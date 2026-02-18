@@ -8,6 +8,7 @@ export const DEFAULT_MODEL = "gemini-3-flash-preview";
 
 interface GeminiApiConfig {
 	geminiApiKey?: string;
+	GEMINI_API_KEY?: string;
 }
 
 let cachedConfig: GeminiApiConfig | null = null;
@@ -32,7 +33,8 @@ function withTimeout(signal: AbortSignal | undefined, timeoutMs: number): AbortS
 export function getApiKey(): string | null {
 	const envKey = process.env.GEMINI_API_KEY;
 	if (envKey) return envKey;
-	return loadConfig().geminiApiKey ?? null;
+	const cfg = loadConfig();
+	return cfg.geminiApiKey ?? cfg.GEMINI_API_KEY ?? null;
 }
 
 export function isGeminiApiAvailable(): boolean {

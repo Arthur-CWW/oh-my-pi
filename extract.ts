@@ -312,7 +312,7 @@ export async function extractContent(
 	const videoInfo = isVideoFile(url);
 	if (videoInfo) {
 		const result = await extractVideo(videoInfo, signal, options);
-		return result ?? { url, title: "", content: "", error: "Video analysis requires Gemini access. Either:\n  1. Sign into gemini.google.com in Chrome (free, uses cookies)\n  2. Set GEMINI_API_KEY in ~/.pi/web-search.json" };
+		return result ?? { url, title: "", content: "", error: "Video analysis requires Gemini access. Either:\n  1. Sign into gemini.google.com in Chrome (free, uses cookies)\n  2. Set geminiApiKey in ~/.pi/web-search.json (or GEMINI_API_KEY env var)" };
 	}
 
 	try {
@@ -357,7 +357,7 @@ export async function extractContent(
 		httpResult.error,
 		"",
 		"Fallback options:",
-		"  \u2022 Set GEMINI_API_KEY in ~/.pi/web-search.json",
+		"  \u2022 Set geminiApiKey in ~/.pi/web-search.json (or GEMINI_API_KEY env var)",
 		"  \u2022 Sign into gemini.google.com in Chrome",
 		"  \u2022 Use web_search to find content about this topic",
 	].join("\n");

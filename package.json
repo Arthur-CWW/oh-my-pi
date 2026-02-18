@@ -23,6 +23,10 @@
     "url": "https://github.com/nicobailon/pi-web-access/issues"
   },
   "homepage": "https://github.com/nicobailon/pi-web-access#readme",
+  "scripts": {
+    "test:e2e:cookies": "bun scripts/e2e-chrome-cookies.ts",
+    "test:e2e:search:gemini": "bun scripts/e2e-search-gemini.ts"
+  },
   "dependencies": {
     "@mozilla/readability": "^0.5.0",
     "linkedom": "^0.16.0",

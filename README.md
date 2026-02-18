@@ -28,6 +28,16 @@ https://github.com/user-attachments/assets/cac6a17a-1eeb-4dde-9818-cdf85d8ea98f
 pi install npm:pi-web-access
 ```
 
+### Local development install (this repo)
+
+If you want to test changes from a local clone instead of npm:
+
+```bash
+npm install
+pi remove npm:pi-web-access          # avoid duplicate tool/command conflicts
+pi install . -l                      # install into this project's .pi/settings.json
+```
+
 If you're not signed into Chrome, or prefer a different provider, add API keys to `~/.pi/web-search.json`:
 
 ```json
@@ -294,6 +304,13 @@ The `web_search` tool also accepts an optional `context` parameter — a brief d
 Set `"enabled": false` under any feature to disable it. Config changes require a Pi restart.
 
 Rate limits: Perplexity is capped at 10 requests/minute (client-side). Content fetches run 3 concurrent with a 30s timeout per URL.
+
+## Troubleshooting
+
+- `Cannot find module '@mozilla/readability'` when loading a local checkout:
+  run `npm install` in this repo first.
+- `Tool "web_search" conflicts with ...pi-web-access...`:
+  you have both npm and local installs enabled. Remove one (`pi remove npm:pi-web-access` or `pi remove .`).
 
 ## Limitations
 

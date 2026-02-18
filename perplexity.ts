@@ -33,6 +33,7 @@ export interface SearchOptions {
 
 interface WebSearchConfig {
 	perplexityApiKey?: string;
+	PERPLEXITY_API_KEY?: string;
 }
 
 let cachedConfig: WebSearchConfig | null = null;
@@ -56,11 +57,11 @@ function loadConfig(): WebSearchConfig {
 
 function getApiKey(): string {
 	const config = loadConfig();
-	const key = process.env.PERPLEXITY_API_KEY || config.perplexityApiKey;
+	const key = process.env.PERPLEXITY_API_KEY || config.perplexityApiKey || config.PERPLEXITY_API_KEY;
 	if (!key) {
 		throw new Error(
 			"Perplexity API key not found. Either:\n" +
-			`  1. Create ${CONFIG_PATH} with { "perplexityApiKey": "your-key" }\n` +
+			`  1. Create ${CONFIG_PATH} with { \"perplexityApiKey\": \"your-key\" }\n` +
 			"  2. Set PERPLEXITY_API_KEY environment variable\n" +
 			"Get a key at https://perplexity.ai/settings/api"
 		);
@@ -93,7 +94,7 @@ function validateDomainFilter(domains: string[]): string[] {
 
 export function isPerplexityAvailable(): boolean {
 	const config = loadConfig();
-	return Boolean(process.env.PERPLEXITY_API_KEY || config.perplexityApiKey);
+	return Boolean(process.env.PERPLEXITY_API_KEY || config.perplexityApiKey || config.PERPLEXITY_API_KEY);
 }
 
 export async function searchWithPerplexity(query: string, options: SearchOptions = {}): Promise<SearchResponse> {
