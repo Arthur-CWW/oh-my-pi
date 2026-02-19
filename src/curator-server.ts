@@ -19,14 +19,20 @@ export interface CuratorServerCallbacks {
 	onSubmit: (selectedQueryIndices: number[]) => void;
 	onCancel: (reason: "user" | "timeout" | "stale") => void;
 	onProviderChange: (provider: string) => void;
-	onAddSearch: (query: string, queryIndex: number) => Promise<{ answer: string; results: Array<{ title: string; url: string; domain: string }> }>;
+	onAddSearch: (
+		query: string,
+		queryIndex: number,
+	) => Promise<{ answer: string; results: Array<{ title: string; url: string; domain: string }> }>;
 }
 
 export interface CuratorServerHandle {
 	server: http.Server;
 	url: string;
 	close: () => void;
-	pushResult: (queryIndex: number, data: { answer: string; results: Array<{ title: string; url: string; domain: string }> }) => void;
+	pushResult: (
+		queryIndex: number,
+		data: { answer: string; results: Array<{ title: string; url: string; domain: string }> },
+	) => void;
 	pushError: (queryIndex: number, error: string) => void;
 	searchesDone: () => void;
 }
@@ -53,8 +59,11 @@ function parseJSONBody(req: IncomingMessage): Promise<unknown> {
 			body += chunk.toString();
 		});
 		req.on("end", () => {
-			try { resolve(JSON.parse(body)); }
-			catch { reject(new Error("Invalid JSON")); }
+			try {
+				resolve(JSON.parse(body));
+			} catch {
+				reject(new Error("Invalid JSON"));
+			}
 		});
 		req.on("error", reject);
 	});
@@ -80,10 +89,18 @@ export function startCuratorServer(
 		if (completed) return false;
 		completed = true;
 		state = "COMPLETED";
-		if (watchdog) { clearInterval(watchdog); watchdog = null; }
-		if (sseKeepalive) { clearInterval(sseKeepalive); sseKeepalive = null; }
+		if (watchdog) {
+			clearInterval(watchdog);
+			watchdog = null;
+		}
+		if (sseKeepalive) {
+			clearInterval(sseKeepalive);
+			sseKeepalive = null;
+		}
 		if (sseResponse) {
-			try { sseResponse.end(); } catch {}
+			try {
+				sseResponse.end();
+			} catch {}
 			sseResponse = null;
 		}
 		return true;
@@ -121,7 +138,13 @@ export function startCuratorServer(
 		}
 	}
 
-	const pageHtml = generateCuratorPage(queries, sessionToken, timeout, availableProviders, defaultProvider);
+	const pageHtml = generateCuratorPage(
+		queries,
+		sessionToken,
+		timeout,
+		availableProviders,
+		defaultProvider,
+	);
 
 	const server = http.createServer(async (req, res) => {
 		try {
@@ -156,25 +179,31 @@ export function startCuratorServer(
 					return;
 				}
 				if (sseResponse) {
-					try { sseResponse.end(); } catch {}
+					try {
+						sseResponse.end();
+					} catch {}
 				}
 				res.writeHead(200, {
 					"Content-Type": "text/event-stream",
 					"Cache-Control": "no-cache",
-					"Connection": "keep-alive",
+					Connection: "keep-alive",
 					"X-Accel-Buffering": "no",
 				});
 				res.flushHeaders();
 				if (res.socket) res.socket.setNoDelay(true);
 				sseResponse = res;
 				for (const msg of sseBuffer) {
-					try { res.write(msg); } catch {}
+					try {
+						res.write(msg);
+					} catch {}
 				}
 				sseBuffer.length = 0;
 				if (sseKeepalive) clearInterval(sseKeepalive);
 				sseKeepalive = setInterval(() => {
 					if (sseResponse) {
-						try { sseResponse.write(":keepalive\n\n"); } catch {}
+						try {
+							sseResponse.write(":keepalive\n\n");
+						} catch {}
 					}
 				}, 15000);
 				req.on("close", () => {
@@ -185,7 +214,10 @@ export function startCuratorServer(
 
 			if (method === "POST" && url.pathname === "/heartbeat") {
 				const body = await parseJSONBody(req).catch(() => null);
-				if (!body) { sendJson(res, 400, { ok: false, error: "Invalid body" }); return; }
+				if (!body) {
+					sendJson(res, 400, { ok: false, error: "Invalid body" });
+					return;
+				}
 				if (!validateToken(body, res)) return;
 				touchHeartbeat();
 				sendJson(res, 200, { ok: true });
@@ -194,7 +226,10 @@ export function startCuratorServer(
 
 			if (method === "POST" && url.pathname === "/provider") {
 				const body = await parseJSONBody(req).catch(() => null);
-				if (!body) { sendJson(res, 400, { ok: false, error: "Invalid body" }); return; }
+				if (!body) {
+					sendJson(res, 400, { ok: false, error: "Invalid body" });
+					return;
+				}
 				if (!validateToken(body, res)) return;
 				const { provider } = body as { provider?: string };
 				if (typeof provider === "string" && provider.length > 0) {
@@ -206,7 +241,10 @@ export function startCuratorServer(
 
 			if (method === "POST" && url.pathname === "/search") {
 				const body = await parseJSONBody(req).catch(() => null);
-				if (!body) { sendJson(res, 400, { ok: false, error: "Invalid body" }); return; }
+				if (!body) {
+					sendJson(res, 400, { ok: false, error: "Invalid body" });
+					return;
+				}
 				if (!validateToken(body, res)) return;
 				if (state === "COMPLETED") {
 					sendJson(res, 409, { ok: false, error: "Session closed" });
@@ -221,7 +259,12 @@ export function startCuratorServer(
 				touchHeartbeat();
 				try {
 					const result = await callbacks.onAddSearch(query.trim(), qi);
-					sendJson(res, 200, { ok: true, queryIndex: qi, answer: result.answer, results: result.results });
+					sendJson(res, 200, {
+						ok: true,
+						queryIndex: qi,
+						answer: result.answer,
+						results: result.results,
+					});
 				} catch (err) {
 					const message = err instanceof Error ? err.message : "Search failed";
 					sendJson(res, 200, { ok: true, queryIndex: qi, error: message });
@@ -231,10 +274,13 @@ export function startCuratorServer(
 
 			if (method === "POST" && url.pathname === "/submit") {
 				const body = await parseJSONBody(req).catch(() => null);
-				if (!body) { sendJson(res, 400, { ok: false, error: "Invalid body" }); return; }
+				if (!body) {
+					sendJson(res, 400, { ok: false, error: "Invalid body" });
+					return;
+				}
 				if (!validateToken(body, res)) return;
 				const { selected } = body as { selected?: number[] };
-				if (!Array.isArray(selected) || !selected.every(n => typeof n === "number")) {
+				if (!Array.isArray(selected) || !selected.every((n) => typeof n === "number")) {
 					sendJson(res, 400, { ok: false, error: "Invalid selection" });
 					return;
 				}
@@ -253,7 +299,10 @@ export function startCuratorServer(
 
 			if (method === "POST" && url.pathname === "/cancel") {
 				const body = await parseJSONBody(req).catch(() => null);
-				if (!body) { sendJson(res, 400, { ok: false, error: "Invalid body" }); return; }
+				if (!body) {
+					sendJson(res, 400, { ok: false, error: "Invalid body" });
+					return;
+				}
 				if (!validateToken(body, res)) return;
 				if (!markCompleted()) {
 					sendJson(res, 200, { ok: true });
@@ -301,7 +350,9 @@ export function startCuratorServer(
 				url,
 				close: () => {
 					const wasOpen = markCompleted();
-					try { server.close(); } catch {}
+					try {
+						server.close();
+					} catch {}
 					if (wasOpen) {
 						setImmediate(() => callbacks.onCancel("stale"));
 					}

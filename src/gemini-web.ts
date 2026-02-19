@@ -49,10 +49,24 @@ export async function queryWithCookies(
 		fullPrompt = `${fullPrompt}\n\nYouTube video: ${options.youtubeUrl}`;
 	}
 
-	const result = await runGeminiWebOnce(fullPrompt, cookieMap, model, options.files, timeoutMs, options.signal);
+	const result = await runGeminiWebOnce(
+		fullPrompt,
+		cookieMap,
+		model,
+		options.files,
+		timeoutMs,
+		options.signal,
+	);
 
 	if (isModelUnavailable(result.errorCode) && model !== "gemini-2.5-flash") {
-		const fallback = await runGeminiWebOnce(fullPrompt, cookieMap, "gemini-2.5-flash", options.files, timeoutMs, options.signal);
+		const fallback = await runGeminiWebOnce(
+			fullPrompt,
+			cookieMap,
+			"gemini-2.5-flash",
+			options.files,
+			timeoutMs,
+			options.signal,
+		);
 		if (fallback.errorMessage) throw new Error(fallback.errorMessage);
 		if (!fallback.text) throw new Error("Gemini Web returned empty response (fallback model)");
 		return fallback.text;
@@ -131,10 +145,7 @@ async function runGeminiWebOnce(
 	}
 }
 
-async function fetchAccessToken(
-	cookieHeader: string,
-	signal: AbortSignal,
-): Promise<string> {
+async function fetchAccessToken(cookieHeader: string, signal: AbortSignal): Promise<string> {
 	const html = await fetchWithCookieRedirects(GEMINI_APP_URL, cookieHeader, 10, signal);
 
 	for (const key of ["SNlM0e", "thykhd"]) {
@@ -142,7 +153,9 @@ async function fetchAccessToken(
 		if (match?.[1]) return match[1];
 	}
 
-	throw new Error("Unable to authenticate with Gemini. Make sure you're signed into gemini.google.com in Chrome.");
+	throw new Error(
+		"Unable to authenticate with Gemini. Make sure you're signed into gemini.google.com in Chrome.",
+	);
 }
 
 async function fetchWithCookieRedirects(
@@ -184,11 +197,7 @@ async function uploadFile(
 	const header = `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${fileName}"\r\nContent-Type: application/octet-stream\r\n\r\n`;
 	const footer = `\r\n--${boundary}--\r\n`;
 
-	const body = Buffer.concat([
-		Buffer.from(header, "utf-8"),
-		data,
-		Buffer.from(footer, "utf-8"),
-	]);
+	const body = Buffer.concat([Buffer.from(header, "utf-8"), data, Buffer.from(footer, "utf-8")]);
 
 	const res = await fetch(GEMINI_UPLOAD_URL, {
 		method: "POST",
@@ -210,14 +219,9 @@ async function uploadFile(
 	return { id: await res.text(), name: fileName };
 }
 
-function buildFReqPayload(
-	prompt: string,
-	uploaded: Array<{ id: string; name: string }>,
-): string {
+function buildFReqPayload(prompt: string, uploaded: Array<{ id: string; name: string }>): string {
 	const promptPayload =
-		uploaded.length > 0
-			? [prompt, 0, null, uploaded.map((file) => [[file.id, 1]])]
-			: [prompt];
+		uploaded.length > 0 ? [prompt, 0, null, uploaded.map((file) => [[file.id, 1]])] : [prompt];
 	const innerList = [promptPayload, null, null];
 	return JSON.stringify([null, JSON.stringify(innerList)]);
 }

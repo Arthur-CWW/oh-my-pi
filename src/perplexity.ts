@@ -40,7 +40,7 @@ let cachedConfig: WebSearchConfig | null = null;
 
 function loadConfig(): WebSearchConfig {
 	if (cachedConfig) return cachedConfig;
-	
+
 	if (existsSync(CONFIG_PATH)) {
 		try {
 			const content = readFileSync(CONFIG_PATH, "utf-8");
@@ -57,13 +57,14 @@ function loadConfig(): WebSearchConfig {
 
 function getApiKey(): string {
 	const config = loadConfig();
-	const key = process.env.PERPLEXITY_API_KEY || config.perplexityApiKey || config.PERPLEXITY_API_KEY;
+	const key =
+		process.env.PERPLEXITY_API_KEY || config.perplexityApiKey || config.PERPLEXITY_API_KEY;
 	if (!key) {
 		throw new Error(
 			"Perplexity API key not found. Either:\n" +
-			`  1. Create ${CONFIG_PATH} with { \"perplexityApiKey\": \"your-key\" }\n` +
-			"  2. Set PERPLEXITY_API_KEY environment variable\n" +
-			"Get a key at https://perplexity.ai/settings/api"
+				`  1. Create ${CONFIG_PATH} with { \"perplexityApiKey\": \"your-key\" }\n` +
+				"  2. Set PERPLEXITY_API_KEY environment variable\n" +
+				"Get a key at https://perplexity.ai/settings/api",
 		);
 	}
 	return key;
@@ -94,10 +95,15 @@ function validateDomainFilter(domains: string[]): string[] {
 
 export function isPerplexityAvailable(): boolean {
 	const config = loadConfig();
-	return Boolean(process.env.PERPLEXITY_API_KEY || config.perplexityApiKey || config.PERPLEXITY_API_KEY);
+	return Boolean(
+		process.env.PERPLEXITY_API_KEY || config.perplexityApiKey || config.PERPLEXITY_API_KEY,
+	);
 }
 
-export async function searchWithPerplexity(query: string, options: SearchOptions = {}): Promise<SearchResponse> {
+export async function searchWithPerplexity(
+	query: string,
+	options: SearchOptions = {},
+): Promise<SearchResponse> {
 	checkRateLimit();
 
 	const activityId = activityMonitor.logStart({ type: "api", query });
@@ -165,7 +171,8 @@ export async function searchWithPerplexity(query: string, options: SearchOptions
 		throw new Error("Perplexity API returned invalid JSON");
 	}
 
-	const answer = (data.choices as Array<{ message?: { content?: string } }>)?.[0]?.message?.content || "";
+	const answer =
+		(data.choices as Array<{ message?: { content?: string } }>)?.[0]?.message?.content || "";
 	const citations = Array.isArray(data.citations) ? data.citations : [];
 
 	const results: SearchResult[] = [];

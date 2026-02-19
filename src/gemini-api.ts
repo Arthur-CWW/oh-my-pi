@@ -66,10 +66,7 @@ export async function queryGeminiApiWithVideo(
 	const body = {
 		contents: [
 			{
-				parts: [
-					{ fileData },
-					{ text: prompt },
-				],
+				parts: [{ fileData }, { text: prompt }],
 			},
 		],
 	};

@@ -29,10 +29,7 @@ export async function extractWithUrlContext(
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify(body),
-			signal: AbortSignal.any([
-				AbortSignal.timeout(60000),
-				...(signal ? [signal] : []),
-			]),
+			signal: AbortSignal.any([AbortSignal.timeout(60000), ...(signal ? [signal] : [])]),
 		});
 
 		if (!res.ok) {
@@ -40,7 +37,7 @@ export async function extractWithUrlContext(
 			return null;
 		}
 
-		const data = await res.json() as UrlContextResponse;
+		const data = (await res.json()) as UrlContextResponse;
 		activityMonitor.logComplete(activityId, res.status);
 
 		const metadata = data.candidates?.[0]?.url_context_metadata;
@@ -51,8 +48,11 @@ export async function extractWithUrlContext(
 			}
 		}
 
-		const content = data.candidates?.[0]?.content?.parts
-			?.map(p => p.text).filter(Boolean).join("\n") ?? "";
+		const content =
+			data.candidates?.[0]?.content?.parts
+				?.map((p) => p.text)
+				.filter(Boolean)
+				.join("\n") ?? "";
 
 		if (!content || content.length < 50) return null;
 

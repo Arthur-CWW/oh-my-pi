@@ -1,0 +1,26 @@
+{
+	"compilerOptions": {
+		"target": "ES2024",
+		"module": "NodeNext",
+		"moduleResolution": "NodeNext",
+		"lib": ["ES2024", "DOM"],
+		"types": ["node"],
+		"baseUrl": ".",
+		"paths": {
+			"@mariozechner/pi-coding-agent": ["types/pi-coding-agent.d.ts"],
+			"@mariozechner/pi-tui": ["types/pi-tui.d.ts"],
+			"@mariozechner/pi-ai": ["types/pi-ai.d.ts"],
+			"@sinclair/typebox": ["types/typebox.d.ts"]
+		},
+		"noEmit": true,
+		"allowJs": false,
+		"allowImportingTsExtensions": true,
+		"resolveJsonModule": true,
+		"esModuleInterop": true,
+		"skipLibCheck": true,
+		"strict": false,
+		"forceConsistentCasingInFileNames": true
+	},
+	"include": ["src/**/*.ts", "scripts/**/*.ts", "skills/**/*.ts"],
+	"exclude": ["node_modules", "test-output"]
+}

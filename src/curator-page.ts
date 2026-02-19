@@ -23,7 +23,10 @@ function buildProviderOptions(
 	];
 
 	return options
-		.map(o => `<option value="${o.value}"${o.value === selected ? " selected" : ""}${o.disabled ? " disabled" : ""}>${o.label}</option>`)
+		.map(
+			(o) =>
+				`<option value="${o.value}"${o.value === selected ? " selected" : ""}${o.disabled ? " disabled" : ""}>${o.label}</option>`,
+		)
 		.join("");
 }
 

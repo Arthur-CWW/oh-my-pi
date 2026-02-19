@@ -1,4 +1,13 @@
-import { existsSync, readFileSync, rmSync, statSync, readdirSync, openSync, readSync, closeSync } from "node:fs";
+import {
+	existsSync,
+	readFileSync,
+	rmSync,
+	statSync,
+	readdirSync,
+	openSync,
+	readSync,
+	closeSync,
+} from "node:fs";
 import { execFile } from "node:child_process";
 import { homedir } from "node:os";
 import { join, extname } from "node:path";
@@ -9,21 +18,85 @@ import { checkGhAvailable, checkRepoSize, fetchViaApi, showGhHint } from "./gith
 const CONFIG_PATH = join(homedir(), ".pi", "web-search.json");
 
 const BINARY_EXTENSIONS = new Set([
-	".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".webp", ".svg", ".tiff", ".tif",
-	".mp3", ".mp4", ".avi", ".mov", ".mkv", ".flv", ".wmv", ".wav", ".ogg", ".webm", ".flac", ".aac",
-	".zip", ".tar", ".gz", ".bz2", ".xz", ".7z", ".rar", ".zst",
-	".exe", ".dll", ".so", ".dylib", ".bin", ".o", ".a", ".lib",
-	".woff", ".woff2", ".ttf", ".otf", ".eot",
-	".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
-	".sqlite", ".db", ".sqlite3",
-	".pyc", ".pyo", ".class", ".jar", ".war",
-	".iso", ".img", ".dmg",
+	".png",
+	".jpg",
+	".jpeg",
+	".gif",
+	".bmp",
+	".ico",
+	".webp",
+	".svg",
+	".tiff",
+	".tif",
+	".mp3",
+	".mp4",
+	".avi",
+	".mov",
+	".mkv",
+	".flv",
+	".wmv",
+	".wav",
+	".ogg",
+	".webm",
+	".flac",
+	".aac",
+	".zip",
+	".tar",
+	".gz",
+	".bz2",
+	".xz",
+	".7z",
+	".rar",
+	".zst",
+	".exe",
+	".dll",
+	".so",
+	".dylib",
+	".bin",
+	".o",
+	".a",
+	".lib",
+	".woff",
+	".woff2",
+	".ttf",
+	".otf",
+	".eot",
+	".pdf",
+	".doc",
+	".docx",
+	".xls",
+	".xlsx",
+	".ppt",
+	".pptx",
+	".sqlite",
+	".db",
+	".sqlite3",
+	".pyc",
+	".pyo",
+	".class",
+	".jar",
+	".war",
+	".iso",
+	".img",
+	".dmg",
 ]);
 
 const NOISE_DIRS = new Set([
-	"node_modules", "vendor", ".next", "dist", "build", "__pycache__",
-	".venv", "venv", ".tox", ".mypy_cache", ".pytest_cache",
-	"target", ".gradle", ".idea", ".vscode",
+	"node_modules",
+	"vendor",
+	".next",
+	"dist",
+	"build",
+	"__pycache__",
+	".venv",
+	"venv",
+	".tox",
+	".mypy_cache",
+	".pytest_cache",
+	"target",
+	".gradle",
+	".idea",
+	".vscode",
 ]);
 
 const MAX_INLINE_FILE_CHARS = 100_000;
@@ -85,12 +158,35 @@ function loadGitHubConfig(): GitHubCloneConfig {
 }
 
 const NON_CODE_SEGMENTS = new Set([
-	"issues", "pull", "pulls", "discussions", "releases", "wiki",
-	"actions", "settings", "security", "projects", "graphs",
-	"compare", "commits", "tags", "branches", "stargazers",
-	"watchers", "network", "forks", "milestone", "labels",
-	"packages", "codespaces", "contribute", "community",
-	"sponsors", "invitations", "notifications", "insights",
+	"issues",
+	"pull",
+	"pulls",
+	"discussions",
+	"releases",
+	"wiki",
+	"actions",
+	"settings",
+	"security",
+	"projects",
+	"graphs",
+	"compare",
+	"commits",
+	"tags",
+	"branches",
+	"stargazers",
+	"watchers",
+	"network",
+	"forks",
+	"milestone",
+	"labels",
+	"packages",
+	"codespaces",
+	"contribute",
+	"community",
+	"sponsors",
+	"invitations",
+	"notifications",
+	"insights",
 ]);
 
 export function parseGitHubUrl(url: string): GitHubUrlInfo | null {
@@ -143,13 +239,20 @@ function cloneDir(config: GitHubCloneConfig, owner: string, repo: string, ref?: 
 	return join(config.clonePath, owner, dirName);
 }
 
-function execClone(args: string[], localPath: string, timeoutMs: number, signal?: AbortSignal): Promise<string | null> {
+function execClone(
+	args: string[],
+	localPath: string,
+	timeoutMs: number,
+	signal?: AbortSignal,
+): Promise<string | null> {
 	return new Promise((resolve) => {
 		const child = execFile(args[0], args.slice(1), { timeout: timeoutMs }, (err) => {
 			if (err) {
 				try {
 					rmSync(localPath, { recursive: true, force: true });
-				} catch { /* ignore */ }
+				} catch {
+					/* ignore */
+				}
 				resolve(null);
 				return;
 			}
@@ -175,13 +278,25 @@ async function cloneRepo(
 
 	try {
 		rmSync(localPath, { recursive: true, force: true });
-	} catch { /* ignore */ }
+	} catch {
+		/* ignore */
+	}
 
 	const timeoutMs = config.cloneTimeoutSeconds * 1000;
 	const hasGh = await checkGhAvailable();
 
 	if (hasGh) {
-		const args = ["gh", "repo", "clone", `${owner}/${repo}`, localPath, "--", "--depth", "1", "--single-branch"];
+		const args = [
+			"gh",
+			"repo",
+			"clone",
+			`${owner}/${repo}`,
+			localPath,
+			"--",
+			"--depth",
+			"1",
+			"--single-branch",
+		];
 		if (ref) args.push("--branch", ref);
 		return execClone(args, localPath, timeoutMs, signal);
 	}
@@ -244,7 +359,7 @@ function buildTree(rootPath: string): string {
 			if (item === ".git") continue;
 
 			const fullPath = join(dir, item);
-			let stat;
+			let stat: ReturnType<typeof statSync>;
 			try {
 				stat = statSync(fullPath);
 			} catch {
@@ -311,7 +426,9 @@ function readReadme(localPath: string): string | null {
 		if (existsSync(readmePath)) {
 			try {
 				const content = readFileSync(readmePath, "utf-8");
-				return content.length > 8192 ? content.slice(0, 8192) + "\n\n[README truncated at 8K chars]" : content;
+				return content.length > 8192
+					? content.slice(0, 8192) + "\n\n[README truncated at 8K chars]"
+					: content;
 			} catch {
 				return null;
 			}
@@ -387,7 +504,9 @@ function generateContent(localPath: string, info: GitHubUrlInfo): string {
 		if (isBinaryFile(fullFilePath)) {
 			const ext = extname(filePath).replace(".", "");
 			lines.push(`## ${filePath}`);
-			lines.push(`Binary file (${ext}, ${formatFileSize(stat.size)}). Use \`read\` or \`bash\` tools at the path above to inspect.`);
+			lines.push(
+				`Binary file (${ext}, ${formatFileSize(stat.size)}). Use \`read\` or \`bash\` tools at the path above to inspect.`,
+			);
 			return lines.join("\n");
 		}
 
@@ -451,7 +570,10 @@ export async function extractGitHub(
 		return fetchViaApi(url, owner, repo, info, sizeNote);
 	}
 
-	const activityId = activityMonitor.logStart({ type: "fetch", url: `github.com/${owner}/${repo}` });
+	const activityId = activityMonitor.logStart({
+		type: "fetch",
+		url: `github.com/${owner}/${repo}`,
+	});
 
 	if (!forceClone) {
 		const sizeKB = await checkRepoSize(owner, repo);
@@ -470,7 +592,8 @@ export async function extractGitHub(
 
 	// Re-check: another concurrent caller may have started a clone while we awaited the size check
 	const cachedAfterSizeCheck = cloneCache.get(key);
-	if (cachedAfterSizeCheck) return awaitCachedClone(cachedAfterSizeCheck, url, owner, repo, info, signal);
+	if (cachedAfterSizeCheck)
+		return awaitCachedClone(cachedAfterSizeCheck, url, owner, repo, info, signal);
 
 	const clonePromise = cloneRepo(owner, repo, info.ref, config, signal);
 	const localPath = cloneDir(config, owner, repo, info.ref);
@@ -498,7 +621,9 @@ export function clearCloneCache(): void {
 	for (const entry of cloneCache.values()) {
 		try {
 			rmSync(entry.localPath, { recursive: true, force: true });
-		} catch { /* ignore */ }
+		} catch {
+			/* ignore */
+		}
 	}
 	cloneCache.clear();
 	cachedConfig = null;

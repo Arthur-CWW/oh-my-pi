@@ -6,9 +6,21 @@ import { activityMonitor } from "./activity.js";
 import { extractRSCContent } from "./rsc-extract.js";
 import { extractPDFToMarkdown, isPDF } from "./pdf-extract.js";
 import { extractGitHub } from "./github-extract.js";
-import { isYouTubeURL, isYouTubeEnabled, extractYouTube, extractYouTubeFrame, extractYouTubeFrames, getYouTubeStreamInfo } from "./youtube-extract.js";
+import {
+	isYouTubeURL,
+	isYouTubeEnabled,
+	extractYouTube,
+	extractYouTubeFrame,
+	extractYouTubeFrames,
+	getYouTubeStreamInfo,
+} from "./youtube-extract.js";
 import { extractWithUrlContext, extractWithGeminiWeb } from "./gemini-url-context.js";
-import { isVideoFile, extractVideo, extractVideoFrame, getLocalVideoDuration } from "./video-extract.js";
+import {
+	isVideoFile,
+	extractVideo,
+	extractVideoFrame,
+	getLocalVideoDuration,
+} from "./video-extract.js";
 import { formatSeconds } from "./utils.js";
 
 const DEFAULT_TIMEOUT_MS = 30000;
@@ -66,13 +78,10 @@ async function extractWithJinaReader(
 	try {
 		const res = await fetch(jinaUrl, {
 			headers: {
-				"Accept": "text/markdown",
+				Accept: "text/markdown",
 				"X-No-Cache": "true",
 			},
-			signal: AbortSignal.any([
-				AbortSignal.timeout(JINA_TIMEOUT_MS),
-				...(signal ? [signal] : []),
-			]),
+			signal: AbortSignal.any([AbortSignal.timeout(JINA_TIMEOUT_MS), ...(signal ? [signal] : [])]),
 		});
 
 		if (!res.ok) {
@@ -91,13 +100,16 @@ async function extractWithJinaReader(
 		const markdownPart = content.slice(contentStart + 17).trim(); // 17 = "Markdown Content:".length
 
 		// Check for failed JS rendering or minimal content
-		if (markdownPart.length < 100 ||
+		if (
+			markdownPart.length < 100 ||
 			markdownPart.startsWith("Loading...") ||
-			markdownPart.startsWith("Please enable JavaScript")) {
+			markdownPart.startsWith("Please enable JavaScript")
+		) {
 			return null;
 		}
 
-		const title = extractHeadingTitle(markdownPart) ?? (new URL(url).pathname.split("/").pop() || url);
+		const title =
+			extractHeadingTitle(markdownPart) ?? (new URL(url).pathname.split("/").pop() || url);
 		return { url, title, content: markdownPart, error: null };
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
@@ -114,13 +126,15 @@ function parseTimestamp(ts: string): number | null {
 	const num = Number(ts);
 	if (!isNaN(num) && num >= 0) return Math.floor(num);
 	const parts = ts.split(":").map(Number);
-	if (parts.some(p => isNaN(p) || p < 0)) return null;
+	if (parts.some((p) => isNaN(p) || p < 0)) return null;
 	if (parts.length === 3) return Math.floor(parts[0] * 3600 + parts[1] * 60 + parts[2]);
 	if (parts.length === 2) return Math.floor(parts[0] * 60 + parts[1]);
 	return null;
 }
 
-type TimestampSpec = { type: "single"; seconds: number } | { type: "range"; start: number; end: number };
+type TimestampSpec =
+	| { type: "single"; seconds: number }
+	| { type: "range"; start: number; end: number };
 
 function parseTimestampSpec(ts: string): TimestampSpec | null {
 	const dashIdx = ts.indexOf("-", 1);
@@ -136,7 +150,11 @@ function parseTimestampSpec(ts: string): TimestampSpec | null {
 const DEFAULT_RANGE_FRAMES = 6;
 const MIN_FRAME_INTERVAL = 5;
 
-function computeRangeTimestamps(start: number, end: number, maxFrames: number = DEFAULT_RANGE_FRAMES): number[] {
+function computeRangeTimestamps(
+	start: number,
+	end: number,
+	maxFrames: number = DEFAULT_RANGE_FRAMES,
+): number[] {
 	if (maxFrames <= 1) return [start];
 	const duration = end - start;
 	const idealInterval = duration / (maxFrames - 1);
@@ -151,8 +169,12 @@ function computeRangeTimestamps(start: number, end: number, maxFrames: number = 
 }
 
 function buildFrameResult(
-	url: string, label: string, requestedCount: number,
-	frames: VideoFrame[], error: string | null, duration?: number,
+	url: string,
+	label: string,
+	requestedCount: number,
+	frames: VideoFrame[],
+	error: string | null,
+	duration?: number,
 ): ExtractedContent {
 	if (frames.length === 0) {
 		const msg = error ?? "Frame extraction failed";
@@ -169,13 +191,16 @@ function buildFrameResult(
 }
 
 async function extractLocalFrames(
-	filePath: string, timestamps: number[],
+	filePath: string,
+	timestamps: number[],
 ): Promise<{ frames: VideoFrame[]; error: string | null }> {
-	const results = await Promise.all(timestamps.map(async (t) => {
-		const frame = await extractVideoFrame(filePath, t);
-		if ("error" in frame) return { error: frame.error };
-		return { ...frame, timestamp: formatSeconds(t) };
-	}));
+	const results = await Promise.all(
+		timestamps.map(async (t) => {
+			const frame = await extractVideoFrame(filePath, t);
+			if ("error" in frame) return { error: frame.error };
+			return { ...frame, timestamp: formatSeconds(t) };
+		}),
+	);
 	const frames = results.filter((f): f is VideoFrame => "data" in f);
 	const firstError = results.find((f): f is { error: string } => "error" in f);
 	return { frames, error: frames.length === 0 && firstError ? firstError.error : null };
@@ -206,7 +231,14 @@ export async function extractContent(
 			const timestamps = computeRangeTimestamps(0, dur, frameCount);
 			const result = await extractYouTubeFrames(ytInfo.videoId, timestamps, streamInfo);
 			const label = `${formatSeconds(0)}-${formatSeconds(dur)}`;
-			return buildFrameResult(url, label, timestamps.length, result.frames, result.error, streamInfo.duration);
+			return buildFrameResult(
+				url,
+				label,
+				timestamps.length,
+				result.frames,
+				result.error,
+				streamInfo.duration,
+			);
 		}
 
 		const videoInfo = isVideoFile(url);
@@ -219,10 +251,22 @@ export async function extractContent(
 			const timestamps = computeRangeTimestamps(0, dur, frameCount);
 			const result = await extractLocalFrames(videoInfo.absolutePath, timestamps);
 			const label = `${formatSeconds(0)}-${formatSeconds(dur)}`;
-			return buildFrameResult(url, label, timestamps.length, result.frames, result.error, durationResult);
+			return buildFrameResult(
+				url,
+				label,
+				timestamps.length,
+				result.frames,
+				result.error,
+				durationResult,
+			);
 		}
 
-		return { url, title: "", content: "", error: "Frame extraction only works with YouTube and local video files" };
+		return {
+			url,
+			title: "",
+			content: "",
+			error: "Frame extraction only works with YouTube and local video files",
+		};
 	}
 
 	if (options?.timestamp) {
@@ -235,14 +279,29 @@ export async function extractContent(
 				if ("error" in streamInfo) {
 					if (spec.type === "range") {
 						const label = `${formatSeconds(spec.start)}-${formatSeconds(spec.end)}`;
-						return { url, title: `Frames ${label}`, content: streamInfo.error, error: streamInfo.error };
+						return {
+							url,
+							title: `Frames ${label}`,
+							content: streamInfo.error,
+							error: streamInfo.error,
+						};
 					}
 					if (frameCount) {
 						const end = spec.seconds + (frameCount - 1) * MIN_FRAME_INTERVAL;
 						const label = `${formatSeconds(spec.seconds)}-${formatSeconds(end)}`;
-						return { url, title: `Frames ${label}`, content: streamInfo.error, error: streamInfo.error };
+						return {
+							url,
+							title: `Frames ${label}`,
+							content: streamInfo.error,
+							error: streamInfo.error,
+						};
 					}
-					return { url, title: `Frame at ${options.timestamp}`, content: streamInfo.error, error: streamInfo.error };
+					return {
+						url,
+						title: `Frame at ${options.timestamp}`,
+						content: streamInfo.error,
+						error: streamInfo.error,
+					};
 				}
 
 				if (spec.type === "range") {
@@ -255,7 +314,14 @@ export async function extractContent(
 						? computeRangeTimestamps(spec.start, spec.end, frameCount)
 						: computeRangeTimestamps(spec.start, spec.end);
 					const result = await extractYouTubeFrames(ytInfo.videoId, timestamps, streamInfo);
-					return buildFrameResult(url, label, timestamps.length, result.frames, result.error, result.duration ?? undefined);
+					return buildFrameResult(
+						url,
+						label,
+						timestamps.length,
+						result.frames,
+						result.error,
+						result.duration ?? undefined,
+					);
 				}
 
 				if (frameCount) {
@@ -267,7 +333,14 @@ export async function extractContent(
 					}
 					const timestamps = computeRangeTimestamps(spec.seconds, end, frameCount);
 					const result = await extractYouTubeFrames(ytInfo.videoId, timestamps, streamInfo);
-					return buildFrameResult(url, label, timestamps.length, result.frames, result.error, result.duration ?? undefined);
+					return buildFrameResult(
+						url,
+						label,
+						timestamps.length,
+						result.frames,
+						result.error,
+						result.duration ?? undefined,
+					);
 				}
 
 				if (streamInfo.duration !== null && spec.seconds > streamInfo.duration) {
@@ -276,9 +349,20 @@ export async function extractContent(
 				}
 				const frame = await extractYouTubeFrame(ytInfo.videoId, spec.seconds, streamInfo);
 				if ("error" in frame) {
-					return { url, title: `Frame at ${options.timestamp}`, content: frame.error, error: frame.error };
+					return {
+						url,
+						title: `Frame at ${options.timestamp}`,
+						content: frame.error,
+						error: frame.error,
+					};
 				}
-				return { url, title: `Frame at ${options.timestamp}`, content: `Video frame at ${options.timestamp}`, error: null, thumbnail: frame };
+				return {
+					url,
+					title: `Frame at ${options.timestamp}`,
+					content: `Video frame at ${options.timestamp}`,
+					error: null,
+					thumbnail: frame,
+				};
 			}
 
 			const videoInfo = isVideoFile(url);
@@ -302,9 +386,20 @@ export async function extractContent(
 
 				const frame = await extractVideoFrame(videoInfo.absolutePath, spec.seconds);
 				if ("error" in frame) {
-					return { url, title: `Frame at ${options.timestamp}`, content: frame.error, error: frame.error };
+					return {
+						url,
+						title: `Frame at ${options.timestamp}`,
+						content: frame.error,
+						error: frame.error,
+					};
 				}
-				return { url, title: `Frame at ${options.timestamp}`, content: `Video frame at ${options.timestamp}`, error: null, thumbnail: frame };
+				return {
+					url,
+					title: `Frame at ${options.timestamp}`,
+					content: `Video frame at ${options.timestamp}`,
+					error: null,
+					thumbnail: frame,
+				};
 			}
 		}
 	}
@@ -312,7 +407,15 @@ export async function extractContent(
 	const videoInfo = isVideoFile(url);
 	if (videoInfo) {
 		const result = await extractVideo(videoInfo, signal, options);
-		return result ?? { url, title: "", content: "", error: "Video analysis requires Gemini access. Either:\n  1. Sign into gemini.google.com in Chrome (free, uses cookies)\n  2. Set geminiApiKey in ~/.pi/web-search.json (or GEMINI_API_KEY env var)" };
+		return (
+			result ?? {
+				url,
+				title: "",
+				content: "",
+				error:
+					"Video analysis requires Gemini access. Either:\n  1. Sign into gemini.google.com in Chrome (free, uses cookies)\n  2. Set geminiApiKey in ~/.pi/web-search.json (or GEMINI_API_KEY env var)",
+			}
+		);
 	}
 
 	try {
@@ -336,20 +439,22 @@ export async function extractContent(
 			url,
 			title: "",
 			content: "",
-			error: "Could not extract YouTube video content. Sign into Google in Chrome for automatic access, or set GEMINI_API_KEY.",
+			error:
+				"Could not extract YouTube video content. Sign into Google in Chrome for automatic access, or set GEMINI_API_KEY.",
 		};
 	}
 
 	const httpResult = await extractViaHttp(url, signal, options);
 
 	if (!httpResult.error || signal?.aborted) return httpResult;
-	if (NON_RECOVERABLE_ERRORS.some(prefix => httpResult.error!.startsWith(prefix))) return httpResult;
+	if (NON_RECOVERABLE_ERRORS.some((prefix) => httpResult.error!.startsWith(prefix)))
+		return httpResult;
 
 	const jinaResult = await extractWithJinaReader(url, signal);
 	if (jinaResult) return jinaResult;
 
-	const geminiResult = await extractWithUrlContext(url, signal)
-		?? await extractWithGeminiWeb(url, signal);
+	const geminiResult =
+		(await extractWithUrlContext(url, signal)) ?? (await extractWithGeminiWeb(url, signal));
 
 	if (geminiResult) return geminiResult;
 
@@ -404,8 +509,10 @@ async function extractViaHttp(
 		const response = await fetch(url, {
 			signal: controller.signal,
 			headers: {
-				"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-				"Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+				"User-Agent":
+					"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+				Accept:
+					"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
 				"Accept-Language": "en-US,en;q=0.9",
 				"Cache-Control": "no-cache",
 				"Sec-Fetch-Dest": "document",
@@ -461,11 +568,13 @@ async function extractViaHttp(
 			}
 		}
 
-		if (contentType.includes("application/octet-stream") ||
+		if (
+			contentType.includes("application/octet-stream") ||
 			contentType.includes("image/") ||
 			contentType.includes("audio/") ||
 			contentType.includes("video/") ||
-			contentType.includes("application/zip")) {
+			contentType.includes("application/zip")
+		) {
 			activityMonitor.logComplete(activityId, response.status);
 			return {
 				url,
@@ -476,7 +585,8 @@ async function extractViaHttp(
 		}
 
 		const text = await response.text();
-		const isHTML = contentType.includes("text/html") || contentType.includes("application/xhtml+xml");
+		const isHTML =
+			contentType.includes("text/html") || contentType.includes("application/xhtml+xml");
 
 		if (!isHTML) {
 			activityMonitor.logComplete(activityId, response.status);

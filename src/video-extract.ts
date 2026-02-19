@@ -5,7 +5,12 @@ import { homedir } from "node:os";
 import { activityMonitor } from "./activity.js";
 import { isGeminiWebAvailable, queryWithCookies } from "./gemini-web.js";
 import { queryGeminiApiWithVideo, getApiKey, API_BASE } from "./gemini-api.js";
-import { extractHeadingTitle, type ExtractedContent, type ExtractOptions, type FrameResult } from "./extract.js";
+import {
+	extractHeadingTitle,
+	type ExtractedContent,
+	type ExtractOptions,
+	type FrameResult,
+} from "./extract.js";
 import { readExecError, trimErrorText, mapFfmpegError } from "./utils.js";
 
 const CONFIG_PATH = join(homedir(), ".pi", "web-search.json");
@@ -74,7 +79,11 @@ export function isVideoFile(input: string): VideoFileInfo | null {
 	const config = loadVideoConfig();
 	if (!config.enabled) return null;
 
-	const isFilePath = input.startsWith("/") || input.startsWith("./") || input.startsWith("../") || input.startsWith("file://");
+	const isFilePath =
+		input.startsWith("/") ||
+		input.startsWith("./") ||
+		input.startsWith("../") ||
+		input.startsWith("file://");
 	if (!isFilePath) return null;
 
 	const filePath = input.startsWith("file://") ? new URL(input).pathname : input;
@@ -105,7 +114,7 @@ function resolveFilePath(filePath: string): string | null {
 
 	try {
 		const normalizedBase = normalizeSpaces(base);
-		const match = readdirSync(dir).find(f => normalizeSpaces(f) === normalizedBase);
+		const match = readdirSync(dir).find((f) => normalizeSpaces(f) === normalizedBase);
 		return match ? join(dir, match) : null;
 	} catch {
 		return null;
@@ -127,8 +136,9 @@ export async function extractVideo(
 	const displayName = basename(info.absolutePath);
 	const activityId = activityMonitor.logStart({ type: "fetch", url: `video:${displayName}` });
 
-	const result = await tryVideoGeminiApi(info, effectivePrompt, effectiveModel, signal)
-		?? await tryVideoGeminiWeb(info, effectivePrompt, effectiveModel, signal);
+	const result =
+		(await tryVideoGeminiApi(info, effectivePrompt, effectiveModel, signal)) ??
+		(await tryVideoGeminiWeb(info, effectivePrompt, effectiveModel, signal));
 
 	if (result) {
 		const thumbnail = await extractVideoFrame(info.absolutePath);
@@ -150,13 +160,29 @@ function mapFfprobeError(err: unknown): string {
 	return snippet ? `ffprobe failed: ${snippet}` : "ffprobe failed";
 }
 
-export async function extractVideoFrame(filePath: string, seconds: number = 1): Promise<FrameResult> {
+export async function extractVideoFrame(
+	filePath: string,
+	seconds: number = 1,
+): Promise<FrameResult> {
 	try {
 		const { execFileSync } = await import("node:child_process");
-		const buffer = execFileSync("ffmpeg", [
-			"-ss", String(seconds), "-i", filePath,
-			"-frames:v", "1", "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1",
-		], { maxBuffer: 5 * 1024 * 1024, timeout: 10000, stdio: ["pipe", "pipe", "pipe"] });
+		const buffer = execFileSync(
+			"ffmpeg",
+			[
+				"-ss",
+				String(seconds),
+				"-i",
+				filePath,
+				"-frames:v",
+				"1",
+				"-f",
+				"image2pipe",
+				"-vcodec",
+				"mjpeg",
+				"pipe:1",
+			],
+			{ maxBuffer: 5 * 1024 * 1024, timeout: 10000, stdio: ["pipe", "pipe", "pipe"] },
+		);
 		if (buffer.length === 0) return { error: "ffmpeg failed: empty output" };
 		return { data: buffer.toString("base64"), mimeType: "image/jpeg" };
 	} catch (err) {
@@ -167,12 +193,11 @@ export async function extractVideoFrame(filePath: string, seconds: number = 1): 
 export async function getLocalVideoDuration(filePath: string): Promise<number | { error: string }> {
 	try {
 		const { execFileSync } = await import("node:child_process");
-		const output = execFileSync("ffprobe", [
-			"-v", "quiet",
-			"-show_entries", "format=duration",
-			"-of", "csv=p=0",
-			filePath,
-		], { timeout: 10000, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim();
+		const output = execFileSync(
+			"ffprobe",
+			["-v", "quiet", "-show_entries", "format=duration", "-of", "csv=p=0", filePath],
+			{ timeout: 10000, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] },
+		).trim();
 		const duration = Number.parseFloat(output);
 		if (!Number.isFinite(duration)) return { error: "ffprobe failed: invalid duration output" };
 		return duration;
@@ -293,7 +318,7 @@ async function uploadToFilesApi(
 		throw new Error(`File upload failed: ${uploadRes.status} (${text.slice(0, 200)})`);
 	}
 
-	const result = await uploadRes.json() as { file: { name: string; uri: string } };
+	const result = (await uploadRes.json()) as { file: { name: string; uri: string } };
 	return result.file;
 }
 
@@ -311,11 +336,11 @@ async function pollFileState(
 		const res = await fetch(`${API_BASE}/${fileName}?key=${apiKey}`, { signal });
 		if (!res.ok) throw new Error(`File state check failed: ${res.status}`);
 
-		const data = await res.json() as { state: string };
+		const data = (await res.json()) as { state: string };
 		if (data.state === "ACTIVE") return;
 		if (data.state === "FAILED") throw new Error("File processing failed");
 
-		await new Promise(r => setTimeout(r, 5000));
+		await new Promise((r) => setTimeout(r, 5000));
 	}
 
 	throw new Error("File processing timed out");

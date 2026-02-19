@@ -75,7 +75,9 @@ function normalizeUrl(url: string): string {
 		const path = u.pathname.replace(/\/$/, "");
 		return `${host}${path}`;
 	} catch {
-		return url.trim().toLowerCase()
+		return url
+			.trim()
+			.toLowerCase()
 			.replace(/^https?:\/\//, "")
 			.replace(/^www\./, "")
 			.replace(/[?#].*$/, "")
@@ -116,7 +118,10 @@ function computeOverlapPairs(
 	const pairs: Array<{ q1: number; q2: number; shared: number; pct: number }> = [];
 	for (const [key, shared] of pairShared) {
 		const [a, b] = key.split("-").map(Number);
-		const minSources = Math.max(1, Math.min(querySourceCounts.get(a) ?? 0, querySourceCounts.get(b) ?? 0));
+		const minSources = Math.max(
+			1,
+			Math.min(querySourceCounts.get(a) ?? 0, querySourceCounts.get(b) ?? 0),
+		);
 		pairs.push({ q1: a, q2: b, shared, pct: Math.round((shared / minSources) * 100) });
 	}
 
@@ -126,9 +131,10 @@ function computeOverlapPairs(
 function answerSimilarity(a: string, b: string): number {
 	const words = (s: string) =>
 		new Set(
-			s.toLowerCase()
+			s
+				.toLowerCase()
 				.split(/\s+/)
-				.filter(w => w.length > 3),
+				.filter((w) => w.length > 3),
 		);
 
 	const setA = words(a);
@@ -160,11 +166,10 @@ function qualityTierForDomain(domain: string): string {
 	return "other";
 }
 
-export function preprocessSearchResults(
-	results: Map<number, QueryResultData>,
-): PreprocessedData {
-	const overlapPairs = computeOverlapPairs(results)
-		.sort((a, b) => b.pct - a.pct || b.shared - a.shared);
+export function preprocessSearchResults(results: Map<number, QueryResultData>): PreprocessedData {
+	const overlapPairs = computeOverlapPairs(results).sort(
+		(a, b) => b.pct - a.pct || b.shared - a.shared,
+	);
 
 	const entries = [...results.entries()].sort((a, b) => a[0] - b[0]);
 	const similarityPairs: Array<{ q1: number; q2: number; similarity: number }> = [];
@@ -191,17 +196,21 @@ export function preprocessSearchResults(
 		}
 	}
 	const skipCondensation = totalTokens < SKIP_THRESHOLD_TOKENS;
-	const qualitySummary = [...qualityCounts.entries()]
-		.sort((a, b) => b[1] - a[1])
-		.map(([tier, count]) => `${count} ${QUALITY_LABELS[tier] ?? tier}`)
-		.join(", ") || "no sources";
+	const qualitySummary =
+		[...qualityCounts.entries()]
+			.sort((a, b) => b[1] - a[1])
+			.map(([tier, count]) => `${count} ${QUALITY_LABELS[tier] ?? tier}`)
+			.join(", ") || "no sources";
 
-	const overlapLines = overlapPairs.map(p =>
-		`- Q${p.q1} and Q${p.q2} share ${p.shared} sources (${p.pct}%)`,
+	const overlapLines = overlapPairs.map(
+		(p) => `- Q${p.q1} and Q${p.q2} share ${p.shared} sources (${p.pct}%)`,
 	);
 	const similarityLines = similarityPairs
-		.filter(p => p.similarity >= REDUNDANT_SIMILARITY_THRESHOLD)
-		.map(p => `- Q${p.q1} and Q${p.q2} answers are ${Math.round(p.similarity * 100)}% similar by word overlap`);
+		.filter((p) => p.similarity >= REDUNDANT_SIMILARITY_THRESHOLD)
+		.map(
+			(p) =>
+				`- Q${p.q1} and Q${p.q2} answers are ${Math.round(p.similarity * 100)}% similar by word overlap`,
+		);
 
 	const hints = [
 		"Overlap analysis:",
@@ -210,7 +219,9 @@ export function preprocessSearchResults(
 		"Answer similarity:",
 		...(similarityLines.length > 0
 			? similarityLines
-			: [`- No answer pairs meet the ${Math.round(REDUNDANT_SIMILARITY_THRESHOLD * 100)}% similarity threshold.`]),
+			: [
+					`- No answer pairs meet the ${Math.round(REDUNDANT_SIMILARITY_THRESHOLD * 100)}% similarity threshold.`,
+				]),
 		"",
 		`Source quality: ${qualitySummary}.`,
 		`Estimated answer tokens: ${totalTokens}. ${skipCondensation ? "Below threshold — skip condensation." : "Condensation recommended."}`,
@@ -251,16 +262,21 @@ export async function condenseSearchResults(
 		const queryData = [...results.entries()]
 			.sort((a, b) => a[0] - b[0])
 			.map(([qi, r]) => {
-				const sources = r.results.map((s, si) => {
-					const domain = extractDomain(s.url);
-					const tier = qualityTierForDomain(domain);
-					return `${si + 1}. ${s.title}\n   ${s.url}\n   quality: ${tier}`;
-				}).join("\n");
-				return `[${qi}] Query: "${r.query}"\n` +
+				const sources = r.results
+					.map((s, si) => {
+						const domain = extractDomain(s.url);
+						const tier = qualityTierForDomain(domain);
+						return `${si + 1}. ${s.title}\n   ${s.url}\n   quality: ${tier}`;
+					})
+					.join("\n");
+				return (
+					`[${qi}] Query: "${r.query}"\n` +
 					(r.error ? `Error: ${r.error}\n` : "") +
 					`Answer:\n${r.answer || "(empty)"}\n` +
-					`Sources:\n${sources || "(none)"}`;
-			}).join("\n\n");
+					`Sources:\n${sources || "(none)"}`
+				);
+			})
+			.join("\n\n");
 
 		let prompt = config.prompt;
 		if (taskContext) prompt += `\n\nUser's task: ${taskContext}`;
@@ -268,24 +284,24 @@ export async function condenseSearchResults(
 		prompt += `\n\nSearch result data:\n${queryData}`;
 
 		const aiContext: Context = {
-			messages: [{
-				role: "user",
-				content: [{ type: "text", text: prompt }],
-				timestamp: Date.now(),
-			}],
+			messages: [
+				{
+					role: "user",
+					content: [{ type: "text", text: prompt }],
+					timestamp: Date.now(),
+				},
+			],
 		};
 
 		const timeoutSignal = AbortSignal.timeout(TIMEOUT_MS);
-		const combinedSignal = signal
-			? AbortSignal.any([signal, timeoutSignal])
-			: timeoutSignal;
+		const combinedSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
 
 		const response = await complete(model, aiContext, {
 			apiKey,
 			signal: combinedSignal,
 			max_tokens: MAX_TOKENS,
 		} as any);
-		const text = response.content.find(c => c.type === "text")?.text?.trim();
+		const text = response.content.find((c) => c.type === "text")?.text?.trim();
 		if (!text) return null;
 		return text;
 	} catch {
@@ -294,12 +310,12 @@ export async function condenseSearchResults(
 }
 
 function verifyCitations(condensed: string, sources: SearchResult[]): string {
-	const knownDomains = new Set(sources.map(s => extractDomain(s.url)));
+	const knownDomains = new Set(sources.map((s) => extractDomain(s.url)));
 	return condensed.replace(CITATION_RE, (_match, inner: string) => {
-		const domains = inner.split(/,\s*/).map(d => d.trim().toLowerCase());
-		const verified = domains.map(d => {
+		const domains = inner.split(/,\s*/).map((d) => d.trim().toLowerCase());
+		const verified = domains.map((d) => {
 			if (knownDomains.has(d)) return d;
-			const closest = [...knownDomains].find(k => k.includes(d) || d.includes(k));
+			const closest = [...knownDomains].find((k) => k.includes(d) || d.includes(k));
 			return closest ?? d;
 		});
 		return `[${verified.join(", ")}]`;
@@ -311,7 +327,7 @@ function collectCitedDomains(text: string): string[] {
 	const seen = new Set<string>();
 	const re = new RegExp(CITATION_RE.source, "gi");
 	for (const match of text.matchAll(re)) {
-		const domains = match[1].split(/,\s*/).map(d => d.trim().toLowerCase());
+		const domains = match[1].split(/,\s*/).map((d) => d.trim().toLowerCase());
 		for (const domain of domains) {
 			if (seen.has(domain)) continue;
 			seen.add(domain);
@@ -322,8 +338,9 @@ function collectCitedDomains(text: string): string[] {
 }
 
 function sourceLineForDomain(domain: string, sources: SearchResult[]): string {
-	const source = sources.find(s => extractDomain(s.url) === domain)
-		?? sources.find(s => {
+	const source =
+		sources.find((s) => extractDomain(s.url) === domain) ??
+		sources.find((s) => {
 			const d = extractDomain(s.url);
 			return d.includes(domain) || domain.includes(d);
 		});
@@ -336,19 +353,18 @@ function completeSourceList(condensed: string, sources: SearchResult[]): string 
 	const withoutSources = condensed.replace(/\n#{2,3}\s+Sources[\s\S]*$/i, "").trimEnd();
 	const citedDomains = collectCitedDomains(withoutSources);
 	if (citedDomains.length === 0) return withoutSources;
-	const sourceLines = citedDomains.map(domain => sourceLineForDomain(domain, sources));
+	const sourceLines = citedDomains.map((domain) => sourceLineForDomain(domain, sources));
 	return `${withoutSources}\n\n## Sources\n${sourceLines.join("\n")}`;
 }
 
-export function postProcessCondensed(
-	condensed: string,
-	sources: SearchResult[],
-): string {
+export function postProcessCondensed(condensed: string, sources: SearchResult[]): string {
 	const verified = verifyCitations(condensed, sources);
 	const completed = completeSourceList(verified, sources);
 	const outputTokens = estimateTokens(completed);
 	if (outputTokens > 4000) {
-		console.warn(`[pi-web-access] Condensed output length exceeded expected threshold: ~${outputTokens} tokens`);
+		console.warn(
+			`[pi-web-access] Condensed output length exceeded expected threshold: ~${outputTokens} tokens`,
+		);
 	}
 	return completed.trim();
 }
