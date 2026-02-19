@@ -1,8 +1,8 @@
 import { existsSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { join } from "node:path";
-import { getGoogleCookies } from "../src/chrome-cookies.ts";
-import { queryWithCookies } from "../src/gemini-web.ts";
+import { getGoogleCookies } from "../src/old/chrome-cookies.ts";
+import { queryWithCookies } from "../src/old/gemini-web.ts";
 
 const CHROME_COOKIES_PATH = join(
 	homedir(),

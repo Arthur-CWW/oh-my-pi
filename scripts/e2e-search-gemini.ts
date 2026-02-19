@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { search } from "../src/gemini-search.ts";
-import { isGeminiWebAvailable } from "../src/gemini-web.ts";
+import { search } from "../src/old/gemini-search.ts";
+import { isGeminiWebAvailable } from "../src/old/gemini-web.ts";
 
 function ok(message: string): void {
 	console.log(`✅ ${message}`);
