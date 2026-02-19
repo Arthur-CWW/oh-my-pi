@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { search } from "../src/old/gemini-search.ts";
+import { search } from "../src/effect/gemini-search.ts";
 import { isGeminiWebAvailable } from "../src/old/gemini-web.ts";
 
 function ok(message: string): void {
@@ -22,7 +22,7 @@ function writeTestOutput(data: {
 	const outDir = join(process.cwd(), "test-output");
 	mkdirSync(outDir, { recursive: true });
 
-	const base = `e2e-search-gemini-${timestamp()}`;
+	const base = `e2e-search-gemini-effect-${timestamp()}`;
 	const jsonPath = join(outDir, `${base}.json`);
 	const mdPath = join(outDir, `${base}.md`);
 
@@ -39,7 +39,7 @@ function writeTestOutput(data: {
 	);
 
 	const md = [
-		"# E2E Gemini Search Result",
+		"# E2E Gemini Search Result (Effect)",
 		"",
 		`- **Passed:** ${data.passed ? "yes" : "no"}`,
 		`- **Created:** ${new Date().toISOString()}`,
@@ -66,7 +66,7 @@ function writeTestOutput(data: {
 async function main() {
 	const query = process.argv.slice(2).join(" ") || "clavicular latest transcript with fuentes";
 
-	console.log("\npi-web-access e2e Gemini search test\n");
+	console.log("\npi-web-access e2e Gemini search test (Effect)\n");
 	console.log(`Query: ${query}\n`);
 
 	let cookieCount = 0;
@@ -78,26 +78,13 @@ async function main() {
 
 		const result = await search(query, { provider: "gemini", numResults: 5 });
 
-		if (!result.answer?.trim()) {
-			throw new Error("Search returned empty answer");
-		}
-
+		if (!result.answer?.trim()) throw new Error("Search returned empty answer");
 		if (!Array.isArray(result.results) || result.results.length === 0) {
 			throw new Error("Search returned no sources");
 		}
 
-		const first = result.results[0];
 		ok(`Search returned answer (${result.answer.length} chars)`);
 		ok(`Retrieved ${result.results.length} sources`);
-
-		console.log("\nFirst source:");
-		console.log(`- ${first.title || "(untitled)"}`);
-		console.log(`- ${first.url}`);
-
-		console.log("\nAnswer preview:");
-		console.log(
-			result.answer.slice(0, 300).replace(/\s+/g, " ") + (result.answer.length > 300 ? "..." : ""),
-		);
 
 		const outputDir = writeTestOutput({
 			query,
@@ -106,17 +93,11 @@ async function main() {
 			answer: result.answer,
 			sources: result.results,
 		});
-
 		console.log(`\n📁 Test output written to: ${outputDir}`);
-		console.log("🎉 E2E passed: gemini web_search returned answer + sources\n");
+		console.log("🎉 E2E passed: Effect gemini search returned answer + sources\n");
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
-		const outputDir = writeTestOutput({
-			query,
-			passed: false,
-			error: message,
-			cookieCount,
-		});
+		const outputDir = writeTestOutput({ query, passed: false, error: message, cookieCount });
 		console.error(`❌ Unhandled error: ${message}`);
 		console.error(`📁 Test output written to: ${outputDir}`);
 		process.exit(1);

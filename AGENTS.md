@@ -18,6 +18,20 @@ Current Pi extension entrypoint:
 4. Preserve current behavior unless explicitly changing spec.
 5. Keep observability local-first (SQLite event log planned in Effect layer).
 
+## Persistent User Preferences (Self-Healing)
+
+When the user states a repo-wide preference (code style, structure, testing workflow, migration workflow), treat it as persistent across sessions and update this file immediately.
+
+Rules:
+1. Apply the preference in the current change.
+2. Update `AGENTS.md` in the same task so future sessions inherit it.
+3. Prefer updating existing preference bullets rather than duplicating/conflicting rules.
+
+Current persistent preferences:
+- Prefer a **compressed/flat file layout** for new Effect slices when practical.
+- Avoid unnecessary nested folders + `index.ts` re-export barrels for single-feature modules.
+- If splitting into multiple files is necessary, keep it minimal and justify briefly in PR/task notes.
+
 ## Mandatory Validation After Every Change
 
 Run all commands below and ensure they pass before finishing work.
@@ -35,6 +49,7 @@ pi --no-extensions -e ./src/old/index.ts --help
 Notes:
 - `test:e2e:search:gemini` writes artifacts into `test-output/`.
 - If e2e fails intermittently, keep artifacts and record failures in `docs/migration-spec.md` bug ledger.
+- When changing `src/effect/*` entry/CLI behavior, also validate Effect CLI loading (e.g. `pi --no-extensions -e ./src/effect/index.ts --help` or `bun run test:e2e:effect:help`).
 
 ## Testing Scope
 

@@ -32,7 +32,9 @@
 		"test": "bun test tests",
 		"test:e2e:cookies": "bun scripts/e2e-chrome-cookies.ts",
 		"test:e2e:search:gemini": "bun scripts/e2e-search-gemini.ts",
-		"test:e2e:effect:help": "pi --no-extensions -e ./src/effect/index.ts --help"
+		"test:e2e:effect:help": "pi --no-extensions -e ./src/effect/index.ts --help",
+		"test:e2e:cookies:effect": "bun scripts/e2e-chrome-cookies-effect.ts",
+		"test:e2e:search:gemini:effect": "bun scripts/e2e-search-gemini-effect.ts"
 	},
 	"dependencies": {
 		"@effect/platform": "^0.94.5",
