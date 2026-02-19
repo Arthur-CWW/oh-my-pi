@@ -66,6 +66,26 @@ Keep `src/old` intact until parity checks pass.
 - Migration prep: `docs/effect-migration-prep.md`
 - Effect reference snapshot: `docs/references/effect-llms.txt`
 - Session handoff context: `docs/migration-context.md`
+- Running migration tracker: `docs/task-tracker.md`
+
+## Task Tracking & Completion Workflow
+
+Use `docs/task-tracker.md` as the single source of truth for migration progress.
+
+Task state format (todo list + explicit state label):
+- `- [ ] [TODO] ...`
+- `- [ ] [IN_PROGRESS] ...`
+- `- [ ] [BLOCKED] ...`
+- `- [x] [READY_FOR_USER_CHECK] ...`
+- `- [x] [DONE] ...` (set only after user confirms)
+
+Rules:
+1. Start work by moving one task to `[IN_PROGRESS]`.
+2. When implementation + tests are complete, mark `[READY_FOR_USER_CHECK]` and add a short result note.
+3. User confirms, then set `[DONE]`.
+4. Keep tasks small and boundary-focused.
+
+After finishing each task, provide a brief summary in chat: **Done / Not done / Risks**.
 
 ## When Adding New Features During Migration
 
