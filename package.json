@@ -31,7 +31,8 @@
 		"check": "bun run typecheck && bun run lint && bun run format:check",
 		"test": "bun test tests",
 		"test:e2e:cookies": "bun scripts/e2e-chrome-cookies.ts",
-		"test:e2e:search:gemini": "bun scripts/e2e-search-gemini.ts"
+		"test:e2e:search:gemini": "bun scripts/e2e-search-gemini.ts",
+		"test:e2e:effect:help": "pi --no-extensions -e ./src/effect/index.ts --help"
 	},
 	"dependencies": {
 		"@effect/platform": "^0.94.5",

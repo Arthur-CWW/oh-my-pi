@@ -4,6 +4,8 @@ This folder contains the new Effect TS implementation.
 
 Current production entrypoint remains `src/old/index.ts`.
 
+Shadow dry-run entrypoint: `src/effect/index.ts` (non-production validation path).
+
 ## Foundation modules
 
 - `src/effect/core/Errors.ts`

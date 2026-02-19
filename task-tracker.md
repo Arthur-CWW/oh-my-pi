@@ -24,5 +24,6 @@ State legend (symbol-only):
   - Result: Added `src/effect/observability/EventStore.ts` (+ index) with SQLite-backed append/list APIs, bun/node sqlite driver fallback, schema + indexes, and typed `EventStoreError` handling; added `tests/event-store.test.ts`; mandatory validation commands passed.
 - [ ] Migrate `gemini-search` to Effect vertical slice with parity tests against `src/old` behavior.
 - [ ] Add snapshot tests for stable boundary outputs (search normalization / condensed summaries).
-- [ ] Wire `src/effect/index.ts` shadow entry for non-production dry runs.
+- [@User] Wire `src/effect/index.ts` shadow entry for non-production dry runs.
+  - Result: Added `src/effect/index.ts` shadow extension with `effect_event_store_smoke` tool (exercises Effect SQLite event store), added `tests/effect-index.test.ts`, and added `test:e2e:effect:help` script to validate CLI loading via `pi --no-extensions -e ./src/effect/index.ts --help`; validations passed (Gemini e2e passed on retry after one transient failure).
 - [ ] Cut over extension entrypoint from `src/old/index.ts` to `src/effect/index.ts` after parity.
