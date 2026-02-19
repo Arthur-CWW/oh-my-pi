@@ -136,6 +136,7 @@ Add snapshot tests for:
 2. Gemini cookie path can be flaky in some environments (historical issue #2 with `node:sqlite` loader contexts).
 3. Diagnostics are often collapsed; some flows still return generic fallback errors.
 4. Lint warnings remain in old codebase (style + strictness), to be addressed during slice migration.
+5. Intermittent Gemini search e2e flake observed (2026-02-19): first run failed with `Gemini search unavailable` despite cookies present; immediate retry passed. Artifacts retained in `test-output/`.
 
 ### Manual smoke notes (current machine)
 
