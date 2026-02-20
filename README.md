@@ -79,6 +79,18 @@ fetch_content({ url: "https://youtube.com/watch?v=abc", prompt: "What libraries 
 fetch_content({ url: "/path/to/recording.mp4", prompt: "What error appears on screen?" })
 ```
 
+## Direct CLI (Bun)
+
+The core modules can also run directly from the terminal with Bun:
+
+```bash
+bun src/effect/gemini-search.ts --query "effect ts" --provider auto
+bun src/effect/chrome-cookies.ts --names __Secure-1PSID,__Secure-1PSIDTS
+bun src/old/extract.ts https://example.com/article --json
+```
+
+Use `--help` on each file for available flags.
+
 ## Tools
 
 ### web_search

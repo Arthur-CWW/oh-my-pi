@@ -4,6 +4,8 @@ import { search as legacySearch } from "../src/old/gemini-search.js";
 import {
 	buildSearchPrompt,
 	extractSourceUrls,
+	parseSearchCliArgs,
+	runSearchCli,
 	search as effectSearch,
 	type GeminiSearchDeps,
 } from "../src/effect/gemini-search.js";
@@ -69,5 +71,48 @@ describe("effect gemini-search", () => {
 		await expect(effectSearch("fallback", {}, deps)).rejects.toThrow(
 			"No search provider available. Either:",
 		);
+	});
+
+	it("parses CLI flags for provider + filters", () => {
+		const parsed = parseSearchCliArgs([
+			"--query",
+			"effect typescript",
+			"--provider",
+			"gemini",
+			"--num-results",
+			"7",
+			"--recency-filter",
+			"month",
+			"--domain",
+			"effect.website,-example.com",
+		]);
+		expect(parsed.kind).toBe("ok");
+		if (parsed.kind === "ok") {
+			expect(parsed.value.query).toBe("effect typescript");
+			expect(parsed.value.options).toEqual({
+				provider: "gemini",
+				numResults: 7,
+				recencyFilter: "month",
+				domainFilter: ["effect.website", "-example.com"],
+			});
+		}
+	});
+
+	it("runs search CLI with injected search implementation", async () => {
+		const output: string[] = [];
+		const errors: string[] = [];
+		const exitCode = await runSearchCli(["--query", "bun runtime", "--json"], {
+			executeSearch: async () => ({
+				answer: "Bun is a JS runtime",
+				results: [{ title: "Bun", url: "https://bun.sh", snippet: "" }],
+			}),
+			stdout: (text) => output.push(text),
+			stderr: (text) => errors.push(text),
+		});
+
+		expect(exitCode).toBe(0);
+		expect(errors).toEqual([]);
+		expect(output[0]).toContain('"query": "bun runtime"');
+		expect(output[0]).toContain('"url": "https://bun.sh"');
 	});
 });

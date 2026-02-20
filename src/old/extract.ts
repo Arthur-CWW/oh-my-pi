@@ -668,3 +668,259 @@ export async function fetchAllContent(
 ): Promise<ExtractedContent[]> {
 	return Promise.all(urls.map((url) => fetchLimit(() => extractContent(url, signal, options))));
 }
+
+interface FetchCliArgs {
+	readonly urls: ReadonlyArray<string>;
+	readonly options: ExtractOptions;
+	readonly json: boolean;
+	readonly help: boolean;
+}
+
+type FetchCliParseResult =
+	| { readonly kind: "ok"; readonly value: FetchCliArgs }
+	| { readonly kind: "error"; readonly message: string };
+
+export interface FetchCliDeps {
+	readonly fetchAll?: typeof fetchAllContent;
+	readonly stdout?: (text: string) => void;
+	readonly stderr?: (text: string) => void;
+}
+
+const FETCH_CLI_USAGE = `Usage: bun src/old/extract.ts [options] <url...>
+
+Options:
+  --url <url>                  Add a URL (repeatable)
+  --urls <urlA,urlB>           Comma-separated URLs
+  --prompt <text>              Video analysis prompt
+  --timestamp <spec>           Timestamp or range (e.g. 23:41-25:00)
+  --frames <1-12>              Number of frames to extract
+  --model <model>              Override Gemini model for video flows
+  --timeout-ms <ms>            Request timeout in milliseconds
+  --force-clone                Force clone large GitHub repositories
+  --json                       Print JSON output
+  -h, --help                   Show this help
+`;
+
+function parseCliValue(argv: readonly string[], index: number, flag: string): string {
+	const value = argv[index + 1];
+	if (!value) {
+		throw new Error(`Missing value for ${flag}`);
+	}
+	return value;
+}
+
+function parseInteger(value: string, flag: string, minimum: number): number {
+	const parsed = Number(value);
+	if (!Number.isInteger(parsed) || parsed < minimum) {
+		throw new Error(`${flag} must be an integer >= ${minimum}`);
+	}
+	return parsed;
+}
+
+export function parseFetchCliArgs(argv: readonly string[]): FetchCliParseResult {
+	const urls: string[] = [];
+	const options: ExtractOptions = {};
+	let json = false;
+	let help = false;
+
+	try {
+		for (let index = 0; index < argv.length; index++) {
+			const arg = argv[index];
+			switch (arg) {
+				case "-h":
+				case "--help":
+					help = true;
+					break;
+				case "--json":
+					json = true;
+					break;
+				case "--force-clone":
+					options.forceClone = true;
+					break;
+				case "--url": {
+					const value = parseCliValue(argv, index, arg);
+					urls.push(value);
+					index += 1;
+					break;
+				}
+				case "--urls": {
+					const value = parseCliValue(argv, index, arg);
+					urls.push(...value.split(",").map((part) => part.trim()).filter(Boolean));
+					index += 1;
+					break;
+				}
+				case "--prompt":
+					options.prompt = parseCliValue(argv, index, arg);
+					index += 1;
+					break;
+				case "--timestamp":
+					options.timestamp = parseCliValue(argv, index, arg);
+					index += 1;
+					break;
+				case "--frames": {
+					const value = parseCliValue(argv, index, arg);
+					const frames = parseInteger(value, "--frames", 1);
+					if (frames > 12) {
+						throw new Error("--frames must be <= 12");
+					}
+					options.frames = frames;
+					index += 1;
+					break;
+				}
+				case "--model":
+					options.model = parseCliValue(argv, index, arg);
+					index += 1;
+					break;
+				case "--timeout-ms": {
+					const value = parseCliValue(argv, index, arg);
+					options.timeoutMs = parseInteger(value, "--timeout-ms", 1);
+					index += 1;
+					break;
+				}
+				default:
+					if (arg.startsWith("-")) {
+						return { kind: "error", message: `Unknown flag ${arg}` };
+					}
+					urls.push(arg);
+			}
+		}
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		return { kind: "error", message };
+	}
+
+	if (!help && urls.length === 0) {
+		return { kind: "error", message: "At least one URL is required" };
+	}
+
+	return {
+		kind: "ok",
+		value: {
+			urls,
+			options,
+			json,
+			help,
+		},
+	};
+}
+
+interface ExtractedContentSummary {
+	readonly url: string;
+	readonly title: string;
+	readonly content: string;
+	readonly error: string | null;
+	readonly duration?: number;
+	readonly thumbnail?: {
+		readonly mimeType: string;
+		readonly bytes: number;
+	};
+	readonly frames?: ReadonlyArray<{
+		readonly timestamp: string;
+		readonly mimeType: string;
+		readonly bytes: number;
+	}>;
+}
+
+function summarizeExtractedContent(result: ExtractedContent): ExtractedContentSummary {
+	return {
+		url: result.url,
+		title: result.title,
+		content: result.content,
+		error: result.error,
+		duration: result.duration,
+		thumbnail: result.thumbnail
+			? {
+					mimeType: result.thumbnail.mimeType,
+					bytes: result.thumbnail.data.length,
+				}
+			: undefined,
+		frames: result.frames?.map((frame) => ({
+			timestamp: frame.timestamp,
+			mimeType: frame.mimeType,
+			bytes: frame.data.length,
+		})),
+	};
+}
+
+function formatFetchCliOutput(results: ReadonlyArray<ExtractedContent>): string {
+	const successful = results.filter((result) => !result.error).length;
+	const lines = [`Fetched ${results.length} URL(s). ${successful}/${results.length} succeeded.`];
+	for (const [index, result] of results.entries()) {
+		lines.push("", `## [${index + 1}] ${result.title || result.url}`, `URL: ${result.url}`);
+		if (result.error) {
+			lines.push(`Error: ${result.error}`);
+			continue;
+		}
+		if (result.duration !== undefined) {
+			lines.push(`Duration: ${formatSeconds(Math.floor(result.duration))}`);
+		}
+		if (result.frames?.length) {
+			lines.push(`Frames: ${result.frames.length}`);
+		}
+		lines.push(result.content);
+	}
+	return lines.join("\n");
+}
+
+export async function runFetchCli(
+	argv: readonly string[],
+	deps: FetchCliDeps = {},
+): Promise<number> {
+	const parsed = parseFetchCliArgs(argv);
+	const stdout = deps.stdout ?? ((text: string) => console.log(text));
+	const stderr = deps.stderr ?? ((text: string) => console.error(text));
+	if (parsed.kind === "error") {
+		stderr(`Error: ${parsed.message}`);
+		stderr(FETCH_CLI_USAGE.trimEnd());
+		return 1;
+	}
+
+	if (parsed.value.help) {
+		stdout(FETCH_CLI_USAGE.trimEnd());
+		return 0;
+	}
+
+	const fetchAll = deps.fetchAll ?? fetchAllContent;
+	try {
+		const results = await fetchAll([...parsed.value.urls], undefined, parsed.value.options);
+		if (parsed.value.json) {
+			stdout(
+				JSON.stringify(
+					{
+						urls: parsed.value.urls,
+						options: parsed.value.options,
+						results: results.map(summarizeExtractedContent),
+					},
+					null,
+					2,
+				),
+			);
+			return 0;
+		}
+
+		stdout(formatFetchCliOutput(results));
+		return 0;
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		stderr(`Error: ${message}`);
+		return 1;
+	}
+}
+
+function isBunDirectRun(fileStem: string): boolean {
+	if (typeof Bun === "undefined") return false;
+	const scriptPath = Bun.argv[1];
+	if (!scriptPath) return false;
+	return (
+		scriptPath.endsWith(`/${fileStem}.ts`) ||
+		scriptPath.endsWith(`\\${fileStem}.ts`) ||
+		scriptPath.endsWith(`/${fileStem}.js`) ||
+		scriptPath.endsWith(`\\${fileStem}.js`)
+	);
+}
+
+if (isBunDirectRun("extract")) {
+	void runFetchCli(process.argv.slice(2)).then((exitCode) => {
+		process.exitCode = exitCode;
+	});
+}

@@ -289,3 +289,256 @@ interface GroundingChunk {
 		readonly title?: string;
 	};
 }
+
+interface SearchCliArgs {
+	readonly query: string;
+	readonly options: FullSearchOptions;
+	readonly json: boolean;
+	readonly help: boolean;
+}
+
+type SearchCliParseResult =
+	| { readonly kind: "ok"; readonly value: SearchCliArgs }
+	| { readonly kind: "error"; readonly message: string };
+
+export interface SearchCliDeps {
+	readonly executeSearch?: typeof search;
+	readonly stdout?: (text: string) => void;
+	readonly stderr?: (text: string) => void;
+}
+
+const SEARCH_CLI_USAGE = `Usage: bun src/effect/gemini-search.ts [options] [query]
+
+Options:
+  -q, --query <text>             Search query
+      --provider <auto|perplexity|gemini>
+      --num-results <1-20>
+      --recency-filter <day|week|month|year>
+      --domain <host>            Repeatable. Prefix with '-' to exclude.
+      --json                     Print JSON output
+  -h, --help                     Show this help
+`;
+
+const RECENCY_FILTERS = new Set<NonNullable<SearchOptions["recencyFilter"]>>([
+	"day",
+	"week",
+	"month",
+	"year",
+]);
+
+const SEARCH_PROVIDERS = new Set<SearchProvider>(["auto", "perplexity", "gemini"]);
+
+function isSearchProvider(value: string): value is SearchProvider {
+	return SEARCH_PROVIDERS.has(value as SearchProvider);
+}
+
+function isRecencyFilter(
+	value: string,
+): value is NonNullable<SearchOptions["recencyFilter"]> {
+	return RECENCY_FILTERS.has(value as NonNullable<SearchOptions["recencyFilter"]>);
+}
+
+type SearchCliValueResult =
+	| { readonly kind: "ok"; readonly value: string }
+	| { readonly kind: "error"; readonly message: string };
+
+function parseCliValue(argv: readonly string[], index: number, flag: string): SearchCliValueResult {
+	const value = argv[index + 1];
+	if (!value) {
+		return { kind: "error", message: `Missing value for ${flag}` };
+	}
+	return { kind: "ok", value };
+}
+
+export function parseSearchCliArgs(argv: readonly string[]): SearchCliParseResult {
+	let query: string | null = null;
+	let provider: SearchProvider | undefined;
+	let numResults: number | undefined;
+	let recencyFilter: SearchOptions["recencyFilter"] | undefined;
+	const domainFilter: string[] = [];
+	let json = false;
+	let help = false;
+
+	for (let index = 0; index < argv.length; index++) {
+		const arg = argv[index];
+		switch (arg) {
+			case "-h":
+			case "--help":
+				help = true;
+				break;
+			case "--json":
+				json = true;
+				break;
+			case "-q":
+			case "--query": {
+				const parsed = parseCliValue(argv, index, arg);
+				if (parsed.kind === "error") return parsed;
+				query = parsed.value;
+				index += 1;
+				break;
+			}
+			case "--provider": {
+				const parsed = parseCliValue(argv, index, arg);
+				if (parsed.kind === "error") return parsed;
+				if (!isSearchProvider(parsed.value)) {
+					return {
+						kind: "error",
+						message: `Invalid provider \"${parsed.value}\"`,
+					};
+				}
+				provider = parsed.value;
+				index += 1;
+				break;
+			}
+			case "--num-results": {
+				const parsed = parseCliValue(argv, index, arg);
+				if (parsed.kind === "error") return parsed;
+				const value = Number(parsed.value);
+				if (!Number.isInteger(value) || value < 1 || value > 20) {
+					return { kind: "error", message: "--num-results must be an integer from 1 to 20" };
+				}
+				numResults = value;
+				index += 1;
+				break;
+			}
+			case "--recency-filter":
+			case "--recency": {
+				const parsed = parseCliValue(argv, index, arg);
+				if (parsed.kind === "error") return parsed;
+				if (!isRecencyFilter(parsed.value)) {
+					return {
+						kind: "error",
+						message: `Invalid recency filter \"${parsed.value}\"`,
+					};
+				}
+				recencyFilter = parsed.value;
+				index += 1;
+				break;
+			}
+			case "--domain": {
+				const parsed = parseCliValue(argv, index, arg);
+				if (parsed.kind === "error") return parsed;
+				domainFilter.push(...parsed.value.split(",").map((item) => item.trim()).filter(Boolean));
+				index += 1;
+				break;
+			}
+			default:
+				if (arg.startsWith("-")) {
+					return { kind: "error", message: `Unknown flag ${arg}` };
+				}
+				if (query) {
+					return { kind: "error", message: `Unexpected positional argument \"${arg}\"` };
+				}
+				query = arg;
+		}
+	}
+
+	if (help) {
+		return {
+			kind: "ok",
+			value: {
+				query: query ?? "",
+				options: {},
+				json,
+				help: true,
+			},
+		};
+	}
+
+	if (!query) {
+		return { kind: "error", message: "Missing search query" };
+	}
+
+	const options: FullSearchOptions = {
+		...(provider ? { provider } : {}),
+		...(numResults !== undefined ? { numResults } : {}),
+		...(recencyFilter ? { recencyFilter } : {}),
+		...(domainFilter.length > 0 ? { domainFilter } : {}),
+	};
+
+	return {
+		kind: "ok",
+		value: {
+			query,
+			options,
+			json,
+			help: false,
+		},
+	};
+}
+
+function formatSearchCliOutput(response: SearchResponse): string {
+	const lines: string[] = [];
+	if (response.answer.trim().length > 0) {
+		lines.push(response.answer.trim());
+	}
+	if (response.results.length > 0) {
+		lines.push("", "Sources:");
+		for (const [index, result] of response.results.entries()) {
+			lines.push(`${index + 1}. ${result.title}`, `   ${result.url}`);
+		}
+	}
+	return lines.join("\n");
+}
+
+export async function runSearchCli(
+	argv: readonly string[],
+	deps: SearchCliDeps = {},
+): Promise<number> {
+	const parsed = parseSearchCliArgs(argv);
+	const stdout = deps.stdout ?? ((text: string) => console.log(text));
+	const stderr = deps.stderr ?? ((text: string) => console.error(text));
+	if (parsed.kind === "error") {
+		stderr(`Error: ${parsed.message}`);
+		stderr(SEARCH_CLI_USAGE.trimEnd());
+		return 1;
+	}
+
+	if (parsed.value.help) {
+		stdout(SEARCH_CLI_USAGE.trimEnd());
+		return 0;
+	}
+
+	const executeSearch = deps.executeSearch ?? search;
+	try {
+		const response = await executeSearch(parsed.value.query, parsed.value.options);
+		if (parsed.value.json) {
+			stdout(
+				JSON.stringify(
+					{
+						query: parsed.value.query,
+						options: parsed.value.options,
+						response,
+					},
+					null,
+					2,
+				),
+			);
+			return 0;
+		}
+		stdout(formatSearchCliOutput(response));
+		return 0;
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		stderr(`Error: ${message}`);
+		return 1;
+	}
+}
+
+function isBunDirectRun(fileStem: string): boolean {
+	if (typeof Bun === "undefined") return false;
+	const scriptPath = Bun.argv[1];
+	if (!scriptPath) return false;
+	return (
+		scriptPath.endsWith(`/${fileStem}.ts`) ||
+		scriptPath.endsWith(`\\${fileStem}.ts`) ||
+		scriptPath.endsWith(`/${fileStem}.js`) ||
+		scriptPath.endsWith(`\\${fileStem}.js`)
+	);
+}
+
+if (isBunDirectRun("gemini-search")) {
+	void runSearchCli(process.argv.slice(2)).then((exitCode) => {
+		process.exitCode = exitCode;
+	});
+}

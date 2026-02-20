@@ -140,6 +140,7 @@ Add snapshot tests for:
 4. Lint warnings remain in old codebase (style + strictness), to be addressed during slice migration.
 5. Intermittent Gemini search e2e flake observed (2026-02-19): first run failed with `Gemini search unavailable` despite cookies present; immediate retry passed. Artifacts retained in `test-output/`.
 6. Intermittent Effect Gemini search e2e flake observed (2026-02-19): first run of `test:e2e:search:gemini:effect` failed with `Gemini search unavailable`; immediate retry passed. Artifacts retained in `test-output/`.
+7. Intermittent Gemini search e2e flake observed again (2026-02-20): first run of `test:e2e:search:gemini` failed with `Gemini search unavailable`; immediate retry passed. Artifacts retained in `test-output/`.
 
 ### Manual smoke notes (current machine)
 
