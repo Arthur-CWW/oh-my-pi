@@ -34,7 +34,11 @@
 		"test:e2e:search:gemini": "bun scripts/e2e-search-gemini.ts",
 		"test:e2e:effect:help": "pi --no-extensions -e ./src/effect/index.ts --help",
 		"test:e2e:cookies:effect": "bun scripts/e2e-chrome-cookies-effect.ts",
-		"test:e2e:search:gemini:effect": "bun scripts/e2e-search-gemini-effect.ts"
+		"test:e2e:search:gemini:effect": "bun scripts/e2e-search-gemini-effect.ts",
+		"kagi:help": "bun packages/kagi/scripts/kagi-lab.ts help",
+		"kagi:session:refresh": "bun packages/kagi/scripts/kagi-lab.ts session:refresh",
+		"kagi:runs:list": "bun packages/kagi/scripts/kagi-lab.ts runs:list",
+		"kagi:network:query": "bun packages/kagi/scripts/query-network-captures.ts"
 	},
 	"dependencies": {
 		"@effect/platform": "^0.94.5",
@@ -44,6 +48,7 @@
 		"effect": "^3.19.18",
 		"linkedom": "^0.16.0",
 		"p-limit": "^6.1.0",
+		"puppeteer-core": "^24.26.1",
 		"turndown": "^7.2.0",
 		"unpdf": "^1.4.0"
 	},

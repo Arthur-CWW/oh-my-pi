@@ -1,0 +1,33 @@
+{
+  "name": "kagi_browser_ext",
+  "version": "1.0.0",
+  "description": "A simple helper extension for setting Kagi as a default search engine, and automatically logging in to Kagi in incognito browsing windows",
+  "main": "build.js",
+  "private": true,
+  "scripts": {
+    "watch": "nodemon build.js firefox watch",
+    "build": "node build.js firefox",
+    "format": "biome format --write . && biome check --apply .",
+    "lint": "biome check .",
+    "test": "npm run lint"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kagisearch/browser_extensions.git"
+  },
+  "author": "",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/kagisearch/browser_extensions/issues"
+  },
+  "homepage": "https://github.com/kagisearch/browser_extensions#readme",
+  "devDependencies": {
+    "@biomejs/biome": "1.6.1",
+    "adm-zip": "0.5.12",
+    "nodemon": "3.1.0"
+  },
+  "engines": {
+    "node": "20.x",
+    "npm": "10.x"
+  }
+}

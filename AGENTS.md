@@ -35,6 +35,7 @@ Current persistent preferences:
 - Avoid unnecessary nested folders + `index.ts` re-export barrels for single-feature modules.
 - If splitting into multiple files is necessary, keep it minimal and justify briefly in PR/task notes.
 - Use `effect-solutions` (plural) when invoking the local Effect solutions CLI (`effect-solution` is not present in this environment).
+- During implementation iterations, run **scoped/filtered tests first** (only tests relevant to the current feature area); run full mandatory validation suite once at handoff or when explicitly requested.
 
 ## Mandatory Validation After Every Change
 

@@ -2,4 +2,11 @@ node_modules/
 bun.lock
 test-output/
 
+packages/kagi/output/
+packages/kagi/storage/session.json
+
+skills/pi-skills
+
 pi-session-*
+
+.claude-trace
