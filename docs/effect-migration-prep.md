@@ -21,17 +21,17 @@ Useful for:
 - `@effect/platform-node`
 - sqlite binding of choice (evaluate Bun compatibility)
 
-## Proposed folder layout
+## Working folder layout (current direction)
 
-- `src/old/*` current implementation
-- `src/effect/core/*` shared services (config/errors/http/fs/logging)
+- `src/old/*` legacy implementation retained for parity/debug
+- `src/effect/core/*` shared services (config/errors/http/logging)
 - `src/effect/observability/*` event types + sqlite event store
-- `src/effect/search/*` migrated search providers and orchestrator
-- `src/effect/extract/*` migrated content extraction pipeline
-- `src/effect/index.ts` future extension entrypoint
+- `src/effect/*.ts` flattened Effect slices when practical (per repo preference)
+- `src/effect/index.ts` current extension entrypoint
 
 ## Migration operating mode
 
-- Keep `src/old` as production path until parity achieved.
-- Build migrated slices in `src/effect`.
-- Validate each slice via tests + smoke scripts + snapshots.
+- Package entry now points to `src/effect/index.ts`.
+- Effect entrypoint currently keeps a compatibility bridge to legacy tool registration for behavior parity.
+- Replace bridge incrementally by migrating remaining slices into Effect modules.
+- Validate each slice via tests + smoke scripts + snapshots before removing bridge paths.

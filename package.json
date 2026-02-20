@@ -49,7 +49,7 @@
 	},
 	"pi": {
 		"extensions": [
-			"./src/old/index.ts"
+			"./src/effect/index.ts"
 		],
 		"skills": [
 			"./skills"

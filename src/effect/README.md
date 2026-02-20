@@ -2,9 +2,9 @@
 
 This folder contains the new Effect TS implementation.
 
-Current production entrypoint remains `src/old/index.ts`.
+Current production entrypoint: `src/effect/index.ts`.
 
-Shadow dry-run entrypoint: `src/effect/index.ts` (non-production validation path).
+Legacy parity/debug entrypoint retained: `src/old/index.ts`.
 
 ## Foundation modules
 

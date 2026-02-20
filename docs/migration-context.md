@@ -4,17 +4,13 @@ This file is intended to bootstrap a new session with all relevant migration con
 
 ## Current State
 
-- Legacy code moved to: `src/old/*`
-- New Effect area scaffolded: `src/effect/*`
-- Effect foundation modules added:
-  - `src/effect/core/Errors.ts`
-  - `src/effect/core/Config.ts`
-  - `src/effect/core/Http.ts`
-  - `src/effect/core/Observability.ts`
-- Core barrel file added: `src/effect/core/index.ts`
-- Extension still runs from: `src/old/index.ts`
-- Type shims removed.
-- `any` cleanup started (no explicit `any` in current checked paths).
+- Legacy code remains in: `src/old/*`
+- Effect code lives in: `src/effect/*`
+- Foundation modules exist under `src/effect/core/*`
+- SQLite event store exists under `src/effect/observability/EventStore.ts`
+- Gemini search slice exists in `src/effect/gemini-search.ts`
+- **Package extension entry now points to `src/effect/index.ts`**
+- `src/effect/index.ts` currently uses a compatibility bridge to register legacy tool surface from `src/old/index.ts`, then adds Effect-only tools (so behavior remains stable during migration)
 
 ## Why Migration
 
@@ -24,78 +20,48 @@ Primary goals:
 3. Event sourcing to local SQLite for action traceability
 4. Safer incremental changes with boundary tests and parity checks
 
-## Existing Validation Commands
+## Validation Commands (current)
 
 ```bash
 bun run typecheck
 bun run test
 bun run test:e2e:cookies
 bun run test:e2e:search:gemini
+bun run test:e2e:effect:help
+bun run test:e2e:cookies:effect
+bun run test:e2e:search:gemini:effect
+pi --no-extensions -e ./src/effect/index.ts --help
 pi --no-extensions -e ./src/old/index.ts --help
 ```
-
-## Existing Tests
-
-- `tests/utils.test.ts`
-- `tests/parsers.test.ts`
-- `tests/storage.test.ts`
-- `tests/search-filter.test.ts`
-- `tests/video-file.test.ts`
-- `tests/rsc-extract.test.ts`
-- `tests/effect-core.test.ts`
 
 ## Existing E2E Smoke
 
 - `scripts/e2e-chrome-cookies.ts`
 - `scripts/e2e-search-gemini.ts`
+- `scripts/e2e-chrome-cookies-effect.ts`
+- `scripts/e2e-search-gemini-effect.ts`
 
 Search e2e outputs artifacts to `test-output/` (JSON + MD).
 
-## Baseline Observations
+## Observations
 
-- Repeated Gemini search and cookie smoke runs passed in this environment.
-- Historical flakiness known around Gemini cookie/auth path in some runtime contexts.
-- `src/old/index.ts` has typing complexity and should be migrated by slices instead of deep patching.
+- Gemini and cookie smoke tests pass on this environment, with historical intermittent Gemini flake already tracked in `docs/migration-spec.md`.
+- Legacy `src/old/index.ts` has typing complexity and remains excluded from strict typecheck.
+- Cutover is complete at package entrypoint level, but full migration is still in progress because the Effect entrypoint currently bridges legacy tools.
 
-## Next Recommended Work (First Migration Slice)
+## Recommended Next Work
 
-1. ✅ Add Effect core modules:
-   - `src/effect/core/Errors.ts`
-   - `src/effect/core/Config.ts`
-   - `src/effect/core/Http.ts`
-   - `src/effect/core/Observability.ts`
-2. Add local SQLite event store service in Effect layer.
-3. Migrate `gemini-search` flow to `src/effect/search/*`.
-4. Add parity/contract tests old vs new search output shape.
-5. Add snapshot tests for normalized search outputs.
-
-## Event Sourcing Direction (Local SQLite)
-
-Planned event model examples:
-- `SearchRequested`
-- `ProviderSelected`
-- `ProviderAttempted`
-- `ProviderFailed`
-- `ProviderSucceeded`
-- `FallbackAttempted`
-- `ToolCompleted`
-
-Each event should include:
-- `eventId`
-- `timestamp`
-- `correlationId`
-- `sessionId` (if available)
-- structured payload
-
-## Constraints / Preferences
-
-- Boundary testing over implementation-detail testing
-- Snapshot tests acceptable and encouraged for stable boundaries
-- Keep old and new implementations side-by-side until parity confidence is achieved
+1. Keep cutover stable while replacing compatibility bridge incrementally.
+2. Migrate remaining tool slices from legacy index into Effect-native modules:
+   - `perplexity`
+   - `fetch_content` / `get_search_content`
+   - extractor special cases (YouTube/video/GitHub)
+3. Add parity tests per migrated slice and remove bridge once parity confidence is sufficient.
 
 ## Related Docs
 
 - `AGENTS.md`
+- `task-tracker.md`
 - `docs/migration-spec.md`
 - `docs/effect-migration-prep.md`
 - `docs/references/effect-llms.txt`

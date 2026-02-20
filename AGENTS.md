@@ -8,7 +8,10 @@ This repo is migrating from the legacy implementation to an Effect TS implementa
 - New implementation (in progress): `src/effect/*`
 
 Current Pi extension entrypoint:
-- `package.json -> pi.extensions[0] = ./src/old/index.ts`
+- `package.json -> pi.extensions[0] = ./src/effect/index.ts`
+
+Legacy entrypoint retained for parity/debug:
+- `./src/old/index.ts`
 
 ## Ground Rules
 
@@ -31,6 +34,7 @@ Current persistent preferences:
 - Prefer a **compressed/flat file layout** for new Effect slices when practical.
 - Avoid unnecessary nested folders + `index.ts` re-export barrels for single-feature modules.
 - If splitting into multiple files is necessary, keep it minimal and justify briefly in PR/task notes.
+- Use `effect-solutions` (plural) when invoking the local Effect solutions CLI (`effect-solution` is not present in this environment).
 
 ## Mandatory Validation After Every Change
 
@@ -43,7 +47,7 @@ bun run typecheck
 bun run test
 bun run test:e2e:cookies
 bun run test:e2e:search:gemini
-pi --no-extensions -e ./src/old/index.ts --help
+pi --no-extensions -e ./src/effect/index.ts --help
 ```
 
 Notes:
@@ -105,3 +109,5 @@ After finishing each task, provide a brief summary in chat: **Done / Not done / 
 - Run the specific new/updated test(s) and then run full `bun run test`
 - Add structured errors (typed) instead of generic string errors
 - Emit observable events (once EventStore is introduced)
+
+---

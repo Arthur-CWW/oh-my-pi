@@ -1,10 +1,10 @@
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "bun:test";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Effect } from "effect";
-import { registerEffectTools, type EffectExtensionDeps } from "../src/effect/index.js";
+import effectEntry, { registerEffectTools, type EffectExtensionDeps } from "../src/effect/index.js";
 
 interface ToolLike {
 	readonly name?: unknown;
@@ -26,6 +26,23 @@ function registerWith(deps: EffectExtensionDeps): Map<string, ToolLike> {
 	} as unknown as ExtensionAPI;
 
 	registerEffectTools(api, deps);
+	return registered;
+}
+
+function registerCutoverEntry(): Map<string, ToolLike> {
+	const registered = new Map<string, ToolLike>();
+	const api = {
+		registerTool: (tool: ToolLike) => {
+			if (typeof tool.name === "string") {
+				registered.set(tool.name, tool);
+			}
+		},
+		registerShortcut: () => {},
+		on: () => {},
+		registerCommand: () => {},
+	} as unknown as ExtensionAPI;
+
+	effectEntry(api);
 	return registered;
 }
 
@@ -85,5 +102,23 @@ describe("effect shadow entry", () => {
 		const result = await tool.execute("call-3", { names: ["__Secure-1PSID", "NID"] });
 		expect(result.details?.error).toBe(null);
 		expect(result.content[0]?.text).toContain("Present requested: 1/2");
+	});
+});
+
+describe("effect production cutover entry", () => {
+	it("registers legacy tool surface plus effect extras", () => {
+		const tools = registerCutoverEntry();
+		expect(tools.has("web_search")).toBe(true);
+		expect(tools.has("fetch_content")).toBe(true);
+		expect(tools.has("get_search_content")).toBe(true);
+		expect(tools.has("chrome_cookies")).toBe(true);
+		expect(tools.has("effect_event_store_smoke")).toBe(true);
+	});
+
+	it("package entrypoint points to effect index", () => {
+		const packageJson = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8")) as {
+			readonly pi?: { readonly extensions?: readonly string[] };
+		};
+		expect(packageJson.pi?.extensions?.[0]).toBe("./src/effect/index.ts");
 	});
 });

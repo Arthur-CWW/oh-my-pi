@@ -3,6 +3,7 @@ import { StringEnum } from "@mariozechner/pi-ai";
 import { Type } from "@sinclair/typebox";
 import { Effect } from "effect";
 import { randomUUID } from "node:crypto";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { makeEvent } from "./core/Observability.js";
@@ -27,6 +28,10 @@ interface CookiesParams {
 	readonly names?: string[];
 }
 
+interface RegisterEffectToolsOptions {
+	readonly includeWebSearch?: boolean;
+}
+
 export interface EffectExtensionDeps {
 	readonly search: (query: string, options?: FullSearchOptions) => Promise<{
 		answer: string;
@@ -40,12 +45,29 @@ const defaultDeps: EffectExtensionDeps = {
 	readCookies: readChromeCookiesEffect,
 };
 
+const LEGACY_ENTRY_CANDIDATES = ["../old/index.js", "../old/index.ts"] as const;
+
 function formatSearchSummary(results: Array<{ title: string; url: string }>, answer: string): string {
 	const body = answer ? `${answer}\n\n---\n\n**Sources:**\n` : "";
 	return body + results.map((result, index) => `${index + 1}. ${result.title}\n   ${result.url}`).join("\n\n");
 }
 
-export function registerEffectTools(pi: ExtensionAPI, deps: EffectExtensionDeps = defaultDeps): void {
+function loadLegacyRegistrar(): ((pi: ExtensionAPI) => void) | null {
+	const require = createRequire(import.meta.url);
+	for (const candidate of LEGACY_ENTRY_CANDIDATES) {
+		try {
+			const moduleRecord = require(candidate) as { default?: unknown };
+			if (typeof moduleRecord.default === "function") {
+				return moduleRecord.default as (pi: ExtensionAPI) => void;
+			}
+		} catch {
+			// Try next candidate path.
+		}
+	}
+	return null;
+}
+
+function registerEventStoreSmokeTool(pi: ExtensionAPI): void {
 	pi.registerTool({
 		name: "effect_event_store_smoke",
 		label: "Effect Event Store Smoke",
@@ -103,7 +125,9 @@ export function registerEffectTools(pi: ExtensionAPI, deps: EffectExtensionDeps 
 			};
 		},
 	});
+}
 
+function registerEffectWebSearchTool(pi: ExtensionAPI, deps: EffectExtensionDeps): void {
 	pi.registerTool({
 		name: "web_search",
 		label: "Web Search (Effect)",
@@ -147,7 +171,9 @@ export function registerEffectTools(pi: ExtensionAPI, deps: EffectExtensionDeps 
 			}
 		},
 	});
+}
 
+function registerChromeCookiesTool(pi: ExtensionAPI, deps: EffectExtensionDeps): void {
 	pi.registerTool({
 		name: "chrome_cookies",
 		label: "Chrome Cookies (Effect)",
@@ -167,7 +193,6 @@ export function registerEffectTools(pi: ExtensionAPI, deps: EffectExtensionDeps 
 			}
 
 			const present = requested.filter((name) => Boolean(exit.value.cookies[name]));
-			const missing = requested.filter((name) => !exit.value.cookies[name]);
 			return {
 				content: [
 					{
@@ -183,6 +208,25 @@ export function registerEffectTools(pi: ExtensionAPI, deps: EffectExtensionDeps 
 	});
 }
 
+export function registerEffectTools(
+	pi: ExtensionAPI,
+	deps: EffectExtensionDeps = defaultDeps,
+	options: RegisterEffectToolsOptions = {},
+): void {
+	registerEventStoreSmokeTool(pi);
+	registerChromeCookiesTool(pi, deps);
+	if (options.includeWebSearch !== false) {
+		registerEffectWebSearchTool(pi, deps);
+	}
+}
+
 export default function (pi: ExtensionAPI) {
-	registerEffectTools(pi);
+	const registerLegacy = loadLegacyRegistrar();
+	if (registerLegacy) {
+		registerLegacy(pi);
+		registerEffectTools(pi, defaultDeps, { includeWebSearch: false });
+		return;
+	}
+
+	registerEffectTools(pi, defaultDeps, { includeWebSearch: true });
 }

@@ -16,14 +16,16 @@
 
 ---
 
-## Current Repo Organization (after prep)
+## Current Repo Organization
 
-- `src/old/*` → current implementation (source of truth during migration)
-- `src/effect/*` → new Effect TS implementation
+- `src/old/*` → legacy implementation retained for parity/debug
+- `src/effect/*` → current Effect TS implementation (active package entry)
 - `tests/*` → boundary-focused tests (Bun)
 - `scripts/*` → e2e smoke scripts (cookies/search)
 
-Pi extension entry (current): `src/old/index.ts`
+Pi extension entry (current): `src/effect/index.ts`
+
+Legacy entry retained: `src/old/index.ts`
 
 ---
 
@@ -80,11 +82,11 @@ For each slice:
 - Add contract tests (same input, same output shape)
 - Dual-run optional (old + new) for comparison in debug mode
 
-### Phase 4 — Switch Over
+### Phase 4 — Switch Over (completed, compatibility bridge active)
 
-- Swap Pi entry from `src/old/index.ts` to `src/effect/index.ts`
-- Keep `src/old` for one release window
-- Remove old after parity confidence
+- ✅ Swapped Pi entry from `src/old/index.ts` to `src/effect/index.ts`
+- Keep `src/old` for parity/debug release window
+- Remove old bridge after parity confidence on remaining slices
 
 ---
 
@@ -168,7 +170,7 @@ Add snapshot tests for:
 
 ## Immediate Next Tasks
 
-1. Add Effect deps + base modules under `src/effect/core`.
-2. Implement `EventStore` (sqlite) + `Observability` service.
-3. Migrate `gemini-search` as first vertical slice with parity tests.
-4. Add snapshot tests for search output normalization.
+1. Replace compatibility bridge in `src/effect/index.ts` with Effect-native implementations slice-by-slice.
+2. Migrate remaining search/fetch flows (`perplexity`, `fetch_content`, `get_search_content`) to Effect modules with parity tests.
+3. Migrate extractor special cases (YouTube/video/GitHub) into Effect slices.
+4. Remove legacy bridge after parity confidence and repeated smoke passes.

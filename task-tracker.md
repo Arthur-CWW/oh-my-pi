@@ -1,6 +1,6 @@
 # Migration Task Tracker
 
-_Last updated: 2026-02-19_
+_Last updated: 2026-02-20_
 
 State legend (symbol-only):
 - `[ ]` Open
@@ -28,4 +28,5 @@ State legend (symbol-only):
   - Result: Added `tests/search-snapshots.test.ts` with golden snapshot assertions for `preprocessSearchResults` normalization output and `postProcessCondensed` summary output; added snapshot fixtures under `tests/snapshots/{search-preprocess.snapshot.json,search-condensed.snapshot.md}`; validations passed.
 - [@User] Wire `src/effect/index.ts` shadow entry for non-production dry runs.
   - Result: Extended `src/effect/index.ts` shadow extension to register `web_search` (Effect Gemini slice), `chrome_cookies` (Effect cookie reader), and `effect_event_store_smoke`; updated `tests/effect-index.test.ts`; added Effect e2e scripts `scripts/e2e-search-gemini-effect.ts` + `scripts/e2e-chrome-cookies-effect.ts` and package scripts `test:e2e:search:gemini:effect` + `test:e2e:cookies:effect`; CLI loading and effect e2e flows pass (Gemini effect e2e passed on retry after one transient failure).
-- [ ] Cut over extension entrypoint from `src/old/index.ts` to `src/effect/index.ts` after parity.
+- [@User] Cut over extension entrypoint from `src/old/index.ts` to `src/effect/index.ts` after parity.
+  - Result: Switched `package.json` extension entry to `./src/effect/index.ts`; updated Effect entrypoint to load legacy tool surface via compatibility bridge and register Effect-only tools (`chrome_cookies`, `effect_event_store_smoke`) without overriding legacy `web_search`; added cutover tests in `tests/effect-index.test.ts` (tool-surface parity + package entry assertion); full validation pass completed (typecheck, tests, legacy/effect e2e, old/effect CLI help).
