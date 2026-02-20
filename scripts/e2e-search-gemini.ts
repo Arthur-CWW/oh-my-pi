@@ -64,7 +64,7 @@ function writeTestOutput(data: {
 }
 
 async function main() {
-	const query = process.argv.slice(2).join(" ") || "clavicular latest transcript with fuentes";
+	const query = process.argv.slice(2).join(" ") || "What is Bun runtime?";
 
 	console.log("\npi-web-access e2e Gemini search test\n");
 	console.log(`Query: ${query}\n`);

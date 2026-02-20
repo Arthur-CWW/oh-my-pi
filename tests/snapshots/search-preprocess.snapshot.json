@@ -1,0 +1,21 @@
+{
+  "overlapPairs": [
+    {
+      "q1": 1,
+      "q2": 2,
+      "shared": 1,
+      "pct": 33
+    }
+  ],
+  "similarityPairs": [
+    {
+      "q1": 1,
+      "q2": 2,
+      "similarity": 0.125
+    }
+  ],
+  "totalTokens": 48,
+  "skipCondensation": true,
+  "qualitySummary": "4 other sources, 1 discussion sources, 1 forum sources",
+  "hints": "Overlap analysis:\n- Q1 and Q2 share 1 sources (33%)\n\nAnswer similarity:\n- No answer pairs meet the 70% similarity threshold.\n\nSource quality: 4 other sources, 1 discussion sources, 1 forum sources.\nEstimated answer tokens: 48. Below threshold — skip condensation."
+}
