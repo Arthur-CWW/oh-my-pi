@@ -1,79 +1,63 @@
 # Kagi Unofficial Client Handoff (Session Summary)
 
-Date: 2026-02-20
+Date: 2026-02-21
 
-## What was completed
+## What was completed this session
 
-### 1) Isolated Kagi workspace
-- Created `packages/kagi/` as a standalone provider workspace.
-- Cloned Kagi extension repo into:
-  - `packages/kagi/vendor/browser_extensions`
+### 1) Dynamic lens discovery (no longer static-only)
+- Updated `packages/kagi/src/kagi-client.ts` to support dynamic lens resolution:
+  - Added `discoverLenses(session, { query, includeFallback })`
+  - Added `extractLensesFromHtml(html)` parser heuristics for:
+    - search-page anchor links containing `l=<id>`
+    - embedded JSON descriptors (`slug` + `id`)
+  - Search path now attempts dynamic lens discovery before `/socket/search` when a named lens is used.
+- Kept observed defaults as fallback merge (for resilience), but lens handling is now discovery-first.
 
-### 2) Unofficial client implementation
-- Added `packages/kagi/src/kagi-client.ts` with typed APIs for:
-  - Chrome session capture + local secure cache (`session.json`)
-  - Mimicked `/socket/search` fetch + SSE parsing + realtime chunk capture
-  - `/search/advanced` POST replay and redirect capture
-  - Domain rule APIs:
-    - `/esr/user_rules`
-    - `/esr/user_rules/delete`
-    - `/esr/user_rules/bulk`
-  - Video rule APIs:
-    - `/esr/video_rules`
-    - `/esr/video_rules/delete`
+### 2) Expanded advanced-search coverage + tests
+- Extended `tests/kagi-client.test.ts` to cover:
+  - full known advanced-search form payload mapping
+  - default-empty behavior for omitted fields
+  - `terms_appearing=any` normalization to empty form value
+- Added lens-specific tests:
+  - dynamic lens extraction from HTML anchors
+  - dynamic lens extraction from embedded JSON
+  - dynamic lens-map usage in `buildSearchParams`
 
-### 3) Artifact logging and querying
-- Added `packages/kagi/src/kagi-log.ts` for run persistence and filtering.
-- Added CLI:
-  - `packages/kagi/scripts/kagi-lab.ts`
-- Added network artifact query utility:
-  - `packages/kagi/scripts/query-network-captures.ts`
+### 3) CLI improvements for lens work
+- Updated `packages/kagi/scripts/kagi-lab.ts`:
+  - new command: `lenses:list`
+  - search flag support: `--discover-lenses` (default enabled)
+  - search summary now includes lens/discovery metadata
 
-### 4) Evidence captures
-- Network captures saved in:
-  - `packages/kagi/output/network/`
-- Accessibility tree snapshots saved in:
-  - `packages/kagi/output/a11y/`
-- Search run outputs + raw SSE saved in:
-  - `packages/kagi/output/runs/`
+### 4) Standalone package metadata under `packages/kagi`
+- Added `packages/kagi/package.json` with local scripts:
+  - `help`, `session:refresh`, `lenses:list`, `search`, `test`
+- Added root convenience script:
+  - `kagi:lenses:list`
 
-### 5) Tests
-- Added:
-  - `tests/kagi-client.test.ts`
-  - `tests/kagi-log.test.ts`
-- Scoped run used during iteration:
-  - `bun test tests/kagi-client.test.ts tests/kagi-log.test.ts`
+### 5) Documentation updates in package scope
+- Updated:
+  - `packages/kagi/README.md`
+  - `packages/kagi/notes/api-quirks.md`
 
 ---
 
-## What was tested with mimicked fetch requests
+## Scoped validation run during iteration
 
-Yes, **mimicked fetch requests were used and validated** for these endpoint families:
-- `/socket/search`
-- `/search/advanced`
-- `/esr/user_rules`, `/esr/user_rules/delete`, `/esr/user_rules/bulk`
-- `/esr/video_rules`, `/esr/video_rules/delete`
+```bash
+bun test tests/kagi-client.test.ts tests/kagi-log.test.ts
+bun packages/kagi/scripts/kagi-lab.ts help
+```
 
-Mimic included:
-- browser-like headers (`user-agent`, `sec-ch-*`, `dnt`, referer)
-- cookie header from captured Kagi cookies
-- optional `x-kagi-authorization` session token
+Result: pass.
 
 ---
 
-## Not finished / open items
+## Remaining follow-ups
 
-1) **Lenses are likely not fixed**
-- Current code uses static lens mapping observed in this session.
-- Need follow-up: discover available lenses dynamically from current account/UI (or endpoint) instead of hardcoding.
-
-2) **Advanced search coverage is not exhaustive**
-- Implemented full payload shape and tested core fields.
-- Not every field combination was exhaustively validated across multiple regions/file types/term modes.
-
-3) **Video-channel bulk workflow polish**
-- API calls work.
-- Next pass should add more robust import UX (dry-run validation + rollback report + duplicate handling policy).
+1) Lens parser robustness if Kagi search-page markup changes.
+2) Full advanced-search e2e matrix sweep (regions/file-types/date windows).
+3) Video-channel bulk UX hardening (dry-run + rollback/reporting).
 
 ---
 
@@ -83,8 +67,11 @@ Mimic included:
 # refresh local Kagi session from open Chrome profile
 bun packages/kagi/scripts/kagi-lab.ts session:refresh
 
-# run search with full capture
-bun packages/kagi/scripts/kagi-lab.ts search --query "C++ UB strict aliasing" --lens programming
+# discover available lenses from current account/session
+bun packages/kagi/scripts/kagi-lab.ts lenses:list --query "strict aliasing"
+
+# run search with discovery-enabled lens resolution
+bun packages/kagi/scripts/kagi-lab.ts search --query "C++ UB strict aliasing" --lens programming --discover-lenses 1
 
 # test advanced redirect shape
 bun packages/kagi/scripts/kagi-lab.ts advanced:redirect --site myanimelist.net --terms-appearing title --file-type pdf --last-update 3 --region us

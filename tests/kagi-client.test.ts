@@ -3,13 +3,14 @@ import {
 	buildAdvancedSearchPostBody,
 	buildMimicHeaders,
 	buildSearchParams,
+	extractLensesFromHtml,
 	parseSse,
 	parseVideoRuleTargetFromDomain,
 	type KagiSessionState,
 } from "../packages/kagi/src/kagi-client.js";
 
 describe("kagi client helpers", () => {
-	it("builds search params with lens and filters", () => {
+	it("builds search params with built-in lens mapping and filters", () => {
 		const params = buildSearchParams(
 			{
 				query: "strict aliasing c++",
@@ -37,22 +38,93 @@ describe("kagi client helpers", () => {
 		expect(params.get("nonce")).toBe("nonce-1");
 	});
 
-	it("maps advanced search body fields", () => {
+	it("prefers discovered lens map for custom account lenses", () => {
+		const params = buildSearchParams(
+			{
+				query: "effector guide",
+				lens: "ai labs",
+				lensMap: {
+					ai_labs: "42",
+				},
+			},
+			"nonce-2",
+		);
+
+		expect(params.get("l")).toBe("42");
+	});
+
+	it("maps advanced search body fields across the full payload", () => {
 		const params = buildAdvancedSearchPostBody({
-			allWords: "a b",
+			allWords: "alpha beta",
 			exactWords: "quoted phrase",
+			anyWords: "x y",
+			noneWords: "z",
 			region: "us",
-			lastUpdate: 2,
+			lastUpdate: 3,
+			fromDate: "2024-01-01",
+			toDate: "2026-01-31",
+			site: "myanimelist.net",
 			termsAppearing: "title",
 			fileType: "pdf",
 		});
 
-		expect(params.get("all_words")).toBe("a b");
+		expect(params.get("all_words")).toBe("alpha beta");
 		expect(params.get("exact_words")).toBe("quoted phrase");
+		expect(params.get("any_words")).toBe("x y");
+		expect(params.get("none_words")).toBe("z");
 		expect(params.get("region")).toBe("us");
-		expect(params.get("last_update")).toBe("2");
+		expect(params.get("last_update")).toBe("3");
+		expect(params.get("from_date")).toBe("2024-01-01");
+		expect(params.get("to_date")).toBe("2026-01-31");
+		expect(params.get("site")).toBe("myanimelist.net");
 		expect(params.get("terms_appearing")).toBe("title");
 		expect(params.get("file_type")).toBe("pdf");
+	});
+
+	it("normalizes advanced search defaults for omitted and any-terms modes", () => {
+		const params = buildAdvancedSearchPostBody({
+			termsAppearing: "any",
+		});
+
+		expect(params.get("all_words")).toBe("");
+		expect(params.get("exact_words")).toBe("");
+		expect(params.get("any_words")).toBe("");
+		expect(params.get("none_words")).toBe("");
+		expect(params.get("region")).toBe("");
+		expect(params.get("last_update")).toBe("");
+		expect(params.get("from_date")).toBe("");
+		expect(params.get("to_date")).toBe("");
+		expect(params.get("site")).toBe("");
+		expect(params.get("terms_appearing")).toBe("");
+		expect(params.get("file_type")).toBe("");
+	});
+
+	it("extracts dynamic lenses from search HTML anchors", () => {
+		const html = `
+			<div>
+				<a href="/search?q=test">All</a>
+				<a data-lens="programming" href="/search?q=test&l=2">Programming</a>
+				<a data-lens="small web" href="/search?q=test&l=17">Small Web+</a>
+			</div>
+		`;
+		const lenses = extractLensesFromHtml(html);
+
+		expect(lenses.map((lens) => lens.key)).toContain("programming");
+		expect(lenses.find((lens) => lens.key === "programming")?.value).toBe("2");
+		expect(lenses.find((lens) => lens.key === "small_web")?.value).toBe("17");
+		expect(lenses.find((lens) => lens.key === "all")?.value).toBeUndefined();
+	});
+
+	it("extracts dynamic lenses from embedded JSON lens descriptors", () => {
+		const html = `
+			<script>
+				window.__DATA__ = {"lenses":[{"slug":"forums","id":1},{"id":5,"slug":"small_web"}]};
+			</script>
+		`;
+		const lenses = extractLensesFromHtml(html);
+
+		expect(lenses.find((lens) => lens.key === "forums")?.value).toBe("1");
+		expect(lenses.find((lens) => lens.key === "small_web")?.value).toBe("5");
 	});
 
 	it("parses video domain targets", () => {

@@ -2,7 +2,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "n
 import { dirname, resolve } from "node:path";
 import puppeteer from "puppeteer-core";
 
-export type KagiLens = "all" | "academic" | "forums" | "programming" | "pdfs" | "news_360" | "small_web";
+export type KagiLens = string;
 
 export type KagiTermsAppearing = "any" | "url" | "title";
 
@@ -33,10 +33,28 @@ export interface KagiSessionState {
 	cookies: KagiCookie[];
 }
 
+export interface KagiLensDefinition {
+	key: string;
+	label: string;
+	value: string | undefined;
+	source: "dynamic" | "fallback";
+}
+
+export interface KagiLensDiscoveryResult {
+	capturedAt: string;
+	status: number;
+	ok: boolean;
+	requestUrl: string;
+	responseHeaders: Record<string, string>;
+	lenses: KagiLensDefinition[];
+	lensMap: Record<string, string | undefined>;
+}
+
 export interface KagiSearchOptions {
 	query: string;
 	region?: string;
 	lens?: KagiLens;
+	lensMap?: Record<string, string | undefined>;
 	dateRange?: 1 | 2 | 3 | 4;
 	fromDate?: string;
 	toDate?: string;
@@ -140,7 +158,7 @@ const DEFAULT_BASE_URL = "https://kagi.com";
 const DEFAULT_BROWSER_URL = "http://localhost:9222";
 const DEFAULT_SESSION_PATH = "packages/kagi/storage/session.json";
 
-const LENS_VALUE: Record<KagiLens, string | undefined> = {
+const BUILTIN_LENS_MAP: Record<string, string | undefined> = {
 	all: undefined,
 	academic: "0",
 	forums: "1",
@@ -148,6 +166,14 @@ const LENS_VALUE: Record<KagiLens, string | undefined> = {
 	pdfs: "3",
 	news_360: "4",
 	small_web: "5",
+};
+
+const LENS_KEY_ALIASES: Record<string, string> = {
+	forum: "forums",
+	news: "news_360",
+	news360: "news_360",
+	smallweb: "small_web",
+	small: "small_web",
 };
 
 const SAME_SITE_MAP: Record<string, KagiCookie["sameSite"]> = {
@@ -270,6 +296,112 @@ export function loadSession(filePath = DEFAULT_SESSION_PATH): KagiSessionState {
 	return JSON.parse(raw) as KagiSessionState;
 }
 
+export async function discoverLenses(
+	session: KagiSessionState,
+	options?: {
+		query?: string;
+		includeFallback?: boolean;
+	},
+): Promise<KagiLensDiscoveryResult> {
+	const baseUrl = session.baseUrl || DEFAULT_BASE_URL;
+	const requestUrl = new URL("/search", baseUrl);
+	if (options?.query) {
+		requestUrl.searchParams.set("q", options.query);
+	}
+	const refererUrl = new URL("/search", baseUrl);
+	const headers = buildMimicHeaders(session, refererUrl);
+	headers.accept = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
+
+	const response = await fetch(requestUrl, {
+		method: "GET",
+		headers,
+	});
+	const html = await response.text();
+	const discovered = extractLensesFromHtml(html);
+	const includeFallback = options?.includeFallback ?? true;
+	const lenses = includeFallback ? mergeLensDefinitionsWithFallback(discovered) : discovered;
+
+	return {
+		capturedAt: new Date().toISOString(),
+		status: response.status,
+		ok: response.ok,
+		requestUrl: requestUrl.toString(),
+		responseHeaders: headersToRecord(response.headers),
+		lenses,
+		lensMap: lensMapFromDefinitions(lenses),
+	};
+}
+
+export function extractLensesFromHtml(html: string): KagiLensDefinition[] {
+	const byKey = new Map<string, KagiLensDefinition>();
+
+	const anchorRegex = /<a\b([^>]*)>([\s\S]*?)<\/a>/gi;
+	for (const match of html.matchAll(anchorRegex)) {
+		const attributes = match[1] ?? "";
+		const innerHtml = match[2] ?? "";
+		const href = findAttributeValue(attributes, "href");
+		if (!href) {
+			continue;
+		}
+		const parsedHref = safeUrl(href.replace(/&amp;/gi, "&"), "https://kagi.com");
+		if (!parsedHref || parsedHref.pathname !== "/search") {
+			continue;
+		}
+		const lensValue = parsedHref.searchParams.get("l") ?? undefined;
+		const label = normalizeLensLabel(cleanHtmlText(innerHtml));
+		if (!lensValue && !isAllLabel(label)) {
+			continue;
+		}
+		const keyAttr =
+			findAttributeValue(attributes, "data-lens") ??
+			findAttributeValue(attributes, "data-key") ??
+			findAttributeValue(attributes, "data-slug") ??
+			label;
+		const key = normalizeLensKey(keyAttr);
+		if (!key) {
+			continue;
+		}
+		upsertLensDefinition(byKey, {
+			key,
+			label,
+			value: lensValue,
+			source: "dynamic",
+		});
+	}
+
+	const slugThenIdRegex = /"slug"\s*:\s*"([^"]+)"[^{}]{0,240}?"(?:id|value|l)"\s*:\s*"?(\d+)"?/g;
+	for (const match of html.matchAll(slugThenIdRegex)) {
+		const key = normalizeLensKey(match[1] ?? "");
+		const value = match[2] ?? "";
+		if (!key || value.length === 0) {
+			continue;
+		}
+		upsertLensDefinition(byKey, {
+			key,
+			label: prettifyLensLabel(key),
+			value,
+			source: "dynamic",
+		});
+	}
+
+	const idThenSlugRegex = /"(?:id|value|l)"\s*:\s*"?(\d+)"?[^{}]{0,240}?"slug"\s*:\s*"([^"]+)"/g;
+	for (const match of html.matchAll(idThenSlugRegex)) {
+		const value = match[1] ?? "";
+		const key = normalizeLensKey(match[2] ?? "");
+		if (!key || value.length === 0) {
+			continue;
+		}
+		upsertLensDefinition(byKey, {
+			key,
+			label: prettifyLensLabel(key),
+			value,
+			source: "dynamic",
+		});
+	}
+
+	return [...byKey.values()].sort(compareLensDefinitions);
+}
+
 export function buildSearchUrls(session: KagiSessionState, options: KagiSearchOptions): {
 	requestUrl: URL;
 	refererUrl: URL;
@@ -297,8 +429,9 @@ export function buildSearchParams(options: KagiSearchOptions, nonce: string): UR
 		params.set("r", options.region);
 	}
 
-	if (options.lens && LENS_VALUE[options.lens]) {
-		params.set("l", LENS_VALUE[options.lens] as string);
+	const lensValue = resolveLensValue(options.lens, options.lensMap);
+	if (typeof lensValue === "string" && lensValue.length > 0) {
+		params.set("l", lensValue);
 	}
 
 	if (options.dateRange) {
@@ -589,26 +722,50 @@ export async function runSocketSearchWithAutoRefresh(
 		sessionPath?: string;
 		browserUrl?: string;
 		rateLimiter?: SimpleRateLimiter;
+		discoverLenses?: boolean;
 	},
 ): Promise<KagiSearchResult> {
 	const sessionPath = config?.sessionPath ?? DEFAULT_SESSION_PATH;
 	const rateLimiter = config?.rateLimiter;
+	const shouldDiscoverLenses = config?.discoverLenses ?? true;
 	if (rateLimiter) {
 		await rateLimiter.waitTurn();
 	}
 
 	let session = loadSession(sessionPath);
-	let result = await runSocketSearch(session, options);
+	let preparedOptions = await withDiscoveredLensMap(session, options, shouldDiscoverLenses);
+	let result = await runSocketSearch(session, preparedOptions);
 	if (result.status === 401 || result.status === 403) {
 		session = await captureSessionFromChrome(config?.browserUrl ?? DEFAULT_BROWSER_URL);
 		saveSession(session, sessionPath);
 		if (rateLimiter) {
 			await rateLimiter.waitTurn();
 		}
-		result = await runSocketSearch(session, options);
+		preparedOptions = await withDiscoveredLensMap(session, options, shouldDiscoverLenses);
+		result = await runSocketSearch(session, preparedOptions);
 	}
 
 	return result;
+}
+
+async function withDiscoveredLensMap(
+	session: KagiSessionState,
+	options: KagiSearchOptions,
+	shouldDiscoverLenses: boolean,
+): Promise<KagiSearchOptions> {
+	if (!shouldDiscoverLenses || !options.lens || isNumericLens(options.lens) || isAllLens(options.lens)) {
+		return options;
+	}
+
+	try {
+		const discovery = await discoverLenses(session, { query: options.query, includeFallback: true });
+		return {
+			...options,
+			lensMap: discovery.lensMap,
+		};
+	} catch {
+		return options;
+	}
 }
 
 async function runRulePost(
@@ -679,6 +836,201 @@ async function readResponseBody(
 	}
 	reader.releaseLock();
 	return content;
+}
+
+function resolveLensValue(
+	lens: string | undefined,
+	discoveredMap: Record<string, string | undefined> | undefined,
+): string | undefined {
+	if (!lens) {
+		return undefined;
+	}
+	const trimmed = lens.trim();
+	if (trimmed.length === 0) {
+		return undefined;
+	}
+	if (isNumericLens(trimmed)) {
+		return trimmed;
+	}
+
+	const normalized = normalizeLensKey(trimmed);
+	if (normalized === "all") {
+		return undefined;
+	}
+
+	const discoveredValue = getLensMapValue(discoveredMap, normalized);
+	if (typeof discoveredValue !== "undefined") {
+		return discoveredValue;
+	}
+
+	return getLensMapValue(BUILTIN_LENS_MAP, normalized);
+}
+
+function getLensMapValue(
+	lensMap: Record<string, string | undefined> | undefined,
+	normalizedLensKey: string,
+): string | undefined {
+	if (!lensMap) {
+		return undefined;
+	}
+	if (hasOwn(lensMap, normalizedLensKey)) {
+		return lensMap[normalizedLensKey];
+	}
+	const alias = LENS_KEY_ALIASES[normalizedLensKey];
+	if (alias && hasOwn(lensMap, alias)) {
+		return lensMap[alias];
+	}
+	return undefined;
+}
+
+function mergeLensDefinitionsWithFallback(dynamicLenses: KagiLensDefinition[]): KagiLensDefinition[] {
+	const byKey = new Map<string, KagiLensDefinition>();
+	for (const lens of dynamicLenses) {
+		upsertLensDefinition(byKey, lens);
+	}
+	for (const [key, value] of Object.entries(BUILTIN_LENS_MAP)) {
+		upsertLensDefinition(byKey, {
+			key,
+			label: prettifyLensLabel(key),
+			value,
+			source: "fallback",
+		});
+	}
+	return [...byKey.values()].sort(compareLensDefinitions);
+}
+
+function lensMapFromDefinitions(definitions: KagiLensDefinition[]): Record<string, string | undefined> {
+	const map: Record<string, string | undefined> = {};
+	for (const definition of definitions) {
+		map[definition.key] = definition.value;
+	}
+	return map;
+}
+
+function upsertLensDefinition(map: Map<string, KagiLensDefinition>, entry: KagiLensDefinition): void {
+	const normalizedKey = normalizeLensKey(entry.key);
+	if (!normalizedKey) {
+		return;
+	}
+	const current = map.get(normalizedKey);
+	if (!current) {
+		map.set(normalizedKey, {
+			key: normalizedKey,
+			label: normalizeLensLabel(entry.label || prettifyLensLabel(normalizedKey)),
+			value: entry.value,
+			source: entry.source,
+		});
+		return;
+	}
+
+	const nextValue = typeof current.value === "string" && current.value.length > 0 ? current.value : entry.value;
+	const nextLabel = current.label.length > 0 ? current.label : normalizeLensLabel(entry.label);
+	const nextSource = current.source === "dynamic" || entry.source === "dynamic" ? "dynamic" : "fallback";
+	map.set(normalizedKey, {
+		key: normalizedKey,
+		label: nextLabel.length > 0 ? nextLabel : prettifyLensLabel(normalizedKey),
+		value: nextValue,
+		source: nextSource,
+	});
+}
+
+function normalizeLensKey(raw: string): string {
+	const sanitized = raw
+		.trim()
+		.toLowerCase()
+		.replace(/&amp;/g, "and")
+		.replace(/[^a-z0-9]+/g, "_")
+		.replace(/^_+|_+$/g, "");
+	if (sanitized.length === 0) {
+		return "";
+	}
+	return LENS_KEY_ALIASES[sanitized] ?? sanitized;
+}
+
+function normalizeLensLabel(raw: string): string {
+	const trimmed = raw.trim();
+	if (trimmed.length === 0) {
+		return trimmed;
+	}
+	return trimmed.replace(/\s+/g, " ");
+}
+
+function cleanHtmlText(raw: string): string {
+	return raw
+		.replace(/<script[\s\S]*?<\/script>/gi, " ")
+		.replace(/<style[\s\S]*?<\/style>/gi, " ")
+		.replace(/<[^>]+>/g, " ")
+		.replace(/&nbsp;/gi, " ")
+		.replace(/&amp;/gi, "&")
+		.replace(/&quot;/gi, '"')
+		.replace(/&#39;/gi, "'")
+		.replace(/&lt;/gi, "<")
+		.replace(/&gt;/gi, ">")
+		.replace(/\s+/g, " ")
+		.trim();
+}
+
+function prettifyLensLabel(key: string): string {
+	const normalized = normalizeLensKey(key);
+	if (normalized === "news_360") {
+		return "News 360";
+	}
+	if (normalized === "small_web") {
+		return "Small Web";
+	}
+	return normalized
+		.split("_")
+		.filter((chunk) => chunk.length > 0)
+		.map((chunk) => chunk.charAt(0).toUpperCase() + chunk.slice(1))
+		.join(" ");
+}
+
+function compareLensDefinitions(left: KagiLensDefinition, right: KagiLensDefinition): number {
+	const leftValue = typeof left.value === "string" ? Number(left.value) : Number.NaN;
+	const rightValue = typeof right.value === "string" ? Number(right.value) : Number.NaN;
+	const leftRank = Number.isFinite(leftValue) ? leftValue : Number.POSITIVE_INFINITY;
+	const rightRank = Number.isFinite(rightValue) ? rightValue : Number.POSITIVE_INFINITY;
+	if (leftRank !== rightRank) {
+		return leftRank - rightRank;
+	}
+	return left.key.localeCompare(right.key);
+}
+
+function isAllLabel(label: string): boolean {
+	const normalized = normalizeLensKey(label);
+	return normalized === "all";
+}
+
+function isAllLens(lens: string): boolean {
+	return normalizeLensKey(lens) === "all";
+}
+
+function isNumericLens(lens: string): boolean {
+	return /^\d+$/.test(lens.trim());
+}
+
+function findAttributeValue(attributes: string, key: string): string | null {
+	const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	const quotedRegex = new RegExp(`${escapedKey}\\s*=\\s*([\"'])(.*?)\\1`, "i");
+	const quotedMatch = attributes.match(quotedRegex);
+	if (quotedMatch?.[2]) {
+		return quotedMatch[2];
+	}
+	const bareRegex = new RegExp(`${escapedKey}\\s*=\\s*([^\\s>]+)`, "i");
+	const bareMatch = attributes.match(bareRegex);
+	return bareMatch?.[1] ?? null;
+}
+
+function safeUrl(raw: string, base: string): URL | null {
+	try {
+		return new URL(raw, base);
+	} catch {
+		return null;
+	}
+}
+
+function hasOwn(record: Record<string, string | undefined>, key: string): boolean {
+	return Object.prototype.hasOwnProperty.call(record, key);
 }
 
 function headersToRecord(headers: Headers): Record<string, string> {

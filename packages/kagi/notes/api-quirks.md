@@ -1,6 +1,6 @@
 # Kagi API quirks / reverse-engineering notes
 
-_Last updated: 2026-02-20_
+_Last updated: 2026-02-21_
 
 ## 1) Search streaming path
 
@@ -13,7 +13,7 @@ _Last updated: 2026-02-20_
 
 ### Optional params observed
 - `r` region (e.g. `us`, `au`)
-- `l` lens (`0` academic, `1` forums, `2` programming, `3` pdfs, `4` news_360, `5` small_web)
+- `l` lens ID (discovered dynamically per account/session; observed defaults: `0` academic, `1` forums, `2` programming, `3` pdfs, `4` news_360, `5` small_web)
 - `dr` date range (`1` day, `2` week, `3` month, `4` year)
 - `from_date`, `to_date`
 - `order` (`2|3|4`), `dir` (`asc|desc`)
@@ -25,6 +25,13 @@ _Last updated: 2026-02-20_
 - Response body is SSE-like chunks (`hi`, then `id:`, `data:` blocks)
 - Notable tags inside data arrays: `top_content`, `top-content-unique`, `search.info`, `search`
 - Server refreshes `kagi_session` cookie in many responses
+
+### Lens discovery strategy (2026-02-21)
+- Dynamic discovery now implemented in client (`discoverLenses`):
+  - `GET /search` with authenticated session headers
+  - Parse lens candidates from search-page anchors (`/search?...&l=<id>`) and embedded JSON descriptors (`slug` + `id` pairs)
+- Returned lens map is merged with observed fallback defaults so existing names continue to work if discovery yields partial data.
+- Search CLI now supports `lenses:list` and `search --discover-lenses 1` (enabled by default).
 
 ---
 
@@ -49,6 +56,7 @@ _Last updated: 2026-02-20_
 ### Behavior
 - Returns `302` with `Location: /search?...`
 - Example produced query expansion: `intitle:site:myanimelist.net filetype:pdf&r=us&dr=3`
+- Current client/test coverage now validates full known payload keys and default-empty behavior for omitted fields (including `terms_appearing=any` => empty form value).
 
 ---
 
@@ -135,10 +143,9 @@ High-level findings:
 
 ## Open follow-up items
 
-1. **Lens mapping should be dynamic**
-   - Current client uses observed lens IDs from this session.
-   - Not complete for accounts with custom/extra lenses; dynamic discovery is pending.
+1. **Lens discovery robustness**
+   - Dynamic discovery is live, but parser heuristics should be re-verified when Kagi ships major search-page markup changes.
 
-2. **Advanced-search option matrix not fully exhausted**
-   - Payload shape is reconstructed and core fields are tested.
-   - Full combinatorial validation across all filters/regions/file-types is still pending.
+2. **Advanced-search combinatorial validation**
+   - Known fields are covered in unit tests.
+   - End-to-end matrix sweeps across all regions/file-types/date combinations are still pending.

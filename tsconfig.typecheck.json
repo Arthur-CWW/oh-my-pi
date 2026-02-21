@@ -3,6 +3,6 @@
 	"compilerOptions": {
 		"types": ["node", "bun-types"]
 	},
-	"include": ["src/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts"],
+	"include": ["src/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts", "packages/kagi/src/**/*.ts", "packages/kagi/scripts/**/*.ts"],
 	"exclude": ["node_modules", "test-output", "src/old/index.ts"]
 }

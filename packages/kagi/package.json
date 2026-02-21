@@ -1,0 +1,14 @@
+{
+	"name": "@pi-web-access/kagi-lab",
+	"private": true,
+	"version": "0.0.0",
+	"description": "Unofficial Kagi reverse-engineering lab workspace",
+	"type": "module",
+	"scripts": {
+		"help": "bun scripts/kagi-lab.ts help",
+		"session:refresh": "bun scripts/kagi-lab.ts session:refresh",
+		"lenses:list": "bun scripts/kagi-lab.ts lenses:list",
+		"search": "bun scripts/kagi-lab.ts search",
+		"test": "bun test ../../tests/kagi-client.test.ts ../../tests/kagi-log.test.ts"
+	}
+}

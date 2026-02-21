@@ -11,6 +11,7 @@ This folder is an isolated Kagi provider workspace.
   - domain/video personalization rule mutations (`/esr/*`)
 - `src/kagi-log.ts` — run persistence + query/filter utilities
 - `scripts/kagi-lab.ts` — CLI for fast experimentation
+- `package.json` — local package metadata + convenience scripts for this workspace
 - `vendor/browser_extensions/` — cloned `kagisearch/browser_extensions`
 - `output/` — network captures, a11y snapshots, run artifacts
 - `notes/api-quirks.md` — running reverse-engineering findings
@@ -23,9 +24,11 @@ This folder is an isolated Kagi provider workspace.
    - `skills/pi-skills/browser-tools/browser-start.js --profile`
 2. Refresh local session cache:
    - `bun packages/kagi/scripts/kagi-lab.ts session:refresh`
-3. Run a search capture:
-   - `bun packages/kagi/scripts/kagi-lab.ts search --query "c++ strict aliasing UB examples" --lens programming --date-range 3`
-4. List stored runs:
+3. Discover available lenses for your current account/session:
+   - `bun packages/kagi/scripts/kagi-lab.ts lenses:list --query "strict aliasing"`
+4. Run a search capture:
+   - `bun packages/kagi/scripts/kagi-lab.ts search --query "c++ strict aliasing UB examples" --lens programming --discover-lenses 1 --date-range 3`
+5. List stored runs:
    - `bun packages/kagi/scripts/kagi-lab.ts runs:list --contains "c++"`
 
 ---
@@ -42,6 +45,12 @@ bun packages/kagi/scripts/kagi-lab.ts search \
   --region us \
   --out-dir packages/kagi/output/runs \
   --live-out packages/kagi/output/runs/live-cpp.sse.txt
+```
+
+### Lens discovery (dynamic)
+
+```bash
+bun packages/kagi/scripts/kagi-lab.ts lenses:list --query "c++ strict aliasing" --include-fallback 1
 ```
 
 ### Advanced-search redirect shape
@@ -100,3 +109,4 @@ bun packages/kagi/scripts/query-network-captures.ts --contains /search/advanced 
 - Treat this as unofficial/reverse-engineered behavior.
 - Be polite: rate limit your requests (CLI defaults include jitter).
 - Session data is sensitive; `session.json` is written with mode `0600`.
+- You can run package-local scripts directly via `packages/kagi/package.json` (for example: `bun --cwd packages/kagi run help`).

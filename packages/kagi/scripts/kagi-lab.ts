@@ -5,6 +5,7 @@ import { dirname, resolve } from "node:path";
 import puppeteer from "puppeteer-core";
 import {
 	captureSessionFromChrome,
+	discoverLenses,
 	loadSession,
 	parseVideoRuleTargetFromDomain,
 	runAdvancedSearchRedirect,
@@ -37,6 +38,9 @@ switch (command) {
 		break;
 	case "search":
 		await cmdSearch(parsed);
+		break;
+	case "lenses:list":
+		await cmdLensesList(parsed);
 		break;
 	case "advanced:redirect":
 		await cmdAdvancedRedirect(parsed);
@@ -98,7 +102,7 @@ async function cmdSearch(cli: ParsedCli): Promise<void> {
 	const searchOptions: KagiSearchOptions = {
 		query,
 		region: flagValue(cli, "region") ?? undefined,
-		lens: (flagValue(cli, "lens") as KagiSearchOptions["lens"]) ?? undefined,
+		lens: flagValue(cli, "lens") ?? undefined,
 		dateRange: asDateRange(flagValue(cli, "date-range")),
 		fromDate: flagValue(cli, "from-date") ?? undefined,
 		toDate: flagValue(cli, "to-date") ?? undefined,
@@ -110,11 +114,13 @@ async function cmdSearch(cli: ParsedCli): Promise<void> {
 		maxResponseBytes,
 		onSseChunk: (chunk) => appendFileSync(resolve(liveOutPath), chunk),
 	};
+	const discoverLensesForSearch = asOptionalBool(flagValue(cli, "discover-lenses")) ?? true;
 
 	const result = await runSocketSearchWithAutoRefresh(searchOptions, {
 		sessionPath,
 		browserUrl,
 		rateLimiter,
+		discoverLenses: discoverLensesForSearch,
 	});
 	const record = saveSearchRun(result, {
 		query,
@@ -125,6 +131,8 @@ async function cmdSearch(cli: ParsedCli): Promise<void> {
 	const summary = {
 		command: "search",
 		query,
+		lens: searchOptions.lens ?? "all",
+		discoverLenses: discoverLensesForSearch,
 		status: result.status,
 		ok: result.ok,
 		requestUrl: result.requestUrl,
@@ -137,6 +145,29 @@ async function cmdSearch(cli: ParsedCli): Promise<void> {
 
 	const latestPath = writeJsonSnapshot(`${outputDir}/latest-summary.json`, summary);
 	console.log(JSON.stringify({ ...summary, latestPath }, null, 2));
+}
+
+async function cmdLensesList(cli: ParsedCli): Promise<void> {
+	const session = loadSession(flagValue(cli, "session") ?? DEFAULT_SESSION_PATH);
+	const includeFallback = asOptionalBool(flagValue(cli, "include-fallback")) ?? true;
+	const query = flagValue(cli, "query") ?? "lens discovery";
+	const result = await discoverLenses(session, { query, includeFallback });
+	console.log(
+		JSON.stringify(
+			{
+				command: "lenses:list",
+				query,
+				includeFallback,
+				status: result.status,
+				ok: result.ok,
+				requestUrl: result.requestUrl,
+				count: result.lenses.length,
+				lenses: result.lenses,
+			},
+			null,
+			2,
+		),
+	);
 }
 
 async function cmdAdvancedRedirect(cli: ParsedCli): Promise<void> {
@@ -424,6 +455,7 @@ function printHelp(): void {
 Commands:
   session:refresh      Refresh local session from Chrome remote-debugging profile
   search               Run /socket/search with request mimic + local event capture
+  lenses:list          Discover available lenses from your current account/session
   advanced:redirect    Submit /search/advanced payload and return redirect URL
   rules:domain:set     Set domain rule (kind -2|-1|0|1|2)
   rules:domain:bulk    Bulk set domains using /esr/user_rules/bulk
@@ -436,7 +468,8 @@ Commands:
 
 Examples:
   bun packages/kagi/scripts/kagi-lab.ts session:refresh
-  bun packages/kagi/scripts/kagi-lab.ts search --query "c++ strict aliasing examples" --lens programming --date-range 3 --out-dir packages/kagi/output/runs --param personalized=0
+  bun packages/kagi/scripts/kagi-lab.ts search --query "c++ strict aliasing examples" --lens programming --discover-lenses 1 --date-range 3 --out-dir packages/kagi/output/runs --param personalized=0
+  bun packages/kagi/scripts/kagi-lab.ts lenses:list --query "c++ UB" --include-fallback 1
   bun packages/kagi/scripts/kagi-lab.ts advanced:redirect --site myanimelist.net --terms-appearing title --file-type pdf --last-update 3 --region us
   bun packages/kagi/scripts/kagi-lab.ts rules:domain:set --domain github.com --kind 1
   bun packages/kagi/scripts/kagi-lab.ts rules:domain:bulk --file domains.txt --kind -2
