@@ -51,7 +51,16 @@ _Last updated: 2026-02-21_
 - `to_date`
 - `site`
 - `terms_appearing` (`title`/`url`/empty)
-- `file_type` (`pdf`, etc)
+- `file_type`
+
+### Option values observed via Puppeteer (2026-02-21)
+- Advanced form opens from search page modal toggle (`#menu-advanced-search-toggle`) and posts to `/search/advanced`.
+- `region` is a large radio group (ISO-like country/locale codes + `no_region`), e.g. `us`, `au`, `be`, `be_fr`, `ca`, `ca_fr`, `es`, `es_ca`.
+- `last_update` options: `"" | "1" | "2" | "3" | "4"`.
+- `terms_appearing` options: `"" | "url" | "title"`.
+- `file_type` options include:
+  - `""`, `pdf`, `ps`, `csv`, `epub`, `gearth`, `gps`, `hancom`, `html`, `excel`, `powerpoint`, `word`,
+  - `open_presentation`, `open_spreadsheet`, `open_text`, `rtf`, `svg`, `latex`, `text`, `xml`.
 
 ### Behavior
 - Returns `302` with `Location: /search?...`

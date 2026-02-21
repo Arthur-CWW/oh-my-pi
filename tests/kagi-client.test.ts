@@ -99,6 +99,20 @@ describe("kagi client helpers", () => {
 		expect(params.get("file_type")).toBe("");
 	});
 
+	it("passes through extended advanced options discovered in UI", () => {
+		const params = buildAdvancedSearchPostBody({
+			region: "be_fr",
+			lastUpdate: 4,
+			fileType: "open_spreadsheet",
+			termsAppearing: "url",
+		});
+
+		expect(params.get("region")).toBe("be_fr");
+		expect(params.get("last_update")).toBe("4");
+		expect(params.get("file_type")).toBe("open_spreadsheet");
+		expect(params.get("terms_appearing")).toBe("url");
+	});
+
 	it("extracts dynamic lenses from search HTML anchors", () => {
 		const html = `
 			<div>

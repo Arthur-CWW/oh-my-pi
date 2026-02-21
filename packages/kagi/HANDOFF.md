@@ -18,6 +18,7 @@ Date: 2026-02-21
   - full known advanced-search form payload mapping
   - default-empty behavior for omitted fields
   - `terms_appearing=any` normalization to empty form value
+  - extended UI-discovered options (e.g. `region=be_fr`, `file_type=open_spreadsheet`)
 - Added lens-specific tests:
   - dynamic lens extraction from HTML anchors
   - dynamic lens extraction from embedded JSON
