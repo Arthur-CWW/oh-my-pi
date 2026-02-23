@@ -7,7 +7,8 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { makeEvent } from "./core/Observability.js";
-import { type FullSearchOptions, search as effectSearch } from "./gemini-search.js";
+import { type FullSearchOptions, search as geminiSearch } from "./gemini-search.js";
+import { kagiSearchEffect, type SearchSuccess } from "./kagi-search.js";
 import { readChromeCookiesEffect } from "./chrome-cookies.js";
 import { makeSqliteEventStore } from "./observability/EventStore.js";
 
@@ -18,10 +19,11 @@ interface EventStoreSmokeParams {
 
 interface WebSearchParams {
 	readonly query?: string;
-	readonly provider?: "auto" | "perplexity" | "gemini";
+	readonly provider?: "auto" | "kagi" | "gemini" | "perplexity";
 	readonly numResults?: number;
 	readonly recencyFilter?: "day" | "week" | "month" | "year";
 	readonly domainFilter?: string[];
+	readonly lens?: string;
 }
 
 interface CookiesParams {
@@ -33,21 +35,46 @@ interface RegisterEffectToolsOptions {
 }
 
 export interface EffectExtensionDeps {
-	readonly search: (query: string, options?: FullSearchOptions) => Promise<{
-		answer: string;
-		results: Array<{ title: string; url: string; snippet: string }>;
-	}>;
+	readonly search: (query: string, options?: FullSearchOptions) => Promise<SearchSuccess>;
 	readonly readCookies: typeof readChromeCookiesEffect;
 }
 
+async function searchWithFallback(
+	query: string,
+	options?: FullSearchOptions,
+): Promise<SearchSuccess> {
+	const preferredProvider = options?.provider ?? "auto";
+	
+	// Try Kagi first if auto or explicitly requested
+	if (preferredProvider === "auto" || preferredProvider === "kagi") {
+		try {
+			const kagiResult = await Effect.runPromise(
+				kagiSearchEffect(query)
+			);
+			return kagiResult;
+		} catch (kagiErr) {
+			// If Kagi fails and user explicitly wanted Kagi, don't fall back
+			if (preferredProvider === "kagi") {
+				throw kagiErr;
+			}
+			// Otherwise fall through to Gemini
+			console.error(`Kagi search failed, falling back to Gemini: ${kagiErr}`);
+		}
+	}
+	
+	// Fall back to Gemini
+	const geminiResult = await geminiSearch(query, options);
+	return geminiResult;
+}
+
 const defaultDeps: EffectExtensionDeps = {
-	search: effectSearch,
+	search: searchWithFallback,
 	readCookies: readChromeCookiesEffect,
 };
 
 const LEGACY_ENTRY_CANDIDATES = ["../old/index.js", "../old/index.ts"] as const;
 
-function formatSearchSummary(results: Array<{ title: string; url: string }>, answer: string): string {
+function formatSearchSummary(results: ReadonlyArray<{ title: string; url: string }>, answer: string): string {
 	const body = answer ? `${answer}\n\n---\n\n**Sources:**\n` : "";
 	return body + results.map((result, index) => `${index + 1}. ${result.title}\n   ${result.url}`).join("\n\n");
 }
@@ -127,15 +154,16 @@ function registerEventStoreSmokeTool(pi: ExtensionAPI): void {
 	});
 }
 
-function registerEffectWebSearchTool(pi: ExtensionAPI, deps: EffectExtensionDeps): void {
+function registerWebSearchTool(pi: ExtensionAPI, deps: EffectExtensionDeps): void {
 	pi.registerTool({
 		name: "web_search",
-		label: "Web Search (Effect)",
+		label: "Web Search",
 		description:
-			"Effect migration web search tool (Gemini/Perplexity routing). Supports Gemini API and Gemini Web cookie-auth fallback.",
+			"Web search tool using Kagi (default) with Gemini fallback. Supports lenses for specialized searches.",
 		parameters: Type.Object({
 			query: Type.String({ description: "Search query" }),
-			provider: Type.Optional(StringEnum(["auto", "perplexity", "gemini"])),
+			provider: Type.Optional(StringEnum(["auto", "kagi", "gemini", "perplexity"])),
+			lens: Type.Optional(Type.String()),
 			numResults: Type.Optional(Type.Number({ minimum: 1, maximum: 20 })),
 			recencyFilter: Type.Optional(StringEnum(["day", "week", "month", "year"])),
 			domainFilter: Type.Optional(Type.Array(Type.String())),
@@ -145,7 +173,7 @@ function registerEffectWebSearchTool(pi: ExtensionAPI, deps: EffectExtensionDeps
 			if (!params.query?.trim()) {
 				return {
 					content: [{ type: "text", text: "Error: No query provided." }],
-					details: { error: "missing-query" },
+					details: { error: "missing-query", provider: undefined, resultCount: undefined },
 				};
 			}
 
@@ -155,18 +183,21 @@ function registerEffectWebSearchTool(pi: ExtensionAPI, deps: EffectExtensionDeps
 					numResults: params.numResults,
 					recencyFilter: params.recencyFilter,
 					domainFilter: params.domainFilter,
+					lens: params.lens,
 				});
 				return {
 					content: [{ type: "text", text: formatSearchSummary(response.results, response.answer) }],
 					details: {
-						error: null,
+						error: null as string | null,
+						provider: "kagi" as string | undefined,
+						resultCount: response.results.length as number | undefined,
 					},
 				};
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
 				return {
 					content: [{ type: "text", text: `Error: ${message}` }],
-					details: { error: message },
+					details: { error: message, provider: undefined, resultCount: undefined },
 				};
 			}
 		},
@@ -216,7 +247,7 @@ export function registerEffectTools(
 	registerEventStoreSmokeTool(pi);
 	registerChromeCookiesTool(pi, deps);
 	if (options.includeWebSearch !== false) {
-		registerEffectWebSearchTool(pi, deps);
+		registerWebSearchTool(pi, deps);
 	}
 }
 

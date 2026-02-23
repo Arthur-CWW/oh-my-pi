@@ -9,10 +9,11 @@ import {
 	type SearchResult,
 } from "../old/perplexity.js";
 
-export type SearchProvider = "auto" | "perplexity" | "gemini";
+export type SearchProvider = "auto" | "perplexity" | "gemini" | "kagi";
 
 export interface FullSearchOptions extends SearchOptions {
 	readonly provider?: SearchProvider;
+	readonly lens?: string;
 }
 
 export interface GeminiSearchDeps {
