@@ -18,7 +18,7 @@ https://github.com/user-attachments/assets/cac6a17a-1eeb-4dde-9818-cdf85d8ea98f
 
 **Video Understanding** — Point it at a YouTube video or local screen recording and ask questions about what's on screen. Full transcripts, visual descriptions, and frame extraction at exact timestamps.
 
-**Smart Fallbacks** — Every capability has a fallback chain. Search tries Perplexity, then Gemini API, then Gemini Web. YouTube tries Gemini Web, then API, then Perplexity. Blocked pages retry through Jina Reader and Gemini extraction. Something always works.
+**Smart Fallbacks** — Every capability has a fallback chain. Search now defaults to Kagi (session-based), then falls back to Gemini. YouTube tries Gemini Web, then API, then Perplexity. Blocked pages retry through Jina Reader and Gemini extraction. Something always works.
 
 **GitHub Cloning** — GitHub URLs are cloned locally instead of scraped. The agent gets real file contents and a local path to explore, not rendered HTML.
 
@@ -47,7 +47,7 @@ If you're not signed into Chrome, or prefer a different provider, add API keys t
 }
 ```
 
-You can configure one or both. In `auto` mode (default), `web_search` tries Perplexity first, then Gemini API, then Gemini Web.
+You can configure one or both. In `auto` mode (default), `web_search` tries Kagi first, then Gemini (API/Web fallback chain).
 
 Optional dependencies for video frame extraction:
 
@@ -84,6 +84,7 @@ fetch_content({ url: "/path/to/recording.mp4", prompt: "What error appears on sc
 The core modules can also run directly from the terminal with Bun:
 
 ```bash
+bun scripts/kagi-search-cli.ts "effect ts" --lens programming --json
 bun src/effect/gemini-search.ts --query "effect ts" --provider auto
 bun src/effect/chrome-cookies.ts --names __Secure-1PSID,__Secure-1PSIDTS
 bun src/old/extract.ts https://example.com/article --json
@@ -95,27 +96,24 @@ Use `--help` on each file for available flags.
 
 ### web_search
 
-Search the web via Perplexity AI or Gemini. Returns a synthesized answer with source citations.
+Search the web with Kagi-first routing (default), with Gemini fallback. Returns a synthesized answer plus source links.
 
 ```typescript
 web_search({ query: "rust async programming" })
-web_search({ queries: ["query 1", "query 2"] })
-web_search({ query: "latest news", numResults: 10, recencyFilter: "week" })
+web_search({ query: "latest news", recencyFilter: "week" })
 web_search({ query: "...", domainFilter: ["github.com"] })
+web_search({ query: "...", provider: "kagi", lens: "programming" })
 web_search({ query: "...", provider: "gemini" })
-web_search({ query: "...", includeContent: true })
-web_search({ queries: ["query 1", "query 2"], curate: true })
 ```
 
 | Parameter | Description |
 |-----------|-------------|
-| `query` / `queries` | Single query or batch of queries |
-| `numResults` | Results per query (default: 5, max: 20) |
+| `query` | Single query string |
+| `provider` | `auto` (default), `kagi`, `gemini`, or `perplexity` |
+| `lens` | Kagi lens key (e.g. `programming`, `academic`, `news_360`) |
+| `numResults` | Requested result count (1-20) |
 | `recencyFilter` | `day`, `week`, `month`, or `year` |
-| `domainFilter` | Limit to domains (prefix with `-` to exclude) |
-| `provider` | `auto` (default), `perplexity`, or `gemini` |
-| `includeContent` | Fetch full page content from sources in background |
-| `curate` | Hold results for browser review (default: true for multi-query). Press Ctrl+Shift+S to open browser UI, or wait for countdown to auto-condense and send. Set to false to skip both curation and condensation. |
+| `domainFilter` | Limit query to domains (translated to `site:` filters for Kagi path) |
 
 ### fetch_content
 
@@ -270,7 +268,7 @@ All config lives in `~/.pi/web-search.json`. Every field is optional.
 }
 ```
 
-`GEMINI_API_KEY` and `PERPLEXITY_API_KEY` env vars take precedence over config file values. `provider` sets the default search provider: `"perplexity"` or `"gemini"`. This is also updated automatically when you change the provider in the curator UI. `curateWindow` controls how many seconds multi-query searches wait before auto-sending results (default: 10). During the countdown, press Ctrl+Shift+S to open the browser curator. Set to 0 to always send immediately (Ctrl+Shift+S still works during the search itself).
+`GEMINI_API_KEY` and `PERPLEXITY_API_KEY` env vars take precedence over config file values. `provider` controls non-Kagi fallback preference (`"perplexity"` or `"gemini"`) when Kagi is unavailable. `curateWindow` controls how many seconds multi-query searches wait before auto-sending results (default: 10). During the countdown, press Ctrl+Shift+S to open the browser curator. Set to 0 to always send immediately (Ctrl+Shift+S still works during the search itself).
 
 ### Shortcuts
 

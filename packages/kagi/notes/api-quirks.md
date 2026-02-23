@@ -23,7 +23,11 @@ _Last updated: 2026-02-23_
 ### Transport notes
 - Request `Accept: text/event-stream`
 - Response body is SSE-like chunks (`hi`, then `id:`, `data:` blocks)
-- Notable tags inside data arrays: `top_content`, `top-content-unique`, `search.info`, `search`
+- `data:` payloads are usually JSON arrays of `{ tag, payload, ... }` objects (not a single object).
+- Notable tags inside data arrays: `top_content`, `top-content-unique`, `search.info`, `search`, `interesting-finds`, `domain_info`.
+- `search` tag payload is itself a JSON string (typically `{"content":"<html...>"}`) and contains rendered SERP HTML.
+- `top-content-unique` payload is a compact HTML status line (e.g. `24 relevant results in 1.55s`).
+- `error` tag payload returns full HTML fallback UI (e.g. “This lens may be too limited...”).
 - Server refreshes `kagi_session` cookie in many responses
 
 ### Lens discovery strategy (2026-02-21)
@@ -82,9 +86,11 @@ _Last updated: 2026-02-23_
 - Captured browser submit with `last_update=4` and attempted date inputs produced:
   - `from_date=`
   - `to_date=`
-  in actual POST body (see capture artifact above).
+  in actual POST body (older capture, see artifact history).
+- On Linux headless Chrome, keyboard-typing date inputs can mangle values (`2024-01-01` -> `40101-02-02`).
+- Probe script now sets date fields with direct DOM value assignment (`input.value=...`) to avoid locale/keyboard corruption.
+- Even with correct `from_date` / `to_date` present in POST body, redirect still tends to prioritize `dr=<last_update>` and omit explicit date bounds from final URL.
 - Direct POST replay with only date bounds (no `last_update`) preserves date params in redirect URL (server accepts them).
-- Direct POST replay with `last_update` set may prioritize `dr` in redirect and omit explicit date bounds from redirected query.
 
 ---
 

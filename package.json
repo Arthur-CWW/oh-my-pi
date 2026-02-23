@@ -38,6 +38,7 @@
 		"kagi:help": "bun packages/kagi/scripts/kagi-lab.ts help",
 		"kagi:session:refresh": "bun packages/kagi/scripts/kagi-lab.ts session:refresh",
 		"kagi:lenses:list": "bun packages/kagi/scripts/kagi-lab.ts lenses:list",
+		"kagi:search:effect": "bun scripts/kagi-search-cli.ts",
 		"kagi:runs:list": "bun packages/kagi/scripts/kagi-lab.ts runs:list",
 		"kagi:network:query": "bun packages/kagi/scripts/query-network-captures.ts",
 		"kagi:advanced:probe": "bun packages/kagi/scripts/probe-advanced-search.ts",

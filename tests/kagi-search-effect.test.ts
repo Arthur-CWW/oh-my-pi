@@ -2,9 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { Effect } from "effect";
 import {
 	kagiSearchEffect,
-	KagiSearchError,
 	parseKagiSearchCliArgs,
-	runKagiSearchCli,
 	type KagiSearchDeps,
 } from "../src/effect/kagi-search.js";
 
@@ -61,6 +59,118 @@ describe("kagi search effect", () => {
 			url: "https://example.com",
 			snippet: "Description",
 		});
+	});
+
+	it("extracts answer and results from Kagi tagged SSE payload arrays", async () => {
+		const mockSearchPayload = JSON.stringify({
+			content:
+				'<div class="_0_SRI search-result"><div class="_0_TITLE __sri-title"><h3><a class="__sri_title_link" href="https://bun.com/">Bun Runtime</a></h3></div><div class="_0_DESC __sri-desc">Fast JavaScript runtime.</div></div>',
+		});
+		const mockDeps: KagiSearchDeps = {
+			runSearch: async () => ({
+				capturedAt: new Date().toISOString(),
+				requestUrl: "https://kagi.com/socket/search?q=bun+runtime",
+				referer: "https://kagi.com/search?q=bun+runtime",
+				status: 200,
+				ok: true,
+				headersSent: {},
+				responseHeaders: {},
+				rawSse: "hi",
+				parsedEvents: [
+					{
+						id: "0",
+						dataRaw: "[]",
+						dataJson: [{ tag: "top-content-unique", payload: "<i>24</i> relevant results in <i>1.55s</i>." }],
+					},
+					{
+						id: "1",
+						dataRaw: "[]",
+						dataJson: [{ tag: "search", payload: mockSearchPayload }],
+					},
+				],
+			}),
+		};
+
+		const result = await Effect.runPromise(kagiSearchEffect("bun runtime", mockDeps));
+		expect(result.answer).toBe("24 relevant results in 1.55s.");
+		expect(result.results).toEqual([
+			{
+				title: "Bun Runtime",
+				url: "https://bun.com/",
+				snippet: "Fast JavaScript runtime.",
+			},
+		]);
+	});
+
+	it("extracts results when search payload is already parsed object", async () => {
+		const mockDeps: KagiSearchDeps = {
+			runSearch: async () => ({
+				capturedAt: new Date().toISOString(),
+				requestUrl: "https://kagi.com/socket/search?q=test",
+				referer: "https://kagi.com/search",
+				status: 200,
+				ok: true,
+				headersSent: {},
+				responseHeaders: {},
+				rawSse: "",
+				parsedEvents: [
+					{
+						id: "1",
+						dataRaw: "",
+						dataJson: [
+							{
+								tag: "search",
+								payload: {
+									content:
+										'<div class="_0_SRI search-result"><div class="_0_TITLE __sri-title"><h3><a class="__sri_title_link" href="https://example.com">Example</a></h3></div><div class="_0_DESC __sri-desc">Snippet text</div></div>',
+								},
+							},
+						],
+					},
+				],
+			}),
+		};
+
+		const result = await Effect.runPromise(kagiSearchEffect("example", mockDeps));
+		expect(result.results).toEqual([
+			{ title: "Example", url: "https://example.com", snippet: "Snippet text" },
+		]);
+	});
+
+	it("maps lens/recency/domain options into Kagi search options", async () => {
+		let capturedQuery = "";
+		let capturedLens: string | undefined;
+		let capturedDateRange: number | undefined;
+		const mockDeps: KagiSearchDeps = {
+			runSearch: async (options) => {
+				capturedQuery = options.query;
+				capturedLens = options.lens;
+				capturedDateRange = options.dateRange;
+				return {
+					capturedAt: new Date().toISOString(),
+					requestUrl: "https://kagi.com/socket/search?q=test",
+					referer: "https://kagi.com/search",
+					status: 200,
+					ok: true,
+					headersSent: {},
+					responseHeaders: {},
+					rawSse: 'id: 1\ndata: {"content": "ok"}',
+					parsedEvents: [{ id: "1", dataRaw: "", dataJson: { content: "ok" } }],
+				};
+			},
+		};
+
+		await Effect.runPromise(
+			kagiSearchEffect("effect ts", mockDeps, {
+				lens: "programming",
+				recencyFilter: "month",
+				domainFilter: ["bun.com", "effect.website"],
+			}),
+		);
+
+		expect(capturedLens).toBe("programming");
+		expect(capturedDateRange).toBe(3);
+		expect(capturedQuery).toBe("effect ts (site:bun.com OR site:effect.website)");
 	});
 
 	it("returns error for failed search", async () => {

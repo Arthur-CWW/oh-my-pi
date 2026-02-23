@@ -8,6 +8,7 @@ import effectEntry, { registerEffectTools, type EffectExtensionDeps } from "../s
 
 interface ToolLike {
 	readonly name?: unknown;
+	readonly description?: unknown;
 	readonly execute?: (
 		toolCallId: string,
 		params: Record<string, unknown>,
@@ -93,6 +94,35 @@ describe("effect shadow entry", () => {
 		expect(result.content[0]?.text).toContain("https://bun.com");
 	});
 
+	it("forwards kagi-specific provider and lens options", async () => {
+		let capturedProvider: string | undefined;
+		let capturedLens: string | undefined;
+		const tools = registerWith({
+			search: async (_query, options) => {
+				capturedProvider = options?.provider;
+				capturedLens = options?.lens;
+				return {
+					answer: "ok",
+					results: [{ title: "Result", url: "https://example.com", snippet: "" }],
+				};
+			},
+			readCookies: fakeDeps.readCookies,
+		});
+		const tool = tools.get("web_search");
+		expect(typeof tool?.execute).toBe("function");
+		if (typeof tool?.execute !== "function") throw new Error("missing execute");
+
+		const result = await tool.execute("call-2b", {
+			query: "effect",
+			provider: "kagi",
+			lens: "programming",
+		});
+
+		expect(result.details?.error).toBe(null);
+		expect(capturedProvider).toBe("kagi");
+		expect(capturedLens).toBe("programming");
+	});
+
 	it("runs chrome_cookies via effect deps", async () => {
 		const tools = registerWith(fakeDeps);
 		const tool = tools.get("chrome_cookies");
@@ -113,6 +143,7 @@ describe("effect production cutover entry", () => {
 		expect(tools.has("get_search_content")).toBe(true);
 		expect(tools.has("chrome_cookies")).toBe(true);
 		expect(tools.has("effect_event_store_smoke")).toBe(true);
+		expect(String(tools.get("web_search")?.description ?? "")).toContain("Kagi");
 	});
 
 	it("package entrypoint points to effect index", () => {

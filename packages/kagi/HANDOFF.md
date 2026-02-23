@@ -49,7 +49,19 @@ Date: 2026-02-23
   - redirect/response metadata
 - Latest artifact:
   - `packages/kagi/output/network/capture-advanced-submit-filled.json`
-- Key finding documented: when `last_update` is set, date bounds can be omitted in submitted form/redirect; direct POSTs without `last_update` preserve `from_date`/`to_date`.
+- Key findings documented:
+  - when `last_update` is set, date bounds can be omitted in submitted form/redirect
+  - direct POSTs without `last_update` preserve `from_date`/`to_date`
+  - Linux headless keyboard entry can corrupt date input values; probe now uses direct DOM value assignment for dates.
+
+### 7) Effect integration: Kagi-first search provider
+- Added `src/effect/kagi-search.ts` wrapper for Kagi search with:
+  - lazy import (jiti-compatible extension loading)
+  - SSE-tag parsing for real Kagi payloads (`top-content-unique`, `search`, `error`)
+  - HTML extraction for titles/URLs/snippets from `search.payload.content`
+  - option mapping (`lens`, `recencyFilter -> dr`, `domainFilter -> site:` clauses)
+- Updated `src/effect/index.ts` so `web_search` now prefers Kagi by default and falls back to Gemini.
+- In production cutover mode, Effect `web_search` is registered last to override legacy `web_search` while keeping the rest of the legacy tool surface.
 
 ---
 

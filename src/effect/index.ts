@@ -34,24 +34,32 @@ interface RegisterEffectToolsOptions {
 	readonly includeWebSearch?: boolean;
 }
 
+interface SearchResponse extends SearchSuccess {
+	readonly providerUsed?: "kagi" | "gemini" | "perplexity";
+}
+
 export interface EffectExtensionDeps {
-	readonly search: (query: string, options?: FullSearchOptions) => Promise<SearchSuccess>;
+	readonly search: (query: string, options?: FullSearchOptions) => Promise<SearchResponse>;
 	readonly readCookies: typeof readChromeCookiesEffect;
 }
 
 async function searchWithFallback(
 	query: string,
 	options?: FullSearchOptions,
-): Promise<SearchSuccess> {
+): Promise<SearchResponse> {
 	const preferredProvider = options?.provider ?? "auto";
 	
 	// Try Kagi first if auto or explicitly requested
 	if (preferredProvider === "auto" || preferredProvider === "kagi") {
 		try {
 			const kagiResult = await Effect.runPromise(
-				kagiSearchEffect(query)
+				kagiSearchEffect(query, undefined, {
+					lens: options?.lens,
+					recencyFilter: options?.recencyFilter,
+					domainFilter: options?.domainFilter,
+				}),
 			);
-			return kagiResult;
+			return { ...kagiResult, providerUsed: "kagi" };
 		} catch (kagiErr) {
 			// If Kagi fails and user explicitly wanted Kagi, don't fall back
 			if (preferredProvider === "kagi") {
@@ -64,7 +72,8 @@ async function searchWithFallback(
 	
 	// Fall back to Gemini
 	const geminiResult = await geminiSearch(query, options);
-	return geminiResult;
+	const providerUsed = options?.provider === "perplexity" ? "perplexity" : "gemini";
+	return { ...geminiResult, providerUsed };
 }
 
 const defaultDeps: EffectExtensionDeps = {
@@ -189,7 +198,7 @@ function registerWebSearchTool(pi: ExtensionAPI, deps: EffectExtensionDeps): voi
 					content: [{ type: "text", text: formatSearchSummary(response.results, response.answer) }],
 					details: {
 						error: null as string | null,
-						provider: "kagi" as string | undefined,
+						provider: response.providerUsed,
 						resultCount: response.results.length as number | undefined,
 					},
 				};
@@ -255,7 +264,9 @@ export default function (pi: ExtensionAPI) {
 	const registerLegacy = loadLegacyRegistrar();
 	if (registerLegacy) {
 		registerLegacy(pi);
-		registerEffectTools(pi, defaultDeps, { includeWebSearch: false });
+		// Register Effect web_search last so it overrides legacy web_search while
+		// preserving the rest of the legacy tool surface during migration.
+		registerEffectTools(pi, defaultDeps, { includeWebSearch: true });
 		return;
 	}
 
