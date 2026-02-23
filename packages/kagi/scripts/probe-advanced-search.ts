@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import puppeteer from "puppeteer-core";
 
@@ -43,8 +43,24 @@ interface A11yNode {
 	children?: A11yNode[];
 }
 
+interface SessionCookie {
+	name: string;
+	value: string;
+	domain: string;
+	path: string;
+	expires: number;
+	httpOnly: boolean;
+	secure: boolean;
+	sameSite: "Strict" | "Lax" | "None" | "Unknown";
+}
+
+interface SessionFileShape {
+	cookies?: SessionCookie[];
+}
+
 const outputPath = resolve(process.argv[2] ?? "packages/kagi/output/network/capture-advanced-submit-filled.json");
 const browserUrl = process.argv[3] ?? "http://localhost:9222";
+const sessionPath = resolve(process.argv[4] ?? "packages/kagi/storage/session.json");
 
 const result: AdvancedProbeResult = {
 	runId: `advanced-filled-${Date.now()}`,
@@ -78,6 +94,7 @@ const browser = await puppeteer.connect({ browserURL: browserUrl, defaultViewpor
 
 try {
 	const page = await browser.newPage();
+	await applySessionCookies(page, sessionPath);
 
 	page.on("request", (request) => {
 		if (request.method() !== "POST") {
@@ -111,29 +128,29 @@ try {
 		waitUntil: "domcontentloaded",
 		timeout: 60_000,
 	});
-	await page.click("#menu-advanced-search-toggle");
-	await page.waitForSelector("#menu-advanced-search form", { timeout: 20_000 });
 
-	await setInputValue(page, "input[name=\"all_words\"]", result.formValues.all_words);
-	await setInputValue(page, "input[name=\"exact_words\"]", result.formValues.exact_words);
-	await setInputValue(page, "input[name=\"any_words\"]", result.formValues.any_words);
-	await setInputValue(page, "input[name=\"none_words\"]", result.formValues.none_words);
-	await setInputValue(page, "input[name=\"site\"]", result.formValues.site);
+	const formSelector = await openAdvancedSearchForm(page);
 
-	await setRadioValue(page, "region", "be_fr");
-	await setRadioValue(page, "last_update", "4");
-	await typeInputValue(page, "input[name=\"from_date\"]", result.formValues.from_date);
-	await typeInputValue(page, "input[name=\"to_date\"]", result.formValues.to_date);
-	await setRadioValue(page, "terms_appearing", "url");
-	await setRadioValue(page, "file_type", "open_spreadsheet");
+	await setInputValue(page, `${formSelector} input[name="all_words"]`, result.formValues.all_words);
+	await setInputValue(page, `${formSelector} input[name="exact_words"]`, result.formValues.exact_words);
+	await setInputValue(page, `${formSelector} input[name="any_words"]`, result.formValues.any_words);
+	await setInputValue(page, `${formSelector} input[name="none_words"]`, result.formValues.none_words);
+	await setInputValue(page, `${formSelector} input[name="site"]`, result.formValues.site);
 
-	const modalHandle = await page.$("#menu-advanced-search");
+	await setRadioValue(page, formSelector, "region", "be_fr");
+	await setRadioValue(page, formSelector, "last_update", "4");
+	await typeInputValue(page, `${formSelector} input[name="from_date"]`, result.formValues.from_date);
+	await typeInputValue(page, `${formSelector} input[name="to_date"]`, result.formValues.to_date);
+	await setRadioValue(page, formSelector, "terms_appearing", "url");
+	await setRadioValue(page, formSelector, "file_type", "open_spreadsheet");
+
+	const modalHandle = (await page.$("#menu-advanced-search")) ?? (await page.$(formSelector));
 	const modalA11y = modalHandle
 		? ((await page.accessibility.snapshot({ root: modalHandle, interestingOnly: false })) as A11yNode | null)
 		: null;
 	result.a11y = summarizeA11y(modalA11y);
 
-	const preSubmit = await page.$eval("#menu-advanced-search form", (formElement) => {
+	const preSubmit = await page.$eval(formSelector, (formElement) => {
 		const form = formElement as HTMLFormElement;
 		const formData: Array<[string, string]> = Array.from(new FormData(form).entries()).map(
 			([key, value]) => [key, typeof value === "string" ? value : "[file]"] as [string, string],
@@ -164,7 +181,7 @@ try {
 
 	await Promise.all([
 		page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 30_000 }),
-		page.$eval("#menu-advanced-search form", (formElement) => {
+		page.$eval(formSelector, (formElement) => {
 			const form = formElement as HTMLFormElement;
 			form.requestSubmit();
 		}),
@@ -196,6 +213,63 @@ try {
 	await browser.disconnect();
 }
 
+async function openAdvancedSearchForm(page: puppeteer.Page): Promise<string> {
+	const modalFormSelector = "#menu-advanced-search form";
+	const directFormSelector = 'form[action="/search/advanced"]';
+
+	if (await page.$(modalFormSelector)) {
+		return modalFormSelector;
+	}
+
+	const toggleSelectors = [
+		"#menu-advanced-search-toggle",
+		"a[href='#menu-advanced-search']",
+		"[href='#menu-advanced-search']",
+	];
+
+	for (const selector of toggleSelectors) {
+		const exists = await page.$(selector);
+		if (!exists) {
+			continue;
+		}
+		await page.click(selector);
+		try {
+			await page.waitForSelector(modalFormSelector, { timeout: 10_000 });
+			return modalFormSelector;
+		} catch {
+			// keep trying fallbacks
+		}
+	}
+
+	if (await page.$(directFormSelector)) {
+		return directFormSelector;
+	}
+
+	const debug = await page.evaluate(() => {
+		const candidates = Array.from(document.querySelectorAll("a,button,[role=button]"))
+			.map((item) => ({
+				id: item.id || "",
+				text: (item.textContent || "").trim(),
+				href: item.tagName.toLowerCase() === "a" ? (item.getAttribute("href") ?? "") : "",
+			}))
+			.filter(
+				(item) =>
+					item.id.includes("advanced") ||
+					item.text.toLowerCase().includes("advanced") ||
+					item.href.includes("advanced") ||
+					item.href.includes("menu-advanced-search"),
+			)
+			.slice(0, 20);
+		return {
+			url: location.href,
+			title: document.title,
+			candidates,
+		};
+	});
+
+	throw new Error(`Unable to locate advanced-search form. Debug: ${JSON.stringify(debug)}`);
+}
+
 async function setInputValue(page: puppeteer.Page, selector: string, value: string): Promise<void> {
 	await page.$eval(
 		selector,
@@ -209,9 +283,9 @@ async function setInputValue(page: puppeteer.Page, selector: string, value: stri
 	);
 }
 
-async function setRadioValue(page: puppeteer.Page, name: string, value: string): Promise<void> {
+async function setRadioValue(page: puppeteer.Page, formSelector: string, name: string, value: string): Promise<void> {
 	await page.$eval(
-		`input[type=\"radio\"][name=\"${name}\"][value=\"${value}\"]`,
+		`${formSelector} input[type="radio"][name="${name}"][value="${value}"]`,
 		(radioElement) => {
 			const radio = radioElement as HTMLInputElement;
 			radio.checked = true;
@@ -222,10 +296,11 @@ async function setRadioValue(page: puppeteer.Page, name: string, value: string):
 }
 
 async function typeInputValue(page: puppeteer.Page, selector: string, value: string): Promise<void> {
+	const modifier = process.platform === "darwin" ? "Meta" : "Control";
 	await page.focus(selector);
-	await page.keyboard.down("Meta");
+	await page.keyboard.down(modifier);
 	await page.keyboard.press("KeyA");
-	await page.keyboard.up("Meta");
+	await page.keyboard.up(modifier);
 	await page.keyboard.press("Backspace");
 	await page.keyboard.type(value);
 	await page.$eval(selector, (inputElement) => {
@@ -233,6 +308,37 @@ async function typeInputValue(page: puppeteer.Page, selector: string, value: str
 		input.dispatchEvent(new Event("input", { bubbles: true }));
 		input.dispatchEvent(new Event("change", { bubbles: true }));
 	});
+}
+
+async function applySessionCookies(page: puppeteer.Page, path: string): Promise<void> {
+	if (!existsSync(path)) {
+		return;
+	}
+	const parsed = JSON.parse(readFileSync(path, "utf8")) as SessionFileShape;
+	const cookies = (parsed.cookies ?? [])
+		.filter((cookie) => cookie.domain.includes("kagi.com"))
+		.filter((cookie) => cookie.name.length > 0)
+		.map((cookie) => ({
+			name: cookie.name,
+			value: cookie.value,
+			domain: cookie.domain,
+			path: cookie.path || "/",
+			httpOnly: cookie.httpOnly,
+			secure: cookie.secure,
+			expires: Number.isFinite(cookie.expires) ? cookie.expires : undefined,
+			sameSite: toPuppeteerSameSite(cookie.sameSite),
+		}));
+	if (cookies.length === 0) {
+		return;
+	}
+	await page.setCookie(...cookies);
+}
+
+function toPuppeteerSameSite(value: SessionCookie["sameSite"]): "Strict" | "Lax" | "None" | undefined {
+	if (value === "Strict" || value === "Lax" || value === "None") {
+		return value;
+	}
+	return undefined;
 }
 
 function summarizeA11y(root: A11yNode | null): AccessibilitySummary {
