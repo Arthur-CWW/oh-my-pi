@@ -37,6 +37,7 @@ Current persistent preferences:
 - Use `effect-solutions` (plural) when invoking the local Effect solutions CLI (`effect-solution` is not present in this environment).
 - During implementation iterations, run **scoped/filtered tests first** (only tests relevant to the current feature area); run full mandatory validation suite once at handoff or when explicitly requested.
 - For interactive/TUI or long-running process validation, prefer **tmux-managed test sessions** (fixed pane size, scripted `send-keys`, `capture-pane` snapshots, explicit session cleanup) locally and over SSH.
+- Prefer **static module imports**; avoid dynamic/lazy `import()` unless technically required (and briefly justify when used).
 
 ## Mandatory Validation After Every Change
 

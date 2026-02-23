@@ -1,60 +1,19 @@
 import { Data, Effect } from "effect";
+import {
+	SimpleRateLimiter,
+	runSocketSearchWithAutoRefresh,
+	type KagiSearchOptions as ClientKagiSearchOptions,
+	type KagiSearchResult as ClientKagiSearchResult,
+} from "../../packages/kagi/src/kagi-client.js";
 
-interface ParsedKagiEvent {
-	readonly id: string | null;
-	readonly dataRaw: string;
-	readonly dataJson: unknown;
-}
+type KagiSearchOptions = Pick<ClientKagiSearchOptions, "query" | "lens" | "dateRange" | "maxResponseBytes">;
+type KagiSearchResult = ClientKagiSearchResult;
 
-interface KagiSearchOptions {
-	readonly query: string;
-	readonly lens?: string;
-	readonly dateRange?: 1 | 2 | 3 | 4;
-	readonly maxResponseBytes?: number;
-}
-
-interface KagiSearchResult {
-	readonly capturedAt: string;
-	readonly requestUrl: string;
-	readonly referer: string;
-	readonly status: number;
-	readonly ok: boolean;
-	readonly headersSent: Record<string, string>;
-	readonly responseHeaders: Record<string, string>;
-	readonly rawSse: string;
-	readonly parsedEvents: ReadonlyArray<ParsedKagiEvent>;
-}
-
-interface KagiClientModule {
-	readonly runSocketSearchWithAutoRefresh: (
-		options: KagiSearchOptions,
-		config?: {
-			readonly sessionPath?: string;
-			readonly browserUrl?: string;
-			readonly rateLimiter?: unknown;
-			readonly discoverLenses?: boolean;
-		},
-	) => Promise<KagiSearchResult>;
-	readonly SimpleRateLimiter: new (options: { readonly minIntervalMs: number; readonly jitterMs: number }) => unknown;
-}
-
-let cachedClientPromise: Promise<KagiClientModule> | null = null;
-let cachedRateLimiter: unknown | null = null;
-
-async function loadKagiClient(): Promise<KagiClientModule> {
-	if (!cachedClientPromise) {
-		cachedClientPromise = import("../../packages/kagi/src/kagi-client.js") as Promise<KagiClientModule>;
-	}
-	return cachedClientPromise;
-}
+const DEFAULT_RATE_LIMITER = new SimpleRateLimiter({ minIntervalMs: 1000, jitterMs: 500 });
 
 async function runDefaultKagiSearch(options: KagiSearchOptions): Promise<KagiSearchResult> {
-	const client = await loadKagiClient();
-	if (!cachedRateLimiter) {
-		cachedRateLimiter = new client.SimpleRateLimiter({ minIntervalMs: 1000, jitterMs: 500 });
-	}
-	return client.runSocketSearchWithAutoRefresh(options, {
-		rateLimiter: cachedRateLimiter,
+	return runSocketSearchWithAutoRefresh(options, {
+		rateLimiter: DEFAULT_RATE_LIMITER,
 		discoverLenses: true,
 	});
 }
