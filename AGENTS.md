@@ -56,6 +56,7 @@ Notes:
 - `test:e2e:search:gemini` writes artifacts into `test-output/`.
 - If e2e fails intermittently, keep artifacts and record failures in `docs/migration-spec.md` bug ledger.
 - When changing `src/effect/*` entry/CLI behavior, also validate Effect CLI loading (e.g. `pi --no-extensions -e ./src/effect/index.ts --help` or `bun run test:e2e:effect:help`).
+- `test:e2e:cookies` is **macOS only** - Chrome cookie decryption uses platform-specific Keychain APIs (no Linux/Windows implementation currently).
 
 ## Testing Scope
 
