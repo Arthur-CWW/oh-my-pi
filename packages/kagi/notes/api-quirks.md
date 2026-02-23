@@ -1,6 +1,6 @@
 # Kagi API quirks / reverse-engineering notes
 
-_Last updated: 2026-02-21_
+_Last updated: 2026-02-23_
 
 ## 1) Search streaming path
 
@@ -62,10 +62,29 @@ _Last updated: 2026-02-21_
   - `""`, `pdf`, `ps`, `csv`, `epub`, `gearth`, `gps`, `hancom`, `html`, `excel`, `powerpoint`, `word`,
   - `open_presentation`, `open_spreadsheet`, `open_text`, `rtf`, `svg`, `latex`, `text`, `xml`.
 
+### Accessibility tree + submit capture verification (2026-02-23)
+- Added dedicated probe script: `packages/kagi/scripts/probe-advanced-search.ts`.
+- Probe artifacts written to:
+  - `packages/kagi/output/network/capture-advanced-submit-filled.json`
+- Probe performs all of the following in one run:
+  - opens advanced modal (`#menu-advanced-search-toggle`)
+  - fills inputs and radio options
+  - captures modal accessibility subtree summary
+  - submits form and stores request/response payloads
+- Current capture includes an accessibility summary (`a11y.nonEmptyNameCount=96`) and sampled names from the modal tree.
+
 ### Behavior
 - Returns `302` with `Location: /search?...`
 - Example produced query expansion: `intitle:site:myanimelist.net filetype:pdf&r=us&dr=3`
 - Current client/test coverage now validates full known payload keys and default-empty behavior for omitted fields (including `terms_appearing=any` => empty form value).
+
+### Date + `last_update` interaction quirk
+- Captured browser submit with `last_update=4` and attempted date inputs produced:
+  - `from_date=`
+  - `to_date=`
+  in actual POST body (see capture artifact above).
+- Direct POST replay with only date bounds (no `last_update`) preserves date params in redirect URL (server accepts them).
+- Direct POST replay with `last_update` set may prioritize `dr` in redirect and omit explicit date bounds from redirected query.
 
 ---
 

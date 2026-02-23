@@ -36,6 +36,7 @@ Current persistent preferences:
 - If splitting into multiple files is necessary, keep it minimal and justify briefly in PR/task notes.
 - Use `effect-solutions` (plural) when invoking the local Effect solutions CLI (`effect-solution` is not present in this environment).
 - During implementation iterations, run **scoped/filtered tests first** (only tests relevant to the current feature area); run full mandatory validation suite once at handoff or when explicitly requested.
+- For interactive/TUI or long-running process validation, prefer **tmux-managed test sessions** (fixed pane size, scripted `send-keys`, `capture-pane` snapshots, explicit session cleanup) locally and over SSH.
 
 ## Mandatory Validation After Every Change
 

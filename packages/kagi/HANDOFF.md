@@ -1,6 +1,6 @@
 # Kagi Unofficial Client Handoff (Session Summary)
 
-Date: 2026-02-21
+Date: 2026-02-23
 
 ## What was completed this session
 
@@ -40,6 +40,16 @@ Date: 2026-02-21
 - Updated:
   - `packages/kagi/README.md`
   - `packages/kagi/notes/api-quirks.md`
+
+### 6) Advanced-search browser parity probe (a11y + network)
+- Added `packages/kagi/scripts/probe-advanced-search.ts`.
+- Probe captures in a single run:
+  - advanced modal accessibility subtree summary
+  - actual POST payload to `/search/advanced`
+  - redirect/response metadata
+- Latest artifact:
+  - `packages/kagi/output/network/capture-advanced-submit-filled.json`
+- Key finding documented: when `last_update` is set, date bounds can be omitted in submitted form/redirect; direct POSTs without `last_update` preserve `from_date`/`to_date`.
 
 ---
 
@@ -90,6 +100,9 @@ bun packages/kagi/scripts/kagi-lab.ts rules:video:delete --platform-id you_tube 
 
 # query captured network logs
 bun packages/kagi/scripts/query-network-captures.ts --contains /esr/video_rules
+
+# run advanced-search browser parity probe (a11y + submit capture)
+bun packages/kagi/scripts/probe-advanced-search.ts
 ```
 
 ---

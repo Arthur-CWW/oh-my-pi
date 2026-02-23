@@ -9,6 +9,7 @@
 		"session:refresh": "bun scripts/kagi-lab.ts session:refresh",
 		"lenses:list": "bun scripts/kagi-lab.ts lenses:list",
 		"search": "bun scripts/kagi-lab.ts search",
+		"advanced:probe": "bun scripts/probe-advanced-search.ts",
 		"test": "bun test ../../tests/kagi-client.test.ts ../../tests/kagi-log.test.ts"
 	}
 }

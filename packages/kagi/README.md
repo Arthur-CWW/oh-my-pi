@@ -102,6 +102,12 @@ bun packages/kagi/scripts/query-network-captures.ts --contains /esr/video_rules
 bun packages/kagi/scripts/query-network-captures.ts --contains /search/advanced --kind request
 ```
 
+### Probe advanced-search browser parity (a11y + submit capture)
+
+```bash
+bun packages/kagi/scripts/probe-advanced-search.ts
+```
+
 ---
 
 ## Notes
