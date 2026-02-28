@@ -21,6 +21,15 @@ import {
 	type KagiSearchOptions,
 } from "../src/kagi-client.js";
 import { queryRuns, saveSearchRun, writeJsonSnapshot } from "../src/kagi-log.js";
+import {
+	buildKagiVisualizerHtml,
+	buildVisualizerModelFromRaw,
+	buildVisualizerModelFromRunRecord,
+	loadJsonPayload,
+	loadRunRecordForVisualizer,
+	loadTextPayload,
+	type KagiVisualizerModel,
+} from "../src/kagi-visualizer.js";
 
 const DEFAULT_SESSION_PATH = "packages/kagi/storage/session.json";
 const DEFAULT_RUNS_DIR = "packages/kagi/output/runs";
@@ -65,6 +74,9 @@ switch (command) {
 		break;
 	case "runs:list":
 		await cmdRunsList(parsed);
+		break;
+	case "visualize":
+		await cmdVisualize(parsed);
 		break;
 	case "a11y:capture":
 		await cmdA11yCapture(parsed);
@@ -294,6 +306,68 @@ async function cmdRunsList(cli: ParsedCli): Promise<void> {
 	console.log(JSON.stringify({ command: "runs:list", outputDir: resolve(outputDir), count: runs.length, runs }, null, 2));
 }
 
+async function cmdVisualize(cli: ParsedCli): Promise<void> {
+	const runPath = flagValue(cli, "run");
+	const rawSsePath = flagValue(cli, "raw-sse");
+	const jsonPath = flagValue(cli, "json");
+	const title = flagValue(cli, "title") ?? "Kagi SSE/API Visualizer";
+	const sourceLabel = flagValue(cli, "source") ?? "kagi-lab visualize";
+	const outPath = flagValue(cli, "out") ?? `packages/kagi/output/visualizer/kagi-visualizer-${Date.now()}.html`;
+
+	let model: KagiVisualizerModel;
+	if (runPath) {
+		const record = loadRunRecordForVisualizer(runPath);
+		model = buildVisualizerModelFromRunRecord(record, sourceLabel);
+	} else {
+		const rawSse = rawSsePath ? loadTextPayload(rawSsePath) : "";
+		const additionalPayload = jsonPath ? loadJsonPayload(jsonPath) : undefined;
+		if (rawSse.length === 0 && typeof additionalPayload === "undefined") {
+			throw new Error("Provide --run <record.json> or --raw-sse <file> [--json <file>].");
+		}
+
+		const metadata: Record<string, string> = {};
+		if (rawSsePath) {
+			metadata.rawSsePath = resolve(rawSsePath);
+		}
+		if (jsonPath) {
+			metadata.jsonPath = resolve(jsonPath);
+		}
+
+		model = buildVisualizerModelFromRaw({
+			title,
+			sourceLabel,
+			rawSse,
+			metadata,
+			additionalPayload,
+		});
+	}
+
+	const renderedModel: KagiVisualizerModel = {
+		...model,
+		title,
+		sourceLabel,
+	};
+
+	const outputPath = resolve(outPath);
+	mkdirSync(dirname(outputPath), { recursive: true });
+	writeFileSync(outputPath, buildKagiVisualizerHtml(renderedModel), "utf8");
+
+	console.log(
+		JSON.stringify(
+			{
+				command: "visualize",
+				outputPath,
+				eventCount: renderedModel.events.length,
+				resultCount: renderedModel.summaryResults.length,
+				shortcuts: "j/k, h/l, 1/2/3, gg, G, /, :, ?",
+				hint: `Open in browser: file://${outputPath}`,
+			},
+			null,
+			2,
+		),
+	);
+}
+
 async function cmdA11yCapture(cli: ParsedCli): Promise<void> {
 	const browserUrl = flagValue(cli, "browser-url") ?? DEFAULT_BROWSER_URL;
 	const url = flagValue(cli, "url") ?? undefined;
@@ -464,6 +538,7 @@ Commands:
   rules:video:import   Import channel rules from file (channel|creator_name per line)
   rules:video:delete   Delete video channel rule
   runs:list            Query saved run records
+  visualize            Build interactive SSE/API visualizer HTML from run/json payloads
   a11y:capture         Save full accessibility tree JSON
 
 Examples:
@@ -476,6 +551,8 @@ Examples:
   bun packages/kagi/scripts/kagi-lab.ts rules:video:set --channel youtube.com/channel/UCSJ4gkVC6NrvII8umztf0Ow --creator-name "Lofi Girl" --kind -1
   bun packages/kagi/scripts/kagi-lab.ts rules:video:import --file channels.txt --kind -1
   bun packages/kagi/scripts/kagi-lab.ts runs:list --contains "c++" --tag search.info
+  bun packages/kagi/scripts/kagi-lab.ts visualize --run packages/kagi/output/runs/kagi-search-<id>.json
+  bun packages/kagi/scripts/kagi-lab.ts visualize --raw-sse packages/kagi/output/runs/live.sse.txt --json packages/kagi/output/runs/kagi-search-<id>.json
   bun packages/kagi/scripts/kagi-lab.ts a11y:capture --url https://kagi.com/settings/search --out packages/kagi/output/a11y/settings-search.json
 `);
 }

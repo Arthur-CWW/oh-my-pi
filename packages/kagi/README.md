@@ -9,6 +9,7 @@ This folder is an isolated Kagi provider workspace.
   - `/socket/search` replay with browser-like headers/cookies
   - `/search/advanced` POST replay
   - domain/video personalization rule mutations (`/esr/*`)
+- `src/kagi-query-parser.ts` — Google-style operator parser that emits structured Kagi-compatible query filters
 - `src/kagi-log.ts` — run persistence + query/filter utilities
 - `scripts/kagi-lab.ts` — CLI for fast experimentation
 - `package.json` — local package metadata + convenience scripts for this workspace
@@ -102,6 +103,22 @@ bun packages/kagi/scripts/query-network-captures.ts --contains /esr/video_rules
 bun packages/kagi/scripts/query-network-captures.ts --contains /search/advanced --kind request
 ```
 
+### Visualize SSE + parsed payload side-by-side (vim-style navigation)
+
+```bash
+# From a saved run record JSON
+bun packages/kagi/scripts/kagi-lab.ts visualize \
+  --run packages/kagi/output/runs/kagi-search-<id>.json
+
+# From raw SSE + optional related API JSON payload
+bun packages/kagi/scripts/kagi-lab.ts visualize \
+  --raw-sse packages/kagi/output/runs/live-cpp.sse.txt \
+  --json packages/kagi/output/runs/kagi-search-<id>.json
+```
+
+The visualizer renders search HTML in a sandboxed iframe with injected CSS and shows parsed JSON/raw payload/results in adjacent panes.
+Keyboard shortcuts: `j/k`, `h/l`, `1/2/3`, `gg`, `G`, `/`, `:`, `?`.
+
 ### Probe advanced-search browser parity (a11y + submit capture)
 
 ```bash
@@ -113,6 +130,8 @@ bun packages/kagi/scripts/probe-advanced-search.ts
 ## Notes
 
 - Treat this as unofficial/reverse-engineered behavior.
+- Operator reference baseline: https://help.kagi.com/kagi/features/search-operators.html
+- Parser quirk handling: unsupported operators are passed through in query text and may be ignored by Kagi; coarse dates like `after:2025` are preserved inline instead of being coerced into `from_date`.
 - Be polite: rate limit your requests (CLI defaults include jitter).
 - Session data is sensitive; `session.json` is written with mode `0600`.
 - You can run package-local scripts directly via `packages/kagi/package.json` (for example: `bun --cwd packages/kagi run help`).
