@@ -13,16 +13,16 @@
 		"fetch",
 		"scraping"
 	],
-	"author": "Nico Bailon",
+	"author": "wirebabel",
 	"license": "MIT",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/nicobailon/pi-web-access.git"
+		"url": "git+https://github.com/arthur-cww/pi-web-access.git"
 	},
 	"bugs": {
-		"url": "https://github.com/nicobailon/pi-web-access/issues"
+		"url": "https://github.com/arthur-cww/pi-web-access/issues"
 	},
-	"homepage": "https://github.com/nicobailon/pi-web-access#readme",
+	"homepage": "https://github.com/arthur-cww/pi-web-access#readme",
 	"scripts": {
 		"format": "biome format --write .",
 		"format:check": "biome format .",
@@ -64,7 +64,7 @@
 		"skills": [
 			"./skills"
 		],
-		"video": "https://github.com/nicobailon/pi-web-access/raw/refs/heads/main/pi-web-fetch-demo.mp4"
+		"video": "https://github.com/arthur-cww/pi-web-access/raw/refs/heads/main/pi-web-fetch-demo.mp4"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.4.2",
