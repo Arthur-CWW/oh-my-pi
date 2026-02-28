@@ -37,6 +37,20 @@ _Last updated: 2026-02-23_
 - Returned lens map is merged with observed fallback defaults so existing names continue to work if discovery yields partial data.
 - Search CLI now supports `lenses:list` and `search --discover-lenses 1` (enabled by default).
 
+### Query-operator parsing quirks (Effect/Kagi bridge)
+- Canonical Kagi operator reference (docs):
+  - https://help.kagi.com/kagi/features/search-operators.html
+  - listed operators include: `filetype:`, `site:`, `inurl:`, `intitle:`, quotes, `()`, `AND`, `OR`, `+`, `-`, `*`.
+- Parser supports Kagi operators directly, plus compatibility helpers:
+  - `site:`, `-site:`
+  - `before:YYYY-MM-DD`, `after:YYYY-MM-DD` (also accepts `/` separators)
+  - `filetype:` / `ext:`
+  - `intitle:` / `allintitle:`
+  - `inurl:` / `allinurl:`
+  - `intext:` / `allintext:`
+- **Date precision quirk:** coarse date operators like `after:2025` are *not* coerced into `from_date`/`to_date` because semantics differ from full-date filtering; they are left inline in query text.
+- Unsupported operators (for example `author:` / `related:`) are surfaced as parser metadata and passed through in text query; Kagi may ignore them.
+
 ---
 
 ## 2) Advanced search form flow

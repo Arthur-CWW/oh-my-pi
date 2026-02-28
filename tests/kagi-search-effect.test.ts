@@ -122,7 +122,7 @@ describe("kagi search effect", () => {
 								tag: "search",
 								payload: {
 									content:
-										'<div class="_0_SRI search-result"><div class="_0_TITLE __sri-title"><h3><a class="__sri_title_link" href="https://example.com">Example</a></h3></div><div class="_0_DESC __sri-desc">Snippet text</div></div>',
+										'<div class="_0_SRI search-result"><div class="_0_TITLE __sri-title"><h3><a class="__sri_title_link" href="https://example.com">Example</a></h3></div><div class="_0_DESC __sri-desc"><div><span class="__sri-time">Feb 23, 2025</span> Snippet text</div></div></div>',
 								},
 							},
 						],
@@ -133,7 +133,12 @@ describe("kagi search effect", () => {
 
 		const result = await Effect.runPromise(kagiSearchEffect("example", mockDeps));
 		expect(result.results).toEqual([
-			{ title: "Example", url: "https://example.com", snippet: "Snippet text" },
+			{
+				title: "Example",
+				url: "https://example.com",
+				snippet: "Feb 23, 2025 Snippet text",
+				publishedAt: "Feb 23, 2025",
+			},
 		]);
 	});
 
@@ -171,6 +176,82 @@ describe("kagi search effect", () => {
 		expect(capturedLens).toBe("programming");
 		expect(capturedDateRange).toBe(3);
 		expect(capturedQuery).toBe("effect ts (site:bun.com OR site:effect.website)");
+	});
+
+	it("maps Google-style query operators into Kagi API params", async () => {
+		let capturedQuery = "";
+		let capturedDateRange: number | undefined;
+		let capturedFromDate: string | undefined;
+		let capturedToDate: string | undefined;
+		const mockDeps: KagiSearchDeps = {
+			runSearch: async (options) => {
+				capturedQuery = options.query;
+				capturedDateRange = options.dateRange;
+				capturedFromDate = options.fromDate;
+				capturedToDate = options.toDate;
+				return {
+					capturedAt: new Date().toISOString(),
+					requestUrl: "https://kagi.com/socket/search?q=test",
+					referer: "https://kagi.com/search",
+					status: 200,
+					ok: true,
+					headersSent: {},
+					responseHeaders: {},
+					rawSse: 'id: 1\ndata: {"content": "ok"}',
+					parsedEvents: [{ id: "1", dataRaw: "", dataJson: { content: "ok" } }],
+				};
+			},
+		};
+
+		await Effect.runPromise(
+			kagiSearchEffect("effect ts site:bun.com -site:example.com before:2025-01-31 after:2024-01-01 OR", mockDeps, {
+				recencyFilter: "month",
+				domainFilter: ["effect.website"],
+			}),
+		);
+
+		expect(capturedDateRange).toBeUndefined();
+		expect(capturedFromDate).toBe("2024-01-01");
+		expect(capturedToDate).toBe("2025-01-31");
+		expect(capturedQuery).toBe("effect ts (site:effect.website OR site:bun.com) -site:example.com");
+	});
+
+	it("keeps coarse year-based date operators inline instead of forcing Kagi date bounds", async () => {
+		let capturedQuery = "";
+		let capturedDateRange: number | undefined;
+		let capturedFromDate: string | undefined;
+		let capturedToDate: string | undefined;
+		const mockDeps: KagiSearchDeps = {
+			runSearch: async (options) => {
+				capturedQuery = options.query;
+				capturedDateRange = options.dateRange;
+				capturedFromDate = options.fromDate;
+				capturedToDate = options.toDate;
+				return {
+					capturedAt: new Date().toISOString(),
+					requestUrl: "https://kagi.com/socket/search?q=test",
+					referer: "https://kagi.com/search",
+					status: 200,
+					ok: true,
+					headersSent: {},
+					responseHeaders: {},
+					rawSse: 'id: 1\ndata: {"content": "ok"}',
+					parsedEvents: [{ id: "1", dataRaw: "", dataJson: { content: "ok" } }],
+				};
+			},
+		};
+
+		const result = await Effect.runPromise(
+			kagiSearchEffect("effect ts after:2025", mockDeps, {
+				recencyFilter: "month",
+			}),
+		);
+
+		expect(capturedDateRange).toBe(3);
+		expect(capturedFromDate).toBeUndefined();
+		expect(capturedToDate).toBeUndefined();
+		expect(capturedQuery).toBe("effect ts after:2025");
+		expect(result.queryDiagnostics?.unmappedDateOperators).toEqual(["after:2025"]);
 	});
 
 	it("returns error for failed search", async () => {

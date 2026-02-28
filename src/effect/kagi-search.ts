@@ -5,8 +5,17 @@ import {
 	type KagiSearchOptions as ClientKagiSearchOptions,
 	type KagiSearchResult as ClientKagiSearchResult,
 } from "../../packages/kagi/src/kagi-client.js";
+import {
+	applyDomainFilterToQuery,
+	mergeDomainFilters,
+	parseGoogleStyleQuery,
+	type StructuredKagiSearchQuery,
+} from "../../packages/kagi/src/kagi-query-parser.js";
 
-type KagiSearchOptions = Pick<ClientKagiSearchOptions, "query" | "lens" | "dateRange" | "maxResponseBytes">;
+type KagiSearchOptions = Pick<
+	ClientKagiSearchOptions,
+	"query" | "lens" | "dateRange" | "fromDate" | "toDate" | "maxResponseBytes"
+>;
 type KagiSearchResult = ClientKagiSearchResult;
 
 const DEFAULT_RATE_LIMITER = new SimpleRateLimiter({ minIntervalMs: 1000, jitterMs: 500 });
@@ -37,7 +46,16 @@ export interface SearchSuccess {
 		readonly title: string;
 		readonly url: string;
 		readonly snippet: string;
+		readonly publishedAt?: string;
 	}>;
+	readonly queryDiagnostics?: {
+		readonly unsupportedOperators: ReadonlyArray<string>;
+		readonly unmappedDateOperators: ReadonlyArray<string>;
+		readonly normalizedQuery: string;
+		readonly domainFilter: ReadonlyArray<string>;
+		readonly fromDate?: string;
+		readonly toDate?: string;
+	};
 }
 
 export interface KagiSearchEffectOptions {
@@ -45,6 +63,8 @@ export interface KagiSearchEffectOptions {
 	readonly recencyFilter?: "day" | "week" | "month" | "year";
 	readonly domainFilter?: ReadonlyArray<string>;
 }
+
+export type ParsedGoogleStyleQuery = StructuredKagiSearchQuery;
 
 function mapRecencyFilterToDateRange(value: KagiSearchEffectOptions["recencyFilter"]): 1 | 2 | 3 | 4 | undefined {
 	switch (value) {
@@ -59,24 +79,6 @@ function mapRecencyFilterToDateRange(value: KagiSearchEffectOptions["recencyFilt
 		default:
 			return undefined;
 	}
-}
-
-function applyDomainFilter(query: string, domains: KagiSearchEffectOptions["domainFilter"]): string {
-	if (!domains || domains.length === 0) {
-		return query;
-	}
-	const cleaned = domains
-		.map((domain) => domain.trim())
-		.filter((domain) => domain.length > 0)
-		.map((domain) => (domain.includes(" ") ? `"${domain}"` : domain));
-	if (cleaned.length === 0) {
-		return query;
-	}
-	const clauses = cleaned.map((domain) => `site:${domain}`);
-	if (clauses.length === 1) {
-		return `${query} ${clauses[0]}`;
-	}
-	return `${query} (${clauses.join(" OR ")})`;
 }
 
 interface TaggedPayloadRecord {
@@ -117,7 +119,12 @@ function stripHtml(input: string): string {
 	return decodeHtmlEntities(stripped).replace(/\s+([.,;:!?])/g, "$1");
 }
 
-function extractResultsFromSearchPayload(payload: unknown): Array<{ title: string; url: string; snippet: string }> {
+function extractResultsFromSearchPayload(payload: unknown): Array<{
+	title: string;
+	url: string;
+	snippet: string;
+	publishedAt?: string;
+}> {
 	let html = "";
 	if (typeof payload === "string") {
 		html = payload;
@@ -142,9 +149,11 @@ function extractResultsFromSearchPayload(payload: unknown): Array<{ title: strin
 
 	const titleRegex = /<a[^>]*class="[^"]*__sri_title_link[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
 	const descRegex = /<div class="_0_DESC __sri-desc">([\s\S]*?)<\/div>/g;
+	const timeRegex = /<span class="__sri-time[^"]*">([\s\S]*?)<\/span>/g;
 	const descList = Array.from(html.matchAll(descRegex)).map((match) => stripHtml(match[1] ?? ""));
+	const publishedAtList = Array.from(html.matchAll(timeRegex)).map((match) => stripHtml(match[1] ?? ""));
 
-	const results: Array<{ title: string; url: string; snippet: string }> = [];
+	const results: Array<{ title: string; url: string; snippet: string; publishedAt?: string }> = [];
 	let index = 0;
 	for (const match of html.matchAll(titleRegex)) {
 		const url = decodeHtmlEntities((match[1] ?? "").trim());
@@ -152,10 +161,12 @@ function extractResultsFromSearchPayload(payload: unknown): Array<{ title: strin
 		if (!url || !title) {
 			continue;
 		}
+		const publishedAt = (publishedAtList[index] ?? "").trim();
 		results.push({
 			title,
 			url,
 			snippet: descList[index] ?? "",
+			...(publishedAt.length > 0 ? { publishedAt } : {}),
 		});
 		index += 1;
 	}
@@ -210,8 +221,13 @@ function extractAnswerFromEvents(result: KagiSearchResult): string {
 	return result.rawSse.slice(0, 5000);
 }
 
-function extractResultsFromEvents(result: KagiSearchResult): Array<{ title: string; url: string; snippet: string }> {
-	const results: Array<{ title: string; url: string; snippet: string }> = [];
+function extractResultsFromEvents(result: KagiSearchResult): Array<{
+	title: string;
+	url: string;
+	snippet: string;
+	publishedAt?: string;
+}> {
+	const results: Array<{ title: string; url: string; snippet: string; publishedAt?: string }> = [];
 	const seenUrls = new Set<string>();
 
 	for (const event of result.parsedEvents) {
@@ -241,9 +257,17 @@ function extractResultsFromEvents(result: KagiSearchResult): Array<{ title: stri
 					const title = String(entry.title ?? entry.name ?? "");
 					const url = String(entry.url ?? entry.link ?? entry.href ?? "");
 					const snippet = String(entry.snippet ?? entry.description ?? entry.content ?? "");
+					const publishedAt = String(
+						entry.publishedAt ?? entry.published_at ?? entry.updatedAt ?? entry.updated_at ?? entry.date ?? "",
+					).trim();
 					if (title.length > 0 && url.length > 0 && !seenUrls.has(url)) {
 						seenUrls.add(url);
-						results.push({ title, url, snippet });
+						results.push({
+							title,
+							url,
+							snippet,
+							...(publishedAt.length > 0 ? { publishedAt } : {}),
+						});
 					}
 				}
 			}
@@ -251,10 +275,14 @@ function extractResultsFromEvents(result: KagiSearchResult): Array<{ title: stri
 				const url = String(data.url);
 				if (!seenUrls.has(url)) {
 					seenUrls.add(url);
+					const publishedAt = String(
+						data.publishedAt ?? data.published_at ?? data.updatedAt ?? data.updated_at ?? data.date ?? "",
+					).trim();
 					results.push({
 						title: String(data.title),
 						url,
 						snippet: String(data.snippet ?? data.description ?? ""),
+						...(publishedAt.length > 0 ? { publishedAt } : {}),
 					});
 				}
 			}
@@ -270,13 +298,21 @@ export function kagiSearchEffect(
 	options: KagiSearchEffectOptions = {},
 ): Effect.Effect<SearchSuccess, KagiSearchError> {
 	return Effect.gen(function* () {
-		const preparedQuery = applyDomainFilter(query, options.domainFilter);
+		const parsedQuery = parseGoogleStyleQuery(query);
+		const mergedDomainFilter = mergeDomainFilters(options.domainFilter, parsedQuery.domainFilter);
+		const queryWithInlineFilters =
+			parsedQuery.normalizedQuery.length > 0 ? parsedQuery.normalizedQuery : parsedQuery.baseQuery;
+		const preparedQuery = applyDomainFilterToQuery(queryWithInlineFilters, mergedDomainFilter);
+		const effectiveQuery = preparedQuery.length > 0 ? preparedQuery : query.trim();
+		const hasExplicitDateBounds = Boolean(parsedQuery.fromDate || parsedQuery.toDate);
 		const result = yield* Effect.tryPromise({
 			try: () =>
 				deps.runSearch({
-					query: preparedQuery,
+					query: effectiveQuery,
 					lens: options.lens,
-					dateRange: mapRecencyFilterToDateRange(options.recencyFilter),
+					dateRange: hasExplicitDateBounds ? undefined : mapRecencyFilterToDateRange(options.recencyFilter),
+					fromDate: parsedQuery.fromDate,
+					toDate: parsedQuery.toDate,
 					maxResponseBytes: 2_000_000,
 				}),
 			catch: (cause) =>
@@ -294,7 +330,18 @@ export function kagiSearchEffect(
 
 		const answer = extractAnswerFromEvents(result);
 		const results = extractResultsFromEvents(result);
-		return { answer, results };
+		return {
+			answer,
+			results,
+			queryDiagnostics: {
+				unsupportedOperators: parsedQuery.unsupportedOperators,
+				unmappedDateOperators: parsedQuery.unmappedDateOperators,
+				normalizedQuery: queryWithInlineFilters,
+				domainFilter: mergedDomainFilter,
+				...(parsedQuery.fromDate ? { fromDate: parsedQuery.fromDate } : {}),
+				...(parsedQuery.toDate ? { toDate: parsedQuery.toDate } : {}),
+			},
+		};
 	});
 }
 
@@ -379,6 +426,15 @@ Examples:
   bun src/effect/kagi-search.ts "what is Effect TS"
   bun src/effect/kagi-search.ts --lens programming "rust async await"
   bun src/effect/kagi-search.ts "quantum computing" --json
+
+Google-style operator support (mapped to Kagi-compatible filters):
+  site:, -site:, before:YYYY-MM-DD, after:YYYY-MM-DD,
+  filetype:/ext:, intitle:/allintitle:, inurl:/allinurl:, intext:/allintext:
+
+Quirks:
+  - Only full dates (YYYY-MM-DD or YYYY/MM/DD) map to Kagi from_date/to_date.
+  - Coarse dates like after:2025 remain inline in the query to preserve behavior.
+  - Unsupported operators are passed through and may be ignored by Kagi.
 `);
 }
 

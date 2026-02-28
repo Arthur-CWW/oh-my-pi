@@ -38,6 +38,13 @@ interface SearchResponse extends SearchSuccess {
 	readonly providerUsed?: "kagi" | "gemini" | "perplexity";
 }
 
+interface WebSearchToolDetails {
+	readonly error: string | null;
+	readonly provider?: "kagi" | "gemini" | "perplexity";
+	readonly resultCount?: number;
+	readonly queryDiagnostics?: SearchSuccess["queryDiagnostics"];
+}
+
 export interface EffectExtensionDeps {
 	readonly search: (query: string, options?: FullSearchOptions) => Promise<SearchResponse>;
 	readonly readCookies: typeof readChromeCookiesEffect;
@@ -83,9 +90,28 @@ const defaultDeps: EffectExtensionDeps = {
 
 const LEGACY_ENTRY_CANDIDATES = ["../old/index.js", "../old/index.ts"] as const;
 
-function formatSearchSummary(results: ReadonlyArray<{ title: string; url: string }>, answer: string): string {
+function formatSearchSummary(
+	results: ReadonlyArray<{ title: string; url: string; snippet?: string; publishedAt?: string }>,
+	answer: string,
+): string {
 	const body = answer ? `${answer}\n\n---\n\n**Sources:**\n` : "";
-	return body + results.map((result, index) => `${index + 1}. ${result.title}\n   ${result.url}`).join("\n\n");
+	return (
+		body +
+		results
+			.map((result, index) => {
+				const snippet = result.snippet?.trim() ?? "";
+				const publishedAt = result.publishedAt?.trim() ?? "";
+				const lines = [`${index + 1}. ${result.title}`, `   ${result.url}`];
+				if (publishedAt.length > 0) {
+					lines.push(`   Date: ${publishedAt}`);
+				}
+				if (snippet.length > 0) {
+					lines.push(`   ${snippet}`);
+				}
+				return lines.join("\n");
+			})
+			.join("\n\n")
+	);
 }
 
 function loadLegacyRegistrar(): ((pi: ExtensionAPI) => void) | null {
@@ -168,9 +194,9 @@ function registerWebSearchTool(pi: ExtensionAPI, deps: EffectExtensionDeps): voi
 		name: "web_search",
 		label: "Web Search",
 		description:
-			"Web search tool using Kagi (default) with Gemini fallback. Supports lenses for specialized searches.",
+			"Web search tool using Kagi (default) with Gemini fallback. Supports Kagi operators (`filetype:`, `site:`, `inurl:`, `intitle:`, quotes, boolean/grouping) plus Google-style compatibility helpers (`before:`/`after:` full-date mapping, `ext:`, `allintitle:`, `allinurl:`, `allintext:`). Unsupported operators are passed through and may be ignored by Kagi.",
 		parameters: Type.Object({
-			query: Type.String({ description: "Search query" }),
+			query: Type.String({ description: "Search query (Google-style operators supported where Kagi-compatible)" }),
 			provider: Type.Optional(StringEnum(["auto", "kagi", "gemini", "perplexity"])),
 			lens: Type.Optional(Type.String()),
 			numResults: Type.Optional(Type.Number({ minimum: 1, maximum: 20 })),
@@ -180,9 +206,10 @@ function registerWebSearchTool(pi: ExtensionAPI, deps: EffectExtensionDeps): voi
 		async execute(_toolCallId, rawParams) {
 			const params = rawParams as WebSearchParams;
 			if (!params.query?.trim()) {
+				const details: WebSearchToolDetails = { error: "missing-query" };
 				return {
 					content: [{ type: "text", text: "Error: No query provided." }],
-					details: { error: "missing-query", provider: undefined, resultCount: undefined },
+					details,
 				};
 			}
 
@@ -194,19 +221,22 @@ function registerWebSearchTool(pi: ExtensionAPI, deps: EffectExtensionDeps): voi
 					domainFilter: params.domainFilter,
 					lens: params.lens,
 				});
+				const details: WebSearchToolDetails = {
+					error: null,
+					provider: response.providerUsed,
+					resultCount: response.results.length,
+					queryDiagnostics: response.queryDiagnostics,
+				};
 				return {
 					content: [{ type: "text", text: formatSearchSummary(response.results, response.answer) }],
-					details: {
-						error: null as string | null,
-						provider: response.providerUsed,
-						resultCount: response.results.length as number | undefined,
-					},
+					details,
 				};
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
+				const details: WebSearchToolDetails = { error: message };
 				return {
 					content: [{ type: "text", text: `Error: ${message}` }],
-					details: { error: message, provider: undefined, resultCount: undefined },
+					details,
 				};
 			}
 		},

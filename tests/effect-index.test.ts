@@ -50,7 +50,14 @@ function registerCutoverEntry(): Map<string, ToolLike> {
 const fakeDeps: EffectExtensionDeps = {
 	search: async () => ({
 		answer: "Bun is a runtime.",
-		results: [{ title: "Bun", url: "https://bun.com", snippet: "" }],
+		results: [
+			{
+				title: "Bun",
+				url: "https://bun.com",
+				snippet: "Fast JavaScript runtime.",
+				publishedAt: "2025-02-23",
+			},
+		],
 	}),
 	readCookies: () =>
 		Effect.succeed({
@@ -92,6 +99,8 @@ describe("effect shadow entry", () => {
 		expect(result.details?.error).toBe(null);
 		expect(result.content[0]?.text).toContain("Bun is a runtime.");
 		expect(result.content[0]?.text).toContain("https://bun.com");
+		expect(result.content[0]?.text).toContain("Date: 2025-02-23");
+		expect(result.content[0]?.text).toContain("Fast JavaScript runtime.");
 	});
 
 	it("forwards kagi-specific provider and lens options", async () => {
