@@ -1,6 +1,6 @@
 {
-	"name": "pi-web-access",
-	"version": "0.10.2",
+	"name": "@wirebabel/pi-web-access",
+	"version": "0.10.3",
 	"description": "Web search, URL fetching, GitHub repo cloning, PDF extraction, YouTube video understanding, and local video analysis for Pi coding agent",
 	"type": "module",
 	"keywords": [
@@ -17,19 +17,30 @@
 	"license": "MIT",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/arthur-cww/pi-web-access.git"
+		"url": "git+https://github.com/Arthur-CWW/pi-web-access.git"
 	},
 	"bugs": {
-		"url": "https://github.com/arthur-cww/pi-web-access/issues"
+		"url": "https://github.com/Arthur-CWW/pi-web-access/issues"
 	},
-	"homepage": "https://github.com/arthur-cww/pi-web-access#readme",
+	"homepage": "https://github.com/Arthur-CWW/pi-web-access#readme",
+	"files": [
+		"src",
+		"packages/kagi/src",
+		"skills",
+		"README.md",
+		"CHANGELOG.md",
+		"LICENSE"
+	],
+	"publishConfig": {
+		"access": "public"
+	},
 	"scripts": {
 		"format": "biome format --write .",
 		"format:check": "biome format .",
 		"lint": "biome lint .",
 		"typecheck": "tsc -p tsconfig.typecheck.json --noEmit",
 		"check": "bun run typecheck && bun run lint && bun run format:check",
-		"test": "bun test tests",
+		"test": "bun test ./tests",
 		"test:e2e:cookies": "bun scripts/e2e-chrome-cookies.ts",
 		"test:e2e:search:gemini": "bun scripts/e2e-search-gemini.ts",
 		"test:e2e:effect:help": "pi --no-extensions -e ./src/effect/index.ts --help",
@@ -64,7 +75,7 @@
 		"skills": [
 			"./skills"
 		],
-		"video": "https://github.com/arthur-cww/pi-web-access/raw/refs/heads/main/pi-web-fetch-demo.mp4"
+		"video": "https://github.com/Arthur-CWW/pi-web-access/raw/refs/heads/main/pi-web-fetch-demo.mp4"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.4.2",

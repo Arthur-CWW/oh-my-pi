@@ -38,6 +38,8 @@ Current persistent preferences:
 - During implementation iterations, run **only scoped/filtered tests** for the feature being changed (file-level and, when useful, test-name filtering). Do **not** run the full suite repeatedly while iterating. Run the full mandatory validation suite once at handoff or when explicitly requested. Avoid live API/e2e validation runs unless the user explicitly asks for a manual pass.
 - For interactive/TUI or long-running process validation, prefer **tmux-managed test sessions** (fixed pane size, scripted `send-keys`, `capture-pane` snapshots, explicit session cleanup) locally and over SSH.
 - Prefer **static module imports**; avoid dynamic/lazy `import()` unless technically required (and briefly justify when used).
+- When validating package installation behavior, default to **global `pi install` (no `-l`)** so settings are exercised under `~/.pi` (agent settings path), unless the user explicitly asks for project-local install behavior.
+- Keep fork repository metadata URLs aligned to the current git `origin` remote (owner/repo casing included), unless the user explicitly asks otherwise.
 
 ## Mandatory Validation After Every Change
 
