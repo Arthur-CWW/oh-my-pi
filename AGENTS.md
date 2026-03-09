@@ -55,8 +55,13 @@ Current persistent preferences:
 - Prefer **static module imports**; avoid dynamic/lazy `import()` unless technically required (and briefly justify when used).
 - When validating package installation behavior, default to **global `pi install` (no `-l`)** so settings are exercised under `~/.pi` (agent settings path), unless the user explicitly asks for project-local install behavior.
 - Keep fork repository metadata URLs aligned to the current git `origin` remote (owner/repo casing included), unless the user explicitly asks otherwise.
-- Prefer Effect-provided observability/logging/tracing primitives over custom in-repo observability implementations; add custom wrappers only when the Effect stack cannot meet a concrete requirement.
+- Prefer Effect-native instrumentation (`Effect.fn`, spans, typed errors) plus lightweight local event-emission services for migration observability; avoid adding OpenTelemetry/export pipeline work unless explicitly requested.
+- Observability/event services must be optional and fail-open: if emitting/persisting events fails, feature/tool behavior must continue.
+- Prefer schema-first boundaries: define Effect `Schema` once and derive runtime validation/decoding + TypeScript types from it where serde/input contracts exist.
+- At third-party boundaries, normalize nullable/undefined payloads with schema transforms/codecs (recursive normalization when needed) before domain logic.
+- Do not use raw `as` casts for tool parameters in Effect entry paths; decode/validate boundary inputs and return actionable errors.
 - Prefer Effect-native retry/timeouts (`Effect.retry`, `Schedule`, `Effect.timeout`) over bespoke retry helpers in Effect paths.
+- For standalone/dual-use tooling paths, prefer Effect CLI + schema-driven argument decoding patterns where practical to keep extension and CLI behavior aligned.
 - Do not introduce dynamic imports in new Effect code paths; use static imports and Effect-native/database-integrated approaches where possible.
 - Treat `src/old/*` as reference/stability baseline; avoid modifying it unless the user explicitly requests a legacy-path change.
 

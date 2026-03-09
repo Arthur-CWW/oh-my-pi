@@ -90,6 +90,18 @@ describe("effect shadow entry", () => {
 		rmSync(dbPath, { force: true });
 	});
 
+	it("validates effect_event_store_smoke params with schema decode", async () => {
+		const tools = registerWith(fakeDeps);
+		const tool = tools.get("effect_event_store_smoke");
+		expect(typeof tool?.execute).toBe("function");
+		if (typeof tool?.execute !== "function") throw new Error("missing execute");
+
+		const result = await tool.execute("call-1-schema", { dbPath: 1234 });
+		expect(result.details?.error).toBe("invalid-params");
+		expect(result.details?.reason).toContain("dbPath");
+		expect(result.content[0]?.text).toContain("Invalid parameters for effect_event_store_smoke");
+	});
+
 	it("runs web_search via effect deps", async () => {
 		const tools = registerWith(fakeDeps);
 		const tool = tools.get("web_search");
@@ -123,6 +135,27 @@ describe("effect shadow entry", () => {
 		expect(errorDetails?.nextStep).toContain("web_search");
 		expect(result.content[0]?.text).toContain("No query was provided");
 		expect(result.content[0]?.text).toContain("Next step:");
+	});
+
+	it("validates web_search params with schema decode", async () => {
+		const tools = registerWith(fakeDeps);
+		const tool = tools.get("web_search");
+		expect(typeof tool?.execute).toBe("function");
+		if (typeof tool?.execute !== "function") throw new Error("missing execute");
+
+		const result = await tool.execute("call-2a-schema", {
+			query: "effect",
+			numResults: 999,
+		});
+		const errorDetails = result.details?.error as
+			| {
+					readonly title?: string;
+					readonly technicalCause?: string;
+			  }
+			| undefined;
+		expect(errorDetails?.title).toBe("Invalid web_search parameters");
+		expect(errorDetails?.technicalCause).toContain("numResults");
+		expect(result.content[0]?.text).toContain("Invalid web_search parameters");
 	});
 
 	it("forwards kagi-specific provider and lens options", async () => {
@@ -176,6 +209,17 @@ describe("effect shadow entry", () => {
 		expect(errorDetails?.technicalCause).toBe("provider-down");
 		expect(result.content[0]?.text).toContain("Technical cause: provider-down");
 		expect(result.content[0]?.text).toContain("Next step:");
+	});
+
+	it("validates chrome_cookies params with schema decode", async () => {
+		const tools = registerWith(fakeDeps);
+		const tool = tools.get("chrome_cookies");
+		expect(typeof tool?.execute).toBe("function");
+		if (typeof tool?.execute !== "function") throw new Error("missing execute");
+
+		const result = await tool.execute("call-3-schema", { names: "__Secure-1PSID" });
+		expect(result.details?.error).toContain("names");
+		expect(result.content[0]?.text).toContain("Invalid parameters for chrome_cookies");
 	});
 
 	it("runs chrome_cookies via effect deps", async () => {

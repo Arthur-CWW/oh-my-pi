@@ -1,13 +1,13 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { StringEnum } from "@mariozechner/pi-ai";
 import { Type } from "@sinclair/typebox";
-import { Context, Effect, Layer, Schema } from "effect";
+import { Context, Effect, Layer, ParseResult, Schema } from "effect";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readChromeCookiesEffect, type CookieReadResult } from "./chrome-cookies.js";
-import { makeEvent } from "./core/Observability.js";
+import { makeEvent, type ObservabilityEventName } from "./core/Observability.js";
 import { type FullSearchOptions } from "./gemini-search.js";
 import { type SearchSuccess } from "./kagi-search.js";
 import { makeSqliteEventStore } from "./observability/EventStore.js";
@@ -19,23 +19,30 @@ import {
 } from "./search-runtime.js";
 import { makeSearchEventsService } from "./search-events.js";
 
-interface EventStoreSmokeParams {
-	readonly dbPath?: string;
-	readonly correlationId?: string;
-}
+const WebSearchProviderSchema = Schema.Literal("auto", "kagi", "gemini");
+const RecencyFilterSchema = Schema.Literal("day", "week", "month", "year");
 
-interface WebSearchParams {
-	readonly query?: string;
-	readonly provider?: "auto" | "kagi" | "gemini";
-	readonly numResults?: number;
-	readonly recencyFilter?: "day" | "week" | "month" | "year";
-	readonly domainFilter?: string[];
-	readonly lens?: string;
-}
+const EventStoreSmokeParamsSchema = Schema.Struct({
+	dbPath: Schema.optional(Schema.String),
+	correlationId: Schema.optional(Schema.String),
+});
 
-interface CookiesParams {
-	readonly names?: string[];
-}
+const WebSearchParamsSchema = Schema.Struct({
+	query: Schema.String,
+	provider: Schema.optional(WebSearchProviderSchema),
+	numResults: Schema.optional(Schema.Number.pipe(Schema.between(1, 20))),
+	recencyFilter: Schema.optional(RecencyFilterSchema),
+	domainFilter: Schema.optional(Schema.Array(Schema.String)),
+	lens: Schema.optional(Schema.String),
+});
+
+const CookiesParamsSchema = Schema.Struct({
+	names: Schema.optional(Schema.Array(Schema.String)),
+});
+
+type EventStoreSmokeParams = typeof EventStoreSmokeParamsSchema.Type;
+type WebSearchParams = typeof WebSearchParamsSchema.Type;
+type CookiesParams = typeof CookiesParamsSchema.Type;
 
 interface RegisterEffectToolsOptions {
 	readonly includeWebSearch?: boolean;
@@ -68,6 +75,15 @@ interface CookiesToolDetails {
 	readonly error: string | null;
 	readonly source?: CookieReadResult["source"];
 	readonly warnings?: ReadonlyArray<string>;
+}
+
+interface EventStoreSmokeToolDetails {
+	readonly error: string | null;
+	readonly reason: string | null;
+	readonly dbPath: string | null;
+	readonly correlationId: string | null;
+	readonly eventCount: number;
+	readonly latestEventName: ObservabilityEventName | null;
 }
 
 type SearchExecutionOutcome =
@@ -131,6 +147,24 @@ function toErrorMessage(error: unknown): string {
 		}
 	}
 	return String(error);
+}
+
+function formatParseError(error: ParseResult.ParseError): string {
+	return ParseResult.TreeFormatter.formatErrorSync(error);
+}
+
+async function decodeToolParams<A, I>(
+	schema: Schema.Schema<A, I, never>,
+	rawParams: unknown,
+): Promise<{ readonly ok: true; readonly value: A } | { readonly ok: false; readonly message: string }> {
+	return Effect.runPromise(
+		Schema.decodeUnknown(schema)(rawParams).pipe(
+			Effect.match({
+				onSuccess: (value) => ({ ok: true as const, value }),
+				onFailure: (error) => ({ ok: false as const, message: formatParseError(error) }),
+			}),
+		),
+	);
 }
 
 function isTaggedError(error: unknown, tag: string): boolean {
@@ -326,7 +360,22 @@ function registerEventStoreSmokeTool(pi: ExtensionAPI): void {
 			correlationId: Type.Optional(Type.String()),
 		}),
 		async execute(_toolCallId, rawParams) {
-			const params = rawParams as EventStoreSmokeParams;
+			const decoded = await decodeToolParams(EventStoreSmokeParamsSchema, rawParams);
+			if (decoded.ok === false) {
+				const details: EventStoreSmokeToolDetails = {
+					error: "invalid-params",
+					reason: decoded.message,
+					dbPath: null,
+					correlationId: null,
+					eventCount: 0,
+					latestEventName: null,
+				};
+				return {
+					content: [{ type: "text", text: "Invalid parameters for effect_event_store_smoke." }],
+					details,
+				};
+			}
+			const params: EventStoreSmokeParams = decoded.value;
 			const dbPath =
 				params.dbPath ?? join(tmpdir(), `pi-web-access-effect-shadow-${Date.now()}-${randomUUID()}.sqlite`);
 			const correlationId = params.correlationId ?? `effect-shadow-${randomUUID()}`;
@@ -342,26 +391,30 @@ function registerEventStoreSmokeTool(pi: ExtensionAPI): void {
 				);
 				const events = yield* store.listByCorrelationId(correlationId);
 				yield* store.close;
-				return {
+				const details: EventStoreSmokeToolDetails = {
 					error: null,
+					reason: null,
 					dbPath,
 					correlationId,
 					eventCount: events.length,
 					latestEventName: events[events.length - 1]?.name ?? null,
 				};
+				return details;
 			});
 
 			const exit = await Effect.runPromiseExit(program);
 			if (exit._tag === "Failure") {
+				const details: EventStoreSmokeToolDetails = {
+					error: "event-store-smoke-failed",
+					reason: null,
+					dbPath,
+					correlationId,
+					eventCount: 0,
+					latestEventName: null,
+				};
 				return {
 					content: [{ type: "text", text: "Effect shadow event-store smoke failed." }],
-					details: {
-						error: "event-store-smoke-failed",
-						dbPath,
-						correlationId,
-						eventCount: 0,
-						latestEventName: null,
-					},
+					details,
 				};
 			}
 
@@ -390,8 +443,33 @@ function registerWebSearchTool(pi: ExtensionAPI, searchLayer: Layer.Layer<Search
 			domainFilter: Type.Optional(Type.Array(Type.String())),
 		}),
 		async execute(_toolCallId, rawParams) {
-			const params = rawParams as WebSearchParams;
-			if (!params.query?.trim()) {
+			const decoded = await decodeToolParams(WebSearchParamsSchema, rawParams);
+			if (decoded.ok === false) {
+				const error = SearchToolExecutionError.make({
+					title: "Invalid web_search parameters",
+					reassurance: "The request reached the tool, but one or more arguments are invalid.",
+					technicalCause: decoded.message,
+					nextStep: "Fix the tool arguments and retry. Verify provider enum, numResults range, and list field types.",
+					escapeHatch: "If this came from automation, validate payloads against the tool schema before calling.",
+					retryable: true,
+				});
+				const details: WebSearchToolDetails = {
+					error: {
+						title: error.title,
+						reassurance: error.reassurance,
+						technicalCause: error.technicalCause,
+						nextStep: error.nextStep,
+						escapeHatch: error.escapeHatch,
+						retryable: error.retryable,
+					},
+				};
+				return {
+					content: [{ type: "text", text: formatSearchToolError(error) }],
+					details,
+				};
+			}
+			const params: WebSearchParams = decoded.value;
+			if (!params.query.trim()) {
 				const error = SearchToolExecutionError.make({
 					title: "No query was provided",
 					reassurance: "The tool is ready to run once you provide a search query.",
@@ -418,11 +496,11 @@ function registerWebSearchTool(pi: ExtensionAPI, searchLayer: Layer.Layer<Search
 
 			const searchProgram = Effect.gen(function* () {
 				const search = yield* SearchService;
-				return yield* search.search(params.query ?? "", {
+				return yield* search.search(params.query, {
 					provider: params.provider,
 					numResults: params.numResults,
 					recencyFilter: params.recencyFilter,
-					domainFilter: params.domainFilter,
+					domainFilter: params.domainFilter ? [...params.domainFilter] : undefined,
 					lens: params.lens,
 				});
 			}).pipe(Effect.provide(searchLayer));
@@ -480,7 +558,15 @@ function registerChromeCookiesTool(pi: ExtensionAPI, cookiesLayer: Layer.Layer<C
 			names: Type.Optional(Type.Array(Type.String())),
 		}),
 		async execute(_toolCallId, rawParams) {
-			const params = rawParams as CookiesParams;
+			const decoded = await decodeToolParams(CookiesParamsSchema, rawParams);
+			if (decoded.ok === false) {
+				const details: CookiesToolDetails = { error: decoded.message };
+				return {
+					content: [{ type: "text", text: `Invalid parameters for chrome_cookies.\n${decoded.message}` }],
+					details,
+				};
+			}
+			const params: CookiesParams = decoded.value;
 			const requested = params.names ?? ["__Secure-1PSID", "__Secure-1PSIDTS", "NID"];
 
 			const readProgram = Effect.gen(function* () {
