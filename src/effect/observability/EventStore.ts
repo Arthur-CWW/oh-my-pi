@@ -1,4 +1,5 @@
 import { mkdirSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname } from "node:path";
 import { Effect } from "effect";
 import { EventStoreError, stringifyUnknown } from "../core/Errors.js";
@@ -67,10 +68,20 @@ function asString(value: unknown): string | undefined {
 }
 
 async function loadSqliteDatabase(dbPath: string): Promise<SqliteDatabase> {
+	const require = createRequire(import.meta.url);
 	const errors: string[] = [];
 
 	try {
-		const bunSqlite = (await import("bun:sqlite")) as typeof import("bun:sqlite");
+		const bunSqlite = require("bun:sqlite") as {
+			readonly Database: new (path: string) => {
+				exec: (sql: string) => unknown;
+				prepare: (sql: string) => {
+					run: (...params: ReadonlyArray<SqliteParam>) => unknown;
+					all: (...params: ReadonlyArray<SqliteParam>) => unknown;
+				};
+				close: () => void;
+			};
+		};
 		const db = new bunSqlite.Database(dbPath);
 		return {
 			exec: (sql) => db.exec(sql),
@@ -88,7 +99,7 @@ async function loadSqliteDatabase(dbPath: string): Promise<SqliteDatabase> {
 	}
 
 	try {
-		const nodeSqlite = (await import("node:sqlite")) as typeof import("node:sqlite");
+		const nodeSqlite = require("node:sqlite") as typeof import("node:sqlite");
 		const db = new nodeSqlite.DatabaseSync(dbPath);
 		return {
 			exec: (sql) => db.exec(sql),
