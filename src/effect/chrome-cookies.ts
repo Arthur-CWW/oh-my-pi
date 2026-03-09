@@ -1,7 +1,7 @@
 import { Effect, Either, Schema } from "effect";
 import { platform } from "node:os";
 import puppeteer from "puppeteer-core";
-import { getGoogleCookies as readLegacyGoogleCookies, type CookieMap } from "../old/chrome-cookies.js";
+import { readLegacyGoogleCookies, type CookieMap } from "./chrome-cookies-legacy.js";
 
 const DEFAULT_CHROME_DEBUG_URL = "http://localhost:9222";
 

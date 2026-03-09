@@ -1,6 +1,6 @@
 import { Effect, Schema } from "effect";
-import { API_BASE, DEFAULT_MODEL, getApiKey } from "../old/gemini-api.js";
-import { isGeminiWebAvailable, queryWithCookies } from "../old/gemini-web.js";
+import { API_BASE, DEFAULT_MODEL, getApiKey } from "./gemini-api.js";
+import { isGeminiWebAvailable, queryWithCookies } from "./gemini-web.js";
 
 export interface SearchResult {
 	title: string;

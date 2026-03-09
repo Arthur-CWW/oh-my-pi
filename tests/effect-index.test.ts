@@ -245,6 +245,25 @@ describe("effect production cutover entry", () => {
 		expect(String(tools.get("web_search")?.description ?? "")).toContain("Kagi");
 	});
 
+	it("supports disabling the legacy bridge with PI_WEB_ACCESS_DISABLE_LEGACY_BRIDGE", () => {
+		const previous = process.env.PI_WEB_ACCESS_DISABLE_LEGACY_BRIDGE;
+		process.env.PI_WEB_ACCESS_DISABLE_LEGACY_BRIDGE = "1";
+		try {
+			const tools = registerCutoverEntry();
+			expect(tools.has("web_search")).toBe(true);
+			expect(tools.has("fetch_content")).toBe(false);
+			expect(tools.has("get_search_content")).toBe(false);
+			expect(tools.has("chrome_cookies")).toBe(true);
+			expect(tools.has("effect_event_store_smoke")).toBe(true);
+		} finally {
+			if (previous === undefined) {
+				delete process.env.PI_WEB_ACCESS_DISABLE_LEGACY_BRIDGE;
+			} else {
+				process.env.PI_WEB_ACCESS_DISABLE_LEGACY_BRIDGE = previous;
+			}
+		}
+	});
+
 	it("package entrypoint points to effect index", () => {
 		const packageJson = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8")) as {
 			readonly pi?: { readonly extensions?: readonly string[] };

@@ -24,31 +24,6 @@ export class MissingConfigError extends Schema.TaggedError<MissingConfigError>()
 	},
 ) {}
 
-export class HttpRequestError extends Schema.TaggedError<HttpRequestError>()(
-	"HttpRequestError",
-	{
-		url: Schema.String,
-		reason: Schema.String,
-	},
-) {}
-
-export class HttpTimeoutError extends Schema.TaggedError<HttpTimeoutError>()(
-	"HttpTimeoutError",
-	{
-		url: Schema.String,
-		timeoutMs: Schema.Number,
-	},
-) {}
-
-export class HttpStatusError extends Schema.TaggedError<HttpStatusError>()(
-	"HttpStatusError",
-	{
-		url: Schema.String,
-		status: Schema.Number,
-		bodySnippet: Schema.String,
-	},
-) {}
-
 export class EventStoreError extends Schema.TaggedError<EventStoreError>()(
 	"EventStoreError",
 	{
@@ -57,8 +32,6 @@ export class EventStoreError extends Schema.TaggedError<EventStoreError>()(
 ) {}
 
 export type ConfigError = ConfigReadError | ConfigParseError | MissingConfigError;
-
-export type HttpError = HttpRequestError | HttpTimeoutError | HttpStatusError;
 
 export function stringifyUnknown(value: unknown): string {
 	if (value instanceof Error) {

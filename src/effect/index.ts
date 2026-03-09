@@ -626,14 +626,25 @@ export function registerEffectTools(
 	}
 }
 
+function isLegacyBridgeDisabled(): boolean {
+	const value = process.env.PI_WEB_ACCESS_DISABLE_LEGACY_BRIDGE;
+	if (!value) {
+		return false;
+	}
+	const normalized = value.trim().toLowerCase();
+	return normalized === "1" || normalized === "true";
+}
+
 export default function (pi: ExtensionAPI) {
-	const registerLegacy = loadLegacyRegistrar();
-	if (registerLegacy) {
-		registerLegacy(pi);
-		// Register Effect web_search last so it overrides legacy web_search while
-		// preserving the rest of the legacy tool surface during migration.
-		registerEffectTools(pi, defaultDeps, { includeWebSearch: true });
-		return;
+	if (!isLegacyBridgeDisabled()) {
+		const registerLegacy = loadLegacyRegistrar();
+		if (registerLegacy) {
+			registerLegacy(pi);
+			// Register Effect web_search last so it overrides legacy web_search while
+			// preserving the rest of the legacy tool surface during migration.
+			registerEffectTools(pi, defaultDeps, { includeWebSearch: true });
+			return;
+		}
 	}
 
 	registerEffectTools(pi, defaultDeps, { includeWebSearch: true });
