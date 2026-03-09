@@ -1,41 +1,55 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { Config, ConfigProvider, Effect, Layer, Option } from "effect";
 
 export const API_BASE = "https://generativelanguage.googleapis.com/v1beta";
 const CONFIG_PATH = join(homedir(), ".pi", "web-search.json");
 export const DEFAULT_MODEL = "gemini-3-flash-preview";
 
-interface GeminiApiConfig {
-	readonly geminiApiKey?: string;
-	readonly GEMINI_API_KEY?: string;
-}
+let cachedFileConfig: unknown | null = null;
 
-let cachedConfig: GeminiApiConfig | null = null;
-
-function loadConfig(): GeminiApiConfig {
-	if (cachedConfig) {
-		return cachedConfig;
+function loadConfigJson(): unknown {
+	if (cachedFileConfig !== null) {
+		return cachedFileConfig;
 	}
 	if (existsSync(CONFIG_PATH)) {
 		try {
-			cachedConfig = JSON.parse(readFileSync(CONFIG_PATH, "utf-8")) as GeminiApiConfig;
-			return cachedConfig;
+			cachedFileConfig = JSON.parse(readFileSync(CONFIG_PATH, "utf-8")) as unknown;
+			return cachedFileConfig;
 		} catch {
-			// Fall back to empty config.
+			// Fall back to empty config object.
 		}
 	}
-	cachedConfig = {};
-	return cachedConfig;
+	cachedFileConfig = {};
+	return cachedFileConfig;
+}
+
+function readApiKeyFromEnvironment(): string | null {
+	const option = Effect.runSync(Config.option(Config.string("GEMINI_API_KEY")));
+	return Option.isSome(option) ? option.value : null;
+}
+
+function readApiKeyFromFileConfig(rawConfig: unknown): string | null {
+	const program = Config.option(
+		Config.string("geminiApiKey").pipe(Config.orElse(() => Config.string("GEMINI_API_KEY"))),
+	).pipe(Effect.provide(Layer.setConfigProvider(ConfigProvider.fromJson(rawConfig))));
+
+	const exit = Effect.runSyncExit(program);
+	if (exit._tag === "Failure") {
+		return null;
+	}
+	return Option.isSome(exit.value) ? exit.value.value : null;
 }
 
 export function getApiKey(): string | null {
-	const envKey = process.env.GEMINI_API_KEY;
+	const envKey = readApiKeyFromEnvironment();
 	if (envKey) {
 		return envKey;
 	}
-	const config = loadConfig();
-	return config.geminiApiKey ?? config.GEMINI_API_KEY ?? null;
+
+	const config = loadConfigJson();
+	return readApiKeyFromFileConfig(config);
 }
 
 export function isGeminiApiAvailable(): boolean {

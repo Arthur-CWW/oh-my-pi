@@ -26,6 +26,22 @@ describe("effect core", () => {
 		expect(config.shortcuts?.activity).toBe("ctrl+shift+w");
 	});
 
+	it("decodes kagi provider and defaults unknown providers to auto", async () => {
+		const kagiConfig = await Effect.runPromise(
+			decodeWebSearchConfig({
+				provider: "kagi",
+			}),
+		);
+		const unknownConfig = await Effect.runPromise(
+			decodeWebSearchConfig({
+				provider: "not-a-provider",
+			}),
+		);
+
+		expect(kagiConfig.provider).toBe("kagi");
+		expect(unknownConfig.provider).toBe("auto");
+	});
+
 	it("returns typed missing env errors", async () => {
 		const key = "PI_WEB_ACCESS_TEST_MISSING_ENV";
 		delete process.env[key];

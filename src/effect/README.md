@@ -11,3 +11,4 @@ Legacy parity/debug entrypoint retained: `src/old/index.ts`.
 - `src/effect/core/Errors.ts`
 - `src/effect/core/Config.ts`
 - `src/effect/core/Observability.ts`
+- `src/effect/search-contracts.ts`

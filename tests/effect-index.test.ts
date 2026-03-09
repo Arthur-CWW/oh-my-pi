@@ -158,6 +158,26 @@ describe("effect shadow entry", () => {
 		expect(result.content[0]?.text).toContain("Invalid web_search parameters");
 	});
 
+	it("rejects deprecated auto provider selection at tool boundary", async () => {
+		const tools = registerWith(fakeDeps);
+		const tool = tools.get("web_search");
+		expect(typeof tool?.execute).toBe("function");
+		if (typeof tool?.execute !== "function") throw new Error("missing execute");
+
+		const result = await tool.execute("call-2a-provider-auto", {
+			query: "effect",
+			provider: "auto",
+		});
+		const errorDetails = result.details?.error as
+			| {
+					readonly title?: string;
+					readonly technicalCause?: string;
+			  }
+			| undefined;
+		expect(errorDetails?.title).toBe("Invalid web_search parameters");
+		expect(errorDetails?.technicalCause).toContain("provider");
+	});
+
 	it("forwards kagi-specific provider and lens options", async () => {
 		let capturedProvider: string | undefined;
 		let capturedLens: string | undefined;

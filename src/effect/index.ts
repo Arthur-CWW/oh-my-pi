@@ -17,10 +17,13 @@ import {
 	type SearchRuntimeResponse,
 	searchWithFallback,
 } from "./search-runtime.js";
+import {
+	RECENCY_FILTER_VALUES,
+	SEARCH_PROVIDER_SELECTION_VALUES,
+	RecencyFilterSchema,
+	SearchProviderSelectionSchema,
+} from "./search-contracts.js";
 import { makeSearchEventsService } from "./search-events.js";
-
-const WebSearchProviderSchema = Schema.Literal("auto", "kagi", "gemini");
-const RecencyFilterSchema = Schema.Literal("day", "week", "month", "year");
 
 const EventStoreSmokeParamsSchema = Schema.Struct({
 	dbPath: Schema.optional(Schema.String),
@@ -29,7 +32,7 @@ const EventStoreSmokeParamsSchema = Schema.Struct({
 
 const WebSearchParamsSchema = Schema.Struct({
 	query: Schema.String,
-	provider: Schema.optional(WebSearchProviderSchema),
+	provider: Schema.optional(SearchProviderSelectionSchema),
 	numResults: Schema.optional(Schema.Number.pipe(Schema.between(1, 20))),
 	recencyFilter: Schema.optional(RecencyFilterSchema),
 	domainFilter: Schema.optional(Schema.Array(Schema.String)),
@@ -436,7 +439,7 @@ function registerWebSearchTool(pi: ExtensionAPI, searchLayer: Layer.Layer<Search
 			"Web search tool using Kagi (default) with Gemini fallback. Supports Kagi operators (`filetype:`, `site:`, `inurl:`, `intitle:`, quotes, boolean/grouping) plus Google-style compatibility helpers (`before:`/`after:` full-date mapping, `ext:`, `allintitle:`, `allinurl:`, `allintext:`). Unsupported operators are passed through and may be ignored by Kagi.",
 		parameters: Type.Object({
 			query: Type.String({ description: "Search query (Google-style operators supported where Kagi-compatible)" }),
-			provider: Type.Optional(StringEnum(["auto", "kagi", "gemini"])),
+			provider: Type.Optional(StringEnum([...SEARCH_PROVIDER_SELECTION_VALUES])),
 			lens: Type.Optional(Type.String()),
 			numResults: Type.Optional(Type.Number({ minimum: 1, maximum: 20 })),
 			recencyFilter: Type.Optional(StringEnum(["day", "week", "month", "year"])),

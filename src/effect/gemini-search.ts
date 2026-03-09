@@ -1,6 +1,16 @@
-import { Effect, Schema } from "effect";
+import { Args, Command, Options } from "@effect/cli";
+import { NodeContext } from "@effect/platform-node";
+import { Effect, Option, Schema } from "effect";
 import { API_BASE, DEFAULT_MODEL, getApiKey } from "./gemini-api.js";
 import { isGeminiWebAvailable, queryWithCookies } from "./gemini-web.js";
+import {
+	GEMINI_CLI_PROVIDER_VALUES,
+	RECENCY_FILTER_VALUES,
+	decodeGeminiCliProvider,
+	decodeRecencyFilter,
+	type RecencyFilter,
+	type SearchProvider,
+} from "./search-contracts.js";
 
 export interface SearchResult {
 	title: string;
@@ -15,12 +25,10 @@ export interface SearchResponse {
 
 export interface SearchOptions {
 	numResults?: number;
-	recencyFilter?: "day" | "week" | "month" | "year";
+	recencyFilter?: RecencyFilter;
 	domainFilter?: string[];
 	signal?: AbortSignal;
 }
-
-export type SearchProvider = "auto" | "gemini" | "kagi";
 
 export interface FullSearchOptions extends SearchOptions {
 	readonly provider?: SearchProvider;
@@ -303,32 +311,13 @@ const SEARCH_CLI_USAGE = `Usage: bun src/effect/gemini-search.ts [options] [quer
 
 Options:
   -q, --query <text>             Search query
-      --provider <auto|gemini>
+      --provider <gemini>
       --num-results <1-20>
       --recency-filter <day|week|month|year>
       --domain <host>            Repeatable. Prefix with '-' to exclude.
       --json                     Print JSON output
   -h, --help                     Show this help
 `;
-
-const RECENCY_FILTERS = new Set<NonNullable<SearchOptions["recencyFilter"]>>([
-	"day",
-	"week",
-	"month",
-	"year",
-]);
-
-const SEARCH_PROVIDERS = new Set<SearchProvider>(["auto", "gemini"]);
-
-function isSearchProvider(value: string): value is SearchProvider {
-	return SEARCH_PROVIDERS.has(value as SearchProvider);
-}
-
-function isRecencyFilter(
-	value: string,
-): value is NonNullable<SearchOptions["recencyFilter"]> {
-	return RECENCY_FILTERS.has(value as NonNullable<SearchOptions["recencyFilter"]>);
-}
 
 type SearchCliValueResult =
 	| { readonly kind: "ok"; readonly value: string }
@@ -372,13 +361,14 @@ export function parseSearchCliArgs(argv: readonly string[]): SearchCliParseResul
 			case "--provider": {
 				const parsed = parseCliValue(argv, index, arg);
 				if (parsed.kind === "error") return parsed;
-				if (!isSearchProvider(parsed.value)) {
+				const decodedProvider = decodeGeminiCliProvider(parsed.value);
+				if (!decodedProvider) {
 					return {
 						kind: "error",
 						message: `Invalid provider \"${parsed.value}\"`,
 					};
 				}
-				provider = parsed.value;
+				provider = decodedProvider;
 				index += 1;
 				break;
 			}
@@ -397,13 +387,14 @@ export function parseSearchCliArgs(argv: readonly string[]): SearchCliParseResul
 			case "--recency": {
 				const parsed = parseCliValue(argv, index, arg);
 				if (parsed.kind === "error") return parsed;
-				if (!isRecencyFilter(parsed.value)) {
+				const decodedRecencyFilter = decodeRecencyFilter(parsed.value);
+				if (!decodedRecencyFilter) {
 					return {
 						kind: "error",
 						message: `Invalid recency filter \"${parsed.value}\"`,
 					};
 				}
-				recencyFilter = parsed.value;
+				recencyFilter = decodedRecencyFilter;
 				index += 1;
 				break;
 			}
@@ -473,33 +464,110 @@ function formatSearchCliOutput(response: SearchResponse): string {
 	return lines.join("\n");
 }
 
+class SearchCliParseError extends Schema.TaggedError<SearchCliParseError>()("SearchCliParseError", {
+	reason: Schema.String,
+}) {}
+
+function normalizeDomainFilters(rawDomains: ReadonlyArray<string>): ReadonlyArray<string> {
+	return rawDomains
+		.flatMap((entry) => entry.split(","))
+		.map((entry) => entry.trim())
+		.filter((entry) => entry.length > 0);
+}
+
+function makeSearchCliParserCommand() {
+	let parsed: SearchCliArgs | null = null;
+
+	const queryOption = Options.text("query").pipe(Options.withAlias("q"), Options.optional);
+	const queryArg = Args.text({ name: "query" }).pipe(Args.optional);
+	const provider = Options.choice("provider", [...GEMINI_CLI_PROVIDER_VALUES]).pipe(Options.optional);
+	const numResults = Options.integer("num-results").pipe(Options.optional);
+	const recencyFilter = Options.choice("recency-filter", [...RECENCY_FILTER_VALUES]).pipe(Options.optional);
+	const domain = Options.text("domain").pipe(Options.repeated);
+	const json = Options.boolean("json");
+
+	const command = Command.make(
+		"gemini-search",
+		{ queryOption, queryArg, provider, numResults, recencyFilter, domain, json },
+		(options) =>
+			Effect.gen(function* () {
+				const query =
+					(Option.getOrUndefined(options.queryOption) ?? Option.getOrUndefined(options.queryArg) ?? "").trim();
+				if (!query) {
+					return yield* SearchCliParseError.make({ reason: "Missing search query" });
+				}
+
+				const domainFilter = normalizeDomainFilters(options.domain);
+				yield* Effect.sync(() => {
+					parsed = {
+						query,
+						options: {
+							...(Option.isSome(options.provider) ? { provider: options.provider.value } : {}),
+							...(Option.isSome(options.numResults) ? { numResults: options.numResults.value } : {}),
+							...(Option.isSome(options.recencyFilter)
+								? { recencyFilter: options.recencyFilter.value }
+								: {}),
+							...(domainFilter.length > 0 ? { domainFilter: [...domainFilter] } : {}),
+						},
+						json: options.json,
+						help: false,
+					};
+				});
+			}),
+	);
+
+	return {
+		command,
+		readParsed: () => parsed,
+	};
+}
+
 export async function runSearchCli(
 	argv: readonly string[],
 	deps: SearchCliDeps = {},
 ): Promise<number> {
-	const parsed = parseSearchCliArgs(argv);
 	const stdout = deps.stdout ?? ((text: string) => console.log(text));
 	const stderr = deps.stderr ?? ((text: string) => console.error(text));
-	if (parsed.kind === "error") {
-		stderr(`Error: ${parsed.message}`);
-		stderr(SEARCH_CLI_USAGE.trimEnd());
-		return 1;
-	}
-
-	if (parsed.value.help) {
+	if (argv.includes("--help") || argv.includes("-h")) {
 		stdout(SEARCH_CLI_USAGE.trimEnd());
 		return 0;
 	}
 
+	const parser = makeSearchCliParserCommand();
+	const cli = Command.run(parser.command, {
+		name: "gemini-search",
+		version: "0.0.0",
+	});
+
+	const parseExit = await Effect.runPromiseExit(
+		cli(["node", "gemini-search", ...argv]).pipe(Effect.provide(NodeContext.layer)),
+	);
+	if (parseExit._tag === "Failure") {
+		const fallbackParse = parseSearchCliArgs(argv);
+		if (fallbackParse.kind === "error") {
+			stderr(`Error: ${fallbackParse.message}`);
+			stderr(SEARCH_CLI_USAGE.trimEnd());
+			return 1;
+		}
+		stderr("Error: Search command failed");
+		return 1;
+	}
+
+	const parsed = parser.readParsed();
+	if (!parsed) {
+		stderr("Error: Search command failed");
+		return 1;
+	}
+
 	const executeSearch = deps.executeSearch ?? search;
 	try {
-		const response = await executeSearch(parsed.value.query, parsed.value.options);
-		if (parsed.value.json) {
+		const response = await executeSearch(parsed.query, parsed.options);
+		if (parsed.json) {
 			stdout(
 				JSON.stringify(
 					{
-						query: parsed.value.query,
-						options: parsed.value.options,
+						query: parsed.query,
+						options: parsed.options,
 						response,
 					},
 					null,

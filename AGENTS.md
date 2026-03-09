@@ -61,7 +61,8 @@ Current persistent preferences:
 - At third-party boundaries, normalize nullable/undefined payloads with schema transforms/codecs (recursive normalization when needed) before domain logic.
 - Do not use raw `as` casts for tool parameters in Effect entry paths; decode/validate boundary inputs and return actionable errors.
 - Prefer Effect-native retry/timeouts (`Effect.retry`, `Schedule`, `Effect.timeout`) over bespoke retry helpers in Effect paths.
-- For standalone/dual-use tooling paths, prefer Effect CLI + schema-driven argument decoding patterns where practical to keep extension and CLI behavior aligned.
+- For standalone/dual-use tooling paths, prefer Effect CLI (`@effect/cli`) over bespoke argument parsing; use hand-rolled parsers only as temporary migration shims.
+- Prefer Effect Config (`Config`, `Schema.Config`, `ConfigProvider`) over ad-hoc env/json config readers for new or refactored config surfaces.
 - Do not introduce dynamic imports in new Effect code paths; use static imports and Effect-native/database-integrated approaches where possible.
 - Treat `src/old/*` as reference/stability baseline; avoid modifying it unless the user explicitly requests a legacy-path change.
 

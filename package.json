@@ -57,11 +57,14 @@
 		"framework:remote": "bash scripts/framework-remote.sh"
 	},
 	"dependencies": {
-		"@effect/platform": "^0.94.5",
-		"@effect/platform-node": "^0.104.1",
-		"@effect/schema": "^0.75.5",
+		"@effect/cli": "0.73.2",
+		"@effect/platform": "0.94.5",
+		"@effect/platform-node": "0.104.1",
+		"@effect/printer": "0.47.0",
+		"@effect/printer-ansi": "0.47.0",
+		"@effect/schema": "0.75.5",
 		"@mozilla/readability": "^0.5.0",
-		"effect": "^3.19.18",
+		"effect": "3.19.18",
 		"linkedom": "^0.16.0",
 		"p-limit": "^6.1.0",
 		"puppeteer-core": "^24.26.1",
@@ -74,12 +77,11 @@
 		],
 		"skills": [
 			"./skills"
-		],
-		"video": "https://github.com/Arthur-CWW/pi-web-access/raw/refs/heads/main/pi-web-fetch-demo.mp4"
+		]
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.4.2",
-		"@effect/language-service": "^0.79.0",
+		"@effect/language-service": "0.79.0",
 		"@mariozechner/pi-ai": "^0.53.0",
 		"@mariozechner/pi-coding-agent": "^0.53.0",
 		"@mariozechner/pi-tui": "^0.53.0",
