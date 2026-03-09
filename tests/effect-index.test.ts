@@ -63,6 +63,7 @@ const fakeDeps: EffectExtensionDeps = {
 		Effect.succeed({
 			cookies: { "__Secure-1PSID": "x", "__Secure-1PSIDTS": "y" },
 			warnings: [],
+			source: "legacy",
 		}),
 };
 

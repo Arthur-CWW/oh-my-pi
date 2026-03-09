@@ -1,5 +1,43 @@
-import { Effect, Schema } from "effect";
-import { getGoogleCookies, type CookieMap } from "../old/chrome-cookies.js";
+import { Effect, Either, Schema } from "effect";
+import { platform } from "node:os";
+import puppeteer from "puppeteer-core";
+import { getGoogleCookies as readLegacyGoogleCookies, type CookieMap } from "../old/chrome-cookies.js";
+
+const DEFAULT_CHROME_DEBUG_URL = "http://localhost:9222";
+
+const GOOGLE_ORIGINS = [
+	"https://gemini.google.com",
+	"https://accounts.google.com",
+	"https://www.google.com",
+] as const;
+
+const GOOGLE_COOKIE_NAMES = new Set([
+	"__Secure-1PSID",
+	"__Secure-1PSIDTS",
+	"__Secure-1PSIDCC",
+	"__Secure-1PAPISID",
+	"NID",
+	"AEC",
+	"SOCS",
+	"__Secure-BUCKET",
+	"__Secure-ENID",
+	"SID",
+	"HSID",
+	"SSID",
+	"APISID",
+	"SAPISID",
+	"__Secure-3PSID",
+	"__Secure-3PSIDTS",
+	"__Secure-3PAPISID",
+	"SIDCC",
+]);
+
+interface BrowserCookieRecord {
+	readonly name: string;
+	readonly value: string;
+	readonly domain: string;
+	readonly expires: number;
+}
 
 export class ChromeCookiesError extends Schema.TaggedError<ChromeCookiesError>()(
 	"ChromeCookiesError",
@@ -11,34 +49,217 @@ export class ChromeCookiesError extends Schema.TaggedError<ChromeCookiesError>()
 export interface CookieReadResult {
 	readonly cookies: CookieMap;
 	readonly warnings: ReadonlyArray<string>;
+	readonly source: "legacy" | "devtools" | "none";
 }
 
 export interface ChromeCookiesDeps {
-	readonly getGoogleCookies: () => Promise<{ cookies: CookieMap; warnings: string[] } | null>;
+	readonly readLegacyGoogleCookies: () => Promise<{ cookies: CookieMap; warnings: string[] } | null>;
+	readonly readGoogleCookiesFromDevTools: (
+		browserUrl: string,
+	) => Promise<{ cookies: CookieMap; warnings: string[] }>;
+	readonly getChromeDebugUrl: () => string;
+	readonly getPlatform: () => NodeJS.Platform;
 }
 
 const defaultDeps: ChromeCookiesDeps = {
-	getGoogleCookies,
+	readLegacyGoogleCookies,
+	readGoogleCookiesFromDevTools,
+	getChromeDebugUrl: () => process.env.CHROME_DEBUG_URL ?? DEFAULT_CHROME_DEBUG_URL,
+	getPlatform: platform,
 };
+
+function toErrorMessage(error: unknown): string {
+	if (error instanceof Error) {
+		return error.message;
+	}
+	return String(error);
+}
+
+function normalizeChromeDebugUrl(value: string): string {
+	const trimmed = value.trim();
+	return trimmed.length > 0 ? trimmed : DEFAULT_CHROME_DEBUG_URL;
+}
+
+function isGoogleCookieDomain(domain: string, googleHosts: ReadonlyArray<string>): boolean {
+	const normalized = domain.replace(/^\.+/, "").toLowerCase();
+	if (normalized.length === 0) {
+		return false;
+	}
+	for (const host of googleHosts) {
+		const normalizedHost = host.toLowerCase();
+		if (normalized === normalizedHost || normalized.endsWith(`.${normalizedHost}`)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+function isCookieNotExpired(expires: number, nowEpochSeconds: number): boolean {
+	if (!Number.isFinite(expires) || expires <= 0) {
+		return true;
+	}
+	return expires > nowEpochSeconds;
+}
+
+function expandHostCandidates(host: string): ReadonlyArray<string> {
+	const parts = host.split(".").filter(Boolean);
+	if (parts.length <= 1) {
+		return [host];
+	}
+	const candidates = new Set<string>();
+	candidates.add(host);
+	for (let index = 1; index <= parts.length - 2; index++) {
+		const suffix = parts.slice(index).join(".");
+		if (suffix.length > 0) {
+			candidates.add(suffix);
+		}
+	}
+	return [...candidates];
+}
+
+function buildGoogleHostCandidates(): ReadonlyArray<string> {
+	const hosts = new Set<string>();
+	for (const origin of GOOGLE_ORIGINS) {
+		const hostname = new URL(origin).hostname;
+		for (const candidate of expandHostCandidates(hostname)) {
+			hosts.add(candidate);
+		}
+	}
+	return [...hosts];
+}
+
+export function selectGoogleCookies(
+	rows: ReadonlyArray<BrowserCookieRecord>,
+	nowEpochSeconds = Date.now() / 1000,
+): CookieMap {
+	const googleHosts = buildGoogleHostCandidates();
+	const selected: CookieMap = {};
+	for (const row of rows) {
+		if (!GOOGLE_COOKIE_NAMES.has(row.name)) {
+			continue;
+		}
+		if (selected[row.name]) {
+			continue;
+		}
+		if (!isGoogleCookieDomain(row.domain, googleHosts)) {
+			continue;
+		}
+		if (!isCookieNotExpired(row.expires, nowEpochSeconds)) {
+			continue;
+		}
+		if (!row.value || row.value.length === 0) {
+			continue;
+		}
+		selected[row.name] = row.value;
+	}
+	return selected;
+}
+
+export async function readGoogleCookiesFromDevTools(
+	browserUrl: string,
+): Promise<{ cookies: CookieMap; warnings: string[] }> {
+	const normalizedUrl = normalizeChromeDebugUrl(browserUrl);
+	try {
+		const browser = await puppeteer.connect({ browserURL: normalizedUrl, defaultViewport: null });
+		try {
+			const pages = await browser.pages();
+			const page = pages.at(-1) ?? (await browser.newPage());
+			const cdp = await page.target().createCDPSession();
+			await cdp.send("Network.enable");
+			const payload = (await cdp.send("Network.getAllCookies")) as {
+				readonly cookies: ReadonlyArray<BrowserCookieRecord>;
+			};
+			const cookies = selectGoogleCookies(payload.cookies);
+			const warnings =
+				Object.keys(cookies).length > 0
+					? []
+					: [
+							"Chrome DevTools is reachable, but no Google auth cookies were found.",
+							"Sign into gemini.google.com in Chrome and retry.",
+						];
+			return { cookies, warnings };
+		} finally {
+			await browser.disconnect();
+		}
+	} catch (error) {
+		return {
+			cookies: {},
+			warnings: [
+				`Chrome DevTools cookie extraction failed at ${normalizedUrl}: ${toErrorMessage(error)}`,
+				"Start Chrome with --remote-debugging-port=9222, or set CHROME_DEBUG_URL to your DevTools endpoint.",
+			],
+		};
+	}
+}
 
 export function readChromeCookiesEffect(
 	deps: ChromeCookiesDeps = defaultDeps,
 ): Effect.Effect<CookieReadResult, ChromeCookiesError> {
-	return Effect.tryPromise({
-		try: async () => {
-			const result = await deps.getGoogleCookies();
-			if (!result) {
-				throw new Error("Chrome cookie extraction unavailable on this platform or profile");
-			}
-			return {
-				cookies: result.cookies,
-				warnings: result.warnings,
-			};
-		},
-		catch: (cause) =>
-			ChromeCookiesError.make({
-				reason: cause instanceof Error ? cause.message : String(cause),
+	return Effect.gen(function* () {
+		const platformName = deps.getPlatform();
+		const debugUrl = normalizeChromeDebugUrl(deps.getChromeDebugUrl());
+
+		const warnings: string[] = [];
+		let legacyCookies: CookieMap = {};
+
+		const legacyAttempt = yield* Effect.either(
+			Effect.tryPromise({
+				try: () => deps.readLegacyGoogleCookies(),
+				catch: (cause) =>
+					ChromeCookiesError.make({
+						reason: toErrorMessage(cause),
+					}),
 			}),
+		);
+		if (Either.isRight(legacyAttempt) && legacyAttempt.right) {
+			legacyCookies = legacyAttempt.right.cookies;
+			warnings.push(...legacyAttempt.right.warnings);
+		}
+		if (Either.isLeft(legacyAttempt)) {
+			warnings.push(`Legacy cookie extraction failed: ${legacyAttempt.left.reason}`);
+		}
+
+		if (Object.keys(legacyCookies).length > 0) {
+			return {
+				cookies: legacyCookies,
+				warnings,
+				source: "legacy" as const,
+			};
+		}
+
+		if (platformName !== "darwin") {
+			warnings.push("Non-macOS platform detected; using Chrome DevTools cookie extraction fallback.");
+		}
+
+		const devToolsAttempt = yield* Effect.either(
+			Effect.tryPromise({
+				try: () => deps.readGoogleCookiesFromDevTools(debugUrl),
+				catch: (cause) =>
+					ChromeCookiesError.make({
+						reason: toErrorMessage(cause),
+					}),
+			}),
+		);
+
+		if (Either.isRight(devToolsAttempt)) {
+			warnings.push(...devToolsAttempt.right.warnings);
+			if (Object.keys(devToolsAttempt.right.cookies).length > 0) {
+				return {
+					cookies: devToolsAttempt.right.cookies,
+					warnings,
+					source: "devtools" as const,
+				};
+			}
+		} else {
+			warnings.push(`DevTools cookie extraction failed: ${devToolsAttempt.left.reason}`);
+		}
+
+		warnings.push("No Google auth cookies are currently available.");
+		return {
+			cookies: {},
+			warnings,
+			source: "none" as const,
+		};
 	});
 }
 
@@ -153,6 +374,7 @@ export async function runCookiesCli(
 						present,
 						missing,
 						warnings: result.warnings,
+						source: result.source,
 						cookies: result.cookies,
 					},
 					null,
@@ -165,6 +387,7 @@ export async function runCookiesCli(
 		const lines = [
 			`Found ${Object.keys(result.cookies).length} Google cookie(s).`,
 			`Requested present: ${present.length}/${parsed.value.names.length}`,
+			`Source: ${result.source}`,
 		];
 		if (present.length > 0) {
 			lines.push("", "Present:", ...present.map((name) => `- ${name}`));

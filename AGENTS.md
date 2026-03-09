@@ -57,6 +57,8 @@ Current persistent preferences:
 - Keep fork repository metadata URLs aligned to the current git `origin` remote (owner/repo casing included), unless the user explicitly asks otherwise.
 - Prefer Effect-provided observability/logging/tracing primitives over custom in-repo observability implementations; add custom wrappers only when the Effect stack cannot meet a concrete requirement.
 - Prefer Effect-native retry/timeouts (`Effect.retry`, `Schedule`, `Effect.timeout`) over bespoke retry helpers in Effect paths.
+- Do not introduce dynamic imports in new Effect code paths; use static imports and Effect-native/database-integrated approaches where possible.
+- Treat `src/old/*` as reference/stability baseline; avoid modifying it unless the user explicitly requests a legacy-path change.
 
 ## Mandatory Validation After Every Change
 

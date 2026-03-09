@@ -55,6 +55,12 @@ interface WebSearchToolDetails {
 	readonly queryDiagnostics?: SearchSuccess["queryDiagnostics"];
 }
 
+interface CookiesToolDetails {
+	readonly error: string | null;
+	readonly source?: CookieReadResult["source"];
+	readonly warnings?: ReadonlyArray<string>;
+}
+
 type SearchExecutionOutcome =
 	| { readonly ok: true; readonly response: SearchResponse }
 	| { readonly ok: false; readonly error: SearchToolExecutionError };
@@ -569,23 +575,29 @@ function registerChromeCookiesTool(pi: ExtensionAPI, cookiesLayer: Layer.Layer<C
 			);
 
 			if ("error" in outcome) {
+				const details: CookiesToolDetails = { error: outcome.error.reason };
 				return {
 					content: [{ type: "text", text: `Error: ${outcome.error.reason}` }],
-					details: { error: outcome.error.reason },
+					details,
 				};
 			}
 
 			const present = requested.filter((name) => Boolean(outcome.value.cookies[name]));
+			const warningText =
+				outcome.value.warnings.length > 0 ? ` Warnings: ${outcome.value.warnings.length}.` : "";
+			const details: CookiesToolDetails = {
+				error: null,
+				source: outcome.value.source,
+				warnings: outcome.value.warnings,
+			};
 			return {
 				content: [
 					{
 						type: "text",
-						text: `Found ${Object.keys(outcome.value.cookies).length} Google cookie(s). Present requested: ${present.length}/${requested.length}.`,
+						text: `Found ${Object.keys(outcome.value.cookies).length} Google cookie(s). Present requested: ${present.length}/${requested.length}. Source: ${outcome.value.source}.${warningText}`,
 					},
 				],
-				details: {
-					error: null,
-				},
+				details,
 			};
 		},
 	});
