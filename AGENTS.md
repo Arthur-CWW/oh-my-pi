@@ -21,6 +21,20 @@ Legacy entrypoint retained for parity/debug:
 4. Preserve current behavior unless explicitly changing spec.
 5. Keep observability local-first (SQLite event log planned in Effect layer).
 
+<!-- effect-solutions:start -->
+## Effect Best Practices
+
+**IMPORTANT:** Always consult effect-solutions before writing Effect code.
+
+1. Run `effect-solutions list` to see available guides
+2. Run `effect-solutions show <topic>...` for relevant patterns (supports multiple topics)
+3. Search local Effect source references (`vendor/effect/` and, when present, `.reference/effect/`) for real implementations
+
+Topics: quick-start, project-setup, tsconfig, basics, services-and-layers, data-modeling, error-handling, config, testing, cli.
+
+Never guess at Effect patterns - check the guide first.
+<!-- effect-solutions:end -->
+
 ## Persistent User Preferences (Self-Healing)
 
 When the user states a repo-wide preference (code style, structure, testing workflow, migration workflow), treat it as persistent across sessions and update this file immediately.
@@ -41,6 +55,8 @@ Current persistent preferences:
 - Prefer **static module imports**; avoid dynamic/lazy `import()` unless technically required (and briefly justify when used).
 - When validating package installation behavior, default to **global `pi install` (no `-l`)** so settings are exercised under `~/.pi` (agent settings path), unless the user explicitly asks for project-local install behavior.
 - Keep fork repository metadata URLs aligned to the current git `origin` remote (owner/repo casing included), unless the user explicitly asks otherwise.
+- Prefer Effect-provided observability/logging/tracing primitives over custom in-repo observability implementations; add custom wrappers only when the Effect stack cannot meet a concrete requirement.
+- Prefer Effect-native retry/timeouts (`Effect.retry`, `Schedule`, `Effect.timeout`) over bespoke retry helpers in Effect paths.
 
 ## Mandatory Validation After Every Change
 

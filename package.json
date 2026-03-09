@@ -9,7 +9,6 @@
 		"pi-coding-agent",
 		"extension",
 		"web-search",
-		"perplexity",
 		"fetch",
 		"scraping"
 	],
@@ -35,6 +34,7 @@
 		"access": "public"
 	},
 	"scripts": {
+		"prepare": "effect-language-service patch",
 		"format": "biome format --write .",
 		"format:check": "biome format .",
 		"lint": "biome lint .",
@@ -79,6 +79,7 @@
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.4.2",
+		"@effect/language-service": "^0.79.0",
 		"@mariozechner/pi-ai": "^0.53.0",
 		"@mariozechner/pi-coding-agent": "^0.53.0",
 		"@mariozechner/pi-tui": "^0.53.0",

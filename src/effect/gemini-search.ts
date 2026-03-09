@@ -1,15 +1,26 @@
 import { Effect, Schema } from "effect";
 import { API_BASE, DEFAULT_MODEL, getApiKey } from "../old/gemini-api.js";
 import { isGeminiWebAvailable, queryWithCookies } from "../old/gemini-web.js";
-import {
-	isPerplexityAvailable,
-	searchWithPerplexity,
-	type SearchOptions,
-	type SearchResponse,
-	type SearchResult,
-} from "../old/perplexity.js";
 
-export type SearchProvider = "auto" | "perplexity" | "gemini" | "kagi";
+export interface SearchResult {
+	title: string;
+	url: string;
+	snippet: string;
+}
+
+export interface SearchResponse {
+	answer: string;
+	results: SearchResult[];
+}
+
+export interface SearchOptions {
+	numResults?: number;
+	recencyFilter?: "day" | "week" | "month" | "year";
+	domainFilter?: string[];
+	signal?: AbortSignal;
+}
+
+export type SearchProvider = "auto" | "gemini" | "kagi";
 
 export interface FullSearchOptions extends SearchOptions {
 	readonly provider?: SearchProvider;
@@ -18,11 +29,6 @@ export interface FullSearchOptions extends SearchOptions {
 
 export interface GeminiSearchDeps {
 	readonly resolveConfiguredProvider: () => Effect.Effect<SearchProvider, never>;
-	readonly isPerplexityAvailable: () => boolean;
-	readonly searchWithPerplexity: (
-		query: string,
-		options: SearchOptions,
-	) => Promise<SearchResponse>;
 	readonly getGeminiApiKey: () => string | null;
 	readonly isGeminiWebAvailable: () => ReturnType<typeof isGeminiWebAvailable>;
 	readonly queryWithCookies: typeof queryWithCookies;
@@ -31,8 +37,6 @@ export interface GeminiSearchDeps {
 
 const defaultDeps: GeminiSearchDeps = {
 	resolveConfiguredProvider: () => Effect.succeed("auto"),
-	isPerplexityAvailable,
-	searchWithPerplexity,
 	getGeminiApiKey: getApiKey,
 	isGeminiWebAvailable,
 	queryWithCookies,
@@ -52,48 +56,32 @@ const GEMINI_UNAVAILABLE_MESSAGE =
 	"  2. Sign into gemini.google.com in Chrome";
 
 const PROVIDER_UNAVAILABLE_MESSAGE =
-	"No search provider available. Either:\n" +
-	"  1. Set perplexityApiKey in ~/.pi/web-search.json (or PERPLEXITY_API_KEY env var)\n" +
-	"  2. Set geminiApiKey in ~/.pi/web-search.json (or GEMINI_API_KEY env var)\n" +
-	"  3. Sign into gemini.google.com in Chrome";
+	"No Gemini search path is available. Either:\n" +
+	"  1. Set geminiApiKey in ~/.pi/web-search.json (or GEMINI_API_KEY env var)\n" +
+	"  2. Sign into gemini.google.com in Chrome";
 
 export function searchEffect(
 	query: string,
 	options: FullSearchOptions = {},
 	deps: GeminiSearchDeps = defaultDeps,
-): Effect.Effect<SearchResponse, SearchUnavailableError | Error> {
+): Effect.Effect<SearchResponse, SearchUnavailableError> {
 	return Effect.gen(function* () {
 		const configuredProvider = yield* deps.resolveConfiguredProvider();
 		const provider = options.provider ?? configuredProvider;
-
-		if (provider === "perplexity") {
-			return yield* Effect.tryPromise({
-				try: () => deps.searchWithPerplexity(query, options),
-				catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
-			});
-		}
-
-		if (provider === "gemini") {
-			const result =
-				(yield* searchWithGeminiApiEffect(query, options, deps)) ??
-				(yield* searchWithGeminiWebEffect(query, options, deps));
-			if (result) return result;
-			return yield* SearchUnavailableError.make({ reason: GEMINI_UNAVAILABLE_MESSAGE });
-		}
-
-		if (deps.isPerplexityAvailable()) {
-			return yield* Effect.tryPromise({
-				try: () => deps.searchWithPerplexity(query, options),
-				catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
-			});
+		if (provider !== "auto" && provider !== "kagi" && provider !== "gemini") {
+			return yield* SearchUnavailableError.make({ reason: PROVIDER_UNAVAILABLE_MESSAGE });
 		}
 
 		const geminiResult =
 			(yield* searchWithGeminiApiEffect(query, options, deps)) ??
 			(yield* searchWithGeminiWebEffect(query, options, deps));
-		if (geminiResult) return geminiResult;
+		if (geminiResult) {
+			return geminiResult;
+		}
 
-		return yield* SearchUnavailableError.make({ reason: PROVIDER_UNAVAILABLE_MESSAGE });
+		return yield* SearchUnavailableError.make({
+			reason: provider === "gemini" ? GEMINI_UNAVAILABLE_MESSAGE : PROVIDER_UNAVAILABLE_MESSAGE,
+		});
 	});
 }
 
@@ -102,14 +90,14 @@ export async function search(
 	options: FullSearchOptions = {},
 	deps: GeminiSearchDeps = defaultDeps,
 ): Promise<SearchResponse> {
-	const mapped = Effect.catchTag(searchEffect(query, options, deps), "SearchUnavailableError", (error) =>
-		Effect.fail(new Error(error.reason)),
-	);
-	return Effect.runPromise(
-		Effect.catchAll(mapped, (error) =>
-			Effect.fail(error instanceof Error ? error : new Error("Search failed")),
-		),
-	);
+	const exit = await Effect.runPromiseExit(searchEffect(query, options, deps));
+	if (exit._tag === "Success") {
+		return exit.value;
+	}
+	if (exit.cause._tag === "Fail") {
+		throw new Error(exit.cause.error.reason);
+	}
+	throw new Error("Search failed");
 }
 
 function buildAbortSignal(timeoutMs: number, signal?: AbortSignal): AbortSignal {
@@ -315,7 +303,7 @@ const SEARCH_CLI_USAGE = `Usage: bun src/effect/gemini-search.ts [options] [quer
 
 Options:
   -q, --query <text>             Search query
-      --provider <auto|perplexity|gemini>
+      --provider <auto|gemini>
       --num-results <1-20>
       --recency-filter <day|week|month|year>
       --domain <host>            Repeatable. Prefix with '-' to exclude.
@@ -330,7 +318,7 @@ const RECENCY_FILTERS = new Set<NonNullable<SearchOptions["recencyFilter"]>>([
 	"year",
 ]);
 
-const SEARCH_PROVIDERS = new Set<SearchProvider>(["auto", "perplexity", "gemini"]);
+const SEARCH_PROVIDERS = new Set<SearchProvider>(["auto", "gemini"]);
 
 function isSearchProvider(value: string): value is SearchProvider {
 	return SEARCH_PROVIDERS.has(value as SearchProvider);

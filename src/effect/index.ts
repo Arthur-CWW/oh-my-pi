@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { StringEnum } from "@mariozechner/pi-ai";
 import { Type } from "@sinclair/typebox";
-import { Context, Effect, Layer, Schema } from "effect";
+import { Context, Effect, Either, Layer, Schema, Schedule } from "effect";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -19,7 +19,7 @@ interface EventStoreSmokeParams {
 
 interface WebSearchParams {
 	readonly query?: string;
-	readonly provider?: "auto" | "kagi" | "gemini" | "perplexity";
+	readonly provider?: "auto" | "kagi" | "gemini";
 	readonly numResults?: number;
 	readonly recencyFilter?: "day" | "week" | "month" | "year";
 	readonly domainFilter?: string[];
@@ -35,12 +35,22 @@ interface RegisterEffectToolsOptions {
 }
 
 interface SearchResponse extends SearchSuccess {
-	readonly providerUsed?: "kagi" | "gemini" | "perplexity";
+	readonly providerUsed?: "kagi" | "gemini";
+}
+
+interface SearchErrorDetails {
+	readonly title: string;
+	readonly reassurance?: string;
+	readonly technicalCause: string;
+	readonly nextStep: string;
+	readonly escapeHatch?: string;
+	readonly retryable: boolean;
+	readonly provider?: "kagi" | "gemini";
 }
 
 interface WebSearchToolDetails {
-	readonly error: string | null;
-	readonly provider?: "kagi" | "gemini" | "perplexity";
+	readonly error: SearchErrorDetails | null;
+	readonly provider?: "kagi" | "gemini";
 	readonly resultCount?: number;
 	readonly queryDiagnostics?: SearchSuccess["queryDiagnostics"];
 }
@@ -58,10 +68,28 @@ export interface EffectExtensionDeps {
 	readonly readCookies: typeof readChromeCookiesEffect;
 }
 
+class SearchProviderError extends Schema.TaggedError<SearchProviderError>()("SearchProviderError", {
+	provider: Schema.Literal("kagi", "gemini"),
+	reason: Schema.String,
+}) {}
+
+class SearchFallbackError extends Schema.TaggedError<SearchFallbackError>()("SearchFallbackError", {
+	primaryProvider: Schema.Literal("kagi"),
+	primaryReason: Schema.String,
+	fallbackProvider: Schema.Literal("gemini"),
+	fallbackReason: Schema.String,
+}) {}
+
 class SearchToolExecutionError extends Schema.TaggedError<SearchToolExecutionError>()(
 	"SearchToolExecutionError",
 	{
-		reason: Schema.String,
+		title: Schema.String,
+		reassurance: Schema.optional(Schema.String),
+		technicalCause: Schema.String,
+		nextStep: Schema.String,
+		escapeHatch: Schema.optional(Schema.String),
+		retryable: Schema.Boolean,
+		provider: Schema.optional(Schema.Literal("kagi", "gemini")),
 	},
 ) {}
 
@@ -102,53 +130,167 @@ function toErrorMessage(error: unknown): string {
 	return String(error);
 }
 
+function isTaggedError(error: unknown, tag: string): boolean {
+	if (!error || typeof error !== "object") {
+		return false;
+	}
+	const candidate = error as { readonly _tag?: unknown };
+	return candidate._tag === tag;
+}
+
+function mapSearchFailureToToolError(error: unknown): SearchToolExecutionError {
+	if (error instanceof SearchProviderError || isTaggedError(error, "SearchProviderError")) {
+		const provider =
+			error instanceof SearchProviderError
+				? error.provider
+				: (error as { readonly provider: "kagi" | "gemini" }).provider;
+		const reason =
+			error instanceof SearchProviderError
+				? error.reason
+				: (error as { readonly reason: string }).reason;
+		return SearchToolExecutionError.make({
+			title:
+				provider === "kagi"
+					? "Kagi search is currently unavailable"
+					: "Gemini search is currently unavailable",
+			reassurance: "Your query was received, but the provider could not return results this time.",
+			technicalCause: reason,
+			nextStep:
+				provider === "kagi"
+					? "Try again, or rerun with provider: \"gemini\" while Kagi recovers."
+					: "Check Gemini authentication/API key settings, then retry the same query.",
+			escapeHatch: "If this keeps happening, share this error with support and include the technical cause.",
+			retryable: true,
+			provider,
+		});
+	}
+
+	if (error instanceof SearchFallbackError || isTaggedError(error, "SearchFallbackError")) {
+		const primaryReason =
+			error instanceof SearchFallbackError
+				? error.primaryReason
+				: (error as { readonly primaryReason: string }).primaryReason;
+		const fallbackReason =
+			error instanceof SearchFallbackError
+				? error.fallbackReason
+				: (error as { readonly fallbackReason: string }).fallbackReason;
+		return SearchToolExecutionError.make({
+			title: "No search provider could complete this request",
+			reassurance: "Your query is intact. We tried both providers before returning this error.",
+			technicalCause: `Kagi: ${primaryReason}\nGemini: ${fallbackReason}`,
+			nextStep: "Retry now, or run again with provider: \"gemini\" after checking your auth/config.",
+			escapeHatch: "If this persists, contact support and include both provider causes.",
+			retryable: true,
+		});
+	}
+
+	return SearchToolExecutionError.make({
+		title: "Web search failed",
+		reassurance: "Your query was received, but the request did not complete.",
+		technicalCause: toErrorMessage(error),
+		nextStep: "Retry the search. If it repeats, switch provider or check local auth/session state.",
+		escapeHatch: "If the issue keeps happening, share this message with support.",
+		retryable: true,
+	});
+}
+
+function formatSearchToolError(error: SearchToolExecutionError): string {
+	const lines = [error.title];
+	if (error.reassurance) {
+		lines.push("", error.reassurance);
+	}
+	lines.push("", `Technical cause: ${error.technicalCause}`);
+	lines.push(`Next step: ${error.nextStep}`);
+	if (error.escapeHatch) {
+		lines.push(`Need help: ${error.escapeHatch}`);
+	}
+	return lines.join("\n");
+}
+
+const SEARCH_RETRY_POLICY = Schedule.spaced("250 millis").pipe(Schedule.compose(Schedule.recurs(1)));
+
+const runKagiSearchEffect = Effect.fn("EffectIndex.runKagiSearch")(function* (
+	query: string,
+	options: FullSearchOptions,
+) {
+	return yield* kagiSearchEffect(query, undefined, {
+		lens: options.lens,
+		recencyFilter: options.recencyFilter,
+		domainFilter: options.domainFilter,
+	}).pipe(
+		Effect.map((result): SearchResponse => ({ ...result, providerUsed: "kagi" })),
+		Effect.mapError((error) =>
+			SearchProviderError.make({
+				provider: "kagi",
+				reason: error.reason,
+			}),
+		),
+	);
+});
+
+const runGeminiSearchEffect = Effect.fn("EffectIndex.runGeminiSearch")(function* (
+	query: string,
+	options: FullSearchOptions,
+) {
+	const result = yield* Effect.tryPromise({
+		try: () => geminiSearch(query, options),
+		catch: (cause) =>
+			SearchProviderError.make({
+				provider: "gemini",
+				reason: toErrorMessage(cause),
+			}),
+	});
+	return {
+		...result,
+		providerUsed: "gemini" as const,
+	};
+});
+
 const searchWithFallbackEffect = Effect.fn("EffectIndex.searchWithFallback")(function* (
 	query: string,
 	options: FullSearchOptions = {},
 ) {
 	const preferredProvider = options.provider ?? "auto";
-
-	if (preferredProvider === "auto" || preferredProvider === "kagi") {
-		const kagiResponse = yield* kagiSearchEffect(query, undefined, {
-			lens: options.lens,
-			recencyFilter: options.recencyFilter,
-			domainFilter: options.domainFilter,
-		}).pipe(
-			Effect.map((result): SearchResponse => ({ ...result, providerUsed: "kagi" })),
-			Effect.catchTag("KagiSearchError", (error) =>
-				preferredProvider === "kagi"
-					? Effect.fail(error)
-					: Effect.gen(function* () {
-						yield* Effect.logWarning(
-							`Kagi search failed, falling back to Gemini: ${error.reason}`,
-						);
-						return null;
-					}),
-			),
-		);
-
-		if (kagiResponse) {
-			return kagiResponse;
-		}
+	if (preferredProvider === "kagi") {
+		return yield* runKagiSearchEffect(query, options).pipe(Effect.retry(SEARCH_RETRY_POLICY));
+	}
+	if (preferredProvider === "gemini") {
+		return yield* runGeminiSearchEffect(query, options).pipe(Effect.retry(SEARCH_RETRY_POLICY));
 	}
 
-	const geminiResponse = yield* Effect.tryPromise({
-		try: () => geminiSearch(query, options),
-		catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
+	const kagiAttempt = yield* Effect.either(
+		runKagiSearchEffect(query, options).pipe(Effect.retry(SEARCH_RETRY_POLICY)),
+	);
+	if (Either.isRight(kagiAttempt)) {
+		return kagiAttempt.right;
+	}
+
+	yield* Effect.logWarning(`Kagi search failed, falling back to Gemini: ${kagiAttempt.left.reason}`);
+
+	const geminiAttempt = yield* Effect.either(
+		runGeminiSearchEffect(query, options).pipe(Effect.retry(SEARCH_RETRY_POLICY)),
+	);
+	if (Either.isRight(geminiAttempt)) {
+		return geminiAttempt.right;
+	}
+
+	return yield* SearchFallbackError.make({
+		primaryProvider: "kagi",
+		primaryReason: kagiAttempt.left.reason,
+		fallbackProvider: "gemini",
+		fallbackReason: geminiAttempt.left.reason,
 	});
-	const providerUsed: SearchResponse["providerUsed"] =
-		options.provider === "perplexity" ? "perplexity" : "gemini";
-	return {
-		...geminiResponse,
-		providerUsed,
-	};
 });
 
 async function searchWithFallback(
 	query: string,
 	options?: FullSearchOptions,
 ): Promise<SearchResponse> {
-	return Effect.runPromise(searchWithFallbackEffect(query, options ?? {}));
+	return Effect.runPromise(
+		searchWithFallbackEffect(query, options ?? {}).pipe(
+			Effect.mapError((error) => mapSearchFailureToToolError(error)),
+		),
+	);
 }
 
 function makeSearchServiceLayer(deps: EffectExtensionDeps): Layer.Layer<SearchService> {
@@ -159,9 +301,9 @@ function makeSearchServiceLayer(deps: EffectExtensionDeps): Layer.Layer<SearchSe
 		return yield* Effect.tryPromise({
 			try: () => deps.search(query, options),
 			catch: (cause) =>
-				SearchToolExecutionError.make({
-					reason: toErrorMessage(cause),
-				}),
+				cause instanceof SearchToolExecutionError
+					? cause
+					: mapSearchFailureToToolError(cause),
 		});
 	});
 
@@ -313,7 +455,7 @@ function registerWebSearchTool(pi: ExtensionAPI, searchLayer: Layer.Layer<Search
 			"Web search tool using Kagi (default) with Gemini fallback. Supports Kagi operators (`filetype:`, `site:`, `inurl:`, `intitle:`, quotes, boolean/grouping) plus Google-style compatibility helpers (`before:`/`after:` full-date mapping, `ext:`, `allintitle:`, `allinurl:`, `allintext:`). Unsupported operators are passed through and may be ignored by Kagi.",
 		parameters: Type.Object({
 			query: Type.String({ description: "Search query (Google-style operators supported where Kagi-compatible)" }),
-			provider: Type.Optional(StringEnum(["auto", "kagi", "gemini", "perplexity"])),
+			provider: Type.Optional(StringEnum(["auto", "kagi", "gemini"])),
 			lens: Type.Optional(Type.String()),
 			numResults: Type.Optional(Type.Number({ minimum: 1, maximum: 20 })),
 			recencyFilter: Type.Optional(StringEnum(["day", "week", "month", "year"])),
@@ -322,9 +464,26 @@ function registerWebSearchTool(pi: ExtensionAPI, searchLayer: Layer.Layer<Search
 		async execute(_toolCallId, rawParams) {
 			const params = rawParams as WebSearchParams;
 			if (!params.query?.trim()) {
-				const details: WebSearchToolDetails = { error: "missing-query" };
+				const error = SearchToolExecutionError.make({
+					title: "No query was provided",
+					reassurance: "The tool is ready to run once you provide a search query.",
+					technicalCause: "Missing required parameter: query",
+					nextStep: "Call web_search again with a non-empty query string.",
+					escapeHatch: "If this came from an automated prompt, validate tool arguments before calling.",
+					retryable: true,
+				});
+				const details: WebSearchToolDetails = {
+					error: {
+						title: error.title,
+						reassurance: error.reassurance,
+						technicalCause: error.technicalCause,
+						nextStep: error.nextStep,
+						escapeHatch: error.escapeHatch,
+						retryable: error.retryable,
+					},
+				};
 				return {
-					content: [{ type: "text", text: "Error: No query provided." }],
+					content: [{ type: "text", text: formatSearchToolError(error) }],
 					details,
 				};
 			}
@@ -340,7 +499,7 @@ function registerWebSearchTool(pi: ExtensionAPI, searchLayer: Layer.Layer<Search
 				});
 			}).pipe(Effect.provide(searchLayer));
 
-			const outcome = await Effect.runPromise(
+			const outcome: SearchExecutionOutcome = await Effect.runPromise(
 				searchProgram.pipe(
 					Effect.match({
 						onFailure: (error): SearchExecutionOutcome => ({ ok: false, error }),
@@ -349,10 +508,20 @@ function registerWebSearchTool(pi: ExtensionAPI, searchLayer: Layer.Layer<Search
 				),
 			);
 
-			if ("error" in outcome) {
-				const details: WebSearchToolDetails = { error: outcome.error.reason };
+			if (outcome.ok === false) {
+				const details: WebSearchToolDetails = {
+					error: {
+						title: outcome.error.title,
+						reassurance: outcome.error.reassurance,
+						technicalCause: outcome.error.technicalCause,
+						nextStep: outcome.error.nextStep,
+						escapeHatch: outcome.error.escapeHatch,
+						retryable: outcome.error.retryable,
+						provider: outcome.error.provider,
+					},
+				};
 				return {
-					content: [{ type: "text", text: `Error: ${outcome.error.reason}` }],
+					content: [{ type: "text", text: formatSearchToolError(outcome.error) }],
 					details,
 				};
 			}

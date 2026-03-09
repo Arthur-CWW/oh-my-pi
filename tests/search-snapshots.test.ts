@@ -6,8 +6,13 @@ import {
 	preprocessSearchResults,
 	type PreprocessedData,
 } from "../src/old/search-filter.js";
-import type { SearchResult } from "../src/old/perplexity.js";
 import type { QueryResultData } from "../src/old/storage.js";
+
+interface SearchResult {
+	readonly title: string;
+	readonly url: string;
+	readonly snippet: string;
+}
 
 const UPDATE = process.env.UPDATE_SNAPSHOTS === "1";
 

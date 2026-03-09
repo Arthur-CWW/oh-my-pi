@@ -1,5 +1,7 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import puppeteer from "puppeteer-core";
 
 export type KagiLens = string;
@@ -156,7 +158,47 @@ export class SimpleRateLimiter {
 
 const DEFAULT_BASE_URL = "https://kagi.com";
 const DEFAULT_BROWSER_URL = "http://localhost:9222";
-const DEFAULT_SESSION_PATH = "packages/kagi/storage/session.json";
+const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
+const LEGACY_CWD_SESSION_PATH = "packages/kagi/storage/session.json";
+const HOME_SESSION_PATH = ".pi/pi-web-access/kagi-session.json";
+
+export interface ResolveKagiSessionPathOptions {
+	readonly explicitPath?: string;
+	readonly envPath?: string;
+	readonly cwd?: string;
+	readonly moduleDir?: string;
+	readonly homeDir?: string;
+	readonly pathExists?: (path: string) => boolean;
+}
+
+export function resolveKagiSessionPath(options: ResolveKagiSessionPathOptions = {}): string {
+	const explicitPath = normalizePath(options.explicitPath);
+	if (explicitPath) {
+		return resolve(explicitPath);
+	}
+
+	const envPath = normalizePath(options.envPath ?? process.env.KAGI_SESSION_PATH);
+	if (envPath) {
+		return resolve(envPath);
+	}
+
+	const cwd = options.cwd ?? process.cwd();
+	const moduleDir = options.moduleDir ?? MODULE_DIR;
+	const homeDir = options.homeDir ?? homedir();
+	const pathExists = options.pathExists ?? existsSync;
+
+	const legacyPath = resolve(cwd, LEGACY_CWD_SESSION_PATH);
+	if (pathExists(legacyPath)) {
+		return legacyPath;
+	}
+
+	const modulePath = resolve(moduleDir, "../storage/session.json");
+	if (pathExists(modulePath)) {
+		return modulePath;
+	}
+
+	return resolve(homeDir, HOME_SESSION_PATH);
+}
 
 const BUILTIN_LENS_MAP: Record<string, string | undefined> = {
 	all: undefined,
@@ -279,7 +321,7 @@ export async function captureSessionFromChrome(browserUrl = DEFAULT_BROWSER_URL)
 	}
 }
 
-export function saveSession(session: KagiSessionState, filePath = DEFAULT_SESSION_PATH): string {
+export function saveSession(session: KagiSessionState, filePath = resolveKagiSessionPath()): string {
 	const outputPath = resolve(filePath);
 	mkdirSync(dirname(outputPath), { recursive: true });
 	writeFileSync(outputPath, `${JSON.stringify(session, null, 2)}\n`, "utf8");
@@ -287,7 +329,7 @@ export function saveSession(session: KagiSessionState, filePath = DEFAULT_SESSIO
 	return outputPath;
 }
 
-export function loadSession(filePath = DEFAULT_SESSION_PATH): KagiSessionState {
+export function loadSession(filePath = resolveKagiSessionPath()): KagiSessionState {
 	const inputPath = resolve(filePath);
 	if (!existsSync(inputPath)) {
 		throw new Error(`Kagi session file not found: ${inputPath}`);
@@ -725,18 +767,35 @@ export async function runSocketSearchWithAutoRefresh(
 		discoverLenses?: boolean;
 	},
 ): Promise<KagiSearchResult> {
-	const sessionPath = config?.sessionPath ?? DEFAULT_SESSION_PATH;
+	const sessionPath = resolveKagiSessionPath({ explicitPath: config?.sessionPath });
+	const browserUrl = config?.browserUrl ?? DEFAULT_BROWSER_URL;
 	const rateLimiter = config?.rateLimiter;
 	const shouldDiscoverLenses = config?.discoverLenses ?? true;
 	if (rateLimiter) {
 		await rateLimiter.waitTurn();
 	}
 
-	let session = loadSession(sessionPath);
+	let session: KagiSessionState;
+	try {
+		session = loadSession(sessionPath);
+	} catch (error) {
+		if (!isSessionFileMissingError(error)) {
+			throw error;
+		}
+		try {
+			session = await captureSessionFromChrome(browserUrl);
+		} catch (captureError) {
+			throw new Error(
+				`Kagi session unavailable. Tried ${sessionPath} and could not refresh from Chrome (${browserUrl}): ${toErrorMessage(captureError)}`,
+			);
+		}
+		saveSession(session, sessionPath);
+	}
+
 	let preparedOptions = await withDiscoveredLensMap(session, options, shouldDiscoverLenses);
 	let result = await runSocketSearch(session, preparedOptions);
 	if (result.status === 401 || result.status === 403) {
-		session = await captureSessionFromChrome(config?.browserUrl ?? DEFAULT_BROWSER_URL);
+		session = await captureSessionFromChrome(browserUrl);
 		saveSession(session, sessionPath);
 		if (rateLimiter) {
 			await rateLimiter.waitTurn();
@@ -1027,6 +1086,28 @@ function safeUrl(raw: string, base: string): URL | null {
 	} catch {
 		return null;
 	}
+}
+
+function normalizePath(value: string | undefined): string | undefined {
+	const trimmed = value?.trim();
+	if (!trimmed || trimmed.length === 0) {
+		return undefined;
+	}
+	return trimmed;
+}
+
+function isSessionFileMissingError(error: unknown): boolean {
+	if (!(error instanceof Error)) {
+		return false;
+	}
+	return error.message.startsWith("Kagi session file not found:");
+}
+
+function toErrorMessage(error: unknown): string {
+	if (error instanceof Error) {
+		return error.message;
+	}
+	return String(error);
 }
 
 function hasOwn(record: Record<string, string | undefined>, key: string): boolean {

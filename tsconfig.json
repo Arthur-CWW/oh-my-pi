@@ -11,8 +11,15 @@
 		"resolveJsonModule": true,
 		"esModuleInterop": true,
 		"skipLibCheck": true,
+		"moduleDetection": "force",
+		"verbatimModuleSyntax": true,
 		"strict": false,
-		"forceConsistentCasingInFileNames": true
+		"forceConsistentCasingInFileNames": true,
+		"plugins": [
+			{
+				"name": "@effect/language-service"
+			}
+		]
 	},
 	"include": ["src/**/*.ts", "scripts/**/*.ts", "skills/**/*.ts", "packages/kagi/src/**/*.ts", "packages/kagi/scripts/**/*.ts"],
 	"exclude": ["node_modules", "test-output"]

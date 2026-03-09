@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { describe, expect, it } from "bun:test";
 import {
 	buildAdvancedSearchPostBody,
@@ -6,6 +7,7 @@ import {
 	extractLensesFromHtml,
 	parseSse,
 	parseVideoRuleTargetFromDomain,
+	resolveKagiSessionPath,
 	type KagiSessionState,
 } from "../packages/kagi/src/kagi-client.js";
 
@@ -164,6 +166,48 @@ describe("kagi client helpers", () => {
 		expect(Array.isArray(parsed[0]?.dataJson)).toBe(true);
 		expect(parsed[1]?.id).toBe("1");
 		expect(parsed[1]?.dataJson).toBe("plain text");
+	});
+
+	it("resolves Kagi session path with explicit/env/module/home precedence", () => {
+		const cwd = "/workspace/project";
+		const moduleDir = "/workspace/pi-web-access/packages/kagi/src";
+		const homeDir = "/home/tester";
+		const existing = new Set<string>();
+		const pathExists = (path: string): boolean => existing.has(path);
+
+		expect(
+			resolveKagiSessionPath({
+				explicitPath: "./custom/session.json",
+				cwd,
+				moduleDir,
+				homeDir,
+				pathExists,
+			}),
+		).toBe(resolve("./custom/session.json"));
+
+		expect(
+			resolveKagiSessionPath({
+				envPath: "/tmp/env-session.json",
+				cwd,
+				moduleDir,
+				homeDir,
+				pathExists,
+			}),
+		).toBe(resolve("/tmp/env-session.json"));
+
+		const legacyPath = resolve(cwd, "packages/kagi/storage/session.json");
+		existing.add(legacyPath);
+		expect(resolveKagiSessionPath({ cwd, moduleDir, homeDir, pathExists })).toBe(legacyPath);
+		existing.delete(legacyPath);
+
+		const modulePath = resolve(moduleDir, "../storage/session.json");
+		existing.add(modulePath);
+		expect(resolveKagiSessionPath({ cwd, moduleDir, homeDir, pathExists })).toBe(modulePath);
+		existing.delete(modulePath);
+
+		expect(resolveKagiSessionPath({ cwd, moduleDir, homeDir, pathExists })).toBe(
+			resolve(homeDir, ".pi/pi-web-access/kagi-session.json"),
+		);
 	});
 
 	it("builds mimic headers with cookie and x-kagi authorization", () => {

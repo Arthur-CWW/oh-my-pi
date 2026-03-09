@@ -57,11 +57,9 @@ describe("effect gemini-search", () => {
 		]);
 	});
 
-	it("uses effect deps to preserve provider fallback behavior", async () => {
+	it("returns provider-unavailable guidance when Gemini channels are unavailable", async () => {
 		const deps: GeminiSearchDeps = {
 			resolveConfiguredProvider: () => Effect.succeed("auto"),
-			isPerplexityAvailable: () => false,
-			searchWithPerplexity: async () => ({ answer: "p", results: [] }),
 			getGeminiApiKey: () => null,
 			isGeminiWebAvailable: async () => null,
 			queryWithCookies: async () => "",
@@ -69,7 +67,7 @@ describe("effect gemini-search", () => {
 		};
 
 		await expect(effectSearch("fallback", {}, deps)).rejects.toThrow(
-			"No search provider available. Either:",
+			"No Gemini search path is available. Either:",
 		);
 	});
 

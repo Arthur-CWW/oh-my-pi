@@ -103,6 +103,27 @@ describe("effect shadow entry", () => {
 		expect(result.content[0]?.text).toContain("Fast JavaScript runtime.");
 	});
 
+	it("returns structured validation guidance for missing query", async () => {
+		const tools = registerWith(fakeDeps);
+		const tool = tools.get("web_search");
+		expect(typeof tool?.execute).toBe("function");
+		if (typeof tool?.execute !== "function") throw new Error("missing execute");
+
+		const result = await tool.execute("call-2a", { query: "   " });
+		const errorDetails = result.details?.error as
+			| {
+					readonly title?: string;
+					readonly technicalCause?: string;
+					readonly nextStep?: string;
+			  }
+			| undefined;
+		expect(errorDetails?.title).toBe("No query was provided");
+		expect(errorDetails?.technicalCause).toContain("Missing required parameter");
+		expect(errorDetails?.nextStep).toContain("web_search");
+		expect(result.content[0]?.text).toContain("No query was provided");
+		expect(result.content[0]?.text).toContain("Next step:");
+	});
+
 	it("forwards kagi-specific provider and lens options", async () => {
 		let capturedProvider: string | undefined;
 		let capturedLens: string | undefined;
@@ -144,8 +165,16 @@ describe("effect shadow entry", () => {
 		if (typeof tool?.execute !== "function") throw new Error("missing execute");
 
 		const result = await tool.execute("call-2c", { query: "effect" });
-		expect(result.details?.error).toBe("provider-down");
-		expect(result.content[0]?.text).toContain("provider-down");
+		const errorDetails = result.details?.error as
+			| {
+					readonly title?: string;
+					readonly technicalCause?: string;
+			  }
+			| undefined;
+		expect(errorDetails?.title).toBe("Web search failed");
+		expect(errorDetails?.technicalCause).toBe("provider-down");
+		expect(result.content[0]?.text).toContain("Technical cause: provider-down");
+		expect(result.content[0]?.text).toContain("Next step:");
 	});
 
 	it("runs chrome_cookies via effect deps", async () => {

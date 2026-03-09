@@ -422,7 +422,7 @@ Options:
   -h, --help        Show this help
 
 Environment:
-  KAGI_SESSION_PATH   Path to session.json (default: packages/kagi/storage/session.json)
+  KAGI_SESSION_PATH   Path to session.json (default: auto-detected; falls back to ~/.pi/pi-web-access/kagi-session.json)
   CHROME_DEBUG_URL    Chrome DevTools URL (default: http://localhost:9222)
 
 Examples:

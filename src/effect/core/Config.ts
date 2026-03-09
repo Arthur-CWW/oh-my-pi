@@ -6,7 +6,7 @@ import { ConfigParseError, ConfigReadError, MissingConfigError } from "./Errors.
 
 export const DEFAULT_WEB_SEARCH_CONFIG_PATH = join(homedir(), ".pi", "web-search.json");
 
-export type SearchProvider = "auto" | "perplexity" | "gemini";
+export type SearchProvider = "auto" | "gemini";
 
 export interface AutoFilterConfig {
 	readonly enabled: boolean;
@@ -36,7 +36,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function parseProvider(value: unknown): SearchProvider {
-	if (value === "auto" || value === "perplexity" || value === "gemini") return value;
+	if (value === "auto" || value === "gemini") return value;
 	return "auto";
 }
 
