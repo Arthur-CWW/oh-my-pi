@@ -1,16 +1,23 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { StringEnum } from "@mariozechner/pi-ai";
 import { Type } from "@sinclair/typebox";
-import { Context, Effect, Either, Layer, Schema, Schedule } from "effect";
+import { Context, Effect, Layer, Schema } from "effect";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readChromeCookiesEffect, type CookieReadResult } from "./chrome-cookies.js";
 import { makeEvent } from "./core/Observability.js";
-import { type FullSearchOptions, search as geminiSearch } from "./gemini-search.js";
-import { kagiSearchEffect, type SearchSuccess } from "./kagi-search.js";
+import { type FullSearchOptions } from "./gemini-search.js";
+import { type SearchSuccess } from "./kagi-search.js";
 import { makeSqliteEventStore } from "./observability/EventStore.js";
+import {
+	SearchFallbackError,
+	SearchProviderError,
+	type SearchRuntimeResponse,
+	searchWithFallback,
+} from "./search-runtime.js";
+import { makeSearchEventsService } from "./search-events.js";
 
 interface EventStoreSmokeParams {
 	readonly dbPath?: string;
@@ -36,6 +43,7 @@ interface RegisterEffectToolsOptions {
 
 interface SearchResponse extends SearchSuccess {
 	readonly providerUsed?: "kagi" | "gemini";
+	readonly correlationId?: string;
 }
 
 interface SearchErrorDetails {
@@ -52,6 +60,7 @@ interface WebSearchToolDetails {
 	readonly error: SearchErrorDetails | null;
 	readonly provider?: "kagi" | "gemini";
 	readonly resultCount?: number;
+	readonly correlationId?: string;
 	readonly queryDiagnostics?: SearchSuccess["queryDiagnostics"];
 }
 
@@ -73,18 +82,6 @@ export interface EffectExtensionDeps {
 	readonly search: (query: string, options?: FullSearchOptions) => Promise<SearchResponse>;
 	readonly readCookies: typeof readChromeCookiesEffect;
 }
-
-class SearchProviderError extends Schema.TaggedError<SearchProviderError>()("SearchProviderError", {
-	provider: Schema.Literal("kagi", "gemini"),
-	reason: Schema.String,
-}) {}
-
-class SearchFallbackError extends Schema.TaggedError<SearchFallbackError>()("SearchFallbackError", {
-	primaryProvider: Schema.Literal("kagi"),
-	primaryReason: Schema.String,
-	fallbackProvider: Schema.Literal("gemini"),
-	fallbackReason: Schema.String,
-}) {}
 
 class SearchToolExecutionError extends Schema.TaggedError<SearchToolExecutionError>()(
 	"SearchToolExecutionError",
@@ -213,90 +210,15 @@ function formatSearchToolError(error: SearchToolExecutionError): string {
 	return lines.join("\n");
 }
 
-const SEARCH_RETRY_POLICY = Schedule.spaced("250 millis").pipe(Schedule.compose(Schedule.recurs(1)));
+const SEARCH_EVENTS_DB_PATH = process.env.PI_WEB_ACCESS_EVENT_DB_PATH;
 
-const runKagiSearchEffect = Effect.fn("EffectIndex.runKagiSearch")(function* (
-	query: string,
-	options: FullSearchOptions,
-) {
-	return yield* kagiSearchEffect(query, undefined, {
-		lens: options.lens,
-		recencyFilter: options.recencyFilter,
-		domainFilter: options.domainFilter,
-	}).pipe(
-		Effect.map((result): SearchResponse => ({ ...result, providerUsed: "kagi" })),
-		Effect.mapError((error) =>
-			SearchProviderError.make({
-				provider: "kagi",
-				reason: error.reason,
-			}),
-		),
-	);
-});
+const defaultSearchEventsServicePromise = Effect.runPromise(
+	makeSearchEventsService(SEARCH_EVENTS_DB_PATH ? { dbPath: SEARCH_EVENTS_DB_PATH } : {}),
+);
 
-const runGeminiSearchEffect = Effect.fn("EffectIndex.runGeminiSearch")(function* (
-	query: string,
-	options: FullSearchOptions,
-) {
-	const result = yield* Effect.tryPromise({
-		try: () => geminiSearch(query, options),
-		catch: (cause) =>
-			SearchProviderError.make({
-				provider: "gemini",
-				reason: toErrorMessage(cause),
-			}),
-	});
-	return {
-		...result,
-		providerUsed: "gemini" as const,
-	};
-});
-
-const searchWithFallbackEffect = Effect.fn("EffectIndex.searchWithFallback")(function* (
-	query: string,
-	options: FullSearchOptions = {},
-) {
-	const preferredProvider = options.provider ?? "auto";
-	if (preferredProvider === "kagi") {
-		return yield* runKagiSearchEffect(query, options).pipe(Effect.retry(SEARCH_RETRY_POLICY));
-	}
-	if (preferredProvider === "gemini") {
-		return yield* runGeminiSearchEffect(query, options).pipe(Effect.retry(SEARCH_RETRY_POLICY));
-	}
-
-	const kagiAttempt = yield* Effect.either(
-		runKagiSearchEffect(query, options).pipe(Effect.retry(SEARCH_RETRY_POLICY)),
-	);
-	if (Either.isRight(kagiAttempt)) {
-		return kagiAttempt.right;
-	}
-
-	yield* Effect.logWarning(`Kagi search failed, falling back to Gemini: ${kagiAttempt.left.reason}`);
-
-	const geminiAttempt = yield* Effect.either(
-		runGeminiSearchEffect(query, options).pipe(Effect.retry(SEARCH_RETRY_POLICY)),
-	);
-	if (Either.isRight(geminiAttempt)) {
-		return geminiAttempt.right;
-	}
-
-	return yield* SearchFallbackError.make({
-		primaryProvider: "kagi",
-		primaryReason: kagiAttempt.left.reason,
-		fallbackProvider: "gemini",
-		fallbackReason: geminiAttempt.left.reason,
-	});
-});
-
-async function searchWithFallback(
-	query: string,
-	options?: FullSearchOptions,
-): Promise<SearchResponse> {
-	return Effect.runPromise(
-		searchWithFallbackEffect(query, options ?? {}).pipe(
-			Effect.mapError((error) => mapSearchFailureToToolError(error)),
-		),
-	);
+async function defaultSearch(query: string, options?: FullSearchOptions): Promise<SearchRuntimeResponse> {
+	const events = await defaultSearchEventsServicePromise;
+	return searchWithFallback(query, options ?? {}, { events });
 }
 
 function makeSearchServiceLayer(deps: EffectExtensionDeps): Layer.Layer<SearchService> {
@@ -348,7 +270,7 @@ function makeCookiesServiceLayer(deps: EffectExtensionDeps): Layer.Layer<Cookies
 }
 
 const defaultDeps: EffectExtensionDeps = {
-	search: searchWithFallback,
+	search: defaultSearch,
 	readCookies: readChromeCookiesEffect,
 };
 
@@ -536,6 +458,7 @@ function registerWebSearchTool(pi: ExtensionAPI, searchLayer: Layer.Layer<Search
 				error: null,
 				provider: outcome.response.providerUsed,
 				resultCount: outcome.response.results.length,
+				correlationId: outcome.response.correlationId,
 				queryDiagnostics: outcome.response.queryDiagnostics,
 			};
 			return {
