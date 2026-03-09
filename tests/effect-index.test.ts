@@ -132,6 +132,22 @@ describe("effect shadow entry", () => {
 		expect(capturedLens).toBe("programming");
 	});
 
+	it("maps structured search dependency failures to tool errors", async () => {
+		const tools = registerWith({
+			search: async () => {
+				throw { reason: "provider-down" };
+			},
+			readCookies: fakeDeps.readCookies,
+		});
+		const tool = tools.get("web_search");
+		expect(typeof tool?.execute).toBe("function");
+		if (typeof tool?.execute !== "function") throw new Error("missing execute");
+
+		const result = await tool.execute("call-2c", { query: "effect" });
+		expect(result.details?.error).toBe("provider-down");
+		expect(result.content[0]?.text).toContain("provider-down");
+	});
+
 	it("runs chrome_cookies via effect deps", async () => {
 		const tools = registerWith(fakeDeps);
 		const tool = tools.get("chrome_cookies");

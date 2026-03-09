@@ -1,15 +1,15 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { StringEnum } from "@mariozechner/pi-ai";
 import { Type } from "@sinclair/typebox";
-import { Effect } from "effect";
+import { Context, Effect, Layer, Schema } from "effect";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { readChromeCookiesEffect, type CookieReadResult } from "./chrome-cookies.js";
 import { makeEvent } from "./core/Observability.js";
 import { type FullSearchOptions, search as geminiSearch } from "./gemini-search.js";
 import { kagiSearchEffect, type SearchSuccess } from "./kagi-search.js";
-import { readChromeCookiesEffect } from "./chrome-cookies.js";
 import { makeSqliteEventStore } from "./observability/EventStore.js";
 
 interface EventStoreSmokeParams {
@@ -45,42 +45,158 @@ interface WebSearchToolDetails {
 	readonly queryDiagnostics?: SearchSuccess["queryDiagnostics"];
 }
 
+type SearchExecutionOutcome =
+	| { readonly ok: true; readonly response: SearchResponse }
+	| { readonly ok: false; readonly error: SearchToolExecutionError };
+
+type CookiesExecutionOutcome =
+	| { readonly ok: true; readonly value: CookieReadResult }
+	| { readonly ok: false; readonly error: CookiesToolExecutionError };
+
 export interface EffectExtensionDeps {
 	readonly search: (query: string, options?: FullSearchOptions) => Promise<SearchResponse>;
 	readonly readCookies: typeof readChromeCookiesEffect;
 }
 
+class SearchToolExecutionError extends Schema.TaggedError<SearchToolExecutionError>()(
+	"SearchToolExecutionError",
+	{
+		reason: Schema.String,
+	},
+) {}
+
+class CookiesToolExecutionError extends Schema.TaggedError<CookiesToolExecutionError>()(
+	"CookiesToolExecutionError",
+	{
+		reason: Schema.String,
+	},
+) {}
+
+class SearchService extends Context.Tag("@pi-web-access/SearchService")<
+	SearchService,
+	{
+		readonly search: (
+			query: string,
+			options?: FullSearchOptions,
+		) => Effect.Effect<SearchResponse, SearchToolExecutionError>;
+	}
+>() {}
+
+class CookiesService extends Context.Tag("@pi-web-access/CookiesService")<
+	CookiesService,
+	{
+		readonly readCookies: () => Effect.Effect<CookieReadResult, CookiesToolExecutionError>;
+	}
+>() {}
+
+function toErrorMessage(error: unknown): string {
+	if (error instanceof Error) {
+		return error.message;
+	}
+	if (error && typeof error === "object" && "reason" in error) {
+		const reason = (error as { readonly reason: unknown }).reason;
+		if (typeof reason === "string") {
+			return reason;
+		}
+	}
+	return String(error);
+}
+
+const searchWithFallbackEffect = Effect.fn("EffectIndex.searchWithFallback")(function* (
+	query: string,
+	options: FullSearchOptions = {},
+) {
+	const preferredProvider = options.provider ?? "auto";
+
+	if (preferredProvider === "auto" || preferredProvider === "kagi") {
+		const kagiResponse = yield* kagiSearchEffect(query, undefined, {
+			lens: options.lens,
+			recencyFilter: options.recencyFilter,
+			domainFilter: options.domainFilter,
+		}).pipe(
+			Effect.map((result): SearchResponse => ({ ...result, providerUsed: "kagi" })),
+			Effect.catchTag("KagiSearchError", (error) =>
+				preferredProvider === "kagi"
+					? Effect.fail(error)
+					: Effect.gen(function* () {
+						yield* Effect.logWarning(
+							`Kagi search failed, falling back to Gemini: ${error.reason}`,
+						);
+						return null;
+					}),
+			),
+		);
+
+		if (kagiResponse) {
+			return kagiResponse;
+		}
+	}
+
+	const geminiResponse = yield* Effect.tryPromise({
+		try: () => geminiSearch(query, options),
+		catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
+	});
+	const providerUsed: SearchResponse["providerUsed"] =
+		options.provider === "perplexity" ? "perplexity" : "gemini";
+	return {
+		...geminiResponse,
+		providerUsed,
+	};
+});
+
 async function searchWithFallback(
 	query: string,
 	options?: FullSearchOptions,
 ): Promise<SearchResponse> {
-	const preferredProvider = options?.provider ?? "auto";
-	
-	// Try Kagi first if auto or explicitly requested
-	if (preferredProvider === "auto" || preferredProvider === "kagi") {
-		try {
-			const kagiResult = await Effect.runPromise(
-				kagiSearchEffect(query, undefined, {
-					lens: options?.lens,
-					recencyFilter: options?.recencyFilter,
-					domainFilter: options?.domainFilter,
+	return Effect.runPromise(searchWithFallbackEffect(query, options ?? {}));
+}
+
+function makeSearchServiceLayer(deps: EffectExtensionDeps): Layer.Layer<SearchService> {
+	const search = Effect.fn("SearchService.search")(function* (
+		query: string,
+		options?: FullSearchOptions,
+	) {
+		return yield* Effect.tryPromise({
+			try: () => deps.search(query, options),
+			catch: (cause) =>
+				SearchToolExecutionError.make({
+					reason: toErrorMessage(cause),
 				}),
-			);
-			return { ...kagiResult, providerUsed: "kagi" };
-		} catch (kagiErr) {
-			// If Kagi fails and user explicitly wanted Kagi, don't fall back
-			if (preferredProvider === "kagi") {
-				throw kagiErr;
-			}
-			// Otherwise fall through to Gemini
-			console.error(`Kagi search failed, falling back to Gemini: ${kagiErr}`);
-		}
-	}
-	
-	// Fall back to Gemini
-	const geminiResult = await geminiSearch(query, options);
-	const providerUsed = options?.provider === "perplexity" ? "perplexity" : "gemini";
-	return { ...geminiResult, providerUsed };
+		});
+	});
+
+	return Layer.succeed(
+		SearchService,
+		SearchService.of({
+			search,
+		}),
+	);
+}
+
+function makeCookiesServiceLayer(deps: EffectExtensionDeps): Layer.Layer<CookiesService> {
+	const readCookies = Effect.fn("CookiesService.readCookies")(function* () {
+		return yield* deps.readCookies().pipe(
+			Effect.mapError((error) =>
+				CookiesToolExecutionError.make({
+					reason: toErrorMessage(error),
+				}),
+			),
+			Effect.catchAllDefect((defect) =>
+				Effect.fail(
+					CookiesToolExecutionError.make({
+						reason: toErrorMessage(defect),
+					}),
+				),
+			),
+		);
+	});
+
+	return Layer.succeed(
+		CookiesService,
+		CookiesService.of({
+			readCookies,
+		}),
+	);
 }
 
 const defaultDeps: EffectExtensionDeps = {
@@ -189,7 +305,7 @@ function registerEventStoreSmokeTool(pi: ExtensionAPI): void {
 	});
 }
 
-function registerWebSearchTool(pi: ExtensionAPI, deps: EffectExtensionDeps): void {
+function registerWebSearchTool(pi: ExtensionAPI, searchLayer: Layer.Layer<SearchService>): void {
 	pi.registerTool({
 		name: "web_search",
 		label: "Web Search",
@@ -213,37 +329,51 @@ function registerWebSearchTool(pi: ExtensionAPI, deps: EffectExtensionDeps): voi
 				};
 			}
 
-			try {
-				const response = await deps.search(params.query, {
+			const searchProgram = Effect.gen(function* () {
+				const search = yield* SearchService;
+				return yield* search.search(params.query ?? "", {
 					provider: params.provider,
 					numResults: params.numResults,
 					recencyFilter: params.recencyFilter,
 					domainFilter: params.domainFilter,
 					lens: params.lens,
 				});
-				const details: WebSearchToolDetails = {
-					error: null,
-					provider: response.providerUsed,
-					resultCount: response.results.length,
-					queryDiagnostics: response.queryDiagnostics,
-				};
+			}).pipe(Effect.provide(searchLayer));
+
+			const outcome = await Effect.runPromise(
+				searchProgram.pipe(
+					Effect.match({
+						onFailure: (error): SearchExecutionOutcome => ({ ok: false, error }),
+						onSuccess: (response): SearchExecutionOutcome => ({ ok: true, response }),
+					}),
+				),
+			);
+
+			if ("error" in outcome) {
+				const details: WebSearchToolDetails = { error: outcome.error.reason };
 				return {
-					content: [{ type: "text", text: formatSearchSummary(response.results, response.answer) }],
-					details,
-				};
-			} catch (error) {
-				const message = error instanceof Error ? error.message : String(error);
-				const details: WebSearchToolDetails = { error: message };
-				return {
-					content: [{ type: "text", text: `Error: ${message}` }],
+					content: [{ type: "text", text: `Error: ${outcome.error.reason}` }],
 					details,
 				};
 			}
+
+			const details: WebSearchToolDetails = {
+				error: null,
+				provider: outcome.response.providerUsed,
+				resultCount: outcome.response.results.length,
+				queryDiagnostics: outcome.response.queryDiagnostics,
+			};
+			return {
+				content: [
+					{ type: "text", text: formatSearchSummary(outcome.response.results, outcome.response.answer) },
+				],
+				details,
+			};
 		},
 	});
 }
 
-function registerChromeCookiesTool(pi: ExtensionAPI, deps: EffectExtensionDeps): void {
+function registerChromeCookiesTool(pi: ExtensionAPI, cookiesLayer: Layer.Layer<CookiesService>): void {
 	pi.registerTool({
 		name: "chrome_cookies",
 		label: "Chrome Cookies (Effect)",
@@ -254,20 +384,34 @@ function registerChromeCookiesTool(pi: ExtensionAPI, deps: EffectExtensionDeps):
 		async execute(_toolCallId, rawParams) {
 			const params = rawParams as CookiesParams;
 			const requested = params.names ?? ["__Secure-1PSID", "__Secure-1PSIDTS", "NID"];
-			const exit = await Effect.runPromiseExit(deps.readCookies());
-			if (exit._tag === "Failure") {
+
+			const readProgram = Effect.gen(function* () {
+				const cookies = yield* CookiesService;
+				return yield* cookies.readCookies();
+			}).pipe(Effect.provide(cookiesLayer));
+
+			const outcome = await Effect.runPromise(
+				readProgram.pipe(
+					Effect.match({
+						onFailure: (error): CookiesExecutionOutcome => ({ ok: false, error }),
+						onSuccess: (value): CookiesExecutionOutcome => ({ ok: true, value }),
+					}),
+				),
+			);
+
+			if ("error" in outcome) {
 				return {
-					content: [{ type: "text", text: "Error: Chrome cookies unavailable." }],
-					details: { error: "cookies-unavailable" },
+					content: [{ type: "text", text: `Error: ${outcome.error.reason}` }],
+					details: { error: outcome.error.reason },
 				};
 			}
 
-			const present = requested.filter((name) => Boolean(exit.value.cookies[name]));
+			const present = requested.filter((name) => Boolean(outcome.value.cookies[name]));
 			return {
 				content: [
 					{
 						type: "text",
-						text: `Found ${Object.keys(exit.value.cookies).length} Google cookie(s). Present requested: ${present.length}/${requested.length}.`,
+						text: `Found ${Object.keys(outcome.value.cookies).length} Google cookie(s). Present requested: ${present.length}/${requested.length}.`,
 					},
 				],
 				details: {
@@ -284,9 +428,11 @@ export function registerEffectTools(
 	options: RegisterEffectToolsOptions = {},
 ): void {
 	registerEventStoreSmokeTool(pi);
-	registerChromeCookiesTool(pi, deps);
+	const searchLayer = makeSearchServiceLayer(deps);
+	const cookiesLayer = makeCookiesServiceLayer(deps);
+	registerChromeCookiesTool(pi, cookiesLayer);
 	if (options.includeWebSearch !== false) {
-		registerWebSearchTool(pi, deps);
+		registerWebSearchTool(pi, searchLayer);
 	}
 }
 

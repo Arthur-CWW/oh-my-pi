@@ -133,7 +133,7 @@ function decodeRow(row: EventRow): Effect.Effect<ObservabilityEvent, EventStoreE
 			};
 		},
 		catch: (cause) =>
-			new EventStoreError({
+			EventStoreError.make({
 				reason: `Failed to decode event row: ${stringifyUnknown(cause)}`,
 			}),
 	});
@@ -142,7 +142,7 @@ function decodeRow(row: EventRow): Effect.Effect<ObservabilityEvent, EventStoreE
 function decodeRows(rows: unknown): Effect.Effect<ReadonlyArray<ObservabilityEvent>, EventStoreError> {
 	if (!Array.isArray(rows)) {
 		return Effect.fail(
-			new EventStoreError({
+			EventStoreError.make({
 				reason: "Expected sqlite query rows to be an array",
 			}),
 		);
@@ -151,7 +151,7 @@ function decodeRows(rows: unknown): Effect.Effect<ReadonlyArray<ObservabilityEve
 	return Effect.forEach(rows, (row) => {
 		if (!isRecord(row)) {
 			return Effect.fail(
-				new EventStoreError({
+				EventStoreError.make({
 					reason: "Encountered non-record sqlite row",
 				}),
 			);
@@ -171,14 +171,14 @@ function decodeRows(rows: unknown): Effect.Effect<ReadonlyArray<ObservabilityEve
 
 		if (!eventRow.event_id || !eventRow.correlation_id || !eventRow.name || !eventRow.payload_json) {
 			return Effect.fail(
-				new EventStoreError({
+				EventStoreError.make({
 					reason: "Missing required sqlite event row fields",
 				}),
 			);
 		}
 		if (!Number.isFinite(toTimestampNumber(eventRow.timestamp))) {
 			return Effect.fail(
-				new EventStoreError({
+				EventStoreError.make({
 					reason: "Event row has invalid timestamp",
 				}),
 			);
@@ -246,7 +246,7 @@ export function makeSqliteEventStore(
 						);
 					},
 					catch: (cause) =>
-						new EventStoreError({
+						EventStoreError.make({
 							reason: `Failed to append event: ${stringifyUnknown(cause)}`,
 						}),
 				});
@@ -258,7 +258,7 @@ export function makeSqliteEventStore(
 					Effect.try({
 						try: () => byCorrelation.all(correlationId) as unknown,
 						catch: (cause) =>
-							new EventStoreError({
+							EventStoreError.make({
 								reason: `Failed to list events by correlation id: ${stringifyUnknown(cause)}`,
 							}),
 					}),
@@ -272,7 +272,7 @@ export function makeSqliteEventStore(
 					Effect.try({
 						try: () => recent.all(Math.max(0, Math.floor(limit))) as unknown,
 						catch: (cause) =>
-							new EventStoreError({
+							EventStoreError.make({
 								reason: `Failed to list recent events: ${stringifyUnknown(cause)}`,
 							}),
 					}),
@@ -284,7 +284,7 @@ export function makeSqliteEventStore(
 					db.close();
 				},
 				catch: (cause) =>
-					new EventStoreError({
+					EventStoreError.make({
 						reason: `Failed to close sqlite database: ${stringifyUnknown(cause)}`,
 					}),
 			});
@@ -297,7 +297,7 @@ export function makeSqliteEventStore(
 			};
 		},
 		catch: (cause) =>
-			new EventStoreError({
+			EventStoreError.make({
 				reason: `Failed to initialize sqlite event store: ${stringifyUnknown(cause)}`,
 			}),
 	});

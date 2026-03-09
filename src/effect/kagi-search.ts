@@ -1,4 +1,4 @@
-import { Data, Effect } from "effect";
+import { Effect, Schema } from "effect";
 import {
 	SimpleRateLimiter,
 	runSocketSearchWithAutoRefresh,
@@ -27,10 +27,13 @@ async function runDefaultKagiSearch(options: KagiSearchOptions): Promise<KagiSea
 	});
 }
 
-export class KagiSearchError extends Data.TaggedError("KagiSearchError")<{
-	readonly reason: string;
-	readonly status?: number;
-}> {}
+export class KagiSearchError extends Schema.TaggedError<KagiSearchError>()(
+	"KagiSearchError",
+	{
+		reason: Schema.String,
+		status: Schema.optional(Schema.Number),
+	},
+) {}
 
 export interface KagiSearchDeps {
 	readonly runSearch: (options: KagiSearchOptions) => Promise<KagiSearchResult>;
@@ -316,13 +319,13 @@ export function kagiSearchEffect(
 					maxResponseBytes: 2_000_000,
 				}),
 			catch: (cause) =>
-				new KagiSearchError({
+				KagiSearchError.make({
 					reason: cause instanceof Error ? cause.message : String(cause),
 				}),
 		});
 
 		if (!result.ok) {
-			return yield* new KagiSearchError({
+			return yield* KagiSearchError.make({
 				reason: `Kagi search failed with status ${result.status}`,
 				status: result.status,
 			});

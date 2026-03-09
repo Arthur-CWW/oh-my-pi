@@ -1,9 +1,12 @@
-import { Data, Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { getGoogleCookies, type CookieMap } from "../old/chrome-cookies.js";
 
-export class ChromeCookiesError extends Data.TaggedError("ChromeCookiesError")<{
-	readonly reason: string;
-}> {}
+export class ChromeCookiesError extends Schema.TaggedError<ChromeCookiesError>()(
+	"ChromeCookiesError",
+	{
+		reason: Schema.String,
+	},
+) {}
 
 export interface CookieReadResult {
 	readonly cookies: CookieMap;
@@ -33,7 +36,7 @@ export function readChromeCookiesEffect(
 			};
 		},
 		catch: (cause) =>
-			new ChromeCookiesError({
+			ChromeCookiesError.make({
 				reason: cause instanceof Error ? cause.message : String(cause),
 			}),
 	});

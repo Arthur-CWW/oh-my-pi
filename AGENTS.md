@@ -35,6 +35,7 @@ Current persistent preferences:
 - Avoid unnecessary nested folders + `index.ts` re-export barrels for single-feature modules.
 - If splitting into multiple files is necessary, keep it minimal and justify briefly in PR/task notes.
 - Use `effect-solutions` (plural) when invoking the local Effect solutions CLI (`effect-solution` is not present in this environment).
+- For Effect migrations/refactors, consult `effect-solutions` guidance first (`quick-start` + relevant topic docs such as `basics`, `services-and-layers`, `error-handling`, `config`) before implementing.
 - During implementation iterations, run **only scoped/filtered tests** for the feature being changed (file-level and, when useful, test-name filtering). Do **not** run the full suite repeatedly while iterating. Run the full mandatory validation suite once at handoff or when explicitly requested. Avoid live API/e2e validation runs unless the user explicitly asks for a manual pass.
 - For interactive/TUI or long-running process validation, prefer **tmux-managed test sessions** (fixed pane size, scripted `send-keys`, `capture-pane` snapshots, explicit session cleanup) locally and over SSH.
 - Prefer **static module imports**; avoid dynamic/lazy `import()` unless technically required (and briefly justify when used).

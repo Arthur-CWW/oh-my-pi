@@ -50,7 +50,7 @@ export function request(options: HttpRequestOptions): Effect.Effect<Response, Ht
 
 					if (!response.ok) {
 						const bodySnippet = (await response.text()).slice(0, 300);
-						const statusError = new HttpStatusError({
+						const statusError = HttpStatusError.make({
 							url: options.url,
 							status: response.status,
 							bodySnippet,
@@ -70,8 +70,8 @@ export function request(options: HttpRequestOptions): Effect.Effect<Response, Ht
 					}
 					const message = stringifyUnknown(cause).toLowerCase();
 					const mappedError: HttpError = message.includes("timeout") || message.includes("abort")
-						? new HttpTimeoutError({ url: options.url, timeoutMs })
-						: new HttpRequestError({ url: options.url, reason: stringifyUnknown(cause) });
+						? HttpTimeoutError.make({ url: options.url, timeoutMs })
+						: HttpRequestError.make({ url: options.url, reason: stringifyUnknown(cause) });
 
 					if (attempt <= retries) {
 						lastError = mappedError;
@@ -83,7 +83,7 @@ export function request(options: HttpRequestOptions): Effect.Effect<Response, Ht
 			}
 
 			if (lastError) throw lastError;
-			throw new HttpRequestError({
+			throw HttpRequestError.make({
 				url: options.url,
 				reason: "Request failed without a specific error",
 			});
@@ -96,7 +96,7 @@ export function request(options: HttpRequestOptions): Effect.Effect<Response, Ht
 			) {
 				return cause;
 			}
-			return new HttpRequestError({
+			return HttpRequestError.make({
 				url: options.url,
 				reason: stringifyUnknown(cause),
 			});
@@ -111,7 +111,7 @@ export function requestJson<T>(
 		Effect.tryPromise({
 			try: () => response.json() as Promise<T>,
 			catch: (cause) =>
-				new HttpRequestError({
+				HttpRequestError.make({
 					url: options.url,
 					reason: `Failed to parse JSON response: ${stringifyUnknown(cause)}`,
 				}),

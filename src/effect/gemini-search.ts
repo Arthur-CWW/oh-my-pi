@@ -1,4 +1,4 @@
-import { Data, Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { API_BASE, DEFAULT_MODEL, getApiKey } from "../old/gemini-api.js";
 import { isGeminiWebAvailable, queryWithCookies } from "../old/gemini-web.js";
 import {
@@ -39,9 +39,12 @@ const defaultDeps: GeminiSearchDeps = {
 	fetch,
 };
 
-export class SearchUnavailableError extends Data.TaggedError("SearchUnavailableError")<{
-	readonly reason: string;
-}> {}
+export class SearchUnavailableError extends Schema.TaggedError<SearchUnavailableError>()(
+	"SearchUnavailableError",
+	{
+		reason: Schema.String,
+	},
+) {}
 
 const GEMINI_UNAVAILABLE_MESSAGE =
 	"Gemini search unavailable. Either:\n" +
@@ -75,7 +78,7 @@ export function searchEffect(
 				(yield* searchWithGeminiApiEffect(query, options, deps)) ??
 				(yield* searchWithGeminiWebEffect(query, options, deps));
 			if (result) return result;
-			return yield* Effect.fail(new SearchUnavailableError({ reason: GEMINI_UNAVAILABLE_MESSAGE }));
+			return yield* SearchUnavailableError.make({ reason: GEMINI_UNAVAILABLE_MESSAGE });
 		}
 
 		if (deps.isPerplexityAvailable()) {
@@ -90,7 +93,7 @@ export function searchEffect(
 			(yield* searchWithGeminiWebEffect(query, options, deps));
 		if (geminiResult) return geminiResult;
 
-		return yield* Effect.fail(new SearchUnavailableError({ reason: PROVIDER_UNAVAILABLE_MESSAGE }));
+		return yield* SearchUnavailableError.make({ reason: PROVIDER_UNAVAILABLE_MESSAGE });
 	});
 }
 

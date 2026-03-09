@@ -77,7 +77,7 @@ export function decodeWebSearchConfig(
 			return { provider, curateWindow, autoFilter, shortcuts };
 		},
 		catch: (cause) =>
-			new ConfigParseError({
+			ConfigParseError.make({
 				path,
 				reason: cause instanceof Error ? cause.message : String(cause),
 			}),
@@ -94,7 +94,7 @@ export function loadWebSearchConfig(
 				return readFileSync(path, "utf-8");
 			},
 			catch: (cause) =>
-				new ConfigReadError({
+				ConfigReadError.make({
 					path,
 					reason: cause instanceof Error ? cause.message : String(cause),
 				}),
@@ -103,7 +103,7 @@ export function loadWebSearchConfig(
 		const parsed = yield* Effect.try({
 			try: () => JSON.parse(rawText) as unknown,
 			catch: (cause) =>
-				new ConfigParseError({
+				ConfigParseError.make({
 					path,
 					reason: cause instanceof Error ? cause.message : String(cause),
 				}),
@@ -123,7 +123,7 @@ export function requireEnv(name: string): Effect.Effect<string, MissingConfigErr
 			return value;
 		},
 		catch: (cause) =>
-			new MissingConfigError({
+			MissingConfigError.make({
 				key: name,
 				reason: cause instanceof Error ? cause.message : String(cause),
 			}),

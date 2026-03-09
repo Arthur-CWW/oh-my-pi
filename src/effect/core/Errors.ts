@@ -1,39 +1,60 @@
-import { Data } from "effect";
+import { Schema } from "effect";
 
-export class ConfigReadError extends Data.TaggedError("ConfigReadError")<{
-	readonly path: string;
-	readonly reason: string;
-}> {}
+export class ConfigReadError extends Schema.TaggedError<ConfigReadError>()(
+	"ConfigReadError",
+	{
+		path: Schema.String,
+		reason: Schema.String,
+	},
+) {}
 
-export class ConfigParseError extends Data.TaggedError("ConfigParseError")<{
-	readonly path: string;
-	readonly reason: string;
-}> {}
+export class ConfigParseError extends Schema.TaggedError<ConfigParseError>()(
+	"ConfigParseError",
+	{
+		path: Schema.String,
+		reason: Schema.String,
+	},
+) {}
 
-export class MissingConfigError extends Data.TaggedError("MissingConfigError")<{
-	readonly key: string;
-	readonly reason: string;
-}> {}
+export class MissingConfigError extends Schema.TaggedError<MissingConfigError>()(
+	"MissingConfigError",
+	{
+		key: Schema.String,
+		reason: Schema.String,
+	},
+) {}
 
-export class HttpRequestError extends Data.TaggedError("HttpRequestError")<{
-	readonly url: string;
-	readonly reason: string;
-}> {}
+export class HttpRequestError extends Schema.TaggedError<HttpRequestError>()(
+	"HttpRequestError",
+	{
+		url: Schema.String,
+		reason: Schema.String,
+	},
+) {}
 
-export class HttpTimeoutError extends Data.TaggedError("HttpTimeoutError")<{
-	readonly url: string;
-	readonly timeoutMs: number;
-}> {}
+export class HttpTimeoutError extends Schema.TaggedError<HttpTimeoutError>()(
+	"HttpTimeoutError",
+	{
+		url: Schema.String,
+		timeoutMs: Schema.Number,
+	},
+) {}
 
-export class HttpStatusError extends Data.TaggedError("HttpStatusError")<{
-	readonly url: string;
-	readonly status: number;
-	readonly bodySnippet: string;
-}> {}
+export class HttpStatusError extends Schema.TaggedError<HttpStatusError>()(
+	"HttpStatusError",
+	{
+		url: Schema.String,
+		status: Schema.Number,
+		bodySnippet: Schema.String,
+	},
+) {}
 
-export class EventStoreError extends Data.TaggedError("EventStoreError")<{
-	readonly reason: string;
-}> {}
+export class EventStoreError extends Schema.TaggedError<EventStoreError>()(
+	"EventStoreError",
+	{
+		reason: Schema.String,
+	},
+) {}
 
 export type ConfigError = ConfigReadError | ConfigParseError | MissingConfigError;
 
