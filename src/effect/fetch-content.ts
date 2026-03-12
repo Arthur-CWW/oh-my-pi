@@ -1,10 +1,11 @@
 import { Data, Effect, Schema } from "effect";
+import { fetchAllContentEffect, type ExtractOptions } from "./fetch-content-runtime.js";
 import {
-	fetchAllContentEffect,
-	type ExtractedContent,
-	type ExtractOptions,
-} from "./fetch-content-runtime.js";
-import { generateId, storeResult, type StoredSearchData } from "../shared/stored-results.js";
+	generateId,
+	storeResult,
+	type StoredSearchData,
+} from "../shared/stored-results.js";
+import type { ExtractedContent } from "../shared/fetch-content-contracts.js";
 
 const MAX_INLINE_CONTENT = 30000;
 

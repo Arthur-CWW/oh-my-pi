@@ -1,10 +1,10 @@
 import { describe, expect, it } from "bun:test";
 import { Effect } from "effect";
+import type { ExtractedContent } from "../../shared/fetch-content-contracts.js";
 import { API_BASE, DEFAULT_MODEL } from "../gemini-api.js";
 import {
 	extractContentEffect,
 	extractViaHttpEffect,
-	type ExtractedContent,
 	type FetchContentRuntimeDeps,
 } from "../fetch-content-runtime.js";
 
@@ -28,7 +28,18 @@ function makeDeps(
 ): Partial<FetchContentRuntimeDeps> {
 	return {
 		fetch: async (_input: string | URL | Request, _init?: RequestInit) => unexpected("fetch"),
-		legacyExtractContent: () => Effect.fail({ _tag: "UnexpectedLegacyExtract" as const }),
+		extractGitHub: async () => unexpected("extractGitHub"),
+		extractPDFToMarkdown: async () => unexpected("extractPDFToMarkdown"),
+		extractYouTube: async () => unexpected("extractYouTube"),
+		getYouTubeStreamInfo: async () => unexpected("getYouTubeStreamInfo"),
+		extractYouTubeFrame: async () => unexpected("extractYouTubeFrame"),
+		extractYouTubeFrames: async () => unexpected("extractYouTubeFrames"),
+		isYouTubeEnabled: () => true,
+		isVideoFile: () => null,
+		extractVideo: async () => unexpected("extractVideo"),
+		extractVideoFrame: async () => unexpected("extractVideoFrame"),
+		getLocalVideoDuration: async () => unexpected("getLocalVideoDuration"),
+		extractLocalFrames: async () => unexpected("extractLocalFrames"),
 		getApiKey: () => null,
 		isGeminiWebAvailable: () => Effect.succeed(null),
 		queryWithCookies: () => Effect.fail({ _tag: "UnexpectedGeminiWebQuery" as const }),
@@ -234,42 +245,36 @@ describe("effect fetch-content runtime", () => {
 		});
 	});
 
-	it("keeps later-pass timestamp and video flows delegated to the legacy extractor", async () => {
-		const legacyResult: ExtractedContent = {
-			url: "https://example.com/not-a-video",
-			title: "Frame at 00:10",
-			content: "legacy delegated result",
-			error: null,
-		};
-
+	it("handles timestamp frame extraction through effect-owned youtube helpers", async () => {
+		const url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
 		const result = await Effect.runPromise(
 			extractContentEffect(
-				legacyResult.url,
+				url,
 				undefined,
 				{ timestamp: "00:10" },
 				makeDeps({
-					legacyExtractContent: () => Effect.succeed(legacyResult),
+					getYouTubeStreamInfo: async () => ({ streamUrl: "https://stream.test", duration: 120 }),
+					extractYouTubeFrame: async () => ({ data: "frame-data", mimeType: "image/jpeg" }),
 				}),
 			),
 		);
 
-		expect(result).toEqual(legacyResult);
+		expect(result).toEqual({
+			url,
+			title: "Frame at 00:10",
+			content: "Video frame at 00:10",
+			error: null,
+			thumbnail: { data: "frame-data", mimeType: "image/jpeg" },
+		});
 	});
 
-	it("delegates github and pdf flows to the legacy extractor", async () => {
+	it("uses effect-owned github and pdf extraction paths", async () => {
 		const githubResult: ExtractedContent = {
 			url: "https://github.com/example/repo",
-			title: "repo",
-			content: "legacy github result",
+			title: "example/repo",
+			content: "effect github result",
 			error: null,
 		};
-		const pdfResult: ExtractedContent = {
-			url: "https://example.com/doc.pdf",
-			title: "doc",
-			content: "legacy pdf result",
-			error: null,
-		};
-		const delegatedUrls: string[] = [];
 
 		const github = await Effect.runPromise(
 			extractContentEffect(
@@ -277,30 +282,39 @@ describe("effect fetch-content runtime", () => {
 				undefined,
 				undefined,
 				makeDeps({
-					legacyExtractContent: (url) => {
-						delegatedUrls.push(url);
-						return Effect.succeed(url === githubResult.url ? githubResult : pdfResult);
-					},
+					extractGitHub: async () => githubResult,
 				}),
 			),
 		);
+
 		const pdf = await Effect.runPromise(
-			extractContentEffect(
-				pdfResult.url,
+			extractViaHttpEffect(
+				"https://example.com/doc.pdf",
 				undefined,
 				undefined,
 				makeDeps({
-					legacyExtractContent: (url) => {
-						delegatedUrls.push(url);
-						return Effect.succeed(url === githubResult.url ? githubResult : pdfResult);
-					},
+					fetch: async () =>
+						new Response(Uint8Array.from([1, 2, 3]), {
+							status: 200,
+							headers: { "content-type": "application/pdf" },
+						}),
+					extractPDFToMarkdown: async () => ({
+						title: "doc",
+						pages: 3,
+						chars: 1200,
+						outputPath: "/tmp/doc.md",
+					}),
 				}),
 			),
 		);
 
 		expect(github).toEqual(githubResult);
-		expect(pdf).toEqual(pdfResult);
-		expect(delegatedUrls).toEqual([githubResult.url, pdfResult.url]);
+		expect(pdf).toEqual({
+			url: "https://example.com/doc.pdf",
+			title: "doc",
+			content: "PDF extracted and saved to: /tmp/doc.md\n\nPages: 3\nCharacters: 1200",
+			error: null,
+		});
 	});
 
 	it("returns guidance when all general-page fallbacks are exhausted", async () => {

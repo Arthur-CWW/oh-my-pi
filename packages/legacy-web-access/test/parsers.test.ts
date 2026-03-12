@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
-import { parseGitHubUrl } from "../packages/legacy-web-access/src/github-extract.ts";
-import { isPDF } from "../packages/legacy-web-access/src/pdf-extract.ts";
-import { isYouTubeURL } from "../packages/legacy-web-access/src/youtube-extract.ts";
+import { parseGitHubUrl } from "../src/github-extract.ts";
+import { isPDF } from "../src/pdf-extract.ts";
+import { isYouTubeURL } from "../src/youtube-extract.ts";
 
 describe("URL parsers", () => {
 	it("parses github root URL", () => {

@@ -213,24 +213,17 @@ Bundled research workflow for investigating open-source libraries. Combines GitH
 
 ## Commands
 
-### /websearch
-
-Open the search curator directly in the browser. Runs searches and lets you review, add, and select results to send back to the agent — no LLM round-trip needed.
-
-```
-/websearch                                    # empty page, type your own searches
-/websearch react hooks, next.js caching       # pre-fill with comma-separated queries
-```
-
-Results get injected into the conversation when you click Send. The agent sees them and can use them immediately.
-
 ### /search
 
-Browse stored search results interactively. Lists all results from the current session with their response IDs for easy retrieval.
+Browse stored search/fetch results interactively. Lists stored response IDs and lets you inspect or delete them from the current session.
+
+### Legacy-only command/UI reference
+
+The old browser curator command (`/websearch`) and activity widget now live only in `packages/legacy-web-access/src/index.ts` as migration reference/debug code. They are **not** registered by the default Effect entrypoint (`src/effect/index.ts`).
 
 ## Activity Monitor
 
-Toggle with **Ctrl+Shift+W** to see live request/response activity:
+The activity widget below is part of the legacy reference entrypoint, not the default Effect entrypoint:
 
 ```
 ─── Web Search Activity ────────────────────────────────────
@@ -244,11 +237,12 @@ Toggle with **Ctrl+Shift+W** to see live request/response activity:
 
 All config lives in `~/.pi/web-search.json`. Every field is optional.
 
+The default Effect entrypoint currently uses the `geminiApiKey`, `provider`, `githubClone`, `youtube`, and `video` settings below. Legacy-only curator settings such as `curateWindow`, `autoFilter`, and `shortcuts` still exist for reference/debugging under `packages/legacy-web-access`, but are not used by the default Effect entrypoint.
+
 ```json
 {
   "geminiApiKey": "AIza...",
-  "curateWindow": 10,
-  "autoFilter": true,
+  "provider": "kagi",
   "githubClone": {
     "enabled": true,
     "maxRepoSizeMB": 350,
@@ -263,19 +257,15 @@ All config lives in `~/.pi/web-search.json`. Every field is optional.
     "enabled": true,
     "preferredModel": "gemini-3-flash-preview",
     "maxSizeMB": 50
-  },
-  "shortcuts": {
-    "curate": "ctrl+shift+s",
-    "activity": "ctrl+shift+w"
   }
 }
 ```
 
-`GEMINI_API_KEY` takes precedence over the config file value. `provider` controls the default `web_search` provider preference (`"kagi"` or `"gemini"`); if omitted, the default Kagi-first fallback flow is used. `curateWindow` controls how many seconds multi-query searches wait before auto-sending results (default: 10). During the countdown, press Ctrl+Shift+S to open the browser curator. Set to 0 to always send immediately (Ctrl+Shift+S still works during the search itself).
+`GEMINI_API_KEY` takes precedence over the config file value. `provider` controls the default `web_search` provider preference (`"kagi"` or `"gemini"`); if omitted, the default Kagi-first fallback flow is used.
 
-### Shortcuts
+### Legacy-only shortcut settings
 
-Both shortcuts are configurable via `~/.pi/web-search.json`:
+These shortcut settings apply only to the legacy reference entrypoint:
 
 ```json
 {
@@ -288,9 +278,11 @@ Both shortcuts are configurable via `~/.pi/web-search.json`:
 
 Values use the same format as pi keybindings (e.g. `ctrl+s`, `ctrl+shift+s`, `alt+r`). Changes take effect on next pi restart.
 
-### Auto-Condense
+### Legacy-only auto-condense
 
-Multi-query searches are automatically condensed into a deduplicated briefing when the countdown expires without manual curation. A single LLM call receives all search results — enriched with preprocessing analysis (URL overlap, answer similarity, source quality tiers) — and produces a concise synthesis organized by topic. Irrelevant or off-topic results are skipped automatically.
+Multi-query auto-condense belongs to the legacy reference entrypoint. The default Effect entrypoint does not currently load that browser-curation flow.
+
+When used from the legacy entrypoint, multi-query searches are automatically condensed into a deduplicated briefing when the countdown expires without manual curation. A single LLM call receives all search results — enriched with preprocessing analysis (URL overlap, answer similarity, source quality tiers) — and produces a concise synthesis organized by topic. Irrelevant or off-topic results are skipped automatically.
 
 ```json
 {

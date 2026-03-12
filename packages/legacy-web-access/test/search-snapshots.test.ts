@@ -5,8 +5,8 @@ import {
 	postProcessCondensed,
 	preprocessSearchResults,
 	type PreprocessedData,
-} from "../packages/legacy-web-access/src/search-filter.js";
-import type { QueryResultData } from "../packages/legacy-web-access/src/storage.js";
+} from "../src/search-filter.js";
+import type { QueryResultData } from "../src/storage.js";
 
 interface SearchResult {
 	readonly title: string;
@@ -74,7 +74,14 @@ describe("search snapshots", () => {
 	it("snapshot: preprocess search normalization output", () => {
 		const preprocessed = preprocessSearchResults(makeResultsMap());
 		assertSnapshot(
-			join(process.cwd(), "tests", "snapshots", "search-preprocess.snapshot.json"),
+			join(
+				process.cwd(),
+				"packages",
+				"legacy-web-access",
+				"test",
+				"snapshots",
+				"search-preprocess.snapshot.json",
+			),
 			normalizePreprocessed(preprocessed),
 		);
 	});
@@ -86,7 +93,14 @@ describe("search snapshots", () => {
 		].join("\n\n");
 		const output = postProcessCondensed(condensed, makeSources());
 		assertSnapshot(
-			join(process.cwd(), "tests", "snapshots", "search-condensed.snapshot.md"),
+			join(
+				process.cwd(),
+				"packages",
+				"legacy-web-access",
+				"test",
+				"snapshots",
+				"search-condensed.snapshot.md",
+			),
 			output,
 		);
 	});

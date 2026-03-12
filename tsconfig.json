@@ -17,6 +17,6 @@
 		"forceConsistentCasingInFileNames": true,
 		"plugins": []
 	},
-	"include": ["src/**/*.ts", "scripts/**/*.ts", "skills/**/*.ts", "packages/kagi/src/**/*.ts", "packages/kagi/scripts/**/*.ts", "packages/legacy-web-access/src/**/*.ts"],
+	"include": ["src/**/*.ts", "scripts/**/*.ts", "skills/**/*.ts", "packages/kagi/src/**/*.ts", "packages/kagi/scripts/**/*.ts", "packages/legacy-web-access/src/**/*.ts", "packages/legacy-web-access/test/**/*.ts"],
 	"exclude": ["node_modules", "test-output"]
 }

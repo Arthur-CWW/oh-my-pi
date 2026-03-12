@@ -3,14 +3,9 @@ import { StringEnum } from "@mariozechner/pi-ai";
 import { Type } from "@sinclair/typebox";
 import { Cause, Data, Effect, Exit, Schema } from "effect";
 import { randomUUID } from "node:crypto";
-import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-	fetchAllContentEffect,
-	type ExtractedContent,
-	type ExtractOptions,
-} from "./fetch-content-runtime.js";
+import { fetchAllContentEffect, type ExtractOptions } from "./fetch-content-runtime.js";
 import { readChromeCookiesEffect, type CookieReadResult } from "./chrome-cookies.js";
 import { makeSearchEvent, type SearchEventName } from "./search-event.js";
 import {
@@ -41,6 +36,8 @@ import {
 	type GetSearchContentParams,
 } from "./search-content.js";
 import { makeSearchEventsService } from "./search-events.js";
+import { deleteResult, getAllResults } from "../shared/stored-results.js";
+import type { ExtractedContent } from "../shared/fetch-content-contracts.js";
 
 const EventStoreSmokeParamsSchema = Schema.Struct({
 	dbPath: Schema.optional(Schema.String),
@@ -340,11 +337,6 @@ const defaultDeps: EffectExtensionDeps = {
 	readCookies: readChromeCookiesEffect,
 };
 
-const LEGACY_ENTRY_CANDIDATES = [
-	"../../packages/legacy-web-access/src/index.js",
-	"../../packages/legacy-web-access/src/index.ts",
-] as const;
-
 function formatSearchSummary(
 	results: ReadonlyArray<{ title: string; url: string; snippet?: string; publishedAt?: string }>,
 	answer: string,
@@ -369,19 +361,94 @@ function formatSearchSummary(
 	);
 }
 
-function loadLegacyRegistrar(): ((pi: ExtensionAPI) => void) | null {
-	const require = createRequire(import.meta.url);
-	for (const candidate of LEGACY_ENTRY_CANDIDATES) {
-		try {
-			const moduleRecord = require(candidate) as { default?: unknown };
-			if (typeof moduleRecord.default === "function") {
-				return moduleRecord.default as (pi: ExtensionAPI) => void;
-			}
-		} catch {
-			// Try next candidate path.
-		}
+function formatStoredResultAge(timestamp: number): string {
+	const ageMinutes = Math.floor((Date.now() - timestamp) / 60000);
+	return ageMinutes < 60 ? `${ageMinutes}m ago` : `${Math.floor(ageMinutes / 60)}h ago`;
+}
+
+function describeStoredResult(result: {
+	readonly id: string;
+	readonly type: "search" | "fetch";
+	readonly timestamp: number;
+	readonly queries?: ReadonlyArray<{ readonly query: string }>;
+	readonly urls?: ReadonlyArray<ExtractedContent>;
+}): string {
+	const age = formatStoredResultAge(result.timestamp);
+	if (result.type === "search" && result.queries) {
+		const query = result.queries[0]?.query || "unknown";
+		return `[${result.id.slice(0, 6)}] "${query}" (${result.queries.length} queries) - ${age}`;
 	}
-	return null;
+	if (result.type === "fetch" && result.urls) {
+		return `[${result.id.slice(0, 6)}] ${result.urls.length} URLs fetched - ${age}`;
+	}
+	return `[${result.id.slice(0, 6)}] ${result.type} - ${age}`;
+}
+
+function registerSearchCommand(pi: ExtensionAPI): void {
+	pi.registerCommand("search", {
+		description: "Browse stored web search results",
+		handler: async (_args, ctx) => {
+			const results = getAllResults();
+			if (results.length === 0) {
+				ctx.ui.notify("No stored search results", "info");
+				return;
+			}
+
+			const choice = await ctx.ui.select(
+				"Stored Search Results",
+				results.map((result) => describeStoredResult(result)),
+			);
+			if (!choice) {
+				return;
+			}
+
+			const match = choice.match(/^\[([a-z0-9]+)\]/);
+			if (!match?.[1]) {
+				return;
+			}
+
+			const selected = results.find((result) => result.id.startsWith(match[1]));
+			if (!selected) {
+				return;
+			}
+
+			const action = await ctx.ui.select(`Result ${selected.id.slice(0, 6)}`, [
+				"View details",
+				"Delete",
+			]);
+			if (action === "Delete") {
+				deleteResult(selected.id);
+				ctx.ui.notify(`Deleted ${selected.id.slice(0, 6)}`, "info");
+				return;
+			}
+			if (action !== "View details") {
+				return;
+			}
+
+			let info = `ID: ${selected.id}\nType: ${selected.type}\nAge: ${formatStoredResultAge(selected.timestamp)}\n\n`;
+			if (selected.type === "search" && selected.queries) {
+				info += "Queries:\n";
+				for (const query of selected.queries.slice(0, 10)) {
+					info += `- "${query.query}" (${query.results.length} results)\n`;
+				}
+				if (selected.queries.length > 10) {
+					info += `... and ${selected.queries.length - 10} more\n`;
+				}
+			}
+			if (selected.type === "fetch" && selected.urls) {
+				info += "URLs:\n";
+				for (const urlResult of selected.urls.slice(0, 10)) {
+					const urlDisplay =
+						urlResult.url.length > 50 ? `${urlResult.url.slice(0, 47)}...` : urlResult.url;
+					info += `- ${urlDisplay} (${urlResult.error || `${urlResult.content.length} chars`})\n`;
+				}
+				if (selected.urls.length > 10) {
+					info += `... and ${selected.urls.length - 10} more\n`;
+				}
+			}
+			ctx.ui.notify(info, "info");
+		},
+	});
 }
 
 function registerEventStoreSmokeTool(pi: ExtensionAPI): void {
@@ -479,7 +546,7 @@ function registerWebSearchTool(pi: ExtensionAPI, deps: EffectExtensionDeps): voi
 			provider: Type.Optional(StringEnum([...SEARCH_PROVIDER_SELECTION_VALUES])),
 			lens: Type.Optional(Type.String()),
 			numResults: Type.Optional(Type.Number({ minimum: 1, maximum: 20 })),
-			recencyFilter: Type.Optional(StringEnum(["day", "week", "month", "year"])),
+			recencyFilter: Type.Optional(StringEnum([...RECENCY_FILTER_VALUES])),
 			domainFilter: Type.Optional(Type.Array(Type.String())),
 		}),
 		async execute(_toolCallId, rawParams) {
@@ -801,26 +868,7 @@ export function registerEffectTools(
 	}
 }
 
-function isLegacyBridgeDisabled(): boolean {
-	const value = process.env.PI_WEB_ACCESS_DISABLE_LEGACY_BRIDGE;
-	if (!value) {
-		return false;
-	}
-	const normalized = value.trim().toLowerCase();
-	return normalized === "1" || normalized === "true";
-}
-
 export default function (pi: ExtensionAPI) {
-	if (!isLegacyBridgeDisabled()) {
-		const registerLegacy = loadLegacyRegistrar();
-		if (registerLegacy) {
-			registerLegacy(pi);
-			// Register Effect-owned migration tools after the legacy bridge so they override
-			// legacy implementations while preserving the rest of the legacy tool surface.
-			registerEffectTools(pi, defaultDeps, { includeWebSearch: true });
-			return;
-		}
-	}
-
 	registerEffectTools(pi, defaultDeps, { includeWebSearch: true });
+	registerSearchCommand(pi);
 }

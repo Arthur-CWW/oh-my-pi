@@ -76,7 +76,7 @@ pi --no-extensions -e ./packages/legacy-web-access/src/index.ts --help
 ## Recommended next task
 
 1. User confirm current `[@User]` tasks to move them to `[x]`.
-2. Start next vertical migrations still relying on legacy bridge:
-   - `perplexity`
-   - `fetch_content` / `get_search_content`
-   - extractor special cases (YouTube/video/GitHub) into Effect slices.
+2. Continue bridge-free Effect cleanup:
+   - split `src/effect/index.ts` further now that tool + `/search` command registration are fully Effect-owned
+   - tighten shared fetch-content contracts/config/error handling around the new Effect-owned GitHub/PDF/YouTube/local-video modules
+   - keep `packages/legacy-web-access/*` reference-only unless a parity/debug fix is explicitly needed

@@ -35,6 +35,11 @@ interface ToolLike {
 	) => { text: string };
 }
 
+interface CommandLike {
+	readonly description?: unknown;
+	readonly handler?: unknown;
+}
+
 function registerWith(deps: EffectExtensionDeps): Map<string, ToolLike> {
 	const registered = new Map<string, ToolLike>();
 	const api = {
@@ -49,21 +54,31 @@ function registerWith(deps: EffectExtensionDeps): Map<string, ToolLike> {
 	return registered;
 }
 
-function registerCutoverEntry(): Map<string, ToolLike> {
-	const registered = new Map<string, ToolLike>();
+function captureCutoverEntry(): {
+	readonly tools: Map<string, ToolLike>;
+	readonly commands: Map<string, CommandLike>;
+} {
+	const tools = new Map<string, ToolLike>();
+	const commands = new Map<string, CommandLike>();
 	const api = {
 		registerTool: (tool: ToolLike) => {
 			if (typeof tool.name === "string") {
-				registered.set(tool.name, tool);
+				tools.set(tool.name, tool);
 			}
 		},
 		registerShortcut: () => {},
 		on: () => {},
-		registerCommand: () => {},
+		registerCommand: (name: string, command: CommandLike) => {
+			commands.set(name, command);
+		},
 	} as unknown as ExtensionAPI;
 
 	effectEntry(api);
-	return registered;
+	return { tools, commands };
+}
+
+function registerCutoverEntry(): Map<string, ToolLike> {
+	return captureCutoverEntry().tools;
 }
 
 const fakeTheme: TestTheme = {
@@ -451,33 +466,35 @@ describe("effect shadow entry", () => {
 });
 
 describe("effect production cutover entry", () => {
-	it("registers legacy tool surface plus effect extras", () => {
-		const tools = registerCutoverEntry();
+	it("registers the effect tool surface and effect-owned search command", () => {
+		const { tools, commands } = captureCutoverEntry();
 		expect(tools.has("web_search")).toBe(true);
 		expect(tools.has("fetch_content")).toBe(true);
 		expect(tools.has("get_search_content")).toBe(true);
 		expect(tools.has("chrome_cookies")).toBe(true);
 		expect(tools.has("effect_event_store_smoke")).toBe(true);
 		expect(String(tools.get("web_search")?.description ?? "")).toContain("Kagi");
+		expect(commands.has("search")).toBe(true);
+		expect(commands.has("websearch")).toBe(false);
 	});
 
-	it("supports disabling the legacy bridge with PI_WEB_ACCESS_DISABLE_LEGACY_BRIDGE", () => {
-		const previous = process.env.PI_WEB_ACCESS_DISABLE_LEGACY_BRIDGE;
-		process.env.PI_WEB_ACCESS_DISABLE_LEGACY_BRIDGE = "1";
-		try {
-			const tools = registerCutoverEntry();
-			expect(tools.has("web_search")).toBe(true);
-			expect(tools.has("fetch_content")).toBe(true);
-			expect(tools.has("get_search_content")).toBe(true);
-			expect(tools.has("chrome_cookies")).toBe(true);
-			expect(tools.has("effect_event_store_smoke")).toBe(true);
-		} finally {
-			if (previous === undefined) {
-				delete process.env.PI_WEB_ACCESS_DISABLE_LEGACY_BRIDGE;
-			} else {
-				process.env.PI_WEB_ACCESS_DISABLE_LEGACY_BRIDGE = previous;
-			}
-		}
+	it("search command shows empty-state guidance without stored results", async () => {
+		const { commands } = captureCutoverEntry();
+		const command = commands.get("search");
+		expect(typeof command?.handler).toBe("function");
+		if (typeof command?.handler !== "function") throw new Error("missing search handler");
+
+		const notifications: string[] = [];
+		await command.handler("", {
+			ui: {
+				notify: (message: string) => {
+					notifications.push(message);
+				},
+				select: async () => null,
+			},
+		});
+
+		expect(notifications).toEqual(["No stored search results"]);
 	});
 
 	it("package entrypoint points to effect index", () => {

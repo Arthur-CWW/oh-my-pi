@@ -1,3 +1,11 @@
+import type {
+	ExtractedContent as StoredFetchContent,
+	ImageData as StoredImageData,
+	VideoFrame as StoredVideoFrame,
+} from "./fetch-content-contracts.js";
+
+export type { StoredFetchContent, StoredImageData, StoredVideoFrame };
+
 export interface StoredSearchResult {
 	title: string;
 	url: string;
@@ -9,27 +17,6 @@ export interface QueryResultData {
 	answer: string;
 	results: StoredSearchResult[];
 	error: string | null;
-}
-
-export interface StoredVideoFrame {
-	data: string;
-	mimeType: string;
-	timestamp: string;
-}
-
-export interface StoredImageData {
-	data: string;
-	mimeType: string;
-}
-
-export interface StoredFetchContent {
-	url: string;
-	title: string;
-	content: string;
-	error: string | null;
-	thumbnail?: StoredImageData;
-	frames?: StoredVideoFrame[];
-	duration?: number;
 }
 
 export interface StoredSearchData {

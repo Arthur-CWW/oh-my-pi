@@ -60,6 +60,7 @@ Current persistent preferences:
 - Prefer Effect-based provider package interfaces (including `packages/kagi/*` runtime surfaces); keep `Promise`/`async` only at explicit external boundaries.
 - Do not expose user-facing provider selection values like `"auto"`; omitted provider should continue to mean the default Kagi-first fallback flow.
 - Treat `packages/legacy-web-access/src/*` as the legacy reference/stability baseline during migration; keep it isolated behind that package boundary and avoid pulling new logic back into the main `src/` tree.
+- Treat `packages/legacy-web-access/*` as reference-only by default; avoid modifying legacy files unless the task explicitly targets parity/debugging there, and prefer extracting shared logic into Effect-owned or neutral shared modules instead.
 - When validating package installation behavior, default to **global `pi install` (no `-l`)** so settings are exercised under `~/.pi` (agent settings path), unless the user explicitly asks for project-local install behavior.
 - Keep fork repository metadata URLs aligned to the current git `origin` remote (owner/repo casing included), unless the user explicitly asks otherwise.
 - Prefer Effect-native instrumentation (`Effect.fn`, spans, typed errors) plus lightweight local event-emission services for migration observability; avoid adding OpenTelemetry/export pipeline work unless explicitly requested.
@@ -67,6 +68,7 @@ Current persistent preferences:
 - Keep internal migration flows Effect-native end-to-end; only convert to `Promise`/`async` at explicit external boundaries (tool `execute`, CLI main, interop wrappers).
 - Observability/event services must be optional and fail-open: if emitting/persisting events fails, feature/tool behavior must continue.
 - Prefer schema-first boundaries: define Effect `Schema` once and derive runtime validation/decoding + TypeScript types from it where serde/input contracts exist.
+- Prefer Effect `Schema` for parsing/serialization work when practical; avoid ad-hoc JSON/shape parsing when a shared schema boundary would clarify the contract.
 - At third-party boundaries, normalize nullable/undefined payloads with schema transforms/codecs (recursive normalization when needed) before domain logic.
 - Do not use raw `as` casts for tool parameters in Effect entry paths; decode/validate boundary inputs and return actionable errors.
 - Prefer Effect-native retry/timeouts (`Effect.retry`, `Schedule`, `Effect.timeout`) over bespoke retry helpers in Effect paths.
@@ -75,6 +77,7 @@ Current persistent preferences:
 - Prefer migrating new/refactored Effect code toward the local `vendor/effect-smol` v4 stack/package surfaces rather than adding more dependency on the current v3-era split packages.
 - Prefer shared/effect-owned helpers over importing implementation modules from `packages/legacy-web-access/src/*` into new Effect code; if both paths need the same utility, extract it to a neutral shared module or make the legacy package delegate to the shared/effect-owned implementation instead of the reverse.
 - `ast-grep` is available and you should use it liberally :)
+- when you see an slop code issue, and you think it can be fixed easily with ast-grep , query and fix it right away
 - Prefer the locally available power tools when they reduce risk or improve review quality: `difft`/difftastic for semantic diffs, `fd` for file discovery, `jq` for JSON inspection/transforms, `delta` for readable git diffs, and `rg` for fast text search.
 - Preserve user-facing behavior and tool contracts, but do not keep legacy implementation-detail compatibility, helper-shape parity, or low-value unit tests (for example CLI help-string assertions) unless they protect an actual repo boundary.
 - Keep docs maintenance proportional: prioritize `AGENTS.md`, `task-tracker.md`, the current migration handoff, and user-facing README/install docs; avoid spending time preserving stale historical notes unless they directly affect current work.

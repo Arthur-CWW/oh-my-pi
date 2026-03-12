@@ -60,10 +60,9 @@ Tests were updated accordingly:
 - Moved the legacy implementation from `src/old/*` to `packages/legacy-web-access/src/*`.
 - Added `packages/legacy-web-access/package.json` as the package boundary.
 - Rewired repo/runtime references to the new legacy package location:
-  - `src/effect/index.ts` legacy bridge loader path
-  - `src/effect/fetch-content-runtime.ts`
+  - `src/effect/fetch-content-runtime.ts` (historical migration step; direct legacy extractor dependency was later removed)
   - `scripts/e2e-*.ts`
-  - repo-level old/reference tests under `tests/*`
+  - repo-level old/reference tests under `tests/*` (later moved into `packages/legacy-web-access/test/*`)
 - Updated TS/package include lists so the legacy package is tracked explicitly.
 
 ### 5) Effect entry/test/storage cleanup pass
@@ -87,11 +86,11 @@ Tests were updated accordingly:
 
 - Copied the legacy storage helpers into `packages/legacy-web-access/src/storage.ts`, so the legacy package no longer depends on `src/shared/*`.
 - Simplified `src/effect/fetch-content-runtime.ts` by:
-  - removing direct legacy-package imports for GitHub/PDF/RSC/video/YouTube helpers
   - copying RSC extraction into `src/effect/rsc-extract.ts`
-  - delegating GitHub/PDF/video/YouTube/timestamp flows through the single legacy extractor boundary
+  - later replacing the final legacy extractor dependency with Effect-owned GitHub/PDF/YouTube/local-video helpers
+  - adding shared schema-based fetch-content contracts/config parsing for the extractor boundary
   - dropping the legacy activity-monitor plumbing from the Effect runtime path
-- Simplified `src/effect/index.ts` by removing the temporary Search/Cookies service/layer indirection and calling the Effect deps directly at the tool boundary.
+- Simplified `src/effect/index.ts` by removing the temporary Search/Cookies service/layer indirection, later removing the default legacy bridge entirely, and keeping an Effect-owned `/search` command for stored-result browsing.
 
 ### 7) Core/observability cleanup pass
 
@@ -155,14 +154,13 @@ Results:
 ## Recommended next refactor
 
 Best next slice:
-1. **Continue simplifying `src/effect/index.ts` tool wiring**
-   - the fetch-content render helpers are now split out, but entry/tool registration + boundary formatting logic is still too concentrated in one file
+1. **Split/simplify `src/effect/index.ts` further now that the legacy bridge is gone**
+   - tool registration, command registration, and boundary formatting logic are still concentrated in one file
    - keep splits flat (no barrel-folder churn)
-2. **Continue shrinking the single legacy extractor fallback in `src/effect/fetch-content-runtime.ts`**
-   - GitHub/PDF/video/YouTube/timestamp now route through one legacy boundary; the next worthwhile cleanup is replacing more of that fallback with Effect-owned implementations
-3. **Continue simplifying `src/effect/index.ts` tool wiring**
-4. **Continue simplifying `src/effect/core/Config.ts` if more standard Effect Config combinators can replace ad-hoc glue without hurting clarity**
-5. Keep `packages/legacy-web-access` stable and isolated unless a legacy wrapper/delegation is explicitly needed.
+2. **Keep tightening the new Effect-owned fetch special cases**
+   - GitHub/PDF/YouTube/local-video paths are now local, so the next worthwhile cleanup is improving shared contracts/config/error handling rather than delegating back to legacy
+3. **Continue simplifying `src/effect/core/Config.ts` if more standard Effect Config combinators can replace ad-hoc glue without hurting clarity**
+4. Keep `packages/legacy-web-access` stable and isolated unless a legacy parity/debug fix is explicitly needed.
 
 ## Notes for next session
 

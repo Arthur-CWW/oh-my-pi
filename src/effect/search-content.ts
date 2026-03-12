@@ -1,4 +1,8 @@
 import { Effect, Option, Schema } from "effect";
+import {
+	ExtractedContentSchema,
+	type ExtractedContent,
+} from "../shared/fetch-content-contracts.js";
 import { getResult } from "../shared/stored-results.js";
 
 const SearchResultSchema = Schema.Struct({
@@ -15,29 +19,6 @@ const QueryResultDataSchema = Schema.Struct({
 });
 
 type QueryResultData = typeof QueryResultDataSchema.Type;
-
-const VideoFrameSchema = Schema.Struct({
-	data: Schema.String,
-	mimeType: Schema.String,
-	timestamp: Schema.String,
-});
-
-const ImageDataSchema = Schema.Struct({
-	data: Schema.String,
-	mimeType: Schema.String,
-});
-
-const ExtractedContentSchema = Schema.Struct({
-	url: Schema.String,
-	title: Schema.String,
-	content: Schema.String,
-	error: Schema.Union([Schema.String, Schema.Null]),
-	thumbnail: Schema.optional(ImageDataSchema),
-	frames: Schema.optional(Schema.Array(VideoFrameSchema)),
-	duration: Schema.optional(Schema.Number),
-});
-
-type ExtractedContent = typeof ExtractedContentSchema.Type;
 
 const SearchStoredDataSchema = Schema.Struct({
 	id: Schema.String,

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { isVideoFile } from "../packages/legacy-web-access/src/video-extract.ts";
+import { isVideoFile } from "../src/video-extract.ts";
 
 const tempDirs: string[] = [];
 

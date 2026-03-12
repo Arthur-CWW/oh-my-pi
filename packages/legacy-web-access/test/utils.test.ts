@@ -5,7 +5,7 @@ import {
 	mapFfmpegError,
 	readExecError,
 	trimErrorText,
-} from "../packages/legacy-web-access/src/utils.ts";
+} from "../src/utils.ts";
 
 describe("utils", () => {
 	it("formats seconds correctly", () => {
