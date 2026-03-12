@@ -1,15 +1,13 @@
 import { Readability } from "@mozilla/readability";
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { extname, join } from "node:path";
 import { Data, Effect, Schema } from "effect";
 import { parseHTML } from "linkedom";
 import TurndownService from "turndown";
-import { activityMonitor } from "../../packages/legacy-web-access/src/activity.js";
 import { extractContent as legacyExtractContent } from "../../packages/legacy-web-access/src/extract.js";
-import { extractGitHub } from "../../packages/legacy-web-access/src/github-extract.js";
-import { extractPDFToMarkdown, type PDFExtractResult, isPDF } from "../../packages/legacy-web-access/src/pdf-extract.js";
-import { extractRSCContent } from "../../packages/legacy-web-access/src/rsc-extract.js";
-import { isVideoFile } from "../../packages/legacy-web-access/src/video-extract.js";
-import { isYouTubeEnabled, isYouTubeURL } from "../../packages/legacy-web-access/src/youtube-extract.js";
 import { API_BASE, DEFAULT_MODEL, getApiKey } from "./gemini-api.js";
+import { extractRSCContent } from "./rsc-extract.js";
 import {
 	isGeminiWebAvailableEffect,
 	queryWithCookiesEffect,
@@ -28,6 +26,21 @@ Do not summarize — extract the full content.
 
 URL: `;
 const NON_RECOVERABLE_ERRORS = ["Unsupported content type", "Response too large"] as const;
+const WEB_SEARCH_CONFIG_PATH = join(homedir(), ".pi", "web-search.json");
+const YOUTUBE_REGEX =
+	/(?:(?:www\.|m\.)?youtube\.com\/(?:watch\?.*v=|shorts\/|live\/|embed\/|v\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/;
+const LOCAL_VIDEO_EXTENSIONS = new Set([
+	".mp4",
+	".mov",
+	".webm",
+	".avi",
+	".mpeg",
+	".mpg",
+	".wmv",
+	".flv",
+	".3gp",
+	".3gpp",
+]);
 
 const HTTP_HEADERS = {
 	"User-Agent":
@@ -93,20 +106,11 @@ class FetchContentRuntimeError extends Data.TaggedError("FetchContentRuntimeErro
 
 export interface FetchContentRuntimeDeps {
 	readonly fetch: (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
-	readonly extractGitHub: (
-		url: string,
-		signal?: AbortSignal,
-		forceClone?: boolean,
-	) => Effect.Effect<ExtractedContent | null, unknown>;
 	readonly legacyExtractContent: (
 		url: string,
 		signal?: AbortSignal,
 		options?: ExtractOptions,
 	) => Effect.Effect<ExtractedContent, unknown>;
-	readonly extractPdfToMarkdown: (
-		buffer: ArrayBuffer,
-		url: string,
-	) => Effect.Effect<PDFExtractResult, unknown>;
 	readonly getApiKey: () => string | null;
 	readonly isGeminiWebAvailable: () => Effect.Effect<CookieMap | null, unknown>;
 	readonly queryWithCookies: (
@@ -118,19 +122,9 @@ export interface FetchContentRuntimeDeps {
 
 const defaultDeps: FetchContentRuntimeDeps = {
 	fetch,
-	extractGitHub: (url, signal, forceClone) =>
-		Effect.tryPromise({
-			try: () => extractGitHub(url, signal, forceClone),
-			catch: toFetchContentRuntimeError,
-		}),
 	legacyExtractContent: (url, signal, options) =>
 		Effect.tryPromise({
 			try: () => legacyExtractContent(url, signal, options),
-			catch: toFetchContentRuntimeError,
-		}),
-	extractPdfToMarkdown: (buffer, url) =>
-		Effect.tryPromise({
-			try: () => extractPDFToMarkdown(buffer, url),
 			catch: toFetchContentRuntimeError,
 		}),
 	getApiKey,
@@ -161,11 +155,6 @@ function toErrorMessage(error: unknown): string {
 
 function toFetchContentRuntimeError(error: unknown): FetchContentRuntimeError {
 	return new FetchContentRuntimeError({ reason: toErrorMessage(error) });
-}
-
-function isAbortLikeError(error: unknown): boolean {
-	const message = toErrorMessage(error).toLowerCase();
-	return message.includes("abort");
 }
 
 function withTimeout(signal: AbortSignal | undefined, timeoutMs: number): AbortSignal {
@@ -211,15 +200,67 @@ function isLikelyJSRendered(html: string): boolean {
 	return textContent.length < 500 && scriptCount > 3;
 }
 
+function readFeatureFlag(name: "youtube", defaultValue: boolean): boolean {
+	try {
+		if (!existsSync(WEB_SEARCH_CONFIG_PATH)) {
+			return defaultValue;
+		}
+		const raw = JSON.parse(readFileSync(WEB_SEARCH_CONFIG_PATH, "utf-8")) as {
+			readonly youtube?: { readonly enabled?: boolean };
+		};
+		return raw[name]?.enabled ?? defaultValue;
+	} catch {
+		return defaultValue;
+	}
+}
+
+function isLocalVideoPath(input: string): boolean {
+	if (isValidUrl(input)) {
+		return false;
+	}
+	return LOCAL_VIDEO_EXTENSIONS.has(extname(input).toLowerCase());
+}
+
+function isYouTubeUrl(input: string): boolean {
+	try {
+		const parsed = new URL(input);
+		if (parsed.pathname === "/playlist") {
+			return false;
+		}
+	} catch {
+		return false;
+	}
+	return YOUTUBE_REGEX.test(input);
+}
+
+function isGitHubUrl(input: string): boolean {
+	try {
+		const hostname = new URL(input).hostname.toLowerCase();
+		return hostname === "github.com" || hostname === "www.github.com" || hostname === "gist.github.com";
+	} catch {
+		return false;
+	}
+}
+
+function isPdfContent(url: string, contentType?: string): boolean {
+	if (contentType?.includes("application/pdf")) {
+		return true;
+	}
+	try {
+		return new URL(url).pathname.toLowerCase().endsWith(".pdf");
+	} catch {
+		return false;
+	}
+}
+
 function shouldUseLegacyExtract(url: string, options?: ExtractOptions): boolean {
 	if (options?.frames || options?.timestamp) {
 		return true;
 	}
-	if (isVideoFile(url)) {
+	if (isGitHubUrl(url) || isLocalVideoPath(url) || isPdfContent(url)) {
 		return true;
 	}
-	const ytInfo = isYouTubeURL(url);
-	return ytInfo.isYouTube && isYouTubeEnabled();
+	return isYouTubeUrl(url) && readFeatureFlag("youtube", true);
 }
 
 function makeErrorResult(url: string, error: string): ExtractedContent {
@@ -244,14 +285,6 @@ function fallbackGuidance(error: string): string {
 	].join("\n");
 }
 
-function logActivityFailure(activityId: string, error: unknown, onAbortStatus = 0): void {
-	if (isAbortLikeError(error)) {
-		activityMonitor.logComplete(activityId, onAbortStatus);
-		return;
-	}
-	activityMonitor.logError(activityId, toErrorMessage(error));
-}
-
 function readJsonResponseEffect<A>(response: Response): Effect.Effect<A, FetchContentRuntimeError> {
 	return Effect.tryPromise({
 		try: () => response.json() as Promise<A>,
@@ -264,15 +297,6 @@ function readTextResponseEffect(
 ): Effect.Effect<string, FetchContentRuntimeError> {
 	return Effect.tryPromise({
 		try: () => response.text(),
-		catch: toFetchContentRuntimeError,
-	});
-}
-
-function readBufferResponseEffect(
-	response: Response,
-): Effect.Effect<ArrayBuffer, FetchContentRuntimeError> {
-	return Effect.tryPromise({
-		try: () => response.arrayBuffer(),
 		catch: toFetchContentRuntimeError,
 	});
 }
@@ -290,7 +314,6 @@ export const extractWithJinaReaderEffect = Effect.fn("FetchContentRuntime.extrac
 	function* (url: string, signal?: AbortSignal, deps?: Partial<FetchContentRuntimeDeps>) {
 		const runtimeDeps = resolveDeps(deps);
 		const jinaUrl = JINA_READER_BASE + url;
-		const activityId = activityMonitor.logStart({ type: "api", query: `jina: ${url}` });
 
 		const program = Effect.gen(function* () {
 			const response = yield* Effect.tryPromise({
@@ -306,13 +329,10 @@ export const extractWithJinaReaderEffect = Effect.fn("FetchContentRuntime.extrac
 			});
 
 			if (!response.ok) {
-				yield* Effect.sync(() => activityMonitor.logComplete(activityId, response.status));
 				return null;
 			}
 
 			const content = yield* readTextResponseEffect(response);
-			yield* Effect.sync(() => activityMonitor.logComplete(activityId, response.status));
-
 			const contentStart = content.indexOf("Markdown Content:");
 			if (contentStart < 0) {
 				return null;
@@ -336,18 +356,8 @@ export const extractWithJinaReaderEffect = Effect.fn("FetchContentRuntime.extrac
 		});
 
 		return yield* program.pipe(
-			Effect.catchTag("FetchContentRuntimeError", (error) =>
-				Effect.sync(() => {
-					logActivityFailure(activityId, error);
-					return null;
-				}),
-			),
-			Effect.catchDefect((defect) =>
-				Effect.sync(() => {
-					logActivityFailure(activityId, defect);
-					return null;
-				}),
-			),
+			Effect.catchTag("FetchContentRuntimeError", () => Effect.succeed(null)),
+			Effect.catchDefect(() => Effect.succeed(null)),
 		);
 	},
 );
@@ -360,7 +370,6 @@ export const extractWithUrlContextEffect = Effect.fn("FetchContentRuntime.extrac
 			return null;
 		}
 
-		const activityId = activityMonitor.logStart({ type: "api", query: `url_context: ${url}` });
 		const requestBody = {
 			contents: [{ parts: [{ text: EXTRACTION_PROMPT + url }] }],
 			tools: [{ url_context: {} }],
@@ -379,13 +388,10 @@ export const extractWithUrlContextEffect = Effect.fn("FetchContentRuntime.extrac
 			});
 
 			if (!response.ok) {
-				yield* Effect.sync(() => activityMonitor.logComplete(activityId, response.status));
 				return null;
 			}
 
 			const data = yield* readJsonResponseEffect<UrlContextResponse>(response);
-			yield* Effect.sync(() => activityMonitor.logComplete(activityId, response.status));
-
 			const metadata = data.candidates?.[0]?.url_context_metadata;
 			if (metadata?.url_metadata?.length) {
 				const status = metadata.url_metadata[0]?.url_retrieval_status;
@@ -412,18 +418,8 @@ export const extractWithUrlContextEffect = Effect.fn("FetchContentRuntime.extrac
 		});
 
 		return yield* program.pipe(
-			Effect.catchTag("FetchContentRuntimeError", (error) =>
-				Effect.sync(() => {
-					logActivityFailure(activityId, error);
-					return null;
-				}),
-			),
-			Effect.catchDefect((defect) =>
-				Effect.sync(() => {
-					logActivityFailure(activityId, defect);
-					return null;
-				}),
-			),
+			Effect.catchTag("FetchContentRuntimeError", () => Effect.succeed(null)),
+			Effect.catchDefect(() => Effect.succeed(null)),
 		);
 	},
 );
@@ -439,14 +435,12 @@ export const extractWithGeminiWebEffect = Effect.fn("FetchContentRuntime.extract
 			return null;
 		}
 
-		const activityId = activityMonitor.logStart({ type: "api", query: `gemini_web: ${url}` });
 		const program = Effect.gen(function* () {
 			const text = yield* runtimeDeps.queryWithCookies(EXTRACTION_PROMPT + url, cookies, {
 				model: "gemini-3-flash-preview",
 				signal,
 				timeoutMs: 60000,
 			});
-			yield* Effect.sync(() => activityMonitor.logComplete(activityId, 200));
 			if (text.length < 50) {
 				return null;
 			}
@@ -460,18 +454,8 @@ export const extractWithGeminiWebEffect = Effect.fn("FetchContentRuntime.extract
 		});
 
 		return yield* program.pipe(
-			Effect.catch((error) =>
-				Effect.sync(() => {
-					logActivityFailure(activityId, error);
-					return null;
-				}),
-			),
-			Effect.catchDefect((defect) =>
-				Effect.sync(() => {
-					logActivityFailure(activityId, defect);
-					return null;
-				}),
-			),
+			Effect.catch(() => Effect.succeed(null)),
+			Effect.catchDefect(() => Effect.succeed(null)),
 		);
 	},
 );
@@ -484,7 +468,6 @@ export const extractViaHttpEffect = Effect.fn("FetchContentRuntime.extractViaHtt
 ) {
 	const runtimeDeps = resolveDeps(deps);
 	const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-	const activityId = activityMonitor.logStart({ type: "fetch", url });
 
 	const program = Effect.gen(function* () {
 		const response = yield* Effect.tryPromise({
@@ -497,18 +480,16 @@ export const extractViaHttpEffect = Effect.fn("FetchContentRuntime.extractViaHtt
 		});
 
 		if (!response.ok) {
-			yield* Effect.sync(() => activityMonitor.logComplete(activityId, response.status));
 			return makeErrorResult(url, `HTTP ${response.status}: ${response.statusText}`);
 		}
 
 		const contentLengthHeader = response.headers.get("content-length");
 		const contentType = response.headers.get("content-type") || "";
-		const isPdfContent = isPDF(url, contentType);
-		const maxResponseSize = isPdfContent ? 20 * 1024 * 1024 : 5 * 1024 * 1024;
+		const pdfContent = isPdfContent(url, contentType);
+		const maxResponseSize = pdfContent ? 20 * 1024 * 1024 : 5 * 1024 * 1024;
 		if (contentLengthHeader) {
 			const contentLength = Number.parseInt(contentLengthHeader, 10);
 			if (Number.isFinite(contentLength) && contentLength > maxResponseSize) {
-				yield* Effect.sync(() => activityMonitor.logComplete(activityId, response.status));
 				return makeErrorResult(
 					url,
 					`Response too large (${Math.round(contentLength / 1024 / 1024)}MB)`,
@@ -516,18 +497,10 @@ export const extractViaHttpEffect = Effect.fn("FetchContentRuntime.extractViaHtt
 			}
 		}
 
-		if (isPdfContent) {
-			const buffer = yield* readBufferResponseEffect(response);
-			const result = yield* runtimeDeps
-				.extractPdfToMarkdown(buffer, url)
-				.pipe(Effect.mapError(toFetchContentRuntimeError));
-			yield* Effect.sync(() => activityMonitor.logComplete(activityId, response.status));
-			return {
-				url,
-				title: result.title,
-				content: `PDF extracted and saved to: ${result.outputPath}\n\nPages: ${result.pages}\nCharacters: ${result.chars}`,
-				error: null,
-			} satisfies ExtractedContent;
+		if (pdfContent) {
+			return yield* runtimeDeps.legacyExtractContent(url, signal, options).pipe(
+				Effect.mapError(toFetchContentRuntimeError),
+			);
 		}
 
 		if (
@@ -537,7 +510,6 @@ export const extractViaHttpEffect = Effect.fn("FetchContentRuntime.extractViaHtt
 			contentType.includes("video/") ||
 			contentType.includes("application/zip")
 		) {
-			yield* Effect.sync(() => activityMonitor.logComplete(activityId, response.status));
 			return makeErrorResult(url, `Unsupported content type: ${contentType.split(";")[0]}`);
 		}
 
@@ -545,7 +517,6 @@ export const extractViaHttpEffect = Effect.fn("FetchContentRuntime.extractViaHtt
 		const isHtml =
 			contentType.includes("text/html") || contentType.includes("application/xhtml+xml");
 		if (!isHtml) {
-			yield* Effect.sync(() => activityMonitor.logComplete(activityId, response.status));
 			return { url, title: extractTextTitle(text, url), content: text, error: null };
 		}
 
@@ -561,11 +532,9 @@ export const extractViaHttpEffect = Effect.fn("FetchContentRuntime.extractViaHtt
 		if (!article) {
 			const rscResult = extractRSCContent(text);
 			if (rscResult) {
-				yield* Effect.sync(() => activityMonitor.logComplete(activityId, response.status));
 				return { url, title: rscResult.title, content: rscResult.content, error: null };
 			}
 
-			yield* Effect.sync(() => activityMonitor.logComplete(activityId, response.status));
 			return makeErrorResult(
 				url,
 				isLikelyJSRendered(text)
@@ -578,7 +547,6 @@ export const extractViaHttpEffect = Effect.fn("FetchContentRuntime.extractViaHtt
 			try: () => turndown.turndown(article.content),
 			catch: toFetchContentRuntimeError,
 		});
-		yield* Effect.sync(() => activityMonitor.logComplete(activityId, response.status));
 		if (markdown.length < MIN_USEFUL_CONTENT) {
 			return {
 				url,
@@ -600,18 +568,9 @@ export const extractViaHttpEffect = Effect.fn("FetchContentRuntime.extractViaHtt
 
 	return yield* program.pipe(
 		Effect.catchTag("FetchContentRuntimeError", (error) =>
-			Effect.sync(() => {
-				logActivityFailure(activityId, error);
-				return makeErrorResult(url, error.reason);
-			}),
+			Effect.succeed(makeErrorResult(url, error.reason)),
 		),
-		Effect.catchDefect((defect) =>
-			Effect.sync(() => {
-				const message = toErrorMessage(defect);
-				logActivityFailure(activityId, message);
-				return makeErrorResult(url, message);
-			}),
-		),
+		Effect.catchDefect((defect) => Effect.succeed(makeErrorResult(url, toErrorMessage(defect)))),
 	);
 });
 
@@ -632,14 +591,6 @@ export const extractContentEffect = Effect.fn("FetchContentRuntime.extractConten
 
 	if (!isValidUrl(url)) {
 		return makeErrorResult(url, "Invalid URL");
-	}
-
-	const githubResult = yield* runtimeDeps.extractGitHub(url, signal, options?.forceClone).pipe(
-		Effect.catch(() => Effect.succeed<ExtractedContent | null>(null)),
-		Effect.catchDefect(() => Effect.succeed<ExtractedContent | null>(null)),
-	);
-	if (githubResult) {
-		return githubResult;
 	}
 
 	const httpResult = yield* extractViaHttpEffect(url, signal, options, runtimeDeps);

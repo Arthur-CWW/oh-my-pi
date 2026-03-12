@@ -83,7 +83,17 @@ Tests were updated accordingly:
   - CLI help-string assertions in Effect CLI tests
   - standalone storage helper test (`tests/storage.test.ts`)
 
-### 6) Core/observability cleanup pass
+### 6) Further fetch/index simplification pass
+
+- Copied the legacy storage helpers into `packages/legacy-web-access/src/storage.ts`, so the legacy package no longer depends on `src/shared/*`.
+- Simplified `src/effect/fetch-content-runtime.ts` by:
+  - removing direct legacy-package imports for GitHub/PDF/RSC/video/YouTube helpers
+  - copying RSC extraction into `src/effect/rsc-extract.ts`
+  - delegating GitHub/PDF/video/YouTube/timestamp flows through the single legacy extractor boundary
+  - dropping the legacy activity-monitor plumbing from the Effect runtime path
+- Simplified `src/effect/index.ts` by removing the temporary Search/Cookies service/layer indirection and calling the Effect deps directly at the tool boundary.
+
+### 7) Core/observability cleanup pass
 
 - Removed unused Effect wrapper modules:
   - `src/effect/core/Errors.ts`
@@ -148,10 +158,10 @@ Best next slice:
 1. **Continue simplifying `src/effect/index.ts` tool wiring**
    - the fetch-content render helpers are now split out, but entry/tool registration + boundary formatting logic is still too concentrated in one file
    - keep splits flat (no barrel-folder churn)
-2. **Reduce remaining `src/effect/fetch-content-runtime.ts` imports from `packages/legacy-web-access/src/*`**
-   - storage is now shared/effect-owned; the next worthwhile cleanup is pushing more fetch/runtime helpers out of the legacy package
-3. **Continue simplifying `src/effect/core/Config.ts` if more standard Effect Config combinators can replace ad-hoc glue without hurting clarity**
-4. **Continue moving focused Effect slice tests out of top-level `tests/` when they are not cross-package/integration coverage**
+2. **Continue shrinking the single legacy extractor fallback in `src/effect/fetch-content-runtime.ts`**
+   - GitHub/PDF/video/YouTube/timestamp now route through one legacy boundary; the next worthwhile cleanup is replacing more of that fallback with Effect-owned implementations
+3. **Continue simplifying `src/effect/index.ts` tool wiring**
+4. **Continue simplifying `src/effect/core/Config.ts` if more standard Effect Config combinators can replace ad-hoc glue without hurting clarity**
 5. Keep `packages/legacy-web-access` stable and isolated unless a legacy wrapper/delegation is explicitly needed.
 
 ## Notes for next session

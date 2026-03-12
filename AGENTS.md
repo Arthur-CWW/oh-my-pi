@@ -77,6 +77,7 @@ Current persistent preferences:
 - `ast-grep` is available and you should use it liberally :)
 - Prefer the locally available power tools when they reduce risk or improve review quality: `difft`/difftastic for semantic diffs, `fd` for file discovery, `jq` for JSON inspection/transforms, `delta` for readable git diffs, and `rg` for fast text search.
 - Preserve user-facing behavior and tool contracts, but do not keep legacy implementation-detail compatibility, helper-shape parity, or low-value unit tests (for example CLI help-string assertions) unless they protect an actual repo boundary.
+- Keep docs maintenance proportional: prioritize `AGENTS.md`, `task-tracker.md`, the current migration handoff, and user-facing README/install docs; avoid spending time preserving stale historical notes unless they directly affect current work.
 ## Mandatory Validation After Every Change
 
 Run all commands below and ensure they pass before finishing work.

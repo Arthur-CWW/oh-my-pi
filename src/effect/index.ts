@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { StringEnum } from "@mariozechner/pi-ai";
 import { Type } from "@sinclair/typebox";
-import { Cause, Data, Effect, Exit, Layer, Schema, ServiceMap } from "effect";
+import { Cause, Data, Effect, Exit, Schema } from "effect";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -128,10 +128,6 @@ type SearchExecutionOutcome =
 	| { readonly ok: true; readonly response: SearchResponse }
 	| { readonly ok: false; readonly error: SearchToolExecutionError };
 
-type CookiesExecutionOutcome =
-	| { readonly ok: true; readonly value: CookieReadResult }
-	| { readonly ok: false; readonly error: CookiesToolExecutionError };
-
 type FetchContentExecutionOutcome =
 	| { readonly ok: true; readonly response: FetchContentToolResponse }
 	| { readonly ok: false; readonly error: FetchContentExecutionError };
@@ -162,17 +158,6 @@ class SearchToolExecutionError extends Data.TaggedError("SearchToolExecutionErro
 class CookiesToolExecutionError extends Data.TaggedError("CookiesToolExecutionError")<{
 	readonly reason: string;
 }> {}
-
-const SearchService = ServiceMap.Service<{
-	readonly search: (
-		query: string,
-		options?: FullSearchOptions,
-	) => Effect.Effect<SearchResponse, SearchToolExecutionError>;
-}>("@pi-web-access/SearchService");
-
-const CookiesService = ServiceMap.Service<{
-	readonly readCookies: () => Effect.Effect<CookieReadResult, CookiesToolExecutionError>;
-}>("@pi-web-access/CookiesService");
 
 function toErrorMessage(error: unknown): string {
 	if (error instanceof Error) {
@@ -309,45 +294,37 @@ const defaultSearch = Effect.fn("EffectIndex.defaultSearch")(function* (
 	return yield* searchWithFallbackEffect(query, options ?? {}, { events });
 });
 
-function makeSearchServiceLayer(deps: EffectExtensionDeps) {
-	const search = Effect.fn("SearchService.search")(function* (
-		query: string,
-		options?: FullSearchOptions,
-	) {
-		return yield* deps.search(query, options).pipe(
-			Effect.mapError((cause) =>
-				cause instanceof SearchToolExecutionError ? cause : mapSearchFailureToToolError(cause),
-			),
-			Effect.catchDefect((defect) => Effect.fail(mapSearchFailureToToolError(defect))),
-		);
-	});
-
-	return Layer.succeed(SearchService, {
-		search,
-	});
+function searchWithToolDeps(
+	deps: EffectExtensionDeps,
+	query: string,
+	options?: FullSearchOptions,
+): Effect.Effect<SearchResponse, SearchToolExecutionError> {
+	return deps.search(query, options).pipe(
+		Effect.mapError((cause) =>
+			cause instanceof SearchToolExecutionError ? cause : mapSearchFailureToToolError(cause),
+		),
+		Effect.catchDefect((defect) => Effect.fail(mapSearchFailureToToolError(defect))),
+	);
 }
 
-function makeCookiesServiceLayer(deps: EffectExtensionDeps) {
-	const readCookies = Effect.fn("CookiesService.readCookies")(function* () {
-		return yield* deps.readCookies().pipe(
-			Effect.mapError((error) =>
+function readCookiesWithToolDeps(
+	deps: EffectExtensionDeps,
+): Effect.Effect<CookieReadResult, CookiesToolExecutionError> {
+	return deps.readCookies().pipe(
+		Effect.mapError(
+			(error) =>
 				new CookiesToolExecutionError({
 					reason: toErrorMessage(error),
 				}),
+		),
+		Effect.catchDefect((defect) =>
+			Effect.fail(
+				new CookiesToolExecutionError({
+					reason: toErrorMessage(defect),
+				}),
 			),
-			Effect.catchDefect((defect) =>
-				Effect.fail(
-					new CookiesToolExecutionError({
-						reason: toErrorMessage(defect),
-					}),
-				),
-			),
-		);
-	});
-
-	return Layer.succeed(CookiesService, {
-		readCookies,
-	});
+		),
+	);
 }
 
 const defaultDeps: EffectExtensionDeps = {
@@ -489,7 +466,7 @@ function registerEventStoreSmokeTool(pi: ExtensionAPI): void {
 	});
 }
 
-function registerWebSearchTool(pi: ExtensionAPI, searchLayer: ReturnType<typeof makeSearchServiceLayer>): void {
+function registerWebSearchTool(pi: ExtensionAPI, deps: EffectExtensionDeps): void {
 	pi.registerTool({
 		name: "web_search",
 		label: "Web Search",
@@ -560,19 +537,14 @@ function registerWebSearchTool(pi: ExtensionAPI, searchLayer: ReturnType<typeof 
 				};
 			}
 
-			const searchProgram = Effect.gen(function* () {
-				const search = yield* SearchService;
-				return yield* search.search(params.query, {
+			const outcome: SearchExecutionOutcome = await Effect.runPromise(
+				searchWithToolDeps(deps, params.query, {
 					provider: params.provider,
 					numResults: params.numResults,
 					recencyFilter: params.recencyFilter,
 					domainFilter: params.domainFilter ? [...params.domainFilter] : undefined,
 					lens: params.lens,
-				});
-			}).pipe(Effect.provide(searchLayer));
-
-			const outcome: SearchExecutionOutcome = await Effect.runPromise(
-				searchProgram.pipe(
+				}).pipe(
 					Effect.match({
 						onFailure: (error): SearchExecutionOutcome => ({ ok: false, error }),
 						onSuccess: (response): SearchExecutionOutcome => ({ ok: true, response }),
@@ -618,10 +590,7 @@ function registerWebSearchTool(pi: ExtensionAPI, searchLayer: ReturnType<typeof 
 	});
 }
 
-function registerChromeCookiesTool(
-	pi: ExtensionAPI,
-	cookiesLayer: ReturnType<typeof makeCookiesServiceLayer>,
-): void {
+function registerChromeCookiesTool(pi: ExtensionAPI, deps: EffectExtensionDeps): void {
 	pi.registerTool({
 		name: "chrome_cookies",
 		label: "Chrome Cookies (Effect)",
@@ -643,41 +612,32 @@ function registerChromeCookiesTool(
 			const params: CookiesParams = decoded.value;
 			const requested = params.names ?? ["__Secure-1PSID", "__Secure-1PSIDTS", "NID"];
 
-			const readProgram = Effect.gen(function* () {
-				const cookies = yield* CookiesService;
-				return yield* cookies.readCookies();
-			}).pipe(Effect.provide(cookiesLayer));
+			const outcome = await Effect.runPromiseExit(readCookiesWithToolDeps(deps));
 
-			const outcome = await Effect.runPromise(
-				readProgram.pipe(
-					Effect.match({
-						onFailure: (error): CookiesExecutionOutcome => ({ ok: false, error }),
-						onSuccess: (value): CookiesExecutionOutcome => ({ ok: true, value }),
-					}),
-				),
-			);
-
-			if ("error" in outcome) {
-				const details: CookiesToolDetails = { error: outcome.error.reason };
+			if (Exit.isFailure(outcome)) {
+				const error = Cause.squash(outcome.cause);
+				const reason =
+					error instanceof CookiesToolExecutionError ? error.reason : toErrorMessage(error);
+				const details: CookiesToolDetails = { error: reason };
 				return {
-					content: [{ type: "text", text: `Error: ${outcome.error.reason}` }],
+					content: [{ type: "text", text: `Error: ${reason}` }],
 					details,
 				};
 			}
 
-			const present = requested.filter((name) => Boolean(outcome.value.cookies[name]));
-			const warningText =
-				outcome.value.warnings.length > 0 ? ` Warnings: ${outcome.value.warnings.length}.` : "";
+			const cookies = outcome.value;
+			const present = requested.filter((name) => Boolean(cookies.cookies[name]));
+			const warningText = cookies.warnings.length > 0 ? ` Warnings: ${cookies.warnings.length}.` : "";
 			const details: CookiesToolDetails = {
 				error: null,
-				source: outcome.value.source,
-				warnings: outcome.value.warnings,
+				source: cookies.source,
+				warnings: cookies.warnings,
 			};
 			return {
 				content: [
 					{
 						type: "text",
-						text: `Found ${Object.keys(outcome.value.cookies).length} Google cookie(s). Present requested: ${present.length}/${requested.length}. Source: ${outcome.value.source}.${warningText}`,
+						text: `Found ${Object.keys(cookies.cookies).length} Google cookie(s). Present requested: ${present.length}/${requested.length}. Source: ${cookies.source}.${warningText}`,
 					},
 				],
 				details,
@@ -833,13 +793,11 @@ export function registerEffectTools(
 	options: RegisterEffectToolsOptions = {},
 ): void {
 	registerEventStoreSmokeTool(pi);
-	const searchLayer = makeSearchServiceLayer(deps);
-	const cookiesLayer = makeCookiesServiceLayer(deps);
-	registerChromeCookiesTool(pi, cookiesLayer);
+	registerChromeCookiesTool(pi, deps);
 	registerFetchContentTool(pi, deps);
 	registerGetSearchContentTool(pi);
 	if (options.includeWebSearch !== false) {
-		registerWebSearchTool(pi, searchLayer);
+		registerWebSearchTool(pi, deps);
 	}
 }
 

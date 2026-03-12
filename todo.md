@@ -9,8 +9,8 @@ wtf is that loadLegacyRegistrar .. yeahhh just remove that shit.
 I added some notes to your ones
 ---
  1. Remove remaining legacy coupling
-     - src/effect/index.ts still loads src/old/index.* via loadLegacyRegistrar().
-     - src/effect/gemini-search.ts imports from src/old/gemini-api.ts + src/old/gemini-web.ts.
+     - src/effect/index.ts still loads packages/legacy-web-access/src/index.* via loadLegacyRegistrar().
+     - src/effect/gemini-search.ts imports from packages/legacy-web-access/src/gemini-api.ts + packages/legacy-web-access/src/gemini-web.ts.
      - src/effect/chrome-cookies.ts imports legacy cookie reader.
      - This is the main blocker to “real” Effect-native behavior.
 >Ok

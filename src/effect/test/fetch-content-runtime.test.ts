@@ -1,6 +1,5 @@
-import { beforeEach, describe, expect, it } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { Effect } from "effect";
-import { activityMonitor } from "../../../packages/legacy-web-access/src/activity.js";
 import { API_BASE, DEFAULT_MODEL } from "../gemini-api.js";
 import {
 	extractContentEffect,
@@ -29,9 +28,7 @@ function makeDeps(
 ): Partial<FetchContentRuntimeDeps> {
 	return {
 		fetch: async (_input: string | URL | Request, _init?: RequestInit) => unexpected("fetch"),
-		extractGitHub: () => Effect.succeed(null),
 		legacyExtractContent: () => Effect.fail({ _tag: "UnexpectedLegacyExtract" as const }),
-		extractPdfToMarkdown: () => Effect.fail({ _tag: "UnexpectedPdfExtract" as const }),
 		getApiKey: () => null,
 		isGeminiWebAvailable: () => Effect.succeed(null),
 		queryWithCookies: () => Effect.fail({ _tag: "UnexpectedGeminiWebQuery" as const }),
@@ -40,9 +37,6 @@ function makeDeps(
 }
 
 describe("effect fetch-content runtime", () => {
-	beforeEach(() => {
-		activityMonitor.clear();
-	});
 
 	it("extracts general HTML pages through the Effect-owned HTTP pipeline", async () => {
 		const html = makeLongArticleHtml("Example Article");
@@ -260,6 +254,53 @@ describe("effect fetch-content runtime", () => {
 		);
 
 		expect(result).toEqual(legacyResult);
+	});
+
+	it("delegates github and pdf flows to the legacy extractor", async () => {
+		const githubResult: ExtractedContent = {
+			url: "https://github.com/example/repo",
+			title: "repo",
+			content: "legacy github result",
+			error: null,
+		};
+		const pdfResult: ExtractedContent = {
+			url: "https://example.com/doc.pdf",
+			title: "doc",
+			content: "legacy pdf result",
+			error: null,
+		};
+		const delegatedUrls: string[] = [];
+
+		const github = await Effect.runPromise(
+			extractContentEffect(
+				githubResult.url,
+				undefined,
+				undefined,
+				makeDeps({
+					legacyExtractContent: (url) => {
+						delegatedUrls.push(url);
+						return Effect.succeed(url === githubResult.url ? githubResult : pdfResult);
+					},
+				}),
+			),
+		);
+		const pdf = await Effect.runPromise(
+			extractContentEffect(
+				pdfResult.url,
+				undefined,
+				undefined,
+				makeDeps({
+					legacyExtractContent: (url) => {
+						delegatedUrls.push(url);
+						return Effect.succeed(url === githubResult.url ? githubResult : pdfResult);
+					},
+				}),
+			),
+		);
+
+		expect(github).toEqual(githubResult);
+		expect(pdf).toEqual(pdfResult);
+		expect(delegatedUrls).toEqual([githubResult.url, pdfResult.url]);
 	});
 
 	it("returns guidance when all general-page fallbacks are exhausted", async () => {
