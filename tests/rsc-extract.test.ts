@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { extractRSCContent } from "../src/old/rsc-extract.ts";
+import { extractRSCContent } from "../packages/legacy-web-access/src/rsc-extract.ts";
 
 describe("extractRSCContent", () => {
 	it("returns null for non-RSC HTML", () => {

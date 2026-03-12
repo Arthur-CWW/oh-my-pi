@@ -3,7 +3,7 @@ import {
 	parseFetchCliArgs,
 	runFetchCli,
 	type ExtractedContent,
-} from "../src/old/extract.ts";
+} from "../packages/legacy-web-access/src/extract.ts";
 
 describe("fetch CLI", () => {
 	it("parses URLs + extraction flags", () => {

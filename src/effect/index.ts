@@ -12,7 +12,7 @@ import {
 	type ExtractOptions,
 } from "./fetch-content-runtime.js";
 import { readChromeCookiesEffect, type CookieReadResult } from "./chrome-cookies.js";
-import { makeEvent, type ObservabilityEventName } from "./core/Observability.js";
+import { makeSearchEvent, type SearchEventName } from "./search-event.js";
 import {
 	executeFetchContent,
 	FetchContentExecutionError,
@@ -105,7 +105,7 @@ interface EventStoreSmokeToolDetails {
 	readonly dbPath: string | null;
 	readonly correlationId: string | null;
 	readonly eventCount: number;
-	readonly latestEventName: ObservabilityEventName | null;
+	readonly latestEventName: SearchEventName | null;
 }
 
 interface GetSearchContentToolDetails {
@@ -363,7 +363,10 @@ const defaultDeps: EffectExtensionDeps = {
 	readCookies: readChromeCookiesEffect,
 };
 
-const LEGACY_ENTRY_CANDIDATES = ["../old/index.js", "../old/index.ts"] as const;
+const LEGACY_ENTRY_CANDIDATES = [
+	"../../packages/legacy-web-access/src/index.js",
+	"../../packages/legacy-web-access/src/index.ts",
+] as const;
 
 function formatSearchSummary(
 	results: ReadonlyArray<{ title: string; url: string; snippet?: string; publishedAt?: string }>,
@@ -441,7 +444,7 @@ function registerEventStoreSmokeTool(pi: ExtensionAPI): void {
 			const program = Effect.gen(function* () {
 				const store = yield* makeSqliteEventStore({ dbPath });
 				yield* store.append(
-					makeEvent(
+					makeSearchEvent(
 						"ToolCompleted",
 						{ tool: "effect_event_store_smoke", mode: "shadow" },
 						correlationId,

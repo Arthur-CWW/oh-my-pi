@@ -686,7 +686,7 @@ export interface FetchCliDeps {
 	readonly stderr?: (text: string) => void;
 }
 
-const FETCH_CLI_USAGE = `Usage: bun src/old/extract.ts [options] <url...>
+const FETCH_CLI_USAGE = `Usage: bun packages/legacy-web-access/src/extract.ts [options] <url...>
 
 Options:
   --url <url>                  Add a URL (repeatable)

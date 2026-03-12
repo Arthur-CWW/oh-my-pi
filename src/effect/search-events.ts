@@ -1,15 +1,10 @@
 import { Effect } from "effect";
-import { EventStoreError, stringifyUnknown } from "./core/Errors.js";
-import {
-	makeEvent,
-	type ObservabilityEvent,
-	type ObservabilityEventName,
-} from "./core/Observability.js";
 import { makeSqliteEventStore } from "./observability/EventStore.js";
+import { makeSearchEvent, type SearchEvent, type SearchEventName } from "./search-event.js";
 
 export interface SearchEventsService {
 	readonly emit: (
-		name: ObservabilityEventName,
+		name: SearchEventName,
 		payload: Record<string, unknown>,
 		correlationId: string,
 		sessionId?: string,
@@ -24,7 +19,7 @@ export interface SearchEventsOptions {
 
 export interface InMemorySearchEvents {
 	readonly service: SearchEventsService;
-	readonly events: ReadonlyArray<ObservabilityEvent>;
+	readonly events: ReadonlyArray<SearchEvent>;
 }
 
 export const NoopSearchEventsService: SearchEventsService = {
@@ -32,21 +27,30 @@ export const NoopSearchEventsService: SearchEventsService = {
 	close: Effect.void,
 };
 
-function failOpenStoreError(error: EventStoreError): Effect.Effect<void, never> {
-	return Effect.logWarning(`Search event sink error: ${error.reason}`).pipe(Effect.as(undefined));
+function toErrorMessage(error: unknown): string {
+	if (error instanceof Error) {
+		return error.message;
+	}
+	if (error && typeof error === "object" && "reason" in error) {
+		const reason = (error as { readonly reason: unknown }).reason;
+		if (typeof reason === "string") {
+			return reason;
+		}
+	}
+	return String(error);
 }
 
-function failOpenDefect(defect: unknown): Effect.Effect<void, never> {
-	return Effect.logWarning(`Search event sink defect: ${stringifyUnknown(defect)}`).pipe(Effect.as(undefined));
+function logFailOpen(label: string, error: unknown): Effect.Effect<void, never> {
+	return Effect.logWarning(`${label}: ${toErrorMessage(error)}`).pipe(Effect.as(undefined));
 }
 
 export function makeInMemorySearchEvents(): InMemorySearchEvents {
-	const events: ObservabilityEvent[] = [];
+	const events: SearchEvent[] = [];
 	return {
 		service: {
 			emit: (name, payload, correlationId, sessionId) =>
 				Effect.sync(() => {
-					events.push(makeEvent(name, payload, correlationId, sessionId));
+					events.push(makeSearchEvent(name, payload, correlationId, sessionId));
 				}),
 			close: Effect.void,
 		},
@@ -69,15 +73,19 @@ export function makeSearchEventsService(
 	}).pipe(
 		Effect.map((store): SearchEventsService => ({
 			emit: (name, payload, correlationId, sessionId) =>
-				store
-					.append(makeEvent(name, payload, correlationId, sessionId))
-					.pipe(Effect.catch(failOpenStoreError), Effect.catchDefect(failOpenDefect)),
-			close: store.close.pipe(Effect.catch(failOpenStoreError), Effect.catchDefect(failOpenDefect)),
+				store.append(makeSearchEvent(name, payload, correlationId, sessionId)).pipe(
+					Effect.catch((error) => logFailOpen("Search event sink error", error)),
+					Effect.catchDefect((defect) => logFailOpen("Search event sink defect", defect)),
+				),
+			close: store.close.pipe(
+				Effect.catch((error) => logFailOpen("Search event sink error", error)),
+				Effect.catchDefect((defect) => logFailOpen("Search event sink defect", defect)),
+			),
 		})),
 		Effect.catch((error) =>
-			Effect.logWarning(`Failed to initialize search event sqlite sink: ${error.reason}`).pipe(
-				Effect.as(NoopSearchEventsService),
-			),
+			Effect.logWarning(
+				`Failed to initialize search event sqlite sink: ${toErrorMessage(error)}`,
+			).pipe(Effect.as(NoopSearchEventsService)),
 		),
 	);
 }

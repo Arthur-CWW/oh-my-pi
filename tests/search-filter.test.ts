@@ -3,8 +3,8 @@ import {
 	postProcessCondensed,
 	preprocessSearchResults,
 	resolveCondenseConfig,
-} from "../src/old/search-filter.ts";
-import type { QueryResultData } from "../src/old/storage.ts";
+} from "../packages/legacy-web-access/src/search-filter.ts";
+import type { QueryResultData } from "../packages/legacy-web-access/src/storage.ts";
 
 describe("search-filter", () => {
 	it("resolves condense config", () => {

@@ -25,6 +25,7 @@
 	"files": [
 		"src",
 		"packages/kagi/src",
+		"packages/legacy-web-access",
 		"skills",
 		"README.md",
 		"CHANGELOG.md",

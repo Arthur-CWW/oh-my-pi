@@ -1,9 +1,8 @@
 import { mkdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname } from "node:path";
-import { Effect } from "effect";
-import { EventStoreError, stringifyUnknown } from "../core/Errors.js";
-import { type ObservabilityEvent, type ObservabilityEventName } from "../core/Observability.js";
+import { Data, Effect } from "effect";
+import { type SearchEvent, type SearchEventName } from "../search-event.js";
 
 type SqliteParam = string | number | bigint | boolean | Uint8Array | null;
 
@@ -27,12 +26,16 @@ interface EventRow {
 	readonly payload_json: string;
 }
 
+export class EventStoreError extends Data.TaggedError("EventStoreError")<{
+	readonly reason: string;
+}> {}
+
 export interface SqliteEventStore {
-	readonly append: (event: ObservabilityEvent) => Effect.Effect<void, EventStoreError>;
+	readonly append: (event: SearchEvent) => Effect.Effect<void, EventStoreError>;
 	readonly listByCorrelationId: (
 		correlationId: string,
-	) => Effect.Effect<ReadonlyArray<ObservabilityEvent>, EventStoreError>;
-	readonly listRecent: (limit: number) => Effect.Effect<ReadonlyArray<ObservabilityEvent>, EventStoreError>;
+	) => Effect.Effect<ReadonlyArray<SearchEvent>, EventStoreError>;
+	readonly listRecent: (limit: number) => Effect.Effect<ReadonlyArray<SearchEvent>, EventStoreError>;
 	readonly close: Effect.Effect<void, EventStoreError>;
 }
 
@@ -41,7 +44,7 @@ export interface SqliteEventStoreOptions {
 	readonly createDir?: boolean;
 }
 
-const EVENT_NAMES: ReadonlySet<ObservabilityEventName> = new Set([
+const EVENT_NAMES: ReadonlySet<SearchEventName> = new Set([
 	"SearchRequested",
 	"ProviderSelected",
 	"ProviderAttempted",
@@ -51,12 +54,25 @@ const EVENT_NAMES: ReadonlySet<ObservabilityEventName> = new Set([
 	"ToolCompleted",
 ]);
 
+function toErrorMessage(error: unknown): string {
+	if (error instanceof Error) {
+		return error.message;
+	}
+	if (error && typeof error === "object" && "reason" in error) {
+		const reason = (error as { readonly reason: unknown }).reason;
+		if (typeof reason === "string") {
+			return reason;
+		}
+	}
+	return String(error);
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null;
 }
 
-function isEventName(value: string): value is ObservabilityEventName {
-	return EVENT_NAMES.has(value as ObservabilityEventName);
+function isEventName(value: string): value is SearchEventName {
+	return EVENT_NAMES.has(value as SearchEventName);
 }
 
 function toTimestampNumber(value: number | bigint): number {
@@ -95,7 +111,7 @@ async function loadSqliteDatabase(dbPath: string): Promise<SqliteDatabase> {
 			close: () => db.close(),
 		};
 	} catch (cause) {
-		errors.push(`bun:sqlite unavailable: ${stringifyUnknown(cause)}`);
+		errors.push(`bun:sqlite unavailable: ${toErrorMessage(cause)}`);
 	}
 
 	try {
@@ -115,13 +131,13 @@ async function loadSqliteDatabase(dbPath: string): Promise<SqliteDatabase> {
 			close: () => db.close(),
 		};
 	} catch (cause) {
-		errors.push(`node:sqlite unavailable: ${stringifyUnknown(cause)}`);
+		errors.push(`node:sqlite unavailable: ${toErrorMessage(cause)}`);
 	}
 
 	throw new Error(`No sqlite driver available (${errors.join("; ")})`);
 }
 
-function decodeRow(row: EventRow): Effect.Effect<ObservabilityEvent, EventStoreError> {
+function decodeRow(row: EventRow): Effect.Effect<SearchEvent, EventStoreError> {
 	return Effect.try({
 		try: () => {
 			const eventName = row.name;
@@ -145,12 +161,12 @@ function decodeRow(row: EventRow): Effect.Effect<ObservabilityEvent, EventStoreE
 		},
 		catch: (cause) =>
 			new EventStoreError({
-				reason: `Failed to decode event row: ${stringifyUnknown(cause)}`,
+				reason: `Failed to decode event row: ${toErrorMessage(cause)}`,
 			}),
 	});
 }
 
-function decodeRows(rows: unknown): Effect.Effect<ReadonlyArray<ObservabilityEvent>, EventStoreError> {
+function decodeRows(rows: unknown): Effect.Effect<ReadonlyArray<SearchEvent>, EventStoreError> {
 	if (!Array.isArray(rows)) {
 		return Effect.fail(
 			new EventStoreError({
@@ -244,7 +260,7 @@ export function makeSqliteEventStore(
 				LIMIT ?
 			`);
 
-			const append = (event: ObservabilityEvent): Effect.Effect<void, EventStoreError> =>
+			const append = (event: SearchEvent): Effect.Effect<void, EventStoreError> =>
 				Effect.try({
 					try: () => {
 						insert.run(
@@ -258,19 +274,19 @@ export function makeSqliteEventStore(
 					},
 					catch: (cause) =>
 						new EventStoreError({
-							reason: `Failed to append event: ${stringifyUnknown(cause)}`,
+							reason: `Failed to append event: ${toErrorMessage(cause)}`,
 						}),
 				});
 
 			const listByCorrelationId = (
 				correlationId: string,
-			): Effect.Effect<ReadonlyArray<ObservabilityEvent>, EventStoreError> =>
+			): Effect.Effect<ReadonlyArray<SearchEvent>, EventStoreError> =>
 				Effect.flatMap(
 					Effect.try({
 						try: () => byCorrelation.all(correlationId) as unknown,
 						catch: (cause) =>
 							new EventStoreError({
-								reason: `Failed to list events by correlation id: ${stringifyUnknown(cause)}`,
+								reason: `Failed to list events by correlation id: ${toErrorMessage(cause)}`,
 							}),
 					}),
 					decodeRows,
@@ -278,13 +294,13 @@ export function makeSqliteEventStore(
 
 			const listRecent = (
 				limit: number,
-			): Effect.Effect<ReadonlyArray<ObservabilityEvent>, EventStoreError> =>
+			): Effect.Effect<ReadonlyArray<SearchEvent>, EventStoreError> =>
 				Effect.flatMap(
 					Effect.try({
 						try: () => recent.all(Math.max(0, Math.floor(limit))) as unknown,
 						catch: (cause) =>
 							new EventStoreError({
-								reason: `Failed to list recent events: ${stringifyUnknown(cause)}`,
+								reason: `Failed to list recent events: ${toErrorMessage(cause)}`,
 							}),
 					}),
 					decodeRows,
@@ -296,7 +312,7 @@ export function makeSqliteEventStore(
 				},
 				catch: (cause) =>
 					new EventStoreError({
-						reason: `Failed to close sqlite database: ${stringifyUnknown(cause)}`,
+						reason: `Failed to close sqlite database: ${toErrorMessage(cause)}`,
 					}),
 			});
 
@@ -309,7 +325,7 @@ export function makeSqliteEventStore(
 		},
 		catch: (cause) =>
 			new EventStoreError({
-				reason: `Failed to initialize sqlite event store: ${stringifyUnknown(cause)}`,
+				reason: `Failed to initialize sqlite event store: ${toErrorMessage(cause)}`,
 			}),
 	});
 }

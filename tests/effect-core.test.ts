@@ -2,13 +2,10 @@ import { describe, expect, it } from "bun:test";
 import { Cause, Effect, Exit } from "effect";
 import {
 	decodeWebSearchConfig,
-	makeEvent,
-	makeInMemoryObservability,
 	requireEnv,
-	Observability,
-} from "../src/effect/core/index.ts";
+} from "../src/effect/core/Config.ts";
 
-describe("effect core", () => {
+describe("effect config", () => {
 	it("decodes web-search config with old and new provider keys", async () => {
 		const config = await Effect.runPromise(
 			decodeWebSearchConfig({
@@ -52,23 +49,5 @@ describe("effect core", () => {
 			const failure = Cause.findErrorOption(result.cause);
 			expect(failure._tag).toBe("Some");
 		}
-	});
-
-	it("publishes observability events to in-memory sink", async () => {
-		const { layer, sink } = makeInMemoryObservability();
-		const correlationId = "corr-1";
-
-		const program = Effect.gen(function* () {
-			const obs = yield* Observability;
-			return yield* obs.publish(
-				makeEvent("SearchRequested", { query: "effect migration" }, correlationId, "session-1"),
-			);
-		});
-
-		await Effect.runPromise(Effect.provide(program, layer));
-
-		expect(sink.events.length).toBe(1);
-		expect(sink.events[0]?.name).toBe("SearchRequested");
-		expect(sink.events[0]?.correlationId).toBe(correlationId);
 	});
 });

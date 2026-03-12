@@ -8,7 +8,7 @@ _Last updated: 2026-03-12 (local session dump)_
 - Branch: `main`
 - HEAD: `83efb45`
 - Entry extension: `package.json -> ./src/effect/index.ts`
-- Legacy baseline remains untouched: `src/old/*`
+- Legacy baseline package: `packages/legacy-web-access/src/*`
 
 ## What changed in this session
 
@@ -55,7 +55,18 @@ Tests were updated accordingly:
 - `tests/effect-cookies.test.ts`
 - `src/effect/kagi-search.test.ts`
 
-### 4) Effect entry/test/storage cleanup pass
+### 4) Legacy implementation moved into its own workspace package
+
+- Moved the legacy implementation from `src/old/*` to `packages/legacy-web-access/src/*`.
+- Added `packages/legacy-web-access/package.json` as the package boundary.
+- Rewired repo/runtime references to the new legacy package location:
+  - `src/effect/index.ts` legacy bridge loader path
+  - `src/effect/fetch-content-runtime.ts`
+  - `scripts/e2e-*.ts`
+  - repo-level old/reference tests under `tests/*`
+- Updated TS/package include lists so the legacy package is tracked explicitly.
+
+### 5) Effect entry/test/storage cleanup pass
 
 - Moved Effect slice tests out of colocated files into adjacent test folders:
   - `src/effect/test/fetch-content.test.ts`
@@ -64,15 +75,28 @@ Tests were updated accordingly:
 - Removed the old colocated test files under `src/effect/*.test.ts`.
 - Extracted fetch-content render helpers out of `src/effect/index.ts` into `src/effect/fetch-content-render.ts`.
 - Introduced neutral shared stored-result helpers in `src/shared/stored-results.ts`.
-- Rewired Effect code to use the shared storage module instead of importing from `src/old/storage.ts`:
+- Rewired Effect code to use the shared storage module instead of importing from the legacy storage module:
   - `src/effect/fetch-content.ts`
   - `src/effect/search-content.ts`
-- Kept `src/old/storage.ts` as a thin legacy wrapper for session restore + re-exports.
+- The legacy package storage module remains a thin wrapper for session restore + re-exports.
 - Removed low-value tests encountered in this pass:
   - CLI help-string assertions in Effect CLI tests
   - standalone storage helper test (`tests/storage.test.ts`)
 
-### 5) Repo guidance/preferences updated
+### 6) Core/observability cleanup pass
+
+- Removed unused Effect wrapper modules:
+  - `src/effect/core/Errors.ts`
+  - `src/effect/core/Observability.ts`
+  - `src/effect/core/index.ts`
+  - `src/effect/observability/index.ts`
+- Added flat `src/effect/search-event.ts` for shared event types + event construction.
+- Localized config/event-store error types into the modules that actually use them:
+  - `src/effect/core/Config.ts`
+  - `src/effect/observability/EventStore.ts`
+- Simplified `tests/effect-core.test.ts` to focus on config behavior instead of removed observability wrappers.
+
+### 7) Repo guidance/preferences updated
 
 - `AGENTS.md` now points Effect work at:
   - `vendor/effect-smol/LLMS.md`
@@ -110,13 +134,13 @@ Results:
 - Gemini web cookies are missing, and/or
 - no usable Gemini API auth is available in this shell.
 
-### Vendor tree is intentionally dirty right now
+### Vendor tree protection
 
-`vendor/effect-smol` has local changes required for this repo’s current setup:
-- package metadata patched for local file resolution
-- local build artifacts generated / used
+`vendor/effect-smol` local integration patches were stashed inside the vendored repo and the worktree files were made read-only (excluding `.git`) as a guardrail.
 
-Do not assume a clean submodule/vendor state.
+- Current vendor worktree should be clean
+- Existing stash is inside `vendor/effect-smol` (`git stash list` there)
+- The vendor tree should now be treated as read-only unless explicitly requested otherwise
 
 ## Recommended next refactor
 
@@ -124,10 +148,11 @@ Best next slice:
 1. **Continue simplifying `src/effect/index.ts` tool wiring**
    - the fetch-content render helpers are now split out, but entry/tool registration + boundary formatting logic is still too concentrated in one file
    - keep splits flat (no barrel-folder churn)
-2. **Reduce remaining `src/effect/fetch-content-runtime.ts` imports from `src/old/*`**
-   - storage is now shared/effect-owned; the next worthwhile cleanup is pushing more fetch/runtime helpers out of legacy modules
-3. **Continue moving focused Effect slice tests out of top-level `tests/` when they are not cross-package/integration coverage**
-4. Keep `src/old/*` untouched unless a legacy wrapper/delegation is explicitly needed.
+2. **Reduce remaining `src/effect/fetch-content-runtime.ts` imports from `packages/legacy-web-access/src/*`**
+   - storage is now shared/effect-owned; the next worthwhile cleanup is pushing more fetch/runtime helpers out of the legacy package
+3. **Continue simplifying `src/effect/core/Config.ts` if more standard Effect Config combinators can replace ad-hoc glue without hurting clarity**
+4. **Continue moving focused Effect slice tests out of top-level `tests/` when they are not cross-package/integration coverage**
+5. Keep `packages/legacy-web-access` stable and isolated unless a legacy wrapper/delegation is explicitly needed.
 
 ## Notes for next session
 
@@ -140,4 +165,4 @@ Best next slice:
 
 ## Short resume prompt
 
-Continue the Effect cleanup by splitting more `src/effect/index.ts` tool wiring, reducing remaining `src/effect/fetch-content-runtime.ts` imports from `src/old/*`, and moving any remaining focused Effect slice tests into adjacent `src/effect/test` coverage. Reuse local effect-smol docs/source only, validate with targeted tests first, then run the full handoff validation set.
+Continue the Effect cleanup by splitting more `src/effect/index.ts` tool wiring, reducing remaining `src/effect/fetch-content-runtime.ts` imports from `packages/legacy-web-access/src/*`, and simplifying any remaining unnecessary `src/effect/core/*` glue in favor of direct Effect APIs. Reuse local effect-smol docs/source only, validate with targeted tests first, then run the full handoff validation set.

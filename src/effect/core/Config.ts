@@ -1,9 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { Config, ConfigProvider, Effect, Option } from "effect";
+import { Config, ConfigProvider, Data, Effect, Option } from "effect";
 import { decodeSearchProviderOrAuto, type SearchProvider } from "../search-contracts.js";
-import { ConfigParseError, ConfigReadError, MissingConfigError } from "./Errors.js";
 
 export const DEFAULT_WEB_SEARCH_CONFIG_PATH = join(homedir(), ".pi", "web-search.json");
 
@@ -25,6 +24,21 @@ export interface WebSearchConfig {
 	readonly shortcuts?: ShortcutConfig;
 }
 
+export class ConfigReadError extends Data.TaggedError("ConfigReadError")<{
+	readonly path: string;
+	readonly reason: string;
+}> {}
+
+export class ConfigParseError extends Data.TaggedError("ConfigParseError")<{
+	readonly path: string;
+	readonly reason: string;
+}> {}
+
+export class MissingConfigError extends Data.TaggedError("MissingConfigError")<{
+	readonly key: string;
+	readonly reason: string;
+}> {}
+
 const DEFAULT_SHORTCUTS: ShortcutConfig = {
 	curate: "ctrl+shift+s",
 	activity: "ctrl+shift+w",
@@ -34,10 +48,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null;
 }
 
+function toErrorMessage(cause: unknown): string {
+	return cause instanceof Error ? cause.message : String(cause);
+}
+
 function toParseError(path: string, cause: unknown): ConfigParseError {
 	return new ConfigParseError({
 		path,
-		reason: cause instanceof Error ? cause.message : String(cause),
+		reason: toErrorMessage(cause),
 	});
 }
 
@@ -85,7 +103,7 @@ function decodeWithConfigProvider(
 						enabled: autoFilterEnabled,
 						...(typeof autoFilterModel === "string" ? { model: autoFilterModel } : {}),
 						...(typeof autoFilterPrompt === "string" ? { prompt: autoFilterPrompt } : {}),
-					}
+				  }
 				: typeof autoFilterBoolean === "boolean"
 					? { enabled: autoFilterBoolean }
 					: undefined;
@@ -100,7 +118,7 @@ function decodeWithConfigProvider(
 			? {
 					curate: shortcutsCurate ?? DEFAULT_SHORTCUTS.curate,
 					activity: shortcutsActivity ?? DEFAULT_SHORTCUTS.activity,
-				}
+			  }
 			: undefined;
 
 		return {
@@ -141,7 +159,7 @@ export function loadWebSearchConfig(
 			catch: (cause) =>
 				new ConfigReadError({
 					path,
-					reason: cause instanceof Error ? cause.message : String(cause),
+					reason: toErrorMessage(cause),
 				}),
 		});
 
@@ -162,7 +180,7 @@ export function requireEnv(name: string): Effect.Effect<string, MissingConfigErr
 			(cause) =>
 				new MissingConfigError({
 					key: name,
-					reason: cause instanceof Error ? cause.message : String(cause),
+					reason: toErrorMessage(cause),
 				}),
 		),
 	);

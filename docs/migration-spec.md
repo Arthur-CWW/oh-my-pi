@@ -18,14 +18,14 @@
 
 ## Current Repo Organization
 
-- `src/old/*` → legacy implementation retained for parity/debug
+- `packages/legacy-web-access/src/*` → legacy implementation retained for parity/debug behind its own package boundary
 - `src/effect/*` → current Effect TS implementation (active package entry)
 - `tests/*` → boundary-focused tests (Bun)
 - `scripts/*` → e2e smoke scripts (cookies/search)
 
 Pi extension entry (current): `src/effect/index.ts`
 
-Legacy entry retained: `src/old/index.ts`
+Legacy entry retained: `packages/legacy-web-access/src/index.ts`
 
 ---
 
@@ -84,8 +84,8 @@ For each slice:
 
 ### Phase 4 — Switch Over (completed, compatibility bridge active)
 
-- ✅ Swapped Pi entry from `src/old/index.ts` to `src/effect/index.ts`
-- Keep `src/old` for parity/debug release window
+- ✅ Swapped Pi entry from `packages/legacy-web-access/src/index.ts` to `src/effect/index.ts`
+- Keep `packages/legacy-web-access` for parity/debug release window
 - Remove old bridge after parity confidence on remaining slices
 
 ---
@@ -134,7 +134,7 @@ Add snapshot tests for:
 
 ## Known Issues / Bug Ledger (baseline)
 
-1. Pi extension typing drift in `src/old/index.ts` (strict TS fails if included).
+1. Pi extension typing drift in `packages/legacy-web-access/src/index.ts` (strict TS fails if included).
 2. Gemini cookie path can be flaky in some environments (historical issue #2 with `node:sqlite` loader contexts).
 3. Diagnostics are often collapsed; some flows still return generic fallback errors.
 4. Lint warnings remain in old codebase (style + strictness), to be addressed during slice migration.

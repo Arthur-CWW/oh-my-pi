@@ -23,9 +23,9 @@ Useful for:
 
 ## Working folder layout (current direction)
 
-- `src/old/*` legacy implementation retained for parity/debug
-- `src/effect/core/*` shared services (config/errors/http/logging)
-- `src/effect/observability/*` event types + sqlite event store
+- `packages/legacy-web-access/src/*` legacy implementation retained for parity/debug behind its own package boundary
+- `src/effect/core/*` shared config helpers only where standard Effect APIs are not enough
+- `src/effect/observability/*` sqlite event store only; shared event typing lives in flat Effect modules when practical
 - `src/effect/*.ts` flattened Effect slices when practical (per repo preference)
 - `src/effect/index.ts` current extension entrypoint
 

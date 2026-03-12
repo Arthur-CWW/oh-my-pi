@@ -83,10 +83,10 @@ The core modules can also run directly from the terminal with Bun:
 bun scripts/kagi-search-cli.ts "effect ts" --lens programming --json
 bun src/effect/gemini-search.ts --query "effect ts" --provider gemini
 bun src/effect/chrome-cookies.ts --names __Secure-1PSID,__Secure-1PSIDTS
-bun src/old/extract.ts https://example.com/article --json
+bun packages/legacy-web-access/src/extract.ts https://example.com/article --json
 ```
 
-Use `--help` on each file for available flags. Note: `src/old/extract.ts` remains the direct CLI shim while `fetch_content` itself is now registered from the Effect entrypoint.
+Use `--help` on each file for available flags. Note: `packages/legacy-web-access/src/extract.ts` remains the direct CLI shim while `fetch_content` itself is now registered from the Effect entrypoint.
 
 ## Testing
 
@@ -365,14 +365,14 @@ Content fetches run 3 concurrent with a 30s timeout per URL.
 
 | File | Purpose |
 |------|---------|
-| `src/old/index.ts` | Legacy extension entry kept for parity/reference |
-| `src/old/extract.ts` | Legacy extraction pipeline still backing parts of `fetch_content` internals |
-| `src/old/github-extract.ts` | GitHub clone/cache/content generation |
-| `src/old/youtube-extract.ts` | YouTube extraction + frame handling |
-| `src/old/video-extract.ts` | Local video analysis helpers |
-| `src/old/pdf-extract.ts` | PDF text extraction |
-| `src/old/rsc-extract.ts` | RSC flight data parser for Next.js pages |
-| `src/old/storage.ts` | Session-aware result storage used during migration |
+| `packages/legacy-web-access/src/index.ts` | Legacy extension entry kept for parity/reference |
+| `packages/legacy-web-access/src/extract.ts` | Legacy extraction pipeline still backing parts of `fetch_content` internals |
+| `packages/legacy-web-access/src/github-extract.ts` | GitHub clone/cache/content generation |
+| `packages/legacy-web-access/src/youtube-extract.ts` | YouTube extraction + frame handling |
+| `packages/legacy-web-access/src/video-extract.ts` | Local video analysis helpers |
+| `packages/legacy-web-access/src/pdf-extract.ts` | PDF text extraction |
+| `packages/legacy-web-access/src/rsc-extract.ts` | RSC flight data parser for Next.js pages |
+| `packages/legacy-web-access/src/storage.ts` | Session-aware result storage used during migration |
 | `skills/librarian/` | Bundled skill for library research |
 
 </details>

@@ -5,10 +5,10 @@ _Last updated: 2026-02-20_
 ## What was completed in this pass
 
 1. **Production entrypoint cutover completed**
-   - `package.json -> pi.extensions[0]` switched from `./src/old/index.ts` to `./src/effect/index.ts`.
+   - `package.json -> pi.extensions[0]` switched from `./packages/legacy-web-access/src/index.ts` to `./src/effect/index.ts`.
 
 2. **Effect entrypoint made production-safe with compatibility bridge**
-   - `src/effect/index.ts` now attempts to load/register legacy extension (`src/old/index.ts`) first.
+   - `src/effect/index.ts` now attempts to load/register the legacy package entry (`packages/legacy-web-access/src/index.ts`) first.
    - Effect-only tools are still added (`chrome_cookies`, `effect_event_store_smoke`).
    - Effect `web_search` registration is disabled when legacy tools are present to avoid clobbering legacy behavior during cutover window.
 
@@ -24,7 +24,7 @@ _Last updated: 2026-02-20_
 
 ## Current architecture
 
-- Legacy implementation: `src/old/*` (retained for parity/debug + compatibility bridge)
+- Legacy implementation: `packages/legacy-web-access/src/*` (retained for parity/debug + compatibility bridge)
 - Effect implementation: `src/effect/*` (current extension entrypoint)
 - Extension entry in package config: `./src/effect/index.ts`
 
@@ -40,7 +40,7 @@ bun run test:e2e:effect:help
 bun run test:e2e:cookies:effect
 bun run test:e2e:search:gemini:effect
 pi --no-extensions -e ./src/effect/index.ts --help
-pi --no-extensions -e ./src/old/index.ts --help
+pi --no-extensions -e ./packages/legacy-web-access/src/index.ts --help
 ```
 
 ## Test status snapshot

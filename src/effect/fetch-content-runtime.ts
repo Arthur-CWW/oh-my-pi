@@ -2,13 +2,13 @@ import { Readability } from "@mozilla/readability";
 import { Data, Effect, Schema } from "effect";
 import { parseHTML } from "linkedom";
 import TurndownService from "turndown";
-import { activityMonitor } from "../old/activity.js";
-import { extractContent as legacyExtractContent } from "../old/extract.js";
-import { extractGitHub } from "../old/github-extract.js";
-import { extractPDFToMarkdown, type PDFExtractResult, isPDF } from "../old/pdf-extract.js";
-import { extractRSCContent } from "../old/rsc-extract.js";
-import { isVideoFile } from "../old/video-extract.js";
-import { isYouTubeEnabled, isYouTubeURL } from "../old/youtube-extract.js";
+import { activityMonitor } from "../../packages/legacy-web-access/src/activity.js";
+import { extractContent as legacyExtractContent } from "../../packages/legacy-web-access/src/extract.js";
+import { extractGitHub } from "../../packages/legacy-web-access/src/github-extract.js";
+import { extractPDFToMarkdown, type PDFExtractResult, isPDF } from "../../packages/legacy-web-access/src/pdf-extract.js";
+import { extractRSCContent } from "../../packages/legacy-web-access/src/rsc-extract.js";
+import { isVideoFile } from "../../packages/legacy-web-access/src/video-extract.js";
+import { isYouTubeEnabled, isYouTubeURL } from "../../packages/legacy-web-access/src/youtube-extract.js";
 import { API_BASE, DEFAULT_MODEL, getApiKey } from "./gemini-api.js";
 import {
 	isGeminiWebAvailableEffect,

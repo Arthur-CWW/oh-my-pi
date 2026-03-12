@@ -5,8 +5,8 @@ import {
 	postProcessCondensed,
 	preprocessSearchResults,
 	type PreprocessedData,
-} from "../src/old/search-filter.js";
-import type { QueryResultData } from "../src/old/storage.js";
+} from "../packages/legacy-web-access/src/search-filter.js";
+import type { QueryResultData } from "../packages/legacy-web-access/src/storage.js";
 
 interface SearchResult {
 	readonly title: string;

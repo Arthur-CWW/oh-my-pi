@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import { Effect } from "effect";
-import { activityMonitor } from "../../old/activity.js";
+import { activityMonitor } from "../../../packages/legacy-web-access/src/activity.js";
 import { API_BASE, DEFAULT_MODEL } from "../gemini-api.js";
 import {
 	extractContentEffect,

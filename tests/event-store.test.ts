@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "bun:test";
 import { Effect } from "effect";
-import { makeEvent } from "../src/effect/core/Observability.js";
+import { makeSearchEvent } from "../src/effect/search-event.js";
 import { makeSqliteEventStore } from "../src/effect/observability/EventStore.js";
 
 function tempDbPath(name: string): string {
@@ -17,10 +17,10 @@ describe("sqlite event store", () => {
 		const correlationId = "corr-123";
 
 		await Effect.runPromise(
-			store.append(makeEvent("SearchRequested", { query: "effect" }, correlationId, "session-1")),
+			store.append(makeSearchEvent("SearchRequested", { query: "effect" }, correlationId, "session-1")),
 		);
 		await Effect.runPromise(
-			store.append(makeEvent("ProviderSelected", { provider: "gemini" }, correlationId, "session-1")),
+			store.append(makeSearchEvent("ProviderSelected", { provider: "gemini" }, correlationId, "session-1")),
 		);
 
 		const events = await Effect.runPromise(store.listByCorrelationId(correlationId));

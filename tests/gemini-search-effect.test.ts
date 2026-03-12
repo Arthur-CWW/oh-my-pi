@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { Effect } from "effect";
-import { search as legacySearch } from "../src/old/gemini-search.js";
+import { search as legacySearch } from "../packages/legacy-web-access/src/gemini-search.js";
 import {
 	buildSearchPrompt,
 	extractSourceUrls,

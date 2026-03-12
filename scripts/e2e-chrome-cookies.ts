@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { readChromeCookiesEffect } from "../src/effect/chrome-cookies.ts";
-import { queryWithCookies } from "../src/old/gemini-web.ts";
+import { queryWithCookies } from "../packages/legacy-web-access/src/gemini-web.ts";
 
 function fail(message: string): never {
 	console.error(`❌ ${message}`);

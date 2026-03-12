@@ -1,5 +1,5 @@
 import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { clearResults, isValidStoredData, storeResult } from "../shared/stored-results.js";
+import { clearResults, isValidStoredData, storeResult } from "../../../src/shared/stored-results.js";
 
 export {
 	clearResults,
@@ -14,7 +14,7 @@ export {
 	type StoredSearchData,
 	type StoredSearchResult,
 	type StoredVideoFrame,
-} from "../shared/stored-results.js";
+} from "../../../src/shared/stored-results.js";
 
 const CACHE_TTL_MS = 60 * 60 * 1000;
 

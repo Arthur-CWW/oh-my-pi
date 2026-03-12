@@ -4,14 +4,14 @@
 
 This repo is migrating from the legacy implementation to an Effect TS implementation **without breaking behavior**.
 
-- Legacy implementation: `src/old/*`
+- Legacy implementation: `packages/legacy-web-access/src/*`
 - New implementation (in progress): `src/effect/*`
 
 Current Pi extension entrypoint:
 - `package.json -> pi.extensions[0] = ./src/effect/index.ts`
 
 Legacy entrypoint retained for parity/debug:
-- `./src/old/index.ts`
+- `./packages/legacy-web-access/src/index.ts`
 
 ## Ground Rules
 
@@ -59,7 +59,7 @@ Current persistent preferences:
 - Keep provider-specific behavior, transport/session handling, and error classification inside provider package/module boundaries; `src/effect/*` runtime/entry adapters should consume typed provider errors and stay thin/provider-agnostic.
 - Prefer Effect-based provider package interfaces (including `packages/kagi/*` runtime surfaces); keep `Promise`/`async` only at explicit external boundaries.
 - Do not expose user-facing provider selection values like `"auto"`; omitted provider should continue to mean the default Kagi-first fallback flow.
-- Treat `src/old/*` as reference/stability baseline during migration, but the target end-state is to move the legacy implementation into its own workspace/package dependency at `packages/legacy-web-access` instead of keeping it inside the main `src/` tree.
+- Treat `packages/legacy-web-access/src/*` as the legacy reference/stability baseline during migration; keep it isolated behind that package boundary and avoid pulling new logic back into the main `src/` tree.
 - When validating package installation behavior, default to **global `pi install` (no `-l`)** so settings are exercised under `~/.pi` (agent settings path), unless the user explicitly asks for project-local install behavior.
 - Keep fork repository metadata URLs aligned to the current git `origin` remote (owner/repo casing included), unless the user explicitly asks otherwise.
 - Prefer Effect-native instrumentation (`Effect.fn`, spans, typed errors) plus lightweight local event-emission services for migration observability; avoid adding OpenTelemetry/export pipeline work unless explicitly requested.
@@ -73,8 +73,8 @@ Current persistent preferences:
 - For standalone/dual-use tooling paths, prefer the local Effect CLI modules from `vendor/effect-smol` (currently `effect/unstable/cli` in the v4 beta repo) over bespoke argument parsing or `@effect/cli`; use hand-rolled parsers only as temporary migration shims.
 - Prefer Effect Config (`Config`, `Schema.Config`, `ConfigProvider`) over ad-hoc env/json config readers for new or refactored config surfaces.
 - Prefer migrating new/refactored Effect code toward the local `vendor/effect-smol` v4 stack/package surfaces rather than adding more dependency on the current v3-era split packages.
-- Prefer shared/effect-owned helpers over importing implementation modules from `src/old/*` into new Effect code; if both paths need the same utility, extract it to a neutral shared module or make the legacy path delegate to the shared/effect-owned implementation instead of the reverse.
-- Use `ast-grep` for repetitive structural searches/rewrites and cleanup passes (for example removing repeated low-value test patterns, finding legacy imports, and applying mechanical refactors) before falling back to ad-hoc text search/manual edits alone.
+- Prefer shared/effect-owned helpers over importing implementation modules from `packages/legacy-web-access/src/*` into new Effect code; if both paths need the same utility, extract it to a neutral shared module or make the legacy package delegate to the shared/effect-owned implementation instead of the reverse.
+- `ast-grep` is available and you should use it liberally :)
 - Prefer the locally available power tools when they reduce risk or improve review quality: `difft`/difftastic for semantic diffs, `fd` for file discovery, `jq` for JSON inspection/transforms, `delta` for readable git diffs, and `rg` for fast text search.
 - Preserve user-facing behavior and tool contracts, but do not keep legacy implementation-detail compatibility, helper-shape parity, or low-value unit tests (for example CLI help-string assertions) unless they protect an actual repo boundary.
 ## Mandatory Validation After Every Change
@@ -120,7 +120,7 @@ Follow `docs/migration-spec.md`:
 3. Vertical slice migrations (search first)
 4. Cutover to `src/effect/index.ts`
 
-Keep `src/old` intact until parity checks pass.
+Keep `packages/legacy-web-access` intact until parity checks pass.
 
 ## Key Project Docs
 
