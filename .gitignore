@@ -13,6 +13,9 @@ pi-session-*
 
 agent-stuff/
 bin/
-vendor/
+vendor/*
+!vendor/effect-smol/
+!vendor/pi-mono/
+!vendor/agent-stuff/
 
 *.mp4

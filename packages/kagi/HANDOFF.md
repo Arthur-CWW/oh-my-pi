@@ -13,7 +13,7 @@
 - Kept provider-specific typed errors inside package scope:
   - `session-unavailable`, `storage-failed`, `unauthorized`, `forbidden`, `rate-limited`, `http-error`, `request-failed`, `invalid-target`
 - Added package-level Effect coverage:
-  - `packages/kagi/src/kagi-client-effect.test.ts`
+  - `packages/kagi/test/kagi-client-effect.test.ts`
   - covers session bootstrap/storage, lens discovery auth failure, advanced redirect success, rule transport failure, and invalid video target classification
 
 ### Next follow-up
@@ -34,8 +34,8 @@
 - Updated Effect adapter to consume package Effect interface:
   - `src/effect/kagi-search.ts`
 - Added/updated tests:
-  - `tests/kagi-search-package-effect.test.ts` (new package-level classification tests)
-  - `tests/kagi-search-effect.test.ts` (deps now Effect-based)
+  - `packages/kagi/test/kagi-search-package-effect.test.ts` (package-level classification tests)
+  - `src/effect/kagi-search.test.ts` (Effect adapter deps now Effect-based)
 
 ### Next follow-up
 
@@ -57,7 +57,7 @@ Date: 2026-02-23
 - Kept observed defaults as fallback merge (for resilience), but lens handling is now discovery-first.
 
 ### 2) Expanded advanced-search coverage + tests
-- Extended `tests/kagi-client.test.ts` to cover:
+- Extended `packages/kagi/test/kagi-client.test.ts` to cover:
   - full known advanced-search form payload mapping
   - default-empty behavior for omitted fields
   - `terms_appearing=any` normalization to empty form value
@@ -111,7 +111,7 @@ Date: 2026-02-23
 ## Scoped validation run during iteration
 
 ```bash
-bun test tests/kagi-client.test.ts tests/kagi-log.test.ts
+bun test packages/kagi/test/kagi-client.test.ts packages/kagi/test/kagi-log.test.ts
 bun packages/kagi/scripts/kagi-lab.ts help
 ```
 

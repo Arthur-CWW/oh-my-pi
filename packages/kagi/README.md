@@ -14,6 +14,7 @@ This folder is an isolated Kagi provider workspace.
 - `src/kagi-query-parser.ts` — Google-style operator parser that emits structured Kagi-compatible query filters
 - `src/kagi-log.ts` — run persistence + query/filter utilities
 - `scripts/kagi-lab.ts` — CLI for fast experimentation
+- `test/` — package-scoped unit/contract coverage for Kagi-owned modules
 - `package.json` — local package metadata + convenience scripts for this workspace
 - `vendor/browser_extensions/` — cloned `kagisearch/browser_extensions`
 - `output/` — network captures, a11y snapshots, run artifacts

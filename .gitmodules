@@ -1,0 +1,9 @@
+[submodule "vendor/effect-smol"]
+	path = vendor/effect-smol
+	url = https://github.com/Effect-TS/effect-smol
+[submodule "vendor/pi-mono"]
+	path = vendor/pi-mono
+	url = https://github.com/badlogic/pi-mono.git
+[submodule "vendor/agent-stuff"]
+	path = vendor/agent-stuff
+	url = https://github.com/mitsuhiko/agent-stuff

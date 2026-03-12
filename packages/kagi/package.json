@@ -11,6 +11,6 @@
 		"search": "bun scripts/kagi-lab.ts search",
 		"visualize": "bun scripts/kagi-lab.ts visualize",
 		"advanced:probe": "bun scripts/probe-advanced-search.ts",
-		"test": "bun test ../../tests/kagi-client.test.ts ./src ../../tests/kagi-log.test.ts ../../tests/kagi-search-package-effect.test.ts"
+		"test": "bun test ./test"
 	}
 }

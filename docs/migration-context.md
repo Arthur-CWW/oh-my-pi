@@ -43,7 +43,7 @@ _Last updated: 2026-03-12 (local session dump)_
     - `request-failed`
     - `invalid-target`
 - Updated tests/docs:
-  - added colocated `packages/kagi/src/kagi-client-effect.test.ts`
+  - added package-local `packages/kagi/test/kagi-client-effect.test.ts`
   - updated `packages/kagi/{README.md,HANDOFF.md,package.json}`
 - `src/effect/*` adapters remain unchanged/thin; current app-layer Kagi integration still only consumes the search interface.
 
@@ -78,8 +78,8 @@ _Last updated: 2026-03-12 (local session dump)_
   - now consumes package Effect interface
   - removed Kagi HTTP/session branching from Effect app layer
 - Updated tests:
-  - `tests/kagi-search-effect.test.ts` (deps are now Effect-based)
-  - `tests/kagi-search-package-effect.test.ts` (new package-level classification coverage)
+  - `src/effect/kagi-search.test.ts` (deps are now Effect-based)
+  - `packages/kagi/test/kagi-search-package-effect.test.ts` (package-level classification coverage)
 - Updated package docs: `packages/kagi/README.md`
 
 ### 5) Preference persistence updated

@@ -51,7 +51,7 @@ Current persistent preferences:
 - Use `effect-solutions` (plural) when invoking the local Effect solutions CLI (`effect-solution` is not present in this environment).
 - For Effect migrations/refactors, consult `effect-solutions` guidance first (`quick-start` + relevant topic docs such as `basics`, `services-and-layers`, `error-handling`, `config`) before implementing.
 - During implementation iterations, run **only scoped/filtered tests** for the feature being changed (file-level and, when useful, test-name filtering). Do **not** run the full suite repeatedly while iterating. Run the full mandatory validation suite once at handoff or when explicitly requested. Avoid live API/e2e validation runs unless the user explicitly asks for a manual pass.
-- Prefer tests to live close to the source they validate when practical (colocated `*.test.ts` beside `src/*` / package modules rather than only under the top-level `tests/` folder).
+- Prefer tests to live close to the source they validate when practical: use package-local sibling `src/` + `test/` layouts for standalone workspaces/packages (for example `packages/kagi/{src,test}`, similar to `vendor/pi-mono`), colocated `*.test.ts` for focused Effect slices when that stays flatter, and reserve the top-level `tests/` folder for repo-level/cross-package coverage.
 - When drafting next-session/resume prompts, do **not** restate `AGENTS.md` guidance; keep prompts short and focused on current repo state, blockers, and the concrete next refactor.
 - Prefer **larger migration/refactor slices** over overly tiny micro-tasks when safety/rollback is still reasonable; split work only when risk, validation cost, or parity concerns justify it.
 - For interactive/TUI or long-running process validation, prefer **tmux-managed test sessions** (fixed pane size, scripted `send-keys`, `capture-pane` snapshots, explicit session cleanup) locally and over SSH.
@@ -94,13 +94,14 @@ Notes:
 
 ## Testing Scope
 
-### Existing automated tests (`tests/`)
-- URL parsing boundaries
-- utility functions
-- storage behavior
-- search-filter behavior
-- video file detection
-- RSC guard behavior
+### Repo-level automated tests (`tests/`)
+- cross-package boundaries
+- extension/runtime integration coverage
+- legacy/effect parity checks
+
+### Package-local / colocated automated tests
+- package workspaces should prefer sibling `test/` folders (for example `packages/kagi/test`)
+- focused Effect/runtime slices may keep colocated `*.test.ts` beside the implementation when that is the flatter option
 
 ### Existing smoke scripts (`scripts/`)
 - Chrome cookie auth path
