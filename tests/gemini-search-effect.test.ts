@@ -61,8 +61,8 @@ describe("effect gemini-search", () => {
 		const deps: GeminiSearchDeps = {
 			resolveConfiguredProvider: () => Effect.succeed("auto"),
 			getGeminiApiKey: () => null,
-			isGeminiWebAvailable: async () => null,
-			queryWithCookies: async () => "",
+			isGeminiWebAvailable: () => Effect.succeed(null),
+			queryWithCookies: () => Effect.succeed(""),
 			fetch,
 		};
 

@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { basename } from "node:path";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { readChromeCookiesEffect } from "./chrome-cookies.js";
 
 const GEMINI_APP_URL = "https://gemini.google.com/app";
@@ -32,35 +32,53 @@ export interface GeminiWebOptions {
 }
 
 export interface GeminiWebAvailabilityDeps {
-	readonly readCookies: () => Promise<{ readonly cookies: CookieMap }>;
+	readonly readCookies: () => Effect.Effect<{ readonly cookies: CookieMap }, unknown>;
 }
 
+class GeminiWebError extends Schema.TaggedError<GeminiWebError>()("GeminiWebError", {
+	reason: Schema.String,
+}) {}
+
 const defaultGeminiWebAvailabilityDeps: GeminiWebAvailabilityDeps = {
-	readCookies: async () => {
-		const result = await Effect.runPromise(readChromeCookiesEffect());
-		return { cookies: result.cookies };
-	},
+	readCookies: () => readChromeCookiesEffect().pipe(Effect.map((result) => ({ cookies: result.cookies }))),
 };
 
 function hasRequiredCookies(cookieMap: CookieMap): boolean {
 	return REQUIRED_COOKIES.every((name) => Boolean(cookieMap[name]));
 }
 
-export async function isGeminiWebAvailable(
+function toErrorMessage(error: unknown): string {
+	if (error instanceof Error) {
+		return error.message;
+	}
+	return String(error);
+}
+
+function toGeminiWebError(error: unknown): GeminiWebError {
+	return GeminiWebError.make({ reason: toErrorMessage(error) });
+}
+
+export const isGeminiWebAvailableEffect = Effect.fn("GeminiWeb.isGeminiWebAvailable")(function* (
 	deps: GeminiWebAvailabilityDeps = defaultGeminiWebAvailabilityDeps,
-): Promise<CookieMap | null> {
-	const result = await deps.readCookies();
+) {
+	const result = yield* deps.readCookies();
 	if (!hasRequiredCookies(result.cookies)) {
 		return null;
 	}
 	return result.cookies;
+});
+
+export async function isGeminiWebAvailable(
+	deps: GeminiWebAvailabilityDeps = defaultGeminiWebAvailabilityDeps,
+): Promise<CookieMap | null> {
+	return Effect.runPromise(isGeminiWebAvailableEffect(deps));
 }
 
-export async function queryWithCookies(
+export const queryWithCookiesEffect = Effect.fn("GeminiWeb.queryWithCookies")(function* (
 	prompt: string,
 	cookieMap: CookieMap,
 	options: GeminiWebOptions = {},
-): Promise<string> {
+) {
 	const model = options.model && MODEL_HEADERS[options.model] ? options.model : "gemini-2.5-flash";
 	const timeoutMs = options.timeoutMs ?? 120000;
 
@@ -69,7 +87,7 @@ export async function queryWithCookies(
 		fullPrompt = `${fullPrompt}\n\nYouTube video: ${options.youtubeUrl}`;
 	}
 
-	const result = await runGeminiWebOnce(
+	const result = yield* runGeminiWebOnceEffect(
 		fullPrompt,
 		cookieMap,
 		model,
@@ -79,7 +97,7 @@ export async function queryWithCookies(
 	);
 
 	if (isModelUnavailable(result.errorCode) && model !== "gemini-2.5-flash") {
-		const fallback = await runGeminiWebOnce(
+		const fallback = yield* runGeminiWebOnceEffect(
 			fullPrompt,
 			cookieMap,
 			"gemini-2.5-flash",
@@ -88,21 +106,29 @@ export async function queryWithCookies(
 			options.signal,
 		);
 		if (fallback.errorMessage) {
-			throw new Error(fallback.errorMessage);
+			return yield* GeminiWebError.make({ reason: fallback.errorMessage });
 		}
 		if (!fallback.text) {
-			throw new Error("Gemini Web returned empty response (fallback model)");
+			return yield* GeminiWebError.make({ reason: "Gemini Web returned empty response (fallback model)" });
 		}
 		return fallback.text;
 	}
 
 	if (result.errorMessage) {
-		throw new Error(result.errorMessage);
+		return yield* GeminiWebError.make({ reason: result.errorMessage });
 	}
 	if (!result.text) {
-		throw new Error("Gemini Web returned empty response");
+		return yield* GeminiWebError.make({ reason: "Gemini Web returned empty response" });
 	}
 	return result.text;
+});
+
+export async function queryWithCookies(
+	prompt: string,
+	cookieMap: CookieMap,
+	options: GeminiWebOptions = {},
+): Promise<string> {
+	return Effect.runPromise(queryWithCookiesEffect(prompt, cookieMap, options));
 }
 
 interface GeminiWebResult {
@@ -111,72 +137,78 @@ interface GeminiWebResult {
 	readonly errorMessage?: string;
 }
 
-async function runGeminiWebOnce(
+const runGeminiWebOnceEffect = Effect.fn("GeminiWeb.runGeminiWebOnce")(function* (
 	prompt: string,
 	cookieMap: CookieMap,
 	model: string,
 	files: ReadonlyArray<string> | undefined,
 	timeoutMs: number,
 	signal?: AbortSignal,
-): Promise<GeminiWebResult> {
+) {
 	const effectiveSignal = withTimeout(signal, timeoutMs);
 	const cookieHeader = buildCookieHeader(cookieMap);
-	const accessToken = await fetchAccessToken(cookieHeader, effectiveSignal);
+	const accessToken = yield* fetchAccessTokenEffect(cookieHeader, effectiveSignal);
 
-	const uploaded: Array<{ id: string; name: string }> = [];
-	if (files) {
-		for (const filePath of files) {
-			uploaded.push(await uploadFile(filePath, cookieHeader, effectiveSignal));
-		}
-	}
+	const uploaded = yield* Effect.forEach(files ?? [], (filePath) =>
+		uploadFileEffect(filePath, cookieHeader, effectiveSignal),
+	);
 
 	const fReq = buildFReqPayload(prompt, uploaded);
 	const params = new URLSearchParams();
 	params.set("at", accessToken);
 	params.set("f.req", fReq);
 
-	const response = await fetch(GEMINI_STREAM_GENERATE_URL, {
-		method: "POST",
-		headers: {
-			"content-type": "application/x-www-form-urlencoded;charset=utf-8",
-			host: "gemini.google.com",
-			origin: "https://gemini.google.com",
-			referer: "https://gemini.google.com/",
-			"x-same-domain": "1",
-			"user-agent": USER_AGENT,
-			cookie: cookieHeader,
-			[MODEL_HEADER_NAME]: MODEL_HEADERS[model],
-		},
-		body: params.toString(),
-		signal: effectiveSignal,
+	const response = yield* Effect.tryPromise({
+		try: () =>
+			fetch(GEMINI_STREAM_GENERATE_URL, {
+				method: "POST",
+				headers: {
+					"content-type": "application/x-www-form-urlencoded;charset=utf-8",
+					host: "gemini.google.com",
+					origin: "https://gemini.google.com",
+					referer: "https://gemini.google.com/",
+					"x-same-domain": "1",
+					"user-agent": USER_AGENT,
+					cookie: cookieHeader,
+					[MODEL_HEADER_NAME]: MODEL_HEADERS[model],
+				},
+				body: params.toString(),
+				signal: effectiveSignal,
+			}),
+		catch: toGeminiWebError,
 	});
 
-	const rawText = await response.text();
+	const rawText = yield* Effect.tryPromise({
+		try: () => response.text(),
+		catch: toGeminiWebError,
+	});
 
 	if (!response.ok) {
 		return { text: "", errorMessage: `Gemini request failed: ${response.status}` };
 	}
 
-	try {
-		return parseStreamGenerateResponse(rawText);
-	} catch (error) {
-		let errorCode: number | undefined;
-		try {
-			const json = JSON.parse(trimJsonEnvelope(rawText));
-			errorCode = extractErrorCode(json);
-		} catch {
-			// Keep original parse error.
-		}
-		return {
-			text: "",
-			errorCode,
-			errorMessage: error instanceof Error ? error.message : String(error),
-		};
+	const parsed = yield* Effect.either(
+		Effect.try({
+			try: () => parseStreamGenerateResponse(rawText),
+			catch: toGeminiWebError,
+		}),
+	);
+	if (parsed._tag === "Right") {
+		return parsed.right;
 	}
-}
 
-async function fetchAccessToken(cookieHeader: string, signal: AbortSignal): Promise<string> {
-	const html = await fetchWithCookieRedirects(GEMINI_APP_URL, cookieHeader, 10, signal);
+	return {
+		text: "",
+		errorCode: tryExtractErrorCode(rawText),
+		errorMessage: parsed.left.reason,
+	};
+});
+
+const fetchAccessTokenEffect = Effect.fn("GeminiWeb.fetchAccessToken")(function* (
+	cookieHeader: string,
+	signal: AbortSignal,
+) {
+	const html = yield* fetchWithCookieRedirectsEffect(GEMINI_APP_URL, cookieHeader, 10, signal);
 
 	for (const key of ["SNlM0e", "thykhd"] as const) {
 		const match = html.match(new RegExp(`"${key}":"(.*?)"`));
@@ -185,23 +217,27 @@ async function fetchAccessToken(cookieHeader: string, signal: AbortSignal): Prom
 		}
 	}
 
-	throw new Error(
-		"Unable to authenticate with Gemini. Make sure you're signed into gemini.google.com in Chrome.",
-	);
-}
+	return yield* GeminiWebError.make({
+		reason: "Unable to authenticate with Gemini. Make sure you're signed into gemini.google.com in Chrome.",
+	});
+});
 
-async function fetchWithCookieRedirects(
+const fetchWithCookieRedirectsEffect = Effect.fn("GeminiWeb.fetchWithCookieRedirects")(function* (
 	url: string,
 	cookieHeader: string,
 	maxRedirects: number,
 	signal: AbortSignal,
-): Promise<string> {
+) {
 	let current = url;
 	for (let index = 0; index <= maxRedirects; index++) {
-		const response = await fetch(current, {
-			headers: { "user-agent": USER_AGENT, cookie: cookieHeader },
-			redirect: "manual",
-			signal,
+		const response = yield* Effect.tryPromise({
+			try: () =>
+				fetch(current, {
+					headers: { "user-agent": USER_AGENT, cookie: cookieHeader },
+					redirect: "manual",
+					signal,
+				}),
+			catch: toGeminiWebError,
 		});
 		if (response.status >= 300 && response.status < 400) {
 			const location = response.headers.get("location");
@@ -210,17 +246,22 @@ async function fetchWithCookieRedirects(
 				continue;
 			}
 		}
-		return response.text();
-	}
-	throw new Error(`Too many redirects (>${maxRedirects})`);
-}
 
-async function uploadFile(
+		return yield* Effect.tryPromise({
+			try: () => response.text(),
+			catch: toGeminiWebError,
+		});
+	}
+
+	return yield* GeminiWebError.make({ reason: `Too many redirects (>${maxRedirects})` });
+});
+
+const uploadFileEffect = Effect.fn("GeminiWeb.uploadFile")(function* (
 	filePath: string,
 	cookieHeader: string,
 	signal: AbortSignal,
-): Promise<{ id: string; name: string }> {
-	const data = readFileSync(filePath);
+) {
+	const data = yield* Effect.sync(() => readFileSync(filePath));
 	const fileName = basename(filePath);
 	const boundary = "----FormBoundary" + Math.random().toString(36).slice(2);
 	const header = `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${fileName}"\r\nContent-Type: application/octet-stream\r\n\r\n`;
@@ -228,25 +269,36 @@ async function uploadFile(
 
 	const body = Buffer.concat([Buffer.from(header, "utf-8"), data, Buffer.from(footer, "utf-8")]);
 
-	const response = await fetch(GEMINI_UPLOAD_URL, {
-		method: "POST",
-		headers: {
-			"content-type": `multipart/form-data; boundary=${boundary}`,
-			"push-id": GEMINI_UPLOAD_PUSH_ID,
-			"user-agent": USER_AGENT,
-			cookie: cookieHeader,
-		},
-		body,
-		signal,
+	const response = yield* Effect.tryPromise({
+		try: () =>
+			fetch(GEMINI_UPLOAD_URL, {
+				method: "POST",
+				headers: {
+					"content-type": `multipart/form-data; boundary=${boundary}`,
+					"push-id": GEMINI_UPLOAD_PUSH_ID,
+					"user-agent": USER_AGENT,
+					cookie: cookieHeader,
+				},
+				body,
+				signal,
+			}),
+		catch: toGeminiWebError,
 	});
 
 	if (!response.ok) {
-		const text = await response.text();
-		throw new Error(`File upload failed: ${response.status} (${text.slice(0, 200)})`);
+		const text = yield* Effect.tryPromise({
+			try: () => response.text(),
+			catch: toGeminiWebError,
+		}).pipe(Effect.catchAll(() => Effect.succeed("")));
+		return yield* GeminiWebError.make({ reason: `File upload failed: ${response.status} (${text.slice(0, 200)})` });
 	}
 
-	return { id: await response.text(), name: fileName };
-}
+	const uploadId = yield* Effect.tryPromise({
+		try: () => response.text(),
+		catch: toGeminiWebError,
+	});
+	return { id: uploadId, name: fileName };
+});
 
 function buildFReqPayload(prompt: string, uploaded: ReadonlyArray<{ id: string; name: string }>): string {
 	const promptPayload =
@@ -293,6 +345,15 @@ function trimJsonEnvelope(text: string): string {
 function extractErrorCode(responseJson: unknown): number | undefined {
 	const code = getNestedValue(responseJson, [0, 5, 2, 0, 1, 0]);
 	return typeof code === "number" && code >= 0 ? code : undefined;
+}
+
+function tryExtractErrorCode(rawText: string): number | undefined {
+	try {
+		const json = JSON.parse(trimJsonEnvelope(rawText));
+		return extractErrorCode(json);
+	} catch {
+		return undefined;
+	}
 }
 
 function isModelUnavailable(errorCode: number | undefined): boolean {

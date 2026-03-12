@@ -1,6 +1,6 @@
 # Migration Task Tracker
 
-_Last updated: 2026-03-09_
+_Last updated: 2026-03-10_
 
 State legend (symbol-only):
 - `[ ]` Open
@@ -62,3 +62,9 @@ State legend (symbol-only):
   - Result: Added `src/effect/search-contracts.ts` with shared provider/recency schema contracts + value sets; switched `src/effect/index.ts` and `src/effect/core/Config.ts` to consume shared contracts; moved `core/Config` decoding to Effect Config + `ConfigProvider.fromJson` flow; updated `src/effect/gemini-api.ts` to read env/file key paths via Effect Config; wired `src/effect/gemini-search.ts` CLI execution path through `@effect/cli` command parsing (while keeping existing parse helper exports for compatibility tests); removed user-facing `auto` provider selection from `web_search` tool boundary so omitted provider now defaults to Kagi/fallback flow.
 - [@User] Align Effect package dependency versions and add Effect CLI stack with compatible peer versions.
   - Result: Added `@effect/cli@0.73.2` plus required printer peers (`@effect/printer@0.47.0`, `@effect/printer-ansi@0.47.0`); pinned Effect package versions in `package.json` (`effect`, `@effect/platform`, `@effect/platform-node`, `@effect/schema`, `@effect/language-service`) to avoid cross-version drift during migration.
+- [@User] Extract `get_search_content` into an Effect-native tool path and keep legacy-output parity while bridge remains for `fetch_content`.
+  - Result: Added flattened `src/effect/search-content.ts` with schema-first stored-result decoding + Effect.fn execution, registered Effect-owned `get_search_content` in `src/effect/index.ts` (overrides legacy tool when bridge is enabled and remains available when bridge is disabled), and expanded `tests/effect-index.test.ts` with legacy-format contract checks + schema-validation coverage.
+- [@User] Refactor Kagi package surface to provide Effect-native search interface + provider-specific error classification; keep Effect app layer thin.
+  - Result: Added `packages/kagi/src/kagi-search-effect.ts` with Effect-native `runKagiSocketSearchEffect` and typed Kagi-specific error classification (`session-unavailable`, `unauthorized`, `forbidden`, `rate-limited`, `http-error`, `request-failed`); switched `src/effect/kagi-search.ts` to consume this Effect interface (removing Kagi HTTP/session branching from Effect app layer); updated Kagi tests to inject Effect deps and added `tests/kagi-search-package-effect.test.ts` covering package-level error classification.
+- [@User] Keep Effect migration internals Effect-first and push `async`/`Promise` usage to explicit boundaries only.
+  - Result: Refactored `src/effect/{gemini-web,gemini-search,search-runtime,index}.ts` to keep provider orchestration and web/API calls in `Effect` values (typed tagged errors + `Effect.fn`), leaving `async` wrappers at CLI/tool execute boundaries; fixed `src/effect/observability/EventStore.ts` row-decoding guard regression; updated tests in `tests/{gemini-web-effect,gemini-search-effect,effect-index}.test.ts`; validations run (`bun run typecheck`, scoped tests, full `bun run test`, `bun run test:e2e:cookies`, `pi --no-extensions -e ./src/effect/index.ts --help`; Gemini e2e requires local auth/API and still fails without credentials).

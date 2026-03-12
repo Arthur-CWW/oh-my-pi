@@ -1,67 +1,102 @@
 # Migration Context Handoff
 
-This file is intended to bootstrap a new session with all relevant migration context.
+_Last updated: 2026-03-11 (local session dump)_
 
-## Current State
+## Repo Snapshot
 
-- Legacy code remains in: `src/old/*`
-- Effect code lives in: `src/effect/*`
-- Foundation modules exist under `src/effect/core/*`
-- SQLite event store exists under `src/effect/observability/EventStore.ts`
-- Gemini search slice exists in `src/effect/gemini-search.ts`
-- **Package extension entry now points to `src/effect/index.ts`**
-- `src/effect/index.ts` currently uses a compatibility bridge to register legacy tool surface from `src/old/index.ts`, then adds Effect-only tools (so behavior remains stable during migration)
+- Repo: `/home/arthur/projects/pi-web-access`
+- Branch: `main`
+- HEAD: `9ce9d9e`
+- Entry extension: `package.json -> ./src/effect/index.ts`
+- Legacy baseline remains: `src/old/*`
 
-## Why Migration
+## What changed in this session
 
-Primary goals:
-1. Typed errors and better error surfaces (no generic collapse)
-2. Stronger local debugging for agent/human workflows
-3. Event sourcing to local SQLite for action traceability
-4. Safer incremental changes with boundary tests and parity checks
+### 1) Effect-native `get_search_content` slice extracted
 
-## Validation Commands (current)
+- Added: `src/effect/search-content.ts`
+  - schema-first decoding for stored search/fetch payloads
+  - Effect-native execution (`Effect.fn`) for retrieval + formatting
+- Updated: `src/effect/index.ts`
+  - registers Effect-owned `get_search_content`
+  - keeps schema-boundary param validation at tool boundary
+  - Effect tool overrides legacy tool when bridge is enabled
+  - still available when legacy bridge is disabled
+- Updated tests: `tests/effect-index.test.ts`
+  - tool registration assertions
+  - stored search/fetch behavior checks
+  - schema-validation failure checks
+  - kill-switch expectation updated (`get_search_content` remains present)
+
+### 2) Kagi provider moved toward package-owned Effect interface
+
+- Added: `packages/kagi/src/kagi-search-effect.ts`
+  - Effect-native boundary: `runKagiSocketSearchEffect(...)`
+  - typed provider-specific error classification in package boundary:
+    - `session-unavailable`
+    - `unauthorized`
+    - `forbidden`
+    - `rate-limited`
+    - `http-error`
+    - `request-failed`
+- Updated: `src/effect/kagi-search.ts`
+  - now consumes package Effect interface
+  - removed Kagi HTTP/session branching from Effect app layer
+- Updated tests:
+  - `tests/kagi-search-effect.test.ts` (deps are now Effect-based)
+  - `tests/kagi-search-package-effect.test.ts` (new package-level classification coverage)
+- Updated package docs: `packages/kagi/README.md`
+
+### 3) Preference persistence updated
+
+- `AGENTS.md` updated with persistent preference:
+  - provider-specific error classification/normalization should live in provider package/module boundary
+  - Effect runtime/entry should consume typed provider errors
+
+## Validation status from this session
+
+Ran:
 
 ```bash
 bun run typecheck
 bun run test
 bun run test:e2e:cookies
 bun run test:e2e:search:gemini
-bun run test:e2e:effect:help
-bun run test:e2e:cookies:effect
-bun run test:e2e:search:gemini:effect
 pi --no-extensions -e ./src/effect/index.ts --help
-pi --no-extensions -e ./src/old/index.ts --help
 ```
 
-## Existing E2E Smoke
+Results:
 
-- `scripts/e2e-chrome-cookies.ts`
-- `scripts/e2e-search-gemini.ts`
-- `scripts/e2e-chrome-cookies-effect.ts`
-- `scripts/e2e-search-gemini-effect.ts`
+- ✅ `bun run typecheck`
+- ✅ `bun run test`
+- ✅ `bun run test:e2e:cookies` (warning-only in this env; exits 0)
+- ❌ `bun run test:e2e:search:gemini` (missing Gemini auth/API key in environment)
+- ✅ `pi --no-extensions -e ./src/effect/index.ts --help`
 
-Search e2e outputs artifacts to `test-output/` (JSON + MD).
+## Current migration position
 
-## Observations
+- Legacy bridge still exists in `src/effect/index.ts` (kill switch still supported).
+- `get_search_content` is now Effect-owned.
+- `fetch_content` is still legacy-owned.
+- Kagi search runtime path now has package-owned Effect boundary and package-owned provider error classification.
 
-- Gemini and cookie smoke tests pass on this environment, with historical intermittent Gemini flake already tracked in `docs/migration-spec.md`.
-- Legacy `src/old/index.ts` has typing complexity and remains excluded from strict typecheck.
-- Cutover is complete at package entrypoint level, but full migration is still in progress because the Effect entrypoint currently bridges legacy tools.
+## Recommended next steps
 
-## Recommended Next Work
+1. Continue converting `packages/kagi/*` surfaces to Effect-native interfaces (search done; remaining advanced/rules helpers still Promise-centric).
+2. Keep Kagi-specific error/transport/session logic package-local.
+3. Continue legacy bridge reduction by extracting `fetch_content` to Effect-native path with parity tests.
+4. Keep scoped tests during iteration; run full required validation at handoff.
 
-1. Keep cutover stable while replacing compatibility bridge incrementally.
-2. Migrate remaining tool slices from legacy index into Effect-native modules:
-   - `perplexity`
-   - `fetch_content` / `get_search_content`
-   - extractor special cases (YouTube/video/GitHub)
-3. Add parity tests per migrated slice and remove bridge once parity confidence is sufficient.
+## Known environment blockers
 
-## Related Docs
+- Gemini e2e depends on either:
+  - authenticated Gemini web cookies in Chrome, or
+  - `GEMINI_API_KEY` / `~/.pi/web-search.json` key config.
 
-- `AGENTS.md`
-- `task-tracker.md`
-- `docs/migration-spec.md`
-- `docs/effect-migration-prep.md`
-- `docs/references/effect-llms.txt`
+## Notes for next session
+
+- Preserve local `todo.md` changes.
+- Working tree is currently dirty with multiple in-progress migration edits (do not assume clean checkout).
+- Task tracker has these recent items in `[@User]` state:
+  - Effect-native `get_search_content` extraction
+  - Kagi package Effect interface + package-local error classification

@@ -1,10 +1,11 @@
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "bun:test";
+import { beforeEach, describe, expect, it } from "bun:test";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Effect } from "effect";
 import effectEntry, { registerEffectTools, type EffectExtensionDeps } from "../src/effect/index.js";
+import { clearResults, storeResult } from "../src/old/storage.js";
 
 interface ToolLike {
 	readonly name?: unknown;
@@ -48,17 +49,18 @@ function registerCutoverEntry(): Map<string, ToolLike> {
 }
 
 const fakeDeps: EffectExtensionDeps = {
-	search: async () => ({
-		answer: "Bun is a runtime.",
-		results: [
-			{
-				title: "Bun",
-				url: "https://bun.com",
-				snippet: "Fast JavaScript runtime.",
-				publishedAt: "2025-02-23",
-			},
-		],
-	}),
+	search: () =>
+		Effect.succeed({
+			answer: "Bun is a runtime.",
+			results: [
+				{
+					title: "Bun",
+					url: "https://bun.com",
+					snippet: "Fast JavaScript runtime.",
+					publishedAt: "2025-02-23",
+				},
+			],
+		}),
 	readCookies: () =>
 		Effect.succeed({
 			cookies: { "__Secure-1PSID": "x", "__Secure-1PSIDTS": "y" },
@@ -67,12 +69,17 @@ const fakeDeps: EffectExtensionDeps = {
 		}),
 };
 
+beforeEach(() => {
+	clearResults();
+});
+
 describe("effect shadow entry", () => {
 	it("registers all effect tools", () => {
 		const tools = registerWith(fakeDeps);
 		expect(tools.has("effect_event_store_smoke")).toBe(true);
 		expect(tools.has("web_search")).toBe(true);
 		expect(tools.has("chrome_cookies")).toBe(true);
+		expect(tools.has("get_search_content")).toBe(true);
 	});
 
 	it("runs sqlite smoke tool", async () => {
@@ -182,13 +189,13 @@ describe("effect shadow entry", () => {
 		let capturedProvider: string | undefined;
 		let capturedLens: string | undefined;
 		const tools = registerWith({
-			search: async (_query, options) => {
+			search: (_query, options) => {
 				capturedProvider = options?.provider;
 				capturedLens = options?.lens;
-				return {
+				return Effect.succeed({
 					answer: "ok",
 					results: [{ title: "Result", url: "https://example.com", snippet: "" }],
-				};
+				});
 			},
 			readCookies: fakeDeps.readCookies,
 		});
@@ -209,9 +216,7 @@ describe("effect shadow entry", () => {
 
 	it("maps structured search dependency failures to tool errors", async () => {
 		const tools = registerWith({
-			search: async () => {
-				throw { reason: "provider-down" };
-			},
+			search: () => Effect.fail({ reason: "provider-down" }),
 			readCookies: fakeDeps.readCookies,
 		});
 		const tool = tools.get("web_search");
@@ -252,6 +257,86 @@ describe("effect shadow entry", () => {
 		expect(result.details?.error).toBe(null);
 		expect(result.content[0]?.text).toContain("Present requested: 1/2");
 	});
+
+	it("returns stored search content with legacy-compatible formatting", async () => {
+		const tools = registerWith(fakeDeps);
+		const tool = tools.get("get_search_content");
+		expect(typeof tool?.execute).toBe("function");
+		if (typeof tool?.execute !== "function") throw new Error("missing execute");
+
+		storeResult("search-1", {
+			id: "search-1",
+			type: "search",
+			timestamp: Date.now(),
+			queries: [
+				{
+					query: "effect ts",
+					answer: "Effect is a TypeScript library",
+					results: [
+						{
+							title: "Effect",
+							url: "https://effect.website",
+							snippet: "Docs",
+						},
+					],
+					error: null,
+				},
+			],
+		});
+
+		const result = await tool.execute("call-4", { responseId: "search-1", queryIndex: 0 });
+		expect(result.content[0]?.text).toBe(
+			'## Results for: "effect ts"\n\nEffect is a TypeScript library\n\n---\n\n### Effect\nhttps://effect.website\n\n',
+		);
+		expect(result.details).toEqual({ query: "effect ts", resultCount: 1 });
+	});
+
+	it("returns stored fetched URL content and not-found guidance", async () => {
+		const tools = registerWith(fakeDeps);
+		const tool = tools.get("get_search_content");
+		expect(typeof tool?.execute).toBe("function");
+		if (typeof tool?.execute !== "function") throw new Error("missing execute");
+
+		storeResult("fetch-1", {
+			id: "fetch-1",
+			type: "fetch",
+			timestamp: Date.now(),
+			urls: [
+				{
+					url: "https://example.com",
+					title: "Example",
+					content: "Example body",
+					error: null,
+				},
+			],
+		});
+
+		const found = await tool.execute("call-5", { responseId: "fetch-1", urlIndex: 0 });
+		expect(found.content[0]?.text).toBe("# Example\n\nExample body");
+		expect(found.details).toEqual({
+			url: "https://example.com",
+			title: "Example",
+			contentLength: 12,
+		});
+
+		const missing = await tool.execute("call-5b", { responseId: "missing" });
+		expect(missing.content[0]?.text).toBe('Error: No stored results for "missing"');
+		expect(missing.details).toEqual({ error: "Not found", responseId: "missing" });
+	});
+
+	it("validates get_search_content params with schema decode", async () => {
+		const tools = registerWith(fakeDeps);
+		const tool = tools.get("get_search_content");
+		expect(typeof tool?.execute).toBe("function");
+		if (typeof tool?.execute !== "function") throw new Error("missing execute");
+
+		const result = await tool.execute("call-6", { responseId: 123 });
+		expect(result.content[0]?.text).toContain("Invalid parameters for get_search_content");
+		expect(result.details).toEqual({
+			error: "invalid-params",
+			reason: expect.stringContaining("responseId"),
+		});
+	});
 });
 
 describe("effect production cutover entry", () => {
@@ -272,7 +357,7 @@ describe("effect production cutover entry", () => {
 			const tools = registerCutoverEntry();
 			expect(tools.has("web_search")).toBe(true);
 			expect(tools.has("fetch_content")).toBe(false);
-			expect(tools.has("get_search_content")).toBe(false);
+			expect(tools.has("get_search_content")).toBe(true);
 			expect(tools.has("chrome_cookies")).toBe(true);
 			expect(tools.has("effect_event_store_smoke")).toBe(true);
 		} finally {

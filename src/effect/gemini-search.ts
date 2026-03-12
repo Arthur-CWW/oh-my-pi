@@ -2,7 +2,12 @@ import { Args, Command, Options } from "@effect/cli";
 import { NodeContext } from "@effect/platform-node";
 import { Effect, Option, Schema } from "effect";
 import { API_BASE, DEFAULT_MODEL, getApiKey } from "./gemini-api.js";
-import { isGeminiWebAvailable, queryWithCookies } from "./gemini-web.js";
+import {
+	isGeminiWebAvailableEffect,
+	queryWithCookiesEffect,
+	type CookieMap,
+	type GeminiWebOptions,
+} from "./gemini-web.js";
 import {
 	GEMINI_CLI_PROVIDER_VALUES,
 	RECENCY_FILTER_VALUES,
@@ -38,16 +43,20 @@ export interface FullSearchOptions extends SearchOptions {
 export interface GeminiSearchDeps {
 	readonly resolveConfiguredProvider: () => Effect.Effect<SearchProvider, never>;
 	readonly getGeminiApiKey: () => string | null;
-	readonly isGeminiWebAvailable: () => ReturnType<typeof isGeminiWebAvailable>;
-	readonly queryWithCookies: typeof queryWithCookies;
+	readonly isGeminiWebAvailable: () => Effect.Effect<CookieMap | null, unknown>;
+	readonly queryWithCookies: (
+		prompt: string,
+		cookieMap: CookieMap,
+		options?: GeminiWebOptions,
+	) => Effect.Effect<string, unknown>;
 	readonly fetch: typeof fetch;
 }
 
 const defaultDeps: GeminiSearchDeps = {
 	resolveConfiguredProvider: () => Effect.succeed("auto"),
 	getGeminiApiKey: getApiKey,
-	isGeminiWebAvailable,
-	queryWithCookies,
+	isGeminiWebAvailable: isGeminiWebAvailableEffect,
+	queryWithCookies: queryWithCookiesEffect,
 	fetch,
 };
 
@@ -113,80 +122,102 @@ function buildAbortSignal(timeoutMs: number, signal?: AbortSignal): AbortSignal 
 	return signal ? AbortSignal.any([timeout, signal]) : timeout;
 }
 
-async function searchWithGeminiApi(
+function toSearchInternalError(error: unknown): SearchUnavailableError {
+	const reason = error instanceof Error ? error.message : String(error);
+	return SearchUnavailableError.make({ reason });
+}
+
+const searchWithGeminiApiCoreEffect = Effect.fn("GeminiSearch.searchWithGeminiApiCore")(function* (
 	query: string,
 	options: SearchOptions,
 	deps: GeminiSearchDeps,
-): Promise<SearchResponse | null> {
+) {
 	const apiKey = deps.getGeminiApiKey();
-	if (!apiKey) return null;
-
-	try {
-		const body = {
-			contents: [{ parts: [{ text: query }] }],
-			tools: [{ google_search: {} }],
-		};
-
-		const response = await deps.fetch(`${API_BASE}/models/${DEFAULT_MODEL}:generateContent?key=${apiKey}`, {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify(body),
-			signal: buildAbortSignal(60000, options.signal),
-		});
-
-		if (!response.ok) {
-			return null;
-		}
-
-		const data = (await response.json()) as GeminiSearchResponse;
-		const answer =
-			data.candidates?.[0]?.content?.parts
-				?.map((part) => part.text)
-				.filter((value): value is string => typeof value === "string" && value.length > 0)
-				.join("\n") ?? "";
-
-		const results = await resolveGroundingChunks(
-			data.candidates?.[0]?.groundingMetadata?.groundingChunks,
-			options.signal,
-			deps.fetch,
-		);
-
-		if (!answer && results.length === 0) return null;
-		return { answer, results };
-	} catch {
+	if (!apiKey) {
 		return null;
 	}
-}
+
+	const body = {
+		contents: [{ parts: [{ text: query }] }],
+		tools: [{ google_search: {} }],
+	};
+
+	const response = yield* Effect.tryPromise({
+		try: () =>
+			deps.fetch(`${API_BASE}/models/${DEFAULT_MODEL}:generateContent?key=${apiKey}`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify(body),
+				signal: buildAbortSignal(60000, options.signal),
+			}),
+		catch: toSearchInternalError,
+	});
+
+	if (!response.ok) {
+		return null;
+	}
+
+	const data = yield* Effect.tryPromise({
+		try: () => response.json() as Promise<GeminiSearchResponse>,
+		catch: toSearchInternalError,
+	});
+	const answer =
+		data.candidates?.[0]?.content?.parts
+			?.map((part) => part.text)
+			.filter((value): value is string => typeof value === "string" && value.length > 0)
+			.join("\n") ?? "";
+
+	const results = yield* resolveGroundingChunksEffect(
+		data.candidates?.[0]?.groundingMetadata?.groundingChunks,
+		options.signal,
+		deps.fetch,
+	);
+
+	if (!answer && results.length === 0) {
+		return null;
+	}
+	return { answer, results };
+});
 
 function searchWithGeminiApiEffect(
 	query: string,
 	options: SearchOptions,
 	deps: GeminiSearchDeps,
 ): Effect.Effect<SearchResponse | null> {
-	return Effect.promise(() => searchWithGeminiApi(query, options, deps));
+	return searchWithGeminiApiCoreEffect(query, options, deps).pipe(
+		Effect.catchAll(() => Effect.succeed(null)),
+		Effect.catchAllDefect(() => Effect.succeed(null)),
+	);
 }
+
+const searchWithGeminiWebCoreEffect = Effect.fn("GeminiSearch.searchWithGeminiWebCore")(function* (
+	query: string,
+	options: SearchOptions,
+	deps: GeminiSearchDeps,
+) {
+	const cookies = yield* deps.isGeminiWebAvailable();
+	if (!cookies) {
+		return null;
+	}
+
+	const prompt = buildSearchPrompt(query, options);
+	const answer = yield* deps.queryWithCookies(prompt, cookies, {
+		model: "gemini-3-flash-preview",
+		signal: options.signal,
+		timeoutMs: 60000,
+	});
+	return { answer, results: extractSourceUrls(answer) };
+});
 
 function searchWithGeminiWebEffect(
 	query: string,
 	options: SearchOptions,
 	deps: GeminiSearchDeps,
 ): Effect.Effect<SearchResponse | null> {
-	return Effect.promise(async () => {
-		try {
-			const cookies = await deps.isGeminiWebAvailable();
-			if (!cookies) return null;
-
-			const prompt = buildSearchPrompt(query, options);
-			const answer = await deps.queryWithCookies(prompt, cookies, {
-				model: "gemini-3-flash-preview",
-				signal: options.signal,
-				timeoutMs: 60000,
-			});
-			return { answer, results: extractSourceUrls(answer) };
-		} catch {
-			return null;
-		}
-	});
+	return searchWithGeminiWebCoreEffect(query, options, deps).pipe(
+		Effect.catchAll(() => Effect.succeed(null)),
+		Effect.catchAllDefect(() => Effect.succeed(null)),
+	);
 }
 
 export function buildSearchPrompt(query: string, options: SearchOptions): string {
@@ -233,44 +264,55 @@ export function extractSourceUrls(markdown: string): SearchResult[] {
 	return results;
 }
 
-async function resolveGroundingChunks(
+const resolveGroundingChunksEffect = Effect.fn("GeminiSearch.resolveGroundingChunks")(function* (
 	chunks: ReadonlyArray<GroundingChunk> | undefined,
 	signal: AbortSignal | undefined,
 	fetchImpl: typeof fetch,
-): Promise<SearchResult[]> {
-	if (!chunks || chunks.length === 0) return [];
+) {
+	if (!chunks || chunks.length === 0) {
+		return [];
+	}
 
 	const results: SearchResult[] = [];
 	for (const chunk of chunks) {
-		if (!chunk.web) continue;
+		if (!chunk.web) {
+			continue;
+		}
 
 		const title = chunk.web.title ?? "";
 		let url = chunk.web.uri ?? "";
 		if (url.includes("vertexaisearch.cloud.google.com/grounding-api-redirect")) {
-			const resolved = await resolveRedirect(url, signal, fetchImpl);
-			if (resolved) url = resolved;
+			const resolved = yield* resolveRedirectEffect(url, signal, fetchImpl).pipe(
+				Effect.catchAll(() => Effect.succeed(null)),
+				Effect.catchAllDefect(() => Effect.succeed(null)),
+			);
+			if (resolved) {
+				url = resolved;
+			}
 		}
-		if (url) results.push({ title, url, snippet: "" });
+		if (url) {
+			results.push({ title, url, snippet: "" });
+		}
 	}
 	return results;
-}
+});
 
-async function resolveRedirect(
+const resolveRedirectEffect = Effect.fn("GeminiSearch.resolveRedirect")(function* (
 	proxyUrl: string,
 	signal: AbortSignal | undefined,
 	fetchImpl: typeof fetch,
-): Promise<string | null> {
-	try {
-		const response = await fetchImpl(proxyUrl, {
-			method: "HEAD",
-			redirect: "manual",
-			signal: buildAbortSignal(5000, signal),
-		});
-		return response.headers.get("location") ?? null;
-	} catch {
-		return null;
-	}
-}
+) {
+	const response = yield* Effect.tryPromise({
+		try: () =>
+			fetchImpl(proxyUrl, {
+				method: "HEAD",
+				redirect: "manual",
+				signal: buildAbortSignal(5000, signal),
+			}),
+		catch: toSearchInternalError,
+	});
+	return response.headers.get("location") ?? null;
+});
 
 interface GeminiSearchResponse {
 	readonly candidates?: ReadonlyArray<{

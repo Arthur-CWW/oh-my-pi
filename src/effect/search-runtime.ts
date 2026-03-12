@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Effect, Either, Schedule, Schema } from "effect";
-import { search as geminiSearch, type FullSearchOptions } from "./gemini-search.js";
+import { searchEffect as geminiSearchEffect, type FullSearchOptions } from "./gemini-search.js";
 import { kagiSearchEffect, type SearchSuccess } from "./kagi-search.js";
 import { NoopSearchEventsService, type SearchEventsService } from "./search-events.js";
 
@@ -44,19 +44,6 @@ export interface SearchRuntimeDeps {
 	readonly generateCorrelationId: () => string;
 }
 
-function toErrorMessage(error: unknown): string {
-	if (error instanceof Error) {
-		return error.message;
-	}
-	if (error && typeof error === "object" && "reason" in error) {
-		const reason = (error as { readonly reason: unknown }).reason;
-		if (typeof reason === "string") {
-			return reason;
-		}
-	}
-	return String(error);
-}
-
 function toGeminiOptions(options: SearchRuntimeOptions): FullSearchOptions {
 	return {
 		provider: options.provider,
@@ -89,14 +76,14 @@ const runDefaultGeminiSearch = Effect.fn("SearchRuntime.runDefaultGeminiSearch")
 	query: string,
 	options: SearchRuntimeOptions,
 ) {
-	return yield* Effect.tryPromise({
-		try: () => geminiSearch(query, toGeminiOptions(options)),
-		catch: (cause) =>
+	return yield* geminiSearchEffect(query, toGeminiOptions(options)).pipe(
+		Effect.mapError((error) =>
 			SearchProviderError.make({
 				provider: "gemini",
-				reason: toErrorMessage(cause),
+				reason: error.reason,
 			}),
-	});
+		),
+	);
 });
 
 const defaultSearchRuntimeDeps: SearchRuntimeDeps = {

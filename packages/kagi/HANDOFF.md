@@ -1,5 +1,26 @@
 # Kagi Unofficial Client Handoff (Session Summary)
 
+## Update: 2026-03-11
+
+### What changed this session
+
+- Added package-owned Effect interface for Kagi search:
+  - `packages/kagi/src/kagi-search-effect.ts`
+  - exported `runKagiSocketSearchEffect(...)`
+- Moved Kagi-specific error classification into package boundary (instead of Effect app entry/runtime branches):
+  - `session-unavailable`, `unauthorized`, `forbidden`, `rate-limited`, `http-error`, `request-failed`
+- Updated Effect adapter to consume package Effect interface:
+  - `src/effect/kagi-search.ts`
+- Added/updated tests:
+  - `tests/kagi-search-package-effect.test.ts` (new package-level classification tests)
+  - `tests/kagi-search-effect.test.ts` (deps now Effect-based)
+
+### Next follow-up
+
+- Continue converting remaining `packages/kagi/*` runtime interfaces to Effect-first style (search is done; advanced/rules paths still Promise-centric).
+
+---
+
 Date: 2026-02-23
 
 ## What was completed this session

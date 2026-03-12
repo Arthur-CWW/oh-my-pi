@@ -1,10 +1,13 @@
 import { Effect, Schema } from "effect";
 import {
 	SimpleRateLimiter,
-	runSocketSearchWithAutoRefresh,
 	type KagiSearchOptions as ClientKagiSearchOptions,
 	type KagiSearchResult as ClientKagiSearchResult,
 } from "../../packages/kagi/src/kagi-client.js";
+import {
+	KagiSearchRuntimeError,
+	runKagiSocketSearchEffect,
+} from "../../packages/kagi/src/kagi-search-effect.js";
 import {
 	applyDomainFilterToQuery,
 	mergeDomainFilters,
@@ -20,8 +23,10 @@ type KagiSearchResult = ClientKagiSearchResult;
 
 const DEFAULT_RATE_LIMITER = new SimpleRateLimiter({ minIntervalMs: 1000, jitterMs: 500 });
 
-async function runDefaultKagiSearch(options: KagiSearchOptions): Promise<KagiSearchResult> {
-	return runSocketSearchWithAutoRefresh(options, {
+function runDefaultKagiSearch(
+	options: KagiSearchOptions,
+): Effect.Effect<KagiSearchResult, KagiSearchRuntimeError> {
+	return runKagiSocketSearchEffect(options, {
 		rateLimiter: DEFAULT_RATE_LIMITER,
 		discoverLenses: true,
 	});
@@ -36,7 +41,7 @@ export class KagiSearchError extends Schema.TaggedError<KagiSearchError>()(
 ) {}
 
 export interface KagiSearchDeps {
-	readonly runSearch: (options: KagiSearchOptions) => Promise<KagiSearchResult>;
+	readonly runSearch: (options: KagiSearchOptions) => Effect.Effect<KagiSearchResult, KagiSearchRuntimeError>;
 }
 
 const defaultDeps: KagiSearchDeps = {
@@ -308,28 +313,23 @@ export function kagiSearchEffect(
 		const preparedQuery = applyDomainFilterToQuery(queryWithInlineFilters, mergedDomainFilter);
 		const effectiveQuery = preparedQuery.length > 0 ? preparedQuery : query.trim();
 		const hasExplicitDateBounds = Boolean(parsedQuery.fromDate || parsedQuery.toDate);
-		const result = yield* Effect.tryPromise({
-			try: () =>
-				deps.runSearch({
-					query: effectiveQuery,
-					lens: options.lens,
-					dateRange: hasExplicitDateBounds ? undefined : mapRecencyFilterToDateRange(options.recencyFilter),
-					fromDate: parsedQuery.fromDate,
-					toDate: parsedQuery.toDate,
-					maxResponseBytes: 2_000_000,
-				}),
-			catch: (cause) =>
-				KagiSearchError.make({
-					reason: cause instanceof Error ? cause.message : String(cause),
-				}),
-		});
-
-		if (!result.ok) {
-			return yield* KagiSearchError.make({
-				reason: `Kagi search failed with status ${result.status}`,
-				status: result.status,
-			});
-		}
+		const result = yield* deps
+			.runSearch({
+				query: effectiveQuery,
+				lens: options.lens,
+				dateRange: hasExplicitDateBounds ? undefined : mapRecencyFilterToDateRange(options.recencyFilter),
+				fromDate: parsedQuery.fromDate,
+				toDate: parsedQuery.toDate,
+				maxResponseBytes: 2_000_000,
+			})
+			.pipe(
+				Effect.mapError((error) =>
+					KagiSearchError.make({
+						reason: error.reason,
+						status: error.status,
+					}),
+				),
+			);
 
 		const answer = extractAnswerFromEvents(result);
 		const results = extractResultsFromEvents(result);

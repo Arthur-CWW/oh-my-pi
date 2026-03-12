@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { Effect } from "effect";
+import { KagiSearchRuntimeError } from "../packages/kagi/src/kagi-search-effect.js";
 import {
 	kagiSearchEffect,
 	parseKagiSearchCliArgs,
@@ -9,19 +10,20 @@ import {
 describe("kagi search effect", () => {
 	it("returns search results on success", async () => {
 		const mockDeps: KagiSearchDeps = {
-			runSearch: async () => ({
-				capturedAt: new Date().toISOString(),
-				requestUrl: "https://kagi.com/socket/search?q=test",
-				referer: "https://kagi.com/search",
-				status: 200,
-				ok: true,
-				headersSent: {},
-				responseHeaders: {},
-				rawSse: 'id: 1\ndata: {"content": "Test answer"}',
-				parsedEvents: [
-					{ id: "1", dataRaw: '{"content": "Test answer"}', dataJson: { content: "Test answer" } },
-				],
-			}),
+			runSearch: () =>
+				Effect.succeed({
+					capturedAt: new Date().toISOString(),
+					requestUrl: "https://kagi.com/socket/search?q=test",
+					referer: "https://kagi.com/search",
+					status: 200,
+					ok: true,
+					headersSent: {},
+					responseHeaders: {},
+					rawSse: 'id: 1\ndata: {"content": "Test answer"}',
+					parsedEvents: [
+						{ id: "1", dataRaw: '{"content": "Test answer"}', dataJson: { content: "Test answer" } },
+					],
+				}),
 		};
 
 		const result = await Effect.runPromise(kagiSearchEffect("test query", mockDeps));
@@ -31,25 +33,26 @@ describe("kagi search effect", () => {
 
 	it("extracts results from parsed events", async () => {
 		const mockDeps: KagiSearchDeps = {
-			runSearch: async () => ({
-				capturedAt: new Date().toISOString(),
-				requestUrl: "https://kagi.com/socket/search?q=test",
-				referer: "https://kagi.com/search",
-				status: 200,
-				ok: true,
-				headersSent: {},
-				responseHeaders: {},
-				rawSse: 'id: 1\ndata: {"results": [{"title": "Test", "url": "https://example.com", "snippet": "Description"}]}',
-				parsedEvents: [
-					{
-						id: "1",
-						dataRaw: '{"results": [{"title": "Test", "url": "https://example.com", "snippet": "Description"}]}',
-						dataJson: {
-							results: [{ title: "Test", url: "https://example.com", snippet: "Description" }],
+			runSearch: () =>
+				Effect.succeed({
+					capturedAt: new Date().toISOString(),
+					requestUrl: "https://kagi.com/socket/search?q=test",
+					referer: "https://kagi.com/search",
+					status: 200,
+					ok: true,
+					headersSent: {},
+					responseHeaders: {},
+					rawSse: 'id: 1\ndata: {"results": [{"title": "Test", "url": "https://example.com", "snippet": "Description"}]}',
+					parsedEvents: [
+						{
+							id: "1",
+							dataRaw: '{"results": [{"title": "Test", "url": "https://example.com", "snippet": "Description"}]}',
+							dataJson: {
+								results: [{ title: "Test", url: "https://example.com", snippet: "Description" }],
+							},
 						},
-					},
-				],
-			}),
+					],
+				}),
 		};
 
 		const result = await Effect.runPromise(kagiSearchEffect("test", mockDeps));
@@ -67,28 +70,29 @@ describe("kagi search effect", () => {
 				'<div class="_0_SRI search-result"><div class="_0_TITLE __sri-title"><h3><a class="__sri_title_link" href="https://bun.com/">Bun Runtime</a></h3></div><div class="_0_DESC __sri-desc">Fast JavaScript runtime.</div></div>',
 		});
 		const mockDeps: KagiSearchDeps = {
-			runSearch: async () => ({
-				capturedAt: new Date().toISOString(),
-				requestUrl: "https://kagi.com/socket/search?q=bun+runtime",
-				referer: "https://kagi.com/search?q=bun+runtime",
-				status: 200,
-				ok: true,
-				headersSent: {},
-				responseHeaders: {},
-				rawSse: "hi",
-				parsedEvents: [
-					{
-						id: "0",
-						dataRaw: "[]",
-						dataJson: [{ tag: "top-content-unique", payload: "<i>24</i> relevant results in <i>1.55s</i>." }],
-					},
-					{
-						id: "1",
-						dataRaw: "[]",
-						dataJson: [{ tag: "search", payload: mockSearchPayload }],
-					},
-				],
-			}),
+			runSearch: () =>
+				Effect.succeed({
+					capturedAt: new Date().toISOString(),
+					requestUrl: "https://kagi.com/socket/search?q=bun+runtime",
+					referer: "https://kagi.com/search?q=bun+runtime",
+					status: 200,
+					ok: true,
+					headersSent: {},
+					responseHeaders: {},
+					rawSse: "hi",
+					parsedEvents: [
+						{
+							id: "0",
+							dataRaw: "[]",
+							dataJson: [{ tag: "top-content-unique", payload: "<i>24</i> relevant results in <i>1.55s</i>." }],
+						},
+						{
+							id: "1",
+							dataRaw: "[]",
+							dataJson: [{ tag: "search", payload: mockSearchPayload }],
+						},
+					],
+				}),
 		};
 
 		const result = await Effect.runPromise(kagiSearchEffect("bun runtime", mockDeps));
@@ -104,31 +108,32 @@ describe("kagi search effect", () => {
 
 	it("extracts results when search payload is already parsed object", async () => {
 		const mockDeps: KagiSearchDeps = {
-			runSearch: async () => ({
-				capturedAt: new Date().toISOString(),
-				requestUrl: "https://kagi.com/socket/search?q=test",
-				referer: "https://kagi.com/search",
-				status: 200,
-				ok: true,
-				headersSent: {},
-				responseHeaders: {},
-				rawSse: "",
-				parsedEvents: [
-					{
-						id: "1",
-						dataRaw: "",
-						dataJson: [
-							{
-								tag: "search",
-								payload: {
-									content:
-										'<div class="_0_SRI search-result"><div class="_0_TITLE __sri-title"><h3><a class="__sri_title_link" href="https://example.com">Example</a></h3></div><div class="_0_DESC __sri-desc"><div><span class="__sri-time">Feb 23, 2025</span> Snippet text</div></div></div>',
+			runSearch: () =>
+				Effect.succeed({
+					capturedAt: new Date().toISOString(),
+					requestUrl: "https://kagi.com/socket/search?q=test",
+					referer: "https://kagi.com/search",
+					status: 200,
+					ok: true,
+					headersSent: {},
+					responseHeaders: {},
+					rawSse: "",
+					parsedEvents: [
+						{
+							id: "1",
+							dataRaw: "",
+							dataJson: [
+								{
+									tag: "search",
+									payload: {
+										content:
+											'<div class="_0_SRI search-result"><div class="_0_TITLE __sri-title"><h3><a class="__sri_title_link" href="https://example.com">Example</a></h3></div><div class="_0_DESC __sri-desc"><div><span class="__sri-time">Feb 23, 2025</span> Snippet text</div></div></div>',
+									},
 								},
-							},
-						],
-					},
-				],
-			}),
+							],
+						},
+					],
+				}),
 		};
 
 		const result = await Effect.runPromise(kagiSearchEffect("example", mockDeps));
@@ -147,22 +152,23 @@ describe("kagi search effect", () => {
 		let capturedLens: string | undefined;
 		let capturedDateRange: number | undefined;
 		const mockDeps: KagiSearchDeps = {
-			runSearch: async (options) => {
-				capturedQuery = options.query;
-				capturedLens = options.lens;
-				capturedDateRange = options.dateRange;
-				return {
-					capturedAt: new Date().toISOString(),
-					requestUrl: "https://kagi.com/socket/search?q=test",
-					referer: "https://kagi.com/search",
-					status: 200,
-					ok: true,
-					headersSent: {},
-					responseHeaders: {},
-					rawSse: 'id: 1\ndata: {"content": "ok"}',
-					parsedEvents: [{ id: "1", dataRaw: "", dataJson: { content: "ok" } }],
-				};
-			},
+			runSearch: (options) =>
+				Effect.sync(() => {
+					capturedQuery = options.query;
+					capturedLens = options.lens;
+					capturedDateRange = options.dateRange;
+					return {
+						capturedAt: new Date().toISOString(),
+						requestUrl: "https://kagi.com/socket/search?q=test",
+						referer: "https://kagi.com/search",
+						status: 200,
+						ok: true,
+						headersSent: {},
+						responseHeaders: {},
+						rawSse: 'id: 1\ndata: {"content": "ok"}',
+						parsedEvents: [{ id: "1", dataRaw: "", dataJson: { content: "ok" } }],
+					};
+				}),
 		};
 
 		await Effect.runPromise(
@@ -184,30 +190,35 @@ describe("kagi search effect", () => {
 		let capturedFromDate: string | undefined;
 		let capturedToDate: string | undefined;
 		const mockDeps: KagiSearchDeps = {
-			runSearch: async (options) => {
-				capturedQuery = options.query;
-				capturedDateRange = options.dateRange;
-				capturedFromDate = options.fromDate;
-				capturedToDate = options.toDate;
-				return {
-					capturedAt: new Date().toISOString(),
-					requestUrl: "https://kagi.com/socket/search?q=test",
-					referer: "https://kagi.com/search",
-					status: 200,
-					ok: true,
-					headersSent: {},
-					responseHeaders: {},
-					rawSse: 'id: 1\ndata: {"content": "ok"}',
-					parsedEvents: [{ id: "1", dataRaw: "", dataJson: { content: "ok" } }],
-				};
-			},
+			runSearch: (options) =>
+				Effect.sync(() => {
+					capturedQuery = options.query;
+					capturedDateRange = options.dateRange;
+					capturedFromDate = options.fromDate;
+					capturedToDate = options.toDate;
+					return {
+						capturedAt: new Date().toISOString(),
+						requestUrl: "https://kagi.com/socket/search?q=test",
+						referer: "https://kagi.com/search",
+						status: 200,
+						ok: true,
+						headersSent: {},
+						responseHeaders: {},
+						rawSse: 'id: 1\ndata: {"content": "ok"}',
+						parsedEvents: [{ id: "1", dataRaw: "", dataJson: { content: "ok" } }],
+					};
+				}),
 		};
 
 		await Effect.runPromise(
-			kagiSearchEffect("effect ts site:bun.com -site:example.com before:2025-01-31 after:2024-01-01 OR", mockDeps, {
-				recencyFilter: "month",
-				domainFilter: ["effect.website"],
-			}),
+			kagiSearchEffect(
+				"effect ts site:bun.com -site:example.com before:2025-01-31 after:2024-01-01 OR",
+				mockDeps,
+				{
+					recencyFilter: "month",
+					domainFilter: ["effect.website"],
+				},
+			),
 		);
 
 		expect(capturedDateRange).toBeUndefined();
@@ -222,23 +233,24 @@ describe("kagi search effect", () => {
 		let capturedFromDate: string | undefined;
 		let capturedToDate: string | undefined;
 		const mockDeps: KagiSearchDeps = {
-			runSearch: async (options) => {
-				capturedQuery = options.query;
-				capturedDateRange = options.dateRange;
-				capturedFromDate = options.fromDate;
-				capturedToDate = options.toDate;
-				return {
-					capturedAt: new Date().toISOString(),
-					requestUrl: "https://kagi.com/socket/search?q=test",
-					referer: "https://kagi.com/search",
-					status: 200,
-					ok: true,
-					headersSent: {},
-					responseHeaders: {},
-					rawSse: 'id: 1\ndata: {"content": "ok"}',
-					parsedEvents: [{ id: "1", dataRaw: "", dataJson: { content: "ok" } }],
-				};
-			},
+			runSearch: (options) =>
+				Effect.sync(() => {
+					capturedQuery = options.query;
+					capturedDateRange = options.dateRange;
+					capturedFromDate = options.fromDate;
+					capturedToDate = options.toDate;
+					return {
+						capturedAt: new Date().toISOString(),
+						requestUrl: "https://kagi.com/socket/search?q=test",
+						referer: "https://kagi.com/search",
+						status: 200,
+						ok: true,
+						headersSent: {},
+						responseHeaders: {},
+						rawSse: 'id: 1\ndata: {"content": "ok"}',
+						parsedEvents: [{ id: "1", dataRaw: "", dataJson: { content: "ok" } }],
+					};
+				}),
 		};
 
 		const result = await Effect.runPromise(
@@ -256,17 +268,15 @@ describe("kagi search effect", () => {
 
 	it("returns error for failed search", async () => {
 		const mockDeps: KagiSearchDeps = {
-			runSearch: async () => ({
-				capturedAt: new Date().toISOString(),
-				requestUrl: "https://kagi.com/socket/search?q=test",
-				referer: "https://kagi.com/search",
-				status: 401,
-				ok: false,
-				headersSent: {},
-				responseHeaders: {},
-				rawSse: "",
-				parsedEvents: [],
-			}),
+			runSearch: () =>
+				Effect.fail(
+					KagiSearchRuntimeError.make({
+						code: "unauthorized",
+						reason: "Kagi session is unauthorized. Refresh your Kagi session and retry.",
+						status: 401,
+						requestUrl: "https://kagi.com/socket/search?q=test",
+					}),
+				),
 		};
 
 		const exit = await Effect.runPromiseExit(kagiSearchEffect("test", mockDeps));
@@ -316,22 +326,22 @@ describe("kagi search effect", () => {
 
 	it("runs search with injected deps", async () => {
 		const mockDeps: KagiSearchDeps = {
-			runSearch: async () => ({
-				capturedAt: new Date().toISOString(),
-				requestUrl: "https://kagi.com/socket/search?q=test",
-				referer: "https://kagi.com/search",
-				status: 200,
-				ok: true,
-				headersSent: {},
-				responseHeaders: {},
-				rawSse: 'id: 1\ndata: {"content": "Answer text"}',
-				parsedEvents: [
-					{ id: "1", dataRaw: '{"content": "Answer text"}', dataJson: { content: "Answer text" } },
-				],
-			}),
+			runSearch: () =>
+				Effect.succeed({
+					capturedAt: new Date().toISOString(),
+					requestUrl: "https://kagi.com/socket/search?q=test",
+					referer: "https://kagi.com/search",
+					status: 200,
+					ok: true,
+					headersSent: {},
+					responseHeaders: {},
+					rawSse: 'id: 1\ndata: {"content": "Answer text"}',
+					parsedEvents: [
+						{ id: "1", dataRaw: '{"content": "Answer text"}', dataJson: { content: "Answer text" } },
+					],
+				}),
 		};
 
-		// Test the full effect with injected deps
 		const result = await Effect.runPromise(kagiSearchEffect("test query", mockDeps));
 		expect(result.answer).toBe("Answer text");
 		expect(result.results).toEqual([]);

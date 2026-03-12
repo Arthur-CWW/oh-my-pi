@@ -53,9 +53,12 @@ Current persistent preferences:
 - During implementation iterations, run **only scoped/filtered tests** for the feature being changed (file-level and, when useful, test-name filtering). Do **not** run the full suite repeatedly while iterating. Run the full mandatory validation suite once at handoff or when explicitly requested. Avoid live API/e2e validation runs unless the user explicitly asks for a manual pass.
 - For interactive/TUI or long-running process validation, prefer **tmux-managed test sessions** (fixed pane size, scripted `send-keys`, `capture-pane` snapshots, explicit session cleanup) locally and over SSH.
 - Prefer **static module imports**; avoid dynamic/lazy `import()` unless technically required (and briefly justify when used).
+- Do not introduce dynamic imports in new Effect code paths; use static imports and Effect-native/database-integrated approaches where possible.
+- Treat `src/old/*` as reference/stability baseline; avoid modifying it unless the user explicitly requests a legacy-path change.
 - When validating package installation behavior, default to **global `pi install` (no `-l`)** so settings are exercised under `~/.pi` (agent settings path), unless the user explicitly asks for project-local install behavior.
 - Keep fork repository metadata URLs aligned to the current git `origin` remote (owner/repo casing included), unless the user explicitly asks otherwise.
 - Prefer Effect-native instrumentation (`Effect.fn`, spans, typed errors) plus lightweight local event-emission services for migration observability; avoid adding OpenTelemetry/export pipeline work unless explicitly requested.
+- Keep internal migration flows Effect-native end-to-end; only convert to `Promise`/`async` at explicit external boundaries (tool `execute`, CLI main, interop wrappers).
 - Observability/event services must be optional and fail-open: if emitting/persisting events fails, feature/tool behavior must continue.
 - Prefer schema-first boundaries: define Effect `Schema` once and derive runtime validation/decoding + TypeScript types from it where serde/input contracts exist.
 - At third-party boundaries, normalize nullable/undefined payloads with schema transforms/codecs (recursive normalization when needed) before domain logic.
@@ -63,9 +66,6 @@ Current persistent preferences:
 - Prefer Effect-native retry/timeouts (`Effect.retry`, `Schedule`, `Effect.timeout`) over bespoke retry helpers in Effect paths.
 - For standalone/dual-use tooling paths, prefer Effect CLI (`@effect/cli`) over bespoke argument parsing; use hand-rolled parsers only as temporary migration shims.
 - Prefer Effect Config (`Config`, `Schema.Config`, `ConfigProvider`) over ad-hoc env/json config readers for new or refactored config surfaces.
-- Do not introduce dynamic imports in new Effect code paths; use static imports and Effect-native/database-integrated approaches where possible.
-- Treat `src/old/*` as reference/stability baseline; avoid modifying it unless the user explicitly requests a legacy-path change.
-
 ## Mandatory Validation After Every Change
 
 Run all commands below and ensure they pass before finishing work.

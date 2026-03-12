@@ -11,18 +11,18 @@ import { makeEvent, type ObservabilityEventName } from "./core/Observability.js"
 import { type FullSearchOptions } from "./gemini-search.js";
 import { type SearchSuccess } from "./kagi-search.js";
 import { makeSqliteEventStore } from "./observability/EventStore.js";
-import {
-	SearchFallbackError,
-	SearchProviderError,
-	type SearchRuntimeResponse,
-	searchWithFallback,
-} from "./search-runtime.js";
+import { SearchFallbackError, SearchProviderError, searchWithFallbackEffect } from "./search-runtime.js";
 import {
 	RECENCY_FILTER_VALUES,
 	SEARCH_PROVIDER_SELECTION_VALUES,
 	RecencyFilterSchema,
 	SearchProviderSelectionSchema,
 } from "./search-contracts.js";
+import {
+	executeGetSearchContent,
+	GetSearchContentParamsSchema,
+	type GetSearchContentParams,
+} from "./search-content.js";
 import { makeSearchEventsService } from "./search-events.js";
 
 const EventStoreSmokeParamsSchema = Schema.Struct({
@@ -89,6 +89,22 @@ interface EventStoreSmokeToolDetails {
 	readonly latestEventName: ObservabilityEventName | null;
 }
 
+interface GetSearchContentToolDetails {
+	readonly error?: string;
+	readonly reason?: string;
+	readonly responseId?: string;
+	readonly query?: string;
+	readonly resultCount?: number;
+	readonly url?: string;
+	readonly title?: string;
+	readonly contentLength?: number;
+}
+
+interface GetSearchContentToolResponse {
+	readonly content: Array<{ readonly type: "text"; readonly text: string }>;
+	readonly details: GetSearchContentToolDetails;
+}
+
 type SearchExecutionOutcome =
 	| { readonly ok: true; readonly response: SearchResponse }
 	| { readonly ok: false; readonly error: SearchToolExecutionError };
@@ -98,7 +114,7 @@ type CookiesExecutionOutcome =
 	| { readonly ok: false; readonly error: CookiesToolExecutionError };
 
 export interface EffectExtensionDeps {
-	readonly search: (query: string, options?: FullSearchOptions) => Promise<SearchResponse>;
+	readonly search: (query: string, options?: FullSearchOptions) => Effect.Effect<SearchResponse, unknown>;
 	readonly readCookies: typeof readChromeCookiesEffect;
 }
 
@@ -156,17 +172,15 @@ function formatParseError(error: ParseResult.ParseError): string {
 	return ParseResult.TreeFormatter.formatErrorSync(error);
 }
 
-async function decodeToolParams<A, I>(
+function decodeToolParams<A, I>(
 	schema: Schema.Schema<A, I, never>,
 	rawParams: unknown,
-): Promise<{ readonly ok: true; readonly value: A } | { readonly ok: false; readonly message: string }> {
-	return Effect.runPromise(
-		Schema.decodeUnknown(schema)(rawParams).pipe(
-			Effect.match({
-				onSuccess: (value) => ({ ok: true as const, value }),
-				onFailure: (error) => ({ ok: false as const, message: formatParseError(error) }),
-			}),
-		),
+): Effect.Effect<{ readonly ok: true; readonly value: A } | { readonly ok: false; readonly message: string }> {
+	return Schema.decodeUnknown(schema)(rawParams).pipe(
+		Effect.match({
+			onSuccess: (value) => ({ ok: true as const, value }),
+			onFailure: (error) => ({ ok: false as const, message: formatParseError(error) }),
+		}),
 	);
 }
 
@@ -253,23 +267,36 @@ const defaultSearchEventsServicePromise = Effect.runPromise(
 	makeSearchEventsService(SEARCH_EVENTS_DB_PATH ? { dbPath: SEARCH_EVENTS_DB_PATH } : {}),
 );
 
-async function defaultSearch(query: string, options?: FullSearchOptions): Promise<SearchRuntimeResponse> {
-	const events = await defaultSearchEventsServicePromise;
-	return searchWithFallback(query, options ?? {}, { events });
-}
+const defaultSearch = Effect.fn("EffectIndex.defaultSearch")(function* (
+	query: string,
+	options?: FullSearchOptions,
+) {
+	const events = yield* Effect.tryPromise({
+		try: () => defaultSearchEventsServicePromise,
+		catch: (cause) =>
+			SearchToolExecutionError.make({
+				title: "Search event service initialization failed",
+				reassurance: "Search is available, but telemetry setup failed during initialization.",
+				technicalCause: toErrorMessage(cause),
+				nextStep: "Retry the search request. If this persists, check local filesystem permissions.",
+				escapeHatch: "Set PI_WEB_ACCESS_EVENT_DB_PATH to a writable location or unset it to disable sqlite events.",
+				retryable: true,
+			}),
+	});
+	return yield* searchWithFallbackEffect(query, options ?? {}, { events });
+});
 
 function makeSearchServiceLayer(deps: EffectExtensionDeps): Layer.Layer<SearchService> {
 	const search = Effect.fn("SearchService.search")(function* (
 		query: string,
 		options?: FullSearchOptions,
 	) {
-		return yield* Effect.tryPromise({
-			try: () => deps.search(query, options),
-			catch: (cause) =>
-				cause instanceof SearchToolExecutionError
-					? cause
-					: mapSearchFailureToToolError(cause),
-		});
+		return yield* deps.search(query, options).pipe(
+			Effect.mapError((cause) =>
+				cause instanceof SearchToolExecutionError ? cause : mapSearchFailureToToolError(cause),
+			),
+			Effect.catchAllDefect((defect) => Effect.fail(mapSearchFailureToToolError(defect))),
+		);
 	});
 
 	return Layer.succeed(
@@ -363,7 +390,7 @@ function registerEventStoreSmokeTool(pi: ExtensionAPI): void {
 			correlationId: Type.Optional(Type.String()),
 		}),
 		async execute(_toolCallId, rawParams) {
-			const decoded = await decodeToolParams(EventStoreSmokeParamsSchema, rawParams);
+			const decoded = await Effect.runPromise(decodeToolParams(EventStoreSmokeParamsSchema, rawParams));
 			if (decoded.ok === false) {
 				const details: EventStoreSmokeToolDetails = {
 					error: "invalid-params",
@@ -446,7 +473,7 @@ function registerWebSearchTool(pi: ExtensionAPI, searchLayer: Layer.Layer<Search
 			domainFilter: Type.Optional(Type.Array(Type.String())),
 		}),
 		async execute(_toolCallId, rawParams) {
-			const decoded = await decodeToolParams(WebSearchParamsSchema, rawParams);
+			const decoded = await Effect.runPromise(decodeToolParams(WebSearchParamsSchema, rawParams));
 			if (decoded.ok === false) {
 				const error = SearchToolExecutionError.make({
 					title: "Invalid web_search parameters",
@@ -561,7 +588,7 @@ function registerChromeCookiesTool(pi: ExtensionAPI, cookiesLayer: Layer.Layer<C
 			names: Type.Optional(Type.Array(Type.String())),
 		}),
 		async execute(_toolCallId, rawParams) {
-			const decoded = await decodeToolParams(CookiesParamsSchema, rawParams);
+			const decoded = await Effect.runPromise(decodeToolParams(CookiesParamsSchema, rawParams));
 			if (decoded.ok === false) {
 				const details: CookiesToolDetails = { error: decoded.message };
 				return {
@@ -615,6 +642,42 @@ function registerChromeCookiesTool(pi: ExtensionAPI, cookiesLayer: Layer.Layer<C
 	});
 }
 
+function registerGetSearchContentTool(pi: ExtensionAPI): void {
+	pi.registerTool({
+		name: "get_search_content",
+		label: "Get Search Content",
+		description: "Retrieve full content from a previous web_search or fetch_content call.",
+		parameters: Type.Object({
+			responseId: Type.String({ description: "The responseId from web_search or fetch_content" }),
+			query: Type.Optional(Type.String({ description: "Get content for this query (web_search)" })),
+			queryIndex: Type.Optional(Type.Number({ description: "Get content for query at index" })),
+			url: Type.Optional(Type.String({ description: "Get content for this URL" })),
+			urlIndex: Type.Optional(Type.Number({ description: "Get content for URL at index" })),
+		}),
+		async execute(_toolCallId, rawParams): Promise<GetSearchContentToolResponse> {
+			const decoded = await Effect.runPromise(decodeToolParams(GetSearchContentParamsSchema, rawParams));
+			if (decoded.ok === false) {
+				return {
+					content: [
+						{ type: "text", text: `Invalid parameters for get_search_content.\n${decoded.message}` },
+					],
+					details: {
+						error: "invalid-params",
+						reason: decoded.message,
+					},
+				};
+			}
+
+			const params: GetSearchContentParams = decoded.value;
+			const result = await Effect.runPromise(executeGetSearchContent(params));
+			return {
+				content: result.content.map((item) => ({ type: item.type, text: item.text })),
+				details: { ...result.details },
+			};
+		},
+	});
+}
+
 export function registerEffectTools(
 	pi: ExtensionAPI,
 	deps: EffectExtensionDeps = defaultDeps,
@@ -624,6 +687,7 @@ export function registerEffectTools(
 	const searchLayer = makeSearchServiceLayer(deps);
 	const cookiesLayer = makeCookiesServiceLayer(deps);
 	registerChromeCookiesTool(pi, cookiesLayer);
+	registerGetSearchContentTool(pi);
 	if (options.includeWebSearch !== false) {
 		registerWebSearchTool(pi, searchLayer);
 	}
