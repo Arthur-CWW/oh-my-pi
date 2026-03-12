@@ -1,0 +1,24 @@
+id: effect-no-fail-open-catchdefect-null
+message: Don't swallow defects to `null` in internal Effect code.
+severity: warning
+language: TypeScript
+files:
+  - src/effect/**/*.ts
+  - packages/kagi/src/**/*.ts
+ignores:
+  - src/effect/test/**/*.ts
+  - tests/**/*.ts
+  - packages/legacy-web-access/**
+  - '**/*test.ts'
+rule:
+  any:
+    - pattern: Effect.catchDefect(() => Effect.succeed(null))
+    - pattern: Effect.catchDefect(($ERROR) => Effect.succeed(null))
+    - pattern: Effect.catchDefect(() => Effect.succeed<$TYPE>(null))
+    - pattern: Effect.catchDefect(($ERROR) => Effect.succeed<$TYPE>(null))
+note: |
+  Defects usually indicate bugs or invalid assumptions. Keep them visible unless there is a very
+  explicit and well-documented reason to swallow them.
+metadata:
+  category: effect-slop
+  rationale: keep-defects-visible

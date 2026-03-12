@@ -1,0 +1,28 @@
+id: effect-no-sync-fs-process
+message: Avoid sync fs/process helpers in Effect runtime paths.
+severity: warning
+language: TypeScript
+files:
+  - src/effect/**/*.ts
+  - packages/kagi/src/**/*.ts
+ignores:
+  - src/effect/test/**/*.ts
+  - tests/**/*.ts
+  - packages/legacy-web-access/**
+  - '**/*test.ts'
+rule:
+  any:
+    - pattern: execFileSync($$$ARGS)
+    - pattern: readFileSync($$$ARGS)
+    - pattern: existsSync($$$ARGS)
+    - pattern: statSync($$$ARGS)
+    - pattern: readdirSync($$$ARGS)
+    - pattern: mkdirSync($$$ARGS)
+    - pattern: writeFileSync($$$ARGS)
+    - pattern: spawnSync($$$ARGS)
+note: |
+  Sync fs/process calls are a recurring migration smell. Prefer ChildProcessSpawner for commands and
+  Effect-managed fs/config/service boundaries for runtime code.
+metadata:
+  category: effect-slop
+  rationale: effect-managed-io

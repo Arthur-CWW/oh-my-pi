@@ -1,0 +1,9 @@
+id: effect-no-return-null
+snapshots:
+  ? |
+    return null
+  : labels:
+    - source: return null
+      style: primary
+      start: 0
+      end: 11

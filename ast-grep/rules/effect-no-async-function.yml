@@ -1,0 +1,26 @@
+id: effect-no-async-function
+message: Prefer Effect.fn / Effect.gen for internal Effect logic; keep async wrappers only at explicit boundaries.
+severity: info
+language: TypeScript
+files:
+  - src/effect/**/*.ts
+  - packages/kagi/src/**/*.ts
+ignores:
+  - src/effect/test/**/*.ts
+  - tests/**/*.ts
+  - packages/legacy-web-access/**
+  - src/effect/index.ts
+  - src/effect/chrome-cookies.ts
+  - src/effect/gemini-search.ts
+  - src/effect/kagi-search.ts
+  - '**/*test.ts'
+rule:
+  pattern:
+    context: 'export async function $NAME($$$ARGS): Promise<$RET> { $$$BODY }'
+    selector: function_declaration
+note: |
+  This is a reminder rule, not an absolute ban. Boundary shims may remain async, but core runtime
+  modules should generally expose Effect-first exports.
+metadata:
+  category: effect-slop
+  rationale: effect-first-exports

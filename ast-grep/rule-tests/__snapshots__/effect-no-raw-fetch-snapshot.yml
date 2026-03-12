@@ -1,0 +1,9 @@
+id: effect-no-raw-fetch
+snapshots:
+  ? |
+    const response = await fetch(url, { method: "GET" })
+  : labels:
+    - source: 'fetch(url, { method: "GET" })'
+      style: primary
+      start: 23
+      end: 52

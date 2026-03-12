@@ -34,6 +34,17 @@ Priority topics for this repo: services/layers, errors, running programs, config
 
 Never guess at Effect patterns - check the local effect-smol docs/source first.
 
+### Required Effect preflight (strict)
+
+For any task touching `src/effect/*`, `packages/*` Effect-native modules, or other new/refactored Effect code:
+
+1. Read `vendor/effect-smol/LLMS.md`, then the exact `vendor/effect-smol/ai-docs/src/*` files that match the APIs/patterns you are about to use.
+2. Read the corresponding implementation/source under `vendor/effect-smol/packages/*` before locking in the pattern.
+3. Before editing, be able to name the exact docs/source files you consulted; if you cannot name them, stop and do the doc preflight first.
+4. Prefer copying the local documented pattern (for example `ServiceMap.Service`, `ServiceMap.Reference`, `HttpClient`, `ChildProcessSpawner`, `Config`, `Schema`, `Schedule`) rather than improvising a pseudo-Effect version from memory.
+5. If the current code already contains slop (`raw fetch`, `execFileSync`, Promise-first internal helpers, `unknown` error channels, broad `catch`/`catchDefect` to `null`, raw JSON casts), do **not** preserve that shape by default; re-check the Effect docs/source and move toward the documented pattern unless the task is explicitly a minimal parity patch.
+6. In task notes / handoff / summary for Effect-heavy changes, briefly cite the key vendored docs/source files that drove the implementation.
+
 ## Persistent User Preferences (Self-Healing)
 
 When the user states a repo-wide preference (code style, structure, testing workflow, migration workflow), treat it as persistent across sessions and update this file immediately.
@@ -48,6 +59,7 @@ Current persistent preferences:
 - Avoid unnecessary nested folders + `index.ts` re-export barrels for single-feature modules.
 - If splitting into multiple files is necessary, keep it minimal and justify briefly in PR/task notes.
 - For Effect migrations/refactors, start from `vendor/effect-smol/LLMS.md`, follow linked docs recursively/progressively, and confirm patterns against `vendor/effect-smol/packages/*` source before implementing.
+- For Effect work, require an explicit doc/source preflight before editing: agents must read and be able to name the exact relevant `vendor/effect-smol/ai-docs/src/*` and `vendor/effect-smol/packages/*` files they are following, and should cite those files briefly in task notes/handoffs instead of improvising Effect patterns from memory.
 - Treat the local `vendor/effect-smol` repo as the authoritative Effect reference for this project, but as a read-only vendored dependency/docs source: do not modify files under `vendor/effect-smol` unless the user explicitly asks; avoid `effect-solutions`, `node_modules`, and random external docs unless the user explicitly asks.
 - During implementation iterations, run **only scoped/filtered tests** for the feature being changed (file-level and, when useful, test-name filtering). Do **not** run the full suite repeatedly while iterating. Run the full mandatory validation suite once at handoff or when explicitly requested. Avoid live API/e2e validation runs unless the user explicitly asks for a manual pass.
 - Prefer tests to live close to the source they validate when practical: use adjacent sibling `src/` + `test/` layouts for standalone workspaces/packages and Effect slices (for example `packages/kagi/{src,test}` or `src/effect/test/*`), avoid colocated `*.test.ts` files beside implementation files under `src/effect`, and reserve the top-level `tests/` folder for repo-level/cross-package coverage.
@@ -82,6 +94,8 @@ Current persistent preferences:
 - Prefer shared/effect-owned helpers over importing implementation modules from `packages/legacy-web-access/src/*` into new Effect code; if both paths need the same utility, extract it to a neutral shared module or make the legacy package delegate to the shared/effect-owned implementation instead of the reverse.
 - `ast-grep` is available and you should use it liberally :)
 - when you see an slop code issue, and you think it can be fixed easily with ast-grep , query and fix it right away
+- Prefer adding/updating local ast-grep guardrail rules for recurring repo-specific slop patterns (especially Effect migration smells) so future agents get nudged before repeating the same mistakes.
+- For ast-grep rule work, prefer the local vendored `vendor/ast-grep/*` repo snapshot/schema/source as the first reference instead of guessing YAML rule syntax from memory.
 - Prefer the locally available power tools when they reduce risk or improve review quality: `difft`/difftastic for semantic diffs, `fd` for file discovery, `jq` for JSON inspection/transforms, `delta` for readable git diffs, and `rg` for fast text search.
 - Preserve user-facing behavior and tool contracts, but do not keep legacy implementation-detail compatibility, helper-shape parity, or low-value unit tests (for example CLI help-string assertions) unless they protect an actual repo boundary.
 - Keep docs maintenance proportional: prioritize `AGENTS.md`, `task-tracker.md`, the current migration handoff, and user-facing README/install docs; avoid spending time preserving stale historical notes unless they directly affect current work.
@@ -136,6 +150,7 @@ Keep `packages/legacy-web-access` intact until parity checks pass.
 - Migration prep: `docs/effect-migration-prep.md`
 - Effect reference snapshot: `docs/references/effect-llms.txt`
 - Primary local Effect v4 docs/source: `vendor/effect-smol/LLMS.md` + `vendor/effect-smol/ai-docs` + `vendor/effect-smol/packages/*`
+- Local ast-grep rule reference snapshot: `vendor/ast-grep/*` (`README.md`, `schemas/yaml_rule.json`, selected `crates/*` source)
 - Session handoff context: `docs/migration-context.md`
 - Running migration tracker: `task-tracker.md` (repo root)
 

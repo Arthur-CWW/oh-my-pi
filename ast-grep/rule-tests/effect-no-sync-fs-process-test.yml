@@ -1,0 +1,9 @@
+id: effect-no-sync-fs-process
+valid:
+  - |
+    const output = yield* spawner.string(ChildProcess.make("git", ["status"]))
+invalid:
+  - |
+    const output = execFileSync("git", ["status"])
+  - |
+    const content = readFileSync(path, "utf-8")

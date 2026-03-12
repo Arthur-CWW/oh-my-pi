@@ -1,0 +1,9 @@
+id: effect-no-raw-json-cast
+valid:
+  - |
+    const decoded = yield* Schema.decodeUnknownEffect(ResponseSchema)(payload)
+invalid:
+  - |
+    const data = response.json() as Promise<ApiResponse>
+  - |
+    const data = (await response.json()) as { readonly state: string }

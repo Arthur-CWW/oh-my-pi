@@ -17,6 +17,7 @@ vendor/*
 !vendor/effect-smol/
 !vendor/pi-mono/
 !vendor/agent-stuff/
+!vendor/ast-grep/
 
 *.mp4
 prompt.md

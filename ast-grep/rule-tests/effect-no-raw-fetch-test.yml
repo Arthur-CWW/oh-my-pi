@@ -1,0 +1,7 @@
+id: effect-no-raw-fetch
+valid:
+  - |
+    const response = yield* client.get("/todos")
+invalid:
+  - |
+    const response = await fetch(url, { method: "GET" })

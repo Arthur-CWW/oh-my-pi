@@ -1,0 +1,11 @@
+id: effect-no-raw-fetch-deps
+valid:
+  - |
+    interface RuntimeDeps {
+      readonly loadPage: (url: string) => Effect.Effect<Page, HttpError>
+    }
+invalid:
+  - |
+    interface RuntimeDeps {
+      readonly fetch: (input: string | URL | Request, init?: RequestInit) => Promise<Response>
+    }

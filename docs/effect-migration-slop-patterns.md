@@ -286,6 +286,91 @@ Do not “fix” these without a concrete reason:
 
 The smell is not the syntax by itself. The smell is when boundary-oriented syntax leaks into internal domain/runtime logic.
 
+## Gemini Web auth / cookies refactor notes
+
+The current pattern in `src/effect/fetch-content-runtime.ts` and `src/effect/gemini-search.ts` is a smell:
+
+```ts
+const cookies = yield* runtimeDeps.isGeminiWebAvailable().pipe(
+  Effect.catch(() => Effect.succeed(null)),
+  Effect.catchDefect(() => Effect.succeed(null))
+)
+if (!cookies) {
+  return null
+}
+```
+
+### Why this is slop
+
+- auth/session state leaks into callers
+- callers know about `CookieMap`, which should be an internal transport detail
+- the fallback policy is duplicated at each call site
+- `unknown` error channels force overly broad `Effect.catch(...)`
+- `Effect.catchDefect(...)` hides bugs that should usually remain defects
+- `null` conflates “Gemini Web unavailable” with “Gemini Web request failed”
+
+### Preferred shape
+
+Treat this as a **service boundary** first, not a repeated inline check.
+
+Use a **resource** only if we later keep alive a long-lived browser / DevTools / websocket session.
+
+Good next abstraction:
+
+- `GeminiWebClient` service
+  - `query(...)` — strict API
+  - `queryIfAvailable(...)` — unavailable becomes no result, but operational errors still fail
+  - `queryFailOpen(...)` — explicit fail-open wrapper for outer fallback edges only
+
+### Public semantics to standardize
+
+Avoid `queryOptional` as the primary internal API name because it is ambiguous.
+
+Prefer these names / semantics instead:
+
+#### `query(prompt, options)`
+
+- returns `Effect.Effect<string, GeminiWebUnavailable | GeminiWebRequestError | GeminiWebDecodeError | ...>`
+- missing cookies / not signed in => fail with `GeminiWebUnavailable`
+- request / parse / upload failures => fail with typed errors
+- defects stay defects
+
+#### `queryIfAvailable(prompt, options)`
+
+- returns `Effect.Effect<Option<string>, GeminiWebRequestError | GeminiWebDecodeError | ...>` conceptually
+- unavailable => no result
+- operational failures still fail
+- best default for internal fallback orchestration
+
+#### `queryFailOpen(prompt, options)`
+
+- returns `Effect.Effect<Option<string>>` conceptually
+- unavailable => no result
+- tagged/expected operational failures may also become no result
+- defects should still remain defects unless there is a very explicit reason to swallow them
+
+If we keep a compatibility wrapper called `queryOptional`, document it as a thin adapter and specify exactly one meaning. Do **not** leave it ambiguous between:
+
+- unavailable-only soft fallback
+- all-expected-failure soft fallback
+- `string | null` compatibility wrapper
+
+### `fetch-content-runtime.ts` and raw `fetch`
+
+`src/effect/fetch-content-runtime.ts` is still using a transitional transport abstraction:
+
+- `readonly fetch: (...) => Promise<Response>` in deps
+- manual `Response` parsing helpers
+- ad-hoc status/headers/body handling in the orchestration module
+
+That is migration debt, not the target architecture.
+
+Preferred direction:
+
+- move page/Jina/Gemini URL-context HTTP logic behind Effect `HttpClient`
+- keep `fetch-content-runtime.ts` focused on orchestration and fallback policy
+- stop exposing transport details (`fetch`, `Response`, `CookieMap`) to orchestration callers
+
 ## Migration rules for parallel contributors
 
 1. Do not change user-facing tool contracts unless the task explicitly includes contract cleanup.

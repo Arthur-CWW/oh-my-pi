@@ -1,0 +1,11 @@
+id: effect-no-async-function
+valid:
+  - |
+    export const load = Effect.fn("load")(function* () {
+      return "ok"
+    })
+invalid:
+  - |
+    export async function load(): Promise<string> {
+      return "ok"
+    }

@@ -1,0 +1,16 @@
+id: effect-no-sync-fs-process
+snapshots:
+  ? |
+    const content = readFileSync(path, "utf-8")
+  : labels:
+    - source: readFileSync(path, "utf-8")
+      style: primary
+      start: 16
+      end: 43
+  ? |
+    const output = execFileSync("git", ["status"])
+  : labels:
+    - source: execFileSync("git", ["status"])
+      style: primary
+      start: 15
+      end: 46

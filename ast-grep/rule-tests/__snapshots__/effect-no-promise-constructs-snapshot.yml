@@ -1,0 +1,16 @@
+id: effect-no-promise-constructs
+snapshots:
+  ? |
+    const result = await new Promise((resolve) => setTimeout(resolve, 1000))
+  : labels:
+    - source: new Promise((resolve) => setTimeout(resolve, 1000))
+      style: primary
+      start: 21
+      end: 72
+  ? |
+    const results = await Promise.all(items.map(runItem))
+  : labels:
+    - source: Promise.all(items.map(runItem))
+      style: primary
+      start: 22
+      end: 53

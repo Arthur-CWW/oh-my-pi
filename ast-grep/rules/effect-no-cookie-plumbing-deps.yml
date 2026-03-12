@@ -1,0 +1,28 @@
+id: effect-no-cookie-plumbing-deps
+message: Hide CookieMap/session details behind a Gemini Web service boundary.
+severity: warning
+language: TypeScript
+files:
+  - src/effect/**/*.ts
+ignores:
+  - src/effect/test/**/*.ts
+  - tests/**/*.ts
+  - packages/legacy-web-access/**
+  - src/effect/gemini-web.ts
+  - src/effect/chrome-cookies.ts
+  - src/effect/chrome-cookies-legacy.ts
+  - '**/*test.ts'
+rule:
+  any:
+    - pattern:
+        context: 'interface X { readonly isGeminiWebAvailable: () => Effect.Effect<CookieMap | null, $ERROR>; }'
+        selector: property_signature
+    - pattern:
+        context: 'interface X { readonly queryWithCookies: (prompt: string, cookieMap: CookieMap, options?: GeminiWebOptions) => Effect.Effect<string, $ERROR>; }'
+        selector: property_signature
+note: |
+  Orchestration callers should depend on a higher-level GeminiWebClient-style API (`query`,
+  `queryIfAvailable`, `queryFailOpen`) instead of passing CookieMap around.
+metadata:
+  category: effect-slop
+  rationale: hide-auth-transport-details

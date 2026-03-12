@@ -1,0 +1,22 @@
+id: effect-no-promise-constructs
+message: Prefer Effect concurrency/time primitives over Promise.all / new Promise in Effect runtime code.
+severity: warning
+language: TypeScript
+files:
+  - src/effect/**/*.ts
+  - packages/kagi/src/**/*.ts
+ignores:
+  - src/effect/test/**/*.ts
+  - tests/**/*.ts
+  - packages/legacy-web-access/**
+  - '**/*test.ts'
+rule:
+  any:
+    - pattern: Promise.all($ARG)
+    - pattern: new Promise($HANDLER)
+note: |
+  Common replacements include Effect.forEach, Effect.promise/tryPromise, Effect.sleep, Effect.retry,
+  and Schedule-based polling/retry logic.
+metadata:
+  category: effect-slop
+  rationale: effect-native-concurrency

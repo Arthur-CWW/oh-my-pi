@@ -1,0 +1,9 @@
+id: effect-no-fail-open-catch-null
+valid:
+  - |
+    effect.pipe(Effect.catchTag("Unavailable", () => Effect.succeed("fallback")))
+invalid:
+  - |
+    effect.pipe(Effect.catch(() => Effect.succeed(null)))
+  - |
+    effect.pipe(Effect.catch((error) => Effect.succeed<Result | null>(null)))

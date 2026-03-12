@@ -1,0 +1,9 @@
+id: effect-no-fail-open-catchdefect-null
+valid:
+  - |
+    effect.pipe(Effect.tapErrorCause(Effect.logError))
+invalid:
+  - |
+    effect.pipe(Effect.catchDefect(() => Effect.succeed(null)))
+  - |
+    effect.pipe(Effect.catchDefect((defect) => Effect.succeed<Response | null>(null)))

@@ -1,0 +1,9 @@
+id: effect-no-promise-constructs
+valid:
+  - |
+    const results = yield* Effect.forEach(items, runItem)
+invalid:
+  - |
+    const results = await Promise.all(items.map(runItem))
+  - |
+    const result = await new Promise((resolve) => setTimeout(resolve, 1000))

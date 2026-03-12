@@ -1,0 +1,16 @@
+id: effect-no-fail-open-catch-null
+snapshots:
+  ? |
+    effect.pipe(Effect.catch(() => Effect.succeed(null)))
+  : labels:
+    - source: Effect.catch(() => Effect.succeed(null))
+      style: primary
+      start: 12
+      end: 52
+  ? |
+    effect.pipe(Effect.catch((error) => Effect.succeed<Result | null>(null)))
+  : labels:
+    - source: Effect.catch((error) => Effect.succeed<Result | null>(null))
+      style: primary
+      start: 12
+      end: 72
