@@ -1,14 +1,10 @@
 import { Effect, Schema } from "effect";
 import {
-	fetchAllContent,
+	fetchAllContentEffect,
 	type ExtractedContent,
 	type ExtractOptions,
-} from "../old/extract.js";
-import {
-	generateId,
-	storeResult,
-	type StoredSearchData,
-} from "../old/storage.js";
+} from "./fetch-content-runtime.js";
+import { generateId, storeResult, type StoredSearchData } from "../old/storage.js";
 
 const MAX_INLINE_CONTENT = 30000;
 
@@ -121,13 +117,13 @@ export interface FetchContentDeps {
 
 const defaultDeps: FetchContentDeps = {
 	fetchContent: (urls, signal, options) =>
-		Effect.tryPromise({
-			try: () => fetchAllContent([...urls], signal, options),
-			catch: (cause) =>
+		fetchAllContentEffect(urls, signal, options).pipe(
+			Effect.mapError((cause) =>
 				FetchContentExecutionError.make({
 					reason: toErrorMessage(cause),
 				}),
-		}),
+			),
+		),
 	generateId,
 	storeResult,
 };
@@ -164,7 +160,10 @@ function stripThumbnails(results: ReadonlyArray<ExtractedContent>): ExtractedCon
 	return results.map(({ thumbnail, frames, ...rest }) => rest);
 }
 
-function makeStoredFetchData(responseId: string, fetchResults: ReadonlyArray<ExtractedContent>): StoredSearchData {
+function makeStoredFetchData(
+	responseId: string,
+	fetchResults: ReadonlyArray<ExtractedContent>,
+): StoredSearchData {
 	return {
 		id: responseId,
 		type: "fetch",

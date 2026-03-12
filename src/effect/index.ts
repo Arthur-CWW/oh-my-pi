@@ -7,8 +7,12 @@ import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type ExtractedContent, type ExtractOptions, fetchAllContent } from "../old/extract.js";
 import { formatSeconds } from "../old/utils.js";
+import {
+	fetchAllContentEffect,
+	type ExtractedContent,
+	type ExtractOptions,
+} from "./fetch-content-runtime.js";
 import { readChromeCookiesEffect, type CookieReadResult } from "./chrome-cookies.js";
 import { makeEvent, type ObservabilityEventName } from "./core/Observability.js";
 import {
@@ -21,7 +25,11 @@ import {
 import { type FullSearchOptions } from "./gemini-search.js";
 import { type SearchSuccess } from "./kagi-search.js";
 import { makeSqliteEventStore } from "./observability/EventStore.js";
-import { SearchFallbackError, SearchProviderError, searchWithFallbackEffect } from "./search-runtime.js";
+import {
+	SearchFallbackError,
+	SearchProviderError,
+	searchWithFallbackEffect,
+} from "./search-runtime.js";
 import {
 	RECENCY_FILTER_VALUES,
 	SEARCH_PROVIDER_SELECTION_VALUES,
@@ -128,7 +136,10 @@ type FetchContentExecutionOutcome =
 	| { readonly ok: false; readonly error: FetchContentExecutionError };
 
 export interface EffectExtensionDeps {
-	readonly search: (query: string, options?: FullSearchOptions) => Effect.Effect<SearchResponse, unknown>;
+	readonly search: (
+		query: string,
+		options?: FullSearchOptions,
+	) => Effect.Effect<SearchResponse, unknown>;
 	readonly fetchContent: (
 		urls: ReadonlyArray<string>,
 		signal?: AbortSignal,
@@ -194,7 +205,9 @@ function formatParseError(error: ParseResult.ParseError): string {
 function decodeToolParams<A, I>(
 	schema: Schema.Schema<A, I, never>,
 	rawParams: unknown,
-): Effect.Effect<{ readonly ok: true; readonly value: A } | { readonly ok: false; readonly message: string }> {
+): Effect.Effect<
+	{ readonly ok: true; readonly value: A } | { readonly ok: false; readonly message: string }
+> {
 	return Schema.decodeUnknown(schema)(rawParams).pipe(
 		Effect.match({
 			onSuccess: (value) => ({ ok: true as const, value }),
@@ -230,9 +243,10 @@ function mapSearchFailureToToolError(error: unknown): SearchToolExecutionError {
 			technicalCause: reason,
 			nextStep:
 				provider === "kagi"
-					? "Try again, or rerun with provider: \"gemini\" while Kagi recovers."
+					? 'Try again, or rerun with provider: "gemini" while Kagi recovers.'
 					: "Check Gemini authentication/API key settings, then retry the same query.",
-			escapeHatch: "If this keeps happening, share this error with support and include the technical cause.",
+			escapeHatch:
+				"If this keeps happening, share this error with support and include the technical cause.",
 			retryable: true,
 			provider,
 		});
@@ -251,7 +265,7 @@ function mapSearchFailureToToolError(error: unknown): SearchToolExecutionError {
 			title: "No search provider could complete this request",
 			reassurance: "Your query is intact. We tried both providers before returning this error.",
 			technicalCause: `Kagi: ${primaryReason}\nGemini: ${fallbackReason}`,
-			nextStep: "Retry now, or run again with provider: \"gemini\" after checking your auth/config.",
+			nextStep: 'Retry now, or run again with provider: "gemini" after checking your auth/config.',
 			escapeHatch: "If this persists, contact support and include both provider causes.",
 			retryable: true,
 		});
@@ -298,7 +312,8 @@ const defaultSearch = Effect.fn("EffectIndex.defaultSearch")(function* (
 				reassurance: "Search is available, but telemetry setup failed during initialization.",
 				technicalCause: toErrorMessage(cause),
 				nextStep: "Retry the search request. If this persists, check local filesystem permissions.",
-				escapeHatch: "Set PI_WEB_ACCESS_EVENT_DB_PATH to a writable location or unset it to disable sqlite events.",
+				escapeHatch:
+					"Set PI_WEB_ACCESS_EVENT_DB_PATH to a writable location or unset it to disable sqlite events.",
 				retryable: true,
 			}),
 	});
@@ -355,13 +370,13 @@ function makeCookiesServiceLayer(deps: EffectExtensionDeps): Layer.Layer<Cookies
 const defaultDeps: EffectExtensionDeps = {
 	search: defaultSearch,
 	fetchContent: (urls, signal, options) =>
-		Effect.tryPromise({
-			try: () => fetchAllContent([...urls], signal, options),
-			catch: (cause) =>
+		fetchAllContentEffect(urls, signal, options).pipe(
+			Effect.mapError((cause) =>
 				FetchContentExecutionError.make({
 					reason: toErrorMessage(cause),
 				}),
-		}),
+			),
+		),
 	readCookies: readChromeCookiesEffect,
 };
 
@@ -436,7 +451,9 @@ function readBoolean(value: unknown): boolean | undefined {
 }
 
 function readStringArray(value: unknown): ReadonlyArray<string> | undefined {
-	return Array.isArray(value) && value.every((entry) => typeof entry === "string") ? value : undefined;
+	return Array.isArray(value) && value.every((entry) => typeof entry === "string")
+		? value
+		: undefined;
 }
 
 function readFetchContentRenderDetails(value: unknown): FetchContentRenderDetails {
@@ -500,14 +517,20 @@ function readFetchTextContent(items: unknown): string {
 function renderFetchContentCall(args: unknown, theme: RenderTheme): Text {
 	const { urlList, prompt, timestamp, frames, model } = readFetchCallArgs(args);
 	if (urlList.length === 0) {
-		return new Text(theme.fg("toolTitle", theme.bold("fetch ")) + theme.fg("error", "(no URL)"), 0, 0);
+		return new Text(
+			theme.fg("toolTitle", theme.bold("fetch ")) + theme.fg("error", "(no URL)"),
+			0,
+			0,
+		);
 	}
 	const lines: string[] = [];
 	if (urlList.length === 1) {
 		const display = urlList[0].length > 60 ? urlList[0].slice(0, 57) + "..." : urlList[0];
 		lines.push(theme.fg("toolTitle", theme.bold("fetch ")) + theme.fg("accent", display));
 	} else {
-		lines.push(theme.fg("toolTitle", theme.bold("fetch ")) + theme.fg("accent", `${urlList.length} URLs`));
+		lines.push(
+			theme.fg("toolTitle", theme.bold("fetch ")) + theme.fg("accent", `${urlList.length} URLs`),
+		);
 		for (const url of urlList.slice(0, 5)) {
 			const display = url.length > 60 ? url.slice(0, 57) + "..." : url;
 			lines.push(theme.fg("muted", `  ${display}`));
@@ -555,7 +578,10 @@ function renderFetchContentResult(
 				: imageCount === 1
 					? theme.fg("accent", " [image]")
 					: "";
-		let statusLine = theme.fg("success", title) + theme.fg("muted", ` (${details.totalChars ?? 0} chars)`) + imageBadge;
+		let statusLine =
+			theme.fg("success", title) +
+			theme.fg("muted", ` (${details.totalChars ?? 0} chars)`) +
+			imageBadge;
 		if (details.truncated) {
 			statusLine += theme.fg("warning", " [truncated]");
 		}
@@ -569,7 +595,8 @@ function renderFetchContentResult(
 		}
 		const lines = [statusLine];
 		if (details.prompt) {
-			const display = details.prompt.length > 250 ? details.prompt.slice(0, 247) + "..." : details.prompt;
+			const display =
+				details.prompt.length > 250 ? details.prompt.slice(0, 247) + "..." : details.prompt;
 			lines.push(theme.fg("dim", `  prompt: "${display}"`));
 		}
 		if (details.timestamp) {
@@ -583,7 +610,9 @@ function renderFetchContentResult(
 		return new Text(lines.join("\n"), 0, 0);
 	}
 	const countColor = (details.successful ?? 0) > 0 ? "success" : "error";
-	const statusLine = theme.fg(countColor, `${details.successful ?? 0}/${details.urlCount ?? 0} URLs`) + theme.fg("muted", " (content stored)");
+	const statusLine =
+		theme.fg(countColor, `${details.successful ?? 0}/${details.urlCount ?? 0} URLs`) +
+		theme.fg("muted", " (content stored)");
 	if (!state.expanded) {
 		return new Text(statusLine, 0, 0);
 	}
@@ -618,7 +647,9 @@ function registerEventStoreSmokeTool(pi: ExtensionAPI): void {
 			correlationId: Type.Optional(Type.String()),
 		}),
 		async execute(_toolCallId, rawParams) {
-			const decoded = await Effect.runPromise(decodeToolParams(EventStoreSmokeParamsSchema, rawParams));
+			const decoded = await Effect.runPromise(
+				decodeToolParams(EventStoreSmokeParamsSchema, rawParams),
+			);
 			if (decoded.ok === false) {
 				const details: EventStoreSmokeToolDetails = {
 					error: "invalid-params",
@@ -635,7 +666,8 @@ function registerEventStoreSmokeTool(pi: ExtensionAPI): void {
 			}
 			const params: EventStoreSmokeParams = decoded.value;
 			const dbPath =
-				params.dbPath ?? join(tmpdir(), `pi-web-access-effect-shadow-${Date.now()}-${randomUUID()}.sqlite`);
+				params.dbPath ??
+				join(tmpdir(), `pi-web-access-effect-shadow-${Date.now()}-${randomUUID()}.sqlite`);
 			const correlationId = params.correlationId ?? `effect-shadow-${randomUUID()}`;
 
 			const program = Effect.gen(function* () {
@@ -693,7 +725,9 @@ function registerWebSearchTool(pi: ExtensionAPI, searchLayer: Layer.Layer<Search
 		description:
 			"Web search tool using Kagi (default) with Gemini fallback. Supports Kagi operators (`filetype:`, `site:`, `inurl:`, `intitle:`, quotes, boolean/grouping) plus Google-style compatibility helpers (`before:`/`after:` full-date mapping, `ext:`, `allintitle:`, `allinurl:`, `allintext:`). Unsupported operators are passed through and may be ignored by Kagi.",
 		parameters: Type.Object({
-			query: Type.String({ description: "Search query (Google-style operators supported where Kagi-compatible)" }),
+			query: Type.String({
+				description: "Search query (Google-style operators supported where Kagi-compatible)",
+			}),
 			provider: Type.Optional(StringEnum([...SEARCH_PROVIDER_SELECTION_VALUES])),
 			lens: Type.Optional(Type.String()),
 			numResults: Type.Optional(Type.Number({ minimum: 1, maximum: 20 })),
@@ -707,8 +741,10 @@ function registerWebSearchTool(pi: ExtensionAPI, searchLayer: Layer.Layer<Search
 					title: "Invalid web_search parameters",
 					reassurance: "The request reached the tool, but one or more arguments are invalid.",
 					technicalCause: decoded.message,
-					nextStep: "Fix the tool arguments and retry. Verify provider enum, numResults range, and list field types.",
-					escapeHatch: "If this came from automation, validate payloads against the tool schema before calling.",
+					nextStep:
+						"Fix the tool arguments and retry. Verify provider enum, numResults range, and list field types.",
+					escapeHatch:
+						"If this came from automation, validate payloads against the tool schema before calling.",
 					retryable: true,
 				});
 				const details: WebSearchToolDetails = {
@@ -733,7 +769,8 @@ function registerWebSearchTool(pi: ExtensionAPI, searchLayer: Layer.Layer<Search
 					reassurance: "The tool is ready to run once you provide a search query.",
 					technicalCause: "Missing required parameter: query",
 					nextStep: "Call web_search again with a non-empty query string.",
-					escapeHatch: "If this came from an automated prompt, validate tool arguments before calling.",
+					escapeHatch:
+						"If this came from an automated prompt, validate tool arguments before calling.",
 					retryable: true,
 				});
 				const details: WebSearchToolDetails = {
@@ -799,7 +836,10 @@ function registerWebSearchTool(pi: ExtensionAPI, searchLayer: Layer.Layer<Search
 			};
 			return {
 				content: [
-					{ type: "text", text: formatSearchSummary(outcome.response.results, outcome.response.answer) },
+					{
+						type: "text",
+						text: formatSearchSummary(outcome.response.results, outcome.response.answer),
+					},
 				],
 				details,
 			};
@@ -807,7 +847,10 @@ function registerWebSearchTool(pi: ExtensionAPI, searchLayer: Layer.Layer<Search
 	});
 }
 
-function registerChromeCookiesTool(pi: ExtensionAPI, cookiesLayer: Layer.Layer<CookiesService>): void {
+function registerChromeCookiesTool(
+	pi: ExtensionAPI,
+	cookiesLayer: Layer.Layer<CookiesService>,
+): void {
 	pi.registerTool({
 		name: "chrome_cookies",
 		label: "Chrome Cookies (Effect)",
@@ -820,7 +863,9 @@ function registerChromeCookiesTool(pi: ExtensionAPI, cookiesLayer: Layer.Layer<C
 			if (decoded.ok === false) {
 				const details: CookiesToolDetails = { error: decoded.message };
 				return {
-					content: [{ type: "text", text: `Invalid parameters for chrome_cookies.\n${decoded.message}` }],
+					content: [
+						{ type: "text", text: `Invalid parameters for chrome_cookies.\n${decoded.message}` },
+					],
 					details,
 				};
 			}
@@ -912,10 +957,14 @@ function registerFetchContentTool(pi: ExtensionAPI, deps: EffectExtensionDeps): 
 			),
 		}),
 		async execute(_toolCallId, rawParams, signal, onUpdate) {
-			const decoded = await Effect.runPromise(decodeToolParams(FetchContentParamsSchema, rawParams));
+			const decoded = await Effect.runPromise(
+				decodeToolParams(FetchContentParamsSchema, rawParams),
+			);
 			if (decoded.ok === false) {
 				return {
-					content: [{ type: "text", text: `Invalid parameters for fetch_content.\n${decoded.message}` }],
+					content: [
+						{ type: "text", text: `Invalid parameters for fetch_content.\n${decoded.message}` },
+					],
 					details: {
 						error: "invalid-params",
 						reason: decoded.message,
@@ -979,11 +1028,16 @@ function registerGetSearchContentTool(pi: ExtensionAPI): void {
 			urlIndex: Type.Optional(Type.Number({ description: "Get content for URL at index" })),
 		}),
 		async execute(_toolCallId, rawParams): Promise<GetSearchContentToolResponse> {
-			const decoded = await Effect.runPromise(decodeToolParams(GetSearchContentParamsSchema, rawParams));
+			const decoded = await Effect.runPromise(
+				decodeToolParams(GetSearchContentParamsSchema, rawParams),
+			);
 			if (decoded.ok === false) {
 				return {
 					content: [
-						{ type: "text", text: `Invalid parameters for get_search_content.\n${decoded.message}` },
+						{
+							type: "text",
+							text: `Invalid parameters for get_search_content.\n${decoded.message}`,
+						},
 					],
 					details: {
 						error: "invalid-params",
