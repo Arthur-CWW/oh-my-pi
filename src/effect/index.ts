@@ -2,7 +2,7 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { StringEnum } from "@mariozechner/pi-ai";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
-import { Context, Effect, Layer, ParseResult, Schema } from "effect";
+import { Cause, Data, Effect, Exit, Layer, Schema, ServiceMap } from "effect";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -51,7 +51,9 @@ const EventStoreSmokeParamsSchema = Schema.Struct({
 const WebSearchParamsSchema = Schema.Struct({
 	query: Schema.String,
 	provider: Schema.optional(SearchProviderSelectionSchema),
-	numResults: Schema.optional(Schema.Number.pipe(Schema.between(1, 20))),
+	numResults: Schema.optional(
+		Schema.Number.check(Schema.isBetween({ minimum: 1, maximum: 20 })),
+	),
 	recencyFilter: Schema.optional(RecencyFilterSchema),
 	domainFilter: Schema.optional(Schema.Array(Schema.String)),
 	lens: Schema.optional(Schema.String),
@@ -148,42 +150,30 @@ export interface EffectExtensionDeps {
 	readonly readCookies: typeof readChromeCookiesEffect;
 }
 
-class SearchToolExecutionError extends Schema.TaggedError<SearchToolExecutionError>()(
-	"SearchToolExecutionError",
-	{
-		title: Schema.String,
-		reassurance: Schema.optional(Schema.String),
-		technicalCause: Schema.String,
-		nextStep: Schema.String,
-		escapeHatch: Schema.optional(Schema.String),
-		retryable: Schema.Boolean,
-		provider: Schema.optional(Schema.Literal("kagi", "gemini")),
-	},
-) {}
+class SearchToolExecutionError extends Data.TaggedError("SearchToolExecutionError")<{
+	readonly title: string;
+	readonly reassurance?: string;
+	readonly technicalCause: string;
+	readonly nextStep: string;
+	readonly escapeHatch?: string;
+	readonly retryable: boolean;
+	readonly provider?: "kagi" | "gemini";
+}> {}
 
-class CookiesToolExecutionError extends Schema.TaggedError<CookiesToolExecutionError>()(
-	"CookiesToolExecutionError",
-	{
-		reason: Schema.String,
-	},
-) {}
+class CookiesToolExecutionError extends Data.TaggedError("CookiesToolExecutionError")<{
+	readonly reason: string;
+}> {}
 
-class SearchService extends Context.Tag("@pi-web-access/SearchService")<
-	SearchService,
-	{
-		readonly search: (
-			query: string,
-			options?: FullSearchOptions,
-		) => Effect.Effect<SearchResponse, SearchToolExecutionError>;
-	}
->() {}
+const SearchService = ServiceMap.Service<{
+	readonly search: (
+		query: string,
+		options?: FullSearchOptions,
+	) => Effect.Effect<SearchResponse, SearchToolExecutionError>;
+}>("@pi-web-access/SearchService");
 
-class CookiesService extends Context.Tag("@pi-web-access/CookiesService")<
-	CookiesService,
-	{
-		readonly readCookies: () => Effect.Effect<CookieReadResult, CookiesToolExecutionError>;
-	}
->() {}
+const CookiesService = ServiceMap.Service<{
+	readonly readCookies: () => Effect.Effect<CookieReadResult, CookiesToolExecutionError>;
+}>("@pi-web-access/CookiesService");
 
 function toErrorMessage(error: unknown): string {
 	if (error instanceof Error) {
@@ -198,22 +188,22 @@ function toErrorMessage(error: unknown): string {
 	return String(error);
 }
 
-function formatParseError(error: ParseResult.ParseError): string {
-	return ParseResult.TreeFormatter.formatErrorSync(error);
-}
-
-function decodeToolParams<A, I>(
-	schema: Schema.Schema<A, I, never>,
+function decodeToolParams<S extends Schema.Top & { readonly DecodingServices: never }>(
+	schema: S,
 	rawParams: unknown,
 ): Effect.Effect<
-	{ readonly ok: true; readonly value: A } | { readonly ok: false; readonly message: string }
+	{ readonly ok: true; readonly value: S["Type"] } | { readonly ok: false; readonly message: string }
 > {
-	return Schema.decodeUnknown(schema)(rawParams).pipe(
-		Effect.match({
-			onSuccess: (value) => ({ ok: true as const, value }),
-			onFailure: (error) => ({ ok: false as const, message: formatParseError(error) }),
-		}),
-	);
+	return Effect.sync(() => {
+		const decoded = Schema.decodeUnknownExit(schema)(rawParams);
+		if (Exit.isSuccess(decoded)) {
+			return { ok: true as const, value: decoded.value };
+		}
+		return {
+			ok: false as const,
+			message: String(Cause.squash(decoded.cause)),
+		};
+	});
 }
 
 function isTaggedError(error: unknown, tag: string): boolean {
@@ -234,7 +224,7 @@ function mapSearchFailureToToolError(error: unknown): SearchToolExecutionError {
 			error instanceof SearchProviderError
 				? error.reason
 				: (error as { readonly reason: string }).reason;
-		return SearchToolExecutionError.make({
+		return new SearchToolExecutionError({
 			title:
 				provider === "kagi"
 					? "Kagi search is currently unavailable"
@@ -261,7 +251,7 @@ function mapSearchFailureToToolError(error: unknown): SearchToolExecutionError {
 			error instanceof SearchFallbackError
 				? error.fallbackReason
 				: (error as { readonly fallbackReason: string }).fallbackReason;
-		return SearchToolExecutionError.make({
+		return new SearchToolExecutionError({
 			title: "No search provider could complete this request",
 			reassurance: "Your query is intact. We tried both providers before returning this error.",
 			technicalCause: `Kagi: ${primaryReason}\nGemini: ${fallbackReason}`,
@@ -271,7 +261,7 @@ function mapSearchFailureToToolError(error: unknown): SearchToolExecutionError {
 		});
 	}
 
-	return SearchToolExecutionError.make({
+	return new SearchToolExecutionError({
 		title: "Web search failed",
 		reassurance: "Your query was received, but the request did not complete.",
 		technicalCause: toErrorMessage(error),
@@ -307,7 +297,7 @@ const defaultSearch = Effect.fn("EffectIndex.defaultSearch")(function* (
 	const events = yield* Effect.tryPromise({
 		try: () => defaultSearchEventsServicePromise,
 		catch: (cause) =>
-			SearchToolExecutionError.make({
+			new SearchToolExecutionError({
 				title: "Search event service initialization failed",
 				reassurance: "Search is available, but telemetry setup failed during initialization.",
 				technicalCause: toErrorMessage(cause),
@@ -320,7 +310,7 @@ const defaultSearch = Effect.fn("EffectIndex.defaultSearch")(function* (
 	return yield* searchWithFallbackEffect(query, options ?? {}, { events });
 });
 
-function makeSearchServiceLayer(deps: EffectExtensionDeps): Layer.Layer<SearchService> {
+function makeSearchServiceLayer(deps: EffectExtensionDeps) {
 	const search = Effect.fn("SearchService.search")(function* (
 		query: string,
 		options?: FullSearchOptions,
@@ -329,29 +319,26 @@ function makeSearchServiceLayer(deps: EffectExtensionDeps): Layer.Layer<SearchSe
 			Effect.mapError((cause) =>
 				cause instanceof SearchToolExecutionError ? cause : mapSearchFailureToToolError(cause),
 			),
-			Effect.catchAllDefect((defect) => Effect.fail(mapSearchFailureToToolError(defect))),
+			Effect.catchDefect((defect) => Effect.fail(mapSearchFailureToToolError(defect))),
 		);
 	});
 
-	return Layer.succeed(
-		SearchService,
-		SearchService.of({
-			search,
-		}),
-	);
+	return Layer.succeed(SearchService, {
+		search,
+	});
 }
 
-function makeCookiesServiceLayer(deps: EffectExtensionDeps): Layer.Layer<CookiesService> {
+function makeCookiesServiceLayer(deps: EffectExtensionDeps) {
 	const readCookies = Effect.fn("CookiesService.readCookies")(function* () {
 		return yield* deps.readCookies().pipe(
 			Effect.mapError((error) =>
-				CookiesToolExecutionError.make({
+				new CookiesToolExecutionError({
 					reason: toErrorMessage(error),
 				}),
 			),
-			Effect.catchAllDefect((defect) =>
+			Effect.catchDefect((defect) =>
 				Effect.fail(
-					CookiesToolExecutionError.make({
+					new CookiesToolExecutionError({
 						reason: toErrorMessage(defect),
 					}),
 				),
@@ -359,12 +346,9 @@ function makeCookiesServiceLayer(deps: EffectExtensionDeps): Layer.Layer<Cookies
 		);
 	});
 
-	return Layer.succeed(
-		CookiesService,
-		CookiesService.of({
-			readCookies,
-		}),
-	);
+	return Layer.succeed(CookiesService, {
+		readCookies,
+	});
 }
 
 const defaultDeps: EffectExtensionDeps = {
@@ -372,7 +356,7 @@ const defaultDeps: EffectExtensionDeps = {
 	fetchContent: (urls, signal, options) =>
 		fetchAllContentEffect(urls, signal, options).pipe(
 			Effect.mapError((cause) =>
-				FetchContentExecutionError.make({
+				new FetchContentExecutionError({
 					reason: toErrorMessage(cause),
 				}),
 			),
@@ -718,7 +702,7 @@ function registerEventStoreSmokeTool(pi: ExtensionAPI): void {
 	});
 }
 
-function registerWebSearchTool(pi: ExtensionAPI, searchLayer: Layer.Layer<SearchService>): void {
+function registerWebSearchTool(pi: ExtensionAPI, searchLayer: ReturnType<typeof makeSearchServiceLayer>): void {
 	pi.registerTool({
 		name: "web_search",
 		label: "Web Search",
@@ -737,7 +721,7 @@ function registerWebSearchTool(pi: ExtensionAPI, searchLayer: Layer.Layer<Search
 		async execute(_toolCallId, rawParams) {
 			const decoded = await Effect.runPromise(decodeToolParams(WebSearchParamsSchema, rawParams));
 			if (decoded.ok === false) {
-				const error = SearchToolExecutionError.make({
+				const error = new SearchToolExecutionError({
 					title: "Invalid web_search parameters",
 					reassurance: "The request reached the tool, but one or more arguments are invalid.",
 					technicalCause: decoded.message,
@@ -764,7 +748,7 @@ function registerWebSearchTool(pi: ExtensionAPI, searchLayer: Layer.Layer<Search
 			}
 			const params: WebSearchParams = decoded.value;
 			if (!params.query.trim()) {
-				const error = SearchToolExecutionError.make({
+				const error = new SearchToolExecutionError({
 					title: "No query was provided",
 					reassurance: "The tool is ready to run once you provide a search query.",
 					technicalCause: "Missing required parameter: query",
@@ -849,7 +833,7 @@ function registerWebSearchTool(pi: ExtensionAPI, searchLayer: Layer.Layer<Search
 
 function registerChromeCookiesTool(
 	pi: ExtensionAPI,
-	cookiesLayer: Layer.Layer<CookiesService>,
+	cookiesLayer: ReturnType<typeof makeCookiesServiceLayer>,
 ): void {
 	pi.registerTool({
 		name: "chrome_cookies",

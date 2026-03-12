@@ -1,11 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { Config, ConfigProvider, Effect, Layer, Option } from "effect";
-import {
-	decodeSearchProviderOrAuto,
-	type SearchProvider,
-} from "../search-contracts.js";
+import { Config, ConfigProvider, Effect, Option } from "effect";
+import { decodeSearchProviderOrAuto, type SearchProvider } from "../search-contracts.js";
 import { ConfigParseError, ConfigReadError, MissingConfigError } from "./Errors.js";
 
 export const DEFAULT_WEB_SEARCH_CONFIG_PATH = join(homedir(), ".pi", "web-search.json");
@@ -38,17 +35,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function toParseError(path: string, cause: unknown): ConfigParseError {
-	return ConfigParseError.make({
+	return new ConfigParseError({
 		path,
 		reason: cause instanceof Error ? cause.message : String(cause),
 	});
 }
 
-function optionalConfig<A>(config: Config.Config<A>): Effect.Effect<A | undefined, never> {
-	return Config.option(config).pipe(
-		Effect.map((value) => (Option.isSome(value) ? value.value : undefined)),
-		Effect.orElseSucceed(() => undefined),
-	);
+function optionalConfig<A>(config: Config.Config<A>): Effect.Effect<A | undefined> {
+	return Effect.gen(function* () {
+		const value = yield* Config.option(config);
+		return Option.isSome(value) ? value.value : undefined;
+	}).pipe(Effect.catch(() => Effect.succeed(undefined)));
 }
 
 function decodeWithConfigProvider(
@@ -56,13 +53,14 @@ function decodeWithConfigProvider(
 	path: string,
 ): Effect.Effect<WebSearchConfig, ConfigParseError> {
 	const hasShortcutsRecord = isRecord(raw.shortcuts);
+	const provider = ConfigProvider.fromUnknown(raw);
 
 	const program = Effect.gen(function* () {
 		const providerValue = yield* Config.string("provider").pipe(
 			Config.orElse(() => Config.string("searchProvider")),
 			Config.orElse(() => Config.succeed("auto")),
 		);
-		const provider = decodeSearchProviderOrAuto(providerValue);
+		const resolvedProvider = decodeSearchProviderOrAuto(providerValue);
 
 		const curateWindowRaw = yield* optionalConfig(Config.number("curateWindow"));
 		const curateWindow =
@@ -106,7 +104,7 @@ function decodeWithConfigProvider(
 			: undefined;
 
 		return {
-			provider,
+			provider: resolvedProvider,
 			...(curateWindow !== undefined ? { curateWindow } : {}),
 			...(autoFilter ? { autoFilter } : {}),
 			...(shortcuts ? { shortcuts } : {}),
@@ -114,7 +112,7 @@ function decodeWithConfigProvider(
 	});
 
 	return program.pipe(
-		Effect.provide(Layer.setConfigProvider(ConfigProvider.fromJson(raw))),
+		Effect.provide(ConfigProvider.layer(provider)),
 		Effect.mapError((cause) => (cause instanceof ConfigParseError ? cause : toParseError(path, cause))),
 	);
 }
@@ -141,7 +139,7 @@ export function loadWebSearchConfig(
 				return readFileSync(path, "utf-8");
 			},
 			catch: (cause) =>
-				ConfigReadError.make({
+				new ConfigReadError({
 					path,
 					reason: cause instanceof Error ? cause.message : String(cause),
 				}),
@@ -157,12 +155,15 @@ export function loadWebSearchConfig(
 }
 
 export function requireEnv(name: string): Effect.Effect<string, MissingConfigError> {
-	return Config.string(name).pipe(
-		Effect.mapError((cause) =>
-			MissingConfigError.make({
-				key: name,
-				reason: cause instanceof Error ? cause.message : String(cause),
-			}),
+	return Effect.gen(function* () {
+		return yield* Config.string(name);
+	}).pipe(
+		Effect.mapError(
+			(cause) =>
+				new MissingConfigError({
+					key: name,
+					reason: cause instanceof Error ? cause.message : String(cause),
+				}),
 		),
 	);
 }

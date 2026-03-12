@@ -24,15 +24,16 @@ Legacy entrypoint retained for parity/debug:
 <!-- effect-solutions:start -->
 ## Effect Best Practices
 
-**IMPORTANT:** Always consult effect-solutions before writing Effect code.
+**IMPORTANT:** Use the local `vendor/effect-smol` docs + source as the primary Effect reference before writing Effect code.
 
-1. Run `effect-solutions list` to see available guides
-2. Run `effect-solutions show <topic>...` for relevant patterns (supports multiple topics)
-3. Search local Effect source references (`vendor/effect/` and, when present, `.reference/effect/`) for real implementations
+1. Start at `vendor/effect-smol/LLMS.md`
+2. Follow the linked `ai-docs/src/*` files recursively/progressively for the topic you are touching
+3. Read the corresponding real implementation/source under `vendor/effect-smol/packages/*` before locking in a pattern
+4. Do **not** rely on `effect-solutions`, `node_modules`, or external Effect docs unless the user explicitly asks
 
-Topics: quick-start, project-setup, tsconfig, basics, services-and-layers, data-modeling, error-handling, config, testing, cli.
+Priority topics for this repo: services/layers, errors, running programs, config, testing, and CLI.
 
-Never guess at Effect patterns - check the guide first.
+Never guess at Effect patterns - check the local effect-smol docs/source first.
 <!-- effect-solutions:end -->
 
 ## Persistent User Preferences (Self-Healing)
@@ -48,8 +49,8 @@ Current persistent preferences:
 - Prefer a **compressed/flat file layout** for new Effect slices when practical.
 - Avoid unnecessary nested folders + `index.ts` re-export barrels for single-feature modules.
 - If splitting into multiple files is necessary, keep it minimal and justify briefly in PR/task notes.
-- Use `effect-solutions` (plural) when invoking the local Effect solutions CLI (`effect-solution` is not present in this environment).
-- For Effect migrations/refactors, consult `effect-solutions` guidance first (`quick-start` + relevant topic docs such as `basics`, `services-and-layers`, `error-handling`, `config`) before implementing.
+- For Effect migrations/refactors, start from `vendor/effect-smol/LLMS.md`, follow linked docs recursively/progressively, and confirm patterns against `vendor/effect-smol/packages/*` source before implementing.
+- Treat the local `vendor/effect-smol` repo as the authoritative Effect reference for this project; avoid `effect-solutions`, `node_modules`, and random external docs unless the user explicitly asks.
 - During implementation iterations, run **only scoped/filtered tests** for the feature being changed (file-level and, when useful, test-name filtering). Do **not** run the full suite repeatedly while iterating. Run the full mandatory validation suite once at handoff or when explicitly requested. Avoid live API/e2e validation runs unless the user explicitly asks for a manual pass.
 - Prefer tests to live close to the source they validate when practical: use package-local sibling `src/` + `test/` layouts for standalone workspaces/packages (for example `packages/kagi/{src,test}`, similar to `vendor/pi-mono`), colocated `*.test.ts` for focused Effect slices when that stays flatter, and reserve the top-level `tests/` folder for repo-level/cross-package coverage.
 - When drafting next-session/resume prompts, do **not** restate `AGENTS.md` guidance; keep prompts short and focused on current repo state, blockers, and the concrete next refactor.
@@ -70,8 +71,9 @@ Current persistent preferences:
 - At third-party boundaries, normalize nullable/undefined payloads with schema transforms/codecs (recursive normalization when needed) before domain logic.
 - Do not use raw `as` casts for tool parameters in Effect entry paths; decode/validate boundary inputs and return actionable errors.
 - Prefer Effect-native retry/timeouts (`Effect.retry`, `Schedule`, `Effect.timeout`) over bespoke retry helpers in Effect paths.
-- For standalone/dual-use tooling paths, prefer Effect CLI (`@effect/cli`) over bespoke argument parsing; use hand-rolled parsers only as temporary migration shims.
+- For standalone/dual-use tooling paths, prefer the local Effect CLI modules from `vendor/effect-smol` (currently `effect/unstable/cli` in the v4 beta repo) over bespoke argument parsing or `@effect/cli`; use hand-rolled parsers only as temporary migration shims.
 - Prefer Effect Config (`Config`, `Schema.Config`, `ConfigProvider`) over ad-hoc env/json config readers for new or refactored config surfaces.
+- Prefer migrating new/refactored Effect code toward the local `vendor/effect-smol` v4 stack/package surfaces rather than adding more dependency on the current v3-era split packages.
 ## Mandatory Validation After Every Change
 
 Run all commands below and ensure they pass before finishing work.
@@ -122,6 +124,7 @@ Keep `src/old` intact until parity checks pass.
 - Migration spec: `docs/migration-spec.md`
 - Migration prep: `docs/effect-migration-prep.md`
 - Effect reference snapshot: `docs/references/effect-llms.txt`
+- Primary local Effect v4 docs/source: `vendor/effect-smol/LLMS.md` + `vendor/effect-smol/ai-docs` + `vendor/effect-smol/packages/*`
 - Session handoff context: `docs/migration-context.md`
 - Running migration tracker: `task-tracker.md` (repo root)
 

@@ -1,4 +1,4 @@
-import { Effect, Schema } from "effect";
+import { Data, Effect, Schema } from "effect";
 import {
 	fetchAllContentEffect,
 	type ExtractedContent,
@@ -8,7 +8,7 @@ import { generateId, storeResult, type StoredSearchData } from "../old/storage.j
 
 const MAX_INLINE_CONTENT = 30000;
 
-const FramesSchema = Schema.Number.pipe(Schema.int(), Schema.between(1, 12));
+const FramesSchema = Schema.Int.pipe(Schema.check(Schema.isBetween({ minimum: 1, maximum: 12 })));
 
 export const FetchContentParamsSchema = Schema.Struct({
 	url: Schema.optional(Schema.String),
@@ -84,12 +84,9 @@ export type FetchContentToolResponse =
 	| (FetchContentBaseResponse & { readonly details: FetchContentSingleSuccessDetails })
 	| (FetchContentBaseResponse & { readonly details: FetchContentMultiSuccessDetails });
 
-export class FetchContentExecutionError extends Schema.TaggedError<FetchContentExecutionError>()(
-	"FetchContentExecutionError",
-	{
-		reason: Schema.String,
-	},
-) {}
+export class FetchContentExecutionError extends Data.TaggedError("FetchContentExecutionError")<{
+	readonly reason: string;
+}> {}
 
 export interface FetchContentProgressUpdate {
 	readonly content: Array<{ readonly type: "text"; readonly text: string }>;
@@ -119,7 +116,7 @@ const defaultDeps: FetchContentDeps = {
 	fetchContent: (urls, signal, options) =>
 		fetchAllContentEffect(urls, signal, options).pipe(
 			Effect.mapError((cause) =>
-				FetchContentExecutionError.make({
+				new FetchContentExecutionError({
 					reason: toErrorMessage(cause),
 				}),
 			),
@@ -309,7 +306,7 @@ export const executeFetchContent = Effect.fn("FetchContent.executeFetchContent")
 			Effect.mapError((cause) =>
 				cause instanceof FetchContentExecutionError
 					? cause
-					: FetchContentExecutionError.make({ reason: toErrorMessage(cause) }),
+					: new FetchContentExecutionError({ reason: toErrorMessage(cause) }),
 			),
 		);
 

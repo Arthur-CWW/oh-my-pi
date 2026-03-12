@@ -71,10 +71,10 @@ export function makeSearchEventsService(
 			emit: (name, payload, correlationId, sessionId) =>
 				store
 					.append(makeEvent(name, payload, correlationId, sessionId))
-					.pipe(Effect.catchAll(failOpenStoreError), Effect.catchAllDefect(failOpenDefect)),
-			close: store.close.pipe(Effect.catchAll(failOpenStoreError), Effect.catchAllDefect(failOpenDefect)),
+					.pipe(Effect.catch(failOpenStoreError), Effect.catchDefect(failOpenDefect)),
+			close: store.close.pipe(Effect.catch(failOpenStoreError), Effect.catchDefect(failOpenDefect)),
 		})),
-		Effect.catchAll((error) =>
+		Effect.catch((error) =>
 			Effect.logWarning(`Failed to initialize search event sqlite sink: ${error.reason}`).pipe(
 				Effect.as(NoopSearchEventsService),
 			),

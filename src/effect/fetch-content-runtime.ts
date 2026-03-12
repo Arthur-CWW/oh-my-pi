@@ -1,5 +1,5 @@
 import { Readability } from "@mozilla/readability";
-import { Effect, Schema } from "effect";
+import { Data, Effect, Schema } from "effect";
 import { parseHTML } from "linkedom";
 import TurndownService from "turndown";
 import { activityMonitor } from "../old/activity.js";
@@ -87,12 +87,9 @@ export interface UrlContextResponse {
 	}>;
 }
 
-class FetchContentRuntimeError extends Schema.TaggedError<FetchContentRuntimeError>()(
-	"FetchContentRuntimeError",
-	{
-		reason: Schema.String,
-	},
-) {}
+class FetchContentRuntimeError extends Data.TaggedError("FetchContentRuntimeError")<{
+	readonly reason: string;
+}> {}
 
 export interface FetchContentRuntimeDeps {
 	readonly fetch: (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
@@ -163,7 +160,7 @@ function toErrorMessage(error: unknown): string {
 }
 
 function toFetchContentRuntimeError(error: unknown): FetchContentRuntimeError {
-	return FetchContentRuntimeError.make({ reason: toErrorMessage(error) });
+	return new FetchContentRuntimeError({ reason: toErrorMessage(error) });
 }
 
 function isAbortLikeError(error: unknown): boolean {
@@ -345,7 +342,7 @@ export const extractWithJinaReaderEffect = Effect.fn("FetchContentRuntime.extrac
 					return null;
 				}),
 			),
-			Effect.catchAllDefect((defect) =>
+			Effect.catchDefect((defect) =>
 				Effect.sync(() => {
 					logActivityFailure(activityId, defect);
 					return null;
@@ -421,7 +418,7 @@ export const extractWithUrlContextEffect = Effect.fn("FetchContentRuntime.extrac
 					return null;
 				}),
 			),
-			Effect.catchAllDefect((defect) =>
+			Effect.catchDefect((defect) =>
 				Effect.sync(() => {
 					logActivityFailure(activityId, defect);
 					return null;
@@ -435,8 +432,8 @@ export const extractWithGeminiWebEffect = Effect.fn("FetchContentRuntime.extract
 	function* (url: string, signal?: AbortSignal, deps?: Partial<FetchContentRuntimeDeps>) {
 		const runtimeDeps = resolveDeps(deps);
 		const cookies = yield* runtimeDeps.isGeminiWebAvailable().pipe(
-			Effect.catchAll(() => Effect.succeed<CookieMap | null>(null)),
-			Effect.catchAllDefect(() => Effect.succeed<CookieMap | null>(null)),
+			Effect.catch(() => Effect.succeed<CookieMap | null>(null)),
+			Effect.catchDefect(() => Effect.succeed<CookieMap | null>(null)),
 		);
 		if (!cookies) {
 			return null;
@@ -463,13 +460,13 @@ export const extractWithGeminiWebEffect = Effect.fn("FetchContentRuntime.extract
 		});
 
 		return yield* program.pipe(
-			Effect.catchAll((error) =>
+			Effect.catch((error) =>
 				Effect.sync(() => {
 					logActivityFailure(activityId, error);
 					return null;
 				}),
 			),
-			Effect.catchAllDefect((defect) =>
+			Effect.catchDefect((defect) =>
 				Effect.sync(() => {
 					logActivityFailure(activityId, defect);
 					return null;
@@ -608,7 +605,7 @@ export const extractViaHttpEffect = Effect.fn("FetchContentRuntime.extractViaHtt
 				return makeErrorResult(url, error.reason);
 			}),
 		),
-		Effect.catchAllDefect((defect) =>
+		Effect.catchDefect((defect) =>
 			Effect.sync(() => {
 				const message = toErrorMessage(defect);
 				logActivityFailure(activityId, message);
@@ -638,8 +635,8 @@ export const extractContentEffect = Effect.fn("FetchContentRuntime.extractConten
 	}
 
 	const githubResult = yield* runtimeDeps.extractGitHub(url, signal, options?.forceClone).pipe(
-		Effect.catchAll(() => Effect.succeed<ExtractedContent | null>(null)),
-		Effect.catchAllDefect(() => Effect.succeed<ExtractedContent | null>(null)),
+		Effect.catch(() => Effect.succeed<ExtractedContent | null>(null)),
+		Effect.catchDefect(() => Effect.succeed<ExtractedContent | null>(null)),
 	);
 	if (githubResult) {
 		return githubResult;

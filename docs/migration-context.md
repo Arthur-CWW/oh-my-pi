@@ -6,88 +6,63 @@ _Last updated: 2026-03-12 (local session dump)_
 
 - Repo: `/home/arthur/projects/pi-web-access`
 - Branch: `main`
-- HEAD: `9ce9d9e`
+- HEAD: `83efb45`
 - Entry extension: `package.json -> ./src/effect/index.ts`
-- Legacy baseline remains: `src/old/*`
+- Legacy baseline remains untouched: `src/old/*`
 
 ## What changed in this session
 
-### 1) `fetch_content` is now Effect-owned
+### 1) Effect runtime moved to local `vendor/effect-smol` v4 packages
 
-- Added: `src/effect/fetch-content.ts`
-  - schema-first boundary for `fetch_content` params
-  - Effect-native execution + progress updates
-  - legacy-compatible single/multi URL output formatting and stored-result persistence
-- Updated: `src/effect/index.ts`
-  - registers Effect-owned `fetch_content`
-  - overrides legacy `fetch_content` when bridge is enabled
-  - keeps `fetch_content` available when legacy bridge is disabled
-  - mirrors legacy-style `renderCall` / `renderResult` TUI behavior for the Effect-owned tool
-- Updated tests/scripts:
-  - added colocated `src/effect/fetch-content.test.ts`
-  - kept entry-boundary validation in `tests/effect-index.test.ts`
-  - updated root `package.json` test script to include colocated tests
+- Root deps now use local file-based packages:
+  - `effect`
+  - `@effect/platform-node`
+  - `@effect/platform-node-shared`
+- Removed old split-package / `@effect/cli` setup from the active repo dependency graph.
+- Removed Effect language-service patching from the root setup.
+- `vendor/effect-smol` was built locally and patched for dist-backed file resolution, so the repo currently depends on a **dirty local vendor tree**.
 
-### 2) Remaining Kagi runtime helpers moved toward package-owned Effect interfaces
+### 2) `src/effect/*` was refactored onto v4-compatible APIs
 
-- Added: `packages/kagi/src/kagi-client-effect.ts`
-  - Effect-native wrappers for session refresh/load/save
-  - Effect-native lens discovery, advanced-search redirect, and domain/video rule mutations
-  - package-scoped typed provider errors:
-    - `session-unavailable`
-    - `storage-failed`
-    - `unauthorized`
-    - `forbidden`
-    - `rate-limited`
-    - `http-error`
-    - `request-failed`
-    - `invalid-target`
-- Updated tests/docs:
-  - added package-local `packages/kagi/test/kagi-client-effect.test.ts`
-  - updated `packages/kagi/{README.md,HANDOFF.md,package.json}`
-- `src/effect/*` adapters remain unchanged/thin; current app-layer Kagi integration still only consumes the search interface.
+Large parts of the Effect path were simplified/refit to work against local effect-smol v4 surfaces:
 
-### 3) Effect-native `get_search_content` slice extracted
+- `Data.TaggedError` instead of the previous tagged-error pattern
+- `ServiceMap.Reference` / `ServiceMap.Service` instead of old `Context.Tag` usage
+- `Schema.decodeUnknownExit` / `decodeUnknownOption`
+- `ConfigProvider.fromUnknown`
+- `Effect.result`
+- `Effect.catch` / `Effect.catchDefect`
 
-- Added: `src/effect/search-content.ts`
-  - schema-first decoding for stored search/fetch payloads
-  - Effect-native execution (`Effect.fn`) for retrieval + formatting
-- Updated: `src/effect/index.ts`
-  - registers Effect-owned `get_search_content`
-  - keeps schema-boundary param validation at tool boundary
-  - Effect tool overrides legacy tool when bridge is enabled
-  - still available when legacy bridge is disabled
-- Updated tests: `tests/effect-index.test.ts`
-  - tool registration assertions
-  - stored search/fetch behavior checks
-  - schema-validation failure checks
-  - kill-switch expectation updated (`get_search_content` remains present)
+Notable files touched:
+- `src/effect/index.ts`
+- `src/effect/gemini-search.ts`
+- `src/effect/chrome-cookies.ts`
+- `src/effect/kagi-search.ts`
+- `src/effect/search-runtime.ts`
+- `src/effect/search-content.ts`
+- `src/effect/core/{Config,Errors,Observability}.ts`
+- `packages/kagi/src/{kagi-client-effect,kagi-search-effect}.ts`
 
-### 4) Kagi provider moved toward package-owned Effect interface
+### 3) Direct CLIs in `src/effect/*` now use local Effect CLI modules
 
-- Added: `packages/kagi/src/kagi-search-effect.ts`
-  - Effect-native boundary: `runKagiSocketSearchEffect(...)`
-  - typed provider-specific error classification in package boundary:
-    - `session-unavailable`
-    - `unauthorized`
-    - `forbidden`
-    - `rate-limited`
-    - `http-error`
-    - `request-failed`
-- Updated: `src/effect/kagi-search.ts`
-  - now consumes package Effect interface
-  - removed Kagi HTTP/session branching from Effect app layer
-- Updated tests:
-  - `src/effect/kagi-search.test.ts` (deps are now Effect-based)
-  - `packages/kagi/test/kagi-search-package-effect.test.ts` (package-level classification coverage)
-- Updated package docs: `packages/kagi/README.md`
+Migrated direct CLI surfaces to local `effect/unstable/cli`:
+- `src/effect/gemini-search.ts`
+- `src/effect/chrome-cookies.ts`
+- `src/effect/kagi-search.ts`
 
-### 5) Preference persistence updated
+Tests were updated accordingly:
+- `tests/gemini-search-effect.test.ts`
+- `tests/effect-cookies.test.ts`
+- `src/effect/kagi-search.test.ts`
 
-- `AGENTS.md` updated with persistent preferences:
-  - provider-specific error classification/normalization should live in provider package/module boundary
-  - Effect runtime/entry should consume typed provider errors
-  - prefer colocated tests near the source they validate when practical
+### 4) Repo guidance/preferences updated
+
+- `AGENTS.md` now points Effect work at:
+  - `vendor/effect-smol/LLMS.md`
+  - linked `ai-docs/src/*`
+  - matching source in `vendor/effect-smol/packages/*`
+- Top-level `tests/` remains repo-level/cross-package coverage.
+- Package-owned Kagi tests remain under `packages/kagi/test`.
 
 ## Validation status from this session
 
@@ -102,43 +77,46 @@ pi --no-extensions -e ./src/effect/index.ts --help
 ```
 
 Results:
-
 - ✅ `bun run typecheck`
 - ✅ `bun run test`
-- ✅ `bun run test:e2e:cookies` (warning-only in this env; exits 0)
-- ❌ `bun run test:e2e:search:gemini` (Gemini API key is present, but current quota is exhausted; Gemini web cookies are also unavailable)
+- ✅ `bun run test:e2e:cookies`
+- ❌ `bun run test:e2e:search:gemini`
 - ✅ `pi --no-extensions -e ./src/effect/index.ts --help`
 
-## Current migration position
+## Current blockers / caveats
 
-- Legacy bridge still exists in `src/effect/index.ts` (kill switch still supported).
-- `get_search_content` is now Effect-owned.
-- `fetch_content` is now Effect-owned at the tool boundary.
-- Kagi search runtime path has a package-owned Effect boundary and package-owned provider error classification.
-- Remaining Kagi session/lens/advanced/rules helpers now also expose package-owned Effect wrappers, so `src/effect/*` can stay thin when those surfaces are consumed later.
+### Gemini e2e blocker
 
-## Recommended next steps
+`bun run test:e2e:search:gemini` is still blocked in this environment because Gemini auth is unavailable:
+- Gemini web cookies are missing, and/or
+- no usable Gemini API auth is available in this shell.
 
-1. Take a larger refactor slice next: move the general web-page `fetch_content` pipeline behind the Effect-owned boundary in one pass (HTTP/HTML extraction + Jina/Gemini fallback orchestration), while preserving stored output/tool parity.
-2. After that, continue with the remaining extractor subpaths (GitHub / YouTube / local video) incrementally behind the same stable Effect-owned `fetch_content` boundary.
-3. Keep Kagi-specific error/transport/session logic package-local and, when consuming non-search Kagi helpers, prefer the new package Effect wrappers instead of reintroducing app-layer branching.
-4. Continue colocating new module tests near the implementations they validate when practical.
-5. Keep scoped tests during iteration; run full required validation at handoff.
+### Vendor tree is intentionally dirty right now
 
-## Known environment blockers
+`vendor/effect-smol` has local changes required for this repo’s current setup:
+- package metadata patched for local file resolution
+- local build artifacts generated / used
 
-- Gemini e2e is currently blocked in this environment because:
-  - Gemini web cookies are unavailable, and
-  - the configured `GEMINI_API_KEY` is present but currently returns `429 RESOURCE_EXHAUSTED` (quota exhausted).
+Do not assume a clean submodule/vendor state.
+
+## Recommended next refactor
+
+Best next slice:
+1. **Further simplify `src/effect/index.ts`**
+   - it still contains too much tool wiring / formatting / boundary logic in one file
+   - split only where it clearly reduces complexity without recreating barrel-folder sprawl
+2. After that, continue simplifying the Effect-owned fetch/search boundaries where there is still migration glue left.
+3. Keep `src/old/*` untouched.
 
 ## Notes for next session
 
-- Preserve local `todo.md` changes.
-- Working tree may be dirty; do not assume a clean checkout.
-- The next open task already added to `task-tracker.md` is:
-  - `Refactor the general web-page fetch_content pipeline behind the Effect-owned boundary (HTTP/HTML extraction + Jina/Gemini fallback orchestration), preserving stored output parity before tackling GitHub / YouTube / local-video paths.`
-- Task tracker has these recent items in `[@User]` state:
-  - Effect-native `get_search_content` extraction
-  - Effect-native `fetch_content` extraction
-  - Kagi package Effect interface + package-local error classification
-  - Remaining Kagi runtime helpers moved to package-owned Effect wrappers
+- Working tree is dirty; inspect before changing anything.
+- `task-tracker.md` already records the v4/effect-smol migration slice as `[@User]`.
+- The next session should assume:
+  - local effect v4 is active
+  - direct `src/effect` CLIs are on `effect/unstable/cli`
+  - `vendor/effect-smol` is part of the working implementation right now
+
+## Short resume prompt
+
+Continue simplifying `src/effect/index.ts` now that the repo runs on local `vendor/effect-smol` v4 packages. Preserve behavior, keep `src/old/*` untouched, and avoid creating extra folder/barrel churn. Reuse local effect-smol docs/source only (`vendor/effect-smol/LLMS.md` + linked ai-docs + packages source). Validate with typecheck + targeted tests first, then full `bun run test`, `bun run test:e2e:cookies`, and `pi --no-extensions -e ./src/effect/index.ts --help`.

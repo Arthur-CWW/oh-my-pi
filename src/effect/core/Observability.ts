@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { Context, Effect, Layer } from "effect";
+import { Effect, Layer, ServiceMap } from "effect";
 
 export type ObservabilityEventName =
 	| "SearchRequested"
@@ -20,13 +20,14 @@ export interface ObservabilityEvent {
 }
 
 export interface ObservabilityService {
-	readonly publish: (event: ObservabilityEvent) => Effect.Effect<void, never>;
+	readonly publish: (event: ObservabilityEvent) => Effect.Effect<void>;
 }
 
-export class Observability extends Context.Tag("pi-web-access/Observability")<
-	Observability,
-	ObservabilityService
->() {}
+export const Observability = ServiceMap.Reference<ObservabilityService>("pi-web-access/Observability", {
+	defaultValue: () => ({
+		publish: () => Effect.void,
+	}),
+});
 
 export function makeEvent(
 	name: ObservabilityEventName,
@@ -52,10 +53,7 @@ export interface InMemoryEventSink {
 	readonly events: ReadonlyArray<ObservabilityEvent>;
 }
 
-export function makeInMemoryObservability(): {
-	readonly layer: Layer.Layer<Observability>;
-	readonly sink: InMemoryEventSink;
-} {
+export function makeInMemoryObservability() {
 	const stored: ObservabilityEvent[] = [];
 	return {
 		layer: Layer.succeed(Observability, {

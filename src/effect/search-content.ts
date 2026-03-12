@@ -1,4 +1,4 @@
-import { Effect, Either, Schema } from "effect";
+import { Effect, Option, Schema } from "effect";
 import { getResult } from "../old/storage.js";
 
 const SearchResultSchema = Schema.Struct({
@@ -11,7 +11,7 @@ const QueryResultDataSchema = Schema.Struct({
 	query: Schema.String,
 	answer: Schema.String,
 	results: Schema.Array(SearchResultSchema),
-	error: Schema.Union(Schema.String, Schema.Null),
+	error: Schema.Union([Schema.String, Schema.Null]),
 });
 
 type QueryResultData = typeof QueryResultDataSchema.Type;
@@ -31,7 +31,7 @@ const ExtractedContentSchema = Schema.Struct({
 	url: Schema.String,
 	title: Schema.String,
 	content: Schema.String,
-	error: Schema.Union(Schema.String, Schema.Null),
+	error: Schema.Union([Schema.String, Schema.Null]),
 	thumbnail: Schema.optional(ImageDataSchema),
 	frames: Schema.optional(Schema.Array(VideoFrameSchema)),
 	duration: Schema.optional(Schema.Number),
@@ -53,7 +53,7 @@ const FetchStoredDataSchema = Schema.Struct({
 	urls: Schema.Array(ExtractedContentSchema),
 });
 
-const StoredSearchDataSchema = Schema.Union(SearchStoredDataSchema, FetchStoredDataSchema);
+const StoredSearchDataSchema = Schema.Union([SearchStoredDataSchema, FetchStoredDataSchema]);
 type StoredSearchData = typeof StoredSearchDataSchema.Type;
 
 export const GetSearchContentParamsSchema = Schema.Struct({
@@ -138,7 +138,10 @@ export type GetSearchContentToolResult =
 	| (BaseGetSearchContentResult & { readonly details: UrlErrorDetails })
 	| (BaseGetSearchContentResult & { readonly details: UrlContentDetails });
 
-function toTextResult<TDetails>(text: string, details: TDetails): BaseGetSearchContentResult & { readonly details: TDetails } {
+function toTextResult<TDetails>(
+	text: string,
+	details: TDetails,
+): BaseGetSearchContentResult & { readonly details: TDetails } {
 	return {
 		content: [{ type: "text", text }],
 		details,
@@ -146,8 +149,8 @@ function toTextResult<TDetails>(text: string, details: TDetails): BaseGetSearchC
 }
 
 function decodeStoredSearchData(raw: unknown): StoredSearchData | null {
-	const decoded = Schema.decodeUnknownEither(StoredSearchDataSchema)(raw);
-	return Either.isRight(decoded) ? decoded.right : null;
+	const decoded = Schema.decodeUnknownOption(StoredSearchDataSchema)(raw);
+	return Option.isSome(decoded) ? decoded.value : null;
 }
 
 function formatFullResults(queryData: QueryResultData): string {
@@ -178,10 +181,9 @@ function handleSearchData(
 	} else if (params.queryIndex !== undefined) {
 		queryData = data.queries[params.queryIndex];
 		if (!queryData) {
-			return toTextResult(
-				`Index ${params.queryIndex} out of range (0-${data.queries.length - 1})`,
-				{ error: "Index out of range" },
-			);
+			return toTextResult(`Index ${params.queryIndex} out of range (0-${data.queries.length - 1})`, {
+				error: "Index out of range",
+			});
 		}
 	} else {
 		const available = data.queries.map((query, index) => `${index}: "${query.query}"`).join(", ");
@@ -263,15 +265,5 @@ export const executeGetSearchContent = Effect.fn("SearchContent.executeGetSearch
 		});
 	}
 
-	if (data.type === "search") {
-		return handleSearchData(data, params);
-	}
-
-	if (data.type === "fetch") {
-		return handleFetchData(data, params);
-	}
-
-	return toTextResult("Invalid stored data format", {
-		error: "Invalid data",
-	});
+	return data.type === "search" ? handleSearchData(data, params) : handleFetchData(data, params);
 });

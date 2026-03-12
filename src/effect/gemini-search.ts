@@ -1,6 +1,6 @@
-import { Args, Command, Options } from "@effect/cli";
-import { NodeContext } from "@effect/platform-node";
-import { Effect, Option, Schema } from "effect";
+import { NodeServices } from "@effect/platform-node";
+import { Cause, Data, Effect, Exit, Option } from "effect";
+import { Argument, Command, Flag } from "effect/unstable/cli";
 import { API_BASE, DEFAULT_MODEL, getApiKey } from "./gemini-api.js";
 import {
 	isGeminiWebAvailableEffect,
@@ -60,12 +60,9 @@ const defaultDeps: GeminiSearchDeps = {
 	fetch,
 };
 
-export class SearchUnavailableError extends Schema.TaggedError<SearchUnavailableError>()(
-	"SearchUnavailableError",
-	{
-		reason: Schema.String,
-	},
-) {}
+export class SearchUnavailableError extends Data.TaggedError("SearchUnavailableError")<{
+	readonly reason: string;
+}> {}
 
 const GEMINI_UNAVAILABLE_MESSAGE =
 	"Gemini search unavailable. Either:\n" +
@@ -86,7 +83,7 @@ export function searchEffect(
 		const configuredProvider = yield* deps.resolveConfiguredProvider();
 		const provider = options.provider ?? configuredProvider;
 		if (provider !== "auto" && provider !== "kagi" && provider !== "gemini") {
-			return yield* SearchUnavailableError.make({ reason: PROVIDER_UNAVAILABLE_MESSAGE });
+			return yield* new SearchUnavailableError({ reason: PROVIDER_UNAVAILABLE_MESSAGE });
 		}
 
 		const geminiResult =
@@ -96,7 +93,7 @@ export function searchEffect(
 			return geminiResult;
 		}
 
-		return yield* SearchUnavailableError.make({
+		return yield* new SearchUnavailableError({
 			reason: provider === "gemini" ? GEMINI_UNAVAILABLE_MESSAGE : PROVIDER_UNAVAILABLE_MESSAGE,
 		});
 	});
@@ -108,13 +105,14 @@ export async function search(
 	deps: GeminiSearchDeps = defaultDeps,
 ): Promise<SearchResponse> {
 	const exit = await Effect.runPromiseExit(searchEffect(query, options, deps));
-	if (exit._tag === "Success") {
+	if (Exit.isSuccess(exit)) {
 		return exit.value;
 	}
-	if (exit.cause._tag === "Fail") {
-		throw new Error(exit.cause.error.reason);
+	const failure = Cause.findErrorOption(exit.cause);
+	if (Option.isSome(failure)) {
+		throw new Error(failure.value.reason);
 	}
-	throw new Error("Search failed");
+	throw new Error(String(Cause.squash(exit.cause)));
 }
 
 function buildAbortSignal(timeoutMs: number, signal?: AbortSignal): AbortSignal {
@@ -124,7 +122,7 @@ function buildAbortSignal(timeoutMs: number, signal?: AbortSignal): AbortSignal 
 
 function toSearchInternalError(error: unknown): SearchUnavailableError {
 	const reason = error instanceof Error ? error.message : String(error);
-	return SearchUnavailableError.make({ reason });
+	return new SearchUnavailableError({ reason });
 }
 
 const searchWithGeminiApiCoreEffect = Effect.fn("GeminiSearch.searchWithGeminiApiCore")(function* (
@@ -185,8 +183,8 @@ function searchWithGeminiApiEffect(
 	deps: GeminiSearchDeps,
 ): Effect.Effect<SearchResponse | null> {
 	return searchWithGeminiApiCoreEffect(query, options, deps).pipe(
-		Effect.catchAll(() => Effect.succeed(null)),
-		Effect.catchAllDefect(() => Effect.succeed(null)),
+		Effect.catch(() => Effect.succeed(null)),
+		Effect.catchDefect(() => Effect.succeed(null)),
 	);
 }
 
@@ -215,8 +213,8 @@ function searchWithGeminiWebEffect(
 	deps: GeminiSearchDeps,
 ): Effect.Effect<SearchResponse | null> {
 	return searchWithGeminiWebCoreEffect(query, options, deps).pipe(
-		Effect.catchAll(() => Effect.succeed(null)),
-		Effect.catchAllDefect(() => Effect.succeed(null)),
+		Effect.catch(() => Effect.succeed(null)),
+		Effect.catchDefect(() => Effect.succeed(null)),
 	);
 }
 
@@ -283,8 +281,8 @@ const resolveGroundingChunksEffect = Effect.fn("GeminiSearch.resolveGroundingChu
 		let url = chunk.web.uri ?? "";
 		if (url.includes("vertexaisearch.cloud.google.com/grounding-api-redirect")) {
 			const resolved = yield* resolveRedirectEffect(url, signal, fetchImpl).pipe(
-				Effect.catchAll(() => Effect.succeed(null)),
-				Effect.catchAllDefect(() => Effect.succeed(null)),
+				Effect.catch(() => Effect.succeed(null)),
+				Effect.catchDefect(() => Effect.succeed(null)),
 			);
 			if (resolved) {
 				url = resolved;
@@ -336,12 +334,7 @@ interface SearchCliArgs {
 	readonly query: string;
 	readonly options: FullSearchOptions;
 	readonly json: boolean;
-	readonly help: boolean;
 }
-
-type SearchCliParseResult =
-	| { readonly kind: "ok"; readonly value: SearchCliArgs }
-	| { readonly kind: "error"; readonly message: string };
 
 export interface SearchCliDeps {
 	readonly executeSearch?: typeof search;
@@ -361,137 +354,6 @@ Options:
   -h, --help                     Show this help
 `;
 
-type SearchCliValueResult =
-	| { readonly kind: "ok"; readonly value: string }
-	| { readonly kind: "error"; readonly message: string };
-
-function parseCliValue(argv: readonly string[], index: number, flag: string): SearchCliValueResult {
-	const value = argv[index + 1];
-	if (!value) {
-		return { kind: "error", message: `Missing value for ${flag}` };
-	}
-	return { kind: "ok", value };
-}
-
-export function parseSearchCliArgs(argv: readonly string[]): SearchCliParseResult {
-	let query: string | null = null;
-	let provider: SearchProvider | undefined;
-	let numResults: number | undefined;
-	let recencyFilter: SearchOptions["recencyFilter"] | undefined;
-	const domainFilter: string[] = [];
-	let json = false;
-	let help = false;
-
-	for (let index = 0; index < argv.length; index++) {
-		const arg = argv[index];
-		switch (arg) {
-			case "-h":
-			case "--help":
-				help = true;
-				break;
-			case "--json":
-				json = true;
-				break;
-			case "-q":
-			case "--query": {
-				const parsed = parseCliValue(argv, index, arg);
-				if (parsed.kind === "error") return parsed;
-				query = parsed.value;
-				index += 1;
-				break;
-			}
-			case "--provider": {
-				const parsed = parseCliValue(argv, index, arg);
-				if (parsed.kind === "error") return parsed;
-				const decodedProvider = decodeGeminiCliProvider(parsed.value);
-				if (!decodedProvider) {
-					return {
-						kind: "error",
-						message: `Invalid provider \"${parsed.value}\"`,
-					};
-				}
-				provider = decodedProvider;
-				index += 1;
-				break;
-			}
-			case "--num-results": {
-				const parsed = parseCliValue(argv, index, arg);
-				if (parsed.kind === "error") return parsed;
-				const value = Number(parsed.value);
-				if (!Number.isInteger(value) || value < 1 || value > 20) {
-					return { kind: "error", message: "--num-results must be an integer from 1 to 20" };
-				}
-				numResults = value;
-				index += 1;
-				break;
-			}
-			case "--recency-filter":
-			case "--recency": {
-				const parsed = parseCliValue(argv, index, arg);
-				if (parsed.kind === "error") return parsed;
-				const decodedRecencyFilter = decodeRecencyFilter(parsed.value);
-				if (!decodedRecencyFilter) {
-					return {
-						kind: "error",
-						message: `Invalid recency filter \"${parsed.value}\"`,
-					};
-				}
-				recencyFilter = decodedRecencyFilter;
-				index += 1;
-				break;
-			}
-			case "--domain": {
-				const parsed = parseCliValue(argv, index, arg);
-				if (parsed.kind === "error") return parsed;
-				domainFilter.push(...parsed.value.split(",").map((item) => item.trim()).filter(Boolean));
-				index += 1;
-				break;
-			}
-			default:
-				if (arg.startsWith("-")) {
-					return { kind: "error", message: `Unknown flag ${arg}` };
-				}
-				if (query) {
-					return { kind: "error", message: `Unexpected positional argument \"${arg}\"` };
-				}
-				query = arg;
-		}
-	}
-
-	if (help) {
-		return {
-			kind: "ok",
-			value: {
-				query: query ?? "",
-				options: {},
-				json,
-				help: true,
-			},
-		};
-	}
-
-	if (!query) {
-		return { kind: "error", message: "Missing search query" };
-	}
-
-	const options: FullSearchOptions = {
-		...(provider ? { provider } : {}),
-		...(numResults !== undefined ? { numResults } : {}),
-		...(recencyFilter ? { recencyFilter } : {}),
-		...(domainFilter.length > 0 ? { domainFilter } : {}),
-	};
-
-	return {
-		kind: "ok",
-		value: {
-			query,
-			options,
-			json,
-			help: false,
-		},
-	};
-}
-
 function formatSearchCliOutput(response: SearchResponse): string {
 	const lines: string[] = [];
 	if (response.answer.trim().length > 0) {
@@ -506,9 +368,9 @@ function formatSearchCliOutput(response: SearchResponse): string {
 	return lines.join("\n");
 }
 
-class SearchCliParseError extends Schema.TaggedError<SearchCliParseError>()("SearchCliParseError", {
-	reason: Schema.String,
-}) {}
+class SearchCliParseError extends Data.TaggedError("SearchCliParseError")<{
+	readonly reason: string;
+}> {}
 
 function normalizeDomainFilters(rawDomains: ReadonlyArray<string>): ReadonlyArray<string> {
 	return rawDomains
@@ -520,42 +382,46 @@ function normalizeDomainFilters(rawDomains: ReadonlyArray<string>): ReadonlyArra
 function makeSearchCliParserCommand() {
 	let parsed: SearchCliArgs | null = null;
 
-	const queryOption = Options.text("query").pipe(Options.withAlias("q"), Options.optional);
-	const queryArg = Args.text({ name: "query" }).pipe(Args.optional);
-	const provider = Options.choice("provider", [...GEMINI_CLI_PROVIDER_VALUES]).pipe(Options.optional);
-	const numResults = Options.integer("num-results").pipe(Options.optional);
-	const recencyFilter = Options.choice("recency-filter", [...RECENCY_FILTER_VALUES]).pipe(Options.optional);
-	const domain = Options.text("domain").pipe(Options.repeated);
-	const json = Options.boolean("json");
+	const queryOption = Flag.optional(Flag.string("query").pipe(Flag.withAlias("q")));
+	const queryArg = Argument.optional(Argument.string("query"));
+	const provider = Flag.optional(Flag.choice("provider", GEMINI_CLI_PROVIDER_VALUES));
+	const numResults = Flag.optional(
+		Flag.integer("num-results").pipe(
+			Flag.filter(
+				(value) => Number.isInteger(value) && value >= 1 && value <= 20,
+				() => "--num-results must be an integer from 1 to 20",
+			),
+		),
+	);
+	const recencyFilter = Flag.optional(
+		Flag.choice("recency-filter", RECENCY_FILTER_VALUES).pipe(Flag.withAlias("recency")),
+	);
+	const domain = Flag.string("domain").pipe(Flag.between(0, 100));
+	const json = Flag.boolean("json");
 
 	const command = Command.make(
 		"gemini-search",
 		{ queryOption, queryArg, provider, numResults, recencyFilter, domain, json },
-		(options) =>
-			Effect.gen(function* () {
-				const query =
-					(Option.getOrUndefined(options.queryOption) ?? Option.getOrUndefined(options.queryArg) ?? "").trim();
-				if (!query) {
-					return yield* SearchCliParseError.make({ reason: "Missing search query" });
-				}
+		Effect.fn(function* (input) {
+			const query =
+				(Option.getOrUndefined(input.queryOption) ?? Option.getOrUndefined(input.queryArg) ?? "").trim();
+			if (!query) {
+				return yield* new SearchCliParseError({ reason: "Missing search query" });
+			}
 
-				const domainFilter = normalizeDomainFilters(options.domain);
-				yield* Effect.sync(() => {
-					parsed = {
-						query,
-						options: {
-							...(Option.isSome(options.provider) ? { provider: options.provider.value } : {}),
-							...(Option.isSome(options.numResults) ? { numResults: options.numResults.value } : {}),
-							...(Option.isSome(options.recencyFilter)
-								? { recencyFilter: options.recencyFilter.value }
-								: {}),
-							...(domainFilter.length > 0 ? { domainFilter: [...domainFilter] } : {}),
-						},
-						json: options.json,
-						help: false,
-					};
-				});
-			}),
+			parsed = {
+				query,
+				options: {
+					...(Option.isSome(input.provider) ? { provider: input.provider.value } : {}),
+					...(Option.isSome(input.numResults) ? { numResults: input.numResults.value } : {}),
+					...(Option.isSome(input.recencyFilter) ? { recencyFilter: input.recencyFilter.value } : {}),
+					...(input.domain.length > 0
+						? { domainFilter: [...normalizeDomainFilters(input.domain)] }
+						: {}),
+				},
+				json: input.json,
+			};
+		}),
 	);
 
 	return {
@@ -576,22 +442,21 @@ export async function runSearchCli(
 	}
 
 	const parser = makeSearchCliParserCommand();
-	const cli = Command.run(parser.command, {
-		name: "gemini-search",
+	const runCommand = Command.runWith(parser.command, {
 		version: "0.0.0",
 	});
 
 	const parseExit = await Effect.runPromiseExit(
-		cli(["node", "gemini-search", ...argv]).pipe(Effect.provide(NodeContext.layer)),
+		runCommand(argv).pipe(Effect.provide(NodeServices.layer)),
 	);
-	if (parseExit._tag === "Failure") {
-		const fallbackParse = parseSearchCliArgs(argv);
-		if (fallbackParse.kind === "error") {
-			stderr(`Error: ${fallbackParse.message}`);
-			stderr(SEARCH_CLI_USAGE.trimEnd());
-			return 1;
-		}
-		stderr("Error: Search command failed");
+	if (Exit.isFailure(parseExit)) {
+		const failure = Cause.findErrorOption(parseExit.cause);
+		const reason =
+			Option.isSome(failure) && failure.value instanceof SearchCliParseError
+				? failure.value.reason
+				: String(Cause.squash(parseExit.cause));
+		stderr(`Error: ${reason}`);
+		stderr(SEARCH_CLI_USAGE.trimEnd());
 		return 1;
 	}
 
@@ -621,8 +486,7 @@ export async function runSearchCli(
 		stdout(formatSearchCliOutput(response));
 		return 0;
 	} catch (error) {
-		const message = error instanceof Error ? error.message : String(error);
-		stderr(`Error: ${message}`);
+		stderr(`Error: ${error instanceof Error ? error.message : String(error)}`);
 		return 1;
 	}
 }

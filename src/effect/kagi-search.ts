@@ -1,4 +1,6 @@
-import { Effect, Schema } from "effect";
+import { NodeServices } from "@effect/platform-node";
+import { Cause, Data, Effect, Exit, Option } from "effect";
+import { Argument, Command, Flag } from "effect/unstable/cli";
 import {
 	SimpleRateLimiter,
 	type KagiSearchOptions as ClientKagiSearchOptions,
@@ -32,13 +34,10 @@ function runDefaultKagiSearch(
 	});
 }
 
-export class KagiSearchError extends Schema.TaggedError<KagiSearchError>()(
-	"KagiSearchError",
-	{
-		reason: Schema.String,
-		status: Schema.optional(Schema.Number),
-	},
-) {}
+export class KagiSearchError extends Data.TaggedError("KagiSearchError")<{
+	readonly reason: string;
+	readonly status?: number;
+}> {}
 
 export interface KagiSearchDeps {
 	readonly runSearch: (options: KagiSearchOptions) => Effect.Effect<KagiSearchResult, KagiSearchRuntimeError>;
@@ -324,7 +323,7 @@ export function kagiSearchEffect(
 			})
 			.pipe(
 				Effect.mapError((error) =>
-					KagiSearchError.make({
+					new KagiSearchError({
 						reason: error.reason,
 						status: error.status,
 					}),
@@ -352,65 +351,11 @@ interface KagiSearchCliArgs {
 	readonly query: string;
 	readonly lens?: string;
 	readonly json: boolean;
-	readonly help: boolean;
 }
 
-type KagiSearchCliParseResult =
-	| { readonly kind: "ok"; readonly value: KagiSearchCliArgs }
-	| { readonly kind: "error"; readonly message: string };
-
-export function parseKagiSearchCliArgs(args: readonly string[]): KagiSearchCliParseResult {
-	const queryIdx = args.indexOf("--query");
-	const lensIdx = args.indexOf("--lens");
-	const json = args.includes("--json");
-	const help = args.includes("--help") || args.includes("-h");
-
-	if (help) {
-		return {
-			kind: "ok",
-			value: { query: "", json: false, help: true },
-		};
-	}
-
-	let query = "";
-	if (queryIdx >= 0 && args[queryIdx + 1]) {
-		query = args[queryIdx + 1];
-	}
-
-	if (!query) {
-		const skipIndices = new Set<number>();
-		for (let i = 0; i < args.length; i++) {
-			if (args[i] === "--lens" || args[i] === "--query") {
-				skipIndices.add(i);
-				skipIndices.add(i + 1);
-			}
-			if (args[i] === "--json" || args[i] === "--help" || args[i] === "-h") {
-				skipIndices.add(i);
-			}
-		}
-		const positional = args.filter((_, i) => !skipIndices.has(i) && !args[i].startsWith("-"));
-		if (positional.length > 0) {
-			query = positional.join(" ");
-		}
-	}
-
-	if (!query.trim()) {
-		return {
-			kind: "error",
-			message: "Missing query. Use: bun src/effect/kagi-search.ts <query> [--lens <lens>] [--json]",
-		};
-	}
-
-	let lens: string | undefined;
-	if (lensIdx >= 0 && args[lensIdx + 1]) {
-		lens = args[lensIdx + 1];
-	}
-
-	return {
-		kind: "ok",
-		value: { query, lens, json, help: false },
-	};
-}
+class KagiSearchCliParseError extends Data.TaggedError("KagiSearchCliParseError")<{
+	readonly reason: string;
+}> {}
 
 export function printKagiSearchHelp(): void {
 	console.log(`Usage: bun src/effect/kagi-search.ts [options] <query>
@@ -441,31 +386,79 @@ Quirks:
 `);
 }
 
+function makeKagiSearchCliParserCommand() {
+	let parsed: KagiSearchCliArgs | null = null;
+
+	const queryOption = Flag.optional(Flag.string("query"));
+	const queryArgs = Argument.string("query").pipe(Argument.variadic());
+	const lens = Flag.optional(Flag.string("lens"));
+	const json = Flag.boolean("json");
+
+	const command = Command.make(
+		"kagi-search",
+		{ queryOption, queryArgs, lens, json },
+		Effect.fn(function* (input) {
+			const query =
+				(Option.getOrUndefined(input.queryOption) ?? input.queryArgs.join(" ")).trim();
+			if (!query) {
+				return yield* new KagiSearchCliParseError({
+					reason: "Missing query. Use: bun src/effect/kagi-search.ts <query> [--lens <lens>] [--json]",
+				});
+			}
+
+			parsed = {
+				query,
+				...(Option.isSome(input.lens) ? { lens: input.lens.value } : {}),
+				json: input.json,
+			};
+		}),
+	);
+
+	return {
+		command,
+		readParsed: () => parsed,
+	};
+}
+
 export async function runKagiSearchCli(args: readonly string[]): Promise<number> {
-	const parsed = parseKagiSearchCliArgs(args);
-
-	if (parsed.kind === "error") {
-		console.error(`Error: ${parsed.message}`);
-		return 1;
-	}
-
-	if (parsed.value.help) {
+	if (args.includes("--help") || args.includes("-h")) {
 		printKagiSearchHelp();
 		return 0;
 	}
 
-	const result = await Effect.runPromiseExit(
-		kagiSearchEffect(parsed.value.query, defaultDeps, {
-			lens: parsed.value.lens,
-		}),
+	const parser = makeKagiSearchCliParserCommand();
+	const runCommand = Command.runWith(parser.command, { version: "0.0.0" });
+	const parseExit = await Effect.runPromiseExit(
+		runCommand(args).pipe(Effect.provide(NodeServices.layer)),
 	);
+	if (Exit.isFailure(parseExit)) {
+		const failure = Cause.findErrorOption(parseExit.cause);
+		const reason =
+			Option.isSome(failure) && failure.value instanceof KagiSearchCliParseError
+				? failure.value.reason
+				: String(Cause.squash(parseExit.cause));
+			console.error(`Error: ${reason}`);
+			return 1;
+	}
 
-	if (result._tag === "Failure") {
-		console.error(`Search failed: ${result.cause._tag}`);
+	const parsed = parser.readParsed();
+	if (!parsed) {
+		console.error("Error: Search command failed");
 		return 1;
 	}
 
-	if (parsed.value.json) {
+	const result = await Effect.runPromiseExit(
+		kagiSearchEffect(parsed.query, defaultDeps, {
+			lens: parsed.lens,
+		}),
+	);
+
+	if (Exit.isFailure(result)) {
+		console.error(`Search failed: ${String(Cause.squash(result.cause))}`);
+		return 1;
+	}
+
+	if (parsed.json) {
 		console.log(JSON.stringify(result.value, null, 2));
 	} else {
 		console.log(result.value.answer);

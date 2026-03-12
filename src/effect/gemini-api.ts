@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { Config, ConfigProvider, Effect, Layer, Option } from "effect";
+import { Config, ConfigProvider, Effect, Exit, Option } from "effect";
 
 export const API_BASE = "https://generativelanguage.googleapis.com/v1beta";
 const CONFIG_PATH = join(homedir(), ".pi", "web-search.json");
@@ -25,21 +25,23 @@ function loadConfigJson(): unknown {
 	return cachedFileConfig;
 }
 
-function readApiKeyFromEnvironment(): string | null {
-	const option = Effect.runSync(Config.option(Config.string("GEMINI_API_KEY")));
-	return Option.isSome(option) ? option.value : null;
-}
-
-function readApiKeyFromFileConfig(rawConfig: unknown): string | null {
-	const program = Config.option(
-		Config.string("geminiApiKey").pipe(Config.orElse(() => Config.string("GEMINI_API_KEY"))),
-	).pipe(Effect.provide(Layer.setConfigProvider(ConfigProvider.fromJson(rawConfig))));
-
-	const exit = Effect.runSyncExit(program);
-	if (exit._tag === "Failure") {
+function readOptionalConfig(config: Config.Config<string>, provider: ConfigProvider.ConfigProvider): string | null {
+	const exit = Effect.runSyncExit(Config.option(config).parse(provider));
+	if (Exit.isFailure(exit)) {
 		return null;
 	}
 	return Option.isSome(exit.value) ? exit.value.value : null;
+}
+
+function readApiKeyFromEnvironment(): string | null {
+	return readOptionalConfig(Config.string("GEMINI_API_KEY"), ConfigProvider.fromEnv());
+}
+
+function readApiKeyFromFileConfig(rawConfig: unknown): string | null {
+	return readOptionalConfig(
+		Config.string("geminiApiKey").pipe(Config.orElse(() => Config.string("GEMINI_API_KEY"))),
+		ConfigProvider.fromUnknown(rawConfig),
+	);
 }
 
 export function getApiKey(): string | null {

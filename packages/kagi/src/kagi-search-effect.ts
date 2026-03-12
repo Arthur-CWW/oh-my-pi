@@ -1,4 +1,4 @@
-import { Effect, Schema } from "effect";
+import { Data, Effect } from "effect";
 import {
 	runSocketSearchWithAutoRefresh,
 	type KagiSearchOptions,
@@ -17,15 +17,12 @@ export const KAGI_SEARCH_RUNTIME_ERROR_CODES = [
 
 export type KagiSearchRuntimeErrorCode = (typeof KAGI_SEARCH_RUNTIME_ERROR_CODES)[number];
 
-export class KagiSearchRuntimeError extends Schema.TaggedError<KagiSearchRuntimeError>()(
-	"KagiSearchRuntimeError",
-	{
-		code: Schema.Literal(...KAGI_SEARCH_RUNTIME_ERROR_CODES),
-		reason: Schema.String,
-		status: Schema.optional(Schema.Number),
-		requestUrl: Schema.optional(Schema.String),
-	},
-) {}
+export class KagiSearchRuntimeError extends Data.TaggedError("KagiSearchRuntimeError")<{
+	readonly code: KagiSearchRuntimeErrorCode;
+	readonly reason: string;
+	readonly status?: number;
+	readonly requestUrl?: string;
+}> {}
 
 export interface KagiSearchAutoRefreshConfig {
 	readonly sessionPath?: string;
@@ -84,7 +81,7 @@ function mapTransportFailureToRuntimeError(cause: unknown): KagiSearchRuntimeErr
 	const code: KagiSearchRuntimeErrorCode = normalized.startsWith("kagi session unavailable")
 		? "session-unavailable"
 		: "request-failed";
-	return KagiSearchRuntimeError.make({
+	return new KagiSearchRuntimeError({
 		code,
 		reason,
 	});
@@ -101,7 +98,7 @@ export const runKagiSocketSearchEffect = Effect.fn("Kagi.runKagiSocketSearchEffe
 	});
 
 	if (!result.ok) {
-		return yield* KagiSearchRuntimeError.make({
+		return yield* new KagiSearchRuntimeError({
 			code: statusToErrorCode(result.status),
 			reason: statusToReason(result.status),
 			status: result.status,

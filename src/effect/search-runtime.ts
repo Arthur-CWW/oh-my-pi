@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { Effect, Either, Schedule, Schema } from "effect";
+import { Data, Effect, Result, Schedule } from "effect";
 import { searchEffect as geminiSearchEffect, type FullSearchOptions } from "./gemini-search.js";
 import { kagiSearchEffect, type SearchSuccess } from "./kagi-search.js";
 import { NoopSearchEventsService, type SearchEventsService } from "./search-events.js";
@@ -14,20 +14,17 @@ export interface SearchRuntimeResponse extends SearchSuccess {
 	readonly correlationId: string;
 }
 
-export class SearchProviderError extends Schema.TaggedError<SearchProviderError>()(
-	"SearchProviderError",
-	{
-		provider: Schema.Literal("kagi", "gemini"),
-		reason: Schema.String,
-	},
-) {}
+export class SearchProviderError extends Data.TaggedError("SearchProviderError")<{
+	readonly provider: "kagi" | "gemini";
+	readonly reason: string;
+}> {}
 
-export class SearchFallbackError extends Schema.TaggedError<SearchFallbackError>()("SearchFallbackError", {
-	primaryProvider: Schema.Literal("kagi"),
-	primaryReason: Schema.String,
-	fallbackProvider: Schema.Literal("gemini"),
-	fallbackReason: Schema.String,
-}) {}
+export class SearchFallbackError extends Data.TaggedError("SearchFallbackError")<{
+	readonly primaryProvider: "kagi";
+	readonly primaryReason: string;
+	readonly fallbackProvider: "gemini";
+	readonly fallbackReason: string;
+}> {}
 
 const SEARCH_RETRY_POLICY = Schedule.spaced("250 millis").pipe(Schedule.compose(Schedule.recurs(1)));
 
@@ -64,7 +61,7 @@ const runDefaultKagiSearch = Effect.fn("SearchRuntime.runDefaultKagiSearch")(fun
 		domainFilter: options.domainFilter,
 	}).pipe(
 		Effect.mapError((error) =>
-			SearchProviderError.make({
+			new SearchProviderError({
 				provider: "kagi",
 				reason: error.reason,
 			}),
@@ -78,7 +75,7 @@ const runDefaultGeminiSearch = Effect.fn("SearchRuntime.runDefaultGeminiSearch")
 ) {
 	return yield* geminiSearchEffect(query, toGeminiOptions(options)).pipe(
 		Effect.mapError((error) =>
-			SearchProviderError.make({
+			new SearchProviderError({
 				provider: "gemini",
 				reason: error.reason,
 			}),
@@ -153,17 +150,17 @@ const runProviderAttempt = Effect.fn("SearchRuntime.runProviderAttempt")(functio
 	});
 
 	const runProvider = provider === "kagi" ? deps.runKagiSearch : deps.runGeminiSearch;
-	const outcome = yield* Effect.either(runProvider(query, options).pipe(Effect.retry(SEARCH_RETRY_POLICY)));
+	const outcome = yield* Effect.result(runProvider(query, options).pipe(Effect.retry(SEARCH_RETRY_POLICY)));
 
-	if (Either.isRight(outcome)) {
+	if (Result.isSuccess(outcome)) {
 		yield* emitSearchEvent(deps, options, "ProviderSucceeded", {
 			provider,
-			resultCount: outcome.right.results.length,
+			resultCount: outcome.success.results.length,
 		});
 	} else {
 		yield* emitSearchEvent(deps, options, "ProviderFailed", {
 			provider,
-			reason: outcome.left.reason,
+			reason: outcome.failure.reason,
 		});
 	}
 
@@ -205,7 +202,7 @@ export const searchWithFallbackEffect = Effect.fn("SearchRuntime.searchWithFallb
 			},
 		);
 
-		if (Either.isRight(kagiOutcome)) {
+		if (Result.isSuccess(kagiOutcome)) {
 			yield* emitSearchEvent(
 				deps,
 				{ ...options, correlationId: context.correlationId },
@@ -213,10 +210,10 @@ export const searchWithFallbackEffect = Effect.fn("SearchRuntime.searchWithFallb
 				{
 					status: "success",
 					provider: "kagi",
-					resultCount: kagiOutcome.right.results.length,
+					resultCount: kagiOutcome.success.results.length,
 				},
 			);
-			return toSearchRuntimeResponse(kagiOutcome.right, "kagi", context.correlationId);
+			return toSearchRuntimeResponse(kagiOutcome.success, "kagi", context.correlationId);
 		}
 
 		yield* emitSearchEvent(
@@ -226,10 +223,10 @@ export const searchWithFallbackEffect = Effect.fn("SearchRuntime.searchWithFallb
 			{
 				status: "failed",
 				provider: "kagi",
-				reason: kagiOutcome.left.reason,
+				reason: kagiOutcome.failure.reason,
 			},
 		);
-		return yield* kagiOutcome.left;
+		return yield* kagiOutcome.failure;
 	}
 
 	if (provider === "gemini") {
@@ -253,7 +250,7 @@ export const searchWithFallbackEffect = Effect.fn("SearchRuntime.searchWithFallb
 			},
 		);
 
-		if (Either.isRight(geminiOutcome)) {
+		if (Result.isSuccess(geminiOutcome)) {
 			yield* emitSearchEvent(
 				deps,
 				{ ...options, correlationId: context.correlationId },
@@ -261,10 +258,10 @@ export const searchWithFallbackEffect = Effect.fn("SearchRuntime.searchWithFallb
 				{
 					status: "success",
 					provider: "gemini",
-					resultCount: geminiOutcome.right.results.length,
+					resultCount: geminiOutcome.success.results.length,
 				},
 			);
-			return toSearchRuntimeResponse(geminiOutcome.right, "gemini", context.correlationId);
+			return toSearchRuntimeResponse(geminiOutcome.success, "gemini", context.correlationId);
 		}
 
 		yield* emitSearchEvent(
@@ -274,10 +271,10 @@ export const searchWithFallbackEffect = Effect.fn("SearchRuntime.searchWithFallb
 			{
 				status: "failed",
 				provider: "gemini",
-				reason: geminiOutcome.left.reason,
+				reason: geminiOutcome.failure.reason,
 			},
 		);
-		return yield* geminiOutcome.left;
+		return yield* geminiOutcome.failure;
 	}
 
 	yield* emitSearchEvent(deps, { ...options, correlationId: context.correlationId }, "ProviderSelected", {
@@ -294,7 +291,7 @@ export const searchWithFallbackEffect = Effect.fn("SearchRuntime.searchWithFallb
 			correlationId: context.correlationId,
 		},
 	);
-	if (Either.isRight(kagiOutcome)) {
+	if (Result.isSuccess(kagiOutcome)) {
 		yield* emitSearchEvent(
 			deps,
 			{ ...options, correlationId: context.correlationId },
@@ -302,10 +299,10 @@ export const searchWithFallbackEffect = Effect.fn("SearchRuntime.searchWithFallb
 			{
 				status: "success",
 				provider: "kagi",
-				resultCount: kagiOutcome.right.results.length,
+				resultCount: kagiOutcome.success.results.length,
 			},
 		);
-		return toSearchRuntimeResponse(kagiOutcome.right, "kagi", context.correlationId);
+		return toSearchRuntimeResponse(kagiOutcome.success, "kagi", context.correlationId);
 	}
 
 	yield* emitSearchEvent(
@@ -315,7 +312,7 @@ export const searchWithFallbackEffect = Effect.fn("SearchRuntime.searchWithFallb
 		{
 			fromProvider: "kagi",
 			toProvider: "gemini",
-			reason: kagiOutcome.left.reason,
+			reason: kagiOutcome.failure.reason,
 		},
 	);
 	yield* emitSearchEvent(deps, { ...options, correlationId: context.correlationId }, "ProviderSelected", {
@@ -332,7 +329,7 @@ export const searchWithFallbackEffect = Effect.fn("SearchRuntime.searchWithFallb
 			correlationId: context.correlationId,
 		},
 	);
-	if (Either.isRight(geminiOutcome)) {
+	if (Result.isSuccess(geminiOutcome)) {
 		yield* emitSearchEvent(
 			deps,
 			{ ...options, correlationId: context.correlationId },
@@ -340,10 +337,10 @@ export const searchWithFallbackEffect = Effect.fn("SearchRuntime.searchWithFallb
 			{
 				status: "success",
 				provider: "gemini",
-				resultCount: geminiOutcome.right.results.length,
+				resultCount: geminiOutcome.success.results.length,
 			},
 		);
-		return toSearchRuntimeResponse(geminiOutcome.right, "gemini", context.correlationId);
+		return toSearchRuntimeResponse(geminiOutcome.success, "gemini", context.correlationId);
 	}
 
 	yield* emitSearchEvent(
@@ -353,16 +350,16 @@ export const searchWithFallbackEffect = Effect.fn("SearchRuntime.searchWithFallb
 		{
 			status: "failed",
 			primaryProvider: "kagi",
-			primaryReason: kagiOutcome.left.reason,
+			primaryReason: kagiOutcome.failure.reason,
 			fallbackProvider: "gemini",
-			fallbackReason: geminiOutcome.left.reason,
+			fallbackReason: geminiOutcome.failure.reason,
 		},
 	);
-	return yield* SearchFallbackError.make({
+	return yield* new SearchFallbackError({
 		primaryProvider: "kagi",
-		primaryReason: kagiOutcome.left.reason,
+		primaryReason: kagiOutcome.failure.reason,
 		fallbackProvider: "gemini",
-		fallbackReason: geminiOutcome.left.reason,
+		fallbackReason: geminiOutcome.failure.reason,
 	});
 });
 

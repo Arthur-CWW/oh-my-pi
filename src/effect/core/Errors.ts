@@ -1,35 +1,23 @@
-import { Schema } from "effect";
+import { Data } from "effect";
 
-export class ConfigReadError extends Schema.TaggedError<ConfigReadError>()(
-	"ConfigReadError",
-	{
-		path: Schema.String,
-		reason: Schema.String,
-	},
-) {}
+export class ConfigReadError extends Data.TaggedError("ConfigReadError")<{
+	readonly path: string;
+	readonly reason: string;
+}> {}
 
-export class ConfigParseError extends Schema.TaggedError<ConfigParseError>()(
-	"ConfigParseError",
-	{
-		path: Schema.String,
-		reason: Schema.String,
-	},
-) {}
+export class ConfigParseError extends Data.TaggedError("ConfigParseError")<{
+	readonly path: string;
+	readonly reason: string;
+}> {}
 
-export class MissingConfigError extends Schema.TaggedError<MissingConfigError>()(
-	"MissingConfigError",
-	{
-		key: Schema.String,
-		reason: Schema.String,
-	},
-) {}
+export class MissingConfigError extends Data.TaggedError("MissingConfigError")<{
+	readonly key: string;
+	readonly reason: string;
+}> {}
 
-export class EventStoreError extends Schema.TaggedError<EventStoreError>()(
-	"EventStoreError",
-	{
-		reason: Schema.String,
-	},
-) {}
+export class EventStoreError extends Data.TaggedError("EventStoreError")<{
+	readonly reason: string;
+}> {}
 
 export type ConfigError = ConfigReadError | ConfigParseError | MissingConfigError;
 

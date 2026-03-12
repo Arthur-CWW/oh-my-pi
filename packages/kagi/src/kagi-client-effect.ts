@@ -1,4 +1,4 @@
-import { Effect, Schema } from "effect";
+import { Data, Effect } from "effect";
 import {
 	captureSessionFromChrome,
 	discoverLenses,
@@ -48,16 +48,13 @@ export const KAGI_CLIENT_RUNTIME_OPERATIONS = [
 export type KagiClientRuntimeErrorCode = (typeof KAGI_CLIENT_RUNTIME_ERROR_CODES)[number];
 export type KagiClientRuntimeOperation = (typeof KAGI_CLIENT_RUNTIME_OPERATIONS)[number];
 
-export class KagiClientRuntimeError extends Schema.TaggedError<KagiClientRuntimeError>()(
-	"KagiClientRuntimeError",
-	{
-		code: Schema.Literal(...KAGI_CLIENT_RUNTIME_ERROR_CODES),
-		operation: Schema.Literal(...KAGI_CLIENT_RUNTIME_OPERATIONS),
-		reason: Schema.String,
-		status: Schema.optional(Schema.Number),
-		requestUrl: Schema.optional(Schema.String),
-	},
-) {}
+export class KagiClientRuntimeError extends Data.TaggedError("KagiClientRuntimeError")<{
+	readonly code: KagiClientRuntimeErrorCode;
+	readonly operation: KagiClientRuntimeOperation;
+	readonly reason: string;
+	readonly status?: number;
+	readonly requestUrl?: string;
+}> {}
 
 export interface KagiLensDiscoveryEffectOptions {
 	readonly query?: string;
@@ -203,7 +200,7 @@ function isSessionUnavailableReason(reason: string): boolean {
 }
 
 function mapSessionRefreshFailure(cause: unknown): KagiClientRuntimeError {
-	return KagiClientRuntimeError.make({
+	return new KagiClientRuntimeError({
 		code: "session-unavailable",
 		operation: "session:refresh",
 		reason: toErrorMessage(cause),
@@ -212,7 +209,7 @@ function mapSessionRefreshFailure(cause: unknown): KagiClientRuntimeError {
 
 function mapSessionLoadFailure(cause: unknown): KagiClientRuntimeError {
 	const reason = toErrorMessage(cause);
-	return KagiClientRuntimeError.make({
+	return new KagiClientRuntimeError({
 		code: isSessionUnavailableReason(reason) ? "session-unavailable" : "storage-failed",
 		operation: "session:load",
 		reason,
@@ -220,7 +217,7 @@ function mapSessionLoadFailure(cause: unknown): KagiClientRuntimeError {
 }
 
 function mapSessionSaveFailure(cause: unknown): KagiClientRuntimeError {
-	return KagiClientRuntimeError.make({
+	return new KagiClientRuntimeError({
 		code: "storage-failed",
 		operation: "session:save",
 		reason: toErrorMessage(cause),
@@ -232,7 +229,7 @@ function mapTransportFailure(
 	cause: unknown,
 ): KagiClientRuntimeError {
 	const reason = toErrorMessage(cause);
-	return KagiClientRuntimeError.make({
+	return new KagiClientRuntimeError({
 		code: isSessionUnavailableReason(reason) ? "session-unavailable" : "request-failed",
 		operation,
 		reason,
@@ -240,7 +237,7 @@ function mapTransportFailure(
 }
 
 function mapInvalidTargetFailure(cause: unknown): KagiClientRuntimeError {
-	return KagiClientRuntimeError.make({
+	return new KagiClientRuntimeError({
 		code: "invalid-target",
 		operation: "rules:video:target",
 		reason: toErrorMessage(cause),
@@ -269,7 +266,7 @@ function ensureExpectedStatus<T extends KagiHttpResult>(
 		return Effect.succeed(result);
 	}
 	return Effect.fail(
-		KagiClientRuntimeError.make({
+		new KagiClientRuntimeError({
 			code: statusToErrorCode(result.status),
 			operation,
 			reason: statusToReason(operation, result.status),

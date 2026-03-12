@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { Effect } from "effect";
+import { Cause, Effect, Exit } from "effect";
 import {
 	decodeWebSearchConfig,
 	makeEvent,
@@ -47,9 +47,10 @@ describe("effect core", () => {
 		delete process.env[key];
 		const result = await Effect.runPromiseExit(requireEnv(key));
 
-		expect(result._tag).toBe("Failure");
-		if (result._tag === "Failure") {
-			expect(result.cause._tag).toBe("Fail");
+		expect(Exit.isFailure(result)).toBe(true);
+		if (Exit.isFailure(result)) {
+			const failure = Cause.findErrorOption(result.cause);
+			expect(failure._tag).toBe("Some");
 		}
 	});
 
@@ -57,11 +58,12 @@ describe("effect core", () => {
 		const { layer, sink } = makeInMemoryObservability();
 		const correlationId = "corr-1";
 
-		const program = Effect.flatMap(Observability, (obs) =>
-			obs.publish(
+		const program = Effect.gen(function* () {
+			const obs = yield* Observability;
+			return yield* obs.publish(
 				makeEvent("SearchRequested", { query: "effect migration" }, correlationId, "session-1"),
-			),
-		);
+			);
+		});
 
 		await Effect.runPromise(Effect.provide(program, layer));
 

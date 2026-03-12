@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { basename } from "node:path";
-import { Effect, Schema } from "effect";
+import { Data, Effect, Result } from "effect";
 import { readChromeCookiesEffect } from "./chrome-cookies.js";
 
 const GEMINI_APP_URL = "https://gemini.google.com/app";
@@ -35,9 +35,9 @@ export interface GeminiWebAvailabilityDeps {
 	readonly readCookies: () => Effect.Effect<{ readonly cookies: CookieMap }, unknown>;
 }
 
-class GeminiWebError extends Schema.TaggedError<GeminiWebError>()("GeminiWebError", {
-	reason: Schema.String,
-}) {}
+class GeminiWebError extends Data.TaggedError("GeminiWebError")<{
+	readonly reason: string;
+}> {}
 
 const defaultGeminiWebAvailabilityDeps: GeminiWebAvailabilityDeps = {
 	readCookies: () => readChromeCookiesEffect().pipe(Effect.map((result) => ({ cookies: result.cookies }))),
@@ -55,7 +55,7 @@ function toErrorMessage(error: unknown): string {
 }
 
 function toGeminiWebError(error: unknown): GeminiWebError {
-	return GeminiWebError.make({ reason: toErrorMessage(error) });
+	return new GeminiWebError({ reason: toErrorMessage(error) });
 }
 
 export const isGeminiWebAvailableEffect = Effect.fn("GeminiWeb.isGeminiWebAvailable")(function* (
@@ -106,19 +106,19 @@ export const queryWithCookiesEffect = Effect.fn("GeminiWeb.queryWithCookies")(fu
 			options.signal,
 		);
 		if (fallback.errorMessage) {
-			return yield* GeminiWebError.make({ reason: fallback.errorMessage });
+			return yield* new GeminiWebError({ reason: fallback.errorMessage });
 		}
 		if (!fallback.text) {
-			return yield* GeminiWebError.make({ reason: "Gemini Web returned empty response (fallback model)" });
+			return yield* new GeminiWebError({ reason: "Gemini Web returned empty response (fallback model)" });
 		}
 		return fallback.text;
 	}
 
 	if (result.errorMessage) {
-		return yield* GeminiWebError.make({ reason: result.errorMessage });
+		return yield* new GeminiWebError({ reason: result.errorMessage });
 	}
 	if (!result.text) {
-		return yield* GeminiWebError.make({ reason: "Gemini Web returned empty response" });
+		return yield* new GeminiWebError({ reason: "Gemini Web returned empty response" });
 	}
 	return result.text;
 });
@@ -187,20 +187,20 @@ const runGeminiWebOnceEffect = Effect.fn("GeminiWeb.runGeminiWebOnce")(function*
 		return { text: "", errorMessage: `Gemini request failed: ${response.status}` };
 	}
 
-	const parsed = yield* Effect.either(
+	const parsed = yield* Effect.result(
 		Effect.try({
 			try: () => parseStreamGenerateResponse(rawText),
 			catch: toGeminiWebError,
 		}),
 	);
-	if (parsed._tag === "Right") {
-		return parsed.right;
+	if (Result.isSuccess(parsed)) {
+		return parsed.success;
 	}
 
 	return {
 		text: "",
 		errorCode: tryExtractErrorCode(rawText),
-		errorMessage: parsed.left.reason,
+		errorMessage: parsed.failure.reason,
 	};
 });
 
@@ -217,7 +217,7 @@ const fetchAccessTokenEffect = Effect.fn("GeminiWeb.fetchAccessToken")(function*
 		}
 	}
 
-	return yield* GeminiWebError.make({
+	return yield* new GeminiWebError({
 		reason: "Unable to authenticate with Gemini. Make sure you're signed into gemini.google.com in Chrome.",
 	});
 });
@@ -253,7 +253,7 @@ const fetchWithCookieRedirectsEffect = Effect.fn("GeminiWeb.fetchWithCookieRedir
 		});
 	}
 
-	return yield* GeminiWebError.make({ reason: `Too many redirects (>${maxRedirects})` });
+	return yield* new GeminiWebError({ reason: `Too many redirects (>${maxRedirects})` });
 });
 
 const uploadFileEffect = Effect.fn("GeminiWeb.uploadFile")(function* (
@@ -289,8 +289,8 @@ const uploadFileEffect = Effect.fn("GeminiWeb.uploadFile")(function* (
 		const text = yield* Effect.tryPromise({
 			try: () => response.text(),
 			catch: toGeminiWebError,
-		}).pipe(Effect.catchAll(() => Effect.succeed("")));
-		return yield* GeminiWebError.make({ reason: `File upload failed: ${response.status} (${text.slice(0, 200)})` });
+		}).pipe(Effect.catch(() => Effect.succeed("")));
+		return yield* new GeminiWebError({ reason: `File upload failed: ${response.status} (${text.slice(0, 200)})` });
 	}
 
 	const uploadId = yield* Effect.tryPromise({

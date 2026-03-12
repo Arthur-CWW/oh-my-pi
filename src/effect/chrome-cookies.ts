@@ -1,4 +1,6 @@
-import { Effect, Either, Schema } from "effect";
+import { NodeServices } from "@effect/platform-node";
+import { Cause, Data, Effect, Exit, Option, Result } from "effect";
+import { Argument, Command, Flag } from "effect/unstable/cli";
 import { platform } from "node:os";
 import puppeteer from "puppeteer-core";
 import { readLegacyGoogleCookies, type CookieMap } from "./chrome-cookies-legacy.js";
@@ -39,12 +41,9 @@ interface BrowserCookieRecord {
 	readonly expires: number;
 }
 
-export class ChromeCookiesError extends Schema.TaggedError<ChromeCookiesError>()(
-	"ChromeCookiesError",
-	{
-		reason: Schema.String,
-	},
-) {}
+export class ChromeCookiesError extends Data.TaggedError("ChromeCookiesError")<{
+	readonly reason: string;
+}> {}
 
 export interface CookieReadResult {
 	readonly cookies: CookieMap;
@@ -202,21 +201,21 @@ export function readChromeCookiesEffect(
 		const warnings: string[] = [];
 		let legacyCookies: CookieMap = {};
 
-		const legacyAttempt = yield* Effect.either(
+		const legacyAttempt = yield* Effect.result(
 			Effect.tryPromise({
 				try: () => deps.readLegacyGoogleCookies(),
 				catch: (cause) =>
-					ChromeCookiesError.make({
+					new ChromeCookiesError({
 						reason: toErrorMessage(cause),
 					}),
 			}),
 		);
-		if (Either.isRight(legacyAttempt) && legacyAttempt.right) {
-			legacyCookies = legacyAttempt.right.cookies;
-			warnings.push(...legacyAttempt.right.warnings);
+		if (Result.isSuccess(legacyAttempt) && legacyAttempt.success) {
+			legacyCookies = legacyAttempt.success.cookies;
+			warnings.push(...legacyAttempt.success.warnings);
 		}
-		if (Either.isLeft(legacyAttempt)) {
-			warnings.push(`Legacy cookie extraction failed: ${legacyAttempt.left.reason}`);
+		if (Result.isFailure(legacyAttempt)) {
+			warnings.push(`Legacy cookie extraction failed: ${legacyAttempt.failure.reason}`);
 		}
 
 		if (Object.keys(legacyCookies).length > 0) {
@@ -231,27 +230,27 @@ export function readChromeCookiesEffect(
 			warnings.push("Non-macOS platform detected; using Chrome DevTools cookie extraction fallback.");
 		}
 
-		const devToolsAttempt = yield* Effect.either(
+		const devToolsAttempt = yield* Effect.result(
 			Effect.tryPromise({
 				try: () => deps.readGoogleCookiesFromDevTools(debugUrl),
 				catch: (cause) =>
-					ChromeCookiesError.make({
+					new ChromeCookiesError({
 						reason: toErrorMessage(cause),
 					}),
 			}),
 		);
 
-		if (Either.isRight(devToolsAttempt)) {
-			warnings.push(...devToolsAttempt.right.warnings);
-			if (Object.keys(devToolsAttempt.right.cookies).length > 0) {
+		if (Result.isSuccess(devToolsAttempt)) {
+			warnings.push(...devToolsAttempt.success.warnings);
+			if (Object.keys(devToolsAttempt.success.cookies).length > 0) {
 				return {
-					cookies: devToolsAttempt.right.cookies,
+					cookies: devToolsAttempt.success.cookies,
 					warnings,
 					source: "devtools" as const,
 				};
 			}
 		} else {
-			warnings.push(`DevTools cookie extraction failed: ${devToolsAttempt.left.reason}`);
+			warnings.push(`DevTools cookie extraction failed: ${devToolsAttempt.failure.reason}`);
 		}
 
 		warnings.push("No Google auth cookies are currently available.");
@@ -266,12 +265,11 @@ export function readChromeCookiesEffect(
 interface CookiesCliArgs {
 	readonly names: ReadonlyArray<string>;
 	readonly json: boolean;
-	readonly help: boolean;
 }
 
-type CookiesCliParseResult =
-	| { readonly kind: "ok"; readonly value: CookiesCliArgs }
-	| { readonly kind: "error"; readonly message: string };
+class CookiesCliParseError extends Data.TaggedError("CookiesCliParseError")<{
+	readonly reason: string;
+}> {}
 
 export interface CookiesCliDeps {
 	readonly readCookies?: () => Promise<CookieReadResult>;
@@ -289,55 +287,38 @@ Options:
   -h, --help                   Show this help
 `;
 
-function parseCliValue(argv: readonly string[], index: number, flag: string): string {
-	const value = argv[index + 1];
-	if (!value) {
-		throw new Error(`Missing value for ${flag}`);
-	}
-	return value;
+function normalizeCookieNames(rawNames: ReadonlyArray<string>): ReadonlyArray<string> {
+	return rawNames
+		.flatMap((entry) => entry.split(","))
+		.map((entry) => entry.trim())
+		.filter((entry) => entry.length > 0);
 }
 
-export function parseCookiesCliArgs(argv: readonly string[]): CookiesCliParseResult {
-	const names: string[] = [];
-	let json = false;
-	let help = false;
+function makeCookiesCliParserCommand() {
+	let parsed: CookiesCliArgs | null = null;
 
-	try {
-		for (let index = 0; index < argv.length; index++) {
-			const arg = argv[index];
-			switch (arg) {
-				case "-h":
-				case "--help":
-					help = true;
-					break;
-				case "--json":
-					json = true;
-					break;
-				case "--names": {
-					const value = parseCliValue(argv, index, arg);
-					names.push(...value.split(",").map((name) => name.trim()).filter(Boolean));
-					index += 1;
-					break;
-				}
-				default:
-					if (arg.startsWith("-")) {
-						return { kind: "error", message: `Unknown flag ${arg}` };
-					}
-					names.push(arg);
-			}
-		}
-	} catch (error) {
-		const message = error instanceof Error ? error.message : String(error);
-		return { kind: "error", message };
-	}
+	const namesOption = Flag.optional(Flag.string("names"));
+	const nameArgs = Argument.string("name").pipe(Argument.variadic());
+	const json = Flag.boolean("json");
+
+	const command = Command.make(
+		"chrome-cookies",
+		{ namesOption, nameArgs, json },
+		Effect.fn(function* (input) {
+			const names = normalizeCookieNames([
+				...(Option.isSome(input.namesOption) ? [input.namesOption.value] : []),
+				...input.nameArgs,
+			]);
+			parsed = {
+				names: names.length > 0 ? names : [...DEFAULT_COOKIE_NAMES],
+				json: input.json,
+			};
+		}),
+	);
 
 	return {
-		kind: "ok",
-		value: {
-			names: names.length > 0 ? names : [...DEFAULT_COOKIE_NAMES],
-			json,
-			help,
-		},
+		command,
+		readParsed: () => parsed,
 	};
 }
 
@@ -345,32 +326,45 @@ export async function runCookiesCli(
 	argv: readonly string[],
 	deps: CookiesCliDeps = {},
 ): Promise<number> {
-	const parsed = parseCookiesCliArgs(argv);
 	const stdout = deps.stdout ?? ((text: string) => console.log(text));
 	const stderr = deps.stderr ?? ((text: string) => console.error(text));
+	if (argv.includes("--help") || argv.includes("-h")) {
+		stdout(COOKIES_CLI_USAGE.trimEnd());
+		return 0;
+	}
 
-	if (parsed.kind === "error") {
-		stderr(`Error: ${parsed.message}`);
+	const parser = makeCookiesCliParserCommand();
+	const runCommand = Command.runWith(parser.command, {
+		version: "0.0.0",
+	});
+	const parseExit = await Effect.runPromiseExit(
+		runCommand(argv).pipe(Effect.provide(NodeServices.layer)),
+	);
+	if (Exit.isFailure(parseExit)) {
+		const squashed = Cause.squash(parseExit.cause);
+		const reason = squashed instanceof CookiesCliParseError ? squashed.reason : String(squashed);
+		stderr(`Error: ${reason}`);
 		stderr(COOKIES_CLI_USAGE.trimEnd());
 		return 1;
 	}
 
-	if (parsed.value.help) {
-		stdout(COOKIES_CLI_USAGE.trimEnd());
-		return 0;
+	const parsed = parser.readParsed();
+	if (!parsed) {
+		stderr("Error: Cookie command failed");
+		return 1;
 	}
 
 	const readCookies = deps.readCookies ?? (() => Effect.runPromise(readChromeCookiesEffect()));
 
 	try {
 		const result = await readCookies();
-		const present = parsed.value.names.filter((name) => Boolean(result.cookies[name]));
-		const missing = parsed.value.names.filter((name) => !result.cookies[name]);
-		if (parsed.value.json) {
+		const present = parsed.names.filter((name) => Boolean(result.cookies[name]));
+		const missing = parsed.names.filter((name) => !result.cookies[name]);
+		if (parsed.json) {
 			stdout(
 				JSON.stringify(
 					{
-						requested: parsed.value.names,
+						requested: parsed.names,
 						present,
 						missing,
 						warnings: result.warnings,
@@ -386,7 +380,7 @@ export async function runCookiesCli(
 
 		const lines = [
 			`Found ${Object.keys(result.cookies).length} Google cookie(s).`,
-			`Requested present: ${present.length}/${parsed.value.names.length}`,
+			`Requested present: ${present.length}/${parsed.names.length}`,
 			`Source: ${result.source}`,
 		];
 		if (present.length > 0) {
@@ -401,8 +395,7 @@ export async function runCookiesCli(
 		stdout(lines.join("\n"));
 		return 0;
 	} catch (error) {
-		const message = error instanceof Error ? error.message : String(error);
-		stderr(`Error: ${message}`);
+		stderr(`Error: ${error instanceof Error ? error.message : String(error)}`);
 		return 1;
 	}
 }

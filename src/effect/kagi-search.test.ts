@@ -1,11 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { Effect } from "effect";
 import { KagiSearchRuntimeError } from "../../packages/kagi/src/kagi-search-effect.js";
-import {
-	kagiSearchEffect,
-	parseKagiSearchCliArgs,
-	type KagiSearchDeps,
-} from "./kagi-search.js";
+import { kagiSearchEffect, runKagiSearchCli, type KagiSearchDeps } from "./kagi-search.js";
 
 describe("kagi search effect", () => {
 	it("returns search results on success", async () => {
@@ -270,7 +266,7 @@ describe("kagi search effect", () => {
 		const mockDeps: KagiSearchDeps = {
 			runSearch: () =>
 				Effect.fail(
-					KagiSearchRuntimeError.make({
+					new KagiSearchRuntimeError({
 						code: "unauthorized",
 						reason: "Kagi session is unauthorized. Refresh your Kagi session and retry.",
 						status: 401,
@@ -283,44 +279,39 @@ describe("kagi search effect", () => {
 		expect(exit._tag).toBe("Failure");
 	});
 
-	it("parses CLI args with positional query", () => {
-		const parsed = parseKagiSearchCliArgs(["what", "is", "Effect", "TS"]);
-		expect(parsed.kind).toBe("ok");
-		if (parsed.kind === "ok") {
-			expect(parsed.value.query).toBe("what is Effect TS");
-			expect(parsed.value.json).toBe(false);
-			expect(parsed.value.help).toBe(false);
+	it("prints CLI help", async () => {
+		const stdout: string[] = [];
+		const stderr: string[] = [];
+		const log = console.log;
+		const err = console.error;
+		console.log = (value?: unknown) => stdout.push(String(value ?? ""));
+		console.error = (value?: unknown) => stderr.push(String(value ?? ""));
+		try {
+			const exitCode = await runKagiSearchCli(["--help"]);
+			expect(exitCode).toBe(0);
+			expect(stderr).toEqual([]);
+			expect(stdout.join("\n")).toContain("--lens <lens>");
+		} finally {
+			console.log = log;
+			console.error = err;
 		}
 	});
 
-	it("parses CLI args with --query flag", () => {
-		const parsed = parseKagiSearchCliArgs(["--query", "rust programming", "--json"]);
-		expect(parsed.kind).toBe("ok");
-		if (parsed.kind === "ok") {
-			expect(parsed.value.query).toBe("rust programming");
-			expect(parsed.value.json).toBe(true);
-		}
-	});
-
-	it("parses CLI args with --lens", () => {
-		const parsed = parseKagiSearchCliArgs(["--lens", "programming", "async rust"]);
-		expect(parsed.kind).toBe("ok");
-		if (parsed.kind === "ok") {
-			expect(parsed.value.lens).toBe("programming");
-			expect(parsed.value.query).toBe("async rust");
-		}
-	});
-
-	it("returns error for missing query", () => {
-		const parsed = parseKagiSearchCliArgs(["--json"]);
-		expect(parsed.kind).toBe("error");
-	});
-
-	it("parses help flag", () => {
-		const parsed = parseKagiSearchCliArgs(["--help"]);
-		expect(parsed.kind).toBe("ok");
-		if (parsed.kind === "ok") {
-			expect(parsed.value.help).toBe(true);
+	it("returns CLI error for missing query", async () => {
+		const stdout: string[] = [];
+		const stderr: string[] = [];
+		const log = console.log;
+		const err = console.error;
+		console.log = (value?: unknown) => stdout.push(String(value ?? ""));
+		console.error = (value?: unknown) => stderr.push(String(value ?? ""));
+		try {
+			const exitCode = await runKagiSearchCli(["--json"]);
+			expect(exitCode).toBe(1);
+			expect(stdout).toEqual([]);
+			expect(stderr.join("\n")).toContain("Missing query");
+		} finally {
+			console.log = log;
+			console.error = err;
 		}
 	});
 

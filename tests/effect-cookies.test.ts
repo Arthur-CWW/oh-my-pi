@@ -1,7 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { Effect } from "effect";
 import {
-	parseCookiesCliArgs,
 	readChromeCookiesEffect,
 	runCookiesCli,
 	selectGoogleCookies,
@@ -51,12 +50,17 @@ describe("effect chrome cookies", () => {
 		expect(cookies.NID).toBeUndefined();
 	});
 
-	it("parses CLI cookie names", () => {
-		const parsed = parseCookiesCliArgs(["--names", "A,B", "C"]);
-		expect(parsed.kind).toBe("ok");
-		if (parsed.kind === "ok") {
-			expect(parsed.value.names).toEqual(["A", "B", "C"]);
-		}
+	it("reports CLI validation/help through the command runner", async () => {
+		const output: string[] = [];
+		const errors: string[] = [];
+		const exitCode = await runCookiesCli(["--help"], {
+			stdout: (text) => output.push(text),
+			stderr: (text) => errors.push(text),
+		});
+
+		expect(exitCode).toBe(0);
+		expect(errors).toEqual([]);
+		expect(output[0]).toContain("--names <cookieA,cookieB>");
 	});
 
 	it("runs cookies CLI with injected reader", async () => {

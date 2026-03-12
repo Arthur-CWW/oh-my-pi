@@ -2,7 +2,7 @@ import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "bun:test";
-import { Effect } from "effect";
+import { Cause, Effect, Exit, Option } from "effect";
 import { makeSqliteEventStore } from "../src/effect/observability/EventStore.js";
 import {
 	makeInMemorySearchEvents,
@@ -65,7 +65,7 @@ describe("search runtime events", () => {
 					events: inMemory.service,
 					runKagiSearch: () =>
 						Effect.fail(
-							SearchProviderError.make({
+							new SearchProviderError({
 								provider: "kagi",
 								reason: "kagi unavailable",
 							}),
@@ -104,14 +104,14 @@ describe("search runtime events", () => {
 					events: inMemory.service,
 					runKagiSearch: () =>
 						Effect.fail(
-							SearchProviderError.make({
+							new SearchProviderError({
 								provider: "kagi",
 								reason: "kagi down",
 							}),
 						),
 					runGeminiSearch: () =>
 						Effect.fail(
-							SearchProviderError.make({
+							new SearchProviderError({
 								provider: "gemini",
 								reason: "gemini down",
 							}),
@@ -120,11 +120,12 @@ describe("search runtime events", () => {
 			),
 		);
 
-		expect(exit._tag).toBe("Failure");
-		if (exit._tag === "Failure") {
-			expect(exit.cause._tag).toBe("Fail");
-			if (exit.cause._tag === "Fail") {
-				expect(exit.cause.error._tag).toBe("SearchFallbackError");
+		expect(Exit.isFailure(exit)).toBe(true);
+		if (Exit.isFailure(exit)) {
+			const failure = Cause.findErrorOption(exit.cause);
+			expect(Option.isSome(failure)).toBe(true);
+			if (Option.isSome(failure)) {
+				expect(failure.value._tag).toBe("SearchFallbackError");
 			}
 		}
 		expect(inMemory.events.map((event) => event.name)).toEqual([

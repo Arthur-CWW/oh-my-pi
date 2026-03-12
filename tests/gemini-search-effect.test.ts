@@ -4,7 +4,6 @@ import { search as legacySearch } from "../src/old/gemini-search.js";
 import {
 	buildSearchPrompt,
 	extractSourceUrls,
-	parseSearchCliArgs,
 	runSearchCli,
 	search as effectSearch,
 	type GeminiSearchDeps,
@@ -71,29 +70,17 @@ describe("effect gemini-search", () => {
 		);
 	});
 
-	it("parses CLI flags for provider + filters", () => {
-		const parsed = parseSearchCliArgs([
-			"--query",
-			"effect typescript",
-			"--provider",
-			"gemini",
-			"--num-results",
-			"7",
-			"--recency-filter",
-			"month",
-			"--domain",
-			"effect.website,-example.com",
-		]);
-		expect(parsed.kind).toBe("ok");
-		if (parsed.kind === "ok") {
-			expect(parsed.value.query).toBe("effect typescript");
-			expect(parsed.value.options).toEqual({
-				provider: "gemini",
-				numResults: 7,
-				recencyFilter: "month",
-				domainFilter: ["effect.website", "-example.com"],
-			});
-		}
+	it("prints CLI validation errors for missing query", async () => {
+		const output: string[] = [];
+		const errors: string[] = [];
+		const exitCode = await runSearchCli([], {
+			stdout: (text) => output.push(text),
+			stderr: (text) => errors.push(text),
+		});
+
+		expect(exitCode).toBe(1);
+		expect(output).toEqual([]);
+		expect(errors[0]).toContain("Missing search query");
 	});
 
 	it("runs search CLI with injected search implementation", async () => {
