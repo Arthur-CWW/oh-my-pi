@@ -51,9 +51,13 @@ Current persistent preferences:
 - Use `effect-solutions` (plural) when invoking the local Effect solutions CLI (`effect-solution` is not present in this environment).
 - For Effect migrations/refactors, consult `effect-solutions` guidance first (`quick-start` + relevant topic docs such as `basics`, `services-and-layers`, `error-handling`, `config`) before implementing.
 - During implementation iterations, run **only scoped/filtered tests** for the feature being changed (file-level and, when useful, test-name filtering). Do **not** run the full suite repeatedly while iterating. Run the full mandatory validation suite once at handoff or when explicitly requested. Avoid live API/e2e validation runs unless the user explicitly asks for a manual pass.
+- Prefer tests to live close to the source they validate when practical (colocated `*.test.ts` beside `src/*` / package modules rather than only under the top-level `tests/` folder).
 - For interactive/TUI or long-running process validation, prefer **tmux-managed test sessions** (fixed pane size, scripted `send-keys`, `capture-pane` snapshots, explicit session cleanup) locally and over SSH.
 - Prefer **static module imports**; avoid dynamic/lazy `import()` unless technically required (and briefly justify when used).
 - Do not introduce dynamic imports in new Effect code paths; use static imports and Effect-native/database-integrated approaches where possible.
+- Keep provider-specific behavior, transport/session handling, and error classification inside provider package/module boundaries; `src/effect/*` runtime/entry adapters should consume typed provider errors and stay thin/provider-agnostic.
+- Prefer Effect-based provider package interfaces (including `packages/kagi/*` runtime surfaces); keep `Promise`/`async` only at explicit external boundaries.
+- Do not expose user-facing provider selection values like `"auto"`; omitted provider should continue to mean the default Kagi-first fallback flow.
 - Treat `src/old/*` as reference/stability baseline; avoid modifying it unless the user explicitly requests a legacy-path change.
 - When validating package installation behavior, default to **global `pi install` (no `-l`)** so settings are exercised under `~/.pi` (agent settings path), unless the user explicitly asks for project-local install behavior.
 - Keep fork repository metadata URLs aligned to the current git `origin` remote (owner/repo casing included), unless the user explicitly asks otherwise.

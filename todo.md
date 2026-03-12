@@ -68,3 +68,5 @@ pi tui/via the extension API.
 ----
 
 Ok, I gave some feedback on your suggestions, wdyt
+
+how can i test the cli by hand, can you update the docs, an cleanup

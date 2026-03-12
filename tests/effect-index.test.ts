@@ -14,7 +14,11 @@ interface ToolLike {
 		toolCallId: string,
 		params: Record<string, unknown>,
 		signal?: AbortSignal,
-	) => Promise<{ content: Array<{ type: string; text: string }>; details?: Record<string, unknown> }>;
+		onUpdate?: (update: { content: Array<{ type: string; text: string }>; details?: Record<string, unknown> }) => void,
+	) => Promise<{
+		content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>;
+		details?: Record<string, unknown>;
+	}>;
 }
 
 function registerWith(deps: EffectExtensionDeps): Map<string, ToolLike> {
@@ -61,6 +65,15 @@ const fakeDeps: EffectExtensionDeps = {
 				},
 			],
 		}),
+	fetchContent: (urls) =>
+		Effect.succeed(
+			urls.map((url, index) => ({
+				url,
+				title: `Title ${index + 1}`,
+				content: `Body ${index + 1} for ${url}`,
+				error: null,
+			})),
+		),
 	readCookies: () =>
 		Effect.succeed({
 			cookies: { "__Secure-1PSID": "x", "__Secure-1PSIDTS": "y" },
@@ -78,6 +91,7 @@ describe("effect shadow entry", () => {
 		const tools = registerWith(fakeDeps);
 		expect(tools.has("effect_event_store_smoke")).toBe(true);
 		expect(tools.has("web_search")).toBe(true);
+		expect(tools.has("fetch_content")).toBe(true);
 		expect(tools.has("chrome_cookies")).toBe(true);
 		expect(tools.has("get_search_content")).toBe(true);
 	});
@@ -197,6 +211,7 @@ describe("effect shadow entry", () => {
 					results: [{ title: "Result", url: "https://example.com", snippet: "" }],
 				});
 			},
+			fetchContent: fakeDeps.fetchContent,
 			readCookies: fakeDeps.readCookies,
 		});
 		const tool = tools.get("web_search");
@@ -217,6 +232,7 @@ describe("effect shadow entry", () => {
 	it("maps structured search dependency failures to tool errors", async () => {
 		const tools = registerWith({
 			search: () => Effect.fail({ reason: "provider-down" }),
+			fetchContent: fakeDeps.fetchContent,
 			readCookies: fakeDeps.readCookies,
 		});
 		const tool = tools.get("web_search");
@@ -256,6 +272,20 @@ describe("effect shadow entry", () => {
 		const result = await tool.execute("call-3", { names: ["__Secure-1PSID", "NID"] });
 		expect(result.details?.error).toBe(null);
 		expect(result.content[0]?.text).toContain("Present requested: 1/2");
+	});
+
+	it("validates fetch_content params with schema decode", async () => {
+		const tools = registerWith(fakeDeps);
+		const tool = tools.get("fetch_content");
+		expect(typeof tool?.execute).toBe("function");
+		if (typeof tool?.execute !== "function") throw new Error("missing execute");
+
+		const result = await tool.execute("call-fetch-2", { frames: 99 });
+		expect(result.content[0]?.text).toContain("Invalid parameters for fetch_content");
+		expect(result.details).toEqual({
+			error: "invalid-params",
+			reason: expect.stringContaining("frames"),
+		});
 	});
 
 	it("returns stored search content with legacy-compatible formatting", async () => {
@@ -356,7 +386,7 @@ describe("effect production cutover entry", () => {
 		try {
 			const tools = registerCutoverEntry();
 			expect(tools.has("web_search")).toBe(true);
-			expect(tools.has("fetch_content")).toBe(false);
+			expect(tools.has("fetch_content")).toBe(true);
 			expect(tools.has("get_search_content")).toBe(true);
 			expect(tools.has("chrome_cookies")).toBe(true);
 			expect(tools.has("effect_event_store_smoke")).toBe(true);

@@ -1,5 +1,27 @@
 # Kagi Unofficial Client Handoff (Session Summary)
 
+## Update: 2026-03-12
+
+### What changed this session
+
+- Added package-owned Effect wrappers for the remaining Kagi runtime helpers beyond search:
+  - `packages/kagi/src/kagi-client-effect.ts`
+  - session refresh/load/save
+  - lens discovery
+  - advanced-search redirect
+  - domain/video rule mutations
+- Kept provider-specific typed errors inside package scope:
+  - `session-unavailable`, `storage-failed`, `unauthorized`, `forbidden`, `rate-limited`, `http-error`, `request-failed`, `invalid-target`
+- Added package-level Effect coverage:
+  - `packages/kagi/src/kagi-client-effect.test.ts`
+  - covers session bootstrap/storage, lens discovery auth failure, advanced redirect success, rule transport failure, and invalid video target classification
+
+### Next follow-up
+
+- Wire these package Effect wrappers into additional provider-owned tooling/runtime entrypoints as needed (the Effect app layer remains thin and currently only consumes the search path).
+
+---
+
 ## Update: 2026-03-11
 
 ### What changed this session

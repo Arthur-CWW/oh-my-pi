@@ -6,8 +6,16 @@ import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { type ExtractedContent, type ExtractOptions, fetchAllContent } from "../old/extract.js";
 import { readChromeCookiesEffect, type CookieReadResult } from "./chrome-cookies.js";
 import { makeEvent, type ObservabilityEventName } from "./core/Observability.js";
+import {
+	executeFetchContent,
+	FetchContentExecutionError,
+	FetchContentParamsSchema,
+	type FetchContentParams,
+	type FetchContentToolResponse,
+} from "./fetch-content.js";
 import { type FullSearchOptions } from "./gemini-search.js";
 import { type SearchSuccess } from "./kagi-search.js";
 import { makeSqliteEventStore } from "./observability/EventStore.js";
@@ -113,8 +121,17 @@ type CookiesExecutionOutcome =
 	| { readonly ok: true; readonly value: CookieReadResult }
 	| { readonly ok: false; readonly error: CookiesToolExecutionError };
 
+type FetchContentExecutionOutcome =
+	| { readonly ok: true; readonly response: FetchContentToolResponse }
+	| { readonly ok: false; readonly error: FetchContentExecutionError };
+
 export interface EffectExtensionDeps {
 	readonly search: (query: string, options?: FullSearchOptions) => Effect.Effect<SearchResponse, unknown>;
+	readonly fetchContent: (
+		urls: ReadonlyArray<string>,
+		signal?: AbortSignal,
+		options?: ExtractOptions,
+	) => Effect.Effect<ReadonlyArray<ExtractedContent>, unknown>;
 	readonly readCookies: typeof readChromeCookiesEffect;
 }
 
@@ -335,6 +352,14 @@ function makeCookiesServiceLayer(deps: EffectExtensionDeps): Layer.Layer<Cookies
 
 const defaultDeps: EffectExtensionDeps = {
 	search: defaultSearch,
+	fetchContent: (urls, signal, options) =>
+		Effect.tryPromise({
+			try: () => fetchAllContent([...urls], signal, options),
+			catch: (cause) =>
+				FetchContentExecutionError.make({
+					reason: toErrorMessage(cause),
+				}),
+		}),
 	readCookies: readChromeCookiesEffect,
 };
 
@@ -642,6 +667,96 @@ function registerChromeCookiesTool(pi: ExtensionAPI, cookiesLayer: Layer.Layer<C
 	});
 }
 
+function registerFetchContentTool(pi: ExtensionAPI, deps: EffectExtensionDeps): void {
+	pi.registerTool({
+		name: "fetch_content",
+		label: "Fetch Content",
+		description:
+			"Fetch URL(s) and extract readable content as markdown. Supports YouTube video transcripts (with thumbnail), GitHub repository contents, and local video files (with frame thumbnail). Video frames can be extracted via timestamp/range or sampled across the entire video with frames alone. Falls back to Gemini for pages that block bots or fail Readability extraction. For YouTube and video files: ALWAYS pass the user's specific question via the prompt parameter — this directs the AI to focus on that aspect of the video, producing much better results than a generic extraction. Content is always stored and can be retrieved with get_search_content.",
+		parameters: Type.Object({
+			url: Type.Optional(Type.String({ description: "Single URL to fetch" })),
+			urls: Type.Optional(Type.Array(Type.String(), { description: "Multiple URLs (parallel)" })),
+			forceClone: Type.Optional(
+				Type.Boolean({
+					description: "Force cloning large GitHub repositories that exceed the size threshold",
+				}),
+			),
+			prompt: Type.Optional(
+				Type.String({
+					description:
+						"Question or instruction for video analysis (YouTube and video files). Pass the user's specific question here — e.g. 'describe the book shown at the advice for beginners section'. Without this, a generic transcript extraction is used which may miss what the user is asking about.",
+				}),
+			),
+			timestamp: Type.Optional(
+				Type.String({
+					description:
+						"Extract video frame(s) at a timestamp or time range. Single: '1:23:45', '23:45', or '85' (seconds). Range: '23:41-25:00' extracts evenly-spaced frames across that span (default 6). Use frames with ranges to control density; single+frames uses a fixed 5s interval. YouTube requires yt-dlp + ffmpeg; local videos require ffmpeg. Use a range when you know the approximate area but not the exact moment — you'll get a contact sheet to visually identify the right frame.",
+				}),
+			),
+			frames: Type.Optional(
+				Type.Integer({
+					minimum: 1,
+					maximum: 12,
+					description:
+						"Number of frames to extract. Use with timestamp range for custom density, with single timestamp to get N frames at 5s intervals, or alone to sample across the entire video. Requires yt-dlp + ffmpeg for YouTube, ffmpeg for local video.",
+				}),
+			),
+			model: Type.Optional(
+				Type.String({
+					description:
+						"Override the Gemini model for video/YouTube analysis (e.g. 'gemini-2.5-flash', 'gemini-3-flash-preview'). Defaults to config or gemini-3-flash-preview.",
+				}),
+			),
+		}),
+		async execute(_toolCallId, rawParams, signal, onUpdate) {
+			const decoded = await Effect.runPromise(decodeToolParams(FetchContentParamsSchema, rawParams));
+			if (decoded.ok === false) {
+				return {
+					content: [{ type: "text", text: `Invalid parameters for fetch_content.\n${decoded.message}` }],
+					details: {
+						error: "invalid-params",
+						reason: decoded.message,
+					},
+				};
+			}
+
+			const params: FetchContentParams = decoded.value;
+			const outcome: FetchContentExecutionOutcome = await Effect.runPromise(
+				executeFetchContent(
+					params,
+					{
+						signal,
+						onUpdate,
+						persistToSession: (data) => {
+							const api = pi as ExtensionAPI & {
+								readonly appendEntry?: (customType: string, data: unknown) => void;
+							};
+							api.appendEntry?.("web-search-results", data);
+						},
+					},
+					{ fetchContent: deps.fetchContent },
+				).pipe(
+					Effect.match({
+						onFailure: (error): FetchContentExecutionOutcome => ({ ok: false, error }),
+						onSuccess: (response): FetchContentExecutionOutcome => ({ ok: true, response }),
+					}),
+				),
+			);
+
+			if (outcome.ok === false) {
+				return {
+					content: [{ type: "text", text: `Error: ${outcome.error.reason}` }],
+					details: {
+						error: outcome.error.reason,
+					},
+				};
+			}
+
+			return outcome.response;
+		},
+	});
+}
+
 function registerGetSearchContentTool(pi: ExtensionAPI): void {
 	pi.registerTool({
 		name: "get_search_content",
@@ -687,6 +802,7 @@ export function registerEffectTools(
 	const searchLayer = makeSearchServiceLayer(deps);
 	const cookiesLayer = makeCookiesServiceLayer(deps);
 	registerChromeCookiesTool(pi, cookiesLayer);
+	registerFetchContentTool(pi, deps);
 	registerGetSearchContentTool(pi);
 	if (options.includeWebSearch !== false) {
 		registerWebSearchTool(pi, searchLayer);
@@ -707,8 +823,8 @@ export default function (pi: ExtensionAPI) {
 		const registerLegacy = loadLegacyRegistrar();
 		if (registerLegacy) {
 			registerLegacy(pi);
-			// Register Effect web_search last so it overrides legacy web_search while
-			// preserving the rest of the legacy tool surface during migration.
+			// Register Effect-owned migration tools after the legacy bridge so they override
+			// legacy implementations while preserving the rest of the legacy tool surface.
 			registerEffectTools(pi, defaultDeps, { includeWebSearch: true });
 			return;
 		}

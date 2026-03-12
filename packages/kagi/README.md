@@ -9,6 +9,7 @@ This folder is an isolated Kagi provider workspace.
   - `/socket/search` replay with browser-like headers/cookies
   - `/search/advanced` POST replay
   - domain/video personalization rule mutations (`/esr/*`)
+- `src/kagi-client-effect.ts` — Effect-native wrappers for session refresh/load/save, lens discovery, advanced-search redirect, and domain/video rule mutations with package-scoped typed errors (`session-unavailable`, `storage-failed`, auth/rate-limit/http/request failures, `invalid-target`)
 - `src/kagi-search-effect.ts` — Effect-native search boundary + Kagi-specific error classification (`session-unavailable`, auth/rate-limit/http/request failures)
 - `src/kagi-query-parser.ts` — Google-style operator parser that emits structured Kagi-compatible query filters
 - `src/kagi-log.ts` — run persistence + query/filter utilities

@@ -1,6 +1,6 @@
 # Migration Task Tracker
 
-_Last updated: 2026-03-10_
+_Last updated: 2026-03-12_
 
 State legend (symbol-only):
 - `[ ]` Open
@@ -64,6 +64,10 @@ State legend (symbol-only):
   - Result: Added `@effect/cli@0.73.2` plus required printer peers (`@effect/printer@0.47.0`, `@effect/printer-ansi@0.47.0`); pinned Effect package versions in `package.json` (`effect`, `@effect/platform`, `@effect/platform-node`, `@effect/schema`, `@effect/language-service`) to avoid cross-version drift during migration.
 - [@User] Extract `get_search_content` into an Effect-native tool path and keep legacy-output parity while bridge remains for `fetch_content`.
   - Result: Added flattened `src/effect/search-content.ts` with schema-first stored-result decoding + Effect.fn execution, registered Effect-owned `get_search_content` in `src/effect/index.ts` (overrides legacy tool when bridge is enabled and remains available when bridge is disabled), and expanded `tests/effect-index.test.ts` with legacy-format contract checks + schema-validation coverage.
+- [@User] Extract `fetch_content` into an Effect-native tool path while preserving legacy output/storage behavior.
+  - Result: Added flattened `src/effect/fetch-content.ts` with schema-first params, Effect-native execution, legacy-compatible output/storage formatting, and session persistence hooks; registered Effect-owned `fetch_content` in `src/effect/index.ts` so it overrides the legacy tool while the bridge remains and stays available when the bridge is disabled; added colocated `src/effect/fetch-content.test.ts`, kept entry-boundary validation in `tests/effect-index.test.ts`, and updated root/package test scripts to include colocated tests; validations run (`bun run typecheck`, `bun run test`, `bun run test:e2e:cookies`, `pi --no-extensions -e ./src/effect/index.ts --help`; Gemini e2e still requires local auth/API and fails without credentials in this environment).
+- [@User] Refactor remaining `packages/kagi/*` runtime helpers (session/lenses/advanced/rules) to Effect-native package interfaces with package-scoped typed errors.
+  - Result: Added `packages/kagi/src/kagi-client-effect.ts` with Effect-native wrappers for session refresh/load/save, lens discovery, advanced-search redirect, and domain/video rule mutations; kept provider-specific typed errors package-local (`session-unavailable`, `storage-failed`, `unauthorized`, `forbidden`, `rate-limited`, `http-error`, `request-failed`, `invalid-target`); added colocated `packages/kagi/src/kagi-client-effect.test.ts` and updated `packages/kagi/package.json`/`packages/kagi/README.md`; validations run (`bun run typecheck`, `bun run test`, `bun run test:e2e:cookies`, `pi --no-extensions -e ./src/effect/index.ts --help`; Gemini e2e still requires local auth/API and fails without credentials in this environment).
 - [@User] Refactor Kagi package surface to provide Effect-native search interface + provider-specific error classification; keep Effect app layer thin.
   - Result: Added `packages/kagi/src/kagi-search-effect.ts` with Effect-native `runKagiSocketSearchEffect` and typed Kagi-specific error classification (`session-unavailable`, `unauthorized`, `forbidden`, `rate-limited`, `http-error`, `request-failed`); switched `src/effect/kagi-search.ts` to consume this Effect interface (removing Kagi HTTP/session branching from Effect app layer); updated Kagi tests to inject Effect deps and added `tests/kagi-search-package-effect.test.ts` covering package-level error classification.
 - [@User] Keep Effect migration internals Effect-first and push `async`/`Promise` usage to explicit boundaries only.
