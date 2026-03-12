@@ -342,7 +342,7 @@ export interface SearchCliDeps {
 	readonly stderr?: (text: string) => void;
 }
 
-const SEARCH_CLI_USAGE = `Usage: bun src/effect/gemini-search.ts [options] [query]
+const SEARCH_CLI_USAGE = `Usage: bun scripts/gemini-search-cli.ts [options] [query]
 
 Options:
   -q, --query <text>             Search query

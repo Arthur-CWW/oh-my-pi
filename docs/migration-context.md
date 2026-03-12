@@ -165,12 +165,15 @@ Best next slice:
 ## Notes for next session
 
 - Working tree is dirty; inspect before changing anything.
-- `task-tracker.md` already records the v4/effect-smol migration slice as `[@User]`.
+- `task-tracker.md` already records the current fetch/index simplification slice as `[@User]`.
 - The next session should assume:
   - local effect v4 is active
   - direct `src/effect` CLIs are on `effect/unstable/cli`
-  - `vendor/effect-smol` is part of the working implementation right now
+  - `src/effect/fetch-content-runtime.ts` no longer depends on `packages/legacy-web-access/src/extract.js`
+  - the default Effect entrypoint no longer loads the legacy bridge
+  - `/websearch` + the activity widget are legacy-only/reference behavior for now; reintroducing them on the Effect path would be a deliberate new migration slice
+  - `vendor/effect-smol` remains the required read-only reference/source of truth
 
 ## Short resume prompt
 
-Continue the Effect cleanup by splitting more `src/effect/index.ts` tool wiring, reducing remaining `src/effect/fetch-content-runtime.ts` imports from `packages/legacy-web-access/src/*`, and simplifying any remaining unnecessary `src/effect/core/*` glue in favor of direct Effect APIs. Reuse local effect-smol docs/source only, validate with targeted tests first, then run the full handoff validation set.
+Continue the bridge-free Effect cleanup by splitting `src/effect/index.ts` into flatter registration/boundary modules, tightening the new schema-based fetch-content contracts/config/error handling around `src/effect/{github,pdf,video,youtube}-extract.ts`, and only touching `packages/legacy-web-access/*` if a parity/debug fix explicitly requires it. Reuse local effect-smol docs/source only, run targeted tests first, then run the handoff validation set (`bun run typecheck`, `bun run test`, `bun run test:e2e:cookies`, `pi --no-extensions -e ./src/effect/index.ts --help`; note Gemini e2e is still auth-blocked in this environment).

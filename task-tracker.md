@@ -19,11 +19,14 @@ State legend (symbol-only):
   - Result: tracker + state model added.
 
 - [x] Add Effect TS dependencies and scaffold core modules (`Config`, `Errors`, `Http`, `Observability`) with tests.
+- [@User] Document recurring Effect migration slop patterns starting from `src/effect/video-extract.ts` and map reusable cleanup targets across `src/effect/*`.
+  - Result: Added `docs/effect-migration-slop-patterns.md` with a video-extract-based smell ledger, Effect doc/source references, repo-wide hotspot queries, a current hotspot snapshot for `src/effect/*`, parallel work batches, and guardrails for distinguishing real internal slop from legitimate boundary adapters.
   
 - [@User] Remove dynamic `import("node:sqlite")` usage from Effect event store loader path.
   - Result: Reworked `src/effect/observability/EventStore.ts` loader to use static `createRequire`-based driver resolution (`bun:sqlite` first, `node:sqlite` fallback) with no runtime `import()` calls in the Effect path; preserved dual-runtime behavior and validated via typecheck + event-store/effect-index tests + full suite.
 - [x] Extract Effect search runtime with optional fail-open SearchEvents service (in-memory/SQLite sink) and wire `web_search` default path through it.
   - Result: Added `src/effect/search-runtime.ts` (Effect.fn-instrumented provider selection/fallback flow) and `src/effect/search-events.ts` (optional fail-open event service with noop/in-memory/SQLite paths); wired Effect entry default `web_search` through runtime + optional `PI_WEB_ACCESS_EVENT_DB_PATH` sink initialization; surfaced `correlationId` in `web_search` details; added `tests/search-runtime-events.test.ts` covering Kagi success, Kagi→Gemini fallback, total failure, and SQLite event persistence.
+- [@] Replace bespoke sqlite event-store driver shims with the Effect sqlite-node client, remove Effect-side direct-run detection helpers, and set up internal package aliases for cross-workspace imports.
 - [x] Replace raw tool param casts in `src/effect/index.ts` with Effect Schema boundary decoding and actionable validation errors.
   - Result: Added Effect Schema param contracts (`EventStoreSmokeParamsSchema`, `WebSearchParamsSchema`, `CookiesParamsSchema`) and runtime decode helper using `Schema.decodeUnknown` + `ParseResult.TreeFormatter`; removed raw `as` casts in tool execute paths; added consistent invalid-parameter responses and maintained existing success/error flows; expanded `tests/effect-index.test.ts` with schema-validation assertions for `effect_event_store_smoke`, `web_search`, and `chrome_cookies`.
 - [@User] Decouple Effect Gemini search path from `packages/legacy-web-access/src/{gemini-api,gemini-web}` by introducing Effect-owned Gemini API/Web modules (no dynamic imports).

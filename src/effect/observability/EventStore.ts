@@ -1,21 +1,9 @@
 import { mkdirSync } from "node:fs";
-import { createRequire } from "node:module";
 import { dirname } from "node:path";
-import { Data, Effect } from "effect";
+import { SqliteClient } from "@effect/sql-sqlite-bun";
+import { Data, Effect, Exit, Scope } from "effect";
+import * as Reactivity from "effect/unstable/reactivity/Reactivity";
 import { type SearchEvent, type SearchEventName } from "../search-event.js";
-
-type SqliteParam = string | number | bigint | boolean | Uint8Array | null;
-
-interface SqliteStatement {
-	readonly run: (...params: ReadonlyArray<SqliteParam>) => unknown;
-	readonly all: (...params: ReadonlyArray<SqliteParam>) => unknown;
-}
-
-interface SqliteDatabase {
-	readonly exec: (sql: string) => unknown;
-	readonly prepare: (sql: string) => SqliteStatement;
-	readonly close: () => void;
-}
 
 interface EventRow {
 	readonly event_id: string;
@@ -36,7 +24,7 @@ export interface SqliteEventStore {
 		correlationId: string,
 	) => Effect.Effect<ReadonlyArray<SearchEvent>, EventStoreError>;
 	readonly listRecent: (limit: number) => Effect.Effect<ReadonlyArray<SearchEvent>, EventStoreError>;
-	readonly close: Effect.Effect<void, EventStoreError>;
+	readonly close: Effect.Effect<void>;
 }
 
 export interface SqliteEventStoreOptions {
@@ -67,12 +55,18 @@ function toErrorMessage(error: unknown): string {
 	return String(error);
 }
 
+function toEventStoreError(context: string, error: unknown): EventStoreError {
+	return new EventStoreError({
+		reason: `${context}: ${toErrorMessage(error)}`,
+	});
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null;
 }
 
-function isEventName(value: string): value is SearchEventName {
-	return EVENT_NAMES.has(value as SearchEventName);
+function isEventName(value: unknown): value is SearchEventName {
+	return typeof value === "string" && EVENT_NAMES.has(value as SearchEventName);
 }
 
 function toTimestampNumber(value: number | bigint): number {
@@ -83,99 +77,51 @@ function asString(value: unknown): string | undefined {
 	return typeof value === "string" ? value : undefined;
 }
 
-async function loadSqliteDatabase(dbPath: string): Promise<SqliteDatabase> {
-	const require = createRequire(import.meta.url);
-	const errors: string[] = [];
-
-	try {
-		const bunSqlite = require("bun:sqlite") as {
-			readonly Database: new (path: string) => {
-				exec: (sql: string) => unknown;
-				prepare: (sql: string) => {
-					run: (...params: ReadonlyArray<SqliteParam>) => unknown;
-					all: (...params: ReadonlyArray<SqliteParam>) => unknown;
-				};
-				close: () => void;
-			};
-		};
-		const db = new bunSqlite.Database(dbPath);
-		return {
-			exec: (sql) => db.exec(sql),
-			prepare: (sql) => {
-				const statement = db.prepare(sql);
-				return {
-					run: (...params: ReadonlyArray<SqliteParam>) => statement.run(...params),
-					all: (...params: ReadonlyArray<SqliteParam>) => statement.all(...params),
-				};
-			},
-			close: () => db.close(),
-		};
-	} catch (cause) {
-		errors.push(`bun:sqlite unavailable: ${toErrorMessage(cause)}`);
-	}
-
-	try {
-		const nodeSqlite = require("node:sqlite") as typeof import("node:sqlite");
-		const db = new nodeSqlite.DatabaseSync(dbPath);
-		return {
-			exec: (sql) => db.exec(sql),
-			prepare: (sql) => {
-				const statement = db.prepare(sql);
-				return {
-					run: (...params: ReadonlyArray<SqliteParam>) =>
-						statement.run(...(params as ReadonlyArray<import("node:sqlite").SQLInputValue>)),
-					all: (...params: ReadonlyArray<SqliteParam>) =>
-						statement.all(...(params as ReadonlyArray<import("node:sqlite").SQLInputValue>)),
-				};
-			},
-			close: () => db.close(),
-		};
-	} catch (cause) {
-		errors.push(`node:sqlite unavailable: ${toErrorMessage(cause)}`);
-	}
-
-	throw new Error(`No sqlite driver available (${errors.join("; ")})`);
-}
-
-function decodeRow(row: EventRow): Effect.Effect<SearchEvent, EventStoreError> {
-	return Effect.try({
-		try: () => {
-			const eventName = row.name;
-			if (!isEventName(eventName)) {
-				throw new Error(`Unknown event name: ${row.name}`);
-			}
-
-			const payload = JSON.parse(row.payload_json) as unknown;
-			if (!isRecord(payload)) {
-				throw new Error("Event payload must be a JSON object");
-			}
-
-			return {
-				eventId: row.event_id,
-				timestamp: toTimestampNumber(row.timestamp),
-				correlationId: row.correlation_id,
-				sessionId: row.session_id ?? undefined,
-				name: eventName,
-				payload,
-			};
-		},
-		catch: (cause) =>
+const decodeRow = Effect.fn("EventStore.decodeRow")(function* (
+	row: EventRow,
+): Effect.fn.Return<SearchEvent, EventStoreError> {
+	if (!isEventName(row.name)) {
+		return yield* Effect.fail(
 			new EventStoreError({
-				reason: `Failed to decode event row: ${toErrorMessage(cause)}`,
+				reason: `Unknown event name: ${row.name}`,
 			}),
-	});
-}
+		);
+	}
 
-function decodeRows(rows: unknown): Effect.Effect<ReadonlyArray<SearchEvent>, EventStoreError> {
+	const payload = yield* Effect.try({
+		try: () => JSON.parse(row.payload_json) as unknown,
+		catch: (cause) => toEventStoreError("Failed to parse sqlite event payload", cause),
+	});
+	if (!isRecord(payload)) {
+		return yield* Effect.fail(
+			new EventStoreError({
+				reason: "Event payload must be a JSON object",
+			}),
+		);
+	}
+
+	return {
+		eventId: row.event_id,
+		timestamp: toTimestampNumber(row.timestamp),
+		correlationId: row.correlation_id,
+		sessionId: row.session_id ?? undefined,
+		name: row.name,
+		payload,
+	};
+});
+
+const decodeRows = Effect.fn("EventStore.decodeRows")(function* (
+	rows: unknown,
+): Effect.fn.Return<ReadonlyArray<SearchEvent>, EventStoreError> {
 	if (!Array.isArray(rows)) {
-		return Effect.fail(
+		return yield* Effect.fail(
 			new EventStoreError({
 				reason: "Expected sqlite query rows to be an array",
 			}),
 		);
 	}
 
-	return Effect.forEach(rows, (row) => {
+	return yield* Effect.forEach(rows, (row) => {
 		if (!isRecord(row)) {
 			return Effect.fail(
 				new EventStoreError({
@@ -213,119 +159,108 @@ function decodeRows(rows: unknown): Effect.Effect<ReadonlyArray<SearchEvent>, Ev
 
 		return decodeRow(eventRow);
 	});
-}
+});
 
-export function makeSqliteEventStore(
+export const makeSqliteEventStore = Effect.fn("EventStore.makeSqliteEventStore")(function* (
 	options: SqliteEventStoreOptions,
-): Effect.Effect<SqliteEventStore, EventStoreError> {
-	return Effect.tryPromise({
-		try: async () => {
-			if (options.createDir ?? true) {
-				mkdirSync(dirname(options.dbPath), { recursive: true });
-			}
+): Effect.fn.Return<SqliteEventStore, EventStoreError> {
+	if (options.createDir ?? true) {
+		yield* Effect.try({
+			try: () => mkdirSync(dirname(options.dbPath), { recursive: true }),
+			catch: (cause) => toEventStoreError("Failed to create sqlite event-store directory", cause),
+		});
+	}
 
-			const db = await loadSqliteDatabase(options.dbPath);
+	const scope = yield* Scope.make();
+	const sql = yield* SqliteClient.make({ filename: options.dbPath }).pipe(
+		Scope.provide(scope),
+		Effect.provide(Reactivity.layer),
+	);
 
-			db.exec("PRAGMA journal_mode = WAL;");
-			db.exec("PRAGMA synchronous = NORMAL;");
-			db.exec(`
-				CREATE TABLE IF NOT EXISTS events (
-					event_id TEXT PRIMARY KEY,
-					timestamp INTEGER NOT NULL,
-					correlation_id TEXT NOT NULL,
-					session_id TEXT,
-					name TEXT NOT NULL,
-					payload_json TEXT NOT NULL
-				);
-				CREATE INDEX IF NOT EXISTS idx_events_correlation_time
-					ON events (correlation_id, timestamp);
-				CREATE INDEX IF NOT EXISTS idx_events_time
-					ON events (timestamp);
-			`);
+	yield* sql`PRAGMA journal_mode = WAL;`.pipe(
+		Effect.as(undefined),
+		Effect.mapError((cause) => toEventStoreError("Failed to enable sqlite WAL mode", cause)),
+	);
+	yield* sql`PRAGMA synchronous = NORMAL;`.pipe(
+		Effect.as(undefined),
+		Effect.mapError((cause) => toEventStoreError("Failed to configure sqlite synchronous mode", cause)),
+	);
+	yield* sql`
+		CREATE TABLE IF NOT EXISTS events (
+			event_id TEXT PRIMARY KEY,
+			timestamp INTEGER NOT NULL,
+			correlation_id TEXT NOT NULL,
+			session_id TEXT,
+			name TEXT NOT NULL,
+			payload_json TEXT NOT NULL
+		)
+	`.pipe(
+		Effect.as(undefined),
+		Effect.mapError((cause) => toEventStoreError("Failed to initialize sqlite event table", cause)),
+	);
+	yield* sql`
+		CREATE INDEX IF NOT EXISTS idx_events_correlation_time
+		ON events (correlation_id, timestamp)
+	`.pipe(
+		Effect.as(undefined),
+		Effect.mapError((cause) =>
+			toEventStoreError("Failed to initialize sqlite correlation index", cause),
+		),
+	);
+	yield* sql`
+		CREATE INDEX IF NOT EXISTS idx_events_time
+		ON events (timestamp)
+	`.pipe(
+		Effect.as(undefined),
+		Effect.mapError((cause) => toEventStoreError("Failed to initialize sqlite time index", cause)),
+	);
 
-			const insert = db.prepare(`
-				INSERT INTO events (event_id, timestamp, correlation_id, session_id, name, payload_json)
-				VALUES (?, ?, ?, ?, ?, ?)
-			`);
-			const byCorrelation = db.prepare(`
-				SELECT event_id, timestamp, correlation_id, session_id, name, payload_json
-				FROM events
-				WHERE correlation_id = ?
-				ORDER BY timestamp ASC
-			`);
-			const recent = db.prepare(`
-				SELECT event_id, timestamp, correlation_id, session_id, name, payload_json
-				FROM events
-				ORDER BY timestamp DESC
-				LIMIT ?
-			`);
+	const append = (event: SearchEvent): Effect.Effect<void, EventStoreError> =>
+		sql`
+			INSERT INTO events (event_id, timestamp, correlation_id, session_id, name, payload_json)
+			VALUES (
+				${event.eventId},
+				${event.timestamp},
+				${event.correlationId},
+				${event.sessionId ?? null},
+				${event.name},
+				${JSON.stringify(event.payload)}
+			)
+		`.pipe(
+			Effect.as(undefined),
+			Effect.mapError((cause) => toEventStoreError("Failed to append event", cause)),
+		);
 
-			const append = (event: SearchEvent): Effect.Effect<void, EventStoreError> =>
-				Effect.try({
-					try: () => {
-						insert.run(
-							event.eventId,
-							event.timestamp,
-							event.correlationId,
-							event.sessionId ?? null,
-							event.name,
-							JSON.stringify(event.payload),
-						);
-					},
-					catch: (cause) =>
-						new EventStoreError({
-							reason: `Failed to append event: ${toErrorMessage(cause)}`,
-						}),
-				});
+	const listByCorrelationId = (
+		correlationId: string,
+	): Effect.Effect<ReadonlyArray<SearchEvent>, EventStoreError> =>
+		sql<EventRow>`
+			SELECT event_id, timestamp, correlation_id, session_id, name, payload_json
+			FROM events
+			WHERE correlation_id = ${correlationId}
+			ORDER BY timestamp ASC
+		`.pipe(
+			Effect.mapError((cause) =>
+				toEventStoreError("Failed to list events by correlation id", cause),
+			),
+			Effect.flatMap(decodeRows),
+		);
 
-			const listByCorrelationId = (
-				correlationId: string,
-			): Effect.Effect<ReadonlyArray<SearchEvent>, EventStoreError> =>
-				Effect.flatMap(
-					Effect.try({
-						try: () => byCorrelation.all(correlationId) as unknown,
-						catch: (cause) =>
-							new EventStoreError({
-								reason: `Failed to list events by correlation id: ${toErrorMessage(cause)}`,
-							}),
-					}),
-					decodeRows,
-				);
+	const listRecent = (limit: number): Effect.Effect<ReadonlyArray<SearchEvent>, EventStoreError> =>
+		sql<EventRow>`
+			SELECT event_id, timestamp, correlation_id, session_id, name, payload_json
+			FROM events
+			ORDER BY timestamp DESC
+			LIMIT ${Math.max(0, Math.floor(limit))}
+		`.pipe(
+			Effect.mapError((cause) => toEventStoreError("Failed to list recent events", cause)),
+			Effect.flatMap(decodeRows),
+		);
 
-			const listRecent = (
-				limit: number,
-			): Effect.Effect<ReadonlyArray<SearchEvent>, EventStoreError> =>
-				Effect.flatMap(
-					Effect.try({
-						try: () => recent.all(Math.max(0, Math.floor(limit))) as unknown,
-						catch: (cause) =>
-							new EventStoreError({
-								reason: `Failed to list recent events: ${toErrorMessage(cause)}`,
-							}),
-					}),
-					decodeRows,
-				);
-
-			const close = Effect.try({
-				try: () => {
-					db.close();
-				},
-				catch: (cause) =>
-					new EventStoreError({
-						reason: `Failed to close sqlite database: ${toErrorMessage(cause)}`,
-					}),
-			});
-
-			return {
-				append,
-				listByCorrelationId,
-				listRecent,
-				close,
-			};
-		},
-		catch: (cause) =>
-			new EventStoreError({
-				reason: `Failed to initialize sqlite event store: ${toErrorMessage(cause)}`,
-			}),
-	});
-}
+	return {
+		append,
+		listByCorrelationId,
+		listRecent,
+		close: Scope.close(scope, Exit.void),
+	};
+});

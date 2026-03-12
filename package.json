@@ -34,6 +34,9 @@
 	"publishConfig": {
 		"access": "public"
 	},
+	"imports": {
+		"#kagi/*": "./packages/kagi/src/*.ts"
+	},
 	"scripts": {
 		"format": "biome format --write .",
 		"format:check": "biome format .",
@@ -59,6 +62,7 @@
 	"dependencies": {
 		"@effect/platform-node": "file:vendor/effect-smol/packages/platform-node",
 		"@effect/platform-node-shared": "file:vendor/effect-smol/packages/platform-node-shared",
+		"@effect/sql-sqlite-bun": "4.0.0-beta.31",
 		"@mozilla/readability": "^0.5.0",
 		"effect": "file:vendor/effect-smol/packages/effect",
 		"linkedom": "^0.16.0",

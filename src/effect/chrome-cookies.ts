@@ -399,7 +399,6 @@ export async function runCookiesCli(
 		return 1;
 	}
 }
-
 function isBunDirectRun(fileStem: string): boolean {
 	if (typeof Bun === "undefined") return false;
 	const scriptPath = Bun.argv[1];

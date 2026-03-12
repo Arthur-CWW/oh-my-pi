@@ -81,12 +81,12 @@ The core modules can also run directly from the terminal with Bun:
 
 ```bash
 bun scripts/kagi-search-cli.ts "effect ts" --lens programming --json
-bun src/effect/gemini-search.ts --query "effect ts" --provider gemini
-bun src/effect/chrome-cookies.ts --names __Secure-1PSID,__Secure-1PSIDTS
+bun scripts/gemini-search-cli.ts --query "effect ts" --provider gemini
+bun scripts/chrome-cookies-cli.ts --names __Secure-1PSID,__Secure-1PSIDTS
 bun packages/legacy-web-access/src/extract.ts https://example.com/article --json
 ```
 
-Use `--help` on each file for available flags. Note: `packages/legacy-web-access/src/extract.ts` remains the direct CLI shim while `fetch_content` itself is now registered from the Effect entrypoint.
+Use `--help` on each CLI for available flags. Note: `packages/legacy-web-access/src/extract.ts` remains the direct CLI shim while `fetch_content` itself is now registered from the Effect entrypoint.
 
 ## Testing
 

@@ -65,7 +65,9 @@ Current persistent preferences:
 - Keep fork repository metadata URLs aligned to the current git `origin` remote (owner/repo casing included), unless the user explicitly asks otherwise.
 - Prefer Effect-native instrumentation (`Effect.fn`, spans, typed errors) plus lightweight local event-emission services for migration observability; avoid adding OpenTelemetry/export pipeline work unless explicitly requested.
 - Prefer direct standard Effect/platform APIs over repo-specific wrapper modules in `src/effect/core/*` and `src/effect/observability/*`; if a custom abstraction is not buying a real boundary, simplify/remove it instead of preserving it.
-- Keep internal migration flows Effect-native end-to-end; only convert to `Promise`/`async` at explicit external boundaries (tool `execute`, CLI main, interop wrappers).
+- Keep internal migration flows Effect-native end-to-end; only convert to `Promise`/`async` at explicit external boundaries (tool `execute`, CLI main, interop wrappers), and keep that conversion as close to the boundary as possible.
+- Prefer Effect-native structure over helper soup: use `Effect.fn`, `Effect.gen`, services/layers, `Schema`, `Config`, and combinator-based error handling instead of bespoke one-line wrapper functions, manual try/catch plumbing, or ad-hoc control-flow helpers when a standard Effect API already covers the case.
+- Prefer handling failures in the Effect error channel with combinators (`Effect.catch`, `catchTag`, `catchTags`, `mapError`, etc.) rather than custom out-of-band error branching where practical.
 - Observability/event services must be optional and fail-open: if emitting/persisting events fails, feature/tool behavior must continue.
 - Prefer schema-first boundaries: define Effect `Schema` once and derive runtime validation/decoding + TypeScript types from it where serde/input contracts exist.
 - Prefer Effect `Schema` for parsing/serialization work when practical; avoid ad-hoc JSON/shape parsing when a shared schema boundary would clarify the contract.
@@ -75,6 +77,8 @@ Current persistent preferences:
 - For standalone/dual-use tooling paths, prefer the local Effect CLI modules from `vendor/effect-smol` (currently `effect/unstable/cli` in the v4 beta repo) over bespoke argument parsing or `@effect/cli`; use hand-rolled parsers only as temporary migration shims.
 - Prefer Effect Config (`Config`, `Schema.Config`, `ConfigProvider`) over ad-hoc env/json config readers for new or refactored config surfaces.
 - Prefer migrating new/refactored Effect code toward the local `vendor/effect-smol` v4 stack/package surfaces rather than adding more dependency on the current v3-era split packages.
+- Standardize new/refactored runtime code on **Node-oriented Effect interfaces**; use Bun for local execution/compilation/test runs, but do not preserve separate Bun-vs-Node implementation paths unless the user explicitly asks. Prefer Node-side Effect packages/APIs (for example `@effect/sql-sqlite-node`) over bespoke dual-runtime shims.
+- Avoid ad-hoc direct-run detection helpers (`typeof Bun`, `Bun.argv[1]`, filename sniffing). Keep modules importable and expose explicit CLI/program entrypoints via dedicated scripts or standard Effect CLI / runtime mains instead.
 - Prefer shared/effect-owned helpers over importing implementation modules from `packages/legacy-web-access/src/*` into new Effect code; if both paths need the same utility, extract it to a neutral shared module or make the legacy package delegate to the shared/effect-owned implementation instead of the reverse.
 - `ast-grep` is available and you should use it liberally :)
 - when you see an slop code issue, and you think it can be fixed easily with ast-grep , query and fix it right away

@@ -1,6 +1,6 @@
-import { rmSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { describe, expect, it } from "bun:test";
 import { Effect } from "effect";
 import { makeSearchEvent } from "../src/effect/search-event.js";
@@ -63,5 +63,22 @@ describe("sqlite event store", () => {
 
 		await Effect.runPromise(store.close);
 		rmSync(dbPath, { force: true });
+	});
+
+	it("creates the parent directory for a sqlite database path by default", async () => {
+		const dbPath = join(
+			tmpdir(),
+			`pi-web-access-event-store-dir-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+			"nested",
+			"events.sqlite",
+		);
+		const parentDir = dirname(dbPath);
+		const store = await Effect.runPromise(makeSqliteEventStore({ dbPath }));
+
+		expect(existsSync(dbPath)).toBe(true);
+		expect(existsSync(parentDir)).toBe(true);
+
+		await Effect.runPromise(store.close);
+		rmSync(dirname(parentDir), { recursive: true, force: true });
 	});
 });

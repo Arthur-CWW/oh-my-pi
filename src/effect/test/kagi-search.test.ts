@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { Effect } from "effect";
-import { KagiSearchRuntimeError } from "../../../packages/kagi/src/kagi-search-effect.js";
+import { KagiSearchRuntimeError } from "#kagi/kagi-search-effect";
 import { kagiSearchEffect, runKagiSearchCli, type KagiSearchDeps } from "../kagi-search.js";
 
 describe("kagi search effect", () => {

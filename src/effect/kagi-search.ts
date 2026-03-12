@@ -5,17 +5,17 @@ import {
 	SimpleRateLimiter,
 	type KagiSearchOptions as ClientKagiSearchOptions,
 	type KagiSearchResult as ClientKagiSearchResult,
-} from "../../packages/kagi/src/kagi-client.js";
+} from "#kagi/kagi-client";
 import {
 	KagiSearchRuntimeError,
 	runKagiSocketSearchEffect,
-} from "../../packages/kagi/src/kagi-search-effect.js";
+} from "#kagi/kagi-search-effect";
 import {
 	applyDomainFilterToQuery,
 	mergeDomainFilters,
 	parseGoogleStyleQuery,
 	type StructuredKagiSearchQuery,
-} from "../../packages/kagi/src/kagi-query-parser.js";
+} from "#kagi/kagi-query-parser";
 
 type KagiSearchOptions = Pick<
 	ClientKagiSearchOptions,
@@ -473,4 +473,3 @@ export async function runKagiSearchCli(args: readonly string[]): Promise<number>
 
 	return 0;
 }
-

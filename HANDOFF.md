@@ -1,82 +1,83 @@
 # Handoff (Migration Context)
 
-_Last updated: 2026-02-20_
+_Last updated: 2026-03-12_
 
 ## What was completed in this pass
 
-1. **Production entrypoint cutover completed**
-   - `package.json -> pi.extensions[0]` switched from `./packages/legacy-web-access/src/index.ts` to `./src/effect/index.ts`.
+1. **Remaining fetch-content legacy extractor dependency removed**
+   - `src/effect/fetch-content-runtime.ts` no longer imports `packages/legacy-web-access/src/extract.js`.
+   - Added Effect-owned extractor modules:
+     - `src/effect/github-api.ts`
+     - `src/effect/github-extract.ts`
+     - `src/effect/pdf-extract.ts`
+     - `src/effect/video-extract.ts`
+     - `src/effect/youtube-extract.ts`
+   - Added shared schema/config helpers:
+     - `src/shared/fetch-content-contracts.ts`
+     - `src/effect/fetch-content-config.ts`
+     - `src/effect/fetch-content-utils.ts`
 
-2. **Effect entrypoint made production-safe with compatibility bridge**
-   - `src/effect/index.ts` now attempts to load/register the legacy package entry (`packages/legacy-web-access/src/index.ts`) first.
-   - Effect-only tools are still added (`chrome_cookies`, `effect_event_store_smoke`).
-   - Effect `web_search` registration is disabled when legacy tools are present to avoid clobbering legacy behavior during cutover window.
+2. **Default Effect entrypoint is now bridge-free**
+   - Removed the legacy registrar / bridge from `src/effect/index.ts`.
+   - The default entrypoint now registers only the Effect-owned tool surface.
+   - Added an Effect-owned `/search` command for browsing stored search/fetch results.
+   - The legacy `/websearch` browser-curation flow and activity widget remain reference-only under `packages/legacy-web-access/src/index.ts`.
 
-3. **Cutover contract tests added/updated**
-   - `tests/effect-index.test.ts` now validates:
-     - Effect tool registration (shadow path)
-     - Production cutover tool surface includes legacy tools + Effect extras
-     - package entrypoint points to `./src/effect/index.ts`
+3. **Legacy/reference tests moved out of top-level `tests/`**
+   - Moved legacy/reference-only tests to `packages/legacy-web-access/test/*`.
+   - Moved legacy snapshots to `packages/legacy-web-access/test/snapshots/*`.
+   - Updated TS include lists so the legacy package test folder is typechecked.
 
-4. **Tracker + agent preferences updated**
-   - `task-tracker.md`: cutover task moved to `[@User]` with result note.
-   - `AGENTS.md`: added persistent preference that the local CLI binary is `effect-solutions` (plural).
+4. **Legacy package marked reference-only**
+   - Added `packages/legacy-web-access/README.md` explaining that legacy code is retained for parity/debug reference and should not be modified unless explicitly needed.
+
+5. **Repo guidance/preferences updated**
+   - `AGENTS.md` now explicitly records:
+     - prefer Effect `Schema` for parsing/serialization work when practical
+     - treat `packages/legacy-web-access/*` as reference-only by default
 
 ## Current architecture
 
-- Legacy implementation: `packages/legacy-web-access/src/*` (retained for parity/debug + compatibility bridge)
-- Effect implementation: `src/effect/*` (current extension entrypoint)
-- Extension entry in package config: `./src/effect/index.ts`
+- Default extension entrypoint: `src/effect/index.ts`
+- Legacy reference/debug package: `packages/legacy-web-access/src/*`
+- Effect fetch-content runtime special cases are now local to `src/effect/*`
+- Shared stored-result helpers remain in `src/shared/stored-results.ts`
+- Shared fetch-content contracts now live in `src/shared/fetch-content-contracts.ts`
 
-## Validation commands run (all passed)
+## Validation commands run in the latest pass
 
 ```bash
-bun test tests/effect-index.test.ts
 bun run typecheck
 bun run test
 bun run test:e2e:cookies
 bun run test:e2e:search:gemini
-bun run test:e2e:effect:help
-bun run test:e2e:cookies:effect
-bun run test:e2e:search:gemini:effect
 pi --no-extensions -e ./src/effect/index.ts --help
-pi --no-extensions -e ./packages/legacy-web-access/src/index.ts --help
 ```
 
-## Test status snapshot
+## Latest validation status
 
-- `bun test tests`: **36 pass, 0 fail**
-- Legacy e2e cookies/search: pass
-- Effect e2e cookies/search: pass
-- Effect CLI load: pass
-- Legacy CLI load: pass
-
-## Files touched in this pass
-
-- `src/effect/index.ts`
-- `tests/effect-index.test.ts`
-- `package.json`
-- `AGENTS.md`
-- `task-tracker.md`
-- `src/effect/README.md`
-- `docs/migration-context.md`
-- `docs/migration-spec.md`
-- `docs/effect-migration-prep.md`
-- `HANDOFF.md`
+- ✅ `bun run typecheck`
+- ✅ `bun run test`
+- ✅ `bun run test:e2e:cookies`
+- ❌ `bun run test:e2e:search:gemini` (blocked by missing Gemini auth/API in this environment)
+- ✅ `pi --no-extensions -e ./src/effect/index.ts --help`
 
 ## Important docs to start next session
 
 - `AGENTS.md`
 - `task-tracker.md`
-- `docs/migration-spec.md`
 - `docs/migration-context.md`
+- `docs/migration-spec.md`
 - `docs/effect-migration-prep.md`
 - `docs/references/effect-llms.txt`
+- `packages/legacy-web-access/README.md`
 
 ## Recommended next task
 
-1. User confirm current `[@User]` tasks to move them to `[x]`.
-2. Continue bridge-free Effect cleanup:
-   - split `src/effect/index.ts` further now that tool + `/search` command registration are fully Effect-owned
-   - tighten shared fetch-content contracts/config/error handling around the new Effect-owned GitHub/PDF/YouTube/local-video modules
-   - keep `packages/legacy-web-access/*` reference-only unless a parity/debug fix is explicitly needed
+1. Split `src/effect/index.ts` further now that tool + command registration are fully Effect-owned.
+2. Tighten the schema/config/error boundaries around the new Effect-owned fetch special-case modules:
+   - `src/effect/github-extract.ts`
+   - `src/effect/pdf-extract.ts`
+   - `src/effect/video-extract.ts`
+   - `src/effect/youtube-extract.ts`
+3. Keep `packages/legacy-web-access/*` stable/reference-only unless a parity/debug fix explicitly requires touching it.
