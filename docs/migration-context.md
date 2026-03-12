@@ -55,7 +55,24 @@ Tests were updated accordingly:
 - `tests/effect-cookies.test.ts`
 - `src/effect/kagi-search.test.ts`
 
-### 4) Repo guidance/preferences updated
+### 4) Effect entry/test/storage cleanup pass
+
+- Moved Effect slice tests out of colocated files into adjacent test folders:
+  - `src/effect/test/fetch-content.test.ts`
+  - `src/effect/test/fetch-content-runtime.test.ts`
+  - `src/effect/test/kagi-search.test.ts`
+- Removed the old colocated test files under `src/effect/*.test.ts`.
+- Extracted fetch-content render helpers out of `src/effect/index.ts` into `src/effect/fetch-content-render.ts`.
+- Introduced neutral shared stored-result helpers in `src/shared/stored-results.ts`.
+- Rewired Effect code to use the shared storage module instead of importing from `src/old/storage.ts`:
+  - `src/effect/fetch-content.ts`
+  - `src/effect/search-content.ts`
+- Kept `src/old/storage.ts` as a thin legacy wrapper for session restore + re-exports.
+- Removed low-value tests encountered in this pass:
+  - CLI help-string assertions in Effect CLI tests
+  - standalone storage helper test (`tests/storage.test.ts`)
+
+### 5) Repo guidance/preferences updated
 
 - `AGENTS.md` now points Effect work at:
   - `vendor/effect-smol/LLMS.md`
@@ -63,6 +80,8 @@ Tests were updated accordingly:
   - matching source in `vendor/effect-smol/packages/*`
 - Top-level `tests/` remains repo-level/cross-package coverage.
 - Package-owned Kagi tests remain under `packages/kagi/test`.
+- Effect/runtime slice tests should prefer adjacent `test/` folders (for example `src/effect/test`) instead of colocated `*.test.ts`.
+- Use `ast-grep` for repetitive structural cleanup/refactor passes.
 
 ## Validation status from this session
 
@@ -102,11 +121,13 @@ Do not assume a clean submodule/vendor state.
 ## Recommended next refactor
 
 Best next slice:
-1. **Further simplify `src/effect/index.ts`**
-   - it still contains too much tool wiring / formatting / boundary logic in one file
-   - split only where it clearly reduces complexity without recreating barrel-folder sprawl
-2. After that, continue simplifying the Effect-owned fetch/search boundaries where there is still migration glue left.
-3. Keep `src/old/*` untouched.
+1. **Continue simplifying `src/effect/index.ts` tool wiring**
+   - the fetch-content render helpers are now split out, but entry/tool registration + boundary formatting logic is still too concentrated in one file
+   - keep splits flat (no barrel-folder churn)
+2. **Reduce remaining `src/effect/fetch-content-runtime.ts` imports from `src/old/*`**
+   - storage is now shared/effect-owned; the next worthwhile cleanup is pushing more fetch/runtime helpers out of legacy modules
+3. **Continue moving focused Effect slice tests out of top-level `tests/` when they are not cross-package/integration coverage**
+4. Keep `src/old/*` untouched unless a legacy wrapper/delegation is explicitly needed.
 
 ## Notes for next session
 
@@ -119,4 +140,4 @@ Best next slice:
 
 ## Short resume prompt
 
-Continue simplifying `src/effect/index.ts` now that the repo runs on local `vendor/effect-smol` v4 packages. Preserve behavior, keep `src/old/*` untouched, and avoid creating extra folder/barrel churn. Reuse local effect-smol docs/source only (`vendor/effect-smol/LLMS.md` + linked ai-docs + packages source). Validate with typecheck + targeted tests first, then full `bun run test`, `bun run test:e2e:cookies`, and `pi --no-extensions -e ./src/effect/index.ts --help`.
+Continue the Effect cleanup by splitting more `src/effect/index.ts` tool wiring, reducing remaining `src/effect/fetch-content-runtime.ts` imports from `src/old/*`, and moving any remaining focused Effect slice tests into adjacent `src/effect/test` coverage. Reuse local effect-smol docs/source only, validate with targeted tests first, then run the full handoff validation set.

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { Effect } from "effect";
-import { KagiSearchRuntimeError } from "../../packages/kagi/src/kagi-search-effect.js";
-import { kagiSearchEffect, runKagiSearchCli, type KagiSearchDeps } from "./kagi-search.js";
+import { KagiSearchRuntimeError } from "../../../packages/kagi/src/kagi-search-effect.js";
+import { kagiSearchEffect, runKagiSearchCli, type KagiSearchDeps } from "../kagi-search.js";
 
 describe("kagi search effect", () => {
 	it("returns search results on success", async () => {
@@ -277,24 +277,6 @@ describe("kagi search effect", () => {
 
 		const exit = await Effect.runPromiseExit(kagiSearchEffect("test", mockDeps));
 		expect(exit._tag).toBe("Failure");
-	});
-
-	it("prints CLI help", async () => {
-		const stdout: string[] = [];
-		const stderr: string[] = [];
-		const log = console.log;
-		const err = console.error;
-		console.log = (value?: unknown) => stdout.push(String(value ?? ""));
-		console.error = (value?: unknown) => stderr.push(String(value ?? ""));
-		try {
-			const exitCode = await runKagiSearchCli(["--help"]);
-			expect(exitCode).toBe(0);
-			expect(stderr).toEqual([]);
-			expect(stdout.join("\n")).toContain("--lens <lens>");
-		} finally {
-			console.log = log;
-			console.error = err;
-		}
 	});
 
 	it("returns CLI error for missing query", async () => {

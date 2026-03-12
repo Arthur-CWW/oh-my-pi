@@ -4,7 +4,7 @@ import {
 	type ExtractedContent,
 	type ExtractOptions,
 } from "./fetch-content-runtime.js";
-import { generateId, storeResult, type StoredSearchData } from "../old/storage.js";
+import { generateId, storeResult, type StoredSearchData } from "../shared/stored-results.js";
 
 const MAX_INLINE_CONTENT = 30000;
 

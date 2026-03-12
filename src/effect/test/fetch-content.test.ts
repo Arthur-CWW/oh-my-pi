@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import { Effect } from "effect";
-import { executeFetchContent } from "./fetch-content.js";
-import { clearResults, getResult } from "../old/storage.js";
+import { clearResults, getResult } from "../../shared/stored-results.js";
+import { executeFetchContent } from "../fetch-content.js";
 
 describe("effect fetch-content", () => {
 	beforeEach(() => {
@@ -106,7 +106,7 @@ describe("effect fetch-content", () => {
 		});
 	});
 
-	it("returns legacy-compatible no-url validation guidance", async () => {
+	it("returns validation guidance when no url is provided", async () => {
 		const result = await Effect.runPromise(executeFetchContent({}));
 		expect(result).toEqual({
 			content: [{ type: "text", text: "Error: No URL provided." }],

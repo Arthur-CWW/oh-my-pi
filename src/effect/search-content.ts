@@ -1,5 +1,5 @@
 import { Effect, Option, Schema } from "effect";
-import { getResult } from "../old/storage.js";
+import { getResult } from "../shared/stored-results.js";
 
 const SearchResultSchema = Schema.Struct({
 	title: Schema.String,

@@ -21,7 +21,6 @@ Legacy entrypoint retained for parity/debug:
 4. Preserve current behavior unless explicitly changing spec.
 5. Keep observability local-first (SQLite event log planned in Effect layer).
 
-<!-- effect-solutions:start -->
 ## Effect Best Practices
 
 **IMPORTANT:** Use the local `vendor/effect-smol` docs + source as the primary Effect reference before writing Effect code.
@@ -34,7 +33,6 @@ Legacy entrypoint retained for parity/debug:
 Priority topics for this repo: services/layers, errors, running programs, config, testing, and CLI.
 
 Never guess at Effect patterns - check the local effect-smol docs/source first.
-<!-- effect-solutions:end -->
 
 ## Persistent User Preferences (Self-Healing)
 
@@ -50,9 +48,9 @@ Current persistent preferences:
 - Avoid unnecessary nested folders + `index.ts` re-export barrels for single-feature modules.
 - If splitting into multiple files is necessary, keep it minimal and justify briefly in PR/task notes.
 - For Effect migrations/refactors, start from `vendor/effect-smol/LLMS.md`, follow linked docs recursively/progressively, and confirm patterns against `vendor/effect-smol/packages/*` source before implementing.
-- Treat the local `vendor/effect-smol` repo as the authoritative Effect reference for this project; avoid `effect-solutions`, `node_modules`, and random external docs unless the user explicitly asks.
+- Treat the local `vendor/effect-smol` repo as the authoritative Effect reference for this project, but as a read-only vendored dependency/docs source: do not modify files under `vendor/effect-smol` unless the user explicitly asks; avoid `effect-solutions`, `node_modules`, and random external docs unless the user explicitly asks.
 - During implementation iterations, run **only scoped/filtered tests** for the feature being changed (file-level and, when useful, test-name filtering). Do **not** run the full suite repeatedly while iterating. Run the full mandatory validation suite once at handoff or when explicitly requested. Avoid live API/e2e validation runs unless the user explicitly asks for a manual pass.
-- Prefer tests to live close to the source they validate when practical: use package-local sibling `src/` + `test/` layouts for standalone workspaces/packages (for example `packages/kagi/{src,test}`, similar to `vendor/pi-mono`), colocated `*.test.ts` for focused Effect slices when that stays flatter, and reserve the top-level `tests/` folder for repo-level/cross-package coverage.
+- Prefer tests to live close to the source they validate when practical: use adjacent sibling `src/` + `test/` layouts for standalone workspaces/packages and Effect slices (for example `packages/kagi/{src,test}` or `src/effect/test/*`), avoid colocated `*.test.ts` files beside implementation files under `src/effect`, and reserve the top-level `tests/` folder for repo-level/cross-package coverage.
 - When drafting next-session/resume prompts, do **not** restate `AGENTS.md` guidance; keep prompts short and focused on current repo state, blockers, and the concrete next refactor.
 - Prefer **larger migration/refactor slices** over overly tiny micro-tasks when safety/rollback is still reasonable; split work only when risk, validation cost, or parity concerns justify it.
 - For interactive/TUI or long-running process validation, prefer **tmux-managed test sessions** (fixed pane size, scripted `send-keys`, `capture-pane` snapshots, explicit session cleanup) locally and over SSH.
@@ -61,10 +59,11 @@ Current persistent preferences:
 - Keep provider-specific behavior, transport/session handling, and error classification inside provider package/module boundaries; `src/effect/*` runtime/entry adapters should consume typed provider errors and stay thin/provider-agnostic.
 - Prefer Effect-based provider package interfaces (including `packages/kagi/*` runtime surfaces); keep `Promise`/`async` only at explicit external boundaries.
 - Do not expose user-facing provider selection values like `"auto"`; omitted provider should continue to mean the default Kagi-first fallback flow.
-- Treat `src/old/*` as reference/stability baseline; avoid modifying it unless the user explicitly requests a legacy-path change.
+- Treat `src/old/*` as reference/stability baseline during migration, but the target end-state is to move the legacy implementation into its own workspace/package dependency at `packages/legacy-web-access` instead of keeping it inside the main `src/` tree.
 - When validating package installation behavior, default to **global `pi install` (no `-l`)** so settings are exercised under `~/.pi` (agent settings path), unless the user explicitly asks for project-local install behavior.
 - Keep fork repository metadata URLs aligned to the current git `origin` remote (owner/repo casing included), unless the user explicitly asks otherwise.
 - Prefer Effect-native instrumentation (`Effect.fn`, spans, typed errors) plus lightweight local event-emission services for migration observability; avoid adding OpenTelemetry/export pipeline work unless explicitly requested.
+- Prefer direct standard Effect/platform APIs over repo-specific wrapper modules in `src/effect/core/*` and `src/effect/observability/*`; if a custom abstraction is not buying a real boundary, simplify/remove it instead of preserving it.
 - Keep internal migration flows Effect-native end-to-end; only convert to `Promise`/`async` at explicit external boundaries (tool `execute`, CLI main, interop wrappers).
 - Observability/event services must be optional and fail-open: if emitting/persisting events fails, feature/tool behavior must continue.
 - Prefer schema-first boundaries: define Effect `Schema` once and derive runtime validation/decoding + TypeScript types from it where serde/input contracts exist.
@@ -74,6 +73,10 @@ Current persistent preferences:
 - For standalone/dual-use tooling paths, prefer the local Effect CLI modules from `vendor/effect-smol` (currently `effect/unstable/cli` in the v4 beta repo) over bespoke argument parsing or `@effect/cli`; use hand-rolled parsers only as temporary migration shims.
 - Prefer Effect Config (`Config`, `Schema.Config`, `ConfigProvider`) over ad-hoc env/json config readers for new or refactored config surfaces.
 - Prefer migrating new/refactored Effect code toward the local `vendor/effect-smol` v4 stack/package surfaces rather than adding more dependency on the current v3-era split packages.
+- Prefer shared/effect-owned helpers over importing implementation modules from `src/old/*` into new Effect code; if both paths need the same utility, extract it to a neutral shared module or make the legacy path delegate to the shared/effect-owned implementation instead of the reverse.
+- Use `ast-grep` for repetitive structural searches/rewrites and cleanup passes (for example removing repeated low-value test patterns, finding legacy imports, and applying mechanical refactors) before falling back to ad-hoc text search/manual edits alone.
+- Prefer the locally available power tools when they reduce risk or improve review quality: `difft`/difftastic for semantic diffs, `fd` for file discovery, `jq` for JSON inspection/transforms, `delta` for readable git diffs, and `rg` for fast text search.
+- Preserve user-facing behavior and tool contracts, but do not keep legacy implementation-detail compatibility, helper-shape parity, or low-value unit tests (for example CLI help-string assertions) unless they protect an actual repo boundary.
 ## Mandatory Validation After Every Change
 
 Run all commands below and ensure they pass before finishing work.
@@ -101,9 +104,9 @@ Notes:
 - extension/runtime integration coverage
 - legacy/effect parity checks
 
-### Package-local / colocated automated tests
+### Package-local automated tests
 - package workspaces should prefer sibling `test/` folders (for example `packages/kagi/test`)
-- focused Effect/runtime slices may keep colocated `*.test.ts` beside the implementation when that is the flatter option
+- Effect/runtime slices should prefer adjacent `test/` folders (for example `src/effect/test`) instead of colocated `*.test.ts` beside implementation files
 
 ### Existing smoke scripts (`scripts/`)
 - Chrome cookie auth path
@@ -150,5 +153,3 @@ After finishing each task, provide a brief summary in chat: **Done / Not done / 
 - Run the specific new/updated test(s) and then run full `bun run test`
 - Add structured errors (typed) instead of generic string errors
 - Emit observable events (once EventStore is introduced)
-
----

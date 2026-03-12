@@ -1,13 +1,13 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import { Effect } from "effect";
-import { activityMonitor } from "../old/activity.js";
-import { API_BASE, DEFAULT_MODEL } from "./gemini-api.js";
+import { activityMonitor } from "../../old/activity.js";
+import { API_BASE, DEFAULT_MODEL } from "../gemini-api.js";
 import {
 	extractContentEffect,
 	extractViaHttpEffect,
 	type ExtractedContent,
 	type FetchContentRuntimeDeps,
-} from "./fetch-content-runtime.js";
+} from "../fetch-content-runtime.js";
 
 function makeLongArticleHtml(title: string): string {
 	const paragraph =
@@ -262,7 +262,7 @@ describe("effect fetch-content runtime", () => {
 		expect(result).toEqual(legacyResult);
 	});
 
-	it("returns the legacy guidance string when all general-page fallbacks are exhausted", async () => {
+	it("returns guidance when all general-page fallbacks are exhausted", async () => {
 		const url = "https://example.com/blocked";
 		const result = await Effect.runPromise(
 			extractContentEffect(

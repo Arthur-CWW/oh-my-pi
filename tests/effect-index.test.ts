@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it } from "bun:test";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Effect } from "effect";
 import effectEntry, { registerEffectTools, type EffectExtensionDeps } from "../src/effect/index.js";
-import { clearResults, storeResult } from "../src/old/storage.js";
+import { clearResults, storeResult } from "../src/shared/stored-results.js";
 
 interface TestTheme {
 	readonly fg: (token: string, text: string) => string;
