@@ -7,6 +7,11 @@ import { Effect } from "effect";
 import effectEntry, { registerEffectTools, type EffectExtensionDeps } from "../src/effect/index.js";
 import { clearResults, storeResult } from "../src/old/storage.js";
 
+interface TestTheme {
+	readonly fg: (token: string, text: string) => string;
+	readonly bold: (text: string) => string;
+}
+
 interface ToolLike {
 	readonly name?: unknown;
 	readonly description?: unknown;
@@ -19,6 +24,15 @@ interface ToolLike {
 		content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>;
 		details?: Record<string, unknown>;
 	}>;
+	readonly renderCall?: (args: Record<string, unknown>, theme: TestTheme) => { text: string };
+	readonly renderResult?: (
+		result: {
+			content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>;
+			details?: Record<string, unknown>;
+		},
+		state: { expanded?: boolean; isPartial?: boolean },
+		theme: TestTheme,
+	) => { text: string };
 }
 
 function registerWith(deps: EffectExtensionDeps): Map<string, ToolLike> {
@@ -51,6 +65,11 @@ function registerCutoverEntry(): Map<string, ToolLike> {
 	effectEntry(api);
 	return registered;
 }
+
+const fakeTheme: TestTheme = {
+	fg: (_token, text) => text,
+	bold: (text) => text,
+};
 
 const fakeDeps: EffectExtensionDeps = {
 	search: () =>
@@ -286,6 +305,68 @@ describe("effect shadow entry", () => {
 			error: "invalid-params",
 			reason: expect.stringContaining("frames"),
 		});
+	});
+
+	it("mirrors legacy-style fetch_content call/result rendering", () => {
+		const tools = registerWith(fakeDeps);
+		const tool = tools.get("fetch_content");
+		expect(typeof tool?.renderCall).toBe("function");
+		expect(typeof tool?.renderResult).toBe("function");
+		if (typeof tool?.renderCall !== "function" || typeof tool?.renderResult !== "function") {
+			throw new Error("missing render helper");
+		}
+
+		const callView = tool.renderCall(
+			{
+				url: "https://example.com/article",
+				prompt: "Find the main claim",
+				timestamp: "23:41-25:00",
+				frames: 4,
+				model: "gemini-2.5-flash",
+			},
+			fakeTheme,
+		);
+		expect(callView.text).toContain("fetch https://example.com/article");
+		expect(callView.text).toContain("timestamp: 23:41-25:00");
+		expect(callView.text).toContain("frames: 4");
+		expect(callView.text).toContain('prompt: "Find the main claim"');
+		expect(callView.text).toContain("model: gemini-2.5-flash");
+
+		const partialView = tool.renderResult(
+			{
+				content: [{ type: "text", text: "Fetching..." }],
+				details: { phase: "fetch", progress: 0.3 },
+			},
+			{ isPartial: true },
+			fakeTheme,
+		);
+		expect(partialView.text).toContain("fetch");
+
+		const resultView = tool.renderResult(
+			{
+				content: [{ type: "text", text: "Body preview" }],
+				details: {
+					urlCount: 1,
+					successful: 1,
+					totalChars: 12,
+					title: "Example Title",
+					truncated: true,
+					imageCount: 2,
+					timestamp: "23:41-25:00",
+					frames: 4,
+					duration: 125,
+				},
+			},
+			{ expanded: true },
+			fakeTheme,
+		);
+		expect(resultView.text).toContain("Example Title");
+		expect(resultView.text).toContain("(12 chars)");
+		expect(resultView.text).toContain("[2 images]");
+		expect(resultView.text).toContain("[truncated]");
+		expect(resultView.text).toContain("2:05 total");
+		expect(resultView.text).toContain("timestamp: 23:41-25:00");
+		expect(resultView.text).toContain("frames: 4");
 	});
 
 	it("returns stored search content with legacy-compatible formatting", async () => {

@@ -22,6 +22,7 @@ _Last updated: 2026-03-12 (local session dump)_
   - registers Effect-owned `fetch_content`
   - overrides legacy `fetch_content` when bridge is enabled
   - keeps `fetch_content` available when legacy bridge is disabled
+  - mirrors legacy-style `renderCall` / `renderResult` TUI behavior for the Effect-owned tool
 - Updated tests/scripts:
   - added colocated `src/effect/fetch-content.test.ts`
   - kept entry-boundary validation in `tests/effect-index.test.ts`
@@ -105,7 +106,7 @@ Results:
 - ✅ `bun run typecheck`
 - ✅ `bun run test`
 - ✅ `bun run test:e2e:cookies` (warning-only in this env; exits 0)
-- ❌ `bun run test:e2e:search:gemini` (missing Gemini auth/API key in environment)
+- ❌ `bun run test:e2e:search:gemini` (Gemini API key is present, but current quota is exhausted; Gemini web cookies are also unavailable)
 - ✅ `pi --no-extensions -e ./src/effect/index.ts --help`
 
 ## Current migration position
@@ -118,21 +119,24 @@ Results:
 
 ## Recommended next steps
 
-1. Continue reducing legacy extractor internals behind the new Effect-owned `fetch_content` boundary (GitHub/YouTube/video/http special cases incrementally, with parity tests).
-2. Keep Kagi-specific error/transport/session logic package-local and, when consuming non-search Kagi helpers, prefer the new package Effect wrappers instead of reintroducing app-layer branching.
-3. Continue colocating new module tests near the implementations they validate when practical.
-4. Keep scoped tests during iteration; run full required validation at handoff.
+1. Take a larger refactor slice next: move the general web-page `fetch_content` pipeline behind the Effect-owned boundary in one pass (HTTP/HTML extraction + Jina/Gemini fallback orchestration), while preserving stored output/tool parity.
+2. After that, continue with the remaining extractor subpaths (GitHub / YouTube / local video) incrementally behind the same stable Effect-owned `fetch_content` boundary.
+3. Keep Kagi-specific error/transport/session logic package-local and, when consuming non-search Kagi helpers, prefer the new package Effect wrappers instead of reintroducing app-layer branching.
+4. Continue colocating new module tests near the implementations they validate when practical.
+5. Keep scoped tests during iteration; run full required validation at handoff.
 
 ## Known environment blockers
 
-- Gemini e2e depends on either:
-  - authenticated Gemini web cookies in Chrome, or
-  - `GEMINI_API_KEY` / `~/.pi/web-search.json` key config.
+- Gemini e2e is currently blocked in this environment because:
+  - Gemini web cookies are unavailable, and
+  - the configured `GEMINI_API_KEY` is present but currently returns `429 RESOURCE_EXHAUSTED` (quota exhausted).
 
 ## Notes for next session
 
 - Preserve local `todo.md` changes.
-- Working tree is currently dirty with multiple in-progress migration edits (do not assume clean checkout).
+- Working tree may be dirty; do not assume a clean checkout.
+- The next open task already added to `task-tracker.md` is:
+  - `Refactor the general web-page fetch_content pipeline behind the Effect-owned boundary (HTTP/HTML extraction + Jina/Gemini fallback orchestration), preserving stored output parity before tackling GitHub / YouTube / local-video paths.`
 - Task tracker has these recent items in `[@User]` state:
   - Effect-native `get_search_content` extraction
   - Effect-native `fetch_content` extraction

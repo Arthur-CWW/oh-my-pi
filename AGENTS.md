@@ -52,6 +52,8 @@ Current persistent preferences:
 - For Effect migrations/refactors, consult `effect-solutions` guidance first (`quick-start` + relevant topic docs such as `basics`, `services-and-layers`, `error-handling`, `config`) before implementing.
 - During implementation iterations, run **only scoped/filtered tests** for the feature being changed (file-level and, when useful, test-name filtering). Do **not** run the full suite repeatedly while iterating. Run the full mandatory validation suite once at handoff or when explicitly requested. Avoid live API/e2e validation runs unless the user explicitly asks for a manual pass.
 - Prefer tests to live close to the source they validate when practical (colocated `*.test.ts` beside `src/*` / package modules rather than only under the top-level `tests/` folder).
+- When drafting next-session/resume prompts, do **not** restate `AGENTS.md` guidance; keep prompts short and focused on current repo state, blockers, and the concrete next refactor.
+- Prefer **larger migration/refactor slices** over overly tiny micro-tasks when safety/rollback is still reasonable; split work only when risk, validation cost, or parity concerns justify it.
 - For interactive/TUI or long-running process validation, prefer **tmux-managed test sessions** (fixed pane size, scripted `send-keys`, `capture-pane` snapshots, explicit session cleanup) locally and over SSH.
 - Prefer **static module imports**; avoid dynamic/lazy `import()` unless technically required (and briefly justify when used).
 - Do not introduce dynamic imports in new Effect code paths; use static imports and Effect-native/database-integrated approaches where possible.
@@ -132,7 +134,7 @@ Rules:
 1. Start work by moving one task to `[@]`.
 2. When implementation + tests are complete, mark `[@User]` and add a short result note.
 3. User confirms, then set `[x]`.
-4. Keep tasks small and boundary-focused.
+4. Keep tasks boundary-focused, but prefer meaningful end-to-end refactor slices over overly small micro-tasks when they remain safe and reversible.
 
 After finishing each task, provide a brief summary in chat: **Done / Not done / Risks**.
 

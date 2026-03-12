@@ -141,6 +141,7 @@ Add snapshot tests for:
 5. Intermittent Gemini search e2e flake observed (2026-02-19): first run failed with `Gemini search unavailable` despite cookies present; immediate retry passed. Artifacts retained in `test-output/`.
 6. Intermittent Effect Gemini search e2e flake observed (2026-02-19): first run of `test:e2e:search:gemini:effect` failed with `Gemini search unavailable`; immediate retry passed. Artifacts retained in `test-output/`.
 7. Intermittent Gemini search e2e flake observed again (2026-02-20): first run of `test:e2e:search:gemini` failed with `Gemini search unavailable`; immediate retry passed. Artifacts retained in `test-output/`.
+8. Gemini API validation failure observed (2026-03-12): `test:e2e:search:gemini` and `test:e2e:search:gemini:effect` still failed even with `GEMINI_API_KEY` configured because the API returned `429 RESOURCE_EXHAUSTED` (quota exhausted). Gemini web cookies were also unavailable, so no fallback path existed. Artifacts retained in `test-output/`.
 
 ### Manual smoke notes (current machine)
 

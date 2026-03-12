@@ -1,6 +1,3 @@
-<p>
-  <img src="banner.png" alt="pi-web-access" width="1100">
-</p>
 
 # Pi Web Access
 
@@ -18,7 +15,7 @@ https://github.com/user-attachments/assets/cac6a17a-1eeb-4dde-9818-cdf85d8ea98f
 
 **Video Understanding** — Point it at a YouTube video or local screen recording and ask questions about what's on screen. Full transcripts, visual descriptions, and frame extraction at exact timestamps.
 
-**Smart Fallbacks** — Every capability has a fallback chain. Search now defaults to Kagi (session-based), then falls back to Gemini. YouTube tries Gemini Web, then API, then Perplexity. Blocked pages retry through Jina Reader and Gemini extraction. Something always works.
+**Smart Fallbacks** — Every capability has a fallback chain. Search defaults to Kagi (session-based), then falls back to Gemini. YouTube and page extraction retry through Gemini and Jina-based paths when direct extraction fails.
 
 **GitHub Cloning** — GitHub URLs are cloned locally instead of scraped. The agent gets real file contents and a local path to explore, not rendered HTML.
 
@@ -38,16 +35,15 @@ pi remove npm:pi-web-access          # avoid duplicate tool/command conflicts
 pi install . -l                      # install into this project's .pi/settings.json
 ```
 
-If you're not signed into Chrome, or prefer a different provider, add API keys to `~/.pi/web-search.json`:
+If you're not signed into Chrome, add API keys to `~/.pi/web-search.json`:
 
 ```json
 {
-  "perplexityApiKey": "pplx-...",
   "geminiApiKey": "AIza..."
 }
 ```
 
-You can configure one or both. In `auto` mode (default), `web_search` tries Kagi first, then Gemini (API/Web fallback chain).
+`geminiApiKey` powers Gemini fallback/search paths. If `provider` is omitted, `web_search` uses the default Kagi-first fallback flow, then Gemini (API/Web fallback chain).
 
 Optional dependencies for video frame extraction:
 
@@ -85,12 +81,21 @@ The core modules can also run directly from the terminal with Bun:
 
 ```bash
 bun scripts/kagi-search-cli.ts "effect ts" --lens programming --json
-bun src/effect/gemini-search.ts --query "effect ts" --provider auto
+bun src/effect/gemini-search.ts --query "effect ts" --provider gemini
 bun src/effect/chrome-cookies.ts --names __Secure-1PSID,__Secure-1PSIDTS
 bun src/old/extract.ts https://example.com/article --json
 ```
 
-Use `--help` on each file for available flags.
+Use `--help` on each file for available flags. Note: `src/old/extract.ts` remains the direct CLI shim while `fetch_content` itself is now registered from the Effect entrypoint.
+
+## Testing
+
+```bash
+bun run typecheck
+bun run test
+```
+
+The test runner discovers both the historical top-level `tests/` suite and colocated tests under `src/` / `packages/`.
 
 ## Tools
 
@@ -109,7 +114,7 @@ web_search({ query: "...", provider: "gemini" })
 | Parameter | Description |
 |-----------|-------------|
 | `query` | Single query string |
-| `provider` | `auto` (default), `kagi`, `gemini`, or `perplexity` |
+| `provider` | Optional: `kagi` or `gemini`. Omit it for the default Kagi-first fallback flow. |
 | `lens` | Kagi lens key (e.g. `programming`, `academic`, `news_360`) |
 | `numResults` | Requested result count (1-20) |
 | `recencyFilter` | `day`, `week`, `month`, or `year` |
@@ -158,7 +163,7 @@ Repos over 350MB get a lightweight API-based view instead of a full clone (overr
 
 YouTube URLs are processed via Gemini for full video understanding — visual descriptions, transcripts with timestamps, and chapter markers. Pass a `prompt` to ask specific questions about the video. Results include the video thumbnail so the agent gets visual context alongside the transcript.
 
-Fallback: Gemini Web → Gemini API → Perplexity (text summary only). Handles all URL formats: `/watch?v=`, `youtu.be/`, `/shorts/`, `/live/`, `/embed/`, `/v/`.
+Fallback: Gemini Web → Gemini API. Handles all URL formats: `/watch?v=`, `youtu.be/`, `/shorts/`, `/live/`, `/embed/`, `/v/`.
 
 ### Local video files
 
@@ -194,7 +199,7 @@ When Readability fails or returns only a cookie notice, the extension retries vi
 fetch_content(url)
   → Video file?  Gemini API (Files API) → Gemini Web
   → GitHub URL?  Clone repo, return file contents + local path
-  → YouTube URL? Gemini Web → Gemini API → Perplexity
+  → YouTube URL? Gemini Web → Gemini API
   → HTTP fetch → PDF? Extract text, save to ~/Downloads/
                → HTML? Readability → RSC parser → Jina Reader → Gemini fallback
                → Text/JSON/Markdown? Return directly
@@ -241,9 +246,7 @@ All config lives in `~/.pi/web-search.json`. Every field is optional.
 
 ```json
 {
-  "perplexityApiKey": "pplx-...",
   "geminiApiKey": "AIza...",
-  "provider": "perplexity",
   "curateWindow": 10,
   "autoFilter": true,
   "githubClone": {
@@ -268,7 +271,7 @@ All config lives in `~/.pi/web-search.json`. Every field is optional.
 }
 ```
 
-`GEMINI_API_KEY` and `PERPLEXITY_API_KEY` env vars take precedence over config file values. `provider` controls non-Kagi fallback preference (`"perplexity"` or `"gemini"`) when Kagi is unavailable. `curateWindow` controls how many seconds multi-query searches wait before auto-sending results (default: 10). During the countdown, press Ctrl+Shift+S to open the browser curator. Set to 0 to always send immediately (Ctrl+Shift+S still works during the search itself).
+`GEMINI_API_KEY` takes precedence over the config file value. `provider` controls the default `web_search` provider preference (`"kagi"` or `"gemini"`); if omitted, the default Kagi-first fallback flow is used. `curateWindow` controls how many seconds multi-query searches wait before auto-sending results (default: 10). During the countdown, press Ctrl+Shift+S to open the browser curator. Set to 0 to always send immediately (Ctrl+Shift+S still works during the search itself).
 
 ### Shortcuts
 
@@ -313,7 +316,7 @@ The `web_search` tool also accepts an optional `context` parameter — a brief d
 
 Set `"enabled": false` under any feature to disable it. Config changes require a Pi restart.
 
-Rate limits: Perplexity is capped at 10 requests/minute (client-side). Content fetches run 3 concurrent with a 30s timeout per URL.
+Content fetches run 3 concurrent with a 30s timeout per URL.
 
 ## Troubleshooting
 
@@ -334,28 +337,42 @@ Rate limits: Perplexity is capped at 10 requests/minute (client-side). Content f
 <details>
 <summary>Files</summary>
 
+### Active Effect entry/runtime
+
 | File | Purpose |
 |------|---------|
-| `index.ts` | Extension entry, tool definitions, commands, widget |
-| `curator-page.ts` | HTML/CSS/JS generation for the curator UI with markdown rendering |
-| `curator-server.ts` | Ephemeral HTTP server with SSE streaming and state machine |
-| `search-filter.ts` | Auto-condense pipeline — preprocessing, LLM condensation, and post-processing for multi-query results |
-| `extract.ts` | URL/file path routing, HTTP extraction, fallback orchestration |
-| `gemini-search.ts` | Search routing across Perplexity, Gemini API, Gemini Web |
-| `gemini-url-context.ts` | Gemini URL Context + Web extraction fallbacks |
-| `gemini-web.ts` | Gemini Web client (cookie auth, StreamGenerate) |
-| `gemini-api.ts` | Gemini REST API client (generateContent) |
-| `chrome-cookies.ts` | Chrome cookie extraction (macOS Keychain/SQLite + cross-platform DevTools fallback) |
-| `youtube-extract.ts` | YouTube detection, three-tier extraction, frame extraction |
-| `video-extract.ts` | Local video detection, Files API upload, Gemini analysis |
-| `github-extract.ts` | GitHub URL parsing, clone cache, content generation |
-| `github-api.ts` | GitHub API fallback for large repos and commit SHAs |
-| `perplexity.ts` | Perplexity API client with rate limiting |
-| `pdf-extract.ts` | PDF text extraction, saves to markdown |
-| `rsc-extract.ts` | RSC flight data parser for Next.js pages |
-| `utils.ts` | Shared formatting and error helpers |
-| `storage.ts` | Session-aware result storage |
-| `activity.ts` | Activity tracking for the observability widget |
+| `src/effect/index.ts` | Active Pi extension entrypoint and tool registration |
+| `src/effect/kagi-search.ts` | Kagi-backed search adapter used by `web_search` |
+| `src/effect/fetch-content.ts` | Effect-owned `fetch_content` boundary + stored-output shaping |
+| `src/effect/search-content.ts` | Effect-owned `get_search_content` retrieval path |
+| `src/effect/gemini-search.ts` | Gemini search helpers and fallback orchestration |
+| `src/effect/gemini-web.ts` | Gemini Web client (cookie auth) |
+| `src/effect/gemini-api.ts` | Gemini REST API client |
+| `src/effect/chrome-cookies.ts` | Chrome cookie extraction (macOS + DevTools fallback) |
+| `src/effect/search-runtime.ts` | Provider selection / fallback orchestration |
+| `src/effect/search-events.ts` | Optional fail-open local search event emission |
+
+### Kagi package workspace
+
+| File | Purpose |
+|------|---------|
+| `packages/kagi/src/kagi-client.ts` | Unofficial Kagi session/search/runtime helpers |
+| `packages/kagi/src/kagi-search-effect.ts` | Effect-native Kagi search boundary + typed provider errors |
+| `packages/kagi/src/kagi-client-effect.ts` | Effect-native wrappers for Kagi session/lens/advanced/rules helpers |
+| `packages/kagi/src/kagi-query-parser.ts` | Google-style operator parsing for Kagi-compatible search |
+
+### Legacy reference path (still being reduced)
+
+| File | Purpose |
+|------|---------|
+| `src/old/index.ts` | Legacy extension entry kept for parity/reference |
+| `src/old/extract.ts` | Legacy extraction pipeline still backing parts of `fetch_content` internals |
+| `src/old/github-extract.ts` | GitHub clone/cache/content generation |
+| `src/old/youtube-extract.ts` | YouTube extraction + frame handling |
+| `src/old/video-extract.ts` | Local video analysis helpers |
+| `src/old/pdf-extract.ts` | PDF text extraction |
+| `src/old/rsc-extract.ts` | RSC flight data parser for Next.js pages |
+| `src/old/storage.ts` | Session-aware result storage used during migration |
 | `skills/librarian/` | Bundled skill for library research |
 
 </details>
