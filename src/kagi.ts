@@ -150,7 +150,7 @@ export function getPayloadHtml(item: KagiEventItem): string {
   return ""
 }
 
-export function extractResults(events: Array<{ data: unknown }>): Array<{ title: string; url: string; snippet: string }> {
+export function parseResults(events: Array<{ data: unknown }>): Array<{ title: string; url: string; snippet: string }> {
   const out: Array<{ title: string; url: string; snippet: string }> = []
   const seen = new Set<string>()
   for (const ev of events) {
@@ -175,7 +175,7 @@ export function extractResults(events: Array<{ data: unknown }>): Array<{ title:
   return out
 }
 
-export function extractAnswer(events: Array<{ data: unknown }>): string {
+export function parseAnswer(events: Array<{ data: unknown }>): string {
   for (const ev of events) {
     if (!Array.isArray(ev.data)) continue
     for (const item of ev.data as KagiEventItem[]) {
@@ -221,8 +221,8 @@ export const runSearch = Effect.fn("kagiRunSearch")(function* (query: string) {
   }
 
   return {
-    answer: extractAnswer(events),
-    results: extractResults(events),
+    answer: parseAnswer(events),
+    results: parseResults(events),
     providerUsed: "kagi" as const,
   } satisfies SearchResponse
 })

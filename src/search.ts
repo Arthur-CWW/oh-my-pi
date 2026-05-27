@@ -20,7 +20,7 @@ function buildPrompt(query: string, opts?: { recencyFilter?: string; domainFilte
   return p
 }
 
-function extractUrls(md: string): Array<{ title: string; url: string; snippet: string }> {
+function parseUrls(md: string): Array<{ title: string; url: string; snippet: string }> {
   const seen = new Set<string>()
   const out: Array<{ title: string; url: string; snippet: string }> = []
   for (const m of md.matchAll(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g)) {
@@ -38,7 +38,7 @@ const geminiSearch = Effect.fn("geminiSearch")(function* (
   const answer = yield* queryApi(buildPrompt(query, opts), { grounding: true })
   return {
     answer,
-    results: extractUrls(answer),
+    results: parseUrls(answer),
     providerUsed: "gemini" as const,
   } satisfies SearchResponse
 })

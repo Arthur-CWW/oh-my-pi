@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test"
 import { Effect } from "effect"
-import { runSearch, extractResults, extractAnswer, stripHtml, getPayloadHtml }
+import { runSearch, parseResults, parseAnswer, stripHtml, getPayloadHtml }
   from "../src/kagi"
 import type { KagiEventItem } from "../src/kagi"
 
@@ -58,7 +58,7 @@ describe("kagi parsing", () => {
   })
 
   it("extracts results from fixture", () => {
-    const results = extractResults(FIXTURE)
+    const results = parseResults(FIXTURE)
     expect(results.length).toBe(2)
     expect(results[0]!.title).toBe("Effect Docs")
     expect(results[0]!.url).toBe("https://effect.website")
@@ -69,7 +69,7 @@ describe("kagi parsing", () => {
   })
 
   it("extracts answer from top-content-unique", () => {
-    expect(extractAnswer(FIXTURE)).toBe("17 relevant results in 1.72s.")
+    expect(parseAnswer(FIXTURE)).toBe("17 relevant results in 1.72s.")
   })
 
   it("deduplicates results by URL", () => {
@@ -87,7 +87,7 @@ describe("kagi parsing", () => {
         },
       }],
     }]
-    const results = extractResults(dupFixture)
+    const results = parseResults(dupFixture)
     expect(results.length).toBe(1)
   })
 })
