@@ -1,5 +1,10 @@
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs"
-import { dirname } from "node:path"
+import {
+  readFileSync, writeFileSync, mkdirSync, existsSync,
+  readdirSync, copyFileSync, rmSync,
+} from "node:fs"
+import { execFileSync } from "node:child_process"
+import { dirname, join } from "node:path"
+import { homedir, tmpdir } from "node:os"
 import { Effect, Result, Schedule } from "effect"
 import { kagiSessionPath } from "./config"
 import { type SearchResponse, toErrorMessage } from "./schemas"
@@ -12,61 +17,96 @@ interface KagiSession {
   capturedAt: string
 }
 
-function loadSession(): KagiSession | null {
-  for (const p of [kagiSessionPath()]) {
-    try {
-      if (!existsSync(p)) continue
-      const s: KagiSession = JSON.parse(readFileSync(p, "utf-8"))
-      if (!s?.cookies?.length) continue
-      if (s.capturedAt && Date.now() - new Date(s.capturedAt).getTime() > 24 * 60 * 60 * 1000) continue
-      return s
-    } catch { /* nop */ }
-  }
+const FF_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:136.0) Gecko/20100101 Firefox/136.0"
+
+function loadCachedSession(): KagiSession | null {
+  const p = kagiSessionPath()
+  try {
+    if (!existsSync(p)) return null
+    const s: KagiSession = JSON.parse(readFileSync(p, "utf-8"))
+    if (!s?.cookies?.length) return null
+    if (s.capturedAt && Date.now() - new Date(s.capturedAt).getTime() > 24 * 60 * 60 * 1000) return null
+    return s
+  } catch { return null }
+}
+
+function findFirefoxCookiesDb(): string | null {
+  const base = join(homedir(), "Library/Application Support/Firefox/Profiles")
+  try {
+    for (const dir of readdirSync(base)) {
+      const db = join(base, dir, "cookies.sqlite")
+      if (existsSync(db)) return db
+    }
+  } catch { /* nop */ }
   return null
 }
 
-async function captureFromChrome(browserUrl = "http://localhost:9222"): Promise<KagiSession> {
-  const pp = await import("puppeteer-core")
-  const browser = await pp.default.connect({ browserURL: browserUrl, defaultViewport: null })
+function captureFromFirefox(): KagiSession | null {
+  const dbPath = findFirefoxCookiesDb()
+  if (!dbPath) return null
+
+  const tempDir = join(tmpdir(), `pi-kagi-ff-${Date.now()}`)
+  const tmpDb = join(tempDir, "cookies.sqlite")
   try {
-    const pages = await browser.pages()
-    const page = pages.find((p) => p.url().startsWith("https://kagi.com")) ?? (await browser.newPage())
-    if (!page.url().startsWith("https://kagi.com")) {
-      await page.goto("https://kagi.com", { waitUntil: "domcontentloaded", timeout: 15000 })
+    mkdirSync(tempDir, { recursive: true })
+    copyFileSync(dbPath, tmpDb)
+
+    const output = execFileSync(
+      "sqlite3",
+      ["-readonly", "-noheader", "-separator", "|", tmpDb,
+        "SELECT name, value FROM moz_cookies WHERE host LIKE '%kagi.com%' AND (expiry > unixepoch() OR expiry = 0)"],
+      { timeout: 5000, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] },
+    ).trim()
+
+    if (!output) return null
+
+    const cookies: Array<{ name: string; value: string }> = []
+    for (const line of output.split("\n")) {
+      const [name, value] = line.split("|")
+      if (name && value) cookies.push({ name, value })
     }
+    if (!cookies.length) return null
 
-    const cdpCookies = (await page.target().createCDPSession().then((c) =>
-      c.send("Network.getAllCookies")
-    )) as { cookies: Array<{ name: string; value: string; domain: string }> }
-
-    const kCookies = cdpCookies.cookies.filter(
-      (c) => c.domain === "kagi.com" || c.domain.endsWith(".kagi.com"),
-    )
-    if (!kCookies.length) throw new Error("No Kagi cookies found. Sign into kagi.com in Chrome first.")
-
-    await page.goto("https://kagi.com/search?q=test", { waitUntil: "domcontentloaded", timeout: 15000 })
-    const hdrs = await page.evaluate(() => ({
-      "accept-language": navigator.language || "en-US",
-      "user-agent": navigator.userAgent,
-    }))
-
-    await browser.disconnect()
     return {
-      cookies: kCookies.map((c) => ({ name: c.name, value: c.value })),
-      headers: { ...hdrs, accept: "application/json" },
+      cookies,
+      headers: {
+        "user-agent": FF_UA,
+        "accept-language": "en-US,en;q=0.9",
+        accept: "application/json",
+      },
       capturedAt: new Date().toISOString(),
     }
-  } catch (err) {
-    await browser.disconnect().catch(() => {})
-    throw err
+  } catch { return null
+  } finally {
+    try { rmSync(tempDir, { recursive: true, force: true }) } catch { /* nop */ }
   }
 }
 
-export async function refreshSession(browserUrl?: string): Promise<string> {
-  const s = await captureFromChrome(browserUrl)
+function getSession(): KagiSession | null {
+  // 1. Try cached session file
+  const cached = loadCachedSession()
+  if (cached) return cached
+
+  // 2. Extract fresh from Firefox cookies.sqlite
+  const ff = captureFromFirefox()
+  if (ff) {
+    try {
+      mkdirSync(dirname(kagiSessionPath()), { recursive: true })
+      writeFileSync(kagiSessionPath(), JSON.stringify(ff, null, 2), "utf-8")
+    } catch { /* nop */ }
+    return ff
+  }
+
+  return null
+}
+
+/** Refresh the Kagi session from Firefox cookies */
+export function refreshSession(): string {
+  const ff = captureFromFirefox()
+  if (!ff) throw new Error("No Firefox profile with Kagi cookies found. Sign into kagi.com in Firefox first.")
   const p = kagiSessionPath()
   mkdirSync(dirname(p), { recursive: true })
-  writeFileSync(p, JSON.stringify(s, null, 2), "utf-8")
+  writeFileSync(p, JSON.stringify(ff, null, 2), "utf-8")
   return p
 }
 
@@ -80,6 +120,17 @@ function stripHtml(html: string): string {
     .replace(/\s+/g, " ").replace(/\s+([.,;:!?])/g, "$1").trim()
 }
 
+type KagiEventItem = {
+  tag: string
+  payload: string | { content?: string }
+}
+
+function getPayloadHtml(item: KagiEventItem): string {
+  if (typeof item.payload === "string") return item.payload
+  if (item.payload && typeof item.payload.content === "string") return item.payload.content
+  return ""
+}
+
 function extractResults(events: Array<{ data: unknown }>): Array<{ title: string; url: string; snippet: string }> {
   const out: Array<{ title: string; url: string; snippet: string }> = []
   const seen = new Set<string>()
@@ -88,11 +139,11 @@ function extractResults(events: Array<{ data: unknown }>): Array<{ title: string
     const data = ev.data
     if (!Array.isArray(data)) continue
 
-    for (const item of data) {
-      if (!item || typeof item !== "object" || !("t" in item)) continue
-      if ((item as { t: string }).t !== "search") continue
+    for (const item of data as KagiEventItem[]) {
+      if (!item?.tag) continue
+      if (item.tag !== "search") continue
 
-      const html = (item as { c?: string }).c ?? ""
+      const html = getPayloadHtml(item)
       if (!html) continue
 
       const descs = [...html.matchAll(/<div[^>]*class="[^"]*__sri-desc[^"]*"[^>]*>([\s\S]*?)<\/div>/gi)]
@@ -114,10 +165,12 @@ function extractResults(events: Array<{ data: unknown }>): Array<{ title: string
 
 function extractAnswer(events: Array<{ data: unknown }>): string {
   for (const ev of events) {
-    const d = ev.data
-    if (d && typeof d === "object" && !Array.isArray(d)) {
-      const o = d as Record<string, unknown>
-      if (o.t === "top-content-unique" && typeof o.c === "string") return stripHtml(o.c)
+    const data = ev.data
+    if (!Array.isArray(data)) continue
+    for (const item of data as KagiEventItem[]) {
+      if (item.tag === "top-content-unique") {
+        return stripHtml(getPayloadHtml(item))
+      }
     }
   }
   return ""
@@ -126,8 +179,8 @@ function extractAnswer(events: Array<{ data: unknown }>): string {
 // ─── Effect API ───────────────────────────────────────────────────────
 
 export const runSearch = Effect.fn("kagiRunSearch")(function* (query: string) {
-  const session = loadSession()
-  if (!session) return yield* Effect.fail(new Error("Kagi session not found"))
+  const session = getSession()
+  if (!session) return yield* Effect.fail(new Error("Kagi session not found. Sign into kagi.com in Chrome or Firefox."))
 
   const cookieHeader = session.cookies.map((c) => `${c.name}=${c.value}`).join("; ")
 
