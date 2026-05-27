@@ -30,9 +30,13 @@
     "extensions": ["./src/index.ts"],
     "skills": ["./skills"]
   },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*"
+  },
   "devDependencies": {
-    "@mariozechner/pi-ai": "^0.53.0",
-    "@mariozechner/pi-coding-agent": "^0.53.0",
+    "@earendil-works/pi-ai": "^0.75.5",
+    "@earendil-works/pi-coding-agent": "^0.75.5",
     "@sinclair/typebox": "^0.34.48",
     "@types/node": "^25.2.3",
     "@types/turndown": "^5.0.6",

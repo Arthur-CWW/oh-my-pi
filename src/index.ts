@@ -1,5 +1,4 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent"
-import { StringEnum } from "@mariozechner/pi-ai"
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent"
 import { Type } from "@sinclair/typebox"
 import { Effect, Result } from "effect"
 import { search } from "./search"
@@ -22,7 +21,7 @@ function registerWebSearch(pi: ExtensionAPI): void {
     description: "Web search using Kagi (default) with Gemini fallback.",
     parameters: Type.Object({
       query: Type.String({ description: "Search query" }),
-      provider: Type.Optional(StringEnum(["kagi", "gemini"])),
+      provider: Type.Optional(Type.String()),
     }),
     async execute(_callId, rawParams) {
       const params = rawParams as { query: string; provider?: string }
