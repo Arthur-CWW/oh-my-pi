@@ -11,3 +11,5 @@ prompt.md
 vendor/*
 !vendor/kagi-chrome-extension/
 skills/chrome-devtools-mcp/
+skills/pi-skills/
+skills/chrome-devtools-mcp/
