@@ -139,8 +139,8 @@ try {
 
 	await setRadioValue(page, formSelector, "region", "be_fr");
 	await setRadioValue(page, formSelector, "last_update", "4");
-	await setInputValue(page, `${formSelector} input[name="from_date"]`, result.formValues.from_date);
-	await setInputValue(page, `${formSelector} input[name="to_date"]`, result.formValues.to_date);
+	await typeInputValue(page, `${formSelector} input[name="from_date"]`, result.formValues.from_date);
+	await typeInputValue(page, `${formSelector} input[name="to_date"]`, result.formValues.to_date);
 	await setRadioValue(page, formSelector, "terms_appearing", "url");
 	await setRadioValue(page, formSelector, "file_type", "open_spreadsheet");
 
@@ -293,6 +293,52 @@ async function setRadioValue(page: puppeteer.Page, formSelector: string, name: s
 			radio.dispatchEvent(new Event("change", { bubbles: true }));
 		},
 	);
+}
+
+async function typeInputValue(page: puppeteer.Page, selector: string, value: string): Promise<void> {
+	const modifier = process.platform === "darwin" ? "Meta" : "Control";
+	await page.focus(selector);
+	await page.keyboard.down(modifier);
+	await page.keyboard.press("KeyA");
+	await page.keyboard.up(modifier);
+	await page.keyboard.press("Backspace");
+	await page.keyboard.type(value);
+	await page.$eval(selector, (inputElement) => {
+		const input = inputElement as HTMLInputElement;
+		input.dispatchEvent(new Event("input", { bubbles: true }));
+		input.dispatchEvent(new Event("change", { bubbles: true }));
+	});
+}
+
+async function applySessionCookies(page: puppeteer.Page, path: string): Promise<void> {
+	if (!existsSync(path)) {
+		return;
+	}
+	const parsed = JSON.parse(readFileSync(path, "utf8")) as SessionFileShape;
+	const cookies = (parsed.cookies ?? [])
+		.filter((cookie) => cookie.domain.includes("kagi.com"))
+		.filter((cookie) => cookie.name.length > 0)
+		.map((cookie) => ({
+			name: cookie.name,
+			value: cookie.value,
+			domain: cookie.domain,
+			path: cookie.path || "/",
+			httpOnly: cookie.httpOnly,
+			secure: cookie.secure,
+			expires: Number.isFinite(cookie.expires) ? cookie.expires : undefined,
+			sameSite: toPuppeteerSameSite(cookie.sameSite),
+		}));
+	if (cookies.length === 0) {
+		return;
+	}
+	await page.setCookie(...cookies);
+}
+
+function toPuppeteerSameSite(value: SessionCookie["sameSite"]): "Strict" | "Lax" | "None" | undefined {
+	if (value === "Strict" || value === "Lax" || value === "None") {
+		return value;
+	}
+	return undefined;
 }
 
 async function applySessionCookies(page: puppeteer.Page, path: string): Promise<void> {
