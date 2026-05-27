@@ -5,7 +5,7 @@ test-output/
 packages/kagi/output/
 packages/kagi/storage/session.json
 
-skills/pi-skills
+# skills/pi-skills
 
 pi-session-*
 
