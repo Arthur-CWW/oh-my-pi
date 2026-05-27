@@ -95,7 +95,8 @@ Current persistent preferences:
 - `ast-grep` is available and you should use it liberally :)
 - when you see an slop code issue, and you think it can be fixed easily with ast-grep , query and fix it right away
 - Prefer adding/updating local ast-grep guardrail rules for recurring repo-specific slop patterns (especially Effect migration smells) so future agents get nudged before repeating the same mistakes.
-- For ast-grep rule work, prefer the local vendored `vendor/ast-grep/*` repo snapshot/schema/source as the first reference instead of guessing YAML rule syntax from memory.
+- Prefer vendored upstream tooling repos under `vendor/*` to remain proper git submodules when tracking external upstreams, rather than ad-hoc copied snapshots, unless the user explicitly asks for a plain vendored copy.
+- For ast-grep rule work, prefer the local vendored `vendor/ast-grep/*` repo/schema/source as the first reference instead of guessing YAML rule syntax from memory.
 - Prefer the locally available power tools when they reduce risk or improve review quality: `difft`/difftastic for semantic diffs, `fd` for file discovery, `jq` for JSON inspection/transforms, `delta` for readable git diffs, and `rg` for fast text search.
 - Preserve user-facing behavior and tool contracts, but do not keep legacy implementation-detail compatibility, helper-shape parity, or low-value unit tests (for example CLI help-string assertions) unless they protect an actual repo boundary.
 - Keep docs maintenance proportional: prioritize `AGENTS.md`, `task-tracker.md`, the current migration handoff, and user-facing README/install docs; avoid spending time preserving stale historical notes unless they directly affect current work.
@@ -150,7 +151,8 @@ Keep `packages/legacy-web-access` intact until parity checks pass.
 - Migration prep: `docs/effect-migration-prep.md`
 - Effect reference snapshot: `docs/references/effect-llms.txt`
 - Primary local Effect v4 docs/source: `vendor/effect-smol/LLMS.md` + `vendor/effect-smol/ai-docs` + `vendor/effect-smol/packages/*`
-- Local ast-grep rule reference snapshot: `vendor/ast-grep/*` (`README.md`, `schemas/yaml_rule.json`, selected `crates/*` source)
+- Local ast-grep rule reference submodule: `vendor/ast-grep/*` (`README.md`, `schemas/yaml_rule.json`, selected `crates/*` source)
+- Local Effect language-service reference submodule: `vendor/effect-language-service/*` (`README.md`, `packages/language-service/*`)
 - Session handoff context: `docs/migration-context.md`
 - Running migration tracker: `task-tracker.md` (repo root)
 

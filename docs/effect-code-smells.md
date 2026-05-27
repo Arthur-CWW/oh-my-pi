@@ -20,7 +20,7 @@ Key paths:
 - `sgconfig.yml`
 - `ast-grep/rules/*.yml`
 - `ast-grep/rule-tests/*.yml`
-- `vendor/ast-grep/*` (local ast-grep README/schema/source snapshot for rule-authoring reference)
+- `vendor/ast-grep/*` (local ast-grep submodule checkout used as the rule-authoring reference)
 
 Helpful commands:
 

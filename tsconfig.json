@@ -19,7 +19,28 @@
 		"verbatimModuleSyntax": true,
 		"strict": false,
 		"forceConsistentCasingInFileNames": true,
-		"plugins": []
+		"plugins": [
+			{
+				"name": "@effect/language-service",
+				"diagnostics": true,
+				"diagnosticsName": true,
+				"refactors": true,
+				"quickinfo": true,
+				"completions": true,
+				"goto": true,
+				"inlays": true,
+				"namespaceImportPackages": ["effect", "@effect/*"],
+				"diagnosticSeverity": {
+					"anyUnknownInErrorContext": "warning",
+					"preferSchemaOverJson": "warning",
+					"tryCatchInEffectGen": "warning",
+					"schemaSyncInEffect": "warning",
+					"serviceNotAsClass": "warning",
+					"scopeInLayerEffect": "warning",
+					"effectFnOpportunity": "suggestion"
+				}
+			}
+		]
 	},
 	"include": ["src/**/*.ts", "scripts/**/*.ts", "skills/**/*.ts", "packages/kagi/src/**/*.ts", "packages/kagi/scripts/**/*.ts", "packages/legacy-web-access/src/**/*.ts", "packages/legacy-web-access/test/**/*.ts"],
 	"exclude": ["node_modules", "test-output"]

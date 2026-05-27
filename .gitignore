@@ -18,6 +18,7 @@ vendor/*
 !vendor/pi-mono/
 !vendor/agent-stuff/
 !vendor/ast-grep/
+!vendor/effect-language-service/
 
 *.mp4
 prompt.md

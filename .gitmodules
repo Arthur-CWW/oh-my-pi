@@ -7,3 +7,9 @@
 [submodule "vendor/agent-stuff"]
 	path = vendor/agent-stuff
 	url = https://github.com/mitsuhiko/agent-stuff
+[submodule "vendor/ast-grep"]
+	path = vendor/ast-grep
+	url = https://github.com/ast-grep/ast-grep
+[submodule "vendor/effect-language-service"]
+	path = vendor/effect-language-service
+	url = https://github.com/Effect-TS/language-service
