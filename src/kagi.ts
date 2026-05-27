@@ -12,7 +12,7 @@ import { type SearchResponse, toErrorMessage } from "./schemas"
 // ─── Session ──────────────────────────────────────────────────────────
 
 interface KagiSession {
-  cookies: Array<{ name: string; value: string }>
+  token: string
   headers: Record<string, string>
   capturedAt: string
 }
@@ -26,7 +26,7 @@ function loadCachedSession(): KagiSession | null {
   try {
     if (!existsSync(p)) return null
     const s: KagiSession = JSON.parse(readFileSync(p, "utf-8"))
-    if (!s?.cookies?.length) return null
+    if (!s?.token) return null
     if (s.capturedAt && Date.now() - new Date(s.capturedAt).getTime() > 24 * 60 * 60 * 1000) return null
     return s
   } catch { return null }
@@ -58,18 +58,14 @@ function captureFromFirefox(): KagiSession | null {
     const output = execFileSync(
       "sqlite3",
       ["-readonly", "-noheader", "-separator", "|", tmpDb,
-        "SELECT name, value FROM moz_cookies WHERE host LIKE '%kagi.com%' AND (expiry > unixepoch() OR expiry = 0)"],
+        "SELECT name, value FROM moz_cookies WHERE host LIKE '%kagi.com%' AND name = 'kagi_session' AND (expiry > unixepoch() OR expiry = 0)"],
       { timeout: 5000, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] },
     ).trim()
     if (!output) return null
-    const cookies: Array<{ name: string; value: string }> = []
-    for (const line of output.split("\n")) {
-      const [name, value] = line.split("|")
-      if (name && value) cookies.push({ name, value })
-    }
-    if (!cookies.length) return null
+    const [, token] = output.split("\n")[0]?.split("|") ?? []
+    if (!token) return null
     return {
-      cookies,
+      token,
       headers: { "user-agent": FF_UA, "accept-language": "en-US,en;q=0.9", accept: "application/json" },
       capturedAt: new Date().toISOString(),
     }
@@ -91,16 +87,17 @@ async function captureFromChromeCdP(browserUrl = "http://localhost:9222"): Promi
         c.send("Network.getAllCookies")
       )) as { cookies: Array<{ name: string; value: string; domain: string }> }
       const kCookies = cdpCookies.cookies.filter(
-        (c) => c.domain === "kagi.com" || c.domain.endsWith(".kagi.com"),
+        (c) => (c.domain === "kagi.com" || c.domain.endsWith(".kagi.com")) && c.name === "kagi_session",
       )
-      if (!kCookies.length) return null
+      const kagiSession = kCookies.find((c) => c.name === "kagi_session")
+      if (!kagiSession?.value) return null
       const hdrs = await page.evaluate(() => ({
         "accept-language": navigator.language || "en-US",
         "user-agent": navigator.userAgent,
       }))
       await browser.disconnect()
       return {
-        cookies: kCookies.map((c) => ({ name: c.name, value: c.value })),
+        token: kagiSession.value,
         headers: { ...hdrs, accept: "application/json" },
         capturedAt: new Date().toISOString(),
       }
@@ -197,10 +194,9 @@ export const runSearch = Effect.fn("kagiRunSearch")(function* (query: string) {
   }
   if (!session) return yield* Effect.fail(new Error("Kagi session not found. Sign into kagi.com in Chrome or Firefox."))
 
-  const cookieHeader = session.cookies.map((c) => `${c.name}=${c.value}`).join("; ")
   const response = yield* Effect.tryPromise({
     try: () => fetch(`https://kagi.com/socket/search?q=${encodeURIComponent(query)}`, {
-      headers: { ...session.headers, cookie: cookieHeader },
+      headers: { ...session.headers, "X-Kagi-Authorization": session.token },
       signal: AbortSignal.timeout(30000),
     }),
     catch: (err) => new Error(`Kagi request: ${toErrorMessage(err)}`),
