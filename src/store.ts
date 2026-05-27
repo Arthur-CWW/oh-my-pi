@@ -1,29 +1,49 @@
-import { Database } from "bun:sqlite"
-import { mkdirSync } from "node:fs"
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs"
 import { dirname } from "node:path"
 import { Effect } from "effect"
 import type { StoredData } from "./schemas"
 
-// ─── SQLite setup ─────────────────────────────────────────────────────
+const STORE_PATH = `${process.env.HOME ?? process.env.USERPROFILE ?? "/tmp"}/.pi/pi-web-access/store.json`
 
-const DB_PATH = `${process.env.HOME ?? process.env.USERPROFILE ?? "/tmp"}/.pi/pi-web-access/store.sqlite`
+interface StoreEntry {
+  value: unknown
+  expiresAt: number | null
+}
 
-let _db: Database | null = null
+// ─── JSON file store ──────────────────────────────────────────────────
 
-function db(): Database {
-  if (_db) return _db
-  mkdirSync(dirname(DB_PATH), { recursive: true })
-  _db = new Database(DB_PATH)
-  _db.run("PRAGMA journal_mode = WAL")
-  _db.run("PRAGMA synchronous = NORMAL")
-  _db.run(`CREATE TABLE IF NOT EXISTS store (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL,
-    expires_at INTEGER,
-    created_at INTEGER NOT NULL
-  )`)
-  _db.run("DELETE FROM store WHERE expires_at IS NOT NULL AND expires_at < ?", [Date.now()])
-  return _db
+let _store: Record<string, StoreEntry> | null = null
+
+function load(): Record<string, StoreEntry> {
+  if (_store) return _store
+  try {
+    if (existsSync(STORE_PATH)) {
+      _store = JSON.parse(readFileSync(STORE_PATH, "utf-8"))
+      return _store!
+    }
+  } catch { /* nop */ }
+  _store = {}
+  return _store
+}
+
+function save(): void {
+  if (!_store) return
+  mkdirSync(dirname(STORE_PATH), { recursive: true })
+  writeFileSync(STORE_PATH, JSON.stringify(_store, null, 2), "utf-8")
+}
+
+function cleanExpired(): void {
+  const s = load()
+  const now = Date.now()
+  let changed = false
+  for (const key of Object.keys(s)) {
+    const entry = s[key]
+    if (entry?.expiresAt && entry.expiresAt < now) {
+      delete s[key]
+      changed = true
+    }
+  }
+  if (changed) save()
 }
 
 // ─── KV API ───────────────────────────────────────────────────────────
@@ -33,36 +53,37 @@ export const storeSet = Effect.fn("storeSet")(function* (
   value: unknown,
   ttlMs?: number,
 ) {
-  const d = db()
-  const json = JSON.stringify(value)
-  const expiresAt = ttlMs ? Date.now() + ttlMs : null
-  d.run(
-    "INSERT OR REPLACE INTO store (key, value, expires_at, created_at) VALUES (?, ?, ?, ?)",
-    [key, json, expiresAt, Date.now()],
-  )
+  const s = load()
+  s[key] = {
+    value,
+    expiresAt: ttlMs ? Date.now() + ttlMs : null,
+  }
+  save()
 })
 
 export const storeGet = Effect.fn("storeGet")(function* (key: string) {
-  const d = db()
-  d.run("DELETE FROM store WHERE key = ? AND expires_at IS NOT NULL AND expires_at < ?", [key, Date.now()])
-  const row = d.query("SELECT value FROM store WHERE key = ?").get(key) as { value: string } | null
-  if (!row) return null
-  try { return JSON.parse(row.value) } catch { return null }
+  cleanExpired()
+  const entry = load()[key]
+  if (!entry) return null
+  return entry.value
 })
 
 export const storeDelete = Effect.fn("storeDelete")(function* (key: string) {
-  db().run("DELETE FROM store WHERE key = ?", [key])
+  const s = load()
+  delete s[key]
+  save()
 })
 
 export const storeList = Effect.fn("storeList")(function* () {
-  const d = db()
-  d.run("DELETE FROM store WHERE expires_at IS NOT NULL AND expires_at < ?", [Date.now()])
-  return d.query("SELECT key, created_at, expires_at FROM store ORDER BY created_at DESC").all() as Array<{
-    key: string; created_at: number; expires_at: number | null
-  }>
+  cleanExpired()
+  return Object.entries(load()).map(([key, entry]) => ({
+    key,
+    created_at: 0,
+    expires_at: entry.expiresAt,
+  }))
 })
 
-// ─── Result storage (search/fetch session results) ────────────────────
+// ─── Result storage ───────────────────────────────────────────────────
 
 const RESULT_TTL = 24 * 60 * 60 * 1000
 
