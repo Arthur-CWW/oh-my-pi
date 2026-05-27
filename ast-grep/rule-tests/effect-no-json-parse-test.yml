@@ -1,7 +1,0 @@
-id: effect-no-json-parse
-valid:
-  - |
-    const decode = Schema.decodeUnknownEither(ConfigSchema)
-invalid:
-  - |
-    const config = JSON.parse(raw)

@@ -1,21 +1,13 @@
 node_modules/
 bun.lock
-test-output/
 
-packages/kagi/output/
-packages/kagi/storage/session.json
-
-# skills/pi-skills
-
-pi-session-*
-
+.env
 .claude-trace
-
-agent-stuff/
-bin/
-vendor/*
-!vendor/kagi-chrome-extension/
-!vendor/.gitkeep
-
+pi-session-*
 *.mp4
 prompt.md
+-.en.vtt
+
+vendor/*
+!vendor/kagi-chrome-extension/
+skills/chrome-devtools-mcp/

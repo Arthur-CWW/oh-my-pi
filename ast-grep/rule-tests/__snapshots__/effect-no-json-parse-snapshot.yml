@@ -1,9 +1,0 @@
-id: effect-no-json-parse
-snapshots:
-  ? |
-    const config = JSON.parse(raw)
-  : labels:
-    - source: JSON.parse(raw)
-      style: primary
-      start: 15
-      end: 30
