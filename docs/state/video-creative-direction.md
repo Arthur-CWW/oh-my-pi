@@ -222,6 +222,12 @@ Other relevant tools/leads:
 - Affogato
 - HeyGen / Synthesia / Creatify-style tools
 
+Current research direction:
+
+- Identify the most popular / highest-revenue AI UGC or full-AI-influencer tools using public evidence and proxies.
+- Study the best product workflows clean-room: what to emulate, what is commodity, what is moat.
+- “Copy them” means build a similar/better modular workflow from public behavior and first principles, not stealing code, bypassing paywalls, copying trademarks, or cloning private identities.
+
 ## Tool/machine preferences
 
 - Main Mac: source-of-truth repo, logged-in browsers, Jimeng/Dreamina capture, Gemini CLI, ChatGPT Pro research.
@@ -254,3 +260,4 @@ Arthur clarified:
 - Avoid getting banned by Twitter/X; consider a different account first.
 - Maintain state docs as living memory: if Arthur gives new durable preferences or direction in a session, update the state docs so they stay synchronized with what he actually cares about.
 - When writing prompts for new Pi/LLM sessions, use `@file/path` context references where possible so maintained docs are auto-included rather than copied by hand.
+- New GPT-Pro research target: find the most popular/highest-revenue AI UGC/full-AI-influencer tool(s), then produce a clean-room blueprint for building a similar or better modular graph/layer alternative.
