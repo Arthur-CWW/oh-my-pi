@@ -9,6 +9,7 @@ Current packages:
 - `packages/web-access` — Pi tools for web search, content fetching, YouTube transcripts, Chrome cookies, Codex session import, and frontend LLM browser sessions.
 - `packages/browser-use` — clean-room CDP browser-use extension prototype.
 - `packages/twitter-archive` — local-first Twitter/X archive schema and future capture/search helpers.
+- `packages/jimeng-client` — Jimeng/Dreamina direct API helpers ported from Slotok reverse engineering.
 - `apps/tweet-viewer` — future local archive viewer.
 - `workflows/*` — future archive/analyze/generate shortform-video workflows.
 
@@ -21,6 +22,7 @@ pi --help                         # verify project Pi package loads
 bun run typecheck                 # delegates to packages/web-access
 bun run test                      # delegates to packages/web-access
 bun run check                     # typecheck + tests
+bun run jimeng:test               # Jimeng direct-client unit tests
 bun run web-access:smoke          # live tool smoke test
 bun run web-access:help           # verify extension directly
 ```
@@ -46,6 +48,7 @@ packages/web-access/
   vendor/kagi-chrome-extension/   Official Kagi extension (submodule)
 
 packages/twitter-archive/         Local archive schema/capture package skeleton
+packages/jimeng-client/           Jimeng/Dreamina direct API helpers
 apps/tweet-viewer/                Local archive viewer skeleton
 docs/twitter-archive-plan.md      Twitter/X archive and shortform pipeline plan
 ```
@@ -68,3 +71,4 @@ docs/twitter-archive-plan.md      Twitter/X archive and shortform pipeline plan
 - No colocated `*.test.ts` beside impl files
 - Twitter/X capture should be respectful: low concurrency, jitter/backoff, disk cache/entity dedupe, no private/locked content
 - Browser-based Twitter/X scraping should inspect only the main content/tweet column plus search input; ignore sidebars/trends/DMs/navigation chrome
+- Jimeng live/direct runs can consume paid quota; run dry-run plans first, keep concurrency 1, and stop on risk-control (`1019` / `shark not pass`) errors

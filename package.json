@@ -12,12 +12,15 @@
     "url": "git+https://github.com/Arthur-CWW/pi-workflows.git"
   },
   "scripts": {
-    "typecheck": "cd packages/web-access && bun run typecheck && cd ../twitter-archive && bun run typecheck",
-    "test": "cd packages/web-access && bun run test",
+    "typecheck": "cd packages/web-access && bun run typecheck && cd ../twitter-archive && bun run typecheck && cd ../jimeng-client && bun run typecheck",
+    "test": "cd packages/web-access && bun run test && cd ../jimeng-client && bun run test",
     "check": "bun run typecheck && bun run test",
     "web-access:smoke": "cd packages/web-access && bun run scripts/smoke.ts",
     "web-access:help": "pi -e ./packages/web-access/src/index.ts --help",
-    "twitter-archive:typecheck": "cd packages/twitter-archive && bun run typecheck"
+    "twitter-archive:typecheck": "cd packages/twitter-archive && bun run typecheck",
+    "jimeng:typecheck": "cd packages/jimeng-client && bun run typecheck",
+    "jimeng:test": "cd packages/jimeng-client && bun run test",
+    "jimeng:cli": "cd packages/jimeng-client && bun run src/cli.ts --"
   },
   "pi": {
     "extensions": ["./packages/web-access/src/index.ts"],

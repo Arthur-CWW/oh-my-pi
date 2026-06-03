@@ -7,6 +7,7 @@ Current focus:
 - `packages/web-access` — existing Pi web/search/fetch/YouTube/frontend-LLM tools.
 - `packages/browser-use` — clean-room CDP browser-use extension prototype.
 - `packages/twitter-archive` — planned local X/Twitter archive capture + normalization.
+- `packages/jimeng-client` — Jimeng/Dreamina direct API helpers ported from Slotok reverse engineering.
 - `apps/tweet-viewer` — planned local searchable archive viewer.
 - `workflows/*` — planned shortform-video archive, analysis, and generation pipelines.
 
@@ -29,6 +30,7 @@ packages/
   web-access/        # Pi web access extension moved from repo root
   browser-use/       # CDP browser automation extension prototype
   twitter-archive/  # local archive model/capture package skeleton
+  jimeng-client/    # Jimeng direct client helpers
 apps/
   tweet-viewer/      # local archive browser/search UI skeleton
 workflows/
@@ -47,3 +49,7 @@ The Twitter/X archive should stay local-first and respectful: low concurrency, j
 For X/Twitter frontend capture, scope DOM inspection to the main content column/tweet component and search input only. Ignore sidebars, trends, DMs, ads, and unrelated navigation chrome.
 
 See `docs/twitter-archive-plan.md` for the implementation plan.
+
+## Jimeng
+
+The Slotok `reverse-jimeng` direct API notes/client were brought over into `packages/jimeng-client` plus `docs/provider/jimeng-direct-client-endpoints.md`. Use dry-runs first; live runs can consume paid quota.
