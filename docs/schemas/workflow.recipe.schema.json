@@ -1,0 +1,266 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pi-workflows.local/schemas/workflow.recipe.schema.json",
+  "title": "Pi Video Pipeline Recipe",
+  "description": "v1alpha1 schema for human-authored YAML/JSON video pipeline recipes. YAML must be parsed as a JSON-compatible subset before validation.",
+  "type": "object",
+  "required": ["schemaVersion", "kind", "id", "name", "stages"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": "pi.workflow/v1alpha1"
+    },
+    "kind": {
+      "const": "VideoPipelineRecipe"
+    },
+    "id": {
+      "$ref": "#/$defs/slug"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/jsonValue"
+      },
+      "properties": {
+        "createdBy": { "type": "string" },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "notes": { "type": "string" }
+      }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maxConcurrentStages": { "type": "integer", "minimum": 1 },
+        "quotaMode": {
+          "type": "string",
+          "enum": ["offline-only", "confirm-before-paid-submit", "allow-paid-generation"]
+        },
+        "allowNetwork": { "type": "boolean" },
+        "allowPaidGeneration": { "type": "boolean" },
+        "stopOnRiskControl": { "type": "boolean" },
+        "notes": { "type": "string" }
+      }
+    },
+    "providers": {
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/providerId" },
+      "additionalProperties": { "$ref": "#/$defs/providerPolicy" }
+    },
+    "vars": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/jsonValue" }
+    },
+    "assetLibraries": {
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/identifier" },
+      "additionalProperties": { "$ref": "#/$defs/assetLibrary" }
+    },
+    "assets": {
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/identifier" },
+      "additionalProperties": { "$ref": "#/$defs/assetRef" }
+    },
+    "prompts": {
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/identifier" },
+      "additionalProperties": { "$ref": "#/$defs/prompt" }
+    },
+    "stages": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/stage" }
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_-]*$"
+    },
+    "slug": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$"
+    },
+    "providerId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$"
+    },
+    "stageKind": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*(\\.[a-z][a-z0-9-]*)+$",
+      "examples": [
+        "image.generate",
+        "video.generate",
+        "audio.tts",
+        "video.lipsync",
+        "subtitle.generate",
+        "video.ffmpeg",
+        "video.analyze",
+        "archive.query",
+        "script.generate",
+        "asset.character",
+        "asset.prop",
+        "asset.background",
+        "asset.overlay",
+        "scene.compose"
+      ]
+    },
+    "uri": {
+      "type": "string",
+      "pattern": "^(asset|file|artifact|https|x-tweet)://.+$"
+    },
+    "expressionRef": {
+      "type": "string",
+      "pattern": "^\\$(vars|assets|assetLibraries|prompts|outputs|stages)\\.[A-Za-z][A-Za-z0-9_.-]*$"
+    },
+    "jsonValue": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "boolean" },
+        { "type": "number" },
+        { "type": "string" },
+        {
+          "type": "array",
+          "items": { "$ref": "#/$defs/jsonValue" }
+        },
+        {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/jsonValue" }
+        }
+      ]
+    },
+    "providerPolicy": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/jsonValue" },
+      "properties": {
+        "maxConcurrency": { "type": "integer", "minimum": 1 },
+        "minPollIntervalMs": { "type": "integer", "minimum": 0 },
+        "stopOnErrors": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "sessionRef": { "type": "string" },
+        "copyVideoToTmpFirst": { "type": "boolean" }
+      }
+    },
+    "assetLibrary": {
+      "type": "object",
+      "required": ["uri"],
+      "additionalProperties": false,
+      "properties": {
+        "uri": { "$ref": "#/$defs/uri" },
+        "description": { "type": "string" },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/jsonValue" }
+        }
+      }
+    },
+    "assetRef": {
+      "type": "object",
+      "required": ["kind", "uri"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "image",
+            "video",
+            "audio",
+            "subtitle",
+            "text",
+            "json",
+            "mask",
+            "caption-style",
+            "scene-template",
+            "format-template",
+            "other"
+          ]
+        },
+        "uri": { "$ref": "#/$defs/uri" },
+        "role": { "type": "string" },
+        "description": { "type": "string" },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "vibeAxes": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/jsonValue" }
+        }
+      }
+    },
+    "prompt": {
+      "type": "object",
+      "required": ["language", "text"],
+      "additionalProperties": false,
+      "properties": {
+        "language": { "type": "string", "minLength": 1 },
+        "text": { "type": "string", "minLength": 1 },
+        "translatedText": { "type": "string" },
+        "negativeText": { "type": "string" },
+        "notes": { "type": "string" },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        }
+      }
+    },
+    "stage": {
+      "type": "object",
+      "required": ["id", "kind", "provider", "input", "output"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "kind": { "$ref": "#/$defs/stageKind" },
+        "provider": { "$ref": "#/$defs/providerId" },
+        "needs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/identifier" },
+          "uniqueItems": true
+        },
+        "input": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/jsonValue" }
+        },
+        "output": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": { "$ref": "#/$defs/identifier" },
+          "additionalProperties": { "$ref": "#/$defs/identifier" }
+        },
+        "policy": { "$ref": "#/$defs/providerPolicy" },
+        "notes": { "type": "string" }
+      }
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-fA-F0-9]{64}$"
+    }
+  }
+}

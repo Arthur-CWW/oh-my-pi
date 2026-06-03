@@ -39,6 +39,15 @@ data/workflow-runs/                # ignored runtime outputs
 
 Do not add `workflows/` yet unless implementation starts. For now this doc defines the target shape.
 
+Current draft schema stubs live under:
+
+```txt
+docs/schemas/workflow.recipe.schema.json
+docs/schemas/workflow.run-manifest.schema.json
+```
+
+They intentionally validate the JSON-compatible object produced after YAML parsing, not raw YAML syntax.
+
 ## Core concepts
 
 - **Recipe**: desired creative pipeline, authored/reviewed by humans.
@@ -277,8 +286,8 @@ For good iteration and auditability, the recipe/manifest must capture:
 
 ## Implementation milestones
 
-1. Write JSON Schema for the minimal recipe and run manifest.
-2. Add a small validator CLI that parses YAML and validates against schema.
+1. Draft JSON Schema for the minimal recipe and run manifest. Initial stubs: `docs/schemas/workflow.recipe.schema.json`, `docs/schemas/workflow.run-manifest.schema.json`.
+2. Add a small validator CLI that parses YAML and validates against these schemas.
 3. Add a dry-run planner that prints the DAG and parallel stages.
 4. Add local-only executors for `subtitle.generate`, `video.ffmpeg`, and `video.analyze`.
 5. Add provider adapters after Jimeng/TTS/lipsync lanes identify stable APIs.
