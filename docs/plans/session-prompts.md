@@ -2,16 +2,18 @@
 
 Use these prompts to start parallel Pi sessions without worktrees. Every worker should read the state docs first and keep status under ignored `data/coordination/**`.
 
+These prompts use `@path/to/file.md` references where useful, so Pi can auto-include the referenced file context in the prompt.
+
 ## Universal preface for all creative/video sessions
 
 ```txt
 You are working in /Users/arthur/projects/pi-web-access, a pi-workflows monorepo.
-First read:
-- AGENTS.md
-- docs/state/README.md
-- docs/state/video-creative-direction.md
-- docs/plans/README.md
-- docs/plans/coordination-runbook.md
+First read / include:
+- @AGENTS.md
+- @docs/state/README.md
+- @docs/state/video-creative-direction.md
+- @docs/plans/README.md
+- @docs/plans/coordination-runbook.md
 
 Important: docs/state/video-creative-direction.md is the living taste ledger / vibe bible / creative north-star. If Arthur gives new durable preferences, goals, anti-goals, machine facts, or vibe direction during this session, update the relevant docs/state/** file in the same session unless he says not to.
 
@@ -41,11 +43,11 @@ Do not run paid generation or risky browser scraping. If workers produce source 
 ```txt
 You are the pipeline serialization and layered video graph lane.
 Use the universal preface.
-Also read:
-- docs/plans/pipeline-serialization-format.md
-- docs/plans/layered-video-graph.md
-- docs/plans/video-asset-library.md
-- docs/schemas/video-asset-catalog-v0.sql
+Also read / include:
+- @docs/plans/pipeline-serialization-format.md
+- @docs/plans/layered-video-graph.md
+- @docs/plans/video-asset-library.md
+- @docs/schemas/video-asset-catalog-v0.sql
 
 Goal: define a versioned YAML recipe + JSON run manifest format for reversible ComfyUI-like graph nodes and video-editor-like layers. Preserve separable character/background/prop/audio/caption/filter components.
 
@@ -69,10 +71,10 @@ Do not edit Jimeng/Twitter code without handoff.
 ```txt
 You are the composable brainrot asset library lane.
 Use the universal preface.
-Also read:
-- docs/plans/video-asset-library.md
-- docs/state/video-creative-direction.md
-- scripts/generate-brainrot-assets-v0.py
+Also read / include:
+- @docs/plans/video-asset-library.md
+- @docs/state/video-creative-direction.md
+- @scripts/generate-brainrot-assets-v0.py
 
 Goal: create small, stupid/fun, composable assets for one stage of the pipeline: overlays, props, caption-safe loops, masks, SFX ideas, Chinese internet meme primitives, etc. Register prompts/tags/vibe scores/provenance in SQLite.
 
@@ -98,10 +100,10 @@ Do not use paid providers unless explicitly approved. Local procedural/ffmpeg as
 ```txt
 You are the Jimeng/Dreamina frontend API reversal lane.
 Use the universal preface.
-Also read:
-- docs/plans/jimeng-frontend-api-reversal.md
-- docs/provider/jimeng-direct-client-endpoints.md
-- packages/jimeng-client/README.md
+Also read / include:
+- @docs/plans/jimeng-frontend-api-reversal.md
+- @docs/provider/jimeng-direct-client-endpoints.md
+- @packages/jimeng-client/README.md
 
 Goal: discover real frontend payloads for image-to-video / first-frame / multimodal generation and port stable direct-client helpers. Do not reuse old text-to-video templates for image-to-video.
 
@@ -127,9 +129,9 @@ Safety:
 ```txt
 You are the TTS/lipsync research and benchmark lane.
 Use the universal preface.
-Also read:
-- docs/plans/tts-lipsync-research.md
-- docs/plans/machine-roles.md
+Also read / include:
+- @docs/plans/tts-lipsync-research.md
+- @docs/plans/machine-roles.md
 
 Goal: find high-quality TTS and lipsync/talking-head options for stylized/non-human characters, especially a seal, with automation-friendly APIs/CLIs. Voice quality and modularity matter more than one-shot video.
 
@@ -150,10 +152,10 @@ Do not spend paid API quota without approval. Prefer research, pricing/capabilit
 ```txt
 You are the Pleometric/X archive lane.
 Use the universal preface.
-Also read:
-- docs/plans/pleometric-archive.md
-- docs/twitter-archive-plan.md
-- docs/plans/machine-roles.md
+Also read / include:
+- @docs/plans/pleometric-archive.md
+- @docs/twitter-archive-plan.md
+- @docs/plans/machine-roles.md
 
 Goal: archive public tweets/replies/quotes/media for Pleometric and future accounts, excluding likes/bookmarks, safely and respectfully. Start with low-risk metadata/media inventory and small bounded runs.
 
@@ -180,10 +182,10 @@ Safety:
 ```txt
 You are the AI UGC format mining lane.
 Use the universal preface.
-Also read:
-- docs/plans/ai-ugc-format-mining.md
-- docs/state/video-creative-direction.md
-- docs/twitter-archive-plan.md
+Also read / include:
+- @docs/plans/ai-ugc-format-mining.md
+- @docs/state/video-creative-direction.md
+- @docs/twitter-archive-plan.md
 
 Goal: compile and decompose AI UGC / shortform ad formats into reusable structures: hook, persona, scene, captions, product/demo slot, proof/authority slot, CTA, filters, pacing. Identify tools like Bluma/Arcads/Higgsfield/viral.app/Fastlane and source posts from recent Firefox/X history.
 
@@ -204,10 +206,10 @@ Do not clone private identities or copyrighted videos verbatim. Capture high-lev
 ```txt
 You are the desktop GPU / ComfyUI local-model lane.
 Use the universal preface.
-Also read:
-- docs/plans/machine-roles.md
-- docs/plans/video-asset-library.md
-- docs/state/video-creative-direction.md
+Also read / include:
+- @docs/plans/machine-roles.md
+- @docs/plans/video-asset-library.md
+- @docs/state/video-creative-direction.md
 
 Known machine facts:
 - SSH alias: desktop

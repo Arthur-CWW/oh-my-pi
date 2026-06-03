@@ -72,6 +72,7 @@ Each component should be separately editable, inspectable, replaceable, cacheabl
 7. **Generate assets as reusable primitives, not just final outputs.** Characters, dangling keys, captions, backgrounds, filters, sound stings, etc. should be remixable.
 8. **Account/risk safety matters.** Do not get banned by X/Twitter. Do not brute-force rate limits, auth challenges, or Jimeng risk controls.
 9. **The system should later support both brainrot art videos and less-brainrotty AI UGC/ad videos.**
+10. **When composing Pi/LLM prompts, use `@path/to/file` references where supported** so the prompt can auto-include maintained context docs instead of manually pasting or duplicating them.
 
 ## What Arthur actually cares about
 
@@ -252,3 +253,4 @@ Arthur clarified:
 - Archive future accounts too, not only Pleometric; yes to tweets/replies/quotes/media, no to likes.
 - Avoid getting banned by Twitter/X; consider a different account first.
 - Maintain state docs as living memory: if Arthur gives new durable preferences or direction in a session, update the state docs so they stay synchronized with what he actually cares about.
+- When writing prompts for new Pi/LLM sessions, use `@file/path` context references where possible so maintained docs are auto-included rather than copied by hand.

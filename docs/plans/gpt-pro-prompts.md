@@ -4,8 +4,18 @@
 
 Status: submitted asynchronously via `llm_frontend_browser` on 2026-06-03. Runtime session notes should live under `data/research/**`, not in this tracked doc.
 
+When using a Pi prompt or LLM handoff that supports file expansion, prefer including context with `@file` references rather than copying large docs by hand.
+
 ```txt
 You are doing high-effort product/technical research for a macOS/TypeScript/ffmpeg video workflow project.
+
+If your runner supports @file inclusion, include:
+- @docs/state/video-creative-direction.md
+- @docs/plans/layered-video-graph.md
+- @docs/plans/video-asset-library.md
+- @docs/plans/tts-lipsync-research.md
+- @docs/plans/ai-ugc-format-mining.md
+- @docs/plans/machine-roles.md
 
 Context:
 - We are building a modular, editable, reversible shortform-video pipeline, closer to ComfyUI graph nodes + video-editor layers than one-shot text-to-video.
