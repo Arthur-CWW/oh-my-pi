@@ -69,10 +69,23 @@ Use CDP in the dedicated frontend browser profile. Capture:
 - WebSocket sent/received frames
 - timing and initiator stack if available
 
+Current implementation:
+
+```txt
+packages/jimeng-client/src/network-recorder.ts
+```
+
+Help-only run:
+
+```bash
+bun packages/jimeng-client/src/network-recorder.ts --help
+```
+
 Store raw traces only under ignored paths:
 
 ```txt
 data/jimeng-captures/<timestamp>-<flow>/raw-network.jsonl
+data/jimeng-captures/<timestamp>-<flow>/capture-template.raw.json
 data/jimeng-captures/<timestamp>-<flow>/redacted-summary.md
 ```
 
@@ -158,7 +171,7 @@ Use the background-safe pattern from `packages/web-access/skills/background-brow
 
 Important: attach network listeners to the target page and avoid `Target.activateTarget`, `page.bringToFront`, or DevTools UI.
 
-Events worth recording:
+Events worth recording and currently covered by `network-recorder.ts`:
 
 - `Network.requestWillBeSent`
 - `Network.requestWillBeSentExtraInfo`
@@ -169,6 +182,21 @@ Events worth recording:
 - `Network.getRequestPostData`
 - `Network.webSocketFrameReceived`
 - `Network.webSocketFrameSent`
+
+Preferred attach modes:
+
+```bash
+# Attach to an existing Jimeng tab; useful when Arthur is manually driving the UI.
+bun packages/jimeng-client/src/network-recorder.ts \
+  --target-url jimeng.jianying.com \
+  --flow image2video-upload \
+  --durationSec 0
+
+# Create a background target; useful for passive page-load/session endpoint capture.
+bun packages/jimeng-client/src/network-recorder.ts \
+  --flow session-refresh \
+  --durationSec 180
+```
 
 ## Handoff prompt for a worker agent
 

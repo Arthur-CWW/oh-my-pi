@@ -22,7 +22,7 @@ This package contains only local client code and tests. It does **not** include 
 - Do not brute-force retries or spam repeated prompts.
 - Refresh browser session/cookies explicitly when auth expires.
 
-## CLI
+## Direct-client CLI
 
 ```bash
 bun run jimeng:cli -- \
@@ -35,3 +35,18 @@ bun run jimeng:cli -- \
 ```
 
 Use `--dryRun` first. Live runs can consume paid quota.
+
+## Background network recorder
+
+Passive CDP recorder for frontend API reversal:
+
+```bash
+bun packages/jimeng-client/src/network-recorder.ts --help
+
+bun packages/jimeng-client/src/network-recorder.ts \
+  --target-url jimeng.jianying.com \
+  --flow manual-upload \
+  --durationSec 0
+```
+
+Default output stays under ignored `data/jimeng-captures/**` and includes raw JSONL, a capture template, and a redacted summary. Do not commit raw captures, cookies, signed URLs, or generated media.

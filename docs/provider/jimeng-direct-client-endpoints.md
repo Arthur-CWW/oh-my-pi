@@ -21,6 +21,30 @@ Load session bundle and call endpoints with `fetch`.
 
 ---
 
+## Official CLI capability inventory (2026-06-03)
+
+Help-only inspection of the installed official `dreamina` CLI confirmed these generator commands are exposed locally:
+
+- `text2image`
+- `image2image`
+- `text2video`
+- `image2video`
+- `frames2video`
+- `multiframe2video`
+- `multimodal2video`
+- `image_upscale`
+
+Important capability notes from help output:
+
+- `image2video` uploads one local image automatically and treats ratio as inferred from the input image. Advanced controls expose `--duration`, `--video_resolution`, and `--model_version` with `3.0`, `3.0fast`, `3.0pro`, `3.5pro`, and `seedance2.0` variants.
+- `multimodal2video` maps to Dreamina Web `全能参考` / all-around reference mode. It uploads local image/video/audio references automatically, requires at least one image or video, and supports Seedance 2.0 variants.
+- `text2video` supports Seedance 2.0 variants, duration `4..15`, and ratios `1:1`, `3:4`, `16:9`, `4:3`, `9:16`, `21:9`.
+- `text2image` supports model versions `3.0`, `3.1`, `4.0`, `4.1`, `4.5`, `4.6`, `5.0`.
+- `image2image` supports 1-10 local input images and model versions `4.0`, `4.1`, `4.5`, `4.6`, `5.0`.
+- All generation operations can consume credits. Some high-risk/content-safety model paths may require one-time Dreamina Web authorization (`AigcComplianceConfirmationRequired`).
+
+---
+
 ## Endpoint catalog (confirmed)
 
 ### 1) Image submit (agent path)
@@ -32,7 +56,7 @@ Load session bundle and call endpoints with `fetch`.
   - `text/event-stream`
 - Follow-up:
   - parse stream for submit info, then poll `get_history_by_ids`
-- current utility: `src/shared/jimeng-sse.ts` (`extractSubmitIdFromSseText`) for resilient submit-id extraction
+- current utility: `packages/jimeng-client/src/sse.ts` (`extractSubmitIdFromSseText`) for resilient submit-id extraction
 
 ### 2) Video submit (workbench path)
 - `POST https://jimeng.jianying.com/mweb/v1/aigc_draft/generate`
@@ -245,6 +269,48 @@ Supports optional frame URI injection for video payload patching:
 - `--lastFrameUri <uri>`
 
 > Note: this is payload-level injection only; direct upload-to-URI mapping still needs reversing.
+
+## Background network recorder
+
+A passive CDP recorder is available at:
+
+```txt
+packages/jimeng-client/src/network-recorder.ts
+```
+
+It connects to the dedicated Jimeng frontend CDP profile (`http://127.0.0.1:9340` by default), opens new targets with `Target.createTarget({ background: true })` when needed, and never calls `Target.activateTarget`, `page.bringToFront`, or DevTools UI methods.
+
+Help-only run:
+
+```bash
+bun packages/jimeng-client/src/network-recorder.ts --help
+```
+
+Capture examples:
+
+```bash
+# Create a background Jimeng target and record for 3 minutes.
+bun packages/jimeng-client/src/network-recorder.ts \
+  --flow image2video-upload \
+  --durationSec 180
+
+# Attach to an already-open Jimeng tab and record until Ctrl-C.
+bun packages/jimeng-client/src/network-recorder.ts \
+  --target-url jimeng.jianying.com \
+  --flow manual-upload \
+  --durationSec 0
+```
+
+Default output path:
+
+```txt
+data/jimeng-captures/<timestamp>-<flow>/
+  raw-network.jsonl            # raw local-only CDP events; may contain cookies/signatures
+  capture-template.raw.json    # request-template shape consumed by direct-client patching helpers
+  redacted-summary.md          # reviewable summary with headers/signatures/query values redacted
+```
+
+Do not commit raw captures or generated media. If a redacted summary is promoted into tracked docs, manually review it first for cookies, reusable signatures, signed URL values, account IDs, and private prompt/media content.
 
 ## Next reverse target (immediate)
 1. Capture and isolate asset upload endpoint used before first/last frame submit.
