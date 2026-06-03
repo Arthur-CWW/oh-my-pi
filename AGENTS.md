@@ -63,6 +63,7 @@ docs/twitter-archive-plan.md      Twitter/X archive and shortform pipeline plan
 
 ## Persistent Preferences
 
+- For video/creative/AI UGC work, read and maintain `docs/state/README.md` and `docs/state/video-creative-direction.md`; when Arthur gives new durable preferences or direction in a session, update the relevant state doc so it stays synchronized.
 - `moduleResolution: "bundler"` — no `.js` import extensions
 - `bun-types` in package typecheck configs for tests
 - Cross-runtime: avoid native modules unless deliberately isolated
