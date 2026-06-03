@@ -1,0 +1,1498 @@
+{
+  "tweet_id": "2050691099241668993",
+  "tweet_url": "https://x.com/alexcooldev/status/2050691099241668993",
+  "tweet_text": "https://t.co/BRrt8nmA1f",
+  "x_article_url": "https://x.com/i/article/2050683101765128192",
+  "x_article_alias_url": "https://x.com/alexcooldev/article/2050691099241668993",
+  "history_title": "How to create multiple AI influencers to market on TikTok (Step-by-step simple guide)",
+  "article": {
+    "content_state": {
+      "blocks": [
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "3oqen",
+          "text": "Organic content is a long-term game, and it requires high volume so you can build an engagement farming machine.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "ds3a5",
+          "text": "Here’s an example: an AI calorie tracker app making over $20k/month just from AI influencers on TikTok. (And all revenue tracking tools tend to underestimate actual revenue by about 50%-100%, which means these two app platforms could actually be generating over $40k–$50k per month.)",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "1ddrv",
+          "text": "Yes, you heard that right, another AI calorie tracker app lol.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 0,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "9bf8r",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 1,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "5uc5k",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 2,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "87cng",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 3,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "dej33",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 4,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "79q3a",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "b6s8b",
+          "text": "They’ve created over 30–40 influencers (that’s just what I’ve been able to research, I think there are even more), and all of them are automated to promote their products (similar to how I do it with my own products).",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "1knu6",
+          "text": "And This is:",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "1obdl",
+          "text": "How to Build a Scalable AI Influencer Machine.",
+          "type": "header-one"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "eu18",
+          "text": "NanoBanana + Arcads.\nThat’s literally my entire stack.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "3qokh",
+          "text": "I don’t need an agency.\nI don’t need a content team.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "35eol",
+          "text": "I can create dozens of AI influencer videos at scale, consistently, and organically.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "1v2uh",
+          "text": "The biggest thing most people get wrong",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "gsii",
+          "text": "The internet already tells you what works.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "ei6fl",
+          "text": "Every viral TikTok, Reel, or Short is:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "ab8nc",
+          "text": "proof of demand",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "f68ha",
+          "text": "proof of structure",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "8s1e5",
+          "text": "proof of messaging",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "4ns1c",
+          "text": "Your job is not to be creative from scratch.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "1vib9",
+          "text": "Your job is to distribute intelligently.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "5jv5u",
+          "text": "Step 1: Don’t guess. Learn from what already works",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "87net",
+          "text": "I scroll:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "cor0o",
+          "text": "TikTok",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "8g6ji",
+          "text": "Instagram Reels",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "br0tv",
+          "text": "YouTube Shorts",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "6nsia",
+          "text": "I look for:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "a0eh",
+          "text": "hooks in first 2–3 seconds",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "fd9r3",
+          "text": "strong retention",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "fv8cg",
+          "text": "real comments",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "bjb6k",
+          "text": "Free market research at scale.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "bc9f0",
+          "text": "Step 2: Generate unique AI influencers",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "2k0gq",
+          "text": "Most people reuse one face.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "be5h6",
+          "text": "I don’t.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "63lij",
+          "text": "Each influencer has:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "8bdnv",
+          "text": "unique face",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "9920o",
+          "text": "unique vibe",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "4hbec",
+          "text": "specific persona",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "890qa",
+          "text": "Using NanoBanana:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "f856q",
+          "text": "generate fast",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "8qo7i",
+          "text": "control style",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "d0mbb",
+          "text": "avoid repetition",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "5v65t",
+          "text": "Unique faces = scalability.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "amhis",
+          "text": "Step 3: Realism beats perfection",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "29lpr",
+          "text": "If it looks fake, it’s your prompt.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "c69qg",
+          "text": "Avoid:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "e12vu",
+          "text": "perfect lighting",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "feih1",
+          "text": "model aesthetic",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "fdts5",
+          "text": "Focus on:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "cuh9f",
+          "text": "imperfect shots",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "5mpav",
+          "text": "casual moments",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "9u2g4",
+          "text": "real-life environments",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "dtdc9",
+          "text": "Step 4: Prompt like an engineer (this is the cheat code)",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "evno8",
+          "text": "Inside Arcads with Grok Imagine, structure > creativity.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "4u2qh",
+          "text": "Use JSON to control everything.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "emkln",
+          "text": "Framework:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "7dlp6",
+          "text": "Lock identity",
+          "type": "ordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "5s0ki",
+          "text": "Add real environment",
+          "type": "ordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "8fkld",
+          "text": "Simulate smartphone camera",
+          "type": "ordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "6cv5j",
+          "text": "JSON Example (copy this format)",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 5,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "7sjjo",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 6,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "3ifp7",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "g6mm",
+          "text": "I find this prompt from: ",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 7,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "3ava4",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "83jfr",
+          "text": "Why this JSON works",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "7j3e0",
+          "text": "removes ambiguity",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "ag1hn",
+          "text": "forces realism",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "eus1t",
+          "text": "creates repeatable system",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "b8m08",
+          "text": "easy to scale across multiple influencers",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "d996",
+          "text": "You’re not prompting anymore.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "cl2hp",
+          "text": "You’re building a system.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "3j9sn",
+          "text": "Step 5: Turn images into videos",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "3srl5",
+          "text": "Images don’t convert.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "3g9aa",
+          "text": "Videos do.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "9bgp6",
+          "text": "With Arcads:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "s6b6",
+          "text": "animate naturally",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "89dqv",
+          "text": "match TikTok behavior",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "ejajr",
+          "text": "feel like UGC",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "3n778",
+          "text": "Goal: looks like real creator.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "68f3p",
+          "text": "Step 6: Use Pinterest for slideshow content",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "mhde",
+          "text": "Pinterest is infinite content.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "4nakp",
+          "text": "Search:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "38egf",
+          "text": "glow up",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "3pac2",
+          "text": "study",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "4akts",
+          "text": "fitness",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "b4o55",
+          "text": "self improvement",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "96am2",
+          "text": "Pick:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "a6p7c",
+          "text": "relatable",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "rhfj",
+          "text": "emotional",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "9vllv",
+          "text": "slightly imperfect",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "6gd3t",
+          "text": "Slideshow structure",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "h36b",
+          "text": "Slide 1: Hook\nSlide 2–5: Story\nSlide 6: Result\nSlide 7: CTA",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "1b56a",
+          "text": "Combine everything",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "evn10",
+          "text": "Best setup:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "bmq85",
+          "text": "AI influencer for authority",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "5ov33",
+          "text": "Pinterest images for story",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "8g38r",
+          "text": "video for conversion",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "cptuq",
+          "text": "This gives:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "fu5a3",
+          "text": "high retention",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "eqh5g",
+          "text": "fast production",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "cbb18",
+          "text": "massive scale",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "a9oah",
+          "text": "Step 7: Remix, don’t copy",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "5co7j",
+          "text": "You remix:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "3pksf",
+          "text": "hook",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "5bspd",
+          "text": "angle",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "16k1v",
+          "text": "structure",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "db5va",
+          "text": "Same psychology.\nDifferent execution.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "ea24f",
+          "text": "Final thought",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "25av9",
+          "text": "If you want AI influencers that convert:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "pjei",
+          "text": "Stop prompting like an artist.\nStart building systems.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 8,
+              "length": 1,
+              "offset": 93
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "78jol",
+          "text": "That’s the difference between:\npeople who post content\nand people who build content machines 💪",
+          "type": "unstyled"
+        }
+      ],
+      "entityMap": [
+        {
+          "key": "8",
+          "value": {
+            "data": {
+              "url": "https://abs.twimg.com/emoji/v2/svg/1f4aa.svg"
+            },
+            "mutability": "Immutable",
+            "type": "TWEMOJI"
+          }
+        },
+        {
+          "key": "4",
+          "value": {
+            "data": {
+              "entityKey": "2e0b47db-ddeb-4946-9f7d-9fd5e02cc081",
+              "mediaItems": [
+                {
+                  "localMediaId": "9",
+                  "mediaCategory": "DraftTweetImage",
+                  "mediaId": "2050684143328251904"
+                }
+              ]
+            },
+            "mutability": "Immutable",
+            "type": "MEDIA"
+          }
+        },
+        {
+          "key": "5",
+          "value": {
+            "data": {
+              "markdown": "```json\n{\n  \"subject\": {\n    \"description\": \"A young woman with long, dark burgundy-red hair tied in a messy ponytail, wearing thin-frame glasses, with a fair and natural skin tone.\",\n    \"body\": {\n      \"physique\": \"Hyper-pronounced hourglass silhouette with an extreme waist-to-hip ratio.\",\n      \"anatomy\": \"Extremely large, voluminous gluteal muscles (gluteus maximus) with realistic weight and soft skin texture; narrow, cinched waist; toned thighs; well-defined lumbar curve (lower back arch). High-level anatomical accuracy in the legs and feet, showing realistic sole texture and toe alignment.\",\n      \"details\": \"Visible skin pores, natural skin folds at the waist, no airbrushing, realistic muscle definition in the lower body.\"\n    }\n  },\n  \"wardrobe\": {\n    \"top\": \"Oversized, thick-knit grey cotton hoodie, slightly cropped or pulled up to reveal the waist.\",\n    \"bottom\": \"Ultra-short, tight-fitting micro-shorts featuring a vibrant Brazilian flag color palette (canary yellow base with forest green trim and royal blue accents).\",\n    \"text_details\": \"Bold white text reads 'BRASIL' printed clearly across the fabric of the shorts.\",\n    \"accessories\": \"Thin silver wireframe spectacles; small stud earrings.\"\n  },\n  \"pose_action\": {\n    \"description\": \"The subject is seated on the floor in a dynamic twist; lower body is angled away from the camera to emphasize the volume of the hips, while the torso is turned back toward a mirror. She is holding a modern smartphone in a black case, capturing a high-angle mirror selfie.\",\n    \"posture\": \"Seated on shins with feet tucked, creating a 'W-sit' variation that highlights the curvature of the glutes and hips.\"\n  },\n  \"scene\": {\n    \"environment\": \"A cozy, sunlit domestic bedroom or studio. The floor is covered in a beige, high-pile textured carpet. In the background, a tall black cat tree with a plush 'Chopper' hat toy and a white desk chair with a patterned beige throw are visible but softly out of focus.\",\n    \"reflection_integrity\": \"Mirror selfie perspective; ensure the phone and hands are reflected accurately with consistent spatial logic. Reflection shows the back of the hoodie and the side profile of the face.\"\n  },\n  \"lighting\": {\n    \"type\": \"Soft, diffused natural daylight coming from a side window.\",\n    \"effects\": \"Subtle rim lighting along the curves of the hips and shoulders to enhance three-dimensional volume; soft shadows on the carpet to ground the subject; natural highlights on the skin and hair.\"\n  },\n  \"camera\": {\n    \"technical\": \"Shot on 35mm lens, f/2.8 aperture for a shallow depth of field, sharp focus on the subject's body and shorts, 8k resolution, raw photo style.\",\n    \"aspect_ratio\": \"9:16\",\n    \"negative_constraints\": \"no logos (except specified), no beautify smoothing, no extra limbs, no AI artifacts, no random text, no distorted fingers, no blurred skin textures, reflection integrity rules applied.\"\n  }\n}\n```"
+            },
+            "mutability": "Mutable",
+            "type": "MARKDOWN"
+          }
+        },
+        {
+          "key": "6",
+          "value": {
+            "data": {
+              "entityKey": "07592663-7d3a-4132-b3cc-aeef75753bf0",
+              "mediaItems": [
+                {
+                  "localMediaId": "12",
+                  "mediaCategory": "DraftTweetImage",
+                  "mediaId": "2050690285198512130"
+                }
+              ]
+            },
+            "mutability": "Immutable",
+            "type": "MEDIA"
+          }
+        },
+        {
+          "key": "1",
+          "value": {
+            "data": {
+              "entityKey": "05ddfb31-3069-472a-a30a-5a7e6350bef8",
+              "mediaItems": [
+                {
+                  "localMediaId": "3",
+                  "mediaCategory": "DraftTweetImage",
+                  "mediaId": "2050683980178202624"
+                }
+              ]
+            },
+            "mutability": "Immutable",
+            "type": "MEDIA"
+          }
+        },
+        {
+          "key": "0",
+          "value": {
+            "data": {
+              "entityKey": "fa06dc5a-3ba5-4e7d-adc2-a3d42100204c",
+              "mediaItems": [
+                {
+                  "localMediaId": "1",
+                  "mediaCategory": "DraftTweetImage",
+                  "mediaId": "2050683847294263296"
+                }
+              ]
+            },
+            "mutability": "Immutable",
+            "type": "MEDIA"
+          }
+        },
+        {
+          "key": "2",
+          "value": {
+            "data": {
+              "entityKey": "e3e36b5b-491a-4377-9684-9c71c2873eeb",
+              "mediaItems": [
+                {
+                  "localMediaId": "5",
+                  "mediaCategory": "DraftTweetImage",
+                  "mediaId": "2050684036721590272"
+                }
+              ]
+            },
+            "mutability": "Immutable",
+            "type": "MEDIA"
+          }
+        },
+        {
+          "key": "7",
+          "value": {
+            "data": {
+              "tweetId": "2014761827138240937"
+            },
+            "mutability": "Immutable",
+            "type": "TWEET"
+          }
+        },
+        {
+          "key": "3",
+          "value": {
+            "data": {
+              "entityKey": "7f72b6d0-43b8-4681-b9cd-273a61849a8a",
+              "mediaItems": [
+                {
+                  "localMediaId": "7",
+                  "mediaCategory": "DraftTweetImage",
+                  "mediaId": "2050684086130556928"
+                }
+              ]
+            },
+            "mutability": "Immutable",
+            "type": "MEDIA"
+          }
+        }
+      ]
+    },
+    "cover_media": {
+      "id": "QXBpTWVkaWE6DAAFCgABHHWDKWlbwAAKAAIWFVkb/RoQAAAA",
+      "media_id": "2050689419221647360",
+      "media_info": {
+        "__typename": "ApiImage",
+        "color_info": {
+          "palette": [
+            {
+              "percentage": 79.2,
+              "rgb": {
+                "blue": 16,
+                "green": 16,
+                "red": 16
+              }
+            },
+            {
+              "percentage": 10.8,
+              "rgb": {
+                "blue": 100,
+                "green": 120,
+                "red": 134
+              }
+            },
+            {
+              "percentage": 2.21,
+              "rgb": {
+                "blue": 68,
+                "green": 102,
+                "red": 153
+              }
+            },
+            {
+              "percentage": 1.76,
+              "rgb": {
+                "blue": 23,
+                "green": 48,
+                "red": 32
+              }
+            },
+            {
+              "percentage": 0.81,
+              "rgb": {
+                "blue": 181,
+                "green": 198,
+                "red": 207
+              }
+            }
+          ]
+        },
+        "original_img_height": 600,
+        "original_img_url": "https://pbs.twimg.com/media/HHWDKWlbwAAAhku.jpg",
+        "original_img_width": 1500
+      },
+      "media_key": "3_2050689419221647360"
+    },
+    "id": "QXJ0aWNsZUVudGl0eToyMDUwNjgzMTAxNzY1MTI4MTky",
+    "is_grok_summary_eligible": true,
+    "lifecycle_state": {
+      "modified_at_secs": 1777757832
+    },
+    "media_entities": [
+      {
+        "id": "QXBpTWVkaWE6DAAFCgABHHWD8wmaEAIKAAIWFVkb/RoQAAAA",
+        "media_id": "2050690285198512130",
+        "media_info": {
+          "__typename": "ApiImage",
+          "color_info": {
+            "palette": [
+              {
+                "percentage": 56.16,
+                "rgb": {
+                  "blue": 163,
+                  "green": 178,
+                  "red": 187
+                }
+              },
+              {
+                "percentage": 25.97,
+                "rgb": {
+                  "blue": 96,
+                  "green": 112,
+                  "red": 128
+                }
+              },
+              {
+                "percentage": 10.2,
+                "rgb": {
+                  "blue": 50,
+                  "green": 52,
+                  "red": 67
+                }
+              },
+              {
+                "percentage": 3.66,
+                "rgb": {
+                  "blue": 95,
+                  "green": 113,
+                  "red": 158
+                }
+              },
+              {
+                "percentage": 1,
+                "rgb": {
+                  "blue": 92,
+                  "green": 223,
+                  "red": 241
+                }
+              }
+            ]
+          },
+          "original_img_height": 2752,
+          "original_img_url": "https://pbs.twimg.com/media/HHWD8wmaEAIYcgT.jpg",
+          "original_img_width": 1536
+        },
+        "media_key": "3_2050690285198512130"
+      },
+      {
+        "id": "QXBpTWVkaWE6DAAFCgABHHV+GBibIAAKAAIWFVkb/RoQAAAA",
+        "media_id": "2050683847294263296",
+        "media_info": {
+          "__typename": "ApiImage",
+          "color_info": {
+            "palette": [
+              {
+                "percentage": 93.04,
+                "rgb": {
+                  "blue": 9,
+                  "green": 10,
+                  "red": 9
+                }
+              },
+              {
+                "percentage": 4.01,
+                "rgb": {
+                  "blue": 22,
+                  "green": 59,
+                  "red": 51
+                }
+              },
+              {
+                "percentage": 1.66,
+                "rgb": {
+                  "blue": 115,
+                  "green": 116,
+                  "red": 115
+                }
+              },
+              {
+                "percentage": 1.06,
+                "rgb": {
+                  "blue": 43,
+                  "green": 146,
+                  "red": 123
+                }
+              },
+              {
+                "percentage": 0.18,
+                "rgb": {
+                  "blue": 191,
+                  "green": 194,
+                  "red": 183
+                }
+              }
+            ]
+          },
+          "original_img_height": 640,
+          "original_img_url": "https://pbs.twimg.com/media/HHV-GBibIAAInkp.jpg",
+          "original_img_width": 2614
+        },
+        "media_key": "3_2050683847294263296"
+      },
+      {
+        "id": "QXBpTWVkaWE6DAAFCgABHHV+NwkbIAAKAAIWFVkb/RoQAAAA",
+        "media_id": "2050683980178202624",
+        "media_info": {
+          "__typename": "ApiImage",
+          "color_info": {
+            "palette": [
+              {
+                "percentage": 72.55,
+                "rgb": {
+                  "blue": 13,
+                  "green": 14,
+                  "red": 14
+                }
+              },
+              {
+                "percentage": 16.89,
+                "rgb": {
+                  "blue": 104,
+                  "green": 120,
+                  "red": 134
+                }
+              },
+              {
+                "percentage": 3.09,
+                "rgb": {
+                  "blue": 116,
+                  "green": 114,
+                  "red": 110
+                }
+              },
+              {
+                "percentage": 1.83,
+                "rgb": {
+                  "blue": 188,
+                  "green": 198,
+                  "red": 205
+                }
+              },
+              {
+                "percentage": 1.62,
+                "rgb": {
+                  "blue": 77,
+                  "green": 120,
+                  "red": 159
+                }
+              }
+            ]
+          },
+          "original_img_height": 1742,
+          "original_img_url": "https://pbs.twimg.com/media/HHV-NwkbIAAbiSu.jpg",
+          "original_img_width": 2736
+        },
+        "media_key": "3_2050683980178202624"
+      },
+      {
+        "id": "QXBpTWVkaWE6DAAFCgABHHV+XQWbUAAKAAIWFVkb/RoQAAAA",
+        "media_id": "2050684143328251904",
+        "media_info": {
+          "__typename": "ApiImage",
+          "color_info": {
+            "palette": [
+              {
+                "percentage": 86.14,
+                "rgb": {
+                  "blue": 0,
+                  "green": 0,
+                  "red": 0
+                }
+              },
+              {
+                "percentage": 8.52,
+                "rgb": {
+                  "blue": 73,
+                  "green": 104,
+                  "red": 138
+                }
+              },
+              {
+                "percentage": 2.12,
+                "rgb": {
+                  "blue": 90,
+                  "green": 122,
+                  "red": 110
+                }
+              },
+              {
+                "percentage": 1.28,
+                "rgb": {
+                  "blue": 101,
+                  "green": 108,
+                  "red": 112
+                }
+              },
+              {
+                "percentage": 0.99,
+                "rgb": {
+                  "blue": 36,
+                  "green": 54,
+                  "red": 77
+                }
+              }
+            ]
+          },
+          "original_img_height": 1724,
+          "original_img_url": "https://pbs.twimg.com/media/HHV-XQWbUAArgaF.jpg",
+          "original_img_width": 2706
+        },
+        "media_key": "3_2050684143328251904"
+      },
+      {
+        "id": "QXBpTWVkaWE6DAAFCgABHHV+T7RbwAAKAAIWFVkb/RoQAAAA",
+        "media_id": "2050684086130556928",
+        "media_info": {
+          "__typename": "ApiImage",
+          "color_info": {
+            "palette": [
+              {
+                "percentage": 65.5,
+                "rgb": {
+                  "blue": 5,
+                  "green": 5,
+                  "red": 5
+                }
+              },
+              {
+                "percentage": 14.2,
+                "rgb": {
+                  "blue": 157,
+                  "green": 163,
+                  "red": 169
+                }
+              },
+              {
+                "percentage": 8.33,
+                "rgb": {
+                  "blue": 82,
+                  "green": 104,
+                  "red": 137
+                }
+              },
+              {
+                "percentage": 1.31,
+                "rgb": {
+                  "blue": 105,
+                  "green": 136,
+                  "red": 123
+                }
+              },
+              {
+                "percentage": 0.95,
+                "rgb": {
+                  "blue": 56,
+                  "green": 43,
+                  "red": 38
+                }
+              }
+            ]
+          },
+          "original_img_height": 1748,
+          "original_img_url": "https://pbs.twimg.com/media/HHV-T7RbwAAERRw.jpg",
+          "original_img_width": 2740
+        },
+        "media_key": "3_2050684086130556928"
+      },
+      {
+        "id": "QXBpTWVkaWE6DAAFCgABHHV+RDNawAAKAAIWFVkb/RoQAAAA",
+        "media_id": "2050684036721590272",
+        "media_info": {
+          "__typename": "ApiImage",
+          "color_info": {
+            "palette": [
+              {
+                "percentage": 67.62,
+                "rgb": {
+                  "blue": 2,
+                  "green": 2,
+                  "red": 2
+                }
+              },
+              {
+                "percentage": 17.27,
+                "rgb": {
+                  "blue": 145,
+                  "green": 152,
+                  "red": 153
+                }
+              },
+              {
+                "percentage": 2.49,
+                "rgb": {
+                  "blue": 60,
+                  "green": 90,
+                  "red": 115
+                }
+              },
+              {
+                "percentage": 0.88,
+                "rgb": {
+                  "blue": 70,
+                  "green": 99,
+                  "red": 76
+                }
+              },
+              {
+                "percentage": 0.75,
+                "rgb": {
+                  "blue": 204,
+                  "green": 191,
+                  "red": 179
+                }
+              }
+            ]
+          },
+          "original_img_height": 1734,
+          "original_img_url": "https://pbs.twimg.com/media/HHV-RDNawAA8Vzn.jpg",
+          "original_img_width": 2740
+        },
+        "media_key": "3_2050684036721590272"
+      }
+    ],
+    "metadata": {
+      "first_published_at_secs": 1777757832
+    },
+    "plain_text": "Organic content is a long-term game, and it requires high volume so you can build an engagement farming machine.\nHere’s an example: an AI calorie tracker app making over $20k/month just from AI influencers on TikTok. (And all revenue tracking tools tend to underestimate actual revenue by about 50%-100%, which means these two app platforms could actually be generating over $40k–$50k per month.)\nYes, you heard that right, another AI calorie tracker app lol.\n \n \n \n \n \nThey’ve created over 30–40 influencers (that’s just what I’ve been able to research, I think there are even more), and all of them are automated to promote their products (similar to how I do it with my own products).\nAnd This is:\nHow to Build a Scalable AI Influencer Machine.\nNanoBanana + Arcads.\nThat’s literally my entire stack.\nI don’t need an agency.\nI don’t need a content team.\nI can create dozens of AI influencer videos at scale, consistently, and organically.\nThe biggest thing most people get wrong\nThe internet already tells you what works.\nEvery viral TikTok, Reel, or Short is:\nproof of demand\nproof of structure\nproof of messaging\nYour job is not to be creative from scratch.\nYour job is to distribute intelligently.\nStep 1: Don’t guess. Learn from what already works\nI scroll:\nTikTok\nInstagram Reels\nYouTube Shorts\nI look for:\nhooks in first 2–3 seconds\nstrong retention\nreal comments\nFree market research at scale.\nStep 2: Generate unique AI influencers\nMost people reuse one face.\nI don’t.\nEach influencer has:\nunique face\nunique vibe\nspecific persona\nUsing NanoBanana:\ngenerate fast\ncontrol style\navoid repetition\nUnique faces = scalability.\nStep 3: Realism beats perfection\nIf it looks fake, it’s your prompt.\nAvoid:\nperfect lighting\nmodel aesthetic\nFocus on:\nimperfect shots\ncasual moments\nreal-life environments\nStep 4: Prompt like an engineer (this is the cheat code)\nInside Arcads with Grok Imagine, structure > creativity.\nUse JSON to control everything.\nFramework:\nLock identity\nAdd real environment\nSimulate smartphone camera\nJSON Example (copy this format)\n \n \nI find this prompt from: \n \nWhy this JSON works\nremoves ambiguity\nforces realism\ncreates repeatable system\neasy to scale across multiple influencers\nYou’re not prompting anymore.\nYou’re building a system.\nStep 5: Turn images into videos\nImages don’t convert.\nVideos do.\nWith Arcads:\nanimate naturally\nmatch TikTok behavior\nfeel like UGC\nGoal: looks like real creator.\nStep 6: Use Pinterest for slideshow content\nPinterest is infinite content.\nSearch:\nglow up\nstudy\nfitness\nself improvement\nPick:\nrelatable\nemotional\nslightly imperfect\nSlideshow structure\nSlide 1: Hook\nSlide 2–5: Story\nSlide 6: Result\nSlide 7: CTA\nCombine everything\nBest setup:\nAI influencer for authority\nPinterest images for story\nvideo for conversion\nThis gives:\nhigh retention\nfast production\nmassive scale\nStep 7: Remix, don’t copy\nYou remix:\nhook\nangle\nstructure\nSame psychology.\nDifferent execution.\nFinal thought\nIf you want AI influencers that convert:\nStop prompting like an artist.\nStart building systems.\nThat’s the difference between:\npeople who post content\nand people who build content machines 💪",
+    "preview_text": "Organic content is a long-term game, and it requires high volume so you can build an engagement farming machine.\nHere’s an example: an AI calorie tracker app making over $20k/month just from AI",
+    "rest_id": "2050683101765128192",
+    "summary_text": "- Organic content demands high volume to build an engagement farming machine on TikTok.\n- One AI calorie tracker app generates over $20k–$50k/month using 30–40 automated AI influencers.\n- Stack uses NanoBanana to generate unique faces, vibes, and personas for each influencer.\n- Realism beats perfection: focus on imperfect shots, casual moments, and real-life environments via structured JSON prompts in Arcads with Grok Imagine.\n- Turn images into natural UGC-style videos, remix proven hooks and structures from viral content, and combine AI authority with Pinterest slideshow stories for scalable conversion.",
+    "title": "How to create multiple AI influencers to market on TikTok (Step-by-step simple guide) "
+  }
+}

@@ -1,0 +1,2100 @@
+{
+  "tweet_id": "2056060717942677643",
+  "tweet_url": "https://x.com/alexcooldev/status/2056060717942677643",
+  "tweet_text": "https://t.co/vos9LHOq8v",
+  "x_article_url": "https://x.com/i/article/2056034023340941313",
+  "x_article_alias_url": "https://x.com/alexcooldev/article/2056060717942677643",
+  "history_title": "How to Create Massive AI Influencer Content at Scale (Step-by-Step Guide & Case Study)",
+  "article": {
+    "content_state": {
+      "blocks": [
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "67kj6",
+          "text": "Currently, there are a lot of self-improvement apps using AI influencers to promote their apps on TikTok, and they’re going extremely viral. You can check out these AI influencer accounts.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 0,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "2055n",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 1,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "3m0ho",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 2,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "520g",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "69qkb",
+          "text": "And yeah, all of these TikTok accounts are promoting one app called Her 75. It’s 100% organic with no paid ads, and the app is making over $40k/month. (Like I mentioned before, those analytics platforms usually underestimate real revenue by around 50–150%, meaning the actual revenue could be closer to $60k–$70k/month with extremely high profit margins.)",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 3,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "21k6s",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 4,
+              "length": 6,
+              "offset": 92
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "50pfl",
+          "text": "And now I’m going to guide you step by step on how to create AI influencers like this using Arcads. (Why Arcads? Because Arcads is partnering with me and sponsoring unlimited credits so I can create bulk AI influencer videos. But you can absolutely use any AI tools that fit your workflow.)",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "bqgdt",
+          "text": "Now let's get starting.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "e2ieo",
+          "text": "Step 1: Create highly realistic AI influencers using GPT Images 2 or Nano Banano with JSON format prompts.",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "5oj2o",
+          "text": "Why JSON format instead of normal prompts? Because JSON gives you a clear structure and makes the output much more consistent. Instead of writing a random paragraph prompt every time, you can define the influencer’s face, hairstyle, outfit, camera angle, lighting, background, expression, and visual style in separate fields. This makes it easier to create multiple variations while keeping the same identity across different videos. It also helps AI tools understand exactly what you want and reduces random results.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 5,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "4kvqg",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "9ius",
+          "text": "JSON Image (worked very well with GPT Image 2):",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 6,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "66pju",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "8pqa9",
+          "text": "Step 2: Build the full AI video workflow inside Arcads",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "q76n",
+          "text": "After creating the AI influencer image, I don’t want to jump between 10 different tools.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "f10mm",
+          "text": "I want one workflow where I can create, test, remix, and scale the whole ad format.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "3b4dr",
+          "text": "That’s why I use Arcads as the main creative workspace.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "cuddu",
+          "text": "Inside Arcads, I can use tools like GPT Image, Nano Banana, Kling, Seedance, Swap Actor, Camera Angle, Captions, Translate Video, Transcribe, Extract Frame, Extend Videos, Talking Actors, UGC Studio, and Create Workflow.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "440iv",
+          "text": "So instead of thinking:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "cgnld",
+          "text": "“Let me generate one random AI video.”",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "89msl",
+          "text": "I think:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "11cpi",
+          "text": "“How do I build a repeatable content engine?”",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "3c6o7",
+          "text": "For this case study, the goal is to recreate a TikTok-style fitness transformation video.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "f1lgi",
+          "text": "The format is simple:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "2ut9o",
+          "text": "Before body → after body → same person feeling → short text overlay → app as the system behind the transformation.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "1ajvf",
+          "text": "Something like:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "6m9ek",
+          "text": "“same person btw”",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "1g7sr",
+          "text": "This format works because the hook is visual.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "dqjbv",
+          "text": "People don’t need to read a long caption.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "e6v5p",
+          "text": "They instantly understand the story in 1 second.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "52kg3",
+          "text": "Step 3: Start with a proven reference video",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "cg6d5",
+          "text": "The next thing I need is a real reference video.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "cafea",
+          "text": "This is important because I’m not asking AI to randomly invent movement.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "ffjs1",
+          "text": "I want to use a real TikTok motion pattern and apply it to my AI character.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "39p7h",
+          "text": "For this type of video, I look for a reference that has:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "68uql",
+          "text": "one person",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "7urqm",
+          "text": "vertical 9:16 format",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "1prsf",
+          "text": "clear body visibility",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "c20sg",
+          "text": "simple body-check movement",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "9k00u",
+          "text": "stable phone-camera framing",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "205et",
+          "text": "no dancing",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "2i9db",
+          "text": "no fast cuts",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "5gnh1",
+          "text": "no complex motion",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "fc083",
+          "text": "The best reference videos are usually very simple.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "cb6eb",
+          "text": "A girl standing in a bedroom, extending her arms, turning slightly, and showing a fitness progress angle.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "4cu5l",
+          "text": "That’s it.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "4jjeh",
+          "text": "The more native the reference video feels, the better the final AI video feels.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "18brh",
+          "text": "Step 4: Use Kling Motion Control inside Arcads",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "fp03t",
+          "text": "Now I upload the reference video into Kling Motion Control inside Arcads.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "81b9",
+          "text": "This is the key part.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "2ngtj",
+          "text": "The reference video controls the motion.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "23ci8",
+          "text": "The AI character controls the identity.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "45f42",
+          "text": "So the workflow becomes:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "ct275",
+          "text": "Reference video + AI character image = realistic AI influencer video",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "68iur",
+          "text": "This is much better than normal image-to-video because the movement already comes from a real video.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "bkv6m",
+          "text": "For this fitness transformation format, that matters a lot.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "a03ha",
+          "text": "Small details like breathing, arm movement, body posture, and phone-camera motion are what make the video feel real.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "23l4",
+          "text": "Step 5: Match the AI character to the reference video",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "at71n",
+          "text": "This is where most people fail.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "abg0k",
+          "text": "They upload a reference video with one pose, then upload an AI image with a totally different pose.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "b9a3p",
+          "text": "Then the output looks weird.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "rm5a",
+          "text": "For better results, I try to match:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "aefqh",
+          "text": "same gender",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "204b5",
+          "text": "similar outfit",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "4f7f4",
+          "text": "similar pose",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "e8dgd",
+          "text": "similar camera angle",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "11l36",
+          "text": "similar framing",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "eq1dc",
+          "text": "similar lighting",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "64tn4",
+          "text": "similar body visibility",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "elur2",
+          "text": "For example, if the reference video shows a girl wearing workout clothes with her arms extended, my AI character should also be wearing workout clothes with a similar pose.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "aa6c8",
+          "text": "The closer the AI image is to the reference video, the cleaner the motion transfer becomes.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "35uih",
+          "text": "Step 6: Keep the prompt simple",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "fgaqa",
+          "text": "Since the motion already comes from the reference video, I don’t need a complicated prompt.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "2qjpp",
+          "text": "I only use the prompt to guide realism and avoid common AI mistakes.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "d54tg",
+          "text": "Example prompt:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "8gchl",
+          "text": "“Create a realistic vertical TikTok fitness transformation video using the uploaded reference video as the motion guide. Replace the original person with the uploaded AI character. Keep the same body-check pose, camera framing, and casual phone-camera style. Natural blinking, subtle breathing, realistic skin texture, stable body proportions, no face distortion, no body distortion, no extra fingers, no unnatural hands.”",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "al4c4",
+          "text": "Simple prompts usually work better here.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "2dla4",
+          "text": "The goal is not cinematic perfection.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "fp0jp",
+          "text": "The goal is TikTok-native realism.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "9eot",
+          "text": "Step 7: Generate multiple versions, not just one",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "b0vpc",
+          "text": "Never generate only one video.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "729jg",
+          "text": "AI video is a numbers game.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "fm6qk",
+          "text": "Sometimes the first output has weird hands.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "fkr13",
+          "text": "Sometimes the second output has an unstable face.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "9e0lq",
+          "text": "Sometimes the third output looks fake.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "3ah9q",
+          "text": "Then version four suddenly looks almost perfect.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "82o37",
+          "text": "That’s why I generate multiple variations inside Arcads.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "agr93",
+          "text": "Same reference video.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "6ro0b",
+          "text": "Same AI character.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "173sq",
+          "text": "Same basic prompt.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "b1m84",
+          "text": "Different outputs.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "1cnu1",
+          "text": "Then I pick the most realistic one.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "esck9",
+          "text": "This is the real workflow:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "ft73f",
+          "text": "Generate in bulk → review → select the best → remix → scale.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "7v3jv",
+          "text": "Step 8: Create both “before” and “after” versions",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "copnt",
+          "text": "For this transformation format, I need two AI character assets.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "c6mgb",
+          "text": "The first one is the “before” version.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "4va80",
+          "text": "This should look like a normal beginner fitness body.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "1uqcn",
+          "text": "Relatable, realistic, and not too perfect.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "cdo0g",
+          "text": "The second one is the “after” version.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "fi5qq",
+          "text": "Same person, but leaner, more toned, and more confident.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "f160e",
+          "text": "The important thing is identity consistency.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "1fvpd",
+          "text": "The face, hair, outfit, pose, camera angle, and lighting should feel similar.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "d4t61",
+          "text": "If the after version looks like a completely different person, the video loses trust.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "65gfu",
+          "text": "The transformation should feel believable.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "4brh",
+          "text": "Not extreme.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "6pt1",
+          "text": "Believable.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "3dg13",
+          "text": "Step 9: Run both versions through the same motion workflow",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "f4tb1",
+          "text": "Now I run both images through Kling Motion Control.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "4h193",
+          "text": "First:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "ep2gq",
+          "text": "Reference motion + before character = before clip",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "867lr",
+          "text": "Then:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "b9hr",
+          "text": "Reference motion + after character = after clip",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "e8af",
+          "text": "This gives me two clips with similar movement.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "eotpm",
+          "text": "That’s what makes the transformation feel stronger.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "cacia",
+          "text": "The viewer sees the same pose, same motion, same person feeling, but a different body result.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "6umrr",
+          "text": "That creates the “same person btw” effect.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "31gt8",
+          "text": "Step 10: Use Arcads to create more variations",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "4pd8i",
+          "text": "Once I have the core video, I can use other Arcads tools to create more variations.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "c8ccf",
+          "text": "For example:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "5s7hg",
+          "text": "I can use Captions to add subtitles.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "ftcv5",
+          "text": "I can use Translate Video to localize the creative into other markets.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "f812t",
+          "text": "I can use Swap Actor or Replace Actor to test another AI influencer.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "3otsc",
+          "text": "I can use Camera Angle to create a different visual version.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "cu1ko",
+          "text": "I can use Extract Frame to pull strong still images from the video.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "bfu7i",
+          "text": "I can use Extend Videos if I want a longer version.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "bjin8",
+          "text": "I can use UGC Studio or Talking Actors if I want to turn the same concept into a talking-style creator ad.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "44noe",
+          "text": "This is why Arcads is useful.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "bujd4",
+          "text": "It’s not just one AI video tool.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "3bvpc",
+          "text": "It becomes the creative production system.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "2eh0k",
+          "text": "One idea can quickly become many ad variations.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "chv08",
+          "text": "Step 11: Create multiple hooks from the same visual",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "9nmp1",
+          "text": "The visual format can stay the same, but the hook changes everything.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "6lvv9",
+          "text": "For example, I can test:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "ao94d",
+          "text": "“same person btw”",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "665b4",
+          "text": "“75 days later…”",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "f6gvr",
+          "text": "“this is what consistency did”",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "5e2sa",
+          "text": "“she didn’t need motivation, she needed a system”",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "af9p6",
+          "text": "“I stopped restarting every Monday”",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "3bb3i",
+          "text": "“POV: you finally stayed consistent”",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "9mlkg",
+          "text": "“not a diet, just a system”",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "cfmjp",
+          "text": "Same video style.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "br3so",
+          "text": "Different hook.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "de416",
+          "text": "Different audience psychology.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "depbq",
+          "text": "This is how I find the winning angle.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "aq7vg",
+          "text": "Most people try to create a completely new video every time.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "2jrk2",
+          "text": "But the better approach is to find one working format, then remix the hook, character, CTA, and app angle.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "14m33",
+          "text": "Step 12: Add the app as the reason behind the result",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "elcaq",
+          "text": "The app should not feel like a random ad at the end.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "96n36",
+          "text": "It should feel like the system behind the transformation.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "7uuu9",
+          "text": "For example:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "c227k",
+          "text": "“She didn’t need more motivation. She needed a system.”",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "4qf9",
+          "text": "Then show the app:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "ep50k",
+          "text": "workout tracker",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "f31it",
+          "text": "daily plan",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "66sms",
+          "text": "habit streak",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "cknup",
+          "text": "progress calendar",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "4a6ed",
+          "text": "AI coach",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "745jh",
+          "text": "meal reminder",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "bob4a",
+          "text": "75-day challenge",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "300vt",
+          "text": "This makes the app feel natural.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "f40gs",
+          "text": "The structure is:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "d1php",
+          "text": "Visual transformation → curiosity → app as the system → CTA",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "fvch0",
+          "text": "That’s much stronger than just saying:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "3mt1b",
+          "text": "“Download this app now.”",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "e1c41",
+          "text": "Step 13: Export the best versions and prepare them for posting",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "crg69",
+          "text": "After generating and testing enough variations inside Arcads, I export only the strongest versions.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "6vagl",
+          "text": "Not every output is worth posting.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "5658a",
+          "text": "I only keep the ones that look:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "d305n",
+          "text": "realistic",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "f4n4i",
+          "text": "native to TikTok",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "6rnfl",
+          "text": "easy to understand",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "d6lp9",
+          "text": "emotionally clear",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "8bqto",
+          "text": "believable as a transformation",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "aicnu",
+          "text": "strong enough to stop the scroll",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "1bt3h",
+          "text": "At this point, the core production is done.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "5l4a4",
+          "text": "Arcads helped me create the AI character workflow, apply real motion with Kling Motion Control, generate multiple variations, test different hooks, and prepare the final creative assets.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "bamkv",
+          "text": "Then I can move into the final editing / posting stage.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "b49q0",
+          "text": "Final workflow:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "692ue",
+          "text": "Create the AI influencer image",
+          "type": "ordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "26isc",
+          "text": "Build the workflow inside Arcads",
+          "type": "ordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "7pro3",
+          "text": "Find a proven TikTok reference video",
+          "type": "ordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "er33s",
+          "text": "Use Kling Motion Control to transfer the motion",
+          "type": "ordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "7dhlh",
+          "text": "Match the AI character with the reference video",
+          "type": "ordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "1b06q",
+          "text": "Generate multiple versions",
+          "type": "ordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "7btmh",
+          "text": "Create both before and after character clips",
+          "type": "ordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "58e6f",
+          "text": "Remix hooks and creative angles",
+          "type": "ordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "8rila",
+          "text": "Use Arcads tools to create more variants",
+          "type": "ordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "bm4gd",
+          "text": "Export the best versions",
+          "type": "ordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "cdvrv",
+          "text": "Add the app naturally as the system behind the transformation",
+          "type": "ordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "7dm2q",
+          "text": "Post and track which version converts best",
+          "type": "ordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "f9b8l",
+          "text": "This is the real power of AI influencer content.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "bkt1h",
+          "text": "It’s not about creating one AI video.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "8tpmh",
+          "text": "It’s about building a repeatable creative engine.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "1unmj",
+          "text": "One viral format can become 10, 20, or 50 different variations.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "1e8sc",
+          "text": "And when you combine AI characters, real reference motion, Kling Motion Control, and Arcads workflow, you can create TikTok-native AI influencer videos at scale without hiring UGC creators for every single test.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 7,
+              "length": 1,
+              "offset": 98
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "dl593",
+          "text": "This post is sponsored by Arcads AI, so you can still look for similar tools that fit your needs. 💪",
+          "type": "unstyled"
+        }
+      ],
+      "entityMap": [
+        {
+          "key": "4",
+          "value": {
+            "data": {
+              "url": "https://www.arcads.ai/?utm_source=chatgpt.com"
+            },
+            "mutability": "Mutable",
+            "type": "LINK"
+          }
+        },
+        {
+          "key": "5",
+          "value": {
+            "data": {
+              "entityKey": "8955fddb-5709-47d1-abe4-77c1c4c71c56",
+              "mediaItems": [
+                {
+                  "localMediaId": "9",
+                  "mediaCategory": "DraftTweetImage",
+                  "mediaId": "2056037853931753472"
+                }
+              ]
+            },
+            "mutability": "Immutable",
+            "type": "MEDIA"
+          }
+        },
+        {
+          "key": "6",
+          "value": {
+            "data": {
+              "markdown": "```json\n{\n  \"scene\": {\n    \"type\": \"fitness_transformation_video_frame\",\n    \"setting\": \"bedroom\",\n    \"lighting\": \"warm indoor lighting\",\n    \"camera_angle\": \"front-facing\",\n    \"aspect_ratio\": \"9:16\"\n  },\n  \"subject\": {\n    \"gender\": \"female\",\n    \"pose\": \"standing with arms extended sideways\",\n    \"expression\": \"neutral\",\n    \"clothing\": {\n      \"top\": \"black sports bra\",\n      \"bottom\": \"white shorts\"\n    },\n    \"appearance\": {\n      \"wet_hair\": true,\n      \"body_type\": \"average/curvy\"\n    }\n  },\n  \"background\": {\n    \"wall_color\": \"light pink\",\n    \"furniture\": [\n      \"white wardrobe\",\n      \"curtains\",\n      \"floor vase with dried plants\"\n    ],\n    \"decor\": [\n      \"minimal face sketch wall art\",\n      \"stacked towels\"\n    ]\n  },\n  \"style\": {\n    \"aesthetic\": \"minimal cozy lifestyle\",\n    \"platform\": \"TikTok/Reels\"\n  }\n}\n```"
+            },
+            "mutability": "Mutable",
+            "type": "MARKDOWN"
+          }
+        },
+        {
+          "key": "1",
+          "value": {
+            "data": {
+              "entityKey": "ab501a7c-936e-43cb-a032-0a7db72dca46",
+              "mediaItems": [
+                {
+                  "localMediaId": "3",
+                  "mediaCategory": "DraftTweetImage",
+                  "mediaId": "2056034822494302208"
+                }
+              ]
+            },
+            "mutability": "Immutable",
+            "type": "MEDIA"
+          }
+        },
+        {
+          "key": "0",
+          "value": {
+            "data": {
+              "entityKey": "02183ac8-7b1b-4fb9-84c4-5f7e8e3b6c96",
+              "mediaItems": [
+                {
+                  "localMediaId": "1",
+                  "mediaCategory": "DraftTweetImage",
+                  "mediaId": "2056034787337646081"
+                }
+              ]
+            },
+            "mutability": "Immutable",
+            "type": "MEDIA"
+          }
+        },
+        {
+          "key": "2",
+          "value": {
+            "data": {
+              "entityKey": "4b7bc742-bd9d-4ead-a748-9b4b71c0fcec",
+              "mediaItems": [
+                {
+                  "localMediaId": "5",
+                  "mediaCategory": "DraftTweetImage",
+                  "mediaId": "2056034901443649536"
+                }
+              ]
+            },
+            "mutability": "Immutable",
+            "type": "MEDIA"
+          }
+        },
+        {
+          "key": "7",
+          "value": {
+            "data": {
+              "url": "https://abs.twimg.com/emoji/v2/svg/1f4aa.svg"
+            },
+            "mutability": "Immutable",
+            "type": "TWEMOJI"
+          }
+        },
+        {
+          "key": "3",
+          "value": {
+            "data": {
+              "entityKey": "16014eaa-0b94-4fda-96f4-5c424f87dd8a",
+              "mediaItems": [
+                {
+                  "localMediaId": "7",
+                  "mediaCategory": "DraftTweetImage",
+                  "mediaId": "2056035406593101825"
+                }
+              ]
+            },
+            "mutability": "Immutable",
+            "type": "MEDIA"
+          }
+        }
+      ]
+    },
+    "cover_media": {
+      "id": "QXBpTWVkaWE6DAAFCgABHIiXgVzakAAKAAIWFVkb/RoQAAAA",
+      "media_id": "2056059811759034368",
+      "media_info": {
+        "__typename": "ApiImage",
+        "color_info": {
+          "palette": [
+            {
+              "percentage": 66.24,
+              "rgb": {
+                "blue": 1,
+                "green": 1,
+                "red": 1
+              }
+            },
+            {
+              "percentage": 15.41,
+              "rgb": {
+                "blue": 135,
+                "green": 149,
+                "red": 167
+              }
+            },
+            {
+              "percentage": 5.3,
+              "rgb": {
+                "blue": 85,
+                "green": 122,
+                "red": 177
+              }
+            },
+            {
+              "percentage": 1.19,
+              "rgb": {
+                "blue": 77,
+                "green": 65,
+                "red": 67
+              }
+            },
+            {
+              "percentage": 0.74,
+              "rgb": {
+                "blue": 39,
+                "green": 39,
+                "red": 23
+              }
+            }
+          ]
+        },
+        "original_img_height": 600,
+        "original_img_url": "https://pbs.twimg.com/media/HIiXgVzakAARxrY.jpg",
+        "original_img_width": 1500
+      },
+      "media_key": "3_2056059811759034368"
+    },
+    "id": "QXJ0aWNsZUVudGl0eToyMDU2MDM0MDIzMzQwOTQxMzEz",
+    "is_grok_summary_eligible": true,
+    "lifecycle_state": {
+      "modified_at_secs": 1779038049
+    },
+    "media_entities": [
+      {
+        "id": "QXBpTWVkaWE6DAAFCgABHIiDiOhb0AAKAAIWFVkb/RoQAAAA",
+        "media_id": "2056037853931753472",
+        "media_info": {
+          "__typename": "ApiImage",
+          "color_info": {
+            "palette": [
+              {
+                "percentage": 85.1,
+                "rgb": {
+                  "blue": 11,
+                  "green": 7,
+                  "red": 6
+                }
+              },
+              {
+                "percentage": 9.68,
+                "rgb": {
+                  "blue": 130,
+                  "green": 163,
+                  "red": 203
+                }
+              },
+              {
+                "percentage": 1.7,
+                "rgb": {
+                  "blue": 169,
+                  "green": 168,
+                  "red": 168
+                }
+              },
+              {
+                "percentage": 1.53,
+                "rgb": {
+                  "blue": 59,
+                  "green": 99,
+                  "red": 145
+                }
+              },
+              {
+                "percentage": 0.59,
+                "rgb": {
+                  "blue": 83,
+                  "green": 144,
+                  "red": 203
+                }
+              }
+            ]
+          },
+          "original_img_height": 2402,
+          "original_img_url": "https://pbs.twimg.com/media/HIiDiOhb0AAT6gp.jpg",
+          "original_img_width": 3786
+        },
+        "media_key": "3_2056037853931753472"
+      },
+      {
+        "id": "QXBpTWVkaWE6DAAFCgABHIiA2XpaoAAKAAIWFVkb/RoQAAAA",
+        "media_id": "2056034901443649536",
+        "media_info": {
+          "__typename": "ApiImage",
+          "color_info": {
+            "palette": [
+              {
+                "percentage": 51.07,
+                "rgb": {
+                  "blue": 0,
+                  "green": 0,
+                  "red": 0
+                }
+              },
+              {
+                "percentage": 22.67,
+                "rgb": {
+                  "blue": 146,
+                  "green": 158,
+                  "red": 177
+                }
+              },
+              {
+                "percentage": 8.46,
+                "rgb": {
+                  "blue": 88,
+                  "green": 127,
+                  "red": 177
+                }
+              },
+              {
+                "percentage": 7.45,
+                "rgb": {
+                  "blue": 69,
+                  "green": 92,
+                  "red": 126
+                }
+              },
+              {
+                "percentage": 0.8,
+                "rgb": {
+                  "blue": 92,
+                  "green": 70,
+                  "red": 234
+                }
+              }
+            ]
+          },
+          "original_img_height": 1814,
+          "original_img_url": "https://pbs.twimg.com/media/HIiA2XpaoAAqUNb.jpg",
+          "original_img_width": 2784
+        },
+        "media_key": "3_2056034901443649536"
+      },
+      {
+        "id": "QXBpTWVkaWE6DAAFCgABHIiAxxibMAAKAAIWFVkb/RoQAAAA",
+        "media_id": "2056034822494302208",
+        "media_info": {
+          "__typename": "ApiImage",
+          "color_info": {
+            "palette": [
+              {
+                "percentage": 55.18,
+                "rgb": {
+                  "blue": 2,
+                  "green": 2,
+                  "red": 2
+                }
+              },
+              {
+                "percentage": 25.61,
+                "rgb": {
+                  "blue": 147,
+                  "green": 154,
+                  "red": 172
+                }
+              },
+              {
+                "percentage": 6.53,
+                "rgb": {
+                  "blue": 73,
+                  "green": 90,
+                  "red": 122
+                }
+              },
+              {
+                "percentage": 4.15,
+                "rgb": {
+                  "blue": 107,
+                  "green": 131,
+                  "red": 183
+                }
+              },
+              {
+                "percentage": 1.32,
+                "rgb": {
+                  "blue": 188,
+                  "green": 157,
+                  "red": 140
+                }
+              }
+            ]
+          },
+          "original_img_height": 1822,
+          "original_img_url": "https://pbs.twimg.com/media/HIiAxxibMAAQy80.jpg",
+          "original_img_width": 2734
+        },
+        "media_key": "3_2056034822494302208"
+      },
+      {
+        "id": "QXBpTWVkaWE6DAAFCgABHIiBTxebkAEKAAIWFVkb/RoQAAAA",
+        "media_id": "2056035406593101825",
+        "media_info": {
+          "__typename": "ApiImage",
+          "color_info": {
+            "palette": [
+              {
+                "percentage": 94.89,
+                "rgb": {
+                  "blue": 13,
+                  "green": 12,
+                  "red": 11
+                }
+              },
+              {
+                "percentage": 2.76,
+                "rgb": {
+                  "blue": 30,
+                  "green": 64,
+                  "red": 55
+                }
+              },
+              {
+                "percentage": 1.19,
+                "rgb": {
+                  "blue": 247,
+                  "green": 247,
+                  "red": 247
+                }
+              },
+              {
+                "percentage": 0.69,
+                "rgb": {
+                  "blue": 56,
+                  "green": 164,
+                  "red": 138
+                }
+              },
+              {
+                "percentage": 0.11,
+                "rgb": {
+                  "blue": 113,
+                  "green": 57,
+                  "red": 34
+                }
+              }
+            ]
+          },
+          "original_img_height": 1026,
+          "original_img_url": "https://pbs.twimg.com/media/HIiBTxebkAEk5Zm.jpg",
+          "original_img_width": 2512
+        },
+        "media_key": "3_2056035406593101825"
+      },
+      {
+        "id": "QXBpTWVkaWE6DAAFCgABHIiAvukbMAEKAAIWFVkb/RoQAAAA",
+        "media_id": "2056034787337646081",
+        "media_info": {
+          "__typename": "ApiImage",
+          "color_info": {
+            "palette": [
+              {
+                "percentage": 51.98,
+                "rgb": {
+                  "blue": 1,
+                  "green": 1,
+                  "red": 1
+                }
+              },
+              {
+                "percentage": 31.46,
+                "rgb": {
+                  "blue": 149,
+                  "green": 157,
+                  "red": 174
+                }
+              },
+              {
+                "percentage": 4.55,
+                "rgb": {
+                  "blue": 78,
+                  "green": 91,
+                  "red": 123
+                }
+              },
+              {
+                "percentage": 2.1,
+                "rgb": {
+                  "blue": 116,
+                  "green": 141,
+                  "red": 183
+                }
+              },
+              {
+                "percentage": 1.77,
+                "rgb": {
+                  "blue": 142,
+                  "green": 170,
+                  "red": 178
+                }
+              }
+            ]
+          },
+          "original_img_height": 1836,
+          "original_img_url": "https://pbs.twimg.com/media/HIiAvukbMAEEYy4.jpg",
+          "original_img_width": 2756
+        },
+        "media_key": "3_2056034787337646081"
+      }
+    ],
+    "metadata": {
+      "first_published_at_secs": 1779038049
+    },
+    "plain_text": "Currently, there are a lot of self-improvement apps using AI influencers to promote their apps on TikTok, and they’re going extremely viral. You can check out these AI influencer accounts.\n \n \n \nAnd yeah, all of these TikTok accounts are promoting one app called Her 75. It’s 100% organic with no paid ads, and the app is making over $40k/month. (Like I mentioned before, those analytics platforms usually underestimate real revenue by around 50–150%, meaning the actual revenue could be closer to $60k–$70k/month with extremely high profit margins.)\n \nAnd now I’m going to guide you step by step on how to create AI influencers like this using Arcads. (Why Arcads? Because Arcads is partnering with me and sponsoring unlimited credits so I can create bulk AI influencer videos. But you can absolutely use any AI tools that fit your workflow.)\nNow let's get starting.\nStep 1: Create highly realistic AI influencers using GPT Images 2 or Nano Banano with JSON format prompts.\nWhy JSON format instead of normal prompts? Because JSON gives you a clear structure and makes the output much more consistent. Instead of writing a random paragraph prompt every time, you can define the influencer’s face, hairstyle, outfit, camera angle, lighting, background, expression, and visual style in separate fields. This makes it easier to create multiple variations while keeping the same identity across different videos. It also helps AI tools understand exactly what you want and reduces random results.\n \nJSON Image (worked very well with GPT Image 2):\n \nStep 2: Build the full AI video workflow inside Arcads\nAfter creating the AI influencer image, I don’t want to jump between 10 different tools.\nI want one workflow where I can create, test, remix, and scale the whole ad format.\nThat’s why I use Arcads as the main creative workspace.\nInside Arcads, I can use tools like GPT Image, Nano Banana, Kling, Seedance, Swap Actor, Camera Angle, Captions, Translate Video, Transcribe, Extract Frame, Extend Videos, Talking Actors, UGC Studio, and Create Workflow.\nSo instead of thinking:\n“Let me generate one random AI video.”\nI think:\n“How do I build a repeatable content engine?”\nFor this case study, the goal is to recreate a TikTok-style fitness transformation video.\nThe format is simple:\nBefore body → after body → same person feeling → short text overlay → app as the system behind the transformation.\nSomething like:\n“same person btw”\nThis format works because the hook is visual.\nPeople don’t need to read a long caption.\nThey instantly understand the story in 1 second.\nStep 3: Start with a proven reference video\nThe next thing I need is a real reference video.\nThis is important because I’m not asking AI to randomly invent movement.\nI want to use a real TikTok motion pattern and apply it to my AI character.\nFor this type of video, I look for a reference that has:\none person\nvertical 9:16 format\nclear body visibility\nsimple body-check movement\nstable phone-camera framing\nno dancing\nno fast cuts\nno complex motion\nThe best reference videos are usually very simple.\nA girl standing in a bedroom, extending her arms, turning slightly, and showing a fitness progress angle.\nThat’s it.\nThe more native the reference video feels, the better the final AI video feels.\nStep 4: Use Kling Motion Control inside Arcads\nNow I upload the reference video into Kling Motion Control inside Arcads.\nThis is the key part.\nThe reference video controls the motion.\nThe AI character controls the identity.\nSo the workflow becomes:\nReference video + AI character image = realistic AI influencer video\nThis is much better than normal image-to-video because the movement already comes from a real video.\nFor this fitness transformation format, that matters a lot.\nSmall details like breathing, arm movement, body posture, and phone-camera motion are what make the video feel real.\nStep 5: Match the AI character to the reference video\nThis is where most people fail.\nThey upload a reference video with one pose, then upload an AI image with a totally different pose.\nThen the output looks weird.\nFor better results, I try to match:\nsame gender\nsimilar outfit\nsimilar pose\nsimilar camera angle\nsimilar framing\nsimilar lighting\nsimilar body visibility\nFor example, if the reference video shows a girl wearing workout clothes with her arms extended, my AI character should also be wearing workout clothes with a similar pose.\nThe closer the AI image is to the reference video, the cleaner the motion transfer becomes.\nStep 6: Keep the prompt simple\nSince the motion already comes from the reference video, I don’t need a complicated prompt.\nI only use the prompt to guide realism and avoid common AI mistakes.\nExample prompt:\n“Create a realistic vertical TikTok fitness transformation video using the uploaded reference video as the motion guide. Replace the original person with the uploaded AI character. Keep the same body-check pose, camera framing, and casual phone-camera style. Natural blinking, subtle breathing, realistic skin texture, stable body proportions, no face distortion, no body distortion, no extra fingers, no unnatural hands.”\nSimple prompts usually work better here.\nThe goal is not cinematic perfection.\nThe goal is TikTok-native realism.\nStep 7: Generate multiple versions, not just one\nNever generate only one video.\nAI video is a numbers game.\nSometimes the first output has weird hands.\nSometimes the second output has an unstable face.\nSometimes the third output looks fake.\nThen version four suddenly looks almost perfect.\nThat’s why I generate multiple variations inside Arcads.\nSame reference video.\nSame AI character.\nSame basic prompt.\nDifferent outputs.\nThen I pick the most realistic one.\nThis is the real workflow:\nGenerate in bulk → review → select the best → remix → scale.\nStep 8: Create both “before” and “after” versions\nFor this transformation format, I need two AI character assets.\nThe first one is the “before” version.\nThis should look like a normal beginner fitness body.\nRelatable, realistic, and not too perfect.\nThe second one is the “after” version.\nSame person, but leaner, more toned, and more confident.\nThe important thing is identity consistency.\nThe face, hair, outfit, pose, camera angle, and lighting should feel similar.\nIf the after version looks like a completely different person, the video loses trust.\nThe transformation should feel believable.\nNot extreme.\nBelievable.\nStep 9: Run both versions through the same motion workflow\nNow I run both images through Kling Motion Control.\nFirst:\nReference motion + before character = before clip\nThen:\nReference motion + after character = after clip\nThis gives me two clips with similar movement.\nThat’s what makes the transformation feel stronger.\nThe viewer sees the same pose, same motion, same person feeling, but a different body result.\nThat creates the “same person btw” effect.\nStep 10: Use Arcads to create more variations\nOnce I have the core video, I can use other Arcads tools to create more variations.\nFor example:\nI can use Captions to add subtitles.\nI can use Translate Video to localize the creative into other markets.\nI can use Swap Actor or Replace Actor to test another AI influencer.\nI can use Camera Angle to create a different visual version.\nI can use Extract Frame to pull strong still images from the video.\nI can use Extend Videos if I want a longer version.\nI can use UGC Studio or Talking Actors if I want to turn the same concept into a talking-style creator ad.\nThis is why Arcads is useful.\nIt’s not just one AI video tool.\nIt becomes the creative production system.\nOne idea can quickly become many ad variations.\nStep 11: Create multiple hooks from the same visual\nThe visual format can stay the same, but the hook changes everything.\nFor example, I can test:\n“same person btw”\n“75 days later…”\n“this is what consistency did”\n“she didn’t need motivation, she needed a system”\n“I stopped restarting every Monday”\n“POV: you finally stayed consistent”\n“not a diet, just a system”\nSame video style.\nDifferent hook.\nDifferent audience psychology.\nThis is how I find the winning angle.\nMost people try to create a completely new video every time.\nBut the better approach is to find one working format, then remix the hook, character, CTA, and app angle.\nStep 12: Add the app as the reason behind the result\nThe app should not feel like a random ad at the end.\nIt should feel like the system behind the transformation.\nFor example:\n“She didn’t need more motivation. She needed a system.”\nThen show the app:\nworkout tracker\ndaily plan\nhabit streak\nprogress calendar\nAI coach\nmeal reminder\n75-day challenge\nThis makes the app feel natural.\nThe structure is:\nVisual transformation → curiosity → app as the system → CTA\nThat’s much stronger than just saying:\n“Download this app now.”\nStep 13: Export the best versions and prepare them for posting\nAfter generating and testing enough variations inside Arcads, I export only the strongest versions.\nNot every output is worth posting.\nI only keep the ones that look:\nrealistic\nnative to TikTok\neasy to understand\nemotionally clear\nbelievable as a transformation\nstrong enough to stop the scroll\nAt this point, the core production is done.\nArcads helped me create the AI character workflow, apply real motion with Kling Motion Control, generate multiple variations, test different hooks, and prepare the final creative assets.\nThen I can move into the final editing / posting stage.\nFinal workflow:\nCreate the AI influencer image\nBuild the workflow inside Arcads\nFind a proven TikTok reference video\nUse Kling Motion Control to transfer the motion\nMatch the AI character with the reference video\nGenerate multiple versions\nCreate both before and after character clips\nRemix hooks and creative angles\nUse Arcads tools to create more variants\nExport the best versions\nAdd the app naturally as the system behind the transformation\nPost and track which version converts best\nThis is the real power of AI influencer content.\nIt’s not about creating one AI video.\nIt’s about building a repeatable creative engine.\nOne viral format can become 10, 20, or 50 different variations.\nAnd when you combine AI characters, real reference motion, Kling Motion Control, and Arcads workflow, you can create TikTok-native AI influencer videos at scale without hiring UGC creators for every single test.\nThis post is sponsored by Arcads AI, so you can still look for similar tools that fit your needs. 💪",
+    "preview_text": "Currently, there are a lot of self-improvement apps using AI influencers to promote their apps on TikTok, and they’re going extremely viral. You can check out these AI influencer accounts.\n \n \n \nAnd",
+    "rest_id": "2056034023340941313",
+    "summary_text": "- Self-improvement apps use AI influencers on TikTok to promote Her 75, driving massive organic virality and over $40k/month revenue. \n- I create realistic AI influencers with JSON prompts for consistent identity across videos. \n- I build a repeatable workflow in Arcads using reference TikTok videos and Kling Motion Control to generate native fitness transformation content. \n- I produce before and after versions with matched poses, generate multiple variations, remix hooks like “same person btw”, and position the app as the transformation system. \n- This creates a scalable content engine for bulk AI influencer videos without hiring creators.",
+    "title": "How to Create Massive AI Influencer Content at Scale (Step-by-Step Guide & Case Study)"
+  }
+}

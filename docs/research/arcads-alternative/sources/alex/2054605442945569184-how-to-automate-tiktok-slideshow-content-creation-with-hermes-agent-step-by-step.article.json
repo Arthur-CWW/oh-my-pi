@@ -1,0 +1,1817 @@
+{
+  "tweet_id": "2054605442945569184",
+  "tweet_url": "https://x.com/alexcooldev/status/2054605442945569184",
+  "tweet_text": "https://t.co/I4LMeR2DxK",
+  "x_article_url": "https://x.com/i/article/2054593147406262272",
+  "x_article_alias_url": "https://x.com/alexcooldev/article/2054605442945569184",
+  "history_title": "How to Automate TikTok Slideshow Content Creation with Hermes Agent (Step-by-Step Guide)",
+  "article": {
+    "content_state": {
+      "blocks": [
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "67i5t",
+          "text": "Currently, TikTok is heavily boosting views and engagement for slideshows, you can check out these channels.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 0,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "1qc48",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 1,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "dj692",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 2,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "3nu93",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 3,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "2pu1n",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "3ttc7",
+          "text": "Why this stack",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "drers",
+          "text": "Slideshows are the highest leverage format on TikTok right now:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "5dhqu",
+          "text": "Algorithm still pushes them aggressively (cheap content, infinite supply problem on TT's side)",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "1v46s",
+          "text": "No filming, no editing, no face required",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "fno1u",
+          "text": "Hook-driven → you can A/B test 50 hooks/day",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "1bm1b",
+          "text": "Draft uploads bypass most bot detection that hits the direct-publish API",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "ub5l",
+          "text": "The bottleneck was never ideas. It was the assembly line. Hook → niche → image direction → 8 slide compositions → caption → schedule. Doing this manually = 20 mins per post. For 30 accounts = a full-time job you hate.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 66,
+              "offset": 254,
+              "style": "Bold"
+            }
+          ],
+          "key": "ae50s",
+          "text": "Hermes Agent is the right tool because it's not a framework you npm install and wire up it's an autonomous CLI agent that lives wherever you put it (my $5 Hetzner box), with built-in skills, cron, MCP, and subagent delegation. The whole pipeline is just skills that the agent loads + cron jobs that fire them on schedule. No queue infrastructure, no worker pool to manage.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "2a666",
+          "text": "Step 1: Install Hermes Agent",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "3lv2l",
+          "text": "One-liner install on the VPS:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 4,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "9dp9o",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "2d4dd",
+          "text": "Pick a provider:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 5,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "3c5ck",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {
+            "urls": [
+              {
+                "fromIndex": 217,
+                "text": "Z.AI",
+                "toIndex": 221
+              }
+            ]
+          },
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "hjgj",
+          "text": "I run with Anthropic via OAuth (Max plan) for the agent-y stages (hook research, image direction, caption) and a cheap OpenRouter fallback for high-volume polls. You can also wire Nous Portal, OpenAI Codex, DeepSeek, Z.AI, Kimi hermes model walks through it all.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "eo3qi",
+          "text": "Verify it works:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 6,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "2qg7d",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {
+            "urls": [
+              {
+                "fromIndex": 74,
+                "text": "https://hermes-agent.nousresearch.com/docs/getting-started/quickstart",
+                "toIndex": 143
+              }
+            ]
+          },
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "d7un6",
+          "text": "If that responds, you're past the hardest part. The full quickstart is at https://hermes-agent.nousresearch.com/docs/getting-started/quickstart.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "3mlp1",
+          "text": "Then install the gateway as a systemd service so cron jobs actually run when you're not logged in:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 7,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "3obsp",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "5ohsq",
+          "text": "This is the daemon that ticks the scheduler every 60 seconds and runs due jobs in fresh agent sessions.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "1ifcg",
+          "text": "Step 2: Mental model pipeline = skills + cron, not workers",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 5,
+              "offset": 97,
+              "style": "Bold"
+            },
+            {
+              "length": 8,
+              "offset": 161,
+              "style": "Bold"
+            }
+          ],
+          "key": "def18",
+          "text": "Most automation tutorials reach for queues and workers. Hermes flips this. The unit of work is a skill (markdown file in ~/.hermes/skills/) and the trigger is a cron job that loads one or more skills and runs them.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "3h4ru",
+          "text": "Here's the mapping for the TikTok pipeline:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 8,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "13cap",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "79fih",
+          "text": "Each skill is a markdown file the agent loads on demand. Cron jobs chain them via context_from. The Hermes scheduler runs each job in a fresh isolated session, so no state corruption between accounts.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "fghti",
+          "text": "Step 3: Create the skills",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "8v8or",
+          "text": "Skills live in ~/.hermes/skills/<category>/<skill-name>/SKILL.md. The agent can create them itself via skill_manage, or you can author them by hand. I do a mix I draft the structure, then let Hermes refine after watching it run.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "cg27j",
+          "text": "Hook Researcher skill",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "e3eo7",
+          "text": "bash",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 9,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "fl19h",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "20g8a",
+          "text": "~/.hermes/skills/tiktok/hook-researcher/SKILL.md:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 10,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "60chd",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "813co",
+          "text": "Image Source Router skill",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "49rvd",
+          "text": "This decides Pinterest vs AI gen per slot.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "71fpp",
+          "text": "~/.hermes/skills/tiktok/source-router/SKILL.md:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 11,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "eobc5",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "4h8bg",
+          "text": "Pinterest Scraper skill",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "avciq",
+          "text": "This one needs a helper script because the agent shouldn't be doing HTTP rotation logic in-context.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 12,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "3f0hd",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "dujm0",
+          "text": "~/.hermes/skills/tiktok/pinterest-scraper/SKILL.md:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 13,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "7f27a",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "etlg4",
+          "text": "~/.hermes/skills/tiktok/pinterest-scraper/scripts/scrape.py is a normal Python script. The agent invokes it via execute_code or terminal and parses stdout. The PROXY_POOL_URL declared above gets passed through automatically into execute_code sandboxes that's a Hermes feature that saved me a lot of env plumbing.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "8fdfp",
+          "text": "Slide Compositor no-agent mode",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "b0fsc",
+          "text": "This stage is fully deterministic. No LLM needed. Hermes has no_agent mode for exactly this:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "aehe0",
+          "text": "bash",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 14,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "fc1s9",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "dhcm4",
+          "text": "~/.hermes/scripts/compose-slides.py:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 15,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "bgnh6",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "9pnk9",
+          "text": "Then schedule it as a no_agent cron job wakeAgent never fires, no LLM cost on this step.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "3geoi",
+          "text": "Publisher skill",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "f751",
+          "text": "~/.hermes/skills/tiktok/publisher/SKILL.md:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 16,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "fdujs",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "bc5pp",
+          "text": "Step 4: The shadow ban killer always draft mode",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "9eomb",
+          "text": "This is the part most tutorials skip and it's the biggest reason new accounts die.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 76,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "fvh9r",
+          "text": "If an account is less than 30 days old, ALWAYS post as draft. No exceptions.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "b7ijf",
+          "text": "New accounts on TikTok are on probation. The algorithm profiles:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "2ksc",
+          "text": "Publishing through the Content Posting API → bot risk score +1",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "7n0en",
+          "text": "Publish IP not matching the account's usual device IP → +1",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "ahtgt",
+          "text": "Suspiciously regular intervals → +1",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "fpq37",
+          "text": "Stripped or inconsistent metadata vs on-device capture → +1",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "7vke1",
+          "text": "Stack 2-3 of those on a fresh account and you get shadow banned silently. No notification. Videos stuck at 50-200 views forever. You'll think your content sucks. It doesn't the account is dead.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "6iegm",
+          "text": "The Publisher skill above hardcodes draft mode for any account under 30 days / under 20 posts. Postiz uploads it as a draft, then my iPhone farm picks up the draft (via WebDriverAgent automation) and hits Publish from a real device with a real IP. TikTok sees a human-initiated publish from a known device clean.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "5lfbh",
+          "text": "Warmup protocol:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "c1emj",
+          "text": "Days 1-7: account does nothing but scroll, like, follow",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "1eajf",
+          "text": "Days 8-14: post 1 draft/day, published from device 2-4 hours after draft creation",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "38iob",
+          "text": "Days 15-30: ramp to 2-3 drafts/day, randomize publish times within ±90 min",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "7rton",
+          "text": "Day 30+: full pipeline cadence, still draft mode",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "adu6n",
+          "text": "Hermes cron + Postiz Cloud + iPhone farm device publish = indistinguishable from organic behavior to TikTok's classifiers.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "eabg3",
+          "text": "Step 5: Chain everything together with cron + context_from",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "4e8l8",
+          "text": "This is the magic of Hermes' cron system. Each pipeline stage is a separate cron job. Job N reads the most recent output of Job N-1 via context_from. The chain runs end-to-end without me orchestrating anything.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "e4bc3",
+          "text": "I create the chain from a single chat session with Hermes:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "63ast",
+          "text": "text",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "17hjd",
+          "text": "hermes --tui\n> I need to set up the TikTok pipeline for account acc_42, niche=fitness.\n> Schedule the pipeline to run every day at 09:00 UTC.\n> Chain: hook research → source routing → pinterest scrape → compose → caption → publish.\n> Each stage should use the matching skill and receive context from the previous stage.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "7eqbo",
+          "text": "Hermes uses the cronjob tool internally and creates the chain. Here's what the equivalent direct calls look like (Hermes does this for you):",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 17,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "9iec",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "e9rsn",
+          "text": "A few key things:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 32,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "9du1o",
+          "text": "context_from chains the outputs. Hermes reads each upstream job's most recent saved output from ~/.hermes/cron/output/{job_id}/ and prepends it to the next job's prompt as context. No databases, no queues, no glue code.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 50,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "5nfut",
+          "text": "workdir runs the job inside the project directory. This means AGENTS.md, .cursorrules, and any local context files get auto-loaded. Useful when you keep account configs and prompt overrides in a project repo.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 32,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "2tb9v",
+          "text": "no_agent=True on the compositor. Pure deterministic Sharp/PIL work. No reason to pay for an LLM turn. The script's stdout becomes the job's output and chains to the next stage normally.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 18,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "9gvl5",
+          "text": "deliver=\"telegram\" pings me when the publish completes. I use \"all\" for the final stage on the high-value account so I get the success ping on every connected channel.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "80cjf",
+          "text": "Step 6: Per-stage toolset control (cost saver)",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "3retv",
+          "text": "By default cron jobs inherit the toolsets you configured for the cron platform via hermes tools. But for cost control on high-frequency stages, lock toolsets per job:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 18,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "pq94",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "dargl",
+          "text": "Hook research doesn't need browser, terminal, or delegation toolsets — those bloat the tool-schema prompt on every LLM call. Locking the hook job to [\"file\"] cut my hook-gen tokens by ~40%. Across 30 accounts × 1 post/day × 30 days = real money.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "ea2fc",
+          "text": "The Pinterest scrape job needs [\"terminal\", \"file\"] to call the script. The compositor in no_agent mode doesn't load any toolsets (no agent runs). The publisher needs [\"terminal\", \"file\"] for postiz-cli.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "eikqg",
+          "text": "Step 7: Skip the agent when nothing changed",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "3vui3",
+          "text": "Hermes has a pre-check script pattern that's perfect for the daily hook job. If the niche performance data hasn't changed since yesterday, there's no reason to generate fresh hooks yesterday's top 3 are still the top 3.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "sq27",
+          "text": "~/.hermes/scripts/hook-precheck.py:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 19,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "39u7f",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "ebcnq",
+          "text": "Attach via the script parameter when creating the cron job. The agent only wakes when performance data actually changed. On a typical day where I haven't manually logged anything new, this skips the LLM entirely. Free.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "4hf8k",
+          "text": "Step 8: Postiz setup cloud (or you can self hosted) + the official Hermes skill",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "fisfd",
+          "text": "I tried self-hosting Postiz in Docker for 2 months. Spent more time fixing the container than building features OAuth token refreshes failing, media disk filling up, schedule worker dying silently. Postiz Cloud at $29/mo bought back ~5 hrs/week of debugging.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "d5p06",
+          "text": "The 60-second setup:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "163j8",
+          "text": "bash",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 20,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "9ka6p",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "2u93t",
+          "text": "The Postiz skill exposes itself to Hermes through this SKILL.md (lives in ~/.hermes/skills/postiz-agent/SKILL.md after install):",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 21,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "90dp5",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "dtj02",
+          "text": "Hermes reads this on session start, registers the postiz binary as a tool, and now any cron job that loads this skill can call it.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "1gvgt",
+          "text": "API basics worth knowing",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 22,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "8pn6l",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 24,
+              "offset": 134,
+              "style": "Bold"
+            }
+          ],
+          "key": "f7s7d",
+          "text": "The two-layer mode system trips people up. Postiz has its own type: \"draft\" for posts that sit in Postiz's UI without going anywhere. That's NOT what we want. We want type: \"schedule\" with content_posting_method: \"UPLOAD\" Postiz schedules the post, pushes it to TikTok at the scheduled time, but as a TikTok-side draft that lands in the account's inbox for the iPhone farm to publish from a real device.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "41jvh",
+          "text": "Wrong combination = wrong outcome. Test this on one account first.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "2gj2o",
+          "text": "Self-host only if you have compliance reasons or you're posting at volume that justifies it. Cloud has a real cost (30 req/hr cap per key), but self-host eats your hours.What I learned the hard way",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 29,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "bbgqq",
+          "text": "Don't trust your first hooks. I ran the pipeline for 2 weeks blasting hook-archetype #1. Flat. Switched to A/B testing 3 archetypes per niche with a daily eval loop reading back from TikTok's view counts → killed the dead archetypes, doubled down on winners. CTR jumped within a week.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 40,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "cueqn",
+          "text": "Pinterest beats AI for authentic niches. I spent 3 months optimizing image gen prompts for fitness transformation slides. Then tested 50/50 against Pinterest-scraped equivalents. Pinterest slides got 2.3x the saves. Real photos hit different. The fix: route per-niche.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 46,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "500hv",
+          "text": "Draft mode is non-negotiable for new accounts. I lost 4 accounts before I accepted this. Direct publish on a fresh account = silent shadow ban within the first week. You won't know until you've wasted 2 months of content on a dead account.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "9km7u",
+          "text": "Resource:",
+          "type": "unstyled"
+        },
+        {
+          "data": {
+            "urls": [
+              {
+                "fromIndex": 14,
+                "text": "https://hermes-agent.nousresearch.com/",
+                "toIndex": 52
+              }
+            ]
+          },
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "en2kp",
+          "text": "Hermes Agent: https://hermes-agent.nousresearch.com/",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {
+            "urls": [
+              {
+                "fromIndex": 8,
+                "text": "https://postiz.com/",
+                "toIndex": 27
+              }
+            ]
+          },
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "2dgd",
+          "text": "Postiz: https://postiz.com/",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 23,
+              "length": 1,
+              "offset": 15
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "7btkk",
+          "text": "Good luck guys 💪",
+          "type": "unstyled"
+        }
+      ],
+      "entityMap": [
+        {
+          "key": "12",
+          "value": {
+            "data": {
+              "markdown": "```bash\nmkdir -p ~/.hermes/skills/tiktok/pinterest-scraper/scripts\n\n```"
+            },
+            "mutability": "Mutable",
+            "type": "MARKDOWN"
+          }
+        },
+        {
+          "key": "8",
+          "value": {
+            "data": {
+              "entityKey": "cc05eca5-9887-499b-b4af-286dec3d3ee6",
+              "mediaItems": [
+                {
+                  "localMediaId": "11",
+                  "mediaCategory": "DraftTweetImage",
+                  "mediaId": "2054600335759745024"
+                }
+              ]
+            },
+            "mutability": "Immutable",
+            "type": "MEDIA"
+          }
+        },
+        {
+          "key": "19",
+          "value": {
+            "data": {
+              "markdown": "```python\n#!/usr/bin/env python3\nimport json, hashlib, pathlib, sys\n\nperf_file = pathlib.Path.home() / \".hermes/data/tiktok/hook_performance.jsonl\"\nstate_file = pathlib.Path.home() / \".hermes/state/hook-perf-hash.txt\"\nstate_file.parent.mkdir(parents=True, exist_ok=True)\n\ncurrent_hash = hashlib.sha256(perf_file.read_bytes()).hexdigest()\nlast_hash = state_file.read_text().strip() if state_file.exists() else \"\"\n\nif current_hash == last_hash:\n    # Nothing new since last run. Skip the agent.\n    print(json.dumps({\"wakeAgent\": False}))\n    sys.exit(0)\n\nstate_file.write_text(current_hash)\nprint(json.dumps({\"wakeAgent\": True, \"context\": {\"perf_updated\": True}}))\n```"
+            },
+            "mutability": "Mutable",
+            "type": "MARKDOWN"
+          }
+        },
+        {
+          "key": "23",
+          "value": {
+            "data": {
+              "url": "https://abs.twimg.com/emoji/v2/svg/1f4aa.svg"
+            },
+            "mutability": "Immutable",
+            "type": "TWEMOJI"
+          }
+        },
+        {
+          "key": "4",
+          "value": {
+            "data": {
+              "markdown": "```bash\ncurl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash\nsource ~/.bashrc\n```"
+            },
+            "mutability": "Mutable",
+            "type": "MARKDOWN"
+          }
+        },
+        {
+          "key": "15",
+          "value": {
+            "data": {
+              "markdown": "```python\n#!/usr/bin/env python3\n\"\"\"Composite 8 raw images + hook into TikTok-ready 1080x1920 slides.\nReads job spec from stdin (JSON), writes composited file paths to stdout.\n\"\"\"\nimport json, sys\nfrom PIL import Image, ImageDraw, ImageFont\n# ...full Sharp/PIL compositing logic here...\n\nif __name__ == \"__main__\":\n    spec = json.load(sys.stdin)\n    output_paths = compose_all(spec)\n    print(json.dumps({\"slides\": output_paths}))\n```"
+            },
+            "mutability": "Mutable",
+            "type": "MARKDOWN"
+          }
+        },
+        {
+          "key": "11",
+          "value": {
+            "data": {
+              "markdown": "```markdown\n---\nname: tiktok-source-router\ndescription: Decide image source (pinterest or ai_gen) per slide for a TikTok carousel\nversion: 1.0.0\nmetadata:\n  hermes:\n    tags: [tiktok, images, routing]\n    category: tiktok\n---\n\n# TikTok Image Source Router\n\n## When to Use\nAfter a hook is picked, before image gathering. Decides per slide whether to\nsource from Pinterest or generate with AI.\n\n## Procedure\n1. Read the niche + hook from context.\n2. Apply routing rules:\n   - Fitness, fashion, food, travel, aesthetic → Pinterest (real photos win)\n   - Anime/RPG, fictional characters, abstract concepts → AI gen\n   - Mixed niches: cover slide AI gen, body slides Pinterest\n3. Output JSON array of 8 routing decisions:\n   `[{ slot, source, query_or_brief }, ...]`\n\n## Pitfalls\n- Don't AI-gen fitness transformations. Uncanny valley. Use Pinterest.\n- Don't Pinterest-search for \"anime warrior rank up\". Doesn't exist. Use AI gen.\n```"
+            },
+            "mutability": "Mutable",
+            "type": "MARKDOWN"
+          }
+        },
+        {
+          "key": "9",
+          "value": {
+            "data": {
+              "markdown": "```bash\nmkdir -p ~/.hermes/skills/tiktok/hook-researcher\n\n```"
+            },
+            "mutability": "Mutable",
+            "type": "MARKDOWN"
+          }
+        },
+        {
+          "key": "22",
+          "value": {
+            "data": {
+              "entityKey": "f7b0ea11-736d-4fc0-be3d-3b5b7bdc88e7",
+              "mediaItems": [
+                {
+                  "localMediaId": "14",
+                  "mediaCategory": "DraftTweetImage",
+                  "mediaId": "2054604882758586368"
+                }
+              ]
+            },
+            "mutability": "Immutable",
+            "type": "MEDIA"
+          }
+        },
+        {
+          "key": "13",
+          "value": {
+            "data": {
+              "markdown": "```markdown\n---\nname: tiktok-pinterest-scraper\ndescription: Source TikTok-ready images from Pinterest with proxy rotation and phash dedup\nversion: 1.0.0\nrequired_environment_variables:\n  - name: PROXY_POOL_URL\n    prompt: Residential proxy pool endpoint\n    help: Bright Data, Smartproxy, or any rotating residential proxy\nmetadata:\n  hermes:\n    tags: [tiktok, pinterest, scraping]\n    category: tiktok\n---\n\n# TikTok Pinterest Scraper\n\n## When to Use\nSource router routes a slot to `pinterest`. Need fresh, unique, properly-sized\nimages for that account.\n\n## Procedure\n1. Call `scripts/scrape.py` with the search query and account_id:\n   `python scripts/scrape.py --query \"{q}\" --account {id} --count {n}`\n2. The script handles:\n   - Proxy rotation per request\n   - Cookie pool rotation\n   - Perceptual hash dedup against the last 30 days for that account\n   - Aspect ratio filter (min 1080×1350)\n   - S3 upload to MinIO\n3. Parse the script's stdout (JSON list of S3 URLs).\n4. If count returned < requested, retry with rephrased query (max 2 retries).\n\n## Pitfalls\n- Pinterest rate-limits per IP. Always go through proxy.\n- Hamming distance < 5 = duplicate. Don't relax this threshold.\n- Anything < 1080×1350 will look soft on TikTok. Filter at search, not after download.\n```"
+            },
+            "mutability": "Mutable",
+            "type": "MARKDOWN"
+          }
+        },
+        {
+          "key": "16",
+          "value": {
+            "data": {
+              "markdown": "```markdown\n---\nname: tiktok-publisher\ndescription: Upload composited slides to TikTok as draft via Postiz Cloud\nversion: 1.0.0\nrequired_environment_variables:\n  - name: POSTIZ_API_KEY\n    prompt: Postiz Cloud API key\n    help: Get from postiz.com → Settings → API Keys\nmetadata:\n  hermes:\n    tags: [tiktok, publishing]\n    category: tiktok\n---\n\n# TikTok Publisher\n\n## When to Use\nAfter slides + caption are ready. Uploads as draft to TikTok via Postiz.\n\n## Procedure\n1. Read slides paths + caption + account_id from context.\n2. Always check account age. If `< 30 days` or `total_posts < 20` → force draft mode.\n   Honestly even for old accounts I default to draft. There is zero upside to direct-publish.\n3. Call `postiz-cli`:\npostiz-cli schedule \n--account {account_id} \n--platform tiktok \n--mode draft \n--media {slide_paths} \n--caption {caption} \n--time {scheduled_iso}\n4. Capture postId from stdout. Write to `~/.hermes/data/tiktok/posts.jsonl`.\n\n## Pitfalls\n- NEVER direct-publish on a new account. Silent shadow ban inside a week.\n- Postiz CLI needs POSTIZ_API_KEY in env. Hermes passes it through automatically.\n- Randomize scheduled time within ±90min jitter to kill robotic interval signal.\n```"
+            },
+            "mutability": "Mutable",
+            "type": "MARKDOWN"
+          }
+        },
+        {
+          "key": "5",
+          "value": {
+            "data": {
+              "markdown": "```bash\nhermes model\n```"
+            },
+            "mutability": "Mutable",
+            "type": "MARKDOWN"
+          }
+        },
+        {
+          "key": "10",
+          "value": {
+            "data": {
+              "markdown": "```markdown\n---\nname: tiktok-hook-researcher\ndescription: Generate TikTok slideshow hooks for a given niche, eval, return top 3\nversion: 1.0.0\nmetadata:\n  hermes:\n    tags: [tiktok, content, hooks]\n    category: tiktok\n---\n\n# TikTok Hook Researcher\n\n## When to Use\nWhen asked to generate hooks for a TikTok slideshow in a specific niche.\n\n## Procedure\n1. Read the last 20 winning hooks for the niche from\n   `~/.hermes/data/tiktok/hook_performance.jsonl`.\n2. Generate 10 hook candidates. Constraints:\n   - Under 60 characters\n   - Curiosity gap, not clickbait\n   - Mix of 3 archetypes: contrarian, listicle, transformation\n3. Score each candidate 1-10 on \"would a 19yo stop scrolling for this\",\n   calibrated against the winning hooks.\n4. Output JSON to stdout: `{ hooks: [{ text, archetype, score }, ...] }`\n   sorted by score descending. Return the top 3.\n\n## Pitfalls\n- LLMs default to clickbait. Bias hard against \"You won't believe...\" patterns.\n- Don't reuse exact phrasing from the last 20 winners — algorithm penalizes recycled hooks.\n\n## Verification\nOutput is valid JSON. Top hook has score ≥ 7. All hooks ≤ 60 chars.\n```"
+            },
+            "mutability": "Mutable",
+            "type": "MARKDOWN"
+          }
+        },
+        {
+          "key": "21",
+          "value": {
+            "data": {
+              "markdown": "```markdown\n---\nname: postiz\ndescription: Social media automation CLI for scheduling posts across 30+ platforms including TikTok\nmetadata:\n  hermes-agent:\n    requirements:\n      env:\n        - POSTIZ_API_KEY\n      binaries:\n        - postiz\n---\n\n# Available Commands\n- postiz integrations:list\n- postiz integrations:settings <id>\n- postiz posts:create\n- postiz upload <file>\n- postiz analytics:platform <id>\n```"
+            },
+            "mutability": "Mutable",
+            "type": "MARKDOWN"
+          }
+        },
+        {
+          "key": "6",
+          "value": {
+            "data": {
+              "markdown": "```bash\nhermes --tui\n> Summarize what's in this directory.\n```"
+            },
+            "mutability": "Mutable",
+            "type": "MARKDOWN"
+          }
+        },
+        {
+          "key": "1",
+          "value": {
+            "data": {
+              "entityKey": "d6576eff-e3a7-4136-ab34-2ce3b1e23375",
+              "mediaItems": [
+                {
+                  "localMediaId": "3",
+                  "mediaCategory": "DraftTweetImage",
+                  "mediaId": "2054595668434673664"
+                }
+              ]
+            },
+            "mutability": "Immutable",
+            "type": "MEDIA"
+          }
+        },
+        {
+          "key": "17",
+          "value": {
+            "data": {
+              "markdown": "```python\n# Stage 1: Hook research, daily at 09:00\ncronjob(\n    action=\"create\",\n    name=\"tt-hook-acc42\",\n    schedule=\"0 9 * * *\",\n    skills=[\"tiktok-hook-researcher\"],\n    prompt=\"Generate hooks for niche=fitness for account acc_42. Output top 3 as JSON.\",\n    workdir=\"/home/alex/tiktok-pipeline\",\n)\n\n# Stage 2: Source routing, 5 minutes later\ncronjob(\n    action=\"create\",\n    name=\"tt-route-acc42\",\n    schedule=\"5 9 * * *\",\n    skills=[\"tiktok-source-router\"],\n    context_from=\"tt-hook-acc42\",\n    prompt=\"Route image sources for the top hook. Output 8 routing decisions.\",\n)\n\n# Stage 3: Pinterest scrape (for pinterest-routed slots)\ncronjob(\n    action=\"create\",\n    name=\"tt-pinterest-acc42\",\n    schedule=\"10 9 * * *\",\n    skills=[\"tiktok-pinterest-scraper\"],\n    context_from=\"tt-route-acc42\",\n    prompt=\"For each pinterest-routed slot, scrape unique deduped images. Output S3 URLs.\",\n)\n\n# Stage 4: Compositor — no_agent mode, pure script\ncronjob(\n    action=\"create\",\n    name=\"tt-compose-acc42\",\n    schedule=\"20 9 * * *\",\n    no_agent=True,\n    script=\"compose-slides.py\",\n    context_from=[\"tt-pinterest-acc42\", \"tt-hook-acc42\"],\n    name=\"tt-compose-acc42\",\n)\n\n# Stage 5: Caption\ncronjob(\n    action=\"create\",\n    name=\"tt-caption-acc42\",\n    schedule=\"25 9 * * *\",\n    skills=[\"tiktok-caption-writer\"],\n    context_from=[\"tt-hook-acc42\", \"tt-compose-acc42\"],\n    prompt=\"Write caption + 4 hashtags for the slideshow.\",\n)\n\n# Stage 6: Publish\ncronjob(\n    action=\"create\",\n    name=\"tt-publish-acc42\",\n    schedule=\"30 9 * * *\",\n    skills=[\"tiktok-publisher\"],\n    context_from=[\"tt-compose-acc42\", \"tt-caption-acc42\"],\n    prompt=\"Upload slides + caption as draft to TikTok account acc_42 via Postiz.\",\n    deliver=\"telegram\",  # ping me when done\n)\n```"
+            },
+            "mutability": "Mutable",
+            "type": "MARKDOWN"
+          }
+        },
+        {
+          "key": "14",
+          "value": {
+            "data": {
+              "markdown": "```bash\nmkdir -p ~/.hermes/scripts\n```"
+            },
+            "mutability": "Mutable",
+            "type": "MARKDOWN"
+          }
+        },
+        {
+          "key": "0",
+          "value": {
+            "data": {
+              "entityKey": "1023f4a7-f3f2-4f45-85ad-0873ef20ad44",
+              "mediaItems": [
+                {
+                  "localMediaId": "1",
+                  "mediaCategory": "DraftTweetImage",
+                  "mediaId": "2054595631239540738"
+                }
+              ]
+            },
+            "mutability": "Immutable",
+            "type": "MEDIA"
+          }
+        },
+        {
+          "key": "20",
+          "value": {
+            "data": {
+              "markdown": "```bash\n# 1. Sign up at postiz.com, get an API key from Settings → Developers → Public API\n# 2. Install the official Postiz × Hermes skill\nnpx skills add gitroomhq/postiz-agent\n\n# 3. Add the API key to Hermes env\necho \"POSTIZ_API_KEY=pos_your_key_here\" >> ~/.hermes/.env\n\n# 4. Connect your TikTok accounts via the Postiz web UI (OAuth flow)\n# Each connected account = one \"integration\" with a unique integration_id\n\n# 5. Verify discovery from Hermes\nhermes tools list | grep postiz   # should show postiz commands available\npostiz integrations:list           # lists all connected channels\n```"
+            },
+            "mutability": "Mutable",
+            "type": "MARKDOWN"
+          }
+        },
+        {
+          "key": "2",
+          "value": {
+            "data": {
+              "entityKey": "b202109f-20f9-480d-b71c-d62f05650c48",
+              "mediaItems": [
+                {
+                  "localMediaId": "5",
+                  "mediaCategory": "DraftTweetImage",
+                  "mediaId": "2054596371186163712"
+                }
+              ]
+            },
+            "mutability": "Immutable",
+            "type": "MEDIA"
+          }
+        },
+        {
+          "key": "18",
+          "value": {
+            "data": {
+              "markdown": "```python\ncronjob(\n    action=\"create\",\n    name=\"tt-hook-acc42\",\n    schedule=\"0 9 * * *\",\n    skills=[\"tiktok-hook-researcher\"],\n    enabled_toolsets=[\"file\"],  # hook gen only needs file read for past performance\n    prompt=\"...\",\n)\n```"
+            },
+            "mutability": "Mutable",
+            "type": "MARKDOWN"
+          }
+        },
+        {
+          "key": "7",
+          "value": {
+            "data": {
+              "markdown": "```bash\nhermes gateway install\n\n```"
+            },
+            "mutability": "Mutable",
+            "type": "MARKDOWN"
+          }
+        },
+        {
+          "key": "3",
+          "value": {
+            "data": {
+              "entityKey": "42f0ca8b-634e-41a7-8052-40b7c57b605c",
+              "mediaItems": [
+                {
+                  "localMediaId": "7",
+                  "mediaCategory": "DraftTweetImage",
+                  "mediaId": "2054596535170846720"
+                }
+              ]
+            },
+            "mutability": "Immutable",
+            "type": "MEDIA"
+          }
+        }
+      ]
+    },
+    "cover_media": {
+      "id": "QXBpTWVkaWE6DAAFCgABHINrVvSboAEKAAIWFVkb/RoQAAAA",
+      "media_id": "2054603876226277377",
+      "media_info": {
+        "__typename": "ApiImage",
+        "color_info": {
+          "palette": [
+            {
+              "percentage": 75.51,
+              "rgb": {
+                "blue": 5,
+                "green": 6,
+                "red": 6
+              }
+            },
+            {
+              "percentage": 10.52,
+              "rgb": {
+                "blue": 105,
+                "green": 118,
+                "red": 135
+              }
+            },
+            {
+              "percentage": 7.75,
+              "rgb": {
+                "blue": 187,
+                "green": 192,
+                "red": 195
+              }
+            },
+            {
+              "percentage": 5.5,
+              "rgb": {
+                "blue": 132,
+                "green": 129,
+                "red": 126
+              }
+            },
+            {
+              "percentage": 0.7,
+              "rgb": {
+                "blue": 38,
+                "green": 56,
+                "red": 104
+              }
+            }
+          ]
+        },
+        "original_img_height": 600,
+        "original_img_url": "https://pbs.twimg.com/media/HINrVvSboAEOMDE.jpg",
+        "original_img_width": 1500
+      },
+      "media_key": "3_2054603876226277377"
+    },
+    "id": "QXJ0aWNsZUVudGl0eToyMDU0NTkzMTQ3NDA2MjYyMjcy",
+    "is_grok_summary_eligible": true,
+    "lifecycle_state": {
+      "modified_at_secs": 1778691084
+    },
+    "media_entities": [
+      {
+        "id": "QXBpTWVkaWE6DAAFCgABHINj10UaMAIKAAIWFVkb/RoQAAAA",
+        "media_id": "2054595631239540738",
+        "media_info": {
+          "__typename": "ApiImage",
+          "color_info": {
+            "palette": [
+              {
+                "percentage": 71.98,
+                "rgb": {
+                  "blue": 2,
+                  "green": 3,
+                  "red": 3
+                }
+              },
+              {
+                "percentage": 14.3,
+                "rgb": {
+                  "blue": 106,
+                  "green": 114,
+                  "red": 133
+                }
+              },
+              {
+                "percentage": 6.23,
+                "rgb": {
+                  "blue": 176,
+                  "green": 190,
+                  "red": 198
+                }
+              },
+              {
+                "percentage": 1.64,
+                "rgb": {
+                  "blue": 178,
+                  "green": 139,
+                  "red": 112
+                }
+              },
+              {
+                "percentage": 1.13,
+                "rgb": {
+                  "blue": 59,
+                  "green": 52,
+                  "red": 36
+                }
+              }
+            ]
+          },
+          "original_img_height": 1984,
+          "original_img_url": "https://pbs.twimg.com/media/HINj10UaMAIYnux.jpg",
+          "original_img_width": 3130
+        },
+        "media_key": "3_2054595631239540738"
+      },
+      {
+        "id": "QXBpTWVkaWE6DAAFCgABHINj3+4a4AAKAAIWFVkb/RoQAAAA",
+        "media_id": "2054595668434673664",
+        "media_info": {
+          "__typename": "ApiImage",
+          "color_info": {
+            "palette": [
+              {
+                "percentage": 80.57,
+                "rgb": {
+                  "blue": 3,
+                  "green": 4,
+                  "red": 4
+                }
+              },
+              {
+                "percentage": 12.31,
+                "rgb": {
+                  "blue": 116,
+                  "green": 123,
+                  "red": 132
+                }
+              },
+              {
+                "percentage": 1.85,
+                "rgb": {
+                  "blue": 46,
+                  "green": 71,
+                  "red": 122
+                }
+              },
+              {
+                "percentage": 1.36,
+                "rgb": {
+                  "blue": 185,
+                  "green": 194,
+                  "red": 201
+                }
+              },
+              {
+                "percentage": 0.61,
+                "rgb": {
+                  "blue": 35,
+                  "green": 42,
+                  "red": 74
+                }
+              }
+            ]
+          },
+          "original_img_height": 1988,
+          "original_img_url": "https://pbs.twimg.com/media/HINj3-4a4AA8BqW.jpg",
+          "original_img_width": 3162
+        },
+        "media_key": "3_2054595668434673664"
+      },
+      {
+        "id": "QXBpTWVkaWE6DAAFCgABHINkqbubUAAKAAIWFVkb/RoQAAAA",
+        "media_id": "2054596535170846720",
+        "media_info": {
+          "__typename": "ApiImage",
+          "color_info": {
+            "palette": [
+              {
+                "percentage": 93.23,
+                "rgb": {
+                  "blue": 10,
+                  "green": 11,
+                  "red": 10
+                }
+              },
+              {
+                "percentage": 3.02,
+                "rgb": {
+                  "blue": 9,
+                  "green": 51,
+                  "red": 42
+                }
+              },
+              {
+                "percentage": 1.85,
+                "rgb": {
+                  "blue": 125,
+                  "green": 126,
+                  "red": 124
+                }
+              },
+              {
+                "percentage": 1.51,
+                "rgb": {
+                  "blue": 8,
+                  "green": 135,
+                  "red": 107
+                }
+              },
+              {
+                "percentage": 0.31,
+                "rgb": {
+                  "blue": 4,
+                  "green": 192,
+                  "red": 151
+                }
+              }
+            ]
+          },
+          "original_img_height": 598,
+          "original_img_url": "https://pbs.twimg.com/media/HINkqbubUAA0GVk.jpg",
+          "original_img_width": 2546
+        },
+        "media_key": "3_2054596535170846720"
+      },
+      {
+        "id": "QXBpTWVkaWE6DAAFCgABHINkg41boAAKAAIWFVkb/RoQAAAA",
+        "media_id": "2054596371186163712",
+        "media_info": {
+          "__typename": "ApiImage",
+          "color_info": {
+            "palette": [
+              {
+                "percentage": 83.01,
+                "rgb": {
+                  "blue": 8,
+                  "green": 9,
+                  "red": 9
+                }
+              },
+              {
+                "percentage": 11.35,
+                "rgb": {
+                  "blue": 94,
+                  "green": 107,
+                  "red": 114
+                }
+              },
+              {
+                "percentage": 2.43,
+                "rgb": {
+                  "blue": 76,
+                  "green": 104,
+                  "red": 145
+                }
+              },
+              {
+                "percentage": 1.65,
+                "rgb": {
+                  "blue": 55,
+                  "green": 43,
+                  "red": 28
+                }
+              },
+              {
+                "percentage": 0.22,
+                "rgb": {
+                  "blue": 87,
+                  "green": 47,
+                  "red": 254
+                }
+              }
+            ]
+          },
+          "original_img_height": 1938,
+          "original_img_url": "https://pbs.twimg.com/media/HINkg41boAAJhdG.jpg",
+          "original_img_width": 3138
+        },
+        "media_key": "3_2054596371186163712"
+      },
+      {
+        "id": "QXBpTWVkaWE6DAAFCgABHINsQU6b0AAKAAIWFVkb/RoQAAAA",
+        "media_id": "2054604882758586368",
+        "media_info": {
+          "__typename": "ApiImage",
+          "color_info": {
+            "palette": [
+              {
+                "percentage": 99.82,
+                "rgb": {
+                  "blue": 42,
+                  "green": 44,
+                  "red": 44
+                }
+              },
+              {
+                "percentage": 0.18,
+                "rgb": {
+                  "blue": 120,
+                  "green": 122,
+                  "red": 122
+                }
+              }
+            ]
+          },
+          "original_img_height": 642,
+          "original_img_url": "https://pbs.twimg.com/media/HINsQU6b0AAS2Ka.jpg",
+          "original_img_width": 1470
+        },
+        "media_key": "3_2054604882758586368"
+      },
+      {
+        "id": "QXBpTWVkaWE6DAAFCgABHINoHqBboAAKAAIWFVkb/RoQAAAA",
+        "media_id": "2054600335759745024",
+        "media_info": {
+          "__typename": "ApiImage",
+          "color_info": {
+            "palette": [
+              {
+                "percentage": 99.64,
+                "rgb": {
+                  "blue": 42,
+                  "green": 44,
+                  "red": 44
+                }
+              },
+              {
+                "percentage": 0.36,
+                "rgb": {
+                  "blue": 124,
+                  "green": 126,
+                  "red": 126
+                }
+              }
+            ]
+          },
+          "original_img_height": 684,
+          "original_img_url": "https://pbs.twimg.com/media/HINoHqBboAAvU_A.jpg",
+          "original_img_width": 1434
+        },
+        "media_key": "3_2054600335759745024"
+      }
+    ],
+    "metadata": {
+      "first_published_at_secs": 1778691084
+    },
+    "plain_text": "Currently, TikTok is heavily boosting views and engagement for slideshows, you can check out these channels.\n \n \n \n \nWhy this stack\nSlideshows are the highest leverage format on TikTok right now:\nAlgorithm still pushes them aggressively (cheap content, infinite supply problem on TT's side)\nNo filming, no editing, no face required\nHook-driven → you can A/B test 50 hooks/day\nDraft uploads bypass most bot detection that hits the direct-publish API\nThe bottleneck was never ideas. It was the assembly line. Hook → niche → image direction → 8 slide compositions → caption → schedule. Doing this manually = 20 mins per post. For 30 accounts = a full-time job you hate.\nHermes Agent is the right tool because it's not a framework you npm install and wire up it's an autonomous CLI agent that lives wherever you put it (my $5 Hetzner box), with built-in skills, cron, MCP, and subagent delegation. The whole pipeline is just skills that the agent loads + cron jobs that fire them on schedule. No queue infrastructure, no worker pool to manage.\nStep 1: Install Hermes Agent\nOne-liner install on the VPS:\n \nPick a provider:\n \nI run with Anthropic via OAuth (Max plan) for the agent-y stages (hook research, image direction, caption) and a cheap OpenRouter fallback for high-volume polls. You can also wire Nous Portal, OpenAI Codex, DeepSeek, Z.AI, Kimi hermes model walks through it all.\nVerify it works:\n \nIf that responds, you're past the hardest part. The full quickstart is at https://hermes-agent.nousresearch.com/docs/getting-started/quickstart.\nThen install the gateway as a systemd service so cron jobs actually run when you're not logged in:\n \nThis is the daemon that ticks the scheduler every 60 seconds and runs due jobs in fresh agent sessions.\nStep 2: Mental model pipeline = skills + cron, not workers\nMost automation tutorials reach for queues and workers. Hermes flips this. The unit of work is a skill (markdown file in ~/.hermes/skills/) and the trigger is a cron job that loads one or more skills and runs them.\nHere's the mapping for the TikTok pipeline:\n \nEach skill is a markdown file the agent loads on demand. Cron jobs chain them via context_from. The Hermes scheduler runs each job in a fresh isolated session, so no state corruption between accounts.\nStep 3: Create the skills\nSkills live in ~/.hermes/skills/<category>/<skill-name>/SKILL.md. The agent can create them itself via skill_manage, or you can author them by hand. I do a mix I draft the structure, then let Hermes refine after watching it run.\nHook Researcher skill\nbash\n \n~/.hermes/skills/tiktok/hook-researcher/SKILL.md:\n \nImage Source Router skill\nThis decides Pinterest vs AI gen per slot.\n~/.hermes/skills/tiktok/source-router/SKILL.md:\n \nPinterest Scraper skill\nThis one needs a helper script because the agent shouldn't be doing HTTP rotation logic in-context.\n \n~/.hermes/skills/tiktok/pinterest-scraper/SKILL.md:\n \n~/.hermes/skills/tiktok/pinterest-scraper/scripts/scrape.py is a normal Python script. The agent invokes it via execute_code or terminal and parses stdout. The PROXY_POOL_URL declared above gets passed through automatically into execute_code sandboxes that's a Hermes feature that saved me a lot of env plumbing.\nSlide Compositor no-agent mode\nThis stage is fully deterministic. No LLM needed. Hermes has no_agent mode for exactly this:\nbash\n \n~/.hermes/scripts/compose-slides.py:\n \nThen schedule it as a no_agent cron job wakeAgent never fires, no LLM cost on this step.\nPublisher skill\n~/.hermes/skills/tiktok/publisher/SKILL.md:\n \nStep 4: The shadow ban killer always draft mode\nThis is the part most tutorials skip and it's the biggest reason new accounts die.\nIf an account is less than 30 days old, ALWAYS post as draft. No exceptions.\nNew accounts on TikTok are on probation. The algorithm profiles:\nPublishing through the Content Posting API → bot risk score +1\nPublish IP not matching the account's usual device IP → +1\nSuspiciously regular intervals → +1\nStripped or inconsistent metadata vs on-device capture → +1\nStack 2-3 of those on a fresh account and you get shadow banned silently. No notification. Videos stuck at 50-200 views forever. You'll think your content sucks. It doesn't the account is dead.\nThe Publisher skill above hardcodes draft mode for any account under 30 days / under 20 posts. Postiz uploads it as a draft, then my iPhone farm picks up the draft (via WebDriverAgent automation) and hits Publish from a real device with a real IP. TikTok sees a human-initiated publish from a known device clean.\nWarmup protocol:\nDays 1-7: account does nothing but scroll, like, follow\nDays 8-14: post 1 draft/day, published from device 2-4 hours after draft creation\nDays 15-30: ramp to 2-3 drafts/day, randomize publish times within ±90 min\nDay 30+: full pipeline cadence, still draft mode\nHermes cron + Postiz Cloud + iPhone farm device publish = indistinguishable from organic behavior to TikTok's classifiers.\nStep 5: Chain everything together with cron + context_from\nThis is the magic of Hermes' cron system. Each pipeline stage is a separate cron job. Job N reads the most recent output of Job N-1 via context_from. The chain runs end-to-end without me orchestrating anything.\nI create the chain from a single chat session with Hermes:\ntext\nhermes --tui\n> I need to set up the TikTok pipeline for account acc_42, niche=fitness.\n> Schedule the pipeline to run every day at 09:00 UTC.\n> Chain: hook research → source routing → pinterest scrape → compose → caption → publish.\n> Each stage should use the matching skill and receive context from the previous stage.\nHermes uses the cronjob tool internally and creates the chain. Here's what the equivalent direct calls look like (Hermes does this for you):\n \nA few key things:\ncontext_from chains the outputs. Hermes reads each upstream job's most recent saved output from ~/.hermes/cron/output/{job_id}/ and prepends it to the next job's prompt as context. No databases, no queues, no glue code.\nworkdir runs the job inside the project directory. This means AGENTS.md, .cursorrules, and any local context files get auto-loaded. Useful when you keep account configs and prompt overrides in a project repo.\nno_agent=True on the compositor. Pure deterministic Sharp/PIL work. No reason to pay for an LLM turn. The script's stdout becomes the job's output and chains to the next stage normally.\ndeliver=\"telegram\" pings me when the publish completes. I use \"all\" for the final stage on the high-value account so I get the success ping on every connected channel.\nStep 6: Per-stage toolset control (cost saver)\nBy default cron jobs inherit the toolsets you configured for the cron platform via hermes tools. But for cost control on high-frequency stages, lock toolsets per job:\n \nHook research doesn't need browser, terminal, or delegation toolsets — those bloat the tool-schema prompt on every LLM call. Locking the hook job to [\"file\"] cut my hook-gen tokens by ~40%. Across 30 accounts × 1 post/day × 30 days = real money.\nThe Pinterest scrape job needs [\"terminal\", \"file\"] to call the script. The compositor in no_agent mode doesn't load any toolsets (no agent runs). The publisher needs [\"terminal\", \"file\"] for postiz-cli.\nStep 7: Skip the agent when nothing changed\nHermes has a pre-check script pattern that's perfect for the daily hook job. If the niche performance data hasn't changed since yesterday, there's no reason to generate fresh hooks yesterday's top 3 are still the top 3.\n~/.hermes/scripts/hook-precheck.py:\n \nAttach via the script parameter when creating the cron job. The agent only wakes when performance data actually changed. On a typical day where I haven't manually logged anything new, this skips the LLM entirely. Free.\nStep 8: Postiz setup cloud (or you can self hosted) + the official Hermes skill\nI tried self-hosting Postiz in Docker for 2 months. Spent more time fixing the container than building features OAuth token refreshes failing, media disk filling up, schedule worker dying silently. Postiz Cloud at $29/mo bought back ~5 hrs/week of debugging.\nThe 60-second setup:\nbash\n \nThe Postiz skill exposes itself to Hermes through this SKILL.md (lives in ~/.hermes/skills/postiz-agent/SKILL.md after install):\n \nHermes reads this on session start, registers the postiz binary as a tool, and now any cron job that loads this skill can call it.\nAPI basics worth knowing\n \nThe two-layer mode system trips people up. Postiz has its own type: \"draft\" for posts that sit in Postiz's UI without going anywhere. That's NOT what we want. We want type: \"schedule\" with content_posting_method: \"UPLOAD\" Postiz schedules the post, pushes it to TikTok at the scheduled time, but as a TikTok-side draft that lands in the account's inbox for the iPhone farm to publish from a real device.\nWrong combination = wrong outcome. Test this on one account first.\nSelf-host only if you have compliance reasons or you're posting at volume that justifies it. Cloud has a real cost (30 req/hr cap per key), but self-host eats your hours.What I learned the hard way\nDon't trust your first hooks. I ran the pipeline for 2 weeks blasting hook-archetype #1. Flat. Switched to A/B testing 3 archetypes per niche with a daily eval loop reading back from TikTok's view counts → killed the dead archetypes, doubled down on winners. CTR jumped within a week.\nPinterest beats AI for authentic niches. I spent 3 months optimizing image gen prompts for fitness transformation slides. Then tested 50/50 against Pinterest-scraped equivalents. Pinterest slides got 2.3x the saves. Real photos hit different. The fix: route per-niche.\nDraft mode is non-negotiable for new accounts. I lost 4 accounts before I accepted this. Direct publish on a fresh account = silent shadow ban within the first week. You won't know until you've wasted 2 months of content on a dead account.\nResource:\nHermes Agent: https://hermes-agent.nousresearch.com/\nPostiz: https://postiz.com/\nGood luck guys 💪",
+    "preview_text": "Currently, TikTok is heavily boosting views and engagement for slideshows, you can check out these channels.\n \n \n \n \nWhy this stack\nSlideshows are the highest leverage format on TikTok right now:",
+    "rest_id": "2054593147406262272",
+    "summary_text": "- TikTok aggressively boosts slideshows as cheap, high-leverage content needing no filming, editing, or face.\n\n- The assembly bottleneck—hook to niche, images, slides, caption, schedule—took 20 minutes per post manually.\n\n- Hermes Agent runs an autonomous CLI pipeline of markdown skills triggered by cron jobs on a cheap VPS.\n\n- Skills handle hook research, image routing and scraping from Pinterest, deterministic slide composition, and draft publishing via Postiz.\n\n- New accounts use strict draft mode with iPhone farm publishing from real devices to avoid shadow bans during warmup.",
+    "title": "How to Automate TikTok Slideshow Content Creation with Hermes Agent (Step-by-Step Guide)"
+  }
+}

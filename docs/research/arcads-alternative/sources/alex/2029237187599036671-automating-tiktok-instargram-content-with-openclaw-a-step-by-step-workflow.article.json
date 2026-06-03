@@ -1,0 +1,1315 @@
+{
+  "tweet_id": "2029237187599036671",
+  "tweet_url": "https://x.com/alexcooldev/status/2029237187599036671",
+  "tweet_text": "https://t.co/2tsbuPm8bB",
+  "x_article_url": "https://x.com/i/article/2029230214790955008",
+  "x_article_alias_url": "https://x.com/alexcooldev/article/2029237187599036671",
+  "history_title": "Automating TikTok, Instargram Content with OpenClaw (A Step-by-Step Workflow)",
+  "article": {
+    "content_state": {
+      "blocks": [
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 225,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "9a3mh",
+          "text": "As you’ve seen, Coconote AI and Answer AI were just acquired by Quizlet for millions of dollars. That’s pretty crazy and even crazier is that they both grew mainly through organic content on TikTok and Instagram using AI UGC.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 0,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "3ob1g",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 1,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "a8kbd",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "agf0k",
+          "text": "",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "9j5gs",
+          "text": "Creating TikTok, IG content at scale used to require a full production team: scriptwriters, actors, video editors, and social media managers all working in concert. In 2026, a new generation of AI-powered tools has changed the equation entirely. By combining OpenClaw (an open-source autonomous AI agent), Arcads AI (a platform that turns text scripts into realistic UGC-style videos), and Postiz (an open-source social media scheduler), you can build an end-to-end content pipeline that runs with minimal manual intervention.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "3o2fe",
+          "text": "This guide walks you through the complete workflow, from setting up each tool to connecting them into a seamless automation chain. Whether you’re a solo creator looking to post consistently, a marketer running campaigns for multiple brands, or an agency scaling content for clients, this step-by-step approach will help you produce, schedule, and analyze TikTok, IG content faster than ever before.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "6cfig",
+          "text": "Part 1: Understanding the Tools",
+          "type": "header-one"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "e3lav",
+          "text": "What Is OpenClaw?",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "cnao8",
+          "text": "OpenClaw is a free, open-source autonomous AI agent originally created by Austrian developer Peter Steinberger. Initially published in November 2025 under a different name, it was rebranded to OpenClaw in late January 2026 and has since accumulated over 200,000 GitHub stars. The project gained massive popularity thanks to its open-source nature and viral community projects.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "9cl2j",
+          "text": "At its core, OpenClaw is an agentic interface that runs locally on your machine and connects to a large language model such as Claude, DeepSeek, or GPT. You interact with it through a messaging platform like Telegram, Signal, Discord, or WhatsApp. It can execute tasks autonomously: reading emails, generating images, transcribing meetings, browsing the web, and now, managing entire social media workflows through specialized “skills.”",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "14n14",
+          "text": "Think of OpenClaw as your AI-powered command center. You give it a natural language instruction, and it figures out which APIs to call, which files to create, and which platforms to post to. For TikTok automation specifically, OpenClaw can orchestrate the entire content lifecycle by connecting to video generation tools and scheduling platforms through their APIs.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "d4ro8",
+          "text": "Key capabilities for TikTok automation:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "e8se6",
+          "text": "• Autonomous task execution via natural language commands",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "751he",
+          "text": "• Integration with social media APIs through installable skills",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "f63tu",
+          "text": "• Cross-platform posting to TikTok, Instagram, YouTube, Facebook, Pinterest, and LinkedIn",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "7c43f",
+          "text": "• Smart scheduling based on engagement data",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "6q3ch",
+          "text": "• Analytics tracking and performance learning",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "1uiem",
+          "text": "• Memory retention across sessions for consistent brand voice",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "240as",
+          "text": "What Is Arcads AI?",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "9fi1p",
+          "text": "Arcads AI is a specialized platform for generating realistic, direct-to-camera UGC-style video ads using AI-powered human actors. Unlike generic AI avatar tools, Arcads uses motion capture data from real, consenting performers to create digital actors that feature natural gestures, expressions, body language, and lip synchronization. The result is video content that closely mimics the authentic, talking-head style that performs exceptionally well on TikTok.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "a0ehq",
+          "text": "The workflow is straightforward: you write a script (or use the built-in hook generator for inspiration), select an actor from a library of over 300 AI avatars spanning diverse demographics and styles, choose a background, and click generate. Within approximately two minutes, you have a polished video clip ready for deployment. Arcads supports text-to-speech and speech-to-speech, meaning you can also record your own voice and have the AI actor lip-sync to your delivery.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "1iuqs",
+          "text": "For TikTok specifically, Arcads includes a dedicated TikTok Ads Generator feature that creates videos optimized for the platform’s algorithm, including appropriate duration and engaging visual elements. The bulk creation feature is particularly powerful for marketers: you can generate dozens of video variations with different actors, hooks, and scripts in a single batch, enabling rapid A/B testing at scale.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "e95v4",
+          "text": "Key capabilities:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "d29pa",
+          "text": "• 300+ hyper-realistic AI actors with diverse demographics",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "5jqg0",
+          "text": "• Script-to-video generation in approximately 2 minutes",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "968fa",
+          "text": "• Bulk creation for mass variation testing",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "7laq9",
+          "text": "• Multilingual support in 35+ languages",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "2d4gv",
+          "text": "• Customizable backgrounds, gestures, and emotions",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "c65kf",
+          "text": "• API access on Pro plans for programmatic integration",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "8fvao",
+          "text": "• Videos up to 90 seconds, optimized for TikTok and Reels",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "6m73o",
+          "text": "Pricing overview:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "8o4ai",
+          "text": "Arcads offers tiered pricing. The Starter plan begins at around €100/month for 10 videos, the Creator/Basic plan at approximately €200/month for 20 videos, and the Pro plan offers custom pricing with team collaboration, API access, and advanced features like ElevenLabs voice integration and actor cloning. Note that Arcads does not currently offer a free trial, so you’ll need to commit to a paid plan from the start.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "c5k7k",
+          "text": "What Is Postiz?",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "5mu0",
+          "text": "Postiz is an open-source, self-hosted social media scheduling tool that has quickly become a favorite among developers, privacy-conscious brands, and agencies. Available on GitHub with thousands of stars and millions of downloads, Postiz supports scheduling across 30+ platforms including TikTok, X (Twitter), Instagram, LinkedIn, YouTube, Reddit, Bluesky, Mastodon, Discord, and more.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "6jahl",
+          "text": "What sets Postiz apart from commercial schedulers like Buffer or Hootsuite is its combination of open-source flexibility with powerful built-in features. It includes an AI assistant for generating post ideas and writing copy, a Canva-like design editor for creating visuals directly within the platform, team collaboration tools, analytics dashboards, and a marketplace for connecting with influencers and brands.",
+          "type": "unstyled"
+        },
+        {
+          "data": {
+            "urls": [
+              {
+                "fromIndex": 367,
+                "text": "Make.com",
+                "toIndex": 375
+              }
+            ]
+          },
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "5dgfs",
+          "text": "For automation purposes, Postiz offers a robust public API and a dedicated CLI tool called Postiz Agent. The CLI is specifically designed for AI agents like OpenClaw and Claude, allowing them to schedule posts, manage media uploads, and orchestrate multi-platform campaigns through structured JSON commands. Postiz also integrates with automation platforms like n8n, Make.com, and Zapier.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "7gtsm",
+          "text": "Key capabilities:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "9mviv",
+          "text": "• Open-source and self-hostable for full data control",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "arni0",
+          "text": "• Scheduling across 30+ social media platforms",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "d0p1l",
+          "text": "• AI-powered content creation assistant",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "e99rb",
+          "text": "• Built-in visual design editor",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "7qao5",
+          "text": "• CLI tool (Postiz Agent) built for AI agent integration",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "e7cp4",
+          "text": "• Analytics and performance tracking",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "dep1q",
+          "text": "• Team collaboration and multi-account management",
+          "type": "unstyled"
+        },
+        {
+          "data": {
+            "urls": [
+              {
+                "fromIndex": 28,
+                "text": "Make.com",
+                "toIndex": 36
+              }
+            ]
+          },
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "eu60v",
+          "text": "• API integration with n8n, Make.com, and Zapier",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "9u4ht",
+          "text": "Part 2: Setting Up Your Tools",
+          "type": "header-one"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "4hi3k",
+          "text": "Step 1: Setting Up OpenClaw",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "9qf9m",
+          "text": "OpenClaw runs locally on your machine and requires a computer with reasonable specs. Many users run it on dedicated hardware even repurposed gaming PCs work well. Here’s how to get started:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "er27q",
+          "text": "Prerequisites",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "sfac",
+          "text": "• A computer running Ubuntu (recommended) or another Linux distribution, macOS, or Windows with WSL",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "t28h",
+          "text": "• An API key from a supported LLM provider (Anthropic/Claude, OpenAI, or DeepSeek)",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "ah4e",
+          "text": "• A messaging platform account (Telegram is the most common choice)",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "cq2m3",
+          "text": "• Node.js and Python installed on your system",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "1jo2v",
+          "text": "Installation",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "7ur65",
+          "text": "1. Clone the OpenClaw repository from GitHub to your local machine.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "c68gv",
+          "text": "2. Install the required dependencies following the project’s documentation.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "c0i00",
+          "text": "3. Configure your LLM provider by adding your API key to the configuration file.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "d9if1",
+          "text": "4. Connect your messaging platform (e.g., create a Telegram bot and paste your Bot Token into OpenClaw’s config).",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "7nvn4",
+          "text": "5. Launch OpenClaw and verify it responds to messages on your chosen platform.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "3fts3",
+          "text": "6. Test basic functionality by asking it simple questions to confirm the LLM connection works.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "59mom",
+          "text": "Once OpenClaw is running, you’ll interact with it by sending messages through your chosen messaging app. The agent reads your instructions, plans the necessary steps, and executes them autonomously.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "21kr0",
+          "text": "Step 2: Setting Up Arcads AI",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "83uot",
+          "text": "Arcads AI is a cloud-based platform, so setup is simpler than OpenClaw:",
+          "type": "unstyled"
+        },
+        {
+          "data": {
+            "urls": [
+              {
+                "fromIndex": 9,
+                "text": "arcads.ai",
+                "toIndex": 18
+              }
+            ]
+          },
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "3e1jd",
+          "text": "1. Go to arcads.ai and create an account.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "f2gmq",
+          "text": "2. Choose a pricing plan. The Starter plan (€100/month for 10 videos) is sufficient for getting started, but if you plan to do bulk testing, consider the Creator plan for higher volume.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "79k4h",
+          "text": "3. Familiarize yourself with the interface: the script editor, actor library, and generation settings.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "b3mb0",
+          "text": "4. Generate a test video to understand the workflow: write a short script, pick an actor, select a background, and hit generate.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "fcmjq",
+          "text": "5. If you’re on the Pro plan, locate your API credentials in the account settings for later integration with OpenClaw.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "1acsa",
+          "text": "Take some time to explore the actor library. Filter by demographics that match your target audience on TikTok. Note which actors, backgrounds, and styles feel most authentic for your niche.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "f6e9m",
+          "text": "Step 3: Setting Up Postiz",
+          "type": "header-two"
+        },
+        {
+          "data": {
+            "urls": [
+              {
+                "fromIndex": 59,
+                "text": "postiz.com",
+                "toIndex": 69
+              }
+            ]
+          },
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "dbns2",
+          "text": "You have two options for Postiz: use the hosted version at postiz.com, or self-host it for full control.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "e2r9d",
+          "text": "Option A: Hosted Version",
+          "type": "unstyled"
+        },
+        {
+          "data": {
+            "urls": [
+              {
+                "fromIndex": 14,
+                "text": "postiz.com",
+                "toIndex": 24
+              }
+            ]
+          },
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "bbo1l",
+          "text": "1. Sign up at postiz.com and choose a plan.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "busq7",
+          "text": "2. Connect your TikTok account (and any other social platforms) through the OAuth flow.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "19t66",
+          "text": "3. Generate an API key from your account settings for use with OpenClaw and the CLI.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "3q0s3",
+          "text": "Option B: Self-Hosted (Recommended for Technical Users)",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "nh9u",
+          "text": "1. Ensure you have Docker installed on your server or local machine.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "9vspr",
+          "text": "2. Clone the Postiz repository from GitHub.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "966ig",
+          "text": "3. Follow the Docker deployment instructions in the documentation.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "3qmr6",
+          "text": "4. Access the web interface and connect your social media accounts.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "1f1e9",
+          "text": "5. Generate your API key for external integrations.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "6bldu",
+          "text": "Installing the Postiz Agent CLI",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "dtl2",
+          "text": "For AI agent integration, install the Postiz CLI globally:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "3hv98",
+          "text": "Run: ",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 2,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "cusl3",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "rkgc",
+          "text": "Then set your API key as an environment variable (POSTIZ_API_KEY) and test the connection by running: postiz integrations:list",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "7p25i",
+          "text": "This should display all your connected social media platforms with their integration IDs, which you’ll need for scheduling posts.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "5k2gk",
+          "text": "Part 3: The Complete Automation Workflow",
+          "type": "header-one"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "8vtid",
+          "text": "Now that all three tools are configured, here’s how they work together in an end-to-end pipeline:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "b3o36",
+          "text": "Phase 1: Content Strategy & Script Generation",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "552jq",
+          "text": "The automation begins with content planning. You can either provide OpenClaw with a content calendar or let it generate one based on your niche and goals.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "3tcgl",
+          "text": "Send OpenClaw a message like: “Create a 7-day TikTok content calendar for a fitness supplement brand. Focus on UGC-style testimonials, quick tips, and product benefits. Write a 30-second script for each day.”",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "9jmnh",
+          "text": "OpenClaw will use its connected LLM to generate scripts tailored for TikTok’s short-form format. Each script should include a strong hook in the first 1–3 seconds, a value-driven body, and a clear call to action. You can also instruct OpenClaw to research trending topics first by enabling web search skills, so your content stays relevant.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "5m4u9",
+          "text": "For ongoing automation, you can set up a recurring instruction: “Every Monday at 8 AM, generate 7 new TikTok scripts based on what’s trending in [your niche] this week.” OpenClaw’s memory system retains your brand voice, audience preferences, and past performance data across sessions, so the scripts improve over time.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "9d9te",
+          "text": "Phase 2: Video Generation with Arcads AI",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "fia8m",
+          "text": "With scripts ready, the next phase is turning them into videos.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "8vd03",
+          "text": "Manual approach:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "32ee4",
+          "text": "1. Log into Arcads AI and create a new project.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "1l027",
+          "text": "2. Paste your script into the script editor (or use the hook generator for inspiration).",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "7bpnc",
+          "text": "3. Browse the actor library and select an avatar that matches your brand’s target demographic. Filter by age, gender, skin tone, and environment.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "2rbni",
+          "text": "4. Choose a background setting that fits your content (gym for fitness, kitchen for food, home office for productivity, etc.).",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "8vrjt",
+          "text": "5. Adjust voice settings: select from built-in voices, use speech-to-speech to transfer your own delivery style, or upload custom audio.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "fc03q",
+          "text": "6. Click generate and wait approximately 2 minutes for the video.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "79pc",
+          "text": "7. Preview the result. If satisfied, download the video. If not, tweak the script or actor and regenerate.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "4pg6p",
+          "text": "Automated approach (Pro plan with API):",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "ect61",
+          "text": "If you’re on the Arcads Pro plan, you can connect OpenClaw directly to the Arcads API. Install the Arcads skill for OpenClaw, provide your API credentials, and then simply tell OpenClaw: “Generate TikTok videos for all 7 scripts I created today using [actor name] with a gym background.” OpenClaw will call the Arcads API for each script, download the generated videos, and prepare them for the next phase.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "agghp",
+          "text": "For bulk testing, you can instruct OpenClaw to generate multiple variations: “For each script, create 3 versions with different actors and 2 versions with different hooks.” This leverages Arcads’ batch creation capability to produce a large volume of creative assets for A/B testing.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "9blnb",
+          "text": "Post-production tips:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "dnbih",
+          "text": "Keep in mind that Arcads generates the talking-head video clip, but you may want to add captions, B-roll footage, music, or branded elements. You can use CapCut, Premiere Pro, or another editing tool for these finishing touches. For a more automated approach, some OpenClaw skills integrate with video editing APIs to add captions and overlays programmatically.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "6gqt2",
+          "text": "Phase 3: Scheduling & Publishing with Postiz",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "5heq9",
+          "text": "With your videos created (and optionally edited), it’s time to schedule them for posting.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "3hoc9",
+          "text": "Using OpenClaw with Postiz Agent:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "1p78i",
+          "text": "The Postiz Agent CLI integrates directly with OpenClaw. Once the CLI is installed and configured, you can tell OpenClaw:",
+          "type": "unstyled"
+        },
+        {
+          "data": {
+            "hashtags": [
+              {
+                "fromIndex": 138,
+                "text": "fitness",
+                "toIndex": 146
+              },
+              {
+                "fromIndex": 147,
+                "text": "morningroutine",
+                "toIndex": 162
+              },
+              {
+                "fromIndex": 163,
+                "text": "supplements",
+                "toIndex": 175
+              }
+            ]
+          },
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "fn7u7",
+          "text": "“Upload today’s TikTok video and schedule it for 6 PM EST today with the caption: ‘This supplement changed my morning routine here’s why. #fitness #morningroutine #supplements’”",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "bv54c",
+          "text": "OpenClaw will execute the Postiz CLI commands to upload the media file, create the post with your caption and hashtags, set the scheduled time, and target the correct TikTok integration. Every command returns structured JSON, making it easy for OpenClaw to verify success and handle errors.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "f700l",
+          "text": "Using the Postiz web interface:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "fvcmh",
+          "text": "If you prefer a visual approach, log into Postiz’s web dashboard. Use the visual calendar to drag and drop your content into time slots. The AI assistant can suggest optimal posting times based on your historical engagement data. You can also use the built-in design editor to create thumbnail images or story cards to accompany your TikTok posts on other platforms.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "bbro1",
+          "text": "Cross-platform distribution:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "d2jdt",
+          "text": "One of the biggest advantages of this setup is cross-posting. A single TikTok video can be simultaneously scheduled for Instagram Reels, YouTube Shorts, Facebook, LinkedIn, and Pinterest. Postiz handles platform-specific requirements (aspect ratios, caption lengths, hashtag limits) so you can maximize reach from a single piece of content.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "gtrq",
+          "text": "Phase 4: Analytics & Optimization",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "bh6r4",
+          "text": "The automation loop doesn’t end at publishing. Both OpenClaw and Postiz provide analytics capabilities that feed back into your content strategy.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "2aja1",
+          "text": "Postiz tracks engagement metrics across all platforms: views, likes, comments, shares, and follower growth. You can access these through the web dashboard or via the CLI with the analytics commands.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "2nbm9",
+          "text": "Set up a recurring OpenClaw instruction: “Every Sunday evening, pull analytics from Postiz for the past week. Identify which videos performed best and worst. Summarize the key patterns and adjust next week’s content strategy accordingly.”",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "144ps",
+          "text": "Over time, this creates a feedback loop where OpenClaw learns which hooks, actors, topics, and posting times drive the most engagement. The agent uses this data to write better scripts, select more effective actors, and schedule at optimal times, all without you having to manually analyze dashboards.",
+          "type": "unstyled"
+        }
+      ],
+      "entityMap": [
+        {
+          "key": "0",
+          "value": {
+            "data": {
+              "caption": "Coconote IG channel",
+              "entityKey": "f5d6adc7-2acc-4988-b0ce-6c671ea06a42",
+              "mediaItems": [
+                {
+                  "localMediaId": "1",
+                  "mediaCategory": "DraftTweetImage",
+                  "mediaId": "2029232710456336384"
+                }
+              ]
+            },
+            "mutability": "Immutable",
+            "type": "MEDIA"
+          }
+        },
+        {
+          "key": "1",
+          "value": {
+            "data": {
+              "entityKey": "c575f086-0425-4224-b36f-fbdc228deeef",
+              "mediaItems": [
+                {
+                  "localMediaId": "3",
+                  "mediaCategory": "DraftTweetImage",
+                  "mediaId": "2029232869382717440"
+                }
+              ]
+            },
+            "mutability": "Immutable",
+            "type": "MEDIA"
+          }
+        },
+        {
+          "key": "2",
+          "value": {
+            "data": {
+              "markdown": "```bash\n npm install -g postiz\n```"
+            },
+            "mutability": "Mutable",
+            "type": "MARKDOWN"
+          }
+        }
+      ]
+    },
+    "cover_media": {
+      "id": "QXBpTWVkaWE6DAAFCgABHClLPWlbcAAKAAIWFVkb/RoQAAAA",
+      "media_id": "2029235834239807488",
+      "media_info": {
+        "__typename": "ApiImage",
+        "color_info": {
+          "palette": [
+            {
+              "percentage": 84.42,
+              "rgb": {
+                "blue": 40,
+                "green": 38,
+                "red": 38
+              }
+            },
+            {
+              "percentage": 12.99,
+              "rgb": {
+                "blue": 101,
+                "green": 106,
+                "red": 107
+              }
+            },
+            {
+              "percentage": 1.78,
+              "rgb": {
+                "blue": 133,
+                "green": 171,
+                "red": 183
+              }
+            },
+            {
+              "percentage": 0.23,
+              "rgb": {
+                "blue": 35,
+                "green": 59,
+                "red": 88
+              }
+            },
+            {
+              "percentage": 0.2,
+              "rgb": {
+                "blue": 41,
+                "green": 30,
+                "red": 26
+              }
+            }
+          ]
+        },
+        "original_img_height": 614,
+        "original_img_url": "https://pbs.twimg.com/media/HClLPWlbcAAf-S1.jpg",
+        "original_img_width": 1536
+      },
+      "media_key": "3_2029235834239807488"
+    },
+    "id": "QXJ0aWNsZUVudGl0eToyMDI5MjMwMjE0NzkwOTU1MDA4",
+    "is_grok_summary_eligible": true,
+    "lifecycle_state": {
+      "modified_at_secs": 1772642821
+    },
+    "media_entities": [
+      {
+        "id": "QXBpTWVkaWE6DAAFCgABHClIZhlaYAAKAAIWFVkb/RoQAAAA",
+        "media_id": "2029232710456336384",
+        "media_info": {
+          "__typename": "ApiImage",
+          "color_info": {
+            "palette": [
+              {
+                "percentage": 50.78,
+                "rgb": {
+                  "blue": 38,
+                  "green": 40,
+                  "red": 51
+                }
+              },
+              {
+                "percentage": 22.57,
+                "rgb": {
+                  "blue": 115,
+                  "green": 131,
+                  "red": 160
+                }
+              },
+              {
+                "percentage": 4.35,
+                "rgb": {
+                  "blue": 77,
+                  "green": 102,
+                  "red": 177
+                }
+              },
+              {
+                "percentage": 3.14,
+                "rgb": {
+                  "blue": 35,
+                  "green": 60,
+                  "red": 92
+                }
+              },
+              {
+                "percentage": 1.97,
+                "rgb": {
+                  "blue": 206,
+                  "green": 213,
+                  "red": 224
+                }
+              }
+            ]
+          },
+          "original_img_height": 2248,
+          "original_img_url": "https://pbs.twimg.com/media/HClIZhlaYAAT0lr.jpg",
+          "original_img_width": 2556
+        },
+        "media_key": "3_2029232710456336384"
+      },
+      {
+        "id": "QXBpTWVkaWE6DAAFCgABHClIixoagAAKAAIWFVkb/RoQAAAA",
+        "media_id": "2029232869382717440",
+        "media_info": {
+          "__typename": "ApiImage",
+          "color_info": {
+            "palette": [
+              {
+                "percentage": 75.39,
+                "rgb": {
+                  "blue": 40,
+                  "green": 35,
+                  "red": 34
+                }
+              },
+              {
+                "percentage": 15.33,
+                "rgb": {
+                  "blue": 91,
+                  "green": 102,
+                  "red": 114
+                }
+              },
+              {
+                "percentage": 5.64,
+                "rgb": {
+                  "blue": 42,
+                  "green": 72,
+                  "red": 105
+                }
+              },
+              {
+                "percentage": 1.22,
+                "rgb": {
+                  "blue": 112,
+                  "green": 143,
+                  "red": 184
+                }
+              },
+              {
+                "percentage": 1.19,
+                "rgb": {
+                  "blue": 228,
+                  "green": 235,
+                  "red": 244
+                }
+              }
+            ]
+          },
+          "original_img_height": 2178,
+          "original_img_url": "https://pbs.twimg.com/media/HClIixoagAAh-gJ.jpg",
+          "original_img_width": 2270
+        },
+        "media_key": "3_2029232869382717440"
+      }
+    ],
+    "metadata": {
+      "first_published_at_secs": 1772642821
+    },
+    "plain_text": "As you’ve seen, Coconote AI and Answer AI were just acquired by Quizlet for millions of dollars. That’s pretty crazy and even crazier is that they both grew mainly through organic content on TikTok and Instagram using AI UGC.\n \n \n\nCreating TikTok, IG content at scale used to require a full production team: scriptwriters, actors, video editors, and social media managers all working in concert. In 2026, a new generation of AI-powered tools has changed the equation entirely. By combining OpenClaw (an open-source autonomous AI agent), Arcads AI (a platform that turns text scripts into realistic UGC-style videos), and Postiz (an open-source social media scheduler), you can build an end-to-end content pipeline that runs with minimal manual intervention.\nThis guide walks you through the complete workflow, from setting up each tool to connecting them into a seamless automation chain. Whether you’re a solo creator looking to post consistently, a marketer running campaigns for multiple brands, or an agency scaling content for clients, this step-by-step approach will help you produce, schedule, and analyze TikTok, IG content faster than ever before.\nPart 1: Understanding the Tools\nWhat Is OpenClaw?\nOpenClaw is a free, open-source autonomous AI agent originally created by Austrian developer Peter Steinberger. Initially published in November 2025 under a different name, it was rebranded to OpenClaw in late January 2026 and has since accumulated over 200,000 GitHub stars. The project gained massive popularity thanks to its open-source nature and viral community projects.\nAt its core, OpenClaw is an agentic interface that runs locally on your machine and connects to a large language model such as Claude, DeepSeek, or GPT. You interact with it through a messaging platform like Telegram, Signal, Discord, or WhatsApp. It can execute tasks autonomously: reading emails, generating images, transcribing meetings, browsing the web, and now, managing entire social media workflows through specialized “skills.”\nThink of OpenClaw as your AI-powered command center. You give it a natural language instruction, and it figures out which APIs to call, which files to create, and which platforms to post to. For TikTok automation specifically, OpenClaw can orchestrate the entire content lifecycle by connecting to video generation tools and scheduling platforms through their APIs.\nKey capabilities for TikTok automation:\n• Autonomous task execution via natural language commands\n• Integration with social media APIs through installable skills\n• Cross-platform posting to TikTok, Instagram, YouTube, Facebook, Pinterest, and LinkedIn\n• Smart scheduling based on engagement data\n• Analytics tracking and performance learning\n• Memory retention across sessions for consistent brand voice\nWhat Is Arcads AI?\nArcads AI is a specialized platform for generating realistic, direct-to-camera UGC-style video ads using AI-powered human actors. Unlike generic AI avatar tools, Arcads uses motion capture data from real, consenting performers to create digital actors that feature natural gestures, expressions, body language, and lip synchronization. The result is video content that closely mimics the authentic, talking-head style that performs exceptionally well on TikTok.\nThe workflow is straightforward: you write a script (or use the built-in hook generator for inspiration), select an actor from a library of over 300 AI avatars spanning diverse demographics and styles, choose a background, and click generate. Within approximately two minutes, you have a polished video clip ready for deployment. Arcads supports text-to-speech and speech-to-speech, meaning you can also record your own voice and have the AI actor lip-sync to your delivery.\nFor TikTok specifically, Arcads includes a dedicated TikTok Ads Generator feature that creates videos optimized for the platform’s algorithm, including appropriate duration and engaging visual elements. The bulk creation feature is particularly powerful for marketers: you can generate dozens of video variations with different actors, hooks, and scripts in a single batch, enabling rapid A/B testing at scale.\nKey capabilities:\n• 300+ hyper-realistic AI actors with diverse demographics\n• Script-to-video generation in approximately 2 minutes\n• Bulk creation for mass variation testing\n• Multilingual support in 35+ languages\n• Customizable backgrounds, gestures, and emotions\n• API access on Pro plans for programmatic integration\n• Videos up to 90 seconds, optimized for TikTok and Reels\nPricing overview:\nArcads offers tiered pricing. The Starter plan begins at around €100/month for 10 videos, the Creator/Basic plan at approximately €200/month for 20 videos, and the Pro plan offers custom pricing with team collaboration, API access, and advanced features like ElevenLabs voice integration and actor cloning. Note that Arcads does not currently offer a free trial, so you’ll need to commit to a paid plan from the start.\nWhat Is Postiz?\nPostiz is an open-source, self-hosted social media scheduling tool that has quickly become a favorite among developers, privacy-conscious brands, and agencies. Available on GitHub with thousands of stars and millions of downloads, Postiz supports scheduling across 30+ platforms including TikTok, X (Twitter), Instagram, LinkedIn, YouTube, Reddit, Bluesky, Mastodon, Discord, and more.\nWhat sets Postiz apart from commercial schedulers like Buffer or Hootsuite is its combination of open-source flexibility with powerful built-in features. It includes an AI assistant for generating post ideas and writing copy, a Canva-like design editor for creating visuals directly within the platform, team collaboration tools, analytics dashboards, and a marketplace for connecting with influencers and brands.\nFor automation purposes, Postiz offers a robust public API and a dedicated CLI tool called Postiz Agent. The CLI is specifically designed for AI agents like OpenClaw and Claude, allowing them to schedule posts, manage media uploads, and orchestrate multi-platform campaigns through structured JSON commands. Postiz also integrates with automation platforms like n8n, Make.com, and Zapier.\nKey capabilities:\n• Open-source and self-hostable for full data control\n• Scheduling across 30+ social media platforms\n• AI-powered content creation assistant\n• Built-in visual design editor\n• CLI tool (Postiz Agent) built for AI agent integration\n• Analytics and performance tracking\n• Team collaboration and multi-account management\n• API integration with n8n, Make.com, and Zapier\nPart 2: Setting Up Your Tools\nStep 1: Setting Up OpenClaw\nOpenClaw runs locally on your machine and requires a computer with reasonable specs. Many users run it on dedicated hardware even repurposed gaming PCs work well. Here’s how to get started:\nPrerequisites\n• A computer running Ubuntu (recommended) or another Linux distribution, macOS, or Windows with WSL\n• An API key from a supported LLM provider (Anthropic/Claude, OpenAI, or DeepSeek)\n• A messaging platform account (Telegram is the most common choice)\n• Node.js and Python installed on your system\nInstallation\n1. Clone the OpenClaw repository from GitHub to your local machine.\n2. Install the required dependencies following the project’s documentation.\n3. Configure your LLM provider by adding your API key to the configuration file.\n4. Connect your messaging platform (e.g., create a Telegram bot and paste your Bot Token into OpenClaw’s config).\n5. Launch OpenClaw and verify it responds to messages on your chosen platform.\n6. Test basic functionality by asking it simple questions to confirm the LLM connection works.\nOnce OpenClaw is running, you’ll interact with it by sending messages through your chosen messaging app. The agent reads your instructions, plans the necessary steps, and executes them autonomously.\nStep 2: Setting Up Arcads AI\nArcads AI is a cloud-based platform, so setup is simpler than OpenClaw:\n1. Go to arcads.ai and create an account.\n2. Choose a pricing plan. The Starter plan (€100/month for 10 videos) is sufficient for getting started, but if you plan to do bulk testing, consider the Creator plan for higher volume.\n3. Familiarize yourself with the interface: the script editor, actor library, and generation settings.\n4. Generate a test video to understand the workflow: write a short script, pick an actor, select a background, and hit generate.\n5. If you’re on the Pro plan, locate your API credentials in the account settings for later integration with OpenClaw.\nTake some time to explore the actor library. Filter by demographics that match your target audience on TikTok. Note which actors, backgrounds, and styles feel most authentic for your niche.\nStep 3: Setting Up Postiz\nYou have two options for Postiz: use the hosted version at postiz.com, or self-host it for full control.\nOption A: Hosted Version\n1. Sign up at postiz.com and choose a plan.\n2. Connect your TikTok account (and any other social platforms) through the OAuth flow.\n3. Generate an API key from your account settings for use with OpenClaw and the CLI.\nOption B: Self-Hosted (Recommended for Technical Users)\n1. Ensure you have Docker installed on your server or local machine.\n2. Clone the Postiz repository from GitHub.\n3. Follow the Docker deployment instructions in the documentation.\n4. Access the web interface and connect your social media accounts.\n5. Generate your API key for external integrations.\nInstalling the Postiz Agent CLI\nFor AI agent integration, install the Postiz CLI globally:\nRun: \n \nThen set your API key as an environment variable (POSTIZ_API_KEY) and test the connection by running: postiz integrations:list\nThis should display all your connected social media platforms with their integration IDs, which you’ll need for scheduling posts.\nPart 3: The Complete Automation Workflow\nNow that all three tools are configured, here’s how they work together in an end-to-end pipeline:\nPhase 1: Content Strategy & Script Generation\nThe automation begins with content planning. You can either provide OpenClaw with a content calendar or let it generate one based on your niche and goals.\nSend OpenClaw a message like: “Create a 7-day TikTok content calendar for a fitness supplement brand. Focus on UGC-style testimonials, quick tips, and product benefits. Write a 30-second script for each day.”\nOpenClaw will use its connected LLM to generate scripts tailored for TikTok’s short-form format. Each script should include a strong hook in the first 1–3 seconds, a value-driven body, and a clear call to action. You can also instruct OpenClaw to research trending topics first by enabling web search skills, so your content stays relevant.\nFor ongoing automation, you can set up a recurring instruction: “Every Monday at 8 AM, generate 7 new TikTok scripts based on what’s trending in [your niche] this week.” OpenClaw’s memory system retains your brand voice, audience preferences, and past performance data across sessions, so the scripts improve over time.\nPhase 2: Video Generation with Arcads AI\nWith scripts ready, the next phase is turning them into videos.\nManual approach:\n1. Log into Arcads AI and create a new project.\n2. Paste your script into the script editor (or use the hook generator for inspiration).\n3. Browse the actor library and select an avatar that matches your brand’s target demographic. Filter by age, gender, skin tone, and environment.\n4. Choose a background setting that fits your content (gym for fitness, kitchen for food, home office for productivity, etc.).\n5. Adjust voice settings: select from built-in voices, use speech-to-speech to transfer your own delivery style, or upload custom audio.\n6. Click generate and wait approximately 2 minutes for the video.\n7. Preview the result. If satisfied, download the video. If not, tweak the script or actor and regenerate.\nAutomated approach (Pro plan with API):\nIf you’re on the Arcads Pro plan, you can connect OpenClaw directly to the Arcads API. Install the Arcads skill for OpenClaw, provide your API credentials, and then simply tell OpenClaw: “Generate TikTok videos for all 7 scripts I created today using [actor name] with a gym background.” OpenClaw will call the Arcads API for each script, download the generated videos, and prepare them for the next phase.\nFor bulk testing, you can instruct OpenClaw to generate multiple variations: “For each script, create 3 versions with different actors and 2 versions with different hooks.” This leverages Arcads’ batch creation capability to produce a large volume of creative assets for A/B testing.\nPost-production tips:\nKeep in mind that Arcads generates the talking-head video clip, but you may want to add captions, B-roll footage, music, or branded elements. You can use CapCut, Premiere Pro, or another editing tool for these finishing touches. For a more automated approach, some OpenClaw skills integrate with video editing APIs to add captions and overlays programmatically.\nPhase 3: Scheduling & Publishing with Postiz\nWith your videos created (and optionally edited), it’s time to schedule them for posting.\nUsing OpenClaw with Postiz Agent:\nThe Postiz Agent CLI integrates directly with OpenClaw. Once the CLI is installed and configured, you can tell OpenClaw:\n“Upload today’s TikTok video and schedule it for 6 PM EST today with the caption: ‘This supplement changed my morning routine here’s why. #fitness #morningroutine #supplements’”\nOpenClaw will execute the Postiz CLI commands to upload the media file, create the post with your caption and hashtags, set the scheduled time, and target the correct TikTok integration. Every command returns structured JSON, making it easy for OpenClaw to verify success and handle errors.\nUsing the Postiz web interface:\nIf you prefer a visual approach, log into Postiz’s web dashboard. Use the visual calendar to drag and drop your content into time slots. The AI assistant can suggest optimal posting times based on your historical engagement data. You can also use the built-in design editor to create thumbnail images or story cards to accompany your TikTok posts on other platforms.\nCross-platform distribution:\nOne of the biggest advantages of this setup is cross-posting. A single TikTok video can be simultaneously scheduled for Instagram Reels, YouTube Shorts, Facebook, LinkedIn, and Pinterest. Postiz handles platform-specific requirements (aspect ratios, caption lengths, hashtag limits) so you can maximize reach from a single piece of content.\nPhase 4: Analytics & Optimization\nThe automation loop doesn’t end at publishing. Both OpenClaw and Postiz provide analytics capabilities that feed back into your content strategy.\nPostiz tracks engagement metrics across all platforms: views, likes, comments, shares, and follower growth. You can access these through the web dashboard or via the CLI with the analytics commands.\nSet up a recurring OpenClaw instruction: “Every Sunday evening, pull analytics from Postiz for the past week. Identify which videos performed best and worst. Summarize the key patterns and adjust next week’s content strategy accordingly.”\nOver time, this creates a feedback loop where OpenClaw learns which hooks, actors, topics, and posting times drive the most engagement. The agent uses this data to write better scripts, select more effective actors, and schedule at optimal times, all without you having to manually analyze dashboards.",
+    "preview_text": "As you’ve seen, Coconote AI and Answer AI were just acquired by Quizlet for millions of dollars. That’s pretty crazy and even crazier is that they both grew mainly through organic content on TikTok",
+    "rest_id": "2029230214790955008",
+    "summary_text": "- Coconote AI and Answer AI grew rapidly via organic AI-generated UGC on TikTok and Instagram before multimillion-dollar acquisitions by Quizlet.\n- In 2026, combine OpenClaw (open-source autonomous AI agent), Arcads AI (realistic UGC video generation), and Postiz (open-source scheduler) to automate the full TikTok/Instagram content pipeline.\n- OpenClaw orchestrates via natural language: generates scripts with brand-consistent voice, calls Arcads API for video creation using 300+ hyper-realistic AI actors, then schedules through Postiz Agent CLI.\n- Arcads produces direct-to-camera talking-head videos in ~2 minutes, supporting bulk variations, multilingual TTS, and TikTok-optimized formats.\n- Postiz enables cross-platform scheduling (30+ networks), analytics tracking, and feedback loops so OpenClaw continuously improves scripts, actors, and posting times based on performance data.",
+    "title": "Automating TikTok, Instargram Content with OpenClaw (A Step-by-Step Workflow)"
+  }
+}

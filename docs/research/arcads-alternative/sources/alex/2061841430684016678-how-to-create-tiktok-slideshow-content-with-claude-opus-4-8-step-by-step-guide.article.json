@@ -1,0 +1,1169 @@
+{
+  "tweet_id": "2061841430684016678",
+  "tweet_url": "https://x.com/alexcooldev/status/2061841430684016678",
+  "tweet_text": "https://t.co/TghRMA8H3C",
+  "x_article_url": "https://x.com/i/article/2060344915134144513",
+  "x_article_alias_url": "https://x.com/alexcooldev/article/2061841430684016678",
+  "history_title": "How to Create TikTok Slideshow Content with Claude Opus 4.8 (Step-by-Step Guide)",
+  "article": {
+    "content_state": {
+      "blocks": [
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "du4rc",
+          "text": "I make a lot of TikTok slideshows. Not because I love TikTok, but because slideshows are the easiest viral format out there right now: they're cheap, fast, and a good first slide can get saved thousands of times. You don't need a camera, you don't need to be on screen, and you don't need to know how to code.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 5,
+              "offset": 43,
+              "style": "Italic"
+            },
+            {
+              "length": 3,
+              "offset": 195,
+              "style": "Italic"
+            }
+          ],
+          "key": "a2o8t",
+          "text": "The trick isn't coming up with ideas. It's speed. One slideshow a day is a hobby. A few a day is a real account. So I built a simple routine: take a slideshow that already went viral, figure out why it worked, and rebuild fresh versions of it.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 8,
+              "offset": 9,
+              "style": "Bold"
+            },
+            {
+              "length": 5,
+              "offset": 147,
+              "style": "Italic"
+            }
+          ],
+          "key": "e1cut",
+          "text": "I'll use StudyTok (study tips, exam-season, \"how I actually passed\" content) as the example all the way through, because it's evergreen and people hoard study hacks — the saves are insane.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "2ts5q",
+          "text": "And this is one of my TikTok accounts that I use to promote my app:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 0,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "fflpl",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {
+            "mentions": [
+              {
+                "fromIndex": 29,
+                "text": "nickystudy12",
+                "toIndex": 42
+              }
+            ],
+            "urls": [
+              {
+                "fromIndex": 6,
+                "text": "https://www.tiktok.com/@nickystudy12",
+                "toIndex": 42
+              }
+            ]
+          },
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "3gv48",
+          "text": "Link: https://www.tiktok.com/@nickystudy12",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "300jc",
+          "text": "Here are the tools and the 6 steps. No coding, I promise.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 10,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "6os77",
+          "text": "The tools: snaptik (download) → Claude (the plan) → ChatGPT (images) → Pinterest (real photos) → Canva (put it together) → Postiz (schedule).",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 6,
+              "offset": 34,
+              "style": "Italic"
+            }
+          ],
+          "key": "f5cen",
+          "text": "The whole idea: a viral post is a recipe. Copy the recipe, swap the ingredients, and you get a brand-new dish every time.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "5ume0",
+          "text": "Step 1 — Find slideshows that already went viral",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "4es1n",
+          "text": "Open TikTok and look in your niche for slideshows that clearly blew up — way more likes than the account's usual, tons of comments, people saving and reposting. Those are your examples to learn from.",
+          "type": "unstyled"
+        },
+        {
+          "data": {
+            "urls": [
+              {
+                "fromIndex": 36,
+                "text": "snaptik.app",
+                "toIndex": 47
+              }
+            ]
+          },
+          "entityRanges": [
+            {
+              "key": 1,
+              "length": 11,
+              "offset": 36
+            }
+          ],
+          "inlineStyleRanges": [
+            {
+              "length": 11,
+              "offset": 36,
+              "style": "Bold"
+            }
+          ],
+          "key": "6uq46",
+          "text": "Copy the TikTok link, paste it into snaptik.app, and download it. You'll get all the slides as images.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "fge52",
+          "text": "Two simple rules:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 29,
+              "offset": 0,
+              "style": "Bold"
+            },
+            {
+              "length": 3,
+              "offset": 127,
+              "style": "Italic"
+            }
+          ],
+          "key": "eqfgd",
+          "text": "Learn from it, don't copy it. Never re-upload someone else's actual slides — that gets you a copyright strike. You're studying how it's built so you can make your own.",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 28,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "7bai0",
+          "text": "Grab 5–10 examples, not one. One example just gives you a copy. Several let you see the pattern they all share, which is the real gold.",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "ah3bj",
+          "text": "Step 2 — Ask Claude to turn it into a simple plan (with a hook on every slide)",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 6,
+              "offset": 83,
+              "style": "Bold"
+            }
+          ],
+          "key": "eh30p",
+          "text": "This is the part that does the thinking for you. Upload the downloaded slides into Claude and ask it to break the slideshow down into a simple, slide-by-slide plan you can follow.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "3luof",
+          "text": "Copy-paste this prompt:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "dtl9p",
+          "text": "Here are the slides from a viral TikTok slideshow. For each slide, tell me: (1) the exact text that should go on screen, (2) a short description of what the image should show, and (3) whether I should make the image with AI or find a real photo for it. Also give me the caption and hashtags. Keep it simple and in plain language.",
+          "type": "blockquote"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "i3la",
+          "text": "Claude hands you back a clean little plan, something like:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 19,
+              "offset": 0,
+              "style": "Bold"
+            },
+            {
+              "length": 55,
+              "offset": 37,
+              "style": "Italic"
+            }
+          ],
+          "key": "dj3e3",
+          "text": "Slide 1 (the hook): Text on screen — \"i failed every exam until a med student told me this.\" Image — a messy desk at night, one warm lamp, open book and coffee.",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 8,
+              "offset": 0,
+              "style": "Bold"
+            },
+            {
+              "length": 57,
+              "offset": 16,
+              "style": "Italic"
+            }
+          ],
+          "key": "6vqc0",
+          "text": "Slide 2: Text — \"step 1: stop re-reading your notes (it's lying to you).\" Image — close-up of highlighted notes.",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {
+            "hashtags": [
+              {
+                "fromIndex": 103,
+                "text": "studytok",
+                "toIndex": 112
+              },
+              {
+                "fromIndex": 113,
+                "text": "studytips",
+                "toIndex": 123
+              },
+              {
+                "fromIndex": 124,
+                "text": "examseason",
+                "toIndex": 135
+              }
+            ]
+          },
+          "entityRanges": [
+            {
+              "key": 2,
+              "length": 1,
+              "offset": 82
+            }
+          ],
+          "inlineStyleRanges": [
+            {
+              "length": 35,
+              "offset": 49,
+              "style": "Italic"
+            }
+          ],
+          "key": "dtjmi",
+          "text": "...and so on for each slide, plus a caption like \"save this before your next exam 📚\" and hashtags like #studytok #studytips #examseason.",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "aguff",
+          "text": "The one thing most people get wrong: every slide needs a hook",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 4,
+              "offset": 161,
+              "style": "Italic"
+            },
+            {
+              "length": 11,
+              "offset": 209,
+              "style": "Bold"
+            }
+          ],
+          "key": "1vno8",
+          "text": "People sweat over the first slide and then go lazy: \"step 1… step 2… the end.\" That kills you. On a slideshow, people only keep swiping if each slide makes them want to see the next one. So ask Claude to make every slide a mini-hook.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "c00i2",
+          "text": "Paste this:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "6fj7r",
+          "text": "Rewrite the text on every slide so each one makes the viewer want to swipe to the next. No boring labels like \"step 1\" — make every line curious or surprising. Keep each under 12 words and casual, like a real person talking.",
+          "type": "blockquote"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "gfff",
+          "text": "The difference:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 22,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "1k6gb",
+          "text": "Boring (people leave): \"Step 2: use active recall.\"",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 21,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "hs8m",
+          "text": "Hooky (people swipe): \"step 2: the trick that feels harder but works 3x faster.\"",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "fdkeq",
+          "text": "Same info. Totally different results. Do this on every slideshow before you make a single image — it's free and it's the biggest difference between flopping and going viral.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 34,
+              "offset": 0,
+              "style": "Bold"
+            },
+            {
+              "length": 51,
+              "offset": 45,
+              "style": "Italic"
+            }
+          ],
+          "key": "4qsn3",
+          "text": "Want 10 slideshows instead of one? Just ask: \"Give me 10 versions of this with different hooks.\" Now you've got a week of content from one example.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "c1op9",
+          "text": "Step 3 — Make the images with ChatGPT",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 7,
+              "offset": 60,
+              "style": "Bold"
+            }
+          ],
+          "key": "doi5b",
+          "text": "Take the image descriptions from your plan and make them in ChatGPT (its image generator).",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 13,
+              "offset": 8,
+              "style": "Bold"
+            }
+          ],
+          "key": "crcfe",
+          "text": "Do them one at a time — paste one slide's description, get the image, save it, then do the next. Don't ask for all 6 at once; it gets confused and the images come out messy.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "6bdir",
+          "text": "A few easy tips for nice, matching slides:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 23,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "2b7v6",
+          "text": "Ask for vertical images (tell it \"tall, phone-shaped, 4:5\"). That's the TikTok shape.",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 34,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "6ckjf",
+          "text": "Keep the same vibe on every slide. Add the same look to each description, like \"warm lighting, cozy, slightly film-like.\" That keeps your slideshow feeling like one set.",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 25,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "6ojao",
+          "text": "Leave room for your text. Tell it to keep the top or bottom of the image fairly empty so your words fit nicely later.",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "6agn0",
+          "text": "Step 4 — Grab real photos from Pinterest for the simple slides",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 31,
+              "offset": 32,
+              "style": "Bold"
+            }
+          ],
+          "key": "98ftb",
+          "text": "Here's a money-and-quality tip: don't make every slide with AI. It's slower, it costs more, and a slideshow that's 100% AI starts to feel fake — and people can tell.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "filj8",
+          "text": "So split it:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 6,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "9gqkb",
+          "text": "Use AI for slides that need something specific you can't find (a person, an exact scene).",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 13,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "4rh0p",
+          "text": "Use Pinterest for the \"vibe\" slides — a cozy study desk, handwritten notes, a coffee cup, a calm bedroom. These already exist, look real, and cost you nothing.",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "4d7se",
+          "text": "Just search Pinterest for the mood (e.g. \"aesthetic study desk at night,\" \"handwritten notes flatlay\") and save what fits.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 43,
+              "offset": 21,
+              "style": "Bold"
+            },
+            {
+              "length": 4,
+              "offset": 169,
+              "style": "Italic"
+            }
+          ],
+          "key": "4c5tk",
+          "text": "One important habit: don't post a Pinterest photo exactly as-is. Crop it, adjust the colors to match your other slides, and put your text on top in Canva. That makes it your slide instead of someone else's photo. When a photo is doing real work, lean toward images you're actually allowed to use (your own photos or free-to-use stock).",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "75i8g",
+          "text": "Mixing real photos with a couple of AI images is what makes a slideshow feel like a real person made it — and that's exactly what gets saved and shared.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "ktl3",
+          "text": "Step 5 — Put it together in Canva",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 5,
+              "offset": 5,
+              "style": "Bold"
+            },
+            {
+              "length": 11,
+              "offset": 30,
+              "style": "Bold"
+            }
+          ],
+          "key": "dnee9",
+          "text": "Open Canva, start a design at 1080 × 1350 (the tall TikTok size), and drop in your images — the AI ones and the Pinterest ones together. Then add your text from the plan.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "3m9nr",
+          "text": "Three things to focus on:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 31,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "38olq",
+          "text": "Make the text big and readable. Bold, with an outline or shadow so it shows up on any background.",
+          "type": "ordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 27,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "cvtjm",
+          "text": "Make slide 1 the strongest. It does most of the work of stopping the scroll.",
+          "type": "ordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 23,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "752k4",
+          "text": "Keep a consistent look. Same font and colors every time so your account looks put-together, not random.",
+          "type": "ordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "8cbja",
+          "text": "Then download each slide as an image. Done.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 31,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "acudc",
+          "text": "About the \"AI label\" on TikTok: TikTok can detect AI-made images and add an \"AI-generated\" label, and you might be tempted to find ways to hide it. Honestly, skip that. The label barely affects your reach — a strong hook matters far more — and trying to hide AI content is against TikTok's rules and can get a new account in trouble. If you're posting genuinely AI content, just turn on the disclosure and post. If TikTok wrongly labels work that's mostly yours, use TikTok's own option to dispute the label. Build on the version that won't get you in trouble later.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "2qo5g",
+          "text": "Step 6 — Schedule everything in Postiz",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 3,
+              "length": 6,
+              "offset": 47
+            }
+          ],
+          "inlineStyleRanges": [
+            {
+              "length": 6,
+              "offset": 47,
+              "style": "Bold"
+            }
+          ],
+          "key": "7va18",
+          "text": "Now you've got a stack of finished slideshows. Postiz turns that stack into a posting schedule so you're not uploading by hand every evening.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "7gsdf",
+          "text": "It's all clicking, no code:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 39,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "5a3cp",
+          "text": "Schedule right in the Postiz dashboard. Open the calendar, create a new post, upload your slides in order, add the caption and hashtags from your plan, pick a date and time. That's the whole thing — a visual calendar you drag posts onto.",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 34,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "1nc76",
+          "text": "Spread posts out, don't dump them. Post at a steady rhythm (mornings and evenings usually work) so your account looks like a real person, not a robot dropping 20 posts at midnight.",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 99,
+              "offset": 0,
+              "style": "Bold"
+            },
+            {
+              "length": 5,
+              "offset": 365,
+              "style": "Bold"
+            }
+          ],
+          "key": "fivdj",
+          "text": "For brand-new accounts (especially on a VPN): use \"Save as Draft\" instead of posting automatically. New accounts get watched closely by TikTok at first, and posts fired straight from an outside tool — especially over a VPN — are the kind of thing that can get a fresh account shadowbanned. So for the first couple of weeks, have Postiz send the post to TikTok as a draft, then open the TikTok app yourself and tap \"post.\" It's one extra tap, but it looks like a normal upload, which is exactly what a young account needs. Once the account is settled and posting fine, switch back to automatic scheduling.",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "fh85d",
+          "text": "Why this works",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 20,
+              "offset": 188,
+              "style": "Italic"
+            }
+          ],
+          "key": "2r4qb",
+          "text": "Most people treat every slideshow like a brand-new creative project. It isn't. The hard creative work already happened — when a post proved the recipe works. Everything after that is just following the recipe:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 7,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "344o1",
+          "text": "snaptik finds a winner.",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 6,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "7hcsq",
+          "text": "Claude turns it into a simple plan, with a hook on every slide.",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 7,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "7qbgf",
+          "text": "ChatGPT makes the images you can't find.",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 9,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "6q8kd",
+          "text": "Pinterest gives you the real photos for everything else.",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 5,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "bi0r0",
+          "text": "Canva puts it together.",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 6,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "dphmq",
+          "text": "Postiz schedules it.",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "73bf2",
+          "text": "One winner becomes a template. One template becomes a week of posts. And in short-form, posting often is most of the game — this just lets you do it without burning out.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "3fcib",
+          "text": "Resources:",
+          "type": "unstyled"
+        },
+        {
+          "data": {
+            "urls": [
+              {
+                "fromIndex": 0,
+                "text": "https://postiz.com/",
+                "toIndex": 19
+              }
+            ]
+          },
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "7ckkv",
+          "text": "https://postiz.com/",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {
+            "urls": [
+              {
+                "fromIndex": 0,
+                "text": "https://www.canva.com/",
+                "toIndex": 22
+              }
+            ]
+          },
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "d1hj0",
+          "text": "https://www.canva.com/",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {
+            "urls": [
+              {
+                "fromIndex": 0,
+                "text": "https://snaptik.app/",
+                "toIndex": 20
+              }
+            ]
+          },
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "dhovb",
+          "text": "https://snaptik.app/",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "2ddfn",
+          "text": "Set the routine up once. Then let it run.",
+          "type": "unstyled"
+        }
+      ],
+      "entityMap": [
+        {
+          "key": "0",
+          "value": {
+            "data": {
+              "entityKey": "6176c19e-0b9f-4cf8-9125-1663f2585529",
+              "mediaItems": [
+                {
+                  "localMediaId": "5",
+                  "mediaCategory": "DraftTweetImage",
+                  "mediaId": "2061840966018039808"
+                }
+              ]
+            },
+            "mutability": "Immutable",
+            "type": "MEDIA"
+          }
+        },
+        {
+          "key": "1",
+          "value": {
+            "data": {
+              "entityKey": "76924631-78fc-4cc9-977f-5d322a8534db",
+              "url": "https://snaptik.app/"
+            },
+            "mutability": "Mutable",
+            "type": "LINK"
+          }
+        },
+        {
+          "key": "2",
+          "value": {
+            "data": {
+              "url": "https://abs.twimg.com/emoji/v2/svg/1f4da.svg"
+            },
+            "mutability": "Immutable",
+            "type": "TWEMOJI"
+          }
+        },
+        {
+          "key": "3",
+          "value": {
+            "data": {
+              "entityKey": "a0b7d769-c466-486d-8b07-ed929a2d8ae2",
+              "url": "https://postiz.com/"
+            },
+            "mutability": "Mutable",
+            "type": "LINK"
+          }
+        }
+      ]
+    },
+    "cover_media": {
+      "id": "QXBpTWVkaWE6DAAFCgABHJ0f3JWbAAAKAAIWFVkb/RoQAAAA",
+      "media_id": "2061839236668784640",
+      "media_info": {
+        "__typename": "ApiImage",
+        "color_info": {
+          "palette": [
+            {
+              "percentage": 58.16,
+              "rgb": {
+                "blue": 249,
+                "green": 249,
+                "red": 250
+              }
+            },
+            {
+              "percentage": 26.12,
+              "rgb": {
+                "blue": 11,
+                "green": 15,
+                "red": 17
+              }
+            },
+            {
+              "percentage": 1.72,
+              "rgb": {
+                "blue": 96,
+                "green": 125,
+                "red": 218
+              }
+            },
+            {
+              "percentage": 1.46,
+              "rgb": {
+                "blue": 28,
+                "green": 25,
+                "red": 202
+              }
+            },
+            {
+              "percentage": 0.81,
+              "rgb": {
+                "blue": 237,
+                "green": 65,
+                "red": 111
+              }
+            }
+          ]
+        },
+        "original_img_height": 600,
+        "original_img_url": "https://pbs.twimg.com/media/HJ0f3JWbAAAgMQS.jpg",
+        "original_img_width": 1500
+      },
+      "media_key": "3_2061839236668784640"
+    },
+    "id": "QXJ0aWNsZUVudGl0eToyMDYwMzQ0OTE1MTM0MTQ0NTEz",
+    "is_grok_summary_eligible": true,
+    "lifecycle_state": {
+      "modified_at_secs": 1780416543
+    },
+    "media_entities": [
+      {
+        "id": "QXBpTWVkaWE6DAAFCgABHJ0hbzragAAKAAIWFVkb/RoQAAAA",
+        "media_id": "2061840966018039808",
+        "media_info": {
+          "__typename": "ApiImage",
+          "color_info": {
+            "palette": [
+              {
+                "percentage": 73.84,
+                "rgb": {
+                  "blue": 5,
+                  "green": 8,
+                  "red": 9
+                }
+              },
+              {
+                "percentage": 7.72,
+                "rgb": {
+                  "blue": 198,
+                  "green": 203,
+                  "red": 205
+                }
+              },
+              {
+                "percentage": 3.34,
+                "rgb": {
+                  "blue": 46,
+                  "green": 75,
+                  "red": 96
+                }
+              },
+              {
+                "percentage": 1.99,
+                "rgb": {
+                  "blue": 137,
+                  "green": 177,
+                  "red": 191
+                }
+              },
+              {
+                "percentage": 1.91,
+                "rgb": {
+                  "blue": 71,
+                  "green": 52,
+                  "red": 43
+                }
+              }
+            ]
+          },
+          "original_img_height": 1700,
+          "original_img_url": "https://pbs.twimg.com/media/HJ0hbzragAA30L-.jpg",
+          "original_img_width": 2562
+        },
+        "media_key": "3_2061840966018039808"
+      }
+    ],
+    "metadata": {
+      "first_published_at_secs": 1780416278
+    },
+    "plain_text": "I make a lot of TikTok slideshows. Not because I love TikTok, but because slideshows are the easiest viral format out there right now: they're cheap, fast, and a good first slide can get saved thousands of times. You don't need a camera, you don't need to be on screen, and you don't need to know how to code.\nThe trick isn't coming up with ideas. It's speed. One slideshow a day is a hobby. A few a day is a real account. So I built a simple routine: take a slideshow that already went viral, figure out why it worked, and rebuild fresh versions of it.\nI'll use StudyTok (study tips, exam-season, \"how I actually passed\" content) as the example all the way through, because it's evergreen and people hoard study hacks — the saves are insane.\nAnd this is one of my TikTok accounts that I use to promote my app:\n \nLink: https://www.tiktok.com/@nickystudy12\nHere are the tools and the 6 steps. No coding, I promise.\nThe tools: snaptik (download) → Claude (the plan) → ChatGPT (images) → Pinterest (real photos) → Canva (put it together) → Postiz (schedule).\nThe whole idea: a viral post is a recipe. Copy the recipe, swap the ingredients, and you get a brand-new dish every time.\nStep 1 — Find slideshows that already went viral\nOpen TikTok and look in your niche for slideshows that clearly blew up — way more likes than the account's usual, tons of comments, people saving and reposting. Those are your examples to learn from.\nCopy the TikTok link, paste it into snaptik.app, and download it. You'll get all the slides as images.\nTwo simple rules:\nLearn from it, don't copy it. Never re-upload someone else's actual slides — that gets you a copyright strike. You're studying how it's built so you can make your own.\nGrab 5–10 examples, not one. One example just gives you a copy. Several let you see the pattern they all share, which is the real gold.\nStep 2 — Ask Claude to turn it into a simple plan (with a hook on every slide)\nThis is the part that does the thinking for you. Upload the downloaded slides into Claude and ask it to break the slideshow down into a simple, slide-by-slide plan you can follow.\nCopy-paste this prompt:\nHere are the slides from a viral TikTok slideshow. For each slide, tell me: (1) the exact text that should go on screen, (2) a short description of what the image should show, and (3) whether I should make the image with AI or find a real photo for it. Also give me the caption and hashtags. Keep it simple and in plain language.\nClaude hands you back a clean little plan, something like:\nSlide 1 (the hook): Text on screen — \"i failed every exam until a med student told me this.\" Image — a messy desk at night, one warm lamp, open book and coffee.\nSlide 2: Text — \"step 1: stop re-reading your notes (it's lying to you).\" Image — close-up of highlighted notes.\n...and so on for each slide, plus a caption like \"save this before your next exam 📚\" and hashtags like #studytok #studytips #examseason.\nThe one thing most people get wrong: every slide needs a hook\nPeople sweat over the first slide and then go lazy: \"step 1… step 2… the end.\" That kills you. On a slideshow, people only keep swiping if each slide makes them want to see the next one. So ask Claude to make every slide a mini-hook.\nPaste this:\nRewrite the text on every slide so each one makes the viewer want to swipe to the next. No boring labels like \"step 1\" — make every line curious or surprising. Keep each under 12 words and casual, like a real person talking.\nThe difference:\nBoring (people leave): \"Step 2: use active recall.\"\nHooky (people swipe): \"step 2: the trick that feels harder but works 3x faster.\"\nSame info. Totally different results. Do this on every slideshow before you make a single image — it's free and it's the biggest difference between flopping and going viral.\nWant 10 slideshows instead of one? Just ask: \"Give me 10 versions of this with different hooks.\" Now you've got a week of content from one example.\nStep 3 — Make the images with ChatGPT\nTake the image descriptions from your plan and make them in ChatGPT (its image generator).\nDo them one at a time — paste one slide's description, get the image, save it, then do the next. Don't ask for all 6 at once; it gets confused and the images come out messy.\nA few easy tips for nice, matching slides:\nAsk for vertical images (tell it \"tall, phone-shaped, 4:5\"). That's the TikTok shape.\nKeep the same vibe on every slide. Add the same look to each description, like \"warm lighting, cozy, slightly film-like.\" That keeps your slideshow feeling like one set.\nLeave room for your text. Tell it to keep the top or bottom of the image fairly empty so your words fit nicely later.\nStep 4 — Grab real photos from Pinterest for the simple slides\nHere's a money-and-quality tip: don't make every slide with AI. It's slower, it costs more, and a slideshow that's 100% AI starts to feel fake — and people can tell.\nSo split it:\nUse AI for slides that need something specific you can't find (a person, an exact scene).\nUse Pinterest for the \"vibe\" slides — a cozy study desk, handwritten notes, a coffee cup, a calm bedroom. These already exist, look real, and cost you nothing.\nJust search Pinterest for the mood (e.g. \"aesthetic study desk at night,\" \"handwritten notes flatlay\") and save what fits.\nOne important habit: don't post a Pinterest photo exactly as-is. Crop it, adjust the colors to match your other slides, and put your text on top in Canva. That makes it your slide instead of someone else's photo. When a photo is doing real work, lean toward images you're actually allowed to use (your own photos or free-to-use stock).\nMixing real photos with a couple of AI images is what makes a slideshow feel like a real person made it — and that's exactly what gets saved and shared.\nStep 5 — Put it together in Canva\nOpen Canva, start a design at 1080 × 1350 (the tall TikTok size), and drop in your images — the AI ones and the Pinterest ones together. Then add your text from the plan.\nThree things to focus on:\nMake the text big and readable. Bold, with an outline or shadow so it shows up on any background.\nMake slide 1 the strongest. It does most of the work of stopping the scroll.\nKeep a consistent look. Same font and colors every time so your account looks put-together, not random.\nThen download each slide as an image. Done.\nAbout the \"AI label\" on TikTok: TikTok can detect AI-made images and add an \"AI-generated\" label, and you might be tempted to find ways to hide it. Honestly, skip that. The label barely affects your reach — a strong hook matters far more — and trying to hide AI content is against TikTok's rules and can get a new account in trouble. If you're posting genuinely AI content, just turn on the disclosure and post. If TikTok wrongly labels work that's mostly yours, use TikTok's own option to dispute the label. Build on the version that won't get you in trouble later.\nStep 6 — Schedule everything in Postiz\nNow you've got a stack of finished slideshows. Postiz turns that stack into a posting schedule so you're not uploading by hand every evening.\nIt's all clicking, no code:\nSchedule right in the Postiz dashboard. Open the calendar, create a new post, upload your slides in order, add the caption and hashtags from your plan, pick a date and time. That's the whole thing — a visual calendar you drag posts onto.\nSpread posts out, don't dump them. Post at a steady rhythm (mornings and evenings usually work) so your account looks like a real person, not a robot dropping 20 posts at midnight.\nFor brand-new accounts (especially on a VPN): use \"Save as Draft\" instead of posting automatically. New accounts get watched closely by TikTok at first, and posts fired straight from an outside tool — especially over a VPN — are the kind of thing that can get a fresh account shadowbanned. So for the first couple of weeks, have Postiz send the post to TikTok as a draft, then open the TikTok app yourself and tap \"post.\" It's one extra tap, but it looks like a normal upload, which is exactly what a young account needs. Once the account is settled and posting fine, switch back to automatic scheduling.\nWhy this works\nMost people treat every slideshow like a brand-new creative project. It isn't. The hard creative work already happened — when a post proved the recipe works. Everything after that is just following the recipe:\nsnaptik finds a winner.\nClaude turns it into a simple plan, with a hook on every slide.\nChatGPT makes the images you can't find.\nPinterest gives you the real photos for everything else.\nCanva puts it together.\nPostiz schedules it.\nOne winner becomes a template. One template becomes a week of posts. And in short-form, posting often is most of the game — this just lets you do it without burning out.\nResources:\nhttps://postiz.com/\nhttps://www.canva.com/\nhttps://snaptik.app/\nSet the routine up once. Then let it run.",
+    "preview_text": "I make a lot of TikTok slideshows. Not because I love TikTok, but because slideshows are the easiest viral format out there right now: they're cheap, fast, and a good first slide can get saved",
+    "rest_id": "2060344915134144513",
+    "summary_text": "- I make viral TikTok slideshows by studying winners, not inventing from scratch. Slideshows need strong hooks on every slide to keep swipes going.\n\n- Workflow: snaptik downloads viral examples, Claude creates slide-by-slide plans with hooks, ChatGPT generates specific images.\n\n- Pinterest supplies real photos for vibe slides, Canva assembles everything with big readable text, Postiz schedules posts.\n\n- Mix AI and real images for authentic feel. Post consistently in niches like StudyTok where saves are high. \n\n- One proven recipe becomes many fresh versions without burnout.",
+    "title": "How to Create TikTok Slideshow Content with Claude Opus 4.8 (Step-by-Step Guide) "
+  }
+}

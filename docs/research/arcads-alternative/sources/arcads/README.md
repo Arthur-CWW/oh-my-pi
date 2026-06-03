@@ -1,0 +1,91 @@
+# Arcads Source Archive
+
+Extracted: 2026-06-03T14:15:50.867498+00:00
+
+Manifest: `docs/research/arcads-alternative/arcads-source-urls.txt`
+
+## Pages
+
+- [Arcads - Create winning ads with AI](markdown/www-arcads-ai-238034af.md) — `200` — https://www.arcads.ai/
+- [AI Ugc Video](markdown/www-arcads-ai-features-ai-ugc-video-8127f5f1.md) — `200` — https://www.arcads.ai/features/ai-ugc-video
+- [Ai avatars](markdown/www-arcads-ai-features-ai-avatars-b050c871.md) — `200` — https://www.arcads.ai/features/ai-avatars
+- [Text to Speech](markdown/www-arcads-ai-features-text-to-speech-57fc74e8.md) — `200` — https://www.arcads.ai/features/text-to-speech
+- [Speech to Speech](markdown/www-arcads-ai-features-speech-to-speech-070a9af0.md) — `200` — https://www.arcads.ai/features/speech-to-speech
+- [Engage Audiences with](markdown/www-arcads-ai-features-facebook-ai-ads-generator-7d8ac847.md) — `200` — https://www.arcads.ai/features/facebook-ai-ads-generator
+- [AI Lip-sync](markdown/www-arcads-ai-features-ai-lipsync-94c02fc0.md) — `200` — https://www.arcads.ai/features/ai-lipsync
+- [High-Converting Ads](markdown/www-arcads-ai-features-ai-product-video-generator-d9121fc0.md) — `200` — https://www.arcads.ai/features/ai-product-video-generator
+- [Batch Creations](markdown/www-arcads-ai-features-batch-creations-87aa7bde.md) — `200` — https://www.arcads.ai/features/batch-creations
+- [AI Actors](markdown/www-arcads-ai-features-ai-actors-f6b17548.md) — `200` — https://www.arcads.ai/features/ai-actors
+- [AI Ads](markdown/www-arcads-ai-features-ai-ads-9db85ab3.md) — `200` — https://www.arcads.ai/features/ai-ads
+- [Ai Video Generator](markdown/www-arcads-ai-features-ai-video-generator-c8594047.md) — `200` — https://www.arcads.ai/features/ai-video-generator
+- [Ai Shorts Generator](markdown/www-arcads-ai-features-ai-shorts-generator-b8d203e9.md) — `200` — https://www.arcads.ai/features/ai-shorts-generator
+- [Ai Content Generator](markdown/www-arcads-ai-features-ai-content-generator-4dc38d6e.md) — `200` — https://www.arcads.ai/features/ai-content-generator
+- [Ai Video Api](markdown/www-arcads-ai-features-ai-video-api-94c87c68.md) — `200` — https://www.arcads.ai/features/ai-video-api
+- [Ai Lip Sync Api](markdown/www-arcads-ai-features-ai-lip-sync-api-121af8ce.md) — `200` — https://www.arcads.ai/features/ai-lip-sync-api
+- [Ai For Affiliate](markdown/www-arcads-ai-features-ai-for-affiliate-870e3ad6.md) — `200` — https://www.arcads.ai/features/ai-for-affiliate
+- [Talking Avatar Ai](markdown/www-arcads-ai-features-talking-avatar-ai-c9285acd.md) — `200` — https://www.arcads.ai/features/talking-avatar-ai
+- [AI Tik-Tok Ads Generator](markdown/www-arcads-ai-features-ai-tik-tok-ads-generator-650cc8f3.md) — `200` — https://www.arcads.ai/features/ai-tik-tok-ads-generator
+- [Ad Creative Testing](markdown/www-arcads-ai-use-cases-ad-creative-testing-3cfb58d4.md) — `200` — https://www.arcads.ai/use-cases/ad-creative-testing
+- [AI TikTok Video Generator](markdown/www-arcads-ai-use-cases-ai-tik-tok-video-generator-092112e2.md) — `200` — https://www.arcads.ai/use-cases/ai-tik-tok-video-generator
+- [AI Facebook Ad Video Generator](markdown/www-arcads-ai-use-cases-ai-facebook-video-ad-generator-8bc2af72.md) — `200` — https://www.arcads.ai/use-cases/ai-facebook-video-ad-generator
+- [AI YouTube Video Generator](markdown/www-arcads-ai-use-cases-ai-youtube-video-generator-aef04d1d.md) — `200` — https://www.arcads.ai/use-cases/ai-youtube-video-generator
+- [E-commerce](markdown/www-arcads-ai-industries-e-commerce-d0841d4d.md) — `200` — https://www.arcads.ai/industries/e-commerce
+- [SaaS](markdown/www-arcads-ai-industries-saas-c71d0854.md) — `200` — https://www.arcads.ai/industries/saas
+- [Mobile Apps](markdown/www-arcads-ai-industries-mobile-apps-8074e26b.md) — `200` — https://www.arcads.ai/industries/mobile-apps
+- [Marketing Agencies](markdown/www-arcads-ai-industries-marketing-agencies-220cb284.md) — `200` — https://www.arcads.ai/industries/marketing-agencies
+- [Arcads Raises 16m Seed](markdown/www-arcads-ai-blog-arcads-raises-16m-seed-6b62c077.md) — `200` — https://www.arcads.ai/blog/arcads-raises-16m-seed
+- [How hipto Scaled Performance Creatives with Arcads AI | Use Case](markdown/www-arcads-ai-usecases-hipto-b0657aff.md) — `200` — https://www.arcads.ai/usecases/hipto
+- [Harnessing AI to Transform Marketing Strategies for Better...](markdown/www-arcads-ai-usecases-teknasyon-890e6ac0.md) — `200` — https://www.arcads.ai/usecases/teknasyon
+- [How to create winning ads with AI UGC](markdown/get-arcads-ai-f9eb2159.md) — `200` — https://get.arcads.ai/
+- [How to create winning ads with AI UGC](markdown/get-arcads-ai-hook-generator-ee5417cc.md) — `200` — https://get.arcads.ai/hook-generator
+- [How to create winning ads with AI UGC](markdown/get-arcads-ai-meta-a71fbeb6.md) — `200` — https://get.arcads.ai/meta
+- [Arcads-prompt-enhancer](markdown/arcads-prompt-enhancer-get-arcads-ai-a823e418.md) — `200` — https://arcads-prompt-enhancer.get.arcads.ai/
+- [arcads.ai](markdown/tools-arcads-ai-7af89a92.md) — `200` — https://tools.arcads.ai/
+- [arcads.ai](markdown/tools-arcads-ai-repurpose-facebook-ad-32e398e4.md) — `200` — https://tools.arcads.ai/repurpose-facebook-ad
+- [arcads.ai](markdown/tools-arcads-ai-fb-ads-uploader-24d75430.md) — `200` — https://tools.arcads.ai/fb-ads-uploader
+- [arcads.ai](markdown/tools-arcads-ai-spy-agent-bdca5713.md) — `200` — https://tools.arcads.ai/spy-agent
+- [arcads.ai](markdown/tools-arcads-ai-tiktok-repurposer-0ecd51c5.md) — `200` — https://tools.arcads.ai/tiktok-repurposer
+- [arcads.ai](markdown/tools-arcads-ai-ai-girl-b1da0505.md) — `200` — https://tools.arcads.ai/ai-girl
+- [Arcads - AI UGC](markdown/try-arcads-ai-ai-avatar-video-generator-8bce090b.md) — `200` — https://try.arcads.ai/ai-avatar-video-generator
+- [AI Video Ads Generator | Create Professional Video Ads with AI | Arcads.ai](markdown/try-arcads-ai-ai-video-ads-generator-d5ce9e82.md) — `200` — https://try.arcads.ai/ai-video-ads-generator
+- [Home | Arcads Help Center](markdown/intercom-help-arcads-en-b3a4ff31.md) — `200` — https://intercom.help/arcads/en/
+- [How to use Arcads platform ?  | Arcads Help Center](markdown/intercom-help-arcads-en-collections-7500987-how-to-use-arcads-platform-a33670dd.md) — `200` — https://intercom.help/arcads/en/collections/7500987-how-to-use-arcads-platform
+- [How to use the Arcads API ?  | Arcads Help Center](markdown/intercom-help-arcads-en-collections-11661632-how-to-use-the-arcads-api-8543e3cc.md) — `200` — https://intercom.help/arcads/en/collections/11661632-how-to-use-the-arcads-api
+- [Arcads.ai API Documentation | Arcads Help Center](markdown/intercom-help-arcads-en-articles-10538922-arcads-ai-api-documentation-537e5c27.md) — `200` — https://intercom.help/arcads/en/articles/10538922-arcads-ai-api-documentation
+- [Getting Started with Arcads | Arcads Help Center](markdown/intercom-help-arcads-en-articles-14531683-getting-started-with-arcads-e9b95ea6.md) — `200` — https://intercom.help/arcads/en/articles/14531683-getting-started-with-arcads
+- [What is the Workflow feature? | Arcads Help Center](markdown/intercom-help-arcads-en-articles-14284875-what-is-the-workflow-feature-ee5088a0.md) — `200` — https://intercom.help/arcads/en/articles/14284875-what-is-the-workflow-feature
+- [How to show a product in a video ? | Arcads Help Center](markdown/intercom-help-arcads-en-articles-13281882-how-to-show-a-product-in-a-video-86276866.md) — `200` — https://intercom.help/arcads/en/articles/13281882-how-to-show-a-product-in-a-video
+- [How to Show Your mobile App in a video with Arcads ? | Arcads Help Center](markdown/intercom-help-arcads-en-articles-13230089-how-to-show-your-mobile-app-in-a-video-with-arcads-2758e653.md) — `200` — https://intercom.help/arcads/en/articles/13230089-how-to-show-your-mobile-app-in-a-video-with-arcads
+- [How to extend your videos ? | Arcads Help Center](markdown/intercom-help-arcads-en-articles-13230010-how-to-extend-your-videos-ab211f2d.md) — `200` — https://intercom.help/arcads/en/articles/13230010-how-to-extend-your-videos
+- [How to add Captions to my videos ? | Arcads Help Center](markdown/intercom-help-arcads-en-articles-13230628-how-to-add-captions-to-my-videos-0fa576c7.md) — `200` — https://intercom.help/arcads/en/articles/13230628-how-to-add-captions-to-my-videos
+- [How to create Unboxing Videos ? | Arcads Help Center](markdown/intercom-help-arcads-en-articles-13230674-how-to-create-unboxing-videos-c38ba6da.md) — `200` — https://intercom.help/arcads/en/articles/13230674-how-to-create-unboxing-videos
+- [How to use the "Fashion Try-On" tool ? | Arcads Help Center](markdown/intercom-help-arcads-en-articles-13239446-how-to-use-the-fashion-try-on-tool-a4365ca9.md) — `200` — https://intercom.help/arcads/en/articles/13239446-how-to-use-the-fashion-try-on-tool
+- [How to use the "Skin Enhancer" tool ? | Arcads Help Center](markdown/intercom-help-arcads-en-articles-13239538-how-to-use-the-skin-enhancer-tool-bcb6c6af.md) — `200` — https://intercom.help/arcads/en/articles/13239538-how-to-use-the-skin-enhancer-tool
+- [How to Clone Yourself Into a Talking Actor? | Arcads Help Center](markdown/intercom-help-arcads-en-articles-13239662-how-to-clone-yourself-into-a-talking-actor-eb0b9516.md) — `200` — https://intercom.help/arcads/en/articles/13239662-how-to-clone-yourself-into-a-talking-actor
+- [How to create a talking actor video (no product)? | Arcads Help Center](markdown/intercom-help-arcads-en-articles-13239650-how-to-create-a-talking-actor-video-no-product-879b4056.md) — `200` — https://intercom.help/arcads/en/articles/13239650-how-to-create-a-talking-actor-video-no-product
+- [How to Create a Custom "Talking Actor" ? | Arcads Help Center](markdown/intercom-help-arcads-en-articles-13240351-how-to-create-a-custom-talking-actor-45061fce.md) — `200` — https://intercom.help/arcads/en/articles/13240351-how-to-create-a-custom-talking-actor
+- [How to edit a video ? | Arcads Help Center](markdown/intercom-help-arcads-en-articles-13240462-how-to-edit-a-video-b8aa9fee.md) — `200` — https://intercom.help/arcads/en/articles/13240462-how-to-edit-a-video
+- [How to remove Background from Any Image or Video? | Arcads Help Center](markdown/intercom-help-arcads-en-articles-13240665-how-to-remove-background-from-any-image-or-video-6989c84d.md) — `200` — https://intercom.help/arcads/en/articles/13240665-how-to-remove-background-from-any-image-or-video
+- [How to use the "Hook repurposer" tool ? | Arcads Help Center](markdown/intercom-help-arcads-en-articles-13243043-how-to-use-the-hook-repurposer-tool-835e5941.md) — `200` — https://intercom.help/arcads/en/articles/13243043-how-to-use-the-hook-repurposer-tool
+- [How to replace an actor from an existing video? | Arcads Help Center](markdown/intercom-help-arcads-en-articles-13244238-how-to-replace-an-actor-from-an-existing-video-ef7d2cca.md) — `200` — https://intercom.help/arcads/en/articles/13244238-how-to-replace-an-actor-from-an-existing-video
+- [Arcads videos examples ! Get inspired! | Arcads Help Center](markdown/intercom-help-arcads-en-articles-13240206-arcads-videos-examples-get-inspired-c7ddd4b3.md) — `200` — https://intercom.help/arcads/en/articles/13240206-arcads-videos-examples-get-inspired
+- [Which content type are prohibited ? | Arcads Help Center](markdown/intercom-help-arcads-en-articles-9276579-which-content-type-are-prohibited-0b174e9c.md) — `200` — https://intercom.help/arcads/en/articles/9276579-which-content-type-are-prohibited
+- [What Languages Are Supported by Arcads? | Arcads Help Center](markdown/intercom-help-arcads-en-articles-13250377-what-languages-are-supported-by-arcads-34a2c4c5.md) — `200` — https://intercom.help/arcads/en/articles/13250377-what-languages-are-supported-by-arcads
+- [How to translate a video in multiple languages? | Arcads Help Center](markdown/intercom-help-arcads-en-articles-13428700-how-to-translate-a-video-in-multiple-languages-bc8ffea4.md) — `200` — https://intercom.help/arcads/en/articles/13428700-how-to-translate-a-video-in-multiple-languages
+- [Pronunciation Guide 🗣️ | Arcads Help Center](markdown/intercom-help-arcads-en-articles-9099813-pronunciation-guide-4497f56a.md) — `200` — https://intercom.help/arcads/en/articles/9099813-pronunciation-guide
+- [Understanding Omnihuman 1.5, Audio-Driven, and Arcads 1.0 | Arcads Help Center](markdown/intercom-help-arcads-en-articles-13429441-understanding-omnihuman-1-5-audio-driven-and-arcads-1-0-a04dbb0c.md) — `200` — https://intercom.help/arcads/en/articles/13429441-understanding-omnihuman-1-5-audio-driven-and-arcads-1-0
+- [Introducing Gestures | Arcads Help Center](markdown/intercom-help-arcads-en-articles-13571136-introducing-gestures-ecbfed11.md) — `200` — https://intercom.help/arcads/en/articles/13571136-introducing-gestures
+- [How to generate an image with multiple camera angles ? | Arcads Help Center](markdown/intercom-help-arcads-en-articles-13571562-how-to-generate-an-image-with-multiple-camera-angles-3229aec6.md) — `200` — https://intercom.help/arcads/en/articles/13571562-how-to-generate-an-image-with-multiple-camera-angles
+- [How to generate UGC Studio images? | Arcads Help Center](markdown/intercom-help-arcads-en-articles-13573182-how-to-generate-ugc-studio-images-1e52c661.md) — `200` — https://intercom.help/arcads/en/articles/13573182-how-to-generate-ugc-studio-images
+- [How Are Credits Counted? | Arcads Help Center](markdown/intercom-help-arcads-en-articles-13725589-how-are-credits-counted-4df532a1.md) — `200` — https://intercom.help/arcads/en/articles/13725589-how-are-credits-counted
+- [Happy Horse Prompting Guide | Arcads Help Center](markdown/intercom-help-arcads-en-articles-14782448-happy-horse-prompting-guide-9d99fe5c.md) — `200` — https://intercom.help/arcads/en/articles/14782448-happy-horse-prompting-guide
+- [Arcads AI Review: Features, Pricing & Best Alternative](markdown/creatify-ai-review-arcads-ai-01fbc089.md) — `200` — https://creatify.ai/review/arcads-ai
+- [Arcads Review: AI UGC Ads, Pricing, Pros, Cons and Verdict](markdown/diyai-io-ai-tools-video-generation-reviews-arcads-review-83749324.md) — `200` — https://diyai.io/ai-tools/video-generation/reviews/arcads-review/
+- [Arcads review: My honest thoughts about this AI ad maker | Marketer Milk](markdown/www-marketermilk-com-blog-arcads-review-85881246.md) — `200` — https://www.marketermilk.com/blog/arcads-review
+- [Arcads AI pricing 2026: Plans, free trial, and alternatives | eesel AI](markdown/www-eesel-ai-blog-arcads-ai-pricing-540ecb19.md) — `200` — https://www.eesel.ai/blog/arcads-ai-pricing
+- [Arcads Review](markdown/www-airpost-ai-blog-arcads-features-pricing-and-alternatives-251ad543.md) — `200` — https://www.airpost.ai/blog/arcads-features-pricing-and-alternatives
+- [Arcads Review (2026): AI Video Ads - GoHighLevel.ai](markdown/www-gohighlevel-ai-reviews-arcads-review-4e0204b2.md) — `200` — https://www.gohighlevel.ai/reviews/arcads-review
+- [Arcads AI Review (2025): Best UGC AI Ads Generator? - codingem.com](markdown/www-codingem-com-arcads-ai-review-9106984f.md) — `200` — https://www.codingem.com/arcads-ai-review/
+- [Arcads AI vs MakeUGC.ai vs Affogato AI â A Complete Guide for Marketing Leaders in 2026](markdown/genesysgrowth-com-blog-arcads-ai-vs-makeugc-ai-vs-affogato-ai-326f8539.md) — `200` — https://genesysgrowth.com/blog/arcads-ai-vs-makeugc.ai-vs-affogato-ai
+- [Arcads.ai Review 2026: Features, Pricing, Pros And Cons](markdown/www-pasivemarketer-com-arcads-ai-review-668237eb.md) — `200` — https://www.pasivemarketer.com/arcads-ai-review
+- [Arcads AI Review 2026: Features, Pricing & Alternatives | EzUGC](markdown/www-ezugc-ai-blog-arcads-ai-267fd84f.md) — `200` — https://www.ezugc.ai/blog/arcads-ai

@@ -1,0 +1,6578 @@
+{
+  "openapi": "3.0.0",
+  "paths": {
+    "/v1/elevenlabs/credentials": {
+      "post": {
+        "description": "Create credentials for a workspace",
+        "operationId": "createCredentials",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CredentialsCreationDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The credentials were created successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CredentialsDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Create credentials for a workspace",
+        "tags": [
+          "ElevenLabs"
+        ]
+      },
+      "get": {
+        "description": "Get credentials for a workspace",
+        "operationId": "getWorkspaceCredentials",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "The credentials were retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CredentialsDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Get credentials for a workspace",
+        "tags": [
+          "ElevenLabs"
+        ]
+      },
+      "delete": {
+        "description": "Delete ElevenLabs credentials for a workspace",
+        "operationId": "deleteWorkspaceCredentials",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "The credentials were deleted successfully"
+          },
+          "404": {
+            "description": "The workspace credentials were not found"
+          },
+          "500": {
+            "description": "An error occurred while deleting the credentials"
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Delete ElevenLabs credentials for a workspace",
+        "tags": [
+          "ElevenLabs"
+        ]
+      }
+    },
+    "/v1/elevenlabs/trigger-import": {
+      "post": {
+        "description": "Trigger import of voices from ElevenLabs",
+        "operationId": "triggerImport",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "The import was triggered successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "number"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The workspace credentials were not found"
+          },
+          "500": {
+            "description": "An error occurred while triggering the import"
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Trigger import of voices from ElevenLabs",
+        "tags": [
+          "ElevenLabs"
+        ]
+      }
+    },
+    "/v1/folders/{folderId}/scripts": {
+      "get": {
+        "operationId": "getFolderScripts",
+        "parameters": [
+          {
+            "name": "folderId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "pageSize",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": 50,
+              "type": "number"
+            }
+          },
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "isActiveVersion",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Scripts successfully retrieved for folder",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedScripts"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authentication error"
+          },
+          "404": {
+            "description": "Folder not found"
+          },
+          "500": {
+            "description": "Unknown error"
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Get paginated scripts for given folder",
+        "tags": [
+          "Folders"
+        ]
+      }
+    },
+    "/v1/folders/{folderId}": {
+      "get": {
+        "operationId": "getFolder",
+        "parameters": [
+          {
+            "name": "folderId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Folder successfully retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FolderDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authentication error"
+          },
+          "404": {
+            "description": "Folder not found"
+          },
+          "500": {
+            "description": "Unknown error"
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Get folder by ID",
+        "tags": [
+          "Folders"
+        ]
+      },
+      "put": {
+        "operationId": "updateFolder",
+        "parameters": [
+          {
+            "name": "folderId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FolderNameUpdateDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Folder successfully updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authentication error"
+          },
+          "404": {
+            "description": "Folder not found"
+          },
+          "500": {
+            "description": "Unknown error"
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Update folder with given ID",
+        "tags": [
+          "Folders"
+        ]
+      },
+      "delete": {
+        "operationId": "deleteFolder",
+        "parameters": [
+          {
+            "name": "folderId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Folder successfully deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authentication error"
+          },
+          "404": {
+            "description": "Folder not found"
+          },
+          "500": {
+            "description": "Unknown error"
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Delete folder by ID",
+        "tags": [
+          "Folders"
+        ]
+      }
+    },
+    "/v1/folders": {
+      "post": {
+        "operationId": "createFolder",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FolderCreationDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Folder successfully created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FolderDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authentication error"
+          },
+          "404": {
+            "description": "Product not found"
+          },
+          "500": {
+            "description": "Unknown error"
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Create new folder within product",
+        "tags": [
+          "Folders"
+        ]
+      }
+    },
+    "/v2/images/generate": {
+      "post": {
+        "operationId": "generate",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateImageDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Trigger image generation",
+        "tags": [
+          "Images v2"
+        ]
+      }
+    },
+    "/v2/videos/generate": {
+      "post": {
+        "operationId": "generate",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateVideoDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Trigger video generation",
+        "tags": [
+          "Videos v2"
+        ]
+      }
+    },
+    "/v1/presets": {
+      "get": {
+        "operationId": "getPresetTypes",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Preset types list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PresetTypeDto"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authentication error"
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "List available preset types",
+        "tags": [
+          "Presets"
+        ]
+      }
+    },
+    "/v1/presets/{presetType}/templates": {
+      "get": {
+        "operationId": "getPresetTemplates",
+        "parameters": [
+          {
+            "name": "presetType",
+            "required": true,
+            "in": "path",
+            "description": "The preset type to list templates for",
+            "schema": {
+              "enum": [
+                "camera-movement",
+                "fashion-tryon",
+                "gameplay-ad",
+                "gestures",
+                "product-showcase",
+                "showyourapp",
+                "unboxing-pov"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "pageSize",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": 50,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated preset templates",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedPresetTemplates"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid preset type"
+          },
+          "403": {
+            "description": "Authentication error"
+          },
+          "500": {
+            "description": "Unknown error"
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "List available templates for a preset type",
+        "tags": [
+          "Presets"
+        ]
+      }
+    },
+    "/v1/presets/camera-movement/generate": {
+      "post": {
+        "operationId": "generateCameraMovement",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartCameraMovementDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Trigger Camera Movement preset generation",
+        "tags": [
+          "Presets"
+        ]
+      }
+    },
+    "/v1/presets/fashion-tryon/generate": {
+      "post": {
+        "operationId": "generateFashionTryOn",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartFashionTryOnDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Trigger Fashion Try-On preset generation",
+        "tags": [
+          "Presets"
+        ]
+      }
+    },
+    "/v1/presets/gestures/generate": {
+      "post": {
+        "operationId": "generateGestures",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartGesturesDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Trigger Gestures preset generation",
+        "tags": [
+          "Presets"
+        ]
+      }
+    },
+    "/v1/presets/product-showcase/generate": {
+      "post": {
+        "operationId": "generateProductShowcase",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartProductShowcaseDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Trigger Product Showcase preset generation",
+        "tags": [
+          "Presets"
+        ]
+      }
+    },
+    "/v1/presets/showyourapp/generate": {
+      "post": {
+        "operationId": "generateShowyourapp",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartShowyourappDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Trigger Showyourapp preset generation",
+        "tags": [
+          "Presets"
+        ]
+      }
+    },
+    "/v1/presets/unboxing-pov/generate": {
+      "post": {
+        "operationId": "generateUnboxingPov",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartUnboxingPovDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Trigger Unboxing POV preset generation",
+        "tags": [
+          "Presets"
+        ]
+      }
+    },
+    "/v1/presets/gameplay-ad/generate": {
+      "post": {
+        "operationId": "generateGameplayAd",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartGameplayAdDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Trigger Gameplay Ad preset generation",
+        "tags": [
+          "Presets"
+        ]
+      }
+    },
+    "/v1/products/{productId}/folders": {
+      "get": {
+        "operationId": "getProductFolders",
+        "parameters": [
+          {
+            "name": "productId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "pageSize",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": 50,
+              "type": "number"
+            }
+          },
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": 1,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Folders successfully retrieved for product",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedFolders"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authentication error"
+          },
+          "404": {
+            "description": "Product not found"
+          },
+          "500": {
+            "description": "Unknown error"
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Get paginated folders for given product",
+        "tags": [
+          "Products"
+        ]
+      }
+    },
+    "/v1/products": {
+      "get": {
+        "operationId": "getWorkspaceProducts",
+        "parameters": [
+          {
+            "name": "pageSize",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": 50,
+              "type": "number"
+            }
+          },
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": 1,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Products successfully retrieved for workspace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedProducts"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authentication error"
+          },
+          "500": {
+            "description": "Unknown error"
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Get paginated products for your workspace",
+        "tags": [
+          "Products"
+        ]
+      },
+      "post": {
+        "operationId": "createProduct",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProductCreationDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Folder successfully created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authentication error"
+          },
+          "500": {
+            "description": "Unknown error"
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Create new product",
+        "tags": [
+          "Products"
+        ]
+      }
+    },
+    "/v1/products/{productId}": {
+      "get": {
+        "operationId": "getProduct",
+        "parameters": [
+          {
+            "name": "productId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Product successfully retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authentication error"
+          },
+          "404": {
+            "description": "Product not found"
+          },
+          "500": {
+            "description": "Unknown error"
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Get product by ID",
+        "tags": [
+          "Products"
+        ]
+      },
+      "put": {
+        "operationId": "updateProduct",
+        "parameters": [
+          {
+            "name": "productId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProductUpdateDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Product successfully updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authentication error"
+          },
+          "404": {
+            "description": "Product not found"
+          },
+          "500": {
+            "description": "Unknown error"
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Update product with given ID",
+        "tags": [
+          "Products"
+        ]
+      },
+      "delete": {
+        "operationId": "deleteProduct",
+        "parameters": [
+          {
+            "name": "productId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Product successfully deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authentication error"
+          },
+          "404": {
+            "description": "Product not found"
+          },
+          "500": {
+            "description": "Unknown error"
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Delete product by ID",
+        "tags": [
+          "Products"
+        ]
+      }
+    },
+    "/v1/projects": {
+      "post": {
+        "description": "Create a new project within a specified folder.",
+        "operationId": "createProject",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectCreationDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Project successfully created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authentication error"
+          },
+          "404": {
+            "description": "Folder not found"
+          },
+          "500": {
+            "description": "Unknown error"
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Create a new project",
+        "tags": [
+          "Projects"
+        ]
+      }
+    },
+    "/v1/projects/{projectId}": {
+      "get": {
+        "description": "Retrieve a project by its ID.",
+        "operationId": "getProject",
+        "parameters": [
+          {
+            "name": "projectId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Project successfully retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authentication error"
+          },
+          "404": {
+            "description": "Project not found"
+          },
+          "500": {
+            "description": "Unknown error"
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Get project by ID",
+        "tags": [
+          "Projects"
+        ]
+      },
+      "put": {
+        "description": "Update an existing project name.",
+        "operationId": "updateProject",
+        "parameters": [
+          {
+            "name": "projectId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectUpdateDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Project successfully updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authentication error"
+          },
+          "404": {
+            "description": "Project not found"
+          },
+          "500": {
+            "description": "Unknown error"
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Update project",
+        "tags": [
+          "Projects"
+        ]
+      },
+      "delete": {
+        "description": "Delete an existing project and all its associated scripts.",
+        "operationId": "deleteProject",
+        "parameters": [
+          {
+            "name": "projectId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Project successfully deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authentication error"
+          },
+          "404": {
+            "description": "Project not found"
+          },
+          "500": {
+            "description": "Unknown error"
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Delete project",
+        "tags": [
+          "Projects"
+        ]
+      }
+    },
+    "/v1/actors": {
+      "get": {
+        "operationId": "getActors",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "pageSize",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": 50,
+              "type": "number"
+            }
+          },
+          {
+            "name": "freeSpeech",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "age",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "name": "gender",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "name": "skinTone",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Actors list successfully retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedSituations"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authentication error"
+          },
+          "500": {
+            "description": "Unknown error"
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Get paginated actors w/ filters",
+        "tags": [
+          "Actors"
+        ]
+      }
+    },
+    "/v1/actors/{actorId}/situations": {
+      "get": {
+        "operationId": "getSituation",
+        "parameters": [
+          {
+            "name": "actorId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "talkingActorEnabled",
+            "required": false,
+            "in": "query",
+            "description": "Filter by talking-actor situations. If no content-type filter is provided, the API defaults to talkingActorEnabled=true for backward compatibility.",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "showYourAppEnabled",
+            "required": false,
+            "in": "query",
+            "description": "Filter by \"show your app\" situations.",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "unboxingPovEnabled",
+            "required": false,
+            "in": "query",
+            "description": "Filter by unboxing POV situations.",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "brollSora2Enabled",
+            "required": false,
+            "in": "query",
+            "description": "Filter by Sora-2 B-roll situations.",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "fashionTryOnEnabled",
+            "required": false,
+            "in": "query",
+            "description": "Filter by fashion try-on situations.",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "productShowcaseEnabled",
+            "required": false,
+            "in": "query",
+            "description": "Filter by product-showcase situations.",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "gesturesEnabled",
+            "required": false,
+            "in": "query",
+            "description": "Filter by gestures situations.",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "cameraMovementEnabled",
+            "required": false,
+            "in": "query",
+            "description": "Filter by camera-movement situations.",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Situations successfully retrieved for actor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SituationDto"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authentication error"
+          },
+          "404": {
+            "description": "Actor not found"
+          },
+          "500": {
+            "description": "Unknown error"
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Get all situations for given actor",
+        "tags": [
+          "Actors"
+        ]
+      }
+    },
+    "/v1/situations": {
+      "get": {
+        "operationId": "getSituations",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "pageSize",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": 50,
+              "type": "number"
+            }
+          },
+          {
+            "name": "isPro",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "talkingActorEnabled",
+            "required": false,
+            "in": "query",
+            "description": "Filter by talking-actor situations. Pass true for talking-actor content, false to exclude it (note: false narrows to non-talking content only, not any specific alternative). If NO content-type filter is provided, the API defaults to talkingActorEnabled=true for backward compatibility.",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "showYourAppEnabled",
+            "required": false,
+            "in": "query",
+            "description": "Filter by \"show your app\" situations.",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "unboxingPovEnabled",
+            "required": false,
+            "in": "query",
+            "description": "Filter by unboxing POV situations.",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "brollSora2Enabled",
+            "required": false,
+            "in": "query",
+            "description": "Filter by Sora-2 B-roll situations.",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "fashionTryOnEnabled",
+            "required": false,
+            "in": "query",
+            "description": "Filter by fashion try-on situations.",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "productShowcaseEnabled",
+            "required": false,
+            "in": "query",
+            "description": "Filter by product-showcase situations.",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "gesturesEnabled",
+            "required": false,
+            "in": "query",
+            "description": "Filter by gestures situations.",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "cameraMovementEnabled",
+            "required": false,
+            "in": "query",
+            "description": "Filter by camera-movement situations.",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "actorGender",
+            "required": false,
+            "in": "query",
+            "description": "Filter by actor gender (case-insensitive). Values: male, female. Only applies to actor-based situations; not supported alongside preset content-type filters (fashionTryOnEnabled, productShowcaseEnabled, gesturesEnabled, cameraMovementEnabled, unboxingPovEnabled, brollSora2Enabled).",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "name": "actorAge",
+            "required": false,
+            "in": "query",
+            "description": "Filter by actor age (case-insensitive). Values: adult, senior, young adult. Only applies to actor-based situations; not supported alongside preset content-type filters.",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "name": "actorName",
+            "required": false,
+            "in": "query",
+            "description": "Filter by actor name (case-insensitive LIKE search). Only applies to actor-based situations; not supported alongside preset content-type filters.",
+            "schema": {
+              "example": "john",
+              "type": "string"
+            }
+          },
+          {
+            "name": "actorFreeSpeech",
+            "required": false,
+            "in": "query",
+            "description": "Filter by actor free speech capability. Only applies to actor-based situations; not supported alongside preset content-type filters.",
+            "schema": {
+              "example": true,
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Situations list successfully retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedSituations"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authentication error"
+          },
+          "500": {
+            "description": "Unknown error"
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Get paginated situations w/ filters",
+        "tags": [
+          "Situations"
+        ]
+      }
+    },
+    "/v1/situations/mine": {
+      "get": {
+        "operationId": "getMySituations",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "pageSize",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": 50,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Workspace situations successfully retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedSituations"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authentication error"
+          },
+          "500": {
+            "description": "Unknown error"
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Get paginated situations linked to workspace",
+        "tags": [
+          "Situations"
+        ]
+      }
+    },
+    "/v1/situations/{situationId}": {
+      "get": {
+        "operationId": "getSituation",
+        "parameters": [
+          {
+            "name": "situationId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Situation successfully retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SituationDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authentication error"
+          },
+          "404": {
+            "description": "Situation not found"
+          },
+          "500": {
+            "description": "Unknown error"
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Get situation by ID",
+        "tags": [
+          "Situations"
+        ]
+      }
+    },
+    "/v1/scripts/{scriptId}/videos": {
+      "get": {
+        "operationId": "getScriptVideos",
+        "parameters": [
+          {
+            "name": "scriptId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Videos successfully retrieved for script",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/VideoDto"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authentication error"
+          },
+          "404": {
+            "description": "Script not found"
+          },
+          "500": {
+            "description": "Unknown error"
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Get videos for given script",
+        "tags": [
+          "Scripts"
+        ]
+      }
+    },
+    "/v1/scripts/{scriptId}": {
+      "get": {
+        "operationId": "getScript",
+        "parameters": [
+          {
+            "name": "scriptId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Script successfully retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScriptDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authentication error"
+          },
+          "404": {
+            "description": "Script not found"
+          },
+          "500": {
+            "description": "Unknown error"
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Get script by ID",
+        "tags": [
+          "Scripts"
+        ]
+      },
+      "put": {
+        "operationId": "updateScript",
+        "parameters": [
+          {
+            "name": "scriptId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScriptUpdateDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Script successfully updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authentication error"
+          },
+          "404": {
+            "description": "Script not found"
+          },
+          "500": {
+            "description": "Unknown error"
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Update script with given ID",
+        "tags": [
+          "Scripts"
+        ]
+      },
+      "delete": {
+        "operationId": "deleteScript",
+        "parameters": [
+          {
+            "name": "scriptId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Script successfully deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authentication error"
+          },
+          "404": {
+            "description": "Script not found"
+          },
+          "500": {
+            "description": "Unknown error"
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Delete script by ID",
+        "tags": [
+          "Scripts"
+        ]
+      }
+    },
+    "/v1/scripts": {
+      "post": {
+        "description": "Create a new script. You can specify either:\n    - folderId only: A new project will be created in that folder\n    - projectId only: The script will be added to the existing project\n    - Both folderId and projectId: The script will be added to the project, but only if the project belongs to that folder\n    \n    At least one of folderId or projectId must be provided.",
+        "operationId": "createScript",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScriptCreationDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Script successfully created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScriptDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input: missing both folderId and projectId, or project does not belong to the specified folder"
+          },
+          "403": {
+            "description": "Authentication error"
+          },
+          "404": {
+            "description": "Folder, project, situation, or voice not found. Error message specifies which resource: FOLDER_NOT_FOUND, PROJECT_NOT_FOUND, SITUATION_NOT_FOUND, VOICE_NOT_FOUND"
+          },
+          "500": {
+            "description": "Unknown error"
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Create new script within folder or project",
+        "tags": [
+          "Scripts"
+        ]
+      }
+    },
+    "/v1/scripts/{scriptId}/generate": {
+      "post": {
+        "operationId": "generateScriptVideos",
+        "parameters": [
+          {
+            "name": "scriptId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Videos generation successfully triggered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authentication error"
+          },
+          "404": {
+            "description": "Script not found"
+          },
+          "422": {
+            "description": "Generation request was refused for one of the following reasons (explicited in error msg): script was blocked by generation, contains forbidden actors, has no videos to generate or requires more credits than the workspace has"
+          },
+          "500": {
+            "description": "Unknown error"
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Trigger videos generation for the given script",
+        "tags": [
+          "Scripts"
+        ]
+      }
+    },
+    "/v1/scripts/{scriptId}/duplicate": {
+      "post": {
+        "operationId": "duplicateScript",
+        "parameters": [
+          {
+            "name": "scriptId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Script successfully duplicated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScriptDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authentication error"
+          },
+          "404": {
+            "description": "Script not found"
+          },
+          "500": {
+            "description": "Unknown error"
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Duplicate script w/ given ID",
+        "tags": [
+          "Scripts"
+        ]
+      }
+    },
+    "/v1/scripts/{scriptId}/new-version": {
+      "post": {
+        "operationId": "createNewVersion",
+        "parameters": [
+          {
+            "name": "scriptId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "New version successfully created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScriptDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authentication error"
+          },
+          "404": {
+            "description": "Script not found"
+          },
+          "500": {
+            "description": "Unknown error"
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Create new version of script w/ given ID",
+        "tags": [
+          "Scripts"
+        ]
+      }
+    },
+    "/v1/scripts/{scriptId}/generate-omnihuman": {
+      "post": {
+        "operationId": "generateScriptOmniHuman",
+        "parameters": [
+          {
+            "name": "scriptId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Omnihuman generation completed with detailed results",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OmniHumanGenerationResultDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authentication error"
+          },
+          "404": {
+            "description": "Script not found"
+          },
+          "422": {
+            "description": "Generation request was refused (blocked by moderation, no videos to generate, or script cannot be generated)"
+          },
+          "500": {
+            "description": "Unknown error"
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Trigger omnihuman generation for the given script",
+        "tags": [
+          "Scripts"
+        ]
+      }
+    },
+    "/v1/videos/{videoId}": {
+      "get": {
+        "operationId": "getVideo",
+        "parameters": [
+          {
+            "name": "videoId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Video successfully retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authentication error"
+          },
+          "404": {
+            "description": "Video not found"
+          },
+          "500": {
+            "description": "Unknown error"
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Get video by ID",
+        "tags": [
+          "Videos"
+        ]
+      },
+      "put": {
+        "operationId": "updateVideo",
+        "parameters": [
+          {
+            "name": "videoId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VideoUpdateDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Video successfully updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authentication error"
+          },
+          "404": {
+            "description": "Video not found"
+          },
+          "500": {
+            "description": "Unknown error"
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Update video with given ID",
+        "tags": [
+          "Videos"
+        ]
+      },
+      "delete": {
+        "operationId": "deleteVideo",
+        "parameters": [
+          {
+            "name": "videoId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Video successfully deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authentication error"
+          },
+          "404": {
+            "description": "Video not found"
+          },
+          "500": {
+            "description": "Unknown error"
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Delete video by ID",
+        "tags": [
+          "Videos"
+        ]
+      }
+    },
+    "/v1/videos": {
+      "post": {
+        "operationId": "createVideo",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VideoCreationDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Video successfully created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authentication error"
+          },
+          "404": {
+            "description": "Script not found"
+          },
+          "500": {
+            "description": "Unknown error"
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Create new video for given script",
+        "tags": [
+          "Videos"
+        ]
+      }
+    },
+    "/v1/videos/{videoId}/watch": {
+      "get": {
+        "operationId": "getVideoLink",
+        "parameters": [
+          {
+            "name": "videoId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Video successfully retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authentication error"
+          },
+          "404": {
+            "description": "Video not found"
+          },
+          "422": {
+            "description": "Video has not been generated yet"
+          },
+          "500": {
+            "description": "Unknown error"
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Get video watch link",
+        "tags": [
+          "Videos"
+        ]
+      }
+    },
+    "/v1/assets/add-to-project": {
+      "post": {
+        "description": "\n      Associates an existing video asset with a project.\n      \n      **Features:**\n      - Links a video asset to a specific project\n      - Validates asset and project ownership\n      - Supports both public and workspace-owned assets\n      \n      **Authentication:** Requires Basic Auth with client credentials\n      \n      **Note:** The asset must exist and be accessible to the workspace, and the project must belong to the workspace.\n    ",
+        "operationId": "addAssetToProject",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "description": "Asset and project identifiers",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddAssetToProjectDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Asset successfully added to project",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssetOperationResponseDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authentication error"
+          },
+          "404": {
+            "description": "Project or asset not found"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Add an asset to a project",
+        "tags": [
+          "Any Assets"
+        ]
+      }
+    },
+    "/v1/assets/remove-from-project": {
+      "post": {
+        "description": "\n      Removes the association between a video asset and a project.\n      \n      **Features:**\n      - Unlinks a video asset from a specific project\n      - Validates asset and project ownership\n      - Supports both public and workspace-owned assets\n      \n      **Authentication:** Requires Basic Auth with client credentials\n      \n      **Note:** The asset must exist and be accessible to the workspace, and the project must belong to the workspace. If the asset is not associated with the project, the operation will still succeed.\n    ",
+        "operationId": "removeAssetFromProject",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "description": "Asset and project identifiers",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RemoveAssetFromProjectDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Asset successfully removed from project",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssetOperationResponseDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authentication error"
+          },
+          "404": {
+            "description": "Project or asset not found"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Remove an asset from a project",
+        "tags": [
+          "Any Assets"
+        ]
+      }
+    },
+    "/v1/assets/{id}": {
+      "get": {
+        "description": "\n      Retrieves a video asset by its unique identifier.\n      \n      **Features:**\n      - Returns complete video asset information\n      - Supports both public and workspace-owned assets\n      - Includes URLs for video, thumbnail, and metadata\n      \n      **Authentication:** Requires Basic Auth with client credentials\n      \n      **Note:** The asset must exist and be accessible to the workspace (either owned by the workspace or public).\n    ",
+        "operationId": "getAssetById",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Video asset successfully retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssetResponseDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authentication error"
+          },
+          "404": {
+            "description": "Video asset not found"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Get a video asset by ID",
+        "tags": [
+          "Any Assets"
+        ]
+      }
+    },
+    "/v1/assets/{id}/watch": {
+      "get": {
+        "description": "\n      Retrieves a direct download link for a video asset if it's fully generated.\n\n      **Features:**\n      - Returns a signed URL for direct download\n      - Supports both public and workspace-owned assets\n      - Validates asset generation status\n\n      **Authentication:** Requires Basic Auth with client credentials\n\n      **Note:** The asset must be fully generated (status: GENERATED) to get the download link.\n    ",
+        "operationId": "getAssetWatchLink",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Asset successfully retrieved and redirected to download URL"
+          },
+          "403": {
+            "description": "Authentication error"
+          },
+          "404": {
+            "description": "Asset not found"
+          },
+          "422": {
+            "description": "Asset has not been generated yet"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Get asset watch link",
+        "tags": [
+          "Any Assets"
+        ]
+      }
+    },
+    "/v1/audio-driven": {
+      "post": {
+        "operationId": "generateAudioDriven",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAudioDrivenDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Audio driven generation completed with detailed results",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AudioDrivenGenerationResultDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authentication error"
+          },
+          "404": {
+            "description": "Script not found"
+          },
+          "422": {
+            "description": "Generation request was refused (blocked by moderation, no videos to generate, or script cannot be generated)"
+          },
+          "500": {
+            "description": "Unknown error"
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Trigger Audio driven generation",
+        "tags": [
+          "AudioDriven"
+        ]
+      }
+    },
+    "/v1/b-roll": {
+      "post": {
+        "description": "\n      Generate a B-roll video asset based on the provided prompt and parameters.\n      \n      **Features:**\n      - Generate videos from text prompts\n      - Support for reference images (base64 encoded)\n      - Support for start frame images (base64 encoded)\n      - Multiple aspect ratios (16:9, 1:1, 9:16)\n      - Video durations of 5 or 10 seconds\n      \n      **Authentication:** Requires Basic Auth with client credentials\n      \n      **Note:** Either refImageAsBase64 OR startFrameAsBase64 can be provided, but not both.\n    ",
+        "operationId": "createBRoll",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "description": "B-roll video generation parameters",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateBRollDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "B-roll video asset successfully created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BRollVideoAssetResponseDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authentication error"
+          },
+          "404": {
+            "description": "Product or project not found"
+          },
+          "422": {
+            "description": "Validation error or content blocked by moderation"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Create a B-roll video asset",
+        "tags": [
+          "B-Roll Assets"
+        ]
+      }
+    },
+    "/v1/omnihuman": {
+      "post": {
+        "operationId": "generateOmniHuman",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateOmniHumanDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Omnihuman generation completed with detailed results",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OmniHumanGenerationResultDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authentication error"
+          },
+          "404": {
+            "description": "Script not found"
+          },
+          "422": {
+            "description": "Generation request was refused (blocked by moderation, no videos to generate, or script cannot be generated)"
+          },
+          "500": {
+            "description": "Unknown error"
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Trigger Omnihuman generation",
+        "tags": [
+          "OmniHuman"
+        ]
+      }
+    },
+    "/v1/scene": {
+      "post": {
+        "description": "\n      Generate a scene video asset based on the provided script, prompt and parameters.\n      \n      **Features:**\n      - Generate videos from text scripts and prompts\n      - Support for context scripts and prompts for continuity\n      - Support for reference images (base64 encoded)\n      - Support for start frame images (base64 encoded)\n      - Multiple aspect ratios (16:9, 1:1, 9:16)\n      - Optional project association\n      \n      **Authentication:** Requires Basic Auth with client credentials\n      \n      **Note:** Either refImageAsBase64 OR startFrameAsBase64 can be provided, but not both.\n    ",
+        "operationId": "createScene",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "description": "Scene video generation parameters",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSceneDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Scene video asset successfully created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SceneVideoAssetResponseDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authentication error"
+          },
+          "404": {
+            "description": "Product or project not found"
+          },
+          "422": {
+            "description": "Validation error or content blocked by moderation"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Create a scene video asset",
+        "tags": [
+          "Scene Assets"
+        ]
+      }
+    },
+    "/health": {
+      "get": {
+        "operationId": "check",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Health"
+        ]
+      }
+    },
+    "/health/release": {
+      "get": {
+        "operationId": "release",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Health"
+        ]
+      }
+    },
+    "/health/timeout-test": {
+      "get": {
+        "operationId": "timeoutTest",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Health"
+        ]
+      }
+    },
+    "/v1/voices/{voiceId}": {
+      "get": {
+        "operationId": "getVoice",
+        "parameters": [
+          {
+            "name": "voiceId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Voice successfully retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authentication error"
+          },
+          "404": {
+            "description": "Voice not found"
+          },
+          "500": {
+            "description": "Unknown error"
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Get voice by ID",
+        "tags": [
+          "Voices"
+        ]
+      }
+    },
+    "/v1/voices": {
+      "get": {
+        "operationId": "getVoices",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "pageSize",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": 50,
+              "type": "number"
+            }
+          },
+          {
+            "name": "age",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "name": "language",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "name": "gender",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Voices list successfully retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedVoices"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authentication error"
+          },
+          "500": {
+            "description": "Unknown error"
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Get paginated voices w/ filters",
+        "tags": [
+          "Voices"
+        ]
+      }
+    },
+    "/v1/voices/mine": {
+      "delete": {
+        "operationId": "deleteWorkspaceVoices",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Workspace voices deleted"
+          },
+          "403": {
+            "description": "Authentication error"
+          },
+          "500": {
+            "description": "Unknown error"
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Delete all workspace voices",
+        "tags": [
+          "Voices"
+        ]
+      }
+    },
+    "/v1/workflows/runs/{runId}": {
+      "get": {
+        "operationId": "getWorkflowRun",
+        "parameters": [
+          {
+            "name": "runId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "tags": [
+          "WorkflowRunsPublic"
+        ]
+      }
+    },
+    "/v1/workflows/{workflowId}/webhook": {
+      "post": {
+        "operationId": "triggerWorkflowWebhook",
+        "parameters": [
+          {
+            "name": "workflowId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "WorkflowWebhook"
+        ]
+      }
+    },
+    "/v1/workflows/{workflowId}/runs": {
+      "get": {
+        "operationId": "listWorkflowRuns",
+        "parameters": [
+          {
+            "name": "workflowId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "tags": [
+          "Workflows"
+        ]
+      }
+    },
+    "/v1/workflows/notion/generate-video-from-script-template": {
+      "post": {
+        "operationId": "useWorkflowFromNotion",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "tags": [
+          "Workflows"
+        ]
+      }
+    },
+    "/v1/sora2/generate/video": {
+      "post": {
+        "description": "Optional reference image: either upload via `POST /v1/file-upload/get-presigned-url` and pass `refImageFilePath`, or pass `refImageAsBase64`. When both are sent, `refImageFilePath` wins.",
+        "operationId": "startVideo",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartSora2Dto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Trigger Sora2 text-to-video generation",
+        "tags": [
+          "Sora2"
+        ]
+      }
+    },
+    "/v1/sora2/remix/video": {
+      "post": {
+        "operationId": "remixVideo",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RemixSora2Dto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Trigger Sora2 video-to-video remix",
+        "tags": [
+          "Sora2"
+        ]
+      }
+    },
+    "/v2/talking-actors/generate": {
+      "post": {
+        "operationId": "generate",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GenerateTalkingActorsDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Generation started",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/GenerationResultItemDto"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Generate talking actor videos",
+        "tags": [
+          "Talking Actors v2"
+        ]
+      }
+    },
+    "/v2/talking-actors/{id}": {
+      "get": {
+        "operationId": "getStatus",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Generation ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Generation status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TalkingActorStatusDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Get talking actor generation status",
+        "tags": [
+          "Talking Actors v2"
+        ]
+      }
+    },
+    "/v2/talking-actors/{id}/watch": {
+      "get": {
+        "operationId": "getWatchUrl",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Generation ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect to watch URL"
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Get talking actor watch URL",
+        "tags": [
+          "Talking Actors v2"
+        ]
+      }
+    },
+    "/v1/veo31/generate/video": {
+      "post": {
+        "operationId": "startVideo",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartVeo31Dto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Trigger Veo31 text-to-video generation",
+        "tags": [
+          "Veo31"
+        ]
+      }
+    },
+    "/v1/file-upload/get-presigned-url": {
+      "post": {
+        "operationId": "generatePresignedUrl",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GeneratePresignedUrlDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Presigned URL successfully generated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PresignedUrlResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid file type"
+          },
+          "403": {
+            "description": "Authentication error"
+          },
+          "500": {
+            "description": "Unknown error"
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Generate presigned URL for file upload",
+        "tags": [
+          "File Upload"
+        ]
+      }
+    },
+    "/v1/file-upload/create-asset": {
+      "post": {
+        "description": "\n      Creates a media library asset from a file previously uploaded via the get-presigned-url endpoint.\n\n      **Usage flow:**\n      1. Call `POST /v1/file-upload/get-presigned-url` to get a presigned URL and `filePath`\n      2. Upload the file directly to S3 using the presigned URL (PUT request)\n      3. Call this endpoint with the returned `filePath` and a `productId` to register the file as an asset\n\n      **Authentication:** Requires Basic Auth with client credentials\n    ",
+        "operationId": "createAssetFromUpload",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAssetFromUploadDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Asset successfully created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssetResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid file path or unsupported file type"
+          },
+          "403": {
+            "description": "Authentication error"
+          },
+          "500": {
+            "description": "Unknown error"
+          }
+        },
+        "security": [
+          {
+            "basic": []
+          }
+        ],
+        "summary": "Create an asset from an uploaded file",
+        "tags": [
+          "File Upload"
+        ]
+      }
+    }
+  },
+  "info": {
+    "title": "Arcads' external API",
+    "description": "",
+    "version": "1.0",
+    "contact": {}
+  },
+  "tags": [],
+  "servers": [],
+  "components": {
+    "securitySchemes": {
+      "basic": {
+        "type": "http",
+        "scheme": "basic"
+      }
+    },
+    "schemas": {
+      "CredentialsCreationDto": {
+        "type": "object",
+        "properties": {
+          "secretKey": {
+            "type": "string",
+            "description": "The ElevenLabs API key"
+          }
+        },
+        "required": [
+          "secretKey"
+        ]
+      },
+      "CredentialsDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The id of the credentials"
+          },
+          "obfuscatedSecret": {
+            "type": "string",
+            "description": "The ElevenLabs API key"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "The date the credentials were created"
+          },
+          "deletedAt": {
+            "type": "object",
+            "description": "The date the credentials were deleted"
+          }
+        },
+        "required": [
+          "id",
+          "obfuscatedSecret",
+          "createdAt",
+          "deletedAt"
+        ]
+      },
+      "ScriptVideoDto": {
+        "type": "object",
+        "properties": {
+          "situationId": {
+            "type": "string",
+            "description": "The situation ID of the video"
+          },
+          "voiceId": {
+            "type": "string",
+            "description": "The voice ID of the video"
+          }
+        },
+        "required": [
+          "situationId"
+        ]
+      },
+      "ScriptDto": {
+        "type": "object",
+        "properties": {
+          "folderId": {
+            "type": "string",
+            "description": "The folder ID where the script will be created. Required if projectId is not provided. If both folderId and projectId are provided, the project must belong to this folder."
+          },
+          "projectId": {
+            "type": "string",
+            "description": "The project ID where the script will be created. Required if folderId is not provided. If provided, the project must belong to the workspace."
+          },
+          "name": {
+            "type": "string",
+            "description": "The name of the script"
+          },
+          "text": {
+            "type": "string",
+            "description": "The text of the script"
+          },
+          "videos": {
+            "description": "The videos of the script",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ScriptVideoDto"
+            }
+          },
+          "id": {
+            "type": "string",
+            "description": "The ID of the script"
+          },
+          "version": {
+            "type": "number",
+            "description": "The version of the script"
+          },
+          "isActiveVersion": {
+            "type": "boolean",
+            "description": "Whether or not this is the latest version of this script"
+          }
+        },
+        "required": [
+          "name",
+          "text",
+          "id",
+          "version",
+          "isActiveVersion"
+        ]
+      },
+      "PaginatedScripts": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "number",
+            "description": "Total number of scripts matching the provided criteria"
+          },
+          "items": {
+            "description": "List of scripts matching the provided criteria and the pagination params",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ScriptDto"
+            }
+          }
+        },
+        "required": [
+          "count",
+          "items"
+        ]
+      },
+      "FolderDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The name of the folder"
+          },
+          "productId": {
+            "type": "string",
+            "description": "The product ID of the folder"
+          },
+          "id": {
+            "type": "string",
+            "description": "The ID of the folder"
+          },
+          "userId": {
+            "type": "string",
+            "description": "The user ID of the folder"
+          }
+        },
+        "required": [
+          "name",
+          "id",
+          "userId"
+        ]
+      },
+      "FolderCreationDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The name of the folder"
+          },
+          "productId": {
+            "type": "string",
+            "description": "The user ID of the folder"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "FolderNameUpdateDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The name of the folder"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "CreateImageDto": {
+        "type": "object",
+        "properties": {
+          "model": {
+            "type": "string",
+            "description": "The model used to generate the image",
+            "enum": [
+              "gpt-image",
+              "gpt-image-2",
+              "nano-banana",
+              "nano-banana-2",
+              "soul",
+              "grok_image",
+              "seedream",
+              "seedream_5_lite"
+            ],
+            "example": "gpt-image"
+          },
+          "productId": {
+            "type": "string",
+            "description": "The ID of the product",
+            "example": "40c97d04-b1b8-45fa-878d-4490a729bf5f"
+          },
+          "projectId": {
+            "type": "string",
+            "description": "The ID of the project",
+            "example": "40c97d04-b1b8-45fa-878d-4490a729bf5f"
+          },
+          "prompt": {
+            "type": "string",
+            "description": "The prompt for the image",
+            "example": "A futuristic city skyline at sunset"
+          },
+          "aspectRatio": {
+            "type": "string",
+            "description": "The aspect ratio of the image",
+            "example": "16:9",
+            "enum": [
+              "1:1",
+              "16:9",
+              "9:16"
+            ]
+          },
+          "referenceImages": {
+            "description": "The links to reference images. Upload files via presigned URL endpoint first and pass returned file paths here.\nMax reference images per model:\n  - gpt-image: 5\n  - gpt-image-2: 5\n  - nano-banana: 14\n  - nano-banana-2: 14\n  - soul: 0\n  - grok_image: 1\n  - seedream: 4\n  - seedream_5_lite: 4",
+            "example": [
+              "/path/to/image1.jpg",
+              "/path/to/image2.jpg"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "nbGenerations": {
+            "type": "number",
+            "description": "Number of generations for SOUL model",
+            "example": 3,
+            "minimum": 1,
+            "maximum": 10
+          },
+          "enhance": {
+            "type": "boolean",
+            "description": "When true, the prompt is enhanced by Claude before generation. Costs an additional 8 credits. Only applies to eligible asset types."
+          }
+        },
+        "required": [
+          "model",
+          "productId",
+          "prompt",
+          "aspectRatio"
+        ]
+      },
+      "CreateVideoDto": {
+        "type": "object",
+        "properties": {
+          "model": {
+            "type": "string",
+            "description": "The model used to generate the video",
+            "enum": [
+              "sora2",
+              "sora2-pro",
+              "veo31",
+              "kling-2.6",
+              "kling-3.0",
+              "grok-video",
+              "seedance",
+              "seedance-2.0",
+              "happy-horse"
+            ],
+            "example": "sora2"
+          },
+          "productId": {
+            "type": "string",
+            "description": "The ID of the product",
+            "example": "40c97d04-b1b8-45fa-878d-4490a729bf5f"
+          },
+          "projectId": {
+            "type": "string",
+            "description": "The ID of the project",
+            "example": "40c97d04-b1b8-45fa-878d-4490a729bf5f"
+          },
+          "prompt": {
+            "type": "string",
+            "description": "The prompt for the video",
+            "example": "A futuristic city skyline at sunset"
+          },
+          "aspectRatio": {
+            "type": "string",
+            "description": "The aspect ratio of the video. Standard values: '1:1', '16:9', '9:16'. grok-video also supports 'auto'. seedance-2.0: '9:16' or '16:9' only.",
+            "example": "16:9"
+          },
+          "duration": {
+            "type": "number",
+            "description": "Duration in seconds. Model-specific: sora2/sora2-pro: 4/8/12/16/20. kling-2.6: 5/10. kling-3.0: 3-15. grok-video: 1-15. seedance: 4-12. seedance-2.0: 4-15. veo31: not applicable.",
+            "example": 5
+          },
+          "resolution": {
+            "type": "string",
+            "description": "Video resolution. Model-specific: sora2/sora2-pro: 720p/1080p. veo31: 720p/1080p/4K. grok-video: 480p/720p. seedance: 480p/720p/1080p. seedance-2.0: 480p/720p. kling models: not applicable.",
+            "example": "720p"
+          },
+          "referenceImages": {
+            "description": "The links to reference images. Upload files via presigned URL endpoint first and pass returned file paths here.\nMax reference images per model:\n  - sora2: 1\n  - sora2-pro: 1\n  - veo31: 3\n  - seedance: 1\n  - seedance-2.0: 3\n  - happy-horse: 1",
+            "example": [
+              "/path/to/image1.jpg"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "referenceVideos": {
+            "description": "The links to reference videos (seedance-2.0 only). Upload files via presigned URL endpoint first.\nMax reference videos per model:\n  - seedance-2.0: 3",
+            "example": [
+              "/path/to/video1.mp4"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "referenceAudios": {
+            "description": "The links to reference audios (seedance-2.0 only). Upload files via presigned URL endpoint first.\nMax reference audios per model:\n  - seedance-2.0: 3",
+            "example": [
+              "/path/to/audio1.mp3"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "audioEnabled": {
+            "type": "boolean",
+            "description": "Enable audio output for the generated video. Only applicable for seedance-2.0.",
+            "example": true
+          },
+          "startFrame": {
+            "type": "string",
+            "description": "Path to the start frame image (presigned URL path). Supported by: veo31, kling-2.6, kling-3.0, grok-video.",
+            "example": "tmp/start-frame.jpg"
+          },
+          "endFrame": {
+            "type": "string",
+            "description": "Path to the end frame image (presigned URL path). Supported by: veo31, kling-2.6, kling-3.0, seedance.",
+            "example": "tmp/end-frame.jpg"
+          },
+          "nbGenerations": {
+            "type": "number",
+            "description": "Number of generations. Only applicable for sora2/sora2-pro models.",
+            "example": 2,
+            "minimum": 1,
+            "maximum": 10
+          },
+          "enhance": {
+            "type": "boolean",
+            "description": "When true, the prompt is enhanced by Claude before generation. Costs an additional 8 credits. Only applies to eligible asset types."
+          }
+        },
+        "required": [
+          "model",
+          "productId",
+          "prompt"
+        ]
+      },
+      "PresetTypeDto": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "The preset type slug",
+            "enum": [
+              "camera-movement",
+              "fashion-tryon",
+              "gameplay-ad",
+              "gestures",
+              "product-showcase",
+              "showyourapp",
+              "unboxing-pov"
+            ],
+            "example": "gestures"
+          },
+          "name": {
+            "type": "string",
+            "description": "Human-readable name",
+            "example": "Gestures"
+          },
+          "description": {
+            "type": "string",
+            "description": "Description of the preset type"
+          }
+        },
+        "required": [
+          "type",
+          "name",
+          "description"
+        ]
+      },
+      "EmbeddedActorDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The actor's ID"
+          },
+          "name": {
+            "type": "string",
+            "description": "The actor's display name",
+            "example": "Sarah"
+          },
+          "gender": {
+            "type": "string",
+            "description": "The actor's gender",
+            "enum": [
+              "Female",
+              "Male"
+            ],
+            "example": "Female"
+          },
+          "age": {
+            "type": "string",
+            "description": "The actor's age bracket",
+            "enum": [
+              "Adult",
+              "Senior",
+              "Young Adult"
+            ],
+            "example": "Adult"
+          },
+          "skinTone": {
+            "type": "string",
+            "description": "The actor's canonical skin-tone slug",
+            "enum": [
+              "skin100",
+              "skin200",
+              "skin300",
+              "skin400",
+              "skin500",
+              "skin600"
+            ],
+            "example": "skin300"
+          },
+          "skinToneHex": {
+            "type": "string",
+            "description": "Hex color matching the actor's skinTone, for rendering swatches identically to the Arcads UI",
+            "example": "#CFA07C"
+          },
+          "freeSpeech": {
+            "type": "boolean",
+            "description": "Whether the actor supports free-speech generation"
+          },
+          "imageUrl": {
+            "type": "string",
+            "description": "Signed URL to the actor's headshot image. Empty string if no headshot is available."
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "gender",
+          "age",
+          "skinTone",
+          "skinToneHex",
+          "freeSpeech",
+          "imageUrl"
+        ]
+      },
+      "PresetTemplateDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The template ID (use as situationId in the generate endpoint)",
+            "example": "40c97d04-b1b8-45fa-878d-4490a729bf5f"
+          },
+          "actorId": {
+            "type": "string",
+            "description": "The actor ID of the situation"
+          },
+          "actor": {
+            "description": "Actor associated with this situation. Null for situations without an actor (e.g. B-roll, Sora-2).",
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/EmbeddedActorDto"
+              }
+            ]
+          },
+          "workspaceId": {
+            "type": "string",
+            "description": "The workspace ID of the situation",
+            "nullable": true
+          },
+          "previewUrl": {
+            "type": "string",
+            "description": "The video's URL"
+          },
+          "imageUrl": {
+            "type": "string",
+            "description": "The snapshot image URL"
+          },
+          "tags": {
+            "description": "Free-form tags describing what is shown in the situation (e.g. setting, scenario, mood). Useful for choosing the right situation to remix for a given product.",
+            "example": [
+              "kitchen",
+              "sitting",
+              "casual"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "emotions": {
+            "description": "Emotions conveyed by the actor in the situation.",
+            "example": [
+              "happy",
+              "curious"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "accessories": {
+            "description": "Accessories visible in the situation.",
+            "example": [
+              "glasses",
+              "hat"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "cameraAngle": {
+            "type": "string",
+            "description": "Camera angle of the situation. Null when the situation has no specific angle.",
+            "nullable": true,
+            "enum": [
+              "front",
+              "close_up",
+              "low_angle",
+              "depth"
+            ]
+          },
+          "talkingActorEnabled": {
+            "type": "boolean",
+            "description": "Whether this situation is a standard talking-actor situation (lip-synced UGC). Mutually exclusive with the other content-type flags below."
+          },
+          "showYourAppEnabled": {
+            "type": "boolean",
+            "description": "Whether this situation is a \"show your app\" situation (actor presenting an on-screen app)."
+          },
+          "unboxingPovEnabled": {
+            "type": "boolean",
+            "description": "Whether this situation is an unboxing POV situation."
+          },
+          "brollSora2Enabled": {
+            "type": "boolean",
+            "description": "Whether this situation is a Sora-2 B-roll situation."
+          },
+          "brollSora2OpenaiVideoId": {
+            "type": "object",
+            "description": "The OpenAI Sora-2 video ID used as the source for this B-roll situation. Null for situations that are not Sora-2 B-roll.",
+            "nullable": true
+          },
+          "fashionTryOnEnabled": {
+            "type": "boolean",
+            "description": "Whether this situation is a fashion try-on situation."
+          },
+          "productShowcaseEnabled": {
+            "type": "boolean",
+            "description": "Whether this situation is a product-showcase situation."
+          },
+          "gesturesEnabled": {
+            "type": "boolean",
+            "description": "Whether this situation is a gestures situation."
+          },
+          "cameraMovementEnabled": {
+            "type": "boolean",
+            "description": "Whether this situation is a camera-movement situation."
+          },
+          "cameraMovementMotionId": {
+            "type": "object",
+            "description": "The motion ID used for this camera-movement situation. Null for situations that are not camera-movement.",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "previewUrl",
+          "imageUrl",
+          "tags",
+          "emotions",
+          "accessories",
+          "talkingActorEnabled",
+          "showYourAppEnabled",
+          "unboxingPovEnabled",
+          "brollSora2Enabled",
+          "fashionTryOnEnabled",
+          "productShowcaseEnabled",
+          "gesturesEnabled",
+          "cameraMovementEnabled"
+        ]
+      },
+      "PaginatedPresetTemplates": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "number",
+            "description": "Total number of templates for this preset type"
+          },
+          "items": {
+            "description": "List of templates",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PresetTemplateDto"
+            }
+          }
+        },
+        "required": [
+          "count",
+          "items"
+        ]
+      },
+      "StartCameraMovementDto": {
+        "type": "object",
+        "properties": {
+          "productId": {
+            "type": "string",
+            "description": "The ID of the product",
+            "example": "40c97d04-b1b8-45fa-878d-4490a729bf5f"
+          },
+          "projectId": {
+            "type": "string",
+            "description": "The ID of the project",
+            "example": "40c97d04-b1b8-45fa-878d-4490a729bf5f"
+          },
+          "situationId": {
+            "type": "string",
+            "description": "The ID of the situation",
+            "example": "40c97d04-b1b8-45fa-878d-4490a729bf5f"
+          },
+          "referenceImages": {
+            "description": "Avatar image path from presigned URL upload",
+            "example": [
+              "/tmp-uploads/avatar.png"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "aspectRatio": {
+            "type": "string",
+            "description": "The aspect ratio of the video",
+            "example": "16:9",
+            "enum": [
+              "1:1",
+              "16:9",
+              "9:16"
+            ]
+          },
+          "strength": {
+            "type": "number",
+            "description": "The camera movement strength",
+            "example": 0.75
+          }
+        },
+        "required": [
+          "productId",
+          "situationId",
+          "referenceImages"
+        ]
+      },
+      "StartFashionTryOnDto": {
+        "type": "object",
+        "properties": {
+          "productId": {
+            "type": "string",
+            "description": "The ID of the product",
+            "example": "40c97d04-b1b8-45fa-878d-4490a729bf5f"
+          },
+          "projectId": {
+            "type": "string",
+            "description": "The ID of the project",
+            "example": "40c97d04-b1b8-45fa-878d-4490a729bf5f"
+          },
+          "situationId": {
+            "type": "string",
+            "description": "The ID of the situation",
+            "example": "40c97d04-b1b8-45fa-878d-4490a729bf5f"
+          },
+          "referenceImages": {
+            "description": "Garment image paths from presigned URL upload",
+            "example": [
+              "/tmp-uploads/garment-front.png"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "aspectRatio": {
+            "type": "string",
+            "description": "The aspect ratio of the video",
+            "example": "16:9",
+            "enum": [
+              "1:1",
+              "16:9",
+              "9:16"
+            ]
+          }
+        },
+        "required": [
+          "productId",
+          "situationId",
+          "referenceImages"
+        ]
+      },
+      "StartGesturesDto": {
+        "type": "object",
+        "properties": {
+          "productId": {
+            "type": "string",
+            "description": "The ID of the product",
+            "example": "40c97d04-b1b8-45fa-878d-4490a729bf5f"
+          },
+          "projectId": {
+            "type": "string",
+            "description": "The ID of the project",
+            "example": "40c97d04-b1b8-45fa-878d-4490a729bf5f"
+          },
+          "situationId": {
+            "type": "string",
+            "description": "The ID of the situation",
+            "example": "40c97d04-b1b8-45fa-878d-4490a729bf5f"
+          },
+          "referenceImages": {
+            "description": "Avatar image path from presigned URL upload",
+            "example": [
+              "/tmp-uploads/avatar.png"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "aspectRatio": {
+            "type": "string",
+            "description": "The aspect ratio of the video",
+            "example": "16:9",
+            "enum": [
+              "1:1",
+              "16:9",
+              "9:16"
+            ]
+          }
+        },
+        "required": [
+          "productId",
+          "situationId",
+          "referenceImages"
+        ]
+      },
+      "StartProductShowcaseDto": {
+        "type": "object",
+        "properties": {
+          "productId": {
+            "type": "string",
+            "description": "The ID of the product",
+            "example": "40c97d04-b1b8-45fa-878d-4490a729bf5f"
+          },
+          "projectId": {
+            "type": "string",
+            "description": "The ID of the project",
+            "example": "40c97d04-b1b8-45fa-878d-4490a729bf5f"
+          },
+          "situationId": {
+            "type": "string",
+            "description": "The ID of the situation",
+            "example": "40c97d04-b1b8-45fa-878d-4490a729bf5f"
+          },
+          "referenceImages": {
+            "description": "Product image path from presigned URL upload",
+            "example": [
+              "/tmp-uploads/product.png"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "prompt": {
+            "type": "string",
+            "description": "Product description (10-1000 chars)",
+            "example": "A premium matte black mechanical keyboard with RGB lighting."
+          },
+          "aspectRatio": {
+            "type": "string",
+            "description": "The aspect ratio of the video",
+            "example": "16:9",
+            "enum": [
+              "1:1",
+              "16:9",
+              "9:16"
+            ]
+          }
+        },
+        "required": [
+          "productId",
+          "situationId",
+          "referenceImages",
+          "prompt"
+        ]
+      },
+      "StartShowyourappDto": {
+        "type": "object",
+        "properties": {
+          "productId": {
+            "type": "string",
+            "description": "The ID of the product",
+            "example": "40c97d04-b1b8-45fa-878d-4490a729bf5f"
+          },
+          "projectId": {
+            "type": "string",
+            "description": "The ID of the project",
+            "example": "40c97d04-b1b8-45fa-878d-4490a729bf5f"
+          },
+          "situationId": {
+            "type": "string",
+            "description": "The ID of the situation",
+            "example": "40c97d04-b1b8-45fa-878d-4490a729bf5f"
+          },
+          "referenceImages": {
+            "description": "App screenshot path from presigned URL upload",
+            "example": [
+              "/tmp-uploads/app-screenshot.png"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "productId",
+          "situationId",
+          "referenceImages"
+        ]
+      },
+      "StartUnboxingPovDto": {
+        "type": "object",
+        "properties": {
+          "productId": {
+            "type": "string",
+            "description": "The ID of the product",
+            "example": "40c97d04-b1b8-45fa-878d-4490a729bf5f"
+          },
+          "projectId": {
+            "type": "string",
+            "description": "The ID of the project",
+            "example": "40c97d04-b1b8-45fa-878d-4490a729bf5f"
+          },
+          "situationId": {
+            "type": "string",
+            "description": "The ID of the situation",
+            "example": "40c97d04-b1b8-45fa-878d-4490a729bf5f"
+          },
+          "referenceImages": {
+            "description": "Product image path from presigned URL upload",
+            "example": [
+              "/tmp-uploads/product.png"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "productId",
+          "situationId",
+          "referenceImages"
+        ]
+      },
+      "StartGameplayAdDto": {
+        "type": "object",
+        "properties": {
+          "productId": {
+            "type": "string",
+            "description": "The ID of the product",
+            "example": "40c97d04-b1b8-45fa-878d-4490a729bf5f"
+          },
+          "projectId": {
+            "type": "string",
+            "description": "The ID of the project",
+            "example": "40c97d04-b1b8-45fa-878d-4490a729bf5f"
+          },
+          "situationId": {
+            "type": "string",
+            "description": "The ID of the situation",
+            "example": "40c97d04-b1b8-45fa-878d-4490a729bf5f"
+          },
+          "referenceVideos": {
+            "description": "Gameplay video path from presigned URL upload",
+            "example": [
+              "/tmp-uploads/gameplay.mp4"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "prompt": {
+            "type": "string",
+            "description": "Optional prompt to guide script generation"
+          }
+        },
+        "required": [
+          "productId",
+          "situationId",
+          "referenceVideos"
+        ]
+      },
+      "PaginatedFolders": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "number",
+            "description": "Total number of folders matching the provided criteria"
+          },
+          "items": {
+            "description": "List of folders matching the provided criteria and the pagination params",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FolderDto"
+            }
+          }
+        },
+        "required": [
+          "count",
+          "items"
+        ]
+      },
+      "ProductDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The name of the product"
+          },
+          "description": {
+            "type": "string",
+            "description": "The description of the product"
+          },
+          "targetAudience": {
+            "type": "string",
+            "description": "The target audience of the product"
+          },
+          "mainFeatures": {
+            "description": "The main features of the product",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "painPoint": {
+            "type": "string",
+            "description": "The pain point targeted by the product"
+          },
+          "perceived": {
+            "type": "string",
+            "description": "The perceived value of the product"
+          },
+          "id": {
+            "type": "string",
+            "description": "The ID of the product"
+          },
+          "workspaceId": {
+            "type": "string",
+            "description": "The workspace ID of the product"
+          },
+          "folders": {
+            "description": "The folders of the product",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "name",
+          "id",
+          "workspaceId",
+          "folders"
+        ]
+      },
+      "PaginatedProducts": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "number",
+            "description": "Total number of products matching the provided criteria"
+          },
+          "items": {
+            "description": "List of products matching the provided criteria and the pagination params",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductDto"
+            }
+          }
+        },
+        "required": [
+          "count",
+          "items"
+        ]
+      },
+      "ProductCreationDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The name of the product"
+          },
+          "description": {
+            "type": "string",
+            "description": "The description of the product"
+          },
+          "targetAudience": {
+            "type": "string",
+            "description": "The target audience of the product"
+          },
+          "mainFeatures": {
+            "description": "The main features of the product",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "painPoint": {
+            "type": "string",
+            "description": "The pain point targeted by the product"
+          },
+          "perceived": {
+            "type": "string",
+            "description": "The perceived value of the product"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "ProductUpdateDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The name of the product"
+          },
+          "description": {
+            "type": "string",
+            "description": "The description of the product"
+          },
+          "targetAudience": {
+            "type": "string",
+            "description": "The target audience of the product"
+          },
+          "mainFeatures": {
+            "description": "The main features of the product",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "painPoint": {
+            "type": "string",
+            "description": "The pain point targeted by the product"
+          },
+          "perceived": {
+            "type": "string",
+            "description": "The perceived value of the product"
+          }
+        }
+      },
+      "ProjectCreationDto": {
+        "type": "object",
+        "properties": {
+          "folderId": {
+            "type": "string",
+            "description": "The folder ID where the project will be created",
+            "example": "123e4567-e89b-12d3-a456-426614174000"
+          },
+          "name": {
+            "type": "string",
+            "description": "The name of the project",
+            "example": "My Project"
+          }
+        },
+        "required": [
+          "folderId",
+          "name"
+        ]
+      },
+      "ProjectDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Project ID"
+          },
+          "folderId": {
+            "type": "string",
+            "description": "Folder ID"
+          },
+          "name": {
+            "type": "string",
+            "description": "Project name"
+          },
+          "userId": {
+            "type": "string",
+            "description": "User ID who created the project"
+          },
+          "createdAt": {
+            "type": "string",
+            "description": "Creation timestamp"
+          },
+          "updatedAt": {
+            "type": "string",
+            "description": "Last update timestamp"
+          }
+        },
+        "required": [
+          "id",
+          "folderId",
+          "name",
+          "userId",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "ProjectUpdateDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The new name of the project",
+            "example": "Updated Project Name"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "SituationDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The situation's ID"
+          },
+          "actorId": {
+            "type": "string",
+            "description": "The actor ID of the situation"
+          },
+          "actor": {
+            "description": "Actor associated with this situation. Null for situations without an actor (e.g. B-roll, Sora-2).",
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/EmbeddedActorDto"
+              }
+            ]
+          },
+          "workspaceId": {
+            "type": "string",
+            "description": "The workspace ID of the situation",
+            "nullable": true
+          },
+          "previewUrl": {
+            "type": "string",
+            "description": "The video's URL"
+          },
+          "imageUrl": {
+            "type": "string",
+            "description": "The snapshot image URL"
+          },
+          "tags": {
+            "description": "Free-form tags describing what is shown in the situation (e.g. setting, scenario, mood). Useful for choosing the right situation to remix for a given product.",
+            "example": [
+              "kitchen",
+              "sitting",
+              "casual"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "emotions": {
+            "description": "Emotions conveyed by the actor in the situation.",
+            "example": [
+              "happy",
+              "curious"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "accessories": {
+            "description": "Accessories visible in the situation.",
+            "example": [
+              "glasses",
+              "hat"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "cameraAngle": {
+            "type": "string",
+            "description": "Camera angle of the situation. Null when the situation has no specific angle.",
+            "nullable": true,
+            "enum": [
+              "front",
+              "close_up",
+              "low_angle",
+              "depth"
+            ]
+          },
+          "talkingActorEnabled": {
+            "type": "boolean",
+            "description": "Whether this situation is a standard talking-actor situation (lip-synced UGC). Mutually exclusive with the other content-type flags below."
+          },
+          "showYourAppEnabled": {
+            "type": "boolean",
+            "description": "Whether this situation is a \"show your app\" situation (actor presenting an on-screen app)."
+          },
+          "unboxingPovEnabled": {
+            "type": "boolean",
+            "description": "Whether this situation is an unboxing POV situation."
+          },
+          "brollSora2Enabled": {
+            "type": "boolean",
+            "description": "Whether this situation is a Sora-2 B-roll situation."
+          },
+          "brollSora2OpenaiVideoId": {
+            "type": "object",
+            "description": "The OpenAI Sora-2 video ID used as the source for this B-roll situation. Null for situations that are not Sora-2 B-roll.",
+            "nullable": true
+          },
+          "fashionTryOnEnabled": {
+            "type": "boolean",
+            "description": "Whether this situation is a fashion try-on situation."
+          },
+          "productShowcaseEnabled": {
+            "type": "boolean",
+            "description": "Whether this situation is a product-showcase situation."
+          },
+          "gesturesEnabled": {
+            "type": "boolean",
+            "description": "Whether this situation is a gestures situation."
+          },
+          "cameraMovementEnabled": {
+            "type": "boolean",
+            "description": "Whether this situation is a camera-movement situation."
+          },
+          "cameraMovementMotionId": {
+            "type": "object",
+            "description": "The motion ID used for this camera-movement situation. Null for situations that are not camera-movement.",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "previewUrl",
+          "imageUrl",
+          "tags",
+          "emotions",
+          "accessories",
+          "talkingActorEnabled",
+          "showYourAppEnabled",
+          "unboxingPovEnabled",
+          "brollSora2Enabled",
+          "fashionTryOnEnabled",
+          "productShowcaseEnabled",
+          "gesturesEnabled",
+          "cameraMovementEnabled"
+        ]
+      },
+      "PaginatedSituations": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "number",
+            "description": "Total number of situations matching the provided criteria"
+          },
+          "items": {
+            "description": "List of situations matching the provided criteria and the pagination params",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SituationDto"
+            }
+          }
+        },
+        "required": [
+          "count",
+          "items"
+        ]
+      },
+      "VideoData": {
+        "type": "object",
+        "properties": {
+          "speed": {
+            "type": "number",
+            "description": "The speed of the video"
+          },
+          "similarityBoost": {
+            "type": "number",
+            "description": "The similarity boost of the video"
+          },
+          "stability": {
+            "type": "number",
+            "description": "The stability of the video"
+          },
+          "style": {
+            "type": "number",
+            "description": "The style of the video"
+          },
+          "useSpeakerBoost": {
+            "type": "boolean",
+            "description": "Whether to use speaker boost"
+          }
+        }
+      },
+      "VideoDto": {
+        "type": "object",
+        "properties": {
+          "voiceId": {
+            "type": "string",
+            "description": "The voice ID of the video"
+          },
+          "data": {
+            "description": "The data of the video",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VideoData"
+              }
+            ]
+          },
+          "scriptId": {
+            "type": "string",
+            "description": "The script ID of the video"
+          },
+          "situationId": {
+            "type": "string",
+            "description": "The situation ID of the video"
+          },
+          "id": {
+            "type": "string",
+            "description": "The ID of the video"
+          },
+          "videoStatus": {
+            "type": "object",
+            "description": "The status of the video"
+          },
+          "videoUrl": {
+            "type": "string",
+            "description": "The video's URL"
+          }
+        },
+        "required": [
+          "scriptId",
+          "situationId",
+          "id",
+          "videoUrl"
+        ]
+      },
+      "ScriptCreationDto": {
+        "type": "object",
+        "properties": {
+          "folderId": {
+            "type": "string",
+            "description": "The folder ID where the script will be created. Required if projectId is not provided. If both folderId and projectId are provided, the project must belong to this folder."
+          },
+          "projectId": {
+            "type": "string",
+            "description": "The project ID where the script will be created. Required if folderId is not provided. If provided, the project must belong to the workspace."
+          },
+          "name": {
+            "type": "string",
+            "description": "The name of the script"
+          },
+          "text": {
+            "type": "string",
+            "description": "The text of the script"
+          },
+          "videos": {
+            "description": "The videos of the script",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ScriptVideoDto"
+            }
+          }
+        },
+        "required": [
+          "name",
+          "text"
+        ]
+      },
+      "ScriptUpdateDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The name of the script"
+          },
+          "text": {
+            "type": "string",
+            "description": "The text of the script"
+          },
+          "folderId": {
+            "type": "string",
+            "description": "The folder ID of the script"
+          }
+        }
+      },
+      "OmniHumanGeneratedAssetDataDto": {
+        "type": "object",
+        "properties": {
+          "situationId": {
+            "type": "string"
+          },
+          "videoId": {
+            "type": "string"
+          },
+          "audioUrl": {
+            "type": "string"
+          },
+          "startFrame": {
+            "type": "string"
+          },
+          "script": {
+            "type": "string"
+          }
+        }
+      },
+      "OmniHumanGeneratedAssetDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "productId": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "actor_image",
+              "actor_image_suggestions",
+              "ai_actor",
+              "audio_driven",
+              "camera_angle",
+              "camera_movement",
+              "captions",
+              "styled_subtitles",
+              "change_voice",
+              "extend_video",
+              "extend_sora2",
+              "extract_frame",
+              "extract_audio",
+              "change_speed_video",
+              "change_speed_audio",
+              "isolate_voice",
+              "speech_to_speech",
+              "text_to_speech",
+              "mute_video",
+              "fashion_tryon",
+              "gameplay_ad",
+              "gestures",
+              "gpt-image",
+              "gpt-image-2",
+              "grok_image",
+              "grok_imagine_15",
+              "grok_video",
+              "grok_video_edit",
+              "happy_horse",
+              "hook_repurposed",
+              "image-background-removed",
+              "kling_26",
+              "kling_30",
+              "kling_30_4k",
+              "kling-animate",
+              "kling30-animate",
+              "nano-banana",
+              "nano-banana-2",
+              "omnihuman",
+              "product_showcase",
+              "seedance",
+              "seedance_20",
+              "seedream",
+              "seedream_5_lite",
+              "showyourapp",
+              "skin_enhanced_image",
+              "sora2",
+              "soul",
+              "stitch",
+              "transcribe",
+              "transcribe_audio",
+              "translate_video",
+              "unboxing_pov",
+              "uploaded_audio",
+              "uploaded_document",
+              "uploaded_image",
+              "uploaded_video",
+              "upscaled_image",
+              "upscaled_video",
+              "veo31",
+              "video-background-removed",
+              "video_editor",
+              "wan22_animate",
+              "replace_actor",
+              "rendered_video",
+              "ai_video_editing",
+              "rendered_image",
+              "prompt_builder",
+              "prompt_enhancer",
+              "llm",
+              "workflow_text_split",
+              "actor_motion",
+              "scene",
+              "b_roll"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "created",
+              "pending",
+              "generated",
+              "failed",
+              "uploaded"
+            ]
+          },
+          "data": {
+            "$ref": "#/components/schemas/OmniHumanGeneratedAssetDataDto"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "productId",
+          "type",
+          "status",
+          "data",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "OmniHumanFailedItemDto": {
+        "type": "object",
+        "properties": {
+          "videoId": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "videoId",
+          "error"
+        ]
+      },
+      "OmniHumanSummaryDto": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "number"
+          },
+          "successful": {
+            "type": "number"
+          },
+          "failed": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "total",
+          "successful",
+          "failed"
+        ]
+      },
+      "OmniHumanGenerationResultDto": {
+        "type": "object",
+        "properties": {
+          "created": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OmniHumanGeneratedAssetDto"
+            }
+          },
+          "failed": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OmniHumanFailedItemDto"
+            }
+          },
+          "summary": {
+            "$ref": "#/components/schemas/OmniHumanSummaryDto"
+          }
+        },
+        "required": [
+          "created",
+          "failed",
+          "summary"
+        ]
+      },
+      "VideoCreationDto": {
+        "type": "object",
+        "properties": {
+          "voiceId": {
+            "type": "string",
+            "description": "The voice ID of the video"
+          },
+          "data": {
+            "description": "The data of the video",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VideoData"
+              }
+            ]
+          },
+          "scriptId": {
+            "type": "string",
+            "description": "The script ID of the video"
+          },
+          "situationId": {
+            "type": "string",
+            "description": "The situation ID of the video"
+          }
+        },
+        "required": [
+          "scriptId",
+          "situationId"
+        ]
+      },
+      "VideoUpdateDto": {
+        "type": "object",
+        "properties": {
+          "voiceId": {
+            "type": "string",
+            "description": "The voice ID of the video"
+          },
+          "data": {
+            "description": "The data of the video",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VideoData"
+              }
+            ]
+          }
+        }
+      },
+      "AddAssetToProjectDto": {
+        "type": "object",
+        "properties": {
+          "assetId": {
+            "type": "string",
+            "description": "The ID of the asset",
+            "example": "b972ffe0-3364-46ad-922e-211df4f1d441"
+          },
+          "projectId": {
+            "type": "string",
+            "description": "The ID of the project",
+            "example": "40c97d04-b1b8-45fa-878d-4490a729bf5f"
+          }
+        },
+        "required": [
+          "assetId",
+          "projectId"
+        ]
+      },
+      "AssetOperationResponseDto": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "description": "Indicates whether the operation was successful",
+            "example": true
+          }
+        },
+        "required": [
+          "success"
+        ]
+      },
+      "RemoveAssetFromProjectDto": {
+        "type": "object",
+        "properties": {
+          "assetId": {
+            "type": "string",
+            "description": "The ID of the asset",
+            "example": "b972ffe0-3364-46ad-922e-211df4f1d441"
+          },
+          "projectId": {
+            "type": "string",
+            "description": "The ID of the project",
+            "example": "40c97d04-b1b8-45fa-878d-4490a729bf5f"
+          }
+        },
+        "required": [
+          "assetId",
+          "projectId"
+        ]
+      },
+      "AssetResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The unique identifier of the video asset",
+            "example": "b972ffe0-3364-46ad-922e-211df4f1d441"
+          },
+          "productId": {
+            "type": "string",
+            "description": "The ID of the product this video asset belongs to",
+            "example": "40c97d04-b1b8-45fa-878d-4490a729bf5f"
+          },
+          "type": {
+            "type": "string",
+            "description": "The type of video asset",
+            "enum": [
+              "actor_image",
+              "actor_image_suggestions",
+              "ai_actor",
+              "audio_driven",
+              "camera_angle",
+              "camera_movement",
+              "captions",
+              "styled_subtitles",
+              "change_voice",
+              "extend_video",
+              "extend_sora2",
+              "extract_frame",
+              "extract_audio",
+              "change_speed_video",
+              "change_speed_audio",
+              "isolate_voice",
+              "speech_to_speech",
+              "text_to_speech",
+              "mute_video",
+              "fashion_tryon",
+              "gameplay_ad",
+              "gestures",
+              "gpt-image",
+              "gpt-image-2",
+              "grok_image",
+              "grok_imagine_15",
+              "grok_video",
+              "grok_video_edit",
+              "happy_horse",
+              "hook_repurposed",
+              "image-background-removed",
+              "kling_26",
+              "kling_30",
+              "kling_30_4k",
+              "kling-animate",
+              "kling30-animate",
+              "nano-banana",
+              "nano-banana-2",
+              "omnihuman",
+              "product_showcase",
+              "seedance",
+              "seedance_20",
+              "seedream",
+              "seedream_5_lite",
+              "showyourapp",
+              "skin_enhanced_image",
+              "sora2",
+              "soul",
+              "stitch",
+              "transcribe",
+              "transcribe_audio",
+              "translate_video",
+              "unboxing_pov",
+              "uploaded_audio",
+              "uploaded_document",
+              "uploaded_image",
+              "uploaded_video",
+              "upscaled_image",
+              "upscaled_video",
+              "veo31",
+              "video-background-removed",
+              "video_editor",
+              "wan22_animate",
+              "replace_actor",
+              "rendered_video",
+              "ai_video_editing",
+              "rendered_image",
+              "prompt_builder",
+              "prompt_enhancer",
+              "llm",
+              "workflow_text_split",
+              "actor_motion",
+              "scene",
+              "b_roll"
+            ],
+            "example": "b_roll"
+          },
+          "url": {
+            "type": "string",
+            "description": "The URL of the generated video",
+            "example": "https://videoassets/b972ffe0-3364-46ad-922e-211df4f1d441.mp4"
+          },
+          "sdUrl": {
+            "type": "string",
+            "description": "The URL of the standard definition video",
+            "example": "https://videoassets/b972ffe0-3364-46ad-922e-211df4f1d441_sd.mp4"
+          },
+          "thumbnailUrl": {
+            "type": "string",
+            "description": "The URL of the video thumbnail",
+            "example": "https://videoassets/b972ffe0-3364-46ad-922e-211df4f1d441.jpg"
+          },
+          "status": {
+            "type": "string",
+            "description": "The current status of the video asset",
+            "enum": [
+              "created",
+              "pending",
+              "generated",
+              "failed",
+              "uploaded"
+            ],
+            "example": "generated"
+          },
+          "data": {
+            "type": "object",
+            "description": "The video asset data (structure varies by type)",
+            "example": {
+              "prompt": "A beautiful landscape with mountains and a lake at sunset",
+              "aspectRatio": "16:9",
+              "duration": 10
+            }
+          },
+          "subStatus": {
+            "type": "object",
+            "description": "The sub-status of the video asset",
+            "example": null
+          },
+          "projects": {
+            "description": "Array of project IDs this asset belongs to",
+            "example": [
+              "40c97d04-b1b8-45fa-878d-4490a729bf5f"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "type"
+        ]
+      },
+      "AudioDrivenVideoDto": {
+        "type": "object",
+        "properties": {
+          "situationId": {
+            "type": "string",
+            "description": "The situation ID of the video"
+          },
+          "voiceId": {
+            "type": "string",
+            "description": "The voice ID of the video. Opaque string - supports both internal UUIDs and external provider IDs (e.g. ElevenLabs)."
+          }
+        },
+        "required": [
+          "situationId"
+        ]
+      },
+      "CreateAudioDrivenDto": {
+        "type": "object",
+        "properties": {
+          "productId": {
+            "type": "string",
+            "description": "The product ID of the folder"
+          },
+          "text": {
+            "type": "string",
+            "description": "The text of the script"
+          },
+          "videos": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AudioDrivenVideoDto"
+            }
+          }
+        },
+        "required": [
+          "productId",
+          "text",
+          "videos"
+        ]
+      },
+      "AudioDrivenGeneratedAssetDataDto": {
+        "type": "object",
+        "properties": {
+          "situationId": {
+            "type": "string"
+          },
+          "videoId": {
+            "type": "string"
+          },
+          "audioUrl": {
+            "type": "string"
+          },
+          "startFrame": {
+            "type": "string"
+          },
+          "script": {
+            "type": "string"
+          }
+        }
+      },
+      "AudioDrivenGeneratedAssetDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "productId": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "actor_image",
+              "actor_image_suggestions",
+              "ai_actor",
+              "audio_driven",
+              "camera_angle",
+              "camera_movement",
+              "captions",
+              "styled_subtitles",
+              "change_voice",
+              "extend_video",
+              "extend_sora2",
+              "extract_frame",
+              "extract_audio",
+              "change_speed_video",
+              "change_speed_audio",
+              "isolate_voice",
+              "speech_to_speech",
+              "text_to_speech",
+              "mute_video",
+              "fashion_tryon",
+              "gameplay_ad",
+              "gestures",
+              "gpt-image",
+              "gpt-image-2",
+              "grok_image",
+              "grok_imagine_15",
+              "grok_video",
+              "grok_video_edit",
+              "happy_horse",
+              "hook_repurposed",
+              "image-background-removed",
+              "kling_26",
+              "kling_30",
+              "kling_30_4k",
+              "kling-animate",
+              "kling30-animate",
+              "nano-banana",
+              "nano-banana-2",
+              "omnihuman",
+              "product_showcase",
+              "seedance",
+              "seedance_20",
+              "seedream",
+              "seedream_5_lite",
+              "showyourapp",
+              "skin_enhanced_image",
+              "sora2",
+              "soul",
+              "stitch",
+              "transcribe",
+              "transcribe_audio",
+              "translate_video",
+              "unboxing_pov",
+              "uploaded_audio",
+              "uploaded_document",
+              "uploaded_image",
+              "uploaded_video",
+              "upscaled_image",
+              "upscaled_video",
+              "veo31",
+              "video-background-removed",
+              "video_editor",
+              "wan22_animate",
+              "replace_actor",
+              "rendered_video",
+              "ai_video_editing",
+              "rendered_image",
+              "prompt_builder",
+              "prompt_enhancer",
+              "llm",
+              "workflow_text_split",
+              "actor_motion",
+              "scene",
+              "b_roll"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "created",
+              "pending",
+              "generated",
+              "failed",
+              "uploaded"
+            ]
+          },
+          "data": {
+            "$ref": "#/components/schemas/AudioDrivenGeneratedAssetDataDto"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "productId",
+          "type",
+          "status",
+          "data",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "AudioDrivenFailedItemDto": {
+        "type": "object",
+        "properties": {
+          "videoId": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "videoId",
+          "error"
+        ]
+      },
+      "AudioDrivenSummaryDto": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "number"
+          },
+          "successful": {
+            "type": "number"
+          },
+          "failed": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "total",
+          "successful",
+          "failed"
+        ]
+      },
+      "AudioDrivenGenerationResultDto": {
+        "type": "object",
+        "properties": {
+          "created": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AudioDrivenGeneratedAssetDto"
+            }
+          },
+          "failed": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AudioDrivenFailedItemDto"
+            }
+          },
+          "summary": {
+            "$ref": "#/components/schemas/AudioDrivenSummaryDto"
+          }
+        },
+        "required": [
+          "created",
+          "failed",
+          "summary"
+        ]
+      },
+      "CreateBRollDto": {
+        "type": "object",
+        "properties": {
+          "productId": {
+            "type": "string",
+            "description": "The ID of the product",
+            "example": "b972ffe0-3364-46ad-922e-211df4f1d441"
+          },
+          "projectId": {
+            "type": "string",
+            "description": "The ID of the project (optional)",
+            "example": "40c97d04-b1b8-45fa-878d-4490a729bf5f"
+          },
+          "prompt": {
+            "type": "string",
+            "description": "The prompt describing the video content to generate",
+            "example": "A beautiful landscape with mountains and a lake at sunset"
+          },
+          "aspectRatio": {
+            "type": "string",
+            "description": "The aspect ratio of the video",
+            "enum": [
+              "1:1",
+              "16:9",
+              "9:16"
+            ],
+            "example": "16:9"
+          },
+          "duration": {
+            "type": "number",
+            "description": "The video duration in seconds",
+            "enum": [
+              5,
+              10
+            ],
+            "example": 10
+          },
+          "refImageAsBase64": {
+            "type": "string",
+            "description": "Optional reference image as base64 string (data:image/...;base64,...)",
+            "example": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQ..."
+          },
+          "startFrameAsBase64": {
+            "type": "string",
+            "description": "Optional start frame image as base64 string (data:image/...;base64,...)",
+            "example": "data:image/webp;base64,UklGRggUCQBXRUJQVlA4WAoAAAAwAAAADwUA..."
+          },
+          "endFrameAsBase64": {
+            "type": "string",
+            "description": "Optional end frame image as base64 string (data:image/...;base64,...)",
+            "example": "data:image/webp;base64,UklGRggUCQBXRUJQVlA4WAoAAAAwAAAADwUA..."
+          }
+        },
+        "required": [
+          "productId",
+          "prompt",
+          "aspectRatio",
+          "duration"
+        ]
+      },
+      "BRollVideoAssetDataDto": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "description": "The prompt used for video generation"
+          },
+          "aspectRatio": {
+            "type": "string",
+            "description": "The aspect ratio of the video",
+            "enum": [
+              "1:1",
+              "16:9",
+              "9:16"
+            ]
+          },
+          "duration": {
+            "type": "number",
+            "description": "The video duration in seconds",
+            "enum": [
+              5,
+              10
+            ]
+          },
+          "hasInputImage": {
+            "type": "boolean",
+            "description": "Whether the video has an input image"
+          },
+          "hasStartFrame": {
+            "type": "boolean",
+            "description": "Whether the video has a start frame"
+          },
+          "nbGenerations": {
+            "type": "number",
+            "description": "Number of generations"
+          },
+          "refImage": {
+            "type": "string",
+            "description": "Reference image URL"
+          },
+          "startFrame": {
+            "type": "string",
+            "description": "Start frame URL"
+          },
+          "endFrame": {
+            "type": "string",
+            "description": "End frame URL"
+          }
+        },
+        "required": [
+          "prompt",
+          "aspectRatio",
+          "duration"
+        ]
+      },
+      "BRollVideoAssetResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The unique identifier of the video asset"
+          },
+          "productId": {
+            "type": "string",
+            "description": "The ID of the product this video asset belongs to"
+          },
+          "type": {
+            "type": "string",
+            "description": "The type of video asset",
+            "enum": [
+              "actor_image",
+              "actor_image_suggestions",
+              "ai_actor",
+              "audio_driven",
+              "camera_angle",
+              "camera_movement",
+              "captions",
+              "styled_subtitles",
+              "change_voice",
+              "extend_video",
+              "extend_sora2",
+              "extract_frame",
+              "extract_audio",
+              "change_speed_video",
+              "change_speed_audio",
+              "isolate_voice",
+              "speech_to_speech",
+              "text_to_speech",
+              "mute_video",
+              "fashion_tryon",
+              "gameplay_ad",
+              "gestures",
+              "gpt-image",
+              "gpt-image-2",
+              "grok_image",
+              "grok_imagine_15",
+              "grok_video",
+              "grok_video_edit",
+              "happy_horse",
+              "hook_repurposed",
+              "image-background-removed",
+              "kling_26",
+              "kling_30",
+              "kling_30_4k",
+              "kling-animate",
+              "kling30-animate",
+              "nano-banana",
+              "nano-banana-2",
+              "omnihuman",
+              "product_showcase",
+              "seedance",
+              "seedance_20",
+              "seedream",
+              "seedream_5_lite",
+              "showyourapp",
+              "skin_enhanced_image",
+              "sora2",
+              "soul",
+              "stitch",
+              "transcribe",
+              "transcribe_audio",
+              "translate_video",
+              "unboxing_pov",
+              "uploaded_audio",
+              "uploaded_document",
+              "uploaded_image",
+              "uploaded_video",
+              "upscaled_image",
+              "upscaled_video",
+              "veo31",
+              "video-background-removed",
+              "video_editor",
+              "wan22_animate",
+              "replace_actor",
+              "rendered_video",
+              "ai_video_editing",
+              "rendered_image",
+              "prompt_builder",
+              "prompt_enhancer",
+              "llm",
+              "workflow_text_split",
+              "actor_motion",
+              "scene",
+              "b_roll"
+            ],
+            "example": "b_roll"
+          },
+          "url": {
+            "type": "string",
+            "description": "The URL of the generated video"
+          },
+          "sdUrl": {
+            "type": "string",
+            "description": "The URL of the standard definition video"
+          },
+          "thumbnailUrl": {
+            "type": "string",
+            "description": "The URL of the video thumbnail"
+          },
+          "status": {
+            "type": "string",
+            "description": "The current status of the video asset",
+            "enum": [
+              "created",
+              "pending",
+              "generated",
+              "failed",
+              "uploaded"
+            ]
+          },
+          "data": {
+            "description": "The video asset data",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BRollVideoAssetDataDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "productId",
+          "type",
+          "status",
+          "data"
+        ]
+      },
+      "OmniHumanVideoDto": {
+        "type": "object",
+        "properties": {
+          "situationId": {
+            "type": "string",
+            "description": "The situation ID of the video"
+          },
+          "voiceId": {
+            "type": "string",
+            "description": "The voice ID of the video. Opaque string - supports both internal UUIDs and external provider IDs (e.g. ElevenLabs)."
+          }
+        },
+        "required": [
+          "situationId"
+        ]
+      },
+      "CreateOmniHumanDto": {
+        "type": "object",
+        "properties": {
+          "productId": {
+            "type": "string",
+            "description": "The product ID of the folder"
+          },
+          "text": {
+            "type": "string",
+            "description": "The text of the script"
+          },
+          "videos": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OmniHumanVideoDto"
+            }
+          }
+        },
+        "required": [
+          "productId",
+          "text",
+          "videos"
+        ]
+      },
+      "CreateSceneDto": {
+        "type": "object",
+        "properties": {
+          "productId": {
+            "type": "string",
+            "description": "The ID of the product",
+            "example": "b972ffe0-3364-46ad-922e-211df4f1d441"
+          },
+          "projectId": {
+            "type": "string",
+            "description": "The ID of the project (optional)",
+            "example": "40c97d04-b1b8-45fa-878d-4490a729bf5f"
+          },
+          "script": {
+            "type": "string",
+            "description": "The script for the video (optional)",
+            "example": "Hi guys! This is a beautiful day!"
+          },
+          "prompt": {
+            "type": "string",
+            "description": "The prompt describing the video content to generate",
+            "example": "A man walking in the street. He is talking to the camera"
+          },
+          "contextScript": {
+            "type": "string",
+            "description": "The context script of the video (optional)",
+            "example": "Previous scene context..."
+          },
+          "contextPrompt": {
+            "type": "string",
+            "description": "The context prompt of the video (optional)",
+            "example": "Previous scene visual context..."
+          },
+          "aspectRatio": {
+            "type": "string",
+            "description": "The aspect ratio of the video",
+            "enum": [
+              "1:1",
+              "16:9",
+              "9:16"
+            ],
+            "example": "16:9"
+          },
+          "refImageAsBase64": {
+            "type": "string",
+            "description": "Optional reference image as base64 string (data:image/...;base64,...)",
+            "example": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQ..."
+          },
+          "startFrameAsBase64": {
+            "type": "string",
+            "description": "Optional start frame image as base64 string (data:image/...;base64,...)",
+            "example": "data:image/webp;base64,UklGRggUCQBXRUJQVlA4WAoAAAAwAAAADwUA..."
+          }
+        },
+        "required": [
+          "productId",
+          "prompt",
+          "aspectRatio"
+        ]
+      },
+      "SceneVideoAssetDataDto": {
+        "type": "object",
+        "properties": {
+          "script": {
+            "type": "string",
+            "description": "The script used for video generation"
+          },
+          "prompt": {
+            "type": "string",
+            "description": "The prompt used for video generation"
+          },
+          "contextScript": {
+            "type": "string",
+            "description": "The context script of the video"
+          },
+          "contextPrompt": {
+            "type": "string",
+            "description": "The context prompt of the video"
+          },
+          "aspectRatio": {
+            "type": "string",
+            "description": "The aspect ratio of the video",
+            "enum": [
+              "1:1",
+              "16:9",
+              "9:16"
+            ]
+          },
+          "hasInputImage": {
+            "type": "boolean",
+            "description": "Whether the video has an input image"
+          },
+          "hasStartFrame": {
+            "type": "boolean",
+            "description": "Whether the video has a start frame"
+          },
+          "nbGenerations": {
+            "type": "number",
+            "description": "Number of generations"
+          },
+          "refImage": {
+            "type": "string",
+            "description": "Reference image URL"
+          },
+          "startFrame": {
+            "type": "string",
+            "description": "Start frame URL"
+          }
+        },
+        "required": [
+          "prompt",
+          "aspectRatio"
+        ]
+      },
+      "SceneVideoAssetResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The unique identifier of the video asset"
+          },
+          "productId": {
+            "type": "string",
+            "description": "The ID of the product this video asset belongs to"
+          },
+          "type": {
+            "type": "string",
+            "description": "The type of video asset",
+            "enum": [
+              "actor_image",
+              "actor_image_suggestions",
+              "ai_actor",
+              "audio_driven",
+              "camera_angle",
+              "camera_movement",
+              "captions",
+              "styled_subtitles",
+              "change_voice",
+              "extend_video",
+              "extend_sora2",
+              "extract_frame",
+              "extract_audio",
+              "change_speed_video",
+              "change_speed_audio",
+              "isolate_voice",
+              "speech_to_speech",
+              "text_to_speech",
+              "mute_video",
+              "fashion_tryon",
+              "gameplay_ad",
+              "gestures",
+              "gpt-image",
+              "gpt-image-2",
+              "grok_image",
+              "grok_imagine_15",
+              "grok_video",
+              "grok_video_edit",
+              "happy_horse",
+              "hook_repurposed",
+              "image-background-removed",
+              "kling_26",
+              "kling_30",
+              "kling_30_4k",
+              "kling-animate",
+              "kling30-animate",
+              "nano-banana",
+              "nano-banana-2",
+              "omnihuman",
+              "product_showcase",
+              "seedance",
+              "seedance_20",
+              "seedream",
+              "seedream_5_lite",
+              "showyourapp",
+              "skin_enhanced_image",
+              "sora2",
+              "soul",
+              "stitch",
+              "transcribe",
+              "transcribe_audio",
+              "translate_video",
+              "unboxing_pov",
+              "uploaded_audio",
+              "uploaded_document",
+              "uploaded_image",
+              "uploaded_video",
+              "upscaled_image",
+              "upscaled_video",
+              "veo31",
+              "video-background-removed",
+              "video_editor",
+              "wan22_animate",
+              "replace_actor",
+              "rendered_video",
+              "ai_video_editing",
+              "rendered_image",
+              "prompt_builder",
+              "prompt_enhancer",
+              "llm",
+              "workflow_text_split",
+              "actor_motion",
+              "scene",
+              "b_roll"
+            ],
+            "example": "scene"
+          },
+          "url": {
+            "type": "string",
+            "description": "The URL of the generated video"
+          },
+          "sdUrl": {
+            "type": "string",
+            "description": "The URL of the standard definition video"
+          },
+          "thumbnailUrl": {
+            "type": "string",
+            "description": "The URL of the video thumbnail"
+          },
+          "status": {
+            "type": "string",
+            "description": "The current status of the video asset",
+            "enum": [
+              "created",
+              "pending",
+              "generated",
+              "failed",
+              "uploaded"
+            ]
+          },
+          "data": {
+            "description": "The video asset data",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SceneVideoAssetDataDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "productId",
+          "type",
+          "status",
+          "data"
+        ]
+      },
+      "VoiceDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The ID of the voice"
+          },
+          "workspaceId": {
+            "type": "object",
+            "description": "The workspace ID of the voice"
+          },
+          "name": {
+            "type": "string",
+            "description": "The name of the voice"
+          },
+          "gender": {
+            "type": "object",
+            "description": "The gender of the voice (optional for imported ElevenLabs voices)"
+          },
+          "age": {
+            "type": "object",
+            "description": "The age of the voice (optional for imported ElevenLabs voices)"
+          },
+          "accent": {
+            "type": "string",
+            "description": "The accent of the voice (optional for imported ElevenLabs voices)"
+          },
+          "language": {
+            "type": "object",
+            "description": "The language of the voice"
+          },
+          "descriptive": {
+            "type": "string",
+            "description": "The description of the voice"
+          },
+          "audioUrl": {
+            "type": "string",
+            "description": "The voice's audio URL"
+          },
+          "createdAt": {
+            "type": "string",
+            "description": "The date when the voice was created"
+          }
+        },
+        "required": [
+          "id",
+          "workspaceId",
+          "name",
+          "gender",
+          "age",
+          "accent",
+          "language",
+          "descriptive",
+          "audioUrl",
+          "createdAt"
+        ]
+      },
+      "PaginatedVoices": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "number",
+            "description": "Total number of situations matching the provided criteria"
+          },
+          "items": {
+            "description": "List of situations matching the provided criteria and the pagination params",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VoiceDto"
+            }
+          }
+        },
+        "required": [
+          "count",
+          "items"
+        ]
+      },
+      "StartSora2Dto": {
+        "type": "object",
+        "properties": {
+          "productId": {
+            "type": "string",
+            "description": "The ID of the product",
+            "example": "40c97d04-b1b8-45fa-878d-4490a729bf5f"
+          },
+          "projectId": {
+            "type": "string",
+            "description": "The ID of the project",
+            "example": "40c97d04-b1b8-45fa-878d-4490a729bf5f"
+          },
+          "prompt": {
+            "type": "string",
+            "description": "The prompt for the video",
+            "example": "A beautiful landscape with mountains and a lake at sunset"
+          },
+          "aspectRatio": {
+            "type": "string",
+            "description": "The aspect ratio of the video",
+            "example": "16:9",
+            "enum": [
+              "1:1",
+              "16:9",
+              "9:16"
+            ]
+          },
+          "duration": {
+            "type": "number",
+            "description": "The duration of the video",
+            "example": 4,
+            "enum": [
+              4,
+              8,
+              12,
+              16,
+              20
+            ]
+          },
+          "refImageFilePath": {
+            "type": "string",
+            "description": "S3 file path returned by `POST /v1/file-upload/get-presigned-url` after uploading the image with the presigned URL. Must be under `external-api-temp-uploads/`. If both this and `refImageAsBase64` are set, this field takes precedence.",
+            "example": "external-api-temp-uploads/123e4567-e89b-12d3-a456-426614174000.jpg"
+          },
+          "refImageAsBase64": {
+            "type": "string",
+            "description": "Reference image as a data URL (base64). Ignored when `refImageFilePath` is provided.",
+            "example": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQ..."
+          },
+          "resolution": {
+            "type": "string",
+            "description": "The resolution of the video",
+            "example": "720p",
+            "enum": [
+              "720p",
+              "1080p"
+            ]
+          },
+          "model": {
+            "type": "string",
+            "description": "The model to use for the video",
+            "example": "sora2",
+            "enum": [
+              "sora2",
+              "sora2_pro"
+            ]
+          }
+        },
+        "required": [
+          "productId",
+          "prompt",
+          "aspectRatio",
+          "duration"
+        ]
+      },
+      "RemixSora2Dto": {
+        "type": "object",
+        "properties": {
+          "productId": {
+            "type": "string",
+            "description": "The ID of the product",
+            "example": "40c97d04-b1b8-45fa-878d-4490a729bf5f"
+          },
+          "projectId": {
+            "type": "string",
+            "description": "The ID of the project",
+            "example": "40c97d04-b1b8-45fa-878d-4490a729bf5f"
+          },
+          "sourceVideoAssetId": {
+            "type": "string",
+            "description": "The ID of the source video asset",
+            "example": "40c97d04-b1b8-45fa-878d-4490a729bf5f"
+          },
+          "prompt": {
+            "type": "string",
+            "description": "The prompt for the video",
+            "example": "A beautiful landscape with mountains and a lake at sunset"
+          }
+        },
+        "required": [
+          "productId",
+          "sourceVideoAssetId",
+          "prompt"
+        ]
+      },
+      "ActorInputDto": {
+        "type": "object",
+        "properties": {
+          "situationId": {
+            "type": "string",
+            "description": "The situation ID of the actor",
+            "example": "40c97d04-b1b8-45fa-878d-4490a729bf5f"
+          },
+          "voiceId": {
+            "type": "string",
+            "description": "The voice ID of the actor. Opaque string - supports both internal UUIDs and external provider IDs (e.g. ElevenLabs).",
+            "example": "elevenlabs-voice-id"
+          }
+        },
+        "required": [
+          "situationId"
+        ]
+      },
+      "GenerateTalkingActorsDto": {
+        "type": "object",
+        "properties": {
+          "model": {
+            "type": "string",
+            "description": "The model used to generate talking actors",
+            "enum": [
+              "arcads_1.0",
+              "audio_driven",
+              "omnihuman"
+            ],
+            "example": "arcads_1.0"
+          },
+          "productId": {
+            "type": "string",
+            "description": "The ID of the product",
+            "example": "40c97d04-b1b8-45fa-878d-4490a729bf5f"
+          },
+          "projectId": {
+            "type": "string",
+            "description": "The ID of the project",
+            "example": "40c97d04-b1b8-45fa-878d-4490a729bf5f"
+          },
+          "script": {
+            "type": "string",
+            "description": "The script for the talking actors. Required if referenceAudios is not provided.",
+            "example": "Hello, this is a test script."
+          },
+          "referenceAudios": {
+            "description": "Reference audio files. Required if script is not provided. Max 1 file.",
+            "example": [
+              "/path/to/audio.mp3"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "actors": {
+            "description": "The actors to generate",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ActorInputDto"
+            }
+          },
+          "autoAddScriptEmotion": {
+            "type": "boolean",
+            "description": "Whether to automatically add script emotion",
+            "example": false
+          }
+        },
+        "required": [
+          "model",
+          "productId",
+          "actors"
+        ]
+      },
+      "GenerationResultItemDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The ID of the generated asset",
+            "example": "40c97d04-b1b8-45fa-878d-4490a729bf5f"
+          },
+          "model": {
+            "type": "string",
+            "description": "The model used for generation",
+            "enum": [
+              "arcads_1.0",
+              "audio_driven",
+              "omnihuman"
+            ],
+            "example": "arcads_1.0"
+          },
+          "status": {
+            "type": "string",
+            "description": "The status of the generation",
+            "enum": [
+              "processing",
+              "completed",
+              "failed"
+            ],
+            "example": "processing"
+          }
+        },
+        "required": [
+          "id",
+          "model",
+          "status"
+        ]
+      },
+      "TalkingActorStatusDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The ID of the talking actor asset",
+            "example": "40c97d04-b1b8-45fa-878d-4490a729bf5f"
+          },
+          "model": {
+            "type": "string",
+            "description": "The model used for generation",
+            "enum": [
+              "arcads_1.0",
+              "audio_driven",
+              "omnihuman"
+            ],
+            "example": "arcads_1.0"
+          },
+          "status": {
+            "type": "string",
+            "description": "The status of the generation",
+            "enum": [
+              "processing",
+              "completed",
+              "failed"
+            ],
+            "example": "processing"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "The creation timestamp",
+            "example": "2024-01-01T00:00:00Z"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "The last update timestamp",
+            "example": "2024-01-01T00:00:00Z"
+          },
+          "error": {
+            "type": "string",
+            "description": "Error message if generation failed",
+            "example": "Generation failed due to invalid input"
+          }
+        },
+        "required": [
+          "id",
+          "model",
+          "status",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "StartVeo31Dto": {
+        "type": "object",
+        "properties": {
+          "productId": {
+            "type": "string",
+            "description": "The ID of the product",
+            "example": "40c97d04-b1b8-45fa-878d-4490a729bf5f"
+          },
+          "projectId": {
+            "type": "string",
+            "description": "The ID of the project",
+            "example": "40c97d04-b1b8-45fa-878d-4490a729bf5f"
+          },
+          "prompt": {
+            "type": "string",
+            "description": "The prompt for the video",
+            "example": "A beautiful landscape with mountains and a lake at sunset"
+          },
+          "resolution": {
+            "type": "string",
+            "description": "The resolution of the video",
+            "example": "1080p",
+            "enum": [
+              "480p",
+              "720p",
+              "1080p",
+              "4K"
+            ]
+          },
+          "aspectRatio": {
+            "type": "string",
+            "description": "The aspect ratio of the video",
+            "example": "16:9",
+            "enum": [
+              "1:1",
+              "16:9",
+              "9:16"
+            ]
+          },
+          "referenceImages": {
+            "description": "The links to the reference images. You need to call GET v1/file-upload/get-presigned-url to get an upload presigned URL and a filePath. Then upload the images to S3 using the presigned URL. Put the filePath in the referenceImages array.",
+            "example": [
+              "/path/to/image1.jpg",
+              "/path/to/image2.jpg"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "startFrame": {
+            "type": "string",
+            "description": "The link to the start frame. Start frame can not be used with reference images. You need to call GET v1/file-upload/get-presigned-url to get an upload presigned URL and a filePath. Then upload the image to S3 using the presigned URL. Put the filePath in the startFrame variable.",
+            "example": "/path/to/start-frame.jpg"
+          },
+          "endFrame": {
+            "type": "string",
+            "description": "The link to the end frame. End frame can only be used if start frame is provided.",
+            "example": "/path/to/end-frame.jpg"
+          }
+        },
+        "required": [
+          "productId",
+          "prompt",
+          "resolution",
+          "aspectRatio"
+        ]
+      },
+      "GeneratePresignedUrlDto": {
+        "type": "object",
+        "properties": {
+          "fileType": {
+            "type": "string",
+            "description": "The MIME type of the file to upload",
+            "example": "image/jpeg",
+            "enum": [
+              "image/jpeg",
+              "image/jpg",
+              "image/png",
+              "image/gif",
+              "image/webp",
+              "image/heic",
+              "image/heif",
+              "video/mp4",
+              "video/quicktime",
+              "video/avi",
+              "video/mov",
+              "video/wmv",
+              "video/webm",
+              "audio/mp3",
+              "audio/mp4",
+              "audio/wav",
+              "audio/m4a",
+              "audio/x-m4a",
+              "audio/aac",
+              "audio/ogg",
+              "audio/flac",
+              "audio/webm",
+              "audio/mpeg",
+              "audio/opus",
+              "application/pdf",
+              "text/plain",
+              "text/html",
+              "text/markdown",
+              "text/x-markdown",
+              "text/md",
+              "text/csv",
+              "text/x-csv",
+              "application/csv",
+              "application/x-csv",
+              "text/comma-separated-values",
+              "text/x-comma-separated-values",
+              "application/json",
+              "application/msword",
+              "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+              "application/vnd.ms-excel",
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+              "application/vnd.apple.pages",
+              "application/vnd.apple.numbers",
+              "application/vnd.google-apps.document",
+              "application/vnd.google-apps.spreadsheet",
+              "application/vnd.google-apps.presentation",
+              "application/vnd.google-apps.drawing",
+              "application/x-iwork-pages-sffpages",
+              "application/x-iwork-numbers-sffnumbers"
+            ]
+          }
+        },
+        "required": [
+          "fileType"
+        ]
+      },
+      "PresignedUrlResponseDto": {
+        "type": "object",
+        "properties": {
+          "presignedUrl": {
+            "type": "string",
+            "description": "The presigned URL for uploading the file directly to S3",
+            "example": "https://bucket.s3.amazonaws.com/uploads/workspace-id/image/jpeg/file-id.jpg?X-Amz-Algorithm=..."
+          },
+          "filePath": {
+            "type": "string",
+            "description": "The S3 file path where the file will be stored",
+            "example": "uploads/workspace-id/image/jpeg/file-id.jpg"
+          },
+          "fileId": {
+            "type": "string",
+            "description": "The unique file ID generated for this upload",
+            "example": "123e4567-e89b-12d3-a456-426614174000"
+          },
+          "expiresIn": {
+            "type": "number",
+            "description": "The expiration time of the presigned URL in seconds",
+            "example": 600
+          },
+          "maxFileSize": {
+            "type": "number",
+            "description": "Maximum allowed file size in bytes",
+            "example": 10485760
+          },
+          "maxDuration": {
+            "type": "number",
+            "description": "Maximum allowed video duration in seconds (for video uploads)",
+            "example": 30
+          }
+        },
+        "required": [
+          "presignedUrl",
+          "filePath",
+          "fileId",
+          "expiresIn"
+        ]
+      },
+      "CreateAssetFromUploadDto": {
+        "type": "object",
+        "properties": {
+          "filePath": {
+            "type": "string",
+            "description": "The S3 file path returned by the get-presigned-url endpoint after uploading the file",
+            "example": "external-api-temp-uploads/123e4567-e89b-12d3-a456-426614174000.jpg"
+          },
+          "productId": {
+            "type": "string",
+            "description": "The product ID to associate the asset with",
+            "example": "b972ffe0-3364-46ad-922e-211df4f1d441"
+          },
+          "name": {
+            "type": "string",
+            "description": "Optional name for the asset"
+          }
+        },
+        "required": [
+          "filePath",
+          "productId"
+        ]
+      }
+    }
+  }
+}

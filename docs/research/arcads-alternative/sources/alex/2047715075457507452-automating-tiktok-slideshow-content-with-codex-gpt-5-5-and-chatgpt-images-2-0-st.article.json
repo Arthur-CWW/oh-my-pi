@@ -1,0 +1,2008 @@
+{
+  "tweet_id": "2047715075457507452",
+  "tweet_url": "https://x.com/alexcooldev/status/2047715075457507452",
+  "tweet_text": "https://t.co/NUVhD7Ps1G",
+  "x_article_url": "https://x.com/i/article/2047629246701678592",
+  "x_article_alias_url": "https://x.com/alexcooldev/article/2047715075457507452",
+  "history_title": "Automating TikTok Slideshow Content with Codex GPT-5.5 and ChatGPT images 2.0 (Step by step guide)",
+  "article": {
+    "content_state": {
+      "blocks": [
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "bodna",
+          "text": "A step-by-step guide to cloning viral formats using Codex GPT-5.5 + ChatGPT Images 2.0 + Pinterest + Postiz",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 0,
+              "length": 1,
+              "offset": 108
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "dcn37",
+          "text": "Currently, TikTok is heavily boosting views and engagement for slideshows, you can check out these channels.\n",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 1,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "6bhs4",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 2,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "2f04k",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 3,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "59hbb",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 4,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "adfpe",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "8ou9e",
+          "text": "And actually, most images from Pinterest especially the top ones come from AI-generated influencer avatars. It’s basically an endless source of content, so there’s no need to overuse AI image generation at all. The cost is practically $0, and it’s often easier to go viral compared to fully AI-generated images.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 5,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "5rdmf",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "4f5rs",
+          "text": "This is the full pipeline. No fluff, no \"10x your content\" nonsense. Just the exact setup that's posting 30-50 slideshows a day across my accounts while I sleep.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "8e3g9",
+          "text": "Here's what you'll learn:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 29,
+              "offset": 7,
+              "style": "Bold"
+            }
+          ],
+          "key": "fem61",
+          "text": "How to steal viral slideshow formats without getting flagged for plagiarism",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 16,
+              "offset": 4,
+              "style": "Bold"
+            }
+          ],
+          "key": "b21d1",
+          "text": "Why GPT-5.5 in Codex is the unlock for reverse-engineering slide structures",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 18,
+              "offset": 11,
+              "style": "Bold"
+            }
+          ],
+          "key": "bnn8n",
+          "text": "How to use ChatGPT Images 2.0 to generate entire 8-slide decks with character continuity",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 26,
+              "offset": 7,
+              "style": "Bold"
+            }
+          ],
+          "key": "3oej2",
+          "text": "How to combine Pinterest scraping with AI generation to cut costs by ~85%",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 6,
+              "offset": 13,
+              "style": "Bold"
+            }
+          ],
+          "key": "aq1na",
+          "text": "Self-hosting Postiz to schedule to 50+ TikTok accounts without getting bans",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 12,
+              "offset": 5,
+              "style": "Bold"
+            }
+          ],
+          "key": "ban73",
+          "text": "Full Node.js code for the compositor + BullMQ queue you can run in Codex today",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "ebd8r",
+          "text": "Let's go.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "6k1kb",
+          "text": "Why TikTok slideshows, and why now",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "22cq8",
+          "text": "Video requires editing, UGC actors, b-roll, captions, music sync. It's expensive and slow.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 30,
+              "offset": 16,
+              "style": "Bold"
+            }
+          ],
+          "key": "5199e",
+          "text": "Slideshows need 5-10 images, a hook, and a CTA. That's it. The algorithm treats them like videos, and on average my slideshow posts out-perform my video posts by 3-4x on reach, with maybe 10% of the production effort.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "cigt3",
+          "text": "The bottleneck used to be:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 25,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "f3mm4",
+          "text": "Finding formats that work (scrolling, saving, manually reverse-engineering)",
+          "type": "ordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 57,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "5fbmb",
+          "text": "Generating on-brand images with consistent text and style",
+          "type": "ordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 50,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "3h16p",
+          "text": "Cost of generating 7-8 AI images per post at scale",
+          "type": "ordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 29,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "tv8i",
+          "text": "Posting at scale without bans",
+          "type": "ordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "5orep",
+          "text": "GPT-5.5 solves #1. Images 2.0 solves #2. Pinterest hybrid strategy solves #3. Postiz solves #4.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "63pqj",
+          "text": "The viral format copy strategy (the legal, ethical version)",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 53,
+              "offset": 37,
+              "style": "Bold"
+            }
+          ],
+          "key": "6qjpq",
+          "text": "Before any tooling, understand this: you're not copying content, you're copying structure.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "aacu0",
+          "text": "A viral slideshow has three layers:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 10,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "am5gp",
+          "text": "The format: hook slide, setup, payoff, CTA. This is the skeleton.",
+          "type": "ordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 19,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "6e2ip",
+          "text": "The visual language: fonts, layout, color treatment, image style.",
+          "type": "ordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 11,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "36ap",
+          "text": "The content: the actual topic, niche, and message.",
+          "type": "ordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 24,
+              "offset": 0,
+              "style": "Bold"
+            },
+            {
+              "length": 18,
+              "offset": 105,
+              "style": "Bold"
+            },
+            {
+              "length": 17,
+              "offset": 211,
+              "style": "Bold"
+            }
+          ],
+          "key": "ar4f1",
+          "text": "Layer 1 is free to copy. Nobody owns \"curiosity gap hook, 5 points, save this.\" That's just copywriting. Layer 2 you adapt. Same general structure (big text on image), different fonts and colors for your brand. Layer 3 is yours. Original topics in your niche.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "1v6ng",
+          "text": "Do this wrong and you get ratio'd. Do it right and you ride the algorithm wave that's already proven to convert.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "3ricq",
+          "text": "The scraping step",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "6btg6",
+          "text": "I pull the top 20-50 performing slideshows in my niche from the past 30 days. Save them to a folder with screenshots of each slide. A VA on Fiverr for $5 gets you 100 examples in an afternoon.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 20,
+              "offset": 29,
+              "style": "Bold"
+            }
+          ],
+          "key": "g7nk",
+          "text": "What matters is you have the visual reference set.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "5gd2a",
+          "text": "The Pinterest parallel step",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 23,
+              "offset": 75,
+              "style": "Bold"
+            }
+          ],
+          "key": "1vba1",
+          "text": "At the same time I'm scraping TikTok slideshows for format, I'm building a Pinterest image library for the actual visuals.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "ejhrc",
+          "text": "Pinterest is where aesthetic goes to die and get curated. Scrape 500-1000 images per aesthetic (anime RPG, dark moody fitness, minimal finance, etc.), tag them by mood/color/subject, store in Supabase Storage.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 6,
+              "offset": 27,
+              "style": "Italic"
+            }
+          ],
+          "key": "7477b",
+          "text": "Cost: zero. Quality: often better than AI because humans already curated them.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "imhk",
+          "text": "This is the key cost-cutting move I'll come back to in Step 3.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "dqk3t",
+          "text": "Step 1: Reverse-engineer the format with GPT-5.5 in Codex",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "5ajnn",
+          "text": "This is where GPT-5.5 becomes a different animal than previous models.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "32dnq",
+          "text": "The new GPT-5.5 in Codex has native computer-use capabilities and vision. You can drop 10 slideshow screenshots into Codex and it will analyze structure, extract the templating pattern, and output a reusable schema.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "aijbd",
+          "text": "Here's the exact prompt I use in Codex:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "3u269",
+          "text": "I'm attaching 10 screenshots from a viral TikTok slideshow. \nAnalyze the structure and extract:\n\n1. The hook pattern (slide 1 only): emotional trigger + curiosity gap\n2. The payoff pattern (middle slides): content delivery structure\n3. The CTA pattern (final slide): action request\n4. Visual layout: text placement, image-to-text ratio, font weight\n5. Pacing: how information is dripped across slides\n\nOutput as a JSON schema I can feed into an image generation pipeline.\nFields must include: slide_number, role, text_template, \nvisual_style_notes, image_prompt_template.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "4msu5",
+          "text": "What I get back is a structured JSON like:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 6,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "av8dr",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 25,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "93jrh",
+          "text": "This schema is the asset. Save it with a name like fitness_curiosity_v1.json and reuse it forever. Build up a library of 20-30 of these and you've got infinite content variations.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 7,
+              "offset": 47,
+              "style": "Italic"
+            }
+          ],
+          "key": "5qp99",
+          "text": "The reason GPT-5.5 beats 5.4 here: it actually reasons across the whole slideshow instead of describing each slide in isolation. It catches the narrative arc.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "9b0uo",
+          "text": "Step 2: Hybrid image strategy (Images 2.0 + Pinterest)",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "bg9h2",
+          "text": "This is the biggest cost optimization in the whole pipeline.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "6mo6f",
+          "text": "The naive approach (too expensive)",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "4r4mg",
+          "text": "ChatGPT Images 2.0 can generate 8 images from a single prompt with character and object continuity. This is genuinely game-changing. Previously a 7-slide deck meant 7 separate prompts and your \"main character\" would shift across every slide.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 10,
+              "offset": 53,
+              "style": "Bold"
+            },
+            {
+              "length": 14,
+              "offset": 93,
+              "style": "Bold"
+            }
+          ],
+          "key": "2qmc2",
+          "text": "But at high quality, generating a 7-slide deck costs $0.70-1.00. At 30 slideshows/day that's $600-900/month.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "4ocas",
+          "text": "The hybrid approach (cost killer)",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "fjm47",
+          "text": "Break the slideshow into roles and use the right tool for each:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 14,
+              "offset": 0,
+              "style": "Bold"
+            },
+            {
+              "length": 19,
+              "offset": 17,
+              "style": "Bold"
+            }
+          ],
+          "key": "6htpr",
+          "text": "Slide 1 (hook) = Images 2.0 generate. Needs custom scene exactly matching the topic. Worth the spend.",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 27,
+              "offset": 0,
+              "style": "Bold"
+            },
+            {
+              "length": 15,
+              "offset": 30,
+              "style": "Bold"
+            }
+          ],
+          "key": "5llmv",
+          "text": "Slides 2-6 (payoff/content) = Pinterest image from library, matched by tags. Composite text overlay locally with Sharp/Canvas.",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 13,
+              "offset": 0,
+              "style": "Bold"
+            },
+            {
+              "length": 15,
+              "offset": 16,
+              "style": "Bold"
+            }
+          ],
+          "key": "9gpan",
+          "text": "Slide 7 (CTA) = Pinterest image or reused template background.",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 31,
+              "offset": 8,
+              "style": "Bold"
+            }
+          ],
+          "key": "fsp4",
+          "text": "Result: 1 AI image + 6 Pinterest images instead of 7 AI images.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 32,
+              "offset": 71,
+              "style": "Bold"
+            }
+          ],
+          "key": "3g56i",
+          "text": "Cost drops from ~$1.00/slideshow to ~$0.15/slideshow. At 30/day that's $135/month instead of $900/month.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 8,
+              "offset": 24,
+              "style": "Italic"
+            }
+          ],
+          "key": "68pvu",
+          "text": "Visual quality actually improves in most cases because Pinterest has been human-curated for aesthetic appeal.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "3ff12",
+          "text": "Pinterest caveats",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "6lrjv",
+          "text": "Avoid images with recognizable public figures or brand watermarks",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "eo5o7",
+          "text": "Crop + color grade locally to keep consistent brand palette across slides",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "ji4s",
+          "text": "Rotate library aggressively. Don't use the same image in 10 different posts",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "50bq5",
+          "text": "Tag aggressively when scraping so your matcher can pick the right mood per slide",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "3fpkg",
+          "text": "When to still use Images 2.0 for middle slides",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 13,
+              "offset": 166,
+              "style": "Italic"
+            }
+          ],
+          "key": "2codi",
+          "text": "For Vietnamese content specifically, Images 2.0 text rendering for Vietnamese diacritics (ở, ữ, ế) is genuinely good for the first time. If your slideshow needs text rendered into the image (not composited on top), use AI. For everything else, Pinterest + local text overlay wins.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "8ukbs",
+          "text": "Step 3: Text compositor (Sharp + Canvas API)",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "10ajc",
+          "text": "This is the layer that makes Pinterest images look like branded TikTok slides. Full Node.js code, runs in Codex CLI.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "r1tn",
+          "text": "Install",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 7,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "96q6u",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {
+            "mentions": [
+              {
+                "fromIndex": 4,
+                "text": "napi",
+                "toIndex": 9
+              }
+            ]
+          },
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "dq1lc",
+          "text": "Use @napi-rs/canvas instead of canvas. No cairo/pango system deps, Docker/Railway deploys cleanly.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "5f9cv",
+          "text": "compositor.js",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 8,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "690g3",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "6dkr2",
+          "text": "Step 4: Post queue (BullMQ + Redis)",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "571g4",
+          "text": "This is what chains compositor to Postiz with retry/rate-limit logic.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "6qoef",
+          "text": "queue.js",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 9,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "6os0o",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "469eg",
+          "text": ".env",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 10,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "bn2jl",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "ajjsh",
+          "text": "Run",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 11,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "2t0d9",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "8sec6",
+          "text": "Gotchas fixed in this code",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 15,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "9vbp4",
+          "text": "Vietnamese text: uncomment GlobalFonts.registerFromPath with Be Vietnam Pro or Inter font",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 11,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "1n74q",
+          "text": "Text stroke: rendered before fill so outline doesn't overlap glyphs",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 10,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "462mm",
+          "text": "Rate limit: limiter: { max: 10, duration: 60_000 } on post worker prevents TikTok API ban",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 6,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "b67t9",
+          "text": "Memory: concurrency: 2 on compositor because Sharp is memory-heavy. Bump up on stronger servers",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 5,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "bg8p",
+          "text": "Retry: composite 3 attempts, post 5 attempts with exponential backoff (network reality)",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "973sh",
+          "text": "Step 5: Postiz for posting at scale",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "2kmdk",
+          "text": "Postiz is the self-hosted social scheduler that integrates with TikTok's Content Posting API.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "b08m3",
+          "text": "Why Postiz over alternatives:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 11,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "49ppi",
+          "text": "Open source, you control the stack, no per-seat pricing",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 12,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "afcro",
+          "text": "Multi-tenant, run 50+ TikTok accounts from one instance",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 47,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "8bbnt",
+          "text": "Official TikTok Content Posting API integration. Unofficial posting gets you banned",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 17,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "fhqj9",
+          "text": "Has a working API the queue above calls into",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "3j1ri",
+          "text": "Deploy on Railway or Coolify. Sub-$20/month self-hosting. Connect TikTok business accounts (Content Posting API approval takes 1-3 weeks).",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "4pkq9",
+          "text": "Scaling rules",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 29,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "1eqc3",
+          "text": "3-5 posts per account per day: sweet spot for reach without rate limits",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 31,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "3c3jr",
+          "text": "Minimum 2-3 hours between posts on the same account",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 23,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "13jlp",
+          "text": "Stagger across accounts. Don't fire 50 posts at the same minute",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "fj0dp",
+          "text": "For more aggressive posting you need multiple accounts or the iPhone farm route (physical devices), which is a whole different rabbit hole.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "c7u7g",
+          "text": "Step 6: GPT-5.5 orchestration tying it all together",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "8m2d8",
+          "text": "Architecture:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 12,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "epini",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "58uve",
+          "text": "A single Codex prompt to kick it off:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "5rdou",
+          "text": "Using the fitness niche config and curiosity_ranked_list_v1 format:\n1. Generate 5 fresh topic ideas not used in the last 30 days\n2. For each, fill the slide template with on-brand copy\n3. For slide 1, generate prompt and queue Images 2.0 generation\n4. For slides 2-7, query Pinterest library by tags and pick matches\n5. Queue everything in BullMQ pipeline\n6. Schedule posts via Postiz to 3 active fitness accounts, \n   spaced 4 hours apart",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "29sfo",
+          "text": "GPT-5.5 in Codex reliably completes this end-to-end. Previous models dropped context past 3-4 chained operations.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 7,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "4g1hn",
+          "text": "Caveat: GPT-5.5 isn't available via API key auth yet. Only Codex app, CLI, and IDE extension via ChatGPT subscription. For fully autonomous pipeline use GPT-5.4 via API until the rollout. I run orchestration in Codex CLI via cron.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "a84ea",
+          "text": "The full loop, end-to-end",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "eq8qs",
+          "text": "What happens when cron fires at 2am ICT:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "bb36s",
+          "text": "Job pulls active niches from Postgres",
+          "type": "ordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "7cbv3",
+          "text": "For each niche, GPT-5.5 (via Codex CLI exec) generates 5 slideshow topics",
+          "type": "ordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "f6d3r",
+          "text": "Each topic creates a BullMQ job",
+          "type": "ordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "9evmu",
+          "text": "Image worker: 1 call to Images 2.0 for slide 1, 6 queries to Pinterest library for rest",
+          "type": "ordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "939j2",
+          "text": "Compositor worker overlays branded text on every image",
+          "type": "ordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "c27hg",
+          "text": "Finished slideshow posted to Postiz queue",
+          "type": "ordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "duks6",
+          "text": "Postiz spaces TikTok Content Posting API calls throughout the day",
+          "type": "ordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "98ecg",
+          "text": "By 8am, 15-20 fresh slideshows scheduled across accounts for next 24 hours",
+          "type": "ordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "5lqq8",
+          "text": "What this does NOT solve",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "ej9g3",
+          "text": "Being honest about limitations:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 11,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "8snv1",
+          "text": "Originality: if your niche is oversaturated with AI slideshows, you look like everyone else. The moat is niche selection and format variation, not volume.",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 11,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "4cq43",
+          "text": "TikTok bans: follow API limits, don't stuff hashtags, don't repost identical content across accounts. Two of my accounts got shadowbanned in 6 months, both from hashtag greed.",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 12,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "8q99b",
+          "text": "Monetization: slideshow views don't convert like videos. You need a funnel (slideshow, bio link, landing page, product). Without the funnel, vanity metrics only.",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "dr811",
+          "text": "Also plainly: this workflow is optimized for scale, not deeply personal brand building. If your goal is authentic long-term audience connection, the AI-generated slideshow route works against you. Match the tool to the goal.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "di6vl",
+          "text": "The takeaway",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "ib2c",
+          "text": "Six months ago this pipeline was theoretically possible but practically broken. Image models couldn't do text, couldn't maintain continuity, and automation required stitching 5 APIs together.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "ecaj5",
+          "text": "GPT-5.5 made the orchestration reliable. Images 2.0 made visual output production-ready. Pinterest scraping made it affordable. Postiz filled the posting gap.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "dkcvn",
+          "text": "Build the format library first, the Pinterest library second, the compositor + queue third, the orchestrator last. Don't skip steps. Don't try to go from zero to 50 accounts in a week.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "ei3qp",
+          "text": "The code above runs in Codex today. Copy it, adapt it, ship it.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 13,
+              "length": 1,
+              "offset": 15
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "cfhcv",
+          "text": "Good luck guys 🫡",
+          "type": "unstyled"
+        }
+      ],
+      "entityMap": [
+        {
+          "key": "12",
+          "value": {
+            "data": {
+              "entityKey": "2e31b85d-42a5-4d5d-9b29-9e892d6c6c03",
+              "markdown": "```json\n[Niche config] \n     ↓\n[Format library] ← 20+ viral format schemas (from Step 1)\n     ↓\n[Topic generator] → GPT-5.5 generates on-brand topics\n     ↓\n[Slide content generator] → GPT-5.5 fills the template\n     ↓\n[Hybrid image selector] → AI for slide 1, Pinterest for rest\n     ↓\n[Text compositor] → Sharp + Canvas (Step 3 code)\n     ↓\n[Post queue] → BullMQ + Redis (Step 4 code)\n     ↓\n[Postiz API] → schedules to TikTok accounts\n```"
+            },
+            "mutability": "Mutable",
+            "type": "MARKDOWN"
+          }
+        },
+        {
+          "key": "8",
+          "value": {
+            "data": {
+              "entityKey": "7c1951d7-ca3a-4a3e-b005-08f0dcce4e9b",
+              "markdown": "```javascript\n// compositor.js\nconst sharp = require('sharp');\nconst { createCanvas, GlobalFonts } = require('@napi-rs/canvas');\nconst fs = require('fs/promises');\nconst path = require('path');\n\n// Load custom fonts (Vietnamese support)\n// GlobalFonts.registerFromPath('./fonts/Inter-Bold.ttf', 'Inter Bold');\n\n/**\n * Render text overlay on transparent canvas\n */\nfunction renderTextLayer({ width, height, text, options = {} }) {\n  const {\n    fontSize = 72,\n    fontFamily = 'Inter Bold, Arial, sans-serif',\n    color = '#FFFFFF',\n    strokeColor = '#000000',\n    strokeWidth = 6,\n    position = 'bottom',      // 'top' | 'center' | 'bottom'\n    padding = 60,\n    maxWidth = width - 120,\n    lineHeight = 1.2,\n  } = options;\n\n  const canvas = createCanvas(width, height);\n  const ctx = canvas.getContext('2d');\n\n  ctx.font = `${fontSize}px ${fontFamily}`;\n  ctx.textAlign = 'center';\n  ctx.textBaseline = 'middle';\n  ctx.fillStyle = color;\n  ctx.strokeStyle = strokeColor;\n  ctx.lineWidth = strokeWidth;\n  ctx.lineJoin = 'round';\n\n  // Word wrap\n  const lines = wrapText(ctx, text, maxWidth);\n  const totalHeight = lines.length * fontSize * lineHeight;\n\n  let startY;\n  if (position === 'top') startY = padding + fontSize / 2;\n  else if (position === 'center') startY = height / 2 - totalHeight / 2;\n  else startY = height - padding - totalHeight + fontSize / 2;\n\n  lines.forEach((line, i) => {\n    const y = startY + i * fontSize * lineHeight;\n    ctx.strokeText(line, width / 2, y);  // Stroke first (outline)\n    ctx.fillText(line, width / 2, y);    // Fill on top\n  });\n\n  return canvas.toBuffer('image/png');\n}\n\nfunction wrapText(ctx, text, maxWidth) {\n  const words = text.split(' ');\n  const lines = [];\n  let current = '';\n\n  for (const word of words) {\n    const test = current ? `${current} ${word}` : word;\n    if (ctx.measureText(test).width > maxWidth && current) {\n      lines.push(current);\n      current = word;\n    } else {\n      current = test;\n    }\n  }\n  if (current) lines.push(current);\n  return lines;\n}\n\n/**\n * Composite base image + text overlay + gradient\n */\nasync function compositeSlide({ imageBuffer, text, outputPath, options = {} }) {\n  const { width = 1080, height = 1920, addGradient = true } = options;\n\n  // Resize base image to TikTok 9:16\n  const base = await sharp(imageBuffer)\n    .resize(width, height, { fit: 'cover', position: 'center' })\n    .toBuffer();\n\n  const layers = [];\n\n  // Dark gradient for text readability\n  if (addGradient) {\n    const gradient = await createGradientOverlay(width, height, options.position || 'bottom');\n    layers.push({ input: gradient, top: 0, left: 0 });\n  }\n\n  // Text overlay\n  const textLayer = renderTextLayer({ width, height, text, options });\n  layers.push({ input: textLayer, top: 0, left: 0 });\n\n  // Composite all layers\n  await sharp(base)\n    .composite(layers)\n    .jpeg({ quality: 92 })\n    .toFile(outputPath);\n\n  return outputPath;\n}\n\nasync function createGradientOverlay(width, height, position) {\n  const canvas = createCanvas(width, height);\n  const ctx = canvas.getContext('2d');\n\n  let gradient;\n  if (position === 'bottom') {\n    gradient = ctx.createLinearGradient(0, height * 0.5, 0, height);\n    gradient.addColorStop(0, 'rgba(0,0,0,0)');\n    gradient.addColorStop(1, 'rgba(0,0,0,0.7)');\n  } else if (position === 'top') {\n    gradient = ctx.createLinearGradient(0, 0, 0, height * 0.5);\n    gradient.addColorStop(0, 'rgba(0,0,0,0.7)');\n    gradient.addColorStop(1, 'rgba(0,0,0,0)');\n  } else {\n    gradient = ctx.createLinearGradient(0, 0, 0, height);\n    gradient.addColorStop(0, 'rgba(0,0,0,0.4)');\n    gradient.addColorStop(0.5, 'rgba(0,0,0,0)');\n    gradient.addColorStop(1, 'rgba(0,0,0,0.4)');\n  }\n\n  ctx.fillStyle = gradient;\n  ctx.fillRect(0, 0, width, height);\n  return canvas.toBuffer('image/png');\n}\n\n/**\n * Fetch image from URL (AI or Pinterest) into Buffer\n */\nasync function fetchImage(url) {\n  const res = await fetch(url);\n  if (!res.ok) throw new Error(`Fetch failed: ${url} (${res.status})`);\n  return Buffer.from(await res.arrayBuffer());\n}\n\n/**\n * Composite full slideshow (7 slides)\n */\nasync function compositeSlideshow({ slides, outputDir, slideshowId }) {\n  await fs.mkdir(outputDir, { recursive: true });\n  const results = [];\n\n  for (const slide of slides) {\n    const imageBuffer = await fetchImage(slide.imageUrl);\n    const outputPath = path.join(outputDir, `${slideshowId}_${slide.slideNumber}.jpg`);\n\n    await compositeSlide({\n      imageBuffer,\n      text: slide.text,\n      outputPath,\n      options: {\n        fontSize: slide.fontSize || 72,\n        position: slide.textPosition || 'bottom',\n        color: slide.textColor || '#FFFFFF',\n        addGradient: slide.addGradient !== false,\n      },\n    });\n\n    results.push({ slideNumber: slide.slideNumber, path: outputPath });\n    console.log(`✓ Slide ${slide.slideNumber}/${slides.length} done`);\n  }\n\n  return results;\n}\n\nmodule.exports = { compositeSlide, compositeSlideshow, renderTextLayer };\n```"
+            },
+            "mutability": "Mutable",
+            "type": "MARKDOWN"
+          }
+        },
+        {
+          "key": "4",
+          "value": {
+            "data": {
+              "entityKey": "255d77fe-4f5a-4e36-8837-dedb9eebd69e",
+              "mediaItems": [
+                {
+                  "localMediaId": "11",
+                  "mediaCategory": "DraftTweetImage",
+                  "mediaId": "2047644513670406144"
+                }
+              ]
+            },
+            "mutability": "Immutable",
+            "type": "MEDIA"
+          }
+        },
+        {
+          "key": "11",
+          "value": {
+            "data": {
+              "entityKey": "f67512e1-f41f-4bc9-989a-5e3fb00390c8",
+              "markdown": "```bash\n# Terminal 1: start workers\nnode queue.js\n\n# Terminal 2: enqueue jobs\nnode index.js\n\n# Or via Codex CLI for orchestration\ncodex exec \"node index.js\" --model gpt-5.5\n```"
+            },
+            "mutability": "Mutable",
+            "type": "MARKDOWN"
+          }
+        },
+        {
+          "key": "9",
+          "value": {
+            "data": {
+              "entityKey": "3e419c17-84a1-416f-a850-c1284d02d334",
+              "markdown": "```javascript\n// queue.js\nconst { Queue, Worker } = require('bullmq');\nconst IORedis = require('ioredis');\nconst { compositeSlideshow } = require('./compositor');\n\nconst connection = new IORedis(process.env.REDIS_URL || 'redis://localhost:6379', {\n  maxRetriesPerRequest: null,\n});\n\nconst compositeQueue = new Queue('slideshow-composite', { connection });\nconst postQueue = new Queue('slideshow-post', { connection });\n\n/**\n * Enqueue slideshow job\n */\nasync function enqueueSlideshow({ slideshowId, slides, accountId, scheduledAt }) {\n  return compositeQueue.add(\n    'composite',\n    { slideshowId, slides, accountId, scheduledAt },\n    {\n      attempts: 3,\n      backoff: { type: 'exponential', delay: 5000 },\n      removeOnComplete: { count: 100 },\n      removeOnFail: { count: 500 },\n    }\n  );\n}\n\n/**\n * Worker: Composite then enqueue post job\n */\nconst compositeWorker = new Worker(\n  'slideshow-composite',\n  async (job) => {\n    const { slideshowId, slides, accountId, scheduledAt } = job.data;\n    console.log(`[composite] Start ${slideshowId}`);\n\n    const outputDir = `./output/${slideshowId}`;\n    const results = await compositeSlideshow({ slides, outputDir, slideshowId });\n\n    // Enqueue post job with delay\n    const delay = scheduledAt ? new Date(scheduledAt).getTime() - Date.now() : 0;\n\n    await postQueue.add(\n      'post',\n      {\n        slideshowId,\n        accountId,\n        imagePaths: results.map((r) => r.path),\n        caption: slides[0].caption || '',\n      },\n      {\n        delay: Math.max(0, delay),\n        attempts: 5,\n        backoff: { type: 'exponential', delay: 30000 },\n      }\n    );\n\n    console.log(`[composite] Done ${slideshowId}, post scheduled in ${delay}ms`);\n    return { slideshowId, slideCount: results.length };\n  },\n  { connection, concurrency: 2 }  // 2 parallel to avoid OOM\n);\n\n/**\n * Worker: Post to Postiz\n */\nconst postWorker = new Worker(\n  'slideshow-post',\n  async (job) => {\n    const { slideshowId, accountId, imagePaths, caption } = job.data;\n    console.log(`[post] Sending ${slideshowId} to account ${accountId}`);\n\n    const res = await fetch(`${process.env.POSTIZ_URL}/api/posts`, {\n      method: 'POST',\n      headers: {\n        'Content-Type': 'application/json',\n        'Authorization': `Bearer ${process.env.POSTIZ_API_KEY}`,\n      },\n      body: JSON.stringify({\n        integrationId: accountId,\n        type: 'tiktok-slideshow',\n        media: imagePaths,\n        content: caption,\n      }),\n    });\n\n    if (!res.ok) {\n      const err = await res.text();\n      throw new Error(`Postiz API error ${res.status}: ${err}`);\n    }\n\n    const result = await res.json();\n    console.log(`[post] ✓ Posted ${slideshowId}`);\n    return result;\n  },\n  { connection, concurrency: 3, limiter: { max: 10, duration: 60_000 } }  // max 10 posts/min\n);\n\ncompositeWorker.on('failed', (job, err) => {\n  console.error(`[composite] Failed ${job?.id}:`, err.message);\n});\npostWorker.on('failed', (job, err) => {\n  console.error(`[post] Failed ${job?.id}:`, err.message);\n});\n\nmodule.exports = { enqueueSlideshow, compositeQueue, postQueue };\nindex.js entry point for Codex CLI\n// index.js\nrequire('dotenv').config();\nconst { enqueueSlideshow } = require('./queue');\n\nasync function main() {\n  const slideshow = {\n    slideshowId: `fitness_${Date.now()}`,\n    accountId: 'tiktok_account_uuid_here',\n    scheduledAt: new Date(Date.now() + 4 * 60 * 60 * 1000),\n    slides: [\n      {\n        slideNumber: 1,\n        text: 'Nobody talks about Rank E... but they should',\n        imageUrl: 'https://your-cdn.com/generated/slide1.jpg',  // AI-generated\n        fontSize: 80,\n        textPosition: 'bottom',\n        caption: '5 rank levels explained 💪 #fitness #rankup',\n      },\n      {\n        slideNumber: 2,\n        text: 'Rank E: where everyone starts',\n        imageUrl: 'https://your-cdn.com/pinterest/moody-gym-1.jpg',  // Pinterest\n        fontSize: 72,\n      },\n      // ... slides 3-7 (all Pinterest-sourced)\n    ],\n  };\n\n  const job = await enqueueSlideshow(slideshow);\n  console.log(`Enqueued job ${job.id}`);\n  process.exit(0);\n}\n\nmain().catch(console.error);\n```"
+            },
+            "mutability": "Mutable",
+            "type": "MARKDOWN"
+          }
+        },
+        {
+          "key": "13",
+          "value": {
+            "data": {
+              "url": "https://abs.twimg.com/emoji/v2/svg/1fae1.svg"
+            },
+            "mutability": "Immutable",
+            "type": "TWEMOJI"
+          }
+        },
+        {
+          "key": "5",
+          "value": {
+            "data": {
+              "entityKey": "a6a2b059-0081-4dac-a0e4-04e418c73e63",
+              "mediaItems": [
+                {
+                  "localMediaId": "13",
+                  "mediaCategory": "DraftTweetImage",
+                  "mediaId": "2047645180984188928"
+                }
+              ]
+            },
+            "mutability": "Immutable",
+            "type": "MEDIA"
+          }
+        },
+        {
+          "key": "10",
+          "value": {
+            "data": {
+              "entityKey": "028b82c9-e7e9-4a8d-aaf1-466ccc2bc9db",
+              "markdown": "```bash\nREDIS_URL=redis://localhost:6379\nPOSTIZ_URL=http://localhost:3000\nPOSTIZ_API_KEY=your_postiz_api_key\n```"
+            },
+            "mutability": "Mutable",
+            "type": "MARKDOWN"
+          }
+        },
+        {
+          "key": "6",
+          "value": {
+            "data": {
+              "entityKey": "5bb7b898-8849-45bc-98b5-89d1db6db463",
+              "markdown": "```json\n{\n  \"format_name\": \"curiosity_ranked_list\",\n  \"total_slides\": 7,\n  \"slides\": [\n    {\n      \"slide_number\": 1,\n      \"role\": \"hook\",\n      \"text_template\": \"Nobody talks about {topic} but...\",\n      \"visual_style_notes\": \"Bold white text on dark moody photo, bottom third\",\n      \"image_prompt_template\": \"Cinematic {scene}, dark atmospheric lighting...\"\n    }\n  ]\n}\n```"
+            },
+            "mutability": "Mutable",
+            "type": "MARKDOWN"
+          }
+        },
+        {
+          "key": "1",
+          "value": {
+            "data": {
+              "entityKey": "3fb03a45-43da-43c6-a1f7-e686a0ef8c65",
+              "mediaItems": [
+                {
+                  "localMediaId": "1",
+                  "mediaCategory": "DraftTweetImage",
+                  "mediaId": "2047644241283928064"
+                }
+              ]
+            },
+            "mutability": "Immutable",
+            "type": "MEDIA"
+          }
+        },
+        {
+          "key": "0",
+          "value": {
+            "data": {
+              "entityKey": "a034dcee-0a00-46ec-9738-a1b6ffbaefc3",
+              "url": "https://x.com/alexcooldev/article/2044820024695947654/media/2044725668156702720"
+            },
+            "mutability": "Mutable",
+            "type": "LINK"
+          }
+        },
+        {
+          "key": "2",
+          "value": {
+            "data": {
+              "entityKey": "5b5e56a4-e321-4ea0-ad16-aba15a7ec58e",
+              "mediaItems": [
+                {
+                  "localMediaId": "7",
+                  "mediaCategory": "DraftTweetImage",
+                  "mediaId": "2047644355935240192"
+                }
+              ]
+            },
+            "mutability": "Immutable",
+            "type": "MEDIA"
+          }
+        },
+        {
+          "key": "7",
+          "value": {
+            "data": {
+              "entityKey": "89c7012a-1c40-486f-bac2-02ba09c40324",
+              "markdown": "```bash\nnpm init -y\nnpm install sharp @napi-rs/canvas bullmq ioredis dotenv\n```"
+            },
+            "mutability": "Mutable",
+            "type": "MARKDOWN"
+          }
+        },
+        {
+          "key": "3",
+          "value": {
+            "data": {
+              "entityKey": "05f07f44-94a4-405c-b65c-f5b54a5f342a",
+              "mediaItems": [
+                {
+                  "localMediaId": "9",
+                  "mediaCategory": "DraftTweetImage",
+                  "mediaId": "2047644402395557888"
+                }
+              ]
+            },
+            "mutability": "Immutable",
+            "type": "MEDIA"
+          }
+        }
+      ]
+    },
+    "cover_media": {
+      "id": "QXBpTWVkaWE6DAAFCgABHGqzwqxaoAAKAAIWFVkb/RoQAAAA",
+      "media_id": "2047646629289959424",
+      "media_info": {
+        "__typename": "ApiImage",
+        "color_info": {
+          "palette": [
+            {
+              "percentage": 77.85,
+              "rgb": {
+                "blue": 14,
+                "green": 14,
+                "red": 15
+              }
+            },
+            {
+              "percentage": 13.13,
+              "rgb": {
+                "blue": 109,
+                "green": 116,
+                "red": 123
+              }
+            },
+            {
+              "percentage": 2.33,
+              "rgb": {
+                "blue": 75,
+                "green": 105,
+                "red": 149
+              }
+            },
+            {
+              "percentage": 2.1,
+              "rgb": {
+                "blue": 225,
+                "green": 223,
+                "red": 223
+              }
+            },
+            {
+              "percentage": 1.1,
+              "rgb": {
+                "blue": 63,
+                "green": 75,
+                "red": 118
+              }
+            }
+          ]
+        },
+        "original_img_height": 600,
+        "original_img_url": "https://pbs.twimg.com/media/HGqzwqxaoAA_9L3.jpg",
+        "original_img_width": 1500
+      },
+      "media_key": "3_2047646629289959424"
+    },
+    "id": "QXJ0aWNsZUVudGl0eToyMDQ3NjI5MjQ2NzAxNjc4NTky",
+    "is_grok_summary_eligible": true,
+    "lifecycle_state": {
+      "modified_at_secs": 1777048293
+    },
+    "media_entities": [
+      {
+        "id": "QXBpTWVkaWE6DAAFCgABHGqycXaaYAAKAAIWFVkb/RoQAAAA",
+        "media_id": "2047645180984188928",
+        "media_info": {
+          "__typename": "ApiImage",
+          "color_info": {
+            "palette": [
+              {
+                "percentage": 40.82,
+                "rgb": {
+                  "blue": 31,
+                  "green": 35,
+                  "red": 35
+                }
+              },
+              {
+                "percentage": 33.34,
+                "rgb": {
+                  "blue": 232,
+                  "green": 235,
+                  "red": 235
+                }
+              },
+              {
+                "percentage": 12.99,
+                "rgb": {
+                  "blue": 100,
+                  "green": 114,
+                  "red": 122
+                }
+              },
+              {
+                "percentage": 4.21,
+                "rgb": {
+                  "blue": 106,
+                  "green": 96,
+                  "red": 72
+                }
+              },
+              {
+                "percentage": 0.89,
+                "rgb": {
+                  "blue": 246,
+                  "green": 217,
+                  "red": 212
+                }
+              }
+            ]
+          },
+          "original_img_height": 1746,
+          "original_img_url": "https://pbs.twimg.com/media/HGqycXaaYAAOuPU.jpg",
+          "original_img_width": 3100
+        },
+        "media_key": "3_2047645180984188928"
+      },
+      {
+        "id": "QXBpTWVkaWE6DAAFCgABHGqxlqwaUAAKAAIWFVkb/RoQAAAA",
+        "media_id": "2047644241283928064",
+        "media_info": {
+          "__typename": "ApiImage",
+          "color_info": {
+            "palette": [
+              {
+                "percentage": 69.21,
+                "rgb": {
+                  "blue": 11,
+                  "green": 11,
+                  "red": 12
+                }
+              },
+              {
+                "percentage": 19.31,
+                "rgb": {
+                  "blue": 113,
+                  "green": 119,
+                  "red": 127
+                }
+              },
+              {
+                "percentage": 3.62,
+                "rgb": {
+                  "blue": 75,
+                  "green": 103,
+                  "red": 150
+                }
+              },
+              {
+                "percentage": 2.96,
+                "rgb": {
+                  "blue": 188,
+                  "green": 199,
+                  "red": 204
+                }
+              },
+              {
+                "percentage": 0.95,
+                "rgb": {
+                  "blue": 57,
+                  "green": 60,
+                  "red": 54
+                }
+              }
+            ]
+          },
+          "original_img_height": 1720,
+          "original_img_url": "https://pbs.twimg.com/media/HGqxlqwaUAAtQn4.jpg",
+          "original_img_width": 2688
+        },
+        "media_key": "3_2047644241283928064"
+      },
+      {
+        "id": "QXBpTWVkaWE6DAAFCgABHGqxvC8asAAKAAIWFVkb/RoQAAAA",
+        "media_id": "2047644402395557888",
+        "media_info": {
+          "__typename": "ApiImage",
+          "color_info": {
+            "palette": [
+              {
+                "percentage": 80.23,
+                "rgb": {
+                  "blue": 14,
+                  "green": 14,
+                  "red": 15
+                }
+              },
+              {
+                "percentage": 14.43,
+                "rgb": {
+                  "blue": 114,
+                  "green": 115,
+                  "red": 119
+                }
+              },
+              {
+                "percentage": 3.01,
+                "rgb": {
+                  "blue": 76,
+                  "green": 104,
+                  "red": 146
+                }
+              },
+              {
+                "percentage": 0.66,
+                "rgb": {
+                  "blue": 38,
+                  "green": 23,
+                  "red": 14
+                }
+              },
+              {
+                "percentage": 0.35,
+                "rgb": {
+                  "blue": 79,
+                  "green": 59,
+                  "red": 206
+                }
+              }
+            ]
+          },
+          "original_img_height": 1734,
+          "original_img_url": "https://pbs.twimg.com/media/HGqxvC8asAA5d0A.jpg",
+          "original_img_width": 2724
+        },
+        "media_key": "3_2047644402395557888"
+      },
+      {
+        "id": "QXBpTWVkaWE6DAAFCgABHGqxsV3agAAKAAIWFVkb/RoQAAAA",
+        "media_id": "2047644355935240192",
+        "media_info": {
+          "__typename": "ApiImage",
+          "color_info": {
+            "palette": [
+              {
+                "percentage": 78.58,
+                "rgb": {
+                  "blue": 10,
+                  "green": 10,
+                  "red": 10
+                }
+              },
+              {
+                "percentage": 13.07,
+                "rgb": {
+                  "blue": 114,
+                  "green": 115,
+                  "red": 121
+                }
+              },
+              {
+                "percentage": 3.12,
+                "rgb": {
+                  "blue": 71,
+                  "green": 94,
+                  "red": 135
+                }
+              },
+              {
+                "percentage": 1.38,
+                "rgb": {
+                  "blue": 200,
+                  "green": 198,
+                  "red": 197
+                }
+              },
+              {
+                "percentage": 0.71,
+                "rgb": {
+                  "blue": 51,
+                  "green": 66,
+                  "red": 104
+                }
+              }
+            ]
+          },
+          "original_img_height": 1708,
+          "original_img_url": "https://pbs.twimg.com/media/HGqxsV3agAAUR5Q.jpg",
+          "original_img_width": 2710
+        },
+        "media_key": "3_2047644355935240192"
+      },
+      {
+        "id": "QXBpTWVkaWE6DAAFCgABHGqx1heaIAAKAAIWFVkb/RoQAAAA",
+        "media_id": "2047644513670406144",
+        "media_info": {
+          "__typename": "ApiImage",
+          "color_info": {
+            "palette": [
+              {
+                "percentage": 93.38,
+                "rgb": {
+                  "blue": 11,
+                  "green": 11,
+                  "red": 10
+                }
+              },
+              {
+                "percentage": 3.96,
+                "rgb": {
+                  "blue": 27,
+                  "green": 60,
+                  "red": 51
+                }
+              },
+              {
+                "percentage": 1.32,
+                "rgb": {
+                  "blue": 122,
+                  "green": 123,
+                  "red": 122
+                }
+              },
+              {
+                "percentage": 0.73,
+                "rgb": {
+                  "blue": 57,
+                  "green": 163,
+                  "red": 138
+                }
+              },
+              {
+                "percentage": 0.39,
+                "rgb": {
+                  "blue": 31,
+                  "green": 58,
+                  "red": 85
+                }
+              }
+            ]
+          },
+          "original_img_height": 630,
+          "original_img_url": "https://pbs.twimg.com/media/HGqx1heaIAANT89.jpg",
+          "original_img_width": 2526
+        },
+        "media_key": "3_2047644513670406144"
+      }
+    ],
+    "metadata": {
+      "first_published_at_secs": 1777048293
+    },
+    "plain_text": "A step-by-step guide to cloning viral formats using Codex GPT-5.5 + ChatGPT Images 2.0 + Pinterest + Postiz\nCurrently, TikTok is heavily boosting views and engagement for slideshows, you can check out these channels.\n\n \n \n \n \nAnd actually, most images from Pinterest especially the top ones come from AI-generated influencer avatars. It’s basically an endless source of content, so there’s no need to overuse AI image generation at all. The cost is practically $0, and it’s often easier to go viral compared to fully AI-generated images.\n \nThis is the full pipeline. No fluff, no \"10x your content\" nonsense. Just the exact setup that's posting 30-50 slideshows a day across my accounts while I sleep.\nHere's what you'll learn:\nHow to steal viral slideshow formats without getting flagged for plagiarism\nWhy GPT-5.5 in Codex is the unlock for reverse-engineering slide structures\nHow to use ChatGPT Images 2.0 to generate entire 8-slide decks with character continuity\nHow to combine Pinterest scraping with AI generation to cut costs by ~85%\nSelf-hosting Postiz to schedule to 50+ TikTok accounts without getting bans\nFull Node.js code for the compositor + BullMQ queue you can run in Codex today\nLet's go.\nWhy TikTok slideshows, and why now\nVideo requires editing, UGC actors, b-roll, captions, music sync. It's expensive and slow.\nSlideshows need 5-10 images, a hook, and a CTA. That's it. The algorithm treats them like videos, and on average my slideshow posts out-perform my video posts by 3-4x on reach, with maybe 10% of the production effort.\nThe bottleneck used to be:\nFinding formats that work (scrolling, saving, manually reverse-engineering)\nGenerating on-brand images with consistent text and style\nCost of generating 7-8 AI images per post at scale\nPosting at scale without bans\nGPT-5.5 solves #1. Images 2.0 solves #2. Pinterest hybrid strategy solves #3. Postiz solves #4.\nThe viral format copy strategy (the legal, ethical version)\nBefore any tooling, understand this: you're not copying content, you're copying structure.\nA viral slideshow has three layers:\nThe format: hook slide, setup, payoff, CTA. This is the skeleton.\nThe visual language: fonts, layout, color treatment, image style.\nThe content: the actual topic, niche, and message.\nLayer 1 is free to copy. Nobody owns \"curiosity gap hook, 5 points, save this.\" That's just copywriting. Layer 2 you adapt. Same general structure (big text on image), different fonts and colors for your brand. Layer 3 is yours. Original topics in your niche.\nDo this wrong and you get ratio'd. Do it right and you ride the algorithm wave that's already proven to convert.\nThe scraping step\nI pull the top 20-50 performing slideshows in my niche from the past 30 days. Save them to a folder with screenshots of each slide. A VA on Fiverr for $5 gets you 100 examples in an afternoon.\nWhat matters is you have the visual reference set.\nThe Pinterest parallel step\nAt the same time I'm scraping TikTok slideshows for format, I'm building a Pinterest image library for the actual visuals.\nPinterest is where aesthetic goes to die and get curated. Scrape 500-1000 images per aesthetic (anime RPG, dark moody fitness, minimal finance, etc.), tag them by mood/color/subject, store in Supabase Storage.\nCost: zero. Quality: often better than AI because humans already curated them.\nThis is the key cost-cutting move I'll come back to in Step 3.\nStep 1: Reverse-engineer the format with GPT-5.5 in Codex\nThis is where GPT-5.5 becomes a different animal than previous models.\nThe new GPT-5.5 in Codex has native computer-use capabilities and vision. You can drop 10 slideshow screenshots into Codex and it will analyze structure, extract the templating pattern, and output a reusable schema.\nHere's the exact prompt I use in Codex:\nI'm attaching 10 screenshots from a viral TikTok slideshow. \nAnalyze the structure and extract:\n\n1. The hook pattern (slide 1 only): emotional trigger + curiosity gap\n2. The payoff pattern (middle slides): content delivery structure\n3. The CTA pattern (final slide): action request\n4. Visual layout: text placement, image-to-text ratio, font weight\n5. Pacing: how information is dripped across slides\n\nOutput as a JSON schema I can feed into an image generation pipeline.\nFields must include: slide_number, role, text_template, \nvisual_style_notes, image_prompt_template.\nWhat I get back is a structured JSON like:\n \nThis schema is the asset. Save it with a name like fitness_curiosity_v1.json and reuse it forever. Build up a library of 20-30 of these and you've got infinite content variations.\nThe reason GPT-5.5 beats 5.4 here: it actually reasons across the whole slideshow instead of describing each slide in isolation. It catches the narrative arc.\nStep 2: Hybrid image strategy (Images 2.0 + Pinterest)\nThis is the biggest cost optimization in the whole pipeline.\nThe naive approach (too expensive)\nChatGPT Images 2.0 can generate 8 images from a single prompt with character and object continuity. This is genuinely game-changing. Previously a 7-slide deck meant 7 separate prompts and your \"main character\" would shift across every slide.\nBut at high quality, generating a 7-slide deck costs $0.70-1.00. At 30 slideshows/day that's $600-900/month.\nThe hybrid approach (cost killer)\nBreak the slideshow into roles and use the right tool for each:\nSlide 1 (hook) = Images 2.0 generate. Needs custom scene exactly matching the topic. Worth the spend.\nSlides 2-6 (payoff/content) = Pinterest image from library, matched by tags. Composite text overlay locally with Sharp/Canvas.\nSlide 7 (CTA) = Pinterest image or reused template background.\nResult: 1 AI image + 6 Pinterest images instead of 7 AI images.\nCost drops from ~$1.00/slideshow to ~$0.15/slideshow. At 30/day that's $135/month instead of $900/month.\nVisual quality actually improves in most cases because Pinterest has been human-curated for aesthetic appeal.\nPinterest caveats\nAvoid images with recognizable public figures or brand watermarks\nCrop + color grade locally to keep consistent brand palette across slides\nRotate library aggressively. Don't use the same image in 10 different posts\nTag aggressively when scraping so your matcher can pick the right mood per slide\nWhen to still use Images 2.0 for middle slides\nFor Vietnamese content specifically, Images 2.0 text rendering for Vietnamese diacritics (ở, ữ, ế) is genuinely good for the first time. If your slideshow needs text rendered into the image (not composited on top), use AI. For everything else, Pinterest + local text overlay wins.\nStep 3: Text compositor (Sharp + Canvas API)\nThis is the layer that makes Pinterest images look like branded TikTok slides. Full Node.js code, runs in Codex CLI.\nInstall\n \nUse @napi-rs/canvas instead of canvas. No cairo/pango system deps, Docker/Railway deploys cleanly.\ncompositor.js\n \nStep 4: Post queue (BullMQ + Redis)\nThis is what chains compositor to Postiz with retry/rate-limit logic.\nqueue.js\n \n.env\n \nRun\n \nGotchas fixed in this code\nVietnamese text: uncomment GlobalFonts.registerFromPath with Be Vietnam Pro or Inter font\nText stroke: rendered before fill so outline doesn't overlap glyphs\nRate limit: limiter: { max: 10, duration: 60_000 } on post worker prevents TikTok API ban\nMemory: concurrency: 2 on compositor because Sharp is memory-heavy. Bump up on stronger servers\nRetry: composite 3 attempts, post 5 attempts with exponential backoff (network reality)\nStep 5: Postiz for posting at scale\nPostiz is the self-hosted social scheduler that integrates with TikTok's Content Posting API.\nWhy Postiz over alternatives:\nOpen source, you control the stack, no per-seat pricing\nMulti-tenant, run 50+ TikTok accounts from one instance\nOfficial TikTok Content Posting API integration. Unofficial posting gets you banned\nHas a working API the queue above calls into\nDeploy on Railway or Coolify. Sub-$20/month self-hosting. Connect TikTok business accounts (Content Posting API approval takes 1-3 weeks).\nScaling rules\n3-5 posts per account per day: sweet spot for reach without rate limits\nMinimum 2-3 hours between posts on the same account\nStagger across accounts. Don't fire 50 posts at the same minute\nFor more aggressive posting you need multiple accounts or the iPhone farm route (physical devices), which is a whole different rabbit hole.\nStep 6: GPT-5.5 orchestration tying it all together\nArchitecture:\n \nA single Codex prompt to kick it off:\nUsing the fitness niche config and curiosity_ranked_list_v1 format:\n1. Generate 5 fresh topic ideas not used in the last 30 days\n2. For each, fill the slide template with on-brand copy\n3. For slide 1, generate prompt and queue Images 2.0 generation\n4. For slides 2-7, query Pinterest library by tags and pick matches\n5. Queue everything in BullMQ pipeline\n6. Schedule posts via Postiz to 3 active fitness accounts, \n   spaced 4 hours apart\nGPT-5.5 in Codex reliably completes this end-to-end. Previous models dropped context past 3-4 chained operations.\nCaveat: GPT-5.5 isn't available via API key auth yet. Only Codex app, CLI, and IDE extension via ChatGPT subscription. For fully autonomous pipeline use GPT-5.4 via API until the rollout. I run orchestration in Codex CLI via cron.\nThe full loop, end-to-end\nWhat happens when cron fires at 2am ICT:\nJob pulls active niches from Postgres\nFor each niche, GPT-5.5 (via Codex CLI exec) generates 5 slideshow topics\nEach topic creates a BullMQ job\nImage worker: 1 call to Images 2.0 for slide 1, 6 queries to Pinterest library for rest\nCompositor worker overlays branded text on every image\nFinished slideshow posted to Postiz queue\nPostiz spaces TikTok Content Posting API calls throughout the day\nBy 8am, 15-20 fresh slideshows scheduled across accounts for next 24 hours\nWhat this does NOT solve\nBeing honest about limitations:\nOriginality: if your niche is oversaturated with AI slideshows, you look like everyone else. The moat is niche selection and format variation, not volume.\nTikTok bans: follow API limits, don't stuff hashtags, don't repost identical content across accounts. Two of my accounts got shadowbanned in 6 months, both from hashtag greed.\nMonetization: slideshow views don't convert like videos. You need a funnel (slideshow, bio link, landing page, product). Without the funnel, vanity metrics only.\nAlso plainly: this workflow is optimized for scale, not deeply personal brand building. If your goal is authentic long-term audience connection, the AI-generated slideshow route works against you. Match the tool to the goal.\nThe takeaway\nSix months ago this pipeline was theoretically possible but practically broken. Image models couldn't do text, couldn't maintain continuity, and automation required stitching 5 APIs together.\nGPT-5.5 made the orchestration reliable. Images 2.0 made visual output production-ready. Pinterest scraping made it affordable. Postiz filled the posting gap.\nBuild the format library first, the Pinterest library second, the compositor + queue third, the orchestrator last. Don't skip steps. Don't try to go from zero to 50 accounts in a week.\nThe code above runs in Codex today. Copy it, adapt it, ship it.\nGood luck guys 🫡",
+    "preview_text": "A step-by-step guide to cloning viral formats using Codex GPT-5.5 + ChatGPT Images 2.0 + Pinterest + Postiz\nCurrently, TikTok is heavily boosting views and engagement for slideshows, you can check out",
+    "rest_id": "2047629246701678592",
+    "summary_text": "- TikTok boosts slideshows which outperform videos 3-4x on reach with 10% effort.  \n- Pipeline uses GPT-5.5 in Codex to reverse-engineer viral formats into reusable JSON schemas from screenshots.  \n- Hybrid images combine ChatGPT Images 2.0 for hook slide with Pinterest library for payoff slides, cutting costs 85% to $0.15 per slideshow.  \n- Node.js compositor with Sharp/Canvas overlays branded text; BullMQ queue schedules via self-hosted Postiz to 50+ accounts.  \n- GPT-5.5 orchestrates topic generation to posting while sleeping, building format and Pinterest libraries first for scale.",
+    "title": "Automating TikTok Slideshow Content with Codex GPT-5.5 and ChatGPT images 2.0 (Step by step guide)"
+  }
+}

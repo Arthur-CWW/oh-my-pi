@@ -1,0 +1,1351 @@
+{
+  "tweet_id": "2020883184922324994",
+  "tweet_url": "https://x.com/alexcooldev/status/2020883184922324994",
+  "tweet_text": "https://t.co/ycmigL6sct",
+  "x_article_url": "https://x.com/i/article/2020881819969916928",
+  "x_article_alias_url": "https://x.com/alexcooldev/article/2020883184922324994",
+  "history_title": "How To Generate AI Influencers That Actually Look Real",
+  "article": {
+    "content_state": {
+      "blocks": [
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "1s6ev",
+          "text": "How To Generate AI Influencers That Actually Look Real",
+          "type": "header-one"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 21,
+              "offset": 62,
+              "style": "Bold"
+            }
+          ],
+          "key": "fknp7",
+          "text": "If your AI Influencers still look fake or “too perfect”,\nit’s not the model’s fault.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "49ed2",
+          "text": "It’s your prompt.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "a99j0",
+          "text": "AI models like Grok Imagine, Kling 3.0, Seedance,\nthey’re all v powerful but… only if you talk to it the right way.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 7,
+              "offset": 33,
+              "style": "Bold"
+            }
+          ],
+          "key": "cus7e",
+          "text": "And they’re all available inside Arcads so you don’t have to jump around.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "i6vc",
+          "text": "See, most people prompt it like they’re describing art.\nThat’s the fastest way to get AI-looking results.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 19,
+              "offset": 12,
+              "style": "Bold"
+            },
+            {
+              "length": 6,
+              "offset": 130,
+              "style": "Bold"
+            }
+          ],
+          "key": "a4ups",
+          "text": "If you want real AI Influencers – the kind that blend naturally into TikTok, Reels, or Shorts – you need to prompt the LLM like a system, not a vibe.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 14,
+              "offset": 14,
+              "style": "Bold"
+            }
+          ],
+          "key": "gu4d",
+          "text": "This is where JSON prompting works best (example at the end).",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 45,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "5pp83",
+          "text": "Why Grok Imagine + Arcads Is a Powerful Combo",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "8g9an",
+          "text": "Arcads gives you:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "69pu5",
+          "text": "A fast workflow for AI creators",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "dk2ts",
+          "text": "Easy iteration for influencer content",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "61rd5",
+          "text": "Distribution-ready assets",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "4jged",
+          "text": "Grok Imagine gives you:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "e3ktt",
+          "text": "High-fidelity human generation",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "3b5np",
+          "text": "Strong realism when structured properly",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "c1jec",
+          "text": "Consistent output when guided with constraints",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 23,
+              "offset": 39,
+              "style": "Bold"
+            }
+          ],
+          "key": "fsj5a",
+          "text": "Together, they’re perfect for building AI Influencers at scale.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 54,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "ae07r",
+          "text": "The Core Rule for AI Influencers: Reality > Perfection",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "9029f",
+          "text": "Real AI Influencers don’t look like fashion models.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "4dfpq",
+          "text": "They look like:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "edp3g",
+          "text": "Someone filming content in their kitchen",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "ctska",
+          "text": "A casual mirror selfie",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "6gu40",
+          "text": "A creator adjusting their outfit mid-recording",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "5vlfn",
+          "text": "Slightly imperfect, slightly awkward",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 35,
+              "offset": 11,
+              "style": "Bold"
+            }
+          ],
+          "key": "vsru",
+          "text": "That’s why imperfection is your biggest weapon.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 34,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "34m2m",
+          "text": "The Prompting Framework That Works",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "a0upt",
+          "text": "When using Grok Imagine or Kling 3.0 inside Arcads, structure matters more than creativity.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 10,
+              "offset": 18,
+              "style": "Bold"
+            }
+          ],
+          "key": "5h5ip",
+          "text": "A good prompt has two layers:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 32,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "9jblo",
+          "text": "Structured visual details (JSON)",
+          "type": "ordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 23,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "c22r2",
+          "text": "Clear generation intent",
+          "type": "ordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 24,
+              "offset": 24,
+              "style": "Italic"
+            },
+            {
+              "length": 25,
+              "offset": 53,
+              "style": "Italic"
+            }
+          ],
+          "key": "dhhth",
+          "text": "This tells Grok exactly who the AI Influencer is and how real they should feel.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 36,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "etq9p",
+          "text": "1. Visual Details: Lock the Identity",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "civ35",
+          "text": "Instead of:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "8v6h9",
+          "text": "“A beautiful influencer”",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "a7s45",
+          "text": "Define:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "8eqe7",
+          "text": "Age group",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "f1663",
+          "text": "Ethnicity",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "c7hi7",
+          "text": "Hairstyle",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "9ba39",
+          "text": "Expression",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "88g69",
+          "text": "Outfit details",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "4n626",
+          "text": "Jewelry and tattoos",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 21,
+              "offset": 40,
+              "style": "Bold"
+            }
+          ],
+          "key": "1n53p",
+          "text": "This is how you turn an AI face into an AI Influencer persona.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 33,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "32kh0",
+          "text": "2. Environment Sells the Illusion",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 13,
+              "offset": 29,
+              "style": "Bold"
+            }
+          ],
+          "key": "c5s1f",
+          "text": "Faces don’t convince people.\nContext does.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "1gv4r",
+          "text": "Use real spaces:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "4h7el",
+          "text": "Bedrooms",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "chr0p",
+          "text": "Kitchens",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "2bpvr",
+          "text": "Cabinets with random items",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "ahd8u",
+          "text": "Calendars, lamps, door frames",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "3am5d",
+          "text": "LLMs perform best when the environment feels lived-in.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 42,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "fam7c",
+          "text": "3. Camera & Lighting: Think Like a Creator",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "bamm4",
+          "text": "Avoid:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "aeln1",
+          "text": "Cinematic",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "2ea9u",
+          "text": "Studio lighting",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "2ufl7",
+          "text": "Editorial poses",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "2gjpe",
+          "text": "Use:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "fbdof",
+          "text": "Smartphone front camera",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "3k21",
+          "text": "Natural indoor lighting",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "d8enc",
+          "text": "Slightly off-center framing",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "e8902",
+          "text": "Candid posture",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "pgne",
+          "text": "You’re building influencer content… not stock photos.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 54,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "el342",
+          "text": "Example: Grok Imagine JSON Prompt (Used Inside Arcads)",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "d42al",
+          "text": "Prompt:",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 3,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "6ug8l",
+          "text": "`` {",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "2iaq5",
+          "text": "\"visual_details\": {",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "ec6nn",
+          "text": "\"subject\": {",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "dbb6e",
+          "text": "\"gender\": \"Female\",",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "cu5e7",
+          "text": "\"age_group\": \"Young adult\",",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "7r9j8",
+          "text": "\"hair\": \"Long, dark brown, loose with slight waves, center part\",",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "a019c",
+          "text": "\"eyes\": \"Blue\",",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "55clt",
+          "text": "\"expression\": \"Slight smile, looking directly at camera\",",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "3fbhf",
+          "text": "\"skin_tone\": \"Fair\"",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "1krng",
+          "text": "},",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "2b174",
+          "text": "\"attire\": {",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "661e",
+          "text": "\"garment_type\": \"Traditional Bavarian Dirndl\",",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "dt5mt",
+          "text": "\"color\": \"Royal blue\",",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "46t1p",
+          "text": "\"pattern\": \"Small white floral or polka dot print\",",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "dpf06",
+          "text": "\"details\": [",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "3udf3",
+          "text": "\"Lace-up bodice with white satin ribbon\",",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "1kbml",
+          "text": "\"White lace trim on bodice edges\",",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "3gbd2",
+          "text": "\"White lace under-blouse visible at neckline\"",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "4rvt4",
+          "text": "]",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "c8aqb",
+          "text": "},",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "d8she",
+          "text": "\"accessories_and_body_art\": {",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "6jmfa",
+          "text": "\"jewelry\": [",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "dh0a4",
+          "text": "\"Silver necklace with oval cameo pendant\",",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "74lpf",
+          "text": "\"Thin beaded bracelets\",",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "865ei",
+          "text": "\"Small rings\"",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "5ma0v",
+          "text": "],",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "7f7sn",
+          "text": "\"tattoos\": [",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "e1joj",
+          "text": "\"Minimal line-art tattoo on right forearm\",",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "7j6dh",
+          "text": "\"Simple linear tattoo on left upper arm\"",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "3ibdf",
+          "text": "]",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "4h7kg",
+          "text": "},",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "25jmm",
+          "text": "\"action\": \"Holding the ribbon laces of the bodice with both hands, casually adjusting the fit\",",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "88kjj",
+          "text": "\"background\": {",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "9u5pc",
+          "text": "\"setting\": \"Real indoor home space\",",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "91tb7",
+          "text": "\"elements\": [",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "actd3",
+          "text": "\"Grey kitchen cabinet with glass doors\",",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "4qqvq",
+          "text": "\"Random household items inside\",",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "550on",
+          "text": "\"Wooden door frame\",",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "9b3m7",
+          "text": "\"Wall calendar\",",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "c0le4",
+          "text": "\"Simple ceiling light fixture\"",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "58rni",
+          "text": "]",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "1smqf",
+          "text": "}",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "8lder",
+          "text": "},",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "31n5",
+          "text": "\"image_generation_prompt\": \"Hyper-realistic photo, natural indoor lighting, smartphone camera feel, imperfect framing, visible skin texture, candid moment, looks like a real AI Influencer content creator, not staged, not studio\"",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "334sj",
+          "text": "} ``",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "egs8k",
+          "text": "Result:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 0,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "a9vnj",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 43,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "7dbi7",
+          "text": "Why This Works for AI Influencers in Arcads",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "delar",
+          "text": "JSON removes ambiguity",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "ftc2a",
+          "text": "Real environments kill the “AI smell”",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "8vaq5",
+          "text": "Imperfections build trust",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "40hie",
+          "text": "Reusable structure = scalable AI Influencer farms",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "84lte",
+          "text": "This prompt format works especially well when generating:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "4dfvr",
+          "text": "AI product reviewers",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "3j14d",
+          "text": "AI UGC creators",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "74te0",
+          "text": "AI TikTok & Reels influencers",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 13,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "7s012",
+          "text": "Final Thought",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "nk7m",
+          "text": "If you want AI Influencers that actually convert:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "8qb6b",
+          "text": "Stop prompting Grok like an artist",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "852ro",
+          "text": "Start prompting it like an engineer",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 1,
+              "length": 1,
+              "offset": 102
+            }
+          ],
+          "inlineStyleRanges": [
+            {
+              "length": 25,
+              "offset": 75,
+              "style": "Bold"
+            }
+          ],
+          "key": "2rc3q",
+          "text": "Inside Arcads, Grok Imagine becomes more than an image model, it becomes a real AI Influencer engine. 🚀",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 2,
+              "length": 1,
+              "offset": 53
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "d88n4",
+          "text": "PS: Huge thanks to Arcads for sponsoring our efforts 💪",
+          "type": "unstyled"
+        }
+      ],
+      "entityMap": [
+        {
+          "key": "0",
+          "value": {
+            "data": {
+              "entityKey": "e0153519-92f6-4803-8098-1dfe30fd49ba",
+              "mediaItems": [
+                {
+                  "localMediaId": "1",
+                  "mediaCategory": "DraftTweetImage",
+                  "mediaId": "2020882422045577216"
+                }
+              ]
+            },
+            "mutability": "Immutable",
+            "type": "MEDIA"
+          }
+        },
+        {
+          "key": "1",
+          "value": {
+            "data": {
+              "url": "https://abs-0.twimg.com/emoji/v2/svg/1f680.svg"
+            },
+            "mutability": "Immutable",
+            "type": "TWEMOJI"
+          }
+        },
+        {
+          "key": "2",
+          "value": {
+            "data": {
+              "url": "https://abs-0.twimg.com/emoji/v2/svg/1f4aa.svg"
+            },
+            "mutability": "Immutable",
+            "type": "TWEMOJI"
+          }
+        }
+      ]
+    },
+    "cover_media": {
+      "id": "QXBpTWVkaWE6DAAFCgABHAueV+tbsAAKAAIWFVkb/RoQAAAA",
+      "media_id": "2020882958253797376",
+      "media_info": {
+        "__typename": "ApiImage",
+        "color_info": {
+          "palette": [
+            {
+              "percentage": 47.43,
+              "rgb": {
+                "blue": 25,
+                "green": 28,
+                "red": 31
+              }
+            },
+            {
+              "percentage": 34.18,
+              "rgb": {
+                "blue": 135,
+                "green": 135,
+                "red": 135
+              }
+            },
+            {
+              "percentage": 15.93,
+              "rgb": {
+                "blue": 202,
+                "green": 187,
+                "red": 188
+              }
+            },
+            {
+              "percentage": 1.69,
+              "rgb": {
+                "blue": 64,
+                "green": 91,
+                "red": 112
+              }
+            },
+            {
+              "percentage": 1.23,
+              "rgb": {
+                "blue": 69,
+                "green": 47,
+                "red": 34
+              }
+            }
+          ]
+        },
+        "original_img_height": 540,
+        "original_img_url": "https://pbs.twimg.com/media/HAueV-tbsAAZf72.jpg",
+        "original_img_width": 1351
+      },
+      "media_key": "3_2020882958253797376"
+    },
+    "id": "QXJ0aWNsZUVudGl0eToyMDIwODgxODE5OTY5OTE2OTI4",
+    "is_grok_summary_eligible": true,
+    "lifecycle_state": {
+      "modified_at_secs": 1770651072
+    },
+    "media_entities": [
+      {
+        "id": "QXBpTWVkaWE6DAAFCgABHAud2xLbkAAKAAIWFVkb/RoQAAAA",
+        "media_id": "2020882422045577216",
+        "media_info": {
+          "__typename": "ApiImage",
+          "color_info": {
+            "palette": [
+              {
+                "percentage": 52.93,
+                "rgb": {
+                  "blue": 25,
+                  "green": 25,
+                  "red": 26
+                }
+              },
+              {
+                "percentage": 42.17,
+                "rgb": {
+                  "blue": 124,
+                  "green": 124,
+                  "red": 124
+                }
+              },
+              {
+                "percentage": 2.87,
+                "rgb": {
+                  "blue": 95,
+                  "green": 61,
+                  "red": 41
+                }
+              },
+              {
+                "percentage": 0.99,
+                "rgb": {
+                  "blue": 123,
+                  "green": 71,
+                  "red": 42
+                }
+              },
+              {
+                "percentage": 0.4,
+                "rgb": {
+                  "blue": 90,
+                  "green": 116,
+                  "red": 150
+                }
+              }
+            ]
+          },
+          "original_img_height": 2290,
+          "original_img_url": "https://pbs.twimg.com/media/HAud2xLbkAAyEls.jpg",
+          "original_img_width": 3528
+        },
+        "media_key": "3_2020882422045577216"
+      }
+    ],
+    "metadata": {
+      "first_published_at_secs": 1770651072
+    },
+    "plain_text": "How To Generate AI Influencers That Actually Look Real\nIf your AI Influencers still look fake or “too perfect”,\nit’s not the model’s fault.\nIt’s your prompt.\nAI models like Grok Imagine, Kling 3.0, Seedance,\nthey’re all v powerful but… only if you talk to it the right way.\nAnd they’re all available inside Arcads so you don’t have to jump around.\nSee, most people prompt it like they’re describing art.\nThat’s the fastest way to get AI-looking results.\nIf you want real AI Influencers – the kind that blend naturally into TikTok, Reels, or Shorts – you need to prompt the LLM like a system, not a vibe.\nThis is where JSON prompting works best (example at the end).\nWhy Grok Imagine + Arcads Is a Powerful Combo\nArcads gives you:\nA fast workflow for AI creators\nEasy iteration for influencer content\nDistribution-ready assets\nGrok Imagine gives you:\nHigh-fidelity human generation\nStrong realism when structured properly\nConsistent output when guided with constraints\nTogether, they’re perfect for building AI Influencers at scale.\nThe Core Rule for AI Influencers: Reality > Perfection\nReal AI Influencers don’t look like fashion models.\nThey look like:\nSomeone filming content in their kitchen\nA casual mirror selfie\nA creator adjusting their outfit mid-recording\nSlightly imperfect, slightly awkward\nThat’s why imperfection is your biggest weapon.\nThe Prompting Framework That Works\nWhen using Grok Imagine or Kling 3.0 inside Arcads, structure matters more than creativity.\nA good prompt has two layers:\nStructured visual details (JSON)\nClear generation intent\nThis tells Grok exactly who the AI Influencer is and how real they should feel.\n1. Visual Details: Lock the Identity\nInstead of:\n“A beautiful influencer”\nDefine:\nAge group\nEthnicity\nHairstyle\nExpression\nOutfit details\nJewelry and tattoos\nThis is how you turn an AI face into an AI Influencer persona.\n2. Environment Sells the Illusion\nFaces don’t convince people.\nContext does.\nUse real spaces:\nBedrooms\nKitchens\nCabinets with random items\nCalendars, lamps, door frames\nLLMs perform best when the environment feels lived-in.\n3. Camera & Lighting: Think Like a Creator\nAvoid:\nCinematic\nStudio lighting\nEditorial poses\nUse:\nSmartphone front camera\nNatural indoor lighting\nSlightly off-center framing\nCandid posture\nYou’re building influencer content… not stock photos.\nExample: Grok Imagine JSON Prompt (Used Inside Arcads)\nPrompt:\n`` {\n\"visual_details\": {\n\"subject\": {\n\"gender\": \"Female\",\n\"age_group\": \"Young adult\",\n\"hair\": \"Long, dark brown, loose with slight waves, center part\",\n\"eyes\": \"Blue\",\n\"expression\": \"Slight smile, looking directly at camera\",\n\"skin_tone\": \"Fair\"\n},\n\"attire\": {\n\"garment_type\": \"Traditional Bavarian Dirndl\",\n\"color\": \"Royal blue\",\n\"pattern\": \"Small white floral or polka dot print\",\n\"details\": [\n\"Lace-up bodice with white satin ribbon\",\n\"White lace trim on bodice edges\",\n\"White lace under-blouse visible at neckline\"\n]\n},\n\"accessories_and_body_art\": {\n\"jewelry\": [\n\"Silver necklace with oval cameo pendant\",\n\"Thin beaded bracelets\",\n\"Small rings\"\n],\n\"tattoos\": [\n\"Minimal line-art tattoo on right forearm\",\n\"Simple linear tattoo on left upper arm\"\n]\n},\n\"action\": \"Holding the ribbon laces of the bodice with both hands, casually adjusting the fit\",\n\"background\": {\n\"setting\": \"Real indoor home space\",\n\"elements\": [\n\"Grey kitchen cabinet with glass doors\",\n\"Random household items inside\",\n\"Wooden door frame\",\n\"Wall calendar\",\n\"Simple ceiling light fixture\"\n]\n}\n},\n\"image_generation_prompt\": \"Hyper-realistic photo, natural indoor lighting, smartphone camera feel, imperfect framing, visible skin texture, candid moment, looks like a real AI Influencer content creator, not staged, not studio\"\n} ``\nResult:\n \nWhy This Works for AI Influencers in Arcads\nJSON removes ambiguity\nReal environments kill the “AI smell”\nImperfections build trust\nReusable structure = scalable AI Influencer farms\nThis prompt format works especially well when generating:\nAI product reviewers\nAI UGC creators\nAI TikTok & Reels influencers\nFinal Thought\nIf you want AI Influencers that actually convert:\nStop prompting Grok like an artist\nStart prompting it like an engineer\nInside Arcads, Grok Imagine becomes more than an image model, it becomes a real AI Influencer engine. 🚀\nPS: Huge thanks to Arcads for sponsoring our efforts 💪",
+    "preview_text": "How To Generate AI Influencers That Actually Look Real\nIf your AI Influencers still look fake or “too perfect”,\nit’s not the model’s fault.\nIt’s your prompt.\nAI models like Grok Imagine, Kling 3.0,",
+    "rest_id": "2020881819969916928",
+    "title": "How To Generate AI Influencers That Actually Look Real "
+  }
+}

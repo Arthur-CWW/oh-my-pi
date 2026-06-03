@@ -1,0 +1,1196 @@
+{
+  "tweet_id": "2045853080034672683",
+  "tweet_url": "https://x.com/alexcooldev/status/2045853080034672683",
+  "tweet_text": "https://t.co/YsD1uzQh2o",
+  "x_article_url": "https://x.com/i/article/2045839989607641088",
+  "x_article_alias_url": "https://x.com/alexcooldev/article/2045853080034672683",
+  "history_title": "The Easiest Way to Build an AI Influencer That Sells Your App (or Any Product)",
+  "article": {
+    "content_state": {
+      "blocks": [
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "3vea2",
+          "text": "As you’ve seen, apps like looksmaxing, height growth, hair growth, weight loss, etc. are performing extremely well with AI influencers. These apps generate strong revenue and profit compared to typical apps by building an army of AI influencers on TikTok.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "603k0",
+          "text": "And today, I’ll guide you step by step on how to create a workflow for an AI influencer. Now, first, let’s take a look at the AI influencers below.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 0,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "5n1np",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 1,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "c8vjk",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 2,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "630tc",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 3,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "51g76",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 4,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "6tie0",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "1bakj",
+          "text": "All of these AI influencers are promoting a single app, and that app is making $20k/month (Usually, Sensor Tower estimates with small app revenue about 1.5x–2x lower than the actual numbers, so the real revenue could be around $30k–$40k/month) and it’s all from organic content. (That’s crazy, because without running ads and just building an army of AI influencers, the profit margins are extremely high)",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "abkjv",
+          "text": "So now I’m going to guide you step by step on how to create an AI influencer like this.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "bdi0u",
+          "text": "Step 1: Design the character with a JSON prompt (Nano Banana)",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "83pdq",
+          "text": "The failure mode for 90% of AI influencer attempts: the face changes every post.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "65vec",
+          "text": "Day 1 he has a strong jaw. Day 3 his nose is different. Day 5 he looks 10 years older. Viewers notice instantly and the account dies.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "crfle",
+          "text": "The fix is treating your character like a brand spec. Not a prompt, a schema.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 55,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "ev9i3",
+          "text": "Pro tip before you start writing the spec from scratch: you don't have to. Find a looksmaxing account whose aesthetic is already working (high likes, strong engagement, clean visual identity) and download their TikTok slideshow images. Drop those images into Claude and ask it to generate a structured JSON prompt that captures the character, lighting, mood, and camera style. You get a battle-tested aesthetic spec in 30 seconds instead of guessing what \"looksmaxing lighting\" means.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "bmmae",
+          "text": "This is reverse-engineering at its finest. The algorithm already told you which faces and which lighting work, you're just extracting the recipe. From there, tweak the JSON to make the character your own (different face structure, different hair, different wardrobe) while keeping the proven aesthetic dialed in.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "crpv1",
+          "text": "Here's what a good spec looks like once you have it:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 5,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "403ml",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "drd0l",
+          "text": "Result:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 6,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "d95od",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "88k01",
+          "text": "Read the negative constraints again. This is where most people lose.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "1p2f",
+          "text": "Looksmaxing content does NOT look like a model shoot. It looks like a 19-year-old took a selfie at 2am in his bedroom. If your output looks like a Calvin Klein ad, it reads as fake instantly. \"No CGI skin. No airbrush. No perfect symmetry. No model smile.\" These make the character feel like a real kid, not a stock photo.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "h07c",
+          "text": "The \"mood\" field is underrated. Looksmaxing aesthetic is tired, serious, slightly detached. Not happy. Not energetic. The face does the selling the vibe has to match or the account feels off.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "d6q68",
+          "text": "Once you have this spec locked, you can generate:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "fp8gi",
+          "text": "Bedroom selfie, overhead light, tired stare",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "32adf",
+          "text": "Car mirror selfie, golden hour, slight smirk",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "kd1d",
+          "text": "Bathroom mirror, harsh fluorescent, side profile",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "8ld3o",
+          "text": "Gas station at night, flash on, backwards cap",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "860ls",
+          "text": "Same character. Different scenes. That's your content library.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "ejdg0",
+          "text": "Step 2: Animate with restraint (Veo 3)",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "437kh",
+          "text": "Looksmaxing videos are 90% static face + 10% micro-motion. That's the formula.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "2jjvp",
+          "text": "Feed your Nano Banana image into Veo 3 with a minimal motion prompt:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "bli0",
+          "text": "slow head tilt to reveal jawline",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "g7qj",
+          "text": "slight blink, no smile",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "8sjn3",
+          "text": "subtle camera drift (as if phone is propped)",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "d5oi9",
+          "text": "barely visible breath",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "cgrsi",
+          "text": "Do NOT write prompts like \"character walks into frame and turns to camera with a smile.\" Veo 3 will morph the face mid-motion and you lose the character. Every frame of motion is a chance for the identity to break.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "acqu3",
+          "text": "The trick is to think like a TikTok editor, not a film director. Looksmaxing clips are:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "6aevk",
+          "text": "2-4 seconds of a still face",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "985rq",
+          "text": "A slow zoom on the jaw or side profile",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "60rnh",
+          "text": "A single head turn at the end",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "4ie65",
+          "text": "Text overlay doing the actual narrative work",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "a8hgl",
+          "text": "Your video doesn't need to \"do\" anything. The caption does the work. \"They said I was mid at 16. Now I mog them all.\" The video just has to be the face, staying in character, for 10 seconds. Veo 3 is perfect for this if you don't over-prompt it.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "f67l9",
+          "text": "Pro move: generate 3-4 short clips of the same character in different lighting, then stitch them as a \"transformation\" montage. 2 seconds of \"before\" vibes (dim, slouched, tired) → 2 seconds of \"after\" vibes (harsh light, chin up, serious). The viewer's brain fills in the story. You didn't animate a transformation you implied one.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "dnsn7",
+          "text": "Step 3: Add the hook with voice (Arcads AI)",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "6eph2",
+          "text": "Most looksmaxing accounts don't even use voice. They use text overlay + trending audio.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "dv426",
+          "text": "But when voice works, it crushes. Especially for the \"DM me your score\" angle.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "5j0o5",
+          "text": "Feed your Veo 3 clip into Arcads. Script stays under 15 seconds. Write it like a TikTok hook, not an ad:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "ce2g2",
+          "text": "\"Bro everyone's been asking what app I use to rate my face. It's called [app]. Scored a 7.2 last week, now I'm locked in. Link's in bio, DM me your score.\"",
+          "type": "blockquote"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "1f09c",
+          "text": "Three things to get right in the script:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 38,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "ol0e",
+          "text": "1. Open with \"bro\" or \"ngl\" or \"gang.\" Matches the demographic. Formal openings kill the vibe.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 26,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "b8jcc",
+          "text": "2. Drop a specific number. \"Scored a 7.2\" is 10x more credible than \"got a good score.\" Numbers make it feel real.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 44,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "248ho",
+          "text": "3. End with the CTA wrapped in social proof. \"DM me your score\" is a challenge, not a sales pitch. It makes the viewer want to compete.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "1sf9e",
+          "text": "Arcads handles voice + lipsync. Pick a voice that matches the character — young, slightly monotone, a little raspy. NOT an announcer voice. NOT a hype voice. Looksmaxing voice is detached confidence.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "9u0kd",
+          "text": "The funnel: what actually prints installs",
+          "type": "header-two"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "4rg18",
+          "text": "Content is the top of funnel. Here's the rest of the Jake_Ryder playbook:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 14,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "1kdda",
+          "text": "Bio structure:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "6nq63",
+          "text": "Scripture or aspirational quote (builds \"real person\" trust)",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "cv0o7",
+          "text": "One-line CTA: \"Download [App] and DM me your score\"",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "brkls",
+          "text": "Linktree with one link",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 15,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "at5rn",
+          "text": "Pinned content:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "5pq4",
+          "text": "3 pinned videos is the standard. Highest-view clip + most emotional hook + strongest transformation.",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "1rn3c",
+          "text": "Pin the ones with the highest DM conversion, not the highest views.",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [
+            {
+              "length": 10,
+              "offset": 0,
+              "style": "Bold"
+            }
+          ],
+          "key": "30o33",
+          "text": "DM funnel:",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "eeo9k",
+          "text": "Viewer downloads app, gets their rating, DMs you",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "5fp5f",
+          "text": "You reply with a compliment + a tip that hints at the app's premium features",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "1jost",
+          "text": "Soft push to subscription or affiliate link",
+          "type": "unordered-list-item"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "5o3uh",
+          "text": "This is why looksmaxing apps pay creators (real or AI) so well. Every install is a potential subscriber. Every DM is a warm lead. The character doesn't need to sell it just needs to exist and make viewers curious enough to download the app and see their own score.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [],
+          "inlineStyleRanges": [],
+          "key": "6u1jc",
+          "text": "You can check out how to create an AI workflow here, I’ve made a post about it and included a video.",
+          "type": "unstyled"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 7,
+              "length": 1,
+              "offset": 0
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "eu1g3",
+          "text": " ",
+          "type": "atomic"
+        },
+        {
+          "data": {},
+          "entityRanges": [
+            {
+              "key": 8,
+              "length": 1,
+              "offset": 99
+            }
+          ],
+          "inlineStyleRanges": [],
+          "key": "ash1c",
+          "text": "This post is sponsored by Arcards AI, so you can still look for similar tools that fit your needs. 💪",
+          "type": "unstyled"
+        }
+      ],
+      "entityMap": [
+        {
+          "key": "8",
+          "value": {
+            "data": {
+              "url": "https://abs.twimg.com/emoji/v2/svg/1f4aa.svg"
+            },
+            "mutability": "Immutable",
+            "type": "TWEMOJI"
+          }
+        },
+        {
+          "key": "4",
+          "value": {
+            "data": {
+              "entityKey": "57f8760f-06c4-430b-b112-432d6ba1bb8a",
+              "mediaItems": [
+                {
+                  "localMediaId": "11",
+                  "mediaCategory": "DraftTweetImage",
+                  "mediaId": "2045841712984244224"
+                }
+              ]
+            },
+            "mutability": "Immutable",
+            "type": "MEDIA"
+          }
+        },
+        {
+          "key": "5",
+          "value": {
+            "data": {
+              "markdown": "```json\n{\n  \"human\": {\n    \"gender\": \"male\",\n    \"age_range\": \"18-25\",\n    \"ethnicity\": \"Caucasian\",\n    \"hair\": {\n      \"color\": \"light brown\",\n      \"style\": \"short, messy, textured\",\n      \"length\": \"short\"\n    },\n    \"eyes\": {\n      \"color\": \"blue\",\n      \"expression\": \"soft, slight smile\"\n    },\n    \"facial_features\": {\n      \"eyebrows\": \"thick, dark\",\n      \"facial_hair\": \"light stubble\",\n      \"skin_tone\": \"fair\"\n    },\n    \"expression\": \"subtle smile, relaxed\",\n    \"clothing\": {\n      \"type\": \"t-shirt\",\n      \"color\": \"black\",\n      \"style\": \"casual, oversized\"\n    },\n    \"pose\": \"facing camera, head slightly tilted\",\n    \"framing\": \"close-up, chest-up shot\"\n  },\n  \"scene\": {\n    \"location\": \"indoor, bedroom or personal room\",\n    \"lighting\": {\n      \"type\": \"natural daylight\",\n      \"direction\": \"soft, front-facing\",\n      \"quality\": \"even, slightly warm\"\n    },\n    \"background\": {\n      \"wall_color\": \"white/off-white\",\n      \"objects\": [\n        {\n          \"item\": \"white wardrobe or closet\",\n          \"position\": \"left side\"\n        },\n        {\n          \"item\": \"wooden chair\",\n          \"position\": \"background, behind subject\",\n          \"detail\": \"stacked or placed on top of furniture\"\n        },\n        {\n          \"item\": \"pink towel or cloth\",\n          \"position\": \"hanging on wardrobe\"\n        },\n        {\n          \"item\": \"cardboard boxes\",\n          \"position\": \"upper left, stacked\"\n        }\n      ],\n      \"atmosphere\": \"casual, lived-in, minimalist\"\n    },\n    \"color_palette\": [\"white\", \"beige\", \"black\", \"soft pink\", \"light brown\"],\n    \"mood\": \"casual, candid, friendly\",\n    \"aspect_ratio\": \"9:16 (vertical/portrait)\",\n    \"style\": \"selfie-style, handheld, TikTok/social media format\"\n  }\n}\n```"
+            },
+            "mutability": "Mutable",
+            "type": "MARKDOWN"
+          }
+        },
+        {
+          "key": "6",
+          "value": {
+            "data": {
+              "entityKey": "00b0ae49-cdee-4bde-9738-8118ac433cc8",
+              "mediaItems": [
+                {
+                  "localMediaId": "13",
+                  "mediaCategory": "DraftTweetImage",
+                  "mediaId": "2045846042189668353"
+                }
+              ]
+            },
+            "mutability": "Immutable",
+            "type": "MEDIA"
+          }
+        },
+        {
+          "key": "1",
+          "value": {
+            "data": {
+              "entityKey": "ec415ce0-c4eb-42a6-a5a5-71f418810273",
+              "mediaItems": [
+                {
+                  "localMediaId": "3",
+                  "mediaCategory": "DraftTweetImage",
+                  "mediaId": "2045840915546374144"
+                }
+              ]
+            },
+            "mutability": "Immutable",
+            "type": "MEDIA"
+          }
+        },
+        {
+          "key": "0",
+          "value": {
+            "data": {
+              "entityKey": "224f93a2-edef-4a75-b52f-e7e31229c83f",
+              "mediaItems": [
+                {
+                  "localMediaId": "1",
+                  "mediaCategory": "DraftTweetImage",
+                  "mediaId": "2045840859544109056"
+                }
+              ]
+            },
+            "mutability": "Immutable",
+            "type": "MEDIA"
+          }
+        },
+        {
+          "key": "2",
+          "value": {
+            "data": {
+              "entityKey": "2ac9381d-52e1-4564-b97a-0767f39ce666",
+              "mediaItems": [
+                {
+                  "localMediaId": "5",
+                  "mediaCategory": "DraftTweetImage",
+                  "mediaId": "2045840978322587648"
+                }
+              ]
+            },
+            "mutability": "Immutable",
+            "type": "MEDIA"
+          }
+        },
+        {
+          "key": "7",
+          "value": {
+            "data": {
+              "tweetId": "2037554793833697323"
+            },
+            "mutability": "Immutable",
+            "type": "TWEET"
+          }
+        },
+        {
+          "key": "3",
+          "value": {
+            "data": {
+              "entityKey": "5117e876-f37b-4071-820f-c695a64ed346",
+              "mediaItems": [
+                {
+                  "localMediaId": "7",
+                  "mediaCategory": "DraftTweetImage",
+                  "mediaId": "2045841067409547264"
+                }
+              ]
+            },
+            "mutability": "Immutable",
+            "type": "MEDIA"
+          }
+        }
+      ]
+    },
+    "cover_media": {
+      "id": "QXBpTWVkaWE6DAAFCgABHGRS8NfbwAAKAAIWFVkb/RoQAAAA",
+      "media_id": "2045851325100179456",
+      "media_info": {
+        "__typename": "ApiImage",
+        "color_info": {
+          "palette": [
+            {
+              "percentage": 84.76,
+              "rgb": {
+                "blue": 11,
+                "green": 11,
+                "red": 11
+              }
+            },
+            {
+              "percentage": 8.61,
+              "rgb": {
+                "blue": 112,
+                "green": 129,
+                "red": 157
+              }
+            },
+            {
+              "percentage": 1.61,
+              "rgb": {
+                "blue": 115,
+                "green": 111,
+                "red": 112
+              }
+            },
+            {
+              "percentage": 0.84,
+              "rgb": {
+                "blue": 42,
+                "green": 56,
+                "red": 98
+              }
+            },
+            {
+              "percentage": 0.8,
+              "rgb": {
+                "blue": 54,
+                "green": 44,
+                "red": 41
+              }
+            }
+          ]
+        },
+        "original_img_height": 600,
+        "original_img_url": "https://pbs.twimg.com/media/HGRS8NfbwAAMIpj.jpg",
+        "original_img_width": 1500
+      },
+      "media_key": "3_2045851325100179456"
+    },
+    "id": "QXJ0aWNsZUVudGl0eToyMDQ1ODM5OTg5NjA3NjQxMDg4",
+    "is_grok_summary_eligible": true,
+    "lifecycle_state": {
+      "modified_at_secs": 1776604358
+    },
+    "media_entities": [
+      {
+        "id": "QXBpTWVkaWE6DAAFCgABHGRJbCQbQAAKAAIWFVkb/RoQAAAA",
+        "media_id": "2045840859544109056",
+        "media_info": {
+          "__typename": "ApiImage",
+          "color_info": {
+            "palette": [
+              {
+                "percentage": 67.47,
+                "rgb": {
+                  "blue": 1,
+                  "green": 1,
+                  "red": 2
+                }
+              },
+              {
+                "percentage": 20.28,
+                "rgb": {
+                  "blue": 127,
+                  "green": 143,
+                  "red": 170
+                }
+              },
+              {
+                "percentage": 2.26,
+                "rgb": {
+                  "blue": 176,
+                  "green": 170,
+                  "red": 166
+                }
+              },
+              {
+                "percentage": 1.66,
+                "rgb": {
+                  "blue": 71,
+                  "green": 51,
+                  "red": 48
+                }
+              },
+              {
+                "percentage": 1.24,
+                "rgb": {
+                  "blue": 213,
+                  "green": 143,
+                  "red": 107
+                }
+              }
+            ]
+          },
+          "original_img_height": 1698,
+          "original_img_url": "https://pbs.twimg.com/media/HGRJbCQbQAAorY5.jpg",
+          "original_img_width": 2768
+        },
+        "media_key": "3_2045840859544109056"
+      },
+      {
+        "id": "QXBpTWVkaWE6DAAFCgABHGRJeS4aAAAKAAIWFVkb/RoQAAAA",
+        "media_id": "2045840915546374144",
+        "media_info": {
+          "__typename": "ApiImage",
+          "color_info": {
+            "palette": [
+              {
+                "percentage": 86.71,
+                "rgb": {
+                  "blue": 20,
+                  "green": 20,
+                  "red": 20
+                }
+              },
+              {
+                "percentage": 7.78,
+                "rgb": {
+                  "blue": 121,
+                  "green": 139,
+                  "red": 165
+                }
+              },
+              {
+                "percentage": 1.78,
+                "rgb": {
+                  "blue": 73,
+                  "green": 88,
+                  "red": 109
+                }
+              },
+              {
+                "percentage": 1.51,
+                "rgb": {
+                  "blue": 44,
+                  "green": 24,
+                  "red": 22
+                }
+              },
+              {
+                "percentage": 0.26,
+                "rgb": {
+                  "blue": 39,
+                  "green": 35,
+                  "red": 68
+                }
+              }
+            ]
+          },
+          "original_img_height": 1742,
+          "original_img_url": "https://pbs.twimg.com/media/HGRJeS4aAAA1lhd.jpg",
+          "original_img_width": 3420
+        },
+        "media_key": "3_2045840915546374144"
+      },
+      {
+        "id": "QXBpTWVkaWE6DAAFCgABHGRKMtkaQAAKAAIWFVkb/RoQAAAA",
+        "media_id": "2045841712984244224",
+        "media_info": {
+          "__typename": "ApiImage",
+          "color_info": {
+            "palette": [
+              {
+                "percentage": 99.02,
+                "rgb": {
+                  "blue": 250,
+                  "green": 249,
+                  "red": 248
+                }
+              },
+              {
+                "percentage": 0.66,
+                "rgb": {
+                  "blue": 69,
+                  "green": 47,
+                  "red": 33
+                }
+              },
+              {
+                "percentage": 0.16,
+                "rgb": {
+                  "blue": 201,
+                  "green": 196,
+                  "red": 238
+                }
+              },
+              {
+                "percentage": 0.12,
+                "rgb": {
+                  "blue": 142,
+                  "green": 138,
+                  "red": 133
+                }
+              }
+            ]
+          },
+          "original_img_height": 1062,
+          "original_img_url": "https://pbs.twimg.com/media/HGRKMtkaQAALnm1.jpg",
+          "original_img_width": 3388
+        },
+        "media_key": "3_2045841712984244224"
+      },
+      {
+        "id": "QXBpTWVkaWE6DAAFCgABHGRJnInaIAAKAAIWFVkb/RoQAAAA",
+        "media_id": "2045841067409547264",
+        "media_info": {
+          "__typename": "ApiImage",
+          "color_info": {
+            "palette": [
+              {
+                "percentage": 66.62,
+                "rgb": {
+                  "blue": 2,
+                  "green": 2,
+                  "red": 2
+                }
+              },
+              {
+                "percentage": 18.81,
+                "rgb": {
+                  "blue": 109,
+                  "green": 126,
+                  "red": 150
+                }
+              },
+              {
+                "percentage": 4.53,
+                "rgb": {
+                  "blue": 119,
+                  "green": 113,
+                  "red": 111
+                }
+              },
+              {
+                "percentage": 1.97,
+                "rgb": {
+                  "blue": 194,
+                  "green": 208,
+                  "red": 212
+                }
+              },
+              {
+                "percentage": 1.69,
+                "rgb": {
+                  "blue": 37,
+                  "green": 64,
+                  "red": 87
+                }
+              }
+            ]
+          },
+          "original_img_height": 1728,
+          "original_img_url": "https://pbs.twimg.com/media/HGRJnInaIAAQ_EA.jpg",
+          "original_img_width": 2746
+        },
+        "media_key": "3_2045841067409547264"
+      },
+      {
+        "id": "QXBpTWVkaWE6DAAFCgABHGROItHaoAEKAAIWFVkb/RoQAAAA",
+        "media_id": "2045846042189668353",
+        "media_info": {
+          "__typename": "ApiImage",
+          "color_info": {
+            "palette": [
+              {
+                "percentage": 47.31,
+                "rgb": {
+                  "blue": 149,
+                  "green": 171,
+                  "red": 179
+                }
+              },
+              {
+                "percentage": 35.59,
+                "rgb": {
+                  "blue": 48,
+                  "green": 43,
+                  "red": 43
+                }
+              },
+              {
+                "percentage": 14.29,
+                "rgb": {
+                  "blue": 90,
+                  "green": 114,
+                  "red": 132
+                }
+              },
+              {
+                "percentage": 3.46,
+                "rgb": {
+                  "blue": 142,
+                  "green": 148,
+                  "red": 198
+                }
+              },
+              {
+                "percentage": 0.27,
+                "rgb": {
+                  "blue": 212,
+                  "green": 216,
+                  "red": 212
+                }
+              }
+            ]
+          },
+          "original_img_height": 2563,
+          "original_img_url": "https://pbs.twimg.com/media/HGROItHaoAEPqlS.jpg",
+          "original_img_width": 1536
+        },
+        "media_key": "3_2045846042189668353"
+      },
+      {
+        "id": "QXBpTWVkaWE6DAAFCgABHGRJh8vbAAAKAAIWFVkb/RoQAAAA",
+        "media_id": "2045840978322587648",
+        "media_info": {
+          "__typename": "ApiImage",
+          "color_info": {
+            "palette": [
+              {
+                "percentage": 67.5,
+                "rgb": {
+                  "blue": 3,
+                  "green": 3,
+                  "red": 3
+                }
+              },
+              {
+                "percentage": 20.56,
+                "rgb": {
+                  "blue": 110,
+                  "green": 130,
+                  "red": 154
+                }
+              },
+              {
+                "percentage": 2.5,
+                "rgb": {
+                  "blue": 189,
+                  "green": 206,
+                  "red": 218
+                }
+              },
+              {
+                "percentage": 2.34,
+                "rgb": {
+                  "blue": 101,
+                  "green": 137,
+                  "red": 127
+                }
+              },
+              {
+                "percentage": 2,
+                "rgb": {
+                  "blue": 52,
+                  "green": 37,
+                  "red": 30
+                }
+              }
+            ]
+          },
+          "original_img_height": 1728,
+          "original_img_url": "https://pbs.twimg.com/media/HGRJh8vbAAAg4pv.jpg",
+          "original_img_width": 2830
+        },
+        "media_key": "3_2045840978322587648"
+      }
+    ],
+    "metadata": {
+      "first_published_at_secs": 1776604358
+    },
+    "plain_text": "As you’ve seen, apps like looksmaxing, height growth, hair growth, weight loss, etc. are performing extremely well with AI influencers. These apps generate strong revenue and profit compared to typical apps by building an army of AI influencers on TikTok.\nAnd today, I’ll guide you step by step on how to create a workflow for an AI influencer. Now, first, let’s take a look at the AI influencers below.\n \n \n \n \n \nAll of these AI influencers are promoting a single app, and that app is making $20k/month (Usually, Sensor Tower estimates with small app revenue about 1.5x–2x lower than the actual numbers, so the real revenue could be around $30k–$40k/month) and it’s all from organic content. (That’s crazy, because without running ads and just building an army of AI influencers, the profit margins are extremely high)\nSo now I’m going to guide you step by step on how to create an AI influencer like this.\nStep 1: Design the character with a JSON prompt (Nano Banana)\nThe failure mode for 90% of AI influencer attempts: the face changes every post.\nDay 1 he has a strong jaw. Day 3 his nose is different. Day 5 he looks 10 years older. Viewers notice instantly and the account dies.\nThe fix is treating your character like a brand spec. Not a prompt, a schema.\nPro tip before you start writing the spec from scratch: you don't have to. Find a looksmaxing account whose aesthetic is already working (high likes, strong engagement, clean visual identity) and download their TikTok slideshow images. Drop those images into Claude and ask it to generate a structured JSON prompt that captures the character, lighting, mood, and camera style. You get a battle-tested aesthetic spec in 30 seconds instead of guessing what \"looksmaxing lighting\" means.\nThis is reverse-engineering at its finest. The algorithm already told you which faces and which lighting work, you're just extracting the recipe. From there, tweak the JSON to make the character your own (different face structure, different hair, different wardrobe) while keeping the proven aesthetic dialed in.\nHere's what a good spec looks like once you have it:\n \nResult:\n \nRead the negative constraints again. This is where most people lose.\nLooksmaxing content does NOT look like a model shoot. It looks like a 19-year-old took a selfie at 2am in his bedroom. If your output looks like a Calvin Klein ad, it reads as fake instantly. \"No CGI skin. No airbrush. No perfect symmetry. No model smile.\" These make the character feel like a real kid, not a stock photo.\nThe \"mood\" field is underrated. Looksmaxing aesthetic is tired, serious, slightly detached. Not happy. Not energetic. The face does the selling the vibe has to match or the account feels off.\nOnce you have this spec locked, you can generate:\nBedroom selfie, overhead light, tired stare\nCar mirror selfie, golden hour, slight smirk\nBathroom mirror, harsh fluorescent, side profile\nGas station at night, flash on, backwards cap\nSame character. Different scenes. That's your content library.\nStep 2: Animate with restraint (Veo 3)\nLooksmaxing videos are 90% static face + 10% micro-motion. That's the formula.\nFeed your Nano Banana image into Veo 3 with a minimal motion prompt:\nslow head tilt to reveal jawline\nslight blink, no smile\nsubtle camera drift (as if phone is propped)\nbarely visible breath\nDo NOT write prompts like \"character walks into frame and turns to camera with a smile.\" Veo 3 will morph the face mid-motion and you lose the character. Every frame of motion is a chance for the identity to break.\nThe trick is to think like a TikTok editor, not a film director. Looksmaxing clips are:\n2-4 seconds of a still face\nA slow zoom on the jaw or side profile\nA single head turn at the end\nText overlay doing the actual narrative work\nYour video doesn't need to \"do\" anything. The caption does the work. \"They said I was mid at 16. Now I mog them all.\" The video just has to be the face, staying in character, for 10 seconds. Veo 3 is perfect for this if you don't over-prompt it.\nPro move: generate 3-4 short clips of the same character in different lighting, then stitch them as a \"transformation\" montage. 2 seconds of \"before\" vibes (dim, slouched, tired) → 2 seconds of \"after\" vibes (harsh light, chin up, serious). The viewer's brain fills in the story. You didn't animate a transformation you implied one.\nStep 3: Add the hook with voice (Arcads AI)\nMost looksmaxing accounts don't even use voice. They use text overlay + trending audio.\nBut when voice works, it crushes. Especially for the \"DM me your score\" angle.\nFeed your Veo 3 clip into Arcads. Script stays under 15 seconds. Write it like a TikTok hook, not an ad:\n\"Bro everyone's been asking what app I use to rate my face. It's called [app]. Scored a 7.2 last week, now I'm locked in. Link's in bio, DM me your score.\"\nThree things to get right in the script:\n1. Open with \"bro\" or \"ngl\" or \"gang.\" Matches the demographic. Formal openings kill the vibe.\n2. Drop a specific number. \"Scored a 7.2\" is 10x more credible than \"got a good score.\" Numbers make it feel real.\n3. End with the CTA wrapped in social proof. \"DM me your score\" is a challenge, not a sales pitch. It makes the viewer want to compete.\nArcads handles voice + lipsync. Pick a voice that matches the character — young, slightly monotone, a little raspy. NOT an announcer voice. NOT a hype voice. Looksmaxing voice is detached confidence.\nThe funnel: what actually prints installs\nContent is the top of funnel. Here's the rest of the Jake_Ryder playbook:\nBio structure:\nScripture or aspirational quote (builds \"real person\" trust)\nOne-line CTA: \"Download [App] and DM me your score\"\nLinktree with one link\nPinned content:\n3 pinned videos is the standard. Highest-view clip + most emotional hook + strongest transformation.\nPin the ones with the highest DM conversion, not the highest views.\nDM funnel:\nViewer downloads app, gets their rating, DMs you\nYou reply with a compliment + a tip that hints at the app's premium features\nSoft push to subscription or affiliate link\nThis is why looksmaxing apps pay creators (real or AI) so well. Every install is a potential subscriber. Every DM is a warm lead. The character doesn't need to sell it just needs to exist and make viewers curious enough to download the app and see their own score.\nYou can check out how to create an AI workflow here, I’ve made a post about it and included a video.\n \nThis post is sponsored by Arcards AI, so you can still look for similar tools that fit your needs. 💪",
+    "preview_text": "As you’ve seen, apps like looksmaxing, height growth, hair growth, weight loss, etc. are performing extremely well with AI influencers. These apps generate strong revenue and profit compared to",
+    "rest_id": "2045839989607641088",
+    "summary_text": "- Apps like looksmaxing, height growth, hair growth, and weight loss generate strong revenue by building armies of AI influencers on TikTok, driving $20k–$40k/month organically from one app with high profit margins.\n\n- Design consistent character using JSON prompt from Nano Banana by reverse-engineering successful looksmaxing accounts via Claude, including negative constraints for realistic bedroom selfie vibe and tired, serious mood.\n\n- Animate with restraint in Veo 3 using minimal micro-motion like slow head tilt or subtle blink to avoid face morphing, then stitch short clips for implied transformations.\n\n- Add hook with Arcads AI voiceover using casual script under 15 seconds, specific numbers, and DM CTA to match detached confidence and drive installs.\n\n- Funnel works through bio CTA, pinned videos, and DM replies that turn curiosity into app downloads and subscriptions without hard selling.",
+    "title": "The Easiest Way to Build an AI Influencer That Sells Your App (or Any Product)"
+  }
+}
