@@ -85,6 +85,31 @@ Found by querying local Firefox `places.sqlite` for recent UGC / AI influencer /
 | Jah Jiren / AI clone | `https://x.com/Jahjiren/status/2055696686144438657` | AI clone/app marketing workflow |
 | Pounds / realistic AI influencer affiliate method | `https://x.com/pounddz/status/2017380582238666903` | organic affiliate AI influencer method |
 
+## First format-decomposition queue v0
+
+Focus on reusable mechanics, not private identity cloning or verbatim copies. For each item, capture only public post metadata/media needed to describe the format, then rewrite the mechanics as abstract slots: hook type, persona role, shot rhythm, product/demo slot, caption style, CTA, and reusable layers.
+
+| Priority | Source | Format hypothesis | What to extract first | Reusable slots/layers |
+|---|---|---|---|---|
+| P0 | Bluma launch — `https://x.com/_alisawu/status/2032191984891543814` | De-edit/remix product workflow: source ad → scenes/captions/elements → node canvas → variants | Product promises, UI screenshots/video, scene/element taxonomy, remix affordances | `source_video`, `scene_graph`, `caption_layer`, `element_layer`, `variant_generator` |
+| P0 | Ayo Mosuro “clone winning UGC ad” — `https://x.com/ayomosuro/status/2051473492030492853` | Winning-ad skeleton cloning: script + visual beats + generated replacement footage | Claimed workflow steps, timing, tools, what is swapped vs preserved | `format_template`, `hook_text`, `persona`, `broll`, `caption_style`, `provider_node` |
+| P0 | Gaurav / Fastlane AI UGC army — `https://x.com/gauravsbuilding/status/2051446977850982746` | Website/product ingest → AI influencer persona → many UGC ad variants | Product-ingest inputs, persona consistency strategy, batch-generation loop | `product_brief`, `persona_profile`, `voice`, `scene_template`, `batch_variants` |
+| P1 | Noah Frydberg Claude × Arcads guide — `https://x.com/maverickecom/status/2054584568661819527` | Claude-written ad brief/scripts feeding Arcads avatars | Prompt structure, script sections, avatar/voice/caption choices | `script_prompt`, `avatar_actor`, `tts_voice`, `caption_style`, `approval_loop` |
+| P1 | Alex Nguyen Nano Banana → Veo → Arcads — `https://x.com/alexcooldev/status/2037554793833697323` | Multi-provider chain for persistent influencer content | Provider handoff boundaries, asset persistence, what gets regenerated | `character_reference`, `image_generation`, `video_motion`, `avatar_lipsync`, `post_render` |
+| P1 | Joseph Choi hook cloning — `https://x.com/JosephKChoi/status/2016566310474277050` | Same hook/format propagated across creators/personas | Hook family, proof slot, creator/persona substitutions, CTA pattern | `hook_family`, `persona_swap`, `proof_visual`, `cta_slot`, `analytics_tag` |
+| P1 | Roy UGC farm thread — `https://x.com/im_roy_lee/status/1928629670343221536` | Operational content farm mechanics | Queue size, approval/review cadence, metrics loop, content taxonomy | `campaign`, `format_queue`, `review_state`, `metric_snapshot`, `variant_history` |
+| P2 | Sumaiya / Fast Lane slideshow autopost — `https://x.com/4_emon2115/status/2051843718294983165` | AI influencer slideshow format + cross-post automation | Slide rhythm, image/text separation, scheduler requirements | `slide_scene`, `image_asset`, `caption_layer`, `scheduler`, `platform_preset` |
+| P2 | Jason UGC clay videos — `https://x.com/jasonugc/status/2042324678023242033` | Emerging clay/physicalized AI format | Visual style ingredients, product reveal mechanics, caption effects | `style_preset`, `product_prop`, `motion_loop`, `caption_layer`, `sfx` |
+| P2 | Mike / viral.app projects — `https://x.com/mikey_starts/status/1939704543559635290` | UGC tracking/project workflow | How campaigns/projects/audiences are represented, metric fields | `project`, `audience`, `source_post`, `score`, `iteration_plan` |
+
+Suggested first pass artifacts under `data/ai-ugc-format-mining/`:
+
+```txt
+format-decomposition-queue-v0.md     # queue state and per-source notes
+sources/<source-id>.md               # one normalized teardown per source/post
+formats/<format-id>.yaml             # abstract reusable format template
+```
+
 ## Format decomposition template
 
 For each source video/post, extract:
