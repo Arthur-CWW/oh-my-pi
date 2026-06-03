@@ -17,6 +17,7 @@ Do not let state docs become stale:
 ## Current state docs
 
 - `docs/state/video-creative-direction.md` — canonical taste ledger / vibe bible / creative north-star for video, AI UGC, brainrot, asset graph, and pipeline direction.
+- `docs/state/agent-voice.md` — durable preference for agents to avoid HR/compliance/audit-log voice and talk like a competent friend.
 
 ## Update trigger examples
 
@@ -29,3 +30,4 @@ Update state docs when Arthur says things like:
 - “Use this machine/tool for...”
 - “This workflow should be separable/editable/reusable”
 - “This is a hard rule / important lesson”
+- “Talk to me more like...” / “Stop sounding like...”

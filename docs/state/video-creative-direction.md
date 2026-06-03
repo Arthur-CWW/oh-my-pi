@@ -73,6 +73,7 @@ Each component should be separately editable, inspectable, replaceable, cacheabl
 8. **Account/risk safety matters.** Do not get banned by X/Twitter. Do not brute-force rate limits, auth challenges, or Jimeng risk controls.
 9. **The system should later support both brainrot art videos and less-brainrotty AI UGC/ad videos.**
 10. **When composing Pi/LLM prompts, use `@path/to/file` references where supported** so the prompt can auto-include maintained context docs instead of manually pasting or duplicating them.
+11. **Dreamina/Jimeng direct tooling should behave like real generation tooling: live submit by default, `--dryRun` as the explicit opt-out.** Do not add hidden “yes spend credits” gates that make the default path a no-op; instead keep commands clear, short, logged, concurrency 1, and credit-aware.
 
 ## What Arthur actually cares about
 
@@ -80,6 +81,7 @@ Each component should be separately editable, inspectable, replaceable, cacheabl
 - Separating character generation from backgrounds, props, text, voice, lipsync, and final composition.
 - Building an asset library of “vibe primitives” that can be recombined.
 - Capturing weird internet-native references: niche humor, Chinese memes, abstract/brainrot aesthetics, postmodern absurdity.
+- TikTok/anime “aura edit” montage language: character-centric mythic glamor, hardstyle/Versatile-style beat energy, kinetic panel cuts, glow/contrast, and caption/text swaps.
 - Pleometric-style surreal/postmodern talking-head videos, but not merely copying Pleometric.
 - AI UGC format cloning at the structural level: swap influencer/persona, hook, product, captions, and scene format.
 - Understanding why successful shortform videos work: hook, pacing, captions, visual clutter, authority signals, cringe, emotional pressure.
@@ -225,12 +227,14 @@ Other relevant tools/leads:
 Current research direction:
 
 - Identify the most popular / highest-revenue AI UGC or full-AI-influencer tools using public evidence and proxies.
+- Arcads.ai is now a primary product to reverse-map clean-room: infer the full stack/model choices from public behavior, then design a feature-by-feature equivalent that can be prototyped quickly with open models and/or commodity APIs.
 - Study the best product workflows clean-room: what to emulate, what is commodity, what is moat.
 - “Copy them” means build a similar/better modular workflow from public behavior and first principles, not stealing code, bypassing paywalls, copying trademarks, or cloning private identities.
 
 ## Tool/machine preferences
 
 - Main Mac: source-of-truth repo, logged-in browsers, Jimeng/Dreamina capture, Gemini CLI, ChatGPT Pro research.
+- Official `dreamina` generator commands may be VIP-gated or silently fail for the current account; build and prefer a Dreamina-compatible direct client backed by reversed Jimeng frontend endpoints/captures.
 - Desktop GPU: RTX 3090; good candidate for ComfyUI/local model experiments, but setup is currently messy/incomplete.
 - Framework laptop: long-running data/archive worker; good disk; not source-of-truth editing machine initially.
 
@@ -244,6 +248,12 @@ Current research direction:
 - Desktop GPU/ComfyUI rehab: use 3090 for local experiments if worth the setup cost.
 
 ## Care log
+
+### 2026-06-04
+
+Arthur clarified:
+
+- New GPT-Pro research prompt target: build an Arcads.ai alternative blueprint, including the whole likely stack/models, feature-by-feature product decomposition, and a fast prototype path using different open models/APIs for AI UGC, people/video inputs, formats/templates, and AI influencer generation.
 
 ### 2026-06-03
 
@@ -261,3 +271,6 @@ Arthur clarified:
 - Maintain state docs as living memory: if Arthur gives new durable preferences or direction in a session, update the state docs so they stay synchronized with what he actually cares about.
 - When writing prompts for new Pi/LLM sessions, use `@file/path` context references where possible so maintained docs are auto-included rather than copied by hand.
 - New GPT-Pro research target: find the most popular/highest-revenue AI UGC/full-AI-influencer tool(s), then produce a clean-room blueprint for building a similar or better modular graph/layer alternative.
+- Official `dreamina` generator commands are not the source of truth if account tier/VIP gates block them. Build a Dreamina-compatible direct client from reversed web endpoints. Its default should be live generation like the official CLI; `--dryRun` is the flag for no-spend planning, not the default behavior.
+- New creative lane: TikTok-style Griffith/anime “aura edit” montage energy — hardstyle/Versatile-style music, mythic character focus, panel motion, glow/contrast, and replacing dialogue/text in post.
+- Legal/provenance constraint for this lane: use user-provided/licensed manga/anime assets or original generated character-inspired assets; do not rely on scraping scanlation/piracy sources as the input pipeline.
