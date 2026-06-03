@@ -67,8 +67,9 @@ Suggested axes for the first catalog:
 |---|---|---|
 | `agency-anxiety` | calm/static | dangling-choice-panic |
 | `post-labor-dread` | neutral | automation-ate-my-future |
-| `absurd-bureaucracy` | clean | stamped/formal/ridiculous |
+| `bureaucratic-absurdity` | clean | stamped/formal/ridiculous |
 | `market-ritual` | non-financial | charts/rockets/number-go-up cult |
+| `abstract-chinese-internet` | plain | 抽象 / 魔性 / 赛博 / 内卷 meme energy |
 | `cute-menace` | cute | cute but spiritually threatening |
 | `brainrot-density` | tasteful | maximal overstimulus |
 | `caption-interference` | safe empty space | conflicts with subtitles |
@@ -110,9 +111,13 @@ Create stupid/fun, composable brainrot props and overlays that can be layered ov
 2. rocket/chart market ritual
 3. Chinese abstract meme stamp pulse
 4. math/Chinese glyph rain
-5. optional future: electronic wooden fish, sad frog paperwork, hukou QR portal, cyber steamed bun, attention-slot machine
+5. electronic wooden fish merit counter
+6. sad frog paperwork underclass
+7. hukou QR portal
+8. cyber steamed bun compute ration
+9. attention slot machine
 
-These do not need heavy sync with speech. They are perfect parallel assets while Jimeng/TTS/lipsync research continues.
+These do not need heavy sync with speech. They are perfect parallel assets while Jimeng/TTS/lipsync research continues. The first pass is procedural/local, with all readable text drawn in post/script rather than by a video model.
 
 ## Example asset record
 
@@ -169,8 +174,7 @@ stages:
 
 ## Next implementation steps
 
-1. Create the SQLite DB from `docs/schemas/video-asset-catalog-v0.sql`.
-2. Generate a tiny local procedural brainrot overlay pack under `data/assets/brainrot-props-v0/`.
-3. Register assets, prompts, tags, and vibe scores in `data/asset-catalog/assets.sqlite`.
-4. Later, add a TS/CLI catalog browser/searcher.
-5. Later, let Jimeng/ComfyUI/TTS/lipsync provider nodes write into the same DB.
+1. Inspect/refine the procedural v0 pack under `data/assets/brainrot-props-v0/`.
+2. Add a TS/CLI catalog browser/searcher for `data/asset-catalog/assets.sqlite`.
+3. Compose a few overlays over the seal test video using ffmpeg to test caption interference and placement.
+4. Later, let Jimeng/ComfyUI/TTS/lipsync provider nodes write into the same DB.

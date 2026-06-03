@@ -222,6 +222,119 @@ def render_wooden_fish(i: int) -> Image.Image:
     return img
 
 
+def render_sad_frog_paperwork(i: int) -> Image.Image:
+    img = rgba()
+    d = ImageDraw.Draw(img, "RGBA")
+    t = i / N
+    bob = math.sin(t * math.tau * 1.5) * 8
+    # Bureaucratic paper stack behind the frog.
+    papers = [(76, 225, -12), (112, 245, 5), (48, 278, 11)]
+    for idx, (x, y, _rot) in enumerate(papers):
+        yb = y + bob * (0.35 + idx * 0.2)
+        d.rounded_rectangle((x, yb, x + 220, yb + 285), radius=12, fill=(246, 241, 214, 210), outline=(140, 70, 40, 180), width=3)
+        d.rectangle((x + 18, yb + 24, x + 190, yb + 44), fill=(110, 90, 75, 120))
+        for row in range(5):
+            yy = yb + 74 + row * 34
+            d.line((x + 24, yy, x + 175 - row * 12, yy), fill=(80, 65, 55, 130), width=3)
+        d.rounded_rectangle((x + 82, yb + 190, x + 194, yb + 242), radius=8, outline=(230, 30, 30, 190), width=5)
+        draw_text_center(d, (int(x + 138), int(yb + 216)), "已受理", FONT_TINY, (230, 30, 30, 190), sw=1)
+    # Sad frog clerk/underclass mascot.
+    cx, cy = 250, 570 + bob
+    d.ellipse((cx - 105, cy - 82, cx + 105, cy + 88), fill=(95, 174, 85, 235), outline=(188, 245, 138, 220), width=4)
+    d.ellipse((cx - 78, cy - 116, cx - 22, cy - 42), fill=(118, 205, 95, 238), outline=(188, 245, 138, 210), width=4)
+    d.ellipse((cx + 22, cy - 116, cx + 78, cy - 42), fill=(118, 205, 95, 238), outline=(188, 245, 138, 210), width=4)
+    d.ellipse((cx - 62, cy - 92, cx - 36, cy - 55), fill=(20, 30, 18, 230))
+    d.ellipse((cx + 36, cy - 92, cx + 62, cy - 55), fill=(20, 30, 18, 230))
+    d.arc((cx - 56, cy - 4, cx + 56, cy + 72), 200, 340, fill=(35, 55, 28, 230), width=8)
+    d.ellipse((cx + 60, cy - 20, cx + 72, cy + 44), fill=(90, 210, 255, 160))
+    draw_text_center(d, (250, 760), "FORM 2040", FONT_SMALL, (255, 235, 160, 210), sw=2)
+    return img
+
+
+def render_hukou_qr_portal(i: int) -> Image.Image:
+    img = rgba()
+    d = ImageDraw.Draw(img, "RGBA")
+    t = i / N
+    cx, cy = 492, 310
+    pulse = 0.5 + 0.5 * math.sin(t * math.tau * 2)
+    # Glitch portal frame.
+    for k in range(7):
+        inset = k * 9 + pulse * 5
+        color = (70 + k * 20, 240 - k * 12, 255, 165 - k * 12)
+        d.rounded_rectangle((cx - 158 - inset, cy - 158 - inset, cx + 158 + inset, cy + 158 + inset), radius=22, outline=color, width=3)
+    d.rounded_rectangle((cx - 150, cy - 150, cx + 150, cy + 150), radius=18, fill=(10, 18, 28, 170), outline=(255, 60, 190, 210), width=5)
+    # QR-like non-scannable pattern, deterministic and animated.
+    cell = 14
+    start_x, start_y = cx - 126, cy - 126
+    for row in range(18):
+        for col in range(18):
+            value = (row * 37 + col * 19 + (row ^ col) * 11 + i // 6) % 7
+            if value in (0, 2, 5):
+                alpha = 130 + int(70 * math.sin(t * math.tau + row * 0.4 + col * 0.2))
+                d.rectangle((start_x + col * cell, start_y + row * cell, start_x + col * cell + 9, start_y + row * cell + 9), fill=(230, 255, 255, alpha))
+    for fx, fy in [(start_x, start_y), (start_x + 14 * cell, start_y), (start_x, start_y + 14 * cell)]:
+        d.rectangle((fx, fy, fx + 48, fy + 48), outline=(255, 255, 255, 230), width=6)
+        d.rectangle((fx + 14, fy + 14, fx + 34, fy + 34), fill=(255, 60, 190, 210))
+    draw_text_center(d, (cx, cy + 205), "户口迁跃门", FONT_MED, (120, 245, 255, 225), sw=3)
+    draw_text_center(d, (cx, cy + 252), "ACCESS: PENDING", FONT_TINY, (255, 95, 190, 190), sw=2)
+    return img
+
+
+def render_cyber_steamed_bun(i: int) -> Image.Image:
+    img = rgba()
+    d = ImageDraw.Draw(img, "RGBA")
+    t = i / N
+    cx, cy = 172, 940 + math.sin(t * math.tau * 1.4) * 16
+    # Compute-ration steamed bun.
+    d.ellipse((cx - 112, cy - 78, cx + 112, cy + 86), fill=(245, 245, 232, 232), outline=(100, 255, 235, 185), width=5)
+    for k in range(5):
+        x = cx - 66 + k * 33
+        d.arc((x - 38, cy - 75, x + 38, cy + 45), 205, 330, fill=(195, 210, 210, 170), width=5)
+    # Cute-but-menacing circuit eyes and antenna.
+    d.ellipse((cx - 48, cy - 10, cx - 24, cy + 14), fill=(20, 35, 42, 230))
+    d.ellipse((cx + 24, cy - 10, cx + 48, cy + 14), fill=(20, 35, 42, 230))
+    d.arc((cx - 42, cy + 12, cx + 42, cy + 58), 15, 165, fill=(80, 160, 150, 210), width=5)
+    glow(d, (cx, cy - 78, cx, cy - 142), (100, 255, 235, 190), radius=4, width=4)
+    d.ellipse((cx - 14, cy - 158, cx + 14, cy - 130), fill=(255, 80, 190, 220))
+    # Ration meter.
+    mx, my = cx + 118, cy + 16
+    d.rounded_rectangle((mx, my, mx + 170, my + 54), radius=12, fill=(20, 32, 35, 190), outline=(100, 255, 235, 180), width=3)
+    bars = 1 + (i // 8) % 5
+    for b in range(bars):
+        d.rectangle((mx + 18 + b * 28, my + 14, mx + 37 + b * 28, my + 40), fill=(100, 255, 150, 190))
+    draw_text_center(d, (cx + 94, cy - 112), "算力馒头", FONT_SMALL, (255, 245, 210, 225), sw=3)
+    draw_text_center(d, (mx + 85, my + 86), "ration.exe", FONT_TINY, (100, 255, 235, 165), sw=2)
+    return img
+
+
+def render_attention_slot_machine(i: int) -> Image.Image:
+    img = rgba()
+    d = ImageDraw.Draw(img, "RGBA")
+    t = i / N
+    cx, cy = 360, 245
+    wobble = math.sin(t * math.tau * 1.7) * 5
+    d.rounded_rectangle((cx - 185, cy - 95 + wobble, cx + 185, cy + 210 + wobble), radius=22, fill=(55, 20, 85, 225), outline=(255, 220, 70, 225), width=6)
+    d.rounded_rectangle((cx - 145, cy - 45 + wobble, cx + 145, cy + 108 + wobble), radius=14, fill=(15, 10, 25, 235), outline=(255, 80, 190, 210), width=4)
+    symbols = ["HOOK", "CTA", "∞", "OMG", "$", "泪"]
+    for reel in range(3):
+        rx = cx - 104 + reel * 104
+        d.rounded_rectangle((rx - 38, cy - 26 + wobble, rx + 38, cy + 88 + wobble), radius=10, fill=(245, 240, 225, 225), outline=(40, 20, 60, 230), width=3)
+        sym = symbols[(i // 7 + reel * 2) % len(symbols)]
+        draw_text_center(d, (rx, int(cy + 30 + wobble)), sym, FONT_TINY if len(sym) > 3 else FONT_SMALL, (255, 40, 110, 230), sw=2)
+    # Lever and dopamine sparks.
+    d.line((cx + 190, cy + 18 + wobble, cx + 242, cy - 76 + wobble), fill=(255, 220, 70, 225), width=10)
+    d.ellipse((cx + 222, cy - 108 + wobble, cx + 270, cy - 60 + wobble), fill=(255, 70, 90, 230), outline=(255, 255, 190, 210), width=3)
+    for s in range(10):
+        a = t * math.tau * 1.5 + s * math.tau / 10
+        r = 210 + 16 * math.sin(t * math.tau * 3 + s)
+        x = cx + math.cos(a) * r
+        y = cy + 42 + math.sin(a) * r * 0.55
+        d.ellipse((x - 5, y - 5, x + 5, y + 5), fill=(255, 230, 70, 145))
+    draw_text_center(d, (cx, int(cy - 124 + wobble)), "ATTENTION RNG", FONT_SMALL, (255, 230, 90, 225), sw=3)
+    draw_text_center(d, (cx, int(cy + 170 + wobble)), "再刷一次", FONT_MED, (255, 90, 190, 220), sw=3)
+    return img
+
+
 def specs() -> list[AssetSpec]:
     return [
         AssetSpec(
@@ -329,6 +442,92 @@ def specs() -> list[AssetSpec]:
                 "caption-interference": (0.50, "bottom-right; may compete with captions"),
             },
             renderer=render_wooden_fish,
+        ),
+        AssetSpec(
+            id="brainrot-v0.sad-frog-paperwork-underclass",
+            title="Sad Frog Paperwork Underclass",
+            description="Transparent sad frog buried under local paperwork/stamps: permanent-underclass paperwork and fake bureaucratic mercy.",
+            stage_role="prop_overlay_loop",
+            compositing_role="foreground_alpha",
+            prompt="Procedural transparent overlay loop: sad frog under paperwork, fake Chinese approval stamps, FORM 2040, permanent-underclass bureaucracy, post-labor administrative despair; local editable text only.",
+            tags={
+                "semantic": ["frog", "paperwork", "forms", "underclass"],
+                "meme": ["sad-frog", "bureaucracy", "打工人", "official-absurdity"],
+                "motion": ["bob", "paper-stack", "loopable"],
+                "composition": ["foreground-overlay", "alpha", "local-text"],
+            },
+            vibe_scores={
+                "post-labor-dread": (0.86, "forms as permanent-underclass fate"),
+                "bureaucratic-absurdity": (0.88, "approval stamps on nonsense paperwork"),
+                "brainrot-density": (0.62, "frog meme plus stamp clutter"),
+                "caption-interference": (0.40, "left/mid foreground; mostly clear bottom"),
+            },
+            renderer=render_sad_frog_paperwork,
+        ),
+        AssetSpec(
+            id="brainrot-v0.hukou-qr-portal",
+            title="Hukou QR Portal",
+            description="Transparent glitchy QR-like portal labeled 户口迁跃门: administrative mobility as cyber ritual gate.",
+            stage_role="prop_overlay_loop",
+            compositing_role="foreground_alpha",
+            prompt="Procedural transparent overlay loop: glitchy non-scannable QR portal, 户口迁跃门, ACCESS PENDING, cyber-bureaucratic mobility gate, abstract Chinese internet administrative absurdity; local editable text.",
+            tags={
+                "semantic": ["portal", "qr", "hukou", "access"],
+                "meme": ["户口", "cyber", "chinese-internet", "official-absurdity"],
+                "motion": ["glitch", "pulse", "loopable"],
+                "composition": ["foreground-overlay", "alpha", "local-text", "non-scannable-qr"],
+            },
+            vibe_scores={
+                "abstract-chinese-internet": (0.86, "cyber 户口 portal gag"),
+                "bureaucratic-absurdity": (0.82, "access gate as official ritual"),
+                "agency-anxiety": (0.70, "mobility denied/pending"),
+                "brainrot-density": (0.74, "glitchy QR density"),
+                "caption-interference": (0.34, "upper-right/mid, avoids subtitle band"),
+            },
+            renderer=render_hukou_qr_portal,
+        ),
+        AssetSpec(
+            id="brainrot-v0.cyber-steamed-bun-ration",
+            title="Cyber Steamed Bun Ration",
+            description="Transparent cute-menacing compute ration bao/算力馒头 with battery meter: cyber scarcity snack primitive.",
+            stage_role="prop_overlay_loop",
+            compositing_role="foreground_alpha",
+            prompt="Procedural transparent overlay loop: cute but menacing cyber steamed bun, 算力馒头, compute ration meter, post-labor scarcity snack and Chinese internet absurdity; local editable text.",
+            tags={
+                "semantic": ["steamed-bun", "ration", "compute", "battery"],
+                "meme": ["算力馒头", "cyber", "chinese-internet", "scarcity-snack"],
+                "motion": ["bob", "meter", "loopable"],
+                "composition": ["foreground-overlay", "alpha", "local-text"],
+            },
+            vibe_scores={
+                "cute-menace": (0.82, "cute food mascot with ration-machine aura"),
+                "post-labor-dread": (0.67, "compute ration scarcity"),
+                "abstract-chinese-internet": (0.78, "算力馒头 absurdity"),
+                "brainrot-density": (0.60, "simple cute prop plus meter"),
+                "caption-interference": (0.48, "lower-left; may need caption layout check"),
+            },
+            renderer=render_cyber_steamed_bun,
+        ),
+        AssetSpec(
+            id="brainrot-v0.attention-slot-machine",
+            title="Attention Slot Machine",
+            description="Transparent slot-machine overlay: hook/CTA/dopamine RNG, attention-bait mechanics made explicit.",
+            stage_role="prop_overlay_loop",
+            compositing_role="foreground_alpha",
+            prompt="Procedural transparent overlay loop: slot machine labeled ATTENTION RNG with spinning hook/CTA/dopamine symbols and 再刷一次, attention-bait brainrot mechanics; local editable text.",
+            tags={
+                "semantic": ["slot-machine", "attention", "hook", "cta"],
+                "meme": ["brainrot", "dopamine", "attention-bait", "再刷一次"],
+                "motion": ["spin", "wobble", "spark", "loopable"],
+                "composition": ["foreground-overlay", "alpha", "local-text"],
+            },
+            vibe_scores={
+                "agency-anxiety": (0.58, "attention mechanics pulling the lever"),
+                "brainrot-density": (0.88, "explicit dopamine slot chaos"),
+                "market-ritual": (0.45, "gamified payoff ritual"),
+                "caption-interference": (0.30, "upper-center, leaves lower caption space"),
+            },
+            renderer=render_attention_slot_machine,
         ),
     ]
 
