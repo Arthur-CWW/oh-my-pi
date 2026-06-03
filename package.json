@@ -20,7 +20,7 @@
     "twitter-archive:typecheck": "cd packages/twitter-archive && bun run typecheck",
     "jimeng:typecheck": "cd packages/jimeng-client && bun run typecheck",
     "jimeng:test": "cd packages/jimeng-client && bun run test",
-    "jimeng:cli": "cd packages/jimeng-client && bun run src/cli.ts --"
+    "jimeng:cli": "bun packages/jimeng-client/src/cli.ts"
   },
   "pi": {
     "extensions": ["./packages/web-access/src/index.ts"],

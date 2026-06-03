@@ -25,7 +25,7 @@ This package contains only local client code and tests. It does **not** include 
 ## CLI
 
 ```bash
-bun run src/cli.ts -- \
+bun run jimeng:cli -- \
   --op video \
   --capture data/jimeng-lab/raw/jimeng-network-capture-video-01.json \
   --session-bundle data/jimeng-lab/raw/session-bundle.json \
