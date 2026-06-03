@@ -6,10 +6,12 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./cli": "./src/cli.ts"
+    "./cli": "./src/cli.ts",
+    "./dreamina-compatible-cli": "./src/dreamina-compatible-cli.ts"
   },
   "bin": {
-    "jimeng-direct": "./src/cli.ts"
+    "jimeng-direct": "./src/cli.ts",
+    "jimeng-dreamina": "./src/dreamina-compatible-cli.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

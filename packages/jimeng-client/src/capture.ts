@@ -3,6 +3,18 @@ import { jimengError } from "./errors"
 
 export type JimengOp = "video" | "image"
 
+export const VIDEO_MODEL_REQ_KEYS = {
+  vgfm30Fast: "dreamina_ic_generate_video_model_vgfm_3.0_fast",
+} as const
+
+const VIDEO_MODEL_VERSION_TO_REQ_KEY: Record<string, string> = {
+  "3.0fast": VIDEO_MODEL_REQ_KEYS.vgfm30Fast,
+  "3.0_fast": VIDEO_MODEL_REQ_KEYS.vgfm30Fast,
+  vgfm30fast: VIDEO_MODEL_REQ_KEYS.vgfm30Fast,
+  "vgfm_3.0_fast": VIDEO_MODEL_REQ_KEYS.vgfm30Fast,
+  [VIDEO_MODEL_REQ_KEYS.vgfm30Fast]: VIDEO_MODEL_REQ_KEYS.vgfm30Fast,
+}
+
 export interface JimengSessionBundle {
   cookie: string
   userAgent?: string
@@ -32,6 +44,11 @@ export interface PrepareFromCaptureInput {
   durationSec?: number
   firstFrameUri?: string
   lastFrameUri?: string
+  ratio?: string
+  videoResolution?: string
+  modelVersion?: string
+  modelReqKey?: string
+  seed?: number
 }
 
 export interface PreparedJimengRun {
@@ -76,6 +93,10 @@ export function prepareFromCapture(input: PrepareFromCaptureInput): PreparedJime
       durationSec,
       firstFrameUri: input.firstFrameUri,
       lastFrameUri: input.lastFrameUri,
+      ratio: input.ratio,
+      videoResolution: input.videoResolution,
+      modelReqKey: input.modelReqKey ?? (input.modelVersion ? modelVersionToVideoReqKey(input.modelVersion) : undefined),
+      seed: input.seed,
     },
     submitBody,
     prompt,
@@ -126,7 +147,16 @@ export function buildCookieHeaderFromCookieList(source: string): string {
 }
 
 export function patchSubmitPayload(
-  args: { op: JimengOp; durationSec: number; firstFrameUri?: string; lastFrameUri?: string },
+  args: {
+    op: JimengOp
+    durationSec: number
+    firstFrameUri?: string
+    lastFrameUri?: string
+    ratio?: string
+    videoResolution?: string
+    modelReqKey?: string
+    seed?: number
+  },
   body: Record<string, unknown>,
   prompt: string,
   submitId: string,
@@ -147,14 +177,7 @@ export function patchSubmitPayload(
       metrics.originSubmitId = submitId
 
       if (typeof metrics.sceneOptions === "string") {
-        const sceneOptions = safeJson(metrics.sceneOptions)
-        if (Array.isArray(sceneOptions)) {
-          const firstScene = asRecord(sceneOptions[0])
-          if (firstScene) {
-            firstScene.videoDuration = args.durationSec
-            metrics.sceneOptions = JSON.stringify(sceneOptions)
-          }
-        }
+        metrics.sceneOptions = patchSceneOptions(metrics.sceneOptions, args)
       }
 
       body.metrics_extra = JSON.stringify(metrics)
@@ -170,17 +193,28 @@ export function patchSubmitPayload(
   if (!firstInput) return
 
   firstInput.prompt = prompt
-  firstInput.seed = Math.floor(Math.random() * 4294967296)
+  firstInput.seed = normalizeSeed(args.seed)
   firstInput.duration_ms = args.durationSec * 1000
+  if (args.videoResolution) firstInput.resolution = args.videoResolution
 
   if (args.firstFrameUri) firstInput.first_frame_image = args.firstFrameUri
   if (args.lastFrameUri) firstInput.end_frame_image = args.lastFrameUri
+
+  const textToVideo = getTextToVideoParams(draft)
+  if (textToVideo) {
+    if (args.modelReqKey) textToVideo.model_req_key = args.modelReqKey
+    if (args.ratio) textToVideo.video_aspect_ratio = args.ratio
+    textToVideo.seed = firstInput.seed
+  }
 
   const genVideo = getGenVideo(draft)
   if (genVideo && typeof genVideo.video_task_extra === "string") {
     const taskExtra = safeJson(genVideo.video_task_extra)
     if (isRecord(taskExtra)) {
       taskExtra.originSubmitId = submitId
+      if (typeof taskExtra.sceneOptions === "string") {
+        taskExtra.sceneOptions = patchSceneOptions(taskExtra.sceneOptions, args)
+      }
       genVideo.video_task_extra = JSON.stringify(taskExtra)
     }
   }
@@ -199,6 +233,21 @@ export function extractVideoPrompt(body: Record<string, unknown>): string | null
 export function extractImagePrompt(body: Record<string, unknown>): string | null {
   const prompt = getImagePromptPart(body)?.text
   return typeof prompt === "string" ? prompt : null
+}
+
+export function modelVersionToVideoReqKey(modelVersion: string): string {
+  const normalized = modelVersion.trim()
+  const mapped = VIDEO_MODEL_VERSION_TO_REQ_KEY[normalized]
+  if (!mapped) {
+    throw jimengError({
+      category: "validation",
+      code: "VIDEO_MODEL_VERSION_UNMAPPED",
+      message: `No confirmed direct model_req_key mapping for model_version=${modelVersion}. Capture this model in the frontend or pass --modelReqKey with a confirmed key.`,
+      retryable: false,
+      details: { modelVersion },
+    })
+  }
+  return mapped
 }
 
 export function defaultPrompt(op: JimengOp): string {
@@ -248,15 +297,58 @@ function getImagePromptPart(body: Record<string, unknown>): Record<string, unkno
   return asRecord(asArray(content?.content_parts)[0])
 }
 
+function normalizeSeed(value: number | undefined): number {
+  if (value === undefined) return Math.floor(Math.random() * 4294967296)
+  if (!Number.isInteger(value) || value < 0 || value > 4294967295) {
+    throw jimengError({
+      category: "validation",
+      code: "SEED_INVALID",
+      message: "seed must be an integer from 0 to 4294967295",
+      retryable: false,
+      details: { seed: value },
+    })
+  }
+  return value
+}
+
+function patchSceneOptions(
+  value: string,
+  args: { durationSec: number; videoResolution?: string; modelReqKey?: string },
+): string {
+  const sceneOptions = safeJson(value)
+  if (!Array.isArray(sceneOptions)) return value
+
+  for (const scene of sceneOptions) {
+    const record = asRecord(scene)
+    if (!record) continue
+
+    record.videoDuration = args.durationSec
+    if (args.videoResolution) record.resolution = args.videoResolution
+    if (args.modelReqKey) {
+      record.modelReqKey = args.modelReqKey
+      const reportParams = asRecord(record.reportParams)
+      if (reportParams && typeof record.resolution === "string") {
+        reportParams.extraVipFunctionKey = `${args.modelReqKey}-${record.resolution}`
+      }
+    }
+  }
+
+  return JSON.stringify(sceneOptions)
+}
+
 function getGenVideo(draft: Record<string, unknown>): Record<string, unknown> | null {
   const firstComponent = asRecord(asArray(draft.component_list)[0])
   const abilities = asRecord(firstComponent?.abilities)
   return asRecord(abilities?.gen_video)
 }
 
-function getFirstVideoInput(draft: Record<string, unknown>): Record<string, unknown> | null {
+function getTextToVideoParams(draft: Record<string, unknown>): Record<string, unknown> | null {
   const genVideo = getGenVideo(draft)
-  const textToVideo = asRecord(genVideo?.text_to_video_params)
+  return asRecord(genVideo?.text_to_video_params)
+}
+
+function getFirstVideoInput(draft: Record<string, unknown>): Record<string, unknown> | null {
+  const textToVideo = getTextToVideoParams(draft)
   return asRecord(asArray(textToVideo?.video_gen_inputs)[0])
 }
 

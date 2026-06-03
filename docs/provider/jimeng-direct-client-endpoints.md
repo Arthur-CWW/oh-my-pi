@@ -242,7 +242,10 @@ Mapping guidance:
 - full first/last frame direct upload path without browser-assisted upload
 - voice/配音 + digital-human + motion-mimic endpoint mapping
 
-## Current CLI entrypoint
+## Current CLI entrypoints
+
+### Low-level direct CLI
+
 - `packages/jimeng-client/src/cli.ts`
 - package alias: `bun --cwd packages/jimeng-client run src/cli.ts -- ...`
 
@@ -269,6 +272,45 @@ Supports optional frame URI injection for video payload patching:
 - `--lastFrameUri <uri>`
 
 > Note: this is payload-level injection only; direct upload-to-URI mapping still needs reversing.
+
+### Dreamina-compatible direct CLI
+
+- `packages/jimeng-client/src/dreamina-compatible-cli.ts`
+- package bin: `jimeng-dreamina`
+
+Goal: mirror the official `dreamina` command vocabulary, but use reversed web endpoints and local capture/session templates instead of the VIP-gated official generator command path.
+
+Important behavior: compat commands submit live by default and can consume credits, matching normal generation tooling. `--dryRun` is the explicit no-spend flag.
+
+Current support matrix:
+
+| command | status | notes |
+|---|---|---|
+| `text2video` | implemented | Uses captured `/mweb/v1/aigc_draft/generate`; confirmed live with `dreamina_ic_generate_video_model_vgfm_3.0_fast`. |
+| `text2image` | implemented when image capture is supplied | Uses captured `/mweb/v1/creation_agent/v2/conversation`; needs current local image capture fixture/session. |
+| `image2video` | partial | Can inject confirmed `--firstFrameUri`; local file upload-to-URI still needs reversal. |
+| `frames2video` | partial | Can inject confirmed `--firstFrameUri`/`--lastFrameUri`; local frame upload still needs reversal. |
+| `image2image` | needs capture | Need image reference upload + image edit submit capture. |
+| `multiframe2video` | needs capture | Need multi-frame upload/reference payload capture. |
+| `multimodal2video` | needs capture | Need `全能参考` mixed image/video/audio reference payload capture. |
+| `image_upscale` | needs capture | Need upscale submit/result capture. |
+
+Examples:
+
+```bash
+# support matrix
+bun packages/jimeng-client/src/dreamina-compatible-cli.ts capabilities
+
+# no-spend request patch
+bun packages/jimeng-client/src/dreamina-compatible-cli.ts text2video \
+  --capture data/jimeng-lab/raw/jimeng-network-capture-video-01.json \
+  --session-bundle data/jimeng-lab/raw/session-bundle.json \
+  --prompt "赛博海豹，电影感，无文字" \
+  --duration=3 \
+  --ratio=16:9 \
+  --model_version=3.0fast \
+  --dryRun
+```
 
 ## Background network recorder
 

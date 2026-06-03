@@ -34,7 +34,28 @@ bun run jimeng:cli -- \
   --dryRun
 ```
 
-Use `--dryRun` first. Live runs can consume paid quota.
+`--dryRun` writes a patched plan only. Without `--dryRun`, commands submit live and can consume paid quota.
+
+## Dreamina-compatible direct CLI
+
+`jimeng-dreamina` mirrors the official `dreamina` command vocabulary where the frontend endpoint has been reversed, but uses local capture templates + session bundles instead of the VIP-gated official generator commands.
+
+```bash
+# inspect support matrix
+bun packages/jimeng-client/src/dreamina-compatible-cli.ts capabilities
+
+# dry-run text2video request patching
+bun packages/jimeng-client/src/dreamina-compatible-cli.ts text2video \
+  --capture data/jimeng-lab/raw/jimeng-network-capture-video-01.json \
+  --session-bundle data/jimeng-lab/raw/session-bundle.json \
+  --prompt "赛博海豹，电影感，无文字" \
+  --duration=3 \
+  --ratio=16:9 \
+  --model_version=3.0fast \
+  --dryRun
+```
+
+Important behavior: this compat CLI is live by default, matching normal generation tools. Use `--dryRun` when you do not want to spend credits.
 
 ## Background network recorder
 

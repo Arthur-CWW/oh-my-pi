@@ -8,6 +8,7 @@ const DEFAULT_CDP_URL = "http://127.0.0.1:9340"
 const DEFAULT_JIMENG_URL = "https://jimeng.jianying.com/"
 const DEFAULT_DURATION_SEC = 300
 const DEFAULT_MAX_BODY_BYTES = 250_000
+const SECRET_FIELD_PATTERN = /cookie|token|auth|sign|bogus|msToken|xmst|session|secret|password|csrf|verifyFp|web_id|user_id|uid/i
 
 const USAGE = `Usage: jimeng-network-recorder [options]
 
@@ -50,6 +51,10 @@ interface CdpTargetInfo {
   type: string
   title: string
   url: string
+}
+
+interface ResolvedTarget extends CdpTargetInfo {
+  navigateTo?: string
 }
 
 interface CdpVersionInfo {
@@ -196,6 +201,11 @@ async function main(argv: string[]): Promise<void> {
     })
 
     console.log(`[jimeng-recorder] attached target=${target.id} type=${target.type} title=${JSON.stringify(target.title)} url=${target.url}`)
+    if (target.navigateTo) {
+      await cdp.send("Page.enable", {}, sessionId).catch(() => undefined)
+      console.log(`[jimeng-recorder] navigating background target to ${target.navigateTo}`)
+      await cdp.send("Page.navigate", { url: target.navigateTo }, sessionId)
+    }
     console.log(args.durationSec === 0 ? "[jimeng-recorder] recording until Ctrl-C" : `[jimeng-recorder] recording for ${args.durationSec}s`)
     await waitForStop(args.durationSec)
     detachEvents()
@@ -258,25 +268,27 @@ function parseArgs(argv: string[]): RecorderArgs {
   }
 }
 
-async function resolveTarget(cdp: CdpConnection, args: RecorderArgs): Promise<CdpTargetInfo> {
+async function resolveTarget(cdp: CdpConnection, args: RecorderArgs): Promise<ResolvedTarget> {
   if (args.targetUrl) {
     const match = await findExistingTarget(args.cdpUrl, args.targetUrl)
     if (match) return match
     if (!args.createIfMissing) throw new Error(`No existing page target matched --target-url=${args.targetUrl}`)
   }
 
-  const created = await cdp.send<{ targetId: string }>("Target.createTarget", { url: args.url, background: true })
+  // Create blank first, attach/enable Network, then navigate. This avoids missing the
+  // first landing/session requests that can fire during Target.createTarget(url).
+  const created = await cdp.send<{ targetId: string }>("Target.createTarget", { url: "about:blank", background: true })
   if (!created.targetId) throw new Error("Target.createTarget did not return targetId")
 
   // Give /json/list a short moment to see the new page metadata.
   for (let attempt = 0; attempt < 10; attempt += 1) {
     const targets = await listTargets(args.cdpUrl).catch(() => [] as CdpTargetInfo[])
     const target = targets.find((candidate) => candidate.id === created.targetId)
-    if (target) return target
+    if (target) return { ...target, navigateTo: args.url }
     await sleep(100)
   }
 
-  return { id: created.targetId, type: "page", title: "", url: args.url }
+  return { id: created.targetId, type: "page", title: "", url: "about:blank", navigateTo: args.url }
 }
 
 async function findExistingTarget(cdpUrl: string, needle: string): Promise<CdpTargetInfo | null> {
@@ -446,7 +458,7 @@ function writeCaptureTemplate(file: string, state: RecorderState): void {
   writeFileSync(file, `${JSON.stringify({ entries }, null, 2)}\n`, "utf8")
 }
 
-function writeSummary(file: string, args: RecorderArgs, target: CdpTargetInfo, state: RecorderState): void {
+function writeSummary(file: string, args: RecorderArgs, target: ResolvedTarget, state: RecorderState): void {
   const requests = Array.from(state.requests.values()).filter((request) => request.url && request.method)
   const interesting = requests.filter((request) => isInterestingRequest(request))
   const lines: string[] = []
@@ -458,6 +470,7 @@ function writeSummary(file: string, args: RecorderArgs, target: CdpTargetInfo, s
   lines.push(`- CDP: ${args.cdpUrl}`)
   lines.push(`- Target: ${target.type} ${target.id}`)
   lines.push(`- Target URL: ${redactUrl(target.url)}`)
+  if (target.navigateTo) lines.push(`- Navigated URL: ${redactUrl(target.navigateTo)}`)
   lines.push(`- Total requests: ${requests.length}`)
   lines.push(`- Interesting requests: ${interesting.length}`)
   lines.push("")
@@ -477,7 +490,7 @@ function writeSummary(file: string, args: RecorderArgs, target: CdpTargetInfo, s
     if (request.responseBodySha256) lines.push(`- response body sha256: ${request.responseBodySha256}`)
     lines.push("- request headers:")
     lines.push("  ```json")
-    lines.push(indent(JSON.stringify(redactHeaders(request.requestHeaders), null, 2), "  "))
+    lines.push(indent(JSON.stringify(redactSummaryHeaders(request.requestHeaders), null, 2), "  "))
     lines.push("  ```")
     if (request.postData) {
       lines.push("- post data preview:")
@@ -501,25 +514,78 @@ function redactBodyPreview(body: string): string {
   try {
     return JSON.stringify(redactJson(JSON.parse(truncated)), null, 2)
   } catch {
-    return truncated.replace(/(cookie|token|auth|sign|a_bogus|msToken)(["'=:\s]+)[^\s"'&,}]+/gi, "$1$2[REDACTED]")
+    return redactFreeformSecretText(truncated)
   }
+}
+
+function redactSummaryHeaders(headers: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [key, value] of Object.entries(redactHeaders(headers))) {
+    if (value === "[REDACTED]") {
+      out[key] = value
+    } else if (key === ":path") {
+      out[key] = redactPath(value)
+    } else if (/url|referer|origin/i.test(key) && /^https?:\/\//i.test(value)) {
+      out[key] = redactUrl(value)
+    } else {
+      out[key] = redactFreeformSecretText(value)
+    }
+  }
+  return out
 }
 
 function redactJson(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(redactJson)
-  if (!value || typeof value !== "object") return value
+  if (!value || typeof value !== "object") return redactJsonScalar(value)
 
+  const record = value as Record<string, unknown>
+  const secretDescriptor = typeof record.key === "string" && SECRET_FIELD_PATTERN.test(record.key)
   const out: Record<string, unknown> = {}
-  for (const [key, child] of Object.entries(value)) {
-    if (/cookie|token|auth|sign|bogus|msToken|session|secret|password/i.test(key)) {
+
+  for (const [key, child] of Object.entries(record)) {
+    if (SECRET_FIELD_PATTERN.test(key) || (secretDescriptor && key === "value")) {
       out[key] = "[REDACTED]"
-    } else if (typeof child === "string" && child.length > 500) {
-      out[key] = `${child.slice(0, 500)}…[TRUNCATED ${child.length} chars]`
+    } else if (secretDescriptor && key === "args" && Array.isArray(child)) {
+      out[key] = child.map((item) => typeof item === "string" && !SECRET_FIELD_PATTERN.test(item) ? "[REDACTED]" : redactJson(item))
     } else {
       out[key] = redactJson(child)
     }
   }
   return out
+}
+
+function redactJsonScalar(value: unknown): unknown {
+  if (typeof value !== "string") return value
+
+  const trimmed = value.trim()
+  if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
+    try {
+      return JSON.stringify(redactJson(JSON.parse(trimmed)))
+    } catch {
+      // Fall through to freeform redaction.
+    }
+  }
+
+  if (value.length > 500) return `${redactFreeformSecretText(value.slice(0, 500))}…[TRUNCATED ${value.length} chars]`
+  return redactFreeformSecretText(value)
+}
+
+function redactPath(value: string): string {
+  try {
+    const parsed = new URL(value, "https://redacted.local")
+    for (const key of Array.from(parsed.searchParams.keys())) {
+      parsed.searchParams.set(key, "[REDACTED]")
+    }
+    return `${parsed.pathname}${parsed.search}`
+  } catch {
+    return redactFreeformSecretText(value)
+  }
+}
+
+function redactFreeformSecretText(value: string): string {
+  return value
+    .replace(/([?&](?:msToken|token|access_token|refresh_token|csrf|sign|a_bogus|verifyFp|fp|web_id|user_id|uid|aid)=)[^\s"'&,)]+/gi, "$1[REDACTED]")
+    .replace(/((?:cookie|token|auth|sign|a_bogus|msToken|xmst|session|secret|password|csrf|verifyFp|web_id|user_id|uid)(?:\\?["'=:\s,]+))[^\s\\"'&,}\]]+/gi, "$1[REDACTED]")
 }
 
 function redactUrl(url: string): string {
