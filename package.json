@@ -13,11 +13,12 @@
   },
   "scripts": {
     "typecheck": "cd packages/web-access && bun run typecheck && cd ../twitter-archive && bun run typecheck && cd ../jimeng-client && bun run typecheck",
-    "test": "cd packages/web-access && bun run test && cd ../jimeng-client && bun run test",
+    "test": "cd packages/web-access && bun run test && cd ../twitter-archive && bun run test && cd ../jimeng-client && bun run test",
     "check": "bun run typecheck && bun run test",
     "web-access:smoke": "cd packages/web-access && bun run scripts/smoke.ts",
     "web-access:help": "pi -e ./packages/web-access/src/index.ts --help",
     "twitter-archive:typecheck": "cd packages/twitter-archive && bun run typecheck",
+    "twitter-archive:test": "cd packages/twitter-archive && bun run test",
     "jimeng:typecheck": "cd packages/jimeng-client && bun run typecheck",
     "jimeng:test": "cd packages/jimeng-client && bun run test",
     "jimeng:cli": "bun packages/jimeng-client/src/cli.ts"

@@ -87,8 +87,14 @@ export async function upsertJsonlById<T extends { id: string }>(
   records: readonly T[],
 ): Promise<UpsertJsonlResult> {
   const existing = await readJsonl<T>(filePath)
-  const order = existing.map((record) => record.id)
-  const byId = new Map(existing.map((record) => [record.id, record] as const))
+  const order: string[] = []
+  const byId = new Map<string, T>()
+  for (const record of existing) {
+    if (!byId.has(record.id)) {
+      order.push(record.id)
+    }
+    byId.set(record.id, record)
+  }
   let inserted = 0
   let updated = 0
 
