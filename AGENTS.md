@@ -4,7 +4,7 @@
 
 Pi extension providing web search, content fetching, YouTube transcripts, and Chrome cookie access.
 
-- Entry: `src/index.ts` — registers 5 tools
+- Entry: `src/index.ts` — registers Pi tools and commands
 - Runtime: Node.js (Pi) and Bun (dev/tests)
 - Store: JSON file at `~/.pi/pi-web-access/store.json` (24h TTL)
 
@@ -22,7 +22,7 @@ pi install . -l      # install locally for testing
 
 ```
 src/
-  index.ts      Pi extension entrypoint (5 tools)
+  index.ts      Pi extension entrypoint (tools + commands)
   schemas.ts    Effect Schema types + errors
   config.ts     ~/.pi/web-search.json reader
   store.ts      JSON file KV store with TTL
@@ -32,12 +32,14 @@ src/
   search.ts     web_search (Kagi-first, Gemini fallback)
   fetch.ts      fetch_content (HTTP/Readability → Jina → Gemini)
   youtube.ts    YouTube transcript extraction (yt-dlp)
+  codex.ts      Codex CLI session listing/import and `/codex-resume`
 
 test/
   basic.test.ts    Core tool tests (7)
   store.test.ts    JSON store tests (9)
   kagi.test.ts     Kagi parsing + live test (7)
   platform.test.ts Cross-platform path detection (4)
+  codex.test.ts    Codex session parser/import tests (3)
 
 vendor/kagi-chrome-extension/   Official Kagi extension (submodule)
 ```

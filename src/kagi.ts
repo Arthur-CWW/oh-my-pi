@@ -1,10 +1,11 @@
 import {
   readFileSync, writeFileSync, mkdirSync, existsSync,
-  readdirSync, copyFileSync, rmSync,
+  readdirSync, copyFileSync, rmSync, statSync,
 } from "node:fs"
 import { execFileSync } from "node:child_process"
-import { dirname, join } from "node:path"
+import { dirname, join, resolve } from "node:path"
 import { homedir, platform, tmpdir } from "node:os"
+import { parseHTML } from "linkedom"
 import { Effect, Schedule } from "effect"
 import { kagiSessionPath } from "./config"
 import { type SearchResponse, toErrorMessage } from "./schemas"
@@ -32,45 +33,152 @@ function loadCachedSession(): KagiSession | null {
   } catch { return null }
 }
 
-function findFirefoxCookiesDb(): string | null {
-  const bases = platform() === "darwin"
-    ? [join(homedir(), "Library/Application Support/Firefox/Profiles")]
+function firefoxAppDirs(): string[] {
+  return platform() === "darwin"
+    ? [join(homedir(), "Library/Application Support/Firefox")]
     : [join(homedir(), ".mozilla/firefox"), join(homedir(), "snap/firefox/common/.mozilla/firefox")]
-  for (const base of bases) {
-    try {
-      for (const dir of readdirSync(base)) {
-        const db = join(base, dir, "cookies.sqlite")
-        if (existsSync(db)) return db
-      }
-    } catch { /* nop */ }
-  }
-  return null
 }
 
-function captureFromFirefox(): KagiSession | null {
-  const dbPath = findFirefoxCookiesDb()
-  if (!dbPath) return null
-  const tempDir = join(tmpdir(), `pi-kagi-ff-${Date.now()}`)
+interface FirefoxProfileCandidate {
+  dir: string
+  rank: number
+}
+
+function parseIniBlocks(text: string): Array<{ section: string; values: Record<string, string> }> {
+  const blocks: Array<{ section: string; values: Record<string, string> }> = []
+  for (const block of text.split(/\r?\n(?=\[)/)) {
+    const header = block.match(/^\[([^\]]+)\]/)
+    if (!header?.[1]) continue
+    const values: Record<string, string> = {}
+    for (const line of block.split(/\r?\n/)) {
+      const m = line.match(/^([^=]+)=(.*)$/)
+      if (m?.[1]) values[m[1].trim()] = (m[2] ?? "").trim()
+    }
+    blocks.push({ section: header[1], values })
+  }
+  return blocks
+}
+
+function firefoxProfileDir(appDir: string, path: string, isRelative = true): string {
+  return isRelative ? join(appDir, path) : resolve(path)
+}
+
+function parseFirefoxInstallDefaults(appDir: string): FirefoxProfileCandidate[] {
+  const out: FirefoxProfileCandidate[] = []
+  for (const file of ["installs.ini", "profiles.ini"]) {
+    let text: string
+    try { text = readFileSync(join(appDir, file), "utf-8") } catch { continue }
+    for (const block of parseIniBlocks(text)) {
+      if (!block.section.startsWith("Install") || !block.values.Default) continue
+      out.push({ dir: firefoxProfileDir(appDir, block.values.Default), rank: -100 + out.length })
+    }
+  }
+  return out
+}
+
+function parseFirefoxProfilesIni(appDir: string): FirefoxProfileCandidate[] {
+  let text: string
+  try { text = readFileSync(join(appDir, "profiles.ini"), "utf-8") } catch { return [] }
+
+  const profiles: Array<FirefoxProfileCandidate & { isDefault: boolean; index: number }> = []
+  let index = 0
+  for (const block of parseIniBlocks(text)) {
+    if (!/^Profile\d+$/.test(block.section)) continue
+    if (!block.values.Path) continue
+    profiles.push({
+      dir: firefoxProfileDir(appDir, block.values.Path, block.values.IsRelative !== "0"),
+      isDefault: block.values.Default === "1",
+      rank: 0,
+      index: index++,
+    })
+  }
+
+  profiles.sort((a, b) => {
+    if (a.isDefault !== b.isDefault) return a.isDefault ? -1 : 1
+    return a.index - b.index
+  })
+  return profiles.map((profile, i) => ({
+    dir: profile.dir,
+    rank: profile.isDefault ? i : 100 + i,
+  }))
+}
+
+function addFirefoxProfileDb(
+  candidates: Array<{ path: string; rank: number; mtimeMs: number }>,
+  seen: Set<string>,
+  profileDir: string,
+  rank: number,
+): void {
+  const db = join(profileDir, "cookies.sqlite")
+  if (seen.has(db) || !existsSync(db)) return
+  let mtimeMs = 0
+  try { mtimeMs = statSync(db).mtimeMs } catch { /* nop */ }
+  seen.add(db)
+  candidates.push({ path: db, rank, mtimeMs })
+}
+
+function findFirefoxCookiesDbs(): string[] {
+  const candidates: Array<{ path: string; rank: number; mtimeMs: number }> = []
+  const seen = new Set<string>()
+
+  for (const appDir of firefoxAppDirs()) {
+    for (const profile of [...parseFirefoxInstallDefaults(appDir), ...parseFirefoxProfilesIni(appDir)]) {
+      addFirefoxProfileDb(candidates, seen, profile.dir, profile.rank)
+    }
+
+    // Fallback for unusual installs and newly-created profiles not yet present
+    // in profiles.ini. macOS keeps profiles in ./Profiles; Linux commonly keeps
+    // them directly under the Firefox app directory.
+    for (const container of [join(appDir, "Profiles"), appDir]) {
+      try {
+        for (const dirent of readdirSync(container, { withFileTypes: true })) {
+          if (!dirent.isDirectory()) continue
+          addFirefoxProfileDb(candidates, seen, join(container, dirent.name), 1000)
+        }
+      } catch { /* nop */ }
+    }
+  }
+
+  return candidates
+    .sort((a, b) => a.rank - b.rank || b.mtimeMs - a.mtimeMs)
+    .map((candidate) => candidate.path)
+}
+
+function readKagiSessionTokenFromFirefoxDb(dbPath: string): string | null {
+  const tempDir = join(tmpdir(), `pi-kagi-ff-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`)
   const tmpDb = join(tempDir, "cookies.sqlite")
   try {
     mkdirSync(tempDir, { recursive: true })
     copyFileSync(dbPath, tmpDb)
+    // Firefox usually keeps the live cookie changes in the WAL file while it is
+    // open. Copy it beside the database or sqlite3 can see stale data or fail
+    // with "no such table: moz_cookies".
+    for (const suffix of ["-wal", "-shm"]) {
+      if (existsSync(dbPath + suffix)) copyFileSync(dbPath + suffix, tmpDb + suffix)
+    }
+
     const output = execFileSync(
       "sqlite3",
-      ["-readonly", "-noheader", "-separator", "|", tmpDb,
-        "SELECT name, value FROM moz_cookies WHERE host LIKE '%kagi.com%' AND name = 'kagi_session' AND (expiry > unixepoch() OR expiry = 0)"],
+      ["-readonly", "-noheader", tmpDb,
+        "SELECT value FROM moz_cookies WHERE (host = 'kagi.com' OR host LIKE '%.kagi.com') AND name = 'kagi_session' AND (expiry > unixepoch() OR expiry = 0) ORDER BY expiry DESC LIMIT 1"],
       { timeout: 5000, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] },
     ).trim()
-    if (!output) return null
-    const [, token] = output.split("\n")[0]?.split("|") ?? []
-    if (!token) return null
+    return output.split(/\r?\n/)[0]?.trim() || null
+  } catch { return null
+  } finally { try { rmSync(tempDir, { recursive: true, force: true }) } catch { /* nop */ } }
+}
+
+function captureFromFirefox(): KagiSession | null {
+  for (const dbPath of findFirefoxCookiesDbs()) {
+    const token = readKagiSessionTokenFromFirefoxDb(dbPath)
+    if (!token) continue
     return {
       token,
       headers: { "user-agent": FF_UA, "accept-language": "en-US,en;q=0.9", accept: "application/json" },
       capturedAt: new Date().toISOString(),
     }
-  } catch { return null
-  } finally { try { rmSync(tempDir, { recursive: true, force: true }) } catch { /* nop */ } }
+  }
+  return null
 }
 
 async function captureFromChromeCdP(browserUrl = "http://localhost:9222"): Promise<KagiSession | null> {
@@ -105,23 +213,30 @@ async function captureFromChromeCdP(browserUrl = "http://localhost:9222"): Promi
   } catch { return null }
 }
 
+function saveSession(session: KagiSession): void {
+  try {
+    mkdirSync(dirname(kagiSessionPath()), { recursive: true })
+    writeFileSync(kagiSessionPath(), JSON.stringify(session, null, 2), "utf-8")
+  } catch { /* nop */ }
+}
+
 function getOrCaptureSession(): KagiSession | null {
   const cached = loadCachedSession()
   if (cached) return cached
   const ff = captureFromFirefox()
   if (ff) {
-    try {
-      mkdirSync(dirname(kagiSessionPath()), { recursive: true })
-      writeFileSync(kagiSessionPath(), JSON.stringify(ff, null, 2), "utf-8")
-    } catch { /* nop */ }
+    saveSession(ff)
     return ff
   }
   return null
 }
 
+async function captureFreshSession(): Promise<KagiSession | null> {
+  return captureFromFirefox() ?? await captureFromChromeCdP()
+}
+
 export async function refreshSession(): Promise<string> {
-  let session = captureFromFirefox()
-  if (!session) session = await captureFromChromeCdP()
+  const session = await captureFreshSession()
   if (!session) throw new Error("No Kagi session found. Sign into kagi.com in Chrome or Firefox.")
   const p = kagiSessionPath()
   mkdirSync(dirname(p), { recursive: true })
@@ -133,7 +248,9 @@ export async function refreshSession(): Promise<string> {
 
 export function stripHtml(html: string): string {
   return html
-    .replace(/<[^>]*>/g, " ")
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/<\/?[a-z][^>]*>/gi, " ")
+    .replace(/<![^>]*>/g, " ")
     .replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<").replace(/&gt;/g, ">")
     .replace(/\s+/g, " ").replace(/\s+([.,;:!?])/g, "$1").trim()
@@ -147,6 +264,16 @@ export function getPayloadHtml(item: KagiEventItem): string {
   return ""
 }
 
+function isHttpUrl(url: string): boolean {
+  return /^https?:\/\//i.test(url)
+}
+
+function extractSnippet(anchor: Element): string {
+  const container = anchor.closest("._0_SRI") ?? anchor.closest(".search-result") ?? anchor.parentElement
+  const desc = container?.querySelector(".__sri-desc")
+  return stripHtml(desc?.innerHTML ?? desc?.textContent ?? "")
+}
+
 export function parseResults(events: Array<{ data: unknown }>): Array<{ title: string; url: string; snippet: string }> {
   const out: Array<{ title: string; url: string; snippet: string }> = []
   const seen = new Set<string>()
@@ -156,16 +283,13 @@ export function parseResults(events: Array<{ data: unknown }>): Array<{ title: s
       if (item.tag !== "search") continue
       const html = getPayloadHtml(item)
       if (!html) continue
-      const descs = [...html.matchAll(/<div[^>]*class="[^"]*__sri-desc[^"]*"[^>]*>([\s\S]*?)<\/div>/gi)]
-        .map((m) => stripHtml(m[1] ?? ""))
-      let i = 0
-      for (const m of html.matchAll(/<a[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi)) {
-        const url = (m[1] ?? "").trim()
-        const title = stripHtml(m[2] ?? "")
-        if (!url || !title || seen.has(url)) continue
+      const { document } = parseHTML(html)
+      for (const anchor of Array.from(document.querySelectorAll("a.__sri_title_link"))) {
+        const url = anchor.getAttribute("href")?.trim() ?? ""
+        const title = stripHtml(anchor.innerHTML || anchor.textContent || "")
+        if (!isHttpUrl(url) || !title || seen.has(url)) continue
         seen.add(url)
-        out.push({ title, url, snippet: descs[i] ?? "" })
-        i++
+        out.push({ title, url, snippet: extractSnippet(anchor) })
       }
     }
   }
@@ -187,22 +311,34 @@ export function parseAnswer(events: Array<{ data: unknown }>): string {
 export const runSearch = Effect.fn("kagiRunSearch")(function* (query: string) {
   let session = getOrCaptureSession()
   if (!session) {
-    session = yield* Effect.tryPromise({ try: () => captureFromChromeCdP(), catch: () => null })
-    if (session) {
-      try { mkdirSync(dirname(kagiSessionPath()), { recursive: true }); writeFileSync(kagiSessionPath(), JSON.stringify(session, null, 2), "utf-8") } catch { /* nop */ }
-    }
+    session = yield* Effect.tryPromise({ try: () => captureFreshSession(), catch: () => null })
+    if (session) saveSession(session)
   }
   if (!session) return yield* Effect.fail(new Error("Kagi session not found. Sign into kagi.com in Chrome or Firefox."))
 
-  const response = yield* Effect.tryPromise({
+  const request = (activeSession: KagiSession) => Effect.tryPromise({
     try: () => fetch(`https://kagi.com/socket/search?q=${encodeURIComponent(query)}`, {
-      headers: { ...session.headers, "X-Kagi-Authorization": session.token },
+      headers: {
+        ...activeSession.headers,
+        referer: `https://kagi.com/search?q=${encodeURIComponent(query)}`,
+        "X-Kagi-Authorization": activeSession.token,
+      },
       signal: AbortSignal.timeout(30000),
     }),
     catch: (err) => new Error(`Kagi request: ${toErrorMessage(err)}`),
   }).pipe(Effect.retry(Schedule.recurs(1)))
 
-  if (!response.ok) return yield* Effect.fail(new Error(`Kagi search failed: ${response.status}`))
+  let response = yield* request(session)
+  if (response.status === 401 || response.status === 403) {
+    const refreshed = yield* Effect.tryPromise({ try: () => captureFreshSession(), catch: () => null })
+    if (refreshed?.token && refreshed.token !== session.token) {
+      session = refreshed
+      saveSession(session)
+      response = yield* request(session)
+    }
+  }
+
+  if (!response.ok) return yield* Effect.fail(new Error(`Kagi search failed: ${response.status} ${response.statusText}`))
 
   const raw = yield* Effect.tryPromise({
     try: () => response.text(),

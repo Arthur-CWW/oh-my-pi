@@ -44,6 +44,7 @@ describe("kagi parsing", () => {
   it("strips HTML tags", () => {
     expect(stripHtml("<b>hello</b> world")).toBe("hello world")
     expect(stripHtml("a &#39;b&#39; &amp; c")).toBe("a 'b' & c")
+    expect(stripHtml("<i><0.20s</i>")).toBe("<0.20s")
     expect(stripHtml("   multiple    spaces   ")).toBe("multiple spaces")
   })
 
@@ -89,6 +90,24 @@ describe("kagi parsing", () => {
     }]
     const results = parseResults(dupFixture)
     expect(results.length).toBe(1)
+  })
+
+  it("ignores Kagi action links inside result HTML", () => {
+    const fixture: Array<{ data: unknown }> = [{
+      data: [{
+        tag: "search",
+        payload: {
+          content:
+            '<div class="_0_SRI">' +
+            '<a class="__sri_title_link" href="https://example.com">Example</a>' +
+            '<a href="/search?q=test+site%3Aexample.com">More results from this site</a>' +
+            '<a href="https://web.archive.org/web/https://example.com">Open page in Web Archive</a>' +
+            '<div class="__sri-desc">Example snippet</div>' +
+            "</div>",
+        },
+      }],
+    }]
+    expect(parseResults(fixture)).toEqual([{ title: "Example", url: "https://example.com", snippet: "Example snippet" }])
   })
 })
 

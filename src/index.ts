@@ -6,6 +6,20 @@ import { fetchContent } from "./fetch"
 import { readCookies } from "./cookies"
 import { storeSearch, storeFetch, getStored } from "./store"
 import { getTranscript } from "./youtube"
+import { openChatGptHandoff } from "./chatgpt"
+import {
+  chatGptLoginFrontendBrowser,
+  collectFrontendBrowser,
+  frontendBrowserProjects,
+  frontendBrowserSessions,
+  frontendBrowserStatus,
+  googleLoginFrontendBrowser,
+  promptFrontendBrowser,
+  saveFrontendBrowserProject,
+  setupFrontendBrowser,
+  type FrontendProvider,
+} from "./frontend-browser"
+import { registerCodexResume } from "./codex"
 import { toErrorMessage } from "./schemas"
 
 function run<E, A>(effect: Effect.Effect<A, E>): Promise<A> {
@@ -264,6 +278,383 @@ function registerYouTube(pi: ExtensionAPI): void {
   })
 }
 
+// ─── Tool: chatgpt_handoff ───────────────────────────────────────────
+
+function registerChatGptHandoff(pi: ExtensionAPI): void {
+  pi.registerTool({
+    name: "chatgpt_handoff",
+    label: "ChatGPT Handoff",
+    description:
+      "Copy a prompt to the clipboard and open ChatGPT in a browser for a manual Pro run. Does not submit prompts or scrape responses.",
+    parameters: Type.Object({
+      prompt: Type.String({ description: "Prompt to copy to the clipboard" }),
+      browser: Type.Optional(Type.String({ description: "macOS browser app to open (default: Firefox)" })),
+      conversationUrl: Type.Optional(Type.String({ description: "Existing chatgpt.com conversation URL to continue" })),
+      projectUrl: Type.Optional(Type.String({ description: "chatgpt.com project URL to open" })),
+      copyOnly: Type.Optional(Type.Boolean({ description: "Only copy the prompt; do not open a browser" })),
+    }),
+    async execute(_callId, rawParams) {
+      const params = rawParams as {
+        prompt: string
+        browser?: string
+        conversationUrl?: string
+        projectUrl?: string
+        copyOnly?: boolean
+      }
+
+      if (params.conversationUrl && params.projectUrl) {
+        return {
+          content: [{ type: "text", text: "Error: Use either conversationUrl or projectUrl, not both." }],
+          details: { error: "Conflicting targets" },
+        }
+      }
+
+      const result = await run(
+        Effect.match(openChatGptHandoff(params), {
+          onFailure: (err) => ({ ok: false as const, error: toErrorMessage(err) }),
+          onSuccess: (data) => ({ ok: true as const, data }),
+        }),
+      )
+
+      if (!result.ok) {
+        return {
+          content: [{ type: "text", text: `Error: ${result.error}` }],
+          details: { error: result.error },
+        }
+      }
+
+      const opened = result.data.opened
+        ? `Opened ${result.data.mode} target in ${result.data.browser}: ${result.data.url}`
+        : `Copy-only mode. Target would be: ${result.data.url}`
+
+      return {
+        content: [{
+          type: "text",
+          text: `Copied ${result.data.promptLength} characters to the clipboard.\n${opened}\nPaste and submit manually in ChatGPT.`,
+        }],
+        details: { error: null as unknown as string },
+      }
+    },
+  })
+}
+
+// ─── Tool: llm_frontend_browser ──────────────────────────────────────
+
+function registerLlmFrontendBrowser(pi: ExtensionAPI): void {
+  pi.registerTool({
+    name: "llm_frontend_browser",
+    label: "LLM Frontend Browser",
+    description:
+      "Launch, open, inspect, prompt, or collect responses from a dedicated Helium/Chromium CDP profile for frontend LLM sites like AI Studio, DeepSeek, and ChatGPT.",
+    promptGuidelines: [
+      "Use llm_frontend_browser for frontend LLM sites through a dedicated CDP profile instead of daily-driver browser automation.",
+      "Use llm_frontend_browser in background mode by default; do not pair it with page.bringToFront(), Target.activateTarget, DevTools UI, AppleScript activation, or OS-level click/type automation.",
+    ],
+    parameters: Type.Object({
+      action: Type.Optional(Type.String({ description: "setup, open, google-login, chatgpt-login, prompt, collect, wait, sessions, projects, save-project, or status (default: status)" })),
+      account: Type.Optional(Type.String({ description: "Optional Keychain account label for google-login/chatgpt-login" })),
+      conversationUrl: Type.Optional(Type.String({ description: "Existing chatgpt.com conversation URL for action=collect/wait" })),
+      outputFile: Type.Optional(Type.String({ description: "Write captured response text to this local file" })),
+      prompt: Type.Optional(Type.String({ description: "Prompt text for action=prompt" })),
+      provider: Type.Optional(Type.String({ description: "aistudio, deepseek, or chatgpt (default: aistudio)" })),
+      browser: Type.Optional(Type.String({ description: "macOS browser app (default: Helium)" })),
+      port: Type.Optional(Type.Number({ description: "CDP port" })),
+      profileDir: Type.Optional(Type.String({ description: "Browser user data directory" })),
+      background: Type.Optional(Type.Boolean({ description: "Do not activate the browser" })),
+      newChat: Type.Optional(Type.Boolean({ description: "Start a new provider chat for action=prompt" })),
+      project: Type.Optional(Type.String({ description: "Saved project key or direct project URL for action=prompt/sessions" })),
+      projectKey: Type.Optional(Type.String({ description: "Project alias key for action=save-project" })),
+      projectTitle: Type.Optional(Type.String({ description: "Human title for action=save-project" })),
+      projectUrl: Type.Optional(Type.String({ description: "Project URL for action=prompt/save-project" })),
+      waitForResponse: Type.Optional(Type.Boolean({ description: "Wait for best-effort response text for action=prompt" })),
+      responseTimeoutMs: Type.Optional(Type.Number({ description: "Response wait timeout for action=prompt" })),
+      session: Type.Optional(Type.String({ description: "Saved session id prefix or latest for action=prompt" })),
+      limit: Type.Optional(Type.Number({ description: "Number of sessions to list for action=sessions" })),
+    }),
+    async execute(_callId, rawParams) {
+      const params = rawParams as {
+        action?: string
+        account?: string
+        conversationUrl?: string
+        outputFile?: string
+        prompt?: string
+        provider?: string
+        browser?: string
+        port?: number
+        profileDir?: string
+        background?: boolean
+        newChat?: boolean
+        project?: string
+        projectKey?: string
+        projectTitle?: string
+        projectUrl?: string
+        waitForResponse?: boolean
+        responseTimeoutMs?: number
+        session?: string
+        limit?: number
+      }
+
+      const provider = params.provider as FrontendProvider | undefined
+      const options = {
+        provider,
+        browser: params.browser,
+        port: params.port,
+        profileDir: params.profileDir,
+        account: params.account,
+        background: params.background ?? (params.action === "open" || params.action === "prompt"),
+      }
+
+      if (params.provider && !["aistudio", "deepseek", "chatgpt"].includes(params.provider)) {
+        return {
+          content: [{ type: "text", text: "Error: provider must be one of: aistudio, deepseek, chatgpt." }],
+          details: { error: "Invalid provider" },
+        }
+      }
+
+      if (
+        params.action
+        && !["setup", "open", "google-login", "chatgpt-login", "prompt", "collect", "wait", "sessions", "projects", "save-project", "status"]
+          .includes(params.action)
+      ) {
+        return {
+          content: [{ type: "text", text: "Error: action must be one of: setup, open, google-login, chatgpt-login, prompt, collect, wait, sessions, projects, save-project, status." }],
+          details: { error: "Invalid action" },
+        }
+      }
+
+      const action = params.action ?? "status"
+      if (action === "prompt" && !params.prompt?.trim()) {
+        return {
+          content: [{ type: "text", text: "Error: prompt is required for action=prompt." }],
+          details: { error: "Missing prompt" },
+        }
+      }
+      if (action === "save-project" && (!params.projectKey?.trim() || !params.projectUrl?.trim())) {
+        return {
+          content: [{ type: "text", text: "Error: projectKey and projectUrl are required for action=save-project." }],
+          details: { error: "Missing project" },
+        }
+      }
+
+      if (action === "save-project") {
+        const projectResult = await run(
+          Effect.match(saveFrontendBrowserProject({
+            key: params.projectKey ?? "",
+            provider: provider ?? "chatgpt",
+            title: params.projectTitle,
+            url: params.projectUrl ?? "",
+          }), {
+            onFailure: (err) => ({ ok: false as const, error: toErrorMessage(err) }),
+            onSuccess: (data) => ({ ok: true as const, data }),
+          }),
+        )
+        if (!projectResult.ok) {
+          return {
+            content: [{ type: "text", text: `Error: ${projectResult.error}` }],
+            details: { error: projectResult.error },
+          }
+        }
+        const project = projectResult.data
+        const text = [
+          `${project.key} (${project.provider})`,
+          `Title: ${project.title}`,
+          `URL: ${project.url}`,
+          `Updated: ${new Date(project.updatedAt).toISOString()}`,
+        ].join("\n")
+        return {
+          content: [{ type: "text", text }],
+          details: { error: null as unknown as string },
+        }
+      }
+
+      if (action === "projects") {
+        const projectResult = await run(
+          Effect.match(frontendBrowserProjects({ provider }), {
+            onFailure: (err) => ({ ok: false as const, error: toErrorMessage(err) }),
+            onSuccess: (data) => ({ ok: true as const, data }),
+          }),
+        )
+        if (!projectResult.ok) {
+          return {
+            content: [{ type: "text", text: `Error: ${projectResult.error}` }],
+            details: { error: projectResult.error },
+          }
+        }
+        const text = projectResult.data.length
+          ? projectResult.data.map((project) => [
+            `${project.key} (${project.provider})`,
+            `Title: ${project.title}`,
+            `URL: ${project.url}`,
+            `Updated: ${new Date(project.updatedAt).toISOString()}`,
+          ].join("\n")).join("\n\n")
+          : "No saved projects."
+        return {
+          content: [{ type: "text", text }],
+          details: { error: null as unknown as string },
+        }
+      }
+
+      if (action === "sessions") {
+        const sessionResult = await run(
+          Effect.match(frontendBrowserSessions({ limit: params.limit, project: params.project, provider }), {
+            onFailure: (err) => ({ ok: false as const, error: toErrorMessage(err) }),
+            onSuccess: (data) => ({ ok: true as const, data }),
+          }),
+        )
+        if (!sessionResult.ok) {
+          return {
+            content: [{ type: "text", text: `Error: ${sessionResult.error}` }],
+            details: { error: sessionResult.error },
+          }
+        }
+        const trim = (value: string, length: number) => {
+          const normalized = value.replace(/\s+/g, " ").trim()
+          if (normalized.length <= length) return normalized
+          return `${normalized.slice(0, Math.max(0, length - 3))}...`
+        }
+        const text = sessionResult.data.length
+          ? sessionResult.data.map((session) => [
+            `${session.id} (${session.provider})`,
+            `Updated: ${new Date(session.updatedAt).toISOString()}`,
+            ...(session.projectKey ? [`Project: ${session.projectKey}`] : []),
+            ...(session.conversationUrl ? [`Conversation: ${session.conversationUrl}`] : []),
+            ...(session.title ? [`Title: ${session.title}`] : []),
+            `Prompt: ${trim(session.prompt, 120)}`,
+            ...(session.responseText ? [`Response: ${trim(session.responseText, 160)}`] : []),
+          ].join("\n")).join("\n\n")
+          : "No saved sessions."
+        return {
+          content: [{ type: "text", text }],
+          details: { error: null as unknown as string },
+        }
+      }
+
+      const effect = action === "google-login"
+        ? googleLoginFrontendBrowser({ ...options, background: params.background ?? true })
+        : action === "chatgpt-login"
+          ? chatGptLoginFrontendBrowser({ ...options, background: params.background ?? true, provider: "chatgpt" })
+        : action === "prompt"
+          ? promptFrontendBrowser({
+            ...options,
+            background: params.background ?? true,
+            newChat: params.newChat,
+            outputFile: params.outputFile,
+            prompt: params.prompt ?? "",
+            project: params.project,
+            projectUrl: params.projectUrl,
+            responseTimeoutMs: params.responseTimeoutMs,
+            session: params.session,
+            waitForResponse: params.waitForResponse,
+          })
+          : action === "collect" || action === "wait"
+          ? collectFrontendBrowser({
+            ...options,
+            background: params.background ?? true,
+            conversationUrl: params.conversationUrl,
+            outputFile: params.outputFile,
+            project: params.project,
+            responseTimeoutMs: params.responseTimeoutMs,
+            session: params.session ?? "latest",
+            waitForResponse: action === "wait" ? true : params.waitForResponse ?? false,
+          })
+          : action === "status"
+            ? frontendBrowserStatus(options)
+            : setupFrontendBrowser(options)
+      const result = await run(
+        Effect.match(effect, {
+          onFailure: (err) => ({ ok: false as const, error: toErrorMessage(err) }),
+          onSuccess: (data) => ({ ok: true as const, data }),
+        }),
+      )
+
+      if (!result.ok) {
+        return {
+          content: [{ type: "text", text: `Error: ${result.error}` }],
+          details: { error: result.error },
+        }
+      }
+
+      const data = result.data
+      const lines = [
+        `${data.provider}: ${data.running ? "running" : "not running"}`,
+        `Browser: ${data.browser}`,
+        `CDP: ${data.cdpUrl}`,
+        `Profile: ${data.profileDir}`,
+        `Tabs: ${data.tabs.length}`,
+      ]
+
+      const setupData = data as { selectedTab?: { title: string; url: string } | null }
+      if (setupData.selectedTab) {
+        lines.push(`Provider tab: ${setupData.selectedTab.title || "(untitled)"}`, setupData.selectedTab.url)
+      }
+      const googleData = data as {
+        credentialAccount?: string
+        humanReason?: string | null
+        loggedIn?: boolean
+        needsHuman?: boolean
+        reusedTab?: boolean
+        title?: string
+        url?: string
+      }
+      if (googleData.credentialAccount) {
+        lines.push(
+          `Credential account: ${googleData.credentialAccount}`,
+          `${action === "chatgpt-login" ? "ChatGPT" : "Google"} login: ${googleData.loggedIn ? "ok" : "not confirmed"}`,
+          `Needs human: ${googleData.needsHuman ? "yes" : "no"}`,
+          ...(action === "google-login" ? [`Reused tab: ${googleData.reusedTab ? "yes" : "no"}`] : []),
+          ...(typeof googleData.humanReason === "string" ? [`Human reason: ${googleData.humanReason}`] : []),
+          `Page: ${googleData.title || "(untitled)"}`,
+          googleData.url ?? "",
+        )
+      }
+      const promptData = data as {
+        conversationUrl?: string | null
+        humanReason?: string | null
+        needsHuman?: boolean
+        projectKey?: string | null
+        outputFile?: string | null
+        projectUrl?: string | null
+        responseLength?: number
+        responseText?: string
+        running?: boolean
+        sessionId?: string | null
+        submitted?: boolean
+        title?: string
+        url?: string
+      }
+      if (action === "prompt") {
+        lines.push(
+          `Submitted: ${promptData.submitted ? "yes" : "no"}`,
+          `Needs human: ${promptData.needsHuman ? "yes" : "no"}`,
+        )
+        if (promptData.humanReason) lines.push(`Human reason: ${promptData.humanReason}`)
+        if (promptData.sessionId) lines.push(`Session: ${promptData.sessionId}`)
+        if (promptData.projectKey) lines.push(`Project: ${promptData.projectKey}`)
+        if (promptData.projectUrl) lines.push(`Project URL: ${promptData.projectUrl}`)
+        if (promptData.conversationUrl) lines.push(`Conversation: ${promptData.conversationUrl}`)
+        if (promptData.outputFile) lines.push(`Output file: ${promptData.outputFile}`)
+        lines.push(`Page: ${promptData.title || "(untitled)"}`, promptData.url ?? "")
+        if (promptData.responseText) lines.push("", promptData.responseText)
+        else if (promptData.submitted) lines.push(`Response text: ${promptData.responseLength ? `${promptData.responseLength} chars` : "not captured"}`)
+      }
+      if (action === "collect" || action === "wait") {
+        lines.push(`Running: ${promptData.running ? "yes" : "no"}`)
+        if (promptData.sessionId) lines.push(`Session: ${promptData.sessionId}`)
+        if (promptData.conversationUrl) lines.push(`Conversation: ${promptData.conversationUrl}`)
+        if (promptData.outputFile) lines.push(`Output file: ${promptData.outputFile}`)
+        lines.push(`Page: ${promptData.title || "(untitled)"}`, promptData.url ?? "")
+        if (promptData.responseText) lines.push("", promptData.responseText)
+        else lines.push(`Response text: ${promptData.responseLength ? `${promptData.responseLength} chars` : "not captured"}`)
+      }
+
+      return {
+        content: [{ type: "text", text: lines.join("\n") }],
+        details: { error: null as unknown as string },
+      }
+    },
+  })
+}
+
 // ─── Entrypoint ───────────────────────────────────────────────────────
 
 export default function (pi: ExtensionAPI): void {
@@ -272,4 +663,7 @@ export default function (pi: ExtensionAPI): void {
   registerGetContent(pi)
   registerCookies(pi)
   registerYouTube(pi)
+  registerChatGptHandoff(pi)
+  registerLlmFrontendBrowser(pi)
+  registerCodexResume(pi)
 }

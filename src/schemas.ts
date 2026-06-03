@@ -10,6 +10,14 @@ export class GeminiError extends Schema.TaggedErrorClass<GeminiError>()("GeminiE
   reason: Schema.String,
 }) {}
 
+export class ChatGptHandoffError extends Schema.TaggedErrorClass<ChatGptHandoffError>()("ChatGptHandoffError", {
+  reason: Schema.String,
+}) {}
+
+export class FrontendBrowserError extends Schema.TaggedErrorClass<FrontendBrowserError>()("FrontendBrowserError", {
+  reason: Schema.String,
+}) {}
+
 // ─── Content ──────────────────────────────────────────────────────────
 
 export const ExtractedContent = Schema.Struct({
@@ -95,6 +103,10 @@ export const StoredParams = Schema.Struct({
 // ─── Util ─────────────────────────────────────────────────────────────
 
 export function toErrorMessage(err: unknown): string {
+  if (err && typeof err === "object" && "reason" in err) {
+    const reason = (err as { reason?: unknown }).reason
+    if (typeof reason === "string") return reason
+  }
   if (err instanceof Error) return err.message
   return String(err)
 }

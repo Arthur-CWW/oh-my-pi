@@ -1,0 +1,37 @@
+{
+  "browser": "Helium",
+  "cdpUrl": "http://127.0.0.1:9338",
+  "defaultUrl": "https://chatgpt.com/",
+  "port": 9338,
+  "profileDir": "/Users/arthur/.pi/pi-web-access/helium-chatgpt-profile",
+  "provider": "chatgpt",
+  "running": false,
+  "tabs": [
+    {
+      "id": "3C064F7E0E0CF34A40A11D3EFB980A19",
+      "title": "Rork-style App Pipeline",
+      "type": "page",
+      "url": "https://chatgpt.com/c/6a1f9015-02b0-83ea-a525-4a46e1796026"
+    },
+    {
+      "id": "44CD50CBDCA43DAD2B88B2B3CA1022F6",
+      "title": "uBlock Origin",
+      "type": "background_page",
+      "url": "chrome-extension://blockjmkbacgjkknlgpkjjiijinjdanf/background.html"
+    }
+  ],
+  "conversationUrl": "https://chatgpt.com/c/6a1f9015-02b0-83ea-a525-4a46e1796026",
+  "launched": false,
+  "outputFile": "drafts/rork-ios-pipeline.md",
+  "responseLength": 162,
+  "responseText": "I’ll focus this on an iOS-first, Swift/SwiftUI-native pipeline, separating simulator feedback loops from real-device testing because the tooling and costs differ.",
+  "selectedTab": {
+    "id": "3C064F7E0E0CF34A40A11D3EFB980A19",
+    "title": "Rork-style App Pipeline",
+    "type": "page",
+    "url": "https://chatgpt.com/c/6a1f9015-02b0-83ea-a525-4a46e1796026"
+  },
+  "sessionId": "69058e7d-53d9-4851-a39a-ebd30d079a06",
+  "title": "Rork-style App Pipeline",
+  "url": "https://chatgpt.com/c/6a1f9015-02b0-83ea-a525-4a46e1796026"
+}

@@ -8,6 +8,15 @@ pi-session-*
 prompt.md
 -.en.vtt
 
+# Local scratch/artifacts
+codex-decomp/
+vault
+data/
+artifacts/
+.cache/
+*.sqlite
+*.sqlite-*
+
 vendor/*
 !vendor/kagi-chrome-extension/
 skills/chrome-devtools-mcp/

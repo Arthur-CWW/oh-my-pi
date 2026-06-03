@@ -1,0 +1,16 @@
+{
+  "name": "pi-browser-use-cleanroom",
+  "private": true,
+  "type": "module",
+  "description": "Clean-room browser-use tools for Pi using Chrome DevTools Protocol",
+  "dependencies": {
+    "@sinclair/typebox": "^0.34.48",
+    "puppeteer-core": "^24.26.1"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "pi": {
+    "extensions": ["./index.ts"]
+  }
+}
