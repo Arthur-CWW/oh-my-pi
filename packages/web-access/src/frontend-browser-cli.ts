@@ -70,7 +70,8 @@ Commands:
   status  Show CDP connection and open tabs
 
 Options:
-      --provider <aistudio|deepseek|chatgpt>  Provider target (default: aistudio)
+      --provider <aistudio|deepseek|chatgpt|grok|jimeng>
+                                             Provider target (default: aistudio)
       --browser <app>                         macOS browser app (default: Helium)
       --port <number>                         CDP port (provider-specific default)
       --profile-dir <path>                    Browser user data directory
@@ -94,6 +95,8 @@ Options:
 Examples:
   pi-llm-browser setup --provider aistudio
   pi-llm-browser open --provider deepseek --background
+  pi-llm-browser open --provider grok --background
+  pi-llm-browser open --provider jimeng --background
   pi-llm-browser google-login
   pi-llm-browser chatgpt-login
   pi-llm-browser prompt --provider aistudio "Return exactly: ok"
@@ -107,8 +110,8 @@ Examples:
 }
 
 function parseProvider(value: string | undefined): FrontendProvider {
-  if (value === "aistudio" || value === "deepseek" || value === "chatgpt") return value
-  throw new Error("--provider must be one of: aistudio, deepseek, chatgpt")
+  if (value === "aistudio" || value === "deepseek" || value === "chatgpt" || value === "grok" || value === "jimeng") return value
+  throw new Error("--provider must be one of: aistudio, deepseek, chatgpt, grok, jimeng")
 }
 
 function parseArgs(argv: string[]): CliOptions {

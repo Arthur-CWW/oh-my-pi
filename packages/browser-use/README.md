@@ -21,7 +21,7 @@ State, profile and screenshots live under `~/.pi/pi-browser-use/` by default.
 From this repository:
 
 ```bash
-pi -e ./browser-use-pi/index.ts
+pi -e ./packages/browser-use/index.ts
 ```
 
 Or copy this folder into a Pi package/extension location.

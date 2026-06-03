@@ -17,7 +17,7 @@ import {
 
 export type { FrontendProjectRecord, FrontendSessionRecord } from "./frontend-session-store"
 
-export type FrontendProvider = "aistudio" | "deepseek" | "chatgpt"
+export type FrontendProvider = "aistudio" | "deepseek" | "chatgpt" | "grok" | "jimeng"
 
 export interface FrontendBrowserOptions {
   provider?: FrontendProvider
@@ -162,6 +162,20 @@ const PROVIDERS: Record<FrontendProvider, ProviderConfig> = {
     id: "chatgpt",
     profileName: "helium-chatgpt-profile",
     url: "https://chatgpt.com/",
+  },
+  grok: {
+    defaultPort: 9339,
+    host: "x.com",
+    id: "grok",
+    profileName: "helium-grok-profile",
+    url: "https://x.com/i/grok",
+  },
+  jimeng: {
+    defaultPort: 9340,
+    host: "jimeng.jianying.com",
+    id: "jimeng",
+    profileName: "helium-jimeng-profile",
+    url: "https://jimeng.jianying.com/",
   },
 }
 
@@ -1213,7 +1227,7 @@ async function promptProvider(options: FrontendPromptOptions): Promise<FrontendP
   else if (provider === "chatgpt") result = await promptChatGpt(prepared.options)
   else {
     throw new FrontendBrowserError({
-      reason: "Frontend prompt automation currently supports provider=aistudio or provider=chatgpt.",
+      reason: "Frontend prompt automation currently supports provider=aistudio or provider=chatgpt. Use setup/open/status for grok and jimeng until provider-specific prompt adapters are implemented.",
     })
   }
 

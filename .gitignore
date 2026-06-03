@@ -1,5 +1,8 @@
 node_modules/
+packages/*/node_modules/
+apps/*/node_modules/
 bun.lock
+package-lock.json
 
 .env
 .claude-trace
@@ -17,8 +20,10 @@ artifacts/
 *.sqlite
 *.sqlite-*
 
+# Large/nested vendored repos and local skill checkouts
 vendor/*
-!vendor/kagi-chrome-extension/
+packages/web-access/vendor/*
+!packages/web-access/vendor/kagi-chrome-extension/
 skills/chrome-devtools-mcp/
-skills/pi-skills/
-skills/chrome-devtools-mcp/
+packages/web-access/skills/chrome-devtools-mcp/
+packages/web-access/skills/pi-skills/

@@ -356,7 +356,7 @@ function registerLlmFrontendBrowser(pi: ExtensionAPI): void {
       conversationUrl: Type.Optional(Type.String({ description: "Existing chatgpt.com conversation URL for action=collect/wait" })),
       outputFile: Type.Optional(Type.String({ description: "Write captured response text to this local file" })),
       prompt: Type.Optional(Type.String({ description: "Prompt text for action=prompt" })),
-      provider: Type.Optional(Type.String({ description: "aistudio, deepseek, or chatgpt (default: aistudio)" })),
+      provider: Type.Optional(Type.String({ description: "aistudio, deepseek, chatgpt, grok, or jimeng (default: aistudio)" })),
       browser: Type.Optional(Type.String({ description: "macOS browser app (default: Helium)" })),
       port: Type.Optional(Type.Number({ description: "CDP port" })),
       profileDir: Type.Optional(Type.String({ description: "Browser user data directory" })),
@@ -404,9 +404,9 @@ function registerLlmFrontendBrowser(pi: ExtensionAPI): void {
         background: params.background ?? (params.action === "open" || params.action === "prompt"),
       }
 
-      if (params.provider && !["aistudio", "deepseek", "chatgpt"].includes(params.provider)) {
+      if (params.provider && !["aistudio", "deepseek", "chatgpt", "grok", "jimeng"].includes(params.provider)) {
         return {
-          content: [{ type: "text", text: "Error: provider must be one of: aistudio, deepseek, chatgpt." }],
+          content: [{ type: "text", text: "Error: provider must be one of: aistudio, deepseek, chatgpt, grok, jimeng." }],
           details: { error: "Invalid provider" },
         }
       }

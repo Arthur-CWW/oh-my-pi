@@ -12,12 +12,21 @@ Use `llm_frontend_browser` sparingly. It drives a real logged-in browser profile
 Good fits:
 - Initial product/architecture planning where a high-effort external model answer is worth the wait.
 - Deep research or synthesis that needs ChatGPT Pro/frontend-only capabilities.
+- Opening provider-only frontend sessions such as Grok-on-X or Jimeng for manual/login/setup workflows.
 - Cross-checking major design decisions before implementation.
 
 Avoid for:
 - Routine coding questions you can answer locally.
 - Fast documentation lookup; use normal web search/fetch first.
 - Large parallel batches unless the user explicitly approves the quota/time cost.
+
+## Provider support
+
+- `setup`/`open`/`status`: `aistudio`, `deepseek`, `chatgpt`, `grok`, `jimeng`.
+- `prompt`: currently `aistudio` and `chatgpt` only.
+- `collect`/`wait`: currently `chatgpt` only.
+
+Use Grok/Jimeng support for background-safe session/profile setup until provider-specific prompt/download adapters are implemented.
 
 ## Recommended async workflow for long research
 

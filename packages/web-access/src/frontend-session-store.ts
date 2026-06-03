@@ -5,7 +5,7 @@ import { join } from "node:path"
 import { randomUUID } from "node:crypto"
 import { FrontendBrowserError } from "./schemas"
 
-export type FrontendProvider = "aistudio" | "deepseek" | "chatgpt"
+export type FrontendProvider = "aistudio" | "deepseek" | "chatgpt" | "grok" | "jimeng"
 
 export interface FrontendProjectRecord {
   createdAt: number

@@ -1,18 +1,3 @@
-[submodule "vendor/effect-smol"]
-	path = vendor/effect-smol
-	url = https://github.com/Effect-TS/effect-smol
-[submodule "vendor/pi-mono"]
-	path = vendor/pi-mono
-	url = https://github.com/badlogic/pi-mono.git
-[submodule "vendor/agent-stuff"]
-	path = vendor/agent-stuff
-	url = https://github.com/mitsuhiko/agent-stuff
-[submodule "vendor/ast-grep"]
-	path = vendor/ast-grep
-	url = https://github.com/ast-grep/ast-grep
-[submodule "vendor/effect-language-service"]
-	path = vendor/effect-language-service
-	url = https://github.com/Effect-TS/language-service
-[submodule "vendor/kagi-chrome-extension"]
-	path = vendor/kagi-chrome-extension
+[submodule "packages/web-access/vendor/kagi-chrome-extension"]
+	path = packages/web-access/vendor/kagi-chrome-extension
 	url = https://github.com/kagisearch/chrome_extension_basic.git

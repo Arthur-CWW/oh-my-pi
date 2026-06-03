@@ -1,0 +1,13 @@
+{
+  "name": "@wirebabel/twitter-archive",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local-first Twitter/X archive capture, normalization, and search helpers",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  }
+}

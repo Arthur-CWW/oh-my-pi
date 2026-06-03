@@ -2,46 +2,52 @@
 
 ## Project
 
-Pi extension providing web search, content fetching, YouTube transcripts, and Chrome cookie access.
+`pi-workflows` is a TypeScript monorepo for Pi extensions, skills, local archives, and AI/video workflows.
 
-- Entry: `src/index.ts` — registers Pi tools and commands
-- Runtime: Node.js (Pi) and Bun (dev/tests)
-- Store: JSON file at `~/.pi/pi-web-access/store.json` (24h TTL)
+Current packages:
+
+- `packages/web-access` — Pi tools for web search, content fetching, YouTube transcripts, Chrome cookies, Codex session import, and frontend LLM browser sessions.
+- `packages/browser-use` — clean-room CDP browser-use extension prototype.
+- `packages/twitter-archive` — local-first Twitter/X archive schema and future capture/search helpers.
+- `apps/tweet-viewer` — future local archive viewer.
+- `workflows/*` — future archive/analyze/generate shortform-video workflows.
+
+The repo root is also a Pi package. `.pi/settings.json` points at `..`, and the root `package.json` `pi` manifest loads `packages/web-access/src/index.ts` and `packages/web-access/skills`.
 
 ## Commands
 
 ```bash
-bun run typecheck    # tsc --noEmit
-bun test ./test      # 27 tests
-bun run scripts/smoke.ts  # live tool smoke test
-pi -e ./src/index.ts --help   # verify extension loads
-pi install . -l      # install locally for testing
+pi --help                         # verify project Pi package loads
+bun run typecheck                 # delegates to packages/web-access
+bun run test                      # delegates to packages/web-access
+bun run check                     # typecheck + tests
+bun run web-access:smoke          # live tool smoke test
+bun run web-access:help           # verify extension directly
 ```
 
 ## Files
 
-```
-src/
-  index.ts      Pi extension entrypoint (tools + commands)
-  schemas.ts    Effect Schema types + errors
-  config.ts     ~/.pi/web-search.json reader
-  store.ts      JSON file KV store with TTL
-  cookies.ts    Chrome cookie extraction (macOS Keychain + CDP)
-  gemini.ts     Gemini API + Web client
-  kagi.ts       Kagi search (Firefox cookies or Chrome CDP)
-  search.ts     web_search (Kagi-first, Gemini fallback)
-  fetch.ts      fetch_content (HTTP/Readability → Jina → Gemini)
-  youtube.ts    YouTube transcript extraction (yt-dlp)
-  codex.ts      Codex CLI session listing/import and `/codex-resume`
+```txt
+packages/web-access/
+  src/
+    index.ts      Pi extension entrypoint (tools + commands)
+    schemas.ts    Effect Schema types + errors
+    config.ts     ~/.pi/web-search.json reader
+    store.ts      JSON file KV store with TTL
+    cookies.ts    Chrome cookie extraction (macOS Keychain + CDP)
+    gemini.ts     Gemini API + Web client
+    kagi.ts       Kagi search (Firefox cookies or Chrome CDP)
+    search.ts     web_search (Kagi-first, Gemini fallback)
+    fetch.ts      fetch_content (HTTP/Readability → Jina → Gemini)
+    youtube.ts    YouTube transcript extraction (yt-dlp)
+    codex.ts      Codex CLI session listing/import and `/codex-resume`
+    frontend-browser.ts  frontend LLM browser automation
+  test/
+  vendor/kagi-chrome-extension/   Official Kagi extension (submodule)
 
-test/
-  basic.test.ts    Core tool tests (7)
-  store.test.ts    JSON store tests (9)
-  kagi.test.ts     Kagi parsing + live test (7)
-  platform.test.ts Cross-platform path detection (4)
-  codex.test.ts    Codex session parser/import tests (3)
-
-vendor/kagi-chrome-extension/   Official Kagi extension (submodule)
+packages/twitter-archive/         Local archive schema/capture package skeleton
+apps/tweet-viewer/                Local archive viewer skeleton
+docs/twitter-archive-plan.md      Twitter/X archive and shortform pipeline plan
 ```
 
 ## Effect v4 patterns
@@ -55,8 +61,10 @@ vendor/kagi-chrome-extension/   Official Kagi extension (submodule)
 ## Persistent Preferences
 
 - `moduleResolution: "bundler"` — no `.js` import extensions
-- `bun-types` in `tsconfig.typecheck.json` for test typecheck
-- Cross-runtime: no native modules (JSON file store instead of SQLite)
+- `bun-types` in package typecheck configs for tests
+- Cross-runtime: avoid native modules unless deliberately isolated
 - Kagi auth: `X-Kagi-Authorization` header (matching official extension)
-- Tests close to source: `test/` directory
+- Tests close to source in package `test/` directories
 - No colocated `*.test.ts` beside impl files
+- Twitter/X capture should be respectful: low concurrency, jitter/backoff, disk cache/entity dedupe, no private/locked content
+- Browser-based Twitter/X scraping should inspect only the main content/tweet column plus search input; ignore sidebars/trends/DMs/navigation chrome
