@@ -1,5 +1,5 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js"
-import type { BootstrapPayload, EvalElementDetail, EvalElementSummary } from "../types"
+import type { BootstrapPayload, EvalElementDetail, EvalElementSummary, EvalRunRow } from "../types"
 
 export type ViewKey = "runs" | "dag" | "element" | "json" | "metrics" | "artifacts" | "notes" | "logs" | "terminal" | "views"
 
@@ -59,9 +59,12 @@ export function App(props: AppProps = {}) {
   const shouldFetchOnMount = props.fetchOnMount ?? true
   const initialView = props.initialView ?? "runs"
   const initialViewIndex = Math.max(0, views.findIndex((view) => view.key === initialView))
+  const matchingInitialElementIndex = props.initialBootstrap?.elements.findIndex((element) => element.id === props.initialDetail?.id) ?? 0
+  const initialElementIndex = matchingInitialElementIndex >= 0 ? matchingInitialElementIndex : 0
+
   const [activeView, setActiveView] = createSignal<ViewKey>(initialView)
   const [selectedViewIndex, setSelectedViewIndex] = createSignal(initialViewIndex)
-  const [selectedElementIndex, setSelectedElementIndex] = createSignal(0)
+  const [selectedElementIndex, setSelectedElementIndex] = createSignal(initialElementIndex)
   const [showHelp, setShowHelp] = createSignal(false)
   const [pendingChord, setPendingChord] = createSignal("")
   const [appInfo, setAppInfo] = createSignal<AppInfo | null>(null)
@@ -73,6 +76,7 @@ export function App(props: AppProps = {}) {
   const activeSpec = createMemo(() => views.find((view) => view.key === activeView()) ?? views[0])
   const elements = createMemo(() => bootstrap()?.elements ?? [])
   const selectedElement = createMemo(() => elements()[selectedElementIndex()] ?? null)
+  const selectedRun = createMemo(() => bootstrap()?.runs.find((run) => run.run_id === selectedElement()?.runId) ?? bootstrap()?.runs[0] ?? null)
 
   createEffect(() => {
     const element = selectedElement()
@@ -103,19 +107,6 @@ export function App(props: AppProps = {}) {
     void window.slotok?.getAppInfo().then(setAppInfo).catch((error: Error) => {
       setStatusMessage(`preload unavailable: ${error.message}`)
     })
-
-    if (!shouldFetchOnMount) return
-
-    void fetch(`${daemonBaseUrl}/api/bootstrap?limit=250`)
-      .then((response) => response.ok ? response.json() as Promise<BootstrapPayload> : Promise.reject(new Error(`daemon ${response.status}`)))
-      .then((payload) => {
-        setBootstrap(payload)
-        setSelectedElementIndex(0)
-        setStatusMessage(`Daemon online: ${payload.runs.length} runs, ${payload.elements.length} elements`)
-      })
-      .catch((error: Error) => {
-        setStatusMessage(`Daemon offline: ${error.message}`)
-      })
 
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target
@@ -204,123 +195,153 @@ export function App(props: AppProps = {}) {
 
     window.addEventListener("keydown", onKeyDown)
     onCleanup(() => window.removeEventListener("keydown", onKeyDown))
+
+    if (!shouldFetchOnMount) return
+
+    void fetch(`${daemonBaseUrl}/api/bootstrap?limit=250`)
+      .then((response) => response.ok ? response.json() as Promise<BootstrapPayload> : Promise.reject(new Error(`daemon ${response.status}`)))
+      .then((payload) => {
+        setBootstrap(payload)
+        setSelectedElementIndex(0)
+        setStatusMessage(`Daemon online: ${payload.runs.length} runs, ${payload.elements.length} elements`)
+      })
+      .catch((error: Error) => {
+        setStatusMessage(`Daemon offline: ${error.message}`)
+      })
   })
 
   return (
-    <main class="app-shell">
+    <main class="slotok-shell">
       <aside class="sidebar" aria-label="Slotok navigation">
-        <div class="brand-block">
-          <div class="brand-mark">S</div>
+        <div class="window-controls" aria-hidden="true">
+          <span class="dot close" />
+          <span class="dot minimize" />
+          <span class="dot zoom" />
+        </div>
+
+        <div class="sidebar-brand">
+          <div class="brand-glyph">S</div>
           <div>
             <h1>Slotok</h1>
-            <p>Infinite remix workbench</p>
+            <p>AI video workbench</p>
           </div>
         </div>
 
-        <input id="slotok-search" class="search" placeholder="/ search runs, assets, providers" />
+        <button type="button" class="sidebar-action">New eval run</button>
+        <input id="slotok-search" class="search" placeholder="Search" />
 
-        <nav class="view-list">
-          <For each={views}>{(view, index) => (
-            <button
-              type="button"
-              classList={{ "view-row": true, selected: selectedViewIndex() === index(), active: activeView() === view.key }}
-              onClick={() => {
-                setSelectedViewIndex(index())
-                setActiveView(view.key)
-              }}
-            >
-              <span class="view-chord">{view.chord}</span>
-              <span>
-                <strong>{view.label}</strong>
-                <small>{view.description}</small>
-              </span>
-            </button>
-          )}</For>
-        </nav>
+        <section class="nav-section" aria-label="Workbench views">
+          <h2>Views</h2>
+          <nav class="view-list">
+            <For each={views}>{(view, index) => (
+              <button
+                type="button"
+                classList={{ "view-row": true, selected: selectedViewIndex() === index(), active: activeView() === view.key }}
+                onClick={() => {
+                  setSelectedViewIndex(index())
+                  setActiveView(view.key)
+                }}
+              >
+                <span class="view-dot" />
+                <span class="view-label">{view.label}</span>
+                <span class="view-chord">{view.chord}</span>
+              </button>
+            )}</For>
+          </nav>
+        </section>
+
+        <section class="nav-section run-history" aria-label="Recent runs">
+          <h2>Recent runs</h2>
+          <Show when={bootstrap()} fallback={<p class="sidebar-muted">Start daemon to load runs.</p>}>
+            {(payload) => (
+              <For each={payload().runs.slice(0, 6)}>{(run) => <SidebarRun run={run} />}</For>
+            )}
+          </Show>
+        </section>
+
+        <div class="sidebar-footer">
+          <span classList={{ "connection-dot": true, online: Boolean(bootstrap()) }} />
+          <span>{bootstrap() ? "Local daemon online" : "Daemon offline"}</span>
+        </div>
       </aside>
 
-      <section class="workspace">
+      <section class="main-column">
         <header class="topbar">
-          <div>
-            <span class="eyebrow">{activeSpec().chord}</span>
-            <h2>{activeSpec().label}</h2>
+          <div class="breadcrumbs" aria-label="Breadcrumb">
+            <span>Slotok</span>
+            <span>›</span>
+            <span>Video understanding</span>
+            <span>›</span>
+            <strong>{activeSpec().label}</strong>
           </div>
           <div class="topbar-actions">
-            <span class="status-pill">{pendingChord() ? "g…" : "normal"}</span>
-            <button type="button" onClick={() => setShowHelp((value) => !value)}>?</button>
+            <button type="button" class="ghost-button">Local</button>
+            <button type="button" class="ghost-button">{pendingChord() ? "g…" : "Normal"}</button>
+            <button type="button" class="icon-button" aria-label="Keyboard shortcuts" onClick={() => setShowHelp((value) => !value)}>?</button>
           </div>
         </header>
 
-        <section class="hero-panel">
-          <div class="panel-copy">
-            <p class="eyebrow">Cursor for AI TikTok/video pipeline engineering</p>
-            <h3>{activeSpec().description}</h3>
-            <p>
-              Slotok now loads the current video-understanding eval DB and lets you inspect provider results,
-              metrics, parsed decompositions, and sampled frames. Next: notes/markup and rerun actions.
-            </p>
-          </div>
-          <div class="metric-grid">
-            <Metric label="Daemon" value={bootstrap() ? "online" : "offline"} detail={bootstrap() ? `${bootstrap()?.runs.length ?? 0} runs` : "run dev:daemon"} />
-            <Metric label="Eval elements" value={String(elements().length)} detail="video-understanding" />
-            <Metric label="Selected" value={selectedElement()?.provider ?? "none"} detail={selectedElement()?.status ?? "no element"} />
-            <Metric label="Shortcut mode" value={pendingChord() || "vim"} detail="g<key>, j/k, /" />
-          </div>
-        </section>
+        <div class="workspace-grid">
+          <section class="document-pane" aria-label="Selected Slotok work">
+            <header class="document-header">
+              <p class="kicker">Cursor/Zed for AI TikTok/video pipeline engineering</p>
+              <h2>Video understanding evals</h2>
+              <p>
+                Inspect provider results, parsed decompositions, sampled frames, cost, latency, and cache behavior
+                without leaving the local workbench.
+              </p>
+              <div class="summary-line" aria-label="Eval summary">
+                <InlineMetric label="Runs" value={String(bootstrap()?.runs.length ?? 0)} />
+                <InlineMetric label="Elements" value={String(elements().length)} />
+                <InlineMetric label="Selected" value={selectedElement()?.provider ?? "none"} />
+                <InlineMetric label="View" value={activeSpec().chord} />
+              </div>
+            </header>
 
-        <Show when={bootstrap()}>
-          {(payload) => (
-            <section class="eval-strip" aria-label="Loaded eval data">
-              <For each={payload().runs.slice(0, 4)}>{(run) => (
-                <div class="eval-run-card">
-                  <strong>{run.run_id}</strong>
-                  <span>{run.video_count} video(s) · {run.max_frames} frame cap · {run.result_count ?? 0} result(s)</span>
-                </div>
-              )}</For>
-            </section>
-          )}
-        </Show>
-
-        <section class="content-grid data-grid">
-          <article class="card element-list-card">
-            <div class="card-header">
-              <h3>Eval elements</h3>
-              <span>{selectedElementIndex() + 1}/{elements().length || 0}</span>
-            </div>
-            <ElementList elements={elements()} selectedIndex={selectedElementIndex()} onSelect={setSelectedElementIndex} />
-          </article>
-
-          <article class="card detail-card">
-            <div class="card-header">
-              <h3>{selectedElement()?.title ?? "No element selected"}</h3>
-              <span>{activeSpec().label}</span>
-            </div>
-            <Show when={selectedElement()} fallback={<EmptyState message="Start the daemon to load eval data." />}>
-              {(element) => (
-                <ElementDetail element={element()} detail={detail()} error={detailError()} activeView={activeView()} />
+            <Show when={bootstrap()}>
+              {(payload) => (
+                <section class="run-strip" aria-label="Loaded eval runs">
+                  <For each={payload().runs.slice(0, 3)}>{(run) => <RunCard run={run} />}</For>
+                </section>
               )}
             </Show>
-          </article>
 
-          <article class="card runtime-card">
-            <div class="card-header">
-              <h3>Runtime</h3>
-              <span>local</span>
-            </div>
-            <dl class="runtime-list">
-              <dt>App</dt>
-              <dd>{appInfo()?.name ?? "Slotok Workbench"}</dd>
-              <dt>Platform</dt>
-              <dd>{appInfo()?.platform ?? "browser/dev"}</dd>
-              <dt>Project</dt>
-              <dd>{appInfo()?.cwd ?? "preload pending"}</dd>
-              <dt>Status</dt>
-              <dd>{statusMessage()}</dd>
-              <dt>SQLite</dt>
-              <dd>{bootstrap()?.server.sqlitePath ?? "not connected"}</dd>
-            </dl>
-          </article>
-        </section>
+            <section class="work-card elements-card">
+              <div class="card-header compact">
+                <div>
+                  <h3>Eval elements</h3>
+                  <p>{elements().length ? `${selectedElementIndex() + 1} of ${elements().length}` : "No eval elements loaded"}</p>
+                </div>
+                <span class="subtle-shortcut">j/k</span>
+              </div>
+              <ElementList elements={elements()} selectedIndex={selectedElementIndex()} onSelect={setSelectedElementIndex} />
+            </section>
+
+            <section class="work-card detail-card">
+              <div class="card-header compact">
+                <div>
+                  <h3>{selectedElement()?.title ?? "No element selected"}</h3>
+                  <p>{selectedElement()?.subtitle ?? activeSpec().description}</p>
+                </div>
+                <span class="status-chip">{activeSpec().label}</span>
+              </div>
+              <Show when={selectedElement()} fallback={<EmptyState message="Start the daemon to load eval data." />}> 
+                {(element) => (
+                  <ElementDetail element={element()} detail={detail()} error={detailError()} activeView={activeView()} />
+                )}
+              </Show>
+            </section>
+          </section>
+
+          <Inspector
+            appInfo={appInfo()}
+            bootstrap={bootstrap()}
+            detail={detail()}
+            element={selectedElement()}
+            run={selectedRun()}
+            statusMessage={statusMessage()}
+          />
+        </div>
       </section>
 
       <Show when={showHelp()}>
@@ -338,6 +359,40 @@ export function App(props: AppProps = {}) {
         </div>
       </Show>
     </main>
+  )
+}
+
+function SidebarRun(props: { run: EvalRunRow }) {
+  return (
+    <div class="sidebar-run">
+      <span class="folder-icon" aria-hidden="true">□</span>
+      <span>
+        <strong>{compactRunId(props.run.run_id)}</strong>
+        <small>{props.run.result_count ?? 0} results · {formatUsd(props.run.billed_cost_usd ?? 0)}</small>
+      </span>
+    </div>
+  )
+}
+
+function RunCard(props: { run: EvalRunRow }) {
+  return (
+    <article class="run-card">
+      <div class="run-icon" aria-hidden="true">↳</div>
+      <div>
+        <strong>{props.run.run_id}</strong>
+        <p>{props.run.video_count} video · {props.run.max_frames} frame cap · {props.run.result_count ?? 0} results</p>
+      </div>
+      <span>{formatUsd(props.run.billed_cost_usd ?? 0)}</span>
+    </article>
+  )
+}
+
+function InlineMetric(props: { label: string; value: string }) {
+  return (
+    <span class="inline-metric">
+      <strong>{props.value}</strong>
+      <span>{props.label}</span>
+    </span>
   )
 }
 
@@ -360,11 +415,12 @@ function ElementList(props: { elements: EvalElementSummary[]; selectedIndex: num
           classList={{ "element-row": true, selected: props.selectedIndex === index(), bad: element.metrics.parsedOk === false }}
           onClick={() => props.onSelect(index())}
         >
-          <span class="provider-badge">{element.provider}</span>
+          <span classList={{ "result-dot": true, bad: element.metrics.parsedOk === false, good: element.metrics.parsedOk === true }} />
           <span class="element-main">
             <strong>{element.title}</strong>
-            <small>{element.status} · {element.model} · {element.version}</small>
+            <small>{element.status} · {element.model} · {compactRunId(element.runId)}</small>
           </span>
+          <span class="provider-badge">{element.provider}</span>
           <span class="parse-badge">{element.metrics.parsedOk === false ? "bad json" : element.metrics.parsedOk === true ? "parsed" : "unknown"}</span>
         </button>
       )}</For>
@@ -411,7 +467,7 @@ function ParsedSummary(props: { parsed: unknown }) {
   const summary = createMemo(() => parsedSummary(props.parsed))
   return (
     <section class="parsed-summary">
-      <p class="eyebrow">Parsed decomposition</p>
+      <p class="kicker">Parsed decomposition</p>
       <h4>{summary().title}</h4>
       <p>{summary().description}</p>
       <div class="summary-chips">
@@ -421,8 +477,102 @@ function ParsedSummary(props: { parsed: unknown }) {
   )
 }
 
+function Inspector(props: {
+  appInfo: AppInfo | null
+  bootstrap: BootstrapPayload | null
+  detail: EvalElementDetail | null
+  element: EvalElementSummary | null
+  run: EvalRunRow | null
+  statusMessage: string
+}) {
+  const pathRows = createMemo(() => selectedPathRows(props.element))
+  return (
+    <aside class="inspector-panel" aria-label="Inspector">
+      <section class="inspector-card">
+        <div class="inspector-header">
+          <h3>Environment</h3>
+          <span class="gear" aria-hidden="true">⚙</span>
+        </div>
+        <dl class="runtime-list">
+          <dt>App</dt>
+          <dd>{props.appInfo?.name ?? "Slotok Workbench"}</dd>
+          <dt>Mode</dt>
+          <dd>Local</dd>
+          <dt>Branch</dt>
+          <dd>main</dd>
+          <dt>Status</dt>
+          <dd>{props.statusMessage}</dd>
+        </dl>
+      </section>
+
+      <section class="inspector-card">
+        <div class="inspector-header">
+          <h3>Selected</h3>
+          <span classList={{ "connection-dot": true, online: Boolean(props.element) }} />
+        </div>
+        <Show when={props.element} fallback={<p class="empty-state">No element selected.</p>}>
+          {(element) => (
+            <dl class="runtime-list">
+              <dt>Provider</dt>
+              <dd>{element().provider}</dd>
+              <dt>Status</dt>
+              <dd>{element().status}</dd>
+              <dt>Run</dt>
+              <dd>{compactRunId(element().runId)}</dd>
+              <dt>Created</dt>
+              <dd>{formatTimestamp(element().createdAt)}</dd>
+            </dl>
+          )}
+        </Show>
+      </section>
+
+      <section class="inspector-card">
+        <div class="inspector-header">
+          <h3>Metrics</h3>
+          <span>{props.run ? `${props.run.result_count ?? 0} results` : "—"}</span>
+        </div>
+        <div class="inspector-metrics">
+          <InlineMetric label="billed" value={formatUsd(props.run?.billed_cost_usd ?? props.element?.metrics.estimatedCostUsd)} />
+          <InlineMetric label="avoided" value={formatUsd(props.run?.avoided_cost_usd ?? props.element?.metrics.avoidedCostUsd)} />
+          <InlineMetric label="latency" value={formatMs(props.element?.metrics.latencyMs ?? props.run?.avg_latency_ms)} />
+          <InlineMetric label="tokens" value={formatNumber(props.element?.metrics.totalTokens)} />
+        </div>
+      </section>
+
+      <section class="inspector-card">
+        <div class="inspector-header">
+          <h3>Paths</h3>
+          <span>{pathRows().length}</span>
+        </div>
+        <dl class="path-list">
+          <For each={pathRows()}>{([label, path]) => (
+            <>
+              <dt>{label}</dt>
+              <dd>{path}</dd>
+            </>
+          )}</For>
+        </dl>
+      </section>
+
+      <section class="inspector-card actions-card">
+        <button type="button">Annotate</button>
+        <button type="button">Dry-run rerun</button>
+        <button type="button">Copy JSON pointer</button>
+      </section>
+    </aside>
+  )
+}
+
 function EmptyState(props: { message: string }) {
   return <p class="empty-state">{props.message}</p>
+}
+
+function selectedPathRows(element: EvalElementSummary | null): Array<[string, string]> {
+  if (!element) return []
+  const rows: Array<[string, string]> = [["video", element.paths.video], ["cache", element.paths.cache]]
+  if (element.paths.response) rows.push(["response", element.paths.response])
+  if (element.paths.parsed) rows.push(["parsed", element.paths.parsed])
+  return rows
 }
 
 function parsedSummary(value: unknown): { title: string; description: string; chips: string[] } {
@@ -452,6 +602,14 @@ function fileUrl(path: string): string {
 function jsonPreview(value: unknown, maxChars = 9000): string {
   const text = JSON.stringify(value ?? null, null, 2)
   return text.length > maxChars ? `${text.slice(0, maxChars)}\n…` : text
+}
+
+function compactRunId(value: string): string {
+  return value.replace(/^run_/, "").replace(/_slotok$/, "")
+}
+
+function formatTimestamp(value: string): string {
+  return value.replace("T", " ").replace(/\.\d{3}Z$/, "Z")
 }
 
 function formatNumber(value: number | null | undefined): string {
