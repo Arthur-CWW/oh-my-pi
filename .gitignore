@@ -16,6 +16,7 @@ prompt.md
 
 # Local scratch/artifacts
 codex-decomp/
+tmp/
 vault
 data/
 artifacts/
