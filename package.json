@@ -12,7 +12,7 @@
     "url": "git+https://github.com/Arthur-CWW/pi-workflows.git"
   },
   "scripts": {
-    "typecheck": "cd packages/web-access && bun run typecheck && cd ../mermaid-preview && bun run typecheck && cd ../twitter-archive && bun run typecheck && cd ../jimeng-client && bun run typecheck && cd ../dynamic-workflows && bun run typecheck && cd ../ugc-cli && bun run typecheck",
+    "typecheck": "cd packages/web-access && bun run typecheck && cd ../mermaid-preview && bun run typecheck && cd ../twitter-archive && bun run typecheck && cd ../jimeng-client && bun run typecheck && cd ../dynamic-workflows && bun run typecheck && cd ../ugc-cli && bun run typecheck && cd ../../apps/slotok-workbench && bun run typecheck",
     "test": "cd packages/web-access && bun run test && cd ../mermaid-preview && bun run test && cd ../twitter-archive && bun run test && cd ../jimeng-client && bun run test && cd ../dynamic-workflows && bun run test && cd ../ugc-cli && bun run test",
     "check": "bun run typecheck && bun run test && bun run lint",
     "lint": "bun run lint:unsafe-types && bun run lint:ast-grep && bun run lint:ast-grep:tests",
@@ -22,6 +22,10 @@
     "lint:unsafe-types:update-baseline": "bun run scripts/lint-unsafe-types.boundary.ts --update",
     "lint:unsafe-types:strict": "bun run scripts/lint-unsafe-types.boundary.ts --strict",
     "lint:unsafe-types:rules": "bun run scripts/ast-grep.boundary.ts test --config sgconfig.yml --skip-snapshot-tests",
+    "slotok:build": "cd apps/slotok-workbench && bun run build",
+    "slotok:daemon": "cd apps/slotok-workbench && bun run dev:daemon",
+    "slotok:smoke": "cd apps/slotok-workbench && bun run smoke:daemon",
+    "slotok:typecheck": "cd apps/slotok-workbench && bun run typecheck",
     "ugc": "bun packages/ugc-cli/src/cli.ts",
     "ugc:typecheck": "cd packages/ugc-cli && bun run typecheck",
     "ugc:test": "cd packages/ugc-cli && bun run test",
