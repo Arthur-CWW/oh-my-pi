@@ -281,56 +281,28 @@ export function App(props: AppProps = {}) {
           </div>
         </header>
 
-        <div class="workspace-grid">
-          <section class="document-pane" aria-label="Selected Slotok work">
-            <header class="document-header">
-              <p class="kicker">Cursor/Zed for AI TikTok/video pipeline engineering</p>
-              <h2>Video understanding evals</h2>
-              <p>
-                Inspect provider results, parsed decompositions, sampled frames, cost, latency, and cache behavior
-                without leaving the local workbench.
-              </p>
-              <div class="summary-line" aria-label="Eval summary">
-                <InlineMetric label="Runs" value={String(bootstrap()?.runs.length ?? 0)} />
-                <InlineMetric label="Elements" value={String(elements().length)} />
-                <InlineMetric label="Selected" value={selectedElement()?.provider ?? "none"} />
-                <InlineMetric label="View" value={activeSpec().chord} />
+        <div class="workspace-grid review-layout">
+          <section class="review-pane" aria-label="Selected Slotok review item">
+            <header class="review-toolbar">
+              <div class="review-heading">
+                <p class="kicker">
+                  {elements().length ? `${selectedElementIndex() + 1}/${elements().length}` : "0/0"} · {activeSpec().label} · {selectedElement()?.provider ?? "no provider"}
+                </p>
+                <h2>{selectedElement()?.title ?? "No element selected"}</h2>
+                <p>{selectedElement()?.subtitle ?? "Start the daemon to load eval data."}</p>
+              </div>
+              <div class="review-toolbar-actions" aria-label="Review actions">
+                <InlineMetric label="runs" value={String(bootstrap()?.runs.length ?? 0)} />
+                <InlineMetric label="elements" value={String(elements().length)} />
+                <span class="subtle-shortcut">j/k</span>
               </div>
             </header>
 
-            <Show when={bootstrap()}>
-              {(payload) => (
-                <section class="run-strip" aria-label="Loaded eval runs">
-                  <For each={payload().runs.slice(0, 3)}>{(run) => <RunCard run={run} />}</For>
-                </section>
-              )}
+            <Show when={selectedElement()} fallback={<div class="review-empty"><EmptyState message="Start the daemon to load eval data." /></div>}>
+              {(element) => <ReviewCanvas element={element()} detail={detail()} error={detailError()} activeView={activeView()} />}
             </Show>
 
-            <section class="work-card elements-card">
-              <div class="card-header compact">
-                <div>
-                  <h3>Eval elements</h3>
-                  <p>{elements().length ? `${selectedElementIndex() + 1} of ${elements().length}` : "No eval elements loaded"}</p>
-                </div>
-                <span class="subtle-shortcut">j/k</span>
-              </div>
-              <ElementList elements={elements()} selectedIndex={selectedElementIndex()} onSelect={setSelectedElementIndex} />
-            </section>
-
-            <section class="work-card detail-card">
-              <div class="card-header compact">
-                <div>
-                  <h3>{selectedElement()?.title ?? "No element selected"}</h3>
-                  <p>{selectedElement()?.subtitle ?? activeSpec().description}</p>
-                </div>
-                <span class="status-chip">{activeSpec().label}</span>
-              </div>
-              <Show when={selectedElement()} fallback={<EmptyState message="Start the daemon to load eval data." />}> 
-                {(element) => (
-                  <ElementDetail element={element()} detail={detail()} error={detailError()} activeView={activeView()} />
-                )}
-              </Show>
-            </section>
+            <ElementQueue elements={elements()} selectedIndex={selectedElementIndex()} onSelect={setSelectedElementIndex} />
           </section>
 
           <Inspector
@@ -404,6 +376,167 @@ function Metric(props: { label: string; value: string; detail: string }) {
       <small>{props.detail}</small>
     </div>
   )
+}
+
+function ReviewCanvas(props: { element: EvalElementSummary; detail: EvalElementDetail | null; error: string | null; activeView: ViewKey }) {
+  const parsed = createMemo(() => props.detail?.parsed)
+  const poster = createMemo(() => props.detail?.frames[0]?.path)
+  const jsonValue = createMemo(() => props.activeView === "json" ? parsed() : props.detail ?? props.element)
+  return (
+    <div class="review-canvas">
+      <Show when={props.error}>
+        {(error) => <p class="error-line">Detail load failed: {error()}</p>}
+      </Show>
+
+      <section class="primary-media" aria-label="Primary input video">
+        <div class="media-stage">
+          <video
+            class="review-video"
+            src={fileUrl(props.element.paths.video)}
+            poster={poster() ? fileUrl(poster()!) : undefined}
+            controls
+            preload="metadata"
+          />
+        </div>
+        <div class="media-caption">
+          <strong>Input video</strong>
+          <span>{props.element.videoPath}</span>
+        </div>
+        <Show when={props.detail?.frames.length}>
+          <div class="frame-timeline" aria-label="Sampled frames">
+            <For each={props.detail?.frames ?? []}>{(frame) => (
+              <figure>
+                <img src={fileUrl(frame.path)} alt={`Frame ${frame.index} at ${frame.timestampSeconds}s`} />
+                <figcaption>{frame.timestampSeconds}s</figcaption>
+              </figure>
+            )}</For>
+          </div>
+        </Show>
+      </section>
+
+      <section class="primary-data" aria-label="Primary provider output">
+        <div class="primary-data-header">
+          <div>
+            <p class="kicker">Provider output</p>
+            <h3>{props.activeView === "json" ? "Full parsed JSON" : "Decomposition"}</h3>
+          </div>
+          <div class="output-tabs" aria-label="Output mode">
+            <span classList={{ active: props.activeView !== "json" }}>summary</span>
+            <span classList={{ active: props.activeView === "json" }}>json</span>
+          </div>
+        </div>
+
+        <Show
+          when={props.activeView === "json"}
+          fallback={(
+            <>
+              <ParsedSummary parsed={parsed()} />
+              <DecompositionGlance parsed={parsed()} />
+            </>
+          )}
+        >
+          <StructuredJson value={jsonValue()} />
+        </Show>
+      </section>
+    </div>
+  )
+}
+
+function ElementQueue(props: { elements: EvalElementSummary[]; selectedIndex: number; onSelect: (index: number) => void }) {
+  return (
+    <section class="element-queue" aria-label="Eval element queue">
+      <div class="queue-header">
+        <strong>Queue</strong>
+        <span>{props.elements.length ? `${props.selectedIndex + 1}/${props.elements.length}` : "0/0"}</span>
+      </div>
+      <div class="queue-strip" role="listbox" aria-label="Eval elements">
+        <For each={props.elements}>{(element, index) => (
+          <button
+            type="button"
+            classList={{ "queue-item": true, selected: props.selectedIndex === index(), bad: element.metrics.parsedOk === false }}
+            onClick={() => props.onSelect(index())}
+          >
+            <span classList={{ "result-dot": true, bad: element.metrics.parsedOk === false, good: element.metrics.parsedOk === true }} />
+            <strong>{element.provider}</strong>
+            <span>{element.metrics.parsedOk === false ? "bad json" : element.status}</span>
+            <small>{compactRunId(element.version)}</small>
+          </button>
+        )}</For>
+      </div>
+    </section>
+  )
+}
+
+function DecompositionGlance(props: { parsed: unknown }) {
+  const record = createMemo(() => isRecord(props.parsed) ? props.parsed : null)
+  const timeline = createMemo(() => {
+    const value = record()?.timeline
+    return isRecord(value) ? value : null
+  })
+  const segments = createMemo(() => arrayValue(timeline()?.segments))
+  const assets = createMemo(() => arrayValue(record()?.asset_generation_plan))
+  return (
+    <div class="decomposition-glance">
+      <section>
+        <h4>Timeline segments</h4>
+        <Show when={segments().length} fallback={<p class="empty-state">No segment list in parsed output.</p>}>
+          <For each={segments().slice(0, 8)}>{(segment, index) => (
+            <div class="glance-row">
+              <span>{index() + 1}</span>
+              <p>{describeRecord(segment)}</p>
+            </div>
+          )}</For>
+        </Show>
+      </section>
+      <section>
+        <h4>Asset plan</h4>
+        <Show when={assets().length} fallback={<p class="empty-state">No asset plan in parsed output.</p>}>
+          <For each={assets().slice(0, 10)}>{(asset) => (
+            <div class="glance-row">
+              <span>asset</span>
+              <p>{describeRecord(asset)}</p>
+            </div>
+          )}</For>
+        </Show>
+      </section>
+    </div>
+  )
+}
+
+function StructuredJson(props: { value: unknown }) {
+  return (
+    <div class="json-tree" role="region" aria-label="Formatted JSON output">
+      <JsonNode name="root" value={props.value} depth={0} />
+    </div>
+  )
+}
+
+function JsonNode(props: { name: string; value: unknown; depth: number }) {
+  const value = () => props.value
+  const entries = createMemo(() => isRecord(value()) ? Object.entries(value() as Record<string, unknown>) : [])
+  const items = createMemo(() => Array.isArray(value()) ? value() as unknown[] : [])
+  const isContainer = createMemo(() => isRecord(value()) || Array.isArray(value()))
+  return (
+    <Show when={isContainer()} fallback={<div class="json-leaf"><JsonKey name={props.name} /><span class="json-primitive">{formatJsonPrimitive(value())}</span></div>}>
+      <details class="json-node" open={props.depth < 2}>
+        <summary>
+          <JsonKey name={props.name} />
+          <span class="json-type">{Array.isArray(value()) ? `array[${items().length}]` : `object{${entries().length}}`}</span>
+        </summary>
+        <div class="json-children">
+          <Show when={Array.isArray(value())} fallback={(
+            <For each={entries()}>{([key, child]) => <JsonNode name={key} value={child} depth={props.depth + 1} />}</For>
+          )}>
+            <For each={items()}>{(child, index) => <JsonNode name={String(index())} value={child} depth={props.depth + 1} />}</For>
+          </Show>
+        </div>
+      </details>
+    </Show>
+  )
+}
+
+function JsonKey(props: { name: string }) {
+  return <span class="json-key">{props.name}</span>
 }
 
 function ElementList(props: { elements: EvalElementSummary[]; selectedIndex: number; onSelect: (index: number) => void }) {
@@ -567,6 +700,36 @@ function EmptyState(props: { message: string }) {
   return <p class="empty-state">{props.message}</p>
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function arrayValue(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : []
+}
+
+function describeRecord(value: unknown): string {
+  if (!isRecord(value)) return formatJsonPrimitive(value)
+  const preferred = ["description", "summary", "asset_id", "layer", "priority", "start_seconds", "end_seconds"]
+  const parts: string[] = []
+  for (const key of preferred) {
+    const entry = value[key]
+    if (typeof entry === "string" || typeof entry === "number" || typeof entry === "boolean") {
+      parts.push(`${key}: ${String(entry)}`)
+    }
+  }
+  if (parts.length > 0) return parts.join(" · ")
+  return JSON.stringify(value)
+}
+
+function formatJsonPrimitive(value: unknown): string {
+  if (typeof value === "string") return JSON.stringify(value)
+  if (typeof value === "number" || typeof value === "boolean") return String(value)
+  if (value === null) return "null"
+  if (typeof value === "undefined") return "undefined"
+  return JSON.stringify(value)
+}
+
 function selectedPathRows(element: EvalElementSummary | null): Array<[string, string]> {
   if (!element) return []
   const rows: Array<[string, string]> = [["video", element.paths.video], ["cache", element.paths.cache]]
@@ -581,7 +744,7 @@ function parsedSummary(value: unknown): { title: string; description: string; ch
   }
   const record = value as Record<string, unknown>
   if (typeof record.rawText === "string") {
-    return { title: "Raw/truncated provider text", description: record.rawText.slice(0, 360), chips: ["rawText", "needs retry"] }
+    return { title: "Raw/truncated provider text", description: record.rawText, chips: ["rawText", "needs retry"] }
   }
   const timeline = record.timeline && typeof record.timeline === "object" ? record.timeline as Record<string, unknown> : {}
   const segments = Array.isArray(timeline.segments) ? timeline.segments.length : 0
@@ -599,9 +762,8 @@ function fileUrl(path: string): string {
   return `${daemonBaseUrl}/api/file?path=${encodeURIComponent(path)}`
 }
 
-function jsonPreview(value: unknown, maxChars = 9000): string {
-  const text = JSON.stringify(value ?? null, null, 2)
-  return text.length > maxChars ? `${text.slice(0, maxChars)}\n…` : text
+function jsonPreview(value: unknown): string {
+  return JSON.stringify(value ?? null, null, 2)
 }
 
 function compactRunId(value: string): string {

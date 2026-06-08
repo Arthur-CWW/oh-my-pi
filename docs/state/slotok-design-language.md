@@ -42,6 +42,8 @@ A clean, native-feeling AI engineering workspace: light, quiet, fast, text-first
 - The **Codex-style light UI is the preferred direction**.
 - Left project/session sidebar with soft gray background.
 - Main canvas is mostly white/off-white, spacious, readable, and document-like.
+- The **central selected data must dominate the screen**. Slotok is closer to a data-labeling/review tool than a marketing dashboard: when flipping through elements, the user is trying to inspect the primary artifact/data at a glance.
+- Sidebars are supporting context only. Left/right rails may contain navigation, run lists, metrics, paths, and actions, but they must not compete with the center canvas.
 - Thin borders, subtle cards, restrained shadows.
 - Rounded but not bubbly: medium radii, native macOS-ish restraint.
 - Text-first hierarchy; content should do the work, not decorative panels.
@@ -55,6 +57,8 @@ A clean, native-feeling AI engineering workspace: light, quiet, fast, text-first
 - The current dark Slotok shell aesthetic: orange/gold accents, heavy black panels, oversized metric cards, generic “AI dashboard” energy.
 - Neon/cyberpunk gradients unless a specific media preview demands it.
 - Big ornamental hero panels.
+- Oversized central cards for non-primary metadata, run summaries, shortcuts, or metrics.
+- Making the element list/detail chrome larger than the media/provider output being reviewed.
 - Chunky high-contrast cards everywhere.
 - Overdesigned brand marks and decorative chrome.
 - “Analytics dashboard” layout as the default mental model.
@@ -76,11 +80,13 @@ Use for:
 Translate to Slotok as:
 
 ```txt
-left nav / project tree / run history
-+ central selected run or element document
+left nav / project tree / compact element queue
++ central review canvas where selected input/artifact/provider output is huge
 + right inspector/environment/actions panel
 + bottom command/input/rerun bar later
 ```
+
+The center should answer first: “what am I labeling/reviewing right now?” Everything else is secondary.
 
 ### Arcads logs dark split-pane — secondary
 
@@ -107,11 +113,11 @@ This may become a dark comparison mode or embedded eval view, not the main app d
 
 For the next UI pass:
 
-1. Switch default theme to light.
-2. Replace the black/orange shell with a Codex-like app frame.
-3. Use a left sidebar for views/runs/projects.
-4. Use a central document/detail pane for the selected element.
-5. Use a narrow right inspector for environment, metrics, paths, actions.
+1. Keep the Codex-like light frame.
+2. Treat the middle as a **review canvas**, not a dashboard/document landing page.
+3. Put the selected element's primary artifact/input data in the center at the largest useful size: video/frames/image/output first, metadata second.
+4. Move element navigation to a compact queue/filmstrip/list that supports fast `j/k` flipping without taking over the canvas.
+5. Keep sidebars for navigation, run context, metrics, paths, and actions only.
 6. Make metric data quiet and inline instead of giant cards.
 7. Keep keyboard-first behavior, but visually hide shortcut noise unless helpful.
 
