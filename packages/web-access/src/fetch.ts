@@ -1,5 +1,10 @@
-import { Readability } from "@mozilla/readability"
+import { execFile } from "node:child_process"
+import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { parseHTML } from "linkedom"
+import { Readability } from "@mozilla/readability"
+import { createServer } from "node:net"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import TurndownService from "turndown"
 import { Effect, Result, Schedule } from "effect"
 import { queryApi, isWebAvailable, queryWeb, isApiAvailable } from "./gemini"
@@ -14,8 +19,10 @@ const HTTP_HEADERS = {
 } as const
 
 const CONCURRENT = 3
-const HTTP_MS = 30000
-const JINA_MS = 30000
+const HTTP_MS = 30_000
+const JINA_MS = 30_000
+const BROWSER_MS = 120_000
+const MAX_CONTENT = 500_000
 
 const EXTRACT = "Extract the complete readable content from this URL as clean markdown. Include the page title, all text content, code blocks, and tables. Do not summarize. URL: "
 
@@ -37,101 +44,277 @@ function extractTitle(html: string, url: string): string {
   return m?.[1]?.replace(/\*+/g, "").trim() || pathTitle(url)
 }
 
-function withTimeout(s: AbortSignal | undefined, ms: number): AbortSignal {
-  const t = AbortSignal.timeout(ms)
-  return s ? AbortSignal.any([s, t]) : t
+function withTimeout(signal: AbortSignal | undefined, ms: number): AbortSignal {
+  const timeout = AbortSignal.timeout(ms)
+  return signal ? AbortSignal.any([signal, timeout]) : timeout
 }
 
-// ─── HTTP + Readability ───────────────────────────────────────────────
+function truncateContent(content: string): string {
+  return content.length > MAX_CONTENT ? content.slice(0, MAX_CONTENT) + "\n\n[truncated]" : content
+}
 
-const extractViaHttp = Effect.fn("extractViaHttp")(function* (
-  url: string,
-  sig?: AbortSignal,
-) {
-  const res = yield* Effect.tryPromise({
-    try: () =>
-      fetch(url, {
-        headers: HTTP_HEADERS,
-        signal: withTimeout(sig, HTTP_MS),
-      }),
-    catch: () => null as Response | null,
-  }).pipe(Effect.retry(Schedule.recurs(1)))
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
 
-  if (!res) return { url, title: "", content: "", error: "HTTP request failed" }
-  if (!res.ok) return { url, title: "", content: "", error: `HTTP ${res.status}` }
-
-  const ct = res.headers.get("content-type") || ""
-  const text = yield* Effect.tryPromise({
-    try: () => res.text(),
-    catch: (err) => `__error__${toErrorMessage(err)}`,
+function execFilePromise(file: string, args: string[]): Promise<void> {
+  return new Promise((resolve, reject) => {
+    execFile(file, args, (err) => {
+      if (err) reject(err)
+      else resolve()
+    })
   })
+}
 
-  if (typeof text === "string" && text.startsWith("__error__")) {
-    return { url, title: "", content: "", error: text.slice(9) }
-  }
+export function looksLikeBlockedPage(title: string, text: string, html: string): boolean {
+  const sample = `${title}\n${text}\n${html.slice(0, 4000)}`.toLowerCase()
+  return [
+    "just a moment",
+    "checking your browser",
+    "verification successful. waiting",
+    "please enable javascript and cookies to continue",
+    "turnstile",
+    "cf-chl",
+    "challenges.cloudflare.com",
+    "challenge-platform",
+    "captcha",
+  ].some((needle) => sample.includes(needle))
+}
 
-  // Non-HTML
-  if (!ct.includes("text/html") && !ct.includes("application/xhtml+xml")) {
-    const max = 500_000
-    return {
-      url, title: pathTitle(url),
-      content: text.length > max ? text.slice(0, max) + "\n\n[truncated]" : text,
-      error: null,
-    }
-  }
+export function shouldReturnEarly(httpError: string): boolean {
+  return /^HTTP 4/.test(httpError) && !/^HTTP (401|403|429)\b/.test(httpError)
+}
 
-  // Readability
-  const article = yield* Effect.try({
-    try: () => {
-      const { document } = parseHTML(text)
+function extractFromHtml(html: string, url: string): ExtractedContent {
+  const article = (() => {
+    try {
+      const { document } = parseHTML(html)
       return new Readability(document as unknown as Document).parse()
-    },
-    catch: () => null,
-  })
+    } catch {
+      return null
+    }
+  })()
 
   if (!article) {
-    const bodyText = text.replace(/<script[\s\S]*?<\/script>/gi, "").replace(/<[^>]+>/g, "").trim()
-    const scripts = (text.match(/<script/gi) || []).length
+    const bodyText = html.replace(/<script[\s\S]*?<\/script>/gi, "").replace(/<[^>]+>/g, " ").trim()
+    const scripts = (html.match(/<script/gi) || []).length
     const isJs = !bodyText || (bodyText.length < 500 && scripts > 3)
     return {
-      url, title: extractTitle(text, url),
+      url,
+      title: extractTitle(html, url),
       content: "",
       error: isJs ? "js-rendered" : "readability-failed",
     }
   }
 
   const md = turndown.turndown(article.content)
-  const title = article.title || ""
+  const title = article.title || extractTitle(html, url)
+  if (md.length < 100) return { url, title, content: md, error: "incomplete" }
+  return { url, title, content: truncateContent(md), error: null }
+}
 
-  if (md.length < 100) {
-    return { url, title, content: md, error: "incomplete" }
+async function freePort(): Promise<number> {
+  return await new Promise((resolve, reject) => {
+    const server = createServer()
+    server.once("error", reject)
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address()
+      const port = typeof address === "object" && address ? address.port : null
+      server.close((err) => {
+        if (err) reject(err)
+        else if (typeof port === "number") resolve(port)
+        else reject(new Error("Could not determine free port"))
+      })
+    })
+  })
+}
+
+async function cdpJson<T>(cdpUrl: string, path: string): Promise<T | null> {
+  try {
+    const response = await fetch(`${cdpUrl}${path}`)
+    if (!response.ok) return null
+    return await response.json() as T
+  } catch {
+    return null
+  }
+}
+
+async function waitForCdp(cdpUrl: string, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (await cdpJson<unknown>(cdpUrl, "/json/version")) return true
+    await sleep(200)
+  }
+  return false
+}
+
+function browserAppCandidates(): string[] {
+  const candidates = [
+    process.env.PI_FETCH_BROWSER_APP,
+    "Google Chrome",
+    "Chromium",
+    "Brave Browser",
+    "Microsoft Edge",
+  ].filter((value): value is string => Boolean(value?.trim()))
+  return [...new Set(candidates)]
+}
+
+function puppeteerTargetId(target: unknown): string | undefined {
+  if (!target || typeof target !== "object") return undefined
+  const candidate = target as { _targetId?: unknown }
+  return typeof candidate._targetId === "string" ? candidate._targetId : undefined
+}
+
+async function launchBackgroundBrowser(app: string, port: number, profileDir: string): Promise<string> {
+  if (process.platform !== "darwin") throw new Error("Background browser fallback is currently macOS-only")
+  await mkdir(profileDir, { recursive: true })
+  const args = [
+    "-g",
+    "-na",
+    app,
+    "--args",
+    `--remote-debugging-port=${port}`,
+    `--user-data-dir=${profileDir}`,
+    "--no-first-run",
+    "--no-default-browser-check",
+    "about:blank",
+  ]
+  await execFilePromise("open", args)
+  const cdpUrl = `http://127.0.0.1:${port}`
+  if (!await waitForCdp(cdpUrl, 15_000)) throw new Error(`Timed out waiting for ${app} CDP at ${cdpUrl}`)
+  return cdpUrl
+}
+
+async function waitForExtractableHtml(page: any, signal?: AbortSignal): Promise<{ html: string; text: string; title: string }> {
+  let last = { html: "", text: "", title: "" }
+  const deadline = Date.now() + BROWSER_MS
+
+  while (Date.now() < deadline) {
+    if (signal?.aborted) throw new Error("Aborted")
+
+    await page.waitForNetworkIdle({ idleTime: 1_500, timeout: 5_000 }).catch(() => {})
+    last = await page.evaluate(() => ({
+      html: document.documentElement.outerHTML,
+      text: document.body?.innerText ?? "",
+      title: document.title,
+    }))
+
+    if (!looksLikeBlockedPage(last.title, last.text, last.html) && last.text.trim().length > 400) {
+      return last
+    }
+    await sleep(1_500)
   }
 
-  return {
-    url, title,
-    content: md.length > 500_000 ? md.slice(0, 500_000) + "\n\n[truncated]" : md,
-    error: null,
+  return last
+}
+
+async function extractViaBrowserApp(url: string, app: string, signal?: AbortSignal): Promise<ExtractedContent | null> {
+  const profileDir = await mkdtemp(join(tmpdir(), "pi-fetch-browser-"))
+  let browser: any = null
+
+  try {
+    const port = await freePort()
+    const cdpUrl = await launchBackgroundBrowser(app, port, profileDir)
+    const puppeteer = await import("puppeteer-core")
+    browser = await puppeteer.connect({ browserURL: cdpUrl })
+
+    const browserTarget = browser.targets().find((target: any) => target.type() === "browser")
+    if (!browserTarget) return null
+
+    const client = await browserTarget.createCDPSession()
+    try {
+      const created = await client.send("Target.createTarget", {
+        background: true,
+        url,
+      }) as { targetId: string }
+
+      const target = await browser.waitForTarget(
+        (candidate: unknown) => puppeteerTargetId(candidate) === created.targetId,
+        { timeout: 15_000 },
+      )
+      const page = await target.page()
+      if (!page) return null
+
+      const snapshot = await waitForExtractableHtml(page, signal)
+      if (looksLikeBlockedPage(snapshot.title, snapshot.text, snapshot.html)) return null
+
+      const extracted = extractFromHtml(snapshot.html, url)
+      if (!extracted.error) return extracted
+
+      if (snapshot.text.trim().length > 500) {
+        return {
+          url,
+          title: snapshot.title.trim() || extracted.title,
+          content: truncateContent(snapshot.text.trim()),
+          error: null,
+        }
+      }
+      return null
+    } finally {
+      await client.detach().catch(() => {})
+    }
+  } finally {
+    if (browser) await browser.close().catch(() => {})
+    await rm(profileDir, { recursive: true, force: true }).catch(() => {})
   }
+}
+
+// ─── HTTP + Readability ───────────────────────────────────────────────
+
+const extractViaHttp = Effect.fn("extractViaHttp")(function* (
+  url: string,
+  signal?: AbortSignal,
+) {
+  const response = yield* Effect.tryPromise({
+    try: () =>
+      fetch(url, {
+        headers: HTTP_HEADERS,
+        signal: withTimeout(signal, HTTP_MS),
+      }),
+    catch: () => null as Response | null,
+  }).pipe(Effect.retry(Schedule.recurs(1)))
+
+  if (!response) return { url, title: "", content: "", error: "HTTP request failed" }
+  if (!response.ok) return { url, title: "", content: "", error: `HTTP ${response.status}` }
+
+  const contentType = response.headers.get("content-type") || ""
+  const text = yield* Effect.tryPromise({
+    try: () => response.text(),
+    catch: (err) => `__error__${toErrorMessage(err)}`,
+  })
+
+  if (text.startsWith("__error__")) return { url, title: "", content: "", error: text.slice(9) }
+
+  if (!contentType.includes("text/html") && !contentType.includes("application/xhtml+xml")) {
+    return {
+      url,
+      title: pathTitle(url),
+      content: truncateContent(text),
+      error: null,
+    }
+  }
+
+  return extractFromHtml(text, url)
 })
 
 // ─── Jina Reader fallback ─────────────────────────────────────────────
 
 const extractViaJina = Effect.fn("extractViaJina")(function* (
   url: string,
-  sig?: AbortSignal,
+  signal?: AbortSignal,
 ) {
-  const res = yield* Effect.tryPromise({
+  const response = yield* Effect.tryPromise({
     try: () =>
       fetch(`https://r.jina.ai/${url}`, {
         headers: { Accept: "text/markdown", "X-No-Cache": "true" },
-        signal: withTimeout(sig, JINA_MS),
+        signal: withTimeout(signal, JINA_MS),
       }),
     catch: () => null as Response | null,
   })
-  if (!res?.ok) return null
+  if (!response?.ok) return null
 
   const raw = yield* Effect.tryPromise({
-    try: () => res.text(),
+    try: () => response.text(),
     catch: () => null as string | null,
   })
   if (!raw) return null
@@ -139,30 +322,51 @@ const extractViaJina = Effect.fn("extractViaJina")(function* (
   const idx = raw.indexOf("Markdown Content:")
   const md = idx >= 0 ? raw.slice(idx + 17).trim() : raw.trim()
   if (md.length < 100 || md.startsWith("Loading...")) return null
+  if (raw.includes("Target URL returned error 403") || looksLikeBlockedPage(extractTitle(md, url), md, raw)) return null
 
-  return { url, title: extractTitle(md, url), content: md, error: null }
+  return { url, title: extractTitle(md, url), content: truncateContent(md), error: null }
+})
+
+// ─── Browser fallback ─────────────────────────────────────────────────
+
+const extractViaBrowser = Effect.fn("extractViaBrowser")(function* (
+  url: string,
+  signal?: AbortSignal,
+) {
+  if (process.env.PI_DISABLE_BROWSER_FALLBACK === "1") return null
+  if (process.platform !== "darwin") return null
+
+  for (const app of browserAppCandidates()) {
+    const result = yield* Effect.result(Effect.tryPromise({
+      try: () => extractViaBrowserApp(url, app, signal),
+      catch: () => null,
+    }))
+    if (Result.isSuccess(result) && result.success) return result.success
+  }
+
+  return null
 })
 
 // ─── Gemini fallbacks ─────────────────────────────────────────────────
 
 const extractViaApi = Effect.fn("extractViaApi")(function* (
   url: string,
-  sig?: AbortSignal,
+  signal?: AbortSignal,
 ) {
   if (!isApiAvailable()) return null
 
   const result = yield* Effect.result(
-    queryApi(EXTRACT + url, { urlContext: true, signal: sig, timeoutMs: 60000 }),
+    queryApi(EXTRACT + url, { urlContext: true, signal, timeoutMs: 60_000 }),
   )
   if (Result.isFailure(result)) return null
   const text = result.success
   if (text.length < 50) return null
-  return { url, title: extractTitle(text, url), content: text, error: null }
+  return { url, title: extractTitle(text, url), content: truncateContent(text), error: null }
 })
 
 const extractViaWeb = Effect.fn("extractViaWeb")(function* (
   url: string,
-  sig?: AbortSignal,
+  signal?: AbortSignal,
 ) {
   const cookieResult = yield* Effect.result(isWebAvailable())
   if (Result.isFailure(cookieResult) || !cookieResult.success) return null
@@ -170,46 +374,45 @@ const extractViaWeb = Effect.fn("extractViaWeb")(function* (
   const result = yield* Effect.result(
     queryWeb(EXTRACT + url, cookieResult.success, {
       model: "gemini-2.5-flash",
-      signal: sig,
-      timeoutMs: 60000,
+      signal,
+      timeoutMs: 60_000,
     }),
   )
   if (Result.isFailure(result)) return null
   const text = result.success
   if (text.length < 50) return null
-  return { url, title: extractTitle(text, url), content: text, error: null }
+  return { url, title: extractTitle(text, url), content: truncateContent(text), error: null }
 })
 
 // ─── Main pipeline ────────────────────────────────────────────────────
 
 const extractOne = Effect.fn("extractOne")(function* (
   url: string,
-  sig?: AbortSignal,
+  signal?: AbortSignal,
 ) {
   if (!isHttp(url)) return { url, title: "", content: "", error: "Only HTTP(S) URLs" as string | null }
-  if (sig?.aborted) return { url, title: "", content: "", error: "Aborted" }
+  if (signal?.aborted) return { url, title: "", content: "", error: "Aborted" }
 
-  // 1. Direct HTTP + Readability
-  const http = yield* extractViaHttp(url, sig)
+  const http = yield* extractViaHttp(url, signal)
   if (!http.error) return http
-  if (http.error.startsWith("HTTP 4") && http.error !== "js-rendered") return http
+  if (shouldReturnEarly(http.error)) return http
 
-  // 2. Jina Reader
-  const jina = yield* extractViaJina(url, sig)
+  const jina = yield* extractViaJina(url, signal)
   if (jina) return jina
 
-  // 3. Gemini API
-  const api = yield* extractViaApi(url, sig)
+  const browser = yield* extractViaBrowser(url, signal)
+  if (browser) return browser
+
+  const api = yield* extractViaApi(url, signal)
   if (api) return api
 
-  // 4. Gemini Web
-  const web = yield* extractViaWeb(url, sig)
+  const web = yield* extractViaWeb(url, signal)
   if (web) return web
 
   return {
     ...http,
     error: http.error
-      ? `${http.error}. Tried Readability, Jina, Gemini — all unavailable.`
+      ? `${http.error}. Tried Readability, Jina, background browser, Gemini — all unavailable.`
       : "Could not extract content",
   }
 })
@@ -218,12 +421,12 @@ const extractOne = Effect.fn("extractOne")(function* (
 
 export const fetchContent = Effect.fn("fetchContent")(function* (
   urls: ReadonlyArray<string>,
-  sig?: AbortSignal,
+  signal?: AbortSignal,
 ) {
   if (!urls.length) return []
   return yield* Effect.forEach(
     urls,
-    (u) => extractOne(u, sig),
+    (url) => extractOne(url, signal),
     { concurrency: CONCURRENT },
   )
 })

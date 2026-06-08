@@ -3,7 +3,7 @@ import { readdir, realpath, stat } from "node:fs/promises"
 import { homedir } from "node:os"
 import { basename, isAbsolute, join, relative, resolve } from "node:path"
 import { createInterface } from "node:readline"
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent"
+import { SessionManager, type ExtensionAPI, type ExtensionCommandContext } from "@earendil-works/pi-coding-agent"
 import { Type } from "@sinclair/typebox"
 
 const DEFAULT_MAX_CHARS = 50_000
@@ -11,6 +11,8 @@ const DEFAULT_LIST_LIMIT = 20
 const TOOL_OUTPUT_MAX_CHARS = 3_000
 const TOOL_INPUT_MAX_CHARS = 6_000
 const MESSAGE_MAX_CHARS = 12_000
+const CODEX_IMPORT_ENTRY_TYPE = "codex-resume-import"
+const CODEX_IMPORT_CONTEXT_TYPE = "codex-resume"
 
 export interface CodexSessionInfo {
   cwd?: string
@@ -25,6 +27,7 @@ export interface CodexSessionInfo {
 export interface CodexResumeArgs {
   all: boolean
   help: boolean
+  inline: boolean
   maxChars: number
   noSend: boolean
   pick: boolean
@@ -52,6 +55,24 @@ interface CodexResumeContext {
   originalChars: number
   session: CodexSessionInfo
   truncated: boolean
+}
+
+interface CodexImportMarker {
+  codexCwd?: string
+  codexFile: string
+  codexSessionId: string
+  codexTimestamp?: string
+  codexTitle?: string
+  codexUpdatedAt: number
+  entryCount: number
+  importedAt: string
+  originalChars: number
+  truncated: boolean
+}
+
+interface ImportedPiSessionMatch {
+  exact: boolean
+  path: string
 }
 
 interface CodexJsonRecord {
@@ -97,6 +118,11 @@ async function normalizeExistingPath(path: string | undefined): Promise<string |
   }
 }
 
+async function sameExistingPath(a: string | undefined, b: string | undefined): Promise<boolean> {
+  const [left, right] = await Promise.all([normalizeExistingPath(a), normalizeExistingPath(b)])
+  return Boolean(left && right && left === right)
+}
+
 function parseJsonLine(line: string): CodexJsonRecord | null {
   try {
     const parsed = JSON.parse(line) as unknown
@@ -112,6 +138,10 @@ function stringValue(value: unknown): string | undefined {
 
 function numberValue(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined
+}
+
+function objectValue(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" ? value as Record<string, unknown> : undefined
 }
 
 function titleFromMessage(message: string | undefined): string | undefined {
@@ -451,6 +481,7 @@ export function parseCodexResumeArgs(args: string): CodexResumeArgs {
   const parsed: CodexResumeArgs = {
     all: false,
     help: false,
+    inline: false,
     maxChars: DEFAULT_MAX_CHARS,
     noSend: false,
     pick: false,
@@ -460,6 +491,7 @@ export function parseCodexResumeArgs(args: string): CodexResumeArgs {
     const part = parts[i]!
     if (part === "--all") parsed.all = true
     else if (part === "--pick") parsed.pick = true
+    else if (part === "--inline" || part === "--in-place") parsed.inline = true
     else if (part === "--no-send" || part === "--preview") parsed.noSend = true
     else if (part === "--help" || part === "-h") parsed.help = true
     else if (part.startsWith("--max-chars=")) {
@@ -482,12 +514,13 @@ export function parseCodexResumeArgs(args: string): CodexResumeArgs {
 
 function usageText(): string {
   return [
-    "Usage: /codex-resume [latest|SESSION_ID|path] [--pick] [--all] [--no-send] [--max-chars N]",
+    "Usage: /codex-resume [latest|SESSION_ID|path] [--pick] [--all] [--no-send] [--inline] [--max-chars N]",
     "",
-    "Default: import the latest Codex session for the current cwd and ask Pi to continue.",
+    "Default: create or reopen a native Pi session seeded from the selected Codex session.",
     "--pick: choose from recent sessions.",
     "--all: include sessions from all directories.",
-    "--no-send: import hidden context and prefill the editor instead of starting the agent.",
+    "--no-send: prefill the editor instead of immediately starting the agent.",
+    "--inline: legacy behavior; import Codex context into the current Pi session instead of opening a native Pi session.",
   ].join("\n")
 }
 
@@ -508,7 +541,175 @@ function buildResumeRequest(session: CodexSessionInfo): string {
   ].filter((line): line is string => Boolean(line)).join("\n")
 }
 
-async function selectSession(args: CodexResumeArgs, cwd: string, ctx: Parameters<Parameters<ExtensionAPI["registerCommand"]>[1]["handler"]>[1]): Promise<CodexSessionInfo | null> {
+function buildImportedSessionName(session: CodexSessionInfo): string {
+  const base = session.title ?? `Codex ${session.id.slice(0, 8)}`
+  const normalized = base.replace(/\s+/g, " ").trim()
+  const prefixed = normalized ? `Codex: ${normalized}` : `Codex: ${session.id.slice(0, 8)}`
+  return prefixed.length > 100 ? `${prefixed.slice(0, 97)}...` : prefixed
+}
+
+function buildImportMarker(session: CodexSessionInfo, resume: CodexResumeContext): CodexImportMarker {
+  return {
+    codexCwd: session.cwd,
+    codexFile: session.file,
+    codexSessionId: session.id,
+    codexTimestamp: session.timestamp,
+    codexTitle: session.title,
+    codexUpdatedAt: session.updatedAt,
+    entryCount: resume.entryCount,
+    importedAt: new Date().toISOString(),
+    originalChars: resume.originalChars,
+    truncated: resume.truncated,
+  }
+}
+
+function parseImportMarker(value: unknown): CodexImportMarker | null {
+  const data = objectValue(value)
+  if (!data) return null
+  const codexSessionId = stringValue(data.codexSessionId)
+  const codexFile = stringValue(data.codexFile)
+  const codexUpdatedAt = numberValue(data.codexUpdatedAt)
+  if (!codexSessionId || !codexFile || codexUpdatedAt === undefined) return null
+
+  return {
+    codexCwd: stringValue(data.codexCwd),
+    codexFile,
+    codexSessionId,
+    codexTimestamp: stringValue(data.codexTimestamp),
+    codexTitle: stringValue(data.codexTitle),
+    codexUpdatedAt,
+    entryCount: numberValue(data.entryCount) ?? 0,
+    importedAt: stringValue(data.importedAt) ?? "",
+    originalChars: numberValue(data.originalChars) ?? 0,
+    truncated: data.truncated === true,
+  }
+}
+
+function extractImportMarker(sessionManager: SessionManager): CodexImportMarker | null {
+  const entries = sessionManager.getEntries()
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i]!
+    if (entry.type !== "custom" || entry.customType !== CODEX_IMPORT_ENTRY_TYPE) continue
+    const parsed = parseImportMarker(entry.data)
+    if (parsed) return parsed
+  }
+  return null
+}
+
+async function findImportedPiSession(session: CodexSessionInfo, cwd: string, all: boolean): Promise<ImportedPiSessionMatch | null> {
+  const sessions = all ? await SessionManager.listAll() : await SessionManager.list(cwd)
+  sessions.sort((a, b) => b.modified.getTime() - a.modified.getTime())
+
+  let stalePath: string | null = null
+  for (const info of sessions) {
+    try {
+      const imported = extractImportMarker(SessionManager.open(info.path))
+      if (!imported || imported.codexSessionId !== session.id) continue
+      if (imported.codexUpdatedAt === session.updatedAt) return { exact: true, path: info.path }
+      stalePath ??= info.path
+    } catch {
+      // Ignore malformed or unreadable Pi session files while scanning.
+    }
+  }
+
+  return stalePath ? { exact: false, path: stalePath } : null
+}
+
+async function confirmCwdMismatch(session: CodexSessionInfo, ctx: ExtensionCommandContext): Promise<boolean> {
+  if (!session.cwd) return true
+  if (await sameExistingPath(session.cwd, ctx.cwd)) return true
+  if (!ctx.hasUI) return true
+  return await ctx.ui.confirm(
+    "Codex cwd differs from Pi cwd",
+    `Codex was working in:\n${session.cwd}\n\nPi is currently in:\n${ctx.cwd}\n\nImport this Codex session into a new Pi session anyway?`,
+  )
+}
+
+async function continueCodexSessionInline(pi: ExtensionAPI, ctx: ExtensionCommandContext, session: CodexSessionInfo, args: CodexResumeArgs): Promise<void> {
+  const resume = await buildCodexResumeContext(session, { maxChars: args.maxChars })
+  const delivery = ctx.isIdle() ? undefined : { deliverAs: "followUp" as const }
+  pi.sendMessage({
+    customType: CODEX_IMPORT_CONTEXT_TYPE,
+    content: resume.context,
+    display: false,
+    details: {
+      entryCount: resume.entryCount,
+      file: session.file,
+      originalChars: resume.originalChars,
+      truncated: resume.truncated,
+    },
+  }, delivery)
+
+  const rel = relative(ctx.cwd, session.file)
+  const note = `Imported Codex session ${session.id.slice(0, 8)} (${resume.entryCount} transcript entries${resume.truncated ? ", truncated" : ""}) from ${rel.startsWith("..") ? session.file : rel}.`
+
+  if (args.noSend) {
+    ctx.ui.setEditorText(buildResumeRequest(session))
+    ctx.ui.notify(`${note} Editor prefilled; submit when ready.`, "info")
+    return
+  }
+
+  pi.sendUserMessage(buildResumeRequest(session), delivery)
+  ctx.ui.notify(note, "info")
+}
+
+async function continueCodexSessionNatively(ctx: ExtensionCommandContext, session: CodexSessionInfo, args: CodexResumeArgs): Promise<void> {
+  if (!await confirmCwdMismatch(session, ctx)) return
+
+  const resume = await buildCodexResumeContext(session, { maxChars: args.maxChars })
+  const marker = buildImportMarker(session, resume)
+  const existing = await findImportedPiSession(session, ctx.cwd, args.all)
+  const kickoff = buildResumeRequest(session)
+  const rel = relative(ctx.cwd, session.file)
+  const sourceFile = rel.startsWith("..") ? session.file : rel
+  const cwdMismatch = session.cwd && !await sameExistingPath(session.cwd, ctx.cwd)
+  const mismatchNote = cwdMismatch ? ` Codex cwd differs from current Pi cwd (${session.cwd}).` : ""
+
+  if (existing?.exact) {
+    const note = `Reopened Pi session imported from Codex ${session.id.slice(0, 8)} (${resume.entryCount} transcript entries${resume.truncated ? ", truncated" : ""}) from ${sourceFile}.${mismatchNote}`
+    const currentSessionFile = ctx.sessionManager.getSessionFile()
+    if (await sameExistingPath(currentSessionFile, existing.path)) {
+      ctx.ui.setEditorText(kickoff)
+      ctx.ui.notify(`${note} Editor prefilled; submit when ready.`, "info")
+      return
+    }
+
+    const result = await ctx.switchSession(existing.path, {
+      withSession: async (nextCtx) => {
+        nextCtx.ui.setEditorText(kickoff)
+        nextCtx.ui.notify(`${note} Editor prefilled; submit when ready.`, "info")
+      },
+    })
+    if (result.cancelled) return
+    return
+  }
+
+  const staleNote = existing && !existing.exact
+    ? " Created a fresh Pi import because an older Pi snapshot of this Codex session already existed."
+    : ""
+  const note = `Imported Codex session ${session.id.slice(0, 8)} (${resume.entryCount} transcript entries${resume.truncated ? ", truncated" : ""}) from ${sourceFile} into a native Pi session.${staleNote}${mismatchNote}`
+
+  const result = await ctx.newSession({
+    setup: async (sessionManager) => {
+      sessionManager.appendCustomEntry(CODEX_IMPORT_ENTRY_TYPE, marker)
+      sessionManager.appendCustomMessageEntry(CODEX_IMPORT_CONTEXT_TYPE, resume.context, false, marker)
+      sessionManager.appendSessionInfo(buildImportedSessionName(session))
+    },
+    withSession: async (nextCtx) => {
+      if (args.noSend) {
+        nextCtx.ui.setEditorText(kickoff)
+        nextCtx.ui.notify(`${note} Editor prefilled; submit when ready.`, "info")
+        return
+      }
+
+      await nextCtx.sendUserMessage(kickoff)
+      nextCtx.ui.notify(note, "info")
+    },
+  })
+  if (result.cancelled) return
+}
+
+async function selectSession(args: CodexResumeArgs, cwd: string, ctx: ExtensionCommandContext): Promise<CodexSessionInfo | null> {
   if (args.pick) {
     const sessions = await listCodexSessions({ all: args.all, cwd, limit: DEFAULT_LIST_LIMIT })
     if (!sessions.length) return null
@@ -579,7 +780,7 @@ function registerCodexResumeCommand(pi: ExtensionAPI): void {
     handler: async (rawArgs, ctx) => {
       const args = parseCodexResumeArgs(rawArgs)
       if (args.help) {
-        pi.sendMessage({ customType: "codex-resume", content: usageText(), display: true })
+        pi.sendMessage({ customType: CODEX_IMPORT_CONTEXT_TYPE, content: usageText(), display: true })
         return
       }
 
@@ -589,31 +790,12 @@ function registerCodexResumeCommand(pi: ExtensionAPI): void {
         return
       }
 
-      const resume = await buildCodexResumeContext(session, { maxChars: args.maxChars })
-      const delivery = ctx.isIdle() ? undefined : { deliverAs: "followUp" as const }
-      pi.sendMessage({
-        customType: "codex-resume",
-        content: resume.context,
-        display: false,
-        details: {
-          entryCount: resume.entryCount,
-          file: session.file,
-          originalChars: resume.originalChars,
-          truncated: resume.truncated,
-        },
-      }, delivery)
-
-      const rel = relative(ctx.cwd, session.file)
-      const note = `Imported Codex session ${session.id.slice(0, 8)} (${resume.entryCount} transcript entries${resume.truncated ? ", truncated" : ""}) from ${rel.startsWith("..") ? session.file : rel}.`
-
-      if (args.noSend) {
-        ctx.ui.setEditorText(buildResumeRequest(session))
-        ctx.ui.notify(`${note} Editor prefilled; submit when ready.`, "info")
+      if (args.inline) {
+        await continueCodexSessionInline(pi, ctx, session, args)
         return
       }
 
-      pi.sendUserMessage(buildResumeRequest(session), delivery)
-      ctx.ui.notify(note, "info")
+      await continueCodexSessionNatively(ctx, session, args)
     },
   })
 }

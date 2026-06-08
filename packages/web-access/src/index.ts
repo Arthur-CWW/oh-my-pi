@@ -20,6 +20,8 @@ import {
   type FrontendProvider,
 } from "./frontend-browser"
 import { registerCodexResume } from "./codex"
+import { registerVimLite } from "./vim-lite"
+import { registerAgentCockpit } from "./agent-cockpit-extension"
 import { toErrorMessage } from "./schemas"
 
 function run<E, A>(effect: Effect.Effect<A, E>): Promise<A> {
@@ -666,4 +668,6 @@ export default function (pi: ExtensionAPI): void {
   registerChatGptHandoff(pi)
   registerLlmFrontendBrowser(pi)
   registerCodexResume(pi)
+  registerVimLite(pi)
+  registerAgentCockpit(pi)
 }

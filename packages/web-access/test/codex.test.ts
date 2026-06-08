@@ -107,10 +107,25 @@ describe("codex resume args", () => {
     expect(parseCodexResumeArgs("abc --all --pick --no-send --max-chars 12000")).toEqual({
       all: true,
       help: false,
+      inline: false,
       maxChars: 12_000,
       noSend: true,
       pick: true,
       ref: "abc",
     })
+  })
+
+  it("parses inline import aliases", () => {
+    expect(parseCodexResumeArgs("latest --inline")).toEqual({
+      all: false,
+      help: false,
+      inline: true,
+      maxChars: 50_000,
+      noSend: false,
+      pick: false,
+      ref: "latest",
+    })
+
+    expect(parseCodexResumeArgs("latest --in-place").inline).toBe(true)
   })
 })

@@ -14,7 +14,8 @@
   "bin": {
     "pi-web-search": "./src/cli.ts",
     "pi-chatgpt": "./src/chatgpt-cli.ts",
-    "pi-llm-browser": "./src/frontend-browser-cli.ts"
+    "pi-llm-browser": "./src/frontend-browser-cli.ts",
+    "pi-cockpit": "./src/agent-cockpit-cli.ts"
   },
   "files": ["src", "skills", "README.md", "CHANGELOG.md", "LICENSE"],
   "publishConfig": {
@@ -27,6 +28,7 @@
     "search": "bun run src/cli.ts",
     "chatgpt": "bun run src/chatgpt-cli.ts",
     "llm-browser": "bun run src/frontend-browser-cli.ts",
+    "cockpit": "bun run src/agent-cockpit-cli.ts",
     "kagi-search": "bun run src/cli.ts --provider kagi"
   },
   "dependencies": {

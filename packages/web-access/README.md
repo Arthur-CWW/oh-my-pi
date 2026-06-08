@@ -44,7 +44,7 @@ Use `--refresh-session` to force re-reading Firefox cookies, or `--provider fall
 
 ### fetch_content
 
-Fetch URL(s) and extract readable content as markdown. Falls back through Jina Reader and Gemini when pages block extraction.
+Fetch URL(s) and extract readable content as markdown. Falls back through Jina Reader, a background Chrome capture on macOS, and Gemini when pages block extraction.
 
 ```typescript
 fetch_content({ url: "https://example.com/article" })
@@ -167,7 +167,7 @@ pi-llm-browser status --provider chatgpt
 
 ```
 web_search → Kagi SSE (Firefox cookies) → Gemini API (grounding)
-fetch_content → HTTP + Readability → Jina Reader → Gemini API → Gemini Web
+fetch_content → HTTP + Readability → Jina Reader → background Chrome capture (macOS) → Gemini API → Gemini Web
 youtube_transcript → yt-dlp (metadata + auto-generated captions)
 chrome_cookies → macOS Keychain (Chrome SQLite) → Chrome DevTools CDP
 chatgpt_handoff → pbcopy → open ChatGPT in Firefox for manual submission
@@ -187,6 +187,11 @@ Optional `~/.pi/web-search.json`:
 ```
 
 Set `CHROME_DEBUG_URL` to your Chrome DevTools endpoint (default: `http://localhost:9222`).
+
+`fetch_content` browser fallback knobs:
+
+- `PI_FETCH_BROWSER_APP` — macOS browser app name to use for background extraction (default tries `Google Chrome`, then Chromium/Brave/Edge)
+- `PI_DISABLE_BROWSER_FALLBACK=1` — disable the background browser fallback entirely
 
 ## Testing
 
