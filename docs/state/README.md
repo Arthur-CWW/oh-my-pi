@@ -19,6 +19,7 @@ Do not let state docs become stale:
 ## Current state docs
 
 - `docs/state/video-creative-direction.md` — durable taste ledger / creative north-star for video, AI UGC, brainrot, asset graph, and pipeline direction.
+- `docs/state/slotok-design-language.md` — durable UI/design language for Slotok; current primary visual north star is Codex's light workbench UI, not the dark/orange dashboard shell.
 - `docs/state/symphony-lite-direction.md` — durable direction for the meta-agent orchestration harness: forked agents, reviewer personas, constrained tool sets, workflow DAGs, monitoring, and synthesis.
 - `docs/state/agent-voice.md` — durable preference for agents to avoid HR/compliance/audit-log voice and talk like a competent friend.
 

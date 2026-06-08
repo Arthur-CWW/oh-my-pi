@@ -8,6 +8,8 @@ Working tagline:
 Cursor/Zed for AI TikTok/video pipeline engineering and infinite remixes.
 ```
 
+Design-language note: read `docs/state/slotok-design-language.md` before changing the UI. The current primary visual north star is the Codex light workbench screenshot in `docs/design/slotok/references/codex-light-workbench-sidebar.png`: clean native light shell, soft sidebar, document-like center, restrained cards/inspector panels. Do not continue the dark/orange analytics-dashboard aesthetic.
+
 ## Current status
 
 As of 2026-06-08, the `pipeline_workbench_architecture` workflow completed as an in-memory design fan-out:

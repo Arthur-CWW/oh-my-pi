@@ -100,6 +100,7 @@ Each component should be separately editable, inspectable, replaceable, cacheabl
 - Building comparison-ready decompositions: reference video → timestamped layer/asset decomposition; generated video → same decomposition; diff the two to optimize prompts, assets, providers, and edits.
 - A single local-first pipeline workbench/GUI for browsing all pipeline data: runs, elements, versions, metrics, artifacts, DAG stages, annotations, custom viewers, and rerun/resume controls.
 - The workbench is closer to “Cursor/Zed for AI TikTok/video pipeline engineering” than a dashboard: orchestrate agents, terminals, provider runs, DAG stages, evals, artifacts, and infinite-remix loops.
+- Slotok's default UI should follow the Codex-like light workbench design language captured in `docs/state/slotok-design-language.md`, not the current dark/orange analytics-dashboard shell.
 - Keyboard-first / vim-like interaction should be a default for review tools: `j/k`, `/`, `gg/G`, `g<letter>` view switching, quick annotations, and fast batch navigation.
 - The workbench should support generated/hot-swappable data views: raw JSON is always available, but selected elements should also have purpose-built visual React/Solid/HTML renderers that can be iterated quickly, potentially with Pi/Codex assistance.
 - Keeping prompts/provenance/tags/vibes in a centralized SQLite catalog.
