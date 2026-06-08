@@ -86,7 +86,7 @@ describe("VimLiteEditor", () => {
     const clipboardEditor = createEditor(clipboard)
     clipboardEditor.setText("copy me")
     clipboardEditor.handleInput("\x1b")
-    press(clipboardEditor, "0v$\"+y")
+    press(clipboardEditor, "0v$y")
     const afterClipboardYank = `clipboard=${JSON.stringify(clipboardText)}\n${clipboardEditor.getText()}\n${renderSnapshot(clipboardEditor)}`
 
     const clipboardPasteEditor = createEditor(clipboard)
@@ -97,7 +97,7 @@ describe("VimLiteEditor", () => {
     const lineClipboardEditor = createEditor(clipboard)
     lineClipboardEditor.setText("one\ntwo")
     lineClipboardEditor.handleInput("\x1b")
-    press(lineClipboardEditor, "gg\"+yy")
+    press(lineClipboardEditor, "ggyy")
     const afterLineClipboardYank = `clipboard=${JSON.stringify(clipboardText)}\n${lineClipboardEditor.getText()}\n${renderSnapshot(lineClipboardEditor)}`
 
     const lineClipboardPasteEditor = createEditor(clipboard)
@@ -153,6 +153,36 @@ describe("VimLiteEditor", () => {
 
     const expected = readFileSync(join(import.meta.dir, "__snapshots__", "vim-lite-visual.snap.txt"), "utf8").trimEnd()
     expect(actual).toBe(expected)
+  })
+
+  test("plain yanks write to system clipboard", () => {
+    let clipboardText = ""
+    const clipboard: ClipboardAdapter = {
+      readText: () => clipboardText,
+      writeText(text: string) {
+        clipboardText = text
+        return true
+      },
+    }
+
+    const visualEditor = createEditor(clipboard)
+    visualEditor.setText("copy me")
+    visualEditor.handleInput("\x1b")
+    press(visualEditor, "0v$y")
+    expect(clipboardText).toBe("copy me")
+
+    const lineEditor = createEditor(clipboard)
+    lineEditor.setText("one\ntwo")
+    lineEditor.handleInput("\x1b")
+    press(lineEditor, "ggyy")
+    expect(clipboardText).toBe("one\n")
+
+    clipboardText = "external"
+    const deleteEditor = createEditor(clipboard)
+    deleteEditor.setText("one\ntwo")
+    deleteEditor.handleInput("\x1b")
+    press(deleteEditor, "ggdd")
+    expect(clipboardText).toBe("external")
   })
 
   test("normal mode operations treat large paste markers atomically", () => {

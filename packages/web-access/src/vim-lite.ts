@@ -56,7 +56,7 @@ const HELP_LINES = [
   "vim-lite: Esc normal · i/a/I/A insert · o/O new line · Enter submits",
   "motions: h j k l · w b e · 0 ^ $ · gg/G · counts like 3w or 2dd",
   "visual: v charwise · V linewise · o swap end · d/c/y/x/s operate on selection",
-  "clipboard: \"+y / \"+yy / visual \"+y yank to system clipboard · \"+p paste from it",
+  "clipboard: y / yy / Y / visual y yank to system clipboard · \"+p paste from it",
   "paste markers: gx toggles Pi large-paste marker expansion/collapse",
   "edits: x/X · d/c/y + motion · dd/cc/yy · D/C/Y · p/P · r<char> · s/S · u undo · Ctrl+r redo",
   "Pi keys still work: Ctrl+C clear/copy · Ctrl+D exit on empty · Ctrl+G external editor · Ctrl+P model",
@@ -687,7 +687,7 @@ export class VimLiteEditor extends CustomEditor {
     }
 
     const text = this.e().state.lines.join("\n")
-    this.setRegister({ text: text.slice(range.start, range.end), linewise: false }, registerName)
+    this.setRegister({ text: text.slice(range.start, range.end), linewise: false }, registerName, op === "y")
 
     if (op === "y") {
       this.setCursor(range.startLine, this.offsetToPos(this.e().state.lines, range.start).col)
@@ -826,7 +826,7 @@ export class VimLiteEditor extends CustomEditor {
 
     const text = this.e().state.lines.join("\n")
     const affected = text.slice(start, end)
-    this.setRegister({ text: affected, linewise: false }, registerName)
+    this.setRegister({ text: affected, linewise: false }, registerName, op === "y")
 
     if (op === "y") {
       this.setCursor(startPos.line, startPos.col)
@@ -884,7 +884,7 @@ export class VimLiteEditor extends CustomEditor {
     const startLine = clamp(Math.min(rawStartLine, rawEndLine), 0, maxLine)
     const endLine = clamp(Math.max(rawStartLine, rawEndLine), 0, maxLine)
     const affectedLines = e.state.lines.slice(startLine, endLine + 1)
-    this.setRegister({ text: `${affectedLines.join("\n")}\n`, linewise: true }, registerName)
+    this.setRegister({ text: `${affectedLines.join("\n")}\n`, linewise: true }, registerName, op === "y")
 
     if (op === "y") {
       this.setCursor(startLine, firstNonBlank(e.state.lines[startLine] ?? ""))
@@ -971,9 +971,9 @@ export class VimLiteEditor extends CustomEditor {
     )
   }
 
-  private setRegister(register: Register, registerName: VimRegisterName | undefined = this.consumeSelectedRegister()): void {
+  private setRegister(register: Register, registerName: VimRegisterName | undefined = this.consumeSelectedRegister(), yankToClipboard = false): void {
     this.register = register
-    if (registerName === "+") this.clipboard.writeText(register.text)
+    if (yankToClipboard || registerName === "+") this.clipboard.writeText(register.text)
   }
 
   private consumeSelectedRegister(): VimRegisterName | undefined {

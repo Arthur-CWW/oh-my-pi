@@ -6,14 +6,15 @@
 
 Current packages:
 
-- `packages/web-access` — Pi tools for web search, content fetching, YouTube transcripts, Chrome cookies, Codex session import, and frontend LLM browser sessions.
+- `packages/web-access` — Pi tools for web search, content fetching, YouTube transcripts, Chrome cookies, Codex session import, frontend LLM browser sessions, and the `vim-lite` Pi input editor.
+- `packages/dynamic-workflows` — vendored `pi-dynamic-workflows` source/tests plus local adversarial-review prompt template; the released `npm:pi-dynamic-workflows` package is installed project-locally for the active workflow tool.
 - `packages/browser-use` — clean-room CDP browser-use extension prototype.
 - `packages/twitter-archive` — local-first Twitter/X archive schema and future capture/search helpers.
 - `packages/jimeng-client` — Jimeng/Dreamina direct API helpers ported from Slotok reverse engineering.
 - `apps/tweet-viewer` — future local archive viewer.
 - `workflows/*` — future archive/analyze/generate shortform-video workflows.
 
-The repo root is also a Pi package. `.pi/settings.json` points at `..`, and the root `package.json` `pi` manifest loads `packages/web-access/src/index.ts` and `packages/web-access/skills`.
+The repo root is also a Pi package. `.pi/settings.json` points at `..` and `npm:pi-dynamic-workflows`. The root `package.json` `pi` manifest loads `packages/web-access/src/index.ts`, `packages/web-access/skills`, and the local dynamic-workflows prompt templates.
 
 ## Commands
 
@@ -25,6 +26,7 @@ bun run check                     # typecheck + tests
 bun run jimeng:test               # Jimeng direct-client unit tests
 bun run web-access:smoke          # live tool smoke test
 bun run web-access:help           # verify extension directly
+bun run dynamic-workflows:test     # dynamic workflow parser/runtime tests
 ```
 
 ## Files
@@ -40,18 +42,27 @@ packages/web-access/
     gemini.ts     Gemini API + Web client
     kagi.ts       Kagi search (Firefox cookies or Chrome CDP)
     search.ts     web_search (Kagi-first, Gemini fallback)
-    fetch.ts      fetch_content (HTTP/Readability → Jina → Gemini)
+    fetch.ts      fetch_content (HTTP/Readability → Jina → background Chrome → Gemini)
     youtube.ts    YouTube transcript extraction (yt-dlp)
     codex.ts      Codex CLI session listing/import and `/codex-resume`
+    vim-lite.ts   Vim-like modal Pi input editor registered as `/vim-lite`
     frontend-browser.ts  frontend LLM browser automation
-  test/
+  test/            package tests, including `vim-lite.test.ts` + snapshots
   vendor/kagi-chrome-extension/   Official Kagi extension (submodule)
 
+packages/dynamic-workflows/       Vendored workflow source/tests plus adversarial-review prompt
 packages/twitter-archive/         Local archive schema/capture package skeleton
 packages/jimeng-client/           Jimeng/Dreamina direct API helpers
 apps/tweet-viewer/                Local archive viewer skeleton
 docs/twitter-archive-plan.md      Twitter/X archive and shortform pipeline plan
 ```
+
+## Pi vim-lite editor extension
+
+- Source: `packages/web-access/src/vim-lite.ts`; registered from `packages/web-access/src/index.ts` with `registerVimLite(pi)` and loaded by the root `package.json` Pi manifest.
+- Command: `/vim-lite` enables it, `/vim-lite off|disable` restores Pi's stock editor, `/vim-lite help` shows in-TUI help, `/vim-lite hide` hides that help.
+- Clipboard behavior: plain Vim yanks (`y`, `yy`, `Y`, visual `y`) write to the system clipboard by default; `"+p` pastes from the system clipboard. Deletes/changes only update the internal register unless an explicit register is used.
+- Tests: `packages/web-access/test/vim-lite.test.ts` and `packages/web-access/test/__snapshots__/vim-lite-visual.snap.txt`.
 
 ## Effect v4 patterns
 
