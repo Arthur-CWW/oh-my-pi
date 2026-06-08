@@ -56,14 +56,22 @@ bun scripts/eval-video-understanding.ts \
   --live
 ```
 
-Outputs go under `data/provider-evals/video-understanding/<timestamp>/` by default:
+Outputs go under `data/provider-evals/video-understanding/runs/<timestamp>/` by default, with a shared cache/SQLite DB under `data/provider-evals/video-understanding/`:
 
-- `summary.json` — provider-level counts and estimated cost where available.
+- `summary.json` — provider-level counts, latency, billed estimated cost, and avoided cache-hit cost.
 - `results.json` — per-video provider result paths and usage.
 - `provider-run-log.jsonl` — append-only log of cache misses, hits, completions, and failures.
 - `artifacts/*/frame_*.jpg` — sampled keyframes.
 - `cache/<provider>/<requestHash>.json` — raw provider response cache.
 - `cache/<provider>/<requestHash>.parsed.json` — parsed analysis object when possible.
+- `evals.sqlite` — durable SQLite metrics (`eval_runs`, `eval_results`) for provider/model/status/cache/token/latency/cost comparisons.
+
+Useful SQLite queries:
+
+```bash
+sqlite3 -header -column data/provider-evals/video-understanding/evals.sqlite \
+  "select provider, model, status, cache_status, prompt_tokens, completion_tokens, total_tokens, latency_ms, estimated_cost_usd, avoided_cost_usd, raw_credits_consumed, finish_reason, parsed_ok from eval_results order by created_at desc limit 20;"
+```
 
 ## Cost notes
 
@@ -82,6 +90,18 @@ Kie pricing checked 2026-06-08:
 - Kie pricing explicitly describes Anthropic prompt caching, but not a clear Gemini context-cache API/guarantee.
 - Kie Gemini 3.5 Flash pricing page row: input $0.45 / 1M, output $2.70 / 1M.
 - For Kie live runs, prefer the actual `credits_consumed` field and dashboard logs over estimates.
+
+## First live smoke result
+
+2026-06-08 tiny run over one Pleometric video with 2 sampled frames, `max_output_tokens=4096`:
+
+| Provider | Model | Status | Latency | Tokens / credits | Est. cost | Parse quality |
+|---|---|---:|---:|---:|---:|---|
+| Google direct | `gemini-2.5-flash` | completed | ~24s | 2,978 prompt / 2,144 completion / 1,938 thoughts | ~$0.0063 | hit `MAX_TOKENS`; JSON truncated |
+| Kie | `gemini-2.5-flash` | completed | ~9.9s | 4,640 prompt / 1,863 completion / 0.36 credits | ~$0.0018 | usable JSON |
+| Shared local cache re-run | both | cache hit | 0 provider latency | no new provider call | $0 billed, avoided cost recorded | cache hit preserved prior parse status |
+
+Earlier malformed Kie request used an empty JSON schema and no max-token cap; it returned `{ ...huge whitespace... }`, consumed 7.84 credits (~$0.0392 if $0.005/credit), and is a good example of why we log malformed completions and parsed quality.
 
 ## Important caveat
 
