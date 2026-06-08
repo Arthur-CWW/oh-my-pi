@@ -1,0 +1,41 @@
+---
+source: src/main.rs
+expression: events_snapshot
+---
+[
+  {
+    "event_type": "agent.planned",
+    "id": 1,
+    "payload": {
+      "dry_run": true,
+      "persona": "rubber duck",
+      "prompt_path": "[prompt-path]",
+      "runner": "codex-app-server",
+      "tool_profile": "reviewer-readonly"
+    },
+    "subagent_id": "[agent-id]",
+    "ts": "[ts]",
+    "workflow_id": "[workflow-id]"
+  },
+  {
+    "event_type": "agent.status",
+    "id": 2,
+    "payload": {
+      "status": "done",
+      "summary": "dry run"
+    },
+    "subagent_id": "[agent-id]",
+    "ts": "[ts]",
+    "workflow_id": "[workflow-id]"
+  },
+  {
+    "event_type": "workflow.status",
+    "id": 3,
+    "payload": {
+      "status": "done"
+    },
+    "subagent_id": null,
+    "ts": "[ts]",
+    "workflow_id": "[workflow-id]"
+  }
+]

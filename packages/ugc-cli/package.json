@@ -1,0 +1,15 @@
+{
+  "name": "@wirebabel/ugc-cli",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local-first open CLI for Arcads/Higgsfield-style AI UGC campaign planning and media pipeline manifests",
+  "type": "module",
+  "bin": {
+    "ugc": "./src/cli.ts",
+    "ugc-lab": "./src/cli.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  }
+}
