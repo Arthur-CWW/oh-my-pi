@@ -1,0 +1,11 @@
+{
+  "name": "@wirebabel/slotok-workbench",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Slotok local-first AI video/UGC pipeline workbench",
+  "type": "module",
+  "scripts": {
+    "dev": "bun src/server.ts",
+    "typecheck": "tsc --noEmit"
+  }
+}
