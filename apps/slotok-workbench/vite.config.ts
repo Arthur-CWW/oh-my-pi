@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from "vite"
 import solid from "vite-plugin-solid"
 
@@ -13,5 +14,9 @@ export default defineConfig({
     host: "127.0.0.1",
     port: 47521,
     strictPort: true,
+  },
+  test: {
+    environment: "happy-dom",
+    include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
   },
 })

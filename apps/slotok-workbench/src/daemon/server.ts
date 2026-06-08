@@ -118,7 +118,9 @@ function limitParam(url: URL, fallback: number): number {
 
 function fileResponse(cwd: string, target: string): Response {
   const resolvedCwd = realpathSync(cwd)
-  const resolvedTarget = realpathSync(resolve(cwd, target))
+  const candidate = resolve(cwd, target)
+  if (!existsSync(candidate)) return json({ error: "file not found" }, 404)
+  const resolvedTarget = realpathSync(candidate)
   if (resolvedTarget !== resolvedCwd && !resolvedTarget.startsWith(`${resolvedCwd}/`)) {
     return json({ error: "path outside project is not allowed" }, 403)
   }
@@ -160,7 +162,7 @@ function empty(status: number): Response {
 
 function corsHeaders(extra: Record<string, string> = {}): Headers {
   return new Headers({
-    "access-control-allow-origin": "http://127.0.0.1:47521",
+    "access-control-allow-origin": "*",
     "access-control-allow-methods": "GET,OPTIONS",
     "access-control-allow-headers": "content-type",
     "cache-control": "no-store",

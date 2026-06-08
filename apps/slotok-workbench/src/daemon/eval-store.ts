@@ -123,7 +123,8 @@ export class EvalStore {
       const result = db.query<EvalResultRow, [string]>("SELECT * FROM eval_results WHERE id = ? LIMIT 1").get(id)
       if (!result) return null
       const run = db.query<EvalRunRow, [string]>("SELECT * FROM eval_runs WHERE run_id = ? LIMIT 1").get(result.run_id) ?? undefined
-      const parsed = readJsonFile(result.parsed_path ?? undefined)
+      const parsedPath = parsedPathFor(result)
+      const parsed = readJsonFile(parsedPath ?? undefined)
       const rawPreview = readTextPreview(result.response_path ?? result.cache_path)
       return {
         ...resultToElement(result),
@@ -194,11 +195,18 @@ function resultToElement(row: EvalResultRow): EvalElementSummary {
     },
     paths: {
       video: row.video_path,
-      response: row.response_path ?? null,
-      parsed: row.parsed_path ?? null,
+      response: row.response_path ?? row.cache_path,
+      parsed: parsedPathFor(row),
       cache: row.cache_path,
     },
   }
+}
+
+function parsedPathFor(row: Pick<EvalResultRow, "cache_path" | "parsed_path">): string | null {
+  if (row.parsed_path) return row.parsed_path
+  if (!row.cache_path.endsWith(".json")) return null
+  const candidate = row.cache_path.replace(/\.json$/, ".parsed.json")
+  return existsSync(candidate) ? candidate : null
 }
 
 function parseFrames(value: string): FrameRecord[] {

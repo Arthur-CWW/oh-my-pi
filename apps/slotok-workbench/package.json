@@ -11,6 +11,8 @@
     "dev:renderer": "vite --host 127.0.0.1 --port 47521",
     "dev:electron": "SLOTOK_RENDERER_URL=http://127.0.0.1:47521 electron .",
     "smoke:daemon": "bun src/daemon/server.ts --once",
+    "test": "vitest run",
+    "test:update": "vitest run --update",
     "build": "bun run build:renderer && bun run build:electron",
     "build:renderer": "vite build",
     "build:electron": "tsc -p tsconfig.electron.json",
@@ -21,8 +23,10 @@
   },
   "devDependencies": {
     "electron": "^39.2.6",
+    "happy-dom": "^20.0.11",
     "typescript": "^5.9.3",
     "vite": "^7.2.7",
-    "vite-plugin-solid": "^2.11.8"
+    "vite-plugin-solid": "^2.11.8",
+    "vitest": "^4.0.15"
   }
 }
