@@ -2,11 +2,13 @@
 
 This directory splits the current Jimeng/Dreamina + TTS/lipsync + Pleometric archive work into lanes that can run in parallel in a single working tree, without git worktrees.
 
-Before starting creative/video work, read the state docs:
+Before starting creative/video or orchestration work, read the state docs and relevant review personas:
 
 ```txt
 docs/state/README.md
 docs/state/video-creative-direction.md
+docs/state/symphony-lite-direction.md
+docs/review-agents/README.md
 ```
 
 `video-creative-direction.md` is the living taste ledger / vibe bible / creative north-star for the project. Keep it synchronized with durable preferences Arthur states during sessions.
@@ -23,6 +25,8 @@ docs/state/video-creative-direction.md
 | Pleometric archive | [`pleometric-archive.md`](./pleometric-archive.md) | `packages/twitter-archive/**`, `apps/tweet-viewer/**`, `docs/twitter-archive-plan.md`, this lane doc | `data/twitter-archive/**` |
 | AI UGC format mining | [`ai-ugc-format-mining.md`](./ai-ugc-format-mining.md) | this lane doc; later `packages/twitter-archive/**` or `packages/video-pipeline/**` after handoff | `data/ai-ugc-format-mining/**`, `data/twitter-archive/ugc-sources/**` |
 | Machine/run coordination | [`coordination-runbook.md`](./coordination-runbook.md), [`machine-roles.md`](./machine-roles.md), [`session-prompts.md`](./session-prompts.md) | coordination docs only | `data/coordination/**` |
+| Pi agent control plane / cockpit | [`pi-agent-control-plane.md`](./pi-agent-control-plane.md) | control-plane/cockpit planning docs now; later `packages/control-plane/**`, `packages/tmux-cockpit/**`, and Pi extension glue | TBD |
+| Symphony Lite meta-orchestration | [`symphony-lite.md`](./symphony-lite.md), [`../state/symphony-lite-direction.md`](../state/symphony-lite-direction.md) | workflow/orchestration planning docs now; later `packages/symphony-lite/**`, `packages/dynamic-workflows/**`, and cockpit glue | `data/symphony-lite/**`, cockpit DB |
 
 ## No-worktree coordination rules
 

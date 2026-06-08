@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://pi-workflows.local/schemas/workflow.recipe.schema.json",
   "title": "Pi Video Pipeline Recipe",
-  "description": "v1alpha1 schema for human-authored YAML/JSON video pipeline recipes. YAML must be parsed as a JSON-compatible subset before validation.",
+  "description": "v1alpha1 schema for human-authored JSON video pipeline recipes.",
   "type": "object",
   "required": ["schemaVersion", "kind", "id", "name", "stages"],
   "additionalProperties": false,

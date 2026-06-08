@@ -140,7 +140,7 @@ The graph should also support cloning popular formats ethically by capturing hig
 
 Do not build a full graph runner yet. First:
 
-1. Encode graph concepts in YAML recipe schema.
+1. Encode graph concepts in a JSON recipe schema.
 2. Make `asset` and `stage output` references explicit.
 3. Add local deterministic nodes first: subtitles, ffmpeg compose, mux, analysis.
 4. Add Jimeng/TTS/lipsync provider nodes only after API research stabilizes.

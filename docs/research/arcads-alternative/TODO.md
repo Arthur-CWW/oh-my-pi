@@ -19,3 +19,6 @@
   - Long-poll/collect outputs with retries.
   - Resume after interruption.
 - [ ] Fix/rename the ChatGPT project title in the frontend if desired; current saved alias is `arcads-ugc-lab` and URL works.
+
+reading
+>docs/research/lopopolo-agent-material/cleaned/youtube-latent-space-extreme-harness-engineering.md

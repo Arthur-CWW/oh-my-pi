@@ -49,7 +49,7 @@ Also read / include:
 - @docs/plans/video-asset-library.md
 - @docs/schemas/video-asset-catalog-v0.sql
 
-Goal: define a versioned YAML recipe + JSON run manifest format for reversible ComfyUI-like graph nodes and video-editor-like layers. Preserve separable character/background/prop/audio/caption/filter components.
+Goal: define versioned JSON recipes + JSON run manifests for reversible ComfyUI-like graph nodes and video-editor-like layers. Preserve separable character/background/prop/audio/caption/filter components.
 
 Owned tracked paths:
 - docs/plans/pipeline-serialization-format.md

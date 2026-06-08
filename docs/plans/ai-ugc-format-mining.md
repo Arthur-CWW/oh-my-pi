@@ -196,49 +196,51 @@ Suggested first pass artifacts under `data/ai-ugc-format-mining/`:
 ```txt
 format-decomposition-queue-v1.md     # queue state and per-source notes
 sources/<source-id>.md               # one normalized teardown per source/post/tool
-formats/<format-id>.yaml             # abstract reusable format template
+formats/<format-id>.json             # abstract reusable format template
 ```
 
 ## Format decomposition template
 
 For each source video/post, extract:
 
-```yaml
-formatId: ugc-<slug>
-source:
-  platform: x
-  url: https://x.com/...
-  author: ...
-  capturedAt: ...
-structure:
-  hook:
-    text: ...
-    durationSec: 1.5
-    style: shock|curiosity|pain|authority|demo
-  scenes:
-    - id: scene_1
-      durationSec: 2.0
-      camera: selfie|podcast|screen-record|street|broll
-      character: spokesperson|doctor|founder|customer|mascot
-      background: bedroom|car|podcast|office|surreal
-      props: [phone, product, chart]
-      captionStyle: ...
-  cta:
-    text: ...
-assetsNeeded:
-  character: ai_influencer_or_mascot
-  product: product_image_or_url
-  voice: tts_voice
-  captions: local_ass_style
-editableLayers:
-  - character
-  - hook_text
-  - product_visual
-  - captions
-  - background
-  - broll
-  - music_sfx
-  - filters
+```json
+{
+  "formatId": "ugc-<slug>",
+  "source": {
+    "platform": "x",
+    "url": "https://x.com/...",
+    "author": "...",
+    "capturedAt": "..."
+  },
+  "structure": {
+    "hook": {
+      "text": "...",
+      "durationSec": 1.5,
+      "style": "shock|curiosity|pain|authority|demo"
+    },
+    "scenes": [
+      {
+        "id": "scene_1",
+        "durationSec": 2.0,
+        "camera": "selfie|podcast|screen-record|street|broll",
+        "character": "spokesperson|doctor|founder|customer|mascot",
+        "background": "bedroom|car|podcast|office|surreal",
+        "props": ["phone", "product", "chart"],
+        "captionStyle": "..."
+      }
+    ],
+    "cta": {
+      "text": "..."
+    }
+  },
+  "assetsNeeded": {
+    "character": "ai_influencer_or_mascot",
+    "product": "product_image_or_url",
+    "voice": "tts_voice",
+    "captions": "local_ass_style"
+  },
+  "editableLayers": ["character", "hook_text", "product_visual", "captions", "background", "broll", "music_sfx", "filters"]
+}
 ```
 
 ## CapCut lane idea

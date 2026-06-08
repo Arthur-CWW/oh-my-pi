@@ -1,6 +1,9 @@
 node_modules/
 packages/*/node_modules/
 apps/*/node_modules/
+packages/*/target/
+.pi/npm/
+.pi/git/
 bun.lock
 package-lock.json
 

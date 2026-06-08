@@ -2,292 +2,261 @@
 
 ## Decision
 
-Use a **versioned YAML recipe** for human-authored creative pipelines, validated by a **JSON Schema**, and emit immutable **JSON run manifests** for executed runs.
+Use **versioned JSON** for every machine-readable pipeline artifact:
+
+- recipes
+- campaign plans
+- run manifests
+- variant plans
+- timeline/edit decision lists
+- provider prompt cards
+- review and scoring reports
 
 Why:
 
-- YAML is easier for prompts, dialogue, subtitles, provider knobs, and comments.
-- JSON Schema keeps the format machine-checkable and lets us validate YAML after parsing.
-- JSON manifests are better for reproducibility, caching, and downstream tools.
+- JSON keeps the first CLI simple and dependency-light.
+- JSON is directly validatable with JSON Schema.
+- Agents and scripts can read/write it without YAML parser edge cases.
+- Human-facing text can still live in generated helper files such as `storyboard.md`, `script.txt`, and `captions.srt`.
 
-Constraint: use a **JSON-compatible YAML subset** only:
+No YAML in the first implementation. If a later UI wants comments or richer authoring, it can generate JSON as the canonical source of truth.
 
-- no YAML anchors/aliases
-- no custom tags
-- quote dates/times instead of relying on implicit YAML types
-- maps/lists/scalars only
-- UTF-8 text
+## Current Implementation
 
-## File layout proposal
+The first working CLI package is:
 
 ```txt
-workflows/
-  recipes/                         # committed human-authored specs, later
-    talking-seal-underclass.yaml
-  schemas/                         # committed JSON Schema files, later
-    workflow.recipe.schema.json
-    workflow.run-manifest.schema.json
-
-data/workflow-runs/                # ignored runtime outputs
-  <run-id>/
-    recipe.yaml                    # exact resolved recipe snapshot
-    manifest.json                  # machine run manifest
-    logs/
-    artifacts/
-    provider-raw/                  # redacted if copied into docs/tests
+packages/ugc-cli/
 ```
 
-Do not add `workflows/` yet unless implementation starts. For now this doc defines the target shape.
+Root scripts:
 
-Current draft schema stubs live under:
+```bash
+bun run ugc -- supercomputer modes
+bun run ugc -- model list
+bun run ugc -- arcads ugc-pack --product-name "Demo App" --variants 3 --wait
+bun run ugc -- marketing-studio campaign --product-name "Demo App" --variants 4 --json
+bun run ugc:typecheck
+bun run ugc:test
+```
+
+Runtime output is ignored under:
 
 ```txt
-docs/schemas/workflow.recipe.schema.json
-docs/schemas/workflow.run-manifest.schema.json
+data/ugc-cli/
+  jobs/
+    <job-id>.json
+  runs/
+    <campaign-id>/
+      job.json
+      campaign.json
+      recipe.json
+      manifest.json
+      storyboard.md
+      variants/
+        variant-001/
+          variant.json
+          script.txt
+          captions.srt
+          timeline.json
+          provider-prompts.json
 ```
 
-They intentionally validate the JSON-compatible object produced after YAML parsing, not raw YAML syntax.
+The JSON files are the contract. The Markdown/text/SRT files are generated helpers.
 
-## Core concepts
+## Core Objects
 
-- **Recipe**: desired creative pipeline, authored/reviewed by humans.
-- **Stage**: one executable unit, e.g. TTS, Jimeng video generation, lipsync, ffmpeg subtitles, Gemini analysis.
-- **Asset**: typed file/URL/artifact reference.
-- **Provider**: external/local system used by a stage.
-- **Run manifest**: exact resolved inputs, outputs, timings, provider versions, costs, and errors.
+### Campaign Plan
 
-## Minimal recipe shape
-
-```yaml
-schemaVersion: pi.workflow/v1alpha1
-kind: VideoPipelineRecipe
-id: talking-seal-underclass
-name: Talking Seal Underclass
-
-metadata:
-  createdBy: arthur
-  tags: [pleometric-inspired, seal, post-labor, brainrot]
-  notes: >
-    Generate visuals only in the video model. Add readable subtitles in post.
-
-policy:
-  maxConcurrentStages: 3
-  quotaMode: confirm-before-paid-submit
-  allowNetwork: true
-  allowPaidGeneration: false
-  stopOnRiskControl: true
-
-vars:
-  dialogue: "Automation ate the market. By 2040, labor is a fossil. The underclass is permanent, anon."
-  durationSec: 6
-  aspectRatio: "9:16"
-
-assets:
-  seal_reference:
-    kind: image
-    uri: file://data/dreamina/reference/talking-seal-underclass.png
-    role: visual-reference
-
-prompts:
-  jimeng_visual_zh:
-    language: zh-CN
-    text: |
-      超现实后现代脑腐风格的竖屏短视频，一只海豹像脱口秀主持人一样面对镜头，
-      背景有抽象数学符号、火箭、资本市场图表和冰冷未来城市。
-      只生成画面，不要任何可读文字、字幕、标牌或水印。
-      嘴部可以自然运动，但不要要求模型渲染英文字幕。
-
-stages:
-  - id: generate_visual
-    kind: video.generate
-    provider: jimeng
-    needs: []
-    input:
-      prompt: $prompts.jimeng_visual_zh
-      references: [$assets.seal_reference]
-      durationSec: $vars.durationSec
-      aspectRatio: $vars.aspectRatio
-      mode: image-to-video
-    output:
-      video: base_video
-
-  - id: synth_voice
-    kind: audio.tts
-    provider: tts.best_available
-    needs: []
-    input:
-      text: $vars.dialogue
-      voice: dry-british-documentary
-      format: wav
-    output:
-      audio: narration_wav
-
-  - id: make_subtitles
-    kind: subtitle.generate
-    provider: local
-    needs: []
-    input:
-      text: $vars.dialogue
-      durationSec: $vars.durationSec
-      style: bottom-brainrot-readable
-    output:
-      subtitles: subtitles_ass
-
-  - id: lipsync
-    kind: video.lipsync
-    provider: lipsync.best_available
-    needs: [generate_visual, synth_voice]
-    input:
-      video: $outputs.generate_visual.video
-      audio: $outputs.synth_voice.audio
-    output:
-      video: lipsynced_video
-
-  - id: burn_subtitles
-    kind: video.ffmpeg
-    provider: local
-    needs: [lipsync, make_subtitles]
-    input:
-      video: $outputs.lipsync.video
-      audio: $outputs.synth_voice.audio
-      subtitles: $outputs.make_subtitles.subtitles
-    output:
-      video: final_video
-
-  - id: analyze_final
-    kind: video.analyze
-    provider: gemini-cli
-    needs: [burn_subtitles]
-    input:
-      video: $outputs.burn_subtitles.video
-      rubric: surreal-talking-head-quality-v1
-    output:
-      report: gemini_analysis_json
-```
-
-## Parallelism model
-
-The DAG is encoded by `needs`.
-
-For the seal pipeline:
-
-- `generate_visual`, `synth_voice`, and `make_subtitles` can run in parallel.
-- `lipsync` waits for visual + audio.
-- `burn_subtitles` waits for lipsync + subtitle file.
-- `analyze_final` waits for final video.
-
-Provider policy can further serialize risky stages:
-
-```yaml
-providers:
-  jimeng:
-    maxConcurrency: 1
-    minPollIntervalMs: 2500
-    stopOnErrors: [risk_control, auth]
-  gemini-cli:
-    copyVideoToTmpFirst: true
-```
-
-## Stage kind taxonomy, v1alpha1
-
-Initial stage kinds:
-
-| Kind | Purpose |
-|---|---|
-| `image.generate` | Text/reference image to image |
-| `video.generate` | Text/image/multimodal to video |
-| `audio.tts` | Dialogue to voice audio |
-| `video.lipsync` | Video/image + audio to talking-head video |
-| `subtitle.generate` | Dialogue/timing to `.srt`/`.ass` |
-| `video.ffmpeg` | Local transform/mux/burn subtitles |
-| `video.analyze` | Gemini/GPT/Grok analysis of result |
-| `archive.query` | Pull source inspiration records from local archive |
-| `script.generate` | LLM script/dialogue generation |
-
-Keep stage kinds provider-agnostic. Provider-specific knobs go under `input.providerOptions`.
-
-## Asset reference rules
-
-Supported URI schemes:
-
-- `file://...` for local files relative to repo root unless absolute.
-- `artifact://<stage-id>/<name>` in manifests after a stage runs.
-- `https://...` only for source/provenance URLs or short-lived provider downloads.
-- `x-tweet://<tweet-id>` later for local archive provenance.
-
-Every materialized artifact should have:
+`campaign.json` describes the full Arcads/Higgsfield-style UGC campaign:
 
 ```json
 {
-  "id": "final_video",
-  "kind": "video",
-  "path": "data/workflow-runs/2026-06-03T.../artifacts/final.mp4",
-  "sha256": "...",
-  "mimeType": "video/mp4",
-  "createdByStage": "burn_subtitles"
+  "schemaVersion": "ugc.campaign/v1",
+  "id": "demo-app-42b46932d6",
+  "serialization": "json",
+  "product": {
+    "name": "Demo App",
+    "url": "https://example.com",
+    "description": "A lightweight planning app for overloaded founders.",
+    "approvedClaims": ["saves planning time"],
+    "forbiddenClaims": ["fake customer testimonial"]
+  },
+  "formats": ["talking_head_product_cutaway", "show_app_creator"],
+  "variants": []
 }
 ```
 
-## Run manifest shape
+### Recipe
 
-`manifest.json` should be append-only for reproducibility:
+`recipe.json` is the executable graph skeleton. It is intentionally simple:
 
 ```json
 {
-  "schemaVersion": "pi.workflow.run/v1alpha1",
-  "recipeId": "talking-seal-underclass",
-  "runId": "2026-06-03T120000Z-talking-seal-underclass-a1b2c3",
-  "startedAt": "2026-06-03T12:00:00Z",
-  "finishedAt": null,
-  "status": "running",
-  "recipeSha256": "...",
-  "stages": [
+  "schemaVersion": "ugc.recipe/v1",
+  "id": "demo-app-42b46932d6",
+  "name": "Demo App UGC Campaign",
+  "matrix": {
+    "variants": 3,
+    "formats": ["talking_head_product_cutaway", "show_app_creator"],
+    "personas": ["bedroom_creator", "founder_operator"],
+    "hookStyles": ["pain_point", "skeptical_testimonial"]
+  },
+  "graph": [
     {
-      "id": "synth_voice",
-      "kind": "audio.tts",
-      "provider": "cartesia",
-      "status": "succeeded",
-      "startedAt": "...",
-      "finishedAt": "...",
-      "inputsResolved": {},
-      "outputs": {},
-      "cost": { "currency": "USD", "estimated": 0.02 },
-      "logs": ["logs/synth_voice.log"]
+      "id": "product_brief",
+      "kind": "product.normalize",
+      "provider": "local",
+      "needs": [],
+      "input": {},
+      "output": { "product": "product.json" }
+    },
+    {
+      "id": "caption_sidecars",
+      "kind": "subtitle.generate",
+      "provider": "local",
+      "needs": ["script_variants"],
+      "input": { "format": "srt", "renderReadableTextInPost": true },
+      "output": { "captions": "variants/*/captions.srt" }
     }
   ],
-  "artifacts": [],
-  "errors": []
+  "render": {
+    "width": 1080,
+    "height": 1920,
+    "fps": 30,
+    "aspectRatio": "9:16"
+  }
 }
 ```
 
-## What must be serializable
+### Variant Plan
 
-For good iteration and auditability, the recipe/manifest must capture:
+Each `variants/<id>/variant.json` records the editable creative slots:
 
-- source tweet/video provenance
-- prompts in original language
-- final spoken dialogue
-- subtitle style and timing strategy
-- reference images and hashes
-- provider/model/version/options
-- random seeds if available
-- quotas/cost estimates
-- local commands used, especially ffmpeg/Gemini CLI invocations
-- all output artifact hashes
-- analysis rubric and scores
+```json
+{
+  "id": "variant-001",
+  "formatId": "talking_head_product_cutaway",
+  "persona": {
+    "id": "bedroom_creator",
+    "consentStatus": "synthetic"
+  },
+  "script": {
+    "hook": "If this workflow is still manual...",
+    "body": "Cut from the creator to the product proof...",
+    "cta": "Try it from the link."
+  },
+  "assetsNeeded": [
+    {
+      "kind": "video",
+      "role": "broll",
+      "providerPreference": ["jimeng", "kie", "fal", "local-still-motion"]
+    }
+  ],
+  "compliance": {
+    "syntheticPersona": true,
+    "needsAiDisclosure": true,
+    "blockedClaims": []
+  }
+}
+```
 
-## Open questions for the serialization lane
+### Timeline
 
-1. Should recipes live under committed `workflows/recipes/` or `docs/workflows/` until stable?
-2. Use JSON Pointer-style references instead of `$outputs.stage.asset` strings?
-3. Should provider auth/session references be external names only, e.g. `sessionRef: jimeng.chrome.default`, never paths?
-4. How strict should schema validation be during early experiments?
-5. Should local archive queries be embedded in recipes or resolved before recipe creation?
+Each `timeline.json` is a JSON edit decision list:
 
-## Implementation milestones
+```json
+{
+  "schemaVersion": "ugc.timeline/v1",
+  "variantId": "variant-001",
+  "width": 1080,
+  "height": 1920,
+  "fps": 30,
+  "layers": [
+    {
+      "id": "base_talking_clip",
+      "type": "video",
+      "role": "talking_or_voiceover_clip",
+      "startMs": 0,
+      "endMs": 24000,
+      "source": "provider_prompt_cards.json#talking_or_voiceover_clip"
+    },
+    {
+      "id": "captions",
+      "type": "subtitle",
+      "role": "captions",
+      "source": "captions.srt"
+    }
+  ]
+}
+```
 
-1. Draft JSON Schema for the minimal recipe and run manifest. Initial stubs: `docs/schemas/workflow.recipe.schema.json`, `docs/schemas/workflow.run-manifest.schema.json`.
-2. Add a small validator CLI that parses YAML and validates against these schemas.
-3. Add a dry-run planner that prints the DAG and parallel stages.
-4. Add local-only executors for `subtitle.generate`, `video.ffmpeg`, and `video.analyze`.
-5. Add provider adapters after Jimeng/TTS/lipsync lanes identify stable APIs.
+### Run Manifest
+
+`manifest.json` is the immutable run record:
+
+```json
+{
+  "schemaVersion": "ugc.run/v1",
+  "serialization": "json",
+  "status": "completed",
+  "cost": {
+    "estimatedUsd": 0,
+    "actualUsd": 0,
+    "paidGenerationSubmitted": false
+  },
+  "guardrails": {
+    "noPaidGeneration": true,
+    "noAutoposting": true,
+    "noRealPersonClone": true,
+    "noModelRenderedText": true
+  }
+}
+```
+
+## Component Mapping
+
+The CLI-first open-source analogue breaks Arcads/Higgsfield into these parts:
+
+| Component | Current JSON artifact | Future executable node |
+|---|---|---|
+| Product intake | `campaign.json.product` | `product.normalize`, `web.fetch`, `screenshot.capture` |
+| Format/template selection | `recipe.json.matrix.formats` | `format.instantiate` |
+| Persona/actor selection | `variant.json.persona` | `persona.select`, `image.generate` |
+| Script/hook variants | `variant.json.script` | `script.generate` |
+| Voice/TTS | `provider-prompts.json` | `tts.generate` |
+| Talking actor/lipsync | `provider-prompts.json` | `video.lipsync` |
+| B-roll/product/app scenes | `provider-prompts.json` | `video.generate`, `app.capture` |
+| Captions/text | `captions.srt`, `timeline.json` | `subtitle.generate`, `render.compose` |
+| Final render | `timeline.json` | `remotion.render`, `ffmpeg.finalize` |
+| Scoring/review | `virality-report.json` | `analyze.creative`, `review.score` |
+
+## Provider Policy
+
+Provider adapters should remain pluggable. The JSON graph records capability and preference; it does not care whether the eventual media comes from Jimeng, Kie, fal, OpenAI, Gemini, local ComfyUI, or a manual asset.
+
+First provider posture:
+
+```json
+{
+  "node": "broll",
+  "capability": "video.generate",
+  "preferred": ["jimeng", "kie", "fal", "veo", "kling"],
+  "localFallback": "still image motion / storyboard placeholder"
+}
+```
+
+Hard defaults:
+
+- no paid generation unless explicitly enabled by a future flag
+- no real-person clone path without consent metadata
+- no readable text delegated to image/video models
+- no direct autoposting in the first pipeline
+
+## Next Implementation Steps
+
+1. Add JSON Schema files for `ugc.recipe/v1`, `ugc.campaign/v1`, `ugc.timeline/v1`, and `ugc.run/v1`.
+2. Add a `ugc recipe validate` implementation backed by the schemas instead of the current lightweight shape check.
+3. Add provider adapter interfaces that consume `provider-prompts.json` and write output asset records.
+4. Add a renderer command that consumes `timeline.json` and emits a first simple MP4 through Remotion or ffmpeg.
+5. Add an asset catalog table so generated JSON artifacts can be indexed by product, variant, persona, format, provider, and provenance.

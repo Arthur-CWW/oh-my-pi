@@ -1,0 +1,7 @@
+[tasks.symphonyx-install]
+description = "Install the local SymphonyX CLI globally into ~/.cargo/bin"
+run = "cargo install --path packages/symphony-lite-rs --locked --force"
+
+[tasks.symphonyx-test]
+description = "Run SymphonyX Rust tests"
+run = "cargo test --manifest-path packages/symphony-lite-rs/Cargo.toml"
