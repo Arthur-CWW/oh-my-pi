@@ -5,6 +5,7 @@ Monorepo for Pi extensions, skills, and local-first AI workflows.
 Current focus:
 
 - `packages/web-access` — existing Pi web/search/fetch/YouTube/frontend-LLM tools.
+- `packages/dynamic-workflows` — vendored `pi-dynamic-workflows` source/tests plus adversarial-review prompt template; the released npm package is installed project-locally for the active workflow tool.
 - `packages/browser-use` — clean-room CDP browser-use extension prototype.
 - `packages/twitter-archive` — planned local X/Twitter archive capture + normalization.
 - `packages/jimeng-client` — Jimeng/Dreamina direct API helpers ported from Slotok reverse engineering.
@@ -13,12 +14,13 @@ Current focus:
 
 ## Pi project package
 
-The repo root is now a Pi package. The local project setting `.pi/settings.json` points at `..`, so `pi` from this directory loads the root `pi` manifest and registers the web-access extension.
+The repo root is now a Pi package. The local project setting `.pi/settings.json` points at `..` and `npm:pi-dynamic-workflows`, so `pi` from this directory loads the root `pi` manifest plus the released workflow extension.
 
 Quick checks:
 
 ```bash
 pi --help
+bun run lint
 bun run typecheck
 bun run test
 ```
@@ -28,6 +30,7 @@ bun run test
 ```txt
 packages/
   web-access/        # Pi web access extension moved from repo root
+  dynamic-workflows/ # vendored workflow source/tests and adversarial-review prompt
   browser-use/       # CDP browser automation extension prototype
   twitter-archive/  # local archive model/capture package skeleton
   jimeng-client/    # Jimeng direct client helpers

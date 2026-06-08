@@ -22,7 +22,9 @@ The repo root is also a Pi package. `.pi/settings.json` points at `..` and `npm:
 pi --help                         # verify project Pi package loads
 bun run typecheck                 # delegates to packages/web-access
 bun run test                      # delegates to packages/web-access
-bun run check                     # typecheck + tests
+bun run check                     # typecheck + tests + lint
+bun run lint                      # all repo lint guardrails
+bun run lint:unsafe-types         # ratcheted no any/unknown/Any lint
 bun run jimeng:test               # Jimeng direct-client unit tests
 bun run web-access:smoke          # live tool smoke test
 bun run web-access:help           # verify extension directly
@@ -79,6 +81,8 @@ docs/twitter-archive-plan.md      Twitter/X archive and shortform pipeline plan
 - `moduleResolution: "bundler"` — no `.js` import extensions
 - `bun-types` in package typecheck configs for tests
 - Cross-runtime: avoid native modules unless deliberately isolated
+- Do not introduce explicit TypeScript `any`/`unknown` or Python `Any` outside typed boundary modules; use `bun run lint:unsafe-types`.
+- External API/process/file data should be decoded at the boundary with a schema/parser before entering core code; DB access should use generated/inferred row types or decode rows in the repository layer.
 - Kagi auth: `X-Kagi-Authorization` header (matching official extension)
 - Tests close to source in package `test/` directories
 - No colocated `*.test.ts` beside impl files

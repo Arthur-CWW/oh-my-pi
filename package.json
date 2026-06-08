@@ -12,19 +12,36 @@
     "url": "git+https://github.com/Arthur-CWW/pi-workflows.git"
   },
   "scripts": {
-    "typecheck": "cd packages/web-access && bun run typecheck && cd ../twitter-archive && bun run typecheck && cd ../jimeng-client && bun run typecheck",
-    "test": "cd packages/web-access && bun run test && cd ../twitter-archive && bun run test && cd ../jimeng-client && bun run test",
-    "check": "bun run typecheck && bun run test",
+    "typecheck": "cd packages/web-access && bun run typecheck && cd ../mermaid-preview && bun run typecheck && cd ../twitter-archive && bun run typecheck && cd ../jimeng-client && bun run typecheck && cd ../dynamic-workflows && bun run typecheck && cd ../ugc-cli && bun run typecheck",
+    "test": "cd packages/web-access && bun run test && cd ../mermaid-preview && bun run test && cd ../twitter-archive && bun run test && cd ../jimeng-client && bun run test && cd ../dynamic-workflows && bun run test && cd ../ugc-cli && bun run test",
+    "check": "bun run typecheck && bun run test && bun run lint",
+    "lint": "bun run lint:unsafe-types && bun run lint:ast-grep && bun run lint:ast-grep:tests",
+    "lint:ast-grep": "bun run scripts/ast-grep.boundary.ts scan --config sgconfig.yml --off=no-unsafe-any-unknown-ts --off=no-unsafe-any-python --report-style=medium",
+    "lint:ast-grep:tests": "bun run scripts/check-ast-grep-tests.boundary.ts && bun run lint:unsafe-types:rules",
+    "lint:unsafe-types": "bun run scripts/lint-unsafe-types.boundary.ts",
+    "lint:unsafe-types:update-baseline": "bun run scripts/lint-unsafe-types.boundary.ts --update",
+    "lint:unsafe-types:strict": "bun run scripts/lint-unsafe-types.boundary.ts --strict",
+    "lint:unsafe-types:rules": "bun run scripts/ast-grep.boundary.ts test --config sgconfig.yml --skip-snapshot-tests",
+    "ugc": "bun packages/ugc-cli/src/cli.ts",
+    "ugc:typecheck": "cd packages/ugc-cli && bun run typecheck",
+    "ugc:test": "cd packages/ugc-cli && bun run test",
     "web-access:smoke": "cd packages/web-access && bun run scripts/smoke.ts",
     "web-access:help": "pi -e ./packages/web-access/src/index.ts --help",
+    "cockpit": "bun packages/web-access/src/agent-cockpit-cli.ts",
     "twitter-archive:typecheck": "cd packages/twitter-archive && bun run typecheck",
     "twitter-archive:test": "cd packages/twitter-archive && bun run test",
     "jimeng:typecheck": "cd packages/jimeng-client && bun run typecheck",
     "jimeng:test": "cd packages/jimeng-client && bun run test",
-    "jimeng:cli": "bun packages/jimeng-client/src/cli.ts"
+    "jimeng:cli": "bun packages/jimeng-client/src/cli.ts",
+    "dynamic-workflows:typecheck": "cd packages/dynamic-workflows && bun run typecheck",
+    "dynamic-workflows:test": "cd packages/dynamic-workflows && bun run test"
   },
   "pi": {
-    "extensions": ["./packages/web-access/src/index.ts"],
-    "skills": ["./packages/web-access/skills"]
+    "extensions": ["./packages/web-access/src/index.ts", "./packages/mermaid-preview/src/index.ts"],
+    "skills": ["./packages/web-access/skills"],
+    "prompts": ["./packages/dynamic-workflows/prompts"]
+  },
+  "devDependencies": {
+    "@ast-grep/cli": "0.42.2"
   }
 }

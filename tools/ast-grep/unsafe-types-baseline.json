@@ -1,0 +1,1245 @@
+{
+  "version": 1,
+  "description": "Ratcheted baseline for explicit any/unknown/Any findings. Run `bun run lint:unsafe-types:update-baseline` after intentional cleanup.",
+  "matches": [
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/browser-use/index.ts",
+      "text": "any",
+      "source": "await page.keyboard.press(key as any)",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/browser-use/index.ts",
+      "text": "any",
+      "source": "await page.keyboard.press(parts[0]! as any)",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/browser-use/index.ts",
+      "text": "any",
+      "source": "const css = (globalThis as any).CSS",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/browser-use/index.ts",
+      "text": "any",
+      "source": "const out: any[] = []",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/browser-use/index.ts",
+      "text": "any",
+      "source": "const walk = (node: any, depth: number) => {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/browser-use/index.ts",
+      "text": "any",
+      "source": "for (const modifier of modifiers.reverse()) await page.keyboard.up(modifier as any)",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/browser-use/index.ts",
+      "text": "any",
+      "source": "for (const modifier of modifiers) await page.keyboard.down(modifier as any)",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/browser-use/index.ts",
+      "text": "any",
+      "source": "function errorResult(message: string, details: Record<string, unknown> = {}): any {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/browser-use/index.ts",
+      "text": "unknown",
+      "source": "function errorResult(message: string, details: Record<string, unknown> = {}): any {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/browser-use/index.ts",
+      "text": "any",
+      "source": "function textResult(text: string, details: Record<string, unknown> = {}): any {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/browser-use/index.ts",
+      "text": "unknown",
+      "source": "function textResult(text: string, details: Record<string, unknown> = {}): any {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/browser-use/index.ts",
+      "text": "unknown",
+      "source": "if (await cdpJson<unknown>(cdpUrl, \"/json/version\")) return true",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/browser-use/index.ts",
+      "text": "unknown",
+      "source": "return (page.target() as unknown as { _targetId?: string })._targetId",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/capture.ts",
+      "text": "unknown",
+      "source": "body: Record<string, unknown>,",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/capture.ts",
+      "text": "unknown",
+      "source": "export function extractImagePrompt(body: Record<string, unknown>): string | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/capture.ts",
+      "text": "unknown",
+      "source": "export function extractVideoPrompt(body: Record<string, unknown>): string | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/capture.ts",
+      "text": "unknown",
+      "source": "export function parseJsonRecord(text: string, label: string): Record<string, unknown> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/capture.ts",
+      "text": "unknown",
+      "source": "function asArray(value: unknown): unknown[] {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/capture.ts",
+      "text": "unknown",
+      "source": "function asRecord(value: unknown): Record<string, unknown> | null {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/capture.ts",
+      "text": "unknown",
+      "source": "function getFirstVideoInput(draft: Record<string, unknown>): Record<string, unknown> | null {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/capture.ts",
+      "text": "unknown",
+      "source": "function getGenVideo(draft: Record<string, unknown>): Record<string, unknown> | null {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/capture.ts",
+      "text": "unknown",
+      "source": "function getImagePromptPart(body: Record<string, unknown>): Record<string, unknown> | null {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/capture.ts",
+      "text": "unknown",
+      "source": "function getTextToVideoParams(draft: Record<string, unknown>): Record<string, unknown> | null {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/capture.ts",
+      "text": "unknown",
+      "source": "function isRecord(value: unknown): value is Record<string, unknown> {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/capture.ts",
+      "text": "unknown",
+      "source": "function safeJson(value: string): unknown {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/capture.ts",
+      "text": "unknown",
+      "source": "submitBody: Record<string, unknown>",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/cli.ts",
+      "text": "unknown",
+      "source": "function readJson(file: string): unknown {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/cli.ts",
+      "text": "unknown",
+      "source": "function writeJson(file: string, value: unknown): void {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/dreamina-compatible-cli.ts",
+      "text": "unknown",
+      "source": "function readJson(file: string): unknown {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/dreamina-compatible-cli.ts",
+      "text": "unknown",
+      "source": "function writeJson(file: string, value: unknown): void {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/errors.ts",
+      "text": "unknown",
+      "source": "[key: string]: unknown",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/network-recorder.ts",
+      "text": "unknown",
+      "source": "#pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>()",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/network-recorder.ts",
+      "text": "unknown",
+      "source": "const out: Record<string, unknown> = {}",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/network-recorder.ts",
+      "text": "unknown",
+      "source": "const record = value as Record<string, unknown>",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/network-recorder.ts",
+      "text": "unknown",
+      "source": "function asRecord(value: unknown): Record<string, unknown> | null {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/network-recorder.ts",
+      "text": "unknown",
+      "source": "function headersValue(value: unknown): Record<string, string> | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/network-recorder.ts",
+      "text": "unknown",
+      "source": "function messageDataToString(data: unknown): string {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/network-recorder.ts",
+      "text": "unknown",
+      "source": "function numberValue(value: unknown): number | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/network-recorder.ts",
+      "text": "unknown",
+      "source": "function redactJson(value: unknown): unknown {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/network-recorder.ts",
+      "text": "unknown",
+      "source": "function redactJsonScalar(value: unknown): unknown {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/network-recorder.ts",
+      "text": "unknown",
+      "source": "function stringValue(value: unknown): string | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/network-recorder.ts",
+      "text": "unknown",
+      "source": "function writeJsonl(raw: WriteStream, value: unknown): void {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/network-recorder.ts",
+      "text": "unknown",
+      "source": "params?: Record<string, unknown>",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/network-recorder.ts",
+      "text": "unknown",
+      "source": "private handleMessage(data: unknown): void {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/network-recorder.ts",
+      "text": "unknown",
+      "source": "result?: unknown",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/network-recorder.ts",
+      "text": "unknown",
+      "source": "return !!value && typeof value === \"object\" && !Array.isArray(value) ? value as Record<string, unknown> : null",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/network-recorder.ts",
+      "text": "unknown",
+      "source": "send<T = Record<string, unknown>>(method: string, params: Record<string, unknown> = {}, sessionId?: string): Promise<T> {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/sse.ts",
+      "text": "unknown",
+      "source": "function asUuid(value: unknown): string | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/sse.ts",
+      "text": "unknown",
+      "source": "function findSubmitId(value: unknown): string | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/sse.ts",
+      "text": "unknown",
+      "source": "function findSubmitInfo(value: unknown): { code: number; msg: string | null } | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/sse.ts",
+      "text": "unknown",
+      "source": "function isRecord(value: unknown): value is Record<string, unknown> {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/sse.ts",
+      "text": "unknown",
+      "source": "function normalizeSubmitInfo(value: unknown): { code: number; msg: string | null } | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/sse.ts",
+      "text": "unknown",
+      "source": "function safeJson(value: string): unknown {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/test/capture.test.ts",
+      "text": "any",
+      "source": "const part = ((prepared.submitBody.messages as any[])[0].content.content_parts as any[])[0]",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "packages/twitter-archive/legacy/tweet-archives-app/list-intersection/list_diff.py",
+      "text": "Any",
+      "source": "from typing import Set, Dict, Any",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "packages/twitter-archive/legacy/tweet-archives-app/tweet_hydrator/fetch.py",
+      "text": "Any",
+      "source": ") -> Optional[Dict[str, Any]]:",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "packages/twitter-archive/legacy/tweet-archives-app/tweet_hydrator/fetch.py",
+      "text": "Any",
+      "source": "from typing import Any, Dict, Optional",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "packages/twitter-archive/legacy/tweet-archives-app/tweet_hydrator/fetch.py",
+      "text": "Any",
+      "source": "self, url: str, params: Optional[Dict[str, Any]] = None",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "packages/twitter-archive/legacy/tweet-archives-app/tweet_hydrator/types.py",
+      "text": "Any",
+      "source": "from typing import Any, Dict, Optional",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "packages/twitter-archive/legacy/tweet-archives-app/tweet_hydrator/types.py",
+      "text": "Any",
+      "source": "raw_json: Dict[str, Any]",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "packages/twitter-archive/legacy/tweet-archives-app/waybacktweets/waybacktweets/_cli.py",
+      "text": "Any",
+      "source": "ctx: Optional[Any] = None, param: Optional[Any] = None, value: Optional[str] = None",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "packages/twitter-archive/legacy/tweet-archives-app/waybacktweets/waybacktweets/_cli.py",
+      "text": "Any",
+      "source": "from typing import Any, Optional",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/twitter-archive/src/jsonl.ts",
+      "text": "unknown",
+      "source": "function isErrno(error: unknown, code: string): error is NodeJS.ErrnoException {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/twitter-archive/src/jsonl.ts",
+      "text": "unknown",
+      "source": "public readonly cause: unknown,",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/twitter-archive/src/provider-log.ts",
+      "text": "unknown",
+      "source": "const object = value as Record<string, unknown>",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/twitter-archive/src/provider-log.ts",
+      "text": "unknown",
+      "source": "export function stableProviderRequestHash(value: unknown): string {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/twitter-archive/src/provider-log.ts",
+      "text": "unknown",
+      "source": "function stableStringify(value: unknown): string {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/twitter-archive/src/provider-log.ts",
+      "text": "unknown",
+      "source": "raw?: unknown",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/twitter-archive/src/provider-log.ts",
+      "text": "unknown",
+      "source": "rawPricing?: unknown",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/scripts/smoke.ts",
+      "text": "unknown",
+      "source": "} catch (e: unknown) {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/codex.ts",
+      "text": "unknown",
+      "source": "? Object.entries(payload.changes as Record<string, { type?: unknown }>).map(([file, change]) => {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/codex.ts",
+      "text": "unknown",
+      "source": "const args = parsed as Record<string, unknown>",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/codex.ts",
+      "text": "unknown",
+      "source": "const parsed = JSON.parse(line) as unknown",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/codex.ts",
+      "text": "unknown",
+      "source": "details: { error: null as unknown as string, entryCount: resume.entryCount, file: session.file, truncated: resume.truncated },",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/codex.ts",
+      "text": "unknown",
+      "source": "function formatFunctionCall(payload: Record<string, unknown>): { callId?: string; name: string; text: string } | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/codex.ts",
+      "text": "unknown",
+      "source": "function formatPatchEvent(payload: Record<string, unknown>): string | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/codex.ts",
+      "text": "unknown",
+      "source": "function numberValue(value: unknown): number | undefined {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/codex.ts",
+      "text": "unknown",
+      "source": "function objectValue(value: unknown): Record<string, unknown> | undefined {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/codex.ts",
+      "text": "unknown",
+      "source": "function parseImportMarker(value: unknown): CodexImportMarker | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/codex.ts",
+      "text": "unknown",
+      "source": "function parseJsonString(value: string | undefined): unknown {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/codex.ts",
+      "text": "unknown",
+      "source": "function prettyJson(value: unknown): string {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/codex.ts",
+      "text": "unknown",
+      "source": "function stringValue(value: unknown): string | undefined {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/codex.ts",
+      "text": "unknown",
+      "source": "payload?: Record<string, unknown>",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/codex.ts",
+      "text": "unknown",
+      "source": "return { content: [{ type: \"text\", text }], details: { error: null as unknown as string } }",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/codex.ts",
+      "text": "unknown",
+      "source": "return JSON.parse(value) as unknown",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/codex.ts",
+      "text": "unknown",
+      "source": "return value && typeof value === \"object\" ? value as Record<string, unknown> : undefined",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/config.ts",
+      "text": "unknown",
+      "source": "function load(): Record<string, unknown> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/config.ts",
+      "text": "unknown",
+      "source": "let _cache: Record<string, unknown> | null = null",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/fetch.ts",
+      "text": "unknown",
+      "source": "(candidate: unknown) => puppeteerTargetId(candidate) === created.targetId,",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/fetch.ts",
+      "text": "any",
+      "source": "async function waitForExtractableHtml(page: any, signal?: AbortSignal): Promise<{ html: string; text: string; title: string }> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/fetch.ts",
+      "text": "any",
+      "source": "const browserTarget = browser.targets().find((target: any) => target.type() === \"browser\")",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/fetch.ts",
+      "text": "unknown",
+      "source": "const candidate = target as { _targetId?: unknown }",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/fetch.ts",
+      "text": "unknown",
+      "source": "function puppeteerTargetId(target: unknown): string | undefined {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/fetch.ts",
+      "text": "unknown",
+      "source": "if (await cdpJson<unknown>(cdpUrl, \"/json/version\")) return true",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/fetch.ts",
+      "text": "any",
+      "source": "let browser: any = null",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/fetch.ts",
+      "text": "unknown",
+      "source": "return new Readability(document as unknown as Document).parse()",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/frontend-browser.ts",
+      "text": "any",
+      "source": "async function clickChatGptLoginStep(page: any, credential: GoogleCredential, clicked: string[]): Promise<boolean> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/frontend-browser.ts",
+      "text": "any",
+      "source": "async function clickText(page: any, texts: string[]): Promise<string | null> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/frontend-browser.ts",
+      "text": "any",
+      "source": "async function clickTextByMouse(page: any, texts: string[], options: { preferRight?: boolean } = {}): Promise<string | null> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/frontend-browser.ts",
+      "text": "any",
+      "source": "async function dismissAiStudioBanners(page: any): Promise<void> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/frontend-browser.ts",
+      "text": "any",
+      "source": "async function extractAiStudioResponse(page: any, prompt: string, baseline = \"\"): Promise<string> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/frontend-browser.ts",
+      "text": "any",
+      "source": "async function extractChatGptResponse(page: any, prompt: string, baseline = \"\"): Promise<string> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/frontend-browser.ts",
+      "text": "any",
+      "source": "async function fillAiStudioPrompt(page: any, prompt: string): Promise<void> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/frontend-browser.ts",
+      "text": "any",
+      "source": "async function fillChatGptPrompt(page: any, prompt: string): Promise<void> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/frontend-browser.ts",
+      "text": "any",
+      "source": "async function inspectAiStudioHumanBlocker(page: any): Promise<string | null> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/frontend-browser.ts",
+      "text": "any",
+      "source": "async function inspectChatGptHumanBlocker(page: any, loginRequiredIsHuman = true): Promise<string | null> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/frontend-browser.ts",
+      "text": "any",
+      "source": "async function inspectChatGptSession(page: any, loginRequiredIsHuman = true) {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/frontend-browser.ts",
+      "text": "any",
+      "source": "async function inspectGmailSession(page: any) {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/frontend-browser.ts",
+      "text": "any",
+      "source": "async function isChatGptResponseRunning(page: any): Promise<boolean> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/frontend-browser.ts",
+      "text": "any",
+      "source": "async function submitAiStudioPrompt(page: any): Promise<boolean> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/frontend-browser.ts",
+      "text": "any",
+      "source": "async function submitChatGptPrompt(page: any): Promise<boolean> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/frontend-browser.ts",
+      "text": "any",
+      "source": "async function typeInput(page: any, selector: string, value: string): Promise<boolean> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/frontend-browser.ts",
+      "text": "any",
+      "source": "async function waitForAiStudioResponse(page: any, prompt: string, timeoutMs: number, baseline: string): Promise<string> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/frontend-browser.ts",
+      "text": "any",
+      "source": "async function waitForChatGptResponse(page: any, prompt: string, timeoutMs: number, baseline: string): Promise<string> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/frontend-browser.ts",
+      "text": "unknown",
+      "source": "const rawTabs = await cdpJson<Array<Record<string, unknown>>>(resolved.cdpUrl, \"/json/list\")",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/frontend-browser.ts",
+      "text": "unknown",
+      "source": "const value = (target as { _targetId?: unknown })._targetId",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/frontend-browser.ts",
+      "text": "unknown",
+      "source": "function puppeteerTargetId(target: unknown): string | undefined {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/frontend-browser.ts",
+      "text": "unknown",
+      "source": "if (await cdpJson<unknown>(cdpUrl, \"/json/version\")) return true",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/gemini.ts",
+      "text": "unknown",
+      "source": "const json = JSON.parse(raw.slice(start, end + 1)) as unknown[]",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/gemini.ts",
+      "text": "unknown",
+      "source": "const tools: unknown[] = []",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/gemini.ts",
+      "text": "unknown",
+      "source": "function nested(o: unknown, path: number[]): unknown {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/index.ts",
+      "text": "unknown",
+      "source": "details: { error: null as unknown as string },",
+      "count": 11
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/index.ts",
+      "text": "unknown",
+      "source": "details: result.ok ? { error: null as unknown as string } : { error: result.text },",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/kagi.ts",
+      "text": "unknown",
+      "source": "const events: Array<{ data: unknown }> = []",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/kagi.ts",
+      "text": "unknown",
+      "source": "export function parseAnswer(events: Array<{ data: unknown }>): string {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/kagi.ts",
+      "text": "unknown",
+      "source": "export function parseResults(events: Array<{ data: unknown }>): Array<{ title: string; url: string; snippet: string }> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/store.ts",
+      "text": "unknown",
+      "source": "value: unknown",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/store.ts",
+      "text": "unknown",
+      "source": "value: unknown,",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/vim-lite.ts",
+      "text": "unknown",
+      "source": "return this as unknown as EditorInternals",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/test/codex.test.ts",
+      "text": "unknown",
+      "source": "function jsonl(records: unknown[]): string {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/test/kagi.test.ts",
+      "text": "unknown",
+      "source": "const dupFixture: Array<{ data: unknown }> = [{",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/test/kagi.test.ts",
+      "text": "unknown",
+      "source": "const FIXTURE: Array<{ data: unknown }> = [",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/test/kagi.test.ts",
+      "text": "unknown",
+      "source": "const fixture: Array<{ data: unknown }> = [{",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/test/vim-lite.test.ts",
+      "text": "unknown",
+      "source": ";(editor as unknown as { pastes: Map<number, string> }).pastes.set(1, pasted)",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/test/vim-lite.test.ts",
+      "text": "unknown",
+      "source": "} as unknown as TUI",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "scripts/archive-alex-x-articles.py",
+      "text": "Any",
+      "source": "def apply_links(text: str, block: dict[str, Any], entity_map: dict[str, dict[str, Any]]) -> str:",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "scripts/archive-alex-x-articles.py",
+      "text": "Any",
+      "source": "def blocks_to_markdown(article: dict[str, Any]) -> str:",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "scripts/archive-alex-x-articles.py",
+      "text": "Any",
+      "source": "def call_tweet_detail(tweet_id: str, cookie: str, ct0: str, bearer: str) -> dict[str, Any]:",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "scripts/archive-alex-x-articles.py",
+      "text": "Any",
+      "source": "def find_first_article(obj: Any) -> dict[str, Any] | None:",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "scripts/archive-alex-x-articles.py",
+      "text": "Any",
+      "source": "def find_first_tweet_text(obj: Any) -> str | None:",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "scripts/archive-alex-x-articles.py",
+      "text": "Any",
+      "source": "def media_url_by_id(article: dict[str, Any]) -> dict[str, str]:",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "scripts/archive-alex-x-articles.py",
+      "text": "Any",
+      "source": "def q(obj: Any) -> str:",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "scripts/archive-alex-x-articles.py",
+      "text": "Any",
+      "source": "from typing import Any",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "scripts/eval-video-understanding.ts",
+      "text": "unknown",
+      "source": "): Record<string, unknown> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "scripts/eval-video-understanding.ts",
+      "text": "unknown",
+      "source": "async function callGoogle(sample: VideoSample, args: Args): Promise<unknown> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "scripts/eval-video-understanding.ts",
+      "text": "unknown",
+      "source": "async function callKie(sample: VideoSample, args: Args): Promise<unknown> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "scripts/eval-video-understanding.ts",
+      "text": "unknown",
+      "source": "async function ffprobe(videoPath: string): Promise<Record<string, unknown>> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "scripts/eval-video-understanding.ts",
+      "text": "unknown",
+      "source": "async function readJsonOrThrow(response: Response): Promise<unknown> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "scripts/eval-video-understanding.ts",
+      "text": "any",
+      "source": "const googleText = value?.candidates?.[0]?.content?.parts?.map((part: any) => part.text).filter(Boolean).join(\"\\n\")",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "scripts/eval-video-understanding.ts",
+      "text": "unknown",
+      "source": "const metadata = await ffprobe(videoPath).catch(() => ({} as Record<string, unknown>))",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "scripts/eval-video-understanding.ts",
+      "text": "any",
+      "source": "const value = raw as any",
+      "count": 4
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "scripts/eval-video-understanding.ts",
+      "text": "unknown",
+      "source": "const videoStream = ((metadata.streams as Array<Record<string, unknown>> | undefined) ?? []).find(",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "scripts/eval-video-understanding.ts",
+      "text": "unknown",
+      "source": "function asNumber(value: unknown): number | undefined {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "scripts/eval-video-understanding.ts",
+      "text": "unknown",
+      "source": "function estimateCostUsd(provider: string, model: string, usage: Record<string, unknown>, raw: unknown, args: Args): number | undefined {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "scripts/eval-video-understanding.ts",
+      "text": "unknown",
+      "source": "function extractAnalysisText(raw: unknown): string {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "scripts/eval-video-understanding.ts",
+      "text": "unknown",
+      "source": "function extractCreditsConsumed(raw: unknown): number | undefined {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "scripts/eval-video-understanding.ts",
+      "text": "unknown",
+      "source": "function extractFinishReason(raw: unknown): string | undefined {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "scripts/eval-video-understanding.ts",
+      "text": "unknown",
+      "source": "function extractUsage(raw: unknown): Record<string, unknown> {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "scripts/eval-video-understanding.ts",
+      "text": "unknown",
+      "source": "function isUsefulParsedObject(value: unknown): boolean {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "scripts/eval-video-understanding.ts",
+      "text": "unknown",
+      "source": "function normalizeUsage(usage: Record<string, unknown>): {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "scripts/eval-video-understanding.ts",
+      "text": "unknown",
+      "source": "function tryParseJsonObject(text: string): unknown | undefined {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "scripts/eval-video-understanding.ts",
+      "text": "any",
+      "source": "if (Array.isArray(openAiText)) return openAiText.map((part: any) => part.text ?? part.content ?? \"\").join(\"\\n\")",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "scripts/eval-video-understanding.ts",
+      "text": "unknown",
+      "source": "let parsed: unknown",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "scripts/eval-video-understanding.ts",
+      "text": "unknown",
+      "source": "raw?: unknown",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "scripts/eval-video-understanding.ts",
+      "text": "unknown",
+      "source": "return typeof value === \"object\" && value !== null && Object.keys(value as Record<string, unknown>).length > 0",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "scripts/eval-video-understanding.ts",
+      "text": "unknown",
+      "source": "usage?: Record<string, unknown>",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "scripts/validate-workflow-prototype.py",
+      "text": "Any",
+      "source": "batches: list[list[dict[str, Any]]] = []",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "scripts/validate-workflow-prototype.py",
+      "text": "Any",
+      "source": "def check_schema_and_instance(schema: dict[str, Any], instance: Any, label: str) -> None:",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "scripts/validate-workflow-prototype.py",
+      "text": "Any",
+      "source": "def collect_input_refs(value: Any, path: str) -> list[tuple[str, str]]:",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "scripts/validate-workflow-prototype.py",
+      "text": "Any",
+      "source": "def dependency_warnings(stages: list[dict[str, Any]], stage_by_id: dict[str, dict[str, Any]]) -> list[str]:",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "scripts/validate-workflow-prototype.py",
+      "text": "Any",
+      "source": "def load_json(path: Path) -> Any:",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "scripts/validate-workflow-prototype.py",
+      "text": "Any",
+      "source": "def load_yaml_or_json(path: Path) -> Any:",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "scripts/validate-workflow-prototype.py",
+      "text": "Any",
+      "source": "def print_plan(recipe: dict[str, Any], batches: list[list[dict[str, Any]]], warnings: list[str]) -> None:",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "scripts/validate-workflow-prototype.py",
+      "text": "Any",
+      "source": "def semantic_check_recipe(recipe: dict[str, Any]) -> tuple[list[list[dict[str, Any]]], list[str]]:",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "scripts/validate-workflow-prototype.py",
+      "text": "Any",
+      "source": "def topological_batches(stages: list[dict[str, Any]], stage_by_id: dict[str, dict[str, Any]]) -> list[list[dict[str, Any]]]:",
+      "count": 3
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "scripts/validate-workflow-prototype.py",
+      "text": "Any",
+      "source": "def validate_expression_ref(ref: str, path: str, recipe: dict[str, Any], stage_by_id: dict[str, dict[str, Any]]) -> None:",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "scripts/validate-workflow-prototype.py",
+      "text": "Any",
+      "source": "from typing import Any",
+      "count": 1
+    }
+  ]
+}
