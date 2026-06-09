@@ -29,7 +29,7 @@ Still dirty / pending at time of writing:
 
 - `.pi/extensions/codex-plugin-manager/index.ts` — project-local Codex plugin manager; should be tracked if we keep using it.
 - `vendor/openai/codex-plugin-*` router subset — small vendored plugin-skill material needed by the manager.
-- `packages/personal-core-skills/` — new local candidate package with curated global/core skills copied from `agent-stuff`.
+- `packages/personal-core-skills/` — local package with curated global/core skills copied from `agent-stuff`; now installed globally via local path.
 - `scripts/imagegen-observe.py` — standalone OpenAI Image API diagnostic wrapper; decide keep, move, or delete.
 
 ## What to do next
@@ -40,11 +40,12 @@ Goal: Pi startup should only show skills that are intentionally global for Arthu
 
 Recommended sequence:
 
-1. Track the Codex plugin manager and the small router-skill vendor subset.
-2. Track `packages/personal-core-skills` as the local replacement candidate for noisy global `agent-stuff`.
-3. Decide whether `scripts/imagegen-observe.py` belongs in `packages/ugc-cli`, `scripts/diagnostics/`, or should be deleted.
-4. After Arthur chooses keep/remove statuses, update `~/.pi/agent/settings.json` to remove broad `git:github.com/mitsuhiko/agent-stuff` and replace it with the local curated package.
-5. Remove stale local skill checkouts from `packages/web-access/skills/`:
+1. Track the Codex plugin manager and the small router-skill vendor subset. Done.
+2. Track `packages/personal-core-skills` as the local replacement for noisy global `agent-stuff`. Done.
+3. Vendor full `agent-stuff` source as reference under `vendor/mitsuhiko/agent-stuff`. Done.
+4. Update `~/.pi/agent/settings.json` to remove broad `git:github.com/mitsuhiko/agent-stuff` and replace it with the local curated package. Done.
+5. Decide whether `scripts/imagegen-observe.py` belongs in `packages/ugc-cli`, `scripts/diagnostics/`, or should be deleted.
+6. Remove stale local skill checkouts from `packages/web-access/skills/`:
    - `pi-skills` symlink
    - ignored `chrome-devtools-mcp/` checkout
    - empty/unused scratch dirs such as `deterministic-simulation-testing/` if truly empty

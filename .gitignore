@@ -32,6 +32,11 @@ vendor/openai/*
 !vendor/openai/codex-plugin-catalog.json
 !vendor/openai/codex-plugin-router-skills/
 !vendor/openai/codex-plugin-router-skills/**
+!vendor/mitsuhiko/
+vendor/mitsuhiko/*
+!vendor/mitsuhiko/README.md
+!vendor/mitsuhiko/agent-stuff/
+!vendor/mitsuhiko/agent-stuff/**
 packages/web-access/vendor/*
 !packages/web-access/vendor/kagi-chrome-extension/
 skills/chrome-devtools-mcp/

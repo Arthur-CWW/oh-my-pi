@@ -42,7 +42,7 @@ Current important settings:
 }
 ```
 
-The broad global `agent-stuff` package is why skills like `anachb`, `oebb-scotty`, `apple-mail`, and `openscad` still appear even after this repo's project skill manifest was curated.
+The broad global `agent-stuff` package used to be why skills like `anachb`, `oebb-scotty`, `apple-mail`, and `openscad` still appeared after this repo's project skill manifest was curated. On 2026-06-09, global settings were changed to remove that broad git package and install the local curated `packages/personal-core-skills` package instead.
 
 ## Active startup skills
 
@@ -59,7 +59,7 @@ The broad global `agent-stuff` package is why skills like `anachb`, `oebb-scotty
 
 ### Global `agent-stuff` skills
 
-Source: `git:github.com/mitsuhiko/agent-stuff` at local checkout `/Users/arthur/.pi/agent/git/github.com/mitsuhiko/agent-stuff`.
+Source: formerly `git:github.com/mitsuhiko/agent-stuff`; a reference snapshot is now vendored at `vendor/mitsuhiko/agent-stuff`, and the globally installed local package is `packages/personal-core-skills`.
 
 | Skill | What it does | Recommendation |
 |---|---|---|
@@ -146,7 +146,7 @@ Source repo: `Arthur-CWW/skills` fork of `badlogic/pi-skills` at `/Users/arthur/
 
 ## Recommended final startup shape
 
-Default global skills should shrink to roughly:
+Default global skills have been shrunk to roughly:
 
 - `commit`
 - `uv`

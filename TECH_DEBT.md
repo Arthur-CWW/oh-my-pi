@@ -6,9 +6,10 @@ This is the short, top-level scratchpad for repo/workflow cleanup. Keep details 
 
 ## Skills / Pi resource loading
 
-- The project skill list is now curated in `package.json` and `packages/web-access/package.json`, but Pi still loads many **global** skills from `~/.pi/agent/git/github.com/mitsuhiko/agent-stuff/skills` and `~/.agents/skills`.
-  - Examples still visible globally: `anachb`, `apple-mail`, `oebb-scotty`, `openscad`, `sentry`, `web-browser`, `native-web-search`, etc.
-  - `packages/personal-core-skills/` now vendors the likely keepers from `agent-stuff`; after review, replace the broad global package with that curated local package.
+- The project skill list is now curated in `package.json` and `packages/web-access/package.json`.
+  - The broad global `git:github.com/mitsuhiko/agent-stuff` package has been removed from `~/.pi/agent/settings.json`.
+  - `packages/personal-core-skills/` now vendors and globally loads the likely keepers from `agent-stuff`.
+  - Full `agent-stuff` source is vendored for reference at `vendor/mitsuhiko/agent-stuff`.
 - The old symlinked `packages/web-access/skills/pi-skills -> ~/.pi/skills/pi-skills` and ignored `chrome-devtools-mcp/` checkout should not live under a package skill directory long term.
 - Consolidate overlapping skill families:
   - browser: `background-browser-automation`, `browser-tools`, `web-browser`, `chrome-devtools`, `a11y-debugging`, `debug-optimize-lcp`
