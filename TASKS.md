@@ -9,6 +9,7 @@ Status values: `active`, `next`, `blocked`, `done`, `parked`.
 | ID | Task | Owner | Notes |
 |---|---|---|---|
 | T-2026-06-09-003 | Keep task tracking and durable preferences synchronized | Codex | Root tracker exists; update this file when opening, blocking, finishing, or parking work. |
+| T-2026-06-09-024 | Reverse/catalog useful Jimeng GenAI frontend APIs | Codex | Build a reusable background-browser/session-refresh proxy plus direct-client support for image, video, reference, persona/subject, character, canvas, asset, and template-mining APIs. Current first slice supports workbench text-to-image submit + asset-list polling. |
 
 ## Next
 
@@ -22,6 +23,7 @@ Status values: `active`, `next`, `blocked`, `done`, `parked`.
 | T-2026-06-09-015 | Add writable Slotok annotations and dry-run action endpoints | `docs/plans/slotok-workbench.md` | Read-only annotation decoding exists; next step is POST/PUT persistence and explicit rerun job/action endpoints. |
 | T-2026-06-09-022 | Plan niche research and winning-template mining | Conversation | Later workstream: research a niche, find successful profiles/campaigns/templates, and convert them into clean-room abstract format templates. No live scraping until approved. |
 | T-2026-06-09-023 | Implement reference-profile archive and pose/template extraction | `docs/plans/ugc-studio-workstreams.md` | Future implementation: capture public or rights-cleared profile samples, extract pose/timing/caption/hook mechanics, and keep source-media/identity guardrails explicit. |
+| T-2026-06-09-025 | Capture Jimeng reference/persona/video/canvas API flows | Conversation | Use `jimeng-browser-proxy` skill and passive CDP captures for upload, image-to-image, subject/persona, pose/style/depth/canny reference controls, image-to-video first-frame, multimodal video, lip sync, voice/digital-human, canvas edits, asset library, and explore/template APIs. |
 
 ## Blocked
 

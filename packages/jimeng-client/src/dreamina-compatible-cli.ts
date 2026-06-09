@@ -115,12 +115,15 @@ async function main(argv: string[]): Promise<void> {
   const plan = {
     command: args.command,
     op: prepared.op,
+    submit_kind: prepared.submitKind,
+    poll_kind: prepared.pollKind,
     submit_id: prepared.submitId,
     submit_url: prepared.submitUrl,
     poll_url: prepared.pollUrl,
     submit_headers: redactHeaders(prepared.submitHeaders),
     poll_headers: redactHeaders(prepared.pollHeaders),
     submit_body: prepared.submitBody,
+    poll_body: prepared.pollBody,
     terminal_status: prepared.terminalStatus,
   }
 
@@ -142,6 +145,8 @@ async function main(argv: string[]): Promise<void> {
     pollHeaders: prepared.pollHeaders,
     submitId: submit.submitId,
     terminalStatus: prepared.terminalStatus,
+    pollKind: prepared.pollKind,
+    pollBody: prepared.pollBody,
     pollIntervalMs: args.pollIntervalMs,
     maxPolls: args.maxPolls,
   })

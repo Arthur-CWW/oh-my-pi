@@ -52,8 +52,34 @@ describe("prepareFromCapture", () => {
 
     const part = ((prepared.submitBody.messages as any[])[0].content.content_parts as any[])[0]
     expect(prepared.submitUrl).toContain("/mweb/v1/creation_agent/v2/conversation")
+    expect(prepared.submitKind).toBe("conversation_sse")
+    expect(prepared.pollKind).toBe("history_by_submit_id")
     expect(prepared.terminalStatus).toBe(45)
     expect(part.text).toBe("make a funny image")
+  })
+
+  test("patches current workbench image prompt and asset-list poll body", () => {
+    const prepared = prepareFromCapture({
+      op: "image",
+      capture: workbenchImageCapture(),
+      session,
+      prompt: "new workbench image",
+    })
+
+    const draft = JSON.parse(String(prepared.submitBody.draft_content))
+    const metrics = JSON.parse(String(prepared.submitBody.metrics_extra))
+    const coreParam = draft.component_list[0].abilities.generate.core_param
+
+    expect(prepared.submitUrl).toContain("/mweb/v1/aigc_draft/generate")
+    expect(prepared.submitKind).toBe("workbench_json")
+    expect(prepared.pollUrl).toContain("/mweb/v1/get_asset_list")
+    expect(prepared.pollKind).toBe("asset_list_first_image")
+    expect(prepared.terminalStatus).toBe(50)
+    expect(prepared.submitBody.submit_id).toBe(prepared.submitId)
+    expect(metrics.generateId).toBe(prepared.submitId)
+    expect(coreParam.prompt).toBe("new workbench image")
+    expect(typeof coreParam.seed).toBe("number")
+    expect(prepared.pollBody).toEqual({ count: 20, workspace_id: 123 })
   })
 })
 
@@ -114,6 +140,45 @@ function imageCapture(): CaptureFile {
         }),
       },
       pollRequest(),
+    ],
+  }
+}
+
+function workbenchImageCapture(): CaptureFile {
+  const draft = {
+    component_list: [
+      {
+        abilities: {
+          generate: {
+            core_param: {
+              model: "high_aes_general_v50",
+              prompt: "old workbench image",
+              seed: 1,
+            },
+          },
+        },
+      },
+    ],
+  }
+
+  return {
+    entries: [
+      {
+        kind: "request",
+        url: "https://jimeng.jianying.com/mweb/v1/aigc_draft/generate",
+        headers: { "user-agent": "CapturedUA" },
+        postData: JSON.stringify({
+          submit_id: "old-submit",
+          metrics_extra: JSON.stringify({ generateId: "old-submit", keep: true }),
+          draft_content: JSON.stringify(draft),
+        }),
+      },
+      {
+        kind: "request",
+        url: "https://jimeng.jianying.com/mweb/v1/get_asset_list",
+        headers: { "user-agent": "CapturedUA" },
+        postData: JSON.stringify({ count: 20, workspace_id: 123 }),
+      },
     ],
   }
 }

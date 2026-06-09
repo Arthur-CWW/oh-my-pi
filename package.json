@@ -46,6 +46,7 @@
     "extensions": ["./packages/web-access/src/index.ts", "./packages/mermaid-preview/src/index.ts"],
     "skills": [
       "./packages/web-access/skills/background-browser-automation",
+      "./packages/web-access/skills/jimeng-browser-proxy",
       "./packages/web-access/skills/librarian",
       "./packages/web-access/skills/llm-frontend-browser",
       "./packages/web-access/skills/macos-computer-use",

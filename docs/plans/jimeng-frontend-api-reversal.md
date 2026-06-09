@@ -4,7 +4,19 @@
 
 Map the real Jimeng/Dreamina frontend APIs well enough to support reliable direct-client workflows in `packages/jimeng-client`, especially true image-to-video / first-frame / multimodal video generation.
 
-The immediate fix is to stop reusing the old text-to-video capture template for image-to-video runs.
+The immediate fix is to stop reusing stale templates for operations whose frontend contracts have moved. Current architecture should use the background Jimeng browser profile as a session/token holder, then graduate stable captured contracts into direct `fetch` clients.
+
+## Current Status
+
+2026-06-09 first proxy slice:
+
+- Added `jimeng-browser-proxy` CLI for background CDP session refresh plus direct-client generation.
+- Captured current `/ai-tool/generate/?type=image` workbench text-to-image flow.
+- Implemented current image submit through `/mweb/v1/aigc_draft/generate`.
+- Implemented current image polling/download through `/mweb/v1/get_asset_list`.
+- Preserved older `/mweb/v1/creation_agent/v2/conversation` SSE image path.
+- Added endpoint catalog at `docs/provider/jimeng-frontend-api-catalog.md`.
+- Smoke proof at `docs/qa/jimeng-browser-proxy-smoke.md`.
 
 ## Owner paths
 
@@ -104,12 +116,15 @@ Capture one flow at a time and write a short redacted summary.
 |---|---:|---|
 | Account/credits/session refresh | High | auth bundle, app IDs, user tier, credit payload |
 | Upload reference image | High | upload endpoint, object URI/id schema, signed upload/download URLs |
-| Text-to-image | Medium | image submit path and polling result shape |
+| Text-to-image | Medium | current workbench path implemented; keep cataloging model/config variants |
 | Text-to-video | Medium | current template parity and task statuses |
 | Image-to-video / first-frame | Highest | correct first-frame payload field(s), asset IDs, abilities path |
 | Multimodal/reference-to-video | Highest | reference image arrays, strength/role fields, generation mode |
 | Task history/status | High | polling endpoint variants, terminal statuses, queue info |
 | Artifact download | High | highest-quality video URL fields, expiry behavior |
+| Persona/subject/character tools | High | subject model lifecycle, reference storage, persona-like reusable assets |
+| Canvas edit tools | Medium | inpaint, erase, expand, cutout, local edit payloads |
+| Explore/template mining | Medium | public template/feed detail endpoints for clean-room format abstraction |
 
 ## Phase 3: Endpoint catalog updates
 

@@ -85,6 +85,7 @@ Each component should be separately editable, inspectable, replaceable, cacheabl
 
 - Use `@path/to/file` references in Pi/LLM prompts when supported.
 - Dreamina/Jimeng direct tooling should live-submit by default; `--dryRun` is the explicit opt-out. Keep commands clear, short, logged, concurrency-1, and credit-aware.
+- Jimeng/Dreamina should use a background browser-session proxy while endpoints are still moving: keep a logged-in Helium/CDP profile as the token/session holder, refresh session bundles from it, then graduate stable operations into direct `fetch` clients. Keep reversing every UGC-useful GenAI endpoint, not only text-to-image: reference uploads, persona/subject/character tools, pose/style/depth controls, image/video generation, canvas edits, asset library, and explore/template APIs.
 - For the UGC/video pipeline, keep serialization JSON-first: recipes, manifests, timelines, provider prompt cards, and reports should be plain versioned JSON unless there is a strong later reason to add another format.
 
 ## What Arthur actually cares about

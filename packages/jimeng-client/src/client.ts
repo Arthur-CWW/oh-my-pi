@@ -50,6 +50,12 @@ export interface JimengHistoryItem {
 export interface JimengHistoryRecord {
   status?: number | null
   item_list?: JimengHistoryItem[] | null
+  total_image_count?: number | null
+  finished_image_count?: number | null
+  task?: {
+    status?: number | null
+    [key: string]: unknown
+  } | null
   [key: string]: unknown
 }
 
@@ -82,10 +88,10 @@ export class JimengClient {
   }
 
   async submitPrepared(prepared: PreparedJimengRun): Promise<JimengSubmitResult> {
-    return prepared.op === "video" ? this.submitVideo(prepared) : this.submitImage(prepared)
+    return prepared.submitKind === "conversation_sse" ? this.submitImageConversation(prepared) : this.submitWorkbench(prepared)
   }
 
-  async submitVideo(input: Pick<PreparedJimengRun, "submitUrl" | "submitHeaders" | "submitBody" | "submitId">): Promise<JimengSubmitResult> {
+  async submitWorkbench(input: Pick<PreparedJimengRun, "submitUrl" | "submitHeaders" | "submitBody" | "submitId">): Promise<JimengSubmitResult> {
     const response = await this.requestText(input.submitUrl, {
       method: "POST",
       headers: input.submitHeaders,
@@ -98,7 +104,8 @@ export class JimengClient {
     const record = asRecord(responseBody)
     const data = asRecord(record?.data)
     const aigc = asRecord(data?.aigc_data)
-    const submitId = asString(aigc?.submit_id)
+    const task = asRecord(aigc?.task)
+    const submitId = asString(aigc?.submit_id) ?? asString(task?.submit_id)
     const historyId = asString(aigc?.history_record_id)
     const ret = record?.ret
     const errmsg = record?.errmsg
@@ -106,8 +113,8 @@ export class JimengClient {
     if (!submitId && !historyId) {
       throw jimengError({
         category: "upstream",
-        code: "VIDEO_SUBMIT_MISSING_IDS",
-        message: `Video submit did not return submit/history id (ret=${String(ret ?? "unknown")}, errmsg=${String(errmsg ?? "unknown")})`,
+        code: "WORKBENCH_SUBMIT_MISSING_IDS",
+        message: `Workbench submit did not return submit/history id (ret=${String(ret ?? "unknown")}, errmsg=${String(errmsg ?? "unknown")})`,
         retryable: false,
         details: { ret: ret ?? null, errmsg: errmsg ?? null },
       })
@@ -122,7 +129,15 @@ export class JimengClient {
     }
   }
 
+  async submitVideo(input: Pick<PreparedJimengRun, "submitUrl" | "submitHeaders" | "submitBody" | "submitId">): Promise<JimengSubmitResult> {
+    return this.submitWorkbench(input)
+  }
+
   async submitImage(input: Pick<PreparedJimengRun, "submitUrl" | "submitHeaders" | "submitBody">): Promise<JimengSubmitResult> {
+    return this.submitImageConversation(input)
+  }
+
+  async submitImageConversation(input: Pick<PreparedJimengRun, "submitUrl" | "submitHeaders" | "submitBody">): Promise<JimengSubmitResult> {
     const response = await this.requestText(input.submitUrl, {
       method: "POST",
       headers: input.submitHeaders,
@@ -170,6 +185,8 @@ export class JimengClient {
     pollHeaders: Record<string, string>
     submitId: string
     terminalStatus: number
+    pollKind?: PreparedJimengRun["pollKind"]
+    pollBody?: Record<string, unknown>
     pollIntervalMs: number
     maxPolls: number
   }): Promise<JimengPollResult> {
@@ -179,14 +196,13 @@ export class JimengClient {
       const response = await this.requestText(input.pollUrl, {
         method: "POST",
         headers: input.pollHeaders,
-        body: JSON.stringify({ submit_ids: [input.submitId], need_batch: true, history_ids: [] }),
+        body: JSON.stringify(buildPollBody(input)),
       })
 
       const responseBody = safeJson(response.text)
       assertNoRiskError(responseBody, response.text)
 
-      const pollData = asRecord(asRecord(responseBody)?.data)
-      const record = asHistoryRecord(pollData?.[input.submitId])
+      const record = extractPollRecord(responseBody, input)
       const status = typeof record?.status === "number" ? record.status : null
       const itemCount = record?.item_list?.length ?? 0
 
@@ -232,6 +248,8 @@ export class JimengClient {
       pollHeaders: input.prepared.pollHeaders,
       submitId: submit.submitId,
       terminalStatus: input.prepared.terminalStatus,
+      pollKind: input.prepared.pollKind,
+      pollBody: input.prepared.pollBody,
       pollIntervalMs: input.pollIntervalMs ?? 3000,
       maxPolls: input.maxPolls ?? 30,
     })
@@ -358,6 +376,33 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function asHistoryRecord(value: unknown): JimengHistoryRecord | null {
   return asRecord(value) as JimengHistoryRecord | null
+}
+
+function buildPollBody(input: {
+  submitId: string
+  pollKind?: PreparedJimengRun["pollKind"]
+  pollBody?: Record<string, unknown>
+}): Record<string, unknown> {
+  if (input.pollKind === "asset_list_first_image" && input.pollBody) return input.pollBody
+  return { submit_ids: [input.submitId], need_batch: true, history_ids: [] }
+}
+
+function extractPollRecord(
+  responseBody: unknown,
+  input: { submitId: string; pollKind?: PreparedJimengRun["pollKind"] },
+): JimengHistoryRecord | null {
+  const response = asRecord(responseBody)
+  const data = asRecord(response?.data)
+  if (input.pollKind === "asset_list_first_image") {
+    const assets = Array.isArray(data?.asset_list) ? data.asset_list : []
+    const matchingAsset = assets
+      .map(asRecord)
+      .find((asset) => asRecord(asset?.image)?.submit_id === input.submitId || String(asset?.id ?? "") === input.submitId)
+    const firstAsset = matchingAsset ?? asRecord(assets[0])
+    return asHistoryRecord(firstAsset?.image)
+  }
+
+  return asHistoryRecord(data?.[input.submitId])
 }
 
 function asString(value: unknown): string | null {

@@ -1,4 +1,5 @@
 export * from "./capture"
+export * from "./browser-session"
 export * from "./client"
 export * from "./errors"
 export * from "./sse"

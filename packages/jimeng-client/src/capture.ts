@@ -53,6 +53,8 @@ export interface PrepareFromCaptureInput {
 
 export interface PreparedJimengRun {
   op: JimengOp
+  submitKind: "conversation_sse" | "workbench_json"
+  pollKind: "history_by_submit_id" | "asset_list_first_image"
   submitId: string
   prompt: string
   submitUrl: string
@@ -60,18 +62,21 @@ export interface PreparedJimengRun {
   submitHeaders: Record<string, string>
   pollHeaders: Record<string, string>
   submitBody: Record<string, unknown>
+  pollBody?: Record<string, unknown>
   terminalStatus: number
 }
 
 const VIDEO_SUBMIT_PATH = "/mweb/v1/aigc_draft/generate"
-const IMAGE_SUBMIT_PATH = "/mweb/v1/creation_agent/v2/conversation"
+const IMAGE_AGENT_SUBMIT_PATH = "/mweb/v1/creation_agent/v2/conversation"
+const ASSET_LIST_PATH = "/mweb/v1/get_asset_list"
 const POLL_PATH = "/mweb/v1/get_history_by_ids"
 
 export function prepareFromCapture(input: PrepareFromCaptureInput): PreparedJimengRun {
   const durationSec = normalizeDuration(input.durationSec ?? 3)
-  const submitPath = input.op === "video" ? VIDEO_SUBMIT_PATH : IMAGE_SUBMIT_PATH
-  const submitReq = findRequest(input.capture, submitPath)
-  const pollReq = findRequest(input.capture, POLL_PATH)
+  const submitReq = findSubmitRequest(input.capture, input.op)
+  const submitKind = submitRequestKind(submitReq, input.op)
+  const pollKind = submitKind === "workbench_json" && input.op === "image" ? "asset_list_first_image" : "history_by_submit_id"
+  const pollReq = pollKind === "asset_list_first_image" ? findRequest(input.capture, ASSET_LIST_PATH) : findRequest(input.capture, POLL_PATH)
 
   if (!submitReq?.url || !submitReq.postData || !pollReq?.url) {
     throw jimengError({
@@ -79,11 +84,15 @@ export function prepareFromCapture(input: PrepareFromCaptureInput): PreparedJime
       code: "CAPTURE_MISSING_REQUIRED_REQUESTS",
       message: `Capture missing required requests for op=${input.op}`,
       retryable: false,
-      details: { submitPath, pollPath: POLL_PATH },
+      details: {
+        submitPaths: input.op === "image" ? [IMAGE_AGENT_SUBMIT_PATH, VIDEO_SUBMIT_PATH] : [VIDEO_SUBMIT_PATH],
+        pollPath: pollKind === "asset_list_first_image" ? ASSET_LIST_PATH : POLL_PATH,
+      },
     })
   }
 
   const submitBody = parseJsonRecord(submitReq.postData, "submit request postData")
+  const pollBody = pollReq.postData ? parseJsonRecord(pollReq.postData, "poll request postData") : undefined
   const submitId = randomUUID()
   const prompt = input.prompt ?? (input.op === "video" ? extractVideoPrompt(submitBody) : extractImagePrompt(submitBody)) ?? defaultPrompt(input.op)
 
@@ -105,6 +114,8 @@ export function prepareFromCapture(input: PrepareFromCaptureInput): PreparedJime
 
   return {
     op: input.op,
+    submitKind,
+    pollKind,
     submitId,
     prompt,
     submitUrl: submitReq.url,
@@ -112,12 +123,23 @@ export function prepareFromCapture(input: PrepareFromCaptureInput): PreparedJime
     submitHeaders: buildHeaders(submitReq, input.session),
     pollHeaders: buildHeaders(pollReq, input.session),
     submitBody,
-    terminalStatus: input.op === "video" ? 50 : 45,
+    pollBody,
+    terminalStatus: submitKind === "conversation_sse" ? 45 : 50,
   }
 }
 
 export function findRequest(capture: CaptureFile, pathPart: string): CaptureRequestEntry | undefined {
   return capture.entries.find((entry) => entry.kind === "request" && typeof entry.url === "string" && entry.url.includes(pathPart))
+}
+
+function findSubmitRequest(capture: CaptureFile, op: JimengOp): CaptureRequestEntry | undefined {
+  if (op === "video") return findRequest(capture, VIDEO_SUBMIT_PATH)
+  return findRequest(capture, IMAGE_AGENT_SUBMIT_PATH) ?? findRequest(capture, VIDEO_SUBMIT_PATH)
+}
+
+function submitRequestKind(req: CaptureRequestEntry | undefined, op: JimengOp): PreparedJimengRun["submitKind"] {
+  if (op === "video") return "workbench_json"
+  return typeof req?.url === "string" && req.url.includes(IMAGE_AGENT_SUBMIT_PATH) ? "conversation_sse" : "workbench_json"
 }
 
 export function buildHeaders(req: CaptureRequestEntry, session: JimengSessionBundle): Record<string, string> {
@@ -165,7 +187,12 @@ export function patchSubmitPayload(
   // Only patch leaves we control and preserve all unknown keys/strings.
   if (args.op === "image") {
     const firstPart = getImagePromptPart(body)
-    if (firstPart) firstPart.text = prompt
+    if (firstPart) {
+      firstPart.text = prompt
+      return
+    }
+
+    patchWorkbenchImagePayload(body, prompt, submitId, args.seed)
     return
   }
 
@@ -232,7 +259,13 @@ export function extractVideoPrompt(body: Record<string, unknown>): string | null
 
 export function extractImagePrompt(body: Record<string, unknown>): string | null {
   const prompt = getImagePromptPart(body)?.text
-  return typeof prompt === "string" ? prompt : null
+  if (typeof prompt === "string") return prompt
+
+  if (typeof body.draft_content !== "string") return null
+  const draft = safeJson(body.draft_content)
+  if (!isRecord(draft)) return null
+  const coreParam = getWorkbenchImageCoreParam(draft)
+  return typeof coreParam?.prompt === "string" ? coreParam.prompt : null
 }
 
 export function modelVersionToVideoReqKey(modelVersion: string): string {
@@ -295,6 +328,37 @@ function getImagePromptPart(body: Record<string, unknown>): Record<string, unkno
   const firstMessage = asRecord(asArray(body.messages)[0])
   const content = asRecord(firstMessage?.content)
   return asRecord(asArray(content?.content_parts)[0])
+}
+
+function patchWorkbenchImagePayload(body: Record<string, unknown>, prompt: string, submitId: string, seed: number | undefined): void {
+  body.submit_id = submitId
+
+  if (typeof body.metrics_extra === "string") {
+    const metrics = safeJson(body.metrics_extra)
+    if (isRecord(metrics)) {
+      metrics.generateId = submitId
+      body.metrics_extra = JSON.stringify(metrics)
+    }
+  }
+
+  if (typeof body.draft_content !== "string") return
+  const draft = safeJson(body.draft_content)
+  if (!isRecord(draft)) return
+
+  const coreParam = getWorkbenchImageCoreParam(draft)
+  if (coreParam) {
+    coreParam.prompt = prompt
+    coreParam.seed = normalizeSeed(seed)
+  }
+
+  body.draft_content = JSON.stringify(draft)
+}
+
+function getWorkbenchImageCoreParam(draft: Record<string, unknown>): Record<string, unknown> | null {
+  const firstComponent = asRecord(asArray(draft.component_list)[0])
+  const abilities = asRecord(firstComponent?.abilities)
+  const generate = asRecord(abilities?.generate)
+  return asRecord(generate?.core_param)
 }
 
 function normalizeSeed(value: number | undefined): number {

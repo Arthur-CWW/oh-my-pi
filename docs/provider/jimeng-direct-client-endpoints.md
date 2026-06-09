@@ -47,7 +47,7 @@ Important capability notes from help output:
 
 ## Endpoint catalog (confirmed)
 
-### 1) Image submit (agent path)
+### 1) Image submit (agent path, older)
 - `POST https://jimeng.jianying.com/mweb/v1/creation_agent/v2/conversation`
 - Request shape:
   - `conversation_id`
@@ -58,22 +58,28 @@ Important capability notes from help output:
   - parse stream for submit info, then poll `get_history_by_ids`
 - current utility: `packages/jimeng-client/src/sse.ts` (`extractSubmitIdFromSseText`) for resilient submit-id extraction
 
-### 2) Video submit (workbench path)
+### 2) Workbench submit (current image path and video path)
 - `POST https://jimeng.jianying.com/mweb/v1/aigc_draft/generate`
-- Request shape:
+- Shared request shape:
   - `submit_id`
   - `metrics_extra` (JSON string)
   - `draft_content` (JSON string)
   - `http_common_info.aid`
-- Prompt field location:
+- Video prompt field location:
   - `draft_content.component_list[0].abilities.gen_video.text_to_video_params.video_gen_inputs[0].prompt`
-- Duration field location:
+- Video duration field location:
   - `...video_gen_inputs[0].duration_ms`
 - First/last frame fields (if used):
   - `...video_gen_inputs[0].first_frame_image`
   - `...video_gen_inputs[0].end_frame_image`
+- Current text-to-image prompt field location:
+  - `draft_content.component_list[0].abilities.generate.core_param.prompt`
+- Current text-to-image model field observed:
+  - `draft_content.component_list[0].abilities.generate.core_param.model = high_aes_general_v50`
+- Current text-to-image output mode:
+  - poll/list workspace assets via `get_asset_list`, not only `get_history_by_ids`
 
-### 3) Poll status/results
+### 3) Poll status/results by submit id
 - `POST https://jimeng.jianying.com/mweb/v1/get_history_by_ids`
 - Payload variants observed:
   - `{ "submit_ids": ["<submit_id>"] }`
@@ -82,7 +88,24 @@ Important capability notes from help output:
   - video: `status = 50`
   - image: `status = 45` (observed in earlier image path)
 
-### 4) Optional queue status
+### 4) Workspace asset list / current image polling
+- `POST https://jimeng.jianying.com/mweb/v1/get_asset_list`
+- Request shape observed:
+  - `count`
+  - `direction`
+  - `mode`
+  - `option`
+  - `asset_type_list`
+  - `workspace_id`
+- Current text-to-image terminal success:
+  - `data.asset_list[0].image.status = 50`
+  - `data.asset_list[0].image.task.status = 50`
+  - `data.asset_list[0].image.finished_image_count = data.asset_list[0].image.total_image_count`
+- Artifact URL paths:
+  - `data.asset_list[].image.item_list[].image.large_images[].image_url`
+  - `data.asset_list[].image.item_list[].common_attr.cover_url_map.*`
+
+### 5) Optional queue status
 - `POST https://jimeng.jianying.com/mweb/v1/get_history_queue_info`
 - Not required for minimal direct client; useful for UX progress.
 
@@ -265,6 +288,27 @@ bun --cwd packages/jimeng-client run src/cli.ts -- \
   --capture ../../data/jimeng-lab/raw/jimeng-network-capture-image-01.json \
   --session-bundle ../../data/jimeng-lab/raw/session-bundle.json \
   --prompt "请生成一张搞笑梗图：程序员深夜调试终于成功，夸张幽默，电影感，高清"
+```
+
+### Browser-backed proxy CLI
+
+- `packages/jimeng-client/src/browser-proxy-cli.ts`
+- package alias: `jimeng-browser-proxy`
+
+The proxy refreshes the session from the logged-in background Jimeng browser profile and then uses the direct client. This is the preferred path while endpoint contracts are still being stabilized.
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts session \
+  --cdp http://127.0.0.1:9340 \
+  --target-url jimeng.jianying.com \
+  --session-out data/jimeng-lab/raw/session-bundle-current.json
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts text2image \
+  --cdp http://127.0.0.1:9340 \
+  --target-url "type=image" \
+  --capture data/jimeng-captures/<run>/capture-template.raw.json \
+  --prompt "韩系美妆健身UGC创作者，手机自拍，无文字，无水印" \
+  --dryRun
 ```
 
 Supports optional frame URI injection for video payload patching:

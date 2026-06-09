@@ -57,6 +57,28 @@ bun packages/jimeng-client/src/dreamina-compatible-cli.ts text2video \
 
 Important behavior: this compat CLI is live by default, matching normal generation tools. Use `--dryRun` when you do not want to spend credits.
 
+## Browser-backed proxy CLI
+
+`jimeng-browser-proxy` uses the logged-in background Helium/CDP Jimeng profile as a session holder, then runs the direct client with a fresh browser session bundle. This is the preferred bridge while endpoint contracts are still being reversed.
+
+```bash
+# refresh a local session bundle from the background browser profile
+bun packages/jimeng-client/src/browser-proxy-cli.ts session \
+  --cdp http://127.0.0.1:9340 \
+  --target-url jimeng.jianying.com \
+  --session-out data/jimeng-lab/raw/session-bundle-current.json
+
+# dry-run current workbench text-to-image from a capture template
+bun packages/jimeng-client/src/browser-proxy-cli.ts text2image \
+  --cdp http://127.0.0.1:9340 \
+  --target-url "type=image" \
+  --capture data/jimeng-captures/<run>/capture-template.raw.json \
+  --prompt "韩系美妆健身UGC创作者，手机自拍，无文字，无水印" \
+  --dryRun
+```
+
+The proxy does not foreground the browser. It still live-submits without `--dryRun`, so keep concurrency at `1` and stop on auth/risk-control responses.
+
 ## Background network recorder
 
 Passive CDP recorder for frontend API reversal:

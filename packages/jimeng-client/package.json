@@ -7,11 +7,13 @@
   "exports": {
     ".": "./src/index.ts",
     "./cli": "./src/cli.ts",
-    "./dreamina-compatible-cli": "./src/dreamina-compatible-cli.ts"
+    "./dreamina-compatible-cli": "./src/dreamina-compatible-cli.ts",
+    "./browser-proxy-cli": "./src/browser-proxy-cli.ts"
   },
   "bin": {
     "jimeng-direct": "./src/cli.ts",
-    "jimeng-dreamina": "./src/dreamina-compatible-cli.ts"
+    "jimeng-dreamina": "./src/dreamina-compatible-cli.ts",
+    "jimeng-browser-proxy": "./src/browser-proxy-cli.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

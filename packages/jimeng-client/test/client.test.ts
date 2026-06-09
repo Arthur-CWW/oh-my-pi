@@ -112,6 +112,73 @@ describe("JimengClient", () => {
     expect(result.record.unexpected_meta).toEqual({ source: "provider", nested: { keep_me: true } })
   })
 
+  test("pollUntilTerminal can poll current workbench image asset list", async () => {
+    const submitId = "image-submit-id"
+    const client = new JimengClient({
+      fetch: mockFetchFromQueue([
+        {
+          status: 200,
+          text: JSON.stringify({
+            ret: "0",
+            data: {
+              asset_list: [
+                {
+                  id: "history-id-001",
+                  image: {
+                    submit_id: submitId,
+                    status: 42,
+                    item_list: [],
+                  },
+                },
+              ],
+            },
+          }),
+        },
+        {
+          status: 200,
+          text: JSON.stringify({
+            ret: "0",
+            data: {
+              asset_list: [
+                {
+                  id: "history-id-001",
+                  image: {
+                    submit_id: submitId,
+                    status: 50,
+                    total_image_count: 4,
+                    finished_image_count: 4,
+                    item_list: [
+                      {
+                        image: {
+                          large_images: [{ image_url: "https://img.example/final.png" }],
+                        },
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          }),
+        },
+      ]),
+    })
+
+    const result = await client.pollUntilTerminal({
+      pollUrl: "https://jimeng.example.test/mweb/v1/get_asset_list",
+      pollHeaders: { "content-type": "application/json" },
+      submitId,
+      terminalStatus: 50,
+      pollKind: "asset_list_first_image",
+      pollBody: { count: 20, workspace_id: 123 },
+      pollIntervalMs: 0,
+      maxPolls: 2,
+    })
+
+    expect(result.trace.map((entry) => entry.status)).toEqual([42, 50])
+    expect(result.record.finished_image_count).toBe(4)
+    expect(collectImageUrls(result.record)).toEqual(["https://img.example/final.png"])
+  })
+
   test("pollUntilTerminal times out with typed timeout error", async () => {
     const submitId = "never-terminal"
     const client = new JimengClient({
