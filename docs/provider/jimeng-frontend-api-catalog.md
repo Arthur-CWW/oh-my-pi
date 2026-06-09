@@ -826,6 +826,47 @@ proof=data/jimeng-lab/proof-20260610-overseas-short-videos/
 
 The live response currently uses snake_case `data.item_list`, while the frontend bundle's domain path references camelCase `itemList`/`commonAttr`. The CLI parser accepts both. Normalized output redacts signed cover URLs from item lists while retaining durable cover presence/dimensions, video metadata, ranking signals, and metadata effect ids.
 
+## Confirmed CapCut Template Category Contract
+
+`jimeng-browser-proxy capcut-categories` calls the read-only CapCut editor API category endpoint discovered in the Jimeng/Dreamina frontend bundle. This endpoint does not consume generation quota and does not require CapCut cookies in the current proof; it uses the frontend's CapCut request signer with `pf=7`, `appvr=5.8.0`, `app-sdk-version=999.999.999`, and `sdk_version=16.1.0`.
+
+Command:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts capcut-categories \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --outDir data/jimeng-lab/proof-20260610-capcut-categories
+```
+
+Confirmed endpoint:
+
+```txt
+POST https://edit-api-sg.capcut.com/lv/v1/cc_web/plane/get_categories
+request={"sdk_version":"16.1.0"}
+```
+
+Latest proof returned eight commercial template category groups:
+
+```txt
+Black Friday
+Clothing and shoes
+Cosmetic dailyization
+Food beverages
+Jewelry
+Furniture
+Consumer electronics
+pets
+response_text_sha256=27f4e1bc5a3ff2ddf94568b77d068db828807ab3aa12be3c484588b1b4ff3ea0
+raw=data/jimeng-lab/proof-20260610-capcut-categories/raw/capcut-categories-20260609230631.json
+summary=data/jimeng-lab/proof-20260610-capcut-categories/normalized/capcut-categories-20260609230631-summary.json
+```
+
+Related bundle endpoints are discovered but not claimed as implemented yet:
+
+- `/lv/v1/cc_web/replicate/search_templates`: helper contract found, but guessed keyword/query/search-word payloads returned `ret=1000 param error`; needs real UI capture.
+- `/lv/v1/cc_web/plane/get_collection_templates` and `/lv/v1/cc_web/plane/batch_get_collection_templates`: helper contract found, but category-id guesses returned `ret=1000 param error`; needs real UI capture.
+- `/lv/v1/cc_web/plane/fuzzy_search_templates`: accepts POSTs and returns success, but all tested English title/query fields returned empty lists, so it is not exposed as implemented.
+
 ## Discovered From Frontend Bundles
 
 The 2026-06-09 JS bundle sweep found these useful endpoint groups. Treat rows without an implemented status as capture targets, not stable contracts, until a real UI flow and dry-run payload are recorded.
@@ -836,7 +877,7 @@ The 2026-06-09 JS bundle sweep found these useful endpoint groups. Treat rows wi
 | Subject/persona lifecycle | `/mweb/v1/dreamina_subject/get`, `/mweb/v1/dreamina_subject/create`, `/mweb/v1/dreamina_subject/update`, `/mweb/v1/dreamina_subject/delete`, `/mweb/v1/dreamina_subject/generate_voice`; list is implemented as `subjects`, while create/update/delete/generate_voice remain capture targets |
 | Infinite canvas | `/mweb/v1/infinite_canvas/create_project`, `/mweb/v1/infinite_canvas/conversation`, `/mweb/v1/infinite_canvas/edit`, `/mweb/v1/infinite_canvas/resume`, `/mweb/v1/infinite_canvas/stop_stream`, `/mweb/v1/infinite_canvas/v1/fetch_snapshot`, `/mweb/v1/infinite_canvas/v1/submit_changeset`, `/mweb/v1/infinite_canvas/v1/fetch_changeset` |
 | Reference/image tools | `/mweb/v1/get_common_config`, `/mweb/v1/get_image_description`, `/mweb/v1/get_upload_token`, `/mweb/v1/face_recognize`, `/mweb/v1/blend_preview`, `/mweb/v1/pose_detect`, `/mweb/v1/saliency_seg`, `/mweb/v1/algo_proxy`; image upload, description, face recognition, ControlNet pose/depth/canny preview, pose detect, and object/saliency segmentation are now implemented, while style/reference payload tools still need CLI coverage |
-| Template/research mining | `/mweb/v1/feed`, `/mweb/v1/feed_short_video`, `/lv/v1/cc_web/replicate/search_templates`, `/lv/v1/cc_web/plane/*`; `/mweb/v1/get_explore` is implemented for direct Explore templates and short-video examples, and `/mweb/v1/feed_short_video` is implemented as `overseas-short-videos` |
+| Template/research mining | `/mweb/v1/feed`, `/mweb/v1/feed_short_video`, `/lv/v1/cc_web/plane/get_categories`, `/lv/v1/cc_web/replicate/search_templates`, `/lv/v1/cc_web/plane/*`; `/mweb/v1/get_explore` is implemented for direct Explore templates and short-video examples, `/mweb/v1/feed_short_video` is implemented as `overseas-short-videos`, and CapCut category catalog is implemented as `capcut-categories`; CapCut template rows/search/collection endpoints remain capture targets |
 | Assets/upload/editor | `/lv/v1/asset/*`, `/lv/v1/editor/image/*` |
 | Audio/video utility | `/mweb/v1/mix_audio_video`, `/mweb/v1/mix_audio_videos`, `/lv/v2/intelligence/tts/curl_sync_everphoto` |
 

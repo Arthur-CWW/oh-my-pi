@@ -853,6 +853,45 @@ rg -n 'X-Amz|signed|https?://' data/jimeng-lab/proof-20260610-subjects/normalize
 
 Result: no matches.
 
+## CapCut Commercial Template Category Smoke
+
+`jimeng-browser-proxy capcut-categories` calls the signed read-only CapCut commercial template category endpoint discovered in the Jimeng/Dreamina frontend bundle. This is a no-generation, no-spend probe and did not require CapCut cookies in the current proof.
+
+Command:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts capcut-categories \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --outDir data/jimeng-lab/proof-20260610-capcut-categories
+```
+
+Expected artifact layout:
+
+```txt
+raw=data/jimeng-lab/proof-20260610-capcut-categories/raw/capcut-categories-20260609230631.json
+summary=data/jimeng-lab/proof-20260610-capcut-categories/normalized/capcut-categories-20260609230631-summary.json
+```
+
+Current proof facts:
+
+```txt
+endpoint=https://edit-api-sg.capcut.com/lv/v1/cc_web/plane/get_categories
+request={"sdk_version":"16.1.0"}
+ret=0
+errmsg=success
+category_count=8
+categories=Black Friday, Clothing and shoes, Cosmetic dailyization, Food beverages, Jewelry, Furniture, Consumer electronics, pets
+response_text_sha256=27f4e1bc5a3ff2ddf94568b77d068db828807ab3aa12be3c484588b1b4ff3ea0
+```
+
+URL leak check:
+
+```bash
+rg -n 'X-Amz|x-signature|x-expires' data/jimeng-lab/proof-20260610-capcut-categories/normalized
+```
+
+Expected result: no matches.
+
 ## Verification
 
 ```bash
@@ -865,8 +904,8 @@ Result:
 
 ```txt
 typecheck passed
-53 tests passed, 0 failed
-browser-proxy help listed overseas-short-videos, subjects, describe-image, controlnet-preview, object-mask, templates, short-videos, upload-video, image2video, frames2video, and lip-sync
+58 tests passed, 0 failed
+browser-proxy help listed overseas-short-videos, capcut-categories, subjects, describe-image, controlnet-preview, object-mask, templates, short-videos, upload-video, image2video, frames2video, and lip-sync
 ```
 
 ## Follow-Up

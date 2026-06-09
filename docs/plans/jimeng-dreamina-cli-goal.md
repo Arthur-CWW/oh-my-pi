@@ -31,6 +31,7 @@ As of 2026-06-10, the committed Jimeng CLI baseline is:
 - `858eab2 Document Jimeng ControlNet preview proofs`
 - `3e3bde2 Add Jimeng object mask CLI`
 - `00c4aca Add Jimeng subjects CLI`
+- `44dd492 Add Jimeng feed short video CLI`
 
 ImageX local image upload is now committed and live-proved:
 
@@ -118,6 +119,17 @@ Overseas short-video feed mining is now live-proved without generation spend:
 - proof bundle: `data/jimeng-lab/proof-20260610-overseas-short-videos/`
 - latest proof returned 4 items for `count=5`, `next_offset=5`, top play count `2382533`, and top video metadata `3840x2160`, `57s`, `30fps`, with audio.
 
+CapCut commercial template category mining is now live-proved without generation spend:
+
+- `jimeng-browser-proxy capcut-categories`
+- signed direct `https://edit-api-sg.capcut.com/lv/v1/cc_web/plane/get_categories`
+- frontend bundle evidence: `GetBatchCategories="/lv/v1/cc_web/plane/get_categories"`, body `{sdk_version:"16.1.0"}`, and signer `md5("9e2c|"+pathname.slice(-7)+"|7|5.8.0|"+deviceTime+"||11ac")`
+- useful flags: `--capcut-lan`, `--capcut-loc`
+- normalized output records durable category ids, starling keys, display names, log id, and response hash without signed media URLs
+- proof bundle: `data/jimeng-lab/proof-20260610-capcut-categories/`
+- latest proof returned 8 commercial template categories: Black Friday, Clothing and shoes, Cosmetic dailyization, Food beverages, Jewelry, Furniture, Consumer electronics, and pets.
+- related CapCut template search/collection endpoints are discovered but not implemented: guessed payloads for `/lv/v1/cc_web/replicate/search_templates`, `/lv/v1/cc_web/plane/get_collection_templates`, and `/lv/v1/cc_web/plane/batch_get_collection_templates` returned `ret=1000 param error`; `/lv/v1/cc_web/plane/fuzzy_search_templates` returned success but empty lists for tested English title/query fields. Capture real UI payloads before exposing those as CLI commands.
+
 Reference-image inspection is now live-proved without generation spend:
 
 - `jimeng-browser-proxy describe-image`
@@ -177,7 +189,7 @@ Immediate next slices:
 2. Capture the frontend's explicit end-frame/multi-frame mode and live-prove `frames2video` only if the payload contract matches.
 3. Map style/reference roles and the new object-mask provider references into generation payload patches.
 4. Implement digital-human generation using the confirmed VOD reference path where applicable.
-5. Expand no-spend research/template coverage with CapCut template search and plane endpoints.
+5. Capture real CapCut template row/search/collection payloads, then expand no-spend research/template coverage beyond the confirmed CapCut category catalog.
 6. Implement subject/persona create/update/generate_voice and voice clone once the UI/API flow is captured.
 7. Keep each slice small enough to prove and commit before moving on.
 

@@ -2,6 +2,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import { loadJimengSessionFromBrowser } from "./browser-session"
+import { buildCapCutTemplateCategoriesRequest, fetchCapCutTemplateCategories, summarizeCapCutTemplateCategories } from "./capcut-templates"
 import {
   fetchVoiceLibraryFromCapture,
   generateTextToSpeech,
@@ -69,6 +70,7 @@ Commands:
   templates     Fetch no-spend Explore/template examples for prompt/template mining
   short-videos  Fetch no-spend Explore short videos for reference/profile mining
   overseas-short-videos Fetch no-spend feed_short_video examples for overseas/reference mining
+  capcut-categories Fetch no-spend CapCut commercial template categories
   subjects      Fetch saved Jimeng subject/persona records without generation spend
   describe-image Upload/use an image URI, then describe it and detect faces
   controlnet-preview Upload/use an image URI, then build pose/depth/canny preview refs
@@ -103,6 +105,8 @@ Options:
   --category-id <n>             Explore category id (default: 11222)
   --work-types <csv>            templates work types: video,image,canvas,short_video
   --feed-refer <value>          Explore feed refer, e.g. feed_refresh, feed_enterauto, or feed_loadmore
+  --capcut-lan <value>          CapCut template request language header (default: en)
+  --capcut-loc <value>          CapCut template request location header (default: us)
   --scene <image|video|file|n>   upload-token scene (default: image)
   --file <path>                  Local media file for upload-image/upload-video; alias for --image in image2video
   --video <path>                 Local reference video for lip-sync; uploads to VOD in dry-run planning
@@ -169,6 +173,9 @@ Examples:
     --category-id 11222 \\
     --outDir data/jimeng-lab/cli-overseas-short-videos-smoke
 
+  jimeng-browser-proxy capcut-categories \\
+    --outDir data/jimeng-lab/cli-capcut-categories-smoke
+
   jimeng-browser-proxy subjects \\
     --limit 20 \\
     --outDir data/jimeng-lab/cli-subjects-smoke
@@ -229,6 +236,7 @@ interface CliArgs {
     | "templates"
     | "short-videos"
     | "overseas-short-videos"
+    | "capcut-categories"
     | "subjects"
     | "describe-image"
     | "controlnet-preview"
@@ -261,6 +269,8 @@ interface CliArgs {
   categoryId?: number
   workTypes?: string
   feedRefer?: string
+  capcutLan?: string
+  capcutLoc?: string
   scene?: string
   file?: string
   video?: string
@@ -572,6 +582,55 @@ async function main(argv: string[]): Promise<void> {
       items: redactExploreTemplateItems(result.items),
     })
     console.log(`[jimeng-browser-proxy] overseas-short-videos saved count=${result.items.length} nextOffset=${result.nextOffset ?? "none"}`)
+    return
+  }
+
+  if (args.command === "capcut-categories") {
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const request = buildCapCutTemplateCategoriesRequest()
+    const runId = `capcut-categories-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    if (args.dryRun) {
+      writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
+        command: args.command,
+        host: "https://edit-api-sg.capcut.com",
+        endpoint: "/lv/v1/cc_web/plane/get_categories",
+        request,
+        capcut_lan: args.capcutLan ?? "en",
+        capcut_loc: args.capcutLoc ?? "us",
+        browser_session: redactSession(session),
+      })
+      console.log(`[jimeng-browser-proxy] capcut-categories dry run saved`)
+      return
+    }
+
+    const result = await fetchCapCutTemplateCategories({
+      session,
+      query: {
+        lan: args.capcutLan,
+        loc: args.capcutLoc,
+      },
+    })
+    writeJson(path.join(dirs.rawDir, `${runId}.json`), {
+      host: result.host,
+      http_status: result.httpStatus,
+      ret: result.ret,
+      errmsg: result.errmsg,
+      log_id: result.logId,
+      response_text_sha256: result.responseTextSha256,
+      request: result.request,
+      body: result.body,
+    })
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      endpoint: result.endpoint,
+      host: result.host,
+      http_status: result.httpStatus,
+      ret: result.ret,
+      errmsg: result.errmsg,
+      request: result.request,
+      summary: summarizeCapCutTemplateCategories(result),
+    })
+    console.log(`[jimeng-browser-proxy] capcut-categories saved count=${result.categories.length}`)
     return
   }
 
@@ -1323,6 +1382,7 @@ function parseArgs(argv: string[]): CliArgs {
     && command !== "templates"
     && command !== "short-videos"
     && command !== "overseas-short-videos"
+    && command !== "capcut-categories"
     && command !== "subjects"
     && command !== "describe-image"
     && command !== "controlnet-preview"
@@ -1407,6 +1467,8 @@ function parseArgs(argv: string[]): CliArgs {
     categoryId,
     workTypes: flags["work-types"],
     feedRefer: flags["feed-refer"],
+    capcutLan: flags["capcut-lan"],
+    capcutLoc: flags["capcut-loc"],
     scene: flags.scene,
     file: flags.file,
     video: flags.video,

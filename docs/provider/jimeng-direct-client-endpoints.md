@@ -298,7 +298,7 @@ Frontend bundle scan found these UGC-useful groups, but they are not yet direct-
 - subject/persona CRUD and voice: `/mweb/v1/dreamina_subject/get`, `/mweb/v1/dreamina_subject/create`, `/mweb/v1/dreamina_subject/update`, `/mweb/v1/dreamina_subject/delete`, `/mweb/v1/dreamina_subject/generate_voice`; list is implemented, while create/update/delete/generate_voice still need UI capture
 - infinite canvas: `/mweb/v1/infinite_canvas/create_project`, `/mweb/v1/infinite_canvas/conversation`, `/mweb/v1/infinite_canvas/edit`, `/mweb/v1/infinite_canvas/resume`, `/mweb/v1/infinite_canvas/stop_stream`, `/mweb/v1/infinite_canvas/v1/fetch_snapshot`, `/mweb/v1/infinite_canvas/v1/submit_changeset`, `/mweb/v1/infinite_canvas/v1/fetch_changeset`
 - reference/image tools: `/mweb/v1/get_common_config`, `/mweb/v1/get_image_description`, `/mweb/v1/get_upload_token`, `/mweb/v1/face_recognize`, `/mweb/v1/blend_preview`, `/mweb/v1/pose_detect`, `/mweb/v1/saliency_seg`, `/mweb/v1/algo_proxy`; upload, description, face recognition, ControlNet pose/depth/canny preview, pose detect, and object/saliency segmentation are now direct-client commands, while style/reference payload tools remain capture targets
-- template/research mining: `/mweb/v1/feed`, `/mweb/v1/get_explore`, `/mweb/v1/feed_short_video`, `/lv/v1/cc_web/replicate/search_templates`, `/lv/v1/cc_web/plane/*`; direct `/mweb/v1/get_explore` support is implemented for both templates and short-video examples, and `/mweb/v1/feed_short_video` is implemented as `overseas-short-videos`
+- template/research mining: `/mweb/v1/feed`, `/mweb/v1/get_explore`, `/mweb/v1/feed_short_video`, `/lv/v1/cc_web/plane/get_categories`, `/lv/v1/cc_web/replicate/search_templates`, `/lv/v1/cc_web/plane/*`; direct `/mweb/v1/get_explore` support is implemented for both templates and short-video examples, `/mweb/v1/feed_short_video` is implemented as `overseas-short-videos`, and CapCut category catalog is implemented as `capcut-categories`; CapCut template rows/search/collection payloads still need real UI capture
 
 Next step is to drive those UI flows one at a time with background CDP recording, then create dry-run patchers before live calls.
 
@@ -654,6 +654,53 @@ summary=data/jimeng-lab/proof-20260610-overseas-short-videos/normalized/overseas
 ```
 
 Raw responses contain signed media URLs. Normalized item lists redact signed cover URLs to `coverUrlPresent` while keeping durable cover dimensions and video/ranking metadata.
+
+### 10.3) CapCut commercial template categories
+- `POST https://edit-api-sg.capcut.com/lv/v1/cc_web/plane/get_categories`
+- Status:
+  - live-proved without generation spend
+  - implemented as `jimeng-browser-proxy capcut-categories`
+  - uses the CapCut frontend request signer found in `data/jimeng-lab/js-sweep/files/9111.65b2a25f8b.js`
+  - no CapCut cookies were required in the current proof
+- Request controls:
+  - `--capcut-lan <value>` maps to signed request header `lan` (default `en`)
+  - `--capcut-loc <value>` maps to signed request header `loc` (default `us`)
+  - body is currently fixed to `{ "sdk_version": "16.1.0" }`
+
+Frontend bundle evidence:
+
+```txt
+GetBatchCategories="/lv/v1/cc_web/plane/get_categories"
+body={sdk_version:"16.1.0"}
+sign=md5("9e2c|"+pathname.slice(-7)+"|7|5.8.0|"+deviceTime+"||11ac")
+```
+
+CLI proof:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts capcut-categories \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --outDir data/jimeng-lab/proof-20260610-capcut-categories
+```
+
+Observed safe summary:
+
+```txt
+http_status=200
+ret=0
+errmsg=success
+category_count=8
+categories=Black Friday, Clothing and shoes, Cosmetic dailyization, Food beverages, Jewelry, Furniture, Consumer electronics, pets
+response_text_sha256=27f4e1bc5a3ff2ddf94568b77d068db828807ab3aa12be3c484588b1b4ff3ea0
+raw=data/jimeng-lab/proof-20260610-capcut-categories/raw/capcut-categories-20260609230631.json
+summary=data/jimeng-lab/proof-20260610-capcut-categories/normalized/capcut-categories-20260609230631-summary.json
+```
+
+Remaining CapCut template endpoints are discovered but not implemented:
+
+- `/lv/v1/cc_web/replicate/search_templates` returned `ret=1000 param error` for guessed keyword/query/search-word payloads; capture the actual UI call before exposing it.
+- `/lv/v1/cc_web/plane/get_collection_templates` and `/lv/v1/cc_web/plane/batch_get_collection_templates` returned `ret=1000 param error` for guessed category-id payloads; capture the actual UI call before exposing them.
+- `/lv/v1/cc_web/plane/fuzzy_search_templates` accepted POSTs but returned empty lists for tested English title/query fields; do not claim useful template search yet.
 
 ### 11) Upload token for local reference media
 - `POST https://jimeng.jianying.com/mweb/v1/get_upload_token`
@@ -1324,6 +1371,7 @@ Current support matrix:
 | `lip-sync` | dry-run-proved in `jimeng-browser-proxy` | Browser proxy can prepare the VOD-reference lip-sync provider input from a VOD `vid`/metadata plus TTS voice flags. Live submit still needs a frontend submit capture/compare. |
 | `templates` | implemented in `jimeng-browser-proxy` | No-spend direct `/mweb/v1/get_explore` template mining with prompt/model/usage normalization. |
 | `overseas-short-videos` | implemented in `jimeng-browser-proxy` | No-spend direct `/mweb/v1/feed_short_video` short-video/reference mining with ranking and video metadata normalization. |
+| `capcut-categories` | implemented in `jimeng-browser-proxy` | No-spend signed CapCut `/lv/v1/cc_web/plane/get_categories` commercial template category catalog. |
 | `subjects` | implemented in `jimeng-browser-proxy` | No-spend direct `/mweb/v1/dreamina_subject/get`; current account returned zero saved subjects. |
 | `image2image` | needs capture | Need image reference upload + image edit submit capture. |
 | `multiframe2video` | needs capture | Need multi-frame upload/reference payload capture. |
