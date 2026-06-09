@@ -37,6 +37,9 @@ Use the browser as an authenticated session holder and API discovery surface. Mo
 | `/mweb/v1/get_explore` | POST | Explore examples, public creative templates, and short-video examples for prompt/template/reference mining. | Implemented as no-spend `templates` and `short-videos` |
 | `/mweb/v1/get_image_description` | POST | Image prompt/description extraction for uploaded provider image URIs. Useful for persona/reference inspection. | Implemented as no-spend `describe-image` |
 | `/mweb/v1/face_recognize` | POST | Face/keypoint probe for uploaded provider image URIs. Useful for reference/persona validation before generation payloads. | Implemented as no-spend `describe-image` |
+| `/mweb/v1/blend_preview` | POST | No-spend preview extraction for pose/depth/canny ControlNet reference images. | Implemented as `controlnet-preview`; pose live-proved |
+| `/mweb/v1/pose_detect` | POST | Pose validation for ControlNet pose references. | Implemented as part of `controlnet-preview --control pose`; live-proved |
+| `/mweb/v1/saliency_seg` | POST | Object/mask segmentation for reference-image object-detection and background-paint flows. | Captured; not implemented yet |
 | `/mweb/v1/get_unread_count` | POST | Notification count. | Low priority |
 
 ## Confirmed Voice / Audio Contracts
@@ -204,6 +207,76 @@ summary=data/jimeng-lab/proof-20260610-reference-image-inspect/normalized/descri
 ```
 
 Raw upload traces and response bodies may include signed upload/provider details. They remain ignored under `data/**`.
+
+## Confirmed ControlNet Reference Preview Contract
+
+`jimeng-browser-proxy controlnet-preview` is live-proved as a no-generation probe for Jimeng's reference-image ControlNet path. It accepts a local image, uploads it through the confirmed ImageX scene `2` path when needed, calls `/mweb/v1/blend_preview`, and downloads the returned preview image artifact when a preview URL is present.
+
+Frontend bundle constants:
+
+```txt
+model=img2img_xl_sft
+ability.name=control_net
+control names=pose, depth, canny
+default strength=60/100 = 0.6
+fit modes=center_crop, adapt_to_canvas
+```
+
+Preview request:
+
+```txt
+POST /mweb/v1/blend_preview
+```
+
+```json
+{
+  "model": "img2img_xl_sft",
+  "ability": {
+    "name": "control_net",
+    "image_uri_list": ["tos-cn-i-tb4s082cfz/..."],
+    "control_net_list": [
+      { "name": "pose", "strength": 0.6, "image_index": 0 }
+    ]
+  }
+}
+```
+
+Pose validation request:
+
+```txt
+POST /mweb/v1/pose_detect
+```
+
+```json
+{ "uri": "tos-cn-i-tb4s082cfz/..." }
+```
+
+Current CLI proof:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts controlnet-preview \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --image data/jimeng-lab/ugc-studio-kbeauty-image/artifacts/jimeng-kbeauty-01.png \
+  --control pose \
+  --outDir data/jimeng-lab/proof-20260610-controlnet-pose-preview
+```
+
+Safe summary:
+
+```txt
+image_uri=tos-cn-i-tb4s082cfz/2cb5efccab014a29b171719f4303cb21.png
+control=pose
+fit_mode=center_crop
+strength=0.6
+preview_image_uri=tos-cn-i-tb4s082cfz/222b232061324073accaf7992ec3ad87
+pose_detected=true
+preview_sha256=c9404ff104ba8c380eccada50e1526489b756a6c5380fe512da12ea76f1f0c65
+pose_detect_sha256=4f9e4059d904fdb8f6fb8491eb79eab0e609e630dbbcfe29f4a76e53e5c91f5f
+preview_artifact=data/jimeng-lab/proof-20260610-controlnet-pose-preview/artifacts/controlnet-preview-20260609162825-rvn7f6-pose-preview.png
+summary=data/jimeng-lab/proof-20260610-controlnet-pose-preview/normalized/controlnet-preview-20260609162825-rvn7f6-summary.json
+```
+
+The preview artifact is a `1024x1024` PNG pose skeleton/control map. Raw blend-preview responses can contain signed preview URLs and remain ignored under `data/**`; normalized summaries intentionally record only provider URIs, booleans, hashes, request shapes, and local artifact paths.
 
 ## Confirmed Local Video Upload Contract
 
@@ -593,7 +666,7 @@ The 2026-06-09 JS bundle sweep found these useful endpoint groups. Treat them as
 | Voice cloning / custom voice | `/mweb/v1/voice/submit_task`, `/mweb/v1/voice/query_task`, `/mweb/v1/voice/update`, `/mweb/v1/voice/delete` |
 | Subject/persona lifecycle | `/mweb/v1/dreamina_subject/create`, `/mweb/v1/dreamina_subject/update`, `/mweb/v1/dreamina_subject/delete`, `/mweb/v1/dreamina_subject/generate_voice` |
 | Infinite canvas | `/mweb/v1/infinite_canvas/create_project`, `/mweb/v1/infinite_canvas/conversation`, `/mweb/v1/infinite_canvas/edit`, `/mweb/v1/infinite_canvas/resume`, `/mweb/v1/infinite_canvas/stop_stream`, `/mweb/v1/infinite_canvas/v1/fetch_snapshot`, `/mweb/v1/infinite_canvas/v1/submit_changeset`, `/mweb/v1/infinite_canvas/v1/fetch_changeset` |
-| Reference/image tools | `/mweb/v1/get_common_config`, `/mweb/v1/get_image_description`, `/mweb/v1/get_upload_token`, `/mweb/v1/face_recognize`, `/mweb/v1/algo_proxy` |
+| Reference/image tools | `/mweb/v1/get_common_config`, `/mweb/v1/get_image_description`, `/mweb/v1/get_upload_token`, `/mweb/v1/face_recognize`, `/mweb/v1/blend_preview`, `/mweb/v1/pose_detect`, `/mweb/v1/saliency_seg`, `/mweb/v1/algo_proxy`; image upload, description, face recognition, ControlNet preview, and pose detect are now implemented, while saliency/object tools still need CLI coverage |
 | Template/research mining | `/mweb/v1/feed`, `/mweb/v1/feed_short_video`, `/lv/v1/cc_web/replicate/search_templates`, `/lv/v1/cc_web/plane/*`; `/mweb/v1/get_explore` is now implemented for direct Explore templates and short-video examples |
 | Assets/upload/editor | `/lv/v1/asset/*`, `/lv/v1/editor/image/*` |
 | Audio/video utility | `/mweb/v1/mix_audio_video`, `/mweb/v1/mix_audio_videos`, `/lv/v2/intelligence/tts/curl_sync_everphoto` |

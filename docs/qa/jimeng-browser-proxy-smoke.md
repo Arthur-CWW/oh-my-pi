@@ -336,6 +336,48 @@ face_count=0
 
 The face-recognition endpoint completed successfully but found no face on this generated input. Raw upload traces and response bodies remain under ignored `data/**`.
 
+## ControlNet Reference Preview Smoke
+
+`jimeng-browser-proxy controlnet-preview` uploads a local reference image when needed, then calls Jimeng's no-generation ControlNet preview endpoint. For `--control pose`, it also calls `pose_detect` and saves the returned preview skeleton/control-map image.
+
+Command:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts controlnet-preview \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --image data/jimeng-lab/ugc-studio-kbeauty-image/artifacts/jimeng-kbeauty-01.png \
+  --control pose \
+  --outDir data/jimeng-lab/proof-20260610-controlnet-pose-preview
+```
+
+Result:
+
+```txt
+raw=data/jimeng-lab/proof-20260610-controlnet-pose-preview/raw/controlnet-preview-20260609162825-rvn7f6-raw.json
+summary=data/jimeng-lab/proof-20260610-controlnet-pose-preview/normalized/controlnet-preview-20260609162825-rvn7f6-summary.json
+source_copy=data/jimeng-lab/proof-20260610-controlnet-pose-preview/artifacts/controlnet-preview-20260609162825-rvn7f6-controlnet_reference-jimeng-kbeauty-01.png
+preview_artifact=data/jimeng-lab/proof-20260610-controlnet-pose-preview/artifacts/controlnet-preview-20260609162825-rvn7f6-pose-preview.png
+image_uri=tos-cn-i-tb4s082cfz/2cb5efccab014a29b171719f4303cb21.png
+preview_image_uri=tos-cn-i-tb4s082cfz/222b232061324073accaf7992ec3ad87
+control=pose
+strength=0.6
+fit_mode=center_crop
+pose_detected=true
+preview_response_sha256=c9404ff104ba8c380eccada50e1526489b756a6c5380fe512da12ea76f1f0c65
+pose_detect_response_sha256=4f9e4059d904fdb8f6fb8491eb79eab0e609e630dbbcfe29f4a76e53e5c91f5f
+preview_file=PNG image data, 1024 x 1024, 8-bit/color RGB, non-interlaced
+```
+
+Normalized summary files were checked for signed URL leakage:
+
+```bash
+rg -n "X-Amz|signed|http[s]?://" data/jimeng-lab/proof-20260610-controlnet-pose-preview/normalized
+```
+
+Result: no matches.
+
+Raw upload/preview responses may contain signed URLs and temporary upload traces. They remain under ignored `data/**`.
+
 ## Image-To-Video First-Frame Smoke
 
 Local-upload-backed image-to-video is now live-proved through the browser-proxy front door.
@@ -656,8 +698,8 @@ Result:
 
 ```txt
 typecheck passed
-39 tests passed, 0 failed
-browser-proxy help listed describe-image, templates, short-videos, upload-video, image2video, frames2video, and lip-sync
+44 tests passed, 0 failed
+browser-proxy help listed describe-image, controlnet-preview, templates, short-videos, upload-video, image2video, frames2video, and lip-sync
 ```
 
 ## Follow-Up
@@ -666,7 +708,7 @@ Next useful captures:
 
 - image-to-image / byte edit
 - subject/persona creation
-- pose/style/depth/canny reference controls
+- representative live smokes for depth/canny/style reference controls and object segmentation
 - additional template/research endpoints: CapCut template search, plane endpoints, and the bundle-discovered `/mweb/v1/feed_short_video` overseas path
 - image-to-video end-frame and multi-frame live proof with explicit frontend mode capture
 - multimodal/all-around reference video

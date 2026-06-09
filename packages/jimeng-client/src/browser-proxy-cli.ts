@@ -24,6 +24,16 @@ import {
 } from "./explore"
 import { buildJimengLipSyncVideoPlan, lipSyncVideoReferenceFromUploadSummary, type JimengLipSyncVideoReference } from "./lip-sync"
 import {
+  buildJimengControlNetSaveParams,
+  defaultControlNetPreviewBabiParam,
+  defaultPoseDetectBabiParam,
+  detectJimengPose,
+  generateJimengControlNetPreview,
+  parseJimengControlNetFitMode,
+  parseJimengControlNetKind,
+  summarizeControlNetReferenceInspection,
+} from "./reference-controls"
+import {
   defaultFaceRecognizeBabiParam,
   defaultImageDescriptionBabiParam,
   describeJimengImage,
@@ -48,6 +58,7 @@ Commands:
   templates     Fetch no-spend Explore/template examples for prompt/template mining
   short-videos  Fetch no-spend Explore short videos for reference/profile mining
   describe-image Upload/use an image URI, then describe it and detect faces
+  controlnet-preview Upload/use an image URI, then build pose/depth/canny preview refs
   upload-token  Fetch temporary upload credentials for image/video/file upload scenes
   upload-image  Upload a local image to Jimeng ImageX and return a provider URI
   upload-video  Upload a local video to Jimeng VOD and return a provider video reference
@@ -83,6 +94,10 @@ Options:
   --imageUri <uri>               Existing Jimeng/ImageX provider URI for describe-image
   --noDescription                Skip get_image_description in describe-image
   --noFaces                      Skip face_recognize in describe-image
+  --control <pose|depth|canny>    ControlNet reference kind (default: pose)
+  --strength <n>                 ControlNet strength as 0.01..1 or 1..100 (default: 60)
+  --fitMode <value>              ControlNet save fit mode: center_crop or adapt_to_canvas
+  --noPoseDetect                 Skip pose_detect even when --control pose
   --vid <vid>                    Existing VOD vid for lip-sync
   --videoUri <uri>               Existing VOD/tos provider URI for lip-sync
   --videoWidth <n>               Existing reference video width for lip-sync
@@ -137,6 +152,11 @@ Examples:
     --image data/jimeng-lab/ugc-studio-kbeauty-image/artifacts/jimeng-kbeauty-01.png \\
     --outDir data/jimeng-lab/cli-reference-image-smoke
 
+  jimeng-browser-proxy controlnet-preview \\
+    --image data/jimeng-lab/ugc-studio-kbeauty-image/artifacts/jimeng-kbeauty-01.png \\
+    --control pose \\
+    --outDir data/jimeng-lab/cli-controlnet-preview-smoke
+
   jimeng-browser-proxy upload-image \\
     --file data/jimeng-lab/image-upload-probe/aws4-live/proof-1x1.png \\
     --outDir data/jimeng-lab/cli-image-upload-smoke
@@ -179,6 +199,7 @@ interface CliArgs {
     | "templates"
     | "short-videos"
     | "describe-image"
+    | "controlnet-preview"
     | "upload-token"
     | "upload-image"
     | "upload-video"
@@ -212,6 +233,10 @@ interface CliArgs {
   imageUri?: string
   noDescription: boolean
   noFaces: boolean
+  control?: string
+  strength?: number
+  fitMode?: string
+  noPoseDetect: boolean
   vid?: string
   videoUri?: string
   videoWidth?: number
@@ -605,6 +630,132 @@ async function main(argv: string[]): Promise<void> {
     return
   }
 
+  if (args.command === "controlnet-preview") {
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const sourceFile = args.image ?? args.file
+    const runId = `controlnet-preview-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${Math.random().toString(36).slice(2, 8)}`
+    const requestedImageUri = args.imageUri
+    const control = parseJimengControlNetKind(args.control)
+    const fitMode = parseJimengControlNetFitMode(args.fitMode)
+    const endpoints = [
+      "/mweb/v1/blend_preview",
+      ...(control === "pose" && !args.noPoseDetect ? ["/mweb/v1/pose_detect"] : []),
+    ]
+    if (!sourceFile && !requestedImageUri) throw new Error("controlnet-preview requires --image, --file, or --imageUri")
+
+    if (args.dryRun) {
+      writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
+        command: args.command,
+        endpoint_sequence: [
+          ...(sourceFile ? ["/mweb/v1/get_upload_token scene=2", "ImageX ApplyImageUpload", "ImageX direct POST /upload/v1/{StoreUri}", "ImageX CommitImageUpload"] : []),
+          ...endpoints,
+        ],
+        source_file: sourceFile ? path.resolve(sourceFile) : undefined,
+        image_uri: requestedImageUri,
+        control,
+        fit_mode: fitMode,
+        strength: args.strength,
+        browser_session: redactSession(session),
+      })
+      console.log(`[jimeng-browser-proxy] controlnet-preview dry run saved`)
+      return
+    }
+
+    let imageUri = requestedImageUri
+    let imageUpload: object | null = null
+    if (sourceFile) {
+      const upload = await uploadReferenceImage({
+        session,
+        dirs,
+        runId,
+        role: "controlnet_reference",
+        index: 0,
+        sourceFile,
+      })
+      imageUri = upload.uri
+      imageUpload = upload
+    }
+    if (!imageUri) throw new Error("Image upload did not return an image URI")
+
+    const preview = await generateJimengControlNetPreview({
+      session,
+      imageUri,
+      control,
+      strength: args.strength,
+      babiParam: defaultControlNetPreviewBabiParam(control),
+    })
+    const poseDetection = control === "pose" && !args.noPoseDetect
+      ? await detectJimengPose({
+        session,
+        imageUri,
+        babiParam: defaultPoseDetectBabiParam(),
+      })
+      : null
+    const saveParams = buildJimengControlNetSaveParams({
+      imageUri,
+      control,
+      strength: preview.strength,
+      previewImageUri: preview.previewImageUri,
+      previewImageUrl: preview.previewImageUrl,
+      fitMode,
+    })
+    let previewArtifact: string | null = null
+    if (preview.previewImageUrl && !args.noDownload) {
+      previewArtifact = path.join(dirs.artifactsDir, `${runId}-${control}-preview.png`)
+      const bytes = await new JimengClient().download(preview.previewImageUrl)
+      writeFileSync(previewArtifact, Buffer.from(bytes))
+    }
+    const inspection = { imageUri, control, fitMode, preview, poseDetection, saveParams }
+
+    writeJson(path.join(dirs.rawDir, `${runId}-raw.json`), {
+      preview: {
+        http_status: preview.httpStatus,
+        ret: preview.ret,
+        errmsg: preview.errmsg,
+        response_text_sha256: preview.responseTextSha256,
+        request: preview.request,
+        body: preview.body,
+      },
+      pose_detection: poseDetection ? {
+        http_status: poseDetection.httpStatus,
+        ret: poseDetection.ret,
+        errmsg: poseDetection.errmsg,
+        response_text_sha256: poseDetection.responseTextSha256,
+        request: poseDetection.request,
+        body: poseDetection.body,
+      } : null,
+    })
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      endpoints,
+      image_upload: imageUpload,
+      image_uri: imageUri,
+      control,
+      fit_mode: fitMode,
+      preview: {
+        http_status: preview.httpStatus,
+        ret: preview.ret,
+        errmsg: preview.errmsg,
+        response_text_sha256: preview.responseTextSha256,
+        request: preview.request,
+        preview_image_uri: preview.previewImageUri,
+        preview_image_url_present: !!preview.previewImageUrl,
+        preview_artifact: previewArtifact,
+      },
+      pose_detection: poseDetection ? {
+        http_status: poseDetection.httpStatus,
+        ret: poseDetection.ret,
+        errmsg: poseDetection.errmsg,
+        response_text_sha256: poseDetection.responseTextSha256,
+        request: poseDetection.request,
+        is_pose: poseDetection.isPose,
+      } : null,
+      summary: summarizeControlNetReferenceInspection(inspection),
+    })
+    console.log(`[jimeng-browser-proxy] controlnet-preview saved control=${control} preview_uri=${preview.previewImageUri ?? "missing"} pose=${poseDetection?.isPose ?? "n/a"}`)
+    return
+  }
+
   if (args.command === "upload-token") {
     const dirs = ensureOutputDirs(path.resolve(args.outDir))
     const scene = parseUploadTokenScene(args.scene)
@@ -966,6 +1117,7 @@ function parseArgs(argv: string[]): CliArgs {
     && command !== "templates"
     && command !== "short-videos"
     && command !== "describe-image"
+    && command !== "controlnet-preview"
     && command !== "upload-token"
     && command !== "upload-image"
     && command !== "upload-video"
@@ -984,6 +1136,7 @@ function parseArgs(argv: string[]): CliArgs {
   const videoHeight = flags.videoHeight ? Number(flags.videoHeight) : undefined
   const videoDurationSec = flags.videoDurationSec ? Number(flags.videoDurationSec) : undefined
   const speed = flags.speed ? Number(flags.speed) : undefined
+  const strength = flags.strength ? Number(flags.strength) : undefined
   const seed = flags.seed ? Number(flags.seed) : undefined
   const itemPlatform = flags["item-platform"] ? Number(flags["item-platform"]) : undefined
   const limit = flags.limit ? Number(flags.limit) : undefined
@@ -1016,6 +1169,9 @@ function parseArgs(argv: string[]): CliArgs {
   if (speed !== undefined && (!Number.isFinite(speed) || speed < 0.5 || speed > 2)) {
     throw new Error("--speed must be a number from 0.5 to 2")
   }
+  if (strength !== undefined && (!Number.isFinite(strength) || strength <= 0 || strength > 100)) {
+    throw new Error("--strength must be a number from 0.01..1 or 1..100")
+  }
   return {
     command,
     cdpUrl: flags.cdp ?? DEFAULT_CDP_URL,
@@ -1043,6 +1199,10 @@ function parseArgs(argv: string[]): CliArgs {
     imageUri: flags.imageUri,
     noDescription: flags.noDescription === "true",
     noFaces: flags.noFaces === "true",
+    control: flags.control,
+    strength,
+    fitMode: flags.fitMode,
+    noPoseDetect: flags.noPoseDetect === "true",
     vid: flags.vid,
     videoUri: flags.videoUri,
     videoWidth,
@@ -1113,7 +1273,7 @@ interface ReferenceUploadSummary {
   image_upload: JimengImageUploadResult["summary"]
 }
 
-type ReferenceImageRole = "first_frame" | "end_frame"
+type ReferenceImageRole = "first_frame" | "end_frame" | "controlnet_reference"
 
 interface ReferenceVideoUploadSummary {
   index: number

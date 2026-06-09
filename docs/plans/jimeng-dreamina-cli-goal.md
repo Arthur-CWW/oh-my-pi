@@ -112,13 +112,24 @@ Reference-image inspection is now live-proved without generation spend:
 - proof bundle: `data/jimeng-lab/proof-20260610-reference-image-inspect/`
 - latest proof produced description `黑发女人，白色背心。`; face recognition returned `ret=0`, `errmsg=success`, and `face_count=0` for that input image.
 
+ControlNet reference preview is now live-proved without generation spend:
+
+- `jimeng-browser-proxy controlnet-preview`
+- direct `/mweb/v1/blend_preview` with frontend constants `model=img2img_xl_sft`, `ability.name=control_net`, `control_net_list[].name=pose|depth|canny`, and default strength `0.6`
+- pose mode also calls `/mweb/v1/pose_detect`
+- local images are uploaded through the live-proved ImageX scene `2` path first, unless an existing `--imageUri` is supplied
+- useful flags: `--image`, `--file`, `--imageUri`, `--control`, `--strength`, `--fitMode`, `--noPoseDetect`, `--noDownload`
+- normalized proof records provider URI, preview provider URI, pose-detect result, frontend save-param patch, response hashes, and a local preview PNG path without signed URLs
+- proof bundle: `data/jimeng-lab/proof-20260610-controlnet-pose-preview/`
+- latest proof produced `preview_image_uri=tos-cn-i-tb4s082cfz/222b232061324073accaf7992ec3ad87`, `pose_detected=true`, and a `1024x1024` pose skeleton PNG at `data/jimeng-lab/proof-20260610-controlnet-pose-preview/artifacts/controlnet-preview-20260609162825-rvn7f6-pose-preview.png`.
+
 The next slice is **reference controls and video-reference consumers**. Use the VOD provider reference plus frontend captures to unlock live lip-sync, reference-video, multimodal/all-around reference, pose/style/depth/canny controls, and live end-frame/multi-frame image-to-video paths.
 
 Immediate next slices:
 
 1. Capture a frontend lip-sync submit and compare the converted `draft_content` with the dry-run `providerInput`; enable live submit only if it matches.
 2. Capture the frontend's explicit end-frame/multi-frame mode and live-prove `frames2video` only if the payload contract matches.
-3. Map image-to-video reference controls such as pose/style/depth/canny/reference roles, depending on the clearest captured contracts.
+3. Run representative live no-spend smokes for depth/canny controls and map style/reference roles into generation payload patches.
 4. Implement digital-human generation using the confirmed VOD reference path where applicable.
 5. Expand no-spend research/template coverage with CapCut template search, plane endpoints, and the bundle-discovered `/mweb/v1/feed_short_video` overseas path.
 6. Implement voice clone and subject/persona voice generation once the UI/API flow is captured.
@@ -203,6 +214,7 @@ jimeng-browser-proxy sample-voices
 jimeng-browser-proxy upload-token
 jimeng-browser-proxy upload-image
 jimeng-browser-proxy describe-image
+jimeng-browser-proxy controlnet-preview
 jimeng-browser-proxy text2image
 jimeng-browser-proxy text2video
 jimeng-browser-proxy image2video
