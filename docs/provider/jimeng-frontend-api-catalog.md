@@ -428,6 +428,29 @@ options=[]
 model_tip=仅仅修改人物口型。适合演讲、对白
 ```
 
+Focused no-spend config command:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts lip-sync-config \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --outDir data/jimeng-lab/proof-20260610-lip-sync-config
+```
+
+Latest config proof:
+
+```txt
+image_models=dreamina_lib_sync_image_master_1.5:大师模式:input_media_type,audio_option | dreamina_lib_sync_image_quick_1.5:快速模式:input_media_type,audio_option
+image_default_idx=1
+video_models=dreamina_lib_sync_base:基础模式:仅仅修改人物口型。适合演讲、对白
+video_default_idx=0
+image_response_text_sha256=4ee64d934e475164c23f6c5ed3080a65e33bbe2f478152b4786b187fc24abc23
+video_response_text_sha256=03cb4d200ad77f1e5bded4d6d558bf5f5798b991040ff621f28d74d65ab07ae0
+raw=data/jimeng-lab/proof-20260610-lip-sync-config/raw/lip-sync-config-20260609232724.json
+summary=data/jimeng-lab/proof-20260610-lip-sync-config/normalized/lip-sync-config-20260609232724-summary.json
+```
+
+Raw config responses include signed model-preview GIF URLs. Normalized summaries omit those URLs.
+
 Dry-run proof command:
 
 ```bash
@@ -593,6 +616,8 @@ This is dry-run-proved only. The next live-proof step should capture or select t
 - `subject-list`: `/mweb/v1/dreamina_subject/get`
 
 These probes are useful for keeping the CLI/app aware of available models, lip-sync routes, saved subjects, and user voice assets without consuming generation credits.
+
+The two lip-sync config endpoints also have a focused command, `jimeng-browser-proxy lip-sync-config`, because they directly parameterize digital-human/image-avatar mode and VOD video lip-sync mode.
 
 ## Confirmed Saved Subject / Persona List Contract
 

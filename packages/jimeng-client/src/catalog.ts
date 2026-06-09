@@ -35,6 +35,11 @@ export interface JimengCatalogProbeResult {
   body: unknown
 }
 
+export interface JimengLipSyncConfigResult {
+  image: JimengCatalogProbeResult
+  video: JimengCatalogProbeResult
+}
+
 export interface JimengVoiceCatalogItem {
   id: string
   title: string
@@ -178,6 +183,29 @@ export async function runCatalogProbe(input: {
   return results
 }
 
+export async function fetchLipSyncConfigs(input: {
+  client?: JimengClient
+  session: JimengSessionBundle
+}): Promise<JimengLipSyncConfigResult> {
+  const results = await runCatalogProbe({
+    client: input.client,
+    session: input.session,
+    endpointIds: ["lip-sync-image-config", "lip-sync-video-config"],
+  })
+  const image = results.find((result) => result.endpoint === "lip-sync-image-config")
+  const video = results.find((result) => result.endpoint === "lip-sync-video-config")
+  if (!image || !video) {
+    throw jimengError({
+      category: "upstream",
+      code: "LIP_SYNC_CONFIG_MISSING",
+      message: "Lip-sync config probe did not return both image and video configs",
+      retryable: false,
+      details: { endpoints: results.map((result) => result.endpoint) },
+    })
+  }
+  return { image, video }
+}
+
 export function findVoiceLibraryRequest(capture: CaptureFile): CaptureRequestEntry | undefined {
   return capture.entries.find((entry) =>
     entry.kind === "request"
@@ -267,6 +295,23 @@ export function summarizeVoiceLibrary(voices: JimengVoiceCatalogItem[]): Record<
     by_gender: byGender,
     by_accent: byAccent,
     sample: voices.slice(0, 12),
+  }
+}
+
+export function summarizeLipSyncConfigs(result: JimengLipSyncConfigResult): Record<string, unknown> {
+  return {
+    image: {
+      endpoint: result.image.endpoint,
+      http_status: result.image.httpStatus,
+      response_text_sha256: result.image.responseTextSha256,
+      summary: result.image.summary,
+    },
+    video: {
+      endpoint: result.video.endpoint,
+      http_status: result.video.httpStatus,
+      response_text_sha256: result.video.responseTextSha256,
+      summary: result.video.summary,
+    },
   }
 }
 

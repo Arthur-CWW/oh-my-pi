@@ -1036,6 +1036,46 @@ data/jimeng-lab/proof-20260610-lip-sync-vod-plan/normalized/lip-sync-20260609145
 
 This is deliberately a no-spend planning command. Before enabling live generation, capture a real UI lip-sync submit and compare the converted `draft_content` with the dry-run `providerInput`.
 
+### 14.1) Lip-sync and digital-human model config
+- `POST https://jimeng.jianying.com/mweb/v1/video_generate/get_common_config`
+- Status:
+  - live-proved without generation spend
+  - implemented as `jimeng-browser-proxy lip-sync-config`
+  - wraps the two confirmed scenes already present in the generic catalog probe:
+    - `lip_sync_image_generate_video`
+    - `lip_sync_video_generate_video`
+- Raw responses include signed model-preview GIF URLs. Keep raw files under ignored `data/**`; normalized summaries omit signed media URLs and keep durable model keys, labels, options, tips, commercial config, response hashes, and default indices.
+
+Dry-run command:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts lip-sync-config \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --outDir data/jimeng-lab/proof-20260610-lip-sync-config-dry-run \
+  --dryRun
+```
+
+Live proof command:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts lip-sync-config \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --outDir data/jimeng-lab/proof-20260610-lip-sync-config
+```
+
+Observed safe summary:
+
+```txt
+image_models=dreamina_lib_sync_image_master_1.5:大师模式:input_media_type,audio_option | dreamina_lib_sync_image_quick_1.5:快速模式:input_media_type,audio_option
+image_default_idx=1
+video_models=dreamina_lib_sync_base:基础模式:仅仅修改人物口型。适合演讲、对白
+video_default_idx=0
+image_response_text_sha256=4ee64d934e475164c23f6c5ed3080a65e33bbe2f478152b4786b187fc24abc23
+video_response_text_sha256=03cb4d200ad77f1e5bded4d6d558bf5f5798b991040ff621f28d74d65ab07ae0
+raw=data/jimeng-lab/proof-20260610-lip-sync-config/raw/lip-sync-config-20260609232724.json
+summary=data/jimeng-lab/proof-20260610-lip-sync-config/normalized/lip-sync-config-20260609232724-summary.json
+```
+
 ### 15) Local-image image-to-video
 - Status:
   - live-proved with `jimeng-browser-proxy image2video`
@@ -1396,6 +1436,7 @@ Current support matrix:
 | `text2image` | implemented when image capture is supplied | Uses captured `/mweb/v1/creation_agent/v2/conversation`; needs current local image capture fixture/session. |
 | `image2video` | implemented in `jimeng-browser-proxy`; partial in low-level compat helper | Browser proxy can upload local `--image`, inject `first_frame_image`, submit/poll/download MP4. Low-level helper accepts confirmed `--firstFrameUri`. |
 | `frames2video` | dry-run-proved in `jimeng-browser-proxy`; partial in low-level compat helper | Browser proxy can upload local `--image` and `--lastImage`, inject `first_frame_image`/`end_frame_image`, and write a no-generation plan. Live proof still needs explicit frontend end-frame mode evidence. |
+| `lip-sync-config` | implemented in `jimeng-browser-proxy` | No-spend direct lip-sync/digital-human model config for image/avatar and video modes. |
 | `lip-sync` | dry-run-proved in `jimeng-browser-proxy` | Browser proxy can prepare the VOD-reference lip-sync provider input from a VOD `vid`/metadata plus TTS voice flags. Live submit still needs a frontend submit capture/compare. |
 | `templates` | implemented in `jimeng-browser-proxy` | No-spend direct `/mweb/v1/get_explore` template mining with prompt/model/usage normalization. |
 | `overseas-short-videos` | implemented in `jimeng-browser-proxy` | No-spend direct `/mweb/v1/feed_short_video` short-video/reference mining with ranking and video metadata normalization. |

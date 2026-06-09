@@ -12,10 +12,12 @@ import {
 } from "./capcut-templates"
 import {
   fetchVoiceLibraryFromCapture,
+  fetchLipSyncConfigs,
   generateTextToSpeech,
   getDefaultVoiceLibraryCapturePath,
   parseCatalogEndpointIds,
   runCatalogProbe,
+  summarizeLipSyncConfigs,
   summarizeVoiceLibrary,
   type JimengVoiceCatalogItem,
 } from "./catalog"
@@ -71,6 +73,7 @@ It refreshes the live frontend session from the browser, then uses the direct cl
 Commands:
   session       Save a fresh session bundle from the logged-in Jimeng browser profile
   catalog       Probe non-generating model/tool/persona/voice config endpoints
+  lip-sync-config Fetch no-spend digital-human/lip-sync model configs
   voices        Fetch the built-in voice library from a captured signed feed request
   tts           Generate one MP3 text-to-speech sample from a voice id
   sample-voices Generate sequential MP3 samples for voices from the built-in library
@@ -160,6 +163,9 @@ Examples:
   jimeng-browser-proxy voices \\
     --capture data/jimeng-captures/<run>/capture-template.raw.json
 
+  jimeng-browser-proxy lip-sync-config \\
+    --outDir data/jimeng-lab/cli-lip-sync-config-smoke
+
   jimeng-browser-proxy tts \\
     --voice-id 7597003459665072686 \\
     --text "这条视频值得试一下。"
@@ -241,6 +247,7 @@ interface CliArgs {
   command:
     | "session"
     | "catalog"
+    | "lip-sync-config"
     | "voices"
     | "tts"
     | "sample-voices"
@@ -384,6 +391,51 @@ async function main(argv: string[]): Promise<void> {
       summary: result.summary,
     })))
     console.log(`[jimeng-browser-proxy] catalog saved endpoints=${results.length}`)
+    return
+  }
+
+  if (args.command === "lip-sync-config") {
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const runId = `lip-sync-config-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    if (args.dryRun) {
+      writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
+        command: args.command,
+        endpoint_sequence: [
+          "/mweb/v1/video_generate/get_common_config scene=lip_sync_image_generate_video",
+          "/mweb/v1/video_generate/get_common_config scene=lip_sync_video_generate_video",
+        ],
+        browser_session: redactSession(session),
+      })
+      console.log(`[jimeng-browser-proxy] lip-sync-config dry run saved`)
+      return
+    }
+
+    const result = await fetchLipSyncConfigs({ session })
+    writeJson(path.join(dirs.rawDir, `${runId}.json`), {
+      image: {
+        url: result.image.url,
+        http_status: result.image.httpStatus,
+        ret: result.image.ret,
+        errmsg: result.image.errmsg,
+        response_text_sha256: result.image.responseTextSha256,
+        body: result.image.body,
+      },
+      video: {
+        url: result.video.url,
+        http_status: result.video.httpStatus,
+        ret: result.video.ret,
+        errmsg: result.video.errmsg,
+        response_text_sha256: result.video.responseTextSha256,
+        body: result.video.body,
+      },
+    })
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      summary: summarizeLipSyncConfigs(result),
+    })
+    const imageModels = Array.isArray(result.image.summary.models) ? result.image.summary.models.length : 0
+    const videoModels = Array.isArray(result.video.summary.models) ? result.video.summary.models.length : 0
+    console.log(`[jimeng-browser-proxy] lip-sync-config saved imageModels=${imageModels} videoModels=${videoModels}`)
     return
   }
 
@@ -1424,6 +1476,7 @@ function parseArgs(argv: string[]): CliArgs {
   if (
     command !== "session"
     && command !== "catalog"
+    && command !== "lip-sync-config"
     && command !== "voices"
     && command !== "tts"
     && command !== "sample-voices"

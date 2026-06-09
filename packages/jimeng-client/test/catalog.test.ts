@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test"
 import {
   fetchVoiceLibraryFromCapture,
+  fetchLipSyncConfigs,
   generateTextToSpeech,
   parseCatalogEndpointIds,
+  summarizeLipSyncConfigs,
   type CaptureFile,
   type JimengFetch,
   type JimengSessionBundle,
@@ -104,6 +106,54 @@ describe("Jimeng catalog helpers", () => {
     expect(new TextDecoder().decode(result.audioBytes)).toBe("mp3-bytes")
     expect(result.ret).toBe("0")
   })
+
+  test("fetchLipSyncConfigs probes image and video model configs", async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = []
+    const client = new JimengClient({
+      fetch: mockFetchSequence([
+        JSON.stringify(lipSyncImageConfigBody()),
+        JSON.stringify(lipSyncVideoConfigBody()),
+      ], requests),
+    })
+
+    const result = await fetchLipSyncConfigs({ client, session })
+    const summary = summarizeLipSyncConfigs(result)
+
+    expect(requests.map((request) => request.url)).toEqual([
+      expect.stringContaining("/mweb/v1/video_generate/get_common_config"),
+      expect.stringContaining("/mweb/v1/video_generate/get_common_config"),
+    ])
+    expect(JSON.parse(String(requests[0]?.init?.body))).toEqual({ scene: "lip_sync_image_generate_video", params: {} })
+    expect(JSON.parse(String(requests[1]?.init?.body))).toEqual({ scene: "lip_sync_video_generate_video", params: {} })
+    expect(summary).toMatchObject({
+      image: {
+        endpoint: "lip-sync-image-config",
+        summary: {
+          models: [
+            {
+              model_req_key: "dreamina_lib_sync_image_quick_1.5",
+              model_name: "快速模式",
+              options: ["input_media_type", "audio_option"],
+            },
+          ],
+          default_model_idx: 0,
+        },
+      },
+      video: {
+        endpoint: "lip-sync-video-config",
+        summary: {
+          models: [
+            {
+              model_req_key: "dreamina_lib_sync_base",
+              model_name: "基础模式",
+              model_tip: "仅仅修改人物口型。适合演讲、对白",
+            },
+          ],
+          default_model_idx: 0,
+        },
+      },
+    })
+  })
 })
 
 function voiceCapture(): CaptureFile {
@@ -121,4 +171,65 @@ function voiceCapture(): CaptureFile {
 
 function mockFetch(text: string): JimengFetch {
   return async () => new Response(text, { status: 200 })
+}
+
+function mockFetchSequence(texts: string[], requests: Array<{ url: string; init?: RequestInit }>): JimengFetch {
+  return async (url, init) => {
+    requests.push({ url, init })
+    const text = texts.shift()
+    return new Response(text ?? "{}", { status: 200 })
+  }
+}
+
+function lipSyncImageConfigBody(): Record<string, unknown> {
+  return {
+    ret: "0",
+    errmsg: "success",
+    data: {
+      default_model_idx: 0,
+      model_list: [
+        {
+          model_req_key: "dreamina_lib_sync_image_quick_1.5",
+          model_name: "快速模式",
+          model_tip: "更低成本，快速生成",
+          feats: [],
+          options: [
+            { key: "input_media_type" },
+            { key: "audio_option" },
+          ],
+          commercial_config: {
+            default: {
+              benefit_type: "lip_sync_avatar_omni_15_quick",
+              amount: 0,
+            },
+          },
+        },
+      ],
+    },
+  }
+}
+
+function lipSyncVideoConfigBody(): Record<string, unknown> {
+  return {
+    ret: "0",
+    errmsg: "success",
+    data: {
+      default_model_idx: 0,
+      model_list: [
+        {
+          model_req_key: "dreamina_lib_sync_base",
+          model_name: "基础模式",
+          model_tip: "仅仅修改人物口型。适合演讲、对白",
+          feats: [],
+          options: [],
+          commercial_config: {
+            default: {
+              benefit_type: "lip_sync_avatar_std",
+              amount: 0,
+            },
+          },
+        },
+      ],
+    },
+  }
 }

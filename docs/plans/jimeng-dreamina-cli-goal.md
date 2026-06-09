@@ -89,6 +89,19 @@ Lip-sync VOD video-reference planning is now dry-run-proved:
 - proof bundle: `data/jimeng-lab/proof-20260610-lip-sync-vod-plan/`
 - live generation is intentionally disabled until a real frontend lip-sync submit is captured and compared.
 
+Lip-sync/digital-human model config is now live-proved without generation spend:
+
+- `jimeng-browser-proxy lip-sync-config`
+- direct `/mweb/v1/video_generate/get_common_config` for scenes `lip_sync_image_generate_video` and `lip_sync_video_generate_video`
+- image/avatar models:
+  - `dreamina_lib_sync_image_master_1.5` / `大师模式`
+  - `dreamina_lib_sync_image_quick_1.5` / `快速模式`
+- video model:
+  - `dreamina_lib_sync_base` / `基础模式`
+- image-mode options include `input_media_type` and `audio_option`
+- proof bundle: `data/jimeng-lab/proof-20260610-lip-sync-config/`
+- raw config responses include signed preview GIF URLs, while normalized summaries omit them.
+
 Explore/template mining is now live-proved without generation spend:
 
 - `jimeng-browser-proxy templates`

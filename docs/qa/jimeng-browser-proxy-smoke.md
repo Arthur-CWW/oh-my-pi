@@ -661,6 +661,50 @@ ttsInfo.sourceType=text-to-speech
 
 The command is intentionally dry-run-only. Live submit still needs a captured frontend lip-sync `/mweb/v1/aigc_draft/generate` request so the final converted `draft_content` can be compared before spending quota.
 
+## Lip-Sync Config Smoke
+
+`jimeng-browser-proxy lip-sync-config` fetches the no-spend model configs for digital-human/image-avatar lip sync and video lip sync.
+
+Dry run:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts lip-sync-config \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --outDir data/jimeng-lab/proof-20260610-lip-sync-config-dry-run \
+  --dryRun
+```
+
+Live command:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts lip-sync-config \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --outDir data/jimeng-lab/proof-20260610-lip-sync-config
+```
+
+Result:
+
+```txt
+raw=data/jimeng-lab/proof-20260610-lip-sync-config/raw/lip-sync-config-20260609232724.json
+summary=data/jimeng-lab/proof-20260610-lip-sync-config/normalized/lip-sync-config-20260609232724-summary.json
+image_models=dreamina_lib_sync_image_master_1.5:大师模式:input_media_type,audio_option | dreamina_lib_sync_image_quick_1.5:快速模式:input_media_type,audio_option
+image_default_idx=1
+video_models=dreamina_lib_sync_base:基础模式:仅仅修改人物口型。适合演讲、对白
+video_default_idx=0
+image_response_text_sha256=4ee64d934e475164c23f6c5ed3080a65e33bbe2f478152b4786b187fc24abc23
+video_response_text_sha256=03cb4d200ad77f1e5bded4d6d558bf5f5798b991040ff621f28d74d65ab07ae0
+```
+
+Raw config responses include signed model-preview GIF URLs. Normalized proof is checked separately:
+
+```bash
+rg -n 'X-Amz|x-signature|x-expires|sessionid|sid_guard|msToken' \
+  data/jimeng-lab/proof-20260610-lip-sync-config/normalized \
+  data/jimeng-lab/proof-20260610-lip-sync-config-dry-run/raw
+```
+
+Expected result: no matches.
+
 ## Frames-To-Video Dry-Run Smoke
 
 End-frame payload patching is now CLI-accessible through `frames2video`. This run uploads both local images to ImageX, patches `first_frame_image` and `end_frame_image`, and skips generation submit.
@@ -943,15 +987,15 @@ Expected result: no matches.
 ```bash
 bun run jimeng:typecheck
 bun run jimeng:test
-bun packages/jimeng-client/src/browser-proxy-cli.ts --help | rg 'capcut-template-metadata|capcut-categories|overseas-short-videos|subjects|templates|short-videos'
+bun packages/jimeng-client/src/browser-proxy-cli.ts --help | rg 'lip-sync-config|capcut-template-metadata|capcut-categories|overseas-short-videos|subjects|templates|short-videos'
 ```
 
 Result:
 
 ```txt
 typecheck passed
-62 tests passed, 0 failed
-browser-proxy help listed capcut-template-metadata, overseas-short-videos, capcut-categories, subjects, templates, and short-videos
+63 tests passed, 0 failed
+browser-proxy help listed lip-sync-config, capcut-template-metadata, overseas-short-videos, capcut-categories, subjects, templates, and short-videos
 ```
 
 ## Follow-Up
