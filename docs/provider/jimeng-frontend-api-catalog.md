@@ -33,6 +33,7 @@ Use the browser as an authenticated session holder and API discovery surface. Mo
 | `/mweb/v1/dreamina_subject/get` | POST | Saved subject/persona list. | Implemented for config catalog |
 | `/mweb/v1/feed` | POST | Explore/feed content; a signed `dreamina_tone` feed request returns the built-in voice library. Useful for research/template mining if handled carefully. | Implemented for voice library replay |
 | `/mweb/v1/tts_generate` | POST | Built-in voice text-to-speech. Returns base64 MP3 in `data.data`. | Implemented and live-proved |
+| `/mweb/v1/get_upload_token` | POST | Temporary upload credentials for video/image/file scenes. Required before direct local reference-image upload. | Implemented and live-proved for token step |
 | `/mweb/v1/get_explore` | POST | Explore examples and public creative templates. | Cataloged only |
 | `/mweb/v1/get_unread_count` | POST | Notification count. | Low priority |
 
@@ -72,6 +73,54 @@ data/jimeng-lab/voice-library-samples/
 ```
 
 The latest full voice sample run generated `142/142` MP3 files with concurrency `1` and no `1019` / `shark not pass` risk-control errors.
+
+## Confirmed Upload Token Contract
+
+The next useful UGC slice is local media upload for image-to-video and reference/persona workflows. The first step is confirmed:
+
+```txt
+POST /mweb/v1/get_upload_token
+```
+
+Request:
+
+```json
+{ "scene": 2 }
+```
+
+Observed scene mapping:
+
+| Scene | Meaning from frontend bundle/use | Live status |
+|---:|---|---|
+| `1` | video/VOD upload token | Confirmed |
+| `2` | image/ImageX upload token | Confirmed |
+| `3` | file/audio-like upload token | Confirmed |
+
+Scene `2` response summary from the CLI smoke:
+
+```json
+{
+  "ret": "0",
+  "errmsg": "success",
+  "summary": {
+    "scene": 2,
+    "region": "cn",
+    "spaceName": "tb4s082cfz",
+    "uploadDomainPresent": true,
+    "accessKeyPresent": true,
+    "secretKeyPresent": true,
+    "sessionTokenPresent": true,
+    "expiredTimePresent": true,
+    "currentTimePresent": true
+  }
+}
+```
+
+The raw response includes temporary upload credentials, so it must stay under ignored `data/**`. The next missing piece is using those credentials with the frontend's ImageX/VOD upload SDK behavior to turn a local file into a provider URI that can be injected into:
+
+```txt
+draft_content.component_list[0].abilities.gen_video.text_to_video_params.video_gen_inputs[0].first_frame_image
+```
 
 ## Confirmed Config Catalog Probes
 

@@ -28,6 +28,14 @@ The immediate fix is to stop reusing stale templates for operations whose fronte
 - Generated the current built-in voice sample set, 142/142 MP3s, under ignored `data/jimeng-lab/voice-library-samples/`.
 - Scanned current frontend JS bundles and recorded additional UGC-useful endpoint groups for voice cloning, subject/persona lifecycle, infinite canvas, reference/image tools, templates, assets, and audio/video utilities.
 
+2026-06-09 upload-token slice:
+
+- Added `upload-token` to `browser-proxy-cli`.
+- Confirmed `/mweb/v1/get_upload_token` for scenes `1`, `2`, and `3`.
+- Scene `2` is the ImageX upload-token path needed for local reference images; observed `region=cn`, `spaceName=tb4s082cfz`.
+- Added a proof bundle with playable TTS + video artifacts at `data/jimeng-lab/proof-20260609-voice-video/`.
+- `/lv/v1/asset/prepare_upload_cloud` returned `404` from the Jimeng domain with a simple replay; keep it as a CapCut/LV-domain or signed-header lead, not the current Jimeng path.
+
 ## Owner paths
 
 This lane may edit:
@@ -126,6 +134,7 @@ Capture one flow at a time and write a short redacted summary.
 |---|---:|---|
 | Account/credits/session refresh | High | auth bundle, app IDs, user tier, credit payload |
 | Upload reference image | High | upload endpoint, object URI/id schema, signed upload/download URLs |
+| Upload token | Done | `/mweb/v1/get_upload_token` scenes `1`/`2`/`3`; scene `2` is image upload token |
 | Text-to-image | Medium | current workbench path implemented; keep cataloging model/config variants |
 | Text-to-video | Medium | current template parity and task statuses |
 | Image-to-video / first-frame | Highest | correct first-frame payload field(s), asset IDs, abilities path |
@@ -159,7 +168,7 @@ Keep speculative notes clearly labeled as speculation.
 Likely additions to `packages/jimeng-client`:
 
 - `catalog.ts` for stable non-generating config/list and voice/TTS helpers (implemented in current slice)
-- `upload.ts` for reference image upload/session asset handling
+- `upload.ts` for upload-token retrieval and later reference image upload/session asset handling (token step implemented; byte upload still pending)
 - stronger `capture.ts` template extraction and patching helpers
 - operation types:
   - `image_text`
@@ -187,9 +196,11 @@ bun packages/jimeng-client/src/browser-proxy-cli.ts catalog
 bun packages/jimeng-client/src/browser-proxy-cli.ts voices --capture <capture-template.raw.json>
 bun packages/jimeng-client/src/browser-proxy-cli.ts tts --voice-id <id> --text <zh-text> --dryRun
 bun packages/jimeng-client/src/browser-proxy-cli.ts sample-voices --limit 2 --dryRun
+bun packages/jimeng-client/src/browser-proxy-cli.ts upload-token --scene image
 ```
 
 `catalog` and `voices` are read/replay paths, but still require a valid session. `tts` and `sample-voices` create audio artifacts and may consume quota; keep concurrency `1`.
+`upload-token` is a read/token path whose raw response contains temporary credentials; keep raw output under ignored `data/**`.
 
 ## Phase 5: Validation run
 

@@ -242,6 +242,64 @@ Frontend bundle scan found these UGC-useful groups, but they are not yet direct-
 
 Next step is to drive those UI flows one at a time with background CDP recording, then create dry-run patchers before live calls.
 
+### 10) Upload token for local reference media
+- `POST https://jimeng.jianying.com/mweb/v1/get_upload_token`
+- Status:
+  - live-proved for scenes `1`, `2`, and `3`
+  - implemented as `jimeng-browser-proxy upload-token`
+- Request:
+
+```json
+{ "scene": 2 }
+```
+
+Observed scene mapping:
+
+| scene | frontend use | response space observed |
+|---:|---|---|
+| `1` | video/VOD upload token | `dreamina` |
+| `2` | image/ImageX upload token | `tb4s082cfz` |
+| `3` | file/audio-like upload token | `jj1ywxzpdk` |
+
+Safe summary fields:
+
+```ts
+interface JimengUploadTokenSummary {
+  scene: 1 | 2 | 3
+  region: string | null
+  spaceName: string | null
+  uploadDomainPresent: boolean
+  accessKeyPresent: boolean
+  secretKeyPresent: boolean
+  sessionTokenPresent: boolean
+  expiredTimePresent: boolean
+  currentTimePresent: boolean
+  dataKeys: string[]
+}
+```
+
+CLI proof:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts upload-token \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --scene image \
+  --outDir data/jimeng-lab/upload-token-cli-smoke
+```
+
+Result:
+
+```txt
+upload-token saved scene=2
+ret=0
+spaceName=tb4s082cfz
+region=cn
+```
+
+The raw response includes temporary upload credentials and must not be committed. Store it only under ignored `data/**`.
+
+The `/lv/v1/asset/prepare_upload_cloud` endpoint appears in frontend bundles but returned `404` from the Jimeng domain with a straightforward replay body; it may belong to a CapCut/LV asset domain or require signed LV headers. Do not depend on it for the Jimeng direct-client path yet.
+
 ---
 
 ## Minimal headers (validated baseline)
@@ -398,6 +456,7 @@ Mapping guidance:
 - long-run requirement matrix for `sign/device-time/msToken/a_bogus`
 - region variants (US/HK/JP/SG) requirement differences
 - full first/last frame direct upload path without browser-assisted upload
+- direct ImageX/VOD byte upload using `/mweb/v1/get_upload_token` credentials
 - voice/配音 + digital-human + motion-mimic endpoint mapping
 
 ## Current CLI entrypoints
@@ -451,6 +510,15 @@ Supports optional frame URI injection for video payload patching:
 - `--lastFrameUri <uri>`
 
 > Note: this is payload-level injection only; direct upload-to-URI mapping still needs reversing.
+
+Upload-token probe:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts upload-token \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --scene image \
+  --outDir data/jimeng-lab/upload-token-cli-smoke
+```
 
 ### Dreamina-compatible direct CLI
 

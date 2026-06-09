@@ -9,7 +9,7 @@ Status values: `active`, `next`, `blocked`, `done`, `parked`.
 | ID | Task | Owner | Notes |
 |---|---|---|---|
 | T-2026-06-09-003 | Keep task tracking and durable preferences synchronized | Codex | Root tracker exists; update this file when opening, blocking, finishing, or parking work. |
-| T-2026-06-09-024 | Reverse/catalog useful Jimeng GenAI frontend APIs | Codex | Build a reusable background-browser/session-refresh proxy plus direct-client support for image, video, reference, persona/subject, character, canvas, asset, voice, and template-mining APIs. Current slices support workbench text-to-image submit + asset-list polling, non-generating config probes, built-in voice library replay, and direct TTS MP3 generation. |
+| T-2026-06-09-024 | Reverse/catalog useful Jimeng GenAI frontend APIs | Codex | Build a reusable background-browser/session-refresh proxy plus direct-client support for image, video, reference, persona/subject, character, canvas, asset, voice, and template-mining APIs. Current slices support workbench text-to-image submit + asset-list polling, non-generating config probes, built-in voice library replay, direct TTS MP3 generation, and upload-token retrieval for local media upload. |
 
 ## Next
 
@@ -57,6 +57,7 @@ Status values: `active`, `next`, `blocked`, `done`, `parked`.
 | T-2026-06-09-027 | Decide React vs Solid UGC Studio stack from side-by-side QA | 2026-06-09 | React/shadcn/Tailwind is the maintained UGC Studio stack. Solid UGC routes should be removed rather than maintained as a parallel implementation. |
 | T-2026-06-09-028 | Rebuild React UGC views from canonical generated workspace refs | 2026-06-09 | Refined the React route against the saved workspace-view references, fixed small-desktop sizing/layout issues across Atlas, Exploration, Review, Campaign Map, Final Editor, and KIE Proxy, and saved QA screenshots under `docs/qa/ugc-studio-react-refinement/`. |
 | T-2026-06-09-029 | Add Jimeng voice catalog and TTS CLI support | 2026-06-09 | Added non-generating catalog probes, signed built-in voice library replay, direct `/mweb/v1/tts_generate` MP3 generation, `catalog`/`voices`/`tts`/`sample-voices` CLI commands, tests, and QA docs. Full current library sample run generated 142/142 MP3s under ignored `data/**`. |
+| T-2026-06-09-030 | Add Jimeng upload-token CLI support | 2026-06-09 | Added `/mweb/v1/get_upload_token` helper and `upload-token` CLI command; live-proved scenes `1`, `2`, and `3`. Scene `2` returns ImageX token metadata for reference-image upload; byte upload-to-URI remains the next task. |
 
 ## Related Planning Docs
 

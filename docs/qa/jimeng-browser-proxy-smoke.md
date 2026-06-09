@@ -184,6 +184,95 @@ risk-control: no 1019 / shark-not-pass errors observed
 
 All raw session bundles, captures, manifests, and MP3s stay under ignored `data/**`.
 
+## Playable Proof Bundle
+
+For Jimeng provider work, proof of work is both:
+
+- tests for the TypeScript client/contract helpers
+- actual local media artifacts that can be opened/listened to
+
+Current proof bundle:
+
+```txt
+data/jimeng-lab/proof-20260609-voice-video/
+  manifest.json
+  artifacts/jimeng-direct-video-proof.mp4
+  artifacts/直爽女大-7597003459665072686.mp3
+  normalized/video-result.json
+```
+
+TTS command used for the proof bundle:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts tts \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --voice-id 7597003459665072686 \
+  --voice-title '直爽女大' \
+  --text '这条视频值得试一下。这个声音可以直接用在UGC广告里。' \
+  --outDir data/jimeng-lab/proof-20260609-voice-video
+```
+
+Video proof source:
+
+```txt
+data/jimeng-lab/live-smoke/20260603-direct-video/artifacts/9122d120-d898-4a3f-a2b6-e80b4ac93557-00.mp4
+```
+
+Copied proof artifact:
+
+```txt
+data/jimeng-lab/proof-20260609-voice-video/artifacts/jimeng-direct-video-proof.mp4
+```
+
+Original video-generation command recorded in the proof manifest:
+
+```bash
+bun packages/jimeng-client/src/dreamina-compatible-cli.ts text2video \
+  --capture data/jimeng-lab/raw/jimeng-network-capture-video-01.json \
+  --session-bundle data/jimeng-lab/raw/session-bundle.json \
+  --prompt '赛博霓虹背景中，一只可爱的卡通海豹像金融主播一样严肃点头，镜头缓慢推进，绿色折线和小火箭轻微漂浮，电影感，无文字，无字幕，无水印' \
+  --duration=3 \
+  --ratio=16:9 \
+  --model_version=3.0fast \
+  --outDir data/jimeng-lab/live-smoke/20260603-direct-video
+```
+
+File validation:
+
+```txt
+audio: MPEG ADTS MP3, 96 kbps, 24 kHz, mono
+video: ISO Media MP4
+```
+
+Generated media remains ignored under `data/**`; only commands and contract facts should be committed.
+
+## Upload Token Smoke
+
+The next useful API for UGC reference workflows is upload-token retrieval, because image-to-video needs a local reference image to become a Jimeng provider URI.
+
+Command:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts upload-token \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --scene image \
+  --outDir data/jimeng-lab/upload-token-cli-smoke
+```
+
+Result:
+
+```txt
+upload-token saved scene=2
+ret=0
+region=cn
+spaceName=tb4s082cfz
+accessKeyPresent=true
+secretKeyPresent=true
+sessionTokenPresent=true
+```
+
+Raw token responses include temporary credentials and are intentionally local-only under ignored `data/**`.
+
 ## Verification
 
 ```bash
@@ -195,7 +284,7 @@ Result:
 
 ```txt
 typecheck passed
-18 tests passed, 0 failed
+21 tests passed, 0 failed
 ```
 
 ## Follow-Up

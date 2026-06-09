@@ -14,6 +14,7 @@ import {
 import { prepareFromCapture, redactHeaders, type CaptureFile, type JimengOp, type JimengSessionBundle } from "./capture"
 import { JimengClient } from "./client"
 import { JimengError } from "./errors"
+import { getJimengUploadToken, parseUploadTokenScene } from "./upload"
 
 const DEFAULT_CDP_URL = "http://127.0.0.1:9340"
 
@@ -28,6 +29,7 @@ Commands:
   voices        Fetch the built-in voice library from a captured signed feed request
   tts           Generate one MP3 text-to-speech sample from a voice id
   sample-voices Generate sequential MP3 samples for voices from the built-in library
+  upload-token  Fetch temporary upload credentials for image/video/file upload scenes
   text2image    Submit text-to-image from a captured workbench/agent template
   text2video    Submit text-to-video from a captured workbench template
 
@@ -43,6 +45,7 @@ Options:
   --voice-title <title>         Optional display title for TTS output filename
   --item-platform <n>           Voice item platform (default: 1, Loki/built-in)
   --limit <n>                   sample-voices limit (default: all)
+  --scene <image|video|file|n>   upload-token scene (default: image)
   --prompt <text>               Generation prompt
   --outDir <dir>                Output directory (default: data/jimeng-lab/browser-proxy)
   --dryRun                      Write patched plan only; otherwise live-submit and may consume credits
@@ -66,10 +69,12 @@ Examples:
     --voice-id 7597003459665072686 \\
     --text "这条视频值得试一下。"
 
+  jimeng-browser-proxy upload-token --scene image
+
 Live generation uses the browser session but does not foreground the browser. Keep concurrency at 1.`
 
 interface CliArgs {
-  command: "session" | "catalog" | "voices" | "tts" | "sample-voices" | "text2image" | "text2video"
+  command: "session" | "catalog" | "voices" | "tts" | "sample-voices" | "upload-token" | "text2image" | "text2video"
   cdpUrl: string
   targetUrl?: string
   session?: string
@@ -81,6 +86,7 @@ interface CliArgs {
   voiceTitle?: string
   itemPlatform?: number
   limit?: number
+  scene?: string
   prompt?: string
   outDir: string
   dryRun: boolean
@@ -233,6 +239,28 @@ async function main(argv: string[]): Promise<void> {
     return
   }
 
+  if (args.command === "upload-token") {
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const scene = parseUploadTokenScene(args.scene)
+    const result = await getJimengUploadToken({ session, token: { scene } })
+    const runId = `upload-token-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    writeJson(path.join(dirs.rawDir, `${runId}.json`), {
+      http_status: result.httpStatus,
+      response_text_sha256: result.responseTextSha256,
+      body: result.body,
+    })
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      scene,
+      http_status: result.httpStatus,
+      ret: result.ret,
+      errmsg: result.errmsg,
+      response_text_sha256: result.responseTextSha256,
+      summary: result.summary,
+    })
+    console.log(`[jimeng-browser-proxy] upload-token saved scene=${scene}`)
+    return
+  }
+
   if (!args.capture) throw new Error("--capture is required")
 
   const op: JimengOp = args.command === "text2image" ? "image" : "video"
@@ -316,6 +344,7 @@ function parseArgs(argv: string[]): CliArgs {
     && command !== "voices"
     && command !== "tts"
     && command !== "sample-voices"
+    && command !== "upload-token"
     && command !== "text2image"
     && command !== "text2video"
   ) {
@@ -345,6 +374,7 @@ function parseArgs(argv: string[]): CliArgs {
     voiceTitle: flags["voice-title"],
     itemPlatform,
     limit,
+    scene: flags.scene,
     prompt: flags.prompt,
     outDir: flags.outDir ?? "data/jimeng-lab/browser-proxy",
     dryRun: flags.dryRun === "true",
