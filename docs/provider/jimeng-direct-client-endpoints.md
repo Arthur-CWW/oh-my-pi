@@ -109,6 +109,139 @@ Important capability notes from help output:
 - `POST https://jimeng.jianying.com/mweb/v1/get_history_queue_info`
 - Not required for minimal direct client; useful for UX progress.
 
+### 6) Non-generating model/tool/persona/voice catalog
+- `POST https://jimeng.jianying.com/mweb/v1/creation_agent/v2/skill/list`
+- `POST https://jimeng.jianying.com/mweb/v1/creation_agent/v2/get_agent_config`
+- `POST https://jimeng.jianying.com/mweb/v1/get_user_local_item_list`
+- `POST https://jimeng.jianying.com/mweb/v1/video_generate/get_common_config`
+- `POST https://jimeng.jianying.com/mweb/v1/dreamina_subject/get`
+
+Current utility:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts catalog \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --outDir data/jimeng-lab/cli-catalog-smoke
+```
+
+Validated endpoint ids:
+
+- `skill-list`
+- `agent-config`
+- `voice-assets`
+- `lip-sync-image-config`
+- `lip-sync-video-config`
+- `subject-list`
+
+These probes are read/config/list calls and should not consume generation credits. They still require a live logged-in session bundle.
+
+### 7) Built-in voice library
+- `POST https://jimeng.jianying.com/mweb/v1/feed`
+- Request source:
+  - replay a captured, signed frontend request whose body includes `dreamina_tone`
+  - default capture path currently used by CLI:
+
+```txt
+data/jimeng-captures/20260603090356-home-session-smoke/capture-template.raw.json
+```
+
+Current utility:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts voices \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --capture data/jimeng-captures/20260603090356-home-session-smoke/capture-template.raw.json \
+  --outDir data/jimeng-lab/cli-voices-smoke
+```
+
+Current normalized item shape:
+
+```ts
+interface JimengVoiceCatalogItem {
+  id: string
+  title: string
+  itemPlatform: number
+  effectType: number | null
+  lokiEffectId: string | null
+  speakerId: string | null
+  tags: Array<{ type: string; value: string }>
+  emotions: Array<{ emotion: string; speakerId: string }>
+}
+```
+
+Latest live replay found 142 built-in voices. First known sample:
+
+```txt
+title: 直爽女大
+id: 7597003459665072686
+speaker_id: saturn_6967e2f6bd5f2b43
+```
+
+### 8) Text-to-speech
+- `POST https://jimeng.jianying.com/mweb/v1/tts_generate`
+- Response:
+  - `data.data` is base64 MP3
+  - smoke artifact validated as 24 kHz mono MP3
+
+Request body:
+
+```json
+{
+  "text": "这条视频值得试一下。",
+  "id_info": {
+    "id": "7597003459665072686",
+    "item_platform": 1
+  },
+  "audio_config": {
+    "format": "mp3",
+    "pitch_rate": 0,
+    "sample_rate": 24000,
+    "speech_rate": 0
+  }
+}
+```
+
+One voice sample:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts tts \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --voice-id 7597003459665072686 \
+  --voice-title '直爽女大' \
+  --text '这条视频值得试一下。' \
+  --outDir data/jimeng-lab/cli-tts-smoke
+```
+
+Sequential library sampling:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts sample-voices \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --capture data/jimeng-captures/20260603090356-home-session-smoke/capture-template.raw.json \
+  --text '这条视频值得试一下。' \
+  --limit 2 \
+  --outDir data/jimeng-lab/cli-sample-voices-smoke
+```
+
+Full current proof run generated 142/142 MP3s under ignored:
+
+```txt
+data/jimeng-lab/voice-library-samples/artifacts/
+data/jimeng-lab/voice-library-samples/manifest.json
+```
+
+### 9) Discovered voice/persona/canvas endpoints needing flow captures
+
+Frontend bundle scan found these UGC-useful groups, but they are not yet direct-client contracts:
+
+- voice clone/custom voice: `/mweb/v1/voice/submit_task`, `/mweb/v1/voice/query_task`, `/mweb/v1/voice/update`, `/mweb/v1/voice/delete`
+- subject/persona CRUD and voice: `/mweb/v1/dreamina_subject/create`, `/mweb/v1/dreamina_subject/update`, `/mweb/v1/dreamina_subject/delete`, `/mweb/v1/dreamina_subject/generate_voice`
+- infinite canvas: `/mweb/v1/infinite_canvas/create_project`, `/mweb/v1/infinite_canvas/conversation`, `/mweb/v1/infinite_canvas/edit`, `/mweb/v1/infinite_canvas/resume`, `/mweb/v1/infinite_canvas/stop_stream`, `/mweb/v1/infinite_canvas/v1/fetch_snapshot`, `/mweb/v1/infinite_canvas/v1/submit_changeset`, `/mweb/v1/infinite_canvas/v1/fetch_changeset`
+- reference/image tools: `/mweb/v1/get_common_config`, `/mweb/v1/get_image_description`, `/mweb/v1/get_upload_token`, `/mweb/v1/face_recognize`, `/mweb/v1/algo_proxy`
+- template/research mining: `/mweb/v1/feed`, `/mweb/v1/get_explore`, `/mweb/v1/feed_short_video`, `/lv/v1/cc_web/replicate/search_templates`, `/lv/v1/cc_web/plane/*`
+
+Next step is to drive those UI flows one at a time with background CDP recording, then create dry-run patchers before live calls.
+
 ---
 
 ## Minimal headers (validated baseline)
@@ -136,6 +269,8 @@ Observed values in current captures/polls:
 |---|---:|---:|
 | video | varies (`20`, `30` seen in some traces) | `50` |
 | image | varies | `45` |
+| current asset-list image task | varies | `50` |
+| TTS | n/a | `ret = 0`, base64 MP3 in `data.data` |
 
 Treat all non-terminal values as transient and rely on:
 1) explicit terminal success code, or

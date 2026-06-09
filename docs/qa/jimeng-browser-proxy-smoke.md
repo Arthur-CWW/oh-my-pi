@@ -6,6 +6,8 @@ Date: 2026-06-09
 
 The logged-in background Jimeng browser profile can be used as a session holder while the local CLI prepares/direct-submits current workbench image-generation requests. The old direct client was fixed to support the current `/mweb/v1/aigc_draft/generate` text-to-image path and `get_asset_list` polling.
 
+The same session-refresh/direct-fetch shape now also works for non-generating config probes, built-in voice library replay, and direct MP3 text-to-speech generation through Jimeng frontend APIs.
+
 ## Live Capture
 
 Captured the logged-in image generation page:
@@ -80,6 +82,108 @@ data/jimeng-lab/ugc-studio-kbeauty-image/manifest.json
 
 These generated media files are intentionally kept under ignored `data/**`.
 
+## Voice / TTS Smoke
+
+Refreshed the logged-in session from the background Jimeng browser:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts session \
+  --cdp http://127.0.0.1:9340 \
+  --target-url jimeng.jianying.com \
+  --session-out data/jimeng-lab/raw/session-bundle-current.json
+```
+
+Catalog probe:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts catalog \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --outDir data/jimeng-lab/cli-catalog-smoke
+```
+
+Result:
+
+```txt
+catalog saved endpoints=6
+```
+
+Confirmed catalog ids:
+
+- `skill-list`
+- `agent-config`
+- `voice-assets`
+- `lip-sync-image-config`
+- `lip-sync-video-config`
+- `subject-list`
+
+Voice library replay:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts voices \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --capture data/jimeng-captures/20260603090356-home-session-smoke/capture-template.raw.json \
+  --outDir data/jimeng-lab/cli-voices-smoke-2
+```
+
+Result:
+
+```txt
+voices saved count=142
+```
+
+TTS dry-run:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts tts \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --voice-id 7597003459665072686 \
+  --voice-title '直爽女大' \
+  --text '这条视频值得试一下。' \
+  --outDir data/jimeng-lab/cli-tts-dry-run \
+  --dryRun
+```
+
+TTS live sample:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts tts \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --voice-id 7597003459665072686 \
+  --voice-title '直爽女大' \
+  --text '这条视频值得试一下。' \
+  --outDir data/jimeng-lab/cli-tts-smoke
+```
+
+Result artifact:
+
+```txt
+data/jimeng-lab/cli-tts-smoke/artifacts/直爽女大-7597003459665072686.mp3
+```
+
+The saved-session path was also exercised independently with `--session ... --dryRun`, confirming the direct API commands can run without refreshing CDP on every call when a fresh session bundle already exists.
+
+Sequential voice sampling proof:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts sample-voices \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --capture data/jimeng-captures/20260603090356-home-session-smoke/capture-template.raw.json \
+  --text '这条视频值得试一下。' \
+  --limit 2 \
+  --outDir data/jimeng-lab/cli-sample-voices-smoke
+```
+
+Full current library sample run:
+
+```txt
+generated: 142/142
+artifact dir: data/jimeng-lab/voice-library-samples/artifacts/
+manifest: data/jimeng-lab/voice-library-samples/manifest.json
+risk-control: no 1019 / shark-not-pass errors observed
+```
+
+All raw session bundles, captures, manifests, and MP3s stay under ignored `data/**`.
+
 ## Verification
 
 ```bash
@@ -91,7 +195,7 @@ Result:
 
 ```txt
 typecheck passed
-15 tests passed, 0 failed
+18 tests passed, 0 failed
 ```
 
 ## Follow-Up
@@ -105,4 +209,5 @@ Next useful captures:
 - image-to-video first-frame
 - multimodal/all-around reference video
 - video text generation through the current unified app route
+- voice cloning and subject/persona voice generation
 - canvas edit tools

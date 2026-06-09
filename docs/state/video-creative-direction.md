@@ -86,6 +86,7 @@ Each component should be separately editable, inspectable, replaceable, cacheabl
 - Use `@path/to/file` references in Pi/LLM prompts when supported.
 - Dreamina/Jimeng direct tooling should live-submit by default; `--dryRun` is the explicit opt-out. Keep commands clear, short, logged, concurrency-1, and credit-aware.
 - Jimeng/Dreamina should use a background browser-session proxy while endpoints are still moving: keep a logged-in Helium/CDP profile as the token/session holder, refresh session bundles from it, then graduate stable operations into direct `fetch` clients. Keep reversing every UGC-useful GenAI endpoint, not only text-to-image: reference uploads, persona/subject/character tools, pose/style/depth controls, image/video generation, canvas edits, asset library, and explore/template APIs.
+- Jimeng's voice layer is now a usable UGC primitive: built-in voices can be cataloged from the signed `dreamina_tone` feed, and `/mweb/v1/tts_generate` returns base64 MP3 audio for direct TTS. Use this for quick persona voice prototyping while custom voice clone and subject voice generation still need separate captured contracts.
 - For the UGC/video pipeline, keep serialization JSON-first: recipes, manifests, timelines, provider prompt cards, and reports should be plain versioned JSON unless there is a strong later reason to add another format.
 
 ## What Arthur actually cares about
@@ -307,6 +308,7 @@ Arthur clarified:
 - ComfyUI-style graphs are valuable for a developer/pipeline view, but too granular as the default creative surface. The main UI should expose stages, examples, branches, notes, playable candidates, and snapshot history; users should be able to flick through many generated examples at each stage.
 - Campaigns should track both CTA/conversion tests and non-CTA persona-building posts. The system should support branching exploration, pruning dead ends, returning to earlier checkpoints, and expanding promising influencer/persona directions.
 - Add a future reference-profile-remix lane: archive/decompose public or rights-cleared TikTok/UGC/faceless profiles, capture pose/timing/template mechanics, and swap in synthetic personas, new voice, new product, new hooks, and new captions. Korean-beauty/K-pop-idol-like influencer aesthetics are a promising creative genre; the pasted ABG paywall flow is not a UX target.
+- Jimeng/Dreamina voice/TTS reversal is confirmed enough for pipeline prototyping: config probes, built-in voice library replay, and direct MP3 TTS are implemented; voice clone, subject/persona voice generation, lip-sync generation, and canvas/reference-video flows remain the next captured-contract work.
 
 ### 2026-06-08
 

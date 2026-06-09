@@ -18,6 +18,16 @@ The immediate fix is to stop reusing stale templates for operations whose fronte
 - Added endpoint catalog at `docs/provider/jimeng-frontend-api-catalog.md`.
 - Smoke proof at `docs/qa/jimeng-browser-proxy-smoke.md`.
 
+2026-06-09 voice/API catalog slice:
+
+- Added `packages/jimeng-client/src/catalog.ts` for non-generating Jimeng catalog probes.
+- Added `catalog`, `voices`, `tts`, and `sample-voices` commands to `browser-proxy-cli`.
+- Confirmed direct config/list probes for agent skills, agent model config, cloned voice assets, lip-sync image/video config, and subject list.
+- Replayed a captured signed `dreamina_tone` `/mweb/v1/feed` request to normalize the built-in voice library.
+- Confirmed `/mweb/v1/tts_generate` direct TTS with a built-in voice id; response is base64 MP3 in `data.data`.
+- Generated the current built-in voice sample set, 142/142 MP3s, under ignored `data/jimeng-lab/voice-library-samples/`.
+- Scanned current frontend JS bundles and recorded additional UGC-useful endpoint groups for voice cloning, subject/persona lifecycle, infinite canvas, reference/image tools, templates, assets, and audio/video utilities.
+
 ## Owner paths
 
 This lane may edit:
@@ -123,6 +133,9 @@ Capture one flow at a time and write a short redacted summary.
 | Task history/status | High | polling endpoint variants, terminal statuses, queue info |
 | Artifact download | High | highest-quality video URL fields, expiry behavior |
 | Persona/subject/character tools | High | subject model lifecycle, reference storage, persona-like reusable assets |
+| Built-in voice library + TTS | Done | signed voice feed replay and direct `/mweb/v1/tts_generate` MP3 generation |
+| Voice cloning / subject voice generation | High | custom voice submit/query, persona voice generation, required upload/audio contracts |
+| Lip sync / digital human config | Medium | config probes implemented; generation flow still needs capture |
 | Canvas edit tools | Medium | inpaint, erase, expand, cutout, local edit payloads |
 | Explore/template mining | Medium | public template/feed detail endpoints for clean-room format abstraction |
 
@@ -145,6 +158,7 @@ Keep speculative notes clearly labeled as speculation.
 
 Likely additions to `packages/jimeng-client`:
 
+- `catalog.ts` for stable non-generating config/list and voice/TTS helpers (implemented in current slice)
 - `upload.ts` for reference image upload/session asset handling
 - stronger `capture.ts` template extraction and patching helpers
 - operation types:
@@ -152,6 +166,10 @@ Likely additions to `packages/jimeng-client`:
   - `video_text`
   - `video_image_first_frame`
   - `video_multimodal_reference`
+  - `audio_tts`
+  - `voice_clone`
+  - `subject_create`
+  - `canvas_edit`
 - CLI flags:
   - `--op video-image`
   - `--image <path>`
@@ -161,6 +179,17 @@ Likely additions to `packages/jimeng-client`:
 - redacted fixture tests close to existing tests
 
 Do not run live submits until dry-run payloads match captured frontend requests.
+
+Current implemented helpers:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts catalog
+bun packages/jimeng-client/src/browser-proxy-cli.ts voices --capture <capture-template.raw.json>
+bun packages/jimeng-client/src/browser-proxy-cli.ts tts --voice-id <id> --text <zh-text> --dryRun
+bun packages/jimeng-client/src/browser-proxy-cli.ts sample-voices --limit 2 --dryRun
+```
+
+`catalog` and `voices` are read/replay paths, but still require a valid session. `tts` and `sample-voices` create audio artifacts and may consume quota; keep concurrency `1`.
 
 ## Phase 5: Validation run
 
@@ -219,6 +248,7 @@ bun packages/jimeng-client/src/network-recorder.ts \
 You are the Jimeng/Dreamina API reversal lane in /Users/arthur/projects/pi-web-access.
 Read docs/plans/README.md and docs/plans/jimeng-frontend-api-reversal.md.
 Only edit packages/jimeng-client/**, docs/provider/**, and docs/plans/jimeng-frontend-api-reversal.md unless explicitly handed off.
-First run safe dreamina --help/subcommand inspections and write findings to data/coordination/jimeng-reversal.status.md.
-Then design a background-CDP network recorder for Jimeng frontend flows. Do not consume quota or run live generation without confirmation. Do not commit cookies or captures.
+Current direct-client baseline includes workbench text-to-image, config catalog probes, signed built-in voice feed replay, and direct TTS.
+Next capture targets are voice clone submit/query, dreamina_subject create/update/generate_voice, upload/reference image flows, image-to-video first-frame, multimodal video, lip sync generation, infinite canvas edits, and template mining.
+Use the background-CDP network recorder for one flow at a time. Dry-run payloads before live calls; keep concurrency 1; stop on 1019/shark-not-pass. Do not commit cookies, captures, session bundles, signed URLs, or generated media.
 ```

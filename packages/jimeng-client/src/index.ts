@@ -1,6 +1,7 @@
 export * from "./capture"
 export * from "./browser-session"
 export * from "./client"
+export * from "./catalog"
 export * from "./errors"
 export * from "./sse"
 export * from "./dreamina-compatible"
