@@ -103,6 +103,14 @@ Each component should be separately editable, inspectable, replaceable, cacheabl
 - Slotok's default UI should follow the Codex-like light workbench design language captured in `docs/state/slotok-design-language.md`, not the current dark/orange analytics-dashboard shell.
 - Keyboard-first / vim-like interaction should be a default for review tools: `j/k`, `/`, `gg/G`, `g<letter>` view switching, quick annotations, and fast batch navigation.
 - The workbench should support generated/hot-swappable data views: raw JSON is always available, but selected elements should also have purpose-built visual React/Solid/HTML renderers that can be iterated quickly, potentially with Pi/Codex assistance.
+- The AI UGC UI direction should feel like **Figma for UGC ads**: open-ended canvas first, tastefully minimal chrome, floating prompt/workspace command surface, and a real video-editor/layers/timeline view rather than only campaign tables or constrained dashboards.
+- Prefer secondary controls in lightweight floating modals/popovers over always-visible heavy side menus when exploring campaign setup, layer generation, assets, provider route, or JSON recipe settings.
+- The primary AI UGC workflow is **creative exploration over many generated candidates**, not manual attribute editing. The user directs one agent to generate, critique, fork, and revise batches of personas, hooks, clips, CTAs, and campaigns.
+- Treat synthetic influencers as **whole personas / TikTok profiles**, not single figures or one-off ads: appearance, voice, accent, interests, niche, posting style, promoted products, non-ad posts, CTA behavior, and continuity all need to be tracked.
+- Support “babble and prune”: generate many variations early, flip through playable examples quickly, annotate what works, ask the agent for broad changes, fork directions, and only expose detailed layer controls during late fine-tuning.
+- ComfyUI-style node graphs are useful as a developer/pipeline view, but the primary creative UI should operate at higher abstractions: persona collections, format explorations, campaign branches, snapshot history, and agent instructions.
+- Future reference-profile workflows should decompose a TikTok/influencer/faceless profile into reusable mechanics: pose/timing, gesture rhythm, shot structure, caption/text template, hook families, voice-line structure, CTA pattern, and posting strategy. The swapped output should use a synthetic/right-cleared persona, voice, product, hook copy, and captions.
+- Korean-beauty/K-pop-idol-like influencer aesthetics are a genre worth exploring for AI UGC persona work because they are visually optimized and striking; keep this as a creative lane rather than treating the pasted ABG paywall/onboarding screen as a UX reference.
 - Keeping prompts/provenance/tags/vibes in a centralized SQLite catalog.
 - Using the prototype to discover the pipeline architecture, not to optimize one throwaway video.
 
@@ -205,9 +213,68 @@ Then swap:
 - background
 - filters
 
+The primary UX should move through progressive abstraction levels:
+
+```txt
+concept / product / offer
+→ persona exploration
+→ format exploration
+→ hook + clip batch generation
+→ prune / annotate / fork
+→ CTA and non-CTA campaign mix
+→ metrics review
+→ final layer-level tuning
+→ export / schedule / rerun
+```
+
+At the early stage, the UI should feel more like a fast review and exploration surface than a manual editor:
+
+- show many persona/profile or clip candidates as playable examples
+- let the user flick through examples within each stage of the workflow
+- keep notes and critiques attached to candidates, branches, and snapshots
+- let the agent apply instructions across a selected set, such as changing enthusiasm, accent, CTA pressure, hook families, or persona niche
+- preserve a snapshot/fork/checkpoint history so dead-end branches can be abandoned and strong directions can be expanded
+
+Persona/profile generation should track a richer collection model:
+
+- stable synthetic identity and appearance
+- voice, accent, speaking style, energy, mannerisms, and interests
+- niche, special interest, promoted-product lane, and audience assumptions
+- reusable image/video references when rights-cleared or generated
+- profile-level non-ad content strategy for follower-building posts
+- ad content strategy for hooks, proof, demos, CTAs, and conversion tests
+
+Campaign generation should support mixed posting strategies:
+
+- direct CTA ads with CTA variants and performance tracking
+- non-CTA persona-building posts, dances, edits, trends, or cutesy/viral filler where strategically useful
+- A/B tests across hooks, CTAs, personas, formats, scripts, captions, and proof slots
+
+Reference-profile remixing should be treated as a later workstream:
+
+```txt
+public/right-cleared profile archive
+→ video/sample selection
+→ pose/timing/gesture extraction
+→ transcript/voice-line and hook-template extraction
+→ caption/text/template extraction
+→ format/profile bible
+→ synthetic persona + voice + product swap
+→ generated batch
+→ compare against abstract mechanics, not original identity
+```
+
+Useful variants:
+
+- faceless profile cloning is lower-risk and easier because the style is mostly templates, timing, b-roll, hooks, captions, and posting strategy
+- creator/profile remixing needs explicit consent or a clean-room abstracted style boundary before voice/likeness are touched
+- niche research should eventually discover successful profiles/campaigns/templates in a target market and turn them into abstract reusable format templates
+
 Important ethical/product constraint:
 
 - Clone high-level format mechanics and pacing, not private identities or copyrighted videos verbatim.
+- Generated personas should be synthetic or rights-cleared; avoid designing the system around cloning real private people or exploiting protected identity traits without clear consent and policy checks.
+- Do not preserve or imitate a real creator's recognizable face, voice, private identity, trademarked branding, or exact copyrighted media without consent. Preserve abstract mechanics and timing; swap identity, product, script, and rendered text.
 
 Tool leads, source URLs, provider price tables, and market teardowns belong in:
 
@@ -229,6 +296,16 @@ Active lanes, run coordination, and implementation tasks belong in `docs/plans/`
 Start with `docs/plans/README.md` for the current lane map.
 
 ## Care log
+
+### 2026-06-09
+
+Arthur clarified:
+
+- For the Arcads/Higgsfield-style website demo, the preferred direction is “Figma for UGC ads”: an open canvas with video artboards, editable layer stacks/timeline, floating prompt/workspace command, and secondary menus in modal surfaces. The earlier generated designs were too constrained and missed the video editor/layer view.
+- The product should focus on creative exploration of whole AI UGC personas, TikTok-profile-like collections, formats, and campaigns rather than only single ads or single clips. The user mostly directs one agent to generate, critique, fork, and revise batches; detailed layer editing is a late-stage/fine-tuning mode.
+- ComfyUI-style graphs are valuable for a developer/pipeline view, but too granular as the default creative surface. The main UI should expose stages, examples, branches, notes, playable candidates, and snapshot history; users should be able to flick through many generated examples at each stage.
+- Campaigns should track both CTA/conversion tests and non-CTA persona-building posts. The system should support branching exploration, pruning dead ends, returning to earlier checkpoints, and expanding promising influencer/persona directions.
+- Add a future reference-profile-remix lane: archive/decompose public or rights-cleared TikTok/UGC/faceless profiles, capture pose/timing/template mechanics, and swap in synthetic personas, new voice, new product, new hooks, and new captions. Korean-beauty/K-pop-idol-like influencer aesthetics are a promising creative genre; the pasted ABG paywall flow is not a UX target.
 
 ### 2026-06-08
 

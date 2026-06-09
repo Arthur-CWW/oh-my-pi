@@ -18,6 +18,8 @@ Desired end state:
 - separate character, background, props, hook text, dialogue, TTS, captions, filters, motion, and analysis
 - reusable brainrot elements such as dangling keys, rockets, math boards, UI overlays, etc.
 - later support AI UGC workflows that clone high-level popular formats while swapping the influencer/persona and hook/product
+- later support reference-profile remixing: archive/decompose a public or rights-cleared TikTok/UGC/faceless profile, preserve pose/timing/template mechanics, and swap in a synthetic persona, new voice, product, hooks, captions, and CTA
+- eventually research a niche, identify successful profiles/campaigns/templates, and turn those into abstract clean-room format templates
 
 ## Likely tool Arthur was trying to remember
 
@@ -112,6 +114,7 @@ Clean-room boundaries:
 
 - Study public behavior, public docs, own licensed exports, and user-owned references only.
 - Store abstract format grammar: shot durations, scene roles, hook/body/CTA shape, caption safe areas, overlay timing, product slot placement, cut rhythm.
+- For profile-level references, store abstract pose/timing/gesture/shot/caption-template mechanics and posting strategy. Prefer faceless profiles first because they are easier to abstract without likeness risk.
 - Do **not** store or reuse source pixels, original captions, original audio, creator likenesses, brand marks, proprietary templates, or paywalled workflow details.
 - Do not clone private identities, celebrities, real creators, or fake testimonials.
 - Keep Arthur's hard rule: video/image models should not render readable text; captions and text overlays are post-render layers.
@@ -127,6 +130,35 @@ First MVP shape:
 - Caption renderer in Remotion/ffmpeg/libass with safe-area checks.
 - SQLite/Postgres asset catalog linking prompts, model runs, outputs, costs, rights, vibes, and workflow usage.
 - Variant grid/report with creative IDs and manual metrics import.
+
+## Reference profile remix lane
+
+This lane is secondary priority, but it should shape schemas and UI from the start.
+
+Example target shape:
+
+```txt
+reference profile
+→ archive index
+→ video samples
+→ pose/timing extraction
+→ transcript/hook-template extraction
+→ caption/text-template extraction
+→ profile format bible
+→ synthetic persona/product/voice swap
+→ candidate batch
+```
+
+Data to capture per reference profile:
+
+- profile handle/source URL and capture permissions
+- selected sample videos and rationale
+- shot rhythm, camera framing, pose/gesture cadence, and transition timing
+- hook families, voice-line structure, CTA pattern, and non-CTA posting strategy
+- caption/text layout, safe areas, typography mechanics, and overlay timing
+- what must be swapped: identity, exact voice, exact text, brand marks, source pixels/audio, and product
+
+Niche research later uses the same structure, but starts from a market/category query instead of a named reference profile.
 
 ## Recent Firefox/X history leads
 

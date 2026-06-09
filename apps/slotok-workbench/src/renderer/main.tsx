@@ -1,5 +1,6 @@
 import { render } from "solid-js/web"
 import { App } from "./App"
+import { UgcStudio } from "./UgcStudio"
 import "./styles.css"
 
 const root = document.getElementById("root")
@@ -10,6 +11,9 @@ if (!root) {
 const path = window.location.pathname
 
 render(() => {
+  if (path === "/ugc-studio" || path.startsWith("/ugc-studio/")) {
+    return <UgcStudio />
+  }
   if (path === "/solid" || path.startsWith("/solid/")) {
     return <App />
   }
@@ -29,6 +33,10 @@ function RouteIndex() {
           <a href="/solid/">
             <strong>SolidJS review canvas</strong>
             <span>Current implementation: playable video, formatted JSON, compact element queue.</span>
+          </a>
+          <a href="/ugc-studio/">
+            <strong>UGC Studio demo</strong>
+            <span>Persona atlas, exploration board, batch review, branch map, reference remix, editor, and graph views.</span>
           </a>
           <a href="/design-lab/react-shadcn-tailwind.html">
             <strong>React/shadcn/Tailwind design lab</strong>

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "vitest"
 import type { JSX } from "solid-js"
 import { render } from "solid-js/web"
 import { App } from "./App"
+import { UgcStudio } from "./UgcStudio"
 import { fixtureBootstrap, fixtureDetail, truncatedDetail } from "./test-fixtures"
 
 let disposers: Array<() => void> = []
@@ -33,6 +34,11 @@ describe("Slotok workbench UI snapshots", () => {
         initialView="json"
       />
     ))
+    expect(html).toMatchSnapshot()
+  })
+
+  test("ugc studio demo shell", () => {
+    const html = renderSnapshot(() => <UgcStudio />)
     expect(html).toMatchSnapshot()
   })
 })
