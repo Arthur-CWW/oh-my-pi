@@ -241,7 +241,7 @@ Frontend bundle scan found these UGC-useful groups, but they are not yet direct-
 - voice clone/custom voice: `/mweb/v1/voice/submit_task`, `/mweb/v1/voice/query_task`, `/mweb/v1/voice/update`, `/mweb/v1/voice/delete`
 - subject/persona CRUD and voice: `/mweb/v1/dreamina_subject/create`, `/mweb/v1/dreamina_subject/update`, `/mweb/v1/dreamina_subject/delete`, `/mweb/v1/dreamina_subject/generate_voice`
 - infinite canvas: `/mweb/v1/infinite_canvas/create_project`, `/mweb/v1/infinite_canvas/conversation`, `/mweb/v1/infinite_canvas/edit`, `/mweb/v1/infinite_canvas/resume`, `/mweb/v1/infinite_canvas/stop_stream`, `/mweb/v1/infinite_canvas/v1/fetch_snapshot`, `/mweb/v1/infinite_canvas/v1/submit_changeset`, `/mweb/v1/infinite_canvas/v1/fetch_changeset`
-- reference/image tools: `/mweb/v1/get_common_config`, `/mweb/v1/get_image_description`, `/mweb/v1/get_upload_token`, `/mweb/v1/face_recognize`, `/mweb/v1/blend_preview`, `/mweb/v1/pose_detect`, `/mweb/v1/saliency_seg`, `/mweb/v1/algo_proxy`; upload, description, face recognition, ControlNet pose/depth/canny preview, and pose detect are now direct-client commands, while saliency/object/style tools remain capture targets
+- reference/image tools: `/mweb/v1/get_common_config`, `/mweb/v1/get_image_description`, `/mweb/v1/get_upload_token`, `/mweb/v1/face_recognize`, `/mweb/v1/blend_preview`, `/mweb/v1/pose_detect`, `/mweb/v1/saliency_seg`, `/mweb/v1/algo_proxy`; upload, description, face recognition, ControlNet pose/depth/canny preview, pose detect, and object/saliency segmentation are now direct-client commands, while style/reference payload tools remain capture targets
 - template/research mining: `/mweb/v1/feed`, `/mweb/v1/get_explore`, `/mweb/v1/feed_short_video`, `/lv/v1/cc_web/replicate/search_templates`, `/lv/v1/cc_web/plane/*`; direct `/mweb/v1/get_explore` support is implemented for both templates and short-video examples
 
 Next step is to drive those UI flows one at a time with background CDP recording, then create dry-run patchers before live calls.
@@ -338,6 +338,53 @@ summary=data/jimeng-lab/proof-20260610-controlnet-canny-preview/normalized/contr
 ```
 
 Raw responses may contain signed preview URLs and upload traces; keep them under ignored `data/**`.
+
+### 9.2) Object/saliency segmentation
+- `POST https://jimeng.jianying.com/mweb/v1/saliency_seg`
+- Status:
+  - implemented as `jimeng-browser-proxy object-mask`
+  - no-generation/no-spend reference-image mask path
+  - canvas and default modes live-proved with local ImageX upload and mask PNG downloads
+- Frontend evidence:
+  - canvas request originates as `getSaliencySEG({ imageUriList: [image], mode: "canvas" }, babiParam)`
+  - default request originates as `getSaliencySEG({ imageUriList: [image] }, babiParam)`
+  - `ret=2046` is treated by the frontend as `NoSegmentObjectFoundError`
+  - `ret=2047` is treated by the frontend as `SegmentFailedError`
+
+Direct request shapes:
+
+```json
+{ "image_uri_list": ["tos-cn-i-tb4s082cfz/..."], "mode": "canvas" }
+```
+
+```json
+{ "image_uri_list": ["tos-cn-i-tb4s082cfz/..."] }
+```
+
+CLI proof:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts object-mask \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --image data/jimeng-lab/ugc-studio-kbeauty-image/artifacts/jimeng-kbeauty-01.png \
+  --mode both \
+  --outDir data/jimeng-lab/proof-20260610-object-mask
+```
+
+Observed safe summary:
+
+```txt
+image_uri=tos-cn-i-tb4s082cfz/080999a077994629bbec76c6f344a09a.png
+canvas_mask_uri=tos-cn-i-tb4s082cfz/2b0258d421f14b02b6f20a23eeaae0ec
+canvas_artifact=data/jimeng-lab/proof-20260610-object-mask/artifacts/object-mask-20260609165112-8yjxpj-canvas-mask-01.png
+canvas_png=2048x2048 RGBA
+default_mask_uri=tos-cn-i-tb4s082cfz/d6641d59e6de4d17be119c0b98506129
+default_artifact=data/jimeng-lab/proof-20260610-object-mask/artifacts/object-mask-20260609165112-8yjxpj-default-mask-01.png
+default_png=2048x2048 RGBA
+summary=data/jimeng-lab/proof-20260610-object-mask/normalized/object-mask-20260609165112-8yjxpj-summary.json
+```
+
+Raw responses may contain signed mask URLs and upload traces; keep them under ignored `data/**`.
 
 ### 10) Explore/template mining
 - `POST https://jimeng.jianying.com/mweb/v1/get_explore`

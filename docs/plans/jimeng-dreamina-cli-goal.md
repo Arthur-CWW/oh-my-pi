@@ -128,13 +128,28 @@ ControlNet reference preview is now live-proved without generation spend:
 - latest depth proof produced `preview_image_uri=tos-cn-i-tb4s082cfz/df194e1d74a54982ae5ceb151e239c9c` and a `1024x1024` grayscale depth PNG at `data/jimeng-lab/proof-20260610-controlnet-depth-preview/artifacts/controlnet-preview-20260609163638-wworll-depth-preview.png`.
 - latest canny proof produced `preview_image_uri=tos-cn-i-tb4s082cfz/915b0cd6c0c943fc9ab24b5c12e5a26d` and a `1024x1024` outline PNG at `data/jimeng-lab/proof-20260610-controlnet-canny-preview/artifacts/controlnet-preview-20260609163709-xrv4zg-canny-preview.png`.
 
+Object/saliency segmentation is now live-proved without generation spend:
+
+- `jimeng-browser-proxy object-mask`
+- direct `/mweb/v1/saliency_seg` using frontend-derived request shapes:
+  - canvas mode: `{"image_uri_list":["tos-cn-i-..."],"mode":"canvas"}`
+  - default mode: `{"image_uri_list":["tos-cn-i-..."]}`
+- local images are uploaded through the live-proved ImageX scene `2` path first, unless an existing `--imageUri` is supplied
+- useful flags: `--image`, `--file`, `--imageUri`, `--mode canvas|default|both`, `--noDownload`
+- normalized proof records provider URI, request shapes, response hashes, mask provider URIs, URL-presence booleans, and local mask PNG paths without signed URLs
+- proof bundle: `data/jimeng-lab/proof-20260610-object-mask/`
+- latest proof produced `image_uri=tos-cn-i-tb4s082cfz/080999a077994629bbec76c6f344a09a.png`, one `canvas` mask and one `default` mask:
+  - canvas mask URI `tos-cn-i-tb4s082cfz/2b0258d421f14b02b6f20a23eeaae0ec`, artifact `data/jimeng-lab/proof-20260610-object-mask/artifacts/object-mask-20260609165112-8yjxpj-canvas-mask-01.png`
+  - default mask URI `tos-cn-i-tb4s082cfz/d6641d59e6de4d17be119c0b98506129`, artifact `data/jimeng-lab/proof-20260610-object-mask/artifacts/object-mask-20260609165112-8yjxpj-default-mask-01.png`
+  - both mask artifacts are `2048x2048` PNGs.
+
 The next slice is **reference controls and video-reference consumers**. Use the VOD provider reference plus frontend captures to unlock live lip-sync, reference-video, multimodal/all-around reference, pose/style/depth/canny controls, and live end-frame/multi-frame image-to-video paths.
 
 Immediate next slices:
 
 1. Capture a frontend lip-sync submit and compare the converted `draft_content` with the dry-run `providerInput`; enable live submit only if it matches.
 2. Capture the frontend's explicit end-frame/multi-frame mode and live-prove `frames2video` only if the payload contract matches.
-3. Map style/reference roles and object segmentation into generation payload patches.
+3. Map style/reference roles and the new object-mask provider references into generation payload patches.
 4. Implement digital-human generation using the confirmed VOD reference path where applicable.
 5. Expand no-spend research/template coverage with CapCut template search, plane endpoints, and the bundle-discovered `/mweb/v1/feed_short_video` overseas path.
 6. Implement voice clone and subject/persona voice generation once the UI/API flow is captured.
@@ -220,6 +235,7 @@ jimeng-browser-proxy upload-token
 jimeng-browser-proxy upload-image
 jimeng-browser-proxy describe-image
 jimeng-browser-proxy controlnet-preview
+jimeng-browser-proxy object-mask
 jimeng-browser-proxy text2image
 jimeng-browser-proxy text2video
 jimeng-browser-proxy image2video

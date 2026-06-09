@@ -40,6 +40,14 @@ import {
   recognizeJimengImageFaces,
   summarizeReferenceImageInspection,
 } from "./reference-image"
+import {
+  defaultObjectSegmentationBabiParam,
+  jimengObjectSegmentationModes,
+  parseJimengObjectSegmentationCommandMode,
+  segmentJimengObject,
+  summarizeObjectSegmentation,
+  type JimengObjectSegmentationResult,
+} from "./reference-segmentation"
 import { getJimengUploadToken, parseUploadTokenScene, uploadJimengImage, uploadJimengVideo, type JimengImageUploadResult, type JimengVideoUploadResult } from "./upload"
 
 const DEFAULT_CDP_URL = "http://127.0.0.1:9340"
@@ -59,6 +67,7 @@ Commands:
   short-videos  Fetch no-spend Explore short videos for reference/profile mining
   describe-image Upload/use an image URI, then describe it and detect faces
   controlnet-preview Upload/use an image URI, then build pose/depth/canny preview refs
+  object-mask   Upload/use an image URI, then segment salient object masks
   upload-token  Fetch temporary upload credentials for image/video/file upload scenes
   upload-image  Upload a local image to Jimeng ImageX and return a provider URI
   upload-video  Upload a local video to Jimeng VOD and return a provider video reference
@@ -98,6 +107,7 @@ Options:
   --strength <n>                 ControlNet strength as 0.01..1 or 1..100 (default: 60)
   --fitMode <value>              ControlNet save fit mode: center_crop or adapt_to_canvas
   --noPoseDetect                 Skip pose_detect even when --control pose
+  --mode <canvas|default|both>    Object-mask saliency_seg mode (default: both)
   --vid <vid>                    Existing VOD vid for lip-sync
   --videoUri <uri>               Existing VOD/tos provider URI for lip-sync
   --videoWidth <n>               Existing reference video width for lip-sync
@@ -157,6 +167,11 @@ Examples:
     --control pose \\
     --outDir data/jimeng-lab/cli-controlnet-preview-smoke
 
+  jimeng-browser-proxy object-mask \\
+    --image data/jimeng-lab/ugc-studio-kbeauty-image/artifacts/jimeng-kbeauty-01.png \\
+    --mode both \\
+    --outDir data/jimeng-lab/cli-object-mask-smoke
+
   jimeng-browser-proxy upload-image \\
     --file data/jimeng-lab/image-upload-probe/aws4-live/proof-1x1.png \\
     --outDir data/jimeng-lab/cli-image-upload-smoke
@@ -200,6 +215,7 @@ interface CliArgs {
     | "short-videos"
     | "describe-image"
     | "controlnet-preview"
+    | "object-mask"
     | "upload-token"
     | "upload-image"
     | "upload-video"
@@ -237,6 +253,7 @@ interface CliArgs {
   strength?: number
   fitMode?: string
   noPoseDetect: boolean
+  maskMode?: string
   vid?: string
   videoUri?: string
   videoWidth?: number
@@ -756,6 +773,96 @@ async function main(argv: string[]): Promise<void> {
     return
   }
 
+  if (args.command === "object-mask") {
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const sourceFile = args.image ?? args.file
+    const runId = `object-mask-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${Math.random().toString(36).slice(2, 8)}`
+    const requestedImageUri = args.imageUri
+    const commandMode = parseJimengObjectSegmentationCommandMode(args.maskMode)
+    const modes = jimengObjectSegmentationModes(commandMode)
+    const endpoints = modes.map((mode) => `/mweb/v1/saliency_seg${mode === "canvas" ? " mode=canvas" : " default"}`)
+    if (!sourceFile && !requestedImageUri) throw new Error("object-mask requires --image, --file, or --imageUri")
+
+    if (args.dryRun) {
+      writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
+        command: args.command,
+        endpoint_sequence: [
+          ...(sourceFile ? ["/mweb/v1/get_upload_token scene=2", "ImageX ApplyImageUpload", "ImageX direct POST /upload/v1/{StoreUri}", "ImageX CommitImageUpload"] : []),
+          ...endpoints,
+        ],
+        source_file: sourceFile ? path.resolve(sourceFile) : undefined,
+        image_uri: requestedImageUri,
+        mode: commandMode,
+        browser_session: redactSession(session),
+      })
+      console.log(`[jimeng-browser-proxy] object-mask dry run saved`)
+      return
+    }
+
+    let imageUri = requestedImageUri
+    let imageUpload: object | null = null
+    if (sourceFile) {
+      const upload = await uploadReferenceImage({
+        session,
+        dirs,
+        runId,
+        role: "object_mask_reference",
+        index: 0,
+        sourceFile,
+      })
+      imageUri = upload.uri
+      imageUpload = upload
+    }
+    if (!imageUri) throw new Error("Image upload did not return an image URI")
+
+    const results: JimengObjectSegmentationResult[] = []
+    const downloadedMasks: Array<{ mode: string; index: number; saved_file: string; mask_uri: string | null }> = []
+    const client = new JimengClient()
+    for (const mode of modes) {
+      const result = await segmentJimengObject({
+        session,
+        imageUri,
+        mode,
+        babiParam: defaultObjectSegmentationBabiParam(),
+      })
+      results.push(result)
+      if (!args.noDownload) {
+        for (let i = 0; i < result.masks.length; i += 1) {
+          const mask = result.masks[i]!
+          if (!mask.maskUrl) continue
+          const file = path.join(dirs.artifactsDir, `${runId}-${mode}-mask-${String(i + 1).padStart(2, "0")}.png`)
+          const bytes = await client.download(mask.maskUrl)
+          writeFileSync(file, Buffer.from(bytes))
+          downloadedMasks.push({ mode, index: i, saved_file: file, mask_uri: mask.maskUri })
+        }
+      }
+    }
+
+    writeJson(path.join(dirs.rawDir, `${runId}-raw.json`), {
+      results: results.map((result) => ({
+        mode: result.mode,
+        http_status: result.httpStatus,
+        ret: result.ret,
+        errmsg: result.errmsg,
+        response_text_sha256: result.responseTextSha256,
+        request: result.request,
+        body: result.body,
+      })),
+    })
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      endpoints,
+      image_upload: imageUpload,
+      image_uri: imageUri,
+      mode: commandMode,
+      requests: results.map((result) => result.request),
+      downloaded_masks: downloadedMasks,
+      summary: summarizeObjectSegmentation(results),
+    })
+    console.log(`[jimeng-browser-proxy] object-mask saved mode=${commandMode} masks=${results.map((result) => `${result.mode}:${result.masks.length}`).join(",")}`)
+    return
+  }
+
   if (args.command === "upload-token") {
     const dirs = ensureOutputDirs(path.resolve(args.outDir))
     const scene = parseUploadTokenScene(args.scene)
@@ -1118,6 +1225,7 @@ function parseArgs(argv: string[]): CliArgs {
     && command !== "short-videos"
     && command !== "describe-image"
     && command !== "controlnet-preview"
+    && command !== "object-mask"
     && command !== "upload-token"
     && command !== "upload-image"
     && command !== "upload-video"
@@ -1203,6 +1311,7 @@ function parseArgs(argv: string[]): CliArgs {
     strength,
     fitMode: flags.fitMode,
     noPoseDetect: flags.noPoseDetect === "true",
+    maskMode: flags.mode,
     vid: flags.vid,
     videoUri: flags.videoUri,
     videoWidth,
@@ -1273,7 +1382,7 @@ interface ReferenceUploadSummary {
   image_upload: JimengImageUploadResult["summary"]
 }
 
-type ReferenceImageRole = "first_frame" | "end_frame" | "controlnet_reference"
+type ReferenceImageRole = "first_frame" | "end_frame" | "controlnet_reference" | "object_mask_reference"
 
 interface ReferenceVideoUploadSummary {
   index: number

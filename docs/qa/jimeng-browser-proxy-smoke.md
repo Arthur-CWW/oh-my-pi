@@ -421,6 +421,47 @@ Result: no matches.
 
 Raw upload/preview responses may contain signed URLs and temporary upload traces. They remain under ignored `data/**`.
 
+## Object Mask Segmentation Smoke
+
+`jimeng-browser-proxy object-mask` uploads a local reference image when needed, then calls Jimeng's no-generation `/mweb/v1/saliency_seg` endpoint. The frontend calls both the `canvas` mode request and the default request for object detection, so the smoke uses `--mode both`.
+
+Command:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts object-mask \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --image data/jimeng-lab/ugc-studio-kbeauty-image/artifacts/jimeng-kbeauty-01.png \
+  --mode both \
+  --outDir data/jimeng-lab/proof-20260610-object-mask
+```
+
+Result:
+
+```txt
+raw=data/jimeng-lab/proof-20260610-object-mask/raw/object-mask-20260609165112-8yjxpj-raw.json
+summary=data/jimeng-lab/proof-20260610-object-mask/normalized/object-mask-20260609165112-8yjxpj-summary.json
+source_copy=data/jimeng-lab/proof-20260610-object-mask/artifacts/object-mask-20260609165112-8yjxpj-object_mask_reference-jimeng-kbeauty-01.png
+image_uri=tos-cn-i-tb4s082cfz/080999a077994629bbec76c6f344a09a.png
+canvas_mask_uri=tos-cn-i-tb4s082cfz/2b0258d421f14b02b6f20a23eeaae0ec
+canvas_mask_artifact=data/jimeng-lab/proof-20260610-object-mask/artifacts/object-mask-20260609165112-8yjxpj-canvas-mask-01.png
+canvas_response_sha256=c903f33db56e3f156b6c9a37a61af8668b87169f1642ea6ac3ce7fee4db1c65a
+default_mask_uri=tos-cn-i-tb4s082cfz/d6641d59e6de4d17be119c0b98506129
+default_mask_artifact=data/jimeng-lab/proof-20260610-object-mask/artifacts/object-mask-20260609165112-8yjxpj-default-mask-01.png
+default_response_sha256=7c6f74cd237c1ed788e369300eb30ea8c4de67efe3ca5548db4abcaff9ab2abc
+mask_files=PNG image data, 2048 x 2048, 8-bit/color RGBA, non-interlaced
+```
+
+Normalized summary files were checked for signed URL leakage:
+
+```bash
+rg -n 'X-Amz|signed|https?://' \
+  data/jimeng-lab/proof-20260610-object-mask/normalized
+```
+
+Result: no matches.
+
+Raw upload/segmentation responses may contain signed mask URLs and temporary upload traces. They remain under ignored `data/**`.
+
 ## Image-To-Video First-Frame Smoke
 
 Local-upload-backed image-to-video is now live-proved through the browser-proxy front door.
@@ -742,7 +783,7 @@ Result:
 ```txt
 typecheck passed
 44 tests passed, 0 failed
-browser-proxy help listed describe-image, controlnet-preview, templates, short-videos, upload-video, image2video, frames2video, and lip-sync
+browser-proxy help listed describe-image, controlnet-preview, object-mask, templates, short-videos, upload-video, image2video, frames2video, and lip-sync
 ```
 
 ## Follow-Up
