@@ -33,7 +33,7 @@ Use the browser as an authenticated session holder and API discovery surface. Mo
 | `/mweb/v1/dreamina_subject/get` | POST | Saved subject/persona list. | Implemented for config catalog |
 | `/mweb/v1/feed` | POST | Explore/feed content; a signed `dreamina_tone` feed request returns the built-in voice library. Useful for research/template mining if handled carefully. | Implemented for voice library replay |
 | `/mweb/v1/tts_generate` | POST | Built-in voice text-to-speech. Returns base64 MP3 in `data.data`. | Implemented and live-proved |
-| `/mweb/v1/get_upload_token` | POST | Temporary upload credentials for video/image/file scenes. Required before direct local reference-image upload. | Implemented and live-proved; local ImageX image upload is implemented via `upload-image` |
+| `/mweb/v1/get_upload_token` | POST | Temporary upload credentials for video/image/file scenes. Required before direct local reference-image/video upload. | Implemented and live-proved; local ImageX image upload is implemented via `upload-image`, local VOD video upload via `upload-video` |
 | `/mweb/v1/get_explore` | POST | Explore examples and public creative templates. | Cataloged only |
 | `/mweb/v1/get_unread_count` | POST | Notification count. | Low priority |
 
@@ -155,6 +155,67 @@ This URI can now be injected into first-frame image-to-video payloads:
 ```txt
 draft_content.component_list[0].abilities.gen_video.text_to_video_params.video_gen_inputs[0].first_frame_image
 ```
+
+## Confirmed Local Video Upload Contract
+
+Local VOD upload is now confirmed end-to-end for small/direct reference clips:
+
+```txt
+POST /mweb/v1/get_upload_token
+GET  VOD ApplyUploadInner
+POST VOD /upload/v1/{StoreUri}
+POST VOD CommitUploadInner
+```
+
+Request:
+
+```json
+{ "scene": 1 }
+```
+
+Confirmed VOD details from the frontend uploader SDK and live CLI proof:
+
+- `scene=1` returns the VOD token path for videos.
+- Jimeng's VOD token uses `space_name=dreamina`, `upload_domain=vod.bytedanceapi.com`, and `region=cn`.
+- The bundled uploader calls `ApplyUploadInner` with `Version=2020-11-19`, `SpaceName=dreamina`, `FileType=video`, `IsInner=1`, `FileSize`, optional `FileExtension`, and random `s`.
+- VOD signing uses the same AWS4-style signer shape with credential scope `YYYYMMDD/cn/vod/aws4_request`.
+- Small video files direct-upload to `https://{UploadHost}/upload/v1/{StoreUri}` with `Authorization`, `Content-CRC32`, and `X-Storage-U`.
+- `CommitUploadInner` posts `{"SessionKey":"...","Functions":[]}` and returns provider video references such as `Vid` plus a `tos-cn-v-*` store URI.
+
+Dry-run:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts upload-video \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --file data/jimeng-lab/proof-20260609-image2video-live/artifacts/aa83d0e1-a20c-4b85-ab59-ee3a7894296f-00.mp4 \
+  --outDir data/jimeng-lab/proof-20260609-video-upload-dry-run \
+  --dryRun
+```
+
+Live proof:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts upload-token \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --scene video \
+  --outDir data/jimeng-lab/proof-20260609-video-upload-token
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts upload-video \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --file data/jimeng-lab/proof-20260609-image2video-live/artifacts/aa83d0e1-a20c-4b85-ab59-ee3a7894296f-00.mp4 \
+  --outDir data/jimeng-lab/proof-20260609-video-upload-live
+```
+
+Proof result:
+
+```txt
+vid=v03870g10004d8k1u4nog65hb08dnhig
+storeUri=tos-cn-v-148450/o4gBE1AAWbfiDDig6xEQ4KJhDHQvlExoFkFExB
+source video=H.264 MP4, 704x1248, 5.016667s, 4,285,498 bytes
+summary=data/jimeng-lab/proof-20260609-video-upload-live/normalized/upload-video-20260609141130-summary.json
+```
+
+Raw token/apply/commit responses include temporary credentials and provider upload authorization. They remain ignored under `data/**`.
 
 ## Confirmed Image-To-Video First-Frame Contract
 

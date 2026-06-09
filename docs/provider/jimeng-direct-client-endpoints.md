@@ -363,7 +363,77 @@ ImageHeight=1
 
 Raw token/apply responses contain temporary credentials and provider auth. Keep them only under ignored `data/**`.
 
-### 12) Local-image image-to-video
+### 12) Local video upload to VOD provider reference
+- Status:
+  - live-proved with `jimeng-browser-proxy upload-video`
+  - implemented in `packages/jimeng-client/src/upload.ts`
+  - tested with mocked token/apply/upload/commit sequence
+- Provider sequence:
+
+```txt
+POST /mweb/v1/get_upload_token { "scene": 1 }
+GET  https://vod.bytedanceapi.com/?Action=ApplyUploadInner&Version=2020-11-19&SpaceName=dreamina&FileType=video&IsInner=1&FileSize=<bytes>&FileExtension=.mp4&s=<random>
+POST https://{UploadHost}/upload/v1/{StoreUri}
+POST https://vod.bytedanceapi.com/?Action=CommitUploadInner&Version=2020-11-19&SpaceName=dreamina
+```
+
+Confirmed signer:
+
+```txt
+algorithm: AWS4-HMAC-SHA256
+date header: X-Amz-Date
+token header: x-amz-security-token
+scope: YYYYMMDD/cn/vod/aws4_request
+signed headers for apply: x-amz-date;x-amz-security-token
+```
+
+Direct upload headers:
+
+```txt
+Authorization: StoreInfos[0].Auth
+Content-CRC32: <crc32 hex of bytes>
+X-Storage-U: <encoded user id, empty string works in current proof>
+```
+
+Apply response shape from the active frontend uploader SDK:
+
+```txt
+Result.InnerUploadAddress.UploadNodes[0].SessionKey
+Result.InnerUploadAddress.UploadNodes[0].UploadHost
+Result.InnerUploadAddress.UploadNodes[0].UploadHeader
+Result.InnerUploadAddress.UploadNodes[0].StoreInfos[0].StoreUri
+Result.InnerUploadAddress.UploadNodes[0].StoreInfos[0].Auth
+```
+
+Commit body:
+
+```json
+{ "SessionKey": "<UploadNode.SessionKey>", "Functions": [] }
+```
+
+Live proof commands:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts upload-video \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --file data/jimeng-lab/proof-20260609-image2video-live/artifacts/aa83d0e1-a20c-4b85-ab59-ee3a7894296f-00.mp4 \
+  --outDir data/jimeng-lab/proof-20260609-video-upload-live
+```
+
+Observed safe summary:
+
+```txt
+vid=v03870g10004d8k1u4nog65hb08dnhig
+storeUri=tos-cn-v-148450/o4gBE1AAWbfiDDig6xEQ4KJhDHQvlExoFkFExB
+spaceName=dreamina
+uploadStatus=200
+uploadCrc32=1929b92c
+source mp4=H.264, 704x1248, 5.016667s, 4,285,498 bytes
+```
+
+Raw token/apply responses contain temporary credentials and provider auth. Keep them only under ignored `data/**`.
+
+### 13) Local-image image-to-video
 - Status:
   - live-proved with `jimeng-browser-proxy image2video`
   - implemented in `packages/jimeng-client/src/browser-proxy-cli.ts`
@@ -608,7 +678,7 @@ Mapping guidance:
 - region variants (US/HK/JP/SG) requirement differences
 - end-frame image-to-video live proof using committed ImageX URIs
 - multi-frame/reference-role payload captures for pose/style/depth/canny/character controls
-- VOD/video byte upload using `/mweb/v1/get_upload_token` scene `1` credentials
+- VOD multipart/chunked upload for large reference videos; small/direct VOD upload is implemented and live-proved
 - voice/配音 + digital-human + motion-mimic endpoint mapping
 
 ## Current CLI entrypoints
@@ -661,6 +731,7 @@ Supports local first-frame upload and optional frame URI injection for video pay
 - `image2video --image <path>`
 - `--firstFrameUri <uri>`
 - `--lastFrameUri <uri>`
+- `upload-video --file <path>`
 
 For `image2video --dryRun --image`, the CLI still uploads the local image to obtain a real provider URI, then skips the generation submit.
 
@@ -755,7 +826,7 @@ data/jimeng-captures/<timestamp>-<flow>/
 Do not commit raw captures or generated media. If a redacted summary is promoted into tracked docs, manually review it first for cookies, reusable signatures, signed URL values, account IDs, and private prompt/media content.
 
 ## Next reverse target (immediate)
-1. Implement VOD/video byte upload from `/mweb/v1/get_upload_token` scene `1`.
-2. Use video upload to unlock reference-video, multimodal/all-around reference, and lip-sync flows.
-3. Capture and implement end-frame/multi-frame payloads beyond the confirmed first-frame path.
-4. Add strict `1019` shark breaker/cooldown budgets to the consolidated CLI path.
+1. Use the new VOD upload to unlock reference-video, multimodal/all-around reference, and lip-sync flows.
+2. Capture and implement end-frame/multi-frame payloads beyond the confirmed first-frame path.
+3. Add strict `1019` shark breaker/cooldown budgets to the consolidated CLI path.
+4. Add multipart/chunked VOD upload only when large reference videos require it.

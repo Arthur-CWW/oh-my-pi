@@ -9,7 +9,7 @@ Status values: `active`, `next`, `blocked`, `done`, `parked`.
 | ID | Task | Owner | Notes |
 |---|---|---|---|
 | T-2026-06-09-003 | Keep task tracking and durable preferences synchronized | Codex | Root tracker exists; update this file when opening, blocking, finishing, or parking work. |
-| T-2026-06-09-024 | Reverse/catalog useful Jimeng GenAI frontend APIs | Codex | Build a reusable background-browser/session-refresh proxy plus direct-client support for image, video, reference, persona/subject, character, canvas, asset, voice, and template-mining APIs. Current slices support workbench text-to-image submit + asset-list polling, non-generating config probes, built-in voice library replay, direct TTS MP3 generation, upload-token retrieval, local ImageX image upload to provider URI, and local-upload-backed first-frame image-to-video with MP4 proof. |
+| T-2026-06-09-024 | Reverse/catalog useful Jimeng GenAI frontend APIs | Codex | Build a reusable background-browser/session-refresh proxy plus direct-client support for image, video, reference, persona/subject, character, canvas, asset, voice, and template-mining APIs. Current slices support workbench text-to-image submit + asset-list polling, non-generating config probes, built-in voice library replay, direct TTS MP3 generation, upload-token retrieval, local ImageX image upload to provider URI, local-upload-backed first-frame image-to-video with MP4 proof, and local VOD video upload to `vid`/`tos-cn-v-*` provider references. |
 
 ## Next
 
@@ -60,6 +60,7 @@ Status values: `active`, `next`, `blocked`, `done`, `parked`.
 | T-2026-06-09-030 | Add Jimeng upload-token CLI support | 2026-06-09 | Added `/mweb/v1/get_upload_token` helper and `upload-token` CLI command; live-proved scenes `1`, `2`, and `3`. Scene `2` returns ImageX token metadata for reference-image upload; byte upload-to-URI remains the next task. |
 | T-2026-06-09-036 | Add Jimeng ImageX local image upload CLI support | 2026-06-09 | Added frontend-compatible AWS4 ImageX signer, `ApplyImageUpload`/direct byte upload/`CommitImageUpload` helpers, `upload-image` CLI command, tests, docs, and live proof bundle under `data/jimeng-lab/proof-20260609-image-upload/`. |
 | T-2026-06-09-037 | Add Jimeng local-upload image-to-video CLI support | 2026-06-09 | Added `jimeng-browser-proxy image2video` with local first-frame upload, provider URI injection, useful video flags, tests/docs, and live MP4 proof under `data/jimeng-lab/proof-20260609-image2video-live/`. |
+| T-2026-06-09-038 | Add Jimeng VOD local video upload CLI support | 2026-06-09 | Added `jimeng-browser-proxy upload-video` with `/mweb/v1/get_upload_token` scene `1`, VOD `ApplyUploadInner`/direct byte upload/`CommitUploadInner`, tests/docs, and live proof returning `vid=v03870g10004d8k1u4nog65hb08dnhig`. |
 
 ## Related Planning Docs
 

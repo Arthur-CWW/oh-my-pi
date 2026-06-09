@@ -408,6 +408,69 @@ ffmpeg -y \
   data/jimeng-lab/proof-20260609-image2video-live/artifacts/aa83d0e1-a20c-4b85-ab59-ee3a7894296f-thumb-2s.jpg
 ```
 
+## VOD Video Upload Smoke
+
+Local VOD upload is now live-proved for small/direct reference clips. This is the bridge from local MP4 files to Jimeng video references for reference-video, multimodal/all-around reference, and lip-sync payloads.
+
+Dry-run command:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts upload-video \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --file data/jimeng-lab/proof-20260609-image2video-live/artifacts/aa83d0e1-a20c-4b85-ab59-ee3a7894296f-00.mp4 \
+  --outDir data/jimeng-lab/proof-20260609-video-upload-dry-run \
+  --dryRun
+```
+
+Preflight token command:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts upload-token \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --scene video \
+  --outDir data/jimeng-lab/proof-20260609-video-upload-token
+```
+
+Live upload command:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts upload-video \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --file data/jimeng-lab/proof-20260609-image2video-live/artifacts/aa83d0e1-a20c-4b85-ab59-ee3a7894296f-00.mp4 \
+  --outDir data/jimeng-lab/proof-20260609-video-upload-live
+```
+
+Live result:
+
+```txt
+vid=v03870g10004d8k1u4nog65hb08dnhig
+storeUri=tos-cn-v-148450/o4gBE1AAWbfiDDig6xEQ4KJhDHQvlExoFkFExB
+summary=data/jimeng-lab/proof-20260609-video-upload-live/normalized/upload-video-20260609141130-summary.json
+raw=data/jimeng-lab/proof-20260609-video-upload-live/raw/upload-video-20260609141130-raw.json
+artifact=data/jimeng-lab/proof-20260609-video-upload-live/artifacts/aa83d0e1-a20c-4b85-ab59-ee3a7894296f-00.mp4
+```
+
+Media validation:
+
+```bash
+ffprobe -v error \
+  -show_entries format=duration,size:stream=codec_name,width,height,duration \
+  -of json \
+  data/jimeng-lab/proof-20260609-video-upload-live/artifacts/aa83d0e1-a20c-4b85-ab59-ee3a7894296f-00.mp4
+```
+
+Validation result:
+
+```txt
+codec=h264
+resolution=704x1248
+duration=5.016667s
+size=4285498 bytes
+uploadCrc32=1929b92c
+```
+
+Raw token/apply/commit responses include temporary credentials and provider auth. They are intentionally local-only under ignored `data/**`.
+
 ## Verification
 
 ```bash
@@ -420,8 +483,8 @@ Result:
 
 ```txt
 typecheck passed
-23 tests passed, 0 failed
-browser-proxy help listed image2video
+24 tests passed, 0 failed
+browser-proxy help listed upload-video and image2video
 ```
 
 ## Follow-Up
@@ -433,7 +496,6 @@ Next useful captures:
 - pose/style/depth/canny reference controls
 - image-to-video end-frame and multi-frame controls
 - multimodal/all-around reference video
-- VOD/video upload for reference-video and lip-sync paths
 - video text generation through the current unified app route
 - voice cloning and subject/persona voice generation
 - canvas edit tools

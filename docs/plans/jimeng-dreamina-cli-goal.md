@@ -20,6 +20,7 @@ As of 2026-06-09, the committed baseline is:
 - `4567ca0 Add Jimeng upload token probe`
 - `6fb9c61 Add Jimeng ImageX image upload CLI`
 - `f683706 Update Jimeng CLI extraction goal`
+- `35d9171 Add Jimeng image-to-video CLI proof`
 
 ImageX local image upload is now committed and live-proved:
 
@@ -32,7 +33,7 @@ ImageX local image upload is now committed and live-proved:
 - tests for deterministic AWS4-style ImageX signing and mocked token/apply/upload/commit sequence
 - docs and QA notes showing a live proof URI and local artifact under ignored `data/**`
 
-First-frame image-to-video is now implemented and live-proved in the working tree:
+First-frame image-to-video is now committed and live-proved:
 
 - `jimeng-browser-proxy image2video`
 - local first-frame upload via ImageX scene `2`, provider URI injection into `first_frame_image`, submit/poll/download through `/mweb/v1/aigc_draft/generate` and `/mweb/v1/get_history_by_ids`
@@ -42,7 +43,30 @@ First-frame image-to-video is now implemented and live-proved in the working tre
   - live MP4: `data/jimeng-lab/proof-20260609-image2video-live/artifacts/aa83d0e1-a20c-4b85-ab59-ee3a7894296f-00.mp4`
   - thumbnail: `data/jimeng-lab/proof-20260609-image2video-live/artifacts/aa83d0e1-a20c-4b85-ab59-ee3a7894296f-thumb-2s.jpg`
 
-The next slice is **VOD/video upload**. Use `/mweb/v1/get_upload_token` scene `1` and frontend bundle/capture evidence to turn a local MP4 into whatever provider reference Jimeng uses for reference-video, multimodal/all-around reference, and lip-sync paths.
+VOD/video upload is now implemented and live-proved:
+
+- `jimeng-browser-proxy upload-video`
+- local MP4 upload via:
+  - `/mweb/v1/get_upload_token` scene `1`
+  - VOD `ApplyUploadInner`
+  - direct `POST /upload/v1/{StoreUri}`
+  - VOD `CommitUploadInner`
+- useful provider references exposed for later payloads: `vid` and `tos-cn-v-*` store URI
+- proof bundle:
+  - dry-run: `data/jimeng-lab/proof-20260609-video-upload-dry-run/`
+  - live proof: `data/jimeng-lab/proof-20260609-video-upload-live/`
+  - `vid=v03870g10004d8k1u4nog65hb08dnhig`
+  - `storeUri=tos-cn-v-148450/o4gBE1AAWbfiDDig6xEQ4KJhDHQvlExoFkFExB`
+
+The next slice is **reference controls and video-reference consumers**. Use the VOD provider reference plus frontend captures to unlock reference-video, multimodal/all-around reference, lip-sync, and end-frame/multi-frame image-to-video paths.
+
+Immediate next slices:
+
+1. Image-to-video reference controls such as end frame, multi-frame, pose/style/depth/canny/reference roles, depending on the clearest captured contracts.
+2. Lip-sync or digital-human generation using the confirmed VOD reference path where applicable.
+3. Voice clone and subject/persona voice generation once the UI/API flow is captured.
+
+Do not start the async daemon while these API contracts are still moving.
 
 ## Optimization Target
 
@@ -58,16 +82,29 @@ Maximize useful API coverage and proof quality while keeping live submissions co
 - do not spam servers or brute-force controls
 - do not commit cookies, raw captures, signed URLs, upload credentials, session bundles, or generated media
 
+## Complete Enough Definition
+
+For this project, "complete enough" means each useful API has enough surface area exposed that future pipelines can parameterize it without another frontend reverse-engineering pass.
+
+That means:
+
+- every independent property class gets represented as a CLI flag, typed option, or documented blocked field
+- important mode switches are covered, such as text/image/video input source, duration, ratio, resolution, model version, seed, reference role, voice mode, character/persona id, template id, and upload source type
+- enum-heavy fields do not need exhaustive live proof; list the catalog when available and prove one or two representative values
+- gated, VIP, risk-blocked, or unclear options are still recorded with the exact UI path, trace evidence, and next probe
+- request/response shapes that affect later automation get fixture or snapshot coverage
+- live proof creates useful UGC/Korean-beauty/persona/campaign artifacts, not synthetic placeholder demos
+
 ## CLI Shape
 
 Near-term CLI work should prioritize API coverage and proof over orchestration. Do **not** implement the daemon or full async job queue until the high-value API surface is settled.
 
 Current ownership:
 
-- `jimeng-browser-proxy` is the user-facing front door for logged-in Jimeng/Dreamina work.
-- `jimeng-dreamina` is lower-level Dreamina-compatible plumbing and may remain useful for compatibility tests and payload experiments.
+- `jimeng-browser-proxy` is the user-facing front door for logged-in Jimeng/Dreamina work and should receive new commands by default.
+- `jimeng-dreamina` is lower-level Dreamina-compatible plumbing from the earlier direct-client path. Keep it for compatibility tests, payload experiments, and shared helpers, but do not grow it into a second competing product CLI.
 - Avoid creating more parallel CLIs. Prefer adding new commands to `jimeng-browser-proxy`, while reusing shared helpers underneath.
-- Later cleanup should consolidate the two surfaces or make their relationship explicit enough that users never wonder which one to run.
+- Later cleanup should consolidate the two surfaces or make their relationship explicit enough that users never wonder which one to run. The target user experience is one obvious CLI surface.
 
 Future async direction, deferred:
 
@@ -132,6 +169,7 @@ For each implemented API:
 - QA/proof note in `docs/qa/`
 - local proof bundle under ignored `data/**`
 - command log or manifest that records the important commands needed to recreate artifacts
+- git commit for the finished feature slice before moving to the next coherent API section
 
 For media:
 
@@ -164,6 +202,13 @@ A slice is checkpoint-ready only when:
 - `TASKS.md` and relevant state/plan docs are updated
 - important rerun commands are recorded in the QA note or proof manifest
 - the feature slice has its own git commit
+
+Dirty worktree rule:
+
+- inspect `git status --short` before staging
+- stage only files that belong to the current feature slice
+- never revert unrelated user or generated changes while checkpointing this goal
+- keep raw captures, cookies, credentials, signed URLs, and generated media under ignored `data/**`
 
 Suggested slice order:
 

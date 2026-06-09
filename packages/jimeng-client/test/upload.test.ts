@@ -5,6 +5,7 @@ import {
   signJimengImageXRequest,
   summarizeUploadTokenBody,
   uploadJimengImage,
+  uploadJimengVideo,
   type JimengFetch,
   type JimengSessionBundle,
   JimengClient,
@@ -134,6 +135,52 @@ describe("Jimeng upload helpers", () => {
     expect(JSON.stringify(result.summary)).not.toContain("auth-token")
     expect(JSON.stringify(result.summary)).not.toContain("session-key")
   })
+
+  test("uploads a local video through token, VOD apply, direct upload, and commit", async () => {
+    const requests: Array<{ url: string; method: string; headers: Record<string, string>; bodyText: string | null; bodyBytes: number | null }> = []
+    const client = new JimengClient({
+      fetch: mockVideoUploadFetch(requests),
+    })
+
+    const result = await uploadJimengVideo({
+      client,
+      session,
+      video: {
+        fileName: "reference.mp4",
+        bytes: proofMp4Bytes(),
+      },
+    })
+
+    expect(requests.map((request) => request.method)).toEqual(["POST", "GET", "POST", "POST"])
+    expect(requests[0]?.url).toContain("/mweb/v1/get_upload_token")
+    expect(JSON.parse(requests[0]?.bodyText ?? "{}")).toEqual({ scene: 1 })
+    expect(requests[1]?.url).toContain("Action=ApplyUploadInner")
+    expect(requests[1]?.url).toContain("Version=2020-11-19")
+    expect(requests[1]?.url).toContain("SpaceName=dreamina")
+    expect(requests[1]?.url).toContain("FileType=video")
+    expect(requests[1]?.url).toContain("FileExtension=.mp4")
+    expect(requests[1]?.headers.Authorization).toContain("/cn/vod/aws4_request")
+    expect(requests[2]?.url).toBe("https://vod-upload.example.invalid/upload/v1/tos-vod-cn/dreamina/reference.mp4")
+    expect(requests[2]?.headers["Content-CRC32"]).toBe("6c9888e8")
+    expect(requests[2]?.bodyBytes).toBe(14)
+    expect(requests[3]?.url).toContain("Action=CommitUploadInner")
+    expect(requests[3]?.url).toContain("SpaceName=dreamina")
+    expect(requests[3]?.bodyText).toBe(JSON.stringify({ SessionKey: "vod-session-key", Functions: [] }))
+    expect(result.summary).toEqual({
+      fileName: "reference.mp4",
+      contentType: "video/mp4",
+      bytes: 14,
+      spaceName: "dreamina",
+      storeUri: "tos-vod-cn/dreamina/reference.mp4",
+      vid: "v123",
+      mid: "m123",
+      sourceUri: "tos-vod-cn/dreamina/reference.mp4",
+      uploadStatus: 200,
+      uploadCrc32: "6c9888e8",
+    })
+    expect(JSON.stringify(result.summary)).not.toContain("vod-auth")
+    expect(JSON.stringify(result.summary)).not.toContain("vod-session-key")
+  })
 })
 
 function uploadTokenBody(): Record<string, unknown> {
@@ -179,6 +226,25 @@ function mockImageUploadFetch(requests: Array<{ url: string; method: string; hea
   }
 }
 
+function mockVideoUploadFetch(requests: Array<{ url: string; method: string; headers: Record<string, string>; bodyText: string | null; bodyBytes: number | null }>): JimengFetch {
+  return async (url, init) => {
+    const bodyInfo = await requestBodyInfo(init?.body)
+    requests.push({
+      url,
+      method: init?.method ?? "GET",
+      headers: headersToRecord(init?.headers),
+      bodyText: bodyInfo.text,
+      bodyBytes: bodyInfo.bytes,
+    })
+
+    if (url.includes("/mweb/v1/get_upload_token")) return jsonResponse(videoUploadTokenBody())
+    if (url.includes("Action=ApplyUploadInner")) return jsonResponse(applyVodUploadBody())
+    if (url.includes("/upload/v1/")) return jsonResponse({ code: 2000, message: "Success", data: { crc32: "6c9888e8" } })
+    if (url.includes("Action=CommitUploadInner")) return jsonResponse(commitVodUploadBody())
+    return jsonResponse({ error: "unexpected url" }, 404)
+  }
+}
+
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status })
 }
@@ -207,6 +273,27 @@ function proofPng(): Uint8Array {
   return Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=", "base64")
 }
 
+function proofMp4Bytes(): Uint8Array {
+  return Buffer.from("fake mp4 bytes")
+}
+
+function videoUploadTokenBody(): Record<string, unknown> {
+  return {
+    ret: "0",
+    errmsg: "success",
+    data: {
+      access_key_id: "ak",
+      secret_access_key: "sk",
+      session_token: "token",
+      expired_time: "1781000000",
+      current_time: "1780990000",
+      space_name: "dreamina",
+      upload_domain: "https://vod.example.invalid",
+      region: "cn",
+    },
+  }
+}
+
 function applyImageUploadBody(): Record<string, unknown> {
   return {
     ResponseMetadata: {
@@ -225,6 +312,36 @@ function applyImageUploadBody(): Record<string, unknown> {
           {
             StoreUri: "tos-cn-i-tb4s082cfz/example.png",
             Auth: "auth-token",
+          },
+        ],
+      },
+    },
+  }
+}
+
+function applyVodUploadBody(): Record<string, unknown> {
+  return {
+    ResponseMetadata: {
+      RequestId: "vod-request-id",
+      Action: "ApplyUploadInner",
+      Version: "2020-11-19",
+      Service: "vod",
+      Region: "cn",
+    },
+    Result: {
+      InnerUploadAddress: {
+        UploadNodes: [
+          {
+            SessionKey: "vod-session-key",
+            UploadHost: "vod-upload.example.invalid",
+            UploadHeader: {},
+            StoreInfos: [
+              {
+                StoreUri: "tos-vod-cn/dreamina/reference.mp4",
+                Auth: "vod-auth",
+                UploadID: "upload-id",
+              },
+            ],
           },
         ],
       },
@@ -255,6 +372,29 @@ function commitImageUploadBody(): Record<string, unknown> {
           ImageHeight: 1,
           ImageFormat: "png",
           ImageSize: 68,
+        },
+      ],
+    },
+  }
+}
+
+function commitVodUploadBody(): Record<string, unknown> {
+  return {
+    ResponseMetadata: {
+      RequestId: "vod-request-id",
+      Action: "CommitUploadInner",
+      Version: "2020-11-19",
+      Service: "vod",
+      Region: "cn",
+    },
+    Result: {
+      Results: [
+        {
+          Vid: "v123",
+          Mid: "m123",
+          SourceInfo: {
+            FileName: "tos-vod-cn/dreamina/reference.mp4",
+          },
         },
       ],
     },

@@ -59,6 +59,22 @@ export interface JimengImageUploadResult {
   summary: JimengImageUploadSummary
 }
 
+export interface JimengVideoUploadInput {
+  fileName: string
+  bytes: Uint8Array
+  contentType?: string
+  spaceName?: string
+  userId?: string
+}
+
+export interface JimengVideoUploadResult {
+  token: JimengUploadTokenResult
+  apply: JimengVodApplyResult
+  upload: JimengVodDirectUploadResult
+  commit: JimengVodCommitResult
+  summary: JimengVideoUploadSummary
+}
+
 export interface JimengImageXApplyResult {
   httpStatus: number
   responseTextSha256: string
@@ -103,6 +119,55 @@ export interface JimengImageUploadSummary {
   }>
 }
 
+export interface JimengVodApplyResult {
+  httpStatus: number
+  responseTextSha256: string
+  body: unknown
+  uploadHost: string
+  storeUri: string
+  authorization: string
+  sessionKey: string
+  uploadHeader: Record<string, string>
+  uploadId: string | null
+  fallbackStoreInfo: {
+    uploadHost: string
+    storeUri: string
+    authorization: string
+    sessionKey: string
+    uploadHeader: Record<string, string>
+  } | null
+}
+
+export interface JimengVodDirectUploadResult {
+  httpStatus: number
+  responseTextSha256: string
+  body: unknown
+  crc32: string
+}
+
+export interface JimengVodCommitResult {
+  httpStatus: number
+  responseTextSha256: string
+  body: unknown
+  results: Array<Record<string, unknown>>
+  vid: string | null
+  mid: string | null
+  sourceUri: string | null
+}
+
+export interface JimengVideoUploadSummary {
+  fileName: string
+  contentType: string | null
+  bytes: number
+  spaceName: string
+  storeUri: string
+  vid: string | null
+  mid: string | null
+  sourceUri: string | null
+  uploadStatus: number
+  uploadCrc32: string
+}
+
 export interface JimengImageXSignInput {
   method: "GET" | "POST"
   host: string
@@ -129,6 +194,15 @@ export interface JimengImageUploadCredentials {
   host: string
   region: string
   serviceId: string
+  accessKeyId: string
+  secretAccessKey: string
+  sessionToken: string
+}
+
+export interface JimengVodUploadCredentials {
+  host: string
+  region: string
+  spaceName: string
   accessKeyId: string
   secretAccessKey: string
   sessionToken: string
@@ -198,6 +272,46 @@ export async function uploadJimengImage(input: {
   }
 }
 
+export async function uploadJimengVideo(input: {
+  client?: JimengClient
+  session: JimengSessionBundle
+  video: JimengVideoUploadInput
+}): Promise<JimengVideoUploadResult> {
+  const client = input.client ?? new JimengClient()
+  const token = await getJimengUploadToken({ client, session: input.session, token: { scene: 1 } })
+  const credentials = parseVodUploadCredentials(token.body, input.video.spaceName)
+  const contentType = input.video.contentType ?? contentTypeFromFileName(input.video.fileName)
+  const apply = await applyJimengVodUpload({
+    client,
+    credentials,
+    fileName: input.video.fileName,
+    fileSize: input.video.bytes.byteLength,
+  })
+  const upload = await uploadJimengVodBytes({
+    client,
+    apply,
+    bytes: input.video.bytes,
+    userId: input.video.userId,
+  })
+  const commit = await commitJimengVodUpload({ client, credentials, sessionKey: apply.sessionKey })
+
+  return {
+    token,
+    apply,
+    upload,
+    commit,
+    summary: summarizeJimengVideoUpload({
+      fileName: input.video.fileName,
+      contentType,
+      bytes: input.video.bytes.byteLength,
+      spaceName: credentials.spaceName,
+      apply,
+      upload,
+      commit,
+    }),
+  }
+}
+
 export async function applyJimengImageUpload(input: {
   client?: JimengClient
   credentials: JimengImageUploadCredentials
@@ -235,6 +349,118 @@ export async function applyJimengImageUpload(input: {
   }
 }
 
+export async function applyJimengVodUpload(input: {
+  client?: JimengClient
+  credentials: JimengVodUploadCredentials
+  fileName: string
+  fileSize: number
+}): Promise<JimengVodApplyResult> {
+  const client = input.client ?? new JimengClient()
+  const params: Record<string, string> = {
+    Action: "ApplyUploadInner",
+    Version: "2020-11-19",
+    SpaceName: input.credentials.spaceName,
+    FileType: "video",
+    IsInner: "1",
+    FileSize: String(input.fileSize),
+    s: Math.random().toString(36).substring(2),
+  }
+  const extension = fileExtension(input.fileName)
+  if (extension) params.FileExtension = extension
+
+  const signed = signJimengImageXRequest({
+    method: "GET",
+    host: input.credentials.host,
+    region: input.credentials.region,
+    service: "vod",
+    accessKeyId: input.credentials.accessKeyId,
+    secretAccessKey: input.credentials.secretAccessKey,
+    sessionToken: input.credentials.sessionToken,
+    params,
+  })
+  const response = await client.requestText(signed.url, { method: "GET", headers: signed.headers })
+  const body = safeJson(response.text)
+  assertVolcengineSuccess(body, "ApplyUploadInner")
+  const parsed = parseApplyVodUploadBody(body)
+  return {
+    httpStatus: response.status,
+    responseTextSha256: sha256(response.text),
+    body,
+    ...parsed,
+  }
+}
+
+export async function uploadJimengVodBytes(input: {
+  client?: JimengClient
+  apply: Pick<JimengVodApplyResult, "uploadHost" | "storeUri" | "authorization" | "uploadHeader">
+  bytes: Uint8Array
+  userId?: string
+}): Promise<JimengVodDirectUploadResult> {
+  const client = input.client ?? new JimengClient()
+  const crc32 = crc32Hex(input.bytes)
+  const bodyBuffer = new ArrayBuffer(input.bytes.byteLength)
+  new Uint8Array(bodyBuffer).set(input.bytes)
+  const uploadHost = normalizeUploadHost(input.apply.uploadHost)
+  const response = await client.requestText(`${uploadHost}/upload/v1/${input.apply.storeUri}`, {
+    method: "POST",
+    headers: {
+      Authorization: input.apply.authorization,
+      "Content-CRC32": crc32,
+      "X-Storage-U": encodeURIComponent(input.userId ?? ""),
+      ...input.apply.uploadHeader,
+    },
+    body: new Blob([bodyBuffer]),
+  })
+  const body = safeJson(response.text)
+  assertDirectUploadSuccess(body, "VOD direct")
+  return {
+    httpStatus: response.status,
+    responseTextSha256: sha256(response.text),
+    body,
+    crc32,
+  }
+}
+
+export async function commitJimengVodUpload(input: {
+  client?: JimengClient
+  credentials: JimengVodUploadCredentials
+  sessionKey: string
+}): Promise<JimengVodCommitResult> {
+  const client = input.client ?? new JimengClient()
+  const params = {
+    Action: "CommitUploadInner",
+    Version: "2020-11-19",
+    SpaceName: input.credentials.spaceName,
+  }
+  const bodyText = JSON.stringify({ SessionKey: input.sessionKey, Functions: [] })
+  const signed = signJimengImageXRequest({
+    method: "POST",
+    host: input.credentials.host,
+    region: input.credentials.region,
+    service: "vod",
+    accessKeyId: input.credentials.accessKeyId,
+    secretAccessKey: input.credentials.secretAccessKey,
+    sessionToken: input.credentials.sessionToken,
+    params,
+    headers: { "Content-Type": "application/json" },
+    body: bodyText,
+  })
+  const response = await client.requestText(signed.url, {
+    method: "POST",
+    headers: signed.headers,
+    body: bodyText,
+  })
+  const body = safeJson(response.text)
+  assertVolcengineSuccess(body, "CommitUploadInner")
+  const parsed = parseCommitVodUploadBody(body)
+  return {
+    httpStatus: response.status,
+    responseTextSha256: sha256(response.text),
+    body,
+    ...parsed,
+  }
+}
+
 export async function uploadJimengImageBytes(input: {
   client?: JimengClient
   apply: Pick<JimengImageXApplyResult, "uploadHost" | "storeUri" | "authorization" | "uploadHeader">
@@ -256,7 +482,7 @@ export async function uploadJimengImageBytes(input: {
     body: new Blob([bodyBuffer]),
   })
   const body = safeJson(response.text)
-  assertDirectUploadSuccess(body)
+  assertDirectUploadSuccess(body, "ImageX direct")
   return {
     httpStatus: response.status,
     responseTextSha256: sha256(response.text),
@@ -427,6 +653,41 @@ function parseImageUploadCredentials(body: unknown, overrideServiceId: string | 
   }
 }
 
+function parseVodUploadCredentials(body: unknown, overrideSpaceName: string | undefined): JimengVodUploadCredentials {
+  const data = asRecord(asRecord(body)?.data)
+  const spaceName = overrideSpaceName ?? stringValue(data?.space_name) ?? stringValue(data?.spaceName)
+  const host = stringValue(data?.upload_domain) ?? stringValue(data?.uploadDomain)
+  const accessKeyId = stringValue(data?.access_key_id) ?? stringValue(data?.accessKeyId)
+  const secretAccessKey = stringValue(data?.secret_access_key) ?? stringValue(data?.secretAccessKey)
+  const sessionToken = stringValue(data?.session_token) ?? stringValue(data?.sessionToken)
+  const region = stringValue(data?.region) ?? "cn"
+
+  if (!spaceName || !host || !accessKeyId || !secretAccessKey || !sessionToken) {
+    throw jimengError({
+      category: "validation",
+      code: "UPLOAD_TOKEN_MISSING_VOD_CREDENTIALS",
+      message: "Upload token response missing VOD credentials",
+      retryable: false,
+      details: {
+        spaceNamePresent: !!spaceName,
+        hostPresent: !!host,
+        accessKeyPresent: !!accessKeyId,
+        secretKeyPresent: !!secretAccessKey,
+        sessionTokenPresent: !!sessionToken,
+      },
+    })
+  }
+
+  return {
+    host,
+    region,
+    spaceName,
+    accessKeyId,
+    secretAccessKey,
+    sessionToken,
+  }
+}
+
 function parseApplyImageUploadBody(body: unknown): Omit<JimengImageXApplyResult, "httpStatus" | "responseTextSha256" | "body"> {
   const address = asRecord(asRecord(asRecord(body)?.Result)?.UploadAddress)
   const uploadHosts = asArray(address?.UploadHosts)
@@ -461,6 +722,45 @@ function parseApplyImageUploadBody(body: unknown): Omit<JimengImageXApplyResult,
   }
 }
 
+function parseApplyVodUploadBody(body: unknown): Omit<JimengVodApplyResult, "httpStatus" | "responseTextSha256" | "body"> {
+  const result = asRecord(asRecord(body)?.Result)
+  const innerAddress = asRecord(result?.InnerUploadAddress)
+  const nodes = asArray(innerAddress?.UploadNodes).map(asRecord).filter(isRecord)
+  const node = nodes[0] ?? asRecord(result?.UploadAddress)
+  const storeInfos = asArray(node?.StoreInfos).map(asRecord).filter(isRecord)
+  const store = storeInfos[0]
+  const uploadHosts = asArray(node?.UploadHosts)
+  const uploadHost = stringValue(node?.UploadHost) ?? stringValue(uploadHosts[0])
+  const storeUri = stringValue(store?.StoreUri)
+  const authorization = stringValue(store?.Auth)
+  const sessionKey = stringValue(node?.SessionKey)
+
+  if (!uploadHost || !storeUri || !authorization || !sessionKey) {
+    throw jimengError({
+      category: "upstream",
+      code: "VOD_APPLY_RESPONSE_MISSING_UPLOAD_FIELDS",
+      message: "ApplyUploadInner response missing upload host, store uri, auth, or session key",
+      retryable: false,
+      details: {
+        uploadHostPresent: !!uploadHost,
+        storeUriPresent: !!storeUri,
+        authorizationPresent: !!authorization,
+        sessionKeyPresent: !!sessionKey,
+      },
+    })
+  }
+
+  return {
+    uploadHost,
+    storeUri,
+    authorization,
+    sessionKey,
+    uploadHeader: stringRecord(node?.UploadHeader),
+    uploadId: stringValue(store?.UploadID),
+    fallbackStoreInfo: parseFallbackVodStore(nodes[1]),
+  }
+}
+
 function parseCommitImageUploadBody(body: unknown): Pick<JimengImageXCommitResult, "imageUris" | "pluginResults"> {
   const result = asRecord(asRecord(body)?.Result)
   const results = asArray(result?.Results).map(asRecord).filter(isRecord)
@@ -479,6 +779,44 @@ function parseCommitImageUploadBody(body: unknown): Pick<JimengImageXCommitResul
   }
 
   return { imageUris, pluginResults }
+}
+
+function parseCommitVodUploadBody(body: unknown): Pick<JimengVodCommitResult, "results" | "vid" | "mid" | "sourceUri"> {
+  const result = asRecord(asRecord(body)?.Result)
+  const results = asArray(result?.Results).map(asRecord).filter(isRecord)
+  const first = results[0] ?? result
+  const sourceInfo = asRecord(first?.SourceInfo)
+  const vid = stringValue(first?.Vid)
+  const mid = stringValue(first?.Mid)
+  const sourceUri = stringValue(sourceInfo?.FileName) ?? stringValue(sourceInfo?.StoreUri) ?? stringValue(first?.StoreUri)
+
+  if (!first) {
+    throw jimengError({
+      category: "upstream",
+      code: "VOD_COMMIT_RESPONSE_MISSING_RESULT",
+      message: "CommitUploadInner response missing result payload",
+      retryable: false,
+    })
+  }
+
+  return { results, vid, mid, sourceUri }
+}
+
+function parseFallbackVodStore(node: Record<string, unknown> | undefined): JimengVodApplyResult["fallbackStoreInfo"] {
+  if (!node) return null
+  const store = asArray(node.StoreInfos).map(asRecord).filter(isRecord)[0]
+  const uploadHost = stringValue(node.UploadHost)
+  const storeUri = stringValue(store?.StoreUri)
+  const authorization = stringValue(store?.Auth)
+  const sessionKey = stringValue(node.SessionKey)
+  if (!uploadHost || !storeUri || !authorization || !sessionKey) return null
+  return {
+    uploadHost,
+    storeUri,
+    authorization,
+    sessionKey,
+    uploadHeader: stringRecord(node.UploadHeader),
+  }
 }
 
 function summarizeJimengImageUpload(input: {
@@ -509,6 +847,29 @@ function summarizeJimengImageUpload(input: {
   }
 }
 
+function summarizeJimengVideoUpload(input: {
+  fileName: string
+  contentType: string | null
+  bytes: number
+  spaceName: string
+  apply: JimengVodApplyResult
+  upload: JimengVodDirectUploadResult
+  commit: JimengVodCommitResult
+}): JimengVideoUploadSummary {
+  return {
+    fileName: input.fileName,
+    contentType: input.contentType,
+    bytes: input.bytes,
+    spaceName: input.spaceName,
+    storeUri: input.apply.storeUri,
+    vid: input.commit.vid,
+    mid: input.commit.mid,
+    sourceUri: input.commit.sourceUri,
+    uploadStatus: input.upload.httpStatus,
+    uploadCrc32: input.upload.crc32,
+  }
+}
+
 function buildUploadTokenHeaders(session: JimengSessionBundle): Record<string, string> {
   return {
     "content-type": "application/json",
@@ -525,6 +886,24 @@ function buildUploadTokenHeaders(session: JimengSessionBundle): Record<string, s
     "app-sdk-version": "48.0.0",
     "x-platform": "pc",
   }
+}
+
+function assertVolcengineSuccess(body: unknown, operation: string): void {
+  const error = asRecord(asRecord(body)?.ResponseMetadata)?.Error
+  if (!error) return
+  const record = asRecord(error)
+  throw jimengError({
+    category: "upstream",
+    code: `VOLCENGINE_${operation.toUpperCase()}_FAILED`,
+    message: `${operation} failed (${stringValue(record?.Code) ?? "unknown"}: ${stringValue(record?.Message) ?? "unknown"})`,
+    retryable: false,
+    details: {
+      operation,
+      code: stringValue(record?.Code),
+      message: stringValue(record?.Message),
+      codeN: record?.CodeN ?? null,
+    },
+  })
 }
 
 function assertImageXSuccess(body: unknown, operation: string): void {
@@ -545,13 +924,13 @@ function assertImageXSuccess(body: unknown, operation: string): void {
   })
 }
 
-function assertDirectUploadSuccess(body: unknown): void {
+function assertDirectUploadSuccess(body: unknown, operation: string): void {
   const code = asRecord(body)?.code
   if (code === 2000 || code === "2000") return
   throw jimengError({
     category: "upstream",
-    code: "IMAGEX_DIRECT_UPLOAD_FAILED",
-    message: `ImageX direct upload failed (code=${String(code ?? "unknown")})`,
+    code: "DIRECT_UPLOAD_FAILED",
+    message: `${operation} upload failed (code=${String(code ?? "unknown")})`,
     retryable: false,
     details: { code: code ?? null, message: asRecord(body)?.message ?? null },
   })
@@ -640,6 +1019,9 @@ function contentTypeFromFileName(fileName: string): string | null {
   if (ext === ".jpg" || ext === ".jpeg") return "image/jpeg"
   if (ext === ".webp") return "image/webp"
   if (ext === ".gif") return "image/gif"
+  if (ext === ".mp4") return "video/mp4"
+  if (ext === ".mov") return "video/quicktime"
+  if (ext === ".webm") return "video/webm"
   return null
 }
 
