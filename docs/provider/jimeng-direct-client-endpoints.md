@@ -300,6 +300,65 @@ The raw response includes temporary upload credentials and must not be committed
 
 The `/lv/v1/asset/prepare_upload_cloud` endpoint appears in frontend bundles but returned `404` from the Jimeng domain with a straightforward replay body; it may belong to a CapCut/LV asset domain or require signed LV headers. Do not depend on it for the Jimeng direct-client path yet.
 
+### 11) Local image upload to ImageX provider URI
+- Status:
+  - live-proved with `jimeng-browser-proxy upload-image`
+  - implemented in `packages/jimeng-client/src/upload.ts`
+  - tested with deterministic AWS4 signer and mocked token/apply/upload/commit sequence
+- Provider sequence:
+
+```txt
+POST /mweb/v1/get_upload_token { "scene": 2 }
+GET  https://imagex.bytedanceapi.com/?Action=ApplyImageUpload&Version=2018-08-01&ServiceId=tb4s082cfz&UploadNum=1&FileExtension=.png&s=<random>
+POST https://{UploadHosts[0]}/upload/v1/{StoreUri}
+POST https://imagex.bytedanceapi.com/?Action=CommitImageUpload&Version=2018-08-01&ServiceId=tb4s082cfz
+```
+
+Confirmed signer:
+
+```txt
+algorithm: AWS4-HMAC-SHA256
+date header: X-Amz-Date
+token header: x-amz-security-token
+scope: YYYYMMDD/cn-north-1/imagex/aws4_request
+signed headers for apply: x-amz-date;x-amz-security-token
+```
+
+Direct upload headers:
+
+```txt
+Authorization: StoreInfos[0].Auth
+Content-CRC32: <crc32 hex of bytes>
+X-Storage-U: <encoded user id, empty string works in current proof>
+```
+
+Commit body:
+
+```json
+{ "SessionKey": "<UploadAddress.SessionKey>" }
+```
+
+CLI proof:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts upload-image \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --file data/jimeng-lab/image-upload-probe/aws4-live/proof-1x1.png \
+  --outDir data/jimeng-lab/proof-20260609-image-upload
+```
+
+Observed safe summary:
+
+```txt
+imageUris[0]=tos-cn-i-tb4s082cfz/97c32453461a4041b4f6e20f1dc0a517.png
+uploadStatus=200
+uploadCrc32=9050a959
+ImageWidth=1
+ImageHeight=1
+```
+
+Raw token/apply responses contain temporary credentials and provider auth. Keep them only under ignored `data/**`.
+
 ---
 
 ## Minimal headers (validated baseline)
@@ -455,8 +514,8 @@ Mapping guidance:
 - deterministic submit mapping for all image conversation stream variants
 - long-run requirement matrix for `sign/device-time/msToken/a_bogus`
 - region variants (US/HK/JP/SG) requirement differences
-- full first/last frame direct upload path without browser-assisted upload
-- direct ImageX/VOD byte upload using `/mweb/v1/get_upload_token` credentials
+- first/last-frame image-to-video payload patching using committed ImageX URIs
+- VOD/video byte upload using `/mweb/v1/get_upload_token` scene `1` credentials
 - voice/配音 + digital-human + motion-mimic endpoint mapping
 
 ## Current CLI entrypoints

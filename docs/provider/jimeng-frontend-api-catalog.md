@@ -33,7 +33,7 @@ Use the browser as an authenticated session holder and API discovery surface. Mo
 | `/mweb/v1/dreamina_subject/get` | POST | Saved subject/persona list. | Implemented for config catalog |
 | `/mweb/v1/feed` | POST | Explore/feed content; a signed `dreamina_tone` feed request returns the built-in voice library. Useful for research/template mining if handled carefully. | Implemented for voice library replay |
 | `/mweb/v1/tts_generate` | POST | Built-in voice text-to-speech. Returns base64 MP3 in `data.data`. | Implemented and live-proved |
-| `/mweb/v1/get_upload_token` | POST | Temporary upload credentials for video/image/file scenes. Required before direct local reference-image upload. | Implemented and live-proved for token step |
+| `/mweb/v1/get_upload_token` | POST | Temporary upload credentials for video/image/file scenes. Required before direct local reference-image upload. | Implemented and live-proved; local ImageX image upload is implemented via `upload-image` |
 | `/mweb/v1/get_explore` | POST | Explore examples and public creative templates. | Cataloged only |
 | `/mweb/v1/get_unread_count` | POST | Notification count. | Low priority |
 
@@ -74,12 +74,15 @@ data/jimeng-lab/voice-library-samples/
 
 The latest full voice sample run generated `142/142` MP3 files with concurrency `1` and no `1019` / `shark not pass` risk-control errors.
 
-## Confirmed Upload Token Contract
+## Confirmed Local Image Upload Contract
 
-The next useful UGC slice is local media upload for image-to-video and reference/persona workflows. The first step is confirmed:
+The next useful UGC slice was local media upload for image-to-video and reference/persona workflows. The ImageX image path is now confirmed end-to-end:
 
 ```txt
 POST /mweb/v1/get_upload_token
+GET  ImageX ApplyImageUpload
+POST ImageX /upload/v1/{StoreUri}
+POST ImageX CommitImageUpload
 ```
 
 Request:
@@ -116,7 +119,38 @@ Scene `2` response summary from the CLI smoke:
 }
 ```
 
-The raw response includes temporary upload credentials, so it must stay under ignored `data/**`. The next missing piece is using those credentials with the frontend's ImageX/VOD upload SDK behavior to turn a local file into a provider URI that can be injected into:
+The raw token/apply responses include temporary credentials and upload authorization, so they must stay under ignored `data/**`.
+
+Confirmed ImageX details from the frontend uploader SDK and live CLI proof:
+
+- `scene=2` returns the ImageX token path for images.
+- Jimeng's `region=cn` token value maps to ImageX signing region `cn-north-1`.
+- The provider signer uses AWS4-style constants from the bundled uploader SDK:
+  - `AWS4-HMAC-SHA256`
+  - `X-Amz-Date`
+  - `x-amz-security-token`
+  - credential scope `YYYYMMDD/cn-north-1/imagex/aws4_request`
+- `ApplyImageUpload` uses `ServiceId=tb4s082cfz`, `UploadNum=1`, optional `FileExtension`, and the frontend's random `s` query param.
+- Small images direct-upload to `https://{UploadHosts[0]}/upload/v1/{StoreUri}` with `Authorization`, `Content-CRC32`, and `X-Storage-U`.
+- `CommitImageUpload` posts `{"SessionKey":"..."}` and returns committed provider URIs such as `tos-cn-i-tb4s082cfz/...png`.
+
+Current CLI proof:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts upload-image \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --file data/jimeng-lab/image-upload-probe/aws4-live/proof-1x1.png \
+  --outDir data/jimeng-lab/proof-20260609-image-upload
+```
+
+Result summary:
+
+```txt
+upload-image saved uri=tos-cn-i-tb4s082cfz/97c32453461a4041b4f6e20f1dc0a517.png
+proof artifact: data/jimeng-lab/proof-20260609-image-upload/artifacts/proof-1x1.png
+```
+
+This URI can now be injected into first-frame image-to-video payloads:
 
 ```txt
 draft_content.component_list[0].abilities.gen_video.text_to_video_params.video_gen_inputs[0].first_frame_image

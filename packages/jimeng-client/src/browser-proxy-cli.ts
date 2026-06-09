@@ -14,7 +14,7 @@ import {
 import { prepareFromCapture, redactHeaders, type CaptureFile, type JimengOp, type JimengSessionBundle } from "./capture"
 import { JimengClient } from "./client"
 import { JimengError } from "./errors"
-import { getJimengUploadToken, parseUploadTokenScene } from "./upload"
+import { getJimengUploadToken, parseUploadTokenScene, uploadJimengImage } from "./upload"
 
 const DEFAULT_CDP_URL = "http://127.0.0.1:9340"
 
@@ -30,6 +30,7 @@ Commands:
   tts           Generate one MP3 text-to-speech sample from a voice id
   sample-voices Generate sequential MP3 samples for voices from the built-in library
   upload-token  Fetch temporary upload credentials for image/video/file upload scenes
+  upload-image  Upload a local image to Jimeng ImageX and return a provider URI
   text2image    Submit text-to-image from a captured workbench/agent template
   text2video    Submit text-to-video from a captured workbench template
 
@@ -46,6 +47,7 @@ Options:
   --item-platform <n>           Voice item platform (default: 1, Loki/built-in)
   --limit <n>                   sample-voices limit (default: all)
   --scene <image|video|file|n>   upload-token scene (default: image)
+  --file <path>                  Local image file for upload-image
   --prompt <text>               Generation prompt
   --outDir <dir>                Output directory (default: data/jimeng-lab/browser-proxy)
   --dryRun                      Write patched plan only; otherwise live-submit and may consume credits
@@ -71,10 +73,14 @@ Examples:
 
   jimeng-browser-proxy upload-token --scene image
 
+  jimeng-browser-proxy upload-image \\
+    --file data/jimeng-lab/image-upload-probe/aws4-live/proof-1x1.png \\
+    --outDir data/jimeng-lab/cli-image-upload-smoke
+
 Live generation uses the browser session but does not foreground the browser. Keep concurrency at 1.`
 
 interface CliArgs {
-  command: "session" | "catalog" | "voices" | "tts" | "sample-voices" | "upload-token" | "text2image" | "text2video"
+  command: "session" | "catalog" | "voices" | "tts" | "sample-voices" | "upload-token" | "upload-image" | "text2image" | "text2video"
   cdpUrl: string
   targetUrl?: string
   session?: string
@@ -87,6 +93,7 @@ interface CliArgs {
   itemPlatform?: number
   limit?: number
   scene?: string
+  file?: string
   prompt?: string
   outDir: string
   dryRun: boolean
@@ -261,6 +268,72 @@ async function main(argv: string[]): Promise<void> {
     return
   }
 
+  if (args.command === "upload-image") {
+    if (!args.file) throw new Error("--file is required")
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const sourceFile = path.resolve(args.file)
+    const bytes = readFileSync(sourceFile)
+    const runId = `upload-image-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const artifactFile = path.join(dirs.artifactsDir, path.basename(sourceFile))
+    writeFileSync(artifactFile, bytes)
+    const plan = {
+      command: args.command,
+      endpoint_sequence: [
+        "/mweb/v1/get_upload_token",
+        "ImageX ApplyImageUpload",
+        "ImageX direct POST /upload/v1/{StoreUri}",
+        "ImageX CommitImageUpload",
+      ],
+      source_file: sourceFile,
+      artifact_copy: artifactFile,
+      file_name: path.basename(sourceFile),
+      bytes: bytes.byteLength,
+      browser_session: redactSession(session),
+    }
+    if (args.dryRun) {
+      writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), plan)
+      console.log(`[jimeng-browser-proxy] upload-image dry run saved`)
+      return
+    }
+
+    const result = await uploadJimengImage({
+      session,
+      image: {
+        fileName: path.basename(sourceFile),
+        bytes,
+      },
+    })
+    writeJson(path.join(dirs.rawDir, `${runId}-raw.json`), {
+      token: {
+        http_status: result.token.httpStatus,
+        response_text_sha256: result.token.responseTextSha256,
+        body: result.token.body,
+      },
+      apply: {
+        http_status: result.apply.httpStatus,
+        response_text_sha256: result.apply.responseTextSha256,
+        body: result.apply.body,
+      },
+      upload: {
+        http_status: result.upload.httpStatus,
+        response_text_sha256: result.upload.responseTextSha256,
+        body: result.upload.body,
+      },
+      commit: {
+        http_status: result.commit.httpStatus,
+        response_text_sha256: result.commit.responseTextSha256,
+        body: result.commit.body,
+      },
+    })
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      ...plan,
+      token_summary: result.token.summary,
+      image_upload: result.summary,
+    })
+    console.log(`[jimeng-browser-proxy] upload-image saved uri=${result.summary.imageUris[0] ?? "missing"}`)
+    return
+  }
+
   if (!args.capture) throw new Error("--capture is required")
 
   const op: JimengOp = args.command === "text2image" ? "image" : "video"
@@ -345,6 +418,7 @@ function parseArgs(argv: string[]): CliArgs {
     && command !== "tts"
     && command !== "sample-voices"
     && command !== "upload-token"
+    && command !== "upload-image"
     && command !== "text2image"
     && command !== "text2video"
   ) {
@@ -375,6 +449,7 @@ function parseArgs(argv: string[]): CliArgs {
     itemPlatform,
     limit,
     scene: flags.scene,
+    file: flags.file,
     prompt: flags.prompt,
     outDir: flags.outDir ?? "data/jimeng-lab/browser-proxy",
     dryRun: flags.dryRun === "true",

@@ -6,6 +6,8 @@ Map the real Jimeng/Dreamina frontend APIs well enough to support reliable direc
 
 The immediate fix is to stop reusing stale templates for operations whose frontend contracts have moved. Current architecture should use the background Jimeng browser profile as a session/token holder, then graduate stable captured contracts into direct `fetch` clients.
 
+For the long-running `/goal` spec, proof rules, async CLI shape, and per-feature git checkpoint rule, see [`jimeng-dreamina-cli-goal.md`](./jimeng-dreamina-cli-goal.md).
+
 ## Current Status
 
 2026-06-09 first proxy slice:
@@ -35,6 +37,16 @@ The immediate fix is to stop reusing stale templates for operations whose fronte
 - Scene `2` is the ImageX upload-token path needed for local reference images; observed `region=cn`, `spaceName=tb4s082cfz`.
 - Added a proof bundle with playable TTS + video artifacts at `data/jimeng-lab/proof-20260609-voice-video/`.
 - `/lv/v1/asset/prepare_upload_cloud` returned `404` from the Jimeng domain with a simple replay; keep it as a CapCut/LV-domain or signed-header lead, not the current Jimeng path.
+
+2026-06-09 ImageX upload slice:
+
+- Added ImageX AWS4-style signing, `ApplyImageUpload`, direct `/upload/v1/{StoreUri}` byte upload, and `CommitImageUpload` helpers to `packages/jimeng-client/src/upload.ts`.
+- Added `jimeng-browser-proxy upload-image --file <path>`.
+- Live-proved a local PNG to committed ImageX URI:
+  `tos-cn-i-tb4s082cfz/97c32453461a4041b4f6e20f1dc0a517.png`.
+- Proof bundle:
+  `data/jimeng-lab/proof-20260609-image-upload/`.
+- This unblocks first-frame image-to-video payload patching with real provider URIs.
 
 ## Owner paths
 

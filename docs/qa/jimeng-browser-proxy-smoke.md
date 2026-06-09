@@ -273,6 +273,40 @@ sessionTokenPresent=true
 
 Raw token responses include temporary credentials and are intentionally local-only under ignored `data/**`.
 
+## ImageX Upload Smoke
+
+Local reference-image upload is now live-proved. This is the required bridge from local files to provider URIs for first-frame image-to-video and reference/persona workflows.
+
+Command:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts upload-image \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --file data/jimeng-lab/image-upload-probe/aws4-live/proof-1x1.png \
+  --outDir data/jimeng-lab/proof-20260609-image-upload
+```
+
+Result:
+
+```txt
+upload-image saved uri=tos-cn-i-tb4s082cfz/97c32453461a4041b4f6e20f1dc0a517.png
+artifact=data/jimeng-lab/proof-20260609-image-upload/artifacts/proof-1x1.png
+summary=data/jimeng-lab/proof-20260609-image-upload/normalized/upload-image-20260609123111-summary.json
+```
+
+Safe summary fields:
+
+```txt
+storeUri=tos-cn-i-tb4s082cfz/97c32453461a4041b4f6e20f1dc0a517.png
+uploadStatus=200
+uploadCrc32=9050a959
+ImageWidth=1
+ImageHeight=1
+ImageFormat=png
+```
+
+Raw token/apply responses include temporary credentials and upload authorization. They are intentionally local-only under ignored `data/**`.
+
 ## Verification
 
 ```bash
@@ -284,14 +318,13 @@ Result:
 
 ```txt
 typecheck passed
-21 tests passed, 0 failed
+23 tests passed, 0 failed
 ```
 
 ## Follow-Up
 
 Next useful captures:
 
-- reference image upload
 - image-to-image / byte edit
 - subject/persona creation
 - pose/style/depth/canny reference controls
