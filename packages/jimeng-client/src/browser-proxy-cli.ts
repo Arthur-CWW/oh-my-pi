@@ -14,6 +14,7 @@ import {
 import { prepareFromCapture, redactHeaders, type CaptureFile, type JimengOp, type JimengSessionBundle } from "./capture"
 import { JimengClient } from "./client"
 import { JimengError } from "./errors"
+import { buildJimengLipSyncVideoPlan, lipSyncVideoReferenceFromUploadSummary, type JimengLipSyncVideoReference } from "./lip-sync"
 import { getJimengUploadToken, parseUploadTokenScene, uploadJimengImage, uploadJimengVideo, type JimengImageUploadResult, type JimengVideoUploadResult } from "./upload"
 
 const DEFAULT_CDP_URL = "http://127.0.0.1:9340"
@@ -36,6 +37,7 @@ Commands:
   text2video    Submit text-to-video from a captured workbench template
   image2video   Upload/use a first-frame image URI, then submit image-to-video
   frames2video  Upload/use first and end-frame image URIs, then submit image-to-video
+  lip-sync      Dry-run VOD video-reference lip-sync payload plan from text/voice
 
 Options:
   --cdp <url>                   CDP URL (default: ${DEFAULT_CDP_URL})
@@ -47,10 +49,21 @@ Options:
   --text <text>                 TTS/sample-voices text
   --voice-id <id>               TTS voice id from voices command
   --voice-title <title>         Optional display title for TTS output filename
+  --tone-key <key>               Optional lip-sync voice display/key field
+  --tone-category-id <id>        Optional lip-sync voice category id
+  --tone-category-key <key>      Optional lip-sync voice category key
+  --speed <n>                    TTS/lip-sync speech speed (default: 1.0)
   --item-platform <n>           Voice item platform (default: 1, Loki/built-in)
   --limit <n>                   sample-voices limit (default: all)
   --scene <image|video|file|n>   upload-token scene (default: image)
   --file <path>                  Local media file for upload-image/upload-video; alias for --image in image2video
+  --video <path>                 Local reference video for lip-sync; uploads to VOD in dry-run planning
+  --vid <vid>                    Existing VOD vid for lip-sync
+  --videoUri <uri>               Existing VOD/tos provider URI for lip-sync
+  --videoWidth <n>               Existing reference video width for lip-sync
+  --videoHeight <n>              Existing reference video height for lip-sync
+  --videoDurationSec <sec>       Existing reference video duration for lip-sync
+  --videoMode <value>            Lip-sync videoMode override from a confirmed frontend capture
   --image <path>                 Local first-frame image for image2video
   --lastImage <path>             Local end-frame image for frames2video
   --firstFrameUri <uri>          Existing Jimeng/ImageX provider URI for image2video
@@ -108,6 +121,13 @@ Examples:
     --durationSec 5 \\
     --dryRun
 
+  jimeng-browser-proxy lip-sync \\
+    --session data/jimeng-lab/raw/session-bundle-current.json \\
+    --video data/jimeng-lab/proof-20260609-image2video-live/artifacts/aa83d0e1-a20c-4b85-ab59-ee3a7894296f-00.mp4 \\
+    --voice-id 7597003459665072686 \\
+    --text "三秒告诉你为什么这款补水精华适合熬夜后的底妆。" \\
+    --dryRun
+
 Live generation uses the browser session but does not foreground the browser. Keep concurrency at 1.`
 
 interface CliArgs {
@@ -124,6 +144,7 @@ interface CliArgs {
     | "text2video"
     | "image2video"
     | "frames2video"
+    | "lip-sync"
   cdpUrl: string
   targetUrl?: string
   session?: string
@@ -133,10 +154,21 @@ interface CliArgs {
   text?: string
   voiceId?: string
   voiceTitle?: string
+  toneKey?: string
+  toneCategoryId?: string
+  toneCategoryKey?: string
+  speed?: number
   itemPlatform?: number
   limit?: number
   scene?: string
   file?: string
+  video?: string
+  vid?: string
+  videoUri?: string
+  videoWidth?: number
+  videoHeight?: number
+  videoDurationSec?: number
+  videoMode?: string
   image?: string
   lastImage?: string
   firstFrameUri?: string
@@ -452,6 +484,76 @@ async function main(argv: string[]): Promise<void> {
     return
   }
 
+  if (args.command === "lip-sync") {
+    if (!args.dryRun) {
+      throw new Error("lip-sync live submit is not implemented yet; pass --dryRun to write the confirmed provider-input plan")
+    }
+    if (!args.voiceId) throw new Error("--voice-id is required for lip-sync text-to-speech planning")
+
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const runId = `lip-sync-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${Math.random().toString(36).slice(2, 8)}`
+    const referenceUploads: ReferenceVideoUploadSummary[] = []
+    const videoFile = args.video ?? args.file
+    const videoUpload = videoFile
+      ? await uploadReferenceVideo({
+        session,
+        dirs,
+        runId,
+        role: "lip_sync_video",
+        index: 0,
+        sourceFile: videoFile,
+      })
+      : undefined
+    if (videoUpload) referenceUploads.push(videoUpload)
+    const videoReference = videoUpload
+      ? lipSyncVideoReferenceFromUploadSummary(videoUpload.video_upload)
+      : lipSyncVideoReferenceFromArgs(args)
+
+    const plan = buildJimengLipSyncVideoPlan({
+      prompt: args.prompt,
+      modelReqKey: args.modelReqKey,
+      videoMode: args.videoMode,
+      video: videoReference,
+      ttsInfo: {
+        sourceType: "text-to-speech",
+        text: args.text ?? "三秒告诉你为什么这款补水精华适合熬夜后的底妆。",
+        speed: args.speed ?? 1,
+        toneId: args.voiceId,
+        toneKey: args.toneKey ?? args.voiceTitle,
+        toneCategoryId: args.toneCategoryId,
+        toneCategoryKey: args.toneCategoryKey,
+      },
+    })
+    const file = path.join(dirs.rawDir, `${runId}-dry-run-plan.json`)
+    writeJson(file, {
+      plan,
+      reference_uploads: referenceUploads,
+      browser_session: redactSession(session),
+    })
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: "lip-sync",
+      status: plan.status,
+      reason: plan.reason,
+      model_req_key: plan.modelReqKey,
+      video_reference: videoReference,
+      tts_info: plan.providerInput.videoGenInputs.v2vOpt.lipSyncUserVideo.ttsInfo,
+      reference_uploads: referenceUploads.map((upload) => ({
+        index: upload.index,
+        role: upload.role,
+        source_file: upload.source_file,
+        artifact_copy: upload.artifact_copy,
+        vid: upload.video_upload.vid,
+        uri: upload.video_upload.uri,
+        width: upload.video_upload.width,
+        height: upload.video_upload.height,
+        duration: upload.video_upload.duration,
+      })),
+      next_probe: plan.nextProbe,
+    })
+    console.log(`[jimeng-browser-proxy] lip-sync dry run saved: ${file}`)
+    return
+  }
+
   if (!args.capture) throw new Error("--capture is required")
 
   const op: JimengOp = args.command === "text2image" ? "image" : "video"
@@ -593,12 +695,17 @@ function parseArgs(argv: string[]): CliArgs {
     && command !== "text2video"
     && command !== "image2video"
     && command !== "frames2video"
+    && command !== "lip-sync"
   ) {
     throw new Error(`Unknown command: ${String(command)}`)
   }
 
   const flags = parseFlags(argv.slice(1))
   const durationSec = flags.durationSec
+  const videoWidth = flags.videoWidth ? Number(flags.videoWidth) : undefined
+  const videoHeight = flags.videoHeight ? Number(flags.videoHeight) : undefined
+  const videoDurationSec = flags.videoDurationSec ? Number(flags.videoDurationSec) : undefined
+  const speed = flags.speed ? Number(flags.speed) : undefined
   const seed = flags.seed ? Number(flags.seed) : undefined
   const itemPlatform = flags["item-platform"] ? Number(flags["item-platform"]) : undefined
   const limit = flags.limit ? Number(flags.limit) : undefined
@@ -611,6 +718,18 @@ function parseArgs(argv: string[]): CliArgs {
   if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) {
     throw new Error("--limit must be a positive integer")
   }
+  if (videoWidth !== undefined && (!Number.isInteger(videoWidth) || videoWidth < 1)) {
+    throw new Error("--videoWidth must be a positive integer")
+  }
+  if (videoHeight !== undefined && (!Number.isInteger(videoHeight) || videoHeight < 1)) {
+    throw new Error("--videoHeight must be a positive integer")
+  }
+  if (videoDurationSec !== undefined && (!Number.isFinite(videoDurationSec) || videoDurationSec <= 0)) {
+    throw new Error("--videoDurationSec must be a positive number")
+  }
+  if (speed !== undefined && (!Number.isFinite(speed) || speed < 0.5 || speed > 2)) {
+    throw new Error("--speed must be a number from 0.5 to 2")
+  }
   return {
     command,
     cdpUrl: flags.cdp ?? DEFAULT_CDP_URL,
@@ -622,10 +741,21 @@ function parseArgs(argv: string[]): CliArgs {
     text: flags.text,
     voiceId: flags["voice-id"],
     voiceTitle: flags["voice-title"],
+    toneKey: flags["tone-key"],
+    toneCategoryId: flags["tone-category-id"],
+    toneCategoryKey: flags["tone-category-key"],
+    speed,
     itemPlatform,
     limit,
     scene: flags.scene,
     file: flags.file,
+    video: flags.video,
+    vid: flags.vid,
+    videoUri: flags.videoUri,
+    videoWidth,
+    videoHeight,
+    videoDurationSec,
+    videoMode: flags.videoMode,
     image: flags.image,
     lastImage: flags.lastImage,
     firstFrameUri: flags.firstFrameUri,
@@ -692,6 +822,17 @@ interface ReferenceUploadSummary {
 
 type ReferenceImageRole = "first_frame" | "end_frame"
 
+interface ReferenceVideoUploadSummary {
+  index: number
+  role: ReferenceVideoRole
+  source_file: string
+  artifact_copy: string
+  raw_file: string
+  video_upload: JimengVideoUploadResult["summary"]
+}
+
+type ReferenceVideoRole = "lip_sync_video"
+
 async function uploadReferenceImage(input: {
   session: JimengSessionBundle
   dirs: OutputDirs
@@ -749,6 +890,76 @@ async function uploadReferenceImage(input: {
     raw_file: rawFile,
     uri,
     image_upload: result.summary,
+  }
+}
+
+async function uploadReferenceVideo(input: {
+  session: JimengSessionBundle
+  dirs: OutputDirs
+  runId: string
+  role: ReferenceVideoRole
+  index: number
+  sourceFile: string
+}): Promise<ReferenceVideoUploadSummary> {
+  const sourceFile = path.resolve(input.sourceFile)
+  const bytes = readFileSync(sourceFile)
+  const artifactFile = path.join(input.dirs.artifactsDir, `${input.runId}-${input.role}-${path.basename(sourceFile)}`)
+  writeFileSync(artifactFile, bytes)
+
+  const result = await uploadJimengVideo({
+    session: input.session,
+    video: {
+      fileName: path.basename(sourceFile),
+      bytes,
+    },
+  })
+  const rawFile = path.join(input.dirs.rawDir, `${input.runId}-reference-video-upload-${input.index}-raw.json`)
+  writeJson(rawFile, {
+    token: {
+      http_status: result.token.httpStatus,
+      response_text_sha256: result.token.responseTextSha256,
+      body: result.token.body,
+    },
+    apply: {
+      http_status: result.apply.httpStatus,
+      response_text_sha256: result.apply.responseTextSha256,
+      body: result.apply.body,
+    },
+    upload: {
+      http_status: result.upload.httpStatus,
+      response_text_sha256: result.upload.responseTextSha256,
+      body: result.upload.body,
+    },
+    commit: {
+      http_status: result.commit.httpStatus,
+      response_text_sha256: result.commit.responseTextSha256,
+      body: result.commit.body,
+    },
+  })
+
+  const summary: ReferenceVideoUploadSummary = {
+    index: input.index,
+    role: input.role,
+    source_file: sourceFile,
+    artifact_copy: artifactFile,
+    raw_file: rawFile,
+    video_upload: result.summary,
+  }
+  writeJson(path.join(input.dirs.normalizedDir, `${input.runId}-reference-video-upload-${input.index}-summary.json`), summary)
+  return summary
+}
+
+function lipSyncVideoReferenceFromArgs(args: CliArgs): JimengLipSyncVideoReference {
+  if (!args.vid || !args.videoWidth || !args.videoHeight || !args.videoDurationSec) {
+    throw new Error("lip-sync requires --video/--file or existing --vid with --videoWidth, --videoHeight, and --videoDurationSec")
+  }
+
+  return {
+    vid: args.vid,
+    uri: args.videoUri ?? null,
+    width: args.videoWidth,
+    height: args.videoHeight,
+    duration: args.videoDurationSec,
   }
 }
 

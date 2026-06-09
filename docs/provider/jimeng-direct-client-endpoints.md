@@ -433,7 +433,64 @@ source mp4=H.264, 704x1248, 5.016667s, 4,285,498 bytes
 
 Raw token/apply responses contain temporary credentials and provider auth. Keep them only under ignored `data/**`.
 
-### 13) Local-image image-to-video
+### 13) Lip-sync VOD video-reference dry-run plan
+- Status:
+  - dry-run-proved with `jimeng-browser-proxy lip-sync`
+  - implemented in `packages/jimeng-client/src/lip-sync.ts`
+  - CLI wiring in `packages/jimeng-client/src/browser-proxy-cli.ts`
+  - tested with provider-input snapshot assertions in `packages/jimeng-client/test/lip-sync.test.ts`
+  - live submit intentionally disabled until a frontend lip-sync `/mweb/v1/aigc_draft/generate` request is captured and compared
+- Frontend bundle evidence:
+
+```txt
+generateType: LipSync
+model_req_key: dreamina_lib_sync_base
+input.videoGenInputs.v2vOpt.lipSyncUserVideo.originVideo.originVideo
+input.videoGenInputs.v2vOpt.lipSyncUserVideo.ttsInfo
+processFlows[0].curProcessFlows[0]: DAVideoProcessType.LipSyncUserVideo
+submit query: scenario=image_video_generation, featureKey=text_to_video
+```
+
+Provider-input shape prepared by the CLI:
+
+```txt
+videoGenInputs.v2vOpt.lipSyncUserVideo.originVideo.originVideo.vid
+videoGenInputs.v2vOpt.lipSyncUserVideo.originVideo.originVideo.uri
+videoGenInputs.v2vOpt.lipSyncUserVideo.originVideo.originVideo.width
+videoGenInputs.v2vOpt.lipSyncUserVideo.originVideo.originVideo.height
+videoGenInputs.v2vOpt.lipSyncUserVideo.originVideo.originVideo.duration
+videoGenInputs.v2vOpt.lipSyncUserVideo.ttsInfo.text
+videoGenInputs.v2vOpt.lipSyncUserVideo.ttsInfo.toneId
+videoGenInputs.v2vOpt.lipSyncUserVideo.ttsInfo.speed
+```
+
+Proof command:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts lip-sync \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --vid v03870g10004d8k1u4nog65hb08dnhig \
+  --videoUri tos-cn-v-148450/o4gBE1AAWbfiDDig6xEQ4KJhDHQvlExoFkFExB \
+  --videoWidth 704 \
+  --videoHeight 1248 \
+  --videoDurationSec 5.016667 \
+  --voice-id 7597003459665072686 \
+  --tone-key 清爽女声 \
+  --text 三秒告诉你为什么这款补水精华适合熬夜后的底妆。 \
+  --outDir data/jimeng-lab/proof-20260610-lip-sync-vod-plan \
+  --dryRun
+```
+
+Proof files:
+
+```txt
+data/jimeng-lab/proof-20260610-lip-sync-vod-plan/raw/lip-sync-20260609145310-83bdpg-dry-run-plan.json
+data/jimeng-lab/proof-20260610-lip-sync-vod-plan/normalized/lip-sync-20260609145310-83bdpg-summary.json
+```
+
+This is deliberately a no-spend planning command. Before enabling live generation, capture a real UI lip-sync submit and compare the converted `draft_content` with the dry-run `providerInput`.
+
+### 14) Local-image image-to-video
 - Status:
   - live-proved with `jimeng-browser-proxy image2video`
   - dry-run-proved with `jimeng-browser-proxy frames2video` for local first/end-frame upload and payload patching
@@ -793,6 +850,7 @@ Current support matrix:
 | `text2image` | implemented when image capture is supplied | Uses captured `/mweb/v1/creation_agent/v2/conversation`; needs current local image capture fixture/session. |
 | `image2video` | implemented in `jimeng-browser-proxy`; partial in low-level compat helper | Browser proxy can upload local `--image`, inject `first_frame_image`, submit/poll/download MP4. Low-level helper accepts confirmed `--firstFrameUri`. |
 | `frames2video` | dry-run-proved in `jimeng-browser-proxy`; partial in low-level compat helper | Browser proxy can upload local `--image` and `--lastImage`, inject `first_frame_image`/`end_frame_image`, and write a no-generation plan. Live proof still needs explicit frontend end-frame mode evidence. |
+| `lip-sync` | dry-run-proved in `jimeng-browser-proxy` | Browser proxy can prepare the VOD-reference lip-sync provider input from a VOD `vid`/metadata plus TTS voice flags. Live submit still needs a frontend submit capture/compare. |
 | `image2image` | needs capture | Need image reference upload + image edit submit capture. |
 | `multiframe2video` | needs capture | Need multi-frame upload/reference payload capture. |
 | `multimodal2video` | needs capture | Need `全能参考` mixed image/video/audio reference payload capture. |
@@ -858,7 +916,8 @@ data/jimeng-captures/<timestamp>-<flow>/
 Do not commit raw captures or generated media. If a redacted summary is promoted into tracked docs, manually review it first for cookies, reusable signatures, signed URL values, account IDs, and private prompt/media content.
 
 ## Next reverse target (immediate)
-1. Use the new VOD upload to unlock reference-video, multimodal/all-around reference, and lip-sync flows.
-2. Capture the frontend's explicit end-frame/multi-frame mode and live-prove `frames2video` only after confirming the mode-specific payload contract.
-3. Add strict `1019` shark breaker/cooldown budgets to the consolidated CLI path.
-4. Add multipart/chunked VOD upload only when large reference videos require it.
+1. Capture a real frontend lip-sync submit and compare it against the VOD dry-run provider-input plan before enabling live generation.
+2. Use the VOD upload path to unlock reference-video and multimodal/all-around reference flows.
+3. Capture the frontend's explicit end-frame/multi-frame mode and live-prove `frames2video` only after confirming the mode-specific payload contract.
+4. Add strict `1019` shark breaker/cooldown budgets to the consolidated CLI path.
+5. Add multipart/chunked VOD upload only when large reference videos require it.

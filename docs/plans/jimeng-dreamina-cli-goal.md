@@ -70,15 +70,26 @@ First/end-frame image-to-video is now dry-run-proved:
 - `end_frame_image=tos-cn-i-tb4s082cfz/325213bd2b2049d3a65667350b72807e.jpg`
 - live generation is intentionally not claimed yet; first capture or select the frontend's explicit end-frame/multi-frame mode.
 
-The next slice is **reference controls and video-reference consumers**. Use the VOD provider reference plus frontend captures to unlock reference-video, multimodal/all-around reference, lip-sync, and live end-frame/multi-frame image-to-video paths.
+Lip-sync VOD video-reference planning is now dry-run-proved:
+
+- `jimeng-browser-proxy lip-sync`
+- accepts an existing VOD `vid`/URI/metadata or can upload a local video to VOD first
+- builds `videoGenInputs.v2vOpt.lipSyncUserVideo.originVideo.originVideo`
+- attaches `ttsInfo` with text, `toneId`, optional tone metadata, and speed
+- uses frontend bundle evidence for `model_req_key=dreamina_lib_sync_base`, `generateType=LipSync`, and `DAVideoProcessType.LipSyncUserVideo`
+- proof bundle: `data/jimeng-lab/proof-20260610-lip-sync-vod-plan/`
+- live generation is intentionally disabled until a real frontend lip-sync submit is captured and compared.
+
+The next slice is **reference controls and video-reference consumers**. Use the VOD provider reference plus frontend captures to unlock live lip-sync, reference-video, multimodal/all-around reference, and live end-frame/multi-frame image-to-video paths.
 
 Immediate next slices:
 
-1. Capture the frontend's explicit end-frame/multi-frame mode and live-prove `frames2video` only if the payload contract matches.
-2. Map image-to-video reference controls such as pose/style/depth/canny/reference roles, depending on the clearest captured contracts.
-3. Implement lip-sync or digital-human generation using the confirmed VOD reference path where applicable.
-4. Implement voice clone and subject/persona voice generation once the UI/API flow is captured.
-5. Keep each slice small enough to prove and commit before moving on.
+1. Capture a frontend lip-sync submit and compare the converted `draft_content` with the dry-run `providerInput`; enable live submit only if it matches.
+2. Capture the frontend's explicit end-frame/multi-frame mode and live-prove `frames2video` only if the payload contract matches.
+3. Map image-to-video reference controls such as pose/style/depth/canny/reference roles, depending on the clearest captured contracts.
+4. Implement digital-human generation using the confirmed VOD reference path where applicable.
+5. Implement voice clone and subject/persona voice generation once the UI/API flow is captured.
+6. Keep each slice small enough to prove and commit before moving on.
 
 Do not start the async daemon while these API contracts are still moving.
 

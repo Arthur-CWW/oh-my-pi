@@ -180,7 +180,7 @@ Confirmed VOD details from the frontend uploader SDK and live CLI proof:
 - The bundled uploader calls `ApplyUploadInner` with `Version=2020-11-19`, `SpaceName=dreamina`, `FileType=video`, `IsInner=1`, `FileSize`, optional `FileExtension`, and random `s`.
 - VOD signing uses the same AWS4-style signer shape with credential scope `YYYYMMDD/cn/vod/aws4_request`.
 - Small video files direct-upload to `https://{UploadHost}/upload/v1/{StoreUri}` with `Authorization`, `Content-CRC32`, and `X-Storage-U`.
-- `CommitUploadInner` posts `{"SessionKey":"...","Functions":[]}` and returns provider video references such as `Vid` plus a `tos-cn-v-*` store URI.
+- `CommitUploadInner` posts `{"SessionKey":"...","Functions":[]}` and returns provider video references such as `Vid` plus `VideoMeta` fields including `Uri`, `Width`, `Height`, `Duration`, `Format`, `Codec`, and `Md5`.
 
 Dry-run:
 
@@ -216,6 +216,72 @@ summary=data/jimeng-lab/proof-20260609-video-upload-live/normalized/upload-video
 ```
 
 Raw token/apply/commit responses include temporary credentials and provider upload authorization. They remain ignored under `data/**`.
+
+## Lip-Sync Video Reference Dry-Run Contract
+
+`jimeng-browser-proxy lip-sync` now writes a dry-run VOD video-reference lip-sync plan. Live submit is intentionally disabled until a real frontend lip-sync `/mweb/v1/aigc_draft/generate` request is captured and compared against the generated provider input.
+
+Evidence from the 2026-06-09 frontend bundles:
+
+- initial lip-sync generation builds `input.videoGenInputs.v2vOpt.lipSyncUserVideo`
+- image/avatar mode builds `input.videoGenInputs.i2vOpt.realmanAvatar`
+- both modes attach `ttsInfo`
+- video mode requires `originVideo.originVideo.width` and `originVideo.originVideo.height`
+- mock model records `generateType=LipSync`
+- process flow is `DAVideoProcessType.LipSyncUserVideo` for VOD input and `DAVideoProcessType.LipSyncImage` for image/avatar input
+- initial lip-sync submit query params use `scenario=image_video_generation`, `featureKey=text_to_video`; post-edit lip-sync snippets use `featureKey=to_video-lipsync`
+
+Confirmed video-mode model catalog:
+
+```txt
+scene=lip_sync_video_generate_video
+model_req_key=dreamina_lib_sync_base
+model_name=基础模式
+options=[]
+model_tip=仅仅修改人物口型。适合演讲、对白
+```
+
+Dry-run proof command:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts lip-sync \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --vid v03870g10004d8k1u4nog65hb08dnhig \
+  --videoUri tos-cn-v-148450/o4gBE1AAWbfiDDig6xEQ4KJhDHQvlExoFkFExB \
+  --videoWidth 704 \
+  --videoHeight 1248 \
+  --videoDurationSec 5.016667 \
+  --voice-id 7597003459665072686 \
+  --tone-key 清爽女声 \
+  --text 三秒告诉你为什么这款补水精华适合熬夜后的底妆。 \
+  --outDir data/jimeng-lab/proof-20260610-lip-sync-vod-plan \
+  --dryRun
+```
+
+Dry-run plan facts:
+
+```txt
+status=dry-run-only
+endpoint=/mweb/v1/aigc_draft/generate
+model_req_key=dreamina_lib_sync_base
+provider path=input.videoGenInputs.v2vOpt.lipSyncUserVideo
+originVideo.vid=v03870g10004d8k1u4nog65hb08dnhig
+originVideo.uri=tos-cn-v-148450/o4gBE1AAWbfiDDig6xEQ4KJhDHQvlExoFkFExB
+originVideo.width=704
+originVideo.height=1248
+originVideo.duration=5.016667
+ttsInfo.sourceType=text-to-speech
+ttsInfo.toneId=7597003459665072686
+```
+
+Proof bundle:
+
+```txt
+data/jimeng-lab/proof-20260610-lip-sync-vod-plan/raw/lip-sync-20260609145310-83bdpg-dry-run-plan.json
+data/jimeng-lab/proof-20260610-lip-sync-vod-plan/normalized/lip-sync-20260609145310-83bdpg-summary.json
+```
+
+Next probe: capture the Jimeng lip-sync UI submit request and compare the converted `draft_content` with the dry-run `providerInput` before enabling live submit.
 
 ## Confirmed Image-To-Video First-Frame Contract
 

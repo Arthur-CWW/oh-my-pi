@@ -153,6 +153,9 @@ export interface JimengVodCommitResult {
   vid: string | null
   mid: string | null
   sourceUri: string | null
+  posterUri: string | null
+  runId: string | null
+  videoMeta: JimengVodVideoMeta
 }
 
 export interface JimengVideoUploadSummary {
@@ -164,8 +167,35 @@ export interface JimengVideoUploadSummary {
   vid: string | null
   mid: string | null
   sourceUri: string | null
+  posterUri: string | null
+  duration: number | null
+  width: number | null
+  height: number | null
+  originWidth: number | null
+  originHeight: number | null
+  bitrate: number | null
+  format: string | null
+  codec: string | null
+  md5: string | null
+  uri: string | null
+  runId: string | null
   uploadStatus: number
   uploadCrc32: string
+}
+
+export interface JimengVodVideoMeta {
+  uri: string | null
+  width: number | null
+  height: number | null
+  originWidth: number | null
+  originHeight: number | null
+  duration: number | null
+  bitrate: number | null
+  md5: string | null
+  format: string | null
+  size: number | null
+  fileType: string | null
+  codec: string | null
 }
 
 export interface JimengImageXSignInput {
@@ -781,14 +811,15 @@ function parseCommitImageUploadBody(body: unknown): Pick<JimengImageXCommitResul
   return { imageUris, pluginResults }
 }
 
-function parseCommitVodUploadBody(body: unknown): Pick<JimengVodCommitResult, "results" | "vid" | "mid" | "sourceUri"> {
+function parseCommitVodUploadBody(body: unknown): Pick<JimengVodCommitResult, "results" | "vid" | "mid" | "sourceUri" | "posterUri" | "runId" | "videoMeta"> {
   const result = asRecord(asRecord(body)?.Result)
   const results = asArray(result?.Results).map(asRecord).filter(isRecord)
   const first = results[0] ?? result
   const sourceInfo = asRecord(first?.SourceInfo)
+  const videoMeta = parseVodVideoMeta(first?.VideoMeta)
   const vid = stringValue(first?.Vid)
   const mid = stringValue(first?.Mid)
-  const sourceUri = stringValue(sourceInfo?.FileName) ?? stringValue(sourceInfo?.StoreUri) ?? stringValue(first?.StoreUri)
+  const sourceUri = stringValue(sourceInfo?.FileName) ?? stringValue(sourceInfo?.StoreUri) ?? stringValue(first?.StoreUri) ?? videoMeta.uri
 
   if (!first) {
     throw jimengError({
@@ -799,7 +830,15 @@ function parseCommitVodUploadBody(body: unknown): Pick<JimengVodCommitResult, "r
     })
   }
 
-  return { results, vid, mid, sourceUri }
+  return {
+    results,
+    vid,
+    mid,
+    sourceUri,
+    posterUri: stringValue(first?.PosterUri),
+    runId: stringValue(first?.RunId),
+    videoMeta,
+  }
 }
 
 function parseFallbackVodStore(node: Record<string, unknown> | undefined): JimengVodApplyResult["fallbackStoreInfo"] {
@@ -865,8 +904,38 @@ function summarizeJimengVideoUpload(input: {
     vid: input.commit.vid,
     mid: input.commit.mid,
     sourceUri: input.commit.sourceUri,
+    posterUri: input.commit.posterUri,
+    duration: input.commit.videoMeta.duration,
+    width: input.commit.videoMeta.width,
+    height: input.commit.videoMeta.height,
+    originWidth: input.commit.videoMeta.originWidth,
+    originHeight: input.commit.videoMeta.originHeight,
+    bitrate: input.commit.videoMeta.bitrate,
+    format: input.commit.videoMeta.format,
+    codec: input.commit.videoMeta.codec,
+    md5: input.commit.videoMeta.md5,
+    uri: input.commit.videoMeta.uri,
+    runId: input.commit.runId,
     uploadStatus: input.upload.httpStatus,
     uploadCrc32: input.upload.crc32,
+  }
+}
+
+function parseVodVideoMeta(value: unknown): JimengVodVideoMeta {
+  const meta = asRecord(value)
+  return {
+    uri: stringValue(meta?.Uri),
+    width: numberValue(meta?.Width),
+    height: numberValue(meta?.Height),
+    originWidth: numberValue(meta?.OriginWidth),
+    originHeight: numberValue(meta?.OriginHeight),
+    duration: numberValue(meta?.Duration),
+    bitrate: numberValue(meta?.Bitrate),
+    md5: stringValue(meta?.Md5),
+    format: stringValue(meta?.Format),
+    size: numberValue(meta?.Size),
+    fileType: stringValue(meta?.FileType),
+    codec: stringValue(meta?.Codec),
   }
 }
 

@@ -471,6 +471,41 @@ uploadCrc32=1929b92c
 
 Raw token/apply/commit responses include temporary credentials and provider auth. They are intentionally local-only under ignored `data/**`.
 
+## Lip-Sync VOD Plan Smoke
+
+`jimeng-browser-proxy lip-sync` now prepares the VOD-reference lip-sync provider input without live submit. This uses the already live-proved VOD `vid` and raw `VideoMeta` fields from the upload proof, so it does not spend generation quota or perform another upload.
+
+Command:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts lip-sync \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --vid v03870g10004d8k1u4nog65hb08dnhig \
+  --videoUri tos-cn-v-148450/o4gBE1AAWbfiDDig6xEQ4KJhDHQvlExoFkFExB \
+  --videoWidth 704 \
+  --videoHeight 1248 \
+  --videoDurationSec 5.016667 \
+  --voice-id 7597003459665072686 \
+  --tone-key 清爽女声 \
+  --text 三秒告诉你为什么这款补水精华适合熬夜后的底妆。 \
+  --outDir data/jimeng-lab/proof-20260610-lip-sync-vod-plan \
+  --dryRun
+```
+
+Result:
+
+```txt
+plan=data/jimeng-lab/proof-20260610-lip-sync-vod-plan/raw/lip-sync-20260609145310-83bdpg-dry-run-plan.json
+summary=data/jimeng-lab/proof-20260610-lip-sync-vod-plan/normalized/lip-sync-20260609145310-83bdpg-summary.json
+status=dry-run-only
+model_req_key=dreamina_lib_sync_base
+provider path=input.videoGenInputs.v2vOpt.lipSyncUserVideo
+process flow=DAVideoProcessType.LipSyncUserVideo
+ttsInfo.sourceType=text-to-speech
+```
+
+The command is intentionally dry-run-only. Live submit still needs a captured frontend lip-sync `/mweb/v1/aigc_draft/generate` request so the final converted `draft_content` can be compared before spending quota.
+
 ## Frames-To-Video Dry-Run Smoke
 
 End-frame payload patching is now CLI-accessible through `frames2video`. This run uploads both local images to ImageX, patches `first_frame_image` and `end_frame_image`, and skips generation submit.
@@ -520,8 +555,8 @@ Result:
 
 ```txt
 typecheck passed
-24 tests passed, 0 failed
-browser-proxy help listed upload-video, image2video, and frames2video
+28 tests passed, 0 failed
+browser-proxy help listed upload-video, image2video, frames2video, and lip-sync
 ```
 
 ## Follow-Up
@@ -533,6 +568,7 @@ Next useful captures:
 - pose/style/depth/canny reference controls
 - image-to-video end-frame and multi-frame live proof with explicit frontend mode capture
 - multimodal/all-around reference video
+- lip-sync live submit capture/compare before enabling generation
 - video text generation through the current unified app route
 - voice cloning and subject/persona voice generation
 - canvas edit tools
