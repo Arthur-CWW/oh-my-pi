@@ -14,6 +14,7 @@ import {
 import { prepareFromCapture, redactHeaders, type CaptureFile, type JimengOp, type JimengSessionBundle } from "./capture"
 import { JimengClient } from "./client"
 import { JimengError } from "./errors"
+import { buildExploreRequestBody, fetchExploreTemplates, parseExploreWorkTypes, summarizeExploreTemplates } from "./explore"
 import { buildJimengLipSyncVideoPlan, lipSyncVideoReferenceFromUploadSummary, type JimengLipSyncVideoReference } from "./lip-sync"
 import { getJimengUploadToken, parseUploadTokenScene, uploadJimengImage, uploadJimengVideo, type JimengImageUploadResult, type JimengVideoUploadResult } from "./upload"
 
@@ -30,6 +31,7 @@ Commands:
   voices        Fetch the built-in voice library from a captured signed feed request
   tts           Generate one MP3 text-to-speech sample from a voice id
   sample-voices Generate sequential MP3 samples for voices from the built-in library
+  templates     Fetch no-spend Explore/template examples for prompt/template mining
   upload-token  Fetch temporary upload credentials for image/video/file upload scenes
   upload-image  Upload a local image to Jimeng ImageX and return a provider URI
   upload-video  Upload a local video to Jimeng VOD and return a provider video reference
@@ -54,7 +56,11 @@ Options:
   --tone-category-key <key>      Optional lip-sync voice category key
   --speed <n>                    TTS/lip-sync speech speed (default: 1.0)
   --item-platform <n>           Voice item platform (default: 1, Loki/built-in)
-  --limit <n>                   sample-voices limit (default: all)
+  --limit <n>                   sample-voices limit or templates count
+  --offset <n>                  templates offset (default: 0)
+  --category-id <n>             templates Explore category id (default: 11222)
+  --work-types <csv>            templates work types: video,image,canvas
+  --feed-refer <value>          templates feed refer, e.g. feed_refresh or feed_loadmore
   --scene <image|video|file|n>   upload-token scene (default: image)
   --file <path>                  Local media file for upload-image/upload-video; alias for --image in image2video
   --video <path>                 Local reference video for lip-sync; uploads to VOD in dry-run planning
@@ -98,6 +104,11 @@ Examples:
 
   jimeng-browser-proxy upload-token --scene image
 
+  jimeng-browser-proxy templates \\
+    --limit 10 \\
+    --category-id 11222 \\
+    --work-types image,video,canvas
+
   jimeng-browser-proxy upload-image \\
     --file data/jimeng-lab/image-upload-probe/aws4-live/proof-1x1.png \\
     --outDir data/jimeng-lab/cli-image-upload-smoke
@@ -137,6 +148,7 @@ interface CliArgs {
     | "voices"
     | "tts"
     | "sample-voices"
+    | "templates"
     | "upload-token"
     | "upload-image"
     | "upload-video"
@@ -160,6 +172,10 @@ interface CliArgs {
   speed?: number
   itemPlatform?: number
   limit?: number
+  offset?: number
+  categoryId?: number
+  workTypes?: string
+  feedRefer?: string
   scene?: string
   file?: string
   video?: string
@@ -327,6 +343,52 @@ async function main(argv: string[]): Promise<void> {
       samples,
     })
     console.log(`[jimeng-browser-proxy] sample-voices done count=${samples.length}`)
+    return
+  }
+
+  if (args.command === "templates") {
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const query = {
+      count: args.limit,
+      offset: args.offset,
+      categoryId: args.categoryId,
+      workTypes: parseExploreWorkTypes(args.workTypes),
+      feedRefer: args.feedRefer,
+    }
+    const request = buildExploreRequestBody(query)
+    const runId = `templates-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    if (args.dryRun) {
+      writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
+        command: args.command,
+        endpoint: "/mweb/v1/get_explore",
+        request,
+        browser_session: redactSession(session),
+      })
+      console.log(`[jimeng-browser-proxy] templates dry run saved`)
+      return
+    }
+
+    const result = await fetchExploreTemplates({ session, query })
+    writeJson(path.join(dirs.rawDir, `${runId}.json`), {
+      http_status: result.httpStatus,
+      ret: result.ret,
+      errmsg: result.errmsg,
+      response_text_sha256: result.responseTextSha256,
+      request: result.request,
+      body: result.body,
+    })
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      endpoint: result.endpoint,
+      http_status: result.httpStatus,
+      ret: result.ret,
+      errmsg: result.errmsg,
+      response_text_sha256: result.responseTextSha256,
+      request: result.request,
+      summary: summarizeExploreTemplates(result),
+      items: result.items,
+    })
+    console.log(`[jimeng-browser-proxy] templates saved count=${result.items.length} nextOffset=${result.nextOffset ?? "none"}`)
     return
   }
 
@@ -688,6 +750,7 @@ function parseArgs(argv: string[]): CliArgs {
     && command !== "voices"
     && command !== "tts"
     && command !== "sample-voices"
+    && command !== "templates"
     && command !== "upload-token"
     && command !== "upload-image"
     && command !== "upload-video"
@@ -709,6 +772,8 @@ function parseArgs(argv: string[]): CliArgs {
   const seed = flags.seed ? Number(flags.seed) : undefined
   const itemPlatform = flags["item-platform"] ? Number(flags["item-platform"]) : undefined
   const limit = flags.limit ? Number(flags.limit) : undefined
+  const offset = flags.offset ? Number(flags.offset) : undefined
+  const categoryId = flags["category-id"] ? Number(flags["category-id"]) : undefined
   if (seed !== undefined && (!Number.isInteger(seed) || seed < 0 || seed > 4294967295)) {
     throw new Error("--seed must be an integer from 0 to 4294967295")
   }
@@ -717,6 +782,12 @@ function parseArgs(argv: string[]): CliArgs {
   }
   if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) {
     throw new Error("--limit must be a positive integer")
+  }
+  if (offset !== undefined && (!Number.isInteger(offset) || offset < 0)) {
+    throw new Error("--offset must be a non-negative integer")
+  }
+  if (categoryId !== undefined && (!Number.isInteger(categoryId) || categoryId < 1)) {
+    throw new Error("--category-id must be a positive integer")
   }
   if (videoWidth !== undefined && (!Number.isInteger(videoWidth) || videoWidth < 1)) {
     throw new Error("--videoWidth must be a positive integer")
@@ -747,6 +818,10 @@ function parseArgs(argv: string[]): CliArgs {
     speed,
     itemPlatform,
     limit,
+    offset,
+    categoryId,
+    workTypes: flags["work-types"],
+    feedRefer: flags["feed-refer"],
     scene: flags.scene,
     file: flags.file,
     video: flags.video,

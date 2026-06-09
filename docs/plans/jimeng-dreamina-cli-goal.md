@@ -80,6 +80,15 @@ Lip-sync VOD video-reference planning is now dry-run-proved:
 - proof bundle: `data/jimeng-lab/proof-20260610-lip-sync-vod-plan/`
 - live generation is intentionally disabled until a real frontend lip-sync submit is captured and compared.
 
+Explore/template mining is now live-proved without generation spend:
+
+- `jimeng-browser-proxy templates`
+- direct `/mweb/v1/get_explore` with logged-in browser session headers
+- useful flags: `--limit`, `--offset`, `--category-id`, `--work-types`, `--feed-refer`
+- normalizes Explore examples into prompt, model key, seed, image ratio, template metadata, usage/favorite counters, and cover dimensions
+- proof bundle: `data/jimeng-lab/proof-20260610-templates-explore/`
+- observed quirk: the endpoint returned 40 items for a request with `count=5`, while setting `next_offset=5`; downstream pipelines should apply local caps.
+
 The next slice is **reference controls and video-reference consumers**. Use the VOD provider reference plus frontend captures to unlock live lip-sync, reference-video, multimodal/all-around reference, and live end-frame/multi-frame image-to-video paths.
 
 Immediate next slices:
@@ -88,8 +97,9 @@ Immediate next slices:
 2. Capture the frontend's explicit end-frame/multi-frame mode and live-prove `frames2video` only if the payload contract matches.
 3. Map image-to-video reference controls such as pose/style/depth/canny/reference roles, depending on the clearest captured contracts.
 4. Implement digital-human generation using the confirmed VOD reference path where applicable.
-5. Implement voice clone and subject/persona voice generation once the UI/API flow is captured.
-6. Keep each slice small enough to prove and commit before moving on.
+5. Expand no-spend research/template coverage with `feed_short_video`, CapCut template search, and plane endpoints.
+6. Implement voice clone and subject/persona voice generation once the UI/API flow is captured.
+7. Keep each slice small enough to prove and commit before moving on.
 
 Do not start the async daemon while these API contracts are still moving.
 

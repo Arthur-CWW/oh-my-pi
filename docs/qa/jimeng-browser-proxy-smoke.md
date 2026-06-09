@@ -543,6 +543,39 @@ model_req_key=dreamina_ic_generate_video_model_vgfm_3.0_fast
 
 This is dry-run-proved only. Capture/live-proof the frontend end-frame or multi-frame mode before spending generation quota.
 
+## Explore / Template Mining Smoke
+
+`jimeng-browser-proxy templates` calls `/mweb/v1/get_explore` directly with the logged-in browser session. This is a no-generation, no-spend probe for prompt/template mining.
+
+Command:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts templates \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --limit 5 \
+  --category-id 11222 \
+  --work-types image,video,canvas \
+  --outDir data/jimeng-lab/proof-20260610-templates-explore
+```
+
+Result:
+
+```txt
+raw=data/jimeng-lab/proof-20260610-templates-explore/raw/templates-20260609151716.json
+summary=data/jimeng-lab/proof-20260610-templates-explore/normalized/templates-20260609151716-summary.json
+http_status=200
+ret=0
+errmsg=success
+requested_count=5
+returned_total=40
+next_offset=5
+category_id=11222
+by_template_type.image=40
+by_ai_feature.text_generate_image=40
+```
+
+Normalized examples include `prompt`, `model_req_key`, `seed`, `image_ratio`, template metadata, and usage/favorite counters. The endpoint returned 40 items for `count=5` while setting `next_offset=5`, so downstream UGC mining should treat the count flag as a paging hint and cap locally when needed.
+
 ## Verification
 
 ```bash
@@ -555,8 +588,8 @@ Result:
 
 ```txt
 typecheck passed
-28 tests passed, 0 failed
-browser-proxy help listed upload-video, image2video, frames2video, and lip-sync
+32 tests passed, 0 failed
+browser-proxy help listed templates, upload-video, image2video, frames2video, and lip-sync
 ```
 
 ## Follow-Up
@@ -566,6 +599,7 @@ Next useful captures:
 - image-to-image / byte edit
 - subject/persona creation
 - pose/style/depth/canny reference controls
+- additional template/research endpoints: `feed_short_video`, CapCut template search, and plane endpoints
 - image-to-video end-frame and multi-frame live proof with explicit frontend mode capture
 - multimodal/all-around reference video
 - lip-sync live submit capture/compare before enabling generation

@@ -246,7 +246,90 @@ Frontend bundle scan found these UGC-useful groups, but they are not yet direct-
 
 Next step is to drive those UI flows one at a time with background CDP recording, then create dry-run patchers before live calls.
 
-### 10) Upload token for local reference media
+### 10) Explore/template mining
+- `POST https://jimeng.jianying.com/mweb/v1/get_explore`
+- Status:
+  - live-proved without generation spend
+  - implemented as `jimeng-browser-proxy templates`
+  - typed parser in `packages/jimeng-client/src/explore.ts`
+  - tests in `packages/jimeng-client/test/explore.test.ts`
+- Request controls:
+  - `--limit <n>` maps to `count`
+  - `--offset <n>` maps to `offset`
+  - `--category-id <n>` maps to `category_id` (current proof uses `11222`)
+  - `--work-types image,video,canvas` maps to `filter.work_type_list`
+  - `--feed-refer <value>` maps to `feed_refer`
+
+Request:
+
+```json
+{
+  "count": 5,
+  "filter": {
+    "work_type_list": ["image", "video", "canvas"]
+  },
+  "offset": 0,
+  "image_info": {
+    "width": 2048,
+    "height": 2048,
+    "format": "webp",
+    "image_scene_list": [
+      { "scene": "smart_crop", "width": 360, "height": 360, "format": "webp", "uniq_key": "smart_crop-w:360-h:360" },
+      { "scene": "normal", "width": 2048, "height": 2048, "format": "webp", "uniq_key": "2048" }
+    ]
+  },
+  "category_id": 11222,
+  "feed_refer": "feed_refresh"
+}
+```
+
+Normalized fields:
+
+```txt
+id
+templateType
+aiFeature
+featureTypes
+usageNum / favoriteNum / playNum
+coverUrl / coverWidth / coverHeight / aspectRatio
+draftUri / draftVersion
+prompt
+modelReqKey
+seed
+imageRatio
+metadataEffectId / metadataEffectType
+```
+
+CLI proof:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts templates \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --limit 5 \
+  --category-id 11222 \
+  --work-types image,video,canvas \
+  --outDir data/jimeng-lab/proof-20260610-templates-explore
+```
+
+Observed safe summary:
+
+```txt
+http_status=200
+ret=0
+errmsg=success
+requested_count=5
+returned_total=40
+next_offset=5
+category_id=11222
+by_template_type.image=40
+by_ai_feature.text_generate_image=40
+raw=data/jimeng-lab/proof-20260610-templates-explore/raw/templates-20260609151716.json
+summary=data/jimeng-lab/proof-20260610-templates-explore/normalized/templates-20260609151716-summary.json
+```
+
+Quirk: Jimeng returned 40 items even though the request sent `count=5`, but it set `next_offset=5`. Treat `count` as a paging hint and keep downstream caps client-side.
+
+### 11) Upload token for local reference media
 - `POST https://jimeng.jianying.com/mweb/v1/get_upload_token`
 - Status:
   - live-proved for scenes `1`, `2`, and `3`
@@ -304,7 +387,7 @@ The raw response includes temporary upload credentials and must not be committed
 
 The `/lv/v1/asset/prepare_upload_cloud` endpoint appears in frontend bundles but returned `404` from the Jimeng domain with a straightforward replay body; it may belong to a CapCut/LV asset domain or require signed LV headers. Do not depend on it for the Jimeng direct-client path yet.
 
-### 11) Local image upload to ImageX provider URI
+### 12) Local image upload to ImageX provider URI
 - Status:
   - live-proved with `jimeng-browser-proxy upload-image`
   - implemented in `packages/jimeng-client/src/upload.ts`
@@ -363,7 +446,7 @@ ImageHeight=1
 
 Raw token/apply responses contain temporary credentials and provider auth. Keep them only under ignored `data/**`.
 
-### 12) Local video upload to VOD provider reference
+### 13) Local video upload to VOD provider reference
 - Status:
   - live-proved with `jimeng-browser-proxy upload-video`
   - implemented in `packages/jimeng-client/src/upload.ts`
@@ -433,7 +516,7 @@ source mp4=H.264, 704x1248, 5.016667s, 4,285,498 bytes
 
 Raw token/apply responses contain temporary credentials and provider auth. Keep them only under ignored `data/**`.
 
-### 13) Lip-sync VOD video-reference dry-run plan
+### 14) Lip-sync VOD video-reference dry-run plan
 - Status:
   - dry-run-proved with `jimeng-browser-proxy lip-sync`
   - implemented in `packages/jimeng-client/src/lip-sync.ts`
@@ -490,7 +573,7 @@ data/jimeng-lab/proof-20260610-lip-sync-vod-plan/normalized/lip-sync-20260609145
 
 This is deliberately a no-spend planning command. Before enabling live generation, capture a real UI lip-sync submit and compare the converted `draft_content` with the dry-run `providerInput`.
 
-### 14) Local-image image-to-video
+### 15) Local-image image-to-video
 - Status:
   - live-proved with `jimeng-browser-proxy image2video`
   - dry-run-proved with `jimeng-browser-proxy frames2video` for local first/end-frame upload and payload patching
@@ -851,6 +934,7 @@ Current support matrix:
 | `image2video` | implemented in `jimeng-browser-proxy`; partial in low-level compat helper | Browser proxy can upload local `--image`, inject `first_frame_image`, submit/poll/download MP4. Low-level helper accepts confirmed `--firstFrameUri`. |
 | `frames2video` | dry-run-proved in `jimeng-browser-proxy`; partial in low-level compat helper | Browser proxy can upload local `--image` and `--lastImage`, inject `first_frame_image`/`end_frame_image`, and write a no-generation plan. Live proof still needs explicit frontend end-frame mode evidence. |
 | `lip-sync` | dry-run-proved in `jimeng-browser-proxy` | Browser proxy can prepare the VOD-reference lip-sync provider input from a VOD `vid`/metadata plus TTS voice flags. Live submit still needs a frontend submit capture/compare. |
+| `templates` | implemented in `jimeng-browser-proxy` | No-spend direct `/mweb/v1/get_explore` template mining with prompt/model/usage normalization. |
 | `image2image` | needs capture | Need image reference upload + image edit submit capture. |
 | `multiframe2video` | needs capture | Need multi-frame upload/reference payload capture. |
 | `multimodal2video` | needs capture | Need `全能参考` mixed image/video/audio reference payload capture. |
@@ -919,5 +1003,6 @@ Do not commit raw captures or generated media. If a redacted summary is promoted
 1. Capture a real frontend lip-sync submit and compare it against the VOD dry-run provider-input plan before enabling live generation.
 2. Use the VOD upload path to unlock reference-video and multimodal/all-around reference flows.
 3. Capture the frontend's explicit end-frame/multi-frame mode and live-prove `frames2video` only after confirming the mode-specific payload contract.
-4. Add strict `1019` shark breaker/cooldown budgets to the consolidated CLI path.
-5. Add multipart/chunked VOD upload only when large reference videos require it.
+4. Expand template/research mining beyond direct Explore with `feed_short_video`, CapCut template search, and plane endpoints.
+5. Add strict `1019` shark breaker/cooldown budgets to the consolidated CLI path.
+6. Add multipart/chunked VOD upload only when large reference videos require it.

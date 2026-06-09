@@ -34,7 +34,7 @@ Use the browser as an authenticated session holder and API discovery surface. Mo
 | `/mweb/v1/feed` | POST | Explore/feed content; a signed `dreamina_tone` feed request returns the built-in voice library. Useful for research/template mining if handled carefully. | Implemented for voice library replay |
 | `/mweb/v1/tts_generate` | POST | Built-in voice text-to-speech. Returns base64 MP3 in `data.data`. | Implemented and live-proved |
 | `/mweb/v1/get_upload_token` | POST | Temporary upload credentials for video/image/file scenes. Required before direct local reference-image/video upload. | Implemented and live-proved; local ImageX image upload is implemented via `upload-image`, local VOD video upload via `upload-video` |
-| `/mweb/v1/get_explore` | POST | Explore examples and public creative templates. | Cataloged only |
+| `/mweb/v1/get_explore` | POST | Explore examples and public creative templates for prompt/template mining. | Implemented as no-spend `templates` |
 | `/mweb/v1/get_unread_count` | POST | Notification count. | Low priority |
 
 ## Confirmed Voice / Audio Contracts
@@ -407,6 +407,72 @@ This is dry-run-proved only. The next live-proof step should capture or select t
 
 These probes are useful for keeping the CLI/app aware of available models, lip-sync routes, saved subjects, and user voice assets without consuming generation credits.
 
+## Confirmed Explore / Template Mining Contract
+
+`jimeng-browser-proxy templates` now calls `/mweb/v1/get_explore` directly with the logged-in browser session. This is a no-generation, no-spend endpoint for mining public creative examples, prompt structure, model keys, usage/favorite counts, and template feature labels.
+
+Request shape:
+
+```json
+{
+  "count": 5,
+  "filter": {
+    "work_type_list": ["image", "video", "canvas"]
+  },
+  "offset": 0,
+  "image_info": {
+    "width": 2048,
+    "height": 2048,
+    "format": "webp",
+    "image_scene_list": [
+      { "scene": "smart_crop", "width": 360, "height": 360, "format": "webp", "uniq_key": "smart_crop-w:360-h:360" },
+      { "scene": "normal", "width": 2048, "height": 2048, "format": "webp", "uniq_key": "2048" }
+    ]
+  },
+  "category_id": 11222,
+  "feed_refer": "feed_refresh"
+}
+```
+
+CLI proof:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts templates \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --limit 5 \
+  --category-id 11222 \
+  --work-types image,video,canvas \
+  --outDir data/jimeng-lab/proof-20260610-templates-explore
+```
+
+Observed proof facts:
+
+```txt
+http_status=200
+ret=0
+errmsg=success
+requested_count=5
+returned_total=40
+next_offset=5
+category_id=11222
+by_template_type.image=40
+by_ai_feature.text_generate_image=40
+proof=data/jimeng-lab/proof-20260610-templates-explore/
+```
+
+The response embeds reusable prompt/model evidence in `aigc_draft.content.component_list[].abilities.generate.core_param`. The CLI normalizes:
+
+- `prompt`
+- `model_req_key`
+- `seed`
+- `image_ratio`
+- template type / AI feature labels
+- usage, favorite, and play counts
+- cover dimensions/aspect ratio
+- metadata template id/type
+
+Quirk: the endpoint returned 40 items for a request with `count=5`, while still setting `next_offset=5`. Treat `count` as a paging hint, not a hard returned-item cap.
+
 ## Discovered From Frontend Bundles, Not Yet Live-Proved
 
 The 2026-06-09 JS bundle sweep found these useful endpoint groups. Treat them as capture targets, not stable contracts, until a real UI flow and dry-run payload are recorded.
@@ -417,7 +483,7 @@ The 2026-06-09 JS bundle sweep found these useful endpoint groups. Treat them as
 | Subject/persona lifecycle | `/mweb/v1/dreamina_subject/create`, `/mweb/v1/dreamina_subject/update`, `/mweb/v1/dreamina_subject/delete`, `/mweb/v1/dreamina_subject/generate_voice` |
 | Infinite canvas | `/mweb/v1/infinite_canvas/create_project`, `/mweb/v1/infinite_canvas/conversation`, `/mweb/v1/infinite_canvas/edit`, `/mweb/v1/infinite_canvas/resume`, `/mweb/v1/infinite_canvas/stop_stream`, `/mweb/v1/infinite_canvas/v1/fetch_snapshot`, `/mweb/v1/infinite_canvas/v1/submit_changeset`, `/mweb/v1/infinite_canvas/v1/fetch_changeset` |
 | Reference/image tools | `/mweb/v1/get_common_config`, `/mweb/v1/get_image_description`, `/mweb/v1/get_upload_token`, `/mweb/v1/face_recognize`, `/mweb/v1/algo_proxy` |
-| Template/research mining | `/mweb/v1/feed`, `/mweb/v1/get_explore`, `/mweb/v1/feed_short_video`, `/lv/v1/cc_web/replicate/search_templates`, `/lv/v1/cc_web/plane/*` |
+| Template/research mining | `/mweb/v1/feed`, `/mweb/v1/feed_short_video`, `/lv/v1/cc_web/replicate/search_templates`, `/lv/v1/cc_web/plane/*`; `/mweb/v1/get_explore` is now implemented for direct Explore examples |
 | Assets/upload/editor | `/lv/v1/asset/*`, `/lv/v1/editor/image/*` |
 | Audio/video utility | `/mweb/v1/mix_audio_video`, `/mweb/v1/mix_audio_videos`, `/lv/v2/intelligence/tts/curl_sync_everphoto` |
 
