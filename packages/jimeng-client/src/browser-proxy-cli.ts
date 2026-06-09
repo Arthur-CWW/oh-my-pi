@@ -18,7 +18,9 @@ import {
   buildExploreRequestBody,
   buildShortVideoExploreQuery,
   fetchExploreTemplates,
+  fetchOverseasShortVideos,
   parseExploreWorkTypes,
+  redactExploreTemplateItems,
   summarizeExploreShortVideos,
   summarizeExploreTemplates,
 } from "./explore"
@@ -66,6 +68,7 @@ Commands:
   sample-voices Generate sequential MP3 samples for voices from the built-in library
   templates     Fetch no-spend Explore/template examples for prompt/template mining
   short-videos  Fetch no-spend Explore short videos for reference/profile mining
+  overseas-short-videos Fetch no-spend feed_short_video examples for overseas/reference mining
   subjects      Fetch saved Jimeng subject/persona records without generation spend
   describe-image Upload/use an image URI, then describe it and detect faces
   controlnet-preview Upload/use an image URI, then build pose/depth/canny preview refs
@@ -161,6 +164,11 @@ Examples:
     --category-id 11222 \\
     --feed-refer feed_enterauto
 
+  jimeng-browser-proxy overseas-short-videos \\
+    --limit 5 \\
+    --category-id 11222 \\
+    --outDir data/jimeng-lab/cli-overseas-short-videos-smoke
+
   jimeng-browser-proxy subjects \\
     --limit 20 \\
     --outDir data/jimeng-lab/cli-subjects-smoke
@@ -220,6 +228,7 @@ interface CliArgs {
     | "sample-voices"
     | "templates"
     | "short-videos"
+    | "overseas-short-videos"
     | "subjects"
     | "describe-image"
     | "controlnet-preview"
@@ -470,7 +479,7 @@ async function main(argv: string[]): Promise<void> {
       response_text_sha256: result.responseTextSha256,
       request: result.request,
       summary: summarizeExploreTemplates(result),
-      items: result.items,
+      items: redactExploreTemplateItems(result.items),
     })
     console.log(`[jimeng-browser-proxy] templates saved count=${result.items.length} nextOffset=${result.nextOffset ?? "none"}`)
     return
@@ -515,9 +524,54 @@ async function main(argv: string[]): Promise<void> {
       response_text_sha256: result.responseTextSha256,
       request: result.request,
       summary: summarizeExploreShortVideos(result),
-      items: result.items,
+      items: redactExploreTemplateItems(result.items),
     })
     console.log(`[jimeng-browser-proxy] short-videos saved count=${result.items.length} nextOffset=${result.nextOffset ?? "none"}`)
+    return
+  }
+
+  if (args.command === "overseas-short-videos") {
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const query = buildShortVideoExploreQuery({
+      count: args.limit,
+      offset: args.offset,
+      categoryId: args.categoryId,
+      feedRefer: args.feedRefer,
+    })
+    const request = buildExploreRequestBody(query)
+    const runId = `overseas-short-videos-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    if (args.dryRun) {
+      writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
+        command: args.command,
+        endpoint: "/mweb/v1/feed_short_video",
+        request,
+        browser_session: redactSession(session),
+      })
+      console.log(`[jimeng-browser-proxy] overseas-short-videos dry run saved`)
+      return
+    }
+
+    const result = await fetchOverseasShortVideos({ session, query })
+    writeJson(path.join(dirs.rawDir, `${runId}.json`), {
+      http_status: result.httpStatus,
+      ret: result.ret,
+      errmsg: result.errmsg,
+      response_text_sha256: result.responseTextSha256,
+      request: result.request,
+      body: result.body,
+    })
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      endpoint: result.endpoint,
+      http_status: result.httpStatus,
+      ret: result.ret,
+      errmsg: result.errmsg,
+      response_text_sha256: result.responseTextSha256,
+      request: result.request,
+      summary: summarizeExploreShortVideos(result),
+      items: redactExploreTemplateItems(result.items),
+    })
+    console.log(`[jimeng-browser-proxy] overseas-short-videos saved count=${result.items.length} nextOffset=${result.nextOffset ?? "none"}`)
     return
   }
 
@@ -1268,6 +1322,7 @@ function parseArgs(argv: string[]): CliArgs {
     && command !== "sample-voices"
     && command !== "templates"
     && command !== "short-videos"
+    && command !== "overseas-short-videos"
     && command !== "subjects"
     && command !== "describe-image"
     && command !== "controlnet-preview"

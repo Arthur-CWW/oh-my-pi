@@ -35,6 +35,7 @@ Use the browser as an authenticated session holder and API discovery surface. Mo
 | `/mweb/v1/tts_generate` | POST | Built-in voice text-to-speech. Returns base64 MP3 in `data.data`. | Implemented and live-proved |
 | `/mweb/v1/get_upload_token` | POST | Temporary upload credentials for video/image/file scenes. Required before direct local reference-image/video upload. | Implemented and live-proved; local ImageX image upload is implemented via `upload-image`, local VOD video upload via `upload-video` |
 | `/mweb/v1/get_explore` | POST | Explore examples, public creative templates, and short-video examples for prompt/template/reference mining. | Implemented as no-spend `templates` and `short-videos` |
+| `/mweb/v1/feed_short_video` | POST | Overseas/alternate short-video feed for reference/profile mining. | Implemented as no-spend `overseas-short-videos` |
 | `/mweb/v1/get_image_description` | POST | Image prompt/description extraction for uploaded provider image URIs. Useful for persona/reference inspection. | Implemented as no-spend `describe-image` |
 | `/mweb/v1/face_recognize` | POST | Face/keypoint probe for uploaded provider image URIs. Useful for reference/persona validation before generation payloads. | Implemented as no-spend `describe-image` |
 | `/mweb/v1/blend_preview` | POST | No-spend preview extraction for pose/depth/canny ControlNet reference images. | Implemented as `controlnet-preview`; pose/depth/canny live-proved |
@@ -770,9 +771,64 @@ The normalized short-video fields intentionally omit signed `video_url` values w
 - play, favorite, comment, and share counts
 - metadata effect id/type, currently including `gen_story` / `tool`
 
-## Discovered From Frontend Bundles, Not Yet Live-Proved
+## Confirmed Overseas Short-Video Feed Contract
 
-The 2026-06-09 JS bundle sweep found these useful endpoint groups. Treat them as capture targets, not stable contracts, until a real UI flow and dry-run payload are recorded.
+`jimeng-browser-proxy overseas-short-videos` calls `/mweb/v1/feed_short_video` directly with the logged-in browser session. This is a no-generation, no-spend path for an alternate short-video feed discovered in the frontend bundle as `GET_OVERSEAS_SHORT_VIDEO`.
+
+Request shape:
+
+```json
+{
+  "count": 5,
+  "filter": {
+    "work_type_list": ["short_video"]
+  },
+  "offset": 0,
+  "image_info": {
+    "width": 2048,
+    "height": 2048,
+    "format": "webp"
+  },
+  "category_id": 11222,
+  "feed_refer": "feed_enterauto"
+}
+```
+
+CLI proof:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts overseas-short-videos \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --limit 5 \
+  --category-id 11222 \
+  --outDir data/jimeng-lab/proof-20260610-overseas-short-videos
+```
+
+Observed proof facts:
+
+```txt
+http_status=200
+ret=0
+errmsg=success
+requested_count=5
+returned_total=4
+next_offset=5
+category_id=11222
+feed_refer=feed_enterauto
+top_play_num=2382533
+top_video_duration=57s
+top_video_resolution=3840x2160
+top_video_fps=30
+top_video_has_audio=true
+response_text_sha256=dc3ef47f5dd45b9f2681da88f502f39f3ce0ac2b512259f375d70665f63c0487
+proof=data/jimeng-lab/proof-20260610-overseas-short-videos/
+```
+
+The live response currently uses snake_case `data.item_list`, while the frontend bundle's domain path references camelCase `itemList`/`commonAttr`. The CLI parser accepts both. Normalized output redacts signed cover URLs from item lists while retaining durable cover presence/dimensions, video metadata, ranking signals, and metadata effect ids.
+
+## Discovered From Frontend Bundles
+
+The 2026-06-09 JS bundle sweep found these useful endpoint groups. Treat rows without an implemented status as capture targets, not stable contracts, until a real UI flow and dry-run payload are recorded.
 
 | Group | Endpoints |
 |---|---|
@@ -780,7 +836,7 @@ The 2026-06-09 JS bundle sweep found these useful endpoint groups. Treat them as
 | Subject/persona lifecycle | `/mweb/v1/dreamina_subject/get`, `/mweb/v1/dreamina_subject/create`, `/mweb/v1/dreamina_subject/update`, `/mweb/v1/dreamina_subject/delete`, `/mweb/v1/dreamina_subject/generate_voice`; list is implemented as `subjects`, while create/update/delete/generate_voice remain capture targets |
 | Infinite canvas | `/mweb/v1/infinite_canvas/create_project`, `/mweb/v1/infinite_canvas/conversation`, `/mweb/v1/infinite_canvas/edit`, `/mweb/v1/infinite_canvas/resume`, `/mweb/v1/infinite_canvas/stop_stream`, `/mweb/v1/infinite_canvas/v1/fetch_snapshot`, `/mweb/v1/infinite_canvas/v1/submit_changeset`, `/mweb/v1/infinite_canvas/v1/fetch_changeset` |
 | Reference/image tools | `/mweb/v1/get_common_config`, `/mweb/v1/get_image_description`, `/mweb/v1/get_upload_token`, `/mweb/v1/face_recognize`, `/mweb/v1/blend_preview`, `/mweb/v1/pose_detect`, `/mweb/v1/saliency_seg`, `/mweb/v1/algo_proxy`; image upload, description, face recognition, ControlNet pose/depth/canny preview, pose detect, and object/saliency segmentation are now implemented, while style/reference payload tools still need CLI coverage |
-| Template/research mining | `/mweb/v1/feed`, `/mweb/v1/feed_short_video`, `/lv/v1/cc_web/replicate/search_templates`, `/lv/v1/cc_web/plane/*`; `/mweb/v1/get_explore` is now implemented for direct Explore templates and short-video examples |
+| Template/research mining | `/mweb/v1/feed`, `/mweb/v1/feed_short_video`, `/lv/v1/cc_web/replicate/search_templates`, `/lv/v1/cc_web/plane/*`; `/mweb/v1/get_explore` is implemented for direct Explore templates and short-video examples, and `/mweb/v1/feed_short_video` is implemented as `overseas-short-videos` |
 | Assets/upload/editor | `/lv/v1/asset/*`, `/lv/v1/editor/image/*` |
 | Audio/video utility | `/mweb/v1/mix_audio_video`, `/mweb/v1/mix_audio_videos`, `/lv/v2/intelligence/tts/curl_sync_everphoto` |
 

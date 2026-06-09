@@ -30,6 +30,7 @@ As of 2026-06-10, the committed Jimeng CLI baseline is:
 - `e442938 Add Jimeng ControlNet preview CLI`
 - `858eab2 Document Jimeng ControlNet preview proofs`
 - `3e3bde2 Add Jimeng object mask CLI`
+- `00c4aca Add Jimeng subjects CLI`
 
 ImageX local image upload is now committed and live-proved:
 
@@ -106,6 +107,17 @@ Short-video Explore mining is now live-proved without generation spend:
 - proof bundle: `data/jimeng-lab/proof-20260610-short-videos-explore/`
 - latest proof returned 20 short-video items for `count=5`, `next_offset=5`, top play count `1718727`, and top video metadata `1280x720`, `85s`, `15fps`, with audio.
 
+Overseas short-video feed mining is now live-proved without generation spend:
+
+- `jimeng-browser-proxy overseas-short-videos`
+- direct `/mweb/v1/feed_short_video` with `filter.work_type_list=["short_video"]`
+- useful flags: `--limit`, `--offset`, `--category-id`, `--feed-refer`
+- frontend bundle evidence: `GET_OVERSEAS_SHORT_VIDEO="/mweb/v1/feed_short_video"` and the same short-video query token shape as the Explore short-video lane
+- parser accepts both snake_case live responses and camelCase frontend/domain model shapes
+- normalized output redacts signed cover URLs from item lists while retaining cover URL presence, dimensions, video metadata, ranking signals, and effect/template ids
+- proof bundle: `data/jimeng-lab/proof-20260610-overseas-short-videos/`
+- latest proof returned 4 items for `count=5`, `next_offset=5`, top play count `2382533`, and top video metadata `3840x2160`, `57s`, `30fps`, with audio.
+
 Reference-image inspection is now live-proved without generation spend:
 
 - `jimeng-browser-proxy describe-image`
@@ -165,7 +177,7 @@ Immediate next slices:
 2. Capture the frontend's explicit end-frame/multi-frame mode and live-prove `frames2video` only if the payload contract matches.
 3. Map style/reference roles and the new object-mask provider references into generation payload patches.
 4. Implement digital-human generation using the confirmed VOD reference path where applicable.
-5. Expand no-spend research/template coverage with CapCut template search, plane endpoints, and the bundle-discovered `/mweb/v1/feed_short_video` overseas path.
+5. Expand no-spend research/template coverage with CapCut template search and plane endpoints.
 6. Implement subject/persona create/update/generate_voice and voice clone once the UI/API flow is captured.
 7. Keep each slice small enough to prove and commit before moving on.
 
@@ -261,6 +273,7 @@ jimeng-browser-proxy persona
 jimeng-browser-proxy subject
 jimeng-browser-proxy templates
 jimeng-browser-proxy short-videos
+jimeng-browser-proxy overseas-short-videos
 jimeng-browser-proxy assets
 jimeng-browser-proxy canvas
 ```

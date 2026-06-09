@@ -3,10 +3,13 @@ import {
   buildExploreRequestBody,
   buildShortVideoExploreQuery,
   fetchExploreTemplates,
+  fetchOverseasShortVideos,
   JimengClient,
   JimengError,
+  parseOverseasShortVideosBody,
   parseExploreTemplatesBody,
   parseExploreWorkTypes,
+  redactExploreTemplateItems,
   summarizeExploreShortVideos,
   summarizeExploreTemplates,
   type JimengFetch,
@@ -114,6 +117,28 @@ describe("Jimeng Explore templates", () => {
     expect(result.items[0]?.prompt).toContain("韩系美妆达人")
   })
 
+  test("fetchOverseasShortVideos posts to feed_short_video and parses snake_case response data", async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = []
+    const client = new JimengClient({
+      fetch: mockFetch(JSON.stringify(shortVideoBody()), requests),
+    })
+
+    const result = await fetchOverseasShortVideos({
+      client,
+      session,
+      query: { count: 5, categoryId: 11222 },
+    })
+
+    expect(requests[0]?.url).toContain("/mweb/v1/feed_short_video")
+    expect(JSON.parse(String(requests[0]?.init?.body))).toMatchObject({
+      count: 5,
+      feed_refer: "feed_enterauto",
+      filter: { work_type_list: ["short_video"] },
+    })
+    expect(result.endpoint).toBe("/mweb/v1/feed_short_video")
+    expect(result.items[0]?.videoId).toBe("v03870g10004cu4siofog65s06ml296g")
+  })
+
   test("normalizes short-video metadata without signed video URLs", () => {
     const parsed = parseExploreTemplatesBody(shortVideoBody())
 
@@ -157,6 +182,41 @@ describe("Jimeng Explore templates", () => {
           has_audio: true,
         },
       ],
+    })
+    expect(redactExploreTemplateItems(parsed.items)[0]).toMatchObject({
+      coverUrlPresent: true,
+    })
+    expect("coverUrl" in redactExploreTemplateItems(parsed.items)[0]!).toBe(false)
+  })
+
+  test("normalizes feed_short_video camelCase response data", () => {
+    const parsed = parseOverseasShortVideosBody(overseasShortVideoBody(), { category_id: 11222 })
+
+    expect(parsed).toMatchObject({
+      hasMore: true,
+      nextOffset: 40,
+      categoryId: 11222,
+      requestId: "overseas-request-1",
+    })
+    expect(parsed.items[0]).toMatchObject({
+      id: "overseas-short-1",
+      effectId: "overseas-short-1",
+      effectType: 210,
+      favoriteNum: 302,
+      playNum: 9512,
+      videoId: "v-overseas-1",
+      videoDurationSec: 31,
+      videoDurationMs: 31200,
+      videoWidth: 1080,
+      videoHeight: 1920,
+      videoFps: 30,
+      videoDefinition: "1080p",
+      videoFormat: "mp4",
+      videoCodec: "h264",
+      videoHasAudio: true,
+      videoIsMute: false,
+      metadataEffectId: "creator-template",
+      metadataEffectType: "tool",
     })
   })
 })
@@ -285,6 +345,62 @@ function shortVideoBody(): Record<string, unknown> {
             },
             has_audio: true,
             is_mute: false,
+          },
+        },
+      ],
+    },
+  }
+}
+
+function overseasShortVideoBody(): Record<string, unknown> {
+  return {
+    ret: "0",
+    errmsg: "success",
+    data: {
+      hasMore: true,
+      nextOffset: 40,
+      requestId: "overseas-request-1",
+      itemList: [
+        {
+          commonAttr: {
+            id: "overseas-short-1",
+            effectId: "overseas-short-1",
+            effectType: 210,
+            description: "海外短视频参考",
+            coverUrl: "https://example.invalid/cover.webp",
+            coverHeight: 1920,
+            coverWidth: 1080,
+            aspectRatio: 0.5625,
+          },
+          statistic: {
+            favoriteNum: 302,
+            playNum: 9512,
+            commentNum: 41,
+            shareNum: 12,
+          },
+          categoryIdList: [11222],
+          metadataParam: JSON.stringify({
+            effectId: "creator-template",
+            effectType: "tool",
+          }),
+          video: {
+            videoId: "v-overseas-1",
+            duration: 31,
+            durationMs: 31200,
+            originVideo: {
+              width: 1080,
+              height: 1920,
+              fps: 30,
+              format: "mp4",
+              codec: "h264",
+              definition: "1080p",
+              videoUrl: "https://example.invalid/signed-overseas.mp4",
+            },
+            transcodedVideo: {
+              "720p": { definition: "720p" },
+            },
+            hasAudio: true,
+            isMute: false,
           },
         },
       ],

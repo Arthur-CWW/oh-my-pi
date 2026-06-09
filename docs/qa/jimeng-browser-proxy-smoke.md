@@ -770,6 +770,52 @@ top_by_play[0].has_audio=true
 
 Normalized examples include durable video metadata and ranking signals but omit signed video URLs. Raw responses still contain signed URLs and stay under ignored `data/**`.
 
+## Overseas Short-Video Feed Smoke
+
+`jimeng-browser-proxy overseas-short-videos` calls `/mweb/v1/feed_short_video` with `filter.work_type_list=["short_video"]`. This is a no-generation, no-spend probe for the bundle-discovered overseas/alternate short-video reference feed.
+
+Command:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts overseas-short-videos \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --limit 5 \
+  --category-id 11222 \
+  --outDir data/jimeng-lab/proof-20260610-overseas-short-videos
+```
+
+Result:
+
+```txt
+raw=data/jimeng-lab/proof-20260610-overseas-short-videos/raw/overseas-short-videos-20260609224456.json
+summary=data/jimeng-lab/proof-20260610-overseas-short-videos/normalized/overseas-short-videos-20260609224456-summary.json
+http_status=200
+ret=0
+errmsg=success
+requested_count=5
+returned_total=4
+next_offset=5
+category_id=11222
+feed_refer=feed_enterauto
+top_by_play[0].play_num=2382533
+top_by_play[0].favorite_num=3656
+top_by_play[0].comment_num=154
+top_by_play[0].share_num=319
+top_by_play[0].duration_sec=57
+top_by_play[0].resolution=3840x2160
+top_by_play[0].fps=30
+top_by_play[0].has_audio=true
+response_text_sha256=dc3ef47f5dd45b9f2681da88f502f39f3ce0ac2b512259f375d70665f63c0487
+```
+
+Normalized examples include durable video metadata and ranking signals. Signed cover URLs are redacted to `coverUrlPresent`; raw responses still contain signed media URLs and stay under ignored `data/**`. URL leak check:
+
+```bash
+rg -n 'X-Amz|x-signature|x-expires|https?://' data/jimeng-lab/proof-20260610-overseas-short-videos/normalized
+```
+
+Result: no matches.
+
 ## Saved Subject / Persona List Smoke
 
 `jimeng-browser-proxy subjects` calls `/mweb/v1/dreamina_subject/get` directly with the logged-in browser session. This is a no-generation, no-spend probe for saved subject/persona records.
@@ -819,8 +865,8 @@ Result:
 
 ```txt
 typecheck passed
-51 tests passed, 0 failed
-browser-proxy help listed subjects, describe-image, controlnet-preview, object-mask, templates, short-videos, upload-video, image2video, frames2video, and lip-sync
+53 tests passed, 0 failed
+browser-proxy help listed overseas-short-videos, subjects, describe-image, controlnet-preview, object-mask, templates, short-videos, upload-video, image2video, frames2video, and lip-sync
 ```
 
 ## Follow-Up
@@ -830,7 +876,7 @@ Next useful captures:
 - image-to-image / byte edit
 - subject/persona creation
 - style reference controls and object segmentation
-- additional template/research endpoints: CapCut template search, plane endpoints, and the bundle-discovered `/mweb/v1/feed_short_video` overseas path
+- additional template/research endpoints: CapCut template search and plane endpoints
 - image-to-video end-frame and multi-frame live proof with explicit frontend mode capture
 - multimodal/all-around reference video
 - lip-sync live submit capture/compare before enabling generation

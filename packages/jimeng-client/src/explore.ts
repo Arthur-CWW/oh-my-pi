@@ -10,6 +10,7 @@ const DEFAULT_EXPLORE_COUNT = 20
 export type JimengExploreWorkType = "video" | "image" | "canvas" | "short_video"
 
 export type JimengShortVideoExploreQuery = Omit<JimengExploreQuery, "workTypes">
+export type JimengOverseasShortVideoQuery = JimengShortVideoExploreQuery
 
 export interface JimengExploreQuery {
   count?: number
@@ -77,6 +78,21 @@ export interface JimengExploreTemplatesResult {
   body: unknown
 }
 
+export interface JimengOverseasShortVideosResult {
+  endpoint: "/mweb/v1/feed_short_video"
+  httpStatus: number
+  ret: string | number | null
+  errmsg: string | null
+  responseTextSha256: string
+  request: Record<string, unknown>
+  hasMore: boolean | null
+  nextOffset: number | null
+  categoryId: number | null
+  requestId: string | null
+  items: JimengExploreTemplateItem[]
+  body: unknown
+}
+
 export async function fetchExploreTemplates(input: {
   client?: JimengClient
   session: JimengSessionBundle
@@ -96,6 +112,36 @@ export async function fetchExploreTemplates(input: {
 
   return {
     endpoint: "/mweb/v1/get_explore",
+    httpStatus: response.status,
+    ret: retValue(body),
+    errmsg: errmsgValue(body),
+    responseTextSha256: sha256(response.text),
+    request,
+    ...parsed,
+    body,
+  }
+}
+
+export async function fetchOverseasShortVideos(input: {
+  client?: JimengClient
+  session: JimengSessionBundle
+  query?: JimengOverseasShortVideoQuery
+}): Promise<JimengOverseasShortVideosResult> {
+  const client = input.client ?? new JimengClient()
+  const query = buildShortVideoExploreQuery(input.query)
+  const request = buildExploreRequestBody(query)
+  const response = await client.requestText(`https://jimeng.jianying.com/mweb/v1/feed_short_video?${DEFAULT_QUERY}`, {
+    method: "POST",
+    headers: buildExploreHeaders(input.session),
+    body: JSON.stringify(request),
+  })
+  const body = safeJson(response.text)
+  assertNoRiskError(body, response.text)
+  assertJimengSuccess(body, "overseas short videos")
+  const parsed = parseOverseasShortVideosBody(body, request)
+
+  return {
+    endpoint: "/mweb/v1/feed_short_video",
     httpStatus: response.status,
     ret: retValue(body),
     errmsg: errmsgValue(body),
@@ -189,6 +235,18 @@ export function parseExploreTemplatesBody(body: unknown): Pick<JimengExploreTemp
   }
 }
 
+export function parseOverseasShortVideosBody(body: unknown, request: Record<string, unknown> = {}): Pick<JimengOverseasShortVideosResult, "hasMore" | "nextOffset" | "categoryId" | "requestId" | "items"> {
+  const data = asRecord(asRecord(body)?.data) ?? asRecord(body)
+  const requestCategoryId = numberValue(request.category_id) ?? numberValue(request.categoryId)
+  return {
+    hasMore: booleanValue(data?.has_more) ?? booleanValue(data?.hasMore),
+    nextOffset: numberValue(data?.next_offset) ?? numberValue(data?.nextOffset),
+    categoryId: numberValue(data?.category_id) ?? numberValue(data?.categoryId) ?? requestCategoryId,
+    requestId: stringValue(data?.request_id) ?? stringValue(data?.requestId),
+    items: asArray(data?.item_list ?? data?.itemList).map(parseExploreTemplateItem).filter((item): item is JimengExploreTemplateItem => !!item),
+  }
+}
+
 export function summarizeExploreTemplates(result: Pick<JimengExploreTemplatesResult, "items" | "hasMore" | "nextOffset" | "categoryId" | "requestId">): Record<string, unknown> {
   const byTemplateType = countBy(result.items.map((item) => item.templateType).filter((value): value is string => !!value))
   const byAiFeature = countBy(result.items.map((item) => item.aiFeature).filter((value): value is string => !!value))
@@ -256,63 +314,73 @@ export function summarizeExploreShortVideos(result: Pick<JimengExploreTemplatesR
   }
 }
 
+export function redactExploreTemplateItems(items: JimengExploreTemplateItem[]): Array<Record<string, unknown>> {
+  return items.map((item) => {
+    const { coverUrl: _coverUrl, ...safeItem } = item
+    return {
+      ...safeItem,
+      coverUrlPresent: !!item.coverUrl,
+    }
+  })
+}
+
 function parseExploreTemplateItem(value: unknown): JimengExploreTemplateItem | null {
   const item = asRecord(value)
-  const common = asRecord(item?.common_attr)
-  const id = stringValue(common?.id)
+  const common = asRecord(item?.common_attr) ?? asRecord(item?.commonAttr)
+  const id = stringValue(field(common, "id"))
   if (!item || !common || !id) return null
 
-  const draft = asRecord(item.aigc_draft)
-  const content = parseDraftContent(stringValue(draft?.content))
+  const draft = asRecord(item.aigc_draft) ?? asRecord(item.aigcDraft)
+  const content = parseDraftContent(stringValue(field(draft, "content")))
   const coreParam = findGenerateCoreParam(content)
-  const metadata = asRecord(safeJson(stringValue(item.metadata_param) ?? ""))
+  const metadata = asRecord(safeJson(stringValue(field(item, "metadata_param", "metadataParam")) ?? ""))
   const extra = asRecord(item.extra)
-  const aiFeature = asRecord(item.ai_feature)
+  const aiFeature = asRecord(item.ai_feature) ?? asRecord(item.aiFeature)
   const statistic = asRecord(item.statistic)
   const video = asRecord(item.video)
-  const originVideo = asRecord(video?.origin_video)
-  const transcodedVideo = asRecord(video?.transcoded_video)
+  const originVideo = asRecord(field(video, "origin_video", "originVideo"))
+  const transcodedVideo = asRecord(field(video, "transcoded_video", "transcodedVideo"))
 
   return {
     id,
-    effectId: stringValue(common.effect_id),
-    effectType: numberValue(common.effect_type),
-    title: stringValue(common.title),
-    description: stringValue(common.description),
-    templateType: stringValue(extra?.template_type),
-    aiFeature: stringValue(extra?.ai_feature),
-    featureTypes: asArray(aiFeature?.features).map((feature) => stringValue(asRecord(feature)?.type)).filter((type): type is string => !!type),
-    coverUrl: stringValue(common.cover_url),
-    coverWidth: numberValue(common.cover_width),
-    coverHeight: numberValue(common.cover_height),
-    aspectRatio: numberValue(common.aspect_ratio),
-    usageNum: numberValue(statistic?.usage_num),
-    favoriteNum: numberValue(statistic?.favorite_num),
-    playNum: numberValue(statistic?.play_num),
-    commentNum: numberValue(statistic?.comment_num),
-    shareNum: numberValue(statistic?.share_num),
-    createTime: numberValue(common.create_time),
-    categoryIds: asArray(item.category_id_list).filter((entry): entry is number => typeof entry === "number"),
-    draftUri: stringValue(draft?.uri),
-    draftVersion: stringValue(draft?.version),
-    prompt: stringValue(coreParam?.prompt),
-    modelReqKey: stringValue(coreParam?.model),
-    seed: numberValue(coreParam?.seed),
-    imageRatio: numberValue(coreParam?.image_ratio),
-    metadataEffectId: stringValue(metadata?.effect_id),
-    metadataEffectType: stringValue(metadata?.effect_type),
-    videoId: stringValue(video?.video_id),
-    videoDurationSec: numberValue(video?.duration),
-    videoDurationMs: numberValue(video?.duration_ms),
-    videoWidth: numberValue(originVideo?.width),
-    videoHeight: numberValue(originVideo?.height),
-    videoFps: numberValue(originVideo?.fps),
-    videoDefinition: stringValue(originVideo?.definition),
-    videoFormat: stringValue(originVideo?.format),
-    videoCodec: stringValue(originVideo?.codec),
-    videoSize: numberValue(originVideo?.size),
-    videoHasAudio: booleanValue(video?.has_audio),
-    videoIsMute: booleanValue(video?.is_mute),
+    effectId: stringValue(field(common, "effect_id", "effectId")),
+    effectType: numberValue(field(common, "effect_type", "effectType")),
+    title: stringValue(field(common, "title")),
+    description: stringValue(field(common, "description")),
+    templateType: stringValue(field(extra, "template_type", "templateType")),
+    aiFeature: stringValue(field(extra, "ai_feature", "aiFeature")),
+    featureTypes: asArray(field(aiFeature, "features")).map((feature) => stringValue(field(asRecord(feature), "type"))).filter((type): type is string => !!type),
+    coverUrl: stringValue(field(common, "cover_url", "coverUrl")),
+    coverWidth: numberValue(field(common, "cover_width", "coverWidth")),
+    coverHeight: numberValue(field(common, "cover_height", "coverHeight")),
+    aspectRatio: numberValue(field(common, "aspect_ratio", "aspectRatio")),
+    usageNum: numberValue(field(statistic, "usage_num", "usageNum")),
+    favoriteNum: numberValue(field(statistic, "favorite_num", "favoriteNum")),
+    playNum: numberValue(field(statistic, "play_num", "playNum")),
+    commentNum: numberValue(field(statistic, "comment_num", "commentNum")),
+    shareNum: numberValue(field(statistic, "share_num", "shareNum")),
+    createTime: numberValue(field(common, "create_time", "createTime")),
+    categoryIds: asArray(field(item, "category_id_list", "categoryIdList")).filter((entry): entry is number => typeof entry === "number"),
+    draftUri: stringValue(field(draft, "uri")),
+    draftVersion: stringValue(field(draft, "version")),
+    prompt: stringValue(field(coreParam, "prompt")),
+    modelReqKey: stringValue(field(coreParam, "model")),
+    seed: numberValue(field(coreParam, "seed")),
+    imageRatio: numberValue(field(coreParam, "image_ratio", "imageRatio")),
+    metadataEffectId: stringValue(field(metadata, "effect_id", "effectId")),
+    metadataEffectType: stringValue(field(metadata, "effect_type", "effectType")),
+    videoId: stringValue(field(video, "video_id", "videoId")),
+    videoDurationSec: numberValue(field(video, "duration")),
+    videoDurationMs: numberValue(field(video, "duration_ms", "durationMs")),
+    videoWidth: numberValue(field(originVideo, "width")),
+    videoHeight: numberValue(field(originVideo, "height")),
+    videoFps: numberValue(field(originVideo, "fps")),
+    videoDefinition: stringValue(field(originVideo, "definition")),
+    videoFormat: stringValue(field(originVideo, "format")),
+    videoCodec: stringValue(field(originVideo, "codec")),
+    videoSize: numberValue(field(originVideo, "size")),
+    videoHasAudio: booleanValue(field(video, "has_audio", "hasAudio")),
+    videoIsMute: booleanValue(field(video, "is_mute", "isMute")),
     transcodedDefinitions: transcodedVideo ? Object.keys(transcodedVideo).sort() : [],
   }
 }
@@ -423,6 +491,11 @@ function safeJson(value: string): unknown {
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return !!value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null
+}
+
+function field(record: Record<string, unknown> | null, snakeKey: string, camelKey?: string): unknown {
+  if (!record) return undefined
+  return record[snakeKey] ?? (camelKey ? record[camelKey] : undefined)
 }
 
 function asArray(value: unknown): unknown[] {
