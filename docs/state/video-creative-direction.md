@@ -305,7 +305,8 @@ Start with `docs/plans/README.md` for the current lane map.
 
 Arthur clarified:
 
-- For the UGC Studio UI implementation stack, prefer React + Tailwind + shadcn for the polished route because it gives faster access to high-quality component primitives. Keep the Solid route available as a comparison/baseline, but do not force Solid if it means reimplementing shadcn-level UI details.
+- For the UGC Studio UI implementation stack, maintain React + Tailwind + shadcn as the primary route. Remove the old Solid UGC Studio implementation instead of keeping two competing UI stacks.
+- UGC Studio should be local-first in Electron: persist workspaces, personas, campaigns, candidates, provider jobs, branch snapshots, notes, archives, and exports locally first; network/provider calls should be explicit jobs with cached request/response metadata.
 - KIE is the near-term generation provider for the workbench, but must stay frugal: browser actions should build dry-run JSON by default, expose credit checks, use cheap image routes before video, and cap live submissions tightly because the current account only has a small credit balance.
 - For the Arcads/Higgsfield-style website demo, the preferred direction is “Figma for UGC ads”: an open canvas with video artboards, editable layer stacks/timeline, floating prompt/workspace command, and secondary menus in modal surfaces. The earlier generated designs were too constrained and missed the video editor/layer view.
 - The product should focus on creative exploration of whole AI UGC personas, TikTok-profile-like collections, formats, and campaigns rather than only single ads or single clips. The user mostly directs one agent to generate, critique, fork, and revise batches; detailed layer editing is a late-stage/fine-tuning mode.

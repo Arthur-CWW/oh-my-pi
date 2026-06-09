@@ -31,7 +31,7 @@ The product should feel like a Mac-native creative operations tool: calm, compac
 - Accent color should be sparse: selection rings, active branch, agent status, warnings, and primary action.
 - Prefer native toolbar density: icon buttons, folder rows, breadcrumbs, inspector panes, command bars.
 - Avoid decorative gradients, bokeh/orbs, neon cyberpunk, purple-dominant palettes, and onboarding-step marketing screens.
-- For the polished web demo stack, bias toward React + Tailwind + shadcn-style primitives. Solid can stay as a route/baseline, but do not spend product energy rebuilding shadcn-quality primitives in Solid unless the side-by-side comparison proves it is worth it.
+- React + Tailwind + shadcn-style primitives are now the primary maintained UI stack. Do not maintain parallel Solid UGC Studio routes or rebuild shadcn-quality primitives in Solid.
 
 ## Product Layout Principles
 
@@ -78,8 +78,10 @@ These are views/focus modes, not necessarily hard routes:
 
 Arthur liked Chorus/Conductor's style direction: native, compact, restrained, clean spacing, good font feel, and agent/workspace state presented without generic SaaS dashboard energy. Preserve that direction for UGC Studio. The ABG paywall/onboarding screenshot is only a weak reference for what ABG means, not a product UX target.
 
-Arthur wants the current Solid implementation and the React/shadcn/Tailwind implementation available on separate routes for before/after and stack comparison. React is the pragmatic default for the polished route because shadcn gives better component leverage; Solid remains useful as a baseline until screenshots decide the direction.
+Arthur chose the React/shadcn/Tailwind implementation as the maintained UGC Studio stack. The old Solid UGC Studio implementation should be removed rather than kept as a parallel route.
 
 After comparing the live routes, Arthur prefers the **default visual style** of the React/shadcn route, but not its current content density or information architecture. The React route is too under-detailed, and the exploration board/campaign surfaces do not match the stronger generated workspace-view references. Treat `docs/design/ugc-studio/workspace-views/01-persona-atlas.png` through `04-campaign-branch-map.png` as the canonical UX references for view detail, spacing, density, and layout. The implementation target is: React/shadcn base styling plus the generated workspace-view IA/detail.
+
+UGC Studio should be local-first because it is running in Electron: workspace state, persona/profile bibles, reference archives, generated candidates, branch history, notes, provider job metadata, and exports should live locally first with explicit provider calls and later sync/import/export as separate features.
 
 Arthur clarified that the ABG example was really a Korean-beauty/K-pop-idol-like influencer genre reference, not a request for the ugly onboarding/paywall flow. The future product should also support reference-profile remixing: take a TikTok/influencer/faceless profile, archive/decompose its public style, preserve pose/timing/template mechanics, and swap in a synthetic persona, new hooks, new product, new caption/text template, and new voice.
