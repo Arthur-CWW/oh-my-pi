@@ -40,10 +40,10 @@ This is the short, top-level scratchpad for repo/workflow cleanup. Keep details 
   - domain: `com.lwouis.alt-tab-macos`
   - plist: `~/Library/Preferences/com.lwouis.alt-tab-macos.plist`
   - key: `exceptions` is a JSON string.
-- Current `exceptions` already hide/ignore several apps. To hide another app from AltTab, add an entry like:
+- CuaDriver is hidden from AltTab via:
 
 ```json
-{"bundleIdentifier":"com.example.App","hide":"1","ignore":"0"}
+{"bundleIdentifier":"com.trycua.driver","hide":"1","ignore":"0"}
 ```
 
-- Need decide which app/window should be hidden (CuaDriver? Ghostty/Pi? automation browser? another app) before editing the defaults value.
+- To hide another app from AltTab, add the same shape with that app's bundle id. Use `defaults read com.lwouis.alt-tab-macos exceptions | python3 -m json.tool` to inspect the current list.
