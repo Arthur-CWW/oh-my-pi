@@ -20,6 +20,18 @@ Locked-use mode is **not** a TypeScript-only Pi extension. It requires a reviewe
 - `packages/browser-use/` already provides clean-room CDP browser automation for Pi.
 - `codex-decomp/docs/computer-use-findings.md` records high-level architecture observations for reference only.
 - `packages/web-access/src/index.ts` shows how this repo registers Pi extension tools.
+- `docs/research/hermes-cua-computer-use.md` records the Hermes Agent / trycua inspection.
+- `packages/web-access/skills/macos-computer-use/SKILL.md` is the current Pi skill for using installed CuaDriver from agent loops.
+
+## 2026-06 CuaDriver / Hermes update
+
+Hermes Agent's Computer Use implementation changes the near-term plan: for **unlocked same-session macOS GUI automation**, do not build a native helper first. Hermes wraps upstream `trycua/cua-driver` over MCP/stdio and adds the useful model-facing layer: `capture(mode="som")`, numbered AX elements, element-indexed actions, `capture_after`, prompt guidance, and a modest safety/approval layer.
+
+Plan adjustment:
+
+- Near term: add a Pi wrapper around installed `cua-driver` CLI/MCP plus Pi-side safety policy and artifacts.
+- Keep the native helper design as the fallback/long-term route only if CuaDriver cannot satisfy a needed capability.
+- Keep locked-use mode separate. CuaDriver solves background control while the user session is unlocked; it does not replace the authorization-plugin / guardian design for lock-screen operation.
 
 ## Architecture
 
@@ -115,16 +127,29 @@ Required safeguards:
 
 ### 5. Implementation phases
 
-#### Phase A — Design/spec only
+#### Phase A — CuaDriver wrapper MVP
 
-- Finalize tool schemas for `packages/computer-use`.
-- Write helper API protocol spec.
+- Finalize a Hermes-style `computer_use` Pi tool schema backed by installed `cua-driver`.
+- Add status/install checks: binary path, daemon status, Accessibility, Screen Recording.
+- Implement `capture/list_apps/focus_app/click/type/key/scroll/set_value/wait` by shelling to CuaDriver CLI or speaking MCP over stdio.
+- Preserve active `(pid, window_id, app)` context between capture and action calls.
+- Require fresh capture before element-indexed mutations.
+
+Deliverable: Pi can visually inspect and operate approved apps while the Mac is unlocked, without custom native code.
+
+#### Phase B — Policy hardening for CuaDriver
+
 - Define approval store format and denylist.
-- Add threat model and uninstall procedure docs.
+- Add per-task app/window allowlist and sensitive-action confirmation.
+- Add artifact handling: screenshot paths, frontmost samples, concise run summaries.
+- Add integration tests with mocked CuaDriver responses.
+- Add threat model and uninstall / permission-reset procedure docs.
 
-Deliverable: docs + stub Pi extension tools returning “helper not installed”.
+Deliverable: safe default unlocked Computer Use package backed by CuaDriver.
 
-#### Phase B — Unlocked helper MVP
+#### Phase C — Native helper fallback, unlocked only
+
+Build a signed macOS helper only if CuaDriver is insufficient for required unlocked capabilities.
 
 - Create Swift helper project.
 - Implement status, permissions, app/window listing.
@@ -133,17 +158,7 @@ Deliverable: docs + stub Pi extension tools returning “helper not installed”
 - Add Pi tools that call the helper.
 - Test against Calculator, Finder, a simple local GUI app, and a non-sensitive browser page.
 
-Deliverable: Pi can visually inspect and operate approved apps while the Mac is unlocked.
-
-#### Phase C — Policy hardening
-
-- Add per-task approvals and app allowlist UI in Pi.
-- Add denylist and sensitive-action confirmation hooks.
-- Add audit logs.
-- Add “fresh app state before write action” enforcement.
-- Add integration tests with mocked helper responses.
-
-Deliverable: safe default unlocked Computer Use package.
+Deliverable: fallback native helper for gaps CuaDriver cannot cover.
 
 #### Phase D — Locked-use prototype, local lab only
 
@@ -177,4 +192,4 @@ Deliverable: opt-in locked-use support with admin-reviewed installation.
 
 ## First concrete next step
 
-Create `packages/computer-use` as a Pi package with stub tools and a protocol spec. Keep locked-use as documentation/prototype only until the unlocked helper and policy layer are solid.
+Create a CuaDriver-backed `computer_use` Pi wrapper (likely in `packages/web-access` first, split to `packages/computer-use` once stable). Keep locked-use as documentation/prototype only until the unlocked CuaDriver wrapper and policy layer are solid.
