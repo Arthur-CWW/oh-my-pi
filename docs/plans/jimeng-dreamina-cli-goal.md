@@ -32,6 +32,8 @@ As of 2026-06-10, the committed Jimeng CLI baseline is:
 - `3e3bde2 Add Jimeng object mask CLI`
 - `00c4aca Add Jimeng subjects CLI`
 - `44dd492 Add Jimeng feed short video CLI`
+- `aa0eafb Add CapCut template metadata CLI`
+- `c7b55b1 Add Jimeng lip sync config CLI`
 
 ImageX local image upload is now committed and live-proved:
 
@@ -88,6 +90,19 @@ Lip-sync VOD video-reference planning is now dry-run-proved:
 - uses frontend bundle evidence for `model_req_key=dreamina_lib_sync_base`, `generateType=LipSync`, and `DAVideoProcessType.LipSyncUserVideo`
 - proof bundle: `data/jimeng-lab/proof-20260610-lip-sync-vod-plan/`
 - live generation is intentionally disabled until a real frontend lip-sync submit is captured and compared.
+
+Lip-sync image/avatar planning is now dry-run-proved:
+
+- `jimeng-browser-proxy lip-sync --image` / `--imageUri`
+- local avatar/reference images upload through the confirmed ImageX scene `2` path first unless an existing provider URI and dimensions are supplied
+- builds `videoGenInputs.i2vOpt.realmanAvatar.originImage`
+- attaches `ttsInfo` with text, `toneId`, optional tone metadata, and speed
+- uses frontend bundle evidence for `model_req_key=dreamina_lib_sync_image_quick_1.5`, `generateType=LipSync`, and `DAVideoProcessType.LipSyncImage`
+- proof bundle: `data/jimeng-lab/proof-20260610-lip-sync-image-plan/`
+- latest proof uploaded `image_uri=tos-cn-i-tb4s082cfz/487472ac3b204caa89fc1b2764c0aa1e.png`, `width=2048`, `height=2048`
+- summary hash: `ed087e3df60ae9c30dc835d2d410867670229abfb115adb186846aa1aa631fc6`
+- dry-run plan hash: `5386ac4dd343228680dc66395faade92dfbd225d4968baa3f2e2decba248dea4`
+- live generation is intentionally disabled until a real frontend image/avatar lip-sync submit is captured and compared.
 
 Lip-sync/digital-human model config is now live-proved without generation spend:
 
@@ -204,11 +219,11 @@ Saved subject/persona listing is now live-proved without generation spend:
 - proof bundle: `data/jimeng-lab/proof-20260610-subjects/`
 - latest proof returned `ret=0`, `errmsg=success`, `subject_count=0`, `has_more=false`, `next_cursor=0`, and response hash `618858c54ed5d0b298cf37ed03bf29d27042f54e3e999bb143932cec6a3ef31f`.
 
-The next slice is **reference controls and video-reference consumers**. Use the VOD provider reference plus frontend captures to unlock live lip-sync, reference-video, multimodal/all-around reference, pose/style/depth/canny controls, and live end-frame/multi-frame image-to-video paths.
+The next slice is **lip-sync submit capture and reference-video consumers**. Use the VOD provider reference, ImageX avatar reference, and frontend captures to unlock live lip-sync, reference-video, multimodal/all-around reference, pose/style/depth/canny controls, and live end-frame/multi-frame image-to-video paths.
 
 Immediate next slices:
 
-1. Capture a frontend lip-sync submit and compare the converted `draft_content` with the dry-run `providerInput`; enable live submit only if it matches.
+1. Capture frontend VOD and image/avatar lip-sync submits and compare the converted `draft_content` with the dry-run `providerInput`; enable live submit only if it matches.
 2. Capture the frontend's explicit end-frame/multi-frame mode and live-prove `frames2video` only if the payload contract matches.
 3. Map style/reference roles and the new object-mask provider references into generation payload patches.
 4. Implement digital-human generation using the confirmed VOD reference path where applicable.

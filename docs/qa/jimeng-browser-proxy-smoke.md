@@ -661,6 +661,50 @@ ttsInfo.sourceType=text-to-speech
 
 The command is intentionally dry-run-only. Live submit still needs a captured frontend lip-sync `/mweb/v1/aigc_draft/generate` request so the final converted `draft_content` can be compared before spending quota.
 
+## Lip-Sync Image/Avatar Plan Smoke
+
+`jimeng-browser-proxy lip-sync --image` now prepares the image/avatar lip-sync provider input without live submit. It uploads the local reference image through ImageX first, then writes the dry-run plan using the frontend `i2vOpt.realmanAvatar` payload shape. This consumes upload API calls but does not submit generation.
+
+Command:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts lip-sync \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --image data/jimeng-lab/ugc-studio-kbeauty-image/artifacts/jimeng-kbeauty-01.png \
+  --voice-id 7597003459665072686 \
+  --tone-key 清爽女声 \
+  --text '三秒告诉你为什么这款补水精华适合熬夜后的底妆。' \
+  --outDir data/jimeng-lab/proof-20260610-lip-sync-image-plan \
+  --dryRun
+```
+
+Result:
+
+```txt
+plan=data/jimeng-lab/proof-20260610-lip-sync-image-plan/raw/lip-sync-20260609233956-n72ys1-dry-run-plan.json
+summary=data/jimeng-lab/proof-20260610-lip-sync-image-plan/normalized/lip-sync-20260609233956-n72ys1-summary.json
+reference_upload=data/jimeng-lab/proof-20260610-lip-sync-image-plan/raw/lip-sync-20260609233956-n72ys1-reference-upload-0-raw.json
+artifact_copy=data/jimeng-lab/proof-20260610-lip-sync-image-plan/artifacts/lip-sync-20260609233956-n72ys1-lip_sync_image-jimeng-kbeauty-01.png
+status=dry-run-only
+mode=image
+model_req_key=dreamina_lib_sync_image_quick_1.5
+provider path=input.videoGenInputs.i2vOpt.realmanAvatar
+process flow=DAVideoProcessType.LipSyncImage
+image_uri=tos-cn-i-tb4s082cfz/487472ac3b204caa89fc1b2764c0aa1e.png
+dimensions=2048x2048
+summary_sha256=ed087e3df60ae9c30dc835d2d410867670229abfb115adb186846aa1aa631fc6
+dry_run_plan_sha256=5386ac4dd343228680dc66395faade92dfbd225d4968baa3f2e2decba248dea4
+```
+
+Normalized token/signed URL marker check:
+
+```bash
+rg -n 'X-Amz|x-signature|x-expires|sessionid|sid_guard|msToken' \
+  data/jimeng-lab/proof-20260610-lip-sync-image-plan/normalized
+```
+
+Expected result: no matches.
+
 ## Lip-Sync Config Smoke
 
 `jimeng-browser-proxy lip-sync-config` fetches the no-spend model configs for digital-human/image-avatar lip sync and video lip sync.
@@ -994,7 +1038,7 @@ Result:
 
 ```txt
 typecheck passed
-63 tests passed, 0 failed
+65 tests passed, 0 failed
 browser-proxy help listed lip-sync-config, capcut-template-metadata, overseas-short-videos, capcut-categories, subjects, templates, and short-videos
 ```
 

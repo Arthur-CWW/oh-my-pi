@@ -22,7 +22,7 @@ Use the browser as an authenticated session holder and API discovery surface. Mo
 |---|---:|---|---|
 | `/mweb/v1/workspace/create` | POST | Creates a generation workspace/conversation. | Captured |
 | `/mweb/v1/workspace/update` | POST | Renames/updates current workspace metadata. | Captured |
-| `/mweb/v1/aigc_draft/generate` | POST | Unified workbench submit for current text-to-image, text-to-video, and first-frame image-to-video draft generation paths. | Implemented for workbench text-to-image, text-to-video templates, and local-upload-backed image-to-video |
+| `/mweb/v1/aigc_draft/generate` | POST | Unified workbench submit for current text-to-image, text-to-video, first-frame image-to-video, and lip-sync draft generation paths. | Implemented for workbench text-to-image, text-to-video templates, and local-upload-backed image-to-video; dry-run-proved for VOD and image/avatar lip-sync provider inputs |
 | `/mweb/v1/get_asset_list` | POST | Poll/list workspace assets and completed image results. | Implemented for workbench text-to-image |
 | `/mweb/v1/get_history_by_ids` | POST | Older/general task polling by `submit_id`. | Implemented for captured history-based templates |
 | `/mweb/v1/creation_agent/v2/conversation` | POST/SSE | Older agent text-to-image conversation submit. | Preserved |
@@ -79,6 +79,42 @@ data/jimeng-lab/voice-library-samples/
 ```
 
 The latest full voice sample run generated `142/142` MP3 files with concurrency `1` and no `1019` / `shark not pass` risk-control errors.
+
+## Confirmed Lip-Sync Planning Contracts
+
+The frontend exposes two useful lip-sync branches under the same submit endpoint. Both are currently implemented as dry-run planning only; live generation remains disabled until a real UI submit is captured and compared.
+
+| Branch | Model key | Provider-input path | Current proof |
+|---|---|---|---|
+| VOD/user-video lip-sync | `dreamina_lib_sync_base` | `videoGenInputs.v2vOpt.lipSyncUserVideo` | `data/jimeng-lab/proof-20260610-lip-sync-vod-plan/` |
+| Image/avatar lip-sync | `dreamina_lib_sync_image_quick_1.5` | `videoGenInputs.i2vOpt.realmanAvatar` | `data/jimeng-lab/proof-20260610-lip-sync-image-plan/` |
+
+Image/avatar dry-run command:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts lip-sync \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --image data/jimeng-lab/ugc-studio-kbeauty-image/artifacts/jimeng-kbeauty-01.png \
+  --voice-id 7597003459665072686 \
+  --tone-key 清爽女声 \
+  --text '三秒告诉你为什么这款补水精华适合熬夜后的底妆。' \
+  --outDir data/jimeng-lab/proof-20260610-lip-sync-image-plan \
+  --dryRun
+```
+
+Observed safe image/avatar summary:
+
+```txt
+mode=image
+image_uri=tos-cn-i-tb4s082cfz/487472ac3b204caa89fc1b2764c0aa1e.png
+width=2048
+height=2048
+tts_source=text-to-speech
+tone_id=7597003459665072686
+summary_sha256=ed087e3df60ae9c30dc835d2d410867670229abfb115adb186846aa1aa631fc6
+```
+
+Local image/avatar mode uploads the image through the confirmed ImageX scene `2` path before writing the dry-run plan. Raw upload traces remain ignored under `data/**`.
 
 ## Confirmed Local Image Upload Contract
 

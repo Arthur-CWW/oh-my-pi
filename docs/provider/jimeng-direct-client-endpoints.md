@@ -1036,7 +1036,78 @@ data/jimeng-lab/proof-20260610-lip-sync-vod-plan/normalized/lip-sync-20260609145
 
 This is deliberately a no-spend planning command. Before enabling live generation, capture a real UI lip-sync submit and compare the converted `draft_content` with the dry-run `providerInput`.
 
-### 14.1) Lip-sync and digital-human model config
+### 14.1) Lip-sync image/avatar dry-run plan
+- Status:
+  - dry-run-proved with `jimeng-browser-proxy lip-sync --image`
+  - implemented in `packages/jimeng-client/src/lip-sync.ts`
+  - CLI wiring in `packages/jimeng-client/src/browser-proxy-cli.ts`
+  - tested with provider-input assertions in `packages/jimeng-client/test/lip-sync.test.ts`
+  - live submit intentionally disabled until a frontend image/avatar lip-sync `/mweb/v1/aigc_draft/generate` request is captured and compared
+- Frontend bundle evidence:
+
+```txt
+generateType: LipSync
+model_req_key: dreamina_lib_sync_image_quick_1.5
+input.videoGenInputs.i2vOpt.realmanAvatar.originImage.imageUri
+input.videoGenInputs.i2vOpt.realmanAvatar.originImage.width
+input.videoGenInputs.i2vOpt.realmanAvatar.originImage.height
+input.videoGenInputs.i2vOpt.realmanAvatar.supportedModes
+input.videoGenInputs.i2vOpt.realmanAvatar.ttsInfo
+processFlows[0].curProcessFlows[0]: DAVideoProcessType.LipSyncImage
+submit query: scenario=image_video_generation, featureKey=text_to_video
+```
+
+Provider-input shape prepared by the CLI:
+
+```txt
+videoGenInputs.i2vOpt.realmanAvatar.originImage.imageUri
+videoGenInputs.i2vOpt.realmanAvatar.originImage.imageUrl
+videoGenInputs.i2vOpt.realmanAvatar.originImage.width
+videoGenInputs.i2vOpt.realmanAvatar.originImage.height
+videoGenInputs.i2vOpt.realmanAvatar.supportedModes
+videoGenInputs.i2vOpt.realmanAvatar.ttsInfo.text
+videoGenInputs.i2vOpt.realmanAvatar.ttsInfo.toneId
+videoGenInputs.i2vOpt.realmanAvatar.ttsInfo.speed
+```
+
+Proof command:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts lip-sync \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --image data/jimeng-lab/ugc-studio-kbeauty-image/artifacts/jimeng-kbeauty-01.png \
+  --voice-id 7597003459665072686 \
+  --tone-key 清爽女声 \
+  --text '三秒告诉你为什么这款补水精华适合熬夜后的底妆。' \
+  --outDir data/jimeng-lab/proof-20260610-lip-sync-image-plan \
+  --dryRun
+```
+
+Proof files:
+
+```txt
+data/jimeng-lab/proof-20260610-lip-sync-image-plan/raw/lip-sync-20260609233956-n72ys1-dry-run-plan.json
+data/jimeng-lab/proof-20260610-lip-sync-image-plan/raw/lip-sync-20260609233956-n72ys1-reference-upload-0-raw.json
+data/jimeng-lab/proof-20260610-lip-sync-image-plan/normalized/lip-sync-20260609233956-n72ys1-summary.json
+data/jimeng-lab/proof-20260610-lip-sync-image-plan/artifacts/lip-sync-20260609233956-n72ys1-lip_sync_image-jimeng-kbeauty-01.png
+```
+
+Observed safe summary:
+
+```txt
+mode=image
+model_req_key=dreamina_lib_sync_image_quick_1.5
+image_uri=tos-cn-i-tb4s082cfz/487472ac3b204caa89fc1b2764c0aa1e.png
+width=2048
+height=2048
+supported_modes=avatar
+summary_sha256=ed087e3df60ae9c30dc835d2d410867670229abfb115adb186846aa1aa631fc6
+dry_run_plan_sha256=5386ac4dd343228680dc66395faade92dfbd225d4968baa3f2e2decba248dea4
+```
+
+This is deliberately a no-spend planning command. Local image mode still uploads the reference image to ImageX first so the provider URI/dimensions match frontend payloads; it does not submit generation.
+
+### 14.2) Lip-sync and digital-human model config
 - `POST https://jimeng.jianying.com/mweb/v1/video_generate/get_common_config`
 - Status:
   - live-proved without generation spend
@@ -1437,7 +1508,7 @@ Current support matrix:
 | `image2video` | implemented in `jimeng-browser-proxy`; partial in low-level compat helper | Browser proxy can upload local `--image`, inject `first_frame_image`, submit/poll/download MP4. Low-level helper accepts confirmed `--firstFrameUri`. |
 | `frames2video` | dry-run-proved in `jimeng-browser-proxy`; partial in low-level compat helper | Browser proxy can upload local `--image` and `--lastImage`, inject `first_frame_image`/`end_frame_image`, and write a no-generation plan. Live proof still needs explicit frontend end-frame mode evidence. |
 | `lip-sync-config` | implemented in `jimeng-browser-proxy` | No-spend direct lip-sync/digital-human model config for image/avatar and video modes. |
-| `lip-sync` | dry-run-proved in `jimeng-browser-proxy` | Browser proxy can prepare the VOD-reference lip-sync provider input from a VOD `vid`/metadata plus TTS voice flags. Live submit still needs a frontend submit capture/compare. |
+| `lip-sync` | dry-run-proved in `jimeng-browser-proxy` | Browser proxy can prepare VOD-reference and image/avatar lip-sync provider inputs from VOD/ImageX provider references plus TTS voice flags. Live submit still needs a frontend submit capture/compare. |
 | `templates` | implemented in `jimeng-browser-proxy` | No-spend direct `/mweb/v1/get_explore` template mining with prompt/model/usage normalization. |
 | `overseas-short-videos` | implemented in `jimeng-browser-proxy` | No-spend direct `/mweb/v1/feed_short_video` short-video/reference mining with ranking and video metadata normalization. |
 | `capcut-categories` | implemented in `jimeng-browser-proxy` | No-spend signed CapCut `/lv/v1/cc_web/plane/get_categories` commercial template category catalog. |
@@ -1508,7 +1579,7 @@ data/jimeng-captures/<timestamp>-<flow>/
 Do not commit raw captures or generated media. If a redacted summary is promoted into tracked docs, manually review it first for cookies, reusable signatures, signed URL values, account IDs, and private prompt/media content.
 
 ## Next reverse target (immediate)
-1. Capture a real frontend lip-sync submit and compare it against the VOD dry-run provider-input plan before enabling live generation.
+1. Capture real frontend VOD and image/avatar lip-sync submits and compare them against the dry-run provider-input plans before enabling live generation.
 2. Use the VOD upload path to unlock reference-video and multimodal/all-around reference flows.
 3. Capture the frontend's explicit end-frame/multi-frame mode and live-prove `frames2video` only after confirming the mode-specific payload contract.
 4. Expand template/research mining beyond direct Explore/feed_short_video with CapCut template search and plane endpoints.

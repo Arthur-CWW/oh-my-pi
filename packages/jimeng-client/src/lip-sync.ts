@@ -1,9 +1,17 @@
 import { randomUUID } from "node:crypto"
 import { jimengError } from "./errors"
-import { type JimengVideoUploadSummary } from "./upload"
+import { type JimengImageUploadSummary, type JimengVideoUploadSummary } from "./upload"
 
 export const DEFAULT_LIP_SYNC_VIDEO_MODEL_REQ_KEY = "dreamina_lib_sync_base"
+export const DEFAULT_LIP_SYNC_IMAGE_MODEL_REQ_KEY = "dreamina_lib_sync_image_quick_1.5"
 export const DEFAULT_LIP_SYNC_VIDEO_MODE = "avatar"
+
+export interface JimengLipSyncImageReference {
+  uri: string
+  url?: string | null
+  width: number
+  height: number
+}
 
 export interface JimengLipSyncVideoReference {
   vid: string
@@ -44,6 +52,17 @@ export interface BuildJimengLipSyncVideoPlanInput {
   ttsInfo: JimengLipSyncTtsInfo
 }
 
+export interface BuildJimengLipSyncImagePlanInput {
+  submitId?: string
+  workspaceId?: string | number
+  prompt?: string
+  modelReqKey?: string
+  videoMode?: string
+  image: JimengLipSyncImageReference
+  supportedModes?: string[]
+  ttsInfo: JimengLipSyncTtsInfo
+}
+
 export interface JimengLipSyncVideoPlan {
   command: "lip-sync"
   mode: "video"
@@ -81,6 +100,99 @@ export interface JimengLipSyncVideoPlan {
     }
   }
   nextProbe: string
+}
+
+export interface JimengLipSyncImagePlan {
+  command: "lip-sync"
+  mode: "image"
+  status: "dry-run-only"
+  reason: string
+  submitId: string
+  endpoint: "/mweb/v1/aigc_draft/generate"
+  modelReqKey: string
+  workspaceId?: string | number
+  providerInput: {
+    videoGenInputs: {
+      videoMode: string
+      prompt: string
+      i2vOpt: {
+        realmanAvatar: {
+          originImage: {
+            imageUri: string
+            imageUrl?: string | null
+            width: number
+            height: number
+          }
+          supportedModes: string[]
+          ttsInfo: JimengLipSyncTtsInfo
+        }
+      }
+    }
+    modelReqKey: string
+  }
+  mockModelEvidence: {
+    generateType: "LipSync"
+    processFlows: Array<{ curProcessFlows: ["DAVideoProcessType.LipSyncImage"] }>
+    submitQueryParams: {
+      babiParam: {
+        scenario: "image_video_generation"
+        featureKey: "text_to_video"
+        featureEntranceDetail: "to-generate-text_to_video"
+      }
+    }
+  }
+  nextProbe: string
+}
+
+export function buildJimengLipSyncImagePlan(input: BuildJimengLipSyncImagePlanInput): JimengLipSyncImagePlan {
+  const image = normalizeLipSyncImageReference(input.image)
+  const submitId = input.submitId ?? randomUUID()
+  const modelReqKey = input.modelReqKey ?? DEFAULT_LIP_SYNC_IMAGE_MODEL_REQ_KEY
+  const prompt = input.prompt ?? "对参考人物图片进行口型同步，保持人物身份、镜头构图和真实自拍视频质感。"
+  const videoMode = input.videoMode ?? DEFAULT_LIP_SYNC_VIDEO_MODE
+  const supportedModes = input.supportedModes?.length ? input.supportedModes : [videoMode]
+
+  return {
+    command: "lip-sync",
+    mode: "image",
+    status: "dry-run-only",
+    reason: "Frontend bundle confirms the image/avatar lip-sync model shape, but live submit is deferred until a real /aigc_draft/generate request is captured.",
+    submitId,
+    endpoint: "/mweb/v1/aigc_draft/generate",
+    modelReqKey,
+    workspaceId: input.workspaceId,
+    providerInput: {
+      videoGenInputs: {
+        videoMode,
+        prompt,
+        i2vOpt: {
+          realmanAvatar: {
+            originImage: {
+              imageUri: image.uri,
+              ...(image.url ? { imageUrl: image.url } : {}),
+              width: image.width,
+              height: image.height,
+            },
+            supportedModes,
+            ttsInfo: normalizeTtsInfo(input.ttsInfo),
+          },
+        },
+      },
+      modelReqKey,
+    },
+    mockModelEvidence: {
+      generateType: "LipSync",
+      processFlows: [{ curProcessFlows: ["DAVideoProcessType.LipSyncImage"] }],
+      submitQueryParams: {
+        babiParam: {
+          scenario: "image_video_generation",
+          featureKey: "text_to_video",
+          featureEntranceDetail: "to-generate-text_to_video",
+        },
+      },
+    },
+    nextProbe: "Capture the Jimeng image/avatar lip-sync UI submit request and compare its converted draft_content against providerInput before enabling live submit.",
+  }
 }
 
 export function buildJimengLipSyncVideoPlan(input: BuildJimengLipSyncVideoPlanInput): JimengLipSyncVideoPlan {
@@ -130,6 +242,31 @@ export function buildJimengLipSyncVideoPlan(input: BuildJimengLipSyncVideoPlanIn
   }
 }
 
+export function lipSyncImageReferenceFromUploadSummary(summary: JimengImageUploadSummary): JimengLipSyncImageReference {
+  const uri = summary.imageUris[0]
+  const plugin = summary.pluginResults.find((item) => item.imageUri === uri) ?? summary.pluginResults[0]
+  const width = plugin?.imageWidth ?? null
+  const height = plugin?.imageHeight ?? null
+  if (!uri || !width || !height) {
+    throw jimengError({
+      category: "validation",
+      code: "LIP_SYNC_IMAGE_UPLOAD_METADATA_MISSING",
+      message: "Image upload summary is missing URI, width, or height needed by image/avatar lip-sync.",
+      retryable: false,
+      details: {
+        uriPresent: !!uri,
+        widthPresent: !!width,
+        heightPresent: !!height,
+      },
+    })
+  }
+  return {
+    uri,
+    width,
+    height,
+  }
+}
+
 export function lipSyncVideoReferenceFromUploadSummary(summary: JimengVideoUploadSummary): JimengLipSyncVideoReference {
   if (!summary.vid || !summary.width || !summary.height || !summary.duration) {
     throw jimengError({
@@ -156,6 +293,28 @@ export function lipSyncVideoReferenceFromUploadSummary(summary: JimengVideoUploa
     format: summary.format,
     codec: summary.codec,
     md5: summary.md5,
+  }
+}
+
+export function normalizeLipSyncImageReference(input: JimengLipSyncImageReference): JimengLipSyncImageReference {
+  if (!input.uri || input.width <= 0 || input.height <= 0) {
+    throw jimengError({
+      category: "validation",
+      code: "LIP_SYNC_IMAGE_REFERENCE_INVALID",
+      message: "lip-sync image reference requires provider URI, positive width, and positive height.",
+      retryable: false,
+      details: {
+        uriPresent: !!input.uri,
+        width: input.width,
+        height: input.height,
+      },
+    })
+  }
+  return {
+    uri: input.uri,
+    ...(input.url ? { url: input.url } : {}),
+    width: input.width,
+    height: input.height,
   }
 }
 

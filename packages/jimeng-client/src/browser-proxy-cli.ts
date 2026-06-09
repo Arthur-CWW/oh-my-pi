@@ -34,7 +34,14 @@ import {
   summarizeExploreShortVideos,
   summarizeExploreTemplates,
 } from "./explore"
-import { buildJimengLipSyncVideoPlan, lipSyncVideoReferenceFromUploadSummary, type JimengLipSyncVideoReference } from "./lip-sync"
+import {
+  buildJimengLipSyncImagePlan,
+  buildJimengLipSyncVideoPlan,
+  lipSyncImageReferenceFromUploadSummary,
+  lipSyncVideoReferenceFromUploadSummary,
+  type JimengLipSyncImageReference,
+  type JimengLipSyncVideoReference,
+} from "./lip-sync"
 import {
   buildJimengControlNetSaveParams,
   defaultControlNetPreviewBabiParam,
@@ -93,7 +100,7 @@ Commands:
   text2video    Submit text-to-video from a captured workbench template
   image2video   Upload/use a first-frame image URI, then submit image-to-video
   frames2video  Upload/use first and end-frame image URIs, then submit image-to-video
-  lip-sync      Dry-run VOD video-reference lip-sync payload plan from text/voice
+  lip-sync      Dry-run image/avatar or VOD video-reference lip-sync payload plan from text/voice
 
 Options:
   --cdp <url>                   CDP URL (default: ${DEFAULT_CDP_URL})
@@ -135,7 +142,10 @@ Options:
   --videoHeight <n>              Existing reference video height for lip-sync
   --videoDurationSec <sec>       Existing reference video duration for lip-sync
   --videoMode <value>            Lip-sync videoMode override from a confirmed frontend capture
-  --image <path>                 Local first-frame image for image2video
+  --imageWidth <n>               Existing provider image width for lip-sync image/avatar mode
+  --imageHeight <n>              Existing provider image height for lip-sync image/avatar mode
+  --imageUrl <url>               Optional existing provider image preview URL for lip-sync image/avatar mode
+  --image <path>                 Local first-frame image for image2video or image/avatar lip-sync
   --lastImage <path>             Local end-frame image for frames2video
   --firstFrameUri <uri>          Existing Jimeng/ImageX provider URI for image2video
   --lastFrameUri <uri>           Existing provider URI for end-frame experiments
@@ -241,6 +251,13 @@ Examples:
     --text "三秒告诉你为什么这款补水精华适合熬夜后的底妆。" \\
     --dryRun
 
+  jimeng-browser-proxy lip-sync \\
+    --session data/jimeng-lab/raw/session-bundle-current.json \\
+    --image data/jimeng-lab/ugc-studio-kbeauty-image/artifacts/jimeng-kbeauty-01.png \\
+    --voice-id 7597003459665072686 \\
+    --text "三秒告诉你为什么这款补水精华适合熬夜后的底妆。" \\
+    --dryRun
+
 Live generation uses the browser session but does not foreground the browser. Keep concurrency at 1.`
 
 interface CliArgs {
@@ -307,6 +324,9 @@ interface CliArgs {
   videoHeight?: number
   videoDurationSec?: number
   videoMode?: string
+  imageWidth?: number
+  imageHeight?: number
+  imageUrl?: string
   image?: string
   lastImage?: string
   firstFrameUri?: string
@@ -1283,6 +1303,74 @@ async function main(argv: string[]): Promise<void> {
 
     const dirs = ensureOutputDirs(path.resolve(args.outDir))
     const runId = `lip-sync-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${Math.random().toString(36).slice(2, 8)}`
+    const hasImageInput = !!args.image || !!args.imageUri
+    const hasVideoInput = !!args.video || !!args.vid || !!args.videoUri || (!!args.file && !hasImageInput)
+    if (hasImageInput && hasVideoInput) {
+      throw new Error("lip-sync accepts either image/avatar input (--image or --imageUri) or video input (--video/--file or --vid), not both")
+    }
+    const ttsInfo = {
+      sourceType: "text-to-speech" as const,
+      text: args.text ?? "三秒告诉你为什么这款补水精华适合熬夜后的底妆。",
+      speed: args.speed ?? 1,
+      toneId: args.voiceId,
+      toneKey: args.toneKey ?? args.voiceTitle,
+      toneCategoryId: args.toneCategoryId,
+      toneCategoryKey: args.toneCategoryKey,
+    }
+
+    if (hasImageInput) {
+      const referenceUploads: ReferenceUploadSummary[] = []
+      const imageUpload = args.image
+        ? await uploadReferenceImage({
+          session,
+          dirs,
+          runId,
+          role: "lip_sync_image",
+          index: 0,
+          sourceFile: args.image,
+        })
+        : undefined
+      if (imageUpload) referenceUploads.push(imageUpload)
+      const imageReference = imageUpload
+        ? lipSyncImageReferenceFromUploadSummary(imageUpload.image_upload)
+        : lipSyncImageReferenceFromArgs(args)
+
+      const plan = buildJimengLipSyncImagePlan({
+        prompt: args.prompt,
+        modelReqKey: args.modelReqKey,
+        videoMode: args.videoMode,
+        image: imageReference,
+        ttsInfo,
+      })
+      const file = path.join(dirs.rawDir, `${runId}-dry-run-plan.json`)
+      writeJson(file, {
+        plan,
+        reference_uploads: referenceUploads,
+        browser_session: redactSession(session),
+      })
+      writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+        command: "lip-sync",
+        mode: plan.mode,
+        status: plan.status,
+        reason: plan.reason,
+        model_req_key: plan.modelReqKey,
+        image_reference: imageReference,
+        tts_info: plan.providerInput.videoGenInputs.i2vOpt.realmanAvatar.ttsInfo,
+        reference_uploads: referenceUploads.map((upload) => ({
+          index: upload.index,
+          role: upload.role,
+          source_file: upload.source_file,
+          artifact_copy: upload.artifact_copy,
+          uri: upload.uri,
+          width: upload.image_upload.pluginResults[0]?.imageWidth ?? null,
+          height: upload.image_upload.pluginResults[0]?.imageHeight ?? null,
+        })),
+        next_probe: plan.nextProbe,
+      })
+      console.log(`[jimeng-browser-proxy] lip-sync image dry run saved: ${file}`)
+      return
+    }
+
     const referenceUploads: ReferenceVideoUploadSummary[] = []
     const videoFile = args.video ?? args.file
     const videoUpload = videoFile
@@ -1305,15 +1393,7 @@ async function main(argv: string[]): Promise<void> {
       modelReqKey: args.modelReqKey,
       videoMode: args.videoMode,
       video: videoReference,
-      ttsInfo: {
-        sourceType: "text-to-speech",
-        text: args.text ?? "三秒告诉你为什么这款补水精华适合熬夜后的底妆。",
-        speed: args.speed ?? 1,
-        toneId: args.voiceId,
-        toneKey: args.toneKey ?? args.voiceTitle,
-        toneCategoryId: args.toneCategoryId,
-        toneCategoryKey: args.toneCategoryKey,
-      },
+      ttsInfo,
     })
     const file = path.join(dirs.rawDir, `${runId}-dry-run-plan.json`)
     writeJson(file, {
@@ -1323,6 +1403,7 @@ async function main(argv: string[]): Promise<void> {
     })
     writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
       command: "lip-sync",
+      mode: plan.mode,
       status: plan.status,
       reason: plan.reason,
       model_req_key: plan.modelReqKey,
@@ -1506,6 +1587,8 @@ function parseArgs(argv: string[]): CliArgs {
   const videoWidth = flags.videoWidth ? Number(flags.videoWidth) : undefined
   const videoHeight = flags.videoHeight ? Number(flags.videoHeight) : undefined
   const videoDurationSec = flags.videoDurationSec ? Number(flags.videoDurationSec) : undefined
+  const imageWidth = flags.imageWidth ? Number(flags.imageWidth) : undefined
+  const imageHeight = flags.imageHeight ? Number(flags.imageHeight) : undefined
   const speed = flags.speed ? Number(flags.speed) : undefined
   const strength = flags.strength ? Number(flags.strength) : undefined
   const seed = flags.seed ? Number(flags.seed) : undefined
@@ -1540,6 +1623,12 @@ function parseArgs(argv: string[]): CliArgs {
   }
   if (videoDurationSec !== undefined && (!Number.isFinite(videoDurationSec) || videoDurationSec <= 0)) {
     throw new Error("--videoDurationSec must be a positive number")
+  }
+  if (imageWidth !== undefined && (!Number.isInteger(imageWidth) || imageWidth < 1)) {
+    throw new Error("--imageWidth must be a positive integer")
+  }
+  if (imageHeight !== undefined && (!Number.isInteger(imageHeight) || imageHeight < 1)) {
+    throw new Error("--imageHeight must be a positive integer")
   }
   if (speed !== undefined && (!Number.isFinite(speed) || speed < 0.5 || speed > 2)) {
     throw new Error("--speed must be a number from 0.5 to 2")
@@ -1588,6 +1677,9 @@ function parseArgs(argv: string[]): CliArgs {
     videoHeight,
     videoDurationSec,
     videoMode: flags.videoMode,
+    imageWidth,
+    imageHeight,
+    imageUrl: flags.imageUrl,
     image: flags.image,
     lastImage: flags.lastImage,
     firstFrameUri: flags.firstFrameUri,
@@ -1652,7 +1744,7 @@ interface ReferenceUploadSummary {
   image_upload: JimengImageUploadResult["summary"]
 }
 
-type ReferenceImageRole = "first_frame" | "end_frame" | "controlnet_reference" | "object_mask_reference"
+type ReferenceImageRole = "first_frame" | "end_frame" | "controlnet_reference" | "object_mask_reference" | "lip_sync_image"
 
 interface ReferenceVideoUploadSummary {
   index: number
@@ -1792,6 +1884,19 @@ function lipSyncVideoReferenceFromArgs(args: CliArgs): JimengLipSyncVideoReferen
     width: args.videoWidth,
     height: args.videoHeight,
     duration: args.videoDurationSec,
+  }
+}
+
+function lipSyncImageReferenceFromArgs(args: CliArgs): JimengLipSyncImageReference {
+  if (!args.imageUri || !args.imageWidth || !args.imageHeight) {
+    throw new Error("lip-sync image/avatar mode requires --image or existing --imageUri with --imageWidth and --imageHeight")
+  }
+
+  return {
+    uri: args.imageUri,
+    ...(args.imageUrl ? { url: args.imageUrl } : {}),
+    width: args.imageWidth,
+    height: args.imageHeight,
   }
 }
 
