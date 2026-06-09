@@ -13,7 +13,7 @@ This goal is intentionally coverage-and-proof driven. Do not claim completion be
 
 ## Current Continuation State
 
-As of 2026-06-09, the committed baseline is:
+As of 2026-06-10, the committed Jimeng CLI baseline is:
 
 - `65a67bd Add Jimeng browser proxy client`
 - `6ba0ae9 Add Jimeng voice catalog and TTS CLI`
@@ -21,6 +21,8 @@ As of 2026-06-09, the committed baseline is:
 - `6fb9c61 Add Jimeng ImageX image upload CLI`
 - `f683706 Update Jimeng CLI extraction goal`
 - `35d9171 Add Jimeng image-to-video CLI proof`
+- `28fc0cf Add Jimeng VOD video upload CLI proof`
+- `0bb9bb5 Add Jimeng frames-to-video dry-run CLI`
 
 ImageX local image upload is now committed and live-proved:
 
@@ -73,9 +75,10 @@ The next slice is **reference controls and video-reference consumers**. Use the 
 Immediate next slices:
 
 1. Capture the frontend's explicit end-frame/multi-frame mode and live-prove `frames2video` only if the payload contract matches.
-2. Image-to-video reference controls such as pose/style/depth/canny/reference roles, depending on the clearest captured contracts.
-3. Lip-sync or digital-human generation using the confirmed VOD reference path where applicable.
-4. Voice clone and subject/persona voice generation once the UI/API flow is captured.
+2. Map image-to-video reference controls such as pose/style/depth/canny/reference roles, depending on the clearest captured contracts.
+3. Implement lip-sync or digital-human generation using the confirmed VOD reference path where applicable.
+4. Implement voice clone and subject/persona voice generation once the UI/API flow is captured.
+5. Keep each slice small enough to prove and commit before moving on.
 
 Do not start the async daemon while these API contracts are still moving.
 
@@ -102,20 +105,22 @@ That means:
 - every independent property class gets represented as a CLI flag, typed option, or documented blocked field
 - important mode switches are covered, such as text/image/video input source, duration, ratio, resolution, model version, seed, reference role, voice mode, character/persona id, template id, and upload source type
 - enum-heavy fields do not need exhaustive live proof; list the catalog when available and prove one or two representative values
+- option sets should be explored by property type and API behavior, not by burning quota on every cosmetic choice; for example, testing that voice selection is parameterized matters more than generating every voice
 - gated, VIP, risk-blocked, or unclear options are still recorded with the exact UI path, trace evidence, and next probe
 - request/response shapes that affect later automation get fixture or snapshot coverage
 - live proof creates useful UGC/Korean-beauty/persona/campaign artifacts, not synthetic placeholder demos
 
 ## CLI Shape
 
-Near-term CLI work should prioritize API coverage and proof over orchestration. Do **not** implement the daemon or full async job queue until the high-value API surface is settled.
+Near-term CLI work should prioritize API coverage and proof over orchestration. Do **not** implement the daemon, background worker, full async job queue, or session-refresh scheduler until the high-value API surface is settled.
 
 Current ownership:
 
 - `jimeng-browser-proxy` is the user-facing front door for logged-in Jimeng/Dreamina work and should receive new commands by default.
 - `jimeng-dreamina` is lower-level Dreamina-compatible plumbing from the earlier direct-client path. Keep it for compatibility tests, payload experiments, and shared helpers, but do not grow it into a second competing product CLI.
 - Avoid creating more parallel CLIs. Prefer adding new commands to `jimeng-browser-proxy`, while reusing shared helpers underneath.
-- Later cleanup should consolidate the two surfaces or make their relationship explicit enough that users never wonder which one to run. The target user experience is one obvious CLI surface.
+- Later cleanup can combine the two surfaces or make their relationship explicit enough that users never wonder which one to run. The target user experience is one obvious CLI surface.
+- New user-facing docs and proof commands should prefer `jimeng-browser-proxy` unless the slice is explicitly testing compatibility with the older direct-client path.
 
 Future async direction, deferred:
 
@@ -131,6 +136,7 @@ Current blocking behavior:
 - direct generation commands may block while submitting/polling/downloading, as long as concurrency is `1` and polling is bounded
 - `--wait` or `--sync` can be introduced when the job model exists
 - `--noDownload` submits/polls without downloading final media
+- do not add daemon-only flags or lifecycle commands during the API catalog phase unless the command also works in the current blocking CLI model
 
 Common flags:
 
