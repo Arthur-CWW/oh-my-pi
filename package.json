@@ -44,7 +44,14 @@
   },
   "pi": {
     "extensions": ["./packages/web-access/src/index.ts", "./packages/mermaid-preview/src/index.ts"],
-    "skills": ["./packages/web-access/skills"],
+    "skills": [
+      "./packages/web-access/skills/background-browser-automation",
+      "./packages/web-access/skills/librarian",
+      "./packages/web-access/skills/llm-frontend-browser",
+      "./packages/web-access/skills/macos-computer-use",
+      "./packages/web-access/skills/rubber-duck-adversarial",
+      "./packages/web-access/skills/source-archive"
+    ],
     "prompts": ["./packages/dynamic-workflows/prompts"]
   },
   "devDependencies": {

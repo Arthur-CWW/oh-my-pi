@@ -40,7 +40,14 @@
   },
   "pi": {
     "extensions": ["./src/index.ts"],
-    "skills": ["./skills"]
+    "skills": [
+      "./skills/background-browser-automation",
+      "./skills/librarian",
+      "./skills/llm-frontend-browser",
+      "./skills/macos-computer-use",
+      "./skills/rubber-duck-adversarial",
+      "./skills/source-archive"
+    ]
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",
