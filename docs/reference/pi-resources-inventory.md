@@ -26,13 +26,7 @@ Current important settings:
       "prompts": [],
       "themes": []
     },
-    {
-      "source": "git:github.com/mitsuhiko/agent-stuff",
-      "extensions": [],
-      "themes": [],
-      "prompts": [],
-      "skills": ["!librarian"]
-    }
+    "git:git@github.com:Arthur-CWW/pi-personal-core-skills@main"
   ]
 }
 
@@ -42,7 +36,7 @@ Current important settings:
 }
 ```
 
-The broad global `agent-stuff` package used to be why skills like `anachb`, `oebb-scotty`, `apple-mail`, and `openscad` still appeared after this repo's project skill manifest was curated. On 2026-06-09, global settings were changed to remove that broad git package and install the local curated `packages/personal-core-skills` package instead.
+The broad global `agent-stuff` package used to be why skills like `anachb`, `oebb-scotty`, `apple-mail`, and `openscad` still appeared after this repo's project skill manifest was curated. On 2026-06-09, global settings were changed to remove that broad git package and install the private `git:git@github.com:Arthur-CWW/pi-personal-core-skills@main` package instead.
 
 ## Active startup skills
 
@@ -57,29 +51,29 @@ The broad global `agent-stuff` package used to be why skills like `anachb`, `oeb
 | `rubber-duck-adversarial` | Cross-cutting critique/sanity-check mode. | `packages/web-access/skills/rubber-duck-adversarial` | Keep, if it does not over-trigger. |
 | `source-archive` | Archive public articles/videos/transcripts into repo-local research docs. | `packages/web-access/skills/source-archive` | Keep for research-heavy workflows. |
 
-### Global `agent-stuff` skills
+### Former global `agent-stuff` skills
 
-Source: formerly `git:github.com/mitsuhiko/agent-stuff`; a reference snapshot is now vendored at `vendor/mitsuhiko/agent-stuff`, and the globally installed local package is `packages/personal-core-skills`.
+Source: formerly `git:github.com/mitsuhiko/agent-stuff`; a reference snapshot is now vendored at `vendor/mitsuhiko/agent-stuff`, and the globally installed core-skill package is the private repo `git:git@github.com:Arthur-CWW/pi-personal-core-skills@main`.
 
 | Skill | What it does | Recommendation |
 |---|---|---|
 | `anachb` | Austrian VOR public transport: departures, stations/stops, routes, disruptions. | Personal/travel opt-in only; not global. |
 | `apple-mail` | Search/read local Apple Mail storage and attachments. | Sensitive personal-data opt-in only. |
-| `commit` | Commit workflow; read before making git commits. | Keep as global core; vendored in `packages/personal-core-skills`. |
-| `frontend-design` | Distinctive frontend/UI design guidance. | Keep as global core; vendored in `packages/personal-core-skills`. |
+| `commit` | Commit workflow; read before making git commits. | Keep as global core; included in `pi-personal-core-skills`. |
+| `frontend-design` | Distinctive frontend/UI design guidance. | Keep as global core; included in `pi-personal-core-skills`. |
 | `ghidra` | Headless Ghidra reverse engineering. | Specialist opt-in only. |
-| `github` | Use `gh` CLI for issues, PRs, runs, and API calls. | Keep as global core; vendored in `packages/personal-core-skills`. |
+| `github` | Use `gh` CLI for issues, PRs, runs, and API calls. | Keep as global core; included in `pi-personal-core-skills`. |
 | `google-workspace` | Google Drive/Docs/Calendar/Gmail/Sheets/etc. via local helper scripts. | Useful but personal-data opt-in only. Prefer this over separate `gmcli`/`gdcli`/`gccli`. |
-| `mermaid` | Mermaid chart creation/editing with validation. | Keep as global core; vendored in `packages/personal-core-skills`. |
-| `native-web-search` | Trigger native web search with concise summaries and source URLs. | Optional; overlaps with `web_search`/research workflows. Vendored as optional candidate. |
+| `mermaid` | Mermaid chart creation/editing with validation. | Keep as global core; included in `pi-personal-core-skills`. |
+| `native-web-search` | Trigger native web search with concise summaries and source URLs. | Optional; overlaps with `web_search`/research workflows. Not in the private core package. |
 | `oebb-scotty` | Austrian ÖBB train planning/departures/disruptions. | Personal/travel opt-in only. |
 | `openscad` | Create/render OpenSCAD models and export STL. | Specialist opt-in only. |
-| `pi-share` | Parse pi-share/buildwithpi session URLs and transcripts. | Niche opt-in; vendored as optional candidate. |
+| `pi-share` | Parse pi-share/buildwithpi session URLs and transcripts. | Niche opt-in. Not in the private core package. |
 | `sentry` | Fetch/analyze Sentry issues, events, transactions, logs. | Project-specific only when Sentry is configured. |
-| `summarize` | Convert URL/local files to Markdown via `uvx markitdown`, optional summary. | Optional; overlaps with fetch/source-archive. Vendored as optional candidate. |
-| `tmux` | Remote-control tmux sessions by keystrokes and pane capture. | Keep as global core; vendored in `packages/personal-core-skills`. |
+| `summarize` | Convert URL/local files to Markdown via `uvx markitdown`, optional summary. | Optional; overlaps with fetch/source-archive. Not in the private core package. |
+| `tmux` | Remote-control tmux sessions by keystrokes and pane capture. | Keep as global core; included in `pi-personal-core-skills`. |
 | `update-changelog` | Changelog update workflow. | Release-only manual skill; not global. |
-| `uv` | Python `uv` workflows. | Keep as global core; vendored in `packages/personal-core-skills`. |
+| `uv` | Python `uv` workflows. | Keep as global core; included in `pi-personal-core-skills`. |
 | `web-browser` | Visible Chrome/Chromium CDP browsing/clicking/screenshot workflow. | Optional; useful but should be subordinate to background-safe rules. Vendored as optional candidate. |
 
 ### Global `~/.agents/skills`

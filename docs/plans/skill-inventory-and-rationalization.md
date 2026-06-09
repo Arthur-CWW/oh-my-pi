@@ -45,7 +45,7 @@ These are directly tied to current repo tools/workflows and have enough reuse:
 
 ### Keep globally, but ideally in a small personal core-skills package
 
-These are generally useful across repos and should not live as random global checkouts forever. A first local candidate now exists at `packages/personal-core-skills/`:
+These are generally useful across repos and should not live as random global checkouts forever. They now live in the private repo `git:git@github.com:Arthur-CWW/pi-personal-core-skills@main`, whose package root has a top-level `skills/` directory:
 
 - `commit`
 - `uv`
@@ -142,7 +142,9 @@ packages/
     rubber-duck-adversarial/          # keep
     source-archive/                   # keep
 
-  personal-core-skills/               # future package or global repo
+  # moved out to private repo: git@github.com:Arthur-CWW/pi-personal-core-skills.git
+  # repo root:
+  skills/
     commit/
     uv/
     tmux/
@@ -165,6 +167,6 @@ packages/
 
 1. Should `agent-communication` be deleted outright, or should its useful parts move into `AGENTS.md` / `docs/coordination/agent-edit-log.md` and then delete the skill?
 2. Should `used-hardware-buying-research` become its own personal package, or remain in this monorepo but disabled from auto-load?
-3. Should global settings switch from broad `git:github.com/mitsuhiko/agent-stuff` to the new local `packages/personal-core-skills` package?
+3. Global settings have switched from broad `git:github.com/mitsuhiko/agent-stuff` to private `git:git@github.com:Arthur-CWW/pi-personal-core-skills@main`.
 4. Should the ignored `chrome-devtools-mcp` checkout be removed from `packages/web-access/skills/` entirely and reintroduced only as a proper vendored package when needed?
 5. Should the untracked `.pi/extensions/codex-plugin-manager/` be committed as the official way to opt into Codex plugin skills?

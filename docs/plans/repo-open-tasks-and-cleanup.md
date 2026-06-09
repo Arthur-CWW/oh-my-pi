@@ -29,7 +29,7 @@ Still dirty / pending at time of writing:
 
 - `.pi/extensions/codex-plugin-manager/index.ts` — project-local Codex plugin manager; should be tracked if we keep using it.
 - `vendor/openai/codex-plugin-*` router subset — small vendored plugin-skill material needed by the manager.
-- `packages/personal-core-skills/` — local package with curated global/core skills copied from `agent-stuff`; now installed globally via local path.
+- `pi-personal-core-skills` — private repo with curated global/core skills copied from `agent-stuff`; now installed globally via `git:git@github.com:Arthur-CWW/pi-personal-core-skills@main`.
 - `scripts/imagegen-observe.py` — standalone OpenAI Image API diagnostic wrapper; decide keep, move, or delete.
 
 ## What to do next
@@ -41,11 +41,12 @@ Goal: Pi startup should only show skills that are intentionally global for Arthu
 Recommended sequence:
 
 1. Track the Codex plugin manager and the small router-skill vendor subset. Done.
-2. Track `packages/personal-core-skills` as the local replacement for noisy global `agent-stuff`. Done.
+2. Create and install private `pi-personal-core-skills` repo as the replacement for noisy global `agent-stuff`. Done.
 3. Vendor full `agent-stuff` source as reference under `vendor/mitsuhiko/agent-stuff`. Done.
-4. Update `~/.pi/agent/settings.json` to remove broad `git:github.com/mitsuhiko/agent-stuff` and replace it with the local curated package. Done.
-5. Decide whether `scripts/imagegen-observe.py` belongs in `packages/ugc-cli`, `scripts/diagnostics/`, or should be deleted.
-6. Remove stale local skill checkouts from `packages/web-access/skills/`:
+4. Update `~/.pi/agent/settings.json` to remove broad `git:github.com/mitsuhiko/agent-stuff` and replace it with `git:git@github.com:Arthur-CWW/pi-personal-core-skills@main`. Done.
+5. Remove the temporary in-monorepo `packages/personal-core-skills` copy. Done.
+6. Decide whether `scripts/imagegen-observe.py` belongs in `packages/ugc-cli`, `scripts/diagnostics/`, or should be deleted.
+7. Remove stale local skill checkouts from `packages/web-access/skills/`:
    - `pi-skills` symlink
    - ignored `chrome-devtools-mcp/` checkout
    - empty/unused scratch dirs such as `deterministic-simulation-testing/` if truly empty
@@ -63,7 +64,7 @@ Recommended package boundaries:
 | `packages/pi-editor-tools` | `vim-lite` | editor extension, not web access |
 | `packages/pi-cockpit` | `agent-cockpit*` | orchestration/control-plane work |
 | `packages/computer-use` | CuaDriver wrapper + `macos-computer-use` | native macOS UI testing lane |
-| `packages/personal-core-skills` | commit/uv/tmux/etc. skills | replace global skill sprawl |
+| private `pi-personal-core-skills` repo | commit/uv/tmux/etc. skills | replace global skill sprawl outside this monorepo |
 
 Do this after resource hygiene so package moves do not compound startup confusion.
 
@@ -112,15 +113,17 @@ From `docs/plans/slotok-workbench.md` and UGC/provider docs:
    - `vendor/openai/codex-plugin-router-skills/**`
 
 2. `chore(skills): add personal core skill package`
-   - `packages/personal-core-skills/**`
-   - docs explaining how to switch global settings later
+   - superseded by private `pi-personal-core-skills` repo
 
 3. `docs(repo): consolidate cleanup backlog`
    - this doc
    - resource inventory doc
    - update `TECH_DEBT.md`
 
-4. Later, after Arthur decides:
+4. Done separately:
    - `chore(pi): replace broad global skill package`
-   - edit `~/.pi/agent/settings.json` or project settings as appropriate
+   - `~/.pi/agent/settings.json` now uses the private skills repo
+
+5. Remaining:
    - remove stale skill symlinks/checkouts
+   - decide/move/delete `scripts/imagegen-observe.py`
