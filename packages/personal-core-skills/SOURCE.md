@@ -4,8 +4,8 @@ Vendored on 2026-06-09 from the local Pi-installed checkout:
 
 ```txt
 repo: https://github.com/mitsuhiko/agent-stuff
-commit: e31251d
-local: /Users/arthur/.pi/agent/git/github.com/mitsuhiko/agent-stuff
+commit: c68c84c
+full vendor snapshot: vendor/mitsuhiko/agent-stuff
 license: Apache-2.0
 ```
 
@@ -25,4 +25,4 @@ Copied optional candidates:
 - `skills/summarize` -> `optional-skills/agent-stuff/summarize`
 - `skills/web-browser` -> `optional-skills/agent-stuff/web-browser`
 
-No source modifications were made while copying, aside from excluding local `.DS_Store` files.
+No source modifications were made while copying, aside from excluding local `.DS_Store` files and omitting the optional `web-browser/scripts/package-lock.json` from the curated package copy.
