@@ -35,6 +35,7 @@ Commands:
   text2image    Submit text-to-image from a captured workbench/agent template
   text2video    Submit text-to-video from a captured workbench template
   image2video   Upload/use a first-frame image URI, then submit image-to-video
+  frames2video  Upload/use first and end-frame image URIs, then submit image-to-video
 
 Options:
   --cdp <url>                   CDP URL (default: ${DEFAULT_CDP_URL})
@@ -51,6 +52,7 @@ Options:
   --scene <image|video|file|n>   upload-token scene (default: image)
   --file <path>                  Local media file for upload-image/upload-video; alias for --image in image2video
   --image <path>                 Local first-frame image for image2video
+  --lastImage <path>             Local end-frame image for frames2video
   --firstFrameUri <uri>          Existing Jimeng/ImageX provider URI for image2video
   --lastFrameUri <uri>           Existing provider URI for end-frame experiments
   --ratio <ratio>                Video aspect ratio flag patched into text_to_video_params
@@ -98,6 +100,14 @@ Examples:
     --durationSec 3 \\
     --dryRun
 
+  jimeng-browser-proxy frames2video \\
+    --capture data/jimeng-captures/<run>/capture-template.raw.json \\
+    --image data/jimeng-lab/references/start.png \\
+    --lastImage data/jimeng-lab/references/end.png \\
+    --prompt "韩系美妆达人从自然站姿走到产品特写，真实手机拍摄感，无字幕，无水印" \\
+    --durationSec 5 \\
+    --dryRun
+
 Live generation uses the browser session but does not foreground the browser. Keep concurrency at 1.`
 
 interface CliArgs {
@@ -113,6 +123,7 @@ interface CliArgs {
     | "text2image"
     | "text2video"
     | "image2video"
+    | "frames2video"
   cdpUrl: string
   targetUrl?: string
   session?: string
@@ -127,6 +138,7 @@ interface CliArgs {
   scene?: string
   file?: string
   image?: string
+  lastImage?: string
   firstFrameUri?: string
   lastFrameUri?: string
   ratio?: string
@@ -448,8 +460,9 @@ async function main(argv: string[]): Promise<void> {
   const capture = readJson(args.capture) as CaptureFile
   const referenceUploads: ReferenceUploadSummary[] = []
   let firstFrameUri = args.firstFrameUri
+  let lastFrameUri = args.lastFrameUri
 
-  if (args.command === "image2video") {
+  if (args.command === "image2video" || args.command === "frames2video") {
     const imageFile = args.image ?? args.file
     if (imageFile) {
       const upload = await uploadReferenceImage({
@@ -465,7 +478,26 @@ async function main(argv: string[]): Promise<void> {
     }
 
     if (!firstFrameUri) {
-      throw new Error("image2video requires --image, --file, or --firstFrameUri")
+      throw new Error(`${args.command} requires --image, --file, or --firstFrameUri`)
+    }
+
+    if (args.command === "frames2video") {
+      if (args.lastImage) {
+        const upload = await uploadReferenceImage({
+          session,
+          dirs,
+          runId,
+          role: "end_frame",
+          index: 1,
+          sourceFile: args.lastImage,
+        })
+        referenceUploads.push(upload)
+        lastFrameUri = upload.uri
+      }
+
+      if (!lastFrameUri) {
+        throw new Error("frames2video requires --lastImage or --lastFrameUri")
+      }
     }
   }
 
@@ -476,7 +508,7 @@ async function main(argv: string[]): Promise<void> {
     prompt: args.prompt,
     durationSec: args.durationSec,
     firstFrameUri,
-    lastFrameUri: args.lastFrameUri,
+    lastFrameUri,
     ratio: args.ratio,
     videoResolution: args.videoResolution,
     modelVersion: args.modelVersion,
@@ -560,6 +592,7 @@ function parseArgs(argv: string[]): CliArgs {
     && command !== "text2image"
     && command !== "text2video"
     && command !== "image2video"
+    && command !== "frames2video"
   ) {
     throw new Error(`Unknown command: ${String(command)}`)
   }
@@ -594,6 +627,7 @@ function parseArgs(argv: string[]): CliArgs {
     scene: flags.scene,
     file: flags.file,
     image: flags.image,
+    lastImage: flags.lastImage,
     firstFrameUri: flags.firstFrameUri,
     lastFrameUri: flags.lastFrameUri,
     ratio: flags.ratio,
@@ -648,7 +682,7 @@ interface OutputDirs {
 
 interface ReferenceUploadSummary {
   index: number
-  role: "first_frame"
+  role: ReferenceImageRole
   source_file: string
   artifact_copy: string
   raw_file: string
@@ -656,11 +690,13 @@ interface ReferenceUploadSummary {
   image_upload: JimengImageUploadResult["summary"]
 }
 
+type ReferenceImageRole = "first_frame" | "end_frame"
+
 async function uploadReferenceImage(input: {
   session: JimengSessionBundle
   dirs: OutputDirs
   runId: string
-  role: "first_frame"
+  role: ReferenceImageRole
   index: number
   sourceFile: string
 }): Promise<ReferenceUploadSummary> {

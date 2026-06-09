@@ -436,6 +436,7 @@ Raw token/apply responses contain temporary credentials and provider auth. Keep 
 ### 13) Local-image image-to-video
 - Status:
   - live-proved with `jimeng-browser-proxy image2video`
+  - dry-run-proved with `jimeng-browser-proxy frames2video` for local first/end-frame upload and payload patching
   - implemented in `packages/jimeng-client/src/browser-proxy-cli.ts`
   - payload patching covered by `packages/jimeng-client/test/capture.test.ts`
 - Provider sequence:
@@ -511,6 +512,7 @@ Current exposed parameterization:
 
 ```txt
 --image
+--lastImage
 --firstFrameUri
 --lastFrameUri
 --durationSec
@@ -519,6 +521,34 @@ Current exposed parameterization:
 --modelVersion
 --modelReqKey
 --seed
+```
+
+Frames-to-video dry-run command:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts frames2video \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --capture data/jimeng-lab/raw/jimeng-network-capture-video-01.json \
+  --image data/jimeng-lab/ugc-studio-kbeauty-image/artifacts/jimeng-kbeauty-01.png \
+  --lastImage data/jimeng-lab/proof-20260609-image2video-live/artifacts/aa83d0e1-a20c-4b85-ab59-ee3a7894296f-thumb-2s.jpg \
+  --prompt '韩系美妆达人从自然自拍开场走到精华产品特写，真实手机拍摄感，动作自然连贯，前三秒有明确痛点钩子，无字幕，无水印，不要生成可读文字。' \
+  --durationSec 5 \
+  --ratio 9:16 \
+  --videoResolution 720p \
+  --modelVersion 3.0fast \
+  --seed 20260610 \
+  --dryRun \
+  --outDir data/jimeng-lab/proof-20260609-frames2video-dry-run
+```
+
+Frames-to-video dry-run facts:
+
+```txt
+first_frame_image=tos-cn-i-tb4s082cfz/5b31ee284d5c43eb8097bfc5818b584a.png
+end_frame_image=tos-cn-i-tb4s082cfz/325213bd2b2049d3a65667350b72807e.jpg
+first image=2048x2048 PNG
+end image=704x1248 JPEG
+generation submit skipped
 ```
 
 ---
@@ -729,11 +759,13 @@ bun packages/jimeng-client/src/browser-proxy-cli.ts text2image \
 
 Supports local first-frame upload and optional frame URI injection for video payload patching:
 - `image2video --image <path>`
+- `frames2video --image <path> --lastImage <path>`
 - `--firstFrameUri <uri>`
 - `--lastFrameUri <uri>`
 - `upload-video --file <path>`
 
 For `image2video --dryRun --image`, the CLI still uploads the local image to obtain a real provider URI, then skips the generation submit.
+For `frames2video --dryRun --image --lastImage`, the CLI uploads both local images to obtain real provider URIs, then skips the generation submit.
 
 Upload-token probe:
 
@@ -760,7 +792,7 @@ Current support matrix:
 | `text2video` | implemented | Uses captured `/mweb/v1/aigc_draft/generate`; confirmed live with `dreamina_ic_generate_video_model_vgfm_3.0_fast`. |
 | `text2image` | implemented when image capture is supplied | Uses captured `/mweb/v1/creation_agent/v2/conversation`; needs current local image capture fixture/session. |
 | `image2video` | implemented in `jimeng-browser-proxy`; partial in low-level compat helper | Browser proxy can upload local `--image`, inject `first_frame_image`, submit/poll/download MP4. Low-level helper accepts confirmed `--firstFrameUri`. |
-| `frames2video` | partial | Can inject confirmed `--firstFrameUri`/`--lastFrameUri`; local end-frame upload/live proof still needs browser-proxy command support. |
+| `frames2video` | dry-run-proved in `jimeng-browser-proxy`; partial in low-level compat helper | Browser proxy can upload local `--image` and `--lastImage`, inject `first_frame_image`/`end_frame_image`, and write a no-generation plan. Live proof still needs explicit frontend end-frame mode evidence. |
 | `image2image` | needs capture | Need image reference upload + image edit submit capture. |
 | `multiframe2video` | needs capture | Need multi-frame upload/reference payload capture. |
 | `multimodal2video` | needs capture | Need `全能参考` mixed image/video/audio reference payload capture. |
@@ -827,6 +859,6 @@ Do not commit raw captures or generated media. If a redacted summary is promoted
 
 ## Next reverse target (immediate)
 1. Use the new VOD upload to unlock reference-video, multimodal/all-around reference, and lip-sync flows.
-2. Capture and implement end-frame/multi-frame payloads beyond the confirmed first-frame path.
+2. Capture the frontend's explicit end-frame/multi-frame mode and live-prove `frames2video` only after confirming the mode-specific payload contract.
 3. Add strict `1019` shark breaker/cooldown budgets to the consolidated CLI path.
 4. Add multipart/chunked VOD upload only when large reference videos require it.

@@ -471,6 +471,43 @@ uploadCrc32=1929b92c
 
 Raw token/apply/commit responses include temporary credentials and provider auth. They are intentionally local-only under ignored `data/**`.
 
+## Frames-To-Video Dry-Run Smoke
+
+End-frame payload patching is now CLI-accessible through `frames2video`. This run uploads both local images to ImageX, patches `first_frame_image` and `end_frame_image`, and skips generation submit.
+
+Command:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts frames2video \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --capture data/jimeng-lab/raw/jimeng-network-capture-video-01.json \
+  --image data/jimeng-lab/ugc-studio-kbeauty-image/artifacts/jimeng-kbeauty-01.png \
+  --lastImage data/jimeng-lab/proof-20260609-image2video-live/artifacts/aa83d0e1-a20c-4b85-ab59-ee3a7894296f-thumb-2s.jpg \
+  --prompt '韩系美妆达人从自然自拍开场走到精华产品特写，真实手机拍摄感，动作自然连贯，前三秒有明确痛点钩子，无字幕，无水印，不要生成可读文字。' \
+  --durationSec 5 \
+  --ratio 9:16 \
+  --videoResolution 720p \
+  --modelVersion 3.0fast \
+  --seed 20260610 \
+  --dryRun \
+  --outDir data/jimeng-lab/proof-20260609-frames2video-dry-run
+```
+
+Result:
+
+```txt
+plan=data/jimeng-lab/proof-20260609-frames2video-dry-run/raw/frames2video-20260609142243-t9emm5-dry-run-plan.json
+first_frame_image=tos-cn-i-tb4s082cfz/5b31ee284d5c43eb8097bfc5818b584a.png
+end_frame_image=tos-cn-i-tb4s082cfz/325213bd2b2049d3a65667350b72807e.jpg
+first image=2048x2048 PNG, 2913365 bytes
+end image=704x1248 JPEG, 58126 bytes
+duration_ms=5000
+ratio=9:16
+model_req_key=dreamina_ic_generate_video_model_vgfm_3.0_fast
+```
+
+This is dry-run-proved only. Capture/live-proof the frontend end-frame or multi-frame mode before spending generation quota.
+
 ## Verification
 
 ```bash
@@ -484,7 +521,7 @@ Result:
 ```txt
 typecheck passed
 24 tests passed, 0 failed
-browser-proxy help listed upload-video and image2video
+browser-proxy help listed upload-video, image2video, and frames2video
 ```
 
 ## Follow-Up
@@ -494,7 +531,7 @@ Next useful captures:
 - image-to-image / byte edit
 - subject/persona creation
 - pose/style/depth/canny reference controls
-- image-to-video end-frame and multi-frame controls
+- image-to-video end-frame and multi-frame live proof with explicit frontend mode capture
 - multimodal/all-around reference video
 - video text generation through the current unified app route
 - voice cloning and subject/persona voice generation

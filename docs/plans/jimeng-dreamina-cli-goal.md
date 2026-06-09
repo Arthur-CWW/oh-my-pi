@@ -58,13 +58,24 @@ VOD/video upload is now implemented and live-proved:
   - `vid=v03870g10004d8k1u4nog65hb08dnhig`
   - `storeUri=tos-cn-v-148450/o4gBE1AAWbfiDDig6xEQ4KJhDHQvlExoFkFExB`
 
-The next slice is **reference controls and video-reference consumers**. Use the VOD provider reference plus frontend captures to unlock reference-video, multimodal/all-around reference, lip-sync, and end-frame/multi-frame image-to-video paths.
+First/end-frame image-to-video is now dry-run-proved:
+
+- `jimeng-browser-proxy frames2video`
+- local first-frame and end-frame ImageX uploads
+- patched `video_gen_inputs[0].first_frame_image` and `video_gen_inputs[0].end_frame_image`
+- proof bundle: `data/jimeng-lab/proof-20260609-frames2video-dry-run/`
+- `first_frame_image=tos-cn-i-tb4s082cfz/5b31ee284d5c43eb8097bfc5818b584a.png`
+- `end_frame_image=tos-cn-i-tb4s082cfz/325213bd2b2049d3a65667350b72807e.jpg`
+- live generation is intentionally not claimed yet; first capture or select the frontend's explicit end-frame/multi-frame mode.
+
+The next slice is **reference controls and video-reference consumers**. Use the VOD provider reference plus frontend captures to unlock reference-video, multimodal/all-around reference, lip-sync, and live end-frame/multi-frame image-to-video paths.
 
 Immediate next slices:
 
-1. Image-to-video reference controls such as end frame, multi-frame, pose/style/depth/canny/reference roles, depending on the clearest captured contracts.
-2. Lip-sync or digital-human generation using the confirmed VOD reference path where applicable.
-3. Voice clone and subject/persona voice generation once the UI/API flow is captured.
+1. Capture the frontend's explicit end-frame/multi-frame mode and live-prove `frames2video` only if the payload contract matches.
+2. Image-to-video reference controls such as pose/style/depth/canny/reference roles, depending on the clearest captured contracts.
+3. Lip-sync or digital-human generation using the confirmed VOD reference path where applicable.
+4. Voice clone and subject/persona voice generation once the UI/API flow is captured.
 
 Do not start the async daemon while these API contracts are still moving.
 

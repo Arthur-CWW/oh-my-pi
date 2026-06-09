@@ -234,6 +234,7 @@ Useful CLI flags now exposed:
 
 ```txt
 --image <path>             local first-frame image; uploads before submit
+--lastImage <path>         local end-frame image for frames2video; uploads before submit
 --firstFrameUri <uri>      reuse an existing provider URI
 --lastFrameUri <uri>       payload-level end-frame experiment
 --durationSec <sec>
@@ -291,6 +292,41 @@ video=H.264 MP4, 704x1248, 5.016667s, 4.3 MB
 ```
 
 Raw upload/apply/commit responses, signed artifact URLs, and generated media remain ignored under `data/**`.
+
+### Frames-To-Video Dry-Run Proof
+
+`jimeng-browser-proxy frames2video` now uploads a first-frame image and an end-frame image, then writes a patched no-generation plan with both provider URIs:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts frames2video \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --capture data/jimeng-lab/raw/jimeng-network-capture-video-01.json \
+  --image data/jimeng-lab/ugc-studio-kbeauty-image/artifacts/jimeng-kbeauty-01.png \
+  --lastImage data/jimeng-lab/proof-20260609-image2video-live/artifacts/aa83d0e1-a20c-4b85-ab59-ee3a7894296f-thumb-2s.jpg \
+  --prompt '韩系美妆达人从自然自拍开场走到精华产品特写，真实手机拍摄感，动作自然连贯，前三秒有明确痛点钩子，无字幕，无水印，不要生成可读文字。' \
+  --durationSec 5 \
+  --ratio 9:16 \
+  --videoResolution 720p \
+  --modelVersion 3.0fast \
+  --seed 20260610 \
+  --dryRun \
+  --outDir data/jimeng-lab/proof-20260609-frames2video-dry-run
+```
+
+Dry-run proof facts:
+
+```txt
+first_frame_image=tos-cn-i-tb4s082cfz/5b31ee284d5c43eb8097bfc5818b584a.png
+end_frame_image=tos-cn-i-tb4s082cfz/325213bd2b2049d3a65667350b72807e.jpg
+first image=2048x2048 PNG, 2,913,365 bytes
+end image=704x1248 JPEG, 58,126 bytes
+duration_ms=5000
+ratio=9:16
+model_req_key=dreamina_ic_generate_video_model_vgfm_3.0_fast
+plan=data/jimeng-lab/proof-20260609-frames2video-dry-run/raw/frames2video-20260609142243-t9emm5-dry-run-plan.json
+```
+
+This is dry-run-proved only. The next live-proof step should capture or select the frontend's explicit end-frame/multi-frame mode before spending generation quota.
 
 ## Confirmed Config Catalog Probes
 
