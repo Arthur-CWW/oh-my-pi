@@ -72,6 +72,10 @@ Important capability notes from help output:
 - First/last frame fields (if used):
   - `...video_gen_inputs[0].first_frame_image`
   - `...video_gen_inputs[0].end_frame_image`
+- Image-to-video first-frame status:
+  - implemented in `jimeng-browser-proxy image2video`
+  - local `--image` uploads through ImageX scene `2`, then patches the resulting provider URI into `first_frame_image`
+  - live proof saved under `data/jimeng-lab/proof-20260609-image2video-live/`
 - Current text-to-image prompt field location:
   - `draft_content.component_list[0].abilities.generate.core_param.prompt`
 - Current text-to-image model field observed:
@@ -359,6 +363,94 @@ ImageHeight=1
 
 Raw token/apply responses contain temporary credentials and provider auth. Keep them only under ignored `data/**`.
 
+### 12) Local-image image-to-video
+- Status:
+  - live-proved with `jimeng-browser-proxy image2video`
+  - implemented in `packages/jimeng-client/src/browser-proxy-cli.ts`
+  - payload patching covered by `packages/jimeng-client/test/capture.test.ts`
+- Provider sequence:
+
+```txt
+POST /mweb/v1/get_upload_token { "scene": 2 }
+GET  ImageX ApplyImageUpload
+POST ImageX direct /upload/v1/{StoreUri}
+POST ImageX CommitImageUpload
+POST /mweb/v1/aigc_draft/generate
+POST /mweb/v1/get_history_by_ids until status=50
+GET signed MP4 artifact URL
+```
+
+Local upload dry-run command:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts image2video \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --capture data/jimeng-lab/raw/jimeng-network-capture-video-01.json \
+  --image data/jimeng-lab/ugc-studio-kbeauty-image/artifacts/jimeng-kbeauty-01.png \
+  --prompt '韩系美妆达人自拍风格，干净卧室自然光，镜头轻微推进，创作者像真实TikTok种草视频一样自然开场，前三秒有明确痛点钩子，无字幕，无水印，不要生成可读文字。' \
+  --durationSec 5 \
+  --ratio 9:16 \
+  --videoResolution 720p \
+  --modelVersion 3.0fast \
+  --seed 20260609 \
+  --dryRun \
+  --outDir data/jimeng-lab/proof-20260609-image2video-local-upload
+```
+
+Dry-run proof facts:
+
+```txt
+uploaded firstFrameUri=tos-cn-i-tb4s082cfz/7abfa90c628d46859c32dc2feffcd2e1.png
+reference image=2048x2048 PNG, 2,913,365 bytes
+patched duration_ms=5000
+patched ratio=9:16
+patched model_req_key=dreamina_ic_generate_video_model_vgfm_3.0_fast
+patched seed=20260609
+```
+
+Live proof command:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts image2video \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --capture data/jimeng-lab/raw/jimeng-network-capture-video-01.json \
+  --firstFrameUri tos-cn-i-tb4s082cfz/7abfa90c628d46859c32dc2feffcd2e1.png \
+  --prompt '韩系美妆达人自拍风格，干净卧室自然光，镜头轻微推进，创作者像真实TikTok种草视频一样自然开场，前三秒有明确痛点钩子，无字幕，无水印，不要生成可读文字。' \
+  --durationSec 5 \
+  --ratio 9:16 \
+  --videoResolution 720p \
+  --modelVersion 3.0fast \
+  --seed 20260609 \
+  --pollIntervalMs 10000 \
+  --maxPolls 30 \
+  --outDir data/jimeng-lab/proof-20260609-image2video-live
+```
+
+Live proof facts:
+
+```txt
+submitId=aa83d0e1-a20c-4b85-ab59-ee3a7894296f
+historyId=39156175522050
+poll trace count=5
+artifact=data/jimeng-lab/proof-20260609-image2video-live/artifacts/aa83d0e1-a20c-4b85-ab59-ee3a7894296f-00.mp4
+thumbnail=data/jimeng-lab/proof-20260609-image2video-live/artifacts/aa83d0e1-a20c-4b85-ab59-ee3a7894296f-thumb-2s.jpg
+ffprobe=H.264 MP4, 704x1248, 5.016667s, 4,285,498 bytes
+```
+
+Current exposed parameterization:
+
+```txt
+--image
+--firstFrameUri
+--lastFrameUri
+--durationSec
+--ratio
+--videoResolution
+--modelVersion
+--modelReqKey
+--seed
+```
+
 ---
 
 ## Minimal headers (validated baseline)
@@ -514,7 +606,8 @@ Mapping guidance:
 - deterministic submit mapping for all image conversation stream variants
 - long-run requirement matrix for `sign/device-time/msToken/a_bogus`
 - region variants (US/HK/JP/SG) requirement differences
-- first/last-frame image-to-video payload patching using committed ImageX URIs
+- end-frame image-to-video live proof using committed ImageX URIs
+- multi-frame/reference-role payload captures for pose/style/depth/canny/character controls
 - VOD/video byte upload using `/mweb/v1/get_upload_token` scene `1` credentials
 - voice/配音 + digital-human + motion-mimic endpoint mapping
 
@@ -564,11 +657,12 @@ bun packages/jimeng-client/src/browser-proxy-cli.ts text2image \
   --dryRun
 ```
 
-Supports optional frame URI injection for video payload patching:
+Supports local first-frame upload and optional frame URI injection for video payload patching:
+- `image2video --image <path>`
 - `--firstFrameUri <uri>`
 - `--lastFrameUri <uri>`
 
-> Note: this is payload-level injection only; direct upload-to-URI mapping still needs reversing.
+For `image2video --dryRun --image`, the CLI still uploads the local image to obtain a real provider URI, then skips the generation submit.
 
 Upload-token probe:
 
@@ -594,8 +688,8 @@ Current support matrix:
 |---|---|---|
 | `text2video` | implemented | Uses captured `/mweb/v1/aigc_draft/generate`; confirmed live with `dreamina_ic_generate_video_model_vgfm_3.0_fast`. |
 | `text2image` | implemented when image capture is supplied | Uses captured `/mweb/v1/creation_agent/v2/conversation`; needs current local image capture fixture/session. |
-| `image2video` | partial | Can inject confirmed `--firstFrameUri`; local file upload-to-URI still needs reversal. |
-| `frames2video` | partial | Can inject confirmed `--firstFrameUri`/`--lastFrameUri`; local frame upload still needs reversal. |
+| `image2video` | implemented in `jimeng-browser-proxy`; partial in low-level compat helper | Browser proxy can upload local `--image`, inject `first_frame_image`, submit/poll/download MP4. Low-level helper accepts confirmed `--firstFrameUri`. |
+| `frames2video` | partial | Can inject confirmed `--firstFrameUri`/`--lastFrameUri`; local end-frame upload/live proof still needs browser-proxy command support. |
 | `image2image` | needs capture | Need image reference upload + image edit submit capture. |
 | `multiframe2video` | needs capture | Need multi-frame upload/reference payload capture. |
 | `multimodal2video` | needs capture | Need `全能参考` mixed image/video/audio reference payload capture. |
@@ -661,7 +755,7 @@ data/jimeng-captures/<timestamp>-<flow>/
 Do not commit raw captures or generated media. If a redacted summary is promoted into tracked docs, manually review it first for cookies, reusable signatures, signed URL values, account IDs, and private prompt/media content.
 
 ## Next reverse target (immediate)
-1. Capture and isolate asset upload endpoint used before first/last frame submit.
-2. Confirm direct upload response shape (expected URI/object key fields).
-3. Inject returned upload identifiers into `video_gen_inputs[0].first_frame_image`/`end_frame_image` and replay without browser runtime.
+1. Implement VOD/video byte upload from `/mweb/v1/get_upload_token` scene `1`.
+2. Use video upload to unlock reference-video, multimodal/all-around reference, and lip-sync flows.
+3. Capture and implement end-frame/multi-frame payloads beyond the confirmed first-frame path.
 4. Add strict `1019` shark breaker/cooldown budgets to the consolidated CLI path.

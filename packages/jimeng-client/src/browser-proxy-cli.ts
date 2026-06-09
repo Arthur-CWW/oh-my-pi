@@ -14,7 +14,7 @@ import {
 import { prepareFromCapture, redactHeaders, type CaptureFile, type JimengOp, type JimengSessionBundle } from "./capture"
 import { JimengClient } from "./client"
 import { JimengError } from "./errors"
-import { getJimengUploadToken, parseUploadTokenScene, uploadJimengImage } from "./upload"
+import { getJimengUploadToken, parseUploadTokenScene, uploadJimengImage, type JimengImageUploadResult } from "./upload"
 
 const DEFAULT_CDP_URL = "http://127.0.0.1:9340"
 
@@ -33,6 +33,7 @@ Commands:
   upload-image  Upload a local image to Jimeng ImageX and return a provider URI
   text2image    Submit text-to-image from a captured workbench/agent template
   text2video    Submit text-to-video from a captured workbench template
+  image2video   Upload/use a first-frame image URI, then submit image-to-video
 
 Options:
   --cdp <url>                   CDP URL (default: ${DEFAULT_CDP_URL})
@@ -47,10 +48,18 @@ Options:
   --item-platform <n>           Voice item platform (default: 1, Loki/built-in)
   --limit <n>                   sample-voices limit (default: all)
   --scene <image|video|file|n>   upload-token scene (default: image)
-  --file <path>                  Local image file for upload-image
+  --file <path>                  Local image file for upload-image; alias for --image in image2video
+  --image <path>                 Local first-frame image for image2video
+  --firstFrameUri <uri>          Existing Jimeng/ImageX provider URI for image2video
+  --lastFrameUri <uri>           Existing provider URI for end-frame experiments
+  --ratio <ratio>                Video aspect ratio flag patched into text_to_video_params
+  --videoResolution <value>      Video resolution value patched into video_gen_inputs and sceneOptions
+  --modelVersion <value>         Confirmed shorthand model version, e.g. 3.0fast
+  --modelReqKey <value>          Raw confirmed model_req_key override
+  --seed <n>                     Deterministic seed, 0..4294967295
   --prompt <text>               Generation prompt
   --outDir <dir>                Output directory (default: data/jimeng-lab/browser-proxy)
-  --dryRun                      Write patched plan only; otherwise live-submit and may consume credits
+  --dryRun                      Write patched plan only; image2video still uploads --image to obtain a provider URI
   --noDownload                  Submit/poll but do not download artifacts
   --pollIntervalMs <ms>         Poll interval (default: 3000)
   --maxPolls <n>                Max polls (default: 30)
@@ -77,10 +86,27 @@ Examples:
     --file data/jimeng-lab/image-upload-probe/aws4-live/proof-1x1.png \\
     --outDir data/jimeng-lab/cli-image-upload-smoke
 
+  jimeng-browser-proxy image2video \\
+    --capture data/jimeng-captures/<run>/capture-template.raw.json \\
+    --image data/tiktok-catalogue/mynameissico/2026-05-21_7642426706115972365.jpg \\
+    --prompt "韩系美妆达人自拍风格，干净卧室自然光，前三秒有明确痛点钩子，无字幕，无水印" \\
+    --durationSec 3 \\
+    --dryRun
+
 Live generation uses the browser session but does not foreground the browser. Keep concurrency at 1.`
 
 interface CliArgs {
-  command: "session" | "catalog" | "voices" | "tts" | "sample-voices" | "upload-token" | "upload-image" | "text2image" | "text2video"
+  command:
+    | "session"
+    | "catalog"
+    | "voices"
+    | "tts"
+    | "sample-voices"
+    | "upload-token"
+    | "upload-image"
+    | "text2image"
+    | "text2video"
+    | "image2video"
   cdpUrl: string
   targetUrl?: string
   session?: string
@@ -94,6 +120,14 @@ interface CliArgs {
   limit?: number
   scene?: string
   file?: string
+  image?: string
+  firstFrameUri?: string
+  lastFrameUri?: string
+  ratio?: string
+  videoResolution?: string
+  modelVersion?: string
+  modelReqKey?: string
+  seed?: number
   prompt?: string
   outDir: string
   dryRun: boolean
@@ -340,12 +374,42 @@ async function main(argv: string[]): Promise<void> {
   const runId = `${args.command}-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${Math.random().toString(36).slice(2, 8)}`
   const dirs = ensureOutputDirs(path.resolve(args.outDir))
   const capture = readJson(args.capture) as CaptureFile
+  const referenceUploads: ReferenceUploadSummary[] = []
+  let firstFrameUri = args.firstFrameUri
+
+  if (args.command === "image2video") {
+    const imageFile = args.image ?? args.file
+    if (imageFile) {
+      const upload = await uploadReferenceImage({
+        session,
+        dirs,
+        runId,
+        role: "first_frame",
+        index: 0,
+        sourceFile: imageFile,
+      })
+      referenceUploads.push(upload)
+      firstFrameUri = upload.uri
+    }
+
+    if (!firstFrameUri) {
+      throw new Error("image2video requires --image, --file, or --firstFrameUri")
+    }
+  }
+
   const prepared = prepareFromCapture({
     op,
     capture,
     session,
     prompt: args.prompt,
     durationSec: args.durationSec,
+    firstFrameUri,
+    lastFrameUri: args.lastFrameUri,
+    ratio: args.ratio,
+    videoResolution: args.videoResolution,
+    modelVersion: args.modelVersion,
+    modelReqKey: args.modelReqKey,
+    seed: args.seed,
   })
 
   const plan = {
@@ -361,6 +425,7 @@ async function main(argv: string[]): Promise<void> {
     submit_body: prepared.submitBody,
     poll_body: prepared.pollBody,
     terminal_status: prepared.terminalStatus,
+    reference_uploads: referenceUploads,
     browser_session: redactSession(session),
   }
 
@@ -421,14 +486,19 @@ function parseArgs(argv: string[]): CliArgs {
     && command !== "upload-image"
     && command !== "text2image"
     && command !== "text2video"
+    && command !== "image2video"
   ) {
     throw new Error(`Unknown command: ${String(command)}`)
   }
 
   const flags = parseFlags(argv.slice(1))
   const durationSec = flags.durationSec
+  const seed = flags.seed ? Number(flags.seed) : undefined
   const itemPlatform = flags["item-platform"] ? Number(flags["item-platform"]) : undefined
   const limit = flags.limit ? Number(flags.limit) : undefined
+  if (seed !== undefined && (!Number.isInteger(seed) || seed < 0 || seed > 4294967295)) {
+    throw new Error("--seed must be an integer from 0 to 4294967295")
+  }
   if (itemPlatform !== undefined && (!Number.isInteger(itemPlatform) || itemPlatform < 1)) {
     throw new Error("--item-platform must be a positive integer")
   }
@@ -450,6 +520,14 @@ function parseArgs(argv: string[]): CliArgs {
     limit,
     scene: flags.scene,
     file: flags.file,
+    image: flags.image,
+    firstFrameUri: flags.firstFrameUri,
+    lastFrameUri: flags.lastFrameUri,
+    ratio: flags.ratio,
+    videoResolution: flags.videoResolution,
+    modelVersion: flags.modelVersion,
+    modelReqKey: flags.modelReqKey,
+    seed,
     prompt: flags.prompt,
     outDir: flags.outDir ?? "data/jimeng-lab/browser-proxy",
     dryRun: flags.dryRun === "true",
@@ -487,6 +565,82 @@ function parseFlags(argv: string[]): Record<string, string> {
     }
   }
   return flags
+}
+
+interface OutputDirs {
+  rawDir: string
+  normalizedDir: string
+  artifactsDir: string
+}
+
+interface ReferenceUploadSummary {
+  index: number
+  role: "first_frame"
+  source_file: string
+  artifact_copy: string
+  raw_file: string
+  uri: string
+  image_upload: JimengImageUploadResult["summary"]
+}
+
+async function uploadReferenceImage(input: {
+  session: JimengSessionBundle
+  dirs: OutputDirs
+  runId: string
+  role: "first_frame"
+  index: number
+  sourceFile: string
+}): Promise<ReferenceUploadSummary> {
+  const sourceFile = path.resolve(input.sourceFile)
+  const bytes = readFileSync(sourceFile)
+  const artifactFile = path.join(input.dirs.artifactsDir, `${input.runId}-${input.role}-${path.basename(sourceFile)}`)
+  writeFileSync(artifactFile, bytes)
+
+  const result = await uploadJimengImage({
+    session: input.session,
+    image: {
+      fileName: path.basename(sourceFile),
+      bytes,
+    },
+  })
+  const rawFile = path.join(input.dirs.rawDir, `${input.runId}-reference-upload-${input.index}-raw.json`)
+  writeJson(rawFile, {
+    token: {
+      http_status: result.token.httpStatus,
+      response_text_sha256: result.token.responseTextSha256,
+      body: result.token.body,
+    },
+    apply: {
+      http_status: result.apply.httpStatus,
+      response_text_sha256: result.apply.responseTextSha256,
+      body: result.apply.body,
+    },
+    upload: {
+      http_status: result.upload.httpStatus,
+      response_text_sha256: result.upload.responseTextSha256,
+      body: result.upload.body,
+    },
+    commit: {
+      http_status: result.commit.httpStatus,
+      response_text_sha256: result.commit.responseTextSha256,
+      body: result.commit.body,
+    },
+  })
+
+  const uri = result.summary.imageUris[0]
+  if (!uri) {
+    throw new Error("Image upload did not return an image URI")
+  }
+
+  return {
+    index: input.index,
+    role: input.role,
+    source_file: sourceFile,
+    artifact_copy: artifactFile,
+    raw_file: rawFile,
+    uri,
+    image_upload: result.summary,
+  }
 }
 
 function ensureOutputDirs(outDir: string): { rawDir: string; normalizedDir: string; artifactsDir: string } {

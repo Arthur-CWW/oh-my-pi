@@ -19,6 +19,7 @@ As of 2026-06-09, the committed baseline is:
 - `6ba0ae9 Add Jimeng voice catalog and TTS CLI`
 - `4567ca0 Add Jimeng upload token probe`
 - `6fb9c61 Add Jimeng ImageX image upload CLI`
+- `f683706 Update Jimeng CLI extraction goal`
 
 ImageX local image upload is now committed and live-proved:
 
@@ -31,7 +32,17 @@ ImageX local image upload is now committed and live-proved:
 - tests for deterministic AWS4-style ImageX signing and mocked token/apply/upload/commit sequence
 - docs and QA notes showing a live proof URI and local artifact under ignored `data/**`
 
-The next slice is **image-to-video with an uploaded first-frame URI**. Use `upload-image` to turn a real local UGC/Korean-beauty reference image into a `tos-cn-i-*` provider URI, inject it into `first_frame_image`, and prove the full image-to-video command.
+First-frame image-to-video is now implemented and live-proved in the working tree:
+
+- `jimeng-browser-proxy image2video`
+- local first-frame upload via ImageX scene `2`, provider URI injection into `first_frame_image`, submit/poll/download through `/mweb/v1/aigc_draft/generate` and `/mweb/v1/get_history_by_ids`
+- useful flags exposed for later parameterization: `--image`, `--firstFrameUri`, `--lastFrameUri`, `--durationSec`, `--ratio`, `--videoResolution`, `--modelVersion`, `--modelReqKey`, `--seed`
+- proof bundle:
+  - dry-run/local upload: `data/jimeng-lab/proof-20260609-image2video-local-upload/`
+  - live MP4: `data/jimeng-lab/proof-20260609-image2video-live/artifacts/aa83d0e1-a20c-4b85-ab59-ee3a7894296f-00.mp4`
+  - thumbnail: `data/jimeng-lab/proof-20260609-image2video-live/artifacts/aa83d0e1-a20c-4b85-ab59-ee3a7894296f-thumb-2s.jpg`
+
+The next slice is **VOD/video upload**. Use `/mweb/v1/get_upload_token` scene `1` and frontend bundle/capture evidence to turn a local MP4 into whatever provider reference Jimeng uses for reference-video, multimodal/all-around reference, and lip-sync paths.
 
 ## Optimization Target
 

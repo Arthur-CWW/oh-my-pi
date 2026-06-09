@@ -61,13 +61,13 @@ export const DREAMINA_COMPAT_CAPABILITIES: DreaminaCompatCapability[] = [
     command: "image2video",
     status: "partial",
     directOp: "video",
-    notes: "Can inject a confirmed firstFrameUri into the video template. Local file upload-to-URI still needs upload endpoint reversal.",
+    notes: "Can inject a confirmed firstFrameUri into the video template. The jimeng-browser-proxy front door can upload a local --image first, then pass the provider URI here.",
   },
   {
     command: "frames2video",
     status: "partial",
     directOp: "video",
-    notes: "Can inject confirmed firstFrameUri/lastFrameUri into the video template. Local file upload-to-URI still needs reversal.",
+    notes: "Can inject confirmed firstFrameUri/lastFrameUri into the video template. End-frame local upload should be handled by the front-door CLI when implemented.",
   },
   {
     command: "image2image",
@@ -117,10 +117,10 @@ export function prepareDreaminaCompat(input: DreaminaCompatPrepareInput): Prepar
 
     case "image2video":
       if (input.localImages?.length) {
-        throw needsUploadReversal(input.command, "local --image upload-to-URI is not reversed yet; pass --firstFrameUri from a confirmed upload capture")
+        throw needsUploadReversal(input.command, "local --image upload is handled by jimeng-browser-proxy; pass --firstFrameUri to this low-level helper")
       }
       if (!input.firstFrameUri) {
-        throw needsUploadReversal(input.command, "image2video currently requires --firstFrameUri because local image upload is not reversed yet")
+        throw needsUploadReversal(input.command, "image2video requires --firstFrameUri in this low-level helper")
       }
       return prepareFromCapture({
         op: "video",
@@ -138,7 +138,7 @@ export function prepareDreaminaCompat(input: DreaminaCompatPrepareInput): Prepar
 
     case "frames2video":
       if (input.localImages?.length) {
-        throw needsUploadReversal(input.command, "local frame upload-to-URI is not reversed yet; pass confirmed --firstFrameUri/--lastFrameUri values")
+        throw needsUploadReversal(input.command, "local frame upload is handled by jimeng-browser-proxy; pass confirmed --firstFrameUri/--lastFrameUri values")
       }
       if (!input.firstFrameUri && !input.lastFrameUri) {
         throw needsUploadReversal(input.command, "frames2video currently requires --firstFrameUri and/or --lastFrameUri")

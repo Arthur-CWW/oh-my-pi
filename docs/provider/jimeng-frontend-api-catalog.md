@@ -22,7 +22,7 @@ Use the browser as an authenticated session holder and API discovery surface. Mo
 |---|---:|---|---|
 | `/mweb/v1/workspace/create` | POST | Creates a generation workspace/conversation. | Captured |
 | `/mweb/v1/workspace/update` | POST | Renames/updates current workspace metadata. | Captured |
-| `/mweb/v1/aigc_draft/generate` | POST | Unified workbench submit for current text-to-image and text/video draft generation paths. | Implemented for workbench text-to-image and existing text-to-video templates |
+| `/mweb/v1/aigc_draft/generate` | POST | Unified workbench submit for current text-to-image, text-to-video, and first-frame image-to-video draft generation paths. | Implemented for workbench text-to-image, text-to-video templates, and local-upload-backed image-to-video |
 | `/mweb/v1/get_asset_list` | POST | Poll/list workspace assets and completed image results. | Implemented for workbench text-to-image |
 | `/mweb/v1/get_history_by_ids` | POST | Older/general task polling by `submit_id`. | Implemented for captured history-based templates |
 | `/mweb/v1/creation_agent/v2/conversation` | POST/SSE | Older agent text-to-image conversation submit. | Preserved |
@@ -156,6 +156,81 @@ This URI can now be injected into first-frame image-to-video payloads:
 draft_content.component_list[0].abilities.gen_video.text_to_video_params.video_gen_inputs[0].first_frame_image
 ```
 
+## Confirmed Image-To-Video First-Frame Contract
+
+`jimeng-browser-proxy image2video` is live-proved for the UGC first-frame workflow:
+
+```txt
+local PNG/JPEG/WebP
+→ ImageX scene=2 upload
+→ tos-cn-i-tb4s082cfz/... provider URI
+→ /mweb/v1/aigc_draft/generate with video_gen_inputs[0].first_frame_image
+→ /mweb/v1/get_history_by_ids polling
+→ signed MP4 download
+```
+
+Useful CLI flags now exposed:
+
+```txt
+--image <path>             local first-frame image; uploads before submit
+--firstFrameUri <uri>      reuse an existing provider URI
+--lastFrameUri <uri>       payload-level end-frame experiment
+--durationSec <sec>
+--ratio <ratio>
+--videoResolution <value>
+--modelVersion <value>
+--modelReqKey <value>
+--seed <n>
+```
+
+Dry-run with local upload:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts image2video \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --capture data/jimeng-lab/raw/jimeng-network-capture-video-01.json \
+  --image data/jimeng-lab/ugc-studio-kbeauty-image/artifacts/jimeng-kbeauty-01.png \
+  --prompt '韩系美妆达人自拍风格，干净卧室自然光，镜头轻微推进，创作者像真实TikTok种草视频一样自然开场，前三秒有明确痛点钩子，无字幕，无水印，不要生成可读文字。' \
+  --durationSec 5 \
+  --ratio 9:16 \
+  --videoResolution 720p \
+  --modelVersion 3.0fast \
+  --seed 20260609 \
+  --dryRun \
+  --outDir data/jimeng-lab/proof-20260609-image2video-local-upload
+```
+
+Live proof:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts image2video \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --capture data/jimeng-lab/raw/jimeng-network-capture-video-01.json \
+  --firstFrameUri tos-cn-i-tb4s082cfz/7abfa90c628d46859c32dc2feffcd2e1.png \
+  --prompt '韩系美妆达人自拍风格，干净卧室自然光，镜头轻微推进，创作者像真实TikTok种草视频一样自然开场，前三秒有明确痛点钩子，无字幕，无水印，不要生成可读文字。' \
+  --durationSec 5 \
+  --ratio 9:16 \
+  --videoResolution 720p \
+  --modelVersion 3.0fast \
+  --seed 20260609 \
+  --pollIntervalMs 10000 \
+  --maxPolls 30 \
+  --outDir data/jimeng-lab/proof-20260609-image2video-live
+```
+
+Proof result:
+
+```txt
+firstFrameUri=tos-cn-i-tb4s082cfz/7abfa90c628d46859c32dc2feffcd2e1.png
+submitId=aa83d0e1-a20c-4b85-ab59-ee3a7894296f
+historyId=39156175522050
+artifact=data/jimeng-lab/proof-20260609-image2video-live/artifacts/aa83d0e1-a20c-4b85-ab59-ee3a7894296f-00.mp4
+thumbnail=data/jimeng-lab/proof-20260609-image2video-live/artifacts/aa83d0e1-a20c-4b85-ab59-ee3a7894296f-thumb-2s.jpg
+video=H.264 MP4, 704x1248, 5.016667s, 4.3 MB
+```
+
+Raw upload/apply/commit responses, signed artifact URLs, and generated media remain ignored under `data/**`.
+
 ## Confirmed Config Catalog Probes
 
 `packages/jimeng-client/src/catalog.ts` now has a non-generating catalog probe for:
@@ -254,12 +329,12 @@ image.item_list[].common_attr.cover_url_map["4096" | "2400" | "1080"]
 
 Capture one flow at a time:
 
-- image reference upload
+- richer image reference controls
 - image-to-image / byte edit
 - subject/persona creation
 - voice cloning and subject voice generation
 - pose/style/depth/canny reference controls
-- image-to-video first-frame
+- image-to-video end-frame and multi-frame controls
 - multimodal/all-around reference video
 - video text generation with current unified app route
 - lip sync and voice/digital-human tools

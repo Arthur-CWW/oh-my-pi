@@ -19,11 +19,16 @@ describe("prepareFromCapture", () => {
       durationSec: 4,
       firstFrameUri: "tos://first",
       lastFrameUri: "tos://last",
+      ratio: "9:16",
+      videoResolution: "720p",
+      modelVersion: "3.0fast",
+      seed: 12345,
     })
 
     const draft = JSON.parse(String(prepared.submitBody.draft_content))
     const metrics = JSON.parse(String(prepared.submitBody.metrics_extra))
     const sceneOptions = JSON.parse(String(metrics.sceneOptions))
+    const textToVideo = draft.component_list[0].abilities.gen_video.text_to_video_params
     const input = draft.component_list[0].abilities.gen_video.text_to_video_params.video_gen_inputs[0]
     const taskExtra = JSON.parse(draft.component_list[0].abilities.gen_video.video_task_extra)
 
@@ -38,7 +43,14 @@ describe("prepareFromCapture", () => {
     expect(input.duration_ms).toBe(4000)
     expect(input.first_frame_image).toBe("tos://first")
     expect(input.end_frame_image).toBe("tos://last")
-    expect(typeof input.seed).toBe("number")
+    expect(input.resolution).toBe("720p")
+    expect(input.seed).toBe(12345)
+    expect(textToVideo.video_aspect_ratio).toBe("9:16")
+    expect(textToVideo.model_req_key).toBe("dreamina_ic_generate_video_model_vgfm_3.0_fast")
+    expect(textToVideo.seed).toBe(12345)
+    expect(sceneOptions[0].resolution).toBe("720p")
+    expect(sceneOptions[0].modelReqKey).toBe("dreamina_ic_generate_video_model_vgfm_3.0_fast")
+    expect(sceneOptions[0].reportParams.extraVipFunctionKey).toBe("dreamina_ic_generate_video_model_vgfm_3.0_fast-720p")
     expect(taskExtra.originSubmitId).toBe(prepared.submitId)
   })
 
@@ -113,7 +125,7 @@ function videoCapture(): CaptureFile {
         headers: { "user-agent": "CapturedUA", origin: "https://jimeng.jianying.com" },
         postData: JSON.stringify({
           submit_id: "old-submit",
-          metrics_extra: JSON.stringify({ sceneOptions: JSON.stringify([{ videoDuration: 3 }]), keep: true }),
+          metrics_extra: JSON.stringify({ sceneOptions: JSON.stringify([{ videoDuration: 3, reportParams: {} }]), keep: true }),
           draft_content: JSON.stringify(draft),
         }),
       },

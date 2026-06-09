@@ -11,7 +11,8 @@ This package contains only local client code and tests. It does **not** include 
 - Capture-template patching for:
   - image text prompts
   - video text prompts
-  - first/last frame URI payload injection placeholders
+  - first-frame image-to-video via local ImageX upload and provider URI injection
+  - first/last frame URI payload injection experiments
 - Direct submit/poll/download helpers
 - Structured errors and risk-control detection (`ret=1019` / `shark not pass`)
 
@@ -74,6 +75,18 @@ bun packages/jimeng-client/src/browser-proxy-cli.ts text2image \
   --target-url "type=image" \
   --capture data/jimeng-captures/<run>/capture-template.raw.json \
   --prompt "韩系美妆健身UGC创作者，手机自拍，无文字，无水印" \
+  --dryRun
+
+# local-upload-backed first-frame image-to-video
+bun packages/jimeng-client/src/browser-proxy-cli.ts image2video \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --capture data/jimeng-lab/raw/jimeng-network-capture-video-01.json \
+  --image data/jimeng-lab/ugc-studio-kbeauty-image/artifacts/jimeng-kbeauty-01.png \
+  --prompt "韩系美妆达人自拍风格，干净卧室自然光，镜头轻微推进，无字幕，无水印" \
+  --durationSec 5 \
+  --ratio 9:16 \
+  --videoResolution 720p \
+  --modelVersion 3.0fast \
   --dryRun
 ```
 

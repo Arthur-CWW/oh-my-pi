@@ -48,6 +48,16 @@ For the long-running `/goal` spec, proof rules, async CLI shape, and per-feature
   `data/jimeng-lab/proof-20260609-image-upload/`.
 - This unblocks first-frame image-to-video payload patching with real provider URIs.
 
+2026-06-09 image-to-video first-frame slice:
+
+- Added `jimeng-browser-proxy image2video`.
+- `--image <path>` uploads a local first-frame image through the confirmed ImageX scene `2` path before patching `first_frame_image`.
+- `--firstFrameUri <uri>` reuses an existing provider URI without another upload.
+- Exposed video parameter flags for later pipeline use: `--durationSec`, `--ratio`, `--videoResolution`, `--modelVersion`, `--modelReqKey`, and `--seed`.
+- Live-proved a Korean-beauty UGC reference image to MP4:
+  `data/jimeng-lab/proof-20260609-image2video-live/artifacts/aa83d0e1-a20c-4b85-ab59-ee3a7894296f-00.mp4`.
+- Next slice is VOD/video upload, then end-frame/multi-frame/reference controls.
+
 ## Owner paths
 
 This lane may edit:
@@ -271,7 +281,7 @@ bun packages/jimeng-client/src/network-recorder.ts \
 You are the Jimeng/Dreamina API reversal lane in /Users/arthur/projects/pi-web-access.
 Read docs/plans/README.md and docs/plans/jimeng-frontend-api-reversal.md.
 Only edit packages/jimeng-client/**, docs/provider/**, and docs/plans/jimeng-frontend-api-reversal.md unless explicitly handed off.
-Current direct-client baseline includes workbench text-to-image, config catalog probes, signed built-in voice feed replay, and direct TTS.
-Next capture targets are voice clone submit/query, dreamina_subject create/update/generate_voice, upload/reference image flows, image-to-video first-frame, multimodal video, lip sync generation, infinite canvas edits, and template mining.
+Current direct-client baseline includes workbench text-to-image, config catalog probes, signed built-in voice feed replay, direct TTS, ImageX local image upload, and first-frame image-to-video with MP4 proof.
+Next capture targets are VOD/video upload, end-frame/multi-frame image-to-video, pose/style/depth/canny reference controls, voice clone submit/query, dreamina_subject create/update/generate_voice, multimodal video, lip sync generation, infinite canvas edits, and template mining.
 Use the background-CDP network recorder for one flow at a time. Dry-run payloads before live calls; keep concurrency 1; stop on 1019/shark-not-pass. Do not commit cookies, captures, session bundles, signed URLs, or generated media.
 ```

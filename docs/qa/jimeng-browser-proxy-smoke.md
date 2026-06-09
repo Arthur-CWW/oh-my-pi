@@ -307,11 +307,113 @@ ImageFormat=png
 
 Raw token/apply responses include temporary credentials and upload authorization. They are intentionally local-only under ignored `data/**`.
 
+## Image-To-Video First-Frame Smoke
+
+Local-upload-backed image-to-video is now live-proved through the browser-proxy front door.
+
+Dry-run with a real Korean-beauty UGC reference image:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts image2video \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --capture data/jimeng-lab/raw/jimeng-network-capture-video-01.json \
+  --image data/jimeng-lab/ugc-studio-kbeauty-image/artifacts/jimeng-kbeauty-01.png \
+  --prompt '韩系美妆达人自拍风格，干净卧室自然光，镜头轻微推进，创作者像真实TikTok种草视频一样自然开场，前三秒有明确痛点钩子，无字幕，无水印，不要生成可读文字。' \
+  --durationSec 5 \
+  --ratio 9:16 \
+  --videoResolution 720p \
+  --modelVersion 3.0fast \
+  --seed 20260609 \
+  --dryRun \
+  --outDir data/jimeng-lab/proof-20260609-image2video-local-upload
+```
+
+Dry-run result:
+
+```txt
+upload URI=tos-cn-i-tb4s082cfz/7abfa90c628d46859c32dc2feffcd2e1.png
+plan=data/jimeng-lab/proof-20260609-image2video-local-upload/raw/image2video-20260609132522-77co2l-dry-run-plan.json
+raw upload trace=data/jimeng-lab/proof-20260609-image2video-local-upload/raw/image2video-20260609132522-77co2l-reference-upload-0-raw.json
+reference copy=data/jimeng-lab/proof-20260609-image2video-local-upload/artifacts/image2video-20260609132522-77co2l-first_frame-jimeng-kbeauty-01.png
+```
+
+Patched payload facts:
+
+```txt
+first_frame_image=tos-cn-i-tb4s082cfz/7abfa90c628d46859c32dc2feffcd2e1.png
+prompt=韩系美妆达人自拍风格...
+duration_ms=5000
+ratio=9:16
+videoResolution=720p
+model_req_key=dreamina_ic_generate_video_model_vgfm_3.0_fast
+seed=20260609
+```
+
+Live command:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts image2video \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --capture data/jimeng-lab/raw/jimeng-network-capture-video-01.json \
+  --firstFrameUri tos-cn-i-tb4s082cfz/7abfa90c628d46859c32dc2feffcd2e1.png \
+  --prompt '韩系美妆达人自拍风格，干净卧室自然光，镜头轻微推进，创作者像真实TikTok种草视频一样自然开场，前三秒有明确痛点钩子，无字幕，无水印，不要生成可读文字。' \
+  --durationSec 5 \
+  --ratio 9:16 \
+  --videoResolution 720p \
+  --modelVersion 3.0fast \
+  --seed 20260609 \
+  --pollIntervalMs 10000 \
+  --maxPolls 30 \
+  --outDir data/jimeng-lab/proof-20260609-image2video-live
+```
+
+Live result:
+
+```txt
+submitId=aa83d0e1-a20c-4b85-ab59-ee3a7894296f
+historyId=39156175522050
+status=50
+poll trace count=5
+video=data/jimeng-lab/proof-20260609-image2video-live/artifacts/aa83d0e1-a20c-4b85-ab59-ee3a7894296f-00.mp4
+thumbnail=data/jimeng-lab/proof-20260609-image2video-live/artifacts/aa83d0e1-a20c-4b85-ab59-ee3a7894296f-thumb-2s.jpg
+normalized=data/jimeng-lab/proof-20260609-image2video-live/normalized/image2video-20260609132811-kongh1-result.json
+```
+
+Media validation:
+
+```bash
+ffprobe -v error \
+  -show_entries stream=codec_type,codec_name,width,height,avg_frame_rate,duration:format=duration,size,format_name \
+  -of json \
+  data/jimeng-lab/proof-20260609-image2video-live/artifacts/aa83d0e1-a20c-4b85-ab59-ee3a7894296f-00.mp4
+```
+
+Validation result:
+
+```txt
+codec=h264
+resolution=704x1248
+duration=5.016667s
+size=4285498 bytes
+format=mov,mp4,m4a,3gp,3g2,mj2
+```
+
+Thumbnail extraction:
+
+```bash
+ffmpeg -y \
+  -i data/jimeng-lab/proof-20260609-image2video-live/artifacts/aa83d0e1-a20c-4b85-ab59-ee3a7894296f-00.mp4 \
+  -ss 00:00:02 \
+  -frames:v 1 \
+  data/jimeng-lab/proof-20260609-image2video-live/artifacts/aa83d0e1-a20c-4b85-ab59-ee3a7894296f-thumb-2s.jpg
+```
+
 ## Verification
 
 ```bash
 bun run jimeng:typecheck
 bun run jimeng:test
+bun packages/jimeng-client/src/browser-proxy-cli.ts --help
 ```
 
 Result:
@@ -319,6 +421,7 @@ Result:
 ```txt
 typecheck passed
 23 tests passed, 0 failed
+browser-proxy help listed image2video
 ```
 
 ## Follow-Up
@@ -328,8 +431,9 @@ Next useful captures:
 - image-to-image / byte edit
 - subject/persona creation
 - pose/style/depth/canny reference controls
-- image-to-video first-frame
+- image-to-video end-frame and multi-frame controls
 - multimodal/all-around reference video
+- VOD/video upload for reference-video and lip-sync paths
 - video text generation through the current unified app route
 - voice cloning and subject/persona voice generation
 - canvas edit tools
