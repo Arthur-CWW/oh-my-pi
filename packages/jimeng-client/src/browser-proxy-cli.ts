@@ -23,6 +23,13 @@ import {
   summarizeExploreTemplates,
 } from "./explore"
 import { buildJimengLipSyncVideoPlan, lipSyncVideoReferenceFromUploadSummary, type JimengLipSyncVideoReference } from "./lip-sync"
+import {
+  defaultFaceRecognizeBabiParam,
+  defaultImageDescriptionBabiParam,
+  describeJimengImage,
+  recognizeJimengImageFaces,
+  summarizeReferenceImageInspection,
+} from "./reference-image"
 import { getJimengUploadToken, parseUploadTokenScene, uploadJimengImage, uploadJimengVideo, type JimengImageUploadResult, type JimengVideoUploadResult } from "./upload"
 
 const DEFAULT_CDP_URL = "http://127.0.0.1:9340"
@@ -40,6 +47,7 @@ Commands:
   sample-voices Generate sequential MP3 samples for voices from the built-in library
   templates     Fetch no-spend Explore/template examples for prompt/template mining
   short-videos  Fetch no-spend Explore short videos for reference/profile mining
+  describe-image Upload/use an image URI, then describe it and detect faces
   upload-token  Fetch temporary upload credentials for image/video/file upload scenes
   upload-image  Upload a local image to Jimeng ImageX and return a provider URI
   upload-video  Upload a local video to Jimeng VOD and return a provider video reference
@@ -72,6 +80,9 @@ Options:
   --scene <image|video|file|n>   upload-token scene (default: image)
   --file <path>                  Local media file for upload-image/upload-video; alias for --image in image2video
   --video <path>                 Local reference video for lip-sync; uploads to VOD in dry-run planning
+  --imageUri <uri>               Existing Jimeng/ImageX provider URI for describe-image
+  --noDescription                Skip get_image_description in describe-image
+  --noFaces                      Skip face_recognize in describe-image
   --vid <vid>                    Existing VOD vid for lip-sync
   --videoUri <uri>               Existing VOD/tos provider URI for lip-sync
   --videoWidth <n>               Existing reference video width for lip-sync
@@ -122,6 +133,10 @@ Examples:
     --category-id 11222 \\
     --feed-refer feed_enterauto
 
+  jimeng-browser-proxy describe-image \\
+    --image data/jimeng-lab/ugc-studio-kbeauty-image/artifacts/jimeng-kbeauty-01.png \\
+    --outDir data/jimeng-lab/cli-reference-image-smoke
+
   jimeng-browser-proxy upload-image \\
     --file data/jimeng-lab/image-upload-probe/aws4-live/proof-1x1.png \\
     --outDir data/jimeng-lab/cli-image-upload-smoke
@@ -163,6 +178,7 @@ interface CliArgs {
     | "sample-voices"
     | "templates"
     | "short-videos"
+    | "describe-image"
     | "upload-token"
     | "upload-image"
     | "upload-video"
@@ -193,6 +209,9 @@ interface CliArgs {
   scene?: string
   file?: string
   video?: string
+  imageUri?: string
+  noDescription: boolean
+  noFaces: boolean
   vid?: string
   videoUri?: string
   videoWidth?: number
@@ -448,6 +467,141 @@ async function main(argv: string[]): Promise<void> {
       items: result.items,
     })
     console.log(`[jimeng-browser-proxy] short-videos saved count=${result.items.length} nextOffset=${result.nextOffset ?? "none"}`)
+    return
+  }
+
+  if (args.command === "describe-image") {
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const sourceFile = args.image ?? args.file
+    const runId = `describe-image-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${Math.random().toString(36).slice(2, 8)}`
+    const requestedImageUri = args.imageUri
+    const endpoints = [
+      ...(args.noDescription ? [] : ["/mweb/v1/get_image_description"]),
+      ...(args.noFaces ? [] : ["/mweb/v1/face_recognize"]),
+    ]
+    if (!sourceFile && !requestedImageUri) throw new Error("describe-image requires --image, --file, or --imageUri")
+    if (endpoints.length === 0) throw new Error("describe-image has nothing to do when both --noDescription and --noFaces are passed")
+
+    if (args.dryRun) {
+      writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
+        command: args.command,
+        endpoint_sequence: [
+          ...(sourceFile ? ["/mweb/v1/get_upload_token scene=2", "ImageX ApplyImageUpload", "ImageX direct POST /upload/v1/{StoreUri}", "ImageX CommitImageUpload"] : []),
+          ...endpoints,
+        ],
+        source_file: sourceFile ? path.resolve(sourceFile) : undefined,
+        image_uri: requestedImageUri,
+        requests: {
+          description: args.noDescription || !requestedImageUri ? undefined : { file_uri: requestedImageUri },
+          face_recognition: args.noFaces || !requestedImageUri ? undefined : { image_uri_list: [requestedImageUri] },
+        },
+        browser_session: redactSession(session),
+      })
+      console.log(`[jimeng-browser-proxy] describe-image dry run saved`)
+      return
+    }
+
+    let imageUri = requestedImageUri
+    let imageUpload: object | null = null
+    if (sourceFile) {
+      const resolvedSourceFile = path.resolve(sourceFile)
+      const bytes = readFileSync(resolvedSourceFile)
+      const artifactFile = path.join(dirs.artifactsDir, `${runId}-${path.basename(resolvedSourceFile)}`)
+      writeFileSync(artifactFile, bytes)
+      const uploaded = await uploadJimengImage({
+        session,
+        image: {
+          fileName: path.basename(resolvedSourceFile),
+          bytes,
+        },
+      })
+      writeJson(path.join(dirs.rawDir, `${runId}-upload-raw.json`), {
+        token: {
+          http_status: uploaded.token.httpStatus,
+          response_text_sha256: uploaded.token.responseTextSha256,
+          body: uploaded.token.body,
+        },
+        apply: {
+          http_status: uploaded.apply.httpStatus,
+          response_text_sha256: uploaded.apply.responseTextSha256,
+          body: uploaded.apply.body,
+        },
+        upload: {
+          http_status: uploaded.upload.httpStatus,
+          response_text_sha256: uploaded.upload.responseTextSha256,
+          body: uploaded.upload.body,
+        },
+        commit: {
+          http_status: uploaded.commit.httpStatus,
+          response_text_sha256: uploaded.commit.responseTextSha256,
+          body: uploaded.commit.body,
+        },
+      })
+      imageUri = uploaded.summary.imageUris[0]
+      imageUpload = {
+        source_file: resolvedSourceFile,
+        artifact_copy: artifactFile,
+        image_upload: uploaded.summary,
+      }
+    }
+    if (!imageUri) throw new Error("Image upload did not return an image URI")
+
+    const description = args.noDescription
+      ? null
+      : await describeJimengImage({
+        session,
+        imageUri,
+        babiParam: defaultImageDescriptionBabiParam(),
+      })
+    const faceRecognition = args.noFaces
+      ? null
+      : await recognizeJimengImageFaces({
+        session,
+        imageUri,
+        babiParam: defaultFaceRecognizeBabiParam(),
+      })
+    const inspection = { imageUri, description, faceRecognition }
+
+    writeJson(path.join(dirs.rawDir, `${runId}-raw.json`), {
+      description: description ? {
+        http_status: description.httpStatus,
+        ret: description.ret,
+        errmsg: description.errmsg,
+        response_text_sha256: description.responseTextSha256,
+        request: description.request,
+        body: description.body,
+      } : null,
+      face_recognition: faceRecognition ? {
+        http_status: faceRecognition.httpStatus,
+        ret: faceRecognition.ret,
+        errmsg: faceRecognition.errmsg,
+        response_text_sha256: faceRecognition.responseTextSha256,
+        request: faceRecognition.request,
+        body: faceRecognition.body,
+      } : null,
+    })
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      endpoints,
+      image_upload: imageUpload,
+      image_uri: imageUri,
+      description: description ? {
+        http_status: description.httpStatus,
+        ret: description.ret,
+        errmsg: description.errmsg,
+        response_text_sha256: description.responseTextSha256,
+        description: description.description,
+      } : null,
+      face_recognition: faceRecognition ? {
+        http_status: faceRecognition.httpStatus,
+        ret: faceRecognition.ret,
+        errmsg: faceRecognition.errmsg,
+        response_text_sha256: faceRecognition.responseTextSha256,
+        faces: faceRecognition.faces,
+      } : null,
+      summary: summarizeReferenceImageInspection(inspection),
+    })
+    console.log(`[jimeng-browser-proxy] describe-image saved description=${description?.description ? "yes" : "no"} faces=${faceRecognition?.faces.length ?? 0}`)
     return
   }
 
@@ -811,6 +965,7 @@ function parseArgs(argv: string[]): CliArgs {
     && command !== "sample-voices"
     && command !== "templates"
     && command !== "short-videos"
+    && command !== "describe-image"
     && command !== "upload-token"
     && command !== "upload-image"
     && command !== "upload-video"
@@ -885,6 +1040,9 @@ function parseArgs(argv: string[]): CliArgs {
     scene: flags.scene,
     file: flags.file,
     video: flags.video,
+    imageUri: flags.imageUri,
+    noDescription: flags.noDescription === "true",
+    noFaces: flags.noFaces === "true",
     vid: flags.vid,
     videoUri: flags.videoUri,
     videoWidth,

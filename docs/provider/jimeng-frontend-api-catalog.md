@@ -35,6 +35,8 @@ Use the browser as an authenticated session holder and API discovery surface. Mo
 | `/mweb/v1/tts_generate` | POST | Built-in voice text-to-speech. Returns base64 MP3 in `data.data`. | Implemented and live-proved |
 | `/mweb/v1/get_upload_token` | POST | Temporary upload credentials for video/image/file scenes. Required before direct local reference-image/video upload. | Implemented and live-proved; local ImageX image upload is implemented via `upload-image`, local VOD video upload via `upload-video` |
 | `/mweb/v1/get_explore` | POST | Explore examples, public creative templates, and short-video examples for prompt/template/reference mining. | Implemented as no-spend `templates` and `short-videos` |
+| `/mweb/v1/get_image_description` | POST | Image prompt/description extraction for uploaded provider image URIs. Useful for persona/reference inspection. | Implemented as no-spend `describe-image` |
+| `/mweb/v1/face_recognize` | POST | Face/keypoint probe for uploaded provider image URIs. Useful for reference/persona validation before generation payloads. | Implemented as no-spend `describe-image` |
 | `/mweb/v1/get_unread_count` | POST | Notification count. | Low priority |
 
 ## Confirmed Voice / Audio Contracts
@@ -155,6 +157,53 @@ This URI can now be injected into first-frame image-to-video payloads:
 ```txt
 draft_content.component_list[0].abilities.gen_video.text_to_video_params.video_gen_inputs[0].first_frame_image
 ```
+
+## Confirmed Reference Image Inspection Contract
+
+`jimeng-browser-proxy describe-image` is live-proved as a no-generation probe. It accepts either a local image file, uploaded through the confirmed ImageX scene `2` path, or an existing Jimeng/ImageX provider URI.
+
+Description request:
+
+```txt
+POST /mweb/v1/get_image_description
+```
+
+```json
+{ "file_uri": "tos-cn-i-tb4s082cfz/..." }
+```
+
+Face recognition request:
+
+```txt
+POST /mweb/v1/face_recognize
+```
+
+```json
+{ "image_uri_list": ["tos-cn-i-tb4s082cfz/..."] }
+```
+
+Current CLI proof:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts describe-image \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --image data/jimeng-lab/ugc-studio-kbeauty-image/artifacts/jimeng-kbeauty-01.png \
+  --outDir data/jimeng-lab/proof-20260610-reference-image-inspect
+```
+
+Safe summary:
+
+```txt
+image_uri=tos-cn-i-tb4s082cfz/b8f5124217774661b005916f6ca5bae8.png
+description=黑发女人，白色背心。
+description_sha256=77b52d1885139655c7279ebedd49c6000564c923af84db4ff812307de9628f5f
+face_recognition_ret=0
+face_recognition_sha256=aa358db205f856bbd3369effb85576c4a7b6f265f4bdd6a96a8f805ecaa35d03
+face_count=0
+summary=data/jimeng-lab/proof-20260610-reference-image-inspect/normalized/describe-image-20260609155534-q25boh-summary.json
+```
+
+Raw upload traces and response bodies may include signed upload/provider details. They remain ignored under `data/**`.
 
 ## Confirmed Local Video Upload Contract
 

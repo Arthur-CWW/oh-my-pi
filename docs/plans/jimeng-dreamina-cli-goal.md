@@ -25,6 +25,7 @@ As of 2026-06-10, the committed Jimeng CLI baseline is:
 - `0bb9bb5 Add Jimeng frames-to-video dry-run CLI`
 - `86ff779 Add Jimeng lip-sync VOD dry-run plan`
 - `5c7887a Add Jimeng Explore templates CLI`
+- `594d5d0 Add Jimeng short-video Explore CLI`
 
 ImageX local image upload is now committed and live-proved:
 
@@ -101,7 +102,17 @@ Short-video Explore mining is now live-proved without generation spend:
 - proof bundle: `data/jimeng-lab/proof-20260610-short-videos-explore/`
 - latest proof returned 20 short-video items for `count=5`, `next_offset=5`, top play count `1718727`, and top video metadata `1280x720`, `85s`, `15fps`, with audio.
 
-The next slice is **reference controls and video-reference consumers**. Use the VOD provider reference plus frontend captures to unlock live lip-sync, reference-video, multimodal/all-around reference, and live end-frame/multi-frame image-to-video paths.
+Reference-image inspection is now live-proved without generation spend:
+
+- `jimeng-browser-proxy describe-image`
+- direct `/mweb/v1/get_image_description` and `/mweb/v1/face_recognize` with logged-in browser session headers
+- local images are uploaded through the live-proved ImageX scene `2` path first, unless an existing `--imageUri` is supplied
+- useful flags: `--image`, `--file`, `--imageUri`, `--noDescription`, `--noFaces`
+- normalized proof records provider URI, description presence/length, response hashes, and face count without signed upload traces
+- proof bundle: `data/jimeng-lab/proof-20260610-reference-image-inspect/`
+- latest proof produced description `黑发女人，白色背心。`; face recognition returned `ret=0`, `errmsg=success`, and `face_count=0` for that input image.
+
+The next slice is **reference controls and video-reference consumers**. Use the VOD provider reference plus frontend captures to unlock live lip-sync, reference-video, multimodal/all-around reference, pose/style/depth/canny controls, and live end-frame/multi-frame image-to-video paths.
 
 Immediate next slices:
 
@@ -191,6 +202,7 @@ jimeng-browser-proxy tts
 jimeng-browser-proxy sample-voices
 jimeng-browser-proxy upload-token
 jimeng-browser-proxy upload-image
+jimeng-browser-proxy describe-image
 jimeng-browser-proxy text2image
 jimeng-browser-proxy text2video
 jimeng-browser-proxy image2video
@@ -200,6 +212,7 @@ jimeng-browser-proxy voice-clone
 jimeng-browser-proxy persona
 jimeng-browser-proxy subject
 jimeng-browser-proxy templates
+jimeng-browser-proxy short-videos
 jimeng-browser-proxy assets
 jimeng-browser-proxy canvas
 ```

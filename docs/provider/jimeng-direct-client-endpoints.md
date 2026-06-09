@@ -523,6 +523,68 @@ ImageHeight=1
 
 Raw token/apply responses contain temporary credentials and provider auth. Keep them only under ignored `data/**`.
 
+### 12.1) Reference image inspection
+- Status:
+  - live-proved without generation spend with `jimeng-browser-proxy describe-image`
+  - implemented in `packages/jimeng-client/src/reference-image.ts`
+  - tested with mocked description/face-recognition response shapes in `packages/jimeng-client/test/reference-image.test.ts`
+- Provider sequence for local files:
+
+```txt
+POST /mweb/v1/get_upload_token { "scene": 2 }
+GET  ImageX ApplyImageUpload
+POST ImageX direct /upload/v1/{StoreUri}
+POST ImageX CommitImageUpload
+POST /mweb/v1/get_image_description
+POST /mweb/v1/face_recognize
+```
+
+Description request:
+
+```json
+{ "file_uri": "tos-cn-i-tb4s082cfz/..." }
+```
+
+Face-recognition request:
+
+```json
+{ "image_uri_list": ["tos-cn-i-tb4s082cfz/..."] }
+```
+
+CLI controls:
+
+```txt
+--image <path>       local PNG/JPEG/WebP; uploaded before inspection
+--file <path>        alias for local image/file input
+--imageUri <uri>     existing tos-cn-i-* provider URI
+--noDescription      skip /mweb/v1/get_image_description
+--noFaces            skip /mweb/v1/face_recognize
+```
+
+Live proof command:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts describe-image \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --image data/jimeng-lab/ugc-studio-kbeauty-image/artifacts/jimeng-kbeauty-01.png \
+  --outDir data/jimeng-lab/proof-20260610-reference-image-inspect
+```
+
+Observed safe summary:
+
+```txt
+image_uri=tos-cn-i-tb4s082cfz/b8f5124217774661b005916f6ca5bae8.png
+description=黑发女人，白色背心。
+description_ret=0
+description_sha256=77b52d1885139655c7279ebedd49c6000564c923af84db4ff812307de9628f5f
+face_recognition_ret=0
+face_recognition_sha256=aa358db205f856bbd3369effb85576c4a7b6f265f4bdd6a96a8f805ecaa35d03
+face_count=0
+summary=data/jimeng-lab/proof-20260610-reference-image-inspect/normalized/describe-image-20260609155534-q25boh-summary.json
+```
+
+The face-recognition endpoint succeeded but returned no faces for this specific generated reference image. Treat that as input-dependent, not an API failure. Raw upload/response traces remain ignored under `data/**`.
+
 ### 13) Local video upload to VOD provider reference
 - Status:
   - live-proved with `jimeng-browser-proxy upload-video`

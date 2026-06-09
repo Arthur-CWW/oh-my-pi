@@ -307,6 +307,35 @@ ImageFormat=png
 
 Raw token/apply responses include temporary credentials and upload authorization. They are intentionally local-only under ignored `data/**`.
 
+## Reference Image Inspect Smoke
+
+`jimeng-browser-proxy describe-image` uploads a local reference image when needed, then calls Jimeng's no-generation image-description and face-recognition endpoints.
+
+Command:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts describe-image \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --image data/jimeng-lab/ugc-studio-kbeauty-image/artifacts/jimeng-kbeauty-01.png \
+  --outDir data/jimeng-lab/proof-20260610-reference-image-inspect
+```
+
+Result:
+
+```txt
+raw=data/jimeng-lab/proof-20260610-reference-image-inspect/raw/describe-image-20260609155534-q25boh-raw.json
+summary=data/jimeng-lab/proof-20260610-reference-image-inspect/normalized/describe-image-20260609155534-q25boh-summary.json
+image_uri=tos-cn-i-tb4s082cfz/b8f5124217774661b005916f6ca5bae8.png
+description=黑发女人，白色背心。
+description_ret=0
+description_sha256=77b52d1885139655c7279ebedd49c6000564c923af84db4ff812307de9628f5f
+face_recognition_ret=0
+face_recognition_sha256=aa358db205f856bbd3369effb85576c4a7b6f265f4bdd6a96a8f805ecaa35d03
+face_count=0
+```
+
+The face-recognition endpoint completed successfully but found no face on this generated input. Raw upload traces and response bodies remain under ignored `data/**`.
+
 ## Image-To-Video First-Frame Smoke
 
 Local-upload-backed image-to-video is now live-proved through the browser-proxy front door.
@@ -627,8 +656,8 @@ Result:
 
 ```txt
 typecheck passed
-34 tests passed, 0 failed
-browser-proxy help listed templates, short-videos, upload-video, image2video, frames2video, and lip-sync
+39 tests passed, 0 failed
+browser-proxy help listed describe-image, templates, short-videos, upload-video, image2video, frames2video, and lip-sync
 ```
 
 ## Follow-Up
