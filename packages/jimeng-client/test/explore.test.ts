@@ -1,11 +1,13 @@
 import { describe, expect, test } from "bun:test"
 import {
   buildExploreRequestBody,
+  buildShortVideoExploreQuery,
   fetchExploreTemplates,
   JimengClient,
   JimengError,
   parseExploreTemplatesBody,
   parseExploreWorkTypes,
+  summarizeExploreShortVideos,
   summarizeExploreTemplates,
   type JimengFetch,
   type JimengSessionBundle,
@@ -38,8 +40,22 @@ describe("Jimeng Explore templates", () => {
   })
 
   test("parses work type flags", () => {
-    expect(parseExploreWorkTypes("image,video,canvas")).toEqual(["image", "video", "canvas"])
+    expect(parseExploreWorkTypes("image,video,canvas,short_video")).toEqual(["image", "video", "canvas", "short_video"])
     expect(() => parseExploreWorkTypes("image,audio")).toThrow(JimengError)
+  })
+
+  test("builds short-video Explore query with frontend feed defaults", () => {
+    expect(buildExploreRequestBody(buildShortVideoExploreQuery({ count: 5 }))).toMatchObject({
+      count: 5,
+      offset: 0,
+      feed_refer: "feed_enterauto",
+      filter: { work_type_list: ["short_video"] },
+    })
+    expect(buildExploreRequestBody(buildShortVideoExploreQuery({ offset: 5 }))).toMatchObject({
+      offset: 5,
+      feed_refer: "feed_loadmore",
+      filter: { work_type_list: ["short_video"] },
+    })
   })
 
   test("normalizes prompt and template signals from response body", () => {
@@ -96,6 +112,52 @@ describe("Jimeng Explore templates", () => {
     })
     expect(result.items).toHaveLength(1)
     expect(result.items[0]?.prompt).toContain("韩系美妆达人")
+  })
+
+  test("normalizes short-video metadata without signed video URLs", () => {
+    const parsed = parseExploreTemplatesBody(shortVideoBody())
+
+    expect(parsed.items[0]).toMatchObject({
+      id: "short-video-1",
+      effectId: "short-video-1",
+      effectType: 210,
+      description: "来自故宫的猫税",
+      favoriteNum: 89886,
+      playNum: 29884369,
+      commentNum: 3172,
+      shareNum: 8766,
+      videoId: "v03870g10004cu4siofog65s06ml296g",
+      videoDurationSec: 115,
+      videoDurationMs: 114867,
+      videoWidth: 2560,
+      videoHeight: 1440,
+      videoFps: 30,
+      videoDefinition: "1440p",
+      videoFormat: "mp4",
+      videoCodec: "h264",
+      videoSize: 207251143,
+      videoHasAudio: true,
+      videoIsMute: false,
+      transcodedDefinitions: ["1080p", "480p", "720p"],
+      metadataEffectId: "gen_story",
+      metadataEffectType: "tool",
+    })
+    expect("videoUrl" in parsed.items[0]!).toBe(false)
+
+    expect(summarizeExploreShortVideos(parsed)).toMatchObject({
+      total: 1,
+      top_by_play: [
+        {
+          id: "short-video-1",
+          play_num: 29884369,
+          favorite_num: 89886,
+          video_id: "v03870g10004cu4siofog65s06ml296g",
+          duration_sec: 115,
+          definition: "1440p",
+          has_audio: true,
+        },
+      ],
+    })
   })
 })
 
@@ -160,6 +222,69 @@ function exploreBody(): Record<string, unknown> {
                 },
               ],
             }),
+          },
+        },
+      ],
+    },
+  }
+}
+
+function shortVideoBody(): Record<string, unknown> {
+  return {
+    ret: "0",
+    errmsg: "success",
+    data: {
+      has_more: true,
+      next_offset: 5,
+      request_id: "request-short-1",
+      category_id: 11222,
+      item_list: [
+        {
+          common_attr: {
+            id: "short-video-1",
+            effect_id: "short-video-1",
+            effect_type: 210,
+            title: "",
+            description: "来自故宫的猫税",
+            cover_url: "https://example.invalid/cover.webp",
+            cover_height: 1152,
+            cover_width: 2048,
+            aspect_ratio: 1.7777777777777777,
+            create_time: 1775561323,
+          },
+          statistic: {
+            usage_num: 0,
+            favorite_num: 89886,
+            play_num: 29884369,
+            comment_num: 3172,
+            share_num: 8766,
+          },
+          category_id_list: [11222],
+          metadata_param: JSON.stringify({
+            effect_id: "gen_story",
+            effect_type: "tool",
+          }),
+          video: {
+            video_id: "v03870g10004cu4siofog65s06ml296g",
+            duration: 115,
+            duration_ms: 114867,
+            origin_video: {
+              width: 2560,
+              height: 1440,
+              fps: 30,
+              format: "mp4",
+              codec: "h264",
+              definition: "1440p",
+              size: 207251143,
+              video_url: "https://example.invalid/signed-video-url.mp4",
+            },
+            transcoded_video: {
+              "720p": { definition: "720p" },
+              "1080p": { definition: "1080p" },
+              "480p": { definition: "480p" },
+            },
+            has_audio: true,
+            is_mute: false,
           },
         },
       ],

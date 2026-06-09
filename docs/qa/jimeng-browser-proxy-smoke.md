@@ -576,6 +576,45 @@ by_ai_feature.text_generate_image=40
 
 Normalized examples include `prompt`, `model_req_key`, `seed`, `image_ratio`, template metadata, and usage/favorite counters. The endpoint returned 40 items for `count=5` while setting `next_offset=5`, so downstream UGC mining should treat the count flag as a paging hint and cap locally when needed.
 
+## Short-Video Explore Mining Smoke
+
+`jimeng-browser-proxy short-videos` calls `/mweb/v1/get_explore` with `filter.work_type_list=["short_video"]`. This is a no-generation, no-spend probe for reference-video/profile mining.
+
+Command:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts short-videos \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --limit 5 \
+  --category-id 11222 \
+  --outDir data/jimeng-lab/proof-20260610-short-videos-explore
+```
+
+Result:
+
+```txt
+raw=data/jimeng-lab/proof-20260610-short-videos-explore/raw/short-videos-20260609153530.json
+summary=data/jimeng-lab/proof-20260610-short-videos-explore/normalized/short-videos-20260609153530-summary.json
+http_status=200
+ret=0
+errmsg=success
+requested_count=5
+returned_total=20
+next_offset=5
+category_id=11222
+feed_refer=feed_enterauto
+top_by_play[0].play_num=1718727
+top_by_play[0].favorite_num=5082
+top_by_play[0].comment_num=167
+top_by_play[0].share_num=231
+top_by_play[0].duration_sec=85
+top_by_play[0].resolution=1280x720
+top_by_play[0].fps=15
+top_by_play[0].has_audio=true
+```
+
+Normalized examples include durable video metadata and ranking signals but omit signed video URLs. Raw responses still contain signed URLs and stay under ignored `data/**`.
+
 ## Verification
 
 ```bash
@@ -588,8 +627,8 @@ Result:
 
 ```txt
 typecheck passed
-32 tests passed, 0 failed
-browser-proxy help listed templates, upload-video, image2video, frames2video, and lip-sync
+34 tests passed, 0 failed
+browser-proxy help listed templates, short-videos, upload-video, image2video, frames2video, and lip-sync
 ```
 
 ## Follow-Up
@@ -599,7 +638,7 @@ Next useful captures:
 - image-to-image / byte edit
 - subject/persona creation
 - pose/style/depth/canny reference controls
-- additional template/research endpoints: `feed_short_video`, CapCut template search, and plane endpoints
+- additional template/research endpoints: CapCut template search, plane endpoints, and the bundle-discovered `/mweb/v1/feed_short_video` overseas path
 - image-to-video end-frame and multi-frame live proof with explicit frontend mode capture
 - multimodal/all-around reference video
 - lip-sync live submit capture/compare before enabling generation

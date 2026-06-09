@@ -7,7 +7,9 @@ const DEFAULT_QUERY = "aid=513695&web_version=7.5.0&da_version=3.3.17&aigc_featu
 const DEFAULT_EXPLORE_CATEGORY_ID = 11222
 const DEFAULT_EXPLORE_COUNT = 20
 
-export type JimengExploreWorkType = "video" | "image" | "canvas"
+export type JimengExploreWorkType = "video" | "image" | "canvas" | "short_video"
+
+export type JimengShortVideoExploreQuery = Omit<JimengExploreQuery, "workTypes">
 
 export interface JimengExploreQuery {
   count?: number
@@ -33,6 +35,8 @@ export interface JimengExploreTemplateItem {
   usageNum: number | null
   favoriteNum: number | null
   playNum: number | null
+  commentNum: number | null
+  shareNum: number | null
   createTime: number | null
   categoryIds: number[]
   draftUri: string | null
@@ -43,6 +47,19 @@ export interface JimengExploreTemplateItem {
   imageRatio: number | null
   metadataEffectId: string | null
   metadataEffectType: string | null
+  videoId: string | null
+  videoDurationSec: number | null
+  videoDurationMs: number | null
+  videoWidth: number | null
+  videoHeight: number | null
+  videoFps: number | null
+  videoDefinition: string | null
+  videoFormat: string | null
+  videoCodec: string | null
+  videoSize: number | null
+  videoHasAudio: boolean | null
+  videoIsMute: boolean | null
+  transcodedDefinitions: string[]
 }
 
 export interface JimengExploreTemplatesResult {
@@ -135,10 +152,18 @@ export function buildExploreRequestBody(query: JimengExploreQuery = {}): Record<
   }
 }
 
+export function buildShortVideoExploreQuery(query: JimengShortVideoExploreQuery = {}): JimengExploreQuery {
+  return {
+    ...query,
+    workTypes: ["short_video"],
+    feedRefer: query.feedRefer ?? ((query.offset ?? 0) > 0 ? "feed_loadmore" : "feed_enterauto"),
+  }
+}
+
 export function parseExploreWorkTypes(value: string | undefined): JimengExploreWorkType[] | undefined {
   if (!value) return undefined
   const parsed = value.split(",").map((part) => part.trim()).filter(Boolean)
-  const valid = new Set<JimengExploreWorkType>(["video", "image", "canvas"])
+  const valid = new Set<JimengExploreWorkType>(["video", "image", "canvas", "short_video"])
   for (const workType of parsed) {
     if (!valid.has(workType as JimengExploreWorkType)) {
       throw jimengError({
@@ -193,6 +218,44 @@ export function summarizeExploreTemplates(result: Pick<JimengExploreTemplatesRes
   }
 }
 
+export function summarizeExploreShortVideos(result: Pick<JimengExploreTemplatesResult, "items" | "hasMore" | "nextOffset" | "categoryId" | "requestId">): Record<string, unknown> {
+  const topByPlay = [...result.items]
+    .sort((a, b) => (b.playNum ?? 0) - (a.playNum ?? 0))
+    .slice(0, 10)
+    .map((item) => ({
+      id: item.id,
+      effect_id: item.effectId,
+      effect_type: item.effectType,
+      title: item.title,
+      metadata_effect_id: item.metadataEffectId,
+      metadata_effect_type: item.metadataEffectType,
+      play_num: item.playNum,
+      favorite_num: item.favoriteNum,
+      comment_num: item.commentNum,
+      share_num: item.shareNum,
+      video_id: item.videoId,
+      duration_sec: item.videoDurationSec,
+      duration_ms: item.videoDurationMs,
+      width: item.videoWidth,
+      height: item.videoHeight,
+      fps: item.videoFps,
+      definition: item.videoDefinition,
+      format: item.videoFormat,
+      has_audio: item.videoHasAudio,
+      is_mute: item.videoIsMute,
+      transcoded_definitions: item.transcodedDefinitions,
+    }))
+
+  return {
+    total: result.items.length,
+    has_more: result.hasMore,
+    next_offset: result.nextOffset,
+    category_id: result.categoryId,
+    request_id: result.requestId,
+    top_by_play: topByPlay,
+  }
+}
+
 function parseExploreTemplateItem(value: unknown): JimengExploreTemplateItem | null {
   const item = asRecord(value)
   const common = asRecord(item?.common_attr)
@@ -205,6 +268,10 @@ function parseExploreTemplateItem(value: unknown): JimengExploreTemplateItem | n
   const metadata = asRecord(safeJson(stringValue(item.metadata_param) ?? ""))
   const extra = asRecord(item.extra)
   const aiFeature = asRecord(item.ai_feature)
+  const statistic = asRecord(item.statistic)
+  const video = asRecord(item.video)
+  const originVideo = asRecord(video?.origin_video)
+  const transcodedVideo = asRecord(video?.transcoded_video)
 
   return {
     id,
@@ -219,9 +286,11 @@ function parseExploreTemplateItem(value: unknown): JimengExploreTemplateItem | n
     coverWidth: numberValue(common.cover_width),
     coverHeight: numberValue(common.cover_height),
     aspectRatio: numberValue(common.aspect_ratio),
-    usageNum: numberValue(asRecord(item.statistic)?.usage_num),
-    favoriteNum: numberValue(asRecord(item.statistic)?.favorite_num),
-    playNum: numberValue(asRecord(item.statistic)?.play_num),
+    usageNum: numberValue(statistic?.usage_num),
+    favoriteNum: numberValue(statistic?.favorite_num),
+    playNum: numberValue(statistic?.play_num),
+    commentNum: numberValue(statistic?.comment_num),
+    shareNum: numberValue(statistic?.share_num),
     createTime: numberValue(common.create_time),
     categoryIds: asArray(item.category_id_list).filter((entry): entry is number => typeof entry === "number"),
     draftUri: stringValue(draft?.uri),
@@ -232,6 +301,19 @@ function parseExploreTemplateItem(value: unknown): JimengExploreTemplateItem | n
     imageRatio: numberValue(coreParam?.image_ratio),
     metadataEffectId: stringValue(metadata?.effect_id),
     metadataEffectType: stringValue(metadata?.effect_type),
+    videoId: stringValue(video?.video_id),
+    videoDurationSec: numberValue(video?.duration),
+    videoDurationMs: numberValue(video?.duration_ms),
+    videoWidth: numberValue(originVideo?.width),
+    videoHeight: numberValue(originVideo?.height),
+    videoFps: numberValue(originVideo?.fps),
+    videoDefinition: stringValue(originVideo?.definition),
+    videoFormat: stringValue(originVideo?.format),
+    videoCodec: stringValue(originVideo?.codec),
+    videoSize: numberValue(originVideo?.size),
+    videoHasAudio: booleanValue(video?.has_audio),
+    videoIsMute: booleanValue(video?.is_mute),
+    transcodedDefinitions: transcodedVideo ? Object.keys(transcodedVideo).sort() : [],
   }
 }
 

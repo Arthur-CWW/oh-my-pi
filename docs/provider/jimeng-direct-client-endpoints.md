@@ -242,7 +242,7 @@ Frontend bundle scan found these UGC-useful groups, but they are not yet direct-
 - subject/persona CRUD and voice: `/mweb/v1/dreamina_subject/create`, `/mweb/v1/dreamina_subject/update`, `/mweb/v1/dreamina_subject/delete`, `/mweb/v1/dreamina_subject/generate_voice`
 - infinite canvas: `/mweb/v1/infinite_canvas/create_project`, `/mweb/v1/infinite_canvas/conversation`, `/mweb/v1/infinite_canvas/edit`, `/mweb/v1/infinite_canvas/resume`, `/mweb/v1/infinite_canvas/stop_stream`, `/mweb/v1/infinite_canvas/v1/fetch_snapshot`, `/mweb/v1/infinite_canvas/v1/submit_changeset`, `/mweb/v1/infinite_canvas/v1/fetch_changeset`
 - reference/image tools: `/mweb/v1/get_common_config`, `/mweb/v1/get_image_description`, `/mweb/v1/get_upload_token`, `/mweb/v1/face_recognize`, `/mweb/v1/algo_proxy`
-- template/research mining: `/mweb/v1/feed`, `/mweb/v1/get_explore`, `/mweb/v1/feed_short_video`, `/lv/v1/cc_web/replicate/search_templates`, `/lv/v1/cc_web/plane/*`
+- template/research mining: `/mweb/v1/feed`, `/mweb/v1/get_explore`, `/mweb/v1/feed_short_video`, `/lv/v1/cc_web/replicate/search_templates`, `/lv/v1/cc_web/plane/*`; direct `/mweb/v1/get_explore` support is implemented for both templates and short-video examples
 
 Next step is to drive those UI flows one at a time with background CDP recording, then create dry-run patchers before live calls.
 
@@ -328,6 +328,83 @@ summary=data/jimeng-lab/proof-20260610-templates-explore/normalized/templates-20
 ```
 
 Quirk: Jimeng returned 40 items even though the request sent `count=5`, but it set `next_offset=5`. Treat `count` as a paging hint and keep downstream caps client-side.
+
+### 10.1) Short-video Explore reference mining
+- `POST https://jimeng.jianying.com/mweb/v1/get_explore`
+- Status:
+  - live-proved without generation spend
+  - implemented as `jimeng-browser-proxy short-videos`
+  - reuses `packages/jimeng-client/src/explore.ts`
+- Request controls:
+  - `--limit <n>` maps to `count`
+  - `--offset <n>` maps to `offset`
+  - `--category-id <n>` maps to `category_id`
+  - `--feed-refer <value>` maps to `feed_refer`; default is `feed_enterauto` for offset `0` and `feed_loadmore` for later pages
+  - `filter.work_type_list` is fixed to `["short_video"]`
+
+Request:
+
+```json
+{
+  "count": 5,
+  "filter": {
+    "work_type_list": ["short_video"]
+  },
+  "offset": 0,
+  "image_info": {
+    "width": 2048,
+    "height": 2048,
+    "format": "webp"
+  },
+  "category_id": 11222,
+  "feed_refer": "feed_enterauto"
+}
+```
+
+Normalized fields:
+
+```txt
+id / effectId / effectType
+metadataEffectId / metadataEffectType
+title / description
+playNum / favoriteNum / commentNum / shareNum
+videoId
+videoDurationSec / videoDurationMs
+videoWidth / videoHeight / videoFps
+videoDefinition / videoFormat / videoCodec / videoSize
+videoHasAudio / videoIsMute
+transcodedDefinitions
+```
+
+CLI proof:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts short-videos \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --limit 5 \
+  --category-id 11222 \
+  --outDir data/jimeng-lab/proof-20260610-short-videos-explore
+```
+
+Observed safe summary:
+
+```txt
+http_status=200
+ret=0
+errmsg=success
+requested_count=5
+returned_total=20
+next_offset=5
+category_id=11222
+top_by_play[0].play_num=1718727
+top_by_play[0].duration_sec=85
+top_by_play[0].resolution=1280x720
+top_by_play[0].transcoded_definitions=360p,480p,720p
+raw=data/jimeng-lab/proof-20260610-short-videos-explore/raw/short-videos-20260609153530.json
+summary=data/jimeng-lab/proof-20260610-short-videos-explore/normalized/short-videos-20260609153530-summary.json
+```
+
+The raw response contains signed media URLs. Keep raw and normalized proof outputs under ignored `data/**`; tracked docs should only include durable metadata and hashes.
 
 ### 11) Upload token for local reference media
 - `POST https://jimeng.jianying.com/mweb/v1/get_upload_token`

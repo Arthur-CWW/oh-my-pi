@@ -34,7 +34,7 @@ Use the browser as an authenticated session holder and API discovery surface. Mo
 | `/mweb/v1/feed` | POST | Explore/feed content; a signed `dreamina_tone` feed request returns the built-in voice library. Useful for research/template mining if handled carefully. | Implemented for voice library replay |
 | `/mweb/v1/tts_generate` | POST | Built-in voice text-to-speech. Returns base64 MP3 in `data.data`. | Implemented and live-proved |
 | `/mweb/v1/get_upload_token` | POST | Temporary upload credentials for video/image/file scenes. Required before direct local reference-image/video upload. | Implemented and live-proved; local ImageX image upload is implemented via `upload-image`, local VOD video upload via `upload-video` |
-| `/mweb/v1/get_explore` | POST | Explore examples and public creative templates for prompt/template mining. | Implemented as no-spend `templates` |
+| `/mweb/v1/get_explore` | POST | Explore examples, public creative templates, and short-video examples for prompt/template/reference mining. | Implemented as no-spend `templates` and `short-videos` |
 | `/mweb/v1/get_unread_count` | POST | Notification count. | Low priority |
 
 ## Confirmed Voice / Audio Contracts
@@ -473,6 +473,68 @@ The response embeds reusable prompt/model evidence in `aigc_draft.content.compon
 
 Quirk: the endpoint returned 40 items for a request with `count=5`, while still setting `next_offset=5`. Treat `count` as a paging hint, not a hard returned-item cap.
 
+## Confirmed Short-Video Explore Mining Contract
+
+`jimeng-browser-proxy short-videos` uses the same `/mweb/v1/get_explore` endpoint with `filter.work_type_list=["short_video"]`. This is a no-generation, no-spend path for mining public short-video examples, video metadata, and ranking signals that can seed reference-profile and niche research workflows.
+
+Request shape:
+
+```json
+{
+  "count": 5,
+  "filter": {
+    "work_type_list": ["short_video"]
+  },
+  "offset": 0,
+  "image_info": {
+    "width": 2048,
+    "height": 2048,
+    "format": "webp"
+  },
+  "category_id": 11222,
+  "feed_refer": "feed_enterauto"
+}
+```
+
+CLI proof:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts short-videos \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --limit 5 \
+  --category-id 11222 \
+  --outDir data/jimeng-lab/proof-20260610-short-videos-explore
+```
+
+Observed proof facts:
+
+```txt
+http_status=200
+ret=0
+errmsg=success
+requested_count=5
+returned_total=20
+next_offset=5
+category_id=11222
+feed_refer=feed_enterauto
+top_play_num=1718727
+top_video_duration=85s
+top_video_resolution=1280x720
+top_video_fps=15
+top_video_has_audio=true
+proof=data/jimeng-lab/proof-20260610-short-videos-explore/
+```
+
+The normalized short-video fields intentionally omit signed `video_url` values while retaining durable metadata:
+
+- `video_id`
+- `duration_sec` / `duration_ms`
+- width, height, fps, definition, format, codec, size
+- `has_audio` / `is_mute`
+- available transcoded definitions
+- play, favorite, comment, and share counts
+- metadata effect id/type, currently including `gen_story` / `tool`
+
 ## Discovered From Frontend Bundles, Not Yet Live-Proved
 
 The 2026-06-09 JS bundle sweep found these useful endpoint groups. Treat them as capture targets, not stable contracts, until a real UI flow and dry-run payload are recorded.
@@ -483,7 +545,7 @@ The 2026-06-09 JS bundle sweep found these useful endpoint groups. Treat them as
 | Subject/persona lifecycle | `/mweb/v1/dreamina_subject/create`, `/mweb/v1/dreamina_subject/update`, `/mweb/v1/dreamina_subject/delete`, `/mweb/v1/dreamina_subject/generate_voice` |
 | Infinite canvas | `/mweb/v1/infinite_canvas/create_project`, `/mweb/v1/infinite_canvas/conversation`, `/mweb/v1/infinite_canvas/edit`, `/mweb/v1/infinite_canvas/resume`, `/mweb/v1/infinite_canvas/stop_stream`, `/mweb/v1/infinite_canvas/v1/fetch_snapshot`, `/mweb/v1/infinite_canvas/v1/submit_changeset`, `/mweb/v1/infinite_canvas/v1/fetch_changeset` |
 | Reference/image tools | `/mweb/v1/get_common_config`, `/mweb/v1/get_image_description`, `/mweb/v1/get_upload_token`, `/mweb/v1/face_recognize`, `/mweb/v1/algo_proxy` |
-| Template/research mining | `/mweb/v1/feed`, `/mweb/v1/feed_short_video`, `/lv/v1/cc_web/replicate/search_templates`, `/lv/v1/cc_web/plane/*`; `/mweb/v1/get_explore` is now implemented for direct Explore examples |
+| Template/research mining | `/mweb/v1/feed`, `/mweb/v1/feed_short_video`, `/lv/v1/cc_web/replicate/search_templates`, `/lv/v1/cc_web/plane/*`; `/mweb/v1/get_explore` is now implemented for direct Explore templates and short-video examples |
 | Assets/upload/editor | `/lv/v1/asset/*`, `/lv/v1/editor/image/*` |
 | Audio/video utility | `/mweb/v1/mix_audio_video`, `/mweb/v1/mix_audio_videos`, `/lv/v2/intelligence/tts/curl_sync_everphoto` |
 
