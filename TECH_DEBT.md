@@ -8,14 +8,14 @@ This is the short, top-level scratchpad for repo/workflow cleanup. Keep details 
 
 - The project skill list is now curated in `package.json` and `packages/web-access/package.json`, but Pi still loads many **global** skills from `~/.pi/agent/git/github.com/mitsuhiko/agent-stuff/skills` and `~/.agents/skills`.
   - Examples still visible globally: `anachb`, `apple-mail`, `oebb-scotty`, `openscad`, `sentry`, `web-browser`, `native-web-search`, etc.
-  - Decide whether to move these into a curated personal package, mark niche ones `disable-model-invocation: true`, or remove them from global discovery.
+  - `packages/personal-core-skills/` now vendors the likely keepers from `agent-stuff`; after review, replace the broad global package with that curated local package.
 - The old symlinked `packages/web-access/skills/pi-skills -> ~/.pi/skills/pi-skills` and ignored `chrome-devtools-mcp/` checkout should not live under a package skill directory long term.
 - Consolidate overlapping skill families:
   - browser: `background-browser-automation`, `browser-tools`, `web-browser`, `chrome-devtools`, `a11y-debugging`, `debug-optimize-lcp`
   - research: `librarian`, `native-web-search`, `brave-search`, `summarize`, `youtube-transcript`, `source-archive`
   - personal data: `gmcli`, `gdcli`, `gccli`, `google-workspace`, `apple-mail`
 - Decide whether to delete `agent-communication` or move the useful coordination protocol into `AGENTS.md` / `docs/coordination/agent-edit-log.md`.
-- See `docs/plans/skill-inventory-and-rationalization.md` for the full inventory and usage scan.
+- See `docs/plans/skill-inventory-and-rationalization.md` and `docs/reference/pi-resources-inventory.md` for the full inventory and usage scan.
 
 ## Package / folder organization
 
@@ -31,7 +31,7 @@ This is the short, top-level scratchpad for repo/workflow cleanup. Keep details 
 
 ## Codex plugin import
 
-- `.pi/extensions/codex-plugin-manager/` is untracked. Decide whether to commit it as the official opt-in UI for vendored Codex plugin skills.
+- `.pi/extensions/codex-plugin-manager/` should be tracked if we keep it as the official opt-in UI for vendored Codex plugin skills.
 - Keep Codex plugin skills opt-in; do not make all router skills global. macOS/iOS app skills are useful, finance/sales/etc. should be enabled only per project.
 
 ## AltTab quality-of-life

@@ -1,0 +1,12 @@
+{
+  "name": "@wirebabel/personal-core-skills",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Curated personal Pi skills vendored from external skill repositories.",
+  "type": "module",
+  "keywords": ["pi-package", "pi", "skills"],
+  "license": "Apache-2.0",
+  "pi": {
+    "skills": ["./skills"]
+  }
+}

@@ -45,7 +45,7 @@ These are directly tied to current repo tools/workflows and have enough reuse:
 
 ### Keep globally, but ideally in a small personal core-skills package
 
-These are generally useful across repos and should not live as random global checkouts forever:
+These are generally useful across repos and should not live as random global checkouts forever. A first local candidate now exists at `packages/personal-core-skills/`:
 
 - `commit`
 - `uv`
@@ -53,7 +53,13 @@ These are generally useful across repos and should not live as random global che
 - `github`
 - `mermaid`
 - `frontend-design`
-- maybe `native-web-search` or a single distilled research skill
+
+Optional copied candidates in that package, not default-loaded:
+
+- `native-web-search`
+- `summarize`
+- `web-browser`
+- `pi-share`
 
 ### Make opt-in / project-specific
 
@@ -159,6 +165,6 @@ packages/
 
 1. Should `agent-communication` be deleted outright, or should its useful parts move into `AGENTS.md` / `docs/coordination/agent-edit-log.md` and then delete the skill?
 2. Should `used-hardware-buying-research` become its own personal package, or remain in this monorepo but disabled from auto-load?
-3. Should global `agent-stuff` skills be copied into a curated repo/package, or should `.pi/settings.json` use package resource filters and leave the global checkout alone?
+3. Should global settings switch from broad `git:github.com/mitsuhiko/agent-stuff` to the new local `packages/personal-core-skills` package?
 4. Should the ignored `chrome-devtools-mcp` checkout be removed from `packages/web-access/skills/` entirely and reintroduced only as a proper vendored package when needed?
 5. Should the untracked `.pi/extensions/codex-plugin-manager/` be committed as the official way to opt into Codex plugin skills?
