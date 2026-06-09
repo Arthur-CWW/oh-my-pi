@@ -1,5 +1,8 @@
 import { render } from "solid-js/web"
+import * as React from "react"
+import { createRoot } from "react-dom/client"
 import { App } from "./App"
+import { ReactUgcStudio } from "./ReactUgcStudio"
 import { UgcStudio } from "./UgcStudio"
 import "./styles.css"
 
@@ -10,15 +13,19 @@ if (!root) {
 
 const path = window.location.pathname
 
-render(() => {
-  if (path === "/ugc-studio" || path.startsWith("/ugc-studio/")) {
-    return <UgcStudio />
-  }
-  if (path === "/solid" || path.startsWith("/solid/")) {
-    return <App />
-  }
-  return <RouteIndex />
-}, root)
+if (path === "/react-ugc-studio" || path.startsWith("/react-ugc-studio/")) {
+  createRoot(root).render(React.createElement(ReactUgcStudio))
+} else {
+  render(() => {
+    if (path === "/ugc-studio" || path.startsWith("/ugc-studio/")) {
+      return <UgcStudio />
+    }
+    if (path === "/solid" || path.startsWith("/solid/")) {
+      return <App />
+    }
+    return <RouteIndex />
+  }, root)
+}
 
 function RouteIndex() {
   return (
@@ -38,9 +45,9 @@ function RouteIndex() {
             <strong>UGC Studio demo</strong>
             <span>Persona atlas, exploration board, batch review, branch map, reference remix, editor, and graph views.</span>
           </a>
-          <a href="/design-lab/react-shadcn-tailwind.html">
+          <a href="/react-ugc-studio/">
             <strong>React/shadcn/Tailwind design lab</strong>
-            <span>Static prototype endpoint for comparing layout direction before a full stack switch.</span>
+            <span>Live comparison route with KIE dry-run provider wiring and shadcn-style components.</span>
           </a>
         </div>
       </section>

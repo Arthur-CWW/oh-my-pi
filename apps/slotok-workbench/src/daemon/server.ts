@@ -1,6 +1,14 @@
 #!/usr/bin/env bun
-import { existsSync, realpathSync } from "node:fs"
+import { existsSync, readFileSync, realpathSync } from "node:fs"
 import { extname, resolve } from "node:path"
+import {
+  KIE_CAPABILITIES,
+  createKieTask,
+  getKieCredits,
+  getKieTaskDetail,
+  prepareKieTask,
+  type KieGenerateRequest,
+} from "@wirebabel/ugc-cli"
 import { EvalStore } from "./eval-store"
 
 const DEFAULT_PORT = 47522
@@ -65,7 +73,7 @@ console.log(JSON.stringify({
   sqlitePath: store.config.sqlitePath,
 }, null, 2))
 
-function route(request: Request, evalStore: EvalStore): Response | Promise<Response> {
+async function route(request: Request, evalStore: EvalStore): Promise<Response> {
   if (request.method === "OPTIONS") {
     return empty(204)
   }
@@ -99,6 +107,37 @@ function route(request: Request, evalStore: EvalStore): Response | Promise<Respo
       const target = url.searchParams.get("path")
       if (!target) return json({ error: "missing path" }, 400)
       return fileResponse(evalStore.config.cwd, target)
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/ugc/kie/capabilities") {
+      return json({ provider: "kie", capabilities: KIE_CAPABILITIES })
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/ugc/kie/credits") {
+      if (url.searchParams.get("live") !== "true") {
+        return json({ mode: "dry-run", endpoint: "GET /api/v1/chat/credit", keyPresent: hasKieKey(evalStore.config.cwd) })
+      }
+      return json(await getKieCredits({ envPath: resolve(evalStore.config.cwd, ".env") }))
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/ugc/kie/plan") {
+      const body = await request.json() as KieGenerateRequest
+      return json(prepareKieTask(body))
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/ugc/kie/create") {
+      const body = await request.json() as KieGenerateRequest & { live?: boolean; maxSpendUsd?: number }
+      return json(await createKieTask(body, {
+        live: body.live === true,
+        maxSpendUsd: body.maxSpendUsd ?? 0.25,
+        envPath: resolve(evalStore.config.cwd, ".env"),
+      }))
+    }
+
+    if (request.method === "GET" && url.pathname.startsWith("/api/ugc/kie/tasks/")) {
+      const taskId = decodeURIComponent(url.pathname.slice("/api/ugc/kie/tasks/".length))
+      if (!taskId) return json({ error: "missing task id" }, 400)
+      return json(await getKieTaskDetail(taskId, { envPath: resolve(evalStore.config.cwd, ".env") }))
     }
 
     return json({ error: "not found" }, 404)
@@ -163,9 +202,16 @@ function empty(status: number): Response {
 function corsHeaders(extra: Record<string, string> = {}): Headers {
   return new Headers({
     "access-control-allow-origin": "*",
-    "access-control-allow-methods": "GET,OPTIONS",
+    "access-control-allow-methods": "GET,POST,OPTIONS",
     "access-control-allow-headers": "content-type",
     "cache-control": "no-store",
     ...extra,
   })
+}
+
+function hasKieKey(cwd: string): boolean {
+  if (process.env.KIE_API_KEY) return true
+  const envPath = resolve(cwd, ".env")
+  if (!existsSync(envPath)) return false
+  return /^KIE_API_KEY=/m.test(readFileSync(envPath, "utf8"))
 }

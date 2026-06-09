@@ -1,9 +1,18 @@
 /// <reference types="vitest/config" />
 import { defineConfig } from "vite"
+import react from "@vitejs/plugin-react"
 import solid from "vite-plugin-solid"
 
+const reactRouteFiles = [
+  /src\/renderer\/ReactUgcStudio\.tsx/,
+  /src\/renderer\/components\/ui\/.*\.tsx/,
+]
+
 export default defineConfig({
-  plugins: [solid()],
+  plugins: [
+    react({ include: reactRouteFiles }),
+    solid({ exclude: reactRouteFiles }),
+  ],
   root: ".",
   base: "./",
   build: {

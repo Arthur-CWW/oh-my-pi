@@ -78,6 +78,7 @@ Each component should be separately editable, inspectable, replaceable, cacheabl
 - The system should support both brainrot art videos and less-brainrotty AI UGC/ad videos.
 - For AI UGC experiments, prefer cheap pay-as-you-go APIs over another creator SaaS subscription.
 - This lane is mostly hacking/learning, not production. Cheap iteration can default to Kie or similar providers; keep fal/others as fallback or benchmark.
+- When credits are tiny, provider integrations should default to dry-run JSON planning and cheap image routes first; live video/avatar routes need explicit user action and a small spend cap.
 - For bulk video understanding/tagging, prefer API benchmarks with local caches/error logs over subscription UI automation; compare OpenRouter/Kie/direct Google on real corpus samples before committing spend.
 - Code quality still matters: provider adapters, logging, manifests, spend caps, retries/fallbacks, and reproducible metadata over throwaway spaghetti.
 
@@ -85,6 +86,7 @@ Each component should be separately editable, inspectable, replaceable, cacheabl
 
 - Use `@path/to/file` references in Pi/LLM prompts when supported.
 - Dreamina/Jimeng direct tooling should live-submit by default; `--dryRun` is the explicit opt-out. Keep commands clear, short, logged, concurrency-1, and credit-aware.
+- KIE-backed UGC generation should be the current cheap/default frontend provider while Jimeng reversal remains in progress. Keep KIE dry-run-first in the browser, use Seedream/ByteDance Lite as the frugal routes, and only submit live jobs through explicit capped actions.
 - Jimeng/Dreamina should use a background browser-session proxy while endpoints are still moving: keep a logged-in Helium/CDP profile as the token/session holder, refresh session bundles from it, then graduate stable operations into direct `fetch` clients. Keep reversing every UGC-useful GenAI endpoint, not only text-to-image: reference uploads, persona/subject/character tools, pose/style/depth controls, image/video generation, canvas edits, asset library, and explore/template APIs.
 - Jimeng's voice layer is now a usable UGC primitive: built-in voices can be cataloged from the signed `dreamina_tone` feed, and `/mweb/v1/tts_generate` returns base64 MP3 audio for direct TTS. Use this for quick persona voice prototyping while custom voice clone and subject voice generation still need separate captured contracts.
 - For the UGC/video pipeline, keep serialization JSON-first: recipes, manifests, timelines, provider prompt cards, and reports should be plain versioned JSON unless there is a strong later reason to add another format.
@@ -303,6 +305,8 @@ Start with `docs/plans/README.md` for the current lane map.
 
 Arthur clarified:
 
+- For the UGC Studio UI implementation stack, prefer React + Tailwind + shadcn for the polished route because it gives faster access to high-quality component primitives. Keep the Solid route available as a comparison/baseline, but do not force Solid if it means reimplementing shadcn-level UI details.
+- KIE is the near-term generation provider for the workbench, but must stay frugal: browser actions should build dry-run JSON by default, expose credit checks, use cheap image routes before video, and cap live submissions tightly because the current account only has a small credit balance.
 - For the Arcads/Higgsfield-style website demo, the preferred direction is “Figma for UGC ads”: an open canvas with video artboards, editable layer stacks/timeline, floating prompt/workspace command, and secondary menus in modal surfaces. The earlier generated designs were too constrained and missed the video editor/layer view.
 - The product should focus on creative exploration of whole AI UGC personas, TikTok-profile-like collections, formats, and campaigns rather than only single ads or single clips. The user mostly directs one agent to generate, critique, fork, and revise batches; detailed layer editing is a late-stage/fine-tuning mode.
 - ComfyUI-style graphs are valuable for a developer/pipeline view, but too granular as the default creative surface. The main UI should expose stages, examples, branches, notes, playable candidates, and snapshot history; users should be able to flick through many generated examples at each stage.

@@ -4,6 +4,14 @@
   "private": true,
   "description": "Local-first open CLI for Arcads/Higgsfield-style AI UGC campaign planning and media pipeline manifests",
   "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    }
+  },
   "bin": {
     "ugc": "./src/cli.ts",
     "ugc-lab": "./src/cli.ts"

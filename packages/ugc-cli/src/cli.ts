@@ -1,5 +1,13 @@
 #!/usr/bin/env bun
 import path from "node:path"
+import {
+  KIE_CAPABILITIES,
+  createKieTask,
+  getKieCredits,
+  getKieTaskDetail,
+  prepareKieTask,
+  type KieGenerateRequest,
+} from "./kie"
 import { MODEL_CATALOG, PERSONAS, SUPERCOMPUTER_MODES } from "./templates"
 import {
   buildProductBrief,
@@ -42,6 +50,11 @@ Commands:
   arcads ugc-pack                      Build an Arcads-style UGC pack
   recipe create                        Write a JSON recipe
   recipe validate <recipe.json>        Validate a JSON recipe
+  provider kie capabilities            List KIE model routes for UGC generation
+  provider kie plan                     Build a dry-run KIE request payload
+  provider kie create                   Dry-run by default; add --live to submit
+  provider kie status <task_id>         Query a live KIE task
+  provider kie credits                  Check KIE credits with --live
   upload <image|video|audio> <file>    Copy local asset into data/ugc-cli/uploads
   soul-id create --name <name>         Create a consent-safe character plan
 
@@ -50,6 +63,7 @@ Examples:
   ugc model list
   ugc arcads ugc-pack --product-name "Demo App" --product-url https://example.com --variants 3 --wait
   ugc marketing-studio campaign --product-name "Demo App" --brief "App install ads" --formats ugc_tutorial,show_app_creator --json
+  ugc provider kie plan --operation image-text --prompt "synthetic UGC creator portrait, no text" --json
 `
 
 interface ParsedArgs {
@@ -96,6 +110,11 @@ export async function main(argv: string[]): Promise<void> {
     return
   }
 
+  if (command === "provider") {
+    await handleProvider(subcommand, third, args)
+    return
+  }
+
   if (command === "upload") {
     handleUpload(subcommand, third, args)
     return
@@ -107,6 +126,47 @@ export async function main(argv: string[]): Promise<void> {
   }
 
   throw new Error(`unknown command: ${command}`)
+}
+
+async function handleProvider(provider: string | undefined, action: string | undefined, args: ParsedArgs): Promise<void> {
+  if (provider !== "kie") throw new Error("usage: ugc provider kie <capabilities|plan|create|status|credits>")
+
+  if (action === "capabilities") {
+    output(KIE_CAPABILITIES, args)
+    return
+  }
+
+  if (action === "plan") {
+    output(prepareKieTask(kieGenerateRequestFromFlags(args)), args)
+    return
+  }
+
+  if (action === "create") {
+    output(await createKieTask(kieGenerateRequestFromFlags(args), {
+      live: args.flags.live === true,
+      maxSpendUsd: numberFlag(args, "max-spend-usd", 0.25),
+      envPath: stringFlag(args, "env"),
+    }), args)
+    return
+  }
+
+  if (action === "status") {
+    const taskId = args.positionals[3]
+    if (!taskId) throw new Error("usage: ugc provider kie status <task_id>")
+    output(await getKieTaskDetail(taskId, { envPath: stringFlag(args, "env") }), args)
+    return
+  }
+
+  if (action === "credits") {
+    if (args.flags.live !== true) {
+      output({ mode: "dry-run", endpoint: "GET /api/v1/chat/credit", note: "Add --live to query KIE credits." }, args)
+      return
+    }
+    output(await getKieCredits({ envPath: stringFlag(args, "env") }), args)
+    return
+  }
+
+  throw new Error("usage: ugc provider kie <capabilities|plan|create|status|credits>")
 }
 
 function handleModel(subcommand: string | undefined, modelId: string | undefined, args: ParsedArgs): void {
@@ -296,6 +356,43 @@ function productFromFlags(args: ParsedArgs): ReturnType<typeof buildProductBrief
     productImage: stringFlag(args, "product-image") ?? stringFlag(args, "image"),
     appScreenshot: stringFlag(args, "app-screenshot"),
   })
+}
+
+function kieGenerateRequestFromFlags(args: ParsedArgs): KieGenerateRequest {
+  const operation = stringFlag(args, "operation") ?? stringFlag(args, "op") ?? "image-text"
+  const prompt = stringFlag(args, "prompt")
+  if (!prompt) throw new Error("--prompt is required")
+  if (!isKieOperation(operation)) throw new Error(`unsupported KIE operation: ${operation}`)
+  return {
+    operation,
+    prompt,
+    aspectRatio: stringFlag(args, "aspect-ratio") ?? stringFlag(args, "ratio"),
+    durationSec: numberFlag(args, "duration", numberFlag(args, "duration-sec", 5)),
+    resolution: stringFlag(args, "resolution"),
+    quality: qualityFlag(args),
+    imageUrl: stringFlag(args, "image-url"),
+    endImageUrl: stringFlag(args, "end-image-url"),
+    imageUrls: multiFlag(args, "image-url"),
+    referenceImageUrls: multiFlag(args, "reference-image-url"),
+    referenceVideoUrls: multiFlag(args, "reference-video-url"),
+    referenceAudioUrl: stringFlag(args, "reference-audio-url"),
+    audioUrl: stringFlag(args, "audio-url"),
+    callBackUrl: stringFlag(args, "callback-url"),
+    negativePrompt: stringFlag(args, "negative-prompt"),
+    seed: numberFlag(args, "seed", -1),
+    generateAudio: args.flags["generate-audio"] === true,
+    nsfwChecker: args.flags["nsfw-checker"] === true,
+  }
+}
+
+function isKieOperation(value: string): value is KieGenerateRequest["operation"] {
+  return KIE_CAPABILITIES.some((capability) => capability.operation === value)
+}
+
+function qualityFlag(args: ParsedArgs): KieGenerateRequest["quality"] | undefined {
+  const value = stringFlag(args, "quality")
+  if (value === "basic" || value === "standard" || value === "pro") return value
+  return undefined
 }
 
 function getRequiredJob(id: string): CliJob {
