@@ -37,7 +37,7 @@ Use the browser as an authenticated session holder and API discovery surface. Mo
 | `/mweb/v1/get_explore` | POST | Explore examples, public creative templates, and short-video examples for prompt/template/reference mining. | Implemented as no-spend `templates` and `short-videos` |
 | `/mweb/v1/get_image_description` | POST | Image prompt/description extraction for uploaded provider image URIs. Useful for persona/reference inspection. | Implemented as no-spend `describe-image` |
 | `/mweb/v1/face_recognize` | POST | Face/keypoint probe for uploaded provider image URIs. Useful for reference/persona validation before generation payloads. | Implemented as no-spend `describe-image` |
-| `/mweb/v1/blend_preview` | POST | No-spend preview extraction for pose/depth/canny ControlNet reference images. | Implemented as `controlnet-preview`; pose live-proved |
+| `/mweb/v1/blend_preview` | POST | No-spend preview extraction for pose/depth/canny ControlNet reference images. | Implemented as `controlnet-preview`; pose/depth/canny live-proved |
 | `/mweb/v1/pose_detect` | POST | Pose validation for ControlNet pose references. | Implemented as part of `controlnet-preview --control pose`; live-proved |
 | `/mweb/v1/saliency_seg` | POST | Object/mask segmentation for reference-image object-detection and background-paint flows. | Captured; not implemented yet |
 | `/mweb/v1/get_unread_count` | POST | Notification count. | Low priority |
@@ -210,7 +210,7 @@ Raw upload traces and response bodies may include signed upload/provider details
 
 ## Confirmed ControlNet Reference Preview Contract
 
-`jimeng-browser-proxy controlnet-preview` is live-proved as a no-generation probe for Jimeng's reference-image ControlNet path. It accepts a local image, uploads it through the confirmed ImageX scene `2` path when needed, calls `/mweb/v1/blend_preview`, and downloads the returned preview image artifact when a preview URL is present.
+`jimeng-browser-proxy controlnet-preview` is live-proved as a no-generation probe for Jimeng's reference-image ControlNet path. It accepts a local image, uploads it through the confirmed ImageX scene `2` path when needed, calls `/mweb/v1/blend_preview`, and downloads the returned preview image artifact when a preview URL is present. Pose, depth, and canny/outline controls are all live-proved with the same command.
 
 Frontend bundle constants:
 
@@ -264,6 +264,7 @@ bun packages/jimeng-client/src/browser-proxy-cli.ts controlnet-preview \
 Safe summary:
 
 ```txt
+pose:
 image_uri=tos-cn-i-tb4s082cfz/2cb5efccab014a29b171719f4303cb21.png
 control=pose
 fit_mode=center_crop
@@ -274,9 +275,19 @@ preview_sha256=c9404ff104ba8c380eccada50e1526489b756a6c5380fe512da12ea76f1f0c65
 pose_detect_sha256=4f9e4059d904fdb8f6fb8491eb79eab0e609e630dbbcfe29f4a76e53e5c91f5f
 preview_artifact=data/jimeng-lab/proof-20260610-controlnet-pose-preview/artifacts/controlnet-preview-20260609162825-rvn7f6-pose-preview.png
 summary=data/jimeng-lab/proof-20260610-controlnet-pose-preview/normalized/controlnet-preview-20260609162825-rvn7f6-summary.json
+
+depth:
+preview_image_uri=tos-cn-i-tb4s082cfz/df194e1d74a54982ae5ceb151e239c9c
+preview_sha256=cfd5828742c4efcfe55608254088ddde59bc3dbd2ac4b49df7ba2dad86cbd396
+preview_artifact=data/jimeng-lab/proof-20260610-controlnet-depth-preview/artifacts/controlnet-preview-20260609163638-wworll-depth-preview.png
+
+canny:
+preview_image_uri=tos-cn-i-tb4s082cfz/915b0cd6c0c943fc9ab24b5c12e5a26d
+preview_sha256=ab6fbaa477cfe91545ede7a482ef319e8663ae2be96e05d1e1b0d3ff40ef6c45
+preview_artifact=data/jimeng-lab/proof-20260610-controlnet-canny-preview/artifacts/controlnet-preview-20260609163709-xrv4zg-canny-preview.png
 ```
 
-The preview artifact is a `1024x1024` PNG pose skeleton/control map. Raw blend-preview responses can contain signed preview URLs and remain ignored under `data/**`; normalized summaries intentionally record only provider URIs, booleans, hashes, request shapes, and local artifact paths.
+The preview artifacts are `1024x1024` PNG control maps: pose skeleton, grayscale depth, and canny outline. Raw blend-preview responses can contain signed preview URLs and remain ignored under `data/**`; normalized summaries intentionally record only provider URIs, booleans, hashes, request shapes, and local artifact paths.
 
 ## Confirmed Local Video Upload Contract
 
@@ -666,7 +677,7 @@ The 2026-06-09 JS bundle sweep found these useful endpoint groups. Treat them as
 | Voice cloning / custom voice | `/mweb/v1/voice/submit_task`, `/mweb/v1/voice/query_task`, `/mweb/v1/voice/update`, `/mweb/v1/voice/delete` |
 | Subject/persona lifecycle | `/mweb/v1/dreamina_subject/create`, `/mweb/v1/dreamina_subject/update`, `/mweb/v1/dreamina_subject/delete`, `/mweb/v1/dreamina_subject/generate_voice` |
 | Infinite canvas | `/mweb/v1/infinite_canvas/create_project`, `/mweb/v1/infinite_canvas/conversation`, `/mweb/v1/infinite_canvas/edit`, `/mweb/v1/infinite_canvas/resume`, `/mweb/v1/infinite_canvas/stop_stream`, `/mweb/v1/infinite_canvas/v1/fetch_snapshot`, `/mweb/v1/infinite_canvas/v1/submit_changeset`, `/mweb/v1/infinite_canvas/v1/fetch_changeset` |
-| Reference/image tools | `/mweb/v1/get_common_config`, `/mweb/v1/get_image_description`, `/mweb/v1/get_upload_token`, `/mweb/v1/face_recognize`, `/mweb/v1/blend_preview`, `/mweb/v1/pose_detect`, `/mweb/v1/saliency_seg`, `/mweb/v1/algo_proxy`; image upload, description, face recognition, ControlNet preview, and pose detect are now implemented, while saliency/object tools still need CLI coverage |
+| Reference/image tools | `/mweb/v1/get_common_config`, `/mweb/v1/get_image_description`, `/mweb/v1/get_upload_token`, `/mweb/v1/face_recognize`, `/mweb/v1/blend_preview`, `/mweb/v1/pose_detect`, `/mweb/v1/saliency_seg`, `/mweb/v1/algo_proxy`; image upload, description, face recognition, ControlNet pose/depth/canny preview, and pose detect are now implemented, while saliency/object/style tools still need CLI coverage |
 | Template/research mining | `/mweb/v1/feed`, `/mweb/v1/feed_short_video`, `/lv/v1/cc_web/replicate/search_templates`, `/lv/v1/cc_web/plane/*`; `/mweb/v1/get_explore` is now implemented for direct Explore templates and short-video examples |
 | Assets/upload/editor | `/lv/v1/asset/*`, `/lv/v1/editor/image/*` |
 | Audio/video utility | `/mweb/v1/mix_audio_video`, `/mweb/v1/mix_audio_videos`, `/lv/v2/intelligence/tts/curl_sync_everphoto` |

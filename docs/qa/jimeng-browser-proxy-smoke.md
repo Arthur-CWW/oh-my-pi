@@ -340,7 +340,7 @@ The face-recognition endpoint completed successfully but found no face on this g
 
 `jimeng-browser-proxy controlnet-preview` uploads a local reference image when needed, then calls Jimeng's no-generation ControlNet preview endpoint. For `--control pose`, it also calls `pose_detect` and saves the returned preview skeleton/control-map image.
 
-Command:
+Pose command:
 
 ```bash
 bun packages/jimeng-client/src/browser-proxy-cli.ts controlnet-preview \
@@ -368,10 +368,53 @@ pose_detect_response_sha256=4f9e4059d904fdb8f6fb8491eb79eab0e609e630dbbcfe29f4a7
 preview_file=PNG image data, 1024 x 1024, 8-bit/color RGB, non-interlaced
 ```
 
+Depth command:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts controlnet-preview \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --image data/jimeng-lab/ugc-studio-kbeauty-image/artifacts/jimeng-kbeauty-01.png \
+  --control depth \
+  --outDir data/jimeng-lab/proof-20260610-controlnet-depth-preview
+```
+
+Depth result:
+
+```txt
+summary=data/jimeng-lab/proof-20260610-controlnet-depth-preview/normalized/controlnet-preview-20260609163638-wworll-summary.json
+preview_artifact=data/jimeng-lab/proof-20260610-controlnet-depth-preview/artifacts/controlnet-preview-20260609163638-wworll-depth-preview.png
+preview_image_uri=tos-cn-i-tb4s082cfz/df194e1d74a54982ae5ceb151e239c9c
+preview_response_sha256=cfd5828742c4efcfe55608254088ddde59bc3dbd2ac4b49df7ba2dad86cbd396
+preview_file=PNG image data, 1024 x 1024, 8-bit/color RGB, non-interlaced
+```
+
+Canny command:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts controlnet-preview \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --image data/jimeng-lab/ugc-studio-kbeauty-image/artifacts/jimeng-kbeauty-01.png \
+  --control canny \
+  --outDir data/jimeng-lab/proof-20260610-controlnet-canny-preview
+```
+
+Canny result:
+
+```txt
+summary=data/jimeng-lab/proof-20260610-controlnet-canny-preview/normalized/controlnet-preview-20260609163709-xrv4zg-summary.json
+preview_artifact=data/jimeng-lab/proof-20260610-controlnet-canny-preview/artifacts/controlnet-preview-20260609163709-xrv4zg-canny-preview.png
+preview_image_uri=tos-cn-i-tb4s082cfz/915b0cd6c0c943fc9ab24b5c12e5a26d
+preview_response_sha256=ab6fbaa477cfe91545ede7a482ef319e8663ae2be96e05d1e1b0d3ff40ef6c45
+preview_file=PNG image data, 1024 x 1024, 8-bit/color RGB, non-interlaced
+```
+
 Normalized summary files were checked for signed URL leakage:
 
 ```bash
-rg -n "X-Amz|signed|http[s]?://" data/jimeng-lab/proof-20260610-controlnet-pose-preview/normalized
+rg -n "X-Amz|signed|http[s]?://" \
+  data/jimeng-lab/proof-20260610-controlnet-pose-preview/normalized \
+  data/jimeng-lab/proof-20260610-controlnet-depth-preview/normalized \
+  data/jimeng-lab/proof-20260610-controlnet-canny-preview/normalized
 ```
 
 Result: no matches.
@@ -708,7 +751,7 @@ Next useful captures:
 
 - image-to-image / byte edit
 - subject/persona creation
-- representative live smokes for depth/canny/style reference controls and object segmentation
+- style reference controls and object segmentation
 - additional template/research endpoints: CapCut template search, plane endpoints, and the bundle-discovered `/mweb/v1/feed_short_video` overseas path
 - image-to-video end-frame and multi-frame live proof with explicit frontend mode capture
 - multimodal/all-around reference video

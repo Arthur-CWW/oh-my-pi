@@ -241,7 +241,7 @@ Frontend bundle scan found these UGC-useful groups, but they are not yet direct-
 - voice clone/custom voice: `/mweb/v1/voice/submit_task`, `/mweb/v1/voice/query_task`, `/mweb/v1/voice/update`, `/mweb/v1/voice/delete`
 - subject/persona CRUD and voice: `/mweb/v1/dreamina_subject/create`, `/mweb/v1/dreamina_subject/update`, `/mweb/v1/dreamina_subject/delete`, `/mweb/v1/dreamina_subject/generate_voice`
 - infinite canvas: `/mweb/v1/infinite_canvas/create_project`, `/mweb/v1/infinite_canvas/conversation`, `/mweb/v1/infinite_canvas/edit`, `/mweb/v1/infinite_canvas/resume`, `/mweb/v1/infinite_canvas/stop_stream`, `/mweb/v1/infinite_canvas/v1/fetch_snapshot`, `/mweb/v1/infinite_canvas/v1/submit_changeset`, `/mweb/v1/infinite_canvas/v1/fetch_changeset`
-- reference/image tools: `/mweb/v1/get_common_config`, `/mweb/v1/get_image_description`, `/mweb/v1/get_upload_token`, `/mweb/v1/face_recognize`, `/mweb/v1/blend_preview`, `/mweb/v1/pose_detect`, `/mweb/v1/saliency_seg`, `/mweb/v1/algo_proxy`; upload, description, face recognition, ControlNet preview, and pose detect are now direct-client commands, while saliency/object tools remain capture targets
+- reference/image tools: `/mweb/v1/get_common_config`, `/mweb/v1/get_image_description`, `/mweb/v1/get_upload_token`, `/mweb/v1/face_recognize`, `/mweb/v1/blend_preview`, `/mweb/v1/pose_detect`, `/mweb/v1/saliency_seg`, `/mweb/v1/algo_proxy`; upload, description, face recognition, ControlNet pose/depth/canny preview, and pose detect are now direct-client commands, while saliency/object/style tools remain capture targets
 - template/research mining: `/mweb/v1/feed`, `/mweb/v1/get_explore`, `/mweb/v1/feed_short_video`, `/lv/v1/cc_web/replicate/search_templates`, `/lv/v1/cc_web/plane/*`; direct `/mweb/v1/get_explore` support is implemented for both templates and short-video examples
 
 Next step is to drive those UI flows one at a time with background CDP recording, then create dry-run patchers before live calls.
@@ -253,7 +253,7 @@ Next step is to drive those UI flows one at a time with background CDP recording
   - implemented as `jimeng-browser-proxy controlnet-preview`
   - no-generation/no-spend preview path
   - pose live-proved with local ImageX upload, preview-image download, and pose-detect response
-  - depth/canny use the same request shape and are implemented as flags, but still need representative live smoke runs
+  - depth and canny live-proved with local ImageX upload and preview-image download
 - Frontend constants:
   - `model = img2img_xl_sft`
   - `ability.name = control_net`
@@ -316,12 +316,25 @@ bun packages/jimeng-client/src/browser-proxy-cli.ts controlnet-preview \
 Observed safe summary:
 
 ```txt
+pose:
 image_uri=tos-cn-i-tb4s082cfz/2cb5efccab014a29b171719f4303cb21.png
 preview_image_uri=tos-cn-i-tb4s082cfz/222b232061324073accaf7992ec3ad87
 pose_detected=true
 preview_artifact=data/jimeng-lab/proof-20260610-controlnet-pose-preview/artifacts/controlnet-preview-20260609162825-rvn7f6-pose-preview.png
 preview_png=1024x1024
 summary=data/jimeng-lab/proof-20260610-controlnet-pose-preview/normalized/controlnet-preview-20260609162825-rvn7f6-summary.json
+
+depth:
+preview_image_uri=tos-cn-i-tb4s082cfz/df194e1d74a54982ae5ceb151e239c9c
+preview_artifact=data/jimeng-lab/proof-20260610-controlnet-depth-preview/artifacts/controlnet-preview-20260609163638-wworll-depth-preview.png
+preview_png=1024x1024
+summary=data/jimeng-lab/proof-20260610-controlnet-depth-preview/normalized/controlnet-preview-20260609163638-wworll-summary.json
+
+canny:
+preview_image_uri=tos-cn-i-tb4s082cfz/915b0cd6c0c943fc9ab24b5c12e5a26d
+preview_artifact=data/jimeng-lab/proof-20260610-controlnet-canny-preview/artifacts/controlnet-preview-20260609163709-xrv4zg-canny-preview.png
+preview_png=1024x1024
+summary=data/jimeng-lab/proof-20260610-controlnet-canny-preview/normalized/controlnet-preview-20260609163709-xrv4zg-summary.json
 ```
 
 Raw responses may contain signed preview URLs and upload traces; keep them under ignored `data/**`.
