@@ -1,0 +1,89 @@
+{
+  "version": 1,
+  "plugins": [
+    {
+      "id": "build-macos-apps",
+      "displayName": "Build macOS Apps",
+      "category": "Developer Tools",
+      "description": "Build, run, test, debug, instrument, and implement local macOS apps using Xcode, SwiftUI, AppKit interop, unified logging, and shell-first desktop workflows.",
+      "defaultMode": "router"
+    },
+    {
+      "id": "build-ios-apps",
+      "displayName": "Build iOS Apps",
+      "category": "Developer Tools",
+      "description": "Build iOS apps with workflows for App Intents, SwiftUI UI work, Simulator mirroring, performance profiling, leak investigation, and simulator debugging.",
+      "defaultMode": "router"
+    },
+    {
+      "id": "product-design",
+      "displayName": "Product Design",
+      "category": "Creativity",
+      "description": "Turn early product ideas into reviewable prototypes: confirm the brief, explore product directions, audit user flows, research user friction, prototype from a URL, and make static screenshots interactive.",
+      "defaultMode": "router"
+    },
+    {
+      "id": "creative-production",
+      "displayName": "Creative Production",
+      "category": "Creativity",
+      "description": "Explore campaign ideas, concept images, mood boards, product placements, ad directions, listing images, social posts, launch assets, and reusable visual styles.",
+      "defaultMode": "router"
+    },
+    {
+      "id": "data-analytics",
+      "displayName": "Data Analytics",
+      "category": "Data & Analytics",
+      "description": "Turn analytical questions into validated answers, dashboards, reports, notebooks, KPI frameworks, metric diagnostics, market sizing, data-quality checks, and product/business recommendations.",
+      "defaultMode": "router"
+    },
+    {
+      "id": "sales",
+      "displayName": "Sales",
+      "category": "Business & Operations",
+      "description": "Practical sales workflows for meeting prep, post-call follow-up, account signals, deal strategy, forecast review, competitive briefs, CRM context, and reusable seller preferences.",
+      "defaultMode": "router"
+    },
+    {
+      "id": "figma",
+      "displayName": "Figma",
+      "category": "Creativity",
+      "description": "Figma workflows for design-to-code, file inspection, Code Connect templates, variables/tokens, design system generation, diagrams, FigJam, Slides, and component library work.",
+      "defaultMode": "router"
+    },
+    {
+      "id": "browser",
+      "displayName": "Browser",
+      "category": "Engineering",
+      "description": "Control the Codex in-app browser for local development pages and files: open, navigate, inspect, click, type, screenshot, and verify localhost or file:// targets.",
+      "defaultMode": "router"
+    },
+    {
+      "id": "computer-use",
+      "displayName": "Computer Use",
+      "category": "Productivity",
+      "description": "Control desktop apps through Codex Computer Use: screenshots, accessibility-driven app operation, and scoped GUI tasks on macOS. Review before enabling because it can affect host apps.",
+      "defaultMode": "router"
+    },
+    {
+      "id": "fal",
+      "displayName": "Fal",
+      "category": "Creativity",
+      "description": "AI image and media generation workflows using Fal models. Use as a reference for building local video/image pipelines and future KIE/Kier AI replacements.",
+      "defaultMode": "router"
+    },
+    {
+      "id": "investment-banking",
+      "displayName": "Investment Banking",
+      "category": "Finance",
+      "description": "Investment banking workflows for M&A, coverage, sponsors, capital markets, LevFin, restructuring, valuation, diligence, pitch materials, deal execution, and process trackers.",
+      "defaultMode": "router"
+    },
+    {
+      "id": "public-equity-investing",
+      "displayName": "Public Equity Investing",
+      "category": "Finance",
+      "description": "Public equity workflows for listed-company research, earnings, valuation, model updates, long/short pitches, catalysts, thesis tracking, risk sizing, hedging, dashboards, and investment memos.",
+      "defaultMode": "router"
+    }
+  ]
+}

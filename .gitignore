@@ -26,8 +26,15 @@ artifacts/
 
 # Large/nested vendored repos and local skill checkouts
 vendor/*
+!vendor/openai/
+vendor/openai/*
+!vendor/openai/README.md
+!vendor/openai/codex-plugin-catalog.json
+!vendor/openai/codex-plugin-router-skills/
+!vendor/openai/codex-plugin-router-skills/**
 packages/web-access/vendor/*
 !packages/web-access/vendor/kagi-chrome-extension/
 skills/chrome-devtools-mcp/
 packages/web-access/skills/chrome-devtools-mcp/
 packages/web-access/skills/pi-skills/
+.pi/extensions/*.disabled
