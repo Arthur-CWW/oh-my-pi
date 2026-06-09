@@ -2,7 +2,14 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import { loadJimengSessionFromBrowser } from "./browser-session"
-import { buildCapCutTemplateCategoriesRequest, fetchCapCutTemplateCategories, summarizeCapCutTemplateCategories } from "./capcut-templates"
+import {
+  buildCapCutTemplateCategoriesRequest,
+  capCutTemplateStaticCatalogUrls,
+  fetchCapCutTemplateCategories,
+  fetchCapCutTemplateStaticCatalog,
+  summarizeCapCutTemplateCategories,
+  summarizeCapCutTemplateStaticCatalog,
+} from "./capcut-templates"
 import {
   fetchVoiceLibraryFromCapture,
   generateTextToSpeech,
@@ -71,6 +78,7 @@ Commands:
   short-videos  Fetch no-spend Explore short videos for reference/profile mining
   overseas-short-videos Fetch no-spend feed_short_video examples for overseas/reference mining
   capcut-categories Fetch no-spend CapCut commercial template categories
+  capcut-template-metadata Fetch public CapCut template ratios and scene metadata
   subjects      Fetch saved Jimeng subject/persona records without generation spend
   describe-image Upload/use an image URI, then describe it and detect faces
   controlnet-preview Upload/use an image URI, then build pose/depth/canny preview refs
@@ -176,6 +184,9 @@ Examples:
   jimeng-browser-proxy capcut-categories \\
     --outDir data/jimeng-lab/cli-capcut-categories-smoke
 
+  jimeng-browser-proxy capcut-template-metadata \\
+    --outDir data/jimeng-lab/cli-capcut-template-metadata-smoke
+
   jimeng-browser-proxy subjects \\
     --limit 20 \\
     --outDir data/jimeng-lab/cli-subjects-smoke
@@ -237,6 +248,7 @@ interface CliArgs {
     | "short-videos"
     | "overseas-short-videos"
     | "capcut-categories"
+    | "capcut-template-metadata"
     | "subjects"
     | "describe-image"
     | "controlnet-preview"
@@ -315,6 +327,42 @@ async function main(argv: string[]): Promise<void> {
     mkdirSync(path.dirname(file), { recursive: true })
     writeJson(file, session)
     console.log(`[jimeng-browser-proxy] session saved: ${file}`)
+    return
+  }
+
+  if (args.command === "capcut-template-metadata") {
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const urls = capCutTemplateStaticCatalogUrls()
+    const runId = `capcut-template-metadata-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    if (args.dryRun) {
+      writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
+        command: args.command,
+        endpoint_sequence: [
+          `GET ${urls.ratioCatalogUrl}`,
+          `GET ${urls.sceneCatalogUrl}`,
+        ],
+        browser_session_required: false,
+      })
+      console.log(`[jimeng-browser-proxy] capcut-template-metadata dry run saved`)
+      return
+    }
+
+    const result = await fetchCapCutTemplateStaticCatalog()
+    writeJson(path.join(dirs.rawDir, `${runId}.json`), {
+      ratio_catalog_url: result.ratioCatalogUrl,
+      scene_catalog_url: result.sceneCatalogUrl,
+      ratios_http_status: result.ratiosHttpStatus,
+      scenes_http_status: result.scenesHttpStatus,
+      ratios_response_text_sha256: result.ratiosResponseTextSha256,
+      scenes_response_text_sha256: result.scenesResponseTextSha256,
+      ratios_body: result.ratiosBody,
+      scenes_body: result.scenesBody,
+    })
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      summary: summarizeCapCutTemplateStaticCatalog(result),
+    })
+    console.log(`[jimeng-browser-proxy] capcut-template-metadata saved ratios=${result.ratios.length} scenes=${result.scenes.length}`)
     return
   }
 
@@ -1383,6 +1431,7 @@ function parseArgs(argv: string[]): CliArgs {
     && command !== "short-videos"
     && command !== "overseas-short-videos"
     && command !== "capcut-categories"
+    && command !== "capcut-template-metadata"
     && command !== "subjects"
     && command !== "describe-image"
     && command !== "controlnet-preview"

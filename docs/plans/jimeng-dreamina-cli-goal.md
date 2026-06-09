@@ -130,6 +130,16 @@ CapCut commercial template category mining is now live-proved without generation
 - latest proof returned 8 commercial template categories: Black Friday, Clothing and shoes, Cosmetic dailyization, Food beverages, Jewelry, Furniture, Consumer electronics, and pets.
 - related CapCut template search/collection endpoints are discovered but not implemented: guessed payloads for `/lv/v1/cc_web/replicate/search_templates`, `/lv/v1/cc_web/plane/get_collection_templates`, and `/lv/v1/cc_web/plane/batch_get_collection_templates` returned `ret=1000 param error`; `/lv/v1/cc_web/plane/fuzzy_search_templates` returned success but empty lists for tested English title/query fields. Capture real UI payloads before exposing those as CLI commands.
 
+CapCut public template ratio/scene metadata is now live-proved without generation spend and without a browser session:
+
+- `jimeng-browser-proxy capcut-template-metadata`
+- public static JSON endpoints:
+  - `https://lf16-beecdn.ibytedtos.com/obj/ies-fe-bee-sg/bee_prod/biz_49/bee_prod_49_bee_publish_709.json`
+  - `https://lf16-beecdn.ibytedtos.com/obj/ies-fe-bee-sg/bee_prod/biz_149/bee_prod_149_bee_publish_835.json`
+- frontend bundle evidence: `GetAllTemplateRatio`, `GetTemplateScenes`, and `k.U8.mercury="https://lf16-beecdn.ibytedtos.com/obj/ies-fe-bee-sg/bee_prod"`
+- proof bundle: `data/jimeng-lab/proof-20260610-capcut-template-metadata/`
+- latest proof returned 6 ratio presets and 33 scene formats; first scenes include Instagram post, Instagram story, Instagram portrait, Tiktok, YouTube thumbnail, YouTube intro, YouTube end screen, and Facebook post.
+
 Reference-image inspection is now live-proved without generation spend:
 
 - `jimeng-browser-proxy describe-image`
@@ -189,7 +199,7 @@ Immediate next slices:
 2. Capture the frontend's explicit end-frame/multi-frame mode and live-prove `frames2video` only if the payload contract matches.
 3. Map style/reference roles and the new object-mask provider references into generation payload patches.
 4. Implement digital-human generation using the confirmed VOD reference path where applicable.
-5. Capture real CapCut template row/search/collection payloads, then expand no-spend research/template coverage beyond the confirmed CapCut category catalog.
+5. Capture real CapCut template row/search/collection payloads, then expand no-spend research/template coverage beyond the confirmed CapCut category and public metadata catalogs.
 6. Implement subject/persona create/update/generate_voice and voice clone once the UI/API flow is captured.
 7. Keep each slice small enough to prove and commit before moving on.
 

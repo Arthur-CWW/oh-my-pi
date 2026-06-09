@@ -4,6 +4,9 @@ import { JimengClient } from "./client"
 import { jimengError } from "./errors"
 
 const CAPCUT_TEMPLATE_HOST = "https://edit-api-sg.capcut.com"
+const CAPCUT_TEMPLATE_MERCURY_BASE = "https://lf16-beecdn.ibytedtos.com/obj/ies-fe-bee-sg/bee_prod"
+const CAPCUT_TEMPLATE_RATIO_CATALOG_URL = `${CAPCUT_TEMPLATE_MERCURY_BASE}/biz_49/bee_prod_49_bee_publish_709.json`
+const CAPCUT_TEMPLATE_SCENE_CATALOG_URL = `${CAPCUT_TEMPLATE_MERCURY_BASE}/biz_149/bee_prod_149_bee_publish_835.json`
 const CAPCUT_TEMPLATE_SDK_VERSION = "16.1.0"
 const CAPCUT_TEMPLATE_APP_VERSION = "5.8.0"
 const CAPCUT_TEMPLATE_PF = "7"
@@ -35,6 +38,48 @@ export interface CapCutTemplateCategoriesResult {
   body: unknown
 }
 
+export interface CapCutTemplateRatio {
+  serverScaleType: number
+  size: {
+    width: number
+    height: number
+  }
+  range: {
+    min: number | null
+    max: number | null
+  }
+  aspectRatio: number | null
+}
+
+export interface CapCutTemplateScene {
+  id: number
+  sceneId: string
+  name: string | null
+  sizeUnit: string | null
+  size: {
+    width: number
+    height: number
+  } | null
+  display: boolean | null
+  index: number | null
+  searchTemplateVisible: boolean | null
+  publishTemplateVisible: boolean | null
+  iconUrl: string | null
+}
+
+export interface CapCutTemplateStaticCatalogResult {
+  ratioCatalogUrl: string
+  sceneCatalogUrl: string
+  ratiosHttpStatus: number
+  scenesHttpStatus: number
+  ratiosResponseTextSha256: string
+  scenesResponseTextSha256: string
+  ratios: CapCutTemplateRatio[]
+  scenes: CapCutTemplateScene[]
+  ratiosBody: unknown
+  scenesBody: unknown
+}
+
 export interface CapCutSignedHeaderOptions {
   path: string
   nowSec?: number
@@ -45,6 +90,13 @@ export interface CapCutSignedHeaderOptions {
 
 export function buildCapCutTemplateCategoriesRequest(): Record<string, unknown> {
   return { sdk_version: CAPCUT_TEMPLATE_SDK_VERSION }
+}
+
+export function capCutTemplateStaticCatalogUrls(): { ratioCatalogUrl: string; sceneCatalogUrl: string } {
+  return {
+    ratioCatalogUrl: CAPCUT_TEMPLATE_RATIO_CATALOG_URL,
+    sceneCatalogUrl: CAPCUT_TEMPLATE_SCENE_CATALOG_URL,
+  }
 }
 
 export function buildCapCutSignedHeaders(options: CapCutSignedHeaderOptions): Record<string, string> {
@@ -111,6 +163,36 @@ export async function fetchCapCutTemplateCategories(input: {
   }
 }
 
+export async function fetchCapCutTemplateStaticCatalog(input: {
+  client?: JimengClient
+  userAgent?: string | null
+} = {}): Promise<CapCutTemplateStaticCatalogResult> {
+  const client = input.client ?? new JimengClient()
+  const headers = {
+    accept: "application/json, text/plain, */*",
+    "user-agent": input.userAgent ?? "Mozilla/5.0",
+  }
+  const ratiosResponse = await client.requestText(CAPCUT_TEMPLATE_RATIO_CATALOG_URL, { method: "GET", headers })
+  const scenesResponse = await client.requestText(CAPCUT_TEMPLATE_SCENE_CATALOG_URL, { method: "GET", headers })
+  const ratiosBody = safeJson(ratiosResponse.text)
+  const scenesBody = safeJson(scenesResponse.text)
+  assertHttpSuccess(ratiosResponse.status, ratiosBody, "CapCut template ratio catalog")
+  assertHttpSuccess(scenesResponse.status, scenesBody, "CapCut template scene catalog")
+
+  return {
+    ratioCatalogUrl: CAPCUT_TEMPLATE_RATIO_CATALOG_URL,
+    sceneCatalogUrl: CAPCUT_TEMPLATE_SCENE_CATALOG_URL,
+    ratiosHttpStatus: ratiosResponse.status,
+    scenesHttpStatus: scenesResponse.status,
+    ratiosResponseTextSha256: sha256(ratiosResponse.text),
+    scenesResponseTextSha256: sha256(scenesResponse.text),
+    ratios: parseCapCutTemplateRatioCatalogBody(ratiosBody),
+    scenes: parseCapCutTemplateSceneCatalogBody(scenesBody),
+    ratiosBody,
+    scenesBody,
+  }
+}
+
 export function parseCapCutTemplateCategoriesBody(body: unknown): CapCutTemplateCategory[] {
   return asArray(asRecord(body)?.data)
     .map((value) => {
@@ -126,6 +208,55 @@ export function parseCapCutTemplateCategoriesBody(body: unknown): CapCutTemplate
     .filter((category): category is CapCutTemplateCategory => !!category)
 }
 
+export function parseCapCutTemplateRatioCatalogBody(body: unknown): CapCutTemplateRatio[] {
+  return asArray(body)
+    .map((value) => {
+      const record = asRecord(value)
+      const serverScaleType = numberValue(record?.serverScaleType)
+      const size = asArray(record?.size)
+      const width = numberValue(size[0])
+      const height = numberValue(size[1])
+      if (!record || serverScaleType === null || width === null || height === null) return null
+      const range = asRecord(record.range)
+      return {
+        serverScaleType,
+        size: { width, height },
+        range: {
+          min: numberValue(range?.min),
+          max: numberValue(range?.max),
+        },
+        aspectRatio: height === 0 ? null : roundRatio(width / height),
+      }
+    })
+    .filter((ratio): ratio is CapCutTemplateRatio => !!ratio)
+}
+
+export function parseCapCutTemplateSceneCatalogBody(body: unknown): CapCutTemplateScene[] {
+  return asArray(asRecord(body)?.data)
+    .map((value) => {
+      const record = asRecord(value)
+      const id = numberValue(record?.id)
+      const sceneId = stringValue(record?.sceneId)
+      if (!record || id === null || sceneId === null) return null
+      const size = asRecord(record.size)
+      const width = numberValue(size?.width)
+      const height = numberValue(size?.height)
+      return {
+        id,
+        sceneId,
+        name: stringValue(record.name),
+        sizeUnit: stringValue(record.sizeUnit),
+        size: width === null || height === null ? null : { width, height },
+        display: booleanValue(record.display),
+        index: numberValue(record.index),
+        searchTemplateVisible: booleanValue(record.searchTemplateVIsible),
+        publishTemplateVisible: booleanValue(record.publishTemplateVIsible),
+        iconUrl: stringValue(record.icon),
+      }
+    })
+    .filter((scene): scene is CapCutTemplateScene => !!scene)
+}
+
 export function summarizeCapCutTemplateCategories(result: Pick<CapCutTemplateCategoriesResult, "categories" | "logId" | "responseTextSha256">): Record<string, unknown> {
   return {
     category_count: result.categories.length,
@@ -139,6 +270,38 @@ export function summarizeCapCutTemplateCategories(result: Pick<CapCutTemplateCat
   }
 }
 
+export function summarizeCapCutTemplateStaticCatalog(result: Pick<
+  CapCutTemplateStaticCatalogResult,
+  "ratioCatalogUrl" | "sceneCatalogUrl" | "ratiosResponseTextSha256" | "scenesResponseTextSha256" | "ratios" | "scenes"
+>): Record<string, unknown> {
+  return {
+    ratio_catalog_url: result.ratioCatalogUrl,
+    scene_catalog_url: result.sceneCatalogUrl,
+    ratio_count: result.ratios.length,
+    scene_count: result.scenes.length,
+    ratios_response_text_sha256: result.ratiosResponseTextSha256,
+    scenes_response_text_sha256: result.scenesResponseTextSha256,
+    ratios: result.ratios.map((ratio) => ({
+      server_scale_type: ratio.serverScaleType,
+      size: ratio.size,
+      aspect_ratio: ratio.aspectRatio,
+      range: ratio.range,
+    })),
+    scenes: result.scenes.map((scene) => ({
+      id: scene.id,
+      scene_id: scene.sceneId,
+      name: scene.name,
+      size_unit: scene.sizeUnit,
+      size: scene.size,
+      display: scene.display,
+      index: scene.index,
+      search_template_visible: scene.searchTemplateVisible,
+      publish_template_visible: scene.publishTemplateVisible,
+      icon_url_present: !!scene.iconUrl,
+    })),
+  }
+}
+
 function assertCapCutSuccess(body: unknown, operation: string): void {
   const ret = retValue(body)
   if (ret === "0" || ret === 0) return
@@ -148,6 +311,17 @@ function assertCapCutSuccess(body: unknown, operation: string): void {
     message: `${operation} failed (ret=${String(ret ?? "unknown")}, errmsg=${errmsgValue(body) ?? "unknown"})`,
     retryable: false,
     details: { operation, ret, errmsg: errmsgValue(body) },
+  })
+}
+
+function assertHttpSuccess(status: number, body: unknown, operation: string): void {
+  if (status >= 200 && status < 300) return
+  throw jimengError({
+    category: "upstream",
+    code: "CAPCUT_STATIC_CATALOG_REJECTED",
+    message: `${operation} failed (http_status=${status})`,
+    retryable: false,
+    details: { operation, http_status: status, body },
   })
 }
 
@@ -177,6 +351,14 @@ function stringValue(value: unknown): string | null {
 
 function numberValue(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null
+}
+
+function booleanValue(value: unknown): boolean | null {
+  return typeof value === "boolean" ? value : null
+}
+
+function roundRatio(value: number): number {
+  return Math.round(value * 10000) / 10000
 }
 
 function retValue(body: unknown): string | number | null {

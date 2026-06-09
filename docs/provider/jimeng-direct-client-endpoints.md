@@ -298,7 +298,7 @@ Frontend bundle scan found these UGC-useful groups, but they are not yet direct-
 - subject/persona CRUD and voice: `/mweb/v1/dreamina_subject/get`, `/mweb/v1/dreamina_subject/create`, `/mweb/v1/dreamina_subject/update`, `/mweb/v1/dreamina_subject/delete`, `/mweb/v1/dreamina_subject/generate_voice`; list is implemented, while create/update/delete/generate_voice still need UI capture
 - infinite canvas: `/mweb/v1/infinite_canvas/create_project`, `/mweb/v1/infinite_canvas/conversation`, `/mweb/v1/infinite_canvas/edit`, `/mweb/v1/infinite_canvas/resume`, `/mweb/v1/infinite_canvas/stop_stream`, `/mweb/v1/infinite_canvas/v1/fetch_snapshot`, `/mweb/v1/infinite_canvas/v1/submit_changeset`, `/mweb/v1/infinite_canvas/v1/fetch_changeset`
 - reference/image tools: `/mweb/v1/get_common_config`, `/mweb/v1/get_image_description`, `/mweb/v1/get_upload_token`, `/mweb/v1/face_recognize`, `/mweb/v1/blend_preview`, `/mweb/v1/pose_detect`, `/mweb/v1/saliency_seg`, `/mweb/v1/algo_proxy`; upload, description, face recognition, ControlNet pose/depth/canny preview, pose detect, and object/saliency segmentation are now direct-client commands, while style/reference payload tools remain capture targets
-- template/research mining: `/mweb/v1/feed`, `/mweb/v1/get_explore`, `/mweb/v1/feed_short_video`, `/lv/v1/cc_web/plane/get_categories`, `/lv/v1/cc_web/replicate/search_templates`, `/lv/v1/cc_web/plane/*`; direct `/mweb/v1/get_explore` support is implemented for both templates and short-video examples, `/mweb/v1/feed_short_video` is implemented as `overseas-short-videos`, and CapCut category catalog is implemented as `capcut-categories`; CapCut template rows/search/collection payloads still need real UI capture
+- template/research mining: `/mweb/v1/feed`, `/mweb/v1/get_explore`, `/mweb/v1/feed_short_video`, `/lv/v1/cc_web/plane/get_categories`, public CapCut `bee_prod` metadata JSON, `/lv/v1/cc_web/replicate/search_templates`, `/lv/v1/cc_web/plane/*`; direct `/mweb/v1/get_explore` support is implemented for both templates and short-video examples, `/mweb/v1/feed_short_video` is implemented as `overseas-short-videos`, CapCut category catalog is implemented as `capcut-categories`, and public CapCut ratio/scene metadata is implemented as `capcut-template-metadata`; CapCut template rows/search/collection payloads still need real UI capture
 
 Next step is to drive those UI flows one at a time with background CDP recording, then create dry-run patchers before live calls.
 
@@ -694,6 +694,34 @@ categories=Black Friday, Clothing and shoes, Cosmetic dailyization, Food beverag
 response_text_sha256=27f4e1bc5a3ff2ddf94568b77d068db828807ab3aa12be3c484588b1b4ff3ea0
 raw=data/jimeng-lab/proof-20260610-capcut-categories/raw/capcut-categories-20260609230631.json
 summary=data/jimeng-lab/proof-20260610-capcut-categories/normalized/capcut-categories-20260609230631-summary.json
+```
+
+### 10.4) CapCut public template ratio and scene metadata
+- `GET https://lf16-beecdn.ibytedtos.com/obj/ies-fe-bee-sg/bee_prod/biz_49/bee_prod_49_bee_publish_709.json`
+- `GET https://lf16-beecdn.ibytedtos.com/obj/ies-fe-bee-sg/bee_prod/biz_149/bee_prod_149_bee_publish_835.json`
+- Status:
+  - live-proved without generation spend
+  - implemented as `jimeng-browser-proxy capcut-template-metadata`
+  - public static JSON; no Jimeng or CapCut session is required
+  - frontend bundle evidence: `GetAllTemplateRatio` and `GetTemplateScenes` concatenate `k.U8.mercury` with the two `bee_prod` paths; `k.U8.mercury` resolves to `https://lf16-beecdn.ibytedtos.com/obj/ies-fe-bee-sg/bee_prod`
+
+CLI proof:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts capcut-template-metadata \
+  --outDir data/jimeng-lab/proof-20260610-capcut-template-metadata
+```
+
+Observed safe summary:
+
+```txt
+ratio_count=6
+scene_count=33
+ratios_response_text_sha256=18b2d8e274f0a129fdbec437f5c9b28a2cfad89dd94807d63efb4325ed5ace41
+scenes_response_text_sha256=aa409da2647ee22a9025d17835055ffd34450b1c07783ea54a1909fa367e286d
+first_scenes=Instagram post:1080x1080 | Instagram story:1080x1920 | Instagram portrait:1080x1350 | Tiktok:1080x1920 | YouTube thumbnail:1280x720 | YouTube intro:1920x1080 | YouTube end screen:1920x1080 | Facebook post:940x788
+raw=data/jimeng-lab/proof-20260610-capcut-template-metadata/raw/capcut-template-metadata-20260609231824.json
+summary=data/jimeng-lab/proof-20260610-capcut-template-metadata/normalized/capcut-template-metadata-20260609231824-summary.json
 ```
 
 Remaining CapCut template endpoints are discovered but not implemented:
@@ -1372,6 +1400,7 @@ Current support matrix:
 | `templates` | implemented in `jimeng-browser-proxy` | No-spend direct `/mweb/v1/get_explore` template mining with prompt/model/usage normalization. |
 | `overseas-short-videos` | implemented in `jimeng-browser-proxy` | No-spend direct `/mweb/v1/feed_short_video` short-video/reference mining with ranking and video metadata normalization. |
 | `capcut-categories` | implemented in `jimeng-browser-proxy` | No-spend signed CapCut `/lv/v1/cc_web/plane/get_categories` commercial template category catalog. |
+| `capcut-template-metadata` | implemented in `jimeng-browser-proxy` | No-session public CapCut `bee_prod` ratio and scene metadata catalogs. |
 | `subjects` | implemented in `jimeng-browser-proxy` | No-spend direct `/mweb/v1/dreamina_subject/get`; current account returned zero saved subjects. |
 | `image2image` | needs capture | Need image reference upload + image edit submit capture. |
 | `multiframe2video` | needs capture | Need multi-frame upload/reference payload capture. |

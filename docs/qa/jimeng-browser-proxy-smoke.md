@@ -892,20 +892,66 @@ rg -n 'X-Amz|x-signature|x-expires' data/jimeng-lab/proof-20260610-capcut-catego
 
 Expected result: no matches.
 
+## CapCut Public Template Metadata Smoke
+
+`jimeng-browser-proxy capcut-template-metadata` fetches public static CapCut template ratio and scene metadata discovered in the Jimeng/Dreamina frontend bundle. This is a no-generation, no-spend probe and does not require a browser session.
+
+Dry run:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts capcut-template-metadata \
+  --outDir data/jimeng-lab/proof-20260610-capcut-template-metadata-dry-run \
+  --dryRun
+```
+
+Live command:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts capcut-template-metadata \
+  --outDir data/jimeng-lab/proof-20260610-capcut-template-metadata
+```
+
+Expected artifact layout:
+
+```txt
+raw=data/jimeng-lab/proof-20260610-capcut-template-metadata/raw/capcut-template-metadata-20260609231824.json
+summary=data/jimeng-lab/proof-20260610-capcut-template-metadata/normalized/capcut-template-metadata-20260609231824-summary.json
+```
+
+Current proof facts:
+
+```txt
+ratio_count=6
+scene_count=33
+ratios_response_text_sha256=18b2d8e274f0a129fdbec437f5c9b28a2cfad89dd94807d63efb4325ed5ace41
+scenes_response_text_sha256=aa409da2647ee22a9025d17835055ffd34450b1c07783ea54a1909fa367e286d
+first_scenes=Instagram post:1080x1080 | Instagram story:1080x1920 | Instagram portrait:1080x1350 | Tiktok:1080x1920 | YouTube thumbnail:1280x720 | YouTube intro:1920x1080 | YouTube end screen:1920x1080 | Facebook post:940x788
+```
+
+Token/signed URL marker check:
+
+```bash
+rg -n 'X-Amz|x-signature|x-expires|sessionid|sid_guard|msToken' \
+  data/jimeng-lab/proof-20260610-capcut-template-metadata \
+  data/jimeng-lab/proof-20260610-capcut-template-metadata-dry-run
+```
+
+Expected result: no matches.
+
 ## Verification
 
 ```bash
 bun run jimeng:typecheck
 bun run jimeng:test
-bun packages/jimeng-client/src/browser-proxy-cli.ts --help
+bun packages/jimeng-client/src/browser-proxy-cli.ts --help | rg 'capcut-template-metadata|capcut-categories|overseas-short-videos|subjects|templates|short-videos'
 ```
 
 Result:
 
 ```txt
 typecheck passed
-58 tests passed, 0 failed
-browser-proxy help listed overseas-short-videos, capcut-categories, subjects, describe-image, controlnet-preview, object-mask, templates, short-videos, upload-video, image2video, frames2video, and lip-sync
+62 tests passed, 0 failed
+browser-proxy help listed capcut-template-metadata, overseas-short-videos, capcut-categories, subjects, templates, and short-videos
 ```
 
 ## Follow-Up
@@ -915,7 +961,7 @@ Next useful captures:
 - image-to-image / byte edit
 - subject/persona creation
 - style reference controls and object segmentation
-- additional template/research endpoints: CapCut template search and plane endpoints
+- additional template/research endpoints: CapCut template search and plane row/collection endpoints
 - image-to-video end-frame and multi-frame live proof with explicit frontend mode capture
 - multimodal/all-around reference video
 - lip-sync live submit capture/compare before enabling generation

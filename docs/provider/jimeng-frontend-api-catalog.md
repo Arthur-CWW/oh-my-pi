@@ -867,6 +867,44 @@ Related bundle endpoints are discovered but not claimed as implemented yet:
 - `/lv/v1/cc_web/plane/get_collection_templates` and `/lv/v1/cc_web/plane/batch_get_collection_templates`: helper contract found, but category-id guesses returned `ret=1000 param error`; needs real UI capture.
 - `/lv/v1/cc_web/plane/fuzzy_search_templates`: accepts POSTs and returns success, but all tested English title/query fields returned empty lists, so it is not exposed as implemented.
 
+## Confirmed CapCut Public Template Metadata Contract
+
+`jimeng-browser-proxy capcut-template-metadata` fetches two public static CapCut template metadata JSON files discovered in the same frontend bundle. This path does not require a Jimeng or CapCut session and does not consume generation quota.
+
+Command:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts capcut-template-metadata \
+  --outDir data/jimeng-lab/proof-20260610-capcut-template-metadata
+```
+
+Confirmed endpoints:
+
+```txt
+GET https://lf16-beecdn.ibytedtos.com/obj/ies-fe-bee-sg/bee_prod/biz_49/bee_prod_49_bee_publish_709.json
+GET https://lf16-beecdn.ibytedtos.com/obj/ies-fe-bee-sg/bee_prod/biz_149/bee_prod_149_bee_publish_835.json
+```
+
+Frontend evidence:
+
+```txt
+GetAllTemplateRatio=url(k.U8.mercury + "/biz_49/bee_prod_49_bee_publish_709.json")
+GetTemplateScenes=url(k.U8.mercury + "/biz_149/bee_prod_149_bee_publish_835.json")
+k.U8.mercury="https://lf16-beecdn.ibytedtos.com/obj/ies-fe-bee-sg/bee_prod"
+```
+
+Latest proof:
+
+```txt
+ratio_count=6
+scene_count=33
+ratios_response_text_sha256=18b2d8e274f0a129fdbec437f5c9b28a2cfad89dd94807d63efb4325ed5ace41
+scenes_response_text_sha256=aa409da2647ee22a9025d17835055ffd34450b1c07783ea54a1909fa367e286d
+first_scenes=Instagram post:1080x1080 | Instagram story:1080x1920 | Instagram portrait:1080x1350 | Tiktok:1080x1920 | YouTube thumbnail:1280x720 | YouTube intro:1920x1080 | YouTube end screen:1920x1080 | Facebook post:940x788
+raw=data/jimeng-lab/proof-20260610-capcut-template-metadata/raw/capcut-template-metadata-20260609231824.json
+summary=data/jimeng-lab/proof-20260610-capcut-template-metadata/normalized/capcut-template-metadata-20260609231824-summary.json
+```
+
 ## Discovered From Frontend Bundles
 
 The 2026-06-09 JS bundle sweep found these useful endpoint groups. Treat rows without an implemented status as capture targets, not stable contracts, until a real UI flow and dry-run payload are recorded.
@@ -877,7 +915,7 @@ The 2026-06-09 JS bundle sweep found these useful endpoint groups. Treat rows wi
 | Subject/persona lifecycle | `/mweb/v1/dreamina_subject/get`, `/mweb/v1/dreamina_subject/create`, `/mweb/v1/dreamina_subject/update`, `/mweb/v1/dreamina_subject/delete`, `/mweb/v1/dreamina_subject/generate_voice`; list is implemented as `subjects`, while create/update/delete/generate_voice remain capture targets |
 | Infinite canvas | `/mweb/v1/infinite_canvas/create_project`, `/mweb/v1/infinite_canvas/conversation`, `/mweb/v1/infinite_canvas/edit`, `/mweb/v1/infinite_canvas/resume`, `/mweb/v1/infinite_canvas/stop_stream`, `/mweb/v1/infinite_canvas/v1/fetch_snapshot`, `/mweb/v1/infinite_canvas/v1/submit_changeset`, `/mweb/v1/infinite_canvas/v1/fetch_changeset` |
 | Reference/image tools | `/mweb/v1/get_common_config`, `/mweb/v1/get_image_description`, `/mweb/v1/get_upload_token`, `/mweb/v1/face_recognize`, `/mweb/v1/blend_preview`, `/mweb/v1/pose_detect`, `/mweb/v1/saliency_seg`, `/mweb/v1/algo_proxy`; image upload, description, face recognition, ControlNet pose/depth/canny preview, pose detect, and object/saliency segmentation are now implemented, while style/reference payload tools still need CLI coverage |
-| Template/research mining | `/mweb/v1/feed`, `/mweb/v1/feed_short_video`, `/lv/v1/cc_web/plane/get_categories`, `/lv/v1/cc_web/replicate/search_templates`, `/lv/v1/cc_web/plane/*`; `/mweb/v1/get_explore` is implemented for direct Explore templates and short-video examples, `/mweb/v1/feed_short_video` is implemented as `overseas-short-videos`, and CapCut category catalog is implemented as `capcut-categories`; CapCut template rows/search/collection endpoints remain capture targets |
+| Template/research mining | `/mweb/v1/feed`, `/mweb/v1/feed_short_video`, `/lv/v1/cc_web/plane/get_categories`, public CapCut `bee_prod` metadata JSON, `/lv/v1/cc_web/replicate/search_templates`, `/lv/v1/cc_web/plane/*`; `/mweb/v1/get_explore` is implemented for direct Explore templates and short-video examples, `/mweb/v1/feed_short_video` is implemented as `overseas-short-videos`, CapCut category catalog is implemented as `capcut-categories`, and public CapCut ratio/scene metadata is implemented as `capcut-template-metadata`; CapCut template rows/search/collection endpoints remain capture targets |
 | Assets/upload/editor | `/lv/v1/asset/*`, `/lv/v1/editor/image/*` |
 | Audio/video utility | `/mweb/v1/mix_audio_video`, `/mweb/v1/mix_audio_videos`, `/lv/v2/intelligence/tts/curl_sync_everphoto` |
 
