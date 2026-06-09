@@ -30,7 +30,7 @@ Use the browser as an authenticated session holder and API discovery surface. Mo
 | `/mweb/v1/creation_agent/v2/skill/list` | POST | Available agent skills/tools. | Cataloged only |
 | `/mweb/v1/video_generate/get_common_config` | POST | Video model/common configuration by scene, including lip-sync image/video scenes. | Implemented for config catalog |
 | `/mweb/v1/get_user_local_item_list` | POST | User local/generated item lists; `effect_type=218` returns current user's cloned voices. | Implemented for config catalog |
-| `/mweb/v1/dreamina_subject/get` | POST | Saved subject/persona list. | Implemented for config catalog |
+| `/mweb/v1/dreamina_subject/get` | POST | Saved subject/persona list. | Implemented as no-spend `subjects`; current account returned zero saved subjects |
 | `/mweb/v1/feed` | POST | Explore/feed content; a signed `dreamina_tone` feed request returns the built-in voice library. Useful for research/template mining if handled carefully. | Implemented for voice library replay |
 | `/mweb/v1/tts_generate` | POST | Built-in voice text-to-speech. Returns base64 MP3 in `data.data`. | Implemented and live-proved |
 | `/mweb/v1/get_upload_token` | POST | Temporary upload credentials for video/image/file scenes. Required before direct local reference-image/video upload. | Implemented and live-proved; local ImageX image upload is implemented via `upload-image`, local VOD video upload via `upload-video` |
@@ -593,6 +593,55 @@ This is dry-run-proved only. The next live-proof step should capture or select t
 
 These probes are useful for keeping the CLI/app aware of available models, lip-sync routes, saved subjects, and user voice assets without consuming generation credits.
 
+## Confirmed Saved Subject / Persona List Contract
+
+`jimeng-browser-proxy subjects` calls `/mweb/v1/dreamina_subject/get` directly with the logged-in browser session. This is a no-generation, no-spend list probe for saved Jimeng subjects/personas.
+
+Request shape:
+
+```json
+{
+  "cursor": 0,
+  "limit": 20
+}
+```
+
+CLI proof:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts subjects \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --limit 20 \
+  --outDir data/jimeng-lab/proof-20260610-subjects
+```
+
+Observed proof facts:
+
+```txt
+http_status=200
+ret=0
+errmsg=success
+cursor=0
+limit=20
+subject_count=0
+has_more=false
+next_cursor=0
+response_text_sha256=618858c54ed5d0b298cf37ed03bf29d27042f54e3e999bb143932cec6a3ef31f
+proof=data/jimeng-lab/proof-20260610-subjects/
+```
+
+The current account returned zero saved subjects, which is still a valid endpoint proof. The normalized fields are ready for future accounts with saved personas:
+
+- `subject_id`
+- `name`
+- `description`
+- `status`
+- create/update timestamps
+- cover image URI
+- cover URL presence, without preserving the signed URL
+- image URI count
+- voice id count
+
 ## Confirmed Explore / Template Mining Contract
 
 `jimeng-browser-proxy templates` now calls `/mweb/v1/get_explore` directly with the logged-in browser session. This is a no-generation, no-spend endpoint for mining public creative examples, prompt structure, model keys, usage/favorite counts, and template feature labels.
@@ -728,7 +777,7 @@ The 2026-06-09 JS bundle sweep found these useful endpoint groups. Treat them as
 | Group | Endpoints |
 |---|---|
 | Voice cloning / custom voice | `/mweb/v1/voice/submit_task`, `/mweb/v1/voice/query_task`, `/mweb/v1/voice/update`, `/mweb/v1/voice/delete` |
-| Subject/persona lifecycle | `/mweb/v1/dreamina_subject/create`, `/mweb/v1/dreamina_subject/update`, `/mweb/v1/dreamina_subject/delete`, `/mweb/v1/dreamina_subject/generate_voice` |
+| Subject/persona lifecycle | `/mweb/v1/dreamina_subject/get`, `/mweb/v1/dreamina_subject/create`, `/mweb/v1/dreamina_subject/update`, `/mweb/v1/dreamina_subject/delete`, `/mweb/v1/dreamina_subject/generate_voice`; list is implemented as `subjects`, while create/update/delete/generate_voice remain capture targets |
 | Infinite canvas | `/mweb/v1/infinite_canvas/create_project`, `/mweb/v1/infinite_canvas/conversation`, `/mweb/v1/infinite_canvas/edit`, `/mweb/v1/infinite_canvas/resume`, `/mweb/v1/infinite_canvas/stop_stream`, `/mweb/v1/infinite_canvas/v1/fetch_snapshot`, `/mweb/v1/infinite_canvas/v1/submit_changeset`, `/mweb/v1/infinite_canvas/v1/fetch_changeset` |
 | Reference/image tools | `/mweb/v1/get_common_config`, `/mweb/v1/get_image_description`, `/mweb/v1/get_upload_token`, `/mweb/v1/face_recognize`, `/mweb/v1/blend_preview`, `/mweb/v1/pose_detect`, `/mweb/v1/saliency_seg`, `/mweb/v1/algo_proxy`; image upload, description, face recognition, ControlNet pose/depth/canny preview, pose detect, and object/saliency segmentation are now implemented, while style/reference payload tools still need CLI coverage |
 | Template/research mining | `/mweb/v1/feed`, `/mweb/v1/feed_short_video`, `/lv/v1/cc_web/replicate/search_templates`, `/lv/v1/cc_web/plane/*`; `/mweb/v1/get_explore` is now implemented for direct Explore templates and short-video examples |

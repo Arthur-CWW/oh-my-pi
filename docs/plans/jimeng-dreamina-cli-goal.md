@@ -26,6 +26,10 @@ As of 2026-06-10, the committed Jimeng CLI baseline is:
 - `86ff779 Add Jimeng lip-sync VOD dry-run plan`
 - `5c7887a Add Jimeng Explore templates CLI`
 - `594d5d0 Add Jimeng short-video Explore CLI`
+- `3434225 Add Jimeng reference image inspect CLI`
+- `e442938 Add Jimeng ControlNet preview CLI`
+- `858eab2 Document Jimeng ControlNet preview proofs`
+- `3e3bde2 Add Jimeng object mask CLI`
 
 ImageX local image upload is now committed and live-proved:
 
@@ -143,6 +147,16 @@ Object/saliency segmentation is now live-proved without generation spend:
   - default mask URI `tos-cn-i-tb4s082cfz/d6641d59e6de4d17be119c0b98506129`, artifact `data/jimeng-lab/proof-20260610-object-mask/artifacts/object-mask-20260609165112-8yjxpj-default-mask-01.png`
   - both mask artifacts are `2048x2048` PNGs.
 
+Saved subject/persona listing is now live-proved without generation spend:
+
+- `jimeng-browser-proxy subjects`
+- direct `/mweb/v1/dreamina_subject/get` with logged-in browser session headers
+- useful flags: `--cursor`, `--limit`
+- normalizes durable subject fields: `subject_id`, `name`, `description`, `status`, create/update timestamps, cover image URI, cover URL presence, image URI count, and voice id count
+- normalized summaries intentionally omit signed cover URLs and raw responses remain ignored under `data/**`
+- proof bundle: `data/jimeng-lab/proof-20260610-subjects/`
+- latest proof returned `ret=0`, `errmsg=success`, `subject_count=0`, `has_more=false`, `next_cursor=0`, and response hash `618858c54ed5d0b298cf37ed03bf29d27042f54e3e999bb143932cec6a3ef31f`.
+
 The next slice is **reference controls and video-reference consumers**. Use the VOD provider reference plus frontend captures to unlock live lip-sync, reference-video, multimodal/all-around reference, pose/style/depth/canny controls, and live end-frame/multi-frame image-to-video paths.
 
 Immediate next slices:
@@ -152,7 +166,7 @@ Immediate next slices:
 3. Map style/reference roles and the new object-mask provider references into generation payload patches.
 4. Implement digital-human generation using the confirmed VOD reference path where applicable.
 5. Expand no-spend research/template coverage with CapCut template search, plane endpoints, and the bundle-discovered `/mweb/v1/feed_short_video` overseas path.
-6. Implement voice clone and subject/persona voice generation once the UI/API flow is captured.
+6. Implement subject/persona create/update/generate_voice and voice clone once the UI/API flow is captured.
 7. Keep each slice small enough to prove and commit before moving on.
 
 Do not start the async daemon while these API contracts are still moving.
@@ -233,6 +247,7 @@ jimeng-browser-proxy tts
 jimeng-browser-proxy sample-voices
 jimeng-browser-proxy upload-token
 jimeng-browser-proxy upload-image
+jimeng-browser-proxy subjects
 jimeng-browser-proxy describe-image
 jimeng-browser-proxy controlnet-preview
 jimeng-browser-proxy object-mask

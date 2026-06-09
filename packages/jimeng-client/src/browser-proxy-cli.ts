@@ -48,6 +48,7 @@ import {
   summarizeObjectSegmentation,
   type JimengObjectSegmentationResult,
 } from "./reference-segmentation"
+import { buildJimengSubjectsRequest, fetchJimengSubjects, summarizeJimengSubjects } from "./subjects"
 import { getJimengUploadToken, parseUploadTokenScene, uploadJimengImage, uploadJimengVideo, type JimengImageUploadResult, type JimengVideoUploadResult } from "./upload"
 
 const DEFAULT_CDP_URL = "http://127.0.0.1:9340"
@@ -65,6 +66,7 @@ Commands:
   sample-voices Generate sequential MP3 samples for voices from the built-in library
   templates     Fetch no-spend Explore/template examples for prompt/template mining
   short-videos  Fetch no-spend Explore short videos for reference/profile mining
+  subjects      Fetch saved Jimeng subject/persona records without generation spend
   describe-image Upload/use an image URI, then describe it and detect faces
   controlnet-preview Upload/use an image URI, then build pose/depth/canny preview refs
   object-mask   Upload/use an image URI, then segment salient object masks
@@ -94,6 +96,7 @@ Options:
   --item-platform <n>           Voice item platform (default: 1, Loki/built-in)
   --limit <n>                   sample-voices limit or Explore count
   --offset <n>                  Explore offset (default: 0)
+  --cursor <n>                  Subject/persona list cursor (default: 0)
   --category-id <n>             Explore category id (default: 11222)
   --work-types <csv>            templates work types: video,image,canvas,short_video
   --feed-refer <value>          Explore feed refer, e.g. feed_refresh, feed_enterauto, or feed_loadmore
@@ -158,6 +161,10 @@ Examples:
     --category-id 11222 \\
     --feed-refer feed_enterauto
 
+  jimeng-browser-proxy subjects \\
+    --limit 20 \\
+    --outDir data/jimeng-lab/cli-subjects-smoke
+
   jimeng-browser-proxy describe-image \\
     --image data/jimeng-lab/ugc-studio-kbeauty-image/artifacts/jimeng-kbeauty-01.png \\
     --outDir data/jimeng-lab/cli-reference-image-smoke
@@ -213,6 +220,7 @@ interface CliArgs {
     | "sample-voices"
     | "templates"
     | "short-videos"
+    | "subjects"
     | "describe-image"
     | "controlnet-preview"
     | "object-mask"
@@ -240,6 +248,7 @@ interface CliArgs {
   itemPlatform?: number
   limit?: number
   offset?: number
+  cursor?: number
   categoryId?: number
   workTypes?: string
   feedRefer?: string
@@ -509,6 +518,42 @@ async function main(argv: string[]): Promise<void> {
       items: result.items,
     })
     console.log(`[jimeng-browser-proxy] short-videos saved count=${result.items.length} nextOffset=${result.nextOffset ?? "none"}`)
+    return
+  }
+
+  if (args.command === "subjects") {
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const query = {
+      cursor: args.cursor,
+      limit: args.limit,
+    }
+    const request = buildJimengSubjectsRequest(query)
+    const runId = `subjects-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    if (args.dryRun) {
+      writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
+        command: args.command,
+        endpoint: "/mweb/v1/dreamina_subject/get",
+        request,
+        browser_session: redactSession(session),
+      })
+      console.log(`[jimeng-browser-proxy] subjects dry run saved`)
+      return
+    }
+
+    const result = await fetchJimengSubjects({ session, query })
+    writeJson(path.join(dirs.rawDir, `${runId}.json`), {
+      http_status: result.httpStatus,
+      ret: result.ret,
+      errmsg: result.errmsg,
+      response_text_sha256: result.responseTextSha256,
+      request: result.request,
+      body: result.body,
+    })
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      summary: summarizeJimengSubjects(result),
+    })
+    console.log(`[jimeng-browser-proxy] subjects saved count=${result.subjects.length} nextCursor=${result.nextCursor ?? "none"} hasMore=${result.hasMore ?? "unknown"}`)
     return
   }
 
@@ -1223,6 +1268,7 @@ function parseArgs(argv: string[]): CliArgs {
     && command !== "sample-voices"
     && command !== "templates"
     && command !== "short-videos"
+    && command !== "subjects"
     && command !== "describe-image"
     && command !== "controlnet-preview"
     && command !== "object-mask"
@@ -1249,6 +1295,7 @@ function parseArgs(argv: string[]): CliArgs {
   const itemPlatform = flags["item-platform"] ? Number(flags["item-platform"]) : undefined
   const limit = flags.limit ? Number(flags.limit) : undefined
   const offset = flags.offset ? Number(flags.offset) : undefined
+  const cursor = flags.cursor ? Number(flags.cursor) : undefined
   const categoryId = flags["category-id"] ? Number(flags["category-id"]) : undefined
   if (seed !== undefined && (!Number.isInteger(seed) || seed < 0 || seed > 4294967295)) {
     throw new Error("--seed must be an integer from 0 to 4294967295")
@@ -1261,6 +1308,9 @@ function parseArgs(argv: string[]): CliArgs {
   }
   if (offset !== undefined && (!Number.isInteger(offset) || offset < 0)) {
     throw new Error("--offset must be a non-negative integer")
+  }
+  if (cursor !== undefined && (!Number.isInteger(cursor) || cursor < 0)) {
+    throw new Error("--cursor must be a non-negative integer")
   }
   if (categoryId !== undefined && (!Number.isInteger(categoryId) || categoryId < 1)) {
     throw new Error("--category-id must be a positive integer")
@@ -1298,6 +1348,7 @@ function parseArgs(argv: string[]): CliArgs {
     itemPlatform,
     limit,
     offset,
+    cursor,
     categoryId,
     workTypes: flags["work-types"],
     feedRefer: flags["feed-refer"],

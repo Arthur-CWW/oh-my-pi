@@ -770,6 +770,43 @@ top_by_play[0].has_audio=true
 
 Normalized examples include durable video metadata and ranking signals but omit signed video URLs. Raw responses still contain signed URLs and stay under ignored `data/**`.
 
+## Saved Subject / Persona List Smoke
+
+`jimeng-browser-proxy subjects` calls `/mweb/v1/dreamina_subject/get` directly with the logged-in browser session. This is a no-generation, no-spend probe for saved subject/persona records.
+
+Command:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts subjects \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --limit 20 \
+  --outDir data/jimeng-lab/proof-20260610-subjects
+```
+
+Result:
+
+```txt
+raw=data/jimeng-lab/proof-20260610-subjects/raw/subjects-20260609222826.json
+summary=data/jimeng-lab/proof-20260610-subjects/normalized/subjects-20260609222826-summary.json
+http_status=200
+ret=0
+errmsg=success
+cursor=0
+limit=20
+subject_count=0
+has_more=false
+next_cursor=0
+response_text_sha256=618858c54ed5d0b298cf37ed03bf29d27042f54e3e999bb143932cec6a3ef31f
+```
+
+The current account has no saved subjects, so the returned empty list is expected. The normalized summary still proves the endpoint contract and omits signed URLs. URL leak check:
+
+```bash
+rg -n 'X-Amz|signed|https?://' data/jimeng-lab/proof-20260610-subjects/normalized
+```
+
+Result: no matches.
+
 ## Verification
 
 ```bash
@@ -782,8 +819,8 @@ Result:
 
 ```txt
 typecheck passed
-44 tests passed, 0 failed
-browser-proxy help listed describe-image, controlnet-preview, object-mask, templates, short-videos, upload-video, image2video, frames2video, and lip-sync
+51 tests passed, 0 failed
+browser-proxy help listed subjects, describe-image, controlnet-preview, object-mask, templates, short-videos, upload-video, image2video, frames2video, and lip-sync
 ```
 
 ## Follow-Up

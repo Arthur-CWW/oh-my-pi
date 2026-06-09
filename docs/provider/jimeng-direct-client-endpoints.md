@@ -139,6 +139,62 @@ Validated endpoint ids:
 
 These probes are read/config/list calls and should not consume generation credits. They still require a live logged-in session bundle.
 
+### 6.1) Saved subject/persona list
+- `POST https://jimeng.jianying.com/mweb/v1/dreamina_subject/get`
+- Status:
+  - implemented as `jimeng-browser-proxy subjects`
+  - no-generation/no-spend list path
+  - live-proved with the current logged-in session; current account returned zero saved subjects
+- Request:
+
+```json
+{
+  "cursor": 0,
+  "limit": 20
+}
+```
+
+Current utility:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts subjects \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --limit 20 \
+  --outDir data/jimeng-lab/proof-20260610-subjects
+```
+
+Proof facts:
+
+```txt
+http_status=200
+ret=0
+errmsg=success
+subject_count=0
+has_more=false
+next_cursor=0
+response_text_sha256=618858c54ed5d0b298cf37ed03bf29d27042f54e3e999bb143932cec6a3ef31f
+summary=data/jimeng-lab/proof-20260610-subjects/normalized/subjects-20260609222826-summary.json
+```
+
+Normalized item fields for future non-empty accounts:
+
+```ts
+interface JimengSubjectItem {
+  subjectId: string
+  name: string | null
+  description: string | null
+  status: number | null
+  createTime: string | null
+  updateTime: string | null
+  coverImageUri: string | null
+  coverImageUrl: string | null
+  imageUris: string[]
+  voiceIds: string[]
+}
+```
+
+Normalized summaries redact signed cover URLs into a boolean presence field. Raw responses stay ignored under `data/**`.
+
 ### 7) Built-in voice library
 - `POST https://jimeng.jianying.com/mweb/v1/feed`
 - Request source:
@@ -239,7 +295,7 @@ data/jimeng-lab/voice-library-samples/manifest.json
 Frontend bundle scan found these UGC-useful groups, but they are not yet direct-client contracts:
 
 - voice clone/custom voice: `/mweb/v1/voice/submit_task`, `/mweb/v1/voice/query_task`, `/mweb/v1/voice/update`, `/mweb/v1/voice/delete`
-- subject/persona CRUD and voice: `/mweb/v1/dreamina_subject/create`, `/mweb/v1/dreamina_subject/update`, `/mweb/v1/dreamina_subject/delete`, `/mweb/v1/dreamina_subject/generate_voice`
+- subject/persona CRUD and voice: `/mweb/v1/dreamina_subject/get`, `/mweb/v1/dreamina_subject/create`, `/mweb/v1/dreamina_subject/update`, `/mweb/v1/dreamina_subject/delete`, `/mweb/v1/dreamina_subject/generate_voice`; list is implemented, while create/update/delete/generate_voice still need UI capture
 - infinite canvas: `/mweb/v1/infinite_canvas/create_project`, `/mweb/v1/infinite_canvas/conversation`, `/mweb/v1/infinite_canvas/edit`, `/mweb/v1/infinite_canvas/resume`, `/mweb/v1/infinite_canvas/stop_stream`, `/mweb/v1/infinite_canvas/v1/fetch_snapshot`, `/mweb/v1/infinite_canvas/v1/submit_changeset`, `/mweb/v1/infinite_canvas/v1/fetch_changeset`
 - reference/image tools: `/mweb/v1/get_common_config`, `/mweb/v1/get_image_description`, `/mweb/v1/get_upload_token`, `/mweb/v1/face_recognize`, `/mweb/v1/blend_preview`, `/mweb/v1/pose_detect`, `/mweb/v1/saliency_seg`, `/mweb/v1/algo_proxy`; upload, description, face recognition, ControlNet pose/depth/canny preview, pose detect, and object/saliency segmentation are now direct-client commands, while style/reference payload tools remain capture targets
 - template/research mining: `/mweb/v1/feed`, `/mweb/v1/get_explore`, `/mweb/v1/feed_short_video`, `/lv/v1/cc_web/replicate/search_templates`, `/lv/v1/cc_web/plane/*`; direct `/mweb/v1/get_explore` support is implemented for both templates and short-video examples
@@ -1214,6 +1270,7 @@ Current support matrix:
 | `frames2video` | dry-run-proved in `jimeng-browser-proxy`; partial in low-level compat helper | Browser proxy can upload local `--image` and `--lastImage`, inject `first_frame_image`/`end_frame_image`, and write a no-generation plan. Live proof still needs explicit frontend end-frame mode evidence. |
 | `lip-sync` | dry-run-proved in `jimeng-browser-proxy` | Browser proxy can prepare the VOD-reference lip-sync provider input from a VOD `vid`/metadata plus TTS voice flags. Live submit still needs a frontend submit capture/compare. |
 | `templates` | implemented in `jimeng-browser-proxy` | No-spend direct `/mweb/v1/get_explore` template mining with prompt/model/usage normalization. |
+| `subjects` | implemented in `jimeng-browser-proxy` | No-spend direct `/mweb/v1/dreamina_subject/get`; current account returned zero saved subjects. |
 | `image2image` | needs capture | Need image reference upload + image edit submit capture. |
 | `multiframe2video` | needs capture | Need multi-frame upload/reference payload capture. |
 | `multimodal2video` | needs capture | Need `全能参考` mixed image/video/audio reference payload capture. |
@@ -1284,4 +1341,5 @@ Do not commit raw captures or generated media. If a redacted summary is promoted
 3. Capture the frontend's explicit end-frame/multi-frame mode and live-prove `frames2video` only after confirming the mode-specific payload contract.
 4. Expand template/research mining beyond direct Explore with `feed_short_video`, CapCut template search, and plane endpoints.
 5. Add strict `1019` shark breaker/cooldown budgets to the consolidated CLI path.
-6. Add multipart/chunked VOD upload only when large reference videos require it.
+6. Capture subject/persona create/update/generate_voice and custom voice clone flows.
+7. Add multipart/chunked VOD upload only when large reference videos require it.
