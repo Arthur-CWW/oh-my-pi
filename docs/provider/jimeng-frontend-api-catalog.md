@@ -111,11 +111,12 @@ Use dynamic and static tools together:
 
 1. Record one UI action through background CDP with `network-recorder.ts`; do not foreground Arthur's browser.
 2. Run `jimeng-browser-proxy capture-analyze` on `raw-network.jsonl` to rank endpoints, classify risk, summarize request/response shapes, and emit replay candidates.
-3. Use `ast-grep`/targeted bundle search on endpoint names or initiator bundle chunks to recover enum names and request builders when the analyzer output needs semantic labels.
-4. Replay only explicit candidate JSON bodies with `jimeng-browser-proxy endpoint-probe`; compare `ret`, `errmsg`, and summarized response shapes.
-5. Promote stable read-only or approved contracts into dedicated typed CLI commands with runtime schemas and proof artifacts.
+3. Run `jimeng-browser-proxy discovery-worklist` on one or more analyzer outputs, optional raw probe candidates, and optional `--staticRoot` source/bundle roots to prioritize the next API slice without rereading large bundles.
+4. Use `ast-grep`/targeted bundle search on endpoint names or initiator bundle chunks to recover enum names and request builders when the worklist still needs semantic labels.
+5. Replay only explicit candidate JSON bodies with `jimeng-browser-proxy endpoint-probe`; compare `ret`, `errmsg`, and summarized response shapes.
+6. Promote stable read-only or approved contracts into dedicated typed CLI commands with runtime schemas and proof artifacts.
 
-`capture-analyze` and `endpoint-probe` are intentionally not blind fuzzers. The analyzer produces a token-efficient worklist from CDP truth; the probe replays candidate bodies found from CDP/static evidence, with raw outputs kept under ignored `data/**` and normalized shape summaries safe enough to paste into agent context.
+`capture-analyze`, `discovery-worklist`, and `endpoint-probe` are intentionally not blind fuzzers. The analyzer turns CDP truth into ranked endpoint evidence, the worklist merges analyzer/static/probe evidence into a prioritized next-slice queue, and the probe replays candidate bodies found from CDP/static evidence. Raw outputs stay under ignored `data/**`; normalized summaries are designed to be small enough to paste into agent context after redaction review.
 
 Custom voice clone CLI coverage:
 

@@ -22,6 +22,13 @@ import {
   writeJimengCaptureAnalysisMarkdown,
 } from "./capture-analyzer"
 import {
+  buildJimengDiscoveryWorklist,
+  readJimengCaptureAnalysisFile,
+  readJimengEndpointProbeCandidateFile,
+  summarizeJimengDiscoveryWorklist,
+  writeJimengDiscoveryWorklistMarkdown,
+} from "./discovery-worklist"
+import {
   fetchVoiceLibraryFromCapture,
   fetchLipSyncConfigs,
   generateTextToSpeech,
@@ -153,6 +160,7 @@ It refreshes the live frontend session from the browser, then uses the direct cl
 Commands:
   session       Save a fresh session bundle from the logged-in Jimeng browser profile
   capture-analyze Analyze raw CDP network JSONL into ranked endpoint/probe candidates
+  discovery-worklist Merge capture analysis/static hints into prioritized next API work
   catalog       Probe non-generating model/tool/persona/voice config endpoints
   lip-sync-config Fetch no-spend digital-human/lip-sync model configs
   lip-sync-compare Offline compare a lip-sync dry-run plan against captured UI submit
@@ -199,8 +207,11 @@ Options:
   --capture <file>              Capture template JSON for generation commands
   --rawNetwork <file>           raw-network.jsonl from jimeng-network-recorder for capture-analyze
   --captureDir <dir>            Capture directory containing raw-network.jsonl for capture-analyze/lip-sync-compare
+  --analysis <file[,file]>       capture-analyze normalized analysis JSON for discovery-worklist
+  --probeCandidates <file[,file]> Raw endpoint-probe candidate JSON for discovery-worklist
   --staticRoot <dir[,dir]>      Optional source/bundle roots to search for exact endpoint string hints
   --includeRisky                Include generate/upload/mutate/payment endpoints in replay candidate JSON
+  --includeKnown                Include already-covered endpoints in discovery-worklist
   --plan <file>                 Dry-run plan JSON for lip-sync-compare
   --endpoint <path|url>          Endpoint path or full URL for endpoint-probe
   --method <GET|POST>            HTTP method for endpoint-probe (default: POST)
@@ -290,6 +301,12 @@ Examples:
     --rawNetwork data/jimeng-captures/20260610-subject-create-ui/raw-network.jsonl \\
     --staticRoot packages/jimeng-client/src \\
     --outDir data/jimeng-lab/capture-analysis-subject-create
+
+  jimeng-browser-proxy discovery-worklist \\
+    --analysis data/jimeng-lab/capture-analysis-subject-create/normalized/capture-analyze-<stamp>-analysis.json \\
+    --probeCandidates data/jimeng-lab/capture-analysis-subject-create/raw/capture-analyze-<stamp>-endpoint-probe-candidates.json \\
+    --staticRoot packages/jimeng-client/src \\
+    --outDir data/jimeng-lab/discovery-worklist-subject-create
 
   jimeng-browser-proxy session
 
@@ -460,6 +477,7 @@ interface CliArgs {
   command:
     | "session"
     | "capture-analyze"
+    | "discovery-worklist"
     | "catalog"
     | "endpoint-probe"
     | "lip-sync-config"
@@ -504,8 +522,11 @@ interface CliArgs {
   capture?: string
   rawNetwork?: string
   captureDir?: string
+  analysisFiles?: string[]
+  probeCandidateFiles?: string[]
   staticRoots?: string[]
   includeRisky: boolean
+  includeKnown: boolean
   plan?: string
   endpoint?: string
   method?: "GET" | "POST"
@@ -622,6 +643,50 @@ async function main(argv: string[]): Promise<void> {
     })
     writeFileSync(path.join(dirs.normalizedDir, `${runId}-summary.md`), writeJimengCaptureAnalysisMarkdown(analysis), "utf8")
     console.log(`[jimeng-browser-proxy] capture-analyze saved candidates=${analysis.candidates.length} replay=${analysis.endpoint_probe_candidates.length}`)
+    return
+  }
+
+  if (args.command === "discovery-worklist") {
+    const analysisFiles = args.analysisFiles ?? []
+    if (analysisFiles.length === 0) throw new Error("discovery-worklist requires --analysis")
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const runId = `discovery-worklist-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const analyses = analysisFiles.map(readJimengCaptureAnalysisFile)
+    const probeCandidates = (args.probeCandidateFiles ?? []).flatMap(readJimengEndpointProbeCandidateFile)
+    const worklist = buildJimengDiscoveryWorklist({
+      analyses,
+      analysisFiles: analysisFiles.map((file) => path.resolve(file)),
+      probeCandidates,
+      staticRoots: args.staticRoots,
+      includeKnown: args.includeKnown,
+    })
+    writeJson(path.join(dirs.rawDir, `${runId}.json`), worklist)
+    const exportedVariants = worklist.probe_variant_exports.map((candidate) => {
+      const file = path.join(dirs.rawDir, `${runId}-${slug(candidate.endpoint)}-variants.json`)
+      writeJson(file, {
+        endpoint: candidate.endpoint,
+        method: candidate.method,
+        query: candidate.query,
+        risk_class: candidate.risk_class,
+        variants: candidate.variants,
+      })
+      return {
+        endpoint: candidate.endpoint,
+        method: candidate.method,
+        query: candidate.query,
+        risk_class: candidate.risk_class,
+        replay_safe_by_default: candidate.replay_safe_by_default,
+        variant_count: candidate.variant_count,
+        file,
+      }
+    })
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      summary: summarizeJimengDiscoveryWorklist(worklist),
+      exported_probe_variants: exportedVariants,
+    })
+    writeFileSync(path.join(dirs.normalizedDir, `${runId}-summary.md`), writeJimengDiscoveryWorklistMarkdown(worklist), "utf8")
+    console.log(`[jimeng-browser-proxy] discovery-worklist saved items=${worklist.work_item_count} probe_exports=${exportedVariants.length}`)
     return
   }
 
@@ -2607,6 +2672,7 @@ function parseArgs(argv: string[]): CliArgs {
   if (
     command !== "session"
     && command !== "capture-analyze"
+    && command !== "discovery-worklist"
     && command !== "catalog"
     && command !== "endpoint-probe"
     && command !== "lip-sync-config"
@@ -2737,8 +2803,11 @@ function parseArgs(argv: string[]): CliArgs {
     capture: flags.capture,
     rawNetwork: flags.rawNetwork ?? flags["raw-network"],
     captureDir: flags.captureDir ?? flags["capture-dir"],
+    analysisFiles: parseCsvFlag(flags.analysis),
+    probeCandidateFiles: parseCsvFlag(flags.probeCandidates ?? flags["probe-candidates"]),
     staticRoots: parseCsvFlag(flags.staticRoot ?? flags["static-root"]),
     includeRisky: flags.includeRisky === "true" || flags["include-risky"] === "true",
+    includeKnown: flags.includeKnown === "true" || flags["include-known"] === "true",
     plan: flags.plan,
     endpoint: flags.endpoint,
     method,

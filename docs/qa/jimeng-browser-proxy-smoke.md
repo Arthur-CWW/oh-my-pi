@@ -304,6 +304,59 @@ Expected result:
 normalized capture-analysis proof has no signed URLs
 ```
 
+## Discovery Worklist Smoke
+
+`discovery-worklist` is the offline prioritization step after `capture-analyze`. It does not load a browser session or spend generation quota. It merges analyzer output, optional raw replay candidates, and optional static source/bundle roots into a small next-slice queue.
+
+Proof command:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts discovery-worklist \
+  --analysis data/jimeng-lab/proof-20260610-capture-analyze-subject-create-v3/normalized/capture-analyze-20260610024757-analysis.json \
+  --probeCandidates data/jimeng-lab/proof-20260610-capture-analyze-subject-create-v3/raw/capture-analyze-20260610024757-endpoint-probe-candidates.json \
+  --staticRoot packages/jimeng-client/src \
+  --outDir data/jimeng-lab/proof-20260610-discovery-worklist-subject-create-v3
+```
+
+Result:
+
+```txt
+discovery-worklist saved items=18 probe_exports=1
+captured_endpoints=4
+static_endpoints=39
+already_covered_capture_endpoints_skipped=2
+raw_probe_variant_export=/mweb/v1/get_unread_count
+top_gap_1=/mweb/v1/dreamina_subject/generate_voice action=approval_or_disposable_fixture
+top_gap_2=/mweb/v1/voice/submit_task action=approval_or_disposable_fixture
+top_gap_3=/lv/v1/cc_web/plane/get_collection_templates action=static_capture_needed
+```
+
+Proof files:
+
+```txt
+data/jimeng-lab/proof-20260610-discovery-worklist-subject-create-v3/normalized/discovery-worklist-20260610032849-summary.md
+data/jimeng-lab/proof-20260610-discovery-worklist-subject-create-v3/normalized/discovery-worklist-20260610032849-summary.json
+data/jimeng-lab/proof-20260610-discovery-worklist-subject-create-v3/raw/discovery-worklist-20260610032849.json
+data/jimeng-lab/proof-20260610-discovery-worklist-subject-create-v3/raw/discovery-worklist-20260610032849-mweb-v1-get_unread_count-variants.json
+```
+
+The normalized worklist output was checked for signed URL and raw probe-body leakage:
+
+```bash
+if rg -n "https://|x-signature|x-expires|expire_time|byteimg|douyinpic|vlabvod|secret-style-reference" \
+  data/jimeng-lab/proof-20260610-discovery-worklist-subject-create-v3/normalized; then
+  exit 1
+else
+  echo "normalized discovery-worklist proof has no signed URLs or raw variant bodies"
+fi
+```
+
+Expected result:
+
+```txt
+normalized discovery-worklist proof has no signed URLs or raw variant bodies
+```
+
 ## Endpoint Probe / VOD Metadata Smoke
 
 `endpoint-probe` is the faster replay step for future reversal work. It does not guess or fuzz automatically; it replays explicit JSON body variants from CDP/static evidence, then writes raw local bodies plus normalized request/response shape summaries.

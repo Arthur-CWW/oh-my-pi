@@ -342,6 +342,17 @@ Capture analysis/ranking is now available as the repeatable "tool that builds th
 - proof bundle: `data/jimeng-lab/proof-20260610-capture-analyze-subject-create-v3/`
 - latest proof analyzed 138 events / 27 requests into 5 ranked candidates and 1 safe replay candidate (`/mweb/v1/get_unread_count`); top ranked endpoint was upload/audit `/mweb/v1/imagex/submit_audit_job`, correctly not replay-safe by default
 
+Discovery worklists are now available as the next token-efficient planning layer:
+
+- `jimeng-browser-proxy discovery-worklist`
+- offline; does not load a browser session, foreground UI, or spend generation quota
+- input: one or more `capture-analyze` normalized analysis JSON files via `--analysis`, optional raw endpoint-probe candidate JSON via `--probeCandidates`, and optional source/bundle roots via `--staticRoot`
+- useful flags: `--includeKnown` for audit views that include already-covered endpoints
+- decodes analysis/probe JSON with permissive runtime schemas and emits a prioritized worklist of next API slices: replay/promote, capture request builder, compare dry-run before live, approval/disposable fixture, already-covered, or low-value/risky documentation
+- writes normalized markdown/JSON summaries without raw probe bodies; raw per-endpoint replay variant files stay under ignored `data/**`
+- proof bundle: `data/jimeng-lab/proof-20260610-discovery-worklist-subject-create-v3/`
+- latest proof merged the subject-create capture analysis with static source hints into 18 work items, skipped 2 already-covered capture endpoints, exported 1 raw replay variant for `/mweb/v1/get_unread_count`, and highlighted the real next gaps: subject `generate_voice`, voice clone mutations, CapCut template row/search/collection payload capture, remaining `/mweb/v1/aigc_draft/generate` modes, and older agent/feed/workspace surfaces
+
 Lip-sync submit comparison is now available as the live-generation gate:
 
 - `jimeng-browser-proxy lip-sync-compare`
@@ -377,8 +388,8 @@ Maximize useful API coverage and proof quality while keeping live submissions co
 - prefer direct Jimeng APIs, saved sessions, CDP network/DOM calls, CuaDriver/background browser-use, and other non-interruptive automation paths over `bringToFront`, visible tab clicks, or Computer Use interactions that move the active cursor/window
 - if a frontend-only Jimeng flow truly requires visible UI interaction, first try to reproduce it through background CDP or CuaDriver; if that still cannot work, record the blocked path and ask before interrupting Arthur's flow
 - for unknown frontend flows, prefer a faster hybrid reversal loop over long manual bundle reading: run background CDP/passive network capture first, use `ast-grep`/targeted structural search to locate the frontend request builder, then replay/compare the direct API request with saved session headers
-- promote the hybrid loop into tooling: CDP recorder for dynamic truth, static search for request-builder semantics, `endpoint-probe` for explicit body replay, then dedicated schema-backed commands for stable contracts
-- run `capture-analyze` after every meaningful `jimeng-network-recorder` capture to produce a ranked, token-efficient worklist before opening frontend bundles by hand
+- promote the hybrid loop into tooling: CDP recorder for dynamic truth, `capture-analyze` for endpoint ranking, `discovery-worklist` for next-slice prioritization, static search for request-builder semantics, `endpoint-probe` for explicit body replay, then dedicated schema-backed commands for stable contracts
+- run `capture-analyze` after every meaningful `jimeng-network-recorder` capture, then run `discovery-worklist` before opening frontend bundles by hand
 - use mise-managed developer CLIs such as `ast-grep` when available; install missing local CLIs with `mise` first unless the tool must be a repo/CI dependency
 - validate external Jimeng/CapCut/provider JSON at the boundary with permissive runtime schemas; allow additive extra fields but fail clearly when relied-on response paths drift
 - live generation prompts should be Chinese and in-distribution for the UGC use case
@@ -471,6 +482,7 @@ jimeng-browser-proxy assets
 jimeng-browser-proxy history-queue
 jimeng-browser-proxy history-records
 jimeng-browser-proxy capture-analyze
+jimeng-browser-proxy discovery-worklist
 jimeng-browser-proxy endpoint-probe
 jimeng-browser-proxy video-info
 jimeng-browser-proxy canvas
