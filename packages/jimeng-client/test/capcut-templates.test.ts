@@ -1,21 +1,33 @@
 import { createHash } from "node:crypto"
 import { describe, expect, test } from "bun:test"
 import {
+  buildCapCutCollectionTemplatesRequest,
   buildSingleCapCutEndpointProbeVariant,
   buildCapCutSignedHeaders,
   buildCapCutTemplateCategoriesRequest,
+  buildCapCutTemplateCollectionsRequest,
+  buildCapCutTemplateDetailRequest,
   capCutTemplateStaticCatalogUrls,
+  fetchCapCutCollectionTemplates,
+  fetchCapCutTemplateCollections,
   fetchCapCutTemplateCategories,
+  fetchCapCutTemplateDetail,
   fetchCapCutTemplateStaticCatalog,
   JimengClient,
   JimengError,
+  parseCapCutCollectionTemplatesBody,
   parseCapCutTemplateCategoriesBody,
+  parseCapCutTemplateCollectionsBody,
+  parseCapCutTemplateDetailBody,
   parseCapCutTemplateRatioCatalogBody,
   parseCapCutTemplateSceneCatalogBody,
   parseCapCutEndpointProbeVariants,
   runCapCutEndpointProbe,
+  summarizeCapCutCollectionTemplates,
   summarizeCapCutEndpointProbe,
   summarizeCapCutTemplateCategories,
+  summarizeCapCutTemplateCollections,
+  summarizeCapCutTemplateDetail,
   summarizeCapCutTemplateStaticCatalog,
   type JimengFetch,
   type JimengSessionBundle,
@@ -104,6 +116,163 @@ describe("CapCut commercial template helpers", () => {
         { category_id: 2, display_name: "Cosmetic dailyization" },
       ],
     })
+  })
+
+  test("fetches template collections and normalizes durable collection ids", async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = []
+    const client = new JimengClient({
+      fetch: mockFetch(JSON.stringify(capCutCollectionsBody()), requests),
+    })
+
+    expect(buildCapCutTemplateCollectionsRequest({
+      categoryType: 0,
+      scale: 1,
+      canvasWidth: 1080,
+      canvasHeight: 1920,
+    })).toEqual({
+      sdk_version: "16.1.0",
+      category_type: 0,
+      scale: 1,
+      canvas_width: 1080,
+      canvas_height: 1920,
+    })
+
+    const result = await fetchCapCutTemplateCollections({
+      client,
+      session,
+      query: { lan: "en", loc: "us" },
+    })
+    const summary = summarizeCapCutTemplateCollections(result)
+
+    expect(requests[0]?.url).toBe("https://edit-api-sg.capcut.com/lv/v1/cc_web/plane/get_collections")
+    expect(JSON.parse(String(requests[0]?.init?.body))).toEqual({ sdk_version: "16.1.0" })
+    expect(result.collections).toEqual([
+      {
+        id: 10034,
+        displayName: "Beauty Care",
+        rootCategory: null,
+        starlingKey: "vimo-ad-category-us-29-MNPNHI",
+        resourceLen: 16369,
+        categoryType: 0,
+        direction: 0,
+        isEcomCategory: true,
+        capsuleCount: 0,
+      },
+    ])
+    expect(summary).toMatchObject({
+      collection_count: 1,
+      collections: [
+        { id: 10034, display_name: "Beauty Care", resource_len: 16369 },
+      ],
+    })
+  })
+
+  test("fetches collection template rows and redacts signed media from summaries", async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = []
+    const client = new JimengClient({
+      fetch: mockFetch(JSON.stringify(capCutCollectionTemplatesBody()), requests),
+    })
+
+    expect(buildCapCutCollectionTemplatesRequest({
+      collectionId: 10034,
+      count: 5,
+      cursor: 10,
+      lang: "en",
+    })).toEqual({
+      sdk_version: "16.1.0",
+      enter_from: "feed",
+      count: 5,
+      lang: "en",
+      id: 10034,
+      cursor: 10,
+    })
+
+    const result = await fetchCapCutCollectionTemplates({
+      client,
+      session,
+      query: { collectionId: 10034, count: 5, lan: "en", loc: "us" },
+    })
+    const summary = summarizeCapCutCollectionTemplates(result)
+
+    expect(requests[0]?.url).toBe("https://edit-api-sg.capcut.com/lv/v1/cc_web/plane/get_collection_templates")
+    expect(JSON.parse(String(requests[0]?.init?.body))).toMatchObject({
+      sdk_version: "16.1.0",
+      enter_from: "feed",
+      count: 5,
+      lang: "en",
+      id: 10034,
+    })
+    expect(result.templates[0]).toMatchObject({
+      id: "7369116096600771846",
+      title: "FACEBOOK ADS - BEAUTY",
+      coverUrlPresent: true,
+      coverSize: { width: 1200, height: 628 },
+      categoryIds: [10032, 10034],
+      author: { uid: "6995172659920372737", name: "DK Candra", role: 0 },
+      sceneIds: [10012],
+      canvasSize: { width: 1200, height: 628 },
+      textThemeCoverCount: 1,
+    })
+    expect(summary).toMatchObject({
+      collection_id: 10034,
+      template_count: 1,
+      cursor: 5,
+      has_more: true,
+    })
+    expect(JSON.stringify(summary)).not.toContain("signed.example.invalid")
+    expect(JSON.stringify(summary)).not.toContain("x-signature=secret")
+  })
+
+  test("fetches template detail by web id and summarizes without raw template data", async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = []
+    const client = new JimengClient({
+      fetch: mockFetch(JSON.stringify(capCutTemplateDetailBody()), requests),
+    })
+
+    expect(buildCapCutTemplateDetailRequest({
+      templateId: "7369116096600771846",
+      needDraft: true,
+      lang: "en",
+      region: "us",
+    })).toEqual({
+      sdk_version: "16.1.0",
+      enter_from: "feed",
+      app_version: "5.8.0",
+      lang: "en",
+      region: "us",
+      template_id: "7369116096600771846",
+      need_draft: true,
+    })
+
+    const result = await fetchCapCutTemplateDetail({
+      client,
+      session,
+      query: { templateId: "7369116096600771846", needDraft: false },
+    })
+    const summary = summarizeCapCutTemplateDetail(result)
+
+    expect(requests[0]?.url).toBe("https://edit-api-sg.capcut.com/lv/v1/cc_web/plane/get_template_detail")
+    expect(result.detail).toMatchObject({
+      templateId: "7369116096600771846",
+      templateUrlPresent: true,
+      templateDataPresent: true,
+      draftDataPresent: true,
+      templateVersion: "1.3.2",
+      creatorSubmitType: 1,
+      textThemeEffectCount: 1,
+    })
+    expect(summary).toMatchObject({
+      detail: {
+        template_id: "7369116096600771846",
+        template_url_present: true,
+        material_counts: {
+          effects: 1,
+          file_infos: 0,
+        },
+      },
+    })
+    expect(JSON.stringify(summary)).not.toContain("raw-template-data")
+    expect(JSON.stringify(summary)).not.toContain("https://signed.example.invalid")
   })
 
   test("rejects CapCut API errors", async () => {
@@ -302,6 +471,12 @@ describe("CapCut commercial template helpers", () => {
       },
     })).rejects.toThrow(JimengError)
   })
+
+  test("fails loudly when CapCut required response paths disappear", () => {
+    expect(() => parseCapCutTemplateCollectionsBody({ ret: "0", data: {} })).toThrow()
+    expect(() => parseCapCutCollectionTemplatesBody({ ret: "0", data: {} })).toThrow()
+    expect(() => parseCapCutTemplateDetailBody({ ret: "0", data: {} })).toThrow()
+  })
 })
 
 function capCutCategoriesBody(): Record<string, unknown> {
@@ -321,6 +496,114 @@ function capCutCategoriesBody(): Record<string, unknown> {
         default_display_name: "Cosmetic dailyization",
       },
     ],
+  }
+}
+
+function capCutCollectionsBody(): Record<string, unknown> {
+  return {
+    ret: "0",
+    errmsg: "success",
+    log_id: "log-collections",
+    data: {
+      template_source: "",
+      collections: [
+        {
+          id: 10034,
+          display_name: "Beauty Care",
+          root_category: "",
+          direction: 0,
+          starling_key: "vimo-ad-category-us-29-MNPNHI",
+          resource_len: 16369,
+          category_type: 0,
+          is_ecom_category: true,
+          capsules: [],
+          provider_added_field: "allowed",
+        },
+      ],
+    },
+  }
+}
+
+function capCutCollectionTemplatesBody(): Record<string, unknown> {
+  return {
+    ret: "0",
+    errmsg: "success",
+    log_id: "log-templates",
+    data: {
+      has_more: true,
+      new_cursor: 5,
+      template_source: "",
+      item_list: [
+        {
+          id: 7369116096600772000,
+          web_id: "7369116096600771846",
+          title: "FACEBOOK ADS - BEAUTY",
+          short_title: "BEAUTY",
+          cover_url: "https://signed.example.invalid/cover.webp?x-signature=secret",
+          cover_width: 1200,
+          cover_height: 628,
+          optimized_cover_url: {
+            cover_url_small: "https://signed.example.invalid/small.webp?x-signature=secret",
+          },
+          category_id_list: [10032, 10034],
+          status: 0,
+          author: {
+            uid: 6995172659920373000,
+            web_uid: "6995172659920372737",
+            name: "DK Candra",
+            role: 0,
+          },
+          hypic_extra: {
+            producer_type: 2,
+            features: ["element.text", "template.web"],
+            template_version: "1.0.0",
+          },
+          text_theme_covers: [{ uri: "tos-1" }],
+          text_theme_effects: [{ id: "font-1" }],
+          extra_v2: {
+            canvas_width: "1200",
+            canvas_height: "628",
+            scene_ids: "[10012]",
+          },
+          is_multi_lang: false,
+          template_tags_v2: ["operationTag/industry/beauty & personal care"],
+          item_type: 2001,
+          provider_added_field: { nested: true },
+        },
+      ],
+    },
+  }
+}
+
+function capCutTemplateDetailBody(): Record<string, unknown> {
+  return {
+    ret: "0",
+    errmsg: "success",
+    log_id: "log-detail",
+    data: {
+      template_id: "7369116096600771846",
+      template_url: "https://signed.example.invalid/template.zip?x-signature=secret",
+      template_data: "raw-template-data",
+      draft_data: "{}",
+      main_version: 1,
+      feature_version: 3,
+      revise_version: 2,
+      creator_info: {
+        submit_type: 1,
+      },
+      materials: {
+        effects: [{ id: "effect-1" }],
+        file_infos: [],
+      },
+      extra_v2: {
+        source_draft_id: "source-1",
+      },
+      multi_langs: {},
+      text_theme_covers: [],
+      text_theme_effects: [{ id: "font-1" }],
+      theme_data: "{}",
+      provider_added_field: "allowed",
+    },
   }
 }
 

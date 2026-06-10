@@ -16,6 +16,9 @@ const CAPCUT_TEMPLATE_PF = "7"
 const CAPCUT_TEMPLATE_APP_SDK_VERSION = "999.999.999"
 const CAPCUT_TEMPLATE_SIGN_SECRET_PREFIX = "9e2c"
 const CAPCUT_TEMPLATE_SIGN_SECRET_SUFFIX = "11ac"
+const CAPCUT_TEMPLATE_COLLECTIONS_ENDPOINT = "/lv/v1/cc_web/plane/get_collections"
+const CAPCUT_TEMPLATE_COLLECTION_TEMPLATES_ENDPOINT = "/lv/v1/cc_web/plane/get_collection_templates"
+const CAPCUT_TEMPLATE_DETAIL_ENDPOINT = "/lv/v1/cc_web/plane/get_template_detail"
 
 export interface CapCutTemplateCategory {
   categoryId: number
@@ -26,6 +29,130 @@ export interface CapCutTemplateCategory {
 export interface CapCutTemplateCategoriesQuery {
   lan?: string
   loc?: string
+}
+
+export interface CapCutTemplateCollectionsQuery {
+  categoryType?: string | number
+  scale?: number
+  canvasWidth?: number
+  canvasHeight?: number
+  lan?: string
+  loc?: string
+}
+
+export interface CapCutTemplateCollection {
+  id: number
+  displayName: string | null
+  rootCategory: string | null
+  starlingKey: string | null
+  resourceLen: number | null
+  categoryType: number | null
+  direction: number | null
+  isEcomCategory: boolean | null
+  capsuleCount: number
+}
+
+export interface CapCutTemplateCollectionsResult {
+  endpoint: typeof CAPCUT_TEMPLATE_COLLECTIONS_ENDPOINT
+  host: string
+  httpStatus: number
+  ret: string | number | null
+  errmsg: string | null
+  logId: string | null
+  responseTextSha256: string
+  request: Record<string, unknown>
+  collections: CapCutTemplateCollection[]
+  templateSource: string | null
+  body: unknown
+}
+
+export interface CapCutCollectionTemplatesQuery {
+  collectionId: number
+  count?: number
+  cursor?: number
+  lang?: string
+  lan?: string
+  loc?: string
+}
+
+export interface CapCutCollectionTemplateItem {
+  id: string
+  numericId: string | null
+  title: string | null
+  shortTitle: string | null
+  itemType: number | null
+  status: number | null
+  coverUrlPresent: boolean
+  coverSize: { width: number; height: number } | null
+  optimizedCoverUrlKeys: string[]
+  categoryIds: number[]
+  author: {
+    uid: string | null
+    name: string | null
+    role: number | null
+  }
+  featureCount: number
+  templateVersion: string | null
+  tags: string[]
+  sceneIds: number[]
+  canvasSize: { width: number; height: number } | null
+  isMultiLang: boolean | null
+  textThemeCoverCount: number
+  textThemeEffectCount: number
+}
+
+export interface CapCutCollectionTemplatesResult {
+  endpoint: typeof CAPCUT_TEMPLATE_COLLECTION_TEMPLATES_ENDPOINT
+  host: string
+  httpStatus: number
+  ret: string | number | null
+  errmsg: string | null
+  logId: string | null
+  responseTextSha256: string
+  request: Record<string, unknown>
+  collectionId: number
+  cursor: number | null
+  hasMore: boolean | null
+  templateSource: string | null
+  templates: CapCutCollectionTemplateItem[]
+  body: unknown
+}
+
+export interface CapCutTemplateDetailQuery {
+  templateId: string
+  needDraft?: boolean
+  lang?: string
+  region?: string
+  lan?: string
+  loc?: string
+}
+
+export interface CapCutTemplateDetail {
+  templateId: string
+  templateUrlPresent: boolean
+  templateDataPresent: boolean
+  draftDataPresent: boolean
+  templateVersion: string | null
+  materialCounts: Record<string, number>
+  creatorSubmitType: number | null
+  extraKeys: string[]
+  multiLangKeys: string[]
+  textThemeCoverCount: number
+  textThemeEffectCount: number
+  themeDataPresent: boolean
+}
+
+export interface CapCutTemplateDetailResult {
+  endpoint: typeof CAPCUT_TEMPLATE_DETAIL_ENDPOINT
+  host: string
+  httpStatus: number
+  ret: string | number | null
+  errmsg: string | null
+  logId: string | null
+  responseTextSha256: string
+  request: Record<string, unknown>
+  detail: CapCutTemplateDetail
+  body: unknown
 }
 
 export interface CapCutTemplateCategoriesResult {
@@ -126,6 +253,39 @@ export interface CapCutSignedHeaderOptions {
 
 export function buildCapCutTemplateCategoriesRequest(): Record<string, unknown> {
   return { sdk_version: CAPCUT_TEMPLATE_SDK_VERSION }
+}
+
+export function buildCapCutTemplateCollectionsRequest(query: CapCutTemplateCollectionsQuery = {}): Record<string, unknown> {
+  return omitUndefined({
+    sdk_version: CAPCUT_TEMPLATE_SDK_VERSION,
+    category_type: query.categoryType,
+    scale: query.scale,
+    canvas_width: query.canvasWidth,
+    canvas_height: query.canvasHeight,
+  })
+}
+
+export function buildCapCutCollectionTemplatesRequest(query: CapCutCollectionTemplatesQuery): Record<string, unknown> {
+  return omitUndefined({
+    sdk_version: CAPCUT_TEMPLATE_SDK_VERSION,
+    enter_from: "feed",
+    count: query.count ?? 20,
+    lang: query.lang ?? query.lan ?? "en",
+    id: query.collectionId,
+    cursor: query.cursor,
+  })
+}
+
+export function buildCapCutTemplateDetailRequest(query: CapCutTemplateDetailQuery): Record<string, unknown> {
+  return omitUndefined({
+    sdk_version: CAPCUT_TEMPLATE_SDK_VERSION,
+    enter_from: "feed",
+    app_version: CAPCUT_TEMPLATE_APP_VERSION,
+    lang: query.lang ?? query.lan ?? "en",
+    region: query.region ?? query.loc ?? "us",
+    template_id: query.templateId,
+    need_draft: query.needDraft ?? false,
+  })
 }
 
 export function capCutTemplateStaticCatalogUrls(): { ratioCatalogUrl: string; sceneCatalogUrl: string } {
@@ -241,6 +401,118 @@ export async function fetchCapCutTemplateCategories(input: {
   }
 }
 
+export async function fetchCapCutTemplateCollections(input: {
+  client?: JimengClient
+  session?: Pick<JimengSessionBundle, "userAgent">
+  query?: CapCutTemplateCollectionsQuery
+} = {}): Promise<CapCutTemplateCollectionsResult> {
+  const client = input.client ?? new JimengClient()
+  const endpoint = CAPCUT_TEMPLATE_COLLECTIONS_ENDPOINT
+  const request = buildCapCutTemplateCollectionsRequest(input.query)
+  const response = await client.requestText(`${CAPCUT_TEMPLATE_HOST}${endpoint}`, {
+    method: "POST",
+    headers: buildCapCutSignedHeaders({
+      path: endpoint,
+      lan: input.query?.lan,
+      loc: input.query?.loc,
+      userAgent: input.session?.userAgent,
+    }),
+    body: JSON.stringify(request),
+  })
+  const body = safeJson(response.text)
+  assertCapCutSuccess(body, "CapCut template collections")
+  const parsed = parseCapCutTemplateCollectionsBody(body)
+
+  return {
+    endpoint,
+    host: CAPCUT_TEMPLATE_HOST,
+    httpStatus: response.status,
+    ret: retValue(body),
+    errmsg: errmsgValue(body),
+    logId: stringValue(asRecord(body)?.log_id),
+    responseTextSha256: sha256(response.text),
+    request,
+    collections: parsed.collections,
+    templateSource: parsed.templateSource,
+    body,
+  }
+}
+
+export async function fetchCapCutCollectionTemplates(input: {
+  client?: JimengClient
+  session?: Pick<JimengSessionBundle, "userAgent">
+  query: CapCutCollectionTemplatesQuery
+}): Promise<CapCutCollectionTemplatesResult> {
+  const client = input.client ?? new JimengClient()
+  const endpoint = CAPCUT_TEMPLATE_COLLECTION_TEMPLATES_ENDPOINT
+  const request = buildCapCutCollectionTemplatesRequest(input.query)
+  const response = await client.requestText(`${CAPCUT_TEMPLATE_HOST}${endpoint}`, {
+    method: "POST",
+    headers: buildCapCutSignedHeaders({
+      path: endpoint,
+      lan: input.query.lan,
+      loc: input.query.loc,
+      userAgent: input.session?.userAgent,
+    }),
+    body: JSON.stringify(request),
+  })
+  const body = safeJson(response.text)
+  assertCapCutSuccess(body, "CapCut collection templates")
+  const parsed = parseCapCutCollectionTemplatesBody(body)
+
+  return {
+    endpoint,
+    host: CAPCUT_TEMPLATE_HOST,
+    httpStatus: response.status,
+    ret: retValue(body),
+    errmsg: errmsgValue(body),
+    logId: stringValue(asRecord(body)?.log_id),
+    responseTextSha256: sha256(response.text),
+    request,
+    collectionId: input.query.collectionId,
+    cursor: parsed.cursor,
+    hasMore: parsed.hasMore,
+    templateSource: parsed.templateSource,
+    templates: parsed.templates,
+    body,
+  }
+}
+
+export async function fetchCapCutTemplateDetail(input: {
+  client?: JimengClient
+  session?: Pick<JimengSessionBundle, "userAgent">
+  query: CapCutTemplateDetailQuery
+}): Promise<CapCutTemplateDetailResult> {
+  const client = input.client ?? new JimengClient()
+  const endpoint = CAPCUT_TEMPLATE_DETAIL_ENDPOINT
+  const request = buildCapCutTemplateDetailRequest(input.query)
+  const response = await client.requestText(`${CAPCUT_TEMPLATE_HOST}${endpoint}`, {
+    method: "POST",
+    headers: buildCapCutSignedHeaders({
+      path: endpoint,
+      lan: input.query.lan,
+      loc: input.query.loc,
+      userAgent: input.session?.userAgent,
+    }),
+    body: JSON.stringify(request),
+  })
+  const body = safeJson(response.text)
+  assertCapCutSuccess(body, "CapCut template detail")
+
+  return {
+    endpoint,
+    host: CAPCUT_TEMPLATE_HOST,
+    httpStatus: response.status,
+    ret: retValue(body),
+    errmsg: errmsgValue(body),
+    logId: stringValue(asRecord(body)?.log_id),
+    responseTextSha256: sha256(response.text),
+    request,
+    detail: parseCapCutTemplateDetailBody(body),
+    body,
+  }
+}
+
 export async function fetchCapCutTemplateStaticCatalog(input: {
   client?: JimengClient
   userAgent?: string | null
@@ -325,6 +597,66 @@ export function parseCapCutTemplateCategoriesBody(body: unknown): CapCutTemplate
     .filter((category): category is CapCutTemplateCategory => !!category)
 }
 
+export function parseCapCutTemplateCollectionsBody(body: unknown): { collections: CapCutTemplateCollection[]; templateSource: string | null } {
+  const envelope = parseCapCutEnvelopeBody(body, "CapCut template collections")
+  const data = CapCutCollectionsDataSchema.parse(envelope.data)
+  return {
+    templateSource: stringValue(data.template_source),
+    collections: data.collections.map((collection) => ({
+      id: collection.id,
+      displayName: stringValue(collection.display_name),
+      rootCategory: stringValue(collection.root_category),
+      starlingKey: stringValue(collection.starling_key),
+      resourceLen: numberValue(collection.resource_len),
+      categoryType: numberValue(collection.category_type),
+      direction: numberValue(collection.direction),
+      isEcomCategory: booleanValue(collection.is_ecom_category),
+      capsuleCount: asArray(collection.capsules).length,
+    })),
+  }
+}
+
+export function parseCapCutCollectionTemplatesBody(body: unknown): {
+  cursor: number | null
+  hasMore: boolean | null
+  templateSource: string | null
+  templates: CapCutCollectionTemplateItem[]
+} {
+  const envelope = parseCapCutEnvelopeBody(body, "CapCut collection templates")
+  const data = CapCutCollectionTemplatesDataSchema.parse(envelope.data)
+  return {
+    cursor: numberValue(data.new_cursor),
+    hasMore: booleanValue(data.has_more),
+    templateSource: stringValue(data.template_source),
+    templates: data.item_list.map(parseCapCutCollectionTemplateItem),
+  }
+}
+
+export function parseCapCutTemplateDetailBody(body: unknown): CapCutTemplateDetail {
+  const envelope = parseCapCutEnvelopeBody(body, "CapCut template detail")
+  const data = CapCutTemplateDetailDataSchema.parse(envelope.data)
+  const mainVersion = stringOrNumber(data.main_version)
+  const featureVersion = stringOrNumber(data.feature_version)
+  const reviseVersion = stringOrNumber(data.revise_version)
+  const materials = asRecord(data.materials)
+  return {
+    templateId: String(data.template_id),
+    templateUrlPresent: !!stringValue(data.template_url),
+    templateDataPresent: !!stringValue(data.template_data),
+    draftDataPresent: !!stringValue(data.draft_data),
+    templateVersion: [mainVersion, featureVersion, reviseVersion].every((value) => value !== null)
+      ? `${mainVersion}.${featureVersion}.${reviseVersion}`
+      : null,
+    materialCounts: materials ? countMaterialCollections(materials) : {},
+    creatorSubmitType: numberValue(asRecord(data.creator_info)?.submit_type),
+    extraKeys: Object.keys(asRecord(data.extra_v2) ?? {}).sort(),
+    multiLangKeys: Object.keys(asRecord(data.multi_langs) ?? {}).sort(),
+    textThemeCoverCount: asArray(data.text_theme_covers).length,
+    textThemeEffectCount: asArray(data.text_theme_effects).length,
+    themeDataPresent: !!stringValue(data.theme_data),
+  }
+}
+
 export function parseCapCutTemplateRatioCatalogBody(body: unknown): CapCutTemplateRatio[] {
   return asArray(body)
     .map((value) => {
@@ -384,6 +716,92 @@ export function summarizeCapCutTemplateCategories(result: Pick<CapCutTemplateCat
       starling_key: category.starlingKey,
       display_name: category.displayName,
     })),
+  }
+}
+
+export function summarizeCapCutTemplateCollections(result: Pick<
+  CapCutTemplateCollectionsResult,
+  "collections" | "logId" | "responseTextSha256" | "request" | "templateSource"
+>): Record<string, unknown> {
+  return {
+    collection_count: result.collections.length,
+    log_id: result.logId,
+    response_text_sha256: result.responseTextSha256,
+    request: result.request,
+    template_source: result.templateSource,
+    collections: result.collections.map((collection) => ({
+      id: collection.id,
+      display_name: collection.displayName,
+      root_category: collection.rootCategory,
+      starling_key: collection.starlingKey,
+      resource_len: collection.resourceLen,
+      category_type: collection.categoryType,
+      direction: collection.direction,
+      is_ecom_category: collection.isEcomCategory,
+      capsule_count: collection.capsuleCount,
+    })),
+  }
+}
+
+export function summarizeCapCutCollectionTemplates(result: Pick<
+  CapCutCollectionTemplatesResult,
+  "collectionId" | "cursor" | "hasMore" | "templateSource" | "templates" | "logId" | "responseTextSha256" | "request"
+>): Record<string, unknown> {
+  return {
+    collection_id: result.collectionId,
+    template_count: result.templates.length,
+    cursor: result.cursor,
+    has_more: result.hasMore,
+    template_source: result.templateSource,
+    log_id: result.logId,
+    response_text_sha256: result.responseTextSha256,
+    request: result.request,
+    templates: result.templates.map((template) => ({
+      id: template.id,
+      numeric_id: template.numericId,
+      title: template.title,
+      short_title: template.shortTitle,
+      item_type: template.itemType,
+      status: template.status,
+      cover_url_present: template.coverUrlPresent,
+      cover_size: template.coverSize,
+      optimized_cover_url_keys: template.optimizedCoverUrlKeys,
+      category_ids: template.categoryIds,
+      author: template.author,
+      feature_count: template.featureCount,
+      template_version: template.templateVersion,
+      tags: template.tags,
+      scene_ids: template.sceneIds,
+      canvas_size: template.canvasSize,
+      is_multi_lang: template.isMultiLang,
+      text_theme_cover_count: template.textThemeCoverCount,
+      text_theme_effect_count: template.textThemeEffectCount,
+    })),
+  }
+}
+
+export function summarizeCapCutTemplateDetail(result: Pick<
+  CapCutTemplateDetailResult,
+  "detail" | "logId" | "responseTextSha256" | "request"
+>): Record<string, unknown> {
+  return {
+    log_id: result.logId,
+    response_text_sha256: result.responseTextSha256,
+    request: result.request,
+    detail: {
+      template_id: result.detail.templateId,
+      template_url_present: result.detail.templateUrlPresent,
+      template_data_present: result.detail.templateDataPresent,
+      draft_data_present: result.detail.draftDataPresent,
+      template_version: result.detail.templateVersion,
+      material_counts: result.detail.materialCounts,
+      creator_submit_type: result.detail.creatorSubmitType,
+      extra_keys: result.detail.extraKeys,
+      multi_lang_keys: result.detail.multiLangKeys,
+      text_theme_cover_count: result.detail.textThemeCoverCount,
+      text_theme_effect_count: result.detail.textThemeEffectCount,
+      theme_data_present: result.detail.themeDataPresent,
+    },
   }
 }
 
@@ -478,6 +896,42 @@ function safeJson(value: string): unknown {
 
 const URL_LIKE_RE = /https?:\/\/|byteimg|douyinpic|vlabvod|x-signature|x-expires|expire_time/i
 
+const CapCutEnvelopeSchema = z.object({
+  ret: z.union([z.string(), z.number()]).nullable().optional(),
+  errmsg: z.string().nullable().optional(),
+  log_id: z.string().nullable().optional(),
+  data: z.unknown().optional(),
+}).passthrough()
+
+const CapCutCollectionsDataSchema = z.object({
+  collections: z.array(z.object({
+    id: z.number(),
+    display_name: z.string().nullable().optional(),
+    root_category: z.string().nullable().optional(),
+    direction: z.number().nullable().optional(),
+    starling_key: z.string().nullable().optional(),
+    resource_len: z.number().nullable().optional(),
+    category_type: z.number().nullable().optional(),
+    is_ecom_category: z.boolean().nullable().optional(),
+    capsules: z.array(z.unknown()).nullable().optional(),
+  }).passthrough()),
+  template_source: z.string().nullable().optional(),
+}).passthrough()
+
+const CapCutCollectionTemplatesDataSchema = z.object({
+  item_list: z.array(z.object({
+    id: z.union([z.string(), z.number()]).optional(),
+    web_id: z.string().optional(),
+  }).passthrough()),
+  has_more: z.boolean().nullable().optional(),
+  new_cursor: z.number().nullable().optional(),
+  template_source: z.string().nullable().optional(),
+}).passthrough()
+
+const CapCutTemplateDetailDataSchema = z.object({
+  template_id: z.union([z.string(), z.number()]),
+}).passthrough()
+
 const CapCutProbeEndpointSchema = z.string()
   .min(1)
   .transform((value) => {
@@ -503,6 +957,21 @@ function normalizeCapCutProbeEndpoint(endpoint: string): string {
       message: "CapCut endpoint probe accepts only signed read-oriented /lv/v1/cc_web/* endpoints.",
       retryable: false,
       details: { endpoint, message: parsedError.message },
+    })
+  }
+}
+
+function parseCapCutEnvelopeBody(body: unknown, operation: string): z.infer<typeof CapCutEnvelopeSchema> {
+  try {
+    return CapCutEnvelopeSchema.parse(body)
+  } catch (error) {
+    const parsedError = error instanceof Error ? error : new Error(String(error))
+    throw jimengError({
+      category: "validation",
+      code: "CAPCUT_RESPONSE_CONTRACT_CHANGED",
+      message: `${operation} response no longer matches the expected envelope.`,
+      retryable: false,
+      details: { operation, message: parsedError.message },
     })
   }
 }
@@ -552,6 +1021,94 @@ function asJsonRecord(value: JsonValue | undefined): JsonObject | null {
 
 function asJsonArray(value: JsonValue | undefined): JsonValue[] | null {
   return Array.isArray(value) ? value : null
+}
+
+function omitUndefined(record: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(record).filter(([, value]) => value !== undefined))
+}
+
+function parseCapCutCollectionTemplateItem(item: z.infer<typeof CapCutCollectionTemplatesDataSchema>["item_list"][number]): CapCutCollectionTemplateItem {
+  const record = asRecord(item) ?? {}
+  const numericId = stringOrNumber(record.id)
+  const id = stringValue(record.web_id) ?? numericId
+  if (!id) {
+    throw jimengError({
+      category: "validation",
+      code: "CAPCUT_TEMPLATE_ITEM_ID_MISSING",
+      message: "CapCut collection template row did not include web_id or id.",
+      retryable: false,
+    })
+  }
+  const extra = asRecord(record.extra_v2)
+  const hypicExtra = asRecord(record.hypic_extra)
+  const author = asRecord(record.author)
+  const canvasWidth = numberFromStringOrNumber(extra?.canvas_width)
+  const canvasHeight = numberFromStringOrNumber(extra?.canvas_height)
+  return {
+    id,
+    numericId,
+    title: stringValue(record.title),
+    shortTitle: stringValue(record.short_title),
+    itemType: numberValue(record.item_type),
+    status: numberValue(record.status),
+    coverUrlPresent: !!stringValue(record.cover_url),
+    coverSize: readSize(record.cover_width, record.cover_height),
+    optimizedCoverUrlKeys: Object.keys(asRecord(record.optimized_cover_url) ?? {}).sort(),
+    categoryIds: asArray(record.category_id_list).map(numberValue).filter((value): value is number => value !== null),
+    author: {
+      uid: stringValue(author?.web_uid) ?? stringOrNumber(author?.uid),
+      name: stringValue(author?.name),
+      role: numberValue(author?.role),
+    },
+    featureCount: asArray(hypicExtra?.features).length,
+    templateVersion: stringValue(hypicExtra?.template_version),
+    tags: asArray(record.template_tags_v2).map(stringValue).filter((value): value is string => value !== null),
+    sceneIds: parseNumberJsonArrayField(extra?.scene_ids),
+    canvasSize: canvasWidth === null || canvasHeight === null ? null : { width: canvasWidth, height: canvasHeight },
+    isMultiLang: booleanValue(record.is_multi_lang),
+    textThemeCoverCount: asArray(record.text_theme_covers).length,
+    textThemeEffectCount: asArray(record.text_theme_effects).length,
+  }
+}
+
+function countMaterialCollections(materials: Record<string, unknown>): Record<string, number> {
+  const counts: Record<string, number> = {}
+  for (const [key, value] of Object.entries(materials)) {
+    if (Array.isArray(value)) counts[key] = value.length
+  }
+  return counts
+}
+
+function parseNumberJsonArrayField(value: unknown): number[] {
+  if (Array.isArray(value)) return value.map(numberValue).filter((item): item is number => item !== null)
+  if (typeof value !== "string" || value.length === 0) return []
+  try {
+    const parsed = JSON.parse(value)
+    return Array.isArray(parsed) ? parsed.map(numberValue).filter((item): item is number => item !== null) : []
+  } catch {
+    return []
+  }
+}
+
+function readSize(widthValue: unknown, heightValue: unknown): { width: number; height: number } | null {
+  const width = numberFromStringOrNumber(widthValue)
+  const height = numberFromStringOrNumber(heightValue)
+  return width === null || height === null ? null : { width, height }
+}
+
+function stringOrNumber(value: unknown): string | null {
+  if (typeof value === "string" && value.length > 0) return value
+  if (typeof value === "number" && Number.isFinite(value)) return String(value)
+  return null
+}
+
+function numberFromStringOrNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value
+  if (typeof value === "string" && value.length > 0) {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+  return null
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

@@ -1167,11 +1167,14 @@ raw=data/jimeng-lab/proof-20260610-capcut-categories/raw/capcut-categories-20260
 summary=data/jimeng-lab/proof-20260610-capcut-categories/normalized/capcut-categories-20260609230631-summary.json
 ```
 
-Related bundle endpoints are discovered but not claimed as implemented yet:
+Related collection/template endpoints now have a split status:
 
 - `/lv/v1/cc_web/replicate/search_templates`: frontend method `searchTemplates(e)` maps `sdkVersion`, `searchId`, `enterFrom`, `categoryIds`, `sceneId`, `featureKey`, `colors`, and `graphNum` to `sdk_version`, `search_id`, `enter_from`, `category_ids`, `scene_id`, `strategy_extra`, `custom_colors`, and `graph_num`, while spreading remaining fields into the request body. Guessed keyword/query/search-word payloads returned `ret=1000 param error`; needs real UI capture for the exact remaining fields.
-- `/lv/v1/cc_web/plane/get_collection_templates`: frontend method `getTemplateAccordCategory(e)` injects `{ sdk_version, enter_from: "feed", count: 20, lang }` and then spreads `e`. Category-id guesses returned `ret=1000 param error`; needs real UI capture for the exact category/cursor field names.
+- `/lv/v1/cc_web/plane/get_collections`: implemented as `capcut-collections`; direct `{sdk_version:"16.1.0"}` returned the durable collection ids.
+- `/lv/v1/cc_web/plane/get_collection_templates`: implemented as `capcut-collection-templates`; the stable body field is `id:<collectionId>`, not `category_id` or `collection_id`.
+- `/lv/v1/cc_web/plane/get_template_detail`: implemented as `capcut-template-detail`; the stable id is the string `web_id` from template rows.
 - `/lv/v1/cc_web/plane/batch_get_collection_templates`: frontend method `getBatchTemplatesByCategory(e)` passes `e` through directly and expects an array response with per-category `item_list`.
+- `/lv/v1/cc_web/plane/get_collection_presets` and `/lv/v1/cc_web/plane/preset_template_detail`: discovered; guessed no-spend bodies returned `ret=1015` or need a real preset id.
 - `/lv/v1/cc_web/plane/fuzzy_search_templates`: frontend method `fuzzySearchTemplateByTitle(e)` passes `e` through directly and expects `data.item_list`. Direct no-spend probes returned `ret=0` but empty lists for `makeup`, `beauty`, `korean beauty`, `skincare`, `美妆`, `护肤`, and `韩国美妆`, so it is not exposed as useful yet.
 
 Static method proof:
@@ -1182,6 +1185,51 @@ summary=data/jimeng-lab/proof-20260610-static-locate-capcut-methods/normalized/s
 terms=searchTemplates,getTemplateAccordCategory,getBatchTemplatesByCategory,fuzzySearchTemplateByTitle,getTemplateHotWords
 occurrences=10
 normalized_static_locate_capcut_method_proof_has_no_signed_urls_or_credentials=true
+```
+
+## Confirmed CapCut Template Collection/Row/Detail Contracts
+
+`jimeng-browser-proxy capcut-collections`, `capcut-collection-templates`, and `capcut-template-detail` promote the no-spend collection browsing path into stable CLI commands. They use the same signed `edit-api-sg.capcut.com` request path as the category command and do not require a Jimeng browser session in the current proof.
+
+Commands:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts capcut-collections \
+  --outDir data/jimeng-lab/proof-20260610-capcut-collections
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts capcut-collection-templates \
+  --collection-id 10034 \
+  --limit 5 \
+  --outDir data/jimeng-lab/proof-20260610-capcut-collection-templates
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts capcut-template-detail \
+  --template-id 7369116096600771846 \
+  --outDir data/jimeng-lab/proof-20260610-capcut-template-detail
+```
+
+Confirmed requests:
+
+```txt
+POST /lv/v1/cc_web/plane/get_collections
+body={"sdk_version":"16.1.0"}
+
+POST /lv/v1/cc_web/plane/get_collection_templates
+body={"sdk_version":"16.1.0","enter_from":"feed","count":5,"lang":"en","id":10034}
+
+POST /lv/v1/cc_web/plane/get_template_detail
+body={"sdk_version":"16.1.0","enter_from":"feed","app_version":"5.8.0","lang":"en","region":"us","template_id":"7369116096600771846","need_draft":false}
+```
+
+Proof facts:
+
+```txt
+collections: ret=0 collection_count=35
+collection_templates: ret=0 collection_id=10034 template_count=5 has_more=true new_cursor=5
+first_template_web_id=7369116096600771846
+first_template_title=FACEBOOK ADS - MARKETING POSTER - BEAUTY LIPSTIC - NEW COLLECTION - FB ADS POST
+template_detail: ret=0 template_id=7369116096600771846 template_url_present=true template_version=1.4.3
+template_detail_material_counts=effects:8,local_images:4,file_infos:1
+normalized_outputs_have_no_signed_urls_or_credentials=true
 ```
 
 `jimeng-browser-proxy capcut-probe` is now the signed no-spend replay tool for these remaining CapCut endpoints. It does not load a Jimeng session or foreground a browser; it is guarded to `/lv/v1/cc_web/*`, writes raw responses only under ignored `data/**`, and emits normalized request/response shape summaries without URL values.
@@ -1282,7 +1330,7 @@ The 2026-06-09 JS bundle sweep found these useful endpoint groups. Treat rows wi
 | Subject/persona lifecycle | `/mweb/v1/dreamina_subject/get`, `/mweb/v1/dreamina_subject/create`, `/mweb/v1/dreamina_subject/update`, `/mweb/v1/dreamina_subject/delete`, `/mweb/v1/dreamina_subject/generate_voice`; list/create/update/delete are implemented, while generate_voice is dry-run-only until explicit spend approval or captured UI submit |
 | Infinite canvas | `/mweb/v1/infinite_canvas/create_project`, `/mweb/v1/infinite_canvas/conversation`, `/mweb/v1/infinite_canvas/edit`, `/mweb/v1/infinite_canvas/resume`, `/mweb/v1/infinite_canvas/stop_stream`, `/mweb/v1/infinite_canvas/v1/fetch_snapshot`, `/mweb/v1/infinite_canvas/v1/submit_changeset`, `/mweb/v1/infinite_canvas/v1/fetch_changeset` |
 | Reference/image tools | `/mweb/v1/get_common_config`, `/mweb/v1/get_image_description`, `/mweb/v1/get_upload_token`, `/mweb/v1/face_recognize`, `/mweb/v1/blend_preview`, `/mweb/v1/pose_detect`, `/mweb/v1/saliency_seg`, `/mweb/v1/algo_proxy`; image model common config is implemented as `image-models`; image upload, description, face recognition, ControlNet pose/depth/canny preview, pose detect, and object/saliency segmentation are now implemented, while style/reference payload tools still need CLI coverage |
-| Template/research mining | `/mweb/v1/feed`, `/mweb/v1/feed_short_video`, `/lv/v1/cc_web/plane/get_categories`, public CapCut `bee_prod` metadata JSON, `/lv/v1/cc_web/replicate/search_templates`, `/lv/v1/cc_web/plane/*`; `/mweb/v1/get_explore` is implemented for direct Explore templates and short-video examples, `/mweb/v1/feed_short_video` is implemented as `overseas-short-videos`, CapCut category catalog is implemented as `capcut-categories`, and public CapCut ratio/scene metadata is implemented as `capcut-template-metadata`; CapCut template rows/search/collection endpoints remain capture targets |
+| Template/research mining | `/mweb/v1/feed`, `/mweb/v1/feed_short_video`, `/lv/v1/cc_web/plane/get_categories`, public CapCut `bee_prod` metadata JSON, `/lv/v1/cc_web/replicate/search_templates`, `/lv/v1/cc_web/plane/*`; `/mweb/v1/get_explore` is implemented for direct Explore templates and short-video examples, `/mweb/v1/feed_short_video` is implemented as `overseas-short-videos`, CapCut category catalog is implemented as `capcut-categories`, CapCut collection/row/detail browsing is implemented as `capcut-collections`, `capcut-collection-templates`, and `capcut-template-detail`, and public CapCut ratio/scene metadata is implemented as `capcut-template-metadata`; CapCut search, batch, and preset endpoints remain capture targets |
 | Assets/upload/editor | `/mweb/v1/get_asset_list`, `/lv/v1/asset/*`, `/lv/v1/editor/image/*`; Jimeng workbench/history listing is implemented as no-spend `assets`, while LV/CapCut asset/editor paths remain capture targets |
 | Audio/video utility | `/mweb/v1/mix_audio_video`, `/mweb/v1/mix_audio_videos`, `/lv/v2/intelligence/tts/curl_sync_everphoto` |
 
@@ -1481,7 +1529,7 @@ Latest proof found:
 total_resources=247
 included_non_implemented=120
 high_value_gaps=64
-top_gaps=subject generate_voice, voice clone submit/update/delete, aigc_draft generate capture/compare, CapCut template collection/search payloads
+top_gaps=subject generate_voice, voice clone submit/update/delete, aigc_draft generate capture/compare, CapCut template search/batch/preset payloads
 ```
 
 The inventory/worklist now distinguishes endpoints that were safely probed but did not return useful data:

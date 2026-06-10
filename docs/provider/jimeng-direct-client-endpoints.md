@@ -524,7 +524,7 @@ Frontend bundle scan found these UGC-useful groups, but they are not yet direct-
 - subject/persona CRUD and voice: `/mweb/v1/dreamina_subject/get`, `/mweb/v1/dreamina_subject/create`, `/mweb/v1/dreamina_subject/update`, `/mweb/v1/dreamina_subject/delete`, `/mweb/v1/dreamina_subject/generate_voice`; list/create/update/delete are implemented, while generate_voice is dry-run-only until explicit spend approval or UI capture
 - infinite canvas: `/mweb/v1/infinite_canvas/create_project`, `/mweb/v1/infinite_canvas/conversation`, `/mweb/v1/infinite_canvas/edit`, `/mweb/v1/infinite_canvas/resume`, `/mweb/v1/infinite_canvas/stop_stream`, `/mweb/v1/infinite_canvas/v1/fetch_snapshot`, `/mweb/v1/infinite_canvas/v1/submit_changeset`, `/mweb/v1/infinite_canvas/v1/fetch_changeset`
 - reference/image tools: `/mweb/v1/get_common_config`, `/mweb/v1/get_image_description`, `/mweb/v1/get_upload_token`, `/mweb/v1/face_recognize`, `/mweb/v1/blend_preview`, `/mweb/v1/pose_detect`, `/mweb/v1/saliency_seg`, `/mweb/v1/algo_proxy`; image model common config is implemented as `image-models`; upload, description, face recognition, ControlNet pose/depth/canny preview, pose detect, and object/saliency segmentation are now direct-client commands, while style/reference payload tools remain capture targets
-- template/research mining: `/mweb/v1/feed`, `/mweb/v1/get_explore`, `/mweb/v1/feed_short_video`, `/lv/v1/cc_web/plane/get_categories`, public CapCut `bee_prod` metadata JSON, `/lv/v1/cc_web/replicate/search_templates`, `/lv/v1/cc_web/plane/*`; direct `/mweb/v1/get_explore` support is implemented for both templates and short-video examples, `/mweb/v1/feed_short_video` is implemented as `overseas-short-videos`, CapCut category catalog is implemented as `capcut-categories`, and public CapCut ratio/scene metadata is implemented as `capcut-template-metadata`; CapCut template rows/search/collection payloads still need real UI capture
+- template/research mining: `/mweb/v1/feed`, `/mweb/v1/get_explore`, `/mweb/v1/feed_short_video`, `/lv/v1/cc_web/plane/get_categories`, public CapCut `bee_prod` metadata JSON, `/lv/v1/cc_web/replicate/search_templates`, `/lv/v1/cc_web/plane/*`; direct `/mweb/v1/get_explore` support is implemented for both templates and short-video examples, `/mweb/v1/feed_short_video` is implemented as `overseas-short-videos`, CapCut category catalog is implemented as `capcut-categories`, CapCut collection/row/detail browsing is implemented as `capcut-collections`, `capcut-collection-templates`, and `capcut-template-detail`, and public CapCut ratio/scene metadata is implemented as `capcut-template-metadata`; CapCut search, batch, and preset payloads still need real UI capture
 
 Next step is to drive those UI flows one at a time with background CDP recording, then create dry-run patchers before live calls.
 
@@ -922,7 +922,63 @@ raw=data/jimeng-lab/proof-20260610-capcut-categories/raw/capcut-categories-20260
 summary=data/jimeng-lab/proof-20260610-capcut-categories/normalized/capcut-categories-20260609230631-summary.json
 ```
 
-### 10.4) CapCut public template ratio and scene metadata
+### 10.4) CapCut template collections, rows, and detail
+- `POST https://edit-api-sg.capcut.com/lv/v1/cc_web/plane/get_collections`
+- `POST https://edit-api-sg.capcut.com/lv/v1/cc_web/plane/get_collection_templates`
+- `POST https://edit-api-sg.capcut.com/lv/v1/cc_web/plane/get_template_detail`
+- Status:
+  - live-proved without generation spend
+  - implemented as `jimeng-browser-proxy capcut-collections`, `capcut-collection-templates`, and `capcut-template-detail`
+  - uses the same recovered CapCut frontend request signer as `capcut-categories`
+  - no Jimeng or CapCut cookies were required in the current proof
+- Request controls:
+  - `--collection-id <n>` maps to the stable row-list body field `id`
+  - `--template-id <id>` must be the string template `web_id`, not the rounded numeric `id`
+  - `--limit`, `--cursor`, `--capcut-lan`, and `--capcut-loc` cover row pagination and signed request locale headers
+  - `--needDraft` is supported for detail requests but the current safe proof used `need_draft:false`
+
+Frontend bundle evidence:
+
+```txt
+GetCategories="/lv/v1/cc_web/plane/get_collections"
+GetTemplatesAccordCategory="/lv/v1/cc_web/plane/get_collection_templates"
+GetTemplateDetail="/lv/v1/cc_web/plane/get_template_detail"
+getTemplateAccordCategory(e) injects {sdk_version, enter_from:"feed", count:20, lang}, then spreads e
+getTemplateDetail(e) sends template_id:e.templateId and need_draft:e.needDraft
+```
+
+CLI proof:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts capcut-collections \
+  --outDir data/jimeng-lab/proof-20260610-capcut-collections
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts capcut-collection-templates \
+  --collection-id 10034 \
+  --limit 5 \
+  --outDir data/jimeng-lab/proof-20260610-capcut-collection-templates
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts capcut-template-detail \
+  --template-id 7369116096600771846 \
+  --outDir data/jimeng-lab/proof-20260610-capcut-template-detail
+```
+
+Observed safe summary:
+
+```txt
+collections: http_status=200 ret=0 collection_count=35
+collection_templates: http_status=200 ret=0 collection_id=10034 template_count=5 has_more=true cursor=5
+first_template_web_id=7369116096600771846
+first_template_canvas=1200x628
+first_template_tags=beauty & personal care,Promotion1/New discount,Social media/Facebook,simple
+template_detail: http_status=200 ret=0 template_id=7369116096600771846 template_url_present=true template_version=1.4.3
+template_detail_material_counts=effects:8,local_images:4,file_infos:1
+raw=data/jimeng-lab/proof-20260610-capcut-{collections,collection-templates,template-detail}/raw/
+summary=data/jimeng-lab/proof-20260610-capcut-{collections,collection-templates,template-detail}/normalized/
+normalized_outputs_have_no_signed_urls_or_credentials=true
+```
+
+### 10.5) CapCut public template ratio and scene metadata
 - `GET https://lf16-beecdn.ibytedtos.com/obj/ies-fe-bee-sg/bee_prod/biz_49/bee_prod_49_bee_publish_709.json`
 - `GET https://lf16-beecdn.ibytedtos.com/obj/ies-fe-bee-sg/bee_prod/biz_149/bee_prod_149_bee_publish_835.json`
 - Status:
@@ -950,19 +1006,21 @@ raw=data/jimeng-lab/proof-20260610-capcut-template-metadata/raw/capcut-template-
 summary=data/jimeng-lab/proof-20260610-capcut-template-metadata/normalized/capcut-template-metadata-20260609231824-summary.json
 ```
 
-Remaining CapCut template endpoints are discovered and method-level request builders are recovered, but not implemented as stable row/search commands:
+Remaining CapCut template endpoints are discovered and method-level request builders are recovered, but not implemented as stable search/preset/batch commands:
 
 - `/lv/v1/cc_web/replicate/search_templates`
   - frontend method: `searchTemplates(e)`
   - maps `sdkVersion`, `searchId`, `enterFrom`, `categoryIds`, `sceneId`, `featureKey`, `colors`, and `graphNum` into snake_case API fields, then spreads remaining `e` fields into the body
   - guessed keyword/query/search-word payloads returned `ret=1000 param error`; capture the actual UI call before exposing it
-- `/lv/v1/cc_web/plane/get_collection_templates`
-  - frontend method: `getTemplateAccordCategory(e)`
-  - injects `{ sdk_version, enter_from: "feed", count: 20, lang }`, then spreads `e`
-  - guessed category-id payloads returned `ret=1000 param error`; capture the actual UI call before exposing it
 - `/lv/v1/cc_web/plane/batch_get_collection_templates`
   - frontend method: `getBatchTemplatesByCategory(e)`
   - passes `e` through directly and expects an array response with per-category `item_list`
+- `/lv/v1/cc_web/plane/get_collection_presets`
+  - frontend method: `getPresets(e)`
+  - guessed collection/category bodies returned `ret=1015`; capture a real preset UI call before exposing it
+- `/lv/v1/cc_web/plane/preset_template_detail`
+  - frontend method: `presetTemplateDetail(e)`
+  - needs a real preset id from a successful presets response or UI call
 - `/lv/v1/cc_web/plane/fuzzy_search_templates`
   - frontend method: `fuzzySearchTemplateByTitle(e)`
   - passes `e` through directly and expects `data.item_list`
@@ -978,7 +1036,7 @@ occurrences=10
 normalized_static_locate_capcut_method_proof_has_no_signed_urls_or_credentials=true
 ```
 
-### 10.5) CapCut signed endpoint probe
+### 10.6) CapCut signed endpoint probe
 - `jimeng-browser-proxy capcut-probe`
 - Status:
   - implemented as a session-free no-spend probe tool for the remaining CapCut row/search endpoints
@@ -1028,7 +1086,7 @@ Current proof facts:
 ```txt
 hot_words: body -> ret=0 errmsg=success response_sha=b442e8144ac7..., but data only contained region metadata
 fuzzy_search_templates: keyword-en/keyword-zh/title-en -> ret=0 errmsg=success, but item_list length 0
-get_collection_templates: category_id/collection_id/category_ids -> ret=1000 errmsg="param error"
+get_collection_templates: old category_id/collection_id/category_ids guesses -> ret=1000 errmsg="param error"; superseded by confirmed body field id:<collectionId>
 search_templates: keyword/search_word/query -> ret=1000 errmsg="param error"
 normalized_capcut_probe_proofs_have_no_signed_urls_or_credentials=true
 ```
@@ -1856,6 +1914,9 @@ Current support matrix:
 | `templates` | implemented in `jimeng-browser-proxy` | No-spend direct `/mweb/v1/get_explore` template mining with prompt/model/usage normalization. |
 | `overseas-short-videos` | implemented in `jimeng-browser-proxy` | No-spend direct `/mweb/v1/feed_short_video` short-video/reference mining with ranking and video metadata normalization. |
 | `capcut-categories` | implemented in `jimeng-browser-proxy` | No-spend signed CapCut `/lv/v1/cc_web/plane/get_categories` commercial template category catalog. |
+| `capcut-collections` | implemented in `jimeng-browser-proxy` | No-spend signed CapCut `/lv/v1/cc_web/plane/get_collections` collection id catalog. |
+| `capcut-collection-templates` | implemented in `jimeng-browser-proxy` | No-spend signed CapCut `/lv/v1/cc_web/plane/get_collection_templates` row listing by collection `id`. |
+| `capcut-template-detail` | implemented in `jimeng-browser-proxy` | No-spend signed CapCut `/lv/v1/cc_web/plane/get_template_detail` lookup by string template `web_id`. |
 | `capcut-template-metadata` | implemented in `jimeng-browser-proxy` | No-session public CapCut `bee_prod` ratio and scene metadata catalogs. |
 | `subjects` | implemented in `jimeng-browser-proxy` | No-spend direct `/mweb/v1/dreamina_subject/get`; empty, non-empty, and subject-id filtered list shapes are live-proved. |
 | `subject-create` | implemented in `jimeng-browser-proxy` | No-spend direct subject/persona create from a local ImageX-uploaded or existing provider image. |
@@ -1958,7 +2019,7 @@ bun packages/jimeng-client/src/browser-proxy-cli.ts discovery-worklist \
   --outDir data/jimeng-lab/proof-20260610-discovery-worklist-subject-create-v3
 ```
 
-Latest proof produced 18 prioritized work items, skipped 2 already-covered capture endpoints by default, and exported one raw per-endpoint replay variant file for `/mweb/v1/get_unread_count`. The top useful gaps were subject/persona `generate_voice`, custom voice clone mutations, CapCut template row/search/collection payload capture, remaining `/mweb/v1/aigc_draft/generate` modes, and older agent/feed/workspace surfaces. Normalized proof files contain no signed URL values or raw probe bodies.
+Latest proof produced 18 prioritized work items, skipped 2 already-covered capture endpoints by default, and exported one raw per-endpoint replay variant file for `/mweb/v1/get_unread_count`. The historical top useful gaps were subject/persona `generate_voice`, custom voice clone mutations, CapCut template row/search/collection payload capture, remaining `/mweb/v1/aigc_draft/generate` modes, and older agent/feed/workspace surfaces; the CapCut collection/row/detail part has since been promoted, leaving search/batch/preset capture as the CapCut gap. Normalized proof files contain no signed URL values or raw probe bodies.
 
 Static inventory example:
 
@@ -1969,7 +2030,7 @@ bun packages/jimeng-client/src/browser-proxy-cli.ts static-inventory \
   --outDir data/jimeng-lab/proof-20260610-static-inventory
 ```
 
-Latest proof found 247 static frontend/API resources, included the top 120 non-implemented resources, and counted 64 high-value gaps. The top ranked gaps were `/mweb/v1/dreamina_subject/generate_voice`, voice clone submit/update/delete, `/mweb/v1/aigc_draft/generate`, and the CapCut template collection/search endpoints. Normalized proof files contain no credential markers.
+Latest proof found 247 static frontend/API resources, included 200 non-implemented resources, and counted 61 high-value gaps after the CapCut collection/row/detail endpoints were promoted. The top ranked gaps were `/mweb/v1/dreamina_subject/generate_voice`, voice clone submit/update/delete, `/mweb/v1/aigc_draft/generate`, and the remaining CapCut template search/batch/preset endpoints. Normalized proof files contain no credential markers.
 
 Static locator example:
 
@@ -2016,7 +2077,7 @@ The recommended fast loop is:
 1. Capture real frontend VOD and image/avatar lip-sync submits and compare them against the dry-run provider-input plans before enabling live generation.
 2. Use the VOD upload path to unlock reference-video and multimodal/all-around reference flows.
 3. Capture the frontend's explicit end-frame/multi-frame mode and live-prove `frames2video` only after confirming the mode-specific payload contract.
-4. Expand template/research mining beyond direct Explore/feed_short_video with CapCut template search and plane endpoints.
+4. Expand template/research mining beyond direct Explore/feed_short_video with CapCut template search, batch, and preset endpoints.
 5. Add strict `1019` shark breaker/cooldown budgets to the consolidated CLI path.
 6. Capture/approve subject/persona `generate_voice` live submit and custom voice clone submit/mutation flows.
 7. Add multipart/chunked VOD upload only when large reference videos require it.

@@ -51,7 +51,7 @@ As of 2026-06-10, the committed Jimeng CLI baseline is:
 - `302e088 Document CapCut template method contracts`
 - `8c3dd42 Add signed CapCut endpoint probe`
 - `4d117a2 Recheck Jimeng live generation`
-- current checkpoint: `Add Jimeng image model config CLI`
+- current checkpoint: `Add CapCut template collection CLI`
 
 If the thread goal object lags behind this file after a pause, resume from this document and the latest Git checkpoint. The active working rule is: background-only reversal, direct/API-first implementation, small proven CLI slices, tests and proof artifacts before each commit, and no async daemon until the API surface is settled.
 
@@ -196,7 +196,24 @@ CapCut commercial template category mining is now live-proved without generation
 - normalized output records durable category ids, starling keys, display names, log id, and response hash without signed media URLs
 - proof bundle: `data/jimeng-lab/proof-20260610-capcut-categories/`
 - latest proof returned 8 commercial template categories: Black Friday, Clothing and shoes, Cosmetic dailyization, Food beverages, Jewelry, Furniture, Consumer electronics, and pets.
-- related CapCut template search/collection endpoints are discovered but not implemented: guessed payloads for `/lv/v1/cc_web/replicate/search_templates`, `/lv/v1/cc_web/plane/get_collection_templates`, and `/lv/v1/cc_web/plane/batch_get_collection_templates` returned `ret=1000 param error`; `/lv/v1/cc_web/plane/fuzzy_search_templates` returned success but empty lists for tested English title/query fields. Capture real UI payloads before exposing those as CLI commands.
+
+CapCut template collection, row, and detail browsing is now live-proved without generation spend:
+
+- `jimeng-browser-proxy capcut-collections`
+- `jimeng-browser-proxy capcut-collection-templates`
+- `jimeng-browser-proxy capcut-template-detail`
+- signed direct `https://edit-api-sg.capcut.com/lv/v1/cc_web/plane/get_collections`
+- signed direct `https://edit-api-sg.capcut.com/lv/v1/cc_web/plane/get_collection_templates`
+- signed direct `https://edit-api-sg.capcut.com/lv/v1/cc_web/plane/get_template_detail`
+- useful flags: `--collection-id`, `--template-id`, `--limit`, `--cursor`, `--needDraft`, `--capcut-lan`, `--capcut-loc`
+- confirmed row body uses `id:<collectionId>`; guessed `category_id` and `collection_id` bodies were wrong
+- confirmed detail body uses the string template `web_id`; rounded numeric ids are not stable enough
+- proof bundles:
+  - `data/jimeng-lab/proof-20260610-capcut-collections/`
+  - `data/jimeng-lab/proof-20260610-capcut-collection-templates/`
+  - `data/jimeng-lab/proof-20260610-capcut-template-detail/`
+- latest proof returned 35 collections, 5 Beauty Care templates for `collection_id=10034`, and detail for `template_id=7369116096600771846` with `template_url_present=true`, version `1.4.3`, and material counts `effects:8`, `local_images:4`, `file_infos:1`
+- remaining related endpoints: `/lv/v1/cc_web/replicate/search_templates`, `/lv/v1/cc_web/plane/batch_get_collection_templates`, `/lv/v1/cc_web/plane/get_collection_presets`, `/lv/v1/cc_web/plane/preset_template_detail`, and `/lv/v1/cc_web/plane/fuzzy_search_templates`
 
 CapCut public template ratio/scene metadata is now live-proved without generation spend and without a browser session:
 
@@ -383,7 +400,7 @@ Discovery worklists are now available as the next token-efficient planning layer
 - decodes analysis/probe JSON with permissive runtime schemas and emits a prioritized worklist of next API slices: replay/promote, capture request builder, compare dry-run before live, approval/disposable fixture, already-covered, or low-value/risky documentation
 - writes normalized markdown/JSON summaries without raw probe bodies; raw per-endpoint replay variant files stay under ignored `data/**`
 - proof bundle: `data/jimeng-lab/proof-20260610-discovery-worklist-subject-create-v3/`
-- latest proof merged the subject-create capture analysis with static source hints into 18 work items, skipped 2 already-covered capture endpoints, exported 1 raw replay variant for `/mweb/v1/get_unread_count`, and highlighted the real next gaps: subject `generate_voice`, voice clone mutations, CapCut template row/search/collection payload capture, remaining `/mweb/v1/aigc_draft/generate` modes, and older agent/feed/workspace surfaces
+- latest proof merged the subject-create capture analysis with static source hints into 18 work items, skipped 2 already-covered capture endpoints, exported 1 raw replay variant for `/mweb/v1/get_unread_count`, and historically highlighted subject `generate_voice`, voice clone mutations, CapCut template row/search/collection payload capture, remaining `/mweb/v1/aigc_draft/generate` modes, and older agent/feed/workspace surfaces; the CapCut collection/row/detail part has since been promoted, leaving search/batch/preset capture as the CapCut gap
 
 Static request-builder localization is now available as the bridge between worklist and implementation:
 
@@ -407,8 +424,8 @@ Static API inventory is now available as the systematic coverage map:
 - scans API endpoint strings and public CapCut `bee_prod` catalog URLs, classifies read/generate/upload/mutate/payment/analytics risk, joins the existing known-command map, and ranks uncovered resources for the next slice
 - default output skips fully implemented endpoints so it stays focused on gaps; `--includeKnown` produces an audit inventory
 - proof bundle: `data/jimeng-lab/proof-20260610-static-inventory/`
-- latest proof scanned `data/jimeng-lab/js-sweep/files` plus `packages/jimeng-client/src`, found 247 resources, included the top 120 non-implemented items, and counted 64 high-value gaps
-- top gaps were subject/persona `generate_voice`, voice clone submit/update/delete, unified `/mweb/v1/aigc_draft/generate` capture/compare, and exact CapCut template search/collection payload capture
+- latest proof scanned `data/jimeng-lab/js-sweep/files` plus `packages/jimeng-client/src`, found 247 resources, included 200 non-implemented items, and counted 61 high-value gaps after the CapCut collection/row/detail commands were promoted
+- top gaps were subject/persona `generate_voice`, voice clone submit/update/delete, unified `/mweb/v1/aigc_draft/generate` capture/compare, and remaining CapCut template search/batch/preset payload capture
 - `/mweb/v1/get_history` is now marked `blocked` in the worklist/inventory: safe direct probes with plain, frontend-derived, and explicit `workspace_id=14199856180236` bodies all returned `ret=0` and empty `records_list`; use `assets`, `history-records`, and `history-queue` until a non-empty UI capture proves a useful list contract
 - normalized proof files contain no credential markers
 
@@ -425,7 +442,7 @@ Signed CapCut endpoint replay is now available for no-spend template payload dis
   - `data/jimeng-lab/proof-20260610-capcut-probe-fuzzy/`
   - `data/jimeng-lab/proof-20260610-capcut-probe-collection/`
   - `data/jimeng-lab/proof-20260610-capcut-probe-search/`
-- latest no-spend probes confirmed `/lv/v1/cc_web/replicate/get_search_words` returns `ret=0` but only region metadata for tested variants, and `/lv/v1/cc_web/plane/fuzzy_search_templates` returns `ret=0` with empty lists for guessed keyword/title bodies. Both remain unpromoted. Guessed `/lv/v1/cc_web/plane/get_collection_templates` and `/lv/v1/cc_web/replicate/search_templates` variants still return `ret=1000` / `param error`; capture exact UI payloads before promoting row/search commands
+- latest no-spend probes confirmed `/lv/v1/cc_web/replicate/get_search_words` returns `ret=0` but only region metadata for tested variants, and `/lv/v1/cc_web/plane/fuzzy_search_templates` returns `ret=0` with empty lists for guessed keyword/title bodies. Both remain unpromoted. `/lv/v1/cc_web/plane/get_collection_templates` is now promoted using the confirmed `id:<collectionId>` body; `/lv/v1/cc_web/replicate/search_templates`, batch collection templates, and preset endpoints remain capture targets
 
 Lip-sync submit comparison is now available as the live-generation gate:
 
@@ -465,7 +482,7 @@ Immediate next slices:
 3. Capture the frontend's explicit end-frame/multi-frame mode and live-prove `frames2video` only if the payload contract matches.
 4. Map style/reference roles and the new object-mask provider references into generation payload patches.
 5. Implement digital-human generation using the confirmed VOD reference path where applicable.
-6. Capture real CapCut template row/search/collection payloads, then expand no-spend research/template coverage beyond the confirmed CapCut category and public metadata catalogs.
+6. Capture real CapCut template search/batch/preset payloads, then expand no-spend research/template coverage beyond the confirmed CapCut category, collection/row/detail, and public metadata catalogs.
 7. Capture/approve subject/persona `generate_voice` live submit and custom voice clone live submit/mutation once those UI/API flows are captured.
 8. Keep each slice small enough to prove and commit before moving on.
 

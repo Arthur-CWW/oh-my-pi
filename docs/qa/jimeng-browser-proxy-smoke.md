@@ -329,6 +329,7 @@ raw_probe_variant_export=/mweb/v1/get_unread_count
 top_gap_1=/mweb/v1/dreamina_subject/generate_voice action=approval_or_disposable_fixture
 top_gap_2=/mweb/v1/voice/submit_task action=approval_or_disposable_fixture
 top_gap_3=/lv/v1/cc_web/plane/get_collection_templates action=static_capture_needed
+superseded_note=Later CapCut static/probe work promoted this endpoint with body field id:<collectionId>.
 ```
 
 Proof files:
@@ -450,7 +451,7 @@ Direct no-spend API probe notes:
 
 - `/lv/v1/cc_web/replicate/get_search_words` returned `ret: "0"` with region-only data.
 - `/lv/v1/cc_web/plane/fuzzy_search_templates` returned `ret: "0"` with an empty `item_list` for the simple `keyword` body.
-- `/lv/v1/cc_web/replicate/search_templates` and `/lv/v1/cc_web/plane/get_collection_templates` returned `ret: "1000"` / `errmsg: "param error"` for guessed bodies. These still need exact UI-captured payloads or deeper static call-site recovery before promotion to dedicated CLI commands.
+- `/lv/v1/cc_web/replicate/search_templates` and early `/lv/v1/cc_web/plane/get_collection_templates` guessed bodies returned `ret: "1000"` / `errmsg: "param error"`. This collection-template note is superseded by the later confirmed `id:<collectionId>` body and `capcut-collection-templates` command; search still needs exact UI-captured payloads or deeper static call-site recovery.
 - No image/video/voice generation job was submitted during this proof.
 
 ## Agent Catalog Smoke
@@ -1793,6 +1794,71 @@ rg -n 'X-Amz|x-signature|x-expires' data/jimeng-lab/proof-20260610-capcut-catego
 
 Expected result: no matches.
 
+## CapCut Template Collection/Row/Detail Smoke
+
+`jimeng-browser-proxy capcut-collections`, `capcut-collection-templates`, and `capcut-template-detail` call signed read-only CapCut editor API endpoints. These are no-generation, no-spend probes and did not require a Jimeng or CapCut browser session in the current proof.
+
+Commands:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts capcut-collections \
+  --outDir data/jimeng-lab/proof-20260610-capcut-collections
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts capcut-collection-templates \
+  --collection-id 10034 \
+  --limit 5 \
+  --outDir data/jimeng-lab/proof-20260610-capcut-collection-templates
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts capcut-template-detail \
+  --template-id 7369116096600771846 \
+  --outDir data/jimeng-lab/proof-20260610-capcut-template-detail
+```
+
+Expected artifact layout:
+
+```txt
+collections_raw=data/jimeng-lab/proof-20260610-capcut-collections/raw/capcut-collections-20260610070639.json
+collections_summary=data/jimeng-lab/proof-20260610-capcut-collections/normalized/capcut-collections-20260610070639-summary.json
+rows_raw=data/jimeng-lab/proof-20260610-capcut-collection-templates/raw/capcut-collection-templates-20260610070639.json
+rows_summary=data/jimeng-lab/proof-20260610-capcut-collection-templates/normalized/capcut-collection-templates-20260610070639-summary.json
+detail_raw=data/jimeng-lab/proof-20260610-capcut-template-detail/raw/capcut-template-detail-20260610070639.json
+detail_summary=data/jimeng-lab/proof-20260610-capcut-template-detail/normalized/capcut-template-detail-20260610070639-summary.json
+```
+
+Current proof facts:
+
+```txt
+get_collections_ret=0
+collection_count=35
+useful_collections=Product Display:10031, Beauty Care:10034, Foods & Beverage:10035, Workout and fitness:12007
+get_collection_templates_ret=0
+request_body_uses_id=10034
+template_count=5
+has_more=true
+new_cursor=5
+first_template_web_id=7369116096600771846
+first_template_title=FACEBOOK ADS - MARKETING POSTER - BEAUTY LIPSTIC - NEW COLLECTION - FB ADS POST
+first_template_canvas=1200x628
+get_template_detail_ret=0
+template_detail_template_id=7369116096600771846
+template_url_present=true
+template_data_present=false
+draft_data_present=false
+template_version=1.4.3
+material_counts=effects:8,local_images:4,file_infos:1,replaceable_images:0,yk_images:0
+```
+
+Signed URL/credential leak check:
+
+```bash
+rg -n 'https?://|x-signature|x-expires|byteimg|ibyteimg|signed|token|cookie|sid=' \
+  data/jimeng-lab/proof-20260610-capcut-collections/normalized \
+  data/jimeng-lab/proof-20260610-capcut-collection-templates/normalized \
+  data/jimeng-lab/proof-20260610-capcut-template-detail/normalized
+```
+
+Expected result: no matches.
+
 ## CapCut Public Template Metadata Smoke
 
 `jimeng-browser-proxy capcut-template-metadata` fetches public static CapCut template ratio and scene metadata discovered in the Jimeng/Dreamina frontend bundle. This is a no-generation, no-spend probe and does not require a browser session.
@@ -1841,7 +1907,7 @@ Expected result: no matches.
 
 ## CapCut Signed Endpoint Probe Smoke
 
-`jimeng-browser-proxy capcut-probe` signs explicit `/lv/v1/cc_web/*` replay variants with the recovered CapCut frontend signer. It is session-free, no-spend, and intended for quickly testing row/search/collection payload hypotheses before promoting a stable CLI command.
+`jimeng-browser-proxy capcut-probe` signs explicit `/lv/v1/cc_web/*` replay variants with the recovered CapCut frontend signer. It is session-free, no-spend, and intended for quickly testing search/batch/preset payload hypotheses before promoting a stable CLI command.
 
 Commands:
 
@@ -1874,9 +1940,10 @@ hot_words: body -> ret=0 errmsg=success response_sha=b442e8144ac7..., but data o
 fuzzy_search_templates: keyword-en -> ret=0 errmsg=success response_sha=f70060efdcf4...
 fuzzy_search_templates: keyword-zh -> ret=0 errmsg=success response_sha=9770f85cc99b...
 fuzzy_search_templates: title-en -> ret=0 errmsg=success response_sha=5075ed973ff4...
-get_collection_templates: category_id -> ret=1000 errmsg="param error" response_sha=71cf86d7c28c...
-get_collection_templates: collection_id -> ret=1000 errmsg="param error" response_sha=c975fd67d155...
-get_collection_templates: category_ids -> ret=1000 errmsg="param error" response_sha=7e45dad2b470...
+get_collection_templates: old category_id -> ret=1000 errmsg="param error" response_sha=71cf86d7c28c...
+get_collection_templates: old collection_id -> ret=1000 errmsg="param error" response_sha=c975fd67d155...
+get_collection_templates: old category_ids -> ret=1000 errmsg="param error" response_sha=7e45dad2b470...
+get_collection_templates_superseded_by=confirmed id:<collectionId> body in capcut-collection-templates
 search_templates: keyword -> ret=1000 errmsg="param error" response_sha=147d1c355511...
 search_templates: search_word -> ret=1000 errmsg="param error" response_sha=b53c75bc5959...
 search_templates: query -> ret=1000 errmsg="param error" response_sha=1f36fc8015f7...
@@ -1934,7 +2001,6 @@ Offline command, no browser session and no network replay:
 ```bash
 bun packages/jimeng-client/src/browser-proxy-cli.ts static-inventory \
   --staticRoot data/jimeng-lab/js-sweep/files,packages/jimeng-client/src \
-  --limit 120 \
   --outDir data/jimeng-lab/proof-20260610-static-inventory
 ```
 
@@ -1942,8 +2008,8 @@ Result:
 
 ```txt
 resources=247
-included=120
-high_value_gaps=64
+included=200
+high_value_gaps=61
 top gaps:
   1 /mweb/v1/dreamina_subject/generate_voice -> approval_or_disposable_fixture
   2 /mweb/v1/voice/delete -> approval_or_disposable_fixture
@@ -1951,14 +2017,14 @@ top gaps:
   4 /mweb/v1/voice/update -> approval_or_disposable_fixture
   5 /mweb/v1/aigc_draft/generate -> capture_or_compare_before_live
   9 /lv/v1/cc_web/plane/batch_get_collection_templates -> capture_exact_payload
-  12 /lv/v1/cc_web/replicate/search_templates -> capture_exact_payload
+  11 /lv/v1/cc_web/replicate/search_templates -> capture_exact_payload
 ```
 
 Normalized proof:
 
 ```txt
-data/jimeng-lab/proof-20260610-static-inventory/normalized/static-inventory-20260610060110-summary.json
-data/jimeng-lab/proof-20260610-static-inventory/normalized/static-inventory-20260610060110-summary.md
+data/jimeng-lab/proof-20260610-static-inventory/normalized/static-inventory-20260610071127-summary.json
+data/jimeng-lab/proof-20260610-static-inventory/normalized/static-inventory-20260610071127-summary.md
 ```
 
 Leak check:
@@ -2119,15 +2185,15 @@ next_action=recapture current frontend text-to-image submit through background C
 ```bash
 bun run jimeng:typecheck
 bun run jimeng:test
-bun packages/jimeng-client/src/browser-proxy-cli.ts --help | rg 'static-inventory|lip-sync-config|voice-clones|voice-clone-submit|capcut-probe|capcut-template-metadata|capcut-categories|overseas-short-videos|subject-create|subject-update|subject-delete|subject-generate-voice|subjects|templates|short-videos'
+bun packages/jimeng-client/src/browser-proxy-cli.ts --help | rg 'static-inventory|lip-sync-config|voice-clones|voice-clone-submit|capcut-probe|capcut-template-metadata|capcut-categories|capcut-collections|capcut-collection-templates|capcut-template-detail|overseas-short-videos|subject-create|subject-update|subject-delete|subject-generate-voice|subjects|templates|short-videos'
 ```
 
 Result:
 
 ```txt
 typecheck passed
-118 tests passed, 0 failed
-browser-proxy help listed static-inventory and capcut-probe
+126 tests passed, 0 failed
+browser-proxy help listed static-inventory and CapCut collection/detail commands
 paid smoke normalized files have no live token markers
 ```
 
@@ -2138,7 +2204,7 @@ Next useful captures:
 - image-to-image / byte edit
 - subject/persona generate_voice live submit after explicit spend approval or captured UI submit
 - style reference controls
-- additional template/research endpoints: CapCut template search and plane row/collection endpoints
+- additional template/research endpoints: CapCut template search, batch, and preset endpoints
 - image-to-video end-frame and multi-frame live proof with explicit frontend mode capture
 - multimodal/all-around reference video
 - lip-sync live submit capture/compare before enabling generation

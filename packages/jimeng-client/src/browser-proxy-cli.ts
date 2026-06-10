@@ -17,15 +17,24 @@ import {
 } from "./agent-catalog"
 import { loadJimengSessionFromBrowser } from "./browser-session"
 import {
+  buildCapCutCollectionTemplatesRequest,
   buildSingleCapCutEndpointProbeVariant,
+  buildCapCutTemplateCollectionsRequest,
   buildCapCutTemplateCategoriesRequest,
+  buildCapCutTemplateDetailRequest,
   capCutTemplateStaticCatalogUrls,
+  fetchCapCutCollectionTemplates,
+  fetchCapCutTemplateCollections,
   fetchCapCutTemplateCategories,
+  fetchCapCutTemplateDetail,
   fetchCapCutTemplateStaticCatalog,
   parseCapCutEndpointProbeVariants,
   runCapCutEndpointProbe,
+  summarizeCapCutCollectionTemplates,
   summarizeCapCutEndpointProbe,
+  summarizeCapCutTemplateCollections,
   summarizeCapCutTemplateCategories,
+  summarizeCapCutTemplateDetail,
   summarizeCapCutTemplateStaticCatalog,
 } from "./capcut-templates"
 import {
@@ -214,6 +223,9 @@ Commands:
   overseas-short-videos Fetch no-spend feed_short_video examples for overseas/reference mining
   capcut-probe Probe/replay one signed CapCut /lv/v1/cc_web/* endpoint with JSON variants
   capcut-categories Fetch no-spend CapCut commercial template categories
+  capcut-collections Fetch no-spend CapCut template collection ids/categories
+  capcut-collection-templates Fetch no-spend CapCut template rows for a collection id
+  capcut-template-detail Fetch no-spend CapCut template detail by template web id
   capcut-template-metadata Fetch public CapCut template ratios and scene metadata
   subjects      Fetch saved Jimeng subject/persona records without generation spend
   describe-image Upload/use an image URI, then describe it and detect faces
@@ -293,6 +305,13 @@ Options:
   --feed-refer <value>          Explore feed refer, e.g. feed_refresh, feed_enterauto, or feed_loadmore
   --capcut-lan <value>          CapCut template request language header (default: en)
   --capcut-loc <value>          CapCut template request location header (default: us)
+  --collection-id <n>           CapCut collection id for capcut-collection-templates
+  --template-id <id>            CapCut template web id for capcut-template-detail
+  --category-type <value>       CapCut collection category_type request field
+  --scale <n>                   CapCut collection scale request field
+  --canvasWidth <n>             CapCut collection canvas width request field
+  --canvasHeight <n>            CapCut collection canvas height request field
+  --needDraft                   Request draft data in capcut-template-detail
   --isClientFilter <true|false> Image model config client filtering (default: true)
   --needBetaModel <true|false>  Include beta image models (default: true)
   --needCache <true|false>      Common config query needCache (default: true)
@@ -442,6 +461,18 @@ Examples:
   jimeng-browser-proxy capcut-categories \\
     --outDir data/jimeng-lab/cli-capcut-categories-smoke
 
+  jimeng-browser-proxy capcut-collections \\
+    --outDir data/jimeng-lab/cli-capcut-collections-smoke
+
+  jimeng-browser-proxy capcut-collection-templates \\
+    --collection-id 10034 \\
+    --limit 5 \\
+    --outDir data/jimeng-lab/cli-capcut-collection-templates-smoke
+
+  jimeng-browser-proxy capcut-template-detail \\
+    --template-id 7369116096600771846 \\
+    --outDir data/jimeng-lab/cli-capcut-template-detail-smoke
+
   jimeng-browser-proxy capcut-probe \\
     --endpoint /lv/v1/cc_web/plane/fuzzy_search_templates \\
     --body '{"sdk_version":"16.1.0","keyword":"makeup"}' \\
@@ -567,6 +598,9 @@ interface CliArgs {
     | "overseas-short-videos"
     | "capcut-probe"
     | "capcut-categories"
+    | "capcut-collections"
+    | "capcut-collection-templates"
+    | "capcut-template-detail"
     | "capcut-template-metadata"
     | "subjects"
     | "describe-image"
@@ -642,6 +676,13 @@ interface CliArgs {
   feedRefer?: string
   capcutLan?: string
   capcutLoc?: string
+  capcutCollectionId?: number
+  capcutTemplateId?: string
+  capcutCategoryType?: string | number
+  capcutScale?: number
+  canvasWidth?: number
+  canvasHeight?: number
+  needDraft?: boolean
   isClientFilter?: boolean
   needBetaModel?: boolean
   needCache?: boolean
@@ -833,6 +874,155 @@ async function main(argv: string[]): Promise<void> {
       summary: summarizeJimengLipSyncCompare(result),
     })
     console.log(`[jimeng-browser-proxy] lip-sync-compare saved match=${result.match} candidates=${result.candidate_count}`)
+    return
+  }
+
+  if (args.command === "capcut-collections") {
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const query = {
+      categoryType: args.capcutCategoryType,
+      scale: args.capcutScale,
+      canvasWidth: args.canvasWidth,
+      canvasHeight: args.canvasHeight,
+      lan: args.capcutLan,
+      loc: args.capcutLoc,
+    }
+    const request = buildCapCutTemplateCollectionsRequest(query)
+    const runId = `capcut-collections-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    if (args.dryRun) {
+      writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
+        command: args.command,
+        endpoint_sequence: ["/lv/v1/cc_web/plane/get_collections"],
+        host: "https://edit-api-sg.capcut.com",
+        query,
+        request,
+        browser_session_required: false,
+      })
+      writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+        command: args.command,
+        endpoint: "/lv/v1/cc_web/plane/get_collections",
+        request,
+      })
+      console.log("[jimeng-browser-proxy] capcut-collections dry run saved")
+      return
+    }
+
+    const result = await fetchCapCutTemplateCollections({ query })
+    writeJson(path.join(dirs.rawDir, `${runId}.json`), {
+      endpoint: result.endpoint,
+      http_status: result.httpStatus,
+      ret: result.ret,
+      errmsg: result.errmsg,
+      log_id: result.logId,
+      response_text_sha256: result.responseTextSha256,
+      request: result.request,
+      body: result.body,
+    })
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      summary: summarizeCapCutTemplateCollections(result),
+    })
+    console.log(`[jimeng-browser-proxy] capcut-collections saved count=${result.collections.length}`)
+    return
+  }
+
+  if (args.command === "capcut-collection-templates") {
+    if (!args.capcutCollectionId) throw new Error("capcut-collection-templates requires --collection-id")
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const query = {
+      collectionId: args.capcutCollectionId,
+      count: args.limit ?? 20,
+      cursor: args.cursor,
+      lan: args.capcutLan,
+      loc: args.capcutLoc,
+      lang: args.capcutLan,
+    }
+    const request = buildCapCutCollectionTemplatesRequest(query)
+    const runId = `capcut-collection-templates-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    if (args.dryRun) {
+      writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
+        command: args.command,
+        endpoint_sequence: ["/lv/v1/cc_web/plane/get_collection_templates"],
+        host: "https://edit-api-sg.capcut.com",
+        query,
+        request,
+        browser_session_required: false,
+      })
+      writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+        command: args.command,
+        endpoint: "/lv/v1/cc_web/plane/get_collection_templates",
+        request,
+      })
+      console.log("[jimeng-browser-proxy] capcut-collection-templates dry run saved")
+      return
+    }
+
+    const result = await fetchCapCutCollectionTemplates({ query })
+    writeJson(path.join(dirs.rawDir, `${runId}.json`), {
+      endpoint: result.endpoint,
+      http_status: result.httpStatus,
+      ret: result.ret,
+      errmsg: result.errmsg,
+      log_id: result.logId,
+      response_text_sha256: result.responseTextSha256,
+      request: result.request,
+      body: result.body,
+    })
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      summary: summarizeCapCutCollectionTemplates(result),
+    })
+    console.log(`[jimeng-browser-proxy] capcut-collection-templates saved count=${result.templates.length} hasMore=${result.hasMore ?? "unknown"}`)
+    return
+  }
+
+  if (args.command === "capcut-template-detail") {
+    if (!args.capcutTemplateId) throw new Error("capcut-template-detail requires --template-id")
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const query = {
+      templateId: args.capcutTemplateId,
+      needDraft: args.needDraft ?? false,
+      lan: args.capcutLan,
+      loc: args.capcutLoc,
+      lang: args.capcutLan,
+      region: args.capcutLoc,
+    }
+    const request = buildCapCutTemplateDetailRequest(query)
+    const runId = `capcut-template-detail-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    if (args.dryRun) {
+      writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
+        command: args.command,
+        endpoint_sequence: ["/lv/v1/cc_web/plane/get_template_detail"],
+        host: "https://edit-api-sg.capcut.com",
+        query,
+        request,
+        browser_session_required: false,
+      })
+      writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+        command: args.command,
+        endpoint: "/lv/v1/cc_web/plane/get_template_detail",
+        request,
+      })
+      console.log("[jimeng-browser-proxy] capcut-template-detail dry run saved")
+      return
+    }
+
+    const result = await fetchCapCutTemplateDetail({ query })
+    writeJson(path.join(dirs.rawDir, `${runId}.json`), {
+      endpoint: result.endpoint,
+      http_status: result.httpStatus,
+      ret: result.ret,
+      errmsg: result.errmsg,
+      log_id: result.logId,
+      response_text_sha256: result.responseTextSha256,
+      request: result.request,
+      body: result.body,
+    })
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      summary: summarizeCapCutTemplateDetail(result),
+    })
+    console.log(`[jimeng-browser-proxy] capcut-template-detail saved templateId=${result.detail.templateId} templateUrl=${result.detail.templateUrlPresent ? "yes" : "no"}`)
     return
   }
 
@@ -2975,6 +3165,9 @@ function parseArgs(argv: string[]): CliArgs {
     && command !== "overseas-short-videos"
     && command !== "capcut-probe"
     && command !== "capcut-categories"
+    && command !== "capcut-collections"
+    && command !== "capcut-collection-templates"
+    && command !== "capcut-template-detail"
     && command !== "capcut-template-metadata"
     && command !== "subjects"
     && command !== "describe-image"
@@ -3005,6 +3198,10 @@ function parseArgs(argv: string[]): CliArgs {
   const audioDurationSec = flags.audioDurationSec ? Number(flags.audioDurationSec) : undefined
   const imageWidth = flags.imageWidth ? Number(flags.imageWidth) : undefined
   const imageHeight = flags.imageHeight ? Number(flags.imageHeight) : undefined
+  const canvasWidth = flags.canvasWidth ? Number(flags.canvasWidth) : undefined
+  const canvasHeight = flags.canvasHeight ? Number(flags.canvasHeight) : undefined
+  const capcutScale = flags.scale ? Number(flags.scale) : undefined
+  const capcutCollectionId = flags["collection-id"] ? Number(flags["collection-id"]) : undefined
   const workspaceIdValue = flags.workspaceId ?? flags["workspace-id"]
   const workspaceId = workspaceIdValue ? Number(workspaceIdValue) : undefined
   const speed = flags.speed ? Number(flags.speed) : undefined
@@ -3072,6 +3269,18 @@ function parseArgs(argv: string[]): CliArgs {
   }
   if (imageHeight !== undefined && (!Number.isInteger(imageHeight) || imageHeight < 1)) {
     throw new Error("--imageHeight must be a positive integer")
+  }
+  if (canvasWidth !== undefined && (!Number.isInteger(canvasWidth) || canvasWidth < 1)) {
+    throw new Error("--canvasWidth must be a positive integer")
+  }
+  if (canvasHeight !== undefined && (!Number.isInteger(canvasHeight) || canvasHeight < 1)) {
+    throw new Error("--canvasHeight must be a positive integer")
+  }
+  if (capcutScale !== undefined && (!Number.isFinite(capcutScale) || capcutScale <= 0)) {
+    throw new Error("--scale must be a positive number")
+  }
+  if (capcutCollectionId !== undefined && (!Number.isInteger(capcutCollectionId) || capcutCollectionId < 1)) {
+    throw new Error("--collection-id must be a positive integer")
   }
   if (workspaceId !== undefined && (!Number.isInteger(workspaceId) || workspaceId < 1)) {
     throw new Error("--workspaceId must be a positive integer")
@@ -3145,6 +3354,13 @@ function parseArgs(argv: string[]): CliArgs {
     feedRefer: flags["feed-refer"],
     capcutLan: flags["capcut-lan"],
     capcutLoc: flags["capcut-loc"],
+    capcutCollectionId,
+    capcutTemplateId: flags["template-id"],
+    capcutCategoryType: parseMaybeNumberFlag(flags["category-type"]),
+    capcutScale,
+    canvasWidth,
+    canvasHeight,
+    needDraft: flags.needDraft === "true",
     isClientFilter,
     needBetaModel,
     needCache,
@@ -3250,6 +3466,14 @@ function parseOptionalBooleanFlag(value: string | undefined, flagName: string): 
   if (normalized === "true") return true
   if (normalized === "false") return false
   throw new Error(`${flagName} must be true or false`)
+}
+
+function parseMaybeNumberFlag(value: string | undefined): string | number | undefined {
+  if (value === undefined) return undefined
+  const normalized = value.trim()
+  if (normalized.length === 0) return undefined
+  const numeric = Number(normalized)
+  return Number.isFinite(numeric) && String(numeric) === normalized ? numeric : normalized
 }
 
 function readInlineOrFile(value: string): string {
