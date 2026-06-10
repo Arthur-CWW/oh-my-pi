@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { createHash } from "node:crypto"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import {
@@ -155,6 +156,13 @@ import {
   summarizeJimengInfiniteCanvas,
 } from "./infinite-canvas"
 import {
+  buildJimengWorkspaceByIdsRequest,
+  buildJimengWorkspaceListRequest,
+  fetchJimengWorkspaceContext,
+  parseJimengWorkspaceContextEndpoints,
+  summarizeJimengWorkspaceContext,
+} from "./workspace-context"
+import {
   buildJimengVideoInfoRequest,
   fetchJimengVideoInfo,
   parseJimengVidCsvFlag,
@@ -240,6 +248,7 @@ Commands:
   text2image-plan Build a no-spend direct text-to-image submit body
   account-credit Fetch signed no-spend account credit balance
   commerce-benefits Fetch signed no-spend benefit metadata and user benefit rows
+  workspace-context Fetch no-spend workspace list and workspace-id context
   infinite-canvas Fetch no-spend infinite-canvas project/detail/ratio metadata
   lip-sync-config Fetch no-spend digital-human/lip-sync model configs
   lip-sync-compare Offline compare a lip-sync dry-run plan against captured UI submit
@@ -331,6 +340,7 @@ Options:
   --imageInfo <bool>            Infinite-canvas project list imageInfo flag (default: true)
   --projectId <id>              Infinite-canvas project id for detail lookup
   --userId <id>                 Infinite-canvas user id for custom ratios lookup
+  --workspaceIds <ids>          Comma-separated workspace ids for workspace-context get-by-ids
   --needDraftResource <bool>    Infinite-canvas detail draft resource flag (default: false)
   --asset-types <csv>           Assets types for get_asset_list (default: 1,2,5,6,7,8,9,10,12)
   --asset-mode <value>          Assets mode for get_asset_list (default: workbench)
@@ -567,6 +577,12 @@ Examples:
     --endpoints metadata,user-benefits \\
     --outDir data/jimeng-lab/cli-commerce-benefits-smoke
 
+  jimeng-browser-proxy workspace-context \\
+    --session data/jimeng-lab/raw/session-bundle-current.json \\
+    --endpoints list,get-by-ids \\
+    --limit 20 \\
+    --outDir data/jimeng-lab/cli-workspace-context-smoke
+
   jimeng-browser-proxy subjects \\
     --limit 20 \\
     --outDir data/jimeng-lab/cli-subjects-smoke
@@ -663,6 +679,7 @@ interface CliArgs {
     | "text2image-plan"
     | "account-credit"
     | "commerce-benefits"
+    | "workspace-context"
     | "infinite-canvas"
     | "endpoint-probe"
     | "rate-probe"
@@ -765,6 +782,7 @@ interface CliArgs {
   imageInfo?: boolean
   projectId?: string
   userId?: string
+  workspaceIds?: string[]
   needDraftResource?: boolean
   categoryId?: number
   workTypes?: string
@@ -1634,6 +1652,71 @@ async function main(argv: string[]): Promise<void> {
       summary,
     })
     console.log(`[jimeng-browser-proxy] image-models saved models=${result.modelCount} default=${result.defaultModelIndex ?? "none"}`)
+    return
+  }
+
+  if (args.command === "workspace-context") {
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const endpoints = parseJimengWorkspaceContextEndpoints(args.endpoints)
+    const query = {
+      endpoints,
+      offset: args.offset,
+      limit: args.limit,
+      workspaceIds: args.workspaceIds,
+    }
+    const runId = `workspace-context-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    if (args.dryRun) {
+      writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
+        command: args.command,
+        endpoint_sequence: endpoints.map((endpoint) => endpoint === "list"
+          ? "/mweb/v1/workspace/list"
+          : "/mweb/v1/workspace/get_by_ids"),
+        query,
+        requests: {
+          list: endpoints.includes("list") || (endpoints.includes("get-by-ids") && !args.workspaceIds?.length)
+            ? buildJimengWorkspaceListRequest(query)
+            : null,
+          get_by_ids: args.workspaceIds?.length
+            ? buildJimengWorkspaceByIdsRequest(args.workspaceIds)
+            : { inferred_from_workspace_list: true },
+        },
+        browser_session: redactSession(session),
+      })
+      writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+        command: args.command,
+        endpoints,
+        query: {
+          ...query,
+          workspaceIds: query.workspaceIds ? query.workspaceIds.map((id) => ({ sha256: sha256(id) })) : undefined,
+        },
+        dry_run: true,
+      })
+      console.log(`[jimeng-browser-proxy] workspace-context dry run saved endpoints=${endpoints.join(",")}`)
+      return
+    }
+
+    const result = await fetchJimengWorkspaceContext({ session, query })
+    writeJson(path.join(dirs.rawDir, `${runId}.json`), {
+      endpoints: result.endpoints,
+      skipped: result.skipped,
+      results: result.results.map((item) => ({
+        endpoint: item.endpoint,
+        endpoint_id: item.endpointId,
+        http_status: item.httpStatus,
+        ret: item.ret,
+        errmsg: item.errmsg,
+        response_text_sha256: item.responseTextSha256,
+        request: item.request,
+        body: item.body,
+      })),
+    })
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      summary: summarizeJimengWorkspaceContext(result),
+    })
+    const listResult = result.results.find((item) => item.endpointId === "list")
+    const byIdsResult = result.results.find((item) => item.endpointId === "get-by-ids")
+    console.log(`[jimeng-browser-proxy] workspace-context saved endpoints=${result.results.map((item) => item.endpointId).join(",")} listed=${listResult?.workspaces.length ?? "n/a"} by_ids=${byIdsResult?.workspaces.length ?? "n/a"} skipped=${result.skipped.length}`)
     return
   }
 
@@ -3579,6 +3662,7 @@ function parseArgs(argv: string[]): CliArgs {
     && command !== "text2image-plan"
     && command !== "account-credit"
     && command !== "commerce-benefits"
+    && command !== "workspace-context"
     && command !== "infinite-canvas"
     && command !== "endpoint-probe"
     && command !== "rate-probe"
@@ -3811,6 +3895,7 @@ function parseArgs(argv: string[]): CliArgs {
     imageInfo,
     projectId: flags.projectId,
     userId: flags.userId,
+    workspaceIds: parseCsvFlag(flags.workspaceIds),
     needDraftResource,
     categoryId,
     workTypes: flags["work-types"],
@@ -3929,6 +4014,10 @@ function parseEndpointProbeMethod(value: string | undefined): "GET" | "POST" | u
   const normalized = value.trim().toUpperCase()
   if (normalized === "GET" || normalized === "POST") return normalized
   throw new Error("--method must be GET or POST")
+}
+
+function sha256(text: string): string {
+  return createHash("sha256").update(text).digest("hex")
 }
 
 function parseOptionalBooleanFlag(value: string | undefined, flagName: string): boolean | undefined {

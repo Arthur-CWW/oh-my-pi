@@ -193,6 +193,20 @@ Signed commerce benefit metadata and current user benefit rows are now live-prov
 - proof bundle: `data/jimeng-lab/proof-20260610-commerce-benefits-cli/`
 - latest proof returned `12` metadata rows and `140` current user benefit asset rows; pay modes included `LimitFree`, `Subscribe`, and `UserCredit`
 
+No-spend workspace context reads are now static/dry-run proved:
+
+- `jimeng-browser-proxy workspace-context`
+- endpoints:
+  - `/mweb/v1/workspace/list`
+  - `/mweb/v1/workspace/get_by_ids`
+- static frontend evidence shows list bodies use `{ offset, limit }`, and by-id lookup uses snake_case wire body `{ workspace_ids: [...] }`
+- useful flags: `--endpoints list,get-by-ids`, `--limit`, `--offset`, and `--workspaceIds`
+- proof bundles:
+  - `data/jimeng-lab/proof-20260610-static-locate-workspace-context/`
+  - `data/jimeng-lab/proof-20260610-workspace-context-dry-run/`
+  - `data/jimeng-lab/proof-20260610-static-inventory-workspace-context/`
+- live no-spend replay is pending local resolver recovery: terminal `curl` cannot resolve `jimeng.jianying.com`, `scutil --dns` reports no DNS configuration, but public DNS resolves the host
+
 No-spend direct endpoint concurrency probing is now live-proved:
 
 - `jimeng-browser-proxy rate-probe`
@@ -200,8 +214,8 @@ No-spend direct endpoint concurrency probing is now live-proved:
 - records bounded worker concurrency, latency percentiles, HTTP status counts, `ret` counts, stop reasons, and response hashes without persisting response bodies
 - stop conditions include HTTP `429`, `401`, `403`, auth-ish `ret=1015/1017`, risk `ret=1019`, shark/risk/captcha/verify/login messages, and transport/schema errors
 - reference implementation note from `iptag/jimeng-api`: it does not publish a hard Jimeng rate limit; it supports comma-separated bearer tokens and randomly samples one per image/video request, plus long polling/retry behavior and no local image/video generation concurrency cap
-- latest read-only `/mweb/v1/get_common_config` proof found no observed limit through concurrency `1536` and `1536` total requests in that tier: all read-only sweep requests returned HTTP `200`, `ret=0`, with no stop condition; tail latency rose sharply at the highest tiers
-- proof bundles: `data/jimeng-lab/proof-20260610-rate-probe-common-config-c{1,3,6,10,16,32,64,96,128,192,256,512,768,1024,1536}/`
+- latest read-only `/mweb/v1/get_common_config` proof found no observed limit through concurrency `2048` and `2048` total requests in that tier: all read-only sweep requests returned HTTP `200`, `ret=0`, with no stop condition; tail latency rose sharply at the highest tiers, especially the IP/SNI `2048` run
+- proof bundles: `data/jimeng-lab/proof-20260610-rate-probe-common-config-c{1,3,6,10,16,32,64,96,128,192,256,512,768,1024,1536}/` and `data/jimeng-lab/proof-20260610-rate-probe-common-config-c2048-ip-sni/`
 - this is a read-only config endpoint bound, not a safe generation-submit limit. Keep paid generation submission concurrency at `1` until an explicitly approved capped test says otherwise.
 
 Shared Jimeng risk-control breaker is now implemented in the consolidated client path:
@@ -499,8 +513,8 @@ Static API inventory is now available as the systematic coverage map:
 - scans API endpoint strings and public CapCut `bee_prod` catalog URLs, classifies read/generate/upload/mutate/payment/analytics risk, joins the existing known-command map, and ranks uncovered resources for the next slice
 - default output skips fully implemented endpoints so it stays focused on gaps; `--includeKnown` produces an audit inventory
 - proof bundle: `data/jimeng-lab/proof-20260610-static-inventory/`
-- latest proof scanned `data/jimeng-lab/js-sweep/files` plus `packages/jimeng-client/src`, found 247 resources, included 80 non-implemented items at the current review limit, skipped 40 implemented endpoints, and counted 61 high-value gaps after the CapCut collection/row/detail, LV editor catalog, infinite-canvas read, account credit, and commerce-benefit commands were promoted
-- known status counts are now `unknown=127`, `partial=4`, `implemented=40`, `dry_run_only=4`, `blocked=69`, `captured_only=2`, and `cataloged_only=1`; the five CapCut search/batch/preset-related endpoints above are blocked with exact replay evidence and recommended action `capture_exact_payload`
+- latest proof scanned `data/jimeng-lab/js-sweep/files` plus `packages/jimeng-client/src`, found 247 resources, included 120 items at the current review limit, skipped 42 implemented endpoints, and counted 61 high-value gaps after the CapCut collection/row/detail, LV editor catalog, infinite-canvas read, account credit, commerce-benefit, and workspace-context commands were promoted
+- known status counts are now `unknown=125`, `partial=4`, `implemented=42`, `dry_run_only=4`, `blocked=69`, `captured_only=2`, and `cataloged_only=1`; the five CapCut search/batch/preset-related endpoints above are blocked with exact replay evidence and recommended action `capture_exact_payload`
 - seven video-generation helper endpoints are also now explicitly blocked/capture-needed instead of generic unknowns:
   - `/mweb/v1/video_generate/get_switch_model_queue_info`: safe no-spend probes with empty, `model_req_key`, `model_req_keys`, and scene bodies returned `ret=1000 invalid parameter`
   - `/mweb/v1/video_generate/pre_process` and `/mweb/v1/video_generate/mget_pre_process_result`: frontend task submit/result pair; capture exact UI payload and task ids before promotion

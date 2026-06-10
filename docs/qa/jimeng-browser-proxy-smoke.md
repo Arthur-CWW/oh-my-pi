@@ -2508,6 +2508,12 @@ bun packages/jimeng-client/src/browser-proxy-cli.ts rate-probe \
   --outDir data/jimeng-lab/proof-20260610-rate-probe-common-config-c1536
 ```
 
+The `2048` tier used a one-off Node `https.request` IP/SNI transport because the local macOS resolver temporarily returned no DNS configuration for terminal processes. It kept `servername` and `Host` as `jimeng.jianying.com`, wrote hashes/status/latency only, and saved proof under:
+
+```txt
+data/jimeng-lab/proof-20260610-rate-probe-common-config-c2048-ip-sni/
+```
+
 Measured summaries:
 
 ```txt
@@ -2526,21 +2532,23 @@ concurrency=512 requests=512 completed=512 stopped=false elapsed=1465ms  p50=916
 concurrency=768 requests=768 completed=768 stopped=false elapsed=2447ms  p50=1157ms p95=1835ms  max=2446ms  http=200x768  ret=0x768
 concurrency=1024 requests=1024 completed=1024 stopped=false elapsed=5837ms p50=1942ms p95=2893ms max=5831ms http=200x1024 ret=0x1024
 concurrency=1536 requests=1536 completed=1536 stopped=false elapsed=5318ms p50=2602ms p95=3809ms max=5306ms http=200x1536 ret=0x1536
+concurrency=2048 requests=2048 completed=2048 stopped=false elapsed=28165ms p50=10283ms p95=15822ms max=28013ms http=200x2048 ret=0x2048
 ```
 
 Result:
 
 ```txt
-No rate/auth/risk stop was observed for /mweb/v1/get_common_config through concurrency 1536.
+No rate/auth/risk stop was observed for /mweb/v1/get_common_config through concurrency 2048.
 The iptag/jimeng-api reference does not publish a hard rate limit; it supports comma-separated bearer tokens and randomly samples tokens per request, plus long polling/retry behavior, and does not enforce a local image/video generation concurrency cap.
-Tail latency degraded materially at concurrency 1024 and 1536, so this is a read-config endpoint ceiling observation, not a recommended generation-submit setting.
+Tail latency degraded materially at concurrency 1024, 1536, and especially 2048, so this is a read-config endpoint ceiling observation, not a recommended generation-submit setting.
 ```
 
 Leak check:
 
 ```bash
 rg -n -P 'x-signature|authorization|cookie|sessionid|sid=|msToken|verifyFp|X-Kagi|x-expires|device-time|sign-ver|\bsign\b|tdid' \
-  data/jimeng-lab/proof-20260610-rate-probe-common-config-c{1,3,6,10,16,32,64,96,128,192,256,512,768,1024,1536}/normalized
+  data/jimeng-lab/proof-20260610-rate-probe-common-config-c{1,3,6,10,16,32,64,96,128,192,256,512,768,1024,1536}/normalized \
+  data/jimeng-lab/proof-20260610-rate-probe-common-config-c2048-ip-sni/normalized
 ```
 
 Expected result: no matches.
@@ -3029,12 +3037,63 @@ rg -n -P 'authorization|cookie|sessionid|sid=|msToken|verifyFp|device-time|tdid'
 
 Result: no matches in normalized output. Raw ignored proof contains provider response bodies, including upstream response `sign` fields, but no request headers or cookies.
 
+## Workspace Context Smoke
+
+No-spend workspace/project metadata reads:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts static-locate \
+  --staticRoot data/jimeng-lab/js-sweep/files,packages/jimeng-client/src \
+  --endpoint /mweb/v1/workspace/list,/mweb/v1/workspace/get_by_ids \
+  --outDir data/jimeng-lab/proof-20260610-static-locate-workspace-context \
+  --contextLines 5
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts workspace-context \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --endpoints list,get-by-ids \
+  --limit 20 \
+  --dryRun \
+  --outDir data/jimeng-lab/proof-20260610-workspace-context-dry-run
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts static-inventory \
+  --staticRoot data/jimeng-lab/js-sweep/files,packages/jimeng-client/src \
+  --outDir data/jimeng-lab/proof-20260610-static-inventory-workspace-context \
+  --limit 120
+```
+
+Result:
+
+```txt
+static-locate-workspace-context: endpoints=2 occurrences=2
+workspace-context dry run saved endpoints=list,get-by-ids
+static-inventory: resources=247 skipped_implemented=42 high_value_gaps=61
+known_status_counts=unknown:125,partial:4,implemented:42,dry_run_only:4,blocked:69,captured_only:2,cataloged_only:1
+```
+
+Static frontend evidence:
+
+```txt
+workspace/list body: { offset, limit }
+workspace/get_by_ids wire body: { workspace_ids: [...] }
+```
+
+Current live replay blocker:
+
+```txt
+curl -I https://jimeng.jianying.com/ -> Could not resolve host
+scutil --dns -> No DNS configuration available
+dig @1.1.1.1 jimeng.jianying.com -> resolves CNAME/IPs
+known-good image-models live command also fails through normal Bun fetch
+```
+
+This means the workspace read contract is static/dry-run proved, but live no-spend replay should be rerun after the local resolver is healthy or after adding a reusable IP/SNI fetch override to the CLI.
+
 ## Verification
 
 ```bash
 bun run jimeng:typecheck
 bun run jimeng:test
-bun packages/jimeng-client/src/browser-proxy-cli.ts --help | rg 'static-inventory|account-credit|commerce-benefits|lip-sync-config|voice-clones|voice-clone-submit|capcut-probe|capcut-template-metadata|capcut-categories|capcut-collections|capcut-collection-templates|capcut-template-detail|capcut-editor-catalog|infinite-canvas|overseas-short-videos|subject-create|subject-update|subject-delete|subject-generate-voice|subjects|templates|short-videos'
+bun packages/jimeng-client/src/browser-proxy-cli.ts --help | rg 'static-inventory|account-credit|commerce-benefits|workspace-context|lip-sync-config|voice-clones|voice-clone-submit|capcut-probe|capcut-template-metadata|capcut-categories|capcut-collections|capcut-collection-templates|capcut-template-detail|capcut-editor-catalog|infinite-canvas|overseas-short-videos|subject-create|subject-update|subject-delete|subject-generate-voice|subjects|templates|short-videos'
 ```
 
 Result:
