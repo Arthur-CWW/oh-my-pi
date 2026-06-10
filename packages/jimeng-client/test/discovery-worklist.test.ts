@@ -46,6 +46,20 @@ describe("Jimeng discovery worklist", () => {
           `fetch("/lv/v1/editor/draft/get_template_file")`,
           `fetch("/lv/v1/editor/plane/intelligence/query_recommend_template")`,
           `fetch("/lv/v2/cc_web_task/get_task_draft")`,
+          `fetch("/lv/v1/asset/copy")`,
+          `fetch("/lv/v1/asset/create")`,
+          `fetch("/lv/v1/asset/create_cloud_asset")`,
+          `fetch("/lv/v1/asset/delete")`,
+          `fetch("/lv/v1/asset/label_as_exported")`,
+          `fetch("/lv/v1/asset/prepare_upload_cloud")`,
+          `fetch("/lv/v1/asset/rename")`,
+          `fetch("/lv/v1/editor/template/add")`,
+          `fetch("/lv/v1/editor/template/add_async")`,
+          `fetch("/lv/v1/editor/template/add_query")`,
+          `fetch("/lv/v1/ever_photo/batch_sync_asset")`,
+          `fetch("/lv/v1/ever_photo/promote_asset")`,
+          `fetch("/mweb/v1/remove_history")`,
+          `fetch("/mweb/v1/update_video_default_bgm")`,
         ].join("\n"),
         "utf8",
       )
@@ -143,6 +157,27 @@ describe("Jimeng discovery worklist", () => {
       const lvTaskDraft = worklist.items.find((item) => item.endpoint === "/lv/v2/cc_web_task/get_task_draft")
       expect(lvTaskDraft?.known_status).toBe("blocked")
       expect(lvTaskDraft?.reason).toContain("commercial-photo task id")
+      for (const endpoint of [
+        "/lv/v1/asset/copy",
+        "/lv/v1/asset/create",
+        "/lv/v1/asset/create_cloud_asset",
+        "/lv/v1/asset/delete",
+        "/lv/v1/asset/label_as_exported",
+        "/lv/v1/asset/prepare_upload_cloud",
+        "/lv/v1/asset/rename",
+        "/lv/v1/editor/template/add",
+        "/lv/v1/editor/template/add_async",
+        "/lv/v1/editor/template/add_query",
+        "/lv/v1/ever_photo/batch_sync_asset",
+        "/lv/v1/ever_photo/promote_asset",
+        "/mweb/v1/remove_history",
+        "/mweb/v1/update_video_default_bgm",
+      ]) {
+        expect(worklist.items.find((item) => item.endpoint === endpoint)?.known_status).toBe("blocked")
+      }
+      expect(worklist.items.find((item) => item.endpoint === "/lv/v1/asset/copy")?.reason).toContain("disposable workspace")
+      expect(worklist.items.find((item) => item.endpoint === "/lv/v1/editor/template/add")?.reason).toContain("template state")
+      expect(worklist.items.find((item) => item.endpoint === "/mweb/v1/remove_history")?.reason).toContain("history ids")
       expect(worklist.items.find((item) => item.endpoint === "/mweb/v1/aigc_draft/generate")?.recommended_action).toBe("compare_dry_run_before_live")
       expect(worklist.items.find((item) => item.endpoint === "/mweb/v1/dreamina_subject/generate_voice")?.recommended_action).toBe("approval_or_disposable_fixture")
       expect(worklist.probe_variant_exports).toHaveLength(1)

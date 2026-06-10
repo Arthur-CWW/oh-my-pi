@@ -2129,11 +2129,36 @@ blocked_lv_editor_template_reads:
   /lv/v2/cc_web_task/get_task_draft -> capture_exact_payload
 ```
 
+After classifying LV asset/template/history mutation endpoints:
+
+```txt
+resources=247
+included=200
+skipped_implemented=29
+high_value_gaps=61
+known_status_counts=unknown:159,partial:4,implemented:29,dry_run_only:4,blocked:48,captured_only:2,cataloged_only:1
+blocked_mutations_no_replay:
+  /lv/v1/asset/copy -> disposable_fixture_or_approval
+  /lv/v1/asset/create -> disposable_fixture_or_approval
+  /lv/v1/asset/create_cloud_asset -> disposable_fixture_or_approval
+  /lv/v1/asset/delete -> disposable_fixture_or_approval
+  /lv/v1/asset/label_as_exported -> disposable_fixture_or_approval
+  /lv/v1/asset/prepare_upload_cloud -> disposable_fixture_or_approval
+  /lv/v1/asset/rename -> disposable_fixture_or_approval
+  /lv/v1/editor/template/add -> disposable_fixture_or_approval
+  /lv/v1/editor/template/add_async -> disposable_fixture_or_approval
+  /lv/v1/editor/template/add_query -> capture_matching_async_flow
+  /lv/v1/ever_photo/batch_sync_asset -> disposable_fixture_or_approval
+  /lv/v1/ever_photo/promote_asset -> disposable_fixture_or_approval
+  /mweb/v1/remove_history -> disposable_fixture_or_approval
+  /mweb/v1/update_video_default_bgm -> disposable_fixture_or_approval
+```
+
 Normalized proof:
 
 ```txt
-data/jimeng-lab/proof-20260610-static-inventory/normalized/static-inventory-20260610090044-summary.json
-data/jimeng-lab/proof-20260610-static-inventory/normalized/static-inventory-20260610090044-summary.md
+data/jimeng-lab/proof-20260610-static-inventory/normalized/static-inventory-20260610091001-summary.json
+data/jimeng-lab/proof-20260610-static-inventory/normalized/static-inventory-20260610091001-summary.md
 ```
 
 Video helper proof:
@@ -2258,6 +2283,20 @@ lv-template-permission-probe: 1 variant, ret=1015, errmsg=check login error
 lv-template-file-probe: 1 variant, ret=1016, errmsg=ERR_PARAM
 lv-query-recommend-template-probe: 1 variant, ret=-3, errmsg=bad request
 lv-task-draft-probe: 2 variants, all ret=1015, errmsg=check login error
+```
+
+LV mutation blocker proof:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts static-locate \
+  --staticRoot data/jimeng-lab/js-sweep/files,packages/jimeng-client/src \
+  --endpoint /lv/v1/asset/copy,/lv/v1/asset/create,/lv/v1/asset/create_cloud_asset,/lv/v1/asset/delete,/lv/v1/asset/label_as_exported,/lv/v1/asset/prepare_upload_cloud,/lv/v1/asset/rename,/lv/v1/editor/template/add,/lv/v1/editor/template/add_async,/lv/v1/editor/template/add_query,/lv/v1/ever_photo/batch_sync_asset,/lv/v1/ever_photo/promote_asset,/mweb/v1/remove_history,/mweb/v1/update_video_default_bgm \
+  --outDir data/jimeng-lab/proof-20260610-static-locate-lv-mutation-blockers
+```
+
+```txt
+static-locate-lv-mutation-blockers: 14 endpoints, 20 occurrences, no credential markers in normalized output
+mutation replay: skipped intentionally because these endpoints create, delete, rename, publish, sync, promote, remove, or otherwise mutate account/workspace state
 ```
 
 Leak check:

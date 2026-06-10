@@ -51,6 +51,20 @@ describe("Jimeng static inventory", () => {
           `const lvTemplateFileBlocked = "/lv/v1/editor/draft/get_template_file";`,
           `const lvRecommendTemplateBlocked = "/lv/v1/editor/plane/intelligence/query_recommend_template";`,
           `const lvTaskDraftBlocked = "/lv/v2/cc_web_task/get_task_draft";`,
+          `const lvAssetCopyBlocked = "/lv/v1/asset/copy";`,
+          `const lvAssetCreateBlocked = "/lv/v1/asset/create";`,
+          `const lvAssetCreateCloudBlocked = "/lv/v1/asset/create_cloud_asset";`,
+          `const lvAssetDeleteBlocked = "/lv/v1/asset/delete";`,
+          `const lvAssetLabelExportedBlocked = "/lv/v1/asset/label_as_exported";`,
+          `const lvAssetPrepareUploadBlocked = "/lv/v1/asset/prepare_upload_cloud";`,
+          `const lvAssetRenameBlocked = "/lv/v1/asset/rename";`,
+          `const lvTemplateAddBlocked = "/lv/v1/editor/template/add";`,
+          `const lvTemplateAddAsyncBlocked = "/lv/v1/editor/template/add_async";`,
+          `const lvTemplateAddQueryBlocked = "/lv/v1/editor/template/add_query";`,
+          `const everPhotoBatchSyncBlocked = "/lv/v1/ever_photo/batch_sync_asset";`,
+          `const everPhotoPromoteBlocked = "/lv/v1/ever_photo/promote_asset";`,
+          `const removeHistoryBlocked = "/mweb/v1/remove_history";`,
+          `const updateVideoDefaultBgmBlocked = "/mweb/v1/update_video_default_bgm";`,
           `const unknownRead = "https://jimeng.jianying.com/mweb/v1/template/search?token=secret";`,
           `const unknownGenerate = "/mweb/v1/avatar/generate";`,
           `const capcutCatalog = "https://lf16-beecdn.ibytedtos.com/obj/ies-fe-bee-sg/bee_prod/biz_49/bee_prod_49_bee_publish_709.json?x-signature=secret";`,
@@ -65,7 +79,7 @@ describe("Jimeng static inventory", () => {
       const summary = summarizeJimengStaticInventory(result)
       const markdown = writeJimengStaticInventoryMarkdown(result)
 
-      expect(result.totalResourceCount).toBe(39)
+      expect(result.totalResourceCount).toBe(53)
       expect(result.skippedImplementedCount).toBe(2)
       expect(result.items.map((item) => item.resource)).not.toContain("/mweb/v1/get_history_by_ids")
       expect(result.items.find((item) => item.resource === "/mweb/v1/dreamina_subject/generate_voice")?.recommendedAction).toBe("approval_or_disposable_fixture")
@@ -106,6 +120,24 @@ describe("Jimeng static inventory", () => {
       expect(result.items.find((item) => item.resource === "/lv/v1/editor/draft/get_template_file")?.knownStatus).toBe("blocked")
       expect(result.items.find((item) => item.resource === "/lv/v1/editor/plane/intelligence/query_recommend_template")?.knownStatus).toBe("blocked")
       expect(result.items.find((item) => item.resource === "/lv/v2/cc_web_task/get_task_draft")?.knownStatus).toBe("blocked")
+      for (const endpoint of [
+        "/lv/v1/asset/copy",
+        "/lv/v1/asset/create",
+        "/lv/v1/asset/create_cloud_asset",
+        "/lv/v1/asset/delete",
+        "/lv/v1/asset/label_as_exported",
+        "/lv/v1/asset/prepare_upload_cloud",
+        "/lv/v1/asset/rename",
+        "/lv/v1/editor/template/add",
+        "/lv/v1/editor/template/add_async",
+        "/lv/v1/editor/template/add_query",
+        "/lv/v1/ever_photo/batch_sync_asset",
+        "/lv/v1/ever_photo/promote_asset",
+        "/mweb/v1/remove_history",
+        "/mweb/v1/update_video_default_bgm",
+      ]) {
+        expect(result.items.find((item) => item.resource === endpoint)?.knownStatus).toBe("blocked")
+      }
       expect(result.items.find((item) => item.resource === "/mweb/v1/template/search")?.recommendedAction).toBe("probe_read_endpoint")
       expect(result.items.find((item) => item.resource === "/mweb/v1/avatar/generate")?.riskClass).toBe("generate")
       expect(JSON.stringify(summary)).not.toContain("x-signature=secret")
