@@ -1464,6 +1464,24 @@ The normalized proof was checked for signed URL and raw queue-debug leakage.
 
 ## Useful Future Capture Targets
 
+The offline `static-inventory` proof now gives the broadest current static coverage map:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts static-inventory \
+  --staticRoot data/jimeng-lab/js-sweep/files,packages/jimeng-client/src \
+  --limit 120 \
+  --outDir data/jimeng-lab/proof-20260610-static-inventory
+```
+
+Latest proof found:
+
+```txt
+total_resources=247
+included_non_implemented=120
+high_value_gaps=64
+top_gaps=subject generate_voice, voice clone submit/update/delete, aigc_draft generate capture/compare, CapCut template collection/search payloads
+```
+
 Capture one flow at a time:
 
 - richer image reference controls

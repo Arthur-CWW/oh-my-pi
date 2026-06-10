@@ -1902,7 +1902,7 @@ Do not commit raw captures or generated media. If a redacted summary is promoted
 
 ## Endpoint replay/probe accelerator
 
-`jimeng-browser-proxy capture-analyze`, `jimeng-browser-proxy discovery-worklist`, `jimeng-browser-proxy static-locate`, and `jimeng-browser-proxy endpoint-probe` are the first "tool that builds the tool" layer for this reversal workflow. `capture-analyze` turns CDP `raw-network.jsonl` into ranked endpoint evidence with risk classes, request/response shape summaries, initiator hints, and local replay candidate JSON. `discovery-worklist` merges one or more analyzer outputs with raw probe candidates and static source/bundle hints into a prioritized next-slice queue. `static-locate` turns endpoints from `--endpoint` or analyzer files into local source/bundle occurrences, redacted snippets, symbol hints, and mise-managed `ast-grep` follow-up commands. `endpoint-probe` then replays explicit candidate JSON bodies against one endpoint, stores raw local responses under ignored `data/**`, and writes a normalized shape summary that is small enough to paste into agent context.
+`jimeng-browser-proxy capture-analyze`, `jimeng-browser-proxy discovery-worklist`, `jimeng-browser-proxy static-inventory`, `jimeng-browser-proxy static-locate`, and `jimeng-browser-proxy endpoint-probe` are the first "tool that builds the tool" layer for this reversal workflow. `capture-analyze` turns CDP `raw-network.jsonl` into ranked endpoint evidence with risk classes, request/response shape summaries, initiator hints, and local replay candidate JSON. `discovery-worklist` merges one or more analyzer outputs with raw probe candidates and static source/bundle hints into a prioritized next-slice queue. `static-inventory` scans saved frontend bundles/source roots into a coverage map of implemented, partial, dry-run, captured-only, and unknown resources. `static-locate` turns endpoints from `--endpoint` or analyzer files into local source/bundle occurrences, redacted snippets, symbol hints, and mise-managed `ast-grep` follow-up commands. `endpoint-probe` then replays explicit candidate JSON bodies against one endpoint, stores raw local responses under ignored `data/**`, and writes a normalized shape summary that is small enough to paste into agent context.
 
 Use these tools after a real CDP capture; do not use them as blind fuzzers against write/generate/payment endpoints.
 
@@ -1929,6 +1929,17 @@ bun packages/jimeng-client/src/browser-proxy-cli.ts discovery-worklist \
 ```
 
 Latest proof produced 18 prioritized work items, skipped 2 already-covered capture endpoints by default, and exported one raw per-endpoint replay variant file for `/mweb/v1/get_unread_count`. The top useful gaps were subject/persona `generate_voice`, custom voice clone mutations, CapCut template row/search/collection payload capture, remaining `/mweb/v1/aigc_draft/generate` modes, and older agent/feed/workspace surfaces. Normalized proof files contain no signed URL values or raw probe bodies.
+
+Static inventory example:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts static-inventory \
+  --staticRoot data/jimeng-lab/js-sweep/files,packages/jimeng-client/src \
+  --limit 120 \
+  --outDir data/jimeng-lab/proof-20260610-static-inventory
+```
+
+Latest proof found 247 static frontend/API resources, included the top 120 non-implemented resources, and counted 64 high-value gaps. The top ranked gaps were `/mweb/v1/dreamina_subject/generate_voice`, voice clone submit/update/delete, `/mweb/v1/aigc_draft/generate`, and the CapCut template collection/search endpoints. Normalized proof files contain no credential markers.
 
 Static locator example:
 
@@ -1965,10 +1976,11 @@ The recommended fast loop is:
 1. **Dynamic:** capture one UI action with CDP, saving raw network and redacted summary.
 2. **Analyze:** run `capture-analyze` to rank endpoints, classify risk, summarize shapes, and produce safe replay candidates.
 3. **Prioritize:** run `discovery-worklist` across analyzer outputs, raw probe candidates, and static roots to choose the next small slice.
-4. **Locate:** run `static-locate` to find likely request-builder snippets and get `ast-grep` follow-up commands.
-5. **Static:** use `ast-grep` or targeted bundle search around endpoint names, initiator bundle paths, enum names, and request builder constants when the locator still needs semantic labels.
-6. **Replay:** run `endpoint-probe` with 2-4 likely body variants to identify exact casing and required fields.
-7. **Promote:** implement a dedicated typed CLI command with permissive schema validation and a live/dry-run proof.
+4. **Inventory:** run `static-inventory` periodically on saved bundle roots to detect uncovered API resources and keep the coverage map honest.
+5. **Locate:** run `static-locate` to find likely request-builder snippets and get `ast-grep` follow-up commands.
+6. **Static:** use `ast-grep` or targeted bundle search around endpoint names, initiator bundle paths, enum names, and request builder constants when the locator still needs semantic labels.
+7. **Replay:** run `endpoint-probe` with 2-4 likely body variants to identify exact casing and required fields.
+8. **Promote:** implement a dedicated typed CLI command with permissive schema validation and a live/dry-run proof.
 
 ## Next reverse target (immediate)
 1. Capture real frontend VOD and image/avatar lip-sync submits and compare them against the dry-run provider-input plans before enabling live generation.

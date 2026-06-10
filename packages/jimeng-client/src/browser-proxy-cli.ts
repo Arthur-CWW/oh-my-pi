@@ -90,6 +90,11 @@ import {
   writeJimengStaticLocatorMarkdown,
 } from "./static-locator"
 import {
+  inventoryJimengStaticApis,
+  summarizeJimengStaticInventory,
+  writeJimengStaticInventoryMarkdown,
+} from "./static-inventory"
+import {
   buildJimengHistoryQueueInfoRequest,
   fetchJimengHistoryQueueInfo,
   parseJimengHistoryIdsFlag,
@@ -180,6 +185,7 @@ Commands:
   capture-analyze Analyze raw CDP network JSONL into ranked endpoint/probe candidates
   discovery-worklist Merge capture analysis/static hints into prioritized next API work
   static-locate Locate endpoint request builders in local source/bundle roots
+  static-inventory Inventory frontend API endpoints from local source/bundle roots
   catalog       Probe non-generating model/tool/persona/voice config endpoints
   agent-catalog Fetch normalized agent skills and image/video model catalog
   lip-sync-config Fetch no-spend digital-human/lip-sync model configs
@@ -235,7 +241,7 @@ Options:
   --staticQuery <term[,term]>     Static-locate arbitrary source/bundle search terms
   --contextLines <n>            Snippet context lines for static-locate (default: 3)
   --includeRisky                Include generate/upload/mutate/payment endpoints in replay candidate JSON
-  --includeKnown                Include already-covered endpoints in discovery-worklist
+  --includeKnown                Include already-covered endpoints in discovery-worklist/static-inventory
   --plan <file>                 Dry-run plan JSON for lip-sync-compare
   --endpoint <path|url>          Endpoint path or full URL for endpoint-probe
   --method <GET|POST>            HTTP method for endpoint-probe/capcut-probe (default: POST)
@@ -337,6 +343,10 @@ Examples:
     --analysis data/jimeng-lab/capture-analysis-subject-create/normalized/capture-analyze-<stamp>-analysis.json \\
     --staticRoot packages/jimeng-client/src \\
     --outDir data/jimeng-lab/static-locate-subject-create
+
+  jimeng-browser-proxy static-inventory \\
+    --staticRoot data/jimeng-lab/js-sweep/files,packages/jimeng-client/src \\
+    --outDir data/jimeng-lab/static-inventory
 
   jimeng-browser-proxy session
 
@@ -519,6 +529,7 @@ interface CliArgs {
     | "capture-analyze"
     | "discovery-worklist"
     | "static-locate"
+    | "static-inventory"
     | "catalog"
     | "agent-catalog"
     | "endpoint-probe"
@@ -758,6 +769,25 @@ async function main(argv: string[]): Promise<void> {
     })
     writeFileSync(path.join(dirs.normalizedDir, `${runId}-summary.md`), writeJimengStaticLocatorMarkdown(result), "utf8")
     console.log(`[jimeng-browser-proxy] static-locate saved endpoints=${result.endpoints.length} occurrences=${result.endpointResults.reduce((sum, item) => sum + item.occurrenceCount, 0)}`)
+    return
+  }
+
+  if (args.command === "static-inventory") {
+    if ((args.staticRoots ?? []).length === 0) throw new Error("static-inventory requires --staticRoot")
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const runId = `static-inventory-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const result = inventoryJimengStaticApis({
+      staticRoots: args.staticRoots ?? [],
+      includeKnown: args.includeKnown,
+      limit: args.limit,
+    })
+    writeJson(path.join(dirs.rawDir, `${runId}.json`), result)
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      summary: summarizeJimengStaticInventory(result),
+    })
+    writeFileSync(path.join(dirs.normalizedDir, `${runId}-summary.md`), writeJimengStaticInventoryMarkdown(result), "utf8")
+    console.log(`[jimeng-browser-proxy] static-inventory saved resources=${result.totalResourceCount} included=${result.includedResourceCount} high_value_gaps=${result.highValueGapCount}`)
     return
   }
 
@@ -2854,6 +2884,7 @@ function parseArgs(argv: string[]): CliArgs {
     && command !== "capture-analyze"
     && command !== "discovery-worklist"
     && command !== "static-locate"
+    && command !== "static-inventory"
     && command !== "catalog"
     && command !== "agent-catalog"
     && command !== "endpoint-probe"

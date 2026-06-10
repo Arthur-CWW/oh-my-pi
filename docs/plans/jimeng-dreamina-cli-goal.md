@@ -45,6 +45,12 @@ As of 2026-06-10, the committed Jimeng CLI baseline is:
 - `401a6c1 Add Jimeng capture analyzer CLI`
 - `64b66e2 Add Jimeng lip-sync compare gate`
 - `b77cf2c Add Jimeng discovery worklist CLI`
+- `67527ea Add Jimeng agent catalog CLI`
+- `b5fc63f Add Jimeng static locator CLI`
+- `aa6a97e Enhance Jimeng static locator symbols`
+- `302e088 Document CapCut template method contracts`
+- `8c3dd42 Add signed CapCut endpoint probe`
+- current checkpoint: `Add Jimeng static API inventory CLI`
 
 If the thread goal object lags behind this file after a pause, resume from this document and the latest Git checkpoint. The active working rule is: background-only reversal, direct/API-first implementation, small proven CLI slices, tests and proof artifacts before each commit, and no async daemon until the API surface is settled.
 
@@ -381,6 +387,19 @@ Static request-builder localization is now available as the bridge between workl
 - symbol-search proof bundle: `data/jimeng-lab/proof-20260610-static-locate-capcut-templates-symbols/`
 - latest symbol-search proof searched CapCut template endpoints plus `SearchTemplates`, `GetTemplatesAccordCategory`, `GetBatchTemplatesByCategory`, `FuzzySearchTemplateByTitle`, `GetTemplateHotWords`, and `GetCategories`, found 24 occurrences, and had no signed URLs or credentials in normalized output
 
+Static API inventory is now available as the systematic coverage map:
+
+- `jimeng-browser-proxy static-inventory`
+- offline; does not load a browser session, foreground UI, or spend generation quota
+- input: one or more saved frontend bundle/source roots via `--staticRoot`
+- useful flags: `--limit` and `--includeKnown`
+- scans API endpoint strings and public CapCut `bee_prod` catalog URLs, classifies read/generate/upload/mutate/payment/analytics risk, joins the existing known-command map, and ranks uncovered resources for the next slice
+- default output skips fully implemented endpoints so it stays focused on gaps; `--includeKnown` produces an audit inventory
+- proof bundle: `data/jimeng-lab/proof-20260610-static-inventory/`
+- latest proof scanned `data/jimeng-lab/js-sweep/files` plus `packages/jimeng-client/src`, found 247 resources, included the top 120 non-implemented items, and counted 64 high-value gaps
+- top gaps were subject/persona `generate_voice`, voice clone submit/update/delete, unified `/mweb/v1/aigc_draft/generate` capture/compare, and exact CapCut template search/collection payload capture
+- normalized proof files contain no credential markers
+
 Signed CapCut endpoint replay is now available for no-spend template payload discovery:
 
 - `jimeng-browser-proxy capcut-probe`
@@ -432,7 +451,7 @@ Maximize useful API coverage and proof quality while keeping live submissions co
 - if a frontend-only Jimeng flow truly requires visible UI interaction, first try to reproduce it through background CDP or CuaDriver; if that still cannot work, record the blocked path and ask before interrupting Arthur's flow
 - for unknown frontend flows, prefer a faster hybrid reversal loop over long manual bundle reading or purely dynamic clicking: run background CDP/passive network capture first, use `ast-grep`/targeted structural search to locate the frontend request builder, then replay/compare the direct API request with saved session headers
 - choose static or dynamic evidence by expected leverage, not ideology: use CDP/network truth for actual request bodies and response shapes, use stronger static tools for enum names, option semantics, request-builder branches, and dead-end avoidance
-- promote the hybrid loop into tooling: CDP recorder for dynamic truth, `capture-analyze` for endpoint ranking, `discovery-worklist` for next-slice prioritization, `static-locate --symbol`/`--staticQuery` plus mise-managed `ast-grep` for request-builder semantics, `endpoint-probe` for explicit body replay, then dedicated schema-backed commands for stable contracts
+- promote the hybrid loop into tooling: CDP recorder for dynamic truth, `capture-analyze` for endpoint ranking, `discovery-worklist` and `static-inventory` for next-slice prioritization and coverage audits, `static-locate --symbol`/`--staticQuery` plus mise-managed `ast-grep` for request-builder semantics, `endpoint-probe` for explicit body replay, then dedicated schema-backed commands for stable contracts
 - run `capture-analyze` after every meaningful `jimeng-network-recorder` capture, then run `discovery-worklist` before opening frontend bundles by hand
 - use mise-managed developer CLIs such as `ast-grep` when available; install missing local CLIs with `mise` first unless the tool must be a repo/CI dependency
 - validate external Jimeng/CapCut/provider JSON at the boundary with permissive runtime schemas; allow additive extra fields but fail clearly when relied-on response paths drift
@@ -529,6 +548,7 @@ jimeng-browser-proxy history-records
 jimeng-browser-proxy capture-analyze
 jimeng-browser-proxy discovery-worklist
 jimeng-browser-proxy static-locate
+jimeng-browser-proxy static-inventory
 jimeng-browser-proxy endpoint-probe
 jimeng-browser-proxy video-info
 jimeng-browser-proxy canvas

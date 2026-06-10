@@ -1848,20 +1848,67 @@ Result:
 normalized capcut-probe proofs have no signed URLs or credentials
 ```
 
+## Static Inventory Proof
+
+Offline command, no browser session and no network replay:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts static-inventory \
+  --staticRoot data/jimeng-lab/js-sweep/files,packages/jimeng-client/src \
+  --limit 120 \
+  --outDir data/jimeng-lab/proof-20260610-static-inventory
+```
+
+Result:
+
+```txt
+resources=247
+included=120
+high_value_gaps=64
+top gaps:
+  1 /mweb/v1/dreamina_subject/generate_voice -> approval_or_disposable_fixture
+  2 /mweb/v1/voice/delete -> approval_or_disposable_fixture
+  3 /mweb/v1/voice/submit_task -> approval_or_disposable_fixture
+  4 /mweb/v1/voice/update -> approval_or_disposable_fixture
+  5 /mweb/v1/aigc_draft/generate -> capture_or_compare_before_live
+  9 /lv/v1/cc_web/plane/batch_get_collection_templates -> capture_exact_payload
+  12 /lv/v1/cc_web/replicate/search_templates -> capture_exact_payload
+```
+
+Normalized proof:
+
+```txt
+data/jimeng-lab/proof-20260610-static-inventory/normalized/static-inventory-20260610052044-summary.json
+data/jimeng-lab/proof-20260610-static-inventory/normalized/static-inventory-20260610052044-summary.md
+```
+
+Leak check:
+
+```bash
+rg -n 'x-signature|msToken|verifyFp|sessionid|cookie|authorization|token=|secret=' \
+  data/jimeng-lab/proof-20260610-static-inventory/normalized
+```
+
+Result:
+
+```txt
+static inventory normalized output has no credential markers
+```
+
 ## Verification
 
 ```bash
 bun run jimeng:typecheck
 bun run jimeng:test
-bun packages/jimeng-client/src/browser-proxy-cli.ts --help | rg 'lip-sync-config|voice-clones|voice-clone-submit|capcut-probe|capcut-template-metadata|capcut-categories|overseas-short-videos|subject-create|subject-update|subject-delete|subject-generate-voice|subjects|templates|short-videos'
+bun packages/jimeng-client/src/browser-proxy-cli.ts --help | rg 'static-inventory|lip-sync-config|voice-clones|voice-clone-submit|capcut-probe|capcut-template-metadata|capcut-categories|overseas-short-videos|subject-create|subject-update|subject-delete|subject-generate-voice|subjects|templates|short-videos'
 ```
 
 Result:
 
 ```txt
 typecheck passed
-115 tests passed, 0 failed
-browser-proxy help listed capcut-probe
+117 tests passed, 0 failed
+browser-proxy help listed static-inventory and capcut-probe
 ```
 
 ## Follow-Up

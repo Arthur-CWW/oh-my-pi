@@ -85,6 +85,8 @@ export interface JimengDiscoveryKnownEndpoint {
   note: string
 }
 
+export type JimengDiscoveryRiskClass = z.infer<typeof JimengRiskSchema>
+
 export type JimengDiscoveryRecommendedAction =
   | "probe_then_promote_cli"
   | "capture_request_builder"
@@ -288,6 +290,22 @@ export function buildJimengDiscoveryWorklist(input: {
     items: rankedItems,
     static_only_endpoints: staticEndpoints.filter((endpoint) => !capturedEndpoints.has(endpoint.endpoint)),
   }
+}
+
+export function getJimengDiscoveryKnownEndpoints(): JimengDiscoveryKnownEndpoint[] {
+  return KNOWN_ENDPOINTS.map((endpoint) => ({ ...endpoint }))
+}
+
+export function normalizeJimengDiscoveryEndpoint(value: string | undefined): string | null {
+  return normalizeEndpoint(value)
+}
+
+export function isUsefulJimengDiscoveryEndpoint(endpoint: string): boolean {
+  return isUsefulEndpoint(endpoint)
+}
+
+export function isHighValueJimengDiscoveryEndpoint(endpoint: string): boolean {
+  return isHighValueEndpoint(endpoint)
 }
 
 export function summarizeJimengDiscoveryWorklist(worklist: JimengDiscoveryWorklist): JsonObject {
