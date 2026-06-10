@@ -103,7 +103,7 @@ Current shared helper:
 packages/jimeng-client/src/schema.ts
 ```
 
-Current schema-backed endpoints include `history-queue`, `history-records`, `video-info`, and `agent-catalog`. If Jimeng changes `ret`/`errmsg`/`data` or the relied-on record/media/model paths, the CLI should fail with an explicit `JIMENG_RESPONSE_*_CHANGED` error instead of silently normalizing stale shapes.
+Current schema-backed endpoints include `history-queue`, `history-records`, `video-info`, `agent-catalog`, and `image-models`. If Jimeng changes `ret`/`errmsg`/`data` or the relied-on record/media/model paths, the CLI should fail with an explicit `JIMENG_RESPONSE_*_CHANGED` error instead of silently normalizing stale shapes.
 
 ## Fast Hybrid Reversal Loop
 
@@ -744,6 +744,8 @@ These probes are useful for keeping the CLI/app aware of available models, lip-s
 
 The `skill-list` and `agent-config` subset is now promoted into the focused, schema-backed `jimeng-browser-proxy agent-catalog` command. Use that command for durable official-skill, image-model, video-model, option-enum, input-media-type, unified-edit, and image-control fields.
 
+The direct image model common config is now promoted into the focused, schema-backed `jimeng-browser-proxy image-models` command. Use that command for `/mweb/v1/get_common_config` workbench/default image model keys, feature flags, blend controls, resolution presets, sample-step bounds, and commercial benefit/resource ids.
+
 The two lip-sync config endpoints also have a focused command, `jimeng-browser-proxy lip-sync-config`, because they directly parameterize digital-human/image-avatar mode and VOD video lip-sync mode.
 
 ## Confirmed Saved Subject / Persona List Contract
@@ -1279,7 +1281,7 @@ The 2026-06-09 JS bundle sweep found these useful endpoint groups. Treat rows wi
 | Voice cloning / custom voice | `/mweb/v1/voice/submit_task`, `/mweb/v1/voice/query_task`, `/mweb/v1/voice/update`, `/mweb/v1/voice/delete`; cloned voice listing is implemented as `voice-clones`, task query is implemented for real task ids, and submit/update/delete are dry-run-only until approved/captured |
 | Subject/persona lifecycle | `/mweb/v1/dreamina_subject/get`, `/mweb/v1/dreamina_subject/create`, `/mweb/v1/dreamina_subject/update`, `/mweb/v1/dreamina_subject/delete`, `/mweb/v1/dreamina_subject/generate_voice`; list/create/update/delete are implemented, while generate_voice is dry-run-only until explicit spend approval or captured UI submit |
 | Infinite canvas | `/mweb/v1/infinite_canvas/create_project`, `/mweb/v1/infinite_canvas/conversation`, `/mweb/v1/infinite_canvas/edit`, `/mweb/v1/infinite_canvas/resume`, `/mweb/v1/infinite_canvas/stop_stream`, `/mweb/v1/infinite_canvas/v1/fetch_snapshot`, `/mweb/v1/infinite_canvas/v1/submit_changeset`, `/mweb/v1/infinite_canvas/v1/fetch_changeset` |
-| Reference/image tools | `/mweb/v1/get_common_config`, `/mweb/v1/get_image_description`, `/mweb/v1/get_upload_token`, `/mweb/v1/face_recognize`, `/mweb/v1/blend_preview`, `/mweb/v1/pose_detect`, `/mweb/v1/saliency_seg`, `/mweb/v1/algo_proxy`; image upload, description, face recognition, ControlNet pose/depth/canny preview, pose detect, and object/saliency segmentation are now implemented, while style/reference payload tools still need CLI coverage |
+| Reference/image tools | `/mweb/v1/get_common_config`, `/mweb/v1/get_image_description`, `/mweb/v1/get_upload_token`, `/mweb/v1/face_recognize`, `/mweb/v1/blend_preview`, `/mweb/v1/pose_detect`, `/mweb/v1/saliency_seg`, `/mweb/v1/algo_proxy`; image model common config is implemented as `image-models`; image upload, description, face recognition, ControlNet pose/depth/canny preview, pose detect, and object/saliency segmentation are now implemented, while style/reference payload tools still need CLI coverage |
 | Template/research mining | `/mweb/v1/feed`, `/mweb/v1/feed_short_video`, `/lv/v1/cc_web/plane/get_categories`, public CapCut `bee_prod` metadata JSON, `/lv/v1/cc_web/replicate/search_templates`, `/lv/v1/cc_web/plane/*`; `/mweb/v1/get_explore` is implemented for direct Explore templates and short-video examples, `/mweb/v1/feed_short_video` is implemented as `overseas-short-videos`, CapCut category catalog is implemented as `capcut-categories`, and public CapCut ratio/scene metadata is implemented as `capcut-template-metadata`; CapCut template rows/search/collection endpoints remain capture targets |
 | Assets/upload/editor | `/mweb/v1/get_asset_list`, `/lv/v1/asset/*`, `/lv/v1/editor/image/*`; Jimeng workbench/history listing is implemented as no-spend `assets`, while LV/CapCut asset/editor paths remain capture targets |
 | Audio/video utility | `/mweb/v1/mix_audio_video`, `/mweb/v1/mix_audio_videos`, `/lv/v2/intelligence/tts/curl_sync_everphoto` |

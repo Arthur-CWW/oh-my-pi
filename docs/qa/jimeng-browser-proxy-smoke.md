@@ -501,6 +501,62 @@ Expected result:
 normalized agent-catalog proof has no signed URLs
 ```
 
+## Image Models Common Config Smoke
+
+`image-models` is the schema-backed, no-spend model catalog for the direct image common-config surface. It uses `/mweb/v1/get_common_config` rather than the older creation-agent config wrapper.
+
+Proof command:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts image-models \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --outDir data/jimeng-lab/proof-20260610-image-models
+```
+
+Result:
+
+```txt
+image-models saved models=8 default=0
+model_count=8
+default_model_index=0
+first_selected_model.workbench=high_aes_general_v50
+first_model=图片5.0 Lite
+first_model_sample_steps=16,min=10,max=41
+first_model_resolution_keys=2k,4k
+```
+
+High-value flags observed:
+
+```txt
+control_or_reference_feats=bg_paint,byte_edit,byte_edit_with_custom_ratio,byte_edit_with_empty_prompt,canny,character,depth,face_swap,ip_keep,pose,refuse_image,smart_scale,support_subject
+blend_controls=bg_paint,canny,depth,face_swap,pose
+commercial_benefit_types=image_basic_generate_piece,image_basic_generate_plus,image_basic_v41_2k,image_basic_v41_4k,image_basic_v43_2k,image_basic_v43_4k,image_basic_v46_2k,image_basic_v46_4k,image_basic_v4_pro_2k,image_basic_v4_pro_4k,image_basic_v5_2k,image_basic_v5_4k,image_blend_piece,image_blend_plus,image_inpainting_eraser_piece,image_inpainting_repaint_byteedit_piece,image_inpainting_repaint_piece,image_uhd,image_uhd_4k
+```
+
+Proof files:
+
+```txt
+data/jimeng-lab/proof-20260610-image-models/raw/image-models-20260610063039.json
+data/jimeng-lab/proof-20260610-image-models/normalized/image-models-20260610063039-summary.json
+```
+
+The normalized image-models output was checked for signed URL or credential leakage:
+
+```bash
+if rg -n 'https?://|x-signature|x-expires|sessionid|sid_guard|msToken|odin_tt|passport|cookie|authorization|token=|secret=' \
+  data/jimeng-lab/proof-20260610-image-models/normalized; then
+  exit 1
+else
+  echo "normalized image-models proof has no signed URL or credential markers"
+fi
+```
+
+Expected result:
+
+```txt
+normalized image-models proof has no signed URL or credential markers
+```
+
 ## Endpoint Probe / VOD Metadata Smoke
 
 `endpoint-probe` is the faster replay step for future reversal work. It does not guess or fuzz automatically; it replays explicit JSON body variants from CDP/static evidence, then writes raw local bodies plus normalized request/response shape summaries.

@@ -50,7 +50,8 @@ As of 2026-06-10, the committed Jimeng CLI baseline is:
 - `aa6a97e Enhance Jimeng static locator symbols`
 - `302e088 Document CapCut template method contracts`
 - `8c3dd42 Add signed CapCut endpoint probe`
-- current checkpoint: `Classify Jimeng read-probe dead ends`
+- `4d117a2 Recheck Jimeng live generation`
+- current checkpoint: `Add Jimeng image model config CLI`
 
 If the thread goal object lags behind this file after a pause, resume from this document and the latest Git checkpoint. The active working rule is: background-only reversal, direct/API-first implementation, small proven CLI slices, tests and proof artifacts before each commit, and no async daemon until the API surface is settled.
 
@@ -145,6 +146,16 @@ Agent skill/model catalog is now live-proved without generation spend and schema
 - proof bundle: `data/jimeng-lab/proof-20260610-agent-catalog/`
 - latest proof returned 4 skills, 8 image models, and 5 video models
 - high-value flags included image controls `bg_paint`, `byte_edit`, `canny`, `depth`, `face_swap`, `ip_keep`, `pose`, `support_subject`; video options `fps`, `frames`, `input_media_type`, `multi_frames`, `resolution`, `unified_edit`, `video_aspect_ratio`; and video input media types `prompt`, `first_frame`, `end_frame`, `multi_frame`, and `unified_edit`
+
+Direct image model config is now live-proved without generation spend and schema-backed:
+
+- `jimeng-browser-proxy image-models`
+- direct `/mweb/v1/get_common_config` with frontend-derived body `{ "isClientFilter": true, "needBetaModel": true }` and query flags `needCache` / `needRefresh`
+- useful flags: `--isClientFilter`, `--needBetaModel`, `--needCache`, `--needRefresh`
+- normalizes image model request keys, feature flags, blend controls, feature-config keys, resolution presets, sample-step bounds, commercial benefit/resource ids, model source, max batch count, compliance confirmation flags, and task-cancel support
+- proof bundle: `data/jimeng-lab/proof-20260610-image-models/`
+- latest proof returned 8 image models; default workbench model was `high_aes_general_v50` / `图片5.0 Lite`
+- high-value flags included `bg_paint`, `byte_edit`, `byte_edit_with_custom_ratio`, `byte_edit_with_empty_prompt`, `canny`, `depth`, `face_swap`, `ip_keep`, `pose`, `refuse_image`, `smart_scale`, and `support_subject`
 
 Explore/template mining is now live-proved without generation spend:
 
@@ -541,6 +552,7 @@ Current and near-term commands:
 jimeng-browser-proxy session
 jimeng-browser-proxy catalog
 jimeng-browser-proxy agent-catalog
+jimeng-browser-proxy image-models
 jimeng-browser-proxy voices
 jimeng-browser-proxy tts
 jimeng-browser-proxy sample-voices

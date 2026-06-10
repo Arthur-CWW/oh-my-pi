@@ -107,6 +107,11 @@ import {
   summarizeJimengHistoryRecords,
 } from "./history-records"
 import {
+  buildJimengImageModelsRequest,
+  fetchJimengImageModels,
+  summarizeJimengImageModels,
+} from "./image-models"
+import {
   buildJimengVideoInfoRequest,
   fetchJimengVideoInfo,
   parseJimengVidCsvFlag,
@@ -188,6 +193,7 @@ Commands:
   static-inventory Inventory frontend API endpoints from local source/bundle roots
   catalog       Probe non-generating model/tool/persona/voice config endpoints
   agent-catalog Fetch normalized agent skills and image/video model catalog
+  image-models  Fetch no-spend image generation model/config catalog
   lip-sync-config Fetch no-spend digital-human/lip-sync model configs
   lip-sync-compare Offline compare a lip-sync dry-run plan against captured UI submit
   voices        Fetch the built-in voice library from a captured signed feed request
@@ -287,6 +293,10 @@ Options:
   --feed-refer <value>          Explore feed refer, e.g. feed_refresh, feed_enterauto, or feed_loadmore
   --capcut-lan <value>          CapCut template request language header (default: en)
   --capcut-loc <value>          CapCut template request location header (default: us)
+  --isClientFilter <true|false> Image model config client filtering (default: true)
+  --needBetaModel <true|false>  Include beta image models (default: true)
+  --needCache <true|false>      Common config query needCache (default: true)
+  --needRefresh <true|false>    Common config query needRefresh (default: false)
   --scene <image|video|file|n>   upload-token scene (default: image)
   --file <path>                  Local media file for upload-image/upload-video; alias for --image in image2video
   --video <path>                 Local reference video for lip-sync; uploads to VOD in dry-run planning
@@ -440,6 +450,10 @@ Examples:
   jimeng-browser-proxy capcut-template-metadata \\
     --outDir data/jimeng-lab/cli-capcut-template-metadata-smoke
 
+  jimeng-browser-proxy image-models \\
+    --session data/jimeng-lab/raw/session-bundle-current.json \\
+    --outDir data/jimeng-lab/cli-image-models-smoke
+
   jimeng-browser-proxy subjects \\
     --limit 20 \\
     --outDir data/jimeng-lab/cli-subjects-smoke
@@ -532,6 +546,7 @@ interface CliArgs {
     | "static-inventory"
     | "catalog"
     | "agent-catalog"
+    | "image-models"
     | "endpoint-probe"
     | "lip-sync-config"
     | "lip-sync-compare"
@@ -627,6 +642,10 @@ interface CliArgs {
   feedRefer?: string
   capcutLan?: string
   capcutLoc?: string
+  isClientFilter?: boolean
+  needBetaModel?: boolean
+  needCache?: boolean
+  needRefresh?: boolean
   scene?: string
   file?: string
   video?: string
@@ -1018,6 +1037,54 @@ async function main(argv: string[]): Promise<void> {
     })
     const summaryRecord = summary.config && typeof summary.config === "object" && !Array.isArray(summary.config) ? summary.config : {}
     console.log(`[jimeng-browser-proxy] agent-catalog saved endpoints=${result.endpoints.join(",")} imageModels=${summaryRecord.image_model_count ?? "n/a"} videoModels=${summaryRecord.video_model_count ?? "n/a"}`)
+    return
+  }
+
+  if (args.command === "image-models") {
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const query = {
+      isClientFilter: args.isClientFilter,
+      needBetaModel: args.needBetaModel,
+      needCache: args.needCache,
+      needRefresh: args.needRefresh,
+    }
+    const request = buildJimengImageModelsRequest(query)
+    const runId = `image-models-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    if (args.dryRun) {
+      writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
+        command: args.command,
+        endpoint_sequence: ["/mweb/v1/get_common_config"],
+        query,
+        request,
+        browser_session: redactSession(session),
+      })
+      writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+        command: args.command,
+        endpoint: "/mweb/v1/get_common_config",
+        query,
+        request,
+      })
+      console.log(`[jimeng-browser-proxy] image-models dry run saved`)
+      return
+    }
+
+    const result = await fetchJimengImageModels({ session, query })
+    writeJson(path.join(dirs.rawDir, `${runId}.json`), {
+      endpoint: result.endpoint,
+      http_status: result.httpStatus,
+      ret: result.ret,
+      errmsg: result.errmsg,
+      response_text_sha256: result.responseTextSha256,
+      query: result.query,
+      request: result.request,
+      body: result.body,
+    })
+    const summary = summarizeJimengImageModels(result)
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      summary,
+    })
+    console.log(`[jimeng-browser-proxy] image-models saved models=${result.modelCount} default=${result.defaultModelIndex ?? "none"}`)
     return
   }
 
@@ -2887,6 +2954,7 @@ function parseArgs(argv: string[]): CliArgs {
     && command !== "static-inventory"
     && command !== "catalog"
     && command !== "agent-catalog"
+    && command !== "image-models"
     && command !== "endpoint-probe"
     && command !== "lip-sync-config"
     && command !== "lip-sync-compare"
@@ -2956,6 +3024,10 @@ function parseArgs(argv: string[]): CliArgs {
   const direction = flags.direction ? Number(flags.direction) : undefined
   const orderBy = flags["order-by"] ? Number(flags["order-by"]) : undefined
   const endTimeStamp = flags.endTimeStamp ? Number(flags.endTimeStamp) : undefined
+  const isClientFilter = parseOptionalBooleanFlag(flags.isClientFilter, "--isClientFilter")
+  const needBetaModel = parseOptionalBooleanFlag(flags.needBetaModel, "--needBetaModel")
+  const needCache = parseOptionalBooleanFlag(flags.needCache, "--needCache")
+  const needRefresh = parseOptionalBooleanFlag(flags.needRefresh, "--needRefresh")
   if (seed !== undefined && (!Number.isInteger(seed) || seed < 0 || seed > 4294967295)) {
     throw new Error("--seed must be an integer from 0 to 4294967295")
   }
@@ -3073,6 +3145,10 @@ function parseArgs(argv: string[]): CliArgs {
     feedRefer: flags["feed-refer"],
     capcutLan: flags["capcut-lan"],
     capcutLoc: flags["capcut-loc"],
+    isClientFilter,
+    needBetaModel,
+    needCache,
+    needRefresh,
     scene: flags.scene,
     file: flags.file,
     video: flags.video,
@@ -3166,6 +3242,14 @@ function parseEndpointProbeMethod(value: string | undefined): "GET" | "POST" | u
   const normalized = value.trim().toUpperCase()
   if (normalized === "GET" || normalized === "POST") return normalized
   throw new Error("--method must be GET or POST")
+}
+
+function parseOptionalBooleanFlag(value: string | undefined, flagName: string): boolean | undefined {
+  if (value === undefined) return undefined
+  const normalized = value.trim().toLowerCase()
+  if (normalized === "true") return true
+  if (normalized === "false") return false
+  throw new Error(`${flagName} must be true or false`)
 }
 
 function readInlineOrFile(value: string): string {

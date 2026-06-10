@@ -169,6 +169,7 @@ Important capability notes from help output:
 ### 6) Non-generating model/tool/persona/voice catalog
 - `POST https://jimeng.jianying.com/mweb/v1/creation_agent/v2/skill/list`
 - `POST https://jimeng.jianying.com/mweb/v1/creation_agent/v2/get_agent_config`
+- `POST https://jimeng.jianying.com/mweb/v1/get_common_config`
 - `POST https://jimeng.jianying.com/mweb/v1/get_user_local_item_list`
 - `POST https://jimeng.jianying.com/mweb/v1/video_generate/get_common_config`
 - `POST https://jimeng.jianying.com/mweb/v1/dreamina_subject/get`
@@ -200,6 +201,32 @@ bun packages/jimeng-client/src/browser-proxy-cli.ts agent-catalog \
 ```
 
 Latest proof returned 4 official skills, 8 image models, and 5 video models. Normalized output records model request keys, image control feats, blend controls, resolution presets, frame/fps/aspect option enums, input media types, unified-edit material limits, max batch counts, compliance flags, and task-cancel support without signed URLs. High-value video input media types included `prompt`, `first_frame`, `end_frame`, `multi_frame`, and `unified_edit`.
+
+The direct image model common-config subset also has a dedicated schema-backed command:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts image-models \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --outDir data/jimeng-lab/proof-20260610-image-models
+```
+
+Request:
+
+```json
+{
+  "isClientFilter": true,
+  "needBetaModel": true
+}
+```
+
+Query defaults:
+
+```txt
+needCache=true
+needRefresh=false
+```
+
+Latest proof returned 8 image models, default index `0`, and first selected workbench model `high_aes_general_v50` / `图片5.0 Lite`. Normalized output records feature flags, blend controls, feature-config keys, resolution presets, sample-step bounds, commercial benefit/resource ids, model source, max batch count, compliance flags, and task-cancel support without signed URLs.
 
 These probes are read/config/list calls and should not consume generation credits. They still require a live logged-in session bundle.
 
@@ -496,7 +523,7 @@ Frontend bundle scan found these UGC-useful groups, but they are not yet direct-
 - voice clone/custom voice: `/mweb/v1/voice/submit_task`, `/mweb/v1/voice/query_task`, `/mweb/v1/voice/update`, `/mweb/v1/voice/delete`
 - subject/persona CRUD and voice: `/mweb/v1/dreamina_subject/get`, `/mweb/v1/dreamina_subject/create`, `/mweb/v1/dreamina_subject/update`, `/mweb/v1/dreamina_subject/delete`, `/mweb/v1/dreamina_subject/generate_voice`; list/create/update/delete are implemented, while generate_voice is dry-run-only until explicit spend approval or UI capture
 - infinite canvas: `/mweb/v1/infinite_canvas/create_project`, `/mweb/v1/infinite_canvas/conversation`, `/mweb/v1/infinite_canvas/edit`, `/mweb/v1/infinite_canvas/resume`, `/mweb/v1/infinite_canvas/stop_stream`, `/mweb/v1/infinite_canvas/v1/fetch_snapshot`, `/mweb/v1/infinite_canvas/v1/submit_changeset`, `/mweb/v1/infinite_canvas/v1/fetch_changeset`
-- reference/image tools: `/mweb/v1/get_common_config`, `/mweb/v1/get_image_description`, `/mweb/v1/get_upload_token`, `/mweb/v1/face_recognize`, `/mweb/v1/blend_preview`, `/mweb/v1/pose_detect`, `/mweb/v1/saliency_seg`, `/mweb/v1/algo_proxy`; upload, description, face recognition, ControlNet pose/depth/canny preview, pose detect, and object/saliency segmentation are now direct-client commands, while style/reference payload tools remain capture targets
+- reference/image tools: `/mweb/v1/get_common_config`, `/mweb/v1/get_image_description`, `/mweb/v1/get_upload_token`, `/mweb/v1/face_recognize`, `/mweb/v1/blend_preview`, `/mweb/v1/pose_detect`, `/mweb/v1/saliency_seg`, `/mweb/v1/algo_proxy`; image model common config is implemented as `image-models`; upload, description, face recognition, ControlNet pose/depth/canny preview, pose detect, and object/saliency segmentation are now direct-client commands, while style/reference payload tools remain capture targets
 - template/research mining: `/mweb/v1/feed`, `/mweb/v1/get_explore`, `/mweb/v1/feed_short_video`, `/lv/v1/cc_web/plane/get_categories`, public CapCut `bee_prod` metadata JSON, `/lv/v1/cc_web/replicate/search_templates`, `/lv/v1/cc_web/plane/*`; direct `/mweb/v1/get_explore` support is implemented for both templates and short-video examples, `/mweb/v1/feed_short_video` is implemented as `overseas-short-videos`, CapCut category catalog is implemented as `capcut-categories`, and public CapCut ratio/scene metadata is implemented as `capcut-template-metadata`; CapCut template rows/search/collection payloads still need real UI capture
 
 Next step is to drive those UI flows one at a time with background CDP recording, then create dry-run patchers before live calls.
@@ -1825,6 +1852,7 @@ Current support matrix:
 | `static-locate` | implemented in `jimeng-browser-proxy` | Offline source/bundle locator for endpoint request builders; writes redacted snippets, symbol hints, and mise-managed `ast-grep` follow-up commands without loading a browser session. |
 | `endpoint-probe` | implemented in `jimeng-browser-proxy` | Generic explicit replay/probe helper for candidate JSON body variants; writes raw local response plus normalized request/response shape summaries for faster promotion into typed commands. |
 | `agent-catalog` | implemented in `jimeng-browser-proxy` | No-spend schema-backed `/mweb/v1/creation_agent/v2/skill/list` and `/mweb/v1/creation_agent/v2/get_agent_config` catalog for official agent skills, image/video model request keys, option enums, input media types, unified-edit material limits, and image control features. |
+| `image-models` | implemented in `jimeng-browser-proxy` | No-spend schema-backed `/mweb/v1/get_common_config` catalog for image model keys, default workbench model, feature flags, blend controls, resolution presets, sample-step bounds, and commercial benefit/resource ids. |
 | `templates` | implemented in `jimeng-browser-proxy` | No-spend direct `/mweb/v1/get_explore` template mining with prompt/model/usage normalization. |
 | `overseas-short-videos` | implemented in `jimeng-browser-proxy` | No-spend direct `/mweb/v1/feed_short_video` short-video/reference mining with ranking and video metadata normalization. |
 | `capcut-categories` | implemented in `jimeng-browser-proxy` | No-spend signed CapCut `/lv/v1/cc_web/plane/get_categories` commercial template category catalog. |

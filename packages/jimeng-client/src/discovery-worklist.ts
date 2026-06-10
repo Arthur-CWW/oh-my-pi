@@ -390,6 +390,7 @@ const KNOWN_ENDPOINTS: JimengDiscoveryKnownEndpoint[] = [
   known("/mweb/v1/get_history_by_ids", "implemented", "history-records", "No-spend history lookup by submit/history id."),
   known("/mweb/v1/get_history_queue_info", "implemented", "history-queue", "No-spend queue/progress lookup."),
   known("/mweb/v1/get_video_by_vid", "implemented", "video-info", "No-spend VOD metadata lookup."),
+  known("/mweb/v1/get_common_config", "implemented", "image-models", "No-spend image model/common config catalog."),
   known("/mweb/v1/video_generate/get_common_config", "implemented", "lip-sync-config", "No-spend video/lip-sync model config."),
   known("/mweb/v1/get_user_local_item_list", "implemented", "voice-clones", "No-spend cloned voice/user local item listing."),
   known("/mweb/v1/voice/submit_task", "dry_run_only", "voice-clone-submit", "Voice clone submit may create assets or consume quota."),
