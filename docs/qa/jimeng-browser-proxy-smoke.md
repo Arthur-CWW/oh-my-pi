@@ -2492,6 +2492,26 @@ rg -n -P 'x-signature|authorization|cookie|sessionid|sid=|msToken|verifyFp|X-Kag
 
 Expected result: no matches.
 
+## Risk-Control Breaker Smoke
+
+No-spend unit proof for local `1019` / `shark not pass` cooldown behavior:
+
+```bash
+mkdir -p data/jimeng-lab/proof-20260610-risk-control-breaker
+bun test packages/jimeng-client/test/client.test.ts \
+  | tee data/jimeng-lab/proof-20260610-risk-control-breaker/client-test.log
+```
+
+Result:
+
+```txt
+8 tests passed, including:
+- requestText opens a risk-control cooldown after a shark response
+- risk-control breaker respects configurable consecutive hit budget
+```
+
+Default behavior: `JimengClient.requestText` opens a 10 minute local cooldown after the first consecutive `ret=1019` / `shark not pass` response. During cooldown, follow-up calls fail locally as `RISK_CONTROL_COOLDOWN_ACTIVE` and do not call Jimeng again.
+
 ## Paid-Live Generation Smoke
 
 Arthur explicitly approved a small paid/subscription-account smoke on 2026-06-10. This proof distinguishes **paid-live generation** from read-only/config/upload live API calls.
@@ -2914,7 +2934,7 @@ Result:
 
 ```txt
 typecheck passed
-142 tests passed, 0 failed
+144 tests passed, 0 failed
 browser-proxy help listed static-inventory, account-credit, CapCut collection/detail/editor-catalog, and infinite-canvas commands
 paid smoke normalized files have no live token markers
 ```

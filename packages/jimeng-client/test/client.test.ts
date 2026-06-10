@@ -202,6 +202,110 @@ describe("JimengClient", () => {
     ).rejects.toBeInstanceOf(JimengError)
   })
 
+  test("requestText opens a risk-control cooldown after a shark response", async () => {
+    let nowMs = 1_000
+    let requestCount = 0
+    const client = new JimengClient({
+      fetch: async () => {
+        requestCount += 1
+        return new Response(JSON.stringify({ ret: 1019, errmsg: "shark not pass" }), { status: 200 })
+      },
+      riskControlBreaker: {
+        cooldownMs: 60_000,
+        nowMs: () => nowMs,
+      },
+    })
+
+    await expect(
+      client.requestText("https://jimeng.example.test/mweb/v1/aigc_draft/generate", {
+        method: "POST",
+        body: "{}",
+      }),
+    ).rejects.toMatchObject({
+      category: "risk_control",
+      code: "SHARK_NOT_PASS",
+      retryable: false,
+    })
+
+    expect(client.getRiskControlBreakerState()).toEqual({
+      consecutiveHits: 1,
+      cooldownUntilMs: 61_000,
+      cooldownRemainingMs: 60_000,
+    })
+
+    await expect(
+      client.requestText("https://jimeng.example.test/mweb/v1/get_common_config", {
+        method: "POST",
+        body: "{}",
+      }),
+    ).rejects.toMatchObject({
+      category: "risk_control",
+      code: "RISK_CONTROL_COOLDOWN_ACTIVE",
+      retryable: false,
+    })
+    expect(requestCount).toBe(1)
+
+    nowMs = 61_001
+    await expect(
+      client.requestText("https://jimeng.example.test/mweb/v1/get_common_config", {
+        method: "POST",
+        body: "{}",
+      }),
+    ).rejects.toMatchObject({
+      category: "risk_control",
+      code: "SHARK_NOT_PASS",
+    })
+    expect(requestCount).toBe(2)
+  })
+
+  test("risk-control breaker respects configurable consecutive hit budget", async () => {
+    let nowMs = 10_000
+    const responses = [
+      JSON.stringify({ ret: 1019, errmsg: "shark not pass" }),
+      JSON.stringify({ ret: 0, errmsg: "success" }),
+      JSON.stringify({ ret: 1019, errmsg: "shark not pass" }),
+      JSON.stringify({ ret: 1019, errmsg: "shark not pass" }),
+    ]
+    const client = new JimengClient({
+      fetch: async () => {
+        const text = responses.shift()
+        if (!text) throw new Error("No mocked response")
+        return new Response(text, { status: 200 })
+      },
+      riskControlBreaker: {
+        maxConsecutiveHits: 2,
+        cooldownMs: 30_000,
+        nowMs: () => nowMs,
+      },
+    })
+
+    await expect(client.requestText("https://jimeng.example.test/risk-1", { method: "POST" }))
+      .rejects.toMatchObject({ category: "risk_control", code: "SHARK_NOT_PASS" })
+    expect(client.getRiskControlBreakerState()).toEqual({
+      consecutiveHits: 1,
+      cooldownUntilMs: 0,
+      cooldownRemainingMs: 0,
+    })
+
+    await expect(client.requestText("https://jimeng.example.test/ok", { method: "POST" }))
+      .resolves.toMatchObject({ status: 200 })
+    expect(client.getRiskControlBreakerState().consecutiveHits).toBe(0)
+
+    await expect(client.requestText("https://jimeng.example.test/risk-2", { method: "POST" }))
+      .rejects.toMatchObject({ category: "risk_control", code: "SHARK_NOT_PASS" })
+    await expect(client.requestText("https://jimeng.example.test/risk-3", { method: "POST" }))
+      .rejects.toMatchObject({ category: "risk_control", code: "SHARK_NOT_PASS" })
+    expect(client.getRiskControlBreakerState()).toEqual({
+      consecutiveHits: 2,
+      cooldownUntilMs: 40_000,
+      cooldownRemainingMs: 30_000,
+    })
+
+    nowMs = 20_000
+    await expect(client.requestText("https://jimeng.example.test/blocked", { method: "POST" }))
+      .rejects.toMatchObject({ category: "risk_control", code: "RISK_CONTROL_COOLDOWN_ACTIVE" })
+  })
+
   test("collectImageUrls deduplicates URL sources", () => {
     const urls = collectImageUrls({
       status: 45,

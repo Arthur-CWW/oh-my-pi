@@ -182,6 +182,14 @@ No-spend direct endpoint concurrency probing is now live-proved:
 - proof bundles: `data/jimeng-lab/proof-20260610-rate-probe-common-config-c{1,3,6,10,16,32,64,96,128,192,256,512,768,1024}/`
 - this is a read-only config endpoint bound, not a safe generation-submit limit. Keep paid generation submission concurrency at `1` until an explicitly approved capped test says otherwise.
 
+Shared Jimeng risk-control breaker is now implemented in the consolidated client path:
+
+- `JimengClient.requestText` detects provider `ret=1019` and raw `shark not pass` text before downstream endpoint parsers run
+- default breaker opens a 10 minute cooldown after the first consecutive risk-control hit
+- the budget is configurable with `riskControlBreaker.maxConsecutiveHits`, `cooldownMs`, and `nowMs` for tests
+- follow-up requests during cooldown fail locally as `RISK_CONTROL_COOLDOWN_ACTIVE`, without calling the provider again
+- focused proof: `data/jimeng-lab/proof-20260610-risk-control-breaker/client-test.log`
+
 Infinite canvas project metadata is now live-proved without generation spend and schema-backed:
 
 - `jimeng-browser-proxy infinite-canvas`

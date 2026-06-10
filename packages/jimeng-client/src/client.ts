@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto"
 import { setTimeout as sleep } from "node:timers/promises"
 import { type JimengOp, type PreparedJimengRun } from "./capture"
-import { jimengError } from "./errors"
+import { JimengError, jimengError } from "./errors"
 import { extractImageSubmitInfoFromSseText, extractSubmitIdFromSseText } from "./sse"
 
 export interface JimengFetchResponse {
@@ -78,13 +78,34 @@ export interface JimengRunResult {
 
 export interface JimengClientOptions {
   fetch?: JimengFetch
+  riskControlBreaker?: JimengRiskControlBreakerOptions
+}
+
+export interface JimengRiskControlBreakerOptions {
+  maxConsecutiveHits?: number
+  cooldownMs?: number
+  nowMs?: () => number
+}
+
+export interface JimengRiskControlBreakerState {
+  consecutiveHits: number
+  cooldownUntilMs: number
+  cooldownRemainingMs: number
 }
 
 export class JimengClient {
   #fetch: JimengFetch
+  #riskControlHits = 0
+  #riskControlCooldownUntilMs = 0
+  #riskControlMaxHits: number
+  #riskControlCooldownMs: number
+  #nowMs: () => number
 
   constructor(options: JimengClientOptions = {}) {
     this.#fetch = options.fetch ?? (fetch as unknown as JimengFetch)
+    this.#riskControlMaxHits = positiveInteger(options.riskControlBreaker?.maxConsecutiveHits ?? 1, "riskControlBreaker.maxConsecutiveHits")
+    this.#riskControlCooldownMs = nonNegativeInteger(options.riskControlBreaker?.cooldownMs ?? 10 * 60_000, "riskControlBreaker.cooldownMs")
+    this.#nowMs = options.riskControlBreaker?.nowMs ?? Date.now
   }
 
   async submitPrepared(prepared: PreparedJimengRun): Promise<JimengSubmitResult> {
@@ -286,9 +307,13 @@ export class JimengClient {
 
   async requestText(url: string, init: RequestInit): Promise<{ status: number; text: string }> {
     try {
+      this.#assertRiskControlCooldown(url)
       const response = await this.#fetch(url, init)
-      return { status: response.status, text: await response.text() }
+      const text = await response.text()
+      this.#observeRiskControlText(url, text)
+      return { status: response.status, text }
     } catch (error) {
+      if (error instanceof JimengError) throw error
       throw jimengError({
         category: "transport",
         code: "HTTP_REQUEST_FAILED",
@@ -296,6 +321,16 @@ export class JimengClient {
         retryable: true,
         details: { url },
       })
+    }
+  }
+
+  getRiskControlBreakerState(): JimengRiskControlBreakerState {
+    const nowMs = this.#nowMs()
+    const remaining = Math.max(0, this.#riskControlCooldownUntilMs - nowMs)
+    return {
+      consecutiveHits: this.#riskControlHits,
+      cooldownUntilMs: remaining > 0 ? this.#riskControlCooldownUntilMs : 0,
+      cooldownRemainingMs: remaining,
     }
   }
 
@@ -313,6 +348,57 @@ export class JimengClient {
         details: { url },
       })
     }
+  }
+
+  #assertRiskControlCooldown(url: string): void {
+    const nowMs = this.#nowMs()
+    if (this.#riskControlCooldownUntilMs <= nowMs) {
+      this.#riskControlCooldownUntilMs = 0
+      return
+    }
+
+    throw jimengError({
+      category: "risk_control",
+      code: "RISK_CONTROL_COOLDOWN_ACTIVE",
+      message: "Jimeng risk-control cooldown is active; refusing to send another request.",
+      retryable: false,
+      details: {
+        url,
+        consecutiveRiskControlHits: this.#riskControlHits,
+        cooldownUntilMs: this.#riskControlCooldownUntilMs,
+        cooldownRemainingMs: this.#riskControlCooldownUntilMs - nowMs,
+      },
+    })
+  }
+
+  #observeRiskControlText(url: string, text: string): void {
+    const signal = detectRiskControlSignal(safeJson(text), text)
+    if (!signal) {
+      this.#riskControlHits = 0
+      return
+    }
+
+    this.#riskControlHits += 1
+    const nowMs = this.#nowMs()
+    let cooldownUntilMs = 0
+    if (this.#riskControlCooldownMs > 0 && this.#riskControlHits >= this.#riskControlMaxHits) {
+      cooldownUntilMs = nowMs + this.#riskControlCooldownMs
+      this.#riskControlCooldownUntilMs = cooldownUntilMs
+    }
+
+    throw jimengError({
+      category: "risk_control",
+      code: "SHARK_NOT_PASS",
+      message: "risk_control: shark not pass",
+      retryable: false,
+      details: {
+        url,
+        ret: signal.ret ?? null,
+        errmsg: signal.errmsg ?? null,
+        consecutiveRiskControlHits: this.#riskControlHits,
+        cooldownUntilMs: cooldownUntilMs || null,
+      },
+    })
   }
 }
 
@@ -347,12 +433,8 @@ export function collectImageUrls(record: JimengHistoryRecord): string[] {
 }
 
 export function assertNoRiskError(body: unknown, rawText: string): void {
-  const parsed = asRecord(body)
-  const ret = parsed?.ret
-  const errmsg = typeof parsed?.errmsg === "string" ? parsed.errmsg : ""
-  const combined = `${errmsg} ${rawText}`.toLowerCase()
-
-  if (ret === 1019 || ret === "1019" || combined.includes("shark not pass")) {
+  const signal = detectRiskControlSignal(body, rawText)
+  if (signal) {
     throw jimengError({
       category: "risk_control",
       code: "SHARK_NOT_PASS",
@@ -360,6 +442,28 @@ export function assertNoRiskError(body: unknown, rawText: string): void {
       retryable: false,
     })
   }
+}
+
+export function detectRiskControlSignal(body: unknown, rawText: string): { ret: unknown; errmsg: string | null } | null {
+  const parsed = asRecord(body)
+  const ret = parsed?.ret
+  const errmsg = typeof parsed?.errmsg === "string" ? parsed.errmsg : null
+  const combined = `${errmsg ?? ""} ${rawText}`.toLowerCase()
+
+  if (ret === 1019 || ret === "1019" || combined.includes("shark not pass")) {
+    return { ret, errmsg }
+  }
+  return null
+}
+
+function positiveInteger(value: number, name: string): number {
+  if (Number.isInteger(value) && value > 0) return value
+  throw new Error(`${name} must be a positive integer`)
+}
+
+function nonNegativeInteger(value: number, name: string): number {
+  if (Number.isInteger(value) && value >= 0) return value
+  throw new Error(`${name} must be a non-negative integer`)
 }
 
 function safeJson(value: string): unknown {

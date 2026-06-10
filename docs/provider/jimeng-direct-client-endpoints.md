@@ -260,7 +260,16 @@ concurrency=1024 requests=1024 completed=1024 stopped=false http=200x1024 ret=0x
 
 This means no rate limit was observed up to concurrency `1024` on that read-only config endpoint. Tail latency starts to stretch sharply at the highest tier, and this does **not** establish a safe limit for paid generation, upload, mutation, or polling endpoints.
 
-### 6.0.2) Signed account credit balance
+### 6.0.2) Shared risk-control breaker
+
+- Implemented in `JimengClient.requestText`, so all consolidated direct/browser-proxy commands share the same guard.
+- Detects provider `ret=1019` and raw `shark not pass` response text before downstream endpoint parsers run.
+- Default budget: open a local 10 minute cooldown after the first consecutive risk-control hit.
+- Configurable constructor fields: `riskControlBreaker.maxConsecutiveHits`, `cooldownMs`, and `nowMs`.
+- During cooldown, the client raises `RISK_CONTROL_COOLDOWN_ACTIVE` locally and does not send another provider request.
+- Focused proof: `data/jimeng-lab/proof-20260610-risk-control-breaker/client-test.log`.
+
+### 6.0.3) Signed account credit balance
 
 - Implemented as `jimeng-browser-proxy account-credit`.
 - Direct endpoint: `POST https://jimeng.jianying.com/commerce/v1/benefits/user_credit`
@@ -292,7 +301,7 @@ vip_credit=3990
 total_credit=3990
 ```
 
-### 6.0.3) Infinite canvas project metadata
+### 6.0.4) Infinite canvas project metadata
 
 - Implemented as `jimeng-browser-proxy infinite-canvas`.
 - No-generation/no-spend read path for the canvas workspace project list, one project detail lookup, custom canvas ratio presets, and conversation list.
@@ -2013,7 +2022,8 @@ Current support matrix:
 | `discovery-worklist` | implemented in `jimeng-browser-proxy` | Offline merge/ranking layer over one or more `capture-analyze` outputs, raw probe candidates, and static source/bundle roots. Emits next-slice actions and raw per-endpoint replay variant files without loading a browser session. |
 | `static-locate` | implemented in `jimeng-browser-proxy` | Offline source/bundle locator for endpoint request builders; writes redacted snippets, symbol hints, and mise-managed `ast-grep` follow-up commands without loading a browser session. |
 | `endpoint-probe` | implemented in `jimeng-browser-proxy` | Generic explicit replay/probe helper for candidate JSON body variants; writes raw local response plus normalized request/response shape summaries for faster promotion into typed commands. |
-| `rate-probe` | implemented in `jimeng-browser-proxy` | Bounded concurrency/rate probe for no-spend read/config endpoints with stop-on-429/auth/risk behavior, latency percentiles, status/ret counts, and hash-only response evidence. Latest `/mweb/v1/get_common_config` sweep found no limit through concurrency `256`. |
+| shared risk-control breaker | implemented in `JimengClient` | All consolidated direct/browser-proxy requests now detect `ret=1019` / `shark not pass`, open a local cooldown by default, and refuse follow-up provider calls until cooldown expires. |
+| `rate-probe` | implemented in `jimeng-browser-proxy` | Bounded concurrency/rate probe for no-spend read/config endpoints with stop-on-429/auth/risk behavior, latency percentiles, status/ret counts, and hash-only response evidence. Latest `/mweb/v1/get_common_config` sweep found no limit through concurrency `1024`. |
 | `account-credit` | implemented in `jimeng-browser-proxy` | Signed no-spend `/commerce/v1/benefits/user_credit` credit-balance read. Latest proof returned total 3990 credits, all VIP credits. |
 | `agent-catalog` | implemented in `jimeng-browser-proxy` | No-spend schema-backed `/mweb/v1/creation_agent/v2/skill/list` and `/mweb/v1/creation_agent/v2/get_agent_config` catalog for official agent skills, image/video model request keys, option enums, input media types, unified-edit material limits, and image control features. |
 | `image-models` | implemented in `jimeng-browser-proxy` | No-spend schema-backed `/mweb/v1/get_common_config` catalog for image model keys, default workbench model, feature flags, blend controls, resolution presets, sample-step bounds, and commercial benefit/resource ids. |
