@@ -923,11 +923,33 @@ raw=data/jimeng-lab/proof-20260610-capcut-template-metadata/raw/capcut-template-
 summary=data/jimeng-lab/proof-20260610-capcut-template-metadata/normalized/capcut-template-metadata-20260609231824-summary.json
 ```
 
-Remaining CapCut template endpoints are discovered but not implemented:
+Remaining CapCut template endpoints are discovered and method-level request builders are recovered, but not implemented as stable row/search commands:
 
-- `/lv/v1/cc_web/replicate/search_templates` returned `ret=1000 param error` for guessed keyword/query/search-word payloads; capture the actual UI call before exposing it.
-- `/lv/v1/cc_web/plane/get_collection_templates` and `/lv/v1/cc_web/plane/batch_get_collection_templates` returned `ret=1000 param error` for guessed category-id payloads; capture the actual UI call before exposing them.
-- `/lv/v1/cc_web/plane/fuzzy_search_templates` accepted POSTs but returned empty lists for tested English title/query fields; do not claim useful template search yet.
+- `/lv/v1/cc_web/replicate/search_templates`
+  - frontend method: `searchTemplates(e)`
+  - maps `sdkVersion`, `searchId`, `enterFrom`, `categoryIds`, `sceneId`, `featureKey`, `colors`, and `graphNum` into snake_case API fields, then spreads remaining `e` fields into the body
+  - guessed keyword/query/search-word payloads returned `ret=1000 param error`; capture the actual UI call before exposing it
+- `/lv/v1/cc_web/plane/get_collection_templates`
+  - frontend method: `getTemplateAccordCategory(e)`
+  - injects `{ sdk_version, enter_from: "feed", count: 20, lang }`, then spreads `e`
+  - guessed category-id payloads returned `ret=1000 param error`; capture the actual UI call before exposing it
+- `/lv/v1/cc_web/plane/batch_get_collection_templates`
+  - frontend method: `getBatchTemplatesByCategory(e)`
+  - passes `e` through directly and expects an array response with per-category `item_list`
+- `/lv/v1/cc_web/plane/fuzzy_search_templates`
+  - frontend method: `fuzzySearchTemplateByTitle(e)`
+  - passes `e` through directly and expects `data.item_list`
+  - accepted direct no-spend POSTs but returned empty lists for `makeup`, `beauty`, `korean beauty`, `skincare`, `美妆`, `护肤`, and `韩国美妆`; do not claim useful template search yet
+
+Method-level static proof:
+
+```txt
+proof=data/jimeng-lab/proof-20260610-static-locate-capcut-methods/
+summary=data/jimeng-lab/proof-20260610-static-locate-capcut-methods/normalized/static-locate-20260610042935-summary.json
+terms=searchTemplates,getTemplateAccordCategory,getBatchTemplatesByCategory,fuzzySearchTemplateByTitle,getTemplateHotWords
+occurrences=10
+normalized_static_locate_capcut_method_proof_has_no_signed_urls_or_credentials=true
+```
 
 ### 11) Upload token for local reference media
 - `POST https://jimeng.jianying.com/mweb/v1/get_upload_token`

@@ -1167,9 +1167,20 @@ summary=data/jimeng-lab/proof-20260610-capcut-categories/normalized/capcut-categ
 
 Related bundle endpoints are discovered but not claimed as implemented yet:
 
-- `/lv/v1/cc_web/replicate/search_templates`: helper contract found, but guessed keyword/query/search-word payloads returned `ret=1000 param error`; needs real UI capture.
-- `/lv/v1/cc_web/plane/get_collection_templates` and `/lv/v1/cc_web/plane/batch_get_collection_templates`: helper contract found, but category-id guesses returned `ret=1000 param error`; needs real UI capture.
-- `/lv/v1/cc_web/plane/fuzzy_search_templates`: accepts POSTs and returns success, but all tested English title/query fields returned empty lists, so it is not exposed as implemented.
+- `/lv/v1/cc_web/replicate/search_templates`: frontend method `searchTemplates(e)` maps `sdkVersion`, `searchId`, `enterFrom`, `categoryIds`, `sceneId`, `featureKey`, `colors`, and `graphNum` to `sdk_version`, `search_id`, `enter_from`, `category_ids`, `scene_id`, `strategy_extra`, `custom_colors`, and `graph_num`, while spreading remaining fields into the request body. Guessed keyword/query/search-word payloads returned `ret=1000 param error`; needs real UI capture for the exact remaining fields.
+- `/lv/v1/cc_web/plane/get_collection_templates`: frontend method `getTemplateAccordCategory(e)` injects `{ sdk_version, enter_from: "feed", count: 20, lang }` and then spreads `e`. Category-id guesses returned `ret=1000 param error`; needs real UI capture for the exact category/cursor field names.
+- `/lv/v1/cc_web/plane/batch_get_collection_templates`: frontend method `getBatchTemplatesByCategory(e)` passes `e` through directly and expects an array response with per-category `item_list`.
+- `/lv/v1/cc_web/plane/fuzzy_search_templates`: frontend method `fuzzySearchTemplateByTitle(e)` passes `e` through directly and expects `data.item_list`. Direct no-spend probes returned `ret=0` but empty lists for `makeup`, `beauty`, `korean beauty`, `skincare`, `美妆`, `护肤`, and `韩国美妆`, so it is not exposed as useful yet.
+
+Static method proof:
+
+```txt
+proof=data/jimeng-lab/proof-20260610-static-locate-capcut-methods/
+summary=data/jimeng-lab/proof-20260610-static-locate-capcut-methods/normalized/static-locate-20260610042935-summary.json
+terms=searchTemplates,getTemplateAccordCategory,getBatchTemplatesByCategory,fuzzySearchTemplateByTitle,getTemplateHotWords
+occurrences=10
+normalized_static_locate_capcut_method_proof_has_no_signed_urls_or_credentials=true
+```
 
 ## Confirmed CapCut Public Template Metadata Contract
 
