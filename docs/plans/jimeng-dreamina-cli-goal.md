@@ -473,6 +473,15 @@ Fresh subscription-account generation was rechecked on 2026-06-10 with explicit 
 - `jimeng-browser-proxy image2video` live-submitted `submitId=87b264f4-4997-4390-a0fe-e5d06948a759`, reached terminal `status=50`, saved a `704x1248` H.264 MP4, and validated as `3.016667s`
 - current text-to-image replay against `data/jimeng-captures/20260609095503-text2image-submit/capture-template.raw.json` still returns `ret=3018`, `errmsg=permission denied`; the next action is still a fresh background CDP frontend submit capture
 
+Current subscription API generation was rechecked again on 2026-06-10 with explicit approval:
+
+- proof bundle: `data/jimeng-lab/proof-20260610-subscription-api-live-check/`
+- `jimeng-browser-proxy tts` returned `ret=0`, saved `直爽女大-7597003459665072686.mp3`, and validated as `8.568000s` MP3 audio
+- `jimeng-browser-proxy text2video` live-submitted `submitId=0a829552-fe6a-4f2f-b8d2-8bd6d4ec6fb2`, `historyId=35934031025164`, reached terminal `status=50`, saved a `704x1248` H.264 MP4, and validated as `3.016667s`
+- `jimeng-browser-proxy image2video` live-submitted `submitId=6c83d6bd-d8f6-4b69-a6b9-1d05088312a3`, `historyId=35931512058892`, reached terminal `status=50`, saved a `704x1248` H.264 MP4, and validated as `3.016667s`
+- `text2image` was retried against `data/jimeng-captures/20260609095503-text2image-submit/capture-template.raw.json` and still returns `ret=3018`, `errmsg=permission denied`; do not claim current paid-live text-to-image support until a fresh background CDP submit is captured and compared
+- strict proof leak check found no unredacted credential markers in normalized results or validation metadata
+
 The next slice is **lip-sync submit capture and reference-video consumers**. Use the VOD provider reference, ImageX avatar reference, and frontend captures to unlock live lip-sync, reference-video, multimodal/all-around reference, pose/style/depth/canny controls, and live end-frame/multi-frame image-to-video paths.
 
 Immediate next slices:

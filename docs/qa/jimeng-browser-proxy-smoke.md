@@ -2180,6 +2180,93 @@ text2image with data/jimeng-captures/20260609095503-text2image-submit/capture-te
 next_action=recapture current frontend text-to-image submit through background CDP before claiming paid-live CLI support for this path.
 ```
 
+## Subscription API Live Check
+
+Arthur explicitly approved using the subscription account again on 2026-06-10 to verify that direct API generation still produces actual playable artifacts, not only accepted API responses.
+
+Proof directory:
+
+```txt
+data/jimeng-lab/proof-20260610-subscription-api-live-check/
+```
+
+Commands:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts session \
+  --session-out data/jimeng-lab/raw/session-bundle-current.json
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts tts \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --voice-id 7597003459665072686 \
+  --voice-title "直爽女大" \
+  --text "这是一次订阅账号直连接口测试。我们正在验证语音、文生视频和图生视频都能真实生成素材。" \
+  --outDir data/jimeng-lab/proof-20260610-subscription-api-live-check/tts
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts text2video \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --capture data/jimeng-lab/raw/jimeng-network-capture-video-01.json \
+  --prompt "韩系美妆健身UGC创作者在明亮厨房里用手机自拍，手里拿着一支补水精华，前三秒说熬夜后底妆卡粉就看这个，真实TikTok种草开场，自然表情，轻微手持晃动，无字幕，无水印，不要生成可读文字。" \
+  --durationSec 3 \
+  --ratio 9:16 \
+  --videoResolution 720p \
+  --modelVersion 3.0fast \
+  --seed 2026061011 \
+  --pollIntervalMs 10000 \
+  --maxPolls 40 \
+  --outDir data/jimeng-lab/proof-20260610-subscription-api-live-check/text2video
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts image2video \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --capture data/jimeng-lab/raw/jimeng-network-capture-video-01.json \
+  --image data/jimeng-lab/ugc-studio-kbeauty-image/artifacts/jimeng-kbeauty-01.png \
+  --prompt "韩系美妆达人手机自拍风格，手里拿着补水精华自然靠近镜头，像真实TikTok种草广告开场，动作轻微自然，明亮厨房自然光，无字幕，无水印，不要生成可读文字。" \
+  --durationSec 3 \
+  --ratio 9:16 \
+  --videoResolution 720p \
+  --modelVersion 3.0fast \
+  --seed 2026061012 \
+  --pollIntervalMs 10000 \
+  --maxPolls 40 \
+  --outDir data/jimeng-lab/proof-20260610-subscription-api-live-check/image2video
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts text2image \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --capture data/jimeng-captures/20260609095503-text2image-submit/capture-template.raw.json \
+  --prompt "韩系美妆健身UGC创作者，手机自拍，明亮厨房自然光，手持补水精华，真实TikTok种草封面，无文字，无水印。" \
+  --outDir data/jimeng-lab/proof-20260610-subscription-api-live-check/text2image \
+  --pollIntervalMs 10000 \
+  --maxPolls 10
+```
+
+Results:
+
+```txt
+tts: ret=0, errmsg=success, artifact=data/jimeng-lab/proof-20260610-subscription-api-live-check/tts/artifacts/直爽女大-7597003459665072686.mp3, mp3 audio, duration=8.568000s
+text2video: submitId=0a829552-fe6a-4f2f-b8d2-8bd6d4ec6fb2, historyId=35934031025164, status=50, artifact=data/jimeng-lab/proof-20260610-subscription-api-live-check/text2video/artifacts/0a829552-fe6a-4f2f-b8d2-8bd6d4ec6fb2-00.mp4, 704x1248 h264, duration=3.016667s
+image2video: submitId=6c83d6bd-d8f6-4b69-a6b9-1d05088312a3, historyId=35931512058892, status=50, artifact=data/jimeng-lab/proof-20260610-subscription-api-live-check/image2video/artifacts/6c83d6bd-d8f6-4b69-a6b9-1d05088312a3-00.mp4, 704x1248 h264, duration=3.016667s
+thumbnails=data/jimeng-lab/proof-20260610-subscription-api-live-check/_validation/{text2video-thumb-1s.jpg,image2video-thumb-1s.jpg}
+text2image: blocked; stale capture returned ret=3018, errmsg=permission denied
+```
+
+Validation:
+
+```bash
+ffprobe -v error -show_entries format=duration,format_name:stream=codec_name,codec_type,width,height -of json <artifact>
+ffmpeg -y -v error -ss 1 -i <video> -frames:v 1 <thumb.jpg>
+rg -n -P '"cookie"\s*:\s*"(?!\[REDACTED)|x-signature|x-expires|authorization|msToken|verifyFp|sessionid|sid=' \
+  data/jimeng-lab/proof-20260610-subscription-api-live-check/{tts,text2video,image2video}/normalized \
+  data/jimeng-lab/proof-20260610-subscription-api-live-check/_validation || true
+```
+
+Result:
+
+```txt
+ffprobe confirmed playable MP3/H.264 MP4 artifacts.
+thumbnail JPGs were extracted from both generated videos.
+strict leak check returned no unredacted credential markers.
+```
+
 ## Verification
 
 ```bash

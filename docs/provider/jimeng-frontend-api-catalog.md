@@ -22,7 +22,7 @@ Use the browser as an authenticated session holder and API discovery surface. Mo
 |---|---:|---|---|
 | `/mweb/v1/workspace/create` | POST | Creates a generation workspace/conversation. | Captured |
 | `/mweb/v1/workspace/update` | POST | Renames/updates current workspace metadata. | Captured |
-| `/mweb/v1/aigc_draft/generate` | POST | Unified workbench submit for current text-to-image, text-to-video, first-frame image-to-video, and lip-sync draft generation paths. | Implemented for workbench text-to-image, text-to-video templates, and local-upload-backed image-to-video; dry-run-proved for VOD and image/avatar lip-sync provider inputs |
+| `/mweb/v1/aigc_draft/generate` | POST | Unified workbench submit for current text-to-image, text-to-video, first-frame image-to-video, and lip-sync draft generation paths. | Paid-live proven for text-to-video and local-upload-backed image-to-video; stale text-to-image replay currently returns `ret=3018 permission denied` and needs fresh background CDP capture; dry-run-proved for VOD and image/avatar lip-sync provider inputs |
 | `/mweb/v1/get_asset_list` | POST | Poll/list workspace assets and completed image results. | Implemented for workbench text-to-image polling and no-spend `assets` listing |
 | `/mweb/v1/get_history_by_ids` | POST | Older/general task polling and completed record lookup by `submit_id` or `history_id`. | Implemented for captured history-based templates and no-spend `history-records`; live-proved against the completed K-beauty image generation |
 | `/mweb/v1/get_history_queue_info` | POST | Read-only queue/progress detail lookup for active or historical generation records. | Implemented as no-spend `history-queue`; live-proved against a completed image history id |
@@ -42,7 +42,7 @@ Use the browser as an authenticated session holder and API discovery surface. Mo
 | `/mweb/v1/dreamina_subject/delete` | POST | Delete one or more saved subject/persona records. | Implemented as no-spend `subject-delete`; live-proved on a temporary subject |
 | `/mweb/v1/dreamina_subject/generate_voice` | POST | Generate a subject voice from an image URI. | Dry-run request support only; live submit remains blocked pending explicit spend approval or captured UI submit |
 | `/mweb/v1/feed` | POST | Explore/feed content; a signed `dreamina_tone` feed request returns the built-in voice library. Useful for research/template mining if handled carefully. | Implemented for voice library replay |
-| `/mweb/v1/tts_generate` | POST | Built-in voice text-to-speech. Returns base64 MP3 in `data.data`. | Implemented and live-proved |
+| `/mweb/v1/tts_generate` | POST | Built-in voice text-to-speech. Returns base64 MP3 in `data.data`. | Implemented and paid-live proven; latest subscription proof saved a playable `8.568s` MP3 |
 | `/mweb/v1/get_upload_token` | POST | Temporary upload credentials for video/image/file scenes. Required before direct local reference-image/video upload. | Implemented and live-proved; local ImageX image upload is implemented via `upload-image`, local VOD video upload via `upload-video` |
 | `/mweb/v1/get_explore` | POST | Explore examples, public creative templates, and short-video examples for prompt/template/reference mining. | Implemented as no-spend `templates` and `short-videos` |
 | `/mweb/v1/feed_short_video` | POST | Overseas/alternate short-video feed for reference/profile mining. | Implemented as no-spend `overseas-short-videos` |
@@ -92,6 +92,16 @@ data/jimeng-lab/voice-library-samples/
 ```
 
 The latest full voice sample run generated `142/142` MP3 files with concurrency `1` and no `1019` / `shark not pass` risk-control errors.
+
+Latest direct subscription-account generation proof:
+
+```txt
+proof=data/jimeng-lab/proof-20260610-subscription-api-live-check/
+tts=ret 0, 8.568000s MP3
+text2video=submitId 0a829552-fe6a-4f2f-b8d2-8bd6d4ec6fb2, historyId 35934031025164, status 50, 704x1248 H.264 MP4, 3.016667s
+image2video=submitId 6c83d6bd-d8f6-4b69-a6b9-1d05088312a3, historyId 35931512058892, status 50, 704x1248 H.264 MP4, 3.016667s
+text2image=ret 3018, errmsg permission denied with stale capture data/jimeng-captures/20260609095503-text2image-submit/capture-template.raw.json
+```
 
 ## Runtime Schema Validation
 

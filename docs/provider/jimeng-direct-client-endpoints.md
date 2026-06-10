@@ -76,6 +76,7 @@ Important capability notes from help output:
   - implemented in `jimeng-browser-proxy image2video`
   - local `--image` uploads through ImageX scene `2`, then patches the resulting provider URI into `first_frame_image`
   - live proof saved under `data/jimeng-lab/proof-20260609-image2video-live/`
+  - latest subscription-account direct API proof saved `data/jimeng-lab/proof-20260610-subscription-api-live-check/image2video/artifacts/6c83d6bd-d8f6-4b69-a6b9-1d05088312a3-00.mp4`
 - Current text-to-image prompt field location:
   - `draft_content.component_list[0].abilities.generate.core_param.prompt`
 - Current text-to-image model field observed:
@@ -1894,9 +1895,9 @@ Current support matrix:
 
 | command | status | notes |
 |---|---|---|
-| `text2video` | implemented | Uses captured `/mweb/v1/aigc_draft/generate`; confirmed live with `dreamina_ic_generate_video_model_vgfm_3.0_fast`. |
-| `text2image` | implemented when image capture is supplied | Uses captured `/mweb/v1/creation_agent/v2/conversation`; needs current local image capture fixture/session. |
-| `image2video` | implemented in `jimeng-browser-proxy`; partial in low-level compat helper | Browser proxy can upload local `--image`, inject `first_frame_image`, submit/poll/download MP4. Low-level helper accepts confirmed `--firstFrameUri`. |
+| `text2video` | implemented | Uses captured `/mweb/v1/aigc_draft/generate`; confirmed paid-live with `dreamina_ic_generate_video_model_vgfm_3.0_fast`. Latest proof: `submitId=0a829552-fe6a-4f2f-b8d2-8bd6d4ec6fb2`, `historyId=35934031025164`, 704x1248 H.264 MP4, 3.016667s. |
+| `text2image` | blocked pending fresh capture | Stale workbench capture `data/jimeng-captures/20260609095503-text2image-submit/capture-template.raw.json` now returns `ret=3018`, `errmsg=permission denied`; recapture current frontend submit before claiming support. |
+| `image2video` | implemented in `jimeng-browser-proxy`; partial in low-level compat helper | Browser proxy can upload local `--image`, inject `first_frame_image`, submit/poll/download MP4. Latest paid-live proof: `submitId=6c83d6bd-d8f6-4b69-a6b9-1d05088312a3`, `historyId=35931512058892`, 704x1248 H.264 MP4, 3.016667s. Low-level helper accepts confirmed `--firstFrameUri`. |
 | `frames2video` | dry-run-proved in `jimeng-browser-proxy`; partial in low-level compat helper | Browser proxy can upload local `--image` and `--lastImage`, inject `first_frame_image`/`end_frame_image`, and write a no-generation plan. Live proof still needs explicit frontend end-frame mode evidence. |
 | `lip-sync-config` | implemented in `jimeng-browser-proxy` | No-spend direct lip-sync/digital-human model config for image/avatar and video modes. |
 | `lip-sync` | dry-run-proved in `jimeng-browser-proxy` | Browser proxy can prepare VOD-reference and image/avatar lip-sync provider inputs from VOD/ImageX provider references plus TTS voice flags. Live submit still needs a frontend submit capture/compare. |
