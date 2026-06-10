@@ -1949,6 +1949,38 @@ search_templates: search_word -> ret=1000 errmsg="param error" response_sha=b53c
 search_templates: query -> ret=1000 errmsg="param error" response_sha=1f36fc8015f7...
 ```
 
+Blocked search/batch/preset refresh:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts capcut-probe \
+  --endpoint /lv/v1/cc_web/plane/batch_get_collection_templates \
+  --variants '<id/ids/category_ids/array variants>' \
+  --outDir data/jimeng-lab/proof-20260610-capcut-probe-batch-collection-templates
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts capcut-probe \
+  --endpoint /lv/v1/cc_web/plane/batch_get_collection_templates \
+  --variants '<collection_ids/id_list/category_list/nested collection variants>' \
+  --outDir data/jimeng-lab/proof-20260610-capcut-probe-batch-collection-templates-v2
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts capcut-probe \
+  --endpoint /lv/v1/cc_web/plane/get_collection_presets \
+  --variants '<confirmed collection id/category id/list variants>' \
+  --outDir data/jimeng-lab/proof-20260610-capcut-probe-presets-confirmed-collection
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts capcut-probe \
+  --endpoint /lv/v1/cc_web/replicate/search_templates \
+  --variants '<keyword/query/search_word/category/scene/cursor variants>' \
+  --outDir data/jimeng-lab/proof-20260610-capcut-probe-search-templates-v2
+```
+
+```txt
+batch_get_collection_templates v1: 5 variants, all ret=1000, errmsg=param error
+batch_get_collection_templates v2: 10 variants, all ret=1000, errmsg=param error
+get_collection_presets: 8 confirmed-collection variants, all ret=1015, errmsg=check login error
+search_templates v2: 10 variants, all ret=1000, errmsg=param error
+classification=blocked until exact non-empty UI calls are captured for search, batch rows, collection presets, and preset detail
+```
+
 Additional no-spend classification probes:
 
 ```bash
@@ -1977,6 +2009,10 @@ data/jimeng-lab/proof-20260610-capcut-probe-hot-words/normalized/capcut-probe-20
 data/jimeng-lab/proof-20260610-capcut-probe-fuzzy/normalized/capcut-probe-20260610044826-summary.json
 data/jimeng-lab/proof-20260610-capcut-probe-collection/normalized/capcut-probe-20260610044826-summary.json
 data/jimeng-lab/proof-20260610-capcut-probe-search/normalized/capcut-probe-20260610044826-summary.json
+data/jimeng-lab/proof-20260610-capcut-probe-batch-collection-templates/normalized/capcut-probe-20260610072411-summary.json
+data/jimeng-lab/proof-20260610-capcut-probe-batch-collection-templates-v2/normalized/capcut-probe-20260610072524-summary.json
+data/jimeng-lab/proof-20260610-capcut-probe-presets-confirmed-collection/normalized/capcut-probe-20260610072539-summary.json
+data/jimeng-lab/proof-20260610-capcut-probe-search-templates-v2/normalized/capcut-probe-20260610072556-summary.json
 data/jimeng-lab/proof-20260610-history-list-probe/normalized/endpoint-probe-20260610055200-summary.json
 data/jimeng-lab/proof-20260610-capcut-search-words-probe/normalized/capcut-probe-20260610055357-summary.json
 ```
@@ -2009,22 +2045,22 @@ Result:
 ```txt
 resources=247
 included=200
+skipped_implemented=29
 high_value_gaps=61
-top gaps:
-  1 /mweb/v1/dreamina_subject/generate_voice -> approval_or_disposable_fixture
-  2 /mweb/v1/voice/delete -> approval_or_disposable_fixture
-  3 /mweb/v1/voice/submit_task -> approval_or_disposable_fixture
-  4 /mweb/v1/voice/update -> approval_or_disposable_fixture
-  5 /mweb/v1/aigc_draft/generate -> capture_or_compare_before_live
-  9 /lv/v1/cc_web/plane/batch_get_collection_templates -> capture_exact_payload
-  11 /lv/v1/cc_web/replicate/search_templates -> capture_exact_payload
+known_status_counts=unknown:200,partial:4,implemented:29,dry_run_only:4,blocked:7,captured_only:2,cataloged_only:1
+blocked_capcut_search_batch_preset:
+  /lv/v1/cc_web/plane/batch_get_collection_templates -> capture_exact_payload
+  /lv/v1/cc_web/plane/fuzzy_search_templates -> capture_exact_payload
+  /lv/v1/cc_web/plane/get_collection_presets -> capture_exact_payload
+  /lv/v1/cc_web/plane/preset_template_detail -> capture_exact_payload
+  /lv/v1/cc_web/replicate/search_templates -> capture_exact_payload
 ```
 
 Normalized proof:
 
 ```txt
-data/jimeng-lab/proof-20260610-static-inventory/normalized/static-inventory-20260610071127-summary.json
-data/jimeng-lab/proof-20260610-static-inventory/normalized/static-inventory-20260610071127-summary.md
+data/jimeng-lab/proof-20260610-static-inventory/normalized/static-inventory-20260610074235-summary.json
+data/jimeng-lab/proof-20260610-static-inventory/normalized/static-inventory-20260610074235-summary.md
 ```
 
 Leak check:

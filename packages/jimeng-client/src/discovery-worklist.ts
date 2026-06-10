@@ -419,11 +419,11 @@ const KNOWN_ENDPOINTS: JimengDiscoveryKnownEndpoint[] = [
   known("/lv/v1/cc_web/plane/get_collection_templates", "implemented", "capcut-collection-templates", "No-spend CapCut template rows by collection id; exact body uses id, not category_id."),
   known("/lv/v1/cc_web/plane/get_template_detail", "implemented", "capcut-template-detail", "No-spend CapCut template detail by template web id."),
   known("/lv/v1/cc_web/replicate/get_search_words", "blocked", null, "Signed no-spend probes returned ret=0 but only region metadata, not usable search words; capture a UI call that returns keyword data before promotion."),
-  known("/lv/v1/cc_web/replicate/search_templates", "captured_only", null, "Guessed payloads returned param errors; capture real UI row/search payload."),
-  known("/lv/v1/cc_web/plane/batch_get_collection_templates", "captured_only", null, "Known endpoint string; capture real UI payload before exposing."),
-  known("/lv/v1/cc_web/plane/get_collection_presets", "captured_only", null, "Signed no-spend guessed bodies returned ret=1015; use real collection/preset UI capture before promotion."),
-  known("/lv/v1/cc_web/plane/preset_template_detail", "captured_only", null, "Known endpoint string; needs real preset id from UI or collection-presets response."),
-  known("/lv/v1/cc_web/plane/fuzzy_search_templates", "captured_only", null, "Known endpoint string; tested guessed English fields returned empty results."),
+  known("/lv/v1/cc_web/replicate/search_templates", "blocked", null, "Signed no-spend probes returned ret=1000 param error across recovered keyword/category/search-id variants; capture an exact template-search UI request before promotion."),
+  known("/lv/v1/cc_web/plane/batch_get_collection_templates", "blocked", null, "Signed no-spend probes returned ret=1000 param error across object, list, and nested collection variants; capture the exact batch row UI payload before promotion."),
+  known("/lv/v1/cc_web/plane/get_collection_presets", "blocked", null, "Signed no-spend probes using confirmed collection ids returned ret=1015 check login error; capture the exact preset UI call and required auth/header context before promotion."),
+  known("/lv/v1/cc_web/plane/preset_template_detail", "blocked", null, "Preset detail depends on get_collection_presets data, but preset listing currently returns ret=1015 in safe probes; capture a real preset UI flow before promotion."),
+  known("/lv/v1/cc_web/plane/fuzzy_search_templates", "blocked", null, "Signed no-spend probes returned ret=0 with empty lists for guessed keyword/title bodies; capture a non-empty fuzzy-search UI request before promotion."),
   known("/mweb/v1/get_unread_count", "cataloged_only", null, "Low-value notification count endpoint."),
   known("/mweb/v1/workspace/create", "captured_only", null, "Workspace mutation; low priority until needed for automated project setup."),
   known("/mweb/v1/workspace/update", "captured_only", null, "Workspace mutation; low priority until needed for automated project setup."),
@@ -434,6 +434,10 @@ const KNOWN_ENDPOINTS: JimengDiscoveryKnownEndpoint[] = [
 
 function known(endpoint: string, status: JimengDiscoveryKnownStatus, command: string | null, note: string): JimengDiscoveryKnownEndpoint {
   return { endpoint, status, command, note }
+}
+
+function getKnownEndpointNote(endpoint: string): string | null {
+  return KNOWN_ENDPOINTS.find((knownEndpoint) => knownEndpoint.endpoint === endpoint)?.note ?? null
 }
 
 function recommendCapturedCandidate(
@@ -538,8 +542,8 @@ function recommendStaticEndpoint(endpoint: JimengDiscoveryStaticEndpoint): { act
     return {
       action: "static_capture_needed",
       priority: endpoint.high_value ? 36 : 18,
-      reason: "Known endpoint has safe probe evidence but no useful payload yet; capture a non-empty UI flow before promotion.",
-      blockedReason: "Previous safe probes returned empty or metadata-only payloads.",
+      reason: getKnownEndpointNote(endpoint.endpoint) ?? "Known endpoint has safe probe evidence but no useful payload yet; capture a non-empty UI flow before promotion.",
+      blockedReason: "Previous safe probes did not return a useful payload; capture a non-empty UI flow before CLI promotion.",
     }
   }
   if (endpoint.known_status === "implemented") {

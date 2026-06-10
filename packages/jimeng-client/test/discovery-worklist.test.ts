@@ -21,6 +21,9 @@ describe("Jimeng discovery worklist", () => {
           `fetch("/mweb/v1/reference_profile/list")`,
           `fetch("/mweb/v1/get_history")`,
           `fetch("/mweb/v1/dreamina_subject/generate_voice")`,
+          `fetch("/lv/v1/cc_web/replicate/search_templates")`,
+          `fetch("/lv/v1/cc_web/plane/batch_get_collection_templates")`,
+          `fetch("/lv/v1/cc_web/plane/get_collection_presets")`,
         ].join("\n"),
         "utf8",
       )
@@ -42,6 +45,16 @@ describe("Jimeng discovery worklist", () => {
       expect(blockedGap?.known_status).toBe("blocked")
       expect(blockedGap?.recommended_action).toBe("static_capture_needed")
       expect(blockedGap?.blocked_reason).toContain("Previous safe probes")
+      const capcutSearch = worklist.items.find((item) => item.endpoint === "/lv/v1/cc_web/replicate/search_templates")
+      expect(capcutSearch?.known_status).toBe("blocked")
+      expect(capcutSearch?.recommended_action).toBe("static_capture_needed")
+      expect(capcutSearch?.reason).toContain("ret=1000")
+      const capcutBatch = worklist.items.find((item) => item.endpoint === "/lv/v1/cc_web/plane/batch_get_collection_templates")
+      expect(capcutBatch?.known_status).toBe("blocked")
+      expect(capcutBatch?.reason).toContain("object, list, and nested collection variants")
+      const capcutPresets = worklist.items.find((item) => item.endpoint === "/lv/v1/cc_web/plane/get_collection_presets")
+      expect(capcutPresets?.known_status).toBe("blocked")
+      expect(capcutPresets?.reason).toContain("ret=1015")
       expect(worklist.items.find((item) => item.endpoint === "/mweb/v1/aigc_draft/generate")?.recommended_action).toBe("compare_dry_run_before_live")
       expect(worklist.items.find((item) => item.endpoint === "/mweb/v1/dreamina_subject/generate_voice")?.recommended_action).toBe("approval_or_disposable_fixture")
       expect(worklist.probe_variant_exports).toHaveLength(1)

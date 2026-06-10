@@ -1012,20 +1012,21 @@ Remaining CapCut template endpoints are discovered and method-level request buil
 - `/lv/v1/cc_web/replicate/search_templates`
   - frontend method: `searchTemplates(e)`
   - maps `sdkVersion`, `searchId`, `enterFrom`, `categoryIds`, `sceneId`, `featureKey`, `colors`, and `graphNum` into snake_case API fields, then spreads remaining `e` fields into the body
-  - guessed keyword/query/search-word payloads returned `ret=1000 param error`; capture the actual UI call before exposing it
+  - blocked: signed no-spend probes returned `ret=1000 param error` across 10 recovered keyword/category/search-id variants; capture the actual UI call before exposing it
 - `/lv/v1/cc_web/plane/batch_get_collection_templates`
   - frontend method: `getBatchTemplatesByCategory(e)`
   - passes `e` through directly and expects an array response with per-category `item_list`
+  - blocked: signed no-spend probes returned `ret=1000 param error` across 15 object/list/nested collection variants
 - `/lv/v1/cc_web/plane/get_collection_presets`
   - frontend method: `getPresets(e)`
-  - guessed collection/category bodies returned `ret=1015`; capture a real preset UI call before exposing it
+  - blocked: signed no-spend probes using confirmed collection ids returned `ret=1015 check login error` across 8 variants; capture a real preset UI call and auth/header context before exposing it
 - `/lv/v1/cc_web/plane/preset_template_detail`
   - frontend method: `presetTemplateDetail(e)`
-  - needs a real preset id from a successful presets response or UI call
+  - blocked: needs a real preset id from a successful presets response or UI call; current presets listing is blocked
 - `/lv/v1/cc_web/plane/fuzzy_search_templates`
   - frontend method: `fuzzySearchTemplateByTitle(e)`
   - passes `e` through directly and expects `data.item_list`
-  - accepted direct no-spend POSTs but returned empty lists for `makeup`, `beauty`, `korean beauty`, `skincare`, `美妆`, `护肤`, and `韩国美妆`; do not claim useful template search yet
+  - blocked: accepted direct no-spend POSTs but returned empty lists for guessed keyword/title bodies; capture a non-empty UI call before claiming useful template search
 
 Method-level static proof:
 
@@ -1089,6 +1090,9 @@ hot_words: body -> ret=0 errmsg=success response_sha=b442e8144ac7..., but data o
 fuzzy_search_templates: keyword-en/keyword-zh/title-en -> ret=0 errmsg=success, but item_list length 0
 get_collection_templates: old category_id/collection_id/category_ids guesses -> ret=1000 errmsg="param error"; superseded by confirmed body field id:<collectionId>
 search_templates: keyword/search_word/query -> ret=1000 errmsg="param error"
+batch_get_collection_templates: 15 object/list/nested collection variants -> ret=1000 errmsg="param error"
+get_collection_presets: 8 confirmed-collection variants -> ret=1015 errmsg="check login error"
+blocked_refresh_proofs=data/jimeng-lab/proof-20260610-capcut-probe-batch-collection-templates*,data/jimeng-lab/proof-20260610-capcut-probe-search-templates-v2,data/jimeng-lab/proof-20260610-capcut-probe-presets-confirmed-collection
 normalized_capcut_probe_proofs_have_no_signed_urls_or_credentials=true
 ```
 
@@ -2031,7 +2035,7 @@ bun packages/jimeng-client/src/browser-proxy-cli.ts static-inventory \
   --outDir data/jimeng-lab/proof-20260610-static-inventory
 ```
 
-Latest proof found 247 static frontend/API resources, included 200 non-implemented resources, and counted 61 high-value gaps after the CapCut collection/row/detail endpoints were promoted. The top ranked gaps were `/mweb/v1/dreamina_subject/generate_voice`, voice clone submit/update/delete, `/mweb/v1/aigc_draft/generate`, and the remaining CapCut template search/batch/preset endpoints. Normalized proof files contain no credential markers.
+Latest proof found 247 static frontend/API resources, included 200 non-implemented resources, skipped 29 implemented endpoints, and counted 61 high-value gaps after the CapCut collection/row/detail endpoints were promoted. Known status counts are `unknown=200`, `partial=4`, `implemented=29`, `dry_run_only=4`, `blocked=7`, `captured_only=2`, and `cataloged_only=1`. The remaining CapCut template search/batch/preset endpoints are now explicitly blocked with replay evidence and recommended action `capture_exact_payload`. Normalized proof files contain no credential markers.
 
 Static locator example:
 

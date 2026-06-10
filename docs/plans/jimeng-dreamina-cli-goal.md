@@ -51,7 +51,7 @@ As of 2026-06-10, the committed Jimeng CLI baseline is:
 - `302e088 Document CapCut template method contracts`
 - `8c3dd42 Add signed CapCut endpoint probe`
 - `4d117a2 Recheck Jimeng live generation`
-- current checkpoint: `Add CapCut template collection CLI`
+- current checkpoint: `Recheck Jimeng subscription API generation`
 
 If the thread goal object lags behind this file after a pause, resume from this document and the latest Git checkpoint. The active working rule is: background-only reversal, direct/API-first implementation, small proven CLI slices, tests and proof artifacts before each commit, and no async daemon until the API surface is settled.
 
@@ -213,7 +213,13 @@ CapCut template collection, row, and detail browsing is now live-proved without 
   - `data/jimeng-lab/proof-20260610-capcut-collection-templates/`
   - `data/jimeng-lab/proof-20260610-capcut-template-detail/`
 - latest proof returned 35 collections, 5 Beauty Care templates for `collection_id=10034`, and detail for `template_id=7369116096600771846` with `template_url_present=true`, version `1.4.3`, and material counts `effects:8`, `local_images:4`, `file_infos:1`
-- remaining related endpoints: `/lv/v1/cc_web/replicate/search_templates`, `/lv/v1/cc_web/plane/batch_get_collection_templates`, `/lv/v1/cc_web/plane/get_collection_presets`, `/lv/v1/cc_web/plane/preset_template_detail`, and `/lv/v1/cc_web/plane/fuzzy_search_templates`
+- remaining related endpoints are now explicitly blocked on exact UI payload capture:
+  - `/lv/v1/cc_web/replicate/search_templates`: no-spend direct probes returned `ret=1000 param error` across 10 recovered keyword/category/search-id variants
+  - `/lv/v1/cc_web/plane/batch_get_collection_templates`: no-spend direct probes returned `ret=1000 param error` across 15 object/list/nested collection variants
+  - `/lv/v1/cc_web/plane/get_collection_presets`: no-spend direct probes with confirmed collection ids returned `ret=1015 check login error` across 8 variants
+  - `/lv/v1/cc_web/plane/preset_template_detail`: depends on a real preset id from the currently blocked preset-listing path
+  - `/lv/v1/cc_web/plane/fuzzy_search_templates`: no-spend direct probes returned `ret=0` with empty lists for guessed keyword/title bodies
+  - proof bundles: `data/jimeng-lab/proof-20260610-capcut-probe-batch-collection-templates*/`, `data/jimeng-lab/proof-20260610-capcut-probe-search-templates-v2/`, and `data/jimeng-lab/proof-20260610-capcut-probe-presets-confirmed-collection/`
 
 CapCut public template ratio/scene metadata is now live-proved without generation spend and without a browser session:
 
@@ -424,8 +430,8 @@ Static API inventory is now available as the systematic coverage map:
 - scans API endpoint strings and public CapCut `bee_prod` catalog URLs, classifies read/generate/upload/mutate/payment/analytics risk, joins the existing known-command map, and ranks uncovered resources for the next slice
 - default output skips fully implemented endpoints so it stays focused on gaps; `--includeKnown` produces an audit inventory
 - proof bundle: `data/jimeng-lab/proof-20260610-static-inventory/`
-- latest proof scanned `data/jimeng-lab/js-sweep/files` plus `packages/jimeng-client/src`, found 247 resources, included 200 non-implemented items, and counted 61 high-value gaps after the CapCut collection/row/detail commands were promoted
-- top gaps were subject/persona `generate_voice`, voice clone submit/update/delete, unified `/mweb/v1/aigc_draft/generate` capture/compare, and remaining CapCut template search/batch/preset payload capture
+- latest proof scanned `data/jimeng-lab/js-sweep/files` plus `packages/jimeng-client/src`, found 247 resources, included 200 non-implemented items, skipped 29 implemented endpoints, and counted 61 high-value gaps after the CapCut collection/row/detail commands were promoted
+- known status counts are now `unknown=200`, `partial=4`, `implemented=29`, `dry_run_only=4`, `blocked=7`, `captured_only=2`, and `cataloged_only=1`; the five CapCut search/batch/preset-related endpoints above are blocked with exact replay evidence and recommended action `capture_exact_payload`
 - `/mweb/v1/get_history` is now marked `blocked` in the worklist/inventory: safe direct probes with plain, frontend-derived, and explicit `workspace_id=14199856180236` bodies all returned `ret=0` and empty `records_list`; use `assets`, `history-records`, and `history-queue` until a non-empty UI capture proves a useful list contract
 - normalized proof files contain no credential markers
 
@@ -442,7 +448,7 @@ Signed CapCut endpoint replay is now available for no-spend template payload dis
   - `data/jimeng-lab/proof-20260610-capcut-probe-fuzzy/`
   - `data/jimeng-lab/proof-20260610-capcut-probe-collection/`
   - `data/jimeng-lab/proof-20260610-capcut-probe-search/`
-- latest no-spend probes confirmed `/lv/v1/cc_web/replicate/get_search_words` returns `ret=0` but only region metadata for tested variants, and `/lv/v1/cc_web/plane/fuzzy_search_templates` returns `ret=0` with empty lists for guessed keyword/title bodies. Both remain unpromoted. `/lv/v1/cc_web/plane/get_collection_templates` is now promoted using the confirmed `id:<collectionId>` body; `/lv/v1/cc_web/replicate/search_templates`, batch collection templates, and preset endpoints remain capture targets
+- latest no-spend probes confirmed `/lv/v1/cc_web/replicate/get_search_words` returns `ret=0` but only region metadata for tested variants, `/lv/v1/cc_web/plane/fuzzy_search_templates` returns `ret=0` with empty lists for guessed keyword/title bodies, `/lv/v1/cc_web/replicate/search_templates` returns `ret=1000` across 10 guessed/recovered variants, `/lv/v1/cc_web/plane/batch_get_collection_templates` returns `ret=1000` across 15 variants, and `/lv/v1/cc_web/plane/get_collection_presets` returns `ret=1015` across 8 confirmed-collection variants. `/lv/v1/cc_web/plane/get_collection_templates` is promoted using the confirmed `id:<collectionId>` body; the blocked search/batch/preset endpoints need exact UI-captured payloads before CLI promotion
 
 Lip-sync submit comparison is now available as the live-generation gate:
 

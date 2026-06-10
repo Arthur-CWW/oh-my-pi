@@ -1179,13 +1179,14 @@ summary=data/jimeng-lab/proof-20260610-capcut-categories/normalized/capcut-categ
 
 Related collection/template endpoints now have a split status:
 
-- `/lv/v1/cc_web/replicate/search_templates`: frontend method `searchTemplates(e)` maps `sdkVersion`, `searchId`, `enterFrom`, `categoryIds`, `sceneId`, `featureKey`, `colors`, and `graphNum` to `sdk_version`, `search_id`, `enter_from`, `category_ids`, `scene_id`, `strategy_extra`, `custom_colors`, and `graph_num`, while spreading remaining fields into the request body. Guessed keyword/query/search-word payloads returned `ret=1000 param error`; needs real UI capture for the exact remaining fields.
+- `/lv/v1/cc_web/replicate/search_templates`: blocked pending exact UI payload capture. Frontend method `searchTemplates(e)` maps `sdkVersion`, `searchId`, `enterFrom`, `categoryIds`, `sceneId`, `featureKey`, `colors`, and `graphNum` to `sdk_version`, `search_id`, `enter_from`, `category_ids`, `scene_id`, `strategy_extra`, `custom_colors`, and `graph_num`, while spreading remaining fields into the request body. Signed no-spend probes returned `ret=1000 param error` across 10 recovered keyword/category/search-id variants.
 - `/lv/v1/cc_web/plane/get_collections`: implemented as `capcut-collections`; direct `{sdk_version:"16.1.0"}` returned the durable collection ids.
 - `/lv/v1/cc_web/plane/get_collection_templates`: implemented as `capcut-collection-templates`; the stable body field is `id:<collectionId>`, not `category_id` or `collection_id`.
 - `/lv/v1/cc_web/plane/get_template_detail`: implemented as `capcut-template-detail`; the stable id is the string `web_id` from template rows.
-- `/lv/v1/cc_web/plane/batch_get_collection_templates`: frontend method `getBatchTemplatesByCategory(e)` passes `e` through directly and expects an array response with per-category `item_list`.
-- `/lv/v1/cc_web/plane/get_collection_presets` and `/lv/v1/cc_web/plane/preset_template_detail`: discovered; guessed no-spend bodies returned `ret=1015` or need a real preset id.
-- `/lv/v1/cc_web/plane/fuzzy_search_templates`: frontend method `fuzzySearchTemplateByTitle(e)` passes `e` through directly and expects `data.item_list`. Direct no-spend probes returned `ret=0` but empty lists for `makeup`, `beauty`, `korean beauty`, `skincare`, `美妆`, `护肤`, and `韩国美妆`, so it is not exposed as useful yet.
+- `/lv/v1/cc_web/plane/batch_get_collection_templates`: blocked pending exact UI payload capture. Frontend method `getBatchTemplatesByCategory(e)` passes `e` through directly and expects an array response with per-category `item_list`; signed no-spend probes returned `ret=1000 param error` across 15 object/list/nested collection variants.
+- `/lv/v1/cc_web/plane/get_collection_presets`: blocked pending exact UI payload and auth/header capture. Signed no-spend probes using confirmed collection ids returned `ret=1015 check login error` across 8 variants.
+- `/lv/v1/cc_web/plane/preset_template_detail`: blocked until a real preset id and required preset UI context are captured.
+- `/lv/v1/cc_web/plane/fuzzy_search_templates`: blocked pending non-empty UI capture. Frontend method `fuzzySearchTemplateByTitle(e)` passes `e` through directly and expects `data.item_list`. Direct no-spend probes returned `ret=0` but empty lists for guessed keyword/title bodies, so it is not exposed as useful yet.
 
 Static method proof:
 
@@ -1289,6 +1290,12 @@ Latest no-spend probe facts:
   keyword -> ret=1000 errmsg="param error" response_sha=147d1c355511...
   search_word -> ret=1000 errmsg="param error" response_sha=b53c75bc5959...
   query -> ret=1000 errmsg="param error" response_sha=1f36fc8015f7...
+
+blocked proof refresh:
+  batch_get_collection_templates -> 15 variants, all ret=1000 param error
+  search_templates -> 10 variants, all ret=1000 param error
+  get_collection_presets -> 8 confirmed-collection variants, all ret=1015 check login error
+  proof_dirs=data/jimeng-lab/proof-20260610-capcut-probe-batch-collection-templates*,data/jimeng-lab/proof-20260610-capcut-probe-search-templates-v2,data/jimeng-lab/proof-20260610-capcut-probe-presets-confirmed-collection
 ```
 
 ## Confirmed CapCut Public Template Metadata Contract
