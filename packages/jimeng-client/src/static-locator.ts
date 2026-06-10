@@ -29,8 +29,16 @@ const STOP_IDENTIFIERS = new Set([
   "let",
 ])
 
+export type JimengStaticLocatorTargetKind = "endpoint" | "query"
+
+export interface JimengStaticLocatorSearchTerm {
+  value: string
+  kind: JimengStaticLocatorTargetKind
+}
+
 export interface JimengStaticLocatorOccurrence {
   endpoint: string
+  targetKind: JimengStaticLocatorTargetKind
   file: string
   line: number
   column: number
@@ -44,6 +52,7 @@ export interface JimengStaticLocatorOccurrence {
 
 export interface JimengStaticLocatorEndpointResult {
   endpoint: string
+  targetKind: JimengStaticLocatorTargetKind
   occurrenceCount: number
   files: string[]
   occurrences: JimengStaticLocatorOccurrence[]
@@ -54,6 +63,8 @@ export interface JimengStaticLocatorResult {
   staticRoots: string[]
   analysisFiles: string[]
   endpoints: string[]
+  queries: string[]
+  searchTerms: JimengStaticLocatorSearchTerm[]
   endpointResults: JimengStaticLocatorEndpointResult[]
 }
 
@@ -62,9 +73,15 @@ export function parseJimengStaticLocatorEndpoints(value: string | undefined): st
   return sortedUnique(value.split(",").map((item) => normalizeEndpoint(item.trim())).filter((item): item is string => !!item))
 }
 
+export function parseJimengStaticLocatorQueries(value: string | undefined): string[] {
+  if (!value) return []
+  return sortedUnique(value.split(",").map(normalizeSearchQuery).filter((item): item is string => !!item))
+}
+
 export function locateJimengStaticEndpoints(input: {
   staticRoots: string[]
   endpoints?: string[]
+  queries?: string[]
   analysisFiles?: string[]
   contextLines?: number
   limitPerEndpoint?: number
@@ -76,15 +93,21 @@ export function locateJimengStaticEndpoints(input: {
     ...(input.endpoints ?? []).map(normalizeEndpoint).filter((endpoint): endpoint is string => !!endpoint),
     ...endpointsFromAnalyses(analysisFiles),
   ])
+  const queries = sortedUnique((input.queries ?? []).map(normalizeSearchQuery).filter((query): query is string => !!query))
+  const searchTerms: JimengStaticLocatorSearchTerm[] = [
+    ...endpoints.map((endpoint) => ({ value: endpoint, kind: "endpoint" as const })),
+    ...queries.map((query) => ({ value: query, kind: "query" as const })),
+  ]
   if (staticRoots.length === 0) throw new Error("static-locate requires at least one existing --staticRoot")
-  if (endpoints.length === 0) throw new Error("static-locate requires --endpoint or --analysis")
+  if (searchTerms.length === 0) throw new Error("static-locate requires --endpoint, --analysis, --query, or --symbol")
 
   const contextLines = input.contextLines ?? DEFAULT_CONTEXT_LINES
   const limitPerEndpoint = input.limitPerEndpoint ?? DEFAULT_LIMIT_PER_ENDPOINT
   const resultByEndpoint = new Map<string, JimengStaticLocatorEndpointResult>()
-  for (const endpoint of endpoints) {
-    resultByEndpoint.set(endpoint, {
-      endpoint,
+  for (const searchTerm of searchTerms) {
+    resultByEndpoint.set(termKey(searchTerm), {
+      endpoint: searchTerm.value,
+      targetKind: searchTerm.kind,
       occurrenceCount: 0,
       files: [],
       occurrences: [],
@@ -93,10 +116,10 @@ export function locateJimengStaticEndpoints(input: {
 
   for (const file of staticRoots.flatMap(walkStaticFiles)) {
     const text = readFileSync(file, "utf8")
-    for (const endpoint of endpoints) {
-      const endpointResult = resultByEndpoint.get(endpoint)
+    for (const searchTerm of searchTerms) {
+      const endpointResult = resultByEndpoint.get(termKey(searchTerm))
       if (!endpointResult) continue
-      let occurrenceIndex = text.indexOf(endpoint)
+      let occurrenceIndex = text.indexOf(searchTerm.value)
       while (occurrenceIndex >= 0) {
         endpointResult.occurrenceCount += 1
         if (!endpointResult.files.includes(file)) endpointResult.files.push(file)
@@ -104,7 +127,8 @@ export function locateJimengStaticEndpoints(input: {
           const position = lineColumnAt(text, occurrenceIndex)
           const snippet = sanitizeSnippet(snippetAround(text, occurrenceIndex, position.line, contextLines))
           endpointResult.occurrences.push({
-            endpoint,
+            endpoint: searchTerm.value,
+            targetKind: searchTerm.kind,
             file,
             line: position.line,
             column: position.column,
@@ -113,10 +137,10 @@ export function locateJimengStaticEndpoints(input: {
             nearbySymbols: extractNearbySymbols(snippet),
             nearbyIdentifiers: extractNearbyIdentifiers(snippet),
             requestStringHints: extractRequestStringHints(snippet),
-            suggestedAstGrepCommands: astGrepCommands(endpoint, file),
+            suggestedAstGrepCommands: astGrepCommands(searchTerm, file),
           })
         }
-        occurrenceIndex = text.indexOf(endpoint, occurrenceIndex + endpoint.length)
+        occurrenceIndex = text.indexOf(searchTerm.value, occurrenceIndex + searchTerm.value.length)
       }
     }
   }
@@ -126,6 +150,8 @@ export function locateJimengStaticEndpoints(input: {
     staticRoots,
     analysisFiles,
     endpoints,
+    queries,
+    searchTerms,
     endpointResults: Array.from(resultByEndpoint.values())
       .map((item) => ({
         ...item,
@@ -142,8 +168,11 @@ export function summarizeJimengStaticLocator(result: JimengStaticLocatorResult):
     static_roots: result.staticRoots,
     analysis_files: result.analysisFiles,
     endpoint_count: result.endpoints.length,
+    query_count: result.queries.length,
+    search_term_count: result.searchTerms.length,
     endpoints: result.endpointResults.map((endpoint) => ({
       endpoint: endpoint.endpoint,
+      target_kind: endpoint.targetKind,
       occurrence_count: endpoint.occurrenceCount,
       file_count: endpoint.files.length,
       files: endpoint.files.slice(0, 12),
@@ -169,12 +198,14 @@ export function writeJimengStaticLocatorMarkdown(result: JimengStaticLocatorResu
   lines.push(`- Static roots: ${result.staticRoots.length}`)
   lines.push(`- Analysis files: ${result.analysisFiles.length}`)
   lines.push(`- Endpoints: ${result.endpoints.length}`)
+  lines.push(`- Queries: ${result.queries.length}`)
   lines.push("")
-  lines.push("| Endpoint | Occurrences | Files | Top symbols |")
-  lines.push("| --- | ---: | ---: | --- |")
+  lines.push("| Kind | Term | Occurrences | Files | Top symbols |")
+  lines.push("| --- | --- | ---: | ---: | --- |")
   for (const endpoint of result.endpointResults) {
     const topSymbols = sortedUnique(endpoint.occurrences.flatMap((occurrence) => occurrence.nearbySymbols)).slice(0, 8)
     lines.push([
+      endpoint.targetKind,
       `\`${endpoint.endpoint}\``,
       endpoint.occurrenceCount,
       endpoint.files.length,
@@ -231,6 +262,16 @@ function normalizeEndpoint(value: string | undefined): string | null {
   return endpoint.startsWith("/") ? endpoint : null
 }
 
+function normalizeSearchQuery(value: string | undefined): string | null {
+  const query = value?.trim()
+  if (!query) return null
+  return query.length > 512 ? query.slice(0, 512) : query
+}
+
+function termKey(term: JimengStaticLocatorSearchTerm): string {
+  return `${term.kind}:${term.value}`
+}
+
 function isStaticLocatorApiEndpoint(endpoint: string): boolean {
   return /^\/(?:mweb\/v\d+|lv\/v\d+|api\/[^/]+|commerce\/v\d+|aweme\/|webcast\/)/.test(endpoint)
 }
@@ -259,6 +300,7 @@ function snippetAround(text: string, index: number, line: number, contextLines: 
 
 function sanitizeSnippet(snippet: string): string {
   return snippet
+    .replace(/https?:\/\/(?=["'`])/g, "<protocol-literal>")
     .replace(/https?:\/\/[^"'`\s)]+/g, (value) => redactUrl(value))
     .replace(/\b(cookie|authorization|token|secret|x-signature|x-sign|msToken)\b\s*[:=]\s*["'`]?[^"'`,\s)]+/gi, "$1=<redacted>")
     .slice(0, 4_000)
@@ -306,12 +348,18 @@ function extractRequestStringHints(snippet: string): string[] {
   return sortedUnique(hints).slice(0, 60)
 }
 
-function astGrepCommands(endpoint: string, file: string): string[] {
-  const escapedEndpoint = endpoint.replace(/'/g, "'\\''")
+function astGrepCommands(term: JimengStaticLocatorSearchTerm, file: string): string[] {
+  const escapedTerm = term.value.replace(/'/g, "'\\''")
   const escapedFile = file.replace(/'/g, "'\\''")
+  if (term.kind === "query" && /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(term.value)) {
+    return [
+      `mise x ast-grep -- ast-grep --lang ts -p '${escapedTerm}' '${escapedFile}'`,
+      `rg -n '${escapedTerm}' '${escapedFile}'`,
+    ]
+  }
   return [
-    `mise x ast-grep -- ast-grep --lang ts -p '"${escapedEndpoint}"' '${escapedFile}'`,
-    `mise x ast-grep -- ast-grep --lang ts -p "'${escapedEndpoint}'" '${escapedFile}'`,
+    `mise x ast-grep -- ast-grep --lang ts -p '"${escapedTerm}"' '${escapedFile}'`,
+    `mise x ast-grep -- ast-grep --lang ts -p "'${escapedTerm}'" '${escapedFile}'`,
   ]
 }
 

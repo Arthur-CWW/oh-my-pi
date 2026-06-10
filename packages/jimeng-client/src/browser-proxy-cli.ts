@@ -81,6 +81,7 @@ import {
 import {
   locateJimengStaticEndpoints,
   parseJimengStaticLocatorEndpoints,
+  parseJimengStaticLocatorQueries,
   summarizeJimengStaticLocator,
   writeJimengStaticLocatorMarkdown,
 } from "./static-locator"
@@ -225,6 +226,8 @@ Options:
   --analysis <file[,file]>       capture-analyze normalized analysis JSON for discovery-worklist
   --probeCandidates <file[,file]> Raw endpoint-probe candidate JSON for discovery-worklist
   --staticRoot <dir[,dir]>      Optional source/bundle roots to search for exact endpoint string hints
+  --symbol <name[,name]>         Static-locate symbols/request-builder names to search beside endpoints
+  --staticQuery <term[,term]>     Static-locate arbitrary source/bundle search terms
   --contextLines <n>            Snippet context lines for static-locate (default: 3)
   --includeRisky                Include generate/upload/mutate/payment endpoints in replay candidate JSON
   --includeKnown                Include already-covered endpoints in discovery-worklist
@@ -554,6 +557,7 @@ interface CliArgs {
   analysisFiles?: string[]
   probeCandidateFiles?: string[]
   staticRoots?: string[]
+  staticQueries?: string[]
   contextLines?: number
   includeRisky: boolean
   includeKnown: boolean
@@ -722,14 +726,16 @@ async function main(argv: string[]): Promise<void> {
 
   if (args.command === "static-locate") {
     const endpoints = parseJimengStaticLocatorEndpoints(args.endpoint)
+    const queries = args.staticQueries ?? []
     const analysisFiles = args.analysisFiles ?? []
     if ((args.staticRoots ?? []).length === 0) throw new Error("static-locate requires --staticRoot")
-    if (endpoints.length === 0 && analysisFiles.length === 0) throw new Error("static-locate requires --endpoint or --analysis")
+    if (endpoints.length === 0 && analysisFiles.length === 0 && queries.length === 0) throw new Error("static-locate requires --endpoint, --analysis, --query, or --symbol")
     const dirs = ensureOutputDirs(path.resolve(args.outDir))
     const runId = `static-locate-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
     const result = locateJimengStaticEndpoints({
       staticRoots: args.staticRoots ?? [],
       endpoints,
+      queries,
       analysisFiles,
       contextLines: args.contextLines,
       limitPerEndpoint: args.limit,
@@ -2917,13 +2923,14 @@ function parseArgs(argv: string[]): CliArgs {
     analysisFiles: parseCsvFlag(flags.analysis),
     probeCandidateFiles: parseCsvFlag(flags.probeCandidates ?? flags["probe-candidates"]),
     staticRoots: parseCsvFlag(flags.staticRoot ?? flags["static-root"]),
+    staticQueries: command === "static-locate" ? parseJimengStaticLocatorQueries(flags.staticQuery ?? flags["static-query"] ?? flags.symbol ?? flags.query) : undefined,
     contextLines,
     includeRisky: flags.includeRisky === "true" || flags["include-risky"] === "true",
     includeKnown: flags.includeKnown === "true" || flags["include-known"] === "true",
     plan: flags.plan,
     endpoint: flags.endpoint,
     method,
-    query: flags.query,
+    query: command === "static-locate" ? undefined : flags.query,
     body: flags.body,
     variants: flags.variants,
     endpoints: flags.endpoints,

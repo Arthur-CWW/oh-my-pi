@@ -5,6 +5,7 @@ import { describe, expect, test } from "bun:test"
 import {
   locateJimengStaticEndpoints,
   parseJimengStaticLocatorEndpoints,
+  parseJimengStaticLocatorQueries,
   summarizeJimengStaticLocator,
   writeJimengStaticLocatorMarkdown,
 } from "../src"
@@ -17,6 +18,14 @@ describe("Jimeng static locator", () => {
       "/mweb/v1/c",
     ])
     expect(parseJimengStaticLocatorEndpoints(undefined)).toEqual([])
+  })
+
+  test("parses static query CSV flags", () => {
+    expect(parseJimengStaticLocatorQueries("SearchTemplates, GetTemplateHotWords ,, SearchTemplates")).toEqual([
+      "GetTemplateHotWords",
+      "SearchTemplates",
+    ])
+    expect(parseJimengStaticLocatorQueries(undefined)).toEqual([])
   })
 
   test("locates request-builder snippets and static follow-up commands", () => {
@@ -44,11 +53,47 @@ describe("Jimeng static locator", () => {
       const markdown = writeJimengStaticLocatorMarkdown(result)
 
       expect(result.endpointResults[0]?.occurrenceCount).toBe(1)
+      expect(result.endpointResults[0]?.targetKind).toBe("endpoint")
       expect(result.endpointResults[0]?.occurrences[0]?.nearbySymbols).toContain("GenerateVoicePath")
       expect(result.endpointResults[0]?.occurrences[0]?.nearbySymbols).toContain("submitSubjectVoice")
       expect(result.endpointResults[0]?.occurrences[0]?.suggestedAstGrepCommands[0]).toContain("mise x ast-grep")
       expect(JSON.stringify(summary)).toContain("subject_voice")
       expect(markdown).toContain("/mweb/v1/dreamina_subject/generate_voice")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("locates symbol queries beside endpoint terms", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "jimeng-static-locator-query-"))
+    try {
+      const bundle = path.join(dir, "bundle.js")
+      writeFileSync(
+        bundle,
+        [
+          `const endpoints = { SearchTemplates: { url: "/lv/v1/cc_web/replicate/search_templates" } };`,
+          `function buildPayload(keyword) {`,
+          `  return { keyword, page_size: 20, cursor: "0" };`,
+          `}`,
+          `client.post(endpoints.SearchTemplates.url, buildPayload("serum"));`,
+        ].join("\n"),
+        "utf8",
+      )
+
+      const result = locateJimengStaticEndpoints({
+        staticRoots: [dir],
+        endpoints: ["/lv/v1/cc_web/replicate/search_templates"],
+        queries: ["SearchTemplates"],
+        contextLines: 1,
+        nowIso: "2026-06-10T00:00:00.000Z",
+      })
+      const summary = summarizeJimengStaticLocator(result)
+
+      expect(result.endpoints).toEqual(["/lv/v1/cc_web/replicate/search_templates"])
+      expect(result.queries).toEqual(["SearchTemplates"])
+      expect(result.endpointResults.map((item) => item.targetKind).sort()).toEqual(["endpoint", "query"])
+      expect(JSON.stringify(summary)).toContain("buildPayload")
+      expect(summary.query_count).toBe(1)
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

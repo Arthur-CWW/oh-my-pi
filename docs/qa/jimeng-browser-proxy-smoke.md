@@ -406,6 +406,53 @@ Expected result:
 normalized static-locate proof has no signed URLs or credentials
 ```
 
+Symbol-search proof for CapCut template endpoints:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts static-locate \
+  --endpoint /lv/v1/cc_web/replicate/search_templates,/lv/v1/cc_web/plane/get_collection_templates,/lv/v1/cc_web/plane/batch_get_collection_templates,/lv/v1/cc_web/plane/fuzzy_search_templates \
+  --symbol SearchTemplates,GetTemplatesAccordCategory,GetBatchTemplatesByCategory,FuzzySearchTemplateByTitle,GetTemplateHotWords,GetCategories \
+  --staticRoot data/jimeng-lab/js-sweep/files \
+  --outDir data/jimeng-lab/proof-20260610-static-locate-capcut-templates-symbols \
+  --limit 8 \
+  --contextLines 1
+```
+
+Result:
+
+```txt
+static-locate saved endpoints=4 occurrences=24
+endpoint_count=4
+query_count=6
+search_term_count=10
+```
+
+Proof files:
+
+```txt
+data/jimeng-lab/proof-20260610-static-locate-capcut-templates-symbols/raw/static-locate-20260610041211.json
+data/jimeng-lab/proof-20260610-static-locate-capcut-templates-symbols/normalized/static-locate-20260610041211-summary.json
+data/jimeng-lab/proof-20260610-static-locate-capcut-templates-symbols/normalized/static-locate-20260610041211-summary.md
+```
+
+The normalized CapCut symbol-search output was checked for signed URL and credential leakage:
+
+```bash
+if rg -n "https?://[^\"'\`[:space:])]+|x-signature=|msToken=|cookie=|authorization=|token=|secret=" \
+  data/jimeng-lab/proof-20260610-static-locate-capcut-templates-symbols/normalized; then
+  exit 1
+else
+  echo "normalized static-locate capcut-symbol proof has no signed URLs or credentials"
+fi
+```
+
+Direct no-spend API probe notes:
+
+- `/lv/v1/cc_web/replicate/get_search_words` returned `ret: "0"` with region-only data.
+- `/lv/v1/cc_web/plane/fuzzy_search_templates` returned `ret: "0"` with an empty `item_list` for the simple `keyword` body.
+- `/lv/v1/cc_web/replicate/search_templates` and `/lv/v1/cc_web/plane/get_collection_templates` returned `ret: "1000"` / `errmsg: "param error"` for guessed bodies. These still need exact UI-captured payloads or deeper static call-site recovery before promotion to dedicated CLI commands.
+- No image/video/voice generation job was submitted during this proof.
+
 ## Agent Catalog Smoke
 
 `agent-catalog` is the schema-backed, no-spend model/tool catalog for the older creation-agent surface. It promotes the generic catalog probes into normalized fields that later generation commands can use for flags and validation.
