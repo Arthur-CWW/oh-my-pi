@@ -66,12 +66,27 @@ const CustomRatioDataWireSchema = z.object({
   customRatioInfos: z.array(CustomRatioWireSchema).nullable().optional(),
 }).passthrough()
 
-export type JimengInfiniteCanvasEndpoint = "projects" | "detail" | "ratios"
+const ConversationWireSchema = z.object({
+  id: OptionalString,
+  conversation_id: OptionalString,
+  conversationId: OptionalString,
+  title: OptionalString,
+  name: OptionalString,
+  create_time_ms: OptionalNumber,
+  createTimeMs: OptionalNumber,
+  modify_time_ms: OptionalNumber,
+  modifyTimeMs: OptionalNumber,
+  update_time_ms: OptionalNumber,
+  updateTimeMs: OptionalNumber,
+}).passthrough()
+
+export type JimengInfiniteCanvasEndpoint = "projects" | "detail" | "ratios" | "conversations"
 
 export interface JimengInfiniteCanvasQuery {
   endpoints?: JimengInfiniteCanvasEndpoint[]
   cursor?: number
   limit?: number
+  offset?: number
   imageInfo?: boolean
   onlyFavorite?: boolean
   projectId?: string
@@ -107,8 +122,15 @@ export interface JimengCanvasCustomRatio {
   height: number | null
 }
 
+export interface JimengCanvasConversation {
+  id: string | null
+  title: string | null
+  createTimeMs: number | null
+  modifyTimeMs: number | null
+}
+
 export interface JimengInfiniteCanvasResult {
-  endpoint: "/mweb/v1/infinite_canvas/list_project" | "/mweb/v1/infinite_canvas/project_detail" | "/mweb/v1/infinite_canvas/v1/get_canvas_custom_ratio"
+  endpoint: "/mweb/v1/infinite_canvas/list_project" | "/mweb/v1/infinite_canvas/project_detail" | "/mweb/v1/infinite_canvas/v1/get_canvas_custom_ratio" | "/mweb/v1/infinite_canvas/get_conversation_list"
   endpointId: JimengInfiniteCanvasEndpoint
   httpStatus: number
   ret: string | number | null
@@ -123,6 +145,7 @@ export interface JimengInfiniteCanvasResult {
   hasMore?: boolean | null
   nextCursor?: number | null
   customRatios?: JimengCanvasCustomRatio[]
+  conversations?: JimengCanvasConversation[]
 }
 
 export interface JimengInfiniteCanvasBundle {
@@ -132,16 +155,16 @@ export interface JimengInfiniteCanvasBundle {
 }
 
 export function parseJimengInfiniteCanvasEndpoints(value: string | undefined): JimengInfiniteCanvasEndpoint[] {
-  if (!value || value === "all") return ["projects", "detail", "ratios"]
+  if (!value || value === "all") return ["projects", "detail", "ratios", "conversations"]
   const values = value.split(",").map((part) => part.trim()).filter(Boolean)
-  const allowed = new Set<JimengInfiniteCanvasEndpoint>(["projects", "detail", "ratios"])
+  const allowed = new Set<JimengInfiniteCanvasEndpoint>(["projects", "detail", "ratios", "conversations"])
   const endpoints: JimengInfiniteCanvasEndpoint[] = []
   for (const endpoint of values) {
     if (!allowed.has(endpoint as JimengInfiniteCanvasEndpoint)) {
       throw jimengError({
         category: "validation",
         code: "INFINITE_CANVAS_ENDPOINT_INVALID",
-        message: "infinite-canvas --endpoints must be projects, detail, ratios, or all.",
+        message: "infinite-canvas --endpoints must be projects, detail, ratios, conversations, or all.",
         retryable: false,
         details: { endpoint, allowed: Array.from(allowed) },
       })
@@ -173,6 +196,14 @@ export function buildJimengCanvasCustomRatiosRequest(query: JimengInfiniteCanvas
   return { user_id: query.userId }
 }
 
+export function buildJimengCanvasConversationListRequest(query: JimengInfiniteCanvasQuery & { projectId: string }): JsonObject {
+  return {
+    project_id: query.projectId,
+    offset: query.offset ?? 0,
+    count: query.limit ?? 20,
+  }
+}
+
 export async function fetchJimengInfiniteCanvas(input: {
   client?: JimengClient
   session: JimengSessionBundle
@@ -185,6 +216,7 @@ export async function fetchJimengInfiniteCanvas(input: {
   const needProjectList = requestedEndpoints.includes("projects")
     || (requestedEndpoints.includes("detail") && !input.query?.projectId)
     || (requestedEndpoints.includes("ratios") && !input.query?.userId)
+    || (requestedEndpoints.includes("conversations") && !input.query?.projectId)
 
   let projects: JimengCanvasProject[] = []
   if (needProjectList) {
@@ -220,6 +252,18 @@ export async function fetchJimengInfiniteCanvas(input: {
     }
   }
 
+  if (requestedEndpoints.includes("conversations")) {
+    if (!projectId) {
+      skipped.push({ endpoint: "conversations", reason: "missing project id; project list returned no projects and --projectId was not supplied" })
+    } else {
+      results.push(await fetchCanvasConversations({
+        client,
+        session: input.session,
+        query: { ...input.query, projectId },
+      }))
+    }
+  }
+
   return { endpoints: requestedEndpoints, results, skipped }
 }
 
@@ -227,6 +271,7 @@ export function summarizeJimengInfiniteCanvas(bundle: JimengInfiniteCanvasBundle
   const projects = bundle.results.find((result) => result.endpointId === "projects")
   const detail = bundle.results.find((result) => result.endpointId === "detail")
   const ratios = bundle.results.find((result) => result.endpointId === "ratios")
+  const conversations = bundle.results.find((result) => result.endpointId === "conversations")
   return {
     endpoints: bundle.endpoints,
     result_count: bundle.results.length,
@@ -266,6 +311,20 @@ export function summarizeJimengInfiniteCanvas(bundle: JimengInfiniteCanvasBundle
         name: ratio.name,
         width: ratio.width,
         height: ratio.height,
+      })),
+    } : null,
+    conversations: conversations ? {
+      http_status: conversations.httpStatus,
+      ret: conversations.ret,
+      errmsg: conversations.errmsg,
+      response_text_sha256: conversations.responseTextSha256,
+      request: conversations.request,
+      conversation_count: conversations.conversations?.length ?? 0,
+      items: (conversations.conversations ?? []).map((conversation) => ({
+        id: conversation.id,
+        title: conversation.title,
+        create_time_ms: conversation.createTimeMs,
+        modify_time_ms: conversation.modifyTimeMs,
       })),
     } : null,
   }
@@ -362,6 +421,28 @@ async function fetchCanvasCustomRatios(input: {
   }
 }
 
+async function fetchCanvasConversations(input: {
+  client: JimengClient
+  session: JimengSessionBundle
+  query: JimengInfiniteCanvasQuery & { projectId: string }
+}): Promise<JimengInfiniteCanvasResult> {
+  const request = buildJimengCanvasConversationListRequest(input.query)
+  const response = await requestJimengCanvas({
+    client: input.client,
+    session: input.session,
+    endpoint: "/mweb/v1/infinite_canvas/get_conversation_list",
+    request,
+  })
+  const data = parseConversationListData(response.body)
+  return {
+    endpoint: "/mweb/v1/infinite_canvas/get_conversation_list",
+    endpointId: "conversations",
+    ...response,
+    request,
+    conversations: data.map(parseConversation),
+  }
+}
+
 async function requestJimengCanvas(input: {
   client: JimengClient
   session: JimengSessionBundle
@@ -425,6 +506,29 @@ function parseCustomRatio(ratio: z.infer<typeof CustomRatioWireSchema>): JimengC
     width: numericValue(ratio.width),
     height: numericValue(ratio.height),
   }
+}
+
+function parseConversation(conversation: z.infer<typeof ConversationWireSchema>): JimengCanvasConversation {
+  return {
+    id: stringValue(conversation.conversation_id) ?? stringValue(conversation.conversationId) ?? stringValue(conversation.id),
+    title: stringValue(conversation.title) ?? stringValue(conversation.name),
+    createTimeMs: numberValue(conversation.create_time_ms) ?? numberValue(conversation.createTimeMs),
+    modifyTimeMs: numberValue(conversation.modify_time_ms) ?? numberValue(conversation.modifyTimeMs) ?? numberValue(conversation.update_time_ms) ?? numberValue(conversation.updateTimeMs),
+  }
+}
+
+function parseConversationListData(body: JsonValue): Array<z.infer<typeof ConversationWireSchema>> {
+  const envelope = parseJimengApiEnvelope(body, "infinite canvas conversation list")
+  if (!Array.isArray(envelope.data)) {
+    throw jimengError({
+      category: "upstream",
+      code: "JIMENG_CANVAS_CONVERSATION_LIST_CHANGED",
+      message: "infinite canvas conversation list response data was not an array.",
+      retryable: false,
+      details: { operation: "infinite canvas conversation list", data_kind: typeof envelope.data },
+    })
+  }
+  return envelope.data.map((item) => parseJimengContract(ConversationWireSchema, item, "infinite canvas conversation list"))
 }
 
 function summarizeProject(project: JimengCanvasProject): JsonObject {

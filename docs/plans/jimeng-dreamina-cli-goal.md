@@ -168,22 +168,23 @@ No-spend direct endpoint concurrency probing is now live-proved:
 - records bounded worker concurrency, latency percentiles, HTTP status counts, `ret` counts, stop reasons, and response hashes without persisting response bodies
 - stop conditions include HTTP `429`, `401`, `403`, auth-ish `ret=1015/1017`, risk `ret=1019`, shark/risk/captcha/verify/login messages, and transport/schema errors
 - reference implementation note from `iptag/jimeng-api`: it does not publish a hard Jimeng rate limit; it supports multiple bearer tokens and randomly samples among them, plus long polling/retry behavior
-- latest read-only `/mweb/v1/get_common_config` proof found no observed limit through concurrency `32` and `64` total requests in that tier: all `148/148` sweep requests returned HTTP `200`, `ret=0`, with no stop condition
-- proof bundles: `data/jimeng-lab/proof-20260610-rate-probe-common-config-c{1,3,6,10,16,32}/`
+- latest read-only `/mweb/v1/get_common_config` proof found no observed limit through concurrency `256` and `512` total requests in that tier: all read-only sweep requests returned HTTP `200`, `ret=0`, with no stop condition; tail latency rose at the highest tiers
+- proof bundles: `data/jimeng-lab/proof-20260610-rate-probe-common-config-c{1,3,6,10,16,32,64,96,128,192,256}/`
 - this is a read-only config endpoint bound, not a safe generation-submit limit. Keep paid generation submission concurrency at `1` until an explicitly approved capped test says otherwise.
 
 Infinite canvas project metadata is now live-proved without generation spend and schema-backed:
 
 - `jimeng-browser-proxy infinite-canvas`
-- direct `/mweb/v1/infinite_canvas/list_project`, `/mweb/v1/infinite_canvas/project_detail`, and `/mweb/v1/infinite_canvas/v1/get_canvas_custom_ratio`
-- useful flags: `--endpoints projects,detail,ratios,all`, `--cursor`, `--limit`, `--imageInfo`, `--onlyFavorite`, `--projectId`, `--userId`, and `--needDraftResource`
+- direct `/mweb/v1/infinite_canvas/list_project`, `/mweb/v1/infinite_canvas/project_detail`, `/mweb/v1/infinite_canvas/v1/get_canvas_custom_ratio`, and `/mweb/v1/infinite_canvas/get_conversation_list`
+- useful flags: `--endpoints projects,detail,ratios,conversations,all`, `--cursor`, `--limit`, `--offset`, `--imageInfo`, `--onlyFavorite`, `--projectId`, `--userId`, and `--needDraftResource`
 - frontend bundle evidence:
   - project list sends frontend object fields `cursor`, `limit`, `imageInfo`, and `onlyFavorite`
   - project detail frontend callers use camelCase, but safe probes proved the wire body is `project_id` plus `option.need_draft_resource`
   - custom ratios frontend callers use camelCase, but safe probes proved the wire body is `user_id`
+  - conversation list uses `project_id`, `offset`, and `count`; empty/page-only bodies return `ret=1000`, while project-scoped bodies return `ret=0`
 - normalized output hashes creator user ids, summarizes draft JSON by hash/counts, and omits raw draft JSON, cookies, and signed media URLs
-- proof bundle: `data/jimeng-lab/proof-20260610-infinite-canvas-cli/`
-- latest proof returned one canvas project, one detail record, `mode=1`, draft version `0.0.1`, zero layers/references, zero custom ratios, and no skipped endpoints
+- proof bundle: `data/jimeng-lab/proof-20260610-infinite-canvas-conversations-cli/`
+- latest proof returned one canvas project, one detail record, `mode=1`, draft version `0.0.1`, zero layers/references, zero custom ratios, zero conversations, and no skipped endpoints
 
 Explore/template mining is now live-proved without generation spend:
 

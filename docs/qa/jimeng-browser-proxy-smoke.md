@@ -2435,6 +2435,14 @@ bun packages/jimeng-client/src/browser-proxy-cli.ts rate-probe \
   --requests 64 \
   --concurrency 32 \
   --outDir data/jimeng-lab/proof-20260610-rate-probe-common-config-c32
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts rate-probe \
+  --endpoint /mweb/v1/get_common_config \
+  --method POST \
+  --body '{}' \
+  --requests 512 \
+  --concurrency 256 \
+  --outDir data/jimeng-lab/proof-20260610-rate-probe-common-config-c256
 ```
 
 Measured summaries:
@@ -2446,12 +2454,17 @@ concurrency=6  requests=12  completed=12  stopped=false  elapsed=1418ms   p50=40
 concurrency=10 requests=24  completed=24  stopped=false  elapsed=1277ms   p50=289ms  p95=757ms   http=200x24  ret=0x24
 concurrency=16 requests=24  completed=24  stopped=false  elapsed=653ms    p50=352ms  p95=395ms   http=200x24  ret=0x24
 concurrency=32 requests=64  completed=64  stopped=false  elapsed=720ms    p50=304ms  p95=414ms   http=200x64  ret=0x64
+concurrency=64 requests=128 completed=128 stopped=false elapsed=800ms    p50=337ms  p95=458ms   http=200x128 ret=0x128
+concurrency=96 requests=192 completed=192 stopped=false elapsed=953ms    p50=414ms  p95=523ms   http=200x192 ret=0x192
+concurrency=128 requests=256 completed=256 stopped=false elapsed=983ms   p50=369ms  p95=625ms   http=200x256 ret=0x256
+concurrency=192 requests=384 completed=384 stopped=false elapsed=1260ms  p50=362ms  p95=966ms   http=200x384 ret=0x384
+concurrency=256 requests=512 completed=512 stopped=false elapsed=1626ms  p50=388ms  p95=1406ms  http=200x512 ret=0x512
 ```
 
 Result:
 
 ```txt
-No rate/auth/risk stop was observed for /mweb/v1/get_common_config through concurrency 32.
+No rate/auth/risk stop was observed for /mweb/v1/get_common_config through concurrency 256.
 The iptag/jimeng-api reference does not publish a hard rate limit; it supports comma-separated bearer tokens and randomly samples tokens per request, plus long polling/retry behavior.
 ```
 
@@ -2459,7 +2472,7 @@ Leak check:
 
 ```bash
 rg -n -P 'x-signature|authorization|cookie|sessionid|sid=|msToken|verifyFp|X-Kagi|x-expires' \
-  data/jimeng-lab/proof-20260610-rate-probe-common-config-c{1,3,6,10,16,32}/normalized
+  data/jimeng-lab/proof-20260610-rate-probe-common-config-c{1,3,6,10,16,32,64,96,128,192,256}/normalized
 ```
 
 Expected result: no matches.
@@ -2774,15 +2787,15 @@ normalized proof leak check returned no unredacted credential markers.
 
 ## Infinite Canvas Read Metadata
 
-No-spend direct project/detail/ratio reads were promoted into `jimeng-browser-proxy infinite-canvas`.
+No-spend direct project/detail/ratio/conversation-list reads were promoted into `jimeng-browser-proxy infinite-canvas`.
 
 Static evidence:
 
 ```bash
 bun packages/jimeng-client/src/browser-proxy-cli.ts static-locate \
   --staticRoot data/jimeng-lab/js-sweep/files,packages/jimeng-client/src \
-  --endpoint /mweb/v1/infinite_canvas/list_project,/mweb/v1/infinite_canvas/project_detail,/mweb/v1/infinite_canvas/v1/get_canvas_custom_ratio \
-  --symbol listProject,projectDetail,getCanvasCustomRatio,customRatio,InfiniteCanvas \
+  --endpoint /mweb/v1/infinite_canvas/list_project,/mweb/v1/infinite_canvas/project_detail,/mweb/v1/infinite_canvas/v1/get_canvas_custom_ratio,/mweb/v1/infinite_canvas/get_conversation_list \
+  --symbol listProject,projectDetail,getCanvasCustomRatio,getConversationList,customRatio,InfiniteCanvas \
   --outDir data/jimeng-lab/proof-20260610-static-locate-infinite-canvas-reads
 ```
 
@@ -2803,6 +2816,12 @@ bun packages/jimeng-client/src/browser-proxy-cli.ts endpoint-probe \
   --endpoint /mweb/v1/infinite_canvas/v1/get_canvas_custom_ratio \
   --variants '[{"name":"snake_user","body":{"user_id":"<creator_user_id_from_list_project>"}}]' \
   --outDir data/jimeng-lab/proof-20260610-infinite-canvas-ratios-probe
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts endpoint-probe \
+  --endpoint /mweb/v1/infinite_canvas/get_conversation_list \
+  --method POST \
+  --variants '[{"name":"project_page","body":{"project_id":"8544774599436","offset":0,"count":20}},{"name":"project_id_only","body":{"project_id":"8544774599436"}}]' \
+  --outDir data/jimeng-lab/proof-20260610-infinite-canvas-conversation-list-probe
 ```
 
 CLI proof:
@@ -2811,16 +2830,17 @@ CLI proof:
 bun packages/jimeng-client/src/browser-proxy-cli.ts infinite-canvas \
   --endpoints all \
   --limit 20 \
-  --outDir data/jimeng-lab/proof-20260610-infinite-canvas-cli
+  --outDir data/jimeng-lab/proof-20260610-infinite-canvas-conversations-cli
 ```
 
 Result:
 
 ```txt
-infinite-canvas saved endpoints=projects,detail,ratios projects=1 detail=yes ratios=0 skipped=0
+infinite-canvas saved endpoints=projects,detail,ratios,conversations projects=1 detail=yes ratios=0 conversations=0 skipped=0
 project_count=1
 detail_mode=1
 ratio_count=0
+conversation_count=0
 project_id=8544774599436
 draft_id=8448339004172
 draft_meta_version=0.0.1
@@ -2832,11 +2852,11 @@ Validation:
 
 ```bash
 rg -n "cookie|sid=|session|msToken|x-signature|sign|authorization|<creator_user_id>|byteimg|tos-cn" \
-  data/jimeng-lab/proof-20260610-infinite-canvas-cli/normalized \
-  data/jimeng-lab/proof-20260610-infinite-canvas-cli-dry-run/normalized || true
+  data/jimeng-lab/proof-20260610-infinite-canvas-conversations-cli/normalized \
+  data/jimeng-lab/proof-20260610-infinite-canvas-conversations-cli-dry-run/normalized || true
 ```
 
-Result: no matches. Normalized proof hashes creator user ids and stores draft JSON only as a SHA-256/count summary.
+Result: no matches. Normalized proof hashes creator user ids and stores draft JSON only as a SHA-256/count summary. `fetch_conversation` remains blocked until a non-empty conversation list returns a real `conversation_id`.
 
 ## Verification
 

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import {
   buildJimengCanvasCustomRatiosRequest,
+  buildJimengCanvasConversationListRequest,
   buildJimengCanvasProjectDetailRequest,
   buildJimengCanvasProjectListRequest,
   fetchJimengInfiniteCanvas,
@@ -22,9 +23,9 @@ const session: JimengSessionBundle = {
 
 describe("Jimeng infinite canvas read helpers", () => {
   test("parses endpoint flags and builds wire requests", () => {
-    expect(parseJimengInfiniteCanvasEndpoints(undefined)).toEqual(["projects", "detail", "ratios"])
+    expect(parseJimengInfiniteCanvasEndpoints(undefined)).toEqual(["projects", "detail", "ratios", "conversations"])
     expect(parseJimengInfiniteCanvasEndpoints("ratios,projects,ratios")).toEqual(["ratios", "projects"])
-    expect(() => parseJimengInfiniteCanvasEndpoints("conversation")).toThrow("infinite-canvas --endpoints must be projects, detail, ratios, or all")
+    expect(() => parseJimengInfiniteCanvasEndpoints("conversation")).toThrow("infinite-canvas --endpoints must be projects, detail, ratios, conversations, or all")
 
     expect(buildJimengCanvasProjectListRequest({ cursor: 20, limit: 5, imageInfo: false, onlyFavorite: true })).toEqual({
       cursor: 20,
@@ -39,22 +40,28 @@ describe("Jimeng infinite canvas read helpers", () => {
     expect(buildJimengCanvasCustomRatiosRequest({ userId: "2033447352671660" })).toEqual({
       user_id: "2033447352671660",
     })
+    expect(buildJimengCanvasConversationListRequest({ projectId: "8544774599436", offset: 10, limit: 5 })).toEqual({
+      project_id: "8544774599436",
+      offset: 10,
+      count: 5,
+    })
   })
 
-  test("fetches projects, infers detail/ratio ids, and summarizes without raw draft JSON", async () => {
+  test("fetches projects, infers dependent ids, and summarizes without raw draft JSON", async () => {
     const requests: Array<{ url: string; init?: RequestInit }> = []
     const client = new JimengClient({
       fetch: mockFetchSequence([
         JSON.stringify(projectListBody()),
         JSON.stringify(projectDetailBody()),
         JSON.stringify(customRatiosBody()),
+        JSON.stringify(conversationListBody()),
       ], requests),
     })
 
     const result = await fetchJimengInfiniteCanvas({
       client,
       session,
-      query: { endpoints: ["projects", "detail", "ratios"], limit: 20 },
+      query: { endpoints: ["projects", "detail", "ratios", "conversations"], limit: 20 },
     })
     const summary = summarizeJimengInfiniteCanvas(result)
 
@@ -62,6 +69,7 @@ describe("Jimeng infinite canvas read helpers", () => {
       expect.stringContaining("/mweb/v1/infinite_canvas/list_project"),
       expect.stringContaining("/mweb/v1/infinite_canvas/project_detail"),
       expect.stringContaining("/mweb/v1/infinite_canvas/v1/get_canvas_custom_ratio"),
+      expect.stringContaining("/mweb/v1/infinite_canvas/get_conversation_list"),
     ])
     expect(JSON.parse(String(requests[0]?.init?.body))).toEqual({
       cursor: 0,
@@ -75,6 +83,11 @@ describe("Jimeng infinite canvas read helpers", () => {
     })
     expect(JSON.parse(String(requests[2]?.init?.body))).toEqual({
       user_id: "2033447352671660",
+    })
+    expect(JSON.parse(String(requests[3]?.init?.body))).toEqual({
+      project_id: "8544774599436",
+      offset: 0,
+      count: 20,
     })
     expect(summary).toMatchObject({
       projects: {
@@ -106,6 +119,10 @@ describe("Jimeng infinite canvas read helpers", () => {
         ratio_count: 1,
         items: [{ id: "ratio-1", name: "Tall", width: 1080, height: 1920 }],
       },
+      conversations: {
+        conversation_count: 1,
+        items: [{ id: "conversation-1", title: "Storyboard", create_time_ms: 1771218000000, modify_time_ms: 1771219000000 }],
+      },
     })
     const summaryText = JSON.stringify(summary)
     expect(summaryText).not.toContain("2033447352671660")
@@ -121,13 +138,14 @@ describe("Jimeng infinite canvas read helpers", () => {
     const result = await fetchJimengInfiniteCanvas({
       client,
       session,
-      query: { endpoints: ["detail", "ratios"] },
+      query: { endpoints: ["detail", "ratios", "conversations"] },
     })
 
     expect(result.results.map((item) => item.endpointId)).toEqual(["projects"])
     expect(result.skipped).toEqual([
       { endpoint: "detail", reason: "missing project id; project list returned no projects and --projectId was not supplied" },
       { endpoint: "ratios", reason: "missing user id; project list returned no creator_user_id and --userId was not supplied" },
+      { endpoint: "conversations", reason: "missing project id; project list returned no projects and --projectId was not supplied" },
     ])
   })
 
@@ -228,6 +246,22 @@ function customRatiosBody(): JsonObject {
         },
       ],
     },
+  }
+}
+
+function conversationListBody(): JsonObject {
+  return {
+    ret: "0",
+    errmsg: "success",
+    data: [
+      {
+        conversation_id: "conversation-1",
+        title: "Storyboard",
+        create_time_ms: 1771218000000,
+        update_time_ms: 1771219000000,
+        provider_added_field: { keep: true },
+      },
+    ],
   }
 }
 

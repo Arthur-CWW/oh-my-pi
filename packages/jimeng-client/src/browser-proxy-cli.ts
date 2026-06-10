@@ -133,6 +133,7 @@ import {
 } from "./image-models"
 import {
   buildJimengCanvasCustomRatiosRequest,
+  buildJimengCanvasConversationListRequest,
   buildJimengCanvasProjectDetailRequest,
   buildJimengCanvasProjectListRequest,
   fetchJimengInfiniteCanvas,
@@ -293,7 +294,7 @@ Options:
   --delayMs <ms>                 Optional per-request delay for rate-probe workers
   --endpoints <ids|all>          Catalog endpoints, comma-separated (default: all)
                                   agent-catalog accepts skills,config,all
-                                  infinite-canvas accepts projects,detail,ratios,all
+                                  infinite-canvas accepts projects,detail,ratios,conversations,all
   --text <text>                 TTS/sample-voices text
   --voice-id <id>               TTS voice id from voices command
   --voice-title <title>         Optional display title for TTS output filename
@@ -1470,6 +1471,7 @@ async function main(argv: string[]): Promise<void> {
     const query = {
       endpoints,
       cursor: args.cursor,
+      offset: args.offset,
       limit: args.limit,
       imageInfo: args.imageInfo,
       onlyFavorite: args.onlyFavorite,
@@ -1485,14 +1487,17 @@ async function main(argv: string[]): Promise<void> {
           ? "/mweb/v1/infinite_canvas/list_project"
           : endpoint === "detail"
             ? "/mweb/v1/infinite_canvas/project_detail"
-            : "/mweb/v1/infinite_canvas/v1/get_canvas_custom_ratio"),
+            : endpoint === "ratios"
+              ? "/mweb/v1/infinite_canvas/v1/get_canvas_custom_ratio"
+              : "/mweb/v1/infinite_canvas/get_conversation_list"),
         query,
         requests: {
-          projects: endpoints.includes("projects") || endpoints.includes("detail") || endpoints.includes("ratios")
+          projects: endpoints.includes("projects") || endpoints.includes("detail") || endpoints.includes("ratios") || endpoints.includes("conversations")
             ? buildJimengCanvasProjectListRequest(query)
             : null,
           detail: args.projectId ? buildJimengCanvasProjectDetailRequest({ ...query, projectId: args.projectId }) : { inferred_from_first_project: true },
           ratios: args.userId ? buildJimengCanvasCustomRatiosRequest({ ...query, userId: args.userId }) : { inferred_from_first_project_creator_user_id: true },
+          conversations: args.projectId ? buildJimengCanvasConversationListRequest({ ...query, projectId: args.projectId }) : { inferred_from_first_project: true },
         },
         browser_session: redactSession(session),
       })
@@ -1527,7 +1532,8 @@ async function main(argv: string[]): Promise<void> {
     const projectResult = result.results.find((item) => item.endpointId === "projects")
     const detailResult = result.results.find((item) => item.endpointId === "detail")
     const ratioResult = result.results.find((item) => item.endpointId === "ratios")
-    console.log(`[jimeng-browser-proxy] infinite-canvas saved endpoints=${result.results.map((item) => item.endpointId).join(",")} projects=${projectResult?.projects?.length ?? "n/a"} detail=${detailResult?.project ? "yes" : "no"} ratios=${ratioResult?.customRatios?.length ?? "n/a"} skipped=${result.skipped.length}`)
+    const conversationResult = result.results.find((item) => item.endpointId === "conversations")
+    console.log(`[jimeng-browser-proxy] infinite-canvas saved endpoints=${result.results.map((item) => item.endpointId).join(",")} projects=${projectResult?.projects?.length ?? "n/a"} detail=${detailResult?.project ? "yes" : "no"} ratios=${ratioResult?.customRatios?.length ?? "n/a"} conversations=${conversationResult?.conversations?.length ?? "n/a"} skipped=${result.skipped.length}`)
     return
   }
 
