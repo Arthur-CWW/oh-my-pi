@@ -64,6 +64,15 @@ describe("Jimeng discovery worklist", () => {
           `fetch("/lv/v1/effect/get_category_effects")`,
           `fetch("/lv/v1/effect/get_all_fonts")`,
           `fetch("/lv/v1/editor/plane/color/feed")`,
+          `fetch("/lv/v1/editor/effect/recent_list")`,
+          `fetch("/lv/v2/editor/effect/recent_list")`,
+          `fetch("/lv/v1/editor/plane/common/recent_list")`,
+          `fetch("/lv/v1/editor/plane_draft/get_content_map")`,
+          `fetch("/lv/v1/editor/plane_draft/get_draft_detail")`,
+          `fetch("/lv/v1/ever_photo/batch_get_sync_state")`,
+          `fetch("/lv/v1/ever_photo/get_user_space")`,
+          `fetch("/lv/v1/intelligence/preset_resource_list")`,
+          `fetch("/lv/v2/task/multi_get_tasks")`,
         ].join("\n"),
         "utf8",
       )
@@ -183,6 +192,33 @@ describe("Jimeng discovery worklist", () => {
       expect(worklist.items.find((item) => item.endpoint === "/lv/v1/asset/copy")?.reason).toContain("disposable workspace")
       expect(worklist.items.find((item) => item.endpoint === "/lv/v1/editor/template/add")?.reason).toContain("template state")
       expect(worklist.items.find((item) => item.endpoint === "/mweb/v1/remove_history")?.reason).toContain("history ids")
+      const lvEffectRecent = worklist.items.find((item) => item.endpoint === "/lv/v1/editor/effect/recent_list")
+      expect(lvEffectRecent?.known_status).toBe("blocked")
+      expect(lvEffectRecent?.reason).toContain("ret=1015")
+      const lvEffectRecentV2 = worklist.items.find((item) => item.endpoint === "/lv/v2/editor/effect/recent_list")
+      expect(lvEffectRecentV2?.known_status).toBe("blocked")
+      expect(lvEffectRecentV2?.reason).toContain("ret=1015")
+      const lvCommonRecent = worklist.items.find((item) => item.endpoint === "/lv/v1/editor/plane/common/recent_list")
+      expect(lvCommonRecent?.known_status).toBe("blocked")
+      expect(lvCommonRecent?.reason).toContain("empty item_list")
+      const lvContentMap = worklist.items.find((item) => item.endpoint === "/lv/v1/editor/plane_draft/get_content_map")
+      expect(lvContentMap?.known_status).toBe("blocked")
+      expect(lvContentMap?.reason).toContain("ret=1016")
+      const lvDraftDetail = worklist.items.find((item) => item.endpoint === "/lv/v1/editor/plane_draft/get_draft_detail")
+      expect(lvDraftDetail?.known_status).toBe("blocked")
+      expect(lvDraftDetail?.reason).toContain("ret=1015")
+      const lvSyncState = worklist.items.find((item) => item.endpoint === "/lv/v1/ever_photo/batch_get_sync_state")
+      expect(lvSyncState?.known_status).toBe("blocked")
+      expect(lvSyncState?.reason).toContain("real asset ids")
+      const lvUserSpace = worklist.items.find((item) => item.endpoint === "/lv/v1/ever_photo/get_user_space")
+      expect(lvUserSpace?.known_status).toBe("blocked")
+      expect(lvUserSpace?.reason).toContain("auth context")
+      const lvPresetResource = worklist.items.find((item) => item.endpoint === "/lv/v1/intelligence/preset_resource_list")
+      expect(lvPresetResource?.known_status).toBe("blocked")
+      expect(lvPresetResource?.reason).toContain("ret=-1")
+      const lvMultiGetTasks = worklist.items.find((item) => item.endpoint === "/lv/v2/task/multi_get_tasks")
+      expect(lvMultiGetTasks?.known_status).toBe("blocked")
+      expect(lvMultiGetTasks?.reason).toContain("real task ids")
       expect(worklist.items.find((item) => item.endpoint === "/mweb/v1/aigc_draft/generate")?.recommended_action).toBe("compare_dry_run_before_live")
       expect(worklist.items.find((item) => item.endpoint === "/mweb/v1/dreamina_subject/generate_voice")?.recommended_action).toBe("approval_or_disposable_fixture")
       expect(worklist.probe_variant_exports).toHaveLength(1)

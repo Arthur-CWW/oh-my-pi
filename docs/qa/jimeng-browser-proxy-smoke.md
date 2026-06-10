@@ -2169,11 +2169,31 @@ implemented_lv_editor_catalog:
   /lv/v1/editor/plane/color/feed -> capcut-editor-catalog color palettes
 ```
 
+After classifying additional LV read-state endpoints:
+
+```txt
+resources=247
+included=200
+skipped_implemented=33
+high_value_gaps=61
+known_status_counts=unknown:146,partial:4,implemented:33,dry_run_only:4,blocked:57,captured_only:2,cataloged_only:1
+blocked_lv_read_state:
+  /lv/v1/editor/effect/recent_list -> capture_exact_payload
+  /lv/v2/editor/effect/recent_list -> capture_exact_payload
+  /lv/v1/editor/plane/common/recent_list -> capture_exact_payload
+  /lv/v1/editor/plane_draft/get_content_map -> capture_exact_payload
+  /lv/v1/editor/plane_draft/get_draft_detail -> capture_exact_payload
+  /lv/v1/ever_photo/batch_get_sync_state -> capture_exact_payload
+  /lv/v1/ever_photo/get_user_space -> capture_exact_payload
+  /lv/v1/intelligence/preset_resource_list -> capture_exact_payload
+  /lv/v2/task/multi_get_tasks -> capture_exact_payload
+```
+
 Normalized proof:
 
 ```txt
-data/jimeng-lab/proof-20260610-static-inventory/normalized/static-inventory-20260610093332-summary.json
-data/jimeng-lab/proof-20260610-static-inventory/normalized/static-inventory-20260610093332-summary.md
+data/jimeng-lab/proof-20260610-static-inventory/normalized/static-inventory-20260610094928-summary.json
+data/jimeng-lab/proof-20260610-static-inventory/normalized/static-inventory-20260610094928-summary.md
 ```
 
 Video helper proof:
@@ -2337,13 +2357,42 @@ capcut-editor-catalog saved endpoints=panel,effects,fonts,colors categories=14 e
 summary=data/jimeng-lab/proof-20260610-lv-editor-catalog-cli/normalized/capcut-editor-catalog-20260610093259-summary.json
 ```
 
+LV read-state blocker proof:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts static-locate \
+  --staticRoot data/jimeng-lab/js-sweep/files,packages/jimeng-client/src \
+  --endpoint /lv/v1/editor/effect/recent_list,/lv/v2/editor/effect/recent_list,/lv/v1/editor/plane/common/recent_list,/lv/v1/editor/plane_draft/get_content_map,/lv/v1/editor/plane_draft/get_draft_detail,/lv/v1/ever_photo/batch_get_sync_state,/lv/v1/ever_photo/get_user_space,/lv/v1/intelligence/preset_resource_list,/lv/v2/task/multi_get_tasks \
+  --outDir data/jimeng-lab/proof-20260610-static-locate-lv-read-state
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts capcut-probe \
+  --endpoint /lv/v1/editor/plane/common/recent_list \
+  --variants '[{"name":"empty","body":{}},{"name":"image-editor","body":{"enter_from":"image_editor","limit":20,"offset":0}},{"name":"with-type","body":{"type":"template","limit":20,"offset":0}}]' \
+  --outDir data/jimeng-lab/proof-20260610-lv-plane-common-recent-probe
+```
+
+```txt
+static-locate-lv-read-state: 9 endpoints, 18 occurrences, no credential markers in normalized output
+lv-editor-effect-recent-probe: ret=1015 check login error across empty/fonts/effects variants
+lv-v2-editor-effect-recent-probe: ret=1015 check login error across empty/fonts/effects variants
+lv-plane-common-recent-probe: ret=0 SUCCESS but item_list=[] across empty/image-editor/type variants
+lv-plane-draft-content-map-probe: ret=1016 ERR_PARAM across empty/empty-ids/zero-id variants
+lv-plane-draft-detail-probe: ret=1015 check login error across empty/empty-id/zero-id variants
+lv-ever-photo-sync-state-probe: ret=1015 check login error across empty/empty-ids/empty-uris variants
+lv-ever-photo-user-space-probe: ret=1015 check login error across empty/count/app-id variants
+lv-preset-resource-list-probe: ret=-1 system busy across empty/image-editor/query variants
+lv-multi-get-tasks-probe: ret=1015 check login error across empty/empty-task-ids/zero-task-id variants
+```
+
 Leak check:
 
 ```bash
 rg -n -P 'x-signature|authorization|cookie|sessionid|sid=|msToken|verifyFp|X-Kagi|x-expires' \
   data/jimeng-lab/proof-20260610-lv-editor-catalog-cli/normalized \
-  data/jimeng-lab/proof-20260610-static-inventory/normalized/static-inventory-20260610093332-summary.json \
-  data/jimeng-lab/proof-20260610-static-locate-lv-editor-catalog-reads/normalized
+  data/jimeng-lab/proof-20260610-static-inventory/normalized/static-inventory-20260610094928-summary.json \
+  data/jimeng-lab/proof-20260610-static-locate-lv-editor-catalog-reads/normalized \
+  data/jimeng-lab/proof-20260610-static-locate-lv-read-state/normalized \
+  data/jimeng-lab/proof-20260610-lv-{editor-effect-recent,v2-editor-effect-recent,plane-common-recent,plane-draft-content-map,plane-draft-detail,ever-photo-sync-state,ever-photo-user-space,preset-resource-list,multi-get-tasks}-probe/normalized
 ```
 
 Result:

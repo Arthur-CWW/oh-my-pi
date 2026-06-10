@@ -69,6 +69,15 @@ describe("Jimeng static inventory", () => {
           `const lvEditorEffectsImplemented = "/lv/v1/effect/get_category_effects";`,
           `const lvEditorFontsImplemented = "/lv/v1/effect/get_all_fonts";`,
           `const lvEditorColorsImplemented = "/lv/v1/editor/plane/color/feed";`,
+          `const lvEffectRecentBlocked = "/lv/v1/editor/effect/recent_list";`,
+          `const lvEffectRecentV2Blocked = "/lv/v2/editor/effect/recent_list";`,
+          `const lvCommonRecentBlocked = "/lv/v1/editor/plane/common/recent_list";`,
+          `const lvContentMapBlocked = "/lv/v1/editor/plane_draft/get_content_map";`,
+          `const lvDraftDetailBlocked = "/lv/v1/editor/plane_draft/get_draft_detail";`,
+          `const everPhotoSyncStateBlocked = "/lv/v1/ever_photo/batch_get_sync_state";`,
+          `const everPhotoUserSpaceBlocked = "/lv/v1/ever_photo/get_user_space";`,
+          `const lvPresetResourceBlocked = "/lv/v1/intelligence/preset_resource_list";`,
+          `const lvMultiGetTasksBlocked = "/lv/v2/task/multi_get_tasks";`,
           `const unknownRead = "https://jimeng.jianying.com/mweb/v1/template/search?token=secret";`,
           `const unknownGenerate = "/mweb/v1/avatar/generate";`,
           `const capcutCatalog = "https://lf16-beecdn.ibytedtos.com/obj/ies-fe-bee-sg/bee_prod/biz_49/bee_prod_49_bee_publish_709.json?x-signature=secret";`,
@@ -83,7 +92,7 @@ describe("Jimeng static inventory", () => {
       const summary = summarizeJimengStaticInventory(result)
       const markdown = writeJimengStaticInventoryMarkdown(result)
 
-      expect(result.totalResourceCount).toBe(57)
+      expect(result.totalResourceCount).toBe(66)
       expect(result.skippedImplementedCount).toBe(6)
       expect(result.items.map((item) => item.resource)).not.toContain("/mweb/v1/get_history_by_ids")
       expect(result.items.map((item) => item.resource)).not.toContain("/lv/v1/effect/get_all_fonts")
@@ -140,6 +149,15 @@ describe("Jimeng static inventory", () => {
         "/lv/v1/ever_photo/promote_asset",
         "/mweb/v1/remove_history",
         "/mweb/v1/update_video_default_bgm",
+        "/lv/v1/editor/effect/recent_list",
+        "/lv/v2/editor/effect/recent_list",
+        "/lv/v1/editor/plane/common/recent_list",
+        "/lv/v1/editor/plane_draft/get_content_map",
+        "/lv/v1/editor/plane_draft/get_draft_detail",
+        "/lv/v1/ever_photo/batch_get_sync_state",
+        "/lv/v1/ever_photo/get_user_space",
+        "/lv/v1/intelligence/preset_resource_list",
+        "/lv/v2/task/multi_get_tasks",
       ]) {
         expect(result.items.find((item) => item.resource === endpoint)?.knownStatus).toBe("blocked")
       }

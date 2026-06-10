@@ -52,7 +52,8 @@ As of 2026-06-10, the committed Jimeng CLI baseline is:
 - `8c3dd42 Add signed CapCut endpoint probe`
 - `4d117a2 Recheck Jimeng live generation`
 - `abcc9ca Classify LV mutation blockers`
-- current checkpoint: `Add CapCut editor catalog CLI`
+- `c09bb7d Add LV editor catalog CLI`
+- current checkpoint: `Classify LV read-state blockers`
 
 If the thread goal object lags behind this file after a pause, resume from this document and the latest Git checkpoint. The active working rule is: background-only reversal, direct/API-first implementation, small proven CLI slices, tests and proof artifacts before each commit, and no async daemon until the API surface is settled.
 
@@ -432,7 +433,7 @@ Static API inventory is now available as the systematic coverage map:
 - default output skips fully implemented endpoints so it stays focused on gaps; `--includeKnown` produces an audit inventory
 - proof bundle: `data/jimeng-lab/proof-20260610-static-inventory/`
 - latest proof scanned `data/jimeng-lab/js-sweep/files` plus `packages/jimeng-client/src`, found 247 resources, included 200 non-implemented items, skipped 33 implemented endpoints, and counted 61 high-value gaps after the CapCut collection/row/detail and LV editor catalog commands were promoted
-- known status counts are now `unknown=155`, `partial=4`, `implemented=33`, `dry_run_only=4`, `blocked=48`, `captured_only=2`, and `cataloged_only=1`; the five CapCut search/batch/preset-related endpoints above are blocked with exact replay evidence and recommended action `capture_exact_payload`
+- known status counts are now `unknown=146`, `partial=4`, `implemented=33`, `dry_run_only=4`, `blocked=57`, `captured_only=2`, and `cataloged_only=1`; the five CapCut search/batch/preset-related endpoints above are blocked with exact replay evidence and recommended action `capture_exact_payload`
 - seven video-generation helper endpoints are also now explicitly blocked/capture-needed instead of generic unknowns:
   - `/mweb/v1/video_generate/get_switch_model_queue_info`: safe no-spend probes with empty, `model_req_key`, `model_req_keys`, and scene bodies returned `ret=1000 invalid parameter`
   - `/mweb/v1/video_generate/pre_process` and `/mweb/v1/video_generate/mget_pre_process_result`: frontend task submit/result pair; capture exact UI payload and task ids before promotion
@@ -479,6 +480,15 @@ Static API inventory is now available as the systematic coverage map:
   - useful flags: `--endpoints panel,effects,fonts,colors,all`, `--panel`, `--category`, `--limit`, `--offset`, `--lang`, `--region`, `--capcut-lan`, and `--capcut-loc`
   - latest proof returned 14 font categories, 745 font/effect rows, and 20 color palettes
   - proof bundles: `data/jimeng-lab/proof-20260610-static-locate-lv-editor-catalog-reads/`, `data/jimeng-lab/proof-20260610-lv-editor-catalog-probe-{panel-info,category-effects,all-fonts,color-feed}/`, `data/jimeng-lab/proof-20260610-lv-editor-catalog-cli/`, and refreshed `data/jimeng-lab/proof-20260610-static-inventory/`
+- nine additional LV read-state endpoints are now explicitly blocked/capture-needed instead of generic read probes:
+  - `/lv/v1/editor/effect/recent_list` and `/lv/v2/editor/effect/recent_list`: signed probes with empty/fonts/effects bodies returned `ret=1015 check login error`
+  - `/lv/v1/editor/plane/common/recent_list`: signed probes returned `ret=0` but empty `item_list`; needs a non-empty UI capture before promotion
+  - `/lv/v1/editor/plane_draft/get_content_map`: signed probes with empty/empty-id/zero-id bodies returned `ret=1016 ERR_PARAM`; needs a real draft/content-map id
+  - `/lv/v1/editor/plane_draft/get_draft_detail`: signed probes with empty/empty-id/zero-id bodies returned `ret=1015 check login error`
+  - `/lv/v1/ever_photo/batch_get_sync_state` and `/lv/v1/ever_photo/get_user_space`: signed probes returned `ret=1015 check login error`; need exact EverPhoto/LV auth context and real asset ids where applicable
+  - `/lv/v1/intelligence/preset_resource_list`: signed probes with empty/image-editor/query bodies returned `ret=-1 system busy`; needs exact UI payload
+  - `/lv/v2/task/multi_get_tasks`: signed feed-api probes with empty/empty-list/zero task ids returned `ret=1015 check login error`
+- proof bundles: `data/jimeng-lab/proof-20260610-static-locate-lv-read-state/`, `data/jimeng-lab/proof-20260610-lv-editor-effect-recent-probe/`, `data/jimeng-lab/proof-20260610-lv-v2-editor-effect-recent-probe/`, `data/jimeng-lab/proof-20260610-lv-plane-common-recent-probe/`, `data/jimeng-lab/proof-20260610-lv-plane-draft-content-map-probe/`, `data/jimeng-lab/proof-20260610-lv-plane-draft-detail-probe/`, `data/jimeng-lab/proof-20260610-lv-ever-photo-sync-state-probe/`, `data/jimeng-lab/proof-20260610-lv-ever-photo-user-space-probe/`, `data/jimeng-lab/proof-20260610-lv-preset-resource-list-probe/`, `data/jimeng-lab/proof-20260610-lv-multi-get-tasks-probe/`, and refreshed `data/jimeng-lab/proof-20260610-static-inventory/`
 - `/mweb/v1/get_history` is now marked `blocked` in the worklist/inventory: safe direct probes with plain, frontend-derived, and explicit `workspace_id=14199856180236` bodies all returned `ret=0` and empty `records_list`; use `assets`, `history-records`, and `history-queue` until a non-empty UI capture proves a useful list contract
 - normalized proof files contain no credential markers
 
