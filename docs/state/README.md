@@ -20,12 +20,17 @@ Do not let state docs become stale:
 
 - `docs/state/video-creative-direction.md` — durable taste ledger / creative north-star for video, AI UGC, brainrot, asset graph, and pipeline direction.
 - `docs/state/slotok-design-language.md` — durable UI/design language for Slotok; current primary visual north star is Codex's light workbench UI, not the dark/orange dashboard shell.
+- `docs/state/ugc-studio-style-direction.md` — durable product/style direction for the UGC Studio workspace; current visual north star is Chorus/Conductor-like native agent workbench UI.
+- `docs/state/ugc-studio-design-system.md` — implementation-level design system contract for UGC Studio: shadcn-style primitives, Tailwind variants, workbench components, and migration rules away from screen-specific CSS.
 - `docs/state/symphony-lite-direction.md` — durable direction for the meta-agent orchestration harness: forked agents, reviewer personas, constrained tool sets, workflow DAGs, monitoring, and synthesis.
 - `docs/state/agent-voice.md` — durable preference for agents to avoid HR/compliance/audit-log voice and talk like a competent friend.
+- `docs/state/agent-tooling-preferences.md` — durable preferences for local agent tooling, browser automation, CuaDriver, CDP, and background computer use.
+- `TASKS.md` — top-level task index for active/next/blocked/done repo work.
 
 ## Where things belong
 
 - `docs/state/` — durable preferences and operating memory that should affect many future sessions.
+- `TASKS.md` — top-level task tracker for multi-step work and next actions.
 - `docs/plans/` — active workstreams, runbooks, implementation plans, and current lane coordination.
 - `docs/research/` — market/vendor research, GPT-Pro outputs, source digests, price tables, and other useful evidence. Expensive/important research artifacts should be tracked in git when safe.
 - `docs/drafts/` — one-off creative concepts, scripts, prompts, and exploratory writeups.

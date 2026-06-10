@@ -10,6 +10,8 @@ import {
   type KieGenerateRequest,
 } from "@wirebabel/ugc-cli"
 import { EvalStore } from "./eval-store"
+import { UgcJsonStore } from "./ugc-json-store"
+import { routeUgc } from "./ugc-routes"
 
 const DEFAULT_PORT = 47522
 
@@ -54,6 +56,7 @@ function parseArgs(argv: string[]): ParsedArgs {
 
 const args = parseArgs(process.argv.slice(2))
 const store = new EvalStore({ cwd: args.cwd, sqlitePath: args.sqlitePath })
+const ugcStore = new UgcJsonStore({ cwd: args.cwd })
 
 if (args.once) {
   console.log(JSON.stringify(store.bootstrap(), null, 2))
@@ -63,7 +66,7 @@ if (args.once) {
 const server = Bun.serve({
   hostname: "127.0.0.1",
   port: args.port,
-  fetch: (request) => route(request, store),
+  fetch: (request) => route(request, store, ugcStore),
 })
 
 console.log(JSON.stringify({
@@ -73,7 +76,7 @@ console.log(JSON.stringify({
   sqlitePath: store.config.sqlitePath,
 }, null, 2))
 
-async function route(request: Request, evalStore: EvalStore): Promise<Response> {
+async function route(request: Request, evalStore: EvalStore, ugcJsonStore: UgcJsonStore): Promise<Response> {
   if (request.method === "OPTIONS") {
     return empty(204)
   }
@@ -108,6 +111,9 @@ async function route(request: Request, evalStore: EvalStore): Promise<Response> 
       if (!target) return json({ error: "missing path" }, 400)
       return fileResponse(evalStore.config.cwd, target)
     }
+
+    const ugcResponse = await routeUgc(request, ugcJsonStore)
+    if (ugcResponse) return ugcResponse
 
     if (request.method === "GET" && url.pathname === "/api/ugc/kie/capabilities") {
       return json({ provider: "kie", capabilities: KIE_CAPABILITIES })

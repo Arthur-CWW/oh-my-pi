@@ -50,9 +50,10 @@ import { Badge } from "./components/ui/badge"
 import { Button } from "./components/ui/button"
 import { Tabs, type TabItem } from "./components/ui/tabs"
 import { cn } from "./lib/cn"
-import { ugcStudioWorkspace } from "./ugcStudioModel"
+import { ugcStudioWorkspace, type BranchSnapshot, type CreativeCandidate, type PersonaProfile, type ReferenceProfile, type UgcStudioWorkspace } from "./ugcStudioModel"
+import { createInitialLocalState, type UgcExportManifest, type UgcLocalState, type UgcProviderJob, type UgcReferenceArchive } from "../ugc/local-state"
 
-type ReactView = "atlas" | "explore" | "review" | "campaign" | "editor" | "provider"
+type ReactView = "atlas" | "explore" | "review" | "campaign" | "reference" | "editor" | "graph" | "provider"
 type KieOperation = "image-text" | "image-to-image" | "video-text" | "image-to-video" | "reference-to-video" | "avatar" | "omni-video"
 
 interface KieCapability {
@@ -126,7 +127,8 @@ interface CampaignNode {
   candidateId?: string
 }
 
-const workspace = ugcStudioWorkspace
+const fallbackLocalState = createInitialLocalState(ugcStudioWorkspace.updatedAt)
+const workspace = fallbackLocalState.workspace
 const daemonBaseUrl = "http://127.0.0.1:47522"
 
 const views: Array<{ value: ReactView; label: string; shortLabel: string; icon: React.ComponentType<{ className?: string; size?: number }> }> = [
@@ -134,7 +136,9 @@ const views: Array<{ value: ReactView; label: string; shortLabel: string; icon: 
   { value: "explore", label: "Exploration Board", shortLabel: "Explore", icon: Wand2 },
   { value: "review", label: "Batch Review", shortLabel: "Review", icon: Play },
   { value: "campaign", label: "Campaign Branch Map", shortLabel: "Campaign", icon: GitBranch },
+  { value: "reference", label: "Reference Archive", shortLabel: "Refs", icon: Copy },
   { value: "editor", label: "Final Layer Editor", shortLabel: "Editor", icon: Layers3 },
+  { value: "graph", label: "Developer Graph", shortLabel: "Graph", icon: Network },
   { value: "provider", label: "KIE Proxy", shortLabel: "KIE", icon: Braces },
 ]
 

@@ -32,6 +32,7 @@ The product should feel like a Mac-native creative operations tool: calm, compac
 - Prefer native toolbar density: icon buttons, folder rows, breadcrumbs, inspector panes, command bars.
 - Avoid decorative gradients, bokeh/orbs, neon cyberpunk, purple-dominant palettes, and onboarding-step marketing screens.
 - React + Tailwind + shadcn-style primitives are now the primary maintained UI stack. Do not maintain parallel Solid UGC Studio routes or rebuild shadcn-quality primitives in Solid.
+- Treat the shadcn-style layer as a real design system, not just a few imported buttons. Repeated spacing, radius, focus, panel chrome, status colors, toolbars, sidebars, inspector cards, command surfaces, and form controls should be encoded as variants/composed components before adding one-off CSS. Tailwind call-site overrides are fine for local layout; `.rugc-*` CSS should shrink toward canvas/timeline/media geometry.
 
 ## Product Layout Principles
 
@@ -85,3 +86,5 @@ After comparing the live routes, Arthur prefers the **default visual style** of 
 UGC Studio should be local-first because it is running in Electron: workspace state, persona/profile bibles, reference archives, generated candidates, branch history, notes, provider job metadata, and exports should live locally first with explicit provider calls and later sync/import/export as separate features.
 
 Arthur clarified that the ABG example was really a Korean-beauty/K-pop-idol-like influencer genre reference, not a request for the ugly onboarding/paywall flow. The future product should also support reference-profile remixing: take a TikTok/influencer/faceless profile, archive/decompose its public style, preserve pose/timing/template mechanics, and swap in a synthetic persona, new hooks, new product, new caption/text template, and new voice.
+
+Arthur flagged that without an explicit designer-style system, parallel code sessions create small inconsistent spacing/sizing bugs. UGC Studio should therefore use the owned shadcn/Radix/Tailwind component layer as the default base, with styled variants matching the Chorus/Conductor-like workbench direction. See `docs/state/ugc-studio-design-system.md`.

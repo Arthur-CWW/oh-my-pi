@@ -500,7 +500,7 @@ const remixFieldSourceMedia: RemixField = {
   confidence: 1,
 }
 
-export const ugcStudioWorkspace = {
+export const ugcStudioWorkspace: UgcStudioWorkspace = {
   schemaVersion: "ugc-studio.workspace.v1",
   id: "workspace_protein_bar_ads",
   title: "Protein Bar Ads",
@@ -1626,4 +1626,4 @@ export const ugcStudioWorkspace = {
       ],
     },
   ],
-} satisfies UgcStudioWorkspace
+}

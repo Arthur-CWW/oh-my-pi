@@ -30,6 +30,7 @@ Status values: `active`, `next`, `blocked`, `done`, `parked`.
 | T-2026-06-09-033 | Persist branch snapshots and review notes | `docs/plans/ugc-studio-workstreams.md` | Make campaign branches, dead-end markers, fork decisions, selected-set notes, and snapshot metadata persistent and navigable. |
 | T-2026-06-09-034 | Implement provider job queue and artifact cache | `docs/plans/ugc-studio-workstreams.md` | Turn KIE/Jimeng calls into local dry-run/live-capped jobs with request/response JSON, polling, spend metadata, generated media, and cached artifacts. |
 | T-2026-06-09-035 | Persist final editor timeline and export manifests | `docs/plans/ugc-studio-workstreams.md` | Save captions, voice, b-roll, product-demo, CTA, scene layers, export metadata, and rendered file references locally. |
+| T-2026-06-10-064 | Migrate UGC React route onto the owned shadcn-style design system | Conversation | Baseline primitives and workbench components exist; next pass should replace repeated `.rugc-*` sidebar, toolbar, inspector, command bar, card, form, status, and metric CSS with component variants before adding more feature UI. |
 
 ## Blocked
 
