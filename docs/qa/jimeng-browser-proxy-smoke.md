@@ -1814,7 +1814,7 @@ bun packages/jimeng-client/src/browser-proxy-cli.ts capcut-probe \
 Results:
 
 ```txt
-hot_words: body -> ret=0 errmsg=success response_sha=b442e8144ac7...
+hot_words: body -> ret=0 errmsg=success response_sha=b442e8144ac7..., but data only contained region metadata
 fuzzy_search_templates: keyword-en -> ret=0 errmsg=success response_sha=f70060efdcf4...
 fuzzy_search_templates: keyword-zh -> ret=0 errmsg=success response_sha=9770f85cc99b...
 fuzzy_search_templates: title-en -> ret=0 errmsg=success response_sha=5075ed973ff4...
@@ -1826,6 +1826,27 @@ search_templates: search_word -> ret=1000 errmsg="param error" response_sha=b53c
 search_templates: query -> ret=1000 errmsg="param error" response_sha=1f36fc8015f7...
 ```
 
+Additional no-spend classification probes:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts endpoint-probe \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --endpoint /mweb/v1/get_history \
+  --variants '<plain/frontend-derived/workspace-scoped variants>' \
+  --outDir data/jimeng-lab/proof-20260610-history-list-probe
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts capcut-probe \
+  --endpoint /lv/v1/cc_web/replicate/get_search_words \
+  --variants '<empty/sdk/locale/scene/category variants>' \
+  --outDir data/jimeng-lab/proof-20260610-capcut-search-words-probe
+```
+
+```txt
+get_history: all tested variants -> ret=0 errmsg=success records_list=0 has_more=false next_offset=0
+get_search_words: empty/sdk/locale/scene/category variants -> ret=0 errmsg=success data={"region":"AU"}
+classification=blocked until a non-empty UI capture proves useful payloads
+```
+
 Normalized proof files:
 
 ```txt
@@ -1833,6 +1854,8 @@ data/jimeng-lab/proof-20260610-capcut-probe-hot-words/normalized/capcut-probe-20
 data/jimeng-lab/proof-20260610-capcut-probe-fuzzy/normalized/capcut-probe-20260610044826-summary.json
 data/jimeng-lab/proof-20260610-capcut-probe-collection/normalized/capcut-probe-20260610044826-summary.json
 data/jimeng-lab/proof-20260610-capcut-probe-search/normalized/capcut-probe-20260610044826-summary.json
+data/jimeng-lab/proof-20260610-history-list-probe/normalized/endpoint-probe-20260610055200-summary.json
+data/jimeng-lab/proof-20260610-capcut-search-words-probe/normalized/capcut-probe-20260610055357-summary.json
 ```
 
 Leak check:
@@ -1878,8 +1901,8 @@ top gaps:
 Normalized proof:
 
 ```txt
-data/jimeng-lab/proof-20260610-static-inventory/normalized/static-inventory-20260610052044-summary.json
-data/jimeng-lab/proof-20260610-static-inventory/normalized/static-inventory-20260610052044-summary.md
+data/jimeng-lab/proof-20260610-static-inventory/normalized/static-inventory-20260610060110-summary.json
+data/jimeng-lab/proof-20260610-static-inventory/normalized/static-inventory-20260610060110-summary.md
 ```
 
 Leak check:

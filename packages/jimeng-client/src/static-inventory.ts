@@ -305,6 +305,9 @@ function recommendStaticInventoryAction(input: {
   if (input.known?.status === "cataloged_only") {
     return { action: "document_low_value_or_risky", priority: 24, reason: input.known.note }
   }
+  if (input.known?.status === "blocked") {
+    return { action: "capture_exact_payload", priority: input.highValue ? 36 : 18, reason: input.known.note }
+  }
   if (input.kind === "static_catalog") {
     return { action: "probe_read_endpoint", priority: 68, reason: "Static public catalog URL; fetch only if it carries useful template/reference metadata." }
   }

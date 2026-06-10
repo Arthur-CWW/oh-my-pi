@@ -1482,6 +1482,11 @@ high_value_gaps=64
 top_gaps=subject generate_voice, voice clone submit/update/delete, aigc_draft generate capture/compare, CapCut template collection/search payloads
 ```
 
+The inventory/worklist now distinguishes endpoints that were safely probed but did not return useful data:
+
+- `/mweb/v1/get_history`: `ret=0` but empty `records_list` for plain, frontend-derived, and explicit `workspace_id=14199856180236` variants. Keep using `assets`, `history-records`, and `history-queue`; promote only after a non-empty UI capture proves the request scope.
+- `/lv/v1/cc_web/replicate/get_search_words`: signed no-spend probes returned `ret=0` but only `data.region`, not keyword rows. Keep it blocked until a UI call returns usable search-word payloads.
+
 Capture one flow at a time:
 
 - richer image reference controls

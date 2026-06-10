@@ -386,6 +386,7 @@ function buildKnownEndpointMap(): Map<string, JimengDiscoveryKnownEndpoint> {
 const KNOWN_ENDPOINTS: JimengDiscoveryKnownEndpoint[] = [
   known("/mweb/v1/aigc_draft/generate", "partial", "text2image/text2video/image2video/frames2video/lip-sync", "Unified generation submit; several modes are implemented or dry-run gated, live lip-sync/end-frame still require capture compare."),
   known("/mweb/v1/get_asset_list", "implemented", "assets", "No-spend workspace asset/history listing."),
+  known("/mweb/v1/get_history", "blocked", null, "Safe frontend-derived probes returned ret=0 with empty records_list, including explicit workspace scope; use assets/history-records until a non-empty UI capture is available."),
   known("/mweb/v1/get_history_by_ids", "implemented", "history-records", "No-spend history lookup by submit/history id."),
   known("/mweb/v1/get_history_queue_info", "implemented", "history-queue", "No-spend queue/progress lookup."),
   known("/mweb/v1/get_video_by_vid", "implemented", "video-info", "No-spend VOD metadata lookup."),
@@ -413,6 +414,7 @@ const KNOWN_ENDPOINTS: JimengDiscoveryKnownEndpoint[] = [
   known("/mweb/v1/dreamina_subject/delete", "implemented", "subject-delete", "Subject/persona delete."),
   known("/mweb/v1/dreamina_subject/generate_voice", "dry_run_only", "subject-generate-voice", "Subject voice generation may consume quota and needs capture/approval."),
   known("/lv/v1/cc_web/plane/get_categories", "implemented", "capcut-categories", "No-spend CapCut commercial category catalog."),
+  known("/lv/v1/cc_web/replicate/get_search_words", "blocked", null, "Signed no-spend probes returned ret=0 but only region metadata, not usable search words; capture a UI call that returns keyword data before promotion."),
   known("/lv/v1/cc_web/replicate/search_templates", "captured_only", null, "Guessed payloads returned param errors; capture real UI row/search payload."),
   known("/lv/v1/cc_web/plane/get_collection_templates", "captured_only", null, "Known endpoint string; capture real UI payload before exposing."),
   known("/lv/v1/cc_web/plane/batch_get_collection_templates", "captured_only", null, "Known endpoint string; capture real UI payload before exposing."),
@@ -444,6 +446,14 @@ function recommendCapturedCandidate(
       priority: isHighValueEndpoint(endpoint) ? 35 : 14,
       reason: known.note,
       blockedReason: "Cataloged or low-value endpoint; promote only if a later UGC workflow needs it.",
+    }
+  }
+  if (known?.status === "blocked") {
+    return {
+      action: "static_capture_needed",
+      priority: isHighValueEndpoint(endpoint) ? 38 : 18,
+      reason: known.note,
+      blockedReason: "Previous safe probes did not return useful data; capture a non-empty UI flow before CLI promotion.",
     }
   }
   if (known?.status === "dry_run_only") {
@@ -517,6 +527,14 @@ function recommendStaticEndpoint(endpoint: JimengDiscoveryStaticEndpoint): { act
       priority: endpoint.high_value ? 68 : 45,
       reason: "Known endpoint is not fully live-proved; capture the exact UI flow and compare/replay carefully.",
       blockedReason: null,
+    }
+  }
+  if (endpoint.known_status === "blocked") {
+    return {
+      action: "static_capture_needed",
+      priority: endpoint.high_value ? 36 : 18,
+      reason: "Known endpoint has safe probe evidence but no useful payload yet; capture a non-empty UI flow before promotion.",
+      blockedReason: "Previous safe probes returned empty or metadata-only payloads.",
     }
   }
   if (endpoint.known_status === "implemented") {

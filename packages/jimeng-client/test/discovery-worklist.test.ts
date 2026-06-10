@@ -19,6 +19,7 @@ describe("Jimeng discovery worklist", () => {
         path.join(staticRoot, "bundle.js"),
         [
           `fetch("/mweb/v1/reference_profile/list")`,
+          `fetch("/mweb/v1/get_history")`,
           `fetch("/mweb/v1/dreamina_subject/generate_voice")`,
         ].join("\n"),
         "utf8",
@@ -37,6 +38,10 @@ describe("Jimeng discovery worklist", () => {
       expect(readGap?.recommended_action).toBe("probe_then_promote_cli")
       expect(readGap?.has_probe_variants).toBe(true)
       expect(readGap?.probe_variant_count).toBe(1)
+      const blockedGap = worklist.items.find((item) => item.endpoint === "/mweb/v1/get_history")
+      expect(blockedGap?.known_status).toBe("blocked")
+      expect(blockedGap?.recommended_action).toBe("static_capture_needed")
+      expect(blockedGap?.blocked_reason).toContain("Previous safe probes")
       expect(worklist.items.find((item) => item.endpoint === "/mweb/v1/aigc_draft/generate")?.recommended_action).toBe("compare_dry_run_before_live")
       expect(worklist.items.find((item) => item.endpoint === "/mweb/v1/dreamina_subject/generate_voice")?.recommended_action).toBe("approval_or_disposable_fixture")
       expect(worklist.probe_variant_exports).toHaveLength(1)

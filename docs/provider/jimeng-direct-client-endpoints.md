@@ -999,12 +999,14 @@ bun packages/jimeng-client/src/browser-proxy-cli.ts capcut-probe \
 Current proof facts:
 
 ```txt
-hot_words: body -> ret=0 errmsg=success response_sha=b442e8144ac7...
+hot_words: body -> ret=0 errmsg=success response_sha=b442e8144ac7..., but data only contained region metadata
 fuzzy_search_templates: keyword-en/keyword-zh/title-en -> ret=0 errmsg=success, but item_list length 0
 get_collection_templates: category_id/collection_id/category_ids -> ret=1000 errmsg="param error"
 search_templates: keyword/search_word/query -> ret=1000 errmsg="param error"
 normalized_capcut_probe_proofs_have_no_signed_urls_or_credentials=true
 ```
+
+Follow-up no-spend variants for `/lv/v1/cc_web/replicate/get_search_words` with `{}`, `sdk_version`, locale, scene, and category bodies also returned only `{"region":"AU"}`. The endpoint is now classified as blocked/probed-metadata-only until a real UI call returns search terms.
 
 ### 11) Upload token for local reference media
 - `POST https://jimeng.jianying.com/mweb/v1/get_upload_token`

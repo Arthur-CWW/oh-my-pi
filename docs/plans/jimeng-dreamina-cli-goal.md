@@ -50,7 +50,7 @@ As of 2026-06-10, the committed Jimeng CLI baseline is:
 - `aa6a97e Enhance Jimeng static locator symbols`
 - `302e088 Document CapCut template method contracts`
 - `8c3dd42 Add signed CapCut endpoint probe`
-- current checkpoint: `Add Jimeng static API inventory CLI`
+- current checkpoint: `Classify Jimeng read-probe dead ends`
 
 If the thread goal object lags behind this file after a pause, resume from this document and the latest Git checkpoint. The active working rule is: background-only reversal, direct/API-first implementation, small proven CLI slices, tests and proof artifacts before each commit, and no async daemon until the API surface is settled.
 
@@ -398,6 +398,7 @@ Static API inventory is now available as the systematic coverage map:
 - proof bundle: `data/jimeng-lab/proof-20260610-static-inventory/`
 - latest proof scanned `data/jimeng-lab/js-sweep/files` plus `packages/jimeng-client/src`, found 247 resources, included the top 120 non-implemented items, and counted 64 high-value gaps
 - top gaps were subject/persona `generate_voice`, voice clone submit/update/delete, unified `/mweb/v1/aigc_draft/generate` capture/compare, and exact CapCut template search/collection payload capture
+- `/mweb/v1/get_history` is now marked `blocked` in the worklist/inventory: safe direct probes with plain, frontend-derived, and explicit `workspace_id=14199856180236` bodies all returned `ret=0` and empty `records_list`; use `assets`, `history-records`, and `history-queue` until a non-empty UI capture proves a useful list contract
 - normalized proof files contain no credential markers
 
 Signed CapCut endpoint replay is now available for no-spend template payload discovery:
@@ -413,7 +414,7 @@ Signed CapCut endpoint replay is now available for no-spend template payload dis
   - `data/jimeng-lab/proof-20260610-capcut-probe-fuzzy/`
   - `data/jimeng-lab/proof-20260610-capcut-probe-collection/`
   - `data/jimeng-lab/proof-20260610-capcut-probe-search/`
-- latest no-spend probes confirmed `/lv/v1/cc_web/replicate/get_search_words` and `/lv/v1/cc_web/plane/fuzzy_search_templates` return `ret=0`, while guessed `/lv/v1/cc_web/plane/get_collection_templates` and `/lv/v1/cc_web/replicate/search_templates` variants still return `ret=1000` / `param error`; capture exact UI payloads before promoting row/search commands
+- latest no-spend probes confirmed `/lv/v1/cc_web/replicate/get_search_words` returns `ret=0` but only region metadata for tested variants, and `/lv/v1/cc_web/plane/fuzzy_search_templates` returns `ret=0` with empty lists for guessed keyword/title bodies. Both remain unpromoted. Guessed `/lv/v1/cc_web/plane/get_collection_templates` and `/lv/v1/cc_web/replicate/search_templates` variants still return `ret=1000` / `param error`; capture exact UI payloads before promoting row/search commands
 
 Lip-sync submit comparison is now available as the live-generation gate:
 
