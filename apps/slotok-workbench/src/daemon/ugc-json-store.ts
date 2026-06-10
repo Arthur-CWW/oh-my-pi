@@ -11,6 +11,7 @@ import {
   type BranchPatch,
   type BulkCandidateStatusPatch,
   type CandidateStatusPatch,
+  type CreateBranchInput,
   type CreateExportManifestInput,
   type CreateProviderJobInput,
   type CreateReferenceArchiveInput,
@@ -28,7 +29,7 @@ import {
   type UgcWorkspaceBundleObjectCounts,
   type UgcWorkspaceBundleShardManifest,
 } from "../ugc/local-state"
-import type { JsonValue, PersonaProfile, ReviewNote, UgcStudioWorkspace } from "../renderer/ugcStudioModel"
+import type { BranchSnapshot, JsonValue, PersonaProfile, ReviewNote, UgcStudioWorkspace } from "../renderer/ugcStudioModel"
 
 export interface UgcJsonStoreOptions {
   readonly cwd?: string
@@ -152,6 +153,39 @@ export class UgcJsonStore {
         throw new Error(`branch not found: ${branchId}`)
       }
       return { ...workspace, branchSnapshots }
+    })
+  }
+
+  createBranch(input: CreateBranchInput): UgcLocalState {
+    const state = this.read()
+    const now = this.now()
+    const parent = input.parentId ? state.workspace.branchSnapshots.find((branch) => branch.id === input.parentId) : null
+    if (input.parentId && !parent) throw new Error(`parent branch not found: ${input.parentId}`)
+    const branch: BranchSnapshot = {
+      id: `branch_${slug(input.title ?? input.focus)}_${Date.now().toString(36)}`,
+      parentId: parent?.id ?? null,
+      title: input.title?.trim() || `Fork: ${input.focus}`,
+      status: "active",
+      createdAt: now,
+      focus: input.focus,
+      decisionNote: input.decisionNote ?? "Created as a local fork for creative exploration.",
+      selectedPersonaIds: input.selectedPersonaIds ?? parent?.selectedPersonaIds ?? [],
+      selectedCandidateIds: input.selectedCandidateIds ?? parent?.selectedCandidateIds ?? [],
+      candidateBatchIds: input.candidateBatchIds ?? parent?.candidateBatchIds ?? [],
+      childIds: [],
+      metrics: parent?.metrics ?? [],
+    }
+    return this.write({
+      ...state,
+      workspace: {
+        ...state.workspace,
+        branchSnapshots: [
+          branch,
+          ...state.workspace.branchSnapshots.map((snapshot) => (
+            snapshot.id === parent?.id ? { ...snapshot, childIds: [...snapshot.childIds, branch.id] } : snapshot
+          )),
+        ],
+      },
     })
   }
 

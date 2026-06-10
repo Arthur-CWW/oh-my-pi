@@ -1908,11 +1908,73 @@ function Inspector(props: {
           >
             Save branch note
           </Button>
+          <div className="grid grid-cols-2 gap-2">
+            <Button
+              size="xs"
+              variant="workbench"
+              disabled={props.busy || !props.selectedBranch}
+              onClick={() => {
+                if (!props.selectedBranch) return
+                props.onMutateLocal("/api/ugc/branches", {
+                  parentId: props.selectedBranch.id,
+                  title: `${props.selectedBranch.title} fork`,
+                  focus: branchDecisionDraft || props.selectedBranch.focus,
+                  selectedPersonaIds: props.selectedBranch.selectedPersonaIds,
+                  selectedCandidateIds: props.selectedBranch.selectedCandidateIds,
+                  candidateBatchIds: props.selectedBranch.candidateBatchIds,
+                  decisionNote: "Forked from campaign inspector.",
+                })
+              }}
+            >
+              Fork branch
+            </Button>
+            <Button
+              size="xs"
+              variant="workbench"
+              disabled={props.busy || !props.selectedBranch}
+              onClick={() => {
+                if (!props.selectedBranch) return
+                props.onMutateLocal(`/api/ugc/branches/${props.selectedBranch.id}`, {
+                  status: "promising",
+                  decisionNote: branchDecisionDraft || "Marked promising from campaign inspector.",
+                })
+              }}
+            >
+              Mark promising
+            </Button>
+            <Button
+              size="xs"
+              variant="outline"
+              disabled={props.busy || !props.selectedBranch}
+              onClick={() => {
+                if (!props.selectedBranch) return
+                props.onMutateLocal(`/api/ugc/branches/${props.selectedBranch.id}`, {
+                  status: "active",
+                  decisionNote: branchDecisionDraft || "Rolled back to this branch as the active exploration path.",
+                })
+              }}
+            >
+              Set active
+            </Button>
+          </div>
         </InspectorCard>
         <InspectorCard title="Metrics">
           <ScoreBar label="CTR" value={82} />
           <ScoreBar label="CVR" value={64} />
           <ScoreBar label="Hook hold" value={78} />
+        </InspectorCard>
+        <InspectorCard title="Decision log">
+          <div className="grid gap-2">
+            {workspace.branchSnapshots.slice(0, 5).map((branch) => (
+              <div key={branch.id} className="rounded-md border border-border bg-background p-2 text-[11px] leading-4">
+                <div className="flex items-center justify-between gap-2">
+                  <strong className="truncate text-foreground">{branch.title}</strong>
+                  <StatusBadge tone={branch.status === "active" ? "active" : branch.status === "promising" ? "success" : branch.status === "dead-end" ? "danger" : "neutral"}>{branch.status}</StatusBadge>
+                </div>
+                <p className="m-0 mt-1 text-muted-foreground">{branch.decisionNote}</p>
+              </div>
+            ))}
+          </div>
         </InspectorCard>
         <button
           type="button"

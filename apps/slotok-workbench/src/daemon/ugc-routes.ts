@@ -1,5 +1,5 @@
 import { UgcJsonStore } from "./ugc-json-store"
-import { isRecord, type BranchPatch, type BulkCandidateStatusPatch, type CandidateStatusPatch, type CreateExportManifestInput, type CreateProviderJobInput, type CreateReferenceArchiveInput, type CreateReviewNoteInput, type CreateWorkspaceBundleInput, type ImportWorkspaceBundleInput, type PersonaPatch, type ProviderJobPatch, type ReferenceArchiveFormatOutput, type UgcReferenceArchive } from "../ugc/local-state"
+import { isRecord, type BranchPatch, type BulkCandidateStatusPatch, type CandidateStatusPatch, type CreateBranchInput, type CreateExportManifestInput, type CreateProviderJobInput, type CreateReferenceArchiveInput, type CreateReviewNoteInput, type CreateWorkspaceBundleInput, type ImportWorkspaceBundleInput, type PersonaPatch, type ProviderJobPatch, type ReferenceArchiveFormatOutput, type UgcReferenceArchive } from "../ugc/local-state"
 import type { BranchStatus, CandidateStatus, JsonValue, ReviewAttachment, ReviewVerdict } from "../renderer/ugcStudioModel"
 
 export async function routeUgc(request: Request, store: UgcJsonStore): Promise<Response | null> {
@@ -40,6 +40,10 @@ export async function routeUgc(request: Request, store: UgcJsonStore): Promise<R
     const id = decodeURIComponent(url.pathname.slice("/api/ugc/candidates/".length, -"/status".length))
     if (!id) return json({ error: "missing candidate id" }, 400)
     return json(store.updateCandidate(id, decodeCandidateStatusPatch(await readJson(request))))
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/ugc/branches") {
+    return json(store.createBranch(decodeCreateBranch(await readJson(request))))
   }
 
   if (request.method === "POST" && url.pathname.startsWith("/api/ugc/branches/")) {
@@ -137,6 +141,21 @@ function decodeBranchPatch(value: JsonValue): BranchPatch {
   return {
     ...(isBranchStatus(value.status) ? { status: value.status } : {}),
     ...(typeof value.decisionNote === "string" ? { decisionNote: value.decisionNote } : {}),
+  }
+}
+
+function decodeCreateBranch(value: JsonValue): CreateBranchInput {
+  if (!isRecord(value) || typeof value.focus !== "string" || value.focus.trim().length === 0) {
+    throw new Error("branch create request requires focus")
+  }
+  return {
+    parentId: typeof value.parentId === "string" ? value.parentId : null,
+    title: typeof value.title === "string" ? value.title : undefined,
+    focus: value.focus,
+    selectedPersonaIds: isStringArray(value.selectedPersonaIds) ? value.selectedPersonaIds : undefined,
+    selectedCandidateIds: isStringArray(value.selectedCandidateIds) ? value.selectedCandidateIds : undefined,
+    candidateBatchIds: isStringArray(value.candidateBatchIds) ? value.candidateBatchIds : undefined,
+    decisionNote: typeof value.decisionNote === "string" ? value.decisionNote : undefined,
   }
 }
 

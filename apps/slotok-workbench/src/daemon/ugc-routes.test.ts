@@ -15,6 +15,7 @@ describe("routeUgc", () => {
     const personaId = initial.workspace.personas[0]?.id ?? ""
     const candidateId = initial.workspace.candidates[0]?.id ?? ""
     const referenceProfileId = initial.workspace.referenceProfiles[0]?.id ?? ""
+    const branchId = initial.workspace.branchSnapshots[0]?.id ?? ""
 
     const personaResponse = await routeUgc(jsonRequest(`/api/ugc/personas/${personaId}`, {
       status: "selected",
@@ -43,6 +44,19 @@ describe("routeUgc", () => {
     }), store)
     const noteState = await readState(noteResponse)
     expect(noteState.workspace.reviewNotes[0]?.verdict).toBe("reject")
+
+    const branchResponse = await routeUgc(jsonRequest("/api/ugc/branches", {
+      parentId: branchId,
+      title: "Route fork",
+      focus: "Route-created softer fork",
+      selectedCandidateIds: [candidateId],
+      selectedPersonaIds: [personaId],
+      decisionNote: "Route fork proof.",
+    }), store)
+    const branchState = await readState(branchResponse)
+    const fork = branchState.workspace.branchSnapshots[0]
+    expect(fork?.parentId).toBe(branchId)
+    expect(branchState.workspace.branchSnapshots.find((branch) => branch.id === branchId)?.childIds).toContain(fork?.id)
 
     const archiveResponse = await routeUgc(jsonRequest("/api/ugc/reference-archives", {
       referenceProfileId,

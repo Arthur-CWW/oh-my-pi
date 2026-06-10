@@ -173,6 +173,16 @@ export interface BranchPatch {
   readonly decisionNote?: string
 }
 
+export interface CreateBranchInput {
+  readonly parentId?: string | null
+  readonly title?: string
+  readonly focus: string
+  readonly selectedPersonaIds?: readonly string[]
+  readonly selectedCandidateIds?: readonly string[]
+  readonly candidateBatchIds?: readonly string[]
+  readonly decisionNote?: string
+}
+
 export interface CandidateStatusPatch {
   readonly status: CandidateStatus
 }

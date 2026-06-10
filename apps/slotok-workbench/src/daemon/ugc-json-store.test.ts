@@ -190,6 +190,30 @@ describe("UgcJsonStore", () => {
 
     expect(updated.workspace.candidates.filter((candidate) => candidateIds.includes(candidate.id)).every((candidate) => candidate.status === "needs-revision")).toBe(true)
   })
+
+  test("creates branch forks linked to parent snapshots", () => {
+    const store = createStore()
+    const initial = store.read()
+    const parent = initial.workspace.branchSnapshots[0]
+    if (!parent) throw new Error("missing parent branch")
+
+    const updated = store.createBranch({
+      parentId: parent.id,
+      title: "Softer CTA fork",
+      focus: "Lower pressure CTA variants",
+      selectedPersonaIds: parent.selectedPersonaIds,
+      selectedCandidateIds: parent.selectedCandidateIds,
+      candidateBatchIds: parent.candidateBatchIds,
+      decisionNote: "Fork proof.",
+    })
+    const branch = updated.workspace.branchSnapshots[0]
+    const parentAfter = updated.workspace.branchSnapshots.find((item) => item.id === parent.id)
+
+    expect(branch?.title).toBe("Softer CTA fork")
+    expect(branch?.parentId).toBe(parent.id)
+    expect(branch?.status).toBe("active")
+    expect(parentAfter?.childIds).toContain(branch?.id)
+  })
 })
 
 function createStore(): UgcJsonStore {
