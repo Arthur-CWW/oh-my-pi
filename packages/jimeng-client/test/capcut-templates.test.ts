@@ -452,6 +452,70 @@ describe("CapCut commercial template helpers", () => {
     })
   })
 
+  test("allows explicitly whitelisted signed LV editor read probes", async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = []
+    const client = new JimengClient({
+      fetch: mockFetch(JSON.stringify({
+        ret: "0",
+        errmsg: "success",
+        data: {
+          item_list: [],
+          has_more: false,
+          new_cursor: 0,
+        },
+      }), requests),
+    })
+
+    const result = await runCapCutEndpointProbe({
+      client,
+      probe: {
+        endpoint: "/lv/v1/editor/template/recent_list",
+        variants: [
+          { name: "recent", body: { count: 5, lang: "en" } },
+        ],
+        lan: "en",
+        loc: "us",
+        userAgent: "UnitTest/1.0",
+      },
+    })
+
+    expect(requests[0]?.url).toBe("https://edit-api-sg.capcut.com/lv/v1/editor/template/recent_list")
+    expect(JSON.parse(String(requests[0]?.init?.body))).toEqual({ count: 5, lang: "en" })
+    expect(result.results[0]).toMatchObject({
+      name: "recent",
+      ret: "0",
+      errmsg: "success",
+    })
+  })
+
+  test("routes signed CapCut task probes to the feed API host", async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = []
+    const client = new JimengClient({
+      fetch: mockFetch(JSON.stringify({
+        ret: "0",
+        errmsg: "success",
+        data: {
+          draft_info: [],
+        },
+      }), requests),
+    })
+
+    await runCapCutEndpointProbe({
+      client,
+      probe: {
+        endpoint: "/lv/v2/cc_web_task/get_task_draft",
+        variants: [
+          { name: "task", body: { task_id: "task-1", app_id: 348188 } },
+        ],
+        lan: "en",
+        loc: "us",
+        userAgent: "UnitTest/1.0",
+      },
+    })
+
+    expect(requests[0]?.url).toBe("https://feed-api-sg.capcut.com/lv/v2/cc_web_task/get_task_draft")
+  })
+
   test("rejects unsafe CapCut probe endpoints", async () => {
     const client = new JimengClient({ fetch: mockFetch(JSON.stringify({ ret: "0" }), []) })
 
@@ -467,6 +531,14 @@ describe("CapCut commercial template helpers", () => {
       client,
       probe: {
         endpoint: "/lv/v1/editor/use_report",
+        variants: [{ name: "body", body: {} }],
+      },
+    })).rejects.toThrow(JimengError)
+
+    await expect(runCapCutEndpointProbe({
+      client,
+      probe: {
+        endpoint: "/lv/v1/cc_web/plane/del_presets_template",
         variants: [{ name: "body", body: {} }],
       },
     })).rejects.toThrow(JimengError)

@@ -221,7 +221,7 @@ Commands:
   templates     Fetch no-spend Explore/template examples for prompt/template mining
   short-videos  Fetch no-spend Explore short videos for reference/profile mining
   overseas-short-videos Fetch no-spend feed_short_video examples for overseas/reference mining
-  capcut-probe Probe/replay one signed CapCut /lv/v1/cc_web/* endpoint with JSON variants
+  capcut-probe Probe/replay one signed read-oriented CapCut/LV endpoint with JSON variants
   capcut-categories Fetch no-spend CapCut commercial template categories
   capcut-collections Fetch no-spend CapCut template collection ids/categories
   capcut-collection-templates Fetch no-spend CapCut template rows for a collection id
@@ -477,6 +477,11 @@ Examples:
     --endpoint /lv/v1/cc_web/plane/fuzzy_search_templates \\
     --body '{"sdk_version":"16.1.0","keyword":"makeup"}' \\
     --outDir data/jimeng-lab/cli-capcut-probe-smoke
+
+  jimeng-browser-proxy capcut-probe \\
+    --endpoint /lv/v1/editor/template/recent_list \\
+    --body '{"count":5,"lang":"en"}' \\
+    --outDir data/jimeng-lab/cli-lv-template-recent-probe
 
   jimeng-browser-proxy capcut-template-metadata \\
     --outDir data/jimeng-lab/cli-capcut-template-metadata-smoke

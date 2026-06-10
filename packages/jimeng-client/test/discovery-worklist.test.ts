@@ -40,6 +40,12 @@ describe("Jimeng discovery worklist", () => {
           `fetch("/lv/v1/editor/image/gen_background")`,
           `fetch("/lv/v1/editor/image/saliency_seg")`,
           `fetch("/api/biz/v1/image/entity_seg")`,
+          `fetch("/lv/v1/cc_web/plane/del_presets_template")`,
+          `fetch("/lv/v1/editor/template/recent_list")`,
+          `fetch("/lv/v1/editor/template/check_post_permission")`,
+          `fetch("/lv/v1/editor/draft/get_template_file")`,
+          `fetch("/lv/v1/editor/plane/intelligence/query_recommend_template")`,
+          `fetch("/lv/v2/cc_web_task/get_task_draft")`,
         ].join("\n"),
         "utf8",
       )
@@ -119,6 +125,24 @@ describe("Jimeng discovery worklist", () => {
       const entitySeg = worklist.items.find((item) => item.endpoint === "/api/biz/v1/image/entity_seg")
       expect(entitySeg?.known_status).toBe("blocked")
       expect(entitySeg?.reason).toContain("auto-selection")
+      const lvDeletePreset = worklist.items.find((item) => item.endpoint === "/lv/v1/cc_web/plane/del_presets_template")
+      expect(lvDeletePreset?.known_status).toBe("blocked")
+      expect(lvDeletePreset?.reason).toContain("mutating path")
+      const lvRecentList = worklist.items.find((item) => item.endpoint === "/lv/v1/editor/template/recent_list")
+      expect(lvRecentList?.known_status).toBe("blocked")
+      expect(lvRecentList?.reason).toContain("ret=1015")
+      const lvPermission = worklist.items.find((item) => item.endpoint === "/lv/v1/editor/template/check_post_permission")
+      expect(lvPermission?.known_status).toBe("blocked")
+      expect(lvPermission?.reason).toContain("check login")
+      const lvTemplateFile = worklist.items.find((item) => item.endpoint === "/lv/v1/editor/draft/get_template_file")
+      expect(lvTemplateFile?.known_status).toBe("blocked")
+      expect(lvTemplateFile?.reason).toContain("real template file URIs")
+      const lvRecommendTemplate = worklist.items.find((item) => item.endpoint === "/lv/v1/editor/plane/intelligence/query_recommend_template")
+      expect(lvRecommendTemplate?.known_status).toBe("blocked")
+      expect(lvRecommendTemplate?.reason).toContain("ret=-3")
+      const lvTaskDraft = worklist.items.find((item) => item.endpoint === "/lv/v2/cc_web_task/get_task_draft")
+      expect(lvTaskDraft?.known_status).toBe("blocked")
+      expect(lvTaskDraft?.reason).toContain("commercial-photo task id")
       expect(worklist.items.find((item) => item.endpoint === "/mweb/v1/aigc_draft/generate")?.recommended_action).toBe("compare_dry_run_before_live")
       expect(worklist.items.find((item) => item.endpoint === "/mweb/v1/dreamina_subject/generate_voice")?.recommended_action).toBe("approval_or_disposable_fixture")
       expect(worklist.probe_variant_exports).toHaveLength(1)

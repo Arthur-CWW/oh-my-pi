@@ -7,6 +7,7 @@ import { type JsonObject, type JsonValue } from "./reference-image"
 import { JimengJsonValueSchema, parseJsonText } from "./schema"
 
 const CAPCUT_TEMPLATE_HOST = "https://edit-api-sg.capcut.com"
+const CAPCUT_FEED_API_HOST = "https://feed-api-sg.capcut.com"
 const CAPCUT_TEMPLATE_MERCURY_BASE = "https://lf16-beecdn.ibytedtos.com/obj/ies-fe-bee-sg/bee_prod"
 const CAPCUT_TEMPLATE_RATIO_CATALOG_URL = `${CAPCUT_TEMPLATE_MERCURY_BASE}/biz_49/bee_prod_49_bee_publish_709.json`
 const CAPCUT_TEMPLATE_SCENE_CATALOG_URL = `${CAPCUT_TEMPLATE_MERCURY_BASE}/biz_149/bee_prod_149_bee_publish_835.json`
@@ -19,6 +20,22 @@ const CAPCUT_TEMPLATE_SIGN_SECRET_SUFFIX = "11ac"
 const CAPCUT_TEMPLATE_COLLECTIONS_ENDPOINT = "/lv/v1/cc_web/plane/get_collections"
 const CAPCUT_TEMPLATE_COLLECTION_TEMPLATES_ENDPOINT = "/lv/v1/cc_web/plane/get_collection_templates"
 const CAPCUT_TEMPLATE_DETAIL_ENDPOINT = "/lv/v1/cc_web/plane/get_template_detail"
+const CAPCUT_FEED_API_ENDPOINT_RE = /^\/lv\/v2\/(?:cc_web_task|task)\//
+const CAPCUT_MUTATING_PROBE_ENDPOINTS = new Set([
+  "/lv/v1/cc_web/plane/del_presets_template",
+])
+const CAPCUT_SIGNED_READ_PROBE_ENDPOINTS = new Set([
+  "/lv/v1/editor/draft/get_template_file",
+  "/lv/v1/editor/draft/get_version_list",
+  "/lv/v1/editor/plane/common/recent_list",
+  "/lv/v1/editor/plane/color/feed",
+  "/lv/v1/editor/plane/intelligence/query_recommend_template",
+  "/lv/v1/editor/plane_draft/get_draft_detail",
+  "/lv/v1/editor/template/check_post_permission",
+  "/lv/v1/editor/template/recent_list",
+  "/lv/v2/cc_web_task/get_task_draft",
+  "/lv/v2/task/multi_get_tasks",
+])
 
 export interface CapCutTemplateCategory {
   categoryId: number
@@ -550,7 +567,7 @@ export async function runCapCutEndpointProbe(input: {
   const endpoint = normalizeCapCutProbeEndpoint(input.probe.endpoint)
   const method = input.probe.method ?? "POST"
   const client = input.client ?? new JimengClient()
-  const url = `${CAPCUT_TEMPLATE_HOST}${endpoint}`
+  const url = `${capCutProbeHostForEndpoint(endpoint)}${endpoint}`
   const results: CapCutEndpointProbeVariantResult[] = []
 
   for (const variant of input.probe.variants) {
@@ -580,6 +597,13 @@ export async function runCapCutEndpointProbe(input: {
   }
 
   return { endpoint, url, method, results }
+}
+
+function capCutProbeHostForEndpoint(endpoint: string): string {
+  if (CAPCUT_FEED_API_ENDPOINT_RE.test(endpoint)) {
+    return CAPCUT_FEED_API_HOST
+  }
+  return CAPCUT_TEMPLATE_HOST
 }
 
 export function parseCapCutTemplateCategoriesBody(body: unknown): CapCutTemplateCategory[] {
@@ -937,14 +961,19 @@ const CapCutProbeEndpointSchema = z.string()
   .transform((value) => {
     if (value.startsWith("http://") || value.startsWith("https://")) {
       const url = new URL(value)
-      if (url.host !== new URL(CAPCUT_TEMPLATE_HOST).host) {
-        throw new Error("CapCut endpoint probe only supports edit-api-sg.capcut.com")
+      const allowedHosts = new Set([
+        new URL(CAPCUT_TEMPLATE_HOST).host,
+        new URL(CAPCUT_FEED_API_HOST).host,
+      ])
+      if (!allowedHosts.has(url.host)) {
+        throw new Error("CapCut endpoint probe only supports known CapCut API hosts")
       }
       return url.pathname
     }
     return value
   })
-  .refine((value) => value.startsWith("/lv/v1/cc_web/"), "CapCut endpoint probe only supports /lv/v1/cc_web/* endpoints")
+  .refine((value) => !CAPCUT_MUTATING_PROBE_ENDPOINTS.has(value), "CapCut endpoint probe rejects known mutating endpoints")
+  .refine((value) => value.startsWith("/lv/v1/cc_web/") || CAPCUT_SIGNED_READ_PROBE_ENDPOINTS.has(value), "CapCut endpoint probe only supports signed read-oriented CapCut/LV endpoints")
 
 function normalizeCapCutProbeEndpoint(endpoint: string): string {
   try {
@@ -954,7 +983,7 @@ function normalizeCapCutProbeEndpoint(endpoint: string): string {
     throw jimengError({
       category: "validation",
       code: "CAPCUT_ENDPOINT_PROBE_UNSAFE",
-      message: "CapCut endpoint probe accepts only signed read-oriented /lv/v1/cc_web/* endpoints.",
+      message: "CapCut endpoint probe accepts only signed read-oriented CapCut/LV endpoints.",
       retryable: false,
       details: { endpoint, message: parsedError.message },
     })

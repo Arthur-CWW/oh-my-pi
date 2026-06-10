@@ -45,6 +45,12 @@ describe("Jimeng static inventory", () => {
           `const lvInteractiveMattingBlocked = "/lv/v1/editor/image/interactive_matting";`,
           `const lvSaliencyBlocked = "/lv/v1/editor/image/saliency_seg";`,
           `const lvEntitySegBlocked = "/api/biz/v1/image/entity_seg";`,
+          `const lvDeletePresetBlocked = "/lv/v1/cc_web/plane/del_presets_template";`,
+          `const lvTemplateRecentBlocked = "/lv/v1/editor/template/recent_list";`,
+          `const lvTemplatePermissionBlocked = "/lv/v1/editor/template/check_post_permission";`,
+          `const lvTemplateFileBlocked = "/lv/v1/editor/draft/get_template_file";`,
+          `const lvRecommendTemplateBlocked = "/lv/v1/editor/plane/intelligence/query_recommend_template";`,
+          `const lvTaskDraftBlocked = "/lv/v2/cc_web_task/get_task_draft";`,
           `const unknownRead = "https://jimeng.jianying.com/mweb/v1/template/search?token=secret";`,
           `const unknownGenerate = "/mweb/v1/avatar/generate";`,
           `const capcutCatalog = "https://lf16-beecdn.ibytedtos.com/obj/ies-fe-bee-sg/bee_prod/biz_49/bee_prod_49_bee_publish_709.json?x-signature=secret";`,
@@ -59,7 +65,7 @@ describe("Jimeng static inventory", () => {
       const summary = summarizeJimengStaticInventory(result)
       const markdown = writeJimengStaticInventoryMarkdown(result)
 
-      expect(result.totalResourceCount).toBe(33)
+      expect(result.totalResourceCount).toBe(39)
       expect(result.skippedImplementedCount).toBe(2)
       expect(result.items.map((item) => item.resource)).not.toContain("/mweb/v1/get_history_by_ids")
       expect(result.items.find((item) => item.resource === "/mweb/v1/dreamina_subject/generate_voice")?.recommendedAction).toBe("approval_or_disposable_fixture")
@@ -94,6 +100,12 @@ describe("Jimeng static inventory", () => {
       expect(result.items.find((item) => item.resource === "/lv/v1/editor/image/interactive_matting")?.knownStatus).toBe("blocked")
       expect(result.items.find((item) => item.resource === "/lv/v1/editor/image/saliency_seg")?.knownStatus).toBe("blocked")
       expect(result.items.find((item) => item.resource === "/api/biz/v1/image/entity_seg")?.knownStatus).toBe("blocked")
+      expect(result.items.find((item) => item.resource === "/lv/v1/cc_web/plane/del_presets_template")?.knownStatus).toBe("blocked")
+      expect(result.items.find((item) => item.resource === "/lv/v1/editor/template/recent_list")?.knownStatus).toBe("blocked")
+      expect(result.items.find((item) => item.resource === "/lv/v1/editor/template/check_post_permission")?.knownStatus).toBe("blocked")
+      expect(result.items.find((item) => item.resource === "/lv/v1/editor/draft/get_template_file")?.knownStatus).toBe("blocked")
+      expect(result.items.find((item) => item.resource === "/lv/v1/editor/plane/intelligence/query_recommend_template")?.knownStatus).toBe("blocked")
+      expect(result.items.find((item) => item.resource === "/lv/v2/cc_web_task/get_task_draft")?.knownStatus).toBe("blocked")
       expect(result.items.find((item) => item.resource === "/mweb/v1/template/search")?.recommendedAction).toBe("probe_read_endpoint")
       expect(result.items.find((item) => item.resource === "/mweb/v1/avatar/generate")?.riskClass).toBe("generate")
       expect(JSON.stringify(summary)).not.toContain("x-signature=secret")
@@ -131,7 +143,7 @@ describe("Jimeng static inventory", () => {
       expect(result.items.find((item) => item.resource === "/lv/v1/cc_web/replicate/search_templates")?.recommendedAction).toBe("capture_exact_payload")
       expect(result.items.find((item) => item.resource === "/lv/v1/cc_web/plane/get_collection_templates")?.riskClass).toBe("read")
       expect(result.items.find((item) => item.resource === "/lv/v1/asset/create")?.riskClass).toBe("mutate")
-      expect(result.items.find((item) => item.resource === "/lv/v1/editor/template/recent_list")?.riskClass).toBe("read")
+      expect(result.items.find((item) => item.resource === "/lv/v1/editor/template/recent_list")?.knownStatus).toBe("blocked")
       expect(result.items.find((item) => item.resource === "/mweb/v1/voice/query_task")?.riskClass).toBe("read")
     } finally {
       rmSync(dir, { recursive: true, force: true })

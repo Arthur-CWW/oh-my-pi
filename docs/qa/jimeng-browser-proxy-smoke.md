@@ -1907,7 +1907,7 @@ Expected result: no matches.
 
 ## CapCut Signed Endpoint Probe Smoke
 
-`jimeng-browser-proxy capcut-probe` signs explicit `/lv/v1/cc_web/*` replay variants with the recovered CapCut frontend signer. It is session-free, no-spend, and intended for quickly testing search/batch/preset payload hypotheses before promoting a stable CLI command.
+`jimeng-browser-proxy capcut-probe` signs explicit read-oriented CapCut/LV replay variants with the recovered CapCut frontend signer. It is session-free, no-spend, and intended for quickly testing search/batch/preset/editor payload hypotheses before promoting a stable CLI command. The command rejects known mutating paths such as preset deletion, and routes `/lv/v2/cc_web_task/*` probes to the CapCut feed API host.
 
 Commands:
 
@@ -2112,11 +2112,28 @@ blocked_supporting_context_not_counted_by_static_inventory:
   /cc/v1/workspace/get_user_workspaces -> capture_exact_payload
 ```
 
+After classifying LV editor/template read endpoints:
+
+```txt
+resources=247
+included=200
+skipped_implemented=29
+high_value_gaps=61
+known_status_counts=unknown:173,partial:4,implemented:29,dry_run_only:4,blocked:34,captured_only:2,cataloged_only:1
+blocked_lv_editor_template_reads:
+  /lv/v1/cc_web/plane/del_presets_template -> capture_exact_payload
+  /lv/v1/editor/template/recent_list -> capture_exact_payload
+  /lv/v1/editor/template/check_post_permission -> capture_exact_payload
+  /lv/v1/editor/draft/get_template_file -> capture_exact_payload
+  /lv/v1/editor/plane/intelligence/query_recommend_template -> capture_exact_payload
+  /lv/v2/cc_web_task/get_task_draft -> capture_exact_payload
+```
+
 Normalized proof:
 
 ```txt
-data/jimeng-lab/proof-20260610-static-inventory/normalized/static-inventory-20260610083842-summary.json
-data/jimeng-lab/proof-20260610-static-inventory/normalized/static-inventory-20260610083842-summary.md
+data/jimeng-lab/proof-20260610-static-inventory/normalized/static-inventory-20260610090044-summary.json
+data/jimeng-lab/proof-20260610-static-inventory/normalized/static-inventory-20260610090044-summary.md
 ```
 
 Video helper proof:
@@ -2192,6 +2209,55 @@ lv-asset-query-probe: 3 variants, all ret=1014, errmsg=system busy
 lv-asset-query-aid-probe: 1 variant, ret=1014, errmsg=system busy
 lv-workspace-list-probe: 3 variants, all ret=1014, errmsg=system busy
 lv-workspace-list-lite-aid-probe: 2 variants, all ret=1014, errmsg=system busy
+```
+
+LV editor/template read proof:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts static-locate \
+  --staticRoot data/jimeng-lab/js-sweep/files,packages/jimeng-client/src \
+  --endpoint /lv/v1/editor/draft/get_template_file,/lv/v1/editor/plane/intelligence/query_recommend_template,/lv/v1/editor/template/check_post_permission,/lv/v1/editor/template/recent_list,/lv/v2/cc_web_task/get_task_draft \
+  --outDir data/jimeng-lab/proof-20260610-static-locate-lv-editor-template-reads
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts static-locate \
+  --staticRoot data/jimeng-lab/js-sweep/files,packages/jimeng-client/src \
+  --endpoint /lv/v1/cc_web/plane/del_presets_template \
+  --outDir data/jimeng-lab/proof-20260610-static-locate-lv-preset-delete
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts capcut-probe \
+  --endpoint /lv/v1/editor/template/recent_list \
+  --variants '[{"name":"recent-count-lang","body":{"count":5,"lang":"en"}},{"name":"recent-cursor","body":{"count":5,"lang":"en","cursor":0}}]' \
+  --outDir data/jimeng-lab/proof-20260610-lv-editor-template-recent-probe
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts capcut-probe \
+  --endpoint /lv/v1/editor/template/check_post_permission \
+  --variants '[{"name":"empty","body":{}}]' \
+  --outDir data/jimeng-lab/proof-20260610-lv-template-permission-probe
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts capcut-probe \
+  --endpoint /lv/v1/editor/draft/get_template_file \
+  --variants '[{"name":"empty-uris","body":{"uris":[]}}]' \
+  --outDir data/jimeng-lab/proof-20260610-lv-template-file-probe
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts capcut-probe \
+  --endpoint /lv/v1/editor/plane/intelligence/query_recommend_template \
+  --variants '[{"name":"no-assets-916","body":{"asset_type":"image","input_text":"protein bar UGC ad","assets":[],"workspace_id":"","lang":"en","region":"us","aspect_ratio":["9:16"]}}]' \
+  --outDir data/jimeng-lab/proof-20260610-lv-query-recommend-template-probe
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts capcut-probe \
+  --endpoint /lv/v2/cc_web_task/get_task_draft \
+  --variants '[{"name":"empty-task","body":{"task_id":"","app_id":348188}},{"name":"zero-task","body":{"task_id":"0","app_id":348188}}]' \
+  --outDir data/jimeng-lab/proof-20260610-lv-task-draft-probe
+```
+
+```txt
+static-locate-lv-editor-template-reads: 5 endpoints, 5 occurrences, no credential markers in normalized output
+static-locate-lv-preset-delete: 1 endpoint, 1 occurrence, no credential markers in normalized output
+lv-editor-template-recent-probe: 2 variants, all ret=1015, errmsg=check login error
+lv-template-permission-probe: 1 variant, ret=1015, errmsg=check login error
+lv-template-file-probe: 1 variant, ret=1016, errmsg=ERR_PARAM
+lv-query-recommend-template-probe: 1 variant, ret=-3, errmsg=bad request
+lv-task-draft-probe: 2 variants, all ret=1015, errmsg=check login error
 ```
 
 Leak check:

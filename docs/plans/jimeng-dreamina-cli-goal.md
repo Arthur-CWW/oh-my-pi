@@ -51,7 +51,7 @@ As of 2026-06-10, the committed Jimeng CLI baseline is:
 - `302e088 Document CapCut template method contracts`
 - `8c3dd42 Add signed CapCut endpoint probe`
 - `4d117a2 Recheck Jimeng live generation`
-- current checkpoint: `Classify LV workspace/asset read blockers`
+- current checkpoint: `Classify LV editor/template read blockers`
 
 If the thread goal object lags behind this file after a pause, resume from this document and the latest Git checkpoint. The active working rule is: background-only reversal, direct/API-first implementation, small proven CLI slices, tests and proof artifacts before each commit, and no async daemon until the API surface is settled.
 
@@ -431,7 +431,7 @@ Static API inventory is now available as the systematic coverage map:
 - default output skips fully implemented endpoints so it stays focused on gaps; `--includeKnown` produces an audit inventory
 - proof bundle: `data/jimeng-lab/proof-20260610-static-inventory/`
 - latest proof scanned `data/jimeng-lab/js-sweep/files` plus `packages/jimeng-client/src`, found 247 resources, included 200 non-implemented items, skipped 29 implemented endpoints, and counted 61 high-value gaps after the CapCut collection/row/detail commands were promoted
-- known status counts are now `unknown=179`, `partial=4`, `implemented=29`, `dry_run_only=4`, `blocked=28`, `captured_only=2`, and `cataloged_only=1`; the five CapCut search/batch/preset-related endpoints above are blocked with exact replay evidence and recommended action `capture_exact_payload`
+- known status counts are now `unknown=173`, `partial=4`, `implemented=29`, `dry_run_only=4`, `blocked=34`, `captured_only=2`, and `cataloged_only=1`; the five CapCut search/batch/preset-related endpoints above are blocked with exact replay evidence and recommended action `capture_exact_payload`
 - seven video-generation helper endpoints are also now explicitly blocked/capture-needed instead of generic unknowns:
   - `/mweb/v1/video_generate/get_switch_model_queue_info`: safe no-spend probes with empty, `model_req_key`, `model_req_keys`, and scene bodies returned `ret=1000 invalid parameter`
   - `/mweb/v1/video_generate/pre_process` and `/mweb/v1/video_generate/mget_pre_process_result`: frontend task submit/result pair; capture exact UI payload and task ids before promotion
@@ -458,6 +458,15 @@ Static API inventory is now available as the systematic coverage map:
   - `/lv/v1/asset/query_process`: async process status depends on `process_id` values from mutating copy/create/upload flows
 - `/cc/v1/workspace/get_user_workspaces` is not counted by the current static-inventory namespace extractor, but static-locate found the frontend builder and no-spend probes with count/cursor plus `lite_aid=513695` returned `ret=1014 system busy`; keep it as blocked supporting context until exact UI capture proves the gateway/query params
 - proof bundles: `data/jimeng-lab/proof-20260610-static-locate-lv-asset-read/`, `data/jimeng-lab/proof-20260610-static-locate-lv-workspace-list/`, `data/jimeng-lab/proof-20260610-lv-asset-query-probe/`, `data/jimeng-lab/proof-20260610-lv-asset-query-aid-probe/`, `data/jimeng-lab/proof-20260610-lv-workspace-list-probe/`, `data/jimeng-lab/proof-20260610-lv-workspace-list-lite-aid-probe/`, and refreshed `data/jimeng-lab/proof-20260610-static-inventory/`
+- signed `capcut-probe` now supports an explicit allowlist of read-oriented LV editor endpoints and routes `/lv/v2/cc_web_task/*` probes to `https://feed-api-sg.capcut.com`; it rejects known mutating paths such as `/lv/v1/cc_web/plane/del_presets_template`
+- six LV editor/template endpoints are now explicitly blocked/capture-needed instead of generic read probes:
+  - `/lv/v1/cc_web/plane/del_presets_template`: mutates saved preset-template state; signed probe rejects it without disposable fixture or approval
+  - `/lv/v1/editor/template/recent_list`: signed no-session probes with count/lang and cursor bodies returned `ret=1015 check login error`
+  - `/lv/v1/editor/template/check_post_permission`: signed no-session probe returned `ret=1015 check login error`
+  - `/lv/v1/editor/draft/get_template_file`: signed probe with empty `uris` returned `ret=1016 ERR_PARAM`; needs real template file URIs
+  - `/lv/v1/editor/plane/intelligence/query_recommend_template`: signed no-asset probe returned `ret=-3 bad request`; needs exact workspace/assets/aspect-ratio payload
+  - `/lv/v2/cc_web_task/get_task_draft`: signed feed-api probes with empty/zero task ids returned `ret=1015 check login error`
+- proof bundles: `data/jimeng-lab/proof-20260610-static-locate-lv-editor-template-reads/`, `data/jimeng-lab/proof-20260610-static-locate-lv-preset-delete/`, `data/jimeng-lab/proof-20260610-lv-editor-template-recent-probe/`, `data/jimeng-lab/proof-20260610-lv-template-permission-probe/`, `data/jimeng-lab/proof-20260610-lv-template-file-probe/`, `data/jimeng-lab/proof-20260610-lv-query-recommend-template-probe/`, `data/jimeng-lab/proof-20260610-lv-task-draft-probe/`, and refreshed `data/jimeng-lab/proof-20260610-static-inventory/`
 - `/mweb/v1/get_history` is now marked `blocked` in the worklist/inventory: safe direct probes with plain, frontend-derived, and explicit `workspace_id=14199856180236` bodies all returned `ret=0` and empty `records_list`; use `assets`, `history-records`, and `history-queue` until a non-empty UI capture proves a useful list contract
 - normalized proof files contain no credential markers
 
@@ -465,7 +474,7 @@ Signed CapCut endpoint replay is now available for no-spend template payload dis
 
 - `jimeng-browser-proxy capcut-probe`
 - session-free; it signs requests with the recovered CapCut frontend signer and never opens or foregrounds a browser
-- guarded to `https://edit-api-sg.capcut.com/lv/v1/cc_web/*` endpoints only
+- guarded to signed read-oriented CapCut/LV endpoints only; `edit-api-sg.capcut.com` is used for template/editor reads and `feed-api-sg.capcut.com` is used for `/lv/v2/cc_web_task/*` task reads
 - input: `--endpoint`, `--body`, or `--variants`, plus optional `--capcut-lan` and `--capcut-loc`
 - writes raw variant bodies/responses under ignored `data/**`
 - writes normalized shape summaries with `ret`, `errmsg`, response hashes, top-level keys, URL-like booleans, and request/response shape descriptors without signed URL values
