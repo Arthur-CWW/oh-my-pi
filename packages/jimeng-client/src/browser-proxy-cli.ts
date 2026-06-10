@@ -79,6 +79,12 @@ import {
   summarizeJimengLipSyncCompare,
 } from "./lip-sync-compare"
 import {
+  locateJimengStaticEndpoints,
+  parseJimengStaticLocatorEndpoints,
+  summarizeJimengStaticLocator,
+  writeJimengStaticLocatorMarkdown,
+} from "./static-locator"
+import {
   buildJimengHistoryQueueInfoRequest,
   fetchJimengHistoryQueueInfo,
   parseJimengHistoryIdsFlag,
@@ -168,6 +174,7 @@ Commands:
   session       Save a fresh session bundle from the logged-in Jimeng browser profile
   capture-analyze Analyze raw CDP network JSONL into ranked endpoint/probe candidates
   discovery-worklist Merge capture analysis/static hints into prioritized next API work
+  static-locate Locate endpoint request builders in local source/bundle roots
   catalog       Probe non-generating model/tool/persona/voice config endpoints
   agent-catalog Fetch normalized agent skills and image/video model catalog
   lip-sync-config Fetch no-spend digital-human/lip-sync model configs
@@ -218,6 +225,7 @@ Options:
   --analysis <file[,file]>       capture-analyze normalized analysis JSON for discovery-worklist
   --probeCandidates <file[,file]> Raw endpoint-probe candidate JSON for discovery-worklist
   --staticRoot <dir[,dir]>      Optional source/bundle roots to search for exact endpoint string hints
+  --contextLines <n>            Snippet context lines for static-locate (default: 3)
   --includeRisky                Include generate/upload/mutate/payment endpoints in replay candidate JSON
   --includeKnown                Include already-covered endpoints in discovery-worklist
   --plan <file>                 Dry-run plan JSON for lip-sync-compare
@@ -316,6 +324,11 @@ Examples:
     --probeCandidates data/jimeng-lab/capture-analysis-subject-create/raw/capture-analyze-<stamp>-endpoint-probe-candidates.json \\
     --staticRoot packages/jimeng-client/src \\
     --outDir data/jimeng-lab/discovery-worklist-subject-create
+
+  jimeng-browser-proxy static-locate \\
+    --analysis data/jimeng-lab/capture-analysis-subject-create/normalized/capture-analyze-<stamp>-analysis.json \\
+    --staticRoot packages/jimeng-client/src \\
+    --outDir data/jimeng-lab/static-locate-subject-create
 
   jimeng-browser-proxy session
 
@@ -492,6 +505,7 @@ interface CliArgs {
     | "session"
     | "capture-analyze"
     | "discovery-worklist"
+    | "static-locate"
     | "catalog"
     | "agent-catalog"
     | "endpoint-probe"
@@ -540,6 +554,7 @@ interface CliArgs {
   analysisFiles?: string[]
   probeCandidateFiles?: string[]
   staticRoots?: string[]
+  contextLines?: number
   includeRisky: boolean
   includeKnown: boolean
   plan?: string
@@ -702,6 +717,30 @@ async function main(argv: string[]): Promise<void> {
     })
     writeFileSync(path.join(dirs.normalizedDir, `${runId}-summary.md`), writeJimengDiscoveryWorklistMarkdown(worklist), "utf8")
     console.log(`[jimeng-browser-proxy] discovery-worklist saved items=${worklist.work_item_count} probe_exports=${exportedVariants.length}`)
+    return
+  }
+
+  if (args.command === "static-locate") {
+    const endpoints = parseJimengStaticLocatorEndpoints(args.endpoint)
+    const analysisFiles = args.analysisFiles ?? []
+    if ((args.staticRoots ?? []).length === 0) throw new Error("static-locate requires --staticRoot")
+    if (endpoints.length === 0 && analysisFiles.length === 0) throw new Error("static-locate requires --endpoint or --analysis")
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const runId = `static-locate-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const result = locateJimengStaticEndpoints({
+      staticRoots: args.staticRoots ?? [],
+      endpoints,
+      analysisFiles,
+      contextLines: args.contextLines,
+      limitPerEndpoint: args.limit,
+    })
+    writeJson(path.join(dirs.rawDir, `${runId}.json`), result)
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      summary: summarizeJimengStaticLocator(result),
+    })
+    writeFileSync(path.join(dirs.normalizedDir, `${runId}-summary.md`), writeJimengStaticLocatorMarkdown(result), "utf8")
+    console.log(`[jimeng-browser-proxy] static-locate saved endpoints=${result.endpoints.length} occurrences=${result.endpointResults.reduce((sum, item) => sum + item.occurrenceCount, 0)}`)
     return
   }
 
@@ -2738,6 +2777,7 @@ function parseArgs(argv: string[]): CliArgs {
     command !== "session"
     && command !== "capture-analyze"
     && command !== "discovery-worklist"
+    && command !== "static-locate"
     && command !== "catalog"
     && command !== "agent-catalog"
     && command !== "endpoint-probe"
@@ -2793,6 +2833,8 @@ function parseArgs(argv: string[]): CliArgs {
   const workspaceId = workspaceIdValue ? Number(workspaceIdValue) : undefined
   const speed = flags.speed ? Number(flags.speed) : undefined
   const strength = flags.strength ? Number(flags.strength) : undefined
+  const contextLinesValue = flags.contextLines ?? flags["context-lines"]
+  const contextLines = contextLinesValue ? Number(contextLinesValue) : undefined
   const seed = flags.seed ? Number(flags.seed) : undefined
   const itemPlatform = flags["item-platform"] ? Number(flags["item-platform"]) : undefined
   const limit = flags.limit ? Number(flags.limit) : undefined
@@ -2860,6 +2902,9 @@ function parseArgs(argv: string[]): CliArgs {
   if (strength !== undefined && (!Number.isFinite(strength) || strength <= 0 || strength > 100)) {
     throw new Error("--strength must be a number from 0.01..1 or 1..100")
   }
+  if (contextLines !== undefined && (!Number.isInteger(contextLines) || contextLines < 0 || contextLines > 20)) {
+    throw new Error("--contextLines must be an integer from 0..20")
+  }
   return {
     command,
     cdpUrl: flags.cdp ?? DEFAULT_CDP_URL,
@@ -2872,6 +2917,7 @@ function parseArgs(argv: string[]): CliArgs {
     analysisFiles: parseCsvFlag(flags.analysis),
     probeCandidateFiles: parseCsvFlag(flags.probeCandidates ?? flags["probe-candidates"]),
     staticRoots: parseCsvFlag(flags.staticRoot ?? flags["static-root"]),
+    contextLines,
     includeRisky: flags.includeRisky === "true" || flags["include-risky"] === "true",
     includeKnown: flags.includeKnown === "true" || flags["include-known"] === "true",
     plan: flags.plan,

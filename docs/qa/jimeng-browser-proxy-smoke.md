@@ -357,6 +357,55 @@ Expected result:
 normalized discovery-worklist proof has no signed URLs or raw variant bodies
 ```
 
+## Static Locator Smoke
+
+`static-locate` is the offline bridge between a prioritized endpoint and the code that likely builds its request. It does not load a browser session or spend generation quota.
+
+Proof command:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts static-locate \
+  --analysis data/jimeng-lab/proof-20260610-capture-analyze-subject-create-v3/normalized/capture-analyze-20260610024757-analysis.json \
+  --staticRoot packages/jimeng-client/src \
+  --outDir data/jimeng-lab/proof-20260610-static-locate-subject-create \
+  --limit 4
+```
+
+Result:
+
+```txt
+static-locate saved endpoints=4 occurrences=16
+endpoint_count=4
+top_1=/mweb/v1/get_upload_token occurrences=9 files=3
+top_2=/mweb/v1/imagex/submit_audit_job occurrences=6 files=3
+top_3=/mweb/v1/get_unread_count occurrences=1 files=1
+```
+
+Proof files:
+
+```txt
+data/jimeng-lab/proof-20260610-static-locate-subject-create/raw/static-locate-20260610040116.json
+data/jimeng-lab/proof-20260610-static-locate-subject-create/normalized/static-locate-20260610040116-summary.json
+data/jimeng-lab/proof-20260610-static-locate-subject-create/normalized/static-locate-20260610040116-summary.md
+```
+
+The normalized static locator output was checked for signed URL and credential leakage:
+
+```bash
+latest=$(find data/jimeng-lab/proof-20260610-static-locate-subject-create/normalized -name 'static-locate-*-summary.json' | sort | tail -1)
+if rg -n "https://|x-signature|x-expires|expire_time|byteimg|douyinpic|vlabvod|cookie|authorization" "$latest"; then
+  exit 1
+else
+  echo "normalized static-locate proof has no signed URLs or credentials"
+fi
+```
+
+Expected result:
+
+```txt
+normalized static-locate proof has no signed URLs or credentials
+```
+
 ## Agent Catalog Smoke
 
 `agent-catalog` is the schema-backed, no-spend model/tool catalog for the older creation-agent surface. It promotes the generic catalog probes into normalized fields that later generation commands can use for flags and validation.
