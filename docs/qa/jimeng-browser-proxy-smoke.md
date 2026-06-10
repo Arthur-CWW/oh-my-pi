@@ -180,6 +180,79 @@ rg -n "https://|x-signature|byteimg|internal-queue-name|dreamina_matrix_queue_na
 
 Expected result: no matches.
 
+## History Records Smoke
+
+This is the read-only `/mweb/v1/get_history_by_ids` path used to recover completed generation records by submit id or history id. The implementation validates the response through permissive Zod boundary schemas before normalization, so additive provider fields are accepted but required contract paths fail clearly.
+
+Dry-run request-shape proof:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts history-records \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --submitId a6bbee65-bed0-4e5b-aaf1-5ab466137b82 \
+  --outDir data/jimeng-lab/proof-20260610-history-records \
+  --dryRun
+```
+
+Live no-spend proof by submit id:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts history-records \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --submitId a6bbee65-bed0-4e5b-aaf1-5ab466137b82 \
+  --outDir data/jimeng-lab/proof-20260610-history-records
+```
+
+Live no-spend proof by history id:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts history-records \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --historyId 39148697060354 \
+  --outDir data/jimeng-lab/proof-20260610-history-records-by-history-id
+```
+
+Result:
+
+```txt
+history-records saved count=1 statuses=a6bbee65-bed0-4e5b-aaf1-5ab466137b82:50
+history-records saved count=1 statuses=39148697060354:50
+ret=0
+errmsg=success
+submit_id=a6bbee65-bed0-4e5b-aaf1-5ab466137b82
+history_record_id=39148697060354
+status=50
+task_status=50
+generate_type=1
+mode=workbench
+model_req_key=high_aes_general_v50
+model_name=图片5.0 Lite
+seed=105719980
+total_image_count=4
+finished_image_count=4
+item_count=4
+submit_lookup_response_sha256=2da0421296eb99f5c3e14b4ac543d800481a4f875e8b7c555f6404ef903bd413
+history_lookup_response_sha256=77079fffff13a0c230698d7032bacd8a9784bbf9e8184e4685dd37e324aea8a6
+```
+
+The normalized summaries were checked for signed URL leakage:
+
+```bash
+if rg -n "https://|x-signature|x-expires|byteimg|SIGNED_URL" \
+  data/jimeng-lab/proof-20260610-history-records/normalized \
+  data/jimeng-lab/proof-20260610-history-records-by-history-id/normalized; then
+  exit 1
+else
+  echo "normalized history-records proofs have no signed URLs"
+fi
+```
+
+Expected result:
+
+```txt
+normalized history-records proofs have no signed URLs
+```
+
 ## Voice / TTS Smoke
 
 Refreshed the logged-in session from the background Jimeng browser:

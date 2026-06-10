@@ -39,6 +39,7 @@ As of 2026-06-10, the committed Jimeng CLI baseline is:
 - `e5e3539 Add Jimeng subject lifecycle CLI`
 - `6fc9948 Add Jimeng voice clone CLI coverage`
 - `e8313de Add Jimeng workbench assets CLI`
+- `736ed98 Add Jimeng history queue CLI`
 
 If the thread goal object lags behind this file after a pause, resume from this document and the latest Git checkpoint. The active working rule is: background-only reversal, direct/API-first implementation, small proven CLI slices, tests and proof artifacts before each commit, and no async daemon until the API surface is settled.
 
@@ -298,6 +299,18 @@ History queue/status lookup is now live-proved without generation spend:
 - proof bundle: `data/jimeng-lab/proof-20260610-history-queue/`
 - latest proof returned `entry_count=1`, `history_id=39148697060354`, `status=0`, `queue_status=3`, `queue_length=0`, `polling_interval_seconds=30`, `polling_timeout_seconds=86400`, response hash `292217828c13e57d7908a146e9496d36194c57ab075d547a24e74c7eb61ea8c0`, and debug-info hash `f71e62a6cfa3199b9974993f1774d6161383110784671d6fc9c3fa945072182e`
 
+History record lookup is now live-proved without generation spend and schema-backed:
+
+- `jimeng-browser-proxy history-records`
+- direct `/mweb/v1/get_history_by_ids` with logged-in browser session headers
+- useful flags: `--submitId`, `--submitIds`, `--historyId`, `--historyIds`
+- request shape: `{"submit_ids":["..."],"need_batch":true,"history_ids":["..."]}`
+- response contract is decoded through permissive Zod schemas before normalization; additive provider fields are allowed, while the relied-on `ret`/`errmsg`/`data` map and history record/media paths produce explicit contract-drift errors if changed
+- normalized summaries keep lookup key, history id, submit id, status/task status, prompt, model key/name, seed, generated item count, provider image/video URIs, dimensions, and URL-presence booleans while omitting signed media URLs
+- proof bundles: `data/jimeng-lab/proof-20260610-history-records/` and `data/jimeng-lab/proof-20260610-history-records-by-history-id/`
+- latest submit-id proof returned `record_count=1`, `lookup_key=a6bbee65-bed0-4e5b-aaf1-5ab466137b82`, `history_record_id=39148697060354`, `status=50`, `task_status=50`, `generate_type=1`, `mode=workbench`, `model_req_key=high_aes_general_v50`, `model_name=图片5.0 Lite`, `seed=105719980`, `total_image_count=4`, `finished_image_count=4`, response hash `2da0421296eb99f5c3e14b4ac543d800481a4f875e8b7c555f6404ef903bd413`
+- latest history-id proof returned the same completed record for lookup key `39148697060354`, response hash `77079fffff13a0c230698d7032bacd8a9784bbf9e8184e4685dd37e324aea8a6`
+
 The next slice is **lip-sync submit capture and reference-video consumers**. Use the VOD provider reference, ImageX avatar reference, and frontend captures to unlock live lip-sync, reference-video, multimodal/all-around reference, pose/style/depth/canny controls, and live end-frame/multi-frame image-to-video paths.
 
 Immediate next slices:
@@ -323,6 +336,7 @@ Maximize useful API coverage and proof quality while keeping live submissions co
 - if a frontend-only Jimeng flow truly requires visible UI interaction, first try to reproduce it through background CDP or CuaDriver; if that still cannot work, record the blocked path and ask before interrupting Arthur's flow
 - for unknown frontend flows, prefer a faster hybrid reversal loop over long manual bundle reading: run background CDP/passive network capture first, use `ast-grep`/targeted structural search to locate the frontend request builder, then replay/compare the direct API request with saved session headers
 - use mise-managed developer CLIs such as `ast-grep` when available; install missing local CLIs with `mise` first unless the tool must be a repo/CI dependency
+- validate external Jimeng/CapCut/provider JSON at the boundary with permissive runtime schemas; allow additive extra fields but fail clearly when relied-on response paths drift
 - live generation prompts should be Chinese and in-distribution for the UGC use case
 - test/proof prompts should generate actually useful Korean-beauty, UGC ad, persona, TikTok-profile, reference-upload, or campaign assets, not toy demos
 - map the product's actual account/UI limits and encode them in docs/code
@@ -410,6 +424,7 @@ jimeng-browser-proxy short-videos
 jimeng-browser-proxy overseas-short-videos
 jimeng-browser-proxy assets
 jimeng-browser-proxy history-queue
+jimeng-browser-proxy history-records
 jimeng-browser-proxy canvas
 ```
 
@@ -422,6 +437,7 @@ For each implemented API:
 - exact runnable command
 - normalized JSON output
 - typed helper and CLI command
+- runtime schema/decoder for external JSON contracts, permissive to extra fields and strict for paths the CLI relies on
 - automated tests close to `packages/jimeng-client/test/`
 - snapshot or fixture-style tests where request/response shape matters
 - redacted docs in `docs/provider/`

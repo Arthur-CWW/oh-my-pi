@@ -15,6 +15,9 @@
     "jimeng-dreamina": "./src/dreamina-compatible-cli.ts",
     "jimeng-browser-proxy": "./src/browser-proxy-cli.ts"
   },
+  "dependencies": {
+    "zod": "^4.3.6"
+  },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "bun test ./test"

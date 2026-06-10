@@ -85,12 +85,24 @@ Important capability notes from help output:
 
 ### 3) Poll status/results by submit id
 - `POST https://jimeng.jianying.com/mweb/v1/get_history_by_ids`
+- Implemented read-only lookup:
+  - `jimeng-browser-proxy history-records`
+  - uses schema-backed response decoding and URL-safe normalization
 - Payload variants observed:
   - `{ "submit_ids": ["<submit_id>"] }`
   - `{ "submit_ids": ["<submit_id>"], "need_batch": true, "history_ids": [] }`
+  - `{ "submit_ids": [], "need_batch": true, "history_ids": ["<history_id>"] }`
 - Terminal success seen:
   - video: `status = 50`
   - image: `status = 45` (observed in earlier image path)
+  - completed workbench image record: `status = 50`, `task.status = 50`
+- Latest no-spend proof:
+  - submit id `a6bbee65-bed0-4e5b-aaf1-5ab466137b82` returned history record `39148697060354`
+  - history id `39148697060354` returned the same completed record
+  - `generate_type=1`, `mode=workbench`, `model_req_key=high_aes_general_v50`, `model_name=图片5.0 Lite`, `seed=105719980`
+  - `total_image_count=4`, `finished_image_count=4`, `item_count=4`
+  - proof bundles `data/jimeng-lab/proof-20260610-history-records/` and `data/jimeng-lab/proof-20260610-history-records-by-history-id/`
+  - normalized summaries omit signed image/video URLs and keep URL-presence booleans only
 
 ### 4) Workspace asset list / current image polling
 - `POST https://jimeng.jianying.com/mweb/v1/get_asset_list`
@@ -1433,6 +1445,23 @@ Often optional in successful replay runs:
 - full `sec-ch-ua*`
 
 > Note: anti-bot behavior is dynamic; keep an easy switch to add full browser-like headers when needed.
+
+## Runtime response contracts
+
+All new Jimeng/CapCut provider integrations should decode external JSON at the boundary with runtime schemas before normalizing. The schemas should be permissive to extra fields because the frontend payloads are broad and provider-owned, but strict for the paths this repo relies on.
+
+Current helper:
+
+```txt
+packages/jimeng-client/src/schema.ts
+```
+
+Current schema-backed commands:
+
+- `jimeng-browser-proxy history-queue`
+- `jimeng-browser-proxy history-records`
+
+Expected drift behavior: additive fields should continue working, while missing or incompatible envelope/data/record paths should fail with explicit `JIMENG_RESPONSE_ENVELOPE_CHANGED`, `JIMENG_RESPONSE_DATA_MAP_CHANGED`, or `JIMENG_RESPONSE_CONTRACT_CHANGED` errors.
 
 ---
 

@@ -24,7 +24,7 @@ Use the browser as an authenticated session holder and API discovery surface. Mo
 | `/mweb/v1/workspace/update` | POST | Renames/updates current workspace metadata. | Captured |
 | `/mweb/v1/aigc_draft/generate` | POST | Unified workbench submit for current text-to-image, text-to-video, first-frame image-to-video, and lip-sync draft generation paths. | Implemented for workbench text-to-image, text-to-video templates, and local-upload-backed image-to-video; dry-run-proved for VOD and image/avatar lip-sync provider inputs |
 | `/mweb/v1/get_asset_list` | POST | Poll/list workspace assets and completed image results. | Implemented for workbench text-to-image polling and no-spend `assets` listing |
-| `/mweb/v1/get_history_by_ids` | POST | Older/general task polling by `submit_id`. | Implemented for captured history-based templates |
+| `/mweb/v1/get_history_by_ids` | POST | Older/general task polling and completed record lookup by `submit_id` or `history_id`. | Implemented for captured history-based templates and no-spend `history-records`; live-proved against the completed K-beauty image generation |
 | `/mweb/v1/get_history_queue_info` | POST | Read-only queue/progress detail lookup for active or historical generation records. | Implemented as no-spend `history-queue`; live-proved against a completed image history id |
 | `/mweb/v1/creation_agent/v2/conversation` | POST/SSE | Older agent text-to-image conversation submit. | Preserved |
 | `/mweb/v1/creation_agent/v2/get_agent_config` | POST | Agent/tool configuration payload. | Cataloged only |
@@ -91,6 +91,18 @@ data/jimeng-lab/voice-library-samples/
 ```
 
 The latest full voice sample run generated `142/142` MP3 files with concurrency `1` and no `1019` / `shark not pass` risk-control errors.
+
+## Runtime Schema Validation
+
+Provider JSON is not treated as trusted just because TypeScript interfaces compile. New direct-client endpoints should decode raw JSON at the boundary with permissive runtime schemas: keep `.passthrough()` or equivalent behavior for additive provider fields, but enforce the envelope and nested paths used by normalization or downstream pipelines.
+
+Current shared helper:
+
+```txt
+packages/jimeng-client/src/schema.ts
+```
+
+The first schema-backed endpoints are `history-queue` and `history-records`. If Jimeng changes `ret`/`errmsg`/`data` or the relied-on record/media paths, the CLI should fail with an explicit `JIMENG_RESPONSE_*_CHANGED` error instead of silently normalizing stale shapes.
 
 Custom voice clone CLI coverage:
 

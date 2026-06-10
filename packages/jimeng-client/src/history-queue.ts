@@ -1,10 +1,63 @@
 import { createHash } from "node:crypto"
+import { z } from "zod"
 import { type JimengSessionBundle } from "./capture"
 import { assertNoRiskError, JimengClient } from "./client"
 import { jimengError } from "./errors"
 import { type JsonObject, type JsonValue } from "./reference-image"
+import { parseJimengApiEnvelope, parseJimengContract, parseJimengDataMap, parseJsonText } from "./schema"
 
 const DEFAULT_QUERY = "aid=513695&device_platform=web&region=cn&da_version=3.1.3"
+const OptionalString = z.string().nullable().optional()
+const OptionalNumber = z.number().nullable().optional()
+
+const QueueInfoWireSchema = z.object({
+  queue_idx: OptionalNumber,
+  queueIdx: OptionalNumber,
+  priority: OptionalNumber,
+  queue_status: OptionalNumber,
+  queueStatus: OptionalNumber,
+  queue_length: OptionalNumber,
+  queueLength: OptionalNumber,
+  polling_config: z.object({
+    interval_seconds: OptionalNumber,
+    timeout_seconds: OptionalNumber,
+  }).passthrough().nullable().optional(),
+  pollingConfig: z.object({
+    intervalSeconds: OptionalNumber,
+    timeoutSeconds: OptionalNumber,
+  }).passthrough().nullable().optional(),
+  priority_queue_display_threshold: z.object({
+    vip_queuing_time_threshold: OptionalNumber,
+    waiting_time_threshold: OptionalNumber,
+  }).passthrough().nullable().optional(),
+  priorityQueueDisplayThreshold: z.object({
+    vipQueuingTimeThreshold: OptionalNumber,
+    waitingTimeThreshold: OptionalNumber,
+  }).passthrough().nullable().optional(),
+  debug_info: OptionalString,
+  debugInfo: OptionalString,
+}).passthrough()
+
+const ForecastCostTimeWireSchema = z.object({
+  forecast_generate_cost: OptionalNumber,
+  forecastGenerateCost: OptionalNumber,
+  forecast_queue_cost: OptionalNumber,
+  forecastQueueCost: OptionalNumber,
+}).passthrough()
+
+const HistoryQueueEntryWireSchema = z.object({
+  status: OptionalNumber,
+  fail_code: z.union([z.string(), z.number()]).nullable().optional(),
+  failCode: z.union([z.string(), z.number()]).nullable().optional(),
+  fail_msg: OptionalString,
+  failMsg: OptionalString,
+  queue_info: QueueInfoWireSchema.nullable().optional(),
+  queueInfo: QueueInfoWireSchema.nullable().optional(),
+  forecast_cost_time: ForecastCostTimeWireSchema.nullable().optional(),
+  forecastCostTime: ForecastCostTimeWireSchema.nullable().optional(),
+}).passthrough()
+
+const HistoryQueueDataMapSchema = z.record(z.string(), HistoryQueueEntryWireSchema)
 
 export interface JimengHistoryQueueInfoQuery {
   historyIds: string[]
@@ -66,7 +119,7 @@ export async function fetchJimengHistoryQueueInfo(input: {
     headers: buildHistoryQueueHeaders(input.session),
     body: JSON.stringify(request),
   })
-  const body = safeJson(response.text)
+  const body = parseJsonText(response.text, "history queue info")
   assertNoRiskError(body, response.text)
   assertJimengSuccess(body, "history queue info")
 
@@ -83,10 +136,9 @@ export async function fetchJimengHistoryQueueInfo(input: {
 }
 
 export function parseJimengHistoryQueueInfoBody(body: JsonValue): JimengHistoryQueueInfoEntry[] {
-  const data = asRecord(asRecord(body)?.data)
-  if (!data) return []
+  const data = parseJimengContract(HistoryQueueDataMapSchema, parseJimengDataMap(body, "history queue info"), "history queue info")
   return Object.entries(data)
-    .map(([historyId, value]) => parseHistoryQueueEntry(historyId, value))
+    .map(([historyId, value]) => parseHistoryQueueEntry(historyId, value as JsonValue))
     .filter((entry): entry is JimengHistoryQueueInfoEntry => !!entry)
 }
 
@@ -216,14 +268,15 @@ function buildHistoryQueueHeaders(session: JimengSessionBundle): Record<string, 
 }
 
 function assertJimengSuccess(body: JsonValue, operation: string): void {
-  const ret = retValue(body)
+  const envelope = parseJimengApiEnvelope(body, operation)
+  const ret = envelope.ret ?? null
   if (ret === "0" || ret === 0) return
   throw jimengError({
     category: "upstream",
     code: "JIMENG_API_REJECTED",
-    message: `${operation} failed (ret=${String(ret ?? "unknown")}, errmsg=${errmsgValue(body) ?? "unknown"})`,
+    message: `${operation} failed (ret=${String(ret ?? "missing")}, errmsg=${errmsgValue(body) ?? "missing"})`,
     retryable: false,
-    details: { ret, errmsg: errmsgValue(body) },
+    details: { ret, errmsg: envelope.errmsg ?? null },
   })
 }
 
@@ -240,14 +293,6 @@ function retValue(body: JsonValue): string | number | null {
 
 function errmsgValue(body: JsonValue): string | null {
   return stringValue(asRecord(body)?.errmsg)
-}
-
-function safeJson(value: string): JsonValue {
-  try {
-    return JSON.parse(value) as JsonValue
-  } catch {
-    return value
-  }
 }
 
 function asRecord(value: JsonValue | undefined): JsonObject | null {

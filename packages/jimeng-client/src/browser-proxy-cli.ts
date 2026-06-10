@@ -56,6 +56,12 @@ import {
   summarizeJimengHistoryQueueInfo,
 } from "./history-queue"
 import {
+  buildJimengHistoryRecordsRequest,
+  fetchJimengHistoryRecords,
+  parseJimengIdCsvFlag,
+  summarizeJimengHistoryRecords,
+} from "./history-records"
+import {
   buildJimengControlNetSaveParams,
   defaultControlNetPreviewBabiParam,
   defaultPoseDetectBabiParam,
@@ -137,6 +143,7 @@ Commands:
   sample-voices Generate sequential MP3 samples for voices from the built-in library
   assets        Fetch workspace/workbench asset history without generation spend
   history-queue Fetch read-only queue/progress details for one or more history ids
+  history-records Fetch read-only completed/history records by submit id or history id
   templates     Fetch no-spend Explore/template examples for prompt/template mining
   short-videos  Fetch no-spend Explore short videos for reference/profile mining
   overseas-short-videos Fetch no-spend feed_short_video examples for overseas/reference mining
@@ -184,8 +191,10 @@ Options:
   --offset <n>                  Explore offset (default: 0)
   --asset-types <csv>           Assets types for get_asset_list (default: 1,2,5,6,7,8,9,10,12)
   --asset-mode <value>          Assets mode for get_asset_list (default: workbench)
+  --submitId <id>               Submit id for history-records
+  --submitIds <csv>             Submit ids for history-records
   --historyId <id>              History id for history-queue
-  --historyIds <csv>            History ids for history-queue
+  --historyIds <csv>            History ids for history-queue/history-records
   --direction <n>               Assets list direction (default: 1)
   --order-by <n>                Assets list order_by option (default: 0)
   --endTimeStamp <n>            Assets pagination timestamp/cursor (default: 0)
@@ -271,6 +280,11 @@ Examples:
     --session data/jimeng-lab/raw/session-bundle-current.json \\
     --historyId 39148697060354 \\
     --outDir data/jimeng-lab/cli-history-queue-smoke
+
+  jimeng-browser-proxy history-records \\
+    --session data/jimeng-lab/raw/session-bundle-current.json \\
+    --submitId a6bbee65-bed0-4e5b-aaf1-5ab466137b82 \\
+    --outDir data/jimeng-lab/cli-history-records-smoke
 
   jimeng-browser-proxy lip-sync-config \\
     --outDir data/jimeng-lab/cli-lip-sync-config-smoke
@@ -400,6 +414,7 @@ interface CliArgs {
     | "sample-voices"
     | "assets"
     | "history-queue"
+    | "history-records"
     | "templates"
     | "short-videos"
     | "overseas-short-videos"
@@ -445,6 +460,8 @@ interface CliArgs {
   offset?: number
   assetTypes?: number[]
   assetMode?: string
+  submitId?: string
+  submitIds?: string[]
   historyId?: string
   historyIds?: string[]
   direction?: number
@@ -970,6 +987,55 @@ async function main(argv: string[]): Promise<void> {
       summary: summarizeJimengHistoryQueueInfo(result),
     })
     console.log(`[jimeng-browser-proxy] history-queue saved count=${result.entries.length} statuses=${result.entries.map((entry) => `${entry.historyId}:${entry.queueInfo?.queueStatus ?? "none"}`).join(",")}`)
+    return
+  }
+
+  if (args.command === "history-records") {
+    const submitIds = args.submitIds ?? (args.submitId ? [args.submitId] : [])
+    const historyIds = args.historyIds ?? (args.historyId ? [args.historyId] : [])
+    if (submitIds.length === 0 && historyIds.length === 0) {
+      throw new Error("history-records requires --submitId, --submitIds, --historyId, or --historyIds")
+    }
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const query = { submitIds, historyIds }
+    const request = buildJimengHistoryRecordsRequest(query)
+    const runId = `history-records-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    if (args.dryRun) {
+      writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
+        command: args.command,
+        endpoint: "/mweb/v1/get_history_by_ids",
+        request,
+        browser_session: redactSession(session),
+      })
+      writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+        command: args.command,
+        endpoint: "/mweb/v1/get_history_by_ids",
+        request,
+      })
+      console.log(`[jimeng-browser-proxy] history-records dry run saved`)
+      return
+    }
+
+    const result = await fetchJimengHistoryRecords({ session, query })
+    writeJson(path.join(dirs.rawDir, `${runId}.json`), {
+      http_status: result.httpStatus,
+      ret: result.ret,
+      errmsg: result.errmsg,
+      response_text_sha256: result.responseTextSha256,
+      request: result.request,
+      body: result.body,
+    })
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      endpoint: result.endpoint,
+      http_status: result.httpStatus,
+      ret: result.ret,
+      errmsg: result.errmsg,
+      response_text_sha256: result.responseTextSha256,
+      request: result.request,
+      summary: summarizeJimengHistoryRecords(result),
+    })
+    console.log(`[jimeng-browser-proxy] history-records saved count=${result.records.length} statuses=${result.records.map((record) => `${record.lookupKey}:${record.status ?? "none"}`).join(",")}`)
     return
   }
 
@@ -2327,6 +2393,7 @@ function parseArgs(argv: string[]): CliArgs {
     && command !== "sample-voices"
     && command !== "assets"
     && command !== "history-queue"
+    && command !== "history-records"
     && command !== "templates"
     && command !== "short-videos"
     && command !== "overseas-short-videos"
@@ -2371,6 +2438,7 @@ function parseArgs(argv: string[]): CliArgs {
   const cursor = flags.cursor ? Number(flags.cursor) : undefined
   const categoryId = flags["category-id"] ? Number(flags["category-id"]) : undefined
   const assetTypes = parseJimengAssetTypes(flags["asset-types"])
+  const submitIds = parseJimengIdCsvFlag(flags.submitIds)
   const historyIds = parseJimengHistoryIdsFlag(flags.historyIds)
   const direction = flags.direction ? Number(flags.direction) : undefined
   const orderBy = flags["order-by"] ? Number(flags["order-by"]) : undefined
@@ -2455,6 +2523,8 @@ function parseArgs(argv: string[]): CliArgs {
     offset,
     assetTypes,
     assetMode: flags["asset-mode"],
+    submitId: flags.submitId,
+    submitIds,
     historyId: flags.historyId,
     historyIds,
     direction,
