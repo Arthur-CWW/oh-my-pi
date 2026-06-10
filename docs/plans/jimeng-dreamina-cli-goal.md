@@ -34,6 +34,15 @@ As of 2026-06-10, the committed Jimeng CLI baseline is:
 - `44dd492 Add Jimeng feed short video CLI`
 - `aa0eafb Add CapCut template metadata CLI`
 - `c7b55b1 Add Jimeng lip sync config CLI`
+- `4936bc7 Add Jimeng lip sync image planning`
+
+Active uncommitted continuation:
+
+- Subject/persona creation has been frontend-captured from the asset library `主体 -> 创建主体` modal.
+- Confirmed create endpoint: `POST /mweb/v1/dreamina_subject/create`.
+- Confirmed payload shape: `content.name`, `content.description`, `content.main_image.{width,height,image_uri,image_url}`, and `workspace_id`.
+- Confirmed required UI nuance: local image upload must go through the real file chooser path or equivalent background CDP/CuaDriver event path so React attaches the uploaded image into modal state; direct hidden-file-input mutation left Save disabled.
+- Next implementation slice is a typed `subject-create` CLI with dry-run/live paths, redaction-safe proof summaries, tests, and docs.
 
 ImageX local image upload is now committed and live-proved:
 
@@ -239,6 +248,9 @@ Maximize useful API coverage and proof quality while keeping live submissions co
 
 - generation submission concurrency is `1` for now
 - polling, downloads, passive capture, and local processing can run in the background when safe
+- default to background automation; do not foreground Arthur's browser, steal focus, or use visible UI automation while Arthur is using the machine unless he explicitly asks
+- prefer direct Jimeng APIs, saved sessions, CDP network/DOM calls, CuaDriver/background browser-use, and other non-interruptive automation paths over `bringToFront`, visible tab clicks, or Computer Use interactions that move the active cursor/window
+- if a frontend-only Jimeng flow truly requires visible UI interaction, first try to reproduce it through background CDP or CuaDriver; if that still cannot work, record the blocked path and ask before interrupting Arthur's flow
 - live generation prompts should be Chinese and in-distribution for the UGC use case
 - test/proof prompts should generate actually useful Korean-beauty, UGC ad, persona, TikTok-profile, reference-upload, or campaign assets, not toy demos
 - map the product's actual account/UI limits and encode them in docs/code
