@@ -31,6 +31,11 @@ describe("Jimeng discovery worklist", () => {
           `fetch("/mweb/v1/video_generate/face_auth/skip/query")`,
           `fetch("/mweb/v1/aigc_draft/cancel_generate")`,
           `fetch("/mweb/v1/aigc_draft/generate_accelerate")`,
+          `fetch("/lv/v1/editor/image/ai_model/submit_task")`,
+          `fetch("/lv/v1/editor/image/ai_model/batch_get_results")`,
+          `fetch("/lv/v1/editor/image/gen_background")`,
+          `fetch("/lv/v1/editor/image/saliency_seg")`,
+          `fetch("/api/biz/v1/image/entity_seg")`,
         ].join("\n"),
         "utf8",
       )
@@ -83,6 +88,21 @@ describe("Jimeng discovery worklist", () => {
       const generateAccelerate = worklist.items.find((item) => item.endpoint === "/mweb/v1/aigc_draft/generate_accelerate")
       expect(generateAccelerate?.known_status).toBe("blocked")
       expect(generateAccelerate?.reason).toContain("may spend quota")
+      const lvAiSubmit = worklist.items.find((item) => item.endpoint === "/lv/v1/editor/image/ai_model/submit_task")
+      expect(lvAiSubmit?.known_status).toBe("blocked")
+      expect(lvAiSubmit?.reason).toContain("task submit")
+      const lvAiResults = worklist.items.find((item) => item.endpoint === "/lv/v1/editor/image/ai_model/batch_get_results")
+      expect(lvAiResults?.known_status).toBe("blocked")
+      expect(lvAiResults?.reason).toContain("depends on task ids")
+      const lvBackground = worklist.items.find((item) => item.endpoint === "/lv/v1/editor/image/gen_background")
+      expect(lvBackground?.known_status).toBe("blocked")
+      expect(lvBackground?.reason).toContain("AI background generation")
+      const lvSaliency = worklist.items.find((item) => item.endpoint === "/lv/v1/editor/image/saliency_seg")
+      expect(lvSaliency?.known_status).toBe("blocked")
+      expect(lvSaliency?.reason).toContain("distinct from implemented Jimeng")
+      const entitySeg = worklist.items.find((item) => item.endpoint === "/api/biz/v1/image/entity_seg")
+      expect(entitySeg?.known_status).toBe("blocked")
+      expect(entitySeg?.reason).toContain("auto-selection")
       expect(worklist.items.find((item) => item.endpoint === "/mweb/v1/aigc_draft/generate")?.recommended_action).toBe("compare_dry_run_before_live")
       expect(worklist.items.find((item) => item.endpoint === "/mweb/v1/dreamina_subject/generate_voice")?.recommended_action).toBe("approval_or_disposable_fixture")
       expect(worklist.probe_variant_exports).toHaveLength(1)

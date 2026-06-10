@@ -2074,11 +2074,32 @@ blocked_video_generate_helpers:
   /mweb/v1/aigc_draft/generate_accelerate -> capture_exact_payload
 ```
 
+After classifying LV editor image helper endpoints:
+
+```txt
+resources=247
+included=200
+skipped_implemented=29
+high_value_gaps=61
+known_status_counts=unknown:183,partial:4,implemented:29,dry_run_only:4,blocked:24,captured_only:2,cataloged_only:1
+blocked_lv_editor_image_helpers:
+  /lv/v1/editor/image/ai_model/submit_task -> capture_exact_payload
+  /lv/v1/editor/image/ai_model/batch_get_results -> capture_exact_payload
+  /lv/v1/editor/image/ai_model/materials -> capture_exact_payload
+  /lv/v1/editor/image/ai_model/create_cloth_mask -> capture_exact_payload
+  /lv/v1/editor/image/batch_get_url -> capture_exact_payload
+  /lv/v1/editor/image/embed_resource -> capture_exact_payload
+  /lv/v1/editor/image/gen_background -> capture_exact_payload
+  /lv/v1/editor/image/interactive_matting -> capture_exact_payload
+  /lv/v1/editor/image/saliency_seg -> capture_exact_payload
+  /api/biz/v1/image/entity_seg -> capture_exact_payload
+```
+
 Normalized proof:
 
 ```txt
-data/jimeng-lab/proof-20260610-static-inventory/normalized/static-inventory-20260610080520-summary.json
-data/jimeng-lab/proof-20260610-static-inventory/normalized/static-inventory-20260610080520-summary.md
+data/jimeng-lab/proof-20260610-static-inventory/normalized/static-inventory-20260610081244-summary.json
+data/jimeng-lab/proof-20260610-static-inventory/normalized/static-inventory-20260610081244-summary.md
 ```
 
 Video helper proof:
@@ -2099,6 +2120,25 @@ bun packages/jimeng-client/src/browser-proxy-cli.ts endpoint-probe \
 ```txt
 static-locate-video-generate-helpers: 5 endpoints, 6 occurrences, no credential markers in normalized output
 switch-model-queue-probe: 4 variants, all ret=1000, errmsg=invalid parameter
+```
+
+LV editor image helper proof:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts static-locate \
+  --staticRoot data/jimeng-lab/js-sweep/files,packages/jimeng-client/src \
+  --endpoint /lv/v1/editor/image/ai_model/submit_task,/lv/v1/editor/image/ai_model/batch_get_results,/lv/v1/editor/image/batch_get_url,/lv/v1/editor/image/ai_model/materials,/lv/v1/editor/image/embed_resource,/lv/v1/editor/image/gen_background,/lv/v1/editor/image/interactive_matting,/lv/v1/editor/image/saliency_seg,/lv/v1/editor/image/ai_model/create_cloth_mask \
+  --outDir data/jimeng-lab/proof-20260610-static-locate-lv-editor-image-helpers
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts static-locate \
+  --staticRoot data/jimeng-lab/js-sweep/files,packages/jimeng-client/src \
+  --endpoint /api/biz/v1/image/entity_seg \
+  --outDir data/jimeng-lab/proof-20260610-static-locate-lv-editor-image-entity-seg
+```
+
+```txt
+static-locate-lv-editor-image-helpers: 9 endpoints, 9 occurrences, no credential markers in normalized output
+static-locate-lv-editor-image-entity-seg: 1 endpoint, 1 occurrence, no credential markers in normalized output
 ```
 
 Leak check:

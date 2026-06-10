@@ -31,6 +31,16 @@ describe("Jimeng static inventory", () => {
           `const faceAuthSkipQueryBlocked = "/mweb/v1/video_generate/face_auth/skip/query";`,
           `const cancelGenerateBlocked = "/mweb/v1/aigc_draft/cancel_generate";`,
           `const generateAccelerateBlocked = "/mweb/v1/aigc_draft/generate_accelerate";`,
+          `const lvAiSubmitBlocked = "/lv/v1/editor/image/ai_model/submit_task";`,
+          `const lvAiResultsBlocked = "/lv/v1/editor/image/ai_model/batch_get_results";`,
+          `const lvAiMaterialsBlocked = "/lv/v1/editor/image/ai_model/materials";`,
+          `const lvAiClothMaskBlocked = "/lv/v1/editor/image/ai_model/create_cloth_mask";`,
+          `const lvBatchUrlBlocked = "/lv/v1/editor/image/batch_get_url";`,
+          `const lvEmbedResourceBlocked = "/lv/v1/editor/image/embed_resource";`,
+          `const lvGenBackgroundBlocked = "/lv/v1/editor/image/gen_background";`,
+          `const lvInteractiveMattingBlocked = "/lv/v1/editor/image/interactive_matting";`,
+          `const lvSaliencyBlocked = "/lv/v1/editor/image/saliency_seg";`,
+          `const lvEntitySegBlocked = "/api/biz/v1/image/entity_seg";`,
           `const unknownRead = "https://jimeng.jianying.com/mweb/v1/template/search?token=secret";`,
           `const unknownGenerate = "/mweb/v1/avatar/generate";`,
           `const capcutCatalog = "https://lf16-beecdn.ibytedtos.com/obj/ies-fe-bee-sg/bee_prod/biz_49/bee_prod_49_bee_publish_709.json?x-signature=secret";`,
@@ -45,7 +55,7 @@ describe("Jimeng static inventory", () => {
       const summary = summarizeJimengStaticInventory(result)
       const markdown = writeJimengStaticInventoryMarkdown(result)
 
-      expect(result.totalResourceCount).toBe(19)
+      expect(result.totalResourceCount).toBe(29)
       expect(result.skippedImplementedCount).toBe(2)
       expect(result.items.map((item) => item.resource)).not.toContain("/mweb/v1/get_history_by_ids")
       expect(result.items.find((item) => item.resource === "/mweb/v1/dreamina_subject/generate_voice")?.recommendedAction).toBe("approval_or_disposable_fixture")
@@ -66,6 +76,16 @@ describe("Jimeng static inventory", () => {
       expect(result.items.find((item) => item.resource === "/mweb/v1/video_generate/face_auth/skip/query")?.knownStatus).toBe("blocked")
       expect(result.items.find((item) => item.resource === "/mweb/v1/aigc_draft/cancel_generate")?.knownStatus).toBe("blocked")
       expect(result.items.find((item) => item.resource === "/mweb/v1/aigc_draft/generate_accelerate")?.knownStatus).toBe("blocked")
+      expect(result.items.find((item) => item.resource === "/lv/v1/editor/image/ai_model/submit_task")?.knownStatus).toBe("blocked")
+      expect(result.items.find((item) => item.resource === "/lv/v1/editor/image/ai_model/batch_get_results")?.knownStatus).toBe("blocked")
+      expect(result.items.find((item) => item.resource === "/lv/v1/editor/image/ai_model/materials")?.knownStatus).toBe("blocked")
+      expect(result.items.find((item) => item.resource === "/lv/v1/editor/image/ai_model/create_cloth_mask")?.knownStatus).toBe("blocked")
+      expect(result.items.find((item) => item.resource === "/lv/v1/editor/image/batch_get_url")?.knownStatus).toBe("blocked")
+      expect(result.items.find((item) => item.resource === "/lv/v1/editor/image/embed_resource")?.knownStatus).toBe("blocked")
+      expect(result.items.find((item) => item.resource === "/lv/v1/editor/image/gen_background")?.knownStatus).toBe("blocked")
+      expect(result.items.find((item) => item.resource === "/lv/v1/editor/image/interactive_matting")?.knownStatus).toBe("blocked")
+      expect(result.items.find((item) => item.resource === "/lv/v1/editor/image/saliency_seg")?.knownStatus).toBe("blocked")
+      expect(result.items.find((item) => item.resource === "/api/biz/v1/image/entity_seg")?.knownStatus).toBe("blocked")
       expect(result.items.find((item) => item.resource === "/mweb/v1/template/search")?.recommendedAction).toBe("probe_read_endpoint")
       expect(result.items.find((item) => item.resource === "/mweb/v1/avatar/generate")?.riskClass).toBe("generate")
       expect(JSON.stringify(summary)).not.toContain("x-signature=secret")

@@ -1350,6 +1350,7 @@ The 2026-06-09 JS bundle sweep found these useful endpoint groups. Treat rows wi
 | Video generation helpers | `/mweb/v1/video_generate/get_switch_model_queue_info`, `/mweb/v1/video_generate/pre_process`, `/mweb/v1/video_generate/mget_pre_process_result`, `/mweb/v1/video_generate/face_auth/skip`, `/mweb/v1/video_generate/face_auth/skip/query`, `/mweb/v1/aigc_draft/cancel_generate`, `/mweb/v1/aigc_draft/generate_accelerate`; these are blocked pending exact UI payload capture or disposable active-job context. Safe switch-model queue probes returned `ret=1000 invalid parameter` across empty/model/scene bodies. |
 | Template/research mining | `/mweb/v1/feed`, `/mweb/v1/feed_short_video`, `/lv/v1/cc_web/plane/get_categories`, public CapCut `bee_prod` metadata JSON, `/lv/v1/cc_web/replicate/search_templates`, `/lv/v1/cc_web/plane/*`; `/mweb/v1/get_explore` is implemented for direct Explore templates and short-video examples, `/mweb/v1/feed_short_video` is implemented as `overseas-short-videos`, CapCut category catalog is implemented as `capcut-categories`, CapCut collection/row/detail browsing is implemented as `capcut-collections`, `capcut-collection-templates`, and `capcut-template-detail`, and public CapCut ratio/scene metadata is implemented as `capcut-template-metadata`; CapCut search, batch, and preset endpoints remain capture targets |
 | Assets/upload/editor | `/mweb/v1/get_asset_list`, `/lv/v1/asset/*`, `/lv/v1/editor/image/*`; Jimeng workbench/history listing is implemented as no-spend `assets`, while LV/CapCut asset/editor paths remain capture targets |
+| LV editor image AI helpers | `/lv/v1/editor/image/ai_model/submit_task`, `/lv/v1/editor/image/ai_model/batch_get_results`, `/lv/v1/editor/image/ai_model/materials`, `/lv/v1/editor/image/ai_model/create_cloth_mask`, `/lv/v1/editor/image/batch_get_url`, `/lv/v1/editor/image/embed_resource`, `/lv/v1/editor/image/gen_background`, `/lv/v1/editor/image/interactive_matting`, `/lv/v1/editor/image/saliency_seg`, `/api/biz/v1/image/entity_seg`; all are marked blocked until an exact editor UI payload is captured. LV `saliency_seg` is separate from implemented Jimeng `/mweb/v1/saliency_seg`. |
 | Audio/video utility | `/mweb/v1/mix_audio_video`, `/mweb/v1/mix_audio_videos`, `/lv/v2/intelligence/tts/curl_sync_everphoto` |
 
 The scan artifacts stay local-only under ignored:
@@ -1545,14 +1546,16 @@ Latest proof found:
 
 ```txt
 total_resources=247
-included_non_implemented=120
-high_value_gaps=64
-top_gaps=subject generate_voice, voice clone submit/update/delete, aigc_draft generate capture/compare, CapCut template search/batch/preset payloads
+included_non_implemented=200
+high_value_gaps=61
+known_status_counts=unknown:183,partial:4,implemented:29,dry_run_only:4,blocked:24,captured_only:2,cataloged_only:1
+top_gaps=subject generate_voice, voice clone submit/update/delete, aigc_draft generate capture/compare, LV asset/editor read probes, CapCut template search/batch/preset payloads
 ```
 
 The inventory/worklist now distinguishes endpoints that were safely probed but did not return useful data:
 
 - `/mweb/v1/get_history`: `ret=0` but empty `records_list` for plain, frontend-derived, and explicit `workspace_id=14199856180236` variants. Keep using `assets`, `history-records`, and `history-queue`; promote only after a non-empty UI capture proves the request scope.
+- Ten LV editor image helper endpoints are marked `blocked` until exact editor payloads are captured: AI task submit/result/material/cloth-mask helpers, URL/embed-resource helpers, background generation, interactive matting, LV cutout, and `/api/biz/v1/image/entity_seg`.
 - `/lv/v1/cc_web/replicate/get_search_words`: signed no-spend probes returned `ret=0` but only `data.region`, not keyword rows. Keep it blocked until a UI call returns usable search-word payloads.
 
 Capture one flow at a time:

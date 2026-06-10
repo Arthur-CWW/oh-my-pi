@@ -51,7 +51,7 @@ As of 2026-06-10, the committed Jimeng CLI baseline is:
 - `302e088 Document CapCut template method contracts`
 - `8c3dd42 Add signed CapCut endpoint probe`
 - `4d117a2 Recheck Jimeng live generation`
-- current checkpoint: `Classify Jimeng video helper blockers`
+- current checkpoint: `Classify LV editor image helper blockers`
 
 If the thread goal object lags behind this file after a pause, resume from this document and the latest Git checkpoint. The active working rule is: background-only reversal, direct/API-first implementation, small proven CLI slices, tests and proof artifacts before each commit, and no async daemon until the API surface is settled.
 
@@ -431,7 +431,7 @@ Static API inventory is now available as the systematic coverage map:
 - default output skips fully implemented endpoints so it stays focused on gaps; `--includeKnown` produces an audit inventory
 - proof bundle: `data/jimeng-lab/proof-20260610-static-inventory/`
 - latest proof scanned `data/jimeng-lab/js-sweep/files` plus `packages/jimeng-client/src`, found 247 resources, included 200 non-implemented items, skipped 29 implemented endpoints, and counted 61 high-value gaps after the CapCut collection/row/detail commands were promoted
-- known status counts are now `unknown=193`, `partial=4`, `implemented=29`, `dry_run_only=4`, `blocked=14`, `captured_only=2`, and `cataloged_only=1`; the five CapCut search/batch/preset-related endpoints above are blocked with exact replay evidence and recommended action `capture_exact_payload`
+- known status counts are now `unknown=183`, `partial=4`, `implemented=29`, `dry_run_only=4`, `blocked=24`, `captured_only=2`, and `cataloged_only=1`; the five CapCut search/batch/preset-related endpoints above are blocked with exact replay evidence and recommended action `capture_exact_payload`
 - seven video-generation helper endpoints are also now explicitly blocked/capture-needed instead of generic unknowns:
   - `/mweb/v1/video_generate/get_switch_model_queue_info`: safe no-spend probes with empty, `model_req_key`, `model_req_keys`, and scene bodies returned `ret=1000 invalid parameter`
   - `/mweb/v1/video_generate/pre_process` and `/mweb/v1/video_generate/mget_pre_process_result`: frontend task submit/result pair; capture exact UI payload and task ids before promotion
@@ -439,6 +439,18 @@ Static API inventory is now available as the systematic coverage map:
   - `/mweb/v1/aigc_draft/cancel_generate`: mutates an in-flight provider job; use only with an active disposable job or exact UI capture
   - `/mweb/v1/aigc_draft/generate_accelerate`: may spend quota or alter queue priority; require exact UI capture and explicit approval before live replay
 - proof bundles: `data/jimeng-lab/proof-20260610-static-locate-video-generate-helpers/`, `data/jimeng-lab/proof-20260610-switch-model-queue-probe/`, and refreshed `data/jimeng-lab/proof-20260610-static-inventory/`
+- ten CapCut/LV editor image helper endpoints are now explicitly blocked/capture-needed instead of generic unknowns:
+  - `/lv/v1/editor/image/ai_model/submit_task`: image AI model task submit; capture exact UI payload and approval context before live replay
+  - `/lv/v1/editor/image/ai_model/batch_get_results`: result lookup depends on task ids from `ai_model/submit_task`
+  - `/lv/v1/editor/image/ai_model/materials`: needs exact model/material UI context
+  - `/lv/v1/editor/image/ai_model/create_cloth_mask`: cloth-mask task endpoint may create provider-side task state
+  - `/lv/v1/editor/image/batch_get_url`: needs exact resource id/URI list and auth context
+  - `/lv/v1/editor/image/embed_resource`: needs exact source resource payload
+  - `/lv/v1/editor/image/gen_background`: AI background generation; capture exact UI payload and approval context
+  - `/lv/v1/editor/image/interactive_matting`: needs exact brush/image payload
+  - `/lv/v1/editor/image/saliency_seg`: distinct from implemented Jimeng `/mweb/v1/saliency_seg`; capture exact LV editor payload
+  - `/api/biz/v1/image/entity_seg`: auto-selection entity segmentation; capture exact editor UI payload
+- proof bundles: `data/jimeng-lab/proof-20260610-static-locate-lv-editor-image-helpers/`, `data/jimeng-lab/proof-20260610-static-locate-lv-editor-image-entity-seg/`, and refreshed `data/jimeng-lab/proof-20260610-static-inventory/`
 - `/mweb/v1/get_history` is now marked `blocked` in the worklist/inventory: safe direct probes with plain, frontend-derived, and explicit `workspace_id=14199856180236` bodies all returned `ret=0` and empty `records_list`; use `assets`, `history-records`, and `history-queue` until a non-empty UI capture proves a useful list contract
 - normalized proof files contain no credential markers
 
