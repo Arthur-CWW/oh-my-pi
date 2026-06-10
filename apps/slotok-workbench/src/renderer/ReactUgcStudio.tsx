@@ -71,6 +71,7 @@ import {
 import { cn } from "./lib/cn"
 import { ugcStudioWorkspace, type BranchSnapshot, type CandidateStatus, type CreativeCandidate, type JsonValue, type PersonaProfile, type ReferenceProfile, type ReviewVerdict, type UgcStudioWorkspace } from "./ugcStudioModel"
 import { createInitialLocalState, referenceProfileToArchive, type ReferenceArchiveFormatOutput, type UgcExportManifest, type UgcLocalState, type UgcProviderJob, type UgcProviderJobStatus, type UgcReferenceArchive } from "../ugc/local-state"
+import { deriveUgcDeveloperGraph, type DerivedGraphFamily } from "../ugc/developer-graph"
 
 type ReactView = "atlas" | "explore" | "review" | "campaign" | "reference" | "editor" | "graph" | "provider"
 type KieOperation = "image-text" | "image-to-image" | "video-text" | "image-to-video" | "reference-to-video" | "avatar" | "omni-video"
@@ -1899,20 +1900,72 @@ function ReferenceFormatOutputCard(props: { output: ReferenceArchiveFormatOutput
 }
 
 function DeveloperGraphView(props: { onMutateLocal: (path: string, body: object) => void }) {
-  const { workspace, providerJobs } = useUgcLocalState()
+  const localState = useUgcLocalState()
+  const { workspace, providerJobs, exportManifests, researchTargets, templateMiningJobs } = localState
+  const derivedGraph = React.useMemo(() => deriveUgcDeveloperGraph(localState), [localState])
+  const [selectedNodeId, setSelectedNodeId] = React.useState(derivedGraph.nodes[0]?.id ?? "")
+  const selectedNode = derivedGraph.nodes.find((node) => node.id === selectedNodeId) ?? derivedGraph.nodes[0]
+  const families: DerivedGraphFamily[] = ["brief", "persona", "reference", "branch", "candidate", "provider-job", "export", "research", "template"]
+
+  React.useEffect(() => {
+    if (!derivedGraph.nodes.some((node) => node.id === selectedNodeId)) {
+      setSelectedNodeId(derivedGraph.nodes[0]?.id ?? "")
+    }
+  }, [derivedGraph.nodes, selectedNodeId])
+
   return (
-    <div className="rugc-provider">
+    <div className="rugc-provider rugc-dev-graph">
       <section>
         <Network size={32} />
-        <h2>{workspace.developerGraph.title}</h2>
-        <p>Developer view keeps the ComfyUI-like pipeline inspectable without making it the default creative surface.</p>
-        <div className="rugc-provider-note">
-          <strong>Provider jobs</strong>
-          <p>{providerJobs.length} local job records. KIE/Jimeng calls should land here before or after live provider submission.</p>
+        <h2>Local Workspace Graph</h2>
+        <p>Derived from the current local JSON workspace: personas, references, candidates, branches, provider jobs, exports, research targets, and clean-room template jobs.</p>
+        <div className="grid grid-cols-5 gap-2">
+          <MetricRow label="Nodes" value={String(derivedGraph.nodes.length)} />
+          <MetricRow label="Edges" value={String(derivedGraph.edges.length)} />
+          <MetricRow label="Jobs" value={String(providerJobs.length)} />
+          <MetricRow label="Exports" value={String(exportManifests.length)} />
+          <MetricRow label="Research" value={String(researchTargets.length + templateMiningJobs.length)} />
         </div>
-        <div className="rugc-provider-note">
+        <div className="mt-3 grid gap-3">
+          {families.map((family) => {
+            const nodes = derivedGraph.nodes.filter((node) => node.family === family)
+            if (nodes.length === 0) return null
+            return (
+              <div key={family} className="rugc-provider-note">
+                <div className="flex items-center justify-between gap-2">
+                  <strong className="capitalize">{family.replace("-", " ")}</strong>
+                  <StatusBadge>{nodes.length}</StatusBadge>
+                </div>
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  {nodes.slice(0, 8).map((node) => (
+                    <button
+                      key={node.id}
+                      type="button"
+                      className={cn(
+                        "rounded-md border border-border bg-card p-2 text-left shadow-sm hover:bg-accent",
+                        selectedNode?.id === node.id && "border-primary/60 bg-primary/10",
+                      )}
+                      onClick={() => setSelectedNodeId(node.id)}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="truncate text-[11px] font-semibold text-foreground">{node.title}</span>
+                        <StatusBadge tone={developerNodeTone(node.status)}>{node.status}</StatusBadge>
+                      </div>
+                      <p className="m-0 mt-1 line-clamp-2 text-[10px] leading-4 text-muted-foreground">{node.subtitle}</p>
+                      <div className="mt-2 flex items-center justify-between text-[10px] text-muted-foreground">
+                        <span>{node.inputs.length} in</span>
+                        <span>{node.outputs.length} out</span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+        <div className="rugc-provider-note mt-3">
           <strong>Workspace bundle</strong>
-          <p>Export the current local workspace, object shards, asset paths, provider jobs, archives, and export manifests.</p>
+          <p>Export the current local workspace, object shards, asset paths, provider jobs, archives, research queues, templates, and export manifests.</p>
           <Button
             size="xs"
             variant="workbench"
@@ -1925,21 +1978,48 @@ function DeveloperGraphView(props: { onMutateLocal: (path: string, body: object)
         </div>
       </section>
       <aside>
-        {workspace.developerGraph.nodes.map((node) => (
-          <div key={node.id} className="rugc-provider-note">
-            <strong>{node.title}</strong>
-            <p>{node.kind} / {node.status}</p>
-            <MetricRow label="Inputs" value={String(node.inputs.length)} />
-            <MetricRow label="Outputs" value={String(node.outputs.length)} />
+        {selectedNode ? (
+          <>
+            <div className="rugc-provider-note">
+              <div className="flex items-center justify-between gap-2">
+                <strong>{selectedNode.title}</strong>
+                <StatusBadge tone={developerNodeTone(selectedNode.status)}>{selectedNode.family}</StatusBadge>
+              </div>
+              <p>{selectedNode.subtitle}</p>
+              <MetricRow label="Status" value={selectedNode.status} />
+              <MetricRow label="Inputs" value={String(selectedNode.inputs.length)} />
+              <MetricRow label="Outputs" value={String(selectedNode.outputs.length)} />
+              <MetricRow label="Artifacts" value={String(selectedNode.artifactPaths.length)} />
+            </div>
+            <div className="rugc-provider-note">
+              <strong>Connected edges</strong>
+              <div className="mt-2 grid gap-1.5">
+                {derivedGraph.edges.filter((edge) => edge.fromId === selectedNode.id || edge.toId === selectedNode.id).slice(0, 10).map((edge) => (
+                  <div key={edge.id} className="rounded border border-border bg-card p-2 text-[10px] text-muted-foreground">
+                    <strong className="text-foreground">{edge.label}</strong>
+                    <span className="block truncate">{edge.fromId} {"->"} {edge.toId}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <pre>{JSON.stringify(selectedNode.rawJson, null, 2)}</pre>
+          </>
+        ) : (
+          <div className="rugc-provider-note">
+            <strong>No graph nodes</strong>
+            <p>The local workspace has no derivable nodes.</p>
           </div>
-        ))}
-        <pre>{JSON.stringify({
-          routes: workspace.developerGraph.providerRoutes,
-          recentJobs: providerJobs.slice(0, 3),
-        }, null, 2)}</pre>
+        )}
       </aside>
     </div>
   )
+}
+
+function developerNodeTone(status: string): "success" | "danger" | "active" | "neutral" {
+  if (["selected", "starred", "succeeded", "ready", "done", "rendered", "promising"].includes(status)) return "success"
+  if (["failed", "blocked", "dead-end", "rejected"].includes(status)) return "danger"
+  if (["queued", "running", "sampling", "active", "draft", "planned"].includes(status)) return "active"
+  return "neutral"
 }
 
 function ProviderView(props: {

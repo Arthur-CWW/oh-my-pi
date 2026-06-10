@@ -966,6 +966,26 @@ body {
   padding: 12px;
 }
 
+.rugc-dev-graph {
+  grid-template-columns: minmax(0, 1fr) 280px;
+  align-items: start;
+  min-width: 700px;
+}
+
+.rugc-dev-graph section {
+  place-items: stretch;
+  align-content: start;
+  min-height: 0;
+  padding: 16px;
+  text-align: left;
+}
+
+.rugc-dev-graph aside {
+  max-height: calc(100vh - 158px);
+  overflow: auto;
+  border-left: 1px solid #ddd9ce;
+}
+
 .rugc-provider label {
   display: grid;
   gap: 6px;
@@ -1109,8 +1129,17 @@ body {
     min-width: 0;
   }
 
+  .rugc-dev-graph {
+    grid-template-columns: minmax(0, 1fr) 260px;
+    min-width: 0;
+  }
+
   .rugc-provider section {
     min-height: 220px;
+  }
+
+  .rugc-dev-graph section {
+    min-height: 0;
   }
 }
 
