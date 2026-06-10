@@ -1278,7 +1278,7 @@ async function main(argv: string[]): Promise<void> {
     })
     const file = path.join(dirs.artifactsDir, `${slug(`${args.voiceTitle ?? "voice"}-${args.voiceId}`)}.mp3`)
     writeFileSync(file, Buffer.from(result.audioBytes))
-    writeJson(path.join(dirs.normalizedDir, `${runId}-result.json`), {
+    writeJson(path.join(dirs.normalizedDir, `${runId}-result.json`), redactJimengProofForNormalized({
       ...plan,
       http_status: result.httpStatus,
       ret: result.ret,
@@ -1286,7 +1286,7 @@ async function main(argv: string[]): Promise<void> {
       response_text_sha256: result.responseTextSha256,
       artifact: file,
       bytes: result.audioBytes.length,
-    })
+    }))
     console.log(`[jimeng-browser-proxy] tts saved: ${file}`)
     return
   }
@@ -2868,7 +2868,7 @@ async function main(argv: string[]): Promise<void> {
     manifest.push({ kind: artifact.kind, url: artifact.url, saved_file: file })
   }
 
-  writeJson(path.join(dirs.normalizedDir, `${runId}-result.json`), { plan, submit, pollTrace: poll.trace, artifacts: manifest })
+  writeJson(path.join(dirs.normalizedDir, `${runId}-result.json`), redactJimengProofForNormalized({ plan, submit, pollTrace: poll.trace, artifacts: manifest }))
   console.log(`[jimeng-browser-proxy] done artifacts=${manifest.length}`)
 }
 
@@ -3372,6 +3372,24 @@ function subjectImageReferenceFromArgs(args: CliArgs, command: "subject-create" 
   }
 }
 
+export function redactJimengProofForNormalized(value: unknown): JsonValue {
+  if (value === undefined) return null
+  if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value
+  if (Array.isArray(value)) return value.map(redactJimengProofForNormalized)
+  if (typeof value !== "object") return String(value)
+  const out: Record<string, JsonValue> = {}
+  for (const [key, entry] of Object.entries(value)) {
+    if (isSensitiveProofKey(key)) {
+      out[key] = typeof entry === "string" ? `[REDACTED ${entry.length} chars]` : "[REDACTED]"
+    } else if (typeof entry === "string" && (isUrlProofKey(key) || hasSensitiveUrlToken(entry))) {
+      out[key] = redactProofUrl(entry)
+    } else {
+      out[key] = redactJimengProofForNormalized(entry)
+    }
+  }
+  return out
+}
+
 function redactSignedUrls(value: JsonValue): JsonValue {
   if (Array.isArray(value)) return value.map(redactSignedUrls)
   if (!value || typeof value !== "object") return value
@@ -3384,6 +3402,30 @@ function redactSignedUrls(value: JsonValue): JsonValue {
     }
   }
   return out
+}
+
+function isSensitiveProofKey(key: string): boolean {
+  return /cookie|authorization|msToken|verifyFp|sessionid|sid_guard|a_bogus|x-signature|secret/i.test(key)
+}
+
+function isUrlProofKey(key: string): boolean {
+  return /url$/i.test(key) || /^url$/i.test(key)
+}
+
+function hasSensitiveUrlToken(value: string): boolean {
+  return /[?&](msToken|a_bogus|x-signature|x-expires|X-Amz|lk3s)=/i.test(value)
+}
+
+function redactProofUrl(value: string): string {
+  try {
+    const url = new URL(value)
+    if (url.hostname.endsWith("jimeng.jianying.com")) {
+      return `${url.origin}${url.pathname}${url.search ? "?[REDACTED_QUERY]" : ""}`
+    }
+    return "[SIGNED_URL_REDACTED]"
+  } catch {
+    return hasSensitiveUrlToken(value) ? "[SIGNED_URL_REDACTED]" : value
+  }
 }
 
 function ensureOutputDirs(outDir: string): { rawDir: string; normalizedDir: string; artifactsDir: string } {

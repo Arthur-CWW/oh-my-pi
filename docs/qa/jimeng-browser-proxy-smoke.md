@@ -1895,6 +1895,79 @@ Result:
 static inventory normalized output has no credential markers
 ```
 
+## Paid-Live Generation Smoke
+
+Arthur explicitly approved a small paid/subscription-account smoke on 2026-06-10. This proof distinguishes **paid-live generation** from read-only/config/upload live API calls.
+
+Session refresh:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts session \
+  --session-out data/jimeng-lab/raw/session-bundle-current.json
+```
+
+TTS command:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts tts \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --voice-id 7597003459665072686 \
+  --voice-title '直爽女大' \
+  --text '三秒告诉你，为什么这款补水精华适合熬夜后的底妆。质地轻薄，不搓泥，早八也能快速出门。' \
+  --outDir data/jimeng-lab/proof-20260610-paid-generation-smoke/tts
+```
+
+Text-to-video command:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts text2video \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --capture data/jimeng-lab/raw/jimeng-network-capture-video-01.json \
+  --prompt '韩系美妆达人在干净卧室用手机自拍，前三秒拿起补水精华说今天底妆不服帖就看这个，镜头轻微推进，真实UGC广告感，自然表情，无字幕，无水印，不要生成可读文字。' \
+  --durationSec 3 \
+  --ratio 9:16 \
+  --videoResolution 720p \
+  --modelVersion 3.0fast \
+  --seed 20260610 \
+  --pollIntervalMs 10000 \
+  --maxPolls 40 \
+  --outDir data/jimeng-lab/proof-20260610-paid-generation-smoke/text2video
+```
+
+Image-to-video command:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts image2video \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --capture data/jimeng-lab/raw/jimeng-network-capture-video-01.json \
+  --image data/jimeng-lab/ugc-studio-kbeauty-image/artifacts/jimeng-kbeauty-01.png \
+  --prompt '韩系美妆达人手机自拍风格，拿着补水精华自然转身靠近镜头，像真实TikTok种草开场，动作轻微自然，干净卧室自然光，无字幕，无水印，不要生成可读文字。' \
+  --durationSec 3 \
+  --ratio 9:16 \
+  --videoResolution 720p \
+  --modelVersion 3.0fast \
+  --seed 20260611 \
+  --pollIntervalMs 10000 \
+  --maxPolls 40 \
+  --outDir data/jimeng-lab/proof-20260610-paid-generation-smoke/image2video
+```
+
+Results:
+
+```txt
+tts: ret=0, errmsg=success, artifact=data/jimeng-lab/proof-20260610-paid-generation-smoke/tts/artifacts/直爽女大-7597003459665072686.mp3, duration=9.768s, codec=mp3
+text2video: submitId=3f1c75b2-897c-4861-8c5c-92e744301e57, historyId=35925875166732, status=50, artifact=data/jimeng-lab/proof-20260610-paid-generation-smoke/text2video/artifacts/3f1c75b2-897c-4861-8c5c-92e744301e57-00.mp4, 704x1248 h264, duration=3.016667s
+image2video: submitId=a12f868d-69ca-4886-9be0-29247d81b3a6, historyId=35925049076492, status=50, artifact=data/jimeng-lab/proof-20260610-paid-generation-smoke/image2video/artifacts/a12f868d-69ca-4886-9be0-29247d81b3a6-00.mp4, 704x1248 h264, duration=3.016667s
+manifest=data/jimeng-lab/proof-20260610-paid-generation-smoke/manifest.md
+```
+
+Current blocked paid-live replay:
+
+```txt
+text2image with data/jimeng-captures/20260609095503-text2image-submit/capture-template.raw.json now returns ret=3018, errmsg=permission denied, even after session refresh.
+next_action=recapture current frontend text-to-image submit through background CDP before claiming paid-live CLI support for this path.
+```
+
 ## Verification
 
 ```bash
@@ -1907,8 +1980,9 @@ Result:
 
 ```txt
 typecheck passed
-117 tests passed, 0 failed
+118 tests passed, 0 failed
 browser-proxy help listed static-inventory and capcut-probe
+paid smoke normalized files have no live token markers
 ```
 
 ## Follow-Up

@@ -426,17 +426,28 @@ Lip-sync submit comparison is now available as the live-generation gate:
 - proof bundle: `data/jimeng-lab/proof-20260610-lip-sync-compare-no-capture/`
 - latest proof against the existing subject-create capture correctly returned `match=false`, `candidate_count=0`; next proof should use a real background CDP lip-sync UI submit capture
 
+Paid-live generation smoke is now proven against the subscription account with explicit approval:
+
+- proof bundle: `data/jimeng-lab/proof-20260610-paid-generation-smoke/`
+- exact rerun commands are recorded in `data/jimeng-lab/proof-20260610-paid-generation-smoke/manifest.md` and `docs/qa/jimeng-browser-proxy-smoke.md`
+- `jimeng-browser-proxy tts` returned `ret=0`, saved `直爽女大-7597003459665072686.mp3`, and validated as `9.768s` MP3 audio
+- `jimeng-browser-proxy text2video` live-submitted `submitId=3f1c75b2-897c-4861-8c5c-92e744301e57`, reached terminal `status=50`, saved a `704x1248` H.264 MP4, and validated as `3.016667s`
+- `jimeng-browser-proxy image2video` live-submitted `submitId=a12f868d-69ca-4886-9be0-29247d81b3a6`, reached terminal `status=50`, saved a `704x1248` H.264 MP4, and validated as `3.016667s`
+- stale workbench `text2image` capture `data/jimeng-captures/20260609095503-text2image-submit/capture-template.raw.json` now returns `ret=3018`, `errmsg=permission denied` even after session refresh; recapture the current frontend text-to-image submit before claiming paid-live CLI support for that path
+- use precise proof labels from here on: `paid-live generation`, `read-only live`, `upload live`, `mutate live`, or `dry-run`
+
 The next slice is **lip-sync submit capture and reference-video consumers**. Use the VOD provider reference, ImageX avatar reference, and frontend captures to unlock live lip-sync, reference-video, multimodal/all-around reference, pose/style/depth/canny controls, and live end-frame/multi-frame image-to-video paths.
 
 Immediate next slices:
 
 1. Capture frontend VOD and image/avatar lip-sync submits and compare the converted `draft_content` with the dry-run `providerInput`; enable live submit only if it matches.
-2. Capture the frontend's explicit end-frame/multi-frame mode and live-prove `frames2video` only if the payload contract matches.
-3. Map style/reference roles and the new object-mask provider references into generation payload patches.
-4. Implement digital-human generation using the confirmed VOD reference path where applicable.
-5. Capture real CapCut template row/search/collection payloads, then expand no-spend research/template coverage beyond the confirmed CapCut category and public metadata catalogs.
-6. Capture/approve subject/persona `generate_voice` live submit and custom voice clone live submit/mutation once those UI/API flows are captured.
-7. Keep each slice small enough to prove and commit before moving on.
+2. Recapture current frontend text-to-image submit and compare it against the stale workbench replay that now returns `ret=3018`.
+3. Capture the frontend's explicit end-frame/multi-frame mode and live-prove `frames2video` only if the payload contract matches.
+4. Map style/reference roles and the new object-mask provider references into generation payload patches.
+5. Implement digital-human generation using the confirmed VOD reference path where applicable.
+6. Capture real CapCut template row/search/collection payloads, then expand no-spend research/template coverage beyond the confirmed CapCut category and public metadata catalogs.
+7. Capture/approve subject/persona `generate_voice` live submit and custom voice clone live submit/mutation once those UI/API flows are captured.
+8. Keep each slice small enough to prove and commit before moving on.
 
 Do not start the async daemon while these API contracts are still moving.
 
