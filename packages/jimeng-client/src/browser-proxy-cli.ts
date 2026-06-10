@@ -171,6 +171,14 @@ import {
   summarizeJimengResearchKeywords,
 } from "./research-keywords"
 import {
+  buildJimengResearchSearchRequest,
+  fetchJimengResearchSearch,
+  parseJimengResearchAssetType,
+  parseJimengResearchSearchChannel,
+  parseJimengResearchShowTypeList,
+  summarizeJimengResearchSearch,
+} from "./research-search"
+import {
   buildJimengVideoInfoRequest,
   fetchJimengVideoInfo,
   parseJimengVidCsvFlag,
@@ -258,6 +266,7 @@ Commands:
   commerce-benefits Fetch signed no-spend benefit metadata and user benefit rows
   workspace-context Fetch no-spend workspace list and workspace-id context
   research-keywords Fetch no-spend search suggestions and guessed research keywords
+  research-search Fetch no-spend inspiration, short-film, or workspace asset search results
   infinite-canvas Fetch no-spend infinite-canvas project/detail/ratio metadata
   lip-sync-config Fetch no-spend digital-human/lip-sync model configs
   lip-sync-compare Offline compare a lip-sync dry-run plan against captured UI submit
@@ -332,6 +341,16 @@ Options:
                                   infinite-canvas accepts projects,detail,ratios,conversations,all
                                   research-keywords accepts suggest,guess,all
   --channels <ids|all>           Research channels: inspiration,short-film,asset,all
+  --channel <id>                 research-search channel: inspiration, short-film, or asset
+  --searchId <id>                research-search continuation search id
+  --source <value>               research-search source (default: search)
+  --assetType <name|id>          Asset search type: image,video,story,canvas,audio,document,canvas-project
+  --blockIndex <n>               Asset search block index (default: 0)
+  --showTypeList <csv>           Optional asset search show_type_list integers
+  --needIntentionMark <bool>     Inspiration/short-film intention-mark option (default: true)
+  --isInsertFrame <bool>         Optional asset search insert-frame filter
+  --hideStoryAgentResult <bool>  Optional asset search story-agent filter
+  --beginTimeStamp <n>           Optional asset search lower timestamp bound
   --text <text>                 TTS/sample-voices text
   --voice-id <id>               TTS voice id from voices command
   --voice-title <title>         Optional display title for TTS output filename
@@ -602,6 +621,13 @@ Examples:
     --limit 10 \\
     --outDir data/jimeng-lab/cli-research-keywords-smoke
 
+  jimeng-browser-proxy research-search \\
+    --session data/jimeng-lab/raw/session-bundle-current.json \\
+    --channel short-film \\
+    --keyword "韩系美妆" \\
+    --limit 12 \\
+    --outDir data/jimeng-lab/cli-research-search-smoke
+
   jimeng-browser-proxy subjects \\
     --limit 20 \\
     --outDir data/jimeng-lab/cli-subjects-smoke
@@ -700,6 +726,7 @@ interface CliArgs {
     | "commerce-benefits"
     | "workspace-context"
     | "research-keywords"
+    | "research-search"
     | "infinite-canvas"
     | "endpoint-probe"
     | "rate-probe"
@@ -768,6 +795,15 @@ interface CliArgs {
   delayMs?: number
   endpoints?: string
   channels?: string
+  searchId?: string
+  source?: string
+  assetType?: string
+  blockIndex?: number
+  showTypeList?: number[]
+  needIntentionMark?: boolean
+  isInsertFrame?: boolean
+  hideStoryAgentResult?: boolean
+  beginTimeStamp?: number
   text?: string
   voiceId?: string
   voiceTitle?: string
@@ -1816,6 +1852,74 @@ async function main(argv: string[]): Promise<void> {
       summary: summarizeJimengResearchKeywords(result),
     })
     console.log(`[jimeng-browser-proxy] research-keywords saved results=${result.results.length} items=${result.results.reduce((sum, item) => sum + item.items.length, 0)} skipped=${result.skipped.length}`)
+    return
+  }
+
+  if (args.command === "research-search") {
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const channel = parseJimengResearchSearchChannel(args.channels)
+    const query = {
+      channel,
+      keyword: args.keyword,
+      count: args.limit,
+      cursor: args.cursor,
+      searchId: args.searchId,
+      source: args.source,
+      workspaceId: args.workspaceId,
+      needIntentionMark: args.needIntentionMark,
+      assetType: parseJimengResearchAssetType(args.assetType),
+      blockIndex: args.blockIndex,
+      onlyFavorited: args.onlyFavorite,
+      showTypeList: args.showTypeList,
+      isInsertFrame: args.isInsertFrame,
+      hideStoryAgentResult: args.hideStoryAgentResult,
+      beginTimeStamp: args.beginTimeStamp,
+      endTimeStamp: args.endTimeStamp,
+    }
+    const request = buildJimengResearchSearchRequest(query)
+    const runId = `research-search-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    if (args.dryRun) {
+      writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
+        command: args.command,
+        endpoint: "/mweb/search/v1/search",
+        request,
+        browser_session: redactSession(session),
+        live_request: false,
+      })
+      writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+        command: args.command,
+        endpoint: "/mweb/search/v1/search",
+        channel,
+        request,
+        dry_run: true,
+      })
+      console.log(`[jimeng-browser-proxy] research-search dry run saved channel=${channel}`)
+      return
+    }
+
+    const result = await fetchJimengResearchSearch({ session, query })
+    writeJson(path.join(dirs.rawDir, `${runId}.json`), {
+      endpoint: result.endpoint,
+      channel: result.channel,
+      wire_channel: result.wireChannel,
+      http_status: result.httpStatus,
+      ret: result.ret,
+      errmsg: result.errmsg,
+      response_text_sha256: result.responseTextSha256,
+      request: result.request,
+      search_id: result.searchId,
+      has_more: result.hasMore,
+      next_cursor: result.nextCursor,
+      can_search_deeper: result.canSearchDeeper,
+      cache_sync_token_present: result.cacheSyncTokenPresent,
+      decryption_applied: result.decryptionApplied,
+      body: result.body,
+    })
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      summary: summarizeJimengResearchSearch(result),
+    })
+    console.log(`[jimeng-browser-proxy] research-search saved channel=${channel} items=${result.items.length} assets=${result.assets.length} has_more=${result.hasMore}`)
     return
   }
 
@@ -3763,6 +3867,7 @@ function parseArgs(argv: string[]): CliArgs {
     && command !== "commerce-benefits"
     && command !== "workspace-context"
     && command !== "research-keywords"
+    && command !== "research-search"
     && command !== "infinite-canvas"
     && command !== "endpoint-probe"
     && command !== "rate-probe"
@@ -3810,7 +3915,7 @@ function parseArgs(argv: string[]): CliArgs {
     throw new Error(`Unknown command: ${String(command)}`)
   }
 
-  const flags = parseFlags(argv.slice(1))
+  const flags = parseJimengBrowserProxyFlags(argv.slice(1))
   const method = parseEndpointProbeMethod(flags.method)
   const durationSec = flags.durationSec
   const videoWidth = flags.videoWidth ? Number(flags.videoWidth) : undefined
@@ -3846,6 +3951,8 @@ function parseArgs(argv: string[]): CliArgs {
   const direction = flags.direction ? Number(flags.direction) : undefined
   const orderBy = flags["order-by"] ? Number(flags["order-by"]) : undefined
   const endTimeStamp = flags.endTimeStamp ? Number(flags.endTimeStamp) : undefined
+  const beginTimeStamp = flags.beginTimeStamp ? Number(flags.beginTimeStamp) : undefined
+  const blockIndex = flags.blockIndex ? Number(flags.blockIndex) : undefined
   const isClientFilter = parseOptionalBooleanFlag(flags.isClientFilter, "--isClientFilter")
   const needBetaModel = parseOptionalBooleanFlag(flags.needBetaModel, "--needBetaModel")
   const needCache = parseOptionalBooleanFlag(flags.needCache, "--needCache")
@@ -3853,6 +3960,10 @@ function parseArgs(argv: string[]): CliArgs {
   const imageInfo = parseOptionalBooleanFlag(flags.imageInfo, "--imageInfo")
   const needDraftResource = parseOptionalBooleanFlag(flags.needDraftResource, "--needDraftResource")
   const intelligentRatio = parseOptionalBooleanFlag(flags.intelligentRatio, "--intelligentRatio")
+  const onlyFavorite = parseOptionalBooleanFlag(flags.onlyFavorite, "--onlyFavorite")
+  const needIntentionMark = parseOptionalBooleanFlag(flags.needIntentionMark, "--needIntentionMark")
+  const isInsertFrame = parseOptionalBooleanFlag(flags.isInsertFrame, "--isInsertFrame")
+  const hideStoryAgentResult = parseOptionalBooleanFlag(flags.hideStoryAgentResult, "--hideStoryAgentResult")
   if (seed !== undefined && (!Number.isInteger(seed) || seed < 0 || seed > 4294967295)) {
     throw new Error("--seed must be an integer from 0 to 4294967295")
   }
@@ -3889,6 +4000,12 @@ function parseArgs(argv: string[]): CliArgs {
   if (endTimeStamp !== undefined && (!Number.isFinite(endTimeStamp) || endTimeStamp < 0)) {
     throw new Error("--endTimeStamp must be a non-negative number")
   }
+  if (beginTimeStamp !== undefined && (!Number.isFinite(beginTimeStamp) || beginTimeStamp < 0)) {
+    throw new Error("--beginTimeStamp must be a non-negative number")
+  }
+  if (blockIndex !== undefined && (!Number.isInteger(blockIndex) || blockIndex < 0)) {
+    throw new Error("--blockIndex must be a non-negative integer")
+  }
   if (videoWidth !== undefined && (!Number.isInteger(videoWidth) || videoWidth < 1)) {
     throw new Error("--videoWidth must be a positive integer")
   }
@@ -3919,8 +4036,10 @@ function parseArgs(argv: string[]): CliArgs {
   if (capcutCollectionId !== undefined && (!Number.isInteger(capcutCollectionId) || capcutCollectionId < 1)) {
     throw new Error("--collection-id must be a positive integer")
   }
-  if (workspaceId !== undefined && (!Number.isInteger(workspaceId) || workspaceId < 1)) {
-    throw new Error("--workspaceId must be a positive integer")
+  if (workspaceId !== undefined && (!Number.isInteger(workspaceId) || workspaceId < (command === "research-search" ? 0 : 1))) {
+    throw new Error(command === "research-search"
+      ? "--workspaceId must be a non-negative integer for research-search"
+      : "--workspaceId must be a positive integer")
   }
   if (speed !== undefined && (!Number.isFinite(speed) || speed < 0.5 || speed > 2)) {
     throw new Error("--speed must be a number from 0.5 to 2")
@@ -3960,7 +4079,16 @@ function parseArgs(argv: string[]): CliArgs {
     concurrency,
     delayMs,
     endpoints: flags.endpoints,
-    channels: flags.channels,
+    channels: flags.channel ?? flags.channels,
+    searchId: flags.searchId,
+    source: flags.source,
+    assetType: flags.assetType,
+    blockIndex,
+    showTypeList: parseJimengResearchShowTypeList(flags.showTypeList),
+    needIntentionMark,
+    isInsertFrame,
+    hideStoryAgentResult,
+    beginTimeStamp,
     text: flags.text,
     voiceId: flags["voice-id"],
     voiceTitle: flags["voice-title"],
@@ -3992,7 +4120,7 @@ function parseArgs(argv: string[]): CliArgs {
     keyword: flags.keyword,
     subjectId: flags.subjectId,
     subjectIds: parseCsvFlag(flags.subjectIds),
-    onlyFavorite: flags.onlyFavorite === "true" ? true : undefined,
+    onlyFavorite,
     imageInfo,
     projectId: flags.projectId,
     userId: flags.userId,
@@ -4080,7 +4208,7 @@ function resolveRawNetworkFile(args: CliArgs): string {
   return file
 }
 
-function parseFlags(argv: string[]): Record<string, string> {
+export function parseJimengBrowserProxyFlags(argv: string[]): Record<string, string> {
   const flags: Record<string, string> = {}
   for (let i = 0; i < argv.length; i += 1) {
     const token = argv[i]
@@ -4094,7 +4222,7 @@ function parseFlags(argv: string[]): Record<string, string> {
 
     const key = token.slice(2)
     const next = argv[i + 1]
-    if (next && !next.startsWith("--")) {
+    if (next !== undefined && !next.startsWith("--")) {
       flags[key] = next
       i += 1
     } else {

@@ -647,7 +647,21 @@ Jimeng keyword research is now live-proved without generation spend:
 - Effect Schema validates the relied-on `data.suggest_list` / `data.guess_list` paths while allowing additive provider fields
 - live proof: `data/jimeng-lab/proof-20260610-research-keywords-cli-live/`
 - latest result: 5 successful sequential reads, 30 normalized keywords, 1 documented skip, and no credential markers in normalized output
-- static inventory now recognizes `/mweb/search/v1/*`; `/mweb/search/v1/search` remains partial until its frontend response decrypt/sign transform is recovered, and `/mweb/search/v1/fetch_debug/search` is classified as a non-production debug wrapper
+- static inventory recognizes `/mweb/search/v1/*`; `/mweb/search/v1/fetch_debug/search` remains classified as a non-production debug wrapper
+
+Full Jimeng research search is now live-proved without generation spend:
+
+- `jimeng-browser-proxy research-search`
+- supports `inspiration`, `short-film` (`short_film` on the wire), and workspace `asset` search
+- the request surface exposes keyword, pagination/search id, workspace, intention-mark, asset type, favorites, show-type, insert-frame, story-agent, and timestamp controls
+- Effect Schema enforces the relied-on result envelope and item/asset paths while tolerating additive provider fields
+- the frontend AES-256-CBC cache-token/media-URL transform was recovered and reproduced in a deterministic unit test; current live responses returned already-signed URLs without a cache token
+- dry-run proof: `data/jimeng-lab/proof-20260611-research-search-cli-dry-run/`
+- live inspiration proof: `data/jimeng-lab/proof-20260611-research-search-cli-inspiration/` returned 6 image/template results
+- live short-film proof: `data/jimeng-lab/proof-20260611-research-search-cli-short-film/` returned 6 playable video results with dimensions, durations, and engagement metrics
+- live asset proof: `data/jimeng-lab/proof-20260611-research-search-cli-asset-v3/` returned 1 image asset containing 4 generated items
+- refreshed inventory proof: `data/jimeng-lab/proof-20260611-static-inventory-research-search/` reports `implemented=45`, `partial=4`, and `skipped_implemented=45`
+- normalized proofs contain no credential markers or signed media URL values
 
 The next slice is **lip-sync submit capture and reference-video consumers**. Use the VOD provider reference, ImageX avatar reference, and frontend captures to unlock live lip-sync, reference-video, multimodal/all-around reference, pose/style/depth/canny controls, and live end-frame/multi-frame image-to-video paths.
 
@@ -658,7 +672,7 @@ Immediate next slices:
 3. Capture the frontend's explicit end-frame/multi-frame mode and live-prove `frames2video` only if the payload contract matches.
 4. Map style/reference roles and the new object-mask provider references into generation payload patches.
 5. Implement digital-human generation using the confirmed VOD reference path where applicable.
-6. Recover the `/mweb/search/v1/search` response transform, then capture real CapCut template search/batch/preset payloads to expand no-spend research/template coverage.
+6. Capture real CapCut template search/batch/preset payloads to expand no-spend research/template coverage.
 7. Capture/approve subject/persona `generate_voice` live submit and custom voice clone live submit/mutation once those UI/API flows are captured.
 8. Keep each slice small enough to prove and commit before moving on.
 

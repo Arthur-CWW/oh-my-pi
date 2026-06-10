@@ -67,7 +67,7 @@ describe("Jimeng static inventory", () => {
           `const updateVideoDefaultBgmBlocked = "/mweb/v1/update_video_default_bgm";`,
           `const researchSuggestImplemented = "/mweb/search/v1/sug";`,
           `const researchGuessImplemented = "/mweb/search/v1/guess";`,
-          `const researchSearchPartial = "/mweb/search/v1/search";`,
+          `const researchSearchImplemented = "/mweb/search/v1/search";`,
           `const researchDebugBlocked = "/mweb/search/v1/fetch_debug/search";`,
           `const lvEditorPanelImplemented = "/lv/v1/effect/get_panel_info";`,
           `const lvEditorEffectsImplemented = "/lv/v1/effect/get_category_effects";`,
@@ -97,12 +97,12 @@ describe("Jimeng static inventory", () => {
       const markdown = writeJimengStaticInventoryMarkdown(result)
 
       expect(result.totalResourceCount).toBe(70)
-      expect(result.skippedImplementedCount).toBe(8)
+      expect(result.skippedImplementedCount).toBe(9)
       expect(result.items.map((item) => item.resource)).not.toContain("/mweb/v1/get_history_by_ids")
       expect(result.items.map((item) => item.resource)).not.toContain("/mweb/search/v1/sug")
       expect(result.items.map((item) => item.resource)).not.toContain("/mweb/search/v1/guess")
+      expect(result.items.map((item) => item.resource)).not.toContain("/mweb/search/v1/search")
       expect(result.items.map((item) => item.resource)).not.toContain("/lv/v1/effect/get_all_fonts")
-      expect(result.items.find((item) => item.resource === "/mweb/search/v1/search")?.knownStatus).toBe("partial")
       expect(result.items.find((item) => item.resource === "/mweb/search/v1/fetch_debug/search")?.knownStatus).toBe("blocked")
       expect(result.items.find((item) => item.resource === "/mweb/v1/dreamina_subject/generate_voice")?.recommendedAction).toBe("approval_or_disposable_fixture")
       expect(result.items.find((item) => item.resource === "/mweb/v1/get_history")?.knownStatus).toBe("blocked")
@@ -215,7 +215,8 @@ describe("Jimeng static inventory", () => {
       expect(result.items.find((item) => item.resource === "/mweb/v1/voice/query_task")?.riskClass).toBe("read")
       expect(result.items.find((item) => item.resource === "/mweb/search/v1/sug")?.knownCommand).toBe("research-keywords")
       expect(result.items.find((item) => item.resource === "/mweb/search/v1/guess")?.knownCommand).toBe("research-keywords")
-      expect(result.items.find((item) => item.resource === "/mweb/search/v1/search")?.knownStatus).toBe("partial")
+      expect(result.items.find((item) => item.resource === "/mweb/search/v1/search")?.knownStatus).toBe("implemented")
+      expect(result.items.find((item) => item.resource === "/mweb/search/v1/search")?.knownCommand).toBe("research-search")
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

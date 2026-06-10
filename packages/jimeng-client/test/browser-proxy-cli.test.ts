@@ -1,8 +1,25 @@
 import { describe, expect, test } from "bun:test"
-import { redactJimengProofForNormalized } from "../src/browser-proxy-cli"
+import {
+  parseJimengBrowserProxyFlags,
+  redactJimengProofForNormalized,
+} from "../src/browser-proxy-cli"
 import { type JsonObject } from "../src"
 
 describe("jimeng-browser-proxy normalized proof redaction", () => {
+  test("preserves explicit empty flag values", () => {
+    expect(parseJimengBrowserProxyFlags([
+      "--channel",
+      "asset",
+      "--keyword",
+      "",
+      "--dryRun",
+    ])).toEqual({
+      channel: "asset",
+      keyword: "",
+      dryRun: "true",
+    })
+  })
+
   test("redacts tokenized Jimeng URLs, signed media URLs, and credential fields", () => {
     const redacted = redactJimengProofForNormalized({
       plan: {

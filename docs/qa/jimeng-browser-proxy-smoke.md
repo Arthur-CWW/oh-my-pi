@@ -3146,22 +3146,66 @@ skipped_implemented=44
 known_status_counts=unknown:125,partial:5,implemented:44,dry_run_only:4,blocked:70,captured_only:2,cataloged_only:1
 ```
 
-Full `/mweb/search/v1/search` remains partial because the frontend applies a result transform that still needs to be recovered. `/mweb/search/v1/fetch_debug/search` is classified as a blocked debug wrapper rather than a production API.
+Full `/mweb/search/v1/search` is now implemented as no-spend `research-search`.
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts research-search \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --channel inspiration \
+  --keyword '韩系美妆' \
+  --limit 6 \
+  --outDir data/jimeng-lab/proof-20260611-research-search-cli-inspiration
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts research-search \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --channel short-film \
+  --keyword '韩系美妆' \
+  --limit 6 \
+  --outDir data/jimeng-lab/proof-20260611-research-search-cli-short-film
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts research-search \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --channel asset \
+  --assetType image \
+  --workspaceId 0 \
+  --limit 4 \
+  --outDir data/jimeng-lab/proof-20260611-research-search-cli-asset-v3
+```
+
+Result:
+
+```txt
+inspiration: ret=0, items=6, has_more=true, next_cursor=6
+short-film: ret=0, items=6, has_more=true, first video=1920x1080, 65.8s
+asset: ret=0, assets=1, generated_items=4, has_more=false
+```
+
+Effect Schema validates the required envelope and selected nested item/asset paths while accepting additive provider fields. The frontend cache-token/media transform was recovered as AES-256-CBC and is covered by a synthetic encrypted-response test. Current live responses had no `cache_sync_token`, so no live decryption was needed. Normalized proofs omit signed media URLs and contain no credential markers.
+
+Refreshed static inventory:
+
+```txt
+resources=251
+skipped_implemented=45
+known_status_counts=unknown:125,partial:4,implemented:45,dry_run_only:4,blocked:70,captured_only:2,cataloged_only:1
+```
+
+`/mweb/search/v1/fetch_debug/search` remains classified as a blocked debug wrapper rather than a production API.
 
 ## Verification
 
 ```bash
 bun run jimeng:typecheck
 bun run jimeng:test
-bun packages/jimeng-client/src/browser-proxy-cli.ts --help | rg 'static-inventory|account-credit|commerce-benefits|workspace-context|research-keywords|lip-sync-config|voice-clones|voice-clone-submit|capcut-probe|capcut-template-metadata|capcut-categories|capcut-collections|capcut-collection-templates|capcut-template-detail|capcut-editor-catalog|infinite-canvas|overseas-short-videos|subject-create|subject-update|subject-delete|subject-generate-voice|subjects|templates|short-videos'
+bun packages/jimeng-client/src/browser-proxy-cli.ts --help | rg 'static-inventory|account-credit|commerce-benefits|workspace-context|research-keywords|research-search|lip-sync-config|voice-clones|voice-clone-submit|capcut-probe|capcut-template-metadata|capcut-categories|capcut-collections|capcut-collection-templates|capcut-template-detail|capcut-editor-catalog|infinite-canvas|overseas-short-videos|subject-create|subject-update|subject-delete|subject-generate-voice|subjects|templates|short-videos'
 ```
 
 Result:
 
 ```txt
 typecheck passed
-164 tests passed, 0 failed
-browser-proxy help listed static-inventory, account-credit, commerce-benefits, workspace-context, research-keywords, CapCut collection/detail/editor-catalog, and infinite-canvas commands
+170 tests passed, 0 failed
+browser-proxy help listed static-inventory, account-credit, commerce-benefits, workspace-context, research-keywords, research-search, CapCut collection/detail/editor-catalog, and infinite-canvas commands
 paid smoke normalized files have no live token markers
 ```
 
