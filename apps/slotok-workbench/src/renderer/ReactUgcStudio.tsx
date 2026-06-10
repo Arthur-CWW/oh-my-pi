@@ -69,7 +69,7 @@ import {
   WorkbenchTopbar,
 } from "./design-system/workbench"
 import { cn } from "./lib/cn"
-import { ugcStudioWorkspace, type BranchSnapshot, type CreativeCandidate, type JsonValue, type PersonaProfile, type ReferenceProfile, type UgcStudioWorkspace } from "./ugcStudioModel"
+import { ugcStudioWorkspace, type BranchSnapshot, type CandidateStatus, type CreativeCandidate, type JsonValue, type PersonaProfile, type ReferenceProfile, type ReviewVerdict, type UgcStudioWorkspace } from "./ugcStudioModel"
 import { createInitialLocalState, referenceProfileToArchive, type ReferenceArchiveFormatOutput, type UgcExportManifest, type UgcLocalState, type UgcProviderJob, type UgcProviderJobStatus, type UgcReferenceArchive } from "../ugc/local-state"
 
 type ReactView = "atlas" | "explore" | "review" | "campaign" | "reference" | "editor" | "graph" | "provider"
@@ -1053,32 +1053,108 @@ function ExplorationBoard(props: {
 
 function BatchReview(props: { selectedCandidateId: string; onSelectCandidate: (id: string) => void; onMutateLocal: (path: string, body: object) => void }) {
   const { workspace } = useUgcLocalState()
+  const [filter, setFilter] = React.useState<"needs-review" | "starred" | "needs-revision" | "rejected" | "all">("needs-review")
+  const [sortBy, setSortBy] = React.useState<"score" | "status" | "persona">("score")
+  const [selectedSetIds, setSelectedSetIds] = React.useState<readonly string[]>([])
+  const [noteDraft, setNoteDraft] = React.useState("Needs a more casual middle beat and softer CTA.")
   const selectedCandidate = workspace.candidates.find((candidate) => candidate.id === props.selectedCandidateId) ?? workspace.candidates[0]
   const selectedCandidateId = selectedCandidate?.id ?? props.selectedCandidateId
+  const selectedCandidateNotes = selectedCandidate
+    ? workspace.reviewNotes.filter((note) => selectedCandidate.reviewNoteIds.includes(note.id) || (note.attachedTo.kind === "candidate" && note.attachedTo.id === selectedCandidate.id))
+    : []
+  const filteredCandidates = React.useMemo(() => {
+    const candidates = workspace.candidates.filter((candidate) => {
+      if (filter === "all") return true
+      if (filter === "needs-review") return candidate.status === "ready" || candidate.status === "queued" || candidate.status === "generating"
+      return candidate.status === filter
+    })
+    return [...candidates].sort((left, right) => {
+      if (sortBy === "score") return right.scorecard.overall - left.scorecard.overall
+      if (sortBy === "persona") return (left.personaId ?? "").localeCompare(right.personaId ?? "")
+      return left.status.localeCompare(right.status)
+    })
+  }, [filter, sortBy, workspace.candidates])
+  const selectedSet = selectedSetIds.length ? selectedSetIds : [selectedCandidateId].filter(Boolean)
+  const filterItems: Array<{ id: typeof filter; label: string; count: number }> = [
+    { id: "needs-review", label: "Needs Review", count: workspace.candidates.filter((candidate) => candidate.status === "ready" || candidate.status === "queued" || candidate.status === "generating").length },
+    { id: "starred", label: "Starred", count: workspace.candidates.filter((candidate) => candidate.status === "starred").length },
+    { id: "needs-revision", label: "Needs Revision", count: workspace.candidates.filter((candidate) => candidate.status === "needs-revision").length },
+    { id: "rejected", label: "Rejected", count: workspace.candidates.filter((candidate) => candidate.status === "rejected").length },
+    { id: "all", label: "All Candidates", count: workspace.candidates.length },
+  ]
+
+  React.useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) return
+      if (event.key === "1") {
+        event.preventDefault()
+        applyStatusToSet("rejected")
+      } else if (event.key === "2") {
+        event.preventDefault()
+        applyStatusToSet("needs-revision")
+      } else if (event.key === "3") {
+        event.preventDefault()
+        applyStatusToSet("starred")
+      } else if (event.key === "5") {
+        event.preventDefault()
+        addReviewNote("fork", "Fork this direction into a lower-pressure variation.")
+      }
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [selectedSetIds, selectedCandidateId, noteDraft])
+
+  function applyStatusToSet(status: CandidateStatus) {
+    props.onMutateLocal("/api/ugc/candidates/status", { candidateIds: selectedSet, status })
+  }
+
+  function addReviewNote(verdict: ReviewVerdict, requestedChange: string | null = null) {
+    props.onMutateLocal("/api/ugc/notes", {
+      attachedTo: { kind: "candidate", id: selectedCandidateId },
+      verdict,
+      body: noteDraft,
+      requestedChange,
+    })
+  }
+
+  function toggleSelectedSet(candidateId: string) {
+    setSelectedSetIds((ids) => ids.includes(candidateId) ? ids.filter((id) => id !== candidateId) : [...ids, candidateId])
+  }
+
   return (
     <div className="rugc-review">
       <aside className="rugc-review-queue">
-        <h3>Candidate 23 of 236</h3>
+        <h3>Candidate {Math.max(1, filteredCandidates.findIndex((candidate) => candidate.id === selectedCandidateId) + 1)} of {filteredCandidates.length}</h3>
         <div className="rugc-review-filters">
-          {["Needs Review", "Starred", "Approved", "Rejected", "All Candidates"].map((label, index) => (
-            <button key={label} type="button" className={index === 0 ? "active" : ""}>
+          {filterItems.map((item) => (
+            <button key={item.id} type="button" className={filter === item.id ? "active" : ""} onClick={() => setFilter(item.id)}>
               <span />
-              {label}
-              <em>{[18, 7, 23, 12, 236][index]}</em>
+              {item.label}
+              <em>{item.count}</em>
             </button>
           ))}
         </div>
+        <label className="grid gap-1 text-[11px] text-muted-foreground">
+          Sort
+          <select value={sortBy} onChange={(event) => setSortBy(event.target.value as typeof sortBy)} className="h-8 rounded-md border border-input bg-background px-2 text-xs text-foreground">
+            <option value="score">Score</option>
+            <option value="status">Status</option>
+            <option value="persona">Persona</option>
+          </select>
+        </label>
         <div className="rugc-shortcuts">
           <strong>Keyboard shortcuts</strong>
           <span>Space Play / Pause</span>
           <span>1 Reject</span>
+          <span>2 Revise</span>
           <span>3 Star</span>
           <span>5 Fork</span>
         </div>
       </aside>
       <section className="rugc-player-wrap">
         <div className="rugc-variant-strip">
-          {workspace.candidates.map((candidate, index) => (
+          {filteredCandidates.map((candidate, index) => (
             <button
               key={candidate.id}
               type="button"
@@ -1114,28 +1190,44 @@ function BatchReview(props: { selectedCandidateId: string; onSelectCandidate: (i
         <ScoreBar label="Authenticity" value={selectedCandidate?.scorecard.formatFit ?? 0} />
         <ScoreBar label="Predicted Retention" value={selectedCandidate?.scorecard.overall ?? 0} />
         <blockquote>She feels slightly scripted in the middle. CTA could be softer.</blockquote>
+        <Textarea value={noteDraft} onChange={(event) => setNoteDraft(event.target.value)} className="min-h-16" />
         <div className="flex flex-wrap gap-2">
-          <Button size="xs" variant="workbench" onClick={() => props.onMutateLocal(`/api/ugc/candidates/${selectedCandidateId}/status`, { status: "starred" })}>Star</Button>
-          <Button size="xs" variant="workbench" onClick={() => props.onMutateLocal(`/api/ugc/candidates/${selectedCandidateId}/status`, { status: "needs-revision" })}>Revise</Button>
-          <Button size="xs" variant="outline" onClick={() => props.onMutateLocal(`/api/ugc/candidates/${selectedCandidateId}/status`, { status: "rejected" })}>Reject</Button>
+          <Button size="xs" variant="workbench" onClick={() => applyStatusToSet("starred")}>Star {selectedSet.length}</Button>
+          <Button size="xs" variant="workbench" onClick={() => applyStatusToSet("needs-revision")}>Revise {selectedSet.length}</Button>
+          <Button size="xs" variant="outline" onClick={() => applyStatusToSet("rejected")}>Reject {selectedSet.length}</Button>
           <Button
             size="xs"
             variant="subtle"
-            onClick={() => props.onMutateLocal("/api/ugc/notes", {
-              attachedTo: { kind: "candidate", id: selectedCandidateId },
-              verdict: "revise",
-              body: "Needs a more casual middle beat and softer CTA.",
-              requestedChange: "Regenerate with lower-pressure delivery.",
-            })}
+            onClick={() => addReviewNote("revise", "Regenerate with lower-pressure delivery.")}
           >
             Add note
           </Button>
         </div>
+        <div className="grid gap-2">
+          <strong className="text-[11px] text-foreground">Notes</strong>
+          {selectedCandidateNotes.length ? selectedCandidateNotes.map((note) => (
+            <div key={note.id} className="rounded-md border border-border bg-background p-2 text-[11px] leading-4 text-muted-foreground">
+              <span className="font-semibold text-foreground">{note.verdict}</span> / {note.body}
+            </div>
+          )) : <p className="m-0 text-[11px] text-muted-foreground">No notes yet.</p>}
+        </div>
       </aside>
+      <div className="col-span-full flex items-center justify-between gap-3 rounded-md border border-border bg-card px-3 py-2 shadow-sm">
+        <div className="min-w-0 text-[11px] text-muted-foreground">
+          <strong className="text-foreground">{selectedSet.length}</strong> selected
+          <span className="ml-2">Filter: {filterItems.find((item) => item.id === filter)?.label}</span>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button size="xs" variant="workbench" onClick={() => applyStatusToSet("starred")}>Star selected</Button>
+          <Button size="xs" variant="workbench" onClick={() => applyStatusToSet("needs-revision")}>Revise selected</Button>
+          <Button size="xs" variant="outline" onClick={() => applyStatusToSet("rejected")}>Reject selected</Button>
+          <Button size="xs" variant="subtle" onClick={() => addReviewNote("revise", "Regenerate selected direction with a softer CTA.")}>Add note</Button>
+        </div>
+      </div>
       <table className="rugc-review-table">
         <thead>
           <tr>
-            <th></th>
+            <th>Select</th>
             <th>Thumbnail</th>
             <th>Persona</th>
             <th>Format</th>
@@ -1146,16 +1238,24 @@ function BatchReview(props: { selectedCandidateId: string; onSelectCandidate: (i
           </tr>
         </thead>
         <tbody>
-          {workspace.candidates.map((candidate, index) => (
+          {filteredCandidates.map((candidate, index) => (
             <tr key={candidate.id} className={candidate.id === props.selectedCandidateId ? "active" : ""}>
-              <td>{index + 21}</td>
+              <td>
+                <input
+                  type="checkbox"
+                  checked={selectedSetIds.includes(candidate.id)}
+                  onChange={() => toggleSelectedSet(candidate.id)}
+                  aria-label={`Select ${candidate.title}`}
+                />
+                <span className="ml-2">{index + 1}</span>
+              </td>
               <td><MiniThumb status={candidate.status === "needs-revision" ? "risk" : "keep"} label="" /></td>
               <td>{candidate.personaId?.includes("deadpan") ? "Runner" : "Lily"}</td>
               <td>{candidate.kind}</td>
               <td>{candidate.title}</td>
               <td>{candidate.kind === "cta" ? "Direct" : "Soft"}</td>
               <td>{candidate.scorecard.overall} / {candidate.scorecard.personaFit}</td>
-              <td><StatusPill status={candidate.status === "starred" ? "Approved" : candidate.status === "needs-revision" ? "In Review" : "Draft"} /></td>
+              <td><StatusPill status={candidate.status === "starred" ? "Approved" : candidate.status === "needs-revision" ? "In Review" : candidate.status === "rejected" ? "Rejected" : "Draft"} /></td>
             </tr>
           ))}
         </tbody>

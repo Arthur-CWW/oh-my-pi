@@ -1,5 +1,5 @@
 import { UgcJsonStore } from "./ugc-json-store"
-import { isRecord, type BranchPatch, type CandidateStatusPatch, type CreateExportManifestInput, type CreateProviderJobInput, type CreateReferenceArchiveInput, type CreateReviewNoteInput, type CreateWorkspaceBundleInput, type ImportWorkspaceBundleInput, type PersonaPatch, type ProviderJobPatch, type ReferenceArchiveFormatOutput, type UgcReferenceArchive } from "../ugc/local-state"
+import { isRecord, type BranchPatch, type BulkCandidateStatusPatch, type CandidateStatusPatch, type CreateExportManifestInput, type CreateProviderJobInput, type CreateReferenceArchiveInput, type CreateReviewNoteInput, type CreateWorkspaceBundleInput, type ImportWorkspaceBundleInput, type PersonaPatch, type ProviderJobPatch, type ReferenceArchiveFormatOutput, type UgcReferenceArchive } from "../ugc/local-state"
 import type { BranchStatus, CandidateStatus, JsonValue, ReviewAttachment, ReviewVerdict } from "../renderer/ugcStudioModel"
 
 export async function routeUgc(request: Request, store: UgcJsonStore): Promise<Response | null> {
@@ -30,6 +30,10 @@ export async function routeUgc(request: Request, store: UgcJsonStore): Promise<R
     const id = decodeURIComponent(url.pathname.slice("/api/ugc/personas/".length))
     if (!id) return json({ error: "missing persona id" }, 400)
     return json(store.updatePersona(id, decodePersonaPatch(await readJson(request))))
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/ugc/candidates/status") {
+    return json(store.updateCandidates(decodeBulkCandidateStatusPatch(await readJson(request))))
   }
 
   if (request.method === "POST" && url.pathname.startsWith("/api/ugc/candidates/") && url.pathname.endsWith("/status")) {
@@ -118,6 +122,14 @@ function decodePersonaPatch(value: JsonValue): PersonaPatch {
 function decodeCandidateStatusPatch(value: JsonValue): CandidateStatusPatch {
   if (!isRecord(value) || !isCandidateStatus(value.status)) throw new Error("candidate status patch requires a valid status")
   return { status: value.status }
+}
+
+function decodeBulkCandidateStatusPatch(value: JsonValue): BulkCandidateStatusPatch {
+  if (!isRecord(value) || !isCandidateStatus(value.status)) throw new Error("candidate bulk status patch requires a valid status")
+  if (!Array.isArray(value.candidateIds) || !value.candidateIds.every((item) => typeof item === "string")) {
+    throw new Error("candidate bulk status patch requires candidateIds")
+  }
+  return { candidateIds: value.candidateIds, status: value.status }
 }
 
 function decodeBranchPatch(value: JsonValue): BranchPatch {

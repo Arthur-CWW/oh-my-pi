@@ -9,6 +9,7 @@ import {
   summarizeLocalState,
   toJsonValue,
   type BranchPatch,
+  type BulkCandidateStatusPatch,
   type CandidateStatusPatch,
   type CreateExportManifestInput,
   type CreateProviderJobInput,
@@ -114,6 +115,24 @@ export class UgcJsonStore {
       ))
       if (candidates.every((candidate, index) => candidate === workspace.candidates[index])) {
         throw new Error(`candidate not found: ${candidateId}`)
+      }
+      return { ...workspace, candidates }
+    })
+  }
+
+  updateCandidates(patch: BulkCandidateStatusPatch): UgcLocalState {
+    const candidateIds = new Set(patch.candidateIds)
+    if (candidateIds.size === 0) throw new Error("candidate bulk status patch requires candidateIds")
+    return this.updateWorkspace((workspace) => {
+      let updatedCount = 0
+      const candidates = workspace.candidates.map((candidate) => {
+        if (!candidateIds.has(candidate.id)) return candidate
+        updatedCount += 1
+        return { ...candidate, status: patch.status }
+      })
+      if (updatedCount !== candidateIds.size) {
+        const missing = [...candidateIds].filter((id) => !workspace.candidates.some((candidate) => candidate.id === id))
+        throw new Error(`candidate not found: ${missing.join(", ")}`)
       }
       return { ...workspace, candidates }
     })

@@ -180,6 +180,16 @@ describe("UgcJsonStore", () => {
     expect(job?.response).toEqual({ taskId: "kie_task_123", resultUrls: ["file:///tmp/out.mp4"] })
     expect(job?.updatedAt).toBe("2026-06-10T00:00:00.000Z")
   })
+
+  test("updates selected candidate sets in one local transaction", () => {
+    const store = createStore()
+    const initial = store.read()
+    const candidateIds = initial.workspace.candidates.slice(0, 2).map((candidate) => candidate.id)
+
+    const updated = store.updateCandidates({ candidateIds, status: "needs-revision" })
+
+    expect(updated.workspace.candidates.filter((candidate) => candidateIds.includes(candidate.id)).every((candidate) => candidate.status === "needs-revision")).toBe(true)
+  })
 })
 
 function createStore(): UgcJsonStore {

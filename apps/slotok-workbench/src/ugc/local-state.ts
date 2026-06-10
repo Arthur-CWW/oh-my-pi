@@ -177,6 +177,11 @@ export interface CandidateStatusPatch {
   readonly status: CandidateStatus
 }
 
+export interface BulkCandidateStatusPatch {
+  readonly candidateIds: readonly string[]
+  readonly status: CandidateStatus
+}
+
 export interface CreateReviewNoteInput {
   readonly author?: "arthur" | "agent"
   readonly attachedTo: ReviewAttachment

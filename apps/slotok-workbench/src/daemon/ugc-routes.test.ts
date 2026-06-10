@@ -28,6 +28,14 @@ describe("routeUgc", () => {
     const statusState = await readState(statusResponse)
     expect(statusState.workspace.candidates.find((candidate) => candidate.id === candidateId)?.status).toBe("rejected")
 
+    const selectedSetIds = initial.workspace.candidates.slice(0, 2).map((candidate) => candidate.id)
+    const bulkStatusResponse = await routeUgc(jsonRequest("/api/ugc/candidates/status", {
+      candidateIds: selectedSetIds,
+      status: "needs-revision",
+    }), store)
+    const bulkStatusState = await readState(bulkStatusResponse)
+    expect(bulkStatusState.workspace.candidates.filter((candidate) => selectedSetIds.includes(candidate.id)).every((candidate) => candidate.status === "needs-revision")).toBe(true)
+
     const noteResponse = await routeUgc(jsonRequest("/api/ugc/notes", {
       attachedTo: { kind: "candidate", id: candidateId },
       verdict: "reject",
