@@ -13,8 +13,11 @@ describe("UgcJsonStore", () => {
     expect(state.schemaVersion).toBe("ugc-studio.local-state.v1")
     expect(state.workspace.personas.length).toBeGreaterThan(0)
     expect(state.referenceArchives.length).toBe(state.workspace.referenceProfiles.length)
+    expect(state.researchTargets.length).toBeGreaterThan(0)
+    expect(state.templateMiningJobs.length).toBeGreaterThan(0)
     expect(existsSync(resolve(store.config.workspaceDir, "workspace.json"))).toBe(true)
     expect(existsSync(resolve(store.config.workspaceDir, "personas", `${state.workspace.personas[0]?.id}.json`))).toBe(true)
+    expect(existsSync(resolve(store.config.workspaceDir, "research-targets", `${state.researchTargets[0]?.id}.json`))).toBe(true)
     expect(existsSync(resolve(store.config.workspaceDir, "assets", "generated"))).toBe(true)
   })
 
@@ -66,6 +69,30 @@ describe("UgcJsonStore", () => {
       ],
       notes: ["abstract mechanics only"],
     })
+    const researchTargetState = store.createResearchTarget({
+      niche: "faceless skincare UGC",
+      query: "faceless skincare routine captions proof CTA template",
+      platform: "tiktok",
+      sourcePolicy: "metadata-only",
+      notes: ["queue only"],
+    })
+    const researchTargetId = researchTargetState.researchTargets[0]?.id ?? ""
+    store.updateResearchTarget(researchTargetId, { status: "sampling", priority: 2 })
+    const templateJobState = store.createTemplateMiningJob({
+      researchTargetId,
+      templateSpec: {
+        schemaVersion: "ugc-studio.clean-room-template.v1",
+        id: "template_faceless_skin_proof",
+        title: "Faceless skincare proof",
+        category: "caption",
+        preservedMechanics: { captionBlocks: 3, cue: "before-after-proof" },
+        swapSlots: ["product", "hook", "CTA"],
+        blockedFields: ["source audio", "exact captions"],
+        proofNotes: ["clean-room test"],
+      },
+    })
+    const templateJobId = templateJobState.templateMiningJobs[0]?.id ?? ""
+    store.updateTemplateMiningJob(templateJobId, { status: "ready", candidateIds: [candidateId] })
     store.createExportManifest({ selectedCandidateId: candidateId, label: "Proof export", notes: ["draft manifest"] })
 
     const updated = store.read()
@@ -85,6 +112,10 @@ describe("UgcJsonStore", () => {
     expect(updated.referenceArchives[0]?.notes).toContain("abstract mechanics only")
     expect(updated.referenceArchives[0]?.archiveStatus).toBe("decomposed")
     expect(updated.referenceArchives[0]?.candidateFormatOutputs[0]?.id).toBe("format_test_pose")
+    expect(updated.researchTargets[0]?.status).toBe("sampling")
+    expect(updated.researchTargets[0]?.templateJobIds).toContain(templateJobId)
+    expect(updated.templateMiningJobs[0]?.status).toBe("ready")
+    expect(updated.templateMiningJobs[0]?.templateSpec.title).toBe("Faceless skincare proof")
     expect(updated.exportManifests[0]?.label).toBe("Proof export")
 
     const reloaded = new UgcJsonStore({
@@ -96,6 +127,7 @@ describe("UgcJsonStore", () => {
       readonly candidateFormatOutputs?: readonly { readonly id: string }[]
     }
     expect(reloaded.referenceArchives[0]?.candidateFormatOutputs[0]?.id).toBe("format_test_pose")
+    expect(reloaded.templateMiningJobs[0]?.templateSpec.title).toBe("Faceless skincare proof")
     expect(archiveShard.candidateFormatOutputs?.[0]?.id).toBe("format_test_pose")
   })
 
@@ -125,6 +157,8 @@ describe("UgcJsonStore", () => {
     expect(bundle.objectCounts.personas).toBe(initial.workspace.personas.length)
     expect(bundle.shardManifest.workspace).toBe("workspace.json")
     expect(bundle.shardManifest.collections.referenceArchives.length).toBe(initial.referenceArchives.length)
+    expect(bundle.shardManifest.collections.researchTargets.length).toBe(initial.researchTargets.length)
+    expect(bundle.shardManifest.collections.templateMiningJobs.length).toBe(initial.templateMiningJobs.length)
     expect(bundle.shardManifest.collections.bundles).toContain(`bundles/${bundle.id}.json`)
     expect(bundle.shardManifest.assets.generated).toBe("assets/generated")
     expect(existsSync(bundlePath)).toBe(true)

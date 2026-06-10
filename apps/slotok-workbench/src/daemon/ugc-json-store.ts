@@ -3,6 +3,8 @@ import { dirname, resolve } from "node:path"
 import {
   candidateById,
   createInitialLocalState,
+  createInitialResearchTargets,
+  createInitialTemplateMiningJobs,
   isLocalState,
   isRecord,
   referenceProfileToArchive,
@@ -11,20 +13,27 @@ import {
   type BranchPatch,
   type BulkCandidateStatusPatch,
   type CandidateStatusPatch,
+  type CleanRoomTemplateSpec,
   type CreateBranchInput,
   type CreateExportManifestInput,
   type CreateProviderJobInput,
   type CreateReferenceArchiveInput,
+  type CreateResearchTargetInput,
   type CreateReviewNoteInput,
+  type CreateTemplateMiningJobInput,
   type CreateWorkspaceBundleInput,
   type FinalEditorPatch,
   type ImportWorkspaceBundleInput,
   type PersonaPatch,
   type ProviderJobPatch,
+  type ResearchTargetPatch,
+  type TemplateMiningJobPatch,
   type UgcExportManifest,
   type UgcLocalState,
   type UgcProviderJob,
   type UgcReferenceArchive,
+  type UgcResearchTarget,
+  type UgcTemplateMiningJob,
   type UgcWorkspaceBundle,
   type UgcWorkspaceBundleImportResult,
   type UgcWorkspaceBundleObjectCounts,
@@ -300,6 +309,90 @@ export class UgcJsonStore {
     return this.write({ ...state, referenceArchives })
   }
 
+  createResearchTarget(input: CreateResearchTargetInput): UgcLocalState {
+    const state = this.read()
+    const now = this.now()
+    const target: UgcResearchTarget = {
+      schemaVersion: "ugc-studio.research-target.v1",
+      id: `research_${slug(input.niche)}_${Date.now().toString(36)}`,
+      workspaceId: state.workspace.id,
+      platform: input.platform ?? "tiktok",
+      niche: input.niche,
+      query: input.query,
+      status: "queued",
+      priority: input.priority ?? 3,
+      sourcePolicy: input.sourcePolicy ?? "metadata-only",
+      createdAt: now,
+      updatedAt: now,
+      templateJobIds: [],
+      notes: input.notes ?? [],
+    }
+    return this.write({ ...state, researchTargets: [target, ...state.researchTargets] })
+  }
+
+  updateResearchTarget(targetId: string, patch: ResearchTargetPatch): UgcLocalState {
+    const state = this.read()
+    const now = this.now()
+    const researchTargets = state.researchTargets.map((target) => {
+      if (target.id !== targetId) return target
+      return {
+        ...target,
+        status: patch.status ?? target.status,
+        priority: patch.priority ?? target.priority,
+        notes: patch.notes ?? target.notes,
+        updatedAt: now,
+      }
+    })
+    if (researchTargets.every((target, index) => target === state.researchTargets[index])) {
+      throw new Error(`research target not found: ${targetId}`)
+    }
+    return this.write({ ...state, researchTargets })
+  }
+
+  createTemplateMiningJob(input: CreateTemplateMiningJobInput): UgcLocalState {
+    const state = this.read()
+    const target = state.researchTargets.find((item) => item.id === input.researchTargetId)
+    if (!target) throw new Error(`research target not found: ${input.researchTargetId}`)
+    const now = this.now()
+    const templateSpec = input.templateSpec ?? createTemplateSpecFromTarget(target)
+    const job: UgcTemplateMiningJob = {
+      schemaVersion: "ugc-studio.template-mining-job.v1",
+      id: `template_job_${slug(templateSpec.title)}_${Date.now().toString(36)}`,
+      workspaceId: state.workspace.id,
+      researchTargetId: input.researchTargetId,
+      status: input.status ?? "planned",
+      createdAt: now,
+      updatedAt: now,
+      templateSpec,
+      candidateIds: input.candidateIds ?? [],
+      error: null,
+    }
+    const researchTargets = state.researchTargets.map((item) => (
+      item.id === target.id ? { ...item, templateJobIds: [...item.templateJobIds, job.id], updatedAt: now } : item
+    ))
+    return this.write({ ...state, researchTargets, templateMiningJobs: [job, ...state.templateMiningJobs] })
+  }
+
+  updateTemplateMiningJob(jobId: string, patch: TemplateMiningJobPatch): UgcLocalState {
+    const state = this.read()
+    const now = this.now()
+    const templateMiningJobs = state.templateMiningJobs.map((job) => {
+      if (job.id !== jobId) return job
+      return {
+        ...job,
+        status: patch.status ?? job.status,
+        templateSpec: patch.templateSpec ?? job.templateSpec,
+        candidateIds: patch.candidateIds ?? job.candidateIds,
+        error: patch.error === undefined ? job.error : patch.error,
+        updatedAt: now,
+      }
+    })
+    if (templateMiningJobs.every((job, index) => job === state.templateMiningJobs[index])) {
+      throw new Error(`template mining job not found: ${jobId}`)
+    }
+    return this.write({ ...state, templateMiningJobs })
+  }
+
   updateFinalEditor(patch: FinalEditorPatch): UgcLocalState {
     return this.updateWorkspace((workspace) => {
       if (patch.selectedCandidateId && !candidateById(workspace, patch.selectedCandidateId)) {
@@ -454,6 +547,23 @@ function patchPersona(persona: PersonaProfile, patch: PersonaPatch): PersonaProf
   }
 }
 
+function createTemplateSpecFromTarget(target: UgcResearchTarget): CleanRoomTemplateSpec {
+  return {
+    schemaVersion: "ugc-studio.clean-room-template.v1",
+    id: `template_${slug(target.niche)}`,
+    title: `${target.niche} clean-room template`,
+    category: "format",
+    preservedMechanics: {
+      query: target.query,
+      sourcePolicy: target.sourcePolicy,
+      extractionGoal: "Preserve abstract timing, structure, caption grammar, and CTA pattern only.",
+    },
+    swapSlots: ["synthetic persona", "product", "hook copy", "caption copy", "voice", "CTA"],
+    blockedFields: ["source face", "source voice", "exact captions", "source pixels", "brand marks"],
+    proofNotes: target.notes.length > 0 ? target.notes : ["Queued from local research target. No live scraping performed."],
+  }
+}
+
 function stampState(state: UgcLocalState, now: string): UgcLocalState {
   return {
     ...state,
@@ -463,6 +573,10 @@ function stampState(state: UgcLocalState, now: string): UgcLocalState {
 }
 
 function normalizeLocalState(state: UgcLocalState): UgcLocalState {
+  const legacyState = state as UgcLocalState & {
+    readonly researchTargets?: readonly UgcResearchTarget[]
+    readonly templateMiningJobs?: readonly UgcTemplateMiningJob[]
+  }
   const referenceArchives = state.workspace.referenceProfiles.map((referenceProfile) => {
     const defaultArchive = referenceProfileToArchive(state.workspace.id, referenceProfile, state.updatedAt)
     const existing = state.referenceArchives.find((archive) => archive.referenceProfileId === referenceProfile.id)
@@ -479,7 +593,12 @@ function normalizeLocalState(state: UgcLocalState): UgcLocalState {
   const orphanArchives = state.referenceArchives.filter((archive) => (
     !state.workspace.referenceProfiles.some((referenceProfile) => referenceProfile.id === archive.referenceProfileId)
   ))
-  return { ...state, referenceArchives: [...referenceArchives, ...orphanArchives] }
+  return {
+    ...state,
+    referenceArchives: [...referenceArchives, ...orphanArchives],
+    researchTargets: legacyState.researchTargets ?? createInitialResearchTargets(state.workspace.id, state.updatedAt),
+    templateMiningJobs: legacyState.templateMiningJobs ?? createInitialTemplateMiningJobs(state.workspace.id, state.updatedAt),
+  }
 }
 
 function writeWorkspaceShards(workspaceDir: string, state: UgcLocalState): void {
@@ -492,6 +611,8 @@ function writeWorkspaceShards(workspaceDir: string, state: UgcLocalState): void 
   writeCollection(resolve(workspaceDir, "provider-jobs"), state.providerJobs)
   writeCollection(resolve(workspaceDir, "reference-archives"), state.referenceArchives)
   writeCollection(resolve(workspaceDir, "exports"), state.exportManifests)
+  writeCollection(resolve(workspaceDir, "research-targets"), state.researchTargets)
+  writeCollection(resolve(workspaceDir, "template-mining-jobs"), state.templateMiningJobs)
   mkdirSync(resolve(workspaceDir, "assets/source"), { recursive: true })
   mkdirSync(resolve(workspaceDir, "assets/generated"), { recursive: true })
   mkdirSync(resolve(workspaceDir, "assets/exports"), { recursive: true })
@@ -543,6 +664,8 @@ function bundleObjectCounts(state: UgcLocalState): UgcWorkspaceBundleObjectCount
     providerJobs: state.providerJobs.length,
     referenceArchives: state.referenceArchives.length,
     exportManifests: state.exportManifests.length,
+    researchTargets: state.researchTargets.length,
+    templateMiningJobs: state.templateMiningJobs.length,
   }
 }
 
@@ -559,6 +682,8 @@ function createShardManifest(state: UgcLocalState, workspaceDir: string, current
       providerJobs: state.providerJobs.map((item) => `provider-jobs/${item.id}.json`),
       referenceArchives: state.referenceArchives.map((item) => `reference-archives/${item.id}.json`),
       exports: state.exportManifests.map((item) => `exports/${item.id}.json`),
+      researchTargets: state.researchTargets.map((item) => `research-targets/${item.id}.json`),
+      templateMiningJobs: state.templateMiningJobs.map((item) => `template-mining-jobs/${item.id}.json`),
       bundles: [...bundlePaths].sort(),
     },
     assets: {
@@ -610,6 +735,8 @@ function isObjectCounts(value: unknown): value is UgcWorkspaceBundleObjectCounts
     && typeof value.providerJobs === "number"
     && typeof value.referenceArchives === "number"
     && typeof value.exportManifests === "number"
+    && typeof value.researchTargets === "number"
+    && typeof value.templateMiningJobs === "number"
 }
 
 function isShardManifest(value: unknown): value is UgcWorkspaceBundleShardManifest {
@@ -622,6 +749,8 @@ function isShardManifest(value: unknown): value is UgcWorkspaceBundleShardManife
     && isStringArray(value.collections.providerJobs)
     && isStringArray(value.collections.referenceArchives)
     && isStringArray(value.collections.exports)
+    && isStringArray(value.collections.researchTargets)
+    && isStringArray(value.collections.templateMiningJobs)
     && isStringArray(value.collections.bundles)
     && typeof value.assets.source === "string"
     && typeof value.assets.generated === "string"

@@ -16,6 +16,9 @@ export type UgcProvider = "kie" | "jimeng" | "local"
 export type UgcProviderJobMode = "dry-run" | "live"
 export type UgcProviderJobStatus = "planned" | "queued" | "running" | "succeeded" | "failed" | "blocked" | "completed"
 export type UgcExportStatus = "draft" | "queued" | "rendered" | "failed"
+export type UgcResearchPlatform = "tiktok" | "instagram" | "youtube-shorts" | "web" | "internal"
+export type UgcResearchTargetStatus = "draft" | "queued" | "sampling" | "decomposed" | "blocked" | "done"
+export type UgcTemplateMiningJobStatus = "planned" | "queued" | "running" | "ready" | "blocked" | "done"
 
 export interface UgcWorkspaceSummary {
   readonly id: string
@@ -26,6 +29,8 @@ export interface UgcWorkspaceSummary {
   readonly branchCount: number
   readonly providerJobCount: number
   readonly exportCount: number
+  readonly researchTargetCount: number
+  readonly templateMiningJobCount: number
 }
 
 export interface UgcWorkspaceBundle {
@@ -49,6 +54,8 @@ export interface UgcWorkspaceBundleObjectCounts {
   readonly providerJobs: number
   readonly referenceArchives: number
   readonly exportManifests: number
+  readonly researchTargets: number
+  readonly templateMiningJobs: number
 }
 
 export interface UgcWorkspaceBundleShardManifest {
@@ -62,6 +69,8 @@ export interface UgcWorkspaceBundleShardManifest {
     readonly providerJobs: readonly string[]
     readonly referenceArchives: readonly string[]
     readonly exports: readonly string[]
+    readonly researchTargets: readonly string[]
+    readonly templateMiningJobs: readonly string[]
     readonly bundles: readonly string[]
   }
   readonly assets: {
@@ -149,12 +158,54 @@ export interface ReferenceArchiveFormatOutput {
   readonly manifestJson: JsonValue
 }
 
+export interface UgcResearchTarget {
+  readonly schemaVersion: "ugc-studio.research-target.v1"
+  readonly id: string
+  readonly workspaceId: string
+  readonly platform: UgcResearchPlatform
+  readonly niche: string
+  readonly query: string
+  readonly status: UgcResearchTargetStatus
+  readonly priority: number
+  readonly sourcePolicy: "metadata-only" | "abstract-mechanics"
+  readonly createdAt: string
+  readonly updatedAt: string
+  readonly templateJobIds: readonly string[]
+  readonly notes: readonly string[]
+}
+
+export interface UgcTemplateMiningJob {
+  readonly schemaVersion: "ugc-studio.template-mining-job.v1"
+  readonly id: string
+  readonly workspaceId: string
+  readonly researchTargetId: string
+  readonly status: UgcTemplateMiningJobStatus
+  readonly createdAt: string
+  readonly updatedAt: string
+  readonly templateSpec: CleanRoomTemplateSpec
+  readonly candidateIds: readonly string[]
+  readonly error: string | null
+}
+
+export interface CleanRoomTemplateSpec {
+  readonly schemaVersion: "ugc-studio.clean-room-template.v1"
+  readonly id: string
+  readonly title: string
+  readonly category: "format" | "pose" | "caption" | "hook" | "cta" | "persona-building"
+  readonly preservedMechanics: JsonValue
+  readonly swapSlots: readonly string[]
+  readonly blockedFields: readonly string[]
+  readonly proofNotes: readonly string[]
+}
+
 export interface UgcLocalState {
   readonly schemaVersion: "ugc-studio.local-state.v1"
   readonly workspace: UgcStudioWorkspace
   readonly providerJobs: readonly UgcProviderJob[]
   readonly exportManifests: readonly UgcExportManifest[]
   readonly referenceArchives: readonly UgcReferenceArchive[]
+  readonly researchTargets: readonly UgcResearchTarget[]
+  readonly templateMiningJobs: readonly UgcTemplateMiningJob[]
   readonly updatedAt: string
 }
 
@@ -233,6 +284,35 @@ export interface CreateReferenceArchiveInput {
   readonly notes?: readonly string[]
 }
 
+export interface CreateResearchTargetInput {
+  readonly platform?: UgcResearchPlatform
+  readonly niche: string
+  readonly query: string
+  readonly priority?: number
+  readonly sourcePolicy?: UgcResearchTarget["sourcePolicy"]
+  readonly notes?: readonly string[]
+}
+
+export interface ResearchTargetPatch {
+  readonly status?: UgcResearchTargetStatus
+  readonly notes?: readonly string[]
+  readonly priority?: number
+}
+
+export interface CreateTemplateMiningJobInput {
+  readonly researchTargetId: string
+  readonly status?: UgcTemplateMiningJobStatus
+  readonly templateSpec?: CleanRoomTemplateSpec
+  readonly candidateIds?: readonly string[]
+}
+
+export interface TemplateMiningJobPatch {
+  readonly status?: UgcTemplateMiningJobStatus
+  readonly templateSpec?: CleanRoomTemplateSpec
+  readonly candidateIds?: readonly string[]
+  readonly error?: string | null
+}
+
 export interface CreateExportManifestInput {
   readonly label?: string
   readonly selectedCandidateId?: string
@@ -279,6 +359,8 @@ export function createInitialLocalState(now = new Date().toISOString()): UgcLoca
     providerJobs: [],
     exportManifests: [],
     referenceArchives: workspace.referenceProfiles.map((referenceProfile) => referenceProfileToArchive(workspace.id, referenceProfile, now)),
+    researchTargets: createInitialResearchTargets(workspace.id, now),
+    templateMiningJobs: createInitialTemplateMiningJobs(workspace.id, now),
     updatedAt: now,
   }
 }
@@ -293,7 +375,59 @@ export function summarizeLocalState(state: UgcLocalState): UgcWorkspaceSummary {
     branchCount: state.workspace.branchSnapshots.length,
     providerJobCount: state.providerJobs.length,
     exportCount: state.exportManifests.length,
+    researchTargetCount: state.researchTargets.length,
+    templateMiningJobCount: state.templateMiningJobs.length,
   }
+}
+
+export function createInitialResearchTargets(workspaceId: string, now: string): readonly UgcResearchTarget[] {
+  return [
+    {
+      schemaVersion: "ugc-studio.research-target.v1",
+      id: "research_kbeauty_fitness_ugc",
+      workspaceId,
+      platform: "tiktok",
+      niche: "Korean beauty fitness UGC",
+      query: "Korean beauty fitness creator protein snack soft routine proof hooks",
+      status: "queued",
+      priority: 1,
+      sourcePolicy: "metadata-only",
+      createdAt: now,
+      updatedAt: now,
+      templateJobIds: ["template_job_kbeauty_soft_proof"],
+      notes: ["No live scraping. Queue public/rights-cleared research targets for later review."],
+    },
+  ]
+}
+
+export function createInitialTemplateMiningJobs(workspaceId: string, now: string): readonly UgcTemplateMiningJob[] {
+  return [
+    {
+      schemaVersion: "ugc-studio.template-mining-job.v1",
+      id: "template_job_kbeauty_soft_proof",
+      workspaceId,
+      researchTargetId: "research_kbeauty_fitness_ugc",
+      status: "planned",
+      createdAt: now,
+      updatedAt: now,
+      templateSpec: {
+        schemaVersion: "ugc-studio.clean-room-template.v1",
+        id: "template_kbeauty_soft_proof",
+        title: "Soft routine proof hook",
+        category: "hook",
+        preservedMechanics: {
+          structure: ["quiet problem beat", "routine insert", "product proof", "low-pressure CTA"],
+          captionRhythm: "two short caption blocks, one proof line, one CTA line",
+          editCadence: "calm jump cuts every 2-3 seconds",
+        },
+        swapSlots: ["synthetic persona", "product demo", "hook copy", "CTA copy", "voice"],
+        blockedFields: ["source face", "source voice", "exact caption text", "source pixels", "brand marks"],
+        proofNotes: ["Abstract mechanics only; no source media or identity cloning."],
+      },
+      candidateIds: [],
+      error: null,
+    },
+  ]
 }
 
 export function referenceProfileToArchive(workspaceId: string, referenceProfile: ReferenceProfile, now: string): UgcReferenceArchive {
@@ -356,6 +490,8 @@ export function isLocalState(value: unknown): value is UgcLocalState {
   if (value.schemaVersion !== "ugc-studio.local-state.v1") return false
   if (!isWorkspace(value.workspace)) return false
   if (!Array.isArray(value.providerJobs) || !Array.isArray(value.exportManifests) || !Array.isArray(value.referenceArchives)) return false
+  if ("researchTargets" in value && !Array.isArray(value.researchTargets)) return false
+  if ("templateMiningJobs" in value && !Array.isArray(value.templateMiningJobs)) return false
   return typeof value.updatedAt === "string"
 }
 

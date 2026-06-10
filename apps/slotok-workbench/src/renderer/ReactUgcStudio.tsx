@@ -1538,9 +1538,12 @@ type ReferenceSourcePolicy = UgcReferenceArchive["sourcePolicy"]
 type ReferenceArchiveStatus = UgcReferenceArchive["archiveStatus"]
 
 function ReferenceArchiveView(props: { onMutateLocal: (path: string, body: object) => void }) {
-  const { workspace, referenceArchives } = useUgcLocalState()
+  const { workspace, referenceArchives, researchTargets, templateMiningJobs } = useUgcLocalState()
   const [selectedReferenceId, setSelectedReferenceId] = React.useState(workspace.referenceProfiles[0]?.id ?? "")
+  const [selectedResearchTargetId, setSelectedResearchTargetId] = React.useState(researchTargets[0]?.id ?? "")
   const selectedReference = workspace.referenceProfiles.find((reference) => reference.id === selectedReferenceId) ?? workspace.referenceProfiles[0]
+  const selectedResearchTarget = researchTargets.find((target) => target.id === selectedResearchTargetId) ?? researchTargets[0]
+  const selectedTemplateJobs = selectedResearchTarget ? templateMiningJobs.filter((job) => job.researchTargetId === selectedResearchTarget.id) : []
   const persistedArchive = referenceArchives.find((archive) => archive.referenceProfileId === selectedReference?.id)
   const defaultArchive = selectedReference ? referenceProfileToArchive(workspace.id, selectedReference, workspace.updatedAt) : null
   const selectedArchive = persistedArchive ?? defaultArchive
@@ -1557,6 +1560,12 @@ function ReferenceArchiveView(props: { onMutateLocal: (path: string, body: objec
       setSelectedReferenceId(workspace.referenceProfiles[0]?.id ?? "")
     }
   }, [selectedReferenceId, workspace.referenceProfiles])
+
+  React.useEffect(() => {
+    if (!researchTargets.some((target) => target.id === selectedResearchTargetId)) {
+      setSelectedResearchTargetId(researchTargets[0]?.id ?? "")
+    }
+  }, [researchTargets, selectedResearchTargetId])
 
   React.useEffect(() => {
     setSourcePolicy(selectedArchive?.sourcePolicy ?? "abstract-mechanics")
@@ -1616,6 +1625,36 @@ function ReferenceArchiveView(props: { onMutateLocal: (path: string, body: objec
       },
     })
   }
+  const queueResearchTarget = () => {
+    props.onMutateLocal("/api/ugc/research-targets", {
+      platform: selectedReference.platform === "internal-pack" ? "internal" : selectedReference.platform,
+      niche: selectedReference.styleLane,
+      query: `${selectedReference.styleLane} ${selectedReference.useCase} clean-room template mechanics`,
+      sourcePolicy: "metadata-only",
+      notes: [`Queued from ${selectedReference.displayName}; metadata and abstract mechanics only.`],
+    })
+  }
+  const mineTemplate = () => {
+    if (!selectedResearchTarget) return
+    props.onMutateLocal("/api/ugc/template-mining-jobs", {
+      researchTargetId: selectedResearchTarget.id,
+      status: "planned",
+      templateSpec: {
+        schemaVersion: "ugc-studio.clean-room-template.v1",
+        id: `template_${selectedResearchTarget.id}`,
+        title: `${selectedResearchTarget.niche} template`,
+        category: "format",
+        preservedMechanics: {
+          query: selectedResearchTarget.query,
+          sourcePolicy: selectedResearchTarget.sourcePolicy,
+          extractionGoal: "Preserve abstract timing, shot structure, caption grammar, and CTA mechanics.",
+        },
+        swapSlots: ["synthetic persona", "product", "hook", "caption", "voice", "CTA"],
+        blockedFields: ["source face", "source voice", "exact captions", "source pixels", "brand marks"],
+        proofNotes: ["Created from local queue. No live scraping performed."],
+      },
+    })
+  }
 
   return (
     <div className="grid h-full min-h-0 grid-cols-[220px_minmax(0,1fr)] gap-3 overflow-hidden p-3">
@@ -1647,6 +1686,31 @@ function ReferenceArchiveView(props: { onMutateLocal: (path: string, body: objec
               </button>
             )
           })}
+        </div>
+        <div className="mt-3 border-t border-border pt-3">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <span className="text-[11px] font-semibold text-foreground">Research queue</span>
+            <StatusBadge>{researchTargets.length}</StatusBadge>
+          </div>
+          <div className="grid gap-2">
+            {researchTargets.slice(0, 4).map((target) => (
+              <button
+                key={target.id}
+                type="button"
+                className={cn(
+                  "grid gap-1 rounded-md border border-border bg-background px-2.5 py-2 text-left hover:bg-accent",
+                  selectedResearchTarget?.id === target.id && "border-primary/60 bg-primary/10",
+                )}
+                onClick={() => setSelectedResearchTargetId(target.id)}
+              >
+                <span className="truncate text-[11px] font-semibold text-foreground">{target.niche}</span>
+                <span className="truncate text-[10px] text-muted-foreground">{target.platform} / {target.status}</span>
+              </button>
+            ))}
+          </div>
+          <Button className="mt-2 w-full" size="xs" variant="workbench" onClick={queueResearchTarget}>
+            <Plus size={13} /> Queue current lane
+          </Button>
         </div>
       </PanelCard>
 
@@ -1732,6 +1796,46 @@ function ReferenceArchiveView(props: { onMutateLocal: (path: string, body: objec
             <div className="grid grid-cols-2 gap-2">
               {outputs.map((output) => <ReferenceFormatOutputCard key={output.id} output={output} />)}
             </div>
+          </div>
+
+          <div className="mt-3 grid gap-2 rounded-md border border-border bg-background p-3">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <p className="m-0 text-[11px] font-semibold text-foreground">Niche research and template mining</p>
+                <p className="m-0 mt-0.5 text-[10px] text-muted-foreground">Local queue only. Use this to plan later niche/template research without scraping live sources.</p>
+              </div>
+              <Button size="xs" variant="workbench" disabled={!selectedResearchTarget} onClick={mineTemplate}>
+                <Plus size={13} /> Mine template
+              </Button>
+            </div>
+            {selectedResearchTarget ? (
+              <div className="grid grid-cols-[minmax(0,1fr)_260px] gap-2">
+                <div className="rounded-md border border-border bg-card p-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <strong className="text-[11px] text-foreground">{selectedResearchTarget.niche}</strong>
+                    <StatusBadge tone={selectedResearchTarget.status === "blocked" ? "danger" : selectedResearchTarget.status === "done" ? "success" : "active"}>{selectedResearchTarget.status}</StatusBadge>
+                  </div>
+                  <p className="mt-1 line-clamp-2 text-[11px] leading-4 text-muted-foreground">{selectedResearchTarget.query}</p>
+                  <div className="mt-2 flex items-center justify-between text-[10px] text-muted-foreground">
+                    <span>{selectedResearchTarget.sourcePolicy}</span>
+                    <span>{selectedTemplateJobs.length} template jobs</span>
+                  </div>
+                </div>
+                <div className="grid gap-1.5">
+                  {selectedTemplateJobs.slice(0, 3).map((job) => (
+                    <div key={job.id} className="rounded border border-border bg-card p-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="truncate text-[10px] font-semibold text-foreground">{job.templateSpec.title}</span>
+                        <StatusBadge>{job.status}</StatusBadge>
+                      </div>
+                      <p className="m-0 mt-1 line-clamp-2 text-[10px] text-muted-foreground">{job.templateSpec.proofNotes.join(" ")}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <p className="m-0 text-[11px] text-muted-foreground">No local research targets queued.</p>
+            )}
           </div>
 
           <div className="mt-3 grid grid-cols-[minmax(0,1fr)_260px] gap-2">

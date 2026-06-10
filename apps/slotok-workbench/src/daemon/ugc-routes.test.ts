@@ -94,6 +94,50 @@ describe("routeUgc", () => {
     const deleteState = await readState(deleteResponse)
     expect(deleteState.referenceArchives.some((archive) => archive.id === archiveId)).toBe(false)
 
+    const researchResponse = await routeUgc(jsonRequest("/api/ugc/research-targets", {
+      niche: "faceless SaaS founder UGC",
+      query: "faceless founder UGC template hook CTA screen recording proof",
+      platform: "tiktok",
+      sourcePolicy: "metadata-only",
+      notes: ["route research proof"],
+    }), store)
+    const researchState = await readState(researchResponse)
+    const researchTargetId = researchState.researchTargets[0]?.id ?? ""
+    expect(researchState.researchTargets[0]?.niche).toBe("faceless SaaS founder UGC")
+
+    const patchResearchResponse = await routeUgc(jsonRequest(`/api/ugc/research-targets/${researchTargetId}`, {
+      status: "sampling",
+      priority: 1,
+      notes: ["sample public metadata only"],
+    }), store)
+    const patchResearchState = await readState(patchResearchResponse)
+    expect(patchResearchState.researchTargets.find((target) => target.id === researchTargetId)?.status).toBe("sampling")
+
+    const templateJobResponse = await routeUgc(jsonRequest("/api/ugc/template-mining-jobs", {
+      researchTargetId,
+      status: "planned",
+      templateSpec: {
+        schemaVersion: "ugc-studio.clean-room-template.v1",
+        id: "template_route_faceless_saas",
+        title: "Faceless SaaS proof template",
+        category: "format",
+        preservedMechanics: { screenBeats: 4, captionBlocks: 2 },
+        swapSlots: ["product", "hook", "CTA"],
+        blockedFields: ["source pixels", "exact captions"],
+        proofNotes: ["metadata-only route proof"],
+      },
+    }), store)
+    const templateJobState = await readState(templateJobResponse)
+    const templateJobId = templateJobState.templateMiningJobs[0]?.id ?? ""
+    expect(templateJobState.researchTargets.find((target) => target.id === researchTargetId)?.templateJobIds).toContain(templateJobId)
+
+    const patchTemplateJobResponse = await routeUgc(jsonRequest(`/api/ugc/template-mining-jobs/${templateJobId}`, {
+      status: "ready",
+      candidateIds: [candidateId],
+    }), store)
+    const patchTemplateJobState = await readState(patchTemplateJobResponse)
+    expect(patchTemplateJobState.templateMiningJobs.find((job) => job.id === templateJobId)?.status).toBe("ready")
+
     const finalEditorResponse = await routeUgc(jsonRequest("/api/ugc/final-editor", {
       selectedCandidateId: candidateId,
       trackUpdates: [{ id: editorTrack.id, visible: false, locked: true }],

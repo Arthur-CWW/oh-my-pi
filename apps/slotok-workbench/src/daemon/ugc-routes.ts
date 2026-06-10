@@ -1,5 +1,5 @@
 import { UgcJsonStore } from "./ugc-json-store"
-import { isRecord, type BranchPatch, type BulkCandidateStatusPatch, type CandidateStatusPatch, type CreateBranchInput, type CreateExportManifestInput, type CreateProviderJobInput, type CreateReferenceArchiveInput, type CreateReviewNoteInput, type CreateWorkspaceBundleInput, type FinalEditorClipPatch, type FinalEditorPatch, type FinalEditorTrackPatch, type ImportWorkspaceBundleInput, type PersonaPatch, type ProviderJobPatch, type ReferenceArchiveFormatOutput, type UgcReferenceArchive } from "../ugc/local-state"
+import { isRecord, type BranchPatch, type BulkCandidateStatusPatch, type CandidateStatusPatch, type CleanRoomTemplateSpec, type CreateBranchInput, type CreateExportManifestInput, type CreateProviderJobInput, type CreateReferenceArchiveInput, type CreateResearchTargetInput, type CreateReviewNoteInput, type CreateTemplateMiningJobInput, type CreateWorkspaceBundleInput, type FinalEditorClipPatch, type FinalEditorPatch, type FinalEditorTrackPatch, type ImportWorkspaceBundleInput, type PersonaPatch, type ProviderJobPatch, type ReferenceArchiveFormatOutput, type ResearchTargetPatch, type TemplateMiningJobPatch, type UgcReferenceArchive, type UgcResearchPlatform, type UgcResearchTargetStatus, type UgcTemplateMiningJobStatus } from "../ugc/local-state"
 import type { BranchStatus, CandidateStatus, JsonValue, ReviewAttachment, ReviewVerdict } from "../renderer/ugcStudioModel"
 
 export async function routeUgc(request: Request, store: UgcJsonStore): Promise<Response | null> {
@@ -82,6 +82,31 @@ export async function routeUgc(request: Request, store: UgcJsonStore): Promise<R
     const id = decodeURIComponent(url.pathname.slice("/api/ugc/reference-archives/".length, -"/delete".length))
     if (!id) return json({ error: "missing reference archive id" }, 400)
     return json(store.deleteReferenceArchive(id))
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/ugc/research-targets") {
+    const state = store.read()
+    return json({ researchTargets: state.researchTargets, templateMiningJobs: state.templateMiningJobs })
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/ugc/research-targets") {
+    return json(store.createResearchTarget(decodeCreateResearchTarget(await readJson(request))))
+  }
+
+  if (request.method === "POST" && url.pathname.startsWith("/api/ugc/research-targets/")) {
+    const id = decodeURIComponent(url.pathname.slice("/api/ugc/research-targets/".length))
+    if (!id) return json({ error: "missing research target id" }, 400)
+    return json(store.updateResearchTarget(id, decodeResearchTargetPatch(await readJson(request))))
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/ugc/template-mining-jobs") {
+    return json(store.createTemplateMiningJob(decodeCreateTemplateMiningJob(await readJson(request))))
+  }
+
+  if (request.method === "POST" && url.pathname.startsWith("/api/ugc/template-mining-jobs/")) {
+    const id = decodeURIComponent(url.pathname.slice("/api/ugc/template-mining-jobs/".length))
+    if (!id) return json({ error: "missing template mining job id" }, 400)
+    return json(store.updateTemplateMiningJob(id, decodeTemplateMiningJobPatch(await readJson(request))))
   }
 
   if (request.method === "POST" && url.pathname === "/api/ugc/final-editor") {
@@ -221,6 +246,71 @@ function decodeCreateReferenceArchive(value: JsonValue): CreateReferenceArchiveI
   }
 }
 
+function decodeCreateResearchTarget(value: JsonValue): CreateResearchTargetInput {
+  if (!isRecord(value)) throw new Error("research target request must be an object")
+  if (typeof value.niche !== "string" || value.niche.trim().length === 0) throw new Error("research target requires niche")
+  if (typeof value.query !== "string" || value.query.trim().length === 0) throw new Error("research target requires query")
+  return {
+    platform: isResearchPlatform(value.platform) ? value.platform : "tiktok",
+    niche: value.niche,
+    query: value.query,
+    priority: typeof value.priority === "number" ? value.priority : undefined,
+    sourcePolicy: value.sourcePolicy === "abstract-mechanics" ? "abstract-mechanics" : "metadata-only",
+    notes: isStringArray(value.notes) ? value.notes : undefined,
+  }
+}
+
+function decodeResearchTargetPatch(value: JsonValue): ResearchTargetPatch {
+  if (!isRecord(value)) return {}
+  return {
+    status: isResearchTargetStatus(value.status) ? value.status : undefined,
+    priority: typeof value.priority === "number" ? value.priority : undefined,
+    notes: isStringArray(value.notes) ? value.notes : undefined,
+  }
+}
+
+function decodeCreateTemplateMiningJob(value: JsonValue): CreateTemplateMiningJobInput {
+  if (!isRecord(value) || typeof value.researchTargetId !== "string") throw new Error("template mining job requires researchTargetId")
+  return {
+    researchTargetId: value.researchTargetId,
+    status: isTemplateMiningJobStatus(value.status) ? value.status : undefined,
+    templateSpec: decodeCleanRoomTemplateSpec(value.templateSpec),
+    candidateIds: isStringArray(value.candidateIds) ? value.candidateIds : undefined,
+  }
+}
+
+function decodeTemplateMiningJobPatch(value: JsonValue): TemplateMiningJobPatch {
+  if (!isRecord(value)) return {}
+  return {
+    status: isTemplateMiningJobStatus(value.status) ? value.status : undefined,
+    templateSpec: decodeCleanRoomTemplateSpec(value.templateSpec),
+    candidateIds: isStringArray(value.candidateIds) ? value.candidateIds : undefined,
+    error: value.error === undefined ? undefined : typeof value.error === "string" ? value.error : null,
+  }
+}
+
+function decodeCleanRoomTemplateSpec(value: unknown): CleanRoomTemplateSpec | undefined {
+  if (value === undefined) return undefined
+  if (!isRecord(value)) throw new Error("templateSpec must be an object")
+  if (value.schemaVersion !== "ugc-studio.clean-room-template.v1") throw new Error("templateSpec schemaVersion is invalid")
+  if (typeof value.id !== "string" || typeof value.title !== "string") throw new Error("templateSpec requires id and title")
+  if (!isCleanRoomTemplateCategory(value.category)) throw new Error("templateSpec category is invalid")
+  if (!isJsonValue(value.preservedMechanics)) throw new Error("templateSpec preservedMechanics must be JSON")
+  if (!isStringArray(value.swapSlots) || !isStringArray(value.blockedFields) || !isStringArray(value.proofNotes)) {
+    throw new Error("templateSpec requires swapSlots, blockedFields, and proofNotes")
+  }
+  return {
+    schemaVersion: "ugc-studio.clean-room-template.v1",
+    id: value.id,
+    title: value.title,
+    category: value.category,
+    preservedMechanics: value.preservedMechanics,
+    swapSlots: value.swapSlots,
+    blockedFields: value.blockedFields,
+    proofNotes: value.proofNotes,
+  }
+}
+
 function decodeCreateExportManifest(value: JsonValue): CreateExportManifestInput {
   if (!isRecord(value)) return {}
   return {
@@ -349,6 +439,22 @@ function isReferenceSourcePolicy(value: unknown): value is UgcReferenceArchive["
 
 function isReferenceArchiveStatus(value: unknown): value is UgcReferenceArchive["archiveStatus"] {
   return value === "not-started" || value === "queued" || value === "sampled" || value === "decomposed"
+}
+
+function isResearchPlatform(value: unknown): value is UgcResearchPlatform {
+  return value === "tiktok" || value === "instagram" || value === "youtube-shorts" || value === "web" || value === "internal"
+}
+
+function isResearchTargetStatus(value: unknown): value is UgcResearchTargetStatus {
+  return value === "draft" || value === "queued" || value === "sampling" || value === "decomposed" || value === "blocked" || value === "done"
+}
+
+function isTemplateMiningJobStatus(value: unknown): value is UgcTemplateMiningJobStatus {
+  return value === "planned" || value === "queued" || value === "running" || value === "ready" || value === "blocked" || value === "done"
+}
+
+function isCleanRoomTemplateCategory(value: unknown): value is CleanRoomTemplateSpec["category"] {
+  return value === "format" || value === "pose" || value === "caption" || value === "hook" || value === "cta" || value === "persona-building"
 }
 
 function isStringArray(value: unknown): value is readonly string[] {
