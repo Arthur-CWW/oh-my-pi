@@ -1,33 +1,34 @@
 import { createHash } from "node:crypto"
-import { z } from "zod"
+import { Schema } from "effect"
 import { type JimengSessionBundle } from "./capture"
 import { assertNoRiskError, JimengClient } from "./client"
 import { buildJimengEndpointProbeHeaders } from "./endpoint-probe"
 import { jimengError } from "./errors"
 import { type JsonObject, type JsonValue } from "./reference-image"
-import { parseJimengApiEnvelope, parseJimengContract, parseJsonText } from "./schema"
+import { parseJimengApiEnvelope, parseJsonText } from "./schema"
 
 const DEFAULT_QUERY = "aid=513695&device_platform=web&region=CN&web_version=7.5.0&da_version=3.3.17"
-const OptionalString = z.string().nullable().optional()
-const OptionalNumber = z.number().nullable().optional()
-const OptionalBoolean = z.boolean().nullable().optional()
+const OptionalString = Schema.optional(Schema.NullOr(Schema.String))
+const OptionalId = Schema.optional(Schema.NullOr(Schema.Union([Schema.String, Schema.Number])))
+const OptionalNumber = Schema.optional(Schema.NullOr(Schema.Number))
+const OptionalBoolean = Schema.optional(Schema.NullOr(Schema.Boolean))
 
-const WorkspaceWireSchema = z.object({
-  id: OptionalString,
-  workspace_id: OptionalString,
-  workspaceId: OptionalString,
+const WorkspaceWireSchema = Schema.Struct({
+  id: OptionalId,
+  workspace_id: OptionalId,
+  workspaceId: OptionalId,
   name: OptionalString,
   description: OptionalString,
   role: OptionalString,
   workspace_type: OptionalNumber,
   workspaceType: OptionalNumber,
   status: OptionalNumber,
-  owner_user_id: OptionalString,
-  ownerUserId: OptionalString,
-  creator_user_id: OptionalString,
-  creatorUserId: OptionalString,
-  user_id: OptionalString,
-  userId: OptionalString,
+  owner_user_id: OptionalId,
+  ownerUserId: OptionalId,
+  creator_user_id: OptionalId,
+  creatorUserId: OptionalId,
+  user_id: OptionalId,
+  userId: OptionalId,
   member_count: OptionalNumber,
   memberCount: OptionalNumber,
   create_time_ms: OptionalNumber,
@@ -38,24 +39,26 @@ const WorkspaceWireSchema = z.object({
   modifyTimeMs: OptionalNumber,
   is_default: OptionalBoolean,
   isDefault: OptionalBoolean,
-}).passthrough()
+})
 
-const WorkspaceListDataWireSchema = z.object({
-  workspaces: z.array(WorkspaceWireSchema).nullable().optional(),
-  workspace_list: z.array(WorkspaceWireSchema).nullable().optional(),
-  workspaceList: z.array(WorkspaceWireSchema).nullable().optional(),
-  list: z.array(WorkspaceWireSchema).nullable().optional(),
+const WorkspaceListDataWireSchema = Schema.Struct({
+  workspaces: Schema.optional(Schema.NullOr(Schema.Array(WorkspaceWireSchema))),
+  workspace_list: Schema.optional(Schema.NullOr(Schema.Array(WorkspaceWireSchema))),
+  workspaceList: Schema.optional(Schema.NullOr(Schema.Array(WorkspaceWireSchema))),
+  list: Schema.optional(Schema.NullOr(Schema.Array(WorkspaceWireSchema))),
   total: OptionalNumber,
   has_more: OptionalBoolean,
   hasMore: OptionalBoolean,
-}).passthrough()
+})
 
-const WorkspaceByIdsDataWireSchema = z.object({
-  workspace_map: z.record(z.string(), WorkspaceWireSchema).nullable().optional(),
-  workspaceMap: z.record(z.string(), WorkspaceWireSchema).nullable().optional(),
-  workspaces: z.array(WorkspaceWireSchema).nullable().optional(),
-  list: z.array(WorkspaceWireSchema).nullable().optional(),
-}).passthrough()
+const WorkspaceByIdsDataWireSchema = Schema.Struct({
+  workspace_map: Schema.optional(Schema.NullOr(Schema.Record(Schema.String, WorkspaceWireSchema))),
+  workspaceMap: Schema.optional(Schema.NullOr(Schema.Record(Schema.String, WorkspaceWireSchema))),
+  workspaces: Schema.optional(Schema.NullOr(Schema.Array(WorkspaceWireSchema))),
+  list: Schema.optional(Schema.NullOr(Schema.Array(WorkspaceWireSchema))),
+})
+
+type WorkspaceWire = Schema.Schema.Type<typeof WorkspaceWireSchema>
 
 export type JimengWorkspaceContextEndpoint = "list" | "get-by-ids"
 
@@ -213,7 +216,7 @@ async function fetchWorkspaceList(input: {
     endpointId: "list",
     request,
   })
-  const data = parseJimengContract(WorkspaceListDataWireSchema, dataMap(response.body, "workspace list"), "workspace list")
+  const data = decodeWorkspaceContract(WorkspaceListDataWireSchema, dataMap(response.body, "workspace list"), "workspace list")
   const rawWorkspaces = data.workspaces ?? data.workspace_list ?? data.workspaceList ?? data.list
   if (!rawWorkspaces) {
     throw jimengError({
@@ -248,7 +251,7 @@ async function fetchWorkspaceByIds(input: {
     endpointId: "get-by-ids",
     request,
   })
-  const data = parseJimengContract(WorkspaceByIdsDataWireSchema, dataMap(response.body, "workspace get by ids"), "workspace get by ids")
+  const data = decodeWorkspaceContract(WorkspaceByIdsDataWireSchema, dataMap(response.body, "workspace get by ids"), "workspace get by ids")
   const workspaceMap = data.workspace_map ?? data.workspaceMap
   const rawWorkspaces = workspaceMap ? Object.values(workspaceMap) : data.workspaces ?? data.list
   if (!rawWorkspaces) {
@@ -293,8 +296,8 @@ async function requestWorkspace(input: {
   }
 }
 
-function parseWorkspace(workspace: z.infer<typeof WorkspaceWireSchema>): JimengWorkspaceContextWorkspace | null {
-  const id = stringValue(workspace.workspace_id) ?? stringValue(workspace.workspaceId) ?? stringValue(workspace.id)
+function parseWorkspace(workspace: WorkspaceWire): JimengWorkspaceContextWorkspace | null {
+  const id = idValue(workspace.workspace_id) ?? idValue(workspace.workspaceId) ?? idValue(workspace.id)
   if (!id) return null
   return {
     id,
@@ -303,9 +306,9 @@ function parseWorkspace(workspace: z.infer<typeof WorkspaceWireSchema>): JimengW
     role: stringValue(workspace.role),
     workspaceType: numberValue(workspace.workspace_type) ?? numberValue(workspace.workspaceType),
     status: numberValue(workspace.status),
-    ownerUserId: stringValue(workspace.owner_user_id) ?? stringValue(workspace.ownerUserId),
-    creatorUserId: stringValue(workspace.creator_user_id) ?? stringValue(workspace.creatorUserId),
-    userId: stringValue(workspace.user_id) ?? stringValue(workspace.userId),
+    ownerUserId: idValue(workspace.owner_user_id) ?? idValue(workspace.ownerUserId),
+    creatorUserId: idValue(workspace.creator_user_id) ?? idValue(workspace.creatorUserId),
+    userId: idValue(workspace.user_id) ?? idValue(workspace.userId),
     memberCount: numberValue(workspace.member_count) ?? numberValue(workspace.memberCount),
     createTimeMs: numberValue(workspace.create_time_ms) ?? numberValue(workspace.createTimeMs),
     updateTimeMs: numberValue(workspace.update_time_ms) ?? numberValue(workspace.updateTimeMs) ?? numberValue(workspace.modify_time_ms) ?? numberValue(workspace.modifyTimeMs),
@@ -355,15 +358,39 @@ function dataMap(body: JsonValue, operation: string): JsonObject {
   })
 }
 
-function stringValue(value: unknown): string | null {
+function decodeWorkspaceContract<A>(schema: Schema.Decoder<A>, value: JsonValue, operation: string): A {
+  try {
+    return Schema.decodeUnknownSync(schema)(value)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    throw jimengError({
+      category: "upstream",
+      code: "JIMENG_WORKSPACE_CONTEXT_CONTRACT_CHANGED",
+      message: `${operation}: Jimeng workspace context response did not match required fields.`,
+      retryable: false,
+      details: {
+        operation,
+        error: message,
+      },
+    })
+  }
+}
+
+function stringValue(value: JsonValue | undefined): string | null {
   return typeof value === "string" && value.length > 0 ? value : null
 }
 
-function numberValue(value: unknown): number | null {
+function idValue(value: JsonValue | undefined): string | null {
+  if (typeof value === "string" && value.length > 0) return value
+  if (typeof value === "number" && Number.isFinite(value)) return String(value)
+  return null
+}
+
+function numberValue(value: JsonValue | undefined): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null
 }
 
-function booleanValue(value: unknown): boolean | null {
+function booleanValue(value: JsonValue | undefined): boolean | null {
   return typeof value === "boolean" ? value : null
 }
 

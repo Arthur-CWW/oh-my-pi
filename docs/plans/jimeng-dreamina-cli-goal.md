@@ -193,7 +193,7 @@ Signed commerce benefit metadata and current user benefit rows are now live-prov
 - proof bundle: `data/jimeng-lab/proof-20260610-commerce-benefits-cli/`
 - latest proof returned `12` metadata rows and `140` current user benefit asset rows; pay modes included `LimitFree`, `Subscribe`, and `UserCredit`
 
-No-spend workspace context reads are now static/dry-run proved:
+No-spend workspace context reads are now live-proved:
 
 - `jimeng-browser-proxy workspace-context`
 - endpoints:
@@ -204,8 +204,9 @@ No-spend workspace context reads are now static/dry-run proved:
 - proof bundles:
   - `data/jimeng-lab/proof-20260610-static-locate-workspace-context/`
   - `data/jimeng-lab/proof-20260610-workspace-context-dry-run/`
+  - `data/jimeng-lab/proof-20260610-workspace-context-live/`
   - `data/jimeng-lab/proof-20260610-static-inventory-workspace-context/`
-- live no-spend replay is pending local resolver recovery: terminal `curl` cannot resolve `jimeng.jianying.com`, `scutil --dns` reports no DNS configuration, but public DNS resolves the host
+- latest live proof returned `2` listed workspaces and `1` by-id workspace, both with `ret=0`; the live response also showed numeric default workspace ids, so the boundary schema accepts string or number ids and normalizes them to strings
 
 No-spend direct endpoint concurrency probing is now live-proved:
 
@@ -214,8 +215,8 @@ No-spend direct endpoint concurrency probing is now live-proved:
 - records bounded worker concurrency, latency percentiles, HTTP status counts, `ret` counts, stop reasons, and response hashes without persisting response bodies
 - stop conditions include HTTP `429`, `401`, `403`, auth-ish `ret=1015/1017`, risk `ret=1019`, shark/risk/captcha/verify/login messages, and transport/schema errors
 - reference implementation note from `iptag/jimeng-api`: it does not publish a hard Jimeng rate limit; it supports comma-separated bearer tokens and randomly samples one per image/video request, plus long polling/retry behavior and no local image/video generation concurrency cap
-- latest read-only `/mweb/v1/get_common_config` proof found no observed limit through concurrency `2048` and `2048` total requests in that tier: all read-only sweep requests returned HTTP `200`, `ret=0`, with no stop condition; tail latency rose sharply at the highest tiers, especially the IP/SNI `2048` run
-- proof bundles: `data/jimeng-lab/proof-20260610-rate-probe-common-config-c{1,3,6,10,16,32,64,96,128,192,256,512,768,1024,1536}/` and `data/jimeng-lab/proof-20260610-rate-probe-common-config-c2048-ip-sni/`
+- latest read-only `/mweb/v1/get_common_config` proof found no Jimeng-side `429`, auth, or `1019`/shark stop through concurrency `3072`: the `3072` IP/SNI tier completed `3071/3072` HTTP `200`, `ret=0` responses and one transport `ECONNRESET`; tail latency rose sharply at the highest tiers, so this is now network/transport-bound before a provider rate-limit signal
+- proof bundles: `data/jimeng-lab/proof-20260610-rate-probe-common-config-c{1,3,6,10,16,32,64,96,128,192,256,512,768,1024,1536}/`, `data/jimeng-lab/proof-20260610-rate-probe-common-config-c2048-ip-sni/`, and `data/jimeng-lab/proof-20260610-rate-probe-common-config-c3072-ip-sni/`
 - this is a read-only config endpoint bound, not a safe generation-submit limit. Keep paid generation submission concurrency at `1` until an explicitly approved capped test says otherwise.
 
 Shared Jimeng risk-control breaker is now implemented in the consolidated client path:

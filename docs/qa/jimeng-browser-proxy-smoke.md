@@ -3055,6 +3055,12 @@ bun packages/jimeng-client/src/browser-proxy-cli.ts workspace-context \
   --dryRun \
   --outDir data/jimeng-lab/proof-20260610-workspace-context-dry-run
 
+bun packages/jimeng-client/src/browser-proxy-cli.ts workspace-context \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --endpoints list,get-by-ids \
+  --limit 20 \
+  --outDir data/jimeng-lab/proof-20260610-workspace-context-live
+
 bun packages/jimeng-client/src/browser-proxy-cli.ts static-inventory \
   --staticRoot data/jimeng-lab/js-sweep/files,packages/jimeng-client/src \
   --outDir data/jimeng-lab/proof-20260610-static-inventory-workspace-context \
@@ -3066,6 +3072,7 @@ Result:
 ```txt
 static-locate-workspace-context: endpoints=2 occurrences=2
 workspace-context dry run saved endpoints=list,get-by-ids
+workspace-context saved endpoints=list,get-by-ids listed=2 by_ids=1 skipped=0
 static-inventory: resources=247 skipped_implemented=42 high_value_gaps=61
 known_status_counts=unknown:125,partial:4,implemented:42,dry_run_only:4,blocked:69,captured_only:2,cataloged_only:1
 ```
@@ -3077,16 +3084,19 @@ workspace/list body: { offset, limit }
 workspace/get_by_ids wire body: { workspace_ids: [...] }
 ```
 
-Current live replay blocker:
+Live no-spend proof:
 
 ```txt
-curl -I https://jimeng.jianying.com/ -> Could not resolve host
-scutil --dns -> No DNS configuration available
-dig @1.1.1.1 jimeng.jianying.com -> resolves CNAME/IPs
-known-good image-models live command also fails through normal Bun fetch
+data/jimeng-lab/proof-20260610-workspace-context-live/normalized/workspace-context-20260610124419-summary.json
+list ret=0 workspace_count=2 total=0 has_more=false
+get_by_ids ret=0 workspace_count=1
+listed workspace names: default, 韩系美妆健身自拍参考图
+response hashes:
+  list=220409f83176bba37c9ebd8c2f3275dedf57186c82b292f538c51359848975bf
+  get_by_ids=02f52f72aa95ffa0f754e03776be0be4efbe064eaa81de7c2bd68e1b6a2e9674
 ```
 
-This means the workspace read contract is static/dry-run proved, but live no-spend replay should be rerun after the local resolver is healthy or after adding a reusable IP/SNI fetch override to the CLI.
+The live response included numeric `workspace_id=0` for the default workspace, so the boundary schema accepts string or number ids and normalizes ids to strings. Normalized proof files contain no credential markers or signed media URLs; raw ignored proof can contain signed `cover_image` URLs.
 
 ## Verification
 
