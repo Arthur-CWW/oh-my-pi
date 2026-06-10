@@ -17,6 +17,7 @@ import {
   type CreateWorkspaceBundleInput,
   type ImportWorkspaceBundleInput,
   type PersonaPatch,
+  type ProviderJobPatch,
   type UgcExportManifest,
   type UgcLocalState,
   type UgcProviderJob,
@@ -187,6 +188,26 @@ export class UgcJsonStore {
       error: input.error ?? null,
     }
     return this.write({ ...state, providerJobs: [job, ...state.providerJobs] })
+  }
+
+  updateProviderJob(jobId: string, patch: ProviderJobPatch): UgcLocalState {
+    const state = this.read()
+    const now = this.now()
+    const providerJobs = state.providerJobs.map((job) => {
+      if (job.id !== jobId) return job
+      return {
+        ...job,
+        status: patch.status ?? job.status,
+        response: patch.response === undefined ? job.response : patch.response,
+        artifactPaths: patch.artifactPaths ?? job.artifactPaths,
+        error: patch.error === undefined ? job.error : patch.error,
+        updatedAt: now,
+      }
+    })
+    if (providerJobs.every((job, index) => job === state.providerJobs[index])) {
+      throw new Error(`provider job not found: ${jobId}`)
+    }
+    return this.write({ ...state, providerJobs })
   }
 
   createReferenceArchive(input: CreateReferenceArchiveInput): UgcLocalState {

@@ -94,6 +94,29 @@ describe("routeUgc", () => {
     expect(importResult.valid).toBe(true)
     expect(importResult.dryRun).toBe(true)
     expect(importResult.imported).toBe(false)
+
+    const createJobResponse = await routeUgc(jsonRequest("/api/ugc/provider-jobs", {
+      provider: "kie",
+      operation: "image-to-video",
+      status: "queued",
+      request: { prompt: "route job proof" },
+      targetIds: [candidateId],
+      spendCapUsd: 0.05,
+    }), store)
+    const createJobState = await readState(createJobResponse)
+    const jobId = createJobState.providerJobs[0]?.id ?? ""
+    const patchJobResponse = await routeUgc(jsonRequest(`/api/ugc/provider-jobs/${jobId}`, {
+      status: "blocked",
+      response: { taskId: "kie_task_route", code: 429 },
+      artifactPaths: ["artifacts/provider/kie_task_route/manifest.json"],
+      error: "credit cap or provider backoff",
+    }), store)
+    const patchJobState = await readState(patchJobResponse)
+    const patchedJob = patchJobState.providerJobs.find((job) => job.id === jobId)
+
+    expect(patchedJob?.status).toBe("blocked")
+    expect(patchedJob?.artifactPaths).toContain("artifacts/provider/kie_task_route/manifest.json")
+    expect(patchedJob?.error).toContain("credit cap")
   })
 
   test("returns null for routes owned by other daemon handlers", async () => {

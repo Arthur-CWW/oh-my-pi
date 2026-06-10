@@ -14,7 +14,7 @@ import {
 
 export type UgcProvider = "kie" | "jimeng" | "local"
 export type UgcProviderJobMode = "dry-run" | "live"
-export type UgcProviderJobStatus = "queued" | "planned" | "running" | "completed" | "failed"
+export type UgcProviderJobStatus = "planned" | "queued" | "running" | "succeeded" | "failed" | "blocked" | "completed"
 export type UgcExportStatus = "draft" | "queued" | "rendered" | "failed"
 
 export interface UgcWorkspaceSummary {
@@ -194,6 +194,13 @@ export interface CreateProviderJobInput {
   readonly spendCapUsd?: number
   readonly estimatedCostUsd?: number | null
   readonly request: JsonValue
+  readonly response?: JsonValue | null
+  readonly artifactPaths?: readonly string[]
+  readonly error?: string | null
+}
+
+export interface ProviderJobPatch {
+  readonly status?: UgcProviderJobStatus
   readonly response?: JsonValue | null
   readonly artifactPaths?: readonly string[]
   readonly error?: string | null

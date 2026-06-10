@@ -70,7 +70,7 @@ import {
 } from "./design-system/workbench"
 import { cn } from "./lib/cn"
 import { ugcStudioWorkspace, type BranchSnapshot, type CreativeCandidate, type JsonValue, type PersonaProfile, type ReferenceProfile, type UgcStudioWorkspace } from "./ugcStudioModel"
-import { createInitialLocalState, referenceProfileToArchive, type ReferenceArchiveFormatOutput, type UgcExportManifest, type UgcLocalState, type UgcProviderJob, type UgcReferenceArchive } from "../ugc/local-state"
+import { createInitialLocalState, referenceProfileToArchive, type ReferenceArchiveFormatOutput, type UgcExportManifest, type UgcLocalState, type UgcProviderJob, type UgcProviderJobStatus, type UgcReferenceArchive } from "../ugc/local-state"
 
 type ReactView = "atlas" | "explore" | "review" | "campaign" | "reference" | "editor" | "graph" | "provider"
 type KieOperation = "image-text" | "image-to-image" | "video-text" | "image-to-video" | "reference-to-video" | "avatar" | "omni-video"
@@ -551,6 +551,31 @@ function sourcePolicyFor(reference: ReferenceProfile): ReferenceSourcePolicy {
     : "abstract-mechanics"
 }
 
+function displayProviderJobStatus(status: UgcProviderJobStatus): string {
+  return status === "completed" ? "succeeded" : status
+}
+
+function providerJobStatusTone(status: UgcProviderJobStatus) {
+  if (status === "succeeded" || status === "completed") return "success"
+  if (status === "failed" || status === "blocked") return "danger"
+  if (status === "running" || status === "queued") return "active"
+  return "neutral"
+}
+
+function extractKieTaskId(value: JsonValue | null): string | null {
+  const root = jsonRecord(value)
+  if (!root) return null
+  if (typeof root.taskId === "string") return root.taskId
+  const response = jsonRecord(root.response)
+  const data = jsonRecord(response?.data ?? null)
+  return typeof data?.taskId === "string" ? data.taskId : null
+}
+
+function jsonRecord(value: JsonValue | undefined | null): { readonly [key: string]: JsonValue } | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null
+  return value as { readonly [key: string]: JsonValue }
+}
+
 export function ReactUgcStudio() {
   const [activeView, setActiveView] = React.useState<ReactView>("atlas")
   const [localState, setLocalState] = React.useState<UgcLocalState>(fallbackLocalState)
@@ -919,6 +944,7 @@ function WorkspaceView(props: {
       request={props.request}
       onOperationChange={props.onOperationChange}
       onCallKie={props.onCallKie}
+      onMutateLocal={props.onMutateLocal}
     />
   )
 }
@@ -1557,18 +1583,68 @@ function ProviderView(props: {
   request: KieRequest
   onOperationChange: (operation: KieOperation) => void
   onCallKie: (path: string, body?: KieRequest) => void
+  onMutateLocal: (path: string, body: object) => void
 }) {
+  const { providerJobs } = useUgcLocalState()
+  const [selectedJobId, setSelectedJobId] = React.useState(providerJobs[0]?.id ?? "")
+  const selectedJob = providerJobs.find((job) => job.id === selectedJobId) ?? providerJobs[0]
+  const kieTaskId = extractKieTaskId(selectedJob?.response ?? null)
+
+  React.useEffect(() => {
+    if (!providerJobs.some((job) => job.id === selectedJobId)) setSelectedJobId(providerJobs[0]?.id ?? "")
+  }, [providerJobs, selectedJobId])
+
   return (
-    <div className="rugc-provider">
-      <section>
-        <Braces size={32} />
-        <h2>KIE proxy is wired through the local daemon</h2>
-        <p>The browser builds request JSON locally. Live submission is explicit and capped because credits are limited.</p>
-      </section>
-      <aside>
-        <label>
-          <span>Operation</span>
-          <select value={props.operation} onChange={(event) => props.onOperationChange(event.target.value as KieOperation)}>
+    <div className="grid h-full min-h-0 grid-cols-[minmax(0,1fr)_320px] gap-3 overflow-hidden p-3">
+      <PanelCard className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden" density="compact">
+        <PanelHeader
+          eyebrow="Local queue"
+          title="Provider jobs"
+          actions={<StatusBadge tone="active">{providerJobs.length}</StatusBadge>}
+        />
+        <div className="min-h-0 overflow-auto pr-1">
+          {providerJobs.length === 0 ? (
+            <div className="grid h-full min-h-52 place-items-center rounded-md border border-dashed border-border bg-background p-6 text-center">
+              <div>
+                <Braces className="mx-auto text-muted-foreground" size={26} />
+                <p className="mt-2 text-xs font-semibold text-foreground">No provider jobs yet</p>
+                <p className="mt-1 text-[11px] leading-4 text-muted-foreground">Dry-run or live capped KIE calls create local job records.</p>
+              </div>
+            </div>
+          ) : (
+            <div className="grid gap-2">
+              {providerJobs.map((job) => (
+                <button
+                  key={job.id}
+                  type="button"
+                  className={cn(
+                    "grid gap-1 rounded-md border border-border bg-card px-3 py-2 text-left shadow-sm transition-colors hover:bg-accent",
+                    selectedJob?.id === job.id && "border-primary/60 bg-primary/10",
+                  )}
+                  onClick={() => setSelectedJobId(job.id)}
+                >
+                  <span className="flex items-center justify-between gap-2">
+                    <strong className="min-w-0 truncate text-xs text-foreground">{job.operation}</strong>
+                    <StatusBadge tone={providerJobStatusTone(job.status)}>{displayProviderJobStatus(job.status)}</StatusBadge>
+                  </span>
+                  <span className="text-[11px] text-muted-foreground">{job.provider} / {job.mode} / cap ${job.spendCapUsd.toFixed(2)}</span>
+                  <span className="truncate text-[10px] text-muted-foreground">{job.updatedAt}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </PanelCard>
+
+      <PanelCard className="grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden" density="compact">
+        <PanelHeader eyebrow="KIE proxy" title="Route controls" actions={<CircleDollarSign size={14} />} />
+        <label className="grid gap-1.5">
+          <span className="text-[11px] font-medium text-muted-foreground">Operation</span>
+          <select
+            value={props.operation}
+            className="h-8 rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            onChange={(event) => props.onOperationChange(event.target.value as KieOperation)}
+          >
             {props.capabilities.map((capability) => (
               <option key={capability.operation} value={capability.operation}>
                 {capability.operation} / {capability.model}
@@ -1580,16 +1656,74 @@ function ProviderView(props: {
           <strong>{props.selectedCapability?.label}</strong>
           <p>{props.selectedCapability?.notes}</p>
         </div>
-        <Button onClick={() => props.onCallKie("/api/ugc/kie/plan", props.request)} disabled={props.busy}>Dry-run request JSON</Button>
-        <Button
-          variant="outline"
-          onClick={() => props.onCallKie("/api/ugc/kie/create", { ...props.request, live: true, maxSpendUsd: 0.05 })}
-          disabled={props.busy || (props.selectedCapability?.estimatedCostUsd ?? 1) > 0.05}
-        >
-          Live submit capped at $0.05
-        </Button>
-        <pre>{props.result}</pre>
-      </aside>
+        <div className="grid grid-cols-2 gap-2">
+          <Button size="xs" onClick={() => props.onCallKie("/api/ugc/kie/plan", props.request)} disabled={props.busy}>Dry-run JSON</Button>
+          <Button
+            size="xs"
+            variant="outline"
+            onClick={() => props.onCallKie("/api/ugc/kie/create", { ...props.request, live: true, maxSpendUsd: 0.05 })}
+            disabled={props.busy || (props.selectedCapability?.estimatedCostUsd ?? 1) > 0.05}
+          >
+            Live $0.05 cap
+          </Button>
+        </div>
+
+        <div className="mt-3 min-h-0 overflow-auto pr-1">
+          {selectedJob ? (
+            <div className="grid gap-3">
+              <div className="rounded-md border border-border bg-background p-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="m-0 truncate text-xs font-semibold text-foreground">{selectedJob.operation}</p>
+                    <p className="m-0 mt-0.5 text-[11px] text-muted-foreground">{selectedJob.id}</p>
+                  </div>
+                  <StatusBadge tone={providerJobStatusTone(selectedJob.status)}>{displayProviderJobStatus(selectedJob.status)}</StatusBadge>
+                </div>
+                <div className="mt-2 grid gap-1">
+                  <MetricRow label="Provider" value={selectedJob.provider} />
+                  <MetricRow label="Mode" value={selectedJob.mode} />
+                  <MetricRow label="Estimate" value={selectedJob.estimatedCostUsd === null ? "n/a" : `$${selectedJob.estimatedCostUsd.toFixed(2)}`} />
+                  <MetricRow label="Artifacts" value={String(selectedJob.artifactPaths.length)} />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-1">
+                {(["queued", "running", "succeeded", "blocked", "failed"] satisfies UgcProviderJobStatus[]).map((status) => (
+                  <Button
+                    key={status}
+                    size="xs"
+                    variant={selectedJob.status === status ? "selected" : "workbench"}
+                    onClick={() => props.onMutateLocal(`/api/ugc/provider-jobs/${selectedJob.id}`, { status })}
+                  >
+                    {displayProviderJobStatus(status)}
+                  </Button>
+                ))}
+              </div>
+
+              {kieTaskId ? (
+                <Button size="xs" variant="workbench" onClick={() => props.onCallKie(`/api/ugc/kie/tasks/${kieTaskId}`)}>
+                  <RefreshCw size={13} /> Poll KIE task
+                </Button>
+              ) : null}
+
+              <div className="rounded-md border border-border bg-background p-2">
+                <p className="m-0 text-[11px] font-semibold text-foreground">Artifact refs</p>
+                <div className="mt-1 grid gap-1 text-[11px] text-muted-foreground">
+                  {selectedJob.artifactPaths.length ? selectedJob.artifactPaths.map((path) => <span key={path} className="truncate">{path}</span>) : <span>none</span>}
+                </div>
+              </div>
+
+              <pre className="rugc-json">{JSON.stringify({
+                request: selectedJob.request,
+                response: selectedJob.response,
+                error: selectedJob.error,
+              }, null, 2)}</pre>
+            </div>
+          ) : (
+            <pre className="rugc-json">{props.result}</pre>
+          )}
+        </div>
+      </PanelCard>
     </div>
   )
 }

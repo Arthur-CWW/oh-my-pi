@@ -1,5 +1,5 @@
 import { UgcJsonStore } from "./ugc-json-store"
-import { isRecord, type BranchPatch, type CandidateStatusPatch, type CreateExportManifestInput, type CreateProviderJobInput, type CreateReferenceArchiveInput, type CreateReviewNoteInput, type CreateWorkspaceBundleInput, type ImportWorkspaceBundleInput, type PersonaPatch, type ReferenceArchiveFormatOutput, type UgcReferenceArchive } from "../ugc/local-state"
+import { isRecord, type BranchPatch, type CandidateStatusPatch, type CreateExportManifestInput, type CreateProviderJobInput, type CreateReferenceArchiveInput, type CreateReviewNoteInput, type CreateWorkspaceBundleInput, type ImportWorkspaceBundleInput, type PersonaPatch, type ProviderJobPatch, type ReferenceArchiveFormatOutput, type UgcReferenceArchive } from "../ugc/local-state"
 import type { BranchStatus, CandidateStatus, JsonValue, ReviewAttachment, ReviewVerdict } from "../renderer/ugcStudioModel"
 
 export async function routeUgc(request: Request, store: UgcJsonStore): Promise<Response | null> {
@@ -54,6 +54,12 @@ export async function routeUgc(request: Request, store: UgcJsonStore): Promise<R
 
   if (request.method === "POST" && url.pathname === "/api/ugc/provider-jobs") {
     return json(store.createProviderJob(decodeCreateProviderJob(await readJson(request))))
+  }
+
+  if (request.method === "POST" && url.pathname.startsWith("/api/ugc/provider-jobs/")) {
+    const id = decodeURIComponent(url.pathname.slice("/api/ugc/provider-jobs/".length))
+    if (!id) return json({ error: "missing provider job id" }, 400)
+    return json(store.updateProviderJob(id, decodeProviderJobPatch(await readJson(request))))
   }
 
   if (request.method === "GET" && url.pathname === "/api/ugc/reference-archives") {
@@ -155,6 +161,16 @@ function decodeCreateProviderJob(value: JsonValue): CreateProviderJobInput {
   }
 }
 
+function decodeProviderJobPatch(value: JsonValue): ProviderJobPatch {
+  if (!isRecord(value)) return {}
+  return {
+    status: isProviderJobStatus(value.status) ? value.status : undefined,
+    response: value.response === undefined ? undefined : isJsonValue(value.response) ? value.response : null,
+    artifactPaths: isStringArray(value.artifactPaths) ? value.artifactPaths : undefined,
+    error: value.error === undefined ? undefined : typeof value.error === "string" ? value.error : null,
+  }
+}
+
 function decodeCreateReferenceArchive(value: JsonValue): CreateReferenceArchiveInput {
   if (!isRecord(value) || typeof value.referenceProfileId !== "string") throw new Error("reference archive requires referenceProfileId")
   return {
@@ -229,7 +245,13 @@ function isReviewAttachmentKind(value: unknown): value is ReviewAttachment["kind
 }
 
 function isProviderJobStatus(value: unknown): value is CreateProviderJobInput["status"] {
-  return value === "queued" || value === "planned" || value === "running" || value === "completed" || value === "failed"
+  return value === "planned"
+    || value === "queued"
+    || value === "running"
+    || value === "succeeded"
+    || value === "failed"
+    || value === "blocked"
+    || value === "completed"
 }
 
 function isReferenceSourcePolicy(value: unknown): value is UgcReferenceArchive["sourcePolicy"] {

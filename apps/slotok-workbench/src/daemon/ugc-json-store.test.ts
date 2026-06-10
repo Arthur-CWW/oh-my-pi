@@ -153,6 +153,33 @@ describe("UgcJsonStore", () => {
     expect(applied.imported).toBe(true)
     expect(store.read().workspace.title).toBe("Imported Workspace")
   })
+
+  test("patches provider job status, response, artifacts, and errors", () => {
+    const store = createStore()
+    const candidateId = store.read().workspace.candidates[0]?.id ?? ""
+    const created = store.createProviderJob({
+      provider: "kie",
+      operation: "video-text",
+      status: "queued",
+      request: { prompt: "dry-run queue proof" },
+      targetIds: [candidateId],
+      spendCapUsd: 0.05,
+    })
+    const jobId = created.providerJobs[0]?.id ?? ""
+
+    const updated = store.updateProviderJob(jobId, {
+      status: "succeeded",
+      response: { taskId: "kie_task_123", resultUrls: ["file:///tmp/out.mp4"] },
+      artifactPaths: ["artifacts/provider/kie_task_123/out.mp4"],
+      error: null,
+    })
+    const job = updated.providerJobs.find((item) => item.id === jobId)
+
+    expect(job?.status).toBe("succeeded")
+    expect(job?.artifactPaths).toContain("artifacts/provider/kie_task_123/out.mp4")
+    expect(job?.response).toEqual({ taskId: "kie_task_123", resultUrls: ["file:///tmp/out.mp4"] })
+    expect(job?.updatedAt).toBe("2026-06-10T00:00:00.000Z")
+  })
 })
 
 function createStore(): UgcJsonStore {
