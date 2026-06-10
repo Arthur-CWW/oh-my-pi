@@ -2533,14 +2533,15 @@ concurrency=768 requests=768 completed=768 stopped=false elapsed=2447ms  p50=115
 concurrency=1024 requests=1024 completed=1024 stopped=false elapsed=5837ms p50=1942ms p95=2893ms max=5831ms http=200x1024 ret=0x1024
 concurrency=1536 requests=1536 completed=1536 stopped=false elapsed=5318ms p50=2602ms p95=3809ms max=5306ms http=200x1536 ret=0x1536
 concurrency=2048 requests=2048 completed=2048 stopped=false elapsed=28165ms p50=10283ms p95=15822ms max=28013ms http=200x2048 ret=0x2048
+concurrency=3072 requests=3072 completed=3072 stopped=false elapsed=36287ms p50=10828ms p95=18176ms max=36240ms http=200x3071,none x1 ret=0x3071,none x1 error=ECONNRESETx1
 ```
 
 Result:
 
 ```txt
-No rate/auth/risk stop was observed for /mweb/v1/get_common_config through concurrency 2048.
+No Jimeng-side rate/auth/risk stop was observed for /mweb/v1/get_common_config through concurrency 3072.
 The iptag/jimeng-api reference does not publish a hard rate limit; it supports comma-separated bearer tokens and randomly samples tokens per request, plus long polling/retry behavior, and does not enforce a local image/video generation concurrency cap.
-Tail latency degraded materially at concurrency 1024, 1536, and especially 2048, so this is a read-config endpoint ceiling observation, not a recommended generation-submit setting.
+Tail latency degraded materially at concurrency 1024, 1536, 2048, and 3072; the 3072 tier also produced one local/network transport reset before any Jimeng `429`, auth, or `1019`/shark signal. This is a read-config endpoint ceiling observation, not a recommended generation-submit setting.
 ```
 
 Leak check:
@@ -2548,7 +2549,8 @@ Leak check:
 ```bash
 rg -n -P 'x-signature|authorization|cookie|sessionid|sid=|msToken|verifyFp|X-Kagi|x-expires|device-time|sign-ver|\bsign\b|tdid' \
   data/jimeng-lab/proof-20260610-rate-probe-common-config-c{1,3,6,10,16,32,64,96,128,192,256,512,768,1024,1536}/normalized \
-  data/jimeng-lab/proof-20260610-rate-probe-common-config-c2048-ip-sni/normalized
+  data/jimeng-lab/proof-20260610-rate-probe-common-config-c2048-ip-sni/normalized \
+  data/jimeng-lab/proof-20260610-rate-probe-common-config-c3072-ip-sni/normalized
 ```
 
 Expected result: no matches.
