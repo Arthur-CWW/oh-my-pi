@@ -237,7 +237,7 @@ These probes are read/config/list calls and should not consume generation credit
 - Designed for safe, bounded no-spend read/config/list endpoints. By default it rejects likely paid/mutating/generating endpoint paths; generation-submit concurrency remains `1` unless separately approved and capped.
 - Uses the same session headers as `endpoint-probe`, validates JSON/envelope shape at the boundary, and stores hashes/timing/status summaries rather than full response bodies.
 - Stop conditions: HTTP `429`, `401`, `403`, auth-ish `ret=1015/1017`, risk `ret=1019`, shark/risk/captcha/verify/login messages, and transport/schema errors.
-- `iptag/jimeng-api` reference finding: no hard rate-limit number is published there; it supports comma-separated multiple bearer tokens and randomly samples tokens per request, with long polling/retry behavior.
+- `iptag/jimeng-api` reference finding: no hard rate-limit number is published there; it supports comma-separated multiple bearer tokens and randomly samples tokens per request, with long polling/retry behavior. Its image/video HTTP routes do not enforce a local generation concurrency cap.
 
 Read-only `/mweb/v1/get_common_config` sweep on 2026-06-10:
 
@@ -256,9 +256,10 @@ concurrency=256 requests=512 completed=512 stopped=false http=200x512 ret=0x512 
 concurrency=512 requests=512 completed=512 stopped=false http=200x512 ret=0x512 p50=916ms  p95=1441ms max=1463ms
 concurrency=768 requests=768 completed=768 stopped=false http=200x768 ret=0x768 p50=1157ms p95=1835ms max=2446ms
 concurrency=1024 requests=1024 completed=1024 stopped=false http=200x1024 ret=0x1024 p50=1942ms p95=2893ms max=5831ms
+concurrency=1536 requests=1536 completed=1536 stopped=false http=200x1536 ret=0x1536 p50=2602ms p95=3809ms max=5306ms
 ```
 
-This means no rate limit was observed up to concurrency `1024` on that read-only config endpoint. Tail latency starts to stretch sharply at the highest tier, and this does **not** establish a safe limit for paid generation, upload, mutation, or polling endpoints.
+This means no rate limit was observed up to concurrency `1536` on that read-only config endpoint. Tail latency starts to stretch sharply at the highest tiers, and this does **not** establish a safe limit for paid generation, upload, mutation, or polling endpoints.
 
 ### 6.0.2) Shared risk-control breaker
 
@@ -2063,7 +2064,7 @@ Current support matrix:
 | `static-locate` | implemented in `jimeng-browser-proxy` | Offline source/bundle locator for endpoint request builders; writes redacted snippets, symbol hints, and mise-managed `ast-grep` follow-up commands without loading a browser session. |
 | `endpoint-probe` | implemented in `jimeng-browser-proxy` | Generic explicit replay/probe helper for candidate JSON body variants; writes raw local response plus normalized request/response shape summaries for faster promotion into typed commands. |
 | shared risk-control breaker | implemented in `JimengClient` | All consolidated direct/browser-proxy requests now detect `ret=1019` / `shark not pass`, open a local cooldown by default, and refuse follow-up provider calls until cooldown expires. |
-| `rate-probe` | implemented in `jimeng-browser-proxy` | Bounded concurrency/rate probe for no-spend read/config endpoints with stop-on-429/auth/risk behavior, latency percentiles, status/ret counts, and hash-only response evidence. Latest `/mweb/v1/get_common_config` sweep found no limit through concurrency `1024`. |
+| `rate-probe` | implemented in `jimeng-browser-proxy` | Bounded concurrency/rate probe for no-spend read/config endpoints with stop-on-429/auth/risk behavior, latency percentiles, status/ret counts, and hash-only response evidence. Latest `/mweb/v1/get_common_config` sweep found no read/config limit through concurrency `1536`. |
 | `account-credit` | implemented in `jimeng-browser-proxy` | Signed no-spend `/commerce/v1/benefits/user_credit` credit-balance read. Latest proof returned total 3990 credits, all VIP credits. |
 | `commerce-benefits` | implemented in `jimeng-browser-proxy` | Signed no-spend `/commerce/v3/resource/benefit_metadata` and `/commerce/v3/benefits/batch_get_user_benefit` reads. Latest proof returned 12 metadata rows, 140 user benefit rows, and pay modes `LimitFree`, `Subscribe`, and `UserCredit`. |
 | `agent-catalog` | implemented in `jimeng-browser-proxy` | No-spend schema-backed `/mweb/v1/creation_agent/v2/skill/list` and `/mweb/v1/creation_agent/v2/get_agent_config` catalog for official agent skills, image/video model request keys, option enums, input media types, unified-edit material limits, and image control features. |

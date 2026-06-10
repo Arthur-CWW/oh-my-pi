@@ -188,9 +188,9 @@ No-spend direct endpoint concurrency probing is now live-proved:
 - defaults to rejecting likely paid/mutating/generating endpoints unless explicitly overridden
 - records bounded worker concurrency, latency percentiles, HTTP status counts, `ret` counts, stop reasons, and response hashes without persisting response bodies
 - stop conditions include HTTP `429`, `401`, `403`, auth-ish `ret=1015/1017`, risk `ret=1019`, shark/risk/captcha/verify/login messages, and transport/schema errors
-- reference implementation note from `iptag/jimeng-api`: it does not publish a hard Jimeng rate limit; it supports multiple bearer tokens and randomly samples among them, plus long polling/retry behavior
-- latest read-only `/mweb/v1/get_common_config` proof found no observed limit through concurrency `1024` and `1024` total requests in that tier: all read-only sweep requests returned HTTP `200`, `ret=0`, with no stop condition; tail latency rose sharply at the highest tier
-- proof bundles: `data/jimeng-lab/proof-20260610-rate-probe-common-config-c{1,3,6,10,16,32,64,96,128,192,256,512,768,1024}/`
+- reference implementation note from `iptag/jimeng-api`: it does not publish a hard Jimeng rate limit; it supports comma-separated bearer tokens and randomly samples one per image/video request, plus long polling/retry behavior and no local image/video generation concurrency cap
+- latest read-only `/mweb/v1/get_common_config` proof found no observed limit through concurrency `1536` and `1536` total requests in that tier: all read-only sweep requests returned HTTP `200`, `ret=0`, with no stop condition; tail latency rose sharply at the highest tiers
+- proof bundles: `data/jimeng-lab/proof-20260610-rate-probe-common-config-c{1,3,6,10,16,32,64,96,128,192,256,512,768,1024,1536}/`
 - this is a read-only config endpoint bound, not a safe generation-submit limit. Keep paid generation submission concurrency at `1` until an explicitly approved capped test says otherwise.
 
 Shared Jimeng risk-control breaker is now implemented in the consolidated client path:

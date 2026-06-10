@@ -2454,6 +2454,14 @@ for c in 512 768 1024; do
     --concurrency "$c" \
     --outDir "data/jimeng-lab/proof-20260610-rate-probe-common-config-c$c"
 done
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts rate-probe \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --endpoint /mweb/v1/get_common_config \
+  --body '{"isClientFilter":true,"needBetaModel":true}' \
+  --requests 1536 \
+  --concurrency 1536 \
+  --outDir data/jimeng-lab/proof-20260610-rate-probe-common-config-c1536
 ```
 
 Measured summaries:
@@ -2473,21 +2481,22 @@ concurrency=256 requests=512 completed=512 stopped=false elapsed=1626ms  p50=388
 concurrency=512 requests=512 completed=512 stopped=false elapsed=1465ms  p50=916ms  p95=1441ms  max=1463ms  http=200x512  ret=0x512
 concurrency=768 requests=768 completed=768 stopped=false elapsed=2447ms  p50=1157ms p95=1835ms  max=2446ms  http=200x768  ret=0x768
 concurrency=1024 requests=1024 completed=1024 stopped=false elapsed=5837ms p50=1942ms p95=2893ms max=5831ms http=200x1024 ret=0x1024
+concurrency=1536 requests=1536 completed=1536 stopped=false elapsed=5318ms p50=2602ms p95=3809ms max=5306ms http=200x1536 ret=0x1536
 ```
 
 Result:
 
 ```txt
-No rate/auth/risk stop was observed for /mweb/v1/get_common_config through concurrency 1024.
-The iptag/jimeng-api reference does not publish a hard rate limit; it supports comma-separated bearer tokens and randomly samples tokens per request, plus long polling/retry behavior.
-Tail latency degraded materially at concurrency 1024, so this is a read-config endpoint ceiling observation, not a recommended generation-submit setting.
+No rate/auth/risk stop was observed for /mweb/v1/get_common_config through concurrency 1536.
+The iptag/jimeng-api reference does not publish a hard rate limit; it supports comma-separated bearer tokens and randomly samples tokens per request, plus long polling/retry behavior, and does not enforce a local image/video generation concurrency cap.
+Tail latency degraded materially at concurrency 1024 and 1536, so this is a read-config endpoint ceiling observation, not a recommended generation-submit setting.
 ```
 
 Leak check:
 
 ```bash
 rg -n -P 'x-signature|authorization|cookie|sessionid|sid=|msToken|verifyFp|X-Kagi|x-expires|device-time|sign-ver|\bsign\b|tdid' \
-  data/jimeng-lab/proof-20260610-rate-probe-common-config-c{1,3,6,10,16,32,64,96,128,192,256,512,768,1024}/normalized
+  data/jimeng-lab/proof-20260610-rate-probe-common-config-c{1,3,6,10,16,32,64,96,128,192,256,512,768,1024,1536}/normalized
 ```
 
 Expected result: no matches.
