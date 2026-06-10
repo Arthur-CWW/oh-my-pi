@@ -40,6 +40,11 @@ As of 2026-06-10, the committed Jimeng CLI baseline is:
 - `6fc9948 Add Jimeng voice clone CLI coverage`
 - `e8313de Add Jimeng workbench assets CLI`
 - `736ed98 Add Jimeng history queue CLI`
+- `858dcb0 Add schema-backed Jimeng history records CLI`
+- `1edef0e Add Jimeng endpoint probe and video info CLI`
+- `401a6c1 Add Jimeng capture analyzer CLI`
+- `64b66e2 Add Jimeng lip-sync compare gate`
+- `b77cf2c Add Jimeng discovery worklist CLI`
 
 If the thread goal object lags behind this file after a pause, resume from this document and the latest Git checkpoint. The active working rule is: background-only reversal, direct/API-first implementation, small proven CLI slices, tests and proof artifacts before each commit, and no async daemon until the API surface is settled.
 
@@ -124,6 +129,16 @@ Lip-sync/digital-human model config is now live-proved without generation spend:
 - image-mode options include `input_media_type` and `audio_option`
 - proof bundle: `data/jimeng-lab/proof-20260610-lip-sync-config/`
 - raw config responses include signed preview GIF URLs, while normalized summaries omit them.
+
+Agent skill/model catalog is now live-proved without generation spend and schema-backed:
+
+- `jimeng-browser-proxy agent-catalog`
+- direct `/mweb/v1/creation_agent/v2/skill/list` and `/mweb/v1/creation_agent/v2/get_agent_config` with logged-in browser session headers
+- useful flags: `--endpoints skills,config,all`
+- normalizes official agent skills, image model keys, video model keys, image control feats, image blend controls, resolution presets, sample-step bounds, video option keys, frame counts, fps, aspect ratios, input media types, unified-edit material limits, compliance confirmation flags, cancel support, and max batch counts
+- proof bundle: `data/jimeng-lab/proof-20260610-agent-catalog/`
+- latest proof returned 4 skills, 8 image models, and 5 video models
+- high-value flags included image controls `bg_paint`, `byte_edit`, `canny`, `depth`, `face_swap`, `ip_keep`, `pose`, `support_subject`; video options `fps`, `frames`, `input_media_type`, `multi_frames`, `resolution`, `unified_edit`, `video_aspect_ratio`; and video input media types `prompt`, `first_frame`, `end_frame`, `multi_frame`, and `unified_edit`
 
 Explore/template mining is now live-proved without generation spend:
 
@@ -387,7 +402,8 @@ Maximize useful API coverage and proof quality while keeping live submissions co
 - default to background automation; do not foreground Arthur's browser, steal focus, or use visible UI automation while Arthur is using the machine unless he explicitly asks
 - prefer direct Jimeng APIs, saved sessions, CDP network/DOM calls, CuaDriver/background browser-use, and other non-interruptive automation paths over `bringToFront`, visible tab clicks, or Computer Use interactions that move the active cursor/window
 - if a frontend-only Jimeng flow truly requires visible UI interaction, first try to reproduce it through background CDP or CuaDriver; if that still cannot work, record the blocked path and ask before interrupting Arthur's flow
-- for unknown frontend flows, prefer a faster hybrid reversal loop over long manual bundle reading: run background CDP/passive network capture first, use `ast-grep`/targeted structural search to locate the frontend request builder, then replay/compare the direct API request with saved session headers
+- for unknown frontend flows, prefer a faster hybrid reversal loop over long manual bundle reading or purely dynamic clicking: run background CDP/passive network capture first, use `ast-grep`/targeted structural search to locate the frontend request builder, then replay/compare the direct API request with saved session headers
+- choose static or dynamic evidence by expected leverage, not ideology: use CDP/network truth for actual request bodies and response shapes, use stronger static tools for enum names, option semantics, request-builder branches, and dead-end avoidance
 - promote the hybrid loop into tooling: CDP recorder for dynamic truth, `capture-analyze` for endpoint ranking, `discovery-worklist` for next-slice prioritization, static search for request-builder semantics, `endpoint-probe` for explicit body replay, then dedicated schema-backed commands for stable contracts
 - run `capture-analyze` after every meaningful `jimeng-network-recorder` capture, then run `discovery-worklist` before opening frontend bundles by hand
 - use mise-managed developer CLIs such as `ast-grep` when available; install missing local CLIs with `mise` first unless the tool must be a repo/CI dependency
@@ -457,6 +473,7 @@ Current and near-term commands:
 ```bash
 jimeng-browser-proxy session
 jimeng-browser-proxy catalog
+jimeng-browser-proxy agent-catalog
 jimeng-browser-proxy voices
 jimeng-browser-proxy tts
 jimeng-browser-proxy sample-voices

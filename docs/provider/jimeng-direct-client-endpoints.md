@@ -190,6 +190,17 @@ Validated endpoint ids:
 - `lip-sync-video-config`
 - `subject-list`
 
+The agent skill/model subset now has a dedicated schema-backed command:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts agent-catalog \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --endpoints skills,config \
+  --outDir data/jimeng-lab/proof-20260610-agent-catalog
+```
+
+Latest proof returned 4 official skills, 8 image models, and 5 video models. Normalized output records model request keys, image control feats, blend controls, resolution presets, frame/fps/aspect option enums, input media types, unified-edit material limits, max batch counts, compliance flags, and task-cancel support without signed URLs. High-value video input media types included `prompt`, `first_frame`, `end_frame`, `multi_frame`, and `unified_edit`.
+
 These probes are read/config/list calls and should not consume generation credits. They still require a live logged-in session bundle.
 
 ### 6.1) Saved subject/persona list
@@ -1493,6 +1504,8 @@ Current schema-backed commands:
 
 - `jimeng-browser-proxy history-queue`
 - `jimeng-browser-proxy history-records`
+- `jimeng-browser-proxy video-info`
+- `jimeng-browser-proxy agent-catalog`
 
 Expected drift behavior: additive fields should continue working, while missing or incompatible envelope/data/record paths should fail with explicit `JIMENG_RESPONSE_ENVELOPE_CHANGED`, `JIMENG_RESPONSE_DATA_MAP_CHANGED`, or `JIMENG_RESPONSE_CONTRACT_CHANGED` errors.
 
@@ -1731,6 +1744,7 @@ Current support matrix:
 | `capture-analyze` | implemented in `jimeng-browser-proxy` | Offline CDP `raw-network.jsonl` analyzer/ranker with risk classes, shape summaries, static endpoint string hints, sanitized markdown/JSON, and local `endpoint-probe` replay candidates. |
 | `discovery-worklist` | implemented in `jimeng-browser-proxy` | Offline merge/ranking layer over one or more `capture-analyze` outputs, raw probe candidates, and static source/bundle roots. Emits next-slice actions and raw per-endpoint replay variant files without loading a browser session. |
 | `endpoint-probe` | implemented in `jimeng-browser-proxy` | Generic explicit replay/probe helper for candidate JSON body variants; writes raw local response plus normalized request/response shape summaries for faster promotion into typed commands. |
+| `agent-catalog` | implemented in `jimeng-browser-proxy` | No-spend schema-backed `/mweb/v1/creation_agent/v2/skill/list` and `/mweb/v1/creation_agent/v2/get_agent_config` catalog for official agent skills, image/video model request keys, option enums, input media types, unified-edit material limits, and image control features. |
 | `templates` | implemented in `jimeng-browser-proxy` | No-spend direct `/mweb/v1/get_explore` template mining with prompt/model/usage normalization. |
 | `overseas-short-videos` | implemented in `jimeng-browser-proxy` | No-spend direct `/mweb/v1/feed_short_video` short-video/reference mining with ranking and video metadata normalization. |
 | `capcut-categories` | implemented in `jimeng-browser-proxy` | No-spend signed CapCut `/lv/v1/cc_web/plane/get_categories` commercial template category catalog. |

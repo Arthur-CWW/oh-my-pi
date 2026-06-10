@@ -357,6 +357,54 @@ Expected result:
 normalized discovery-worklist proof has no signed URLs or raw variant bodies
 ```
 
+## Agent Catalog Smoke
+
+`agent-catalog` is the schema-backed, no-spend model/tool catalog for the older creation-agent surface. It promotes the generic catalog probes into normalized fields that later generation commands can use for flags and validation.
+
+Proof command:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts agent-catalog \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --endpoints skills,config \
+  --outDir data/jimeng-lab/proof-20260610-agent-catalog
+```
+
+Result:
+
+```txt
+agent-catalog saved endpoints=skills,config imageModels=8 videoModels=5
+skill_count=4
+image_model_count=8
+video_model_count=5
+video_input_media_types=end_frame,first_frame,multi_frame,prompt,unified_edit
+video_option_keys=fps,frames,input_media_type,multi_frames,resolution,unified_edit,video_aspect_ratio
+```
+
+Proof files:
+
+```txt
+data/jimeng-lab/proof-20260610-agent-catalog/raw/agent-catalog-20260610034941.json
+data/jimeng-lab/proof-20260610-agent-catalog/normalized/agent-catalog-20260610034941-summary.json
+```
+
+The normalized agent-catalog output was checked for signed URL leakage:
+
+```bash
+if rg -n "https://|x-signature|x-expires|expire_time|byteimg|douyinpic|vlabvod" \
+  data/jimeng-lab/proof-20260610-agent-catalog/normalized; then
+  exit 1
+else
+  echo "normalized agent-catalog proof has no signed URLs"
+fi
+```
+
+Expected result:
+
+```txt
+normalized agent-catalog proof has no signed URLs
+```
+
 ## Endpoint Probe / VOD Metadata Smoke
 
 `endpoint-probe` is the faster replay step for future reversal work. It does not guess or fuzz automatically; it replays explicit JSON body variants from CDP/static evidence, then writes raw local bodies plus normalized request/response shape summaries.

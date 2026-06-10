@@ -1,6 +1,7 @@
 export * from "./capture"
 export * from "./capture-analyzer"
 export * from "./discovery-worklist"
+export * from "./agent-catalog"
 export * from "./browser-session"
 export * from "./client"
 export * from "./catalog"

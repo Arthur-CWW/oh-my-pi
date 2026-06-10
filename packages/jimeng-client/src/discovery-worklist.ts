@@ -403,8 +403,8 @@ const KNOWN_ENDPOINTS: JimengDiscoveryKnownEndpoint[] = [
   known("/mweb/v1/workspace/create", "captured_only", null, "Workspace mutation; low priority until needed for automated project setup."),
   known("/mweb/v1/workspace/update", "captured_only", null, "Workspace mutation; low priority until needed for automated project setup."),
   known("/mweb/v1/creation_agent/v2/conversation", "partial", null, "Older SSE agent submit preserved but not a current high-priority UGC surface."),
-  known("/mweb/v1/creation_agent/v2/get_agent_config", "cataloged_only", "catalog", "Agent config catalog probe."),
-  known("/mweb/v1/creation_agent/v2/skill/list", "cataloged_only", "catalog", "Agent skill catalog probe."),
+  known("/mweb/v1/creation_agent/v2/get_agent_config", "implemented", "agent-catalog", "Schema-backed agent/model config catalog."),
+  known("/mweb/v1/creation_agent/v2/skill/list", "implemented", "agent-catalog", "Schema-backed official/custom agent skill catalog."),
 ]
 
 function known(endpoint: string, status: JimengDiscoveryKnownStatus, command: string | null, note: string): JimengDiscoveryKnownEndpoint {

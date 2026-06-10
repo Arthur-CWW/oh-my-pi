@@ -28,8 +28,8 @@ Use the browser as an authenticated session holder and API discovery surface. Mo
 | `/mweb/v1/get_history_queue_info` | POST | Read-only queue/progress detail lookup for active or historical generation records. | Implemented as no-spend `history-queue`; live-proved against a completed image history id |
 | `/mweb/v1/get_video_by_vid` | POST | Read-only VOD metadata lookup by uploaded/generated video `vid`. Useful for lip-sync/reference-video validation. | Implemented as schema-backed no-spend `video-info`; live-proved with body `{"vids":["..."]}` |
 | `/mweb/v1/creation_agent/v2/conversation` | POST/SSE | Older agent text-to-image conversation submit. | Preserved |
-| `/mweb/v1/creation_agent/v2/get_agent_config` | POST | Agent/tool configuration payload. | Cataloged only |
-| `/mweb/v1/creation_agent/v2/skill/list` | POST | Available agent skills/tools. | Cataloged only |
+| `/mweb/v1/creation_agent/v2/get_agent_config` | POST | Agent/tool configuration payload. | Implemented as schema-backed no-spend `agent-catalog` |
+| `/mweb/v1/creation_agent/v2/skill/list` | POST | Available agent skills/tools. | Implemented as schema-backed no-spend `agent-catalog` |
 | `/mweb/v1/video_generate/get_common_config` | POST | Video model/common configuration by scene, including lip-sync image/video scenes. | Implemented for config catalog |
 | `/mweb/v1/get_user_local_item_list` | POST | User local/generated item lists; `effect_type=218` returns current user's cloned voices. | Implemented for config catalog and `voice-clones`; live-proved no-spend |
 | `/mweb/v1/voice/submit_task` | POST | Custom voice clone / voice conversion task submit. | Voice-clone request shape dry-run-proved; live submit disabled pending approval/capture |
@@ -103,7 +103,7 @@ Current shared helper:
 packages/jimeng-client/src/schema.ts
 ```
 
-Current schema-backed endpoints include `history-queue`, `history-records`, and `video-info`. If Jimeng changes `ret`/`errmsg`/`data` or the relied-on record/media paths, the CLI should fail with an explicit `JIMENG_RESPONSE_*_CHANGED` error instead of silently normalizing stale shapes.
+Current schema-backed endpoints include `history-queue`, `history-records`, `video-info`, and `agent-catalog`. If Jimeng changes `ret`/`errmsg`/`data` or the relied-on record/media/model paths, the CLI should fail with an explicit `JIMENG_RESPONSE_*_CHANGED` error instead of silently normalizing stale shapes.
 
 ## Fast Hybrid Reversal Loop
 
@@ -730,7 +730,7 @@ This is dry-run-proved only. The next live-proof step should capture or select t
 
 ## Confirmed Config Catalog Probes
 
-`packages/jimeng-client/src/catalog.ts` now has a non-generating catalog probe for:
+`packages/jimeng-client/src/catalog.ts` has a broad non-generating catalog smoke probe for:
 
 - `skill-list`: `/mweb/v1/creation_agent/v2/skill/list`
 - `agent-config`: `/mweb/v1/creation_agent/v2/get_agent_config`
@@ -740,6 +740,8 @@ This is dry-run-proved only. The next live-proof step should capture or select t
 - `subject-list`: `/mweb/v1/dreamina_subject/get`
 
 These probes are useful for keeping the CLI/app aware of available models, lip-sync routes, saved subjects, and user voice assets without consuming generation credits.
+
+The `skill-list` and `agent-config` subset is now promoted into the focused, schema-backed `jimeng-browser-proxy agent-catalog` command. Use that command for durable official-skill, image-model, video-model, option-enum, input-media-type, unified-edit, and image-control fields.
 
 The two lip-sync config endpoints also have a focused command, `jimeng-browser-proxy lip-sync-config`, because they directly parameterize digital-human/image-avatar mode and VOD video lip-sync mode.
 
@@ -1212,6 +1214,7 @@ The 2026-06-09 JS bundle sweep found these useful endpoint groups. Treat rows wi
 
 | Group | Endpoints |
 |---|---|
+| Agent skill/model catalog | `/mweb/v1/creation_agent/v2/skill/list`, `/mweb/v1/creation_agent/v2/get_agent_config`; implemented as no-spend `agent-catalog`, including official skills, image/video model keys, input media types, frame/fps/aspect options, unified-edit material limits, and image control feats |
 | Voice cloning / custom voice | `/mweb/v1/voice/submit_task`, `/mweb/v1/voice/query_task`, `/mweb/v1/voice/update`, `/mweb/v1/voice/delete`; cloned voice listing is implemented as `voice-clones`, task query is implemented for real task ids, and submit/update/delete are dry-run-only until approved/captured |
 | Subject/persona lifecycle | `/mweb/v1/dreamina_subject/get`, `/mweb/v1/dreamina_subject/create`, `/mweb/v1/dreamina_subject/update`, `/mweb/v1/dreamina_subject/delete`, `/mweb/v1/dreamina_subject/generate_voice`; list/create/update/delete are implemented, while generate_voice is dry-run-only until explicit spend approval or captured UI submit |
 | Infinite canvas | `/mweb/v1/infinite_canvas/create_project`, `/mweb/v1/infinite_canvas/conversation`, `/mweb/v1/infinite_canvas/edit`, `/mweb/v1/infinite_canvas/resume`, `/mweb/v1/infinite_canvas/stop_stream`, `/mweb/v1/infinite_canvas/v1/fetch_snapshot`, `/mweb/v1/infinite_canvas/v1/submit_changeset`, `/mweb/v1/infinite_canvas/v1/fetch_changeset` |

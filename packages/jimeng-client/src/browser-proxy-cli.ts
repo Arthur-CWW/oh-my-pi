@@ -8,6 +8,13 @@ import {
   summarizeJimengAssets,
   workspaceIdFromJimengSession,
 } from "./assets"
+import {
+  buildJimengAgentConfigRequest,
+  buildJimengAgentSkillsRequest,
+  fetchJimengAgentCatalog,
+  parseJimengAgentCatalogEndpoints,
+  summarizeJimengAgentCatalog,
+} from "./agent-catalog"
 import { loadJimengSessionFromBrowser } from "./browser-session"
 import {
   buildCapCutTemplateCategoriesRequest,
@@ -162,6 +169,7 @@ Commands:
   capture-analyze Analyze raw CDP network JSONL into ranked endpoint/probe candidates
   discovery-worklist Merge capture analysis/static hints into prioritized next API work
   catalog       Probe non-generating model/tool/persona/voice config endpoints
+  agent-catalog Fetch normalized agent skills and image/video model catalog
   lip-sync-config Fetch no-spend digital-human/lip-sync model configs
   lip-sync-compare Offline compare a lip-sync dry-run plan against captured UI submit
   voices        Fetch the built-in voice library from a captured signed feed request
@@ -219,6 +227,7 @@ Options:
   --body <json>                  Single JSON body for endpoint-probe
   --variants <json|file>         Probe variants JSON array or object with variants
   --endpoints <ids|all>          Catalog endpoints, comma-separated (default: all)
+                                  agent-catalog accepts skills,config,all
   --text <text>                 TTS/sample-voices text
   --voice-id <id>               TTS voice id from voices command
   --voice-title <title>         Optional display title for TTS output filename
@@ -309,6 +318,11 @@ Examples:
     --outDir data/jimeng-lab/discovery-worklist-subject-create
 
   jimeng-browser-proxy session
+
+  jimeng-browser-proxy agent-catalog \\
+    --session data/jimeng-lab/raw/session-bundle-current.json \\
+    --endpoints skills,config \\
+    --outDir data/jimeng-lab/cli-agent-catalog-smoke
 
   jimeng-browser-proxy text2image \\
     --capture data/jimeng-captures/<run>/capture-template.raw.json \\
@@ -479,6 +493,7 @@ interface CliArgs {
     | "capture-analyze"
     | "discovery-worklist"
     | "catalog"
+    | "agent-catalog"
     | "endpoint-probe"
     | "lip-sync-config"
     | "lip-sync-compare"
@@ -808,6 +823,56 @@ async function main(argv: string[]): Promise<void> {
       summary: summarizeJimengEndpointProbe(result),
     })
     console.log(`[jimeng-browser-proxy] endpoint-probe saved variants=${result.results.length} rets=${result.results.map((item) => `${item.name}:${item.ret ?? "none"}`).join(",")}`)
+    return
+  }
+
+  if (args.command === "agent-catalog") {
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const endpoints = parseJimengAgentCatalogEndpoints(args.endpoints)
+    const runId = `agent-catalog-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const requests = {
+      skills: buildJimengAgentSkillsRequest(),
+      config: buildJimengAgentConfigRequest(),
+    }
+    if (args.dryRun) {
+      writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
+        command: args.command,
+        endpoint_sequence: endpoints.map((endpoint) => endpoint === "skills"
+          ? "/mweb/v1/creation_agent/v2/skill/list"
+          : "/mweb/v1/creation_agent/v2/get_agent_config"),
+        requests,
+        browser_session: redactSession(session),
+      })
+      writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+        command: args.command,
+        endpoints,
+        requests,
+      })
+      console.log(`[jimeng-browser-proxy] agent-catalog dry run saved endpoints=${endpoints.join(",")}`)
+      return
+    }
+
+    const result = await fetchJimengAgentCatalog({ session, endpoints })
+    writeJson(path.join(dirs.rawDir, `${runId}.json`), {
+      endpoints: result.endpoints,
+      results: result.results.map((item) => ({
+        endpoint: item.endpoint,
+        endpoint_id: item.endpointId,
+        http_status: item.httpStatus,
+        ret: item.ret,
+        errmsg: item.errmsg,
+        response_text_sha256: item.responseTextSha256,
+        request: item.request,
+        body: item.body,
+      })),
+    })
+    const summary = summarizeJimengAgentCatalog(result)
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      summary,
+    })
+    const summaryRecord = summary.config && typeof summary.config === "object" && !Array.isArray(summary.config) ? summary.config : {}
+    console.log(`[jimeng-browser-proxy] agent-catalog saved endpoints=${result.endpoints.join(",")} imageModels=${summaryRecord.image_model_count ?? "n/a"} videoModels=${summaryRecord.video_model_count ?? "n/a"}`)
     return
   }
 
@@ -2674,6 +2739,7 @@ function parseArgs(argv: string[]): CliArgs {
     && command !== "capture-analyze"
     && command !== "discovery-worklist"
     && command !== "catalog"
+    && command !== "agent-catalog"
     && command !== "endpoint-probe"
     && command !== "lip-sync-config"
     && command !== "lip-sync-compare"
