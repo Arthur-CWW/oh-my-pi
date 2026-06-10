@@ -53,7 +53,8 @@ As of 2026-06-10, the committed Jimeng CLI baseline is:
 - `4d117a2 Recheck Jimeng live generation`
 - `abcc9ca Classify LV mutation blockers`
 - `c09bb7d Add LV editor catalog CLI`
-- current checkpoint: `Classify LV read-state blockers`
+- `a124c30 Classify LV read-state blockers`
+- current checkpoint: no-spend rate/concurrency probe CLI
 
 If the thread goal object lags behind this file after a pause, resume from this document and the latest Git checkpoint. The active working rule is: background-only reversal, direct/API-first implementation, small proven CLI slices, tests and proof artifacts before each commit, and no async daemon until the API surface is settled.
 
@@ -158,6 +159,17 @@ Direct image model config is now live-proved without generation spend and schema
 - proof bundle: `data/jimeng-lab/proof-20260610-image-models/`
 - latest proof returned 8 image models; default workbench model was `high_aes_general_v50` / `图片5.0 Lite`
 - high-value flags included `bg_paint`, `byte_edit`, `byte_edit_with_custom_ratio`, `byte_edit_with_empty_prompt`, `canny`, `depth`, `face_swap`, `ip_keep`, `pose`, `refuse_image`, `smart_scale`, and `support_subject`
+
+No-spend direct endpoint concurrency probing is now live-proved:
+
+- `jimeng-browser-proxy rate-probe`
+- defaults to rejecting likely paid/mutating/generating endpoints unless explicitly overridden
+- records bounded worker concurrency, latency percentiles, HTTP status counts, `ret` counts, stop reasons, and response hashes without persisting response bodies
+- stop conditions include HTTP `429`, `401`, `403`, auth-ish `ret=1015/1017`, risk `ret=1019`, shark/risk/captcha/verify/login messages, and transport/schema errors
+- reference implementation note from `iptag/jimeng-api`: it does not publish a hard Jimeng rate limit; it supports multiple bearer tokens and randomly samples among them, plus long polling/retry behavior
+- latest read-only `/mweb/v1/get_common_config` proof found no observed limit through concurrency `32` and `64` total requests in that tier: all `148/148` sweep requests returned HTTP `200`, `ret=0`, with no stop condition
+- proof bundles: `data/jimeng-lab/proof-20260610-rate-probe-common-config-c{1,3,6,10,16,32}/`
+- this is a read-only config endpoint bound, not a safe generation-submit limit. Keep paid generation submission concurrency at `1` until an explicitly approved capped test says otherwise.
 
 Explore/template mining is now live-proved without generation spend:
 

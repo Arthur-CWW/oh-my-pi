@@ -113,7 +113,7 @@ Current shared helper:
 packages/jimeng-client/src/schema.ts
 ```
 
-Current schema-backed endpoints include `history-queue`, `history-records`, `video-info`, `agent-catalog`, and `image-models`. If Jimeng changes `ret`/`errmsg`/`data` or the relied-on record/media/model paths, the CLI should fail with an explicit `JIMENG_RESPONSE_*_CHANGED` error instead of silently normalizing stale shapes.
+Current schema-backed endpoints include `history-queue`, `history-records`, `video-info`, `agent-catalog`, `image-models`, and the envelope/timing layer used by `rate-probe`. If Jimeng changes `ret`/`errmsg`/`data` or the relied-on record/media/model paths, the CLI should fail with an explicit `JIMENG_RESPONSE_*_CHANGED` error instead of silently normalizing stale shapes.
 
 ## Fast Hybrid Reversal Loop
 
@@ -125,9 +125,12 @@ Use dynamic and static tools together:
 4. Run `jimeng-browser-proxy static-locate` on the prioritized endpoints and source/bundle roots to recover files, redacted snippets, symbol hints, and mise-managed `ast-grep` follow-up commands.
 5. Use `ast-grep`/targeted bundle search on the locator output when enum names, request-builder branches, or option semantics still need deeper structural evidence.
 6. Replay only explicit candidate JSON bodies with `jimeng-browser-proxy endpoint-probe`; compare `ret`, `errmsg`, and summarized response shapes.
-7. Promote stable read-only or approved contracts into dedicated typed CLI commands with runtime schemas and proof artifacts.
+7. For read/config/list endpoints that need throughput data, use `jimeng-browser-proxy rate-probe` with bounded `--requests` and `--concurrency`. It stops on 429/auth/risk signals and records hashes/timing/status counts without full response bodies.
+8. Promote stable read-only or approved contracts into dedicated typed CLI commands with runtime schemas and proof artifacts.
 
-`capture-analyze`, `discovery-worklist`, `static-locate`, and `endpoint-probe` are intentionally not blind fuzzers. The analyzer turns CDP truth into ranked endpoint evidence, the worklist merges analyzer/static/probe evidence into a prioritized next-slice queue, the locator finds likely request-builder code, and the probe replays candidate bodies found from CDP/static evidence. Raw outputs stay under ignored `data/**`; normalized summaries are designed to be small enough to paste into agent context after redaction review.
+`capture-analyze`, `discovery-worklist`, `static-locate`, `endpoint-probe`, and `rate-probe` are intentionally not blind fuzzers. The analyzer turns CDP truth into ranked endpoint evidence, the worklist merges analyzer/static/probe evidence into a prioritized next-slice queue, the locator finds likely request-builder code, the probe replays candidate bodies found from CDP/static evidence, and the rate probe measures only bounded known-read endpoints unless explicitly overridden. Raw outputs stay under ignored `data/**`; normalized summaries are designed to be small enough to paste into agent context after redaction review.
+
+Latest no-spend `/mweb/v1/get_common_config` rate sweep completed `148/148` read-only requests with HTTP `200` and `ret=0`, including `64/64` at concurrency `32`. No HTTP `429`, auth, or risk-control stop was observed on that endpoint. Treat this as a config-endpoint bound only; it is not a generation-submit limit. The external `iptag/jimeng-api` project does not publish a hard limit; it load-balances comma-separated bearer tokens randomly and uses polling/retry behavior.
 
 Custom voice clone CLI coverage:
 
@@ -1582,6 +1585,7 @@ Capture one flow at a time:
 ## Safety Notes
 
 - Keep generation concurrency at `1`.
+- Use `rate-probe` only for read/config/list endpoints by default; paid generation, upload, and mutation concurrency require explicit capped approval.
 - Dry-run before live submit.
 - Stop on auth challenges, CAPTCHA, `ret=1019`, or `shark not pass`.
 - Do not commit raw captures, session bundles, cookies, signed URLs, or generated media.

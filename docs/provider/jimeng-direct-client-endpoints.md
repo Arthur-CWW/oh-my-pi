@@ -231,6 +231,27 @@ Latest proof returned 8 image models, default index `0`, and first selected work
 
 These probes are read/config/list calls and should not consume generation credits. They still require a live logged-in session bundle.
 
+### 6.0.1) Read-only endpoint concurrency probe
+
+- Implemented as `jimeng-browser-proxy rate-probe`.
+- Designed for safe, bounded no-spend read/config/list endpoints. By default it rejects likely paid/mutating/generating endpoint paths; generation-submit concurrency remains `1` unless separately approved and capped.
+- Uses the same session headers as `endpoint-probe`, validates JSON/envelope shape at the boundary, and stores hashes/timing/status summaries rather than full response bodies.
+- Stop conditions: HTTP `429`, `401`, `403`, auth-ish `ret=1015/1017`, risk `ret=1019`, shark/risk/captcha/verify/login messages, and transport/schema errors.
+- `iptag/jimeng-api` reference finding: no hard rate-limit number is published there; it supports comma-separated multiple bearer tokens and randomly samples tokens per request, with long polling/retry behavior.
+
+Read-only `/mweb/v1/get_common_config` sweep on 2026-06-10:
+
+```txt
+concurrency=1  requests=12  completed=12  stopped=false  http=200x12  ret=0x12  p95=2147ms
+concurrency=3  requests=12  completed=12  stopped=false  http=200x12  ret=0x12  p95=1160ms
+concurrency=6  requests=12  completed=12  stopped=false  http=200x12  ret=0x12  p95=943ms
+concurrency=10 requests=24  completed=24  stopped=false  http=200x24  ret=0x24  p95=757ms
+concurrency=16 requests=24  completed=24  stopped=false  http=200x24  ret=0x24  p95=395ms
+concurrency=32 requests=64  completed=64  stopped=false  http=200x64  ret=0x64  p95=414ms
+```
+
+This means no rate limit was observed up to concurrency `32` on that read-only config endpoint. It does **not** establish a safe limit for paid generation, upload, mutation, or polling endpoints.
+
 ### 6.1) Saved subject/persona list
 - `POST https://jimeng.jianying.com/mweb/v1/dreamina_subject/get`
 - Status:
@@ -1915,6 +1936,7 @@ Current support matrix:
 | `discovery-worklist` | implemented in `jimeng-browser-proxy` | Offline merge/ranking layer over one or more `capture-analyze` outputs, raw probe candidates, and static source/bundle roots. Emits next-slice actions and raw per-endpoint replay variant files without loading a browser session. |
 | `static-locate` | implemented in `jimeng-browser-proxy` | Offline source/bundle locator for endpoint request builders; writes redacted snippets, symbol hints, and mise-managed `ast-grep` follow-up commands without loading a browser session. |
 | `endpoint-probe` | implemented in `jimeng-browser-proxy` | Generic explicit replay/probe helper for candidate JSON body variants; writes raw local response plus normalized request/response shape summaries for faster promotion into typed commands. |
+| `rate-probe` | implemented in `jimeng-browser-proxy` | Bounded concurrency/rate probe for no-spend read/config endpoints with stop-on-429/auth/risk behavior, latency percentiles, status/ret counts, and hash-only response evidence. Latest `/mweb/v1/get_common_config` sweep found no limit through concurrency `32`. |
 | `agent-catalog` | implemented in `jimeng-browser-proxy` | No-spend schema-backed `/mweb/v1/creation_agent/v2/skill/list` and `/mweb/v1/creation_agent/v2/get_agent_config` catalog for official agent skills, image/video model request keys, option enums, input media types, unified-edit material limits, and image control features. |
 | `image-models` | implemented in `jimeng-browser-proxy` | No-spend schema-backed `/mweb/v1/get_common_config` catalog for image model keys, default workbench model, feature flags, blend controls, resolution presets, sample-step bounds, and commercial benefit/resource ids. |
 | `templates` | implemented in `jimeng-browser-proxy` | No-spend direct `/mweb/v1/get_explore` template mining with prompt/model/usage normalization. |

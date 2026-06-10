@@ -2401,6 +2401,69 @@ Result:
 normalized LV editor catalog and static-inventory proofs have no credential markers
 ```
 
+## Read-Only Rate Probe Smoke
+
+This proof measures a no-spend/read-only config endpoint. It does not authorize or establish a safe paid-generation concurrency limit.
+
+Command pattern:
+
+```bash
+for c in 1 3 6; do
+  bun packages/jimeng-client/src/browser-proxy-cli.ts rate-probe \
+    --session data/jimeng-lab/raw/session-bundle-current.json \
+    --endpoint /mweb/v1/get_common_config \
+    --body '{"is_client_filter":true,"need_beta_model":true,"need_cache":true,"need_refresh":false}' \
+    --requests 12 \
+    --concurrency "$c" \
+    --outDir "data/jimeng-lab/proof-20260610-rate-probe-common-config-c$c"
+done
+
+for c in 10 16; do
+  bun packages/jimeng-client/src/browser-proxy-cli.ts rate-probe \
+    --session data/jimeng-lab/raw/session-bundle-current.json \
+    --endpoint /mweb/v1/get_common_config \
+    --body '{"is_client_filter":true,"need_beta_model":true,"need_cache":true,"need_refresh":false}' \
+    --requests 24 \
+    --concurrency "$c" \
+    --outDir "data/jimeng-lab/proof-20260610-rate-probe-common-config-c$c"
+done
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts rate-probe \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --endpoint /mweb/v1/get_common_config \
+  --body '{"is_client_filter":true,"need_beta_model":true,"need_cache":true,"need_refresh":false}' \
+  --requests 64 \
+  --concurrency 32 \
+  --outDir data/jimeng-lab/proof-20260610-rate-probe-common-config-c32
+```
+
+Measured summaries:
+
+```txt
+concurrency=1  requests=12  completed=12  stopped=false  elapsed=10009ms  p50=639ms  p95=2147ms  http=200x12  ret=0x12
+concurrency=3  requests=12  completed=12  stopped=false  elapsed=3685ms   p50=875ms  p95=1160ms  http=200x12  ret=0x12
+concurrency=6  requests=12  completed=12  stopped=false  elapsed=1418ms   p50=406ms  p95=943ms   http=200x12  ret=0x12
+concurrency=10 requests=24  completed=24  stopped=false  elapsed=1277ms   p50=289ms  p95=757ms   http=200x24  ret=0x24
+concurrency=16 requests=24  completed=24  stopped=false  elapsed=653ms    p50=352ms  p95=395ms   http=200x24  ret=0x24
+concurrency=32 requests=64  completed=64  stopped=false  elapsed=720ms    p50=304ms  p95=414ms   http=200x64  ret=0x64
+```
+
+Result:
+
+```txt
+No rate/auth/risk stop was observed for /mweb/v1/get_common_config through concurrency 32.
+The iptag/jimeng-api reference does not publish a hard rate limit; it supports comma-separated bearer tokens and randomly samples tokens per request, plus long polling/retry behavior.
+```
+
+Leak check:
+
+```bash
+rg -n -P 'x-signature|authorization|cookie|sessionid|sid=|msToken|verifyFp|X-Kagi|x-expires' \
+  data/jimeng-lab/proof-20260610-rate-probe-common-config-c{1,3,6,10,16,32}/normalized
+```
+
+Expected result: no matches.
+
 ## Paid-Live Generation Smoke
 
 Arthur explicitly approved a small paid/subscription-account smoke on 2026-06-10. This proof distinguishes **paid-live generation** from read-only/config/upload live API calls.

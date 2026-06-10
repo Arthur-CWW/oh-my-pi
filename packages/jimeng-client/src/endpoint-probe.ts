@@ -154,7 +154,7 @@ export function summarizeJimengEndpointProbe(result: JimengEndpointProbeResult):
   }
 }
 
-function buildEndpointProbeHeaders(session: JimengSessionBundle): Record<string, string> {
+export function buildJimengEndpointProbeHeaders(session: JimengSessionBundle): Record<string, string> {
   return {
     "content-type": "application/json",
     accept: "application/json, text/plain, */*",
@@ -171,6 +171,8 @@ function buildEndpointProbeHeaders(session: JimengSessionBundle): Record<string,
     "x-platform": "pc",
   }
 }
+
+const buildEndpointProbeHeaders = buildJimengEndpointProbeHeaders
 
 function parseOptionalEnvelope(body: JsonValue, name: string): { ret: string | number | null; errmsg: string | null } {
   try {

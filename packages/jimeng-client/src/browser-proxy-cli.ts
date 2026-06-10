@@ -86,6 +86,10 @@ import {
   summarizeJimengEndpointProbe,
 } from "./endpoint-probe"
 import {
+  runJimengRateProbe,
+  summarizeJimengRateProbe,
+} from "./rate-probe"
+import {
   buildJimengLipSyncImagePlan,
   buildJimengLipSyncVideoPlan,
   lipSyncImageReferenceFromUploadSummary,
@@ -221,6 +225,7 @@ Commands:
   tts           Generate one MP3 text-to-speech sample from a voice id
   sample-voices Generate sequential MP3 samples for voices from the built-in library
   endpoint-probe Probe/replay one endpoint with JSON body variants and shape summaries
+  rate-probe    Measure bounded no-spend endpoint concurrency/rate behavior
   assets        Fetch workspace/workbench asset history without generation spend
   history-queue Fetch read-only queue/progress details for one or more history ids
   history-records Fetch read-only completed/history records by submit id or history id
@@ -274,6 +279,9 @@ Options:
   --query <query>                Query string override for endpoint-probe
   --body <json>                  Single JSON body for endpoint-probe/capcut-probe
   --variants <json|file>         Probe variants JSON array or object with variants
+  --requests <n>                 Total requests for rate-probe (default: --limit or 12)
+  --concurrency <n>              Concurrent workers for rate-probe (default: 1)
+  --delayMs <ms>                 Optional per-request delay for rate-probe workers
   --endpoints <ids|all>          Catalog endpoints, comma-separated (default: all)
                                   agent-catalog accepts skills,config,all
   --text <text>                 TTS/sample-voices text
@@ -420,6 +428,14 @@ Examples:
     --endpoint /mweb/v1/get_video_by_vid \\
     --variants '[{"name":"vids","body":{"vids":["v03870g10004d8k1u4nog65hb08dnhig"]}},{"name":"vid","body":{"vid":"v03870g10004d8k1u4nog65hb08dnhig"}}]' \\
     --outDir data/jimeng-lab/endpoint-probe-video-info
+
+  jimeng-browser-proxy rate-probe \\
+    --session data/jimeng-lab/raw/session-bundle-current.json \\
+    --endpoint /mweb/v1/get_common_config \\
+    --body '{"is_client_filter":true,"need_beta_model":true,"need_cache":true,"need_refresh":false}' \\
+    --requests 12 \\
+    --concurrency 3 \\
+    --outDir data/jimeng-lab/rate-probe-common-config
 
   jimeng-browser-proxy assets \\
     --session data/jimeng-lab/raw/session-bundle-current.json \\
@@ -596,6 +612,7 @@ interface CliArgs {
     | "agent-catalog"
     | "image-models"
     | "endpoint-probe"
+    | "rate-probe"
     | "lip-sync-config"
     | "lip-sync-compare"
     | "voices"
@@ -656,6 +673,9 @@ interface CliArgs {
   query?: string
   body?: string
   variants?: string
+  requests?: number
+  concurrency?: number
+  delayMs?: number
   endpoints?: string
   text?: string
   voiceId?: string
@@ -1267,6 +1287,63 @@ async function main(argv: string[]): Promise<void> {
       summary: summarizeJimengEndpointProbe(result),
     })
     console.log(`[jimeng-browser-proxy] endpoint-probe saved variants=${result.results.length} rets=${result.results.map((item) => `${item.name}:${item.ret ?? "none"}`).join(",")}`)
+    return
+  }
+
+  if (args.command === "rate-probe") {
+    if (!args.endpoint) throw new Error("rate-probe requires --endpoint")
+    if (!args.body && !args.variants) throw new Error("rate-probe requires --body or --variants")
+    const variants = args.variants
+      ? parseJimengEndpointProbeVariants(readInlineOrFile(args.variants))
+      : buildSingleEndpointProbeVariant(args.body!)
+    const requestCount = args.requests ?? args.limit ?? 12
+    const concurrency = args.concurrency ?? 1
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const runId = `rate-probe-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const probe = {
+      endpoint: args.endpoint,
+      method: args.method,
+      query: args.query,
+      variants,
+      requestCount,
+      concurrency,
+      delayMs: args.delayMs ?? 0,
+      includeRisky: args.includeRisky,
+    }
+    if (args.dryRun) {
+      writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
+        command: args.command,
+        probe,
+        browser_session: redactSession(session),
+        warning: probe.includeRisky
+          ? "includeRisky is enabled; this may call paid, mutating, or generating endpoints."
+          : "Default mode rejects likely paid/mutating/generating endpoints.",
+      })
+      writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+        command: args.command,
+        probe: {
+          endpoint: probe.endpoint,
+          method: probe.method ?? "POST",
+          query: probe.query ?? null,
+          variant_count: probe.variants.length,
+          requests: probe.requestCount,
+          concurrency: probe.concurrency,
+          delay_ms: probe.delayMs,
+          include_risky: probe.includeRisky,
+          variants: probe.variants.map((variant) => ({ name: variant.name })),
+        },
+      })
+      console.log(`[jimeng-browser-proxy] rate-probe dry run saved requests=${requestCount} concurrency=${concurrency}`)
+      return
+    }
+
+    const result = await runJimengRateProbe({ session, probe })
+    writeJson(path.join(dirs.rawDir, `${runId}.json`), result)
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      summary: summarizeJimengRateProbe(result),
+    })
+    console.log(`[jimeng-browser-proxy] rate-probe saved completed=${result.attempts.length}/${result.requestCount} concurrency=${result.concurrency} stopped=${result.stopped}${result.stopReason ? ` reason=${result.stopReason}` : ""}`)
     return
   }
 
@@ -3236,6 +3313,7 @@ function parseArgs(argv: string[]): CliArgs {
     && command !== "agent-catalog"
     && command !== "image-models"
     && command !== "endpoint-probe"
+    && command !== "rate-probe"
     && command !== "lip-sync-config"
     && command !== "lip-sync-compare"
     && command !== "voices"
@@ -3302,6 +3380,9 @@ function parseArgs(argv: string[]): CliArgs {
   const seed = flags.seed ? Number(flags.seed) : undefined
   const itemPlatform = flags["item-platform"] ? Number(flags["item-platform"]) : undefined
   const limit = flags.limit ? Number(flags.limit) : undefined
+  const requests = flags.requests ? Number(flags.requests) : undefined
+  const concurrency = flags.concurrency ? Number(flags.concurrency) : undefined
+  const delayMs = flags.delayMs ? Number(flags.delayMs) : undefined
   const offset = flags.offset ? Number(flags.offset) : undefined
   const cursor = flags.cursor ? Number(flags.cursor) : undefined
   const categoryId = flags["category-id"] ? Number(flags["category-id"]) : undefined
@@ -3324,6 +3405,15 @@ function parseArgs(argv: string[]): CliArgs {
   }
   if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) {
     throw new Error("--limit must be a positive integer")
+  }
+  if (requests !== undefined && (!Number.isInteger(requests) || requests < 1)) {
+    throw new Error("--requests must be a positive integer")
+  }
+  if (concurrency !== undefined && (!Number.isInteger(concurrency) || concurrency < 1)) {
+    throw new Error("--concurrency must be a positive integer")
+  }
+  if (delayMs !== undefined && (!Number.isInteger(delayMs) || delayMs < 0)) {
+    throw new Error("--delayMs must be a non-negative integer")
   }
   if (offset !== undefined && (!Number.isInteger(offset) || offset < 0)) {
     throw new Error("--offset must be a non-negative integer")
@@ -3407,6 +3497,9 @@ function parseArgs(argv: string[]): CliArgs {
     query: command === "static-locate" ? undefined : flags.query,
     body: flags.body,
     variants: flags.variants,
+    requests,
+    concurrency,
+    delayMs,
     endpoints: flags.endpoints,
     text: flags.text,
     voiceId: flags["voice-id"],
