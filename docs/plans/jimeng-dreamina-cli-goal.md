@@ -55,7 +55,8 @@ As of 2026-06-10, the committed Jimeng CLI baseline is:
 - `c09bb7d Add LV editor catalog CLI`
 - `a124c30 Classify LV read-state blockers`
 - `1d423bd Add Jimeng rate probe CLI`
-- current checkpoint: Effect Schema-backed no-spend direct `text2image-plan` request builder
+- `52b0724 Use Effect Schema for Jimeng workspace context`
+- current checkpoint: Effect Schema-backed no-spend `research-keywords` suggestions/guesses plus `/mweb/search/v1` static-inventory coverage
 
 If the thread goal object lags behind this file after a pause, resume from this document and the latest Git checkpoint. The active working rule is: background-only reversal, direct/API-first implementation, small proven CLI slices, tests and proof artifacts before each commit, and no async daemon until the API surface is settled.
 
@@ -637,6 +638,17 @@ Actual subscription API generation was rechecked again on 2026-06-10 after the u
 - validation thumbnails were saved under `data/jimeng-lab/proof-20260610-actual-api-generation-check/_validation/`
 - normalized proof leak check found no unredacted credential markers
 
+Jimeng keyword research is now live-proved without generation spend:
+
+- `jimeng-browser-proxy research-keywords`
+- frontend-derived channels: `inspiration`, `short-film` (`short_film` on the wire), and `asset`
+- `/mweb/search/v1/sug` returns suggestions for inspiration and short-film; asset suggestions are skipped because a direct proof returned `ret=1000 invalid parameter`
+- `/mweb/search/v1/guess` supports all three channels; the current inspiration proof returned 10 guessed terms while short-film and asset returned valid empty lists
+- Effect Schema validates the relied-on `data.suggest_list` / `data.guess_list` paths while allowing additive provider fields
+- live proof: `data/jimeng-lab/proof-20260610-research-keywords-cli-live/`
+- latest result: 5 successful sequential reads, 30 normalized keywords, 1 documented skip, and no credential markers in normalized output
+- static inventory now recognizes `/mweb/search/v1/*`; `/mweb/search/v1/search` remains partial until its frontend response decrypt/sign transform is recovered, and `/mweb/search/v1/fetch_debug/search` is classified as a non-production debug wrapper
+
 The next slice is **lip-sync submit capture and reference-video consumers**. Use the VOD provider reference, ImageX avatar reference, and frontend captures to unlock live lip-sync, reference-video, multimodal/all-around reference, pose/style/depth/canny controls, and live end-frame/multi-frame image-to-video paths.
 
 Immediate next slices:
@@ -646,7 +658,7 @@ Immediate next slices:
 3. Capture the frontend's explicit end-frame/multi-frame mode and live-prove `frames2video` only if the payload contract matches.
 4. Map style/reference roles and the new object-mask provider references into generation payload patches.
 5. Implement digital-human generation using the confirmed VOD reference path where applicable.
-6. Capture real CapCut template search/batch/preset payloads, then expand no-spend research/template coverage beyond the confirmed CapCut category, collection/row/detail, and public metadata catalogs.
+6. Recover the `/mweb/search/v1/search` response transform, then capture real CapCut template search/batch/preset payloads to expand no-spend research/template coverage.
 7. Capture/approve subject/persona `generate_voice` live submit and custom voice clone live submit/mutation once those UI/API flows are captured.
 8. Keep each slice small enough to prove and commit before moving on.
 

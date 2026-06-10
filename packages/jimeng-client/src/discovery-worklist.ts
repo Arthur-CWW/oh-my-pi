@@ -7,8 +7,8 @@ import { JimengJsonObjectSchema, JimengJsonValueSchema, parseJimengContract, par
 const STATIC_FILE_RE = /\.(?:[cm]?[jt]sx?|json|html|map|txt)$/i
 const MAX_STATIC_FILE_BYTES = 3_000_000
 const SKIP_DIRS = new Set([".git", "node_modules", "dist", "build", ".next", ".turbo", "coverage"])
-const ENDPOINT_STRING_RE = /["'`](\/(?:mweb\/v\d+|lv\/v\d+|api\/|commerce\/|aweme\/|webcast\/)[^"'`\\\s?#${}]*)/g
-const FULL_URL_RE = /https?:\/\/[^"'`\s]+\/(?:mweb\/v\d+|lv\/v\d+|api\/|commerce\/|aweme\/|webcast\/)[^"'`\s?#${}]*/g
+const ENDPOINT_STRING_RE = /["'`](\/(?:mweb\/(?:search\/)?v\d+|lv\/v\d+|api\/|commerce\/|aweme\/|webcast\/)[^"'`\\\s?#${}]*)/g
+const FULL_URL_RE = /https?:\/\/[^"'`\s]+\/(?:mweb\/(?:search\/)?v\d+|lv\/v\d+|api\/|commerce\/|aweme\/|webcast\/)[^"'`\s?#${}]*/g
 
 const JimengRiskSchema = z.enum(["read", "mutate", "upload", "generate", "payment", "analytics", "third_party", "unclassified"])
 
@@ -393,6 +393,10 @@ const KNOWN_ENDPOINTS: JimengDiscoveryKnownEndpoint[] = [
   known("/mweb/v1/get_common_config", "implemented", "image-models", "No-spend image model/common config catalog."),
   known("/mweb/v1/workspace/list", "implemented", "workspace-context", "No-spend workspace listing for logged-in project/workspace context."),
   known("/mweb/v1/workspace/get_by_ids", "implemented", "workspace-context", "No-spend workspace lookup by ids inferred from workspace list or supplied explicitly."),
+  known("/mweb/search/v1/sug", "implemented", "research-keywords", "No-spend keyword suggestions for inspiration and short-film research channels; asset suggestions are explicitly skipped after ret=1000 proof."),
+  known("/mweb/search/v1/guess", "implemented", "research-keywords", "No-spend guessed/trending research keywords for inspiration, short-film, and asset channels."),
+  known("/mweb/search/v1/search", "partial", null, "Frontend search request shape is statically recovered, but result promotion still needs the frontend response decrypt/sign transform."),
+  known("/mweb/search/v1/fetch_debug/search", "blocked", null, "Frontend debug-wrapper path is not the production search request; use /mweb/search/v1/search after recovering its response transform."),
   known("/commerce/v1/benefits/user_credit", "implemented", "account-credit", "Signed no-spend account credit balance read used to gate paid generation tests."),
   known("/commerce/v3/resource/benefit_metadata", "implemented", "commerce-benefits", "Signed no-spend benefit metadata read for AIGC/function quota and pay-mode strategy fields."),
   known("/commerce/v3/benefits/batch_get_user_benefit", "implemented", "commerce-benefits", "Signed no-spend user benefit asset read for current quota/pay-mode rows."),
@@ -756,7 +760,7 @@ function normalizeEndpoint(value: string | undefined): string | null {
 
 function isUsefulEndpoint(endpoint: string): boolean {
   if (endpoint === "/api/" || endpoint === "/api") return false
-  return /^\/(?:mweb\/v\d+|lv\/v\d+|api\/[^/]+|commerce\/v\d+|aweme\/|webcast\/)/.test(endpoint)
+  return /^\/(?:mweb\/(?:search\/)?v\d+|lv\/v\d+|api\/[^/]+|commerce\/v\d+|aweme\/|webcast\/)/.test(endpoint)
 }
 
 function isHighValueEndpoint(endpoint: string): boolean {

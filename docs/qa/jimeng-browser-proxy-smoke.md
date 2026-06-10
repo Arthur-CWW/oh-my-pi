@@ -3100,20 +3100,68 @@ response hashes:
 
 The live response included numeric `workspace_id=0` for the default workspace, so the boundary schema accepts string or number ids and normalizes ids to strings. Normalized proof files contain no credential markers or signed media URLs; raw ignored proof can contain signed `cover_image` URLs.
 
+## Research Keywords Smoke
+
+No-spend Jimeng keyword discovery:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts research-keywords \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --endpoints suggest,guess \
+  --channels inspiration,short-film,asset \
+  --keyword '韩系美妆' \
+  --limit 10 \
+  --dryRun \
+  --outDir data/jimeng-lab/proof-20260610-research-keywords-cli-dry-run
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts research-keywords \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --endpoints suggest,guess \
+  --channels inspiration,short-film,asset \
+  --keyword '韩系美妆' \
+  --limit 10 \
+  --outDir data/jimeng-lab/proof-20260610-research-keywords-cli-live
+```
+
+Result:
+
+```txt
+dry-run planned requests=5
+live results=5 items=30 skipped=1
+suggest/inspiration ret=0 items=10
+suggest/short-film ret=0 items=10
+suggest/asset skipped after prior ret=1000 invalid parameter proof
+guess/inspiration ret=0 items=10
+guess/short-film ret=0 items=0
+guess/asset ret=0 items=0
+```
+
+The Effect Schema boundary requires `data.suggest_list` or `data.guess_list`, accepts additive provider fields, and rejects nonzero `ret`. Suggestion `gid` values arrive as JSON numbers larger than JavaScript's safe integer range, so normalized output marks them as unsafe and does not claim an exact id. Normalized dry-run/live proofs contain no credentials or signed URLs.
+
+Static inventory was also fixed to recognize `/mweb/search/v1/*`:
+
+```txt
+resources=251
+skipped_implemented=44
+known_status_counts=unknown:125,partial:5,implemented:44,dry_run_only:4,blocked:70,captured_only:2,cataloged_only:1
+```
+
+Full `/mweb/search/v1/search` remains partial because the frontend applies a result transform that still needs to be recovered. `/mweb/search/v1/fetch_debug/search` is classified as a blocked debug wrapper rather than a production API.
+
 ## Verification
 
 ```bash
 bun run jimeng:typecheck
 bun run jimeng:test
-bun packages/jimeng-client/src/browser-proxy-cli.ts --help | rg 'static-inventory|account-credit|commerce-benefits|workspace-context|lip-sync-config|voice-clones|voice-clone-submit|capcut-probe|capcut-template-metadata|capcut-categories|capcut-collections|capcut-collection-templates|capcut-template-detail|capcut-editor-catalog|infinite-canvas|overseas-short-videos|subject-create|subject-update|subject-delete|subject-generate-voice|subjects|templates|short-videos'
+bun packages/jimeng-client/src/browser-proxy-cli.ts --help | rg 'static-inventory|account-credit|commerce-benefits|workspace-context|research-keywords|lip-sync-config|voice-clones|voice-clone-submit|capcut-probe|capcut-template-metadata|capcut-categories|capcut-collections|capcut-collection-templates|capcut-template-detail|capcut-editor-catalog|infinite-canvas|overseas-short-videos|subject-create|subject-update|subject-delete|subject-generate-voice|subjects|templates|short-videos'
 ```
 
 Result:
 
 ```txt
 typecheck passed
-149 tests passed, 0 failed
-browser-proxy help listed static-inventory, account-credit, commerce-benefits, CapCut collection/detail/editor-catalog, and infinite-canvas commands
+164 tests passed, 0 failed
+browser-proxy help listed static-inventory, account-credit, commerce-benefits, workspace-context, research-keywords, CapCut collection/detail/editor-catalog, and infinite-canvas commands
 paid smoke normalized files have no live token markers
 ```
 

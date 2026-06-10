@@ -18,6 +18,10 @@ describe("Jimeng static locator", () => {
       "/mweb/v1/c",
     ])
     expect(parseJimengStaticLocatorEndpoints(undefined)).toEqual([])
+    expect(parseJimengStaticLocatorEndpoints("/mweb/search/v1/sug,/mweb/search/v1/search")).toEqual([
+      "/mweb/search/v1/search",
+      "/mweb/search/v1/sug",
+    ])
   })
 
   test("parses static query CSV flags", () => {

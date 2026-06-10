@@ -14,8 +14,8 @@ import { type JsonObject } from "./reference-image"
 const STATIC_FILE_RE = /\.(?:[cm]?[jt]sx?|json|html|map|txt)$/i
 const MAX_STATIC_FILE_BYTES = 8_000_000
 const SKIP_DIRS = new Set([".git", "node_modules", "dist", "build", ".next", ".turbo", "coverage"])
-const ENDPOINT_STRING_RE = /["'`](\/(?:mweb\/v\d+|lv\/v\d+|api\/|commerce\/|aweme\/|webcast\/)[^"'`\\\s?#${}]*)/g
-const FULL_URL_RE = /https?:\/\/[^"'`\s]+\/(?:mweb\/v\d+|lv\/v\d+|api\/|commerce\/|aweme\/|webcast\/)[^"'`\s?#${}]*/g
+const ENDPOINT_STRING_RE = /["'`](\/(?:mweb\/(?:search\/)?v\d+|lv\/v\d+|api\/|commerce\/|aweme\/|webcast\/)[^"'`\\\s?#${}]*)/g
+const FULL_URL_RE = /https?:\/\/[^"'`\s]+\/(?:mweb\/(?:search\/)?v\d+|lv\/v\d+|api\/|commerce\/|aweme\/|webcast\/)[^"'`\s?#${}]*/g
 const CAPCUT_STATIC_CATALOG_RE = /https?:\/\/[^"'`\s]+\/obj\/ies-fe-bee-sg\/bee_prod\/[^"'`\s?#]+/g
 
 export type JimengStaticInventoryResourceKind = "api_endpoint" | "static_catalog"

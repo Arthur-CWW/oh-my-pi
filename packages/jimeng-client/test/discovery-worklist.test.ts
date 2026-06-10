@@ -60,6 +60,10 @@ describe("Jimeng discovery worklist", () => {
           `fetch("/lv/v1/ever_photo/promote_asset")`,
           `fetch("/mweb/v1/remove_history")`,
           `fetch("/mweb/v1/update_video_default_bgm")`,
+          `fetch("/mweb/search/v1/sug")`,
+          `fetch("/mweb/search/v1/guess")`,
+          `fetch("/mweb/search/v1/search")`,
+          `fetch("/mweb/search/v1/fetch_debug/search")`,
           `fetch("/lv/v1/effect/get_panel_info")`,
           `fetch("/lv/v1/effect/get_category_effects")`,
           `fetch("/lv/v1/effect/get_all_fonts")`,
@@ -86,7 +90,11 @@ describe("Jimeng discovery worklist", () => {
 
       expect(worklist.skipped_known_count).toBe(1)
       expect(worklist.items.some((item) => item.endpoint === "/mweb/v1/get_history_by_ids")).toBe(false)
+      expect(worklist.items.some((item) => item.endpoint === "/mweb/search/v1/sug")).toBe(false)
+      expect(worklist.items.some((item) => item.endpoint === "/mweb/search/v1/guess")).toBe(false)
       expect(worklist.items.some((item) => item.endpoint === "/lv/v1/effect/get_all_fonts")).toBe(false)
+      expect(worklist.items.find((item) => item.endpoint === "/mweb/search/v1/search")?.known_status).toBe("partial")
+      expect(worklist.items.find((item) => item.endpoint === "/mweb/search/v1/fetch_debug/search")?.known_status).toBe("blocked")
       const readGap = worklist.items.find((item) => item.endpoint === "/mweb/v1/reference_profile/list")
       expect(readGap?.recommended_action).toBe("probe_then_promote_cli")
       expect(readGap?.has_probe_variants).toBe(true)

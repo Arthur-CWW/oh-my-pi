@@ -163,6 +163,14 @@ import {
   summarizeJimengWorkspaceContext,
 } from "./workspace-context"
 import {
+  buildJimengResearchGuessRequest,
+  buildJimengResearchSuggestRequest,
+  fetchJimengResearchKeywords,
+  parseJimengResearchKeywordChannels,
+  parseJimengResearchKeywordEndpoints,
+  summarizeJimengResearchKeywords,
+} from "./research-keywords"
+import {
   buildJimengVideoInfoRequest,
   fetchJimengVideoInfo,
   parseJimengVidCsvFlag,
@@ -249,6 +257,7 @@ Commands:
   account-credit Fetch signed no-spend account credit balance
   commerce-benefits Fetch signed no-spend benefit metadata and user benefit rows
   workspace-context Fetch no-spend workspace list and workspace-id context
+  research-keywords Fetch no-spend search suggestions and guessed research keywords
   infinite-canvas Fetch no-spend infinite-canvas project/detail/ratio metadata
   lip-sync-config Fetch no-spend digital-human/lip-sync model configs
   lip-sync-compare Offline compare a lip-sync dry-run plan against captured UI submit
@@ -321,6 +330,8 @@ Options:
   --endpoints <ids|all>          Catalog endpoints, comma-separated (default: all)
                                   agent-catalog accepts skills,config,all
                                   infinite-canvas accepts projects,detail,ratios,conversations,all
+                                  research-keywords accepts suggest,guess,all
+  --channels <ids|all>           Research channels: inspiration,short-film,asset,all
   --text <text>                 TTS/sample-voices text
   --voice-id <id>               TTS voice id from voices command
   --voice-title <title>         Optional display title for TTS output filename
@@ -354,7 +365,7 @@ Options:
   --endTimeStamp <n>            Assets pagination timestamp/cursor (default: 0)
   --includeStoryAgentResult     Do not hide story-agent results in assets query
   --cursor <n>                  Subject/persona list cursor (default: 0)
-  --keyword <text>              Subject/persona list search keyword
+  --keyword <text>              Research suggestion or subject/persona list search keyword
   --subjectId <id>              Subject/persona id for update/delete
   --subjectIds <csv>            Subject/persona ids for filtered list or batch delete
   --onlyFavorite                Subject/persona list favorite filter
@@ -583,6 +594,14 @@ Examples:
     --limit 20 \\
     --outDir data/jimeng-lab/cli-workspace-context-smoke
 
+  jimeng-browser-proxy research-keywords \\
+    --session data/jimeng-lab/raw/session-bundle-current.json \\
+    --endpoints suggest,guess \\
+    --channels inspiration,short-film,asset \\
+    --keyword "韩系美妆" \\
+    --limit 10 \\
+    --outDir data/jimeng-lab/cli-research-keywords-smoke
+
   jimeng-browser-proxy subjects \\
     --limit 20 \\
     --outDir data/jimeng-lab/cli-subjects-smoke
@@ -680,6 +699,7 @@ interface CliArgs {
     | "account-credit"
     | "commerce-benefits"
     | "workspace-context"
+    | "research-keywords"
     | "infinite-canvas"
     | "endpoint-probe"
     | "rate-probe"
@@ -747,6 +767,7 @@ interface CliArgs {
   concurrency?: number
   delayMs?: number
   endpoints?: string
+  channels?: string
   text?: string
   voiceId?: string
   voiceTitle?: string
@@ -1717,6 +1738,84 @@ async function main(argv: string[]): Promise<void> {
     const listResult = result.results.find((item) => item.endpointId === "list")
     const byIdsResult = result.results.find((item) => item.endpointId === "get-by-ids")
     console.log(`[jimeng-browser-proxy] workspace-context saved endpoints=${result.results.map((item) => item.endpointId).join(",")} listed=${listResult?.workspaces.length ?? "n/a"} by_ids=${byIdsResult?.workspaces.length ?? "n/a"} skipped=${result.skipped.length}`)
+    return
+  }
+
+  if (args.command === "research-keywords") {
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const endpoints = parseJimengResearchKeywordEndpoints(args.endpoints)
+    const channels = parseJimengResearchKeywordChannels(args.channels)
+    const query = {
+      endpoints,
+      channels,
+      keyword: args.keyword,
+      count: args.limit,
+    }
+    const runId = `research-keywords-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    if (args.dryRun) {
+      const requests = endpoints.flatMap((endpoint) => channels.map((channel) => {
+        if (endpoint === "suggest" && channel === "asset") {
+          return {
+            endpoint,
+            channel,
+            skipped: true,
+            reason: "Jimeng returns ret=1000 invalid parameter for asset suggestions",
+          }
+        }
+        return {
+          endpoint,
+          channel,
+          path: endpoint === "suggest" ? "/mweb/search/v1/sug" : "/mweb/search/v1/guess",
+          request: endpoint === "suggest"
+            ? buildJimengResearchSuggestRequest(channel, args.keyword ?? "")
+            : buildJimengResearchGuessRequest(channel, args.limit ?? 10),
+        }
+      }))
+      writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
+        command: args.command,
+        endpoint_sequence: requests.flatMap((request) => "path" in request ? [request.path] : []),
+        query,
+        requests,
+        browser_session: redactSession(session),
+      })
+      writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+        command: args.command,
+        endpoints,
+        channels,
+        keyword: args.keyword ?? null,
+        count: args.limit ?? 10,
+        requests,
+        dry_run: true,
+      })
+      console.log(`[jimeng-browser-proxy] research-keywords dry run saved requests=${requests.filter((request) => "path" in request).length}`)
+      return
+    }
+
+    const result = await fetchJimengResearchKeywords({ session, query })
+    writeJson(path.join(dirs.rawDir, `${runId}.json`), {
+      endpoints: result.endpoints,
+      channels: result.channels,
+      keyword: result.keyword,
+      count: result.count,
+      skipped: result.skipped,
+      results: result.results.map((item) => ({
+        endpoint: item.endpoint,
+        endpoint_id: item.endpointId,
+        channel: item.channel,
+        wire_channel: item.wireChannel,
+        http_status: item.httpStatus,
+        ret: item.ret,
+        errmsg: item.errmsg,
+        response_text_sha256: item.responseTextSha256,
+        request: item.request,
+        body: item.body,
+      })),
+    })
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      summary: summarizeJimengResearchKeywords(result),
+    })
+    console.log(`[jimeng-browser-proxy] research-keywords saved results=${result.results.length} items=${result.results.reduce((sum, item) => sum + item.items.length, 0)} skipped=${result.skipped.length}`)
     return
   }
 
@@ -3663,6 +3762,7 @@ function parseArgs(argv: string[]): CliArgs {
     && command !== "account-credit"
     && command !== "commerce-benefits"
     && command !== "workspace-context"
+    && command !== "research-keywords"
     && command !== "infinite-canvas"
     && command !== "endpoint-probe"
     && command !== "rate-probe"
@@ -3860,6 +3960,7 @@ function parseArgs(argv: string[]): CliArgs {
     concurrency,
     delayMs,
     endpoints: flags.endpoints,
+    channels: flags.channels,
     text: flags.text,
     voiceId: flags["voice-id"],
     voiceTitle: flags["voice-title"],

@@ -273,7 +273,7 @@ function termKey(term: JimengStaticLocatorSearchTerm): string {
 }
 
 function isStaticLocatorApiEndpoint(endpoint: string): boolean {
-  return /^\/(?:mweb\/v\d+|lv\/v\d+|api\/[^/]+|commerce\/v\d+|aweme\/|webcast\/)/.test(endpoint)
+  return /^\/(?:mweb\/(?:search\/)?v\d+|lv\/v\d+|api\/[^/]+|commerce\/v\d+|aweme\/|webcast\/)/.test(endpoint)
 }
 
 function lineColumnAt(text: string, index: number): { line: number; column: number } {

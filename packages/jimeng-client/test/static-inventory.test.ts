@@ -65,6 +65,10 @@ describe("Jimeng static inventory", () => {
           `const everPhotoPromoteBlocked = "/lv/v1/ever_photo/promote_asset";`,
           `const removeHistoryBlocked = "/mweb/v1/remove_history";`,
           `const updateVideoDefaultBgmBlocked = "/mweb/v1/update_video_default_bgm";`,
+          `const researchSuggestImplemented = "/mweb/search/v1/sug";`,
+          `const researchGuessImplemented = "/mweb/search/v1/guess";`,
+          `const researchSearchPartial = "/mweb/search/v1/search";`,
+          `const researchDebugBlocked = "/mweb/search/v1/fetch_debug/search";`,
           `const lvEditorPanelImplemented = "/lv/v1/effect/get_panel_info";`,
           `const lvEditorEffectsImplemented = "/lv/v1/effect/get_category_effects";`,
           `const lvEditorFontsImplemented = "/lv/v1/effect/get_all_fonts";`,
@@ -92,10 +96,14 @@ describe("Jimeng static inventory", () => {
       const summary = summarizeJimengStaticInventory(result)
       const markdown = writeJimengStaticInventoryMarkdown(result)
 
-      expect(result.totalResourceCount).toBe(66)
-      expect(result.skippedImplementedCount).toBe(6)
+      expect(result.totalResourceCount).toBe(70)
+      expect(result.skippedImplementedCount).toBe(8)
       expect(result.items.map((item) => item.resource)).not.toContain("/mweb/v1/get_history_by_ids")
+      expect(result.items.map((item) => item.resource)).not.toContain("/mweb/search/v1/sug")
+      expect(result.items.map((item) => item.resource)).not.toContain("/mweb/search/v1/guess")
       expect(result.items.map((item) => item.resource)).not.toContain("/lv/v1/effect/get_all_fonts")
+      expect(result.items.find((item) => item.resource === "/mweb/search/v1/search")?.knownStatus).toBe("partial")
+      expect(result.items.find((item) => item.resource === "/mweb/search/v1/fetch_debug/search")?.knownStatus).toBe("blocked")
       expect(result.items.find((item) => item.resource === "/mweb/v1/dreamina_subject/generate_voice")?.recommendedAction).toBe("approval_or_disposable_fixture")
       expect(result.items.find((item) => item.resource === "/mweb/v1/get_history")?.knownStatus).toBe("blocked")
       expect(result.items.find((item) => item.resource === "/mweb/v1/get_history")?.recommendedAction).toBe("capture_exact_payload")
@@ -183,6 +191,9 @@ describe("Jimeng static inventory", () => {
           `fetch("/lv/v1/asset/create");`,
           `fetch("/lv/v1/editor/template/recent_list");`,
           `fetch("/mweb/v1/voice/query_task");`,
+          `fetch("/mweb/search/v1/sug");`,
+          `fetch("/mweb/search/v1/guess");`,
+          `fetch("/mweb/search/v1/search");`,
         ].join("\n"),
         "utf8",
       )
@@ -202,6 +213,9 @@ describe("Jimeng static inventory", () => {
       expect(result.items.find((item) => item.resource === "/lv/v1/asset/create")?.riskClass).toBe("mutate")
       expect(result.items.find((item) => item.resource === "/lv/v1/editor/template/recent_list")?.knownStatus).toBe("blocked")
       expect(result.items.find((item) => item.resource === "/mweb/v1/voice/query_task")?.riskClass).toBe("read")
+      expect(result.items.find((item) => item.resource === "/mweb/search/v1/sug")?.knownCommand).toBe("research-keywords")
+      expect(result.items.find((item) => item.resource === "/mweb/search/v1/guess")?.knownCommand).toBe("research-keywords")
+      expect(result.items.find((item) => item.resource === "/mweb/search/v1/search")?.knownStatus).toBe("partial")
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
