@@ -55,7 +55,7 @@ As of 2026-06-10, the committed Jimeng CLI baseline is:
 - `c09bb7d Add LV editor catalog CLI`
 - `a124c30 Classify LV read-state blockers`
 - `1d423bd Add Jimeng rate probe CLI`
-- current checkpoint: no-spend infinite-canvas read CLI
+- current checkpoint: no-spend commerce benefit/quota metadata CLI
 
 If the thread goal object lags behind this file after a pause, resume from this document and the latest Git checkpoint. The active working rule is: background-only reversal, direct/API-first implementation, small proven CLI slices, tests and proof artifacts before each commit, and no async daemon until the API surface is settled.
 
@@ -170,6 +170,17 @@ Signed account credit balance is now live-proved without generation spend and sc
 - proof bundle: `data/jimeng-lab/proof-20260610-account-credit-cli/`
 - latest proof returned total `3990` credits, all from VIP credits
 - related `/commerce/v1/benefits/credit_receive` is a mutating daily-claim endpoint and remains out of scope without explicit approval
+
+Signed commerce benefit metadata and current user benefit rows are now live-proved without generation spend and schema-backed:
+
+- `jimeng-browser-proxy commerce-benefits`
+- direct `/commerce/v3/resource/benefit_metadata` and `/commerce/v3/benefits/batch_get_user_benefit`
+- uses the same frontend-compatible `device-time` / `sign` / `sign-ver` commerce headers as `account-credit`
+- static frontend evidence showed the wire body must be snake_case `query_list`, not the service-layer camelCase `queryList`
+- default request queries `aigc/get_all` and `normal_func/get_all`
+- normalizes resource ids, benefit types, units, use modes, pay modes, roles, quotas, `total_credits`, and `enable_preview`
+- proof bundle: `data/jimeng-lab/proof-20260610-commerce-benefits-cli/`
+- latest proof returned `12` metadata rows and `140` current user benefit asset rows; pay modes included `LimitFree`, `Subscribe`, and `UserCredit`
 
 No-spend direct endpoint concurrency probing is now live-proved:
 
@@ -477,8 +488,8 @@ Static API inventory is now available as the systematic coverage map:
 - scans API endpoint strings and public CapCut `bee_prod` catalog URLs, classifies read/generate/upload/mutate/payment/analytics risk, joins the existing known-command map, and ranks uncovered resources for the next slice
 - default output skips fully implemented endpoints so it stays focused on gaps; `--includeKnown` produces an audit inventory
 - proof bundle: `data/jimeng-lab/proof-20260610-static-inventory/`
-- latest proof scanned `data/jimeng-lab/js-sweep/files` plus `packages/jimeng-client/src`, found 247 resources, included 160 non-implemented items, skipped 36 implemented endpoints, and counted 61 high-value gaps after the CapCut collection/row/detail, LV editor catalog, and infinite-canvas read commands were promoted
-- known status counts are now `unknown=143`, `partial=4`, `implemented=36`, `dry_run_only=4`, `blocked=57`, `captured_only=2`, and `cataloged_only=1`; the five CapCut search/batch/preset-related endpoints above are blocked with exact replay evidence and recommended action `capture_exact_payload`
+- latest proof scanned `data/jimeng-lab/js-sweep/files` plus `packages/jimeng-client/src`, found 247 resources, included 80 non-implemented items at the current review limit, skipped 40 implemented endpoints, and counted 61 high-value gaps after the CapCut collection/row/detail, LV editor catalog, infinite-canvas read, account credit, and commerce-benefit commands were promoted
+- known status counts are now `unknown=127`, `partial=4`, `implemented=40`, `dry_run_only=4`, `blocked=69`, `captured_only=2`, and `cataloged_only=1`; the five CapCut search/batch/preset-related endpoints above are blocked with exact replay evidence and recommended action `capture_exact_payload`
 - seven video-generation helper endpoints are also now explicitly blocked/capture-needed instead of generic unknowns:
   - `/mweb/v1/video_generate/get_switch_model_queue_info`: safe no-spend probes with empty, `model_req_key`, `model_req_keys`, and scene bodies returned `ret=1000 invalid parameter`
   - `/mweb/v1/video_generate/pre_process` and `/mweb/v1/video_generate/mget_pre_process_result`: frontend task submit/result pair; capture exact UI payload and task ids before promotion

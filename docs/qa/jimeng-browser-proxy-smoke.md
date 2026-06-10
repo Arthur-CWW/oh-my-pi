@@ -2922,20 +2922,74 @@ rg -n -P 'x-signature|authorization|cookie|sessionid|sid=|msToken|verifyFp|sign|
 
 Result: no matches in normalized output. Raw ignored proof contains the provider response body only; request headers/cookies are not persisted.
 
+## Commerce Benefits Smoke
+
+No-spend signed benefit metadata and current user benefit rows:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts commerce-benefits \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --endpoints metadata,user-benefits \
+  --outDir data/jimeng-lab/proof-20260610-commerce-benefits-cli
+```
+
+Result:
+
+```txt
+commerce-benefits saved metadata=12 user_assets=140
+resource_ids=common_ai,generate_agent,generate_audio,generate_cast,generate_img,generate_music,generate_video,intergen,lip_sync,queue_speed,remove_watermark,xuelei
+pay_modes=LimitFree,Subscribe,UserCredit
+```
+
+Supporting static evidence and failed guess:
+
+```txt
+data/jimeng-lab/proof-20260610-commerce-static-locate-v2/
+data/jimeng-lab/proof-20260610-commerce-catalog-probe/
+```
+
+The first camelCase `queryList` probe returned `ret=1000`; the frontend serializer evidence showed the correct wire body is snake_case `query_list`.
+
+Refreshed inventory after promotion:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts static-inventory \
+  --staticRoot data/jimeng-lab/js-sweep/files,packages/jimeng-client/src \
+  --outDir data/jimeng-lab/proof-20260610-static-inventory-commerce-benefits \
+  --limit 80
+```
+
+Result:
+
+```txt
+resources=247
+skipped_implemented=40
+known_status_counts=unknown:127,partial:4,implemented:40,dry_run_only:4,blocked:69,captured_only:2,cataloged_only:1
+```
+
+Normalized leak check:
+
+```bash
+rg -n -P 'authorization|cookie|sessionid|sid=|msToken|verifyFp|device-time|tdid' \
+  data/jimeng-lab/proof-20260610-commerce-benefits-cli/normalized || true
+```
+
+Result: no matches in normalized output. Raw ignored proof contains provider response bodies, including upstream response `sign` fields, but no request headers or cookies.
+
 ## Verification
 
 ```bash
 bun run jimeng:typecheck
 bun run jimeng:test
-bun packages/jimeng-client/src/browser-proxy-cli.ts --help | rg 'static-inventory|account-credit|lip-sync-config|voice-clones|voice-clone-submit|capcut-probe|capcut-template-metadata|capcut-categories|capcut-collections|capcut-collection-templates|capcut-template-detail|capcut-editor-catalog|infinite-canvas|overseas-short-videos|subject-create|subject-update|subject-delete|subject-generate-voice|subjects|templates|short-videos'
+bun packages/jimeng-client/src/browser-proxy-cli.ts --help | rg 'static-inventory|account-credit|commerce-benefits|lip-sync-config|voice-clones|voice-clone-submit|capcut-probe|capcut-template-metadata|capcut-categories|capcut-collections|capcut-collection-templates|capcut-template-detail|capcut-editor-catalog|infinite-canvas|overseas-short-videos|subject-create|subject-update|subject-delete|subject-generate-voice|subjects|templates|short-videos'
 ```
 
 Result:
 
 ```txt
 typecheck passed
-144 tests passed, 0 failed
-browser-proxy help listed static-inventory, account-credit, CapCut collection/detail/editor-catalog, and infinite-canvas commands
+149 tests passed, 0 failed
+browser-proxy help listed static-inventory, account-credit, commerce-benefits, CapCut collection/detail/editor-catalog, and infinite-canvas commands
 paid smoke normalized files have no live token markers
 ```
 

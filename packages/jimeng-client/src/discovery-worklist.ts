@@ -392,6 +392,8 @@ const KNOWN_ENDPOINTS: JimengDiscoveryKnownEndpoint[] = [
   known("/mweb/v1/get_video_by_vid", "implemented", "video-info", "No-spend VOD metadata lookup."),
   known("/mweb/v1/get_common_config", "implemented", "image-models", "No-spend image model/common config catalog."),
   known("/commerce/v1/benefits/user_credit", "implemented", "account-credit", "Signed no-spend account credit balance read used to gate paid generation tests."),
+  known("/commerce/v3/resource/benefit_metadata", "implemented", "commerce-benefits", "Signed no-spend benefit metadata read for AIGC/function quota and pay-mode strategy fields."),
+  known("/commerce/v3/benefits/batch_get_user_benefit", "implemented", "commerce-benefits", "Signed no-spend user benefit asset read for current quota/pay-mode rows."),
   known("/mweb/v1/infinite_canvas/list_project", "implemented", "infinite-canvas", "No-spend infinite-canvas project listing."),
   known("/mweb/v1/infinite_canvas/project_detail", "implemented", "infinite-canvas", "No-spend infinite-canvas project detail lookup by project_id."),
   known("/mweb/v1/infinite_canvas/v1/get_canvas_custom_ratio", "implemented", "infinite-canvas", "No-spend infinite-canvas custom ratio listing by user_id."),

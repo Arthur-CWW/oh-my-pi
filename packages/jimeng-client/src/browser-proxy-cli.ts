@@ -19,6 +19,12 @@ import {
   fetchJimengAccountCredit,
   summarizeJimengAccountCredit,
 } from "./account-credit"
+import {
+  buildJimengCommerceBenefitsRequest,
+  fetchJimengCommerceBenefits,
+  parseJimengCommerceBenefitEndpoints,
+  summarizeJimengCommerceBenefits,
+} from "./commerce-benefits"
 import { loadJimengSessionFromBrowser } from "./browser-session"
 import {
   buildCapCutCollectionTemplatesRequest,
@@ -228,6 +234,7 @@ Commands:
   agent-catalog Fetch normalized agent skills and image/video model catalog
   image-models  Fetch no-spend image generation model/config catalog
   account-credit Fetch signed no-spend account credit balance
+  commerce-benefits Fetch signed no-spend benefit metadata and user benefit rows
   infinite-canvas Fetch no-spend infinite-canvas project/detail/ratio metadata
   lip-sync-config Fetch no-spend digital-human/lip-sync model configs
   lip-sync-compare Offline compare a lip-sync dry-run plan against captured UI submit
@@ -538,6 +545,11 @@ Examples:
     --session data/jimeng-lab/raw/session-bundle-current.json \\
     --outDir data/jimeng-lab/cli-image-models-smoke
 
+  jimeng-browser-proxy commerce-benefits \\
+    --session data/jimeng-lab/raw/session-bundle-current.json \\
+    --endpoints metadata,user-benefits \\
+    --outDir data/jimeng-lab/cli-commerce-benefits-smoke
+
   jimeng-browser-proxy subjects \\
     --limit 20 \\
     --outDir data/jimeng-lab/cli-subjects-smoke
@@ -632,6 +644,7 @@ interface CliArgs {
     | "agent-catalog"
     | "image-models"
     | "account-credit"
+    | "commerce-benefits"
     | "infinite-canvas"
     | "endpoint-probe"
     | "rate-probe"
@@ -1352,6 +1365,62 @@ async function main(argv: string[]): Promise<void> {
       summary: summarizeJimengAccountCredit(result),
     })
     console.log(`[jimeng-browser-proxy] account-credit saved total=${result.credit.totalCredit} gift=${result.credit.giftCredit} purchase=${result.credit.purchaseCredit} vip=${result.credit.vipCredit}`)
+    return
+  }
+
+  if (args.command === "commerce-benefits") {
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const runId = `commerce-benefits-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const endpoints = parseJimengCommerceBenefitEndpoints(args.endpoints)
+    const request = buildJimengCommerceBenefitsRequest()
+    if (args.dryRun) {
+      writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
+        command: args.command,
+        endpoint_sequence: endpoints.map((endpoint) => endpoint === "metadata"
+          ? "/commerce/v3/resource/benefit_metadata"
+          : "/commerce/v3/benefits/batch_get_user_benefit"),
+        method: "POST",
+        request,
+        signed_headers: ["device-time", "sign", "sign-ver"],
+        browser_session: redactSession(session),
+      })
+      writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+        command: args.command,
+        endpoints,
+        request,
+        dry_run: true,
+      })
+      console.log(`[jimeng-browser-proxy] commerce-benefits dry run saved endpoints=${endpoints.join(",")}`)
+      return
+    }
+
+    const result = await fetchJimengCommerceBenefits({ session, endpoints, request })
+    writeJson(path.join(dirs.rawDir, `${runId}.json`), {
+      requested_endpoints: result.requestedEndpoints,
+      request: result.request,
+      metadata: result.metadata ? {
+        endpoint: result.metadata.endpoint,
+        http_status: result.metadata.httpStatus,
+        ret: result.metadata.ret,
+        errmsg: result.metadata.errmsg,
+        response_text_sha256: result.metadata.responseTextSha256,
+        body: result.metadata.body,
+      } : null,
+      user_benefits: result.userBenefits ? {
+        endpoint: result.userBenefits.endpoint,
+        http_status: result.userBenefits.httpStatus,
+        ret: result.userBenefits.ret,
+        errmsg: result.userBenefits.errmsg,
+        response_text_sha256: result.userBenefits.responseTextSha256,
+        body: result.userBenefits.body,
+      } : null,
+    })
+    const summary = summarizeJimengCommerceBenefits(result)
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      summary,
+    })
+    console.log(`[jimeng-browser-proxy] commerce-benefits saved metadata=${result.metadata?.metadataCount ?? "skip"} user_assets=${result.userBenefits?.assetCount ?? "skip"}`)
     return
   }
 
@@ -3450,6 +3519,7 @@ function parseArgs(argv: string[]): CliArgs {
     && command !== "agent-catalog"
     && command !== "image-models"
     && command !== "account-credit"
+    && command !== "commerce-benefits"
     && command !== "infinite-canvas"
     && command !== "endpoint-probe"
     && command !== "rate-probe"
