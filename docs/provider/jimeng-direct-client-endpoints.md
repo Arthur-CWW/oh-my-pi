@@ -253,9 +253,12 @@ concurrency=96 requests=192 completed=192 stopped=false http=200x192 ret=0x192 p
 concurrency=128 requests=256 completed=256 stopped=false http=200x256 ret=0x256 p95=625ms
 concurrency=192 requests=384 completed=384 stopped=false http=200x384 ret=0x384 p95=966ms
 concurrency=256 requests=512 completed=512 stopped=false http=200x512 ret=0x512 p95=1406ms
+concurrency=512 requests=512 completed=512 stopped=false http=200x512 ret=0x512 p50=916ms  p95=1441ms max=1463ms
+concurrency=768 requests=768 completed=768 stopped=false http=200x768 ret=0x768 p50=1157ms p95=1835ms max=2446ms
+concurrency=1024 requests=1024 completed=1024 stopped=false http=200x1024 ret=0x1024 p50=1942ms p95=2893ms max=5831ms
 ```
 
-This means no rate limit was observed up to concurrency `256` on that read-only config endpoint. Tail latency starts to stretch at the highest tiers, and this does **not** establish a safe limit for paid generation, upload, mutation, or polling endpoints.
+This means no rate limit was observed up to concurrency `1024` on that read-only config endpoint. Tail latency starts to stretch sharply at the highest tier, and this does **not** establish a safe limit for paid generation, upload, mutation, or polling endpoints.
 
 ### 6.0.2) Signed account credit balance
 

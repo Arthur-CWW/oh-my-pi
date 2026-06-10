@@ -2443,6 +2443,17 @@ bun packages/jimeng-client/src/browser-proxy-cli.ts rate-probe \
   --requests 512 \
   --concurrency 256 \
   --outDir data/jimeng-lab/proof-20260610-rate-probe-common-config-c256
+
+for c in 512 768 1024; do
+  bun packages/jimeng-client/src/browser-proxy-cli.ts rate-probe \
+    --session data/jimeng-lab/raw/session-bundle-current.json \
+    --endpoint /mweb/v1/get_common_config \
+    --method POST \
+    --body '{}' \
+    --requests "$c" \
+    --concurrency "$c" \
+    --outDir "data/jimeng-lab/proof-20260610-rate-probe-common-config-c$c"
+done
 ```
 
 Measured summaries:
@@ -2459,20 +2470,24 @@ concurrency=96 requests=192 completed=192 stopped=false elapsed=953ms    p50=414
 concurrency=128 requests=256 completed=256 stopped=false elapsed=983ms   p50=369ms  p95=625ms   http=200x256 ret=0x256
 concurrency=192 requests=384 completed=384 stopped=false elapsed=1260ms  p50=362ms  p95=966ms   http=200x384 ret=0x384
 concurrency=256 requests=512 completed=512 stopped=false elapsed=1626ms  p50=388ms  p95=1406ms  http=200x512 ret=0x512
+concurrency=512 requests=512 completed=512 stopped=false elapsed=1465ms  p50=916ms  p95=1441ms  max=1463ms  http=200x512  ret=0x512
+concurrency=768 requests=768 completed=768 stopped=false elapsed=2447ms  p50=1157ms p95=1835ms  max=2446ms  http=200x768  ret=0x768
+concurrency=1024 requests=1024 completed=1024 stopped=false elapsed=5837ms p50=1942ms p95=2893ms max=5831ms http=200x1024 ret=0x1024
 ```
 
 Result:
 
 ```txt
-No rate/auth/risk stop was observed for /mweb/v1/get_common_config through concurrency 256.
+No rate/auth/risk stop was observed for /mweb/v1/get_common_config through concurrency 1024.
 The iptag/jimeng-api reference does not publish a hard rate limit; it supports comma-separated bearer tokens and randomly samples tokens per request, plus long polling/retry behavior.
+Tail latency degraded materially at concurrency 1024, so this is a read-config endpoint ceiling observation, not a recommended generation-submit setting.
 ```
 
 Leak check:
 
 ```bash
-rg -n -P 'x-signature|authorization|cookie|sessionid|sid=|msToken|verifyFp|X-Kagi|x-expires' \
-  data/jimeng-lab/proof-20260610-rate-probe-common-config-c{1,3,6,10,16,32,64,96,128,192,256}/normalized
+rg -n -P 'x-signature|authorization|cookie|sessionid|sid=|msToken|verifyFp|X-Kagi|x-expires|device-time|sign-ver|\bsign\b|tdid' \
+  data/jimeng-lab/proof-20260610-rate-probe-common-config-c{1,3,6,10,16,32,64,96,128,192,256,512,768,1024}/normalized
 ```
 
 Expected result: no matches.
