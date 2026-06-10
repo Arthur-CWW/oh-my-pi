@@ -24,6 +24,13 @@ describe("Jimeng discovery worklist", () => {
           `fetch("/lv/v1/cc_web/replicate/search_templates")`,
           `fetch("/lv/v1/cc_web/plane/batch_get_collection_templates")`,
           `fetch("/lv/v1/cc_web/plane/get_collection_presets")`,
+          `fetch("/mweb/v1/video_generate/get_switch_model_queue_info")`,
+          `fetch("/mweb/v1/video_generate/pre_process")`,
+          `fetch("/mweb/v1/video_generate/mget_pre_process_result")`,
+          `fetch("/mweb/v1/video_generate/face_auth/skip")`,
+          `fetch("/mweb/v1/video_generate/face_auth/skip/query")`,
+          `fetch("/mweb/v1/aigc_draft/cancel_generate")`,
+          `fetch("/mweb/v1/aigc_draft/generate_accelerate")`,
         ].join("\n"),
         "utf8",
       )
@@ -55,6 +62,27 @@ describe("Jimeng discovery worklist", () => {
       const capcutPresets = worklist.items.find((item) => item.endpoint === "/lv/v1/cc_web/plane/get_collection_presets")
       expect(capcutPresets?.known_status).toBe("blocked")
       expect(capcutPresets?.reason).toContain("ret=1015")
+      const switchQueue = worklist.items.find((item) => item.endpoint === "/mweb/v1/video_generate/get_switch_model_queue_info")
+      expect(switchQueue?.known_status).toBe("blocked")
+      expect(switchQueue?.reason).toContain("ret=1000 invalid parameter")
+      const preProcess = worklist.items.find((item) => item.endpoint === "/mweb/v1/video_generate/pre_process")
+      expect(preProcess?.known_status).toBe("blocked")
+      expect(preProcess?.reason).toContain("submits a video pre-process task")
+      const preProcessResult = worklist.items.find((item) => item.endpoint === "/mweb/v1/video_generate/mget_pre_process_result")
+      expect(preProcessResult?.known_status).toBe("blocked")
+      expect(preProcessResult?.reason).toContain("depends on task ids")
+      const faceAuthSkip = worklist.items.find((item) => item.endpoint === "/mweb/v1/video_generate/face_auth/skip")
+      expect(faceAuthSkip?.known_status).toBe("blocked")
+      expect(faceAuthSkip?.reason).toContain("task state")
+      const faceAuthSkipQuery = worklist.items.find((item) => item.endpoint === "/mweb/v1/video_generate/face_auth/skip/query")
+      expect(faceAuthSkipQuery?.known_status).toBe("blocked")
+      expect(faceAuthSkipQuery?.reason).toContain("depends on a task id")
+      const cancelGenerate = worklist.items.find((item) => item.endpoint === "/mweb/v1/aigc_draft/cancel_generate")
+      expect(cancelGenerate?.known_status).toBe("blocked")
+      expect(cancelGenerate?.reason).toContain("Cancels an in-flight generation")
+      const generateAccelerate = worklist.items.find((item) => item.endpoint === "/mweb/v1/aigc_draft/generate_accelerate")
+      expect(generateAccelerate?.known_status).toBe("blocked")
+      expect(generateAccelerate?.reason).toContain("may spend quota")
       expect(worklist.items.find((item) => item.endpoint === "/mweb/v1/aigc_draft/generate")?.recommended_action).toBe("compare_dry_run_before_live")
       expect(worklist.items.find((item) => item.endpoint === "/mweb/v1/dreamina_subject/generate_voice")?.recommended_action).toBe("approval_or_disposable_fixture")
       expect(worklist.probe_variant_exports).toHaveLength(1)

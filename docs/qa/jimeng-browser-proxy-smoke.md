@@ -2056,11 +2056,49 @@ blocked_capcut_search_batch_preset:
   /lv/v1/cc_web/replicate/search_templates -> capture_exact_payload
 ```
 
+After classifying video-generation helper endpoints:
+
+```txt
+resources=247
+included=200
+skipped_implemented=29
+high_value_gaps=61
+known_status_counts=unknown:193,partial:4,implemented:29,dry_run_only:4,blocked:14,captured_only:2,cataloged_only:1
+blocked_video_generate_helpers:
+  /mweb/v1/video_generate/get_switch_model_queue_info -> capture_exact_payload
+  /mweb/v1/video_generate/pre_process -> capture_exact_payload
+  /mweb/v1/video_generate/mget_pre_process_result -> capture_exact_payload
+  /mweb/v1/video_generate/face_auth/skip -> capture_exact_payload
+  /mweb/v1/video_generate/face_auth/skip/query -> capture_exact_payload
+  /mweb/v1/aigc_draft/cancel_generate -> capture_exact_payload
+  /mweb/v1/aigc_draft/generate_accelerate -> capture_exact_payload
+```
+
 Normalized proof:
 
 ```txt
-data/jimeng-lab/proof-20260610-static-inventory/normalized/static-inventory-20260610074235-summary.json
-data/jimeng-lab/proof-20260610-static-inventory/normalized/static-inventory-20260610074235-summary.md
+data/jimeng-lab/proof-20260610-static-inventory/normalized/static-inventory-20260610080520-summary.json
+data/jimeng-lab/proof-20260610-static-inventory/normalized/static-inventory-20260610080520-summary.md
+```
+
+Video helper proof:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts static-locate \
+  --staticRoot data/jimeng-lab/js-sweep/files,packages/jimeng-client/src \
+  --endpoint /mweb/v1/video_generate/get_switch_model_queue_info,/mweb/v1/video_generate/mget_pre_process_result,/mweb/v1/video_generate/pre_process,/mweb/v1/video_generate/face_auth/skip,/mweb/v1/video_generate/face_auth/skip/query \
+  --outDir data/jimeng-lab/proof-20260610-static-locate-video-generate-helpers
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts endpoint-probe \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --endpoint /mweb/v1/video_generate/get_switch_model_queue_info \
+  --variants '[{"name":"empty","body":{}},{"name":"current-fast-model","body":{"model_req_key":"dreamina_ic_generate_video_model_vgfm_3.0_fast"}},{"name":"current-fast-model-snake-list","body":{"model_req_keys":["dreamina_ic_generate_video_model_vgfm_3.0_fast"]}},{"name":"video-scene","body":{"scene":"text_to_video","model_req_key":"dreamina_ic_generate_video_model_vgfm_3.0_fast"}}]' \
+  --outDir data/jimeng-lab/proof-20260610-switch-model-queue-probe
+```
+
+```txt
+static-locate-video-generate-helpers: 5 endpoints, 6 occurrences, no credential markers in normalized output
+switch-model-queue-probe: 4 variants, all ret=1000, errmsg=invalid parameter
 ```
 
 Leak check:

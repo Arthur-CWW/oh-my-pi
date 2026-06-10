@@ -24,6 +24,13 @@ describe("Jimeng static inventory", () => {
           `const capcutPresetsBlocked = "/lv/v1/cc_web/plane/get_collection_presets";`,
           `const capcutFuzzyBlocked = "/lv/v1/cc_web/plane/fuzzy_search_templates";`,
           `const capcutPresetDetailBlocked = "/lv/v1/cc_web/plane/preset_template_detail";`,
+          `const switchModelQueueBlocked = "/mweb/v1/video_generate/get_switch_model_queue_info";`,
+          `const preProcessBlocked = "/mweb/v1/video_generate/pre_process";`,
+          `const preProcessResultBlocked = "/mweb/v1/video_generate/mget_pre_process_result";`,
+          `const faceAuthSkipBlocked = "/mweb/v1/video_generate/face_auth/skip";`,
+          `const faceAuthSkipQueryBlocked = "/mweb/v1/video_generate/face_auth/skip/query";`,
+          `const cancelGenerateBlocked = "/mweb/v1/aigc_draft/cancel_generate";`,
+          `const generateAccelerateBlocked = "/mweb/v1/aigc_draft/generate_accelerate";`,
           `const unknownRead = "https://jimeng.jianying.com/mweb/v1/template/search?token=secret";`,
           `const unknownGenerate = "/mweb/v1/avatar/generate";`,
           `const capcutCatalog = "https://lf16-beecdn.ibytedtos.com/obj/ies-fe-bee-sg/bee_prod/biz_49/bee_prod_49_bee_publish_709.json?x-signature=secret";`,
@@ -38,7 +45,7 @@ describe("Jimeng static inventory", () => {
       const summary = summarizeJimengStaticInventory(result)
       const markdown = writeJimengStaticInventoryMarkdown(result)
 
-      expect(result.totalResourceCount).toBe(12)
+      expect(result.totalResourceCount).toBe(19)
       expect(result.skippedImplementedCount).toBe(2)
       expect(result.items.map((item) => item.resource)).not.toContain("/mweb/v1/get_history_by_ids")
       expect(result.items.find((item) => item.resource === "/mweb/v1/dreamina_subject/generate_voice")?.recommendedAction).toBe("approval_or_disposable_fixture")
@@ -52,6 +59,13 @@ describe("Jimeng static inventory", () => {
       expect(result.items.find((item) => item.resource === "/lv/v1/cc_web/plane/get_collection_presets")?.knownStatus).toBe("blocked")
       expect(result.items.find((item) => item.resource === "/lv/v1/cc_web/plane/preset_template_detail")?.knownStatus).toBe("blocked")
       expect(result.items.find((item) => item.resource === "/lv/v1/cc_web/plane/fuzzy_search_templates")?.knownStatus).toBe("blocked")
+      expect(result.items.find((item) => item.resource === "/mweb/v1/video_generate/get_switch_model_queue_info")?.knownStatus).toBe("blocked")
+      expect(result.items.find((item) => item.resource === "/mweb/v1/video_generate/pre_process")?.knownStatus).toBe("blocked")
+      expect(result.items.find((item) => item.resource === "/mweb/v1/video_generate/mget_pre_process_result")?.knownStatus).toBe("blocked")
+      expect(result.items.find((item) => item.resource === "/mweb/v1/video_generate/face_auth/skip")?.knownStatus).toBe("blocked")
+      expect(result.items.find((item) => item.resource === "/mweb/v1/video_generate/face_auth/skip/query")?.knownStatus).toBe("blocked")
+      expect(result.items.find((item) => item.resource === "/mweb/v1/aigc_draft/cancel_generate")?.knownStatus).toBe("blocked")
+      expect(result.items.find((item) => item.resource === "/mweb/v1/aigc_draft/generate_accelerate")?.knownStatus).toBe("blocked")
       expect(result.items.find((item) => item.resource === "/mweb/v1/template/search")?.recommendedAction).toBe("probe_read_endpoint")
       expect(result.items.find((item) => item.resource === "/mweb/v1/avatar/generate")?.riskClass).toBe("generate")
       expect(JSON.stringify(summary)).not.toContain("x-signature=secret")
