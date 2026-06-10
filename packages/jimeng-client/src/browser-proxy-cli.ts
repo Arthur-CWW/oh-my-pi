@@ -142,6 +142,10 @@ import {
   summarizeJimengImageModels,
 } from "./image-models"
 import {
+  buildJimengText2ImageDirectPlan,
+  summarizeJimengText2ImageDirectPlan,
+} from "./text2image-plan"
+import {
   buildJimengCanvasCustomRatiosRequest,
   buildJimengCanvasConversationListRequest,
   buildJimengCanvasProjectDetailRequest,
@@ -233,6 +237,7 @@ Commands:
   catalog       Probe non-generating model/tool/persona/voice config endpoints
   agent-catalog Fetch normalized agent skills and image/video model catalog
   image-models  Fetch no-spend image generation model/config catalog
+  text2image-plan Build a no-spend direct text-to-image submit body
   account-credit Fetch signed no-spend account credit balance
   commerce-benefits Fetch signed no-spend benefit metadata and user benefit rows
   infinite-canvas Fetch no-spend infinite-canvas project/detail/ratio metadata
@@ -359,6 +364,10 @@ Options:
   --needBetaModel <true|false>  Include beta image models (default: true)
   --needCache <true|false>      Common config query needCache (default: true)
   --needRefresh <true|false>    Common config query needRefresh (default: false)
+  --resolution <1k|2k|4k>       Direct text2image-plan large image resolution (default: 2k)
+  --sampleStrength <0..1>       Direct text2image-plan prompt strength (default: 0.5)
+  --negativePrompt <text>       Direct text2image-plan negative prompt
+  --intelligentRatio <bool>     Direct text2image-plan intelligent ratio mode (default: false)
   --panel <value>               LV editor catalog panel (default: fonts)
   --category <value>            LV editor catalog category (default: all)
   --lang <value>                LV editor catalog language (default: en)
@@ -435,6 +444,14 @@ Examples:
     --capture data/jimeng-captures/<run>/capture-template.raw.json \\
     --prompt "韩系美妆健身UGC创作者，手机自拍，无文字，无水印" \\
     --dryRun
+
+  jimeng-browser-proxy text2image-plan \\
+    --session data/jimeng-lab/raw/session-bundle-current.json \\
+    --prompt "韩系美妆达人在自然光卧室里展示补水精华，真实手机自拍感，无文字，无水印" \\
+    --modelVersion jimeng-5.0 \\
+    --resolution 2k \\
+    --ratio 9:16 \\
+    --sampleStrength 0.5
 
   jimeng-browser-proxy voices \\
     --capture data/jimeng-captures/<run>/capture-template.raw.json
@@ -643,6 +660,7 @@ interface CliArgs {
     | "catalog"
     | "agent-catalog"
     | "image-models"
+    | "text2image-plan"
     | "account-credit"
     | "commerce-benefits"
     | "infinite-canvas"
@@ -797,9 +815,13 @@ interface CliArgs {
   lastFrameUri?: string
   ratio?: string
   videoResolution?: string
+  resolution?: string
   modelVersion?: string
   modelReqKey?: string
   seed?: number
+  sampleStrength?: number
+  negativePrompt?: string
+  intelligentRatio?: boolean
   prompt?: string
   outDir: string
   dryRun: boolean
@@ -1271,6 +1293,42 @@ async function main(argv: string[]): Promise<void> {
   }
 
   const session = await loadSession(args)
+
+  if (args.command === "text2image-plan") {
+    if (!args.prompt) throw new Error("text2image-plan requires --prompt")
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const runId = `text2image-plan-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const plan = buildJimengText2ImageDirectPlan({
+      prompt: args.prompt,
+      modelVersion: args.modelVersion,
+      modelReqKey: args.modelReqKey,
+      resolution: args.resolution,
+      ratio: args.ratio,
+      sampleStrength: args.sampleStrength,
+      negativePrompt: args.negativePrompt,
+      intelligentRatio: args.intelligentRatio,
+      seed: args.seed,
+      submitId: args.submitId,
+    })
+    writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
+      command: args.command,
+      endpoint: plan.endpoint,
+      method: plan.method,
+      query: plan.query,
+      request: plan.request,
+      draft_content: plan.draftContent,
+      metrics_extra: plan.metricsExtra,
+      browser_session: redactSession(session),
+      live_submit: false,
+      warning: "No request was sent. This is a direct text-to-image submit body plan for review before paid live generation.",
+    })
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      summary: summarizeJimengText2ImageDirectPlan(plan),
+    })
+    console.log(`[jimeng-browser-proxy] text2image-plan saved model=${plan.modelReqKey} resolution=${plan.resolution} ratio=${plan.ratio} live_submit=false`)
+    return
+  }
 
   if (args.command === "endpoint-probe") {
     if (!args.endpoint) throw new Error("endpoint-probe requires --endpoint")
@@ -3518,6 +3576,7 @@ function parseArgs(argv: string[]): CliArgs {
     && command !== "catalog"
     && command !== "agent-catalog"
     && command !== "image-models"
+    && command !== "text2image-plan"
     && command !== "account-credit"
     && command !== "commerce-benefits"
     && command !== "infinite-canvas"
@@ -3584,6 +3643,7 @@ function parseArgs(argv: string[]): CliArgs {
   const workspaceId = workspaceIdValue ? Number(workspaceIdValue) : undefined
   const speed = flags.speed ? Number(flags.speed) : undefined
   const strength = flags.strength ? Number(flags.strength) : undefined
+  const sampleStrength = flags.sampleStrength ? Number(flags.sampleStrength) : undefined
   const contextLinesValue = flags.contextLines ?? flags["context-lines"]
   const contextLines = contextLinesValue ? Number(contextLinesValue) : undefined
   const seed = flags.seed ? Number(flags.seed) : undefined
@@ -3608,6 +3668,7 @@ function parseArgs(argv: string[]): CliArgs {
   const needRefresh = parseOptionalBooleanFlag(flags.needRefresh, "--needRefresh")
   const imageInfo = parseOptionalBooleanFlag(flags.imageInfo, "--imageInfo")
   const needDraftResource = parseOptionalBooleanFlag(flags.needDraftResource, "--needDraftResource")
+  const intelligentRatio = parseOptionalBooleanFlag(flags.intelligentRatio, "--intelligentRatio")
   if (seed !== undefined && (!Number.isInteger(seed) || seed < 0 || seed > 4294967295)) {
     throw new Error("--seed must be an integer from 0 to 4294967295")
   }
@@ -3682,6 +3743,9 @@ function parseArgs(argv: string[]): CliArgs {
   }
   if (strength !== undefined && (!Number.isFinite(strength) || strength <= 0 || strength > 100)) {
     throw new Error("--strength must be a number from 0.01..1 or 1..100")
+  }
+  if (sampleStrength !== undefined && (!Number.isFinite(sampleStrength) || sampleStrength < 0 || sampleStrength > 1)) {
+    throw new Error("--sampleStrength must be a number from 0 to 1")
   }
   if (contextLines !== undefined && (!Number.isInteger(contextLines) || contextLines < 0 || contextLines > 20)) {
     throw new Error("--contextLines must be an integer from 0..20")
@@ -3797,9 +3861,13 @@ function parseArgs(argv: string[]): CliArgs {
     lastFrameUri: flags.lastFrameUri,
     ratio: flags.ratio,
     videoResolution: flags.videoResolution,
+    resolution: flags.resolution,
     modelVersion: flags.modelVersion,
     modelReqKey: flags.modelReqKey,
     seed,
+    sampleStrength,
+    negativePrompt: flags.negativePrompt,
+    intelligentRatio,
     prompt: flags.prompt,
     outDir: flags.outDir ?? "data/jimeng-lab/browser-proxy",
     dryRun: flags.dryRun === "true",

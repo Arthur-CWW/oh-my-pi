@@ -16,6 +16,7 @@
     "jimeng-browser-proxy": "./src/browser-proxy-cli.ts"
   },
   "dependencies": {
+    "effect": "^4.0.0-beta.71",
     "zod": "^4.3.6"
   },
   "scripts": {

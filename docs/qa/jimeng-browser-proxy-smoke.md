@@ -61,6 +61,50 @@ The plan redacts cookies and confirms:
 - `submit_url` contains `/mweb/v1/aigc_draft/generate`
 - `poll_url` contains `/mweb/v1/get_asset_list`
 
+## Direct Text-to-Image Plan Smoke
+
+No-spend direct request-body planning with Effect Schema contract validation:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts text2image-plan \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --prompt "韩系美妆达人在自然光卧室里展示补水精华，真实手机自拍感，无文字，无水印" \
+  --modelVersion jimeng-5.0 \
+  --resolution 2k \
+  --ratio 9:16 \
+  --sampleStrength 0.5 \
+  --seed 123456 \
+  --outDir data/jimeng-lab/proof-20260610-text2image-plan-direct
+```
+
+Result:
+
+```txt
+text2image-plan saved model=high_aes_general_v50 resolution=2k ratio=9:16 live_submit=false
+endpoint=/mweb/v1/aigc_draft/generate
+width=1440
+height=2560
+image_ratio=5
+has_metrics_extra=true
+has_draft_content=true
+```
+
+Proof files:
+
+```txt
+data/jimeng-lab/proof-20260610-text2image-plan-direct/raw/text2image-plan-20260610122304-dry-run-plan.json
+data/jimeng-lab/proof-20260610-text2image-plan-direct/normalized/text2image-plan-20260610122304-summary.json
+```
+
+Credential leak check:
+
+```bash
+rg -n -P 'authorization|cookie|sessionid|sid=|msToken|verifyFp|device-time|tdid' \
+  data/jimeng-lab/proof-20260610-text2image-plan-direct/normalized
+```
+
+Expected result: no matches. The raw plan includes only a redacted cookie placeholder in `browser_session`.
+
 ## Generated Artifacts
 
 The live UI submit completed with `status = 50`, `total_image_count = 4`, `finished_image_count = 4`.

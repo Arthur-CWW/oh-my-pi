@@ -22,7 +22,7 @@ Use the browser as an authenticated session holder and API discovery surface. Mo
 |---|---:|---|---|
 | `/mweb/v1/workspace/create` | POST | Creates a generation workspace/conversation. | Captured |
 | `/mweb/v1/workspace/update` | POST | Renames/updates current workspace metadata. | Captured |
-| `/mweb/v1/aigc_draft/generate` | POST | Unified workbench submit for current text-to-image, text-to-video, first-frame image-to-video, and lip-sync draft generation paths. | Paid-live proven for text-to-video and local-upload-backed image-to-video; stale text-to-image replay currently returns `ret=3018 permission denied` and needs fresh background CDP capture; dry-run-proved for VOD and image/avatar lip-sync provider inputs |
+| `/mweb/v1/aigc_draft/generate` | POST | Unified workbench submit for current text-to-image, text-to-video, first-frame image-to-video, and lip-sync draft generation paths. | Paid-live proven for text-to-video and local-upload-backed image-to-video; no-spend direct `text2image-plan` submit body builder is Effect Schema-backed; stale text-to-image replay still returns `ret=3018 permission denied` and needs fresh background CDP capture before live claim; dry-run-proved for VOD and image/avatar lip-sync provider inputs |
 | `/mweb/v1/get_asset_list` | POST | Poll/list workspace assets and completed image results. | Implemented for workbench text-to-image polling and no-spend `assets` listing |
 | `/mweb/v1/get_history_by_ids` | POST | Older/general task polling and completed record lookup by `submit_id` or `history_id`. | Implemented for captured history-based templates and no-spend `history-records`; live-proved against the completed K-beauty image generation |
 | `/mweb/v1/get_history_queue_info` | POST | Read-only queue/progress detail lookup for active or historical generation records. | Implemented as no-spend `history-queue`; live-proved against a completed image history id |
@@ -108,7 +108,9 @@ text2image=ret 3018, errmsg permission denied with stale capture data/jimeng-cap
 
 ## Runtime Schema Validation
 
-Provider JSON is not treated as trusted just because TypeScript interfaces compile. New direct-client endpoints should decode raw JSON at the boundary with permissive runtime schemas: keep `.passthrough()` or equivalent behavior for additive provider fields, but enforce the envelope and nested paths used by normalization or downstream pipelines.
+Provider JSON is not treated as trusted just because TypeScript interfaces compile. New direct-client endpoints should decode raw JSON at the boundary with permissive runtime schemas: keep `.passthrough()` or equivalent behavior for additive provider fields, but enforce the envelope and nested paths used by normalization, request construction, or downstream pipelines.
+
+Preferred new validation stack: Effect v4 / Effect Schema. Existing Zod-backed endpoints can stay in place until touched, but new slices should use Effect Schema for boundary contracts unless there is a local reason not to.
 
 Current shared helper:
 
@@ -116,7 +118,7 @@ Current shared helper:
 packages/jimeng-client/src/schema.ts
 ```
 
-Current schema-backed endpoints include `history-queue`, `history-records`, `video-info`, `agent-catalog`, `image-models`, `account-credit`, `commerce-benefits`, and the envelope/timing layer used by `rate-probe`. If Jimeng changes `ret`/`errmsg`/`data` or the relied-on record/media/model/benefit paths, the CLI should fail with an explicit `JIMENG_RESPONSE_*_CHANGED` error instead of silently normalizing stale shapes.
+Current schema-backed endpoints include `history-queue`, `history-records`, `video-info`, `agent-catalog`, `image-models`, `account-credit`, `commerce-benefits`, `text2image-plan`, and the envelope/timing layer used by `rate-probe`. If Jimeng changes `ret`/`errmsg`/`data` or the relied-on record/media/model/benefit/request paths, the CLI should fail with an explicit contract-changed error instead of silently normalizing stale shapes.
 
 ## Fast Hybrid Reversal Loop
 
@@ -133,7 +135,7 @@ Use dynamic and static tools together:
 
 `capture-analyze`, `discovery-worklist`, `static-locate`, `endpoint-probe`, and `rate-probe` are intentionally not blind fuzzers. The analyzer turns CDP truth into ranked endpoint evidence, the worklist merges analyzer/static/probe evidence into a prioritized next-slice queue, the locator finds likely request-builder code, the probe replays candidate bodies found from CDP/static evidence, and the rate probe measures only bounded known-read endpoints unless explicitly overridden. Raw outputs stay under ignored `data/**`; normalized summaries are designed to be small enough to paste into agent context after redaction review.
 
-Latest no-spend `/mweb/v1/get_common_config` rate sweep completed `1024/1024` read-only requests at concurrency `1024` with HTTP `200` and `ret=0`; no HTTP `429`, auth, or risk-control stop was observed on that endpoint, though tail latency stretched sharply at the top tier. Treat this as a config-endpoint bound only; it is not a generation-submit limit. The external `iptag/jimeng-api` project does not publish a hard limit; it load-balances comma-separated bearer tokens randomly and uses polling/retry behavior.
+Latest no-spend `/mweb/v1/get_common_config` rate sweep completed `1536/1536` read-only requests at concurrency `1536` with HTTP `200` and `ret=0`; no HTTP `429`, auth, or risk-control stop was observed on that endpoint, though tail latency stretched sharply at the top tier. Treat this as a config-endpoint bound only; it is not a generation-submit limit. The external `iptag/jimeng-api` project does not publish a hard limit; it load-balances comma-separated bearer tokens randomly and uses polling/retry behavior.
 
 The shared `JimengClient` request boundary now opens a local cooldown after `ret=1019` or raw `shark not pass` responses. Follow-up calls during cooldown fail locally as `RISK_CONTROL_COOLDOWN_ACTIVE`, which protects live reverse-engineering loops from repeatedly hitting provider risk control.
 

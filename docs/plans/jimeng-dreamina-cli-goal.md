@@ -55,7 +55,7 @@ As of 2026-06-10, the committed Jimeng CLI baseline is:
 - `c09bb7d Add LV editor catalog CLI`
 - `a124c30 Classify LV read-state blockers`
 - `1d423bd Add Jimeng rate probe CLI`
-- current checkpoint: no-spend commerce benefit/quota metadata CLI
+- current checkpoint: Effect Schema-backed no-spend direct `text2image-plan` request builder
 
 If the thread goal object lags behind this file after a pause, resume from this document and the latest Git checkpoint. The active working rule is: background-only reversal, direct/API-first implementation, small proven CLI slices, tests and proof artifacts before each commit, and no async daemon until the API surface is settled.
 
@@ -160,6 +160,17 @@ Direct image model config is now live-proved without generation spend and schema
 - proof bundle: `data/jimeng-lab/proof-20260610-image-models/`
 - latest proof returned 8 image models; default workbench model was `high_aes_general_v50` / `图片5.0 Lite`
 - high-value flags included `bg_paint`, `byte_edit`, `byte_edit_with_custom_ratio`, `byte_edit_with_empty_prompt`, `canny`, `depth`, `face_swap`, `ip_keep`, `pose`, `refuse_image`, `smart_scale`, and `support_subject`
+
+Direct text-to-image submit body planning is now no-spend dry-run-proved and Effect Schema-backed:
+
+- `jimeng-browser-proxy text2image-plan`
+- builds the current direct `/mweb/v1/aigc_draft/generate` workbench submit body without sending it
+- uses frontend/static evidence from the current workbench path and `iptag/jimeng-api`-style direct request structure
+- useful flags: `--prompt`, `--modelVersion`, `--modelReqKey`, `--resolution`, `--ratio`, `--sampleStrength`, `--negativePrompt`, `--intelligentRatio`, `--seed`, and `--submitId`
+- validates the relied-on nested `extend`, `metrics_extra`, `draft_content`, `core_param`, `large_image_info`, and `sceneOptions` contract paths with Effect v4 / Effect Schema while tolerating additive provider fields
+- proof bundle: `data/jimeng-lab/proof-20260610-text2image-plan-direct/`
+- latest proof produced model `high_aes_general_v50`, resolution `2k`, ratio `9:16`, size `1440x2560`, `image_ratio=5`, and `live_submit=false`
+- live text-to-image generation is still not claimed; a fresh background CDP frontend submit capture is still needed before enabling/claiming paid live direct text-to-image submit.
 
 Signed account credit balance is now live-proved without generation spend and schema-backed:
 

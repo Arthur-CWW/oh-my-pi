@@ -83,6 +83,13 @@ Important capability notes from help output:
   - `draft_content.component_list[0].abilities.generate.core_param.model = high_aes_general_v50`
 - Current text-to-image output mode:
   - poll/list workspace assets via `get_asset_list`, not only `get_history_by_ids`
+- Direct text-to-image request planning status:
+  - implemented as no-spend `jimeng-browser-proxy text2image-plan`
+  - builds the direct workbench submit body for `/mweb/v1/aigc_draft/generate` without sending it
+  - validates the nested request contract with Effect v4 / Effect Schema
+  - proof bundle: `data/jimeng-lab/proof-20260610-text2image-plan-direct/`
+  - latest proof: `model_req_key=high_aes_general_v50`, `resolution=2k`, `ratio=9:16`, `width=1440`, `height=2560`, `image_ratio=5`, `live_submit=false`
+  - live submit remains blocked on a fresh background CDP frontend text-to-image submit capture; do not claim current paid-live text-to-image yet.
 
 ### 3) Poll status/results by submit id
 - `POST https://jimeng.jianying.com/mweb/v1/get_history_by_ids`
@@ -1810,7 +1817,9 @@ Often optional in successful replay runs:
 
 ## Runtime response contracts
 
-All new Jimeng/CapCut provider integrations should decode external JSON at the boundary with runtime schemas before normalizing. The schemas should be permissive to extra fields because the frontend payloads are broad and provider-owned, but strict for the paths this repo relies on.
+All new Jimeng/CapCut provider integrations should decode external JSON at the boundary with runtime schemas before normalizing or constructing provider request bodies. The schemas should be permissive to extra fields because the frontend payloads are broad and provider-owned, but strict for the paths this repo relies on.
+
+Preferred new validation stack: Effect v4 / Effect Schema. Existing Zod-backed endpoints can stay in place until touched, but new slices should use Effect Schema for boundary contracts unless there is a local reason not to.
 
 Current helper:
 
@@ -1824,8 +1833,12 @@ Current schema-backed commands:
 - `jimeng-browser-proxy history-records`
 - `jimeng-browser-proxy video-info`
 - `jimeng-browser-proxy agent-catalog`
+- `jimeng-browser-proxy image-models`
+- `jimeng-browser-proxy account-credit`
+- `jimeng-browser-proxy commerce-benefits`
+- `jimeng-browser-proxy text2image-plan` (Effect Schema-backed request contract)
 
-Expected drift behavior: additive fields should continue working, while missing or incompatible envelope/data/record paths should fail with explicit `JIMENG_RESPONSE_ENVELOPE_CHANGED`, `JIMENG_RESPONSE_DATA_MAP_CHANGED`, or `JIMENG_RESPONSE_CONTRACT_CHANGED` errors.
+Expected drift behavior: additive fields should continue working, while missing or incompatible envelope/data/record/request paths should fail with explicit contract-changed errors.
 
 ---
 
