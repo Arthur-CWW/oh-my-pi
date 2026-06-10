@@ -7,8 +7,9 @@ Generated during the React data-binding/local-first workstream.
 - UGC Studio has a repo-local JSON store for workspace, personas, branches, candidates, notes, provider jobs, reference archives, and export manifests.
 - The daemon exposes local-first UGC routes under `/api/ugc/*`.
 - The React route loads `/api/ugc/workspace` when the daemon is available and falls back to the fixture when it is not.
-- Review, persona, branch, provider, reference archive, and export-manifest actions write back through daemon routes.
+- Review, persona/profile-bible, branch note/status, provider, reference archive, and export-manifest actions write back through daemon routes.
 - The visible workspace includes Persona Atlas, Exploration Board, Batch Review, Campaign Branch Map, Reference Archive, Final Layer Editor, Developer Graph, and KIE Proxy views.
+- The inspector exposes editable persona profile-bible fields for niche, voice style, accent, and energy, plus editable campaign branch decision notes.
 
 ## Verification
 

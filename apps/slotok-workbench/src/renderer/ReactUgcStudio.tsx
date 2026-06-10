@@ -48,7 +48,9 @@ import {
 } from "lucide-react"
 import { Badge } from "./components/ui/badge"
 import { Button } from "./components/ui/button"
+import { Input } from "./components/ui/input"
 import { Tabs, type TabItem } from "./components/ui/tabs"
+import { Textarea } from "./components/ui/textarea"
 import { cn } from "./lib/cn"
 import { ugcStudioWorkspace, type BranchSnapshot, type CreativeCandidate, type JsonValue, type PersonaProfile, type ReferenceProfile, type UgcStudioWorkspace } from "./ugcStudioModel"
 import { createInitialLocalState, type UgcExportManifest, type UgcLocalState, type UgcProviderJob, type UgcReferenceArchive } from "../ugc/local-state"
@@ -1325,6 +1327,28 @@ function Inspector(props: {
   onMutateLocal: (path: string, body: object) => void
 }) {
   const { workspace, providerJobs, exportManifests, referenceArchives } = useUgcLocalState()
+  const selectedFullPersona = workspace.personas.find((persona) => persona.id === props.selectedPersona?.id)
+  const [personaDraft, setPersonaDraft] = React.useState({
+    niche: selectedFullPersona?.profileBible.niche ?? "",
+    speakingStyle: selectedFullPersona?.voice.speakingStyle ?? "",
+    accent: selectedFullPersona?.voice.accent ?? "",
+    energy: String(selectedFullPersona?.voice.energy ?? 60),
+  })
+  const [branchDecisionDraft, setBranchDecisionDraft] = React.useState(props.selectedBranch?.decisionNote ?? "")
+
+  React.useEffect(() => {
+    setPersonaDraft({
+      niche: selectedFullPersona?.profileBible.niche ?? "",
+      speakingStyle: selectedFullPersona?.voice.speakingStyle ?? "",
+      accent: selectedFullPersona?.voice.accent ?? "",
+      energy: String(selectedFullPersona?.voice.energy ?? 60),
+    })
+  }, [selectedFullPersona?.id, selectedFullPersona?.profileBible.niche, selectedFullPersona?.voice.accent, selectedFullPersona?.voice.energy, selectedFullPersona?.voice.speakingStyle])
+
+  React.useEffect(() => {
+    setBranchDecisionDraft(props.selectedBranch?.decisionNote ?? "")
+  }, [props.selectedBranch?.decisionNote, props.selectedBranch?.id])
+
   if (props.activeView === "provider") {
     return (
       <aside className="rugc-inspector">
@@ -1353,7 +1377,25 @@ function Inspector(props: {
           <MetricRow label="Children" value={String(props.selectedBranch?.childIds.length ?? 0)} />
         </InspectorCard>
         <InspectorCard title="Decision">
-          <p>{props.selectedBranch?.decisionNote ?? "No branch note yet."}</p>
+          <Textarea
+            value={branchDecisionDraft}
+            onChange={(event) => setBranchDecisionDraft(event.target.value)}
+            className="min-h-24"
+          />
+          <Button
+            size="xs"
+            variant="workbench"
+            disabled={props.busy || !props.selectedBranch}
+            onClick={() => {
+              if (!props.selectedBranch) return
+              props.onMutateLocal(`/api/ugc/branches/${props.selectedBranch.id}`, {
+                status: props.selectedBranch.status,
+                decisionNote: branchDecisionDraft,
+              })
+            }}
+          >
+            Save branch note
+          </Button>
         </InspectorCard>
         <InspectorCard title="Metrics">
           <ScoreBar label="CTR" value={82} />
@@ -1421,18 +1463,46 @@ function Inspector(props: {
       <InspectorCard title="Selected persona">
         <MetricRow label="Name" value={props.selectedPersona?.name ?? "None"} />
         <MetricRow label="Lane" value={props.selectedPersona?.archetype ?? "None"} />
-        <MetricRow label="Voice" value={props.selectedPersona?.voice ?? "None"} />
-        <MetricRow label="Niche" value={props.selectedPersona?.niche ?? "None"} />
+        <label className="grid gap-1 py-1">
+          <span>Niche</span>
+          <Input value={personaDraft.niche} onChange={(event) => setPersonaDraft((draft) => ({ ...draft, niche: event.target.value }))} />
+        </label>
+        <label className="grid gap-1 py-1">
+          <span>Voice style</span>
+          <Input value={personaDraft.speakingStyle} onChange={(event) => setPersonaDraft((draft) => ({ ...draft, speakingStyle: event.target.value }))} />
+        </label>
+        <label className="grid gap-1 py-1">
+          <span>Accent</span>
+          <Input value={personaDraft.accent} onChange={(event) => setPersonaDraft((draft) => ({ ...draft, accent: event.target.value }))} />
+        </label>
+        <label className="grid gap-1 py-1">
+          <span>Energy</span>
+          <Input
+            type="number"
+            min={0}
+            max={100}
+            value={personaDraft.energy}
+            onChange={(event) => setPersonaDraft((draft) => ({ ...draft, energy: event.target.value }))}
+          />
+        </label>
         <Button
           size="xs"
           variant="workbench"
           disabled={props.busy || !props.selectedPersona}
           onClick={() => {
             if (!props.selectedPersona) return
-            props.onMutateLocal(`/api/ugc/personas/${props.selectedPersona.id}`, { status: "selected" })
+            props.onMutateLocal(`/api/ugc/personas/${props.selectedPersona.id}`, {
+              status: "selected",
+              profileBible: { niche: personaDraft.niche },
+              voice: {
+                accent: personaDraft.accent,
+                speakingStyle: personaDraft.speakingStyle,
+                energy: Number(personaDraft.energy),
+              },
+            })
           }}
         >
-          Mark selected
+          Save profile bible
         </Button>
       </InspectorCard>
       <InspectorCard title="Selected candidate">
