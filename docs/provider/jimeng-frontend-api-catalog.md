@@ -29,7 +29,11 @@ Use the browser as an authenticated session holder and API discovery surface. Mo
 | `/mweb/v1/creation_agent/v2/get_agent_config` | POST | Agent/tool configuration payload. | Cataloged only |
 | `/mweb/v1/creation_agent/v2/skill/list` | POST | Available agent skills/tools. | Cataloged only |
 | `/mweb/v1/video_generate/get_common_config` | POST | Video model/common configuration by scene, including lip-sync image/video scenes. | Implemented for config catalog |
-| `/mweb/v1/get_user_local_item_list` | POST | User local/generated item lists; `effect_type=218` returns current user's cloned voices. | Implemented for config catalog |
+| `/mweb/v1/get_user_local_item_list` | POST | User local/generated item lists; `effect_type=218` returns current user's cloned voices. | Implemented for config catalog and `voice-clones`; live-proved no-spend |
+| `/mweb/v1/voice/submit_task` | POST | Custom voice clone / voice conversion task submit. | Voice-clone request shape dry-run-proved; live submit disabled pending approval/capture |
+| `/mweb/v1/voice/query_task` | POST | Query voice clone/conversion task ids. | Implemented for `voice-clone-query`; live proof waits for a real task id |
+| `/mweb/v1/voice/update` | POST | Rename/update a cloned voice asset. | Dry-run request shape only; live mutation disabled pending disposable fixture |
+| `/mweb/v1/voice/delete` | POST | Delete a cloned voice asset. | Dry-run request shape only; live mutation disabled pending disposable fixture |
 | `/mweb/v1/dreamina_subject/get` | POST | Saved subject/persona list. | Implemented as no-spend `subjects`; live-proved empty and non-empty filtered/list shapes |
 | `/mweb/v1/dreamina_subject/create` | POST | Create saved subject/persona from a main reference image. | Implemented as no-spend `subject-create`; live-proved with local ImageX upload, audit, image lookup, and create |
 | `/mweb/v1/dreamina_subject/update` | POST | Update saved subject/persona content. | Implemented as no-spend `subject-update`; live-proved on a temporary subject |
@@ -56,6 +60,9 @@ The built-in voice picker is not exposed through the same local-item endpoint as
 | cloned voice assets | `/mweb/v1/get_user_local_item_list` with `effect_type=218` and `clone_voice_status` filter | direct JSON body | Empty list is valid when the account has no cloned voices. |
 | built-in voice library | signed `/mweb/v1/feed` request whose body includes `dreamina_tone` | replay from captured frontend request | 142 built-in voice items in current replay; normalized id, title, tags, speaker id, emotions. |
 | text-to-speech | `/mweb/v1/tts_generate` | direct JSON body | Base64 MP3 payload, validated as 24 kHz mono MP3 in smoke run. |
+| custom voice clone submit | `/mweb/v1/voice/submit_task` | frontend request builder module `914178` | Dry-run-only request shape: `scene=1`, `voice_clone.audio`, `voice_clone.name`. |
+| custom voice task query | `/mweb/v1/voice/query_task` | frontend request builder module `914178` | Implemented; live proof needs a real task id. |
+| custom voice update/delete | `/mweb/v1/voice/update`, `/mweb/v1/voice/delete` | frontend request builder module `914178` | Dry-run-only mutation shapes: `local_item_id`, plus `name` for update. |
 
 TTS body shape:
 
@@ -83,6 +90,47 @@ data/jimeng-lab/voice-library-samples/
 ```
 
 The latest full voice sample run generated `142/142` MP3 files with concurrency `1` and no `1019` / `shark not pass` risk-control errors.
+
+Custom voice clone CLI coverage:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts voice-clones \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --limit 50 \
+  --outDir data/jimeng-lab/proof-20260610-voice-clone
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts voice-clone-submit \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --audioVid v03870g10004d8k1u4nog65hb08dnhig \
+  --audioDurationSec 3 \
+  --audioTitle kbeauty-reference.mp3 \
+  --name "Kbeauty reference voice" \
+  --outDir data/jimeng-lab/proof-20260610-voice-clone \
+  --dryRun
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts voice-clone-query \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --taskIds task-voice-placeholder \
+  --outDir data/jimeng-lab/proof-20260610-voice-clone \
+  --dryRun
+```
+
+Current proof facts:
+
+```txt
+proof=data/jimeng-lab/proof-20260610-voice-clone/
+voice_clone_asset_ret=0
+voice_clone_asset_errmsg=success
+voice_clone_asset_count=0
+voice_clone_asset_next_offset=50
+voice_clone_asset_response_sha256=dd8e9025b1bf0d2f13556868f9a451984d6b1f9bd91647f8582d960c57788ee0
+submit_request={"submit_id":"<uuid>","scene":1,"voice_clone":{"audio":{"vid":"v03870g10004d8k1u4nog65hb08dnhig","duration":3,"title":"kbeauty-reference.mp3"},"name":"Kbeauty reference voice"}}
+query_request={"task_id_list":["task-voice-placeholder"]}
+update_request={"local_item_id":"voice-placeholder","name":"Renamed Kbeauty voice"}
+delete_request={"local_item_id":"voice-placeholder"}
+```
+
+Live voice-clone submit/update/delete remain disabled because they create or mutate account assets and may consume quota. Use background CDP capture plus explicit approval before enabling them.
 
 ## Confirmed Lip-Sync Planning Contracts
 
@@ -1128,7 +1176,7 @@ The 2026-06-09 JS bundle sweep found these useful endpoint groups. Treat rows wi
 
 | Group | Endpoints |
 |---|---|
-| Voice cloning / custom voice | `/mweb/v1/voice/submit_task`, `/mweb/v1/voice/query_task`, `/mweb/v1/voice/update`, `/mweb/v1/voice/delete` |
+| Voice cloning / custom voice | `/mweb/v1/voice/submit_task`, `/mweb/v1/voice/query_task`, `/mweb/v1/voice/update`, `/mweb/v1/voice/delete`; cloned voice listing is implemented as `voice-clones`, task query is implemented for real task ids, and submit/update/delete are dry-run-only until approved/captured |
 | Subject/persona lifecycle | `/mweb/v1/dreamina_subject/get`, `/mweb/v1/dreamina_subject/create`, `/mweb/v1/dreamina_subject/update`, `/mweb/v1/dreamina_subject/delete`, `/mweb/v1/dreamina_subject/generate_voice`; list/create/update/delete are implemented, while generate_voice is dry-run-only until explicit spend approval or captured UI submit |
 | Infinite canvas | `/mweb/v1/infinite_canvas/create_project`, `/mweb/v1/infinite_canvas/conversation`, `/mweb/v1/infinite_canvas/edit`, `/mweb/v1/infinite_canvas/resume`, `/mweb/v1/infinite_canvas/stop_stream`, `/mweb/v1/infinite_canvas/v1/fetch_snapshot`, `/mweb/v1/infinite_canvas/v1/submit_changeset`, `/mweb/v1/infinite_canvas/v1/fetch_changeset` |
 | Reference/image tools | `/mweb/v1/get_common_config`, `/mweb/v1/get_image_description`, `/mweb/v1/get_upload_token`, `/mweb/v1/face_recognize`, `/mweb/v1/blend_preview`, `/mweb/v1/pose_detect`, `/mweb/v1/saliency_seg`, `/mweb/v1/algo_proxy`; image upload, description, face recognition, ControlNet pose/depth/canny preview, pose detect, and object/saliency segmentation are now implemented, while style/reference payload tools still need CLI coverage |

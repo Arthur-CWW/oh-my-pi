@@ -1089,6 +1089,88 @@ rg -n 'X-Amz|x-signature|x-expires|sessionid|sid_guard|msToken|signed.example' \
 
 Result: no matches.
 
+## Jimeng Custom Voice Clone Smoke
+
+`jimeng-browser-proxy voice-clones` calls the no-spend cloned voice asset list endpoint. The frontend request-builder module also confirms custom voice clone submit/query/update/delete request shapes; submit/update/delete are intentionally dry-run-only until Arthur approves creating or mutating account voice assets.
+
+Live no-spend asset list:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts voice-clones \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --limit 50 \
+  --outDir data/jimeng-lab/proof-20260610-voice-clone
+```
+
+Dry-run request-shape proofs:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts voice-clone-submit \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --audioVid v03870g10004d8k1u4nog65hb08dnhig \
+  --audioDurationSec 3 \
+  --audioTitle kbeauty-reference.mp3 \
+  --name "Kbeauty reference voice" \
+  --outDir data/jimeng-lab/proof-20260610-voice-clone \
+  --dryRun
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts voice-clone-query \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --taskIds task-voice-placeholder \
+  --outDir data/jimeng-lab/proof-20260610-voice-clone \
+  --dryRun
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts voice-clone-update \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --voice-id voice-placeholder \
+  --name "Renamed Kbeauty voice" \
+  --outDir data/jimeng-lab/proof-20260610-voice-clone \
+  --dryRun
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts voice-clone-delete \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --voice-id voice-placeholder \
+  --outDir data/jimeng-lab/proof-20260610-voice-clone \
+  --dryRun
+```
+
+Expected artifact layout:
+
+```txt
+data/jimeng-lab/proof-20260610-voice-clone/
+  raw/voice-clones-20260610005945.json
+  normalized/voice-clones-20260610005945-summary.json
+  raw/voice-clone-submit-20260610005945-ctwq0l-dry-run-plan.json
+  raw/voice-clone-query-20260610010112-w1953e-dry-run-plan.json
+  raw/voice-clone-update-20260610010002-yx13s5-dry-run-plan.json
+  raw/voice-clone-delete-20260610010002-qc9nno-dry-run-plan.json
+```
+
+Current proof facts:
+
+```txt
+voice_clone_asset_ret=0
+voice_clone_asset_errmsg=success
+voice_clone_asset_count=0
+voice_clone_asset_has_more=false
+voice_clone_asset_next_offset=50
+voice_clone_asset_response_sha256=dd8e9025b1bf0d2f13556868f9a451984d6b1f9bd91647f8582d960c57788ee0
+submit_scene=1
+submit_audio_vid=v03870g10004d8k1u4nog65hb08dnhig
+query_task_id_list=task-voice-placeholder
+update_request=local_item_id+name
+delete_request=local_item_id
+```
+
+Secret/signed URL marker check:
+
+```bash
+rg -n 'X-Amz|x-signature|x-expires|sessionid|sid_guard|msToken' \
+  data/jimeng-lab/proof-20260610-voice-clone/normalized
+```
+
+Result: no live secret values. Dry-run summaries include only redacted cookie placeholders such as `"[REDACTED 3544 chars]"`.
+
 ## CapCut Commercial Template Category Smoke
 
 `jimeng-browser-proxy capcut-categories` calls the signed read-only CapCut commercial template category endpoint discovered in the Jimeng/Dreamina frontend bundle. This is a no-generation, no-spend probe and did not require CapCut cookies in the current proof.
@@ -1179,15 +1261,15 @@ Expected result: no matches.
 ```bash
 bun run jimeng:typecheck
 bun run jimeng:test
-bun packages/jimeng-client/src/browser-proxy-cli.ts --help | rg 'lip-sync-config|capcut-template-metadata|capcut-categories|overseas-short-videos|subject-create|subject-update|subject-delete|subject-generate-voice|subjects|templates|short-videos'
+bun packages/jimeng-client/src/browser-proxy-cli.ts --help | rg 'lip-sync-config|voice-clones|voice-clone-submit|capcut-template-metadata|capcut-categories|overseas-short-videos|subject-create|subject-update|subject-delete|subject-generate-voice|subjects|templates|short-videos'
 ```
 
 Result:
 
 ```txt
 typecheck passed
-74 tests passed, 0 failed
-browser-proxy help listed lip-sync-config, capcut-template-metadata, overseas-short-videos, capcut-categories, subject-create, subject-update, subject-delete, subject-generate-voice, subjects, templates, and short-videos
+80 tests passed, 0 failed
+browser-proxy help listed lip-sync-config, voice-clones, voice-clone-submit, capcut-template-metadata, overseas-short-videos, capcut-categories, subject-create, subject-update, subject-delete, subject-generate-voice, subjects, templates, and short-videos
 ```
 
 ## Follow-Up
@@ -1202,5 +1284,5 @@ Next useful captures:
 - multimodal/all-around reference video
 - lip-sync live submit capture/compare before enabling generation
 - video text generation through the current unified app route
-- voice cloning and subject/persona voice generation
+- voice clone live submit/mutation and subject/persona voice generation
 - canvas edit tools

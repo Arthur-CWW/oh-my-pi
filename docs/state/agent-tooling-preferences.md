@@ -16,6 +16,7 @@ Durable preferences for local automation, browser control, and computer-use tool
 - For UI/UX implementations, produce reviewer-saving proof artifacts after QA: a short recorded walkthrough video when practical, screenshots or visual diffs, and a concise report with commands and pass/fail findings. The artifact should show the changed workflow being exercised, not merely prove that a process exited.
 - For API reversal, provider setup, integrations, and backend behavior, choose proof tests that demonstrate the actual accomplishment: live or dry-run contract tests as appropriate, snapshot/fixture tests, decoded boundary assertions, and saved outputs/logs that let Arthur or a reviewer verify the work quickly.
 - When a Python utility needs third-party libraries, run it through `uv` with explicit dependencies, for example `uv run --with pillow python ...`; do not call `python3` directly for ad hoc library-backed scripts.
+- When installing missing local developer CLIs for agent work, prefer `mise` first so tools are user-level and reusable. Add repo dependencies only when the tool must be part of project CI or runtime reproducibility.
 
 ## Decision Log
 
@@ -32,3 +33,5 @@ Arthur clarified that ad hoc Python scripts needing libraries should run via `uv
 ### 2026-06-10
 
 Arthur clarified during Jimeng/Dreamina API reversal that agents must not interrupt his active computer use. For browser/login flows, use background CDP, CuaDriver, browser-use, direct API calls, saved sessions, and passive network capture first. Do not call `bringToFront`, foreground tabs, or use visible UI automation unless he explicitly opts in.
+
+Arthur clarified that missing developer CLI tooling should preferably be installed through `mise`. For example, use the existing mise-managed `ast-grep` CLI for structural bundle/code searches instead of adding `@ast-grep/cli` as a project dependency unless CI needs it.

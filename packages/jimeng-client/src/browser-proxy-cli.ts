@@ -89,6 +89,19 @@ import {
   type JimengSubjectImageReference,
 } from "./subjects"
 import { getJimengUploadToken, parseUploadTokenScene, uploadJimengImage, uploadJimengVideo, type JimengImageUploadResult, type JimengVideoUploadResult } from "./upload"
+import {
+  JimengCloneVoiceStatus,
+  buildJimengClonedVoiceDeleteRequest,
+  buildJimengClonedVoiceUpdateRequest,
+  buildJimengClonedVoicesRequest,
+  buildJimengVoiceCloneSubmitRequest,
+  buildJimengVoiceTaskQueryRequest,
+  fetchJimengClonedVoices,
+  queryJimengVoiceTasks,
+  summarizeJimengClonedVoices,
+  summarizeJimengVoiceTaskQuery,
+  type JimengCloneVoiceStatusValue,
+} from "./voice-clone"
 
 const DEFAULT_CDP_URL = "http://127.0.0.1:9340"
 
@@ -102,6 +115,11 @@ Commands:
   catalog       Probe non-generating model/tool/persona/voice config endpoints
   lip-sync-config Fetch no-spend digital-human/lip-sync model configs
   voices        Fetch the built-in voice library from a captured signed feed request
+  voice-clones  Fetch current user's cloned voice assets without generation spend
+  voice-clone-submit Dry-run a custom voice clone submit request from an uploaded audio vid
+  voice-clone-query Dry-run/query voice task ids
+  voice-clone-update Dry-run cloned voice rename request
+  voice-clone-delete Dry-run cloned voice delete request
   tts           Generate one MP3 text-to-speech sample from a voice id
   sample-voices Generate sequential MP3 samples for voices from the built-in library
   templates     Fetch no-spend Explore/template examples for prompt/template mining
@@ -136,6 +154,12 @@ Options:
   --text <text>                 TTS/sample-voices text
   --voice-id <id>               TTS voice id from voices command
   --voice-title <title>         Optional display title for TTS output filename
+  --voice-statuses <csv>         Cloned voice statuses: generating,success,fail or 1,2,3
+  --audioVid <vid>              Uploaded audio VOD vid for voice clone submit
+  --audioUrl <url>              Optional uploaded audio preview URL for voice clone submit
+  --audioDurationSec <sec>      Optional uploaded audio duration for voice clone submit
+  --audioTitle <title>          Optional uploaded audio title for voice clone submit
+  --taskIds <csv>               Voice task ids for voice-clone-query
   --tone-key <key>               Optional lip-sync voice display/key field
   --tone-category-id <id>        Optional lip-sync voice category id
   --tone-category-key <key>      Optional lip-sync voice category key
@@ -203,6 +227,17 @@ Examples:
 
   jimeng-browser-proxy voices \\
     --capture data/jimeng-captures/<run>/capture-template.raw.json
+
+  jimeng-browser-proxy voice-clones \\
+    --session data/jimeng-lab/raw/session-bundle-current.json \\
+    --limit 50 \\
+    --outDir data/jimeng-lab/cli-voice-clones-smoke
+
+  jimeng-browser-proxy voice-clone-submit \\
+    --session data/jimeng-lab/raw/session-bundle-current.json \\
+    --audioVid v03870g10004d8k1u4nog65hb08dnhig \\
+    --name "Kbeauty reference voice" \\
+    --dryRun
 
   jimeng-browser-proxy lip-sync-config \\
     --outDir data/jimeng-lab/cli-lip-sync-config-smoke
@@ -323,6 +358,11 @@ interface CliArgs {
     | "catalog"
     | "lip-sync-config"
     | "voices"
+    | "voice-clones"
+    | "voice-clone-submit"
+    | "voice-clone-query"
+    | "voice-clone-update"
+    | "voice-clone-delete"
     | "tts"
     | "sample-voices"
     | "templates"
@@ -355,6 +395,12 @@ interface CliArgs {
   text?: string
   voiceId?: string
   voiceTitle?: string
+  voiceStatuses?: string[]
+  audioVid?: string
+  audioUrl?: string
+  audioDurationSec?: number
+  audioTitle?: string
+  taskIds?: string[]
   toneKey?: string
   toneCategoryId?: string
   toneCategoryKey?: string
@@ -543,6 +589,154 @@ async function main(argv: string[]): Promise<void> {
       voices: result.voices,
     })
     console.log(`[jimeng-browser-proxy] voices saved count=${result.voices.length}`)
+    return
+  }
+
+  if (args.command === "voice-clones") {
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const query = {
+      offset: args.offset,
+      limit: args.limit,
+      statuses: parseVoiceCloneStatuses(args.voiceStatuses),
+    }
+    const request = buildJimengClonedVoicesRequest(query)
+    const runId = `voice-clones-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    if (args.dryRun) {
+      writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
+        command: args.command,
+        endpoint: "/mweb/v1/get_user_local_item_list",
+        request,
+        browser_session: redactSession(session),
+      })
+      console.log(`[jimeng-browser-proxy] voice-clones dry run saved`)
+      return
+    }
+
+    const result = await fetchJimengClonedVoices({ session, query })
+    writeJson(path.join(dirs.rawDir, `${runId}.json`), {
+      http_status: result.httpStatus,
+      ret: result.ret,
+      errmsg: result.errmsg,
+      response_text_sha256: result.responseTextSha256,
+      request: result.request,
+      body: result.body,
+    })
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      summary: summarizeJimengClonedVoices(result),
+    })
+    console.log(`[jimeng-browser-proxy] voice-clones saved count=${result.voices.length} nextOffset=${result.nextOffset ?? "none"} hasMore=${result.hasMore ?? "unknown"}`)
+    return
+  }
+
+  if (args.command === "voice-clone-submit") {
+    if (!args.dryRun) throw new Error("voice-clone-submit live submit is disabled until explicit spend approval/capture; pass --dryRun")
+    if (!args.audioVid) throw new Error("voice-clone-submit requires --audioVid from upload-video/audio upload")
+    if (!args.name) throw new Error("voice-clone-submit requires --name")
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const request = buildJimengVoiceCloneSubmitRequest({
+      audio: {
+        vid: args.audioVid,
+        audioUrl: args.audioUrl,
+        duration: args.audioDurationSec,
+        title: args.audioTitle,
+      },
+      name: args.name,
+    })
+    const runId = `voice-clone-submit-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${Math.random().toString(36).slice(2, 8)}`
+    const plan = {
+      command: args.command,
+      status: "dry-run-only",
+      reason: "Frontend bundle confirms /mweb/v1/voice/submit_task scene=1 for voice cloning, but live submit may consume quota or create account assets. Capture/approve the UI flow before enabling.",
+      endpoint_sequence: ["/mweb/v1/voice/submit_task"],
+      request,
+      browser_session: redactSession(session),
+    }
+    writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), plan)
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), plan)
+    console.log(`[jimeng-browser-proxy] voice-clone-submit dry run saved`)
+    return
+  }
+
+  if (args.command === "voice-clone-query") {
+    const taskIds = args.taskIds ?? []
+    if (taskIds.length === 0) throw new Error("voice-clone-query requires --taskIds")
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const request = buildJimengVoiceTaskQueryRequest({ taskIds })
+    const runId = `voice-clone-query-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${Math.random().toString(36).slice(2, 8)}`
+    const plan = {
+      command: args.command,
+      endpoint_sequence: ["/mweb/v1/voice/query_task"],
+      request,
+      browser_session: redactSession(session),
+    }
+    if (args.dryRun) {
+      const dryRunPlan = {
+        ...plan,
+        status: "dry-run",
+        reason: "Task query shape is frontend-confirmed; live query is no-spend once a real task id is available.",
+      }
+      writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), dryRunPlan)
+      writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), dryRunPlan)
+      console.log(`[jimeng-browser-proxy] voice-clone-query dry run saved`)
+      return
+    }
+
+    const result = await queryJimengVoiceTasks({ session, taskIds })
+    writeJson(path.join(dirs.rawDir, `${runId}-raw.json`), {
+      http_status: result.httpStatus,
+      ret: result.ret,
+      errmsg: result.errmsg,
+      response_text_sha256: result.responseTextSha256,
+      request: result.request,
+      body: result.body,
+    })
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      summary: summarizeJimengVoiceTaskQuery(result),
+    })
+    console.log(`[jimeng-browser-proxy] voice-clone-query saved tasks=${result.tasks.length}`)
+    return
+  }
+
+  if (args.command === "voice-clone-update") {
+    if (!args.dryRun) throw new Error("voice-clone-update live mutation is disabled until a disposable cloned voice fixture exists; pass --dryRun")
+    if (!args.voiceId) throw new Error("voice-clone-update requires --voice-id")
+    if (!args.name) throw new Error("voice-clone-update requires --name")
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const request = buildJimengClonedVoiceUpdateRequest({ voiceId: args.voiceId, name: args.name })
+    const runId = `voice-clone-update-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${Math.random().toString(36).slice(2, 8)}`
+    const plan = {
+      command: args.command,
+      status: "dry-run-only",
+      reason: "Update mutates account voice assets; enable live only after a real cloned voice fixture exists and Arthur approves mutation.",
+      endpoint_sequence: ["/mweb/v1/voice/update"],
+      request,
+      browser_session: redactSession(session),
+    }
+    writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), plan)
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), plan)
+    console.log(`[jimeng-browser-proxy] voice-clone-update dry run saved`)
+    return
+  }
+
+  if (args.command === "voice-clone-delete") {
+    if (!args.dryRun) throw new Error("voice-clone-delete live mutation is disabled until a disposable cloned voice fixture exists; pass --dryRun")
+    if (!args.voiceId) throw new Error("voice-clone-delete requires --voice-id")
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const request = buildJimengClonedVoiceDeleteRequest({ voiceId: args.voiceId })
+    const runId = `voice-clone-delete-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${Math.random().toString(36).slice(2, 8)}`
+    const plan = {
+      command: args.command,
+      status: "dry-run-only",
+      reason: "Delete mutates account voice assets; enable live only after a disposable cloned voice fixture exists and Arthur approves mutation.",
+      endpoint_sequence: ["/mweb/v1/voice/delete"],
+      request,
+      browser_session: redactSession(session),
+    }
+    writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), plan)
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), plan)
+    console.log(`[jimeng-browser-proxy] voice-clone-delete dry run saved`)
     return
   }
 
@@ -1982,6 +2176,11 @@ function parseArgs(argv: string[]): CliArgs {
     && command !== "catalog"
     && command !== "lip-sync-config"
     && command !== "voices"
+    && command !== "voice-clones"
+    && command !== "voice-clone-submit"
+    && command !== "voice-clone-query"
+    && command !== "voice-clone-update"
+    && command !== "voice-clone-delete"
     && command !== "tts"
     && command !== "sample-voices"
     && command !== "templates"
@@ -2014,6 +2213,7 @@ function parseArgs(argv: string[]): CliArgs {
   const videoWidth = flags.videoWidth ? Number(flags.videoWidth) : undefined
   const videoHeight = flags.videoHeight ? Number(flags.videoHeight) : undefined
   const videoDurationSec = flags.videoDurationSec ? Number(flags.videoDurationSec) : undefined
+  const audioDurationSec = flags.audioDurationSec ? Number(flags.audioDurationSec) : undefined
   const imageWidth = flags.imageWidth ? Number(flags.imageWidth) : undefined
   const imageHeight = flags.imageHeight ? Number(flags.imageHeight) : undefined
   const workspaceIdValue = flags.workspaceId ?? flags["workspace-id"]
@@ -2053,6 +2253,9 @@ function parseArgs(argv: string[]): CliArgs {
   if (videoDurationSec !== undefined && (!Number.isFinite(videoDurationSec) || videoDurationSec <= 0)) {
     throw new Error("--videoDurationSec must be a positive number")
   }
+  if (audioDurationSec !== undefined && (!Number.isFinite(audioDurationSec) || audioDurationSec <= 0)) {
+    throw new Error("--audioDurationSec must be a positive number")
+  }
   if (imageWidth !== undefined && (!Number.isInteger(imageWidth) || imageWidth < 1)) {
     throw new Error("--imageWidth must be a positive integer")
   }
@@ -2079,6 +2282,12 @@ function parseArgs(argv: string[]): CliArgs {
     text: flags.text,
     voiceId: flags["voice-id"],
     voiceTitle: flags["voice-title"],
+    voiceStatuses: parseCsvFlag(flags["voice-statuses"]),
+    audioVid: flags.audioVid,
+    audioUrl: flags.audioUrl,
+    audioDurationSec,
+    audioTitle: flags.audioTitle,
+    taskIds: parseCsvFlag(flags.taskIds),
     toneKey: flags["tone-key"],
     toneCategoryId: flags["tone-category-id"],
     toneCategoryKey: flags["tone-category-key"],
@@ -2171,6 +2380,17 @@ function parseCsvFlag(value: string | undefined): string[] | undefined {
   if (value === undefined) return undefined
   const items = value.split(",").map((item) => item.trim()).filter(Boolean)
   return items.length > 0 ? items : undefined
+}
+
+function parseVoiceCloneStatuses(values: string[] | undefined): JimengCloneVoiceStatusValue[] | undefined {
+  if (!values) return undefined
+  return values.map((value) => {
+    const normalized = value.trim().toLowerCase()
+    if (normalized === "generating" || normalized === "1") return JimengCloneVoiceStatus.Generating
+    if (normalized === "success" || normalized === "2") return JimengCloneVoiceStatus.Success
+    if (normalized === "fail" || normalized === "failed" || normalized === "3") return JimengCloneVoiceStatus.Fail
+    throw new Error(`Unknown cloned voice status: ${value}`)
+  })
 }
 
 interface OutputDirs {

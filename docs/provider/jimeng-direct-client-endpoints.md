@@ -1653,6 +1653,10 @@ Current support matrix:
 | `subject-update` | implemented in `jimeng-browser-proxy` | No-spend direct subject/persona content update, live-proved on a temporary subject. |
 | `subject-delete` | implemented in `jimeng-browser-proxy` | No-spend direct subject/persona delete, live-proved on the same temporary subject. |
 | `subject-generate-voice` | dry-run-only in `jimeng-browser-proxy` | Request shape is known as `image_uri`; live submit disabled pending explicit spend approval or captured UI submit. |
+| `voice-clones` | implemented in `jimeng-browser-proxy` | No-spend direct cloned voice asset list via `/mweb/v1/get_user_local_item_list` with `effect_type=218`; latest proof returned zero account voices. |
+| `voice-clone-query` | implemented in `jimeng-browser-proxy` | Direct `/mweb/v1/voice/query_task` helper and CLI; dry-run-proved request shape, live proof waits for a real task id. |
+| `voice-clone-submit` | dry-run-only in `jimeng-browser-proxy` | Request shape known as `/mweb/v1/voice/submit_task` with `scene=1`, `voice_clone.audio`, and `voice_clone.name`; live disabled pending approval/capture. |
+| `voice-clone-update` / `voice-clone-delete` | dry-run-only in `jimeng-browser-proxy` | Mutation request shapes known as `local_item_id` and `local_item_id + name`; live disabled pending a disposable cloned voice fixture. |
 | `image2image` | needs capture | Need image reference upload + image edit submit capture. |
 | `multiframe2video` | needs capture | Need multi-frame upload/reference payload capture. |
 | `multimodal2video` | needs capture | Need `全能参考` mixed image/video/audio reference payload capture. |
@@ -1723,5 +1727,5 @@ Do not commit raw captures or generated media. If a redacted summary is promoted
 3. Capture the frontend's explicit end-frame/multi-frame mode and live-prove `frames2video` only after confirming the mode-specific payload contract.
 4. Expand template/research mining beyond direct Explore/feed_short_video with CapCut template search and plane endpoints.
 5. Add strict `1019` shark breaker/cooldown budgets to the consolidated CLI path.
-6. Capture/approve subject/persona `generate_voice` live submit and custom voice clone flows.
+6. Capture/approve subject/persona `generate_voice` live submit and custom voice clone submit/mutation flows.
 7. Add multipart/chunked VOD upload only when large reference videos require it.

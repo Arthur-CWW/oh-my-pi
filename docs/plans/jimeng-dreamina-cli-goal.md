@@ -36,6 +36,7 @@ As of 2026-06-10, the committed Jimeng CLI baseline is:
 - `c7b55b1 Add Jimeng lip sync config CLI`
 - `4936bc7 Add Jimeng lip sync image planning`
 - `cf2b953 Document background Jimeng automation preference`
+- `e5e3539 Add Jimeng subject lifecycle CLI`
 
 ImageX local image upload is now committed and live-proved:
 
@@ -255,6 +256,22 @@ Subject/persona voice generation is request-shaped but not live-submitted:
 - proof bundle: `data/jimeng-lab/proof-20260610-subject-lifecycle/`
 - live submit is disabled because it may consume generation quota and still needs explicit spend approval or a captured UI submit
 
+Custom voice clone coverage is now partially implemented and proved:
+
+- `jimeng-browser-proxy voice-clones`
+- `jimeng-browser-proxy voice-clone-submit`
+- `jimeng-browser-proxy voice-clone-query`
+- `jimeng-browser-proxy voice-clone-update`
+- `jimeng-browser-proxy voice-clone-delete`
+- frontend bundle evidence maps:
+  - cloned voice assets: `/mweb/v1/get_user_local_item_list` with `effect_type=218`, `filter_opt.clone_voice_status=[1,2]`
+  - voice clone submit: `/mweb/v1/voice/submit_task` with `scene=1`, `voice_clone.audio`, `voice_clone.name`
+  - voice task query: `/mweb/v1/voice/query_task` with `task_id_list`
+  - voice update/delete: `/mweb/v1/voice/update` and `/mweb/v1/voice/delete` with `local_item_id`
+- live no-spend asset proof returned `ret=0`, `errmsg=success`, `voice_count=0`, `next_offset=50`
+- proof bundle: `data/jimeng-lab/proof-20260610-voice-clone/`
+- submit/update/delete remain dry-run-only because they may create or mutate account assets; enable live only after background CDP capture and explicit approval or a disposable fixture
+
 The next slice is **lip-sync submit capture and reference-video consumers**. Use the VOD provider reference, ImageX avatar reference, and frontend captures to unlock live lip-sync, reference-video, multimodal/all-around reference, pose/style/depth/canny controls, and live end-frame/multi-frame image-to-video paths.
 
 Immediate next slices:
@@ -264,7 +281,7 @@ Immediate next slices:
 3. Map style/reference roles and the new object-mask provider references into generation payload patches.
 4. Implement digital-human generation using the confirmed VOD reference path where applicable.
 5. Capture real CapCut template row/search/collection payloads, then expand no-spend research/template coverage beyond the confirmed CapCut category and public metadata catalogs.
-6. Capture/approve subject/persona `generate_voice` live submit and voice clone once those UI/API flows are captured.
+6. Capture/approve subject/persona `generate_voice` live submit and custom voice clone live submit/mutation once those UI/API flows are captured.
 7. Keep each slice small enough to prove and commit before moving on.
 
 Do not start the async daemon while these API contracts are still moving.
@@ -278,6 +295,8 @@ Maximize useful API coverage and proof quality while keeping live submissions co
 - default to background automation; do not foreground Arthur's browser, steal focus, or use visible UI automation while Arthur is using the machine unless he explicitly asks
 - prefer direct Jimeng APIs, saved sessions, CDP network/DOM calls, CuaDriver/background browser-use, and other non-interruptive automation paths over `bringToFront`, visible tab clicks, or Computer Use interactions that move the active cursor/window
 - if a frontend-only Jimeng flow truly requires visible UI interaction, first try to reproduce it through background CDP or CuaDriver; if that still cannot work, record the blocked path and ask before interrupting Arthur's flow
+- for unknown frontend flows, prefer a faster hybrid reversal loop over long manual bundle reading: run background CDP/passive network capture first, use `ast-grep`/targeted structural search to locate the frontend request builder, then replay/compare the direct API request with saved session headers
+- use mise-managed developer CLIs such as `ast-grep` when available; install missing local CLIs with `mise` first unless the tool must be a repo/CI dependency
 - live generation prompts should be Chinese and in-distribution for the UGC use case
 - test/proof prompts should generate actually useful Korean-beauty, UGC ad, persona, TikTok-profile, reference-upload, or campaign assets, not toy demos
 - map the product's actual account/UI limits and encode them in docs/code
@@ -434,7 +453,7 @@ Suggested slice order:
 7. VOD/video upload
 8. reference controls: pose, style, depth, canny, character/reference roles
 9. lip-sync and digital-human generation
-10. voice clone and subject/persona voice generation
+10. voice clone live submit/mutation and subject/persona voice generation
 11. persona/subject/character lifecycle
 12. templates, explore/feed mining, assets, canvas/editing, export utilities
 
