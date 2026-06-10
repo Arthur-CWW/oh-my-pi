@@ -54,7 +54,8 @@ As of 2026-06-10, the committed Jimeng CLI baseline is:
 - `abcc9ca Classify LV mutation blockers`
 - `c09bb7d Add LV editor catalog CLI`
 - `a124c30 Classify LV read-state blockers`
-- current checkpoint: no-spend rate/concurrency probe CLI
+- `1d423bd Add Jimeng rate probe CLI`
+- current checkpoint: no-spend infinite-canvas read CLI
 
 If the thread goal object lags behind this file after a pause, resume from this document and the latest Git checkpoint. The active working rule is: background-only reversal, direct/API-first implementation, small proven CLI slices, tests and proof artifacts before each commit, and no async daemon until the API surface is settled.
 
@@ -170,6 +171,19 @@ No-spend direct endpoint concurrency probing is now live-proved:
 - latest read-only `/mweb/v1/get_common_config` proof found no observed limit through concurrency `32` and `64` total requests in that tier: all `148/148` sweep requests returned HTTP `200`, `ret=0`, with no stop condition
 - proof bundles: `data/jimeng-lab/proof-20260610-rate-probe-common-config-c{1,3,6,10,16,32}/`
 - this is a read-only config endpoint bound, not a safe generation-submit limit. Keep paid generation submission concurrency at `1` until an explicitly approved capped test says otherwise.
+
+Infinite canvas project metadata is now live-proved without generation spend and schema-backed:
+
+- `jimeng-browser-proxy infinite-canvas`
+- direct `/mweb/v1/infinite_canvas/list_project`, `/mweb/v1/infinite_canvas/project_detail`, and `/mweb/v1/infinite_canvas/v1/get_canvas_custom_ratio`
+- useful flags: `--endpoints projects,detail,ratios,all`, `--cursor`, `--limit`, `--imageInfo`, `--onlyFavorite`, `--projectId`, `--userId`, and `--needDraftResource`
+- frontend bundle evidence:
+  - project list sends frontend object fields `cursor`, `limit`, `imageInfo`, and `onlyFavorite`
+  - project detail frontend callers use camelCase, but safe probes proved the wire body is `project_id` plus `option.need_draft_resource`
+  - custom ratios frontend callers use camelCase, but safe probes proved the wire body is `user_id`
+- normalized output hashes creator user ids, summarizes draft JSON by hash/counts, and omits raw draft JSON, cookies, and signed media URLs
+- proof bundle: `data/jimeng-lab/proof-20260610-infinite-canvas-cli/`
+- latest proof returned one canvas project, one detail record, `mode=1`, draft version `0.0.1`, zero layers/references, zero custom ratios, and no skipped endpoints
 
 Explore/template mining is now live-proved without generation spend:
 
@@ -444,8 +458,8 @@ Static API inventory is now available as the systematic coverage map:
 - scans API endpoint strings and public CapCut `bee_prod` catalog URLs, classifies read/generate/upload/mutate/payment/analytics risk, joins the existing known-command map, and ranks uncovered resources for the next slice
 - default output skips fully implemented endpoints so it stays focused on gaps; `--includeKnown` produces an audit inventory
 - proof bundle: `data/jimeng-lab/proof-20260610-static-inventory/`
-- latest proof scanned `data/jimeng-lab/js-sweep/files` plus `packages/jimeng-client/src`, found 247 resources, included 200 non-implemented items, skipped 33 implemented endpoints, and counted 61 high-value gaps after the CapCut collection/row/detail and LV editor catalog commands were promoted
-- known status counts are now `unknown=146`, `partial=4`, `implemented=33`, `dry_run_only=4`, `blocked=57`, `captured_only=2`, and `cataloged_only=1`; the five CapCut search/batch/preset-related endpoints above are blocked with exact replay evidence and recommended action `capture_exact_payload`
+- latest proof scanned `data/jimeng-lab/js-sweep/files` plus `packages/jimeng-client/src`, found 247 resources, included 160 non-implemented items, skipped 36 implemented endpoints, and counted 61 high-value gaps after the CapCut collection/row/detail, LV editor catalog, and infinite-canvas read commands were promoted
+- known status counts are now `unknown=143`, `partial=4`, `implemented=36`, `dry_run_only=4`, `blocked=57`, `captured_only=2`, and `cataloged_only=1`; the five CapCut search/batch/preset-related endpoints above are blocked with exact replay evidence and recommended action `capture_exact_payload`
 - seven video-generation helper endpoints are also now explicitly blocked/capture-needed instead of generic unknowns:
   - `/mweb/v1/video_generate/get_switch_model_queue_info`: safe no-spend probes with empty, `model_req_key`, `model_req_keys`, and scene bodies returned `ret=1000 invalid parameter`
   - `/mweb/v1/video_generate/pre_process` and `/mweb/v1/video_generate/mget_pre_process_result`: frontend task submit/result pair; capture exact UI payload and task ids before promotion

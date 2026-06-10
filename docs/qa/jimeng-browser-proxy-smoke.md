@@ -2772,20 +2772,86 @@ thumbnail JPGs were extracted from both generated videos.
 normalized proof leak check returned no unredacted credential markers.
 ```
 
+## Infinite Canvas Read Metadata
+
+No-spend direct project/detail/ratio reads were promoted into `jimeng-browser-proxy infinite-canvas`.
+
+Static evidence:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts static-locate \
+  --staticRoot data/jimeng-lab/js-sweep/files,packages/jimeng-client/src \
+  --endpoint /mweb/v1/infinite_canvas/list_project,/mweb/v1/infinite_canvas/project_detail,/mweb/v1/infinite_canvas/v1/get_canvas_custom_ratio \
+  --symbol listProject,projectDetail,getCanvasCustomRatio,customRatio,InfiniteCanvas \
+  --outDir data/jimeng-lab/proof-20260610-static-locate-infinite-canvas-reads
+```
+
+Contract probes:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts endpoint-probe \
+  --endpoint /mweb/v1/infinite_canvas/list_project \
+  --variants '[{"name":"frontend_list","body":{"cursor":0,"limit":20,"imageInfo":true,"onlyFavorite":false}},{"name":"minimal_page","body":{"cursor":0,"limit":20}},{"name":"empty","body":{}}]' \
+  --outDir data/jimeng-lab/proof-20260610-infinite-canvas-list-probe
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts endpoint-probe \
+  --endpoint /mweb/v1/infinite_canvas/project_detail \
+  --variants '[{"name":"snake_detail_no_resource","body":{"project_id":"8544774599436","option":{"need_draft_resource":false}}}]' \
+  --outDir data/jimeng-lab/proof-20260610-infinite-canvas-detail-probe
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts endpoint-probe \
+  --endpoint /mweb/v1/infinite_canvas/v1/get_canvas_custom_ratio \
+  --variants '[{"name":"snake_user","body":{"user_id":"<creator_user_id_from_list_project>"}}]' \
+  --outDir data/jimeng-lab/proof-20260610-infinite-canvas-ratios-probe
+```
+
+CLI proof:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts infinite-canvas \
+  --endpoints all \
+  --limit 20 \
+  --outDir data/jimeng-lab/proof-20260610-infinite-canvas-cli
+```
+
+Result:
+
+```txt
+infinite-canvas saved endpoints=projects,detail,ratios projects=1 detail=yes ratios=0 skipped=0
+project_count=1
+detail_mode=1
+ratio_count=0
+project_id=8544774599436
+draft_id=8448339004172
+draft_meta_version=0.0.1
+layer_count=0
+reference_count=0
+```
+
+Validation:
+
+```bash
+rg -n "cookie|sid=|session|msToken|x-signature|sign|authorization|<creator_user_id>|byteimg|tos-cn" \
+  data/jimeng-lab/proof-20260610-infinite-canvas-cli/normalized \
+  data/jimeng-lab/proof-20260610-infinite-canvas-cli-dry-run/normalized || true
+```
+
+Result: no matches. Normalized proof hashes creator user ids and stores draft JSON only as a SHA-256/count summary.
+
 ## Verification
 
 ```bash
 bun run jimeng:typecheck
 bun run jimeng:test
-bun packages/jimeng-client/src/browser-proxy-cli.ts --help | rg 'static-inventory|lip-sync-config|voice-clones|voice-clone-submit|capcut-probe|capcut-template-metadata|capcut-categories|capcut-collections|capcut-collection-templates|capcut-template-detail|capcut-editor-catalog|overseas-short-videos|subject-create|subject-update|subject-delete|subject-generate-voice|subjects|templates|short-videos'
+bun packages/jimeng-client/src/browser-proxy-cli.ts --help | rg 'static-inventory|lip-sync-config|voice-clones|voice-clone-submit|capcut-probe|capcut-template-metadata|capcut-categories|capcut-collections|capcut-collection-templates|capcut-template-detail|capcut-editor-catalog|infinite-canvas|overseas-short-videos|subject-create|subject-update|subject-delete|subject-generate-voice|subjects|templates|short-videos'
 ```
 
 Result:
 
 ```txt
 typecheck passed
-126 tests passed, 0 failed
-browser-proxy help listed static-inventory and CapCut collection/detail/editor-catalog commands
+138 tests passed, 0 failed
+browser-proxy help listed static-inventory, CapCut collection/detail/editor-catalog, and infinite-canvas commands
 paid smoke normalized files have no live token markers
 ```
 

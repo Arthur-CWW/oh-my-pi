@@ -132,6 +132,14 @@ import {
   summarizeJimengImageModels,
 } from "./image-models"
 import {
+  buildJimengCanvasCustomRatiosRequest,
+  buildJimengCanvasProjectDetailRequest,
+  buildJimengCanvasProjectListRequest,
+  fetchJimengInfiniteCanvas,
+  parseJimengInfiniteCanvasEndpoints,
+  summarizeJimengInfiniteCanvas,
+} from "./infinite-canvas"
+import {
   buildJimengVideoInfoRequest,
   fetchJimengVideoInfo,
   parseJimengVidCsvFlag,
@@ -214,6 +222,7 @@ Commands:
   catalog       Probe non-generating model/tool/persona/voice config endpoints
   agent-catalog Fetch normalized agent skills and image/video model catalog
   image-models  Fetch no-spend image generation model/config catalog
+  infinite-canvas Fetch no-spend infinite-canvas project/detail/ratio metadata
   lip-sync-config Fetch no-spend digital-human/lip-sync model configs
   lip-sync-compare Offline compare a lip-sync dry-run plan against captured UI submit
   voices        Fetch the built-in voice library from a captured signed feed request
@@ -284,6 +293,7 @@ Options:
   --delayMs <ms>                 Optional per-request delay for rate-probe workers
   --endpoints <ids|all>          Catalog endpoints, comma-separated (default: all)
                                   agent-catalog accepts skills,config,all
+                                  infinite-canvas accepts projects,detail,ratios,all
   --text <text>                 TTS/sample-voices text
   --voice-id <id>               TTS voice id from voices command
   --voice-title <title>         Optional display title for TTS output filename
@@ -300,6 +310,10 @@ Options:
   --item-platform <n>           Voice item platform (default: 1, Loki/built-in)
   --limit <n>                   sample-voices limit or Explore count
   --offset <n>                  Explore offset (default: 0)
+  --imageInfo <bool>            Infinite-canvas project list imageInfo flag (default: true)
+  --projectId <id>              Infinite-canvas project id for detail lookup
+  --userId <id>                 Infinite-canvas user id for custom ratios lookup
+  --needDraftResource <bool>    Infinite-canvas detail draft resource flag (default: false)
   --asset-types <csv>           Assets types for get_asset_list (default: 1,2,5,6,7,8,9,10,12)
   --asset-mode <value>          Assets mode for get_asset_list (default: workbench)
   --submitId <id>               Submit id for history-records
@@ -611,6 +625,7 @@ interface CliArgs {
     | "catalog"
     | "agent-catalog"
     | "image-models"
+    | "infinite-canvas"
     | "endpoint-probe"
     | "rate-probe"
     | "lip-sync-config"
@@ -709,6 +724,10 @@ interface CliArgs {
   subjectId?: string
   subjectIds?: string[]
   onlyFavorite?: boolean
+  imageInfo?: boolean
+  projectId?: string
+  userId?: string
+  needDraftResource?: boolean
   categoryId?: number
   workTypes?: string
   feedRefer?: string
@@ -1442,6 +1461,73 @@ async function main(argv: string[]): Promise<void> {
       summary,
     })
     console.log(`[jimeng-browser-proxy] image-models saved models=${result.modelCount} default=${result.defaultModelIndex ?? "none"}`)
+    return
+  }
+
+  if (args.command === "infinite-canvas") {
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const endpoints = parseJimengInfiniteCanvasEndpoints(args.endpoints)
+    const query = {
+      endpoints,
+      cursor: args.cursor,
+      limit: args.limit,
+      imageInfo: args.imageInfo,
+      onlyFavorite: args.onlyFavorite,
+      projectId: args.projectId,
+      userId: args.userId,
+      needDraftResource: args.needDraftResource,
+    }
+    const runId = `infinite-canvas-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    if (args.dryRun) {
+      writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
+        command: args.command,
+        endpoint_sequence: endpoints.map((endpoint) => endpoint === "projects"
+          ? "/mweb/v1/infinite_canvas/list_project"
+          : endpoint === "detail"
+            ? "/mweb/v1/infinite_canvas/project_detail"
+            : "/mweb/v1/infinite_canvas/v1/get_canvas_custom_ratio"),
+        query,
+        requests: {
+          projects: endpoints.includes("projects") || endpoints.includes("detail") || endpoints.includes("ratios")
+            ? buildJimengCanvasProjectListRequest(query)
+            : null,
+          detail: args.projectId ? buildJimengCanvasProjectDetailRequest({ ...query, projectId: args.projectId }) : { inferred_from_first_project: true },
+          ratios: args.userId ? buildJimengCanvasCustomRatiosRequest({ ...query, userId: args.userId }) : { inferred_from_first_project_creator_user_id: true },
+        },
+        browser_session: redactSession(session),
+      })
+      writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+        command: args.command,
+        endpoints,
+        query,
+      })
+      console.log(`[jimeng-browser-proxy] infinite-canvas dry run saved endpoints=${endpoints.join(",")}`)
+      return
+    }
+
+    const result = await fetchJimengInfiniteCanvas({ session, query })
+    writeJson(path.join(dirs.rawDir, `${runId}.json`), {
+      endpoints: result.endpoints,
+      skipped: result.skipped,
+      results: result.results.map((item) => ({
+        endpoint: item.endpoint,
+        endpoint_id: item.endpointId,
+        http_status: item.httpStatus,
+        ret: item.ret,
+        errmsg: item.errmsg,
+        response_text_sha256: item.responseTextSha256,
+        request: item.request,
+        body: item.body,
+      })),
+    })
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      summary: summarizeJimengInfiniteCanvas(result),
+    })
+    const projectResult = result.results.find((item) => item.endpointId === "projects")
+    const detailResult = result.results.find((item) => item.endpointId === "detail")
+    const ratioResult = result.results.find((item) => item.endpointId === "ratios")
+    console.log(`[jimeng-browser-proxy] infinite-canvas saved endpoints=${result.results.map((item) => item.endpointId).join(",")} projects=${projectResult?.projects?.length ?? "n/a"} detail=${detailResult?.project ? "yes" : "no"} ratios=${ratioResult?.customRatios?.length ?? "n/a"} skipped=${result.skipped.length}`)
     return
   }
 
@@ -3312,6 +3398,7 @@ function parseArgs(argv: string[]): CliArgs {
     && command !== "catalog"
     && command !== "agent-catalog"
     && command !== "image-models"
+    && command !== "infinite-canvas"
     && command !== "endpoint-probe"
     && command !== "rate-probe"
     && command !== "lip-sync-config"
@@ -3397,6 +3484,8 @@ function parseArgs(argv: string[]): CliArgs {
   const needBetaModel = parseOptionalBooleanFlag(flags.needBetaModel, "--needBetaModel")
   const needCache = parseOptionalBooleanFlag(flags.needCache, "--needCache")
   const needRefresh = parseOptionalBooleanFlag(flags.needRefresh, "--needRefresh")
+  const imageInfo = parseOptionalBooleanFlag(flags.imageInfo, "--imageInfo")
+  const needDraftResource = parseOptionalBooleanFlag(flags.needDraftResource, "--needDraftResource")
   if (seed !== undefined && (!Number.isInteger(seed) || seed < 0 || seed > 4294967295)) {
     throw new Error("--seed must be an integer from 0 to 4294967295")
   }
@@ -3533,6 +3622,10 @@ function parseArgs(argv: string[]): CliArgs {
     subjectId: flags.subjectId,
     subjectIds: parseCsvFlag(flags.subjectIds),
     onlyFavorite: flags.onlyFavorite === "true" ? true : undefined,
+    imageInfo,
+    projectId: flags.projectId,
+    userId: flags.userId,
+    needDraftResource,
     categoryId,
     workTypes: flags["work-types"],
     feedRefer: flags["feed-refer"],
