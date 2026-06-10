@@ -1222,7 +1222,16 @@ data/jimeng-lab/proof-20260610-lip-sync-vod-plan/raw/lip-sync-20260609145310-83b
 data/jimeng-lab/proof-20260610-lip-sync-vod-plan/normalized/lip-sync-20260609145310-83bdpg-summary.json
 ```
 
-This is deliberately a no-spend planning command. Before enabling live generation, capture a real UI lip-sync submit and compare the converted `draft_content` with the dry-run `providerInput`.
+This is deliberately a no-spend planning command. Before enabling live generation, capture a real UI lip-sync submit and compare the converted `draft_content` with the dry-run `providerInput` using `lip-sync-compare`:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts lip-sync-compare \
+  --plan data/jimeng-lab/proof-20260610-lip-sync-vod-plan/raw/lip-sync-20260609145310-83bdpg-dry-run-plan.json \
+  --rawNetwork data/jimeng-captures/<lip-sync-capture>/raw-network.jsonl \
+  --outDir data/jimeng-lab/proof-20260610-lip-sync-compare
+```
+
+Current no-capture proof against the subject-create capture returned `match=false`, `candidate_count=0` under `data/jimeng-lab/proof-20260610-lip-sync-compare-no-capture/`, confirming the comparator is wired but still waiting for a real lip-sync UI submit capture.
 
 ### 14.1) Lip-sync image/avatar dry-run plan
 - Status:
@@ -1714,6 +1723,7 @@ Current support matrix:
 | `frames2video` | dry-run-proved in `jimeng-browser-proxy`; partial in low-level compat helper | Browser proxy can upload local `--image` and `--lastImage`, inject `first_frame_image`/`end_frame_image`, and write a no-generation plan. Live proof still needs explicit frontend end-frame mode evidence. |
 | `lip-sync-config` | implemented in `jimeng-browser-proxy` | No-spend direct lip-sync/digital-human model config for image/avatar and video modes. |
 | `lip-sync` | dry-run-proved in `jimeng-browser-proxy` | Browser proxy can prepare VOD-reference and image/avatar lip-sync provider inputs from VOD/ImageX provider references plus TTS voice flags. Live submit still needs a frontend submit capture/compare. |
+| `lip-sync-compare` | implemented in `jimeng-browser-proxy` | Offline compare gate for lip-sync live enablement: checks dry-run provider input and model key against captured `/mweb/v1/aigc_draft/generate` requests from `raw-network.jsonl` or `capture-template.raw.json`. |
 | `assets` | implemented in `jimeng-browser-proxy` | No-spend direct `/mweb/v1/get_asset_list` workspace/workbench asset history with request flags for count, asset types, mode, direction, order, timestamp cursor, favorite filter, story-agent visibility, and workspace id. Latest proof returned one completed image asset with four generated image items and no signed URLs in normalized output. |
 | `history-queue` | implemented in `jimeng-browser-proxy` | No-spend direct `/mweb/v1/get_history_queue_info` lookup with `--historyId`/`--historyIds`; latest proof returned queue status `3`, polling interval `30s`, and no raw debug info in normalized output. |
 | `history-records` | implemented in `jimeng-browser-proxy` | No-spend direct `/mweb/v1/get_history_by_ids` lookup by submit id or history id with schema-backed normalization. |

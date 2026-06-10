@@ -605,7 +605,16 @@ data/jimeng-lab/proof-20260610-lip-sync-vod-plan/raw/lip-sync-20260609145310-83b
 data/jimeng-lab/proof-20260610-lip-sync-vod-plan/normalized/lip-sync-20260609145310-83bdpg-summary.json
 ```
 
-Next probe: capture the Jimeng lip-sync UI submit request and compare the converted `draft_content` with the dry-run `providerInput` before enabling live submit.
+Compare gate:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts lip-sync-compare \
+  --plan data/jimeng-lab/proof-20260610-lip-sync-vod-plan/raw/lip-sync-20260609145310-83bdpg-dry-run-plan.json \
+  --rawNetwork data/jimeng-captures/<lip-sync-capture>/raw-network.jsonl \
+  --outDir data/jimeng-lab/proof-20260610-lip-sync-compare
+```
+
+Current no-capture proof against `data/jimeng-captures/20260610-subject-create-ui/raw-network.jsonl` returned `match=false`, `candidate_count=0`; a real background CDP lip-sync UI submit capture is still required before enabling live submit.
 
 ## Confirmed Image-To-Video First-Frame Contract
 

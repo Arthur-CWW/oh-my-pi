@@ -60,6 +60,11 @@ import {
   type JimengLipSyncVideoReference,
 } from "./lip-sync"
 import {
+  compareJimengLipSyncPlanWithCaptureTemplate,
+  compareJimengLipSyncPlanWithRawNetwork,
+  summarizeJimengLipSyncCompare,
+} from "./lip-sync-compare"
+import {
   buildJimengHistoryQueueInfoRequest,
   fetchJimengHistoryQueueInfo,
   parseJimengHistoryIdsFlag,
@@ -150,6 +155,7 @@ Commands:
   capture-analyze Analyze raw CDP network JSONL into ranked endpoint/probe candidates
   catalog       Probe non-generating model/tool/persona/voice config endpoints
   lip-sync-config Fetch no-spend digital-human/lip-sync model configs
+  lip-sync-compare Offline compare a lip-sync dry-run plan against captured UI submit
   voices        Fetch the built-in voice library from a captured signed feed request
   voice-clones  Fetch current user's cloned voice assets without generation spend
   voice-clone-submit Dry-run a custom voice clone submit request from an uploaded audio vid
@@ -192,9 +198,10 @@ Options:
   --session-out <file>          session command output (default: data/jimeng-lab/raw/session-bundle-current.json)
   --capture <file>              Capture template JSON for generation commands
   --rawNetwork <file>           raw-network.jsonl from jimeng-network-recorder for capture-analyze
-  --captureDir <dir>            Capture directory containing raw-network.jsonl for capture-analyze
+  --captureDir <dir>            Capture directory containing raw-network.jsonl for capture-analyze/lip-sync-compare
   --staticRoot <dir[,dir]>      Optional source/bundle roots to search for exact endpoint string hints
   --includeRisky                Include generate/upload/mutate/payment endpoints in replay candidate JSON
+  --plan <file>                 Dry-run plan JSON for lip-sync-compare
   --endpoint <path|url>          Endpoint path or full URL for endpoint-probe
   --method <GET|POST>            HTTP method for endpoint-probe (default: POST)
   --query <query>                Query string override for endpoint-probe
@@ -334,6 +341,11 @@ Examples:
   jimeng-browser-proxy lip-sync-config \\
     --outDir data/jimeng-lab/cli-lip-sync-config-smoke
 
+  jimeng-browser-proxy lip-sync-compare \\
+    --plan data/jimeng-lab/proof-20260610-lip-sync-vod-plan/raw/lip-sync-20260609145310-83bdpg-dry-run-plan.json \\
+    --rawNetwork data/jimeng-captures/<capture>/raw-network.jsonl \\
+    --outDir data/jimeng-lab/lip-sync-compare
+
   jimeng-browser-proxy tts \\
     --voice-id 7597003459665072686 \\
     --text "这条视频值得试一下。"
@@ -451,6 +463,7 @@ interface CliArgs {
     | "catalog"
     | "endpoint-probe"
     | "lip-sync-config"
+    | "lip-sync-compare"
     | "voices"
     | "voice-clones"
     | "voice-clone-submit"
@@ -493,6 +506,7 @@ interface CliArgs {
   captureDir?: string
   staticRoots?: string[]
   includeRisky: boolean
+  plan?: string
   endpoint?: string
   method?: "GET" | "POST"
   query?: string
@@ -608,6 +622,32 @@ async function main(argv: string[]): Promise<void> {
     })
     writeFileSync(path.join(dirs.normalizedDir, `${runId}-summary.md`), writeJimengCaptureAnalysisMarkdown(analysis), "utf8")
     console.log(`[jimeng-browser-proxy] capture-analyze saved candidates=${analysis.candidates.length} replay=${analysis.endpoint_probe_candidates.length}`)
+    return
+  }
+
+  if (args.command === "lip-sync-compare") {
+    if (!args.plan) throw new Error("lip-sync-compare requires --plan")
+    if (!args.rawNetwork && !args.captureDir && !args.capture) {
+      throw new Error("lip-sync-compare requires --rawNetwork, --captureDir, or --capture")
+    }
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const runId = `lip-sync-compare-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const dryRunPlanText = readFileSync(path.resolve(args.plan), "utf8")
+    const result = args.capture
+      ? compareJimengLipSyncPlanWithCaptureTemplate({
+        dryRunPlanText,
+        captureTemplateText: readFileSync(path.resolve(args.capture), "utf8"),
+      })
+      : compareJimengLipSyncPlanWithRawNetwork({
+        dryRunPlanText,
+        rawNetworkText: readFileSync(resolveRawNetworkFile(args), "utf8"),
+      })
+    writeJson(path.join(dirs.rawDir, `${runId}.json`), result)
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      summary: summarizeJimengLipSyncCompare(result),
+    })
+    console.log(`[jimeng-browser-proxy] lip-sync-compare saved match=${result.match} candidates=${result.candidate_count}`)
     return
   }
 
@@ -2570,6 +2610,7 @@ function parseArgs(argv: string[]): CliArgs {
     && command !== "catalog"
     && command !== "endpoint-probe"
     && command !== "lip-sync-config"
+    && command !== "lip-sync-compare"
     && command !== "voices"
     && command !== "voice-clones"
     && command !== "voice-clone-submit"
@@ -2698,6 +2739,7 @@ function parseArgs(argv: string[]): CliArgs {
     captureDir: flags.captureDir ?? flags["capture-dir"],
     staticRoots: parseCsvFlag(flags.staticRoot ?? flags["static-root"]),
     includeRisky: flags.includeRisky === "true" || flags["include-risky"] === "true",
+    plan: flags.plan,
     endpoint: flags.endpoint,
     method,
     query: flags.query,

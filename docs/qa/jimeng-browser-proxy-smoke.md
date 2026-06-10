@@ -946,6 +946,51 @@ ttsInfo.sourceType=text-to-speech
 
 The command is intentionally dry-run-only. Live submit still needs a captured frontend lip-sync `/mweb/v1/aigc_draft/generate` request so the final converted `draft_content` can be compared before spending quota.
 
+## Lip-Sync Compare Smoke
+
+`jimeng-browser-proxy lip-sync-compare` is the offline gate for enabling live lip-sync submit. It compares a dry-run `providerInput.videoGenInputs` and `modelReqKey` against captured `/mweb/v1/aigc_draft/generate` UI submits from `raw-network.jsonl` or `capture-template.raw.json`.
+
+Current proof uses the existing subject-create capture, which should not contain a lip-sync submit:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts lip-sync-compare \
+  --plan data/jimeng-lab/proof-20260610-lip-sync-vod-plan/raw/lip-sync-20260609145310-83bdpg-dry-run-plan.json \
+  --rawNetwork data/jimeng-captures/20260610-subject-create-ui/raw-network.jsonl \
+  --outDir data/jimeng-lab/proof-20260610-lip-sync-compare-no-capture
+```
+
+Result:
+
+```txt
+lip-sync-compare saved match=false candidates=0
+mode=video
+plan_model_req_key=dreamina_lib_sync_base
+```
+
+Proof files:
+
+```txt
+data/jimeng-lab/proof-20260610-lip-sync-compare-no-capture/raw/lip-sync-compare-20260610030130.json
+data/jimeng-lab/proof-20260610-lip-sync-compare-no-capture/normalized/lip-sync-compare-20260610030130-summary.json
+```
+
+Signed URL marker check:
+
+```bash
+if rg -n "https://|x-signature|x-expires|expire_time|byteimg|douyinpic|vlabvod" \
+  data/jimeng-lab/proof-20260610-lip-sync-compare-no-capture/normalized; then
+  exit 1
+else
+  echo "normalized lip-sync-compare proof has no signed URLs"
+fi
+```
+
+Expected result:
+
+```txt
+normalized lip-sync-compare proof has no signed URLs
+```
+
 ## Lip-Sync Image/Avatar Plan Smoke
 
 `jimeng-browser-proxy lip-sync --image` now prepares the image/avatar lip-sync provider input without live submit. It uploads the local reference image through ImageX first, then writes the dry-run plan using the frontend `i2vOpt.realmanAvatar` payload shape. This consumes upload API calls but does not submit generation.

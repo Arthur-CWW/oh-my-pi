@@ -342,6 +342,17 @@ Capture analysis/ranking is now available as the repeatable "tool that builds th
 - proof bundle: `data/jimeng-lab/proof-20260610-capture-analyze-subject-create-v3/`
 - latest proof analyzed 138 events / 27 requests into 5 ranked candidates and 1 safe replay candidate (`/mweb/v1/get_unread_count`); top ranked endpoint was upload/audit `/mweb/v1/imagex/submit_audit_job`, correctly not replay-safe by default
 
+Lip-sync submit comparison is now available as the live-generation gate:
+
+- `jimeng-browser-proxy lip-sync-compare`
+- offline; does not load a browser session or foreground any UI
+- input: a `lip-sync --dryRun` plan via `--plan`, plus captured UI submit evidence via `--rawNetwork`, `--captureDir`, or `--capture`
+- extracts `/mweb/v1/aigc_draft/generate` requests, parses `draft_content.component_list[0].abilities.gen_video.text_to_video_params.video_gen_inputs[0]`, and compares it against `plan.providerInput.videoGenInputs`
+- compares `text_to_video_params.model_req_key` against `plan.providerInput.modelReqKey`
+- output reports path-level match/mismatch summaries and hashes/shape descriptors without raw media URL values
+- proof bundle: `data/jimeng-lab/proof-20260610-lip-sync-compare-no-capture/`
+- latest proof against the existing subject-create capture correctly returned `match=false`, `candidate_count=0`; next proof should use a real background CDP lip-sync UI submit capture
+
 The next slice is **lip-sync submit capture and reference-video consumers**. Use the VOD provider reference, ImageX avatar reference, and frontend captures to unlock live lip-sync, reference-video, multimodal/all-around reference, pose/style/depth/canny controls, and live end-frame/multi-frame image-to-video paths.
 
 Immediate next slices:
@@ -449,6 +460,7 @@ jimeng-browser-proxy text2video
 jimeng-browser-proxy image2video
 jimeng-browser-proxy frames2video
 jimeng-browser-proxy lip-sync
+jimeng-browser-proxy lip-sync-compare
 jimeng-browser-proxy voice-clone
 jimeng-browser-proxy persona
 jimeng-browser-proxy subject
