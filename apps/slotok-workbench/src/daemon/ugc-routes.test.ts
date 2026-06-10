@@ -68,6 +68,32 @@ describe("routeUgc", () => {
     const deleteResponse = await routeUgc(jsonRequest(`/api/ugc/reference-archives/${archiveId}/delete`, {}), store)
     const deleteState = await readState(deleteResponse)
     expect(deleteState.referenceArchives.some((archive) => archive.id === archiveId)).toBe(false)
+
+    const bundleResponse = await routeUgc(jsonRequest("/api/ugc/workspace/bundles/export", { label: "Route bundle proof" }), store)
+    const bundle = await bundleResponse?.json() as {
+      readonly schemaVersion?: string
+      readonly label?: string
+      readonly state?: UgcLocalState
+      readonly objectCounts?: { readonly personas?: number }
+    }
+    expect(bundle.schemaVersion).toBe("ugc-studio.workspace-bundle.v1")
+    expect(bundle.label).toBe("Route bundle proof")
+    expect(bundle.objectCounts?.personas).toBeGreaterThan(0)
+
+    const importResponse = await routeUgc(jsonRequest("/api/ugc/workspace/bundles/import", {
+      bundle,
+      dryRun: true,
+    }), store)
+    const importResult = await importResponse?.json() as {
+      readonly schemaVersion?: string
+      readonly valid?: boolean
+      readonly dryRun?: boolean
+      readonly imported?: boolean
+    }
+    expect(importResult.schemaVersion).toBe("ugc-studio.workspace-bundle-import-result.v1")
+    expect(importResult.valid).toBe(true)
+    expect(importResult.dryRun).toBe(true)
+    expect(importResult.imported).toBe(false)
   })
 
   test("returns null for routes owned by other daemon handlers", async () => {

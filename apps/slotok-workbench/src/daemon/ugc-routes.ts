@@ -1,5 +1,5 @@
 import { UgcJsonStore } from "./ugc-json-store"
-import { isRecord, type BranchPatch, type CandidateStatusPatch, type CreateExportManifestInput, type CreateProviderJobInput, type CreateReferenceArchiveInput, type CreateReviewNoteInput, type PersonaPatch, type ReferenceArchiveFormatOutput, type UgcReferenceArchive } from "../ugc/local-state"
+import { isRecord, type BranchPatch, type CandidateStatusPatch, type CreateExportManifestInput, type CreateProviderJobInput, type CreateReferenceArchiveInput, type CreateReviewNoteInput, type CreateWorkspaceBundleInput, type ImportWorkspaceBundleInput, type PersonaPatch, type ReferenceArchiveFormatOutput, type UgcReferenceArchive } from "../ugc/local-state"
 import type { BranchStatus, CandidateStatus, JsonValue, ReviewAttachment, ReviewVerdict } from "../renderer/ugcStudioModel"
 
 export async function routeUgc(request: Request, store: UgcJsonStore): Promise<Response | null> {
@@ -16,6 +16,14 @@ export async function routeUgc(request: Request, store: UgcJsonStore): Promise<R
 
   if (request.method === "POST" && url.pathname === "/api/ugc/workspace/reset") {
     return json(store.reset())
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/ugc/workspace/bundles/export") {
+    return json(store.exportWorkspaceBundle(decodeCreateWorkspaceBundle(await readJson(request))))
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/ugc/workspace/bundles/import") {
+    return json(store.importWorkspaceBundle(decodeImportWorkspaceBundle(await readJson(request))))
   }
 
   if (request.method === "POST" && url.pathname.startsWith("/api/ugc/personas/")) {
@@ -171,6 +179,21 @@ function decodeCreateExportManifest(value: JsonValue): CreateExportManifestInput
     timelineJson: isJsonValue(value.timelineJson) ? value.timelineJson : undefined,
     notes: Array.isArray(value.notes) && value.notes.every((item) => typeof item === "string") ? value.notes : undefined,
   }
+}
+
+function decodeCreateWorkspaceBundle(value: JsonValue): CreateWorkspaceBundleInput {
+  if (!isRecord(value)) return {}
+  return { label: typeof value.label === "string" ? value.label : undefined }
+}
+
+function decodeImportWorkspaceBundle(value: JsonValue): ImportWorkspaceBundleInput {
+  if (isRecord(value) && "bundle" in value) {
+    return {
+      bundle: isJsonValue(value.bundle) ? value.bundle : null,
+      dryRun: value.dryRun === false ? false : true,
+    }
+  }
+  return { bundle: value, dryRun: true }
 }
 
 function decodeReviewAttachment(value: JsonValue | undefined): ReviewAttachment {

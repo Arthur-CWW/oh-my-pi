@@ -112,6 +112,47 @@ describe("UgcJsonStore", () => {
     expect(updated.referenceArchives.some((item) => item.id === archive?.id)).toBe(false)
     expect(updated.workspace.referenceProfiles.some((item) => item.id === referenceProfileId)).toBe(true)
   })
+
+  test("exports workspace bundles and validates dry-run imports", () => {
+    const store = createStore()
+    const initial = store.read()
+    const bundle = store.exportWorkspaceBundle({ label: "QA portable bundle" })
+    const bundlePath = resolve(store.config.workspaceDir, "bundles", `${bundle.id}.json`)
+
+    expect(bundle.schemaVersion).toBe("ugc-studio.workspace-bundle.v1")
+    expect(bundle.label).toBe("QA portable bundle")
+    expect(bundle.workspaceId).toBe(initial.workspace.id)
+    expect(bundle.objectCounts.personas).toBe(initial.workspace.personas.length)
+    expect(bundle.shardManifest.workspace).toBe("workspace.json")
+    expect(bundle.shardManifest.collections.referenceArchives.length).toBe(initial.referenceArchives.length)
+    expect(bundle.shardManifest.collections.bundles).toContain(`bundles/${bundle.id}.json`)
+    expect(bundle.shardManifest.assets.generated).toBe("assets/generated")
+    expect(existsSync(bundlePath)).toBe(true)
+
+    const persisted = JSON.parse(readFileSync(bundlePath, "utf8")) as { readonly schemaVersion?: string; readonly state?: { readonly schemaVersion?: string } }
+    expect(persisted.schemaVersion).toBe("ugc-studio.workspace-bundle.v1")
+    expect(persisted.state?.schemaVersion).toBe("ugc-studio.local-state.v1")
+
+    const dryRun = store.importWorkspaceBundle({ bundle, dryRun: true })
+    expect(dryRun.valid).toBe(true)
+    expect(dryRun.dryRun).toBe(true)
+    expect(dryRun.imported).toBe(false)
+    expect(dryRun.objectCounts?.candidates).toBe(initial.workspace.candidates.length)
+
+    const applied = store.importWorkspaceBundle({
+      bundle: {
+        ...bundle,
+        state: {
+          ...bundle.state,
+          workspace: { ...bundle.state.workspace, title: "Imported Workspace" },
+        },
+      },
+      dryRun: false,
+    })
+    expect(applied.valid).toBe(true)
+    expect(applied.imported).toBe(true)
+    expect(store.read().workspace.title).toBe("Imported Workspace")
+  })
 })
 
 function createStore(): UgcJsonStore {

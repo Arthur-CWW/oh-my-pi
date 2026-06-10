@@ -1,9 +1,10 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs"
 import { dirname, resolve } from "node:path"
 import {
   candidateById,
   createInitialLocalState,
   isLocalState,
+  isRecord,
   referenceProfileToArchive,
   summarizeLocalState,
   toJsonValue,
@@ -13,11 +14,17 @@ import {
   type CreateProviderJobInput,
   type CreateReferenceArchiveInput,
   type CreateReviewNoteInput,
+  type CreateWorkspaceBundleInput,
+  type ImportWorkspaceBundleInput,
   type PersonaPatch,
   type UgcExportManifest,
   type UgcLocalState,
   type UgcProviderJob,
   type UgcReferenceArchive,
+  type UgcWorkspaceBundle,
+  type UgcWorkspaceBundleImportResult,
+  type UgcWorkspaceBundleObjectCounts,
+  type UgcWorkspaceBundleShardManifest,
 } from "../ugc/local-state"
 import type { JsonValue, PersonaProfile, ReviewNote, UgcStudioWorkspace } from "../renderer/ugcStudioModel"
 
@@ -242,6 +249,68 @@ export class UgcJsonStore {
     return this.write({ ...state, exportManifests: [manifest, ...state.exportManifests] })
   }
 
+  exportWorkspaceBundle(input: CreateWorkspaceBundleInput = {}): UgcWorkspaceBundle {
+    const state = this.read()
+    const now = this.now()
+    const label = input.label?.trim() || `${state.workspace.title} workspace bundle`
+    const id = `bundle_${slug(state.workspace.id)}_${Date.now().toString(36)}`
+    const bundle: UgcWorkspaceBundle = {
+      schemaVersion: "ugc-studio.workspace-bundle.v1",
+      id,
+      workspaceId: state.workspace.id,
+      label,
+      exportedAt: now,
+      sourceStateUpdatedAt: state.updatedAt,
+      summary: summarizeLocalState(state),
+      objectCounts: bundleObjectCounts(state),
+      shardManifest: createShardManifest(state, this.config.workspaceDir, `bundles/${id}.json`),
+      state: cloneStateForBundle(state),
+    }
+    writeJsonAtomic(resolve(this.config.workspaceDir, "bundles", `${bundle.id}.json`), bundle)
+    return bundle
+  }
+
+  importWorkspaceBundle(input: ImportWorkspaceBundleInput): UgcWorkspaceBundleImportResult {
+    const now = this.now()
+    const errors: string[] = []
+    const warnings: string[] = []
+    const dryRun = input.dryRun !== false
+    const bundle = decodeWorkspaceBundle(input.bundle)
+
+    if (!bundle) {
+      errors.push("Bundle must be a ugc-studio.workspace-bundle.v1 object with a valid local state payload.")
+    }
+
+    if (bundle && bundle.workspaceId !== bundle.state.workspace.id) {
+      errors.push("Bundle workspaceId does not match state.workspace.id.")
+    }
+
+    if (bundle && bundle.state.schemaVersion !== "ugc-studio.local-state.v1") {
+      errors.push("Bundle state schema is not ugc-studio.local-state.v1.")
+    }
+
+    if (bundle && bundle.state.workspace.id !== this.config.workspaceId) {
+      warnings.push(`Bundle workspace ${bundle.state.workspace.id} will replace current workspace ${this.config.workspaceId} if applied.`)
+    }
+
+    const valid = errors.length === 0 && Boolean(bundle)
+    const importedState = valid && !dryRun && bundle ? this.write(bundle.state) : null
+
+    return {
+      schemaVersion: "ugc-studio.workspace-bundle-import-result.v1",
+      dryRun,
+      valid,
+      imported: Boolean(importedState),
+      checkedAt: now,
+      bundleId: bundle?.id ?? null,
+      workspaceId: bundle?.workspaceId ?? null,
+      errors,
+      warnings,
+      objectCounts: bundle?.objectCounts ?? null,
+      importedState,
+    }
+  }
+
   private updateWorkspace(update: (workspace: UgcStudioWorkspace) => UgcStudioWorkspace): UgcLocalState {
     const state = this.read()
     return this.write({ ...state, workspace: update(state.workspace) })
@@ -304,6 +373,7 @@ function writeWorkspaceShards(workspaceDir: string, state: UgcLocalState): void 
   mkdirSync(resolve(workspaceDir, "assets/source"), { recursive: true })
   mkdirSync(resolve(workspaceDir, "assets/generated"), { recursive: true })
   mkdirSync(resolve(workspaceDir, "assets/exports"), { recursive: true })
+  mkdirSync(resolve(workspaceDir, "bundles"), { recursive: true })
 }
 
 function writeCollection<T extends { readonly id: string }>(dir: string, records: readonly T[]): void {
@@ -340,4 +410,102 @@ function findProjectRoot(start: string): string {
 
 function slug(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 80) || "item"
+}
+
+function bundleObjectCounts(state: UgcLocalState): UgcWorkspaceBundleObjectCounts {
+  return {
+    personas: state.workspace.personas.length,
+    branches: state.workspace.branchSnapshots.length,
+    candidates: state.workspace.candidates.length,
+    notes: state.workspace.reviewNotes.length,
+    providerJobs: state.providerJobs.length,
+    referenceArchives: state.referenceArchives.length,
+    exportManifests: state.exportManifests.length,
+  }
+}
+
+function createShardManifest(state: UgcLocalState, workspaceDir: string, currentBundlePath: string): UgcWorkspaceBundleShardManifest {
+  const bundlePaths = new Set([...listJsonFiles(resolve(workspaceDir, "bundles"), "bundles"), currentBundlePath])
+  return {
+    workspace: "workspace.json",
+    collections: {
+      personas: state.workspace.personas.map((item) => `personas/${item.id}.json`),
+      campaigns: [`campaigns/${state.workspace.productBrief.id}.json`],
+      branches: state.workspace.branchSnapshots.map((item) => `branches/${item.id}.json`),
+      candidates: state.workspace.candidates.map((item) => `candidates/${item.id}.json`),
+      notes: state.workspace.reviewNotes.map((item) => `notes/${item.id}.json`),
+      providerJobs: state.providerJobs.map((item) => `provider-jobs/${item.id}.json`),
+      referenceArchives: state.referenceArchives.map((item) => `reference-archives/${item.id}.json`),
+      exports: state.exportManifests.map((item) => `exports/${item.id}.json`),
+      bundles: [...bundlePaths].sort(),
+    },
+    assets: {
+      source: "assets/source",
+      generated: "assets/generated",
+      exports: "assets/exports",
+    },
+  }
+}
+
+function listJsonFiles(dir: string, relativePrefix: string): readonly string[] {
+  if (!existsSync(dir)) return []
+  return readdirSync(dir, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
+    .map((entry) => `${relativePrefix}/${entry.name}`)
+    .sort()
+}
+
+function cloneStateForBundle(state: UgcLocalState): UgcLocalState {
+  return JSON.parse(JSON.stringify(state)) as UgcLocalState
+}
+
+function decodeWorkspaceBundle(value: JsonValue | UgcWorkspaceBundle): UgcWorkspaceBundle | null {
+  if (!isRecord(value) || value.schemaVersion !== "ugc-studio.workspace-bundle.v1") return null
+  if (typeof value.id !== "string" || typeof value.workspaceId !== "string" || typeof value.label !== "string") return null
+  if (typeof value.exportedAt !== "string" || typeof value.sourceStateUpdatedAt !== "string") return null
+  if (!isLocalState(value.state)) return null
+  if (!isObjectCounts(value.objectCounts) || !isShardManifest(value.shardManifest)) return null
+  return {
+    schemaVersion: "ugc-studio.workspace-bundle.v1",
+    id: value.id,
+    workspaceId: value.workspaceId,
+    label: value.label,
+    exportedAt: value.exportedAt,
+    sourceStateUpdatedAt: value.sourceStateUpdatedAt,
+    summary: summarizeLocalState(value.state),
+    objectCounts: value.objectCounts,
+    shardManifest: value.shardManifest,
+    state: value.state,
+  }
+}
+
+function isObjectCounts(value: unknown): value is UgcWorkspaceBundleObjectCounts {
+  if (!isRecord(value)) return false
+  return typeof value.personas === "number"
+    && typeof value.branches === "number"
+    && typeof value.candidates === "number"
+    && typeof value.notes === "number"
+    && typeof value.providerJobs === "number"
+    && typeof value.referenceArchives === "number"
+    && typeof value.exportManifests === "number"
+}
+
+function isShardManifest(value: unknown): value is UgcWorkspaceBundleShardManifest {
+  if (!isRecord(value) || typeof value.workspace !== "string" || !isRecord(value.collections) || !isRecord(value.assets)) return false
+  return isStringArray(value.collections.personas)
+    && isStringArray(value.collections.campaigns)
+    && isStringArray(value.collections.branches)
+    && isStringArray(value.collections.candidates)
+    && isStringArray(value.collections.notes)
+    && isStringArray(value.collections.providerJobs)
+    && isStringArray(value.collections.referenceArchives)
+    && isStringArray(value.collections.exports)
+    && isStringArray(value.collections.bundles)
+    && typeof value.assets.source === "string"
+    && typeof value.assets.generated === "string"
+    && typeof value.assets.exports === "string"
+}
+
+function isStringArray(value: unknown): value is readonly string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string")
 }

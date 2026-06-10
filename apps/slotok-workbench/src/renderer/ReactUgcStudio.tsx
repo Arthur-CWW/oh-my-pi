@@ -647,7 +647,7 @@ export function ReactUgcStudio() {
         body: JSON.stringify(body),
       })
       const payload = await response.json() as UgcLocalState | { error?: string }
-      if (!response.ok || !("schemaVersion" in payload)) {
+      if (!response.ok || !("schemaVersion" in payload) || payload.schemaVersion !== "ugc-studio.local-state.v1") {
         setResult(JSON.stringify(payload, null, 2))
         return
       }
@@ -907,7 +907,7 @@ function WorkspaceView(props: {
     return <FinalEditor selectedCandidateId={props.selectedCandidateId} onMutateLocal={props.onMutateLocal} />
   }
   if (props.activeView === "graph") {
-    return <DeveloperGraphView />
+    return <DeveloperGraphView onMutateLocal={props.onMutateLocal} />
   }
   return (
     <ProviderView
@@ -1504,7 +1504,7 @@ function ReferenceFormatOutputCard(props: { output: ReferenceArchiveFormatOutput
   )
 }
 
-function DeveloperGraphView() {
+function DeveloperGraphView(props: { onMutateLocal: (path: string, body: object) => void }) {
   const { workspace, providerJobs } = useUgcLocalState()
   return (
     <div className="rugc-provider">
@@ -1515,6 +1515,19 @@ function DeveloperGraphView() {
         <div className="rugc-provider-note">
           <strong>Provider jobs</strong>
           <p>{providerJobs.length} local job records. KIE/Jimeng calls should land here before or after live provider submission.</p>
+        </div>
+        <div className="rugc-provider-note">
+          <strong>Workspace bundle</strong>
+          <p>Export the current local workspace, object shards, asset paths, provider jobs, archives, and export manifests.</p>
+          <Button
+            size="xs"
+            variant="workbench"
+            onClick={() => props.onMutateLocal("/api/ugc/workspace/bundles/export", {
+              label: `${workspace.title} developer export`,
+            })}
+          >
+            <Download size={13} /> Export bundle
+          </Button>
         </div>
       </section>
       <aside>

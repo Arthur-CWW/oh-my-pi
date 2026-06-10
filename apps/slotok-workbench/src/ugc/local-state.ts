@@ -28,6 +28,63 @@ export interface UgcWorkspaceSummary {
   readonly exportCount: number
 }
 
+export interface UgcWorkspaceBundle {
+  readonly schemaVersion: "ugc-studio.workspace-bundle.v1"
+  readonly id: string
+  readonly workspaceId: string
+  readonly label: string
+  readonly exportedAt: string
+  readonly sourceStateUpdatedAt: string
+  readonly summary: UgcWorkspaceSummary
+  readonly objectCounts: UgcWorkspaceBundleObjectCounts
+  readonly shardManifest: UgcWorkspaceBundleShardManifest
+  readonly state: UgcLocalState
+}
+
+export interface UgcWorkspaceBundleObjectCounts {
+  readonly personas: number
+  readonly branches: number
+  readonly candidates: number
+  readonly notes: number
+  readonly providerJobs: number
+  readonly referenceArchives: number
+  readonly exportManifests: number
+}
+
+export interface UgcWorkspaceBundleShardManifest {
+  readonly workspace: string
+  readonly collections: {
+    readonly personas: readonly string[]
+    readonly campaigns: readonly string[]
+    readonly branches: readonly string[]
+    readonly candidates: readonly string[]
+    readonly notes: readonly string[]
+    readonly providerJobs: readonly string[]
+    readonly referenceArchives: readonly string[]
+    readonly exports: readonly string[]
+    readonly bundles: readonly string[]
+  }
+  readonly assets: {
+    readonly source: string
+    readonly generated: string
+    readonly exports: string
+  }
+}
+
+export interface UgcWorkspaceBundleImportResult {
+  readonly schemaVersion: "ugc-studio.workspace-bundle-import-result.v1"
+  readonly dryRun: boolean
+  readonly valid: boolean
+  readonly imported: boolean
+  readonly checkedAt: string
+  readonly bundleId: string | null
+  readonly workspaceId: string | null
+  readonly errors: readonly string[]
+  readonly warnings: readonly string[]
+  readonly objectCounts: UgcWorkspaceBundleObjectCounts | null
+  readonly importedState: UgcLocalState | null
+}
+
 export interface UgcProviderJob {
   readonly schemaVersion: "ugc-studio.provider-job.v1"
   readonly id: string
@@ -160,6 +217,15 @@ export interface CreateExportManifestInput {
   readonly presetId?: string
   readonly timelineJson?: JsonValue
   readonly notes?: readonly string[]
+}
+
+export interface CreateWorkspaceBundleInput {
+  readonly label?: string
+}
+
+export interface ImportWorkspaceBundleInput {
+  readonly bundle: JsonValue | UgcWorkspaceBundle
+  readonly dryRun?: boolean
 }
 
 export function createInitialLocalState(now = new Date().toISOString()): UgcLocalState {
