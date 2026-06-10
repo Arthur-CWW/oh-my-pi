@@ -35,14 +35,7 @@ As of 2026-06-10, the committed Jimeng CLI baseline is:
 - `aa0eafb Add CapCut template metadata CLI`
 - `c7b55b1 Add Jimeng lip sync config CLI`
 - `4936bc7 Add Jimeng lip sync image planning`
-
-Active uncommitted continuation:
-
-- Subject/persona creation has been frontend-captured from the asset library `主体 -> 创建主体` modal.
-- Confirmed create endpoint: `POST /mweb/v1/dreamina_subject/create`.
-- Confirmed payload shape: `content.name`, `content.description`, `content.main_image.{width,height,image_uri,image_url}`, and `workspace_id`.
-- Confirmed required UI nuance: local image upload must go through the real file chooser path or equivalent background CDP/CuaDriver event path so React attaches the uploaded image into modal state; direct hidden-file-input mutation left Save disabled.
-- Next implementation slice is a typed `subject-create` CLI with dry-run/live paths, redaction-safe proof summaries, tests, and docs.
+- `cf2b953 Document background Jimeng automation preference`
 
 ImageX local image upload is now committed and live-proved:
 
@@ -228,6 +221,20 @@ Saved subject/persona listing is now live-proved without generation spend:
 - proof bundle: `data/jimeng-lab/proof-20260610-subjects/`
 - latest proof returned `ret=0`, `errmsg=success`, `subject_count=0`, `has_more=false`, `next_cursor=0`, and response hash `618858c54ed5d0b298cf37ed03bf29d27042f54e3e999bb143932cec6a3ef31f`.
 
+Subject/persona creation is now live-proved without generation spend:
+
+- `jimeng-browser-proxy subject-create`
+- confirmed from asset library `主体 -> 创建主体` UI capture, then implemented as direct background API calls
+- local images upload through the confirmed ImageX scene `2` path, then call:
+  - `/mweb/v1/imagex/submit_audit_job`
+  - `/mweb/v1/get_image_by_uri`
+  - `/mweb/v1/dreamina_subject/create`
+- create payload shape: `content.name`, `content.description`, `content.main_image.{width,height,image_uri,image_url}`, and `workspace_id`
+- useful flags: `--workspaceId`, `--name`, `--description`, `--image`, `--file`, `--imageUri`, `--imageWidth`, `--imageHeight`, `--imageUrl`
+- proof bundle: `data/jimeng-lab/proof-20260610-subject-create-cli/`
+- latest proof created `subject_id=12352249053442`, `data_id=12352249053698`, using `image_uri=tos-cn-i-tb4s082cfz/d56ac871b3a94f77bc83ac84a861ede6.png`, `2048x2048`, with summary hash `52a8d7ba8acf00de72912228a5d1ab1ea0d96edea5adf8be44744d2092258dec`
+- normalized summaries intentionally omit signed image URLs; raw upload/create responses remain ignored under `data/**`
+
 The next slice is **lip-sync submit capture and reference-video consumers**. Use the VOD provider reference, ImageX avatar reference, and frontend captures to unlock live lip-sync, reference-video, multimodal/all-around reference, pose/style/depth/canny controls, and live end-frame/multi-frame image-to-video paths.
 
 Immediate next slices:
@@ -237,7 +244,7 @@ Immediate next slices:
 3. Map style/reference roles and the new object-mask provider references into generation payload patches.
 4. Implement digital-human generation using the confirmed VOD reference path where applicable.
 5. Capture real CapCut template row/search/collection payloads, then expand no-spend research/template coverage beyond the confirmed CapCut category and public metadata catalogs.
-6. Implement subject/persona create/update/generate_voice and voice clone once the UI/API flow is captured.
+6. Capture and implement subject/persona update/delete/generate_voice plus voice clone once those UI/API flows are captured.
 7. Keep each slice small enough to prove and commit before moving on.
 
 Do not start the async daemon while these API contracts are still moving.

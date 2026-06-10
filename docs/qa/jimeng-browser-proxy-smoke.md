@@ -941,6 +941,58 @@ rg -n 'X-Amz|signed|https?://' data/jimeng-lab/proof-20260610-subjects/normalize
 
 Result: no matches.
 
+## Saved Subject / Persona Create Smoke
+
+`jimeng-browser-proxy subject-create` creates a saved Jimeng subject/persona directly from a local ImageX-uploaded or existing provider image. This is a no-generation, no-spend asset lifecycle command.
+
+Dry-run:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts subject-create \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --workspaceId 14199856180236 \
+  --name "CLI Kbeauty UGC" \
+  --description "韩系美妆健身UGC创作者，真实手机自拍参考图。" \
+  --image data/jimeng-lab/ugc-studio-kbeauty-image/artifacts/jimeng-kbeauty-01.png \
+  --outDir data/jimeng-lab/proof-20260610-subject-create-cli \
+  --dryRun
+```
+
+Live proof:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts subject-create \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --workspaceId 14199856180236 \
+  --name "CLI Kbeauty UGC 2" \
+  --description "韩系美妆健身UGC创作者，真实手机自拍参考图。" \
+  --image data/jimeng-lab/ugc-studio-kbeauty-image/artifacts/jimeng-kbeauty-01.png \
+  --outDir data/jimeng-lab/proof-20260610-subject-create-cli
+```
+
+Result:
+
+```txt
+subject_id=12352249053442
+data_id=12352249053698
+main_image_uri=tos-cn-i-tb4s082cfz/d56ac871b3a94f77bc83ac84a861ede6.png
+main_image_size=2048x2048
+audit_ret=0
+image_lookup_ret=0
+create_ret=0
+summary=data/jimeng-lab/proof-20260610-subject-create-cli/normalized/subject-create-20260610001348-mm0zq8-summary.json
+summary_sha256=52a8d7ba8acf00de72912228a5d1ab1ea0d96edea5adf8be44744d2092258dec
+```
+
+Normalized leak check:
+
+```bash
+rg -n 'X-Amz|x-signature|x-expires|sessionid|sid_guard|msToken|signed.example' \
+  data/jimeng-lab/proof-20260610-subject-create-cli/normalized
+```
+
+Result: no matches.
+
 ## CapCut Commercial Template Category Smoke
 
 `jimeng-browser-proxy capcut-categories` calls the signed read-only CapCut commercial template category endpoint discovered in the Jimeng/Dreamina frontend bundle. This is a no-generation, no-spend probe and did not require CapCut cookies in the current proof.
@@ -1031,15 +1083,15 @@ Expected result: no matches.
 ```bash
 bun run jimeng:typecheck
 bun run jimeng:test
-bun packages/jimeng-client/src/browser-proxy-cli.ts --help | rg 'lip-sync-config|capcut-template-metadata|capcut-categories|overseas-short-videos|subjects|templates|short-videos'
+bun packages/jimeng-client/src/browser-proxy-cli.ts --help | rg 'lip-sync-config|capcut-template-metadata|capcut-categories|overseas-short-videos|subject-create|subjects|templates|short-videos'
 ```
 
 Result:
 
 ```txt
 typecheck passed
-65 tests passed, 0 failed
-browser-proxy help listed lip-sync-config, capcut-template-metadata, overseas-short-videos, capcut-categories, subjects, templates, and short-videos
+70 tests passed, 0 failed
+browser-proxy help listed lip-sync-config, capcut-template-metadata, overseas-short-videos, capcut-categories, subject-create, subjects, templates, and short-videos
 ```
 
 ## Follow-Up
@@ -1047,8 +1099,8 @@ browser-proxy help listed lip-sync-config, capcut-template-metadata, overseas-sh
 Next useful captures:
 
 - image-to-image / byte edit
-- subject/persona creation
-- style reference controls and object segmentation
+- subject/persona update/delete/generate_voice
+- style reference controls
 - additional template/research endpoints: CapCut template search and plane row/collection endpoints
 - image-to-video end-frame and multi-frame live proof with explicit frontend mode capture
 - multimodal/all-around reference video

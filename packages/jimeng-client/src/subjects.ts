@@ -2,9 +2,11 @@ import { createHash } from "node:crypto"
 import { type JimengSessionBundle } from "./capture"
 import { assertNoRiskError, JimengClient } from "./client"
 import { jimengError } from "./errors"
-import { type JsonObject, type JsonValue } from "./reference-image"
+import { parseImageUri, type JsonObject, type JsonValue } from "./reference-image"
+import { type JimengImageUploadSummary } from "./upload"
 
 const DEFAULT_QUERY = "aid=513695&web_version=7.5.0&da_version=3.3.17&aigc_features=app_lip_sync"
+const DEFAULT_WEB_ID = "7647092336736290330"
 
 export interface JimengSubjectsQuery {
   cursor?: number
@@ -37,10 +39,87 @@ export interface JimengSubjectsResult {
   body: JsonValue
 }
 
+export interface JimengSubjectImageReference {
+  imageUri: string
+  width: number
+  height: number
+  imageUrl?: string
+}
+
+export interface JimengSubjectCreateInput {
+  name: string
+  description?: string
+  workspaceId: number
+  mainImage: JimengSubjectImageReference
+}
+
+export interface JimengSubjectCreateResult {
+  endpoint: "/mweb/v1/dreamina_subject/create"
+  httpStatus: number
+  ret: string | number | null
+  errmsg: string | null
+  responseTextSha256: string
+  request: JsonObject
+  subject: JimengSubjectItem | null
+  subjectId: string | null
+  dataId: string | null
+  body: JsonValue
+}
+
+export interface JimengImageAuditResult {
+  endpoint: "/mweb/v1/imagex/submit_audit_job"
+  httpStatus: number
+  ret: string | number | null
+  errmsg: string | null
+  responseTextSha256: string
+  request: JsonObject
+  body: JsonValue
+}
+
+export interface JimengImageByUriItem {
+  imageUri: string
+  imageUrl: string | null
+  width: number | null
+  height: number | null
+  format: string | null
+}
+
+export interface JimengImageByUriResult {
+  endpoint: "/mweb/v1/get_image_by_uri"
+  httpStatus: number
+  ret: string | number | null
+  errmsg: string | null
+  responseTextSha256: string
+  request: JsonObject
+  images: JimengImageByUriItem[]
+  body: JsonValue
+}
+
 export function buildJimengSubjectsRequest(query: JimengSubjectsQuery = {}): JsonObject {
   const cursor = normalizeCursor(query.cursor)
   const limit = normalizeLimit(query.limit)
   return { cursor, limit }
+}
+
+export function buildJimengSubjectCreateRequest(input: JimengSubjectCreateInput): JsonObject {
+  const name = normalizeSubjectName(input.name)
+  const workspaceId = normalizeWorkspaceId(input.workspaceId)
+  const image = normalizeSubjectImageReference(input.mainImage)
+  const mainImage: JsonObject = {
+    width: image.width,
+    height: image.height,
+    image_uri: image.imageUri,
+  }
+  if (image.imageUrl) mainImage.image_url = image.imageUrl
+
+  return {
+    content: {
+      name,
+      ...(input.description !== undefined ? { description: input.description } : {}),
+      main_image: mainImage,
+    },
+    workspace_id: workspaceId,
+  }
 }
 
 export async function fetchJimengSubjects(input: {
@@ -74,6 +153,111 @@ export async function fetchJimengSubjects(input: {
   }
 }
 
+export async function submitJimengImageAuditJob(input: {
+  client?: JimengClient
+  session: JimengSessionBundle
+  imageUris: string[]
+}): Promise<JimengImageAuditResult> {
+  const imageUris = input.imageUris.map(parseImageUri)
+  if (imageUris.length === 0) {
+    throw jimengError({
+      category: "validation",
+      code: "IMAGE_AUDIT_URIS_REQUIRED",
+      message: "At least one provider image URI is required for image audit.",
+      retryable: false,
+    })
+  }
+  const request = { uri_list: imageUris }
+  const client = input.client ?? new JimengClient()
+  const response = await client.requestText(`https://jimeng.jianying.com/mweb/v1/imagex/submit_audit_job?${DEFAULT_QUERY}`, {
+    method: "POST",
+    headers: buildSubjectsHeaders(input.session),
+    body: JSON.stringify(request),
+  })
+  const body = safeJson(response.text)
+  assertNoRiskError(body, response.text)
+  assertJimengSuccess(body, "image audit")
+
+  return {
+    endpoint: "/mweb/v1/imagex/submit_audit_job",
+    httpStatus: response.status,
+    ret: retValue(body),
+    errmsg: errmsgValue(body),
+    responseTextSha256: sha256(response.text),
+    request,
+    body,
+  }
+}
+
+export async function fetchJimengImagesByUri(input: {
+  client?: JimengClient
+  session: JimengSessionBundle
+  imageUris: string[]
+}): Promise<JimengImageByUriResult> {
+  const imageUris = input.imageUris.map(parseImageUri)
+  if (imageUris.length === 0) {
+    throw jimengError({
+      category: "validation",
+      code: "IMAGE_LOOKUP_URIS_REQUIRED",
+      message: "At least one provider image URI is required for image lookup.",
+      retryable: false,
+    })
+  }
+  const request = { uris: imageUris }
+  const client = input.client ?? new JimengClient()
+  const response = await client.requestText(buildGetImageByUriUrl(input.session), {
+    method: "POST",
+    headers: buildSubjectsHeaders(input.session),
+    body: JSON.stringify(request),
+  })
+  const body = safeJson(response.text)
+  assertNoRiskError(body, response.text)
+  assertJimengSuccess(body, "image lookup")
+
+  return {
+    endpoint: "/mweb/v1/get_image_by_uri",
+    httpStatus: response.status,
+    ret: retValue(body),
+    errmsg: errmsgValue(body),
+    responseTextSha256: sha256(response.text),
+    request,
+    images: imageByUriItems(body, imageUris),
+    body,
+  }
+}
+
+export async function createJimengSubject(input: {
+  client?: JimengClient
+  session: JimengSessionBundle
+  subject: JimengSubjectCreateInput
+}): Promise<JimengSubjectCreateResult> {
+  const request = buildJimengSubjectCreateRequest(input.subject)
+  const client = input.client ?? new JimengClient()
+  const response = await client.requestText(`https://jimeng.jianying.com/mweb/v1/dreamina_subject/create?${DEFAULT_QUERY}`, {
+    method: "POST",
+    headers: buildSubjectsHeaders(input.session),
+    body: JSON.stringify(request),
+  })
+  const body = safeJson(response.text)
+  assertNoRiskError(body, response.text)
+  assertJimengSuccess(body, "subject create")
+  const data = asRecord(asRecord(body)?.data)
+  const subject = parseSubject(data) ?? null
+
+  return {
+    endpoint: "/mweb/v1/dreamina_subject/create",
+    httpStatus: response.status,
+    ret: retValue(body),
+    errmsg: errmsgValue(body),
+    responseTextSha256: sha256(response.text),
+    request,
+    subject,
+    subjectId: stringValue(data?.subject_id) ?? subject?.subjectId ?? null,
+    dataId: stringValue(data?.data_id),
+    body,
+  }
+}
+
 export function summarizeJimengSubjects(result: JimengSubjectsResult): JsonObject {
   return {
     endpoint: result.endpoint,
@@ -102,6 +286,103 @@ export function summarizeJimengSubjects(result: JimengSubjectsResult): JsonObjec
   }
 }
 
+export function summarizeJimengSubjectCreate(result: JimengSubjectCreateResult): JsonObject {
+  return {
+    endpoint: result.endpoint,
+    http_status: result.httpStatus,
+    ret: result.ret,
+    errmsg: result.errmsg,
+    response_text_sha256: result.responseTextSha256,
+    request: redactSubjectCreateRequest(result.request),
+    subject_id: result.subjectId,
+    data_id: result.dataId,
+    subject: result.subject ? {
+      subject_id: result.subject.subjectId,
+      name: result.subject.name,
+      description: result.subject.description,
+      status: result.subject.status,
+      create_time: result.subject.createTime,
+      update_time: result.subject.updateTime,
+      cover_image_uri: result.subject.coverImageUri,
+      cover_image_url_present: !!result.subject.coverImageUrl,
+      image_uris: result.subject.imageUris,
+      image_count: result.subject.imageUris.length,
+      voice_ids: result.subject.voiceIds,
+      voice_count: result.subject.voiceIds.length,
+    } : null,
+  }
+}
+
+export function summarizeJimengImageByUri(result: JimengImageByUriResult): JsonObject {
+  return {
+    endpoint: result.endpoint,
+    http_status: result.httpStatus,
+    ret: result.ret,
+    errmsg: result.errmsg,
+    response_text_sha256: result.responseTextSha256,
+    request: result.request,
+    images: result.images.map((image) => ({
+      image_uri: image.imageUri,
+      image_url_present: !!image.imageUrl,
+      width: image.width,
+      height: image.height,
+      format: image.format,
+    })),
+  }
+}
+
+export function subjectImageReferenceFromUploadSummary(
+  summary: JimengImageUploadSummary,
+  imageUrl?: string,
+): JimengSubjectImageReference {
+  const plugin = summary.pluginResults.find((item) => item.imageUri === summary.imageUris[0]) ?? summary.pluginResults[0]
+  const imageUri = summary.imageUris[0] ?? plugin?.imageUri
+  const width = plugin?.imageWidth
+  const height = plugin?.imageHeight
+  if (!imageUri || !width || !height) {
+    throw jimengError({
+      category: "validation",
+      code: "SUBJECT_IMAGE_UPLOAD_MISSING_DIMENSIONS",
+      message: "Image upload summary missing subject image URI, width, or height.",
+      retryable: false,
+      details: {
+        imageUriPresent: !!imageUri,
+        widthPresent: !!width,
+        heightPresent: !!height,
+      },
+    })
+  }
+  return normalizeSubjectImageReference({ imageUri, width, height, ...(imageUrl ? { imageUrl } : {}) })
+}
+
+export function normalizeSubjectImageReference(reference: JimengSubjectImageReference): JimengSubjectImageReference {
+  const imageUri = parseImageUri(reference.imageUri)
+  if (!Number.isInteger(reference.width) || reference.width < 1) {
+    throw jimengError({
+      category: "validation",
+      code: "SUBJECT_IMAGE_WIDTH_INVALID",
+      message: "Subject image width must be a positive integer.",
+      retryable: false,
+      details: { width: reference.width },
+    })
+  }
+  if (!Number.isInteger(reference.height) || reference.height < 1) {
+    throw jimengError({
+      category: "validation",
+      code: "SUBJECT_IMAGE_HEIGHT_INVALID",
+      message: "Subject image height must be a positive integer.",
+      retryable: false,
+      details: { height: reference.height },
+    })
+  }
+  return {
+    imageUri,
+    width: reference.width,
+    height: reference.height,
+    ...(reference.imageUrl ? { imageUrl: reference.imageUrl } : {}),
+  }
+}
+
 function subjectsValue(body: JsonValue): JimengSubjectItem[] {
   const root = asRecord(body)
   const data = asRecord(root?.data)
@@ -119,11 +400,13 @@ function subjectsValue(body: JsonValue): JimengSubjectItem[] {
 function parseSubject(value: JsonValue): JimengSubjectItem | null {
   const subject = asRecord(value)
   if (!subject) return null
-  const subjectData = asRecord(subject.subject_data) ?? asRecord(subject.subjectData) ?? subject
+  const subjectData = asRecord(subject.subject_data) ?? asRecord(subject.subjectData) ?? asRecord(subject.content) ?? subject
   const cover = asRecord(subjectData.cover)
     ?? asRecord(subjectData.cover_image)
     ?? asRecord(subjectData.coverImage)
     ?? asRecord(subjectData.avatar)
+    ?? asRecord(subjectData.main_image)
+    ?? asRecord(subjectData.mainImage)
     ?? asRecord(subjectData.image)
   const imageUris = collectImageUris(subjectData)
   const voiceIds = collectVoiceIds(subjectData)
@@ -132,6 +415,8 @@ function parseSubject(value: JsonValue): JimengSubjectItem | null {
     subjectId: stringValue(subjectData.subject_id)
       ?? stringValue(subjectData.subjectId)
       ?? stringValue(subjectData.id)
+      ?? stringValue(subject.subject_id)
+      ?? stringValue(subject.subjectId)
       ?? stringValue(subject.id),
     name: stringValue(subjectData.name)
       ?? stringValue(subjectData.title)
@@ -175,6 +460,10 @@ function collectImageUris(subject: JsonObject): string[] {
   add(subject.imageUri)
   add(subject.cover_image_uri)
   add(subject.coverImageUri)
+  const mainImage = asRecord(subject.main_image) ?? asRecord(subject.mainImage)
+  add(mainImage?.image_uri)
+  add(mainImage?.imageUri)
+  add(mainImage?.uri)
 
   for (const key of ["image_list", "imageList", "images", "materials", "material_list", "materialList"]) {
     for (const entry of asArray(subject[key])) {
@@ -219,6 +508,65 @@ function collectVoiceIds(subject: JsonObject): string[] {
   }
 
   return [...seen]
+}
+
+function imageByUriItems(body: JsonValue, requestedUris: string[]): JimengImageByUriItem[] {
+  const root = asRecord(body)
+  const map = asRecord(root?.uri2image) ?? asRecord(asRecord(root?.data)?.uri2image)
+  return requestedUris.map((uri) => {
+    const image = asRecord(map?.[uri])
+    return {
+      imageUri: stringValue(image?.image_uri) ?? stringValue(image?.imageUri) ?? uri,
+      imageUrl: stringValue(image?.image_url) ?? stringValue(image?.imageUrl),
+      width: positiveNumberValue(image?.width),
+      height: positiveNumberValue(image?.height),
+      format: stringValue(image?.format),
+    }
+  })
+}
+
+function normalizeSubjectName(value: string): string {
+  const name = value.trim()
+  if (name.length < 1 || name.length > 20) {
+    throw jimengError({
+      category: "validation",
+      code: "SUBJECT_NAME_INVALID",
+      message: "Subject name must be 1 to 20 characters.",
+      retryable: false,
+      details: { length: name.length },
+    })
+  }
+  return name
+}
+
+function normalizeWorkspaceId(value: number): number {
+  if (!Number.isInteger(value) || value < 1) {
+    throw jimengError({
+      category: "validation",
+      code: "SUBJECT_WORKSPACE_ID_INVALID",
+      message: "Subject workspace id must be a positive integer.",
+      retryable: false,
+      details: { workspaceId: value },
+    })
+  }
+  return value
+}
+
+function redactSubjectCreateRequest(request: JsonObject): JsonObject {
+  const content = asRecord(request.content)
+  const mainImage = asRecord(content?.main_image)
+  const redactedMainImage: JsonObject = {
+    ...(mainImage ?? {}),
+    image_url_present: !!mainImage?.image_url,
+  }
+  if (mainImage?.image_url) redactedMainImage.image_url = "[SIGNED_URL_REDACTED]"
+  return {
+    ...request,
+    content: {
+      ...(content ?? {}),
+      main_image: redactedMainImage,
+    },
+  }
 }
 
 function normalizeCursor(value: number | undefined): number {
@@ -267,13 +615,30 @@ function buildSubjectsHeaders(session: JimengSessionBundle): Record<string, stri
   }
 }
 
-function assertJimengSuccess(body: JsonValue): void {
+function buildGetImageByUriUrl(session: JimengSessionBundle): string {
+  const params = new URLSearchParams(DEFAULT_QUERY)
+  params.set("device_platform", "web")
+  params.set("region", "CN")
+  params.set("web_id", extractCookieValue(session.cookie, "_tea_web_id") ?? session.webId ?? DEFAULT_WEB_ID)
+  return `https://jimeng.jianying.com/mweb/v1/get_image_by_uri?${params.toString()}`
+}
+
+function extractCookieValue(cookie: string, name: string): string | null {
+  const parts = cookie.split(";")
+  for (const part of parts) {
+    const [rawKey, ...rawValue] = part.trim().split("=")
+    if (rawKey === name) return decodeURIComponent(rawValue.join("="))
+  }
+  return null
+}
+
+function assertJimengSuccess(body: JsonValue, operation = "subjects request"): void {
   const ret = retValue(body)
   if (ret === "0" || ret === 0) return
   throw jimengError({
     category: "upstream",
     code: "JIMENG_API_REJECTED",
-    message: `subjects request failed (ret=${String(ret ?? "unknown")}, errmsg=${errmsgValue(body) ?? "unknown"})`,
+    message: `${operation} failed (ret=${String(ret ?? "unknown")}, errmsg=${errmsgValue(body) ?? "unknown"})`,
     retryable: false,
     details: { ret, errmsg: errmsgValue(body) },
   })
@@ -314,6 +679,11 @@ function stringOrNumber(value: JsonValue | undefined): string | number | null {
 
 function numberValue(value: JsonValue | undefined): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null
+}
+
+function positiveNumberValue(value: JsonValue | undefined): number | null {
+  const number = numberValue(value)
+  return number && number > 0 ? number : null
 }
 
 function booleanValue(value: JsonValue | undefined): boolean | null {

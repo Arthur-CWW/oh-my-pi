@@ -58,6 +58,7 @@ import {
   describeJimengImage,
   recognizeJimengImageFaces,
   summarizeReferenceImageInspection,
+  type JsonValue,
 } from "./reference-image"
 import {
   defaultObjectSegmentationBabiParam,
@@ -67,7 +68,19 @@ import {
   summarizeObjectSegmentation,
   type JimengObjectSegmentationResult,
 } from "./reference-segmentation"
-import { buildJimengSubjectsRequest, fetchJimengSubjects, summarizeJimengSubjects } from "./subjects"
+import {
+  buildJimengSubjectCreateRequest,
+  buildJimengSubjectsRequest,
+  createJimengSubject,
+  fetchJimengImagesByUri,
+  fetchJimengSubjects,
+  subjectImageReferenceFromUploadSummary,
+  submitJimengImageAuditJob,
+  summarizeJimengImageByUri,
+  summarizeJimengSubjectCreate,
+  summarizeJimengSubjects,
+  type JimengSubjectImageReference,
+} from "./subjects"
 import { getJimengUploadToken, parseUploadTokenScene, uploadJimengImage, uploadJimengVideo, type JimengImageUploadResult, type JimengVideoUploadResult } from "./upload"
 
 const DEFAULT_CDP_URL = "http://127.0.0.1:9340"
@@ -96,6 +109,7 @@ Commands:
   upload-token  Fetch temporary upload credentials for image/video/file upload scenes
   upload-image  Upload a local image to Jimeng ImageX and return a provider URI
   upload-video  Upload a local video to Jimeng VOD and return a provider video reference
+  subject-create Create a saved Jimeng subject/persona from a main reference image
   text2image    Submit text-to-image from a captured workbench/agent template
   text2video    Submit text-to-video from a captured workbench template
   image2video   Upload/use a first-frame image URI, then submit image-to-video
@@ -145,6 +159,9 @@ Options:
   --imageWidth <n>               Existing provider image width for lip-sync image/avatar mode
   --imageHeight <n>              Existing provider image height for lip-sync image/avatar mode
   --imageUrl <url>               Optional existing provider image preview URL for lip-sync image/avatar mode
+  --name <text>                  Subject/persona name, max 20 chars
+  --description <text>           Subject/persona description
+  --workspaceId <id>             Jimeng workspace id for subject/persona creation
   --image <path>                 Local first-frame image for image2video or image/avatar lip-sync
   --lastImage <path>             Local end-frame image for frames2video
   --firstFrameUri <uri>          Existing Jimeng/ImageX provider URI for image2video
@@ -229,6 +246,13 @@ Examples:
     --file data/jimeng-lab/proof-20260609-image2video-live/artifacts/aa83d0e1-a20c-4b85-ab59-ee3a7894296f-00.mp4 \\
     --outDir data/jimeng-lab/cli-video-upload-smoke
 
+  jimeng-browser-proxy subject-create \\
+    --session data/jimeng-lab/raw/session-bundle-current.json \\
+    --workspaceId 14199856180236 \\
+    --name "K-beauty UGC persona" \\
+    --description "韩系美妆健身UGC创作者，真实手机自拍参考图。" \\
+    --image data/jimeng-lab/ugc-studio-kbeauty-image/artifacts/jimeng-kbeauty-01.png
+
   jimeng-browser-proxy image2video \\
     --capture data/jimeng-captures/<run>/capture-template.raw.json \\
     --image data/tiktok-catalogue/mynameissico/2026-05-21_7642426706115972365.jpg \\
@@ -280,6 +304,7 @@ interface CliArgs {
     | "upload-token"
     | "upload-image"
     | "upload-video"
+    | "subject-create"
     | "text2image"
     | "text2video"
     | "image2video"
@@ -327,6 +352,9 @@ interface CliArgs {
   imageWidth?: number
   imageHeight?: number
   imageUrl?: string
+  name?: string
+  description?: string
+  workspaceId?: number
   image?: string
   lastImage?: string
   firstFrameUri?: string
@@ -1295,6 +1323,155 @@ async function main(argv: string[]): Promise<void> {
     return
   }
 
+  if (args.command === "subject-create") {
+    if (!args.name) throw new Error("--name is required for subject-create")
+    if (!args.workspaceId) throw new Error("--workspaceId is required for subject-create")
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const sourceFile = args.image ?? args.file
+    const runId = `subject-create-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${Math.random().toString(36).slice(2, 8)}`
+    if (sourceFile && args.imageUri) {
+      throw new Error("subject-create accepts either a local --image/--file or existing --imageUri, not both")
+    }
+    if (!sourceFile && !args.imageUri) {
+      throw new Error("subject-create requires --image, --file, or existing --imageUri with --imageWidth and --imageHeight")
+    }
+
+    const existingReference = sourceFile ? null : subjectImageReferenceFromArgs(args)
+    const dryRunRequest = existingReference ? buildJimengSubjectCreateRequest({
+      name: args.name,
+      description: args.description,
+      workspaceId: args.workspaceId,
+      mainImage: existingReference,
+    }) : null
+    const plan = {
+      command: args.command,
+      endpoint_sequence: [
+        ...(sourceFile ? [
+          "/mweb/v1/get_upload_token scene=2",
+          "ImageX ApplyImageUpload",
+          "ImageX direct POST /upload/v1/{StoreUri}",
+          "ImageX CommitImageUpload",
+          "/mweb/v1/imagex/submit_audit_job",
+          "/mweb/v1/get_image_by_uri",
+        ] : [
+          ...(existingReference?.imageUrl ? [] : ["/mweb/v1/get_image_by_uri"]),
+        ]),
+        "/mweb/v1/dreamina_subject/create",
+      ],
+      source_file: sourceFile ? path.resolve(sourceFile) : undefined,
+      existing_image_uri: args.imageUri,
+      workspace_id: args.workspaceId,
+      name: args.name,
+      description_present: args.description !== undefined,
+      request: dryRunRequest ? redactSignedUrls(dryRunRequest) : undefined,
+      browser_session: redactSession(session),
+    }
+    if (args.dryRun) {
+      writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), plan)
+      console.log(`[jimeng-browser-proxy] subject-create dry run saved`)
+      return
+    }
+
+    let mainImage: JimengSubjectImageReference
+    let uploadSummary: ReferenceUploadSummary | null = null
+    let audit: Awaited<ReturnType<typeof submitJimengImageAuditJob>> | null = null
+    let imageLookup: Awaited<ReturnType<typeof fetchJimengImagesByUri>> | null = null
+    if (sourceFile) {
+      uploadSummary = await uploadReferenceImage({
+        session,
+        dirs,
+        runId,
+        role: "subject_main_image",
+        index: 0,
+        sourceFile,
+      })
+      audit = await submitJimengImageAuditJob({
+        session,
+        imageUris: [uploadSummary.uri],
+      })
+      writeJson(path.join(dirs.rawDir, `${runId}-audit-raw.json`), {
+        http_status: audit.httpStatus,
+        ret: audit.ret,
+        errmsg: audit.errmsg,
+        response_text_sha256: audit.responseTextSha256,
+        request: audit.request,
+        body: audit.body,
+      })
+      imageLookup = await fetchJimengImagesByUri({
+        session,
+        imageUris: [uploadSummary.uri],
+      })
+      writeJson(path.join(dirs.rawDir, `${runId}-image-lookup-raw.json`), {
+        http_status: imageLookup.httpStatus,
+        ret: imageLookup.ret,
+        errmsg: imageLookup.errmsg,
+        response_text_sha256: imageLookup.responseTextSha256,
+        request: imageLookup.request,
+        body: imageLookup.body,
+      })
+      mainImage = subjectImageReferenceFromUploadSummary(uploadSummary.image_upload, imageLookup.images[0]?.imageUrl ?? args.imageUrl)
+    } else {
+      mainImage = existingReference!
+      if (!mainImage.imageUrl) {
+        imageLookup = await fetchJimengImagesByUri({
+          session,
+          imageUris: [mainImage.imageUri],
+        })
+        writeJson(path.join(dirs.rawDir, `${runId}-image-lookup-raw.json`), {
+          http_status: imageLookup.httpStatus,
+          ret: imageLookup.ret,
+          errmsg: imageLookup.errmsg,
+          response_text_sha256: imageLookup.responseTextSha256,
+          request: imageLookup.request,
+          body: imageLookup.body,
+        })
+        const imageUrl = imageLookup.images[0]?.imageUrl
+        if (imageUrl) mainImage = { ...mainImage, imageUrl }
+      }
+    }
+
+    const result = await createJimengSubject({
+      session,
+      subject: {
+        name: args.name,
+        description: args.description,
+        workspaceId: args.workspaceId,
+        mainImage,
+      },
+    })
+    writeJson(path.join(dirs.rawDir, `${runId}-raw.json`), {
+      http_status: result.httpStatus,
+      ret: result.ret,
+      errmsg: result.errmsg,
+      response_text_sha256: result.responseTextSha256,
+      request: result.request,
+      body: result.body,
+    })
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      ...plan,
+      request: redactSignedUrls(result.request),
+      reference_upload: uploadSummary,
+      audit: audit ? {
+        endpoint: audit.endpoint,
+        http_status: audit.httpStatus,
+        ret: audit.ret,
+        errmsg: audit.errmsg,
+        response_text_sha256: audit.responseTextSha256,
+        request: audit.request,
+      } : null,
+      image_lookup: imageLookup ? summarizeJimengImageByUri(imageLookup) : null,
+      main_image: {
+        image_uri: mainImage.imageUri,
+        width: mainImage.width,
+        height: mainImage.height,
+        image_url_present: !!mainImage.imageUrl,
+      },
+      summary: summarizeJimengSubjectCreate(result),
+    })
+    console.log(`[jimeng-browser-proxy] subject-create saved subjectId=${result.subjectId ?? "missing"}`)
+    return
+  }
+
   if (args.command === "lip-sync") {
     if (!args.dryRun) {
       throw new Error("lip-sync live submit is not implemented yet; pass --dryRun to write the confirmed provider-input plan")
@@ -1573,6 +1750,7 @@ function parseArgs(argv: string[]): CliArgs {
     && command !== "upload-token"
     && command !== "upload-image"
     && command !== "upload-video"
+    && command !== "subject-create"
     && command !== "text2image"
     && command !== "text2video"
     && command !== "image2video"
@@ -1589,6 +1767,8 @@ function parseArgs(argv: string[]): CliArgs {
   const videoDurationSec = flags.videoDurationSec ? Number(flags.videoDurationSec) : undefined
   const imageWidth = flags.imageWidth ? Number(flags.imageWidth) : undefined
   const imageHeight = flags.imageHeight ? Number(flags.imageHeight) : undefined
+  const workspaceIdValue = flags.workspaceId ?? flags["workspace-id"]
+  const workspaceId = workspaceIdValue ? Number(workspaceIdValue) : undefined
   const speed = flags.speed ? Number(flags.speed) : undefined
   const strength = flags.strength ? Number(flags.strength) : undefined
   const seed = flags.seed ? Number(flags.seed) : undefined
@@ -1629,6 +1809,9 @@ function parseArgs(argv: string[]): CliArgs {
   }
   if (imageHeight !== undefined && (!Number.isInteger(imageHeight) || imageHeight < 1)) {
     throw new Error("--imageHeight must be a positive integer")
+  }
+  if (workspaceId !== undefined && (!Number.isInteger(workspaceId) || workspaceId < 1)) {
+    throw new Error("--workspaceId must be a positive integer")
   }
   if (speed !== undefined && (!Number.isFinite(speed) || speed < 0.5 || speed > 2)) {
     throw new Error("--speed must be a number from 0.5 to 2")
@@ -1680,6 +1863,9 @@ function parseArgs(argv: string[]): CliArgs {
     imageWidth,
     imageHeight,
     imageUrl: flags.imageUrl,
+    name: flags.name,
+    description: flags.description,
+    workspaceId,
     image: flags.image,
     lastImage: flags.lastImage,
     firstFrameUri: flags.firstFrameUri,
@@ -1744,7 +1930,7 @@ interface ReferenceUploadSummary {
   image_upload: JimengImageUploadResult["summary"]
 }
 
-type ReferenceImageRole = "first_frame" | "end_frame" | "controlnet_reference" | "object_mask_reference" | "lip_sync_image"
+type ReferenceImageRole = "first_frame" | "end_frame" | "controlnet_reference" | "object_mask_reference" | "lip_sync_image" | "subject_main_image"
 
 interface ReferenceVideoUploadSummary {
   index: number
@@ -1898,6 +2084,33 @@ function lipSyncImageReferenceFromArgs(args: CliArgs): JimengLipSyncImageReferen
     width: args.imageWidth,
     height: args.imageHeight,
   }
+}
+
+function subjectImageReferenceFromArgs(args: CliArgs): JimengSubjectImageReference {
+  if (!args.imageUri || !args.imageWidth || !args.imageHeight) {
+    throw new Error("subject-create existing-image mode requires --imageUri with --imageWidth and --imageHeight")
+  }
+
+  return {
+    imageUri: args.imageUri,
+    width: args.imageWidth,
+    height: args.imageHeight,
+    ...(args.imageUrl ? { imageUrl: args.imageUrl } : {}),
+  }
+}
+
+function redactSignedUrls(value: JsonValue): JsonValue {
+  if (Array.isArray(value)) return value.map(redactSignedUrls)
+  if (!value || typeof value !== "object") return value
+  const out: Record<string, JsonValue> = {}
+  for (const [key, entry] of Object.entries(value)) {
+    if (/url/i.test(key) && typeof entry === "string") {
+      out[key] = "[SIGNED_URL_REDACTED]"
+    } else {
+      out[key] = redactSignedUrls(entry)
+    }
+  }
+  return out
 }
 
 function ensureOutputDirs(outDir: string): { rawDir: string; normalizedDir: string; artifactsDir: string } {

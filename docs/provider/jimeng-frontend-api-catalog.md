@@ -31,6 +31,7 @@ Use the browser as an authenticated session holder and API discovery surface. Mo
 | `/mweb/v1/video_generate/get_common_config` | POST | Video model/common configuration by scene, including lip-sync image/video scenes. | Implemented for config catalog |
 | `/mweb/v1/get_user_local_item_list` | POST | User local/generated item lists; `effect_type=218` returns current user's cloned voices. | Implemented for config catalog |
 | `/mweb/v1/dreamina_subject/get` | POST | Saved subject/persona list. | Implemented as no-spend `subjects`; current account returned zero saved subjects |
+| `/mweb/v1/dreamina_subject/create` | POST | Create saved subject/persona from a main reference image. | Implemented as no-spend `subject-create`; live-proved with local ImageX upload, audit, image lookup, and create |
 | `/mweb/v1/feed` | POST | Explore/feed content; a signed `dreamina_tone` feed request returns the built-in voice library. Useful for research/template mining if handled carefully. | Implemented for voice library replay |
 | `/mweb/v1/tts_generate` | POST | Built-in voice text-to-speech. Returns base64 MP3 in `data.data`. | Implemented and live-proved |
 | `/mweb/v1/get_upload_token` | POST | Temporary upload credentials for video/image/file scenes. Required before direct local reference-image/video upload. | Implemented and live-proved; local ImageX image upload is implemented via `upload-image`, local VOD video upload via `upload-video` |
@@ -704,6 +705,73 @@ The current account returned zero saved subjects, which is still a valid endpoin
 - image URI count
 - voice id count
 
+## Confirmed Saved Subject / Persona Create Contract
+
+`jimeng-browser-proxy subject-create` creates a saved Jimeng subject/persona directly from a local ImageX-uploaded or existing provider image. This is an asset CRUD path, not a generation submit.
+
+Captured UI path:
+
+```txt
+资产 -> 主体 -> 创建主体 -> 从本地添加 -> 保存
+```
+
+Direct endpoint sequence for local-image mode:
+
+```txt
+/mweb/v1/get_upload_token scene=2
+ImageX ApplyImageUpload
+ImageX direct POST /upload/v1/{StoreUri}
+ImageX CommitImageUpload
+/mweb/v1/imagex/submit_audit_job
+/mweb/v1/get_image_by_uri
+/mweb/v1/dreamina_subject/create
+```
+
+Create request shape:
+
+```json
+{
+  "content": {
+    "name": "CLI Kbeauty UGC 2",
+    "description": "韩系美妆健身UGC创作者，真实手机自拍参考图。",
+    "main_image": {
+      "width": 2048,
+      "height": 2048,
+      "image_uri": "tos-cn-i-tb4s082cfz/d56ac871b3a94f77bc83ac84a861ede6.png",
+      "image_url": "<signed preview url>"
+    }
+  },
+  "workspace_id": 14199856180236
+}
+```
+
+CLI proof:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts subject-create \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --workspaceId 14199856180236 \
+  --name "CLI Kbeauty UGC 2" \
+  --description "韩系美妆健身UGC创作者，真实手机自拍参考图。" \
+  --image data/jimeng-lab/ugc-studio-kbeauty-image/artifacts/jimeng-kbeauty-01.png \
+  --outDir data/jimeng-lab/proof-20260610-subject-create-cli
+```
+
+Observed proof facts:
+
+```txt
+http_status=200
+ret=0
+errmsg=success
+subject_id=12352249053442
+data_id=12352249053698
+main_image_uri=tos-cn-i-tb4s082cfz/d56ac871b3a94f77bc83ac84a861ede6.png
+summary_sha256=52a8d7ba8acf00de72912228a5d1ab1ea0d96edea5adf8be44744d2092258dec
+proof=data/jimeng-lab/proof-20260610-subject-create-cli/
+```
+
+Normalized summaries redact signed image URLs. Raw upload, lookup, and create responses stay ignored under `data/**`.
+
 ## Confirmed Explore / Template Mining Contract
 
 `jimeng-browser-proxy templates` now calls `/mweb/v1/get_explore` directly with the logged-in browser session. This is a no-generation, no-spend endpoint for mining public creative examples, prompt structure, model keys, usage/favorite counts, and template feature labels.
@@ -973,7 +1041,7 @@ The 2026-06-09 JS bundle sweep found these useful endpoint groups. Treat rows wi
 | Group | Endpoints |
 |---|---|
 | Voice cloning / custom voice | `/mweb/v1/voice/submit_task`, `/mweb/v1/voice/query_task`, `/mweb/v1/voice/update`, `/mweb/v1/voice/delete` |
-| Subject/persona lifecycle | `/mweb/v1/dreamina_subject/get`, `/mweb/v1/dreamina_subject/create`, `/mweb/v1/dreamina_subject/update`, `/mweb/v1/dreamina_subject/delete`, `/mweb/v1/dreamina_subject/generate_voice`; list is implemented as `subjects`, while create/update/delete/generate_voice remain capture targets |
+| Subject/persona lifecycle | `/mweb/v1/dreamina_subject/get`, `/mweb/v1/dreamina_subject/create`, `/mweb/v1/dreamina_subject/update`, `/mweb/v1/dreamina_subject/delete`, `/mweb/v1/dreamina_subject/generate_voice`; list is implemented as `subjects`, create is implemented as `subject-create`, while update/delete/generate_voice remain capture targets |
 | Infinite canvas | `/mweb/v1/infinite_canvas/create_project`, `/mweb/v1/infinite_canvas/conversation`, `/mweb/v1/infinite_canvas/edit`, `/mweb/v1/infinite_canvas/resume`, `/mweb/v1/infinite_canvas/stop_stream`, `/mweb/v1/infinite_canvas/v1/fetch_snapshot`, `/mweb/v1/infinite_canvas/v1/submit_changeset`, `/mweb/v1/infinite_canvas/v1/fetch_changeset` |
 | Reference/image tools | `/mweb/v1/get_common_config`, `/mweb/v1/get_image_description`, `/mweb/v1/get_upload_token`, `/mweb/v1/face_recognize`, `/mweb/v1/blend_preview`, `/mweb/v1/pose_detect`, `/mweb/v1/saliency_seg`, `/mweb/v1/algo_proxy`; image upload, description, face recognition, ControlNet pose/depth/canny preview, pose detect, and object/saliency segmentation are now implemented, while style/reference payload tools still need CLI coverage |
 | Template/research mining | `/mweb/v1/feed`, `/mweb/v1/feed_short_video`, `/lv/v1/cc_web/plane/get_categories`, public CapCut `bee_prod` metadata JSON, `/lv/v1/cc_web/replicate/search_templates`, `/lv/v1/cc_web/plane/*`; `/mweb/v1/get_explore` is implemented for direct Explore templates and short-video examples, `/mweb/v1/feed_short_video` is implemented as `overseas-short-videos`, CapCut category catalog is implemented as `capcut-categories`, and public CapCut ratio/scene metadata is implemented as `capcut-template-metadata`; CapCut template rows/search/collection endpoints remain capture targets |
@@ -1053,7 +1121,7 @@ Capture one flow at a time:
 
 - richer image reference controls
 - image-to-image / byte edit
-- subject/persona creation
+- subject/persona update/delete/generate_voice
 - voice cloning and subject voice generation
 - pose/style/depth/canny reference controls
 - image-to-video end-frame and multi-frame controls

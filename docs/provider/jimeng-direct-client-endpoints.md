@@ -195,6 +195,65 @@ interface JimengSubjectItem {
 
 Normalized summaries redact signed cover URLs into a boolean presence field. Raw responses stay ignored under `data/**`.
 
+### 6.2) Subject/persona create
+- `POST https://jimeng.jianying.com/mweb/v1/dreamina_subject/create`
+- Status:
+  - implemented as `jimeng-browser-proxy subject-create`
+  - no-generation/no-spend asset create path
+  - live-proved with a local ImageX-uploaded persona reference image
+- Supporting calls for local-image mode:
+  - `/mweb/v1/get_upload_token` scene `2`
+  - ImageX `ApplyImageUpload`
+  - direct `POST /upload/v1/{StoreUri}`
+  - ImageX `CommitImageUpload`
+  - `/mweb/v1/imagex/submit_audit_job`
+  - `/mweb/v1/get_image_by_uri`
+- Request:
+
+```json
+{
+  "content": {
+    "name": "CLI Kbeauty UGC 2",
+    "description": "韩系美妆健身UGC创作者，真实手机自拍参考图。",
+    "main_image": {
+      "width": 2048,
+      "height": 2048,
+      "image_uri": "tos-cn-i-tb4s082cfz/d56ac871b3a94f77bc83ac84a861ede6.png",
+      "image_url": "<signed preview url>"
+    }
+  },
+  "workspace_id": 14199856180236
+}
+```
+
+Current utility:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts subject-create \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --workspaceId 14199856180236 \
+  --name "CLI Kbeauty UGC 2" \
+  --description "韩系美妆健身UGC创作者，真实手机自拍参考图。" \
+  --image data/jimeng-lab/ugc-studio-kbeauty-image/artifacts/jimeng-kbeauty-01.png \
+  --outDir data/jimeng-lab/proof-20260610-subject-create-cli
+```
+
+Proof facts:
+
+```txt
+http_status=200
+ret=0
+errmsg=success
+subject_id=12352249053442
+data_id=12352249053698
+main_image_uri=tos-cn-i-tb4s082cfz/d56ac871b3a94f77bc83ac84a861ede6.png
+main_image_size=2048x2048
+summary_sha256=52a8d7ba8acf00de72912228a5d1ab1ea0d96edea5adf8be44744d2092258dec
+summary=data/jimeng-lab/proof-20260610-subject-create-cli/normalized/subject-create-20260610001348-mm0zq8-summary.json
+```
+
+Normalized summaries replace signed media URLs with presence booleans or `[SIGNED_URL_REDACTED]`. Raw upload, lookup, and create responses stay ignored under `data/**`.
+
 ### 7) Built-in voice library
 - `POST https://jimeng.jianying.com/mweb/v1/feed`
 - Request source:
@@ -295,7 +354,7 @@ data/jimeng-lab/voice-library-samples/manifest.json
 Frontend bundle scan found these UGC-useful groups, but they are not yet direct-client contracts:
 
 - voice clone/custom voice: `/mweb/v1/voice/submit_task`, `/mweb/v1/voice/query_task`, `/mweb/v1/voice/update`, `/mweb/v1/voice/delete`
-- subject/persona CRUD and voice: `/mweb/v1/dreamina_subject/get`, `/mweb/v1/dreamina_subject/create`, `/mweb/v1/dreamina_subject/update`, `/mweb/v1/dreamina_subject/delete`, `/mweb/v1/dreamina_subject/generate_voice`; list is implemented, while create/update/delete/generate_voice still need UI capture
+- subject/persona CRUD and voice: `/mweb/v1/dreamina_subject/get`, `/mweb/v1/dreamina_subject/create`, `/mweb/v1/dreamina_subject/update`, `/mweb/v1/dreamina_subject/delete`, `/mweb/v1/dreamina_subject/generate_voice`; list and create are implemented, while update/delete/generate_voice still need UI capture
 - infinite canvas: `/mweb/v1/infinite_canvas/create_project`, `/mweb/v1/infinite_canvas/conversation`, `/mweb/v1/infinite_canvas/edit`, `/mweb/v1/infinite_canvas/resume`, `/mweb/v1/infinite_canvas/stop_stream`, `/mweb/v1/infinite_canvas/v1/fetch_snapshot`, `/mweb/v1/infinite_canvas/v1/submit_changeset`, `/mweb/v1/infinite_canvas/v1/fetch_changeset`
 - reference/image tools: `/mweb/v1/get_common_config`, `/mweb/v1/get_image_description`, `/mweb/v1/get_upload_token`, `/mweb/v1/face_recognize`, `/mweb/v1/blend_preview`, `/mweb/v1/pose_detect`, `/mweb/v1/saliency_seg`, `/mweb/v1/algo_proxy`; upload, description, face recognition, ControlNet pose/depth/canny preview, pose detect, and object/saliency segmentation are now direct-client commands, while style/reference payload tools remain capture targets
 - template/research mining: `/mweb/v1/feed`, `/mweb/v1/get_explore`, `/mweb/v1/feed_short_video`, `/lv/v1/cc_web/plane/get_categories`, public CapCut `bee_prod` metadata JSON, `/lv/v1/cc_web/replicate/search_templates`, `/lv/v1/cc_web/plane/*`; direct `/mweb/v1/get_explore` support is implemented for both templates and short-video examples, `/mweb/v1/feed_short_video` is implemented as `overseas-short-videos`, CapCut category catalog is implemented as `capcut-categories`, and public CapCut ratio/scene metadata is implemented as `capcut-template-metadata`; CapCut template rows/search/collection payloads still need real UI capture
@@ -1514,6 +1573,7 @@ Current support matrix:
 | `capcut-categories` | implemented in `jimeng-browser-proxy` | No-spend signed CapCut `/lv/v1/cc_web/plane/get_categories` commercial template category catalog. |
 | `capcut-template-metadata` | implemented in `jimeng-browser-proxy` | No-session public CapCut `bee_prod` ratio and scene metadata catalogs. |
 | `subjects` | implemented in `jimeng-browser-proxy` | No-spend direct `/mweb/v1/dreamina_subject/get`; current account returned zero saved subjects. |
+| `subject-create` | implemented in `jimeng-browser-proxy` | No-spend direct subject/persona create from a local ImageX-uploaded or existing provider image. |
 | `image2image` | needs capture | Need image reference upload + image edit submit capture. |
 | `multiframe2video` | needs capture | Need multi-frame upload/reference payload capture. |
 | `multimodal2video` | needs capture | Need `全能参考` mixed image/video/audio reference payload capture. |
@@ -1584,5 +1644,5 @@ Do not commit raw captures or generated media. If a redacted summary is promoted
 3. Capture the frontend's explicit end-frame/multi-frame mode and live-prove `frames2video` only after confirming the mode-specific payload contract.
 4. Expand template/research mining beyond direct Explore/feed_short_video with CapCut template search and plane endpoints.
 5. Add strict `1019` shark breaker/cooldown budgets to the consolidated CLI path.
-6. Capture subject/persona create/update/generate_voice and custom voice clone flows.
+6. Capture subject/persona update/delete/generate_voice and custom voice clone flows.
 7. Add multipart/chunked VOD upload only when large reference videos require it.
