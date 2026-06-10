@@ -17,6 +17,7 @@ import {
   type CreateReferenceArchiveInput,
   type CreateReviewNoteInput,
   type CreateWorkspaceBundleInput,
+  type FinalEditorPatch,
   type ImportWorkspaceBundleInput,
   type PersonaPatch,
   type ProviderJobPatch,
@@ -297,6 +298,53 @@ export class UgcJsonStore {
       throw new Error(`reference archive not found: ${archiveId}`)
     }
     return this.write({ ...state, referenceArchives })
+  }
+
+  updateFinalEditor(patch: FinalEditorPatch): UgcLocalState {
+    return this.updateWorkspace((workspace) => {
+      if (patch.selectedCandidateId && !candidateById(workspace, patch.selectedCandidateId)) {
+        throw new Error(`candidate not found: ${patch.selectedCandidateId}`)
+      }
+      const trackUpdates = new Map((patch.trackUpdates ?? []).map((trackPatch) => [trackPatch.id, trackPatch]))
+      const clipUpdates = new Map((patch.clipUpdates ?? []).map((clipPatch) => [`${clipPatch.trackId}::${clipPatch.clipId}`, clipPatch]))
+      const seenTracks = new Set<string>()
+      const seenClips = new Set<string>()
+      const tracks = workspace.finalEditor.tracks.map((track) => {
+        const trackPatch = trackUpdates.get(track.id)
+        if (trackPatch) seenTracks.add(track.id)
+        const clips = track.clips.map((clip) => {
+          const clipKey = `${track.id}::${clip.id}`
+          const clipPatch = clipUpdates.get(clipKey)
+          if (!clipPatch) return clip
+          seenClips.add(clipKey)
+          return {
+            ...clip,
+            label: clipPatch.label ?? clip.label,
+            startSeconds: clipPatch.startSeconds ?? clip.startSeconds,
+            durationSeconds: clipPatch.durationSeconds ?? clip.durationSeconds,
+            payloadJson: clipPatch.payloadJson ?? clip.payloadJson,
+          }
+        })
+        return {
+          ...track,
+          visible: trackPatch?.visible ?? track.visible,
+          locked: trackPatch?.locked ?? track.locked,
+          clips,
+        }
+      })
+      const missingTrackIds = [...trackUpdates.keys()].filter((id) => !seenTracks.has(id))
+      if (missingTrackIds.length > 0) throw new Error(`editor track not found: ${missingTrackIds.join(", ")}`)
+      const missingClipKeys = [...clipUpdates.keys()].filter((key) => !seenClips.has(key))
+      if (missingClipKeys.length > 0) throw new Error(`editor clip not found: ${missingClipKeys.join(", ")}`)
+      return {
+        ...workspace,
+        finalEditor: {
+          ...workspace.finalEditor,
+          selectedCandidateId: patch.selectedCandidateId ?? workspace.finalEditor.selectedCandidateId,
+          tracks,
+        },
+      }
+    })
   }
 
   createExportManifest(input: CreateExportManifestInput): UgcLocalState {

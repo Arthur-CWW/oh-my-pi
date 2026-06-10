@@ -353,6 +353,7 @@ export interface EditorClip {
   readonly assetId: string
   readonly sourceCandidateId: string | null
   readonly editableFields: readonly string[]
+  readonly payloadJson?: JsonValue
 }
 
 export interface ExportPreset {

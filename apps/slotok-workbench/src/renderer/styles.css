@@ -750,7 +750,24 @@ body {
   font-size: 13px;
 }
 
-.rugc-layer-list button {
+.rugc-layer-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+  border-radius: 8px;
+  padding: 3px;
+}
+
+.rugc-layer-row.selected {
+  background: #2a2e32;
+  box-shadow: inset 0 0 0 1px #4c83d3;
+}
+
+.rugc-layer-row.muted {
+  opacity: .62;
+}
+
+.rugc-layer-select {
   display: grid;
   grid-template-columns: 10px minmax(0,1fr);
   gap: 3px 7px;
@@ -762,27 +779,42 @@ body {
   text-align: left;
 }
 
-.rugc-layer-list button:hover {
+.rugc-layer-select:hover {
   background: #2a2e32;
 }
 
-.rugc-layer-list button span {
+.rugc-layer-select span {
   width: 10px;
   height: 10px;
   border-radius: 3px;
   background: #72a7ff;
 }
 
-.rugc-layer-list button span.captions { background: #b06bf2; }
-.rugc-layer-list button span.audio,
-.rugc-layer-list button span.voice { background: #4da66f; }
-.rugc-layer-list button span.product-demo { background: #e3a422; }
+.rugc-layer-select span.captions { background: #b06bf2; }
+.rugc-layer-select span.audio,
+.rugc-layer-select span.voice { background: #4da66f; }
+.rugc-layer-select span.product-demo { background: #e3a422; }
 
-.rugc-layer-list button em {
+.rugc-layer-select em {
   grid-column: 2;
   color: #9ca0a3;
   font-style: normal;
   font-size: 10px;
+}
+
+.rugc-layer-toggle {
+  min-height: 24px;
+  border: 1px solid #41464b;
+  border-radius: 6px;
+  background: #25292d;
+  color: #d4d6d6;
+  font-size: 10px;
+}
+
+.rugc-layer-toggle.active {
+  border-color: #5ca0ff;
+  background: #1d3655;
+  color: #eef6ff;
 }
 
 .rugc-editor-canvas {
@@ -883,6 +915,26 @@ body {
   bottom: 3px;
   border-radius: 4px;
   background: #6da3ff;
+}
+
+.rugc-timeline-clip {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 4px;
+  background: #6da3ff;
+  color: #061325;
+  font-size: 10px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rugc-timeline-clip.selected {
+  border-color: #eaf3ff;
+  box-shadow: 0 0 0 2px #5ca0ff;
 }
 
 .rugc-provider {

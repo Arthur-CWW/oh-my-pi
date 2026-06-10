@@ -929,7 +929,7 @@ function WorkspaceView(props: {
     return <ReferenceArchiveView onMutateLocal={props.onMutateLocal} />
   }
   if (props.activeView === "editor") {
-    return <FinalEditor selectedCandidateId={props.selectedCandidateId} onMutateLocal={props.onMutateLocal} />
+    return <FinalEditor selectedCandidateId={props.selectedCandidateId} onSelectCandidate={props.onSelectCandidate} onMutateLocal={props.onMutateLocal} />
   }
   if (props.activeView === "graph") {
     return <DeveloperGraphView onMutateLocal={props.onMutateLocal} />
@@ -1317,20 +1317,121 @@ function CampaignMap(props: { selectedBranchId: string; onSelectBranch: (id: str
   )
 }
 
-function FinalEditor(props: { selectedCandidateId: string; onMutateLocal: (path: string, body: object) => void }) {
+function FinalEditor(props: { selectedCandidateId: string; onSelectCandidate: (id: string) => void; onMutateLocal: (path: string, body: object) => void }) {
   const { workspace } = useUgcLocalState()
   const selectedCandidate = workspace.candidates.find((candidate) => candidate.id === props.selectedCandidateId) ?? workspace.candidates[0]
+  const [selectedTrackId, setSelectedTrackId] = React.useState(workspace.finalEditor.tracks[0]?.id ?? "")
+  const selectedTrack = workspace.finalEditor.tracks.find((track) => track.id === selectedTrackId) ?? workspace.finalEditor.tracks[0]
+  const [selectedClipId, setSelectedClipId] = React.useState(selectedTrack?.clips[0]?.id ?? "")
+  const selectedClip = selectedTrack?.clips.find((clip) => clip.id === selectedClipId) ?? selectedTrack?.clips[0]
+  const [clipLabelDraft, setClipLabelDraft] = React.useState(selectedClip?.label ?? "")
+  const [clipTextDraft, setClipTextDraft] = React.useState(clipTextFromPayload(selectedClip, selectedCandidate))
+  const [startDraft, setStartDraft] = React.useState(String(selectedClip?.startSeconds ?? 0))
+  const [durationDraft, setDurationDraft] = React.useState(String(selectedClip?.durationSeconds ?? 1))
+  const timelinePatchPreview = React.useMemo(() => ({
+    selectedCandidateId: selectedCandidate?.id ?? null,
+    trackUpdate: selectedTrack ? {
+      id: selectedTrack.id,
+      visible: selectedTrack.visible,
+      locked: selectedTrack.locked,
+    } : null,
+    clipUpdate: selectedTrack && selectedClip ? {
+      trackId: selectedTrack.id,
+      clipId: selectedClip.id,
+      label: clipLabelDraft,
+      startSeconds: numberDraft(startDraft, selectedClip.startSeconds),
+      durationSeconds: numberDraft(durationDraft, selectedClip.durationSeconds),
+      payloadJson: { text: clipTextDraft, source: "final-editor" },
+    } : null,
+  }), [clipLabelDraft, clipTextDraft, durationDraft, selectedCandidate?.id, selectedClip, selectedTrack, startDraft])
+
+  React.useEffect(() => {
+    if (!workspace.finalEditor.tracks.some((track) => track.id === selectedTrackId)) {
+      setSelectedTrackId(workspace.finalEditor.tracks[0]?.id ?? "")
+      return
+    }
+    if (selectedTrack && !selectedTrack.clips.some((clip) => clip.id === selectedClipId)) {
+      setSelectedClipId(selectedTrack.clips[0]?.id ?? "")
+    }
+  }, [selectedClipId, selectedTrack, selectedTrackId, workspace.finalEditor.tracks])
+
+  React.useEffect(() => {
+    setClipLabelDraft(selectedClip?.label ?? "")
+    setClipTextDraft(clipTextFromPayload(selectedClip, selectedCandidate))
+    setStartDraft(String(selectedClip?.startSeconds ?? 0))
+    setDurationDraft(String(selectedClip?.durationSeconds ?? 1))
+  }, [selectedCandidate, selectedClip])
+
+  function selectCandidate(candidateId: string) {
+    props.onSelectCandidate(candidateId)
+    props.onMutateLocal("/api/ugc/final-editor", { selectedCandidateId: candidateId })
+  }
+
+  function patchTrack(trackId: string, patch: { readonly visible?: boolean; readonly locked?: boolean }) {
+    props.onMutateLocal("/api/ugc/final-editor", { trackUpdates: [{ id: trackId, ...patch }] })
+  }
+
+  function saveSelectedClip() {
+    if (!selectedTrack || !selectedClip || !selectedCandidate) return
+    props.onMutateLocal("/api/ugc/final-editor", {
+      selectedCandidateId: selectedCandidate.id,
+      clipUpdates: [
+        {
+          trackId: selectedTrack.id,
+          clipId: selectedClip.id,
+          label: clipLabelDraft.trim() || selectedClip.label,
+          startSeconds: numberDraft(startDraft, selectedClip.startSeconds),
+          durationSeconds: Math.max(0.1, numberDraft(durationDraft, selectedClip.durationSeconds)),
+          payloadJson: {
+            text: clipTextDraft.trim() || selectedClip.label,
+            source: "final-editor",
+            editableFields: selectedClip.editableFields,
+          },
+        },
+      ],
+    })
+  }
+
   return (
     <div className="rugc-editor">
       <aside className="rugc-layer-list">
         <h3>Layers</h3>
         {workspace.finalEditor.tracks.map((track) => (
-          <button key={track.id} type="button">
-            <span className={track.kind} />
-            <strong>{track.label}</strong>
-            <em>{track.clips.length} clips</em>
-          </button>
+          <div key={track.id} className={cn("rugc-layer-row", selectedTrack?.id === track.id && "selected", !track.visible && "muted")}>
+            <button
+              type="button"
+              className="rugc-layer-select"
+              onClick={() => {
+                setSelectedTrackId(track.id)
+                setSelectedClipId(track.clips[0]?.id ?? "")
+              }}
+            >
+              <span className={track.kind} />
+              <strong>{track.label}</strong>
+              <em>{track.clips.length} clips</em>
+            </button>
+            <button type="button" className={cn("rugc-layer-toggle", track.visible && "active")} onClick={() => patchTrack(track.id, { visible: !track.visible })}>
+              {track.visible ? "Visible" : "Hidden"}
+            </button>
+            <button type="button" className={cn("rugc-layer-toggle", track.locked && "active")} onClick={() => patchTrack(track.id, { locked: !track.locked })}>
+              {track.locked ? "Locked" : "Unlocked"}
+            </button>
+          </div>
         ))}
+        <div className="mt-2 grid gap-2 border-t border-[#303438] pt-3">
+          <label className="grid gap-1 text-[10px] font-semibold uppercase text-[#9ca0a3]">
+            Candidate
+            <select
+              value={selectedCandidate?.id ?? ""}
+              className="h-8 rounded-md border border-[#41464b] bg-[#25292d] px-2 text-xs normal-case text-[#ededeb]"
+              onChange={(event) => selectCandidate(event.currentTarget.value)}
+            >
+              {workspace.candidates.map((candidate) => (
+                <option key={candidate.id} value={candidate.id}>{candidate.title}</option>
+              ))}
+            </select>
+          </label>
+        </div>
       </aside>
       <section className="rugc-editor-canvas">
         <div className="rugc-editor-toolbar">
@@ -1342,6 +1443,7 @@ function FinalEditor(props: { selectedCandidateId: string; onMutateLocal: (path:
               selectedCandidateId: selectedCandidate?.id,
               label: `${selectedCandidate?.title ?? "Candidate"} draft export`,
               presetId: workspace.finalEditor.exportPresets[0]?.id,
+              timelineJson: workspace.finalEditor,
               notes: ["Created from Final Layer Editor"],
             })}
           >
@@ -1357,17 +1459,79 @@ function FinalEditor(props: { selectedCandidateId: string; onMutateLocal: (path:
             </article>
           ))}
         </div>
-        <div className="rugc-editor-timeline">
-          {workspace.finalEditor.tracks.map((track, index) => (
-            <div key={track.id} className="rugc-editor-track">
-              <span>{track.label}</span>
-              <div><i style={{ left: `${index * 5}%`, width: `${Math.min(82, Math.max(18, track.clips.length * 22))}%` }} /></div>
+        <div className="grid grid-cols-[minmax(0,1fr)_300px] overflow-hidden border-t border-[#303438]">
+          <div className="rugc-editor-timeline">
+            {workspace.finalEditor.tracks.map((track) => (
+              <div key={track.id} className={cn("rugc-editor-track", !track.visible && "opacity-45")}>
+                <span>{track.label}</span>
+                <div>
+                  {track.clips.map((clip) => (
+                    <button
+                      key={clip.id}
+                      type="button"
+                      className={cn("rugc-timeline-clip", selectedTrack?.id === track.id && selectedClip?.id === clip.id && "selected")}
+                      style={{
+                        left: `${Math.min(95, Math.max(0, (clip.startSeconds / workspace.finalEditor.durationSeconds) * 100))}%`,
+                        width: `${Math.min(92, Math.max(10, (clip.durationSeconds / workspace.finalEditor.durationSeconds) * 100))}%`,
+                      }}
+                      onClick={() => {
+                        setSelectedTrackId(track.id)
+                        setSelectedClipId(clip.id)
+                      }}
+                    >
+                      {clip.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+          <aside className="grid gap-2 overflow-auto border-l border-[#303438] bg-[#202326] p-3">
+            <div>
+              <strong className="text-xs">Clip edit</strong>
+              <p className="m-0 mt-1 text-[11px] leading-4 text-[#aeb0b0]">Timing and caption payload persist into the export manifest.</p>
             </div>
-          ))}
+            <label className="grid gap-1 text-[10px] font-semibold uppercase text-[#9ca0a3]">
+              Clip label
+              <Input value={clipLabelDraft} onChange={(event) => setClipLabelDraft(event.currentTarget.value)} />
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              <label className="grid gap-1 text-[10px] font-semibold uppercase text-[#9ca0a3]">
+                Start
+                <Input type="number" step="0.05" min="0" value={startDraft} onChange={(event) => setStartDraft(event.currentTarget.value)} />
+              </label>
+              <label className="grid gap-1 text-[10px] font-semibold uppercase text-[#9ca0a3]">
+                Duration
+                <Input type="number" step="0.05" min="0.1" value={durationDraft} onChange={(event) => setDurationDraft(event.currentTarget.value)} />
+              </label>
+            </div>
+            <label className="grid gap-1 text-[10px] font-semibold uppercase text-[#9ca0a3]">
+              Caption/Text payload
+              <Textarea className="min-h-[74px]" value={clipTextDraft} onChange={(event) => setClipTextDraft(event.currentTarget.value)} />
+            </label>
+            <Button size="xs" variant="selected" disabled={!selectedTrack || !selectedClip} onClick={saveSelectedClip}>
+              Save clip edit
+            </Button>
+            <div className="min-h-0">
+              <div className="mb-1 text-[10px] font-semibold uppercase text-[#9ca0a3]">JSON diff preview</div>
+              <pre className="rugc-json max-h-[138px]">{JSON.stringify(timelinePatchPreview, null, 2)}</pre>
+            </div>
+          </aside>
         </div>
       </section>
     </div>
   )
+}
+
+function clipTextFromPayload(clip: { readonly label: string; readonly payloadJson?: JsonValue } | undefined, candidate: CreativeCandidate | undefined): string {
+  const payload = jsonRecord(clip?.payloadJson ?? null)
+  if (typeof payload?.text === "string") return payload.text
+  return candidate?.preview.transcript[0]?.text ?? clip?.label ?? ""
+}
+
+function numberDraft(value: string, fallback: number): number {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : fallback
 }
 
 type ReferenceSourcePolicy = UgcReferenceArchive["sourcePolicy"]

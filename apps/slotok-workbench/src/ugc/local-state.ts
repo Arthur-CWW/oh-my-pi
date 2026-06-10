@@ -241,6 +241,27 @@ export interface CreateExportManifestInput {
   readonly notes?: readonly string[]
 }
 
+export interface FinalEditorPatch {
+  readonly selectedCandidateId?: string
+  readonly trackUpdates?: readonly FinalEditorTrackPatch[]
+  readonly clipUpdates?: readonly FinalEditorClipPatch[]
+}
+
+export interface FinalEditorTrackPatch {
+  readonly id: string
+  readonly visible?: boolean
+  readonly locked?: boolean
+}
+
+export interface FinalEditorClipPatch {
+  readonly trackId: string
+  readonly clipId: string
+  readonly label?: string
+  readonly startSeconds?: number
+  readonly durationSeconds?: number
+  readonly payloadJson?: JsonValue
+}
+
 export interface CreateWorkspaceBundleInput {
   readonly label?: string
 }

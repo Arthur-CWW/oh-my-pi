@@ -214,6 +214,46 @@ describe("UgcJsonStore", () => {
     expect(branch?.status).toBe("active")
     expect(parentAfter?.childIds).toContain(branch?.id)
   })
+
+  test("persists final editor track and clip edits into export timeline JSON", () => {
+    const store = createStore()
+    const initial = store.read()
+    const candidateId = initial.workspace.candidates[1]?.id ?? initial.workspace.candidates[0]?.id ?? ""
+    const track = initial.workspace.finalEditor.tracks[0]
+    const clip = track?.clips[0]
+    if (!track || !clip) throw new Error("missing editor track or clip")
+
+    const updated = store.updateFinalEditor({
+      selectedCandidateId: candidateId,
+      trackUpdates: [{ id: track.id, visible: false, locked: true }],
+      clipUpdates: [
+        {
+          trackId: track.id,
+          clipId: clip.id,
+          label: "Hook caption revised",
+          startSeconds: 1.25,
+          durationSeconds: 4.5,
+          payloadJson: { text: "This is the softer opening hook.", captionStyle: "low-pressure" },
+        },
+      ],
+    })
+    const updatedTrack = updated.workspace.finalEditor.tracks.find((item) => item.id === track.id)
+    const updatedClip = updatedTrack?.clips.find((item) => item.id === clip.id)
+
+    expect(updated.workspace.finalEditor.selectedCandidateId).toBe(candidateId)
+    expect(updatedTrack?.visible).toBe(false)
+    expect(updatedTrack?.locked).toBe(true)
+    expect(updatedClip?.label).toBe("Hook caption revised")
+    expect(updatedClip?.startSeconds).toBe(1.25)
+    expect(updatedClip?.durationSeconds).toBe(4.5)
+    expect(updatedClip?.payloadJson).toEqual({ text: "This is the softer opening hook.", captionStyle: "low-pressure" })
+
+    const exported = store.createExportManifest({ label: "Editor persistence proof" })
+    const timeline = exported.exportManifests[0]?.timelineJson
+
+    expect(JSON.stringify(timeline)).toContain("Hook caption revised")
+    expect(JSON.stringify(timeline)).toContain("softer opening hook")
+  })
 })
 
 function createStore(): UgcJsonStore {

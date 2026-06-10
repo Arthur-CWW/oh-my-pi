@@ -16,6 +16,9 @@ describe("routeUgc", () => {
     const candidateId = initial.workspace.candidates[0]?.id ?? ""
     const referenceProfileId = initial.workspace.referenceProfiles[0]?.id ?? ""
     const branchId = initial.workspace.branchSnapshots[0]?.id ?? ""
+    const editorTrack = initial.workspace.finalEditor.tracks[0]
+    const editorClip = editorTrack?.clips[0]
+    if (!editorTrack || !editorClip) throw new Error("missing editor track or clip")
 
     const personaResponse = await routeUgc(jsonRequest(`/api/ugc/personas/${personaId}`, {
       status: "selected",
@@ -90,6 +93,29 @@ describe("routeUgc", () => {
     const deleteResponse = await routeUgc(jsonRequest(`/api/ugc/reference-archives/${archiveId}/delete`, {}), store)
     const deleteState = await readState(deleteResponse)
     expect(deleteState.referenceArchives.some((archive) => archive.id === archiveId)).toBe(false)
+
+    const finalEditorResponse = await routeUgc(jsonRequest("/api/ugc/final-editor", {
+      selectedCandidateId: candidateId,
+      trackUpdates: [{ id: editorTrack.id, visible: false, locked: true }],
+      clipUpdates: [
+        {
+          trackId: editorTrack.id,
+          clipId: editorClip.id,
+          label: "Route caption edit",
+          startSeconds: 0.75,
+          durationSeconds: 3.25,
+          payloadJson: { text: "Route-layer softer caption.", cue: "hook" },
+        },
+      ],
+    }), store)
+    const finalEditorState = await readState(finalEditorResponse)
+    const patchedTrack = finalEditorState.workspace.finalEditor.tracks.find((track) => track.id === editorTrack.id)
+    const patchedClip = patchedTrack?.clips.find((clip) => clip.id === editorClip.id)
+
+    expect(patchedTrack?.visible).toBe(false)
+    expect(patchedTrack?.locked).toBe(true)
+    expect(patchedClip?.label).toBe("Route caption edit")
+    expect(patchedClip?.payloadJson).toEqual({ text: "Route-layer softer caption.", cue: "hook" })
 
     const bundleResponse = await routeUgc(jsonRequest("/api/ugc/workspace/bundles/export", { label: "Route bundle proof" }), store)
     const bundle = await bundleResponse?.json() as {

@@ -1,5 +1,5 @@
 import { UgcJsonStore } from "./ugc-json-store"
-import { isRecord, type BranchPatch, type BulkCandidateStatusPatch, type CandidateStatusPatch, type CreateBranchInput, type CreateExportManifestInput, type CreateProviderJobInput, type CreateReferenceArchiveInput, type CreateReviewNoteInput, type CreateWorkspaceBundleInput, type ImportWorkspaceBundleInput, type PersonaPatch, type ProviderJobPatch, type ReferenceArchiveFormatOutput, type UgcReferenceArchive } from "../ugc/local-state"
+import { isRecord, type BranchPatch, type BulkCandidateStatusPatch, type CandidateStatusPatch, type CreateBranchInput, type CreateExportManifestInput, type CreateProviderJobInput, type CreateReferenceArchiveInput, type CreateReviewNoteInput, type CreateWorkspaceBundleInput, type FinalEditorClipPatch, type FinalEditorPatch, type FinalEditorTrackPatch, type ImportWorkspaceBundleInput, type PersonaPatch, type ProviderJobPatch, type ReferenceArchiveFormatOutput, type UgcReferenceArchive } from "../ugc/local-state"
 import type { BranchStatus, CandidateStatus, JsonValue, ReviewAttachment, ReviewVerdict } from "../renderer/ugcStudioModel"
 
 export async function routeUgc(request: Request, store: UgcJsonStore): Promise<Response | null> {
@@ -82,6 +82,10 @@ export async function routeUgc(request: Request, store: UgcJsonStore): Promise<R
     const id = decodeURIComponent(url.pathname.slice("/api/ugc/reference-archives/".length, -"/delete".length))
     if (!id) return json({ error: "missing reference archive id" }, 400)
     return json(store.deleteReferenceArchive(id))
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/ugc/final-editor") {
+    return json(store.updateFinalEditor(decodeFinalEditorPatch(await readJson(request))))
   }
 
   if (request.method === "POST" && url.pathname === "/api/ugc/exports") {
@@ -226,6 +230,60 @@ function decodeCreateExportManifest(value: JsonValue): CreateExportManifestInput
     timelineJson: isJsonValue(value.timelineJson) ? value.timelineJson : undefined,
     notes: Array.isArray(value.notes) && value.notes.every((item) => typeof item === "string") ? value.notes : undefined,
   }
+}
+
+function decodeFinalEditorPatch(value: JsonValue): FinalEditorPatch {
+  if (!isRecord(value)) return {}
+  return {
+    selectedCandidateId: typeof value.selectedCandidateId === "string" ? value.selectedCandidateId : undefined,
+    trackUpdates: decodeFinalEditorTrackPatches(value.trackUpdates),
+    clipUpdates: decodeFinalEditorClipPatches(value.clipUpdates),
+  }
+}
+
+function decodeFinalEditorTrackPatches(value: unknown): readonly FinalEditorTrackPatch[] | undefined {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value)) throw new Error("final editor trackUpdates must be an array")
+  return value.map((item) => {
+    if (!isRecord(item) || typeof item.id !== "string") throw new Error("final editor track patch requires id")
+    return {
+      id: item.id,
+      visible: typeof item.visible === "boolean" ? item.visible : undefined,
+      locked: typeof item.locked === "boolean" ? item.locked : undefined,
+    }
+  })
+}
+
+function decodeFinalEditorClipPatches(value: unknown): readonly FinalEditorClipPatch[] | undefined {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value)) throw new Error("final editor clipUpdates must be an array")
+  return value.map((item) => {
+    if (!isRecord(item) || typeof item.trackId !== "string" || typeof item.clipId !== "string") {
+      throw new Error("final editor clip patch requires trackId and clipId")
+    }
+    const startSeconds = decodeNonNegativeNumber(item.startSeconds, "startSeconds")
+    const durationSeconds = decodePositiveNumber(item.durationSeconds, "durationSeconds")
+    return {
+      trackId: item.trackId,
+      clipId: item.clipId,
+      label: typeof item.label === "string" ? item.label : undefined,
+      startSeconds,
+      durationSeconds,
+      payloadJson: isJsonValue(item.payloadJson) ? item.payloadJson : undefined,
+    }
+  })
+}
+
+function decodeNonNegativeNumber(value: unknown, label: string): number | undefined {
+  if (value === undefined) return undefined
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) throw new Error(`final editor ${label} must be a non-negative number`)
+  return value
+}
+
+function decodePositiveNumber(value: unknown, label: string): number | undefined {
+  if (value === undefined) return undefined
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) throw new Error(`final editor ${label} must be a positive number`)
+  return value
 }
 
 function decodeCreateWorkspaceBundle(value: JsonValue): CreateWorkspaceBundleInput {
