@@ -51,7 +51,7 @@ As of 2026-06-10, the committed Jimeng CLI baseline is:
 - `302e088 Document CapCut template method contracts`
 - `8c3dd42 Add signed CapCut endpoint probe`
 - `4d117a2 Recheck Jimeng live generation`
-- current checkpoint: `Classify LV editor image helper blockers`
+- current checkpoint: `Classify LV workspace/asset read blockers`
 
 If the thread goal object lags behind this file after a pause, resume from this document and the latest Git checkpoint. The active working rule is: background-only reversal, direct/API-first implementation, small proven CLI slices, tests and proof artifacts before each commit, and no async daemon until the API surface is settled.
 
@@ -431,7 +431,7 @@ Static API inventory is now available as the systematic coverage map:
 - default output skips fully implemented endpoints so it stays focused on gaps; `--includeKnown` produces an audit inventory
 - proof bundle: `data/jimeng-lab/proof-20260610-static-inventory/`
 - latest proof scanned `data/jimeng-lab/js-sweep/files` plus `packages/jimeng-client/src`, found 247 resources, included 200 non-implemented items, skipped 29 implemented endpoints, and counted 61 high-value gaps after the CapCut collection/row/detail commands were promoted
-- known status counts are now `unknown=183`, `partial=4`, `implemented=29`, `dry_run_only=4`, `blocked=24`, `captured_only=2`, and `cataloged_only=1`; the five CapCut search/batch/preset-related endpoints above are blocked with exact replay evidence and recommended action `capture_exact_payload`
+- known status counts are now `unknown=179`, `partial=4`, `implemented=29`, `dry_run_only=4`, `blocked=28`, `captured_only=2`, and `cataloged_only=1`; the five CapCut search/batch/preset-related endpoints above are blocked with exact replay evidence and recommended action `capture_exact_payload`
 - seven video-generation helper endpoints are also now explicitly blocked/capture-needed instead of generic unknowns:
   - `/mweb/v1/video_generate/get_switch_model_queue_info`: safe no-spend probes with empty, `model_req_key`, `model_req_keys`, and scene bodies returned `ret=1000 invalid parameter`
   - `/mweb/v1/video_generate/pre_process` and `/mweb/v1/video_generate/mget_pre_process_result`: frontend task submit/result pair; capture exact UI payload and task ids before promotion
@@ -451,6 +451,13 @@ Static API inventory is now available as the systematic coverage map:
   - `/lv/v1/editor/image/saliency_seg`: distinct from implemented Jimeng `/mweb/v1/saliency_seg`; capture exact LV editor payload
   - `/api/biz/v1/image/entity_seg`: auto-selection entity segmentation; capture exact editor UI payload
 - proof bundles: `data/jimeng-lab/proof-20260610-static-locate-lv-editor-image-helpers/`, `data/jimeng-lab/proof-20260610-static-locate-lv-editor-image-entity-seg/`, and refreshed `data/jimeng-lab/proof-20260610-static-inventory/`
+- four LV asset read endpoints are now explicitly blocked/capture-needed instead of generic read probes:
+  - `/lv/v1/asset/list`: EverCloud material list needs exact `workspace_id`/`space_id` from the workspace service
+  - `/lv/v1/asset/query`: user asset list returned `ret=1014 system busy` across workspace basic/no-parent/minimal bodies and a Jimeng query-param retry
+  - `/lv/v1/asset/detail`: material detail depends on asset ids plus workspace/space ids from a successful LV asset list/query capture
+  - `/lv/v1/asset/query_process`: async process status depends on `process_id` values from mutating copy/create/upload flows
+- `/cc/v1/workspace/get_user_workspaces` is not counted by the current static-inventory namespace extractor, but static-locate found the frontend builder and no-spend probes with count/cursor plus `lite_aid=513695` returned `ret=1014 system busy`; keep it as blocked supporting context until exact UI capture proves the gateway/query params
+- proof bundles: `data/jimeng-lab/proof-20260610-static-locate-lv-asset-read/`, `data/jimeng-lab/proof-20260610-static-locate-lv-workspace-list/`, `data/jimeng-lab/proof-20260610-lv-asset-query-probe/`, `data/jimeng-lab/proof-20260610-lv-asset-query-aid-probe/`, `data/jimeng-lab/proof-20260610-lv-workspace-list-probe/`, `data/jimeng-lab/proof-20260610-lv-workspace-list-lite-aid-probe/`, and refreshed `data/jimeng-lab/proof-20260610-static-inventory/`
 - `/mweb/v1/get_history` is now marked `blocked` in the worklist/inventory: safe direct probes with plain, frontend-derived, and explicit `workspace_id=14199856180236` bodies all returned `ret=0` and empty `records_list`; use `assets`, `history-records`, and `history-queue` until a non-empty UI capture proves a useful list contract
 - normalized proof files contain no credential markers
 

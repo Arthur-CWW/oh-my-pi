@@ -2095,11 +2095,28 @@ blocked_lv_editor_image_helpers:
   /api/biz/v1/image/entity_seg -> capture_exact_payload
 ```
 
+After classifying LV workspace/asset read endpoints:
+
+```txt
+resources=247
+included=200
+skipped_implemented=29
+high_value_gaps=61
+known_status_counts=unknown:179,partial:4,implemented:29,dry_run_only:4,blocked:28,captured_only:2,cataloged_only:1
+blocked_lv_asset_reads:
+  /lv/v1/asset/list -> capture_exact_payload
+  /lv/v1/asset/query -> capture_exact_payload
+  /lv/v1/asset/detail -> capture_exact_payload
+  /lv/v1/asset/query_process -> capture_exact_payload
+blocked_supporting_context_not_counted_by_static_inventory:
+  /cc/v1/workspace/get_user_workspaces -> capture_exact_payload
+```
+
 Normalized proof:
 
 ```txt
-data/jimeng-lab/proof-20260610-static-inventory/normalized/static-inventory-20260610081244-summary.json
-data/jimeng-lab/proof-20260610-static-inventory/normalized/static-inventory-20260610081244-summary.md
+data/jimeng-lab/proof-20260610-static-inventory/normalized/static-inventory-20260610083842-summary.json
+data/jimeng-lab/proof-20260610-static-inventory/normalized/static-inventory-20260610083842-summary.md
 ```
 
 Video helper proof:
@@ -2139,6 +2156,42 @@ bun packages/jimeng-client/src/browser-proxy-cli.ts static-locate \
 ```txt
 static-locate-lv-editor-image-helpers: 9 endpoints, 9 occurrences, no credential markers in normalized output
 static-locate-lv-editor-image-entity-seg: 1 endpoint, 1 occurrence, no credential markers in normalized output
+```
+
+LV workspace/asset read proof:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts static-locate \
+  --staticRoot data/jimeng-lab/js-sweep/files,packages/jimeng-client/src \
+  --endpoint /lv/v1/asset/list,/lv/v1/asset/detail,/lv/v1/asset/query,/lv/v1/asset/query_process \
+  --outDir data/jimeng-lab/proof-20260610-static-locate-lv-asset-read
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts static-locate \
+  --staticRoot data/jimeng-lab/js-sweep/files,packages/jimeng-client/src \
+  --endpoint /cc/v1/workspace/get_user_workspaces \
+  --outDir data/jimeng-lab/proof-20260610-static-locate-lv-workspace-list
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts endpoint-probe \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --endpoint /lv/v1/asset/query \
+  --variants '[{"name":"workspace-basic","body":{"count":5,"asset_types":[1,2,3,4,5,6,7,8,9,10,12],"parent_id":"0","is_cross_folder":true,"order_by":0,"order":1,"offset":0,"workspace_id":14199856180236}},{"name":"workspace-no-parent","body":{"count":5,"asset_types":[1,2,5,6,7,8,9,10,12],"is_cross_folder":true,"order_by":0,"order":1,"offset":0,"workspace_id":14199856180236}},{"name":"workspace-minimal","body":{"count":5,"offset":0,"workspace_id":14199856180236}}]' \
+  --outDir data/jimeng-lab/proof-20260610-lv-asset-query-probe
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts endpoint-probe \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --endpoint /cc/v1/workspace/get_user_workspaces \
+  --query 'lite_aid=513695' \
+  --variants '[{"name":"count-only-lite","body":{"count":100}},{"name":"cursor-convert-lite","body":{"count":100,"cursor":"0","need_convert_workspace":true}}]' \
+  --outDir data/jimeng-lab/proof-20260610-lv-workspace-list-lite-aid-probe
+```
+
+```txt
+static-locate-lv-asset-read: 4 endpoints, 5 occurrences, no credential markers in normalized output
+static-locate-lv-workspace-list: 1 endpoint, 1 occurrence, no credential markers in normalized output
+lv-asset-query-probe: 3 variants, all ret=1014, errmsg=system busy
+lv-asset-query-aid-probe: 1 variant, ret=1014, errmsg=system busy
+lv-workspace-list-probe: 3 variants, all ret=1014, errmsg=system busy
+lv-workspace-list-lite-aid-probe: 2 variants, all ret=1014, errmsg=system busy
 ```
 
 Leak check:

@@ -31,6 +31,10 @@ describe("Jimeng static inventory", () => {
           `const faceAuthSkipQueryBlocked = "/mweb/v1/video_generate/face_auth/skip/query";`,
           `const cancelGenerateBlocked = "/mweb/v1/aigc_draft/cancel_generate";`,
           `const generateAccelerateBlocked = "/mweb/v1/aigc_draft/generate_accelerate";`,
+          `const lvAssetListBlocked = "/lv/v1/asset/list";`,
+          `const lvAssetQueryBlocked = "/lv/v1/asset/query";`,
+          `const lvAssetDetailBlocked = "/lv/v1/asset/detail";`,
+          `const lvAssetQueryProcessBlocked = "/lv/v1/asset/query_process";`,
           `const lvAiSubmitBlocked = "/lv/v1/editor/image/ai_model/submit_task";`,
           `const lvAiResultsBlocked = "/lv/v1/editor/image/ai_model/batch_get_results";`,
           `const lvAiMaterialsBlocked = "/lv/v1/editor/image/ai_model/materials";`,
@@ -55,7 +59,7 @@ describe("Jimeng static inventory", () => {
       const summary = summarizeJimengStaticInventory(result)
       const markdown = writeJimengStaticInventoryMarkdown(result)
 
-      expect(result.totalResourceCount).toBe(29)
+      expect(result.totalResourceCount).toBe(33)
       expect(result.skippedImplementedCount).toBe(2)
       expect(result.items.map((item) => item.resource)).not.toContain("/mweb/v1/get_history_by_ids")
       expect(result.items.find((item) => item.resource === "/mweb/v1/dreamina_subject/generate_voice")?.recommendedAction).toBe("approval_or_disposable_fixture")
@@ -76,6 +80,10 @@ describe("Jimeng static inventory", () => {
       expect(result.items.find((item) => item.resource === "/mweb/v1/video_generate/face_auth/skip/query")?.knownStatus).toBe("blocked")
       expect(result.items.find((item) => item.resource === "/mweb/v1/aigc_draft/cancel_generate")?.knownStatus).toBe("blocked")
       expect(result.items.find((item) => item.resource === "/mweb/v1/aigc_draft/generate_accelerate")?.knownStatus).toBe("blocked")
+      expect(result.items.find((item) => item.resource === "/lv/v1/asset/list")?.knownStatus).toBe("blocked")
+      expect(result.items.find((item) => item.resource === "/lv/v1/asset/query")?.knownStatus).toBe("blocked")
+      expect(result.items.find((item) => item.resource === "/lv/v1/asset/detail")?.knownStatus).toBe("blocked")
+      expect(result.items.find((item) => item.resource === "/lv/v1/asset/query_process")?.knownStatus).toBe("blocked")
       expect(result.items.find((item) => item.resource === "/lv/v1/editor/image/ai_model/submit_task")?.knownStatus).toBe("blocked")
       expect(result.items.find((item) => item.resource === "/lv/v1/editor/image/ai_model/batch_get_results")?.knownStatus).toBe("blocked")
       expect(result.items.find((item) => item.resource === "/lv/v1/editor/image/ai_model/materials")?.knownStatus).toBe("blocked")

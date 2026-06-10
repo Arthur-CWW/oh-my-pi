@@ -31,6 +31,10 @@ describe("Jimeng discovery worklist", () => {
           `fetch("/mweb/v1/video_generate/face_auth/skip/query")`,
           `fetch("/mweb/v1/aigc_draft/cancel_generate")`,
           `fetch("/mweb/v1/aigc_draft/generate_accelerate")`,
+          `fetch("/lv/v1/asset/list")`,
+          `fetch("/lv/v1/asset/query")`,
+          `fetch("/lv/v1/asset/detail")`,
+          `fetch("/lv/v1/asset/query_process")`,
           `fetch("/lv/v1/editor/image/ai_model/submit_task")`,
           `fetch("/lv/v1/editor/image/ai_model/batch_get_results")`,
           `fetch("/lv/v1/editor/image/gen_background")`,
@@ -88,6 +92,18 @@ describe("Jimeng discovery worklist", () => {
       const generateAccelerate = worklist.items.find((item) => item.endpoint === "/mweb/v1/aigc_draft/generate_accelerate")
       expect(generateAccelerate?.known_status).toBe("blocked")
       expect(generateAccelerate?.reason).toContain("may spend quota")
+      const lvAssetList = worklist.items.find((item) => item.endpoint === "/lv/v1/asset/list")
+      expect(lvAssetList?.known_status).toBe("blocked")
+      expect(lvAssetList?.reason).toContain("workspace_id/space_id")
+      const lvAssetQuery = worklist.items.find((item) => item.endpoint === "/lv/v1/asset/query")
+      expect(lvAssetQuery?.known_status).toBe("blocked")
+      expect(lvAssetQuery?.reason).toContain("ret=1014")
+      const lvAssetDetail = worklist.items.find((item) => item.endpoint === "/lv/v1/asset/detail")
+      expect(lvAssetDetail?.known_status).toBe("blocked")
+      expect(lvAssetDetail?.reason).toContain("asset ids")
+      const lvAssetQueryProcess = worklist.items.find((item) => item.endpoint === "/lv/v1/asset/query_process")
+      expect(lvAssetQueryProcess?.known_status).toBe("blocked")
+      expect(lvAssetQueryProcess?.reason).toContain("process_id")
       const lvAiSubmit = worklist.items.find((item) => item.endpoint === "/lv/v1/editor/image/ai_model/submit_task")
       expect(lvAiSubmit?.known_status).toBe("blocked")
       expect(lvAiSubmit?.reason).toContain("task submit")
