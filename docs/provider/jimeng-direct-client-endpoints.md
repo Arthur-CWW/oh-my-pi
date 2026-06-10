@@ -1899,9 +1899,9 @@ Current support matrix:
 
 | command | status | notes |
 |---|---|---|
-| `text2video` | implemented | Uses captured `/mweb/v1/aigc_draft/generate`; confirmed paid-live with `dreamina_ic_generate_video_model_vgfm_3.0_fast`. Latest proof: `submitId=0a829552-fe6a-4f2f-b8d2-8bd6d4ec6fb2`, `historyId=35934031025164`, 704x1248 H.264 MP4, 3.016667s. |
+| `text2video` | implemented | Uses captured `/mweb/v1/aigc_draft/generate`; confirmed paid-live with `dreamina_ic_generate_video_model_vgfm_3.0_fast`. Latest proof: `submitId=31ab1cf8-1548-46de-8419-b167bb813eb0`, `historyId=35936274855692`, 704x1248 H.264 MP4, 3.016667s. |
 | `text2image` | blocked pending fresh capture | Stale workbench capture `data/jimeng-captures/20260609095503-text2image-submit/capture-template.raw.json` now returns `ret=3018`, `errmsg=permission denied`; recapture current frontend submit before claiming support. |
-| `image2video` | implemented in `jimeng-browser-proxy`; partial in low-level compat helper | Browser proxy can upload local `--image`, inject `first_frame_image`, submit/poll/download MP4. Latest paid-live proof: `submitId=6c83d6bd-d8f6-4b69-a6b9-1d05088312a3`, `historyId=35931512058892`, 704x1248 H.264 MP4, 3.016667s. Low-level helper accepts confirmed `--firstFrameUri`. |
+| `image2video` | implemented in `jimeng-browser-proxy`; partial in low-level compat helper | Browser proxy can upload local `--image`, inject `first_frame_image`, submit/poll/download MP4. Latest paid-live proof: `submitId=f9774f3b-84ce-4025-82c4-7a529d6e4409`, `historyId=35933448749068`, 704x1248 H.264 MP4, 3.016667s. Low-level helper accepts confirmed `--firstFrameUri`. |
 | `frames2video` | dry-run-proved in `jimeng-browser-proxy`; partial in low-level compat helper | Browser proxy can upload local `--image` and `--lastImage`, inject `first_frame_image`/`end_frame_image`, and write a no-generation plan. Live proof still needs explicit frontend end-frame mode evidence. |
 | `lip-sync-config` | implemented in `jimeng-browser-proxy` | No-spend direct lip-sync/digital-human model config for image/avatar and video modes. |
 | `lip-sync` | dry-run-proved in `jimeng-browser-proxy` | Browser proxy can prepare VOD-reference and image/avatar lip-sync provider inputs from VOD/ImageX provider references plus TTS voice flags. Live submit still needs a frontend submit capture/compare. |

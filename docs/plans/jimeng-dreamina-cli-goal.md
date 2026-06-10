@@ -51,7 +51,7 @@ As of 2026-06-10, the committed Jimeng CLI baseline is:
 - `302e088 Document CapCut template method contracts`
 - `8c3dd42 Add signed CapCut endpoint probe`
 - `4d117a2 Recheck Jimeng live generation`
-- current checkpoint: `Recheck Jimeng subscription API generation`
+- current checkpoint: `Classify CapCut template probe blockers`
 
 If the thread goal object lags behind this file after a pause, resume from this document and the latest Git checkpoint. The active working rule is: background-only reversal, direct/API-first implementation, small proven CLI slices, tests and proof artifacts before each commit, and no async daemon until the API surface is settled.
 
@@ -487,6 +487,16 @@ Current subscription API generation was rechecked again on 2026-06-10 with expli
 - `jimeng-browser-proxy image2video` live-submitted `submitId=6c83d6bd-d8f6-4b69-a6b9-1d05088312a3`, `historyId=35931512058892`, reached terminal `status=50`, saved a `704x1248` H.264 MP4, and validated as `3.016667s`
 - `text2image` was retried against `data/jimeng-captures/20260609095503-text2image-submit/capture-template.raw.json` and still returns `ret=3018`, `errmsg=permission denied`; do not claim current paid-live text-to-image support until a fresh background CDP submit is captured and compared
 - strict proof leak check found no unredacted credential markers in normalized results or validation metadata
+
+Actual subscription API generation was rechecked again on 2026-06-10 after the user asked whether the API had really been tested with the subscription account:
+
+- proof bundle: `data/jimeng-lab/proof-20260610-actual-api-generation-check/`
+- exact commands: `data/jimeng-lab/proof-20260610-actual-api-generation-check/manifest.md`
+- `jimeng-browser-proxy tts` returned `ret=0`, saved `直爽女大-7597003459665072686.mp3`, and validated as `10.680000s`, `24 kHz`, mono MP3 audio
+- `jimeng-browser-proxy text2video` live-submitted `submitId=31ab1cf8-1548-46de-8419-b167bb813eb0`, `historyId=35936274855692`, reached terminal `status=50`, saved a `704x1248` H.264 MP4, and validated as `3.016667s`
+- `jimeng-browser-proxy image2video` live-submitted `submitId=f9774f3b-84ce-4025-82c4-7a529d6e4409`, `historyId=35933448749068`, reached terminal `status=50`, saved a `704x1248` H.264 MP4, and validated as `3.016667s`
+- validation thumbnails were saved under `data/jimeng-lab/proof-20260610-actual-api-generation-check/_validation/`
+- normalized proof leak check found no unredacted credential markers
 
 The next slice is **lip-sync submit capture and reference-video consumers**. Use the VOD provider reference, ImageX avatar reference, and frontend captures to unlock live lip-sync, reference-video, multimodal/all-around reference, pose/style/depth/canny controls, and live end-frame/multi-frame image-to-video paths.
 

@@ -96,10 +96,10 @@ The latest full voice sample run generated `142/142` MP3 files with concurrency 
 Latest direct subscription-account generation proof:
 
 ```txt
-proof=data/jimeng-lab/proof-20260610-subscription-api-live-check/
-tts=ret 0, 8.568000s MP3
-text2video=submitId 0a829552-fe6a-4f2f-b8d2-8bd6d4ec6fb2, historyId 35934031025164, status 50, 704x1248 H.264 MP4, 3.016667s
-image2video=submitId 6c83d6bd-d8f6-4b69-a6b9-1d05088312a3, historyId 35931512058892, status 50, 704x1248 H.264 MP4, 3.016667s
+proof=data/jimeng-lab/proof-20260610-actual-api-generation-check/
+tts=ret 0, 10.680000s MP3, 24 kHz mono
+text2video=submitId 31ab1cf8-1548-46de-8419-b167bb813eb0, historyId 35936274855692, status 50, 704x1248 H.264 MP4, 3.016667s
+image2video=submitId f9774f3b-84ce-4025-82c4-7a529d6e4409, historyId 35933448749068, status 50, 704x1248 H.264 MP4, 3.016667s
 text2image=ret 3018, errmsg permission denied with stale capture data/jimeng-captures/20260609095503-text2image-submit/capture-template.raw.json
 ```
 

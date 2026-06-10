@@ -2303,6 +2303,87 @@ thumbnail JPGs were extracted from both generated videos.
 strict leak check returned no unredacted credential markers.
 ```
 
+## Actual Subscription API Generation Check
+
+Arthur asked whether the actual subscription account/API had really been tested, not merely called. A fresh bounded run on 2026-06-10 generated one artifact per implemented paid-live mode.
+
+Manifest:
+
+```txt
+data/jimeng-lab/proof-20260610-actual-api-generation-check/manifest.md
+```
+
+Commands:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts tts \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --voice-id 7597003459665072686 \
+  --voice-title '直爽女大' \
+  --text '这是一次真实订阅账号接口测试。我们要确认语音、文生视频、图生视频都能生成可用素材。' \
+  --outDir data/jimeng-lab/proof-20260610-actual-api-generation-check/tts
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts text2video \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --capture data/jimeng-lab/raw/jimeng-network-capture-video-01.json \
+  --prompt '韩系美妆UGC创作者在明亮厨房里用手机自拍，手里拿着一瓶补水精华，前三秒说熬夜后底妆卡粉就看这个，真实TikTok种草开场，自然表情，轻微手持晃动，无字幕，无水印，不要生成可读文字。' \
+  --durationSec 3 \
+  --ratio 9:16 \
+  --videoResolution 720p \
+  --modelVersion 3.0fast \
+  --seed 2026061013 \
+  --pollIntervalMs 10000 \
+  --maxPolls 40 \
+  --outDir data/jimeng-lab/proof-20260610-actual-api-generation-check/text2video
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts image2video \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --capture data/jimeng-lab/raw/jimeng-network-capture-video-01.json \
+  --image data/jimeng-lab/ugc-studio-kbeauty-image/artifacts/jimeng-kbeauty-01.png \
+  --prompt '韩系美妆达人手机自拍风格，手里拿着补水精华自然靠近镜头，像真实TikTok种草广告开场，动作轻微自然，明亮厨房自然光，无字幕，无水印，不要生成可读文字。' \
+  --durationSec 3 \
+  --ratio 9:16 \
+  --videoResolution 720p \
+  --modelVersion 3.0fast \
+  --seed 2026061014 \
+  --pollIntervalMs 10000 \
+  --maxPolls 40 \
+  --outDir data/jimeng-lab/proof-20260610-actual-api-generation-check/image2video
+```
+
+Results:
+
+```txt
+tts: ret=0, errmsg=success, artifact=data/jimeng-lab/proof-20260610-actual-api-generation-check/tts/artifacts/直爽女大-7597003459665072686.mp3, mp3 audio, 24 kHz mono, duration=10.680000s
+text2video: submitId=31ab1cf8-1548-46de-8419-b167bb813eb0, historyId=35936274855692, status=50, artifact=data/jimeng-lab/proof-20260610-actual-api-generation-check/text2video/artifacts/31ab1cf8-1548-46de-8419-b167bb813eb0-00.mp4, 704x1248 h264, duration=3.016667s
+image2video: submitId=f9774f3b-84ce-4025-82c4-7a529d6e4409, historyId=35933448749068, status=50, artifact=data/jimeng-lab/proof-20260610-actual-api-generation-check/image2video/artifacts/f9774f3b-84ce-4025-82c4-7a529d6e4409-00.mp4, 704x1248 h264, duration=3.016667s
+thumbnails=data/jimeng-lab/proof-20260610-actual-api-generation-check/_validation/{text2video-thumb-1s.jpg,image2video-thumb-1s.jpg}
+```
+
+Validation:
+
+```bash
+ffprobe -v error -show_entries stream=codec_name,width,height -show_entries format=duration -of json \
+  data/jimeng-lab/proof-20260610-actual-api-generation-check/text2video/artifacts/31ab1cf8-1548-46de-8419-b167bb813eb0-00.mp4
+
+ffprobe -v error -show_entries stream=codec_name,width,height -show_entries format=duration -of json \
+  data/jimeng-lab/proof-20260610-actual-api-generation-check/image2video/artifacts/f9774f3b-84ce-4025-82c4-7a529d6e4409-00.mp4
+
+ffprobe -v error -show_entries stream=codec_name,sample_rate,channels -show_entries format=duration -of json \
+  data/jimeng-lab/proof-20260610-actual-api-generation-check/tts/artifacts/直爽女大-7597003459665072686.mp3
+
+rg -n -P '"cookie"\s*:\s*"(?!\[REDACTED)|x-signature|x-expires|authorization|msToken|verifyFp|sessionid|sid=' \
+  data/jimeng-lab/proof-20260610-actual-api-generation-check/*/normalized || true
+```
+
+Result:
+
+```txt
+ffprobe confirmed playable MP3/H.264 MP4 artifacts.
+thumbnail JPGs were extracted from both generated videos.
+normalized proof leak check returned no unredacted credential markers.
+```
+
 ## Verification
 
 ```bash
