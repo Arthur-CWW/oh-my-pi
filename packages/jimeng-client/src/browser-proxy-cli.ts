@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import {
   buildJimengAssetsRequest,
@@ -42,6 +42,12 @@ import {
   summarizeExploreTemplates,
 } from "./explore"
 import {
+  buildSingleEndpointProbeVariant,
+  parseJimengEndpointProbeVariants,
+  runJimengEndpointProbe,
+  summarizeJimengEndpointProbe,
+} from "./endpoint-probe"
+import {
   buildJimengLipSyncImagePlan,
   buildJimengLipSyncVideoPlan,
   lipSyncImageReferenceFromUploadSummary,
@@ -61,6 +67,12 @@ import {
   parseJimengIdCsvFlag,
   summarizeJimengHistoryRecords,
 } from "./history-records"
+import {
+  buildJimengVideoInfoRequest,
+  fetchJimengVideoInfo,
+  parseJimengVidCsvFlag,
+  summarizeJimengVideoInfo,
+} from "./video-info"
 import {
   buildJimengControlNetSaveParams,
   defaultControlNetPreviewBabiParam,
@@ -141,9 +153,11 @@ Commands:
   voice-clone-delete Dry-run cloned voice delete request
   tts           Generate one MP3 text-to-speech sample from a voice id
   sample-voices Generate sequential MP3 samples for voices from the built-in library
+  endpoint-probe Probe/replay one endpoint with JSON body variants and shape summaries
   assets        Fetch workspace/workbench asset history without generation spend
   history-queue Fetch read-only queue/progress details for one or more history ids
   history-records Fetch read-only completed/history records by submit id or history id
+  video-info    Fetch read-only VOD video metadata by vid
   templates     Fetch no-spend Explore/template examples for prompt/template mining
   short-videos  Fetch no-spend Explore short videos for reference/profile mining
   overseas-short-videos Fetch no-spend feed_short_video examples for overseas/reference mining
@@ -172,6 +186,11 @@ Options:
   --session <file>              Load a saved session bundle instead of refreshing from CDP
   --session-out <file>          session command output (default: data/jimeng-lab/raw/session-bundle-current.json)
   --capture <file>              Capture template JSON for generation commands
+  --endpoint <path|url>          Endpoint path or full URL for endpoint-probe
+  --method <GET|POST>            HTTP method for endpoint-probe (default: POST)
+  --query <query>                Query string override for endpoint-probe
+  --body <json>                  Single JSON body for endpoint-probe
+  --variants <json|file>         Probe variants JSON array or object with variants
   --endpoints <ids|all>          Catalog endpoints, comma-separated (default: all)
   --text <text>                 TTS/sample-voices text
   --voice-id <id>               TTS voice id from voices command
@@ -195,6 +214,7 @@ Options:
   --submitIds <csv>             Submit ids for history-records
   --historyId <id>              History id for history-queue
   --historyIds <csv>            History ids for history-queue/history-records
+  --vids <csv>                  VOD vids for video-info
   --direction <n>               Assets list direction (default: 1)
   --order-by <n>                Assets list order_by option (default: 0)
   --endTimeStamp <n>            Assets pagination timestamp/cursor (default: 0)
@@ -271,6 +291,12 @@ Examples:
     --name "Kbeauty reference voice" \\
     --dryRun
 
+  jimeng-browser-proxy endpoint-probe \\
+    --session data/jimeng-lab/raw/session-bundle-current.json \\
+    --endpoint /mweb/v1/get_video_by_vid \\
+    --variants '[{"name":"vids","body":{"vids":["v03870g10004d8k1u4nog65hb08dnhig"]}},{"name":"vid","body":{"vid":"v03870g10004d8k1u4nog65hb08dnhig"}}]' \\
+    --outDir data/jimeng-lab/endpoint-probe-video-info
+
   jimeng-browser-proxy assets \\
     --session data/jimeng-lab/raw/session-bundle-current.json \\
     --limit 10 \\
@@ -285,6 +311,11 @@ Examples:
     --session data/jimeng-lab/raw/session-bundle-current.json \\
     --submitId a6bbee65-bed0-4e5b-aaf1-5ab466137b82 \\
     --outDir data/jimeng-lab/cli-history-records-smoke
+
+  jimeng-browser-proxy video-info \\
+    --session data/jimeng-lab/raw/session-bundle-current.json \\
+    --vid v03870g10004d8k1u4nog65hb08dnhig \\
+    --outDir data/jimeng-lab/cli-video-info-smoke
 
   jimeng-browser-proxy lip-sync-config \\
     --outDir data/jimeng-lab/cli-lip-sync-config-smoke
@@ -403,6 +434,7 @@ interface CliArgs {
   command:
     | "session"
     | "catalog"
+    | "endpoint-probe"
     | "lip-sync-config"
     | "voices"
     | "voice-clones"
@@ -415,6 +447,7 @@ interface CliArgs {
     | "assets"
     | "history-queue"
     | "history-records"
+    | "video-info"
     | "templates"
     | "short-videos"
     | "overseas-short-videos"
@@ -441,6 +474,11 @@ interface CliArgs {
   session?: string
   sessionOut: string
   capture?: string
+  endpoint?: string
+  method?: "GET" | "POST"
+  query?: string
+  body?: string
+  variants?: string
   endpoints?: string
   text?: string
   voiceId?: string
@@ -464,6 +502,7 @@ interface CliArgs {
   submitIds?: string[]
   historyId?: string
   historyIds?: string[]
+  vids?: string[]
   direction?: number
   orderBy?: number
   endTimeStamp?: number
@@ -568,6 +607,63 @@ async function main(argv: string[]): Promise<void> {
   }
 
   const session = await loadSession(args)
+
+  if (args.command === "endpoint-probe") {
+    if (!args.endpoint) throw new Error("endpoint-probe requires --endpoint")
+    if (!args.body && !args.variants) throw new Error("endpoint-probe requires --body or --variants")
+    const variants = args.variants
+      ? parseJimengEndpointProbeVariants(readInlineOrFile(args.variants))
+      : buildSingleEndpointProbeVariant(args.body!)
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const runId = `endpoint-probe-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const probe = {
+      endpoint: args.endpoint,
+      method: args.method,
+      query: args.query,
+      variants,
+    }
+    if (args.dryRun) {
+      writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
+        command: args.command,
+        probe,
+        browser_session: redactSession(session),
+      })
+      writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+        command: args.command,
+        probe: {
+          endpoint: probe.endpoint,
+          method: probe.method ?? "POST",
+          query: probe.query ?? null,
+          variant_count: probe.variants.length,
+          variants: probe.variants.map((variant) => ({ name: variant.name })),
+        },
+      })
+      console.log(`[jimeng-browser-proxy] endpoint-probe dry run saved variants=${variants.length}`)
+      return
+    }
+
+    const result = await runJimengEndpointProbe({ session, probe })
+    writeJson(path.join(dirs.rawDir, `${runId}.json`), {
+      endpoint: result.endpoint,
+      url: result.url,
+      method: result.method,
+      results: result.results.map((item) => ({
+        name: item.name,
+        request_body: item.requestBody,
+        http_status: item.httpStatus,
+        ret: item.ret,
+        errmsg: item.errmsg,
+        response_text_sha256: item.responseTextSha256,
+        body: item.body,
+      })),
+    })
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      summary: summarizeJimengEndpointProbe(result),
+    })
+    console.log(`[jimeng-browser-proxy] endpoint-probe saved variants=${result.results.length} rets=${result.results.map((item) => `${item.name}:${item.ret ?? "none"}`).join(",")}`)
+    return
+  }
 
   if (args.command === "catalog") {
     const dirs = ensureOutputDirs(path.resolve(args.outDir))
@@ -1036,6 +1132,54 @@ async function main(argv: string[]): Promise<void> {
       summary: summarizeJimengHistoryRecords(result),
     })
     console.log(`[jimeng-browser-proxy] history-records saved count=${result.records.length} statuses=${result.records.map((record) => `${record.lookupKey}:${record.status ?? "none"}`).join(",")}`)
+    return
+  }
+
+  if (args.command === "video-info") {
+    const vids = args.vids ?? (args.vid ? [args.vid] : [])
+    if (vids.length === 0) {
+      throw new Error("video-info requires --vid or --vids")
+    }
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const query = { vids }
+    const request = buildJimengVideoInfoRequest(query)
+    const runId = `video-info-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    if (args.dryRun) {
+      writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
+        command: args.command,
+        endpoint: "/mweb/v1/get_video_by_vid",
+        request,
+        browser_session: redactSession(session),
+      })
+      writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+        command: args.command,
+        endpoint: "/mweb/v1/get_video_by_vid",
+        request,
+      })
+      console.log(`[jimeng-browser-proxy] video-info dry run saved`)
+      return
+    }
+
+    const result = await fetchJimengVideoInfo({ session, query })
+    writeJson(path.join(dirs.rawDir, `${runId}.json`), {
+      http_status: result.httpStatus,
+      ret: result.ret,
+      errmsg: result.errmsg,
+      response_text_sha256: result.responseTextSha256,
+      request: result.request,
+      body: result.body,
+    })
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      endpoint: result.endpoint,
+      http_status: result.httpStatus,
+      ret: result.ret,
+      errmsg: result.errmsg,
+      response_text_sha256: result.responseTextSha256,
+      request: result.request,
+      summary: summarizeJimengVideoInfo(result),
+    })
+    console.log(`[jimeng-browser-proxy] video-info saved count=${result.videos.length} vids=${result.videos.map((video) => `${video.lookupVid}:${video.definition ?? "none"}`).join(",")}`)
     return
   }
 
@@ -2382,6 +2526,7 @@ function parseArgs(argv: string[]): CliArgs {
   if (
     command !== "session"
     && command !== "catalog"
+    && command !== "endpoint-probe"
     && command !== "lip-sync-config"
     && command !== "voices"
     && command !== "voice-clones"
@@ -2394,6 +2539,7 @@ function parseArgs(argv: string[]): CliArgs {
     && command !== "assets"
     && command !== "history-queue"
     && command !== "history-records"
+    && command !== "video-info"
     && command !== "templates"
     && command !== "short-videos"
     && command !== "overseas-short-videos"
@@ -2420,6 +2566,7 @@ function parseArgs(argv: string[]): CliArgs {
   }
 
   const flags = parseFlags(argv.slice(1))
+  const method = parseEndpointProbeMethod(flags.method)
   const durationSec = flags.durationSec
   const videoWidth = flags.videoWidth ? Number(flags.videoWidth) : undefined
   const videoHeight = flags.videoHeight ? Number(flags.videoHeight) : undefined
@@ -2440,6 +2587,7 @@ function parseArgs(argv: string[]): CliArgs {
   const assetTypes = parseJimengAssetTypes(flags["asset-types"])
   const submitIds = parseJimengIdCsvFlag(flags.submitIds)
   const historyIds = parseJimengHistoryIdsFlag(flags.historyIds)
+  const vids = parseJimengVidCsvFlag(flags.vids)
   const direction = flags.direction ? Number(flags.direction) : undefined
   const orderBy = flags["order-by"] ? Number(flags["order-by"]) : undefined
   const endTimeStamp = flags.endTimeStamp ? Number(flags.endTimeStamp) : undefined
@@ -2504,6 +2652,11 @@ function parseArgs(argv: string[]): CliArgs {
     session: flags.session,
     sessionOut: flags["session-out"] ?? "data/jimeng-lab/raw/session-bundle-current.json",
     capture: flags.capture,
+    endpoint: flags.endpoint,
+    method,
+    query: flags.query,
+    body: flags.body,
+    variants: flags.variants,
     endpoints: flags.endpoints,
     text: flags.text,
     voiceId: flags["voice-id"],
@@ -2527,6 +2680,7 @@ function parseArgs(argv: string[]): CliArgs {
     submitIds,
     historyId: flags.historyId,
     historyIds,
+    vids,
     direction,
     orderBy,
     endTimeStamp,
@@ -2616,6 +2770,21 @@ function parseCsvFlag(value: string | undefined): string[] | undefined {
   if (value === undefined) return undefined
   const items = value.split(",").map((item) => item.trim()).filter(Boolean)
   return items.length > 0 ? items : undefined
+}
+
+function parseEndpointProbeMethod(value: string | undefined): "GET" | "POST" | undefined {
+  if (!value) return undefined
+  const normalized = value.trim().toUpperCase()
+  if (normalized === "GET" || normalized === "POST") return normalized
+  throw new Error("--method must be GET or POST")
+}
+
+function readInlineOrFile(value: string): string {
+  if (value.startsWith("@")) return readFileSync(path.resolve(value.slice(1)), "utf8")
+  if ((value.endsWith(".json") || value.endsWith(".jsonl")) && existsSync(path.resolve(value))) {
+    return readFileSync(path.resolve(value), "utf8")
+  }
+  return value
 }
 
 function parseVoiceCloneStatuses(values: string[] | undefined): JimengCloneVoiceStatusValue[] | undefined {

@@ -253,6 +253,69 @@ Expected result:
 normalized history-records proofs have no signed URLs
 ```
 
+## Endpoint Probe / VOD Metadata Smoke
+
+`endpoint-probe` is the faster replay step for future reversal work. It does not guess or fuzz automatically; it replays explicit JSON body variants from CDP/static evidence, then writes raw local bodies plus normalized request/response shape summaries.
+
+Variant proof for `/mweb/v1/get_video_by_vid`:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts endpoint-probe \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --endpoint /mweb/v1/get_video_by_vid \
+  --variants '[{"name":"vids","body":{"vids":["v03870g10004d8k1u4nog65hb08dnhig"]}},{"name":"vid","body":{"vid":"v03870g10004d8k1u4nog65hb08dnhig"}}]' \
+  --outDir data/jimeng-lab/proof-20260610-endpoint-probe-video-info
+```
+
+Result:
+
+```txt
+endpoint-probe saved variants=2 rets=vids:0,vid:1000
+```
+
+Promoted typed command:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts video-info \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --vid v03870g10004d8k1u4nog65hb08dnhig \
+  --outDir data/jimeng-lab/proof-20260610-video-info
+```
+
+Result:
+
+```txt
+video-info saved count=1 vids=v03870g10004d8k1u4nog65hb08dnhig:720p
+ret=0
+errmsg=success
+response_sha256=06ae536f69e703297f9cba1988665d0dcf4ad7c05bc117f79332931ec010a17d
+duration=5s
+resolution=704x1248
+fps=24
+format=mp4
+definition=720p
+size_bytes=4285498
+transcoded_definitions=720p
+```
+
+The normalized summaries were checked for signed URL leakage:
+
+```bash
+if rg -n "https://|x-signature|x-expires|expire_time|byteimg|douyinpic|vlabvod|SIGNED_URL" \
+  data/jimeng-lab/proof-20260610-endpoint-probe-video-info/normalized \
+  data/jimeng-lab/proof-20260610-video-info/normalized; then
+  exit 1
+else
+  echo "normalized endpoint-probe/video-info proofs have no signed URLs"
+fi
+```
+
+Expected result:
+
+```txt
+normalized endpoint-probe/video-info proofs have no signed URLs
+```
+
 ## Voice / TTS Smoke
 
 Refreshed the logged-in session from the background Jimeng browser:

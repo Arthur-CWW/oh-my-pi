@@ -311,6 +311,25 @@ History record lookup is now live-proved without generation spend and schema-bac
 - latest submit-id proof returned `record_count=1`, `lookup_key=a6bbee65-bed0-4e5b-aaf1-5ab466137b82`, `history_record_id=39148697060354`, `status=50`, `task_status=50`, `generate_type=1`, `mode=workbench`, `model_req_key=high_aes_general_v50`, `model_name=图片5.0 Lite`, `seed=105719980`, `total_image_count=4`, `finished_image_count=4`, response hash `2da0421296eb99f5c3e14b4ac543d800481a4f875e8b7c555f6404ef903bd413`
 - latest history-id proof returned the same completed record for lookup key `39148697060354`, response hash `77079fffff13a0c230698d7032bacd8a9784bbf9e8184e4685dd37e324aea8a6`
 
+Endpoint replay/probing is now available to speed future slices:
+
+- `jimeng-browser-proxy endpoint-probe`
+- replays explicit JSON body variants against one endpoint using saved/background session headers
+- writes raw local response bodies under ignored `data/**`
+- writes normalized request/response shape summaries with hashes, `ret`/`errmsg`, and URL-like-token booleans; signed URL values are not included in normalized summaries
+- latest proof used `/mweb/v1/get_video_by_vid` to compare `{"vids":["v03870g10004d8k1u4nog65hb08dnhig"]}` vs `{"vid":"v03870g10004d8k1u4nog65hb08dnhig"}`; `vids` returned `ret=0`, singular `vid` returned `ret=1000`
+- proof bundle: `data/jimeng-lab/proof-20260610-endpoint-probe-video-info/`
+
+VOD video metadata lookup is now live-proved without generation spend and schema-backed:
+
+- `jimeng-browser-proxy video-info`
+- direct `/mweb/v1/get_video_by_vid` with logged-in browser session headers
+- confirmed request shape: `{"vids":["..."]}`
+- useful flags: `--vid`, `--vids`
+- normalized summaries keep VOD id, duration, dimensions, fps, format, definition, md5, size, transcoded definitions, and URL-presence booleans while omitting signed video/cover URLs
+- proof bundle: `data/jimeng-lab/proof-20260610-video-info/`
+- latest proof returned `vid=v03870g10004d8k1u4nog65hb08dnhig`, `duration=5s`, `width=704`, `height=1248`, `fps=24`, `format=mp4`, `definition=720p`, `size_bytes=4285498`, response hash `06ae536f69e703297f9cba1988665d0dcf4ad7c05bc117f79332931ec010a17d`
+
 The next slice is **lip-sync submit capture and reference-video consumers**. Use the VOD provider reference, ImageX avatar reference, and frontend captures to unlock live lip-sync, reference-video, multimodal/all-around reference, pose/style/depth/canny controls, and live end-frame/multi-frame image-to-video paths.
 
 Immediate next slices:
@@ -335,6 +354,7 @@ Maximize useful API coverage and proof quality while keeping live submissions co
 - prefer direct Jimeng APIs, saved sessions, CDP network/DOM calls, CuaDriver/background browser-use, and other non-interruptive automation paths over `bringToFront`, visible tab clicks, or Computer Use interactions that move the active cursor/window
 - if a frontend-only Jimeng flow truly requires visible UI interaction, first try to reproduce it through background CDP or CuaDriver; if that still cannot work, record the blocked path and ask before interrupting Arthur's flow
 - for unknown frontend flows, prefer a faster hybrid reversal loop over long manual bundle reading: run background CDP/passive network capture first, use `ast-grep`/targeted structural search to locate the frontend request builder, then replay/compare the direct API request with saved session headers
+- promote the hybrid loop into tooling: CDP recorder for dynamic truth, static search for request-builder semantics, `endpoint-probe` for explicit body replay, then dedicated schema-backed commands for stable contracts
 - use mise-managed developer CLIs such as `ast-grep` when available; install missing local CLIs with `mise` first unless the tool must be a repo/CI dependency
 - validate external Jimeng/CapCut/provider JSON at the boundary with permissive runtime schemas; allow additive extra fields but fail clearly when relied-on response paths drift
 - live generation prompts should be Chinese and in-distribution for the UGC use case
@@ -425,6 +445,8 @@ jimeng-browser-proxy overseas-short-videos
 jimeng-browser-proxy assets
 jimeng-browser-proxy history-queue
 jimeng-browser-proxy history-records
+jimeng-browser-proxy endpoint-probe
+jimeng-browser-proxy video-info
 jimeng-browser-proxy canvas
 ```
 

@@ -104,6 +104,30 @@ Important capability notes from help output:
   - proof bundles `data/jimeng-lab/proof-20260610-history-records/` and `data/jimeng-lab/proof-20260610-history-records-by-history-id/`
   - normalized summaries omit signed image/video URLs and keep URL-presence booleans only
 
+### 3.1) Resolve VOD metadata by vid
+- `POST https://jimeng.jianying.com/mweb/v1/get_video_by_vid`
+- Implemented read-only lookup:
+  - `jimeng-browser-proxy video-info`
+  - schema-backed response decoding and URL-safe normalization
+- Confirmed wire body:
+
+```json
+{ "vids": ["v03870g10004d8k1u4nog65hb08dnhig"] }
+```
+
+- Negative proof:
+  - `{ "vid": "v03870g10004d8k1u4nog65hb08dnhig" }` returned `ret=1000`, `errmsg=invalid parameter`
+  - `{ "video_id": "..." }` and `{ "video_ids": ["..."] }` also returned `ret=1000`
+- Latest no-spend proof:
+  - `ret=0`, `errmsg=success`
+  - `vid=v03870g10004d8k1u4nog65hb08dnhig`
+  - `duration=5s`, `width=704`, `height=1248`, `fps=24`, `format=mp4`, `definition=720p`
+  - `size_bytes=4285498`
+  - `transcoded_definitions=["720p"]`
+  - response hash `06ae536f69e703297f9cba1988665d0dcf4ad7c05bc117f79332931ec010a17d`
+  - proof bundle `data/jimeng-lab/proof-20260610-video-info/`
+  - normalized summary keeps `video_url_present` and `cover_url_present` booleans but omits signed URLs
+
 ### 4) Workspace asset list / current image polling
 - `POST https://jimeng.jianying.com/mweb/v1/get_asset_list`
 - Request shape observed:
@@ -1692,6 +1716,9 @@ Current support matrix:
 | `lip-sync` | dry-run-proved in `jimeng-browser-proxy` | Browser proxy can prepare VOD-reference and image/avatar lip-sync provider inputs from VOD/ImageX provider references plus TTS voice flags. Live submit still needs a frontend submit capture/compare. |
 | `assets` | implemented in `jimeng-browser-proxy` | No-spend direct `/mweb/v1/get_asset_list` workspace/workbench asset history with request flags for count, asset types, mode, direction, order, timestamp cursor, favorite filter, story-agent visibility, and workspace id. Latest proof returned one completed image asset with four generated image items and no signed URLs in normalized output. |
 | `history-queue` | implemented in `jimeng-browser-proxy` | No-spend direct `/mweb/v1/get_history_queue_info` lookup with `--historyId`/`--historyIds`; latest proof returned queue status `3`, polling interval `30s`, and no raw debug info in normalized output. |
+| `history-records` | implemented in `jimeng-browser-proxy` | No-spend direct `/mweb/v1/get_history_by_ids` lookup by submit id or history id with schema-backed normalization. |
+| `video-info` | implemented in `jimeng-browser-proxy` | No-spend direct `/mweb/v1/get_video_by_vid` VOD metadata lookup by `vid`; latest proof confirmed `{"vids":[...]}` and returned `704x1248`, `5s`, `24fps`, `720p`. |
+| `endpoint-probe` | implemented in `jimeng-browser-proxy` | Generic explicit replay/probe helper for candidate JSON body variants; writes raw local response plus normalized request/response shape summaries for faster promotion into typed commands. |
 | `templates` | implemented in `jimeng-browser-proxy` | No-spend direct `/mweb/v1/get_explore` template mining with prompt/model/usage normalization. |
 | `overseas-short-videos` | implemented in `jimeng-browser-proxy` | No-spend direct `/mweb/v1/feed_short_video` short-video/reference mining with ranking and video metadata normalization. |
 | `capcut-categories` | implemented in `jimeng-browser-proxy` | No-spend signed CapCut `/lv/v1/cc_web/plane/get_categories` commercial template category catalog. |
@@ -1769,11 +1796,43 @@ data/jimeng-captures/<timestamp>-<flow>/
 
 Do not commit raw captures or generated media. If a redacted summary is promoted into tracked docs, manually review it first for cookies, reusable signatures, signed URL values, account IDs, and private prompt/media content.
 
+## Endpoint replay/probe accelerator
+
+`jimeng-browser-proxy endpoint-probe` is the first "tool that builds the tool" for this reversal workflow. It replays explicit candidate JSON bodies against one endpoint, stores raw local responses under ignored `data/**`, and writes a normalized shape summary that is small enough to paste into agent context.
+
+Use it after CDP/static evidence identifies a candidate endpoint; do not use it as a blind fuzzer against write/generate/payment endpoints.
+
+Example:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts endpoint-probe \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --endpoint /mweb/v1/get_video_by_vid \
+  --variants '[{"name":"vids","body":{"vids":["v03870g10004d8k1u4nog65hb08dnhig"]}},{"name":"vid","body":{"vid":"v03870g10004d8k1u4nog65hb08dnhig"}}]' \
+  --outDir data/jimeng-lab/proof-20260610-endpoint-probe-video-info
+```
+
+Latest proof:
+
+```txt
+vids -> ret=0, errmsg=success, response has vid2video shape and URL-like raw tokens
+vid  -> ret=1000, errmsg=invalid parameter
+normalized summary contains host/path/query keys, request/response shape summaries, hashes, and URL-like booleans; no signed URL values
+```
+
+The recommended fast loop is:
+
+1. **Dynamic:** capture one UI action with CDP, saving raw network and redacted summary.
+2. **Static:** use `ast-grep` or targeted bundle search around endpoint names, initiator bundle URLs, enum names, and request builder constants.
+3. **Replay:** run `endpoint-probe` with 2-4 likely body variants to identify exact casing and required fields.
+4. **Promote:** implement a dedicated typed CLI command with permissive schema validation and a live/dry-run proof.
+
 ## Next reverse target (immediate)
-1. Capture real frontend VOD and image/avatar lip-sync submits and compare them against the dry-run provider-input plans before enabling live generation.
-2. Use the VOD upload path to unlock reference-video and multimodal/all-around reference flows.
-3. Capture the frontend's explicit end-frame/multi-frame mode and live-prove `frames2video` only after confirming the mode-specific payload contract.
-4. Expand template/research mining beyond direct Explore/feed_short_video with CapCut template search and plane endpoints.
-5. Add strict `1019` shark breaker/cooldown budgets to the consolidated CLI path.
-6. Capture/approve subject/persona `generate_voice` live submit and custom voice clone submit/mutation flows.
-7. Add multipart/chunked VOD upload only when large reference videos require it.
+1. Add a capture analyzer/ranker that turns `raw-network.jsonl` into candidate endpoint JSON with risk class, initiator bundle URLs, request/response shape summaries, and suggested `endpoint-probe` variants.
+2. Capture real frontend VOD and image/avatar lip-sync submits and compare them against the dry-run provider-input plans before enabling live generation.
+3. Use the VOD upload path to unlock reference-video and multimodal/all-around reference flows.
+4. Capture the frontend's explicit end-frame/multi-frame mode and live-prove `frames2video` only after confirming the mode-specific payload contract.
+5. Expand template/research mining beyond direct Explore/feed_short_video with CapCut template search and plane endpoints.
+6. Add strict `1019` shark breaker/cooldown budgets to the consolidated CLI path.
+7. Capture/approve subject/persona `generate_voice` live submit and custom voice clone submit/mutation flows.
+8. Add multipart/chunked VOD upload only when large reference videos require it.

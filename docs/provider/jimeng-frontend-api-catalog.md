@@ -26,6 +26,7 @@ Use the browser as an authenticated session holder and API discovery surface. Mo
 | `/mweb/v1/get_asset_list` | POST | Poll/list workspace assets and completed image results. | Implemented for workbench text-to-image polling and no-spend `assets` listing |
 | `/mweb/v1/get_history_by_ids` | POST | Older/general task polling and completed record lookup by `submit_id` or `history_id`. | Implemented for captured history-based templates and no-spend `history-records`; live-proved against the completed K-beauty image generation |
 | `/mweb/v1/get_history_queue_info` | POST | Read-only queue/progress detail lookup for active or historical generation records. | Implemented as no-spend `history-queue`; live-proved against a completed image history id |
+| `/mweb/v1/get_video_by_vid` | POST | Read-only VOD metadata lookup by uploaded/generated video `vid`. Useful for lip-sync/reference-video validation. | Implemented as schema-backed no-spend `video-info`; live-proved with body `{"vids":["..."]}` |
 | `/mweb/v1/creation_agent/v2/conversation` | POST/SSE | Older agent text-to-image conversation submit. | Preserved |
 | `/mweb/v1/creation_agent/v2/get_agent_config` | POST | Agent/tool configuration payload. | Cataloged only |
 | `/mweb/v1/creation_agent/v2/skill/list` | POST | Available agent skills/tools. | Cataloged only |
@@ -102,7 +103,18 @@ Current shared helper:
 packages/jimeng-client/src/schema.ts
 ```
 
-The first schema-backed endpoints are `history-queue` and `history-records`. If Jimeng changes `ret`/`errmsg`/`data` or the relied-on record/media paths, the CLI should fail with an explicit `JIMENG_RESPONSE_*_CHANGED` error instead of silently normalizing stale shapes.
+Current schema-backed endpoints include `history-queue`, `history-records`, and `video-info`. If Jimeng changes `ret`/`errmsg`/`data` or the relied-on record/media paths, the CLI should fail with an explicit `JIMENG_RESPONSE_*_CHANGED` error instead of silently normalizing stale shapes.
+
+## Fast Hybrid Reversal Loop
+
+Use dynamic and static tools together:
+
+1. Record one UI action through background CDP with `network-recorder.ts`; do not foreground Arthur's browser.
+2. Inspect the small redacted summary first, then use `ast-grep`/targeted bundle search on endpoint names or initiator bundle chunks to recover enum names and request builders.
+3. Replay only explicit candidate JSON bodies with `jimeng-browser-proxy endpoint-probe`; compare `ret`, `errmsg`, and summarized response shapes.
+4. Promote stable read-only or approved contracts into dedicated typed CLI commands with runtime schemas and proof artifacts.
+
+`endpoint-probe` is intentionally not a blind fuzzer. It is a replay tool for candidate bodies found from CDP/static evidence, with raw outputs kept under ignored `data/**` and normalized shape summaries safe enough to paste into agent context.
 
 Custom voice clone CLI coverage:
 
