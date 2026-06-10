@@ -65,6 +65,10 @@ describe("Jimeng static inventory", () => {
           `const everPhotoPromoteBlocked = "/lv/v1/ever_photo/promote_asset";`,
           `const removeHistoryBlocked = "/mweb/v1/remove_history";`,
           `const updateVideoDefaultBgmBlocked = "/mweb/v1/update_video_default_bgm";`,
+          `const lvEditorPanelImplemented = "/lv/v1/effect/get_panel_info";`,
+          `const lvEditorEffectsImplemented = "/lv/v1/effect/get_category_effects";`,
+          `const lvEditorFontsImplemented = "/lv/v1/effect/get_all_fonts";`,
+          `const lvEditorColorsImplemented = "/lv/v1/editor/plane/color/feed";`,
           `const unknownRead = "https://jimeng.jianying.com/mweb/v1/template/search?token=secret";`,
           `const unknownGenerate = "/mweb/v1/avatar/generate";`,
           `const capcutCatalog = "https://lf16-beecdn.ibytedtos.com/obj/ies-fe-bee-sg/bee_prod/biz_49/bee_prod_49_bee_publish_709.json?x-signature=secret";`,
@@ -79,9 +83,10 @@ describe("Jimeng static inventory", () => {
       const summary = summarizeJimengStaticInventory(result)
       const markdown = writeJimengStaticInventoryMarkdown(result)
 
-      expect(result.totalResourceCount).toBe(53)
-      expect(result.skippedImplementedCount).toBe(2)
+      expect(result.totalResourceCount).toBe(57)
+      expect(result.skippedImplementedCount).toBe(6)
       expect(result.items.map((item) => item.resource)).not.toContain("/mweb/v1/get_history_by_ids")
+      expect(result.items.map((item) => item.resource)).not.toContain("/lv/v1/effect/get_all_fonts")
       expect(result.items.find((item) => item.resource === "/mweb/v1/dreamina_subject/generate_voice")?.recommendedAction).toBe("approval_or_disposable_fixture")
       expect(result.items.find((item) => item.resource === "/mweb/v1/get_history")?.knownStatus).toBe("blocked")
       expect(result.items.find((item) => item.resource === "/mweb/v1/get_history")?.recommendedAction).toBe("capture_exact_payload")
@@ -156,6 +161,7 @@ describe("Jimeng static inventory", () => {
           `fetch("/mweb/v1/get_history_by_ids");`,
           `fetch("/lv/v1/cc_web/replicate/search_templates");`,
           `fetch("/lv/v1/cc_web/plane/get_collection_templates");`,
+          `fetch("/lv/v1/effect/get_all_fonts");`,
           `fetch("/lv/v1/asset/create");`,
           `fetch("/lv/v1/editor/template/recent_list");`,
           `fetch("/mweb/v1/voice/query_task");`,
@@ -174,6 +180,7 @@ describe("Jimeng static inventory", () => {
       expect(result.items.find((item) => item.resource === "/lv/v1/cc_web/replicate/search_templates")?.knownStatus).toBe("blocked")
       expect(result.items.find((item) => item.resource === "/lv/v1/cc_web/replicate/search_templates")?.recommendedAction).toBe("capture_exact_payload")
       expect(result.items.find((item) => item.resource === "/lv/v1/cc_web/plane/get_collection_templates")?.riskClass).toBe("read")
+      expect(result.items.find((item) => item.resource === "/lv/v1/effect/get_all_fonts")?.knownCommand).toBe("capcut-editor-catalog")
       expect(result.items.find((item) => item.resource === "/lv/v1/asset/create")?.riskClass).toBe("mutate")
       expect(result.items.find((item) => item.resource === "/lv/v1/editor/template/recent_list")?.knownStatus).toBe("blocked")
       expect(result.items.find((item) => item.resource === "/mweb/v1/voice/query_task")?.riskClass).toBe("read")

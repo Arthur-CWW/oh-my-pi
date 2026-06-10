@@ -2154,11 +2154,26 @@ blocked_mutations_no_replay:
   /mweb/v1/update_video_default_bgm -> disposable_fixture_or_approval
 ```
 
+After adding LV editor font/effect/color catalog CLI support:
+
+```txt
+resources=247
+included=200
+skipped_implemented=33
+high_value_gaps=61
+known_status_counts=unknown:155,partial:4,implemented:33,dry_run_only:4,blocked:48,captured_only:2,cataloged_only:1
+implemented_lv_editor_catalog:
+  /lv/v1/effect/get_panel_info -> capcut-editor-catalog panel categories/effects
+  /lv/v1/effect/get_category_effects -> capcut-editor-catalog category effect rows
+  /lv/v1/effect/get_all_fonts -> capcut-editor-catalog all font rows
+  /lv/v1/editor/plane/color/feed -> capcut-editor-catalog color palettes
+```
+
 Normalized proof:
 
 ```txt
-data/jimeng-lab/proof-20260610-static-inventory/normalized/static-inventory-20260610091001-summary.json
-data/jimeng-lab/proof-20260610-static-inventory/normalized/static-inventory-20260610091001-summary.md
+data/jimeng-lab/proof-20260610-static-inventory/normalized/static-inventory-20260610093332-summary.json
+data/jimeng-lab/proof-20260610-static-inventory/normalized/static-inventory-20260610093332-summary.md
 ```
 
 Video helper proof:
@@ -2299,17 +2314,42 @@ static-locate-lv-mutation-blockers: 14 endpoints, 20 occurrences, no credential 
 mutation replay: skipped intentionally because these endpoints create, delete, rename, publish, sync, promote, remove, or otherwise mutate account/workspace state
 ```
 
+LV editor catalog proof:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts static-locate \
+  --staticRoot data/jimeng-lab/js-sweep/files,packages/jimeng-client/src \
+  --endpoint /lv/v1/effect/get_panel_info,/lv/v1/effect/get_category_effects,/lv/v1/effect/get_all_fonts,/lv/v1/editor/plane/color/feed \
+  --outDir data/jimeng-lab/proof-20260610-static-locate-lv-editor-catalog-reads
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts capcut-editor-catalog \
+  --endpoints all \
+  --panel fonts \
+  --category all \
+  --limit 20 \
+  --offset 0 \
+  --outDir data/jimeng-lab/proof-20260610-lv-editor-catalog-cli
+```
+
+```txt
+static-locate-lv-editor-catalog-reads: 12 endpoints, 18 occurrences, no credential markers in normalized output
+capcut-editor-catalog saved endpoints=panel,effects,fonts,colors categories=14 effects=745 palettes=20
+summary=data/jimeng-lab/proof-20260610-lv-editor-catalog-cli/normalized/capcut-editor-catalog-20260610093259-summary.json
+```
+
 Leak check:
 
 ```bash
-rg -n 'x-signature|msToken|verifyFp|sessionid|cookie|authorization|token=|secret=' \
-  data/jimeng-lab/proof-20260610-static-inventory/normalized
+rg -n -P 'x-signature|authorization|cookie|sessionid|sid=|msToken|verifyFp|X-Kagi|x-expires' \
+  data/jimeng-lab/proof-20260610-lv-editor-catalog-cli/normalized \
+  data/jimeng-lab/proof-20260610-static-inventory/normalized/static-inventory-20260610093332-summary.json \
+  data/jimeng-lab/proof-20260610-static-locate-lv-editor-catalog-reads/normalized
 ```
 
 Result:
 
 ```txt
-static inventory normalized output has no credential markers
+normalized LV editor catalog and static-inventory proofs have no credential markers
 ```
 
 ## Paid-Live Generation Smoke
@@ -2625,7 +2665,7 @@ normalized proof leak check returned no unredacted credential markers.
 ```bash
 bun run jimeng:typecheck
 bun run jimeng:test
-bun packages/jimeng-client/src/browser-proxy-cli.ts --help | rg 'static-inventory|lip-sync-config|voice-clones|voice-clone-submit|capcut-probe|capcut-template-metadata|capcut-categories|capcut-collections|capcut-collection-templates|capcut-template-detail|overseas-short-videos|subject-create|subject-update|subject-delete|subject-generate-voice|subjects|templates|short-videos'
+bun packages/jimeng-client/src/browser-proxy-cli.ts --help | rg 'static-inventory|lip-sync-config|voice-clones|voice-clone-submit|capcut-probe|capcut-template-metadata|capcut-categories|capcut-collections|capcut-collection-templates|capcut-template-detail|capcut-editor-catalog|overseas-short-videos|subject-create|subject-update|subject-delete|subject-generate-voice|subjects|templates|short-videos'
 ```
 
 Result:
@@ -2633,7 +2673,7 @@ Result:
 ```txt
 typecheck passed
 126 tests passed, 0 failed
-browser-proxy help listed static-inventory and CapCut collection/detail commands
+browser-proxy help listed static-inventory and CapCut collection/detail/editor-catalog commands
 paid smoke normalized files have no live token markers
 ```
 

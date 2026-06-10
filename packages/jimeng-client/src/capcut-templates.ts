@@ -27,13 +27,22 @@ const CAPCUT_MUTATING_PROBE_ENDPOINTS = new Set([
 const CAPCUT_SIGNED_READ_PROBE_ENDPOINTS = new Set([
   "/lv/v1/editor/draft/get_template_file",
   "/lv/v1/editor/draft/get_version_list",
+  "/lv/v1/editor/effect/recent_list",
   "/lv/v1/editor/plane/common/recent_list",
   "/lv/v1/editor/plane/color/feed",
   "/lv/v1/editor/plane/intelligence/query_recommend_template",
   "/lv/v1/editor/plane_draft/get_draft_detail",
+  "/lv/v1/editor/plane_draft/get_content_map",
   "/lv/v1/editor/template/check_post_permission",
   "/lv/v1/editor/template/recent_list",
+  "/lv/v1/effect/get_all_fonts",
+  "/lv/v1/effect/get_category_effects",
+  "/lv/v1/effect/get_panel_info",
+  "/lv/v1/ever_photo/batch_get_sync_state",
+  "/lv/v1/ever_photo/get_user_space",
+  "/lv/v1/intelligence/preset_resource_list",
   "/lv/v2/cc_web_task/get_task_draft",
+  "/lv/v2/editor/effect/recent_list",
   "/lv/v2/task/multi_get_tasks",
 ])
 

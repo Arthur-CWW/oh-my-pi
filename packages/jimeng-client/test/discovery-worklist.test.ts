@@ -60,6 +60,10 @@ describe("Jimeng discovery worklist", () => {
           `fetch("/lv/v1/ever_photo/promote_asset")`,
           `fetch("/mweb/v1/remove_history")`,
           `fetch("/mweb/v1/update_video_default_bgm")`,
+          `fetch("/lv/v1/effect/get_panel_info")`,
+          `fetch("/lv/v1/effect/get_category_effects")`,
+          `fetch("/lv/v1/effect/get_all_fonts")`,
+          `fetch("/lv/v1/editor/plane/color/feed")`,
         ].join("\n"),
         "utf8",
       )
@@ -73,6 +77,7 @@ describe("Jimeng discovery worklist", () => {
 
       expect(worklist.skipped_known_count).toBe(1)
       expect(worklist.items.some((item) => item.endpoint === "/mweb/v1/get_history_by_ids")).toBe(false)
+      expect(worklist.items.some((item) => item.endpoint === "/lv/v1/effect/get_all_fonts")).toBe(false)
       const readGap = worklist.items.find((item) => item.endpoint === "/mweb/v1/reference_profile/list")
       expect(readGap?.recommended_action).toBe("probe_then_promote_cli")
       expect(readGap?.has_probe_variants).toBe(true)

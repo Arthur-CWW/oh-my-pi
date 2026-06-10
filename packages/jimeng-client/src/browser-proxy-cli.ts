@@ -38,6 +38,13 @@ import {
   summarizeCapCutTemplateStaticCatalog,
 } from "./capcut-templates"
 import {
+  buildCapCutEditorCatalogRequest,
+  capCutEditorCatalogEndpointPath,
+  fetchCapCutEditorCatalog,
+  parseCapCutEditorCatalogEndpoints,
+  summarizeCapCutEditorCatalog,
+} from "./lv-editor-catalog"
+import {
   analyzeJimengNetworkCaptureFile,
   writeJimengCaptureAnalysisMarkdown,
 } from "./capture-analyzer"
@@ -227,6 +234,7 @@ Commands:
   capcut-collection-templates Fetch no-spend CapCut template rows for a collection id
   capcut-template-detail Fetch no-spend CapCut template detail by template web id
   capcut-template-metadata Fetch public CapCut template ratios and scene metadata
+  capcut-editor-catalog Fetch no-spend LV editor fonts/effects/colors catalog
   subjects      Fetch saved Jimeng subject/persona records without generation spend
   describe-image Upload/use an image URI, then describe it and detect faces
   controlnet-preview Upload/use an image URI, then build pose/depth/canny preview refs
@@ -316,6 +324,10 @@ Options:
   --needBetaModel <true|false>  Include beta image models (default: true)
   --needCache <true|false>      Common config query needCache (default: true)
   --needRefresh <true|false>    Common config query needRefresh (default: false)
+  --panel <value>               LV editor catalog panel (default: fonts)
+  --category <value>            LV editor catalog category (default: all)
+  --lang <value>                LV editor catalog language (default: en)
+  --region <value>              LV editor catalog region (default: US)
   --scene <image|video|file|n>   upload-token scene (default: image)
   --file <path>                  Local media file for upload-image/upload-video; alias for --image in image2video
   --video <path>                 Local reference video for lip-sync; uploads to VOD in dry-run planning
@@ -607,6 +619,7 @@ interface CliArgs {
     | "capcut-collection-templates"
     | "capcut-template-detail"
     | "capcut-template-metadata"
+    | "capcut-editor-catalog"
     | "subjects"
     | "describe-image"
     | "controlnet-preview"
@@ -692,6 +705,10 @@ interface CliArgs {
   needBetaModel?: boolean
   needCache?: boolean
   needRefresh?: boolean
+  panel?: string
+  category?: string
+  lang?: string
+  region?: string
   scene?: string
   file?: string
   video?: string
@@ -1064,6 +1081,74 @@ async function main(argv: string[]): Promise<void> {
       summary: summarizeCapCutTemplateStaticCatalog(result),
     })
     console.log(`[jimeng-browser-proxy] capcut-template-metadata saved ratios=${result.ratios.length} scenes=${result.scenes.length}`)
+    return
+  }
+
+  if (args.command === "capcut-editor-catalog") {
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const endpoints = parseCapCutEditorCatalogEndpoints(args.endpoints)
+    const query = {
+      endpoints,
+      panel: args.panel,
+      category: args.category,
+      limit: args.limit,
+      offset: args.offset,
+      lang: args.lang,
+      region: args.region,
+      lan: args.capcutLan,
+      loc: args.capcutLoc,
+    }
+    const requests = Object.fromEntries(endpoints.map((endpoint) => [endpoint, {
+      endpoint: capCutEditorCatalogEndpointPath(endpoint),
+      request: buildCapCutEditorCatalogRequest(endpoint, query),
+    }]))
+    const runId = `capcut-editor-catalog-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    if (args.dryRun) {
+      writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
+        command: args.command,
+        endpoint_sequence: endpoints.map(capCutEditorCatalogEndpointPath),
+        host: "https://edit-api-sg.capcut.com",
+        query,
+        requests,
+        browser_session_required: false,
+      })
+      writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+        command: args.command,
+        endpoints,
+        requests,
+      })
+      console.log(`[jimeng-browser-proxy] capcut-editor-catalog dry run saved endpoints=${endpoints.join(",")}`)
+      return
+    }
+
+    const result = await fetchCapCutEditorCatalog({ query })
+    writeJson(path.join(dirs.rawDir, `${runId}.json`), {
+      endpoints: result.endpoints,
+      results: result.results.map((item) => ({
+        endpoint_id: item.endpointId,
+        endpoint: item.endpoint,
+        host: item.host,
+        http_status: item.httpStatus,
+        ret: item.ret,
+        errmsg: item.errmsg,
+        status_code: item.statusCode,
+        status_message: item.statusMessage,
+        response_text_sha256: item.responseTextSha256,
+        request: item.request,
+        body: item.body,
+      })),
+    })
+    const summary = summarizeCapCutEditorCatalog(result)
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      summary,
+    })
+    const totals = result.results.reduce((acc, item) => ({
+      categories: acc.categories + item.categoryCount,
+      effects: acc.effects + item.effectCount,
+      palettes: acc.palettes + item.paletteCount,
+    }), { categories: 0, effects: 0, palettes: 0 })
+    console.log(`[jimeng-browser-proxy] capcut-editor-catalog saved endpoints=${result.endpoints.join(",")} categories=${totals.categories} effects=${totals.effects} palettes=${totals.palettes}`)
     return
   }
 
@@ -3174,6 +3259,7 @@ function parseArgs(argv: string[]): CliArgs {
     && command !== "capcut-collection-templates"
     && command !== "capcut-template-detail"
     && command !== "capcut-template-metadata"
+    && command !== "capcut-editor-catalog"
     && command !== "subjects"
     && command !== "describe-image"
     && command !== "controlnet-preview"
@@ -3370,6 +3456,10 @@ function parseArgs(argv: string[]): CliArgs {
     needBetaModel,
     needCache,
     needRefresh,
+    panel: flags.panel,
+    category: flags.category,
+    lang: flags.lang,
+    region: flags.region,
     scene: flags.scene,
     file: flags.file,
     video: flags.video,

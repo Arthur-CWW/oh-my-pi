@@ -51,7 +51,8 @@ As of 2026-06-10, the committed Jimeng CLI baseline is:
 - `302e088 Document CapCut template method contracts`
 - `8c3dd42 Add signed CapCut endpoint probe`
 - `4d117a2 Recheck Jimeng live generation`
-- current checkpoint: `Classify LV asset/template mutation blockers`
+- `abcc9ca Classify LV mutation blockers`
+- current checkpoint: `Add CapCut editor catalog CLI`
 
 If the thread goal object lags behind this file after a pause, resume from this document and the latest Git checkpoint. The active working rule is: background-only reversal, direct/API-first implementation, small proven CLI slices, tests and proof artifacts before each commit, and no async daemon until the API surface is settled.
 
@@ -430,8 +431,8 @@ Static API inventory is now available as the systematic coverage map:
 - scans API endpoint strings and public CapCut `bee_prod` catalog URLs, classifies read/generate/upload/mutate/payment/analytics risk, joins the existing known-command map, and ranks uncovered resources for the next slice
 - default output skips fully implemented endpoints so it stays focused on gaps; `--includeKnown` produces an audit inventory
 - proof bundle: `data/jimeng-lab/proof-20260610-static-inventory/`
-- latest proof scanned `data/jimeng-lab/js-sweep/files` plus `packages/jimeng-client/src`, found 247 resources, included 200 non-implemented items, skipped 29 implemented endpoints, and counted 61 high-value gaps after the CapCut collection/row/detail commands were promoted
-- known status counts are now `unknown=159`, `partial=4`, `implemented=29`, `dry_run_only=4`, `blocked=48`, `captured_only=2`, and `cataloged_only=1`; the five CapCut search/batch/preset-related endpoints above are blocked with exact replay evidence and recommended action `capture_exact_payload`
+- latest proof scanned `data/jimeng-lab/js-sweep/files` plus `packages/jimeng-client/src`, found 247 resources, included 200 non-implemented items, skipped 33 implemented endpoints, and counted 61 high-value gaps after the CapCut collection/row/detail and LV editor catalog commands were promoted
+- known status counts are now `unknown=155`, `partial=4`, `implemented=33`, `dry_run_only=4`, `blocked=48`, `captured_only=2`, and `cataloged_only=1`; the five CapCut search/batch/preset-related endpoints above are blocked with exact replay evidence and recommended action `capture_exact_payload`
 - seven video-generation helper endpoints are also now explicitly blocked/capture-needed instead of generic unknowns:
   - `/mweb/v1/video_generate/get_switch_model_queue_info`: safe no-spend probes with empty, `model_req_key`, `model_req_keys`, and scene bodies returned `ret=1000 invalid parameter`
   - `/mweb/v1/video_generate/pre_process` and `/mweb/v1/video_generate/mget_pre_process_result`: frontend task submit/result pair; capture exact UI payload and task ids before promotion
@@ -473,6 +474,11 @@ Static API inventory is now available as the systematic coverage map:
   - EverPhoto/LV sync/promote: `/lv/v1/ever_photo/batch_sync_asset` and `/lv/v1/ever_photo/promote_asset`
   - Jimeng workbench mutations: `/mweb/v1/remove_history` and `/mweb/v1/update_video_default_bgm`
 - proof bundle: `data/jimeng-lab/proof-20260610-static-locate-lv-mutation-blockers/`; no live mutation requests were sent
+- `jimeng-browser-proxy capcut-editor-catalog` is now live-proved without generation spend or browser foregrounding for LV editor catalog data:
+  - implemented endpoints: `/lv/v1/effect/get_panel_info`, `/lv/v1/effect/get_category_effects`, `/lv/v1/effect/get_all_fonts`, and `/lv/v1/editor/plane/color/feed`
+  - useful flags: `--endpoints panel,effects,fonts,colors,all`, `--panel`, `--category`, `--limit`, `--offset`, `--lang`, `--region`, `--capcut-lan`, and `--capcut-loc`
+  - latest proof returned 14 font categories, 745 font/effect rows, and 20 color palettes
+  - proof bundles: `data/jimeng-lab/proof-20260610-static-locate-lv-editor-catalog-reads/`, `data/jimeng-lab/proof-20260610-lv-editor-catalog-probe-{panel-info,category-effects,all-fonts,color-feed}/`, `data/jimeng-lab/proof-20260610-lv-editor-catalog-cli/`, and refreshed `data/jimeng-lab/proof-20260610-static-inventory/`
 - `/mweb/v1/get_history` is now marked `blocked` in the worklist/inventory: safe direct probes with plain, frontend-derived, and explicit `workspace_id=14199856180236` bodies all returned `ret=0` and empty `records_list`; use `assets`, `history-records`, and `history-queue` until a non-empty UI capture proves a useful list contract
 - normalized proof files contain no credential markers
 

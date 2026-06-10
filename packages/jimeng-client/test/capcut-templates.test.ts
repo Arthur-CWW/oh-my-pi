@@ -486,6 +486,27 @@ describe("CapCut commercial template helpers", () => {
       ret: "0",
       errmsg: "success",
     })
+
+    const catalogResult = await runCapCutEndpointProbe({
+      client,
+      probe: {
+        endpoint: "/lv/v1/effect/get_panel_info",
+        variants: [
+          { name: "fonts", body: { panel: "fonts", limit: 20, offset: 0 } },
+        ],
+        lan: "en",
+        loc: "us",
+        userAgent: "UnitTest/1.0",
+      },
+    })
+
+    expect(requests[1]?.url).toBe("https://edit-api-sg.capcut.com/lv/v1/effect/get_panel_info")
+    expect(JSON.parse(String(requests[1]?.init?.body))).toEqual({ panel: "fonts", limit: 20, offset: 0 })
+    expect(catalogResult.results[0]).toMatchObject({
+      name: "fonts",
+      ret: "0",
+      errmsg: "success",
+    })
   })
 
   test("routes signed CapCut task probes to the feed API host", async () => {
