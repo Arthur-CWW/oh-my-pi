@@ -38,6 +38,7 @@ As of 2026-06-10, the committed Jimeng CLI baseline is:
 - `cf2b953 Document background Jimeng automation preference`
 - `e5e3539 Add Jimeng subject lifecycle CLI`
 - `6fc9948 Add Jimeng voice clone CLI coverage`
+- `e8313de Add Jimeng workbench assets CLI`
 
 If the thread goal object lags behind this file after a pause, resume from this document and the latest Git checkpoint. The active working rule is: background-only reversal, direct/API-first implementation, small proven CLI slices, tests and proof artifacts before each commit, and no async daemon until the API surface is settled.
 
@@ -286,6 +287,17 @@ Workspace/workbench asset listing is now live-proved without generation spend:
 - proof bundle: `data/jimeng-lab/proof-20260610-assets/`
 - latest proof returned `asset_count=1`, `has_more=false`, `next_offset=1780998990927`, first `asset_id=39148697060354`, `submit_id=a6bbee65-bed0-4e5b-aaf1-5ab466137b82`, `status=50`, `generated_item_count=4`, `model_req_key=high_aes_general_v50`, response hash `5373ac3f6339e82f7f3090059b742d83b17b9b438151476993466ae6d105f312`, and normalized summary hash `10ba3a679c2e7e472c20fb186dedbd5289687c2a5b0aba7e88a0509bf17a4af8`
 
+History queue/status lookup is now live-proved without generation spend:
+
+- `jimeng-browser-proxy history-queue`
+- direct `/mweb/v1/get_history_queue_info` with logged-in browser session headers
+- frontend bundle evidence maps `getHistoryQueueInfo({historyIds})`; direct wire body must be `history_ids`
+- useful flags: `--historyId`, `--historyIds`
+- negative casing proof: `{"historyIds":["39148697060354"]}` returned `ret=1000`, `errmsg=invalid parameter`
+- normalized summaries keep per-history status, queue index/status/length, priority, polling interval/timeout, display thresholds, forecast cost time when present, and debug-info hashes while omitting raw queue debug strings
+- proof bundle: `data/jimeng-lab/proof-20260610-history-queue/`
+- latest proof returned `entry_count=1`, `history_id=39148697060354`, `status=0`, `queue_status=3`, `queue_length=0`, `polling_interval_seconds=30`, `polling_timeout_seconds=86400`, response hash `292217828c13e57d7908a146e9496d36194c57ab075d547a24e74c7eb61ea8c0`, and debug-info hash `f71e62a6cfa3199b9974993f1774d6161383110784671d6fc9c3fa945072182e`
+
 The next slice is **lip-sync submit capture and reference-video consumers**. Use the VOD provider reference, ImageX avatar reference, and frontend captures to unlock live lip-sync, reference-video, multimodal/all-around reference, pose/style/depth/canny controls, and live end-frame/multi-frame image-to-video paths.
 
 Immediate next slices:
@@ -397,6 +409,7 @@ jimeng-browser-proxy templates
 jimeng-browser-proxy short-videos
 jimeng-browser-proxy overseas-short-videos
 jimeng-browser-proxy assets
+jimeng-browser-proxy history-queue
 jimeng-browser-proxy canvas
 ```
 

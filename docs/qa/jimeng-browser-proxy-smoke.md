@@ -127,6 +127,59 @@ rg -n "https://|x-signature|x-expires|byteimg|SIGNED_URL" \
 
 Expected result: no matches.
 
+## History Queue Info Smoke
+
+Dry-run request-shape proof:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts history-queue \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --historyId 39148697060354 \
+  --outDir data/jimeng-lab/proof-20260610-history-queue \
+  --dryRun
+```
+
+Live no-spend proof:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts history-queue \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --historyId 39148697060354 \
+  --outDir data/jimeng-lab/proof-20260610-history-queue
+```
+
+Result:
+
+```txt
+history-queue saved count=1 statuses=39148697060354:3
+ret=0
+errmsg=success
+response_sha256=292217828c13e57d7908a146e9496d36194c57ab075d547a24e74c7eb61ea8c0
+history_id=39148697060354
+status=0
+queue_status=3
+queue_length=0
+polling_interval_seconds=30
+polling_timeout_seconds=86400
+debug_info_sha256=f71e62a6cfa3199b9974993f1774d6161383110784671d6fc9c3fa945072182e
+```
+
+Confirmed wire casing:
+
+```txt
+{"history_ids":["39148697060354"]} -> ret=0, errmsg=success
+{"historyIds":["39148697060354"]} -> ret=1000, errmsg=invalid parameter
+```
+
+The normalized summary was checked for signed URL and raw queue-debug leakage:
+
+```bash
+rg -n "https://|x-signature|byteimg|internal-queue-name|dreamina_matrix_queue_name|debug_info\"" \
+  data/jimeng-lab/proof-20260610-history-queue/normalized
+```
+
+Expected result: no matches.
+
 ## Voice / TTS Smoke
 
 Refreshed the logged-in session from the background Jimeng browser:

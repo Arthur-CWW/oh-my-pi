@@ -25,6 +25,7 @@ Use the browser as an authenticated session holder and API discovery surface. Mo
 | `/mweb/v1/aigc_draft/generate` | POST | Unified workbench submit for current text-to-image, text-to-video, first-frame image-to-video, and lip-sync draft generation paths. | Implemented for workbench text-to-image, text-to-video templates, and local-upload-backed image-to-video; dry-run-proved for VOD and image/avatar lip-sync provider inputs |
 | `/mweb/v1/get_asset_list` | POST | Poll/list workspace assets and completed image results. | Implemented for workbench text-to-image polling and no-spend `assets` listing |
 | `/mweb/v1/get_history_by_ids` | POST | Older/general task polling by `submit_id`. | Implemented for captured history-based templates |
+| `/mweb/v1/get_history_queue_info` | POST | Read-only queue/progress detail lookup for active or historical generation records. | Implemented as no-spend `history-queue`; live-proved against a completed image history id |
 | `/mweb/v1/creation_agent/v2/conversation` | POST/SSE | Older agent text-to-image conversation submit. | Preserved |
 | `/mweb/v1/creation_agent/v2/get_agent_config` | POST | Agent/tool configuration payload. | Cataloged only |
 | `/mweb/v1/creation_agent/v2/skill/list` | POST | Available agent skills/tools. | Cataloged only |
@@ -1304,6 +1305,63 @@ normalized_summary_sha256=10ba3a679c2e7e472c20fb186dedbd5289687c2a5b0aba7e88a050
 ```
 
 Normalized summaries retain durable provider URIs, IDs, prompts, model keys, status, dimensions, and URL-presence booleans. Signed media URLs remain only in ignored raw proof files under `data/**`.
+
+## History Queue Info
+
+`jimeng-browser-proxy history-queue` directly calls `/mweb/v1/get_history_queue_info` as a no-spend status/progress probe for existing history ids. This is useful for future local job UX without starting the async daemon yet.
+
+Frontend bundle evidence:
+
+```txt
+getHistoryQueueInfo({ historyIds })
+→ POST /mweb/v1/get_history_queue_info
+→ frontend JSON transform sends history_ids on the wire
+```
+
+Confirmed wire request:
+
+```json
+{
+  "history_ids": ["39148697060354"]
+}
+```
+
+Negative casing probe:
+
+```txt
+{"historyIds":["39148697060354"]} -> ret=1000, errmsg=invalid parameter
+```
+
+Normalized fields:
+
+- per-history `status`
+- `queue_info.queue_idx`
+- `queue_info.priority`
+- `queue_info.queue_status`
+- `queue_info.queue_length`
+- polling interval and timeout seconds
+- queue display thresholds
+- `forecast_cost_time` when present
+- raw `debug_info` is not included in normalized output; only `debug_info_present` and `debug_info_sha256`
+
+Latest live proof:
+
+```txt
+proof_bundle=data/jimeng-lab/proof-20260610-history-queue/
+ret=0
+errmsg=success
+entry_count=1
+history_id=39148697060354
+status=0
+queue_status=3
+queue_length=0
+polling_interval_seconds=30
+polling_timeout_seconds=86400
+response_sha256=292217828c13e57d7908a146e9496d36194c57ab075d547a24e74c7eb61ea8c0
+debug_info_sha256=f71e62a6cfa3199b9974993f1774d6161383110784671d6fc9c3fa945072182e
+```
+
+The normalized proof was checked for signed URL and raw queue-debug leakage.
 
 ## Useful Future Capture Targets
 

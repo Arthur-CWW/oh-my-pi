@@ -111,7 +111,24 @@ Important capability notes from help output:
 
 ### 5) Optional queue status
 - `POST https://jimeng.jianying.com/mweb/v1/get_history_queue_info`
-- Not required for minimal direct client; useful for UX progress.
+- Implemented as `jimeng-browser-proxy history-queue`.
+- No-spend/read-only status probe for existing history ids.
+- Frontend service takes camelCase `getHistoryQueueInfo({ historyIds })`, but the wire body must be snake_case:
+
+```json
+{ "history_ids": ["39148697060354"] }
+```
+
+- Negative proof: posting `historyIds` returned `ret=1000`, `errmsg=invalid parameter`.
+- Latest proof returned:
+  - `ret=0`, `errmsg=success`
+  - `history_id=39148697060354`
+  - `status=0`
+  - `queue_status=3`
+  - `queue_length=0`
+  - `polling_interval_seconds=30`
+  - `polling_timeout_seconds=86400`
+  - proof bundle `data/jimeng-lab/proof-20260610-history-queue/`
 
 ### 6) Non-generating model/tool/persona/voice catalog
 - `POST https://jimeng.jianying.com/mweb/v1/creation_agent/v2/skill/list`
@@ -1645,6 +1662,7 @@ Current support matrix:
 | `lip-sync-config` | implemented in `jimeng-browser-proxy` | No-spend direct lip-sync/digital-human model config for image/avatar and video modes. |
 | `lip-sync` | dry-run-proved in `jimeng-browser-proxy` | Browser proxy can prepare VOD-reference and image/avatar lip-sync provider inputs from VOD/ImageX provider references plus TTS voice flags. Live submit still needs a frontend submit capture/compare. |
 | `assets` | implemented in `jimeng-browser-proxy` | No-spend direct `/mweb/v1/get_asset_list` workspace/workbench asset history with request flags for count, asset types, mode, direction, order, timestamp cursor, favorite filter, story-agent visibility, and workspace id. Latest proof returned one completed image asset with four generated image items and no signed URLs in normalized output. |
+| `history-queue` | implemented in `jimeng-browser-proxy` | No-spend direct `/mweb/v1/get_history_queue_info` lookup with `--historyId`/`--historyIds`; latest proof returned queue status `3`, polling interval `30s`, and no raw debug info in normalized output. |
 | `templates` | implemented in `jimeng-browser-proxy` | No-spend direct `/mweb/v1/get_explore` template mining with prompt/model/usage normalization. |
 | `overseas-short-videos` | implemented in `jimeng-browser-proxy` | No-spend direct `/mweb/v1/feed_short_video` short-video/reference mining with ranking and video metadata normalization. |
 | `capcut-categories` | implemented in `jimeng-browser-proxy` | No-spend signed CapCut `/lv/v1/cc_web/plane/get_categories` commercial template category catalog. |
