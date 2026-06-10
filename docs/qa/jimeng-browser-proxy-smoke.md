@@ -1991,6 +1991,73 @@ text2image with data/jimeng-captures/20260609095503-text2image-submit/capture-te
 next_action=recapture current frontend text-to-image submit through background CDP before claiming paid-live CLI support for this path.
 ```
 
+## Subscription-Account Live Generation Refresh
+
+Arthur explicitly approved another small live/subscription-account smoke on 2026-06-10 to confirm the current logged-in account still produces actual media artifacts.
+
+Manifest:
+
+```txt
+data/jimeng-lab/proof-20260610-subscription-live-generation-refresh/manifest.md
+```
+
+Commands rerun:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts session \
+  --session-out data/jimeng-lab/raw/session-bundle-current.json
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts tts \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --voice-id 7597003459665072686 \
+  --voice-title "直爽女大" \
+  --text "三秒告诉你为什么这个蛋白棒适合下午三点犯困的时候。第一口像甜点，但配料表很干净。" \
+  --outDir data/jimeng-lab/proof-20260610-subscription-live-generation-refresh/tts
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts text2video \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --capture data/jimeng-lab/raw/jimeng-network-capture-video-01.json \
+  --prompt "韩系美妆健身UGC创作者在明亮厨房里拿起蛋白棒，真实手机自拍质感，前三秒展示下午犯困痛点，动作自然，画面干净，无字幕，无水印，不要生成可读文字。" \
+  --durationSec 3 \
+  --ratio 9:16 \
+  --videoResolution 720p \
+  --modelVersion 3.0fast \
+  --seed 2026061001 \
+  --outDir data/jimeng-lab/proof-20260610-subscription-live-generation-refresh/text2video \
+  --pollIntervalMs 10000 \
+  --maxPolls 40
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts image2video \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --capture data/jimeng-lab/raw/jimeng-network-capture-video-01.json \
+  --image data/jimeng-lab/ugc-studio-kbeauty-image/artifacts/jimeng-kbeauty-01.png \
+  --prompt "韩系美妆达人手机自拍风格，手里拿着蛋白棒自然靠近镜头，像真实TikTok种草开场，动作轻微自然，明亮厨房自然光，无字幕，无水印，不要生成可读文字。" \
+  --durationSec 3 \
+  --ratio 9:16 \
+  --videoResolution 720p \
+  --modelVersion 3.0fast \
+  --seed 2026061002 \
+  --outDir data/jimeng-lab/proof-20260610-subscription-live-generation-refresh/image2video \
+  --pollIntervalMs 10000 \
+  --maxPolls 40
+```
+
+Results:
+
+```txt
+tts: ret=0, errmsg=success, artifact=data/jimeng-lab/proof-20260610-subscription-live-generation-refresh/tts/artifacts/直爽女大-7597003459665072686.mp3, mp3 audio, duration=8.616000s
+text2video: submitId=0781e145-8ead-45e0-8ba7-5a4feb7ee95d, historyId=35925877254412, status=50, artifact=data/jimeng-lab/proof-20260610-subscription-live-generation-refresh/text2video/artifacts/0781e145-8ead-45e0-8ba7-5a4feb7ee95d-00.mp4, 704x1248 h264, duration=3.016667s
+image2video: submitId=87b264f4-4997-4390-a0fe-e5d06948a759, historyId=35924034178572, status=50, artifact=data/jimeng-lab/proof-20260610-subscription-live-generation-refresh/image2video/artifacts/87b264f4-4997-4390-a0fe-e5d06948a759-00.mp4, 704x1248 h264, duration=3.016667s
+thumbnails=data/jimeng-lab/proof-20260610-subscription-live-generation-refresh/_validation/{text2video-thumb-1s.jpg,image2video-thumb-1s.jpg}
+```
+
+Current blocked paid-live replay:
+
+```txt
+text2image with data/jimeng-captures/20260609095503-text2image-submit/capture-template.raw.json still returns ret=3018, errmsg=permission denied.
+next_action=recapture current frontend text-to-image submit through background CDP before claiming paid-live CLI support for this path.
+```
+
 ## Verification
 
 ```bash

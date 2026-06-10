@@ -437,6 +437,14 @@ Paid-live generation smoke is now proven against the subscription account with e
 - stale workbench `text2image` capture `data/jimeng-captures/20260609095503-text2image-submit/capture-template.raw.json` now returns `ret=3018`, `errmsg=permission denied` even after session refresh; recapture the current frontend text-to-image submit before claiming paid-live CLI support for that path
 - use precise proof labels from here on: `paid-live generation`, `read-only live`, `upload live`, `mutate live`, or `dry-run`
 
+Fresh subscription-account generation was rechecked on 2026-06-10 with explicit approval:
+
+- proof bundle: `data/jimeng-lab/proof-20260610-subscription-live-generation-refresh/`
+- `jimeng-browser-proxy tts` returned `ret=0`, saved `直爽女大-7597003459665072686.mp3`, and validated as `8.616000s` MP3 audio
+- `jimeng-browser-proxy text2video` live-submitted `submitId=0781e145-8ead-45e0-8ba7-5a4feb7ee95d`, reached terminal `status=50`, saved a `704x1248` H.264 MP4, and validated as `3.016667s`
+- `jimeng-browser-proxy image2video` live-submitted `submitId=87b264f4-4997-4390-a0fe-e5d06948a759`, reached terminal `status=50`, saved a `704x1248` H.264 MP4, and validated as `3.016667s`
+- current text-to-image replay against `data/jimeng-captures/20260609095503-text2image-submit/capture-template.raw.json` still returns `ret=3018`, `errmsg=permission denied`; the next action is still a fresh background CDP frontend submit capture
+
 The next slice is **lip-sync submit capture and reference-video consumers**. Use the VOD provider reference, ImageX avatar reference, and frontend captures to unlock live lip-sync, reference-video, multimodal/all-around reference, pose/style/depth/canny controls, and live end-frame/multi-frame image-to-video paths.
 
 Immediate next slices:
