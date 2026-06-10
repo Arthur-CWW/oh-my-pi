@@ -1718,6 +1718,7 @@ Current support matrix:
 | `history-queue` | implemented in `jimeng-browser-proxy` | No-spend direct `/mweb/v1/get_history_queue_info` lookup with `--historyId`/`--historyIds`; latest proof returned queue status `3`, polling interval `30s`, and no raw debug info in normalized output. |
 | `history-records` | implemented in `jimeng-browser-proxy` | No-spend direct `/mweb/v1/get_history_by_ids` lookup by submit id or history id with schema-backed normalization. |
 | `video-info` | implemented in `jimeng-browser-proxy` | No-spend direct `/mweb/v1/get_video_by_vid` VOD metadata lookup by `vid`; latest proof confirmed `{"vids":[...]}` and returned `704x1248`, `5s`, `24fps`, `720p`. |
+| `capture-analyze` | implemented in `jimeng-browser-proxy` | Offline CDP `raw-network.jsonl` analyzer/ranker with risk classes, shape summaries, static endpoint string hints, sanitized markdown/JSON, and local `endpoint-probe` replay candidates. |
 | `endpoint-probe` | implemented in `jimeng-browser-proxy` | Generic explicit replay/probe helper for candidate JSON body variants; writes raw local response plus normalized request/response shape summaries for faster promotion into typed commands. |
 | `templates` | implemented in `jimeng-browser-proxy` | No-spend direct `/mweb/v1/get_explore` template mining with prompt/model/usage normalization. |
 | `overseas-short-videos` | implemented in `jimeng-browser-proxy` | No-spend direct `/mweb/v1/feed_short_video` short-video/reference mining with ranking and video metadata normalization. |
@@ -1798,9 +1799,21 @@ Do not commit raw captures or generated media. If a redacted summary is promoted
 
 ## Endpoint replay/probe accelerator
 
-`jimeng-browser-proxy endpoint-probe` is the first "tool that builds the tool" for this reversal workflow. It replays explicit candidate JSON bodies against one endpoint, stores raw local responses under ignored `data/**`, and writes a normalized shape summary that is small enough to paste into agent context.
+`jimeng-browser-proxy capture-analyze` and `jimeng-browser-proxy endpoint-probe` are the first "tool that builds the tool" layer for this reversal workflow. `capture-analyze` turns CDP `raw-network.jsonl` into a ranked worklist with risk classes, request/response shape summaries, initiator hints, and local replay candidate JSON. `endpoint-probe` then replays explicit candidate JSON bodies against one endpoint, stores raw local responses under ignored `data/**`, and writes a normalized shape summary that is small enough to paste into agent context.
 
-Use it after CDP/static evidence identifies a candidate endpoint; do not use it as a blind fuzzer against write/generate/payment endpoints.
+Use these tools after a real CDP capture; do not use them as blind fuzzers against write/generate/payment endpoints.
+
+Capture analyzer example:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts capture-analyze \
+  --rawNetwork data/jimeng-captures/20260610-subject-create-ui/raw-network.jsonl \
+  --staticRoot packages/jimeng-client/src \
+  --outDir data/jimeng-lab/proof-20260610-capture-analyze-subject-create-v3 \
+  --limit 20
+```
+
+Latest proof analyzed 138 events / 27 requests into 5 ranked candidates and 1 safe replay candidate. The top endpoints were `/mweb/v1/imagex/submit_audit_job` (`upload`, not replay-safe), `/mweb/v1/get_unread_count` (`read`, replay-safe), and `/mweb/v1/get_upload_token` (`upload`, not replay-safe). Normalized proof files contain no signed URL values.
 
 Example:
 
@@ -1823,16 +1836,16 @@ normalized summary contains host/path/query keys, request/response shape summari
 The recommended fast loop is:
 
 1. **Dynamic:** capture one UI action with CDP, saving raw network and redacted summary.
-2. **Static:** use `ast-grep` or targeted bundle search around endpoint names, initiator bundle URLs, enum names, and request builder constants.
-3. **Replay:** run `endpoint-probe` with 2-4 likely body variants to identify exact casing and required fields.
-4. **Promote:** implement a dedicated typed CLI command with permissive schema validation and a live/dry-run proof.
+2. **Analyze:** run `capture-analyze` to rank endpoints, classify risk, summarize shapes, and produce safe replay candidates.
+3. **Static:** use `ast-grep` or targeted bundle search around endpoint names, initiator bundle paths, enum names, and request builder constants when the analyzer output needs semantic labels.
+4. **Replay:** run `endpoint-probe` with 2-4 likely body variants to identify exact casing and required fields.
+5. **Promote:** implement a dedicated typed CLI command with permissive schema validation and a live/dry-run proof.
 
 ## Next reverse target (immediate)
-1. Add a capture analyzer/ranker that turns `raw-network.jsonl` into candidate endpoint JSON with risk class, initiator bundle URLs, request/response shape summaries, and suggested `endpoint-probe` variants.
-2. Capture real frontend VOD and image/avatar lip-sync submits and compare them against the dry-run provider-input plans before enabling live generation.
-3. Use the VOD upload path to unlock reference-video and multimodal/all-around reference flows.
-4. Capture the frontend's explicit end-frame/multi-frame mode and live-prove `frames2video` only after confirming the mode-specific payload contract.
-5. Expand template/research mining beyond direct Explore/feed_short_video with CapCut template search and plane endpoints.
-6. Add strict `1019` shark breaker/cooldown budgets to the consolidated CLI path.
-7. Capture/approve subject/persona `generate_voice` live submit and custom voice clone submit/mutation flows.
-8. Add multipart/chunked VOD upload only when large reference videos require it.
+1. Capture real frontend VOD and image/avatar lip-sync submits and compare them against the dry-run provider-input plans before enabling live generation.
+2. Use the VOD upload path to unlock reference-video and multimodal/all-around reference flows.
+3. Capture the frontend's explicit end-frame/multi-frame mode and live-prove `frames2video` only after confirming the mode-specific payload contract.
+4. Expand template/research mining beyond direct Explore/feed_short_video with CapCut template search and plane endpoints.
+5. Add strict `1019` shark breaker/cooldown budgets to the consolidated CLI path.
+6. Capture/approve subject/persona `generate_voice` live submit and custom voice clone submit/mutation flows.
+7. Add multipart/chunked VOD upload only when large reference videos require it.

@@ -253,6 +253,57 @@ Expected result:
 normalized history-records proofs have no signed URLs
 ```
 
+## Capture Analyzer Smoke
+
+`capture-analyze` is the offline ranking step between passive CDP capture and endpoint replay. It does not load a browser session or spend generation quota.
+
+Proof command:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts capture-analyze \
+  --rawNetwork data/jimeng-captures/20260610-subject-create-ui/raw-network.jsonl \
+  --staticRoot packages/jimeng-client/src \
+  --outDir data/jimeng-lab/proof-20260610-capture-analyze-subject-create-v3 \
+  --limit 20
+```
+
+Result:
+
+```txt
+capture-analyze saved candidates=5 replay=1
+events=138
+requests=27
+top_1=/mweb/v1/imagex/submit_audit_job risk=upload safe_replay=false
+top_2=/mweb/v1/get_unread_count risk=read safe_replay=true
+top_3=/mweb/v1/get_upload_token risk=upload safe_replay=false
+safe_replay_candidate=/mweb/v1/get_unread_count
+```
+
+Proof files:
+
+```txt
+data/jimeng-lab/proof-20260610-capture-analyze-subject-create-v3/normalized/capture-analyze-20260610024757-summary.md
+data/jimeng-lab/proof-20260610-capture-analyze-subject-create-v3/normalized/capture-analyze-20260610024757-analysis.json
+data/jimeng-lab/proof-20260610-capture-analyze-subject-create-v3/raw/capture-analyze-20260610024757-endpoint-probe-candidates.json
+```
+
+The normalized analyzer output was checked for signed URL leakage:
+
+```bash
+if rg -n "https://|x-signature|x-expires|expire_time|byteimg|douyinpic|vlabvod" \
+  data/jimeng-lab/proof-20260610-capture-analyze-subject-create-v3/normalized; then
+  exit 1
+else
+  echo "normalized capture-analysis proof has no signed URLs"
+fi
+```
+
+Expected result:
+
+```txt
+normalized capture-analysis proof has no signed URLs
+```
+
 ## Endpoint Probe / VOD Metadata Smoke
 
 `endpoint-probe` is the faster replay step for future reversal work. It does not guess or fuzz automatically; it replays explicit JSON body variants from CDP/static evidence, then writes raw local bodies plus normalized request/response shape summaries.

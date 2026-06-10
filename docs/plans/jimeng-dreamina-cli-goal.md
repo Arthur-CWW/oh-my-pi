@@ -330,6 +330,18 @@ VOD video metadata lookup is now live-proved without generation spend and schema
 - proof bundle: `data/jimeng-lab/proof-20260610-video-info/`
 - latest proof returned `vid=v03870g10004d8k1u4nog65hb08dnhig`, `duration=5s`, `width=704`, `height=1248`, `fps=24`, `format=mp4`, `definition=720p`, `size_bytes=4285498`, response hash `06ae536f69e703297f9cba1988665d0dcf4ad7c05bc117f79332931ec010a17d`
 
+Capture analysis/ranking is now available as the repeatable "tool that builds the tool" stage:
+
+- `jimeng-browser-proxy capture-analyze`
+- offline; does not load a browser session or foreground any UI
+- input: `raw-network.jsonl` from `jimeng-network-recorder`, either via `--rawNetwork` or `--captureDir`
+- useful flags: `--staticRoot`, `--limit`, `--includeRisky`
+- decodes recorder events with permissive Zod schemas so additive CDP/provider fields do not break analysis, while unsupported event shapes fail explicitly
+- normalized output ranks endpoints by UGC usefulness, classifies risk (`read`, `upload`, `generate`, `mutate`, `payment`, etc.), summarizes request/response shapes, keeps `ret`/`errmsg` and hashes, and records static endpoint string hints without signed URLs
+- raw local output writes replay candidate JSON for `endpoint-probe`; only read/API-like endpoints are included by default, and risky replay candidates require `--includeRisky`
+- proof bundle: `data/jimeng-lab/proof-20260610-capture-analyze-subject-create-v3/`
+- latest proof analyzed 138 events / 27 requests into 5 ranked candidates and 1 safe replay candidate (`/mweb/v1/get_unread_count`); top ranked endpoint was upload/audit `/mweb/v1/imagex/submit_audit_job`, correctly not replay-safe by default
+
 The next slice is **lip-sync submit capture and reference-video consumers**. Use the VOD provider reference, ImageX avatar reference, and frontend captures to unlock live lip-sync, reference-video, multimodal/all-around reference, pose/style/depth/canny controls, and live end-frame/multi-frame image-to-video paths.
 
 Immediate next slices:
@@ -355,6 +367,7 @@ Maximize useful API coverage and proof quality while keeping live submissions co
 - if a frontend-only Jimeng flow truly requires visible UI interaction, first try to reproduce it through background CDP or CuaDriver; if that still cannot work, record the blocked path and ask before interrupting Arthur's flow
 - for unknown frontend flows, prefer a faster hybrid reversal loop over long manual bundle reading: run background CDP/passive network capture first, use `ast-grep`/targeted structural search to locate the frontend request builder, then replay/compare the direct API request with saved session headers
 - promote the hybrid loop into tooling: CDP recorder for dynamic truth, static search for request-builder semantics, `endpoint-probe` for explicit body replay, then dedicated schema-backed commands for stable contracts
+- run `capture-analyze` after every meaningful `jimeng-network-recorder` capture to produce a ranked, token-efficient worklist before opening frontend bundles by hand
 - use mise-managed developer CLIs such as `ast-grep` when available; install missing local CLIs with `mise` first unless the tool must be a repo/CI dependency
 - validate external Jimeng/CapCut/provider JSON at the boundary with permissive runtime schemas; allow additive extra fields but fail clearly when relied-on response paths drift
 - live generation prompts should be Chinese and in-distribution for the UGC use case
@@ -445,6 +458,7 @@ jimeng-browser-proxy overseas-short-videos
 jimeng-browser-proxy assets
 jimeng-browser-proxy history-queue
 jimeng-browser-proxy history-records
+jimeng-browser-proxy capture-analyze
 jimeng-browser-proxy endpoint-probe
 jimeng-browser-proxy video-info
 jimeng-browser-proxy canvas

@@ -18,6 +18,10 @@ import {
   summarizeCapCutTemplateStaticCatalog,
 } from "./capcut-templates"
 import {
+  analyzeJimengNetworkCaptureFile,
+  writeJimengCaptureAnalysisMarkdown,
+} from "./capture-analyzer"
+import {
   fetchVoiceLibraryFromCapture,
   fetchLipSyncConfigs,
   generateTextToSpeech,
@@ -143,6 +147,7 @@ It refreshes the live frontend session from the browser, then uses the direct cl
 
 Commands:
   session       Save a fresh session bundle from the logged-in Jimeng browser profile
+  capture-analyze Analyze raw CDP network JSONL into ranked endpoint/probe candidates
   catalog       Probe non-generating model/tool/persona/voice config endpoints
   lip-sync-config Fetch no-spend digital-human/lip-sync model configs
   voices        Fetch the built-in voice library from a captured signed feed request
@@ -186,6 +191,10 @@ Options:
   --session <file>              Load a saved session bundle instead of refreshing from CDP
   --session-out <file>          session command output (default: data/jimeng-lab/raw/session-bundle-current.json)
   --capture <file>              Capture template JSON for generation commands
+  --rawNetwork <file>           raw-network.jsonl from jimeng-network-recorder for capture-analyze
+  --captureDir <dir>            Capture directory containing raw-network.jsonl for capture-analyze
+  --staticRoot <dir[,dir]>      Optional source/bundle roots to search for exact endpoint string hints
+  --includeRisky                Include generate/upload/mutate/payment endpoints in replay candidate JSON
   --endpoint <path|url>          Endpoint path or full URL for endpoint-probe
   --method <GET|POST>            HTTP method for endpoint-probe (default: POST)
   --query <query>                Query string override for endpoint-probe
@@ -270,6 +279,11 @@ Options:
   --durationSec <sec>           Video duration seconds for text2video (default from capture/client)
 
 Examples:
+  jimeng-browser-proxy capture-analyze \\
+    --rawNetwork data/jimeng-captures/20260610-subject-create-ui/raw-network.jsonl \\
+    --staticRoot packages/jimeng-client/src \\
+    --outDir data/jimeng-lab/capture-analysis-subject-create
+
   jimeng-browser-proxy session
 
   jimeng-browser-proxy text2image \\
@@ -433,6 +447,7 @@ Live generation uses the browser session but does not foreground the browser. Ke
 interface CliArgs {
   command:
     | "session"
+    | "capture-analyze"
     | "catalog"
     | "endpoint-probe"
     | "lip-sync-config"
@@ -474,6 +489,10 @@ interface CliArgs {
   session?: string
   sessionOut: string
   capture?: string
+  rawNetwork?: string
+  captureDir?: string
+  staticRoots?: string[]
+  includeRisky: boolean
   endpoint?: string
   method?: "GET" | "POST"
   query?: string
@@ -567,6 +586,28 @@ async function main(argv: string[]): Promise<void> {
     mkdirSync(path.dirname(file), { recursive: true })
     writeJson(file, session)
     console.log(`[jimeng-browser-proxy] session saved: ${file}`)
+    return
+  }
+
+  if (args.command === "capture-analyze") {
+    const rawNetworkFile = resolveRawNetworkFile(args)
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const runId = `capture-analyze-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const analysis = analyzeJimengNetworkCaptureFile({
+      rawNetworkFile,
+      staticRoots: args.staticRoots,
+      limit: args.limit,
+      includeRisky: args.includeRisky,
+    })
+    writeJson(path.join(dirs.normalizedDir, `${runId}-analysis.json`), analysis)
+    writeJson(path.join(dirs.rawDir, `${runId}-endpoint-probe-candidates.json`), {
+      source_path: analysis.source_path,
+      generated_at_iso: analysis.analyzed_at_iso,
+      candidates: analysis.endpoint_probe_candidates,
+      warning: "Local-only replay bodies. Re-check risk_class before replaying generate, upload, mutate, or payment endpoints.",
+    })
+    writeFileSync(path.join(dirs.normalizedDir, `${runId}-summary.md`), writeJimengCaptureAnalysisMarkdown(analysis), "utf8")
+    console.log(`[jimeng-browser-proxy] capture-analyze saved candidates=${analysis.candidates.length} replay=${analysis.endpoint_probe_candidates.length}`)
     return
   }
 
@@ -2525,6 +2566,7 @@ function parseArgs(argv: string[]): CliArgs {
   const command = argv[0]
   if (
     command !== "session"
+    && command !== "capture-analyze"
     && command !== "catalog"
     && command !== "endpoint-probe"
     && command !== "lip-sync-config"
@@ -2652,6 +2694,10 @@ function parseArgs(argv: string[]): CliArgs {
     session: flags.session,
     sessionOut: flags["session-out"] ?? "data/jimeng-lab/raw/session-bundle-current.json",
     capture: flags.capture,
+    rawNetwork: flags.rawNetwork ?? flags["raw-network"],
+    captureDir: flags.captureDir ?? flags["capture-dir"],
+    staticRoots: parseCsvFlag(flags.staticRoot ?? flags["static-root"]),
+    includeRisky: flags.includeRisky === "true" || flags["include-risky"] === "true",
     endpoint: flags.endpoint,
     method,
     query: flags.query,
@@ -2740,6 +2786,17 @@ function parseArgs(argv: string[]): CliArgs {
 function loadSession(args: CliArgs): Promise<JimengSessionBundle> | JimengSessionBundle {
   if (args.session) return readJson(args.session) as JimengSessionBundle
   return loadJimengSessionFromBrowser({ cdpUrl: args.cdpUrl, targetUrl: args.targetUrl })
+}
+
+function resolveRawNetworkFile(args: CliArgs): string {
+  const file = args.rawNetwork
+    ? path.resolve(args.rawNetwork)
+    : args.captureDir
+      ? path.resolve(args.captureDir, "raw-network.jsonl")
+      : null
+  if (!file) throw new Error("capture-analyze requires --rawNetwork or --captureDir")
+  if (!existsSync(file)) throw new Error(`raw-network.jsonl not found: ${file}`)
+  return file
 }
 
 function parseFlags(argv: string[]): Record<string, string> {

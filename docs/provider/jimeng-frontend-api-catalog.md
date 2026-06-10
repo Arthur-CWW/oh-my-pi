@@ -110,11 +110,12 @@ Current schema-backed endpoints include `history-queue`, `history-records`, and 
 Use dynamic and static tools together:
 
 1. Record one UI action through background CDP with `network-recorder.ts`; do not foreground Arthur's browser.
-2. Inspect the small redacted summary first, then use `ast-grep`/targeted bundle search on endpoint names or initiator bundle chunks to recover enum names and request builders.
-3. Replay only explicit candidate JSON bodies with `jimeng-browser-proxy endpoint-probe`; compare `ret`, `errmsg`, and summarized response shapes.
-4. Promote stable read-only or approved contracts into dedicated typed CLI commands with runtime schemas and proof artifacts.
+2. Run `jimeng-browser-proxy capture-analyze` on `raw-network.jsonl` to rank endpoints, classify risk, summarize request/response shapes, and emit replay candidates.
+3. Use `ast-grep`/targeted bundle search on endpoint names or initiator bundle chunks to recover enum names and request builders when the analyzer output needs semantic labels.
+4. Replay only explicit candidate JSON bodies with `jimeng-browser-proxy endpoint-probe`; compare `ret`, `errmsg`, and summarized response shapes.
+5. Promote stable read-only or approved contracts into dedicated typed CLI commands with runtime schemas and proof artifacts.
 
-`endpoint-probe` is intentionally not a blind fuzzer. It is a replay tool for candidate bodies found from CDP/static evidence, with raw outputs kept under ignored `data/**` and normalized shape summaries safe enough to paste into agent context.
+`capture-analyze` and `endpoint-probe` are intentionally not blind fuzzers. The analyzer produces a token-efficient worklist from CDP truth; the probe replays candidate bodies found from CDP/static evidence, with raw outputs kept under ignored `data/**` and normalized shape summaries safe enough to paste into agent context.
 
 Custom voice clone CLI coverage:
 
