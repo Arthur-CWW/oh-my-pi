@@ -50,6 +50,7 @@ describe("UGC workbench design system", () => {
               <CommandSurface
                 value="Generate 8 warmer hooks"
                 onValueChange={() => undefined}
+                leading={<Play size={12} />}
                 actions={<Button size="xs" variant="subtle">Targets</Button>}
                 runButton={<Button size="icon-sm"><Play size={12} /></Button>}
               />

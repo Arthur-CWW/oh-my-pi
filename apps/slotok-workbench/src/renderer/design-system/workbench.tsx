@@ -8,9 +8,9 @@ import { Textarea } from "../components/ui/textarea"
 import { cn } from "../lib/cn"
 import { toneClasses, ugcDesignTokens, type UgcTone } from "./tokens"
 
-export function WorkbenchShell(props: React.HTMLAttributes<HTMLDivElement>) {
+export function WorkbenchShell(props: React.HTMLAttributes<HTMLElement>) {
   return (
-    <div
+    <main
       {...props}
       className={cn(
         "grid min-h-screen grid-cols-[220px_minmax(0,1fr)] overflow-hidden text-xs tracking-normal",
@@ -189,12 +189,14 @@ export function ScoreMeter(props: {
 export function CommandSurface(props: {
   readonly value: string
   readonly onValueChange: (value: string) => void
+  readonly leading?: React.ReactNode
   readonly actions?: React.ReactNode
   readonly runButton?: React.ReactNode
   readonly className?: string
 }) {
   return (
-    <PanelCard tone="floating" density="compact" className={cn("flex items-end gap-2", props.className)}>
+    <PanelCard data-ugc-command-surface tone="floating" density="compact" className={cn("flex items-end gap-2", props.className)}>
+      {props.leading ? <div className="grid h-8 w-8 shrink-0 place-items-center text-primary">{props.leading}</div> : null}
       <Textarea
         value={props.value}
         onChange={(event) => props.onValueChange(event.target.value)}

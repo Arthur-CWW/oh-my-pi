@@ -12,6 +12,7 @@ const reportPath = resolve(repoRoot, "docs/qa/slotok-visual-qa.md")
 const appUrl = "http://127.0.0.1:47521"
 const ugcUrl = `${appUrl}/ugc-studio/`
 const daemonUrl = "http://127.0.0.1:47522"
+const bunExecutable = process.execPath
 
 type FindingStatus = "pass" | "fail" | "warn"
 
@@ -42,7 +43,7 @@ try {
   try {
     const page = await newPage(browser, 1280, 720)
     await page.goto(ugcUrl, { waitUntil: "load" })
-    await page.waitForSelector(".rugc-shell", { timeout: 20_000 })
+    await page.waitForSelector("[data-ugc-studio-root]", { timeout: 20_000 })
 
     const findings: Finding[] = []
     const screenshots: string[] = []
@@ -76,7 +77,7 @@ try {
 
 async function startRenderer(): Promise<void> {
   if (!await isUrlReady(ugcUrl)) {
-    const vite = Bun.spawn(["bun", "run", "dev:renderer"], {
+    const vite = Bun.spawn([bunExecutable, "run", "dev:renderer"], {
       cwd: appRoot,
       stdout: "pipe",
       stderr: "pipe",
@@ -90,7 +91,7 @@ async function startRenderer(): Promise<void> {
 
 async function startDaemon(): Promise<void> {
   if (!await isUrlReady(`${daemonUrl}/api/health`)) {
-    const daemon = Bun.spawn(["bun", "run", "dev:daemon"], {
+    const daemon = Bun.spawn([bunExecutable, "src/daemon/server.ts"], {
       cwd: appRoot,
       stdout: "pipe",
       stderr: "pipe",
@@ -150,11 +151,11 @@ async function captureView(page: Page, name: string, screenshots: string[]): Pro
 
 async function auditView(page: Page): Promise<ViewAudit> {
   return page.evaluate(() => ({
-    commandBarVisible: Boolean(document.querySelector(".rugc-command-bar")),
-    inspectorVisible: Boolean(document.querySelector(".rugc-inspector")),
+    commandBarVisible: Boolean(document.querySelector("[data-ugc-command-surface]")),
+    inspectorVisible: Boolean(document.querySelector("[data-ugc-inspector]")),
     overflowX: document.documentElement.scrollWidth > window.innerWidth,
     title: document.title,
-    view: document.querySelector(".rugc-view-toolbar h1")?.textContent?.trim() ?? "",
+    view: document.querySelector("[data-ugc-view-title]")?.textContent?.trim() ?? "",
   }))
 }
 

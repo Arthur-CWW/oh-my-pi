@@ -51,6 +51,23 @@ import { Button } from "./components/ui/button"
 import { Input } from "./components/ui/input"
 import { Tabs, type TabItem } from "./components/ui/tabs"
 import { Textarea } from "./components/ui/textarea"
+import {
+  CommandSurface,
+  InspectorPanel,
+  MetricRow,
+  PanelCard,
+  PanelHeader,
+  ScoreMeter,
+  SidebarRow,
+  StatusBadge,
+  ToolbarCluster,
+  WorkbenchCanvas,
+  WorkbenchContent,
+  WorkbenchMain,
+  WorkbenchShell,
+  WorkbenchSidebar,
+  WorkbenchTopbar,
+} from "./design-system/workbench"
 import { cn } from "./lib/cn"
 import { ugcStudioWorkspace, type BranchSnapshot, type CreativeCandidate, type JsonValue, type PersonaProfile, type ReferenceProfile, type UgcStudioWorkspace } from "./ugcStudioModel"
 import { createInitialLocalState, type UgcExportManifest, type UgcLocalState, type UgcProviderJob, type UgcReferenceArchive } from "../ugc/local-state"
@@ -654,12 +671,12 @@ export function ReactUgcStudio() {
 
   return (
     <UgcLocalStateContext.Provider value={localState}>
-    <main className="react-ugc-theme rugc-shell">
+    <WorkbenchShell className="react-ugc-theme" data-ugc-studio-root>
       <Sidebar activeView={activeView} onViewChange={setActiveView} />
-      <section className="rugc-main">
+      <WorkbenchMain>
         <Topbar activeViewMeta={activeViewMeta} />
-        <div className="rugc-workbench">
-          <section className="rugc-content">
+        <WorkbenchContent className="grid-cols-[minmax(0,1fr)_314px]">
+          <WorkbenchCanvas className="grid grid-rows-[58px_minmax(0,1fr)] pb-[82px]">
             <ViewToolbar activeView={activeView} onViewChange={setActiveView} />
             <div className="rugc-stage">
               <WorkspaceView
@@ -682,7 +699,7 @@ export function ReactUgcStudio() {
               />
             </div>
             <CommandBar prompt={prompt} onPromptChange={setPrompt} onRun={() => callKie("/api/ugc/kie/plan", request)} busy={busy} />
-          </section>
+          </WorkbenchCanvas>
           <Inspector
             activeView={activeView}
             selectedPersona={selectedPersona}
@@ -693,53 +710,62 @@ export function ReactUgcStudio() {
             busy={busy}
             onMutateLocal={mutateLocal}
           />
-        </div>
-      </section>
-    </main>
+        </WorkbenchContent>
+      </WorkbenchMain>
+    </WorkbenchShell>
     </UgcLocalStateContext.Provider>
   )
 }
 
 function Sidebar(props: { activeView: ReactView; onViewChange: (view: ReactView) => void }) {
   return (
-    <aside className="rugc-sidebar">
-      <div className="rugc-window-dots" aria-hidden="true">
-        <span />
-        <span />
-        <span />
+    <WorkbenchSidebar>
+      <div className="flex h-3 items-center gap-1.5" aria-hidden="true">
+        <span className="h-2 w-2 rounded-full bg-[#ff5f57]" />
+        <span className="h-2 w-2 rounded-full bg-[#ffbd2e]" />
+        <span className="h-2 w-2 rounded-full bg-[#28c840]" />
       </div>
-      <div className="rugc-brand">
-        <Clapperboard className="rugc-brand-icon" />
-        <button type="button">UGC Studio <ChevronDown size={12} /></button>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-primary text-primary-foreground">
+            <Clapperboard size={14} />
+          </span>
+          <Button type="button" variant="ghost" size="xs" className="min-w-0 px-1 font-semibold">
+            <span className="truncate">UGC Studio</span>
+            <ChevronDown size={12} />
+          </Button>
+        </div>
       </div>
-      <button type="button" className="rugc-new-command"><Plus size={13} /> New Command <span>⌘N</span></button>
-      <label className="rugc-search">
+      <Button type="button" variant="workbench" size="sm" className="w-full justify-between">
+        <span className="inline-flex items-center gap-2"><Plus size={13} /> New Command</span>
+        <kbd className="rounded border border-border bg-background px-1 text-[10px] text-muted-foreground">⌘N</kbd>
+      </Button>
+      <label className="flex items-center gap-2 rounded-md border border-border bg-card px-2 py-1.5">
         <Search size={13} />
-        <input value="" readOnly placeholder="Search personas, hooks..." />
+        <Input value="" readOnly placeholder="Search personas, hooks..." className="h-5 border-0 bg-transparent p-0 text-xs shadow-none focus-visible:ring-0" />
       </label>
       <SidebarSection title="Workspace">
         {views.map((view) => {
           const Icon = view.icon
           return (
-            <button
+            <SidebarRow
               key={view.value}
               type="button"
-              className={cn("rugc-side-link", props.activeView === view.value && "active")}
+              active={props.activeView === view.value}
+              icon={<Icon size={14} />}
+              shortcut={`g${view.value.slice(0, 1)}`}
               onClick={() => props.onViewChange(view.value)}
             >
-              <Icon size={14} />
-              <span>{view.label}</span>
-              <kbd>g{view.value.slice(0, 1)}</kbd>
-            </button>
+              {view.label}
+            </SidebarRow>
           )
         })}
       </SidebarSection>
       <SidebarSection title="Campaigns">
         {["Summer Skincare", "Protein Bar Ads", "Hydration Boost", "Coffee Brand", "Archived"].map((label, index) => (
-          <button key={label} type="button" className={cn("rugc-side-link compact", index === 0 && "active-soft")}>
-            <Folder size={13} />
-            <span>{label}</span>
-          </button>
+          <SidebarRow key={label} type="button" active={index === 0} icon={<Folder size={13} />} className="h-7">
+            {label}
+          </SidebarRow>
         ))}
       </SidebarSection>
       <SidebarSection title="Review Queues">
@@ -749,73 +775,80 @@ function Sidebar(props: { activeView: ReactView; onViewChange: (view: ReactView)
           ["Approved", "23"],
           ["Rejected", "12"],
         ].map(([label, count]) => (
-          <button key={label} type="button" className="rugc-side-link compact">
-            {label === "Starred" ? <Star size={13} /> : label === "Approved" ? <CheckCircle2 size={13} /> : label === "Rejected" ? <XCircle size={13} /> : <Inbox size={13} />}
-            <span>{label}</span>
-            <em>{count}</em>
-          </button>
+          <SidebarRow
+            key={label}
+            type="button"
+            icon={label === "Starred" ? <Star size={13} /> : label === "Approved" ? <CheckCircle2 size={13} /> : label === "Rejected" ? <XCircle size={13} /> : <Inbox size={13} />}
+            count={count}
+            className="h-7"
+          >
+            {label}
+          </SidebarRow>
         ))}
       </SidebarSection>
-      <div className="rugc-sidebar-footer">
-        <span>A</span>
+      <div className="mt-auto flex items-center gap-2 border-t border-border pt-3">
+        <span className="grid h-6 w-6 place-items-center rounded-full bg-foreground text-[11px] text-background">A</span>
         <strong>Arthur</strong>
-        <Badge>Pro</Badge>
+        <Badge className="ml-auto">Pro</Badge>
       </div>
-    </aside>
+    </WorkbenchSidebar>
   )
 }
 
 function SidebarSection(props: { title: string; children: React.ReactNode }) {
   return (
-    <section className="rugc-sidebar-section">
-      <h2>{props.title}<Plus size={12} /></h2>
-      <div>{props.children}</div>
+    <section className="grid gap-1.5">
+      <h2 className="mx-1 flex items-center justify-between text-[10px] font-semibold uppercase tracking-normal text-muted-foreground">
+        {props.title}
+        <Plus size={12} />
+      </h2>
+      <div className="grid gap-0.5">{props.children}</div>
     </section>
   )
 }
 
 function Topbar(props: { activeViewMeta: (typeof views)[number] }) {
   return (
-    <header className="rugc-topbar">
-      <div className="rugc-breadcrumb">
+    <WorkbenchTopbar>
+      <div className="flex min-w-0 items-center gap-2 text-muted-foreground">
         <Home size={13} />
         <span>UGC Studio</span>
         <span>/</span>
         <span>Summer Skincare</span>
         <span>/</span>
-        <strong>{props.activeViewMeta.label}</strong>
+        <strong className="truncate text-foreground">{props.activeViewMeta.label}</strong>
       </div>
-      <div className="rugc-top-actions">
-        <label className="rugc-top-search">
+      <div className="flex shrink-0 items-center gap-2">
+        <label className="flex h-8 w-48 items-center gap-2 rounded-md border border-border bg-card px-2">
           <Search size={13} />
-          <input value="" readOnly placeholder="Search" />
-          <kbd>⌘K</kbd>
+          <Input value="" readOnly placeholder="Search" className="h-5 border-0 bg-transparent p-0 text-xs shadow-none focus-visible:ring-0" />
+          <kbd className="rounded border border-border bg-background px-1 text-[10px] text-muted-foreground">⌘K</kbd>
         </label>
-        <button type="button"><Bell size={14} /></button>
-        <button type="button"><Clock size={14} /></button>
-        <button type="button" className="rugc-avatar-button">A</button>
+        <Button type="button" size="icon-sm" variant="workbench" aria-label="Notifications"><Bell size={14} /></Button>
+        <Button type="button" size="icon-sm" variant="workbench" aria-label="History"><Clock size={14} /></Button>
+        <Button type="button" size="icon-sm" variant="subtle" className="rounded-full" aria-label="Arthur">A</Button>
         <Button size="sm" variant="outline">Preview</Button>
         <Button size="sm">Export</Button>
       </div>
-    </header>
+    </WorkbenchTopbar>
   )
 }
 
 function ViewToolbar(props: { activeView: ReactView; onViewChange: (view: ReactView) => void }) {
   return (
-    <div className="rugc-view-toolbar">
-      <div>
-        <p>Summer Skincare / creative search graph</p>
-        <h1>{views.find((view) => view.value === props.activeView)?.label}</h1>
+    <div className="flex h-[58px] items-center justify-between gap-3 border-b border-border bg-card/80 px-4">
+      <div className="min-w-[190px] flex-1">
+        <p className="m-0 truncate text-[11px] text-muted-foreground">Summer Skincare / creative search graph</p>
+        <h1 data-ugc-view-title className="m-0 mt-0.5 truncate text-[15px] font-bold tracking-normal text-foreground">{views.find((view) => view.value === props.activeView)?.label}</h1>
       </div>
-      <div className="rugc-toolbar-actions">
-        <Tabs value={props.activeView} items={viewTabs} onValueChange={props.onViewChange} />
-        <button type="button"><Grid2X2 size={13} /> Board</button>
-        <button type="button"><Table2 size={13} /> Table</button>
-        <button type="button"><Network size={13} /> Graph</button>
-        <button type="button"><Filter size={13} /> Filter</button>
-        <button type="button"><SlidersHorizontal size={13} /> Sort</button>
-      </div>
+      <ToolbarCluster className="max-w-[72%] shrink overflow-x-auto">
+        <Tabs value={props.activeView} items={viewTabs} onValueChange={props.onViewChange} className="shrink-0" />
+        <Button type="button" size="xs" variant="workbench" className="shrink-0 max-[1400px]:hidden"><Grid2X2 size={13} /> Board</Button>
+        <Button type="button" size="xs" variant="workbench" className="shrink-0 max-[1400px]:hidden"><Table2 size={13} /> Table</Button>
+        <Button type="button" size="xs" variant="workbench" className="shrink-0 max-[1400px]:hidden"><Network size={13} /> Graph</Button>
+        <Button type="button" size="xs" variant="workbench" className="shrink-0 max-[1400px]:hidden"><Filter size={13} /> Filter</Button>
+        <Button type="button" size="xs" variant="workbench" className="shrink-0 max-[1400px]:hidden"><SlidersHorizontal size={13} /> Sort</Button>
+      </ToolbarCluster>
     </div>
   )
 }
@@ -1351,7 +1384,7 @@ function Inspector(props: {
 
   if (props.activeView === "provider") {
     return (
-      <aside className="rugc-inspector">
+      <InspectorFrame>
         <InspectorHeader title="KIE Provider" />
         <InspectorCard title="Route policy">
           <MetricRow label="Default" value="dry-run" />
@@ -1362,13 +1395,13 @@ function Inspector(props: {
         <InspectorCard title="Last response">
           <pre className="rugc-json">{props.result}</pre>
         </InspectorCard>
-      </aside>
+      </InspectorFrame>
     )
   }
 
   if (props.activeView === "campaign") {
     return (
-      <aside className="rugc-inspector">
+      <InspectorFrame>
         <InspectorHeader title={props.selectedBranch?.title ?? "Snapshot"} />
         <InspectorCard title="Details">
           <MetricRow label="Stage" value={props.selectedBranch?.focus ?? "Branch"} />
@@ -1404,7 +1437,7 @@ function Inspector(props: {
         </InspectorCard>
         <button
           type="button"
-          className="rugc-danger"
+          className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-left text-xs font-medium text-red-700"
           disabled={props.busy || !props.selectedBranch}
           onClick={() => {
             if (!props.selectedBranch) return
@@ -1416,13 +1449,13 @@ function Inspector(props: {
         >
           Mark as dead end
         </button>
-      </aside>
+      </InspectorFrame>
     )
   }
 
   if (props.activeView === "reference") {
     return (
-      <aside className="rugc-inspector">
+      <InspectorFrame>
         <InspectorHeader title="Reference Archive" />
         <InspectorCard title="Archive counts">
           <MetricRow label="Profiles" value={String(workspace.referenceProfiles.length)} />
@@ -1432,13 +1465,13 @@ function Inspector(props: {
         <InspectorCard title="Latest archive">
           <pre className="rugc-json">{JSON.stringify(referenceArchives[0] ?? {}, null, 2)}</pre>
         </InspectorCard>
-      </aside>
+      </InspectorFrame>
     )
   }
 
   if (props.activeView === "editor") {
     return (
-      <aside className="rugc-inspector">
+      <InspectorFrame>
         <InspectorHeader title="Export Manifests" />
         <InspectorCard title="Final editor">
           <MetricRow label="Tracks" value={String(workspace.finalEditor.tracks.length)} />
@@ -1448,12 +1481,12 @@ function Inspector(props: {
         <InspectorCard title="Latest export">
           <pre className="rugc-json">{JSON.stringify(exportManifests[0] ?? {}, null, 2)}</pre>
         </InspectorCard>
-      </aside>
+      </InspectorFrame>
     )
   }
 
   return (
-    <aside className="rugc-inspector">
+    <InspectorFrame>
       <InspectorHeader title={props.activeView === "review" ? "Candidate" : "Inspector"} />
       <InspectorCard title="Product brief">
         <p>{workspace.productBrief.productName} / {workspace.productBrief.offer}</p>
@@ -1529,48 +1562,63 @@ function Inspector(props: {
           selectedCandidate: props.selectedCandidate?.id,
         }, null, 2)}</pre>
       </InspectorCard>
-    </aside>
+    </InspectorFrame>
+  )
+}
+
+function InspectorFrame(props: { children: React.ReactNode }) {
+  return (
+    <InspectorPanel data-ugc-inspector className="grid content-start gap-3 border-l border-border bg-card/80 p-3.5">
+      {props.children}
+    </InspectorPanel>
   )
 }
 
 function InspectorHeader(props: { title: string }) {
   return (
-    <header className="rugc-inspector-header">
-      <div>
-        <p>Inspector</p>
-        <h2>{props.title}</h2>
-      </div>
-      <div>
-        <button type="button">Creative</button>
-        <button type="button">JSON</button>
-      </div>
-    </header>
+    <PanelHeader
+      eyebrow="Inspector"
+      title={props.title}
+      actions={(
+        <>
+          <Button type="button" size="xs" variant="selected">Creative</Button>
+          <Button type="button" size="xs" variant="ghost">JSON</Button>
+        </>
+      )}
+      className="mb-0"
+    />
   )
 }
 
 function InspectorCard(props: { title: string; children: React.ReactNode }) {
   return (
-    <section className="rugc-inspector-card">
-      <h3>{props.title}</h3>
+    <PanelCard tone="default" density="compact" className="grid gap-2.5 p-3">
+      <h3 className="m-0 text-xs font-semibold tracking-normal text-foreground">{props.title}</h3>
       {props.children}
-    </section>
+    </PanelCard>
   )
 }
 
 function CommandBar(props: { prompt: string; busy: boolean; onPromptChange: (value: string) => void; onRun: () => void }) {
   return (
-    <div className="rugc-command-bar">
-      <Sparkles size={16} />
-      <textarea value={props.prompt} onChange={(event) => props.onPromptChange(event.target.value)} />
-      <div>
-        <button type="button"><Plus size={13} /> Add context</button>
-        <button type="button"><Target size={13} /> Targets</button>
-        <button type="button"><Settings size={13} /> Agent</button>
-      </div>
-      <button type="button" className="run" onClick={props.onRun} disabled={props.busy}>
-        <ArrowUp size={15} />
-      </button>
-    </div>
+    <CommandSurface
+      value={props.prompt}
+      onValueChange={props.onPromptChange}
+      className="absolute bottom-4 left-5 right-5 z-10"
+      leading={<Sparkles size={16} />}
+      actions={(
+        <>
+          <Button type="button" size="xs" variant="subtle"><Plus size={13} /> Add context</Button>
+          <Button type="button" size="xs" variant="subtle"><Target size={13} /> Targets</Button>
+          <Button type="button" size="xs" variant="subtle"><Settings size={13} /> Agent</Button>
+        </>
+      )}
+      runButton={(
+        <Button type="button" size="icon" onClick={props.onRun} disabled={props.busy} aria-label="Run command">
+          <ArrowUp size={15} />
+        </Button>
+      )}
+    />
   )
 }
 
@@ -1583,24 +1631,10 @@ function MiniThumb(props: { status: ExplorationItem["status"] | "good" | "active
 }
 
 function StatusPill(props: { status: PersonaCardModel["status"] }) {
-  return <span className={cn("rugc-status-pill", props.status.toLowerCase().replace(" ", "-"))}>{props.status}</span>
+  const tone = props.status === "Approved" ? "success" : props.status === "In Review" ? "warning" : props.status === "Rejected" ? "danger" : "neutral"
+  return <StatusBadge tone={tone}>{props.status}</StatusBadge>
 }
 
 function ScoreBar(props: { label: string; value: number; warning?: boolean }) {
-  return (
-    <div className="rugc-score">
-      <span>{props.label}</span>
-      <div><i className={props.warning ? "warning" : undefined} style={{ width: `${Math.max(4, Math.min(100, props.value))}%` }} /></div>
-      <strong>{props.value}</strong>
-    </div>
-  )
-}
-
-function MetricRow(props: { label: string; value: string }) {
-  return (
-    <div className="rugc-metric-row">
-      <span>{props.label}</span>
-      <strong>{props.value}</strong>
-    </div>
-  )
+  return <ScoreMeter label={props.label} value={props.value} tone={props.warning ? "warning" : "default"} />
 }

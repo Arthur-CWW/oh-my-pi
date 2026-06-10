@@ -37,6 +37,12 @@ Do not treat shadcn as a dependency that hides styling. The project owns the cop
 4. Move remaining custom CSS toward timeline/canvas/media-only responsibilities.
 5. Add snapshot coverage when introducing or changing variants.
 
+## Current Migration Status
+
+- Route-level shell, sidebar navigation, topbar, view toolbar, inspector rail, inspector cards, metric rows, score rows, status badges, and floating command surface now use owned workbench/shadcn-style components.
+- Remaining `.rugc-*` CSS in `ReactUgcStudio` should be treated as view-specific geometry for Atlas, Exploration Board, Batch Review, Campaign Map, Provider, and Final Editor internals until those patterns are promoted into reusable variants.
+- New reusable chrome should not add fresh `.rugc-*` selectors; extend `components/ui/` or `design-system/workbench.tsx` first.
+
 ## Current Baseline
 
 The first baseline components are:
