@@ -50,7 +50,7 @@ import { Badge } from "./components/ui/badge"
 import { Button } from "./components/ui/button"
 import { Tabs, type TabItem } from "./components/ui/tabs"
 import { cn } from "./lib/cn"
-import { ugcStudioWorkspace, type BranchSnapshot, type CreativeCandidate, type PersonaProfile, type ReferenceProfile, type UgcStudioWorkspace } from "./ugcStudioModel"
+import { ugcStudioWorkspace, type BranchSnapshot, type CreativeCandidate, type JsonValue, type PersonaProfile, type ReferenceProfile, type UgcStudioWorkspace } from "./ugcStudioModel"
 import { createInitialLocalState, type UgcExportManifest, type UgcLocalState, type UgcProviderJob, type UgcReferenceArchive } from "../ugc/local-state"
 
 type ReactView = "atlas" | "explore" | "review" | "campaign" | "reference" | "editor" | "graph" | "provider"
@@ -128,7 +128,7 @@ interface CampaignNode {
 }
 
 const fallbackLocalState = createInitialLocalState(ugcStudioWorkspace.updatedAt)
-const workspace = fallbackLocalState.workspace
+const UgcLocalStateContext = React.createContext<UgcLocalState>(fallbackLocalState)
 const daemonBaseUrl = "http://127.0.0.1:47522"
 
 const views: Array<{ value: ReactView; label: string; shortLabel: string; icon: React.ComponentType<{ className?: string; size?: number }> }> = [
@@ -433,20 +433,138 @@ const campaignColumns: CampaignColumn[] = [
   },
 ]
 
+function useUgcLocalState(): UgcLocalState {
+  return React.useContext(UgcLocalStateContext)
+}
+
+function projectPersonaCard(persona: PersonaProfile, index: number): PersonaCardModel {
+  return {
+    id: persona.id,
+    name: persona.displayName,
+    archetype: persona.genreLane,
+    niche: persona.profileBible.niche,
+    voice: persona.voice.speakingStyle,
+    accent: persona.voice.accent,
+    status: personaStatusLabel(persona.status),
+    clips: persona.sampleClipIds.length,
+    branches: persona.branchSnapshotIds.length,
+    followers: `${24 + index * 7}k`,
+    conversions: String(Math.max(1, persona.postingStrategy.weeklyCadence.filter((item) => item.purpose === "conversion").length)),
+    color: ["rose", "violet", "blue", "green", "amber", "cyan"][index % 6] ?? "slate",
+  }
+}
+
+function projectExplorationRows(workspace: UgcStudioWorkspace): ExplorationRow[] {
+  return explorationRows.map((row) => {
+    if (row.id === "row_persona") {
+      return {
+        ...row,
+        items: workspace.personas.map((persona, index) => ({
+          id: `explore_${persona.id}`,
+          title: persona.displayName,
+          subtitle: persona.profileBible.niche,
+          score: Math.min(9.2, 7.6 + index * 0.4),
+          status: persona.status === "selected" ? "keep" : persona.status === "paused" ? "risk" : "review",
+          personaId: persona.id,
+        })),
+      }
+    }
+    if (row.id === "row_hook") {
+      return {
+        ...row,
+        items: workspace.candidates.slice(0, 5).map((candidate) => ({
+          id: `explore_${candidate.id}`,
+          title: candidate.title,
+          subtitle: candidate.kind,
+          score: candidate.scorecard.hookStrength / 10,
+          status: candidate.status === "rejected" ? "risk" : candidate.status === "starred" ? "keep" : "review",
+          candidateId: candidate.id,
+        })),
+      }
+    }
+    return row
+  })
+}
+
+function projectCampaignColumns(workspace: UgcStudioWorkspace): CampaignColumn[] {
+  const branchNodes = workspace.branchSnapshots.map((branch) => ({
+    id: branch.id,
+    title: branch.title,
+    meta: branch.focus,
+    score: branch.metrics[0]?.value ?? branch.status,
+    status: branch.status === "dead-end" ? "dead" : branch.status === "active" ? "active" : branch.status === "promising" ? "good" : "risk",
+    candidateId: branch.selectedCandidateIds[0],
+  } satisfies CampaignNode))
+  return [
+    campaignColumns[0] ?? { id: "concept", title: "01 Concept", subtitle: "Root", nodes: [] },
+    {
+      id: "branches",
+      title: "02 Branches",
+      subtitle: `${branchNodes.length} snapshots`,
+      nodes: branchNodes,
+    },
+    ...campaignColumns.slice(2),
+  ]
+}
+
+function personaStatusLabel(status: PersonaProfile["status"]): PersonaCardModel["status"] {
+  if (status === "selected") return "Approved"
+  if (status === "promising") return "In Review"
+  if (status === "paused") return "Rejected"
+  return "Draft"
+}
+
+function parseJson(text: string): JsonValue {
+  try {
+    return JSON.parse(text) as JsonValue
+  } catch {
+    return { raw: text }
+  }
+}
+
 export function ReactUgcStudio() {
   const [activeView, setActiveView] = React.useState<ReactView>("atlas")
-  const [selectedCandidateId, setSelectedCandidateId] = React.useState(workspace.finalEditor.selectedCandidateId)
-  const [selectedPersonaId, setSelectedPersonaId] = React.useState(personaCards[0]?.id ?? "")
-  const [selectedBranchId, setSelectedBranchId] = React.useState(campaignColumns[3]?.nodes[1]?.id ?? "")
+  const [localState, setLocalState] = React.useState<UgcLocalState>(fallbackLocalState)
+  const workspace = localState.workspace
+  const [selectedCandidateId, setSelectedCandidateId] = React.useState(fallbackLocalState.workspace.finalEditor.selectedCandidateId)
+  const [selectedPersonaId, setSelectedPersonaId] = React.useState(fallbackLocalState.workspace.personas[0]?.id ?? "")
+  const [selectedBranchId, setSelectedBranchId] = React.useState(fallbackLocalState.workspace.branchSnapshots[0]?.id ?? "")
   const [capabilities, setCapabilities] = React.useState<KieCapability[]>(fallbackCapabilities)
   const [operation, setOperation] = React.useState<KieOperation>("image-text")
   const [prompt, setPrompt] = React.useState("Make the selected personas less polished and generate 8 warmer hooks")
   const [result, setResult] = React.useState("Dry-run a KIE payload to verify routing without spending credits.")
   const [busy, setBusy] = React.useState(false)
+  const personaCards = React.useMemo(() => workspace.personas.map(projectPersonaCard), [workspace.personas])
   const selectedCandidate = workspace.candidates.find((candidate) => candidate.id === selectedCandidateId) ?? workspace.candidates[0]
   const selectedPersona = personaCards.find((persona) => persona.id === selectedPersonaId) ?? personaCards[0]
+  const selectedBranch = workspace.branchSnapshots.find((branch) => branch.id === selectedBranchId) ?? workspace.branchSnapshots[0]
   const selectedCapability = capabilities.find((capability) => capability.operation === operation) ?? capabilities[0]
   const activeViewMeta = views.find((view) => view.value === activeView) ?? views[0]
+
+  React.useEffect(() => {
+    let cancelled = false
+    fetch(`${daemonBaseUrl}/api/ugc/workspace`)
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`daemon ${response.status}`)))
+      .then((payload: UgcLocalState) => {
+        if (!cancelled && payload.schemaVersion === "ugc-studio.local-state.v1") setLocalState(payload)
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  React.useEffect(() => {
+    if (!workspace.candidates.some((candidate) => candidate.id === selectedCandidateId)) {
+      setSelectedCandidateId(workspace.finalEditor.selectedCandidateId || workspace.candidates[0]?.id || "")
+    }
+    if (!workspace.personas.some((persona) => persona.id === selectedPersonaId)) {
+      setSelectedPersonaId(workspace.personas[0]?.id || "")
+    }
+    if (!workspace.branchSnapshots.some((branch) => branch.id === selectedBranchId)) {
+      setSelectedBranchId(workspace.branchSnapshots[0]?.id || "")
+    }
+  }, [workspace, selectedBranchId, selectedCandidateId, selectedPersonaId])
 
   React.useEffect(() => {
     let cancelled = false
@@ -481,6 +599,9 @@ export function ReactUgcStudio() {
       } : undefined)
       const text = await response.text()
       setResult(text)
+      if (body && response.ok) {
+        await persistProviderJob(body, parseJson(text), path.includes("/create") && body.live === true ? "live" : "dry-run")
+      }
     } catch (error) {
       setResult(error instanceof Error ? error.message : String(error))
     } finally {
@@ -488,7 +609,49 @@ export function ReactUgcStudio() {
     }
   }
 
+  async function mutateLocal(path: string, body: object) {
+    setBusy(true)
+    try {
+      const response = await fetch(`${daemonBaseUrl}${path}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      })
+      const payload = await response.json() as UgcLocalState | { error?: string }
+      if (!response.ok || !("schemaVersion" in payload)) {
+        setResult(JSON.stringify(payload, null, 2))
+        return
+      }
+      setLocalState(payload)
+      setResult(JSON.stringify({ ok: true, path, updatedAt: payload.updatedAt }, null, 2))
+    } catch (error) {
+      setResult(error instanceof Error ? error.message : String(error))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function persistProviderJob(body: KieRequest, responseJson: JsonValue, mode: "dry-run" | "live") {
+    const response = await fetch(`${daemonBaseUrl}/api/ugc/provider-jobs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        provider: "kie",
+        operation: body.operation,
+        mode,
+        status: "planned",
+        targetIds: [selectedPersonaId, selectedCandidateId].filter(Boolean),
+        spendCapUsd: body.maxSpendUsd ?? 0.05,
+        estimatedCostUsd: selectedCapability?.estimatedCostUsd ?? null,
+        request: body,
+        response: responseJson,
+      }),
+    })
+    if (response.ok) setLocalState(await response.json() as UgcLocalState)
+  }
+
   return (
+    <UgcLocalStateContext.Provider value={localState}>
     <main className="react-ugc-theme rugc-shell">
       <Sidebar activeView={activeView} onViewChange={setActiveView} />
       <section className="rugc-main">
@@ -513,6 +676,7 @@ export function ReactUgcStudio() {
                 onSelectBranch={setSelectedBranchId}
                 onOperationChange={setOperation}
                 onCallKie={callKie}
+                onMutateLocal={mutateLocal}
               />
             </div>
             <CommandBar prompt={prompt} onPromptChange={setPrompt} onRun={() => callKie("/api/ugc/kie/plan", request)} busy={busy} />
@@ -521,12 +685,16 @@ export function ReactUgcStudio() {
             activeView={activeView}
             selectedPersona={selectedPersona}
             selectedCandidate={selectedCandidate}
+            selectedBranch={selectedBranch}
             selectedCapability={selectedCapability}
             result={result}
+            busy={busy}
+            onMutateLocal={mutateLocal}
           />
         </div>
       </section>
     </main>
+    </UgcLocalStateContext.Provider>
   )
 }
 
@@ -666,6 +834,7 @@ function WorkspaceView(props: {
   onSelectBranch: (id: string) => void
   onOperationChange: (operation: KieOperation) => void
   onCallKie: (path: string, body?: KieRequest) => void
+  onMutateLocal: (path: string, body: object) => void
 }) {
   if (props.activeView === "atlas") {
     return <PersonaAtlas selectedPersonaId={props.selectedPersonaId} onSelectPersona={props.onSelectPersona} />
@@ -681,13 +850,19 @@ function WorkspaceView(props: {
     )
   }
   if (props.activeView === "review") {
-    return <BatchReview selectedCandidateId={props.selectedCandidateId} onSelectCandidate={props.onSelectCandidate} />
+    return <BatchReview selectedCandidateId={props.selectedCandidateId} onSelectCandidate={props.onSelectCandidate} onMutateLocal={props.onMutateLocal} />
   }
   if (props.activeView === "campaign") {
     return <CampaignMap selectedBranchId={props.selectedBranchId} onSelectBranch={props.onSelectBranch} onSelectCandidate={props.onSelectCandidate} />
   }
+  if (props.activeView === "reference") {
+    return <ReferenceArchiveView onMutateLocal={props.onMutateLocal} />
+  }
   if (props.activeView === "editor") {
-    return <FinalEditor selectedCandidateId={props.selectedCandidateId} />
+    return <FinalEditor selectedCandidateId={props.selectedCandidateId} onMutateLocal={props.onMutateLocal} />
+  }
+  if (props.activeView === "graph") {
+    return <DeveloperGraphView />
   }
   return (
     <ProviderView
@@ -704,6 +879,8 @@ function WorkspaceView(props: {
 }
 
 function PersonaAtlas(props: { selectedPersonaId: string; onSelectPersona: (id: string) => void }) {
+  const { workspace } = useUgcLocalState()
+  const personaCards = workspace.personas.map(projectPersonaCard)
   return (
     <div className="rugc-atlas">
       <div className="rugc-atlas-grid">
@@ -756,9 +933,11 @@ function ExplorationBoard(props: {
   onSelectCandidate: (id: string) => void
   onSelectPersona: (id: string) => void
 }) {
+  const { workspace } = useUgcLocalState()
+  const rows = projectExplorationRows(workspace)
   return (
     <div className="rugc-explore">
-      {explorationRows.map((row) => (
+      {rows.map((row) => (
         <section key={row.id} className="rugc-explore-row">
           <div className="rugc-stage-label">
             <span>{row.step}</span>
@@ -801,8 +980,10 @@ function ExplorationBoard(props: {
   )
 }
 
-function BatchReview(props: { selectedCandidateId: string; onSelectCandidate: (id: string) => void }) {
+function BatchReview(props: { selectedCandidateId: string; onSelectCandidate: (id: string) => void; onMutateLocal: (path: string, body: object) => void }) {
+  const { workspace } = useUgcLocalState()
   const selectedCandidate = workspace.candidates.find((candidate) => candidate.id === props.selectedCandidateId) ?? workspace.candidates[0]
+  const selectedCandidateId = selectedCandidate?.id ?? props.selectedCandidateId
   return (
     <div className="rugc-review">
       <aside className="rugc-review-queue">
@@ -862,6 +1043,23 @@ function BatchReview(props: { selectedCandidateId: string; onSelectCandidate: (i
         <ScoreBar label="Authenticity" value={selectedCandidate?.scorecard.formatFit ?? 0} />
         <ScoreBar label="Predicted Retention" value={selectedCandidate?.scorecard.overall ?? 0} />
         <blockquote>She feels slightly scripted in the middle. CTA could be softer.</blockquote>
+        <div className="flex flex-wrap gap-2">
+          <Button size="xs" variant="workbench" onClick={() => props.onMutateLocal(`/api/ugc/candidates/${selectedCandidateId}/status`, { status: "starred" })}>Star</Button>
+          <Button size="xs" variant="workbench" onClick={() => props.onMutateLocal(`/api/ugc/candidates/${selectedCandidateId}/status`, { status: "needs-revision" })}>Revise</Button>
+          <Button size="xs" variant="outline" onClick={() => props.onMutateLocal(`/api/ugc/candidates/${selectedCandidateId}/status`, { status: "rejected" })}>Reject</Button>
+          <Button
+            size="xs"
+            variant="subtle"
+            onClick={() => props.onMutateLocal("/api/ugc/notes", {
+              attachedTo: { kind: "candidate", id: selectedCandidateId },
+              verdict: "revise",
+              body: "Needs a more casual middle beat and softer CTA.",
+              requestedChange: "Regenerate with lower-pressure delivery.",
+            })}
+          >
+            Add note
+          </Button>
+        </div>
       </aside>
       <table className="rugc-review-table">
         <thead>
@@ -896,10 +1094,12 @@ function BatchReview(props: { selectedCandidateId: string; onSelectCandidate: (i
 }
 
 function CampaignMap(props: { selectedBranchId: string; onSelectBranch: (id: string) => void; onSelectCandidate: (id: string) => void }) {
+  const { workspace } = useUgcLocalState()
+  const columns = projectCampaignColumns(workspace)
   return (
     <div className="rugc-map">
       <div className="rugc-map-canvas">
-        {campaignColumns.map((column) => (
+        {columns.map((column) => (
           <section key={column.id} className="rugc-map-column">
             <header>
               <strong>{column.title}</strong>
@@ -946,7 +1146,8 @@ function CampaignMap(props: { selectedBranchId: string; onSelectBranch: (id: str
   )
 }
 
-function FinalEditor(props: { selectedCandidateId: string }) {
+function FinalEditor(props: { selectedCandidateId: string; onMutateLocal: (path: string, body: object) => void }) {
+  const { workspace } = useUgcLocalState()
   const selectedCandidate = workspace.candidates.find((candidate) => candidate.id === props.selectedCandidateId) ?? workspace.candidates[0]
   return (
     <div className="rugc-editor">
@@ -963,6 +1164,18 @@ function FinalEditor(props: { selectedCandidateId: string }) {
       <section className="rugc-editor-canvas">
         <div className="rugc-editor-toolbar">
           {["Select", "Crop", "Text", "Captions", "Audio", "JSON"].map((label) => <button key={label} type="button">{label}</button>)}
+          <Button
+            size="xs"
+            variant="workbench"
+            onClick={() => props.onMutateLocal("/api/ugc/exports", {
+              selectedCandidateId: selectedCandidate?.id,
+              label: `${selectedCandidate?.title ?? "Candidate"} draft export`,
+              presetId: workspace.finalEditor.exportPresets[0]?.id,
+              notes: ["Created from Final Layer Editor"],
+            })}
+          >
+            Save export manifest
+          </Button>
         </div>
         <div className="rugc-phone-row">
           {["Hook", "Product", "Proof", "CTA"].map((label, index) => (
@@ -982,6 +1195,75 @@ function FinalEditor(props: { selectedCandidateId: string }) {
           ))}
         </div>
       </section>
+    </div>
+  )
+}
+
+function ReferenceArchiveView(props: { onMutateLocal: (path: string, body: object) => void }) {
+  const { workspace, referenceArchives } = useUgcLocalState()
+  return (
+    <div className="rugc-provider">
+      <section>
+        <Copy size={32} />
+        <h2>Reference archive is local-first and clean-room by default</h2>
+        <p>Store abstract mechanics, source policy, preserved timing/pose/caption grammar, swapped fields, and blocked identity/audio fields before any remix job runs.</p>
+      </section>
+      <aside>
+        {workspace.referenceProfiles.map((reference) => {
+          const archive = referenceArchives.find((item) => item.referenceProfileId === reference.id)
+          return (
+            <div key={reference.id} className="rugc-provider-note">
+              <strong>{reference.displayName}</strong>
+              <p>{reference.useCase}</p>
+              <MetricRow label="Rights" value={reference.rightsStatus} />
+              <MetricRow label="Archive" value={archive?.sourcePolicy ?? "not saved"} />
+              <Button
+                size="xs"
+                variant="workbench"
+                onClick={() => props.onMutateLocal("/api/ugc/reference-archives", {
+                  referenceProfileId: reference.id,
+                  sourcePolicy: reference.rightsStatus === "rights-cleared" || reference.rightsStatus === "user-owned" ? "rights-cleared-source" : "abstract-mechanics",
+                  notes: ["Created from Reference Archive view"],
+                })}
+              >
+                Save archive spec
+              </Button>
+            </div>
+          )
+        })}
+        <pre>{JSON.stringify(referenceArchives.slice(0, 2), null, 2)}</pre>
+      </aside>
+    </div>
+  )
+}
+
+function DeveloperGraphView() {
+  const { workspace, providerJobs } = useUgcLocalState()
+  return (
+    <div className="rugc-provider">
+      <section>
+        <Network size={32} />
+        <h2>{workspace.developerGraph.title}</h2>
+        <p>Developer view keeps the ComfyUI-like pipeline inspectable without making it the default creative surface.</p>
+        <div className="rugc-provider-note">
+          <strong>Provider jobs</strong>
+          <p>{providerJobs.length} local job records. KIE/Jimeng calls should land here before or after live provider submission.</p>
+        </div>
+      </section>
+      <aside>
+        {workspace.developerGraph.nodes.map((node) => (
+          <div key={node.id} className="rugc-provider-note">
+            <strong>{node.title}</strong>
+            <p>{node.kind} / {node.status}</p>
+            <MetricRow label="Inputs" value={String(node.inputs.length)} />
+            <MetricRow label="Outputs" value={String(node.outputs.length)} />
+          </div>
+        ))}
+        <pre>{JSON.stringify({
+          routes: workspace.developerGraph.providerRoutes,
+          recentJobs: providerJobs.slice(0, 3),
+        }, null, 2)}</pre>
+      </aside>
     </div>
   )
 }
@@ -1035,10 +1317,14 @@ function ProviderView(props: {
 function Inspector(props: {
   activeView: ReactView
   selectedPersona: PersonaCardModel | undefined
-  selectedCandidate: (typeof workspace.candidates)[number] | undefined
+  selectedCandidate: CreativeCandidate | undefined
+  selectedBranch: BranchSnapshot | undefined
   selectedCapability: KieCapability | undefined
   result: string
+  busy: boolean
+  onMutateLocal: (path: string, body: object) => void
 }) {
+  const { workspace, providerJobs, exportManifests, referenceArchives } = useUgcLocalState()
   if (props.activeView === "provider") {
     return (
       <aside className="rugc-inspector">
@@ -1047,6 +1333,7 @@ function Inspector(props: {
           <MetricRow label="Default" value="dry-run" />
           <MetricRow label="Live cap" value="$0.05" />
           <MetricRow label="Model" value={props.selectedCapability?.model ?? "kie"} />
+          <MetricRow label="Saved jobs" value={String(providerJobs.length)} />
         </InspectorCard>
         <InspectorCard title="Last response">
           <pre className="rugc-json">{props.result}</pre>
@@ -1058,22 +1345,67 @@ function Inspector(props: {
   if (props.activeView === "campaign") {
     return (
       <aside className="rugc-inspector">
-        <InspectorHeader title="Snapshot 18" />
+        <InspectorHeader title={props.selectedBranch?.title ?? "Snapshot"} />
         <InspectorCard title="Details">
-          <MetricRow label="Stage" value="Benefit Hook" />
-          <MetricRow label="Variants" value="5" />
-          <MetricRow label="Parent" value="06 GRWM Routine" />
-          <MetricRow label="Children" value="2" />
+          <MetricRow label="Stage" value={props.selectedBranch?.focus ?? "Branch"} />
+          <MetricRow label="Variants" value={String(props.selectedBranch?.selectedCandidateIds.length ?? 0)} />
+          <MetricRow label="Parent" value={props.selectedBranch?.parentId ?? "root"} />
+          <MetricRow label="Children" value={String(props.selectedBranch?.childIds.length ?? 0)} />
         </InspectorCard>
         <InspectorCard title="Decision">
-          <p>Strong performance uplift. Expand into voice-over testimonial and softer CTA angles.</p>
+          <p>{props.selectedBranch?.decisionNote ?? "No branch note yet."}</p>
         </InspectorCard>
         <InspectorCard title="Metrics">
           <ScoreBar label="CTR" value={82} />
           <ScoreBar label="CVR" value={64} />
           <ScoreBar label="Hook hold" value={78} />
         </InspectorCard>
-        <button type="button" className="rugc-danger">Mark as dead end</button>
+        <button
+          type="button"
+          className="rugc-danger"
+          disabled={props.busy || !props.selectedBranch}
+          onClick={() => {
+            if (!props.selectedBranch) return
+            props.onMutateLocal(`/api/ugc/branches/${props.selectedBranch.id}`, {
+              status: "dead-end",
+              decisionNote: "Marked as a dead end from the campaign inspector; return to the parent and fork a softer direction.",
+            })
+          }}
+        >
+          Mark as dead end
+        </button>
+      </aside>
+    )
+  }
+
+  if (props.activeView === "reference") {
+    return (
+      <aside className="rugc-inspector">
+        <InspectorHeader title="Reference Archive" />
+        <InspectorCard title="Archive counts">
+          <MetricRow label="Profiles" value={String(workspace.referenceProfiles.length)} />
+          <MetricRow label="Saved archives" value={String(referenceArchives.length)} />
+          <MetricRow label="Guardrail" value="abstract mechanics first" />
+        </InspectorCard>
+        <InspectorCard title="Latest archive">
+          <pre className="rugc-json">{JSON.stringify(referenceArchives[0] ?? {}, null, 2)}</pre>
+        </InspectorCard>
+      </aside>
+    )
+  }
+
+  if (props.activeView === "editor") {
+    return (
+      <aside className="rugc-inspector">
+        <InspectorHeader title="Export Manifests" />
+        <InspectorCard title="Final editor">
+          <MetricRow label="Tracks" value={String(workspace.finalEditor.tracks.length)} />
+          <MetricRow label="Duration" value={`${workspace.finalEditor.durationSeconds}s`} />
+          <MetricRow label="Exports" value={String(exportManifests.length)} />
+        </InspectorCard>
+        <InspectorCard title="Latest export">
+          <pre className="rugc-json">{JSON.stringify(exportManifests[0] ?? {}, null, 2)}</pre>
+        </InspectorCard>
       </aside>
     )
   }
@@ -1091,12 +1423,34 @@ function Inspector(props: {
         <MetricRow label="Lane" value={props.selectedPersona?.archetype ?? "None"} />
         <MetricRow label="Voice" value={props.selectedPersona?.voice ?? "None"} />
         <MetricRow label="Niche" value={props.selectedPersona?.niche ?? "None"} />
+        <Button
+          size="xs"
+          variant="workbench"
+          disabled={props.busy || !props.selectedPersona}
+          onClick={() => {
+            if (!props.selectedPersona) return
+            props.onMutateLocal(`/api/ugc/personas/${props.selectedPersona.id}`, { status: "selected" })
+          }}
+        >
+          Mark selected
+        </Button>
       </InspectorCard>
       <InspectorCard title="Selected candidate">
         <p>{props.selectedCandidate?.preview.transcript[0]?.text ?? "No candidate selected."}</p>
         <ScoreBar label="Overall" value={props.selectedCandidate?.scorecard.overall ?? 0} />
         <ScoreBar label="Persona fit" value={props.selectedCandidate?.scorecard.personaFit ?? 0} />
         <ScoreBar label="Conversion" value={props.selectedCandidate?.scorecard.conversionPotential ?? 0} warning />
+        <Button
+          size="xs"
+          variant="workbench"
+          disabled={props.busy || !props.selectedCandidate}
+          onClick={() => {
+            if (!props.selectedCandidate) return
+            props.onMutateLocal(`/api/ugc/candidates/${props.selectedCandidate.id}/status`, { status: "starred" })
+          }}
+        >
+          Star candidate
+        </Button>
       </InspectorCard>
       <InspectorCard title="Continuity JSON">
         <pre className="rugc-json">{JSON.stringify({
