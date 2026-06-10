@@ -82,6 +82,51 @@ data/jimeng-lab/ugc-studio-kbeauty-image/manifest.json
 
 These generated media files are intentionally kept under ignored `data/**`.
 
+## Workbench Asset Listing Smoke
+
+Dry-run request-shape proof:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts assets \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --limit 5 \
+  --outDir data/jimeng-lab/proof-20260610-assets \
+  --dryRun
+```
+
+Live no-spend proof:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts assets \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --limit 5 \
+  --outDir data/jimeng-lab/proof-20260610-assets
+```
+
+Result:
+
+```txt
+assets saved count=1 nextOffset=1780998990927 hasMore=false
+ret=0
+errmsg=success
+response_sha256=5373ac3f6339e82f7f3090059b742d83b17b9b438151476993466ae6d105f312
+normalized_summary_sha256=10ba3a679c2e7e472c20fb186dedbd5289687c2a5b0aba7e88a0509bf17a4af8
+first_asset_id=39148697060354
+submit_id=a6bbee65-bed0-4e5b-aaf1-5ab466137b82
+status=50
+model_req_key=high_aes_general_v50
+generated_item_count=4
+```
+
+The normalized summary was checked for signed media URL leakage:
+
+```bash
+rg -n "https://|x-signature|x-expires|byteimg|SIGNED_URL" \
+  data/jimeng-lab/proof-20260610-assets/normalized
+```
+
+Expected result: no matches.
+
 ## Voice / TTS Smoke
 
 Refreshed the logged-in session from the background Jimeng browser:

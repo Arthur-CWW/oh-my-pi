@@ -37,6 +37,9 @@ As of 2026-06-10, the committed Jimeng CLI baseline is:
 - `4936bc7 Add Jimeng lip sync image planning`
 - `cf2b953 Document background Jimeng automation preference`
 - `e5e3539 Add Jimeng subject lifecycle CLI`
+- `6fc9948 Add Jimeng voice clone CLI coverage`
+
+If the thread goal object lags behind this file after a pause, resume from this document and the latest Git checkpoint. The active working rule is: background-only reversal, direct/API-first implementation, small proven CLI slices, tests and proof artifacts before each commit, and no async daemon until the API surface is settled.
 
 ImageX local image upload is now committed and live-proved:
 
@@ -271,6 +274,17 @@ Custom voice clone coverage is now partially implemented and proved:
 - live no-spend asset proof returned `ret=0`, `errmsg=success`, `voice_count=0`, `next_offset=50`
 - proof bundle: `data/jimeng-lab/proof-20260610-voice-clone/`
 - submit/update/delete remain dry-run-only because they may create or mutate account assets; enable live only after background CDP capture and explicit approval or a disposable fixture
+
+Workspace/workbench asset listing is now live-proved without generation spend:
+
+- `jimeng-browser-proxy assets`
+- direct `/mweb/v1/get_asset_list` with logged-in browser session headers
+- frontend capture evidence: text-to-image workbench polling used `count`, `direction=1`, `mode=workbench`, `option.image_info`, `option.origin_image_info`, `option.order_by`, `option.only_favorited`, `option.end_time_stamp`, `option.hide_story_agent_result`, `asset_type_list=[1,2,5,6,7,8,9,10,12]`, and `workspace_id`
+- useful flags: `--limit`, `--asset-types`, `--asset-mode`, `--direction`, `--order-by`, `--endTimeStamp`, `--onlyFavorite`, `--includeStoryAgentResult`, `--workspaceId`
+- session referer workspace inference is supported when `--workspaceId` is omitted
+- normalized summaries keep durable asset ids, submit/history ids, status, prompt, model key/name, seed, provider image/video URIs, dimensions, generated item counts, and URL-presence booleans while omitting signed media URLs
+- proof bundle: `data/jimeng-lab/proof-20260610-assets/`
+- latest proof returned `asset_count=1`, `has_more=false`, `next_offset=1780998990927`, first `asset_id=39148697060354`, `submit_id=a6bbee65-bed0-4e5b-aaf1-5ab466137b82`, `status=50`, `generated_item_count=4`, `model_req_key=high_aes_general_v50`, response hash `5373ac3f6339e82f7f3090059b742d83b17b9b438151476993466ae6d105f312`, and normalized summary hash `10ba3a679c2e7e472c20fb186dedbd5289687c2a5b0aba7e88a0509bf17a4af8`
 
 The next slice is **lip-sync submit capture and reference-video consumers**. Use the VOD provider reference, ImageX avatar reference, and frontend captures to unlock live lip-sync, reference-video, multimodal/all-around reference, pose/style/depth/canny controls, and live end-frame/multi-frame image-to-video paths.
 

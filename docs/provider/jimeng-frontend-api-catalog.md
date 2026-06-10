@@ -23,7 +23,7 @@ Use the browser as an authenticated session holder and API discovery surface. Mo
 | `/mweb/v1/workspace/create` | POST | Creates a generation workspace/conversation. | Captured |
 | `/mweb/v1/workspace/update` | POST | Renames/updates current workspace metadata. | Captured |
 | `/mweb/v1/aigc_draft/generate` | POST | Unified workbench submit for current text-to-image, text-to-video, first-frame image-to-video, and lip-sync draft generation paths. | Implemented for workbench text-to-image, text-to-video templates, and local-upload-backed image-to-video; dry-run-proved for VOD and image/avatar lip-sync provider inputs |
-| `/mweb/v1/get_asset_list` | POST | Poll/list workspace assets and completed image results. | Implemented for workbench text-to-image |
+| `/mweb/v1/get_asset_list` | POST | Poll/list workspace assets and completed image results. | Implemented for workbench text-to-image polling and no-spend `assets` listing |
 | `/mweb/v1/get_history_by_ids` | POST | Older/general task polling by `submit_id`. | Implemented for captured history-based templates |
 | `/mweb/v1/creation_agent/v2/conversation` | POST/SSE | Older agent text-to-image conversation submit. | Preserved |
 | `/mweb/v1/creation_agent/v2/get_agent_config` | POST | Agent/tool configuration payload. | Cataloged only |
@@ -1181,7 +1181,7 @@ The 2026-06-09 JS bundle sweep found these useful endpoint groups. Treat rows wi
 | Infinite canvas | `/mweb/v1/infinite_canvas/create_project`, `/mweb/v1/infinite_canvas/conversation`, `/mweb/v1/infinite_canvas/edit`, `/mweb/v1/infinite_canvas/resume`, `/mweb/v1/infinite_canvas/stop_stream`, `/mweb/v1/infinite_canvas/v1/fetch_snapshot`, `/mweb/v1/infinite_canvas/v1/submit_changeset`, `/mweb/v1/infinite_canvas/v1/fetch_changeset` |
 | Reference/image tools | `/mweb/v1/get_common_config`, `/mweb/v1/get_image_description`, `/mweb/v1/get_upload_token`, `/mweb/v1/face_recognize`, `/mweb/v1/blend_preview`, `/mweb/v1/pose_detect`, `/mweb/v1/saliency_seg`, `/mweb/v1/algo_proxy`; image upload, description, face recognition, ControlNet pose/depth/canny preview, pose detect, and object/saliency segmentation are now implemented, while style/reference payload tools still need CLI coverage |
 | Template/research mining | `/mweb/v1/feed`, `/mweb/v1/feed_short_video`, `/lv/v1/cc_web/plane/get_categories`, public CapCut `bee_prod` metadata JSON, `/lv/v1/cc_web/replicate/search_templates`, `/lv/v1/cc_web/plane/*`; `/mweb/v1/get_explore` is implemented for direct Explore templates and short-video examples, `/mweb/v1/feed_short_video` is implemented as `overseas-short-videos`, CapCut category catalog is implemented as `capcut-categories`, and public CapCut ratio/scene metadata is implemented as `capcut-template-metadata`; CapCut template rows/search/collection endpoints remain capture targets |
-| Assets/upload/editor | `/lv/v1/asset/*`, `/lv/v1/editor/image/*` |
+| Assets/upload/editor | `/mweb/v1/get_asset_list`, `/lv/v1/asset/*`, `/lv/v1/editor/image/*`; Jimeng workbench/history listing is implemented as no-spend `assets`, while LV/CapCut asset/editor paths remain capture targets |
 | Audio/video utility | `/mweb/v1/mix_audio_video`, `/mweb/v1/mix_audio_videos`, `/lv/v2/intelligence/tts/curl_sync_everphoto` |
 
 The scan artifacts stay local-only under ignored:
@@ -1250,6 +1250,60 @@ Image URL paths:
 image.item_list[].image.large_images[].image_url
 image.item_list[].common_attr.cover_url_map["4096" | "2400" | "1080"]
 ```
+
+## Workbench Asset Listing
+
+`jimeng-browser-proxy assets` directly calls `/mweb/v1/get_asset_list` as a reusable no-spend asset picker for the UGC pipeline.
+
+Captured/default request shape:
+
+```json
+{
+  "count": 5,
+  "direction": 1,
+  "mode": "workbench",
+  "option": {
+    "order_by": 0,
+    "only_favorited": false,
+    "end_time_stamp": 0,
+    "hide_story_agent_result": true
+  },
+  "asset_type_list": [1, 2, 5, 6, 7, 8, 9, 10, 12],
+  "workspace_id": 14199856180236
+}
+```
+
+The CLI exposes the meaningful list controls:
+
+- `--limit`
+- `--asset-types`
+- `--asset-mode`
+- `--direction`
+- `--order-by`
+- `--endTimeStamp`
+- `--onlyFavorite`
+- `--includeStoryAgentResult`
+- `--workspaceId`
+
+Latest live proof:
+
+```txt
+proof_bundle=data/jimeng-lab/proof-20260610-assets/
+ret=0
+errmsg=success
+asset_count=1
+has_more=false
+next_offset=1780998990927
+first_asset_id=39148697060354
+submit_id=a6bbee65-bed0-4e5b-aaf1-5ab466137b82
+status=50
+generated_item_count=4
+model_req_key=high_aes_general_v50
+response_sha256=5373ac3f6339e82f7f3090059b742d83b17b9b438151476993466ae6d105f312
+normalized_summary_sha256=10ba3a679c2e7e472c20fb186dedbd5289687c2a5b0aba7e88a0509bf17a4af8
+```
+
+Normalized summaries retain durable provider URIs, IDs, prompts, model keys, status, dimensions, and URL-presence booleans. Signed media URLs remain only in ignored raw proof files under `data/**`.
 
 ## Useful Future Capture Targets
 

@@ -1,6 +1,13 @@
 #!/usr/bin/env bun
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import path from "node:path"
+import {
+  buildJimengAssetsRequest,
+  fetchJimengAssets,
+  parseJimengAssetTypes,
+  summarizeJimengAssets,
+  workspaceIdFromJimengSession,
+} from "./assets"
 import { loadJimengSessionFromBrowser } from "./browser-session"
 import {
   buildCapCutTemplateCategoriesRequest,
@@ -122,6 +129,7 @@ Commands:
   voice-clone-delete Dry-run cloned voice delete request
   tts           Generate one MP3 text-to-speech sample from a voice id
   sample-voices Generate sequential MP3 samples for voices from the built-in library
+  assets        Fetch workspace/workbench asset history without generation spend
   templates     Fetch no-spend Explore/template examples for prompt/template mining
   short-videos  Fetch no-spend Explore short videos for reference/profile mining
   overseas-short-videos Fetch no-spend feed_short_video examples for overseas/reference mining
@@ -167,6 +175,12 @@ Options:
   --item-platform <n>           Voice item platform (default: 1, Loki/built-in)
   --limit <n>                   sample-voices limit or Explore count
   --offset <n>                  Explore offset (default: 0)
+  --asset-types <csv>           Assets types for get_asset_list (default: 1,2,5,6,7,8,9,10,12)
+  --asset-mode <value>          Assets mode for get_asset_list (default: workbench)
+  --direction <n>               Assets list direction (default: 1)
+  --order-by <n>                Assets list order_by option (default: 0)
+  --endTimeStamp <n>            Assets pagination timestamp/cursor (default: 0)
+  --includeStoryAgentResult     Do not hide story-agent results in assets query
   --cursor <n>                  Subject/persona list cursor (default: 0)
   --keyword <text>              Subject/persona list search keyword
   --subjectId <id>              Subject/persona id for update/delete
@@ -238,6 +252,11 @@ Examples:
     --audioVid v03870g10004d8k1u4nog65hb08dnhig \\
     --name "Kbeauty reference voice" \\
     --dryRun
+
+  jimeng-browser-proxy assets \\
+    --session data/jimeng-lab/raw/session-bundle-current.json \\
+    --limit 10 \\
+    --outDir data/jimeng-lab/cli-assets-smoke
 
   jimeng-browser-proxy lip-sync-config \\
     --outDir data/jimeng-lab/cli-lip-sync-config-smoke
@@ -365,6 +384,7 @@ interface CliArgs {
     | "voice-clone-delete"
     | "tts"
     | "sample-voices"
+    | "assets"
     | "templates"
     | "short-videos"
     | "overseas-short-videos"
@@ -408,6 +428,12 @@ interface CliArgs {
   itemPlatform?: number
   limit?: number
   offset?: number
+  assetTypes?: number[]
+  assetMode?: string
+  direction?: number
+  orderBy?: number
+  endTimeStamp?: number
+  includeStoryAgentResult?: boolean
   cursor?: number
   keyword?: string
   subjectId?: string
@@ -828,6 +854,60 @@ async function main(argv: string[]): Promise<void> {
       samples,
     })
     console.log(`[jimeng-browser-proxy] sample-voices done count=${samples.length}`)
+    return
+  }
+
+  if (args.command === "assets") {
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const query = {
+      count: args.limit,
+      direction: args.direction,
+      mode: args.assetMode,
+      assetTypes: args.assetTypes,
+      workspaceId: args.workspaceId ?? workspaceIdFromJimengSession(session),
+      orderBy: args.orderBy,
+      onlyFavorited: args.onlyFavorite,
+      endTimeStamp: args.endTimeStamp,
+      hideStoryAgentResult: args.includeStoryAgentResult ? false : undefined,
+    }
+    const request = buildJimengAssetsRequest(query)
+    const runId = `assets-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    if (args.dryRun) {
+      writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
+        command: args.command,
+        endpoint: "/mweb/v1/get_asset_list",
+        request,
+        browser_session: redactSession(session),
+      })
+      writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+        command: args.command,
+        endpoint: "/mweb/v1/get_asset_list",
+        request,
+      })
+      console.log(`[jimeng-browser-proxy] assets dry run saved`)
+      return
+    }
+
+    const result = await fetchJimengAssets({ session, query })
+    writeJson(path.join(dirs.rawDir, `${runId}.json`), {
+      http_status: result.httpStatus,
+      ret: result.ret,
+      errmsg: result.errmsg,
+      response_text_sha256: result.responseTextSha256,
+      request: result.request,
+      body: result.body,
+    })
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      endpoint: result.endpoint,
+      http_status: result.httpStatus,
+      ret: result.ret,
+      errmsg: result.errmsg,
+      response_text_sha256: result.responseTextSha256,
+      request: result.request,
+      summary: summarizeJimengAssets(result),
+    })
+    console.log(`[jimeng-browser-proxy] assets saved count=${result.assets.length} nextOffset=${result.nextOffset ?? "none"} hasMore=${result.hasMore ?? "unknown"}`)
     return
   }
 
@@ -2183,6 +2263,7 @@ function parseArgs(argv: string[]): CliArgs {
     && command !== "voice-clone-delete"
     && command !== "tts"
     && command !== "sample-voices"
+    && command !== "assets"
     && command !== "templates"
     && command !== "short-videos"
     && command !== "overseas-short-videos"
@@ -2226,6 +2307,10 @@ function parseArgs(argv: string[]): CliArgs {
   const offset = flags.offset ? Number(flags.offset) : undefined
   const cursor = flags.cursor ? Number(flags.cursor) : undefined
   const categoryId = flags["category-id"] ? Number(flags["category-id"]) : undefined
+  const assetTypes = parseJimengAssetTypes(flags["asset-types"])
+  const direction = flags.direction ? Number(flags.direction) : undefined
+  const orderBy = flags["order-by"] ? Number(flags["order-by"]) : undefined
+  const endTimeStamp = flags.endTimeStamp ? Number(flags.endTimeStamp) : undefined
   if (seed !== undefined && (!Number.isInteger(seed) || seed < 0 || seed > 4294967295)) {
     throw new Error("--seed must be an integer from 0 to 4294967295")
   }
@@ -2243,6 +2328,15 @@ function parseArgs(argv: string[]): CliArgs {
   }
   if (categoryId !== undefined && (!Number.isInteger(categoryId) || categoryId < 1)) {
     throw new Error("--category-id must be a positive integer")
+  }
+  if (direction !== undefined && !Number.isInteger(direction)) {
+    throw new Error("--direction must be an integer")
+  }
+  if (orderBy !== undefined && !Number.isInteger(orderBy)) {
+    throw new Error("--order-by must be an integer")
+  }
+  if (endTimeStamp !== undefined && (!Number.isFinite(endTimeStamp) || endTimeStamp < 0)) {
+    throw new Error("--endTimeStamp must be a non-negative number")
   }
   if (videoWidth !== undefined && (!Number.isInteger(videoWidth) || videoWidth < 1)) {
     throw new Error("--videoWidth must be a positive integer")
@@ -2295,6 +2389,12 @@ function parseArgs(argv: string[]): CliArgs {
     itemPlatform,
     limit,
     offset,
+    assetTypes,
+    assetMode: flags["asset-mode"],
+    direction,
+    orderBy,
+    endTimeStamp,
+    includeStoryAgentResult: flags.includeStoryAgentResult === "true",
     cursor,
     keyword: flags.keyword,
     subjectId: flags.subjectId,
