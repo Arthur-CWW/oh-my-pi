@@ -381,6 +381,21 @@ Static request-builder localization is now available as the bridge between workl
 - symbol-search proof bundle: `data/jimeng-lab/proof-20260610-static-locate-capcut-templates-symbols/`
 - latest symbol-search proof searched CapCut template endpoints plus `SearchTemplates`, `GetTemplatesAccordCategory`, `GetBatchTemplatesByCategory`, `FuzzySearchTemplateByTitle`, `GetTemplateHotWords`, and `GetCategories`, found 24 occurrences, and had no signed URLs or credentials in normalized output
 
+Signed CapCut endpoint replay is now available for no-spend template payload discovery:
+
+- `jimeng-browser-proxy capcut-probe`
+- session-free; it signs requests with the recovered CapCut frontend signer and never opens or foregrounds a browser
+- guarded to `https://edit-api-sg.capcut.com/lv/v1/cc_web/*` endpoints only
+- input: `--endpoint`, `--body`, or `--variants`, plus optional `--capcut-lan` and `--capcut-loc`
+- writes raw variant bodies/responses under ignored `data/**`
+- writes normalized shape summaries with `ret`, `errmsg`, response hashes, top-level keys, URL-like booleans, and request/response shape descriptors without signed URL values
+- proof bundles:
+  - `data/jimeng-lab/proof-20260610-capcut-probe-hot-words/`
+  - `data/jimeng-lab/proof-20260610-capcut-probe-fuzzy/`
+  - `data/jimeng-lab/proof-20260610-capcut-probe-collection/`
+  - `data/jimeng-lab/proof-20260610-capcut-probe-search/`
+- latest no-spend probes confirmed `/lv/v1/cc_web/replicate/get_search_words` and `/lv/v1/cc_web/plane/fuzzy_search_templates` return `ret=0`, while guessed `/lv/v1/cc_web/plane/get_collection_templates` and `/lv/v1/cc_web/replicate/search_templates` variants still return `ret=1000` / `param error`; capture exact UI payloads before promoting row/search commands
+
 Lip-sync submit comparison is now available as the live-generation gate:
 
 - `jimeng-browser-proxy lip-sync-compare`

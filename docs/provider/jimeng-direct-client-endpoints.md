@@ -951,6 +951,61 @@ occurrences=10
 normalized_static_locate_capcut_method_proof_has_no_signed_urls_or_credentials=true
 ```
 
+### 10.5) CapCut signed endpoint probe
+- `jimeng-browser-proxy capcut-probe`
+- Status:
+  - implemented as a session-free no-spend probe tool for the remaining CapCut row/search endpoints
+  - guarded to `https://edit-api-sg.capcut.com/lv/v1/cc_web/*`
+  - signs each replay with the recovered frontend CapCut signer
+  - writes raw variant bodies/responses under ignored `data/**`
+  - writes normalized shape summaries without signed URL values
+
+Useful flags:
+
+```txt
+--endpoint <path|url>
+--body <json>
+--variants <json|file>
+--method <GET|POST>
+--capcut-lan <value>
+--capcut-loc <value>
+--dryRun
+```
+
+Live no-spend proof commands:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts capcut-probe \
+  --endpoint /lv/v1/cc_web/replicate/get_search_words \
+  --body '{}' \
+  --outDir data/jimeng-lab/proof-20260610-capcut-probe-hot-words
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts capcut-probe \
+  --endpoint /lv/v1/cc_web/plane/fuzzy_search_templates \
+  --variants '{"variants":[{"name":"keyword-en","body":{"sdk_version":"16.1.0","keyword":"makeup"}},{"name":"keyword-zh","body":{"sdk_version":"16.1.0","keyword":"美妆"}},{"name":"title-en","body":{"sdk_version":"16.1.0","title":"makeup"}}]}' \
+  --outDir data/jimeng-lab/proof-20260610-capcut-probe-fuzzy
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts capcut-probe \
+  --endpoint /lv/v1/cc_web/plane/get_collection_templates \
+  --variants '{"variants":[{"name":"category_id","body":{"sdk_version":"16.1.0","enter_from":"feed","count":20,"lang":"en","category_id":0}},{"name":"collection_id","body":{"sdk_version":"16.1.0","enter_from":"feed","count":20,"lang":"en","collection_id":0}},{"name":"category_ids","body":{"sdk_version":"16.1.0","enter_from":"feed","count":20,"lang":"en","category_ids":[0]}}]}' \
+  --outDir data/jimeng-lab/proof-20260610-capcut-probe-collection
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts capcut-probe \
+  --endpoint /lv/v1/cc_web/replicate/search_templates \
+  --variants '{"variants":[{"name":"keyword","body":{"sdk_version":"16.1.0","enter_from":"feed","count":20,"lang":"en","keyword":"makeup"}},{"name":"search_word","body":{"sdk_version":"16.1.0","enter_from":"feed","count":20,"lang":"en","search_word":"makeup"}},{"name":"query","body":{"sdk_version":"16.1.0","enter_from":"feed","count":20,"lang":"en","query":"makeup"}}]}' \
+  --outDir data/jimeng-lab/proof-20260610-capcut-probe-search
+```
+
+Current proof facts:
+
+```txt
+hot_words: body -> ret=0 errmsg=success response_sha=b442e8144ac7...
+fuzzy_search_templates: keyword-en/keyword-zh/title-en -> ret=0 errmsg=success, but item_list length 0
+get_collection_templates: category_id/collection_id/category_ids -> ret=1000 errmsg="param error"
+search_templates: keyword/search_word/query -> ret=1000 errmsg="param error"
+normalized_capcut_probe_proofs_have_no_signed_urls_or_credentials=true
+```
+
 ### 11) Upload token for local reference media
 - `POST https://jimeng.jianying.com/mweb/v1/get_upload_token`
 - Status:

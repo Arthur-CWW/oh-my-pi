@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto"
 import { describe, expect, test } from "bun:test"
 import {
+  buildSingleCapCutEndpointProbeVariant,
   buildCapCutSignedHeaders,
   buildCapCutTemplateCategoriesRequest,
   capCutTemplateStaticCatalogUrls,
@@ -11,6 +12,9 @@ import {
   parseCapCutTemplateCategoriesBody,
   parseCapCutTemplateRatioCatalogBody,
   parseCapCutTemplateSceneCatalogBody,
+  parseCapCutEndpointProbeVariants,
+  runCapCutEndpointProbe,
+  summarizeCapCutEndpointProbe,
   summarizeCapCutTemplateCategories,
   summarizeCapCutTemplateStaticCatalog,
   type JimengFetch,
@@ -207,6 +211,96 @@ describe("CapCut commercial template helpers", () => {
         },
       ],
     })
+  })
+
+  test("parses CapCut endpoint probe variants and single bodies", () => {
+    expect(parseCapCutEndpointProbeVariants(JSON.stringify({
+      variants: [
+        { name: "keyword", body: { sdk_version: "16.1.0", keyword: "makeup" } },
+      ],
+    }))).toEqual([
+      { name: "keyword", body: { sdk_version: "16.1.0", keyword: "makeup" } },
+    ])
+    expect(buildSingleCapCutEndpointProbeVariant('{"sdk_version":"16.1.0"}')).toEqual([
+      { name: "body", body: { sdk_version: "16.1.0" } },
+    ])
+  })
+
+  test("replays signed CapCut endpoint probe variants and summarizes shapes without URL values", async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = []
+    const client = new JimengClient({
+      fetch: mockFetch(JSON.stringify({
+        ret: "0",
+        errmsg: "success",
+        data: {
+          item_list: [
+            {
+              web_id: "template-1",
+              cover_url: "https://signed.example.invalid/cover.png?x-signature=secret",
+            },
+          ],
+        },
+      }), requests),
+    })
+
+    const result = await runCapCutEndpointProbe({
+      client,
+      probe: {
+        endpoint: "/lv/v1/cc_web/plane/fuzzy_search_templates",
+        variants: [
+          { name: "keyword", body: { sdk_version: "16.1.0", keyword: "makeup" } },
+        ],
+        lan: "en",
+        loc: "us",
+        userAgent: "UnitTest/1.0",
+      },
+    })
+    const summary = summarizeCapCutEndpointProbe(result)
+
+    expect(requests[0]?.url).toBe("https://edit-api-sg.capcut.com/lv/v1/cc_web/plane/fuzzy_search_templates")
+    expect(requests[0]?.init?.headers).toMatchObject({
+      origin: "https://www.capcut.com",
+      referer: "https://www.capcut.com/",
+      "user-agent": "UnitTest/1.0",
+      pf: "7",
+      appvr: "5.8.0",
+    })
+    expect(JSON.parse(String(requests[0]?.init?.body))).toEqual({ sdk_version: "16.1.0", keyword: "makeup" })
+    expect(summary.results).toHaveLength(1)
+    expect(JSON.stringify(summary)).not.toContain("signed.example.invalid")
+    expect(JSON.stringify(summary)).not.toContain("x-signature=secret")
+    expect(summary).toMatchObject({
+      endpoint: "/lv/v1/cc_web/plane/fuzzy_search_templates",
+      variant_count: 1,
+      results: [
+        {
+          name: "keyword",
+          ret: "0",
+          errmsg: "success",
+          response_text_has_url_like_tokens: true,
+        },
+      ],
+    })
+  })
+
+  test("rejects unsafe CapCut probe endpoints", async () => {
+    const client = new JimengClient({ fetch: mockFetch(JSON.stringify({ ret: "0" }), []) })
+
+    await expect(runCapCutEndpointProbe({
+      client,
+      probe: {
+        endpoint: "https://example.invalid/lv/v1/cc_web/plane/fuzzy_search_templates",
+        variants: [{ name: "body", body: {} }],
+      },
+    })).rejects.toThrow(JimengError)
+
+    await expect(runCapCutEndpointProbe({
+      client,
+      probe: {
+        endpoint: "/lv/v1/editor/use_report",
+        variants: [{ name: "body", body: {} }],
+      },
+    })).rejects.toThrow(JimengError)
   })
 })
 

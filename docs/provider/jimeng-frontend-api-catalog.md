@@ -1182,6 +1182,55 @@ occurrences=10
 normalized_static_locate_capcut_method_proof_has_no_signed_urls_or_credentials=true
 ```
 
+`jimeng-browser-proxy capcut-probe` is now the signed no-spend replay tool for these remaining CapCut endpoints. It does not load a Jimeng session or foreground a browser; it is guarded to `/lv/v1/cc_web/*`, writes raw responses only under ignored `data/**`, and emits normalized request/response shape summaries without URL values.
+
+Probe commands:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts capcut-probe \
+  --endpoint /lv/v1/cc_web/replicate/get_search_words \
+  --body '{}' \
+  --outDir data/jimeng-lab/proof-20260610-capcut-probe-hot-words
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts capcut-probe \
+  --endpoint /lv/v1/cc_web/plane/fuzzy_search_templates \
+  --variants '{"variants":[{"name":"keyword-en","body":{"sdk_version":"16.1.0","keyword":"makeup"}},{"name":"keyword-zh","body":{"sdk_version":"16.1.0","keyword":"美妆"}},{"name":"title-en","body":{"sdk_version":"16.1.0","title":"makeup"}}]}' \
+  --outDir data/jimeng-lab/proof-20260610-capcut-probe-fuzzy
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts capcut-probe \
+  --endpoint /lv/v1/cc_web/plane/get_collection_templates \
+  --variants '{"variants":[{"name":"category_id","body":{"sdk_version":"16.1.0","enter_from":"feed","count":20,"lang":"en","category_id":0}},{"name":"collection_id","body":{"sdk_version":"16.1.0","enter_from":"feed","count":20,"lang":"en","collection_id":0}},{"name":"category_ids","body":{"sdk_version":"16.1.0","enter_from":"feed","count":20,"lang":"en","category_ids":[0]}}]}' \
+  --outDir data/jimeng-lab/proof-20260610-capcut-probe-collection
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts capcut-probe \
+  --endpoint /lv/v1/cc_web/replicate/search_templates \
+  --variants '{"variants":[{"name":"keyword","body":{"sdk_version":"16.1.0","enter_from":"feed","count":20,"lang":"en","keyword":"makeup"}},{"name":"search_word","body":{"sdk_version":"16.1.0","enter_from":"feed","count":20,"lang":"en","search_word":"makeup"}},{"name":"query","body":{"sdk_version":"16.1.0","enter_from":"feed","count":20,"lang":"en","query":"makeup"}}]}' \
+  --outDir data/jimeng-lab/proof-20260610-capcut-probe-search
+```
+
+Latest no-spend probe facts:
+
+```txt
+/lv/v1/cc_web/replicate/get_search_words
+  body -> ret=0 errmsg=success response_sha=b442e8144ac7...
+
+/lv/v1/cc_web/plane/fuzzy_search_templates
+  keyword-en -> ret=0 errmsg=success response_sha=f70060efdcf4...
+  keyword-zh -> ret=0 errmsg=success response_sha=9770f85cc99b...
+  title-en -> ret=0 errmsg=success response_sha=5075ed973ff4...
+  all three returned data.item_list length 0 in the normalized shape
+
+/lv/v1/cc_web/plane/get_collection_templates
+  category_id -> ret=1000 errmsg="param error" response_sha=71cf86d7c28c...
+  collection_id -> ret=1000 errmsg="param error" response_sha=c975fd67d155...
+  category_ids -> ret=1000 errmsg="param error" response_sha=7e45dad2b470...
+
+/lv/v1/cc_web/replicate/search_templates
+  keyword -> ret=1000 errmsg="param error" response_sha=147d1c355511...
+  search_word -> ret=1000 errmsg="param error" response_sha=b53c75bc5959...
+  query -> ret=1000 errmsg="param error" response_sha=1f36fc8015f7...
+```
+
 ## Confirmed CapCut Public Template Metadata Contract
 
 `jimeng-browser-proxy capcut-template-metadata` fetches two public static CapCut template metadata JSON files discovered in the same frontend bundle. This path does not require a Jimeng or CapCut session and does not consume generation quota.

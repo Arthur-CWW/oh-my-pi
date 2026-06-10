@@ -1783,20 +1783,85 @@ rg -n 'X-Amz|x-signature|x-expires|sessionid|sid_guard|msToken' \
 
 Expected result: no matches.
 
+## CapCut Signed Endpoint Probe Smoke
+
+`jimeng-browser-proxy capcut-probe` signs explicit `/lv/v1/cc_web/*` replay variants with the recovered CapCut frontend signer. It is session-free, no-spend, and intended for quickly testing row/search/collection payload hypotheses before promoting a stable CLI command.
+
+Commands:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts capcut-probe \
+  --endpoint /lv/v1/cc_web/replicate/get_search_words \
+  --body '{}' \
+  --outDir data/jimeng-lab/proof-20260610-capcut-probe-hot-words
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts capcut-probe \
+  --endpoint /lv/v1/cc_web/plane/fuzzy_search_templates \
+  --variants '{"variants":[{"name":"keyword-en","body":{"sdk_version":"16.1.0","keyword":"makeup"}},{"name":"keyword-zh","body":{"sdk_version":"16.1.0","keyword":"美妆"}},{"name":"title-en","body":{"sdk_version":"16.1.0","title":"makeup"}}]}' \
+  --outDir data/jimeng-lab/proof-20260610-capcut-probe-fuzzy
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts capcut-probe \
+  --endpoint /lv/v1/cc_web/plane/get_collection_templates \
+  --variants '{"variants":[{"name":"category_id","body":{"sdk_version":"16.1.0","enter_from":"feed","count":20,"lang":"en","category_id":0}},{"name":"collection_id","body":{"sdk_version":"16.1.0","enter_from":"feed","count":20,"lang":"en","collection_id":0}},{"name":"category_ids","body":{"sdk_version":"16.1.0","enter_from":"feed","count":20,"lang":"en","category_ids":[0]}}]}' \
+  --outDir data/jimeng-lab/proof-20260610-capcut-probe-collection
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts capcut-probe \
+  --endpoint /lv/v1/cc_web/replicate/search_templates \
+  --variants '{"variants":[{"name":"keyword","body":{"sdk_version":"16.1.0","enter_from":"feed","count":20,"lang":"en","keyword":"makeup"}},{"name":"search_word","body":{"sdk_version":"16.1.0","enter_from":"feed","count":20,"lang":"en","search_word":"makeup"}},{"name":"query","body":{"sdk_version":"16.1.0","enter_from":"feed","count":20,"lang":"en","query":"makeup"}}]}' \
+  --outDir data/jimeng-lab/proof-20260610-capcut-probe-search
+```
+
+Results:
+
+```txt
+hot_words: body -> ret=0 errmsg=success response_sha=b442e8144ac7...
+fuzzy_search_templates: keyword-en -> ret=0 errmsg=success response_sha=f70060efdcf4...
+fuzzy_search_templates: keyword-zh -> ret=0 errmsg=success response_sha=9770f85cc99b...
+fuzzy_search_templates: title-en -> ret=0 errmsg=success response_sha=5075ed973ff4...
+get_collection_templates: category_id -> ret=1000 errmsg="param error" response_sha=71cf86d7c28c...
+get_collection_templates: collection_id -> ret=1000 errmsg="param error" response_sha=c975fd67d155...
+get_collection_templates: category_ids -> ret=1000 errmsg="param error" response_sha=7e45dad2b470...
+search_templates: keyword -> ret=1000 errmsg="param error" response_sha=147d1c355511...
+search_templates: search_word -> ret=1000 errmsg="param error" response_sha=b53c75bc5959...
+search_templates: query -> ret=1000 errmsg="param error" response_sha=1f36fc8015f7...
+```
+
+Normalized proof files:
+
+```txt
+data/jimeng-lab/proof-20260610-capcut-probe-hot-words/normalized/capcut-probe-20260610044826-summary.json
+data/jimeng-lab/proof-20260610-capcut-probe-fuzzy/normalized/capcut-probe-20260610044826-summary.json
+data/jimeng-lab/proof-20260610-capcut-probe-collection/normalized/capcut-probe-20260610044826-summary.json
+data/jimeng-lab/proof-20260610-capcut-probe-search/normalized/capcut-probe-20260610044826-summary.json
+```
+
+Leak check:
+
+```bash
+rg -n 'X-Amz|x-signature|x-expires|cookie|session|authorization|msToken|verifyFp' \
+  data/jimeng-lab/proof-20260610-capcut-probe-*/normalized
+```
+
+Result:
+
+```txt
+normalized capcut-probe proofs have no signed URLs or credentials
+```
+
 ## Verification
 
 ```bash
 bun run jimeng:typecheck
 bun run jimeng:test
-bun packages/jimeng-client/src/browser-proxy-cli.ts --help | rg 'lip-sync-config|voice-clones|voice-clone-submit|capcut-template-metadata|capcut-categories|overseas-short-videos|subject-create|subject-update|subject-delete|subject-generate-voice|subjects|templates|short-videos'
+bun packages/jimeng-client/src/browser-proxy-cli.ts --help | rg 'lip-sync-config|voice-clones|voice-clone-submit|capcut-probe|capcut-template-metadata|capcut-categories|overseas-short-videos|subject-create|subject-update|subject-delete|subject-generate-voice|subjects|templates|short-videos'
 ```
 
 Result:
 
 ```txt
 typecheck passed
-80 tests passed, 0 failed
-browser-proxy help listed lip-sync-config, voice-clones, voice-clone-submit, capcut-template-metadata, overseas-short-videos, capcut-categories, subject-create, subject-update, subject-delete, subject-generate-voice, subjects, templates, and short-videos
+115 tests passed, 0 failed
+browser-proxy help listed capcut-probe
 ```
 
 ## Follow-Up

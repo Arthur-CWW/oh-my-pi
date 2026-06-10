@@ -1,7 +1,10 @@
 import { createHash } from "node:crypto"
+import { z } from "zod"
 import { type JimengSessionBundle } from "./capture"
 import { JimengClient } from "./client"
 import { jimengError } from "./errors"
+import { type JsonObject, type JsonValue } from "./reference-image"
+import { JimengJsonValueSchema, parseJsonText } from "./schema"
 
 const CAPCUT_TEMPLATE_HOST = "https://edit-api-sg.capcut.com"
 const CAPCUT_TEMPLATE_MERCURY_BASE = "https://lf16-beecdn.ibytedtos.com/obj/ies-fe-bee-sg/bee_prod"
@@ -80,6 +83,39 @@ export interface CapCutTemplateStaticCatalogResult {
   scenesBody: unknown
 }
 
+export interface CapCutEndpointProbeVariant {
+  name: string
+  body: JsonValue
+}
+
+export interface CapCutEndpointProbeInput {
+  endpoint: string
+  method?: "GET" | "POST"
+  variants: CapCutEndpointProbeVariant[]
+  lan?: string
+  loc?: string
+  userAgent?: string | null
+}
+
+export interface CapCutEndpointProbeVariantResult {
+  name: string
+  requestBody: JsonValue
+  httpStatus: number
+  ret: string | number | null
+  errmsg: string | null
+  responseTextSha256: string
+  responseTextHasUrlLikeTokens: boolean
+  topLevelKeys: string[]
+  body: JsonValue
+}
+
+export interface CapCutEndpointProbeResult {
+  endpoint: string
+  url: string
+  method: "GET" | "POST"
+  results: CapCutEndpointProbeVariantResult[]
+}
+
 export interface CapCutSignedHeaderOptions {
   path: string
   nowSec?: number
@@ -97,6 +133,48 @@ export function capCutTemplateStaticCatalogUrls(): { ratioCatalogUrl: string; sc
     ratioCatalogUrl: CAPCUT_TEMPLATE_RATIO_CATALOG_URL,
     sceneCatalogUrl: CAPCUT_TEMPLATE_SCENE_CATALOG_URL,
   }
+}
+
+export function parseCapCutEndpointProbeVariants(text: string): CapCutEndpointProbeVariant[] {
+  const parsed = parseJsonText(text, "CapCut endpoint probe variants")
+  const root = asJsonRecord(parsed)
+  const source = asJsonArray(parsed) ?? asJsonArray(root?.variants)
+  if (!source || source.length === 0) {
+    throw jimengError({
+      category: "validation",
+      code: "CAPCUT_ENDPOINT_PROBE_VARIANTS_INVALID",
+      message: "CapCut endpoint probe variants must be a JSON array or an object with a variants array.",
+      retryable: false,
+    })
+  }
+
+  return source.map((value, index) => {
+    const record = asJsonRecord(value)
+    if (!record) {
+      throw jimengError({
+        category: "validation",
+        code: "CAPCUT_ENDPOINT_PROBE_VARIANT_INVALID",
+        message: "Each CapCut endpoint probe variant must be an object.",
+        retryable: false,
+        details: { index },
+      })
+    }
+    const name = stringValue(record.name) ?? `variant-${index + 1}`
+    if (!/^[0-9A-Za-z_.-]+$/.test(name)) {
+      throw jimengError({
+        category: "validation",
+        code: "CAPCUT_ENDPOINT_PROBE_VARIANT_NAME_INVALID",
+        message: "CapCut endpoint probe variant names may contain only letters, numbers, dot, dash, or underscore.",
+        retryable: false,
+        details: { name },
+      })
+    }
+    return { name, body: JimengJsonValueSchema.parse(record.body ?? {}) }
+  })
+}
+
+export function buildSingleCapCutEndpointProbeVariant(text: string): CapCutEndpointProbeVariant[] {
+  return [{ name: "body", body: parseJsonText(text, "CapCut endpoint probe body") }]
 }
 
 export function buildCapCutSignedHeaders(options: CapCutSignedHeaderOptions): Record<string, string> {
@@ -191,6 +269,45 @@ export async function fetchCapCutTemplateStaticCatalog(input: {
     ratiosBody,
     scenesBody,
   }
+}
+
+export async function runCapCutEndpointProbe(input: {
+  client?: JimengClient
+  probe: CapCutEndpointProbeInput
+}): Promise<CapCutEndpointProbeResult> {
+  const endpoint = normalizeCapCutProbeEndpoint(input.probe.endpoint)
+  const method = input.probe.method ?? "POST"
+  const client = input.client ?? new JimengClient()
+  const url = `${CAPCUT_TEMPLATE_HOST}${endpoint}`
+  const results: CapCutEndpointProbeVariantResult[] = []
+
+  for (const variant of input.probe.variants) {
+    const response = await client.requestText(url, {
+      method,
+      headers: buildCapCutSignedHeaders({
+        path: endpoint,
+        lan: input.probe.lan,
+        loc: input.probe.loc,
+        userAgent: input.probe.userAgent,
+      }),
+      body: method === "GET" ? undefined : JSON.stringify(variant.body),
+    })
+    const body = parseJsonText(response.text, `CapCut endpoint probe ${variant.name}`)
+    const envelope = parseCapCutEnvelope(body)
+    results.push({
+      name: variant.name,
+      requestBody: variant.body,
+      httpStatus: response.status,
+      ret: envelope.ret,
+      errmsg: envelope.errmsg,
+      responseTextSha256: sha256(response.text),
+      responseTextHasUrlLikeTokens: URL_LIKE_RE.test(response.text),
+      topLevelKeys: Object.keys(asJsonRecord(body) ?? {}).sort(),
+      body,
+    })
+  }
+
+  return { endpoint, url, method, results }
 }
 
 export function parseCapCutTemplateCategoriesBody(body: unknown): CapCutTemplateCategory[] {
@@ -302,6 +419,28 @@ export function summarizeCapCutTemplateStaticCatalog(result: Pick<
   }
 }
 
+export function summarizeCapCutEndpointProbe(result: CapCutEndpointProbeResult): JsonObject {
+  const url = new URL(result.url)
+  return {
+    endpoint: result.endpoint,
+    url_host: url.host,
+    url_pathname: url.pathname,
+    method: result.method,
+    variant_count: result.results.length,
+    results: result.results.map((item) => ({
+      name: item.name,
+      http_status: item.httpStatus,
+      ret: item.ret,
+      errmsg: item.errmsg,
+      response_text_sha256: item.responseTextSha256,
+      response_text_has_url_like_tokens: item.responseTextHasUrlLikeTokens,
+      top_level_keys: item.topLevelKeys,
+      request_shape: summarizeJsonShape(item.requestBody),
+      response_shape: summarizeJsonShape(item.body),
+    })),
+  }
+}
+
 function assertCapCutSuccess(body: unknown, operation: string): void {
   const ret = retValue(body)
   if (ret === "0" || ret === 0) return
@@ -335,6 +474,84 @@ function safeJson(value: string): unknown {
   } catch {
     return value
   }
+}
+
+const URL_LIKE_RE = /https?:\/\/|byteimg|douyinpic|vlabvod|x-signature|x-expires|expire_time/i
+
+const CapCutProbeEndpointSchema = z.string()
+  .min(1)
+  .transform((value) => {
+    if (value.startsWith("http://") || value.startsWith("https://")) {
+      const url = new URL(value)
+      if (url.host !== new URL(CAPCUT_TEMPLATE_HOST).host) {
+        throw new Error("CapCut endpoint probe only supports edit-api-sg.capcut.com")
+      }
+      return url.pathname
+    }
+    return value
+  })
+  .refine((value) => value.startsWith("/lv/v1/cc_web/"), "CapCut endpoint probe only supports /lv/v1/cc_web/* endpoints")
+
+function normalizeCapCutProbeEndpoint(endpoint: string): string {
+  try {
+    return CapCutProbeEndpointSchema.parse(endpoint)
+  } catch (error) {
+    const parsedError = error instanceof Error ? error : new Error(String(error))
+    throw jimengError({
+      category: "validation",
+      code: "CAPCUT_ENDPOINT_PROBE_UNSAFE",
+      message: "CapCut endpoint probe accepts only signed read-oriented /lv/v1/cc_web/* endpoints.",
+      retryable: false,
+      details: { endpoint, message: parsedError.message },
+    })
+  }
+}
+
+function parseCapCutEnvelope(body: JsonValue): { ret: string | number | null; errmsg: string | null } {
+  const record = asJsonRecord(body)
+  return {
+    ret: typeof record?.ret === "string" || typeof record?.ret === "number" ? record.ret : null,
+    errmsg: stringValue(record?.errmsg),
+  }
+}
+
+function summarizeJsonShape(value: JsonValue, depth = 0): JsonObject {
+  if (value === null) return { kind: "null" }
+  if (typeof value === "string") {
+    return {
+      kind: "string",
+      length: value.length,
+      url_like: URL_LIKE_RE.test(value),
+    }
+  }
+  if (typeof value === "number") return { kind: "number" }
+  if (typeof value === "boolean") return { kind: "boolean" }
+  if (Array.isArray(value)) {
+    return {
+      kind: "array",
+      length: value.length,
+      first: depth >= 3 || value.length === 0 ? null : summarizeJsonShape(value[0]!, depth + 1),
+    }
+  }
+  const keys = Object.keys(value).sort()
+  const fields: JsonObject = {}
+  if (depth < 3) {
+    for (const key of keys.slice(0, 16)) fields[key] = summarizeJsonShape(value[key], depth + 1)
+  }
+  return {
+    kind: "object",
+    key_count: keys.length,
+    keys: keys.slice(0, 64),
+    fields,
+  }
+}
+
+function asJsonRecord(value: JsonValue | undefined): JsonObject | null {
+  return !!value && typeof value === "object" && !Array.isArray(value) ? value : null
+}
+
+function asJsonArray(value: JsonValue | undefined): JsonValue[] | null {
+  return Array.isArray(value) ? value : null
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

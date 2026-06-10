@@ -17,10 +17,14 @@ import {
 } from "./agent-catalog"
 import { loadJimengSessionFromBrowser } from "./browser-session"
 import {
+  buildSingleCapCutEndpointProbeVariant,
   buildCapCutTemplateCategoriesRequest,
   capCutTemplateStaticCatalogUrls,
   fetchCapCutTemplateCategories,
   fetchCapCutTemplateStaticCatalog,
+  parseCapCutEndpointProbeVariants,
+  runCapCutEndpointProbe,
+  summarizeCapCutEndpointProbe,
   summarizeCapCutTemplateCategories,
   summarizeCapCutTemplateStaticCatalog,
 } from "./capcut-templates"
@@ -196,6 +200,7 @@ Commands:
   templates     Fetch no-spend Explore/template examples for prompt/template mining
   short-videos  Fetch no-spend Explore short videos for reference/profile mining
   overseas-short-videos Fetch no-spend feed_short_video examples for overseas/reference mining
+  capcut-probe Probe/replay one signed CapCut /lv/v1/cc_web/* endpoint with JSON variants
   capcut-categories Fetch no-spend CapCut commercial template categories
   capcut-template-metadata Fetch public CapCut template ratios and scene metadata
   subjects      Fetch saved Jimeng subject/persona records without generation spend
@@ -233,9 +238,9 @@ Options:
   --includeKnown                Include already-covered endpoints in discovery-worklist
   --plan <file>                 Dry-run plan JSON for lip-sync-compare
   --endpoint <path|url>          Endpoint path or full URL for endpoint-probe
-  --method <GET|POST>            HTTP method for endpoint-probe (default: POST)
+  --method <GET|POST>            HTTP method for endpoint-probe/capcut-probe (default: POST)
   --query <query>                Query string override for endpoint-probe
-  --body <json>                  Single JSON body for endpoint-probe
+  --body <json>                  Single JSON body for endpoint-probe/capcut-probe
   --variants <json|file>         Probe variants JSON array or object with variants
   --endpoints <ids|all>          Catalog endpoints, comma-separated (default: all)
                                   agent-catalog accepts skills,config,all
@@ -417,6 +422,11 @@ Examples:
   jimeng-browser-proxy capcut-categories \\
     --outDir data/jimeng-lab/cli-capcut-categories-smoke
 
+  jimeng-browser-proxy capcut-probe \\
+    --endpoint /lv/v1/cc_web/plane/fuzzy_search_templates \\
+    --body '{"sdk_version":"16.1.0","keyword":"makeup"}' \\
+    --outDir data/jimeng-lab/cli-capcut-probe-smoke
+
   jimeng-browser-proxy capcut-template-metadata \\
     --outDir data/jimeng-lab/cli-capcut-template-metadata-smoke
 
@@ -529,6 +539,7 @@ interface CliArgs {
     | "templates"
     | "short-videos"
     | "overseas-short-videos"
+    | "capcut-probe"
     | "capcut-categories"
     | "capcut-template-metadata"
     | "subjects"
@@ -809,6 +820,65 @@ async function main(argv: string[]): Promise<void> {
       summary: summarizeCapCutTemplateStaticCatalog(result),
     })
     console.log(`[jimeng-browser-proxy] capcut-template-metadata saved ratios=${result.ratios.length} scenes=${result.scenes.length}`)
+    return
+  }
+
+  if (args.command === "capcut-probe") {
+    if (!args.endpoint) throw new Error("capcut-probe requires --endpoint")
+    if (!args.body && !args.variants) throw new Error("capcut-probe requires --body or --variants")
+    const variants = args.variants
+      ? parseCapCutEndpointProbeVariants(readInlineOrFile(args.variants))
+      : buildSingleCapCutEndpointProbeVariant(args.body!)
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const runId = `capcut-probe-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const probe = {
+      endpoint: args.endpoint,
+      method: args.method,
+      variants,
+      lan: args.capcutLan,
+      loc: args.capcutLoc,
+    }
+    if (args.dryRun) {
+      writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
+        command: args.command,
+        host: "https://edit-api-sg.capcut.com",
+        probe,
+        warning: "Local-only signed CapCut replay plan. Use only read-oriented /lv/v1/cc_web/* endpoints.",
+      })
+      writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+        command: args.command,
+        probe: {
+          endpoint: probe.endpoint,
+          method: probe.method ?? "POST",
+          variant_count: probe.variants.length,
+          capcut_lan: probe.lan ?? "en",
+          capcut_loc: probe.loc ?? "us",
+        },
+      })
+      console.log(`[jimeng-browser-proxy] capcut-probe dry run saved variants=${variants.length}`)
+      return
+    }
+
+    const result = await runCapCutEndpointProbe({ probe })
+    writeJson(path.join(dirs.rawDir, `${runId}.json`), {
+      endpoint: result.endpoint,
+      url: result.url,
+      method: result.method,
+      results: result.results.map((item) => ({
+        name: item.name,
+        request_body: item.requestBody,
+        http_status: item.httpStatus,
+        ret: item.ret,
+        errmsg: item.errmsg,
+        response_text_sha256: item.responseTextSha256,
+        body: item.body,
+      })),
+    })
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      summary: summarizeCapCutEndpointProbe(result),
+    })
+    console.log(`[jimeng-browser-proxy] capcut-probe saved variants=${result.results.length} rets=${result.results.map((item) => `${item.name}:${item.ret ?? "none"}`).join(",")}`)
     return
   }
 
@@ -2804,6 +2874,7 @@ function parseArgs(argv: string[]): CliArgs {
     && command !== "templates"
     && command !== "short-videos"
     && command !== "overseas-short-videos"
+    && command !== "capcut-probe"
     && command !== "capcut-categories"
     && command !== "capcut-template-metadata"
     && command !== "subjects"
