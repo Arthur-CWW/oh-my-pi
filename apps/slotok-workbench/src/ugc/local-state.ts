@@ -74,10 +74,22 @@ export interface UgcReferenceArchive {
   readonly updatedAt: string
   readonly sourcePolicy: "metadata-only" | "abstract-mechanics" | "rights-cleared-source"
   readonly preservedMechanics: JsonValue
+  readonly sampleClipIds: readonly string[]
   readonly swappedFields: readonly string[]
   readonly blockedFields: readonly string[]
   readonly guardrails: readonly string[]
+  readonly candidateFormatOutputs: readonly ReferenceArchiveFormatOutput[]
   readonly notes: readonly string[]
+}
+
+export interface ReferenceArchiveFormatOutput {
+  readonly id: string
+  readonly title: string
+  readonly kind: "format-template" | "pose-plan" | "caption-template" | "hook-family" | "cta-pattern"
+  readonly summary: string
+  readonly stageIds: readonly string[]
+  readonly candidateIds: readonly string[]
+  readonly manifestJson: JsonValue
 }
 
 export interface UgcLocalState {
@@ -133,6 +145,12 @@ export interface CreateProviderJobInput {
 export interface CreateReferenceArchiveInput {
   readonly referenceProfileId: string
   readonly sourcePolicy?: UgcReferenceArchive["sourcePolicy"]
+  readonly archiveStatus?: UgcReferenceArchive["archiveStatus"]
+  readonly preservedMechanics?: JsonValue
+  readonly swappedFields?: readonly string[]
+  readonly blockedFields?: readonly string[]
+  readonly guardrails?: readonly string[]
+  readonly candidateFormatOutputs?: readonly ReferenceArchiveFormatOutput[]
   readonly notes?: readonly string[]
 }
 
@@ -184,11 +202,44 @@ export function referenceProfileToArchive(workspaceId: string, referenceProfile:
       ? "rights-cleared-source"
       : "abstract-mechanics",
     preservedMechanics: toJsonValue(referenceProfile.extractedMechanics),
+    sampleClipIds: referenceProfile.sampleClips.map((clip) => clip.id),
     swappedFields: referenceProfile.remixFields.filter((field) => field.mode === "swap").map((field) => field.label),
     blockedFields: referenceProfile.remixFields.filter((field) => field.mode === "blocked").map((field) => field.label),
     guardrails: referenceProfile.cleanRoomBoundary,
+    candidateFormatOutputs: referenceProfileToFormatOutputs(referenceProfile),
     notes: [],
   }
+}
+
+export function referenceProfileToFormatOutputs(referenceProfile: ReferenceProfile): readonly ReferenceArchiveFormatOutput[] {
+  return [
+    {
+      id: `format_${referenceProfile.id}_pose_timing`,
+      title: "Pose and timing plan",
+      kind: "pose-plan",
+      summary: referenceProfile.extractedMechanics.poseTiming,
+      stageIds: ["stage_reference_profile", "stage_edit_style"],
+      candidateIds: [],
+      manifestJson: {
+        gestureRhythm: referenceProfile.extractedMechanics.gestureRhythm,
+        shotStructure: referenceProfile.extractedMechanics.shotStructure,
+        sampleClipIds: referenceProfile.sampleClips.map((clip) => clip.id),
+      },
+    },
+    {
+      id: `format_${referenceProfile.id}_caption_template`,
+      title: "Caption template grammar",
+      kind: "caption-template",
+      summary: referenceProfile.extractedMechanics.captionTemplate,
+      stageIds: ["stage_hook", "stage_cta"],
+      candidateIds: [],
+      manifestJson: {
+        hookFamilies: referenceProfile.extractedMechanics.hookFamilies,
+        ctaPatterns: referenceProfile.extractedMechanics.ctaPatterns,
+        nonAdPatterns: referenceProfile.extractedMechanics.nonAdPatterns,
+      },
+    },
+  ]
 }
 
 export function isLocalState(value: unknown): value is UgcLocalState {

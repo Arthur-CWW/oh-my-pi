@@ -63,7 +63,11 @@ export class UgcJsonStore {
 
   read(): UgcLocalState {
     const existing = readJsonFile(this.config.statePath)
-    if (isLocalState(existing)) return existing
+    if (isLocalState(existing)) {
+      const normalized = normalizeLocalState(existing)
+      if (JSON.stringify(normalized) !== JSON.stringify(existing)) return this.write(normalized)
+      return normalized
+    }
 
     const created = createInitialLocalState(this.now())
     this.write(created)
@@ -184,9 +188,18 @@ export class UgcJsonStore {
     const referenceProfile = state.workspace.referenceProfiles.find((reference) => reference.id === input.referenceProfileId)
     if (!referenceProfile) throw new Error(`reference profile not found: ${input.referenceProfileId}`)
     const now = this.now()
+    const defaultArchive = referenceProfileToArchive(state.workspace.id, referenceProfile, now)
     const archive: UgcReferenceArchive = {
-      ...(existing ?? referenceProfileToArchive(state.workspace.id, referenceProfile, now)),
-      sourcePolicy: input.sourcePolicy ?? existing?.sourcePolicy ?? referenceProfileToArchive(state.workspace.id, referenceProfile, now).sourcePolicy,
+      ...defaultArchive,
+      ...existing,
+      archiveStatus: input.archiveStatus ?? existing?.archiveStatus ?? defaultArchive.archiveStatus,
+      sourcePolicy: input.sourcePolicy ?? existing?.sourcePolicy ?? defaultArchive.sourcePolicy,
+      preservedMechanics: input.preservedMechanics ?? existing?.preservedMechanics ?? defaultArchive.preservedMechanics,
+      sampleClipIds: existing?.sampleClipIds ?? defaultArchive.sampleClipIds,
+      swappedFields: input.swappedFields ?? existing?.swappedFields ?? defaultArchive.swappedFields,
+      blockedFields: input.blockedFields ?? existing?.blockedFields ?? defaultArchive.blockedFields,
+      guardrails: input.guardrails ?? existing?.guardrails ?? defaultArchive.guardrails,
+      candidateFormatOutputs: input.candidateFormatOutputs ?? existing?.candidateFormatOutputs ?? defaultArchive.candidateFormatOutputs,
       notes: input.notes ?? existing?.notes ?? [],
       updatedAt: now,
     }
@@ -194,6 +207,15 @@ export class UgcJsonStore {
       ...state,
       referenceArchives: [archive, ...state.referenceArchives.filter((item) => item.id !== archive.id)],
     })
+  }
+
+  deleteReferenceArchive(archiveId: string): UgcLocalState {
+    const state = this.read()
+    const referenceArchives = state.referenceArchives.filter((archive) => archive.id !== archiveId && archive.referenceProfileId !== archiveId)
+    if (referenceArchives.length === state.referenceArchives.length) {
+      throw new Error(`reference archive not found: ${archiveId}`)
+    }
+    return this.write({ ...state, referenceArchives })
   }
 
   createExportManifest(input: CreateExportManifestInput): UgcLocalState {
@@ -247,6 +269,26 @@ function stampState(state: UgcLocalState, now: string): UgcLocalState {
     workspace: { ...state.workspace, updatedAt: now },
     updatedAt: now,
   }
+}
+
+function normalizeLocalState(state: UgcLocalState): UgcLocalState {
+  const referenceArchives = state.workspace.referenceProfiles.map((referenceProfile) => {
+    const defaultArchive = referenceProfileToArchive(state.workspace.id, referenceProfile, state.updatedAt)
+    const existing = state.referenceArchives.find((archive) => archive.referenceProfileId === referenceProfile.id)
+    return existing
+      ? {
+          ...defaultArchive,
+          ...existing,
+          sampleClipIds: existing.sampleClipIds ?? defaultArchive.sampleClipIds,
+          candidateFormatOutputs: existing.candidateFormatOutputs ?? defaultArchive.candidateFormatOutputs,
+          notes: existing.notes ?? defaultArchive.notes,
+        }
+      : defaultArchive
+  })
+  const orphanArchives = state.referenceArchives.filter((archive) => (
+    !state.workspace.referenceProfiles.some((referenceProfile) => referenceProfile.id === archive.referenceProfileId)
+  ))
+  return { ...state, referenceArchives: [...referenceArchives, ...orphanArchives] }
 }
 
 function writeWorkspaceShards(workspaceDir: string, state: UgcLocalState): void {

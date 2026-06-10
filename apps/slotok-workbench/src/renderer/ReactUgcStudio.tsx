@@ -70,7 +70,7 @@ import {
 } from "./design-system/workbench"
 import { cn } from "./lib/cn"
 import { ugcStudioWorkspace, type BranchSnapshot, type CreativeCandidate, type JsonValue, type PersonaProfile, type ReferenceProfile, type UgcStudioWorkspace } from "./ugcStudioModel"
-import { createInitialLocalState, type UgcExportManifest, type UgcLocalState, type UgcProviderJob, type UgcReferenceArchive } from "../ugc/local-state"
+import { createInitialLocalState, referenceProfileToArchive, type ReferenceArchiveFormatOutput, type UgcExportManifest, type UgcLocalState, type UgcProviderJob, type UgcReferenceArchive } from "../ugc/local-state"
 
 type ReactView = "atlas" | "explore" | "review" | "campaign" | "reference" | "editor" | "graph" | "provider"
 type KieOperation = "image-text" | "image-to-image" | "video-text" | "image-to-video" | "reference-to-video" | "avatar" | "omni-video"
@@ -539,6 +539,16 @@ function parseJson(text: string): JsonValue {
   } catch {
     return { raw: text }
   }
+}
+
+function splitLines(text: string): readonly string[] {
+  return text.split(/\r?\n/g).map((line) => line.trim()).filter(Boolean)
+}
+
+function sourcePolicyFor(reference: ReferenceProfile): ReferenceSourcePolicy {
+  return reference.rightsStatus === "rights-cleared" || reference.rightsStatus === "user-owned"
+    ? "rights-cleared-source"
+    : "abstract-mechanics"
 }
 
 export function ReactUgcStudio() {
@@ -1234,40 +1244,262 @@ function FinalEditor(props: { selectedCandidateId: string; onMutateLocal: (path:
   )
 }
 
+type ReferenceSourcePolicy = UgcReferenceArchive["sourcePolicy"]
+type ReferenceArchiveStatus = UgcReferenceArchive["archiveStatus"]
+
 function ReferenceArchiveView(props: { onMutateLocal: (path: string, body: object) => void }) {
   const { workspace, referenceArchives } = useUgcLocalState()
+  const [selectedReferenceId, setSelectedReferenceId] = React.useState(workspace.referenceProfiles[0]?.id ?? "")
+  const selectedReference = workspace.referenceProfiles.find((reference) => reference.id === selectedReferenceId) ?? workspace.referenceProfiles[0]
+  const persistedArchive = referenceArchives.find((archive) => archive.referenceProfileId === selectedReference?.id)
+  const defaultArchive = selectedReference ? referenceProfileToArchive(workspace.id, selectedReference, workspace.updatedAt) : null
+  const selectedArchive = persistedArchive ?? defaultArchive
+  const [sourcePolicy, setSourcePolicy] = React.useState<ReferenceSourcePolicy>(selectedArchive?.sourcePolicy ?? "abstract-mechanics")
+  const [archiveStatus, setArchiveStatus] = React.useState<ReferenceArchiveStatus>(selectedArchive?.archiveStatus ?? "sampled")
+  const [mechanicsDraft, setMechanicsDraft] = React.useState(JSON.stringify(selectedArchive?.preservedMechanics ?? {}, null, 2))
+  const [swappedDraft, setSwappedDraft] = React.useState((selectedArchive?.swappedFields ?? []).join("\n"))
+  const [blockedDraft, setBlockedDraft] = React.useState((selectedArchive?.blockedFields ?? []).join("\n"))
+  const [guardrailsDraft, setGuardrailsDraft] = React.useState((selectedArchive?.guardrails ?? []).join("\n"))
+  const [notesDraft, setNotesDraft] = React.useState((selectedArchive?.notes ?? []).join("\n"))
+
+  React.useEffect(() => {
+    if (!workspace.referenceProfiles.some((reference) => reference.id === selectedReferenceId)) {
+      setSelectedReferenceId(workspace.referenceProfiles[0]?.id ?? "")
+    }
+  }, [selectedReferenceId, workspace.referenceProfiles])
+
+  React.useEffect(() => {
+    setSourcePolicy(selectedArchive?.sourcePolicy ?? "abstract-mechanics")
+    setArchiveStatus(selectedArchive?.archiveStatus ?? "sampled")
+    setMechanicsDraft(JSON.stringify(selectedArchive?.preservedMechanics ?? {}, null, 2))
+    setSwappedDraft((selectedArchive?.swappedFields ?? []).join("\n"))
+    setBlockedDraft((selectedArchive?.blockedFields ?? []).join("\n"))
+    setGuardrailsDraft((selectedArchive?.guardrails ?? []).join("\n"))
+    setNotesDraft((selectedArchive?.notes ?? []).join("\n"))
+  }, [selectedArchive?.id, selectedArchive?.updatedAt, selectedReference?.id])
+
+  if (!selectedReference || !selectedArchive) {
+    return (
+      <div className="grid h-full place-items-center p-6">
+        <PanelCard className="max-w-sm text-center">
+          <PanelHeader title="No reference profiles" />
+          <p className="text-xs leading-5 text-muted-foreground">Add a profile target before creating archive specs.</p>
+        </PanelCard>
+      </div>
+    )
+  }
+
+  const outputs = selectedArchive.candidateFormatOutputs
+  const saveArchive = () => {
+    props.onMutateLocal("/api/ugc/reference-archives", {
+      referenceProfileId: selectedReference.id,
+      sourcePolicy,
+      archiveStatus,
+      preservedMechanics: parseJson(mechanicsDraft),
+      swappedFields: splitLines(swappedDraft),
+      blockedFields: splitLines(blockedDraft),
+      guardrails: splitLines(guardrailsDraft),
+      candidateFormatOutputs: outputs,
+      notes: splitLines(notesDraft),
+    })
+  }
+
+  const planRemix = () => {
+    props.onMutateLocal("/api/ugc/provider-jobs", {
+      provider: "local",
+      operation: "reference-remix-plan",
+      mode: "dry-run",
+      status: "planned",
+      targetIds: [selectedReference.id, ...outputs.map((output) => output.id)],
+      spendCapUsd: 0,
+      estimatedCostUsd: 0,
+      request: {
+        referenceProfileId: selectedReference.id,
+        sourcePolicy,
+        archiveStatus,
+        preservedMechanics: parseJson(mechanicsDraft),
+        swappedFields: splitLines(swappedDraft),
+        blockedFields: splitLines(blockedDraft),
+        guardrails: splitLines(guardrailsDraft),
+        candidateFormatOutputs: outputs,
+        nextStep: "Generate synthetic persona/product/template remix candidates from abstract mechanics only.",
+      },
+    })
+  }
+
   return (
-    <div className="rugc-provider">
-      <section>
-        <Copy size={32} />
-        <h2>Reference archive is local-first and clean-room by default</h2>
-        <p>Store abstract mechanics, source policy, preserved timing/pose/caption grammar, swapped fields, and blocked identity/audio fields before any remix job runs.</p>
-      </section>
-      <aside>
-        {workspace.referenceProfiles.map((reference) => {
-          const archive = referenceArchives.find((item) => item.referenceProfileId === reference.id)
-          return (
-            <div key={reference.id} className="rugc-provider-note">
-              <strong>{reference.displayName}</strong>
-              <p>{reference.useCase}</p>
-              <MetricRow label="Rights" value={reference.rightsStatus} />
-              <MetricRow label="Archive" value={archive?.sourcePolicy ?? "not saved"} />
+    <div className="grid h-full min-h-0 grid-cols-[220px_minmax(0,1fr)] gap-3 overflow-hidden p-3">
+      <PanelCard className="min-h-0 overflow-auto" density="compact">
+        <PanelHeader
+          eyebrow="Reference targets"
+          title="Archive"
+          actions={<StatusBadge tone="active">{referenceArchives.length}</StatusBadge>}
+        />
+        <div className="grid gap-2">
+          {workspace.referenceProfiles.map((reference) => {
+            const archive = referenceArchives.find((item) => item.referenceProfileId === reference.id)
+            return (
+              <button
+                key={reference.id}
+                type="button"
+                className={cn(
+                  "grid gap-1 rounded-md border border-border bg-card px-2.5 py-2 text-left shadow-sm transition-colors hover:bg-accent",
+                  selectedReference.id === reference.id && "border-primary/60 bg-primary/10",
+                )}
+                onClick={() => setSelectedReferenceId(reference.id)}
+              >
+                <span className="truncate text-xs font-semibold text-foreground">{reference.displayName}</span>
+                <span className="truncate text-[11px] text-muted-foreground">{reference.platform} / {reference.handle}</span>
+                <span className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+                  <span>{archive?.archiveStatus ?? reference.archiveStatus}</span>
+                  <span>{archive?.sourcePolicy ?? sourcePolicyFor(reference)}</span>
+                </span>
+              </button>
+            )
+          })}
+        </div>
+      </PanelCard>
+
+      <PanelCard className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden" density="compact">
+        <PanelHeader
+          eyebrow={selectedReference.styleLane}
+          title={selectedReference.displayName}
+          actions={<StatusBadge tone={sourcePolicy === "rights-cleared-source" ? "success" : "warning"}>{sourcePolicy}</StatusBadge>}
+        />
+        <div className="min-h-0 overflow-auto pr-1">
+          <div className="grid grid-cols-2 gap-2">
+            <label className="grid gap-1.5">
+              <span className="text-[11px] font-medium text-muted-foreground">Source policy</span>
+              <select
+                value={sourcePolicy}
+                className="h-8 rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                onChange={(event) => setSourcePolicy(event.target.value as ReferenceSourcePolicy)}
+              >
+                <option value="abstract-mechanics">abstract mechanics</option>
+                <option value="metadata-only">metadata only</option>
+                <option value="rights-cleared-source">rights-cleared source</option>
+              </select>
+            </label>
+            <label className="grid gap-1.5">
+              <span className="text-[11px] font-medium text-muted-foreground">Archive status</span>
+              <select
+                value={archiveStatus}
+                className="h-8 rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                onChange={(event) => setArchiveStatus(event.target.value as ReferenceArchiveStatus)}
+              >
+                <option value="not-started">not started</option>
+                <option value="queued">queued</option>
+                <option value="sampled">sampled</option>
+                <option value="decomposed">decomposed</option>
+              </select>
+            </label>
+          </div>
+
+          <div className="mt-3 grid grid-cols-3 gap-2">
+            <MetricRow label="Rights" value={selectedReference.rightsStatus} />
+            <MetricRow label="Samples" value={String(selectedReference.sampleClips.length)} />
+            <MetricRow label="Outputs" value={String(outputs.length)} />
+          </div>
+
+          <div className="mt-3 grid gap-2">
+            <label className="grid gap-1.5">
+              <span className="text-[11px] font-medium text-muted-foreground">Preserved mechanics JSON</span>
+              <Textarea
+                value={mechanicsDraft}
+                onChange={(event) => setMechanicsDraft(event.target.value)}
+                className="min-h-36 font-mono text-[11px]"
+                spellCheck={false}
+              />
+            </label>
+            <div className="grid grid-cols-3 gap-2">
+              <label className="grid gap-1.5">
+                <span className="text-[11px] font-medium text-muted-foreground">Swap</span>
+                <Textarea value={swappedDraft} onChange={(event) => setSwappedDraft(event.target.value)} className="min-h-24" />
+              </label>
+              <label className="grid gap-1.5">
+                <span className="text-[11px] font-medium text-muted-foreground">Block</span>
+                <Textarea value={blockedDraft} onChange={(event) => setBlockedDraft(event.target.value)} className="min-h-24" />
+              </label>
+              <label className="grid gap-1.5">
+                <span className="text-[11px] font-medium text-muted-foreground">Guardrails</span>
+                <Textarea value={guardrailsDraft} onChange={(event) => setGuardrailsDraft(event.target.value)} className="min-h-24" />
+              </label>
+            </div>
+            <label className="grid gap-1.5">
+              <span className="text-[11px] font-medium text-muted-foreground">Notes</span>
+              <Textarea value={notesDraft} onChange={(event) => setNotesDraft(event.target.value)} className="min-h-20" placeholder="One note per line" />
+            </label>
+          </div>
+
+          <div className="mt-3 grid gap-2 rounded-md border border-border bg-background p-3">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <p className="m-0 text-[11px] font-semibold text-foreground">Clean-room outputs</p>
+                <p className="m-0 mt-0.5 text-[10px] text-muted-foreground">Derived local specs for format, pose, caption, hook, and CTA remixing.</p>
+              </div>
+              <Copy size={14} />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {outputs.map((output) => <ReferenceFormatOutputCard key={output.id} output={output} />)}
+            </div>
+          </div>
+
+          <div className="mt-3 grid grid-cols-[minmax(0,1fr)_260px] gap-2">
+            <div className="rounded-md border border-border bg-background p-3">
+              <p className="m-0 text-[11px] font-semibold text-foreground">Sample clips</p>
+              <div className="mt-2 grid gap-1.5">
+                {selectedReference.sampleClips.map((clip) => (
+                  <div key={clip.id} className="rounded border border-border bg-card p-2">
+                    <strong className="block truncate text-[11px] text-foreground">{clip.title}</strong>
+                    <span className="text-[10px] text-muted-foreground">{clip.durationSeconds}s / {clip.storagePolicy}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <pre className="rugc-json m-0 max-h-48">{JSON.stringify({
+              archiveId: selectedArchive.id,
+              sampleClipIds: selectedArchive.sampleClipIds,
+              outputs: selectedArchive.candidateFormatOutputs,
+            }, null, 2)}</pre>
+          </div>
+        </div>
+
+        <div className="mt-3 flex items-center justify-between gap-2 border-t border-border pt-3">
+          <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+            <FileJson size={13} />
+            <span>{persistedArchive ? "Saved archive spec" : "Unsaved local spec"}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            {persistedArchive ? (
               <Button
                 size="xs"
-                variant="workbench"
-                onClick={() => props.onMutateLocal("/api/ugc/reference-archives", {
-                  referenceProfileId: reference.id,
-                  sourcePolicy: reference.rightsStatus === "rights-cleared" || reference.rightsStatus === "user-owned" ? "rights-cleared-source" : "abstract-mechanics",
-                  notes: ["Created from Reference Archive view"],
-                })}
+                variant="ghost"
+                onClick={() => props.onMutateLocal(`/api/ugc/reference-archives/${persistedArchive.id}/delete`, {})}
               >
-                Save archive spec
+                Delete
               </Button>
-            </div>
-          )
-        })}
-        <pre>{JSON.stringify(referenceArchives.slice(0, 2), null, 2)}</pre>
-      </aside>
+            ) : null}
+            <Button size="xs" variant="workbench" onClick={planRemix}><GitFork size={13} /> Plan remix</Button>
+            <Button size="xs" onClick={saveArchive}><Download size={13} /> Save archive</Button>
+          </div>
+        </div>
+      </PanelCard>
+    </div>
+  )
+}
+
+function ReferenceFormatOutputCard(props: { output: ReferenceArchiveFormatOutput }) {
+  return (
+    <div className="rounded-md border border-border bg-background p-2">
+      <div className="flex items-start justify-between gap-2">
+        <strong className="min-w-0 truncate text-[11px] text-foreground">{props.output.title}</strong>
+        <StatusBadge>{props.output.kind}</StatusBadge>
+      </div>
+      <p className="mt-1 line-clamp-3 text-[11px] leading-4 text-muted-foreground">{props.output.summary}</p>
+      <div className="mt-2 flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+        <span>{props.output.stageIds.length} stages</span>
+        <span>{props.output.candidateIds.length} candidates</span>
+      </div>
     </div>
   )
 }

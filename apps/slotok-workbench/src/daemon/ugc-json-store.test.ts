@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs"
+import { mkdtempSync, readFileSync } from "node:fs"
 import { existsSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"
@@ -46,7 +46,26 @@ describe("UgcJsonStore", () => {
       targetIds: [candidateId],
       spendCapUsd: 0.05,
     })
-    store.createReferenceArchive({ referenceProfileId, notes: ["abstract mechanics only"] })
+    store.createReferenceArchive({
+      referenceProfileId,
+      archiveStatus: "decomposed",
+      preservedMechanics: { poseTiming: "hold product on beat three", captionTemplate: "two-line hook" },
+      swappedFields: ["Synthetic persona", "Product offer"],
+      blockedFields: ["Source pixels and audio"],
+      guardrails: ["Use abstract mechanics only"],
+      candidateFormatOutputs: [
+        {
+          id: "format_test_pose",
+          title: "Pose timing test",
+          kind: "pose-plan",
+          summary: "Keep gesture rhythm while replacing identity.",
+          stageIds: ["stage_reference_profile"],
+          candidateIds: [candidateId],
+          manifestJson: { beats: [0, 2, 4] },
+        },
+      ],
+      notes: ["abstract mechanics only"],
+    })
     store.createExportManifest({ selectedCandidateId: candidateId, label: "Proof export", notes: ["draft manifest"] })
 
     const updated = store.read()
@@ -64,7 +83,34 @@ describe("UgcJsonStore", () => {
     expect(updated.workspace.reviewNotes[0]?.body).toContain("less scripted")
     expect(updated.providerJobs[0]?.mode).toBe("dry-run")
     expect(updated.referenceArchives[0]?.notes).toContain("abstract mechanics only")
+    expect(updated.referenceArchives[0]?.archiveStatus).toBe("decomposed")
+    expect(updated.referenceArchives[0]?.candidateFormatOutputs[0]?.id).toBe("format_test_pose")
     expect(updated.exportManifests[0]?.label).toBe("Proof export")
+
+    const reloaded = new UgcJsonStore({
+      cwd: store.config.cwd,
+      root: "ugc-workspaces",
+      now: () => "2026-06-10T00:00:00.000Z",
+    }).read()
+    const archiveShard = JSON.parse(readFileSync(resolve(store.config.workspaceDir, "reference-archives", `${updated.referenceArchives[0]?.id}.json`), "utf8")) as {
+      readonly candidateFormatOutputs?: readonly { readonly id: string }[]
+    }
+    expect(reloaded.referenceArchives[0]?.candidateFormatOutputs[0]?.id).toBe("format_test_pose")
+    expect(archiveShard.candidateFormatOutputs?.[0]?.id).toBe("format_test_pose")
+  })
+
+  test("deletes reference archive records without touching source profiles", () => {
+    const store = createStore()
+    const initial = store.read()
+    const referenceProfileId = initial.workspace.referenceProfiles[0]?.id ?? ""
+    const archive = store.createReferenceArchive({ referenceProfileId, notes: ["temporary archive"] }).referenceArchives[0]
+
+    expect(archive?.referenceProfileId).toBe(referenceProfileId)
+
+    const updated = store.deleteReferenceArchive(archive?.id ?? "")
+
+    expect(updated.referenceArchives.some((item) => item.id === archive?.id)).toBe(false)
+    expect(updated.workspace.referenceProfiles.some((item) => item.id === referenceProfileId)).toBe(true)
   })
 })
 

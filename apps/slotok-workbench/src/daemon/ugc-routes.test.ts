@@ -14,6 +14,7 @@ describe("routeUgc", () => {
     const initial = await readState(initialResponse)
     const personaId = initial.workspace.personas[0]?.id ?? ""
     const candidateId = initial.workspace.candidates[0]?.id ?? ""
+    const referenceProfileId = initial.workspace.referenceProfiles[0]?.id ?? ""
 
     const personaResponse = await routeUgc(jsonRequest(`/api/ugc/personas/${personaId}`, {
       status: "selected",
@@ -34,6 +35,39 @@ describe("routeUgc", () => {
     }), store)
     const noteState = await readState(noteResponse)
     expect(noteState.workspace.reviewNotes[0]?.verdict).toBe("reject")
+
+    const archiveResponse = await routeUgc(jsonRequest("/api/ugc/reference-archives", {
+      referenceProfileId,
+      archiveStatus: "decomposed",
+      sourcePolicy: "abstract-mechanics",
+      preservedMechanics: { poseTiming: "open with hand gesture, cut every two beats" },
+      swappedFields: ["Synthetic persona"],
+      blockedFields: ["Source face", "Source voice"],
+      guardrails: ["No raw media storage"],
+      candidateFormatOutputs: [
+        {
+          id: "format_route_caption",
+          title: "Caption grammar",
+          kind: "caption-template",
+          summary: "Rewrite the hook and product claim while preserving caption cadence.",
+          stageIds: ["stage_hook"],
+          candidateIds: [],
+          manifestJson: { lines: 2 },
+        },
+      ],
+      notes: ["route archive proof"],
+    }), store)
+    const archiveState = await readState(archiveResponse)
+    expect(archiveState.referenceArchives[0]?.candidateFormatOutputs[0]?.id).toBe("format_route_caption")
+
+    const listResponse = await routeUgc(new Request("http://127.0.0.1/api/ugc/reference-archives"), store)
+    const listPayload = await listResponse?.json() as { readonly referenceArchives?: readonly { readonly id: string }[] }
+    const archiveId = listPayload.referenceArchives?.[0]?.id ?? ""
+    expect(listPayload.referenceArchives?.length).toBeGreaterThan(0)
+
+    const deleteResponse = await routeUgc(jsonRequest(`/api/ugc/reference-archives/${archiveId}/delete`, {}), store)
+    const deleteState = await readState(deleteResponse)
+    expect(deleteState.referenceArchives.some((archive) => archive.id === archiveId)).toBe(false)
   })
 
   test("returns null for routes owned by other daemon handlers", async () => {

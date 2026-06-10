@@ -1,5 +1,5 @@
 import { UgcJsonStore } from "./ugc-json-store"
-import { isRecord, type BranchPatch, type CandidateStatusPatch, type CreateExportManifestInput, type CreateProviderJobInput, type CreateReferenceArchiveInput, type CreateReviewNoteInput, type PersonaPatch } from "../ugc/local-state"
+import { isRecord, type BranchPatch, type CandidateStatusPatch, type CreateExportManifestInput, type CreateProviderJobInput, type CreateReferenceArchiveInput, type CreateReviewNoteInput, type PersonaPatch, type ReferenceArchiveFormatOutput, type UgcReferenceArchive } from "../ugc/local-state"
 import type { BranchStatus, CandidateStatus, JsonValue, ReviewAttachment, ReviewVerdict } from "../renderer/ugcStudioModel"
 
 export async function routeUgc(request: Request, store: UgcJsonStore): Promise<Response | null> {
@@ -48,8 +48,18 @@ export async function routeUgc(request: Request, store: UgcJsonStore): Promise<R
     return json(store.createProviderJob(decodeCreateProviderJob(await readJson(request))))
   }
 
+  if (request.method === "GET" && url.pathname === "/api/ugc/reference-archives") {
+    return json({ referenceArchives: store.read().referenceArchives })
+  }
+
   if (request.method === "POST" && url.pathname === "/api/ugc/reference-archives") {
     return json(store.createReferenceArchive(decodeCreateReferenceArchive(await readJson(request))))
+  }
+
+  if (request.method === "POST" && url.pathname.startsWith("/api/ugc/reference-archives/") && url.pathname.endsWith("/delete")) {
+    const id = decodeURIComponent(url.pathname.slice("/api/ugc/reference-archives/".length, -"/delete".length))
+    if (!id) return json({ error: "missing reference archive id" }, 400)
+    return json(store.deleteReferenceArchive(id))
   }
 
   if (request.method === "POST" && url.pathname === "/api/ugc/exports") {
@@ -141,7 +151,13 @@ function decodeCreateReferenceArchive(value: JsonValue): CreateReferenceArchiveI
   if (!isRecord(value) || typeof value.referenceProfileId !== "string") throw new Error("reference archive requires referenceProfileId")
   return {
     referenceProfileId: value.referenceProfileId,
-    sourcePolicy: value.sourcePolicy === "metadata-only" || value.sourcePolicy === "abstract-mechanics" || value.sourcePolicy === "rights-cleared-source" ? value.sourcePolicy : undefined,
+    sourcePolicy: isReferenceSourcePolicy(value.sourcePolicy) ? value.sourcePolicy : undefined,
+    archiveStatus: isReferenceArchiveStatus(value.archiveStatus) ? value.archiveStatus : undefined,
+    preservedMechanics: isJsonValue(value.preservedMechanics) ? value.preservedMechanics : undefined,
+    swappedFields: isStringArray(value.swappedFields) ? value.swappedFields : undefined,
+    blockedFields: isStringArray(value.blockedFields) ? value.blockedFields : undefined,
+    guardrails: isStringArray(value.guardrails) ? value.guardrails : undefined,
+    candidateFormatOutputs: decodeReferenceArchiveFormatOutputs(value.candidateFormatOutputs),
     notes: Array.isArray(value.notes) && value.notes.every((item) => typeof item === "string") ? value.notes : undefined,
   }
 }
@@ -193,8 +209,42 @@ function isProviderJobStatus(value: unknown): value is CreateProviderJobInput["s
   return value === "queued" || value === "planned" || value === "running" || value === "completed" || value === "failed"
 }
 
+function isReferenceSourcePolicy(value: unknown): value is UgcReferenceArchive["sourcePolicy"] {
+  return value === "metadata-only" || value === "abstract-mechanics" || value === "rights-cleared-source"
+}
+
+function isReferenceArchiveStatus(value: unknown): value is UgcReferenceArchive["archiveStatus"] {
+  return value === "not-started" || value === "queued" || value === "sampled" || value === "decomposed"
+}
+
 function isStringArray(value: unknown): value is readonly string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string")
+}
+
+function decodeReferenceArchiveFormatOutputs(value: unknown): readonly ReferenceArchiveFormatOutput[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const outputs: ReferenceArchiveFormatOutput[] = []
+  for (const item of value) {
+    if (!isRecord(item)) return undefined
+    if (typeof item.id !== "string" || typeof item.title !== "string" || typeof item.summary !== "string") return undefined
+    if (!isReferenceArchiveFormatOutputKind(item.kind)) return undefined
+    if (!isStringArray(item.stageIds) || !isStringArray(item.candidateIds)) return undefined
+    if (!isJsonValue(item.manifestJson)) return undefined
+    outputs.push({
+      id: item.id,
+      title: item.title,
+      kind: item.kind,
+      summary: item.summary,
+      stageIds: item.stageIds,
+      candidateIds: item.candidateIds,
+      manifestJson: item.manifestJson,
+    })
+  }
+  return outputs
+}
+
+function isReferenceArchiveFormatOutputKind(value: unknown): value is ReferenceArchiveFormatOutput["kind"] {
+  return value === "format-template" || value === "pose-plan" || value === "caption-template" || value === "hook-family" || value === "cta-pattern"
 }
 
 function isJsonValue(value: unknown): value is JsonValue {
