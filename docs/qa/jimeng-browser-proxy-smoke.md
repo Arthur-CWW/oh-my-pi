@@ -933,7 +933,7 @@ next_cursor=0
 response_text_sha256=618858c54ed5d0b298cf37ed03bf29d27042f54e3e999bb143932cec6a3ef31f
 ```
 
-The current account has no saved subjects, so the returned empty list is expected. The normalized summary still proves the endpoint contract and omits signed URLs. URL leak check:
+That earlier account snapshot had no saved subjects, so the returned empty list was expected. The normalized summary still proves the endpoint contract and omits signed URLs. URL leak check:
 
 ```bash
 rg -n 'X-Amz|signed|https?://' data/jimeng-lab/proof-20260610-subjects/normalized
@@ -989,6 +989,102 @@ Normalized leak check:
 ```bash
 rg -n 'X-Amz|x-signature|x-expires|sessionid|sid_guard|msToken|signed.example' \
   data/jimeng-lab/proof-20260610-subject-create-cli/normalized
+```
+
+Result: no matches.
+
+## Saved Subject / Persona Lifecycle Smoke
+
+`jimeng-browser-proxy subject-update` and `jimeng-browser-proxy subject-delete` complete the no-generation subject CRUD path. The proof creates a temporary subject from an existing provider image, updates it, deletes it, then verifies a subject-id filtered list returns zero results.
+
+Dry-run plans:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts subject-update \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --subjectId 12352249053442 \
+  --name "CLI Kbeauty tuned" \
+  --description "韩系美妆健身UGC创作者，真实手机自拍参考图。" \
+  --imageUri tos-cn-i-tb4s082cfz/d56ac871b3a94f77bc83ac84a861ede6.png \
+  --imageWidth 2048 \
+  --imageHeight 2048 \
+  --outDir data/jimeng-lab/proof-20260610-subject-lifecycle \
+  --dryRun
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts subject-delete \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --subjectId 12352249053442 \
+  --outDir data/jimeng-lab/proof-20260610-subject-lifecycle \
+  --dryRun
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts subject-generate-voice \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --imageUri tos-cn-i-tb4s082cfz/d56ac871b3a94f77bc83ac84a861ede6.png \
+  --outDir data/jimeng-lab/proof-20260610-subject-lifecycle \
+  --dryRun
+```
+
+Live no-generation proof:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts subject-create \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --workspaceId 14199856180236 \
+  --name "CLI QA Temp" \
+  --description "临时主体：用于CLI生命周期验证，随后删除。" \
+  --imageUri tos-cn-i-tb4s082cfz/d56ac871b3a94f77bc83ac84a861ede6.png \
+  --imageWidth 2048 \
+  --imageHeight 2048 \
+  --outDir data/jimeng-lab/proof-20260610-subject-lifecycle
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts subject-update \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --subjectId 14204993143308 \
+  --name "CLI QA Updated" \
+  --description "临时主体：update命令已验证，随后删除。" \
+  --imageUri tos-cn-i-tb4s082cfz/d56ac871b3a94f77bc83ac84a861ede6.png \
+  --imageWidth 2048 \
+  --imageHeight 2048 \
+  --outDir data/jimeng-lab/proof-20260610-subject-lifecycle
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts subject-delete \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --subjectId 14204993143308 \
+  --outDir data/jimeng-lab/proof-20260610-subject-lifecycle
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts subjects \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --limit 20 \
+  --subjectIds 14204993143308 \
+  --outDir data/jimeng-lab/proof-20260610-subject-lifecycle
+```
+
+Result:
+
+```txt
+created_subject_id=14204993143308
+created_data_id=14204993143564
+update_ret=0
+update_errmsg=success
+delete_ret=0
+delete_errmsg=success
+post_delete_filtered_subject_count=0
+proof=data/jimeng-lab/proof-20260610-subject-lifecycle/
+```
+
+Subject voice generation is intentionally dry-run-only:
+
+```txt
+request={"image_uri":"tos-cn-i-tb4s082cfz/d56ac871b3a94f77bc83ac84a861ede6.png"}
+status=dry-run-only
+reason=live generation may consume quota and still needs explicit spend approval or captured UI submit
+```
+
+Normalized signed URL leak check:
+
+```bash
+rg -n 'X-Amz|x-signature|x-expires|sessionid|sid_guard|msToken|signed.example' \
+  data/jimeng-lab/proof-20260610-subject-lifecycle/normalized
 ```
 
 Result: no matches.
@@ -1083,15 +1179,15 @@ Expected result: no matches.
 ```bash
 bun run jimeng:typecheck
 bun run jimeng:test
-bun packages/jimeng-client/src/browser-proxy-cli.ts --help | rg 'lip-sync-config|capcut-template-metadata|capcut-categories|overseas-short-videos|subject-create|subjects|templates|short-videos'
+bun packages/jimeng-client/src/browser-proxy-cli.ts --help | rg 'lip-sync-config|capcut-template-metadata|capcut-categories|overseas-short-videos|subject-create|subject-update|subject-delete|subject-generate-voice|subjects|templates|short-videos'
 ```
 
 Result:
 
 ```txt
 typecheck passed
-70 tests passed, 0 failed
-browser-proxy help listed lip-sync-config, capcut-template-metadata, overseas-short-videos, capcut-categories, subject-create, subjects, templates, and short-videos
+74 tests passed, 0 failed
+browser-proxy help listed lip-sync-config, capcut-template-metadata, overseas-short-videos, capcut-categories, subject-create, subject-update, subject-delete, subject-generate-voice, subjects, templates, and short-videos
 ```
 
 ## Follow-Up
@@ -1099,7 +1195,7 @@ browser-proxy help listed lip-sync-config, capcut-template-metadata, overseas-sh
 Next useful captures:
 
 - image-to-image / byte edit
-- subject/persona update/delete/generate_voice
+- subject/persona generate_voice live submit after explicit spend approval or captured UI submit
 - style reference controls
 - additional template/research endpoints: CapCut template search and plane row/collection endpoints
 - image-to-video end-frame and multi-frame live proof with explicit frontend mode capture

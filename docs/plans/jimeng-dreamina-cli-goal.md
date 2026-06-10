@@ -235,6 +235,26 @@ Subject/persona creation is now live-proved without generation spend:
 - latest proof created `subject_id=12352249053442`, `data_id=12352249053698`, using `image_uri=tos-cn-i-tb4s082cfz/d56ac871b3a94f77bc83ac84a861ede6.png`, `2048x2048`, with summary hash `52a8d7ba8acf00de72912228a5d1ab1ea0d96edea5adf8be44744d2092258dec`
 - normalized summaries intentionally omit signed image URLs; raw upload/create responses remain ignored under `data/**`
 
+Subject/persona update/delete is now live-proved without generation spend:
+
+- `jimeng-browser-proxy subject-update`
+- `jimeng-browser-proxy subject-delete`
+- direct `/mweb/v1/dreamina_subject/update` and `/mweb/v1/dreamina_subject/delete` with logged-in browser session headers
+- frontend bundle evidence maps `updateSubject({subjectId, content})`, `deleteSubject({subjectId})`, and batch `deleteSubjects({subjectIdList})` through the same JSON casing transform as create/list
+- useful flags: `--subjectId`, `--subjectIds`, `--name`, `--description`, `--image`, `--file`, `--imageUri`, `--imageWidth`, `--imageHeight`, `--imageUrl`
+- proof bundle: `data/jimeng-lab/proof-20260610-subject-lifecycle/`
+- latest proof created temporary `subject_id=14204993143308`, updated it to `CLI QA Updated`, deleted it, then verified `subjects --subjectIds 14204993143308` returned `subject_count=0`
+- update response hash: `47168986f6e80a31c8f169afdb19755b4a08895f496292e988e6f1d88b6152c2`
+- delete response hash: `8cc3d46d8dec2d339dc0e7fe2d338f0ac4946752fc276a0f9a508bcb7c1f52f8`
+- normalized summaries intentionally omit signed image URLs; raw responses remain ignored under `data/**`
+
+Subject/persona voice generation is request-shaped but not live-submitted:
+
+- `jimeng-browser-proxy subject-generate-voice --dryRun`
+- frontend bundle evidence maps `generateSubjectVoice({imageUri})` to `/mweb/v1/dreamina_subject/generate_voice` with request body `{"image_uri":"tos-cn-i-..."}`
+- proof bundle: `data/jimeng-lab/proof-20260610-subject-lifecycle/`
+- live submit is disabled because it may consume generation quota and still needs explicit spend approval or a captured UI submit
+
 The next slice is **lip-sync submit capture and reference-video consumers**. Use the VOD provider reference, ImageX avatar reference, and frontend captures to unlock live lip-sync, reference-video, multimodal/all-around reference, pose/style/depth/canny controls, and live end-frame/multi-frame image-to-video paths.
 
 Immediate next slices:
@@ -244,7 +264,7 @@ Immediate next slices:
 3. Map style/reference roles and the new object-mask provider references into generation payload patches.
 4. Implement digital-human generation using the confirmed VOD reference path where applicable.
 5. Capture real CapCut template row/search/collection payloads, then expand no-spend research/template coverage beyond the confirmed CapCut category and public metadata catalogs.
-6. Capture and implement subject/persona update/delete/generate_voice plus voice clone once those UI/API flows are captured.
+6. Capture/approve subject/persona `generate_voice` live submit and voice clone once those UI/API flows are captured.
 7. Keep each slice small enough to prove and commit before moving on.
 
 Do not start the async daemon while these API contracts are still moving.

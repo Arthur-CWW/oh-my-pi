@@ -1,17 +1,26 @@
 import { describe, expect, test } from "bun:test"
 import {
+  buildJimengSubjectDeleteRequest,
+  buildJimengSubjectUpdateRequest,
+  buildJimengSubjectVoiceRequest,
   buildJimengSubjectCreateRequest,
   buildJimengSubjectsRequest,
   createJimengSubject,
+  deleteJimengSubjects,
   fetchJimengImagesByUri,
   fetchJimengSubjects,
+  generateJimengSubjectVoice,
   JimengClient,
   JimengError,
   subjectImageReferenceFromUploadSummary,
   submitJimengImageAuditJob,
   summarizeJimengImageByUri,
   summarizeJimengSubjectCreate,
+  summarizeJimengSubjectDelete,
+  summarizeJimengSubjectUpdate,
+  summarizeJimengSubjectVoice,
   summarizeJimengSubjects,
+  updateJimengSubject,
   type JimengFetch,
   type JimengImageUploadSummary,
   type JimengSessionBundle,
@@ -28,6 +37,21 @@ describe("Jimeng subject/persona helpers", () => {
   test("builds and validates subject list requests", () => {
     expect(buildJimengSubjectsRequest()).toEqual({ cursor: 0, limit: 20 })
     expect(buildJimengSubjectsRequest({ cursor: 10, limit: 50 })).toEqual({ cursor: 10, limit: 50 })
+    expect(buildJimengSubjectsRequest({
+      cursor: 0,
+      limit: 20,
+      keyword: "  skincare  ",
+      subjectIds: ["subject-1", "subject-1", "subject-2"],
+      onlyFavorite: true,
+      workspaceId: 14199856180236,
+    })).toEqual({
+      cursor: 0,
+      limit: 20,
+      keyword: "skincare",
+      subject_id_list: ["subject-1", "subject-2"],
+      only_favorite: true,
+      workspace_id: 14199856180236,
+    })
     expect(() => buildJimengSubjectsRequest({ cursor: -1 })).toThrow(JimengError)
     expect(() => buildJimengSubjectsRequest({ limit: 101 })).toThrow(JimengError)
   })
@@ -66,6 +90,38 @@ describe("Jimeng subject/persona helpers", () => {
       workspaceId: 0,
       mainImage: { imageUri: "tos-cn-i-tb4s082cfz/ref.png", width: 1, height: 1 },
     })).toThrow(JimengError)
+  })
+
+  test("builds subject update, delete, and generate-voice requests", () => {
+    expect(buildJimengSubjectUpdateRequest({
+      subjectId: "subject-1",
+      content: {
+        name: "K-beauty tuned",
+        description: "Updated persona note",
+        mainImage: {
+          imageUri: "tos-cn-i-tb4s082cfz/ref.png",
+          width: 1024,
+          height: 1536,
+        },
+      },
+    })).toEqual({
+      subject_id: "subject-1",
+      content: {
+        name: "K-beauty tuned",
+        description: "Updated persona note",
+        main_image: {
+          width: 1024,
+          height: 1536,
+          image_uri: "tos-cn-i-tb4s082cfz/ref.png",
+        },
+      },
+    })
+    expect(buildJimengSubjectDeleteRequest({ subjectIds: ["subject-1"] })).toEqual({ subject_id: "subject-1" })
+    expect(buildJimengSubjectDeleteRequest({ subjectIds: ["subject-1", "subject-2"] })).toEqual({ subject_id_list: ["subject-1", "subject-2"] })
+    expect(buildJimengSubjectVoiceRequest({ imageUri: "tos-cn-i-tb4s082cfz/ref.png" })).toEqual({ image_uri: "tos-cn-i-tb4s082cfz/ref.png" })
+    expect(() => buildJimengSubjectUpdateRequest({ subjectId: "", content: { name: "Persona" } })).toThrow(JimengError)
+    expect(() => buildJimengSubjectUpdateRequest({ subjectId: "subject-1", content: {} })).toThrow(JimengError)
+    expect(() => buildJimengSubjectDeleteRequest({ subjectIds: [] })).toThrow(JimengError)
   })
 
   test("submits image audit jobs before subject creation", async () => {
@@ -187,6 +243,125 @@ describe("Jimeng subject/persona helpers", () => {
     expect(result.subject?.subjectId).toBe("subject-1")
     expect(result.subject?.name).toBe("K-beauty UGC")
     expect(JSON.stringify(summary)).toContain("image_url_present")
+    expect(JSON.stringify(summary)).not.toContain("signed.example.invalid")
+    expect(JSON.stringify(summary)).not.toContain("x-signature")
+  })
+
+  test("updates a subject and summarizes without signed media URLs", async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = []
+    const client = new JimengClient({
+      fetch: mockFetch(JSON.stringify({
+        ret: "0",
+        errmsg: "success",
+        data: {
+          subject_id: "subject-1",
+          content: {
+            name: "K-beauty tuned",
+            description: "Updated persona note",
+            main_image: {
+              image_uri: "tos-cn-i-tb4s082cfz/ref.png",
+              image_url: "https://signed.example.invalid/ref.png?x-signature=secret",
+              width: 1024,
+              height: 1536,
+            },
+          },
+          subject_control: { status: 0, editable: true },
+        },
+      }), requests),
+    })
+
+    const result = await updateJimengSubject({
+      client,
+      session,
+      subject: {
+        subjectId: "subject-1",
+        content: {
+          name: "K-beauty tuned",
+          description: "Updated persona note",
+          mainImage: {
+            imageUri: "tos-cn-i-tb4s082cfz/ref.png",
+            imageUrl: "https://signed.example.invalid/ref.png?x-signature=secret",
+            width: 1024,
+            height: 1536,
+          },
+        },
+      },
+    })
+    const summary = summarizeJimengSubjectUpdate(result)
+
+    expect(requests[0]?.url).toContain("/mweb/v1/dreamina_subject/update")
+    expect(JSON.parse(String(requests[0]?.init?.body))).toEqual({
+      subject_id: "subject-1",
+      content: {
+        name: "K-beauty tuned",
+        description: "Updated persona note",
+        main_image: {
+          width: 1024,
+          height: 1536,
+          image_uri: "tos-cn-i-tb4s082cfz/ref.png",
+          image_url: "https://signed.example.invalid/ref.png?x-signature=secret",
+        },
+      },
+    })
+    expect(result.subjectId).toBe("subject-1")
+    expect(result.subject?.status).toBe(0)
+    expect(JSON.stringify(summary)).toContain("image_url_present")
+    expect(JSON.stringify(summary)).not.toContain("signed.example.invalid")
+    expect(JSON.stringify(summary)).not.toContain("x-signature")
+  })
+
+  test("deletes subjects and normalizes delete summaries", async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = []
+    const client = new JimengClient({
+      fetch: mockFetch(JSON.stringify({ ret: "0", errmsg: "success", data: {} }), requests),
+    })
+
+    const result = await deleteJimengSubjects({
+      client,
+      session,
+      subjectIds: ["subject-1", "subject-2"],
+    })
+    const summary = summarizeJimengSubjectDelete(result)
+
+    expect(requests[0]?.url).toContain("/mweb/v1/dreamina_subject/delete")
+    expect(JSON.parse(String(requests[0]?.init?.body))).toEqual({ subject_id_list: ["subject-1", "subject-2"] })
+    expect(result.deletedSubjectIds).toEqual(["subject-1", "subject-2"])
+    expect(summary.deleted_subject_count).toBe(2)
+  })
+
+  test("plans subject voice generation and redacts signed audio URLs", async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = []
+    const client = new JimengClient({
+      fetch: mockFetch(JSON.stringify({
+        ret: "0",
+        errmsg: "success",
+        data: {
+          audio_info: {
+            vid: "voice-video-1",
+            audio_url: "https://signed.example.invalid/audio.mp3?x-signature=secret",
+            duration: 3.2,
+            duration_ms: 3200,
+          },
+        },
+      }), requests),
+    })
+
+    const result = await generateJimengSubjectVoice({
+      client,
+      session,
+      imageUri: "tos-cn-i-tb4s082cfz/ref.png",
+    })
+    const summary = summarizeJimengSubjectVoice(result)
+
+    expect(requests[0]?.url).toContain("/mweb/v1/dreamina_subject/generate_voice")
+    expect(JSON.parse(String(requests[0]?.init?.body))).toEqual({ image_uri: "tos-cn-i-tb4s082cfz/ref.png" })
+    expect(result.audioInfo?.vid).toBe("voice-video-1")
+    expect(summary.audio_info).toEqual({
+      vid: "voice-video-1",
+      audio_url_present: true,
+      duration: 3.2,
+      duration_ms: 3200,
+    })
     expect(JSON.stringify(summary)).not.toContain("signed.example.invalid")
     expect(JSON.stringify(summary)).not.toContain("x-signature")
   })

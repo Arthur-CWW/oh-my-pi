@@ -11,6 +11,10 @@ const DEFAULT_WEB_ID = "7647092336736290330"
 export interface JimengSubjectsQuery {
   cursor?: number
   limit?: number
+  keyword?: string
+  subjectIds?: string[]
+  onlyFavorite?: boolean
+  workspaceId?: number
 }
 
 export interface JimengSubjectItem {
@@ -53,6 +57,12 @@ export interface JimengSubjectCreateInput {
   mainImage: JimengSubjectImageReference
 }
 
+export interface JimengSubjectContentInput {
+  name?: string
+  description?: string
+  mainImage?: JimengSubjectImageReference
+}
+
 export interface JimengSubjectCreateResult {
   endpoint: "/mweb/v1/dreamina_subject/create"
   httpStatus: number
@@ -63,6 +73,60 @@ export interface JimengSubjectCreateResult {
   subject: JimengSubjectItem | null
   subjectId: string | null
   dataId: string | null
+  body: JsonValue
+}
+
+export interface JimengSubjectUpdateInput {
+  subjectId: string
+  content: JimengSubjectContentInput
+}
+
+export interface JimengSubjectUpdateResult {
+  endpoint: "/mweb/v1/dreamina_subject/update"
+  httpStatus: number
+  ret: string | number | null
+  errmsg: string | null
+  responseTextSha256: string
+  request: JsonObject
+  subject: JimengSubjectItem | null
+  subjectId: string | null
+  body: JsonValue
+}
+
+export interface JimengSubjectDeleteInput {
+  subjectIds: string[]
+}
+
+export interface JimengSubjectDeleteResult {
+  endpoint: "/mweb/v1/dreamina_subject/delete"
+  httpStatus: number
+  ret: string | number | null
+  errmsg: string | null
+  responseTextSha256: string
+  request: JsonObject
+  deletedSubjectIds: string[]
+  body: JsonValue
+}
+
+export interface JimengSubjectVoiceInput {
+  imageUri: string
+}
+
+export interface JimengSubjectVoiceInfo {
+  vid: string | null
+  audioUrl: string | null
+  duration: number | null
+  durationMs: number | null
+}
+
+export interface JimengSubjectVoiceResult {
+  endpoint: "/mweb/v1/dreamina_subject/generate_voice"
+  httpStatus: number
+  ret: string | number | null
+  errmsg: string | null
+  responseTextSha256: string
+  request: JsonObject
+  audioInfo: JimengSubjectVoiceInfo | null
   body: JsonValue
 }
 
@@ -98,28 +162,79 @@ export interface JimengImageByUriResult {
 export function buildJimengSubjectsRequest(query: JimengSubjectsQuery = {}): JsonObject {
   const cursor = normalizeCursor(query.cursor)
   const limit = normalizeLimit(query.limit)
-  return { cursor, limit }
+  const request: JsonObject = { cursor, limit }
+  const keyword = normalizeOptionalText(query.keyword)
+  if (keyword !== undefined) request.keyword = keyword
+  const subjectIds = normalizeSubjectIds(query.subjectIds)
+  if (subjectIds.length > 0) request.subject_id_list = subjectIds
+  if (query.onlyFavorite !== undefined) request.only_favorite = query.onlyFavorite
+  if (query.workspaceId !== undefined) request.workspace_id = normalizeWorkspaceId(query.workspaceId)
+  return request
 }
 
 export function buildJimengSubjectCreateRequest(input: JimengSubjectCreateInput): JsonObject {
-  const name = normalizeSubjectName(input.name)
   const workspaceId = normalizeWorkspaceId(input.workspaceId)
-  const image = normalizeSubjectImageReference(input.mainImage)
+  const content = buildJimengSubjectContent({
+    name: input.name,
+    description: input.description,
+    mainImage: input.mainImage,
+  })
+
+  return {
+    content,
+    workspace_id: workspaceId,
+  }
+}
+
+export function buildJimengSubjectContent(input: JimengSubjectContentInput): JsonObject {
+  const content: JsonObject = {}
+  if (input.name !== undefined) content.name = normalizeSubjectName(input.name)
+  if (input.description !== undefined) content.description = input.description
+  if (input.mainImage) content.main_image = buildJimengSubjectMainImage(input.mainImage)
+  if (Object.keys(content).length === 0) {
+    throw jimengError({
+      category: "validation",
+      code: "SUBJECT_CONTENT_REQUIRED",
+      message: "Subject content must include at least one editable field.",
+      retryable: false,
+    })
+  }
+  return content
+}
+
+export function buildJimengSubjectMainImage(reference: JimengSubjectImageReference): JsonObject {
+  const image = normalizeSubjectImageReference(reference)
   const mainImage: JsonObject = {
     width: image.width,
     height: image.height,
     image_uri: image.imageUri,
   }
   if (image.imageUrl) mainImage.image_url = image.imageUrl
+  return mainImage
+}
 
+export function buildJimengSubjectUpdateRequest(input: JimengSubjectUpdateInput): JsonObject {
   return {
-    content: {
-      name,
-      ...(input.description !== undefined ? { description: input.description } : {}),
-      main_image: mainImage,
-    },
-    workspace_id: workspaceId,
+    subject_id: normalizeSubjectId(input.subjectId),
+    content: buildJimengSubjectContent(input.content),
   }
+}
+
+export function buildJimengSubjectDeleteRequest(input: JimengSubjectDeleteInput): JsonObject {
+  const subjectIds = normalizeSubjectIds(input.subjectIds)
+  if (subjectIds.length === 0) {
+    throw jimengError({
+      category: "validation",
+      code: "SUBJECT_DELETE_IDS_REQUIRED",
+      message: "At least one subject id is required for subject delete.",
+      retryable: false,
+    })
+  }
+  return subjectIds.length === 1 ? { subject_id: subjectIds[0] } : { subject_id_list: subjectIds }
+}
+
+export function buildJimengSubjectVoiceRequest(input: JimengSubjectVoiceInput): JsonObject {
+  return { image_uri: parseImageUri(input.imageUri) }
 }
 
 export async function fetchJimengSubjects(input: {
@@ -258,6 +373,93 @@ export async function createJimengSubject(input: {
   }
 }
 
+export async function updateJimengSubject(input: {
+  client?: JimengClient
+  session: JimengSessionBundle
+  subject: JimengSubjectUpdateInput
+}): Promise<JimengSubjectUpdateResult> {
+  const request = buildJimengSubjectUpdateRequest(input.subject)
+  const client = input.client ?? new JimengClient()
+  const response = await client.requestText(`https://jimeng.jianying.com/mweb/v1/dreamina_subject/update?${DEFAULT_QUERY}`, {
+    method: "POST",
+    headers: buildSubjectsHeaders(input.session),
+    body: JSON.stringify(request),
+  })
+  const body = safeJson(response.text)
+  assertNoRiskError(body, response.text)
+  assertJimengSuccess(body, "subject update")
+  const data = asRecord(asRecord(body)?.data)
+  const subject = parseSubject(data) ?? null
+
+  return {
+    endpoint: "/mweb/v1/dreamina_subject/update",
+    httpStatus: response.status,
+    ret: retValue(body),
+    errmsg: errmsgValue(body),
+    responseTextSha256: sha256(response.text),
+    request,
+    subject,
+    subjectId: stringValue(data?.subject_id) ?? subject?.subjectId ?? stringValue(request.subject_id),
+    body,
+  }
+}
+
+export async function deleteJimengSubjects(input: {
+  client?: JimengClient
+  session: JimengSessionBundle
+  subjectIds: string[]
+}): Promise<JimengSubjectDeleteResult> {
+  const request = buildJimengSubjectDeleteRequest({ subjectIds: input.subjectIds })
+  const client = input.client ?? new JimengClient()
+  const response = await client.requestText(`https://jimeng.jianying.com/mweb/v1/dreamina_subject/delete?${DEFAULT_QUERY}`, {
+    method: "POST",
+    headers: buildSubjectsHeaders(input.session),
+    body: JSON.stringify(request),
+  })
+  const body = safeJson(response.text)
+  assertNoRiskError(body, response.text)
+  assertJimengSuccess(body, "subject delete")
+
+  return {
+    endpoint: "/mweb/v1/dreamina_subject/delete",
+    httpStatus: response.status,
+    ret: retValue(body),
+    errmsg: errmsgValue(body),
+    responseTextSha256: sha256(response.text),
+    request,
+    deletedSubjectIds: normalizeSubjectIds(input.subjectIds),
+    body,
+  }
+}
+
+export async function generateJimengSubjectVoice(input: {
+  client?: JimengClient
+  session: JimengSessionBundle
+  imageUri: string
+}): Promise<JimengSubjectVoiceResult> {
+  const request = buildJimengSubjectVoiceRequest({ imageUri: input.imageUri })
+  const client = input.client ?? new JimengClient()
+  const response = await client.requestText(`https://jimeng.jianying.com/mweb/v1/dreamina_subject/generate_voice?${DEFAULT_QUERY}`, {
+    method: "POST",
+    headers: buildSubjectsHeaders(input.session),
+    body: JSON.stringify(request),
+  })
+  const body = safeJson(response.text)
+  assertNoRiskError(body, response.text)
+  assertJimengSuccess(body, "subject voice generation")
+
+  return {
+    endpoint: "/mweb/v1/dreamina_subject/generate_voice",
+    httpStatus: response.status,
+    ret: retValue(body),
+    errmsg: errmsgValue(body),
+    responseTextSha256: sha256(response.text),
+    request,
+    audioInfo: subjectVoiceInfo(body),
+    body,
+  }
+}
+
 export function summarizeJimengSubjects(result: JimengSubjectsResult): JsonObject {
   return {
     endpoint: result.endpoint,
@@ -309,6 +511,49 @@ export function summarizeJimengSubjectCreate(result: JimengSubjectCreateResult):
       image_count: result.subject.imageUris.length,
       voice_ids: result.subject.voiceIds,
       voice_count: result.subject.voiceIds.length,
+    } : null,
+  }
+}
+
+export function summarizeJimengSubjectUpdate(result: JimengSubjectUpdateResult): JsonObject {
+  return {
+    endpoint: result.endpoint,
+    http_status: result.httpStatus,
+    ret: result.ret,
+    errmsg: result.errmsg,
+    response_text_sha256: result.responseTextSha256,
+    request: redactSubjectContentRequest(result.request),
+    subject_id: result.subjectId,
+    subject: result.subject ? summarizeSubject(result.subject) : null,
+  }
+}
+
+export function summarizeJimengSubjectDelete(result: JimengSubjectDeleteResult): JsonObject {
+  return {
+    endpoint: result.endpoint,
+    http_status: result.httpStatus,
+    ret: result.ret,
+    errmsg: result.errmsg,
+    response_text_sha256: result.responseTextSha256,
+    request: result.request,
+    deleted_subject_ids: result.deletedSubjectIds,
+    deleted_subject_count: result.deletedSubjectIds.length,
+  }
+}
+
+export function summarizeJimengSubjectVoice(result: JimengSubjectVoiceResult): JsonObject {
+  return {
+    endpoint: result.endpoint,
+    http_status: result.httpStatus,
+    ret: result.ret,
+    errmsg: result.errmsg,
+    response_text_sha256: result.responseTextSha256,
+    request: result.request,
+    audio_info: result.audioInfo ? {
+      vid: result.audioInfo.vid,
+      audio_url_present: !!result.audioInfo.audioUrl,
+      duration: result.audioInfo.duration,
+      duration_ms: result.audioInfo.durationMs,
     } : null,
   }
 }
@@ -401,6 +646,7 @@ function parseSubject(value: JsonValue): JimengSubjectItem | null {
   const subject = asRecord(value)
   if (!subject) return null
   const subjectData = asRecord(subject.subject_data) ?? asRecord(subject.subjectData) ?? asRecord(subject.content) ?? subject
+  const subjectControl = asRecord(subject.subject_control) ?? asRecord(subject.subjectControl)
   const cover = asRecord(subjectData.cover)
     ?? asRecord(subjectData.cover_image)
     ?? asRecord(subjectData.coverImage)
@@ -426,7 +672,7 @@ function parseSubject(value: JsonValue): JimengSubjectItem | null {
       ?? stringValue(subjectData.desc)
       ?? stringValue(subject.description)
       ?? stringValue(subject.desc),
-    status: stringOrNumber(subjectData.status) ?? stringOrNumber(subject.status),
+    status: stringOrNumber(subjectData.status) ?? stringOrNumber(subject.status) ?? stringOrNumber(subjectControl?.status),
     createTime: stringOrNumber(subjectData.create_time)
       ?? stringOrNumber(subjectData.createTime)
       ?? stringOrNumber(subject.create_time)
@@ -447,6 +693,23 @@ function parseSubject(value: JsonValue): JimengSubjectItem | null {
       ?? stringValue(subjectData.coverImageUrl),
     imageUris,
     voiceIds,
+  }
+}
+
+function summarizeSubject(subject: JimengSubjectItem): JsonObject {
+  return {
+    subject_id: subject.subjectId,
+    name: subject.name,
+    description: subject.description,
+    status: subject.status,
+    create_time: subject.createTime,
+    update_time: subject.updateTime,
+    cover_image_uri: subject.coverImageUri,
+    cover_image_url_present: !!subject.coverImageUrl,
+    image_uris: subject.imageUris,
+    image_count: subject.imageUris.length,
+    voice_ids: subject.voiceIds,
+    voice_count: subject.voiceIds.length,
   }
 }
 
@@ -539,6 +802,29 @@ function normalizeSubjectName(value: string): string {
   return name
 }
 
+function normalizeSubjectId(value: string | undefined): string {
+  const subjectId = value?.trim()
+  if (!subjectId) {
+    throw jimengError({
+      category: "validation",
+      code: "SUBJECT_ID_REQUIRED",
+      message: "A subject id is required.",
+      retryable: false,
+    })
+  }
+  return subjectId
+}
+
+function normalizeSubjectIds(values: string[] | undefined): string[] {
+  if (!values) return []
+  const seen = new Set<string>()
+  for (const value of values) {
+    const subjectId = normalizeSubjectId(value)
+    seen.add(subjectId)
+  }
+  return [...seen]
+}
+
 function normalizeWorkspaceId(value: number): number {
   if (!Number.isInteger(value) || value < 1) {
     throw jimengError({
@@ -553,20 +839,31 @@ function normalizeWorkspaceId(value: number): number {
 }
 
 function redactSubjectCreateRequest(request: JsonObject): JsonObject {
+  return redactSubjectContentRequest(request)
+}
+
+function redactSubjectContentRequest(request: JsonObject): JsonObject {
   const content = asRecord(request.content)
   const mainImage = asRecord(content?.main_image)
-  const redactedMainImage: JsonObject = {
-    ...(mainImage ?? {}),
-    image_url_present: !!mainImage?.image_url,
+  const redactedContent: JsonObject = { ...(content ?? {}) }
+  if (mainImage) {
+    const redactedMainImage: JsonObject = {
+      ...mainImage,
+      image_url_present: !!mainImage.image_url,
+    }
+    if (mainImage.image_url) redactedMainImage.image_url = "[SIGNED_URL_REDACTED]"
+    redactedContent.main_image = redactedMainImage
   }
-  if (mainImage?.image_url) redactedMainImage.image_url = "[SIGNED_URL_REDACTED]"
   return {
     ...request,
-    content: {
-      ...(content ?? {}),
-      main_image: redactedMainImage,
-    },
+    content: redactedContent,
   }
+}
+
+function normalizeOptionalText(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined
+  const text = value.trim()
+  return text ? text : undefined
 }
 
 function normalizeCursor(value: number | undefined): number {
@@ -595,6 +892,23 @@ function normalizeLimit(value: number | undefined): number {
     })
   }
   return value
+}
+
+function subjectVoiceInfo(body: JsonValue): JimengSubjectVoiceInfo | null {
+  const root = asRecord(body)
+  const data = asRecord(root?.data)
+  const audioInfo = asRecord(data?.audio_info)
+    ?? asRecord(data?.audioInfo)
+    ?? asRecord(root?.audio_info)
+    ?? asRecord(root?.audioInfo)
+    ?? data
+  if (!audioInfo) return null
+  return {
+    vid: stringValue(audioInfo.vid) ?? stringValue(audioInfo.id),
+    audioUrl: stringValue(audioInfo.audio_url) ?? stringValue(audioInfo.audioUrl) ?? stringValue(audioInfo.url),
+    duration: numberValue(audioInfo.duration),
+    durationMs: numberValue(audioInfo.duration_ms) ?? numberValue(audioInfo.durationMs),
+  }
 }
 
 function buildSubjectsHeaders(session: JimengSessionBundle): Record<string, string> {

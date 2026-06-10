@@ -30,8 +30,11 @@ Use the browser as an authenticated session holder and API discovery surface. Mo
 | `/mweb/v1/creation_agent/v2/skill/list` | POST | Available agent skills/tools. | Cataloged only |
 | `/mweb/v1/video_generate/get_common_config` | POST | Video model/common configuration by scene, including lip-sync image/video scenes. | Implemented for config catalog |
 | `/mweb/v1/get_user_local_item_list` | POST | User local/generated item lists; `effect_type=218` returns current user's cloned voices. | Implemented for config catalog |
-| `/mweb/v1/dreamina_subject/get` | POST | Saved subject/persona list. | Implemented as no-spend `subjects`; current account returned zero saved subjects |
+| `/mweb/v1/dreamina_subject/get` | POST | Saved subject/persona list. | Implemented as no-spend `subjects`; live-proved empty and non-empty filtered/list shapes |
 | `/mweb/v1/dreamina_subject/create` | POST | Create saved subject/persona from a main reference image. | Implemented as no-spend `subject-create`; live-proved with local ImageX upload, audit, image lookup, and create |
+| `/mweb/v1/dreamina_subject/update` | POST | Update saved subject/persona content. | Implemented as no-spend `subject-update`; live-proved on a temporary subject |
+| `/mweb/v1/dreamina_subject/delete` | POST | Delete one or more saved subject/persona records. | Implemented as no-spend `subject-delete`; live-proved on a temporary subject |
+| `/mweb/v1/dreamina_subject/generate_voice` | POST | Generate a subject voice from an image URI. | Dry-run request support only; live submit remains blocked pending explicit spend approval or captured UI submit |
 | `/mweb/v1/feed` | POST | Explore/feed content; a signed `dreamina_tone` feed request returns the built-in voice library. Useful for research/template mining if handled carefully. | Implemented for voice library replay |
 | `/mweb/v1/tts_generate` | POST | Built-in voice text-to-speech. Returns base64 MP3 in `data.data`. | Implemented and live-proved |
 | `/mweb/v1/get_upload_token` | POST | Temporary upload credentials for video/image/file scenes. Required before direct local reference-image/video upload. | Implemented and live-proved; local ImageX image upload is implemented via `upload-image`, local VOD video upload via `upload-video` |
@@ -665,7 +668,8 @@ Request shape:
 ```json
 {
   "cursor": 0,
-  "limit": 20
+  "limit": 20,
+  "subject_id_list": ["14204993143308"]
 }
 ```
 
@@ -675,7 +679,7 @@ CLI proof:
 bun packages/jimeng-client/src/browser-proxy-cli.ts subjects \
   --session data/jimeng-lab/raw/session-bundle-current.json \
   --limit 20 \
-  --outDir data/jimeng-lab/proof-20260610-subjects
+  --outDir data/jimeng-lab/proof-20260610-subjects-after-create
 ```
 
 Observed proof facts:
@@ -686,14 +690,16 @@ ret=0
 errmsg=success
 cursor=0
 limit=20
-subject_count=0
+subject_count=3
 has_more=false
-next_cursor=0
-response_text_sha256=618858c54ed5d0b298cf37ed03bf29d27042f54e3e999bb143932cec6a3ef31f
-proof=data/jimeng-lab/proof-20260610-subjects/
+next_cursor=1781049529864
+top_subject_id=12352249053442
+top_subject_name=CLI Kbeauty UGC 2
+response_text_sha256=27e7441c6bd27520df457685986694753e5a100657bc9e5c30f6c04e78a892a6
+proof=data/jimeng-lab/proof-20260610-subjects-after-create/
 ```
 
-The current account returned zero saved subjects, which is still a valid endpoint proof. The normalized fields are ready for future accounts with saved personas:
+The older `data/jimeng-lab/proof-20260610-subjects/` proof returned zero subjects before the first CLI subject-create run. The later proof shows the non-empty account shape and confirms signed cover URLs are reduced to presence booleans. Normalized fields:
 
 - `subject_id`
 - `name`
@@ -771,6 +777,88 @@ proof=data/jimeng-lab/proof-20260610-subject-create-cli/
 ```
 
 Normalized summaries redact signed image URLs. Raw upload, lookup, and create responses stay ignored under `data/**`.
+
+## Confirmed Saved Subject / Persona Update/Delete Contract
+
+`jimeng-browser-proxy subject-update` and `jimeng-browser-proxy subject-delete` expose the other no-spend subject lifecycle endpoints. The frontend service maps camel-case calls to these wire shapes:
+
+```json
+{
+  "subject_id": "14204993143308",
+  "content": {
+    "name": "CLI QA Updated",
+    "description": "临时主体：update命令已验证，随后删除。",
+    "main_image": {
+      "width": 2048,
+      "height": 2048,
+      "image_uri": "tos-cn-i-tb4s082cfz/d56ac871b3a94f77bc83ac84a861ede6.png",
+      "image_url": "<signed preview url>"
+    }
+  }
+}
+```
+
+```json
+{
+  "subject_id": "14204993143308"
+}
+```
+
+Proof sequence:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts subject-create \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --workspaceId 14199856180236 \
+  --name "CLI QA Temp" \
+  --description "临时主体：用于CLI生命周期验证，随后删除。" \
+  --imageUri tos-cn-i-tb4s082cfz/d56ac871b3a94f77bc83ac84a861ede6.png \
+  --imageWidth 2048 \
+  --imageHeight 2048 \
+  --outDir data/jimeng-lab/proof-20260610-subject-lifecycle
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts subject-update \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --subjectId 14204993143308 \
+  --name "CLI QA Updated" \
+  --description "临时主体：update命令已验证，随后删除。" \
+  --imageUri tos-cn-i-tb4s082cfz/d56ac871b3a94f77bc83ac84a861ede6.png \
+  --imageWidth 2048 \
+  --imageHeight 2048 \
+  --outDir data/jimeng-lab/proof-20260610-subject-lifecycle
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts subject-delete \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --subjectId 14204993143308 \
+  --outDir data/jimeng-lab/proof-20260610-subject-lifecycle
+```
+
+Observed proof facts:
+
+```txt
+created_subject_id=14204993143308
+created_data_id=14204993143564
+update_ret=0
+update_errmsg=success
+update_response_text_sha256=47168986f6e80a31c8f169afdb19755b4a08895f496292e988e6f1d88b6152c2
+delete_ret=0
+delete_errmsg=success
+delete_response_text_sha256=8cc3d46d8dec2d339dc0e7fe2d338f0ac4946752fc276a0f9a508bcb7c1f52f8
+post_delete_filtered_subject_count=0
+proof=data/jimeng-lab/proof-20260610-subject-lifecycle/
+```
+
+`subject-generate-voice` has dry-run request support:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts subject-generate-voice \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --imageUri tos-cn-i-tb4s082cfz/d56ac871b3a94f77bc83ac84a861ede6.png \
+  --outDir data/jimeng-lab/proof-20260610-subject-lifecycle \
+  --dryRun
+```
+
+The request shape is `{"image_uri":"tos-cn-i-..."}`. Live submit remains disabled because it may consume generation quota and still needs explicit spend approval or a captured UI submit.
 
 ## Confirmed Explore / Template Mining Contract
 
@@ -1041,7 +1129,7 @@ The 2026-06-09 JS bundle sweep found these useful endpoint groups. Treat rows wi
 | Group | Endpoints |
 |---|---|
 | Voice cloning / custom voice | `/mweb/v1/voice/submit_task`, `/mweb/v1/voice/query_task`, `/mweb/v1/voice/update`, `/mweb/v1/voice/delete` |
-| Subject/persona lifecycle | `/mweb/v1/dreamina_subject/get`, `/mweb/v1/dreamina_subject/create`, `/mweb/v1/dreamina_subject/update`, `/mweb/v1/dreamina_subject/delete`, `/mweb/v1/dreamina_subject/generate_voice`; list is implemented as `subjects`, create is implemented as `subject-create`, while update/delete/generate_voice remain capture targets |
+| Subject/persona lifecycle | `/mweb/v1/dreamina_subject/get`, `/mweb/v1/dreamina_subject/create`, `/mweb/v1/dreamina_subject/update`, `/mweb/v1/dreamina_subject/delete`, `/mweb/v1/dreamina_subject/generate_voice`; list/create/update/delete are implemented, while generate_voice is dry-run-only until explicit spend approval or captured UI submit |
 | Infinite canvas | `/mweb/v1/infinite_canvas/create_project`, `/mweb/v1/infinite_canvas/conversation`, `/mweb/v1/infinite_canvas/edit`, `/mweb/v1/infinite_canvas/resume`, `/mweb/v1/infinite_canvas/stop_stream`, `/mweb/v1/infinite_canvas/v1/fetch_snapshot`, `/mweb/v1/infinite_canvas/v1/submit_changeset`, `/mweb/v1/infinite_canvas/v1/fetch_changeset` |
 | Reference/image tools | `/mweb/v1/get_common_config`, `/mweb/v1/get_image_description`, `/mweb/v1/get_upload_token`, `/mweb/v1/face_recognize`, `/mweb/v1/blend_preview`, `/mweb/v1/pose_detect`, `/mweb/v1/saliency_seg`, `/mweb/v1/algo_proxy`; image upload, description, face recognition, ControlNet pose/depth/canny preview, pose detect, and object/saliency segmentation are now implemented, while style/reference payload tools still need CLI coverage |
 | Template/research mining | `/mweb/v1/feed`, `/mweb/v1/feed_short_video`, `/lv/v1/cc_web/plane/get_categories`, public CapCut `bee_prod` metadata JSON, `/lv/v1/cc_web/replicate/search_templates`, `/lv/v1/cc_web/plane/*`; `/mweb/v1/get_explore` is implemented for direct Explore templates and short-video examples, `/mweb/v1/feed_short_video` is implemented as `overseas-short-videos`, CapCut category catalog is implemented as `capcut-categories`, and public CapCut ratio/scene metadata is implemented as `capcut-template-metadata`; CapCut template rows/search/collection endpoints remain capture targets |
@@ -1121,7 +1209,7 @@ Capture one flow at a time:
 
 - richer image reference controls
 - image-to-image / byte edit
-- subject/persona update/delete/generate_voice
+- subject/persona generate_voice live submit after explicit spend approval or captured UI submit
 - voice cloning and subject voice generation
 - pose/style/depth/canny reference controls
 - image-to-video end-frame and multi-frame controls

@@ -144,13 +144,14 @@ These probes are read/config/list calls and should not consume generation credit
 - Status:
   - implemented as `jimeng-browser-proxy subjects`
   - no-generation/no-spend list path
-  - live-proved with the current logged-in session; current account returned zero saved subjects
+  - live-proved with empty, non-empty, and subject-id filtered list shapes
 - Request:
 
 ```json
 {
   "cursor": 0,
-  "limit": 20
+  "limit": 20,
+  "subject_id_list": ["14204993143308"]
 }
 ```
 
@@ -160,7 +161,7 @@ Current utility:
 bun packages/jimeng-client/src/browser-proxy-cli.ts subjects \
   --session data/jimeng-lab/raw/session-bundle-current.json \
   --limit 20 \
-  --outDir data/jimeng-lab/proof-20260610-subjects
+  --outDir data/jimeng-lab/proof-20260610-subjects-after-create
 ```
 
 Proof facts:
@@ -174,6 +175,18 @@ has_more=false
 next_cursor=0
 response_text_sha256=618858c54ed5d0b298cf37ed03bf29d27042f54e3e999bb143932cec6a3ef31f
 summary=data/jimeng-lab/proof-20260610-subjects/normalized/subjects-20260609222826-summary.json
+```
+
+Later non-empty proof after `subject-create`:
+
+```txt
+subject_count=3
+has_more=false
+next_cursor=1781049529864
+top_subject_id=12352249053442
+top_subject_name=CLI Kbeauty UGC 2
+response_text_sha256=27e7441c6bd27520df457685986694753e5a100657bc9e5c30f6c04e78a892a6
+summary=data/jimeng-lab/proof-20260610-subjects-after-create/normalized/subjects-20260610002633-summary.json
 ```
 
 Normalized item fields for future non-empty accounts:
@@ -253,6 +266,69 @@ summary=data/jimeng-lab/proof-20260610-subject-create-cli/normalized/subject-cre
 ```
 
 Normalized summaries replace signed media URLs with presence booleans or `[SIGNED_URL_REDACTED]`. Raw upload, lookup, and create responses stay ignored under `data/**`.
+
+### 6.3) Subject/persona update/delete and voice-generation planning
+- `POST https://jimeng.jianying.com/mweb/v1/dreamina_subject/update`
+- `POST https://jimeng.jianying.com/mweb/v1/dreamina_subject/delete`
+- `POST https://jimeng.jianying.com/mweb/v1/dreamina_subject/generate_voice`
+- Status:
+  - `subject-update` implemented and live-proved on a temporary subject
+  - `subject-delete` implemented and live-proved on the same temporary subject
+  - `subject-generate-voice` dry-run request planning implemented; live submit disabled pending explicit spend approval or captured UI submit
+- Frontend bundle evidence:
+  - repo service calls `updateSubject({subjectId, content})`
+  - repo service calls `deleteSubject({subjectId})` or batch `deleteSubjects({subjectIdList})`
+  - repo service calls `generateSubjectVoice({imageUri})`
+
+Update request:
+
+```json
+{
+  "subject_id": "14204993143308",
+  "content": {
+    "name": "CLI QA Updated",
+    "description": "临时主体：update命令已验证，随后删除。",
+    "main_image": {
+      "width": 2048,
+      "height": 2048,
+      "image_uri": "tos-cn-i-tb4s082cfz/d56ac871b3a94f77bc83ac84a861ede6.png",
+      "image_url": "<signed preview url>"
+    }
+  }
+}
+```
+
+Delete request:
+
+```json
+{
+  "subject_id": "14204993143308"
+}
+```
+
+Generate-voice dry-run request:
+
+```json
+{
+  "image_uri": "tos-cn-i-tb4s082cfz/d56ac871b3a94f77bc83ac84a861ede6.png"
+}
+```
+
+Proof facts:
+
+```txt
+proof=data/jimeng-lab/proof-20260610-subject-lifecycle/
+created_subject_id=14204993143308
+created_data_id=14204993143564
+update_ret=0
+update_errmsg=success
+update_response_text_sha256=47168986f6e80a31c8f169afdb19755b4a08895f496292e988e6f1d88b6152c2
+delete_ret=0
+delete_errmsg=success
+delete_response_text_sha256=8cc3d46d8dec2d339dc0e7fe2d338f0ac4946752fc276a0f9a508bcb7c1f52f8
+post_delete_filtered_subject_count=0
+subject_voice_plan=data/jimeng-lab/proof-20260610-subject-lifecycle/raw/subject-generate-voice-20260610003459-kj65qh-dry-run-plan.json
+```
 
 ### 7) Built-in voice library
 - `POST https://jimeng.jianying.com/mweb/v1/feed`
@@ -354,7 +430,7 @@ data/jimeng-lab/voice-library-samples/manifest.json
 Frontend bundle scan found these UGC-useful groups, but they are not yet direct-client contracts:
 
 - voice clone/custom voice: `/mweb/v1/voice/submit_task`, `/mweb/v1/voice/query_task`, `/mweb/v1/voice/update`, `/mweb/v1/voice/delete`
-- subject/persona CRUD and voice: `/mweb/v1/dreamina_subject/get`, `/mweb/v1/dreamina_subject/create`, `/mweb/v1/dreamina_subject/update`, `/mweb/v1/dreamina_subject/delete`, `/mweb/v1/dreamina_subject/generate_voice`; list and create are implemented, while update/delete/generate_voice still need UI capture
+- subject/persona CRUD and voice: `/mweb/v1/dreamina_subject/get`, `/mweb/v1/dreamina_subject/create`, `/mweb/v1/dreamina_subject/update`, `/mweb/v1/dreamina_subject/delete`, `/mweb/v1/dreamina_subject/generate_voice`; list/create/update/delete are implemented, while generate_voice is dry-run-only until explicit spend approval or UI capture
 - infinite canvas: `/mweb/v1/infinite_canvas/create_project`, `/mweb/v1/infinite_canvas/conversation`, `/mweb/v1/infinite_canvas/edit`, `/mweb/v1/infinite_canvas/resume`, `/mweb/v1/infinite_canvas/stop_stream`, `/mweb/v1/infinite_canvas/v1/fetch_snapshot`, `/mweb/v1/infinite_canvas/v1/submit_changeset`, `/mweb/v1/infinite_canvas/v1/fetch_changeset`
 - reference/image tools: `/mweb/v1/get_common_config`, `/mweb/v1/get_image_description`, `/mweb/v1/get_upload_token`, `/mweb/v1/face_recognize`, `/mweb/v1/blend_preview`, `/mweb/v1/pose_detect`, `/mweb/v1/saliency_seg`, `/mweb/v1/algo_proxy`; upload, description, face recognition, ControlNet pose/depth/canny preview, pose detect, and object/saliency segmentation are now direct-client commands, while style/reference payload tools remain capture targets
 - template/research mining: `/mweb/v1/feed`, `/mweb/v1/get_explore`, `/mweb/v1/feed_short_video`, `/lv/v1/cc_web/plane/get_categories`, public CapCut `bee_prod` metadata JSON, `/lv/v1/cc_web/replicate/search_templates`, `/lv/v1/cc_web/plane/*`; direct `/mweb/v1/get_explore` support is implemented for both templates and short-video examples, `/mweb/v1/feed_short_video` is implemented as `overseas-short-videos`, CapCut category catalog is implemented as `capcut-categories`, and public CapCut ratio/scene metadata is implemented as `capcut-template-metadata`; CapCut template rows/search/collection payloads still need real UI capture
@@ -1572,8 +1648,11 @@ Current support matrix:
 | `overseas-short-videos` | implemented in `jimeng-browser-proxy` | No-spend direct `/mweb/v1/feed_short_video` short-video/reference mining with ranking and video metadata normalization. |
 | `capcut-categories` | implemented in `jimeng-browser-proxy` | No-spend signed CapCut `/lv/v1/cc_web/plane/get_categories` commercial template category catalog. |
 | `capcut-template-metadata` | implemented in `jimeng-browser-proxy` | No-session public CapCut `bee_prod` ratio and scene metadata catalogs. |
-| `subjects` | implemented in `jimeng-browser-proxy` | No-spend direct `/mweb/v1/dreamina_subject/get`; current account returned zero saved subjects. |
+| `subjects` | implemented in `jimeng-browser-proxy` | No-spend direct `/mweb/v1/dreamina_subject/get`; empty, non-empty, and subject-id filtered list shapes are live-proved. |
 | `subject-create` | implemented in `jimeng-browser-proxy` | No-spend direct subject/persona create from a local ImageX-uploaded or existing provider image. |
+| `subject-update` | implemented in `jimeng-browser-proxy` | No-spend direct subject/persona content update, live-proved on a temporary subject. |
+| `subject-delete` | implemented in `jimeng-browser-proxy` | No-spend direct subject/persona delete, live-proved on the same temporary subject. |
+| `subject-generate-voice` | dry-run-only in `jimeng-browser-proxy` | Request shape is known as `image_uri`; live submit disabled pending explicit spend approval or captured UI submit. |
 | `image2image` | needs capture | Need image reference upload + image edit submit capture. |
 | `multiframe2video` | needs capture | Need multi-frame upload/reference payload capture. |
 | `multimodal2video` | needs capture | Need `全能参考` mixed image/video/audio reference payload capture. |
@@ -1644,5 +1723,5 @@ Do not commit raw captures or generated media. If a redacted summary is promoted
 3. Capture the frontend's explicit end-frame/multi-frame mode and live-prove `frames2video` only after confirming the mode-specific payload contract.
 4. Expand template/research mining beyond direct Explore/feed_short_video with CapCut template search and plane endpoints.
 5. Add strict `1019` shark breaker/cooldown budgets to the consolidated CLI path.
-6. Capture subject/persona update/delete/generate_voice and custom voice clone flows.
+6. Capture/approve subject/persona `generate_voice` live submit and custom voice clone flows.
 7. Add multipart/chunked VOD upload only when large reference videos require it.
