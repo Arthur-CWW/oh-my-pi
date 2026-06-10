@@ -2858,20 +2858,49 @@ rg -n "cookie|sid=|session|msToken|x-signature|sign|authorization|<creator_user_
 
 Result: no matches. Normalized proof hashes creator user ids and stores draft JSON only as a SHA-256/count summary. `fetch_conversation` remains blocked until a non-empty conversation list returns a real `conversation_id`.
 
+## Account Credit Smoke
+
+No-spend signed account credit read:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts account-credit \
+  --dryRun \
+  --outDir data/jimeng-lab/proof-20260610-account-credit-cli-dry-run
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts account-credit \
+  --outDir data/jimeng-lab/proof-20260610-account-credit-cli
+```
+
+Result:
+
+```txt
+account-credit saved total=3990 gift=0 purchase=0 vip=3990
+```
+
+Validation:
+
+```bash
+rg -n -P 'x-signature|authorization|cookie|sessionid|sid=|msToken|verifyFp|sign|device-time|tdid' \
+  data/jimeng-lab/proof-20260610-account-credit-cli/normalized \
+  data/jimeng-lab/proof-20260610-account-credit-cli-dry-run/normalized || true
+```
+
+Result: no matches in normalized output. Raw ignored proof contains the provider response body only; request headers/cookies are not persisted.
+
 ## Verification
 
 ```bash
 bun run jimeng:typecheck
 bun run jimeng:test
-bun packages/jimeng-client/src/browser-proxy-cli.ts --help | rg 'static-inventory|lip-sync-config|voice-clones|voice-clone-submit|capcut-probe|capcut-template-metadata|capcut-categories|capcut-collections|capcut-collection-templates|capcut-template-detail|capcut-editor-catalog|infinite-canvas|overseas-short-videos|subject-create|subject-update|subject-delete|subject-generate-voice|subjects|templates|short-videos'
+bun packages/jimeng-client/src/browser-proxy-cli.ts --help | rg 'static-inventory|account-credit|lip-sync-config|voice-clones|voice-clone-submit|capcut-probe|capcut-template-metadata|capcut-categories|capcut-collections|capcut-collection-templates|capcut-template-detail|capcut-editor-catalog|infinite-canvas|overseas-short-videos|subject-create|subject-update|subject-delete|subject-generate-voice|subjects|templates|short-videos'
 ```
 
 Result:
 
 ```txt
 typecheck passed
-138 tests passed, 0 failed
-browser-proxy help listed static-inventory, CapCut collection/detail/editor-catalog, and infinite-canvas commands
+142 tests passed, 0 failed
+browser-proxy help listed static-inventory, account-credit, CapCut collection/detail/editor-catalog, and infinite-canvas commands
 paid smoke normalized files have no live token markers
 ```
 

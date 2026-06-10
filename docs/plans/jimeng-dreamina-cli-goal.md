@@ -161,6 +161,16 @@ Direct image model config is now live-proved without generation spend and schema
 - latest proof returned 8 image models; default workbench model was `high_aes_general_v50` / `图片5.0 Lite`
 - high-value flags included `bg_paint`, `byte_edit`, `byte_edit_with_custom_ratio`, `byte_edit_with_empty_prompt`, `canny`, `depth`, `face_swap`, `ip_keep`, `pose`, `refuse_image`, `smart_scale`, and `support_subject`
 
+Signed account credit balance is now live-proved without generation spend and schema-backed:
+
+- `jimeng-browser-proxy account-credit`
+- direct `/commerce/v1/benefits/user_credit`
+- uses frontend-compatible `device-time` / `sign` / `sign-ver` commerce headers recovered from `iptag/jimeng-api`
+- normalizes `gift_credit`, `purchase_credit`, `vip_credit`, and `total_credit`
+- proof bundle: `data/jimeng-lab/proof-20260610-account-credit-cli/`
+- latest proof returned total `3990` credits, all from VIP credits
+- related `/commerce/v1/benefits/credit_receive` is a mutating daily-claim endpoint and remains out of scope without explicit approval
+
 No-spend direct endpoint concurrency probing is now live-proved:
 
 - `jimeng-browser-proxy rate-probe`

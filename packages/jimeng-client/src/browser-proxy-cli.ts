@@ -15,6 +15,10 @@ import {
   parseJimengAgentCatalogEndpoints,
   summarizeJimengAgentCatalog,
 } from "./agent-catalog"
+import {
+  fetchJimengAccountCredit,
+  summarizeJimengAccountCredit,
+} from "./account-credit"
 import { loadJimengSessionFromBrowser } from "./browser-session"
 import {
   buildCapCutCollectionTemplatesRequest,
@@ -223,6 +227,7 @@ Commands:
   catalog       Probe non-generating model/tool/persona/voice config endpoints
   agent-catalog Fetch normalized agent skills and image/video model catalog
   image-models  Fetch no-spend image generation model/config catalog
+  account-credit Fetch signed no-spend account credit balance
   infinite-canvas Fetch no-spend infinite-canvas project/detail/ratio metadata
   lip-sync-config Fetch no-spend digital-human/lip-sync model configs
   lip-sync-compare Offline compare a lip-sync dry-run plan against captured UI submit
@@ -626,6 +631,7 @@ interface CliArgs {
     | "catalog"
     | "agent-catalog"
     | "image-models"
+    | "account-credit"
     | "infinite-canvas"
     | "endpoint-probe"
     | "rate-probe"
@@ -1307,6 +1313,45 @@ async function main(argv: string[]): Promise<void> {
       summary: summarizeJimengEndpointProbe(result),
     })
     console.log(`[jimeng-browser-proxy] endpoint-probe saved variants=${result.results.length} rets=${result.results.map((item) => `${item.name}:${item.ret ?? "none"}`).join(",")}`)
+    return
+  }
+
+  if (args.command === "account-credit") {
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const runId = `account-credit-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    if (args.dryRun) {
+      writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
+        command: args.command,
+        endpoint: "/commerce/v1/benefits/user_credit",
+        method: "POST",
+        request: {},
+        signed_headers: ["device-time", "sign", "sign-ver"],
+        browser_session: redactSession(session),
+      })
+      writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+        command: args.command,
+        endpoint: "/commerce/v1/benefits/user_credit",
+        method: "POST",
+        dry_run: true,
+      })
+      console.log("[jimeng-browser-proxy] account-credit dry run saved")
+      return
+    }
+
+    const result = await fetchJimengAccountCredit({ session })
+    writeJson(path.join(dirs.rawDir, `${runId}.json`), {
+      endpoint: result.endpoint,
+      http_status: result.httpStatus,
+      ret: result.ret,
+      errmsg: result.errmsg,
+      response_text_sha256: result.responseTextSha256,
+      body: result.body,
+    })
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      summary: summarizeJimengAccountCredit(result),
+    })
+    console.log(`[jimeng-browser-proxy] account-credit saved total=${result.credit.totalCredit} gift=${result.credit.giftCredit} purchase=${result.credit.purchaseCredit} vip=${result.credit.vipCredit}`)
     return
   }
 
@@ -3404,6 +3449,7 @@ function parseArgs(argv: string[]): CliArgs {
     && command !== "catalog"
     && command !== "agent-catalog"
     && command !== "image-models"
+    && command !== "account-credit"
     && command !== "infinite-canvas"
     && command !== "endpoint-probe"
     && command !== "rate-probe"

@@ -257,7 +257,39 @@ concurrency=256 requests=512 completed=512 stopped=false http=200x512 ret=0x512 
 
 This means no rate limit was observed up to concurrency `256` on that read-only config endpoint. Tail latency starts to stretch at the highest tiers, and this does **not** establish a safe limit for paid generation, upload, mutation, or polling endpoints.
 
-### 6.0.2) Infinite canvas project metadata
+### 6.0.2) Signed account credit balance
+
+- Implemented as `jimeng-browser-proxy account-credit`.
+- Direct endpoint: `POST https://jimeng.jianying.com/commerce/v1/benefits/user_credit`
+- No generation spend. This is a read-only balance check for gating paid generation tests.
+- Requires the frontend-compatible commerce sign headers recovered from `iptag/jimeng-api`:
+  - `device-time = floor(Date.now()/1000)`
+  - `sign = md5("9e2c|_credit|7|8.4.0|<device-time>||11ac")`
+  - `sign-ver = 1`
+- Response contract:
+  - `data.credit.gift_credit`
+  - `data.credit.purchase_credit`
+  - `data.credit.vip_credit`
+- The related `/commerce/v1/benefits/credit_receive` path mutates daily credit state and is intentionally not implemented.
+
+Proof:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts account-credit \
+  --outDir data/jimeng-lab/proof-20260610-account-credit-cli
+```
+
+Latest proof:
+
+```txt
+ret=0
+gift_credit=0
+purchase_credit=0
+vip_credit=3990
+total_credit=3990
+```
+
+### 6.0.3) Infinite canvas project metadata
 
 - Implemented as `jimeng-browser-proxy infinite-canvas`.
 - No-generation/no-spend read path for the canvas workspace project list, one project detail lookup, custom canvas ratio presets, and conversation list.
@@ -1979,6 +2011,7 @@ Current support matrix:
 | `static-locate` | implemented in `jimeng-browser-proxy` | Offline source/bundle locator for endpoint request builders; writes redacted snippets, symbol hints, and mise-managed `ast-grep` follow-up commands without loading a browser session. |
 | `endpoint-probe` | implemented in `jimeng-browser-proxy` | Generic explicit replay/probe helper for candidate JSON body variants; writes raw local response plus normalized request/response shape summaries for faster promotion into typed commands. |
 | `rate-probe` | implemented in `jimeng-browser-proxy` | Bounded concurrency/rate probe for no-spend read/config endpoints with stop-on-429/auth/risk behavior, latency percentiles, status/ret counts, and hash-only response evidence. Latest `/mweb/v1/get_common_config` sweep found no limit through concurrency `256`. |
+| `account-credit` | implemented in `jimeng-browser-proxy` | Signed no-spend `/commerce/v1/benefits/user_credit` credit-balance read. Latest proof returned total 3990 credits, all VIP credits. |
 | `agent-catalog` | implemented in `jimeng-browser-proxy` | No-spend schema-backed `/mweb/v1/creation_agent/v2/skill/list` and `/mweb/v1/creation_agent/v2/get_agent_config` catalog for official agent skills, image/video model request keys, option enums, input media types, unified-edit material limits, and image control features. |
 | `image-models` | implemented in `jimeng-browser-proxy` | No-spend schema-backed `/mweb/v1/get_common_config` catalog for image model keys, default workbench model, feature flags, blend controls, resolution presets, sample-step bounds, and commercial benefit/resource ids. |
 | `infinite-canvas` | implemented in `jimeng-browser-proxy` | No-spend schema-backed `/mweb/v1/infinite_canvas/list_project`, `/mweb/v1/infinite_canvas/project_detail`, `/mweb/v1/infinite_canvas/v1/get_canvas_custom_ratio`, and `/mweb/v1/infinite_canvas/get_conversation_list` metadata reads. Latest proof returned one canvas project, one detail record, zero custom ratios, and zero conversations. |
