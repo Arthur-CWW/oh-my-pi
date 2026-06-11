@@ -43,3 +43,13 @@ Arthur clarified that API/provider integrations should use runtime schema valida
 Arthur clarified that API reverse engineering should be sped up with mixed dynamic/static tooling. Use CDP network truth, `ast-grep`/targeted bundle search, and explicit replay/probe tools together; avoid spending long stretches reading minified bundles when a captured request plus replay comparison can prove the contract faster.
 
 The Jimeng/Dreamina workflow now has `jimeng-browser-proxy capture-analyze` and `jimeng-browser-proxy discovery-worklist` for this loop. After each meaningful `jimeng-network-recorder` capture, run `capture-analyze` first to rank endpoints, classify replay risk, summarize shapes, and emit local candidate JSON; then run `discovery-worklist` to merge analyzer/probe/static evidence into a prioritized next-slice queue before reading frontend bundles by hand.
+
+### 2026-06-11
+
+Arthur clarified that the Jimeng/Dreamina client is prototype infrastructure, so agents should optimize for a fast, clean architecture rather than compatibility-preserving micro-slices. Avoid proof ritual for backend refactors: passing tests, typecheck, schema fixtures, snapshots, and replayed cassettes are enough unless a live provider contract needs discovery or drift refresh.
+
+For provider/API clients, prefer a shared HTTP transport with `live`, `record`, `replay`, and `fixture` modes over command-specific `--dryRun`/proof flags everywhere. Use dependency injection through Effect `Context`/`Layer` or a thin equivalent so tests swap HTTP/cache/clock/filesystem services directly.
+
+For CLI work, prefer Effect CLI for new or substantially refactored surfaces instead of continuing to grow hand-written argument parsing. For large analyzer/inventory outputs, prefer structured endpoint registries plus snapshot/fixture tests over long inline string fixtures and assertion walls.
+
+Broader lessons about decomposition, caching validated layers, and parallel agents live in `docs/state/agent-iteration-lessons.md`.

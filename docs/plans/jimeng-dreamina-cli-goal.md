@@ -2,14 +2,24 @@
 
 ## Outcome
 
-Reverse engineer Jimeng/Dreamina's logged-in frontend GenAI surface into a truthful, tested local CLI surface first. A daemon-backed async job orchestrator is an optimization phase after the API surface settles; do not jump to it yet.
+Build a fast, truthful Jimeng/Dreamina client for high-value UGC workflows. This is prototype infrastructure, not a stable public SDK: prefer clean architecture and working coverage over backwards-compatible incremental layering.
 
-Keep going until every high-value UGC capability reachable from Arthur's logged-in Jimeng frontend is either:
+Keep going until every high-value UGC capability reachable from Arthur's logged-in Jimeng frontend is either implemented through typed services/CLI or honestly classified in the endpoint registry.
 
-- implemented as a typed CLI command with proof artifacts, or
-- documented as blocked/unknown with captured evidence, exact UI path, request traces, and the next probe.
+The goal is coverage-driven, but the loop should be efficient: avoid ceremony that does not improve confidence. Do not require a local proof bundle for every backend refactor. Do not manually maintain walls of assertions when snapshot fixtures or structured endpoint registries would prove the same thing faster.
 
-This goal is intentionally coverage-and-proof driven. Do not claim completion because one endpoint works. Completion means the useful reachable frontend surface has been systematically explored, implemented where possible, proven where implemented, and honestly documented where blocked.
+## Operating Model
+
+- Use a single HTTP boundary abstraction for Jimeng/CapCut calls with transport modes: `live`, `record`, `replay`, and `fixture`.
+- Decode external JSON at the boundary with permissive Effect Schema contracts: allow additive fields, fail clearly when paths we rely on drift.
+- Put auth headers, risk detection, response redaction, cassette recording, and replay caching in the transport/client layer, not scattered through CLI commands.
+- Use dependency injection through Effect `Context`/`Layer` or a thin equivalent where migration is still in progress. Tests should swap the HTTP transport, clock, filesystem, and logger rather than adding command-specific proof flags.
+- Prefer Effect CLI for new or substantially refactored command surfaces. Do not keep growing hand-written argument parsing if a command is already being rewritten.
+- Treat live no-spend calls as cassette refreshes or provider-drift checks. After one part of the stack is validated, replay cached fixtures for speed.
+- Use snapshot/fixture tests for inventory, worklist, request/response shape, and generated summaries instead of long assertion walls.
+- Move endpoint status/progress into a structured registry and, later, a small SQLite run log if needed. Docs should index the state and decisions, not duplicate every raw progress event.
+- Work in larger coherent refactor chunks when that is more efficient. Small slices are still useful for risky paid/mutating work, but they are not a hard rule for prototype cleanup.
+- No backwards compatibility burden unless a current repo test or workflow depends on it. Delete useless tests and stale code when they slow the loop without protecting behavior.
 
 ## Current Continuation State
 
@@ -58,7 +68,7 @@ As of 2026-06-10, the committed Jimeng CLI baseline is:
 - `52b0724 Use Effect Schema for Jimeng workspace context`
 - current checkpoint: Effect Schema-backed no-spend `profile-research` for public reference profiles/works/stories/item details and current-account follow lists, current-account generated `local-items`, no-spend `account-config`, no-spend `runtime-config`, guarded story/archive export reads (`story-records`, `async-tasks`, and dry-run-only `story-export-plan`), signed no-spend commerce price reads (`commerce-pricing`), and static/probe classification for media helper, adjacent commerce, panel, and notice blockers (`mix_audio_video`, `mix_audio_videos`, `mpack_image`, `execute_generate_audit`, `submit_survey`, overseas/change-plan/trade/refund commerce endpoints, `get_notice_list`, and `get_panel_info`); static inventory now reports `implemented=63`, `partial=6`, `dry_run_only=5`, `blocked=85`, `unknown=89`
 
-If the thread goal object lags behind this file after a pause, resume from this document and the latest Git checkpoint. The active working rule is: background-only reversal, direct/API-first implementation, small proven CLI slices, tests and proof artifacts before each commit, and no async daemon until the API surface is settled.
+If the thread goal object lags behind this file after a pause, resume from this document and the latest Git checkpoint. The active working rule is: background-only reversal, direct/API-first implementation, cached live/record/replay transport, tests and fixtures for backend proof, and no async daemon until the API client surface is settled.
 
 ImageX local image upload is now committed and live-proved:
 
@@ -746,19 +756,21 @@ That means:
 - enum-heavy fields do not need exhaustive live proof; list the catalog when available and prove one or two representative values
 - option sets should be explored by property type and API behavior, not by burning quota on every cosmetic choice; for example, testing that voice selection is parameterized matters more than generating every voice
 - gated, VIP, risk-blocked, or unclear options are still recorded with the exact UI path, trace evidence, and next probe
-- request/response shapes that affect later automation get fixture or snapshot coverage
-- live proof creates useful UGC/Korean-beauty/persona/campaign artifacts, not synthetic placeholder demos
+- request/response shapes that affect later automation get fixture, cassette, or snapshot coverage
+- live provider calls are used to discover/refresh contracts or create approved media artifacts, not as a mandatory ritual for every backend change
+- live media proof creates useful UGC/Korean-beauty/persona/campaign artifacts, not synthetic placeholder demos
 
 ## CLI Shape
 
-Near-term CLI work should prioritize API coverage and proof over orchestration. Do **not** implement the daemon, background worker, full async job queue, or session-refresh scheduler until the high-value API surface is settled.
+Near-term CLI work should prioritize API coverage, clean transport boundaries, and fast replayable tests over orchestration. Do **not** implement the daemon, background worker, full async job queue, or session-refresh scheduler until the high-value API surface and transport model are settled.
 
 Current ownership:
 
 - `jimeng-browser-proxy` is the user-facing front door for logged-in Jimeng/Dreamina work and should receive new commands by default.
 - `jimeng-dreamina` is lower-level Dreamina-compatible plumbing from the earlier direct-client path. Keep it for compatibility tests, payload experiments, and shared helpers, but do not grow it into a second competing product CLI.
-- Avoid creating more parallel CLIs. Prefer adding new commands to `jimeng-browser-proxy`, while reusing shared helpers underneath.
-- Later cleanup can combine the two surfaces or make their relationship explicit enough that users never wonder which one to run. The target user experience is one obvious CLI surface.
+- Avoid creating more parallel CLIs. Prefer one obvious user-facing command surface, backed by shared typed services.
+- For new/refactored surfaces, prefer Effect CLI over hand-written command parsing.
+- Later cleanup can combine the two surfaces or make their relationship explicit enough that users never wonder which one to run.
 - New user-facing docs and proof commands should prefer `jimeng-browser-proxy` unless the slice is explicitly testing compatibility with the older direct-client path.
 
 Future async direction, deferred:
@@ -783,7 +795,9 @@ Common flags:
 - `--capture <file>`
 - `--outDir <dir>`
 - `--json`
-- `--dryRun`
+- `--transport live|record|replay|fixture` once the shared transport lands
+- `--cassette <file-or-dir>` once the shared transport lands
+- `--dryRun` only for mutation/generation planning where no live request should be made
 - `--wait` / `--sync`
 - `--noDownload`
 
@@ -831,7 +845,14 @@ It is fine for commands to land progressively. Missing commands should be repres
 
 ## Proof Standard
 
-For each implemented API:
+Backend/API refactors:
+
+- passing focused tests and package typecheck are enough
+- request/response contracts use Effect Schema or equivalent runtime decoding at the provider boundary
+- fixtures, cassettes, or snapshots cover the shapes relied on by later automation
+- live calls are not required unless the contract is new, stale, suspicious, or provider drift is being checked
+
+New or changed provider contracts:
 
 - exact runnable command
 - normalized JSON output
@@ -839,13 +860,10 @@ For each implemented API:
 - runtime schema/decoder for external JSON contracts, permissive to extra fields and strict for paths the CLI relies on
 - automated tests close to `packages/jimeng-client/test/`
 - snapshot or fixture-style tests where request/response shape matters
-- redacted docs in `docs/provider/`
-- QA/proof note in `docs/qa/`
-- local proof bundle under ignored `data/**`
-- command log or manifest that records the important commands needed to recreate artifacts
-- git commit for the finished feature slice before moving to the next coherent API section
+- record/replay cassette or fixture under ignored `data/**` when live provider verification is needed
+- concise doc/TASKS update only when state or operating instructions change
 
-For media:
+Media generation:
 
 - audio: save MP3/WAV, validate file metadata, transcribe back with the available STT/internal transcription path when available, and compare transcript against the expected Chinese script
 - video: save MP4, validate duration/resolution/codec, extract thumbnails or frames when useful, and record playable artifact paths
@@ -864,18 +882,17 @@ Proof prompts should be useful and in distribution. Avoid placeholder prompts li
 
 ## Checkpoint Rule
 
-Work in feature slices. After finishing one coherent API section, stop and git checkpoint before moving to the next section.
+Work in coherent chunks. Prefer larger cleanup/refactor chunks when they reduce repeated manual work, and smaller slices only when risk, paid quota, mutation, or visible UI interruption makes that safer.
 
-A slice is checkpoint-ready only when:
+A chunk is checkpoint-ready when:
 
-- API contract is documented
+- API contract or architecture decision is documented when new
 - CLI command exists or the feature is explicitly documented as blocked/unknown
-- tests pass for the helper/CLI contract
-- live or dry-run proof exists as appropriate
-- proof artifacts are saved locally under ignored `data/**`
-- `TASKS.md` and relevant state/plan docs are updated
-- important rerun commands are recorded in the QA note or proof manifest
-- the feature slice has its own git commit
+- tests/typecheck pass for the changed contract
+- live cassette/proof exists only when external contract verification was required
+- `TASKS.md` and relevant state/plan docs are updated when the work changes the active state
+- important rerun commands are recorded in a fixture/cassette manifest or concise QA note
+- the coherent chunk has its own git commit
 
 Dirty worktree rule:
 

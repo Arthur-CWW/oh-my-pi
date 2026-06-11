@@ -25,6 +25,7 @@ Do not let state docs become stale:
 - `docs/state/symphony-lite-direction.md` — durable direction for the meta-agent orchestration harness: forked agents, reviewer personas, constrained tool sets, workflow DAGs, monitoring, and synthesis.
 - `docs/state/agent-voice.md` — durable preference for agents to avoid HR/compliance/audit-log voice and talk like a competent friend.
 - `docs/state/agent-tooling-preferences.md` — durable preferences for local agent tooling, browser automation, CuaDriver, CDP, and background computer use.
+- `docs/state/agent-iteration-lessons.md` — durable lessons about decomposing agent work, keeping iteration loops fast, caching validated layers, and using parallel agents when scopes are disjoint.
 - `TASKS.md` — top-level task index for active/next/blocked/done repo work.
 
 ## Where things belong
