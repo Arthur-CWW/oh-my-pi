@@ -13,7 +13,7 @@ Durable lessons about making Codex/agent work faster and less token-heavy.
 - When the work can be split cleanly, use parallel agents for disjoint write scopes or independent investigations. Do not delegate the immediate blocking step if the main thread needs the result before it can continue.
 - Optimize for working prototype architecture before backwards compatibility. Delete stale tests or code when they protect accidental behavior rather than useful behavior.
 - Prefer “build the tool that makes the next 20 steps cheap” over repeating one-endpoint-at-a-time work when the pattern is clear.
-- Prioritize by workflow value first. For provider/API reversal, do not choose low-value no-spend work just because it is easy; rank by the user-visible pipeline capability unlocked, then use speed/no-spend as tie-breakers or safety gates.
+- Prioritize by workflow value first. For provider/API reversal, do not choose low-value no-spend work just because it is easy; rank by the user-visible pipeline capability unlocked, then use speed/no-spend as tie-breakers or safety gates. The acceptance test should include representative examples for workflows the product would actually run, not just endpoint existence.
 
 ## 2026-06-11 Jimeng/Dreamina Lesson
 

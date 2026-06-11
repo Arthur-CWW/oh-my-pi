@@ -9,9 +9,9 @@ Evidence paths can point at ignored `data/**` proof bundles; do not commit raw c
 When pruning the queue, use short family ids:
 
 ```txt
-keep: G1,G2,P1,V1,R1,T1
-maybe: C1,Q1
-skip: L1,N1,U1
+keep: G1,G2,P1,V1,L1,R1,R2,T1,A1
+maybe: C1,Q1,I1,S1,O1
+skip: W1,N1,U1,D1,M1,P2,X1
 ```
 
 `keep` means implement typed service/CLI support. `maybe` means keep cataloged but do not actively build. `skip` means leave as `cataloged_only` or `blocked` with a reason.
@@ -20,7 +20,7 @@ The machine-readable mirror for these family IDs lives in `packages/jimeng-clien
 
 ## Priority Model
 
-Rank work by UGC workflow value first, then implementation speed. No-spend availability is a safety and approval constraint, not the priority function. Do not choose the fastest no-spend W6 endpoint while a higher-value generation, persona/voice, lip-sync, reference-control, or template-mining gap is available; instead ask for approval or build adjacent tests/examples inside that same high-value family.
+Rank work by UGC workflow value first, then implementation speed. No-spend availability is a safety and approval constraint, not the priority function. The first question for a slice is: "What useful UGC workflow does this unlock or prove?" not "Can this be done without spend?" Do not choose the fastest no-spend W6 endpoint while a higher-value generation, persona/voice, lip-sync, reference-control, or template-mining gap is available; instead ask for approval or build adjacent tests/examples inside that same high-value family.
 
 Current highest-value order:
 
@@ -31,7 +31,7 @@ Current highest-value order:
 5. Template mining: CapCut/Jimeng search, batch, presets, hook/caption/template extraction, and faceless profile/template copying.
 6. Supporting metadata reads: history, assets, story/archive, runtime, quota, notices, panels. Build these when they unblock a higher-value workflow; otherwise keep them cataloged.
 
-If the next highest-value step requires paid generation, account mutation, unsafe credential access, visible UI, or fresh background capture, ask for explicit approval with the exact command and proof output path instead of switching to a lower-value no-spend endpoint. If useful no-spend work is needed while waiting, keep it inside the same high-value family through dry-run plans, compare gates, schemas, fixtures, and representative examples that match workflows we would actually run.
+If the next highest-value step requires paid generation, account mutation, unsafe credential access, visible UI, or fresh background capture, ask for explicit approval with the exact command, expected examples, and proof output path instead of switching to a lower-value no-spend endpoint. If useful no-spend work is needed while waiting, keep it inside the same high-value family through dry-run plans, compare gates, schemas, fixtures, and representative examples that match workflows we would actually run.
 
 ## Keep
 

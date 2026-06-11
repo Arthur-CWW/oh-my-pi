@@ -78,7 +78,7 @@ Each component should be separately editable, inspectable, replaceable, cacheabl
 - The system should support both brainrot art videos and less-brainrotty AI UGC/ad videos.
 - For AI UGC experiments, prefer cheap pay-as-you-go APIs over another creator SaaS subscription.
 - This lane is mostly hacking/learning, not production. Cheap iteration can default to Kie or similar providers; keep fal/others as fallback or benchmark.
-- Provider/API reversal should rank by UGC workflow value first, implementation speed second, and no-spend/ease only as a safety gate or tie-breaker. When credits are tiny, use dry-run JSON planning and cheap image routes inside the highest-value workflow family; live video/avatar routes need explicit user action and a small spend cap.
+- Provider/API reversal should rank by UGC workflow value first, implementation speed second, and no-spend/ease only as a safety gate or tie-breaker. Do not substitute low-value safe reads for higher-value generation, persona/voice, lip-sync, reference-control, or template-mining gaps. When credits are tiny, use dry-run JSON planning and cheap image routes inside the highest-value workflow family; live video/avatar routes need explicit user action and a small spend cap.
 - For bulk video understanding/tagging, prefer API benchmarks with local caches/error logs over subscription UI automation; compare OpenRouter/Kie/direct Google on real corpus samples before committing spend.
 - Code quality still matters: provider adapters, logging, manifests, spend caps, retries/fallbacks, and reproducible metadata over throwaway spaghetti.
 

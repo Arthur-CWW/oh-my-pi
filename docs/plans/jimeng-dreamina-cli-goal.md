@@ -808,6 +808,7 @@ Maximize useful API coverage and proof quality while keeping live submissions co
 - default to background automation; do not foreground Arthur's browser, steal focus, or use visible UI automation while Arthur is using the machine unless he explicitly asks
 - prefer direct Jimeng APIs, saved sessions, CDP network/DOM calls, CuaDriver/background browser-use, and other non-interruptive automation paths over `bringToFront`, visible tab clicks, or Computer Use interactions that move the active cursor/window
 - if a frontend-only Jimeng flow truly requires visible UI interaction, first try to reproduce it through background CDP or CuaDriver; if that still cannot work, record the blocked path and ask before interrupting Arthur's flow
+- choose the next endpoint family by UGC workflow value first, then implementation speed; no-spend/ease is only a tie-breaker or approval gate. If the top-value slice needs paid/mutating/capture approval, ask for that approval or do prep inside that same family instead of moving to lower-value supporting reads.
 - for unknown frontend flows, prefer a faster hybrid reversal loop over long manual bundle reading or purely dynamic clicking: run background CDP/passive network capture first, use `ast-grep`/targeted structural search to locate the frontend request builder, then replay/compare the direct API request with saved session headers
 - choose static or dynamic evidence by expected leverage, not ideology: use CDP/network truth for actual request bodies and response shapes, use stronger static tools for enum names, option semantics, request-builder branches, and dead-end avoidance
 - promote the hybrid loop into tooling: CDP recorder for dynamic truth, `capture-analyze` for endpoint ranking, `discovery-worklist` and `static-inventory` for next-slice prioritization and coverage audits, `static-locate --symbol`/`--staticQuery` plus mise-managed `ast-grep` for request-builder semantics, `endpoint-probe` for explicit body replay, then dedicated schema-backed commands for stable contracts
@@ -836,6 +837,7 @@ That means:
 - request/response shapes that affect later automation get fixture, cassette, or snapshot coverage
 - live provider calls are used to discover/refresh contracts or create approved media artifacts, not as a mandatory ritual for every backend change
 - live media proof creates useful UGC/Korean-beauty/persona/campaign artifacts, not synthetic placeholder demos
+- examples are part of the acceptance criteria for high-value APIs: test representative workflows we would actually use, such as persona clips, voice/script application, lip-sync hosts, pose/reference transfer, and hook/template mining.
 
 ## CLI Shape
 
