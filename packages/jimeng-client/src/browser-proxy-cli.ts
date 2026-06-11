@@ -396,8 +396,8 @@ Options:
   --query <query>                Query string override for endpoint-probe
   --body <json>                  Single JSON body for endpoint-probe/capcut-probe
   --variants <json|file>         Probe variants JSON array or object with variants
-  --transport <mode>             endpoint-probe HTTP transport: live, record, replay, fixture (default: live)
-  --cassette <file>              endpoint-probe cassette path for record/replay/fixture
+  --transport <mode>             Shared HTTP transport: live, record, replay, fixture (default: live)
+  --cassette <file>              Cassette path for record/replay/fixture transport
   --requests <n>                 Total requests for rate-probe (default: --limit or 12)
   --concurrency <n>              Concurrent workers for rate-probe (default: 1)
   --delayMs <ms>                 Optional per-request delay for rate-probe workers
@@ -1746,6 +1746,7 @@ async function main(argv: string[]): Promise<void> {
     const dirs = ensureOutputDirs(path.resolve(args.outDir))
     const endpoints = parseJimengAccountConfigEndpoints(args.endpoints)
     const runId = `account-config-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
     if (args.dryRun) {
       writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
         command: args.command,
@@ -1759,12 +1760,20 @@ async function main(argv: string[]): Promise<void> {
           endpoint,
           body: buildJimengAccountConfigRequest(endpoint),
         })),
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
         browser_session: redactSession(session),
         live_request: false,
       })
       writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
         command: args.command,
         endpoints,
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
         requests: endpoints.map((endpoint) => ({
           endpoint,
           body: buildJimengAccountConfigRequest(endpoint),
@@ -1775,9 +1784,17 @@ async function main(argv: string[]): Promise<void> {
       return
     }
 
-    const result = await fetchJimengAccountConfig({ session, query: { endpoints } })
+    const transport = createJimengHttpTransport({
+      mode: args.transportMode,
+      cassettePath,
+    })
+    const result = await fetchJimengAccountConfig({ session, query: { endpoints }, fetch: transport.fetch })
     writeJson(path.join(dirs.rawDir, `${runId}.json`), {
       endpoints: result.endpoints,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       results: result.results.map((item) => ({
         endpoint: item.endpoint,
         endpoint_id: item.endpointId,
@@ -1791,6 +1808,10 @@ async function main(argv: string[]): Promise<void> {
     })
     writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
       command: args.command,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       summary: summarizeJimengAccountConfig(result),
     })
     console.log(`[jimeng-browser-proxy] account-config saved endpoints=${result.results.map((item) => item.endpointId).join(",")}`)

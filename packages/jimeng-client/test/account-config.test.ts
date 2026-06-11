@@ -1,10 +1,15 @@
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import path from "node:path"
 import { describe, expect, test } from "bun:test"
 import {
   buildJimengAccountConfigRequest,
+  createJimengHttpTransport,
   fetchJimengAccountConfig,
   JimengClient,
   JimengError,
   parseJimengAccountConfigEndpoints,
+  readJimengHttpCassette,
   summarizeJimengAccountConfig,
   type JimengFetch,
   type JimengSessionBundle,
@@ -74,6 +79,55 @@ describe("Jimeng account config helpers", () => {
       ],
     })
     expect(JSON.stringify(summary)).not.toContain("https://signed.example.invalid")
+  })
+
+  test("can fetch through recorded and replayed HTTP transport cassettes", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "jimeng-account-config-cassette-"))
+    try {
+      const cassettePath = path.join(dir, "account-config.json")
+      const requests: Array<{ url: string; init?: RequestInit }> = []
+      const recordTransport = createJimengHttpTransport({
+        mode: "record",
+        cassettePath,
+        fetch: mockFetchSequence([JSON.stringify(settingsBody())], requests),
+        nowIso: () => "2026-06-11T00:00:00.000Z",
+      })
+
+      const recorded = await fetchJimengAccountConfig({
+        fetch: recordTransport.fetch,
+        session,
+        query: { endpoints: ["settings"] },
+      })
+
+      expect(recorded.results[0]?.endpointId).toBe("settings")
+      expect(readJimengHttpCassette(cassettePath).entries).toHaveLength(1)
+      expect(requests).toHaveLength(1)
+
+      const replayTransport = createJimengHttpTransport({
+        mode: "replay",
+        cassettePath,
+      })
+      const replayed = await fetchJimengAccountConfig({
+        fetch: replayTransport.fetch,
+        session,
+        query: { endpoints: ["settings"] },
+      })
+
+      expect(summarizeJimengAccountConfig(replayed)).toMatchObject({
+        result_count: 1,
+        results: [
+          {
+            endpoint_id: "settings",
+            user_custom_settings: {
+              aigc_compliance_confirmed: true,
+              allow_remake: false,
+            },
+          },
+        ],
+      })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   test("rejects provider errors and required contract drift", async () => {
