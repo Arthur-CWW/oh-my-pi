@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto"
 import { z } from "zod"
 import { type JimengSessionBundle } from "./capture"
-import { assertNoRiskError, JimengClient } from "./client"
+import { assertNoRiskError, JimengClient, type JimengFetch } from "./client"
 import { buildJimengEndpointProbeHeaders } from "./endpoint-probe"
 import { jimengError } from "./errors"
 import { type JsonObject, type JsonValue } from "./reference-image"
@@ -206,11 +206,12 @@ export function buildJimengCanvasConversationListRequest(query: JimengInfiniteCa
 
 export async function fetchJimengInfiniteCanvas(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   session: JimengSessionBundle
   query?: JimengInfiniteCanvasQuery
 }): Promise<JimengInfiniteCanvasBundle> {
   const requestedEndpoints = input.query?.endpoints ?? parseJimengInfiniteCanvasEndpoints(undefined)
-  const client = input.client ?? new JimengClient()
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
   const results: JimengInfiniteCanvasResult[] = []
   const skipped: JimengInfiniteCanvasBundle["skipped"] = []
   const needProjectList = requestedEndpoints.includes("projects")

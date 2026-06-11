@@ -2670,6 +2670,7 @@ async function main(argv: string[]): Promise<void> {
       needDraftResource: args.needDraftResource,
     }
     const runId = `infinite-canvas-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
     if (args.dryRun) {
       writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
         command: args.command,
@@ -2689,21 +2690,37 @@ async function main(argv: string[]): Promise<void> {
           ratios: args.userId ? buildJimengCanvasCustomRatiosRequest({ ...query, userId: args.userId }) : { inferred_from_first_project_creator_user_id: true },
           conversations: args.projectId ? buildJimengCanvasConversationListRequest({ ...query, projectId: args.projectId }) : { inferred_from_first_project: true },
         },
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
         browser_session: redactSession(session),
       })
       writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
         command: args.command,
         endpoints,
         query,
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
       })
       console.log(`[jimeng-browser-proxy] infinite-canvas dry run saved endpoints=${endpoints.join(",")}`)
       return
     }
 
-    const result = await fetchJimengInfiniteCanvas({ session, query })
+    const transport = createJimengHttpTransport({
+      mode: args.transportMode,
+      cassettePath,
+    })
+    const result = await fetchJimengInfiniteCanvas({ session, query, fetch: transport.fetch })
     writeJson(path.join(dirs.rawDir, `${runId}.json`), {
       endpoints: result.endpoints,
       skipped: result.skipped,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       results: result.results.map((item) => ({
         endpoint: item.endpoint,
         endpoint_id: item.endpointId,
@@ -2717,6 +2734,10 @@ async function main(argv: string[]): Promise<void> {
     })
     writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
       command: args.command,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       summary: summarizeJimengInfiniteCanvas(result),
     })
     const projectResult = result.results.find((item) => item.endpointId === "projects")

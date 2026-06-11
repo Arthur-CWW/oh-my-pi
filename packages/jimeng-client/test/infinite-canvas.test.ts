@@ -1,13 +1,18 @@
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import path from "node:path"
 import { describe, expect, test } from "bun:test"
 import {
   buildJimengCanvasCustomRatiosRequest,
   buildJimengCanvasConversationListRequest,
   buildJimengCanvasProjectDetailRequest,
   buildJimengCanvasProjectListRequest,
+  createJimengHttpTransport,
   fetchJimengInfiniteCanvas,
   JimengClient,
   JimengError,
   parseJimengInfiniteCanvasEndpoints,
+  readJimengHttpCassette,
   summarizeJimengInfiniteCanvas,
   type JimengFetch,
   type JimengSessionBundle,
@@ -128,6 +133,59 @@ describe("Jimeng infinite canvas read helpers", () => {
     expect(summaryText).not.toContain("2033447352671660")
     expect(summaryText).not.toContain("\"layers\"")
     expect(summaryText).not.toContain("signed.example.invalid")
+  })
+
+  test("can fetch the inferred canvas sequence through recorded and replayed HTTP transport cassettes", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "jimeng-infinite-canvas-cassette-"))
+    try {
+      const cassettePath = path.join(dir, "infinite-canvas.json")
+      const requests: Array<{ url: string; init?: RequestInit }> = []
+      const recordTransport = createJimengHttpTransport({
+        mode: "record",
+        cassettePath,
+        fetch: mockFetchSequence([
+          JSON.stringify(projectListBody()),
+          JSON.stringify(projectDetailBody()),
+          JSON.stringify(customRatiosBody()),
+          JSON.stringify(conversationListBody()),
+        ], requests),
+        nowIso: () => "2026-06-11T00:00:00.000Z",
+      })
+      const query = { endpoints: parseJimengInfiniteCanvasEndpoints("all"), limit: 20 }
+
+      const recorded = await fetchJimengInfiniteCanvas({
+        fetch: recordTransport.fetch,
+        session,
+        query,
+      })
+
+      expect(recorded.results).toHaveLength(4)
+      expect(readJimengHttpCassette(cassettePath).entries).toHaveLength(4)
+      expect(requests).toHaveLength(4)
+
+      const replayTransport = createJimengHttpTransport({
+        mode: "replay",
+        cassettePath,
+      })
+      const replayed = await fetchJimengInfiniteCanvas({
+        fetch: replayTransport.fetch,
+        session,
+        query,
+      })
+
+      expect(summarizeJimengInfiniteCanvas(replayed)).toMatchObject({
+        result_count: 4,
+        skipped: [],
+        projects: {
+          project_count: 1,
+        },
+        conversations: {
+          conversation_count: 1,
+        },
+      })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   test("skips dependent endpoints when there is no project to infer from", async () => {
