@@ -103,6 +103,11 @@ import {
   summarizeJimengEndpointProbe,
 } from "./endpoint-probe"
 import {
+  createJimengHttpTransport,
+  parseJimengHttpTransportMode,
+  type JimengHttpTransportMode,
+} from "./http-transport"
+import {
   runJimengRateProbe,
   summarizeJimengRateProbe,
 } from "./rate-probe"
@@ -391,6 +396,8 @@ Options:
   --query <query>                Query string override for endpoint-probe
   --body <json>                  Single JSON body for endpoint-probe/capcut-probe
   --variants <json|file>         Probe variants JSON array or object with variants
+  --transport <mode>             endpoint-probe HTTP transport: live, record, replay, fixture (default: live)
+  --cassette <file>              endpoint-probe cassette path for record/replay/fixture
   --requests <n>                 Total requests for rate-probe (default: --limit or 12)
   --concurrency <n>              Concurrent workers for rate-probe (default: 1)
   --delayMs <ms>                 Optional per-request delay for rate-probe workers
@@ -882,6 +889,8 @@ interface CliArgs {
   query?: string
   body?: string
   variants?: string
+  transportMode: JimengHttpTransportMode
+  cassette?: string
   requests?: number
   concurrency?: number
   delayMs?: number
@@ -1512,6 +1521,7 @@ async function main(argv: string[]): Promise<void> {
       : buildSingleEndpointProbeVariant(args.body!)
     const dirs = ensureOutputDirs(path.resolve(args.outDir))
     const runId = `endpoint-probe-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
     const probe = {
       endpoint: args.endpoint,
       method: args.method,
@@ -1522,10 +1532,18 @@ async function main(argv: string[]): Promise<void> {
       writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
         command: args.command,
         probe,
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
         browser_session: redactSession(session),
       })
       writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
         command: args.command,
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
         probe: {
           endpoint: probe.endpoint,
           method: probe.method ?? "POST",
@@ -1538,11 +1556,23 @@ async function main(argv: string[]): Promise<void> {
       return
     }
 
-    const result = await runJimengEndpointProbe({ session, probe })
+    const transport = createJimengHttpTransport({
+      mode: args.transportMode,
+      cassettePath,
+    })
+    const result = await runJimengEndpointProbe({
+      client: new JimengClient({ fetch: transport.fetch }),
+      session,
+      probe,
+    })
     writeJson(path.join(dirs.rawDir, `${runId}.json`), {
       endpoint: result.endpoint,
       url: result.url,
       method: result.method,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       results: result.results.map((item) => ({
         name: item.name,
         request_body: item.requestBody,
@@ -1555,6 +1585,10 @@ async function main(argv: string[]): Promise<void> {
     })
     writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
       command: args.command,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       summary: summarizeJimengEndpointProbe(result),
     })
     console.log(`[jimeng-browser-proxy] endpoint-probe saved variants=${result.results.length} rets=${result.results.map((item) => `${item.name}:${item.ret ?? "none"}`).join(",")}`)
@@ -4442,6 +4476,7 @@ function parseArgs(argv: string[]): CliArgs {
 
   const flags = parseJimengBrowserProxyFlags(argv.slice(1))
   const method = parseEndpointProbeMethod(flags.method)
+  const transportMode = parseJimengHttpTransportMode(flags.transport ?? flags.transportMode ?? flags["transport-mode"])
   const durationSec = flags.durationSec
   const videoWidth = flags.videoWidth ? Number(flags.videoWidth) : undefined
   const videoHeight = flags.videoHeight ? Number(flags.videoHeight) : undefined
@@ -4600,6 +4635,8 @@ function parseArgs(argv: string[]): CliArgs {
     query: command === "static-locate" ? undefined : flags.query,
     body: flags.body,
     variants: flags.variants,
+    transportMode,
+    cassette: flags.cassette,
     requests,
     concurrency,
     delayMs,
@@ -5074,6 +5111,15 @@ function ensureOutputDirs(outDir: string): { rawDir: string; normalizedDir: stri
   mkdirSync(normalizedDir, { recursive: true })
   mkdirSync(artifactsDir, { recursive: true })
   return { rawDir, normalizedDir, artifactsDir }
+}
+
+function resolveJimengHttpCassettePath(
+  args: Pick<CliArgs, "transportMode" | "cassette">,
+  dirs: { rawDir: string },
+  runId: string,
+): string | undefined {
+  if (args.transportMode === "live") return undefined
+  return path.resolve(args.cassette ?? path.join(dirs.rawDir, `${runId}-cassette.json`))
 }
 
 function readVoiceCapture(file: string | undefined): CaptureFile {
