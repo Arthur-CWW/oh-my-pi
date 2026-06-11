@@ -21,6 +21,23 @@ The goal is coverage-driven, but the loop should be efficient: avoid ceremony th
 - Work in larger coherent refactor chunks when that is more efficient. Small slices are still useful for risky paid/mutating work, but they are not a hard rule for prototype cleanup.
 - No backwards compatibility burden unless a current repo test or workflow depends on it. Delete useless tests and stale code when they slow the loop without protecting behavior.
 
+## Work Chunk Queue
+
+This is the current queue for breaking down the Jimeng/Dreamina workstream. Prefer these chunks over one-endpoint-at-a-time slices unless a step touches paid generation, account mutation, unsafe credentials, or visible UI.
+
+| ID | Chunk | Size | Depends On | Parallelizable? | Notes |
+|---|---|---:|---|---|---|
+| W0 | Finish current `weekly-challenges` slice and clean its tests | S | none | No | Current worktree already has code/tests for this. Finish or intentionally drop it before bigger refactors so it does not keep polluting diffs. |
+| W1 | Shared Jimeng HTTP transport with `live`/`record`/`replay`/`fixture` modes | L | W0 decision | Mostly no | Foundation chunk. Owns auth/session headers, risk detection, redaction, cassette read/write, cache paths, and DI boundary. Do this locally or with one worker; other chunks should not edit the same files until the interface is clear. |
+| W2 | Endpoint registry plus static-inventory/discovery snapshot tests | M/L | W0 decision; can start after W1 interface sketch | Yes, if files are disjoint | Replace giant inline fixtures and repeated known-status assertions with structured registry data and snapshot/fixture tests. This can run beside W1 if one owner only touches registry/analyzer files. |
+| W3 | Effect CLI front door | L | W1 interface sketch | Partly | Replace hand-written parsing for new/refactored commands. Do not migrate every command blindly; start with a command family that benefits from transport/cassette reuse. |
+| W4 | Migrate existing read/research command families to shared transport and cassettes | L | W1, W2 | Yes by command family | Batch similar read-only commands together: account/runtime/workspace/profile/research/catalog/history. Each worker needs a disjoint command family and test files. |
+| W5 | Generation request builders and compare gates | M/L | W1 | Partly | Keep live generation concurrency at 1. Static request-builder work can be parallel; live capture/replay should stay serialized and explicitly approved when paid/mutating. |
+| W6 | Remaining high-value capability coverage | L | W1, W5 where generation is involved | Partly | Lip-sync live submit, fresh text-to-image, end-frame/multi-frame, voice/persona generation, CapCut search/batch/preset. Use larger capability-family chunks, not single endpoints, but serialize paid/mutating/live actions. |
+| W7 | Optional SQLite progress/run log | M | W2 | Yes | Only add this if the registry/snapshot approach still leaves progress hard to inspect. It should track runs and endpoint status without turning docs into a database. |
+
+Parallel-agent rule: use sub-agents only when the write scopes are disjoint and the parent thread is not blocked on the result. Good splits are W1 vs W2 after the transport interface is sketched, or W4 command-family migrations after W1 lands. Bad splits are two agents editing the central CLI parser, endpoint registry, or transport at the same time.
+
 ## Current Continuation State
 
 As of 2026-06-10, the committed Jimeng CLI baseline is:
@@ -706,21 +723,9 @@ Jimeng reference-profile research is now live-proved without generation spend:
 - successful runtime-config probes: `data/jimeng-lab/proof-20260611-probe-{home-header-banner,help-desk-entrance,experiment-params,asr-token,asr-hotwords}/` show empty POST bodies return `ret=0`; `/lv/v1/user/get_enable_list` remains blocked on exact LV auth/context after empty and null probes returned `ret=1014`
 - normalized proofs contain no credential markers or signed media URL values
 
-The next slice is **lip-sync submit capture and reference-video consumers**. Use the VOD provider reference, ImageX avatar reference, and frontend captures to unlock live lip-sync, reference-video, multimodal/all-around reference, pose/style/depth/canny controls, and live end-frame/multi-frame image-to-video paths.
+Older endpoint-level next steps are now inputs to the **Work Chunk Queue** above. Do not resume one-endpoint-at-a-time work by default. Batch related capabilities into the queued chunks, especially W5/W6 for lip-sync, fresh text-to-image, end-frame/multi-frame, reference controls, voice/persona generation, CapCut search/batch/preset, and real story/task ids.
 
-Immediate next slices:
-
-1. Capture frontend VOD and image/avatar lip-sync submits and compare the converted `draft_content` with the dry-run `providerInput`; enable live submit only if it matches.
-2. Recapture current frontend text-to-image submit and compare it against the stale workbench replay that now returns `ret=3018`.
-3. Capture the frontend's explicit end-frame/multi-frame mode and live-prove `frames2video` only if the payload contract matches.
-4. Map style/reference roles and the new object-mask provider references into generation payload patches.
-5. Implement digital-human generation using the confirmed VOD reference path where applicable.
-6. Capture real CapCut template search/batch/preset payloads to expand no-spend research/template coverage.
-7. Capture/approve subject/persona `generate_voice` live submit and custom voice clone live submit/mutation once those UI/API flows are captured.
-8. Live-prove `story-records` / `async-tasks` only after a non-empty story list or approved export flow provides real story/task ids.
-9. Keep each slice small enough to prove and commit before moving on.
-
-Do not start the async daemon while these API contracts are still moving.
+Do not start the async daemon while the API client, transport, registry, and generation compare gates are still moving.
 
 ## Optimization Target
 
