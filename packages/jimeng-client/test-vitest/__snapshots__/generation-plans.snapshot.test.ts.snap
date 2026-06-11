@@ -213,5 +213,127 @@ exports[`Jimeng generation plan snapshots > snapshots representative high-value 
     "valueRank": 1,
     "workflow": "reference-profile-pose-transfer-frames",
   },
+  {
+    "cliExample": "jimeng-browser-proxy omni-video-plan --prompt '@image_file_1 as the new Korean beauty host, mimic timing and hand gestures from @video_file_1, swap the hook to a cushion foundation CTA' --materials '[{"type":"image","fieldName":"image_file_1","uri":"tos-cn-i-tb4s082cfz/kbeauty-persona.png","width":1080,"height":1920},{"type":"video","fieldName":"video_file_1","vid":"v03870g10004d8k1u4nog65hb08dnhig","width":1080,"height":1920,"durationSec":8}]' --modelVersion jimeng-video-seedance-2.0 --durationSec 8",
+    "contract": {
+      "commerce": {
+        "benefit_type": "dreamina_video_seedance_20_video_add",
+        "resource_id": "generate_video",
+      },
+      "draft": {
+        "aigc_mode": "workbench",
+        "component_type": "video_base_component",
+        "generate_type": "gen_video",
+        "min_features": [
+          "AIGC_Video_UnifiedEdit",
+        ],
+        "process_type": 1,
+        "type": "draft",
+        "version": "3.3.17",
+      },
+      "extend_keys": [
+        "m_video_commerce_info",
+        "m_video_commerce_info_list",
+        "root_model",
+      ],
+      "metrics": {
+        "functionMode": "omni_reference",
+        "isDefaultSeed": 0,
+      },
+      "request_keys": [
+        "draft_content",
+        "extend",
+        "http_common_info",
+        "metrics_extra",
+        "submit_id",
+      ],
+      "scene_option": {
+        "materialTypes": [
+          1,
+          2,
+        ],
+        "modelReqKey": "dreamina_seedance_40_pro",
+        "scene": "BasicVideoGenerateButton",
+        "type": "video",
+        "videoDuration": 8,
+      },
+      "text_to_video_params": {
+        "model_req_key": "dreamina_seedance_40_pro",
+        "priority": 0,
+        "video_aspect_ratio": "9:16",
+      },
+      "unified_edit_input": {
+        "material_count": 2,
+        "material_types": [
+          "image",
+          "video",
+        ],
+        "meta_list": [
+          {
+            "material_idx": 0,
+            "meta_type": "image",
+            "text_present": false,
+          },
+          {
+            "material_idx": null,
+            "meta_type": "text",
+            "text_present": true,
+          },
+          {
+            "material_idx": 1,
+            "meta_type": "video",
+            "text_present": false,
+          },
+          {
+            "material_idx": null,
+            "meta_type": "text",
+            "text_present": true,
+          },
+        ],
+      },
+      "video_input": {
+        "duration_ms": 8000,
+        "fps": 24,
+        "has_unified_edit_input": true,
+        "prompt": "",
+      },
+    },
+    "productUse": "All-around reference plan for swapping a new persona into a reference profile's timing, pose, and hand-motion template.",
+    "summary": {
+      "duration_sec": 8,
+      "endpoint": "/mweb/v1/aigc_draft/generate",
+      "fps": 24,
+      "function_mode": "omni_reference",
+      "has_draft_content": true,
+      "has_metrics_extra": true,
+      "live_submit": false,
+      "material_count": 2,
+      "material_counts": {
+        "image": 1,
+        "video": 1,
+      },
+      "material_types": [
+        1,
+        2,
+      ],
+      "meta_count": 4,
+      "meta_types": [
+        "image",
+        "text",
+        "video",
+        "text",
+      ],
+      "method": "POST",
+      "model_req_key": "dreamina_seedance_40_pro",
+      "model_version": "jimeng-video-seedance-2.0",
+      "next_compare_command": "jimeng-browser-proxy request-plan-compare --plan <dry-run-plan.json> --rawNetwork <capture>/raw-network.jsonl",
+      "prompt_length": 137,
+      "query": "aid=513695&device_platform=web&region=cn&da_version=3.3.17&os=mac&web_component_open_flag=1&web_version=7.5.0&aigc_features=app_lip_sync",
+      "ratio": "9:16",
+      "submit_id": "snapshot-omni-reference-transfer",
+    },
+    "valueRank": 1,
+    "workflow": "omni-reference-profile-transfer",
+  },
 ]
 `;

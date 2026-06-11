@@ -182,7 +182,10 @@ import {
 } from "./text2image-plan-compare"
 import {
   buildJimengVideoDirectPlan,
+  buildJimengVideoOmniReferencePlan,
+  parseJimengVideoOmniMaterialsJson,
   summarizeJimengVideoDirectPlan,
+  summarizeJimengVideoOmniReferencePlan,
 } from "./video-plan"
 import {
   buildJimengGenerateAuditPlan,
@@ -358,6 +361,7 @@ Commands:
   text2image-compare Offline compare a direct text-to-image dry-run plan against captured UI submit
   text2video-plan Build a no-spend direct text/image/frames-to-video submit body
   text2video-compare Offline compare a direct video dry-run plan against captured UI submit
+  omni-video-plan Build a dry-run Seedance omni-reference mixed image/video submit body
   generate-audit-plan Build a dry-run generation material pre-audit body
   request-plan-compare Offline compare a simple dry-run request plan against captured UI traffic
   account-credit Fetch signed no-spend account credit balance
@@ -442,6 +446,7 @@ Options:
   --body <json>                  Single JSON body for endpoint-probe/capcut-probe
                                   generate-audit-plan uses this as extra top-level request JSON
   --materials <json|file>         JSON material list for generate-audit-plan
+                                  omni-video-plan uses image/video refs with fieldName, uri/vid, width/height, durationSec
   --variants <json|file>         Probe variants JSON array or object with variants
   --transport <mode>             Shared HTTP transport: live, record, replay, fixture (default: live)
   --cassette <file>              Cassette path for record/replay/fixture transport
@@ -700,6 +705,13 @@ Examples:
     --rawNetwork data/jimeng-captures/<capture>/raw-network.jsonl \\
     --outDir data/jimeng-lab/text2video-compare
 
+  jimeng-browser-proxy omni-video-plan \\
+    --prompt "@image_file_1 as the new host, mimic timing and hand motion from @video_file_1, Korean beauty UGC phone video" \\
+    --materials '[{"type":"image","fieldName":"image_file_1","uri":"tos-cn-i-tb4s082cfz/persona.png","width":1080,"height":1920},{"type":"video","fieldName":"video_file_1","vid":"v03870g10004d8k1u4nog65hb08dnhig","width":1080,"height":1920,"durationSec":8}]' \\
+    --modelVersion jimeng-video-seedance-2.0 \\
+    --durationSec 8 \\
+    --outDir data/jimeng-lab/omni-video-plan
+
   jimeng-browser-proxy tts \\
     --voice-id 7597003459665072686 \\
     --text "这条视频值得试一下。"
@@ -887,6 +899,7 @@ interface CliArgs {
     | "text2image-compare"
     | "text2video-plan"
     | "text2video-compare"
+    | "omni-video-plan"
     | "generate-audit-plan"
     | "request-plan-compare"
     | "account-credit"
@@ -1364,6 +1377,43 @@ async function main(argv: string[]): Promise<void> {
       summary: summarizeJimengVideoDirectPlan(plan),
     })
     console.log(`[jimeng-browser-proxy] text2video-plan saved model=${plan.modelReqKey} resolution=${plan.videoResolution} ratio=${plan.ratio} duration=${plan.durationSec}s live_submit=false`)
+    return
+  }
+
+  if (args.command === "omni-video-plan") {
+    if (!args.prompt) throw new Error("omni-video-plan requires --prompt")
+    if (!args.materials) throw new Error("omni-video-plan requires --materials")
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const runId = `omni-video-plan-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const materialJson = JSON.parse(readInlineOrFile(args.materials)) as JsonValue
+    const plan = buildJimengVideoOmniReferencePlan({
+      prompt: args.prompt,
+      materials: parseJimengVideoOmniMaterialsJson(materialJson),
+      modelVersion: args.modelVersion,
+      modelReqKey: args.modelReqKey,
+      ratio: args.ratio,
+      durationSec: args.durationSec,
+      fps: args.fps,
+      seed: args.seed,
+      submitId: args.submitId,
+    })
+    writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
+      command: args.command,
+      endpoint: plan.endpoint,
+      method: plan.method,
+      query: plan.query,
+      request: plan.request,
+      draft_content: plan.draftContent,
+      metrics_extra: plan.metricsExtra,
+      material_list: plan.materialList,
+      meta_list: plan.metaList,
+      live_submit: false,
+    })
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      summary: summarizeJimengVideoOmniReferencePlan(plan),
+    })
+    console.log(`[jimeng-browser-proxy] omni-video-plan saved model=${plan.modelReqKey} materials=${plan.materialList.length} duration=${plan.durationSec}s live_submit=false`)
     return
   }
 
@@ -5730,6 +5780,7 @@ function parseArgs(argv: string[]): CliArgs {
     && command !== "text2image-compare"
     && command !== "text2video-plan"
     && command !== "text2video-compare"
+    && command !== "omni-video-plan"
     && command !== "generate-audit-plan"
     && command !== "request-plan-compare"
     && command !== "account-credit"

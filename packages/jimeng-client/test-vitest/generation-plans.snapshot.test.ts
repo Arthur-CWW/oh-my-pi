@@ -3,10 +3,14 @@ import { Effect } from "effect"
 import {
   buildJimengText2ImageDirectPlan,
   buildJimengVideoDirectPlan,
+  buildJimengVideoOmniReferencePlan,
+  parseJimengVideoOmniMaterialsJson,
   summarizeJimengText2ImageDirectPlan,
   summarizeJimengVideoDirectPlan,
+  summarizeJimengVideoOmniReferencePlan,
   type JimengText2ImageDirectPlan,
   type JimengVideoDirectPlan,
+  type JimengVideoOmniReferencePlan,
   type JsonObject,
   type JsonValue,
 } from "../src"
@@ -75,6 +79,38 @@ function buildGenerationPlanSnapshots(): readonly GenerationPlanSnapshot[] {
         seed: 2_026_061_103,
         submitId: "snapshot-frames-reference-transfer",
         nowMs: 1_781_234_569_000,
+      }),
+    ),
+    omniVideoSnapshot(
+      "omni-reference-profile-transfer",
+      "All-around reference plan for swapping a new persona into a reference profile's timing, pose, and hand-motion template.",
+      "jimeng-browser-proxy omni-video-plan --prompt '@image_file_1 as the new Korean beauty host, mimic timing and hand gestures from @video_file_1, swap the hook to a cushion foundation CTA' --materials '[{\"type\":\"image\",\"fieldName\":\"image_file_1\",\"uri\":\"tos-cn-i-tb4s082cfz/kbeauty-persona.png\",\"width\":1080,\"height\":1920},{\"type\":\"video\",\"fieldName\":\"video_file_1\",\"vid\":\"v03870g10004d8k1u4nog65hb08dnhig\",\"width\":1080,\"height\":1920,\"durationSec\":8}]' --modelVersion jimeng-video-seedance-2.0 --durationSec 8",
+      buildJimengVideoOmniReferencePlan({
+        prompt: "@image_file_1 as the new Korean beauty host, mimic timing and hand gestures from @video_file_1, swap the hook to a cushion foundation CTA",
+        materials: parseJimengVideoOmniMaterialsJson([
+          {
+            type: "image",
+            fieldName: "image_file_1",
+            uri: "tos-cn-i-tb4s082cfz/kbeauty-persona.png",
+            width: 1080,
+            height: 1920,
+          },
+          {
+            type: "video",
+            fieldName: "video_file_1",
+            vid: "v03870g10004d8k1u4nog65hb08dnhig",
+            width: 1080,
+            height: 1920,
+            durationSec: 8,
+          },
+        ]),
+        modelVersion: "jimeng-video-seedance-2.0",
+        ratio: "9:16",
+        durationSec: 8,
+        fps: 24,
+        seed: 2_026_061_104,
+        submitId: "snapshot-omni-reference-transfer",
+        nowMs: 1_781_234_570_000,
       }),
     ),
   ]
@@ -196,6 +232,84 @@ function text2VideoSnapshot(
   }
 }
 
+function omniVideoSnapshot(
+  workflow: string,
+  productUse: string,
+  cliExample: string,
+  plan: JimengVideoOmniReferencePlan,
+): GenerationPlanSnapshot {
+  const component = firstComponent(plan.draftContent)
+  const abilities = objectField(component, "abilities")
+  const genVideo = objectField(abilities, "gen_video")
+  const params = objectField(genVideo, "text_to_video_params")
+  const videoInput = firstArrayObject(arrayField(params, "video_gen_inputs"))
+  const unifiedEdit = objectField(videoInput, "unified_edit_input")
+  const sceneOption = firstArrayObject(parseJsonStringField(plan.metricsExtra, "sceneOptions"))
+  const extend = objectField(plan.request, "extend")
+
+  return {
+    workflow,
+    valueRank: 1,
+    productUse,
+    cliExample,
+    summary: summarizeJimengVideoOmniReferencePlan(plan),
+    contract: {
+      request_keys: sortedKeys(plan.request),
+      extend_keys: sortedKeys(extend),
+      draft: {
+        type: plan.draftContent.type,
+        version: plan.draftContent.version,
+        min_features: plan.draftContent.min_features,
+        component_type: component.type,
+        aigc_mode: component.aigc_mode,
+        generate_type: component.generate_type,
+        process_type: component.process_type,
+      },
+      commerce: {
+        benefit_type: objectField(extend, "m_video_commerce_info").benefit_type,
+        resource_id: objectField(extend, "m_video_commerce_info").resource_id,
+      },
+      text_to_video_params: {
+        video_aspect_ratio: params.video_aspect_ratio,
+        model_req_key: params.model_req_key,
+        priority: params.priority,
+      },
+      video_input: {
+        prompt: videoInput.prompt,
+        fps: videoInput.fps,
+        duration_ms: videoInput.duration_ms,
+        has_unified_edit_input: !!videoInput.unified_edit_input,
+      },
+      unified_edit_input: {
+        material_types: arrayField(unifiedEdit, "material_list").map((material) => objectValue(material, "material").material_type),
+        material_count: arrayField(unifiedEdit, "material_list").length,
+        meta_list: arrayField(unifiedEdit, "meta_list").map((meta) => {
+          const metaObject = objectValue(meta, "meta")
+          const materialRef = metaObject.material_ref && typeof metaObject.material_ref === "object" && !Array.isArray(metaObject.material_ref)
+            ? metaObject.material_ref
+            : null
+          return {
+            meta_type: metaObject.meta_type,
+            text_present: typeof metaObject.text === "string" && metaObject.text.length > 0,
+            material_idx: materialRef?.material_idx ?? null,
+          }
+        }),
+      },
+      scene_option: {
+        type: sceneOption.type,
+        scene: sceneOption.scene,
+        modelReqKey: sceneOption.modelReqKey,
+        videoDuration: sceneOption.videoDuration,
+        materialTypes: sceneOption.materialTypes,
+      },
+      metrics: {
+        functionMode: plan.metricsExtra.functionMode,
+        isDefaultSeed: plan.metricsExtra.isDefaultSeed,
+      },
+    },
+  }
+}
+
 function firstComponent(draftContent: JsonObject): JsonObject {
   return firstArrayObject(arrayField(draftContent, "component_list"))
 }
@@ -223,6 +337,11 @@ function firstArrayObject(value: JsonValue): JsonObject {
   const [first] = value
   if (first && typeof first === "object" && !Array.isArray(first)) return first
   throw new Error("first array item must be an object")
+}
+
+function objectValue(value: JsonValue, label: string): JsonObject {
+  if (value && typeof value === "object" && !Array.isArray(value)) return value
+  throw new Error(`${label} must be an object`)
 }
 
 function sortedKeys(object: JsonObject): string[] {

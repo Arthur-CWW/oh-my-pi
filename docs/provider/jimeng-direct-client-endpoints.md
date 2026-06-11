@@ -2082,6 +2082,7 @@ Current support matrix:
 | `text2image` | blocked pending fresh capture | Stale workbench capture `data/jimeng-captures/20260609095503-text2image-submit/capture-template.raw.json` now returns `ret=3018`, `errmsg=permission denied`; recapture current frontend submit before claiming support. |
 | `image2video` | implemented in `jimeng-browser-proxy`; partial in low-level compat helper | Browser proxy can upload local `--image`, inject `first_frame_image`, submit/poll/download MP4. Latest paid-live proof: `submitId=f9774f3b-84ce-4025-82c4-7a529d6e4409`, `historyId=35933448749068`, 704x1248 H.264 MP4, 3.016667s. Low-level helper accepts confirmed `--firstFrameUri`. |
 | `frames2video` | dry-run-proved in `jimeng-browser-proxy`; partial in low-level compat helper | Browser proxy can upload local `--image` and `--lastImage`, inject `first_frame_image`/`end_frame_image`, and write a no-generation plan. Live proof still needs explicit frontend end-frame mode evidence. |
+| `multimodal2video` / omni-reference | dry-run-proved in `jimeng-browser-proxy` | `omni-video-plan` builds the Seedance 2.0 `functionMode="omni_reference"` submit body with mixed image/video `unified_edit_input.material_list` and prompt-derived `meta_list`. This covers reference-profile/persona-swap motion transfer without live spend; live submit still needs passive capture compare and explicit approval. Proof: `docs/qa/jimeng-omni-video-plan-20260611.md`. |
 | `account-config` | implemented in `jimeng-browser-proxy` | No-spend direct `/mweb/v1/get_settings`, `/mweb/v1/get_ug_info`, and `/mweb/v1/get_invite_status` with empty POST bodies. Latest proof returned compliance/remix/sharing/watermark/profile-visibility settings, `is_web_registered=true`, and `invite_status=1`. |
 | `runtime-config` | implemented in `jimeng-browser-proxy` | No-spend direct `/mweb/v1/get_experiment_params`, `/mweb/v1/get_home_header_banner_config`, `/mweb/v1/get_help_desk_entrance`, `/mweb/v1/speech/asr_token`, and `/mweb/v1/speech/asr_hotwords` with empty POST bodies. Latest proof returned 5 successful `ret=0` reads; normalized output fingerprints ASR token, appkey, websocket URL, and helpdesk URL. |
 | `lip-sync-config` | implemented in `jimeng-browser-proxy` | No-spend direct lip-sync/digital-human model config for image/avatar and video modes. |
@@ -2123,7 +2124,7 @@ Current support matrix:
 | `voice-clone-update` / `voice-clone-delete` | dry-run-only in `jimeng-browser-proxy` | Mutation request shapes known as `local_item_id` and `local_item_id + name`; live disabled pending a disposable cloned voice fixture. |
 | `image2image` | needs capture | Need image reference upload + image edit submit capture. |
 | `multiframe2video` | needs capture | Need multi-frame upload/reference payload capture. |
-| `multimodal2video` | needs capture | Need `全能参考` mixed image/video/audio reference payload capture. |
+| `multimodal2video` | partial dry-run | `omni-video-plan` covers mixed image/video Seedance all-around reference plans; capture still needed before live replay, and audio-material variants remain unknown. |
 | `image_upscale` | needs capture | Need upscale submit/result capture. |
 
 Examples:

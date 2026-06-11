@@ -1,9 +1,13 @@
 import { describe, expect, test } from "bun:test"
 import {
   buildJimengVideoDirectPlan,
+  buildJimengVideoOmniReferencePlan,
   modelVersionToDirectVideoReqKey,
+  parseJimengVideoOmniMaterialsJson,
   summarizeJimengVideoDirectPlan,
+  summarizeJimengVideoOmniReferencePlan,
   validateJimengVideoDirectRequest,
+  validateJimengVideoOmniReferenceRequest,
 } from "../src/video-plan"
 
 describe("Jimeng direct video plan", () => {
@@ -113,5 +117,122 @@ describe("Jimeng direct video plan", () => {
     expect(modelVersionToDirectVideoReqKey("3.0fast")).toBe("dreamina_ic_generate_video_model_vgfm_3.0_fast")
     expect(() => buildJimengVideoDirectPlan({ prompt: "x", modelVersion: "unknown" })).toThrow("No direct video model_req_key mapping")
     expect(() => buildJimengVideoDirectPlan({ prompt: "x", durationSec: 0 })).toThrow("--durationSec")
+  })
+
+  test("builds a Seedance omni-reference plan for persona plus reference-video transfer", () => {
+    const plan = buildJimengVideoOmniReferencePlan({
+      prompt: "@image_file_1 as the new Korean beauty host, mimic the timing and hand motion from @video_file_1, swap the hook to a cushion foundation CTA",
+      materials: parseJimengVideoOmniMaterialsJson([
+        {
+          type: "image",
+          fieldName: "image_file_1",
+          uri: "tos-cn-i-tb4s082cfz/persona.png",
+          width: 1080,
+          height: 1920,
+          format: "png",
+        },
+        {
+          type: "video",
+          fieldName: "video_file_1",
+          vid: "v03870g10004d8k1u4nog65hb08dnhig",
+          width: 1080,
+          height: 1920,
+          durationSec: 8,
+        },
+      ]),
+      modelVersion: "jimeng-video-seedance-2.0",
+      ratio: "9:16",
+      durationSec: 8,
+      fps: 24,
+      seed: 42,
+      submitId: "submit-omni-reference",
+      nowMs: 1781073939000,
+    })
+
+    const draft = JSON.parse(String(plan.request.draft_content))
+    const metrics = JSON.parse(String(plan.request.metrics_extra))
+    const params = draft.component_list[0].abilities.gen_video.text_to_video_params
+    const videoInput = params.video_gen_inputs[0]
+    const unifiedEdit = videoInput.unified_edit_input
+    const sceneOptions = JSON.parse(metrics.sceneOptions)
+
+    expect(plan.endpoint).toBe("/mweb/v1/aigc_draft/generate")
+    expect(plan.query).toContain("da_version=3.3.17")
+    expect(plan.modelReqKey).toBe("dreamina_seedance_40_pro")
+    expect(plan.request.extend).toMatchObject({
+      root_model: "dreamina_seedance_40_pro",
+      m_video_commerce_info: {
+        benefit_type: "dreamina_video_seedance_20_video_add",
+      },
+    })
+    expect(draft.min_features).toEqual(["AIGC_Video_UnifiedEdit"])
+    expect(videoInput).toMatchObject({
+      prompt: "",
+      duration_ms: 8000,
+      fps: 24,
+    })
+    expect(unifiedEdit.material_list).toHaveLength(2)
+    expect(unifiedEdit.material_list[0]).toMatchObject({
+      material_type: "image",
+      image_info: {
+        image_uri: "tos-cn-i-tb4s082cfz/persona.png",
+        width: 1080,
+        height: 1920,
+      },
+    })
+    expect(unifiedEdit.material_list[1]).toMatchObject({
+      material_type: "video",
+      video_info: {
+        vid: "v03870g10004d8k1u4nog65hb08dnhig",
+        duration: 8000,
+      },
+    })
+    expect(unifiedEdit.meta_list).toEqual([
+      { meta_type: "image", text: "", material_ref: { material_idx: 0 } },
+      { meta_type: "text", text: " as the new Korean beauty host, mimic the timing and hand motion from " },
+      { meta_type: "video", text: "", material_ref: { material_idx: 1 } },
+      { meta_type: "text", text: ", swap the hook to a cushion foundation CTA" },
+    ])
+    expect(sceneOptions[0]).toMatchObject({
+      materialTypes: [1, 2],
+      modelReqKey: "dreamina_seedance_40_pro",
+      videoDuration: 8,
+    })
+    expect(metrics).toMatchObject({
+      functionMode: "omni_reference",
+      isDefaultSeed: 0,
+      originSubmitId: "submit-omni-reference",
+    })
+    expect(summarizeJimengVideoOmniReferencePlan(plan)).toMatchObject({
+      function_mode: "omni_reference",
+      material_counts: { image: 1, video: 1 },
+      material_types: [1, 2],
+      meta_types: ["image", "text", "video", "text"],
+      live_submit: false,
+    })
+  })
+
+  test("validates omni-reference required paths and rejects unsupported models", () => {
+    const plan = buildJimengVideoOmniReferencePlan({
+      prompt: "@image_file_1 as first frame",
+      materials: parseJimengVideoOmniMaterialsJson([
+        { type: 1, uri: "tos-cn-i-tb4s082cfz/persona.png" },
+      ]),
+      seed: 1,
+      submitId: "submit-omni-extra",
+    })
+    expect(() => validateJimengVideoOmniReferenceRequest({
+      ...plan.request,
+      provider_added_field: true,
+    })).not.toThrow()
+    expect(() => buildJimengVideoOmniReferencePlan({
+      prompt: "x",
+      materials: parseJimengVideoOmniMaterialsJson([{ type: "image", uri: "tos-cn-i-tb4s082cfz/persona.png" }]),
+      modelVersion: "jimeng-video-3.0-fast",
+    })).toThrow("omni-video-plan requires Seedance 2.0")
+    expect(() => buildJimengVideoOmniReferencePlan({
+      prompt: "x",
+      materials: parseJimengVideoOmniMaterialsJson([{ type: "video", vid: "v1", durationSec: 20 }]),
+    })).toThrow("durationSec must be a number from 0 to 15.4")
   })
 })

@@ -21,6 +21,10 @@ Covered workflows:
    - CLI shape: `jimeng-browser-proxy text2video-plan --prompt '保留参考视频的手势节奏和镜头推进，换成新护肤品展示，自拍视频质感，轻微手持晃动，自然口播停顿' --firstFrameUri tos-cn-i-tb4s082cfz/reference-start.png --lastFrameUri tos-cn-i-tb4s082cfz/reference-end.png --ratio 9:16 --videoResolution 1080p --durationSec 5`
    - Proves: first/end-frame provider URI paths for reference-profile pose/timing transfer.
 
+4. `omni-reference-profile-transfer`
+   - CLI shape: `jimeng-browser-proxy omni-video-plan --prompt '@image_file_1 as the new Korean beauty host, mimic timing and hand gestures from @video_file_1, swap the hook to a cushion foundation CTA' --materials '[{"type":"image","fieldName":"image_file_1","uri":"tos-cn-i-tb4s082cfz/kbeauty-persona.png","width":1080,"height":1920},{"type":"video","fieldName":"video_file_1","vid":"v03870g10004d8k1u4nog65hb08dnhig","width":1080,"height":1920,"durationSec":8}]' --modelVersion jimeng-video-seedance-2.0 --durationSec 8`
+   - Proves: Seedance omni-reference `unified_edit_input.material_list`, prompt-derived `meta_list`, `functionMode="omni_reference"`, and mixed image/video material refs for reference-profile remix. See `docs/qa/jimeng-omni-video-plan-20260611.md`.
+
 Verification:
 
 ```bash
@@ -33,10 +37,10 @@ cd packages/jimeng-client
 Latest result:
 
 - `typecheck`: pass
-- `bun test ./test`: 250 pass
+- `bun test ./test`: 256 pass
 - `vitest run test-vitest`: 2 files / 3 tests pass
 
 Next highest-value step:
 
-- Approval-gated G1 live capture/compare for `/mweb/v1/aigc_draft/generate`, using the highest-value examples above.
+- Approval-gated G1 live capture/compare for `/mweb/v1/aigc_draft/generate`, using the highest-value examples above, especially `omni-video-plan` for all-around reference/profile transfer.
 - If live capture is not approved, stay inside G1 with additional request builders, compare gates, and schema fixtures rather than switching to unrelated no-spend metadata reads.
