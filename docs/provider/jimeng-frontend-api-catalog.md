@@ -37,6 +37,7 @@ Use the browser as an authenticated session holder and API discovery surface. Mo
 | `/mweb/v1/workspace/update` | POST | Renames/updates current workspace metadata. | Captured |
 | `/mweb/v1/aigc_draft/generate` | POST | Unified workbench submit for current text-to-image, text-to-video, first-frame image-to-video, and lip-sync draft generation paths. | Paid-live proven for text-to-video and local-upload-backed image-to-video; no-spend direct `text2image-plan` submit body builder is Effect Schema-backed; stale text-to-image replay still returns `ret=3018 permission denied` and needs fresh background CDP capture before live claim; dry-run-proved for VOD and image/avatar lip-sync provider inputs |
 | `/mweb/v1/get_asset_list` | POST | Poll/list workspace assets and completed image results. | Implemented for workbench text-to-image polling and no-spend `assets` listing |
+| `/mweb/v1/get_local_item_list` | POST | Current-account unpublished/generated local item detail by generated item ids. | Implemented as Effect Schema-backed no-spend `local-items`; read body uses `item_id_list`; latest proof returned 2 generated image rows with prompt/model/provider URI metadata |
 | `/mweb/v1/get_history_by_ids` | POST | Older/general task polling and completed record lookup by `submit_id` or `history_id`. | Implemented for captured history-based templates and no-spend `history-records`; live-proved against the completed K-beauty image generation |
 | `/mweb/v1/get_history_queue_info` | POST | Read-only queue/progress detail lookup for active or historical generation records. | Implemented as no-spend `history-queue`; live-proved against a completed image history id |
 | `/mweb/v1/get_video_by_vid` | POST | Read-only VOD metadata lookup by uploaded/generated video `vid`. Useful for lip-sync/reference-video validation. | Implemented as schema-backed no-spend `video-info`; live-proved with body `{"vids":["..."]}` |
@@ -1377,7 +1378,7 @@ The 2026-06-09 JS bundle sweep found these useful endpoint groups. Treat rows wi
 | Account/quota reads | `/commerce/v1/benefits/user_credit` is implemented as signed no-spend `account-credit`; `/commerce/v3/resource/benefit_metadata` and `/commerce/v3/benefits/batch_get_user_benefit` are implemented as signed no-spend `commerce-benefits`, useful for quota/cost mapping before paid generation tests. `/commerce/v1/benefits/credit_receive` is a mutation and remains unimplemented without explicit approval. |
 | Video generation helpers | `/mweb/v1/video_generate/get_switch_model_queue_info`, `/mweb/v1/video_generate/pre_process`, `/mweb/v1/video_generate/mget_pre_process_result`, `/mweb/v1/video_generate/face_auth/skip`, `/mweb/v1/video_generate/face_auth/skip/query`, `/mweb/v1/aigc_draft/cancel_generate`, `/mweb/v1/aigc_draft/generate_accelerate`; these are blocked pending exact UI payload capture or disposable active-job context. Safe switch-model queue probes returned `ret=1000 invalid parameter` across empty/model/scene bodies. |
 | Template/research mining | `/mweb/search/v1/sug`, `/mweb/search/v1/guess`, `/mweb/search/v1/search`, `/mweb/v1/feed`, `/mweb/v1/feed_short_video`, `/lv/v1/cc_web/plane/get_categories`, public CapCut `bee_prod` metadata JSON, `/lv/v1/cc_web/replicate/search_templates`, `/lv/v1/cc_web/plane/*`; keyword suggestions/guesses are implemented as `research-keywords`, full inspiration/short-film/workspace-asset search is implemented as `research-search`, `/mweb/v1/get_explore` is implemented for direct Explore templates and short-video examples, `/mweb/v1/feed_short_video` is implemented as `overseas-short-videos`, CapCut category catalog is implemented as `capcut-categories`, CapCut collection/row/detail browsing is implemented as `capcut-collections`, `capcut-collection-templates`, and `capcut-template-detail`, and public CapCut ratio/scene metadata is implemented as `capcut-template-metadata`; CapCut search, batch, and preset endpoints remain capture targets |
-| Assets/upload/editor | `/mweb/v1/get_asset_list`, `/lv/v1/asset/*`, `/lv/v1/editor/image/*`, `/lv/v1/effect/*`, `/lv/v1/editor/template/*`, `/lv/v2/cc_web_task/*`; Jimeng workbench/history listing is implemented as no-spend `assets`; LV editor catalog endpoints `/lv/v1/effect/get_panel_info`, `/lv/v1/effect/get_category_effects`, `/lv/v1/effect/get_all_fonts`, and `/lv/v1/editor/plane/color/feed` are implemented as no-spend `capcut-editor-catalog`; LV asset reads `/lv/v1/asset/list`, `/lv/v1/asset/query`, `/lv/v1/asset/detail`, and `/lv/v1/asset/query_process` are blocked pending exact workspace/space/session context after safe probes returned `ret=1014`; LV editor/template reads `/lv/v1/editor/template/recent_list`, `/lv/v1/editor/template/check_post_permission`, `/lv/v1/editor/draft/get_template_file`, `/lv/v1/editor/plane/intelligence/query_recommend_template`, and `/lv/v2/cc_web_task/get_task_draft` are blocked pending logged-in LV auth or real id/URI context; LV read-state paths such as editor effect recent lists, plane draft detail/content maps, EverPhoto user space/sync state, preset resources, and task multi-get are blocked pending exact LV auth, real ids, or non-empty UI capture; asset/template/history mutations are blocked unless using disposable fixtures or explicit approval |
+| Assets/upload/editor | `/mweb/v1/get_asset_list`, `/mweb/v1/get_local_item_list`, `/lv/v1/asset/*`, `/lv/v1/editor/image/*`, `/lv/v1/effect/*`, `/lv/v1/editor/template/*`, `/lv/v2/cc_web_task/*`; Jimeng workbench/history listing is implemented as no-spend `assets`; generated local item detail is implemented as no-spend `local-items`; LV editor catalog endpoints `/lv/v1/effect/get_panel_info`, `/lv/v1/effect/get_category_effects`, `/lv/v1/effect/get_all_fonts`, and `/lv/v1/editor/plane/color/feed` are implemented as no-spend `capcut-editor-catalog`; LV asset reads `/lv/v1/asset/list`, `/lv/v1/asset/query`, `/lv/v1/asset/detail`, and `/lv/v1/asset/query_process` are blocked pending exact workspace/space/session context after safe probes returned `ret=1014`; LV editor/template reads `/lv/v1/editor/template/recent_list`, `/lv/v1/editor/template/check_post_permission`, `/lv/v1/editor/draft/get_template_file`, `/lv/v1/editor/plane/intelligence/query_recommend_template`, and `/lv/v2/cc_web_task/get_task_draft` are blocked pending logged-in LV auth or real id/URI context; LV read-state paths such as editor effect recent lists, plane draft detail/content maps, EverPhoto user space/sync state, preset resources, and task multi-get are blocked pending exact LV auth, real ids, or non-empty UI capture; asset/template/history mutations are blocked unless using disposable fixtures or explicit approval |
 | LV editor image AI helpers | `/lv/v1/editor/image/ai_model/submit_task`, `/lv/v1/editor/image/ai_model/batch_get_results`, `/lv/v1/editor/image/ai_model/materials`, `/lv/v1/editor/image/ai_model/create_cloth_mask`, `/lv/v1/editor/image/batch_get_url`, `/lv/v1/editor/image/embed_resource`, `/lv/v1/editor/image/gen_background`, `/lv/v1/editor/image/interactive_matting`, `/lv/v1/editor/image/saliency_seg`, `/api/biz/v1/image/entity_seg`; all are marked blocked until an exact editor UI payload is captured. LV `saliency_seg` is separate from implemented Jimeng `/mweb/v1/saliency_seg`. |
 | Audio/video utility | `/mweb/v1/mix_audio_video`, `/mweb/v1/mix_audio_videos`, `/lv/v2/intelligence/tts/curl_sync_everphoto` |
 
@@ -1502,6 +1503,28 @@ normalized_summary_sha256=10ba3a679c2e7e472c20fb186dedbd5289687c2a5b0aba7e88a050
 
 Normalized summaries retain durable provider URIs, IDs, prompts, model keys, status, dimensions, and URL-presence booleans. Signed media URLs remain only in ignored raw proof files under `data/**`.
 
+`jimeng-browser-proxy local-items` calls `/mweb/v1/get_local_item_list` for richer detail on current-account generated item ids returned by asset listings.
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts local-items \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --itemIds 7649332406457060634,7649332406457077018 \
+  --outDir data/jimeng-lab/proof-20260611-local-items-live
+```
+
+Latest live proof:
+
+```txt
+proof_bundle=data/jimeng-lab/proof-20260611-local-items-live/
+ret=0
+item_count=2
+request_body={ item_id_list: [...] }
+model_req_key=high_aes_general_v50
+model_name=图片5.0 Lite
+```
+
+Normalized output keeps prompts, model keys/names, provider URIs, dimensions, author metadata, and media URL-presence booleans, but does not include signed URL values.
+
 ## History Queue Info
 
 `jimeng-browser-proxy history-queue` directly calls `/mweb/v1/get_history_queue_info` as a no-spend status/progress probe for existing history ids. This is useful for future local job UX without starting the async daemon yet.
@@ -1592,6 +1615,7 @@ The inventory/worklist now distinguishes endpoints that were safely probed but d
 - `/lv/v1/cc_web/replicate/get_search_words`: signed no-spend probes returned `ret=0` but only `data.region`, not keyword rows. Keep it blocked until a UI call returns usable search-word payloads.
 - `/mweb/search/v1/sug` and `/mweb/search/v1/guess` are implemented as `research-keywords`; `/mweb/search/v1/search` is implemented as `research-search` with the recovered frontend AES cache-token/media transform, and `/mweb/search/v1/fetch_debug/search` is a blocked debug wrapper.
 - Public Jimeng reference-profile reads are implemented as `profile-research`: profile, homepage, favorites, stories, single item detail, and batch item detail preserve prompts/model keys/reference media/story metadata in normalized output without signed URL values; following/follower lists are labeled current-account scoped. Batch `/mweb/v1/mget_item_info` uses `item_id_list`, recovered from frontend `getWorkDetails({ itemIdList })` callers before snake-case conversion.
+- Current-account generated local item detail is implemented as `local-items`: `/mweb/v1/get_local_item_list` uses `item_id_list` and preserves prompts/model keys/provider URIs/dimensions without signed URL values.
 
 Capture one flow at a time:
 

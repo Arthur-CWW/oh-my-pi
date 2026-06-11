@@ -193,6 +193,12 @@ import {
   summarizeJimengProfileResearch,
 } from "./profile-research"
 import {
+  buildJimengLocalItemsRequest,
+  fetchJimengLocalItems,
+  parseJimengLocalItemIds,
+  summarizeJimengLocalItems,
+} from "./local-items"
+import {
   buildJimengVideoInfoRequest,
   fetchJimengVideoInfo,
   parseJimengVidCsvFlag,
@@ -282,6 +288,7 @@ Commands:
   research-keywords Fetch no-spend search suggestions and guessed research keywords
   research-search Fetch no-spend inspiration, short-film, or workspace asset search results
   profile-research Fetch no-spend public profile/reference works and current-account follow lists
+  local-items  Fetch no-spend current-account unpublished/generated item details by local item id
   infinite-canvas Fetch no-spend infinite-canvas project/detail/ratio metadata
   lip-sync-config Fetch no-spend digital-human/lip-sync model configs
   lip-sync-compare Offline compare a lip-sync dry-run plan against captured UI submit
@@ -366,6 +373,7 @@ Options:
   --secUid <id>                  Public profile sec_uid for profile-research
   --publishedItemId <id>         Published work id for profile-research item detail
   --publishedItemIds <csv>       Published work ids for profile-research batch item details
+  --itemIds <csv>                Local generated item ids for local-items
   --imageTypeList <csv>          Profile homepage/favorites image type filters (default: 3,4,7)
   --needIntentionMark <bool>     Inspiration/short-film intention-mark option (default: true)
   --isInsertFrame <bool>         Optional asset search insert-frame filter
@@ -545,6 +553,11 @@ Examples:
     --session data/jimeng-lab/raw/session-bundle-current.json \\
     --limit 10 \\
     --outDir data/jimeng-lab/cli-assets-smoke
+
+  jimeng-browser-proxy local-items \\
+    --session data/jimeng-lab/raw/session-bundle-current.json \\
+    --itemIds 7649332406457060634 \\
+    --outDir data/jimeng-lab/cli-local-items-smoke
 
   jimeng-browser-proxy history-queue \\
     --session data/jimeng-lab/raw/session-bundle-current.json \\
@@ -748,6 +761,7 @@ interface CliArgs {
     | "research-keywords"
     | "research-search"
     | "profile-research"
+    | "local-items"
     | "infinite-canvas"
     | "endpoint-probe"
     | "rate-probe"
@@ -824,6 +838,7 @@ interface CliArgs {
   secUid?: string
   publishedItemId?: string
   publishedItemIds?: string[]
+  itemIds?: string[]
   imageTypeList?: number[]
   needIntentionMark?: boolean
   isInsertFrame?: boolean
@@ -2040,6 +2055,47 @@ async function main(argv: string[]): Promise<void> {
       summary: summarizeJimengProfileResearch(result),
     })
     console.log(`[jimeng-browser-proxy] profile-research saved results=${result.results.length} items=${result.results.reduce((sum, item) => sum + item.items.length, 0)} profiles=${result.results.reduce((sum, item) => sum + item.profiles.length + (item.profile ? 1 : 0), 0)} skipped=${result.skipped.length}`)
+    return
+  }
+
+  if (args.command === "local-items") {
+    if (!args.itemIds?.length) throw new Error("--itemIds is required for local-items")
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const request = buildJimengLocalItemsRequest(args.itemIds)
+    const runId = `local-items-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    if (args.dryRun) {
+      writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
+        command: args.command,
+        endpoint: "/mweb/v1/get_local_item_list",
+        request,
+        browser_session: redactSession(session),
+        live_request: false,
+      })
+      writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+        command: args.command,
+        endpoint: "/mweb/v1/get_local_item_list",
+        request,
+        dry_run: true,
+      })
+      console.log(`[jimeng-browser-proxy] local-items dry run saved item_ids=${args.itemIds.length}`)
+      return
+    }
+
+    const result = await fetchJimengLocalItems({ session, itemIds: args.itemIds })
+    writeJson(path.join(dirs.rawDir, `${runId}.json`), {
+      endpoint: result.endpoint,
+      http_status: result.httpStatus,
+      ret: result.ret,
+      errmsg: result.errmsg,
+      response_text_sha256: result.responseTextSha256,
+      request: result.request,
+      body: result.body,
+    })
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      summary: summarizeJimengLocalItems(result),
+    })
+    console.log(`[jimeng-browser-proxy] local-items saved items=${result.items.length}`)
     return
   }
 
@@ -3997,6 +4053,7 @@ function parseArgs(argv: string[]): CliArgs {
     && command !== "research-keywords"
     && command !== "research-search"
     && command !== "profile-research"
+    && command !== "local-items"
     && command !== "infinite-canvas"
     && command !== "endpoint-probe"
     && command !== "rate-probe"
@@ -4217,6 +4274,7 @@ function parseArgs(argv: string[]): CliArgs {
     secUid: flags.secUid,
     publishedItemId: flags.publishedItemId,
     publishedItemIds: parseJimengPublishedItemIds(flags.publishedItemIds),
+    itemIds: parseJimengLocalItemIds(flags.itemIds),
     imageTypeList: parseJimengProfileImageTypeList(flags.imageTypeList),
     needIntentionMark,
     isInsertFrame,

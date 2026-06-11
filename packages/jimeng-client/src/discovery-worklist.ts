@@ -467,6 +467,7 @@ const KNOWN_ENDPOINTS: JimengDiscoveryKnownEndpoint[] = [
   known("/mweb/v1/remove_history", "blocked", null, "Removes generated history/workbench records; require disposable history ids or explicit approval."),
   known("/mweb/v1/update_video_default_bgm", "blocked", null, "Mutates a video/workbench record's default BGM state; require disposable item context or explicit approval."),
   known("/mweb/v1/get_user_local_item_list", "implemented", "voice-clones", "No-spend cloned voice/user local item listing."),
+  known("/mweb/v1/get_local_item_list", "implemented", "local-items", "No-spend current-account unpublished/generated item detail by local item_id_list."),
   known("/mweb/v1/voice/submit_task", "dry_run_only", "voice-clone-submit", "Voice clone submit may create assets or consume quota."),
   known("/mweb/v1/voice/query_task", "partial", "voice-clone-query", "Query command exists; live proof needs a real task id."),
   known("/mweb/v1/voice/update", "dry_run_only", "voice-clone-update", "Mutates cloned voice assets."),

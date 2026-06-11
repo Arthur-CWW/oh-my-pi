@@ -3283,11 +3283,36 @@ batch item detail: ret=0, body={ item_id_list: [...] }, 2 normalized work rows
 
 The earlier no-spend probes under `data/jimeng-lab/proof-20260611-probe-mget-item-info/` returned `ret=1000 invalid parameter` for guessed fields. The successful endpoint-probe proof under `data/jimeng-lab/proof-20260611-probe-mget-item-info-item-id-list/` returned `ret=0` for `item_id_list` and download-oriented `pack_item_opt` variants; the CLI exposes only the simple read shape for now.
 
+Current-account generated local item detail `/mweb/v1/get_local_item_list` is implemented as no-spend `local-items` after static caller recovery showed `getUnPublishedWorkDetails(e)` posts the snake-cased local item request.
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts local-items \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --itemIds 7649332406457060634,7649332406457077018 \
+  --dryRun \
+  --outDir data/jimeng-lab/proof-20260611-local-items-dryrun
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts local-items \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --itemIds 7649332406457060634,7649332406457077018 \
+  --outDir data/jimeng-lab/proof-20260611-local-items-live
+```
+
+Result:
+
+```txt
+local-items dry run saved item_ids=2
+local-items saved items=2
+local item detail: ret=0, body={ item_id_list: [...] }, 2 generated image rows
+```
+
+The first probe used the asset wrapper id and returned `ret=3005`; the successful endpoint-probe proof under `data/jimeng-lab/proof-20260611-probe-local-item-list-generated-items/` used generated item ids from `assets` and returned `ret=0`. Normalized `local-items` output keeps prompts, model keys/names, provider URIs, dimensions, author metadata, and URL-presence booleans, but no signed URL values.
+
 Refreshed static inventory:
 
 ```txt
 resources=251
-known_status_counts=unknown:118,partial:4,implemented:52,dry_run_only:4,blocked:70,captured_only:2,cataloged_only:1
+known_status_counts=unknown:117,partial:4,implemented:53,dry_run_only:4,blocked:70,captured_only:2,cataloged_only:1
 ```
 
 ## Verification
@@ -3297,16 +3322,17 @@ bun run jimeng:typecheck
 bun run jimeng:test
 mise x ast-grep -- ast-grep scan --config sgconfig.yml packages/jimeng-client/src/profile-research.ts packages/jimeng-client/src/research-search.ts packages/jimeng-client/test/profile-research.test.ts
 mise x ast-grep -- ast-grep scan --config sgconfig.yml packages/jimeng-client/src/profile-research.ts packages/jimeng-client/src/browser-proxy-cli.ts packages/jimeng-client/src/discovery-worklist.ts packages/jimeng-client/test/profile-research.test.ts
-bun packages/jimeng-client/src/browser-proxy-cli.ts --help | rg 'static-inventory|account-credit|commerce-benefits|workspace-context|research-keywords|research-search|profile-research|lip-sync-config|voice-clones|voice-clone-submit|capcut-probe|capcut-template-metadata|capcut-categories|capcut-collections|capcut-collection-templates|capcut-template-detail|capcut-editor-catalog|infinite-canvas|overseas-short-videos|subject-create|subject-update|subject-delete|subject-generate-voice|subjects|templates|short-videos'
+mise x ast-grep -- ast-grep scan --config sgconfig.yml packages/jimeng-client/src/local-items.ts packages/jimeng-client/src/browser-proxy-cli.ts packages/jimeng-client/src/discovery-worklist.ts packages/jimeng-client/src/index.ts packages/jimeng-client/test/local-items.test.ts
+bun packages/jimeng-client/src/browser-proxy-cli.ts --help | rg 'static-inventory|account-credit|commerce-benefits|workspace-context|research-keywords|research-search|profile-research|local-items|lip-sync-config|voice-clones|voice-clone-submit|capcut-probe|capcut-template-metadata|capcut-categories|capcut-collections|capcut-collection-templates|capcut-template-detail|capcut-editor-catalog|infinite-canvas|overseas-short-videos|subject-create|subject-update|subject-delete|subject-generate-voice|subjects|templates|short-videos'
 ```
 
 Result:
 
 ```txt
 typecheck passed
-173 tests passed, 0 failed
+176 tests passed, 0 failed
 scoped ast-grep unsafe-type rules passed with zero findings
-browser-proxy help listed static-inventory, account-credit, commerce-benefits, workspace-context, research-keywords, research-search, profile-research, CapCut collection/detail/editor-catalog, and infinite-canvas commands
+browser-proxy help listed static-inventory, account-credit, commerce-benefits, workspace-context, research-keywords, research-search, profile-research, local-items, CapCut collection/detail/editor-catalog, and infinite-canvas commands
 paid smoke normalized files have no live token markers
 ```
 
