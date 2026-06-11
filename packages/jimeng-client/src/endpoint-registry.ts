@@ -11,6 +11,8 @@ export interface JimengDiscoveryKnownEndpoint {
   status: JimengDiscoveryKnownStatus
   command: string | null
   note: string
+  evidence: string[]
+  nextProbe: string | null
 }
 
 export type JimengDiscoveryTriageDecision = "keep" | "maybe" | "skip"
@@ -57,6 +59,11 @@ export interface JimengDiscoveryTriageFamilyCoverage {
   notImplementedEndpoints: string[]
 }
 
+export interface JimengDiscoveryEndpointAudit {
+  evidence: string[]
+  nextProbe: string
+}
+
 export interface JimengDiscoveryTriageCoverage {
   decisions: JimengDiscoveryTriageDecision[]
   familyCount: number
@@ -67,11 +74,11 @@ export interface JimengDiscoveryTriageCoverage {
 }
 
 export function getJimengDiscoveryKnownEndpoints(): JimengDiscoveryKnownEndpoint[] {
-  return KNOWN_ENDPOINTS.map((endpoint) => ({ ...endpoint }))
+  return KNOWN_ENDPOINTS.map(cloneKnownEndpoint)
 }
 
 export function buildJimengDiscoveryKnownEndpointMap(): Map<string, JimengDiscoveryKnownEndpoint> {
-  return new Map(KNOWN_ENDPOINTS.map((endpoint) => [endpoint.endpoint, { ...endpoint }]))
+  return new Map(KNOWN_ENDPOINTS.map((endpoint) => [endpoint.endpoint, cloneKnownEndpoint(endpoint)]))
 }
 
 export function getJimengDiscoveryKnownEndpointNote(endpoint: string): string | null {
@@ -178,6 +185,12 @@ export function writeJimengDiscoveryTriageCoverageMarkdown(coverage: JimengDisco
         const command = row?.command ? ` command=${row.command}` : ""
         const note = row?.note ? ` - ${row.note}` : ""
         lines.push(`- \`${endpoint}\` - ${status}${command}${note}`)
+        if (row?.evidence.length) {
+          lines.push(`  - Evidence: ${row.evidence.map((item) => `\`${item}\``).join("; ")}`)
+        }
+        if (row?.nextProbe) {
+          lines.push(`  - Next probe: ${row.nextProbe}`)
+        }
       }
       lines.push("")
     }
@@ -405,6 +418,173 @@ function triageFamily(
   return { id, decision, title, endpoints }
 }
 
+const KEEP_GAP_AUDIT_BY_ENDPOINT: Record<string, JimengDiscoveryEndpointAudit> = {
+  "/mweb/v1/aigc_draft/generate": {
+    evidence: [
+      "docs/qa/jimeng-direct-compare-gates-20260611.md",
+      "data/jimeng-lab/proof-20260610-text2image-plan-direct/",
+      "data/jimeng-lab/text2video-plan-current/",
+      "data/jimeng-lab/proof-20260610-subscription-api-live-check/",
+    ],
+    nextProbe: "Passively capture a current frontend submit for lip-sync, end-frame, or multi-frame generation, then run the matching text2video-compare or lip-sync-compare before any approval-gated live submit.",
+  },
+  "/mweb/v1/execute_generate_audit": {
+    evidence: [
+      "data/jimeng-lab/proof-20260611-static-locate-media-helper-blockers/",
+      "data/jimeng-lab/proof-20260611-static-inventory-media-helper-blockers/",
+    ],
+    nextProbe: "Passively capture the frontend material-audit request around a generation submit and add a request-plan-compare fixture for the exact image/video/audio/subject material payload.",
+  },
+  "/mweb/v1/mpack_image": {
+    evidence: [
+      "data/jimeng-lab/proof-20260611-static-locate-media-helper-blockers/",
+      "data/jimeng-lab/proof-20260611-static-inventory-media-helper-blockers/",
+    ],
+    nextProbe: "Passively capture an image-pack/material-data-service UI flow, then replay only with cassette redaction after the exact caller input shape is known.",
+  },
+  "/mweb/v1/dreamina_subject/generate_voice": {
+    evidence: [
+      "docs/qa/jimeng-request-plan-compare-20260611.md",
+      "data/jimeng-lab/proof-20260610-subject-lifecycle/",
+      "data/jimeng-lab/cli-request-plan-compare-smoke/",
+    ],
+    nextProbe: "Capture a subject generate-voice UI submit and compare it with subject-generate-voice dry-run using request-plan-compare before any approved live voice generation.",
+  },
+  "/mweb/v1/voice/submit_task": {
+    evidence: [
+      "docs/qa/jimeng-request-plan-compare-20260611.md",
+      "data/jimeng-lab/proof-20260610-voice-clone/",
+      "data/jimeng-lab/cli-request-plan-compare-smoke/",
+    ],
+    nextProbe: "Capture a voice-clone submit UI request with disposable source audio and compare the dry-run plan before any approved asset-creating submit.",
+  },
+  "/mweb/v1/voice/query_task": {
+    evidence: [
+      "docs/qa/jimeng-request-plan-compare-20260611.md",
+      "data/jimeng-lab/proof-20260610-voice-clone/",
+    ],
+    nextProbe: "Use a real task id from an approved voice-clone submit flow, then record/replay voice-clone-query as a cassette-backed read.",
+  },
+  "/mweb/v1/voice/update": {
+    evidence: [
+      "docs/qa/jimeng-request-plan-compare-20260611.md",
+      "data/jimeng-lab/proof-20260610-voice-clone/",
+      "data/jimeng-lab/cli-request-plan-compare-smoke/",
+    ],
+    nextProbe: "Capture or create a disposable cloned voice asset, compare voice-clone-update dry-run against the UI request, then require approval before mutation.",
+  },
+  "/mweb/v1/voice/delete": {
+    evidence: [
+      "docs/qa/jimeng-request-plan-compare-20260611.md",
+      "data/jimeng-lab/proof-20260610-voice-clone/",
+      "data/jimeng-lab/cli-request-plan-compare-smoke/",
+    ],
+    nextProbe: "Capture or create a disposable cloned voice asset, compare voice-clone-delete dry-run against the UI request, then require approval before mutation.",
+  },
+  "/mweb/v1/feed": {
+    evidence: [
+      "data/jimeng-lab/cli-voices-smoke/",
+      "data/jimeng-lab/cli-voices-smoke-2/",
+      "data/jimeng-lab/voice-library-samples/",
+    ],
+    nextProbe: "Refresh a signed voice-library feed request from passive UI capture and record/replay the voices command without relying on stale capture templates.",
+  },
+  "/mweb/v1/mix_audio_video": {
+    evidence: [
+      "data/jimeng-lab/proof-20260611-static-locate-media-helper-blockers/",
+      "data/jimeng-lab/proof-20260611-static-inventory-media-helper-blockers/",
+    ],
+    nextProbe: "Capture a single audio/video mix UI submit, recover the exact babiParam/body contract, and keep live replay behind approval because it creates task state.",
+  },
+  "/mweb/v1/mix_audio_videos": {
+    evidence: [
+      "data/jimeng-lab/proof-20260611-static-locate-media-helper-blockers/",
+      "data/jimeng-lab/proof-20260611-static-inventory-media-helper-blockers/",
+    ],
+    nextProbe: "Capture a batch audio/video mix UI submit, recover the exact babiParam/body contract, and keep live replay behind approval because it creates task state.",
+  },
+  "/mweb/v1/video_generate/get_switch_model_queue_info": {
+    evidence: [
+      "data/jimeng-lab/proof-20260610-static-locate-video-generate-helpers/",
+      "data/jimeng-lab/proof-20260610-switch-model-queue-probe/",
+    ],
+    nextProbe: "Capture the frontend switch-model queue request from the lip-sync/video UI and replay the exact body through endpoint-probe record/replay.",
+  },
+  "/mweb/v1/video_generate/pre_process": {
+    evidence: [
+      "data/jimeng-lab/proof-20260610-static-locate-video-generate-helpers/",
+    ],
+    nextProbe: "Passively capture the video pre-process submit flow and add a cassette-backed typed request once the provider task payload is known.",
+  },
+  "/mweb/v1/video_generate/mget_pre_process_result": {
+    evidence: [
+      "data/jimeng-lab/proof-20260610-static-locate-video-generate-helpers/",
+    ],
+    nextProbe: "Use task ids from a captured video_generate/pre_process flow and record/replay the matching result lookup.",
+  },
+  "/mweb/v1/video_generate/face_auth/skip": {
+    evidence: [
+      "data/jimeng-lab/proof-20260610-static-locate-video-generate-helpers/",
+    ],
+    nextProbe: "Capture the Seedance face-auth skip flow, compare payloads offline, and require explicit approval before live replay because it can create provider-side task state.",
+  },
+  "/mweb/v1/video_generate/face_auth/skip/query": {
+    evidence: [
+      "data/jimeng-lab/proof-20260610-static-locate-video-generate-helpers/",
+    ],
+    nextProbe: "Use a task id from a captured face_auth/skip flow and record/replay the paired status query.",
+  },
+  "/mweb/v1/mget_story": {
+    evidence: [
+      "data/jimeng-lab/proof-20260611-probe-user-story-list/",
+      "data/jimeng-lab/proof-20260611-story-archive-dryrun/",
+      "data/jimeng-lab/proof-20260611-static-inventory-story-archive/",
+    ],
+    nextProbe: "Find or capture a public profile with a non-empty story list, then run story-records with real story_id_list values and record/replay the cassette.",
+  },
+  "/lv/v1/cc_web/replicate/get_search_words": {
+    evidence: [
+      "data/jimeng-lab/proof-20260610-capcut-search-words-probe/",
+      "data/jimeng-lab/proof-20260610-capcut-probe-hot-words/",
+    ],
+    nextProbe: "Passively capture the CapCut replicate search UI call that returns keyword data, then replay with signed CapCut headers and a cassette.",
+  },
+  "/lv/v1/cc_web/replicate/search_templates": {
+    evidence: [
+      "data/jimeng-lab/proof-20260610-capcut-probe-search/",
+      "data/jimeng-lab/proof-20260610-capcut-probe-search-templates-v2/",
+    ],
+    nextProbe: "Capture an exact CapCut template-search UI request including keyword/category/search-id fields, then add a typed replay fixture.",
+  },
+  "/lv/v1/cc_web/plane/batch_get_collection_templates": {
+    evidence: [
+      "data/jimeng-lab/proof-20260610-capcut-probe-batch-collection-templates/",
+      "data/jimeng-lab/proof-20260610-capcut-probe-batch-collection-templates-v2/",
+    ],
+    nextProbe: "Capture the collection-row batch UI payload and compare it against the signed no-spend variants that returned ret=1000.",
+  },
+  "/lv/v1/cc_web/plane/get_collection_presets": {
+    evidence: [
+      "data/jimeng-lab/proof-20260610-capcut-probe-presets/",
+      "data/jimeng-lab/proof-20260610-capcut-probe-presets-confirmed-collection/",
+    ],
+    nextProbe: "Capture a preset-list UI request with the required LV auth/header context, then replay with a confirmed collection id.",
+  },
+  "/lv/v1/cc_web/plane/preset_template_detail": {
+    evidence: [
+      "data/jimeng-lab/proof-20260610-capcut-probe-template-detail/",
+      "data/jimeng-lab/proof-20260610-capcut-probe-presets-confirmed-collection/",
+    ],
+    nextProbe: "First unblock get_collection_presets, then use a real preset id from that listing to record/replay preset_template_detail.",
+  },
+  "/lv/v1/cc_web/plane/fuzzy_search_templates": {
+    evidence: [
+      "data/jimeng-lab/proof-20260610-capcut-probe-fuzzy/",
+    ],
+    nextProbe: "Capture a non-empty fuzzy-search UI request and replay the exact signed body instead of guessed keyword/title variants.",
+  },
+}
+
 const KNOWN_ENDPOINTS: JimengDiscoveryKnownEndpoint[] = [
   known("/mweb/v1/aigc_draft/generate", "partial", "text2image-plan/text2image-compare/text2video-plan/text2video-compare/text2video/image2video/frames2video/lip-sync", "Unified generation submit; direct image/video request builders and direct capture compares are dry-run covered; live lip-sync/end-frame still require capture compare or approval-gated submit."),
   known("/mweb/v1/execute_generate_audit", "blocked", null, "Generation pre-audit posts image/video/audio/subject material lists; capture exact material payload before replay."),
@@ -583,5 +763,20 @@ const KNOWN_ENDPOINTS: JimengDiscoveryKnownEndpoint[] = [
 ]
 
 function known(endpoint: string, status: JimengDiscoveryKnownStatus, command: string | null, note: string): JimengDiscoveryKnownEndpoint {
-  return { endpoint, status, command, note }
+  const audit = KEEP_GAP_AUDIT_BY_ENDPOINT[endpoint]
+  return {
+    endpoint,
+    status,
+    command,
+    note,
+    evidence: audit ? [...audit.evidence] : [],
+    nextProbe: audit?.nextProbe ?? null,
+  }
+}
+
+function cloneKnownEndpoint(endpoint: JimengDiscoveryKnownEndpoint): JimengDiscoveryKnownEndpoint {
+  return {
+    ...endpoint,
+    evidence: [...endpoint.evidence],
+  }
 }

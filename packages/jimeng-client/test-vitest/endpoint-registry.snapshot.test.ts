@@ -17,6 +17,8 @@ interface KeepFamilyGapSnapshot {
       readonly status: string
       readonly command: string | null
       readonly note: string
+      readonly evidence: readonly string[]
+      readonly nextProbe: string | null
     }>
   }>
 }
@@ -38,6 +40,8 @@ function buildKeepFamilyGapSnapshot(): KeepFamilyGapSnapshot {
           status: row?.status ?? "missing",
           command: row?.command ?? null,
           note: row?.note ?? "missing registry row",
+          evidence: row?.evidence ?? [],
+          nextProbe: row?.nextProbe ?? null,
         }
       }),
     })),

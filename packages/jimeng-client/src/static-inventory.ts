@@ -351,6 +351,8 @@ function staticCatalogKnownEndpoint(resource: string): JimengDiscoveryKnownEndpo
     status: "implemented",
     command: "capcut-template-metadata",
     note: "Public CapCut bee_prod ratio/scene metadata catalogs are covered by capcut-template-metadata.",
+    evidence: [],
+    nextProbe: null,
   }
 }
 

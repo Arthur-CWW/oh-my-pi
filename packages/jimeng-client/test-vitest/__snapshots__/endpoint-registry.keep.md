@@ -22,44 +22,90 @@
 ### G1 Text/image/video generation
 
 - `/mweb/v1/aigc_draft/generate` - partial command=text2image-plan/text2image-compare/text2video-plan/text2video-compare/text2video/image2video/frames2video/lip-sync - Unified generation submit; direct image/video request builders and direct capture compares are dry-run covered; live lip-sync/end-frame still require capture compare or approval-gated submit.
+  - Evidence: `docs/qa/jimeng-direct-compare-gates-20260611.md`; `data/jimeng-lab/proof-20260610-text2image-plan-direct/`; `data/jimeng-lab/text2video-plan-current/`; `data/jimeng-lab/proof-20260610-subscription-api-live-check/`
+  - Next probe: Passively capture a current frontend submit for lip-sync, end-frame, or multi-frame generation, then run the matching text2video-compare or lip-sync-compare before any approval-gated live submit.
 - `/mweb/v1/execute_generate_audit` - blocked - Generation pre-audit posts image/video/audio/subject material lists; capture exact material payload before replay.
+  - Evidence: `data/jimeng-lab/proof-20260611-static-locate-media-helper-blockers/`; `data/jimeng-lab/proof-20260611-static-inventory-media-helper-blockers/`
+  - Next probe: Passively capture the frontend material-audit request around a generation submit and add a request-plan-compare fixture for the exact image/video/audio/subject material payload.
 
 ### G2 Upload and provider asset references
 
 - `/mweb/v1/mpack_image` - blocked - Packs image material through dreamina-material-data-service; capture the exact caller input shape before promotion.
+  - Evidence: `data/jimeng-lab/proof-20260611-static-locate-media-helper-blockers/`; `data/jimeng-lab/proof-20260611-static-inventory-media-helper-blockers/`
+  - Next probe: Passively capture an image-pack/material-data-service UI flow, then replay only with cassette redaction after the exact caller input shape is known.
 
 ### P1 Persona/subject lifecycle
 
 - `/mweb/v1/dreamina_subject/generate_voice` - dry_run_only command=subject-generate-voice/request-plan-compare - Subject voice generation may consume quota; dry-run request shape can be compared offline against UI captures before approval.
+  - Evidence: `docs/qa/jimeng-request-plan-compare-20260611.md`; `data/jimeng-lab/proof-20260610-subject-lifecycle/`; `data/jimeng-lab/cli-request-plan-compare-smoke/`
+  - Next probe: Capture a subject generate-voice UI submit and compare it with subject-generate-voice dry-run using request-plan-compare before any approved live voice generation.
 
 ### V1 Voice and speech
 
 - `/mweb/v1/voice/submit_task` - dry_run_only command=voice-clone-submit/request-plan-compare - Voice clone submit may create assets or consume quota; dry-run request shape can be compared offline against UI captures.
+  - Evidence: `docs/qa/jimeng-request-plan-compare-20260611.md`; `data/jimeng-lab/proof-20260610-voice-clone/`; `data/jimeng-lab/cli-request-plan-compare-smoke/`
+  - Next probe: Capture a voice-clone submit UI request with disposable source audio and compare the dry-run plan before any approved asset-creating submit.
 - `/mweb/v1/voice/query_task` - partial command=voice-clone-query/request-plan-compare - Query command exists; live proof needs a real task id, and dry-run request shape can be compared offline against UI captures.
+  - Evidence: `docs/qa/jimeng-request-plan-compare-20260611.md`; `data/jimeng-lab/proof-20260610-voice-clone/`
+  - Next probe: Use a real task id from an approved voice-clone submit flow, then record/replay voice-clone-query as a cassette-backed read.
 - `/mweb/v1/voice/update` - dry_run_only command=voice-clone-update/request-plan-compare - Mutates cloned voice assets; dry-run request shape can be compared offline against UI captures.
+  - Evidence: `docs/qa/jimeng-request-plan-compare-20260611.md`; `data/jimeng-lab/proof-20260610-voice-clone/`; `data/jimeng-lab/cli-request-plan-compare-smoke/`
+  - Next probe: Capture or create a disposable cloned voice asset, compare voice-clone-update dry-run against the UI request, then require approval before mutation.
 - `/mweb/v1/voice/delete` - dry_run_only command=voice-clone-delete/request-plan-compare - Mutates cloned voice assets; dry-run request shape can be compared offline against UI captures.
+  - Evidence: `docs/qa/jimeng-request-plan-compare-20260611.md`; `data/jimeng-lab/proof-20260610-voice-clone/`; `data/jimeng-lab/cli-request-plan-compare-smoke/`
+  - Next probe: Capture or create a disposable cloned voice asset, compare voice-clone-delete dry-run against the UI request, then require approval before mutation.
 - `/mweb/v1/feed` - partial command=voices - Built-in voice library replay is implemented for captured signed feed requests.
+  - Evidence: `data/jimeng-lab/cli-voices-smoke/`; `data/jimeng-lab/cli-voices-smoke-2/`; `data/jimeng-lab/voice-library-samples/`
+  - Next probe: Refresh a signed voice-library feed request from passive UI capture and record/replay the voices command without relying on stale capture templates.
 - `/mweb/v1/mix_audio_video` - blocked - Submits a single audio/video mix task and returns task status; capture exact babiParam/body from UI before any live replay.
+  - Evidence: `data/jimeng-lab/proof-20260611-static-locate-media-helper-blockers/`; `data/jimeng-lab/proof-20260611-static-inventory-media-helper-blockers/`
+  - Next probe: Capture a single audio/video mix UI submit, recover the exact babiParam/body contract, and keep live replay behind approval because it creates task state.
 - `/mweb/v1/mix_audio_videos` - blocked - Submits batch audio/video mix tasks and returns submit ids; capture exact babiParam/body from UI before any live replay.
+  - Evidence: `data/jimeng-lab/proof-20260611-static-locate-media-helper-blockers/`; `data/jimeng-lab/proof-20260611-static-inventory-media-helper-blockers/`
+  - Next probe: Capture a batch audio/video mix UI submit, recover the exact babiParam/body contract, and keep live replay behind approval because it creates task state.
 
 ### L1 Lip-sync / digital human
 
 - `/mweb/v1/video_generate/get_switch_model_queue_info` - blocked - No-spend probes with empty, model_req_key, model_req_keys, and scene bodies returned ret=1000 invalid parameter; capture the exact frontend switch-model queue body before promotion.
+  - Evidence: `data/jimeng-lab/proof-20260610-static-locate-video-generate-helpers/`; `data/jimeng-lab/proof-20260610-switch-model-queue-probe/`
+  - Next probe: Capture the frontend switch-model queue request from the lip-sync/video UI and replay the exact body through endpoint-probe record/replay.
 - `/mweb/v1/video_generate/pre_process` - blocked - Frontend data service submits a video pre-process task; capture the exact UI flow and payload before any live replay.
+  - Evidence: `data/jimeng-lab/proof-20260610-static-locate-video-generate-helpers/`
+  - Next probe: Passively capture the video pre-process submit flow and add a cassette-backed typed request once the provider task payload is known.
 - `/mweb/v1/video_generate/mget_pre_process_result` - blocked - Read path depends on task ids from video_generate/pre_process; capture a matching pre-process UI flow before promotion.
+  - Evidence: `data/jimeng-lab/proof-20260610-static-locate-video-generate-helpers/`
+  - Next probe: Use task ids from a captured video_generate/pre_process flow and record/replay the matching result lookup.
 - `/mweb/v1/video_generate/face_auth/skip` - blocked - Seedance face-auth skip submit task can create provider-side task state; capture exact UI payload and approval context before live replay.
+  - Evidence: `data/jimeng-lab/proof-20260610-static-locate-video-generate-helpers/`
+  - Next probe: Capture the Seedance face-auth skip flow, compare payloads offline, and require explicit approval before live replay because it can create provider-side task state.
 - `/mweb/v1/video_generate/face_auth/skip/query` - blocked - Face-auth skip status query depends on a task id from video_generate/face_auth/skip; capture that flow before promotion.
+  - Evidence: `data/jimeng-lab/proof-20260610-static-locate-video-generate-helpers/`
+  - Next probe: Use a task id from a captured face_auth/skip flow and record/replay the paired status query.
 
 ### R1 Reference profile research
 
 - `/mweb/v1/mget_story` - partial command=story-records - No-spend story detail lookup by story_id_list is implemented; live proof still needs real story ids from a non-empty story list or UI capture.
+  - Evidence: `data/jimeng-lab/proof-20260611-probe-user-story-list/`; `data/jimeng-lab/proof-20260611-story-archive-dryrun/`; `data/jimeng-lab/proof-20260611-static-inventory-story-archive/`
+  - Next probe: Find or capture a public profile with a non-empty story list, then run story-records with real story_id_list values and record/replay the cassette.
 
 ### T1 CapCut/template mining
 
 - `/lv/v1/cc_web/replicate/get_search_words` - blocked - Signed no-spend probes returned ret=0 but only region metadata, not usable search words; capture a UI call that returns keyword data before promotion.
+  - Evidence: `data/jimeng-lab/proof-20260610-capcut-search-words-probe/`; `data/jimeng-lab/proof-20260610-capcut-probe-hot-words/`
+  - Next probe: Passively capture the CapCut replicate search UI call that returns keyword data, then replay with signed CapCut headers and a cassette.
 - `/lv/v1/cc_web/replicate/search_templates` - blocked - Signed no-spend probes returned ret=1000 param error across recovered keyword/category/search-id variants; capture an exact template-search UI request before promotion.
+  - Evidence: `data/jimeng-lab/proof-20260610-capcut-probe-search/`; `data/jimeng-lab/proof-20260610-capcut-probe-search-templates-v2/`
+  - Next probe: Capture an exact CapCut template-search UI request including keyword/category/search-id fields, then add a typed replay fixture.
 - `/lv/v1/cc_web/plane/batch_get_collection_templates` - blocked - Signed no-spend probes returned ret=1000 param error across object, list, and nested collection variants; capture the exact batch row UI payload before promotion.
+  - Evidence: `data/jimeng-lab/proof-20260610-capcut-probe-batch-collection-templates/`; `data/jimeng-lab/proof-20260610-capcut-probe-batch-collection-templates-v2/`
+  - Next probe: Capture the collection-row batch UI payload and compare it against the signed no-spend variants that returned ret=1000.
 - `/lv/v1/cc_web/plane/get_collection_presets` - blocked - Signed no-spend probes using confirmed collection ids returned ret=1015 check login error; capture the exact preset UI call and required auth/header context before promotion.
+  - Evidence: `data/jimeng-lab/proof-20260610-capcut-probe-presets/`; `data/jimeng-lab/proof-20260610-capcut-probe-presets-confirmed-collection/`
+  - Next probe: Capture a preset-list UI request with the required LV auth/header context, then replay with a confirmed collection id.
 - `/lv/v1/cc_web/plane/preset_template_detail` - blocked - Preset detail depends on get_collection_presets data, but preset listing currently returns ret=1015 in safe probes; capture a real preset UI flow before promotion.
+  - Evidence: `data/jimeng-lab/proof-20260610-capcut-probe-template-detail/`; `data/jimeng-lab/proof-20260610-capcut-probe-presets-confirmed-collection/`
+  - Next probe: First unblock get_collection_presets, then use a real preset id from that listing to record/replay preset_template_detail.
 - `/lv/v1/cc_web/plane/fuzzy_search_templates` - blocked - Signed no-spend probes returned ret=0 with empty lists for guessed keyword/title bodies; capture a non-empty fuzzy-search UI request before promotion.
+  - Evidence: `data/jimeng-lab/proof-20260610-capcut-probe-fuzzy/`
+  - Next probe: Capture a non-empty fuzzy-search UI request and replay the exact signed body instead of guessed keyword/title variants.
 

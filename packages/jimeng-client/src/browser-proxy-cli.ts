@@ -87,6 +87,7 @@ import { prepareFromCapture, redactHeaders, type CaptureFile, type JimengOp, typ
 import { JimengClient } from "./client"
 import { JimengError } from "./errors"
 import {
+  buildJimengDiscoveryKnownEndpointMap,
   parseJimengDiscoveryTriageDecisions,
   summarizeJimengDiscoveryTriageCoverage,
   writeJimengDiscoveryTriageCoverageMarkdown,
@@ -1211,6 +1212,7 @@ async function main(argv: string[]): Promise<void> {
     const dirs = ensureOutputDirs(path.resolve(args.outDir))
     const runId = `triage-coverage-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
     const coverage = summarizeJimengDiscoveryTriageCoverage({ decisions: args.decisions })
+    const knownByEndpoint = buildJimengDiscoveryKnownEndpointMap()
     writeJson(path.join(dirs.rawDir, `${runId}.json`), coverage)
     writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
       command: args.command,
@@ -1227,6 +1229,17 @@ async function main(argv: string[]): Promise<void> {
         status_counts: family.statusCounts,
         not_implemented_count: family.notImplementedEndpoints.length,
         not_implemented_endpoints: family.notImplementedEndpoints,
+        not_implemented: family.notImplementedEndpoints.map((endpoint) => {
+          const row = knownByEndpoint.get(endpoint)
+          return {
+            endpoint,
+            status: row?.status ?? "missing",
+            command: row?.command ?? null,
+            note: row?.note ?? null,
+            evidence: row?.evidence ?? [],
+            next_probe: row?.nextProbe ?? null,
+          }
+        }),
       })),
     })
     writeFileSync(path.join(dirs.normalizedDir, `${runId}-summary.md`), writeJimengDiscoveryTriageCoverageMarkdown(coverage), "utf8")

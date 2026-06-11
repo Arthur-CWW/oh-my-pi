@@ -16,7 +16,7 @@ skip: L1,N1,U1
 
 `keep` means implement typed service/CLI support. `maybe` means keep cataloged but do not actively build. `skip` means leave as `cataloged_only` or `blocked` with a reason.
 
-The machine-readable mirror for these family IDs lives in `packages/jimeng-client/src/endpoint-registry.ts`. Run `jimeng-browser-proxy triage-coverage --decisions keep` to materialize the current registry coverage as JSON and Markdown. The latest keep-family report has 62 unique endpoints, 0 missing registry rows, 40 implemented endpoints, 4 partial endpoints, 4 dry-run-only endpoints, and 15 blocked endpoints.
+The machine-readable mirror for these family IDs lives in `packages/jimeng-client/src/endpoint-registry.ts`. Run `jimeng-browser-proxy triage-coverage --decisions keep` to materialize the current registry coverage as JSON and Markdown. The latest keep-family report has 62 unique endpoints, 0 missing registry rows, 40 implemented endpoints, 4 partial endpoints, 4 dry-run-only endpoints, and 15 blocked endpoints. Unfinished keep-family rows must carry evidence paths and a concrete next probe in the registry; Vitest snapshots cover the normalized gap object and generated Markdown report.
 
 ## Keep
 

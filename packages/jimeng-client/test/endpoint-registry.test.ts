@@ -27,8 +27,10 @@ describe("Jimeng endpoint registry", () => {
     const registryRow = buildJimengDiscoveryKnownEndpointMap().get(firstEndpoint.endpoint)
     if (!registryRow) throw new Error("expected known endpoint map row")
     registryRow.status = "blocked"
+    registryRow.evidence.push("mutated")
 
     expect(buildJimengDiscoveryKnownEndpointMap().get(firstEndpoint.endpoint)?.status).toBe(originalStatus)
+    expect(buildJimengDiscoveryKnownEndpointMap().get(firstEndpoint.endpoint)?.evidence).not.toContain("mutated")
   })
 
   test("tracks intentionally parked and blocked endpoint decisions", () => {
@@ -71,6 +73,30 @@ describe("Jimeng endpoint registry", () => {
     expect(markdown).toContain("| T1 | keep | CapCut/template mining | 16 | implemented=10, blocked=6 | 6 |")
     expect(markdown).toContain("## Not Implemented Endpoints")
     expect(markdown).toContain("- `/mweb/v1/aigc_draft/generate` - partial command=text2image-plan/text2image-compare/text2video-plan/text2video-compare/text2video/image2video/frames2video/lip-sync")
+    expect(markdown).toContain("Evidence:")
+    expect(markdown).toContain("Next probe:")
+  })
+
+  test("keeps every unfinished keep-family endpoint auditable with evidence and a next probe", () => {
+    const registry = buildJimengDiscoveryKnownEndpointMap()
+    const coverage = summarizeJimengDiscoveryTriageCoverage({ decisions: ["keep"] })
+    const unfinished = coverage.families.flatMap((family) => family.notImplementedEndpoints)
+
+    expect(unfinished.length).toBeGreaterThan(0)
+
+    for (const endpoint of unfinished) {
+      const row = registry.get(endpoint)
+      expect(row).toBeDefined()
+      expect(row?.evidence.length).toBeGreaterThan(0)
+      expect(row?.nextProbe).toBeTruthy()
+    }
+
+    const auditedButNotUnfinished = getJimengDiscoveryKnownEndpoints()
+      .filter((row) => row.evidence.length > 0 || row.nextProbe)
+      .map((row) => row.endpoint)
+      .filter((endpoint) => !unfinished.includes(endpoint))
+
+    expect(auditedButNotUnfinished).toEqual([])
   })
 
   test("parses triage decision flags with keep as the default", () => {
