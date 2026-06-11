@@ -1,6 +1,6 @@
 import { createHash, createHmac } from "node:crypto"
 import { type JimengSessionBundle } from "./capture"
-import { assertNoRiskError, JimengClient } from "./client"
+import { assertNoRiskError, JimengClient, type JimengFetch } from "./client"
 import { jimengError } from "./errors"
 
 const DEFAULT_QUERY = "aid=513695&web_version=7.5.0&da_version=3.3.17&aigc_features=app_lip_sync"
@@ -240,10 +240,11 @@ export interface JimengVodUploadCredentials {
 
 export async function getJimengUploadToken(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   session: JimengSessionBundle
   token: JimengUploadTokenInput
 }): Promise<JimengUploadTokenResult> {
-  const client = input.client ?? new JimengClient()
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
   const response = await client.requestText(`https://jimeng.jianying.com/mweb/v1/get_upload_token?${DEFAULT_QUERY}`, {
     method: "POST",
     headers: buildUploadTokenHeaders(input.session),
@@ -265,10 +266,11 @@ export async function getJimengUploadToken(input: {
 
 export async function uploadJimengImage(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   session: JimengSessionBundle
   image: JimengImageUploadInput
 }): Promise<JimengImageUploadResult> {
-  const client = input.client ?? new JimengClient()
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
   const token = await getJimengUploadToken({ client, session: input.session, token: { scene: 2 } })
   const credentials = parseImageUploadCredentials(token.body, input.image.serviceId)
   const contentType = input.image.contentType ?? contentTypeFromFileName(input.image.fileName)
@@ -304,10 +306,11 @@ export async function uploadJimengImage(input: {
 
 export async function uploadJimengVideo(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   session: JimengSessionBundle
   video: JimengVideoUploadInput
 }): Promise<JimengVideoUploadResult> {
-  const client = input.client ?? new JimengClient()
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
   const token = await getJimengUploadToken({ client, session: input.session, token: { scene: 1 } })
   const credentials = parseVodUploadCredentials(token.body, input.video.spaceName)
   const contentType = input.video.contentType ?? contentTypeFromFileName(input.video.fileName)
@@ -344,10 +347,11 @@ export async function uploadJimengVideo(input: {
 
 export async function applyJimengImageUpload(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   credentials: JimengImageUploadCredentials
   fileExtension?: string
 }): Promise<JimengImageXApplyResult> {
-  const client = input.client ?? new JimengClient()
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
   const params: Record<string, string> = {
     Action: "ApplyImageUpload",
     Version: "2018-08-01",
@@ -381,11 +385,12 @@ export async function applyJimengImageUpload(input: {
 
 export async function applyJimengVodUpload(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   credentials: JimengVodUploadCredentials
   fileName: string
   fileSize: number
 }): Promise<JimengVodApplyResult> {
-  const client = input.client ?? new JimengClient()
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
   const params: Record<string, string> = {
     Action: "ApplyUploadInner",
     Version: "2020-11-19",
@@ -422,11 +427,12 @@ export async function applyJimengVodUpload(input: {
 
 export async function uploadJimengVodBytes(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   apply: Pick<JimengVodApplyResult, "uploadHost" | "storeUri" | "authorization" | "uploadHeader">
   bytes: Uint8Array
   userId?: string
 }): Promise<JimengVodDirectUploadResult> {
-  const client = input.client ?? new JimengClient()
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
   const crc32 = crc32Hex(input.bytes)
   const bodyBuffer = new ArrayBuffer(input.bytes.byteLength)
   new Uint8Array(bodyBuffer).set(input.bytes)
@@ -453,10 +459,11 @@ export async function uploadJimengVodBytes(input: {
 
 export async function commitJimengVodUpload(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   credentials: JimengVodUploadCredentials
   sessionKey: string
 }): Promise<JimengVodCommitResult> {
-  const client = input.client ?? new JimengClient()
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
   const params = {
     Action: "CommitUploadInner",
     Version: "2020-11-19",
@@ -493,11 +500,12 @@ export async function commitJimengVodUpload(input: {
 
 export async function uploadJimengImageBytes(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   apply: Pick<JimengImageXApplyResult, "uploadHost" | "storeUri" | "authorization" | "uploadHeader">
   bytes: Uint8Array
   userId?: string
 }): Promise<JimengImageXDirectUploadResult> {
-  const client = input.client ?? new JimengClient()
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
   const crc32 = crc32Hex(input.bytes)
   const bodyBuffer = new ArrayBuffer(input.bytes.byteLength)
   new Uint8Array(bodyBuffer).set(input.bytes)
@@ -523,10 +531,11 @@ export async function uploadJimengImageBytes(input: {
 
 export async function commitJimengImageUpload(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   credentials: JimengImageUploadCredentials
   sessionKey: string
 }): Promise<JimengImageXCommitResult> {
-  const client = input.client ?? new JimengClient()
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
   const params = {
     Action: "CommitImageUpload",
     Version: "2018-08-01",

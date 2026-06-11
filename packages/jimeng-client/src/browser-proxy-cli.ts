@@ -4701,15 +4701,44 @@ async function main(argv: string[]): Promise<void> {
   if (args.command === "upload-token") {
     const dirs = ensureOutputDirs(path.resolve(args.outDir))
     const scene = parseUploadTokenScene(args.scene)
-    const result = await getJimengUploadToken({ session, token: { scene } })
     const runId = `upload-token-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
+    if (args.dryRun) {
+      writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
+        command: args.command,
+        endpoint: "/mweb/v1/get_upload_token",
+        method: "POST",
+        request: { scene },
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
+        browser_session: redactSession(session),
+      })
+      console.log(`[jimeng-browser-proxy] upload-token dry run saved scene=${scene}`)
+      return
+    }
+
+    const transport = createJimengHttpTransport({
+      mode: args.transportMode,
+      cassettePath,
+    })
+    const result = await getJimengUploadToken({ fetch: transport.fetch, session, token: { scene } })
     writeJson(path.join(dirs.rawDir, `${runId}.json`), {
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       http_status: result.httpStatus,
       response_text_sha256: result.responseTextSha256,
       body: result.body,
     })
     writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
       scene,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       http_status: result.httpStatus,
       ret: result.ret,
       errmsg: result.errmsg,
@@ -4726,6 +4755,7 @@ async function main(argv: string[]): Promise<void> {
     const sourceFile = path.resolve(args.file)
     const bytes = readFileSync(sourceFile)
     const runId = `upload-image-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
     const artifactFile = path.join(dirs.artifactsDir, path.basename(sourceFile))
     writeFileSync(artifactFile, bytes)
     const plan = {
@@ -4740,6 +4770,10 @@ async function main(argv: string[]): Promise<void> {
       artifact_copy: artifactFile,
       file_name: path.basename(sourceFile),
       bytes: bytes.byteLength,
+      transport: {
+        mode: args.transportMode,
+        cassette_path: cassettePath ?? null,
+      },
       browser_session: redactSession(session),
     }
     if (args.dryRun) {
@@ -4748,7 +4782,12 @@ async function main(argv: string[]): Promise<void> {
       return
     }
 
+    const transport = createJimengHttpTransport({
+      mode: args.transportMode,
+      cassettePath,
+    })
     const result = await uploadJimengImage({
+      fetch: transport.fetch,
       session,
       image: {
         fileName: path.basename(sourceFile),
@@ -4756,6 +4795,10 @@ async function main(argv: string[]): Promise<void> {
       },
     })
     writeJson(path.join(dirs.rawDir, `${runId}-raw.json`), {
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       token: {
         http_status: result.token.httpStatus,
         response_text_sha256: result.token.responseTextSha256,
@@ -4779,6 +4822,10 @@ async function main(argv: string[]): Promise<void> {
     })
     writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
       ...plan,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       token_summary: result.token.summary,
       image_upload: result.summary,
     })
@@ -4792,6 +4839,7 @@ async function main(argv: string[]): Promise<void> {
     const sourceFile = path.resolve(args.file)
     const bytes = readFileSync(sourceFile)
     const runId = `upload-video-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
     const artifactFile = path.join(dirs.artifactsDir, path.basename(sourceFile))
     writeFileSync(artifactFile, bytes)
     const plan = {
@@ -4806,6 +4854,10 @@ async function main(argv: string[]): Promise<void> {
       artifact_copy: artifactFile,
       file_name: path.basename(sourceFile),
       bytes: bytes.byteLength,
+      transport: {
+        mode: args.transportMode,
+        cassette_path: cassettePath ?? null,
+      },
       browser_session: redactSession(session),
     }
     if (args.dryRun) {
@@ -4814,7 +4866,12 @@ async function main(argv: string[]): Promise<void> {
       return
     }
 
+    const transport = createJimengHttpTransport({
+      mode: args.transportMode,
+      cassettePath,
+    })
     const result = await uploadJimengVideo({
+      fetch: transport.fetch,
       session,
       video: {
         fileName: path.basename(sourceFile),
@@ -4822,6 +4879,10 @@ async function main(argv: string[]): Promise<void> {
       },
     })
     writeJson(path.join(dirs.rawDir, `${runId}-raw.json`), {
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       token: {
         http_status: result.token.httpStatus,
         response_text_sha256: result.token.responseTextSha256,
@@ -4845,6 +4906,10 @@ async function main(argv: string[]): Promise<void> {
     })
     writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
       ...plan,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       token_summary: result.token.summary,
       video_upload: result.summary,
     })

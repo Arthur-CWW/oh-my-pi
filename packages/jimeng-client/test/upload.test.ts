@@ -1,7 +1,12 @@
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import path from "node:path"
 import { describe, expect, test } from "bun:test"
 import {
+  createJimengHttpTransport,
   getJimengUploadToken,
   parseUploadTokenScene,
+  readJimengHttpCassette,
   signJimengImageXRequest,
   summarizeUploadTokenBody,
   uploadJimengImage,
@@ -136,6 +141,51 @@ describe("Jimeng upload helpers", () => {
     expect(JSON.stringify(result.summary)).not.toContain("session-key")
   })
 
+  test("records and replays image upload through HTTP cassettes", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "jimeng-image-upload-cassette-"))
+    const cassettePath = path.join(dir, "image-upload.json")
+    const requests: Array<{ url: string; method: string; headers: Record<string, string>; bodyText: string | null; bodyBytes: number | null }> = []
+    const originalRandom = Math.random
+    try {
+      Math.random = () => 0.123456789
+      const recordTransport = createJimengHttpTransport({
+        mode: "record",
+        cassettePath,
+        nowIso: () => "2026-06-11T00:00:00.000Z",
+        fetch: mockImageUploadFetch(requests),
+      })
+
+      await uploadJimengImage({
+        fetch: recordTransport.fetch,
+        session,
+        image: {
+          fileName: "proof.png",
+          bytes: proofPng(),
+        },
+      })
+
+      expect(readJimengHttpCassette(cassettePath).entries).toHaveLength(4)
+      expect(requests.map((request) => request.method)).toEqual(["POST", "GET", "POST", "POST"])
+
+      Math.random = () => 0.123456789
+      const replayTransport = createJimengHttpTransport({ mode: "replay", cassettePath })
+      const replayed = await uploadJimengImage({
+        fetch: replayTransport.fetch,
+        session,
+        image: {
+          fileName: "proof.png",
+          bytes: proofPng(),
+        },
+      })
+
+      expect(replayed.summary.imageUris).toEqual(["tos-cn-i-tb4s082cfz/example.png"])
+      expect(JSON.stringify(replayed.summary)).not.toContain("auth-token")
+    } finally {
+      Math.random = originalRandom
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   test("uploads a local video through token, VOD apply, direct upload, and commit", async () => {
     const requests: Array<{ url: string; method: string; headers: Record<string, string>; bodyText: string | null; bodyBytes: number | null }> = []
     const client = new JimengClient({
@@ -192,6 +242,52 @@ describe("Jimeng upload helpers", () => {
     })
     expect(JSON.stringify(result.summary)).not.toContain("vod-auth")
     expect(JSON.stringify(result.summary)).not.toContain("vod-session-key")
+  })
+
+  test("records and replays video upload through HTTP cassettes", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "jimeng-video-upload-cassette-"))
+    const cassettePath = path.join(dir, "video-upload.json")
+    const requests: Array<{ url: string; method: string; headers: Record<string, string>; bodyText: string | null; bodyBytes: number | null }> = []
+    const originalRandom = Math.random
+    try {
+      Math.random = () => 0.123456789
+      const recordTransport = createJimengHttpTransport({
+        mode: "record",
+        cassettePath,
+        nowIso: () => "2026-06-11T00:00:00.000Z",
+        fetch: mockVideoUploadFetch(requests),
+      })
+
+      await uploadJimengVideo({
+        fetch: recordTransport.fetch,
+        session,
+        video: {
+          fileName: "reference.mp4",
+          bytes: proofMp4Bytes(),
+        },
+      })
+
+      expect(readJimengHttpCassette(cassettePath).entries).toHaveLength(4)
+      expect(requests.map((request) => request.method)).toEqual(["POST", "GET", "POST", "POST"])
+
+      Math.random = () => 0.123456789
+      const replayTransport = createJimengHttpTransport({ mode: "replay", cassettePath })
+      const replayed = await uploadJimengVideo({
+        fetch: replayTransport.fetch,
+        session,
+        video: {
+          fileName: "reference.mp4",
+          bytes: proofMp4Bytes(),
+        },
+      })
+
+      expect(replayed.summary.vid).toBe("v123")
+      expect(replayed.summary.uploadCrc32).toBe("6c9888e8")
+      expect(JSON.stringify(replayed.summary)).not.toContain("vod-auth")
+    } finally {
+      Math.random = originalRandom
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
 
