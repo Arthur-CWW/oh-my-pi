@@ -164,6 +164,10 @@ import {
   summarizeJimengText2ImageDirectPlan,
 } from "./text2image-plan"
 import {
+  buildJimengVideoDirectPlan,
+  summarizeJimengVideoDirectPlan,
+} from "./video-plan"
+import {
   buildJimengCanvasCustomRatiosRequest,
   buildJimengCanvasConversationListRequest,
   buildJimengCanvasProjectDetailRequest,
@@ -324,6 +328,7 @@ Commands:
   agent-catalog Fetch normalized agent skills and image/video model catalog
   image-models  Fetch no-spend image generation model/config catalog
   text2image-plan Build a no-spend direct text-to-image submit body
+  text2video-plan Build a no-spend direct text/image/frames-to-video submit body
   account-credit Fetch signed no-spend account credit balance
   commerce-benefits Fetch signed no-spend benefit metadata and user benefit rows
   commerce-pricing Fetch signed no-spend VIP and credit price lists
@@ -512,7 +517,8 @@ Options:
   --videoWidth <n>               Existing reference video width for lip-sync
   --videoHeight <n>              Existing reference video height for lip-sync
   --videoDurationSec <sec>       Existing reference video duration for lip-sync
-  --videoMode <value>            Lip-sync videoMode override from a confirmed frontend capture
+  --videoMode <value>            Lip-sync/video-plan videoMode override from a confirmed frontend capture
+  --fps <n>                      Direct text2video-plan frame rate (default: 24)
   --imageWidth <n>               Existing provider image width for lip-sync image/avatar mode
   --imageHeight <n>              Existing provider image height for lip-sync image/avatar mode
   --imageUrl <url>               Optional existing provider image preview URL for lip-sync image/avatar mode
@@ -822,6 +828,7 @@ interface CliArgs {
     | "agent-catalog"
     | "image-models"
     | "text2image-plan"
+    | "text2video-plan"
     | "account-credit"
     | "commerce-benefits"
     | "commerce-pricing"
@@ -1009,6 +1016,7 @@ interface CliArgs {
   ratio?: string
   videoResolution?: string
   resolution?: string
+  fps?: number
   modelVersion?: string
   modelReqKey?: string
   seed?: number
@@ -1171,6 +1179,77 @@ async function main(argv: string[]): Promise<void> {
     })
     writeFileSync(path.join(dirs.normalizedDir, `${runId}-summary.md`), writeJimengDiscoveryTriageCoverageMarkdown(coverage), "utf8")
     console.log(`[jimeng-browser-proxy] triage-coverage saved decisions=${coverage.decisions.join(",")} families=${coverage.familyCount} missing=${coverage.missingEndpointCount}`)
+    return
+  }
+
+  if (args.command === "text2image-plan") {
+    if (!args.prompt) throw new Error("text2image-plan requires --prompt")
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const runId = `text2image-plan-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const plan = buildJimengText2ImageDirectPlan({
+      prompt: args.prompt,
+      modelVersion: args.modelVersion,
+      modelReqKey: args.modelReqKey,
+      resolution: args.resolution,
+      ratio: args.ratio,
+      sampleStrength: args.sampleStrength,
+      negativePrompt: args.negativePrompt,
+      intelligentRatio: args.intelligentRatio,
+      seed: args.seed,
+      submitId: args.submitId,
+    })
+    writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
+      command: args.command,
+      endpoint: plan.endpoint,
+      method: plan.method,
+      query: plan.query,
+      request: plan.request,
+      draft_content: plan.draftContent,
+      metrics_extra: plan.metricsExtra,
+      live_submit: false,
+    })
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      summary: summarizeJimengText2ImageDirectPlan(plan),
+    })
+    console.log(`[jimeng-browser-proxy] text2image-plan saved model=${plan.modelReqKey} resolution=${plan.resolution} ratio=${plan.ratio} live_submit=false`)
+    return
+  }
+
+  if (args.command === "text2video-plan") {
+    if (!args.prompt) throw new Error("text2video-plan requires --prompt")
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const runId = `text2video-plan-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const videoMode = args.videoMode ? Number(args.videoMode) : undefined
+    const plan = buildJimengVideoDirectPlan({
+      prompt: args.prompt,
+      modelVersion: args.modelVersion,
+      modelReqKey: args.modelReqKey,
+      ratio: args.ratio,
+      videoResolution: args.videoResolution,
+      durationSec: args.durationSec,
+      fps: args.fps,
+      videoMode,
+      seed: args.seed,
+      submitId: args.submitId,
+      firstFrameUri: args.firstFrameUri,
+      lastFrameUri: args.lastFrameUri,
+    })
+    writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
+      command: args.command,
+      endpoint: plan.endpoint,
+      method: plan.method,
+      query: plan.query,
+      request: plan.request,
+      draft_content: plan.draftContent,
+      metrics_extra: plan.metricsExtra,
+      live_submit: false,
+    })
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      summary: summarizeJimengVideoDirectPlan(plan),
+    })
+    console.log(`[jimeng-browser-proxy] text2video-plan saved model=${plan.modelReqKey} resolution=${plan.videoResolution} ratio=${plan.ratio} duration=${plan.durationSec}s live_submit=false`)
     return
   }
 
@@ -1635,42 +1714,6 @@ async function main(argv: string[]): Promise<void> {
   }
 
   const session = await loadSession(args)
-
-  if (args.command === "text2image-plan") {
-    if (!args.prompt) throw new Error("text2image-plan requires --prompt")
-    const dirs = ensureOutputDirs(path.resolve(args.outDir))
-    const runId = `text2image-plan-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
-    const plan = buildJimengText2ImageDirectPlan({
-      prompt: args.prompt,
-      modelVersion: args.modelVersion,
-      modelReqKey: args.modelReqKey,
-      resolution: args.resolution,
-      ratio: args.ratio,
-      sampleStrength: args.sampleStrength,
-      negativePrompt: args.negativePrompt,
-      intelligentRatio: args.intelligentRatio,
-      seed: args.seed,
-      submitId: args.submitId,
-    })
-    writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
-      command: args.command,
-      endpoint: plan.endpoint,
-      method: plan.method,
-      query: plan.query,
-      request: plan.request,
-      draft_content: plan.draftContent,
-      metrics_extra: plan.metricsExtra,
-      browser_session: redactSession(session),
-      live_submit: false,
-      warning: "No request was sent. This is a direct text-to-image submit body plan for review before paid live generation.",
-    })
-    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
-      command: args.command,
-      summary: summarizeJimengText2ImageDirectPlan(plan),
-    })
-    console.log(`[jimeng-browser-proxy] text2image-plan saved model=${plan.modelReqKey} resolution=${plan.resolution} ratio=${plan.ratio} live_submit=false`)
-    return
-  }
 
   if (args.command === "endpoint-probe") {
     if (!args.endpoint) throw new Error("endpoint-probe requires --endpoint")
@@ -5390,6 +5433,7 @@ function parseArgs(argv: string[]): CliArgs {
     && command !== "agent-catalog"
     && command !== "image-models"
     && command !== "text2image-plan"
+    && command !== "text2video-plan"
     && command !== "account-credit"
     && command !== "commerce-benefits"
     && command !== "commerce-pricing"
@@ -5469,6 +5513,7 @@ function parseArgs(argv: string[]): CliArgs {
   const speed = flags.speed ? Number(flags.speed) : undefined
   const strength = flags.strength ? Number(flags.strength) : undefined
   const sampleStrength = flags.sampleStrength ? Number(flags.sampleStrength) : undefined
+  const fps = flags.fps ? Number(flags.fps) : undefined
   const contextLinesValue = flags.contextLines ?? flags["context-lines"]
   const contextLines = contextLinesValue ? Number(contextLinesValue) : undefined
   const seed = flags.seed ? Number(flags.seed) : undefined
@@ -5586,6 +5631,9 @@ function parseArgs(argv: string[]): CliArgs {
   }
   if (sampleStrength !== undefined && (!Number.isFinite(sampleStrength) || sampleStrength < 0 || sampleStrength > 1)) {
     throw new Error("--sampleStrength must be a number from 0 to 1")
+  }
+  if (fps !== undefined && (!Number.isInteger(fps) || fps < 1 || fps > 60)) {
+    throw new Error("--fps must be an integer from 1 to 60")
   }
   if (contextLines !== undefined && (!Number.isInteger(contextLines) || contextLines < 0 || contextLines > 20)) {
     throw new Error("--contextLines must be an integer from 0..20")
@@ -5723,6 +5771,7 @@ function parseArgs(argv: string[]): CliArgs {
     ratio: flags.ratio,
     videoResolution: flags.videoResolution,
     resolution: flags.resolution,
+    fps,
     modelVersion: flags.modelVersion,
     modelReqKey: flags.modelReqKey,
     seed,

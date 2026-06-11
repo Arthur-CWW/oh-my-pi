@@ -202,12 +202,23 @@ Direct text-to-image submit body planning is now no-spend dry-run-proved and Eff
 
 - `jimeng-browser-proxy text2image-plan`
 - builds the current direct `/mweb/v1/aigc_draft/generate` workbench submit body without sending it
+- this command now runs without loading a browser session; it is local request-builder proof only
 - uses frontend/static evidence from the current workbench path and `iptag/jimeng-api`-style direct request structure
 - useful flags: `--prompt`, `--modelVersion`, `--modelReqKey`, `--resolution`, `--ratio`, `--sampleStrength`, `--negativePrompt`, `--intelligentRatio`, `--seed`, and `--submitId`
 - validates the relied-on nested `extend`, `metrics_extra`, `draft_content`, `core_param`, `large_image_info`, and `sceneOptions` contract paths with Effect v4 / Effect Schema while tolerating additive provider fields
 - proof bundle: `data/jimeng-lab/proof-20260610-text2image-plan-direct/`
 - latest proof produced model `high_aes_general_v50`, resolution `2k`, ratio `9:16`, size `1440x2560`, `image_ratio=5`, and `live_submit=false`
 - live text-to-image generation is still not claimed; a fresh background CDP frontend submit capture is still needed before enabling/claiming paid live direct text-to-image submit.
+
+Direct text/image/frame-to-video submit body planning is now no-spend dry-run-proved and Effect Schema-backed:
+
+- `jimeng-browser-proxy text2video-plan`
+- builds the current direct `/mweb/v1/aigc_draft/generate` workbench video submit body without sending it or loading a browser session
+- uses local live-proof payload evidence from the current workbench path and keeps the request shape aligned with `BasicVideoGenerateButton`, `text_to_video_params`, `video_gen_inputs`, and `video_task_extra`
+- useful flags: `--prompt`, `--modelVersion`, `--modelReqKey`, `--ratio`, `--videoResolution`, `--durationSec`, `--fps`, `--videoMode`, `--seed`, `--submitId`, `--firstFrameUri`, and `--lastFrameUri`
+- validates the relied-on nested `extend`, `metrics_extra`, `draft_content`, `text_to_video_params`, `video_gen_inputs`, and `sceneOptions` contract paths with Effect v4 / Effect Schema while tolerating additive provider fields
+- local proof command: `jimeng-browser-proxy text2video-plan --prompt ... --ratio 9:16 --durationSec 5 --firstFrameUri ... --lastFrameUri ...`
+- live submit is still not claimed by this planner; paid/live generation remains behind explicit approval and the existing capture/compare gates.
 
 Signed account credit balance is now live-proved without generation spend and schema-backed:
 
