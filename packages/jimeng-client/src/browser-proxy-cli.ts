@@ -2148,6 +2148,7 @@ async function main(argv: string[]): Promise<void> {
       count: args.limit,
     }
     const runId = `research-keywords-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
     if (args.dryRun) {
       const requests = endpoints.flatMap((endpoint) => channels.map((channel) => {
         if (endpoint === "suggest" && channel === "asset") {
@@ -2172,6 +2173,10 @@ async function main(argv: string[]): Promise<void> {
         endpoint_sequence: requests.flatMap((request) => "path" in request ? [request.path] : []),
         query,
         requests,
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
         browser_session: redactSession(session),
       })
       writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
@@ -2181,18 +2186,30 @@ async function main(argv: string[]): Promise<void> {
         keyword: args.keyword ?? null,
         count: args.limit ?? 10,
         requests,
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
         dry_run: true,
       })
       console.log(`[jimeng-browser-proxy] research-keywords dry run saved requests=${requests.filter((request) => "path" in request).length}`)
       return
     }
 
-    const result = await fetchJimengResearchKeywords({ session, query })
+    const transport = createJimengHttpTransport({
+      mode: args.transportMode,
+      cassettePath,
+    })
+    const result = await fetchJimengResearchKeywords({ session, query, fetch: transport.fetch })
     writeJson(path.join(dirs.rawDir, `${runId}.json`), {
       endpoints: result.endpoints,
       channels: result.channels,
       keyword: result.keyword,
       count: result.count,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       skipped: result.skipped,
       results: result.results.map((item) => ({
         endpoint: item.endpoint,
@@ -2209,6 +2226,10 @@ async function main(argv: string[]): Promise<void> {
     })
     writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
       command: args.command,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       summary: summarizeJimengResearchKeywords(result),
     })
     console.log(`[jimeng-browser-proxy] research-keywords saved results=${result.results.length} items=${result.results.reduce((sum, item) => sum + item.items.length, 0)} skipped=${result.skipped.length}`)

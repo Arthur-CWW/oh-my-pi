@@ -1,14 +1,20 @@
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import path from "node:path"
 import { describe, expect, test } from "bun:test"
 import {
   buildJimengResearchGuessRequest,
   buildJimengResearchSuggestRequest,
+  createJimengHttpTransport,
   fetchJimengResearchKeywords,
   JimengClient,
   JimengError,
   parseJimengResearchKeywordChannels,
   parseJimengResearchKeywordEndpoints,
+  readJimengHttpCassette,
   summarizeJimengResearchKeywords,
   type JimengFetch,
+  type JimengResearchKeywordQuery,
   type JimengSessionBundle,
   type JsonObject,
 } from "../src"
@@ -111,6 +117,69 @@ describe("Jimeng research keyword helpers", () => {
         },
       ],
     })
+  })
+
+  test("can fetch suggestions and guesses through recorded and replayed HTTP transport cassettes", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "jimeng-research-keywords-cassette-"))
+    try {
+      const cassettePath = path.join(dir, "research-keywords.json")
+      const requests: Array<{ url: string; init?: RequestInit }> = []
+      const recordTransport = createJimengHttpTransport({
+        mode: "record",
+        cassettePath,
+        fetch: mockFetchSequence([
+          JSON.stringify(suggestBody()),
+          JSON.stringify(guessBody()),
+          JSON.stringify(emptyGuessBody()),
+        ], requests),
+        nowIso: () => "2026-06-11T00:00:00.000Z",
+      })
+
+      const query: JimengResearchKeywordQuery = {
+        endpoints: ["suggest", "guess"],
+        channels: ["inspiration", "asset"],
+        keyword: "韩系美妆",
+        count: 5,
+      }
+      const recorded = await fetchJimengResearchKeywords({
+        fetch: recordTransport.fetch,
+        session,
+        query,
+      })
+
+      expect(recorded.results).toHaveLength(3)
+      expect(recorded.skipped).toHaveLength(1)
+      expect(readJimengHttpCassette(cassettePath).entries).toHaveLength(3)
+      expect(requests).toHaveLength(3)
+
+      const replayTransport = createJimengHttpTransport({
+        mode: "replay",
+        cassettePath,
+      })
+      const replayed = await fetchJimengResearchKeywords({
+        fetch: replayTransport.fetch,
+        session,
+        query,
+      })
+
+      expect(summarizeJimengResearchKeywords(replayed)).toMatchObject({
+        result_count: 3,
+        skipped: [
+          {
+            endpoint: "suggest",
+            channel: "asset",
+            reason: expect.stringContaining("ret=1000"),
+          },
+        ],
+        results: [
+          { endpoint_id: "suggest", channel: "inspiration", item_count: 2 },
+          { endpoint_id: "guess", channel: "inspiration", item_count: 1 },
+          { endpoint_id: "guess", channel: "asset", item_count: 0 },
+        ],
+      })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   test("requires keyword only when suggestions are selected", async () => {
