@@ -93,6 +93,10 @@ const ProfileStoryListWireSchema = Schema.Struct({
   next_offset: Schema.Number,
 })
 
+const ProfileBatchItemListWireSchema = Schema.Struct({
+  effect_item_list: Schema.Array(JimengResearchItemWireSchema),
+})
+
 type ProfileUserWire = Schema.Schema.Type<typeof ProfileUserWireSchema>
 type ProfileStoryWire = Schema.Schema.Type<typeof ProfileStoryWireSchema>
 
@@ -104,11 +108,13 @@ export type JimengProfileResearchEndpoint =
   | "following"
   | "followers"
   | "item"
+  | "items"
 
 export interface JimengProfileResearchQuery {
   endpoints?: JimengProfileResearchEndpoint[]
   secUid?: string
   publishedItemId?: string
+  publishedItemIds?: string[]
   count?: number
   offset?: number
   imageTypeList?: number[]
@@ -184,7 +190,7 @@ export interface JimengProfileResearchBundle {
 
 export function parseJimengProfileResearchEndpoints(value: string | undefined): JimengProfileResearchEndpoint[] {
   if (!value) return ["profile", "homepage", "favorites", "stories"]
-  if (value === "all") return ["profile", "homepage", "favorites", "stories", "following", "followers", "item"]
+  if (value === "all") return ["profile", "homepage", "favorites", "stories", "following", "followers", "item", "items"]
   const allowed = new Set<JimengProfileResearchEndpoint>([
     "profile",
     "homepage",
@@ -193,6 +199,7 @@ export function parseJimengProfileResearchEndpoints(value: string | undefined): 
     "following",
     "followers",
     "item",
+    "items",
   ])
   const endpoints: JimengProfileResearchEndpoint[] = []
   for (const raw of value.split(",")) {
@@ -202,7 +209,7 @@ export function parseJimengProfileResearchEndpoints(value: string | undefined): 
       throw jimengError({
         category: "validation",
         code: "PROFILE_RESEARCH_ENDPOINT_INVALID",
-        message: "profile-research --endpoints must use profile, homepage, favorites, stories, following, followers, item, or all.",
+        message: "profile-research --endpoints must use profile, homepage, favorites, stories, following, followers, item, items, or all.",
         retryable: false,
         details: { endpoint, allowed: Array.from(allowed) },
       })
@@ -233,6 +240,21 @@ export function parseJimengProfileImageTypeList(value: string | undefined): numb
     })
   }
   return Array.from(new Set(values))
+}
+
+export function parseJimengPublishedItemIds(value: string | undefined): string[] | undefined {
+  if (!value) return undefined
+  const ids = value.split(",").map((part) => part.trim()).filter(Boolean)
+  if (ids.length === 0) {
+    throw jimengError({
+      category: "validation",
+      code: "PROFILE_RESEARCH_ITEM_IDS_INVALID",
+      message: "profile-research --publishedItemIds must be a comma-separated list of item ids.",
+      retryable: false,
+      details: { value },
+    })
+  }
+  return Array.from(new Set(ids))
 }
 
 export function buildJimengProfileUserRequest(secUid: string): JsonObject {
@@ -283,6 +305,11 @@ export function buildJimengProfileItemRequest(publishedItemId: string): JsonObje
   return { published_item_id: requireText(publishedItemId, "--publishedItemId") }
 }
 
+export function buildJimengProfileBatchItemsRequest(publishedItemIds: string[]): JsonObject {
+  const ids = normalizePublishedItemIds(publishedItemIds)
+  return { item_id_list: ids }
+}
+
 export async function fetchJimengProfileResearch(input: {
   client?: JimengClient
   session: JimengSessionBundle
@@ -303,6 +330,10 @@ export async function fetchJimengProfileResearch(input: {
     }
     if (endpoint === "item" && !query.publishedItemId?.trim()) {
       skipped.push({ endpoint, reason: "missing --publishedItemId" })
+      continue
+    }
+    if (endpoint === "items" && !query.publishedItemIds?.length) {
+      skipped.push({ endpoint, reason: "missing --publishedItemIds" })
       continue
     }
     results.push(await fetchProfileEndpoint({ client, session: input.session, endpoint, query }))
@@ -412,6 +443,20 @@ async function fetchProfileEndpoint(input: {
     }
   }
 
+  if (input.endpoint === "items") {
+    const decoded = decodeContract(ProfileBatchItemListWireSchema, data, endpointPath)
+    return {
+      ...common,
+      profile: null,
+      profiles: [],
+      items: decoded.effect_item_list.map(normalizeJimengResearchItem),
+      stories: [],
+      hasMore: null,
+      nextOffset: null,
+      totalCount: decoded.effect_item_list.length,
+    }
+  }
+
   if (input.endpoint === "stories") {
     const decoded = decodeContract(ProfileStoryListWireSchema, data, endpointPath)
     return {
@@ -454,6 +499,8 @@ function requestFor(endpoint: JimengProfileResearchEndpoint, query: JimengProfil
       return buildJimengProfileFollowRequest(endpoint, query)
     case "item":
       return buildJimengProfileItemRequest(requireText(query.publishedItemId, "--publishedItemId"))
+    case "items":
+      return buildJimengProfileBatchItemsRequest(query.publishedItemIds ?? [])
   }
 }
 
@@ -472,6 +519,8 @@ function endpointPathFor(endpoint: JimengProfileResearchEndpoint): string {
       return "/mweb/v1/get_follow_list"
     case "item":
       return "/mweb/v1/get_item_info"
+    case "items":
+      return "/mweb/v1/mget_item_info"
   }
 }
 
@@ -641,6 +690,14 @@ function normalizeImageTypeList(value: number[] | undefined): number[] {
     })
   }
   return Array.from(new Set(normalized))
+}
+
+function normalizePublishedItemIds(value: string[]): string[] {
+  const ids = value.map((item) => item.trim()).filter(Boolean)
+  if (ids.length === 0) {
+    throw validationError("profile-research --publishedItemIds must include at least one id", {})
+  }
+  return Array.from(new Set(ids))
 }
 
 function normalizeId(value: string | number): { value: string | null; unsafe: boolean } {

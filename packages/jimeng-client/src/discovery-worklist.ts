@@ -397,7 +397,7 @@ const KNOWN_ENDPOINTS: JimengDiscoveryKnownEndpoint[] = [
   known("/mweb/v1/get_user_story_list", "implemented", "profile-research", "No-spend public profile story/archive listing by sec_uid; current proof returned an empty but valid story_list."),
   known("/mweb/v1/get_follow_list", "implemented", "profile-research", "No-spend current-account following/follower listing; this endpoint does not accept a public target sec_uid."),
   known("/mweb/v1/get_item_info", "implemented", "profile-research", "No-spend published work detail with generation prompt, model, reference frame, media, and engagement metadata."),
-  known("/mweb/v1/mget_item_info", "blocked", null, "Batch published work detail needs exact frontend payload recovery; safe published_item_ids/item_ids/ids variants returned ret=1000 invalid parameter."),
+  known("/mweb/v1/mget_item_info", "implemented", "profile-research", "No-spend batch published work detail by item_id_list; frontend callers pass itemIdList before snake-case conversion."),
   known("/mweb/v1/workspace/list", "implemented", "workspace-context", "No-spend workspace listing for logged-in project/workspace context."),
   known("/mweb/v1/workspace/get_by_ids", "implemented", "workspace-context", "No-spend workspace lookup by ids inferred from workspace list or supplied explicitly."),
   known("/mweb/search/v1/sug", "implemented", "research-keywords", "No-spend keyword suggestions for inspiration and short-film research channels; asset suggestions are explicitly skipped after ret=1000 proof."),

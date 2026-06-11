@@ -3256,13 +3256,38 @@ stories: ret=0, story_count=0, has_more=false, next_offset=0
 
 Note: the CLI flag parser accepts `--dryRun`, not `--dry-run`; a mistakenly named `proof-20260611-profile-research-stories-dry-run` directory contains a live no-spend read because the kebab-case flag was ignored. Use `proof-20260611-profile-research-stories-dryrun/` for the clean dry-run manifest.
 
-Batch item detail `/mweb/v1/mget_item_info` remains blocked. No-spend probes under `data/jimeng-lab/proof-20260611-probe-mget-item-info/` returned `ret=1000 invalid parameter` for `published_item_ids`, `item_ids`, `ids`, and `published_item_id_list`; static evidence shows a frontend conversion layer around `getWorkDetails`, so the next step is recovering an exact caller payload or UI capture.
+Batch item detail `/mweb/v1/mget_item_info` is implemented as the `items` endpoint after static caller recovery showed `getWorkDetails({ itemIdList })`, which snake-cases to `item_id_list`.
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts profile-research \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --endpoints items \
+  --publishedItemIds 7524730786826751247,7572448714904603931 \
+  --dryRun \
+  --outDir data/jimeng-lab/proof-20260611-profile-research-batch-items-dryrun
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts profile-research \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --endpoints items \
+  --publishedItemIds 7524730786826751247,7572448714904603931 \
+  --outDir data/jimeng-lab/proof-20260611-profile-research-batch-items-live
+```
+
+Result:
+
+```txt
+profile-research dry run saved requests=1
+profile-research saved results=1 items=2 profiles=0 skipped=0
+batch item detail: ret=0, body={ item_id_list: [...] }, 2 normalized work rows
+```
+
+The earlier no-spend probes under `data/jimeng-lab/proof-20260611-probe-mget-item-info/` returned `ret=1000 invalid parameter` for guessed fields. The successful endpoint-probe proof under `data/jimeng-lab/proof-20260611-probe-mget-item-info-item-id-list/` returned `ret=0` for `item_id_list` and download-oriented `pack_item_opt` variants; the CLI exposes only the simple read shape for now.
 
 Refreshed static inventory:
 
 ```txt
 resources=251
-known_status_counts=unknown:118,partial:4,implemented:51,dry_run_only:4,blocked:71,captured_only:2,cataloged_only:1
+known_status_counts=unknown:118,partial:4,implemented:52,dry_run_only:4,blocked:70,captured_only:2,cataloged_only:1
 ```
 
 ## Verification

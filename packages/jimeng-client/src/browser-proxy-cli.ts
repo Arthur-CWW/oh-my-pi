@@ -179,6 +179,7 @@ import {
   summarizeJimengResearchSearch,
 } from "./research-search"
 import {
+  buildJimengProfileBatchItemsRequest,
   buildJimengProfileFavoritesRequest,
   buildJimengProfileFollowRequest,
   buildJimengProfileHomepageRequest,
@@ -186,6 +187,7 @@ import {
   buildJimengProfileStoriesRequest,
   buildJimengProfileUserRequest,
   fetchJimengProfileResearch,
+  parseJimengPublishedItemIds,
   parseJimengProfileImageTypeList,
   parseJimengProfileResearchEndpoints,
   summarizeJimengProfileResearch,
@@ -353,7 +355,7 @@ Options:
                                   agent-catalog accepts skills,config,all
                                   infinite-canvas accepts projects,detail,ratios,conversations,all
                                   research-keywords accepts suggest,guess,all
-                                  profile-research accepts profile,homepage,favorites,stories,following,followers,item,all
+                                  profile-research accepts profile,homepage,favorites,stories,following,followers,item,items,all
   --channels <ids|all>           Research channels: inspiration,short-film,asset,all
   --channel <id>                 research-search channel: inspiration, short-film, or asset
   --searchId <id>                research-search continuation search id
@@ -363,6 +365,7 @@ Options:
   --showTypeList <csv>           Optional asset search show_type_list integers
   --secUid <id>                  Public profile sec_uid for profile-research
   --publishedItemId <id>         Published work id for profile-research item detail
+  --publishedItemIds <csv>       Published work ids for profile-research batch item details
   --imageTypeList <csv>          Profile homepage/favorites image type filters (default: 3,4,7)
   --needIntentionMark <bool>     Inspiration/short-film intention-mark option (default: true)
   --isInsertFrame <bool>         Optional asset search insert-frame filter
@@ -820,6 +823,7 @@ interface CliArgs {
   showTypeList?: number[]
   secUid?: string
   publishedItemId?: string
+  publishedItemIds?: string[]
   imageTypeList?: number[]
   needIntentionMark?: boolean
   isInsertFrame?: boolean
@@ -1951,6 +1955,7 @@ async function main(argv: string[]): Promise<void> {
       endpoints,
       secUid: args.secUid,
       publishedItemId: args.publishedItemId,
+      publishedItemIds: args.publishedItemIds,
       count: args.limit,
       offset: args.offset,
       imageTypeList: args.imageTypeList,
@@ -1958,6 +1963,7 @@ async function main(argv: string[]): Promise<void> {
     }
     const requests = endpoints.flatMap((endpoint) => {
       if (endpoint === "item" && !args.publishedItemId) return []
+      if (endpoint === "items" && !args.publishedItemIds?.length) return []
       const request = endpoint === "profile"
         ? buildJimengProfileUserRequest(args.secUid ?? "")
         : endpoint === "homepage"
@@ -1968,7 +1974,9 @@ async function main(argv: string[]): Promise<void> {
               ? buildJimengProfileStoriesRequest(query)
               : endpoint === "following" || endpoint === "followers"
                 ? buildJimengProfileFollowRequest(endpoint, query)
-                : buildJimengProfileItemRequest(args.publishedItemId ?? "")
+                : endpoint === "item"
+                  ? buildJimengProfileItemRequest(args.publishedItemId ?? "")
+                  : buildJimengProfileBatchItemsRequest(args.publishedItemIds ?? [])
       const pathName = endpoint === "profile"
         ? "/mweb/v1/get_user_info"
         : endpoint === "homepage"
@@ -1979,7 +1987,9 @@ async function main(argv: string[]): Promise<void> {
               ? "/mweb/v1/get_user_story_list"
               : endpoint === "following" || endpoint === "followers"
                 ? "/mweb/v1/get_follow_list"
-                : "/mweb/v1/get_item_info"
+                : endpoint === "item"
+                  ? "/mweb/v1/get_item_info"
+                  : "/mweb/v1/mget_item_info"
       return [{ endpoint, path: pathName, request }]
     })
     const runId = `profile-research-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
@@ -1988,9 +1998,14 @@ async function main(argv: string[]): Promise<void> {
         command: args.command,
         endpoint_sequence: requests.map((request) => request.path),
         requests,
-        skipped: endpoints.includes("item") && !args.publishedItemId
-          ? [{ endpoint: "item", reason: "missing --publishedItemId" }]
-          : [],
+        skipped: [
+          ...(endpoints.includes("item") && !args.publishedItemId
+            ? [{ endpoint: "item", reason: "missing --publishedItemId" }]
+            : []),
+          ...(endpoints.includes("items") && !args.publishedItemIds?.length
+            ? [{ endpoint: "items", reason: "missing --publishedItemIds" }]
+            : []),
+        ],
         browser_session: redactSession(session),
         live_request: false,
       })
@@ -4201,6 +4216,7 @@ function parseArgs(argv: string[]): CliArgs {
     showTypeList: parseJimengResearchShowTypeList(flags.showTypeList),
     secUid: flags.secUid,
     publishedItemId: flags.publishedItemId,
+    publishedItemIds: parseJimengPublishedItemIds(flags.publishedItemIds),
     imageTypeList: parseJimengProfileImageTypeList(flags.imageTypeList),
     needIntentionMark,
     isInsertFrame,

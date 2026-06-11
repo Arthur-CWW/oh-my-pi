@@ -56,7 +56,7 @@ As of 2026-06-10, the committed Jimeng CLI baseline is:
 - `a124c30 Classify LV read-state blockers`
 - `1d423bd Add Jimeng rate probe CLI`
 - `52b0724 Use Effect Schema for Jimeng workspace context`
-- current checkpoint: Effect Schema-backed no-spend `profile-research` for public reference profiles/works/stories and current-account follow lists; static inventory now reports `implemented=51`, `blocked=71`, `unknown=118`
+- current checkpoint: Effect Schema-backed no-spend `profile-research` for public reference profiles/works/stories/item details and current-account follow lists; static inventory now reports `implemented=52`, `blocked=70`, `unknown=118`
 
 If the thread goal object lags behind this file after a pause, resume from this document and the latest Git checkpoint. The active working rule is: background-only reversal, direct/API-first implementation, small proven CLI slices, tests and proof artifacts before each commit, and no async daemon until the API surface is settled.
 
@@ -666,17 +666,19 @@ Full Jimeng research search is now live-proved without generation spend:
 Jimeng reference-profile research is now live-proved without generation spend:
 
 - `jimeng-browser-proxy profile-research`
-- public target reads: profile metadata, homepage works, favorites, stories, and published item detail
+- public target reads: profile metadata, homepage works, favorites, stories, single published item detail, and batch published item detail
 - current-account reads: following and followers; the frontend request does not include a target `sec_uid`, so normalized output labels these results `current-account`
-- useful flags: `--endpoints`, `--secUid`, `--publishedItemId`, `--limit`, `--offset`, `--imageTypeList`, and `--feed-refer`
+- useful flags: `--endpoints`, `--secUid`, `--publishedItemId`, `--publishedItemIds`, `--limit`, `--offset`, `--imageTypeList`, and `--feed-refer`
 - Effect Schema enforces the relied-on profile/list/item paths while accepting additive provider fields
 - normalized works include generation prompt, model key/name, generate type, aspect ratio, seed, first-frame provider URI/dimensions, image/video dimensions and duration, hashtags, and engagement counters
 - dry-run proof: `data/jimeng-lab/proof-20260611-profile-research-cli-dry-run/`
 - story dry-run proof: `data/jimeng-lab/proof-20260611-profile-research-stories-dryrun/`
 - story live proof: `data/jimeng-lab/proof-20260611-profile-research-stories-live/` returned one successful story-list result with `story_count=0`, `has_more=false`, and `next_offset=0`
 - live proof: `data/jimeng-lab/proof-20260611-profile-research-cli-live/` returned 6 successful endpoint results, 3 work/detail rows, and 7 profile rows before the story endpoint was added
-- refreshed inventory proof: `data/jimeng-lab/proof-20260611-static-inventory-profile-stories/` reports `implemented=51`, `unknown=118`, `partial=4`, and `blocked=71`
-- blocked batch proof: `data/jimeng-lab/proof-20260611-probe-mget-item-info/` shows `/mweb/v1/mget_item_info` returned `ret=1000 invalid parameter` for safe id-list variants; recover the exact frontend `getWorkDetails` payload before promoting it
+- batch dry-run proof: `data/jimeng-lab/proof-20260611-profile-research-batch-items-dryrun/`
+- batch live proof: `data/jimeng-lab/proof-20260611-profile-research-batch-items-live/` returned one successful batch result with 2 normalized work rows
+- refreshed inventory proof: `data/jimeng-lab/proof-20260611-static-inventory-profile-batch-items/` reports `implemented=52`, `unknown=118`, `partial=4`, and `blocked=70`
+- successful batch probe: `data/jimeng-lab/proof-20260611-probe-mget-item-info-item-id-list/` shows `/mweb/v1/mget_item_info` accepts `item_id_list`; earlier guessed-field probes under `data/jimeng-lab/proof-20260611-probe-mget-item-info/` are superseded
 - normalized proofs contain no credential markers or signed media URL values
 
 The next slice is **lip-sync submit capture and reference-video consumers**. Use the VOD provider reference, ImageX avatar reference, and frontend captures to unlock live lip-sync, reference-video, multimodal/all-around reference, pose/style/depth/canny controls, and live end-frame/multi-frame image-to-video paths.

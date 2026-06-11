@@ -3,12 +3,14 @@ import {
   buildJimengProfileFavoritesRequest,
   buildJimengProfileFollowRequest,
   buildJimengProfileHomepageRequest,
+  buildJimengProfileBatchItemsRequest,
   buildJimengProfileItemRequest,
   buildJimengProfileStoriesRequest,
   buildJimengProfileUserRequest,
   fetchJimengProfileResearch,
   JimengClient,
   JimengError,
+  parseJimengPublishedItemIds,
   parseJimengProfileImageTypeList,
   parseJimengProfileResearchEndpoints,
   summarizeJimengProfileResearch,
@@ -36,10 +38,13 @@ describe("Jimeng profile research", () => {
       "following",
       "followers",
       "item",
+      "items",
     ])
     expect(() => parseJimengProfileResearchEndpoints("videos")).toThrow("profile-research --endpoints")
     expect(() => parseJimengProfileResearchEndpoints(",")).toThrow("at least one endpoint")
     expect(parseJimengProfileImageTypeList("3,4,7,3")).toEqual([3, 4, 7])
+    expect(parseJimengPublishedItemIds("7524730786826751247,7572448714904603931,7524730786826751247"))
+      .toEqual(["7524730786826751247", "7572448714904603931"])
 
     expect(buildJimengProfileUserRequest("sec-1")).toEqual({ sec_uid: "sec-1" })
     expect(buildJimengProfileHomepageRequest({
@@ -81,6 +86,9 @@ describe("Jimeng profile research", () => {
     expect(buildJimengProfileItemRequest("7524730786826751247")).toEqual({
       published_item_id: "7524730786826751247",
     })
+    expect(buildJimengProfileBatchItemsRequest(["7524730786826751247", "7572448714904603931"])).toEqual({
+      item_id_list: ["7524730786826751247", "7572448714904603931"],
+    })
   })
 
   test("fetches public profile works, current-account follows, and item detail sequentially", async () => {
@@ -94,6 +102,7 @@ describe("Jimeng profile research", () => {
         JSON.stringify(followListBody()),
         JSON.stringify(followListBody([])),
         JSON.stringify(itemDetailBody()),
+        JSON.stringify(batchItemDetailBody()),
       ], requests),
     })
 
@@ -104,6 +113,7 @@ describe("Jimeng profile research", () => {
         endpoints: parseJimengProfileResearchEndpoints("all"),
         secUid: "sec-public-1",
         publishedItemId: "7524730786826751247",
+        publishedItemIds: ["7524730786826751247", "7572448714904603931"],
         count: 6,
       },
     })
@@ -117,10 +127,14 @@ describe("Jimeng profile research", () => {
       "/mweb/v1/get_follow_list",
       "/mweb/v1/get_follow_list",
       "/mweb/v1/get_item_info",
+      "/mweb/v1/mget_item_info",
     ])
     expect(JSON.parse(String(requests[3]?.init?.body))).toMatchObject({ sec_uid: "sec-public-1", count: 6 })
     expect(JSON.parse(String(requests[4]?.init?.body))).toMatchObject({ list_type: 1 })
     expect(JSON.parse(String(requests[5]?.init?.body))).toMatchObject({ list_type: 2 })
+    expect(JSON.parse(String(requests[7]?.init?.body))).toEqual({
+      item_id_list: ["7524730786826751247", "7572448714904603931"],
+    })
     expect(result.results.find((item) => item.endpointId === "profile")?.profile).toMatchObject({
       name: "Sora",
       secUid: "sec-public-1",
@@ -150,8 +164,9 @@ describe("Jimeng profile research", () => {
       coverHeight: 1280,
     })
     expect(result.results.find((item) => item.endpointId === "item")?.items).toHaveLength(1)
+    expect(result.results.find((item) => item.endpointId === "items")?.items).toHaveLength(2)
     expect(summary).toMatchObject({
-      result_count: 7,
+      result_count: 8,
       skipped: [],
       results: expect.arrayContaining([
         expect.objectContaining({
@@ -174,6 +189,11 @@ describe("Jimeng profile research", () => {
             }),
           ],
         }),
+        expect.objectContaining({
+          endpoint_id: "items",
+          item_count: 2,
+          total_count: 2,
+        }),
       ]),
     })
     const summaryText = JSON.stringify(summary)
@@ -189,12 +209,15 @@ describe("Jimeng profile research", () => {
       client: listClient,
       session,
       query: {
-        endpoints: ["following", "item"],
+        endpoints: ["following", "item", "items"],
         count: 5,
       },
     })
     expect(result.results.map((item) => item.endpointId)).toEqual(["following"])
-    expect(result.skipped).toEqual([{ endpoint: "item", reason: "missing --publishedItemId" }])
+    expect(result.skipped).toEqual([
+      { endpoint: "item", reason: "missing --publishedItemId" },
+      { endpoint: "items", reason: "missing --publishedItemIds" },
+    ])
 
     const driftClient = new JimengClient({
       fetch: mockFetchSequence([
@@ -312,10 +335,26 @@ function itemDetailBody(): JsonObject {
   }
 }
 
-function profileItem(): JsonObject {
+function batchItemDetailBody(): JsonObject {
+  return {
+    ret: "0",
+    errmsg: "success",
+    data: {
+      effect_item_list: [
+        profileItem("7524730786826751247"),
+        profileItem("7572448714904603931"),
+      ],
+      deduct_list: null,
+      dto_list: null,
+      additive_provider_field: true,
+    },
+  }
+}
+
+function profileItem(id = "7524730786826751247"): JsonObject {
   return {
     common_attr: {
-      id: "7524730786826751247",
+      id,
       title: "K-beauty hook",
       description: "",
       cover_uri: "tos-cn-p/cover-1",
