@@ -201,14 +201,17 @@ Direct image model config is now live-proved without generation spend and schema
 Direct text-to-image submit body planning is now no-spend dry-run-proved and Effect Schema-backed:
 
 - `jimeng-browser-proxy text2image-plan`
+- `jimeng-browser-proxy text2image-compare`
 - builds the current direct `/mweb/v1/aigc_draft/generate` workbench submit body without sending it
 - this command now runs without loading a browser session; it is local request-builder proof only
+- compares that dry-run body offline against a passive raw CDP network capture or capture-template request before live submit is claimed
 - uses frontend/static evidence from the current workbench path and `iptag/jimeng-api`-style direct request structure
 - useful flags: `--prompt`, `--modelVersion`, `--modelReqKey`, `--resolution`, `--ratio`, `--sampleStrength`, `--negativePrompt`, `--intelligentRatio`, `--seed`, and `--submitId`
 - validates the relied-on nested `extend`, `metrics_extra`, `draft_content`, `core_param`, `large_image_info`, and `sceneOptions` contract paths with Effect v4 / Effect Schema while tolerating additive provider fields
 - proof bundle: `data/jimeng-lab/proof-20260610-text2image-plan-direct/`
 - latest proof produced model `high_aes_general_v50`, resolution `2k`, ratio `9:16`, size `1440x2560`, `image_ratio=5`, and `live_submit=false`
-- live text-to-image generation is still not claimed; a fresh background CDP frontend submit capture is still needed before enabling/claiming paid live direct text-to-image submit.
+- compare proof command: `jimeng-browser-proxy text2image-compare --plan data/jimeng-lab/<proof>/raw/<text2image-plan>-dry-run-plan.json --rawNetwork data/jimeng-captures/<capture>/raw-network.jsonl --outDir data/jimeng-lab/text2image-compare`
+- live text-to-image generation is still not claimed; a fresh background CDP frontend submit capture should be compared before enabling/claiming paid live direct text-to-image submit.
 
 Direct text/image/frame-to-video submit body planning is now no-spend dry-run-proved and Effect Schema-backed:
 

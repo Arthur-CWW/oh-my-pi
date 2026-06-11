@@ -164,6 +164,11 @@ import {
   summarizeJimengText2ImageDirectPlan,
 } from "./text2image-plan"
 import {
+  compareJimengText2ImageDirectPlanWithCaptureTemplate,
+  compareJimengText2ImageDirectPlanWithRawNetwork,
+  summarizeJimengText2ImageDirectCompare,
+} from "./text2image-plan-compare"
+import {
   buildJimengVideoDirectPlan,
   summarizeJimengVideoDirectPlan,
 } from "./video-plan"
@@ -333,6 +338,7 @@ Commands:
   agent-catalog Fetch normalized agent skills and image/video model catalog
   image-models  Fetch no-spend image generation model/config catalog
   text2image-plan Build a no-spend direct text-to-image submit body
+  text2image-compare Offline compare a direct text-to-image dry-run plan against captured UI submit
   text2video-plan Build a no-spend direct text/image/frames-to-video submit body
   text2video-compare Offline compare a direct video dry-run plan against captured UI submit
   account-credit Fetch signed no-spend account credit balance
@@ -409,7 +415,7 @@ Options:
   --includeRisky                Include generate/upload/mutate/payment endpoints in replay candidate JSON
   --includeKnown                Include already-covered endpoints in discovery-worklist/static-inventory
   --decisions <ids>             Triage decisions for triage-coverage: keep,maybe,skip (default: keep)
-  --plan <file>                 Dry-run plan JSON for lip-sync-compare/text2video-compare
+  --plan <file>                 Dry-run plan JSON for *-compare commands
   --endpoint <path|url>          Endpoint path or full URL for endpoint-probe
   --method <GET|POST>            HTTP method for endpoint-probe/capcut-probe (default: POST)
   --query <query>                Query string override for endpoint-probe
@@ -588,6 +594,11 @@ Examples:
     --resolution 2k \\
     --ratio 9:16 \\
     --sampleStrength 0.5
+
+  jimeng-browser-proxy text2image-compare \\
+    --plan data/jimeng-lab/text2image-plan/raw/text2image-plan-<run>-dry-run-plan.json \\
+    --rawNetwork data/jimeng-captures/<capture>/raw-network.jsonl \\
+    --outDir data/jimeng-lab/text2image-compare
 
   jimeng-browser-proxy voices \\
     --capture data/jimeng-captures/<run>/capture-template.raw.json
@@ -839,6 +850,7 @@ interface CliArgs {
     | "agent-catalog"
     | "image-models"
     | "text2image-plan"
+    | "text2image-compare"
     | "text2video-plan"
     | "text2video-compare"
     | "account-credit"
@@ -1225,6 +1237,32 @@ async function main(argv: string[]): Promise<void> {
       summary: summarizeJimengText2ImageDirectPlan(plan),
     })
     console.log(`[jimeng-browser-proxy] text2image-plan saved model=${plan.modelReqKey} resolution=${plan.resolution} ratio=${plan.ratio} live_submit=false`)
+    return
+  }
+
+  if (args.command === "text2image-compare") {
+    if (!args.plan) throw new Error("text2image-compare requires --plan")
+    if (!args.rawNetwork && !args.captureDir && !args.capture) {
+      throw new Error("text2image-compare requires --rawNetwork, --captureDir, or --capture")
+    }
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const runId = `text2image-compare-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const dryRunPlanText = readFileSync(path.resolve(args.plan), "utf8")
+    const result = args.capture
+      ? compareJimengText2ImageDirectPlanWithCaptureTemplate({
+        dryRunPlanText,
+        captureTemplateText: readFileSync(path.resolve(args.capture), "utf8"),
+      })
+      : compareJimengText2ImageDirectPlanWithRawNetwork({
+        dryRunPlanText,
+        rawNetworkText: readFileSync(resolveRawNetworkFile(args), "utf8"),
+      })
+    writeJson(path.join(dirs.rawDir, `${runId}.json`), result)
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      summary: summarizeJimengText2ImageDirectCompare(result),
+    })
+    console.log(`[jimeng-browser-proxy] text2image-compare saved match=${result.match} candidates=${result.candidate_count}`)
     return
   }
 
@@ -5471,6 +5509,7 @@ function parseArgs(argv: string[]): CliArgs {
     && command !== "agent-catalog"
     && command !== "image-models"
     && command !== "text2image-plan"
+    && command !== "text2image-compare"
     && command !== "text2video-plan"
     && command !== "text2video-compare"
     && command !== "account-credit"

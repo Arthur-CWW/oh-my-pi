@@ -91,5 +91,6 @@ Why it is not important now:
 
 ## Generation Compare Gates
 
+- Direct image plans: use `jimeng-browser-proxy text2image-plan` to build a no-session dry-run request and `jimeng-browser-proxy text2image-compare` to compare it against a passive raw CDP/capture-template submit request before live submit is claimed.
 - Direct video plans: use `jimeng-browser-proxy text2video-plan` to build a no-session dry-run request and `jimeng-browser-proxy text2video-compare` to compare it against a passive raw CDP/capture-template submit request before live submit is claimed.
 - Lip-sync plans: keep using `jimeng-browser-proxy lip-sync-compare` because the meaningful payload is nested under provider-specific `videoGenInputs`.

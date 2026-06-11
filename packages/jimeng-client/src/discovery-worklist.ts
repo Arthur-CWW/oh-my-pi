@@ -519,6 +519,7 @@ function suggestedCommandsForCandidate(
   }
   if (action === "compare_dry_run_before_live") {
     return [
+      "jimeng-browser-proxy text2image-compare --plan data/jimeng-lab/<proof>/raw/<text2image-plan>-dry-run-plan.json --rawNetwork data/jimeng-captures/<capture>/raw-network.jsonl --outDir data/jimeng-lab/proof-<date>-text2image-compare",
       "jimeng-browser-proxy text2video-compare --plan data/jimeng-lab/<proof>/raw/<text2video-plan>-dry-run-plan.json --rawNetwork data/jimeng-captures/<capture>/raw-network.jsonl --outDir data/jimeng-lab/proof-<date>-text2video-compare",
       "jimeng-browser-proxy lip-sync-compare --plan data/jimeng-lab/<proof>/raw/<dry-run-plan>.json --rawNetwork data/jimeng-captures/<capture>/raw-network.jsonl --outDir data/jimeng-lab/proof-<date>-lip-sync-compare",
     ]
