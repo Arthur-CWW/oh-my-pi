@@ -1,11 +1,16 @@
 import { createHash } from "node:crypto"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import path from "node:path"
 import { describe, expect, test } from "bun:test"
 import {
   buildJimengCommercePricingRequest,
+  createJimengHttpTransport,
   fetchJimengCommercePricing,
   JimengClient,
   JimengError,
   parseJimengCommercePricingEndpoints,
+  readJimengHttpCassette,
   summarizeJimengCommercePricing,
   type JimengFetch,
   type JimengSessionBundle,
@@ -117,6 +122,48 @@ describe("Jimeng commerce pricing", () => {
     })
     expect(JSON.stringify(summary)).not.toContain("sid=")
     expect(JSON.stringify(summary)).not.toContain("sign")
+  })
+
+  test("records and replays commerce pricing through HTTP cassettes", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "jimeng-commerce-pricing-cassette-"))
+    const cassettePath = path.join(dir, "commerce-pricing.json")
+    const requests: Array<{ url: string; init?: RequestInit }> = []
+    try {
+      const recordTransport = createJimengHttpTransport({
+        mode: "record",
+        cassettePath,
+        nowIso: () => "2026-06-11T00:00:00.000Z",
+        fetch: mockFetch(requests),
+      })
+
+      await fetchJimengCommercePricing({
+        fetch: recordTransport.fetch,
+        session,
+        nowMs: 1_771_234_567_000,
+      })
+
+      expect(readJimengHttpCassette(cassettePath).entries).toHaveLength(2)
+      expect(requests.map((request) => new URL(request.url).pathname)).toEqual([
+        "/commerce/v1/subscription/price_list",
+        "/commerce/v1/purchase/price_list",
+      ])
+
+      const replayTransport = createJimengHttpTransport({ mode: "replay", cassettePath })
+      const replayed = await fetchJimengCommercePricing({
+        fetch: replayTransport.fetch,
+        session,
+        nowMs: 1_771_234_567_000,
+      })
+      const summary = summarizeJimengCommercePricing(replayed)
+
+      expect(replayed.results.map((result) => result.endpointId)).toEqual(["vip", "credit"])
+      expect(replayed.results[0]?.items[0]?.productId).toBe("vip_monthly")
+      expect(replayed.results[1]?.items[0]?.productId).toBe("credits_100")
+      expect(JSON.stringify(summary)).not.toContain("sid=")
+      expect(JSON.stringify(summary)).not.toContain("sign")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   test("fails loudly when required response contract paths disappear", async () => {

@@ -1720,6 +1720,7 @@ async function main(argv: string[]): Promise<void> {
   if (args.command === "account-credit") {
     const dirs = ensureOutputDirs(path.resolve(args.outDir))
     const runId = `account-credit-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
     if (args.dryRun) {
       writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
         command: args.command,
@@ -1727,20 +1728,36 @@ async function main(argv: string[]): Promise<void> {
         method: "POST",
         request: {},
         signed_headers: ["device-time", "sign", "sign-ver"],
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
         browser_session: redactSession(session),
       })
       writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
         command: args.command,
         endpoint: "/commerce/v1/benefits/user_credit",
         method: "POST",
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
         dry_run: true,
       })
       console.log("[jimeng-browser-proxy] account-credit dry run saved")
       return
     }
 
-    const result = await fetchJimengAccountCredit({ session })
+    const transport = createJimengHttpTransport({
+      mode: args.transportMode,
+      cassettePath,
+    })
+    const result = await fetchJimengAccountCredit({ fetch: transport.fetch, session })
     writeJson(path.join(dirs.rawDir, `${runId}.json`), {
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       endpoint: result.endpoint,
       http_status: result.httpStatus,
       ret: result.ret,
@@ -1750,6 +1767,10 @@ async function main(argv: string[]): Promise<void> {
     })
     writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
       command: args.command,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       summary: summarizeJimengAccountCredit(result),
     })
     console.log(`[jimeng-browser-proxy] account-credit saved total=${result.credit.totalCredit} gift=${result.credit.giftCredit} purchase=${result.credit.purchaseCredit} vip=${result.credit.vipCredit}`)
@@ -1761,6 +1782,7 @@ async function main(argv: string[]): Promise<void> {
     const runId = `commerce-benefits-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
     const endpoints = parseJimengCommerceBenefitEndpoints(args.endpoints)
     const request = buildJimengCommerceBenefitsRequest()
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
     if (args.dryRun) {
       writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
         command: args.command,
@@ -1770,20 +1792,36 @@ async function main(argv: string[]): Promise<void> {
         method: "POST",
         request,
         signed_headers: ["device-time", "sign", "sign-ver"],
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
         browser_session: redactSession(session),
       })
       writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
         command: args.command,
         endpoints,
         request,
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
         dry_run: true,
       })
       console.log(`[jimeng-browser-proxy] commerce-benefits dry run saved endpoints=${endpoints.join(",")}`)
       return
     }
 
-    const result = await fetchJimengCommerceBenefits({ session, endpoints, request })
+    const transport = createJimengHttpTransport({
+      mode: args.transportMode,
+      cassettePath,
+    })
+    const result = await fetchJimengCommerceBenefits({ fetch: transport.fetch, session, endpoints, request })
     writeJson(path.join(dirs.rawDir, `${runId}.json`), {
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       requested_endpoints: result.requestedEndpoints,
       request: result.request,
       metadata: result.metadata ? {
@@ -1806,6 +1844,10 @@ async function main(argv: string[]): Promise<void> {
     const summary = summarizeJimengCommerceBenefits(result)
     writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
       command: args.command,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       summary,
     })
     console.log(`[jimeng-browser-proxy] commerce-benefits saved metadata=${result.metadata?.metadataCount ?? "skip"} user_assets=${result.userBenefits?.assetCount ?? "skip"}`)
@@ -1821,6 +1863,7 @@ async function main(argv: string[]): Promise<void> {
       path: endpoint === "vip" ? "/commerce/v1/subscription/price_list" : "/commerce/v1/purchase/price_list",
       body: buildJimengCommercePricingRequest(endpoint),
     }))
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
     if (args.dryRun) {
       writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
         command: args.command,
@@ -1828,6 +1871,10 @@ async function main(argv: string[]): Promise<void> {
         method: "POST",
         requests,
         signed_headers: ["device-time", "sign", "sign-ver"],
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
         browser_session: redactSession(session),
         live_request: false,
       })
@@ -1835,14 +1882,26 @@ async function main(argv: string[]): Promise<void> {
         command: args.command,
         endpoints,
         requests,
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
         dry_run: true,
       })
       console.log(`[jimeng-browser-proxy] commerce-pricing dry run saved endpoints=${endpoints.join(",")}`)
       return
     }
 
-    const result = await fetchJimengCommercePricing({ session, query: { endpoints } })
+    const transport = createJimengHttpTransport({
+      mode: args.transportMode,
+      cassettePath,
+    })
+    const result = await fetchJimengCommercePricing({ fetch: transport.fetch, session, query: { endpoints } })
     writeJson(path.join(dirs.rawDir, `${runId}.json`), {
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       requested_endpoints: result.endpoints,
       results: result.results.map((item) => ({
         endpoint: item.endpoint,
@@ -1858,6 +1917,10 @@ async function main(argv: string[]): Promise<void> {
     const summary = summarizeJimengCommercePricing(result)
     writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
       command: args.command,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       summary,
     })
     console.log(`[jimeng-browser-proxy] commerce-pricing saved ${result.results.map((item) => `${item.endpointId}=${item.items.length}`).join(" ")}`)

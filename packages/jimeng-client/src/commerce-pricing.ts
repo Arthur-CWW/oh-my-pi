@@ -2,7 +2,7 @@ import { createHash } from "node:crypto"
 import { Schema } from "effect"
 import { buildJimengCommerceSignedHeaders } from "./account-credit"
 import { type JimengSessionBundle } from "./capture"
-import { assertNoRiskError, JimengClient } from "./client"
+import { assertNoRiskError, JimengClient, type JimengFetch } from "./client"
 import { jimengError } from "./errors"
 import { type JsonObject, type JsonValue } from "./reference-image"
 import { parseJimengApiEnvelope, parseJsonText } from "./schema"
@@ -136,12 +136,13 @@ export function buildJimengCommercePricingRequest(endpoint: JimengCommercePricin
 
 export async function fetchJimengCommercePricing(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   session: JimengSessionBundle
   query?: JimengCommercePricingQuery
   nowMs?: number
 }): Promise<JimengCommercePricingBundle> {
   const endpoints = input.query?.endpoints ?? parseJimengCommercePricingEndpoints(undefined)
-  const client = input.client ?? new JimengClient()
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
   const results: JimengCommercePricingResult[] = []
   for (const endpoint of endpoints) {
     results.push(await fetchCommercePricingEndpoint({

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto"
 import { z } from "zod"
 import { type JimengSessionBundle } from "./capture"
-import { assertNoRiskError, JimengClient } from "./client"
+import { assertNoRiskError, JimengClient, type JimengFetch } from "./client"
 import { jimengError } from "./errors"
 import { type JsonObject, type JsonValue } from "./reference-image"
 import { parseJimengApiEnvelope, parseJimengContract, parseJsonText } from "./schema"
@@ -49,11 +49,12 @@ export interface JimengAccountCreditResult {
 
 export async function fetchJimengAccountCredit(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   session: JimengSessionBundle
   nowMs?: number
 }): Promise<JimengAccountCreditResult> {
   const request: JsonObject = {}
-  const client = input.client ?? new JimengClient()
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
   const response = await client.requestText(`https://jimeng.jianying.com${USER_CREDIT_ENDPOINT}`, {
     method: "POST",
     headers: buildJimengCommerceSignedHeaders(input.session, {

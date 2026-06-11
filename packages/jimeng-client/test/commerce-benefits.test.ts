@@ -1,13 +1,18 @@
 import { createHash } from "node:crypto"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import path from "node:path"
 import { describe, expect, test } from "bun:test"
 import {
   buildJimengCommerceBenefitsRequest,
+  createJimengHttpTransport,
   fetchJimengCommerceBenefits,
   JimengClient,
   JimengError,
   parseJimengCommerceBenefitEndpoints,
   parseJimengCommerceBenefitMetadataBody,
   parseJimengCommerceUserBenefitBody,
+  readJimengHttpCassette,
   summarizeJimengCommerceBenefits,
   type JimengFetch,
   type JimengSessionBundle,
@@ -129,6 +134,46 @@ describe("Jimeng commerce benefits", () => {
     }
     expect(result.metadata?.metadataCount).toBe(2)
     expect(result.userBenefits?.assetCount).toBe(2)
+  })
+
+  test("records and replays commerce benefits through HTTP cassettes", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "jimeng-commerce-benefits-cassette-"))
+    const cassettePath = path.join(dir, "commerce-benefits.json")
+    const requests: Array<{ url: string; init?: RequestInit }> = []
+    try {
+      const recordTransport = createJimengHttpTransport({
+        mode: "record",
+        cassettePath,
+        nowIso: () => "2026-06-11T00:00:00.000Z",
+        fetch: mockFetch(requests),
+      })
+
+      await fetchJimengCommerceBenefits({
+        fetch: recordTransport.fetch,
+        session,
+        nowMs: 1_771_234_567_000,
+      })
+
+      expect(readJimengHttpCassette(cassettePath).entries).toHaveLength(2)
+      expect(requests.map((request) => request.url)).toEqual([
+        "https://jimeng.jianying.com/commerce/v3/resource/benefit_metadata",
+        "https://jimeng.jianying.com/commerce/v3/benefits/batch_get_user_benefit",
+      ])
+
+      const replayTransport = createJimengHttpTransport({ mode: "replay", cassettePath })
+      const replayed = await fetchJimengCommerceBenefits({
+        fetch: replayTransport.fetch,
+        session,
+        nowMs: 1_771_234_567_000,
+      })
+      const summary = summarizeJimengCommerceBenefits(replayed)
+
+      expect(replayed.metadata?.metadataCount).toBe(2)
+      expect(replayed.userBenefits?.assetCount).toBe(2)
+      expect(JSON.stringify(summary)).not.toContain("sid=")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   test("fails loudly when required response paths disappear", () => {

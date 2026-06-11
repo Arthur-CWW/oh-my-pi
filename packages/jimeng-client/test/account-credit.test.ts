@@ -1,11 +1,16 @@
 import { createHash } from "node:crypto"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import path from "node:path"
 import { describe, expect, test } from "bun:test"
 import {
   buildJimengCommerceSignedHeaders,
+  createJimengHttpTransport,
   fetchJimengAccountCredit,
   JimengClient,
   JimengError,
   parseJimengAccountCreditBody,
+  readJimengHttpCassette,
   summarizeJimengAccountCredit,
   type JimengFetch,
   type JimengSessionBundle,
@@ -90,6 +95,41 @@ describe("Jimeng account credit", () => {
     const headers = requests[0]?.init?.headers as Record<string, string>
     expect(headers.sign).toBe(createHash("md5").update("9e2c|_credit|7|8.4.0|1771234567||11ac").digest("hex"))
     expect(result.credit.totalCredit).toBe(115)
+  })
+
+  test("records and replays account credit through HTTP cassettes", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "jimeng-account-credit-cassette-"))
+    const cassettePath = path.join(dir, "account-credit.json")
+    const requests: Array<{ url: string; init?: RequestInit }> = []
+    try {
+      const recordTransport = createJimengHttpTransport({
+        mode: "record",
+        cassettePath,
+        nowIso: () => "2026-06-11T00:00:00.000Z",
+        fetch: mockFetch(JSON.stringify(accountCreditBody()), requests),
+      })
+
+      await fetchJimengAccountCredit({
+        fetch: recordTransport.fetch,
+        session,
+        nowMs: 1_771_234_567_000,
+      })
+
+      expect(readJimengHttpCassette(cassettePath).entries).toHaveLength(1)
+      expect(requests[0]?.url).toBe("https://jimeng.jianying.com/commerce/v1/benefits/user_credit")
+
+      const replayTransport = createJimengHttpTransport({ mode: "replay", cassettePath })
+      const replayed = await fetchJimengAccountCredit({
+        fetch: replayTransport.fetch,
+        session,
+        nowMs: 1_771_234_567_000,
+      })
+
+      expect(replayed.credit.totalCredit).toBe(115)
+      expect(JSON.stringify(summarizeJimengAccountCredit(replayed))).not.toContain("sid=")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   test("fails loudly when required credit fields disappear", () => {

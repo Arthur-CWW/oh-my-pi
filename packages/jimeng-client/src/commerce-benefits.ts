@@ -2,7 +2,7 @@ import { createHash } from "node:crypto"
 import { z } from "zod"
 import { buildJimengCommerceSignedHeaders } from "./account-credit"
 import { type JimengSessionBundle } from "./capture"
-import { assertNoRiskError, JimengClient } from "./client"
+import { assertNoRiskError, JimengClient, type JimengFetch } from "./client"
 import { jimengError } from "./errors"
 import { type JsonObject, type JsonValue } from "./reference-image"
 import { parseJimengApiEnvelope, parseJimengContract, parseJsonText } from "./schema"
@@ -167,12 +167,13 @@ export function buildJimengCommerceBenefitsRequest(input?: {
 
 export async function fetchJimengCommerceBenefits(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   session: JimengSessionBundle
   endpoints?: JimengCommerceBenefitEndpointId[]
   request?: JsonObject
   nowMs?: number
 }): Promise<JimengCommerceBenefitsResult> {
-  const client = input.client ?? new JimengClient()
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
   const request = input.request ?? buildJimengCommerceBenefitsRequest()
   parseJimengContract(BenefitQueryRequestWireSchema, request, "commerce benefits request")
   const endpoints = input.endpoints ?? ["metadata", "user-benefits"]
