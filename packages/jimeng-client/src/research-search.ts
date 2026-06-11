@@ -16,6 +16,7 @@ const OptionalId = Schema.optional(Schema.NullOr(Schema.Union([Schema.String, Sc
 
 const SearchCommonAttrWireSchema = Schema.Struct({
   id: OptionalId,
+  published_item_id: OptionalId,
   title: OptionalString,
   description: OptionalString,
   cover_uri: OptionalString,
@@ -63,6 +64,7 @@ const SearchVideoWireSchema = Schema.Struct({
   has_audio: OptionalBoolean,
   is_mute: OptionalBoolean,
   origin_video: Schema.optional(Schema.NullOr(SearchOriginVideoWireSchema)),
+  transcoded_video: Schema.optional(Schema.NullOr(Schema.Record(Schema.String, SearchOriginVideoWireSchema))),
 })
 
 const SearchAuthorWireSchema = Schema.Struct({
@@ -98,13 +100,30 @@ const SearchTextToImageParamsWireSchema = Schema.Struct({
   model_config: Schema.optional(Schema.NullOr(SearchModelConfigWireSchema)),
 })
 
+const SearchVideoInputWireSchema = Schema.Struct({
+  prompt: OptionalString,
+  first_frame_image: Schema.optional(Schema.NullOr(SearchImageResourceWireSchema)),
+})
+
+const SearchTextToVideoParamsWireSchema = Schema.Struct({
+  model_req_key: OptionalString,
+  model_config: Schema.optional(Schema.NullOr(SearchModelConfigWireSchema)),
+  video_aspect_ratio: OptionalString,
+  seed: OptionalNumber,
+  video_gen_inputs: Schema.optional(Schema.NullOr(Schema.Array(SearchVideoInputWireSchema))),
+})
+
 const SearchAigcImageParamsWireSchema = Schema.Struct({
+  generate_type: OptionalNumber,
+  first_generate_type: OptionalNumber,
+  image_type: OptionalNumber,
   reference_prompt: OptionalString,
   template_id: OptionalId,
   text2image_params: Schema.optional(Schema.NullOr(SearchTextToImageParamsWireSchema)),
+  text2video_params: Schema.optional(Schema.NullOr(SearchTextToVideoParamsWireSchema)),
 })
 
-const SearchItemWireSchema = Schema.Struct({
+export const JimengResearchItemWireSchema = Schema.Struct({
   common_attr: SearchCommonAttrWireSchema,
   image: Schema.optional(Schema.NullOr(SearchImageWireSchema)),
   video: Schema.optional(Schema.NullOr(SearchVideoWireSchema)),
@@ -121,7 +140,7 @@ const SearchAssetMediaWireSchema = Schema.Struct({
   workspace_id: OptionalNumber,
   generate_type: OptionalNumber,
   mode: OptionalString,
-  item_list: Schema.optional(Schema.NullOr(Schema.Array(SearchItemWireSchema))),
+  item_list: Schema.optional(Schema.NullOr(Schema.Array(JimengResearchItemWireSchema))),
 })
 
 const SearchAssetWireSchema = Schema.Struct({
@@ -138,7 +157,7 @@ const SearchAssetWireSchema = Schema.Struct({
 })
 
 const SearchRowWireSchema = Schema.Struct({
-  item: Schema.optional(Schema.NullOr(SearchItemWireSchema)),
+  item: Schema.optional(Schema.NullOr(JimengResearchItemWireSchema)),
   asset: Schema.optional(Schema.NullOr(SearchAssetWireSchema)),
   rel_score: OptionalNumber,
   search_item_type: OptionalNumber,
@@ -159,7 +178,7 @@ const ResearchSearchEnvelopeSchema = Schema.Struct({
   }),
 })
 
-type SearchItemWire = Schema.Schema.Type<typeof SearchItemWireSchema>
+export type JimengResearchItemWire = Schema.Schema.Type<typeof JimengResearchItemWireSchema>
 type SearchAssetWire = Schema.Schema.Type<typeof SearchAssetWireSchema>
 type SearchAssetMediaWire = Schema.Schema.Type<typeof SearchAssetMediaWireSchema>
 
@@ -205,6 +224,15 @@ export interface JimengResearchSearchItem {
   templateId: string | null
   modelReqKey: string | null
   modelName: string | null
+  generateType: number | null
+  firstGenerateType: number | null
+  imageType: number | null
+  videoAspectRatio: string | null
+  seed: number | null
+  firstFrameImageUri: string | null
+  firstFrameImageUrl: string | null
+  firstFrameImageWidth: number | null
+  firstFrameImageHeight: number | null
   authorId: string | null
   authorIdWasUnsafeNumber: boolean
   authorName: string | null
@@ -382,7 +410,7 @@ export async function fetchJimengResearchSearch(input: {
   const items: JimengResearchSearchItem[] = []
   const assets: JimengResearchSearchAsset[] = []
   for (const row of decoded.data.data_list) {
-    if (row.item) items.push(normalizeSearchItem(row.item))
+    if (row.item) items.push(normalizeJimengResearchItem(row.item))
     if (row.asset) assets.push(normalizeSearchAsset(row.asset))
   }
   if (input.query.channel === "asset" && decoded.data.data_list.length > 0 && assets.length === 0) {
@@ -433,7 +461,7 @@ export function summarizeJimengResearchSearch(result: JimengResearchSearchResult
     decryption_applied: result.decryptionApplied,
     item_count: result.items.length,
     asset_count: result.assets.length,
-    items: result.items.map(summarizeSearchItem),
+    items: result.items.map(summarizeJimengResearchItem),
     assets: result.assets.map((asset) => ({
       id: asset.id,
       id_was_unsafe_number: asset.idWasUnsafeNumber,
@@ -449,7 +477,7 @@ export function summarizeJimengResearchSearch(result: JimengResearchSearchResult
       generate_type: asset.generateType,
       mode: asset.mode,
       generated_item_count: asset.generatedItems.length,
-      generated_items: asset.generatedItems.map(summarizeSearchItem),
+      generated_items: asset.generatedItems.map(summarizeJimengResearchItem),
     })),
   }
 }
@@ -542,22 +570,36 @@ function decodeHexIv(value: string, operation: string): Buffer {
   return Buffer.from(value, "hex")
 }
 
-function normalizeSearchItem(item: SearchItemWire): JimengResearchSearchItem {
-  const id = normalizeId(item.common_attr.id)
+export function normalizeJimengResearchItem(item: JimengResearchItemWire): JimengResearchSearchItem {
+  const id = normalizeId(item.common_attr.published_item_id ?? item.common_attr.id)
   const authorId = normalizeId(item.author?.uid)
   const templateId = normalizeId(item.aigc_image_params?.template_id)
   const firstImage = item.image?.large_images?.[0]
-  const originVideo = item.video?.origin_video
+  const originVideo = item.video?.origin_video ?? firstVideoRendition(item.video?.transcoded_video)
   const textToImage = item.aigc_image_params?.text2image_params
+  const textToVideo = item.aigc_image_params?.text2video_params
+  const firstVideoInput = textToVideo?.video_gen_inputs?.[0]
+  const firstFrameImage = firstVideoInput?.first_frame_image
   return {
     id: id.value,
     idWasUnsafeNumber: id.unsafe,
     title: cleanString(item.common_attr.title),
     description: cleanString(item.common_attr.description),
-    prompt: cleanString(textToImage?.prompt) ?? cleanString(item.aigc_image_params?.reference_prompt),
+    prompt: cleanString(textToImage?.prompt) ?? cleanString(firstVideoInput?.prompt) ?? cleanString(item.aigc_image_params?.reference_prompt),
     templateId: templateId.value,
-    modelReqKey: cleanString(textToImage?.model_config?.model_req_key),
-    modelName: cleanString(textToImage?.model_config?.model_name),
+    modelReqKey: cleanString(textToImage?.model_config?.model_req_key)
+      ?? cleanString(textToVideo?.model_req_key)
+      ?? cleanString(textToVideo?.model_config?.model_req_key),
+    modelName: cleanString(textToImage?.model_config?.model_name) ?? cleanString(textToVideo?.model_config?.model_name),
+    generateType: finiteNumber(item.aigc_image_params?.generate_type),
+    firstGenerateType: finiteNumber(item.aigc_image_params?.first_generate_type),
+    imageType: finiteNumber(item.aigc_image_params?.image_type),
+    videoAspectRatio: cleanString(textToVideo?.video_aspect_ratio),
+    seed: finiteNumber(textToVideo?.seed),
+    firstFrameImageUri: cleanString(firstFrameImage?.image_uri),
+    firstFrameImageUrl: cleanString(firstFrameImage?.image_url),
+    firstFrameImageWidth: finiteNumber(firstFrameImage?.width),
+    firstFrameImageHeight: finiteNumber(firstFrameImage?.height),
     authorId: authorId.value,
     authorIdWasUnsafeNumber: authorId.unsafe,
     authorName: cleanString(item.author?.name),
@@ -611,7 +653,7 @@ function normalizeSearchAsset(asset: SearchAssetWire): JimengResearchSearchAsset
     workspaceId: finiteNumber(mediaEntry.media?.workspace_id),
     generateType: finiteNumber(mediaEntry.media?.generate_type),
     mode: cleanString(mediaEntry.media?.mode),
-    generatedItems: mediaEntry.media?.item_list?.map(normalizeSearchItem) ?? [],
+    generatedItems: mediaEntry.media?.item_list?.map(normalizeJimengResearchItem) ?? [],
   }
 }
 
@@ -629,7 +671,7 @@ function firstAssetMedia(asset: SearchAssetWire): { kind: string | null; media: 
   return found ? { kind: found[0], media: found[1] ?? null } : { kind: null, media: null }
 }
 
-function summarizeSearchItem(item: JimengResearchSearchItem): JsonObject {
+export function summarizeJimengResearchItem(item: JimengResearchSearchItem): JsonObject {
   return {
     id: item.id,
     id_was_unsafe_number: item.idWasUnsafeNumber,
@@ -639,6 +681,15 @@ function summarizeSearchItem(item: JimengResearchSearchItem): JsonObject {
     template_id: item.templateId,
     model_req_key: item.modelReqKey,
     model_name: item.modelName,
+    generate_type: item.generateType,
+    first_generate_type: item.firstGenerateType,
+    image_type: item.imageType,
+    video_aspect_ratio: item.videoAspectRatio,
+    seed: item.seed,
+    first_frame_image_uri: item.firstFrameImageUri,
+    first_frame_image_url_present: !!item.firstFrameImageUrl,
+    first_frame_image_width: item.firstFrameImageWidth,
+    first_frame_image_height: item.firstFrameImageHeight,
     author_id: item.authorId,
     author_id_was_unsafe_number: item.authorIdWasUnsafeNumber,
     author_name: item.authorName,
@@ -671,6 +722,13 @@ function summarizeSearchItem(item: JimengResearchSearchItem): JsonObject {
     share_count: item.shareCount,
     hash_tags: item.hashTags,
   }
+}
+
+function firstVideoRendition(
+  renditions: Record<string, Schema.Schema.Type<typeof SearchOriginVideoWireSchema>> | null | undefined,
+): Schema.Schema.Type<typeof SearchOriginVideoWireSchema> | null {
+  if (!renditions) return null
+  return renditions.origin ?? Object.values(renditions)[0] ?? null
 }
 
 function decodeResearchSearchContract(value: JsonValue): Schema.Schema.Type<typeof ResearchSearchEnvelopeSchema> {

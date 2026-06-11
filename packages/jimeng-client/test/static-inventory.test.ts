@@ -194,6 +194,11 @@ describe("Jimeng static inventory", () => {
           `fetch("/mweb/search/v1/sug");`,
           `fetch("/mweb/search/v1/guess");`,
           `fetch("/mweb/search/v1/search");`,
+          `fetch("/mweb/v1/get_user_info");`,
+          `fetch("/mweb/v1/get_homepage");`,
+          `fetch("/mweb/v1/get_favorite_list");`,
+          `fetch("/mweb/v1/get_follow_list");`,
+          `fetch("/mweb/v1/get_item_info");`,
         ].join("\n"),
         "utf8",
       )
@@ -217,6 +222,15 @@ describe("Jimeng static inventory", () => {
       expect(result.items.find((item) => item.resource === "/mweb/search/v1/guess")?.knownCommand).toBe("research-keywords")
       expect(result.items.find((item) => item.resource === "/mweb/search/v1/search")?.knownStatus).toBe("implemented")
       expect(result.items.find((item) => item.resource === "/mweb/search/v1/search")?.knownCommand).toBe("research-search")
+      for (const endpoint of [
+        "/mweb/v1/get_user_info",
+        "/mweb/v1/get_homepage",
+        "/mweb/v1/get_favorite_list",
+        "/mweb/v1/get_follow_list",
+        "/mweb/v1/get_item_info",
+      ]) {
+        expect(result.items.find((item) => item.resource === endpoint)?.knownCommand).toBe("profile-research")
+      }
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

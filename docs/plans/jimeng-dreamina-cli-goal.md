@@ -56,7 +56,7 @@ As of 2026-06-10, the committed Jimeng CLI baseline is:
 - `a124c30 Classify LV read-state blockers`
 - `1d423bd Add Jimeng rate probe CLI`
 - `52b0724 Use Effect Schema for Jimeng workspace context`
-- current checkpoint: Effect Schema-backed no-spend `research-keywords` suggestions/guesses plus `/mweb/search/v1` static-inventory coverage
+- current checkpoint: Effect Schema-backed no-spend `profile-research` for public reference profiles/works and current-account follow lists; static inventory now reports `implemented=50`, `unknown=120`
 
 If the thread goal object lags behind this file after a pause, resume from this document and the latest Git checkpoint. The active working rule is: background-only reversal, direct/API-first implementation, small proven CLI slices, tests and proof artifacts before each commit, and no async daemon until the API surface is settled.
 
@@ -661,6 +661,19 @@ Full Jimeng research search is now live-proved without generation spend:
 - live short-film proof: `data/jimeng-lab/proof-20260611-research-search-cli-short-film/` returned 6 playable video results with dimensions, durations, and engagement metrics
 - live asset proof: `data/jimeng-lab/proof-20260611-research-search-cli-asset-v3/` returned 1 image asset containing 4 generated items
 - refreshed inventory proof: `data/jimeng-lab/proof-20260611-static-inventory-research-search/` reports `implemented=45`, `partial=4`, and `skipped_implemented=45`
+- normalized proofs contain no credential markers or signed media URL values
+
+Jimeng reference-profile research is now live-proved without generation spend:
+
+- `jimeng-browser-proxy profile-research`
+- public target reads: profile metadata, homepage works, favorites, and published item detail
+- current-account reads: following and followers; the frontend request does not include a target `sec_uid`, so normalized output labels these results `current-account`
+- useful flags: `--endpoints`, `--secUid`, `--publishedItemId`, `--limit`, `--offset`, `--imageTypeList`, and `--feed-refer`
+- Effect Schema enforces the relied-on profile/list/item paths while accepting additive provider fields
+- normalized works include generation prompt, model key/name, generate type, aspect ratio, seed, first-frame provider URI/dimensions, image/video dimensions and duration, hashtags, and engagement counters
+- dry-run proof: `data/jimeng-lab/proof-20260611-profile-research-cli-dry-run/`
+- live proof: `data/jimeng-lab/proof-20260611-profile-research-cli-live/` returned 6 successful endpoint results, 3 work/detail rows, and 7 profile rows
+- refreshed inventory proof: `data/jimeng-lab/proof-20260611-static-inventory-profile-research/` reports `implemented=50`, `unknown=120`, `partial=4`, and `blocked=70`
 - normalized proofs contain no credential markers or signed media URL values
 
 The next slice is **lip-sync submit capture and reference-video consumers**. Use the VOD provider reference, ImageX avatar reference, and frontend captures to unlock live lip-sync, reference-video, multimodal/all-around reference, pose/style/depth/canny controls, and live end-frame/multi-frame image-to-video paths.

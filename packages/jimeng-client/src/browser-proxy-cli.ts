@@ -179,6 +179,17 @@ import {
   summarizeJimengResearchSearch,
 } from "./research-search"
 import {
+  buildJimengProfileFavoritesRequest,
+  buildJimengProfileFollowRequest,
+  buildJimengProfileHomepageRequest,
+  buildJimengProfileItemRequest,
+  buildJimengProfileUserRequest,
+  fetchJimengProfileResearch,
+  parseJimengProfileImageTypeList,
+  parseJimengProfileResearchEndpoints,
+  summarizeJimengProfileResearch,
+} from "./profile-research"
+import {
   buildJimengVideoInfoRequest,
   fetchJimengVideoInfo,
   parseJimengVidCsvFlag,
@@ -267,6 +278,7 @@ Commands:
   workspace-context Fetch no-spend workspace list and workspace-id context
   research-keywords Fetch no-spend search suggestions and guessed research keywords
   research-search Fetch no-spend inspiration, short-film, or workspace asset search results
+  profile-research Fetch no-spend public profile/reference works and current-account follow lists
   infinite-canvas Fetch no-spend infinite-canvas project/detail/ratio metadata
   lip-sync-config Fetch no-spend digital-human/lip-sync model configs
   lip-sync-compare Offline compare a lip-sync dry-run plan against captured UI submit
@@ -340,6 +352,7 @@ Options:
                                   agent-catalog accepts skills,config,all
                                   infinite-canvas accepts projects,detail,ratios,conversations,all
                                   research-keywords accepts suggest,guess,all
+                                  profile-research accepts profile,homepage,favorites,following,followers,item,all
   --channels <ids|all>           Research channels: inspiration,short-film,asset,all
   --channel <id>                 research-search channel: inspiration, short-film, or asset
   --searchId <id>                research-search continuation search id
@@ -347,6 +360,9 @@ Options:
   --assetType <name|id>          Asset search type: image,video,story,canvas,audio,document,canvas-project
   --blockIndex <n>               Asset search block index (default: 0)
   --showTypeList <csv>           Optional asset search show_type_list integers
+  --secUid <id>                  Public profile sec_uid for profile-research
+  --publishedItemId <id>         Published work id for profile-research item detail
+  --imageTypeList <csv>          Profile homepage/favorites image type filters (default: 3,4,7)
   --needIntentionMark <bool>     Inspiration/short-film intention-mark option (default: true)
   --isInsertFrame <bool>         Optional asset search insert-frame filter
   --hideStoryAgentResult <bool>  Optional asset search story-agent filter
@@ -727,6 +743,7 @@ interface CliArgs {
     | "workspace-context"
     | "research-keywords"
     | "research-search"
+    | "profile-research"
     | "infinite-canvas"
     | "endpoint-probe"
     | "rate-probe"
@@ -800,6 +817,9 @@ interface CliArgs {
   assetType?: string
   blockIndex?: number
   showTypeList?: number[]
+  secUid?: string
+  publishedItemId?: string
+  imageTypeList?: number[]
   needIntentionMark?: boolean
   isInsertFrame?: boolean
   hideStoryAgentResult?: boolean
@@ -1920,6 +1940,86 @@ async function main(argv: string[]): Promise<void> {
       summary: summarizeJimengResearchSearch(result),
     })
     console.log(`[jimeng-browser-proxy] research-search saved channel=${channel} items=${result.items.length} assets=${result.assets.length} has_more=${result.hasMore}`)
+    return
+  }
+
+  if (args.command === "profile-research") {
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const endpoints = parseJimengProfileResearchEndpoints(args.endpoints)
+    const query = {
+      endpoints,
+      secUid: args.secUid,
+      publishedItemId: args.publishedItemId,
+      count: args.limit,
+      offset: args.offset,
+      imageTypeList: args.imageTypeList,
+      feedRefer: args.feedRefer,
+    }
+    const requests = endpoints.flatMap((endpoint) => {
+      if (endpoint === "item" && !args.publishedItemId) return []
+      const request = endpoint === "profile"
+        ? buildJimengProfileUserRequest(args.secUid ?? "")
+        : endpoint === "homepage"
+          ? buildJimengProfileHomepageRequest(query)
+          : endpoint === "favorites"
+            ? buildJimengProfileFavoritesRequest(query)
+            : endpoint === "following" || endpoint === "followers"
+              ? buildJimengProfileFollowRequest(endpoint, query)
+              : buildJimengProfileItemRequest(args.publishedItemId ?? "")
+      const pathName = endpoint === "profile"
+        ? "/mweb/v1/get_user_info"
+        : endpoint === "homepage"
+          ? "/mweb/v1/get_homepage"
+          : endpoint === "favorites"
+            ? "/mweb/v1/get_favorite_list"
+            : endpoint === "following" || endpoint === "followers"
+              ? "/mweb/v1/get_follow_list"
+              : "/mweb/v1/get_item_info"
+      return [{ endpoint, path: pathName, request }]
+    })
+    const runId = `profile-research-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    if (args.dryRun) {
+      writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
+        command: args.command,
+        endpoint_sequence: requests.map((request) => request.path),
+        requests,
+        skipped: endpoints.includes("item") && !args.publishedItemId
+          ? [{ endpoint: "item", reason: "missing --publishedItemId" }]
+          : [],
+        browser_session: redactSession(session),
+        live_request: false,
+      })
+      writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+        command: args.command,
+        endpoints,
+        requests,
+        dry_run: true,
+      })
+      console.log(`[jimeng-browser-proxy] profile-research dry run saved requests=${requests.length}`)
+      return
+    }
+
+    const result = await fetchJimengProfileResearch({ session, query })
+    writeJson(path.join(dirs.rawDir, `${runId}.json`), {
+      endpoints: result.endpoints,
+      skipped: result.skipped,
+      results: result.results.map((item) => ({
+        endpoint: item.endpoint,
+        endpoint_id: item.endpointId,
+        scope: item.scope,
+        http_status: item.httpStatus,
+        ret: item.ret,
+        errmsg: item.errmsg,
+        response_text_sha256: item.responseTextSha256,
+        request: item.request,
+        body: item.body,
+      })),
+    })
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      summary: summarizeJimengProfileResearch(result),
+    })
+    console.log(`[jimeng-browser-proxy] profile-research saved results=${result.results.length} items=${result.results.reduce((sum, item) => sum + item.items.length, 0)} profiles=${result.results.reduce((sum, item) => sum + item.profiles.length + (item.profile ? 1 : 0), 0)} skipped=${result.skipped.length}`)
     return
   }
 
@@ -3868,6 +3968,7 @@ function parseArgs(argv: string[]): CliArgs {
     && command !== "workspace-context"
     && command !== "research-keywords"
     && command !== "research-search"
+    && command !== "profile-research"
     && command !== "infinite-canvas"
     && command !== "endpoint-probe"
     && command !== "rate-probe"
@@ -4085,6 +4186,9 @@ function parseArgs(argv: string[]): CliArgs {
     assetType: flags.assetType,
     blockIndex,
     showTypeList: parseJimengResearchShowTypeList(flags.showTypeList),
+    secUid: flags.secUid,
+    publishedItemId: flags.publishedItemId,
+    imageTypeList: parseJimengProfileImageTypeList(flags.imageTypeList),
     needIntentionMark,
     isInsertFrame,
     hideStoryAgentResult,

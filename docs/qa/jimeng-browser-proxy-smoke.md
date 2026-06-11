@@ -3192,22 +3192,68 @@ known_status_counts=unknown:125,partial:4,implemented:45,dry_run_only:4,blocked:
 
 `/mweb/search/v1/fetch_debug/search` remains classified as a blocked debug wrapper rather than a production API.
 
+Public/reference profile research is implemented as no-spend `profile-research`.
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts profile-research \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --endpoints all \
+  --secUid MS4wLjABAAAAtvo4sAxmw1TCTwfvBOl5rVIowjDJGQ64fvQbkpapMY8 \
+  --publishedItemId 7524730786826751247 \
+  --limit 6 \
+  --dryRun \
+  --outDir data/jimeng-lab/proof-20260611-profile-research-cli-dry-run
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts profile-research \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --endpoints all \
+  --secUid MS4wLjABAAAAtvo4sAxmw1TCTwfvBOl5rVIowjDJGQ64fvQbkpapMY8 \
+  --publishedItemId 7524730786826751247 \
+  --limit 6 \
+  --outDir data/jimeng-lab/proof-20260611-profile-research-cli-live
+```
+
+Result:
+
+```txt
+profile-research saved results=6 items=3 profiles=7 skipped=0
+public profile: ret=0, followers=595, material favorites=3715
+homepage: ret=0, items=1, video=704x1248, duration_ms=5042
+favorites: ret=0, items=1, favorite_count=1113, usage_count=201
+following: ret=0, profiles=6, has_more=true
+followers: ret=0, profiles=0
+item detail: ret=0, prompt/model/first-frame/video metadata decoded
+```
+
+The command distinguishes public-profile and current-account scopes. Effect Schema requires the relied-on profile/list/item fields while tolerating additive fields. Normalized proof files contain provider URIs and URL-presence booleans, but no signed URL values or credential markers.
+
+Refreshed static inventory:
+
+```txt
+resources=251
+known_status_counts=unknown:120,partial:4,implemented:50,dry_run_only:4,blocked:70,captured_only:2,cataloged_only:1
+```
+
 ## Verification
 
 ```bash
 bun run jimeng:typecheck
 bun run jimeng:test
-bun packages/jimeng-client/src/browser-proxy-cli.ts --help | rg 'static-inventory|account-credit|commerce-benefits|workspace-context|research-keywords|research-search|lip-sync-config|voice-clones|voice-clone-submit|capcut-probe|capcut-template-metadata|capcut-categories|capcut-collections|capcut-collection-templates|capcut-template-detail|capcut-editor-catalog|infinite-canvas|overseas-short-videos|subject-create|subject-update|subject-delete|subject-generate-voice|subjects|templates|short-videos'
+mise x ast-grep -- ast-grep scan --config sgconfig.yml packages/jimeng-client/src/profile-research.ts packages/jimeng-client/src/research-search.ts packages/jimeng-client/test/profile-research.test.ts
+bun packages/jimeng-client/src/browser-proxy-cli.ts --help | rg 'static-inventory|account-credit|commerce-benefits|workspace-context|research-keywords|research-search|profile-research|lip-sync-config|voice-clones|voice-clone-submit|capcut-probe|capcut-template-metadata|capcut-categories|capcut-collections|capcut-collection-templates|capcut-template-detail|capcut-editor-catalog|infinite-canvas|overseas-short-videos|subject-create|subject-update|subject-delete|subject-generate-voice|subjects|templates|short-videos'
 ```
 
 Result:
 
 ```txt
 typecheck passed
-170 tests passed, 0 failed
-browser-proxy help listed static-inventory, account-credit, commerce-benefits, workspace-context, research-keywords, research-search, CapCut collection/detail/editor-catalog, and infinite-canvas commands
+173 tests passed, 0 failed
+scoped ast-grep unsafe-type rules passed with zero findings
+browser-proxy help listed static-inventory, account-credit, commerce-benefits, workspace-context, research-keywords, research-search, profile-research, CapCut collection/detail/editor-catalog, and infinite-canvas commands
 paid smoke normalized files have no live token markers
 ```
+
+Repo-wide `bun run lint:unsafe-types` remains red on 370 unrelated Slotok/workbench findings plus one stale baseline entry; no finding is in the changed Jimeng files.
 
 ## Follow-Up
 
