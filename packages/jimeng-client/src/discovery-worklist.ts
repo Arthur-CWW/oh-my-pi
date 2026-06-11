@@ -385,6 +385,7 @@ function buildKnownEndpointMap(): Map<string, JimengDiscoveryKnownEndpoint> {
 
 const KNOWN_ENDPOINTS: JimengDiscoveryKnownEndpoint[] = [
   known("/mweb/v1/aigc_draft/generate", "partial", "text2image/text2video/image2video/frames2video/lip-sync", "Unified generation submit; several modes are implemented or dry-run gated, live lip-sync/end-frame still require capture compare."),
+  known("/mweb/v1/execute_generate_audit", "blocked", null, "Generation pre-audit posts image/video/audio/subject material lists; capture exact material payload before replay."),
   known("/mweb/v1/get_asset_list", "implemented", "assets", "No-spend workspace asset/history listing."),
   known("/mweb/v1/get_history", "blocked", null, "Safe frontend-derived probes returned ret=0 with empty records_list, including explicit workspace scope; use assets/history-records until a non-empty UI capture is available."),
   known("/mweb/v1/get_history_by_ids", "implemented", "history-records", "No-spend history lookup by submit/history id."),
@@ -401,6 +402,10 @@ const KNOWN_ENDPOINTS: JimengDiscoveryKnownEndpoint[] = [
   known("/mweb/v1/create_story", "blocked", null, "Creates story/archive state; require a disposable story fixture or exact UI capture before live replay."),
   known("/mweb/v1/update_story", "blocked", null, "Mutates story/archive state; require a disposable story fixture or exact UI capture before live replay."),
   known("/mweb/v1/delete_story", "blocked", null, "Deletes story/archive state; require a disposable story fixture or explicit approval before live replay."),
+  known("/mweb/v1/mix_audio_video", "blocked", null, "Submits a single audio/video mix task and returns task status; capture exact babiParam/body from UI before any live replay."),
+  known("/mweb/v1/mix_audio_videos", "blocked", null, "Submits batch audio/video mix tasks and returns submit ids; capture exact babiParam/body from UI before any live replay."),
+  known("/mweb/v1/mpack_image", "blocked", null, "Packs image material through dreamina-material-data-service; capture the exact caller input shape before promotion."),
+  known("/mweb/v1/submit_survey", "blocked", null, "Submits feature beta-test survey state, currently seen in the lip-sync feature-gate bundle; mutation requires explicit approval."),
   known("/mweb/v1/get_follow_list", "implemented", "profile-research", "No-spend current-account following/follower listing; this endpoint does not accept a public target sec_uid."),
   known("/mweb/v1/get_item_info", "implemented", "profile-research", "No-spend published work detail with generation prompt, model, reference frame, media, and engagement metadata."),
   known("/mweb/v1/mget_item_info", "implemented", "profile-research", "No-spend batch published work detail by item_id_list; frontend callers pass itemIdList before snake-case conversion."),

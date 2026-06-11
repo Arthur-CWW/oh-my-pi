@@ -3439,6 +3439,35 @@ resources=251
 known_status_counts=unknown:103,partial:6,implemented:61,dry_run_only:5,blocked:73,captured_only:2,cataloged_only:1
 ```
 
+## Media Helper Static Classification
+
+Static locator proof classified five unknown media/generation helper endpoints without browser automation or live replay:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts static-locate \
+  --endpoint /mweb/v1/mix_audio_video,/mweb/v1/mix_audio_videos,/mweb/v1/mpack_image,/mweb/v1/execute_generate_audit,/mweb/v1/submit_survey \
+  --staticRoot data/jimeng-lab/js-sweep/files,packages/jimeng-client/src \
+  --outDir data/jimeng-lab/proof-20260611-static-locate-media-helper-blockers
+```
+
+Result:
+
+```txt
+static-locate saved endpoints=5 occurrences=8
+/mweb/v1/mix_audio_video -> blocked; submits one audio/video mix task with babiParam query payload
+/mweb/v1/mix_audio_videos -> blocked; submits batch audio/video mix tasks and returns submit ids
+/mweb/v1/mpack_image -> blocked; packs Dreamina image material but exact caller input shape still needs capture
+/mweb/v1/execute_generate_audit -> blocked; posts material lists for generation pre-audit
+/mweb/v1/submit_survey -> blocked; mutates feature beta-test survey state
+```
+
+Refreshed static inventory:
+
+```txt
+resources=251
+known_status_counts=unknown:98,partial:6,implemented:61,dry_run_only:5,blocked:78,captured_only:2,cataloged_only:1
+```
+
 ## Verification
 
 ```bash
