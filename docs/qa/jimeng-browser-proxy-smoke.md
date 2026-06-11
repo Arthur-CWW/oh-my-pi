@@ -3390,11 +3390,53 @@ local item detail: ret=0, body={ item_id_list: [...] }, 2 generated image rows
 
 The first probe used the asset wrapper id and returned `ret=3005`; the successful endpoint-probe proof under `data/jimeng-lab/proof-20260611-probe-local-item-list-generated-items/` used generated item ids from `assets` and returned `ret=0`. Normalized `local-items` output keeps prompts, model keys/names, provider URIs, dimensions, author metadata, and URL-presence booleans, but no signed URL values.
 
+## Story Archive / Export Task Dry Run
+
+Story archive detail and export task polling are now guarded CLI surfaces:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts story-records \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --storyIds story-proof-placeholder \
+  --dryRun \
+  --outDir data/jimeng-lab/proof-20260611-story-archive-dryrun
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts async-tasks \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --taskIds task-proof-placeholder \
+  --dryRun \
+  --outDir data/jimeng-lab/proof-20260611-story-archive-dryrun
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts story-export-plan \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --storyIds story-proof-placeholder \
+  --submitId story-export-proof-submit \
+  --dryRun \
+  --outDir data/jimeng-lab/proof-20260611-story-archive-dryrun
+```
+
+Result:
+
+```txt
+story-records dry run saved story_ids=1
+async-tasks dry run saved task_ids=1
+story-export-plan dry run saved submit_id=story-export-proof-submit
+```
+
+Coverage notes:
+
+```txt
+/mweb/v1/mget_story -> partial story-records command; live proof needs real story ids from a non-empty story list or UI capture
+/mweb/v1/mget_async_task -> partial async-tasks command; live proof needs a real task id from an approved export flow
+/mweb/v1/submit_async_task -> dry-run-only story-export-plan; live submit creates export task state and needs approval or a disposable story fixture
+/mweb/v1/create_story, update_story, delete_story -> blocked on disposable story fixture or explicit approval
+```
+
 Refreshed static inventory:
 
 ```txt
 resources=251
-known_status_counts=unknown:114,partial:4,implemented:56,dry_run_only:4,blocked:70,captured_only:2,cataloged_only:1
+known_status_counts=unknown:103,partial:6,implemented:61,dry_run_only:5,blocked:73,captured_only:2,cataloged_only:1
 ```
 
 ## Verification
@@ -3407,16 +3449,17 @@ mise x ast-grep -- ast-grep scan --config sgconfig.yml packages/jimeng-client/sr
 mise x ast-grep -- ast-grep scan --config sgconfig.yml packages/jimeng-client/src/local-items.ts packages/jimeng-client/src/browser-proxy-cli.ts packages/jimeng-client/src/discovery-worklist.ts packages/jimeng-client/src/index.ts packages/jimeng-client/test/local-items.test.ts
 mise x ast-grep -- ast-grep scan --config sgconfig.yml packages/jimeng-client/src/account-config.ts packages/jimeng-client/src/browser-proxy-cli.ts packages/jimeng-client/src/discovery-worklist.ts packages/jimeng-client/src/index.ts packages/jimeng-client/test/account-config.test.ts
 mise x ast-grep -- ast-grep scan --config sgconfig.yml packages/jimeng-client/src/runtime-config.ts packages/jimeng-client/src/browser-proxy-cli.ts packages/jimeng-client/src/discovery-worklist.ts packages/jimeng-client/src/index.ts packages/jimeng-client/test/runtime-config.test.ts
-bun packages/jimeng-client/src/browser-proxy-cli.ts --help | rg 'static-inventory|account-credit|commerce-benefits|account-config|runtime-config|workspace-context|research-keywords|research-search|profile-research|local-items|lip-sync-config|voice-clones|voice-clone-submit|capcut-probe|capcut-template-metadata|capcut-categories|capcut-collections|capcut-collection-templates|capcut-template-detail|capcut-editor-catalog|infinite-canvas|overseas-short-videos|subject-create|subject-update|subject-delete|subject-generate-voice|subjects|templates|short-videos'
+mise x ast-grep -- ast-grep scan --config sgconfig.yml packages/jimeng-client/src/story-archive.ts packages/jimeng-client/src/browser-proxy-cli.ts packages/jimeng-client/src/discovery-worklist.ts packages/jimeng-client/src/index.ts packages/jimeng-client/test/story-archive.test.ts
+bun packages/jimeng-client/src/browser-proxy-cli.ts --help | rg 'static-inventory|account-credit|commerce-benefits|account-config|runtime-config|workspace-context|research-keywords|research-search|profile-research|local-items|story-records|async-tasks|story-export-plan|lip-sync-config|voice-clones|voice-clone-submit|capcut-probe|capcut-template-metadata|capcut-categories|capcut-collections|capcut-collection-templates|capcut-template-detail|capcut-editor-catalog|infinite-canvas|overseas-short-videos|subject-create|subject-update|subject-delete|subject-generate-voice|subjects|templates|short-videos'
 ```
 
 Result:
 
 ```txt
 typecheck passed
-182 tests passed, 0 failed
+186 tests passed, 0 failed
 scoped ast-grep unsafe-type rules passed with zero findings
-browser-proxy help listed static-inventory, account-credit, commerce-benefits, account-config, runtime-config, workspace-context, research-keywords, research-search, profile-research, local-items, CapCut collection/detail/editor-catalog, and infinite-canvas commands
+browser-proxy help listed static-inventory, account-credit, commerce-benefits, account-config, runtime-config, workspace-context, research-keywords, research-search, profile-research, local-items, story-records, async-tasks, story-export-plan, CapCut collection/detail/editor-catalog, and infinite-canvas commands
 paid smoke normalized files have no live token markers
 ```
 

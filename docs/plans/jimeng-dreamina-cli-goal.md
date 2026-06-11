@@ -56,7 +56,7 @@ As of 2026-06-10, the committed Jimeng CLI baseline is:
 - `a124c30 Classify LV read-state blockers`
 - `1d423bd Add Jimeng rate probe CLI`
 - `52b0724 Use Effect Schema for Jimeng workspace context`
-- current checkpoint: Effect Schema-backed no-spend `profile-research` for public reference profiles/works/stories/item details and current-account follow lists, current-account generated `local-items`, no-spend `account-config`, and no-spend `runtime-config`; static inventory now reports `implemented=61`, `blocked=70`, `unknown=109`
+- current checkpoint: Effect Schema-backed no-spend `profile-research` for public reference profiles/works/stories/item details and current-account follow lists, current-account generated `local-items`, no-spend `account-config`, no-spend `runtime-config`, and guarded story/archive export reads: `story-records`, `async-tasks`, and dry-run-only `story-export-plan`; static inventory now reports `implemented=61`, `partial=6`, `dry_run_only=5`, `blocked=73`, `unknown=103`
 
 If the thread goal object lags behind this file after a pause, resume from this document and the latest Git checkpoint. The active working rule is: background-only reversal, direct/API-first implementation, small proven CLI slices, tests and proof artifacts before each commit, and no async daemon until the API surface is settled.
 
@@ -683,7 +683,8 @@ Jimeng reference-profile research is now live-proved without generation spend:
 - account-config live proof: `data/jimeng-lab/proof-20260611-account-config-live/` returned current-account settings, `is_web_registered=true`, and `invite_status=1` from empty-body reads
 - runtime-config dry-run proof: `data/jimeng-lab/proof-20260611-runtime-config-dryrun/`
 - runtime-config live proof: `data/jimeng-lab/proof-20260611-runtime-config-live/` returned 5 successful empty-body reads for experiment params, home header banner config, helpdesk entrance, ASR token config, and ASR hotwords; normalized output fingerprints token/appkey/ws_url/helpdesk URL values
-- refreshed inventory proof: `data/jimeng-lab/proof-20260611-static-inventory-runtime-config/` reports `implemented=61`, `unknown=109`, `partial=4`, and `blocked=70`
+- story/archive dry-run proof: `data/jimeng-lab/proof-20260611-story-archive-dryrun/` records guarded wire bodies for `story-records` (`/mweb/v1/mget_story` with `story_id_list`), `async-tasks` (`/mweb/v1/mget_async_task` with `task_id_list`), and dry-run-only `story-export-plan` (`/mweb/v1/submit_async_task` with `type=pack_story_mode`, `submit_id`, and a stringified payload)
+- refreshed inventory proof: `data/jimeng-lab/proof-20260611-static-inventory-story-archive/` reports `implemented=61`, `unknown=103`, `partial=6`, `dry_run_only=5`, and `blocked=73`
 - successful batch probe: `data/jimeng-lab/proof-20260611-probe-mget-item-info-item-id-list/` shows `/mweb/v1/mget_item_info` accepts `item_id_list`; earlier guessed-field probes under `data/jimeng-lab/proof-20260611-probe-mget-item-info/` are superseded
 - successful local item probe: `data/jimeng-lab/proof-20260611-probe-local-item-list-generated-items/` shows `/mweb/v1/get_local_item_list` accepts generated asset item ids in `item_id_list`; the earlier asset-wrapper-id probe under `data/jimeng-lab/proof-20260611-probe-local-item-list/` returned `ret=3005`
 - successful account-config probes: `data/jimeng-lab/proof-20260611-probe-account-config-get-{settings,ug-info,invite-status}/` show empty POST bodies return `ret=0`; `data/jimeng-lab/proof-20260611-probe-account-config-get-panel-info/` returned `ret=2012` for guessed bodies and remains an exact-body recovery target
@@ -701,7 +702,8 @@ Immediate next slices:
 5. Implement digital-human generation using the confirmed VOD reference path where applicable.
 6. Capture real CapCut template search/batch/preset payloads to expand no-spend research/template coverage.
 7. Capture/approve subject/persona `generate_voice` live submit and custom voice clone live submit/mutation once those UI/API flows are captured.
-8. Keep each slice small enough to prove and commit before moving on.
+8. Live-prove `story-records` / `async-tasks` only after a non-empty story list or approved export flow provides real story/task ids.
+9. Keep each slice small enough to prove and commit before moving on.
 
 Do not start the async daemon while these API contracts are still moving.
 

@@ -199,6 +199,17 @@ import {
   summarizeJimengLocalItems,
 } from "./local-items"
 import {
+  buildJimengAsyncTasksRequest,
+  buildJimengStoryExportPlan,
+  buildJimengStoryRecordsRequest,
+  fetchJimengAsyncTasks,
+  fetchJimengStoryRecords,
+  parseJimengStoryIds,
+  summarizeJimengAsyncTasks,
+  summarizeJimengStoryExportPlan,
+  summarizeJimengStoryRecords,
+} from "./story-archive"
+import {
   buildJimengAccountConfigRequest,
   fetchJimengAccountConfig,
   parseJimengAccountConfigEndpoints,
@@ -232,6 +243,7 @@ import {
   describeJimengImage,
   recognizeJimengImageFaces,
   summarizeReferenceImageInspection,
+  type JsonObject,
   type JsonValue,
 } from "./reference-image"
 import {
@@ -303,6 +315,9 @@ Commands:
   research-search Fetch no-spend inspiration, short-film, or workspace asset search results
   profile-research Fetch no-spend public profile/reference works and current-account follow lists
   local-items  Fetch no-spend current-account unpublished/generated item details by local item id
+  story-records Fetch no-spend story/archive records by explicit story id
+  async-tasks  Fetch no-spend async export task status by explicit task id
+  story-export-plan Build a dry-run story export async-task submit body
   infinite-canvas Fetch no-spend infinite-canvas project/detail/ratio metadata
   lip-sync-config Fetch no-spend digital-human/lip-sync model configs
   lip-sync-compare Offline compare a lip-sync dry-run plan against captured UI submit
@@ -390,6 +405,7 @@ Options:
   --publishedItemId <id>         Published work id for profile-research item detail
   --publishedItemIds <csv>       Published work ids for profile-research batch item details
   --itemIds <csv>                Local generated item ids for local-items
+  --storyIds <csv>               Story/archive ids for story-records or story-export-plan
   --imageTypeList <csv>          Profile homepage/favorites image type filters (default: 3,4,7)
   --needIntentionMark <bool>     Inspiration/short-film intention-mark option (default: true)
   --isInsertFrame <bool>         Optional asset search insert-frame filter
@@ -790,6 +806,9 @@ interface CliArgs {
     | "research-search"
     | "profile-research"
     | "local-items"
+    | "story-records"
+    | "async-tasks"
+    | "story-export-plan"
     | "infinite-canvas"
     | "endpoint-probe"
     | "rate-probe"
@@ -867,6 +886,7 @@ interface CliArgs {
   publishedItemId?: string
   publishedItemIds?: string[]
   itemIds?: string[]
+  storyIds?: string[]
   imageTypeList?: number[]
   needIntentionMark?: boolean
   isInsertFrame?: boolean
@@ -2236,6 +2256,116 @@ async function main(argv: string[]): Promise<void> {
       summary: summarizeJimengLocalItems(result),
     })
     console.log(`[jimeng-browser-proxy] local-items saved items=${result.items.length}`)
+    return
+  }
+
+  if (args.command === "story-records") {
+    if (!args.storyIds?.length) throw new Error("--storyIds is required for story-records")
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const request = buildJimengStoryRecordsRequest(args.storyIds)
+    const runId = `story-records-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    if (args.dryRun) {
+      writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
+        command: args.command,
+        endpoint: "/mweb/v1/mget_story",
+        request,
+        browser_session: redactSession(session),
+        live_request: false,
+      })
+      writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+        command: args.command,
+        endpoint: "/mweb/v1/mget_story",
+        request,
+        dry_run: true,
+      })
+      console.log(`[jimeng-browser-proxy] story-records dry run saved story_ids=${args.storyIds.length}`)
+      return
+    }
+
+    const result = await fetchJimengStoryRecords({ session, storyIds: args.storyIds })
+    writeJson(path.join(dirs.rawDir, `${runId}.json`), {
+      endpoint: result.endpoint,
+      http_status: result.httpStatus,
+      ret: result.ret,
+      errmsg: result.errmsg,
+      response_text_sha256: result.responseTextSha256,
+      request: result.request,
+      body: result.body,
+    })
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      summary: summarizeJimengStoryRecords(result),
+    })
+    console.log(`[jimeng-browser-proxy] story-records saved stories=${result.stories.length}`)
+    return
+  }
+
+  if (args.command === "async-tasks") {
+    const taskIds = args.taskIds ?? []
+    if (taskIds.length === 0) throw new Error("--taskIds is required for async-tasks")
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const request = buildJimengAsyncTasksRequest(taskIds)
+    const runId = `async-tasks-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    if (args.dryRun) {
+      writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
+        command: args.command,
+        endpoint: "/mweb/v1/mget_async_task",
+        request,
+        browser_session: redactSession(session),
+        live_request: false,
+      })
+      writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+        command: args.command,
+        endpoint: "/mweb/v1/mget_async_task",
+        request,
+        dry_run: true,
+      })
+      console.log(`[jimeng-browser-proxy] async-tasks dry run saved task_ids=${taskIds.length}`)
+      return
+    }
+
+    const result = await fetchJimengAsyncTasks({ session, taskIds })
+    writeJson(path.join(dirs.rawDir, `${runId}.json`), {
+      endpoint: result.endpoint,
+      http_status: result.httpStatus,
+      ret: result.ret,
+      errmsg: result.errmsg,
+      response_text_sha256: result.responseTextSha256,
+      request: result.request,
+      body: result.body,
+    })
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      summary: summarizeJimengAsyncTasks(result),
+    })
+    console.log(`[jimeng-browser-proxy] async-tasks saved tasks=${result.tasks.length}`)
+    return
+  }
+
+  if (args.command === "story-export-plan") {
+    if (!args.dryRun) throw new Error("story-export-plan is dry-run only because /mweb/v1/submit_async_task creates export task state; pass --dryRun")
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const plan = buildJimengStoryExportPlan({
+      submitId: args.submitId,
+      storyIds: args.storyIds,
+      payload: parseJsonObjectFlag(args.body, "--body"),
+    })
+    const runId = `story-export-plan-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
+      command: args.command,
+      endpoint: plan.endpoint,
+      method: plan.method,
+      request: plan.request,
+      payload_object: plan.payloadObject,
+      browser_session: redactSession(session),
+      live_submit: false,
+      warning: "No request was sent. /mweb/v1/submit_async_task creates an export task and needs approval or a disposable fixture.",
+    })
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      summary: summarizeJimengStoryExportPlan(plan),
+    })
+    console.log(`[jimeng-browser-proxy] story-export-plan dry run saved submit_id=${String(plan.request.submit_id)}`)
     return
   }
 
@@ -4196,6 +4326,9 @@ function parseArgs(argv: string[]): CliArgs {
     && command !== "research-search"
     && command !== "profile-research"
     && command !== "local-items"
+    && command !== "story-records"
+    && command !== "async-tasks"
+    && command !== "story-export-plan"
     && command !== "infinite-canvas"
     && command !== "endpoint-probe"
     && command !== "rate-probe"
@@ -4417,6 +4550,7 @@ function parseArgs(argv: string[]): CliArgs {
     publishedItemId: flags.publishedItemId,
     publishedItemIds: parseJimengPublishedItemIds(flags.publishedItemIds),
     itemIds: parseJimengLocalItemIds(flags.itemIds),
+    storyIds: parseJimengStoryIds(flags.storyIds),
     imageTypeList: parseJimengProfileImageTypeList(flags.imageTypeList),
     needIntentionMark,
     isInsertFrame,
@@ -4604,6 +4738,13 @@ function readInlineOrFile(value: string): string {
     return readFileSync(path.resolve(value), "utf8")
   }
   return value
+}
+
+function parseJsonObjectFlag(value: string | undefined, flagName: string): JsonObject | undefined {
+  if (!value) return undefined
+  const parsed = JSON.parse(readInlineOrFile(value)) as JsonValue
+  if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed
+  throw new Error(`${flagName} must be a JSON object`)
 }
 
 function parseVoiceCloneStatuses(values: string[] | undefined): JimengCloneVoiceStatusValue[] | undefined {
