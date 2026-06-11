@@ -131,6 +131,11 @@ import {
   summarizeJimengLipSyncCompare,
 } from "./lip-sync-compare"
 import {
+  compareJimengRequestPlanWithCaptureTemplate,
+  compareJimengRequestPlanWithRawNetwork,
+  summarizeJimengRequestPlanCompare,
+} from "./request-plan-compare"
+import {
   locateJimengStaticEndpoints,
   parseJimengStaticLocatorEndpoints,
   parseJimengStaticLocatorQueries,
@@ -341,6 +346,7 @@ Commands:
   text2image-compare Offline compare a direct text-to-image dry-run plan against captured UI submit
   text2video-plan Build a no-spend direct text/image/frames-to-video submit body
   text2video-compare Offline compare a direct video dry-run plan against captured UI submit
+  request-plan-compare Offline compare a simple dry-run request plan against captured UI traffic
   account-credit Fetch signed no-spend account credit balance
   commerce-benefits Fetch signed no-spend benefit metadata and user benefit rows
   commerce-pricing Fetch signed no-spend VIP and credit price lists
@@ -416,7 +422,7 @@ Options:
   --includeKnown                Include already-covered endpoints in discovery-worklist/static-inventory
   --decisions <ids>             Triage decisions for triage-coverage: keep,maybe,skip (default: keep)
   --plan <file>                 Dry-run plan JSON for *-compare commands
-  --endpoint <path|url>          Endpoint path or full URL for endpoint-probe
+  --endpoint <path|url>          Endpoint path or full URL for endpoint-probe/request-plan-compare
   --method <GET|POST>            HTTP method for endpoint-probe/capcut-probe (default: POST)
   --query <query>                Query string override for endpoint-probe
   --body <json>                  Single JSON body for endpoint-probe/capcut-probe
@@ -613,6 +619,11 @@ Examples:
     --audioVid v03870g10004d8k1u4nog65hb08dnhig \\
     --name "Kbeauty reference voice" \\
     --dryRun
+
+  jimeng-browser-proxy request-plan-compare \\
+    --plan data/jimeng-lab/voice-clone/raw/voice-clone-submit-<run>-dry-run-plan.json \\
+    --rawNetwork data/jimeng-captures/<capture>/raw-network.jsonl \\
+    --outDir data/jimeng-lab/request-plan-compare
 
   jimeng-browser-proxy endpoint-probe \\
     --session data/jimeng-lab/raw/session-bundle-current.json \\
@@ -853,6 +864,7 @@ interface CliArgs {
     | "text2image-compare"
     | "text2video-plan"
     | "text2video-compare"
+    | "request-plan-compare"
     | "account-credit"
     | "commerce-benefits"
     | "commerce-pricing"
@@ -1326,6 +1338,34 @@ async function main(argv: string[]): Promise<void> {
       summary: summarizeJimengVideoDirectCompare(result),
     })
     console.log(`[jimeng-browser-proxy] text2video-compare saved match=${result.match} candidates=${result.candidate_count}`)
+    return
+  }
+
+  if (args.command === "request-plan-compare") {
+    if (!args.plan) throw new Error("request-plan-compare requires --plan")
+    if (!args.rawNetwork && !args.captureDir && !args.capture) {
+      throw new Error("request-plan-compare requires --rawNetwork, --captureDir, or --capture")
+    }
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const runId = `request-plan-compare-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const dryRunPlanText = readFileSync(path.resolve(args.plan), "utf8")
+    const result = args.capture
+      ? compareJimengRequestPlanWithCaptureTemplate({
+        dryRunPlanText,
+        captureTemplateText: readFileSync(path.resolve(args.capture), "utf8"),
+        endpoint: args.endpoint,
+      })
+      : compareJimengRequestPlanWithRawNetwork({
+        dryRunPlanText,
+        rawNetworkText: readFileSync(resolveRawNetworkFile(args), "utf8"),
+        endpoint: args.endpoint,
+      })
+    writeJson(path.join(dirs.rawDir, `${runId}.json`), result)
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      summary: summarizeJimengRequestPlanCompare(result),
+    })
+    console.log(`[jimeng-browser-proxy] request-plan-compare saved endpoint=${result.plan_endpoint} match=${result.match} candidates=${result.candidate_count}`)
     return
   }
 
@@ -5535,6 +5575,7 @@ function parseArgs(argv: string[]): CliArgs {
     && command !== "text2image-compare"
     && command !== "text2video-plan"
     && command !== "text2video-compare"
+    && command !== "request-plan-compare"
     && command !== "account-credit"
     && command !== "commerce-benefits"
     && command !== "commerce-pricing"

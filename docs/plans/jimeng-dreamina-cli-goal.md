@@ -459,6 +459,7 @@ Subject/persona voice generation is request-shaped but not live-submitted:
 - frontend bundle evidence maps `generateSubjectVoice({imageUri})` to `/mweb/v1/dreamina_subject/generate_voice` with request body `{"image_uri":"tos-cn-i-..."}`
 - proof bundle: `data/jimeng-lab/proof-20260610-subject-lifecycle/`
 - this dry-run plan is now sessionless/no-browser; latest smoke proof: `data/jimeng-lab/cli-sessionless-dryruns/`
+- use `jimeng-browser-proxy request-plan-compare --plan <subject-generate-voice-dry-run-plan.json> --rawNetwork <capture>/raw-network.jsonl` to compare this simple request shape against passive UI traffic before enabling live submit
 - live submit is disabled because it may consume generation quota and still needs explicit spend approval or a captured UI submit
 
 Custom voice clone coverage is now partially implemented and proved:
@@ -476,6 +477,7 @@ Custom voice clone coverage is now partially implemented and proved:
 - live no-spend asset proof returned `ret=0`, `errmsg=success`, `voice_count=0`, `next_offset=50`
 - proof bundle: `data/jimeng-lab/proof-20260610-voice-clone/`
 - submit/query dry-run/update/delete request plans are now sessionless/no-browser; latest smoke proof: `data/jimeng-lab/cli-sessionless-dryruns/`
+- use `jimeng-browser-proxy request-plan-compare --plan <voice-clone-*-dry-run-plan.json> --rawNetwork <capture>/raw-network.jsonl` for submit/query/update/delete capture parity checks; pass `--endpoint` only for ambiguous multi-endpoint plans
 - submit/update/delete remain dry-run-only because they may create or mutate account assets; enable live only after background CDP capture and explicit approval or a disposable fixture
 
 Workspace/workbench asset listing is now live-proved without generation spend:

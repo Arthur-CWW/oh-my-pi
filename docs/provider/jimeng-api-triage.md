@@ -93,4 +93,5 @@ Why it is not important now:
 
 - Direct image plans: use `jimeng-browser-proxy text2image-plan` to build a no-session dry-run request and `jimeng-browser-proxy text2image-compare` to compare it against a passive raw CDP/capture-template submit request before live submit is claimed.
 - Direct video plans: use `jimeng-browser-proxy text2video-plan` to build a no-session dry-run request and `jimeng-browser-proxy text2video-compare` to compare it against a passive raw CDP/capture-template submit request before live submit is claimed.
+- Simple dry-run request plans, including subject voice generation and voice clone submit/query/update/delete, can use `jimeng-browser-proxy request-plan-compare` to compare the planned request body against passive raw CDP/capture-template traffic without live provider calls.
 - Lip-sync plans: keep using `jimeng-browser-proxy lip-sync-compare` because the meaningful payload is nested under provider-specific `videoGenInputs`.
