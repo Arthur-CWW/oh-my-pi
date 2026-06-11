@@ -2061,6 +2061,7 @@ async function main(argv: string[]): Promise<void> {
       workspaceIds: args.workspaceIds,
     }
     const runId = `workspace-context-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
     if (args.dryRun) {
       writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
         command: args.command,
@@ -2076,6 +2077,10 @@ async function main(argv: string[]): Promise<void> {
             ? buildJimengWorkspaceByIdsRequest(args.workspaceIds)
             : { inferred_from_workspace_list: true },
         },
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
         browser_session: redactSession(session),
       })
       writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
@@ -2085,15 +2090,27 @@ async function main(argv: string[]): Promise<void> {
           ...query,
           workspaceIds: query.workspaceIds ? query.workspaceIds.map((id) => ({ sha256: sha256(id) })) : undefined,
         },
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
         dry_run: true,
       })
       console.log(`[jimeng-browser-proxy] workspace-context dry run saved endpoints=${endpoints.join(",")}`)
       return
     }
 
-    const result = await fetchJimengWorkspaceContext({ session, query })
+    const transport = createJimengHttpTransport({
+      mode: args.transportMode,
+      cassettePath,
+    })
+    const result = await fetchJimengWorkspaceContext({ session, query, fetch: transport.fetch })
     writeJson(path.join(dirs.rawDir, `${runId}.json`), {
       endpoints: result.endpoints,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       skipped: result.skipped,
       results: result.results.map((item) => ({
         endpoint: item.endpoint,
@@ -2108,6 +2125,10 @@ async function main(argv: string[]): Promise<void> {
     })
     writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
       command: args.command,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       summary: summarizeJimengWorkspaceContext(result),
     })
     const listResult = result.results.find((item) => item.endpointId === "list")

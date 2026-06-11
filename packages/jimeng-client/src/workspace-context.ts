@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto"
 import { Schema } from "effect"
 import { type JimengSessionBundle } from "./capture"
-import { assertNoRiskError, JimengClient } from "./client"
+import { assertNoRiskError, JimengClient, type JimengFetch } from "./client"
 import { buildJimengEndpointProbeHeaders } from "./endpoint-probe"
 import { jimengError } from "./errors"
 import { type JsonObject, type JsonValue } from "./reference-image"
@@ -138,11 +138,12 @@ export function buildJimengWorkspaceByIdsRequest(workspaceIds: string[]): JsonOb
 
 export async function fetchJimengWorkspaceContext(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   session: JimengSessionBundle
   query?: JimengWorkspaceContextQuery
 }): Promise<JimengWorkspaceContextBundle> {
   const endpoints = input.query?.endpoints ?? parseJimengWorkspaceContextEndpoints(undefined)
-  const client = input.client ?? new JimengClient()
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
   const results: JimengWorkspaceContextResult[] = []
   const skipped: JimengWorkspaceContextBundle["skipped"] = []
   const needList = endpoints.includes("list") || (endpoints.includes("get-by-ids") && !input.query?.workspaceIds?.length)

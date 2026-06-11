@@ -1,11 +1,16 @@
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import path from "node:path"
 import { describe, expect, test } from "bun:test"
 import {
   buildJimengWorkspaceByIdsRequest,
   buildJimengWorkspaceListRequest,
+  createJimengHttpTransport,
   fetchJimengWorkspaceContext,
   JimengClient,
   JimengError,
   parseJimengWorkspaceContextEndpoints,
+  readJimengHttpCassette,
   summarizeJimengWorkspaceContext,
   type JimengFetch,
   type JimengSessionBundle,
@@ -87,6 +92,51 @@ describe("Jimeng workspace context helpers", () => {
     expect(summaryText).not.toContain("2033447352671660")
     expect(summaryText).not.toContain("owner-user-1")
     expect(summaryText).not.toContain("https://signed.example.invalid")
+  })
+
+  test("can fetch inferred lookup through recorded and replayed HTTP transport cassettes", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "jimeng-workspace-context-cassette-"))
+    try {
+      const cassettePath = path.join(dir, "workspace-context.json")
+      const requests: Array<{ url: string; init?: RequestInit }> = []
+      const recordTransport = createJimengHttpTransport({
+        mode: "record",
+        cassettePath,
+        fetch: mockFetchSequence([
+          JSON.stringify(workspaceListBody()),
+          JSON.stringify(workspaceByIdsBody()),
+        ], requests),
+        nowIso: () => "2026-06-11T00:00:00.000Z",
+      })
+
+      const recorded = await fetchJimengWorkspaceContext({
+        fetch: recordTransport.fetch,
+        session,
+        query: { endpoints: ["list", "get-by-ids"], limit: 20 },
+      })
+
+      expect(recorded.results.map((item) => item.endpointId)).toEqual(["list", "get-by-ids"])
+      expect(readJimengHttpCassette(cassettePath).entries).toHaveLength(2)
+      expect(requests).toHaveLength(2)
+
+      const replayTransport = createJimengHttpTransport({
+        mode: "replay",
+        cassettePath,
+      })
+      const replayed = await fetchJimengWorkspaceContext({
+        fetch: replayTransport.fetch,
+        session,
+        query: { endpoints: ["list", "get-by-ids"], limit: 20 },
+      })
+
+      expect(summarizeJimengWorkspaceContext(replayed)).toMatchObject({
+        result_count: 2,
+        list: { workspace_count: 1 },
+        get_by_ids: { workspace_count: 1 },
+      })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   test("uses supplied workspace ids without first listing", async () => {
