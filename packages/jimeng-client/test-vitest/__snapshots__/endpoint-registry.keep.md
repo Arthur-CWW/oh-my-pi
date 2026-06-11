@@ -7,7 +7,7 @@
 
 | ID | Decision | Family | Endpoints | Statuses | Not implemented |
 |---|---|---|---:|---|---:|
-| G1 | keep | Text/image/video generation | 3 | implemented=1, partial=1, blocked=1 | 2 |
+| G1 | keep | Text/image/video generation | 3 | implemented=1, partial=1, dry_run_only=1 | 2 |
 | G2 | keep | Upload and provider asset references | 5 | implemented=4, blocked=1 | 1 |
 | P1 | keep | Persona/subject lifecycle | 5 | implemented=4, dry_run_only=1 | 1 |
 | V1 | keep | Voice and speech | 9 | implemented=2, partial=2, dry_run_only=3, blocked=2 | 7 |
@@ -21,8 +21,8 @@
 
 1. Generation parity and artifact proof - `G1 /mweb/v1/aigc_draft/generate` - partial command=text2image-plan/text2image-compare/text2video-plan/text2video-compare/text2video/image2video/frames2video/lip-sync - Unified generation submit; direct image/video request builders and direct capture compares are dry-run covered; live lip-sync/end-frame still require capture compare or approval-gated submit.
    - Next probe: Passively capture a current frontend submit for lip-sync, end-frame, or multi-frame generation, then run the matching text2video-compare or lip-sync-compare before any approval-gated live submit.
-1. Generation parity and artifact proof - `G1 /mweb/v1/execute_generate_audit` - blocked - Generation pre-audit posts image/video/audio/subject material lists; capture exact material payload before replay.
-   - Next probe: Passively capture the frontend material-audit request around a generation submit and add a request-plan-compare fixture for the exact image/video/audio/subject material payload.
+1. Generation parity and artifact proof - `G1 /mweb/v1/execute_generate_audit` - dry_run_only command=generate-audit-plan/request-plan-compare - Generation pre-audit material transform is modeled for image/video/audio/subject dry-run plans; live replay still needs passive UI capture compare.
+   - Next probe: Passively capture the frontend material-audit request around a generation submit, then compare it with generate-audit-plan using request-plan-compare before any live replay.
 1. Generation parity and artifact proof - `G2 /mweb/v1/mpack_image` - blocked - Packs image material through dreamina-material-data-service; capture the exact caller input shape before promotion.
    - Next probe: Passively capture an image-pack/material-data-service UI flow, then replay only with cassette redaction after the exact caller input shape is known.
 2. Persona and voice - `V1 /mweb/v1/feed` - partial command=voices - Built-in voice library replay is implemented for captured signed feed requests.
@@ -73,9 +73,9 @@
 - `/mweb/v1/aigc_draft/generate` - partial command=text2image-plan/text2image-compare/text2video-plan/text2video-compare/text2video/image2video/frames2video/lip-sync - Unified generation submit; direct image/video request builders and direct capture compares are dry-run covered; live lip-sync/end-frame still require capture compare or approval-gated submit.
   - Evidence: `docs/qa/jimeng-direct-compare-gates-20260611.md`; `data/jimeng-lab/proof-20260610-text2image-plan-direct/`; `data/jimeng-lab/text2video-plan-current/`; `data/jimeng-lab/proof-20260610-subscription-api-live-check/`
   - Next probe: Passively capture a current frontend submit for lip-sync, end-frame, or multi-frame generation, then run the matching text2video-compare or lip-sync-compare before any approval-gated live submit.
-- `/mweb/v1/execute_generate_audit` - blocked - Generation pre-audit posts image/video/audio/subject material lists; capture exact material payload before replay.
-  - Evidence: `data/jimeng-lab/proof-20260611-static-locate-media-helper-blockers/`; `data/jimeng-lab/proof-20260611-static-inventory-media-helper-blockers/`
-  - Next probe: Passively capture the frontend material-audit request around a generation submit and add a request-plan-compare fixture for the exact image/video/audio/subject material payload.
+- `/mweb/v1/execute_generate_audit` - dry_run_only command=generate-audit-plan/request-plan-compare - Generation pre-audit material transform is modeled for image/video/audio/subject dry-run plans; live replay still needs passive UI capture compare.
+  - Evidence: `docs/qa/jimeng-generate-audit-plan-20260611.md`; `data/jimeng-lab/proof-20260611-static-locate-media-helper-blockers/`; `data/jimeng-lab/proof-20260611-static-inventory-media-helper-blockers/`
+  - Next probe: Passively capture the frontend material-audit request around a generation submit, then compare it with generate-audit-plan using request-plan-compare before any live replay.
 
 ### G2 Upload and provider asset references
 

@@ -185,6 +185,11 @@ import {
   summarizeJimengVideoDirectPlan,
 } from "./video-plan"
 import {
+  buildJimengGenerateAuditPlan,
+  parseJimengGenerateAuditMaterialsJson,
+  summarizeJimengGenerateAuditPlan,
+} from "./generate-audit"
+import {
   compareJimengVideoDirectPlanWithCaptureTemplate,
   compareJimengVideoDirectPlanWithRawNetwork,
   summarizeJimengVideoDirectCompare,
@@ -353,6 +358,7 @@ Commands:
   text2image-compare Offline compare a direct text-to-image dry-run plan against captured UI submit
   text2video-plan Build a no-spend direct text/image/frames-to-video submit body
   text2video-compare Offline compare a direct video dry-run plan against captured UI submit
+  generate-audit-plan Build a dry-run generation material pre-audit body
   request-plan-compare Offline compare a simple dry-run request plan against captured UI traffic
   account-credit Fetch signed no-spend account credit balance
   commerce-benefits Fetch signed no-spend benefit metadata and user benefit rows
@@ -434,6 +440,8 @@ Options:
   --method <GET|POST>            HTTP method for endpoint-probe/capcut-probe (default: POST)
   --query <query>                Query string override for endpoint-probe
   --body <json>                  Single JSON body for endpoint-probe/capcut-probe
+                                  generate-audit-plan uses this as extra top-level request JSON
+  --materials <json|file>         JSON material list for generate-audit-plan
   --variants <json|file>         Probe variants JSON array or object with variants
   --transport <mode>             Shared HTTP transport: live, record, replay, fixture (default: live)
   --cassette <file>              Cassette path for record/replay/fixture transport
@@ -879,6 +887,7 @@ interface CliArgs {
     | "text2image-compare"
     | "text2video-plan"
     | "text2video-compare"
+    | "generate-audit-plan"
     | "request-plan-compare"
     | "account-credit"
     | "commerce-benefits"
@@ -957,6 +966,7 @@ interface CliArgs {
   method?: "GET" | "POST"
   query?: string
   body?: string
+  materials?: string
   variants?: string
   transportMode: JimengHttpTransportMode
   cassette?: string
@@ -1380,6 +1390,32 @@ async function main(argv: string[]): Promise<void> {
       summary: summarizeJimengVideoDirectCompare(result),
     })
     console.log(`[jimeng-browser-proxy] text2video-compare saved match=${result.match} candidates=${result.candidate_count}`)
+    return
+  }
+
+  if (args.command === "generate-audit-plan") {
+    if (!args.materials) throw new Error("generate-audit-plan requires --materials")
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const runId = `generate-audit-plan-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const materialJson = JSON.parse(readInlineOrFile(args.materials)) as JsonValue
+    const plan = buildJimengGenerateAuditPlan({
+      materials: parseJimengGenerateAuditMaterialsJson(materialJson),
+      extraRequest: parseJsonObjectFlag(args.body, "--body"),
+    })
+    writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
+      command: args.command,
+      endpoint: plan.endpoint,
+      method: plan.method,
+      query: plan.query,
+      request: plan.request,
+      material_list: plan.materialList,
+      live_submit: false,
+    })
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      summary: summarizeJimengGenerateAuditPlan(plan),
+    })
+    console.log(`[jimeng-browser-proxy] generate-audit-plan saved materials=${plan.materialList.length} live_submit=false`)
     return
   }
 
@@ -5694,6 +5730,7 @@ function parseArgs(argv: string[]): CliArgs {
     && command !== "text2image-compare"
     && command !== "text2video-plan"
     && command !== "text2video-compare"
+    && command !== "generate-audit-plan"
     && command !== "request-plan-compare"
     && command !== "account-credit"
     && command !== "commerce-benefits"
@@ -5923,6 +5960,7 @@ function parseArgs(argv: string[]): CliArgs {
     method,
     query: command === "static-locate" ? undefined : flags.query,
     body: flags.body,
+    materials: flags.materials,
     variants: flags.variants,
     transportMode,
     cassette: flags.cassette,

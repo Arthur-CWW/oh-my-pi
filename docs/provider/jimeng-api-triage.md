@@ -113,4 +113,5 @@ Why it is not important now:
 
 ## Latest Gap Notes
 
+- `G1 /mweb/v1/execute_generate_audit` is now dry-run-only rather than fully blocked. `generate-audit-plan` models the frontend material transform for image/video/audio/subject inputs and can be compared against passive UI traffic through `request-plan-compare`. Live replay still needs a fresh generation capture proving the complete top-level request context.
 - `R1 /mweb/v1/mget_story` remains partial rather than implemented. The `story-records` typed client and replay tests exist, but a 2026-06-11 sweep over three existing followed profiles (`PUAI`, `小波登`, `就扶墙老师`) returned `ret=0` with `story_count=0`; promotion still needs a public profile or UI capture with a non-empty story list. Treat this as supporting audit evidence, not a reason to prioritize story/archive reads over generation, persona/voice, lip-sync, reference controls, or template mining.
