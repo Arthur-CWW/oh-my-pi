@@ -16,6 +16,8 @@ skip: L1,N1,U1
 
 `keep` means implement typed service/CLI support. `maybe` means keep cataloged but do not actively build. `skip` means leave as `cataloged_only` or `blocked` with a reason.
 
+The machine-readable mirror for these family IDs lives in `packages/jimeng-client/src/endpoint-registry.ts`. `summarizeJimengDiscoveryTriageCoverage({ decisions: ["keep"] })` currently reports 62 unique keep-family endpoints and 0 missing registry rows.
+
 ## Keep
 
 | ID | Family | Why it matters |

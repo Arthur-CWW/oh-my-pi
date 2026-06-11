@@ -3,6 +3,9 @@ import {
   buildJimengDiscoveryKnownEndpointMap,
   getJimengDiscoveryKnownEndpointNote,
   getJimengDiscoveryKnownEndpoints,
+  getJimengDiscoveryTriageFamilies,
+  summarizeJimengDiscoveryTriageCoverage,
+  writeJimengDiscoveryTriageCoverageMarkdown,
 } from "../src/endpoint-registry"
 
 describe("Jimeng endpoint registry", () => {
@@ -39,5 +42,29 @@ describe("Jimeng endpoint registry", () => {
   test("returns notes for known endpoints and null for unknown endpoints", () => {
     expect(getJimengDiscoveryKnownEndpointNote("/mweb/v1/get_history")).toContain("Safe frontend-derived probes")
     expect(getJimengDiscoveryKnownEndpointNote("/mweb/v1/not_a_real_endpoint")).toBeNull()
+  })
+
+  test("summarizes triage keep-family coverage from registry statuses", () => {
+    const families = getJimengDiscoveryTriageFamilies()
+    const coverage = summarizeJimengDiscoveryTriageCoverage({ decisions: ["keep"] })
+
+    expect(families.filter((family) => family.decision === "keep").map((family) => family.id)).toEqual([
+      "G1",
+      "G2",
+      "P1",
+      "V1",
+      "L1",
+      "R1",
+      "R2",
+      "T1",
+      "A1",
+    ])
+    expect(coverage.missingEndpointCount).toBe(0)
+    expect(coverage.statusCounts.implemented).toBeGreaterThan(20)
+    expect(coverage.statusCounts.blocked).toBeGreaterThan(10)
+    expect(coverage.families.find((family) => family.id === "T1")?.statusCounts.blocked).toBe(6)
+    expect(coverage.families.find((family) => family.id === "L1")?.notImplementedEndpoints).toContain("/mweb/v1/video_generate/pre_process")
+
+    expect(writeJimengDiscoveryTriageCoverageMarkdown(coverage)).toContain("| T1 | keep | CapCut/template mining | 16 | implemented=10, blocked=6 | 6 |")
   })
 })

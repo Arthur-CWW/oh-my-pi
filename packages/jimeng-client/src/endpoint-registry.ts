@@ -13,6 +13,59 @@ export interface JimengDiscoveryKnownEndpoint {
   note: string
 }
 
+export type JimengDiscoveryTriageDecision = "keep" | "maybe" | "skip"
+
+export type JimengDiscoveryTriageFamilyId =
+  | "G1"
+  | "G2"
+  | "P1"
+  | "V1"
+  | "L1"
+  | "R1"
+  | "R2"
+  | "T1"
+  | "A1"
+  | "C1"
+  | "Q1"
+  | "I1"
+  | "S1"
+  | "O1"
+  | "W1"
+  | "N1"
+  | "U1"
+  | "D1"
+  | "M1"
+  | "P2"
+  | "X1"
+
+export interface JimengDiscoveryTriageFamily {
+  id: JimengDiscoveryTriageFamilyId
+  decision: JimengDiscoveryTriageDecision
+  title: string
+  endpoints: string[]
+}
+
+export type JimengDiscoveryTriageStatusKey = JimengDiscoveryKnownStatus | "missing"
+
+export interface JimengDiscoveryTriageFamilyCoverage {
+  id: JimengDiscoveryTriageFamilyId
+  decision: JimengDiscoveryTriageDecision
+  title: string
+  endpointCount: number
+  statusCounts: Record<JimengDiscoveryTriageStatusKey, number>
+  missingEndpoints: string[]
+  notImplementedEndpoints: string[]
+}
+
+export interface JimengDiscoveryTriageCoverage {
+  decisions: JimengDiscoveryTriageDecision[]
+  familyCount: number
+  uniqueEndpointCount: number
+  missingEndpointCount: number
+  statusCounts: Record<JimengDiscoveryTriageStatusKey, number>
+  families: JimengDiscoveryTriageFamilyCoverage[]
+}
+
 export function getJimengDiscoveryKnownEndpoints(): JimengDiscoveryKnownEndpoint[] {
   return KNOWN_ENDPOINTS.map((endpoint) => ({ ...endpoint }))
 }
@@ -23,6 +76,302 @@ export function buildJimengDiscoveryKnownEndpointMap(): Map<string, JimengDiscov
 
 export function getJimengDiscoveryKnownEndpointNote(endpoint: string): string | null {
   return KNOWN_ENDPOINTS.find((knownEndpoint) => knownEndpoint.endpoint === endpoint)?.note ?? null
+}
+
+export function getJimengDiscoveryTriageFamilies(): JimengDiscoveryTriageFamily[] {
+  return TRIAGE_FAMILIES.map((family) => ({ ...family, endpoints: [...family.endpoints] }))
+}
+
+export function summarizeJimengDiscoveryTriageCoverage(input: {
+  decisions?: JimengDiscoveryTriageDecision[]
+} = {}): JimengDiscoveryTriageCoverage {
+  const decisions = input.decisions ?? ["keep", "maybe", "skip"]
+  const decisionSet = new Set<JimengDiscoveryTriageDecision>(decisions)
+  const knownByEndpoint = buildJimengDiscoveryKnownEndpointMap()
+  const statusCounts = emptyTriageStatusCounts()
+  const uniqueEndpoints = new Set<string>()
+
+  const families = TRIAGE_FAMILIES
+    .filter((family) => decisionSet.has(family.decision))
+    .map((family): JimengDiscoveryTriageFamilyCoverage => {
+      const familyStatusCounts = emptyTriageStatusCounts()
+      const missingEndpoints: string[] = []
+      const notImplementedEndpoints: string[] = []
+
+      for (const endpoint of family.endpoints) {
+        uniqueEndpoints.add(endpoint)
+        const known = knownByEndpoint.get(endpoint)
+        if (!known) {
+          familyStatusCounts.missing += 1
+          statusCounts.missing += 1
+          missingEndpoints.push(endpoint)
+          notImplementedEndpoints.push(endpoint)
+          continue
+        }
+
+        familyStatusCounts[known.status] += 1
+        statusCounts[known.status] += 1
+        if (known.status !== "implemented") notImplementedEndpoints.push(endpoint)
+      }
+
+      return {
+        id: family.id,
+        decision: family.decision,
+        title: family.title,
+        endpointCount: family.endpoints.length,
+        statusCounts: familyStatusCounts,
+        missingEndpoints,
+        notImplementedEndpoints,
+      }
+    })
+
+  return {
+    decisions: [...decisions],
+    familyCount: families.length,
+    uniqueEndpointCount: uniqueEndpoints.size,
+    missingEndpointCount: statusCounts.missing,
+    statusCounts,
+    families,
+  }
+}
+
+export function writeJimengDiscoveryTriageCoverageMarkdown(coverage: JimengDiscoveryTriageCoverage): string {
+  const lines = [
+    "# Jimeng Triage Coverage",
+    "",
+    `- Decisions: ${coverage.decisions.join(", ")}`,
+    `- Families: ${coverage.familyCount}`,
+    `- Unique endpoints: ${coverage.uniqueEndpointCount}`,
+    `- Missing endpoints: ${coverage.missingEndpointCount}`,
+    "",
+    "| ID | Decision | Family | Endpoints | Statuses | Not implemented |",
+    "|---|---|---|---:|---|---:|",
+  ]
+
+  for (const family of coverage.families) {
+    lines.push(`| ${family.id} | ${family.decision} | ${family.title} | ${family.endpointCount} | ${formatTriageStatusCounts(family.statusCounts)} | ${family.notImplementedEndpoints.length} |`)
+  }
+
+  return `${lines.join("\n")}\n`
+}
+
+const TRIAGE_STATUS_KEYS: JimengDiscoveryTriageStatusKey[] = [
+  "implemented",
+  "partial",
+  "dry_run_only",
+  "cataloged_only",
+  "captured_only",
+  "blocked",
+  "missing",
+]
+
+function emptyTriageStatusCounts(): Record<JimengDiscoveryTriageStatusKey, number> {
+  return {
+    implemented: 0,
+    partial: 0,
+    dry_run_only: 0,
+    cataloged_only: 0,
+    captured_only: 0,
+    blocked: 0,
+    missing: 0,
+  }
+}
+
+function formatTriageStatusCounts(statusCounts: Record<JimengDiscoveryTriageStatusKey, number>): string {
+  return TRIAGE_STATUS_KEYS
+    .filter((status) => statusCounts[status] > 0)
+    .map((status) => `${status}=${statusCounts[status]}`)
+    .join(", ")
+}
+
+const TRIAGE_FAMILIES: JimengDiscoveryTriageFamily[] = [
+  triageFamily("G1", "keep", "Text/image/video generation", [
+    "/mweb/v1/aigc_draft/generate",
+    "/mweb/v1/execute_generate_audit",
+    "/mweb/v1/get_common_config",
+  ]),
+  triageFamily("G2", "keep", "Upload and provider asset references", [
+    "/mweb/v1/get_upload_token",
+    "/mweb/v1/imagex/submit_audit_job",
+    "/mweb/v1/get_image_by_uri",
+    "/mweb/v1/get_video_by_vid",
+    "/mweb/v1/mpack_image",
+  ]),
+  triageFamily("P1", "keep", "Persona/subject lifecycle", [
+    "/mweb/v1/dreamina_subject/get",
+    "/mweb/v1/dreamina_subject/create",
+    "/mweb/v1/dreamina_subject/update",
+    "/mweb/v1/dreamina_subject/delete",
+    "/mweb/v1/dreamina_subject/generate_voice",
+  ]),
+  triageFamily("V1", "keep", "Voice and speech", [
+    "/mweb/v1/get_user_local_item_list",
+    "/mweb/v1/voice/submit_task",
+    "/mweb/v1/voice/query_task",
+    "/mweb/v1/voice/update",
+    "/mweb/v1/voice/delete",
+    "/mweb/v1/feed",
+    "/mweb/v1/tts_generate",
+    "/mweb/v1/mix_audio_video",
+    "/mweb/v1/mix_audio_videos",
+  ]),
+  triageFamily("L1", "keep", "Lip-sync / digital human", [
+    "/mweb/v1/video_generate/get_common_config",
+    "/mweb/v1/video_generate/get_switch_model_queue_info",
+    "/mweb/v1/video_generate/pre_process",
+    "/mweb/v1/video_generate/mget_pre_process_result",
+    "/mweb/v1/video_generate/face_auth/skip",
+    "/mweb/v1/video_generate/face_auth/skip/query",
+  ]),
+  triageFamily("R1", "keep", "Reference profile research", [
+    "/mweb/v1/get_user_info",
+    "/mweb/v1/get_homepage",
+    "/mweb/v1/get_favorite_list",
+    "/mweb/v1/get_user_story_list",
+    "/mweb/v1/mget_story",
+    "/mweb/v1/get_follow_list",
+    "/mweb/v1/get_item_info",
+    "/mweb/v1/mget_item_info",
+  ]),
+  triageFamily("R2", "keep", "Reference controls", [
+    "/mweb/v1/get_image_description",
+    "/mweb/v1/face_recognize",
+    "/mweb/v1/blend_preview",
+    "/mweb/v1/pose_detect",
+    "/mweb/v1/saliency_seg",
+  ]),
+  triageFamily("T1", "keep", "CapCut/template mining", [
+    "/mweb/v1/get_explore",
+    "/mweb/v1/feed_short_video",
+    "/lv/v1/effect/get_panel_info",
+    "/lv/v1/effect/get_category_effects",
+    "/lv/v1/effect/get_all_fonts",
+    "/lv/v1/editor/plane/color/feed",
+    "/lv/v1/cc_web/plane/get_categories",
+    "/lv/v1/cc_web/plane/get_collections",
+    "/lv/v1/cc_web/plane/get_collection_templates",
+    "/lv/v1/cc_web/plane/get_template_detail",
+    "/lv/v1/cc_web/replicate/get_search_words",
+    "/lv/v1/cc_web/replicate/search_templates",
+    "/lv/v1/cc_web/plane/batch_get_collection_templates",
+    "/lv/v1/cc_web/plane/get_collection_presets",
+    "/lv/v1/cc_web/plane/preset_template_detail",
+    "/lv/v1/cc_web/plane/fuzzy_search_templates",
+  ]),
+  triageFamily("A1", "keep", "Assets/history/queue/video info", [
+    "/mweb/v1/get_asset_list",
+    "/mweb/v1/get_history",
+    "/mweb/v1/get_history_by_ids",
+    "/mweb/v1/get_history_queue_info",
+    "/mweb/v1/get_video_by_vid",
+    "/mweb/v1/get_local_item_list",
+  ]),
+  triageFamily("C1", "maybe", "Commerce/quota/benefits/pricing", [
+    "/commerce/v1/benefits/user_credit",
+    "/commerce/v1/subscription/price_list",
+    "/commerce/v1/purchase/price_list",
+    "/commerce/v1/subscription/cc_price_list",
+    "/commerce/v1/subscription/get_change_plan_info",
+    "/commerce/v3/resource/benefit_metadata",
+    "/commerce/v3/benefits/batch_get_user_benefit",
+  ]),
+  triageFamily("Q1", "maybe", "Runtime/config/model catalogs", [
+    "/mweb/v1/get_settings",
+    "/mweb/v1/get_ug_info",
+    "/mweb/v1/get_invite_status",
+    "/mweb/v1/get_experiment_params",
+    "/mweb/v1/get_home_header_banner_config",
+    "/mweb/v1/get_help_desk_entrance",
+    "/mweb/v1/speech/asr_token",
+    "/mweb/v1/speech/asr_hotwords",
+    "/mweb/v1/creation_agent/v2/get_agent_config",
+    "/mweb/v1/creation_agent/v2/skill/list",
+  ]),
+  triageFamily("I1", "maybe", "Infinite canvas", [
+    "/mweb/v1/infinite_canvas/list_project",
+    "/mweb/v1/infinite_canvas/project_detail",
+    "/mweb/v1/infinite_canvas/v1/get_canvas_custom_ratio",
+    "/mweb/v1/infinite_canvas/get_conversation_list",
+    "/mweb/v1/infinite_canvas/fetch_conversation",
+    "/mweb/v1/infinite_canvas/conversation",
+    "/mweb/v1/infinite_canvas/create_conversation",
+    "/mweb/v1/infinite_canvas/del_conversation",
+    "/mweb/v1/infinite_canvas/delete_turn",
+    "/mweb/v1/infinite_canvas/update_conversation",
+    "/mweb/v1/infinite_canvas/create_project",
+    "/mweb/v1/infinite_canvas/delete_project",
+    "/mweb/v1/infinite_canvas/edit",
+    "/mweb/v1/infinite_canvas/update_project",
+    "/mweb/v1/infinite_canvas/v1/submit_changeset",
+    "/mweb/v1/infinite_canvas/v1/update_canvas_custom_ratio",
+  ]),
+  triageFamily("S1", "maybe", "Story/archive/export", [
+    "/mweb/v1/mget_story",
+    "/mweb/v1/submit_async_task",
+    "/mweb/v1/mget_async_task",
+    "/mweb/v1/create_story",
+    "/mweb/v1/update_story",
+    "/mweb/v1/delete_story",
+  ]),
+  triageFamily("O1", "maybe", "Rate/concurrency probes", [
+    "/mweb/v1/get_history_queue_info",
+    "/commerce/v1/benefits/user_credit",
+  ]),
+  triageFamily("W1", "skip", "Weekly challenges / activities", [
+    "/mweb/v1/get_weekly_challenge_list",
+    "/mweb/v1/get_weekly_challenge_detail",
+    "/mweb/v1/get_weekly_challenge_work_list",
+  ]),
+  triageFamily("N1", "skip", "Notices, panels, banners, helpdesk", [
+    "/mweb/v1/get_notice_list",
+    "/mweb/v1/get_panel_info",
+    "/mweb/v1/get_home_header_banner_config",
+    "/mweb/v1/get_help_desk_entrance",
+    "/mweb/v1/get_unread_count",
+  ]),
+  triageFamily("U1", "skip", "URL shortener", [
+    "/mweb/v1/get_short_url",
+  ]),
+  triageFamily("D1", "skip", "CapCut account-token/data-sync credentials", [
+    "/mweb/v1/cc_data_sync/get_account_info",
+    "/mweb/v1/cc_data_sync/get_account_token",
+  ]),
+  triageFamily("M1", "skip", "Mutating LV asset/template/draft endpoints", [
+    "/lv/v1/asset/copy",
+    "/lv/v1/asset/create",
+    "/lv/v1/asset/create_cloud_asset",
+    "/lv/v1/asset/delete",
+    "/lv/v1/asset/label_as_exported",
+    "/lv/v1/asset/prepare_upload_cloud",
+    "/lv/v1/asset/rename",
+    "/lv/v1/editor/template/add",
+    "/lv/v1/editor/template/add_async",
+    "/lv/v1/editor/template/add_query",
+    "/lv/v1/cc_web/plane/del_presets_template",
+    "/mweb/v1/workspace/create",
+    "/mweb/v1/workspace/update",
+  ]),
+  triageFamily("P2", "skip", "Payment/order/refund flows", [
+    "/commerce/v3/trade/query_trade",
+    "/commerce/v3/trade/user/can_refund_list",
+    "/commerce/v3/trade/user/refund_record_list",
+  ]),
+  triageFamily("X1", "skip", "Surveys, remove history, update BGM, cancel/accelerate", [
+    "/mweb/v1/submit_survey",
+    "/mweb/v1/remove_history",
+    "/mweb/v1/update_video_default_bgm",
+    "/mweb/v1/aigc_draft/cancel_generate",
+    "/mweb/v1/aigc_draft/generate_accelerate",
+  ]),
+]
+
+function triageFamily(
+  id: JimengDiscoveryTriageFamilyId,
+  decision: JimengDiscoveryTriageDecision,
+  title: string,
+  endpoints: string[],
+): JimengDiscoveryTriageFamily {
+  return { id, decision, title, endpoints }
 }
 
 const KNOWN_ENDPOINTS: JimengDiscoveryKnownEndpoint[] = [
