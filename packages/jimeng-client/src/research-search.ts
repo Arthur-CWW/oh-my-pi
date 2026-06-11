@@ -1,7 +1,7 @@
 import { createDecipheriv, createHash } from "node:crypto"
 import { Schema } from "effect"
 import { type JimengSessionBundle } from "./capture"
-import { assertNoRiskError, JimengClient } from "./client"
+import { assertNoRiskError, JimengClient, type JimengFetch } from "./client"
 import { buildJimengEndpointProbeHeaders } from "./endpoint-probe"
 import { jimengError } from "./errors"
 import { type JsonObject, type JsonValue } from "./reference-image"
@@ -391,11 +391,12 @@ export function buildJimengResearchSearchRequest(query: JimengResearchSearchQuer
 
 export async function fetchJimengResearchSearch(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   session: JimengSessionBundle
   query: JimengResearchSearchQuery
 }): Promise<JimengResearchSearchResult> {
   const request = buildJimengResearchSearchRequest(input.query)
-  const client = input.client ?? new JimengClient()
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
   const response = await client.requestText(`https://jimeng.jianying.com/mweb/search/v1/search?${DEFAULT_QUERY}`, {
     method: "POST",
     headers: buildJimengEndpointProbeHeaders(input.session),

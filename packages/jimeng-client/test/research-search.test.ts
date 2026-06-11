@@ -1,15 +1,21 @@
 import { createCipheriv } from "node:crypto"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import path from "node:path"
 import { describe, expect, test } from "bun:test"
 import {
   buildJimengResearchSearchRequest,
+  createJimengHttpTransport,
   fetchJimengResearchSearch,
   JimengClient,
   JimengError,
   parseJimengResearchAssetType,
   parseJimengResearchSearchChannel,
   parseJimengResearchShowTypeList,
+  readJimengHttpCassette,
   summarizeJimengResearchSearch,
   type JimengFetch,
+  type JimengResearchSearchQuery,
   type JimengSessionBundle,
   type JsonObject,
 } from "../src"
@@ -122,6 +128,54 @@ describe("Jimeng research search", () => {
         image_url_present: true,
       }],
     })
+  })
+
+  test("can fetch inspiration search through recorded and replayed HTTP transport cassettes", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "jimeng-research-search-cassette-"))
+    try {
+      const cassettePath = path.join(dir, "research-search.json")
+      const requests: Array<{ url: string; init?: RequestInit }> = []
+      const recordTransport = createJimengHttpTransport({
+        mode: "record",
+        cassettePath,
+        fetch: mockFetch(JSON.stringify(inspirationBody()), requests),
+        nowIso: () => "2026-06-11T00:00:00.000Z",
+      })
+      const query: JimengResearchSearchQuery = { channel: "inspiration", keyword: "韩系美妆", count: 3 }
+
+      const recorded = await fetchJimengResearchSearch({
+        fetch: recordTransport.fetch,
+        session,
+        query,
+      })
+
+      expect(recorded.items).toHaveLength(1)
+      expect(readJimengHttpCassette(cassettePath).entries).toHaveLength(1)
+      expect(requests).toHaveLength(1)
+
+      const replayTransport = createJimengHttpTransport({
+        mode: "replay",
+        cassettePath,
+      })
+      const replayed = await fetchJimengResearchSearch({
+        fetch: replayTransport.fetch,
+        session,
+        query,
+      })
+
+      expect(summarizeJimengResearchSearch(replayed)).toMatchObject({
+        channel: "inspiration",
+        item_count: 1,
+        items: [
+          {
+            title: "Glass skin hook",
+            prompt: "K-beauty creator holding serum",
+          },
+        ],
+      })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   test("reproduces the frontend cache-token and media URL decrypt transform", async () => {

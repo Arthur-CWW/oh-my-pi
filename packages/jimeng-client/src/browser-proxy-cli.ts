@@ -2259,11 +2259,16 @@ async function main(argv: string[]): Promise<void> {
     }
     const request = buildJimengResearchSearchRequest(query)
     const runId = `research-search-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
     if (args.dryRun) {
       writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
         command: args.command,
         endpoint: "/mweb/search/v1/search",
         request,
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
         browser_session: redactSession(session),
         live_request: false,
       })
@@ -2272,17 +2277,29 @@ async function main(argv: string[]): Promise<void> {
         endpoint: "/mweb/search/v1/search",
         channel,
         request,
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
         dry_run: true,
       })
       console.log(`[jimeng-browser-proxy] research-search dry run saved channel=${channel}`)
       return
     }
 
-    const result = await fetchJimengResearchSearch({ session, query })
+    const transport = createJimengHttpTransport({
+      mode: args.transportMode,
+      cassettePath,
+    })
+    const result = await fetchJimengResearchSearch({ session, query, fetch: transport.fetch })
     writeJson(path.join(dirs.rawDir, `${runId}.json`), {
       endpoint: result.endpoint,
       channel: result.channel,
       wire_channel: result.wireChannel,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       http_status: result.httpStatus,
       ret: result.ret,
       errmsg: result.errmsg,
@@ -2298,6 +2315,10 @@ async function main(argv: string[]): Promise<void> {
     })
     writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
       command: args.command,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       summary: summarizeJimengResearchSearch(result),
     })
     console.log(`[jimeng-browser-proxy] research-search saved channel=${channel} items=${result.items.length} assets=${result.assets.length} has_more=${result.hasMore}`)
