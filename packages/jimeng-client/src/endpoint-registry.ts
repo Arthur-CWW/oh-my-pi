@@ -406,7 +406,7 @@ function triageFamily(
 }
 
 const KNOWN_ENDPOINTS: JimengDiscoveryKnownEndpoint[] = [
-  known("/mweb/v1/aigc_draft/generate", "partial", "text2image-plan/text2video-plan/text2video/image2video/frames2video/lip-sync", "Unified generation submit; direct image/video request builders are dry-run covered; live lip-sync/end-frame still require capture compare or approval-gated submit."),
+  known("/mweb/v1/aigc_draft/generate", "partial", "text2image-plan/text2video-plan/text2video-compare/text2video/image2video/frames2video/lip-sync", "Unified generation submit; direct image/video request builders and direct-video capture compare are dry-run covered; live lip-sync/end-frame still require capture compare or approval-gated submit."),
   known("/mweb/v1/execute_generate_audit", "blocked", null, "Generation pre-audit posts image/video/audio/subject material lists; capture exact material payload before replay."),
   known("/mweb/v1/get_asset_list", "implemented", "assets", "No-spend workspace asset/history listing."),
   known("/mweb/v1/get_history", "blocked", null, "Safe frontend-derived probes returned ret=0 with empty records_list, including explicit workspace scope; use assets/history-records until a non-empty UI capture is available."),

@@ -168,6 +168,11 @@ import {
   summarizeJimengVideoDirectPlan,
 } from "./video-plan"
 import {
+  compareJimengVideoDirectPlanWithCaptureTemplate,
+  compareJimengVideoDirectPlanWithRawNetwork,
+  summarizeJimengVideoDirectCompare,
+} from "./video-plan-compare"
+import {
   buildJimengCanvasCustomRatiosRequest,
   buildJimengCanvasConversationListRequest,
   buildJimengCanvasProjectDetailRequest,
@@ -329,6 +334,7 @@ Commands:
   image-models  Fetch no-spend image generation model/config catalog
   text2image-plan Build a no-spend direct text-to-image submit body
   text2video-plan Build a no-spend direct text/image/frames-to-video submit body
+  text2video-compare Offline compare a direct video dry-run plan against captured UI submit
   account-credit Fetch signed no-spend account credit balance
   commerce-benefits Fetch signed no-spend benefit metadata and user benefit rows
   commerce-pricing Fetch signed no-spend VIP and credit price lists
@@ -391,9 +397,9 @@ Options:
   --target-url <substring>      Existing Jimeng page URL/title substring (default: jimeng.jianying.com)
   --session <file>              Load a saved session bundle instead of refreshing from CDP
   --session-out <file>          session command output (default: data/jimeng-lab/raw/session-bundle-current.json)
-  --capture <file>              Capture template JSON for generation commands
+  --capture <file>              Capture template JSON for generation/compare commands
   --rawNetwork <file>           raw-network.jsonl from jimeng-network-recorder for capture-analyze
-  --captureDir <dir>            Capture directory containing raw-network.jsonl for capture-analyze/lip-sync-compare
+  --captureDir <dir>            Capture directory containing raw-network.jsonl for capture-analyze/*-compare
   --analysis <file[,file]>       capture-analyze normalized analysis JSON for discovery-worklist
   --probeCandidates <file[,file]> Raw endpoint-probe candidate JSON for discovery-worklist
   --staticRoot <dir[,dir]>      Optional source/bundle roots to search for exact endpoint string hints
@@ -403,7 +409,7 @@ Options:
   --includeRisky                Include generate/upload/mutate/payment endpoints in replay candidate JSON
   --includeKnown                Include already-covered endpoints in discovery-worklist/static-inventory
   --decisions <ids>             Triage decisions for triage-coverage: keep,maybe,skip (default: keep)
-  --plan <file>                 Dry-run plan JSON for lip-sync-compare
+  --plan <file>                 Dry-run plan JSON for lip-sync-compare/text2video-compare
   --endpoint <path|url>          Endpoint path or full URL for endpoint-probe
   --method <GET|POST>            HTTP method for endpoint-probe/capcut-probe (default: POST)
   --query <query>                Query string override for endpoint-probe
@@ -644,6 +650,11 @@ Examples:
     --rawNetwork data/jimeng-captures/<capture>/raw-network.jsonl \\
     --outDir data/jimeng-lab/lip-sync-compare
 
+  jimeng-browser-proxy text2video-compare \\
+    --plan data/jimeng-lab/text2video-plan/raw/text2video-plan-<run>-dry-run-plan.json \\
+    --rawNetwork data/jimeng-captures/<capture>/raw-network.jsonl \\
+    --outDir data/jimeng-lab/text2video-compare
+
   jimeng-browser-proxy tts \\
     --voice-id 7597003459665072686 \\
     --text "这条视频值得试一下。"
@@ -829,6 +840,7 @@ interface CliArgs {
     | "image-models"
     | "text2image-plan"
     | "text2video-plan"
+    | "text2video-compare"
     | "account-credit"
     | "commerce-benefits"
     | "commerce-pricing"
@@ -1250,6 +1262,32 @@ async function main(argv: string[]): Promise<void> {
       summary: summarizeJimengVideoDirectPlan(plan),
     })
     console.log(`[jimeng-browser-proxy] text2video-plan saved model=${plan.modelReqKey} resolution=${plan.videoResolution} ratio=${plan.ratio} duration=${plan.durationSec}s live_submit=false`)
+    return
+  }
+
+  if (args.command === "text2video-compare") {
+    if (!args.plan) throw new Error("text2video-compare requires --plan")
+    if (!args.rawNetwork && !args.captureDir && !args.capture) {
+      throw new Error("text2video-compare requires --rawNetwork, --captureDir, or --capture")
+    }
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const runId = `text2video-compare-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const dryRunPlanText = readFileSync(path.resolve(args.plan), "utf8")
+    const result = args.capture
+      ? compareJimengVideoDirectPlanWithCaptureTemplate({
+        dryRunPlanText,
+        captureTemplateText: readFileSync(path.resolve(args.capture), "utf8"),
+      })
+      : compareJimengVideoDirectPlanWithRawNetwork({
+        dryRunPlanText,
+        rawNetworkText: readFileSync(resolveRawNetworkFile(args), "utf8"),
+      })
+    writeJson(path.join(dirs.rawDir, `${runId}.json`), result)
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      summary: summarizeJimengVideoDirectCompare(result),
+    })
+    console.log(`[jimeng-browser-proxy] text2video-compare saved match=${result.match} candidates=${result.candidate_count}`)
     return
   }
 
@@ -5434,6 +5472,7 @@ function parseArgs(argv: string[]): CliArgs {
     && command !== "image-models"
     && command !== "text2image-plan"
     && command !== "text2video-plan"
+    && command !== "text2video-compare"
     && command !== "account-credit"
     && command !== "commerce-benefits"
     && command !== "commerce-pricing"

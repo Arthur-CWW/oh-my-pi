@@ -88,3 +88,8 @@ Why it is not important now:
 - It does not create images, videos, voices, personas, templates, or jobs.
 - It is mostly contest metadata and submission rules.
 - It may become useful later for niche research, trend mining, or brand-brief extraction, but that is downstream of the core UGC generation client.
+
+## Generation Compare Gates
+
+- Direct video plans: use `jimeng-browser-proxy text2video-plan` to build a no-session dry-run request and `jimeng-browser-proxy text2video-compare` to compare it against a passive raw CDP/capture-template submit request before live submit is claimed.
+- Lip-sync plans: keep using `jimeng-browser-proxy lip-sync-compare` because the meaningful payload is nested under provider-specific `videoGenInputs`.

@@ -213,11 +213,14 @@ Direct text-to-image submit body planning is now no-spend dry-run-proved and Eff
 Direct text/image/frame-to-video submit body planning is now no-spend dry-run-proved and Effect Schema-backed:
 
 - `jimeng-browser-proxy text2video-plan`
+- `jimeng-browser-proxy text2video-compare`
 - builds the current direct `/mweb/v1/aigc_draft/generate` workbench video submit body without sending it or loading a browser session
+- compares that dry-run body offline against a passive raw CDP network capture or capture-template request before any live submit is claimed
 - uses local live-proof payload evidence from the current workbench path and keeps the request shape aligned with `BasicVideoGenerateButton`, `text_to_video_params`, `video_gen_inputs`, and `video_task_extra`
 - useful flags: `--prompt`, `--modelVersion`, `--modelReqKey`, `--ratio`, `--videoResolution`, `--durationSec`, `--fps`, `--videoMode`, `--seed`, `--submitId`, `--firstFrameUri`, and `--lastFrameUri`
 - validates the relied-on nested `extend`, `metrics_extra`, `draft_content`, `text_to_video_params`, `video_gen_inputs`, and `sceneOptions` contract paths with Effect v4 / Effect Schema while tolerating additive provider fields
 - local proof command: `jimeng-browser-proxy text2video-plan --prompt ... --ratio 9:16 --durationSec 5 --firstFrameUri ... --lastFrameUri ...`
+- compare proof command: `jimeng-browser-proxy text2video-compare --plan data/jimeng-lab/<proof>/raw/<text2video-plan>-dry-run-plan.json --rawNetwork data/jimeng-captures/<capture>/raw-network.jsonl --outDir data/jimeng-lab/text2video-compare`
 - live submit is still not claimed by this planner; paid/live generation remains behind explicit approval and the existing capture/compare gates.
 
 Signed account credit balance is now live-proved without generation spend and schema-backed:
