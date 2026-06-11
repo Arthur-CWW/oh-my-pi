@@ -3227,11 +3227,42 @@ item detail: ret=0, prompt/model/first-frame/video metadata decoded
 
 The command distinguishes public-profile and current-account scopes. Effect Schema requires the relied-on profile/list/item fields while tolerating additive fields. Normalized proof files contain provider URIs and URL-presence booleans, but no signed URL values or credential markers.
 
+Public story/archive listing was added as the `stories` endpoint on the same command.
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts profile-research \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --endpoints stories \
+  --secUid MS4wLjABAAAAtvo4sAxmw1TCTwfvBOl5rVIowjDJGQ64fvQbkpapMY8 \
+  --limit 6 \
+  --dryRun \
+  --outDir data/jimeng-lab/proof-20260611-profile-research-stories-dryrun
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts profile-research \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --endpoints stories \
+  --secUid MS4wLjABAAAAtvo4sAxmw1TCTwfvBOl5rVIowjDJGQ64fvQbkpapMY8 \
+  --limit 6 \
+  --outDir data/jimeng-lab/proof-20260611-profile-research-stories-live
+```
+
+Result:
+
+```txt
+profile-research dry run saved requests=1
+profile-research saved results=1 items=0 profiles=0 skipped=0
+stories: ret=0, story_count=0, has_more=false, next_offset=0
+```
+
+Note: the CLI flag parser accepts `--dryRun`, not `--dry-run`; a mistakenly named `proof-20260611-profile-research-stories-dry-run` directory contains a live no-spend read because the kebab-case flag was ignored. Use `proof-20260611-profile-research-stories-dryrun/` for the clean dry-run manifest.
+
+Batch item detail `/mweb/v1/mget_item_info` remains blocked. No-spend probes under `data/jimeng-lab/proof-20260611-probe-mget-item-info/` returned `ret=1000 invalid parameter` for `published_item_ids`, `item_ids`, `ids`, and `published_item_id_list`; static evidence shows a frontend conversion layer around `getWorkDetails`, so the next step is recovering an exact caller payload or UI capture.
+
 Refreshed static inventory:
 
 ```txt
 resources=251
-known_status_counts=unknown:120,partial:4,implemented:50,dry_run_only:4,blocked:70,captured_only:2,cataloged_only:1
+known_status_counts=unknown:118,partial:4,implemented:51,dry_run_only:4,blocked:71,captured_only:2,cataloged_only:1
 ```
 
 ## Verification
@@ -3240,6 +3271,7 @@ known_status_counts=unknown:120,partial:4,implemented:50,dry_run_only:4,blocked:
 bun run jimeng:typecheck
 bun run jimeng:test
 mise x ast-grep -- ast-grep scan --config sgconfig.yml packages/jimeng-client/src/profile-research.ts packages/jimeng-client/src/research-search.ts packages/jimeng-client/test/profile-research.test.ts
+mise x ast-grep -- ast-grep scan --config sgconfig.yml packages/jimeng-client/src/profile-research.ts packages/jimeng-client/src/browser-proxy-cli.ts packages/jimeng-client/src/discovery-worklist.ts packages/jimeng-client/test/profile-research.test.ts
 bun packages/jimeng-client/src/browser-proxy-cli.ts --help | rg 'static-inventory|account-credit|commerce-benefits|workspace-context|research-keywords|research-search|profile-research|lip-sync-config|voice-clones|voice-clone-submit|capcut-probe|capcut-template-metadata|capcut-categories|capcut-collections|capcut-collection-templates|capcut-template-detail|capcut-editor-catalog|infinite-canvas|overseas-short-videos|subject-create|subject-update|subject-delete|subject-generate-voice|subjects|templates|short-videos'
 ```
 

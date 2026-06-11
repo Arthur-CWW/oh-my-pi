@@ -17,6 +17,7 @@ const DEFAULT_QUERY = "aid=513695&device_platform=web&region=CN&web_version=7.5.
 const OptionalString = Schema.optional(Schema.NullOr(Schema.String))
 const OptionalNumber = Schema.optional(Schema.NullOr(Schema.Number))
 const OptionalBoolean = Schema.optional(Schema.NullOr(Schema.Boolean))
+const OptionalId = Schema.optional(Schema.NullOr(Schema.Union([Schema.String, Schema.Number])))
 
 const ProfileUserWireSchema = Schema.Struct({
   name: Schema.String,
@@ -54,12 +55,52 @@ const ProfileFollowListWireSchema = Schema.Struct({
   next_offset: Schema.Number,
 })
 
+const ProfileStoryCoverWireSchema = Schema.Struct({
+  image_uri: OptionalString,
+  image_url: OptionalString,
+  uri: OptionalString,
+  url: OptionalString,
+  width: OptionalNumber,
+  height: OptionalNumber,
+  format: OptionalString,
+})
+
+const ProfileStoryWireSchema = Schema.Struct({
+  draft_id: OptionalId,
+  draftId: OptionalId,
+  story_id: OptionalId,
+  storyId: OptionalId,
+  id: OptionalId,
+  name: OptionalString,
+  desc: OptionalString,
+  description: OptionalString,
+  cover: Schema.optional(Schema.NullOr(ProfileStoryCoverWireSchema)),
+  story_version: OptionalId,
+  storyVersion: OptionalId,
+  create_at: OptionalNumber,
+  createAt: OptionalNumber,
+  create_time: OptionalNumber,
+  modify_at: OptionalNumber,
+  modifyAt: OptionalNumber,
+  update_time: OptionalNumber,
+  has_favored: OptionalBoolean,
+  hasFavored: OptionalBoolean,
+})
+
+const ProfileStoryListWireSchema = Schema.Struct({
+  story_list: Schema.Array(ProfileStoryWireSchema),
+  has_more: Schema.Boolean,
+  next_offset: Schema.Number,
+})
+
 type ProfileUserWire = Schema.Schema.Type<typeof ProfileUserWireSchema>
+type ProfileStoryWire = Schema.Schema.Type<typeof ProfileStoryWireSchema>
 
 export type JimengProfileResearchEndpoint =
   | "profile"
   | "homepage"
   | "favorites"
+  | "stories"
   | "following"
   | "followers"
   | "item"
@@ -97,6 +138,25 @@ export interface JimengProfileResearchProfile {
   showFavorites: boolean | null
 }
 
+export interface JimengProfileResearchStory {
+  storyId: string | null
+  storyIdWasUnsafeNumber: boolean
+  draftId: string | null
+  draftIdWasUnsafeNumber: boolean
+  name: string | null
+  description: string | null
+  storyVersion: string | null
+  storyVersionWasUnsafeNumber: boolean
+  createAt: number | null
+  modifyAt: number | null
+  hasFavored: boolean | null
+  coverUri: string | null
+  coverUrl: string | null
+  coverWidth: number | null
+  coverHeight: number | null
+  coverFormat: string | null
+}
+
 export interface JimengProfileResearchResult {
   endpoint: string
   endpointId: JimengProfileResearchEndpoint
@@ -110,6 +170,7 @@ export interface JimengProfileResearchResult {
   profile: JimengProfileResearchProfile | null
   profiles: JimengProfileResearchProfile[]
   items: JimengResearchSearchItem[]
+  stories: JimengProfileResearchStory[]
   hasMore: boolean | null
   nextOffset: number | null
   totalCount: number | null
@@ -122,12 +183,13 @@ export interface JimengProfileResearchBundle {
 }
 
 export function parseJimengProfileResearchEndpoints(value: string | undefined): JimengProfileResearchEndpoint[] {
-  if (!value) return ["profile", "homepage", "favorites"]
-  if (value === "all") return ["profile", "homepage", "favorites", "following", "followers", "item"]
+  if (!value) return ["profile", "homepage", "favorites", "stories"]
+  if (value === "all") return ["profile", "homepage", "favorites", "stories", "following", "followers", "item"]
   const allowed = new Set<JimengProfileResearchEndpoint>([
     "profile",
     "homepage",
     "favorites",
+    "stories",
     "following",
     "followers",
     "item",
@@ -140,7 +202,7 @@ export function parseJimengProfileResearchEndpoints(value: string | undefined): 
       throw jimengError({
         category: "validation",
         code: "PROFILE_RESEARCH_ENDPOINT_INVALID",
-        message: "profile-research --endpoints must use profile, homepage, favorites, following, followers, item, or all.",
+        message: "profile-research --endpoints must use profile, homepage, favorites, stories, following, followers, item, or all.",
         retryable: false,
         details: { endpoint, allowed: Array.from(allowed) },
       })
@@ -198,6 +260,14 @@ export function buildJimengProfileFavoritesRequest(query: JimengProfileResearchQ
   }
 }
 
+export function buildJimengProfileStoriesRequest(query: JimengProfileResearchQuery): JsonObject {
+  return {
+    sec_uid: requireText(query.secUid, "--secUid"),
+    count: normalizeCount(query.count),
+    offset: normalizeOffset(query.offset),
+  }
+}
+
 export function buildJimengProfileFollowRequest(
   endpoint: "following" | "followers",
   query: JimengProfileResearchQuery,
@@ -225,7 +295,10 @@ export async function fetchJimengProfileResearch(input: {
   const skipped: JimengProfileResearchBundle["skipped"] = []
 
   for (const endpoint of endpoints) {
-    if ((endpoint === "profile" || endpoint === "homepage" || endpoint === "favorites") && !query.secUid?.trim()) {
+    if (
+      (endpoint === "profile" || endpoint === "homepage" || endpoint === "favorites" || endpoint === "stories")
+      && !query.secUid?.trim()
+    ) {
       throw validationError(`${endpoint} requires --secUid`, { endpoint })
     }
     if (endpoint === "item" && !query.publishedItemId?.trim()) {
@@ -257,6 +330,8 @@ export function summarizeJimengProfileResearch(bundle: JimengProfileResearchBund
       profiles: result.profiles.map(summarizeProfile),
       item_count: result.items.length,
       items: result.items.map(summarizeJimengResearchItem),
+      story_count: result.stories.length,
+      stories: result.stories.map(summarizeStory),
       has_more: result.hasMore,
       next_offset: result.nextOffset,
       total_count: result.totalCount,
@@ -302,6 +377,7 @@ async function fetchProfileEndpoint(input: {
       profile,
       profiles: [],
       items: [],
+      stories: [],
       hasMore: null,
       nextOffset: null,
       totalCount: null,
@@ -315,6 +391,7 @@ async function fetchProfileEndpoint(input: {
       profile: null,
       profiles: decoded.user_list.map(normalizeProfile),
       items: [],
+      stories: [],
       hasMore: decoded.has_more,
       nextOffset: decoded.next_offset,
       totalCount: null,
@@ -328,8 +405,23 @@ async function fetchProfileEndpoint(input: {
       profile: null,
       profiles: [],
       items: [normalizeJimengResearchItem(decoded)],
+      stories: [],
       hasMore: null,
       nextOffset: null,
+      totalCount: null,
+    }
+  }
+
+  if (input.endpoint === "stories") {
+    const decoded = decodeContract(ProfileStoryListWireSchema, data, endpointPath)
+    return {
+      ...common,
+      profile: null,
+      profiles: [],
+      items: [],
+      stories: decoded.story_list.map(normalizeStory),
+      hasMore: decoded.has_more,
+      nextOffset: decoded.next_offset,
       totalCount: null,
     }
   }
@@ -340,6 +432,7 @@ async function fetchProfileEndpoint(input: {
     profile: null,
     profiles: [],
     items: decoded.item_list.map(normalizeJimengResearchItem),
+    stories: [],
     hasMore: decoded.has_more,
     nextOffset: decoded.next_offset,
     totalCount: finiteNumber(decoded.total_count),
@@ -354,6 +447,8 @@ function requestFor(endpoint: JimengProfileResearchEndpoint, query: JimengProfil
       return buildJimengProfileHomepageRequest(query)
     case "favorites":
       return buildJimengProfileFavoritesRequest(query)
+    case "stories":
+      return buildJimengProfileStoriesRequest(query)
     case "following":
     case "followers":
       return buildJimengProfileFollowRequest(endpoint, query)
@@ -370,6 +465,8 @@ function endpointPathFor(endpoint: JimengProfileResearchEndpoint): string {
       return "/mweb/v1/get_homepage"
     case "favorites":
       return "/mweb/v1/get_favorite_list"
+    case "stories":
+      return "/mweb/v1/get_user_story_list"
     case "following":
     case "followers":
       return "/mweb/v1/get_follow_list"
@@ -404,6 +501,31 @@ function normalizeProfile(profile: ProfileUserWire): JimengProfileResearchProfil
   }
 }
 
+function normalizeStory(story: ProfileStoryWire): JimengProfileResearchStory {
+  const storyId = normalizeOptionalId(story.story_id ?? story.storyId ?? story.id)
+  const draftId = normalizeOptionalId(story.draft_id ?? story.draftId)
+  const storyVersion = normalizeOptionalId(story.story_version ?? story.storyVersion)
+  const cover = story.cover ?? null
+  return {
+    storyId: storyId.value,
+    storyIdWasUnsafeNumber: storyId.unsafe,
+    draftId: draftId.value,
+    draftIdWasUnsafeNumber: draftId.unsafe,
+    name: cleanString(story.name),
+    description: cleanString(story.desc ?? story.description),
+    storyVersion: storyVersion.value,
+    storyVersionWasUnsafeNumber: storyVersion.unsafe,
+    createAt: finiteNumber(story.create_at ?? story.createAt ?? story.create_time),
+    modifyAt: finiteNumber(story.modify_at ?? story.modifyAt ?? story.update_time),
+    hasFavored: booleanValue(story.has_favored ?? story.hasFavored),
+    coverUri: cleanString(cover?.image_uri ?? cover?.uri),
+    coverUrl: cleanString(cover?.image_url ?? cover?.url),
+    coverWidth: finiteNumber(cover?.width),
+    coverHeight: finiteNumber(cover?.height),
+    coverFormat: cleanString(cover?.format),
+  }
+}
+
 function summarizeProfile(profile: JimengProfileResearchProfile): JsonObject {
   return {
     name: profile.name,
@@ -426,6 +548,27 @@ function summarizeProfile(profile: JimengProfileResearchProfile): JsonObject {
     show_following: profile.showFollowing,
     show_likes: profile.showLikes,
     show_favorites: profile.showFavorites,
+  }
+}
+
+function summarizeStory(story: JimengProfileResearchStory): JsonObject {
+  return {
+    story_id: story.storyId,
+    story_id_was_unsafe_number: story.storyIdWasUnsafeNumber,
+    draft_id: story.draftId,
+    draft_id_was_unsafe_number: story.draftIdWasUnsafeNumber,
+    name: story.name,
+    description: story.description,
+    story_version: story.storyVersion,
+    story_version_was_unsafe_number: story.storyVersionWasUnsafeNumber,
+    create_at: story.createAt,
+    modify_at: story.modifyAt,
+    has_favored: story.hasFavored,
+    cover_uri: story.coverUri,
+    cover_url_present: !!story.coverUrl,
+    cover_width: story.coverWidth,
+    cover_height: story.coverHeight,
+    cover_format: story.coverFormat,
   }
 }
 
@@ -504,6 +647,11 @@ function normalizeId(value: string | number): { value: string | null; unsafe: bo
   if (typeof value === "string" && value.length > 0) return { value, unsafe: false }
   if (typeof value === "number" && Number.isSafeInteger(value)) return { value: String(value), unsafe: false }
   return { value: null, unsafe: typeof value === "number" && Number.isFinite(value) }
+}
+
+function normalizeOptionalId(value: string | number | null | undefined): { value: string | null; unsafe: boolean } {
+  if (typeof value === "string" || typeof value === "number") return normalizeId(value)
+  return { value: null, unsafe: false }
 }
 
 function validationError(message: string, details: JsonObject): ReturnType<typeof jimengError> {

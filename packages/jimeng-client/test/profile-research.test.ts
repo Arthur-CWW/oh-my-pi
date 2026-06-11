@@ -4,6 +4,7 @@ import {
   buildJimengProfileFollowRequest,
   buildJimengProfileHomepageRequest,
   buildJimengProfileItemRequest,
+  buildJimengProfileStoriesRequest,
   buildJimengProfileUserRequest,
   fetchJimengProfileResearch,
   JimengClient,
@@ -25,12 +26,13 @@ const session: JimengSessionBundle = {
 
 describe("Jimeng profile research", () => {
   test("parses endpoint flags and builds exact wire request shapes", () => {
-    expect(parseJimengProfileResearchEndpoints(undefined)).toEqual(["profile", "homepage", "favorites"])
+    expect(parseJimengProfileResearchEndpoints(undefined)).toEqual(["profile", "homepage", "favorites", "stories"])
     expect(parseJimengProfileResearchEndpoints("followers,profile,followers")).toEqual(["followers", "profile"])
     expect(parseJimengProfileResearchEndpoints("all")).toEqual([
       "profile",
       "homepage",
       "favorites",
+      "stories",
       "following",
       "followers",
       "item",
@@ -61,6 +63,11 @@ describe("Jimeng profile research", () => {
       image_type_list: [3, 4, 7],
       offset: 0,
     })
+    expect(buildJimengProfileStoriesRequest({ secUid: "sec-1", count: 6 })).toEqual({
+      sec_uid: "sec-1",
+      count: 6,
+      offset: 0,
+    })
     expect(buildJimengProfileFollowRequest("following", { count: 10 })).toEqual({
       list_type: 1,
       count: 10,
@@ -83,6 +90,7 @@ describe("Jimeng profile research", () => {
         JSON.stringify(userInfoBody()),
         JSON.stringify(itemListBody(false)),
         JSON.stringify(itemListBody(true)),
+        JSON.stringify(storyListBody()),
         JSON.stringify(followListBody()),
         JSON.stringify(followListBody([])),
         JSON.stringify(itemDetailBody()),
@@ -105,12 +113,14 @@ describe("Jimeng profile research", () => {
       "/mweb/v1/get_user_info",
       "/mweb/v1/get_homepage",
       "/mweb/v1/get_favorite_list",
+      "/mweb/v1/get_user_story_list",
       "/mweb/v1/get_follow_list",
       "/mweb/v1/get_follow_list",
       "/mweb/v1/get_item_info",
     ])
-    expect(JSON.parse(String(requests[3]?.init?.body))).toMatchObject({ list_type: 1 })
-    expect(JSON.parse(String(requests[4]?.init?.body))).toMatchObject({ list_type: 2 })
+    expect(JSON.parse(String(requests[3]?.init?.body))).toMatchObject({ sec_uid: "sec-public-1", count: 6 })
+    expect(JSON.parse(String(requests[4]?.init?.body))).toMatchObject({ list_type: 1 })
+    expect(JSON.parse(String(requests[5]?.init?.body))).toMatchObject({ list_type: 2 })
     expect(result.results.find((item) => item.endpointId === "profile")?.profile).toMatchObject({
       name: "Sora",
       secUid: "sec-public-1",
@@ -132,9 +142,16 @@ describe("Jimeng profile research", () => {
       name: "Current Follow",
       followerCount: 37,
     })
+    expect(result.results.find((item) => item.endpointId === "stories")?.stories[0]).toMatchObject({
+      storyId: "story-1",
+      draftId: "draft-1",
+      name: "Routine archive",
+      coverWidth: 720,
+      coverHeight: 1280,
+    })
     expect(result.results.find((item) => item.endpointId === "item")?.items).toHaveLength(1)
     expect(summary).toMatchObject({
-      result_count: 6,
+      result_count: 7,
       skipped: [],
       results: expect.arrayContaining([
         expect.objectContaining({
@@ -144,6 +161,16 @@ describe("Jimeng profile research", () => {
             expect.objectContaining({
               video_url_present: true,
               first_frame_image_url_present: true,
+            }),
+          ],
+        }),
+        expect.objectContaining({
+          endpoint_id: "stories",
+          story_count: 1,
+          stories: [
+            expect.objectContaining({
+              story_id: "story-1",
+              cover_url_present: true,
             }),
           ],
         }),
@@ -242,6 +269,36 @@ function followListBody(users: JsonObject[] = [{
       has_more: false,
       next_offset: 10,
       user_list: users,
+      additive_provider_field: true,
+    },
+  }
+}
+
+function storyListBody(): JsonObject {
+  return {
+    ret: 0,
+    errmsg: "success",
+    data: {
+      story_list: [{
+        story_id: "story-1",
+        draft_id: "draft-1",
+        name: "Routine archive",
+        desc: "Daily K-beauty morning story set",
+        story_version: 4,
+        create_at: 1751987932,
+        modify_at: 1751988999,
+        has_favored: true,
+        cover: {
+          image_uri: "tos-cn-i/story-cover",
+          image_url: "https://signed.example.invalid/story-cover.webp?x-signature=secret",
+          width: 720,
+          height: 1280,
+          format: "webp",
+        },
+        additive_provider_field: true,
+      }],
+      has_more: false,
+      next_offset: 0,
       additive_provider_field: true,
     },
   }

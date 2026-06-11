@@ -183,6 +183,7 @@ import {
   buildJimengProfileFollowRequest,
   buildJimengProfileHomepageRequest,
   buildJimengProfileItemRequest,
+  buildJimengProfileStoriesRequest,
   buildJimengProfileUserRequest,
   fetchJimengProfileResearch,
   parseJimengProfileImageTypeList,
@@ -352,7 +353,7 @@ Options:
                                   agent-catalog accepts skills,config,all
                                   infinite-canvas accepts projects,detail,ratios,conversations,all
                                   research-keywords accepts suggest,guess,all
-                                  profile-research accepts profile,homepage,favorites,following,followers,item,all
+                                  profile-research accepts profile,homepage,favorites,stories,following,followers,item,all
   --channels <ids|all>           Research channels: inspiration,short-film,asset,all
   --channel <id>                 research-search channel: inspiration, short-film, or asset
   --searchId <id>                research-search continuation search id
@@ -1963,18 +1964,22 @@ async function main(argv: string[]): Promise<void> {
           ? buildJimengProfileHomepageRequest(query)
           : endpoint === "favorites"
             ? buildJimengProfileFavoritesRequest(query)
-            : endpoint === "following" || endpoint === "followers"
-              ? buildJimengProfileFollowRequest(endpoint, query)
-              : buildJimengProfileItemRequest(args.publishedItemId ?? "")
+            : endpoint === "stories"
+              ? buildJimengProfileStoriesRequest(query)
+              : endpoint === "following" || endpoint === "followers"
+                ? buildJimengProfileFollowRequest(endpoint, query)
+                : buildJimengProfileItemRequest(args.publishedItemId ?? "")
       const pathName = endpoint === "profile"
         ? "/mweb/v1/get_user_info"
         : endpoint === "homepage"
           ? "/mweb/v1/get_homepage"
           : endpoint === "favorites"
             ? "/mweb/v1/get_favorite_list"
-            : endpoint === "following" || endpoint === "followers"
-              ? "/mweb/v1/get_follow_list"
-              : "/mweb/v1/get_item_info"
+            : endpoint === "stories"
+              ? "/mweb/v1/get_user_story_list"
+              : endpoint === "following" || endpoint === "followers"
+                ? "/mweb/v1/get_follow_list"
+                : "/mweb/v1/get_item_info"
       return [{ endpoint, path: pathName, request }]
     })
     const runId = `profile-research-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
@@ -2386,7 +2391,15 @@ async function main(argv: string[]): Promise<void> {
       return
     }
 
-    const samples: Array<Record<string, unknown>> = []
+    const samples: Array<{
+      index: number
+      voice: JimengVoiceCatalogItem
+      file: string
+      bytes: number
+      ret: string | number | null
+      errmsg: string | null
+      response_text_sha256: string
+    }> = []
     for (let i = 0; i < voices.length; i += 1) {
       const voice = voices[i]!
       const result = await generateTextToSpeech({
@@ -4573,6 +4586,8 @@ function subjectImageReferenceFromArgs(args: CliArgs, command: "subject-create" 
   }
 }
 
+// Boundary helper: CLI proof redaction recursively accepts decoded provider/proof data.
+// ast-grep-ignore: no-unsafe-any-unknown-ts
 export function redactJimengProofForNormalized(value: unknown): JsonValue {
   if (value === undefined) return null
   if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value
@@ -4644,10 +4659,14 @@ function readVoiceCapture(file: string | undefined): CaptureFile {
   return readJson(captureFile) as CaptureFile
 }
 
+// Boundary helper: callers decode/cast each JSON file according to command-specific contracts.
+// ast-grep-ignore: no-unsafe-any-unknown-ts
 function readJson(file: string): unknown {
   return JSON.parse(readFileSync(path.resolve(file), "utf8"))
 }
 
+// Boundary helper: CLI proof writers persist typed command summaries and raw provider envelopes.
+// ast-grep-ignore: no-unsafe-any-unknown-ts
 function writeJson(file: string, value: unknown): void {
   writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`, "utf8")
 }
