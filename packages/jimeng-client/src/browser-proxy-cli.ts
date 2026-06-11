@@ -193,6 +193,12 @@ import {
   summarizeJimengGenerateAuditPlan,
 } from "./generate-audit"
 import {
+  buildJimengMixAudioVideoPlan,
+  parseJimengMixAudioInputListJson,
+  parseJimengMixAudioJsonObject,
+  summarizeJimengMixAudioVideoPlan,
+} from "./mix-audio"
+import {
   compareJimengVideoDirectPlanWithCaptureTemplate,
   compareJimengVideoDirectPlanWithRawNetwork,
   summarizeJimengVideoDirectCompare,
@@ -369,6 +375,7 @@ Commands:
   omni-video-plan Build a dry-run Seedance omni-reference mixed image/video submit body
   omni-video-compare Offline compare an omni-reference dry-run plan against captured UI submit
   generate-audit-plan Build a dry-run generation material pre-audit body
+  mix-audio-plan Build a dry-run audio/video mix task request body and babi_param query
   request-plan-compare Offline compare a simple dry-run request plan against captured UI traffic
   account-credit Fetch signed no-spend account credit balance
   commerce-benefits Fetch signed no-spend benefit metadata and user benefit rows
@@ -451,8 +458,13 @@ Options:
   --query <query>                Query string override for endpoint-probe
   --body <json>                  Single JSON body for endpoint-probe/capcut-probe
                                   generate-audit-plan uses this as extra top-level request JSON
+                                  mix-audio-plan uses this as the frontend camel/snake body before snake-case conversion
   --materials <json|file>         JSON material list for generate-audit-plan
                                   omni-video-plan uses image/video refs with fieldName, uri/vid, width/height, durationSec
+  --babiParam <json|file>         JSON babiParam object for mix-audio-plan query param
+  --videoItemId <id>              Generated video item id for mix-audio-plan shortcut body
+  --inputList <json|file>         Batch mix-audio-plan input list with audioVid/videoItemId rows
+  --batch <true|false>            Build mix-audio-plan for /mix_audio_videos instead of /mix_audio_video
   --variants <json|file>         Probe variants JSON array or object with variants
   --transport <mode>             Shared HTTP transport: live, record, replay, fixture (default: live)
   --cassette <file>              Cassette path for record/replay/fixture transport
@@ -913,6 +925,7 @@ interface CliArgs {
     | "omni-video-plan"
     | "omni-video-compare"
     | "generate-audit-plan"
+    | "mix-audio-plan"
     | "request-plan-compare"
     | "account-credit"
     | "commerce-benefits"
@@ -992,6 +1005,10 @@ interface CliArgs {
   query?: string
   body?: string
   materials?: string
+  babiParam?: string
+  videoItemId?: string
+  inputList?: string
+  batch?: boolean
   variants?: string
   transportMode: JimengHttpTransportMode
   cassette?: string
@@ -1504,6 +1521,43 @@ async function main(argv: string[]): Promise<void> {
       summary: summarizeJimengGenerateAuditPlan(plan),
     })
     console.log(`[jimeng-browser-proxy] generate-audit-plan saved materials=${plan.materialList.length} live_submit=false`)
+    return
+  }
+
+  if (args.command === "mix-audio-plan") {
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const runId = `mix-audio-plan-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const bodyJson = args.body
+      ? parseJimengMixAudioJsonObject(JSON.parse(readInlineOrFile(args.body)) as JsonValue, "mix-audio body")
+      : undefined
+    const babiParamJson = args.babiParam
+      ? parseJimengMixAudioJsonObject(JSON.parse(readInlineOrFile(args.babiParam)) as JsonValue, "mix-audio babiParam")
+      : undefined
+    const inputListJson = args.inputList
+      ? parseJimengMixAudioInputListJson(JSON.parse(readInlineOrFile(args.inputList)) as JsonValue)
+      : undefined
+    const plan = buildJimengMixAudioVideoPlan({
+      mode: args.batch ? "batch" : undefined,
+      audioVid: args.audioVid,
+      videoItemId: args.videoItemId,
+      inputList: inputListJson,
+      body: bodyJson,
+      babiParam: babiParamJson,
+    })
+    writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
+      command: args.command,
+      endpoint: plan.endpoint,
+      method: plan.method,
+      request: plan.request,
+      query_params: plan.queryParams,
+      live_submit: false,
+      static_evidence: "frontend submitMixAudioVideoTask omits babiParam from body, snake-cases the remaining body, and sends JSON.stringify(babiParam) as query babi_param",
+    })
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      summary: summarizeJimengMixAudioVideoPlan(plan),
+    })
+    console.log(`[jimeng-browser-proxy] mix-audio-plan saved endpoint=${plan.endpoint} mode=${plan.mode} inputs=${plan.inputCount} live_submit=false`)
     return
   }
 
@@ -5821,6 +5875,7 @@ function parseArgs(argv: string[]): CliArgs {
     && command !== "omni-video-plan"
     && command !== "omni-video-compare"
     && command !== "generate-audit-plan"
+    && command !== "mix-audio-plan"
     && command !== "request-plan-compare"
     && command !== "account-credit"
     && command !== "commerce-benefits"
@@ -6051,6 +6106,10 @@ function parseArgs(argv: string[]): CliArgs {
     query: command === "static-locate" ? undefined : flags.query,
     body: flags.body,
     materials: flags.materials,
+    babiParam: flags.babiParam,
+    videoItemId: flags.videoItemId,
+    inputList: flags.inputList,
+    batch: parseOptionalBooleanFlag(flags.batch, "--batch"),
     variants: flags.variants,
     transportMode,
     cassette: flags.cassette,

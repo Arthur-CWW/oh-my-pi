@@ -35,6 +35,7 @@ export interface JimengRequestPlanCompareCandidate {
   url_pathname: string
   endpoint_match: boolean
   request_match: boolean
+  query_match: boolean | null
   matched_path_count: number
   difference_count: number
   differences: JimengRequestPlanCompareDifference[]
@@ -57,6 +58,7 @@ interface CapturedRequest {
 interface ParsedRequestPlan {
   endpoint: string
   request: JsonObject
+  queryParams: JsonObject | null
 }
 
 export function compareJimengRequestPlanWithRawNetwork(input: {
@@ -89,7 +91,7 @@ export function compareJimengRequestPlanWithRequests(input: {
 }): JimengRequestPlanCompareResult {
   const candidates = input.requests.map((request, index) => compareCapturedRequest(input.expected, request, index))
   return {
-    match: candidates.some((candidate) => candidate.endpoint_match && candidate.request_match),
+    match: candidates.some((candidate) => candidate.endpoint_match && candidate.request_match && candidate.query_match !== false),
     plan_endpoint: input.expected.endpoint,
     plan_request_keys: Object.keys(input.expected.request).sort(),
     candidate_count: candidates.length,
@@ -109,6 +111,7 @@ export function summarizeJimengRequestPlanCompare(result: JimengRequestPlanCompa
       url_pathname: candidate.url_pathname,
       endpoint_match: candidate.endpoint_match,
       request_match: candidate.request_match,
+      query_match: candidate.query_match,
       matched_path_count: candidate.matched_path_count,
       difference_count: candidate.difference_count,
       differences: candidate.differences.slice(0, 50).map((difference) => ({
@@ -124,11 +127,14 @@ export function summarizeJimengRequestPlanCompare(result: JimengRequestPlanCompa
 function compareCapturedRequest(expected: ParsedRequestPlan, request: CapturedRequest, index: number): JimengRequestPlanCompareCandidate {
   const actualEndpoint = endpointPath(request.url)
   const actualBody = parseJsonObject(request.postData, "captured request postData")
+  const actualQuery = expected.queryParams ? queryParamsObject(request.url) : null
   const differences: JimengRequestPlanCompareDifference[] = []
   let matchedPathCount = 0
 
   matchedPathCount += compareScalar(expected.endpoint, actualEndpoint, "endpoint", differences)
   matchedPathCount += compareSubset(expected.request, actualBody, "request", differences)
+  if (expected.queryParams) matchedPathCount += compareSubset(expected.queryParams, actualQuery, "query", differences)
+  const queryDifferences = differences.some((difference) => difference.path === "query" || difference.path.startsWith("query."))
 
   return {
     index,
@@ -136,6 +142,7 @@ function compareCapturedRequest(expected: ParsedRequestPlan, request: CapturedRe
     url_pathname: actualEndpoint,
     endpoint_match: expected.endpoint === actualEndpoint,
     request_match: !differences.some((difference) => difference.path === "request" || difference.path.startsWith("request.")),
+    query_match: expected.queryParams ? !queryDifferences : null,
     matched_path_count: matchedPathCount,
     difference_count: differences.length,
     differences,
@@ -157,6 +164,7 @@ function parseExpectedRequestPlan(text: string, endpointOverride: string | undef
   return {
     endpoint: inferPlanEndpoint(root, nestedPlan, endpointOverride),
     request,
+    queryParams: recordValue(root.query_params) ?? recordValue(root.queryParams) ?? recordValue(nestedPlan?.query_params) ?? recordValue(nestedPlan?.queryParams),
   }
 }
 
@@ -342,6 +350,21 @@ function endpointPath(value: string): string {
     return new URL(value).pathname
   } catch {
     return value.split("?")[0] || value
+  }
+}
+
+function queryParamsObject(value: string): JsonObject {
+  try {
+    const params = new URL(value).searchParams
+    const output: JsonObject = {}
+    for (const [key, paramValue] of params.entries()) output[key] = paramValue
+    return output
+  } catch {
+    const query = value.split("?")[1] ?? ""
+    const params = new URLSearchParams(query)
+    const output: JsonObject = {}
+    for (const [key, paramValue] of params.entries()) output[key] = paramValue
+    return output
   }
 }
 

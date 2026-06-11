@@ -598,17 +598,21 @@ const KEEP_GAP_AUDIT_BY_ENDPOINT: Record<string, JimengDiscoveryEndpointAudit> =
   },
   "/mweb/v1/mix_audio_video": {
     evidence: [
+      "docs/qa/jimeng-mix-audio-plan-20260611.md",
       "data/jimeng-lab/proof-20260611-static-locate-media-helper-blockers/",
       "data/jimeng-lab/proof-20260611-static-inventory-media-helper-blockers/",
+      "data/jimeng-lab/proof-20260611-mix-audio-plan/",
     ],
-    nextProbe: "Capture a single audio/video mix UI submit, recover the exact babiParam/body contract, and keep live replay behind approval because it creates task state.",
+    nextProbe: "Capture a single audio/video mix UI submit, then compare it with mix-audio-plan using request-plan-compare before any approval-gated live replay because it creates task state.",
   },
   "/mweb/v1/mix_audio_videos": {
     evidence: [
+      "docs/qa/jimeng-mix-audio-plan-20260611.md",
       "data/jimeng-lab/proof-20260611-static-locate-media-helper-blockers/",
       "data/jimeng-lab/proof-20260611-static-inventory-media-helper-blockers/",
+      "data/jimeng-lab/proof-20260611-mix-audio-plan/",
     ],
-    nextProbe: "Capture a batch audio/video mix UI submit, recover the exact babiParam/body contract, and keep live replay behind approval because it creates task state.",
+    nextProbe: "Capture a batch audio/video mix UI submit, then compare it with mix-audio-plan --batch using request-plan-compare before any approval-gated live replay because it creates task state.",
   },
   "/mweb/v1/video_generate/get_switch_model_queue_info": {
     evidence: [
@@ -714,8 +718,8 @@ const KNOWN_ENDPOINTS: JimengDiscoveryKnownEndpoint[] = [
   known("/mweb/v1/create_story", "blocked", null, "Creates story/archive state; require a disposable story fixture or exact UI capture before live replay."),
   known("/mweb/v1/update_story", "blocked", null, "Mutates story/archive state; require a disposable story fixture or exact UI capture before live replay."),
   known("/mweb/v1/delete_story", "blocked", null, "Deletes story/archive state; require a disposable story fixture or explicit approval before live replay."),
-  known("/mweb/v1/mix_audio_video", "blocked", null, "Submits a single audio/video mix task and returns task status; capture exact babiParam/body from UI before any live replay."),
-  known("/mweb/v1/mix_audio_videos", "blocked", null, "Submits batch audio/video mix tasks and returns submit ids; capture exact babiParam/body from UI before any live replay."),
+  known("/mweb/v1/mix_audio_video", "dry_run_only", "mix-audio-plan/request-plan-compare", "Single audio/video mix task request transform is dry-run covered with body snake-case plus optional babi_param query compare; live replay creates task state and needs capture approval."),
+  known("/mweb/v1/mix_audio_videos", "dry_run_only", "mix-audio-plan/request-plan-compare", "Batch audio/video mix task request transform is dry-run covered with input_list plus optional babi_param query compare; live replay creates task state and needs capture approval."),
   known("/mweb/v1/mpack_image", "blocked", null, "Packs image material through dreamina-material-data-service; capture the exact caller input shape before promotion."),
   known("/mweb/v1/submit_survey", "blocked", null, "Submits feature beta-test survey state, currently seen in the lip-sync feature-gate bundle; mutation requires explicit approval."),
   known("/mweb/v1/get_follow_list", "implemented", "profile-research", "No-spend current-account following/follower listing; this endpoint does not accept a public target sec_uid."),

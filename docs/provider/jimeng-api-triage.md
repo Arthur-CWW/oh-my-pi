@@ -20,7 +20,7 @@ The machine-readable mirror for these family IDs lives in `packages/jimeng-clien
 
 ## Priority Model
 
-Rank work by UGC workflow value first, then implementation speed. No-spend availability is a safety and approval constraint, not the priority function. Do not choose the fastest no-spend W6 endpoint while a higher-value generation, persona/voice, lip-sync, reference-control, or template-mining gap is available.
+Rank work by UGC workflow value first, then implementation speed. No-spend availability is a safety and approval constraint, not the priority function. Do not choose the fastest no-spend W6 endpoint while a higher-value generation, persona/voice, lip-sync, reference-control, or template-mining gap is available; instead ask for approval or build adjacent tests/examples inside that same high-value family.
 
 Current highest-value order:
 
@@ -31,7 +31,7 @@ Current highest-value order:
 5. Template mining: CapCut/Jimeng search, batch, presets, hook/caption/template extraction, and faceless profile/template copying.
 6. Supporting metadata reads: history, assets, story/archive, runtime, quota, notices, panels. Build these when they unblock a higher-value workflow; otherwise keep them cataloged.
 
-If the next highest-value step requires paid generation, account mutation, unsafe credential access, visible UI, or fresh background capture, ask for explicit approval with the exact command and proof output path instead of switching to a lower-value no-spend endpoint. If useful no-spend work is needed while waiting, keep it inside the same high-value family through dry-run plans, compare gates, schemas, fixtures, and representative examples.
+If the next highest-value step requires paid generation, account mutation, unsafe credential access, visible UI, or fresh background capture, ask for explicit approval with the exact command and proof output path instead of switching to a lower-value no-spend endpoint. If useful no-spend work is needed while waiting, keep it inside the same high-value family through dry-run plans, compare gates, schemas, fixtures, and representative examples that match workflows we would actually run.
 
 ## Keep
 
@@ -115,4 +115,5 @@ Why it is not important now:
 
 - `G1 /mweb/v1/aigc_draft/generate` now has a dry-run `omni-video-plan` plus `omni-video-compare` for Seedance all-around reference generation. It models mixed image/video `unified_edit_input.material_list`, prompt `@field` references in `meta_list`, and `functionMode="omni_reference"` for reference-profile/persona-swap workflows. Live replay still needs passive frontend capture compare through the semantic compare gate and explicit approval because it can spend credits.
 - `G1 /mweb/v1/execute_generate_audit` is now dry-run-only rather than fully blocked. `generate-audit-plan` models the frontend material transform for image/video/audio/subject inputs and can be compared against passive UI traffic through `request-plan-compare`. Live replay still needs a fresh generation capture proving the complete top-level request context.
+- `V1 /mweb/v1/mix_audio_video` and `/mweb/v1/mix_audio_videos` are now dry-run-only rather than fully blocked. `mix-audio-plan` models the frontend body/query transform for applying an audio/voice track to one or more generated video items, and `request-plan-compare` now validates optional `query_params` such as `babi_param`. Live replay still needs passive UI capture compare and explicit approval because it creates task state.
 - `R1 /mweb/v1/mget_story` remains partial rather than implemented. The `story-records` typed client and replay tests exist, but a 2026-06-11 sweep over three existing followed profiles (`PUAI`, `小波登`, `就扶墙老师`) returned `ret=0` with `story_count=0`; promotion still needs a public profile or UI capture with a non-empty story list. Treat this as supporting audit evidence, not a reason to prioritize story/archive reads over generation, persona/voice, lip-sync, reference controls, or template mining.

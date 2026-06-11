@@ -10,7 +10,7 @@
 | G1 | keep | Text/image/video generation | 3 | implemented=1, partial=1, dry_run_only=1 | 2 |
 | G2 | keep | Upload and provider asset references | 5 | implemented=4, blocked=1 | 1 |
 | P1 | keep | Persona/subject lifecycle | 5 | implemented=4, dry_run_only=1 | 1 |
-| V1 | keep | Voice and speech | 9 | implemented=2, partial=2, dry_run_only=3, blocked=2 | 7 |
+| V1 | keep | Voice and speech | 9 | implemented=2, partial=2, dry_run_only=5 | 7 |
 | L1 | keep | Lip-sync / digital human | 6 | implemented=1, blocked=5 | 5 |
 | R1 | keep | Reference profile research | 8 | implemented=7, partial=1 | 1 |
 | R2 | keep | Reference controls | 5 | implemented=5 | 0 |
@@ -31,16 +31,16 @@
    - Next probe: Use a real task id from an approved voice-clone submit flow, then record/replay voice-clone-query as a cassette-backed read.
 2. Persona and voice - `P1 /mweb/v1/dreamina_subject/generate_voice` - dry_run_only command=subject-generate-voice/request-plan-compare - Subject voice generation may consume quota; dry-run request shape can be compared offline against UI captures before approval.
    - Next probe: Capture a subject generate-voice UI submit and compare it with subject-generate-voice dry-run using request-plan-compare before any approved live voice generation.
+2. Persona and voice - `V1 /mweb/v1/mix_audio_video` - dry_run_only command=mix-audio-plan/request-plan-compare - Single audio/video mix task request transform is dry-run covered with body snake-case plus optional babi_param query compare; live replay creates task state and needs capture approval.
+   - Next probe: Capture a single audio/video mix UI submit, then compare it with mix-audio-plan using request-plan-compare before any approval-gated live replay because it creates task state.
+2. Persona and voice - `V1 /mweb/v1/mix_audio_videos` - dry_run_only command=mix-audio-plan/request-plan-compare - Batch audio/video mix task request transform is dry-run covered with input_list plus optional babi_param query compare; live replay creates task state and needs capture approval.
+   - Next probe: Capture a batch audio/video mix UI submit, then compare it with mix-audio-plan --batch using request-plan-compare before any approval-gated live replay because it creates task state.
 2. Persona and voice - `V1 /mweb/v1/voice/delete` - dry_run_only command=voice-clone-delete/request-plan-compare - Mutates cloned voice assets; dry-run request shape can be compared offline against UI captures.
    - Next probe: Capture or create a disposable cloned voice asset, compare voice-clone-delete dry-run against the UI request, then require approval before mutation.
 2. Persona and voice - `V1 /mweb/v1/voice/submit_task` - dry_run_only command=voice-clone-submit/request-plan-compare - Voice clone submit may create assets or consume quota; dry-run request shape can be compared offline against UI captures.
    - Next probe: Capture a voice-clone submit UI request with disposable source audio and compare the dry-run plan before any approved asset-creating submit.
 2. Persona and voice - `V1 /mweb/v1/voice/update` - dry_run_only command=voice-clone-update/request-plan-compare - Mutates cloned voice assets; dry-run request shape can be compared offline against UI captures.
    - Next probe: Capture or create a disposable cloned voice asset, compare voice-clone-update dry-run against the UI request, then require approval before mutation.
-2. Persona and voice - `V1 /mweb/v1/mix_audio_video` - blocked - Submits a single audio/video mix task and returns task status; capture exact babiParam/body from UI before any live replay.
-   - Next probe: Capture a single audio/video mix UI submit, recover the exact babiParam/body contract, and keep live replay behind approval because it creates task state.
-2. Persona and voice - `V1 /mweb/v1/mix_audio_videos` - blocked - Submits batch audio/video mix tasks and returns submit ids; capture exact babiParam/body from UI before any live replay.
-   - Next probe: Capture a batch audio/video mix UI submit, recover the exact babiParam/body contract, and keep live replay behind approval because it creates task state.
 3. Lip-sync / digital human - `L1 /mweb/v1/video_generate/face_auth/skip` - blocked - Seedance face-auth skip submit task can create provider-side task state; capture exact UI payload and approval context before live replay.
    - Next probe: Capture the Seedance face-auth skip flow, compare payloads offline, and require explicit approval before live replay because it can create provider-side task state.
 3. Lip-sync / digital human - `L1 /mweb/v1/video_generate/face_auth/skip/query` - blocked - Face-auth skip status query depends on a task id from video_generate/face_auth/skip; capture that flow before promotion.
@@ -106,12 +106,12 @@
 - `/mweb/v1/feed` - partial command=voices - Built-in voice library replay is implemented for captured signed feed requests.
   - Evidence: `data/jimeng-lab/cli-voices-smoke/`; `data/jimeng-lab/cli-voices-smoke-2/`; `data/jimeng-lab/voice-library-samples/`
   - Next probe: Refresh a signed voice-library feed request from passive UI capture and record/replay the voices command without relying on stale capture templates.
-- `/mweb/v1/mix_audio_video` - blocked - Submits a single audio/video mix task and returns task status; capture exact babiParam/body from UI before any live replay.
-  - Evidence: `data/jimeng-lab/proof-20260611-static-locate-media-helper-blockers/`; `data/jimeng-lab/proof-20260611-static-inventory-media-helper-blockers/`
-  - Next probe: Capture a single audio/video mix UI submit, recover the exact babiParam/body contract, and keep live replay behind approval because it creates task state.
-- `/mweb/v1/mix_audio_videos` - blocked - Submits batch audio/video mix tasks and returns submit ids; capture exact babiParam/body from UI before any live replay.
-  - Evidence: `data/jimeng-lab/proof-20260611-static-locate-media-helper-blockers/`; `data/jimeng-lab/proof-20260611-static-inventory-media-helper-blockers/`
-  - Next probe: Capture a batch audio/video mix UI submit, recover the exact babiParam/body contract, and keep live replay behind approval because it creates task state.
+- `/mweb/v1/mix_audio_video` - dry_run_only command=mix-audio-plan/request-plan-compare - Single audio/video mix task request transform is dry-run covered with body snake-case plus optional babi_param query compare; live replay creates task state and needs capture approval.
+  - Evidence: `docs/qa/jimeng-mix-audio-plan-20260611.md`; `data/jimeng-lab/proof-20260611-static-locate-media-helper-blockers/`; `data/jimeng-lab/proof-20260611-static-inventory-media-helper-blockers/`; `data/jimeng-lab/proof-20260611-mix-audio-plan/`
+  - Next probe: Capture a single audio/video mix UI submit, then compare it with mix-audio-plan using request-plan-compare before any approval-gated live replay because it creates task state.
+- `/mweb/v1/mix_audio_videos` - dry_run_only command=mix-audio-plan/request-plan-compare - Batch audio/video mix task request transform is dry-run covered with input_list plus optional babi_param query compare; live replay creates task state and needs capture approval.
+  - Evidence: `docs/qa/jimeng-mix-audio-plan-20260611.md`; `data/jimeng-lab/proof-20260611-static-locate-media-helper-blockers/`; `data/jimeng-lab/proof-20260611-static-inventory-media-helper-blockers/`; `data/jimeng-lab/proof-20260611-mix-audio-plan/`
+  - Next probe: Capture a batch audio/video mix UI submit, then compare it with mix-audio-plan --batch using request-plan-compare before any approval-gated live replay because it creates task state.
 
 ### L1 Lip-sync / digital human
 

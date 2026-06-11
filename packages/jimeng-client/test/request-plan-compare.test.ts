@@ -102,6 +102,46 @@ describe("Jimeng generic request-plan capture compare", () => {
     })
     expect(result.match).toBe(true)
   })
+
+  test("compares optional query params for babiParam-backed requests", () => {
+    const request = {
+      input: {
+        audio_vid: "v0voice123",
+        video_item_id: "generated-video-item-1",
+      },
+    }
+    const queryParams = {
+      babi_param: JSON.stringify({ pf: "7", scene: "ugc_voice_over" }),
+    }
+    const result = compareJimengRequestPlanWithRawNetwork({
+      dryRunPlanText: JSON.stringify({
+        command: "mix-audio-plan",
+        endpoint: "/mweb/v1/mix_audio_video",
+        request,
+        query_params: queryParams,
+      }),
+      rawNetworkText: jsonl(rawRequestEventWithQuery("mix-audio-1", "/mweb/v1/mix_audio_video", request, queryParams)),
+    })
+
+    expect(result.match).toBe(true)
+    expect(result.candidates[0]?.query_match).toBe(true)
+
+    const drift = compareJimengRequestPlanWithRawNetwork({
+      dryRunPlanText: JSON.stringify({
+        command: "mix-audio-plan",
+        endpoint: "/mweb/v1/mix_audio_video",
+        request,
+        query_params: queryParams,
+      }),
+      rawNetworkText: jsonl(rawRequestEventWithQuery("mix-audio-2", "/mweb/v1/mix_audio_video", request, {
+        babi_param: JSON.stringify({ pf: "9", scene: "ugc_voice_over" }),
+      })),
+    })
+
+    expect(drift.match).toBe(false)
+    expect(drift.candidates[0]?.query_match).toBe(false)
+    expect(drift.candidates[0]?.differences.map((difference) => difference.path)).toContain("query.babi_param")
+  })
 })
 
 function dryRunPlan(command: string, endpoint: string, request: object) {
@@ -115,13 +155,18 @@ function dryRunPlan(command: string, endpoint: string, request: object) {
 }
 
 function rawRequestEvent(requestId: string, endpoint: string, submitBody: object) {
+  return rawRequestEventWithQuery(requestId, endpoint, submitBody, { aid: "513695" })
+}
+
+function rawRequestEventWithQuery(requestId: string, endpoint: string, submitBody: object, queryParams: Record<string, string>) {
+  const params = new URLSearchParams(queryParams)
   return {
     kind: "cdpEvent",
     method: "Network.requestWillBeSent",
     params: {
       requestId,
       request: {
-        url: `https://jimeng.jianying.com${endpoint}?aid=513695`,
+        url: `https://jimeng.jianying.com${endpoint}?${params.toString()}`,
         method: "POST",
         postData: JSON.stringify(submitBody),
       },
