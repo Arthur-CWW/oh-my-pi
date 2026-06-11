@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto"
 import { z } from "zod"
 import { type JimengSessionBundle } from "./capture"
-import { assertNoRiskError, JimengClient } from "./client"
+import { assertNoRiskError, JimengClient, type JimengFetch } from "./client"
 import { jimengError } from "./errors"
 import { type JsonObject, type JsonValue } from "./reference-image"
 import { JimengJsonObjectSchema, JimengJsonValueSchema, parseJimengApiEnvelope, parseJimengContract, parseJsonText } from "./schema"
@@ -292,11 +292,12 @@ export function buildJimengAgentConfigRequest(): JsonObject {
 
 export async function fetchJimengAgentCatalog(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   session: JimengSessionBundle
   endpoints?: JimengAgentCatalogEndpoint[]
 }): Promise<JimengAgentCatalogBundle> {
   const endpoints = input.endpoints ?? ["skills", "config"]
-  const client = input.client ?? new JimengClient()
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
   const results: JimengAgentCatalogResult[] = []
   for (const endpoint of endpoints) {
     if (endpoint === "skills") {

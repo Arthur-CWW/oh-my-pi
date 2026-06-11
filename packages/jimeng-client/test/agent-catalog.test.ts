@@ -1,9 +1,14 @@
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import path from "node:path"
 import { describe, expect, test } from "bun:test"
 import {
   buildJimengAgentConfigRequest,
   buildJimengAgentSkillsRequest,
+  createJimengHttpTransport,
   fetchJimengAgentCatalog,
   parseJimengAgentCatalogEndpoints,
+  readJimengHttpCassette,
   summarizeJimengAgentCatalog,
   type JimengFetch,
   JimengClient,
@@ -71,6 +76,55 @@ describe("Jimeng agent catalog helpers", () => {
     })
     expect(JSON.stringify(summary)).not.toContain("byteimg")
     expect(JSON.stringify(summary)).not.toContain("x-signature")
+  })
+
+  test("can fetch through recorded and replayed HTTP transport cassettes", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "jimeng-agent-catalog-cassette-"))
+    try {
+      const cassettePath = path.join(dir, "agent-catalog.json")
+      const requests: Array<{ url: string; init?: RequestInit }> = []
+      const recordTransport = createJimengHttpTransport({
+        mode: "record",
+        cassettePath,
+        fetch: mockFetchSequence([
+          JSON.stringify(skillListBody()),
+          JSON.stringify(agentConfigBody()),
+        ], requests),
+        nowIso: () => "2026-06-11T00:00:00.000Z",
+      })
+      const endpoints = ["skills", "config"] as const
+
+      const recorded = await fetchJimengAgentCatalog({
+        fetch: recordTransport.fetch,
+        session,
+        endpoints: [...endpoints],
+      })
+
+      expect(recorded.results).toHaveLength(2)
+      expect(readJimengHttpCassette(cassettePath).entries).toHaveLength(2)
+      expect(requests).toHaveLength(2)
+
+      const replayTransport = createJimengHttpTransport({
+        mode: "replay",
+        cassettePath,
+      })
+      const replayed = await fetchJimengAgentCatalog({
+        fetch: replayTransport.fetch,
+        session,
+        endpoints: [...endpoints],
+      })
+
+      expect(summarizeJimengAgentCatalog(replayed)).toMatchObject({
+        result_count: 2,
+        skills: { skill_count: 1 },
+        config: {
+          image_model_count: 1,
+          video_model_count: 1,
+        },
+      })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
 

@@ -1961,6 +1961,7 @@ async function main(argv: string[]): Promise<void> {
       skills: buildJimengAgentSkillsRequest(),
       config: buildJimengAgentConfigRequest(),
     }
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
     if (args.dryRun) {
       writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
         command: args.command,
@@ -1968,20 +1969,36 @@ async function main(argv: string[]): Promise<void> {
           ? "/mweb/v1/creation_agent/v2/skill/list"
           : "/mweb/v1/creation_agent/v2/get_agent_config"),
         requests,
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
         browser_session: redactSession(session),
       })
       writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
         command: args.command,
         endpoints,
         requests,
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
       })
       console.log(`[jimeng-browser-proxy] agent-catalog dry run saved endpoints=${endpoints.join(",")}`)
       return
     }
 
-    const result = await fetchJimengAgentCatalog({ session, endpoints })
+    const transport = createJimengHttpTransport({
+      mode: args.transportMode,
+      cassettePath,
+    })
+    const result = await fetchJimengAgentCatalog({ session, endpoints, fetch: transport.fetch })
     writeJson(path.join(dirs.rawDir, `${runId}.json`), {
       endpoints: result.endpoints,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       results: result.results.map((item) => ({
         endpoint: item.endpoint,
         endpoint_id: item.endpointId,
@@ -1996,6 +2013,10 @@ async function main(argv: string[]): Promise<void> {
     const summary = summarizeJimengAgentCatalog(result)
     writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
       command: args.command,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       summary,
     })
     const summaryRecord = summary.config && typeof summary.config === "object" && !Array.isArray(summary.config) ? summary.config : {}
@@ -2013,12 +2034,17 @@ async function main(argv: string[]): Promise<void> {
     }
     const request = buildJimengImageModelsRequest(query)
     const runId = `image-models-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
     if (args.dryRun) {
       writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
         command: args.command,
         endpoint_sequence: ["/mweb/v1/get_common_config"],
         query,
         request,
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
         browser_session: redactSession(session),
       })
       writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
@@ -2026,14 +2052,26 @@ async function main(argv: string[]): Promise<void> {
         endpoint: "/mweb/v1/get_common_config",
         query,
         request,
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
       })
       console.log(`[jimeng-browser-proxy] image-models dry run saved`)
       return
     }
 
-    const result = await fetchJimengImageModels({ session, query })
+    const transport = createJimengHttpTransport({
+      mode: args.transportMode,
+      cassettePath,
+    })
+    const result = await fetchJimengImageModels({ session, query, fetch: transport.fetch })
     writeJson(path.join(dirs.rawDir, `${runId}.json`), {
       endpoint: result.endpoint,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       http_status: result.httpStatus,
       ret: result.ret,
       errmsg: result.errmsg,
@@ -2045,6 +2083,10 @@ async function main(argv: string[]): Promise<void> {
     const summary = summarizeJimengImageModels(result)
     writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
       command: args.command,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       summary,
     })
     console.log(`[jimeng-browser-proxy] image-models saved models=${result.modelCount} default=${result.defaultModelIndex ?? "none"}`)

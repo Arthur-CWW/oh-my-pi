@@ -1,10 +1,15 @@
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import path from "node:path"
 import { describe, expect, test } from "bun:test"
 import {
   buildJimengImageModelsRequest,
+  createJimengHttpTransport,
   fetchJimengImageModels,
   JimengClient,
   JimengError,
   parseJimengImageModelsBody,
+  readJimengHttpCassette,
   summarizeJimengImageModels,
   type JimengFetch,
   type JimengSessionBundle,
@@ -96,6 +101,48 @@ describe("Jimeng image model config", () => {
       needBetaModel: true,
     })
     expect(result.models.map((model) => model.modelReqKey)).toEqual(["high_aes_general_v50"])
+  })
+
+  test("can fetch through recorded and replayed HTTP transport cassettes", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "jimeng-image-models-cassette-"))
+    try {
+      const cassettePath = path.join(dir, "image-models.json")
+      const requests: Array<{ url: string; init?: RequestInit }> = []
+      const recordTransport = createJimengHttpTransport({
+        mode: "record",
+        cassettePath,
+        fetch: mockFetch(JSON.stringify(imageModelsBody()), requests),
+        nowIso: () => "2026-06-11T00:00:00.000Z",
+      })
+      const query = { isClientFilter: false, needBetaModel: true, needCache: false, needRefresh: true }
+
+      const recorded = await fetchJimengImageModels({
+        fetch: recordTransport.fetch,
+        session,
+        query,
+      })
+
+      expect(recorded.models).toHaveLength(1)
+      expect(readJimengHttpCassette(cassettePath).entries).toHaveLength(1)
+      expect(requests).toHaveLength(1)
+
+      const replayTransport = createJimengHttpTransport({
+        mode: "replay",
+        cassettePath,
+      })
+      const replayed = await fetchJimengImageModels({
+        fetch: replayTransport.fetch,
+        session,
+        query,
+      })
+
+      expect(summarizeJimengImageModels(replayed)).toMatchObject({
+        endpoint: "/mweb/v1/get_common_config",
+        model_count: 1,
+      })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   test("fails loudly when required model list disappears", () => {

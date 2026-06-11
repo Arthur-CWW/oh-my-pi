@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto"
 import { z } from "zod"
 import { type JimengSessionBundle } from "./capture"
-import { assertNoRiskError, JimengClient } from "./client"
+import { assertNoRiskError, JimengClient, type JimengFetch } from "./client"
 import { jimengError } from "./errors"
 import { type JsonObject, type JsonValue } from "./reference-image"
 import { JimengJsonObjectSchema, JimengJsonValueSchema, parseJimengApiEnvelope, parseJimengContract, parseJsonText } from "./schema"
@@ -143,12 +143,13 @@ export function buildJimengImageModelsRequest(query: JimengImageModelsQuery = {}
 
 export async function fetchJimengImageModels(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   session: JimengSessionBundle
   query?: JimengImageModelsQuery
 }): Promise<JimengImageModelsResult> {
   const request = buildJimengImageModelsRequest(input.query)
   const query = buildQuery(input.query)
-  const client = input.client ?? new JimengClient()
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
   const response = await client.requestText(`https://jimeng.jianying.com/mweb/v1/get_common_config?${query.toString()}`, {
     method: "POST",
     headers: buildImageModelsHeaders(input.session),
