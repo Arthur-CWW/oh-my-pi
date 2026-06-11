@@ -1,11 +1,16 @@
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import path from "node:path"
 import { describe, expect, test } from "bun:test"
 import {
   buildJimengObjectSegmentationRequest,
+  createJimengHttpTransport,
   defaultObjectSegmentationBabiParam,
   jimengObjectSegmentationModes,
   JimengClient,
   JimengError,
   parseJimengObjectSegmentationCommandMode,
+  readJimengHttpCassette,
   segmentJimengObject,
   summarizeObjectSegmentation,
   type JimengFetch,
@@ -88,6 +93,111 @@ describe("Jimeng object segmentation helpers", () => {
     expect(result.responseTextSha256).toHaveLength(64)
   })
 
+  test("can segment objects through recorded and replayed HTTP transport cassettes", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "jimeng-reference-segmentation-cassette-"))
+    try {
+      const cassettePath = path.join(dir, "reference-segmentation.json")
+      const requests: Array<{ url: string; init?: RequestInit }> = []
+      const recordTransport = createJimengHttpTransport({
+        mode: "record",
+        cassettePath,
+        fetch: mockFetchSequence([
+          JSON.stringify({
+            ret: "0",
+            errmsg: "success",
+            data: [{
+              mask: {
+                uri: "tos-cn-i-tb4s082cfz/mask.png",
+                url: "https://signed.example.invalid/mask.png?X-Amz-Signature=secret",
+              },
+              bbox: [10, 20, 300, 400],
+              score: 0.91,
+              label: "person",
+            }],
+          }),
+          JSON.stringify({
+            ret: 0,
+            errmsg: "success",
+            data: {
+              maskList: [{
+                maskUrl: "https://signed.example.invalid/mask-default.png?X-Amz-Signature=secret",
+                maskUri: "tos-cn-i-tb4s082cfz/mask-default.png",
+              }],
+            },
+          }),
+        ], requests),
+        nowIso: () => "2026-06-11T00:00:00.000Z",
+      })
+      const imageUri = "tos-cn-i-tb4s082cfz/reference.png"
+
+      const canvas = await segmentJimengObject({
+        fetch: recordTransport.fetch,
+        session,
+        imageUri,
+        mode: "canvas",
+        babiParam: defaultObjectSegmentationBabiParam(),
+      })
+      const defaultResult = await segmentJimengObject({
+        fetch: recordTransport.fetch,
+        session,
+        imageUri,
+        mode: "default",
+        babiParam: defaultObjectSegmentationBabiParam(),
+      })
+
+      expect(canvas.masks).toHaveLength(1)
+      expect(defaultResult.masks).toHaveLength(1)
+      expect(readJimengHttpCassette(cassettePath).entries).toHaveLength(2)
+      expect(requests).toHaveLength(2)
+
+      const replayTransport = createJimengHttpTransport({
+        mode: "replay",
+        cassettePath,
+      })
+      const replayedCanvas = await segmentJimengObject({
+        fetch: replayTransport.fetch,
+        session,
+        imageUri,
+        mode: "canvas",
+        babiParam: defaultObjectSegmentationBabiParam(),
+      })
+      const replayedDefault = await segmentJimengObject({
+        fetch: replayTransport.fetch,
+        session,
+        imageUri,
+        mode: "default",
+        babiParam: defaultObjectSegmentationBabiParam(),
+      })
+      const summary = summarizeObjectSegmentation([replayedCanvas, replayedDefault])
+
+      expect(summary).toMatchObject({
+        image_uri: imageUri,
+        modes: [
+          {
+            mode: "canvas",
+            mask_count: 1,
+            masks: [{
+              mask_uri: "tos-cn-i-tb4s082cfz/mask.png",
+              mask_url_present: true,
+            }],
+          },
+          {
+            mode: "default",
+            mask_count: 1,
+            masks: [{
+              mask_uri: "tos-cn-i-tb4s082cfz/mask-default.png",
+              mask_url_present: true,
+            }],
+          },
+        ],
+      })
+      expect(JSON.stringify(summary)).not.toContain("signed.example.invalid")
+      expect(JSON.stringify(summary)).not.toContain("X-Amz-Signature")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   test("summarizes masks without signed URLs", async () => {
     const client = new JimengClient({
       fetch: mockFetch(JSON.stringify({
@@ -120,6 +230,17 @@ describe("Jimeng object segmentation helpers", () => {
 function mockFetch(text: string, requests: Array<{ url: string; init?: RequestInit }>): JimengFetch {
   return async (url, init) => {
     requests.push({ url, init })
+    return new Response(text, { status: 200 })
+  }
+}
+
+function mockFetchSequence(texts: string[], requests: Array<{ url: string; init?: RequestInit }>): JimengFetch {
+  let index = 0
+  return async (url, init) => {
+    requests.push({ url, init })
+    const text = texts[index]
+    index += 1
+    if (text === undefined) throw new Error(`unexpected request ${url}`)
     return new Response(text, { status: 200 })
   }
 }

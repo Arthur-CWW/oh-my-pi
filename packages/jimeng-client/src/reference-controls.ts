@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto"
 import { type JimengSessionBundle } from "./capture"
-import { assertNoRiskError, JimengClient } from "./client"
+import { assertNoRiskError, JimengClient, type JimengFetch } from "./client"
 import { jimengError } from "./errors"
 import { type JsonObject, type JsonValue, parseImageUri } from "./reference-image"
 
@@ -152,6 +152,7 @@ export function buildJimengControlNetSaveParams(input: {
 
 export async function generateJimengControlNetPreview(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   session: JimengSessionBundle
   imageUri: string
   control: JimengControlNetKind
@@ -161,7 +162,7 @@ export async function generateJimengControlNetPreview(input: {
   const imageUri = parseImageUri(input.imageUri)
   const strength = normalizeJimengControlNetStrength(input.strength)
   const request = buildJimengControlNetPreviewRequest({ imageUri, control: input.control, strength })
-  const client = input.client ?? new JimengClient()
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
   const response = await client.requestText(buildReferenceControlUrl("/mweb/v1/blend_preview", input.babiParam), {
     method: "POST",
     headers: buildReferenceControlHeaders(input.session),
@@ -190,13 +191,14 @@ export async function generateJimengControlNetPreview(input: {
 
 export async function detectJimengPose(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   session: JimengSessionBundle
   imageUri: string
   babiParam?: JsonObject
 }): Promise<JimengPoseDetectResult> {
   const imageUri = parseImageUri(input.imageUri)
   const request = { uri: imageUri }
-  const client = input.client ?? new JimengClient()
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
   const response = await client.requestText(buildReferenceControlUrl("/mweb/v1/pose_detect", input.babiParam), {
     method: "POST",
     headers: buildReferenceControlHeaders(input.session),

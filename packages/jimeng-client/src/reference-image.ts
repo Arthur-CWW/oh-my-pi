@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto"
 import { type JimengSessionBundle } from "./capture"
-import { assertNoRiskError, JimengClient } from "./client"
+import { assertNoRiskError, JimengClient, type JimengFetch } from "./client"
 import { jimengError } from "./errors"
 
 const DEFAULT_QUERY = "aid=513695&web_version=7.5.0&da_version=3.3.17&aigc_features=app_lip_sync"
@@ -51,12 +51,13 @@ export interface JimengReferenceImageInspectionResult {
 
 export async function describeJimengImage(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   session: JimengSessionBundle
   imageUri: string
   babiParam?: JsonObject
 }): Promise<JimengImageDescriptionResult> {
   const imageUri = parseImageUri(input.imageUri)
-  const client = input.client ?? new JimengClient()
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
   const request = { file_uri: imageUri }
   const response = await client.requestText(buildReferenceImageUrl("/mweb/v1/get_image_description", input.babiParam), {
     method: "POST",
@@ -82,12 +83,13 @@ export async function describeJimengImage(input: {
 
 export async function recognizeJimengImageFaces(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   session: JimengSessionBundle
   imageUri: string
   babiParam?: JsonObject
 }): Promise<JimengFaceRecognizeResult> {
   const imageUri = parseImageUri(input.imageUri)
-  const client = input.client ?? new JimengClient()
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
   const request = { image_uri_list: [imageUri] }
   const response = await client.requestText(buildReferenceImageUrl("/mweb/v1/face_recognize", input.babiParam), {
     method: "POST",

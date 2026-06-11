@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto"
 import { type JimengSessionBundle } from "./capture"
-import { assertNoRiskError, JimengClient } from "./client"
+import { assertNoRiskError, JimengClient, type JimengFetch } from "./client"
 import { jimengError } from "./errors"
 import { type JsonObject, type JsonValue, parseImageUri } from "./reference-image"
 
@@ -58,6 +58,7 @@ export function buildJimengObjectSegmentationRequest(input: {
 
 export async function segmentJimengObject(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   session: JimengSessionBundle
   imageUri: string
   mode: JimengObjectSegmentationMode
@@ -65,7 +66,7 @@ export async function segmentJimengObject(input: {
 }): Promise<JimengObjectSegmentationResult> {
   const imageUri = parseImageUri(input.imageUri)
   const request = buildJimengObjectSegmentationRequest({ imageUri, mode: input.mode })
-  const client = input.client ?? new JimengClient()
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
   const response = await client.requestText(buildObjectSegmentationUrl(input.babiParam), {
     method: "POST",
     headers: buildObjectSegmentationHeaders(input.session),

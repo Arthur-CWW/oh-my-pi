@@ -3836,6 +3836,7 @@ async function main(argv: string[]): Promise<void> {
       ...(args.noDescription ? [] : ["/mweb/v1/get_image_description"]),
       ...(args.noFaces ? [] : ["/mweb/v1/face_recognize"]),
     ]
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
     if (!sourceFile && !requestedImageUri) throw new Error("describe-image requires --image, --file, or --imageUri")
     if (endpoints.length === 0) throw new Error("describe-image has nothing to do when both --noDescription and --noFaces are passed")
 
@@ -3851,6 +3852,10 @@ async function main(argv: string[]): Promise<void> {
         requests: {
           description: args.noDescription || !requestedImageUri ? undefined : { file_uri: requestedImageUri },
           face_recognition: args.noFaces || !requestedImageUri ? undefined : { image_uri_list: [requestedImageUri] },
+        },
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
         },
         browser_session: redactSession(session),
       })
@@ -3903,9 +3908,14 @@ async function main(argv: string[]): Promise<void> {
     }
     if (!imageUri) throw new Error("Image upload did not return an image URI")
 
+    const transport = createJimengHttpTransport({
+      mode: args.transportMode,
+      cassettePath,
+    })
     const description = args.noDescription
       ? null
       : await describeJimengImage({
+        fetch: transport.fetch,
         session,
         imageUri,
         babiParam: defaultImageDescriptionBabiParam(),
@@ -3913,6 +3923,7 @@ async function main(argv: string[]): Promise<void> {
     const faceRecognition = args.noFaces
       ? null
       : await recognizeJimengImageFaces({
+        fetch: transport.fetch,
         session,
         imageUri,
         babiParam: defaultFaceRecognizeBabiParam(),
@@ -3920,6 +3931,10 @@ async function main(argv: string[]): Promise<void> {
     const inspection = { imageUri, description, faceRecognition }
 
     writeJson(path.join(dirs.rawDir, `${runId}-raw.json`), {
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       description: description ? {
         http_status: description.httpStatus,
         ret: description.ret,
@@ -3940,6 +3955,10 @@ async function main(argv: string[]): Promise<void> {
     writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
       command: args.command,
       endpoints,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       image_upload: imageUpload,
       image_uri: imageUri,
       description: description ? {
@@ -3973,6 +3992,7 @@ async function main(argv: string[]): Promise<void> {
       "/mweb/v1/blend_preview",
       ...(control === "pose" && !args.noPoseDetect ? ["/mweb/v1/pose_detect"] : []),
     ]
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
     if (!sourceFile && !requestedImageUri) throw new Error("controlnet-preview requires --image, --file, or --imageUri")
 
     if (args.dryRun) {
@@ -3987,6 +4007,10 @@ async function main(argv: string[]): Promise<void> {
         control,
         fit_mode: fitMode,
         strength: args.strength,
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
         browser_session: redactSession(session),
       })
       console.log(`[jimeng-browser-proxy] controlnet-preview dry run saved`)
@@ -4009,7 +4033,12 @@ async function main(argv: string[]): Promise<void> {
     }
     if (!imageUri) throw new Error("Image upload did not return an image URI")
 
+    const transport = createJimengHttpTransport({
+      mode: args.transportMode,
+      cassettePath,
+    })
     const preview = await generateJimengControlNetPreview({
+      fetch: transport.fetch,
       session,
       imageUri,
       control,
@@ -4018,6 +4047,7 @@ async function main(argv: string[]): Promise<void> {
     })
     const poseDetection = control === "pose" && !args.noPoseDetect
       ? await detectJimengPose({
+        fetch: transport.fetch,
         session,
         imageUri,
         babiParam: defaultPoseDetectBabiParam(),
@@ -4040,6 +4070,10 @@ async function main(argv: string[]): Promise<void> {
     const inspection = { imageUri, control, fitMode, preview, poseDetection, saveParams }
 
     writeJson(path.join(dirs.rawDir, `${runId}-raw.json`), {
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       preview: {
         http_status: preview.httpStatus,
         ret: preview.ret,
@@ -4060,6 +4094,10 @@ async function main(argv: string[]): Promise<void> {
     writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
       command: args.command,
       endpoints,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       image_upload: imageUpload,
       image_uri: imageUri,
       control,
@@ -4096,6 +4134,7 @@ async function main(argv: string[]): Promise<void> {
     const commandMode = parseJimengObjectSegmentationCommandMode(args.maskMode)
     const modes = jimengObjectSegmentationModes(commandMode)
     const endpoints = modes.map((mode) => `/mweb/v1/saliency_seg${mode === "canvas" ? " mode=canvas" : " default"}`)
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
     if (!sourceFile && !requestedImageUri) throw new Error("object-mask requires --image, --file, or --imageUri")
 
     if (args.dryRun) {
@@ -4108,6 +4147,10 @@ async function main(argv: string[]): Promise<void> {
         source_file: sourceFile ? path.resolve(sourceFile) : undefined,
         image_uri: requestedImageUri,
         mode: commandMode,
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
         browser_session: redactSession(session),
       })
       console.log(`[jimeng-browser-proxy] object-mask dry run saved`)
@@ -4133,8 +4176,13 @@ async function main(argv: string[]): Promise<void> {
     const results: JimengObjectSegmentationResult[] = []
     const downloadedMasks: Array<{ mode: string; index: number; saved_file: string; mask_uri: string | null }> = []
     const client = new JimengClient()
+    const transport = createJimengHttpTransport({
+      mode: args.transportMode,
+      cassettePath,
+    })
     for (const mode of modes) {
       const result = await segmentJimengObject({
+        fetch: transport.fetch,
         session,
         imageUri,
         mode,
@@ -4154,6 +4202,10 @@ async function main(argv: string[]): Promise<void> {
     }
 
     writeJson(path.join(dirs.rawDir, `${runId}-raw.json`), {
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       results: results.map((result) => ({
         mode: result.mode,
         http_status: result.httpStatus,
@@ -4167,6 +4219,10 @@ async function main(argv: string[]): Promise<void> {
     writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
       command: args.command,
       endpoints,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       image_upload: imageUpload,
       image_uri: imageUri,
       mode: commandMode,

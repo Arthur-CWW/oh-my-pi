@@ -1,7 +1,11 @@
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import path from "node:path"
 import { describe, expect, test } from "bun:test"
 import {
   buildJimengControlNetPreviewRequest,
   buildJimengControlNetSaveParams,
+  createJimengHttpTransport,
   defaultControlNetPreviewBabiParam,
   defaultPoseDetectBabiParam,
   detectJimengPose,
@@ -11,6 +15,7 @@ import {
   normalizeJimengControlNetStrength,
   parseJimengControlNetFitMode,
   parseJimengControlNetKind,
+  readJimengHttpCassette,
   summarizeControlNetReferenceInspection,
   type JimengFetch,
   type JimengSessionBundle,
@@ -127,6 +132,106 @@ describe("Jimeng reference control helpers", () => {
     expect(result.isPose).toBe(true)
   })
 
+  test("can inspect ControlNet references through recorded and replayed HTTP transport cassettes", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "jimeng-reference-controls-cassette-"))
+    try {
+      const cassettePath = path.join(dir, "reference-controls.json")
+      const requests: Array<{ url: string; init?: RequestInit }> = []
+      const recordTransport = createJimengHttpTransport({
+        mode: "record",
+        cassettePath,
+        fetch: mockFetchSequence([
+          JSON.stringify({
+            ret: "0",
+            errmsg: "success",
+            data: {
+              ability: {
+                large_image_list: [{
+                  image_uri: "tos-cn-i-tb4s082cfz/preview.png",
+                  image_url: "https://signed.example.invalid/preview.png?X-Amz-Signature=secret",
+                }],
+              },
+            },
+          }),
+          JSON.stringify({
+            ret: "0",
+            errmsg: "success",
+            data: { is_pose: true },
+          }),
+        ], requests),
+        nowIso: () => "2026-06-11T00:00:00.000Z",
+      })
+      const imageUri = "tos-cn-i-tb4s082cfz/reference.png"
+      const control = "pose"
+      const fitMode = "center_crop"
+
+      const preview = await generateJimengControlNetPreview({
+        fetch: recordTransport.fetch,
+        session,
+        imageUri,
+        control,
+        strength: 60,
+        babiParam: defaultControlNetPreviewBabiParam(control),
+      })
+      const poseDetection = await detectJimengPose({
+        fetch: recordTransport.fetch,
+        session,
+        imageUri,
+        babiParam: defaultPoseDetectBabiParam(),
+      })
+
+      expect(readJimengHttpCassette(cassettePath).entries).toHaveLength(2)
+      expect(requests).toHaveLength(2)
+
+      const replayTransport = createJimengHttpTransport({
+        mode: "replay",
+        cassettePath,
+      })
+      const replayedPreview = await generateJimengControlNetPreview({
+        fetch: replayTransport.fetch,
+        session,
+        imageUri,
+        control,
+        strength: 60,
+        babiParam: defaultControlNetPreviewBabiParam(control),
+      })
+      const replayedPoseDetection = await detectJimengPose({
+        fetch: replayTransport.fetch,
+        session,
+        imageUri,
+        babiParam: defaultPoseDetectBabiParam(),
+      })
+      const summary = summarizeControlNetReferenceInspection({
+        imageUri,
+        control,
+        fitMode,
+        preview: replayedPreview,
+        poseDetection: replayedPoseDetection,
+        saveParams: buildJimengControlNetSaveParams({
+          imageUri,
+          control,
+          strength: 60,
+          previewImageUri: replayedPreview.previewImageUri,
+          previewImageUrl: replayedPreview.previewImageUrl,
+          fitMode,
+        }),
+      })
+
+      expect(preview.previewImageUri).toBe("tos-cn-i-tb4s082cfz/preview.png")
+      expect(poseDetection.isPose).toBe(true)
+      expect(summary).toMatchObject({
+        image_uri: imageUri,
+        preview_image_uri: "tos-cn-i-tb4s082cfz/preview.png",
+        preview_image_url_present: true,
+        pose_detected: true,
+      })
+      expect(JSON.stringify(summary)).not.toContain("signed.example.invalid")
+      expect(JSON.stringify(summary)).not.toContain("X-Amz-Signature")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   test("builds save params and summarizes without signed preview URLs", () => {
     const saveParams = buildJimengControlNetSaveParams({
       imageUri: "tos-cn-i-tb4s082cfz/reference.png",
@@ -179,6 +284,17 @@ describe("Jimeng reference control helpers", () => {
 function mockFetch(text: string, requests: Array<{ url: string; init?: RequestInit }>): JimengFetch {
   return async (url, init) => {
     requests.push({ url, init })
+    return new Response(text, { status: 200 })
+  }
+}
+
+function mockFetchSequence(texts: string[], requests: Array<{ url: string; init?: RequestInit }>): JimengFetch {
+  let index = 0
+  return async (url, init) => {
+    requests.push({ url, init })
+    const text = texts[index]
+    index += 1
+    if (text === undefined) throw new Error(`unexpected request ${url}`)
     return new Response(text, { status: 200 })
   }
 }

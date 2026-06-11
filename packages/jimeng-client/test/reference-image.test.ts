@@ -1,9 +1,14 @@
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import path from "node:path"
 import { describe, expect, test } from "bun:test"
 import {
+  createJimengHttpTransport,
   describeJimengImage,
   JimengClient,
   JimengError,
   parseImageUri,
+  readJimengHttpCassette,
   recognizeJimengImageFaces,
   summarizeReferenceImageInspection,
   type JimengFetch,
@@ -126,6 +131,83 @@ describe("Jimeng reference image helpers", () => {
     ])
   })
 
+  test("can inspect images through recorded and replayed HTTP transport cassettes", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "jimeng-reference-image-cassette-"))
+    try {
+      const cassettePath = path.join(dir, "reference-image.json")
+      const requests: Array<{ url: string; init?: RequestInit }> = []
+      const recordTransport = createJimengHttpTransport({
+        mode: "record",
+        cassettePath,
+        fetch: mockFetchSequence([
+          JSON.stringify({
+            ret: "0",
+            errmsg: "success",
+            data: { description: "韩系美妆达人，室内自然光，正面自拍构图。" },
+          }),
+          JSON.stringify({
+            ret: "0",
+            errmsg: "success",
+            data: {
+              face_info_list: [{
+                face_key: "face-1",
+                face_rect: [10, 20, 110, 220],
+                keypoint: [30, 40, 50, 60],
+                score: 0.91,
+                label: "main",
+              }],
+            },
+          }),
+        ], requests),
+        nowIso: () => "2026-06-11T00:00:00.000Z",
+      })
+      const imageUri = "tos-cn-i-tb4s082cfz/reference.png"
+
+      const description = await describeJimengImage({
+        fetch: recordTransport.fetch,
+        session,
+        imageUri,
+      })
+      const faces = await recognizeJimengImageFaces({
+        fetch: recordTransport.fetch,
+        session,
+        imageUri,
+      })
+
+      expect(description.description).toBeTruthy()
+      expect(faces.faces).toHaveLength(1)
+      expect(readJimengHttpCassette(cassettePath).entries).toHaveLength(2)
+      expect(requests).toHaveLength(2)
+
+      const replayTransport = createJimengHttpTransport({
+        mode: "replay",
+        cassettePath,
+      })
+      const replayedDescription = await describeJimengImage({
+        fetch: replayTransport.fetch,
+        session,
+        imageUri,
+      })
+      const replayedFaces = await recognizeJimengImageFaces({
+        fetch: replayTransport.fetch,
+        session,
+        imageUri,
+      })
+
+      expect(summarizeReferenceImageInspection({
+        imageUri,
+        description: replayedDescription,
+        faceRecognition: replayedFaces,
+      })).toMatchObject({
+        image_uri: imageUri,
+        description_present: true,
+        face_count: 1,
+      })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   test("summarizes reference image inspection without raw response bodies", () => {
     const summary = summarizeReferenceImageInspection({
       imageUri: "tos-cn-i-tb4s082cfz/reference.png",
@@ -179,6 +261,17 @@ describe("Jimeng reference image helpers", () => {
 function mockFetch(text: string, requests: Array<{ url: string; init?: RequestInit }>): JimengFetch {
   return async (url, init) => {
     requests.push({ url, init })
+    return new Response(text, { status: 200 })
+  }
+}
+
+function mockFetchSequence(texts: string[], requests: Array<{ url: string; init?: RequestInit }>): JimengFetch {
+  let index = 0
+  return async (url, init) => {
+    requests.push({ url, init })
+    const text = texts[index]
+    index += 1
+    if (text === undefined) throw new Error(`unexpected request ${url}`)
     return new Response(text, { status: 200 })
   }
 }
