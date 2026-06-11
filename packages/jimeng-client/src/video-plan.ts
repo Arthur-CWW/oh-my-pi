@@ -615,7 +615,7 @@ export function summarizeJimengVideoOmniReferencePlan(plan: JimengVideoOmniRefer
     has_metrics_extra: typeof plan.request.metrics_extra === "string",
     has_draft_content: typeof plan.request.draft_content === "string",
     live_submit: false,
-    next_compare_command: "jimeng-browser-proxy request-plan-compare --plan <dry-run-plan.json> --rawNetwork <capture>/raw-network.jsonl",
+    next_compare_command: "jimeng-browser-proxy omni-video-compare --plan <dry-run-plan.json> --rawNetwork <capture>/raw-network.jsonl",
   }
 }
 

@@ -326,7 +326,7 @@ exports[`Jimeng generation plan snapshots > snapshots representative high-value 
       "method": "POST",
       "model_req_key": "dreamina_seedance_40_pro",
       "model_version": "jimeng-video-seedance-2.0",
-      "next_compare_command": "jimeng-browser-proxy request-plan-compare --plan <dry-run-plan.json> --rawNetwork <capture>/raw-network.jsonl",
+      "next_compare_command": "jimeng-browser-proxy omni-video-compare --plan <dry-run-plan.json> --rawNetwork <capture>/raw-network.jsonl",
       "prompt_length": 137,
       "query": "aid=513695&device_platform=web&region=cn&da_version=3.3.17&os=mac&web_component_open_flag=1&web_version=7.5.0&aigc_features=app_lip_sync",
       "ratio": "9:16",

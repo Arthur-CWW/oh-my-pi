@@ -198,6 +198,11 @@ import {
   summarizeJimengVideoDirectCompare,
 } from "./video-plan-compare"
 import {
+  compareJimengVideoOmniPlanWithCaptureTemplate,
+  compareJimengVideoOmniPlanWithRawNetwork,
+  summarizeJimengVideoOmniCompare,
+} from "./video-omni-compare"
+import {
   buildJimengCanvasCustomRatiosRequest,
   buildJimengCanvasConversationListRequest,
   buildJimengCanvasProjectDetailRequest,
@@ -362,6 +367,7 @@ Commands:
   text2video-plan Build a no-spend direct text/image/frames-to-video submit body
   text2video-compare Offline compare a direct video dry-run plan against captured UI submit
   omni-video-plan Build a dry-run Seedance omni-reference mixed image/video submit body
+  omni-video-compare Offline compare an omni-reference dry-run plan against captured UI submit
   generate-audit-plan Build a dry-run generation material pre-audit body
   request-plan-compare Offline compare a simple dry-run request plan against captured UI traffic
   account-credit Fetch signed no-spend account credit balance
@@ -712,6 +718,11 @@ Examples:
     --durationSec 8 \\
     --outDir data/jimeng-lab/omni-video-plan
 
+  jimeng-browser-proxy omni-video-compare \\
+    --plan data/jimeng-lab/omni-video-plan/raw/omni-video-plan-<run>-dry-run-plan.json \\
+    --rawNetwork data/jimeng-captures/<capture>/raw-network.jsonl \\
+    --outDir data/jimeng-lab/omni-video-compare
+
   jimeng-browser-proxy tts \\
     --voice-id 7597003459665072686 \\
     --text "这条视频值得试一下。"
@@ -900,6 +911,7 @@ interface CliArgs {
     | "text2video-plan"
     | "text2video-compare"
     | "omni-video-plan"
+    | "omni-video-compare"
     | "generate-audit-plan"
     | "request-plan-compare"
     | "account-credit"
@@ -1414,6 +1426,32 @@ async function main(argv: string[]): Promise<void> {
       summary: summarizeJimengVideoOmniReferencePlan(plan),
     })
     console.log(`[jimeng-browser-proxy] omni-video-plan saved model=${plan.modelReqKey} materials=${plan.materialList.length} duration=${plan.durationSec}s live_submit=false`)
+    return
+  }
+
+  if (args.command === "omni-video-compare") {
+    if (!args.plan) throw new Error("omni-video-compare requires --plan")
+    if (!args.rawNetwork && !args.captureDir && !args.capture) {
+      throw new Error("omni-video-compare requires --rawNetwork, --captureDir, or --capture")
+    }
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const runId = `omni-video-compare-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const dryRunPlanText = readFileSync(path.resolve(args.plan), "utf8")
+    const result = args.capture
+      ? compareJimengVideoOmniPlanWithCaptureTemplate({
+        dryRunPlanText,
+        captureTemplateText: readFileSync(path.resolve(args.capture), "utf8"),
+      })
+      : compareJimengVideoOmniPlanWithRawNetwork({
+        dryRunPlanText,
+        rawNetworkText: readFileSync(resolveRawNetworkFile(args), "utf8"),
+      })
+    writeJson(path.join(dirs.rawDir, `${runId}.json`), result)
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      summary: summarizeJimengVideoOmniCompare(result),
+    })
+    console.log(`[jimeng-browser-proxy] omni-video-compare saved match=${result.match} candidates=${result.candidate_count}`)
     return
   }
 
@@ -5781,6 +5819,7 @@ function parseArgs(argv: string[]): CliArgs {
     && command !== "text2video-plan"
     && command !== "text2video-compare"
     && command !== "omni-video-plan"
+    && command !== "omni-video-compare"
     && command !== "generate-audit-plan"
     && command !== "request-plan-compare"
     && command !== "account-credit"

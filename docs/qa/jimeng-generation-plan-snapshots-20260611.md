@@ -37,10 +37,10 @@ cd packages/jimeng-client
 Latest result:
 
 - `typecheck`: pass
-- `bun test ./test`: 256 pass
+- `bun test ./test`: 259 pass
 - `vitest run test-vitest`: 2 files / 3 tests pass
 
 Next highest-value step:
 
-- Approval-gated G1 live capture/compare for `/mweb/v1/aigc_draft/generate`, using the highest-value examples above, especially `omni-video-plan` for all-around reference/profile transfer.
+- Approval-gated G1 live capture/compare for `/mweb/v1/aigc_draft/generate`, using the highest-value examples above, especially `omni-video-plan` plus `omni-video-compare` for all-around reference/profile transfer.
 - If live capture is not approved, stay inside G1 with additional request builders, compare gates, and schema fixtures rather than switching to unrelated no-spend metadata reads.
