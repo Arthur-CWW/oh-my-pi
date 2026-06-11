@@ -3468,6 +3468,55 @@ resources=251
 known_status_counts=unknown:98,partial:6,implemented:61,dry_run_only:5,blocked:78,captured_only:2,cataloged_only:1
 ```
 
+## Commerce Pricing Reads
+
+Signed no-spend VIP and credit price-list reads are implemented as `commerce-pricing`.
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts static-locate \
+  --endpoint /commerce/v1/purchase/price_list,/commerce/v1/subscription/price_list,/commerce/v1/subscription/cc_price_list,/commerce/v1/subscription/get_change_plan_info,/commerce/v3/trade/query_trade,/commerce/v3/trade/user/can_refund_list,/commerce/v3/trade/user/refund_record_list \
+  --staticRoot data/jimeng-lab/js-sweep/files,packages/jimeng-client/src \
+  --outDir data/jimeng-lab/proof-20260611-static-locate-commerce-pricing
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts commerce-pricing \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --endpoints all \
+  --dryRun \
+  --outDir data/jimeng-lab/proof-20260611-commerce-pricing-cli-dryrun
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts commerce-pricing \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --endpoints all \
+  --outDir data/jimeng-lab/proof-20260611-commerce-pricing-cli-live
+```
+
+Result:
+
+```txt
+static-locate saved endpoints=7 occurrences=18
+commerce-pricing dry run saved endpoints=vip,credit
+commerce-pricing saved vip=11 credit=0
+```
+
+The VIP request body is `{ aid: 513695, region: "cn", platform: 7, scene: "vip" }`. The credit request body is `{ goodsTypes: ["credit"] }`. Normalized live proof returned `11` VIP rows, `3` price tabs, max VIP monthly credit amount `6160`, and an empty `price_list` for credit purchase rows.
+
+Blocked adjacent commerce endpoints:
+
+```txt
+/commerce/v1/subscription/cc_price_list -> blocked; current Jimeng host/session returned HTTP 404 text/plain and likely needs overseas gateway or region context
+/commerce/v1/subscription/get_change_plan_info -> blocked; requires selected pid/skuId/pmsTrade plan context
+/commerce/v3/trade/query_trade -> blocked; requires real trade/order id context
+/commerce/v3/trade/user/can_refund_list -> blocked; requires order/refund context
+/commerce/v3/trade/user/refund_record_list -> blocked; requires order/refund context
+```
+
+Refreshed static inventory:
+
+```txt
+resources=251
+known_status_counts=unknown:91,partial:6,implemented:63,dry_run_only:5,blocked:83,captured_only:2,cataloged_only:1
+```
+
 ## Verification
 
 ```bash
@@ -3479,16 +3528,17 @@ mise x ast-grep -- ast-grep scan --config sgconfig.yml packages/jimeng-client/sr
 mise x ast-grep -- ast-grep scan --config sgconfig.yml packages/jimeng-client/src/account-config.ts packages/jimeng-client/src/browser-proxy-cli.ts packages/jimeng-client/src/discovery-worklist.ts packages/jimeng-client/src/index.ts packages/jimeng-client/test/account-config.test.ts
 mise x ast-grep -- ast-grep scan --config sgconfig.yml packages/jimeng-client/src/runtime-config.ts packages/jimeng-client/src/browser-proxy-cli.ts packages/jimeng-client/src/discovery-worklist.ts packages/jimeng-client/src/index.ts packages/jimeng-client/test/runtime-config.test.ts
 mise x ast-grep -- ast-grep scan --config sgconfig.yml packages/jimeng-client/src/story-archive.ts packages/jimeng-client/src/browser-proxy-cli.ts packages/jimeng-client/src/discovery-worklist.ts packages/jimeng-client/src/index.ts packages/jimeng-client/test/story-archive.test.ts
-bun packages/jimeng-client/src/browser-proxy-cli.ts --help | rg 'static-inventory|account-credit|commerce-benefits|account-config|runtime-config|workspace-context|research-keywords|research-search|profile-research|local-items|story-records|async-tasks|story-export-plan|lip-sync-config|voice-clones|voice-clone-submit|capcut-probe|capcut-template-metadata|capcut-categories|capcut-collections|capcut-collection-templates|capcut-template-detail|capcut-editor-catalog|infinite-canvas|overseas-short-videos|subject-create|subject-update|subject-delete|subject-generate-voice|subjects|templates|short-videos'
+mise x ast-grep -- ast-grep scan --config sgconfig.yml packages/jimeng-client/src/commerce-pricing.ts packages/jimeng-client/src/browser-proxy-cli.ts packages/jimeng-client/src/discovery-worklist.ts packages/jimeng-client/src/index.ts packages/jimeng-client/test/commerce-pricing.test.ts packages/jimeng-client/test/discovery-worklist.test.ts packages/jimeng-client/test/static-inventory.test.ts
+bun packages/jimeng-client/src/browser-proxy-cli.ts --help | rg 'static-inventory|account-credit|commerce-benefits|commerce-pricing|account-config|runtime-config|workspace-context|research-keywords|research-search|profile-research|local-items|story-records|async-tasks|story-export-plan|lip-sync-config|voice-clones|voice-clone-submit|capcut-probe|capcut-template-metadata|capcut-categories|capcut-collections|capcut-collection-templates|capcut-template-detail|capcut-editor-catalog|infinite-canvas|overseas-short-videos|subject-create|subject-update|subject-delete|subject-generate-voice|subjects|templates|short-videos'
 ```
 
 Result:
 
 ```txt
 typecheck passed
-186 tests passed, 0 failed
+189 tests passed, 0 failed
 scoped ast-grep unsafe-type rules passed with zero findings
-browser-proxy help listed static-inventory, account-credit, commerce-benefits, account-config, runtime-config, workspace-context, research-keywords, research-search, profile-research, local-items, story-records, async-tasks, story-export-plan, CapCut collection/detail/editor-catalog, and infinite-canvas commands
+browser-proxy help listed static-inventory, account-credit, commerce-benefits, commerce-pricing, account-config, runtime-config, workspace-context, research-keywords, research-search, profile-research, local-items, story-records, async-tasks, story-export-plan, CapCut collection/detail/editor-catalog, and infinite-canvas commands
 paid smoke normalized files have no live token markers
 ```
 

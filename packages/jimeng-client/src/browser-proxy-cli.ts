@@ -26,6 +26,12 @@ import {
   parseJimengCommerceBenefitEndpoints,
   summarizeJimengCommerceBenefits,
 } from "./commerce-benefits"
+import {
+  buildJimengCommercePricingRequest,
+  fetchJimengCommercePricing,
+  parseJimengCommercePricingEndpoints,
+  summarizeJimengCommercePricing,
+} from "./commerce-pricing"
 import { loadJimengSessionFromBrowser } from "./browser-session"
 import {
   buildCapCutCollectionTemplatesRequest,
@@ -308,6 +314,7 @@ Commands:
   text2image-plan Build a no-spend direct text-to-image submit body
   account-credit Fetch signed no-spend account credit balance
   commerce-benefits Fetch signed no-spend benefit metadata and user benefit rows
+  commerce-pricing Fetch signed no-spend VIP and credit price lists
   account-config Fetch no-spend current-account settings, registration, and invite flags
   runtime-config Fetch no-spend frontend runtime, banner, helpdesk, and ASR config reads
   workspace-context Fetch no-spend workspace list and workspace-id context
@@ -391,6 +398,7 @@ Options:
                                   agent-catalog accepts skills,config,all
                                   infinite-canvas accepts projects,detail,ratios,conversations,all
                                   account-config accepts settings,ug-info,invite-status,all
+                                  commerce-pricing accepts vip,credit,all
                                   runtime-config accepts experiment-params,home-header-banner,help-desk-entrance,asr-token,asr-hotwords,all
                                   research-keywords accepts suggest,guess,all
                                   profile-research accepts profile,homepage,favorites,stories,following,followers,item,items,all
@@ -799,6 +807,7 @@ interface CliArgs {
     | "text2image-plan"
     | "account-credit"
     | "commerce-benefits"
+    | "commerce-pricing"
     | "account-config"
     | "runtime-config"
     | "workspace-context"
@@ -1642,6 +1651,58 @@ async function main(argv: string[]): Promise<void> {
       summary,
     })
     console.log(`[jimeng-browser-proxy] commerce-benefits saved metadata=${result.metadata?.metadataCount ?? "skip"} user_assets=${result.userBenefits?.assetCount ?? "skip"}`)
+    return
+  }
+
+  if (args.command === "commerce-pricing") {
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const runId = `commerce-pricing-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const endpoints = parseJimengCommercePricingEndpoints(args.endpoints)
+    const requests = endpoints.map((endpoint) => ({
+      endpoint,
+      path: endpoint === "vip" ? "/commerce/v1/subscription/price_list" : "/commerce/v1/purchase/price_list",
+      body: buildJimengCommercePricingRequest(endpoint),
+    }))
+    if (args.dryRun) {
+      writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
+        command: args.command,
+        endpoint_sequence: requests.map((request) => request.path),
+        method: "POST",
+        requests,
+        signed_headers: ["device-time", "sign", "sign-ver"],
+        browser_session: redactSession(session),
+        live_request: false,
+      })
+      writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+        command: args.command,
+        endpoints,
+        requests,
+        dry_run: true,
+      })
+      console.log(`[jimeng-browser-proxy] commerce-pricing dry run saved endpoints=${endpoints.join(",")}`)
+      return
+    }
+
+    const result = await fetchJimengCommercePricing({ session, query: { endpoints } })
+    writeJson(path.join(dirs.rawDir, `${runId}.json`), {
+      requested_endpoints: result.endpoints,
+      results: result.results.map((item) => ({
+        endpoint: item.endpoint,
+        endpoint_id: item.endpointId,
+        http_status: item.httpStatus,
+        ret: item.ret,
+        errmsg: item.errmsg,
+        response_text_sha256: item.responseTextSha256,
+        request: item.request,
+        body: item.body,
+      })),
+    })
+    const summary = summarizeJimengCommercePricing(result)
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      summary,
+    })
+    console.log(`[jimeng-browser-proxy] commerce-pricing saved ${result.results.map((item) => `${item.endpointId}=${item.items.length}`).join(" ")}`)
     return
   }
 
@@ -4319,6 +4380,7 @@ function parseArgs(argv: string[]): CliArgs {
     && command !== "text2image-plan"
     && command !== "account-credit"
     && command !== "commerce-benefits"
+    && command !== "commerce-pricing"
     && command !== "account-config"
     && command !== "runtime-config"
     && command !== "workspace-context"

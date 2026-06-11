@@ -60,6 +60,13 @@ describe("Jimeng discovery worklist", () => {
           `fetch("/lv/v1/ever_photo/promote_asset")`,
           `fetch("/mweb/v1/remove_history")`,
           `fetch("/mweb/v1/update_video_default_bgm")`,
+          `fetch("/commerce/v1/subscription/price_list")`,
+          `fetch("/commerce/v1/purchase/price_list")`,
+          `fetch("/commerce/v1/subscription/cc_price_list")`,
+          `fetch("/commerce/v1/subscription/get_change_plan_info")`,
+          `fetch("/commerce/v3/trade/query_trade")`,
+          `fetch("/commerce/v3/trade/user/can_refund_list")`,
+          `fetch("/commerce/v3/trade/user/refund_record_list")`,
           `fetch("/mweb/search/v1/sug")`,
           `fetch("/mweb/search/v1/guess")`,
           `fetch("/mweb/search/v1/search")`,
@@ -93,6 +100,8 @@ describe("Jimeng discovery worklist", () => {
       expect(worklist.items.some((item) => item.endpoint === "/mweb/search/v1/sug")).toBe(false)
       expect(worklist.items.some((item) => item.endpoint === "/mweb/search/v1/guess")).toBe(false)
       expect(worklist.items.some((item) => item.endpoint === "/mweb/search/v1/search")).toBe(false)
+      expect(worklist.items.some((item) => item.endpoint === "/commerce/v1/subscription/price_list")).toBe(false)
+      expect(worklist.items.some((item) => item.endpoint === "/commerce/v1/purchase/price_list")).toBe(false)
       expect(worklist.items.some((item) => item.endpoint === "/lv/v1/effect/get_all_fonts")).toBe(false)
       expect(worklist.items.find((item) => item.endpoint === "/mweb/search/v1/fetch_debug/search")?.known_status).toBe("blocked")
       const readGap = worklist.items.find((item) => item.endpoint === "/mweb/v1/reference_profile/list")
@@ -180,6 +189,11 @@ describe("Jimeng discovery worklist", () => {
       expect(lvTaskDraft?.known_status).toBe("blocked")
       expect(lvTaskDraft?.reason).toContain("commercial-photo task id")
       for (const endpoint of [
+        "/commerce/v1/subscription/cc_price_list",
+        "/commerce/v1/subscription/get_change_plan_info",
+        "/commerce/v3/trade/query_trade",
+        "/commerce/v3/trade/user/can_refund_list",
+        "/commerce/v3/trade/user/refund_record_list",
         "/lv/v1/asset/copy",
         "/lv/v1/asset/create",
         "/lv/v1/asset/create_cloud_asset",

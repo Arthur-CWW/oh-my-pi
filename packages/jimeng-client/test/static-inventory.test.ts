@@ -65,6 +65,13 @@ describe("Jimeng static inventory", () => {
           `const everPhotoPromoteBlocked = "/lv/v1/ever_photo/promote_asset";`,
           `const removeHistoryBlocked = "/mweb/v1/remove_history";`,
           `const updateVideoDefaultBgmBlocked = "/mweb/v1/update_video_default_bgm";`,
+          `const commerceVipPricingImplemented = "/commerce/v1/subscription/price_list";`,
+          `const commerceCreditPricingImplemented = "/commerce/v1/purchase/price_list";`,
+          `const commerceOverseasPriceBlocked = "/commerce/v1/subscription/cc_price_list";`,
+          `const commerceChangePlanBlocked = "/commerce/v1/subscription/get_change_plan_info";`,
+          `const commerceTradeBlocked = "/commerce/v3/trade/query_trade";`,
+          `const commerceCanRefundBlocked = "/commerce/v3/trade/user/can_refund_list";`,
+          `const commerceRefundRecordsBlocked = "/commerce/v3/trade/user/refund_record_list";`,
           `const researchSuggestImplemented = "/mweb/search/v1/sug";`,
           `const researchGuessImplemented = "/mweb/search/v1/guess";`,
           `const researchSearchImplemented = "/mweb/search/v1/search";`,
@@ -96,12 +103,14 @@ describe("Jimeng static inventory", () => {
       const summary = summarizeJimengStaticInventory(result)
       const markdown = writeJimengStaticInventoryMarkdown(result)
 
-      expect(result.totalResourceCount).toBe(70)
-      expect(result.skippedImplementedCount).toBe(9)
+      expect(result.totalResourceCount).toBe(77)
+      expect(result.skippedImplementedCount).toBe(11)
       expect(result.items.map((item) => item.resource)).not.toContain("/mweb/v1/get_history_by_ids")
       expect(result.items.map((item) => item.resource)).not.toContain("/mweb/search/v1/sug")
       expect(result.items.map((item) => item.resource)).not.toContain("/mweb/search/v1/guess")
       expect(result.items.map((item) => item.resource)).not.toContain("/mweb/search/v1/search")
+      expect(result.items.map((item) => item.resource)).not.toContain("/commerce/v1/subscription/price_list")
+      expect(result.items.map((item) => item.resource)).not.toContain("/commerce/v1/purchase/price_list")
       expect(result.items.map((item) => item.resource)).not.toContain("/lv/v1/effect/get_all_fonts")
       expect(result.items.find((item) => item.resource === "/mweb/search/v1/fetch_debug/search")?.knownStatus).toBe("blocked")
       expect(result.items.find((item) => item.resource === "/mweb/v1/dreamina_subject/generate_voice")?.recommendedAction).toBe("approval_or_disposable_fixture")
@@ -143,6 +152,11 @@ describe("Jimeng static inventory", () => {
       expect(result.items.find((item) => item.resource === "/lv/v1/editor/plane/intelligence/query_recommend_template")?.knownStatus).toBe("blocked")
       expect(result.items.find((item) => item.resource === "/lv/v2/cc_web_task/get_task_draft")?.knownStatus).toBe("blocked")
       for (const endpoint of [
+        "/commerce/v1/subscription/cc_price_list",
+        "/commerce/v1/subscription/get_change_plan_info",
+        "/commerce/v3/trade/query_trade",
+        "/commerce/v3/trade/user/can_refund_list",
+        "/commerce/v3/trade/user/refund_record_list",
         "/lv/v1/asset/copy",
         "/lv/v1/asset/create",
         "/lv/v1/asset/create_cloud_asset",
@@ -199,6 +213,9 @@ describe("Jimeng static inventory", () => {
           `fetch("/mweb/v1/get_favorite_list");`,
           `fetch("/mweb/v1/get_follow_list");`,
           `fetch("/mweb/v1/get_item_info");`,
+          `fetch("/commerce/v1/subscription/price_list");`,
+          `fetch("/commerce/v1/purchase/price_list");`,
+          `fetch("/commerce/v3/trade/query_trade");`,
         ].join("\n"),
         "utf8",
       )
@@ -222,6 +239,9 @@ describe("Jimeng static inventory", () => {
       expect(result.items.find((item) => item.resource === "/mweb/search/v1/guess")?.knownCommand).toBe("research-keywords")
       expect(result.items.find((item) => item.resource === "/mweb/search/v1/search")?.knownStatus).toBe("implemented")
       expect(result.items.find((item) => item.resource === "/mweb/search/v1/search")?.knownCommand).toBe("research-search")
+      expect(result.items.find((item) => item.resource === "/commerce/v1/subscription/price_list")?.knownCommand).toBe("commerce-pricing")
+      expect(result.items.find((item) => item.resource === "/commerce/v1/purchase/price_list")?.knownCommand).toBe("commerce-pricing")
+      expect(result.items.find((item) => item.resource === "/commerce/v3/trade/query_trade")?.knownStatus).toBe("blocked")
       for (const endpoint of [
         "/mweb/v1/get_user_info",
         "/mweb/v1/get_homepage",
