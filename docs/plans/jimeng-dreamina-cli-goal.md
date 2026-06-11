@@ -56,7 +56,7 @@ As of 2026-06-10, the committed Jimeng CLI baseline is:
 - `a124c30 Classify LV read-state blockers`
 - `1d423bd Add Jimeng rate probe CLI`
 - `52b0724 Use Effect Schema for Jimeng workspace context`
-- current checkpoint: Effect Schema-backed no-spend `profile-research` for public reference profiles/works/stories/item details and current-account follow lists, current-account generated `local-items`, and no-spend `account-config`; static inventory now reports `implemented=56`, `blocked=70`, `unknown=114`
+- current checkpoint: Effect Schema-backed no-spend `profile-research` for public reference profiles/works/stories/item details and current-account follow lists, current-account generated `local-items`, no-spend `account-config`, and no-spend `runtime-config`; static inventory now reports `implemented=61`, `blocked=70`, `unknown=109`
 
 If the thread goal object lags behind this file after a pause, resume from this document and the latest Git checkpoint. The active working rule is: background-only reversal, direct/API-first implementation, small proven CLI slices, tests and proof artifacts before each commit, and no async daemon until the API surface is settled.
 
@@ -681,10 +681,13 @@ Jimeng reference-profile research is now live-proved without generation spend:
 - current-account local item live proof: `data/jimeng-lab/proof-20260611-local-items-live/` returned 2 generated image rows from `/mweb/v1/get_local_item_list` using `item_id_list`
 - account-config dry-run proof: `data/jimeng-lab/proof-20260611-account-config-dryrun/`
 - account-config live proof: `data/jimeng-lab/proof-20260611-account-config-live/` returned current-account settings, `is_web_registered=true`, and `invite_status=1` from empty-body reads
-- refreshed inventory proof: `data/jimeng-lab/proof-20260611-static-inventory-account-config/` reports `implemented=56`, `unknown=114`, `partial=4`, and `blocked=70`
+- runtime-config dry-run proof: `data/jimeng-lab/proof-20260611-runtime-config-dryrun/`
+- runtime-config live proof: `data/jimeng-lab/proof-20260611-runtime-config-live/` returned 5 successful empty-body reads for experiment params, home header banner config, helpdesk entrance, ASR token config, and ASR hotwords; normalized output fingerprints token/appkey/ws_url/helpdesk URL values
+- refreshed inventory proof: `data/jimeng-lab/proof-20260611-static-inventory-runtime-config/` reports `implemented=61`, `unknown=109`, `partial=4`, and `blocked=70`
 - successful batch probe: `data/jimeng-lab/proof-20260611-probe-mget-item-info-item-id-list/` shows `/mweb/v1/mget_item_info` accepts `item_id_list`; earlier guessed-field probes under `data/jimeng-lab/proof-20260611-probe-mget-item-info/` are superseded
 - successful local item probe: `data/jimeng-lab/proof-20260611-probe-local-item-list-generated-items/` shows `/mweb/v1/get_local_item_list` accepts generated asset item ids in `item_id_list`; the earlier asset-wrapper-id probe under `data/jimeng-lab/proof-20260611-probe-local-item-list/` returned `ret=3005`
 - successful account-config probes: `data/jimeng-lab/proof-20260611-probe-account-config-get-{settings,ug-info,invite-status}/` show empty POST bodies return `ret=0`; `data/jimeng-lab/proof-20260611-probe-account-config-get-panel-info/` returned `ret=2012` for guessed bodies and remains an exact-body recovery target
+- successful runtime-config probes: `data/jimeng-lab/proof-20260611-probe-{home-header-banner,help-desk-entrance,experiment-params,asr-token,asr-hotwords}/` show empty POST bodies return `ret=0`; `/lv/v1/user/get_enable_list` remains blocked on exact LV auth/context after empty and null probes returned `ret=1014`
 - normalized proofs contain no credential markers or signed media URL values
 
 The next slice is **lip-sync submit capture and reference-video consumers**. Use the VOD provider reference, ImageX avatar reference, and frontend captures to unlock live lip-sync, reference-video, multimodal/all-around reference, pose/style/depth/canny controls, and live end-frame/multi-frame image-to-video paths.

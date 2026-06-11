@@ -3075,6 +3075,52 @@ resources=251
 known_status_counts=unknown:114,partial:4,implemented:56,dry_run_only:4,blocked:70,captured_only:2,cataloged_only:1
 ```
 
+## Runtime Config Smoke
+
+No-spend frontend runtime, helpdesk, and ASR support reads:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts runtime-config \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --endpoints all \
+  --dryRun \
+  --outDir data/jimeng-lab/proof-20260611-runtime-config-dryrun
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts runtime-config \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --endpoints all \
+  --outDir data/jimeng-lab/proof-20260611-runtime-config-live
+```
+
+Result:
+
+```txt
+runtime-config dry run saved endpoints=experiment-params,home-header-banner,help-desk-entrance,asr-token,asr-hotwords
+runtime-config saved endpoints=experiment-params,home-header-banner,help-desk-entrance,asr-token,asr-hotwords
+experiment-params: ret=0, params_key_count=0
+home-header-banner: ret=0, item_count=8
+help-desk-entrance: ret=0, url fingerprint only
+asr-token: ret=0, token_present=true, token/appkey/ws_url fingerprints only
+asr-hotwords: ret=0, today_word_count=142
+```
+
+Endpoint-probe evidence under `data/jimeng-lab/proof-20260611-probe-{home-header-banner,help-desk-entrance,experiment-params,asr-token,asr-hotwords}/` proved empty POST bodies before CLI promotion. The normalized live summary scan:
+
+```bash
+rg -n 'https?://|wss://|token"\s*:\s*"|ws_url"\s*:\s*"|appkey"\s*:\s*"|Cookie|sid=|session' \
+  data/jimeng-lab/proof-20260611-runtime-config-live/normalized \
+  data/jimeng-lab/proof-20260611-runtime-config-dryrun/normalized
+```
+
+Result: no matches in normalized output. Raw ignored proof contains provider bodies; normalized output keeps only lengths and SHA-256 fingerprints for token-like values and URLs.
+
+Refreshed inventory after promotion:
+
+```txt
+resources=251
+known_status_counts=unknown:109,partial:4,implemented:61,dry_run_only:4,blocked:70,captured_only:2,cataloged_only:1
+```
+
 ## Workspace Context Smoke
 
 No-spend workspace/project metadata reads:
@@ -3360,16 +3406,17 @@ mise x ast-grep -- ast-grep scan --config sgconfig.yml packages/jimeng-client/sr
 mise x ast-grep -- ast-grep scan --config sgconfig.yml packages/jimeng-client/src/profile-research.ts packages/jimeng-client/src/browser-proxy-cli.ts packages/jimeng-client/src/discovery-worklist.ts packages/jimeng-client/test/profile-research.test.ts
 mise x ast-grep -- ast-grep scan --config sgconfig.yml packages/jimeng-client/src/local-items.ts packages/jimeng-client/src/browser-proxy-cli.ts packages/jimeng-client/src/discovery-worklist.ts packages/jimeng-client/src/index.ts packages/jimeng-client/test/local-items.test.ts
 mise x ast-grep -- ast-grep scan --config sgconfig.yml packages/jimeng-client/src/account-config.ts packages/jimeng-client/src/browser-proxy-cli.ts packages/jimeng-client/src/discovery-worklist.ts packages/jimeng-client/src/index.ts packages/jimeng-client/test/account-config.test.ts
-bun packages/jimeng-client/src/browser-proxy-cli.ts --help | rg 'static-inventory|account-credit|commerce-benefits|account-config|workspace-context|research-keywords|research-search|profile-research|local-items|lip-sync-config|voice-clones|voice-clone-submit|capcut-probe|capcut-template-metadata|capcut-categories|capcut-collections|capcut-collection-templates|capcut-template-detail|capcut-editor-catalog|infinite-canvas|overseas-short-videos|subject-create|subject-update|subject-delete|subject-generate-voice|subjects|templates|short-videos'
+mise x ast-grep -- ast-grep scan --config sgconfig.yml packages/jimeng-client/src/runtime-config.ts packages/jimeng-client/src/browser-proxy-cli.ts packages/jimeng-client/src/discovery-worklist.ts packages/jimeng-client/src/index.ts packages/jimeng-client/test/runtime-config.test.ts
+bun packages/jimeng-client/src/browser-proxy-cli.ts --help | rg 'static-inventory|account-credit|commerce-benefits|account-config|runtime-config|workspace-context|research-keywords|research-search|profile-research|local-items|lip-sync-config|voice-clones|voice-clone-submit|capcut-probe|capcut-template-metadata|capcut-categories|capcut-collections|capcut-collection-templates|capcut-template-detail|capcut-editor-catalog|infinite-canvas|overseas-short-videos|subject-create|subject-update|subject-delete|subject-generate-voice|subjects|templates|short-videos'
 ```
 
 Result:
 
 ```txt
 typecheck passed
-179 tests passed, 0 failed
+182 tests passed, 0 failed
 scoped ast-grep unsafe-type rules passed with zero findings
-browser-proxy help listed static-inventory, account-credit, commerce-benefits, account-config, workspace-context, research-keywords, research-search, profile-research, local-items, CapCut collection/detail/editor-catalog, and infinite-canvas commands
+browser-proxy help listed static-inventory, account-credit, commerce-benefits, account-config, runtime-config, workspace-context, research-keywords, research-search, profile-research, local-items, CapCut collection/detail/editor-catalog, and infinite-canvas commands
 paid smoke normalized files have no live token markers
 ```
 

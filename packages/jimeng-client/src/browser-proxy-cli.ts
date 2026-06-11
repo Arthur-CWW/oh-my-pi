@@ -205,6 +205,12 @@ import {
   summarizeJimengAccountConfig,
 } from "./account-config"
 import {
+  buildJimengRuntimeConfigRequest,
+  fetchJimengRuntimeConfig,
+  parseJimengRuntimeConfigEndpoints,
+  summarizeJimengRuntimeConfig,
+} from "./runtime-config"
+import {
   buildJimengVideoInfoRequest,
   fetchJimengVideoInfo,
   parseJimengVidCsvFlag,
@@ -291,6 +297,7 @@ Commands:
   account-credit Fetch signed no-spend account credit balance
   commerce-benefits Fetch signed no-spend benefit metadata and user benefit rows
   account-config Fetch no-spend current-account settings, registration, and invite flags
+  runtime-config Fetch no-spend frontend runtime, banner, helpdesk, and ASR config reads
   workspace-context Fetch no-spend workspace list and workspace-id context
   research-keywords Fetch no-spend search suggestions and guessed research keywords
   research-search Fetch no-spend inspiration, short-film, or workspace asset search results
@@ -369,6 +376,7 @@ Options:
                                   agent-catalog accepts skills,config,all
                                   infinite-canvas accepts projects,detail,ratios,conversations,all
                                   account-config accepts settings,ug-info,invite-status,all
+                                  runtime-config accepts experiment-params,home-header-banner,help-desk-entrance,asr-token,asr-hotwords,all
                                   research-keywords accepts suggest,guess,all
                                   profile-research accepts profile,homepage,favorites,stories,following,followers,item,items,all
   --channels <ids|all>           Research channels: inspiration,short-film,asset,all
@@ -653,6 +661,11 @@ Examples:
     --endpoints all \\
     --outDir data/jimeng-lab/cli-account-config-smoke
 
+  jimeng-browser-proxy runtime-config \\
+    --session data/jimeng-lab/raw/session-bundle-current.json \\
+    --endpoints all \\
+    --outDir data/jimeng-lab/cli-runtime-config-smoke
+
   jimeng-browser-proxy workspace-context \\
     --session data/jimeng-lab/raw/session-bundle-current.json \\
     --endpoints list,get-by-ids \\
@@ -771,6 +784,7 @@ interface CliArgs {
     | "account-credit"
     | "commerce-benefits"
     | "account-config"
+    | "runtime-config"
     | "workspace-context"
     | "research-keywords"
     | "research-search"
@@ -1663,6 +1677,63 @@ async function main(argv: string[]): Promise<void> {
       summary: summarizeJimengAccountConfig(result),
     })
     console.log(`[jimeng-browser-proxy] account-config saved endpoints=${result.results.map((item) => item.endpointId).join(",")}`)
+    return
+  }
+
+  if (args.command === "runtime-config") {
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const endpoints = parseJimengRuntimeConfigEndpoints(args.endpoints)
+    const runId = `runtime-config-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    if (args.dryRun) {
+      writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
+        command: args.command,
+        endpoint_sequence: endpoints.map((endpoint) => {
+          if (endpoint === "experiment-params") return "/mweb/v1/get_experiment_params"
+          if (endpoint === "home-header-banner") return "/mweb/v1/get_home_header_banner_config"
+          if (endpoint === "help-desk-entrance") return "/mweb/v1/get_help_desk_entrance"
+          if (endpoint === "asr-token") return "/mweb/v1/speech/asr_token"
+          return "/mweb/v1/speech/asr_hotwords"
+        }),
+        method: "POST",
+        requests: endpoints.map((endpoint) => ({
+          endpoint,
+          body: buildJimengRuntimeConfigRequest(endpoint),
+        })),
+        browser_session: redactSession(session),
+        live_request: false,
+      })
+      writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+        command: args.command,
+        endpoints,
+        requests: endpoints.map((endpoint) => ({
+          endpoint,
+          body: buildJimengRuntimeConfigRequest(endpoint),
+        })),
+        dry_run: true,
+      })
+      console.log(`[jimeng-browser-proxy] runtime-config dry run saved endpoints=${endpoints.join(",")}`)
+      return
+    }
+
+    const result = await fetchJimengRuntimeConfig({ session, query: { endpoints } })
+    writeJson(path.join(dirs.rawDir, `${runId}.json`), {
+      endpoints: result.endpoints,
+      results: result.results.map((item) => ({
+        endpoint: item.endpoint,
+        endpoint_id: item.endpointId,
+        http_status: item.httpStatus,
+        ret: item.ret,
+        errmsg: item.errmsg,
+        response_text_sha256: item.responseTextSha256,
+        request: item.request,
+        body: item.body,
+      })),
+    })
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      summary: summarizeJimengRuntimeConfig(result),
+    })
+    console.log(`[jimeng-browser-proxy] runtime-config saved endpoints=${result.results.map((item) => item.endpointId).join(",")}`)
     return
   }
 
@@ -4119,6 +4190,7 @@ function parseArgs(argv: string[]): CliArgs {
     && command !== "account-credit"
     && command !== "commerce-benefits"
     && command !== "account-config"
+    && command !== "runtime-config"
     && command !== "workspace-context"
     && command !== "research-keywords"
     && command !== "research-search"
