@@ -37,11 +37,12 @@ describe("Jimeng endpoint registry", () => {
     expect(registry.get("/mweb/v1/get_weekly_challenge_list")?.status).toBe("cataloged_only")
     expect(registry.get("/mweb/v1/get_weekly_challenge_list")?.note).toContain("Back burner")
     expect(registry.get("/lv/v1/cc_web/replicate/search_templates")?.status).toBe("blocked")
+    expect(registry.get("/mweb/v1/get_history")?.command).toBe("history-list")
     expect(registry.get("/mweb/v1/get_history_by_ids")?.command).toBe("history-records")
   })
 
   test("returns notes for known endpoints and null for unknown endpoints", () => {
-    expect(getJimengDiscoveryKnownEndpointNote("/mweb/v1/get_history")).toContain("Safe frontend-derived probes")
+    expect(getJimengDiscoveryKnownEndpointNote("/mweb/v1/get_history")).toContain("valid empty records_list")
     expect(getJimengDiscoveryKnownEndpointNote("/mweb/v1/not_a_real_endpoint")).toBeNull()
   })
 

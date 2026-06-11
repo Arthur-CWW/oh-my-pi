@@ -232,7 +232,7 @@ export async function fetchJimengHistoryRecords(input: {
 export function parseJimengHistoryRecordsBody(body: JsonValue): JimengHistoryRecordEntry[] {
   const data = parseJimengContract(HistoryRecordsDataMapSchema, parseJimengDataMap(body, "history records"), "history records")
   return Object.entries(data)
-    .map(([lookupKey, value]) => parseHistoryRecord(lookupKey, value as JsonValue))
+    .map(([lookupKey, value]) => parseJimengHistoryRecordEntry(lookupKey, value as JsonValue))
     .filter((entry): entry is JimengHistoryRecordEntry => !!entry)
 }
 
@@ -274,7 +274,7 @@ export function parseJimengIdCsvFlag(value: string | undefined): string[] | unde
   return normalizeOptionalIds(value.split(",").map((item) => item.trim()).filter(Boolean), "HISTORY_RECORD_ID_INVALID")
 }
 
-function parseHistoryRecord(lookupKey: string, value: JsonValue): JimengHistoryRecordEntry | null {
+export function parseJimengHistoryRecordEntry(lookupKey: string, value: JsonValue): JimengHistoryRecordEntry | null {
   const record = asRecord(value)
   if (!record) return null
   const task = asRecord(record.task)

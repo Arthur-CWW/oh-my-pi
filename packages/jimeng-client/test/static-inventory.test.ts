@@ -108,6 +108,7 @@ const STATIC_INVENTORY_ENDPOINTS = [
 ] as const
 
 const INCLUDE_KNOWN_ENDPOINTS = [
+  "/mweb/v1/get_history",
   "/mweb/v1/get_history_by_ids",
   "/lv/v1/cc_web/replicate/search_templates",
   "/lv/v1/cc_web/plane/get_collection_templates",
@@ -134,6 +135,7 @@ const INCLUDE_KNOWN_ENDPOINTS = [
 ] as const
 
 const DEFAULT_HIDDEN_IMPLEMENTED_ENDPOINTS = [
+  "/mweb/v1/get_history",
   "/mweb/v1/get_history_by_ids",
   "/mweb/search/v1/sug",
   "/mweb/search/v1/guess",
@@ -145,7 +147,6 @@ const DEFAULT_HIDDEN_IMPLEMENTED_ENDPOINTS = [
 
 const DEFAULT_STATUS_EXPECTATIONS: Partial<Record<string, JimengDiscoveryKnownStatus>> = {
   "/mweb/search/v1/fetch_debug/search": "blocked",
-  "/mweb/v1/get_history": "blocked",
   "/lv/v1/cc_web/replicate/get_search_words": "blocked",
   "/lv/v1/cc_web/replicate/search_templates": "blocked",
   "/lv/v1/cc_web/plane/batch_get_collection_templates": "blocked",
@@ -225,6 +226,7 @@ const DEFAULT_STATUS_EXPECTATIONS: Partial<Record<string, JimengDiscoveryKnownSt
 
 const INCLUDE_KNOWN_STATUS_EXPECTATIONS: Partial<Record<string, JimengDiscoveryKnownStatus>> = {
   "/lv/v1/cc_web/replicate/search_templates": "blocked",
+  "/mweb/v1/get_history": "implemented",
   "/mweb/search/v1/search": "implemented",
   "/commerce/v3/trade/query_trade": "blocked",
   "/mweb/v1/get_notice_list": "blocked",
@@ -235,6 +237,7 @@ const INCLUDE_KNOWN_STATUS_EXPECTATIONS: Partial<Record<string, JimengDiscoveryK
 }
 
 const INCLUDE_KNOWN_COMMAND_EXPECTATIONS: Partial<Record<string, string>> = {
+  "/mweb/v1/get_history": "history-list",
   "/mweb/v1/get_history_by_ids": "history-records",
   "/lv/v1/effect/get_all_fonts": "capcut-editor-catalog",
   "/mweb/search/v1/sug": "research-keywords",
@@ -263,13 +266,12 @@ describe("Jimeng static inventory", () => {
       const markdown = writeJimengStaticInventoryMarkdown(result)
 
       expect(result.totalResourceCount).toBe(91)
-      expect(result.skippedImplementedCount).toBe(11)
+      expect(result.skippedImplementedCount).toBe(12)
       for (const endpoint of DEFAULT_HIDDEN_IMPLEMENTED_ENDPOINTS) {
         expect(result.items.map((item) => item.resource)).not.toContain(endpoint)
       }
       expectStatuses(result, DEFAULT_STATUS_EXPECTATIONS)
       expectAction(result, "/mweb/v1/dreamina_subject/generate_voice", "approval_or_disposable_fixture")
-      expectAction(result, "/mweb/v1/get_history", "capture_exact_payload")
       expectAction(result, "/lv/v1/cc_web/replicate/search_templates", "capture_exact_payload")
       expectAction(result, "/lv/v1/cc_web/plane/batch_get_collection_templates", "capture_exact_payload")
       expectAction(result, "/mweb/v1/template/search", "probe_read_endpoint")

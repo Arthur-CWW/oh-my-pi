@@ -491,6 +491,15 @@ Workspace/workbench asset listing is now live-proved without generation spend:
 - proof bundle: `data/jimeng-lab/proof-20260610-assets/`
 - latest proof returned `asset_count=1`, `has_more=false`, `next_offset=1780998990927`, first `asset_id=39148697060354`, `submit_id=a6bbee65-bed0-4e5b-aaf1-5ab466137b82`, `status=50`, `generated_item_count=4`, `model_req_key=high_aes_general_v50`, response hash `5373ac3f6339e82f7f3090059b742d83b17b9b438151476993466ae6d105f312`, and normalized summary hash `10ba3a679c2e7e472c20fb186dedbd5289687c2a5b0aba7e88a0509bf17a4af8`
 
+History list lookup is now implemented without generation spend:
+
+- `jimeng-browser-proxy history-list`
+- direct `/mweb/v1/get_history` with logged-in browser session headers
+- request shape: `offset`, `count`, `direction`, optional `workspace_id`, optional `filter_type_list`, optional `image_resolution_strategy`, optional `order_by`, and optional `hide_story_agent_result`
+- response contract is decoded through Effect Schema; empty `records_list` is valid, while missing `records_list` is treated as provider contract drift
+- useful flags: `--limit`, `--offset`, `--direction`, `--workspaceId`, `--filter-types`, `--order-by`, `--hideStoryAgentResult`
+- known live probes returned `ret=0` with empty `records_list`; use `assets`, `history-records`, and `history-queue` for richer known-populated lookups until a non-empty UI capture proves broader pagination scope
+
 History queue/status lookup is now live-proved without generation spend:
 
 - `jimeng-browser-proxy history-queue`
@@ -637,7 +646,7 @@ Static API inventory is now available as the systematic coverage map:
   - `/lv/v1/intelligence/preset_resource_list`: signed probes with empty/image-editor/query bodies returned `ret=-1 system busy`; needs exact UI payload
   - `/lv/v2/task/multi_get_tasks`: signed feed-api probes with empty/empty-list/zero task ids returned `ret=1015 check login error`
 - proof bundles: `data/jimeng-lab/proof-20260610-static-locate-lv-read-state/`, `data/jimeng-lab/proof-20260610-lv-editor-effect-recent-probe/`, `data/jimeng-lab/proof-20260610-lv-v2-editor-effect-recent-probe/`, `data/jimeng-lab/proof-20260610-lv-plane-common-recent-probe/`, `data/jimeng-lab/proof-20260610-lv-plane-draft-content-map-probe/`, `data/jimeng-lab/proof-20260610-lv-plane-draft-detail-probe/`, `data/jimeng-lab/proof-20260610-lv-ever-photo-sync-state-probe/`, `data/jimeng-lab/proof-20260610-lv-ever-photo-user-space-probe/`, `data/jimeng-lab/proof-20260610-lv-preset-resource-list-probe/`, `data/jimeng-lab/proof-20260610-lv-multi-get-tasks-probe/`, and refreshed `data/jimeng-lab/proof-20260610-static-inventory/`
-- `/mweb/v1/get_history` is now marked `blocked` in the worklist/inventory: safe direct probes with plain, frontend-derived, and explicit `workspace_id=14199856180236` bodies all returned `ret=0` and empty `records_list`; use `assets`, `history-records`, and `history-queue` until a non-empty UI capture proves a useful list contract
+- `/mweb/v1/get_history` is now covered by `jimeng-browser-proxy history-list`; safe direct probes with plain, frontend-derived, and explicit `workspace_id=14199856180236` bodies returned `ret=0` with empty `records_list`, which is valid but not yet a rich proof of pagination scope.
 - normalized proof files contain no credential markers
 
 Signed CapCut endpoint replay is now available for no-spend template payload discovery:

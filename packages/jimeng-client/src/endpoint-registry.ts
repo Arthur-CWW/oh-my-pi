@@ -409,7 +409,7 @@ const KNOWN_ENDPOINTS: JimengDiscoveryKnownEndpoint[] = [
   known("/mweb/v1/aigc_draft/generate", "partial", "text2image-plan/text2image-compare/text2video-plan/text2video-compare/text2video/image2video/frames2video/lip-sync", "Unified generation submit; direct image/video request builders and direct capture compares are dry-run covered; live lip-sync/end-frame still require capture compare or approval-gated submit."),
   known("/mweb/v1/execute_generate_audit", "blocked", null, "Generation pre-audit posts image/video/audio/subject material lists; capture exact material payload before replay."),
   known("/mweb/v1/get_asset_list", "implemented", "assets", "No-spend workspace asset/history listing."),
-  known("/mweb/v1/get_history", "blocked", null, "Safe frontend-derived probes returned ret=0 with empty records_list, including explicit workspace scope; use assets/history-records until a non-empty UI capture is available."),
+  known("/mweb/v1/get_history", "implemented", "history-list", "No-spend paginated history list; prior live probes returned a valid empty records_list, so use assets/history-records for richer known-populated lookups."),
   known("/mweb/v1/get_history_by_ids", "implemented", "history-records", "No-spend history lookup by submit/history id."),
   known("/mweb/v1/get_history_queue_info", "implemented", "history-queue", "No-spend queue/progress lookup."),
   known("/mweb/v1/get_video_by_vid", "implemented", "video-info", "No-spend VOD metadata lookup."),

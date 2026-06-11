@@ -154,6 +154,12 @@ import {
   summarizeJimengHistoryQueueInfo,
 } from "./history-queue"
 import {
+  buildJimengHistoryListRequest,
+  fetchJimengHistoryList,
+  parseJimengHistoryFilterTypeListFlag,
+  summarizeJimengHistoryList,
+} from "./history-list"
+import {
   buildJimengHistoryRecordsRequest,
   fetchJimengHistoryRecords,
   parseJimengIdCsvFlag,
@@ -374,6 +380,7 @@ Commands:
   endpoint-probe Probe/replay one endpoint with JSON body variants and shape summaries
   rate-probe    Measure bounded no-spend endpoint concurrency/rate behavior
   assets        Fetch workspace/workbench asset history without generation spend
+  history-list  Fetch read-only paginated generation history list
   history-queue Fetch read-only queue/progress details for one or more history ids
   history-records Fetch read-only completed/history records by submit id or history id
   video-info    Fetch read-only VOD video metadata by vid
@@ -487,6 +494,7 @@ Options:
   --historyIds <csv>            History ids for history-queue/history-records
   --vids <csv>                  VOD vids for video-info
   --direction <n>               Assets list direction (default: 1)
+  --filter-types <csv>           History-list filter_type_list values
   --order-by <n>                Assets list order_by option (default: 0)
   --endTimeStamp <n>            Assets pagination timestamp/cursor (default: 0)
   --includeStoryAgentResult     Do not hide story-agent results in assets query
@@ -648,6 +656,12 @@ Examples:
     --session data/jimeng-lab/raw/session-bundle-current.json \\
     --itemIds 7649332406457060634 \\
     --outDir data/jimeng-lab/cli-local-items-smoke
+
+  jimeng-browser-proxy history-list \\
+    --session data/jimeng-lab/raw/session-bundle-current.json \\
+    --limit 10 \\
+    --filter-types 1,10 \\
+    --outDir data/jimeng-lab/cli-history-list-smoke
 
   jimeng-browser-proxy history-queue \\
     --session data/jimeng-lab/raw/session-bundle-current.json \\
@@ -892,6 +906,7 @@ interface CliArgs {
     | "tts"
     | "sample-voices"
     | "assets"
+    | "history-list"
     | "history-queue"
     | "history-records"
     | "video-info"
@@ -982,6 +997,7 @@ interface CliArgs {
   limit?: number
   offset?: number
   assetTypes?: number[]
+  filterTypes?: number[]
   assetMode?: string
   submitId?: string
   submitIds?: string[]
@@ -3784,6 +3800,83 @@ async function main(argv: string[]): Promise<void> {
     return
   }
 
+  if (args.command === "history-list") {
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const query = {
+      offset: args.offset,
+      limit: args.limit,
+      direction: args.direction,
+      workspaceId: args.workspaceId ?? workspaceIdFromJimengSession(session),
+      filterTypeList: args.filterTypes,
+      orderBy: args.orderBy,
+      hideStoryAgentResult: args.hideStoryAgentResult,
+      imageResolutionStrategy: args.filterTypes && args.filterTypes.length > 0 ? {
+        enableCommon: true,
+        enableSmartCrop: true,
+      } : undefined,
+    }
+    const request = buildJimengHistoryListRequest(query)
+    const runId = `history-list-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
+    if (args.dryRun) {
+      writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
+        command: args.command,
+        endpoint: "/mweb/v1/get_history",
+        request,
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
+        browser_session: redactSession(session),
+      })
+      writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+        command: args.command,
+        endpoint: "/mweb/v1/get_history",
+        request,
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
+      })
+      console.log(`[jimeng-browser-proxy] history-list dry run saved`)
+      return
+    }
+
+    const transport = createJimengHttpTransport({
+      mode: args.transportMode,
+      cassettePath,
+    })
+    const result = await fetchJimengHistoryList({ session, query, fetch: transport.fetch })
+    writeJson(path.join(dirs.rawDir, `${runId}.json`), {
+      http_status: result.httpStatus,
+      ret: result.ret,
+      errmsg: result.errmsg,
+      response_text_sha256: result.responseTextSha256,
+      request: result.request,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
+      body: result.body,
+    })
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      endpoint: result.endpoint,
+      http_status: result.httpStatus,
+      ret: result.ret,
+      errmsg: result.errmsg,
+      response_text_sha256: result.responseTextSha256,
+      request: result.request,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
+      summary: summarizeJimengHistoryList(result),
+    })
+    console.log(`[jimeng-browser-proxy] history-list saved count=${result.records.length} nextOffset=${result.nextOffset ?? "none"} hasMore=${result.hasMore ?? "unknown"}`)
+    return
+  }
+
   if (args.command === "history-queue") {
     const historyIds = args.historyIds ?? (args.historyId ? [args.historyId] : [])
     if (historyIds.length === 0) throw new Error("history-queue requires --historyId or --historyIds")
@@ -5603,6 +5696,7 @@ function parseArgs(argv: string[]): CliArgs {
     && command !== "tts"
     && command !== "sample-voices"
     && command !== "assets"
+    && command !== "history-list"
     && command !== "history-queue"
     && command !== "history-records"
     && command !== "video-info"
@@ -5668,6 +5762,7 @@ function parseArgs(argv: string[]): CliArgs {
   const cursor = flags.cursor ? Number(flags.cursor) : undefined
   const categoryId = flags["category-id"] ? Number(flags["category-id"]) : undefined
   const assetTypes = parseJimengAssetTypes(flags["asset-types"])
+  const filterTypes = parseJimengHistoryFilterTypeListFlag(flags["filter-types"])
   const submitIds = parseJimengIdCsvFlag(flags.submitIds)
   const historyIds = parseJimengHistoryIdsFlag(flags.historyIds)
   const vids = parseJimengVidCsvFlag(flags.vids)
@@ -5843,6 +5938,7 @@ function parseArgs(argv: string[]): CliArgs {
     limit,
     offset,
     assetTypes,
+    filterTypes,
     assetMode: flags["asset-mode"],
     submitId: flags.submitId,
     submitIds,

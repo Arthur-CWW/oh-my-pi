@@ -109,7 +109,7 @@ describe("Jimeng discovery worklist", () => {
         nowIso: "2026-06-10T00:00:00.000Z",
       })
 
-      expect(worklist.skipped_known_count).toBe(1)
+      expect(worklist.skipped_known_count).toBe(2)
       expect(worklist.items.some((item) => item.endpoint === "/mweb/v1/get_history_by_ids")).toBe(false)
       expect(worklist.items.some((item) => item.endpoint === "/mweb/search/v1/sug")).toBe(false)
       expect(worklist.items.some((item) => item.endpoint === "/mweb/search/v1/guess")).toBe(false)
@@ -134,10 +134,7 @@ describe("Jimeng discovery worklist", () => {
       expect(readGap?.recommended_action).toBe("probe_then_promote_cli")
       expect(readGap?.has_probe_variants).toBe(true)
       expect(readGap?.probe_variant_count).toBe(1)
-      const blockedGap = worklist.items.find((item) => item.endpoint === "/mweb/v1/get_history")
-      expect(blockedGap?.known_status).toBe("blocked")
-      expect(blockedGap?.recommended_action).toBe("static_capture_needed")
-      expect(blockedGap?.blocked_reason).toContain("Previous safe probes")
+      expect(worklist.items.find((item) => item.endpoint === "/mweb/v1/get_history")).toBeUndefined()
       const capcutSearch = worklist.items.find((item) => item.endpoint === "/lv/v1/cc_web/replicate/search_templates")
       expect(capcutSearch?.known_status).toBe("blocked")
       expect(capcutSearch?.recommended_action).toBe("static_capture_needed")
@@ -299,6 +296,9 @@ describe("Jimeng discovery worklist", () => {
     const covered = worklist.items.find((item) => item.endpoint === "/mweb/v1/get_history_by_ids")
     expect(covered?.recommended_action).toBe("already_covered")
     expect(covered?.known_command).toBe("history-records")
+    const coveredHistoryList = worklist.items.find((item) => item.endpoint === "/mweb/v1/get_history")
+    expect(coveredHistoryList?.recommended_action).toBe("already_covered")
+    expect(coveredHistoryList?.known_command).toBe("history-list")
   })
 
   test("validates saved analysis/probe files and renders normalized summaries without probe bodies", () => {
@@ -353,6 +353,13 @@ function analysisFixture() {
       }),
       candidateFixture({
         rank: 3,
+        endpoint: "/mweb/v1/get_history",
+        riskClass: "read",
+        replaySafe: true,
+        requestShape: { kind: "object", keys: ["offset", "count", "direction"] },
+      }),
+      candidateFixture({
+        rank: 4,
         endpoint: "/mweb/v1/get_history_by_ids",
         riskClass: "read",
         replaySafe: true,
