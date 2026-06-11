@@ -8,6 +8,16 @@ import {
 
 interface KeepFamilyGapSnapshot {
   readonly statusCounts: Record<string, number>
+  readonly valueRankedGaps: ReadonlyArray<{
+    readonly valueRank: number
+    readonly workflow: string
+    readonly implementationRank: number
+    readonly familyId: string
+    readonly endpoint: string
+    readonly status: string
+    readonly command: string | null
+    readonly nextProbe: string | null
+  }>
   readonly families: ReadonlyArray<{
     readonly id: string
     readonly title: string
@@ -29,6 +39,16 @@ function buildKeepFamilyGapSnapshot(): KeepFamilyGapSnapshot {
 
   return {
     statusCounts: coverage.statusCounts,
+    valueRankedGaps: coverage.valueRankedGaps.map((gap) => ({
+      valueRank: gap.valueRank,
+      workflow: gap.workflow,
+      implementationRank: gap.implementationRank,
+      familyId: gap.familyId,
+      endpoint: gap.endpoint,
+      status: gap.status,
+      command: gap.command,
+      nextProbe: gap.nextProbe,
+    })),
     families: coverage.families.map((family) => ({
       id: family.id,
       title: family.title,

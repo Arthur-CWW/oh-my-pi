@@ -64,6 +64,20 @@ export interface JimengDiscoveryEndpointAudit {
   nextProbe: string
 }
 
+export interface JimengDiscoveryValueRankedGap {
+  valueRank: number
+  workflow: string
+  implementationRank: number
+  familyId: JimengDiscoveryTriageFamilyId
+  familyTitle: string
+  endpoint: string
+  status: JimengDiscoveryTriageStatusKey
+  command: string | null
+  note: string
+  evidence: string[]
+  nextProbe: string | null
+}
+
 export interface JimengDiscoveryTriageCoverage {
   decisions: JimengDiscoveryTriageDecision[]
   familyCount: number
@@ -71,6 +85,7 @@ export interface JimengDiscoveryTriageCoverage {
   missingEndpointCount: number
   statusCounts: Record<JimengDiscoveryTriageStatusKey, number>
   families: JimengDiscoveryTriageFamilyCoverage[]
+  valueRankedGaps: JimengDiscoveryValueRankedGap[]
 }
 
 export function getJimengDiscoveryKnownEndpoints(): JimengDiscoveryKnownEndpoint[] {
@@ -153,6 +168,7 @@ export function summarizeJimengDiscoveryTriageCoverage(input: {
     missingEndpointCount: statusCounts.missing,
     statusCounts,
     families,
+    valueRankedGaps: buildJimengDiscoveryValueRankedGaps(families, knownByEndpoint),
   }
 }
 
@@ -171,6 +187,17 @@ export function writeJimengDiscoveryTriageCoverageMarkdown(coverage: JimengDisco
 
   for (const family of coverage.families) {
     lines.push(`| ${family.id} | ${family.decision} | ${family.title} | ${family.endpointCount} | ${formatTriageStatusCounts(family.statusCounts)} | ${family.notImplementedEndpoints.length} |`)
+  }
+
+  if (coverage.valueRankedGaps.length > 0) {
+    lines.push("", "## Value-Ranked Remaining Work", "")
+    for (const gap of coverage.valueRankedGaps) {
+      const command = gap.command ? ` command=${gap.command}` : ""
+      lines.push(`${gap.valueRank}. ${gap.workflow} - \`${gap.familyId} ${gap.endpoint}\` - ${gap.status}${command} - ${gap.note}`)
+      if (gap.nextProbe) {
+        lines.push(`   - Next probe: ${gap.nextProbe}`)
+      }
+    }
   }
 
   const knownByEndpoint = buildJimengDiscoveryKnownEndpointMap()
@@ -197,6 +224,83 @@ export function writeJimengDiscoveryTriageCoverageMarkdown(coverage: JimengDisco
   }
 
   return `${lines.join("\n")}\n`
+}
+
+function buildJimengDiscoveryValueRankedGaps(
+  families: JimengDiscoveryTriageFamilyCoverage[],
+  knownByEndpoint: Map<string, JimengDiscoveryKnownEndpoint>,
+): JimengDiscoveryValueRankedGap[] {
+  const familyById = new Map(TRIAGE_FAMILIES.map((family) => [family.id, family]))
+  const gaps: JimengDiscoveryValueRankedGap[] = []
+
+  for (const family of families) {
+    for (const endpoint of family.notImplementedEndpoints) {
+      const row = knownByEndpoint.get(endpoint)
+      const status = row?.status ?? "missing"
+      const priority = jimengWorkflowPriority(endpoint, family.id)
+      gaps.push({
+        valueRank: priority.rank,
+        workflow: priority.workflow,
+        implementationRank: jimengImplementationRank(status),
+        familyId: family.id,
+        familyTitle: familyById.get(family.id)?.title ?? family.title,
+        endpoint,
+        status,
+        command: row?.command ?? null,
+        note: row?.note ?? "missing registry row",
+        evidence: row ? [...row.evidence] : [],
+        nextProbe: row?.nextProbe ?? null,
+      })
+    }
+  }
+
+  return gaps.sort((left, right) =>
+    left.valueRank - right.valueRank
+    || left.implementationRank - right.implementationRank
+    || left.familyId.localeCompare(right.familyId)
+    || left.endpoint.localeCompare(right.endpoint),
+  )
+}
+
+function jimengWorkflowPriority(endpoint: string, familyId: JimengDiscoveryTriageFamilyId): { rank: number; workflow: string } {
+  if (endpoint === "/mweb/v1/mget_story") {
+    return { rank: 6, workflow: "Supporting metadata reads" }
+  }
+  if (familyId === "G1" || familyId === "G2" || familyId === "A1") {
+    return { rank: 1, workflow: "Generation parity and artifact proof" }
+  }
+  if (familyId === "P1" || familyId === "V1") {
+    return { rank: 2, workflow: "Persona and voice" }
+  }
+  if (familyId === "L1") {
+    return { rank: 3, workflow: "Lip-sync / digital human" }
+  }
+  if (familyId === "R2") {
+    return { rank: 4, workflow: "Reference controls" }
+  }
+  if (familyId === "T1" || familyId === "R1") {
+    return { rank: 5, workflow: "Template and niche mining" }
+  }
+  return { rank: 6, workflow: "Supporting metadata reads" }
+}
+
+function jimengImplementationRank(status: JimengDiscoveryTriageStatusKey): number {
+  switch (status) {
+    case "partial":
+      return 1
+    case "dry_run_only":
+      return 2
+    case "captured_only":
+      return 3
+    case "blocked":
+      return 4
+    case "cataloged_only":
+      return 5
+    case "missing":
+      return 6
+    case "implemented":
+      return 99
+  }
 }
 
 const TRIAGE_STATUS_KEYS: JimengDiscoveryTriageStatusKey[] = [

@@ -69,8 +69,26 @@ describe("Jimeng endpoint registry", () => {
     expect(coverage.statusCounts.blocked).toBeGreaterThan(10)
     expect(coverage.families.find((family) => family.id === "T1")?.statusCounts.blocked).toBe(6)
     expect(coverage.families.find((family) => family.id === "L1")?.notImplementedEndpoints).toContain("/mweb/v1/video_generate/pre_process")
+    expect(coverage.valueRankedGaps[0]).toMatchObject({
+      valueRank: 1,
+      workflow: "Generation parity and artifact proof",
+      familyId: "G1",
+      endpoint: "/mweb/v1/aigc_draft/generate",
+      status: "partial",
+    })
+    expect(coverage.valueRankedGaps.find((gap) => gap.endpoint === "/mweb/v1/mget_story")).toMatchObject({
+      valueRank: 6,
+      workflow: "Supporting metadata reads",
+    })
+    expect(
+      coverage.valueRankedGaps.findIndex((gap) => gap.endpoint === "/mweb/v1/dreamina_subject/generate_voice"),
+    ).toBeLessThan(
+      coverage.valueRankedGaps.findIndex((gap) => gap.endpoint === "/mweb/v1/mget_story"),
+    )
 
     expect(markdown).toContain("| T1 | keep | CapCut/template mining | 16 | implemented=10, blocked=6 | 6 |")
+    expect(markdown).toContain("## Value-Ranked Remaining Work")
+    expect(markdown).toContain("1. Generation parity and artifact proof - `G1 /mweb/v1/aigc_draft/generate`")
     expect(markdown).toContain("## Not Implemented Endpoints")
     expect(markdown).toContain("- `/mweb/v1/aigc_draft/generate` - partial command=text2image-plan/text2image-compare/text2video-plan/text2video-compare/text2video/image2video/frames2video/lip-sync")
     expect(markdown).toContain("Evidence:")
