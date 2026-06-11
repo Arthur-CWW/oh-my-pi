@@ -199,6 +199,12 @@ import {
   summarizeJimengLocalItems,
 } from "./local-items"
 import {
+  buildJimengAccountConfigRequest,
+  fetchJimengAccountConfig,
+  parseJimengAccountConfigEndpoints,
+  summarizeJimengAccountConfig,
+} from "./account-config"
+import {
   buildJimengVideoInfoRequest,
   fetchJimengVideoInfo,
   parseJimengVidCsvFlag,
@@ -284,6 +290,7 @@ Commands:
   text2image-plan Build a no-spend direct text-to-image submit body
   account-credit Fetch signed no-spend account credit balance
   commerce-benefits Fetch signed no-spend benefit metadata and user benefit rows
+  account-config Fetch no-spend current-account settings, registration, and invite flags
   workspace-context Fetch no-spend workspace list and workspace-id context
   research-keywords Fetch no-spend search suggestions and guessed research keywords
   research-search Fetch no-spend inspiration, short-film, or workspace asset search results
@@ -361,6 +368,7 @@ Options:
   --endpoints <ids|all>          Catalog endpoints, comma-separated (default: all)
                                   agent-catalog accepts skills,config,all
                                   infinite-canvas accepts projects,detail,ratios,conversations,all
+                                  account-config accepts settings,ug-info,invite-status,all
                                   research-keywords accepts suggest,guess,all
                                   profile-research accepts profile,homepage,favorites,stories,following,followers,item,items,all
   --channels <ids|all>           Research channels: inspiration,short-film,asset,all
@@ -640,6 +648,11 @@ Examples:
     --endpoints metadata,user-benefits \\
     --outDir data/jimeng-lab/cli-commerce-benefits-smoke
 
+  jimeng-browser-proxy account-config \\
+    --session data/jimeng-lab/raw/session-bundle-current.json \\
+    --endpoints all \\
+    --outDir data/jimeng-lab/cli-account-config-smoke
+
   jimeng-browser-proxy workspace-context \\
     --session data/jimeng-lab/raw/session-bundle-current.json \\
     --endpoints list,get-by-ids \\
@@ -757,6 +770,7 @@ interface CliArgs {
     | "text2image-plan"
     | "account-credit"
     | "commerce-benefits"
+    | "account-config"
     | "workspace-context"
     | "research-keywords"
     | "research-search"
@@ -1594,6 +1608,61 @@ async function main(argv: string[]): Promise<void> {
       summary,
     })
     console.log(`[jimeng-browser-proxy] commerce-benefits saved metadata=${result.metadata?.metadataCount ?? "skip"} user_assets=${result.userBenefits?.assetCount ?? "skip"}`)
+    return
+  }
+
+  if (args.command === "account-config") {
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const endpoints = parseJimengAccountConfigEndpoints(args.endpoints)
+    const runId = `account-config-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    if (args.dryRun) {
+      writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
+        command: args.command,
+        endpoint_sequence: endpoints.map((endpoint) => {
+          if (endpoint === "settings") return "/mweb/v1/get_settings"
+          if (endpoint === "ug-info") return "/mweb/v1/get_ug_info"
+          return "/mweb/v1/get_invite_status"
+        }),
+        method: "POST",
+        requests: endpoints.map((endpoint) => ({
+          endpoint,
+          body: buildJimengAccountConfigRequest(endpoint),
+        })),
+        browser_session: redactSession(session),
+        live_request: false,
+      })
+      writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+        command: args.command,
+        endpoints,
+        requests: endpoints.map((endpoint) => ({
+          endpoint,
+          body: buildJimengAccountConfigRequest(endpoint),
+        })),
+        dry_run: true,
+      })
+      console.log(`[jimeng-browser-proxy] account-config dry run saved endpoints=${endpoints.join(",")}`)
+      return
+    }
+
+    const result = await fetchJimengAccountConfig({ session, query: { endpoints } })
+    writeJson(path.join(dirs.rawDir, `${runId}.json`), {
+      endpoints: result.endpoints,
+      results: result.results.map((item) => ({
+        endpoint: item.endpoint,
+        endpoint_id: item.endpointId,
+        http_status: item.httpStatus,
+        ret: item.ret,
+        errmsg: item.errmsg,
+        response_text_sha256: item.responseTextSha256,
+        request: item.request,
+        body: item.body,
+      })),
+    })
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      summary: summarizeJimengAccountConfig(result),
+    })
+    console.log(`[jimeng-browser-proxy] account-config saved endpoints=${result.results.map((item) => item.endpointId).join(",")}`)
     return
   }
 
@@ -4049,6 +4118,7 @@ function parseArgs(argv: string[]): CliArgs {
     && command !== "text2image-plan"
     && command !== "account-credit"
     && command !== "commerce-benefits"
+    && command !== "account-config"
     && command !== "workspace-context"
     && command !== "research-keywords"
     && command !== "research-search"
