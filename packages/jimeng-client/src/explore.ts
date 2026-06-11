@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto"
 import { type JimengSessionBundle } from "./capture"
-import { assertNoRiskError, JimengClient } from "./client"
+import { assertNoRiskError, JimengClient, type JimengFetch } from "./client"
 import { jimengError } from "./errors"
 
 const DEFAULT_QUERY = "aid=513695&web_version=7.5.0&da_version=3.3.17&aigc_features=app_lip_sync"
@@ -95,10 +95,11 @@ export interface JimengOverseasShortVideosResult {
 
 export async function fetchExploreTemplates(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   session: JimengSessionBundle
   query?: JimengExploreQuery
 }): Promise<JimengExploreTemplatesResult> {
-  const client = input.client ?? new JimengClient()
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
   const request = buildExploreRequestBody(input.query)
   const response = await client.requestText(`https://jimeng.jianying.com/mweb/v1/get_explore?${DEFAULT_QUERY}`, {
     method: "POST",
@@ -124,10 +125,11 @@ export async function fetchExploreTemplates(input: {
 
 export async function fetchOverseasShortVideos(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   session: JimengSessionBundle
   query?: JimengOverseasShortVideoQuery
 }): Promise<JimengOverseasShortVideosResult> {
-  const client = input.client ?? new JimengClient()
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
   const query = buildShortVideoExploreQuery(input.query)
   const request = buildExploreRequestBody(query)
   const response = await client.requestText(`https://jimeng.jianying.com/mweb/v1/feed_short_video?${DEFAULT_QUERY}`, {

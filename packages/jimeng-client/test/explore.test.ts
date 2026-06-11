@@ -1,7 +1,11 @@
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import path from "node:path"
 import { describe, expect, test } from "bun:test"
 import {
   buildExploreRequestBody,
   buildShortVideoExploreQuery,
+  createJimengHttpTransport,
   fetchExploreTemplates,
   fetchOverseasShortVideos,
   JimengClient,
@@ -9,6 +13,7 @@ import {
   parseOverseasShortVideosBody,
   parseExploreTemplatesBody,
   parseExploreWorkTypes,
+  readJimengHttpCassette,
   redactExploreTemplateItems,
   summarizeExploreShortVideos,
   summarizeExploreTemplates,
@@ -137,6 +142,79 @@ describe("Jimeng Explore templates", () => {
     })
     expect(result.endpoint).toBe("/mweb/v1/feed_short_video")
     expect(result.items[0]?.videoId).toBe("v03870g10004cu4siofog65s06ml296g")
+  })
+
+  test("can fetch Explore templates through recorded and replayed HTTP transport cassettes", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "jimeng-explore-cassette-"))
+    try {
+      const cassettePath = path.join(dir, "explore.json")
+      const requests: Array<{ url: string; init?: RequestInit }> = []
+      const recordTransport = createJimengHttpTransport({
+        mode: "record",
+        cassettePath,
+        fetch: mockFetchSequence([
+          JSON.stringify(exploreBody()),
+          JSON.stringify(shortVideoBody()),
+          JSON.stringify(overseasShortVideoBody()),
+        ], requests),
+        nowIso: () => "2026-06-11T00:00:00.000Z",
+      })
+
+      const templates = await fetchExploreTemplates({
+        fetch: recordTransport.fetch,
+        session,
+        query: { count: 5, workTypes: ["image"] },
+      })
+      const shortVideos = await fetchExploreTemplates({
+        fetch: recordTransport.fetch,
+        session,
+        query: buildShortVideoExploreQuery({ count: 5 }),
+      })
+      const overseas = await fetchOverseasShortVideos({
+        fetch: recordTransport.fetch,
+        session,
+        query: { count: 5, categoryId: 11222 },
+      })
+
+      expect(templates.items[0]?.prompt).toContain("韩系美妆达人")
+      expect(shortVideos.items[0]?.videoId).toBe("v03870g10004cu4siofog65s06ml296g")
+      expect(overseas.items[0]?.videoId).toBe("v-overseas-1")
+      expect(readJimengHttpCassette(cassettePath).entries).toHaveLength(3)
+      expect(requests).toHaveLength(3)
+
+      const replayTransport = createJimengHttpTransport({
+        mode: "replay",
+        cassettePath,
+      })
+      const replayedTemplates = await fetchExploreTemplates({
+        fetch: replayTransport.fetch,
+        session,
+        query: { count: 5, workTypes: ["image"] },
+      })
+      const replayedShortVideos = await fetchExploreTemplates({
+        fetch: replayTransport.fetch,
+        session,
+        query: buildShortVideoExploreQuery({ count: 5 }),
+      })
+      const replayedOverseas = await fetchOverseasShortVideos({
+        fetch: replayTransport.fetch,
+        session,
+        query: { count: 5, categoryId: 11222 },
+      })
+      const summaries = [
+        summarizeExploreTemplates(replayedTemplates),
+        summarizeExploreShortVideos(replayedShortVideos),
+        summarizeExploreShortVideos(replayedOverseas),
+      ]
+
+      expect(summaries[0]).toMatchObject({ total: 1 })
+      expect(summaries[1]).toMatchObject({ total: 1 })
+      expect(summaries[2]).toMatchObject({ total: 1 })
+      expect(JSON.stringify(redactExploreTemplateItems(replayedShortVideos.items))).not.toContain("signed-video-url")
+      expect(JSON.stringify(redactExploreTemplateItems(replayedOverseas.items))).not.toContain("signed-overseas")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   test("normalizes short-video metadata without signed video URLs", () => {
@@ -411,6 +489,17 @@ function overseasShortVideoBody(): Record<string, unknown> {
 function mockFetch(text: string, requests: Array<{ url: string; init?: RequestInit }>): JimengFetch {
   return async (url, init) => {
     requests.push({ url, init })
+    return new Response(text, { status: 200 })
+  }
+}
+
+function mockFetchSequence(texts: string[], requests: Array<{ url: string; init?: RequestInit }>): JimengFetch {
+  let index = 0
+  return async (url, init) => {
+    requests.push({ url, init })
+    const text = texts[index]
+    index += 1
+    if (text === undefined) throw new Error(`unexpected request ${url}`)
     return new Response(text, { status: 200 })
   }
 }

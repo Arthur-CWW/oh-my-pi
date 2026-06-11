@@ -3546,19 +3546,32 @@ async function main(argv: string[]): Promise<void> {
     }
     const request = buildExploreRequestBody(query)
     const runId = `templates-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
     if (args.dryRun) {
       writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
         command: args.command,
         endpoint: "/mweb/v1/get_explore",
         request,
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
         browser_session: redactSession(session),
       })
       console.log(`[jimeng-browser-proxy] templates dry run saved`)
       return
     }
 
-    const result = await fetchExploreTemplates({ session, query })
+    const transport = createJimengHttpTransport({
+      mode: args.transportMode,
+      cassettePath,
+    })
+    const result = await fetchExploreTemplates({ fetch: transport.fetch, session, query })
     writeJson(path.join(dirs.rawDir, `${runId}.json`), {
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       http_status: result.httpStatus,
       ret: result.ret,
       errmsg: result.errmsg,
@@ -3574,6 +3587,10 @@ async function main(argv: string[]): Promise<void> {
       errmsg: result.errmsg,
       response_text_sha256: result.responseTextSha256,
       request: result.request,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       summary: summarizeExploreTemplates(result),
       items: redactExploreTemplateItems(result.items),
     })
@@ -3591,19 +3608,32 @@ async function main(argv: string[]): Promise<void> {
     })
     const request = buildExploreRequestBody(query)
     const runId = `short-videos-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
     if (args.dryRun) {
       writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
         command: args.command,
         endpoint: "/mweb/v1/get_explore",
         request,
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
         browser_session: redactSession(session),
       })
       console.log(`[jimeng-browser-proxy] short-videos dry run saved`)
       return
     }
 
-    const result = await fetchExploreTemplates({ session, query })
+    const transport = createJimengHttpTransport({
+      mode: args.transportMode,
+      cassettePath,
+    })
+    const result = await fetchExploreTemplates({ fetch: transport.fetch, session, query })
     writeJson(path.join(dirs.rawDir, `${runId}.json`), {
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       http_status: result.httpStatus,
       ret: result.ret,
       errmsg: result.errmsg,
@@ -3619,6 +3649,10 @@ async function main(argv: string[]): Promise<void> {
       errmsg: result.errmsg,
       response_text_sha256: result.responseTextSha256,
       request: result.request,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       summary: summarizeExploreShortVideos(result),
       items: redactExploreTemplateItems(result.items),
     })
@@ -3636,19 +3670,32 @@ async function main(argv: string[]): Promise<void> {
     })
     const request = buildExploreRequestBody(query)
     const runId = `overseas-short-videos-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
     if (args.dryRun) {
       writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
         command: args.command,
         endpoint: "/mweb/v1/feed_short_video",
         request,
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
         browser_session: redactSession(session),
       })
       console.log(`[jimeng-browser-proxy] overseas-short-videos dry run saved`)
       return
     }
 
-    const result = await fetchOverseasShortVideos({ session, query })
+    const transport = createJimengHttpTransport({
+      mode: args.transportMode,
+      cassettePath,
+    })
+    const result = await fetchOverseasShortVideos({ fetch: transport.fetch, session, query })
     writeJson(path.join(dirs.rawDir, `${runId}.json`), {
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       http_status: result.httpStatus,
       ret: result.ret,
       errmsg: result.errmsg,
@@ -3664,6 +3711,10 @@ async function main(argv: string[]): Promise<void> {
       errmsg: result.errmsg,
       response_text_sha256: result.responseTextSha256,
       request: result.request,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       summary: summarizeExploreShortVideos(result),
       items: redactExploreTemplateItems(result.items),
     })
