@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto"
 import { Schema } from "effect"
 import { type JimengSessionBundle } from "./capture"
-import { assertNoRiskError, JimengClient } from "./client"
+import { assertNoRiskError, JimengClient, type JimengFetch } from "./client"
 import { buildJimengEndpointProbeHeaders } from "./endpoint-probe"
 import { jimengError } from "./errors"
 import { type JsonObject, type JsonValue } from "./reference-image"
@@ -107,11 +107,12 @@ export function buildJimengRuntimeConfigRequest(_endpoint: JimengRuntimeConfigEn
 
 export async function fetchJimengRuntimeConfig(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   session: JimengSessionBundle
   query?: JimengRuntimeConfigQuery
 }): Promise<JimengRuntimeConfigBundle> {
   const endpoints = input.query?.endpoints ?? parseJimengRuntimeConfigEndpoints(undefined)
-  const client = input.client ?? new JimengClient()
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
   const results: JimengRuntimeConfigResult[] = []
   for (const endpoint of endpoints) {
     results.push(await fetchRuntimeConfigEndpoint({ client, session: input.session, endpoint }))

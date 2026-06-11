@@ -1,10 +1,15 @@
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import path from "node:path"
 import { describe, expect, test } from "bun:test"
 import {
   buildJimengRuntimeConfigRequest,
+  createJimengHttpTransport,
   fetchJimengRuntimeConfig,
   JimengClient,
   JimengError,
   parseJimengRuntimeConfigEndpoints,
+  readJimengHttpCassette,
   summarizeJimengRuntimeConfig,
   type JimengFetch,
   type JimengSessionBundle,
@@ -99,6 +104,55 @@ describe("Jimeng runtime config helpers", () => {
     expect(serialized).not.toContain("very-secret-runtime-token")
     expect(serialized).not.toContain("wss://speech.example.invalid")
     expect(serialized).not.toContain("https://help.example.invalid")
+  })
+
+  test("can fetch through recorded and replayed HTTP transport cassettes", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "jimeng-runtime-config-cassette-"))
+    try {
+      const cassettePath = path.join(dir, "runtime-config.json")
+      const requests: Array<{ url: string; init?: RequestInit }> = []
+      const recordTransport = createJimengHttpTransport({
+        mode: "record",
+        cassettePath,
+        fetch: mockFetchSequence([JSON.stringify(asrTokenBody())], requests),
+        nowIso: () => "2026-06-11T00:00:00.000Z",
+      })
+
+      const recorded = await fetchJimengRuntimeConfig({
+        fetch: recordTransport.fetch,
+        session,
+        query: { endpoints: ["asr-token"] },
+      })
+
+      expect(recorded.results[0]?.endpointId).toBe("asr-token")
+      expect(readJimengHttpCassette(cassettePath).entries).toHaveLength(1)
+      expect(requests).toHaveLength(1)
+
+      const replayTransport = createJimengHttpTransport({
+        mode: "replay",
+        cassettePath,
+      })
+      const replayed = await fetchJimengRuntimeConfig({
+        fetch: replayTransport.fetch,
+        session,
+        query: { endpoints: ["asr-token"] },
+      })
+
+      const summary = summarizeJimengRuntimeConfig(replayed)
+      expect(summary).toMatchObject({
+        result_count: 1,
+        results: [
+          {
+            endpoint_id: "asr-token",
+            token_present: true,
+            ws_url: { length: 35 },
+          },
+        ],
+      })
+      expect(JSON.stringify(summary)).not.toContain("very-secret-runtime-token")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   test("rejects provider errors and required contract drift", async () => {

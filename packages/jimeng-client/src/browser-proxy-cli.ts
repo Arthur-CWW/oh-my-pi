@@ -1822,6 +1822,7 @@ async function main(argv: string[]): Promise<void> {
     const dirs = ensureOutputDirs(path.resolve(args.outDir))
     const endpoints = parseJimengRuntimeConfigEndpoints(args.endpoints)
     const runId = `runtime-config-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
     if (args.dryRun) {
       writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
         command: args.command,
@@ -1837,12 +1838,20 @@ async function main(argv: string[]): Promise<void> {
           endpoint,
           body: buildJimengRuntimeConfigRequest(endpoint),
         })),
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
         browser_session: redactSession(session),
         live_request: false,
       })
       writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
         command: args.command,
         endpoints,
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
         requests: endpoints.map((endpoint) => ({
           endpoint,
           body: buildJimengRuntimeConfigRequest(endpoint),
@@ -1853,9 +1862,17 @@ async function main(argv: string[]): Promise<void> {
       return
     }
 
-    const result = await fetchJimengRuntimeConfig({ session, query: { endpoints } })
+    const transport = createJimengHttpTransport({
+      mode: args.transportMode,
+      cassettePath,
+    })
+    const result = await fetchJimengRuntimeConfig({ session, query: { endpoints }, fetch: transport.fetch })
     writeJson(path.join(dirs.rawDir, `${runId}.json`), {
       endpoints: result.endpoints,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       results: result.results.map((item) => ({
         endpoint: item.endpoint,
         endpoint_id: item.endpointId,
@@ -1869,6 +1886,10 @@ async function main(argv: string[]): Promise<void> {
     })
     writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
       command: args.command,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       summary: summarizeJimengRuntimeConfig(result),
     })
     console.log(`[jimeng-browser-proxy] runtime-config saved endpoints=${result.results.map((item) => item.endpointId).join(",")}`)
