@@ -2882,19 +2882,32 @@ async function main(argv: string[]): Promise<void> {
     }
     const request = buildJimengClonedVoicesRequest(query)
     const runId = `voice-clones-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
     if (args.dryRun) {
       writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
         command: args.command,
         endpoint: "/mweb/v1/get_user_local_item_list",
         request,
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
         browser_session: redactSession(session),
       })
       console.log(`[jimeng-browser-proxy] voice-clones dry run saved`)
       return
     }
 
-    const result = await fetchJimengClonedVoices({ session, query })
+    const transport = createJimengHttpTransport({
+      mode: args.transportMode,
+      cassettePath,
+    })
+    const result = await fetchJimengClonedVoices({ fetch: transport.fetch, session, query })
     writeJson(path.join(dirs.rawDir, `${runId}.json`), {
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       http_status: result.httpStatus,
       ret: result.ret,
       errmsg: result.errmsg,
@@ -2904,6 +2917,10 @@ async function main(argv: string[]): Promise<void> {
     })
     writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
       command: args.command,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       summary: summarizeJimengClonedVoices(result),
     })
     console.log(`[jimeng-browser-proxy] voice-clones saved count=${result.voices.length} nextOffset=${result.nextOffset ?? "none"} hasMore=${result.hasMore ?? "unknown"}`)
@@ -2925,12 +2942,17 @@ async function main(argv: string[]): Promise<void> {
       name: args.name,
     })
     const runId = `voice-clone-submit-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${Math.random().toString(36).slice(2, 8)}`
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
     const plan = {
       command: args.command,
       status: "dry-run-only",
       reason: "Frontend bundle confirms /mweb/v1/voice/submit_task scene=1 for voice cloning, but live submit may consume quota or create account assets. Capture/approve the UI flow before enabling.",
       endpoint_sequence: ["/mweb/v1/voice/submit_task"],
       request,
+      transport: {
+        mode: args.transportMode,
+        cassette_path: cassettePath ?? null,
+      },
       browser_session: redactSession(session),
     }
     writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), plan)
@@ -2945,10 +2967,15 @@ async function main(argv: string[]): Promise<void> {
     const dirs = ensureOutputDirs(path.resolve(args.outDir))
     const request = buildJimengVoiceTaskQueryRequest({ taskIds })
     const runId = `voice-clone-query-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${Math.random().toString(36).slice(2, 8)}`
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
     const plan = {
       command: args.command,
       endpoint_sequence: ["/mweb/v1/voice/query_task"],
       request,
+      transport: {
+        mode: args.transportMode,
+        cassette_path: cassettePath ?? null,
+      },
       browser_session: redactSession(session),
     }
     if (args.dryRun) {
@@ -2963,8 +2990,16 @@ async function main(argv: string[]): Promise<void> {
       return
     }
 
-    const result = await queryJimengVoiceTasks({ session, taskIds })
+    const transport = createJimengHttpTransport({
+      mode: args.transportMode,
+      cassettePath,
+    })
+    const result = await queryJimengVoiceTasks({ fetch: transport.fetch, session, taskIds })
     writeJson(path.join(dirs.rawDir, `${runId}-raw.json`), {
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       http_status: result.httpStatus,
       ret: result.ret,
       errmsg: result.errmsg,
@@ -2974,6 +3009,10 @@ async function main(argv: string[]): Promise<void> {
     })
     writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
       command: args.command,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       summary: summarizeJimengVoiceTaskQuery(result),
     })
     console.log(`[jimeng-browser-proxy] voice-clone-query saved tasks=${result.tasks.length}`)
@@ -2987,12 +3026,17 @@ async function main(argv: string[]): Promise<void> {
     const dirs = ensureOutputDirs(path.resolve(args.outDir))
     const request = buildJimengClonedVoiceUpdateRequest({ voiceId: args.voiceId, name: args.name })
     const runId = `voice-clone-update-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${Math.random().toString(36).slice(2, 8)}`
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
     const plan = {
       command: args.command,
       status: "dry-run-only",
       reason: "Update mutates account voice assets; enable live only after a real cloned voice fixture exists and Arthur approves mutation.",
       endpoint_sequence: ["/mweb/v1/voice/update"],
       request,
+      transport: {
+        mode: args.transportMode,
+        cassette_path: cassettePath ?? null,
+      },
       browser_session: redactSession(session),
     }
     writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), plan)
@@ -3007,12 +3051,17 @@ async function main(argv: string[]): Promise<void> {
     const dirs = ensureOutputDirs(path.resolve(args.outDir))
     const request = buildJimengClonedVoiceDeleteRequest({ voiceId: args.voiceId })
     const runId = `voice-clone-delete-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${Math.random().toString(36).slice(2, 8)}`
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
     const plan = {
       command: args.command,
       status: "dry-run-only",
       reason: "Delete mutates account voice assets; enable live only after a disposable cloned voice fixture exists and Arthur approves mutation.",
       endpoint_sequence: ["/mweb/v1/voice/delete"],
       request,
+      transport: {
+        mode: args.transportMode,
+        cassette_path: cassettePath ?? null,
+      },
       browser_session: redactSession(session),
     }
     writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), plan)

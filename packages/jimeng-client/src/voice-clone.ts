@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto"
 import { type JimengSessionBundle } from "./capture"
-import { assertNoRiskError, JimengClient } from "./client"
+import { assertNoRiskError, JimengClient, type JimengFetch } from "./client"
 import { jimengError } from "./errors"
 
 const DEFAULT_QUERY = "aid=513695&device_platform=web&region=CN&web_version=7.5.0&da_version=3.3.17&aigc_features=app_lip_sync"
@@ -206,10 +206,11 @@ export function buildJimengClonedVoiceDeleteRequest(input: JimengClonedVoiceDele
 
 export async function fetchJimengClonedVoices(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   session: JimengSessionBundle
   query?: JimengClonedVoicesQuery
 }): Promise<JimengClonedVoicesResult> {
-  const client = input.client ?? new JimengClient()
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
   const request = buildJimengClonedVoicesRequest(input.query)
   const response = await client.requestText(`https://jimeng.jianying.com/mweb/v1/get_user_local_item_list?${DEFAULT_QUERY}`, {
     method: "POST",
@@ -236,10 +237,11 @@ export async function fetchJimengClonedVoices(input: {
 
 export async function submitJimengVoiceClone(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   session: JimengSessionBundle
   voiceClone: JimengVoiceCloneSubmitInput
 }): Promise<JimengVoiceCloneSubmitResult> {
-  const client = input.client ?? new JimengClient()
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
   const request = buildJimengVoiceCloneSubmitRequest(input.voiceClone)
   const response = await client.requestText(`https://jimeng.jianying.com/mweb/v1/voice/submit_task?${DEFAULT_QUERY}`, {
     method: "POST",
@@ -268,10 +270,11 @@ export async function submitJimengVoiceClone(input: {
 
 export async function queryJimengVoiceTasks(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   session: JimengSessionBundle
   taskIds: string[]
 }): Promise<JimengVoiceTaskQueryResult> {
-  const client = input.client ?? new JimengClient()
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
   const request = buildJimengVoiceTaskQueryRequest({ taskIds: input.taskIds })
   const response = await client.requestText(`https://jimeng.jianying.com/mweb/v1/voice/query_task?${DEFAULT_QUERY}`, {
     method: "POST",
@@ -296,10 +299,11 @@ export async function queryJimengVoiceTasks(input: {
 
 export async function updateJimengClonedVoice(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   session: JimengSessionBundle
   voice: JimengClonedVoiceUpdateInput
 }): Promise<JimengClonedVoiceMutationResult> {
-  const client = input.client ?? new JimengClient()
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
   const request = buildJimengClonedVoiceUpdateRequest(input.voice)
   const response = await client.requestText(`https://jimeng.jianying.com/mweb/v1/voice/update?${DEFAULT_QUERY}`, {
     method: "POST",
@@ -324,10 +328,11 @@ export async function updateJimengClonedVoice(input: {
 
 export async function deleteJimengClonedVoice(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   session: JimengSessionBundle
   voiceId: string
 }): Promise<JimengClonedVoiceMutationResult> {
-  const client = input.client ?? new JimengClient()
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
   const request = buildJimengClonedVoiceDeleteRequest({ voiceId: input.voiceId })
   const response = await client.requestText(`https://jimeng.jianying.com/mweb/v1/voice/delete?${DEFAULT_QUERY}`, {
     method: "POST",
