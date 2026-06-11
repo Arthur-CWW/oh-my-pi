@@ -13,9 +13,12 @@ Durable lessons about making Codex/agent work faster and less token-heavy.
 - When the work can be split cleanly, use parallel agents for disjoint write scopes or independent investigations. Do not delegate the immediate blocking step if the main thread needs the result before it can continue.
 - Optimize for working prototype architecture before backwards compatibility. Delete stale tests or code when they protect accidental behavior rather than useful behavior.
 - Prefer “build the tool that makes the next 20 steps cheap” over repeating one-endpoint-at-a-time work when the pattern is clear.
+- Prioritize by workflow value first. For provider/API reversal, do not choose low-value no-spend work just because it is easy; rank by the user-visible pipeline capability unlocked, then use speed/no-spend as tie-breakers or safety gates.
 
 ## 2026-06-11 Jimeng/Dreamina Lesson
 
 The Jimeng reversal loop became slow because proof, docs, static fixtures, and endpoint classification were all handled manually per endpoint. The better shape is a shared cached HTTP transport, Effect-style dependency injection, replayed fixtures/cassettes, Vitest snapshots for normalized contract/report output, and a structured endpoint registry. This lets agents solve one layer once, cache it, and work on the next layer without spending tokens or provider calls re-validating earlier assumptions.
 
 The small Jimeng registry trial showed that Vitest file snapshots are materially cleaner than hand-rolled string/assertion tests for generated Markdown and large normalized contract objects. For future TypeScript API-reversal work, default to Vitest snapshots when the output is a stable contract artifact; keep direct assertions for small parser branches and narrow behavior checks.
+
+Arthur clarified that the Jimeng/Dreamina queue should not be sorted by no-spend availability. Sort by highest UGC workflow value first: generation parity, persona/voice, lip-sync, reference controls, and template mining. If the highest-value next step requires spend, account mutation, visible UI, or capture approval, ask for approval with a concrete command/proof plan instead of falling back to a lower-value safe endpoint.

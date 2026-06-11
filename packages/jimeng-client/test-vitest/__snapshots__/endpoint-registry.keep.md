@@ -85,8 +85,8 @@
 ### R1 Reference profile research
 
 - `/mweb/v1/mget_story` - partial command=story-records - No-spend story detail lookup by story_id_list is implemented; live proof still needs real story ids from a non-empty story list or UI capture.
-  - Evidence: `data/jimeng-lab/proof-20260611-probe-user-story-list/`; `data/jimeng-lab/proof-20260611-story-archive-dryrun/`; `data/jimeng-lab/proof-20260611-static-inventory-story-archive/`
-  - Next probe: Find or capture a public profile with a non-empty story list, then run story-records with real story_id_list values and record/replay the cassette.
+  - Evidence: `data/jimeng-lab/proof-20260611-probe-user-story-list/`; `data/jimeng-lab/proof-20260611-story-archive-dryrun/`; `data/jimeng-lab/proof-20260611-static-inventory-story-archive/`; `data/jimeng-lab/proof-20260611-profile-story-sweep-puai/`; `data/jimeng-lab/proof-20260611-profile-story-sweep-xiaobodeng/`; `data/jimeng-lab/proof-20260611-profile-story-sweep-fuqiang/`
+  - Next probe: Find or capture a public profile with a non-empty story list, then run story-records with real story_id_list values and record/replay the cassette; the 2026-06-11 no-spend sweep over three followed profiles returned ret=0 with story_count=0.
 
 ### T1 CapCut/template mining
 

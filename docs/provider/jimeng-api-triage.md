@@ -18,6 +18,21 @@ skip: L1,N1,U1
 
 The machine-readable mirror for these family IDs lives in `packages/jimeng-client/src/endpoint-registry.ts`. Run `jimeng-browser-proxy triage-coverage --decisions keep` to materialize the current registry coverage as JSON and Markdown. The latest keep-family report has 62 unique endpoints, 0 missing registry rows, 40 implemented endpoints, 4 partial endpoints, 4 dry-run-only endpoints, and 15 blocked endpoints. Unfinished keep-family rows must carry evidence paths and a concrete next probe in the registry; Vitest snapshots cover the normalized gap object and generated Markdown report.
 
+## Priority Model
+
+Rank work by UGC workflow value first, then implementation speed. No-spend availability is a safety and approval constraint, not the priority function.
+
+Current highest-value order:
+
+1. Generation parity and useful examples: text/image/video submit, first/end-frame, multi-frame, reference/multimodal generation, polling, download, and artifact proof.
+2. Persona and voice: subject voice generation, custom voice clone lifecycle, applying voices to scripts, and reusable persona-profile examples.
+3. Lip-sync and digital human: image/avatar and VOD lip-sync submit parity, pre-process/result flows, and talking-head UGC examples.
+4. Reference controls: pose/depth/canny/style/reference transfer, masks, face/reference validation, and person-swap workflows.
+5. Template mining: CapCut/Jimeng search, batch, presets, hook/caption/template extraction, and faceless profile/template copying.
+6. Supporting metadata reads: history, assets, story/archive, runtime, quota, notices, panels. Build these when they unblock a higher-value workflow; otherwise keep them cataloged.
+
+If the next highest-value step requires paid generation, account mutation, unsafe credential access, visible UI, or fresh background capture, ask for explicit approval with the exact command and proof output path instead of switching to a lower-value no-spend endpoint.
+
 ## Keep
 
 | ID | Family | Why it matters |
@@ -95,3 +110,7 @@ Why it is not important now:
 - Direct video plans: use `jimeng-browser-proxy text2video-plan` to build a no-session dry-run request and `jimeng-browser-proxy text2video-compare` to compare it against a passive raw CDP/capture-template submit request before live submit is claimed.
 - Simple dry-run request plans, including subject voice generation and voice clone submit/query/update/delete, can use `jimeng-browser-proxy request-plan-compare` to compare the planned request body against passive raw CDP/capture-template traffic without live provider calls.
 - Lip-sync plans: keep using `jimeng-browser-proxy lip-sync-compare` because the meaningful payload is nested under provider-specific `videoGenInputs`.
+
+## Latest Gap Notes
+
+- `R1 /mweb/v1/mget_story` remains partial rather than implemented. The `story-records` typed client and replay tests exist, but a 2026-06-11 sweep over three existing followed profiles (`PUAI`, `小波登`, `就扶墙老师`) returned `ret=0` with `story_count=0`; promotion still needs a public profile or UI capture with a non-empty story list. Treat this as supporting audit evidence, not a reason to prioritize story/archive reads over generation, persona/voice, lip-sync, reference controls, or template mining.
