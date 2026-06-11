@@ -2370,11 +2370,16 @@ async function main(argv: string[]): Promise<void> {
       return [{ endpoint, path: pathName, request }]
     })
     const runId = `profile-research-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
     if (args.dryRun) {
       writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
         command: args.command,
         endpoint_sequence: requests.map((request) => request.path),
         requests,
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
         skipped: [
           ...(endpoints.includes("item") && !args.publishedItemId
             ? [{ endpoint: "item", reason: "missing --publishedItemId" }]
@@ -2390,16 +2395,28 @@ async function main(argv: string[]): Promise<void> {
         command: args.command,
         endpoints,
         requests,
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
         dry_run: true,
       })
       console.log(`[jimeng-browser-proxy] profile-research dry run saved requests=${requests.length}`)
       return
     }
 
-    const result = await fetchJimengProfileResearch({ session, query })
+    const transport = createJimengHttpTransport({
+      mode: args.transportMode,
+      cassettePath,
+    })
+    const result = await fetchJimengProfileResearch({ session, query, fetch: transport.fetch })
     writeJson(path.join(dirs.rawDir, `${runId}.json`), {
       endpoints: result.endpoints,
       skipped: result.skipped,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       results: result.results.map((item) => ({
         endpoint: item.endpoint,
         endpoint_id: item.endpointId,
@@ -2414,6 +2431,10 @@ async function main(argv: string[]): Promise<void> {
     })
     writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
       command: args.command,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       summary: summarizeJimengProfileResearch(result),
     })
     console.log(`[jimeng-browser-proxy] profile-research saved results=${result.results.length} items=${result.results.reduce((sum, item) => sum + item.items.length, 0)} profiles=${result.results.reduce((sum, item) => sum + item.profiles.length + (item.profile ? 1 : 0), 0)} skipped=${result.skipped.length}`)

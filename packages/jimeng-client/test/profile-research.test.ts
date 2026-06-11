@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import path from "node:path"
 import { describe, expect, test } from "bun:test"
 import {
   buildJimengProfileFavoritesRequest,
@@ -7,12 +10,14 @@ import {
   buildJimengProfileItemRequest,
   buildJimengProfileStoriesRequest,
   buildJimengProfileUserRequest,
+  createJimengHttpTransport,
   fetchJimengProfileResearch,
   JimengClient,
   JimengError,
   parseJimengPublishedItemIds,
   parseJimengProfileImageTypeList,
   parseJimengProfileResearchEndpoints,
+  readJimengHttpCassette,
   summarizeJimengProfileResearch,
   type JimengFetch,
   type JimengSessionBundle,
@@ -199,6 +204,74 @@ describe("Jimeng profile research", () => {
     const summaryText = JSON.stringify(summary)
     expect(summaryText).not.toContain("x-signature=secret")
     expect(summaryText).not.toContain("https://signed.example.invalid")
+  })
+
+  test("can fetch the full profile sequence through recorded and replayed HTTP transport cassettes", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "jimeng-profile-research-cassette-"))
+    try {
+      const cassettePath = path.join(dir, "profile-research.json")
+      const requests: Array<{ url: string; init?: RequestInit }> = []
+      const bodies = [
+        JSON.stringify(userInfoBody()),
+        JSON.stringify(itemListBody(false)),
+        JSON.stringify(itemListBody(true)),
+        JSON.stringify(storyListBody()),
+        JSON.stringify(followListBody()),
+        JSON.stringify(followListBody([])),
+        JSON.stringify(itemDetailBody()),
+        JSON.stringify(batchItemDetailBody()),
+      ]
+      const recordTransport = createJimengHttpTransport({
+        mode: "record",
+        cassettePath,
+        fetch: mockFetchSequence(bodies, requests),
+        nowIso: () => "2026-06-11T00:00:00.000Z",
+      })
+      const query = {
+        endpoints: parseJimengProfileResearchEndpoints("all"),
+        secUid: "sec-public-1",
+        publishedItemId: "7524730786826751247",
+        publishedItemIds: ["7524730786826751247", "7572448714904603931"],
+        count: 6,
+      }
+
+      const recorded = await fetchJimengProfileResearch({
+        fetch: recordTransport.fetch,
+        session,
+        query,
+      })
+
+      expect(recorded.results).toHaveLength(8)
+      expect(readJimengHttpCassette(cassettePath).entries).toHaveLength(8)
+      expect(requests).toHaveLength(8)
+
+      const replayTransport = createJimengHttpTransport({
+        mode: "replay",
+        cassettePath,
+      })
+      const replayed = await fetchJimengProfileResearch({
+        fetch: replayTransport.fetch,
+        session,
+        query,
+      })
+
+      expect(summarizeJimengProfileResearch(replayed)).toMatchObject({
+        result_count: 8,
+        skipped: [],
+        results: expect.arrayContaining([
+          expect.objectContaining({
+            endpoint_id: "stories",
+            story_count: 1,
+          }),
+          expect.objectContaining({
+            endpoint_id: "items",
+            item_count: 2,
+          }),
+        ]),
+      })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   test("skips optional item detail without an id and rejects required contract drift", async () => {

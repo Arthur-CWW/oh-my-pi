@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto"
 import { Schema } from "effect"
 import { type JimengSessionBundle } from "./capture"
-import { assertNoRiskError, JimengClient } from "./client"
+import { assertNoRiskError, JimengClient, type JimengFetch } from "./client"
 import { buildJimengEndpointProbeHeaders } from "./endpoint-probe"
 import { jimengError } from "./errors"
 import { type JsonObject, type JsonValue } from "./reference-image"
@@ -312,12 +312,13 @@ export function buildJimengProfileBatchItemsRequest(publishedItemIds: string[]):
 
 export async function fetchJimengProfileResearch(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   session: JimengSessionBundle
   query?: JimengProfileResearchQuery
 }): Promise<JimengProfileResearchBundle> {
   const query = input.query ?? {}
   const endpoints = query.endpoints ?? parseJimengProfileResearchEndpoints(undefined)
-  const client = input.client ?? new JimengClient()
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
   const results: JimengProfileResearchResult[] = []
   const skipped: JimengProfileResearchBundle["skipped"] = []
 
