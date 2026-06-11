@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto"
 import { Schema } from "effect"
 import { type JimengSessionBundle } from "./capture"
-import { assertNoRiskError, JimengClient } from "./client"
+import { assertNoRiskError, JimengClient, type JimengFetch } from "./client"
 import { buildJimengEndpointProbeHeaders } from "./endpoint-probe"
 import { jimengError } from "./errors"
 import { type JsonObject, type JsonValue } from "./reference-image"
@@ -49,11 +49,12 @@ export function buildJimengLocalItemsRequest(itemIds: string[]): JsonObject {
 
 export async function fetchJimengLocalItems(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   session: JimengSessionBundle
   itemIds: string[]
 }): Promise<JimengLocalItemsResult> {
   const request = buildJimengLocalItemsRequest(input.itemIds)
-  const client = input.client ?? new JimengClient()
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
   const response = await client.requestText(`https://jimeng.jianying.com/mweb/v1/get_local_item_list?${DEFAULT_QUERY}`, {
     method: "POST",
     headers: buildJimengEndpointProbeHeaders(input.session),

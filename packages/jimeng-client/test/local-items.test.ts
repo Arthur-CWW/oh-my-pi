@@ -1,10 +1,15 @@
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import path from "node:path"
 import { describe, expect, test } from "bun:test"
 import {
   buildJimengLocalItemsRequest,
+  createJimengHttpTransport,
   fetchJimengLocalItems,
   JimengClient,
   JimengError,
   parseJimengLocalItemIds,
+  readJimengHttpCassette,
   summarizeJimengLocalItems,
   type JimengFetch,
   type JimengSessionBundle,
@@ -74,6 +79,48 @@ describe("Jimeng local item details", () => {
     const summaryText = JSON.stringify(summary)
     expect(summaryText).not.toContain("signed.example.invalid")
     expect(summaryText).not.toContain("X-Amz-Signature")
+  })
+
+  test("can fetch through recorded and replayed HTTP transport cassettes", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "jimeng-local-items-cassette-"))
+    try {
+      const cassettePath = path.join(dir, "local-items.json")
+      const requests: Array<{ url: string; init?: RequestInit }> = []
+      const recordTransport = createJimengHttpTransport({
+        mode: "record",
+        cassettePath,
+        fetch: mockFetch(JSON.stringify(localItemsBody()), requests),
+        nowIso: () => "2026-06-11T00:00:00.000Z",
+      })
+      const itemIds = ["7649332406457060634", "7649332406457077018"]
+
+      const recorded = await fetchJimengLocalItems({
+        fetch: recordTransport.fetch,
+        session,
+        itemIds,
+      })
+
+      expect(recorded.items).toHaveLength(2)
+      expect(readJimengHttpCassette(cassettePath).entries).toHaveLength(1)
+      expect(requests).toHaveLength(1)
+
+      const replayTransport = createJimengHttpTransport({
+        mode: "replay",
+        cassettePath,
+      })
+      const replayed = await fetchJimengLocalItems({
+        fetch: replayTransport.fetch,
+        session,
+        itemIds,
+      })
+
+      expect(summarizeJimengLocalItems(replayed)).toMatchObject({
+        endpoint: "/mweb/v1/get_local_item_list",
+        item_count: 2,
+      })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   test("rejects provider errors and required contract drift", async () => {

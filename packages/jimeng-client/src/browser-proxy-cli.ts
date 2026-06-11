@@ -2425,11 +2425,16 @@ async function main(argv: string[]): Promise<void> {
     const dirs = ensureOutputDirs(path.resolve(args.outDir))
     const request = buildJimengLocalItemsRequest(args.itemIds)
     const runId = `local-items-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
     if (args.dryRun) {
       writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
         command: args.command,
         endpoint: "/mweb/v1/get_local_item_list",
         request,
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
         browser_session: redactSession(session),
         live_request: false,
       })
@@ -2437,15 +2442,27 @@ async function main(argv: string[]): Promise<void> {
         command: args.command,
         endpoint: "/mweb/v1/get_local_item_list",
         request,
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
         dry_run: true,
       })
       console.log(`[jimeng-browser-proxy] local-items dry run saved item_ids=${args.itemIds.length}`)
       return
     }
 
-    const result = await fetchJimengLocalItems({ session, itemIds: args.itemIds })
+    const transport = createJimengHttpTransport({
+      mode: args.transportMode,
+      cassettePath,
+    })
+    const result = await fetchJimengLocalItems({ session, itemIds: args.itemIds, fetch: transport.fetch })
     writeJson(path.join(dirs.rawDir, `${runId}.json`), {
       endpoint: result.endpoint,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       http_status: result.httpStatus,
       ret: result.ret,
       errmsg: result.errmsg,
@@ -2455,6 +2472,10 @@ async function main(argv: string[]): Promise<void> {
     })
     writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
       command: args.command,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       summary: summarizeJimengLocalItems(result),
     })
     console.log(`[jimeng-browser-proxy] local-items saved items=${result.items.length}`)
