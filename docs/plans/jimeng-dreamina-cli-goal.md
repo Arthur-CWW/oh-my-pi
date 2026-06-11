@@ -6,7 +6,7 @@ Build a fast, truthful Jimeng/Dreamina client for high-value UGC workflows. This
 
 Keep going until every high-value UGC capability reachable from Arthur's logged-in Jimeng frontend is either implemented through typed services/CLI or honestly classified in the endpoint registry.
 
-The goal is product-value driven, then coverage-driven. Choose the next work by the highest-value UGC workflow it unlocks, not by which endpoint is safest or cheapest to touch. Speed, no-spend status, and implementation size are tie-breakers after product value and user usefulness. Avoid ceremony that does not improve confidence. Do not require a local proof bundle for every backend refactor. Do not manually maintain walls of assertions when snapshot fixtures or structured endpoint registries would prove the same thing faster.
+The goal is product-value driven, then coverage-driven. Choose the next work by the highest-value UGC workflow it unlocks, not by which endpoint is safest or cheapest to touch. Speed, no-spend status, and implementation size are tie-breakers after product value and user usefulness. The specific anti-pattern to avoid is picking the fastest no-spend W6 block while generation, persona/voice, lip-sync, reference-control, or template-mining work remains higher value. Avoid ceremony that does not improve confidence. Do not require a local proof bundle for every backend refactor. Do not manually maintain walls of assertions when snapshot fixtures or structured endpoint registries would prove the same thing faster.
 
 ## Operating Model
 
@@ -17,6 +17,7 @@ The goal is product-value driven, then coverage-driven. Choose the next work by 
 - Prefer Effect CLI for new or substantially refactored command surfaces. Do not keep growing hand-written argument parsing if a command is already being rewritten.
 - Treat live no-spend calls as cassette refreshes or provider-drift checks, not as the default way to choose work. After one part of the stack is validated, replay cached fixtures for speed.
 - Do not let no-spend availability pull the workstream toward low-value endpoints. If the highest-value API requires paid generation, account mutation, or visible UI, stop and ask for explicit approval with the exact planned command, spend/risk, and proof artifact path rather than silently switching to lower-value no-spend work.
+- If approval is needed for the top-value live step, the safe fallback is adjacent prep inside that same high-value family, such as request builders, compare gates, schema fixtures, cassettes, and useful example plans. Do not jump to unrelated supporting reads just because they are cheaper.
 - Test useful workflows and representative examples, not just endpoint existence. A good slice proves a real UGC pipeline step: generating or remixing a persona clip, cloning or applying a voice, lip-syncing a host, transferring pose/reference controls, mining a template/hook, or polling/downloading the resulting artifact.
 - Use Vitest snapshots plus fixtures for inventory, worklist, request/response shape, endpoint registry gaps, cassette metadata, CLI summaries, and generated reports instead of long assertion walls. Prefer file snapshots for generated Markdown or large reports, object snapshots for normalized JSON contracts, and direct assertions only for small behavior branches.
 - Move endpoint status/progress into a structured registry and, later, a small SQLite run log if needed. Docs should index the state and decisions, not duplicate every raw progress event.
@@ -42,7 +43,7 @@ Parallel-agent rule: use sub-agents only when the write scopes are disjoint and 
 
 ## Value-First W6 Queue
 
-When resuming W6, rank work by the workflow value below. Do not pick a lower-value endpoint merely because it is no-spend or easy.
+When resuming W6, rank work by the workflow value below. Do not pick a lower-value endpoint merely because it is no-spend or easy. A "fastest no-spend W6" choice is wrong unless it is also the highest-value available slice or directly unblocks that slice.
 
 1. Generation parity: fresh text-to-image, text-to-video, image-to-video, first/end-frame, multi-frame, reference-image/multimodal generation, submit/poll/download, and example commands that create useful UGC artifacts.
 2. Persona and voice: subject/persona voice generation, custom voice clone submit/query/update/delete, applying voices to scripts, and representative examples for reusable persona profiles.

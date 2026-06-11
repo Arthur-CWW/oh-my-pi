@@ -20,7 +20,7 @@ The machine-readable mirror for these family IDs lives in `packages/jimeng-clien
 
 ## Priority Model
 
-Rank work by UGC workflow value first, then implementation speed. No-spend availability is a safety and approval constraint, not the priority function.
+Rank work by UGC workflow value first, then implementation speed. No-spend availability is a safety and approval constraint, not the priority function. Do not choose the fastest no-spend W6 endpoint while a higher-value generation, persona/voice, lip-sync, reference-control, or template-mining gap is available.
 
 Current highest-value order:
 
@@ -31,7 +31,7 @@ Current highest-value order:
 5. Template mining: CapCut/Jimeng search, batch, presets, hook/caption/template extraction, and faceless profile/template copying.
 6. Supporting metadata reads: history, assets, story/archive, runtime, quota, notices, panels. Build these when they unblock a higher-value workflow; otherwise keep them cataloged.
 
-If the next highest-value step requires paid generation, account mutation, unsafe credential access, visible UI, or fresh background capture, ask for explicit approval with the exact command and proof output path instead of switching to a lower-value no-spend endpoint.
+If the next highest-value step requires paid generation, account mutation, unsafe credential access, visible UI, or fresh background capture, ask for explicit approval with the exact command and proof output path instead of switching to a lower-value no-spend endpoint. If useful no-spend work is needed while waiting, keep it inside the same high-value family through dry-run plans, compare gates, schemas, fixtures, and representative examples.
 
 ## Keep
 
