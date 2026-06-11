@@ -1,6 +1,11 @@
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import path from "node:path"
 import { describe, expect, test } from "bun:test"
 import {
+  createJimengHttpTransport,
   JimengClient,
+  readJimengHttpCassette,
   runJimengRateProbe,
   summarizeJimengRateProbe,
   type JimengFetch,
@@ -55,6 +60,52 @@ describe("Jimeng rate probe", () => {
       http_status_counts: { "200": 6 },
       ret_counts: { "0": 6 },
     })
+  })
+
+  test("records and replays bounded probes through HTTP cassettes", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "jimeng-rate-probe-cassette-"))
+    const cassettePath = path.join(dir, "rate-probe.json")
+    const requests: Array<{ url: string; init?: RequestInit }> = []
+    try {
+      const recordTransport = createJimengHttpTransport({
+        mode: "record",
+        cassettePath,
+        nowIso: () => "2026-06-11T00:00:00.000Z",
+        fetch: mockFetch([
+          { status: 200, body: JSON.stringify({ ret: "0", errmsg: "success", data: { index: 1 } }) },
+          { status: 200, body: JSON.stringify({ ret: "0", errmsg: "success", data: { index: 2 } }) },
+        ], requests),
+      })
+
+      await runJimengRateProbe({
+        fetch: recordTransport.fetch,
+        session,
+        probe: {
+          endpoint: "/mweb/v1/get_common_config",
+          variants: [{ name: "config", body: { need_cache: true } }],
+          requestCount: 2,
+          concurrency: 1,
+        },
+      })
+
+      expect(readJimengHttpCassette(cassettePath).entries).toHaveLength(2)
+      const replayTransport = createJimengHttpTransport({ mode: "replay", cassettePath })
+      const replayed = await runJimengRateProbe({
+        fetch: replayTransport.fetch,
+        session,
+        probe: {
+          endpoint: "/mweb/v1/get_common_config",
+          variants: [{ name: "config", body: { need_cache: true } }],
+          requestCount: 2,
+          concurrency: 1,
+        },
+      })
+
+      expect(replayed.attempts.map((attempt) => attempt.ret)).toEqual(["0", "0"])
+      expect(replayed.stopped).toBe(false)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   test("stops on rate-limit responses", async () => {

@@ -1683,7 +1683,7 @@ async function main(argv: string[]): Promise<void> {
       cassettePath,
     })
     const result = await runJimengEndpointProbe({
-      client: new JimengClient({ fetch: transport.fetch }),
+      fetch: transport.fetch,
       session,
       probe,
     })
@@ -2091,6 +2091,7 @@ async function main(argv: string[]): Promise<void> {
     const concurrency = args.concurrency ?? 1
     const dirs = ensureOutputDirs(path.resolve(args.outDir))
     const runId = `rate-probe-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
     const probe = {
       endpoint: args.endpoint,
       method: args.method,
@@ -2105,6 +2106,10 @@ async function main(argv: string[]): Promise<void> {
       writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
         command: args.command,
         probe,
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
         browser_session: redactSession(session),
         warning: probe.includeRisky
           ? "includeRisky is enabled; this may call paid, mutating, or generating endpoints."
@@ -2112,6 +2117,10 @@ async function main(argv: string[]): Promise<void> {
       })
       writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
         command: args.command,
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
         probe: {
           endpoint: probe.endpoint,
           method: probe.method ?? "POST",
@@ -2128,10 +2137,24 @@ async function main(argv: string[]): Promise<void> {
       return
     }
 
-    const result = await runJimengRateProbe({ session, probe })
-    writeJson(path.join(dirs.rawDir, `${runId}.json`), result)
+    const transport = createJimengHttpTransport({
+      mode: args.transportMode,
+      cassettePath,
+    })
+    const result = await runJimengRateProbe({ fetch: transport.fetch, session, probe })
+    writeJson(path.join(dirs.rawDir, `${runId}.json`), {
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
+      ...result,
+    })
     writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
       command: args.command,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       summary: summarizeJimengRateProbe(result),
     })
     console.log(`[jimeng-browser-proxy] rate-probe saved completed=${result.attempts.length}/${result.requestCount} concurrency=${result.concurrency} stopped=${result.stopped}${result.stopReason ? ` reason=${result.stopReason}` : ""}`)

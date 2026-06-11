@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto"
 import { type JimengSessionBundle } from "./capture"
-import { assertNoRiskError, JimengClient } from "./client"
+import { assertNoRiskError, JimengClient, type JimengFetch } from "./client"
 import { jimengError } from "./errors"
 import { type JsonObject, type JsonValue } from "./reference-image"
 import { parseJimengApiEnvelope, parseJsonText } from "./schema"
@@ -100,12 +100,13 @@ export function buildSingleEndpointProbeVariant(text: string): JimengEndpointPro
 
 export async function runJimengEndpointProbe(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   session: JimengSessionBundle
   probe: JimengEndpointProbeInput
 }): Promise<JimengEndpointProbeResult> {
   const method = input.probe.method ?? "POST"
   const url = buildJimengEndpointProbeUrl(input.probe)
-  const client = input.client ?? new JimengClient()
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
   const results: JimengEndpointProbeVariantResult[] = []
   for (const variant of input.probe.variants) {
     const response = await client.requestText(url, {

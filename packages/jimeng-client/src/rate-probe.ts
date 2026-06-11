@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto"
 import { setTimeout as sleep } from "node:timers/promises"
-import { JimengClient } from "./client"
+import { JimengClient, type JimengFetch } from "./client"
 import {
   buildJimengEndpointProbeHeaders,
   buildJimengEndpointProbeUrl,
@@ -63,6 +63,7 @@ export interface JimengRateProbeResult {
 
 export async function runJimengRateProbe(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   session: JimengSessionBundle
   probe: JimengRateProbeInput
 }): Promise<JimengRateProbeResult> {
@@ -75,7 +76,7 @@ export async function runJimengRateProbe(input: {
   assertRateProbeEndpointAllowed(input.probe.endpoint, input.probe.includeRisky === true)
 
   const url = buildJimengEndpointProbeUrl(input.probe)
-  const client = input.client ?? new JimengClient()
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
   const headers = buildJimengEndpointProbeHeaders(input.session)
   const attempts: JimengRateProbeAttempt[] = []
   const startedAtMs = Date.now()
