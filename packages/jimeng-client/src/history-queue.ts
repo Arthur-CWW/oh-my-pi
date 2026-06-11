@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto"
 import { z } from "zod"
 import { type JimengSessionBundle } from "./capture"
-import { assertNoRiskError, JimengClient } from "./client"
+import { assertNoRiskError, JimengClient, type JimengFetch } from "./client"
 import { jimengError } from "./errors"
 import { type JsonObject, type JsonValue } from "./reference-image"
 import { parseJimengApiEnvelope, parseJimengContract, parseJimengDataMap, parseJsonText } from "./schema"
@@ -109,11 +109,12 @@ export function buildJimengHistoryQueueInfoRequest(query: JimengHistoryQueueInfo
 
 export async function fetchJimengHistoryQueueInfo(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   session: JimengSessionBundle
   historyIds: string[]
 }): Promise<JimengHistoryQueueInfoResult> {
   const request = buildJimengHistoryQueueInfoRequest({ historyIds: input.historyIds })
-  const client = input.client ?? new JimengClient()
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
   const response = await client.requestText(`https://jimeng.jianying.com/mweb/v1/get_history_queue_info?${DEFAULT_QUERY}`, {
     method: "POST",
     headers: buildHistoryQueueHeaders(input.session),

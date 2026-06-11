@@ -1,11 +1,16 @@
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import path from "node:path"
 import { describe, expect, test } from "bun:test"
 import {
   buildJimengHistoryRecordsRequest,
+  createJimengHttpTransport,
   fetchJimengHistoryRecords,
   JimengClient,
   JimengError,
   parseJimengHistoryRecordsBody,
   parseJimengIdCsvFlag,
+  readJimengHttpCassette,
   summarizeJimengHistoryRecords,
   type JimengFetch,
   type JimengSessionBundle,
@@ -106,6 +111,51 @@ describe("Jimeng history records", () => {
       history_ids: ["39148697060354"],
     })
     expect(result.records[0]?.status).toBe(50)
+  })
+
+  test("can fetch through recorded and replayed HTTP transport cassettes", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "jimeng-history-records-cassette-"))
+    try {
+      const cassettePath = path.join(dir, "history-records.json")
+      const requests: Array<{ url: string; init?: RequestInit }> = []
+      const recordTransport = createJimengHttpTransport({
+        mode: "record",
+        cassettePath,
+        fetch: mockFetch(JSON.stringify(historyBody()), requests),
+        nowIso: () => "2026-06-11T00:00:00.000Z",
+      })
+      const query = {
+        submitIds: ["submit-1"],
+        historyIds: ["39148697060354"],
+      }
+
+      const recorded = await fetchJimengHistoryRecords({
+        fetch: recordTransport.fetch,
+        session,
+        query,
+      })
+
+      expect(recorded.records).toHaveLength(1)
+      expect(readJimengHttpCassette(cassettePath).entries).toHaveLength(1)
+      expect(requests).toHaveLength(1)
+
+      const replayTransport = createJimengHttpTransport({
+        mode: "replay",
+        cassettePath,
+      })
+      const replayed = await fetchJimengHistoryRecords({
+        fetch: replayTransport.fetch,
+        session,
+        query,
+      })
+
+      expect(summarizeJimengHistoryRecords(replayed)).toMatchObject({
+        endpoint: "/mweb/v1/get_history_by_ids",
+        record_count: 1,
+      })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
 

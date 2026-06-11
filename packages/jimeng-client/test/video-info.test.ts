@@ -1,10 +1,15 @@
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import path from "node:path"
 import { describe, expect, test } from "bun:test"
 import {
   buildJimengVideoInfoRequest,
+  createJimengHttpTransport,
   fetchJimengVideoInfo,
   JimengClient,
   JimengError,
   parseJimengVidCsvFlag,
+  readJimengHttpCassette,
   summarizeJimengVideoInfo,
   type JimengFetch,
   type JimengSessionBundle,
@@ -62,6 +67,48 @@ describe("Jimeng video info", () => {
     expect(summaryText).toContain("video_url_present")
     expect(summaryText).not.toContain("signed.example.invalid")
     expect(summaryText).not.toContain("x-signature")
+  })
+
+  test("can fetch through recorded and replayed HTTP transport cassettes", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "jimeng-video-info-cassette-"))
+    try {
+      const cassettePath = path.join(dir, "video-info.json")
+      const requests: Array<{ url: string; init?: RequestInit }> = []
+      const recordTransport = createJimengHttpTransport({
+        mode: "record",
+        cassettePath,
+        fetch: mockFetch(JSON.stringify(videoInfoBody()), requests),
+        nowIso: () => "2026-06-11T00:00:00.000Z",
+      })
+      const query = { vids: ["v03870g10004d8k1u4nog65hb08dnhig"] }
+
+      const recorded = await fetchJimengVideoInfo({
+        fetch: recordTransport.fetch,
+        session,
+        query,
+      })
+
+      expect(recorded.videos).toHaveLength(1)
+      expect(readJimengHttpCassette(cassettePath).entries).toHaveLength(1)
+      expect(requests).toHaveLength(1)
+
+      const replayTransport = createJimengHttpTransport({
+        mode: "replay",
+        cassettePath,
+      })
+      const replayed = await fetchJimengVideoInfo({
+        fetch: replayTransport.fetch,
+        session,
+        query,
+      })
+
+      expect(summarizeJimengVideoInfo(replayed)).toMatchObject({
+        endpoint: "/mweb/v1/get_video_by_vid",
+        video_count: 1,
+      })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
 

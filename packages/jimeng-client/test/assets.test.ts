@@ -1,11 +1,16 @@
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import path from "node:path"
 import { describe, expect, test } from "bun:test"
 import {
   buildJimengAssetsRequest,
+  createJimengHttpTransport,
   fetchJimengAssets,
   JimengClient,
   JimengError,
   parseJimengAssetsBody,
   parseJimengAssetTypes,
+  readJimengHttpCassette,
   summarizeJimengAssets,
   workspaceIdFromJimengSession,
   type JimengFetch,
@@ -135,6 +140,48 @@ describe("Jimeng workbench assets", () => {
     })
     expect(result.ret).toBe("0")
     expect(result.assets[0]?.image?.modelReqKey).toBe("high_aes_general_v50")
+  })
+
+  test("can fetch through recorded and replayed HTTP transport cassettes", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "jimeng-assets-cassette-"))
+    try {
+      const cassettePath = path.join(dir, "assets.json")
+      const requests: Array<{ url: string; init?: RequestInit }> = []
+      const recordTransport = createJimengHttpTransport({
+        mode: "record",
+        cassettePath,
+        fetch: mockFetch(JSON.stringify(assetBody()), requests),
+        nowIso: () => "2026-06-11T00:00:00.000Z",
+      })
+      const query = { count: 5, workspaceId: 14199856180236 }
+
+      const recorded = await fetchJimengAssets({
+        fetch: recordTransport.fetch,
+        session,
+        query,
+      })
+
+      expect(recorded.assets).toHaveLength(1)
+      expect(readJimengHttpCassette(cassettePath).entries).toHaveLength(1)
+      expect(requests).toHaveLength(1)
+
+      const replayTransport = createJimengHttpTransport({
+        mode: "replay",
+        cassettePath,
+      })
+      const replayed = await fetchJimengAssets({
+        fetch: replayTransport.fetch,
+        session,
+        query,
+      })
+
+      expect(summarizeJimengAssets(replayed)).toMatchObject({
+        endpoint: "/mweb/v1/get_asset_list",
+        asset_count: 1,
+      })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
 

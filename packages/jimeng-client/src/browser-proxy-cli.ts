@@ -3009,29 +3009,46 @@ async function main(argv: string[]): Promise<void> {
     }
     const request = buildJimengAssetsRequest(query)
     const runId = `assets-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
     if (args.dryRun) {
       writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
         command: args.command,
         endpoint: "/mweb/v1/get_asset_list",
         request,
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
         browser_session: redactSession(session),
       })
       writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
         command: args.command,
         endpoint: "/mweb/v1/get_asset_list",
         request,
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
       })
       console.log(`[jimeng-browser-proxy] assets dry run saved`)
       return
     }
 
-    const result = await fetchJimengAssets({ session, query })
+    const transport = createJimengHttpTransport({
+      mode: args.transportMode,
+      cassettePath,
+    })
+    const result = await fetchJimengAssets({ session, query, fetch: transport.fetch })
     writeJson(path.join(dirs.rawDir, `${runId}.json`), {
       http_status: result.httpStatus,
       ret: result.ret,
       errmsg: result.errmsg,
       response_text_sha256: result.responseTextSha256,
       request: result.request,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       body: result.body,
     })
     writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
@@ -3042,6 +3059,10 @@ async function main(argv: string[]): Promise<void> {
       errmsg: result.errmsg,
       response_text_sha256: result.responseTextSha256,
       request: result.request,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       summary: summarizeJimengAssets(result),
     })
     console.log(`[jimeng-browser-proxy] assets saved count=${result.assets.length} nextOffset=${result.nextOffset ?? "none"} hasMore=${result.hasMore ?? "unknown"}`)
@@ -3054,29 +3075,46 @@ async function main(argv: string[]): Promise<void> {
     const dirs = ensureOutputDirs(path.resolve(args.outDir))
     const request = buildJimengHistoryQueueInfoRequest({ historyIds })
     const runId = `history-queue-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
     if (args.dryRun) {
       writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
         command: args.command,
         endpoint: "/mweb/v1/get_history_queue_info",
         request,
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
         browser_session: redactSession(session),
       })
       writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
         command: args.command,
         endpoint: "/mweb/v1/get_history_queue_info",
         request,
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
       })
       console.log(`[jimeng-browser-proxy] history-queue dry run saved`)
       return
     }
 
-    const result = await fetchJimengHistoryQueueInfo({ session, historyIds })
+    const transport = createJimengHttpTransport({
+      mode: args.transportMode,
+      cassettePath,
+    })
+    const result = await fetchJimengHistoryQueueInfo({ session, historyIds, fetch: transport.fetch })
     writeJson(path.join(dirs.rawDir, `${runId}.json`), {
       http_status: result.httpStatus,
       ret: result.ret,
       errmsg: result.errmsg,
       response_text_sha256: result.responseTextSha256,
       request: result.request,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       body: result.body,
     })
     writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
@@ -3087,6 +3125,10 @@ async function main(argv: string[]): Promise<void> {
       errmsg: result.errmsg,
       response_text_sha256: result.responseTextSha256,
       request: result.request,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       summary: summarizeJimengHistoryQueueInfo(result),
     })
     console.log(`[jimeng-browser-proxy] history-queue saved count=${result.entries.length} statuses=${result.entries.map((entry) => `${entry.historyId}:${entry.queueInfo?.queueStatus ?? "none"}`).join(",")}`)
@@ -3103,29 +3145,46 @@ async function main(argv: string[]): Promise<void> {
     const query = { submitIds, historyIds }
     const request = buildJimengHistoryRecordsRequest(query)
     const runId = `history-records-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
     if (args.dryRun) {
       writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
         command: args.command,
         endpoint: "/mweb/v1/get_history_by_ids",
         request,
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
         browser_session: redactSession(session),
       })
       writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
         command: args.command,
         endpoint: "/mweb/v1/get_history_by_ids",
         request,
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
       })
       console.log(`[jimeng-browser-proxy] history-records dry run saved`)
       return
     }
 
-    const result = await fetchJimengHistoryRecords({ session, query })
+    const transport = createJimengHttpTransport({
+      mode: args.transportMode,
+      cassettePath,
+    })
+    const result = await fetchJimengHistoryRecords({ session, query, fetch: transport.fetch })
     writeJson(path.join(dirs.rawDir, `${runId}.json`), {
       http_status: result.httpStatus,
       ret: result.ret,
       errmsg: result.errmsg,
       response_text_sha256: result.responseTextSha256,
       request: result.request,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       body: result.body,
     })
     writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
@@ -3136,6 +3195,10 @@ async function main(argv: string[]): Promise<void> {
       errmsg: result.errmsg,
       response_text_sha256: result.responseTextSha256,
       request: result.request,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       summary: summarizeJimengHistoryRecords(result),
     })
     console.log(`[jimeng-browser-proxy] history-records saved count=${result.records.length} statuses=${result.records.map((record) => `${record.lookupKey}:${record.status ?? "none"}`).join(",")}`)
@@ -3151,29 +3214,46 @@ async function main(argv: string[]): Promise<void> {
     const query = { vids }
     const request = buildJimengVideoInfoRequest(query)
     const runId = `video-info-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
     if (args.dryRun) {
       writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
         command: args.command,
         endpoint: "/mweb/v1/get_video_by_vid",
         request,
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
         browser_session: redactSession(session),
       })
       writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
         command: args.command,
         endpoint: "/mweb/v1/get_video_by_vid",
         request,
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
       })
       console.log(`[jimeng-browser-proxy] video-info dry run saved`)
       return
     }
 
-    const result = await fetchJimengVideoInfo({ session, query })
+    const transport = createJimengHttpTransport({
+      mode: args.transportMode,
+      cassettePath,
+    })
+    const result = await fetchJimengVideoInfo({ session, query, fetch: transport.fetch })
     writeJson(path.join(dirs.rawDir, `${runId}.json`), {
       http_status: result.httpStatus,
       ret: result.ret,
       errmsg: result.errmsg,
       response_text_sha256: result.responseTextSha256,
       request: result.request,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       body: result.body,
     })
     writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
@@ -3184,6 +3264,10 @@ async function main(argv: string[]): Promise<void> {
       errmsg: result.errmsg,
       response_text_sha256: result.responseTextSha256,
       request: result.request,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       summary: summarizeJimengVideoInfo(result),
     })
     console.log(`[jimeng-browser-proxy] video-info saved count=${result.videos.length} vids=${result.videos.map((video) => `${video.lookupVid}:${video.definition ?? "none"}`).join(",")}`)

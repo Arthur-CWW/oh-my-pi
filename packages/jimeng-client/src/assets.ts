@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto"
 import { type JimengSessionBundle } from "./capture"
-import { assertNoRiskError, JimengClient } from "./client"
+import { assertNoRiskError, JimengClient, type JimengFetch } from "./client"
 import { jimengError } from "./errors"
 import { type JsonObject, type JsonValue } from "./reference-image"
 
@@ -119,11 +119,12 @@ export function buildJimengAssetsRequest(query: JimengAssetsQuery = {}): JsonObj
 
 export async function fetchJimengAssets(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   session: JimengSessionBundle
   query?: JimengAssetsQuery
 }): Promise<JimengAssetsResult> {
   const request = buildJimengAssetsRequest(input.query)
-  const client = input.client ?? new JimengClient()
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
   const response = await client.requestText(`https://jimeng.jianying.com/mweb/v1/get_asset_list?${DEFAULT_QUERY}`, {
     method: "POST",
     headers: buildAssetsHeaders(input.session),
