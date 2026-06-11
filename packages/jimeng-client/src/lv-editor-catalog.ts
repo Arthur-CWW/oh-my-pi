@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto"
 import { z } from "zod"
 import { buildCapCutSignedHeaders } from "./capcut-templates"
-import { JimengClient } from "./client"
+import { JimengClient, type JimengFetch } from "./client"
 import { jimengError } from "./errors"
 import { type JsonObject, type JsonValue } from "./reference-image"
 import { JimengJsonValueSchema, parseJimengApiEnvelope, parseJimengContract, parseJsonText } from "./schema"
@@ -210,9 +210,10 @@ export function capCutEditorCatalogEndpointPath(endpoint: CapCutEditorCatalogEnd
 
 export async function fetchCapCutEditorCatalog(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   query?: CapCutEditorCatalogQuery
 } = {}): Promise<CapCutEditorCatalogResult> {
-  const client = input.client ?? new JimengClient()
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
   const endpoints = input.query?.endpoints ?? parseCapCutEditorCatalogEndpoints("all")
   const results: CapCutEditorCatalogEndpointResult[] = []
 

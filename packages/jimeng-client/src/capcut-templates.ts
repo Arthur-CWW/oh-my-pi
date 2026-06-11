@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto"
 import { z } from "zod"
 import { type JimengSessionBundle } from "./capture"
-import { JimengClient } from "./client"
+import { JimengClient, type JimengFetch } from "./client"
 import { jimengError } from "./errors"
 import { type JsonObject, type JsonValue } from "./reference-image"
 import { JimengJsonValueSchema, parseJsonText } from "./schema"
@@ -394,10 +394,11 @@ export function buildCapCutSignedHeaders(options: CapCutSignedHeaderOptions): Re
 
 export async function fetchCapCutTemplateCategories(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   session?: Pick<JimengSessionBundle, "userAgent">
   query?: CapCutTemplateCategoriesQuery
 } = {}): Promise<CapCutTemplateCategoriesResult> {
-  const client = input.client ?? new JimengClient()
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
   const endpoint = "/lv/v1/cc_web/plane/get_categories"
   const request = buildCapCutTemplateCategoriesRequest()
   const response = await client.requestText(`${CAPCUT_TEMPLATE_HOST}${endpoint}`, {
@@ -429,10 +430,11 @@ export async function fetchCapCutTemplateCategories(input: {
 
 export async function fetchCapCutTemplateCollections(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   session?: Pick<JimengSessionBundle, "userAgent">
   query?: CapCutTemplateCollectionsQuery
 } = {}): Promise<CapCutTemplateCollectionsResult> {
-  const client = input.client ?? new JimengClient()
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
   const endpoint = CAPCUT_TEMPLATE_COLLECTIONS_ENDPOINT
   const request = buildCapCutTemplateCollectionsRequest(input.query)
   const response = await client.requestText(`${CAPCUT_TEMPLATE_HOST}${endpoint}`, {
@@ -466,10 +468,11 @@ export async function fetchCapCutTemplateCollections(input: {
 
 export async function fetchCapCutCollectionTemplates(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   session?: Pick<JimengSessionBundle, "userAgent">
   query: CapCutCollectionTemplatesQuery
 }): Promise<CapCutCollectionTemplatesResult> {
-  const client = input.client ?? new JimengClient()
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
   const endpoint = CAPCUT_TEMPLATE_COLLECTION_TEMPLATES_ENDPOINT
   const request = buildCapCutCollectionTemplatesRequest(input.query)
   const response = await client.requestText(`${CAPCUT_TEMPLATE_HOST}${endpoint}`, {
@@ -506,10 +509,11 @@ export async function fetchCapCutCollectionTemplates(input: {
 
 export async function fetchCapCutTemplateDetail(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   session?: Pick<JimengSessionBundle, "userAgent">
   query: CapCutTemplateDetailQuery
 }): Promise<CapCutTemplateDetailResult> {
-  const client = input.client ?? new JimengClient()
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
   const endpoint = CAPCUT_TEMPLATE_DETAIL_ENDPOINT
   const request = buildCapCutTemplateDetailRequest(input.query)
   const response = await client.requestText(`${CAPCUT_TEMPLATE_HOST}${endpoint}`, {
@@ -541,9 +545,10 @@ export async function fetchCapCutTemplateDetail(input: {
 
 export async function fetchCapCutTemplateStaticCatalog(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   userAgent?: string | null
 } = {}): Promise<CapCutTemplateStaticCatalogResult> {
-  const client = input.client ?? new JimengClient()
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
   const headers = {
     accept: "application/json, text/plain, */*",
     "user-agent": input.userAgent ?? "Mozilla/5.0",
@@ -571,11 +576,12 @@ export async function fetchCapCutTemplateStaticCatalog(input: {
 
 export async function runCapCutEndpointProbe(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   probe: CapCutEndpointProbeInput
 }): Promise<CapCutEndpointProbeResult> {
   const endpoint = normalizeCapCutProbeEndpoint(input.probe.endpoint)
   const method = input.probe.method ?? "POST"
-  const client = input.client ?? new JimengClient()
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
   const url = `${capCutProbeHostForEndpoint(endpoint)}${endpoint}`
   const results: CapCutEndpointProbeVariantResult[] = []
 

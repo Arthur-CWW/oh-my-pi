@@ -1175,6 +1175,7 @@ async function main(argv: string[]): Promise<void> {
     }
     const request = buildCapCutTemplateCollectionsRequest(query)
     const runId = `capcut-collections-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
     if (args.dryRun) {
       writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
         command: args.command,
@@ -1182,19 +1183,35 @@ async function main(argv: string[]): Promise<void> {
         host: "https://edit-api-sg.capcut.com",
         query,
         request,
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
         browser_session_required: false,
       })
       writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
         command: args.command,
         endpoint: "/lv/v1/cc_web/plane/get_collections",
         request,
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
       })
       console.log("[jimeng-browser-proxy] capcut-collections dry run saved")
       return
     }
 
-    const result = await fetchCapCutTemplateCollections({ query })
+    const transport = createJimengHttpTransport({
+      mode: args.transportMode,
+      cassettePath,
+    })
+    const result = await fetchCapCutTemplateCollections({ fetch: transport.fetch, query })
     writeJson(path.join(dirs.rawDir, `${runId}.json`), {
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       endpoint: result.endpoint,
       http_status: result.httpStatus,
       ret: result.ret,
@@ -1206,6 +1223,10 @@ async function main(argv: string[]): Promise<void> {
     })
     writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
       command: args.command,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       summary: summarizeCapCutTemplateCollections(result),
     })
     console.log(`[jimeng-browser-proxy] capcut-collections saved count=${result.collections.length}`)
@@ -1225,6 +1246,7 @@ async function main(argv: string[]): Promise<void> {
     }
     const request = buildCapCutCollectionTemplatesRequest(query)
     const runId = `capcut-collection-templates-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
     if (args.dryRun) {
       writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
         command: args.command,
@@ -1232,19 +1254,35 @@ async function main(argv: string[]): Promise<void> {
         host: "https://edit-api-sg.capcut.com",
         query,
         request,
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
         browser_session_required: false,
       })
       writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
         command: args.command,
         endpoint: "/lv/v1/cc_web/plane/get_collection_templates",
         request,
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
       })
       console.log("[jimeng-browser-proxy] capcut-collection-templates dry run saved")
       return
     }
 
-    const result = await fetchCapCutCollectionTemplates({ query })
+    const transport = createJimengHttpTransport({
+      mode: args.transportMode,
+      cassettePath,
+    })
+    const result = await fetchCapCutCollectionTemplates({ fetch: transport.fetch, query })
     writeJson(path.join(dirs.rawDir, `${runId}.json`), {
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       endpoint: result.endpoint,
       http_status: result.httpStatus,
       ret: result.ret,
@@ -1256,6 +1294,10 @@ async function main(argv: string[]): Promise<void> {
     })
     writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
       command: args.command,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       summary: summarizeCapCutCollectionTemplates(result),
     })
     console.log(`[jimeng-browser-proxy] capcut-collection-templates saved count=${result.templates.length} hasMore=${result.hasMore ?? "unknown"}`)
@@ -1275,6 +1317,7 @@ async function main(argv: string[]): Promise<void> {
     }
     const request = buildCapCutTemplateDetailRequest(query)
     const runId = `capcut-template-detail-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
     if (args.dryRun) {
       writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
         command: args.command,
@@ -1282,19 +1325,35 @@ async function main(argv: string[]): Promise<void> {
         host: "https://edit-api-sg.capcut.com",
         query,
         request,
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
         browser_session_required: false,
       })
       writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
         command: args.command,
         endpoint: "/lv/v1/cc_web/plane/get_template_detail",
         request,
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
       })
       console.log("[jimeng-browser-proxy] capcut-template-detail dry run saved")
       return
     }
 
-    const result = await fetchCapCutTemplateDetail({ query })
+    const transport = createJimengHttpTransport({
+      mode: args.transportMode,
+      cassettePath,
+    })
+    const result = await fetchCapCutTemplateDetail({ fetch: transport.fetch, query })
     writeJson(path.join(dirs.rawDir, `${runId}.json`), {
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       endpoint: result.endpoint,
       http_status: result.httpStatus,
       ret: result.ret,
@@ -1306,6 +1365,10 @@ async function main(argv: string[]): Promise<void> {
     })
     writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
       command: args.command,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       summary: summarizeCapCutTemplateDetail(result),
     })
     console.log(`[jimeng-browser-proxy] capcut-template-detail saved templateId=${result.detail.templateId} templateUrl=${result.detail.templateUrlPresent ? "yes" : "no"}`)
@@ -1316,6 +1379,7 @@ async function main(argv: string[]): Promise<void> {
     const dirs = ensureOutputDirs(path.resolve(args.outDir))
     const urls = capCutTemplateStaticCatalogUrls()
     const runId = `capcut-template-metadata-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
     if (args.dryRun) {
       writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
         command: args.command,
@@ -1323,14 +1387,26 @@ async function main(argv: string[]): Promise<void> {
           `GET ${urls.ratioCatalogUrl}`,
           `GET ${urls.sceneCatalogUrl}`,
         ],
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
         browser_session_required: false,
       })
       console.log(`[jimeng-browser-proxy] capcut-template-metadata dry run saved`)
       return
     }
 
-    const result = await fetchCapCutTemplateStaticCatalog()
+    const transport = createJimengHttpTransport({
+      mode: args.transportMode,
+      cassettePath,
+    })
+    const result = await fetchCapCutTemplateStaticCatalog({ fetch: transport.fetch })
     writeJson(path.join(dirs.rawDir, `${runId}.json`), {
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       ratio_catalog_url: result.ratioCatalogUrl,
       scene_catalog_url: result.sceneCatalogUrl,
       ratios_http_status: result.ratiosHttpStatus,
@@ -1342,6 +1418,10 @@ async function main(argv: string[]): Promise<void> {
     })
     writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
       command: args.command,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       summary: summarizeCapCutTemplateStaticCatalog(result),
     })
     console.log(`[jimeng-browser-proxy] capcut-template-metadata saved ratios=${result.ratios.length} scenes=${result.scenes.length}`)
@@ -1367,6 +1447,7 @@ async function main(argv: string[]): Promise<void> {
       request: buildCapCutEditorCatalogRequest(endpoint, query),
     }]))
     const runId = `capcut-editor-catalog-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
     if (args.dryRun) {
       writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
         command: args.command,
@@ -1374,19 +1455,35 @@ async function main(argv: string[]): Promise<void> {
         host: "https://edit-api-sg.capcut.com",
         query,
         requests,
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
         browser_session_required: false,
       })
       writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
         command: args.command,
         endpoints,
         requests,
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
       })
       console.log(`[jimeng-browser-proxy] capcut-editor-catalog dry run saved endpoints=${endpoints.join(",")}`)
       return
     }
 
-    const result = await fetchCapCutEditorCatalog({ query })
+    const transport = createJimengHttpTransport({
+      mode: args.transportMode,
+      cassettePath,
+    })
+    const result = await fetchCapCutEditorCatalog({ fetch: transport.fetch, query })
     writeJson(path.join(dirs.rawDir, `${runId}.json`), {
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       endpoints: result.endpoints,
       results: result.results.map((item) => ({
         endpoint_id: item.endpointId,
@@ -1405,6 +1502,10 @@ async function main(argv: string[]): Promise<void> {
     const summary = summarizeCapCutEditorCatalog(result)
     writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
       command: args.command,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       summary,
     })
     const totals = result.results.reduce((acc, item) => ({
@@ -1424,6 +1525,7 @@ async function main(argv: string[]): Promise<void> {
       : buildSingleCapCutEndpointProbeVariant(args.body!)
     const dirs = ensureOutputDirs(path.resolve(args.outDir))
     const runId = `capcut-probe-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
     const probe = {
       endpoint: args.endpoint,
       method: args.method,
@@ -1437,9 +1539,17 @@ async function main(argv: string[]): Promise<void> {
         host: "https://edit-api-sg.capcut.com",
         probe,
         warning: "Local-only signed CapCut replay plan. Use only read-oriented /lv/v1/cc_web/* endpoints.",
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
       })
       writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
         command: args.command,
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
         probe: {
           endpoint: probe.endpoint,
           method: probe.method ?? "POST",
@@ -1452,8 +1562,16 @@ async function main(argv: string[]): Promise<void> {
       return
     }
 
-    const result = await runCapCutEndpointProbe({ probe })
+    const transport = createJimengHttpTransport({
+      mode: args.transportMode,
+      cassettePath,
+    })
+    const result = await runCapCutEndpointProbe({ fetch: transport.fetch, probe })
     writeJson(path.join(dirs.rawDir, `${runId}.json`), {
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       endpoint: result.endpoint,
       url: result.url,
       method: result.method,
@@ -1469,6 +1587,10 @@ async function main(argv: string[]): Promise<void> {
     })
     writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
       command: args.command,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       summary: summarizeCapCutEndpointProbe(result),
     })
     console.log(`[jimeng-browser-proxy] capcut-probe saved variants=${result.results.length} rets=${result.results.map((item) => `${item.name}:${item.ret ?? "none"}`).join(",")}`)
@@ -3726,6 +3848,7 @@ async function main(argv: string[]): Promise<void> {
     const dirs = ensureOutputDirs(path.resolve(args.outDir))
     const request = buildCapCutTemplateCategoriesRequest()
     const runId = `capcut-categories-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
     if (args.dryRun) {
       writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
         command: args.command,
@@ -3734,13 +3857,22 @@ async function main(argv: string[]): Promise<void> {
         request,
         capcut_lan: args.capcutLan ?? "en",
         capcut_loc: args.capcutLoc ?? "us",
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
         browser_session: redactSession(session),
       })
       console.log(`[jimeng-browser-proxy] capcut-categories dry run saved`)
       return
     }
 
+    const transport = createJimengHttpTransport({
+      mode: args.transportMode,
+      cassettePath,
+    })
     const result = await fetchCapCutTemplateCategories({
+      fetch: transport.fetch,
       session,
       query: {
         lan: args.capcutLan,
@@ -3748,6 +3880,10 @@ async function main(argv: string[]): Promise<void> {
       },
     })
     writeJson(path.join(dirs.rawDir, `${runId}.json`), {
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       host: result.host,
       http_status: result.httpStatus,
       ret: result.ret,
@@ -3761,6 +3897,10 @@ async function main(argv: string[]): Promise<void> {
       command: args.command,
       endpoint: result.endpoint,
       host: result.host,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       http_status: result.httpStatus,
       ret: result.ret,
       errmsg: result.errmsg,

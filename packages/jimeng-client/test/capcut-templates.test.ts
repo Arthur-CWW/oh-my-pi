@@ -1,4 +1,7 @@
 import { createHash } from "node:crypto"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import path from "node:path"
 import { describe, expect, test } from "bun:test"
 import {
   buildCapCutCollectionTemplatesRequest,
@@ -8,6 +11,7 @@ import {
   buildCapCutTemplateCollectionsRequest,
   buildCapCutTemplateDetailRequest,
   capCutTemplateStaticCatalogUrls,
+  createJimengHttpTransport,
   fetchCapCutCollectionTemplates,
   fetchCapCutTemplateCollections,
   fetchCapCutTemplateCategories,
@@ -22,6 +26,7 @@ import {
   parseCapCutTemplateRatioCatalogBody,
   parseCapCutTemplateSceneCatalogBody,
   parseCapCutEndpointProbeVariants,
+  readJimengHttpCassette,
   runCapCutEndpointProbe,
   summarizeCapCutCollectionTemplates,
   summarizeCapCutEndpointProbe,
@@ -535,6 +540,114 @@ describe("CapCut commercial template helpers", () => {
     })
 
     expect(requests[0]?.url).toBe("https://feed-api-sg.capcut.com/lv/v2/cc_web_task/get_task_draft")
+  })
+
+  test("records and replays CapCut template catalog helpers through HTTP cassettes", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "jimeng-capcut-cassette-"))
+    const cassettePath = path.join(dir, "capcut-template-catalog.json")
+    const requests: Array<{ url: string; init?: RequestInit }> = []
+    try {
+      const recordTransport = createJimengHttpTransport({
+        mode: "record",
+        cassettePath,
+        nowIso: () => "2026-06-11T00:00:00.000Z",
+        fetch: mockFetchSequence([
+          JSON.stringify(capCutCategoriesBody()),
+          JSON.stringify(capCutCollectionsBody()),
+          JSON.stringify(capCutCollectionTemplatesBody()),
+          JSON.stringify(capCutTemplateDetailBody()),
+          JSON.stringify(capCutRatioCatalogBody()),
+          JSON.stringify(capCutSceneCatalogBody()),
+          JSON.stringify({
+            ret: "0",
+            errmsg: "success",
+            data: {
+              item_list: [{ web_id: "template-1", cover_url: "https://signed.example.invalid/cover.png?x-signature=secret" }],
+            },
+          }),
+        ], requests),
+      })
+
+      await fetchCapCutTemplateCategories({
+        fetch: recordTransport.fetch,
+        session,
+        query: { lan: "en", loc: "us" },
+      })
+      await fetchCapCutTemplateCollections({
+        fetch: recordTransport.fetch,
+        query: { lan: "en", loc: "us" },
+      })
+      await fetchCapCutCollectionTemplates({
+        fetch: recordTransport.fetch,
+        query: { collectionId: 10034, count: 5, lan: "en", loc: "us" },
+      })
+      await fetchCapCutTemplateDetail({
+        fetch: recordTransport.fetch,
+        query: { templateId: "7369116096600771846", needDraft: false },
+      })
+      await fetchCapCutTemplateStaticCatalog({ fetch: recordTransport.fetch, userAgent: "UnitTest/1.0" })
+      await runCapCutEndpointProbe({
+        fetch: recordTransport.fetch,
+        probe: {
+          endpoint: "/lv/v1/cc_web/plane/fuzzy_search_templates",
+          variants: [{ name: "keyword", body: { sdk_version: "16.1.0", keyword: "makeup" } }],
+          lan: "en",
+          loc: "us",
+          userAgent: "UnitTest/1.0",
+        },
+      })
+
+      expect(readJimengHttpCassette(cassettePath).entries).toHaveLength(7)
+      expect(requests.map((request) => request.url)).toEqual([
+        "https://edit-api-sg.capcut.com/lv/v1/cc_web/plane/get_categories",
+        "https://edit-api-sg.capcut.com/lv/v1/cc_web/plane/get_collections",
+        "https://edit-api-sg.capcut.com/lv/v1/cc_web/plane/get_collection_templates",
+        "https://edit-api-sg.capcut.com/lv/v1/cc_web/plane/get_template_detail",
+        "https://lf16-beecdn.ibytedtos.com/obj/ies-fe-bee-sg/bee_prod/biz_49/bee_prod_49_bee_publish_709.json",
+        "https://lf16-beecdn.ibytedtos.com/obj/ies-fe-bee-sg/bee_prod/biz_149/bee_prod_149_bee_publish_835.json",
+        "https://edit-api-sg.capcut.com/lv/v1/cc_web/plane/fuzzy_search_templates",
+      ])
+
+      const replayTransport = createJimengHttpTransport({ mode: "replay", cassettePath })
+      const categories = await fetchCapCutTemplateCategories({
+        fetch: replayTransport.fetch,
+        session,
+        query: { lan: "en", loc: "us" },
+      })
+      const collections = await fetchCapCutTemplateCollections({
+        fetch: replayTransport.fetch,
+        query: { lan: "en", loc: "us" },
+      })
+      const templates = await fetchCapCutCollectionTemplates({
+        fetch: replayTransport.fetch,
+        query: { collectionId: 10034, count: 5, lan: "en", loc: "us" },
+      })
+      const detail = await fetchCapCutTemplateDetail({
+        fetch: replayTransport.fetch,
+        query: { templateId: "7369116096600771846", needDraft: false },
+      })
+      const metadata = await fetchCapCutTemplateStaticCatalog({ fetch: replayTransport.fetch, userAgent: "UnitTest/1.0" })
+      const probe = await runCapCutEndpointProbe({
+        fetch: replayTransport.fetch,
+        probe: {
+          endpoint: "/lv/v1/cc_web/plane/fuzzy_search_templates",
+          variants: [{ name: "keyword", body: { sdk_version: "16.1.0", keyword: "makeup" } }],
+          lan: "en",
+          loc: "us",
+          userAgent: "UnitTest/1.0",
+        },
+      })
+
+      expect(categories.categories).toHaveLength(2)
+      expect(collections.collections[0]?.id).toBe(10034)
+      expect(templates.templates[0]?.id).toBe("7369116096600771846")
+      expect(detail.detail.templateUrlPresent).toBe(true)
+      expect(metadata.scenes).toHaveLength(2)
+      expect(probe.results[0]?.ret).toBe("0")
+      expect(JSON.stringify(summarizeCapCutEndpointProbe(probe))).not.toContain("signed.example.invalid")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   test("rejects unsafe CapCut probe endpoints", async () => {
