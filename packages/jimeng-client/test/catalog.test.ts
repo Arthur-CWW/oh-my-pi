@@ -1,9 +1,14 @@
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import path from "node:path"
 import { describe, expect, test } from "bun:test"
 import {
+  createJimengHttpTransport,
   fetchVoiceLibraryFromCapture,
   fetchLipSyncConfigs,
   generateTextToSpeech,
   parseCatalogEndpointIds,
+  readJimengHttpCassette,
   summarizeLipSyncConfigs,
   type CaptureFile,
   type JimengFetch,
@@ -154,6 +159,83 @@ describe("Jimeng catalog helpers", () => {
       },
     })
   })
+
+  test("can run voice catalog helpers through recorded and replayed HTTP transport cassettes", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "jimeng-catalog-cassette-"))
+    try {
+      const cassettePath = path.join(dir, "catalog.json")
+      const requests: Array<{ url: string; init?: RequestInit }> = []
+      const recordTransport = createJimengHttpTransport({
+        mode: "record",
+        cassettePath,
+        fetch: mockFetchSequence([
+          JSON.stringify(lipSyncImageConfigBody()),
+          JSON.stringify(lipSyncVideoConfigBody()),
+          JSON.stringify(voiceLibraryBody()),
+          JSON.stringify(ttsBody()),
+        ], requests),
+        nowIso: () => "2026-06-11T00:00:00.000Z",
+      })
+
+      const configs = await fetchLipSyncConfigs({
+        fetch: recordTransport.fetch,
+        session,
+      })
+      const library = await fetchVoiceLibraryFromCapture({
+        fetch: recordTransport.fetch,
+        session,
+        capture: voiceCapture(),
+      })
+      const tts = await generateTextToSpeech({
+        fetch: recordTransport.fetch,
+        session,
+        tts: {
+          text: "这条视频值得试一下。",
+          voiceId: "voice-001",
+          itemPlatform: 1,
+        },
+      })
+
+      expect(configs.image.endpoint).toBe("lip-sync-image-config")
+      expect(library.voices).toHaveLength(1)
+      expect(new TextDecoder().decode(tts.audioBytes)).toBe("mp3-bytes")
+      expect(readJimengHttpCassette(cassettePath).entries).toHaveLength(4)
+      expect(requests).toHaveLength(4)
+
+      const replayTransport = createJimengHttpTransport({
+        mode: "replay",
+        cassettePath,
+      })
+      const replayedConfigs = await fetchLipSyncConfigs({
+        fetch: replayTransport.fetch,
+        session,
+      })
+      const replayedLibrary = await fetchVoiceLibraryFromCapture({
+        fetch: replayTransport.fetch,
+        session,
+        capture: voiceCapture(),
+      })
+      const replayedTts = await generateTextToSpeech({
+        fetch: replayTransport.fetch,
+        session,
+        tts: {
+          text: "这条视频值得试一下。",
+          voiceId: "voice-001",
+          itemPlatform: 1,
+        },
+      })
+      const summary = summarizeLipSyncConfigs(replayedConfigs)
+
+      expect(summary).toMatchObject({
+        image: { endpoint: "lip-sync-image-config" },
+        video: { endpoint: "lip-sync-video-config" },
+      })
+      expect(replayedLibrary.voices[0]?.speakerId).toBe("saturn-speaker")
+      expect(new TextDecoder().decode(replayedTts.audioBytes)).toBe("mp3-bytes")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
 })
 
 function voiceCapture(): CaptureFile {
@@ -178,6 +260,49 @@ function mockFetchSequence(texts: string[], requests: Array<{ url: string; init?
     requests.push({ url, init })
     const text = texts.shift()
     return new Response(text ?? "{}", { status: 200 })
+  }
+}
+
+function voiceLibraryBody() {
+  return {
+    ret: "0",
+    errmsg: "success",
+    data: {
+      item_list: [
+        {
+          common_attr: {
+            id: "voice-001",
+            title: "直爽女大",
+            effect_type: 209,
+            loki_effect_id: "178740584",
+            web_extra: JSON.stringify({
+              tonetype: JSON.stringify({
+                tag_list: [
+                  { type: "language", value: "普通话" },
+                  { type: "gender", value: "女" },
+                ],
+                tts_model_info_map: {
+                  tts_model_v3: {
+                    speaker_id: "saturn-speaker",
+                    emotion: [{ emotion: "happy", speaker_id: "saturn-happy" }],
+                  },
+                },
+              }),
+            }),
+          },
+        },
+      ],
+    },
+  }
+}
+
+function ttsBody() {
+  return {
+    ret: "0",
+    errmsg: "success",
+    data: {
+      data: Buffer.from("mp3-bytes").toString("base64"),
+    },
   }
 }
 

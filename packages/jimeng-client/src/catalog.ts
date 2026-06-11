@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto"
 import { type CaptureFile, type CaptureRequestEntry, type JimengSessionBundle, buildHeaders } from "./capture"
-import { assertNoRiskError, JimengClient } from "./client"
+import { assertNoRiskError, JimengClient, type JimengFetch } from "./client"
 import { jimengError } from "./errors"
 
 const DEFAULT_QUERY = "aid=513695&web_version=7.5.0&da_version=3.3.17&aigc_features=app_lip_sync"
@@ -149,10 +149,11 @@ export function parseCatalogEndpointIds(value: string | undefined): JimengCatalo
 
 export async function runCatalogProbe(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   session: JimengSessionBundle
   endpointIds?: JimengCatalogEndpointId[]
 }): Promise<JimengCatalogProbeResult[]> {
-  const client = input.client ?? new JimengClient()
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
   const requested = new Set(input.endpointIds ?? JIMENG_CATALOG_ENDPOINTS.map((endpoint) => endpoint.id))
   const results: JimengCatalogProbeResult[] = []
 
@@ -185,10 +186,12 @@ export async function runCatalogProbe(input: {
 
 export async function fetchLipSyncConfigs(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   session: JimengSessionBundle
 }): Promise<JimengLipSyncConfigResult> {
   const results = await runCatalogProbe({
     client: input.client,
+    fetch: input.fetch,
     session: input.session,
     endpointIds: ["lip-sync-image-config", "lip-sync-video-config"],
   })
@@ -218,6 +221,7 @@ export function findVoiceLibraryRequest(capture: CaptureFile): CaptureRequestEnt
 
 export async function fetchVoiceLibraryFromCapture(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   session: JimengSessionBundle
   capture: CaptureFile
 }): Promise<{ request: CaptureRequestEntry; body: unknown; voices: JimengVoiceCatalogItem[]; responseTextSha256: string; httpStatus: number }> {
@@ -231,7 +235,7 @@ export async function fetchVoiceLibraryFromCapture(input: {
     })
   }
 
-  const client = input.client ?? new JimengClient()
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
   const response = await client.requestText(request.url, {
     method: "POST",
     headers: buildVoiceFeedHeaders(request, input.session),
@@ -251,10 +255,11 @@ export async function fetchVoiceLibraryFromCapture(input: {
 
 export async function generateTextToSpeech(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   session: JimengSessionBundle
   tts: JimengTtsInput
 }): Promise<JimengTtsResult> {
-  const client = input.client ?? new JimengClient()
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
   const itemPlatform = input.tts.itemPlatform ?? 1
   const response = await client.requestText(`https://jimeng.jianying.com/mweb/v1/tts_generate?${DEFAULT_QUERY}`, {
     method: "POST",

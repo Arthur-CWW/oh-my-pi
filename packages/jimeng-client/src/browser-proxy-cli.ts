@@ -2793,18 +2793,50 @@ async function main(argv: string[]): Promise<void> {
   if (args.command === "catalog") {
     const dirs = ensureOutputDirs(path.resolve(args.outDir))
     const endpointIds = parseCatalogEndpointIds(args.endpoints)
-    const results = await runCatalogProbe({ session, endpointIds })
     const runId = `catalog-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
-    writeJson(path.join(dirs.rawDir, `${runId}.json`), results)
-    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), results.map((result) => ({
-      endpoint: result.endpoint,
-      description: result.description,
-      http_status: result.httpStatus,
-      ret: result.ret,
-      errmsg: result.errmsg,
-      response_text_sha256: result.responseTextSha256,
-      summary: result.summary,
-    })))
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
+    if (args.dryRun) {
+      writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
+        command: args.command,
+        endpoint_ids: endpointIds,
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
+        browser_session: redactSession(session),
+      })
+      console.log(`[jimeng-browser-proxy] catalog dry run saved endpoints=${endpointIds.length}`)
+      return
+    }
+
+    const transport = createJimengHttpTransport({
+      mode: args.transportMode,
+      cassettePath,
+    })
+    const results = await runCatalogProbe({ fetch: transport.fetch, session, endpointIds })
+    writeJson(path.join(dirs.rawDir, `${runId}.json`), {
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
+      results,
+    })
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
+      results: results.map((result) => ({
+        endpoint: result.endpoint,
+        description: result.description,
+        http_status: result.httpStatus,
+        ret: result.ret,
+        errmsg: result.errmsg,
+        response_text_sha256: result.responseTextSha256,
+        summary: result.summary,
+      })),
+    })
     console.log(`[jimeng-browser-proxy] catalog saved endpoints=${results.length}`)
     return
   }
@@ -2812,6 +2844,7 @@ async function main(argv: string[]): Promise<void> {
   if (args.command === "lip-sync-config") {
     const dirs = ensureOutputDirs(path.resolve(args.outDir))
     const runId = `lip-sync-config-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
     if (args.dryRun) {
       writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
         command: args.command,
@@ -2819,14 +2852,26 @@ async function main(argv: string[]): Promise<void> {
           "/mweb/v1/video_generate/get_common_config scene=lip_sync_image_generate_video",
           "/mweb/v1/video_generate/get_common_config scene=lip_sync_video_generate_video",
         ],
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
         browser_session: redactSession(session),
       })
       console.log(`[jimeng-browser-proxy] lip-sync-config dry run saved`)
       return
     }
 
-    const result = await fetchLipSyncConfigs({ session })
+    const transport = createJimengHttpTransport({
+      mode: args.transportMode,
+      cassettePath,
+    })
+    const result = await fetchLipSyncConfigs({ fetch: transport.fetch, session })
     writeJson(path.join(dirs.rawDir, `${runId}.json`), {
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       image: {
         url: result.image.url,
         http_status: result.image.httpStatus,
@@ -2846,6 +2891,10 @@ async function main(argv: string[]): Promise<void> {
     })
     writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
       command: args.command,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       summary: summarizeLipSyncConfigs(result),
     })
     const imageModels = Array.isArray(result.image.summary.models) ? result.image.summary.models.length : 0
@@ -2857,14 +2906,27 @@ async function main(argv: string[]): Promise<void> {
   if (args.command === "voices") {
     const dirs = ensureOutputDirs(path.resolve(args.outDir))
     const capture = readVoiceCapture(args.capture)
-    const result = await fetchVoiceLibraryFromCapture({ session, capture })
     const runId = `voices-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
+    const transport = createJimengHttpTransport({
+      mode: args.transportMode,
+      cassettePath,
+    })
+    const result = await fetchVoiceLibraryFromCapture({ fetch: transport.fetch, session, capture })
     writeJson(path.join(dirs.rawDir, `${runId}.json`), {
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       http_status: result.httpStatus,
       response_text_sha256: result.responseTextSha256,
       body: result.body,
     })
     writeJson(path.join(dirs.normalizedDir, `${runId}-voices.json`), {
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       response_text_sha256: result.responseTextSha256,
       summary: summarizeVoiceLibrary(result.voices),
       voices: result.voices,
@@ -3074,6 +3136,8 @@ async function main(argv: string[]): Promise<void> {
     if (!args.voiceId) throw new Error("--voice-id is required")
     const text = args.text ?? "这条视频值得试一下。"
     const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const runId = `tts-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
     const plan = {
       command: args.command,
       endpoint: "/mweb/v1/tts_generate",
@@ -3081,16 +3145,24 @@ async function main(argv: string[]): Promise<void> {
       voice_id: args.voiceId,
       voice_title: args.voiceTitle,
       item_platform: args.itemPlatform ?? 1,
+      transport: {
+        mode: args.transportMode,
+        cassette_path: cassettePath ?? null,
+      },
       browser_session: redactSession(session),
     }
-    const runId = `tts-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
     if (args.dryRun) {
       writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), plan)
       console.log(`[jimeng-browser-proxy] tts dry run saved`)
       return
     }
 
+    const transport = createJimengHttpTransport({
+      mode: args.transportMode,
+      cassettePath,
+    })
     const result = await generateTextToSpeech({
+      fetch: transport.fetch,
       session,
       tts: { text, voiceId: args.voiceId, itemPlatform: args.itemPlatform },
     })
@@ -3102,6 +3174,10 @@ async function main(argv: string[]): Promise<void> {
       ret: result.ret,
       errmsg: result.errmsg,
       response_text_sha256: result.responseTextSha256,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       artifact: file,
       bytes: result.audioBytes.length,
     }))
@@ -3111,8 +3187,14 @@ async function main(argv: string[]): Promise<void> {
 
   if (args.command === "sample-voices") {
     const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const runId = `sample-voices-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
+    const transport = createJimengHttpTransport({
+      mode: args.transportMode,
+      cassettePath,
+    })
     const capture = readVoiceCapture(args.capture)
-    const library = await fetchVoiceLibraryFromCapture({ session, capture })
+    const library = await fetchVoiceLibraryFromCapture({ fetch: transport.fetch, session, capture })
     const text = args.text ?? "这条视频值得试一下。"
     const voices = typeof args.limit === "number" ? library.voices.slice(0, args.limit) : library.voices
     const plan = {
@@ -3121,9 +3203,12 @@ async function main(argv: string[]): Promise<void> {
       text,
       voice_count: voices.length,
       dry_run: args.dryRun,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       browser_session: redactSession(session),
     }
-    const runId = `sample-voices-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
     if (args.dryRun) {
       writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), { ...plan, voices })
       console.log(`[jimeng-browser-proxy] sample-voices dry run saved count=${voices.length}`)
@@ -3142,6 +3227,7 @@ async function main(argv: string[]): Promise<void> {
     for (let i = 0; i < voices.length; i += 1) {
       const voice = voices[i]!
       const result = await generateTextToSpeech({
+        fetch: transport.fetch,
         session,
         tts: { text, voiceId: voice.id, itemPlatform: voice.itemPlatform },
       })
