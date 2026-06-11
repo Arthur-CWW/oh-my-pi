@@ -458,6 +458,7 @@ Subject/persona voice generation is request-shaped but not live-submitted:
 - `jimeng-browser-proxy subject-generate-voice --dryRun`
 - frontend bundle evidence maps `generateSubjectVoice({imageUri})` to `/mweb/v1/dreamina_subject/generate_voice` with request body `{"image_uri":"tos-cn-i-..."}`
 - proof bundle: `data/jimeng-lab/proof-20260610-subject-lifecycle/`
+- this dry-run plan is now sessionless/no-browser; latest smoke proof: `data/jimeng-lab/cli-sessionless-dryruns/`
 - live submit is disabled because it may consume generation quota and still needs explicit spend approval or a captured UI submit
 
 Custom voice clone coverage is now partially implemented and proved:
@@ -471,9 +472,10 @@ Custom voice clone coverage is now partially implemented and proved:
   - cloned voice assets: `/mweb/v1/get_user_local_item_list` with `effect_type=218`, `filter_opt.clone_voice_status=[1,2]`
   - voice clone submit: `/mweb/v1/voice/submit_task` with `scene=1`, `voice_clone.audio`, `voice_clone.name`
   - voice task query: `/mweb/v1/voice/query_task` with `task_id_list`
-  - voice update/delete: `/mweb/v1/voice/update` and `/mweb/v1/voice/delete` with `local_item_id`
+- voice update/delete: `/mweb/v1/voice/update` and `/mweb/v1/voice/delete` with `local_item_id`
 - live no-spend asset proof returned `ret=0`, `errmsg=success`, `voice_count=0`, `next_offset=50`
 - proof bundle: `data/jimeng-lab/proof-20260610-voice-clone/`
+- submit/query dry-run/update/delete request plans are now sessionless/no-browser; latest smoke proof: `data/jimeng-lab/cli-sessionless-dryruns/`
 - submit/update/delete remain dry-run-only because they may create or mutate account assets; enable live only after background CDP capture and explicit approval or a disposable fixture
 
 Workspace/workbench asset listing is now live-proved without generation spend:

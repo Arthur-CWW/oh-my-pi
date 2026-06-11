@@ -1789,6 +1789,141 @@ async function main(argv: string[]): Promise<void> {
     return
   }
 
+  if (args.command === "voice-clone-submit") {
+    if (!args.dryRun) throw new Error("voice-clone-submit live submit is disabled until explicit spend approval/capture; pass --dryRun")
+    if (!args.audioVid) throw new Error("voice-clone-submit requires --audioVid from upload-video/audio upload")
+    if (!args.name) throw new Error("voice-clone-submit requires --name")
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const request = buildJimengVoiceCloneSubmitRequest({
+      audio: {
+        vid: args.audioVid,
+        audioUrl: args.audioUrl,
+        duration: args.audioDurationSec,
+        title: args.audioTitle,
+      },
+      name: args.name,
+    })
+    const runId = `voice-clone-submit-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${Math.random().toString(36).slice(2, 8)}`
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
+    const plan = {
+      command: args.command,
+      status: "dry-run-only",
+      reason: "Frontend bundle confirms /mweb/v1/voice/submit_task scene=1 for voice cloning, but live submit may consume quota or create account assets. Capture/approve the UI flow before enabling.",
+      endpoint_sequence: ["/mweb/v1/voice/submit_task"],
+      request,
+      transport: {
+        mode: args.transportMode,
+        cassette_path: cassettePath ?? null,
+      },
+      browser_session_required: false,
+    }
+    writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), plan)
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), plan)
+    console.log(`[jimeng-browser-proxy] voice-clone-submit dry run saved`)
+    return
+  }
+
+  if (args.command === "voice-clone-query" && args.dryRun) {
+    const taskIds = args.taskIds ?? []
+    if (taskIds.length === 0) throw new Error("voice-clone-query requires --taskIds")
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const request = buildJimengVoiceTaskQueryRequest({ taskIds })
+    const runId = `voice-clone-query-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${Math.random().toString(36).slice(2, 8)}`
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
+    const plan = {
+      command: args.command,
+      status: "dry-run",
+      reason: "Task query shape is frontend-confirmed; live query is no-spend once a real task id is available.",
+      endpoint_sequence: ["/mweb/v1/voice/query_task"],
+      request,
+      transport: {
+        mode: args.transportMode,
+        cassette_path: cassettePath ?? null,
+      },
+      browser_session_required: false,
+    }
+    writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), plan)
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), plan)
+    console.log(`[jimeng-browser-proxy] voice-clone-query dry run saved`)
+    return
+  }
+
+  if (args.command === "voice-clone-update") {
+    if (!args.dryRun) throw new Error("voice-clone-update live mutation is disabled until a disposable cloned voice fixture exists; pass --dryRun")
+    if (!args.voiceId) throw new Error("voice-clone-update requires --voice-id")
+    if (!args.name) throw new Error("voice-clone-update requires --name")
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const request = buildJimengClonedVoiceUpdateRequest({ voiceId: args.voiceId, name: args.name })
+    const runId = `voice-clone-update-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${Math.random().toString(36).slice(2, 8)}`
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
+    const plan = {
+      command: args.command,
+      status: "dry-run-only",
+      reason: "Update mutates account voice assets; enable live only after a real cloned voice fixture exists and Arthur approves mutation.",
+      endpoint_sequence: ["/mweb/v1/voice/update"],
+      request,
+      transport: {
+        mode: args.transportMode,
+        cassette_path: cassettePath ?? null,
+      },
+      browser_session_required: false,
+    }
+    writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), plan)
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), plan)
+    console.log(`[jimeng-browser-proxy] voice-clone-update dry run saved`)
+    return
+  }
+
+  if (args.command === "voice-clone-delete") {
+    if (!args.dryRun) throw new Error("voice-clone-delete live mutation is disabled until a disposable cloned voice fixture exists; pass --dryRun")
+    if (!args.voiceId) throw new Error("voice-clone-delete requires --voice-id")
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const request = buildJimengClonedVoiceDeleteRequest({ voiceId: args.voiceId })
+    const runId = `voice-clone-delete-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${Math.random().toString(36).slice(2, 8)}`
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
+    const plan = {
+      command: args.command,
+      status: "dry-run-only",
+      reason: "Delete mutates account voice assets; enable live only after a disposable cloned voice fixture exists and Arthur approves mutation.",
+      endpoint_sequence: ["/mweb/v1/voice/delete"],
+      request,
+      transport: {
+        mode: args.transportMode,
+        cassette_path: cassettePath ?? null,
+      },
+      browser_session_required: false,
+    }
+    writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), plan)
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), plan)
+    console.log(`[jimeng-browser-proxy] voice-clone-delete dry run saved`)
+    return
+  }
+
+  if (args.command === "subject-generate-voice") {
+    if (!args.dryRun) throw new Error("subject-generate-voice live submit is disabled until explicit spend approval/capture; pass --dryRun")
+    if (!args.imageUri) throw new Error("subject-generate-voice requires --imageUri")
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const runId = `subject-generate-voice-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${Math.random().toString(36).slice(2, 8)}`
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
+    const request = buildJimengSubjectVoiceRequest({ imageUri: args.imageUri })
+    const plan = {
+      command: args.command,
+      status: "dry-run-only",
+      reason: "Frontend bundle confirms /mweb/v1/dreamina_subject/generate_voice accepts imageUri, but live generation may consume quota and still needs explicit spend approval or a captured UI submit.",
+      endpoint_sequence: ["/mweb/v1/dreamina_subject/generate_voice"],
+      request,
+      transport: {
+        mode: args.transportMode,
+        cassette_path: cassettePath ?? null,
+      },
+      browser_session_required: false,
+    }
+    writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), plan)
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), plan)
+    console.log(`[jimeng-browser-proxy] subject-generate-voice dry run saved`)
+    return
+  }
+
   const session = await loadSession(args)
 
   if (args.command === "endpoint-probe") {
@@ -3353,40 +3488,6 @@ async function main(argv: string[]): Promise<void> {
     return
   }
 
-  if (args.command === "voice-clone-submit") {
-    if (!args.dryRun) throw new Error("voice-clone-submit live submit is disabled until explicit spend approval/capture; pass --dryRun")
-    if (!args.audioVid) throw new Error("voice-clone-submit requires --audioVid from upload-video/audio upload")
-    if (!args.name) throw new Error("voice-clone-submit requires --name")
-    const dirs = ensureOutputDirs(path.resolve(args.outDir))
-    const request = buildJimengVoiceCloneSubmitRequest({
-      audio: {
-        vid: args.audioVid,
-        audioUrl: args.audioUrl,
-        duration: args.audioDurationSec,
-        title: args.audioTitle,
-      },
-      name: args.name,
-    })
-    const runId = `voice-clone-submit-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${Math.random().toString(36).slice(2, 8)}`
-    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
-    const plan = {
-      command: args.command,
-      status: "dry-run-only",
-      reason: "Frontend bundle confirms /mweb/v1/voice/submit_task scene=1 for voice cloning, but live submit may consume quota or create account assets. Capture/approve the UI flow before enabling.",
-      endpoint_sequence: ["/mweb/v1/voice/submit_task"],
-      request,
-      transport: {
-        mode: args.transportMode,
-        cassette_path: cassettePath ?? null,
-      },
-      browser_session: redactSession(session),
-    }
-    writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), plan)
-    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), plan)
-    console.log(`[jimeng-browser-proxy] voice-clone-submit dry run saved`)
-    return
-  }
-
   if (args.command === "voice-clone-query") {
     const taskIds = args.taskIds ?? []
     if (taskIds.length === 0) throw new Error("voice-clone-query requires --taskIds")
@@ -3442,57 +3543,6 @@ async function main(argv: string[]): Promise<void> {
       summary: summarizeJimengVoiceTaskQuery(result),
     })
     console.log(`[jimeng-browser-proxy] voice-clone-query saved tasks=${result.tasks.length}`)
-    return
-  }
-
-  if (args.command === "voice-clone-update") {
-    if (!args.dryRun) throw new Error("voice-clone-update live mutation is disabled until a disposable cloned voice fixture exists; pass --dryRun")
-    if (!args.voiceId) throw new Error("voice-clone-update requires --voice-id")
-    if (!args.name) throw new Error("voice-clone-update requires --name")
-    const dirs = ensureOutputDirs(path.resolve(args.outDir))
-    const request = buildJimengClonedVoiceUpdateRequest({ voiceId: args.voiceId, name: args.name })
-    const runId = `voice-clone-update-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${Math.random().toString(36).slice(2, 8)}`
-    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
-    const plan = {
-      command: args.command,
-      status: "dry-run-only",
-      reason: "Update mutates account voice assets; enable live only after a real cloned voice fixture exists and Arthur approves mutation.",
-      endpoint_sequence: ["/mweb/v1/voice/update"],
-      request,
-      transport: {
-        mode: args.transportMode,
-        cassette_path: cassettePath ?? null,
-      },
-      browser_session: redactSession(session),
-    }
-    writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), plan)
-    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), plan)
-    console.log(`[jimeng-browser-proxy] voice-clone-update dry run saved`)
-    return
-  }
-
-  if (args.command === "voice-clone-delete") {
-    if (!args.dryRun) throw new Error("voice-clone-delete live mutation is disabled until a disposable cloned voice fixture exists; pass --dryRun")
-    if (!args.voiceId) throw new Error("voice-clone-delete requires --voice-id")
-    const dirs = ensureOutputDirs(path.resolve(args.outDir))
-    const request = buildJimengClonedVoiceDeleteRequest({ voiceId: args.voiceId })
-    const runId = `voice-clone-delete-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${Math.random().toString(36).slice(2, 8)}`
-    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
-    const plan = {
-      command: args.command,
-      status: "dry-run-only",
-      reason: "Delete mutates account voice assets; enable live only after a disposable cloned voice fixture exists and Arthur approves mutation.",
-      endpoint_sequence: ["/mweb/v1/voice/delete"],
-      request,
-      transport: {
-        mode: args.transportMode,
-        cassette_path: cassettePath ?? null,
-      },
-      browser_session: redactSession(session),
-    }
-    writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), plan)
-    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), plan)
-    console.log(`[jimeng-browser-proxy] voice-clone-delete dry run saved`)
     return
   }
 
@@ -4418,33 +4468,6 @@ async function main(argv: string[]): Promise<void> {
     })
     console.log(`[jimeng-browser-proxy] subject-delete saved count=${result.deletedSubjectIds.length}`)
     return
-  }
-
-  if (args.command === "subject-generate-voice") {
-    if (!args.imageUri) throw new Error("subject-generate-voice requires --imageUri")
-    const dirs = ensureOutputDirs(path.resolve(args.outDir))
-    const runId = `subject-generate-voice-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${Math.random().toString(36).slice(2, 8)}`
-    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
-    const request = buildJimengSubjectVoiceRequest({ imageUri: args.imageUri })
-    const plan = {
-      command: args.command,
-      status: "dry-run-only",
-      reason: "Frontend bundle confirms /mweb/v1/dreamina_subject/generate_voice accepts imageUri, but live generation may consume quota and still needs explicit spend approval or a captured UI submit.",
-      endpoint_sequence: ["/mweb/v1/dreamina_subject/generate_voice"],
-      request,
-      transport: {
-        mode: args.transportMode,
-        cassette_path: cassettePath ?? null,
-      },
-      browser_session: redactSession(session),
-    }
-    if (args.dryRun) {
-      writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), plan)
-      writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), plan)
-      console.log(`[jimeng-browser-proxy] subject-generate-voice dry run saved`)
-      return
-    }
-    throw new Error("subject-generate-voice live submit is disabled until explicit spend approval/capture; pass --dryRun")
   }
 
   if (args.command === "describe-image") {
