@@ -72,6 +72,8 @@ describe("Jimeng static inventory", () => {
           `const commerceTradeBlocked = "/commerce/v3/trade/query_trade";`,
           `const commerceCanRefundBlocked = "/commerce/v3/trade/user/can_refund_list";`,
           `const commerceRefundRecordsBlocked = "/commerce/v3/trade/user/refund_record_list";`,
+          `const noticeListBlocked = "/mweb/v1/get_notice_list";`,
+          `const panelInfoBlocked = "/mweb/v1/get_panel_info";`,
           `const researchSuggestImplemented = "/mweb/search/v1/sug";`,
           `const researchGuessImplemented = "/mweb/search/v1/guess";`,
           `const researchSearchImplemented = "/mweb/search/v1/search";`,
@@ -103,7 +105,7 @@ describe("Jimeng static inventory", () => {
       const summary = summarizeJimengStaticInventory(result)
       const markdown = writeJimengStaticInventoryMarkdown(result)
 
-      expect(result.totalResourceCount).toBe(77)
+      expect(result.totalResourceCount).toBe(79)
       expect(result.skippedImplementedCount).toBe(11)
       expect(result.items.map((item) => item.resource)).not.toContain("/mweb/v1/get_history_by_ids")
       expect(result.items.map((item) => item.resource)).not.toContain("/mweb/search/v1/sug")
@@ -152,6 +154,8 @@ describe("Jimeng static inventory", () => {
       expect(result.items.find((item) => item.resource === "/lv/v1/editor/plane/intelligence/query_recommend_template")?.knownStatus).toBe("blocked")
       expect(result.items.find((item) => item.resource === "/lv/v2/cc_web_task/get_task_draft")?.knownStatus).toBe("blocked")
       for (const endpoint of [
+        "/mweb/v1/get_notice_list",
+        "/mweb/v1/get_panel_info",
         "/commerce/v1/subscription/cc_price_list",
         "/commerce/v1/subscription/get_change_plan_info",
         "/commerce/v3/trade/query_trade",
@@ -216,6 +220,8 @@ describe("Jimeng static inventory", () => {
           `fetch("/commerce/v1/subscription/price_list");`,
           `fetch("/commerce/v1/purchase/price_list");`,
           `fetch("/commerce/v3/trade/query_trade");`,
+          `fetch("/mweb/v1/get_notice_list");`,
+          `fetch("/mweb/v1/get_panel_info");`,
         ].join("\n"),
         "utf8",
       )
@@ -242,6 +248,8 @@ describe("Jimeng static inventory", () => {
       expect(result.items.find((item) => item.resource === "/commerce/v1/subscription/price_list")?.knownCommand).toBe("commerce-pricing")
       expect(result.items.find((item) => item.resource === "/commerce/v1/purchase/price_list")?.knownCommand).toBe("commerce-pricing")
       expect(result.items.find((item) => item.resource === "/commerce/v3/trade/query_trade")?.knownStatus).toBe("blocked")
+      expect(result.items.find((item) => item.resource === "/mweb/v1/get_notice_list")?.knownStatus).toBe("blocked")
+      expect(result.items.find((item) => item.resource === "/mweb/v1/get_panel_info")?.knownStatus).toBe("blocked")
       for (const endpoint of [
         "/mweb/v1/get_user_info",
         "/mweb/v1/get_homepage",

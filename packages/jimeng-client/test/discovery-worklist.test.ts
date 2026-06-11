@@ -67,6 +67,8 @@ describe("Jimeng discovery worklist", () => {
           `fetch("/commerce/v3/trade/query_trade")`,
           `fetch("/commerce/v3/trade/user/can_refund_list")`,
           `fetch("/commerce/v3/trade/user/refund_record_list")`,
+          `fetch("/mweb/v1/get_notice_list")`,
+          `fetch("/mweb/v1/get_panel_info")`,
           `fetch("/mweb/search/v1/sug")`,
           `fetch("/mweb/search/v1/guess")`,
           `fetch("/mweb/search/v1/search")`,
@@ -189,6 +191,8 @@ describe("Jimeng discovery worklist", () => {
       expect(lvTaskDraft?.known_status).toBe("blocked")
       expect(lvTaskDraft?.reason).toContain("commercial-photo task id")
       for (const endpoint of [
+        "/mweb/v1/get_notice_list",
+        "/mweb/v1/get_panel_info",
         "/commerce/v1/subscription/cc_price_list",
         "/commerce/v1/subscription/get_change_plan_info",
         "/commerce/v3/trade/query_trade",

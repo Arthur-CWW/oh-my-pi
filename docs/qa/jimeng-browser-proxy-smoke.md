@@ -3517,6 +3517,51 @@ resources=251
 known_status_counts=unknown:91,partial:6,implemented:63,dry_run_only:5,blocked:83,captured_only:2,cataloged_only:1
 ```
 
+## Panel And Notice Read Blockers
+
+Static locate found six low-level read-like gaps. Two were probed safely and classified as blocked pending exact UI request capture.
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts static-locate \
+  --endpoint /mweb/v1/get_notice_list,/mweb/v1/get_weekly_challenge_detail,/mweb/v1/get_short_url,/mweb/v1/get_panel_info,/mweb/v1/cc_data_sync/get_account_info,/mweb/v1/cc_data_sync/get_account_token \
+  --staticRoot data/jimeng-lab/js-sweep/files,packages/jimeng-client/src \
+  --outDir data/jimeng-lab/proof-20260611-static-locate-safe-read-gaps
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts endpoint-probe \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --endpoint /mweb/v1/get_notice_list \
+  --variants '[{"name":"empty","body":{}},{"name":"count","body":{"count":20}},{"name":"pagination","body":{"offset":0,"limit":20}}]' \
+  --outDir data/jimeng-lab/proof-20260611-probe-get-notice-list
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts endpoint-probe \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --endpoint /mweb/v1/get_panel_info \
+  --variants '[{"name":"empty","body":{}},{"name":"panel","body":{"panel":"default"}},{"name":"type","body":{"type":"default"}}]' \
+  --outDir data/jimeng-lab/proof-20260611-probe-get-panel-info
+```
+
+Result:
+
+```txt
+static-locate saved endpoints=6 occurrences=9
+get_notice_list probes returned ret=1000 invalid parameter for empty/count/pagination bodies
+get_panel_info probes returned ret=2012 get panel info failed for empty/panel/type bodies
+```
+
+Classification:
+
+```txt
+/mweb/v1/get_notice_list -> blocked; exact home notice UI request body needed
+/mweb/v1/get_panel_info -> blocked; exact panel/favorite-voice UI request body needed
+```
+
+Refreshed static inventory:
+
+```txt
+resources=251
+known_status_counts=blocked:85,partial:6,implemented:63,dry_run_only:5,unknown:89,captured_only:2,cataloged_only:1
+```
+
 ## Verification
 
 ```bash

@@ -428,6 +428,8 @@ const KNOWN_ENDPOINTS: JimengDiscoveryKnownEndpoint[] = [
   known("/mweb/v1/get_settings", "implemented", "account-config", "No-spend current-account user custom settings read."),
   known("/mweb/v1/get_ug_info", "implemented", "account-config", "No-spend current-account web registration state read."),
   known("/mweb/v1/get_invite_status", "implemented", "account-config", "No-spend current-account invite status read."),
+  known("/mweb/v1/get_notice_list", "blocked", null, "No-spend empty/count/pagination probes returned ret=1000 invalid parameter; capture the exact home notice UI request before promotion."),
+  known("/mweb/v1/get_panel_info", "blocked", null, "No-spend empty/panel/type probes returned ret=2012 get panel info failed; capture the exact panel/favorite-voice UI request before promotion."),
   known("/mweb/v1/get_experiment_params", "implemented", "runtime-config", "No-spend frontend experiment parameter read."),
   known("/mweb/v1/get_home_header_banner_config", "implemented", "runtime-config", "No-spend home header banner/runtime config read."),
   known("/mweb/v1/get_help_desk_entrance", "implemented", "runtime-config", "No-spend help desk entrance read with URL redacted in normalized output."),
