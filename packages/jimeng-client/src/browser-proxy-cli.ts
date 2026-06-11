@@ -3597,19 +3597,32 @@ async function main(argv: string[]): Promise<void> {
     }
     const request = buildJimengSubjectsRequest(query)
     const runId = `subjects-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
     if (args.dryRun) {
       writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
         command: args.command,
         endpoint: "/mweb/v1/dreamina_subject/get",
         request,
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
         browser_session: redactSession(session),
       })
       console.log(`[jimeng-browser-proxy] subjects dry run saved`)
       return
     }
 
-    const result = await fetchJimengSubjects({ session, query })
+    const transport = createJimengHttpTransport({
+      mode: args.transportMode,
+      cassettePath,
+    })
+    const result = await fetchJimengSubjects({ fetch: transport.fetch, session, query })
     writeJson(path.join(dirs.rawDir, `${runId}.json`), {
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       http_status: result.httpStatus,
       ret: result.ret,
       errmsg: result.errmsg,
@@ -3619,6 +3632,10 @@ async function main(argv: string[]): Promise<void> {
     })
     writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
       command: args.command,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       summary: summarizeJimengSubjects(result),
     })
     console.log(`[jimeng-browser-proxy] subjects saved count=${result.subjects.length} nextCursor=${result.nextCursor ?? "none"} hasMore=${result.hasMore ?? "unknown"}`)
@@ -3633,6 +3650,7 @@ async function main(argv: string[]): Promise<void> {
     const dirs = ensureOutputDirs(path.resolve(args.outDir))
     const sourceFile = args.image ?? args.file
     const runId = `subject-update-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${Math.random().toString(36).slice(2, 8)}`
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
     if (sourceFile && args.imageUri) {
       throw new Error("subject-update accepts either a local --image/--file or existing --imageUri, not both")
     }
@@ -3668,6 +3686,10 @@ async function main(argv: string[]): Promise<void> {
       name_present: !!args.name,
       description_present: args.description !== undefined,
       request: dryRunRequest ? redactSignedUrls(dryRunRequest) : undefined,
+      transport: {
+        mode: args.transportMode,
+        cassette_path: cassettePath ?? null,
+      },
       browser_session: redactSession(session),
     }
     if (args.dryRun) {
@@ -3676,6 +3698,10 @@ async function main(argv: string[]): Promise<void> {
       return
     }
 
+    const transport = createJimengHttpTransport({
+      mode: args.transportMode,
+      cassettePath,
+    })
     let mainImage: JimengSubjectImageReference | undefined = existingReference ?? undefined
     let uploadSummary: ReferenceUploadSummary | null = null
     let audit: Awaited<ReturnType<typeof submitJimengImageAuditJob>> | null = null
@@ -3690,6 +3716,7 @@ async function main(argv: string[]): Promise<void> {
         sourceFile,
       })
       audit = await submitJimengImageAuditJob({
+        fetch: transport.fetch,
         session,
         imageUris: [uploadSummary.uri],
       })
@@ -3702,6 +3729,7 @@ async function main(argv: string[]): Promise<void> {
         body: audit.body,
       })
       imageLookup = await fetchJimengImagesByUri({
+        fetch: transport.fetch,
         session,
         imageUris: [uploadSummary.uri],
       })
@@ -3716,6 +3744,7 @@ async function main(argv: string[]): Promise<void> {
       mainImage = subjectImageReferenceFromUploadSummary(uploadSummary.image_upload, imageLookup.images[0]?.imageUrl ?? args.imageUrl)
     } else if (mainImage && !mainImage.imageUrl) {
       imageLookup = await fetchJimengImagesByUri({
+        fetch: transport.fetch,
         session,
         imageUris: [mainImage.imageUri],
       })
@@ -3732,6 +3761,7 @@ async function main(argv: string[]): Promise<void> {
     }
 
     const result = await updateJimengSubject({
+      fetch: transport.fetch,
       session,
       subject: {
         subjectId: args.subjectId,
@@ -3743,6 +3773,10 @@ async function main(argv: string[]): Promise<void> {
       },
     })
     writeJson(path.join(dirs.rawDir, `${runId}-raw.json`), {
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       http_status: result.httpStatus,
       ret: result.ret,
       errmsg: result.errmsg,
@@ -3774,12 +3808,17 @@ async function main(argv: string[]): Promise<void> {
     if (subjectIds.length === 0) throw new Error("subject-delete requires --subjectId or --subjectIds")
     const dirs = ensureOutputDirs(path.resolve(args.outDir))
     const runId = `subject-delete-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${Math.random().toString(36).slice(2, 8)}`
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
     const request = buildJimengSubjectDeleteRequest({ subjectIds })
     const plan = {
       command: args.command,
       endpoint_sequence: ["/mweb/v1/dreamina_subject/delete"],
       request,
       subject_ids: subjectIds,
+      transport: {
+        mode: args.transportMode,
+        cassette_path: cassettePath ?? null,
+      },
       browser_session: redactSession(session),
     }
     if (args.dryRun) {
@@ -3788,8 +3827,16 @@ async function main(argv: string[]): Promise<void> {
       return
     }
 
-    const result = await deleteJimengSubjects({ session, subjectIds })
+    const transport = createJimengHttpTransport({
+      mode: args.transportMode,
+      cassettePath,
+    })
+    const result = await deleteJimengSubjects({ fetch: transport.fetch, session, subjectIds })
     writeJson(path.join(dirs.rawDir, `${runId}-raw.json`), {
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       http_status: result.httpStatus,
       ret: result.ret,
       errmsg: result.errmsg,
@@ -3809,6 +3856,7 @@ async function main(argv: string[]): Promise<void> {
     if (!args.imageUri) throw new Error("subject-generate-voice requires --imageUri")
     const dirs = ensureOutputDirs(path.resolve(args.outDir))
     const runId = `subject-generate-voice-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${Math.random().toString(36).slice(2, 8)}`
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
     const request = buildJimengSubjectVoiceRequest({ imageUri: args.imageUri })
     const plan = {
       command: args.command,
@@ -3816,6 +3864,10 @@ async function main(argv: string[]): Promise<void> {
       reason: "Frontend bundle confirms /mweb/v1/dreamina_subject/generate_voice accepts imageUri, but live generation may consume quota and still needs explicit spend approval or a captured UI submit.",
       endpoint_sequence: ["/mweb/v1/dreamina_subject/generate_voice"],
       request,
+      transport: {
+        mode: args.transportMode,
+        cassette_path: cassettePath ?? null,
+      },
       browser_session: redactSession(session),
     }
     if (args.dryRun) {
@@ -4394,6 +4446,7 @@ async function main(argv: string[]): Promise<void> {
     const dirs = ensureOutputDirs(path.resolve(args.outDir))
     const sourceFile = args.image ?? args.file
     const runId = `subject-create-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${Math.random().toString(36).slice(2, 8)}`
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
     if (sourceFile && args.imageUri) {
       throw new Error("subject-create accepts either a local --image/--file or existing --imageUri, not both")
     }
@@ -4429,6 +4482,10 @@ async function main(argv: string[]): Promise<void> {
       name: args.name,
       description_present: args.description !== undefined,
       request: dryRunRequest ? redactSignedUrls(dryRunRequest) : undefined,
+      transport: {
+        mode: args.transportMode,
+        cassette_path: cassettePath ?? null,
+      },
       browser_session: redactSession(session),
     }
     if (args.dryRun) {
@@ -4437,6 +4494,10 @@ async function main(argv: string[]): Promise<void> {
       return
     }
 
+    const transport = createJimengHttpTransport({
+      mode: args.transportMode,
+      cassettePath,
+    })
     let mainImage: JimengSubjectImageReference
     let uploadSummary: ReferenceUploadSummary | null = null
     let audit: Awaited<ReturnType<typeof submitJimengImageAuditJob>> | null = null
@@ -4451,6 +4512,7 @@ async function main(argv: string[]): Promise<void> {
         sourceFile,
       })
       audit = await submitJimengImageAuditJob({
+        fetch: transport.fetch,
         session,
         imageUris: [uploadSummary.uri],
       })
@@ -4463,6 +4525,7 @@ async function main(argv: string[]): Promise<void> {
         body: audit.body,
       })
       imageLookup = await fetchJimengImagesByUri({
+        fetch: transport.fetch,
         session,
         imageUris: [uploadSummary.uri],
       })
@@ -4479,6 +4542,7 @@ async function main(argv: string[]): Promise<void> {
       mainImage = existingReference!
       if (!mainImage.imageUrl) {
         imageLookup = await fetchJimengImagesByUri({
+          fetch: transport.fetch,
           session,
           imageUris: [mainImage.imageUri],
         })
@@ -4496,6 +4560,7 @@ async function main(argv: string[]): Promise<void> {
     }
 
     const result = await createJimengSubject({
+      fetch: transport.fetch,
       session,
       subject: {
         name: args.name,
@@ -4505,6 +4570,10 @@ async function main(argv: string[]): Promise<void> {
       },
     })
     writeJson(path.join(dirs.rawDir, `${runId}-raw.json`), {
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       http_status: result.httpStatus,
       ret: result.ret,
       errmsg: result.errmsg,

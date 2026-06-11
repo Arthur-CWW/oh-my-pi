@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import path from "node:path"
 import { describe, expect, test } from "bun:test"
 import {
   buildJimengSubjectDeleteRequest,
@@ -6,12 +9,14 @@ import {
   buildJimengSubjectCreateRequest,
   buildJimengSubjectsRequest,
   createJimengSubject,
+  createJimengHttpTransport,
   deleteJimengSubjects,
   fetchJimengImagesByUri,
   fetchJimengSubjects,
   generateJimengSubjectVoice,
   JimengClient,
   JimengError,
+  readJimengHttpCassette,
   subjectImageReferenceFromUploadSummary,
   submitJimengImageAuditJob,
   summarizeJimengImageByUri,
@@ -461,6 +466,169 @@ describe("Jimeng subject/persona helpers", () => {
     expect(JSON.stringify(summary)).not.toContain("signed.example.invalid")
     expect(JSON.stringify(summary)).not.toContain("X-Amz-Signature")
   })
+
+  test("can run subject/persona APIs through recorded and replayed HTTP transport cassettes", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "jimeng-subjects-cassette-"))
+    try {
+      const cassettePath = path.join(dir, "subjects.json")
+      const requests: Array<{ url: string; init?: RequestInit }> = []
+      const recordTransport = createJimengHttpTransport({
+        mode: "record",
+        cassettePath,
+        fetch: mockFetchSequence([
+          JSON.stringify(subjectListBody()),
+          JSON.stringify({ ret: "0", errmsg: "success" }),
+          JSON.stringify(imageLookupBody()),
+          JSON.stringify(subjectCreateBody()),
+          JSON.stringify(subjectUpdateBody()),
+          JSON.stringify({ ret: "0", errmsg: "success", data: {} }),
+          JSON.stringify(subjectVoiceBody()),
+        ], requests),
+        nowIso: () => "2026-06-11T00:00:00.000Z",
+      })
+      const sessionWithWebId = { ...session, cookie: `${session.cookie}; _tea_web_id=web-123` }
+      const mainImage = {
+        imageUri: "tos-cn-i-tb4s082cfz/ref.png",
+        imageUrl: "https://signed.example.invalid/ref.png?x-signature=secret",
+        width: 1024,
+        height: 1536,
+      }
+
+      const subjects = await fetchJimengSubjects({
+        fetch: recordTransport.fetch,
+        session,
+        query: { cursor: 0, limit: 20 },
+      })
+      const audit = await submitJimengImageAuditJob({
+        fetch: recordTransport.fetch,
+        session,
+        imageUris: [mainImage.imageUri],
+      })
+      const lookup = await fetchJimengImagesByUri({
+        fetch: recordTransport.fetch,
+        session: sessionWithWebId,
+        imageUris: [mainImage.imageUri],
+      })
+      const created = await createJimengSubject({
+        fetch: recordTransport.fetch,
+        session,
+        subject: {
+          name: "K-beauty UGC",
+          description: "Polished skincare creator",
+          workspaceId: 14199856180236,
+          mainImage,
+        },
+      })
+      const updated = await updateJimengSubject({
+        fetch: recordTransport.fetch,
+        session,
+        subject: {
+          subjectId: "subject-1",
+          content: {
+            name: "K-beauty tuned",
+            description: "Updated persona note",
+            mainImage,
+          },
+        },
+      })
+      const deleted = await deleteJimengSubjects({
+        fetch: recordTransport.fetch,
+        session,
+        subjectIds: ["subject-1"],
+      })
+      const voice = await generateJimengSubjectVoice({
+        fetch: recordTransport.fetch,
+        session,
+        imageUri: mainImage.imageUri,
+      })
+
+      expect(subjects.subjects).toHaveLength(1)
+      expect(audit.ret).toBe("0")
+      expect(lookup.images).toHaveLength(1)
+      expect(created.subjectId).toBe("subject-1")
+      expect(updated.subjectId).toBe("subject-1")
+      expect(deleted.deletedSubjectIds).toEqual(["subject-1"])
+      expect(voice.audioInfo?.vid).toBe("voice-video-1")
+      expect(readJimengHttpCassette(cassettePath).entries).toHaveLength(7)
+      expect(requests).toHaveLength(7)
+
+      const replayTransport = createJimengHttpTransport({
+        mode: "replay",
+        cassettePath,
+      })
+      const replayedSubjects = await fetchJimengSubjects({
+        fetch: replayTransport.fetch,
+        session,
+        query: { cursor: 0, limit: 20 },
+      })
+      const replayedAudit = await submitJimengImageAuditJob({
+        fetch: replayTransport.fetch,
+        session,
+        imageUris: [mainImage.imageUri],
+      })
+      const replayedLookup = await fetchJimengImagesByUri({
+        fetch: replayTransport.fetch,
+        session: sessionWithWebId,
+        imageUris: [mainImage.imageUri],
+      })
+      const replayedCreated = await createJimengSubject({
+        fetch: replayTransport.fetch,
+        session,
+        subject: {
+          name: "K-beauty UGC",
+          description: "Polished skincare creator",
+          workspaceId: 14199856180236,
+          mainImage,
+        },
+      })
+      const replayedUpdated = await updateJimengSubject({
+        fetch: replayTransport.fetch,
+        session,
+        subject: {
+          subjectId: "subject-1",
+          content: {
+            name: "K-beauty tuned",
+            description: "Updated persona note",
+            mainImage,
+          },
+        },
+      })
+      const replayedDeleted = await deleteJimengSubjects({
+        fetch: replayTransport.fetch,
+        session,
+        subjectIds: ["subject-1"],
+      })
+      const replayedVoice = await generateJimengSubjectVoice({
+        fetch: replayTransport.fetch,
+        session,
+        imageUri: mainImage.imageUri,
+      })
+      const summaries = [
+        summarizeJimengSubjects(replayedSubjects),
+        summarizeJimengImageByUri(replayedLookup),
+        summarizeJimengSubjectCreate(replayedCreated),
+        summarizeJimengSubjectUpdate(replayedUpdated),
+        summarizeJimengSubjectDelete(replayedDeleted),
+        summarizeJimengSubjectVoice(replayedVoice),
+      ]
+
+      expect(replayedAudit.ret).toBe("0")
+      expect(summaries[0]).toMatchObject({ subject_count: 1 })
+      expect(summaries[2]).toMatchObject({ subject_id: "subject-1" })
+      expect(summaries[4]).toMatchObject({ deleted_subject_count: 1 })
+      expect(summaries[5]).toMatchObject({
+        audio_info: {
+          vid: "voice-video-1",
+          audio_url_present: true,
+        },
+      })
+      expect(JSON.stringify(summaries)).not.toContain("signed.example.invalid")
+      expect(JSON.stringify(summaries)).not.toContain("x-signature")
+      expect(JSON.stringify(summaries)).not.toContain("X-Amz-Signature")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
 })
 
 function imageUploadSummary(): JimengImageUploadSummary {
@@ -487,5 +655,115 @@ function mockFetch(text: string, requests: Array<{ url: string; init?: RequestIn
   return async (url, init) => {
     requests.push({ url, init })
     return new Response(text, { status: 200 })
+  }
+}
+
+function mockFetchSequence(texts: string[], requests: Array<{ url: string; init?: RequestInit }>): JimengFetch {
+  let index = 0
+  return async (url, init) => {
+    requests.push({ url, init })
+    const text = texts[index]
+    index += 1
+    if (text === undefined) throw new Error(`unexpected request ${url}`)
+    return new Response(text, { status: 200 })
+  }
+}
+
+function subjectListBody() {
+  return {
+    ret: "0",
+    errmsg: "success",
+    data: {
+      next_cursor: 20,
+      has_more: true,
+      data_list: [{
+        subject_id: "subject-1",
+        name: "K-beauty host",
+        desc: "Polished skincare creator",
+        status: 1,
+        create_time: "1781000000",
+        cover_image: {
+          image_uri: "tos-cn-i-tb4s082cfz/cover.png",
+          image_url: "https://signed.example.invalid/cover.png?X-Amz-Signature=secret",
+        },
+        image_list: [{ image_uri: "tos-cn-i-tb4s082cfz/ref.png" }],
+        voice_list: [{ tone_id: "voice-1" }],
+      }],
+    },
+  }
+}
+
+function imageLookupBody() {
+  return {
+    ret: "0",
+    errmsg: "success",
+    uri2image: {
+      "tos-cn-i-tb4s082cfz/ref.png": {
+        image_uri: "tos-cn-i-tb4s082cfz/ref.png",
+        image_url: "https://signed.example.invalid/ref.png?x-signature=secret",
+        width: 1024,
+        height: 1536,
+        format: "png",
+      },
+    },
+  }
+}
+
+function subjectCreateBody() {
+  return {
+    ret: "0",
+    errmsg: "success",
+    data: {
+      subject_id: "subject-1",
+      data_id: "data-1",
+      content: {
+        name: "K-beauty UGC",
+        description: "Polished skincare creator",
+        main_image: {
+          image_uri: "tos-cn-i-tb4s082cfz/ref.png",
+          image_url: "https://signed.example.invalid/ref.png?x-signature=secret",
+          width: 1024,
+          height: 1536,
+        },
+      },
+      subject_control: { status: 0, enabled: true },
+      workspace_id: 14199856180236,
+    },
+  }
+}
+
+function subjectUpdateBody() {
+  return {
+    ret: "0",
+    errmsg: "success",
+    data: {
+      subject_id: "subject-1",
+      content: {
+        name: "K-beauty tuned",
+        description: "Updated persona note",
+        main_image: {
+          image_uri: "tos-cn-i-tb4s082cfz/ref.png",
+          image_url: "https://signed.example.invalid/ref.png?x-signature=secret",
+          width: 1024,
+          height: 1536,
+        },
+      },
+      subject_control: { status: 0, editable: true },
+    },
+  }
+}
+
+function subjectVoiceBody() {
+  return {
+    ret: "0",
+    errmsg: "success",
+    data: {
+      audio_info: {
+        vid: "voice-video-1",
+        audio_url: "https://signed.example.invalid/audio.mp3?x-signature=secret",
+        duration: 3.2,
+        duration_ms: 3200,
+      },
+    },
   }
 }

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto"
 import { type JimengSessionBundle } from "./capture"
-import { assertNoRiskError, JimengClient } from "./client"
+import { assertNoRiskError, JimengClient, type JimengFetch } from "./client"
 import { jimengError } from "./errors"
 import { parseImageUri, type JsonObject, type JsonValue } from "./reference-image"
 import { type JimengImageUploadSummary } from "./upload"
@@ -239,11 +239,12 @@ export function buildJimengSubjectVoiceRequest(input: JimengSubjectVoiceInput): 
 
 export async function fetchJimengSubjects(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   session: JimengSessionBundle
   query?: JimengSubjectsQuery
 }): Promise<JimengSubjectsResult> {
   const request = buildJimengSubjectsRequest(input.query)
-  const client = input.client ?? new JimengClient()
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
   const response = await client.requestText(`https://jimeng.jianying.com/mweb/v1/dreamina_subject/get?${DEFAULT_QUERY}`, {
     method: "POST",
     headers: buildSubjectsHeaders(input.session),
@@ -270,6 +271,7 @@ export async function fetchJimengSubjects(input: {
 
 export async function submitJimengImageAuditJob(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   session: JimengSessionBundle
   imageUris: string[]
 }): Promise<JimengImageAuditResult> {
@@ -283,7 +285,7 @@ export async function submitJimengImageAuditJob(input: {
     })
   }
   const request = { uri_list: imageUris }
-  const client = input.client ?? new JimengClient()
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
   const response = await client.requestText(`https://jimeng.jianying.com/mweb/v1/imagex/submit_audit_job?${DEFAULT_QUERY}`, {
     method: "POST",
     headers: buildSubjectsHeaders(input.session),
@@ -306,6 +308,7 @@ export async function submitJimengImageAuditJob(input: {
 
 export async function fetchJimengImagesByUri(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   session: JimengSessionBundle
   imageUris: string[]
 }): Promise<JimengImageByUriResult> {
@@ -319,7 +322,7 @@ export async function fetchJimengImagesByUri(input: {
     })
   }
   const request = { uris: imageUris }
-  const client = input.client ?? new JimengClient()
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
   const response = await client.requestText(buildGetImageByUriUrl(input.session), {
     method: "POST",
     headers: buildSubjectsHeaders(input.session),
@@ -343,11 +346,12 @@ export async function fetchJimengImagesByUri(input: {
 
 export async function createJimengSubject(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   session: JimengSessionBundle
   subject: JimengSubjectCreateInput
 }): Promise<JimengSubjectCreateResult> {
   const request = buildJimengSubjectCreateRequest(input.subject)
-  const client = input.client ?? new JimengClient()
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
   const response = await client.requestText(`https://jimeng.jianying.com/mweb/v1/dreamina_subject/create?${DEFAULT_QUERY}`, {
     method: "POST",
     headers: buildSubjectsHeaders(input.session),
@@ -375,11 +379,12 @@ export async function createJimengSubject(input: {
 
 export async function updateJimengSubject(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   session: JimengSessionBundle
   subject: JimengSubjectUpdateInput
 }): Promise<JimengSubjectUpdateResult> {
   const request = buildJimengSubjectUpdateRequest(input.subject)
-  const client = input.client ?? new JimengClient()
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
   const response = await client.requestText(`https://jimeng.jianying.com/mweb/v1/dreamina_subject/update?${DEFAULT_QUERY}`, {
     method: "POST",
     headers: buildSubjectsHeaders(input.session),
@@ -406,11 +411,12 @@ export async function updateJimengSubject(input: {
 
 export async function deleteJimengSubjects(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   session: JimengSessionBundle
   subjectIds: string[]
 }): Promise<JimengSubjectDeleteResult> {
   const request = buildJimengSubjectDeleteRequest({ subjectIds: input.subjectIds })
-  const client = input.client ?? new JimengClient()
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
   const response = await client.requestText(`https://jimeng.jianying.com/mweb/v1/dreamina_subject/delete?${DEFAULT_QUERY}`, {
     method: "POST",
     headers: buildSubjectsHeaders(input.session),
@@ -434,11 +440,12 @@ export async function deleteJimengSubjects(input: {
 
 export async function generateJimengSubjectVoice(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   session: JimengSessionBundle
   imageUri: string
 }): Promise<JimengSubjectVoiceResult> {
   const request = buildJimengSubjectVoiceRequest({ imageUri: input.imageUri })
-  const client = input.client ?? new JimengClient()
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
   const response = await client.requestText(`https://jimeng.jianying.com/mweb/v1/dreamina_subject/generate_voice?${DEFAULT_QUERY}`, {
     method: "POST",
     headers: buildSubjectsHeaders(input.session),
