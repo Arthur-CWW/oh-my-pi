@@ -1,6 +1,7 @@
 export * from "./capture"
 export * from "./capture-analyzer"
 export * from "./discovery-worklist"
+export * from "./endpoint-registry"
 export * from "./agent-catalog"
 export * from "./account-credit"
 export * from "./commerce-benefits"

@@ -1,14 +1,16 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
 import path from "node:path"
 import {
-  getJimengDiscoveryKnownEndpoints,
   isHighValueJimengDiscoveryEndpoint,
   isUsefulJimengDiscoveryEndpoint,
   normalizeJimengDiscoveryEndpoint,
-  type JimengDiscoveryKnownEndpoint,
-  type JimengDiscoveryKnownStatus,
   type JimengDiscoveryRiskClass,
 } from "./discovery-worklist"
+import {
+  getJimengDiscoveryKnownEndpoints,
+  type JimengDiscoveryKnownEndpoint,
+  type JimengDiscoveryKnownStatus,
+} from "./endpoint-registry"
 import { type JsonObject } from "./reference-image"
 
 const STATIC_FILE_RE = /\.(?:[cm]?[jt]sx?|json|html|map|txt)$/i

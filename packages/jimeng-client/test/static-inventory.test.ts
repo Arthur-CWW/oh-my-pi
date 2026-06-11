@@ -10,7 +10,8 @@ import {
   type JimengStaticInventoryRecommendedAction,
   type JimengStaticInventoryResult,
 } from "../src"
-import { type JimengDiscoveryKnownStatus, type JimengDiscoveryRiskClass } from "../src/discovery-worklist"
+import { type JimengDiscoveryRiskClass } from "../src/discovery-worklist"
+import { type JimengDiscoveryKnownStatus } from "../src/endpoint-registry"
 
 const STATIC_INVENTORY_ENDPOINTS = [
   "/mweb/v1/get_history_by_ids",

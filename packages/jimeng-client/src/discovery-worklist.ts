@@ -1,8 +1,21 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
 import path from "node:path"
 import { z } from "zod"
+import {
+  buildJimengDiscoveryKnownEndpointMap,
+  getJimengDiscoveryKnownEndpointNote,
+  getJimengDiscoveryKnownEndpoints,
+  type JimengDiscoveryKnownEndpoint,
+  type JimengDiscoveryKnownStatus,
+} from "./endpoint-registry"
 import { type JsonObject, type JsonValue } from "./reference-image"
 import { JimengJsonObjectSchema, JimengJsonValueSchema, parseJimengContract, parseJsonText } from "./schema"
+
+export {
+  getJimengDiscoveryKnownEndpoints,
+  type JimengDiscoveryKnownEndpoint,
+  type JimengDiscoveryKnownStatus,
+} from "./endpoint-registry"
 
 const STATIC_FILE_RE = /\.(?:[cm]?[jt]sx?|json|html|map|txt)$/i
 const MAX_STATIC_FILE_BYTES = 3_000_000
@@ -69,21 +82,6 @@ const JimengEndpointProbeCandidateFileSchema = z.object({
 type JimengCaptureCandidateInput = z.infer<typeof JimengCaptureCandidateSchema>
 type JimengCaptureAnalysisInput = z.infer<typeof JimengCaptureAnalysisSchema>
 type JimengEndpointProbeCandidateInput = z.infer<typeof JimengEndpointProbeCandidateSchema>
-
-export type JimengDiscoveryKnownStatus =
-  | "implemented"
-  | "partial"
-  | "dry_run_only"
-  | "cataloged_only"
-  | "captured_only"
-  | "blocked"
-
-export interface JimengDiscoveryKnownEndpoint {
-  endpoint: string
-  status: JimengDiscoveryKnownStatus
-  command: string | null
-  note: string
-}
 
 export type JimengDiscoveryRiskClass = z.infer<typeof JimengRiskSchema>
 
@@ -173,7 +171,7 @@ export function buildJimengDiscoveryWorklist(input: {
   const includeKnown = input.includeKnown === true
   const analysisFiles = input.analysisFiles ?? input.analyses.map((analysis) => analysis.source_path ?? "inline")
   const staticRoots = (input.staticRoots ?? []).map((root) => path.resolve(root)).filter((root) => existsSync(root))
-  const knownByEndpoint = buildKnownEndpointMap()
+  const knownByEndpoint = buildJimengDiscoveryKnownEndpointMap()
   const probeByEndpoint = buildProbeCandidateMap(input.probeCandidates ?? [])
   const capturedEndpoints = new Set<string>()
   const items: JimengDiscoveryWorkItem[] = []
@@ -292,10 +290,6 @@ export function buildJimengDiscoveryWorklist(input: {
   }
 }
 
-export function getJimengDiscoveryKnownEndpoints(): JimengDiscoveryKnownEndpoint[] {
-  return KNOWN_ENDPOINTS.map((endpoint) => ({ ...endpoint }))
-}
-
 export function normalizeJimengDiscoveryEndpoint(value: string | undefined): string | null {
   return normalizeEndpoint(value)
 }
@@ -377,195 +371,6 @@ export function writeJimengDiscoveryWorklistMarkdown(worklist: JimengDiscoveryWo
   lines.push("")
   lines.push("Raw probe variant bodies, when available, are written only to local ignored artifacts. Re-check risk and approval requirements before replaying generate, upload, mutate, or payment endpoints.")
   return `${lines.join("\n")}\n`
-}
-
-function buildKnownEndpointMap(): Map<string, JimengDiscoveryKnownEndpoint> {
-  return new Map(KNOWN_ENDPOINTS.map((endpoint) => [endpoint.endpoint, endpoint]))
-}
-
-const KNOWN_ENDPOINTS: JimengDiscoveryKnownEndpoint[] = [
-  known("/mweb/v1/aigc_draft/generate", "partial", "text2image/text2video/image2video/frames2video/lip-sync", "Unified generation submit; several modes are implemented or dry-run gated, live lip-sync/end-frame still require capture compare."),
-  known("/mweb/v1/execute_generate_audit", "blocked", null, "Generation pre-audit posts image/video/audio/subject material lists; capture exact material payload before replay."),
-  known("/mweb/v1/get_asset_list", "implemented", "assets", "No-spend workspace asset/history listing."),
-  known("/mweb/v1/get_history", "blocked", null, "Safe frontend-derived probes returned ret=0 with empty records_list, including explicit workspace scope; use assets/history-records until a non-empty UI capture is available."),
-  known("/mweb/v1/get_history_by_ids", "implemented", "history-records", "No-spend history lookup by submit/history id."),
-  known("/mweb/v1/get_history_queue_info", "implemented", "history-queue", "No-spend queue/progress lookup."),
-  known("/mweb/v1/get_video_by_vid", "implemented", "video-info", "No-spend VOD metadata lookup."),
-  known("/mweb/v1/get_common_config", "implemented", "image-models", "No-spend image model/common config catalog."),
-  known("/mweb/v1/get_user_info", "implemented", "profile-research", "No-spend public profile metadata lookup by sec_uid."),
-  known("/mweb/v1/get_homepage", "implemented", "profile-research", "No-spend public profile work/homepage listing by sec_uid."),
-  known("/mweb/v1/get_favorite_list", "implemented", "profile-research", "No-spend public profile favorite/reference work listing by sec_uid."),
-  known("/mweb/v1/get_user_story_list", "implemented", "profile-research", "No-spend public profile story/archive listing by sec_uid; current proof returned an empty but valid story_list."),
-  known("/mweb/v1/mget_story", "partial", "story-records", "No-spend story detail lookup by story_id_list is implemented; live proof still needs real story ids from a non-empty story list or UI capture."),
-  known("/mweb/v1/submit_async_task", "dry_run_only", "story-export-plan", "Story export task submit uses type=pack_story_mode and stringified payload; live submit creates task state and needs approval or a disposable story fixture."),
-  known("/mweb/v1/mget_async_task", "partial", "async-tasks", "No-spend async task lookup by task_id_list is implemented; live proof needs a real task id from an approved export flow."),
-  known("/mweb/v1/create_story", "blocked", null, "Creates story/archive state; require a disposable story fixture or exact UI capture before live replay."),
-  known("/mweb/v1/update_story", "blocked", null, "Mutates story/archive state; require a disposable story fixture or exact UI capture before live replay."),
-  known("/mweb/v1/delete_story", "blocked", null, "Deletes story/archive state; require a disposable story fixture or explicit approval before live replay."),
-  known("/mweb/v1/mix_audio_video", "blocked", null, "Submits a single audio/video mix task and returns task status; capture exact babiParam/body from UI before any live replay."),
-  known("/mweb/v1/mix_audio_videos", "blocked", null, "Submits batch audio/video mix tasks and returns submit ids; capture exact babiParam/body from UI before any live replay."),
-  known("/mweb/v1/mpack_image", "blocked", null, "Packs image material through dreamina-material-data-service; capture the exact caller input shape before promotion."),
-  known("/mweb/v1/submit_survey", "blocked", null, "Submits feature beta-test survey state, currently seen in the lip-sync feature-gate bundle; mutation requires explicit approval."),
-  known("/mweb/v1/get_follow_list", "implemented", "profile-research", "No-spend current-account following/follower listing; this endpoint does not accept a public target sec_uid."),
-  known("/mweb/v1/get_item_info", "implemented", "profile-research", "No-spend published work detail with generation prompt, model, reference frame, media, and engagement metadata."),
-  known("/mweb/v1/mget_item_info", "implemented", "profile-research", "No-spend batch published work detail by item_id_list; frontend callers pass itemIdList before snake-case conversion."),
-  known("/mweb/v1/workspace/list", "implemented", "workspace-context", "No-spend workspace listing for logged-in project/workspace context."),
-  known("/mweb/v1/workspace/get_by_ids", "implemented", "workspace-context", "No-spend workspace lookup by ids inferred from workspace list or supplied explicitly."),
-  known("/mweb/search/v1/sug", "implemented", "research-keywords", "No-spend keyword suggestions for inspiration and short-film research channels; asset suggestions are explicitly skipped after ret=1000 proof."),
-  known("/mweb/search/v1/guess", "implemented", "research-keywords", "No-spend guessed/trending research keywords for inspiration, short-film, and asset channels."),
-  known("/mweb/search/v1/search", "implemented", "research-search", "No-spend inspiration, short-film, and workspace asset search with Effect Schema boundary validation and the recovered frontend AES media transform."),
-  known("/mweb/search/v1/fetch_debug/search", "blocked", null, "Frontend debug-wrapper path is not the production search request; use implemented research-search for /mweb/search/v1/search."),
-  known("/commerce/v1/benefits/user_credit", "implemented", "account-credit", "Signed no-spend account credit balance read used to gate paid generation tests."),
-  known("/commerce/v1/subscription/price_list", "implemented", "commerce-pricing", "Signed no-spend VIP subscription price-list read; frontend body uses aid=513695, region=cn, platform=7, scene=vip."),
-  known("/commerce/v1/purchase/price_list", "implemented", "commerce-pricing", "Signed no-spend credit purchase price-list read; frontend body uses goodsTypes=[\"credit\"]."),
-  known("/commerce/v1/subscription/cc_price_list", "blocked", null, "Overseas subscription price-list variant; current Jimeng host/session returned HTTP 404 text/plain, so it likely needs overseas gateway or region context."),
-  known("/commerce/v1/subscription/get_change_plan_info", "blocked", null, "Requires selected plan context including pid, skuId, scene=vip, and pmsTrade from a real subscription plan UI selection."),
-  known("/commerce/v3/trade/query_trade", "blocked", null, "Trade/order status read depends on a real trade/order id from a payment flow; do not probe with guessed payment state."),
-  known("/commerce/v3/trade/user/can_refund_list", "blocked", null, "Refund eligibility list depends on order/refund context; capture exact account order UI request before promotion."),
-  known("/commerce/v3/trade/user/refund_record_list", "blocked", null, "Refund record list depends on order/refund context; capture exact account order UI request before promotion."),
-  known("/commerce/v3/resource/benefit_metadata", "implemented", "commerce-benefits", "Signed no-spend benefit metadata read for AIGC/function quota and pay-mode strategy fields."),
-  known("/commerce/v3/benefits/batch_get_user_benefit", "implemented", "commerce-benefits", "Signed no-spend user benefit asset read for current quota/pay-mode rows."),
-  known("/mweb/v1/get_settings", "implemented", "account-config", "No-spend current-account user custom settings read."),
-  known("/mweb/v1/get_ug_info", "implemented", "account-config", "No-spend current-account web registration state read."),
-  known("/mweb/v1/get_invite_status", "implemented", "account-config", "No-spend current-account invite status read."),
-  known("/mweb/v1/get_notice_list", "blocked", null, "No-spend empty/count/pagination probes returned ret=1000 invalid parameter; capture the exact home notice UI request before promotion."),
-  known("/mweb/v1/get_panel_info", "blocked", null, "No-spend empty/panel/type probes returned ret=2012 get panel info failed; capture the exact panel/favorite-voice UI request before promotion."),
-  known("/mweb/v1/get_short_url", "cataloged_only", null, "No-spend probe showed long_url returns ret=0, but this is a low-value URL shortener service rather than a UGC GenAI capability."),
-  known("/mweb/v1/get_weekly_challenge_list", "cataloged_only", null, "Back burner: no-spend Jimeng activity/challenge listing. Cataloged as trend/contest metadata, but not important for the current UGC generation pipeline."),
-  known("/mweb/v1/get_weekly_challenge_detail", "cataloged_only", null, "Back burner: no-spend Jimeng activity/challenge detail by act_key. Removed from active CLI scope because it is not core UGC workflow surface."),
-  known("/mweb/v1/get_weekly_challenge_work_list", "cataloged_only", null, "Back burner: activity work-list likely needs exact detail UI payload; skip unless challenge/trend mining becomes a real product requirement."),
-  known("/mweb/v1/cc_data_sync/get_account_info", "cataloged_only", null, "No-spend probe with account_type=capcut returned ret=0, but this only exposes CapCut binding status and is not a UGC GenAI surface."),
-  known("/mweb/v1/cc_data_sync/get_account_token", "blocked", null, "CapCut data-sync token read can expose account credentials; do not replay or persist raw output without a dedicated credential-safe flow."),
-  known("/mweb/v1/get_experiment_params", "implemented", "runtime-config", "No-spend frontend experiment parameter read."),
-  known("/mweb/v1/get_home_header_banner_config", "implemented", "runtime-config", "No-spend home header banner/runtime config read."),
-  known("/mweb/v1/get_help_desk_entrance", "implemented", "runtime-config", "No-spend help desk entrance read with URL redacted in normalized output."),
-  known("/mweb/v1/speech/asr_token", "implemented", "runtime-config", "No-spend ASR websocket token read with token and ws_url redacted in normalized output."),
-  known("/mweb/v1/speech/asr_hotwords", "implemented", "runtime-config", "No-spend ASR hotword list read."),
-  known("/mweb/v1/infinite_canvas/list_project", "implemented", "infinite-canvas", "No-spend infinite-canvas project listing."),
-  known("/mweb/v1/infinite_canvas/project_detail", "implemented", "infinite-canvas", "No-spend infinite-canvas project detail lookup by project_id."),
-  known("/mweb/v1/infinite_canvas/v1/get_canvas_custom_ratio", "implemented", "infinite-canvas", "No-spend infinite-canvas custom ratio listing by user_id."),
-  known("/mweb/v1/infinite_canvas/get_conversation_list", "implemented", "infinite-canvas", "No-spend infinite-canvas conversation listing by project_id."),
-  known("/mweb/v1/infinite_canvas/fetch_conversation", "blocked", null, "Read path requires a real conversation_id from a non-empty get_conversation_list result; current no-spend project has zero conversations."),
-  known("/mweb/v1/infinite_canvas/conversation", "blocked", null, "Infinite-canvas conversation SSE/generation endpoint may consume points or create turns; capture exact UI submit and compare before live replay."),
-  known("/mweb/v1/infinite_canvas/create_conversation", "blocked", null, "Creates conversation state under a project; require disposable project context or exact UI capture."),
-  known("/mweb/v1/infinite_canvas/del_conversation", "blocked", null, "Deletes conversation state; require disposable conversation id or explicit approval."),
-  known("/mweb/v1/infinite_canvas/delete_turn", "blocked", null, "Deletes a generated conversation turn; require disposable turn id or explicit approval."),
-  known("/mweb/v1/infinite_canvas/update_conversation", "blocked", null, "Renames/updates conversation state; require disposable conversation id or explicit approval."),
-  known("/mweb/v1/infinite_canvas/create_project", "blocked", null, "Creates infinite-canvas project state; require disposable fixture or explicit approval."),
-  known("/mweb/v1/infinite_canvas/delete_project", "blocked", null, "Deletes infinite-canvas project state; require disposable project id or explicit approval."),
-  known("/mweb/v1/infinite_canvas/edit", "blocked", null, "Infinite-canvas edit endpoint can modify canvas/generation state; capture exact UI payload before promotion."),
-  known("/mweb/v1/infinite_canvas/update_project", "blocked", null, "Updates infinite-canvas project metadata/draft state; require disposable project id or explicit approval."),
-  known("/mweb/v1/infinite_canvas/v1/submit_changeset", "blocked", null, "Submits canvas changesets and mutates project draft state; require disposable project/draft fixture or exact UI capture."),
-  known("/mweb/v1/infinite_canvas/v1/update_canvas_custom_ratio", "blocked", null, "Mutates custom ratio presets; require disposable ratio/user context or explicit approval."),
-  known("/mweb/v1/video_generate/get_common_config", "implemented", "lip-sync-config", "No-spend video/lip-sync model config."),
-  known("/mweb/v1/video_generate/get_switch_model_queue_info", "blocked", null, "No-spend probes with empty, model_req_key, model_req_keys, and scene bodies returned ret=1000 invalid parameter; capture the exact frontend switch-model queue body before promotion."),
-  known("/mweb/v1/video_generate/pre_process", "blocked", null, "Frontend data service submits a video pre-process task; capture the exact UI flow and payload before any live replay."),
-  known("/mweb/v1/video_generate/mget_pre_process_result", "blocked", null, "Read path depends on task ids from video_generate/pre_process; capture a matching pre-process UI flow before promotion."),
-  known("/mweb/v1/video_generate/face_auth/skip", "blocked", null, "Seedance face-auth skip submit task can create provider-side task state; capture exact UI payload and approval context before live replay."),
-  known("/mweb/v1/video_generate/face_auth/skip/query", "blocked", null, "Face-auth skip status query depends on a task id from video_generate/face_auth/skip; capture that flow before promotion."),
-  known("/mweb/v1/aigc_draft/cancel_generate", "blocked", null, "Cancels an in-flight generation and mutates provider job state; use only with an active disposable job or exact UI capture."),
-  known("/mweb/v1/aigc_draft/generate_accelerate", "blocked", null, "Generation acceleration may spend quota or alter queue priority; require exact UI capture and explicit approval before live replay."),
-  known("/cc/v1/workspace/get_user_workspaces", "blocked", null, "LV workspace list requires exact lite_aid/session gateway context; no-spend count/cursor/lite_aid probes returned ret=1014 system busy."),
-  known("/lv/v1/user/get_enable_list", "blocked", null, "No-spend empty/null probes returned ret=1014 system busy; capture the exact LV authority request/auth context before promotion."),
-  known("/lv/v1/web/get_lite_user", "blocked", null, "No-spend empty/need_cache/app probes returned ret=1014 system busy; capture exact LV lite-user auth context before promotion."),
-  known("/lv/v1/ad_maker/user/get_enable_list", "blocked", null, "Safe Jimeng-host probes returned HTML instead of JSON, so this likely needs the correct LV/ad-maker gateway or UI auth context."),
-  known("/lv/v1/commerce/get_entrances", "blocked", null, "Safe Jimeng-host probes returned HTML instead of JSON; static evidence shows custom commerce headers/gateway are needed before replay."),
-  known("/lv/v1/platform/query_auth_status", "blocked", null, "Safe Jimeng-host probes returned HTML instead of JSON; capture exact platform auth-status UI request and gateway before promotion."),
-  known("/lv/v1/asset/list", "blocked", null, "LV EverCloud material list needs exact workspace_id/space_id context from the workspace service; capture the UI request before promotion."),
-  known("/lv/v1/asset/query", "blocked", null, "LV user asset query needs exact workspace/session context; no-spend workspace variants returned ret=1014 system busy."),
-  known("/lv/v1/asset/detail", "blocked", null, "LV material detail lookup depends on asset ids plus workspace_id/space_id from a successful LV asset list/query capture."),
-  known("/lv/v1/asset/query_process", "blocked", null, "LV asset async process query depends on process_id values from mutating copy/create/upload flows; capture a matching UI flow before promotion."),
-  known("/lv/v1/editor/image/ai_model/submit_task", "blocked", null, "CapCut/LV editor image AI model task submit; capture exact UI payload and approval context before live replay."),
-  known("/lv/v1/editor/image/ai_model/batch_get_results", "blocked", null, "CapCut/LV editor image AI result lookup depends on task ids from ai_model/submit_task; capture a matching task flow before promotion."),
-  known("/lv/v1/editor/image/ai_model/materials", "blocked", null, "CapCut/LV editor image AI materials endpoint needs exact model/material UI context before CLI promotion."),
-  known("/lv/v1/editor/image/ai_model/create_cloth_mask", "blocked", null, "CapCut/LV editor cloth-mask task endpoint may create provider-side task state; capture exact UI payload before live replay."),
-  known("/lv/v1/editor/image/batch_get_url", "blocked", null, "CapCut/LV editor image URL resolver needs exact resource id/URI list and auth context from UI before promotion."),
-  known("/lv/v1/editor/image/embed_resource", "blocked", null, "CapCut/LV editor image embed-resource endpoint needs exact source resource payload before promotion."),
-  known("/lv/v1/editor/image/gen_background", "blocked", null, "CapCut/LV editor AI background generation endpoint; capture exact UI payload and approval context before live replay."),
-  known("/lv/v1/editor/image/interactive_matting", "blocked", null, "CapCut/LV editor interactive matting endpoint; capture exact brush/image payload before promotion."),
-  known("/lv/v1/editor/image/saliency_seg", "blocked", null, "CapCut/LV editor cutout endpoint is distinct from implemented Jimeng /mweb/v1/saliency_seg; capture exact editor payload before promotion."),
-  known("/api/biz/v1/image/entity_seg", "blocked", null, "CapCut/LV auto-selection entity segmentation endpoint; capture exact editor UI payload before promotion."),
-  known("/lv/v1/cc_web/plane/del_presets_template", "blocked", null, "Deletes saved preset-template state; signed probe intentionally rejects this mutating path without a disposable fixture or explicit approval."),
-  known("/lv/v1/editor/template/recent_list", "blocked", null, "Signed no-session LV probes with count/lang and cursor bodies returned ret=1015 check login error; capture the logged-in editor request and auth context before promotion."),
-  known("/lv/v1/editor/template/check_post_permission", "blocked", null, "Signed no-session LV permission probe returned ret=1015 check login error; capture the logged-in editor request before promotion."),
-  known("/lv/v1/editor/draft/get_template_file", "blocked", null, "Signed LV probe with empty uris returned ret=1016 ERR_PARAM; promotion needs real template file URIs from a captured template/draft flow."),
-  known("/lv/v1/editor/draft/get_version_list", "blocked", null, "LV draft version listing depends on a real editor draft id and signed LV auth context; capture an editor version-history UI request before promotion."),
-  known("/lv/v1/editor/plane/intelligence/query_recommend_template", "blocked", null, "Signed LV template recommendation probe with no assets returned ret=-3 bad request; capture exact workspace/assets/aspect-ratio payload before promotion."),
-  known("/lv/v2/cc_web_task/get_task_draft", "blocked", null, "Signed feed-api task-draft probes with empty/zero task ids returned ret=1015 check login error; requires real commercial-photo task id plus auth context."),
-  known("/lv/v1/asset/copy", "blocked", null, "Copies asset records across workspaces and then polls asset/query_process; require a disposable workspace/asset fixture or explicit approval."),
-  known("/lv/v1/asset/create", "blocked", null, "Creates LV asset/folder records in a workspace; require a disposable workspace fixture or explicit approval."),
-  known("/lv/v1/asset/create_cloud_asset", "blocked", null, "Creates cloud asset records after upload preparation; require a disposable workspace/space fixture or explicit approval."),
-  known("/lv/v1/asset/delete", "blocked", null, "Deletes LV asset records; require disposable asset ids or explicit approval."),
-  known("/lv/v1/asset/label_as_exported", "blocked", null, "Marks LV assets as exported and mutates account asset state; require disposable asset ids or exact UI capture."),
-  known("/lv/v1/asset/prepare_upload_cloud", "blocked", null, "Prepares LV cloud upload state and may allocate upload resources; require disposable workspace/space context or approval."),
-  known("/lv/v1/asset/rename", "blocked", null, "Renames LV asset records; require disposable asset ids or explicit approval."),
-  known("/lv/v1/editor/template/add", "blocked", null, "Publishes/adds an editor template from draft data; mutates account/template state and requires explicit approval."),
-  known("/lv/v1/editor/template/add_async", "blocked", null, "Async template add/publish submit; capture exact UI payload and use only with disposable draft/template context."),
-  known("/lv/v1/editor/template/add_query", "blocked", null, "Async template add status query depends on ids from add_async; capture a matching template publish flow before promotion."),
-  known("/lv/v1/ever_photo/batch_sync_asset", "blocked", null, "Batch syncs EverPhoto/LV assets and requires verified asset/context state; require exact UI capture or disposable fixture."),
-  known("/lv/v1/ever_photo/promote_asset", "blocked", null, "Promotes EverPhoto/LV assets into workspace/cloud asset state; require disposable asset/space fixture or approval."),
-  known("/mweb/v1/remove_history", "blocked", null, "Removes generated history/workbench records; require disposable history ids or explicit approval."),
-  known("/mweb/v1/update_video_default_bgm", "blocked", null, "Mutates a video/workbench record's default BGM state; require disposable item context or explicit approval."),
-  known("/mweb/v1/get_user_local_item_list", "implemented", "voice-clones", "No-spend cloned voice/user local item listing."),
-  known("/mweb/v1/get_local_item_list", "implemented", "local-items", "No-spend current-account unpublished/generated item detail by local item_id_list."),
-  known("/mweb/v1/voice/submit_task", "dry_run_only", "voice-clone-submit", "Voice clone submit may create assets or consume quota."),
-  known("/mweb/v1/voice/query_task", "partial", "voice-clone-query", "Query command exists; live proof needs a real task id."),
-  known("/mweb/v1/voice/update", "dry_run_only", "voice-clone-update", "Mutates cloned voice assets."),
-  known("/mweb/v1/voice/delete", "dry_run_only", "voice-clone-delete", "Mutates cloned voice assets."),
-  known("/mweb/v1/feed", "partial", "voices", "Built-in voice library replay is implemented for captured signed feed requests."),
-  known("/mweb/v1/tts_generate", "implemented", "tts/sample-voices", "Direct TTS MP3 generation."),
-  known("/mweb/v1/get_upload_token", "implemented", "upload-token/upload-image/upload-video", "Scene 1/2/3 upload token support."),
-  known("/mweb/v1/imagex/submit_audit_job", "implemented", "subject-create/subject-update", "Used in subject image creation/update path."),
-  known("/mweb/v1/get_image_by_uri", "implemented", "subject-create/subject-update", "Provider image URI lookup used in subject flows."),
-  known("/mweb/v1/get_explore", "implemented", "templates/short-videos", "No-spend Explore/template/short-video mining."),
-  known("/mweb/v1/feed_short_video", "implemented", "overseas-short-videos", "No-spend overseas/reference short-video mining."),
-  known("/mweb/v1/get_image_description", "implemented", "describe-image", "No-spend reference image description."),
-  known("/mweb/v1/face_recognize", "implemented", "describe-image", "No-spend face probe."),
-  known("/mweb/v1/blend_preview", "implemented", "controlnet-preview", "No-spend pose/depth/canny preview."),
-  known("/mweb/v1/pose_detect", "implemented", "controlnet-preview", "Pose validation for ControlNet preview."),
-  known("/mweb/v1/saliency_seg", "implemented", "object-mask", "No-spend object/mask segmentation."),
-  known("/mweb/v1/dreamina_subject/get", "implemented", "subjects", "No-spend subject/persona listing."),
-  known("/mweb/v1/dreamina_subject/create", "implemented", "subject-create", "Subject/persona creation from image."),
-  known("/mweb/v1/dreamina_subject/update", "implemented", "subject-update", "Subject/persona update."),
-  known("/mweb/v1/dreamina_subject/delete", "implemented", "subject-delete", "Subject/persona delete."),
-  known("/mweb/v1/dreamina_subject/generate_voice", "dry_run_only", "subject-generate-voice", "Subject voice generation may consume quota and needs capture/approval."),
-  known("/lv/v1/effect/get_panel_info", "implemented", "capcut-editor-catalog", "No-spend LV editor panel/category catalog for fonts/effects."),
-  known("/lv/v1/effect/get_category_effects", "implemented", "capcut-editor-catalog", "No-spend LV editor category effect/font rows."),
-  known("/lv/v1/effect/get_all_fonts", "implemented", "capcut-editor-catalog", "No-spend LV editor all-font catalog."),
-  known("/lv/v1/editor/plane/color/feed", "implemented", "capcut-editor-catalog", "No-spend LV editor color palette feed."),
-  known("/lv/v1/editor/effect/recent_list", "blocked", "capcut-probe", "Signed no-spend probes returned ret=1015 check login error; needs exact LV editor auth context or UI capture."),
-  known("/lv/v2/editor/effect/recent_list", "blocked", "capcut-probe", "Signed no-spend probes returned ret=1015 check login error; needs exact LV editor auth context or UI capture."),
-  known("/lv/v1/editor/plane/common/recent_list", "blocked", "capcut-probe", "Signed no-spend probes returned ret=0 but empty item_list; needs a non-empty UI capture before promotion."),
-  known("/lv/v1/editor/plane_draft/get_content_map", "blocked", "capcut-probe", "Signed no-spend probes returned ret=1016 ERR_PARAM for empty/zero draft ids; needs a real draft/content-map id capture."),
-  known("/lv/v1/editor/plane_draft/get_draft_detail", "blocked", "capcut-probe", "Signed no-spend probes returned ret=1015 check login error for empty/zero draft ids; needs exact LV auth and real draft id context."),
-  known("/lv/v1/ever_photo/batch_get_sync_state", "blocked", "capcut-probe", "Signed no-spend probes returned ret=1015 check login error for empty id lists; needs exact EverPhoto/LV auth and real asset ids."),
-  known("/lv/v1/ever_photo/get_user_space", "blocked", "capcut-probe", "Signed no-spend probes returned ret=1015 check login error; needs exact EverPhoto/LV auth context."),
-  known("/lv/v1/intelligence/preset_resource_list", "blocked", "capcut-probe", "Signed no-spend probes returned ret=-1 system busy across empty/image-editor/query bodies; needs exact UI payload capture."),
-  known("/lv/v2/task/multi_get_tasks", "blocked", "capcut-probe", "Signed no-spend probes returned ret=1015 check login error for empty/zero task ids; needs real task ids and signed feed auth context."),
-  known("/lv/v1/cc_web/plane/get_categories", "implemented", "capcut-categories", "No-spend CapCut commercial category catalog."),
-  known("/lv/v1/cc_web/plane/get_collections", "implemented", "capcut-collections", "No-spend CapCut template collection/category ids."),
-  known("/lv/v1/cc_web/plane/get_collection_templates", "implemented", "capcut-collection-templates", "No-spend CapCut template rows by collection id; exact body uses id, not category_id."),
-  known("/lv/v1/cc_web/plane/get_template_detail", "implemented", "capcut-template-detail", "No-spend CapCut template detail by template web id."),
-  known("/lv/v1/cc_web/replicate/get_search_words", "blocked", null, "Signed no-spend probes returned ret=0 but only region metadata, not usable search words; capture a UI call that returns keyword data before promotion."),
-  known("/lv/v1/cc_web/replicate/search_templates", "blocked", null, "Signed no-spend probes returned ret=1000 param error across recovered keyword/category/search-id variants; capture an exact template-search UI request before promotion."),
-  known("/lv/v1/cc_web/plane/batch_get_collection_templates", "blocked", null, "Signed no-spend probes returned ret=1000 param error across object, list, and nested collection variants; capture the exact batch row UI payload before promotion."),
-  known("/lv/v1/cc_web/plane/get_collection_presets", "blocked", null, "Signed no-spend probes using confirmed collection ids returned ret=1015 check login error; capture the exact preset UI call and required auth/header context before promotion."),
-  known("/lv/v1/cc_web/plane/preset_template_detail", "blocked", null, "Preset detail depends on get_collection_presets data, but preset listing currently returns ret=1015 in safe probes; capture a real preset UI flow before promotion."),
-  known("/lv/v1/cc_web/plane/fuzzy_search_templates", "blocked", null, "Signed no-spend probes returned ret=0 with empty lists for guessed keyword/title bodies; capture a non-empty fuzzy-search UI request before promotion."),
-  known("/mweb/v1/get_unread_count", "cataloged_only", null, "Low-value notification count endpoint."),
-  known("/mweb/v1/workspace/create", "captured_only", null, "Workspace mutation; low priority until needed for automated project setup."),
-  known("/mweb/v1/workspace/update", "captured_only", null, "Workspace mutation; low priority until needed for automated project setup."),
-  known("/mweb/v1/creation_agent/v2/conversation", "partial", null, "Older SSE agent submit preserved but not a current high-priority UGC surface."),
-  known("/mweb/v1/creation_agent/v2/get_agent_config", "implemented", "agent-catalog", "Schema-backed agent/model config catalog."),
-  known("/mweb/v1/creation_agent/v2/skill/list", "implemented", "agent-catalog", "Schema-backed official/custom agent skill catalog."),
-]
-
-function known(endpoint: string, status: JimengDiscoveryKnownStatus, command: string | null, note: string): JimengDiscoveryKnownEndpoint {
-  return { endpoint, status, command, note }
-}
-
-function getKnownEndpointNote(endpoint: string): string | null {
-  return KNOWN_ENDPOINTS.find((knownEndpoint) => knownEndpoint.endpoint === endpoint)?.note ?? null
 }
 
 function recommendCapturedCandidate(
@@ -670,7 +475,7 @@ function recommendStaticEndpoint(endpoint: JimengDiscoveryStaticEndpoint): { act
     return {
       action: "static_capture_needed",
       priority: endpoint.high_value ? 36 : 18,
-      reason: getKnownEndpointNote(endpoint.endpoint) ?? "Known endpoint has safe probe evidence but no useful payload yet; capture a non-empty UI flow before promotion.",
+      reason: getJimengDiscoveryKnownEndpointNote(endpoint.endpoint) ?? "Known endpoint has safe probe evidence but no useful payload yet; capture a non-empty UI flow before promotion.",
       blockedReason: "Previous safe probes did not return a useful payload; capture a non-empty UI flow before CLI promotion.",
     }
   }
@@ -678,7 +483,7 @@ function recommendStaticEndpoint(endpoint: JimengDiscoveryStaticEndpoint): { act
     return {
       action: "document_low_value_or_risky",
       priority: endpoint.high_value ? 28 : 14,
-      reason: getKnownEndpointNote(endpoint.endpoint) ?? "Cataloged low-value endpoint; keep out of active implementation scope.",
+      reason: getJimengDiscoveryKnownEndpointNote(endpoint.endpoint) ?? "Cataloged low-value endpoint; keep out of active implementation scope.",
       blockedReason: "Cataloged or low-value endpoint; promote only if a later UGC workflow needs it.",
     }
   }
