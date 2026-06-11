@@ -82,6 +82,20 @@ export function getJimengDiscoveryTriageFamilies(): JimengDiscoveryTriageFamily[
   return TRIAGE_FAMILIES.map((family) => ({ ...family, endpoints: [...family.endpoints] }))
 }
 
+export function parseJimengDiscoveryTriageDecisions(value: string | undefined): JimengDiscoveryTriageDecision[] {
+  if (!value?.trim()) return ["keep"]
+  const decisions: JimengDiscoveryTriageDecision[] = []
+  for (const item of value.split(",")) {
+    const decision = item.trim()
+    if (!decision) continue
+    if (decision !== "keep" && decision !== "maybe" && decision !== "skip") {
+      throw new Error(`Unknown triage decision: ${decision}`)
+    }
+    if (!decisions.includes(decision)) decisions.push(decision)
+  }
+  return decisions.length > 0 ? decisions : ["keep"]
+}
+
 export function summarizeJimengDiscoveryTriageCoverage(input: {
   decisions?: JimengDiscoveryTriageDecision[]
 } = {}): JimengDiscoveryTriageCoverage {
@@ -150,6 +164,23 @@ export function writeJimengDiscoveryTriageCoverageMarkdown(coverage: JimengDisco
 
   for (const family of coverage.families) {
     lines.push(`| ${family.id} | ${family.decision} | ${family.title} | ${family.endpointCount} | ${formatTriageStatusCounts(family.statusCounts)} | ${family.notImplementedEndpoints.length} |`)
+  }
+
+  const knownByEndpoint = buildJimengDiscoveryKnownEndpointMap()
+  const unfinishedFamilies = coverage.families.filter((family) => family.notImplementedEndpoints.length > 0)
+  if (unfinishedFamilies.length > 0) {
+    lines.push("", "## Not Implemented Endpoints", "")
+    for (const family of unfinishedFamilies) {
+      lines.push(`### ${family.id} ${family.title}`, "")
+      for (const endpoint of family.notImplementedEndpoints) {
+        const row = knownByEndpoint.get(endpoint)
+        const status = row?.status ?? "missing"
+        const command = row?.command ? ` command=${row.command}` : ""
+        const note = row?.note ? ` - ${row.note}` : ""
+        lines.push(`- \`${endpoint}\` - ${status}${command}${note}`)
+      }
+      lines.push("")
+    }
   }
 
   return `${lines.join("\n")}\n`

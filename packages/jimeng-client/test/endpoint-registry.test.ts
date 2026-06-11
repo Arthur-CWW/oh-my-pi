@@ -4,6 +4,7 @@ import {
   getJimengDiscoveryKnownEndpointNote,
   getJimengDiscoveryKnownEndpoints,
   getJimengDiscoveryTriageFamilies,
+  parseJimengDiscoveryTriageDecisions,
   summarizeJimengDiscoveryTriageCoverage,
   writeJimengDiscoveryTriageCoverageMarkdown,
 } from "../src/endpoint-registry"
@@ -47,6 +48,7 @@ describe("Jimeng endpoint registry", () => {
   test("summarizes triage keep-family coverage from registry statuses", () => {
     const families = getJimengDiscoveryTriageFamilies()
     const coverage = summarizeJimengDiscoveryTriageCoverage({ decisions: ["keep"] })
+    const markdown = writeJimengDiscoveryTriageCoverageMarkdown(coverage)
 
     expect(families.filter((family) => family.decision === "keep").map((family) => family.id)).toEqual([
       "G1",
@@ -65,6 +67,14 @@ describe("Jimeng endpoint registry", () => {
     expect(coverage.families.find((family) => family.id === "T1")?.statusCounts.blocked).toBe(6)
     expect(coverage.families.find((family) => family.id === "L1")?.notImplementedEndpoints).toContain("/mweb/v1/video_generate/pre_process")
 
-    expect(writeJimengDiscoveryTriageCoverageMarkdown(coverage)).toContain("| T1 | keep | CapCut/template mining | 16 | implemented=10, blocked=6 | 6 |")
+    expect(markdown).toContain("| T1 | keep | CapCut/template mining | 16 | implemented=10, blocked=6 | 6 |")
+    expect(markdown).toContain("## Not Implemented Endpoints")
+    expect(markdown).toContain("- `/mweb/v1/aigc_draft/generate` - partial command=text2image/text2video/image2video/frames2video/lip-sync")
+  })
+
+  test("parses triage decision flags with keep as the default", () => {
+    expect(parseJimengDiscoveryTriageDecisions(undefined)).toEqual(["keep"])
+    expect(parseJimengDiscoveryTriageDecisions("keep,maybe,keep")).toEqual(["keep", "maybe"])
+    expect(() => parseJimengDiscoveryTriageDecisions("weekly")).toThrow("Unknown triage decision")
   })
 })

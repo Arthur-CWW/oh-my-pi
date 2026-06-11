@@ -87,6 +87,12 @@ import { prepareFromCapture, redactHeaders, type CaptureFile, type JimengOp, typ
 import { JimengClient } from "./client"
 import { JimengError } from "./errors"
 import {
+  parseJimengDiscoveryTriageDecisions,
+  summarizeJimengDiscoveryTriageCoverage,
+  writeJimengDiscoveryTriageCoverageMarkdown,
+  type JimengDiscoveryTriageDecision,
+} from "./endpoint-registry"
+import {
   buildExploreRequestBody,
   buildShortVideoExploreQuery,
   fetchExploreTemplates,
@@ -313,6 +319,7 @@ Commands:
   discovery-worklist Merge capture analysis/static hints into prioritized next API work
   static-locate Locate endpoint request builders in local source/bundle roots
   static-inventory Inventory frontend API endpoints from local source/bundle roots
+  triage-coverage Summarize keep/maybe/skip endpoint registry coverage and remaining gaps
   catalog       Probe non-generating model/tool/persona/voice config endpoints
   agent-catalog Fetch normalized agent skills and image/video model catalog
   image-models  Fetch no-spend image generation model/config catalog
@@ -390,6 +397,7 @@ Options:
   --contextLines <n>            Snippet context lines for static-locate (default: 3)
   --includeRisky                Include generate/upload/mutate/payment endpoints in replay candidate JSON
   --includeKnown                Include already-covered endpoints in discovery-worklist/static-inventory
+  --decisions <ids>             Triage decisions for triage-coverage: keep,maybe,skip (default: keep)
   --plan <file>                 Dry-run plan JSON for lip-sync-compare
   --endpoint <path|url>          Endpoint path or full URL for endpoint-probe
   --method <GET|POST>            HTTP method for endpoint-probe/capcut-probe (default: POST)
@@ -809,6 +817,7 @@ interface CliArgs {
     | "discovery-worklist"
     | "static-locate"
     | "static-inventory"
+    | "triage-coverage"
     | "catalog"
     | "agent-catalog"
     | "image-models"
@@ -883,6 +892,7 @@ interface CliArgs {
   contextLines?: number
   includeRisky: boolean
   includeKnown: boolean
+  decisions: JimengDiscoveryTriageDecision[]
   plan?: string
   endpoint?: string
   method?: "GET" | "POST"
@@ -1134,6 +1144,33 @@ async function main(argv: string[]): Promise<void> {
     })
     writeFileSync(path.join(dirs.normalizedDir, `${runId}-summary.md`), writeJimengStaticInventoryMarkdown(result), "utf8")
     console.log(`[jimeng-browser-proxy] static-inventory saved resources=${result.totalResourceCount} included=${result.includedResourceCount} high_value_gaps=${result.highValueGapCount}`)
+    return
+  }
+
+  if (args.command === "triage-coverage") {
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const runId = `triage-coverage-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const coverage = summarizeJimengDiscoveryTriageCoverage({ decisions: args.decisions })
+    writeJson(path.join(dirs.rawDir, `${runId}.json`), coverage)
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      decisions: coverage.decisions,
+      family_count: coverage.familyCount,
+      unique_endpoint_count: coverage.uniqueEndpointCount,
+      missing_endpoint_count: coverage.missingEndpointCount,
+      status_counts: coverage.statusCounts,
+      families: coverage.families.map((family) => ({
+        id: family.id,
+        decision: family.decision,
+        title: family.title,
+        endpoint_count: family.endpointCount,
+        status_counts: family.statusCounts,
+        not_implemented_count: family.notImplementedEndpoints.length,
+        not_implemented_endpoints: family.notImplementedEndpoints,
+      })),
+    })
+    writeFileSync(path.join(dirs.normalizedDir, `${runId}-summary.md`), writeJimengDiscoveryTriageCoverageMarkdown(coverage), "utf8")
+    console.log(`[jimeng-browser-proxy] triage-coverage saved decisions=${coverage.decisions.join(",")} families=${coverage.familyCount} missing=${coverage.missingEndpointCount}`)
     return
   }
 
@@ -5348,6 +5385,7 @@ function parseArgs(argv: string[]): CliArgs {
     && command !== "discovery-worklist"
     && command !== "static-locate"
     && command !== "static-inventory"
+    && command !== "triage-coverage"
     && command !== "catalog"
     && command !== "agent-catalog"
     && command !== "image-models"
@@ -5462,6 +5500,7 @@ function parseArgs(argv: string[]): CliArgs {
   const needIntentionMark = parseOptionalBooleanFlag(flags.needIntentionMark, "--needIntentionMark")
   const isInsertFrame = parseOptionalBooleanFlag(flags.isInsertFrame, "--isInsertFrame")
   const hideStoryAgentResult = parseOptionalBooleanFlag(flags.hideStoryAgentResult, "--hideStoryAgentResult")
+  const decisions = parseJimengDiscoveryTriageDecisions(flags.decisions)
   if (seed !== undefined && (!Number.isInteger(seed) || seed < 0 || seed > 4294967295)) {
     throw new Error("--seed must be an integer from 0 to 4294967295")
   }
@@ -5567,6 +5606,7 @@ function parseArgs(argv: string[]): CliArgs {
     contextLines,
     includeRisky: flags.includeRisky === "true" || flags["include-risky"] === "true",
     includeKnown: flags.includeKnown === "true" || flags["include-known"] === "true",
+    decisions,
     plan: flags.plan,
     endpoint: flags.endpoint,
     method,
