@@ -21,6 +21,12 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "bun test ./test"
+    "test": "bun test ./test",
+    "test:vitest": "vitest run test-vitest",
+    "test:vitest:update": "vitest run test-vitest --update"
+  },
+  "devDependencies": {
+    "@effect/vitest": "4.0.0-beta.71",
+    "vitest": "^4.0.15"
   }
 }
