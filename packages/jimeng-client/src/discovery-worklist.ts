@@ -430,6 +430,12 @@ const KNOWN_ENDPOINTS: JimengDiscoveryKnownEndpoint[] = [
   known("/mweb/v1/get_invite_status", "implemented", "account-config", "No-spend current-account invite status read."),
   known("/mweb/v1/get_notice_list", "blocked", null, "No-spend empty/count/pagination probes returned ret=1000 invalid parameter; capture the exact home notice UI request before promotion."),
   known("/mweb/v1/get_panel_info", "blocked", null, "No-spend empty/panel/type probes returned ret=2012 get panel info failed; capture the exact panel/favorite-voice UI request before promotion."),
+  known("/mweb/v1/get_short_url", "cataloged_only", null, "No-spend probe showed long_url returns ret=0, but this is a low-value URL shortener service rather than a UGC GenAI capability."),
+  known("/mweb/v1/get_weekly_challenge_list", "cataloged_only", null, "Back burner: no-spend Jimeng activity/challenge listing. Cataloged as trend/contest metadata, but not important for the current UGC generation pipeline."),
+  known("/mweb/v1/get_weekly_challenge_detail", "cataloged_only", null, "Back burner: no-spend Jimeng activity/challenge detail by act_key. Removed from active CLI scope because it is not core UGC workflow surface."),
+  known("/mweb/v1/get_weekly_challenge_work_list", "cataloged_only", null, "Back burner: activity work-list likely needs exact detail UI payload; skip unless challenge/trend mining becomes a real product requirement."),
+  known("/mweb/v1/cc_data_sync/get_account_info", "cataloged_only", null, "No-spend probe with account_type=capcut returned ret=0, but this only exposes CapCut binding status and is not a UGC GenAI surface."),
+  known("/mweb/v1/cc_data_sync/get_account_token", "blocked", null, "CapCut data-sync token read can expose account credentials; do not replay or persist raw output without a dedicated credential-safe flow."),
   known("/mweb/v1/get_experiment_params", "implemented", "runtime-config", "No-spend frontend experiment parameter read."),
   known("/mweb/v1/get_home_header_banner_config", "implemented", "runtime-config", "No-spend home header banner/runtime config read."),
   known("/mweb/v1/get_help_desk_entrance", "implemented", "runtime-config", "No-spend help desk entrance read with URL redacted in normalized output."),
@@ -460,6 +466,11 @@ const KNOWN_ENDPOINTS: JimengDiscoveryKnownEndpoint[] = [
   known("/mweb/v1/aigc_draft/cancel_generate", "blocked", null, "Cancels an in-flight generation and mutates provider job state; use only with an active disposable job or exact UI capture."),
   known("/mweb/v1/aigc_draft/generate_accelerate", "blocked", null, "Generation acceleration may spend quota or alter queue priority; require exact UI capture and explicit approval before live replay."),
   known("/cc/v1/workspace/get_user_workspaces", "blocked", null, "LV workspace list requires exact lite_aid/session gateway context; no-spend count/cursor/lite_aid probes returned ret=1014 system busy."),
+  known("/lv/v1/user/get_enable_list", "blocked", null, "No-spend empty/null probes returned ret=1014 system busy; capture the exact LV authority request/auth context before promotion."),
+  known("/lv/v1/web/get_lite_user", "blocked", null, "No-spend empty/need_cache/app probes returned ret=1014 system busy; capture exact LV lite-user auth context before promotion."),
+  known("/lv/v1/ad_maker/user/get_enable_list", "blocked", null, "Safe Jimeng-host probes returned HTML instead of JSON, so this likely needs the correct LV/ad-maker gateway or UI auth context."),
+  known("/lv/v1/commerce/get_entrances", "blocked", null, "Safe Jimeng-host probes returned HTML instead of JSON; static evidence shows custom commerce headers/gateway are needed before replay."),
+  known("/lv/v1/platform/query_auth_status", "blocked", null, "Safe Jimeng-host probes returned HTML instead of JSON; capture exact platform auth-status UI request and gateway before promotion."),
   known("/lv/v1/asset/list", "blocked", null, "LV EverCloud material list needs exact workspace_id/space_id context from the workspace service; capture the UI request before promotion."),
   known("/lv/v1/asset/query", "blocked", null, "LV user asset query needs exact workspace/session context; no-spend workspace variants returned ret=1014 system busy."),
   known("/lv/v1/asset/detail", "blocked", null, "LV material detail lookup depends on asset ids plus workspace_id/space_id from a successful LV asset list/query capture."),
@@ -478,6 +489,7 @@ const KNOWN_ENDPOINTS: JimengDiscoveryKnownEndpoint[] = [
   known("/lv/v1/editor/template/recent_list", "blocked", null, "Signed no-session LV probes with count/lang and cursor bodies returned ret=1015 check login error; capture the logged-in editor request and auth context before promotion."),
   known("/lv/v1/editor/template/check_post_permission", "blocked", null, "Signed no-session LV permission probe returned ret=1015 check login error; capture the logged-in editor request before promotion."),
   known("/lv/v1/editor/draft/get_template_file", "blocked", null, "Signed LV probe with empty uris returned ret=1016 ERR_PARAM; promotion needs real template file URIs from a captured template/draft flow."),
+  known("/lv/v1/editor/draft/get_version_list", "blocked", null, "LV draft version listing depends on a real editor draft id and signed LV auth context; capture an editor version-history UI request before promotion."),
   known("/lv/v1/editor/plane/intelligence/query_recommend_template", "blocked", null, "Signed LV template recommendation probe with no assets returned ret=-3 bad request; capture exact workspace/assets/aspect-ratio payload before promotion."),
   known("/lv/v2/cc_web_task/get_task_draft", "blocked", null, "Signed feed-api task-draft probes with empty/zero task ids returned ret=1015 check login error; requires real commercial-photo task id plus auth context."),
   known("/lv/v1/asset/copy", "blocked", null, "Copies asset records across workspaces and then polls asset/query_process; require a disposable workspace/asset fixture or explicit approval."),
@@ -660,6 +672,14 @@ function recommendStaticEndpoint(endpoint: JimengDiscoveryStaticEndpoint): { act
       priority: endpoint.high_value ? 36 : 18,
       reason: getKnownEndpointNote(endpoint.endpoint) ?? "Known endpoint has safe probe evidence but no useful payload yet; capture a non-empty UI flow before promotion.",
       blockedReason: "Previous safe probes did not return a useful payload; capture a non-empty UI flow before CLI promotion.",
+    }
+  }
+  if (endpoint.known_status === "cataloged_only") {
+    return {
+      action: "document_low_value_or_risky",
+      priority: endpoint.high_value ? 28 : 14,
+      reason: getKnownEndpointNote(endpoint.endpoint) ?? "Cataloged low-value endpoint; keep out of active implementation scope.",
+      blockedReason: "Cataloged or low-value endpoint; promote only if a later UGC workflow needs it.",
     }
   }
   if (endpoint.known_status === "implemented") {

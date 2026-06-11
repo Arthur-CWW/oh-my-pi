@@ -419,6 +419,7 @@ Options:
   --isInsertFrame <bool>         Optional asset search insert-frame filter
   --hideStoryAgentResult <bool>  Optional asset search story-agent filter
   --beginTimeStamp <n>           Optional asset search lower timestamp bound
+  --language <value>             Optional research/profile language filter
   --text <text>                 TTS/sample-voices text
   --voice-id <id>               TTS voice id from voices command
   --voice-title <title>         Optional display title for TTS output filename
@@ -892,6 +893,7 @@ interface CliArgs {
   blockIndex?: number
   showTypeList?: number[]
   secUid?: string
+  language?: string
   publishedItemId?: string
   publishedItemIds?: string[]
   itemIds?: string[]
@@ -4609,6 +4611,7 @@ function parseArgs(argv: string[]): CliArgs {
     blockIndex,
     showTypeList: parseJimengResearchShowTypeList(flags.showTypeList),
     secUid: flags.secUid,
+    language: flags.language,
     publishedItemId: flags.publishedItemId,
     publishedItemIds: parseJimengPublishedItemIds(flags.publishedItemIds),
     itemIds: parseJimengLocalItemIds(flags.itemIds),

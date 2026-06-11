@@ -27,7 +27,7 @@ This is the current queue for breaking down the Jimeng/Dreamina workstream. Pref
 
 | ID | Chunk | Size | Depends On | Parallelizable? | Notes |
 |---|---|---:|---|---|---|
-| W0 | Finish current `weekly-challenges` slice and clean its tests | S | none | No | Current worktree already has code/tests for this. Finish or intentionally drop it before bigger refactors so it does not keep polluting diffs. |
+| W0 | Park `weekly-challenges` and clean dirty state | S | none | No | Weekly challenges are contest/activity metadata, not a core UGC generation surface. Keep them cataloged only in `docs/provider/jimeng-api-triage.md` and the endpoint registry, but remove the active CLI/test slice. |
 | W1 | Shared Jimeng HTTP transport with `live`/`record`/`replay`/`fixture` modes | L | W0 decision | Mostly no | Foundation chunk. Owns auth/session headers, risk detection, redaction, cassette read/write, cache paths, and DI boundary. Do this locally or with one worker; other chunks should not edit the same files until the interface is clear. |
 | W2 | Endpoint registry plus static-inventory/discovery snapshot tests | M/L | W0 decision; can start after W1 interface sketch | Yes, if files are disjoint | Replace giant inline fixtures and repeated known-status assertions with structured registry data and snapshot/fixture tests. This can run beside W1 if one owner only touches registry/analyzer files. |
 | W3 | Effect CLI front door | L | W1 interface sketch | Partly | Replace hand-written parsing for new/refactored commands. Do not migrate every command blindly; start with a command family that benefits from transport/cassette reuse. |

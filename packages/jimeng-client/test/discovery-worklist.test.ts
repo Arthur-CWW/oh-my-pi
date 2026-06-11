@@ -69,6 +69,18 @@ describe("Jimeng discovery worklist", () => {
           `fetch("/commerce/v3/trade/user/refund_record_list")`,
           `fetch("/mweb/v1/get_notice_list")`,
           `fetch("/mweb/v1/get_panel_info")`,
+          `fetch("/mweb/v1/get_short_url")`,
+          `fetch("/mweb/v1/get_weekly_challenge_list")`,
+          `fetch("/mweb/v1/get_weekly_challenge_detail")`,
+          `fetch("/mweb/v1/get_weekly_challenge_work_list")`,
+          `fetch("/mweb/v1/cc_data_sync/get_account_info")`,
+          `fetch("/mweb/v1/cc_data_sync/get_account_token")`,
+          `fetch("/lv/v1/user/get_enable_list")`,
+          `fetch("/lv/v1/web/get_lite_user")`,
+          `fetch("/lv/v1/ad_maker/user/get_enable_list")`,
+          `fetch("/lv/v1/commerce/get_entrances")`,
+          `fetch("/lv/v1/platform/query_auth_status")`,
+          `fetch("/lv/v1/editor/draft/get_version_list")`,
           `fetch("/mweb/search/v1/sug")`,
           `fetch("/mweb/search/v1/guess")`,
           `fetch("/mweb/search/v1/search")`,
@@ -106,6 +118,18 @@ describe("Jimeng discovery worklist", () => {
       expect(worklist.items.some((item) => item.endpoint === "/commerce/v1/purchase/price_list")).toBe(false)
       expect(worklist.items.some((item) => item.endpoint === "/lv/v1/effect/get_all_fonts")).toBe(false)
       expect(worklist.items.find((item) => item.endpoint === "/mweb/search/v1/fetch_debug/search")?.known_status).toBe("blocked")
+      const weeklyList = worklist.items.find((item) => item.endpoint === "/mweb/v1/get_weekly_challenge_list")
+      expect(weeklyList?.known_status).toBe("cataloged_only")
+      expect(weeklyList?.recommended_action).toBe("document_low_value_or_risky")
+      expect(weeklyList?.reason).toContain("Back burner")
+      const weeklyDetail = worklist.items.find((item) => item.endpoint === "/mweb/v1/get_weekly_challenge_detail")
+      expect(weeklyDetail?.known_status).toBe("cataloged_only")
+      expect(weeklyDetail?.recommended_action).toBe("document_low_value_or_risky")
+      expect(weeklyDetail?.reason).toContain("not core UGC workflow")
+      const weeklyWorkList = worklist.items.find((item) => item.endpoint === "/mweb/v1/get_weekly_challenge_work_list")
+      expect(weeklyWorkList?.known_status).toBe("cataloged_only")
+      expect(weeklyWorkList?.recommended_action).toBe("document_low_value_or_risky")
+      expect(weeklyWorkList?.reason).toContain("trend mining")
       const readGap = worklist.items.find((item) => item.endpoint === "/mweb/v1/reference_profile/list")
       expect(readGap?.recommended_action).toBe("probe_then_promote_cli")
       expect(readGap?.has_probe_variants).toBe(true)
@@ -193,6 +217,13 @@ describe("Jimeng discovery worklist", () => {
       for (const endpoint of [
         "/mweb/v1/get_notice_list",
         "/mweb/v1/get_panel_info",
+        "/mweb/v1/cc_data_sync/get_account_token",
+        "/lv/v1/user/get_enable_list",
+        "/lv/v1/web/get_lite_user",
+        "/lv/v1/ad_maker/user/get_enable_list",
+        "/lv/v1/commerce/get_entrances",
+        "/lv/v1/platform/query_auth_status",
+        "/lv/v1/editor/draft/get_version_list",
         "/commerce/v1/subscription/cc_price_list",
         "/commerce/v1/subscription/get_change_plan_info",
         "/commerce/v3/trade/query_trade",
@@ -215,6 +246,10 @@ describe("Jimeng discovery worklist", () => {
       ]) {
         expect(worklist.items.find((item) => item.endpoint === endpoint)?.known_status).toBe("blocked")
       }
+      expect(worklist.items.find((item) => item.endpoint === "/mweb/v1/get_short_url")?.known_status).toBe("cataloged_only")
+      expect(worklist.items.find((item) => item.endpoint === "/mweb/v1/cc_data_sync/get_account_info")?.known_status).toBe("cataloged_only")
+      expect(worklist.items.find((item) => item.endpoint === "/mweb/v1/cc_data_sync/get_account_token")?.reason).toContain("credentials")
+      expect(worklist.items.find((item) => item.endpoint === "/lv/v1/editor/draft/get_version_list")?.reason).toContain("draft id")
       expect(worklist.items.find((item) => item.endpoint === "/lv/v1/asset/copy")?.reason).toContain("disposable workspace")
       expect(worklist.items.find((item) => item.endpoint === "/lv/v1/editor/template/add")?.reason).toContain("template state")
       expect(worklist.items.find((item) => item.endpoint === "/mweb/v1/remove_history")?.reason).toContain("history ids")
