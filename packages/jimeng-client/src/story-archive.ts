@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto"
 import { Schema } from "effect"
 import { type JimengSessionBundle } from "./capture"
-import { assertNoRiskError, JimengClient } from "./client"
+import { assertNoRiskError, JimengClient, type JimengFetch } from "./client"
 import { buildJimengEndpointProbeHeaders } from "./endpoint-probe"
 import { jimengError } from "./errors"
 import { type JsonObject, type JsonValue } from "./reference-image"
@@ -161,10 +161,11 @@ export function buildJimengStoryExportPlan(input: JimengStoryExportPlanInput = {
 
 export async function fetchJimengStoryRecords(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   session: JimengSessionBundle
   storyIds: string[]
 }): Promise<JimengStoryRecordsResult> {
-  const client = input.client ?? new JimengClient()
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
   const request = buildJimengStoryRecordsRequest(input.storyIds)
   const response = await client.requestText(`https://jimeng.jianying.com/mweb/v1/mget_story?${DEFAULT_QUERY}`, {
     method: "POST",
@@ -190,10 +191,11 @@ export async function fetchJimengStoryRecords(input: {
 
 export async function fetchJimengAsyncTasks(input: {
   client?: JimengClient
+  fetch?: JimengFetch
   session: JimengSessionBundle
   taskIds: string[]
 }): Promise<JimengAsyncTasksResult> {
-  const client = input.client ?? new JimengClient()
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
   const request = buildJimengAsyncTasksRequest(input.taskIds)
   const response = await client.requestText(`https://jimeng.jianying.com/mweb/v1/mget_async_task?${DEFAULT_QUERY}`, {
     method: "POST",

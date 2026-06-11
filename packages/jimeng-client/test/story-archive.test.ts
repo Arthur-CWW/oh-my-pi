@@ -1,5 +1,9 @@
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import path from "node:path"
 import { describe, expect, test } from "bun:test"
 import {
+  createJimengHttpTransport,
   JimengClient,
   JimengError,
   buildJimengAsyncTasksRequest,
@@ -8,6 +12,7 @@ import {
   fetchJimengAsyncTasks,
   fetchJimengStoryRecords,
   parseJimengStoryIds,
+  readJimengHttpCassette,
   summarizeJimengAsyncTasks,
   summarizeJimengStoryExportPlan,
   summarizeJimengStoryRecords,
@@ -60,28 +65,7 @@ describe("Jimeng story archive helpers", () => {
   test("fetches story records and redacts signed cover URLs from summary", async () => {
     const requests: Array<{ url: string; init?: RequestInit }> = []
     const client = new JimengClient({
-      fetch: mockFetch(JSON.stringify({
-        ret: "0",
-        errmsg: "success",
-        data: {
-          story_map: {
-            "story-1": {
-              story_id: "story-1",
-              draft_id: "draft-1",
-              story_version: "draft-version-1",
-              name: "K beauty archive",
-              desc: "Routine reference set",
-              cover: {
-                image_uri: "tos-cn-i/story-cover",
-                image_url: "https://signed.example.invalid/story.png?x-signature=secret",
-                width: 720,
-                height: 1280,
-                format: "png",
-              },
-            },
-          },
-        },
-      }), requests),
+      fetch: mockFetch(JSON.stringify(storyRecordsBody()), requests),
     })
 
     const result = await fetchJimengStoryRecords({ client, session, storyIds: ["story-1"] })
@@ -106,25 +90,8 @@ describe("Jimeng story archive helpers", () => {
 
   test("fetches async export tasks and keeps download URLs out of summary", async () => {
     const requests: Array<{ url: string; init?: RequestInit }> = []
-    const payload = {
-      result: {
-        downloadUrl: "https://signed.example.invalid/export.zip?x-signature=secret",
-        missMaterialItem: [{ id: "missing-1" }],
-      },
-    }
     const client = new JimengClient({
-      fetch: mockFetch(JSON.stringify({
-        ret: "0",
-        errmsg: "success",
-        data: {
-          task_map: {
-            "task-1": {
-              status: 50,
-              payload: JSON.stringify(payload),
-            },
-          },
-        },
-      }), requests),
+      fetch: mockFetch(JSON.stringify(asyncTasksBody()), requests),
     })
 
     const result = await fetchJimengAsyncTasks({ client, session, taskIds: ["task-1"] })
@@ -145,11 +112,127 @@ describe("Jimeng story archive helpers", () => {
     expect(JSON.stringify(summary)).not.toContain("signed.example.invalid")
     expect(JSON.stringify(summary)).not.toContain("x-signature")
   })
+
+  test("can fetch story records and async tasks through recorded and replayed HTTP transport cassettes", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "jimeng-story-archive-cassette-"))
+    try {
+      const cassettePath = path.join(dir, "story-archive.json")
+      const requests: Array<{ url: string; init?: RequestInit }> = []
+      const recordTransport = createJimengHttpTransport({
+        mode: "record",
+        cassettePath,
+        fetch: mockFetchSequence([
+          JSON.stringify(storyRecordsBody()),
+          JSON.stringify(asyncTasksBody()),
+        ], requests),
+        nowIso: () => "2026-06-11T00:00:00.000Z",
+      })
+
+      const recordedStories = await fetchJimengStoryRecords({
+        fetch: recordTransport.fetch,
+        session,
+        storyIds: ["story-1"],
+      })
+      const recordedTasks = await fetchJimengAsyncTasks({
+        fetch: recordTransport.fetch,
+        session,
+        taskIds: ["task-1"],
+      })
+
+      expect(recordedStories.stories).toHaveLength(1)
+      expect(recordedTasks.tasks).toHaveLength(1)
+      expect(readJimengHttpCassette(cassettePath).entries).toHaveLength(2)
+      expect(requests).toHaveLength(2)
+
+      const replayTransport = createJimengHttpTransport({
+        mode: "replay",
+        cassettePath,
+      })
+      const replayedStories = await fetchJimengStoryRecords({
+        fetch: replayTransport.fetch,
+        session,
+        storyIds: ["story-1"],
+      })
+      const replayedTasks = await fetchJimengAsyncTasks({
+        fetch: replayTransport.fetch,
+        session,
+        taskIds: ["task-1"],
+      })
+
+      expect(summarizeJimengStoryRecords(replayedStories)).toMatchObject({
+        endpoint: "/mweb/v1/mget_story",
+        story_count: 1,
+      })
+      expect(summarizeJimengAsyncTasks(replayedTasks)).toMatchObject({
+        endpoint: "/mweb/v1/mget_async_task",
+        task_count: 1,
+      })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
 })
+
+function storyRecordsBody() {
+  return {
+    ret: "0",
+    errmsg: "success",
+    data: {
+      story_map: {
+        "story-1": {
+          story_id: "story-1",
+          draft_id: "draft-1",
+          story_version: "draft-version-1",
+          name: "K beauty archive",
+          desc: "Routine reference set",
+          cover: {
+            image_uri: "tos-cn-i/story-cover",
+            image_url: "https://signed.example.invalid/story.png?x-signature=secret",
+            width: 720,
+            height: 1280,
+            format: "png",
+          },
+        },
+      },
+    },
+  }
+}
+
+function asyncTasksBody() {
+  const payload = {
+    result: {
+      downloadUrl: "https://signed.example.invalid/export.zip?x-signature=secret",
+      missMaterialItem: [{ id: "missing-1" }],
+    },
+  }
+  return {
+    ret: "0",
+    errmsg: "success",
+    data: {
+      task_map: {
+        "task-1": {
+          status: 50,
+          payload: JSON.stringify(payload),
+        },
+      },
+    },
+  }
+}
 
 function mockFetch(text: string, requests: Array<{ url: string; init?: RequestInit }>): JimengFetch {
   return async (url, init) => {
     requests.push({ url, init })
+    return new Response(text, { status: 200 })
+  }
+}
+
+function mockFetchSequence(texts: string[], requests: Array<{ url: string; init?: RequestInit }>): JimengFetch {
+  let index = 0
+  return async (url, init) => {
+    requests.push({ url, init })
+    const text = texts[index]
+    index += 1
+    if (text === undefined) throw new Error(`unexpected request ${url}`)
     return new Response(text, { status: 200 })
   }
 }

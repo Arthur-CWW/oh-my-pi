@@ -2508,11 +2508,16 @@ async function main(argv: string[]): Promise<void> {
     const dirs = ensureOutputDirs(path.resolve(args.outDir))
     const request = buildJimengStoryRecordsRequest(args.storyIds)
     const runId = `story-records-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
     if (args.dryRun) {
       writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
         command: args.command,
         endpoint: "/mweb/v1/mget_story",
         request,
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
         browser_session: redactSession(session),
         live_request: false,
       })
@@ -2520,15 +2525,27 @@ async function main(argv: string[]): Promise<void> {
         command: args.command,
         endpoint: "/mweb/v1/mget_story",
         request,
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
         dry_run: true,
       })
       console.log(`[jimeng-browser-proxy] story-records dry run saved story_ids=${args.storyIds.length}`)
       return
     }
 
-    const result = await fetchJimengStoryRecords({ session, storyIds: args.storyIds })
+    const transport = createJimengHttpTransport({
+      mode: args.transportMode,
+      cassettePath,
+    })
+    const result = await fetchJimengStoryRecords({ session, storyIds: args.storyIds, fetch: transport.fetch })
     writeJson(path.join(dirs.rawDir, `${runId}.json`), {
       endpoint: result.endpoint,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       http_status: result.httpStatus,
       ret: result.ret,
       errmsg: result.errmsg,
@@ -2538,6 +2555,10 @@ async function main(argv: string[]): Promise<void> {
     })
     writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
       command: args.command,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       summary: summarizeJimengStoryRecords(result),
     })
     console.log(`[jimeng-browser-proxy] story-records saved stories=${result.stories.length}`)
@@ -2550,11 +2571,16 @@ async function main(argv: string[]): Promise<void> {
     const dirs = ensureOutputDirs(path.resolve(args.outDir))
     const request = buildJimengAsyncTasksRequest(taskIds)
     const runId = `async-tasks-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const cassettePath = resolveJimengHttpCassettePath(args, dirs, runId)
     if (args.dryRun) {
       writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
         command: args.command,
         endpoint: "/mweb/v1/mget_async_task",
         request,
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
         browser_session: redactSession(session),
         live_request: false,
       })
@@ -2562,15 +2588,27 @@ async function main(argv: string[]): Promise<void> {
         command: args.command,
         endpoint: "/mweb/v1/mget_async_task",
         request,
+        transport: {
+          mode: args.transportMode,
+          cassette_path: cassettePath ?? null,
+        },
         dry_run: true,
       })
       console.log(`[jimeng-browser-proxy] async-tasks dry run saved task_ids=${taskIds.length}`)
       return
     }
 
-    const result = await fetchJimengAsyncTasks({ session, taskIds })
+    const transport = createJimengHttpTransport({
+      mode: args.transportMode,
+      cassettePath,
+    })
+    const result = await fetchJimengAsyncTasks({ session, taskIds, fetch: transport.fetch })
     writeJson(path.join(dirs.rawDir, `${runId}.json`), {
       endpoint: result.endpoint,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       http_status: result.httpStatus,
       ret: result.ret,
       errmsg: result.errmsg,
@@ -2580,6 +2618,10 @@ async function main(argv: string[]): Promise<void> {
     })
     writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
       command: args.command,
+      transport: {
+        mode: transport.info.mode,
+        cassette_path: transport.info.cassettePath,
+      },
       summary: summarizeJimengAsyncTasks(result),
     })
     console.log(`[jimeng-browser-proxy] async-tasks saved tasks=${result.tasks.length}`)
