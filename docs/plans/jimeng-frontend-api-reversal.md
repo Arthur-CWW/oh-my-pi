@@ -6,7 +6,9 @@ Map the real Jimeng/Dreamina frontend APIs well enough to support reliable direc
 
 The immediate fix is to stop reusing stale templates for operations whose frontend contracts have moved. Current architecture should use the background Jimeng browser profile as a session/token holder, then graduate stable captured contracts into direct `fetch` clients.
 
-For the long-running `/goal` spec, proof rules, async CLI shape, and per-feature git checkpoint rule, see [`jimeng-dreamina-cli-goal.md`](./jimeng-dreamina-cli-goal.md).
+Current method: use the packet factory in [`jimeng-fast-contract-extraction.md`](./jimeng-fast-contract-extraction.md), not endpoint-by-endpoint manual reversal. A session should select a value-ranked packet, write a packet manifest, gather only the required live/passive/replay samples, run `contract-infer`, promote generated schema/client/CLI/test/registry/docs drafts, then verify with replay/Vitest/typecheck.
+
+For the long-running `/goal` spec, priority model, proof rules, and copy/paste command, see [`jimeng-dreamina-cli-goal.md`](./jimeng-dreamina-cli-goal.md) and [`jimeng-dreamina-cli-goal-command.md`](./jimeng-dreamina-cli-goal-command.md).
 
 ## Current Status
 

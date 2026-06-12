@@ -21,8 +21,8 @@ Use this exact algorithm when a new Codex session resumes the workstream:
 2. Pick one packet from `docs/provider/jimeng-api-triage.md` by product value, not by safety or endpoint count.
 3. Write or refresh the packet manifest before code changes. The manifest can be committed as a short doc note or generated under ignored `data/**`; it must name the examples, sample source, output directory, promotion files, acceptance commands, and next handoff.
 4. If the packet needs live spend, mutation, fresh capture, unsafe credentials, or visible UI, ask once with the exact command/action list and artifact path. If approved, run the matrix. If not approved, keep working inside the same packet with fixtures, compare gates, request builders, schemas, and tests.
-5. Run `contract-infer` or improve it before hand-writing repeated schema/client/test code.
-6. Promote generated drafts in one coherent chunk: schema boundary, typed service, CLI command, registry status, fixtures/cassettes, and Vitest snapshots.
+5. Run `contract-infer` before hand-writing repeated schema/client/test code. If the packet still requires repetitive manual edits, improve `contract-infer` or add a narrow generator for that packet first.
+6. Promote generated drafts in one coherent chunk: schema boundary, typed service, CLI command, registry status, fixtures/cassettes, Vitest snapshots, and a short docs/QA note.
 7. Verify with replay tests, typecheck, Vitest snapshots, and media/artifact checks only when the packet creates media.
 8. End the session with an updated packet handoff: what is promoted, what command proves it, what remains blocked, and the exact next command.
 
@@ -64,6 +64,20 @@ handoff: exact next command if not complete
 This manifest is the cross-session coordination point. Keep raw JSON, media, signed URLs, and cassettes under ignored `data/**`; commit only redacted summaries, registry status, snapshots, and short QA notes.
 
 Current implementation: `packages/jimeng-client/src/packet-plan.ts` builds value-ranked packet plans and writes schema-validated manifest bundles with `writeJimengPacketPlanOutputs`. A manifest bundle contains `packet-manifest.json`, `packet-manifest.md`, and `approval-prompt.txt` when approval is required. Use `jimeng-browser-proxy packet-plan --packet <id> --outDir data/jimeng-lab/<packet-run>` before making packet code changes so future sessions can resume from the same examples, artifact root, infer command, promotion files, and acceptance commands.
+
+## Generated Implementation Factory
+
+This is the intended fast path for implementing many endpoints without hand-rolling each one:
+
+1. `packet-plan` selects a value-ranked family and writes the concrete examples, output root, approval prompt, infer command, promotion files, and acceptance commands.
+2. A bounded matrix or passive capture writes request/response JSON, cassettes, normalized summaries, artifact metadata, exact commands, and credit/account notes under the packet output root.
+3. `contract-infer` reads that output root and produces endpoint-grouped contract summaries, stable path/type stats, schema IR, fixture drafts, CLI flag suggestions, endpoint-registry patch drafts, and Vitest snapshotable reports.
+4. A promotion pass turns those generated drafts into real Effect Schema boundaries, service functions, CLI commands, replay tests, snapshots, registry rows, and docs.
+5. Acceptance runs replay/fixture tests first; live calls are only repeated for missing contracts, media proof, provider drift, or approved new examples.
+
+The generator should prefer small stable contracts over exhaustive mirrored provider types. Required paths are only the fields the client relies on. Extra provider fields should be allowed. Sensitive or unstable values must be redacted before any snapshot or committed fixture.
+
+If a session finds itself manually copying JSON shapes, writing long assertion walls, or making nearly identical registry/test edits, stop and add that transformation to the factory before continuing. The goal is to make the next packet cheaper than the current one.
 
 ## Scaffold-Then-Promote
 

@@ -11,6 +11,8 @@ The goal is product-value driven, then coverage-driven. Choose the next work by 
 ## Operating Model
 
 - Optimize for the shortest useful loop across sessions: packet manifest, bounded samples, contract inference, generated drafts, hand-tightened promotion, replay snapshots, scoped commit. If a step is repeated twice manually, improve the generator or shared abstraction before doing it a third time.
+- Treat the workstream as an implementation factory, not a sequence of manual endpoint tickets. The factory input is a value-ranked packet plus saved provider samples; the output is schema/client/CLI/test/registry/docs changes that can be reviewed and committed together.
+- Generate everything that is mechanically derivable from observed JSON before hand-writing code: Effect Schema IR, boundary decoder drafts, service wrapper drafts, Effect CLI option sketches, replay fixtures, Vitest snapshots, endpoint-registry patches, QA note skeletons, and next-command handoffs. Hand edit only semantics, naming, safety gates, redaction, and user-facing workflow choices.
 - Use `docs/plans/jimeng-fast-contract-extraction.md` as the default implementation loop: bounded live/passive matrix, saved raw and normalized JSON plus artifacts, contract inference, generated wrappers/tests/registry drafts, then replayed fixture proof.
 - Treat one value-ranked API family as one work packet. A packet contains 2-5 useful UGC workflow examples, sample collection, contract inference, generated schema/client/CLI/test/registry drafts, hand-tightening, replay tests, and final gap classification. Do not scatter a session across unrelated endpoint families unless the current packet is blocked.
 - Prefer scaffold generation from saved proof bundles over hand-writing one endpoint at a time. The expected path is `capture or live matrix -> contract-infer -> generated drafts -> hand-tightened Effect Schema/client/CLI -> Vitest snapshots/replay tests`.
@@ -37,15 +39,17 @@ The goal should be resumed as a packet factory, not as open-ended endpoint hunti
 
 1. Select the highest-value unfinished packet from `docs/provider/jimeng-api-triage.md`.
 2. Create or refresh the packet manifest defined in `docs/plans/jimeng-fast-contract-extraction.md`.
-3. Gather only the samples needed for that packet: approved live matrix, passive capture, replay cassette, or existing fixture.
-4. Generate drafts from those samples with `contract-infer` or a packet-specific generator.
-5. Promote the generated draft into typed services, CLI, registry rows, fixtures/cassettes, and Vitest snapshots.
-6. Verify once at the right boundary. Backend refactors need replay tests/typecheck/snapshots; media-generation changes need playable/listenable artifacts.
-7. Leave a compact handoff with exact next commands and blocked reasons.
+3. Gather only the samples needed for that packet: approved live matrix, passive capture, replay cassette, or existing fixture. Do not re-run live proof for layers already validated unless the provider contract is missing or suspected stale.
+4. Run `contract-infer` first. If the output is not enough to implement the packet, improve the generator or add a packet-specific generator before doing repetitive manual schema/test work.
+5. Promote the generated draft into typed services, CLI, registry rows, fixtures/cassettes, and Vitest snapshots as one coherent chunk.
+6. Verify once at the right boundary. Backend/API refactors need replay tests/typecheck/snapshots; media-generation changes additionally need playable/listenable artifacts.
+7. Leave a compact handoff with exact next commands, generated outputs, promoted files, and blocked reasons.
 
 Parallelization is useful only after scopes are split. Good parallel work: sample analysis vs registry docs, or separate packet families after the shared transport/client interface is stable. Bad parallel work: multiple sessions editing the central CLI parser, transport, endpoint registry, or same packet tests at once.
 
 The main speed lever is caching solved layers. Once auth/transport/cassette replay is validated, do not re-prove it in every packet. Once a request shape is captured and redacted, infer and replay from it. Once a registry report is snapshot-covered, update structured rows rather than duplicating progress in prose.
+
+Cross-session rule: the packet manifest and generated contract output are the handoff, not a long prose summary. A new session should be able to resume by reading the manifest, running the listed acceptance commands, and continuing from the listed next command without rediscovering endpoints.
 
 ## Fast Resume Checklist
 

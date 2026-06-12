@@ -74,16 +74,22 @@ describe("Jimeng packet plans", () => {
     const files = writeJimengPacketPlanOutputs(plan, outDir)
     const manifest = JSON.parse(readFileSync(files.manifestJson, "utf8")) as {
       packetId: string
-      examples: Array<{ outputDir: string }>
+      examples: Array<{ id: string; command: string; outputDir: string; approvalNote?: string }>
       approvalRequired: boolean
     }
     const markdown = readFileSync(files.manifestMarkdown, "utf8")
 
     expect(manifest.packetId).toBe("persona-voice")
     expect(manifest.examples[0]?.outputDir).toBe("data/jimeng-lab/packet-persona-voice-20260612/subject-voice")
+    expect(manifest.examples[1]).toMatchObject({
+      id: "voice-clone-submit",
+      command: expect.stringContaining("--dryRun"),
+      approvalNote: expect.stringContaining("explicit mutation/spend approval"),
+    })
     expect(manifest.approvalRequired).toBe(true)
     expect(markdown).toContain("# Jimeng Packet Plan: persona-voice")
     expect(markdown).toContain("## Approval Prompt")
+    expect(markdown).toContain("Live voice clone submit is intentionally disabled")
     expect(typeof files.approvalPrompt).toBe("string")
     if (files.approvalPrompt) {
       expect(existsSync(files.approvalPrompt)).toBe(true)

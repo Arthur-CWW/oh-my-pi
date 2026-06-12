@@ -65,6 +65,22 @@ Before implementation, create or refresh a packet manifest using this checklist:
 
 Do not spend a session adding another dry-run planner unless it is part of this checklist for the currently selected high-value packet. Prefer a bounded sample matrix plus generated scaffolds whenever approval and usable samples exist.
 
+## Fast Factory Outputs
+
+For each selected packet, the target deliverable is not just "an endpoint works." The target is a reusable implementation bundle:
+
+- saved packet manifest under ignored `data/jimeng-lab/<packet-run>/`;
+- bounded sample matrix or passive/replay sample set;
+- `contract-infer` output with stable path/type summaries and schema IR;
+- typed Effect Schema boundary for relied-on request/response paths;
+- service/client wrapper using shared transport and replayable fixtures;
+- CLI surface with representative workflow flags, not every cosmetic provider enum;
+- Vitest snapshots for generated contract/report output;
+- endpoint-registry updates for implemented, dry-run-only, blocked, skipped, and next-probe status;
+- short docs/QA note with commands and artifact paths.
+
+This keeps the triage doc as the decision layer. It should not become a raw progress database or a hand-written mirror of every provider response.
+
 Current recommended next packets:
 
 1. `persona-voice`: profile/subject voice generation, custom voice clone submit/query/update/delete, applying generated audio to scripts/video. This is the next best product unlock after generation proof because personas are reusable UGC assets.

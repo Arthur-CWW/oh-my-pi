@@ -25,6 +25,7 @@ export interface JimengPacketExample {
   command: string
   outputDir: string
   risks: JimengPacketRisk[]
+  approvalNote?: string
 }
 
 export interface JimengPacketPlan {
@@ -119,6 +120,7 @@ const PacketExampleSchema = Schema.Struct({
   command: Schema.String,
   outputDir: Schema.String,
   risks: Schema.Array(PacketRiskSchema),
+  approvalNote: Schema.optional(Schema.String),
 })
 
 const PacketGapSchema = Schema.Struct({
@@ -238,6 +240,7 @@ export function writeJimengPacketPlanMarkdown(plan: JimengPacketPlan): string {
     lines.push(example.purpose, "")
     lines.push(`- Output: \`${example.outputDir}\``)
     lines.push(`- Risks: ${example.risks.join(", ")}`)
+    if (example.approvalNote) lines.push(`- Approval: ${example.approvalNote}`)
     lines.push("")
     lines.push("```bash")
     lines.push(example.command.replaceAll("<outDir>", example.outputDir))
@@ -302,7 +305,10 @@ function buildApprovalPrompt(
   const riskLabels = [...new Set(examples.flatMap((example) => example.risks).filter((risk) => risk !== "none"))]
   const commands = examples
     .filter((example) => example.risks.some((risk) => risk !== "none"))
-    .map((example) => `- ${example.id}: ${example.command.replaceAll("<outDir>", example.outputDir)}`)
+    .map((example) => {
+      const command = example.command.replaceAll("<outDir>", example.outputDir)
+      return example.approvalNote ? `- ${example.id}: ${command}\n  Approval note: ${example.approvalNote}` : `- ${example.id}: ${command}`
+    })
     .join("\n")
 
   return [
@@ -388,9 +394,10 @@ const PACKET_DEFINITIONS: Record<JimengPacketId, PacketDefinition> = {
       {
         id: "voice-clone-submit",
         title: "Disposable voice clone submit",
-        purpose: "Use a disposable source audio fixture to prove voice clone submit/query/update/delete contracts.",
-        command: "bun packages/jimeng-client/src/browser-proxy-cli.ts voice-clone-submit --audioVid <uploaded-audio-vid> --name \"packet disposable voice\" --outDir <outDir>",
+        purpose: "Build the disposable voice clone submit request before any asset-creating live call.",
+        command: "bun packages/jimeng-client/src/browser-proxy-cli.ts voice-clone-submit --audioVid <uploaded-audio-vid> --name \"packet disposable voice\" --dryRun --outDir <outDir>",
         risks: ["account_mutation", "provider_task_state"],
+        approvalNote: "Live voice clone submit is intentionally disabled in the CLI until a disposable source audio fixture and explicit mutation/spend approval exist.",
       },
       {
         id: "voice-mix",
