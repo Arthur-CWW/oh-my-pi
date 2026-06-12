@@ -50,6 +50,29 @@ Use these packet ids when deciding the next multi-session chunk:
 
 Pick the highest-value unfinished packet, not the shortest endpoint. Inside a packet, implement endpoints in batches from the same captured/proof sample set. A packet is done when the useful path is typed and tested, and every remaining family endpoint is classified with evidence and a next probe.
 
+## Fast Packet Checklist
+
+Before implementation, create or refresh a packet manifest using this checklist:
+
+- `why now`: the UGC workflow this packet unlocks.
+- `examples`: 2-5 useful examples, not cosmetic option permutations.
+- `sample source`: approved live matrix, passive capture, replay cassette, existing fixture, or exact approval request.
+- `artifact root`: ignored `data/jimeng-lab/<packet-run>/`.
+- `infer`: `contract-infer` command or generator improvement needed.
+- `promote`: source, tests, endpoint registry, snapshots, and docs to update.
+- `accept`: focused tests, typecheck, Vitest snapshots, replay/cassette proof, and media proof only when creating media.
+- `handoff`: exact next command if the packet is not complete.
+
+Do not spend a session adding another dry-run planner unless it is part of this checklist for the currently selected high-value packet. Prefer a bounded sample matrix plus generated scaffolds whenever approval and usable samples exist.
+
+Current recommended next packets:
+
+1. `persona-voice`: profile/subject voice generation, custom voice clone submit/query/update/delete, applying generated audio to scripts/video. This is the next best product unlock after generation proof because personas are reusable UGC assets.
+2. `lip-sync-human`: avatar or VOD lip-sync submit/poll/download, pre-process result promotion, and talking-head examples.
+3. `reference-controls`: pose/style/reference transfer and omni-reference promotion for person-swap and profile-remix workflows.
+4. `template-mining`: CapCut/Jimeng templates, profile works, hooks, captions, and faceless format extraction.
+5. `gen-parity`: continue only where the existing live matrix/inferred generation contracts are not yet promoted into typed services/CLI.
+
 ## Keep
 
 | ID | Family | Why it matters |

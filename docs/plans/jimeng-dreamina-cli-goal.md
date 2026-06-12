@@ -10,9 +10,11 @@ The goal is product-value driven, then coverage-driven. Choose the next work by 
 
 ## Operating Model
 
+- Optimize for the shortest useful loop across sessions: packet manifest, bounded samples, contract inference, generated drafts, hand-tightened promotion, replay snapshots, scoped commit. If a step is repeated twice manually, improve the generator or shared abstraction before doing it a third time.
 - Use `docs/plans/jimeng-fast-contract-extraction.md` as the default implementation loop: bounded live/passive matrix, saved raw and normalized JSON plus artifacts, contract inference, generated wrappers/tests/registry drafts, then replayed fixture proof.
 - Treat one value-ranked API family as one work packet. A packet contains 2-5 useful UGC workflow examples, sample collection, contract inference, generated schema/client/CLI/test/registry drafts, hand-tightening, replay tests, and final gap classification. Do not scatter a session across unrelated endpoint families unless the current packet is blocked.
 - Prefer scaffold generation from saved proof bundles over hand-writing one endpoint at a time. The expected path is `capture or live matrix -> contract-infer -> generated drafts -> hand-tightened Effect Schema/client/CLI -> Vitest snapshots/replay tests`.
+- Promote in batches by packet. Prefer one coherent schema/client/CLI/test/registry promotion over several tiny commits that each add only a planner, a field, or a doc note. Use smaller commits only at risk boundaries: paid generation, account mutation, credential handling, foreground UI, or destructive cleanup.
 - Use a single HTTP boundary abstraction for Jimeng/CapCut calls with transport modes: `live`, `record`, `replay`, and `fixture`.
 - Decode external JSON at the boundary with permissive Effect Schema contracts: allow additive fields, fail clearly when paths we rely on drift.
 - Put auth headers, risk detection, response redaction, cassette recording, and replay caching in the transport/client layer, not scattered through CLI commands.
@@ -29,16 +31,33 @@ The goal is product-value driven, then coverage-driven. Choose the next work by 
 - Work in larger coherent refactor chunks when that is more efficient. Small slices are still useful for risky paid/mutating work, but they are not a hard rule for prototype cleanup.
 - No backwards compatibility burden unless a current repo test or workflow depends on it. Delete useless tests and stale code when they slow the loop without protecting behavior.
 
+## Fast Multi-Session Structure
+
+The goal should be resumed as a packet factory, not as open-ended endpoint hunting.
+
+1. Select the highest-value unfinished packet from `docs/provider/jimeng-api-triage.md`.
+2. Create or refresh the packet manifest defined in `docs/plans/jimeng-fast-contract-extraction.md`.
+3. Gather only the samples needed for that packet: approved live matrix, passive capture, replay cassette, or existing fixture.
+4. Generate drafts from those samples with `contract-infer` or a packet-specific generator.
+5. Promote the generated draft into typed services, CLI, registry rows, fixtures/cassettes, and Vitest snapshots.
+6. Verify once at the right boundary. Backend refactors need replay tests/typecheck/snapshots; media-generation changes need playable/listenable artifacts.
+7. Leave a compact handoff with exact next commands and blocked reasons.
+
+Parallelization is useful only after scopes are split. Good parallel work: sample analysis vs registry docs, or separate packet families after the shared transport/client interface is stable. Bad parallel work: multiple sessions editing the central CLI parser, transport, endpoint registry, or same packet tests at once.
+
+The main speed lever is caching solved layers. Once auth/transport/cassette replay is validated, do not re-prove it in every packet. Once a request shape is captured and redacted, infer and replay from it. Once a registry report is snapshot-covered, update structured rows rather than duplicating progress in prose.
+
 ## Fast Resume Checklist
 
 Use this at the top of every new session before implementing:
 
 1. Read this file, `docs/plans/jimeng-fast-contract-extraction.md`, `docs/provider/jimeng-api-triage.md`, `docs/plans/jimeng-dreamina-cli-goal-command.md`, and `TASKS.md`.
 2. Inspect `git status --short`; assume unrelated dirty files are user or prior-session work and do not stage them.
-3. Pick the highest-value unfinished family from `triage-coverage --decisions keep`, not the easiest no-spend endpoint.
-4. Create a packet-local plan with examples, sample source, artifact directory, contracts to infer, files to promote, and acceptance tests.
+3. Pick the highest-value unfinished packet from `triage-coverage --decisions keep`, not the easiest no-spend endpoint.
+4. Create or refresh the packet manifest with examples, sample source, artifact directory, contracts to infer, files to promote, and acceptance commands.
 5. If live spend, account mutation, unsafe credential access, foreground UI, or fresh capture is needed, ask once with exact commands/actions and expected risk. If approved, run the bounded matrix and record cassettes/artifacts; if not, do packet-local prep only.
-6. Finish by updating endpoint registry, triage docs, `TASKS.md`, and packet proof notes. Commit scoped files only.
+6. Generate scaffolds from saved samples before hand-writing schema/client/test code.
+7. Finish by updating endpoint registry, triage docs, `TASKS.md`, and packet proof notes. Commit scoped files only.
 
 ## Work Chunk Queue
 

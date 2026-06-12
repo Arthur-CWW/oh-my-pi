@@ -13,6 +13,21 @@ Use this loop when continuing Jimeng/Dreamina API reversal. The goal is to imple
 7. Prove backend/API refactors with replayed cassettes, fixtures, typecheck, and Vitest snapshots. Prove media APIs with actual playable/listenable artifacts from the matrix.
 8. Update `TASKS.md`, `docs/provider/jimeng-api-triage.md`, and the endpoint registry with implemented, blocked, skipped, or next-probe status.
 
+## Fast Session Algorithm
+
+Use this exact algorithm when a new Codex session resumes the workstream:
+
+1. Read the goal docs and current `git status --short`.
+2. Pick one packet from `docs/provider/jimeng-api-triage.md` by product value, not by safety or endpoint count.
+3. Write or refresh the packet manifest before code changes. The manifest can be committed as a short doc note or generated under ignored `data/**`; it must name the examples, sample source, output directory, promotion files, acceptance commands, and next handoff.
+4. If the packet needs live spend, mutation, fresh capture, unsafe credentials, or visible UI, ask once with the exact command/action list and artifact path. If approved, run the matrix. If not approved, keep working inside the same packet with fixtures, compare gates, request builders, schemas, and tests.
+5. Run `contract-infer` or improve it before hand-writing repeated schema/client/test code.
+6. Promote generated drafts in one coherent chunk: schema boundary, typed service, CLI command, registry status, fixtures/cassettes, and Vitest snapshots.
+7. Verify with replay tests, typecheck, Vitest snapshots, and media/artifact checks only when the packet creates media.
+8. End the session with an updated packet handoff: what is promoted, what command proves it, what remains blocked, and the exact next command.
+
+Do not start a session by browsing endpoints manually unless the selected packet has no usable samples, registry rows, or static evidence. Do not switch packets because the current one needs approval; either ask for approval or do adjacent preparation inside that packet.
+
 ## Fast Work Packet
 
 Future sessions should treat one API family as one work packet. Do not restart from endpoint discovery unless the packet has no usable samples.
@@ -31,6 +46,22 @@ remaining gaps: blocked/unknown endpoints with reason and next probe
 ```
 
 The packet is the unit of progress. A good session should either finish one packet or leave a packet-local handoff with the exact next command. Avoid scattering partial work across unrelated families.
+
+Minimum packet manifest:
+
+```txt
+packet: gen-parity | persona-voice | lip-sync-human | reference-controls | template-mining
+why now: one sentence tying it to the UGC product workflow
+examples: 2-5 useful examples, with expected media or normalized output
+sample source: live | passive-capture | replay | fixture, plus approval status
+artifact root: data/jimeng-lab/<packet-run>/
+infer command: exact contract-infer command or "not needed because ..."
+promotion files: planned source/test/registry/docs files
+acceptance commands: focused tests, typecheck, Vitest snapshots
+handoff: exact next command if not complete
+```
+
+This manifest is the cross-session coordination point. Keep raw JSON, media, signed URLs, and cassettes under ignored `data/**`; commit only redacted summaries, registry status, snapshots, and short QA notes.
 
 ## Scaffold-Then-Promote
 
