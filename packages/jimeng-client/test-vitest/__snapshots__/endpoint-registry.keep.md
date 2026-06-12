@@ -11,7 +11,7 @@
 | G2 | keep | Upload and provider asset references | 5 | implemented=4, blocked=1 | 1 |
 | P1 | keep | Persona/subject lifecycle | 5 | implemented=4, dry_run_only=1 | 1 |
 | V1 | keep | Voice and speech | 9 | implemented=2, partial=2, dry_run_only=5 | 7 |
-| L1 | keep | Lip-sync / digital human | 6 | implemented=1, blocked=5 | 5 |
+| L1 | keep | Lip-sync / digital human | 6 | implemented=1, dry_run_only=2, blocked=3 | 5 |
 | R1 | keep | Reference profile research | 8 | implemented=7, partial=1 | 1 |
 | R2 | keep | Reference controls | 5 | implemented=5 | 0 |
 | T1 | keep | CapCut/template mining | 16 | implemented=10, blocked=6 | 6 |
@@ -41,16 +41,16 @@
    - Next probe: Capture a voice-clone submit UI request with disposable source audio and compare the dry-run plan before any approved asset-creating submit.
 2. Persona and voice - `V1 /mweb/v1/voice/update` - dry_run_only command=voice-clone-update/request-plan-compare - Mutates cloned voice assets; dry-run request shape can be compared offline against UI captures.
    - Next probe: Capture or create a disposable cloned voice asset, compare voice-clone-update dry-run against the UI request, then require approval before mutation.
+3. Lip-sync / digital human - `L1 /mweb/v1/video_generate/mget_pre_process_result` - dry_run_only command=video-preprocess-query-plan/request-plan-compare - Pre-process result lookup body is modeled by submit_id_list; live replay needs task ids from a captured or approved pre_process flow.
+   - Next probe: Use task ids from a captured or approved video_generate/pre_process flow, compare with video-preprocess-query-plan, then record/replay the matching result lookup.
+3. Lip-sync / digital human - `L1 /mweb/v1/video_generate/pre_process` - dry_run_only command=video-preprocess-plan/request-plan-compare - Frontend data service pre-process task body is modeled for avatar image checks, voice recommendation, audio detect, and audio silence checks; live replay creates task state and needs passive capture compare plus approval.
+   - Next probe: Passively capture the video pre-process submit flow, compare it with video-preprocess-plan using request-plan-compare, then require explicit approval before live replay because it creates task state.
 3. Lip-sync / digital human - `L1 /mweb/v1/video_generate/face_auth/skip` - blocked - Seedance face-auth skip submit task can create provider-side task state; capture exact UI payload and approval context before live replay.
    - Next probe: Capture the Seedance face-auth skip flow, compare payloads offline, and require explicit approval before live replay because it can create provider-side task state.
 3. Lip-sync / digital human - `L1 /mweb/v1/video_generate/face_auth/skip/query` - blocked - Face-auth skip status query depends on a task id from video_generate/face_auth/skip; capture that flow before promotion.
    - Next probe: Use a task id from a captured face_auth/skip flow and record/replay the paired status query.
 3. Lip-sync / digital human - `L1 /mweb/v1/video_generate/get_switch_model_queue_info` - blocked - No-spend probes with empty, model_req_key, model_req_keys, and scene bodies returned ret=1000 invalid parameter; capture the exact frontend switch-model queue body before promotion.
    - Next probe: Capture the frontend switch-model queue request from the lip-sync/video UI and replay the exact body through endpoint-probe record/replay.
-3. Lip-sync / digital human - `L1 /mweb/v1/video_generate/mget_pre_process_result` - blocked - Read path depends on task ids from video_generate/pre_process; capture a matching pre-process UI flow before promotion.
-   - Next probe: Use task ids from a captured video_generate/pre_process flow and record/replay the matching result lookup.
-3. Lip-sync / digital human - `L1 /mweb/v1/video_generate/pre_process` - blocked - Frontend data service submits a video pre-process task; capture the exact UI flow and payload before any live replay.
-   - Next probe: Passively capture the video pre-process submit flow and add a cassette-backed typed request once the provider task payload is known.
 5. Template and niche mining - `T1 /lv/v1/cc_web/plane/batch_get_collection_templates` - blocked - Signed no-spend probes returned ret=1000 param error across object, list, and nested collection variants; capture the exact batch row UI payload before promotion.
    - Next probe: Capture the collection-row batch UI payload and compare it against the signed no-spend variants that returned ret=1000.
 5. Template and niche mining - `T1 /lv/v1/cc_web/plane/fuzzy_search_templates` - blocked - Signed no-spend probes returned ret=0 with empty lists for guessed keyword/title bodies; capture a non-empty fuzzy-search UI request before promotion.
@@ -118,12 +118,12 @@
 - `/mweb/v1/video_generate/get_switch_model_queue_info` - blocked - No-spend probes with empty, model_req_key, model_req_keys, and scene bodies returned ret=1000 invalid parameter; capture the exact frontend switch-model queue body before promotion.
   - Evidence: `data/jimeng-lab/proof-20260610-static-locate-video-generate-helpers/`; `data/jimeng-lab/proof-20260610-switch-model-queue-probe/`
   - Next probe: Capture the frontend switch-model queue request from the lip-sync/video UI and replay the exact body through endpoint-probe record/replay.
-- `/mweb/v1/video_generate/pre_process` - blocked - Frontend data service submits a video pre-process task; capture the exact UI flow and payload before any live replay.
-  - Evidence: `data/jimeng-lab/proof-20260610-static-locate-video-generate-helpers/`
-  - Next probe: Passively capture the video pre-process submit flow and add a cassette-backed typed request once the provider task payload is known.
-- `/mweb/v1/video_generate/mget_pre_process_result` - blocked - Read path depends on task ids from video_generate/pre_process; capture a matching pre-process UI flow before promotion.
-  - Evidence: `data/jimeng-lab/proof-20260610-static-locate-video-generate-helpers/`
-  - Next probe: Use task ids from a captured video_generate/pre_process flow and record/replay the matching result lookup.
+- `/mweb/v1/video_generate/pre_process` - dry_run_only command=video-preprocess-plan/request-plan-compare - Frontend data service pre-process task body is modeled for avatar image checks, voice recommendation, audio detect, and audio silence checks; live replay creates task state and needs passive capture compare plus approval.
+  - Evidence: `docs/qa/jimeng-video-preprocess-plan-20260612.md`; `data/jimeng-lab/proof-20260610-static-locate-video-generate-helpers/`; `data/jimeng-lab/proof-20260612-video-preprocess-plan/`
+  - Next probe: Passively capture the video pre-process submit flow, compare it with video-preprocess-plan using request-plan-compare, then require explicit approval before live replay because it creates task state.
+- `/mweb/v1/video_generate/mget_pre_process_result` - dry_run_only command=video-preprocess-query-plan/request-plan-compare - Pre-process result lookup body is modeled by submit_id_list; live replay needs task ids from a captured or approved pre_process flow.
+  - Evidence: `docs/qa/jimeng-video-preprocess-plan-20260612.md`; `data/jimeng-lab/proof-20260610-static-locate-video-generate-helpers/`; `data/jimeng-lab/proof-20260612-video-preprocess-query-plan/`
+  - Next probe: Use task ids from a captured or approved video_generate/pre_process flow, compare with video-preprocess-query-plan, then record/replay the matching result lookup.
 - `/mweb/v1/video_generate/face_auth/skip` - blocked - Seedance face-auth skip submit task can create provider-side task state; capture exact UI payload and approval context before live replay.
   - Evidence: `data/jimeng-lab/proof-20260610-static-locate-video-generate-helpers/`
   - Next probe: Capture the Seedance face-auth skip flow, compare payloads offline, and require explicit approval before live replay because it can create provider-side task state.

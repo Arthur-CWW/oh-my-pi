@@ -13,6 +13,53 @@ Use this loop when continuing Jimeng/Dreamina API reversal. The goal is to imple
 7. Prove backend/API refactors with replayed cassettes, fixtures, typecheck, and Vitest snapshots. Prove media APIs with actual playable/listenable artifacts from the matrix.
 8. Update `TASKS.md`, `docs/provider/jimeng-api-triage.md`, and the endpoint registry with implemented, blocked, skipped, or next-probe status.
 
+## Fast Work Packet
+
+Future sessions should treat one API family as one work packet. Do not restart from endpoint discovery unless the packet has no usable samples.
+
+Each packet should have this shape:
+
+```txt
+family: persona-voice | lip-sync | reference-controls | template-mining | generation
+workflow examples: 2-5 concrete UGC examples we would actually run
+live/capture plan: exact commands or UI actions, spend/account risk, output dir
+sample set: raw requests/responses, normalized summaries, artifacts, credit before/after
+contract output: inferred paths, schema IR, wrapper/CLI draft, registry patch draft
+promotion scope: services, CLI commands, fixtures, Vitest snapshots, docs
+acceptance: typecheck, unit tests, Vitest snapshots, replay/cassette proof, artifact proof if media
+remaining gaps: blocked/unknown endpoints with reason and next probe
+```
+
+The packet is the unit of progress. A good session should either finish one packet or leave a packet-local handoff with the exact next command. Avoid scattering partial work across unrelated families.
+
+## Scaffold-Then-Promote
+
+The fastest method is to generate scaffolds from saved contracts, then hand-tighten them:
+
+1. Use passive CDP capture, approved live generation, or cassette replay to collect samples.
+2. Run `contract-infer` over the sample directory.
+3. Generate or update:
+   - permissive Effect Schema boundary contracts,
+   - typed service methods,
+   - Effect CLI command definitions where a command is being rewritten,
+   - fixture/cassette replay tests,
+   - Vitest snapshots for normalized contract output,
+   - endpoint-registry rows and triage notes.
+4. Hand edit only the relied-on paths, naming, redaction, and user-facing flags.
+5. Delete stale one-off tests or planners if the generated/replay path supersedes them.
+
+Do not manually model every enum value. Capture independent property classes: media kind, generation mode, model key, reference kind, voice source, polling path, artifact download path, and mutation/spend risk. Cosmetic choices like "voice A vs voice B" should be represented as one parameterized flag with a small representative fixture.
+
+## Session Bootstrap
+
+At the start of a new session:
+
+1. Read `docs/plans/jimeng-dreamina-cli-goal.md`, this file, `docs/provider/jimeng-api-triage.md`, and `TASKS.md`.
+2. Run `git status --short` and do not stage unrelated dirty files.
+3. Run `jimeng-browser-proxy triage-coverage --decisions keep` or inspect the latest snapshot/report to find the highest-value unfinished family.
+4. If a packet needs live spend, mutation, visible UI, or fresh capture, ask with the exact command/action, expected artifacts, and credit/account risk.
+5. Otherwise work from cassettes/fixtures first, then refresh live only if the contract is missing or stale.
+
 ## Tool To Build
 
 Add a reusable contract-inference command before adding more one-off dry-run planners:

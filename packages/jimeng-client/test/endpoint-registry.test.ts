@@ -66,7 +66,7 @@ describe("Jimeng endpoint registry", () => {
     ])
     expect(coverage.missingEndpointCount).toBe(0)
     expect(coverage.statusCounts.implemented).toBeGreaterThan(20)
-    expect(coverage.statusCounts.blocked).toBeGreaterThan(10)
+    expect(coverage.statusCounts.blocked).toBeGreaterThanOrEqual(10)
     expect(coverage.families.find((family) => family.id === "T1")?.statusCounts.blocked).toBe(6)
     expect(coverage.families.find((family) => family.id === "L1")?.notImplementedEndpoints).toContain("/mweb/v1/video_generate/pre_process")
     expect(coverage.valueRankedGaps[0]).toMatchObject({

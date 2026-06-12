@@ -15,6 +15,7 @@ Durable lessons about making Codex/agent work faster and less token-heavy.
 - Prefer “build the tool that makes the next 20 steps cheap” over repeating one-endpoint-at-a-time work when the pattern is clear.
 - Prioritize by workflow value first. For provider/API reversal, do not choose low-value no-spend work just because it is easy; rank by the user-visible pipeline capability unlocked, then use speed/no-spend as tie-breakers or safety gates. The acceptance test should include representative examples for workflows the product would actually run, not just endpoint existence.
 - When provider spend/capture is approved and bounded, prefer a small real matrix of useful examples over more manual dry-run planners. Save raw/normalized JSON, commands, media artifacts, and credit deltas; infer schemas/scaffolds from those samples; then replay tests from fixtures.
+- For long provider-reversal goals that span multiple sessions, use a work-packet queue rather than a loose endpoint queue. One packet should cover a coherent product workflow family, include examples and acceptance tests, and end with typed promotion or explicit gap classification. This keeps future sessions from restarting discovery or optimizing for tiny safe endpoints.
 
 ## 2026-06-11 Jimeng/Dreamina Lesson
 
@@ -25,3 +26,5 @@ The small Jimeng registry trial showed that Vitest file snapshots are materially
 Arthur clarified that the Jimeng/Dreamina queue should not be sorted by no-spend availability. Sort by highest UGC workflow value first: generation parity, persona/voice, lip-sync, reference controls, and template mining. If the highest-value next step requires spend, account mutation, visible UI, or capture approval, ask for approval with a concrete command/proof plan instead of falling back to a lower-value safe endpoint.
 
 After the 2026-06-12 live generation matrix, the preferred Jimeng implementation loop is: bounded matrix or passive capture, contract inference from saved JSON/artifacts, generated Effect Schema/client/CLI/test/registry drafts, then manual tightening and Vitest replay snapshots. Dry-run planners are useful as compare gates or blocked-flow fallbacks, but they should not be the default work unit when real samples can make the next layer faster.
+
+For future Jimeng sessions, the unit of work should be a named packet such as `persona-voice`, `lip-sync-human`, `reference-controls`, `template-mining`, or `gen-parity`. Each packet should define the examples, sample source, artifact directory, generated scaffolds, acceptance tests, and remaining gap classification before code changes begin.

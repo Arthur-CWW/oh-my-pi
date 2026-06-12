@@ -207,6 +207,15 @@ import {
   summarizeJimengMixAudioVideoPlan,
 } from "./mix-audio"
 import {
+  buildJimengVideoPreprocessPlan,
+  buildJimengVideoPreprocessQueryPlan,
+  parseJimengVideoPreprocessBodyJson,
+  parseJimengVideoPreprocessImageUris,
+  summarizeJimengVideoPreprocessPlan,
+  summarizeJimengVideoPreprocessQueryPlan,
+  type JimengVideoPreprocessMode,
+} from "./video-preprocess"
+import {
   compareJimengVideoDirectPlanWithCaptureTemplate,
   compareJimengVideoDirectPlanWithRawNetwork,
   summarizeJimengVideoDirectCompare,
@@ -386,6 +395,8 @@ Commands:
   omni-video-compare Offline compare an omni-reference dry-run plan against captured UI submit
   generate-audit-plan Build a dry-run generation material pre-audit body
   mix-audio-plan Build a dry-run audio/video mix task request body and babi_param query
+  video-preprocess-plan Build a dry-run lip-sync/digital-human pre-process task body
+  video-preprocess-query-plan Build a dry-run lip-sync/digital-human pre-process result lookup body
   request-plan-compare Offline compare a simple dry-run request plan against captured UI traffic
   account-credit Fetch signed no-spend account credit balance
   commerce-benefits Fetch signed no-spend benefit metadata and user benefit rows
@@ -475,6 +486,9 @@ Options:
   --babiParam <json|file>         JSON babiParam object for mix-audio-plan query param
   --videoItemId <id>              Generated video item id for mix-audio-plan shortcut body
   --inputList <json|file>         Batch mix-audio-plan input list with audioVid/videoItemId rows
+  --mode <value>                  video-preprocess mode: image-create-avatar, voice-recommendation, audio-detect, audio-silence, raw
+  --imageUris <json|file>         JSON array of image URIs for video-preprocess voice recommendations
+  --detectionScene <value>        Optional image-create-avatar detection_scene field
   --batch <true|false>            Build mix-audio-plan for /mix_audio_videos instead of /mix_audio_video
   --variants <json|file>         Probe variants JSON array or object with variants
   --transport <mode>             Shared HTTP transport: live, record, replay, fixture (default: live)
@@ -533,6 +547,7 @@ Options:
   --asset-mode <value>          Assets mode for get_asset_list (default: workbench)
   --submitId <id>               Submit id for history-records
   --submitIds <csv>             Submit ids for history-records
+                                  video-preprocess-query-plan uses submit ids from pre_process tasks
   --historyId <id>              History id for history-queue
   --historyIds <csv>            History ids for history-queue/history-records
   --vids <csv>                  VOD vids for video-info
@@ -627,6 +642,12 @@ Examples:
     --analysis data/jimeng-lab/capture-analysis-subject-create/normalized/capture-analyze-<stamp>-analysis.json \\
     --staticRoot packages/jimeng-client/src \\
     --outDir data/jimeng-lab/static-locate-subject-create
+
+  jimeng-browser-proxy video-preprocess-plan \\
+    --mode image-create-avatar \\
+    --submitId avatar-detect-1 \\
+    --imageUri tos-cn-i-tb4s082cfz/k-beauty-host.png \\
+    --outDir data/jimeng-lab/video-preprocess-plan
 
   jimeng-browser-proxy static-inventory \\
     --staticRoot data/jimeng-lab/js-sweep/files,packages/jimeng-client/src \\
@@ -948,6 +969,8 @@ interface CliArgs {
     | "omni-video-compare"
     | "generate-audit-plan"
     | "mix-audio-plan"
+    | "video-preprocess-plan"
+    | "video-preprocess-query-plan"
     | "request-plan-compare"
     | "account-credit"
     | "commerce-benefits"
@@ -1031,6 +1054,9 @@ interface CliArgs {
   babiParam?: string
   videoItemId?: string
   inputList?: string
+  videoPreprocessMode?: JimengVideoPreprocessMode
+  imageUris?: string
+  detectionScene?: string
   batch?: boolean
   variants?: string
   transportMode: JimengHttpTransportMode
@@ -1616,6 +1642,63 @@ async function main(argv: string[]): Promise<void> {
       summary: summarizeJimengMixAudioVideoPlan(plan),
     })
     console.log(`[jimeng-browser-proxy] mix-audio-plan saved endpoint=${plan.endpoint} mode=${plan.mode} inputs=${plan.inputCount} live_submit=false`)
+    return
+  }
+
+  if (args.command === "video-preprocess-plan") {
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const runId = `video-preprocess-plan-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const bodyJson = args.body
+      ? parseJimengVideoPreprocessBodyJson(JSON.parse(readInlineOrFile(args.body)) as JsonValue)
+      : undefined
+    const imageUrisJson = args.imageUris
+      ? parseJimengVideoPreprocessImageUris(JSON.parse(readInlineOrFile(args.imageUris)) as JsonValue)
+      : undefined
+    const plan = buildJimengVideoPreprocessPlan({
+      mode: args.videoPreprocessMode,
+      submitId: args.submitId,
+      imageUri: args.imageUri,
+      imageUris: imageUrisJson,
+      audioVid: args.audioVid,
+      prompt: args.prompt,
+      detectionScene: args.detectionScene,
+      body: bodyJson,
+    })
+    writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
+      command: args.command,
+      endpoint: plan.endpoint,
+      method: plan.method,
+      request: plan.request,
+      input_list: plan.inputList,
+      live_submit: false,
+      static_evidence: "frontend video-preprocessing-data-service snake-cases { inputList } into input_list and posts it to /mweb/v1/video_generate/pre_process; useful lip-sync scenes include ImageCreateAvatar=2, LipSyncAudioDetect=5, LipSyncAudioSilence=6, and LipSyncVoiceRecommendation=7",
+    })
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      summary: summarizeJimengVideoPreprocessPlan(plan),
+    })
+    console.log(`[jimeng-browser-proxy] video-preprocess-plan saved mode=${plan.mode} inputs=${plan.inputCount} live_submit=false`)
+    return
+  }
+
+  if (args.command === "video-preprocess-query-plan") {
+    const submitIds = args.submitIds ?? (args.submitId ? [args.submitId] : [])
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const runId = `video-preprocess-query-plan-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const plan = buildJimengVideoPreprocessQueryPlan(submitIds)
+    writeJson(path.join(dirs.rawDir, `${runId}-dry-run-plan.json`), {
+      command: args.command,
+      endpoint: plan.endpoint,
+      method: plan.method,
+      request: plan.request,
+      live_submit: false,
+      static_evidence: "frontend video-preprocessing-data-service snake-cases { submitIdList } into submit_id_list and posts it to /mweb/v1/video_generate/mget_pre_process_result",
+    })
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      summary: summarizeJimengVideoPreprocessQueryPlan(plan),
+    })
+    console.log(`[jimeng-browser-proxy] video-preprocess-query-plan saved submitIds=${plan.submitIds.length} live_submit=false`)
     return
   }
 
@@ -5936,6 +6019,8 @@ function parseArgs(argv: string[]): CliArgs {
     && command !== "omni-video-compare"
     && command !== "generate-audit-plan"
     && command !== "mix-audio-plan"
+    && command !== "video-preprocess-plan"
+    && command !== "video-preprocess-query-plan"
     && command !== "request-plan-compare"
     && command !== "account-credit"
     && command !== "commerce-benefits"
@@ -6170,6 +6255,9 @@ function parseArgs(argv: string[]): CliArgs {
     babiParam: flags.babiParam,
     videoItemId: flags.videoItemId,
     inputList: flags.inputList,
+    videoPreprocessMode: command === "video-preprocess-plan" ? parseJimengVideoPreprocessMode(flags.mode) : undefined,
+    imageUris: flags.imageUris,
+    detectionScene: flags.detectionScene,
     batch: parseOptionalBooleanFlag(flags.batch, "--batch"),
     variants: flags.variants,
     transportMode,
@@ -6344,6 +6432,20 @@ function parseCsvFlag(value: string | undefined): string[] | undefined {
   if (value === undefined) return undefined
   const items = value.split(",").map((item) => item.trim()).filter(Boolean)
   return items.length > 0 ? items : undefined
+}
+
+function parseJimengVideoPreprocessMode(value: string | undefined): JimengVideoPreprocessMode | undefined {
+  if (value === undefined) return undefined
+  if (
+    value === "image-create-avatar"
+    || value === "voice-recommendation"
+    || value === "audio-detect"
+    || value === "audio-silence"
+    || value === "raw"
+  ) {
+    return value
+  }
+  throw new Error("--mode for video-preprocess-plan must be image-create-avatar, voice-recommendation, audio-detect, audio-silence, or raw")
 }
 
 function parseEndpointProbeMethod(value: string | undefined): "GET" | "POST" | undefined {

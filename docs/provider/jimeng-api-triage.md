@@ -35,6 +35,21 @@ If the next highest-value step requires paid generation, account mutation, unsaf
 
 When account spend or passive capture is approved, use the fast extraction loop in `docs/plans/jimeng-fast-contract-extraction.md`: run a small value-ranked matrix, save raw/normalized JSON and useful artifacts, infer schemas/scaffolds from the saved contracts, then replay tests from fixtures. Manual dry-run planners are fallback or compare-gate tools, not the default way to implement every remaining endpoint.
 
+## Work Packet Selection
+
+Use these packet ids when deciding the next multi-session chunk:
+
+| Packet | Families | Goal | Example matrix |
+|---|---|---|---|
+| `gen-parity` | G1, G2, A1 | Submit, poll, and download useful image/video generations from typed clients. | Korean beauty still, faceless hook video, reference first/end-frame clip, product demo image-to-video. |
+| `persona-voice` | P1, V1, G2 | Create or reuse a persona, generate/apply voice, and keep persona profile metadata stable. | Saved subject, subject voice, cloned voice submit/query, TTS script, voice-to-video mix. |
+| `lip-sync-human` | L1, V1, G2, A1 | Turn image/avatar or VOD references into talking-head UGC assets. | Avatar image pre-process, voice recommendation, lip-sync submit, poll, artifact download. |
+| `reference-controls` | R2, G1, G2 | Swap person/style/pose while preserving timing, composition, or template structure. | Pose/depth/canny preview, image description/face validation, omni-reference generation. |
+| `template-mining` | T1, R1 | Mine hooks, captions, templates, profile patterns, and faceless formats. | CapCut collection/detail, search/presets if captured, Jimeng Explore short-video templates, public profile works. |
+| `supporting-reads` | A1, Q1, C1, S1 | Fill gaps only when they unblock a higher-value packet. | History, assets, runtime config, quota, story/archive reads. |
+
+Pick the highest-value unfinished packet, not the shortest endpoint. Inside a packet, implement endpoints in batches from the same captured/proof sample set. A packet is done when the useful path is typed and tested, and every remaining family endpoint is classified with evidence and a next probe.
+
 ## Keep
 
 | ID | Family | Why it matters |
@@ -118,6 +133,7 @@ Why it is not important now:
 - 2026-06-12 fast-loop seed: a bounded live generation matrix under `data/jimeng-lab/proof-20260612-live-generation-matrix/manifest.md` spent 24 credits and produced one TTS MP3 plus four MP4 outputs for useful UGC/Korean-beauty/faceless examples. Use that bundle, and future bundles like it, as contract-inference input before hand-writing more request planners.
 - `contract-infer` is now the preferred bridge from proof bundle to implementation. The first real run against `/mweb/v1/aigc_draft/generate` wrote `contract-summary.json`, `contract-summary.md`, `effect-schema-ir.json`, and `registry-patch-draft.json` under `data/jimeng-lab/proof-20260612-live-generation-matrix/contract-infer/normalized/contract/`. Use this output to promote generation parity before moving to lower-value families.
 - `generation-contract` now hand-tightens the inferred `/mweb/v1/aigc_draft/generate` proof shape into a typed submit/poll/artifact summary contract. The first replay over the same live matrix wrote `generation-contract-summary.json` and Markdown under `data/jimeng-lab/proof-20260612-live-generation-matrix/generation-contract/normalized/generation-contract/` and validated 4 saved video generation proofs with 0 skipped candidates.
+- `L1 /mweb/v1/video_generate/pre_process` and `/mweb/v1/video_generate/mget_pre_process_result` are now dry-run-only rather than fully blocked. `video-preprocess-plan` covers avatar image checks, voice recommendation, audio detect, audio silence, and raw frontend-body snake-casing; `video-preprocess-query-plan` covers result lookup by `submit_id_list`. Live replay still needs passive UI capture compare and explicit approval because pre-process submit creates task state.
 - `G1 /mweb/v1/aigc_draft/generate` now has a dry-run `omni-video-plan` plus `omni-video-compare` for Seedance all-around reference generation. It models mixed image/video `unified_edit_input.material_list`, prompt `@field` references in `meta_list`, and `functionMode="omni_reference"` for reference-profile/persona-swap workflows. Live replay still needs passive frontend capture compare through the semantic compare gate and explicit approval because it can spend credits.
 - `G1 /mweb/v1/execute_generate_audit` is now dry-run-only rather than fully blocked. `generate-audit-plan` models the frontend material transform for image/video/audio/subject inputs and can be compared against passive UI traffic through `request-plan-compare`. Live replay still needs a fresh generation capture proving the complete top-level request context.
 - `V1 /mweb/v1/mix_audio_video` and `/mweb/v1/mix_audio_videos` are now dry-run-only rather than fully blocked. `mix-audio-plan` models the frontend body/query transform for applying an audio/voice track to one or more generated video items, and `request-plan-compare` now validates optional `query_params` such as `babi_param`. Live replay still needs passive UI capture compare and explicit approval because it creates task state.

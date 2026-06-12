@@ -1,0 +1,160 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Jimeng video preprocess snapshots > snapshots lip-sync/digital-human preprocess request plans 1`] = `
+{
+  "plans": [
+    {
+      "request": {
+        "input_list": [
+          {
+            "image_create_avatar": {
+              "detection_scene": "ugc_lip_sync_avatar",
+              "image": {
+                "image_uri": "tos-cn-i-tb4s082cfz/kbeauty-host.png",
+              },
+            },
+            "scene": 2,
+            "submit_id": "snapshot-avatar-detect",
+          },
+        ],
+      },
+      "summary": {
+        "endpoint": "/mweb/v1/video_generate/pre_process",
+        "input_count": 1,
+        "live_submit": false,
+        "method": "POST",
+        "mode": "image-create-avatar",
+        "next_compare_command": "jimeng-browser-proxy request-plan-compare --plan <video-preprocess-plan.json> --rawNetwork <capture>/raw-network.jsonl",
+        "request_keys": [
+          "input_list",
+        ],
+        "scene_names": [
+          "ImageCreateAvatar",
+        ],
+        "scenes": [
+          2,
+        ],
+      },
+    },
+    {
+      "request": {
+        "input_list": [
+          {
+            "lip_sync_voice_match": {
+              "image_list": [
+                {
+                  "image_uri": "tos-cn-i-tb4s082cfz/kbeauty-host.png",
+                },
+                {
+                  "image_uri": "tos-cn-i-tb4s082cfz/kbeauty-profile.png",
+                },
+              ],
+            },
+            "scene": 7,
+            "submit_id": "snapshot-voice-match",
+          },
+        ],
+      },
+      "summary": {
+        "endpoint": "/mweb/v1/video_generate/pre_process",
+        "input_count": 1,
+        "live_submit": false,
+        "method": "POST",
+        "mode": "voice-recommendation",
+        "next_compare_command": "jimeng-browser-proxy request-plan-compare --plan <video-preprocess-plan.json> --rawNetwork <capture>/raw-network.jsonl",
+        "request_keys": [
+          "input_list",
+        ],
+        "scene_names": [
+          "LipSyncVoiceRecommendation",
+        ],
+        "scenes": [
+          7,
+        ],
+      },
+    },
+    {
+      "request": {
+        "input_list": [
+          {
+            "lip_sync_audio_detect": {
+              "audio": {
+                "vid": "v0audio123",
+              },
+            },
+            "scene": 5,
+            "submit_id": "snapshot-audio-detect",
+          },
+        ],
+      },
+      "summary": {
+        "endpoint": "/mweb/v1/video_generate/pre_process",
+        "input_count": 1,
+        "live_submit": false,
+        "method": "POST",
+        "mode": "audio-detect",
+        "next_compare_command": "jimeng-browser-proxy request-plan-compare --plan <video-preprocess-plan.json> --rawNetwork <capture>/raw-network.jsonl",
+        "request_keys": [
+          "input_list",
+        ],
+        "scene_names": [
+          "LipSyncAudioDetect",
+        ],
+        "scenes": [
+          5,
+        ],
+      },
+    },
+    {
+      "request": {
+        "input_list": [
+          {
+            "lip_sync_audio_silence": {
+              "prompt": "三秒告诉你为什么熬夜后底妆会卡粉。",
+            },
+            "scene": 6,
+            "submit_id": "snapshot-audio-silence",
+          },
+        ],
+      },
+      "summary": {
+        "endpoint": "/mweb/v1/video_generate/pre_process",
+        "input_count": 1,
+        "live_submit": false,
+        "method": "POST",
+        "mode": "audio-silence",
+        "next_compare_command": "jimeng-browser-proxy request-plan-compare --plan <video-preprocess-plan.json> --rawNetwork <capture>/raw-network.jsonl",
+        "request_keys": [
+          "input_list",
+        ],
+        "scene_names": [
+          "LipSyncAudioSilence",
+        ],
+        "scenes": [
+          6,
+        ],
+      },
+    },
+  ],
+  "query": {
+    "request": {
+      "submit_id_list": [
+        "snapshot-avatar-detect",
+        "snapshot-voice-match",
+        "snapshot-audio-detect",
+        "snapshot-audio-silence",
+      ],
+    },
+    "summary": {
+      "endpoint": "/mweb/v1/video_generate/mget_pre_process_result",
+      "live_submit": false,
+      "method": "POST",
+      "next_compare_command": "jimeng-browser-proxy request-plan-compare --plan <video-preprocess-query-plan.json> --rawNetwork <capture>/raw-network.jsonl",
+      "request_keys": [
+        "submit_id_list",
+      ],
+      "submit_id_count": 4,
+    },
+  },
+}
+`;
