@@ -16,6 +16,8 @@ Jimeng fast-loop update, 2026-06-12: future sessions should use `docs/plans/jime
 
 Jimeng L1 update, 2026-06-12: `jimeng-browser-proxy video-preprocess-plan` and `video-preprocess-query-plan` now dry-run model `/mweb/v1/video_generate/pre_process` and `/mweb/v1/video_generate/mget_pre_process_result` for avatar image checks, voice recommendation, audio detect, audio silence, and result lookup. Proof note: `docs/qa/jimeng-video-preprocess-plan-20260612.md`. Live replay remains capture/approval-gated because pre-process submit creates provider task state.
 
+Jimeng packet-protocol update, 2026-06-12: `buildJimengPacketPlan` now has a schema-validated output writer that emits `packet-manifest.json`, `packet-manifest.md`, and `approval-prompt.txt` for a selected packet. Use this to create the cross-session packet manifest before code changes; focused Bun tests cover output files and contract drift, while Vitest snapshots continue to cover packet summaries/Markdown.
+
 ## Next
 
 | ID | Task | Source | Notes |

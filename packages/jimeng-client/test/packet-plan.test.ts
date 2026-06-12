@@ -1,7 +1,12 @@
+import { existsSync, mkdtempSync, readFileSync } from "node:fs"
+import path from "node:path"
+import { tmpdir } from "node:os"
 import { describe, expect, test } from "bun:test"
 import {
   buildJimengPacketPlan,
   pickNextJimengPacketId,
+  validateJimengPacketPlan,
+  writeJimengPacketPlanOutputs,
   writeJimengPacketPlanMarkdown,
 } from "../src/packet-plan"
 
@@ -57,5 +62,44 @@ describe("Jimeng packet plans", () => {
     expect(plan.approvalRequired).toBe(false)
     expect(plan.approvalPrompt).toBeNull()
     expect(plan.examples[0]?.risks).toEqual(["none"])
+  })
+
+  test("writes a schema-validated packet manifest bundle", () => {
+    const outDir = mkdtempSync(path.join(tmpdir(), "jimeng-packet-plan-"))
+    const plan = buildJimengPacketPlan({
+      packetId: "persona-voice",
+      artifactRoot: "data/jimeng-lab/packet-persona-voice-20260612",
+    })
+
+    const files = writeJimengPacketPlanOutputs(plan, outDir)
+    const manifest = JSON.parse(readFileSync(files.manifestJson, "utf8")) as {
+      packetId: string
+      examples: Array<{ outputDir: string }>
+      approvalRequired: boolean
+    }
+    const markdown = readFileSync(files.manifestMarkdown, "utf8")
+
+    expect(manifest.packetId).toBe("persona-voice")
+    expect(manifest.examples[0]?.outputDir).toBe("data/jimeng-lab/packet-persona-voice-20260612/subject-voice")
+    expect(manifest.approvalRequired).toBe(true)
+    expect(markdown).toContain("# Jimeng Packet Plan: persona-voice")
+    expect(markdown).toContain("## Approval Prompt")
+    expect(typeof files.approvalPrompt).toBe("string")
+    if (files.approvalPrompt) {
+      expect(existsSync(files.approvalPrompt)).toBe(true)
+      expect(readFileSync(files.approvalPrompt, "utf8")).toContain("Approve running the persona-voice packet")
+    }
+  })
+
+  test("rejects packet manifests that drift from the required contract", () => {
+    const plan = buildJimengPacketPlan({
+      artifactRoot: "data/jimeng-lab/packet-gen-parity-20260612",
+    })
+    const invalidPlan = {
+      ...plan,
+      packetId: "weekly-challenges",
+    } as never
+
+    expect(() => validateJimengPacketPlan(invalidPlan)).toThrow("Jimeng packet plan did not match required manifest fields")
   })
 })

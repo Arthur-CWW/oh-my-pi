@@ -1,8 +1,12 @@
+import { mkdirSync, writeFileSync } from "node:fs"
+import path from "node:path"
+import { Schema } from "effect"
 import {
   type JimengDiscoveryTriageFamilyId,
   type JimengDiscoveryValueRankedGap,
   summarizeJimengDiscoveryTriageCoverage,
 } from "./endpoint-registry"
+import { jimengError } from "./errors"
 
 export type JimengPacketId =
   | "gen-parity"
@@ -39,6 +43,12 @@ export interface JimengPacketPlan {
   acceptance: string[]
 }
 
+export interface JimengPacketPlanOutputFiles {
+  manifestJson: string
+  manifestMarkdown: string
+  approvalPrompt: string | null
+}
+
 interface PacketDefinition {
   packetId: JimengPacketId
   title: string
@@ -50,6 +60,96 @@ interface PacketDefinition {
   promotionPlan: string[]
   acceptance: string[]
 }
+
+const PacketIdSchema = Schema.Union([
+  Schema.Literal("gen-parity"),
+  Schema.Literal("persona-voice"),
+  Schema.Literal("lip-sync-human"),
+  Schema.Literal("reference-controls"),
+  Schema.Literal("template-mining"),
+  Schema.Literal("supporting-reads"),
+])
+
+const PacketRiskSchema = Schema.Union([
+  Schema.Literal("none"),
+  Schema.Literal("paid_generation"),
+  Schema.Literal("provider_task_state"),
+  Schema.Literal("account_mutation"),
+  Schema.Literal("fresh_capture"),
+])
+
+const TriageFamilyIdSchema = Schema.Union([
+  Schema.Literal("G1"),
+  Schema.Literal("G2"),
+  Schema.Literal("P1"),
+  Schema.Literal("V1"),
+  Schema.Literal("L1"),
+  Schema.Literal("R1"),
+  Schema.Literal("R2"),
+  Schema.Literal("T1"),
+  Schema.Literal("A1"),
+  Schema.Literal("C1"),
+  Schema.Literal("Q1"),
+  Schema.Literal("I1"),
+  Schema.Literal("S1"),
+  Schema.Literal("O1"),
+  Schema.Literal("W1"),
+  Schema.Literal("N1"),
+  Schema.Literal("U1"),
+  Schema.Literal("D1"),
+  Schema.Literal("M1"),
+  Schema.Literal("P2"),
+  Schema.Literal("X1"),
+])
+
+const TriageStatusSchema = Schema.Union([
+  Schema.Literal("implemented"),
+  Schema.Literal("partial"),
+  Schema.Literal("dry_run_only"),
+  Schema.Literal("cataloged_only"),
+  Schema.Literal("captured_only"),
+  Schema.Literal("blocked"),
+  Schema.Literal("missing"),
+])
+
+const PacketExampleSchema = Schema.Struct({
+  id: Schema.String,
+  title: Schema.String,
+  purpose: Schema.String,
+  command: Schema.String,
+  outputDir: Schema.String,
+  risks: Schema.Array(PacketRiskSchema),
+})
+
+const PacketGapSchema = Schema.Struct({
+  valueRank: Schema.Number,
+  workflow: Schema.String,
+  implementationRank: Schema.Number,
+  familyId: TriageFamilyIdSchema,
+  familyTitle: Schema.String,
+  endpoint: Schema.String,
+  status: TriageStatusSchema,
+  command: Schema.NullOr(Schema.String),
+  note: Schema.String,
+  evidence: Schema.Array(Schema.String),
+  nextProbe: Schema.NullOr(Schema.String),
+})
+
+const PacketPlanSchema = Schema.Struct({
+  packetId: PacketIdSchema,
+  title: Schema.String,
+  familyIds: Schema.Array(TriageFamilyIdSchema),
+  valueRank: Schema.Number,
+  objective: Schema.String,
+  artifactRoot: Schema.String,
+  examples: Schema.Array(PacketExampleSchema),
+  gaps: Schema.Array(PacketGapSchema),
+  approvalRequired: Schema.Boolean,
+  approvalPrompt: Schema.NullOr(Schema.String),
+  samplePlan: Schema.Array(Schema.String),
+  promotionPlan: Schema.Array(Schema.String),
+  acceptance: Schema.Array(Schema.String),
+})
 
 export function buildJimengPacketPlan(input: {
   packetId?: JimengPacketId
@@ -81,6 +181,30 @@ export function buildJimengPacketPlan(input: {
     samplePlan: [...definition.samplePlan],
     promotionPlan: definition.promotionPlan.map((step) => step.replaceAll("<artifactRoot>", artifactRoot)),
     acceptance: [...definition.acceptance],
+  }
+}
+
+export function validateJimengPacketPlan(plan: JimengPacketPlan): JimengPacketPlan {
+  decodePacketPlanContract(PacketPlanSchema, plan, "packet plan")
+  return plan
+}
+
+export function writeJimengPacketPlanOutputs(plan: JimengPacketPlan, outDir: string): JimengPacketPlanOutputFiles {
+  const validated = validateJimengPacketPlan(plan)
+  mkdirSync(outDir, { recursive: true })
+
+  const manifestJson = path.join(outDir, "packet-manifest.json")
+  const manifestMarkdown = path.join(outDir, "packet-manifest.md")
+  const approvalPrompt = validated.approvalPrompt ? path.join(outDir, "approval-prompt.txt") : null
+
+  writeFileSync(manifestJson, `${JSON.stringify(validated, null, 2)}\n`, "utf8")
+  writeFileSync(manifestMarkdown, writeJimengPacketPlanMarkdown(validated), "utf8")
+  if (approvalPrompt) writeFileSync(approvalPrompt, `${validated.approvalPrompt}\n`, "utf8")
+
+  return {
+    manifestJson,
+    manifestMarkdown,
+    approvalPrompt,
   }
 }
 
@@ -144,6 +268,21 @@ export function writeJimengPacketPlanMarkdown(plan: JimengPacketPlan): string {
   }
 
   return `${lines.join("\n")}\n`
+}
+
+function decodePacketPlanContract<A>(schema: Schema.Decoder<A>, value: JimengPacketPlan, operation: string): A {
+  try {
+    return Schema.decodeUnknownSync(schema)(value)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    throw jimengError({
+      category: "validation",
+      code: "JIMENG_PACKET_PLAN_CONTRACT_CHANGED",
+      message: `${operation}: Jimeng packet plan did not match required manifest fields.`,
+      retryable: false,
+      details: { operation, error: message },
+    })
+  }
 }
 
 function packetIdFromFamily(familyId: JimengDiscoveryTriageFamilyId): JimengPacketId {
