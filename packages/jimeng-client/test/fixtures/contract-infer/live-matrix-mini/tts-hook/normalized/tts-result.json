@@ -1,0 +1,18 @@
+{
+  "command": "tts",
+  "endpoint": "/mweb/v1/tts_generate",
+  "text": "前三秒一定要直接讲痛点。",
+  "voice_id": "7597003459665072686",
+  "voice_title": "直爽女大",
+  "item_platform": 1,
+  "transport": {
+    "mode": "live",
+    "cassette_path": null
+  },
+  "http_status": 200,
+  "ret": "0",
+  "errmsg": "success",
+  "response_text_sha256": "sha256-redacted",
+  "artifact": "/repo/data/jimeng-lab/proof/tts-hook/artifacts/sample.mp3",
+  "bytes": 97965
+}

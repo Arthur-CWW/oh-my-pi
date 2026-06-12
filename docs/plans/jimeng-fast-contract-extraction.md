@@ -21,7 +21,7 @@ Add a reusable contract-inference command before adding more one-off dry-run pla
 jimeng-browser-proxy contract-infer \
   --input data/jimeng-lab/<proof-run> \
   --endpoint /mweb/v1/aigc_draft/generate \
-  --outDir data/jimeng-lab/<proof-run>/contract
+  --outDir data/jimeng-lab/<proof-run>/contract-infer
 ```
 
 Expected outputs:
@@ -33,6 +33,8 @@ Expected outputs:
 - CLI flag suggestions for independent property classes, not every cosmetic enum value
 
 This tool should redact cookies, auth headers, signed URLs, upload credentials, request ids, timestamps, and other unstable or sensitive values before producing snapshots.
+
+Current status: `jimeng-browser-proxy contract-infer` exists. It scans saved proof/cassette directories, groups JSON by endpoint, redacts/normalizes embedded JSON strings such as `draft_content` and `metrics_extra`, reports stable/frequent contract paths, summarizes artifacts, emits Effect Schema IR, writes registry patch drafts, and is covered by Bun tests plus Vitest snapshots.
 
 ## Budget And Safety
 
@@ -63,3 +65,18 @@ The 2026-06-12 live matrix is the current seed for this faster loop:
 - verified MP4 outputs as H.264, 704x1248, 60 fps, 3.016667 seconds
 
 Future work should use this style of proof bundle as input to contract inference and scaffold generation.
+
+The first scaffold run is saved locally under:
+
+```txt
+data/jimeng-lab/proof-20260612-live-generation-matrix/contract-infer/normalized/contract/
+```
+
+It was generated with:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts contract-infer \
+  --input data/jimeng-lab/proof-20260612-live-generation-matrix \
+  --endpoint /mweb/v1/aigc_draft/generate \
+  --outDir data/jimeng-lab/proof-20260612-live-generation-matrix/contract-infer
+```

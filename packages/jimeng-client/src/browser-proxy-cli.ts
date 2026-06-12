@@ -66,6 +66,10 @@ import {
   writeJimengCaptureAnalysisMarkdown,
 } from "./capture-analyzer"
 import {
+  inferJimengContractsFromPath,
+  writeJimengContractInferenceOutputs,
+} from "./contract-infer"
+import {
   buildJimengDiscoveryWorklist,
   readJimengCaptureAnalysisFile,
   readJimengEndpointProbeCandidateFile,
@@ -364,6 +368,7 @@ Commands:
   discovery-worklist Merge capture analysis/static hints into prioritized next API work
   static-locate Locate endpoint request builders in local source/bundle roots
   static-inventory Inventory frontend API endpoints from local source/bundle roots
+  contract-infer Infer schema/test/registry scaffolds from saved proof JSON/artifacts
   triage-coverage Summarize keep/maybe/skip endpoint registry coverage and remaining gaps
   catalog       Probe non-generating model/tool/persona/voice config endpoints
   agent-catalog Fetch normalized agent skills and image/video model catalog
@@ -446,6 +451,7 @@ Options:
   --analysis <file[,file]>       capture-analyze normalized analysis JSON for discovery-worklist
   --probeCandidates <file[,file]> Raw endpoint-probe candidate JSON for discovery-worklist
   --staticRoot <dir[,dir]>      Optional source/bundle roots to search for exact endpoint string hints
+  --input <file|dir>             Proof/cassette directory or JSON file for contract-infer
   --symbol <name[,name]>         Static-locate symbols/request-builder names to search beside endpoints
   --staticQuery <term[,term]>     Static-locate arbitrary source/bundle search terms
   --contextLines <n>            Snippet context lines for static-locate (default: 3)
@@ -620,6 +626,11 @@ Examples:
   jimeng-browser-proxy static-inventory \\
     --staticRoot data/jimeng-lab/js-sweep/files,packages/jimeng-client/src \\
     --outDir data/jimeng-lab/static-inventory
+
+  jimeng-browser-proxy contract-infer \\
+    --input data/jimeng-lab/proof-20260612-live-generation-matrix \\
+    --endpoint /mweb/v1/aigc_draft/generate \\
+    --outDir data/jimeng-lab/proof-20260612-live-generation-matrix/contract-infer
 
   jimeng-browser-proxy session
 
@@ -914,6 +925,7 @@ interface CliArgs {
     | "discovery-worklist"
     | "static-locate"
     | "static-inventory"
+    | "contract-infer"
     | "triage-coverage"
     | "catalog"
     | "agent-catalog"
@@ -991,6 +1003,7 @@ interface CliArgs {
   capture?: string
   rawNetwork?: string
   captureDir?: string
+  input?: string
   analysisFiles?: string[]
   probeCandidateFiles?: string[]
   staticRoots?: string[]
@@ -1257,6 +1270,26 @@ async function main(argv: string[]): Promise<void> {
     })
     writeFileSync(path.join(dirs.normalizedDir, `${runId}-summary.md`), writeJimengStaticInventoryMarkdown(result), "utf8")
     console.log(`[jimeng-browser-proxy] static-inventory saved resources=${result.totalResourceCount} included=${result.includedResourceCount} high_value_gaps=${result.highValueGapCount}`)
+    return
+  }
+
+  if (args.command === "contract-infer") {
+    if (!args.input) throw new Error("contract-infer requires --input")
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const outDir = path.join(dirs.normalizedDir, "contract")
+    const inference = inferJimengContractsFromPath({
+      inputPath: args.input,
+      endpoint: args.endpoint,
+      outDir,
+    })
+    const files = writeJimengContractInferenceOutputs(inference, outDir)
+    writeJson(path.join(dirs.rawDir, "contract-infer-inputs.json"), {
+      command: args.command,
+      input: path.resolve(args.input),
+      endpoint: args.endpoint ?? null,
+      output_files: files,
+    })
+    console.log(`[jimeng-browser-proxy] contract-infer saved endpoints=${inference.endpoints.length} documents=${inference.file_count} artifacts=${inference.artifact_count}`)
     return
   }
 
@@ -5864,6 +5897,7 @@ function parseArgs(argv: string[]): CliArgs {
     && command !== "discovery-worklist"
     && command !== "static-locate"
     && command !== "static-inventory"
+    && command !== "contract-infer"
     && command !== "triage-coverage"
     && command !== "catalog"
     && command !== "agent-catalog"
@@ -6092,6 +6126,7 @@ function parseArgs(argv: string[]): CliArgs {
     capture: flags.capture,
     rawNetwork: flags.rawNetwork ?? flags["raw-network"],
     captureDir: flags.captureDir ?? flags["capture-dir"],
+    input: flags.input,
     analysisFiles: parseCsvFlag(flags.analysis),
     probeCandidateFiles: parseCsvFlag(flags.probeCandidates ?? flags["probe-candidates"]),
     staticRoots: parseCsvFlag(flags.staticRoot ?? flags["static-root"]),

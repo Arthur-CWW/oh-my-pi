@@ -1,5 +1,6 @@
 export * from "./capture"
 export * from "./capture-analyzer"
+export * from "./contract-infer"
 export * from "./discovery-worklist"
 export * from "./endpoint-registry"
 export * from "./agent-catalog"

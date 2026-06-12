@@ -1,0 +1,365 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Jimeng contract inference snapshots > snapshots normalized contract-infer output from a proof bundle 1`] = `
+{
+  "artifact_count": 2,
+  "endpoints": [
+    {
+      "cli_flag_suggestions": [
+        "--durationSec",
+        "--fps",
+        "--modelReqKey",
+        "--prompt",
+        "--ratio",
+        "--seed",
+        "--submitId",
+        "--videoResolution",
+      ],
+      "commands": [
+        "text2video",
+      ],
+      "document_kinds": [
+        "normalized",
+      ],
+      "effect_schema_ir": {
+        "mode": "permissive-required-paths",
+        "name": "MwebV1AigcDraftGenerateObservedSchema",
+        "required_paths": [
+          {
+            "path": "plan",
+            "types": [
+              "object",
+            ],
+          },
+          {
+            "path": "pollTrace",
+            "types": [
+              "array",
+            ],
+          },
+          {
+            "path": "submit",
+            "types": [
+              "object",
+            ],
+          },
+          {
+            "path": "artifacts[].kind",
+            "types": [
+              "string",
+            ],
+          },
+          {
+            "path": "plan.command",
+            "types": [
+              "string",
+            ],
+          },
+          {
+            "path": "plan.op",
+            "types": [
+              "string",
+            ],
+          },
+          {
+            "path": "plan.poll_kind",
+            "types": [
+              "string",
+            ],
+          },
+          {
+            "path": "plan.poll_url",
+            "types": [
+              "string",
+            ],
+          },
+          {
+            "path": "plan.submit_body",
+            "types": [
+              "object",
+            ],
+          },
+          {
+            "path": "plan.submit_kind",
+            "types": [
+              "string",
+            ],
+          },
+          {
+            "path": "plan.submit_url",
+            "types": [
+              "string",
+            ],
+          },
+          {
+            "path": "pollTrace[].status",
+            "types": [
+              "number",
+            ],
+          },
+        ],
+      },
+      "endpoint": "/mweb/v1/aigc_draft/generate",
+      "http_statuses": [
+        200,
+      ],
+      "registry_patch_draft": {
+        "command": "text2video",
+        "endpoint": "/mweb/v1/aigc_draft/generate",
+        "evidence": [
+          "text2video-kbeauty-hook/normalized/text2video-result.json",
+        ],
+        "nextProbe": "Promote contract-infer required paths into a hand-tightened typed client/CLI wrapper and Vitest replay snapshot.",
+        "risk": "generation-or-mutation",
+        "status": "partial",
+      },
+      "rets": [
+        "0",
+      ],
+      "sample_count": 1,
+    },
+    {
+      "cli_flag_suggestions": [
+        "--durationSec",
+        "--fps",
+        "--modelReqKey",
+        "--prompt",
+        "--ratio",
+        "--seed",
+        "--submitId",
+        "--videoResolution",
+      ],
+      "commands": [
+        "text2video",
+      ],
+      "document_kinds": [
+        "normalized",
+      ],
+      "effect_schema_ir": {
+        "mode": "permissive-required-paths",
+        "name": "MwebV1GetHistoryByIdsObservedSchema",
+        "required_paths": [
+          {
+            "path": "plan",
+            "types": [
+              "object",
+            ],
+          },
+          {
+            "path": "pollTrace",
+            "types": [
+              "array",
+            ],
+          },
+          {
+            "path": "submit",
+            "types": [
+              "object",
+            ],
+          },
+          {
+            "path": "artifacts[].kind",
+            "types": [
+              "string",
+            ],
+          },
+          {
+            "path": "plan.command",
+            "types": [
+              "string",
+            ],
+          },
+          {
+            "path": "plan.op",
+            "types": [
+              "string",
+            ],
+          },
+          {
+            "path": "plan.poll_kind",
+            "types": [
+              "string",
+            ],
+          },
+          {
+            "path": "plan.poll_url",
+            "types": [
+              "string",
+            ],
+          },
+          {
+            "path": "plan.submit_body",
+            "types": [
+              "object",
+            ],
+          },
+          {
+            "path": "plan.submit_kind",
+            "types": [
+              "string",
+            ],
+          },
+          {
+            "path": "plan.submit_url",
+            "types": [
+              "string",
+            ],
+          },
+          {
+            "path": "pollTrace[].status",
+            "types": [
+              "number",
+            ],
+          },
+        ],
+      },
+      "endpoint": "/mweb/v1/get_history_by_ids",
+      "http_statuses": [
+        200,
+      ],
+      "registry_patch_draft": {
+        "command": "text2video",
+        "endpoint": "/mweb/v1/get_history_by_ids",
+        "evidence": [
+          "text2video-kbeauty-hook/normalized/text2video-result.json",
+        ],
+        "nextProbe": "Promote contract-infer required paths into a hand-tightened typed client/CLI wrapper and Vitest replay snapshot.",
+        "risk": "read-or-unknown",
+        "status": "partial",
+      },
+      "rets": [
+        "0",
+      ],
+      "sample_count": 1,
+    },
+    {
+      "cli_flag_suggestions": [
+        "--item-platform",
+        "--voice-id",
+      ],
+      "commands": [
+        "tts",
+      ],
+      "document_kinds": [
+        "normalized",
+      ],
+      "effect_schema_ir": {
+        "mode": "permissive-required-paths",
+        "name": "MwebV1TtsGenerateObservedSchema",
+        "required_paths": [
+          {
+            "path": "bytes",
+            "types": [
+              "number",
+            ],
+          },
+          {
+            "path": "command",
+            "types": [
+              "string",
+            ],
+          },
+          {
+            "path": "endpoint",
+            "types": [
+              "string",
+            ],
+          },
+          {
+            "path": "errmsg",
+            "types": [
+              "string",
+            ],
+          },
+          {
+            "path": "http_status",
+            "types": [
+              "number",
+            ],
+          },
+          {
+            "path": "item_platform",
+            "types": [
+              "number",
+            ],
+          },
+          {
+            "path": "ret",
+            "types": [
+              "string",
+            ],
+          },
+          {
+            "path": "text",
+            "types": [
+              "string",
+            ],
+          },
+          {
+            "path": "transport",
+            "types": [
+              "object",
+            ],
+          },
+          {
+            "path": "voice_id",
+            "types": [
+              "string",
+            ],
+          },
+          {
+            "path": "voice_title",
+            "types": [
+              "string",
+            ],
+          },
+          {
+            "path": "transport.cassette_path",
+            "types": [
+              "null",
+            ],
+          },
+        ],
+      },
+      "endpoint": "/mweb/v1/tts_generate",
+      "http_statuses": [
+        200,
+      ],
+      "registry_patch_draft": {
+        "command": "tts",
+        "endpoint": "/mweb/v1/tts_generate",
+        "evidence": [
+          "tts-hook/normalized/tts-result.json",
+        ],
+        "nextProbe": "Promote contract-infer required paths into a hand-tightened typed client/CLI wrapper and Vitest replay snapshot.",
+        "risk": "generation-or-mutation",
+        "status": "partial",
+      },
+      "rets": [
+        "0",
+      ],
+      "sample_count": 1,
+    },
+  ],
+  "file_count": 2,
+  "scaffold": {
+    "generated_files": [
+      "contract-summary.json",
+      "contract-summary.md",
+      "effect-schema-ir.json",
+      "registry-patch-draft.json",
+    ],
+    "recommended_next_steps": [
+      "Review required_paths for false positives caused by sample-specific values.",
+      "Promote the generated Effect Schema IR into a hand-tightened boundary schema for the selected command family.",
+      "Add or update a Vitest snapshot over the normalized contract object before wiring more live calls.",
+      "Patch endpoint-registry rows with evidence, command ownership, risk, and next probe from registry_patch_draft.",
+    ],
+    "vitest_snapshot_targets": [
+      "contract-infer:/mweb/v1/aigc_draft/generate",
+      "contract-infer:/mweb/v1/get_history_by_ids",
+      "contract-infer:/mweb/v1/tts_generate",
+    ],
+  },
+}
+`;
