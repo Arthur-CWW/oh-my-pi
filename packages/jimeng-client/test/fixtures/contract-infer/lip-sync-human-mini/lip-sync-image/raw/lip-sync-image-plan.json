@@ -1,0 +1,31 @@
+{
+  "plan": {
+    "command": "lip-sync",
+    "mode": "image",
+    "status": "dry-run-only",
+    "endpoint": "/mweb/v1/aigc_draft/generate",
+    "modelReqKey": "dreamina_lib_sync_image_quick_1.5",
+    "providerInput": {
+      "videoGenInputs": {
+        "videoMode": "avatar",
+        "prompt": "对参考人物图片进行口型同步，保持人物身份和真实自拍视频质感。",
+        "i2vOpt": {
+          "realmanAvatar": {
+            "originImage": {
+              "imageUri": "tos-cn-i-tb4s082cfz/k-beauty-host.png",
+              "width": 2048,
+              "height": 2048
+            },
+            "ttsInfo": {
+              "sourceType": "text-to-speech",
+              "text": "三秒告诉你为什么这款补水精华适合熬夜后的底妆。",
+              "speed": 1,
+              "toneId": "7597003459665072686"
+            }
+          }
+        }
+      },
+      "modelReqKey": "dreamina_lib_sync_image_quick_1.5"
+    }
+  }
+}

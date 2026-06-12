@@ -10,6 +10,7 @@ import {
 
 const fixtureDir = path.resolve(import.meta.dir, "fixtures/contract-infer/live-matrix-mini")
 const personaVoiceFixtureDir = path.resolve(import.meta.dir, "fixtures/contract-infer/persona-voice-mini")
+const lipSyncHumanFixtureDir = path.resolve(import.meta.dir, "fixtures/contract-infer/lip-sync-human-mini")
 
 describe("Jimeng contract inference", () => {
   test("groups proof bundle JSON by endpoint and suggests useful flags", () => {
@@ -59,6 +60,41 @@ describe("Jimeng contract inference", () => {
 
     const mixAudio = inference.endpoints.find((endpoint) => endpoint.endpoint === "/mweb/v1/mix_audio_video")
     expect(mixAudio?.cli_flag_suggestions).toEqual(expect.arrayContaining(["--audioVid", "--videoItemId"]))
+  })
+
+  test("extracts lip-sync and digital-human plan endpoints from packet plans", () => {
+    const inference = inferJimengContractsFromPath({
+      inputPath: lipSyncHumanFixtureDir,
+      generatedAtIso: "2026-06-12T00:00:00.000Z",
+    })
+
+    expect(inference.file_count).toBe(4)
+    expect(inference.endpoints.map((endpoint) => endpoint.endpoint)).toEqual([
+      "/mweb/v1/aigc_draft/generate",
+      "/mweb/v1/video_generate/mget_pre_process_result",
+      "/mweb/v1/video_generate/pre_process",
+    ])
+
+    const generate = inference.endpoints.find((endpoint) => endpoint.endpoint === "/mweb/v1/aigc_draft/generate")
+    expect(generate?.commands).toEqual(["lip-sync"])
+    expect(generate?.cli_flag_suggestions).toEqual(expect.arrayContaining([
+      "--imageUri",
+      "--mode",
+      "--modelReqKey",
+      "--speed",
+      "--text",
+      "--videoUri",
+      "--videoVid",
+      "--voice-id",
+    ]))
+
+    const preprocess = inference.endpoints.find((endpoint) => endpoint.endpoint === "/mweb/v1/video_generate/pre_process")
+    expect(preprocess?.commands).toEqual(["video-preprocess-plan"])
+    expect(preprocess?.cli_flag_suggestions).toContain("--imageUri")
+
+    const preprocessQuery = inference.endpoints.find((endpoint) => endpoint.endpoint === "/mweb/v1/video_generate/mget_pre_process_result")
+    expect(preprocessQuery?.commands).toEqual(["video-preprocess-query-plan"])
+    expect(preprocessQuery?.cli_flag_suggestions).toContain("--submitId")
   })
 
   test("writes scaffold files for review", () => {

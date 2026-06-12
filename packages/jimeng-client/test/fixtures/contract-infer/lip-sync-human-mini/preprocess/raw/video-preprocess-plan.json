@@ -1,0 +1,20 @@
+{
+  "command": "video-preprocess-plan",
+  "endpoint": "/mweb/v1/video_generate/pre_process",
+  "method": "POST",
+  "request": {
+    "input_list": [
+      {
+        "submit_id": "avatar-detect-1",
+        "scene": 2,
+        "image_create_avatar": {
+          "image": {
+            "image_uri": "tos-cn-i-tb4s082cfz/k-beauty-host.png"
+          },
+          "detection_scene": "ugc_lip_sync_avatar"
+        }
+      }
+    ]
+  },
+  "live_submit": false
+}

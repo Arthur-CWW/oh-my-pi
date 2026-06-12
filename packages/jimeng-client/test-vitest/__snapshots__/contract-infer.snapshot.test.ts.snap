@@ -1,5 +1,297 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`Jimeng contract inference snapshots > snapshots lip-sync human packet contract scaffolds 1`] = `
+{
+  "endpoints": [
+    {
+      "cli_flag_suggestions": [
+        "--imageUri",
+        "--mode",
+        "--modelReqKey",
+        "--prompt",
+        "--speed",
+        "--text",
+        "--videoUri",
+        "--videoVid",
+        "--voice-id",
+      ],
+      "commands": [
+        "lip-sync",
+      ],
+      "document_kinds": [
+        "raw",
+      ],
+      "effect_schema_ir": {
+        "mode": "permissive-required-paths",
+        "name": "MwebV1AigcDraftGenerateObservedSchema",
+        "required_paths": [
+          {
+            "path": "plan",
+            "types": [
+              "object",
+            ],
+          },
+          {
+            "path": "plan.command",
+            "types": [
+              "string",
+            ],
+          },
+          {
+            "path": "plan.endpoint",
+            "types": [
+              "string",
+            ],
+          },
+          {
+            "path": "plan.mode",
+            "types": [
+              "string",
+            ],
+          },
+          {
+            "path": "plan.modelReqKey",
+            "types": [
+              "string",
+            ],
+          },
+          {
+            "path": "plan.providerInput",
+            "types": [
+              "object",
+            ],
+          },
+          {
+            "path": "plan.status",
+            "types": [
+              "string",
+            ],
+          },
+          {
+            "path": "plan.providerInput.modelReqKey",
+            "types": [
+              "string",
+            ],
+          },
+          {
+            "path": "plan.providerInput.videoGenInputs",
+            "types": [
+              "object",
+            ],
+          },
+          {
+            "path": "plan.providerInput.videoGenInputs.prompt",
+            "types": [
+              "string",
+            ],
+          },
+          {
+            "path": "plan.providerInput.videoGenInputs.videoMode",
+            "types": [
+              "string",
+            ],
+          },
+        ],
+      },
+      "endpoint": "/mweb/v1/aigc_draft/generate",
+      "registry_patch_draft": {
+        "command": "lip-sync",
+        "endpoint": "/mweb/v1/aigc_draft/generate",
+        "evidence": [
+          "lip-sync-image/raw/lip-sync-image-plan.json",
+          "lip-sync-video/raw/lip-sync-video-plan.json",
+        ],
+        "nextProbe": "Promote contract-infer required paths into a hand-tightened typed client/CLI wrapper and Vitest replay snapshot.",
+        "risk": "generation-or-mutation",
+        "status": "partial",
+      },
+      "sample_count": 2,
+    },
+    {
+      "cli_flag_suggestions": [
+        "--submitId",
+      ],
+      "commands": [
+        "video-preprocess-query-plan",
+      ],
+      "document_kinds": [
+        "raw",
+      ],
+      "effect_schema_ir": {
+        "mode": "permissive-required-paths",
+        "name": "MwebV1VideoGenerateMgetPreProcessResultObservedSchema",
+        "required_paths": [
+          {
+            "path": "command",
+            "types": [
+              "string",
+            ],
+          },
+          {
+            "path": "endpoint",
+            "types": [
+              "string",
+            ],
+          },
+          {
+            "path": "live_submit",
+            "types": [
+              "boolean",
+            ],
+          },
+          {
+            "path": "method",
+            "types": [
+              "string",
+            ],
+          },
+          {
+            "path": "request",
+            "types": [
+              "object",
+            ],
+          },
+          {
+            "path": "request.submit_id_list",
+            "types": [
+              "array",
+            ],
+          },
+        ],
+      },
+      "endpoint": "/mweb/v1/video_generate/mget_pre_process_result",
+      "registry_patch_draft": {
+        "command": "video-preprocess-query-plan",
+        "endpoint": "/mweb/v1/video_generate/mget_pre_process_result",
+        "evidence": [
+          "preprocess-query/raw/video-preprocess-query-plan.json",
+        ],
+        "nextProbe": "Promote contract-infer required paths into a hand-tightened typed client/CLI wrapper and Vitest replay snapshot.",
+        "risk": "generation-or-mutation",
+        "status": "partial",
+      },
+      "sample_count": 1,
+    },
+    {
+      "cli_flag_suggestions": [
+        "--imageUri",
+        "--submitId",
+      ],
+      "commands": [
+        "video-preprocess-plan",
+      ],
+      "document_kinds": [
+        "raw",
+      ],
+      "effect_schema_ir": {
+        "mode": "permissive-required-paths",
+        "name": "MwebV1VideoGeneratePreProcessObservedSchema",
+        "required_paths": [
+          {
+            "path": "command",
+            "types": [
+              "string",
+            ],
+          },
+          {
+            "path": "endpoint",
+            "types": [
+              "string",
+            ],
+          },
+          {
+            "path": "live_submit",
+            "types": [
+              "boolean",
+            ],
+          },
+          {
+            "path": "method",
+            "types": [
+              "string",
+            ],
+          },
+          {
+            "path": "request",
+            "types": [
+              "object",
+            ],
+          },
+          {
+            "path": "request.input_list",
+            "types": [
+              "array",
+            ],
+          },
+          {
+            "path": "request.input_list[].image_create_avatar",
+            "types": [
+              "object",
+            ],
+          },
+          {
+            "path": "request.input_list[].scene",
+            "types": [
+              "number",
+            ],
+          },
+          {
+            "path": "request.input_list[].image_create_avatar.detection_scene",
+            "types": [
+              "string",
+            ],
+          },
+          {
+            "path": "request.input_list[].image_create_avatar.image",
+            "types": [
+              "object",
+            ],
+          },
+          {
+            "path": "request.input_list[].image_create_avatar.image.image_uri",
+            "types": [
+              "string",
+            ],
+          },
+        ],
+      },
+      "endpoint": "/mweb/v1/video_generate/pre_process",
+      "registry_patch_draft": {
+        "command": "video-preprocess-plan",
+        "endpoint": "/mweb/v1/video_generate/pre_process",
+        "evidence": [
+          "preprocess/raw/video-preprocess-plan.json",
+        ],
+        "nextProbe": "Promote contract-infer required paths into a hand-tightened typed client/CLI wrapper and Vitest replay snapshot.",
+        "risk": "generation-or-mutation",
+        "status": "partial",
+      },
+      "sample_count": 1,
+    },
+  ],
+  "file_count": 4,
+  "scaffold": {
+    "generated_files": [
+      "contract-summary.json",
+      "contract-summary.md",
+      "effect-schema-ir.json",
+      "registry-patch-draft.json",
+    ],
+    "recommended_next_steps": [
+      "Review required_paths for false positives caused by sample-specific values.",
+      "Promote the generated Effect Schema IR into a hand-tightened boundary schema for the selected command family.",
+      "Add or update a Vitest snapshot over the normalized contract object before wiring more live calls.",
+      "Patch endpoint-registry rows with evidence, command ownership, risk, and next probe from registry_patch_draft.",
+    ],
+    "vitest_snapshot_targets": [
+      "contract-infer:/mweb/v1/aigc_draft/generate",
+      "contract-infer:/mweb/v1/video_generate/mget_pre_process_result",
+      "contract-infer:/mweb/v1/video_generate/pre_process",
+    ],
+  },
+}
+`;
+
 exports[`Jimeng contract inference snapshots > snapshots normalized contract-infer output from a proof bundle 1`] = `
 {
   "artifact_count": 2,

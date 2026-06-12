@@ -1,0 +1,12 @@
+{
+  "command": "video-preprocess-query-plan",
+  "endpoint": "/mweb/v1/video_generate/mget_pre_process_result",
+  "method": "POST",
+  "request": {
+    "submit_id_list": [
+      "avatar-detect-1",
+      "voice-match-1"
+    ]
+  },
+  "live_submit": false
+}

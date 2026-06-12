@@ -20,6 +20,8 @@ Jimeng packet-factory update, 2026-06-12: `buildJimengPacketPlan` now has a sche
 
 Jimeng persona-voice update, 2026-06-12: `contract-infer` now reads dry-run `endpoint_sequence` request plans and infers persona/voice workflow flags, so existing subject voice, voice clone submit/query/update/delete, and mix-audio proof folders can generate scaffolds without new spend or mutation. Proof note: `docs/qa/jimeng-persona-voice-contract-infer-20260612.md`; ignored outputs: `data/jimeng-lab/proof-20260612-persona-voice-contract-infer/`. Remaining persona/voice work is passive UI capture or approved live runs for provider task creation/mutation, followed by promotion of any observed response contracts into typed services.
 
+Jimeng lip-sync update, 2026-06-12: `contract-infer` now reads the existing image/avatar lip-sync, VOD lip-sync, video pre-process, and pre-process-query proof bundles, including dry-run plans with nested `plan.endpoint`. Proof note: `docs/qa/jimeng-lip-sync-human-contract-infer-20260612.md`; ignored outputs: `data/jimeng-lab/proof-20260612-lip-sync-human-contract-infer/`. Remaining lip-sync/digital-human work is passive UI capture/compare or approved live submit/poll/download for one talking-head artifact, then promotion of the observed response contract into typed services.
+
 ## Next
 
 | ID | Task | Source | Notes |

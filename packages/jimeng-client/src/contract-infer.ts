@@ -429,12 +429,17 @@ function inferCliFlagSuggestions(paths: readonly JimengContractPathSummary[]): s
   const pathText = paths.map((entry) => entry.path).join("\n")
   const candidates: readonly [RegExp, string][] = [
     [/prompt/i, "--prompt"],
+    [/ttsInfo\.text|source_text|request\.text/i, "--text"],
     [/image_uri|imageUri/i, "--imageUri"],
     [/audio_vid|audioVid|voice_clone\.audio\.vid|audio\.vid/i, "--audioVid"],
+    [/originVideo\.originVideo\.vid|origin_video.*vid/i, "--videoVid"],
+    [/originVideo\.originVideo\.uri|video_uri|videoUri/i, "--videoUri"],
     [/video_item_id|videoItemId/i, "--videoItemId"],
     [/task_id_list|taskIds/i, "--taskIds"],
     [/local_item_id|localItemId|voiceId/i, "--voice-id"],
     [/voice_clone\.name|request\.name/i, "--name"],
+    [/ttsInfo\.speed|voice_speed|speech_speed/i, "--speed"],
+    [/videoMode|plan\.mode|request\.mode/i, "--mode"],
     [/duration_ms|videoDuration/i, "--durationSec"],
     [/resolution/i, "--videoResolution"],
     [/video_aspect_ratio|(^|\.)ratio($|\.)/i, "--ratio"],
@@ -443,7 +448,7 @@ function inferCliFlagSuggestions(paths: readonly JimengContractPathSummary[]): s
     [/fps/i, "--fps"],
     [/first_frame_image|firstFrame/i, "--firstFrameUri"],
     [/end_frame_image|lastFrame/i, "--lastFrameUri"],
-    [/voice_id|tone_id|speaker/i, "--voice-id"],
+    [/voice_id|voiceId|tone_id|toneId|speaker/i, "--voice-id"],
     [/item_platform/i, "--item-platform"],
     [/submit_id|submitId/i, "--submitId"],
   ]
@@ -510,7 +515,7 @@ function extractEndpoints(value: JsonValue, relativePath: string): string[] {
     if (isEndpointPath(endpoint)) endpoints.add(endpoint)
   }
   for (const candidate of [
-    extractString(value, ["endpoint", "summary.endpoint"]),
+    extractString(value, ["endpoint", "summary.endpoint", "plan.endpoint"]),
     extractUrlPath(value, "plan.submit_url"),
     extractUrlPath(value, "plan.poll_url"),
   ]) {
