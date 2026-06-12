@@ -48,10 +48,10 @@ exports[`Jimeng packet plan snapshots > snapshots the next gen-parity packet pla
       "status": "partial",
     },
     {
-      "command": "generate-audit-plan/request-plan-compare",
+      "command": "generate-audit-plan/request-plan-compare/executeJimengGenerateAudit",
       "endpoint": "/mweb/v1/execute_generate_audit",
-      "nextProbe": "Passively capture the frontend material-audit request around a generation submit, then compare it with generate-audit-plan using request-plan-compare before any live replay.",
-      "status": "dry_run_only",
+      "nextProbe": "Passively capture the frontend material-audit request around a generation submit, compare it with generate-audit-plan using request-plan-compare, then record/replay executeJimengGenerateAudit with the captured provider response before any approved live replay.",
+      "status": "partial",
     },
     {
       "command": null,
@@ -163,9 +163,9 @@ After the run, feed saved JSON/artifacts into contract-infer and replay tests be
 - 1.1 \`G1 /mweb/v1/aigc_draft/generate\` partial command=text2image-plan/text2image-compare/text2video-plan/omni-video-plan/text2video-compare/omni-video-compare/generation-contract/text2video/image2video/frames2video/lip-sync
   - Unified generation submit; direct image/video, first/end-frame, and Seedance omni-reference request builders are dry-run covered with semantic compare gates; saved live text/image-to-video proofs are now schema-validated by generation-contract; live lip-sync/end-frame/omni-reference still require capture compare or approval-gated submit.
   - Next: Repeat the matrix/infer/promote loop for lip-sync, end-frame, multi-frame, or omni-reference generation, then run the matching compare gate before any approval-gated live submit.
-- 1.2 \`G1 /mweb/v1/execute_generate_audit\` dry_run_only command=generate-audit-plan/request-plan-compare
-  - Generation pre-audit material transform is modeled for image/video/audio/subject dry-run plans; live replay still needs passive UI capture compare.
-  - Next: Passively capture the frontend material-audit request around a generation submit, then compare it with generate-audit-plan using request-plan-compare before any live replay.
+- 1.1 \`G1 /mweb/v1/execute_generate_audit\` partial command=generate-audit-plan/request-plan-compare/executeJimengGenerateAudit
+  - Generation pre-audit material transform is modeled and typed client replay is covered by cassettes; live replay still needs passive UI capture compare for the full frontend submit context.
+  - Next: Passively capture the frontend material-audit request around a generation submit, compare it with generate-audit-plan using request-plan-compare, then record/replay executeJimengGenerateAudit with the captured provider response before any approved live replay.
 - 1.4 \`G2 /mweb/v1/mpack_image\` blocked
   - Packs image material through dreamina-material-data-service; capture the exact caller input shape before promotion.
   - Next: Passively capture an image-pack/material-data-service UI flow, then replay only with cassette redaction after the exact caller input shape is known.

@@ -24,6 +24,8 @@ Jimeng lip-sync update, 2026-06-12: `contract-infer` now reads the existing imag
 
 Jimeng lip-sync client update, 2026-06-12: `submitJimengVideoPreprocess` and `fetchJimengVideoPreprocessResults` now provide typed service helpers and shared transport/cassette replay tests for `/mweb/v1/video_generate/pre_process` and `/mweb/v1/video_generate/mget_pre_process_result`. Proof note: `docs/qa/jimeng-lip-sync-human-preprocess-client-20260612.md`. Live provider calls remain approval-gated because pre-process creates provider task state and result lookup needs task ids from a captured or approved flow.
 
+Jimeng generate-audit client update, 2026-06-12: `executeJimengGenerateAudit` now promotes `/mweb/v1/execute_generate_audit` from dry-run-only planning to a typed service helper with upstream-ret rejection, permissive material-result summaries, and shared transport/cassette replay tests. Proof note: `docs/qa/jimeng-generate-audit-client-20260612.md`. Live replay remains gated on passive frontend material-audit capture plus explicit approval because the endpoint is tied to generation submit context.
+
 ## Next
 
 | ID | Task | Source | Notes |

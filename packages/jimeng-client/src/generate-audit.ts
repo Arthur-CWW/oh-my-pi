@@ -1,6 +1,10 @@
+import { createHash } from "node:crypto"
 import { Schema } from "effect"
+import { type JimengSessionBundle } from "./capture"
+import { assertNoRiskError, JimengClient, type JimengFetch } from "./client"
 import { jimengError } from "./errors"
 import { type JsonObject, type JsonValue } from "./reference-image"
+import { parseJimengApiEnvelope, parseJsonText } from "./schema"
 
 export const JIMENG_GENERATE_AUDIT_ENDPOINT = "/mweb/v1/execute_generate_audit" as const
 export const JIMENG_GENERATE_AUDIT_QUERY = "aid=513695&web_version=7.5.0&da_version=3.3.17&aigc_features=app_lip_sync" as const
@@ -41,6 +45,29 @@ export interface JimengGenerateAuditPlan {
   request: JsonObject
   materialList: JsonObject[]
   materialCounts: Record<"image" | "video" | "audio" | "subject", number>
+}
+
+export interface JimengGenerateAuditMaterialSummary {
+  materialType: number | null
+  uri: string | null
+  vid: string | null
+  itemId: string | number | null
+  subjectDataId: string | number | null
+  status: string | number | boolean | null
+  auditStatus: string | number | boolean | null
+  rejectReason: string | null
+  keys: string[]
+}
+
+export interface JimengGenerateAuditResult {
+  endpoint: typeof JIMENG_GENERATE_AUDIT_ENDPOINT
+  httpStatus: number
+  ret: string | number | null
+  errmsg: string | null
+  responseTextSha256: string
+  request: JsonObject
+  materialResults: JimengGenerateAuditMaterialSummary[]
+  body: JsonValue
 }
 
 const NonEmptyString = Schema.String.check(Schema.isMinLength(1))
@@ -122,6 +149,33 @@ export function buildJimengGenerateAuditPlan(input: JimengGenerateAuditPlanInput
   }
 }
 
+export async function executeJimengGenerateAudit(input: {
+  client?: JimengClient
+  fetch?: JimengFetch
+  session: JimengSessionBundle
+  audit: JimengGenerateAuditPlanInput
+}): Promise<JimengGenerateAuditResult> {
+  const plan = buildJimengGenerateAuditPlan(input.audit)
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
+  const response = await client.requestText(`https://jimeng.jianying.com${JIMENG_GENERATE_AUDIT_ENDPOINT}?${JIMENG_GENERATE_AUDIT_QUERY}`, {
+    method: "POST",
+    headers: buildGenerateAuditHeaders(input.session),
+    body: JSON.stringify(plan.request),
+  })
+  const body = parseGenerateAuditResponse(response.text, "generate audit")
+
+  return {
+    endpoint: JIMENG_GENERATE_AUDIT_ENDPOINT,
+    httpStatus: response.status,
+    ret: retValue(body),
+    errmsg: errmsgValue(body),
+    responseTextSha256: sha256(response.text),
+    request: plan.request,
+    materialResults: summarizeAuditMaterialRows(body),
+    body,
+  }
+}
+
 export function summarizeJimengGenerateAuditPlan(plan: JimengGenerateAuditPlan): JsonObject {
   return {
     endpoint: plan.endpoint,
@@ -133,6 +187,19 @@ export function summarizeJimengGenerateAuditPlan(plan: JimengGenerateAuditPlan):
     material_types: plan.materialList.map((material) => material.material_type),
     live_submit: false,
     next_compare_command: "jimeng-browser-proxy request-plan-compare --plan <dry-run-plan.json> --rawNetwork <capture>/raw-network.jsonl",
+  }
+}
+
+export function summarizeJimengGenerateAuditResult(result: JimengGenerateAuditResult): JsonObject {
+  return {
+    endpoint: result.endpoint,
+    http_status: result.httpStatus,
+    ret: result.ret,
+    errmsg: result.errmsg,
+    response_text_sha256: result.responseTextSha256,
+    request: result.request,
+    material_result_count: result.materialResults.length,
+    material_results: result.materialResults.map(summarizeAuditMaterial),
   }
 }
 
@@ -151,6 +218,130 @@ export function validateJimengGenerateAuditRequest(request: JsonObject): void {
       throw invalidMaterial("Subject audit material requires subject_data_id.")
     }
   }
+}
+
+function parseGenerateAuditResponse(text: string, operation: string): JsonValue {
+  const body = parseJsonText(text, operation)
+  assertNoRiskError(body, text)
+  const envelope = parseJimengApiEnvelope(body, operation)
+  if (envelope.ret !== undefined && String(envelope.ret) !== "0") {
+    throw jimengError({
+      category: "upstream",
+      code: "JIMENG_GENERATE_AUDIT_UPSTREAM_ERROR",
+      message: `${operation} returned ret=${String(envelope.ret)} errmsg=${envelope.errmsg ?? "unknown"}.`,
+      retryable: false,
+      details: { ret: envelope.ret, errmsg: envelope.errmsg ?? null },
+    })
+  }
+  return body
+}
+
+function summarizeAuditMaterialRows(body: JsonValue): JimengGenerateAuditMaterialSummary[] {
+  const data = isJsonObject(body) ? body.data : undefined
+  const rows: JimengGenerateAuditMaterialSummary[] = []
+  collectAuditMaterialRows(data, rows)
+  return rows.slice(0, 40)
+}
+
+function collectAuditMaterialRows(value: JsonValue | undefined, rows: JimengGenerateAuditMaterialSummary[]): void {
+  if (value === undefined || rows.length >= 40) return
+  if (Array.isArray(value)) {
+    for (const entry of value) collectAuditMaterialRows(entry, rows)
+    return
+  }
+  if (!isJsonObject(value)) return
+
+  const uri = stringValue(value.uri) ?? stringValue(value.image_uri) ?? stringValue(value.imageUri)
+  const vid = stringValue(value.vid) ?? stringValue(value.video_id) ?? stringValue(value.videoId)
+  const itemId = stringValue(value.item_id) ?? numberValue(value.item_id) ?? stringValue(value.itemId) ?? numberValue(value.itemId)
+  const subjectDataId = stringValue(value.subject_data_id)
+    ?? numberValue(value.subject_data_id)
+    ?? stringValue(value.subjectDataId)
+    ?? numberValue(value.subjectDataId)
+  const materialType = numberValue(value.material_type)
+    ?? numberValue(value.materialType)
+    ?? (subjectDataId !== null ? JimengGenerateAuditMaterialType.Subject : null)
+  const status = stringValue(value.status) ?? numberValue(value.status) ?? booleanValue(value.status)
+  const auditStatus = stringValue(value.audit_status)
+    ?? numberValue(value.audit_status)
+    ?? booleanValue(value.audit_status)
+    ?? stringValue(value.auditStatus)
+    ?? numberValue(value.auditStatus)
+    ?? booleanValue(value.auditStatus)
+  const rejectReason = stringValue(value.reject_reason) ?? stringValue(value.rejectReason) ?? stringValue(value.reason)
+
+  if (materialType !== null || uri || vid || itemId !== null || subjectDataId !== null || status !== null || auditStatus !== null) {
+    rows.push({
+      materialType,
+      uri,
+      vid,
+      itemId,
+      subjectDataId,
+      status,
+      auditStatus,
+      rejectReason,
+      keys: Object.keys(value).sort(),
+    })
+  }
+
+  for (const entry of Object.values(value)) collectAuditMaterialRows(entry, rows)
+}
+
+function summarizeAuditMaterial(material: JimengGenerateAuditMaterialSummary): JsonObject {
+  return {
+    material_type: material.materialType,
+    uri_present: material.uri !== null,
+    vid: material.vid,
+    item_id: material.itemId,
+    subject_data_id: material.subjectDataId,
+    status: material.status,
+    audit_status: material.auditStatus,
+    reject_reason: material.rejectReason,
+    keys: material.keys,
+  }
+}
+
+function buildGenerateAuditHeaders(session: JimengSessionBundle): Record<string, string> {
+  return {
+    "content-type": "application/json",
+    accept: "application/json, text/plain, */*",
+    "user-agent": session.userAgent ?? "Mozilla/5.0",
+    origin: session.origin ?? "https://jimeng.jianying.com",
+    referer: session.referer ?? "https://jimeng.jianying.com/ai-tool/generate/",
+    cookie: session.cookie,
+    lan: "zh-Hans",
+    pf: "7",
+    loc: "cn",
+    appid: "513695",
+  }
+}
+
+function retValue(body: JsonValue): string | number | null {
+  return isJsonObject(body) && (typeof body.ret === "string" || typeof body.ret === "number") ? body.ret : null
+}
+
+function errmsgValue(body: JsonValue): string | null {
+  return isJsonObject(body) && typeof body.errmsg === "string" ? body.errmsg : null
+}
+
+function stringValue(value: JsonValue | undefined): string | null {
+  return typeof value === "string" && value.trim() ? value : null
+}
+
+function numberValue(value: JsonValue | undefined): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null
+}
+
+function booleanValue(value: JsonValue | undefined): boolean | null {
+  return typeof value === "boolean" ? value : null
+}
+
+function isJsonObject(value: JsonValue): value is JsonObject {
+  return !!value && typeof value === "object" && !Array.isArray(value)
+}
+
+function sha256(value: string): string {
+  return createHash("sha256").update(value).digest("hex")
 }
 
 function normalizeGenerateAuditMaterial(input: JimengGenerateAuditMaterialInput): JsonObject {

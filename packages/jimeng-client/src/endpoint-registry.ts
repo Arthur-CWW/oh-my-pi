@@ -539,10 +539,11 @@ const KEEP_GAP_AUDIT_BY_ENDPOINT: Record<string, JimengDiscoveryEndpointAudit> =
   "/mweb/v1/execute_generate_audit": {
     evidence: [
       "docs/qa/jimeng-generate-audit-plan-20260611.md",
+      "docs/qa/jimeng-generate-audit-client-20260612.md",
       "data/jimeng-lab/proof-20260611-static-locate-media-helper-blockers/",
       "data/jimeng-lab/proof-20260611-static-inventory-media-helper-blockers/",
     ],
-    nextProbe: "Passively capture the frontend material-audit request around a generation submit, then compare it with generate-audit-plan using request-plan-compare before any live replay.",
+    nextProbe: "Passively capture the frontend material-audit request around a generation submit, compare it with generate-audit-plan using request-plan-compare, then record/replay executeJimengGenerateAudit with the captured provider response before any approved live replay.",
   },
   "/mweb/v1/mpack_image": {
     evidence: [
@@ -711,7 +712,7 @@ const KEEP_GAP_AUDIT_BY_ENDPOINT: Record<string, JimengDiscoveryEndpointAudit> =
 
 const KNOWN_ENDPOINTS: JimengDiscoveryKnownEndpoint[] = [
   known("/mweb/v1/aigc_draft/generate", "partial", "text2image-plan/text2image-compare/text2video-plan/omni-video-plan/text2video-compare/omni-video-compare/generation-contract/text2video/image2video/frames2video/lip-sync", "Unified generation submit; direct image/video, first/end-frame, and Seedance omni-reference request builders are dry-run covered with semantic compare gates; saved live text/image-to-video proofs are now schema-validated by generation-contract; live lip-sync/end-frame/omni-reference still require capture compare or approval-gated submit."),
-  known("/mweb/v1/execute_generate_audit", "dry_run_only", "generate-audit-plan/request-plan-compare", "Generation pre-audit material transform is modeled for image/video/audio/subject dry-run plans; live replay still needs passive UI capture compare."),
+  known("/mweb/v1/execute_generate_audit", "partial", "generate-audit-plan/request-plan-compare/executeJimengGenerateAudit", "Generation pre-audit material transform is modeled and typed client replay is covered by cassettes; live replay still needs passive UI capture compare for the full frontend submit context."),
   known("/mweb/v1/get_asset_list", "implemented", "assets", "No-spend workspace asset/history listing."),
   known("/mweb/v1/get_history", "implemented", "history-list", "No-spend paginated history list; prior live probes returned a valid empty records_list, so use assets/history-records for richer known-populated lookups."),
   known("/mweb/v1/get_history_by_ids", "implemented", "history-records", "No-spend history lookup by submit/history id."),
