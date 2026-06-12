@@ -36,6 +36,8 @@ This tool should redact cookies, auth headers, signed URLs, upload credentials, 
 
 Current status: `jimeng-browser-proxy contract-infer` exists. It scans saved proof/cassette directories, groups JSON by endpoint, redacts/normalizes embedded JSON strings such as `draft_content` and `metrics_extra`, reports stable/frequent contract paths, summarizes artifacts, emits Effect Schema IR, writes registry patch drafts, and is covered by Bun tests plus Vitest snapshots.
 
+`jimeng-browser-proxy generation-contract` now validates and summarizes saved live generation proof result JSON after scaffold inference. It promotes the relied-on `/mweb/v1/aigc_draft/generate` submit/poll/artifact paths into a hand-tightened Effect Schema boundary and compact report so future paid runs can replay against fixtures instead of re-reading raw provider JSON.
+
 ## Budget And Safety
 
 - When Arthur approves account spend for exploration, default to at most half of the current remaining credits unless he gives a different cap.
@@ -80,3 +82,19 @@ bun packages/jimeng-client/src/browser-proxy-cli.ts contract-infer \
   --endpoint /mweb/v1/aigc_draft/generate \
   --outDir data/jimeng-lab/proof-20260612-live-generation-matrix/contract-infer
 ```
+
+The first hand-tightened generation proof report is saved locally under:
+
+```txt
+data/jimeng-lab/proof-20260612-live-generation-matrix/generation-contract/normalized/generation-contract/
+```
+
+It was generated with:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts generation-contract \
+  --input data/jimeng-lab/proof-20260612-live-generation-matrix \
+  --outDir data/jimeng-lab/proof-20260612-live-generation-matrix/generation-contract
+```
+
+That run validated 4 saved video generation proofs and skipped 0 candidate JSON files.

@@ -7,6 +7,11 @@
     "submit_id": "submit-redacted",
     "submit_url": "https://jimeng.jianying.com/mweb/v1/aigc_draft/generate?[REDACTED_QUERY]",
     "poll_url": "https://jimeng.jianying.com/mweb/v1/get_history_by_ids?[REDACTED_QUERY]",
+    "poll_body": {
+      "submit_ids": ["submit-redacted"]
+    },
+    "terminal_status": 50,
+    "reference_uploads": [],
     "submit_body": {
       "extend": {
         "root_model": "dreamina_ic_generate_video_model_vgfm_3.0_fast",
@@ -76,6 +81,32 @@
             "queue_idx": 1,
             "queue_status": 1
           }
+        }
+      }
+    }
+  },
+  "responseBody": {
+    "ret": "0",
+    "errmsg": "success",
+    "data": {
+      "aigc_data": {
+        "generate_type": 10,
+        "history_record_id": "history-redacted",
+        "task": {
+          "task_id": "history-redacted",
+          "submit_id": "submit-redacted",
+          "status": 20,
+          "resp_ret": {
+            "ret": "0"
+          }
+        },
+        "mode": "workbench",
+        "status": 20,
+        "submit_id": "submit-redacted",
+        "metrics_extra": "{\"promptSource\":\"custom\",\"functionMode\":\"first_last_frames\",\"sceneOptions\":\"[{\\\"type\\\":\\\"video\\\",\\\"scene\\\":\\\"BasicVideoGenerateButton\\\",\\\"resolution\\\":\\\"720p\\\",\\\"modelReqKey\\\":\\\"dreamina_ic_generate_video_model_vgfm_3.0_fast\\\",\\\"videoDuration\\\":3}]\"}",
+        "model_info": {
+          "model_req_key": "dreamina_ic_generate_video_model_vgfm_3.0_fast",
+          "model_name": "即梦 Seedance 1.0 Fast"
         }
       }
     }

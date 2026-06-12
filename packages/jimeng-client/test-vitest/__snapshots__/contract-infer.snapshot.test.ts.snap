@@ -38,6 +38,12 @@ exports[`Jimeng contract inference snapshots > snapshots normalized contract-inf
             ],
           },
           {
+            "path": "responseBody",
+            "types": [
+              "object",
+            ],
+          },
+          {
             "path": "submit",
             "types": [
               "object",
@@ -62,6 +68,12 @@ exports[`Jimeng contract inference snapshots > snapshots normalized contract-inf
             ],
           },
           {
+            "path": "plan.poll_body",
+            "types": [
+              "object",
+            ],
+          },
+          {
             "path": "plan.poll_kind",
             "types": [
               "string",
@@ -74,27 +86,15 @@ exports[`Jimeng contract inference snapshots > snapshots normalized contract-inf
             ],
           },
           {
+            "path": "plan.reference_uploads",
+            "types": [
+              "array",
+            ],
+          },
+          {
             "path": "plan.submit_body",
             "types": [
               "object",
-            ],
-          },
-          {
-            "path": "plan.submit_kind",
-            "types": [
-              "string",
-            ],
-          },
-          {
-            "path": "plan.submit_url",
-            "types": [
-              "string",
-            ],
-          },
-          {
-            "path": "pollTrace[].status",
-            "types": [
-              "number",
             ],
           },
         ],
@@ -152,6 +152,12 @@ exports[`Jimeng contract inference snapshots > snapshots normalized contract-inf
             ],
           },
           {
+            "path": "responseBody",
+            "types": [
+              "object",
+            ],
+          },
+          {
             "path": "submit",
             "types": [
               "object",
@@ -176,6 +182,12 @@ exports[`Jimeng contract inference snapshots > snapshots normalized contract-inf
             ],
           },
           {
+            "path": "plan.poll_body",
+            "types": [
+              "object",
+            ],
+          },
+          {
             "path": "plan.poll_kind",
             "types": [
               "string",
@@ -188,27 +200,15 @@ exports[`Jimeng contract inference snapshots > snapshots normalized contract-inf
             ],
           },
           {
+            "path": "plan.reference_uploads",
+            "types": [
+              "array",
+            ],
+          },
+          {
             "path": "plan.submit_body",
             "types": [
               "object",
-            ],
-          },
-          {
-            "path": "plan.submit_kind",
-            "types": [
-              "string",
-            ],
-          },
-          {
-            "path": "plan.submit_url",
-            "types": [
-              "string",
-            ],
-          },
-          {
-            "path": "pollTrace[].status",
-            "types": [
-              "number",
             ],
           },
         ],

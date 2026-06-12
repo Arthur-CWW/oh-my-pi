@@ -531,8 +531,10 @@ const KEEP_GAP_AUDIT_BY_ENDPOINT: Record<string, JimengDiscoveryEndpointAudit> =
       "data/jimeng-lab/text2video-plan-current/",
       "data/jimeng-lab/proof-20260610-subscription-api-live-check/",
       "data/jimeng-lab/proof-20260611-omni-video-plan/",
+      "data/jimeng-lab/proof-20260612-live-generation-matrix/contract-infer/normalized/contract/",
+      "data/jimeng-lab/proof-20260612-live-generation-matrix/generation-contract/normalized/generation-contract/",
     ],
-    nextProbe: "Passively capture a current frontend submit for lip-sync, end-frame, multi-frame, or omni-reference generation, then run the matching text2video-compare, omni-video-compare, or lip-sync-compare before any approval-gated live submit.",
+    nextProbe: "Repeat the matrix/infer/promote loop for lip-sync, end-frame, multi-frame, or omni-reference generation, then run the matching compare gate before any approval-gated live submit.",
   },
   "/mweb/v1/execute_generate_audit": {
     evidence: [
@@ -700,7 +702,7 @@ const KEEP_GAP_AUDIT_BY_ENDPOINT: Record<string, JimengDiscoveryEndpointAudit> =
 }
 
 const KNOWN_ENDPOINTS: JimengDiscoveryKnownEndpoint[] = [
-  known("/mweb/v1/aigc_draft/generate", "partial", "text2image-plan/text2image-compare/text2video-plan/omni-video-plan/text2video-compare/omni-video-compare/text2video/image2video/frames2video/lip-sync", "Unified generation submit; direct image/video, first/end-frame, and Seedance omni-reference request builders are dry-run covered with semantic compare gates; live lip-sync/end-frame/omni-reference still require capture compare or approval-gated submit."),
+  known("/mweb/v1/aigc_draft/generate", "partial", "text2image-plan/text2image-compare/text2video-plan/omni-video-plan/text2video-compare/omni-video-compare/generation-contract/text2video/image2video/frames2video/lip-sync", "Unified generation submit; direct image/video, first/end-frame, and Seedance omni-reference request builders are dry-run covered with semantic compare gates; saved live text/image-to-video proofs are now schema-validated by generation-contract; live lip-sync/end-frame/omni-reference still require capture compare or approval-gated submit."),
   known("/mweb/v1/execute_generate_audit", "dry_run_only", "generate-audit-plan/request-plan-compare", "Generation pre-audit material transform is modeled for image/video/audio/subject dry-run plans; live replay still needs passive UI capture compare."),
   known("/mweb/v1/get_asset_list", "implemented", "assets", "No-spend workspace asset/history listing."),
   known("/mweb/v1/get_history", "implemented", "history-list", "No-spend paginated history list; prior live probes returned a valid empty records_list, so use assets/history-records for richer known-populated lookups."),

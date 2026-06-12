@@ -6,7 +6,7 @@ exports[`Jimeng endpoint registry snapshots > snapshots keep-family gap summary 
     {
       "gaps": [
         {
-          "command": "text2image-plan/text2image-compare/text2video-plan/omni-video-plan/text2video-compare/omni-video-compare/text2video/image2video/frames2video/lip-sync",
+          "command": "text2image-plan/text2image-compare/text2video-plan/omni-video-plan/text2video-compare/omni-video-compare/generation-contract/text2video/image2video/frames2video/lip-sync",
           "endpoint": "/mweb/v1/aigc_draft/generate",
           "evidence": [
             "docs/qa/jimeng-direct-compare-gates-20260611.md",
@@ -15,9 +15,11 @@ exports[`Jimeng endpoint registry snapshots > snapshots keep-family gap summary 
             "data/jimeng-lab/text2video-plan-current/",
             "data/jimeng-lab/proof-20260610-subscription-api-live-check/",
             "data/jimeng-lab/proof-20260611-omni-video-plan/",
+            "data/jimeng-lab/proof-20260612-live-generation-matrix/contract-infer/normalized/contract/",
+            "data/jimeng-lab/proof-20260612-live-generation-matrix/generation-contract/normalized/generation-contract/",
           ],
-          "nextProbe": "Passively capture a current frontend submit for lip-sync, end-frame, multi-frame, or omni-reference generation, then run the matching text2video-compare, omni-video-compare, or lip-sync-compare before any approval-gated live submit.",
-          "note": "Unified generation submit; direct image/video, first/end-frame, and Seedance omni-reference request builders are dry-run covered with semantic compare gates; live lip-sync/end-frame/omni-reference still require capture compare or approval-gated submit.",
+          "nextProbe": "Repeat the matrix/infer/promote loop for lip-sync, end-frame, multi-frame, or omni-reference generation, then run the matching compare gate before any approval-gated live submit.",
+          "note": "Unified generation submit; direct image/video, first/end-frame, and Seedance omni-reference request builders are dry-run covered with semantic compare gates; saved live text/image-to-video proofs are now schema-validated by generation-contract; live lip-sync/end-frame/omni-reference still require capture compare or approval-gated submit.",
           "status": "partial",
         },
         {
@@ -414,11 +416,11 @@ exports[`Jimeng endpoint registry snapshots > snapshots keep-family gap summary 
   },
   "valueRankedGaps": [
     {
-      "command": "text2image-plan/text2image-compare/text2video-plan/omni-video-plan/text2video-compare/omni-video-compare/text2video/image2video/frames2video/lip-sync",
+      "command": "text2image-plan/text2image-compare/text2video-plan/omni-video-plan/text2video-compare/omni-video-compare/generation-contract/text2video/image2video/frames2video/lip-sync",
       "endpoint": "/mweb/v1/aigc_draft/generate",
       "familyId": "G1",
       "implementationRank": 1,
-      "nextProbe": "Passively capture a current frontend submit for lip-sync, end-frame, multi-frame, or omni-reference generation, then run the matching text2video-compare, omni-video-compare, or lip-sync-compare before any approval-gated live submit.",
+      "nextProbe": "Repeat the matrix/infer/promote loop for lip-sync, end-frame, multi-frame, or omni-reference generation, then run the matching compare gate before any approval-gated live submit.",
       "status": "partial",
       "valueRank": 1,
       "workflow": "Generation parity and artifact proof",

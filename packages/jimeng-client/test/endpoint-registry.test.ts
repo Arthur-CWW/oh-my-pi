@@ -90,7 +90,7 @@ describe("Jimeng endpoint registry", () => {
     expect(markdown).toContain("## Value-Ranked Remaining Work")
     expect(markdown).toContain("1. Generation parity and artifact proof - `G1 /mweb/v1/aigc_draft/generate`")
     expect(markdown).toContain("## Not Implemented Endpoints")
-    expect(markdown).toContain("- `/mweb/v1/aigc_draft/generate` - partial command=text2image-plan/text2image-compare/text2video-plan/omni-video-plan/text2video-compare/omni-video-compare/text2video/image2video/frames2video/lip-sync")
+    expect(markdown).toContain("- `/mweb/v1/aigc_draft/generate` - partial command=text2image-plan/text2image-compare/text2video-plan/omni-video-plan/text2video-compare/omni-video-compare/generation-contract/text2video/image2video/frames2video/lip-sync")
     expect(markdown).toContain("Evidence:")
     expect(markdown).toContain("Next probe:")
   })

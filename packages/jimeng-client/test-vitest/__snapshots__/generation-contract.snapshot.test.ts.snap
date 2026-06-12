@@ -1,0 +1,42 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Jimeng generation contract snapshots > snapshots normalized generation proof summaries 1`] = `
+[
+  {
+    "artifact_count": 1,
+    "artifact_kinds": [
+      "video",
+    ],
+    "command": "text2video",
+    "duration_ms": 3000,
+    "final_status": 20,
+    "fps": 24,
+    "function_mode": "first_last_frames",
+    "generate_type": 10,
+    "has_end_frame": false,
+    "has_first_frame": false,
+    "latest_poll_status": 50,
+    "model_req_key": "dreamina_ic_generate_video_model_vgfm_3.0_fast",
+    "op": "video",
+    "poll_kind": "history_by_submit_id",
+    "ratio": "9:16",
+    "resolution": "720p",
+    "ret": "0",
+    "submit_kind": "workbench_json",
+    "terminal_status": 50,
+  },
+]
+`;
+
+exports[`Jimeng generation contract snapshots > snapshots normalized generation proof summaries 2`] = `
+"# Jimeng Generation Contract Report
+
+Input: \`/Users/arthur/projects/pi-web-access/packages/jimeng-client/test/fixtures/contract-infer/live-matrix-mini\`
+Proofs: 1
+Skipped JSON files: 0
+
+| Command | Source | Model | Function | Status | Artifacts | Prompt |
+|---|---|---|---|---:|---:|---|
+| text2video | test/fixtures/contract-infer/live-matrix-mini/text2video-kbeauty-hook/normalized/text2video-result.json | dreamina_ic_generate_video_model_vgfm_3.0_fast | first_last_frames | 20 | 1 | 韩系美妆UGC创作者手机自拍，前三秒直接讲痛点。 |
+"
+`;
