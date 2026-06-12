@@ -1,3 +1,7 @@
+import { spawnSync } from "node:child_process"
+import { existsSync, mkdtempSync, readFileSync } from "node:fs"
+import path from "node:path"
+import { tmpdir } from "node:os"
 import { describe, expect, test } from "bun:test"
 import {
   parseJimengBrowserProxyFlags,
@@ -65,5 +69,34 @@ describe("jimeng-browser-proxy normalized proof redaction", () => {
         },
       ],
     })
+  })
+
+  test("packet-plan command writes a sessionless manifest bundle", () => {
+    const outDir = mkdtempSync(path.join(tmpdir(), "jimeng-packet-cli-"))
+    const result = spawnSync(process.execPath, [
+      "src/browser-proxy-cli.ts",
+      "packet-plan",
+      "--packet",
+      "persona-voice",
+      "--outDir",
+      outDir,
+    ], {
+      cwd: path.resolve(import.meta.dir, ".."),
+      encoding: "utf8",
+    })
+
+    expect(result.status).toBe(0)
+    expect(result.stdout).toContain("packet-plan saved packet=persona-voice")
+
+    const manifestJson = path.join(outDir, "normalized", "packet-plan", "packet-manifest.json")
+    const manifestMarkdown = path.join(outDir, "normalized", "packet-plan", "packet-manifest.md")
+    const approvalPrompt = path.join(outDir, "normalized", "packet-plan", "approval-prompt.txt")
+    const rawInputs = path.join(outDir, "raw", "packet-plan-inputs.json")
+
+    expect(existsSync(manifestJson)).toBe(true)
+    expect(existsSync(manifestMarkdown)).toBe(true)
+    expect(existsSync(approvalPrompt)).toBe(true)
+    expect(existsSync(rawInputs)).toBe(true)
+    expect(readFileSync(manifestMarkdown, "utf8")).toContain("# Jimeng Packet Plan: persona-voice")
   })
 })

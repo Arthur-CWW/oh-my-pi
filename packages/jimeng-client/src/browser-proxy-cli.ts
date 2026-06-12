@@ -70,6 +70,11 @@ import {
   writeJimengContractInferenceOutputs,
 } from "./contract-infer"
 import {
+  buildJimengPacketPlan,
+  type JimengPacketId,
+  writeJimengPacketPlanOutputs,
+} from "./packet-plan"
+import {
   buildJimengDiscoveryWorklist,
   readJimengCaptureAnalysisFile,
   readJimengEndpointProbeCandidateFile,
@@ -381,6 +386,7 @@ Commands:
   discovery-worklist Merge capture analysis/static hints into prioritized next API work
   static-locate Locate endpoint request builders in local source/bundle roots
   static-inventory Inventory frontend API endpoints from local source/bundle roots
+  packet-plan   Write the next value-ranked packet manifest and approval prompt
   contract-infer Infer schema/test/registry scaffolds from saved proof JSON/artifacts
   generation-contract Validate/summarize saved live generation proof result JSON
   triage-coverage Summarize keep/maybe/skip endpoint registry coverage and remaining gaps
@@ -468,6 +474,7 @@ Options:
   --probeCandidates <file[,file]> Raw endpoint-probe candidate JSON for discovery-worklist
   --staticRoot <dir[,dir]>      Optional source/bundle roots to search for exact endpoint string hints
   --input <file|dir>             Proof/cassette directory or JSON file for contract-infer/generation-contract
+  --packet <id>                   Packet id for packet-plan (default: next value-ranked gap)
   --symbol <name[,name]>         Static-locate symbols/request-builder names to search beside endpoints
   --staticQuery <term[,term]>     Static-locate arbitrary source/bundle search terms
   --contextLines <n>            Snippet context lines for static-locate (default: 3)
@@ -955,6 +962,7 @@ interface CliArgs {
     | "discovery-worklist"
     | "static-locate"
     | "static-inventory"
+    | "packet-plan"
     | "contract-infer"
     | "generation-contract"
     | "triage-coverage"
@@ -1037,6 +1045,7 @@ interface CliArgs {
   rawNetwork?: string
   captureDir?: string
   input?: string
+  packetId?: JimengPacketId
   analysisFiles?: string[]
   probeCandidateFiles?: string[]
   staticRoots?: string[]
@@ -1326,6 +1335,23 @@ async function main(argv: string[]): Promise<void> {
       output_files: files,
     })
     console.log(`[jimeng-browser-proxy] contract-infer saved endpoints=${inference.endpoints.length} documents=${inference.file_count} artifacts=${inference.artifact_count}`)
+    return
+  }
+
+  if (args.command === "packet-plan") {
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const outDir = path.join(dirs.normalizedDir, "packet-plan")
+    const plan = buildJimengPacketPlan({
+      packetId: args.packetId,
+      artifactRoot: path.join(args.outDir, "packet-artifacts"),
+    })
+    const files = writeJimengPacketPlanOutputs(plan, outDir)
+    writeJson(path.join(dirs.rawDir, "packet-plan-inputs.json"), {
+      command: args.command,
+      packet_id: args.packetId ?? null,
+      output_files: files,
+    })
+    console.log(`[jimeng-browser-proxy] packet-plan saved packet=${plan.packetId} approval=${plan.approvalRequired ? "required" : "not-required"} examples=${plan.examples.length}`)
     return
   }
 
@@ -6005,6 +6031,7 @@ function parseArgs(argv: string[]): CliArgs {
     && command !== "discovery-worklist"
     && command !== "static-locate"
     && command !== "static-inventory"
+    && command !== "packet-plan"
     && command !== "contract-infer"
     && command !== "generation-contract"
     && command !== "triage-coverage"
@@ -6238,6 +6265,7 @@ function parseArgs(argv: string[]): CliArgs {
     rawNetwork: flags.rawNetwork ?? flags["raw-network"],
     captureDir: flags.captureDir ?? flags["capture-dir"],
     input: flags.input,
+    packetId: parseJimengPacketId(flags.packet),
     analysisFiles: parseCsvFlag(flags.analysis),
     probeCandidateFiles: parseCsvFlag(flags.probeCandidates ?? flags["probe-candidates"]),
     staticRoots: parseCsvFlag(flags.staticRoot ?? flags["static-root"]),
@@ -6432,6 +6460,21 @@ function parseCsvFlag(value: string | undefined): string[] | undefined {
   if (value === undefined) return undefined
   const items = value.split(",").map((item) => item.trim()).filter(Boolean)
   return items.length > 0 ? items : undefined
+}
+
+function parseJimengPacketId(value: string | undefined): JimengPacketId | undefined {
+  if (value === undefined) return undefined
+  if (
+    value === "gen-parity"
+    || value === "persona-voice"
+    || value === "lip-sync-human"
+    || value === "reference-controls"
+    || value === "template-mining"
+    || value === "supporting-reads"
+  ) {
+    return value
+  }
+  throw new Error("--packet must be gen-parity, persona-voice, lip-sync-human, reference-controls, template-mining, or supporting-reads")
 }
 
 function parseJimengVideoPreprocessMode(value: string | undefined): JimengVideoPreprocessMode | undefined {

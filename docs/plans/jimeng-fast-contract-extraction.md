@@ -63,7 +63,7 @@ handoff: exact next command if not complete
 
 This manifest is the cross-session coordination point. Keep raw JSON, media, signed URLs, and cassettes under ignored `data/**`; commit only redacted summaries, registry status, snapshots, and short QA notes.
 
-Current implementation: `packages/jimeng-client/src/packet-plan.ts` builds value-ranked packet plans and writes schema-validated manifest bundles with `writeJimengPacketPlanOutputs`. A manifest bundle contains `packet-manifest.json`, `packet-manifest.md`, and `approval-prompt.txt` when approval is required. Use this writer before making packet code changes so future sessions can resume from the same examples, artifact root, infer command, promotion files, and acceptance commands.
+Current implementation: `packages/jimeng-client/src/packet-plan.ts` builds value-ranked packet plans and writes schema-validated manifest bundles with `writeJimengPacketPlanOutputs`. A manifest bundle contains `packet-manifest.json`, `packet-manifest.md`, and `approval-prompt.txt` when approval is required. Use `jimeng-browser-proxy packet-plan --packet <id> --outDir data/jimeng-lab/<packet-run>` before making packet code changes so future sessions can resume from the same examples, artifact root, infer command, promotion files, and acceptance commands.
 
 ## Scaffold-Then-Promote
 
