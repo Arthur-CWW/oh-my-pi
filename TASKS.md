@@ -22,6 +22,8 @@ Jimeng persona-voice update, 2026-06-12: `contract-infer` now reads dry-run `end
 
 Jimeng lip-sync update, 2026-06-12: `contract-infer` now reads the existing image/avatar lip-sync, VOD lip-sync, video pre-process, and pre-process-query proof bundles, including dry-run plans with nested `plan.endpoint`. Proof note: `docs/qa/jimeng-lip-sync-human-contract-infer-20260612.md`; ignored outputs: `data/jimeng-lab/proof-20260612-lip-sync-human-contract-infer/`. Remaining lip-sync/digital-human work is passive UI capture/compare or approved live submit/poll/download for one talking-head artifact, then promotion of the observed response contract into typed services.
 
+Jimeng lip-sync client update, 2026-06-12: `submitJimengVideoPreprocess` and `fetchJimengVideoPreprocessResults` now provide typed service helpers and shared transport/cassette replay tests for `/mweb/v1/video_generate/pre_process` and `/mweb/v1/video_generate/mget_pre_process_result`. Proof note: `docs/qa/jimeng-lip-sync-human-preprocess-client-20260612.md`. Live provider calls remain approval-gated because pre-process creates provider task state and result lookup needs task ids from a captured or approved flow.
+
 ## Next
 
 | ID | Task | Source | Notes |

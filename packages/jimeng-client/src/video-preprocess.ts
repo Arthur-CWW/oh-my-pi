@@ -1,6 +1,10 @@
+import { createHash } from "node:crypto"
 import { Schema } from "effect"
+import { type JimengSessionBundle } from "./capture"
+import { assertNoRiskError, JimengClient, type JimengFetch } from "./client"
 import { jimengError } from "./errors"
 import { type JsonObject, type JsonValue } from "./reference-image"
+import { parseJimengApiEnvelope, parseJsonText } from "./schema"
 
 export const JIMENG_VIDEO_PREPROCESS_ENDPOINT = "/mweb/v1/video_generate/pre_process" as const
 export const JIMENG_VIDEO_PREPROCESS_RESULT_ENDPOINT = "/mweb/v1/video_generate/mget_pre_process_result" as const
@@ -53,6 +57,38 @@ export interface JimengVideoPreprocessQueryPlan {
   submitIds: string[]
 }
 
+export interface JimengVideoPreprocessTaskSummary {
+  submitId: string | null
+  scene: number | null
+  status: string | number | null
+  errmsg: string | null
+  keys: string[]
+}
+
+export interface JimengVideoPreprocessSubmitResult {
+  endpoint: typeof JIMENG_VIDEO_PREPROCESS_ENDPOINT
+  httpStatus: number
+  ret: string | number | null
+  errmsg: string | null
+  responseTextSha256: string
+  request: JsonObject
+  tasks: JimengVideoPreprocessTaskSummary[]
+  body: JsonValue
+}
+
+export interface JimengVideoPreprocessResultLookupResult {
+  endpoint: typeof JIMENG_VIDEO_PREPROCESS_RESULT_ENDPOINT
+  httpStatus: number
+  ret: string | number | null
+  errmsg: string | null
+  responseTextSha256: string
+  request: JsonObject
+  tasks: JimengVideoPreprocessTaskSummary[]
+  body: JsonValue
+}
+
+const DEFAULT_QUERY = "aid=513695&device_platform=web&region=cn&da_version=3.1.3"
+
 const NonEmptyString = Schema.String.check(Schema.isMinLength(1))
 
 const GenericTaskSchema = Schema.Struct({
@@ -99,6 +135,60 @@ export function buildJimengVideoPreprocessQueryPlan(submitIds: string[]): Jimeng
   }
 }
 
+export async function submitJimengVideoPreprocess(input: {
+  client?: JimengClient
+  fetch?: JimengFetch
+  session: JimengSessionBundle
+  preprocess: JimengVideoPreprocessInput
+}): Promise<JimengVideoPreprocessSubmitResult> {
+  const plan = buildJimengVideoPreprocessPlan(input.preprocess)
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
+  const response = await client.requestText(`https://jimeng.jianying.com${JIMENG_VIDEO_PREPROCESS_ENDPOINT}?${DEFAULT_QUERY}`, {
+    method: "POST",
+    headers: buildVideoPreprocessHeaders(input.session),
+    body: JSON.stringify(plan.request),
+  })
+  const body = parseVideoPreprocessResponse(response.text, "video preprocess submit")
+
+  return {
+    endpoint: JIMENG_VIDEO_PREPROCESS_ENDPOINT,
+    httpStatus: response.status,
+    ret: retValue(body),
+    errmsg: errmsgValue(body),
+    responseTextSha256: sha256(response.text),
+    request: plan.request,
+    tasks: summarizeTaskLikeRows(body),
+    body,
+  }
+}
+
+export async function fetchJimengVideoPreprocessResults(input: {
+  client?: JimengClient
+  fetch?: JimengFetch
+  session: JimengSessionBundle
+  submitIds: string[]
+}): Promise<JimengVideoPreprocessResultLookupResult> {
+  const plan = buildJimengVideoPreprocessQueryPlan(input.submitIds)
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
+  const response = await client.requestText(`https://jimeng.jianying.com${JIMENG_VIDEO_PREPROCESS_RESULT_ENDPOINT}?${DEFAULT_QUERY}`, {
+    method: "POST",
+    headers: buildVideoPreprocessHeaders(input.session),
+    body: JSON.stringify(plan.request),
+  })
+  const body = parseVideoPreprocessResponse(response.text, "video preprocess result lookup")
+
+  return {
+    endpoint: JIMENG_VIDEO_PREPROCESS_RESULT_ENDPOINT,
+    httpStatus: response.status,
+    ret: retValue(body),
+    errmsg: errmsgValue(body),
+    responseTextSha256: sha256(response.text),
+    request: plan.request,
+    tasks: summarizeTaskLikeRows(body),
+    body,
+  }
+}
+
 export function parseJimengVideoPreprocessBodyJson(value: JsonValue): JsonObject {
   if (isJsonObject(value)) return { ...value }
   throw jimengError({
@@ -139,6 +229,32 @@ export function summarizeJimengVideoPreprocessQueryPlan(plan: JimengVideoPreproc
     request_keys: Object.keys(plan.request).sort(),
     live_submit: false,
     next_compare_command: "jimeng-browser-proxy request-plan-compare --plan <video-preprocess-query-plan.json> --rawNetwork <capture>/raw-network.jsonl",
+  }
+}
+
+export function summarizeJimengVideoPreprocessSubmitResult(result: JimengVideoPreprocessSubmitResult): JsonObject {
+  return {
+    endpoint: result.endpoint,
+    http_status: result.httpStatus,
+    ret: result.ret,
+    errmsg: result.errmsg,
+    response_text_sha256: result.responseTextSha256,
+    request: result.request,
+    task_count: result.tasks.length,
+    tasks: result.tasks.map(summarizeTask),
+  }
+}
+
+export function summarizeJimengVideoPreprocessResultLookup(result: JimengVideoPreprocessResultLookupResult): JsonObject {
+  return {
+    endpoint: result.endpoint,
+    http_status: result.httpStatus,
+    ret: result.ret,
+    errmsg: result.errmsg,
+    response_text_sha256: result.responseTextSha256,
+    request: result.request,
+    task_count: result.tasks.length,
+    tasks: result.tasks.map(summarizeTask),
   }
 }
 
@@ -315,4 +431,96 @@ function decodeVideoPreprocessContract<A>(schema: Schema.Decoder<A>, value: Json
       details: { operation, error: message },
     })
   }
+}
+
+function parseVideoPreprocessResponse(text: string, operation: string): JsonValue {
+  const body = parseJsonText(text, operation)
+  assertNoRiskError(body, text)
+  const envelope = parseJimengApiEnvelope(body, operation)
+  if (envelope.ret !== undefined && String(envelope.ret) !== "0") {
+    throw jimengError({
+      category: "upstream",
+      code: "JIMENG_VIDEO_PREPROCESS_UPSTREAM_ERROR",
+      message: `${operation} returned ret=${String(envelope.ret)} errmsg=${envelope.errmsg ?? "unknown"}.`,
+      retryable: false,
+      details: { ret: envelope.ret, errmsg: envelope.errmsg ?? null },
+    })
+  }
+  return body
+}
+
+function summarizeTaskLikeRows(body: JsonValue): JimengVideoPreprocessTaskSummary[] {
+  const data = isJsonObject(body) ? body.data : undefined
+  const rows: JimengVideoPreprocessTaskSummary[] = []
+  collectTaskLikeRows(data, rows)
+  return rows.slice(0, 40)
+}
+
+function collectTaskLikeRows(value: JsonValue | undefined, rows: JimengVideoPreprocessTaskSummary[]): void {
+  if (value === undefined || rows.length >= 40) return
+  if (Array.isArray(value)) {
+    for (const entry of value) collectTaskLikeRows(entry, rows)
+    return
+  }
+  if (!isJsonObject(value)) return
+
+  const submitId = stringValue(value.submit_id) ?? stringValue(value.submitId)
+  const scene = numberValue(value.scene)
+  const status = stringValue(value.status) ?? numberValue(value.status)
+  if (submitId || scene !== null || status !== null) {
+    rows.push({
+      submitId,
+      scene,
+      status,
+      errmsg: stringValue(value.errmsg) ?? stringValue(value.error_msg) ?? stringValue(value.errorMsg),
+      keys: Object.keys(value).sort(),
+    })
+  }
+
+  for (const entry of Object.values(value)) collectTaskLikeRows(entry, rows)
+}
+
+function buildVideoPreprocessHeaders(session: JimengSessionBundle): Record<string, string> {
+  return {
+    "content-type": "application/json",
+    accept: "application/json, text/plain, */*",
+    "user-agent": session.userAgent ?? "Mozilla/5.0",
+    origin: session.origin ?? "https://jimeng.jianying.com",
+    referer: session.referer ?? "https://jimeng.jianying.com/ai-tool/generate/",
+    cookie: session.cookie,
+    lan: "zh-Hans",
+    pf: "7",
+    loc: "cn",
+    appid: "513695",
+  }
+}
+
+function summarizeTask(task: JimengVideoPreprocessTaskSummary): JsonObject {
+  return {
+    submit_id: task.submitId,
+    scene: task.scene,
+    status: task.status,
+    errmsg: task.errmsg,
+    keys: task.keys,
+  }
+}
+
+function retValue(body: JsonValue): string | number | null {
+  return isJsonObject(body) && (typeof body.ret === "string" || typeof body.ret === "number") ? body.ret : null
+}
+
+function errmsgValue(body: JsonValue): string | null {
+  return isJsonObject(body) && typeof body.errmsg === "string" ? body.errmsg : null
+}
+
+function stringValue(value: JsonValue | undefined): string | null {
+  return typeof value === "string" && value.trim() ? value : null
+}
+
+function numberValue(value: JsonValue | undefined): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null
+}
+
+function sha256(value: string): string {
+  return createHash("sha256").update(value).digest("hex")
 }

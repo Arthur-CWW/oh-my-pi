@@ -1,17 +1,32 @@
+import { existsSync, mkdtempSync } from "node:fs"
+import path from "node:path"
+import { tmpdir } from "node:os"
 import { describe, expect, test } from "bun:test"
 import {
   buildJimengVideoPreprocessPlan,
   buildJimengVideoPreprocessQueryPlan,
   compareJimengRequestPlanWithRawNetwork,
+  createJimengHttpTransport,
+  fetchJimengVideoPreprocessResults,
   JimengVideoPreprocessScene,
   parseJimengVideoPreprocessBodyJson,
   parseJimengVideoPreprocessImageUris,
+  submitJimengVideoPreprocess,
   summarizeJimengVideoPreprocessPlan,
   summarizeJimengVideoPreprocessQueryPlan,
+  summarizeJimengVideoPreprocessResultLookup,
+  summarizeJimengVideoPreprocessSubmitResult,
   validateJimengVideoPreprocessQueryRequest,
   validateJimengVideoPreprocessRequest,
   type JsonObject,
 } from "../src"
+
+const session = {
+  cookie: "sessionid=test",
+  userAgent: "Mozilla/5.0 Test",
+  origin: "https://jimeng.jianying.com",
+  referer: "https://jimeng.jianying.com/ai-tool/generate/",
+}
 
 describe("Jimeng video preprocess dry-run plans", () => {
   test("builds an image/avatar pre-process request for lip-sync host checks", () => {
@@ -150,6 +165,132 @@ describe("Jimeng video preprocess dry-run plans", () => {
     expect(result.match).toBe(true)
     expect(result.plan_endpoint).toBe("/mweb/v1/video_generate/mget_pre_process_result")
   })
+
+  test("submits and summarizes pre-process task responses through the typed client", async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = []
+    const result = await submitJimengVideoPreprocess({
+      fetch: mockFetch(JSON.stringify(preprocessSubmitBody()), requests),
+      session,
+      preprocess: {
+        mode: "image-create-avatar",
+        submitId: "avatar-detect-1",
+        imageUri: "tos-cn-i-tb4s082cfz/k-beauty-host.png",
+      },
+    })
+
+    expect(requests[0]?.url).toContain("/mweb/v1/video_generate/pre_process")
+    expect(JSON.parse(String(requests[0]?.init?.body))).toEqual({
+      input_list: [
+        {
+          submit_id: "avatar-detect-1",
+          scene: 2,
+          image_create_avatar: {
+            image: { image_uri: "tos-cn-i-tb4s082cfz/k-beauty-host.png" },
+            detection_scene: "ugc_lip_sync_avatar",
+          },
+        },
+      ],
+    })
+    expect(result.tasks).toEqual([
+      {
+        submitId: "avatar-detect-1",
+        scene: 2,
+        status: "submitted",
+        errmsg: null,
+        keys: ["scene", "status", "submit_id"],
+      },
+    ])
+    expect(summarizeJimengVideoPreprocessSubmitResult(result)).toMatchObject({
+      endpoint: "/mweb/v1/video_generate/pre_process",
+      ret: "0",
+      task_count: 1,
+    })
+  })
+
+  test("fetches pre-process results and records/replays transport cassettes", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "jimeng-video-preprocess-cassette-"))
+    try {
+      const cassettePath = path.join(dir, "video-preprocess.json")
+      const requests: Array<{ url: string; init?: RequestInit }> = []
+      const recordTransport = createJimengHttpTransport({
+        mode: "record",
+        cassettePath,
+        fetch: mockFetchSequence([
+          JSON.stringify(preprocessSubmitBody()),
+          JSON.stringify(preprocessResultBody()),
+        ], requests),
+        nowIso: () => "2026-06-12T00:00:00.000Z",
+      })
+
+      const submitted = await submitJimengVideoPreprocess({
+        fetch: recordTransport.fetch,
+        session,
+        preprocess: {
+          mode: "voice-recommendation",
+          submitId: "voice-match-1",
+          imageUri: "tos-cn-i-tb4s082cfz/k-beauty-host.png",
+        },
+      })
+      const result = await fetchJimengVideoPreprocessResults({
+        fetch: recordTransport.fetch,
+        session,
+        submitIds: ["voice-match-1"],
+      })
+
+      expect(submitted.tasks).toHaveLength(1)
+      expect(result.tasks).toEqual([
+        {
+          submitId: "voice-match-1",
+          scene: 7,
+          status: 50,
+          errmsg: null,
+          keys: ["result", "scene", "status", "submit_id"],
+        },
+      ])
+      expect(summarizeJimengVideoPreprocessResultLookup(result)).toMatchObject({
+        endpoint: "/mweb/v1/video_generate/mget_pre_process_result",
+        task_count: 1,
+      })
+      expect(existsSync(cassettePath)).toBe(true)
+
+      const replayTransport = createJimengHttpTransport({
+        mode: "replay",
+        cassettePath,
+        fetch: failIfLiveFetch,
+      })
+      const replaySubmitted = await submitJimengVideoPreprocess({
+        fetch: replayTransport.fetch,
+        session,
+        preprocess: {
+          mode: "voice-recommendation",
+          submitId: "voice-match-1",
+          imageUri: "tos-cn-i-tb4s082cfz/k-beauty-host.png",
+        },
+      })
+      const replayResult = await fetchJimengVideoPreprocessResults({
+        fetch: replayTransport.fetch,
+        session,
+        submitIds: ["voice-match-1"],
+      })
+
+      expect(replaySubmitted.responseTextSha256).toBe(submitted.responseTextSha256)
+      expect(replayResult.responseTextSha256).toBe(result.responseTextSha256)
+    } finally {
+      // Temporary cassette directory is intentionally left to the OS tmp cleaner.
+    }
+  })
+
+  test("rejects provider errors in pre-process responses", async () => {
+    await expect(submitJimengVideoPreprocess({
+      fetch: mockFetch(JSON.stringify({ ret: 1000, errmsg: "invalid parameter" })),
+      session,
+      preprocess: {
+        mode: "audio-detect",
+        submitId: "audio-detect-1",
+        audioVid: "v0audio123",
+      },
+    })).rejects.toThrow("ret=1000")
+  })
 })
 
 function rawRequestEvent(requestId: string, endpoint: string, submitBody: JsonObject) {
@@ -169,4 +310,74 @@ function rawRequestEvent(requestId: string, endpoint: string, submitBody: JsonOb
 
 function jsonl(...events: object[]): string {
   return `${events.map((event) => JSON.stringify(event)).join("\n")}\n`
+}
+
+function preprocessSubmitBody(): JsonObject {
+  return {
+    ret: "0",
+    errmsg: "success",
+    data: {
+      task_list: [
+        {
+          submit_id: "avatar-detect-1",
+          scene: 2,
+          status: "submitted",
+        },
+      ],
+    },
+  }
+}
+
+function preprocessResultBody(): JsonObject {
+  return {
+    ret: "0",
+    errmsg: "success",
+    data: {
+      result_list: [
+        {
+          submit_id: "voice-match-1",
+          scene: 7,
+          status: 50,
+          result: {
+            recommended_tone_id: "7597003459665072686",
+          },
+        },
+      ],
+    },
+  }
+}
+
+function mockFetch(body: string, requests: Array<{ url: string; init?: RequestInit }> = []) {
+  return async (url: string, init?: RequestInit) => {
+    requests.push({ url, init })
+    return responseFromText(body)
+  }
+}
+
+function mockFetchSequence(bodies: string[], requests: Array<{ url: string; init?: RequestInit }> = []) {
+  let index = 0
+  return async (url: string, init?: RequestInit) => {
+    requests.push({ url, init })
+    const body = bodies[index]
+    index += 1
+    return responseFromText(body ?? bodies[bodies.length - 1] ?? "{}")
+  }
+}
+
+async function failIfLiveFetch(): Promise<never> {
+  throw new Error("unexpected live fetch")
+}
+
+function responseFromText(body: string) {
+  const bytes = new TextEncoder().encode(body)
+  return {
+    ok: true,
+    status: 200,
+    async text() {
+      return body
+    },
+    async arrayBuffer() {
+      return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
+    },
+  }
 }

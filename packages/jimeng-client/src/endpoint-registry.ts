@@ -626,18 +626,22 @@ const KEEP_GAP_AUDIT_BY_ENDPOINT: Record<string, JimengDiscoveryEndpointAudit> =
   "/mweb/v1/video_generate/pre_process": {
     evidence: [
       "docs/qa/jimeng-video-preprocess-plan-20260612.md",
+      "docs/qa/jimeng-lip-sync-human-preprocess-client-20260612.md",
       "data/jimeng-lab/proof-20260610-static-locate-video-generate-helpers/",
       "data/jimeng-lab/proof-20260612-video-preprocess-plan/",
+      "data/jimeng-lab/proof-20260612-lip-sync-human-contract-infer/preprocess/",
     ],
-    nextProbe: "Passively capture the video pre-process submit flow, compare it with video-preprocess-plan using request-plan-compare, then require explicit approval before live replay because it creates task state.",
+    nextProbe: "Passively capture the video pre-process submit flow, compare it with video-preprocess-plan using request-plan-compare, then record/replay through submitJimengVideoPreprocess only after explicit approval because it creates task state.",
   },
   "/mweb/v1/video_generate/mget_pre_process_result": {
     evidence: [
       "docs/qa/jimeng-video-preprocess-plan-20260612.md",
+      "docs/qa/jimeng-lip-sync-human-preprocess-client-20260612.md",
       "data/jimeng-lab/proof-20260610-static-locate-video-generate-helpers/",
       "data/jimeng-lab/proof-20260612-video-preprocess-query-plan/",
+      "data/jimeng-lab/proof-20260612-lip-sync-human-contract-infer/preprocess-query/",
     ],
-    nextProbe: "Use task ids from a captured or approved video_generate/pre_process flow, compare with video-preprocess-query-plan, then record/replay the matching result lookup.",
+    nextProbe: "Use task ids from a captured or approved video_generate/pre_process flow, compare with video-preprocess-query-plan, then record/replay through fetchJimengVideoPreprocessResults.",
   },
   "/mweb/v1/video_generate/face_auth/skip": {
     evidence: [
@@ -781,8 +785,8 @@ const KNOWN_ENDPOINTS: JimengDiscoveryKnownEndpoint[] = [
   known("/mweb/v1/infinite_canvas/v1/update_canvas_custom_ratio", "blocked", null, "Mutates custom ratio presets; require disposable ratio/user context or explicit approval."),
   known("/mweb/v1/video_generate/get_common_config", "implemented", "lip-sync-config", "No-spend video/lip-sync model config."),
   known("/mweb/v1/video_generate/get_switch_model_queue_info", "blocked", null, "No-spend probes with empty, model_req_key, model_req_keys, and scene bodies returned ret=1000 invalid parameter; capture the exact frontend switch-model queue body before promotion."),
-  known("/mweb/v1/video_generate/pre_process", "dry_run_only", "video-preprocess-plan/request-plan-compare", "Frontend data service pre-process task body is modeled for avatar image checks, voice recommendation, audio detect, and audio silence checks; live replay creates task state and needs passive capture compare plus approval."),
-  known("/mweb/v1/video_generate/mget_pre_process_result", "dry_run_only", "video-preprocess-query-plan/request-plan-compare", "Pre-process result lookup body is modeled by submit_id_list; live replay needs task ids from a captured or approved pre_process flow."),
+  known("/mweb/v1/video_generate/pre_process", "partial", "video-preprocess-plan/request-plan-compare/submitJimengVideoPreprocess", "Frontend data service pre-process task body is modeled for avatar image checks, voice recommendation, audio detect, and audio silence checks; typed service and cassette replay exist, but live replay creates task state and needs passive capture compare plus approval."),
+  known("/mweb/v1/video_generate/mget_pre_process_result", "partial", "video-preprocess-query-plan/request-plan-compare/fetchJimengVideoPreprocessResults", "Pre-process result lookup body is modeled by submit_id_list and has typed service/cassette replay coverage; live replay needs task ids from a captured or approved pre_process flow."),
   known("/mweb/v1/video_generate/face_auth/skip", "blocked", null, "Seedance face-auth skip submit task can create provider-side task state; capture exact UI payload and approval context before live replay."),
   known("/mweb/v1/video_generate/face_auth/skip/query", "blocked", null, "Face-auth skip status query depends on a task id from video_generate/face_auth/skip; capture that flow before promotion."),
   known("/mweb/v1/aigc_draft/cancel_generate", "blocked", null, "Cancels an in-flight generation and mutates provider job state; use only with an active disposable job or exact UI capture."),
