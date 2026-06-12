@@ -1,0 +1,20 @@
+{
+  "command": "voice-clone-submit",
+  "status": "dry-run-only",
+  "reason": "Voice clone submit creates account task state, so this fixture covers the request contract only.",
+  "endpoint_sequence": [
+    "/mweb/v1/voice/submit_task"
+  ],
+  "request": {
+    "submit_id": "fixture-voice-submit",
+    "scene": 1,
+    "voice_clone": {
+      "audio": {
+        "vid": "v0personaVoiceAudio",
+        "duration": 3,
+        "title": "persona-reference.wav"
+      },
+      "name": "packet disposable voice"
+    }
+  }
+}

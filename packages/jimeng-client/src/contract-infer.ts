@@ -429,9 +429,15 @@ function inferCliFlagSuggestions(paths: readonly JimengContractPathSummary[]): s
   const pathText = paths.map((entry) => entry.path).join("\n")
   const candidates: readonly [RegExp, string][] = [
     [/prompt/i, "--prompt"],
+    [/image_uri|imageUri/i, "--imageUri"],
+    [/audio_vid|audioVid|voice_clone\.audio\.vid|audio\.vid/i, "--audioVid"],
+    [/video_item_id|videoItemId/i, "--videoItemId"],
+    [/task_id_list|taskIds/i, "--taskIds"],
+    [/local_item_id|localItemId|voiceId/i, "--voice-id"],
+    [/voice_clone\.name|request\.name/i, "--name"],
     [/duration_ms|videoDuration/i, "--durationSec"],
     [/resolution/i, "--videoResolution"],
-    [/video_aspect_ratio|ratio/i, "--ratio"],
+    [/video_aspect_ratio|(^|\.)ratio($|\.)/i, "--ratio"],
     [/model_req_key|modelReqKey/i, "--modelReqKey"],
     [/seed/i, "--seed"],
     [/fps/i, "--fps"],
@@ -500,12 +506,15 @@ function extractCommand(value: JsonValue, relativePath: string): string | null {
 
 function extractEndpoints(value: JsonValue, relativePath: string): string[] {
   const endpoints = new Set<string>()
+  for (const endpoint of extractStringArray(value, ["endpoint_sequence", "endpoints", "summary.endpoint_sequence"])) {
+    if (isEndpointPath(endpoint)) endpoints.add(endpoint)
+  }
   for (const candidate of [
     extractString(value, ["endpoint", "summary.endpoint"]),
     extractUrlPath(value, "plan.submit_url"),
     extractUrlPath(value, "plan.poll_url"),
   ]) {
-    if (candidate) endpoints.add(candidate)
+    if (candidate && isEndpointPath(candidate)) endpoints.add(candidate)
   }
 
   const lowerPath = relativePath.toLowerCase()
@@ -516,6 +525,22 @@ function extractEndpoints(value: JsonValue, relativePath: string): string[] {
   if (endpoints.size === 0 && lowerPath.includes("tts")) endpoints.add("/mweb/v1/tts_generate")
   if (endpoints.size === 0 && lowerPath.includes("account-credit")) endpoints.add("/commerce/v1/benefits/user_credit")
   return [...endpoints].sort()
+}
+
+function extractStringArray(value: JsonValue, paths: readonly string[]): string[] {
+  const strings: string[] = []
+  for (const contractPath of paths) {
+    const found = getByPath(value, contractPath)
+    if (!Array.isArray(found)) continue
+    for (const entry of found) {
+      if (typeof entry === "string") strings.push(entry)
+    }
+  }
+  return strings
+}
+
+function isEndpointPath(value: string): boolean {
+  return /^(\/(?:mweb|commerce|lv|cc)\/v\d+\/|\/api\/)/.test(value)
 }
 
 function extractUrlPath(value: JsonValue, contractPath: string): string | null {

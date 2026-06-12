@@ -1,0 +1,13 @@
+{
+  "command": "voice-clone-query",
+  "status": "dry-run-only",
+  "reason": "Task query needs a task id from a real submit; this fixture covers the request contract only.",
+  "endpoint_sequence": [
+    "/mweb/v1/voice/query_task"
+  ],
+  "request": {
+    "task_id_list": [
+      "fixture-voice-task"
+    ]
+  }
+}

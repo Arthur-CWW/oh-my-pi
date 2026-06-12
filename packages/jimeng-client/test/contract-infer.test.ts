@@ -9,6 +9,7 @@ import {
 } from "../src"
 
 const fixtureDir = path.resolve(import.meta.dir, "fixtures/contract-infer/live-matrix-mini")
+const personaVoiceFixtureDir = path.resolve(import.meta.dir, "fixtures/contract-infer/persona-voice-mini")
 
 describe("Jimeng contract inference", () => {
   test("groups proof bundle JSON by endpoint and suggests useful flags", () => {
@@ -29,6 +30,35 @@ describe("Jimeng contract inference", () => {
     expect(generate?.cli_flag_suggestions).toContain("--prompt")
     expect(generate?.cli_flag_suggestions).toContain("--modelReqKey")
     expect(generate?.effect_schema_ir.required_paths.some((entry) => entry.path.includes("draft_content"))).toBe(true)
+  })
+
+  test("extracts endpoint sequences and persona-voice flags from dry-run packet plans", () => {
+    const inference = inferJimengContractsFromPath({
+      inputPath: personaVoiceFixtureDir,
+      generatedAtIso: "2026-06-12T00:00:00.000Z",
+    })
+
+    expect(inference.file_count).toBe(4)
+    expect(inference.endpoints.map((endpoint) => endpoint.endpoint)).toEqual([
+      "/mweb/v1/dreamina_subject/generate_voice",
+      "/mweb/v1/mix_audio_video",
+      "/mweb/v1/voice/query_task",
+      "/mweb/v1/voice/submit_task",
+    ])
+
+    const subjectVoice = inference.endpoints.find((endpoint) => endpoint.endpoint === "/mweb/v1/dreamina_subject/generate_voice")
+    expect(subjectVoice?.commands).toEqual(["subject-generate-voice"])
+    expect(subjectVoice?.cli_flag_suggestions).toContain("--imageUri")
+
+    const voiceSubmit = inference.endpoints.find((endpoint) => endpoint.endpoint === "/mweb/v1/voice/submit_task")
+    expect(voiceSubmit?.commands).toEqual(["voice-clone-submit"])
+    expect(voiceSubmit?.cli_flag_suggestions).toEqual(expect.arrayContaining(["--audioVid", "--name"]))
+
+    const voiceQuery = inference.endpoints.find((endpoint) => endpoint.endpoint === "/mweb/v1/voice/query_task")
+    expect(voiceQuery?.cli_flag_suggestions).toContain("--taskIds")
+
+    const mixAudio = inference.endpoints.find((endpoint) => endpoint.endpoint === "/mweb/v1/mix_audio_video")
+    expect(mixAudio?.cli_flag_suggestions).toEqual(expect.arrayContaining(["--audioVid", "--videoItemId"]))
   })
 
   test("writes scaffold files for review", () => {

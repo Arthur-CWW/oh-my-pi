@@ -33,4 +33,31 @@ describe("Jimeng contract inference snapshots", () => {
         scaffold: inference.scaffold,
       }).toMatchSnapshot()
     }))
+
+  it.effect("snapshots persona-voice packet contract scaffolds", () =>
+    Effect.sync(() => {
+      const fixtureDir = path.resolve(import.meta.dirname, "../test/fixtures/contract-infer/persona-voice-mini")
+      const inference = inferJimengContractsFromPath({
+        inputPath: fixtureDir,
+        generatedAtIso: "2026-06-12T00:00:00.000Z",
+      })
+
+      expect({
+        file_count: inference.file_count,
+        endpoints: inference.endpoints.map((endpoint) => ({
+          endpoint: endpoint.endpoint,
+          sample_count: endpoint.sample_count,
+          commands: endpoint.commands,
+          document_kinds: endpoint.document_kinds,
+          cli_flag_suggestions: endpoint.cli_flag_suggestions,
+          effect_schema_ir: {
+            name: endpoint.effect_schema_ir.name,
+            mode: endpoint.effect_schema_ir.mode,
+            required_paths: endpoint.effect_schema_ir.required_paths.slice(0, 12),
+          },
+          registry_patch_draft: endpoint.registry_patch_draft,
+        })),
+        scaffold: inference.scaffold,
+      }).toMatchSnapshot()
+    }))
 })

@@ -1,0 +1,15 @@
+{
+  "command": "mix-audio-plan",
+  "endpoint": "/mweb/v1/mix_audio_video",
+  "method": "POST",
+  "request": {
+    "input": {
+      "audio_vid": "v0personaVoiceAudio",
+      "video_item_id": "generated-video-item-123"
+    }
+  },
+  "query_params": {
+    "babi_param": "{\"pf\":\"7\",\"scene\":\"ugc_voice_over\"}"
+  },
+  "live_submit": false
+}

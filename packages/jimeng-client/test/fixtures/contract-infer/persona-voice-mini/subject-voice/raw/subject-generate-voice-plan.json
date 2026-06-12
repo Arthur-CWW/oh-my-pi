@@ -1,0 +1,11 @@
+{
+  "command": "subject-generate-voice",
+  "status": "dry-run-only",
+  "reason": "Subject voice generation can spend credits, so this fixture covers the request contract only.",
+  "endpoint_sequence": [
+    "/mweb/v1/dreamina_subject/generate_voice"
+  ],
+  "request": {
+    "image_uri": "tos-cn-i-tb4s082cfz/kbeauty-host.png"
+  }
+}

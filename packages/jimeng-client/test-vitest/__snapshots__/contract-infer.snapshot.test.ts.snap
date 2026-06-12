@@ -363,3 +363,354 @@ exports[`Jimeng contract inference snapshots > snapshots normalized contract-inf
   },
 }
 `;
+
+exports[`Jimeng contract inference snapshots > snapshots persona-voice packet contract scaffolds 1`] = `
+{
+  "endpoints": [
+    {
+      "cli_flag_suggestions": [
+        "--imageUri",
+      ],
+      "commands": [
+        "subject-generate-voice",
+      ],
+      "document_kinds": [
+        "raw",
+      ],
+      "effect_schema_ir": {
+        "mode": "permissive-required-paths",
+        "name": "MwebV1DreaminaSubjectGenerateVoiceObservedSchema",
+        "required_paths": [
+          {
+            "path": "command",
+            "types": [
+              "string",
+            ],
+          },
+          {
+            "path": "endpoint_sequence",
+            "types": [
+              "array",
+            ],
+          },
+          {
+            "path": "reason",
+            "types": [
+              "string",
+            ],
+          },
+          {
+            "path": "request",
+            "types": [
+              "object",
+            ],
+          },
+          {
+            "path": "status",
+            "types": [
+              "string",
+            ],
+          },
+          {
+            "path": "request.image_uri",
+            "types": [
+              "string",
+            ],
+          },
+        ],
+      },
+      "endpoint": "/mweb/v1/dreamina_subject/generate_voice",
+      "registry_patch_draft": {
+        "command": "subject-generate-voice",
+        "endpoint": "/mweb/v1/dreamina_subject/generate_voice",
+        "evidence": [
+          "subject-voice/raw/subject-generate-voice-plan.json",
+        ],
+        "nextProbe": "Promote contract-infer required paths into a hand-tightened typed client/CLI wrapper and Vitest replay snapshot.",
+        "risk": "generation-or-mutation",
+        "status": "partial",
+      },
+      "sample_count": 1,
+    },
+    {
+      "cli_flag_suggestions": [
+        "--audioVid",
+        "--videoItemId",
+      ],
+      "commands": [
+        "mix-audio-plan",
+      ],
+      "document_kinds": [
+        "raw",
+      ],
+      "effect_schema_ir": {
+        "mode": "permissive-required-paths",
+        "name": "MwebV1MixAudioVideoObservedSchema",
+        "required_paths": [
+          {
+            "path": "command",
+            "types": [
+              "string",
+            ],
+          },
+          {
+            "path": "endpoint",
+            "types": [
+              "string",
+            ],
+          },
+          {
+            "path": "live_submit",
+            "types": [
+              "boolean",
+            ],
+          },
+          {
+            "path": "method",
+            "types": [
+              "string",
+            ],
+          },
+          {
+            "path": "query_params",
+            "types": [
+              "object",
+            ],
+          },
+          {
+            "path": "request",
+            "types": [
+              "object",
+            ],
+          },
+          {
+            "path": "query_params.babi_param",
+            "types": [
+              "string",
+            ],
+          },
+          {
+            "path": "request.input",
+            "types": [
+              "object",
+            ],
+          },
+          {
+            "path": "request.input.audio_vid",
+            "types": [
+              "string",
+            ],
+          },
+          {
+            "path": "request.input.video_item_id",
+            "types": [
+              "string",
+            ],
+          },
+        ],
+      },
+      "endpoint": "/mweb/v1/mix_audio_video",
+      "registry_patch_draft": {
+        "command": "mix-audio-plan",
+        "endpoint": "/mweb/v1/mix_audio_video",
+        "evidence": [
+          "voice-mix/raw/mix-audio-plan.json",
+        ],
+        "nextProbe": "Promote contract-infer required paths into a hand-tightened typed client/CLI wrapper and Vitest replay snapshot.",
+        "risk": "generation-or-mutation",
+        "status": "partial",
+      },
+      "sample_count": 1,
+    },
+    {
+      "cli_flag_suggestions": [
+        "--taskIds",
+      ],
+      "commands": [
+        "voice-clone-query",
+      ],
+      "document_kinds": [
+        "raw",
+      ],
+      "effect_schema_ir": {
+        "mode": "permissive-required-paths",
+        "name": "MwebV1VoiceQueryTaskObservedSchema",
+        "required_paths": [
+          {
+            "path": "command",
+            "types": [
+              "string",
+            ],
+          },
+          {
+            "path": "endpoint_sequence",
+            "types": [
+              "array",
+            ],
+          },
+          {
+            "path": "reason",
+            "types": [
+              "string",
+            ],
+          },
+          {
+            "path": "request",
+            "types": [
+              "object",
+            ],
+          },
+          {
+            "path": "status",
+            "types": [
+              "string",
+            ],
+          },
+          {
+            "path": "request.task_id_list",
+            "types": [
+              "array",
+            ],
+          },
+        ],
+      },
+      "endpoint": "/mweb/v1/voice/query_task",
+      "registry_patch_draft": {
+        "command": "voice-clone-query",
+        "endpoint": "/mweb/v1/voice/query_task",
+        "evidence": [
+          "voice-clone/raw/voice-clone-query-plan.json",
+        ],
+        "nextProbe": "Promote contract-infer required paths into a hand-tightened typed client/CLI wrapper and Vitest replay snapshot.",
+        "risk": "generation-or-mutation",
+        "status": "partial",
+      },
+      "sample_count": 1,
+    },
+    {
+      "cli_flag_suggestions": [
+        "--audioVid",
+        "--name",
+        "--submitId",
+      ],
+      "commands": [
+        "voice-clone-submit",
+      ],
+      "document_kinds": [
+        "raw",
+      ],
+      "effect_schema_ir": {
+        "mode": "permissive-required-paths",
+        "name": "MwebV1VoiceSubmitTaskObservedSchema",
+        "required_paths": [
+          {
+            "path": "command",
+            "types": [
+              "string",
+            ],
+          },
+          {
+            "path": "endpoint_sequence",
+            "types": [
+              "array",
+            ],
+          },
+          {
+            "path": "reason",
+            "types": [
+              "string",
+            ],
+          },
+          {
+            "path": "request",
+            "types": [
+              "object",
+            ],
+          },
+          {
+            "path": "status",
+            "types": [
+              "string",
+            ],
+          },
+          {
+            "path": "request.scene",
+            "types": [
+              "number",
+            ],
+          },
+          {
+            "path": "request.voice_clone",
+            "types": [
+              "object",
+            ],
+          },
+          {
+            "path": "request.voice_clone.audio",
+            "types": [
+              "object",
+            ],
+          },
+          {
+            "path": "request.voice_clone.name",
+            "types": [
+              "string",
+            ],
+          },
+          {
+            "path": "request.voice_clone.audio.duration",
+            "types": [
+              "number",
+            ],
+          },
+          {
+            "path": "request.voice_clone.audio.title",
+            "types": [
+              "string",
+            ],
+          },
+          {
+            "path": "request.voice_clone.audio.vid",
+            "types": [
+              "string",
+            ],
+          },
+        ],
+      },
+      "endpoint": "/mweb/v1/voice/submit_task",
+      "registry_patch_draft": {
+        "command": "voice-clone-submit",
+        "endpoint": "/mweb/v1/voice/submit_task",
+        "evidence": [
+          "voice-clone/raw/voice-clone-submit-plan.json",
+        ],
+        "nextProbe": "Promote contract-infer required paths into a hand-tightened typed client/CLI wrapper and Vitest replay snapshot.",
+        "risk": "generation-or-mutation",
+        "status": "partial",
+      },
+      "sample_count": 1,
+    },
+  ],
+  "file_count": 4,
+  "scaffold": {
+    "generated_files": [
+      "contract-summary.json",
+      "contract-summary.md",
+      "effect-schema-ir.json",
+      "registry-patch-draft.json",
+    ],
+    "recommended_next_steps": [
+      "Review required_paths for false positives caused by sample-specific values.",
+      "Promote the generated Effect Schema IR into a hand-tightened boundary schema for the selected command family.",
+      "Add or update a Vitest snapshot over the normalized contract object before wiring more live calls.",
+      "Patch endpoint-registry rows with evidence, command ownership, risk, and next probe from registry_patch_draft.",
+    ],
+    "vitest_snapshot_targets": [
+      "contract-infer:/mweb/v1/dreamina_subject/generate_voice",
+      "contract-infer:/mweb/v1/mix_audio_video",
+      "contract-infer:/mweb/v1/voice/query_task",
+      "contract-infer:/mweb/v1/voice/submit_task",
+    ],
+  },
+}
+`;

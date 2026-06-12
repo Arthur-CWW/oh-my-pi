@@ -99,4 +99,34 @@ describe("jimeng-browser-proxy normalized proof redaction", () => {
     expect(existsSync(rawInputs)).toBe(true)
     expect(readFileSync(manifestMarkdown, "utf8")).toContain("# Jimeng Packet Plan: persona-voice")
   })
+
+  test("contract-infer command writes scaffold outputs from fixture plans", () => {
+    const outDir = mkdtempSync(path.join(tmpdir(), "jimeng-contract-infer-cli-"))
+    const fixtureDir = path.join("test", "fixtures", "contract-infer", "persona-voice-mini")
+    const result = spawnSync(process.execPath, [
+      "src/browser-proxy-cli.ts",
+      "contract-infer",
+      "--input",
+      fixtureDir,
+      "--outDir",
+      outDir,
+    ], {
+      cwd: path.resolve(import.meta.dir, ".."),
+      encoding: "utf8",
+    })
+
+    expect(result.status).toBe(0)
+    expect(result.stdout).toContain("contract-infer saved endpoints=4 documents=4")
+
+    const summaryJson = path.join(outDir, "normalized", "contract", "contract-summary.json")
+    const summaryMarkdown = path.join(outDir, "normalized", "contract", "contract-summary.md")
+    const schemaIr = path.join(outDir, "normalized", "contract", "effect-schema-ir.json")
+    const registryPatch = path.join(outDir, "normalized", "contract", "registry-patch-draft.json")
+
+    expect(existsSync(summaryJson)).toBe(true)
+    expect(existsSync(summaryMarkdown)).toBe(true)
+    expect(existsSync(schemaIr)).toBe(true)
+    expect(existsSync(registryPatch)).toBe(true)
+    expect(readFileSync(summaryMarkdown, "utf8")).toContain("/mweb/v1/voice/submit_task")
+  })
 })

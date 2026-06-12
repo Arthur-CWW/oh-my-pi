@@ -18,6 +18,8 @@ Jimeng L1 update, 2026-06-12: `jimeng-browser-proxy video-preprocess-plan` and `
 
 Jimeng packet-factory update, 2026-06-12: `buildJimengPacketPlan` now has a schema-validated output writer that emits `packet-manifest.json`, `packet-manifest.md`, and `approval-prompt.txt` for a selected packet. `jimeng-browser-proxy packet-plan --packet <id> --outDir data/jimeng-lab/<packet-run>` creates the cross-session packet manifest before code changes. Future sessions should treat the manifest plus `contract-infer` output as the handoff: gather only the needed samples, generate schema/client/CLI/test/registry/docs drafts from saved JSON or cassettes, promote them in one coherent chunk, and prove backend work through replay tests, typecheck, and Vitest snapshots. Do not restart broad static analysis or add one-off dry-run planners unless the selected high-value packet lacks samples or needs a compare gate.
 
+Jimeng persona-voice update, 2026-06-12: `contract-infer` now reads dry-run `endpoint_sequence` request plans and infers persona/voice workflow flags, so existing subject voice, voice clone submit/query/update/delete, and mix-audio proof folders can generate scaffolds without new spend or mutation. Proof note: `docs/qa/jimeng-persona-voice-contract-infer-20260612.md`; ignored outputs: `data/jimeng-lab/proof-20260612-persona-voice-contract-infer/`. Remaining persona/voice work is passive UI capture or approved live runs for provider task creation/mutation, followed by promotion of any observed response contracts into typed services.
+
 ## Next
 
 | ID | Task | Source | Notes |
