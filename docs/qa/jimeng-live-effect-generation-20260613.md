@@ -127,7 +127,7 @@ mise exec -- bun packages/jimeng-client/src/dreamina-compatible-cli.ts text2vide
 - Dashboard status rows now separate implementation state from generated artifacts. Workers can update the same SQLite DB through `artifact-dashboard.ts status`, `artifact-dashboard.ts ingest-proof`, or `jimeng-dreamina --artifact-db`.
 - Media viewers are selected by MIME: video/audio playable, images visible, other files linked.
 - Review shortcuts: `j`/`n` next run, `k`/`p` previous run, `h`/`l` previous/next function, `[`/`]` previous/next artifact, `/` focus the function filter.
-Status note: the CLI/API is not fully complete across all Jimeng functions. Text-to-video direct submit/poll/download is live-proven. Text-to-image compatibility submit is still not live-proven; latest no-spend diagnostics confirmed live auth/credits/model config are valid, and the blocker is a stale/mismatched text-to-image submit capture/template that needs one fresh background UI submit capture. Persona/voice, reference-controls, and template-mining packet work is now reviewed and packet-ledger `done`; lip-sync remains capture-blocked.
+Status note: the CLI/API is not fully complete across all Jimeng functions. Text-to-video direct submit/poll/download is live-proven. Text-to-image now has a live-proven browser-backed CLI path: fresh UI submit capture matched the dry-run plan on stable fields, `jimeng-browser-proxy text2image --transport cdp-ui` completed submit/poll/download with four downloaded images, and the `gen-parity` packet is now done. The remaining direct text-to-image gap is endpoint-level: patched direct replay and `--transport cdp-fetch` still hit `ret=3018`, so the browser signer/runtime path remains a classified follow-up. Persona/voice, reference-controls, and template-mining are done; lip-sync remains capture-blocked.
 
 Validation after dashboard subroutes/shortcuts, direct CLI artifact logging, per-function renderer, Effect wrapper, and SQLite limiter changes:
 
@@ -184,7 +184,7 @@ Implementation notes:
 Seeded current packet rows after fresh review:
 
 ```txt
-gen-parity: blocked; no-spend diagnostics show valid account credit/session/model, but text-to-image needs fresh background UI submit capture.
+gen-parity: done; browser-backed text2image submit/poll/download is live-proven and remaining direct signer gap is classified as endpoint-level partial follow-up.
 persona-voice: done; reviewer passed after required voice audio metadata and mix-audio babi_param fixes.
 lip-sync-human: blocked; UI submit capture needed before live submit claim.
 reference-controls: done; reviewer passed, with style/reference gaps explicitly parked until provider capture.
@@ -213,21 +213,23 @@ data/jimeng-captures/20260613-goal-text2image-submit-refresh/                  f
 data/jimeng-lab/proof-20260613-goal-text2image-ui-history/                     UI submit completed, history_id=36088036919564, status=50, 4 image items, 2048x2048
 data/jimeng-lab/proof-20260613-goal-text2image-compare-v2/                     stable body compare match=true after ignoring volatile seed/ids
 data/jimeng-lab/proof-20260613-goal-text2image-direct/                         patched direct replay still ret=3018 permission denied
+data/jimeng-lab/proof-20260613-goal-text2image-cdp-fetch/                      browser-delegated page.fetch path still ret=3018 permission denied
+data/jimeng-lab/proof-20260613-goal-text2image-cdp-ui/                         browser UI delegated submit/poll/download succeeded, 4 downloaded PNG artifacts
 ```
 
-Conclusion: text-to-image is no longer blocked by stale body/schema, auth, credits, or model access. The remaining blocker is the browser transport/signature layer: the current frontend request includes body-bound `a_bogus`/`msToken`/webmssdk context, so patched direct replay is rejected even when the fresh UI body matches the dry-run plan on stable fields.
+Conclusion: text-to-image is no longer blocked as a user-facing CLI workflow. It is blocked only as a pure direct replay/signature problem: stale body/schema, auth, credits, and model access are ruled out; both patched direct replay and `cdp-fetch` still fail with `ret=3018`, while the browser UI delegated path succeeds through the live frontend runtime.
 
 Validation after this update:
 
 ```txt
-bun test packages/jimeng-client/test/text2image-plan-compare.test.ts packages/jimeng-client/test/endpoint-registry.test.ts
-10 pass, 0 fail
+bun test packages/jimeng-client/test/http-transport.test.ts packages/jimeng-client/test/client.test.ts packages/jimeng-client/test/text2image-plan-compare.test.ts packages/jimeng-client/test/endpoint-registry.test.ts
+25 pass, 0 fail
 
 bun run --cwd packages/jimeng-client typecheck
 passed
 
 bun run --cwd packages/jimeng-client test
-329 pass, 0 fail
+331 pass, 0 fail
 
 bun run --cwd packages/jimeng-client test:vitest
 6 files passed, 9 tests passed

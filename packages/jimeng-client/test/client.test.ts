@@ -318,7 +318,7 @@ describe("JimengClient", () => {
       .rejects.toMatchObject({ category: "risk_control", code: "RISK_CONTROL_COOLDOWN_ACTIVE" })
   })
 
-  test("collectImageUrls deduplicates URL sources", () => {
+  test("collectImageUrls prefers the highest-resolution generated image over preview sizes", () => {
     const urls = collectImageUrls({
       status: 45,
       item_list: [
@@ -326,14 +326,14 @@ describe("JimengClient", () => {
           common_attr: {
             cover_url: "https://img.example/cover.png",
             cover_url_map: {
-              large: "https://img.example/cover.png",
-              small: "https://img.example/small.png",
+              "240": "https://img.example/240.png",
+              "1080": "https://img.example/1080.png",
             },
           },
           image: {
             large_images: [
-              { image_url: "https://img.example/small.png" },
-              { image_url: "https://img.example/other.png" },
+              { image_url: "https://img.example/1024.png", width: 1024, height: 1024 },
+              { image_url: "https://img.example/2048.png", width: 2048, height: 2048 },
             ],
           },
         },
@@ -341,9 +341,7 @@ describe("JimengClient", () => {
     })
 
     expect(urls).toEqual([
-      "https://img.example/cover.png",
-      "https://img.example/small.png",
-      "https://img.example/other.png",
+      "https://img.example/2048.png",
     ])
   })
 

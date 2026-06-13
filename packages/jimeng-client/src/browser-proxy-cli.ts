@@ -32,7 +32,7 @@ import {
   parseJimengCommercePricingEndpoints,
   summarizeJimengCommercePricing,
 } from "./commerce-pricing"
-import { createJimengBrowserFetch, loadJimengSessionFromBrowser } from "./browser-session"
+import { createJimengBrowserFetch, loadJimengSessionFromBrowser, submitJimengText2ImageInBrowser, type JimengBrowserSubmitWireResult } from "./browser-session"
 import {
   buildCapCutCollectionTemplatesRequest,
   buildSingleCapCutEndpointProbeVariant,
@@ -94,7 +94,7 @@ import {
   summarizeVoiceLibrary,
   type JimengVoiceCatalogItem,
 } from "./catalog"
-import { prepareFromCapture, redactHeaders, type CaptureFile, type JimengOp, type JimengSessionBundle } from "./capture"
+import { prepareFromCapture, redactHeaders, type CaptureFile, type JimengOp, type JimengSessionBundle, type PreparedJimengRun } from "./capture"
 import { JimengClient } from "./client"
 import { JimengError } from "./errors"
 import {
@@ -496,8 +496,8 @@ Options:
   --detectionScene <value>        Optional image-create-avatar detection_scene field
   --batch <true|false>            Build mix-audio-plan for /mix_audio_videos instead of /mix_audio_video
   --variants <json|file>         Probe variants JSON array or object with variants
-  --transport <mode>             Shared HTTP transport: live, record, replay, fixture, cdp-fetch (default: live)
-                                 cdp-fetch is submit-only and requires an attached Jimeng CDP browser target
+  --transport <mode>             Shared HTTP transport: live, record, replay, fixture, cdp-fetch, cdp-ui (default: live)
+                                 cdp-fetch delegates submit HTTP to an attached Jimeng CDP page; cdp-ui automates text2image through the live workbench UI
   --requests <n>                 Total requests for rate-probe (default: --limit or 12)
   --concurrency <n>              Concurrent workers for rate-probe (default: 1)
   --delayMs <ms>                 Optional per-request delay for rate-probe workers
@@ -6027,7 +6027,15 @@ async function runBrowserProxyCommand(args: CliArgs): Promise<void> {
     return
   }
 
-  const submitFetch = args.transportMode === "cdp-fetch"
+  const useBrowserFetch = args.transportMode === "cdp-fetch"
+  const useBrowserUi = args.transportMode === "cdp-ui"
+  if (useBrowserUi && args.command !== "text2image") {
+    throw new Error("cdp-ui submit is only implemented for text2image")
+  }
+  if (useBrowserUi && args.resolution && args.resolution !== "2k" && args.resolution !== "4k") {
+    throw new Error("text2image cdp-ui submit supports only --resolution 2k or 4k")
+  }
+  const submitFetch = useBrowserFetch
     ? createJimengHttpTransport({
       mode: "cdp-fetch",
       fetch: createJimengBrowserFetch({
@@ -6040,9 +6048,17 @@ async function runBrowserProxyCommand(args: CliArgs): Promise<void> {
     ? new JimengClient({
       fetch: (url, init) => url === prepared.submitUrl ? submitFetch(url, init) : fetch(url, init),
     })
-    : new JimengClient()
+    : new JimengClient({})
   console.log(`[jimeng-browser-proxy] live submit command=${args.command} submitKind=${prepared.submitKind} pollKind=${prepared.pollKind}`)
-  const submit = await client.submitPrepared(prepared)
+  const submit = useBrowserUi
+    ? await parseJimengBrowserSubmitWireResult(prepared, await submitJimengText2ImageInBrowser({
+      cdpUrl: args.cdpUrl,
+      targetUrl: args.targetUrl,
+      prompt: prepared.prompt,
+      ratio: args.ratio,
+      resolution: args.resolution === "2k" || args.resolution === "4k" ? args.resolution : undefined,
+    }))
+    : await client.submitPrepared(prepared)
   writeJson(path.join(dirs.rawDir, `${runId}-submit.json`), submit)
   console.log(`[jimeng-browser-proxy] submit accepted submitId=${submit.submitId} historyId=${submit.historyId ?? "n/a"}`)
 
@@ -6675,6 +6691,39 @@ function redactBrowserProxyCommandArgv(argv: string[]): string[] {
     }
   }
   return redacted
+}
+
+function parseJimengBrowserSubmitWireResult(
+  prepared: Pick<PreparedJimengRun, "submitId">,
+  wire: JimengBrowserSubmitWireResult,
+) {
+  const recordValue = (value: unknown): Record<string, unknown> | null =>
+    value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null
+  const stringValue = (value: unknown): string | null => typeof value === "string" ? value : null
+  const responseBody = JSON.parse(wire.text) as Record<string, unknown>
+  const data = recordValue(responseBody.data)
+  const aigc = recordValue(data?.aigc_data)
+  const task = recordValue(aigc?.task)
+  const submitId = stringValue(aigc?.submit_id) ?? stringValue(task?.submit_id)
+  const historyId = stringValue(aigc?.history_record_id)
+  const ret = stringValue(responseBody.ret) ?? responseBody.ret
+  const errmsg = stringValue(responseBody.errmsg) ?? responseBody.errmsg
+  if (!submitId && !historyId) {
+    throw new JimengError({
+      category: "upstream",
+      code: "WORKBENCH_SUBMIT_MISSING_IDS",
+      message: `Workbench submit did not return submit/history id (ret=${String(ret ?? "unknown")}, errmsg=${String(errmsg ?? "unknown")})`,
+      retryable: false,
+      details: { ret: ret ?? null, errmsg: errmsg ?? null },
+    })
+  }
+  return {
+    submitId: submitId ?? prepared.submitId,
+    historyId: historyId ?? null,
+    httpStatus: wire.status,
+    responseBody,
+    responseTextSha256: sha256(wire.text),
+  }
 }
 
 function isSensitiveBrowserProxyFlag(key: string): boolean {

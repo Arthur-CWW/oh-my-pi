@@ -98,6 +98,7 @@ describe("Jimeng HTTP cassette transport", () => {
       expect(() => readJimengHttpCassette(cassettePath)).toThrow(/cassette is invalid/)
       expect(parseJimengHttpTransportMode(undefined)).toBe("live")
       expect(parseJimengHttpTransportMode("fixture")).toBe("fixture")
+      expect(parseJimengHttpTransportMode("cdp-ui")).toBe("cdp-ui")
       expect(parseJimengHttpTransportMode("cdp-fetch")).toBe("cdp-fetch")
       expect(() => parseJimengHttpTransportMode("random")).toThrow(JimengError)
     } finally {

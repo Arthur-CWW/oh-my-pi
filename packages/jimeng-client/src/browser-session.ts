@@ -42,6 +42,21 @@ const FORBIDDEN_BROWSER_FETCH_HEADERS = new Set([
   "content-length",
 ])
 
+export interface JimengBrowserImageSubmitOptions extends JimengBrowserSessionOptions {
+  prompt: string
+  ratio?: string
+  resolution?: "2k" | "4k"
+  timeoutMs?: number
+}
+
+export interface JimengBrowserSubmitWireResult {
+  status: number
+  text: string
+  url: string
+}
+
+const JIMENG_IMAGE_WORKBENCH_URL = "https://jimeng.jianying.com/ai-tool/generate/?type=image"
+
 export function createJimengBrowserFetch(options: JimengBrowserFetchOptions): JimengFetch {
   return async (url, init) => {
     const puppeteer = await import("puppeteer-core")
@@ -88,6 +103,43 @@ export function createJimengBrowserFetch(options: JimengBrowserFetchOptions): Ji
   }
 }
 
+export async function submitJimengText2ImageInBrowser(options: JimengBrowserImageSubmitOptions): Promise<JimengBrowserSubmitWireResult> {
+  const puppeteer = await import("puppeteer-core")
+  const browser = await puppeteer.connect({ browserURL: options.cdpUrl, protocolTimeout: 600_000 })
+
+  try {
+    const page = await resolveJimengPage(browser, options)
+    await page.goto(JIMENG_IMAGE_WORKBENCH_URL, { waitUntil: "domcontentloaded" })
+    await new Promise((resolve) => setTimeout(resolve, 3_000))
+    await assertJimengBrowserSession(page, options.cdpUrl)
+    await closeAssetDrawer(page)
+    await fillJimengPrompt(page, options.prompt)
+    await ensureJimengImageSettings(page, options.ratio, options.resolution)
+    const responsePromise = page.waitForResponse(
+      (response) => response.url().includes("/mweb/v1/aigc_draft/generate"),
+      { timeout: options.timeoutMs ?? 60_000 },
+    )
+    await clickJimengImageSubmit(page)
+    const response = await responsePromise
+    return {
+      status: response.status(),
+      text: await response.text(),
+      url: response.url(),
+    }
+  } catch (error) {
+    if (error instanceof JimengError) throw error
+    throw jimengError({
+      category: "transport",
+      code: "JIMENG_BROWSER_UI_SUBMIT_FAILED",
+      message: error instanceof Error ? error.message : String(error),
+      retryable: true,
+      details: { cdpUrl: options.cdpUrl, targetUrl: options.targetUrl ?? null },
+    })
+  } finally {
+    await browser.disconnect()
+  }
+}
+
 export async function loadJimengSessionFromBrowser(options: JimengBrowserSessionOptions): Promise<JimengSessionBundle> {
   const puppeteer = await import("puppeteer-core")
   const browser = await puppeteer.connect({ browserURL: options.cdpUrl })
@@ -120,6 +172,85 @@ export async function loadJimengSessionFromBrowser(options: JimengBrowserSession
     await browser.disconnect()
   }
 }
+
+async function closeAssetDrawer(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const close = document.querySelector('button[aria-label="关闭"]') as HTMLButtonElement | null
+    close?.click()
+  })
+}
+
+async function fillJimengPrompt(page: Page, prompt: string): Promise<void> {
+  const result = await page.evaluate((nextPrompt) => {
+    const editors = Array.from(document.querySelectorAll('div[role="textbox"].ProseMirror, div.ProseMirror[contenteditable="true"]'))
+    const editor = editors[0] as HTMLElement | undefined
+    if (!editor) return false
+    editor.textContent = nextPrompt
+    editor.dispatchEvent(new InputEvent("input", { bubbles: true, data: nextPrompt, inputType: "insertText" }))
+    editor.dispatchEvent(new Event("change", { bubbles: true }))
+    return true
+  }, prompt)
+  if (result) return
+  throw jimengError({
+    category: "validation",
+    code: "JIMENG_IMAGE_PROMPT_EDITOR_MISSING",
+    message: "Jimeng image workbench prompt editor is missing.",
+    retryable: false,
+  })
+}
+
+async function ensureJimengImageSettings(page: Page, ratio?: string, resolution?: "2k" | "4k"): Promise<void> {
+  const current = await page.evaluate(() => {
+    const buttons = Array.from(document.querySelectorAll("button"))
+    const match = buttons.find((entry) => /智能比例|1:1|9:16|16:9|高清 2K|超清 4K/.test((entry.innerText || entry.textContent || "").trim()))
+    return (match?.innerText || match?.textContent || "").trim()
+  })
+  if (ratio && !current.includes(ratio)) {
+    throw jimengError({
+      category: "validation",
+      code: "JIMENG_IMAGE_RATIO_SWITCH_UNSUPPORTED",
+      message: `Jimeng browser UI submit expected ratio ${ratio}, but the current workbench toolbar is ${JSON.stringify(current)}.`,
+      retryable: false,
+      details: { ratio, current },
+    })
+  }
+  if (resolution) {
+    const label = browserResolutionLabel(resolution)
+    if (!current.includes(label)) {
+      throw jimengError({
+        category: "validation",
+        code: "JIMENG_IMAGE_RESOLUTION_SWITCH_UNSUPPORTED",
+        message: `Jimeng browser UI submit expected resolution ${label}, but the current workbench toolbar is ${JSON.stringify(current)}.`,
+        retryable: false,
+        details: { resolution, current },
+      })
+    }
+  }
+}
+
+async function clickJimengImageSubmit(page: Page): Promise<void> {
+  const clicked = await page.evaluate(() => {
+    const buttons = Array.from(document.querySelectorAll("button"))
+    const match = buttons
+      .filter((entry) => !(entry as HTMLButtonElement).disabled)
+      .find((entry) => (entry.className || "").toString().includes("submit-button"))
+    if (!match) return false
+    ;(match as HTMLButtonElement).click()
+    return true
+  })
+  if (clicked) return
+  throw jimengError({
+    category: "validation",
+    code: "JIMENG_IMAGE_SUBMIT_BUTTON_MISSING",
+    message: "Jimeng image workbench submit button is missing or disabled.",
+    retryable: false,
+  })
+}
+
+function browserResolutionLabel(value: "2k" | "4k"): string {
+  return value === "4k" ? "超清 4K" : "高清 2K"
+}
+
 
 async function resolveJimengPage(
   browser: Browser,
@@ -170,10 +301,10 @@ async function serializeBrowserFetchPayload(url: string, init?: RequestInit): Pr
 
 function sanitizeBrowserFetchHeaders(headers: Headers): Array<[string, string]> {
   const out: Array<[string, string]> = []
-  for (const [key, value] of headers.entries()) {
-    if (FORBIDDEN_BROWSER_FETCH_HEADERS.has(key.toLowerCase())) continue
+  headers.forEach((value, key) => {
+    if (FORBIDDEN_BROWSER_FETCH_HEADERS.has(key.toLowerCase())) return
     out.push([key, value])
-  }
+  })
   return out
 }
 

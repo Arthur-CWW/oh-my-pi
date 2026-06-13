@@ -20,7 +20,6 @@ describe("Jimeng client construction seams", () => {
     expect(occurrences.map(({ file, text }) => `${file}|${text}`).sort()).toEqual([
       "browser-proxy-cli.ts|const bytes = await new JimengClient().download(preview.previewImageUrl)",
       "browser-proxy-cli.ts|const client = new JimengClient()",
-      "browser-proxy-cli.ts|const client = new JimengClient()",
       "cli.ts|const client = new JimengClient()",
       "dreamina-compatible-cli.ts|const client = new JimengClient()",
     ].sort())

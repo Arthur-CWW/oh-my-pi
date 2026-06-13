@@ -5,7 +5,7 @@ import { Schema } from "effect"
 import { type JimengFetch, type JimengFetchResponse } from "./client"
 import { JimengError, jimengError } from "./errors"
 
-export type JimengHttpTransportMode = "live" | "record" | "replay" | "fixture" | "cdp-fetch"
+export type JimengHttpTransportMode = "live" | "record" | "replay" | "fixture" | "cdp-fetch" | "cdp-ui"
 
 export interface JimengHttpCassetteRequest {
   method: string
@@ -49,7 +49,7 @@ export interface JimengHttpTransportOptions {
   nowIso?: () => string
 }
 
-const TransportModeValues = ["live", "record", "replay", "fixture", "cdp-fetch"] as const
+const TransportModeValues = ["live", "record", "replay", "fixture", "cdp-fetch", "cdp-ui"] as const
 
 const CassetteRequestSchema = Schema.Struct({
   method: Schema.String,
@@ -117,6 +117,16 @@ export function createJimengHttpTransport(options: JimengHttpTransportOptions = 
       fetch: baseFetch,
       info: { mode, cassettePath: null },
     }
+  }
+
+  if (mode === "cdp-ui") {
+    throw jimengError({
+      category: "validation",
+      code: "JIMENG_BROWSER_UI_TRANSPORT_UNSUPPORTED",
+      message: "Jimeng HTTP transport mode \"cdp-ui\" is submit-command specific and cannot be used as a shared HTTP transport.",
+      retryable: false,
+      details: { mode },
+    })
   }
 
   if (!cassettePath) {

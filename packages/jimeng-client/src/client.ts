@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto"
 import { setTimeout as sleep } from "node:timers/promises"
+import { Effect } from "effect"
 import { type JimengOp, type PreparedJimengRun } from "./capture"
 import { JimengError, jimengError } from "./errors"
 import { extractImageSubmitInfoFromSseText, extractSubmitIdFromSseText } from "./sse"
@@ -42,7 +43,7 @@ export interface JimengHistoryItem {
     cover_url_map?: Record<string, string> | null
   } | null
   image?: {
-    large_images?: Array<{ image_url?: string | null }> | null
+    large_images?: Array<{ image_url?: string | null; width?: number | null; height?: number | null }> | null
   } | null
   [key: string]: unknown
 }
@@ -79,6 +80,24 @@ export interface JimengRunResult {
 export interface JimengClientOptions {
   fetch?: JimengFetch
   riskControlBreaker?: JimengRiskControlBreakerOptions
+}
+
+export interface JimengPollUntilTerminalInput {
+  pollUrl: string
+  pollHeaders: Record<string, string>
+  submitId: string
+  terminalStatus: number
+  pollKind?: PreparedJimengRun["pollKind"]
+  pollBody?: Record<string, unknown>
+  pollIntervalMs: number
+  maxPolls: number
+}
+
+export interface JimengRunPreparedInput {
+  prepared: PreparedJimengRun
+  pollIntervalMs?: number
+  maxPolls?: number
+  downloadArtifacts?: boolean
 }
 
 export interface JimengRiskControlBreakerOptions {
@@ -201,16 +220,7 @@ export class JimengClient {
     }
   }
 
-  async pollUntilTerminal(input: {
-    pollUrl: string
-    pollHeaders: Record<string, string>
-    submitId: string
-    terminalStatus: number
-    pollKind?: PreparedJimengRun["pollKind"]
-    pollBody?: Record<string, unknown>
-    pollIntervalMs: number
-    maxPolls: number
-  }): Promise<JimengPollResult> {
+  async pollUntilTerminal(input: JimengPollUntilTerminalInput): Promise<JimengPollResult> {
     const trace: JimengPollTraceEntry[] = []
 
     for (let attempt = 0; attempt < input.maxPolls; attempt += 1) {
@@ -257,12 +267,7 @@ export class JimengClient {
     })
   }
 
-  async runPrepared(input: {
-    prepared: PreparedJimengRun
-    pollIntervalMs?: number
-    maxPolls?: number
-    downloadArtifacts?: boolean
-  }): Promise<JimengRunResult> {
+  async runPrepared(input: JimengRunPreparedInput): Promise<JimengRunResult> {
     const submit = await this.submitPrepared(input.prepared)
     const poll = await this.pollUntilTerminal({
       pollUrl: input.prepared.pollUrl,
@@ -402,6 +407,47 @@ export class JimengClient {
   }
 }
 
+export const submitPreparedEffect = Effect.fn("submitPreparedEffect")(function* (
+  client: JimengClient,
+  prepared: PreparedJimengRun,
+) {
+  return yield* Effect.tryPromise({
+    try: () => client.submitPrepared(prepared),
+    catch: effectError,
+  })
+})
+
+export const pollUntilTerminalEffect = Effect.fn("pollUntilTerminalEffect")(function* (
+  client: JimengClient,
+  input: JimengPollUntilTerminalInput,
+) {
+  return yield* Effect.tryPromise({
+    try: () => client.pollUntilTerminal(input),
+    catch: effectError,
+  })
+})
+
+export const downloadArtifactsEffect = Effect.fn("downloadArtifactsEffect")(function* (
+  client: JimengClient,
+  op: JimengOp,
+  record: JimengHistoryRecord,
+) {
+  return yield* Effect.tryPromise({
+    try: () => client.downloadArtifacts(op, record),
+    catch: effectError,
+  })
+})
+
+export const runPreparedEffect = Effect.fn("runPreparedEffect")(function* (
+  client: JimengClient,
+  input: JimengRunPreparedInput,
+) {
+  return yield* Effect.tryPromise({
+    try: () => client.runPrepared(input),
+    catch: effectError,
+  })
+})
+
 export function pickVideoUrl(record: JimengHistoryRecord): string | null {
   const firstItem = record.item_list?.[0]
   if (!firstItem?.video) return null
@@ -420,16 +466,44 @@ export function collectImageUrls(record: JimengHistoryRecord): string[] {
   const items = record.item_list ?? []
 
   for (const item of items) {
-    if (item.common_attr?.cover_url) urls.push(item.common_attr.cover_url)
-    if (item.common_attr?.cover_url_map) urls.push(...Object.values(item.common_attr.cover_url_map))
-    if (item.image?.large_images) {
-      for (const image of item.image.large_images) {
-        if (image.image_url) urls.push(image.image_url)
-      }
+    const bestLargeImage = pickBestLargeImageUrl(item.image?.large_images ?? null)
+    if (bestLargeImage) {
+      urls.push(bestLargeImage)
+      continue
     }
+    const bestCover = pickBestCoverUrl(item.common_attr?.cover_url ?? null, item.common_attr?.cover_url_map ?? null)
+    if (bestCover) urls.push(bestCover)
   }
 
   return [...new Set(urls)]
+}
+
+function pickBestLargeImageUrl(images: Array<{ image_url?: string | null; width?: number | null; height?: number | null }> | null): string | null {
+  if (!images || images.length === 0) return null
+  const candidates = images.filter((image): image is { image_url: string; width?: number | null; height?: number | null } => typeof image.image_url === "string" && image.image_url.length > 0)
+  if (candidates.length === 0) return null
+  const best = candidates.reduce((current, candidate) => imageArea(candidate) >= imageArea(current) ? candidate : current)
+  return best.image_url
+}
+
+function pickBestCoverUrl(coverUrl: string | null | undefined, coverUrlMap: Record<string, string> | null | undefined): string | null {
+  const entries = Object.entries(coverUrlMap ?? {}).filter(([, value]) => typeof value === "string" && value.length > 0)
+  if (entries.length > 0) {
+    const best = entries.reduce((current, candidate) => numericKey(candidate[0]) >= numericKey(current[0]) ? candidate : current)
+    return best[1]
+  }
+  return coverUrl ?? null
+}
+
+function imageArea(value: { width?: number | null; height?: number | null }): number {
+  const width = typeof value.width === "number" ? value.width : 0
+  const height = typeof value.height === "number" ? value.height : 0
+  return width * height
+}
+
+function numericKey(value: string): number {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : 0
 }
 
 export function assertNoRiskError(body: unknown, rawText: string): void {
@@ -472,6 +546,10 @@ function safeJson(value: string): unknown {
   } catch {
     return value
   }
+}
+
+function effectError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error))
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
