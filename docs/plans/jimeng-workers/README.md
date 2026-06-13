@@ -25,6 +25,8 @@ The project agent pins:
 model: gemini-3.5-flash
 ```
 
+The project worker agent intentionally does not expose `bash`. This prevents Gemini workers from spending cycles on validation, git inspection, or provider commands that the GPT-5.5 parent must run once against the integrated tree.
+
 Launch workers from the parent GPT-5.5 process with one OMP `task` batch. Do not shell out to separate `omp` processes for normal worker fan-out.
 
 Worker result files should be written under ignored `data/**`, for example:
@@ -34,6 +36,28 @@ data/jimeng-lab/worker-results/mix-audio-result.md
 ```
 
 Do not store credentials, cookies, signed URLs, raw provider responses, or private media in worker result files.
+
+## Worker Guardrails
+
+- Workers do not run tests, typecheck, lint, formatters, git commands, provider CLIs, live captures, or shell probes.
+- Workers may edit only their owned files and ignored worker result files.
+- Workers must not claim validation passed unless the parent gave them a current observed result.
+- Workers should write `commands run: none` unless the assignment explicitly grants command execution.
+- Workers should inspect only files/proof paths listed in the brief. Broad `data/**` or package-wide scans are a prompt smell unless the brief explicitly asks for discovery.
+- Workers should summarize proof shapes/statuses, not paste raw provider JSON bodies or signed URLs.
+
+## Transcript Review Checklist
+
+After each worker finishes, inspect `history://<id>` for:
+
+- tool-policy violations: tests/typecheck/lint/git/provider commands, broad scans, unassigned file edits;
+- false validation claims: “tests pass” without parent-observed output;
+- model/runtime issues: rate-limit errors, auth/model alias failures, retries, or truncated output;
+- context bloat: rereading whole docs or broad proof trees when a narrow path was assigned;
+- unsafe artifact handling: raw provider JSON, signed URLs, cookies, credentials, or private media in result files;
+- handoff quality: exact files, behavioral delta, parent validation commands, and central docs/registry recommendations.
+
+Wave 1 finding: no OMP/Gemini rate-limit or model-alias errors were visible in `history://JimengMixAudio`, `history://JimengGenContract`, or `history://JimengTemplateMining`. The main issues were prompt/tooling: Worker A ran tests/typecheck/git despite the parent-owned validation rule, and read-only workers used broad scans. The next wave should keep `bash` unavailable and make each brief list exact inspection paths.
 
 ## Session Tracking
 

@@ -1,6 +1,10 @@
+import { createHash } from "node:crypto"
 import { Schema } from "effect"
+import { type JimengSessionBundle } from "./capture"
+import { assertNoRiskError, JimengClient, type JimengFetch } from "./client"
 import { jimengError } from "./errors"
 import { type JsonObject, type JsonValue } from "./reference-image"
+import { parseJimengApiEnvelope, parseJsonText } from "./schema"
 
 export const JIMENG_MIX_AUDIO_VIDEO_ENDPOINT = "/mweb/v1/mix_audio_video" as const
 export const JIMENG_MIX_AUDIO_VIDEOS_ENDPOINT = "/mweb/v1/mix_audio_videos" as const
@@ -173,4 +177,207 @@ function decodeMixAudioContract<A>(schema: Schema.Decoder<A>, value: JsonValue, 
       details: { operation, error: message },
     })
   }
+}
+
+export interface JimengMixAudioTaskSummary {
+  taskId: string | null
+  status: string | number | null
+  videoItemId: string | null
+  audioVid: string | null
+  itemId: string | null
+  videoUrl: string | null
+  errmsg: string | null
+  keys: string[]
+}
+
+export interface JimengMixAudioVideoResult {
+  endpoint: typeof JIMENG_MIX_AUDIO_VIDEO_ENDPOINT | typeof JIMENG_MIX_AUDIO_VIDEOS_ENDPOINT
+  httpStatus: number
+  ret: string | number | null
+  errmsg: string | null
+  responseTextSha256: string
+  request: JsonObject
+  queryParams: JsonObject | null
+  tasks: JimengMixAudioTaskSummary[]
+  body: JsonValue
+}
+
+export async function executeJimengMixAudioVideo(input: {
+  client?: JimengClient
+  fetch?: JimengFetch
+  session: JimengSessionBundle
+  mix: JimengMixAudioVideoInput
+}): Promise<JimengMixAudioVideoResult> {
+  const plan = buildJimengMixAudioVideoPlan(input.mix)
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
+
+  const DEFAULT_QUERY = "aid=513695&device_platform=web&region=cn&da_version=3.1.3"
+  const params = new URLSearchParams(DEFAULT_QUERY)
+  if (plan.queryParams && plan.queryParams.babi_param) {
+    params.set("babi_param", plan.queryParams.babi_param as string)
+  }
+  const url = `https://jimeng.jianying.com${plan.endpoint}?${params.toString()}`
+
+  const response = await client.requestText(url, {
+    method: "POST",
+    headers: buildMixAudioHeaders(input.session),
+    body: JSON.stringify(plan.request),
+  })
+
+  const body = parseMixAudioResponse(response.text, "mix-audio submit")
+
+  return {
+    endpoint: plan.endpoint,
+    httpStatus: response.status,
+    ret: retValue(body),
+    errmsg: errmsgValue(body),
+    responseTextSha256: sha256(response.text),
+    request: plan.request,
+    queryParams: plan.queryParams,
+    tasks: summarizeMixAudioTaskLikeRows(body),
+    body,
+  }
+}
+
+export function summarizeJimengMixAudioVideoResult(result: JimengMixAudioVideoResult): JsonObject {
+  return {
+    endpoint: result.endpoint,
+    http_status: result.httpStatus,
+    ret: result.ret,
+    errmsg: result.errmsg,
+    response_text_sha256: result.responseTextSha256,
+    request: redactSensitiveJsonObject(result.request),
+    query_params: result.queryParams ? redactSensitiveJsonObject(result.queryParams) : null,
+    task_count: result.tasks.length,
+    tasks: result.tasks.map(summarizeMixAudioTask),
+  }
+}
+
+function summarizeMixAudioTask(task: JimengMixAudioTaskSummary): JsonObject {
+  return {
+    task_id: task.taskId,
+    status: task.status,
+    video_item_id: task.videoItemId,
+    audio_vid: task.audioVid,
+    item_id: task.itemId,
+    video_url: task.videoUrl ? "[SIGNED_URL_REDACTED]" : null,
+    errmsg: task.errmsg,
+    keys: task.keys,
+  }
+}
+function redactSensitiveJsonObject(value: JsonObject): JsonObject {
+  const redacted = redactSensitiveJsonValue(value)
+  return isJsonObject(redacted) ? redacted : {}
+}
+
+function redactSensitiveJsonValue(value: JsonValue): JsonValue {
+  if (typeof value === "string") return shouldRedactString(value) ? "[SIGNED_URL_REDACTED]" : value
+  if (Array.isArray(value)) return value.map(redactSensitiveJsonValue)
+  if (isJsonObject(value)) {
+    const output: JsonObject = {}
+    for (const [key, item] of Object.entries(value)) output[key] = redactSensitiveJsonValue(item)
+    return output
+  }
+  return value
+}
+
+function shouldRedactString(value: string): boolean {
+  return (value.includes("http://") || value.includes("https://"))
+    && (value.includes("?") || value.includes("sign=") || value.includes("signature") || value.includes("X-Amz-"))
+}
+
+
+function parseMixAudioResponse(text: string, operation: string): JsonValue {
+  const body = parseJsonText(text, operation)
+  assertNoRiskError(body, text)
+  const envelope = parseJimengApiEnvelope(body, operation)
+  if (envelope.ret !== undefined && String(envelope.ret) !== "0") {
+    throw jimengError({
+      category: "upstream",
+      code: "JIMENG_MIX_AUDIO_UPSTREAM_ERROR",
+      message: `${operation} returned ret=${String(envelope.ret)} errmsg=${envelope.errmsg ?? "unknown"}.`,
+      retryable: false,
+      details: { ret: envelope.ret, errmsg: envelope.errmsg ?? null },
+    })
+  }
+  return body
+}
+
+function buildMixAudioHeaders(session: JimengSessionBundle): Record<string, string> {
+  return {
+    "content-type": "application/json",
+    accept: "application/json, text/plain, */*",
+    "user-agent": session.userAgent ?? "Mozilla/5.0",
+    origin: session.origin ?? "https://jimeng.jianying.com",
+    referer: session.referer ?? "https://jimeng.jianying.com/ai-tool/generate/",
+    cookie: session.cookie,
+    lan: "zh-Hans",
+    pf: "7",
+    loc: "cn",
+    appid: "513695",
+  }
+}
+
+function summarizeMixAudioTaskLikeRows(body: JsonValue): JimengMixAudioTaskSummary[] {
+  const data = isJsonObject(body) ? body.data : undefined
+  const rows: JimengMixAudioTaskSummary[] = []
+  collectMixAudioTaskRows(data, rows)
+  return rows.slice(0, 40)
+}
+
+function collectMixAudioTaskRows(value: JsonValue | undefined, rows: JimengMixAudioTaskSummary[]): void {
+  if (value === undefined || rows.length >= 40) return
+  if (Array.isArray(value)) {
+    for (const entry of value) collectMixAudioTaskRows(entry, rows)
+    return
+  }
+  if (!isJsonObject(value)) return
+
+  const taskId = stringValue(value.task_id) ?? stringValue(value.taskId)
+  const status = stringValue(value.status) ?? numberValue(value.status)
+  const videoItemId = stringValue(value.video_item_id) ?? stringValue(value.videoItemId)
+  const audioVid = stringValue(value.audio_vid) ?? stringValue(value.audioVid)
+
+  if (taskId || status !== null || videoItemId || audioVid) {
+    const resultObj = isJsonObject(value.result) ? value.result : undefined
+    const itemId = resultObj ? (stringValue(resultObj.item_id) ?? stringValue(resultObj.itemId)) : null
+    const videoUrl = resultObj ? (stringValue(resultObj.video_url) ?? stringValue(resultObj.videoUrl)) : null
+    const errmsg = stringValue(value.errmsg) ?? stringValue(value.error_msg) ?? stringValue(value.errorMsg)
+
+    rows.push({
+      taskId,
+      status,
+      videoItemId,
+      audioVid,
+      itemId,
+      videoUrl,
+      errmsg,
+      keys: Object.keys(value).sort(),
+    })
+  }
+
+  for (const entry of Object.values(value)) {
+    if (entry === value.result) continue
+    collectMixAudioTaskRows(entry, rows)
+  }
+}
+
+function retValue(body: JsonValue): string | number | null {
+  return isJsonObject(body) && (typeof body.ret === "string" || typeof body.ret === "number") ? body.ret : null
+}
+
+function errmsgValue(body: JsonValue): string | null {
+  return isJsonObject(body) && typeof body.errmsg === "string" ? body.errmsg : null
+}
+
+function stringValue(value: JsonValue | undefined): string | null {
+  return typeof value === "string" && value.trim() ? value : null
+}
+
+function numberValue(value: JsonValue | undefined): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null
+}
+
+function sha256(value: string): string {
+  return createHash("sha256").update(value).digest("hex")
 }

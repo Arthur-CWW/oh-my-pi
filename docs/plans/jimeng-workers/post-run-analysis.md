@@ -38,9 +38,9 @@ Analyze the completed Jimeng worker wave and produce a process/cost report.
 
 For each session, extract if available:
 
-- session id
+- agent id
 - model/provider
-- thinking level
+- parent model
 - start time
 - end time
 - duration
@@ -48,11 +48,11 @@ For each session, extract if available:
 - output tokens
 - cached tokens
 - tool call count
-- bash command count
+- command count
 - files read
 - files edited
-- tests run
-- test result
+- parent validation commands recommended
+- parent validation result
 - estimated cost
 - final status
 - integration outcome
@@ -73,6 +73,7 @@ Include:
 - per-worker table
 - aggregate cost/time table
 - quality findings
+- transcript/tool-policy findings
 - prompt/process improvements
 - recommended wave 2 worker split
 - exact doc updates recommended

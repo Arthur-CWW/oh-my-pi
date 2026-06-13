@@ -113,9 +113,9 @@ Use mock responses with permissive but realistic rows, for example:
 }
 ```
 
-## Validation
+## Parent Validation
 
-Run:
+Do not run these commands. Recommend them for the parent after integration:
 
 ```bash
 cd /Users/arthur/projects/pi-web-access/packages/jimeng-client
