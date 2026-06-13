@@ -202,10 +202,6 @@ import {
   summarizeJimengGenerateAuditPlan,
 } from "./generate-audit"
 import {
-  buildJimengGenerationContractReport,
-  writeJimengGenerationContractReportOutputs,
-} from "./generation-contract"
-import {
   buildJimengMixAudioVideoPlan,
   parseJimengMixAudioInputListJson,
   parseJimengMixAudioJsonObject,
@@ -388,7 +384,6 @@ Commands:
   static-inventory Inventory frontend API endpoints from local source/bundle roots
   packet-plan   Write the next value-ranked packet manifest and approval prompt
   contract-infer Infer schema/test/registry scaffolds from saved proof JSON/artifacts
-  generation-contract Validate/summarize saved live generation proof result JSON
   triage-coverage Summarize keep/maybe/skip endpoint registry coverage and remaining gaps
   catalog       Probe non-generating model/tool/persona/voice config endpoints
   agent-catalog Fetch normalized agent skills and image/video model catalog
@@ -473,7 +468,7 @@ Options:
   --analysis <file[,file]>       capture-analyze normalized analysis JSON for discovery-worklist
   --probeCandidates <file[,file]> Raw endpoint-probe candidate JSON for discovery-worklist
   --staticRoot <dir[,dir]>      Optional source/bundle roots to search for exact endpoint string hints
-  --input <file|dir>             Proof/cassette directory or JSON file for contract-infer/generation-contract
+  --input <file|dir>             Proof/cassette directory or JSON file for contract-infer
   --packet <id>                   Packet id for packet-plan (default: next value-ranked gap)
   --symbol <name[,name]>         Static-locate symbols/request-builder names to search beside endpoints
   --staticQuery <term[,term]>     Static-locate arbitrary source/bundle search terms
@@ -663,11 +658,7 @@ Examples:
   jimeng-browser-proxy contract-infer \\
     --input data/jimeng-lab/proof-20260612-live-generation-matrix \\
     --endpoint /mweb/v1/aigc_draft/generate \\
-    --outDir data/jimeng-lab/proof-20260612-live-generation-matrix/contract-infer
-
-  jimeng-browser-proxy generation-contract \\
-    --input data/jimeng-lab/proof-20260612-live-generation-matrix \\
-    --outDir data/jimeng-lab/proof-20260612-live-generation-matrix/generation-contract
+    --outDir data/jimeng-lab/proof-20260612-live-generation-matrix/contract
 
   jimeng-browser-proxy session
 
@@ -964,7 +955,6 @@ interface CliArgs {
     | "static-inventory"
     | "packet-plan"
     | "contract-infer"
-    | "generation-contract"
     | "triage-coverage"
     | "catalog"
     | "agent-catalog"
@@ -1352,21 +1342,6 @@ async function main(argv: string[]): Promise<void> {
       output_files: files,
     })
     console.log(`[jimeng-browser-proxy] packet-plan saved packet=${plan.packetId} approval=${plan.approvalRequired ? "required" : "not-required"} examples=${plan.examples.length}`)
-    return
-  }
-
-  if (args.command === "generation-contract") {
-    if (!args.input) throw new Error("generation-contract requires --input")
-    const dirs = ensureOutputDirs(path.resolve(args.outDir))
-    const outDir = path.join(dirs.normalizedDir, "generation-contract")
-    const report = buildJimengGenerationContractReport(args.input)
-    const files = writeJimengGenerationContractReportOutputs(report, outDir)
-    writeJson(path.join(dirs.rawDir, "generation-contract-inputs.json"), {
-      command: args.command,
-      input: path.resolve(args.input),
-      output_files: files,
-    })
-    console.log(`[jimeng-browser-proxy] generation-contract saved proofs=${report.proof_count} skipped=${report.skipped_json_count}`)
     return
   }
 
@@ -6033,7 +6008,6 @@ function parseArgs(argv: string[]): CliArgs {
     && command !== "static-inventory"
     && command !== "packet-plan"
     && command !== "contract-infer"
-    && command !== "generation-contract"
     && command !== "triage-coverage"
     && command !== "catalog"
     && command !== "agent-catalog"

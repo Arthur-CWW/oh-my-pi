@@ -298,6 +298,9 @@ function recommendStaticInventoryAction(input: {
   if (input.known?.status === "dry_run_only") {
     return { action: "approval_or_disposable_fixture", priority: 92, reason: input.known.note }
   }
+  if (input.known?.status === "partial" && input.resource === "/mweb/v1/dreamina_subject/generate_voice") {
+    return { action: "approval_or_disposable_fixture", priority: 92, reason: input.known.note }
+  }
   if (input.known?.status === "partial") {
     return { action: "capture_or_compare_before_live", priority: 88, reason: input.known.note }
   }

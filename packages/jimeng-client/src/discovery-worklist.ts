@@ -463,6 +463,14 @@ function recommendStaticEndpoint(endpoint: JimengDiscoveryStaticEndpoint): { act
       blockedReason: "Potential spend or mutation.",
     }
   }
+  if (endpoint.endpoint === "/mweb/v1/dreamina_subject/generate_voice" && endpoint.known_status === "partial") {
+    return {
+      action: "approval_or_disposable_fixture",
+      priority: 84,
+      reason: "Subject voice helper is typed, but live replay may consume quota; require passive capture or explicit approval before live enablement.",
+      blockedReason: "Potential generation spend or provider task creation.",
+    }
+  }
   if (endpoint.known_status === "partial" || endpoint.known_status === "captured_only") {
     return {
       action: "static_capture_needed",
