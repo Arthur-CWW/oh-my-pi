@@ -121,6 +121,8 @@ The project agent sets:
 model: gemini-3.5-flash
 ```
 
+Project `.omp/config.yml` sets `task.isolation.mode: auto`. Prefer `isolated: true` for implementation/write workers so OMP creates a CoW workspace, captures the patch/branch result, and cleans the temporary workspace. Keep read-only planning workers non-isolated unless they need scratch writes.
+
 The task batch shape is:
 
 ```txt
@@ -128,7 +130,8 @@ agent: jimeng-gemini-worker
 context: # Goal / # Constraints / # Contract
 tasks:
   - id: JimengMixAudio
-    assignment: read @docs/plans/jimeng-workers/worker-a-mix-audio.md and complete only that slice
+    isolated: true
+    assignment: read @docs/plans/jimeng-workers/worker-a-mix-audio.md and complete only that implementation slice; return the full result in final agent output
   - id: JimengGenContract
     assignment: read @docs/plans/jimeng-workers/worker-b-generation-contract.md and complete only that read-only slice
   - id: JimengTemplateMining
@@ -137,13 +140,13 @@ tasks:
 
 Workers should not run tests, typecheck, lint, formatters, or project-wide commands. The parent runs quick validation after each result and full validation after integration.
 
-Worker result files still go under ignored `data/**`, for example:
+For isolated workers, the durable handoff is `agent://<id>` / `history://<id>` plus the returned patch. Do not rely on ignored `data/**` result files from isolated workspaces. Non-isolated read-only workers may still write ignored result files under:
 
 ```txt
 data/jimeng-lab/worker-results/<packet>-<worker>-result.md
 ```
 
-Do not store credentials, cookies, signed URLs, or raw provider responses in worker result files.
+Do not store credentials, cookies, signed URLs, or raw provider responses in worker result files or agent output.
 
 ### Merge Protocol
 

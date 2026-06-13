@@ -123,9 +123,9 @@ mise exec -- bun test ./test/mix-audio.test.ts
 mise exec -- bun run typecheck
 ```
 
-## Result File
+## Result Handoff
 
-Write:
+If this task is run isolated, put the full result in final agent output because ignored `data/**` files may not be captured from the temporary workspace. If this task is run non-isolated, also write:
 
 ```txt
 data/jimeng-lab/worker-results/mix-audio-result.md

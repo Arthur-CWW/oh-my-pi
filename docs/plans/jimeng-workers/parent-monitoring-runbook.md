@@ -4,7 +4,7 @@ The parent GPT-5.5 Codex process coordinates OMP `task` subagents running Gemini
 
 ## Start A Wave
 
-Launch workers with the OMP task tool from the parent process. Use one batch so shared context is injected once and workers run in parallel.
+Launch workers with the OMP task tool from the parent process. Use one batch so shared context is injected once and workers run in parallel. Use `isolated: true` for implementation/write workers; OMP will create a CoW workspace, return a patch/branch result, and clean the temporary workspace. Keep read-only planning workers non-isolated unless they need scratch writes.
 
 Task batch:
 
@@ -16,10 +16,11 @@ context:
   # Constraints
   Workers run on Gemini 3.5 Flash via .omp/agents/jimeng-gemini-worker.md. Workers only touch assigned files, never central registry/docs/TASKS/snapshots unless explicitly assigned, never run tests/typecheck/lint/formatters/project-wide commands, and never make live/paid/mutating/visible-provider calls.
   # Contract
-  Parent owns registry/docs/snapshots/final validation/commits. Worker result files live under ignored data/jimeng-lab/worker-results/.
+  Parent owns registry/docs/snapshots/final validation/commits. Isolated write workers return patches through OMP; read-only workers return findings through agent output.
 tasks:
   - id: JimengMixAudio
-    assignment: Read docs/plans/jimeng-workers/worker-a-mix-audio.md and complete only that implementation slice.
+    isolated: true
+    assignment: Read docs/plans/jimeng-workers/worker-a-mix-audio.md and complete only that implementation slice. Put the full result in final agent output; do not rely on ignored data/** files for isolated handoff.
   - id: JimengGenContract
     assignment: Read docs/plans/jimeng-workers/worker-b-generation-contract.md and complete only that read-only planning slice.
   - id: JimengTemplateMining

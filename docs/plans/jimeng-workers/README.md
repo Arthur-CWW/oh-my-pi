@@ -27,15 +27,18 @@ model: gemini-3.5-flash
 
 The project worker agent intentionally does not expose `bash`. This prevents Gemini workers from spending cycles on validation, git inspection, or provider commands that the GPT-5.5 parent must run once against the integrated tree.
 
+Project `.omp/config.yml` sets `task.isolation.mode: auto`. Prefer task isolation for writing workers: set `isolated: true` on each implementation task item so OMP creates a CoW workspace, captures the worker patch, and cleans the workspace after completion. Read-only planning workers can stay non-isolated unless they need scratch writes.
+
 Launch workers from the parent GPT-5.5 process with one OMP `task` batch. Do not shell out to separate `omp` processes for normal worker fan-out.
 
-Worker result files should be written under ignored `data/**`, for example:
+For isolated workers, do not rely on ignored `data/**` result files as the handoff because the temporary workspace is cleaned and ignored files may not be captured in the patch. Put the full result in the final agent output; use `agent://<id>` / `history://<id>` as the durable handoff. Non-isolated read-only workers may still write result files under ignored `data/**`, for example:
 
 ```txt
-data/jimeng-lab/worker-results/mix-audio-result.md
+data/jimeng-lab/worker-results/template-mining-gap-review.md
 ```
 
-Do not store credentials, cookies, signed URLs, raw provider responses, or private media in worker result files.
+Do not store credentials, cookies, signed URLs, raw provider responses, or private media in worker result files or agent output.
+
 
 ## Worker Guardrails
 
