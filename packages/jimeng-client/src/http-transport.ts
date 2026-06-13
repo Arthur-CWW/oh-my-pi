@@ -5,7 +5,7 @@ import { Schema } from "effect"
 import { type JimengFetch, type JimengFetchResponse } from "./client"
 import { JimengError, jimengError } from "./errors"
 
-export type JimengHttpTransportMode = "live" | "record" | "replay" | "fixture"
+export type JimengHttpTransportMode = "live" | "record" | "replay" | "fixture" | "cdp-fetch"
 
 export interface JimengHttpCassetteRequest {
   method: string
@@ -49,7 +49,7 @@ export interface JimengHttpTransportOptions {
   nowIso?: () => string
 }
 
-const TransportModeValues = ["live", "record", "replay", "fixture"] as const
+const TransportModeValues = ["live", "record", "replay", "fixture", "cdp-fetch"] as const
 
 const CassetteRequestSchema = Schema.Struct({
   method: Schema.String,
@@ -97,6 +97,22 @@ export function createJimengHttpTransport(options: JimengHttpTransportOptions = 
   const nowIso = options.nowIso ?? (() => new Date().toISOString())
 
   if (mode === "live") {
+    return {
+      fetch: baseFetch,
+      info: { mode, cassettePath: null },
+    }
+  }
+
+  if (mode === "cdp-fetch") {
+    if (!options.fetch) {
+      throw jimengError({
+        category: "validation",
+        code: "JIMENG_BROWSER_FETCH_REQUIRED",
+        message: "Jimeng HTTP transport mode \"cdp-fetch\" requires an injected browser fetch.",
+        retryable: false,
+        details: { mode },
+      })
+    }
     return {
       fetch: baseFetch,
       info: { mode, cassettePath: null },

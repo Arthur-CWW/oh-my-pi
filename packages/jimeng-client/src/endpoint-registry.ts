@@ -527,14 +527,20 @@ const KEEP_GAP_AUDIT_BY_ENDPOINT: Record<string, JimengDiscoveryEndpointAudit> =
     evidence: [
       "docs/qa/jimeng-direct-compare-gates-20260611.md",
       "docs/qa/jimeng-omni-video-plan-20260611.md",
+      "docs/qa/jimeng-generation-direct-submit-client-20260613.md",
       "data/jimeng-lab/proof-20260610-text2image-plan-direct/",
       "data/jimeng-lab/text2video-plan-current/",
       "data/jimeng-lab/proof-20260610-subscription-api-live-check/",
       "data/jimeng-lab/proof-20260611-omni-video-plan/",
       "data/jimeng-lab/proof-20260612-live-generation-matrix/contract-infer/normalized/contract/",
       "data/jimeng-lab/proof-20260612-live-generation-matrix/generation-contract/normalized/generation-contract/",
+      "data/jimeng-captures/20260613-goal-text2image-submit-refresh/",
+      "data/jimeng-lab/proof-20260613-goal-text2image-capture-analyze/",
+      "data/jimeng-lab/proof-20260613-goal-text2image-compare-v2/",
+      "data/jimeng-lab/proof-20260613-goal-text2image-ui-history/",
+      "data/jimeng-lab/proof-20260613-goal-text2image-direct/",
     ],
-    nextProbe: "Repeat the matrix/infer/promote loop for lip-sync, end-frame, multi-frame, or omni-reference generation, then run the matching compare gate before any approval-gated live submit.",
+    nextProbe: "Fresh UI text-to-image submit succeeded and stable request-body compare now passes, but patched direct replay returned ret=3018 permission denied, indicating a body-bound a_bogus/msToken/browser-signature transport gap. Recover the frontend signer or add a browser-assisted signed submit path before claiming direct text2image parity; lip-sync/end-frame/multi-frame/omni-reference still need their matching compare gates before approval-gated live submit/poll/download.",
   },
   "/mweb/v1/execute_generate_audit": {
     evidence: [
@@ -723,7 +729,7 @@ const KEEP_GAP_AUDIT_BY_ENDPOINT: Record<string, JimengDiscoveryEndpointAudit> =
 }
 
 const KNOWN_ENDPOINTS: JimengDiscoveryKnownEndpoint[] = [
-  known("/mweb/v1/aigc_draft/generate", "partial", "text2image-plan/text2image-compare/text2video-plan/omni-video-plan/text2video-compare/omni-video-compare/generation-contract/text2video/image2video/frames2video/lip-sync", "Unified generation submit; direct image/video, first/end-frame, and Seedance omni-reference request builders are dry-run covered with semantic compare gates; saved live text/image-to-video proofs are now schema-validated by generation-contract; live lip-sync/end-frame/omni-reference still require capture compare or approval-gated submit."),
+  known("/mweb/v1/aigc_draft/generate", "partial", "text2image-plan/text2image-compare/text2video-plan/omni-video-plan/text2video-compare/omni-video-compare/generation-contract/executeJimengVideoDirectSubmit/executeJimengText2ImageSubmit/text2video/image2video/frames2video/lip-sync", "Unified generation submit; direct image/video, first/end-frame, and Seedance omni-reference request builders are dry-run covered with semantic compare gates; direct text/video and text/image submit helpers are mock-fetch tested; saved live text/image-to-video proofs are schema-validated by generation-contract; fresh UI text-to-image capture generated completed image records, but patched direct replay still returns ret=3018 because the current frontend uses a body-bound browser signature/a_bogus context; live lip-sync/end-frame/omni-reference still require capture compare or approval-gated submit/poll/download."),
   known("/mweb/v1/execute_generate_audit", "partial", "generate-audit-plan/request-plan-compare/executeJimengGenerateAudit", "Generation pre-audit material transform is modeled and typed client replay is covered by cassettes; live replay still needs passive UI capture compare for the full frontend submit context."),
   known("/mweb/v1/get_asset_list", "implemented", "assets", "No-spend workspace asset/history listing."),
   known("/mweb/v1/get_history", "implemented", "history-list", "No-spend paginated history list; prior live probes returned a valid empty records_list, so use assets/history-records for richer known-populated lookups."),

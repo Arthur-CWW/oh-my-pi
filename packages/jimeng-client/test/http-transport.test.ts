@@ -98,10 +98,34 @@ describe("Jimeng HTTP cassette transport", () => {
       expect(() => readJimengHttpCassette(cassettePath)).toThrow(/cassette is invalid/)
       expect(parseJimengHttpTransportMode(undefined)).toBe("live")
       expect(parseJimengHttpTransportMode("fixture")).toBe("fixture")
+      expect(parseJimengHttpTransportMode("cdp-fetch")).toBe("cdp-fetch")
       expect(() => parseJimengHttpTransportMode("random")).toThrow(JimengError)
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
+  })
+
+  test("cdp-fetch mode requires injected browser fetch and reuses it like live transport", async () => {
+    expect(() => createJimengHttpTransport({ mode: "cdp-fetch" })).toThrow(JimengError)
+
+    const requests: Array<{ url: string; init?: RequestInit }> = []
+    const transport = createJimengHttpTransport({
+      mode: "cdp-fetch",
+      fetch: mockFetch(["browser-response"], requests),
+    })
+
+    expect(transport.info).toEqual({ mode: "cdp-fetch", cassettePath: null })
+    expect(await responseText(await transport.fetch("https://jimeng.jianying.com/mweb/v1/example", {
+      method: "POST",
+      body: JSON.stringify({ prompt: "browser" }),
+    }))).toBe("browser-response")
+    expect(requests).toEqual([{
+      url: "https://jimeng.jianying.com/mweb/v1/example",
+      init: {
+        method: "POST",
+        body: JSON.stringify({ prompt: "browser" }),
+      },
+    }])
   })
 })
 

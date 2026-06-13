@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { createHash } from "node:crypto"
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import {
   buildJimengAssetsRequest,
@@ -32,7 +32,7 @@ import {
   parseJimengCommercePricingEndpoints,
   summarizeJimengCommercePricing,
 } from "./commerce-pricing"
-import { loadJimengSessionFromBrowser } from "./browser-session"
+import { createJimengBrowserFetch, loadJimengSessionFromBrowser } from "./browser-session"
 import {
   buildCapCutCollectionTemplatesRequest,
   buildSingleCapCutEndpointProbeVariant,
@@ -54,6 +54,7 @@ import {
   summarizeCapCutTemplateDetail,
   summarizeCapCutTemplateStaticCatalog,
 } from "./capcut-templates"
+import { JimengArtifactLog, type JimengArtifactInput } from "./artifact-log"
 import {
   buildCapCutEditorCatalogRequest,
   capCutEditorCatalogEndpointPath,
@@ -74,6 +75,7 @@ import {
   type JimengPacketId,
   writeJimengPacketPlanOutputs,
 } from "./packet-plan"
+import { renderJimengProofReportSync } from "./proof-renderer"
 import {
   buildJimengDiscoveryWorklist,
   readJimengCaptureAnalysisFile,
@@ -384,7 +386,7 @@ Commands:
   static-inventory Inventory frontend API endpoints from local source/bundle roots
   packet-plan   Write the next value-ranked packet manifest and approval prompt
   contract-infer Infer schema/test/registry scaffolds from saved proof JSON/artifacts
-  triage-coverage Summarize keep/maybe/skip endpoint registry coverage and remaining gaps
+  proof-report   Render a local HTML/Markdown report for generated proof artifacts
   catalog       Probe non-generating model/tool/persona/voice config endpoints
   agent-catalog Fetch normalized agent skills and image/video model catalog
   image-models  Fetch no-spend image generation model/config catalog
@@ -468,8 +470,9 @@ Options:
   --analysis <file[,file]>       capture-analyze normalized analysis JSON for discovery-worklist
   --probeCandidates <file[,file]> Raw endpoint-probe candidate JSON for discovery-worklist
   --staticRoot <dir[,dir]>      Optional source/bundle roots to search for exact endpoint string hints
-  --input <file|dir>             Proof/cassette directory or JSON file for contract-infer
+  --input <file|dir>             Proof/cassette directory or JSON file for contract-infer/proof-report
   --packet <id>                   Packet id for packet-plan (default: next value-ranked gap)
+  --title <text>                  Optional proof-report title
   --symbol <name[,name]>         Static-locate symbols/request-builder names to search beside endpoints
   --staticQuery <term[,term]>     Static-locate arbitrary source/bundle search terms
   --contextLines <n>            Snippet context lines for static-locate (default: 3)
@@ -493,8 +496,8 @@ Options:
   --detectionScene <value>        Optional image-create-avatar detection_scene field
   --batch <true|false>            Build mix-audio-plan for /mix_audio_videos instead of /mix_audio_video
   --variants <json|file>         Probe variants JSON array or object with variants
-  --transport <mode>             Shared HTTP transport: live, record, replay, fixture (default: live)
-  --cassette <file>              Cassette path for record/replay/fixture transport
+  --transport <mode>             Shared HTTP transport: live, record, replay, fixture, cdp-fetch (default: live)
+                                 cdp-fetch is submit-only and requires an attached Jimeng CDP browser target
   --requests <n>                 Total requests for rate-probe (default: --limit or 12)
   --concurrency <n>              Concurrent workers for rate-probe (default: 1)
   --delayMs <ms>                 Optional per-request delay for rate-probe workers
@@ -626,6 +629,9 @@ Options:
   --noDownload                  Submit/poll but do not download artifacts
   --pollIntervalMs <ms>         Poll interval (default: 3000)
   --maxPolls <n>                Max polls (default: 30)
+  --artifact-db <file>          Optional SQLite dashboard DB to update with run/artifact status
+  --worker <id>                 Optional dashboard worker id
+  --artifact-notes <text>       Optional dashboard notes for this run
   --durationSec <sec>           Video duration seconds for text2video (default from capture/client)
 
 Examples:
@@ -1027,12 +1033,14 @@ interface CliArgs {
     | "image2video"
     | "frames2video"
     | "lip-sync"
+    | "proof-report"
   cdpUrl: string
   targetUrl?: string
   session?: string
   sessionOut: string
   capture?: string
   rawNetwork?: string
+  title?: string
   captureDir?: string
   input?: string
   packetId?: JimengPacketId
@@ -1183,11 +1191,60 @@ interface CliArgs {
   pollIntervalMs: number
   maxPolls: number
   durationSec?: number
+  artifactDb?: string
+  worker?: string
+  artifactNotes?: string
+}
+
+interface BrowserProxyArtifactLogger {
+  log: JimengArtifactLog
+  runId: string
+  command: string
+  commandCwd: string
+  proofRoot: string
+  startedAtIso: string
+}
+
+interface BrowserProxyRunUpdate {
+  status: string
+  resultJson?: string
+  submitId?: string
+  historyId?: string
+  prompt?: string
+  finishedAtIso?: string
 }
 
 async function main(argv: string[]): Promise<void> {
   const args = parseArgs(argv)
+  const artifactLogger = openBrowserProxyArtifactLogger(args, argv)
+  try {
+    if (artifactLogger) {
+      upsertBrowserProxyArtifactRun(artifactLogger, args, { status: "in_progress" })
+      artifactLogger.log.addEvent({ runId: artifactLogger.runId, level: "info", message: "Browser-proxy CLI run started" })
+    }
+    await runBrowserProxyCommand(args)
+    if (artifactLogger) {
+      finishBrowserProxyArtifactRun(artifactLogger, args, args.dryRun ? "dry_run" : "done")
+    }
+  } catch (error) {
+    if (artifactLogger) {
+      upsertBrowserProxyArtifactRun(artifactLogger, args, {
+        status: "failed",
+        finishedAtIso: new Date().toISOString(),
+      })
+      artifactLogger.log.addEvent({
+        runId: artifactLogger.runId,
+        level: "error",
+        message: error instanceof Error ? error.message : String(error),
+      })
+    }
+    throw error
+  } finally {
+    artifactLogger?.log.close()
+  }
+}
 
+async function runBrowserProxyCommand(args: CliArgs): Promise<void> {
   if (args.command === "session") {
     const session = await loadJimengSessionFromBrowser({ cdpUrl: args.cdpUrl, targetUrl: args.targetUrl })
     const file = path.resolve(args.sessionOut)
@@ -1239,7 +1296,6 @@ async function main(argv: string[]): Promise<void> {
       writeJson(file, {
         endpoint: candidate.endpoint,
         method: candidate.method,
-        query: candidate.query,
         risk_class: candidate.risk_class,
         variants: candidate.variants,
       })
@@ -1325,6 +1381,17 @@ async function main(argv: string[]): Promise<void> {
       output_files: files,
     })
     console.log(`[jimeng-browser-proxy] contract-infer saved endpoints=${inference.endpoints.length} documents=${inference.file_count} artifacts=${inference.artifact_count}`)
+    return
+  }
+
+  if (args.command === "proof-report") {
+    if (!args.input) throw new Error("proof-report requires --input")
+    const report = renderJimengProofReportSync({
+      inputPath: args.input,
+      outDir: args.outDir === "data/jimeng-lab/browser-proxy" ? undefined : args.outDir,
+      title: args.title,
+    })
+    console.log(`[jimeng-browser-proxy] proof-report html=${report.htmlFile} markdown=${report.markdownFile} runs=${report.runs.length}`)
     return
   }
 
@@ -5960,7 +6027,20 @@ async function main(argv: string[]): Promise<void> {
     return
   }
 
-  const client = new JimengClient()
+  const submitFetch = args.transportMode === "cdp-fetch"
+    ? createJimengHttpTransport({
+      mode: "cdp-fetch",
+      fetch: createJimengBrowserFetch({
+        cdpUrl: args.cdpUrl,
+        targetUrl: args.targetUrl,
+      }),
+    }).fetch
+    : null
+  const client = submitFetch
+    ? new JimengClient({
+      fetch: (url, init) => url === prepared.submitUrl ? submitFetch(url, init) : fetch(url, init),
+    })
+    : new JimengClient()
   console.log(`[jimeng-browser-proxy] live submit command=${args.command} submitKind=${prepared.submitKind} pollKind=${prepared.pollKind}`)
   const submit = await client.submitPrepared(prepared)
   writeJson(path.join(dirs.rawDir, `${runId}-submit.json`), submit)
@@ -6080,6 +6160,7 @@ function parseArgs(argv: string[]): CliArgs {
     && command !== "image2video"
     && command !== "frames2video"
     && command !== "lip-sync"
+    && command !== "proof-report"
   ) {
     throw new Error(`Unknown command: ${String(command)}`)
   }
@@ -6238,6 +6319,7 @@ function parseArgs(argv: string[]): CliArgs {
     capture: flags.capture,
     rawNetwork: flags.rawNetwork ?? flags["raw-network"],
     captureDir: flags.captureDir ?? flags["capture-dir"],
+    title: flags.title,
     input: flags.input,
     packetId: parseJimengPacketId(flags.packet),
     analysisFiles: parseCsvFlag(flags.analysis),
@@ -6387,7 +6469,220 @@ function parseArgs(argv: string[]): CliArgs {
     pollIntervalMs: Number(flags.pollIntervalMs ?? 3000),
     maxPolls: Number(flags.maxPolls ?? 30),
     durationSec: durationSec ? Number(durationSec) : undefined,
+    artifactDb: flags["artifact-db"],
+    worker: flags.worker,
+    artifactNotes: flags["artifact-notes"],
   }
+}
+
+function openBrowserProxyArtifactLogger(args: CliArgs, argv: string[]): BrowserProxyArtifactLogger | null {
+  if (!args.artifactDb || args.command === "session") return null
+  const proofRoot = browserProxyArtifactProofRoot(args)
+  return {
+    log: new JimengArtifactLog({ dbPath: path.resolve(args.artifactDb) }),
+    runId: `${args.command}-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${Math.random().toString(36).slice(2, 8)}`,
+    command: buildBrowserProxyReproCommand(argv),
+    commandCwd: process.cwd(),
+    proofRoot,
+    startedAtIso: new Date().toISOString(),
+  }
+}
+
+
+function browserProxyArtifactProofRoot(args: CliArgs): string {
+  if (args.command === "proof-report" && args.outDir === "data/jimeng-lab/browser-proxy" && args.input) {
+    return path.resolve(args.input)
+  }
+  return path.resolve(args.outDir)
+}
+function finishBrowserProxyArtifactRun(logger: BrowserProxyArtifactLogger, args: CliArgs, status: string): void {
+  const files = collectBrowserProxyArtifactFiles(logger.proofRoot)
+  const jsonFiles = files.filter((file) => path.extname(file).toLowerCase() === ".json")
+  const metadata = extractBrowserProxyArtifactMetadata(jsonFiles)
+  const resultJson = pickBrowserProxyResultJson(jsonFiles)
+  const finalStatus = status === "done" && files.some((file) => file.endsWith("-dry-run-plan.json")) ? "dry_run" : status
+  upsertBrowserProxyArtifactRun(logger, args, {
+    status: finalStatus,
+    resultJson,
+    submitId: args.submitId ?? metadata.submitId,
+    historyId: args.historyId ?? metadata.historyId,
+    prompt: args.prompt ?? metadata.prompt,
+    finishedAtIso: new Date().toISOString(),
+  })
+  logger.log.replaceArtifacts(logger.runId, files.map((file) => browserProxyArtifactInput(logger.runId, logger.proofRoot, file)))
+  logger.log.addEvent({
+    runId: logger.runId,
+    level: "info",
+    message: `Logged ${files.length} artifact${files.length === 1 ? "" : "s"} from ${path.relative(logger.commandCwd, logger.proofRoot) || logger.proofRoot}`,
+  })
+}
+
+function upsertBrowserProxyArtifactRun(
+  logger: BrowserProxyArtifactLogger,
+  args: CliArgs,
+  update: BrowserProxyRunUpdate,
+): void {
+  logger.log.upsertRun({
+    id: logger.runId,
+    workerId: args.worker,
+    functionName: `browser-proxy / ${args.command}`,
+    command: logger.command,
+    commandCwd: logger.commandCwd,
+    status: update.status,
+    notes: args.artifactNotes,
+    proofRoot: logger.proofRoot,
+    resultJson: update.resultJson,
+    submitId: update.submitId,
+    historyId: update.historyId,
+    prompt: update.prompt,
+    startedAtIso: logger.startedAtIso,
+    finishedAtIso: update.finishedAtIso,
+  })
+}
+
+function collectBrowserProxyArtifactFiles(root: string): string[] {
+  if (!existsSync(root)) return []
+  const files: string[] = []
+  collectBrowserProxyArtifactFilesInto(root, files)
+  return files.sort()
+}
+
+function collectBrowserProxyArtifactFilesInto(dir: string, files: string[]): void {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const file = path.join(dir, entry.name)
+    if (entry.isDirectory()) {
+      collectBrowserProxyArtifactFilesInto(file, files)
+    } else if (entry.isFile() && !isBrowserProxyArtifactDbSidecar(file)) {
+      files.push(file)
+    }
+  }
+}
+
+function isBrowserProxyArtifactDbSidecar(file: string): boolean {
+  return /\.(?:sqlite|sqlite3|db|db3)(?:-(?:wal|shm))?$/i.test(file)
+}
+
+function pickBrowserProxyResultJson(jsonFiles: string[]): string | undefined {
+  return jsonFiles.find((file) => /(?:^|-)result\.json$/i.test(path.basename(file)))
+    ?? jsonFiles.find((file) => /(?:^|-)summary\.json$/i.test(path.basename(file)))
+    ?? jsonFiles[0]
+}
+
+function browserProxyArtifactInput(runId: string, proofRoot: string, file: string): JimengArtifactInput {
+  const absolute = path.resolve(file)
+  return {
+    id: createHash("sha256").update(`${runId}:${absolute}`).digest("hex").slice(0, 24),
+    runId,
+    kind: browserProxyArtifactKind(proofRoot, absolute),
+    path: absolute,
+    relativePath: path.relative(proofRoot, absolute) || path.basename(absolute),
+    mime: browserProxyArtifactMime(absolute),
+    sizeBytes: browserProxyFileSize(absolute),
+  }
+}
+
+function browserProxyArtifactKind(proofRoot: string, file: string): string {
+  const relative = path.relative(proofRoot, file)
+  const ext = path.extname(file).toLowerCase()
+  if (relative.startsWith(`raw${path.sep}`) && ext === ".json") return "raw-json"
+  if (relative.startsWith(`normalized${path.sep}`) && ext === ".json") return "normalized-json"
+  if (ext === ".mp4" || ext === ".mov" || ext === ".webm") return "video"
+  if (ext === ".png" || ext === ".jpg" || ext === ".jpeg" || ext === ".webp") return "image"
+  if (ext === ".mp3" || ext === ".wav" || ext === ".m4a") return "audio"
+  return "file"
+}
+
+function browserProxyArtifactMime(file: string): string {
+  const ext = path.extname(file).toLowerCase()
+  if (ext === ".json") return "application/json"
+  if (ext === ".md") return "text/markdown"
+  if (ext === ".txt") return "text/plain"
+  if (ext === ".mp4") return "video/mp4"
+  if (ext === ".mov") return "video/quicktime"
+  if (ext === ".webm") return "video/webm"
+  if (ext === ".png") return "image/png"
+  if (ext === ".jpg" || ext === ".jpeg") return "image/jpeg"
+  if (ext === ".webp") return "image/webp"
+  if (ext === ".mp3") return "audio/mpeg"
+  if (ext === ".wav") return "audio/wav"
+  if (ext === ".m4a") return "audio/mp4"
+  return "application/octet-stream"
+}
+
+function browserProxyFileSize(file: string): number | null {
+  try {
+    return statSync(file).size
+  } catch {
+    return null
+  }
+}
+
+function extractBrowserProxyArtifactMetadata(jsonFiles: string[]): { submitId?: string; historyId?: string; prompt?: string } {
+  const metadata: { submitId?: string; historyId?: string; prompt?: string } = {}
+  for (const file of jsonFiles) {
+    const value = safeReadBrowserProxyJson(file)
+    metadata.submitId ??= firstStringByKey(value, "submitId") ?? firstStringByKey(value, "submit_id")
+    metadata.historyId ??= firstStringByKey(value, "historyId") ?? firstStringByKey(value, "history_id")
+    metadata.prompt ??= firstStringByKey(value, "prompt")
+    if (metadata.submitId && metadata.historyId && metadata.prompt) break
+  }
+  return metadata
+}
+
+function safeReadBrowserProxyJson(file: string): JsonValue | undefined {
+  try {
+    return JSON.parse(readFileSync(file, "utf8")) as JsonValue
+  } catch {
+    return undefined
+  }
+}
+
+function firstStringByKey(value: JsonValue | undefined, key: string): string | undefined {
+  if (!value || typeof value !== "object") return undefined
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = firstStringByKey(item, key)
+      if (found) return found
+    }
+    return undefined
+  }
+  for (const [entryKey, entryValue] of Object.entries(value)) {
+    if (entryKey === key && typeof entryValue === "string" && entryValue.trim()) return entryValue
+    const found = firstStringByKey(entryValue, key)
+    if (found) return found
+  }
+  return undefined
+}
+
+function buildBrowserProxyReproCommand(argv: string[]): string {
+  return ["bun", "packages/jimeng-client/src/browser-proxy-cli.ts", ...redactBrowserProxyCommandArgv(argv)].map(shellQuote).join(" ")
+}
+
+function redactBrowserProxyCommandArgv(argv: string[]): string[] {
+  const redacted: string[] = []
+  for (let i = 0; i < argv.length; i += 1) {
+    const token = argv[i]!
+    const eq = token.startsWith("--") ? token.indexOf("=") : -1
+    const key = eq > 2 ? token.slice(2, eq) : token.startsWith("--") ? token.slice(2) : ""
+    if (key && isSensitiveBrowserProxyFlag(key)) {
+      redacted.push(eq > 2 ? `${token.slice(0, eq + 1)}[REDACTED]` : token)
+      if (eq <= 2 && argv[i + 1] !== undefined && !argv[i + 1]!.startsWith("--")) {
+        redacted.push("[REDACTED]")
+        i += 1
+      }
+    } else {
+      redacted.push(token)
+    }
+  }
+  return redacted
+}
+
+function isSensitiveBrowserProxyFlag(key: string): boolean {
+  return /(?:cookie|password|secret|token|credential)/i.test(key)
+}
+
+function shellQuote(value: string): string {
+  return /^[A-Za-z0-9_./:=,-]+$/.test(value) ? value : `'${value.replaceAll("'", "'\\''")}'`
 }
 
 function loadSession(args: CliArgs): Promise<JimengSessionBundle> | JimengSessionBundle {

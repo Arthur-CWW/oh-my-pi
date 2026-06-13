@@ -61,6 +61,38 @@ describe("Jimeng direct text2image plan capture compare", () => {
     expect(result.candidates[0]?.core_param_match).toBe(true)
   })
 
+  test("ignores provider-volatile direct-image ids and empty optional prompt fields", () => {
+    const plan = buildJimengText2ImageDirectPlan({
+      prompt: "韩系美妆达人在自然光卧室里展示补水精华",
+      modelVersion: "jimeng-5.0",
+      resolution: "2k",
+      ratio: "1:1",
+      sampleStrength: 0.5,
+      submitId: "submit-text2image-volatile-plan",
+      seed: 123_456,
+    })
+    const captured = JSON.parse(JSON.stringify(plan.request))
+    captured.submit_id = "submit-text2image-volatile-capture"
+    const capturedDraft = JSON.parse(captured.draft_content)
+    const capturedCore = capturedDraft.component_list[0].abilities.generate.core_param
+    capturedCore.seed = 987_654
+    capturedCore.negative_prompt = ""
+    capturedCore.large_image_info.id = "captured-large-image-id"
+    delete capturedCore.large_image_info.min_version
+    captured.draft_content = JSON.stringify(capturedDraft)
+    const capturedMetrics = JSON.parse(captured.metrics_extra)
+    capturedMetrics.generateId = "submit-text2image-volatile-capture"
+    captured.metrics_extra = JSON.stringify(capturedMetrics)
+
+    const result = compareJimengText2ImageDirectPlanWithRawNetwork({
+      dryRunPlanText: JSON.stringify(planOutput(plan)),
+      rawNetworkText: jsonl(rawRequestEvent("req-volatile", captured)),
+    })
+
+    expect(result.match).toBe(true)
+    expect(result.candidates[0]?.difference_count).toBe(0)
+  })
+
   test("reports path-level direct-image mismatches without leaking prompt text", () => {
     const plan = buildJimengText2ImageDirectPlan({
       prompt: "private product concept with exact brand phrasing",

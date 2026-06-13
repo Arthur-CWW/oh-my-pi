@@ -147,7 +147,7 @@ function compareCapturedRequest(expected: ParsedText2ImageDirectBody, request: C
   matchedPathCount += compareScalar(expected.rootModel, captured.rootModel, "extend.root_model", differences)
   matchedPathCount += compareScalar(expected.modelReqKey, captured.modelReqKey, "core_param.model", differences)
   matchedPathCount += compareCoreParam(expected.coreParam, captured.coreParam, differences)
-  matchedPathCount += compareOptionalObject(expected.metricsExtra, captured.metricsExtra, "metrics_extra", differences)
+  matchedPathCount += compareMetricsExtra(expected.metricsExtra, captured.metricsExtra, differences)
 
   return {
     index,
@@ -240,13 +240,48 @@ function parseRawNetworkCdpEvent(line: string, lineNumber: number): { method?: s
 function compareCoreParam(expected: JsonObject | null, actual: JsonObject | null, differences: JimengText2ImageDirectCompareDifference[]): number {
   if (!expected || !actual) return compareOptionalObject(expected, actual, "core_param", differences)
   let matched = 0
-  for (const key of ["model", "prompt", "sample_strength", "intelligent_ratio", "seed"]) {
+  for (const key of ["model", "prompt", "sample_strength", "intelligent_ratio"]) {
     matched += compareScalar(expected[key], actual[key], `core_param.${key}`, differences)
   }
   matched += compareOptionalField(expected, actual, "image_ratio", differences)
-  matched += compareOptionalField(expected, actual, "negative_prompt", differences)
-  matched += compareOptionalObject(recordValue(expected.large_image_info), recordValue(actual.large_image_info), "core_param.large_image_info", differences)
+  matched += compareOptionalTextField(expected, actual, "negative_prompt", differences)
+  matched += compareLargeImageInfo(recordValue(expected.large_image_info), recordValue(actual.large_image_info), differences)
   return matched
+}
+
+function compareMetricsExtra(expected: JsonObject | null, actual: JsonObject | null, differences: JimengText2ImageDirectCompareDifference[]): number {
+  return compareOptionalObject(omitVolatileFields(expected, ["generateId"]), omitVolatileFields(actual, ["generateId"]), "metrics_extra", differences)
+}
+
+function compareLargeImageInfo(expected: JsonObject | null, actual: JsonObject | null, differences: JimengText2ImageDirectCompareDifference[]): number {
+  return compareOptionalObject(omitVolatileFields(expected, ["id", "min_version"]), omitVolatileFields(actual, ["id", "min_version"]), "core_param.large_image_info", differences)
+}
+
+function omitVolatileFields(value: JsonObject | null, keys: string[]): JsonObject | null {
+  if (!value) return value
+  const output: JsonObject = {}
+  for (const [key, entry] of Object.entries(value)) {
+    if (!keys.includes(key)) output[key] = entry
+  }
+  return output
+}
+
+function compareOptionalTextField(expected: JsonObject, actual: JsonObject, key: string, differences: JimengText2ImageDirectCompareDifference[]): number {
+  const expectedValue = expected[key]
+  const actualValue = actual[key]
+  const expectedEmpty = expectedValue === undefined || expectedValue === null || expectedValue === ""
+  const actualEmpty = actualValue === undefined || actualValue === null || actualValue === ""
+  if (expectedEmpty && actualEmpty) return 1
+  if (expectedEmpty !== actualEmpty) {
+    differences.push({
+      path: `core_param.${key}`,
+      kind: expectedEmpty ? "mismatch" : "missing",
+      expected: expectedEmpty ? { kind: "absent" } : describeValue(expectedValue!),
+      actual: actualEmpty ? { kind: "absent" } : describeValue(actualValue!),
+    })
+    return 0
+  }
+  return compareScalar(expectedValue, actualValue, `core_param.${key}`, differences)
 }
 
 function compareOptionalField(expected: JsonObject, actual: JsonObject, key: string, differences: JimengText2ImageDirectCompareDifference[]): number {

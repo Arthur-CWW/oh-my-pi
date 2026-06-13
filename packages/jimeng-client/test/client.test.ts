@@ -1,5 +1,17 @@
 import { describe, expect, test } from "bun:test"
-import { collectImageUrls, JimengClient, JimengError, type JimengFetch } from "../src"
+import { Effect } from "effect"
+import {
+  collectImageUrls,
+  createJimengHttpTransport,
+  downloadArtifactsEffect,
+  JimengClient,
+  JimengError,
+  pollUntilTerminalEffect,
+  runPreparedEffect,
+  submitPreparedEffect,
+  type JimengFetch,
+  type PreparedJimengRun,
+} from "../src"
 
 function mockFetchFromQueue(textResponses: Array<{ status: number; text: string }>, bytes: Record<string, string> = {}): JimengFetch {
   const queue = [...textResponses]
@@ -332,6 +344,208 @@ describe("JimengClient", () => {
       "https://img.example/cover.png",
       "https://img.example/small.png",
       "https://img.example/other.png",
+    ])
+  })
+
+  test("Effect helpers call injected fetch path and return submit poll and artifacts", async () => {
+    const calls: Array<{ url: string; method: string }> = []
+    const prepared: PreparedJimengRun = {
+      op: "video",
+      submitKind: "workbench_json",
+      pollKind: "history_by_submit_id",
+      submitId: "fallback-submit-id",
+      prompt: "test prompt",
+      submitUrl: "https://jimeng.example.test/mweb/v1/aigc_draft/generate",
+      pollUrl: "https://jimeng.example.test/mweb/v1/get_history_by_ids",
+      submitHeaders: { "content-type": "application/json" },
+      pollHeaders: { "content-type": "application/json" },
+      submitBody: { submit_id: "fallback-submit-id" },
+      terminalStatus: 50,
+    }
+    const client = new JimengClient({
+      fetch: async (url, init) => {
+        calls.push({ url, method: init?.method ?? "GET" })
+        if (url === prepared.submitUrl) {
+          return new Response(JSON.stringify({
+            ret: 0,
+            data: { aigc_data: { submit_id: "effect-submit-id", history_record_id: "effect-history-id" } },
+          }), { status: 200 })
+        }
+        if (url === prepared.pollUrl) {
+          return new Response(JSON.stringify({
+            ret: 0,
+            data: {
+              "effect-submit-id": {
+                status: 50,
+                item_list: [{ video: { play_url: "https://cdn.example.test/effect.mp4" } }],
+              },
+            },
+          }), { status: 200 })
+        }
+        if (url === "https://cdn.example.test/effect.mp4") {
+          return new Response("video-bytes", { status: 200 })
+        }
+        throw new Error(`Unexpected URL ${url}`)
+      },
+    })
+
+    const submit = await Effect.runPromise(submitPreparedEffect(client, prepared))
+    const poll = await Effect.runPromise(pollUntilTerminalEffect(client, {
+      pollUrl: prepared.pollUrl,
+      pollHeaders: prepared.pollHeaders,
+      submitId: submit.submitId,
+      terminalStatus: prepared.terminalStatus,
+      pollKind: prepared.pollKind,
+      pollIntervalMs: 0,
+      maxPolls: 1,
+    }))
+    const artifacts = await Effect.runPromise(downloadArtifactsEffect(client, prepared.op, poll.record))
+
+    expect(submit).toMatchObject({ submitId: "effect-submit-id", historyId: "effect-history-id" })
+    expect(poll.record.item_list?.[0]?.video?.play_url).toBe("https://cdn.example.test/effect.mp4")
+    expect(artifacts).toEqual([{
+      kind: "video",
+      url: "https://cdn.example.test/effect.mp4",
+      bytes: new Uint8Array(await new Response("video-bytes").arrayBuffer()),
+    }])
+    expect(calls).toEqual([
+      { url: prepared.submitUrl, method: "POST" },
+      { url: prepared.pollUrl, method: "POST" },
+      { url: "https://cdn.example.test/effect.mp4", method: "GET" },
+    ])
+  })
+
+  test("runPreparedEffect can route submit through an injected cdp-fetch transport", async () => {
+    const prepared: PreparedJimengRun = {
+      op: "video",
+      submitKind: "workbench_json",
+      pollKind: "history_by_submit_id",
+      submitId: "video-fallback",
+      prompt: "browser submit prompt",
+      submitUrl: "https://jimeng.example.test/mweb/v1/aigc_draft/generate",
+      pollUrl: "https://jimeng.example.test/mweb/v1/get_history_by_ids",
+      submitHeaders: { "content-type": "application/json" },
+      pollHeaders: { "content-type": "application/json" },
+      submitBody: { submit_id: "video-fallback" },
+      terminalStatus: 50,
+    }
+    const browserCalls: Array<{ url: string; method: string }> = []
+    const nodeCalls: Array<{ url: string; method: string }> = []
+    const submitTransport = createJimengHttpTransport({
+      mode: "cdp-fetch",
+      fetch: async (url, init) => {
+        browserCalls.push({ url, method: init?.method ?? "GET" })
+        return new Response(JSON.stringify({
+          ret: 0,
+          data: { aigc_data: { submit_id: "cdp-submit-id", history_record_id: "cdp-history-id" } },
+        }), { status: 200 })
+      },
+    })
+    const client = new JimengClient({
+      fetch: async (url, init) => {
+        if (url === prepared.submitUrl) return submitTransport.fetch(url, init)
+        nodeCalls.push({ url, method: init?.method ?? "GET" })
+        if (url === prepared.pollUrl) {
+          return new Response(JSON.stringify({
+            ret: 0,
+            data: {
+              "cdp-submit-id": {
+                status: 50,
+                item_list: [{ video: { play_url: "https://cdn.example.test/cdp.mp4" } }],
+              },
+            },
+          }), { status: 200 })
+        }
+        if (url === "https://cdn.example.test/cdp.mp4") {
+          return new Response("cdp-video-bytes", { status: 200 })
+        }
+        throw new Error(`Unexpected URL ${url}`)
+      },
+    })
+
+    const result = await Effect.runPromise(runPreparedEffect(client, {
+      prepared,
+      pollIntervalMs: 0,
+      maxPolls: 1,
+    }))
+
+    expect(result.submit).toMatchObject({ submitId: "cdp-submit-id", historyId: "cdp-history-id" })
+    expect(result.artifacts).toEqual([{
+      kind: "video",
+      url: "https://cdn.example.test/cdp.mp4",
+      bytes: new Uint8Array(await new Response("cdp-video-bytes").arrayBuffer()),
+    }])
+    expect(browserCalls).toEqual([{ url: prepared.submitUrl, method: "POST" }])
+    expect(nodeCalls).toEqual([
+      { url: prepared.pollUrl, method: "POST" },
+      { url: "https://cdn.example.test/cdp.mp4", method: "GET" },
+    ])
+  })
+
+  test("runPreparedEffect returns end-to-end submit poll and artifact result", async () => {
+    const prepared: PreparedJimengRun = {
+      op: "image",
+      submitKind: "conversation_sse",
+      pollKind: "asset_list_first_image",
+      submitId: "image-fallback",
+      prompt: "test prompt",
+      submitUrl: "https://jimeng.example.test/mweb/v1/creation_agent/v2/conversation",
+      pollUrl: "https://jimeng.example.test/mweb/v1/get_asset_list",
+      submitHeaders: { "content-type": "application/json" },
+      pollHeaders: { "content-type": "application/json" },
+      submitBody: { messages: [] },
+      pollBody: { count: 20 },
+      terminalStatus: 50,
+    }
+    const calls: string[] = []
+    const client = new JimengClient({
+      fetch: async (url, init) => {
+        calls.push(`${init?.method ?? "GET"} ${url}`)
+        if (url === prepared.submitUrl) {
+          return new Response([
+            "event: message",
+            'data: {"event_data":{"submit_info":{"code":0,"msg":"success"},"aigc_data":{"submit_id":"123e4567-e89b-12d3-a456-426614174000"}}}',
+            "",
+          ].join("\n"), { status: 200 })
+        }
+        if (url === prepared.pollUrl) {
+          return new Response(JSON.stringify({
+            ret: "0",
+            data: {
+              asset_list: [{
+                image: {
+                  submit_id: "123e4567-e89b-12d3-a456-426614174000",
+                  status: 50,
+                  item_list: [{ image: { large_images: [{ image_url: "https://cdn.example.test/image.png" }] } }],
+                },
+              }],
+            },
+          }), { status: 200 })
+        }
+        if (url === "https://cdn.example.test/image.png") {
+          return new Response("image-bytes", { status: 200 })
+        }
+        throw new Error(`Unexpected URL ${url}`)
+      },
+    })
+
+    const result = await Effect.runPromise(runPreparedEffect(client, {
+      prepared,
+      pollIntervalMs: 0,
+      maxPolls: 1,
+    }))
+
+    expect(result.submit.submitId).toBe("123e4567-e89b-12d3-a456-426614174000")
+    expect(result.poll.record.status).toBe(50)
+    expect(result.artifacts).toEqual([{
+      kind: "image",
+      url: "https://cdn.example.test/image.png",
+      bytes: new Uint8Array(await new Response("image-bytes").arrayBuffer()),
+    }])
+    expect(calls).toEqual([
+      `POST ${prepared.submitUrl}`,
+      `POST ${prepared.pollUrl}`,
+      "GET https://cdn.example.test/image.png",
     ])
   })
 })
