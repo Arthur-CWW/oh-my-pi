@@ -8,6 +8,12 @@ import { storeSearch, storeFetch, getStored } from "./store"
 import { getTranscript } from "./youtube"
 import { openChatGptHandoff } from "./chatgpt"
 import {
+  isCuaDriverAction,
+  runCuaDriver,
+  type CuaDriverAction,
+  type JsonValue,
+} from "./cua-driver"
+import {
   chatGptLoginFrontendBrowser,
   collectFrontendBrowser,
   frontendBrowserProjects,
@@ -20,12 +26,91 @@ import {
   type FrontendProvider,
 } from "./frontend-browser"
 import { registerCodexResume } from "./codex"
-import { registerVimLite } from "./vim-lite"
+import registerVimLite from "./vim-lite"
 import { registerAgentCockpit } from "./agent-cockpit-extension"
 import { toErrorMessage } from "./schemas"
 
 function run<E, A>(effect: Effect.Effect<A, E>): Promise<A> {
   return Effect.runPromise(effect as Effect.Effect<A, E, never>)
+}
+
+function truncateText(text: string, limit: number): string {
+  if (text.length <= limit) return text
+  return `${text.slice(0, Math.max(0, limit - 80))}\n\n... truncated ${text.length - limit} chars ...`
+}
+
+// ─── Tool: cua_driver ────────────────────────────────────────────────
+
+function registerCuaDriver(pi: ExtensionAPI): void {
+  pi.registerTool({
+    name: "cua_driver",
+    label: "CuaDriver",
+    description:
+      "Background-safe macOS GUI/browser automation through installed cua-driver. Use capture/get_window_state before element-indexed actions.",
+    promptGuidelines: [
+      "Use cua_driver for local macOS app/browser GUI work that should not steal focus.",
+      "Start with action=list_apps/list_windows, then action=capture with pid/window_id before click/type/key/set_value.",
+      "Prefer element_index actions from the latest capture. Do not reuse element indices after the UI changes.",
+      "Do not use cua_driver for passwords, OAuth consent, 2FA, payment, privacy/security settings, or destructive actions without explicit user instruction.",
+    ],
+    parameters: Type.Object({
+      action: Type.String({
+        description: "status, permissions, list_apps, list_windows, launch_app, capture, get_window_state, click, double_click, right_click, type_text, press_key, hotkey, scroll, drag, set_value, page, zoom, start_recording, or stop_recording",
+      }),
+      args: Type.Optional(Type.Any({ description: "JSON object passed to the underlying cua-driver tool" })),
+      executable: Type.Optional(Type.String({ description: "Optional cua-driver executable path" })),
+      timeoutMs: Type.Optional(Type.Number({ description: "Execution timeout in milliseconds" })),
+    }),
+    async execute(_callId, rawParams) {
+      const params = rawParams as {
+        action?: string
+        args?: JsonValue
+        executable?: string
+        timeoutMs?: number
+      }
+      if (!params.action || !isCuaDriverAction(params.action)) {
+        return {
+          content: [{ type: "text", text: "Error: unsupported cua_driver action." }],
+          details: { action: "", error: "Unsupported action", json: "", text: "" },
+        }
+      }
+
+      const result = await run(
+        Effect.match(runCuaDriver({
+          action: params.action as CuaDriverAction,
+          args: params.args,
+          executable: params.executable,
+          timeoutMs: params.timeoutMs,
+        }), {
+          onFailure: (err) => ({ error: toErrorMessage(err), ok: false as const }),
+          onSuccess: (data) => ({ data, ok: true as const }),
+        }),
+      )
+
+      if (result.ok === false) {
+        return {
+          content: [{ type: "text", text: `Error: ${result.error}` }],
+          details: { action: params.action, error: result.error, json: "", text: "" },
+        }
+      }
+
+      const output = result.data.json === null ? result.data.text : JSON.stringify(result.data.json, null, 2)
+      const text = [
+        `cua_driver ${result.data.action}: ok`,
+        "",
+        truncateText(output, 24_000),
+      ].join("\n")
+      return {
+        content: [{ type: "text", text }],
+        details: {
+          action: result.data.action,
+          error: "",
+          json: result.data.json === null ? "" : JSON.stringify(result.data.json),
+          text: result.data.text,
+        },
+      }
+    },
+  })
 }
 
 // ─── Tool: web_search ─────────────────────────────────────────────────
@@ -347,15 +432,16 @@ function registerLlmFrontendBrowser(pi: ExtensionAPI): void {
     name: "llm_frontend_browser",
     label: "LLM Frontend Browser",
     description:
-      "Launch, open, inspect, prompt, or collect responses from a dedicated Helium/Chromium CDP profile for frontend LLM sites like AI Studio, DeepSeek, and ChatGPT.",
+      "Launch, open, inspect, prompt, or collect responses from a dedicated Helium/Chromium CDP profile for frontend LLM sites like AI Studio, ChatGPT, and Grok.",
     promptGuidelines: [
       "Use llm_frontend_browser for frontend LLM sites through a dedicated CDP profile instead of daily-driver browser automation.",
       "Use llm_frontend_browser in background mode by default; do not pair it with page.bringToFront(), Target.activateTarget, DevTools UI, AppleScript activation, or OS-level click/type automation.",
+      "For X/Twitter-aware search, use provider=grok with an explicit prompt asking Grok to search public X posts and summarize sources; stop if the tool reports needsHuman/login.",
     ],
     parameters: Type.Object({
       action: Type.Optional(Type.String({ description: "setup, open, google-login, chatgpt-login, prompt, collect, wait, sessions, projects, save-project, or status (default: status)" })),
       account: Type.Optional(Type.String({ description: "Optional Keychain account label for google-login/chatgpt-login" })),
-      conversationUrl: Type.Optional(Type.String({ description: "Existing chatgpt.com conversation URL for action=collect/wait" })),
+      conversationUrl: Type.Optional(Type.String({ description: "Existing provider conversation URL for action=collect/wait" })),
       outputFile: Type.Optional(Type.String({ description: "Write captured response text to this local file" })),
       prompt: Type.Optional(Type.String({ description: "Prompt text for action=prompt" })),
       provider: Type.Optional(Type.String({ description: "aistudio, deepseek, chatgpt, grok, or jimeng (default: aistudio)" })),
@@ -660,6 +746,7 @@ function registerLlmFrontendBrowser(pi: ExtensionAPI): void {
 // ─── Entrypoint ───────────────────────────────────────────────────────
 
 export default function (pi: ExtensionAPI): void {
+  registerCuaDriver(pi)
   registerWebSearch(pi)
   registerFetchContent(pi)
   registerGetContent(pi)

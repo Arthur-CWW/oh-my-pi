@@ -42,6 +42,16 @@ type PendingOperator = {
 }
 type Register = { text: string; linewise: boolean }
 type Pos = { line: number; col: number }
+type EditorCompat = Partial<EditorInternals> & {
+  actionHandlers?: Map<Parameters<KeybindingsManager["matches"]>[1], true>
+  getCursor?(): Pos
+  getLines?(): string[]
+  getPaddingX?(): number
+  insertText?(value: string): void
+  moveToLineEnd?(): void
+  moveToLineStart?(): void
+  moveToMessageStart?(): void
+}
 type Snapshot = { text: string; cursor: Pos }
 type VisualRange = { start: number; end: number; linewise: boolean; startLine: number; endLine: number }
 type LayoutSegment = { line: number; startCol: number; endCol: number; text: string; hasCursor: boolean }
@@ -51,6 +61,11 @@ const MAX_COUNT = 999
 const MAX_HISTORY = 300
 const PASTE_MARKER_PATTERN = /\[paste #(\d+)(?: (?:\+\d+ lines|\d+ chars))?\]/g
 const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" })
+const KEY_UP = "\x1b[A"
+const KEY_DOWN = "\x1b[B"
+const KEY_RIGHT = "\x1b[C"
+const KEY_LEFT = "\x1b[D"
+
 
 const HELP_LINES = [
   "vim-lite: Esc normal · i/a/I/A insert · o/O new line · Enter submits",
@@ -136,6 +151,7 @@ export class VimLiteEditor extends CustomEditor {
   private visualAnchor: Pos | undefined
   private register: Register = { text: "", linewise: false }
   private readonly keybindingsManager: KeybindingsManager
+  private readonly vimTui: TUI
   private readonly clipboard: ClipboardAdapter
   private vimUndoStack: Snapshot[] = []
   private vimRedoStack: Snapshot[] = []
@@ -145,7 +161,9 @@ export class VimLiteEditor extends CustomEditor {
   private historyCommandThisInput = false
 
   constructor(tui: TUI, theme: EditorTheme, keybindings: KeybindingsManager, clipboard: ClipboardAdapter = createSystemClipboard()) {
-    super(tui, theme, keybindings)
+    // pi-mono CustomEditor expects (tui, theme); OMP CustomEditor expects (theme).
+    super(Object.assign(tui, theme), theme, keybindings)
+    this.vimTui = tui
     this.keybindingsManager = keybindings
     this.clipboard = clipboard
   }
@@ -219,13 +237,13 @@ export class VimLiteEditor extends CustomEditor {
     // Let the stock editor update width-dependent internals used by motions.
     super.render(width)
 
-    const paddingX = Math.min(this.getPaddingX(), Math.max(0, Math.floor((width - 1) / 2)))
+    const paddingX = Math.min(this.getPaddingXCompat(), Math.max(0, Math.floor((width - 1) / 2)))
     const contentWidth = Math.max(1, width - paddingX * 2)
     const layoutWidth = Math.max(1, contentWidth - (paddingX ? 0 : 1))
     const range = this.getVisualRange()
     const segments = this.layoutSegments(layoutWidth)
     const cursorIndex = Math.max(0, segments.findIndex((segment) => segment.hasCursor))
-    const maxVisible = Math.max(5, Math.floor(this.tui.terminal.rows * 0.3))
+    const maxVisible = Math.max(5, Math.floor(this.vimTui.terminal.rows * 0.3))
     const maxStart = Math.max(0, segments.length - maxVisible)
     const maxVirtualStart = Math.max(0, segments.length - 1)
     const centeredStart = () => clamp(cursorIndex - Math.floor(maxVisible / 2), 0, maxVirtualStart)
@@ -797,9 +815,8 @@ export class VimLiteEditor extends CustomEditor {
     e.cancelAutocomplete()
     e.historyIndex = -1
     e.lastAction = null
-    e.state.lines = text.length > 0 ? text.split("\n") : [""]
-    const cursor = this.offsetToPos(e.state.lines, clamp(cursorOffset, 0, text.length))
-    this.setCursor(cursor.line, cursor.col)
+    const lines = text.length > 0 ? text.split("\n") : [""]
+    this.replaceEditorLines(lines, this.offsetToPos(lines, clamp(cursorOffset, 0, text.length)))
     this.notifyChange()
   }
 
@@ -896,18 +913,21 @@ export class VimLiteEditor extends CustomEditor {
     e.historyIndex = -1
     e.lastAction = null
 
+    const lines = e.state.lines
     if (op === "c") {
-      e.state.lines.splice(startLine, endLine - startLine + 1, "")
-      this.setCursor(startLine, 0)
+      const next = lines.slice()
+      next.splice(startLine, endLine - startLine + 1, "")
+      this.replaceEditorLines(next, { line: startLine, col: 0 })
       this.notifyChange()
       this.enterInsertMode()
       return
     }
 
-    e.state.lines.splice(startLine, endLine - startLine + 1)
-    if (e.state.lines.length === 0) e.state.lines.push("")
-    const nextLine = clamp(startLine, 0, e.state.lines.length - 1)
-    this.setCursor(nextLine, firstNonBlank(e.state.lines[nextLine] ?? ""))
+    const next = lines.slice()
+    next.splice(startLine, endLine - startLine + 1)
+    if (next.length === 0) next.push("")
+    const nextLine = clamp(startLine, 0, next.length - 1)
+    this.replaceEditorLines(next, { line: nextLine, col: firstNonBlank(next[nextLine] ?? "") })
     this.notifyChange()
     this.requestRender()
   }
@@ -997,10 +1017,11 @@ export class VimLiteEditor extends CustomEditor {
     e.lastAction = null
 
     if (this.register.linewise) {
-      const lines = this.register.text.replace(/\n$/, "").split("\n")
+      const pastedLines = this.register.text.replace(/\n$/, "").split("\n")
       const insertAt = before ? e.state.cursorLine : e.state.cursorLine + 1
-      e.state.lines.splice(insertAt, 0, ...lines)
-      this.setCursor(insertAt, firstNonBlank(e.state.lines[insertAt] ?? ""))
+      const next = e.state.lines.slice()
+      next.splice(insertAt, 0, ...pastedLines)
+      this.replaceEditorLines(next, { line: insertAt, col: firstNonBlank(next[insertAt] ?? "") })
       this.notifyChange()
       return
     }
@@ -1016,8 +1037,9 @@ export class VimLiteEditor extends CustomEditor {
     e.lastAction = null
     const lines = Array.from({ length: count }, () => "")
     const insertAt = e.state.cursorLine + 1
-    e.state.lines.splice(insertAt, 0, ...lines)
-    this.setCursor(insertAt, 0)
+    const next = e.state.lines.slice()
+    next.splice(insertAt, 0, ...lines)
+    this.replaceEditorLines(next, { line: insertAt, col: 0 })
     this.notifyChange()
   }
 
@@ -1028,8 +1050,9 @@ export class VimLiteEditor extends CustomEditor {
     e.lastAction = null
     const lines = Array.from({ length: count }, () => "")
     const insertAt = e.state.cursorLine
-    e.state.lines.splice(insertAt, 0, ...lines)
-    this.setCursor(insertAt, 0)
+    const next = e.state.lines.slice()
+    next.splice(insertAt, 0, ...lines)
+    this.replaceEditorLines(next, { line: insertAt, col: 0 })
     this.notifyChange()
   }
 
@@ -1041,9 +1064,8 @@ export class VimLiteEditor extends CustomEditor {
 
     const text = e.state.lines.join("\n")
     const next = text.slice(0, start) + replacement + text.slice(end)
-    e.state.lines = next.length > 0 ? next.split("\n") : [""]
-    const cursor = this.offsetToPos(e.state.lines, clamp(cursorOffset, 0, next.length))
-    this.setCursor(cursor.line, cursor.col)
+    const lines = next.length > 0 ? next.split("\n") : [""]
+    this.replaceEditorLines(lines, this.offsetToPos(lines, clamp(cursorOffset, 0, next.length)))
     this.notifyChange()
   }
 
@@ -1183,10 +1205,9 @@ export class VimLiteEditor extends CustomEditor {
   }
 
   private setCursor(line: number, col: number): void {
-    const e = this.e()
-    e.state.cursorLine = clamp(line, 0, Math.max(0, e.state.lines.length - 1))
-    const currentLine = e.state.lines[e.state.cursorLine] ?? ""
-    e.setCursorCol(clamp(col, 0, currentLine.length))
+    const lines = this.getEditorLines()
+    const cursorLine = clamp(line, 0, Math.max(0, lines.length - 1))
+    this.setEditorCursor({ line: cursorLine, col: clamp(col, 0, (lines[cursorLine] ?? "").length) })
   }
 
   private posToOffset(pos: Pos): number {
@@ -1322,8 +1343,7 @@ export class VimLiteEditor extends CustomEditor {
     e.cancelAutocomplete()
     e.historyIndex = -1
     e.lastAction = null
-    e.state.lines = snapshot.text.length > 0 ? snapshot.text.split("\n") : [""]
-    this.setCursor(snapshot.cursor.line, snapshot.cursor.col)
+    this.replaceEditorLines(snapshot.text.length > 0 ? snapshot.text.split("\n") : [""], snapshot.cursor)
     this.notifyChange()
   }
 
@@ -1403,18 +1423,128 @@ export class VimLiteEditor extends CustomEditor {
   }
 
   private requestRender(): void {
-    this.tui.requestRender()
+    this.vimTui.requestRender()
+  }
+
+  private getPaddingXCompat(): number {
+    return this.asEditorCompat().getPaddingX?.() ?? 2
   }
 
   private wouldRunAppAction(data: string): boolean {
-    for (const action of this.actionHandlers.keys()) {
+    for (const action of this.asEditorCompat().actionHandlers?.keys() ?? []) {
       if (this.keybindingsManager.matches(data, action)) return true
     }
     return false
   }
 
+  private asEditorCompat(): EditorCompat {
+    return this as object as EditorCompat
+  }
+
+  private directEditorInternals(): EditorInternals | undefined {
+    const editor = this.asEditorCompat()
+    return editor.state && editor.setCursorCol && editor.moveCursor && editor.cancelAutocomplete && editor.insertTextAtCursorInternal
+      ? (editor as object as EditorInternals)
+      : undefined
+  }
+
+  private getEditorLines(): string[] {
+    const direct = this.directEditorInternals()
+    if (direct) return direct.state.lines
+    const editor = this.asEditorCompat()
+    return editor.getLines?.() ?? this.getText().split("\n")
+  }
+
+  private getEditorCursor(): Pos {
+    const direct = this.directEditorInternals()
+    if (direct) return { line: direct.state.cursorLine, col: direct.state.cursorCol }
+    const editor = this.asEditorCompat()
+    return editor.getCursor?.() ?? { line: 0, col: 0 }
+  }
+
+  private replaceEditorLines(lines: string[], cursor: Pos): void {
+    const direct = this.directEditorInternals()
+    if (direct) {
+      direct.state.lines = lines
+      this.setCursor(cursor.line, cursor.col)
+      return
+    }
+
+    super.setText(lines.join("\n"))
+    this.setEditorCursor(cursor)
+  }
+
+  private setEditorCursor(cursor: Pos): void {
+    const direct = this.directEditorInternals()
+    if (direct) {
+      direct.state.cursorLine = clamp(cursor.line, 0, Math.max(0, direct.state.lines.length - 1))
+      const currentLine = direct.state.lines[direct.state.cursorLine] ?? ""
+      direct.setCursorCol(clamp(cursor.col, 0, currentLine.length))
+      return
+    }
+
+    const lines = this.getEditorLines()
+    const line = clamp(cursor.line, 0, Math.max(0, lines.length - 1))
+    const col = clamp(cursor.col, 0, (lines[line] ?? "").length)
+    const publicEditor = this.asEditorCompat()
+    publicEditor.moveToMessageStart?.()
+    this.moveToLineStartCompat()
+    for (let i = 0; i < line; i++) super.handleInput(KEY_DOWN)
+    this.moveToLineStartCompat()
+    for (let i = 0; i < col; i++) super.handleInput(KEY_RIGHT)
+  }
+
+  private movePublicCursor(deltaLine: number, deltaCol: number): void {
+    const verticalKey = deltaLine < 0 ? KEY_UP : KEY_DOWN
+    for (let i = 0; i < Math.abs(deltaLine); i++) super.handleInput(verticalKey)
+    const horizontalKey = deltaCol < 0 ? KEY_LEFT : KEY_RIGHT
+    for (let i = 0; i < Math.abs(deltaCol); i++) super.handleInput(horizontalKey)
+  }
+
+  private moveToLineStartCompat(): void {
+    this.asEditorCompat().moveToLineStart?.()
+  }
+
+  private moveToLineEndCompat(): void {
+    this.asEditorCompat().moveToLineEnd?.()
+  }
+
+  private cancelAutocompleteCompat(): void {
+    const direct = this.directEditorInternals()
+    if (direct) {
+      direct.cancelAutocomplete()
+      return
+    }
+    super.handleInput("\x1b")
+  }
+
+  private insertTextCompat(text: string): void {
+    const direct = this.directEditorInternals()
+    if (direct) {
+      direct.insertTextAtCursorInternal(text)
+      return
+    }
+    this.asEditorCompat().insertText?.(text)
+  }
+
   private e(): EditorInternals {
-    return this as unknown as EditorInternals
+    const direct = this.directEditorInternals()
+    if (direct) return direct
+
+    return {
+      state: {
+        lines: this.getEditorLines(),
+        cursorLine: this.getEditorCursor().line,
+        cursorCol: this.getEditorCursor().col,
+      },
+      setCursorCol: (col) => this.setCursor(this.getEditorCursor().line, col),
+      moveCursor: (deltaLine, deltaCol) => this.movePublicCursor(deltaLine, deltaCol),
+      moveToLineStart: () => this.moveToLineStartCompat(),
+      moveToLineEnd: () => this.moveToLineEndCompat(),
+      cancelAutocomplete: () => this.cancelAutocompleteCompat(),
+      insertTextAtCursorInternal: (text) => this.insertTextCompat(text),
+      getText: () => this.getText(),
+    }
   }
 }
 
@@ -1423,7 +1553,7 @@ function installVimLite(ctx: ExtensionContext): void {
   ctx.ui.setEditorComponent((tui, theme, keybindings) => new VimLiteEditor(tui, theme, keybindings))
 }
 
-export function registerVimLite(pi: ExtensionAPI): void {
+export default function registerVimLite(pi: ExtensionAPI): void {
   let enabled = true
 
   pi.on("session_start", (_event, ctx) => {
