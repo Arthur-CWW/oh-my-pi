@@ -2,19 +2,32 @@ import { describe, expect, test } from "bun:test"
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { pathToFileURL } from "node:url"
-import type { KeybindingsManager } from "@earendil-works/pi-coding-agent"
-import type { EditorTheme, TUI } from "@earendil-works/pi-tui"
-import { getKeybindings } from "@earendil-works/pi-tui"
+import type { KeybindingsManager } from "@oh-my-pi/pi-coding-agent"
+import type { EditorTheme, TUI } from "@oh-my-pi/pi-tui"
+import { getKeybindings } from "@oh-my-pi/pi-tui"
 import { type ClipboardAdapter, VimLiteEditor } from "../src/vim-lite"
+
+const symbols: EditorTheme["symbols"] = {
+  cursor: ">",
+  inputCursor: "▌",
+  boxRound: { topLeft: "╭", topRight: "╮", bottomLeft: "╰", bottomRight: "╯", horizontal: "─", vertical: "│" },
+  boxSharp: { topLeft: "+", topRight: "+", bottomLeft: "+", bottomRight: "+", horizontal: "-", vertical: "|", teeDown: "+", teeUp: "+", teeLeft: "+", teeRight: "+", cross: "+" },
+  table: { topLeft: "+", topRight: "+", bottomLeft: "+", bottomRight: "+", horizontal: "-", vertical: "|", teeDown: "+", teeUp: "+", teeLeft: "+", teeRight: "+", cross: "+" },
+  quoteBorder: "|",
+  hrChar: "-",
+  spinnerFrames: ["-"],
+}
 
 const theme: EditorTheme = {
   borderColor: (text: string) => text,
+  symbols,
   selectList: {
     selectedPrefix: (text: string) => text,
     selectedText: (text: string) => text,
     description: (text: string) => text,
     scrollInfo: (text: string) => text,
     noMatch: (text: string) => text,
+    symbols,
   },
 }
 
@@ -22,10 +35,23 @@ function createEditor(clipboard?: ClipboardAdapter): VimLiteEditor {
   const tui = {
     terminal: { rows: 24 },
     requestRender() {},
-  } as unknown as TUI
+  } as TUI
   const editor = new VimLiteEditor(tui, theme, getKeybindings() as KeybindingsManager, clipboard)
   editor.focused = false
   return editor
+}
+
+function seedPaste(editor: VimLiteEditor, id: number, text: string): void {
+  const pastes = Reflect.get(editor, "pastes")
+  if (pastes instanceof Map) {
+    pastes.set(id, text)
+    return
+  }
+
+  if (id !== 1) throw new Error("OMP paste cache seeding only supports the next paste marker")
+  const currentText = editor.getText()
+  editor.handleInput(`\x1b[200~${text}\x1b[201~`)
+  editor.setText(currentText)
 }
 
 function press(editor: VimLiteEditor, input: string): void {
@@ -133,7 +159,7 @@ async function loadOmpRuntime(): Promise<OmpRuntime | undefined> {
   const ompRoot = join(home, ".bun", "install", "global", "node_modules", "@oh-my-pi", "pi-coding-agent")
   const loaderPath = join(ompRoot, "src", "extensibility", "extensions", "loader.ts")
   const keybindingsPath = join(home, ".bun", "install", "global", "node_modules", "@oh-my-pi", "pi-tui", "src", "keybindings.ts")
-  const extensionPath = join(home, ".pi", "agent", "extensions", "vim-lite.ts")
+  const extensionPath = join(home, ".omp", "agent", "extensions", "vim-lite.ts")
   if (!existsSync(loaderPath) || !existsSync(keybindingsPath) || !existsSync(extensionPath)) return undefined
 
   const loader = (await import(pathToFileURL(loaderPath).href)) as OmpLoaderModule
@@ -305,12 +331,35 @@ describe("VimLiteEditor", () => {
     expect(clipboardText).toBe("external")
   })
 
+  test("plain paste reads from system clipboard", () => {
+    let clipboardText = "system paste"
+    const clipboard: ClipboardAdapter = {
+      readText: () => clipboardText,
+      writeText(text: string) {
+        clipboardText = text
+        return true
+      },
+    }
+
+    const charwiseEditor = createEditor(clipboard)
+    charwiseEditor.handleInput("\x1b")
+    press(charwiseEditor, "p")
+    expect(charwiseEditor.getText()).toBe("system paste")
+
+    clipboardText = "line paste\n"
+    const linewiseEditor = createEditor(clipboard)
+    linewiseEditor.setText("base")
+    linewiseEditor.handleInput("\x1b")
+    press(linewiseEditor, "p")
+    expect(linewiseEditor.getText()).toBe("base\nline paste")
+  })
+
   test("normal mode operations treat large paste markers atomically", () => {
     const editor = createEditor()
     const pasted = largePasteText()
 
     editor.handleInput(`\x1b[200~${pasted}\x1b[201~`)
-    expect(editor.getText()).toBe("[paste #1 +12 lines]")
+    expect(editor.getText()).toBe("[Paste #1, +12 lines]")
     expect(editor.getExpandedText()).toBe(pasted)
 
     editor.handleInput("\x1b")
@@ -324,16 +373,33 @@ describe("VimLiteEditor", () => {
     const editor = createEditor()
     const pasted = largePasteText()
 
-    editor.setText(`${pasted}\n[paste #1 +12 lines]`)
-    ;(editor as unknown as { pastes: Map<number, string> }).pastes.set(1, pasted)
+    editor.setText(`${pasted}\n[Paste #1, +12 lines]`)
+    seedPaste(editor, 1, pasted)
     editor.handleInput("\x1b")
 
     press(editor, "gx")
     expect(editor.getText()).toBe(`${pasted}\n${pasted}`)
 
     press(editor, "gx")
-    expect(editor.getText()).toBe(`${pasted}\n[paste #1 +12 lines]`)
+    expect(editor.getText()).toBe(`${pasted}\n[Paste #1, +12 lines]`)
   })
+  test("normal mode word motions render one clamped cursor", () => {
+    const editor = createEditor()
+    editor.focused = true
+    press(editor, "hello world")
+    editor.handleInput("\x1b")
+
+    press(editor, "ww")
+    const rendered = editor.render(40).join("\n")
+
+    expect(editor.getCursor()).toEqual({ line: 0, col: 10 })
+    expect(rendered).not.toContain("\u001b_pi:c\u0007")
+    expect(renderSnapshot(editor, 40)).toContain("hello worl[d]")
+    press(editor, "v")
+    expect(editor.render(40).join("\n")).not.toContain("\u001b_pi:c\u0007")
+
+  })
+
 
   test("loads through the installed OMP extension loader", async () => {
     const editor = await createOmpEditor()
@@ -347,6 +413,31 @@ describe("VimLiteEditor", () => {
     expect(editor.getText()).toBe("ello")
     expect(rendered).toContain("NORMAL")
   })
+  test("actual OMP editor uses system clipboard for default yank and paste", async () => {
+    const editor = await createOmpEditor()
+    if (!editor) return
+
+    let clipboardText = "omp paste"
+    const clipboard: ClipboardAdapter = {
+      readText: () => clipboardText,
+      writeText(text: string) {
+        clipboardText = text
+        return true
+      },
+    }
+    expect(Reflect.set(editor, "clipboard", clipboard)).toBe(true)
+
+    editor.handleInput("\x1b")
+    press(editor, "p")
+    expect(editor.getText()).toBe("omp paste")
+
+    clipboardText = "external"
+    editor.setText("copy")
+    editor.handleInput("\x1b")
+    press(editor, "0v$y")
+    expect(clipboardText).toBe("copy")
+  })
+
 
   test("actual OMP editor adapter survives fuzzed vim input", async () => {
     const editor = await createOmpEditor()

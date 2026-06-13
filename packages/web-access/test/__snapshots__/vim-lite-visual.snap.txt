@@ -1,70 +1,62 @@
 --- visual ---
 ────────────────────────────────
-[h][e][l][l][o] world
+  [h][e][l][l][o] world
 ──────────────────────── VISUAL
 --- after-delete ---
  world
-────────────────────────────────
-[ ]world
-──────────────────────── NORMAL
+╭──────────────────────────────╮
+╰─ [ ]world                NORMAL
 --- after-undo ---
 hello world
-────────────────────────────────
-hell[o] world
-──────────────────────── NORMAL
+╭──────────────────────────────╮
+╰─ hell[o] world           NORMAL
 --- after-redo ---
  world
-────────────────────────────────
-[ ]world
-──────────────────────── NORMAL
+╭──────────────────────────────╮
+╰─ [ ]world                NORMAL
 --- visual-line ---
 ────────────────────────────────
-[o][n][e]
-[t][w][o]
-three
+  [o][n][e]
+  [t][w][o]
+  three
 ──────────────────────── V-LINE
 --- after-line-delete ---
 three
-────────────────────────────────
-[t]hree
-──────────────────────── NORMAL
+╭──────────────────────────────╮
+╰─ [t]hree                 NORMAL
 --- clipboard-yank ---
 clipboard="copy me"
 copy me
-────────────────────────────────
-[c]opy me
-──────────────────────── NORMAL
+╭──────────────────────────────╮
+╰─ [c]opy me               NORMAL
 --- clipboard-paste ---
 copy me
-────────────────────────────────
-copy me[ ]
-──────────────────────── NORMAL
+╭──────────────────────────────╮
+╰─ copy m[e]               NORMAL
 --- line-clipboard-yank ---
 clipboard="one\n"
 one
 two
-────────────────────────────────
-[o]ne
-two
-──────────────────────── NORMAL
+╭──────────────────────────────╮
+│  [o]ne                         │
+╰─ two                   NORMAL
 --- line-clipboard-paste ---
 base
 one
-────────────────────────────────
-base
-[o]ne
-──────────────────────── NORMAL
+╭──────────────────────────────╮
+│  base                        │
+╰─ [o]ne                   NORMAL
 --- visual-wrapped-centered ---
 ────────────
-abcdefghij-
-abcdefghij-
-abcdefghij-
-tai[l]
+  abcdefgh
+  ij-abcde
+  fghij-ta
+  i[l]
 
 
 
 ──── VISUAL
 --- paste-toggle ---
-collapsed="[paste #1 +12 lines]"
+collapsed="[Paste #1, +12 lines]"
 expanded="line-1\nline-2\nline-3\nline-4\nline-5\nline-6\nline-7\nline-8\nline-9\nline-10\nline-11\nline-12"
-recollapsed="[paste #1 +12 lines]"
+recollapsed="[Paste #1, +12 lines]"

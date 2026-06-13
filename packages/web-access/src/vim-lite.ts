@@ -4,9 +4,9 @@ import {
   type ExtensionAPI,
   type ExtensionContext,
   type KeybindingsManager,
-} from "@earendil-works/pi-coding-agent"
-import type { EditorTheme, TUI } from "@earendil-works/pi-tui"
-import { CURSOR_MARKER, matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui"
+} from "@oh-my-pi/pi-coding-agent"
+import type { EditorTheme, TUI } from "@oh-my-pi/pi-tui"
+import { CURSOR_MARKER, Ellipsis, matchesKey, truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui"
 
 type VimMode = "insert" | "normal" | "visual" | "visualLine"
 type VimOperator = "d" | "c" | "y"
@@ -59,7 +59,7 @@ type ExpandedPaste = { marker: string; content: string; start: number; end: numb
 
 const MAX_COUNT = 999
 const MAX_HISTORY = 300
-const PASTE_MARKER_PATTERN = /\[paste #(\d+)(?: (?:\+\d+ lines|\d+ chars))?\]/g
+const PASTE_MARKER_PATTERN = /\[Paste #\d+(?:, (?:\+\d+ lines|\d+ chars))?\]|\[paste #\d+(?: (?:\+\d+ lines|\d+ chars))?\]/g
 const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" })
 const KEY_UP = "\x1b[A"
 const KEY_DOWN = "\x1b[B"
@@ -71,7 +71,7 @@ const HELP_LINES = [
   "vim-lite: Esc normal · i/a/I/A insert · o/O new line · Enter submits",
   "motions: h j k l · w b e · 0 ^ $ · gg/G · counts like 3w or 2dd",
   "visual: v charwise · V linewise · o swap end · d/c/y/x/s operate on selection",
-  "clipboard: y / yy / Y / visual y yank to system clipboard · \"+p paste from it",
+  "clipboard: y / yy / Y / visual y copy to system clipboard · p/P paste from it · deletes stay internal",
   "paste markers: gx toggles Pi large-paste marker expansion/collapse",
   "edits: x/X · d/c/y + motion · dd/cc/yy · D/C/Y · p/P · r<char> · s/S · u undo · Ctrl+r redo",
   "Pi keys still work: Ctrl+C clear/copy · Ctrl+D exit on empty · Ctrl+G external editor · Ctrl+P model",
@@ -160,12 +160,14 @@ export class VimLiteEditor extends CustomEditor {
   private insertSessionStart: Snapshot | undefined
   private historyCommandThisInput = false
 
+  decorateText = (text: string): string => text
+
   constructor(tui: TUI, theme: EditorTheme, keybindings: KeybindingsManager, clipboard: ClipboardAdapter = createSystemClipboard()) {
-    // pi-mono CustomEditor expects (tui, theme); OMP CustomEditor expects (theme).
-    super(Object.assign(tui, theme), theme, keybindings)
+    super(theme)
     this.vimTui = tui
     this.keybindingsManager = keybindings
     this.clipboard = clipboard
+    super.setUseTerminalCursor(false)
   }
 
   handleInput(data: string): void {
@@ -217,21 +219,33 @@ export class VimLiteEditor extends CustomEditor {
     this.recordChange(before, data)
   }
 
-  render(width: number): string[] {
-    const lines = this.isVisualMode() ? this.renderVisual(width) : super.render(width)
-    if (lines.length === 0) return lines
-
-    const label = this.borderColor(` ${this.statusLabel()} `)
-    const labelWidth = visibleWidth(label)
-    if (labelWidth >= width) {
-      lines[lines.length - 1] = truncateToWidth(label, width, "")
-      return lines
-    }
-
-    const last = lines[lines.length - 1]!
-    lines[lines.length - 1] = truncateToWidth(last, width - labelWidth, "") + label
-    return lines
+  override setUseTerminalCursor(_useTerminalCursor: boolean): void {
+    super.setUseTerminalCursor(false)
   }
+
+  render(width: number): string[] {
+    this.clampNormalCursor()
+    const wasFocused = this.focused
+    if (this.mode !== "insert") this.focused = false
+    try {
+      const lines = [...(this.isVisualMode() ? this.renderVisual(width) : super.render(width))]
+      if (lines.length === 0) return lines
+
+      const label = this.borderColor(` ${this.statusLabel()} `)
+      const labelWidth = visibleWidth(label)
+      if (labelWidth >= width) {
+        lines[lines.length - 1] = truncateToWidth(label, width, Ellipsis.Omit)
+        return lines
+      }
+
+      const last = lines[lines.length - 1]!
+      lines[lines.length - 1] = truncateToWidth(last, width - labelWidth, Ellipsis.Omit) + label
+      return lines
+    } finally {
+      this.focused = wasFocused
+    }
+  }
+
 
   private renderVisual(width: number): string[] {
     // Let the stock editor update width-dependent internals used by motions.
@@ -327,12 +341,11 @@ export class VimLiteEditor extends CustomEditor {
 
     if (segment.text.length === 0) {
       const selected = range?.linewise && segment.line >= range.startLine && segment.line <= range.endLine
-      return `${this.focused && cursorCol === 0 ? CURSOR_MARKER : ""}${selected ? "\x1b[7m \x1b[0m" : cursorCol === 0 ? "\x1b[7m \x1b[0m" : ""}`
+      return selected ? "\x1b[7m \x1b[0m" : cursorCol === 0 ? "\x1b[7m \x1b[0m" : ""
     }
 
     for (const part of this.segments(segment.text)) {
       const col = segment.startCol + part.index
-      if (cursorCol === col && this.focused) out += CURSOR_MARKER
       const offset = this.posToOffset({ line: segment.line, col })
       const selected = range
         ? range.linewise
@@ -342,7 +355,7 @@ export class VimLiteEditor extends CustomEditor {
       out += selected ? `\x1b[7m${part.segment}\x1b[0m` : part.segment
     }
 
-    if (cursorCol === segment.endCol && this.focused) out += `${CURSOR_MARKER}\x1b[7m \x1b[0m`
+    if (cursorCol === segment.endCol && this.focused) out += "\x1b[7m \x1b[0m"
     return out
   }
 
@@ -356,6 +369,8 @@ export class VimLiteEditor extends CustomEditor {
 
       this.resetPending()
       super.handleInput(data)
+      this.clampNormalCursor()
+      this.requestRender()
       return true
     }
 
@@ -784,10 +799,14 @@ export class VimLiteEditor extends CustomEditor {
   }
 
   private expandPasteMarkerText(text: string): { text: string; changed: boolean; expansions: ExpandedPaste[] } {
+    const inferredPastes = this.inferPasteContents(text)
     const expansions: ExpandedPaste[] = []
     let offsetDelta = 0
-    const expanded = text.replace(PASTE_MARKER_PATTERN, (marker, idText: string, matchOffset: number) => {
-      const content = this.e().pastes?.get(Number.parseInt(idText, 10))
+    const expanded = text.replace(PASTE_MARKER_PATTERN, (marker: string, matchOffset: number) => {
+      const idText = marker.match(/\d+/)?.[0]
+      const content = idText === undefined
+        ? undefined
+        : this.e().pastes?.get(Number.parseInt(idText, 10)) ?? inferredPastes?.get(matchOffset)
       if (content === undefined) return marker
       const adjustedStart = matchOffset + offsetDelta
       const end = adjustedStart + content.length
@@ -796,6 +815,48 @@ export class VimLiteEditor extends CustomEditor {
       return content
     })
     return { text: expanded, changed: expansions.length > 0, expansions }
+  }
+
+  private inferPasteContents(text: string): Map<number, string> | undefined {
+    const editorText = this.e().getText()
+    if (text !== editorText && !editorText.startsWith(text)) return undefined
+
+    const expandedText = this.getExpandedText()
+    if (expandedText === editorText) return undefined
+
+    const matches = [...editorText.matchAll(PASTE_MARKER_PATTERN)]
+    if (matches.length === 0) return undefined
+
+    const inferred = new Map<number, string>()
+    let originalCursor = 0
+    let expandedCursor = 0
+
+    for (let index = 0; index < matches.length; index++) {
+      const match = matches[index]!
+      const markerStart = match.index
+      const marker = match[0]
+      const literalBefore = editorText.slice(originalCursor, markerStart)
+      if (literalBefore) {
+        if (!expandedText.startsWith(literalBefore, expandedCursor)) return inferred.size > 0 ? inferred : undefined
+        expandedCursor += literalBefore.length
+      }
+
+      const markerEnd = markerStart + marker.length
+      const nextMarkerStart = matches[index + 1]?.index ?? editorText.length
+      const literalAfter = editorText.slice(markerEnd, nextMarkerStart)
+      const contentEnd = literalAfter
+        ? expandedText.indexOf(literalAfter, expandedCursor)
+        : index === matches.length - 1
+          ? expandedText.length
+          : expandedCursor
+      if (contentEnd < expandedCursor) return inferred.size > 0 ? inferred : undefined
+
+      inferred.set(markerStart, expandedText.slice(expandedCursor, contentEnd))
+      expandedCursor = contentEnd
+      originalCursor = markerEnd
+    }
+
+    return inferred
   }
 
   private collapseExpandedPasteText(text: string): { text: string; changed: boolean } {
@@ -1003,12 +1064,15 @@ export class VimLiteEditor extends CustomEditor {
     return registerName
   }
 
-  private paste(before: boolean): void {
-    const registerName = this.consumeSelectedRegister()
-    if (registerName === "+") {
+  private refreshRegisterForPaste(registerName: VimRegisterName | undefined): void {
+    if (registerName === "+" || registerName === undefined) {
       const text = this.clipboard.readText()
       if (text !== undefined) this.register = { text, linewise: text.endsWith("\n") }
     }
+  }
+
+  private paste(before: boolean): void {
+    this.refreshRegisterForPaste(this.consumeSelectedRegister())
 
     if (!this.register.text) return
     const e = this.e()
@@ -1142,6 +1206,15 @@ export class VimLiteEditor extends CustomEditor {
     }
   }
 
+  private clampNormalCursor(): void {
+    if (this.mode !== "normal") return
+    const cursor = this.getEditorCursor()
+    const lines = this.getEditorLines()
+    const line = lines[cursor.line] ?? ""
+    if (line.length === 0 || cursor.col < line.length) return
+    this.setEditorCursor({ line: cursor.line, col: this.prevCol(line, line.length) })
+  }
+
   private moveWordEnd(): void {
     const e = this.e()
     let lineIdx = e.state.cursorLine
@@ -1237,18 +1310,31 @@ export class VimLiteEditor extends CustomEditor {
 
   private nextCol(line: string, col: number): number {
     if (col >= line.length) return col
+    const pasteMarker = this.pasteMarkerAt(line, col)
+    if (pasteMarker) return pasteMarker.end
     const first = this.segments(line.slice(col))[Symbol.iterator]().next().value as Intl.SegmentData | undefined
     return col + (first?.segment.length ?? 1)
   }
 
   private prevCol(line: string, col: number): number {
     if (col <= 0) return 0
+    const pasteMarker = this.pasteMarkerAt(line, col - 1)
+    if (pasteMarker) return pasteMarker.start
     let previous = 0
     for (const segment of this.segments(line)) {
       if (segment.index >= col) break
       previous = segment.index
     }
     return previous
+  }
+
+  private pasteMarkerAt(line: string, col: number): { start: number; end: number } | undefined {
+    for (const match of line.matchAll(PASTE_MARKER_PATTERN)) {
+      const start = match.index
+      const end = start + match[0].length
+      if (col >= start && col < end) return { start, end }
+    }
+    return undefined
   }
 
   private segments(text: string): Iterable<Intl.SegmentData> {
@@ -1423,6 +1509,7 @@ export class VimLiteEditor extends CustomEditor {
   }
 
   private requestRender(): void {
+    this.clampNormalCursor()
     this.vimTui.requestRender()
   }
 
