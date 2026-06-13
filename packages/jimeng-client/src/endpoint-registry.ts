@@ -650,7 +650,7 @@ const KEEP_GAP_AUDIT_BY_ENDPOINT: Record<string, JimengDiscoveryEndpointAudit> =
       "data/jimeng-lab/proof-20260612-video-preprocess-plan/",
       "data/jimeng-lab/proof-20260612-lip-sync-human-contract-infer/preprocess/",
     ],
-    nextProbe: "Passively capture the video pre-process submit flow, compare it with video-preprocess-plan using request-plan-compare, then record/replay through submitJimengVideoPreprocess only after explicit approval because it creates task state.",
+    nextProbe: "Passively capture the real lip-sync/digital-human pre-process submit flow after entering the actual talking-head workbench state, compare it with video-preprocess-plan using request-plan-compare, then record/replay through submitJimengVideoPreprocess only after explicit approval because it creates task state.",
   },
   "/mweb/v1/video_generate/mget_pre_process_result": {
     evidence: [
@@ -660,7 +660,7 @@ const KEEP_GAP_AUDIT_BY_ENDPOINT: Record<string, JimengDiscoveryEndpointAudit> =
       "data/jimeng-lab/proof-20260612-video-preprocess-query-plan/",
       "data/jimeng-lab/proof-20260612-lip-sync-human-contract-infer/preprocess-query/",
     ],
-    nextProbe: "Use task ids from a captured or approved video_generate/pre_process flow, compare with video-preprocess-query-plan, then record/replay through fetchJimengVideoPreprocessResults.",
+    nextProbe: "Use task ids from a captured or approved video_generate/pre_process flow gathered from the real lip-sync/digital-human workbench state, compare with video-preprocess-query-plan, then record/replay through fetchJimengVideoPreprocessResults.",
   },
   "/mweb/v1/video_generate/face_auth/skip": {
     evidence: [
@@ -729,7 +729,7 @@ const KEEP_GAP_AUDIT_BY_ENDPOINT: Record<string, JimengDiscoveryEndpointAudit> =
 }
 
 const KNOWN_ENDPOINTS: JimengDiscoveryKnownEndpoint[] = [
-  known("/mweb/v1/aigc_draft/generate", "partial", "text2image-plan/text2image-compare/text2video-plan/omni-video-plan/text2video-compare/omni-video-compare/generation-contract/executeJimengVideoDirectSubmit/executeJimengText2ImageSubmit/text2video/image2video/frames2video/lip-sync", "Unified generation submit; direct image/video, first/end-frame, and Seedance omni-reference request builders are dry-run covered with semantic compare gates; direct text/video and text/image submit helpers are mock-fetch tested; saved live text/image-to-video proofs are schema-validated by generation-contract; fresh UI text-to-image capture generated completed image records, but patched direct replay still returns ret=3018 because the current frontend uses a body-bound browser signature/a_bogus context; live lip-sync/end-frame/omni-reference still require capture compare or approval-gated submit/poll/download."),
+  known("/mweb/v1/aigc_draft/generate", "partial", "text2image-plan/text2image-compare/text2video-plan/omni-video-plan/text2video-compare/omni-video-compare/generation-contract/executeJimengVideoDirectSubmit/executeJimengText2ImageSubmit/text2video/image2video/frames2video/lip-sync", "Unified generation submit; direct image/video, first/end-frame, and Seedance omni-reference request builders are dry-run covered with semantic compare gates; direct text/video and text/image submit helpers are mock-fetch tested; saved live text/image-to-video proofs are schema-validated by generation-contract; fresh UI text-to-image capture generated completed image records, but patched direct replay still returns ret=3018 because the current frontend uses a body-bound browser signature context; browser-backed text2image submit/poll/download is live-proven; lip-sync image/avatar cdp-ui submit wiring exists, but the current ?type=lip_sync route still renders a generic composer with no confirmed voice-picker controls, so live talking-head submit remains blocked on locating the real lip-sync workbench state."),
   known("/mweb/v1/execute_generate_audit", "partial", "generate-audit-plan/request-plan-compare/executeJimengGenerateAudit", "Generation pre-audit material transform is modeled and typed client replay is covered by cassettes; live replay still needs passive UI capture compare for the full frontend submit context."),
   known("/mweb/v1/get_asset_list", "implemented", "assets", "No-spend workspace asset/history listing."),
   known("/mweb/v1/get_history", "implemented", "history-list", "No-spend paginated history list; prior live probes returned a valid empty records_list, so use assets/history-records for richer known-populated lookups."),

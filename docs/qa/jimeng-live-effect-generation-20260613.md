@@ -127,7 +127,7 @@ mise exec -- bun packages/jimeng-client/src/dreamina-compatible-cli.ts text2vide
 - Dashboard status rows now separate implementation state from generated artifacts. Workers can update the same SQLite DB through `artifact-dashboard.ts status`, `artifact-dashboard.ts ingest-proof`, or `jimeng-dreamina --artifact-db`.
 - Media viewers are selected by MIME: video/audio playable, images visible, other files linked.
 - Review shortcuts: `j`/`n` next run, `k`/`p` previous run, `h`/`l` previous/next function, `[`/`]` previous/next artifact, `/` focus the function filter.
-Status note: the CLI/API is not fully complete across all Jimeng functions. Text-to-video direct submit/poll/download is live-proven. Text-to-image now has a live-proven browser-backed CLI path: fresh UI submit capture matched the dry-run plan on stable fields, `jimeng-browser-proxy text2image --transport cdp-ui` completed submit/poll/download with four downloaded images, and the `gen-parity` packet is now done. The remaining direct text-to-image gap is endpoint-level: patched direct replay and `--transport cdp-fetch` still hit `ret=3018`, so the browser signer/runtime path remains a classified follow-up. Persona/voice, reference-controls, and template-mining are done; lip-sync remains capture-blocked.
+Status note: the CLI/API is not fully complete across all Jimeng functions. Text-to-video direct submit/poll/download is live-proven. Text-to-image now has a live-proven browser-backed CLI path: fresh UI submit capture matched the dry-run plan on stable fields, `jimeng-browser-proxy text2image --transport cdp-ui` completed submit/poll/download with four downloaded images, and the `gen-parity` packet is now done. The remaining direct text-to-image gap is endpoint-level: patched direct replay and `--transport cdp-fetch` still hit `ret=3018`, so the browser signer/runtime path remains a classified follow-up. Persona/voice, reference-controls, and template-mining are done. `lip-sync-human` remains blocked, but now with sharper evidence: browser-backed image/avatar submit wiring exists and focused tests pass, yet the current `?type=lip_sync` route still renders a generic composer instead of confirmed talking-head controls, and the first live attempt failed with `JIMENG_LIP_SYNC_VOICE_OPTION_MISSING`.
 
 Validation after dashboard subroutes/shortcuts, direct CLI artifact logging, per-function renderer, Effect wrapper, and SQLite limiter changes:
 
@@ -151,7 +151,7 @@ Subagents advanced four Jimeng packets without live calls:
 
 - `JimengGenParityWorker`: `text2image` Dreamina compatibility is now explicit partial, not incorrectly "implemented"; it requires refreshed `/mweb/v1/aigc_draft/generate` workbench text-to-image capture and rejects stale `/mweb/v1/creation_agent/v2/conversation`-only captures with typed errors.
 - `JimengPersonaVoiceWorker`: subject voice, voice clone submit/query/update/delete, mix-audio request/query params, and persona-voice contract inference now have tighter Effect Schema/fixture-derived coverage.
-- `JimengLipSyncWorker`: lip-sync image/avatar and VOD plans now validate model/duration/TTS consistency, video-preprocess task bodies are schema-covered, contract inference tags lip-sync/preprocess packet slices, and live submit remains typed unsupported until a real UI submit capture proves parity.
+- `JimengLipSyncWorker`: lip-sync image/avatar and VOD plans now validate model/duration/TTS consistency, video-preprocess task bodies are schema-covered, contract inference tags lip-sync/preprocess packet slices, and live submit remains blocked until the real lip-sync/digital-human workbench state is located.
 - `JimengReferenceWorker`: pose/depth/canny reference controls have observed-provider evidence helpers, style is explicitly catalog-only until a preview/save_params capture exists, reference-image builders cover description/face recognition, segmentation tests cover alternate mask containers/no-object rejection, and agent catalog summaries expose reference coverage.
 
 Validation after packet wave:
@@ -186,7 +186,7 @@ Seeded current packet rows after fresh review:
 ```txt
 gen-parity: done; browser-backed text2image submit/poll/download is live-proven and remaining direct signer gap is classified as endpoint-level partial follow-up.
 persona-voice: done; reviewer passed after required voice audio metadata and mix-audio babi_param fixes.
-lip-sync-human: blocked; UI submit capture needed before live submit claim.
+lip-sync-human: blocked; browser-backed image/avatar submit wiring exists, but the current `?type=lip_sync` route still renders a generic composer and the first live attempt failed with `JIMENG_LIP_SYNC_VOICE_OPTION_MISSING`.
 reference-controls: done; reviewer passed, with style/reference gaps explicitly parked until provider capture.
 template-mining: done; reviewer passed typed non-mutating CapCut/Jimeng template parsing and blocked-reason handling.
 ```
@@ -219,33 +219,48 @@ data/jimeng-lab/proof-20260613-goal-text2image-cdp-ui/                         b
 
 Conclusion: text-to-image is no longer blocked as a user-facing CLI workflow. It is blocked only as a pure direct replay/signature problem: stale body/schema, auth, credits, and model access are ruled out; both patched direct replay and `cdp-fetch` still fail with `ret=3018`, while the browser UI delegated path succeeds through the live frontend runtime.
 
+## Lip-sync browser-backed blocker sharpening
+
+Focused implementation worker output added browser-backed image/avatar lip-sync submit wiring through `jimeng-browser-proxy lip-sync --transport cdp-ui`, plus explicit validation errors when the live page does not expose the needed asset or voice controls.
+
+Observed live blocker:
+
+```txt
+bun packages/jimeng-client/src/browser-proxy-cli.ts lip-sync \
+  --session data/jimeng-lab/raw/session-bundle-current.json \
+  --voice-id 7597003459665072686 \
+  --text "三秒告诉你为什么这款产品值得试。" \
+  --imageUri tos-cn-i-tb4s082cfz/98b783a59d634dd9b499c4079735e370 \
+  --imageWidth 2048 \
+  --imageHeight 2048 \
+  --transport cdp-ui \
+  --cdp http://127.0.0.1:9340 \
+  --target-url jimeng.jianying.com \
+  --outDir data/jimeng-lab/packet-20260613-lip-sync-human-unblock/live-lipsync-proven \
+  --artifact-db data/jimeng-lab/artifact-log.sqlite \
+  --worker Main \
+  --artifact-notes "browser-backed lip-sync image/avatar live proof"
+
+=> JIMENG_LIP_SYNC_VOICE_OPTION_MISSING
+```
+
+Background DOM/screenshot evidence under `data/jimeng-lab/packet-20260613-lip-sync-human-unblock/` shows that `https://jimeng.jianying.com/ai-tool/generate/?type=lip_sync` still renders a generic composer. After selecting a reusable recent image, the visible controls remained generic image-generation labels (`图片5.0 Lite`, `1:1`, `2K`, `时间`, `生成模式`, `操作类型`) and no confirmed lip-sync/voice-picker labels were visible. Screenshot: `data/jimeng-lab/packet-20260613-lip-sync-human-unblock/lip-sync-generic-composer-blocker.png`.
+
 Validation after this update:
 
 ```txt
 bun test packages/jimeng-client/test/http-transport.test.ts packages/jimeng-client/test/client.test.ts packages/jimeng-client/test/text2image-plan-compare.test.ts packages/jimeng-client/test/endpoint-registry.test.ts
 25 pass, 0 fail
 
-bun run --cwd packages/jimeng-client typecheck
-passed
+bun test packages/jimeng-client/test/client.test.ts packages/jimeng-client/test/lip-sync.test.ts packages/jimeng-client/test/client-seams.test.ts
+20 pass, 0 fail
 
 bun run --cwd packages/jimeng-client test
-331 pass, 0 fail
+333 pass, 0 fail
 
 bun run --cwd packages/jimeng-client test:vitest
 6 files passed, 9 tests passed
-```
-Validation:
 
-```txt
-packages/jimeng-client$ bun test test/artifact-dashboard.test.ts
-3 pass, 0 fail
-
-packages/jimeng-client$ bun run test
-323 pass, 0 fail
-
-packages/jimeng-client$ bun run typecheck
+bun run --cwd packages/jimeng-client typecheck
 passed
-
-packages/jimeng-client$ bun run test:vitest
-6 files passed, 9 tests passed
 ```

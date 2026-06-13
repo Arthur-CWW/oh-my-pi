@@ -32,7 +32,12 @@ import {
   parseJimengCommercePricingEndpoints,
   summarizeJimengCommercePricing,
 } from "./commerce-pricing"
-import { createJimengBrowserFetch, loadJimengSessionFromBrowser, submitJimengText2ImageInBrowser, type JimengBrowserSubmitWireResult } from "./browser-session"
+import {
+  createJimengBrowserFetch,
+  loadJimengSessionFromBrowser,
+  submitJimengLipSyncImageInBrowser,
+  submitJimengText2ImageInBrowser,
+} from "./browser-session"
 import {
   buildCapCutCollectionTemplatesRequest,
   buildSingleCapCutEndpointProbeVariant,
@@ -95,7 +100,7 @@ import {
   type JimengVoiceCatalogItem,
 } from "./catalog"
 import { prepareFromCapture, redactHeaders, type CaptureFile, type JimengOp, type JimengSessionBundle, type PreparedJimengRun } from "./capture"
-import { JimengClient } from "./client"
+import { JimengClient, parseJimengWorkbenchSubmitResponse } from "./client"
 import { JimengError } from "./errors"
 import {
   buildJimengDiscoveryKnownEndpointMap,
@@ -5809,9 +5814,6 @@ async function runBrowserProxyCommand(args: CliArgs): Promise<void> {
   }
 
   if (args.command === "lip-sync") {
-    if (!args.dryRun) {
-      throw new Error("lip-sync live submit is not implemented yet; pass --dryRun to write the confirmed provider-input plan")
-    }
     if (!args.voiceId) throw new Error("--voice-id is required for lip-sync text-to-speech planning")
 
     const dirs = ensureOutputDirs(path.resolve(args.outDir))
@@ -5855,33 +5857,95 @@ async function runBrowserProxyCommand(args: CliArgs): Promise<void> {
         image: imageReference,
         ttsInfo,
       })
-      const file = path.join(dirs.rawDir, `${runId}-dry-run-plan.json`)
-      writeJson(file, {
-        plan,
-        reference_uploads: referenceUploads,
-        browser_session: redactSession(session),
+
+      if (args.dryRun) {
+        const file = path.join(dirs.rawDir, `${runId}-dry-run-plan.json`)
+        writeJson(file, {
+          plan,
+          reference_uploads: referenceUploads,
+          browser_session: redactSession(session),
+        })
+        writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+          command: "lip-sync",
+          mode: plan.mode,
+          status: plan.status,
+          reason: plan.reason,
+          model_req_key: plan.modelReqKey,
+          image_reference: imageReference,
+          tts_info: plan.providerInput.videoGenInputs.i2vOpt.realmanAvatar.ttsInfo,
+          reference_uploads: referenceUploads.map((upload) => ({
+            index: upload.index,
+            role: upload.role,
+            source_file: upload.source_file,
+            artifact_copy: upload.artifact_copy,
+            uri: upload.uri,
+            width: upload.image_upload.pluginResults[0]?.imageWidth ?? null,
+            height: upload.image_upload.pluginResults[0]?.imageHeight ?? null,
+          })),
+          next_probe: plan.nextProbe,
+        })
+        console.log(`[jimeng-browser-proxy] lip-sync image dry run saved: ${file}`)
+        return
+      }
+      if (args.transportMode !== "cdp-ui") {
+        throw new Error("lip-sync live submit is only implemented for image/avatar mode with --transport cdp-ui; pass --dryRun to write the confirmed provider-input plan")
+      }
+
+      const client = new JimengClient({})
+      const submitWire = await submitJimengLipSyncImageInBrowser({
+        cdpUrl: args.cdpUrl,
+        targetUrl: args.targetUrl,
+        imageUri: imageReference.uri,
+        voiceId: args.voiceId,
+        text: ttsInfo.text,
       })
-      writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      const parsedSubmit = parseJimengWorkbenchSubmitResponse({
+        text: submitWire.text,
+        fallbackSubmitId: plan.submitId,
+      })
+      const submit = {
+        ...parsedSubmit,
+        httpStatus: submitWire.status,
+      }
+      writeJson(path.join(dirs.rawDir, `${runId}-submit.json`), submit)
+      console.log(`[jimeng-browser-proxy] submit accepted submitId=${submit.submitId} historyId=${submit.historyId ?? "n/a"}`)
+
+      const pollInput = buildJimengHistoryPollInput(session, { submitId: submit.submitId, historyId: submit.historyId ?? undefined })
+      const poll = await client.pollUntilTerminal({
+        ...pollInput,
+        pollIntervalMs: args.pollIntervalMs,
+        maxPolls: args.maxPolls,
+      })
+      writeJson(path.join(dirs.rawDir, `${runId}-poll.json`), poll)
+      console.log(`[jimeng-browser-proxy] poll complete status=${poll.record.status ?? "unknown"} trace=${poll.trace.length}`)
+
+      const artifacts = args.noDownload ? [] : await client.downloadArtifacts("video", poll.record)
+      const manifest = []
+      for (let i = 0; i < artifacts.length; i += 1) {
+        const artifact = artifacts[i]!
+        const file = path.join(dirs.artifactsDir, `${submit.submitId}-${String(i).padStart(2, "0")}.mp4`)
+        writeFileSync(file, Buffer.from(artifact.bytes))
+        manifest.push({ kind: artifact.kind, url: artifact.url, saved_file: file })
+      }
+
+      writeJson(path.join(dirs.normalizedDir, `${runId}-result.json`), redactJimengProofForNormalized({
         command: "lip-sync",
         mode: plan.mode,
-        status: plan.status,
-        reason: plan.reason,
-        model_req_key: plan.modelReqKey,
-        image_reference: imageReference,
-        tts_info: plan.providerInput.videoGenInputs.i2vOpt.realmanAvatar.ttsInfo,
-        reference_uploads: referenceUploads.map((upload) => ({
-          index: upload.index,
-          role: upload.role,
-          source_file: upload.source_file,
-          artifact_copy: upload.artifact_copy,
-          uri: upload.uri,
-          width: upload.image_upload.pluginResults[0]?.imageWidth ?? null,
-          height: upload.image_upload.pluginResults[0]?.imageHeight ?? null,
-        })),
-        next_probe: plan.nextProbe,
-      })
-      console.log(`[jimeng-browser-proxy] lip-sync image dry run saved: ${file}`)
+        plan,
+        reference_uploads: referenceUploads,
+        submit,
+        pollTrace: poll.trace,
+        artifacts: manifest,
+      }))
+      console.log(`[jimeng-browser-proxy] done artifacts=${manifest.length}`)
       return
+    }
+
+    if (!args.dryRun) {
+      if (args.transportMode === "cdp-ui") {
+        throw new Error("lip-sync cdp-ui live submit currently supports only image/avatar mode; pass --dryRun for VOD planning")
+      }
+      throw new Error("lip-sync live submit is not implemented yet; pass --dryRun to write the confirmed provider-input plan")
     }
 
     const referenceUploads: ReferenceVideoUploadSummary[] = []
@@ -6051,13 +6115,20 @@ async function runBrowserProxyCommand(args: CliArgs): Promise<void> {
     : new JimengClient({})
   console.log(`[jimeng-browser-proxy] live submit command=${args.command} submitKind=${prepared.submitKind} pollKind=${prepared.pollKind}`)
   const submit = useBrowserUi
-    ? await parseJimengBrowserSubmitWireResult(prepared, await submitJimengText2ImageInBrowser({
-      cdpUrl: args.cdpUrl,
-      targetUrl: args.targetUrl,
-      prompt: prepared.prompt,
-      ratio: args.ratio,
-      resolution: args.resolution === "2k" || args.resolution === "4k" ? args.resolution : undefined,
-    }))
+    ? await (async () => {
+      const wire = await submitJimengText2ImageInBrowser({
+        cdpUrl: args.cdpUrl,
+        targetUrl: args.targetUrl,
+        prompt: prepared.prompt,
+        ratio: args.ratio,
+        resolution: args.resolution === "2k" || args.resolution === "4k" ? args.resolution : undefined,
+      })
+      const parsed = parseJimengWorkbenchSubmitResponse({
+        text: wire.text,
+        fallbackSubmitId: prepared.submitId,
+      })
+      return { ...parsed, httpStatus: wire.status }
+    })()
     : await client.submitPrepared(prepared)
   writeJson(path.join(dirs.rawDir, `${runId}-submit.json`), submit)
   console.log(`[jimeng-browser-proxy] submit accepted submitId=${submit.submitId} historyId=${submit.historyId ?? "n/a"}`)
@@ -6693,36 +6764,31 @@ function redactBrowserProxyCommandArgv(argv: string[]): string[] {
   return redacted
 }
 
-function parseJimengBrowserSubmitWireResult(
-  prepared: Pick<PreparedJimengRun, "submitId">,
-  wire: JimengBrowserSubmitWireResult,
+function buildJimengHistoryPollInput(
+  session: JimengSessionBundle,
+  ids: { submitId: string; historyId?: string },
 ) {
-  const recordValue = (value: unknown): Record<string, unknown> | null =>
-    value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null
-  const stringValue = (value: unknown): string | null => typeof value === "string" ? value : null
-  const responseBody = JSON.parse(wire.text) as Record<string, unknown>
-  const data = recordValue(responseBody.data)
-  const aigc = recordValue(data?.aigc_data)
-  const task = recordValue(aigc?.task)
-  const submitId = stringValue(aigc?.submit_id) ?? stringValue(task?.submit_id)
-  const historyId = stringValue(aigc?.history_record_id)
-  const ret = stringValue(responseBody.ret) ?? responseBody.ret
-  const errmsg = stringValue(responseBody.errmsg) ?? responseBody.errmsg
-  if (!submitId && !historyId) {
-    throw new JimengError({
-      category: "upstream",
-      code: "WORKBENCH_SUBMIT_MISSING_IDS",
-      message: `Workbench submit did not return submit/history id (ret=${String(ret ?? "unknown")}, errmsg=${String(errmsg ?? "unknown")})`,
-      retryable: false,
-      details: { ret: ret ?? null, errmsg: errmsg ?? null },
-    })
-  }
+  const pollKey = ids.historyId ?? ids.submitId
   return {
-    submitId: submitId ?? prepared.submitId,
-    historyId: historyId ?? null,
-    httpStatus: wire.status,
-    responseBody,
-    responseTextSha256: sha256(wire.text),
+    submitId: pollKey,
+    pollUrl: "https://jimeng.jianying.com/mweb/v1/get_history_by_ids?aid=513695&device_platform=web&region=cn&da_version=3.1.3",
+    pollHeaders: {
+      "content-type": "application/json",
+      accept: "application/json, text/plain, */*",
+      "user-agent": session.userAgent ?? "Mozilla/5.0",
+      origin: session.origin ?? "https://jimeng.jianying.com",
+      referer: session.referer ?? "https://jimeng.jianying.com/ai-tool/generate/",
+      cookie: session.cookie,
+      lan: "zh-Hans",
+      pf: "7",
+      loc: "cn",
+      appid: "513695",
+      appvr: "8.4.0",
+      "app-sdk-version": "48.0.0",
+      "x-platform": "pc",
+    },
+    pollBody: buildJimengHistoryRecordsRequest(ids.historyId ? { historyIds: [ids.historyId] } : { submitIds: [ids.submitId] }),
+    terminalStatus: 50,
   }
 }
 

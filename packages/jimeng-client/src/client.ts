@@ -21,6 +21,17 @@ export interface JimengSubmitResult {
   responseBody: unknown
   responseTextSha256: string
 }
+export interface ParseJimengWorkbenchSubmitResponseInput {
+  text: string
+  fallbackSubmitId: string
+}
+
+export interface ParsedJimengWorkbenchSubmitResponse {
+  submitId: string
+  historyId: string | null
+  responseBody: unknown
+  responseTextSha256: string
+}
 
 export interface JimengPollTraceEntry {
   atIso: string
@@ -137,35 +148,13 @@ export class JimengClient {
       headers: input.submitHeaders,
       body: JSON.stringify(input.submitBody),
     })
-
-    const responseBody = safeJson(response.text)
-    assertNoRiskError(responseBody, response.text)
-
-    const record = asRecord(responseBody)
-    const data = asRecord(record?.data)
-    const aigc = asRecord(data?.aigc_data)
-    const task = asRecord(aigc?.task)
-    const submitId = asString(aigc?.submit_id) ?? asString(task?.submit_id)
-    const historyId = asString(aigc?.history_record_id)
-    const ret = record?.ret
-    const errmsg = record?.errmsg
-
-    if (!submitId && !historyId) {
-      throw jimengError({
-        category: "upstream",
-        code: "WORKBENCH_SUBMIT_MISSING_IDS",
-        message: `Workbench submit did not return submit/history id (ret=${String(ret ?? "unknown")}, errmsg=${String(errmsg ?? "unknown")})`,
-        retryable: false,
-        details: { ret: ret ?? null, errmsg: errmsg ?? null },
-      })
-    }
-
+    const parsed = parseJimengWorkbenchSubmitResponse({
+      text: response.text,
+      fallbackSubmitId: input.submitId,
+    })
     return {
-      submitId: submitId ?? input.submitId,
-      historyId: historyId ?? null,
+      ...parsed,
       httpStatus: response.status,
-      responseBody,
-      responseTextSha256: sha256(response.text),
     }
   }
 
@@ -404,6 +393,35 @@ export class JimengClient {
         cooldownUntilMs: cooldownUntilMs || null,
       },
     })
+  }
+}
+export function parseJimengWorkbenchSubmitResponse(input: ParseJimengWorkbenchSubmitResponseInput): ParsedJimengWorkbenchSubmitResponse {
+  const responseBody = safeJson(input.text)
+  assertNoRiskError(responseBody, input.text)
+  const record = asRecord(responseBody)
+  const data = asRecord(record?.data)
+  const aigc = asRecord(data?.aigc_data)
+  const task = asRecord(aigc?.task)
+  const submitId = asString(aigc?.submit_id) ?? asString(task?.submit_id)
+  const historyId = asString(aigc?.history_record_id)
+  const ret = record?.ret
+  const errmsg = record?.errmsg
+
+  if (!submitId && !historyId) {
+    throw jimengError({
+      category: "upstream",
+      code: "WORKBENCH_SUBMIT_MISSING_IDS",
+      message: `Workbench submit did not return submit/history id (ret=${String(ret ?? "unknown")}, errmsg=${String(errmsg ?? "unknown")})`,
+      retryable: false,
+      details: { ret: ret ?? null, errmsg: errmsg ?? null },
+    })
+  }
+
+  return {
+    submitId: submitId ?? input.fallbackSubmitId,
+    historyId: historyId ?? null,
+    responseBody,
+    responseTextSha256: sha256(input.text),
   }
 }
 

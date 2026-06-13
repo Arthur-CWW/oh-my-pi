@@ -6,6 +6,7 @@ import {
   downloadArtifactsEffect,
   JimengClient,
   JimengError,
+  parseJimengWorkbenchSubmitResponse,
   pollUntilTerminalEffect,
   runPreparedEffect,
   submitPreparedEffect,
@@ -60,6 +61,45 @@ describe("JimengClient", () => {
     expect(result.historyId).toBe("history-id-001")
     expect(result.httpStatus).toBe(200)
     expect(result.responseTextSha256.length).toBe(64)
+  })
+  test("parseJimengWorkbenchSubmitResponse accepts task submit fallback and preserves history ID", () => {
+    const result = parseJimengWorkbenchSubmitResponse({
+      text: JSON.stringify({
+        ret: 0,
+        errmsg: "ok",
+        data: {
+          aigc_data: {
+            history_record_id: "history-id-002",
+            task: {
+              submit_id: "task-submit-id",
+            },
+          },
+        },
+      }),
+      fallbackSubmitId: "fallback-submit-id",
+    })
+
+    expect(result.submitId).toBe("task-submit-id")
+    expect(result.historyId).toBe("history-id-002")
+    expect(result.responseTextSha256.length).toBe(64)
+  })
+
+  test("parseJimengWorkbenchSubmitResponse rejects workbench responses without submit or history IDs", () => {
+    expect.assertions(3)
+    try {
+      parseJimengWorkbenchSubmitResponse({
+        text: JSON.stringify({
+          ret: 1,
+          errmsg: "missing ids",
+          data: { aigc_data: {} },
+        }),
+        fallbackSubmitId: "fallback-submit-id",
+      })
+    } catch (error) {
+      expect(error).toBeInstanceOf(JimengError)
+      expect(error).toMatchObject({ category: "upstream", code: "WORKBENCH_SUBMIT_MISSING_IDS", retryable: false })
+      expect((error as JimengError).details).toMatchObject({ ret: 1, errmsg: "missing ids" })
+    }
   })
 
   test("submitImage fails fast on submit_info rejection", async () => {

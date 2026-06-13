@@ -49,14 +49,22 @@ export interface JimengBrowserImageSubmitOptions extends JimengBrowserSessionOpt
   timeoutMs?: number
 }
 
+export interface JimengBrowserLipSyncImageSubmitOptions extends JimengBrowserSessionOptions {
+  imageUri: string
+  voiceId: string
+  text: string
+  timeoutMs?: number
+}
+
 export interface JimengBrowserSubmitWireResult {
   status: number
   text: string
   url: string
 }
 
+const JIMENG_WORKBENCH_SUBMIT_PATH = "/mweb/v1/aigc_draft/generate"
 const JIMENG_IMAGE_WORKBENCH_URL = "https://jimeng.jianying.com/ai-tool/generate/?type=image"
-
+const JIMENG_LIP_SYNC_WORKBENCH_URL = "https://jimeng.jianying.com/ai-tool/generate/?type=lip_sync"
 export function createJimengBrowserFetch(options: JimengBrowserFetchOptions): JimengFetch {
   return async (url, init) => {
     const puppeteer = await import("puppeteer-core")
@@ -116,7 +124,7 @@ export async function submitJimengText2ImageInBrowser(options: JimengBrowserImag
     await fillJimengPrompt(page, options.prompt)
     await ensureJimengImageSettings(page, options.ratio, options.resolution)
     const responsePromise = page.waitForResponse(
-      (response) => response.url().includes("/mweb/v1/aigc_draft/generate"),
+      (response) => response.url().includes(JIMENG_WORKBENCH_SUBMIT_PATH),
       { timeout: options.timeoutMs ?? 60_000 },
     )
     await clickJimengImageSubmit(page)
@@ -134,6 +142,44 @@ export async function submitJimengText2ImageInBrowser(options: JimengBrowserImag
       message: error instanceof Error ? error.message : String(error),
       retryable: true,
       details: { cdpUrl: options.cdpUrl, targetUrl: options.targetUrl ?? null },
+    })
+  } finally {
+    await browser.disconnect()
+  }
+}
+export async function submitJimengLipSyncImageInBrowser(options: JimengBrowserLipSyncImageSubmitOptions): Promise<JimengBrowserSubmitWireResult> {
+  const puppeteer = await import("puppeteer-core")
+  const browser = await puppeteer.connect({ browserURL: options.cdpUrl, protocolTimeout: 600_000 })
+
+  try {
+    const page = await resolveJimengPage(browser, options)
+    await page.goto(JIMENG_LIP_SYNC_WORKBENCH_URL, { waitUntil: "domcontentloaded" })
+    await new Promise((resolve) => setTimeout(resolve, 3_000))
+    await assertJimengBrowserSession(page, options.cdpUrl)
+    await ensureJimengLipSyncWorkbench(page)
+    await selectJimengLipSyncImageAsset(page, options.imageUri)
+    await closeAssetDrawer(page)
+    await fillJimengLipSyncText(page, options.text)
+    await selectJimengLipSyncVoice(page, options.voiceId)
+    const responsePromise = page.waitForResponse(
+      (response) => response.url().includes(JIMENG_WORKBENCH_SUBMIT_PATH),
+      { timeout: options.timeoutMs ?? 60_000 },
+    )
+    await clickJimengLipSyncSubmit(page)
+    const response = await responsePromise
+    return {
+      status: response.status(),
+      text: await response.text(),
+      url: response.url(),
+    }
+  } catch (error) {
+    if (error instanceof JimengError) throw error
+    throw jimengError({
+      category: "transport",
+      code: "JIMENG_BROWSER_UI_SUBMIT_FAILED",
+      message: error instanceof Error ? error.message : String(error),
+      retryable: true,
+      details: { cdpUrl: options.cdpUrl, targetUrl: options.targetUrl ?? null, workflow: "lip-sync-image" },
     })
   } finally {
     await browser.disconnect()
@@ -198,6 +244,117 @@ async function fillJimengPrompt(page: Page, prompt: string): Promise<void> {
     retryable: false,
   })
 }
+async function ensureJimengLipSyncWorkbench(page: Page): Promise<void> {
+  const modeReady = await page.evaluate(() => {
+    const text = (node: Element | null | undefined): string => (node?.textContent || "").replace(/\s+/g, " ").trim()
+    const clickable = Array.from(document.querySelectorAll("button, [role=\"tab\"], [role=\"button\"]"))
+    const lipSyncToggle = clickable.find((entry) => /数字人|口型|Lip Sync/i.test(text(entry)))
+    if (lipSyncToggle) (lipSyncToggle as HTMLElement).click()
+    const prompt = document.querySelector("div[role=\"textbox\"].ProseMirror, div.ProseMirror[contenteditable=\"true\"], textarea.prompt-input")
+    return !!prompt
+  })
+  if (modeReady) return
+  throw jimengError({
+    category: "validation",
+    code: "JIMENG_LIP_SYNC_WORKBENCH_MISSING",
+    message: "Jimeng lip-sync workbench did not expose the expected prompt editor.",
+    retryable: false,
+  })
+}
+
+async function fillJimengLipSyncText(page: Page, text: string): Promise<void> {
+  const filled = await page.evaluate((nextText) => {
+    const applyText = (element: HTMLElement | null): boolean => {
+      if (!element) return false
+      if (element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement) {
+        const setter = Object.getOwnPropertyDescriptor(element.constructor.prototype, "value")?.set
+          ?? Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set
+          ?? Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set
+        setter?.call(element, nextText)
+        element.dispatchEvent(new InputEvent("input", { bubbles: true, data: nextText, inputType: "insertText" }))
+        element.dispatchEvent(new Event("change", { bubbles: true }))
+        return true
+      }
+      element.textContent = nextText
+      element.dispatchEvent(new InputEvent("input", { bubbles: true, data: nextText, inputType: "insertText" }))
+      element.dispatchEvent(new Event("change", { bubbles: true }))
+      return true
+    }
+    return applyText(document.querySelector("textarea.prompt-input"))
+      || applyText(document.querySelector("div[role=\"textbox\"].ProseMirror") as HTMLElement | null)
+      || applyText(document.querySelector("div.ProseMirror[contenteditable=\"true\"]") as HTMLElement | null)
+  }, text)
+  if (filled) return
+  throw jimengError({
+    category: "validation",
+    code: "JIMENG_LIP_SYNC_TEXT_EDITOR_MISSING",
+    message: "Jimeng lip-sync workbench text editor is missing.",
+    retryable: false,
+  })
+}
+
+async function selectJimengLipSyncImageAsset(page: Page, imageUri: string): Promise<void> {
+  const selected = await page.evaluate((targetImageUri) => {
+    const normalized = targetImageUri.trim()
+    const encoded = encodeURIComponent(normalized)
+    const allElements = Array.from(document.querySelectorAll("button, [role=\"button\"], [role=\"tab\"], label, li, div"))
+    const text = (node: Element | null | undefined): string => (node?.textContent || "").replace(/\s+/g, " ").trim()
+    const click = (node: Element | null | undefined): boolean => {
+      const clickable = (node instanceof HTMLElement ? node : node?.closest("button, [role=\"button\"], label, li, div")) as HTMLElement | null
+      if (!clickable || clickable.hasAttribute("disabled") || clickable.getAttribute("aria-disabled") === "true") return false
+      clickable.click()
+      return true
+    }
+    const valueMatches = (value: string | null | undefined): boolean => !!value && (value.includes(normalized) || value.includes(encoded))
+    const matchNode = allElements.find((entry) => {
+      for (const attribute of entry.getAttributeNames()) {
+        if (valueMatches(entry.getAttribute(attribute))) return true
+      }
+      const datasetValues = Object.values((entry as HTMLElement).dataset ?? {})
+      return datasetValues.some((value) => valueMatches(value))
+    })
+    if (click(matchNode)) return true
+    const imageMatch = Array.from(document.querySelectorAll("img")).find((entry) => valueMatches(entry.getAttribute("src")) || valueMatches(entry.getAttribute("data-src")))
+    return click(imageMatch)
+  }, imageUri)
+  if (selected) return
+  throw jimengError({
+    category: "validation",
+    code: "JIMENG_LIP_SYNC_IMAGE_ASSET_MISSING",
+    message: "Jimeng lip-sync workbench could not locate the requested image asset. Preselect the avatar image in the open workbench, then rerun the browser-backed submit.",
+    retryable: false,
+    details: { imageUri },
+  })
+}
+
+async function selectJimengLipSyncVoice(page: Page, voiceId: string): Promise<void> {
+  const selected = await page.evaluate((targetVoiceId) => {
+    const normalized = targetVoiceId.trim()
+    const text = (node: Element | null | undefined): string => (node?.textContent || "").replace(/\s+/g, " ").trim()
+    const clickable = Array.from(document.querySelectorAll("button, [role=\"button\"], [role=\"option\"], li, div"))
+    const openVoicePicker = clickable.find((entry) => /音色|声音|配音|发音人|语音/i.test(text(entry)))
+    ;(openVoicePicker as HTMLElement | undefined)?.click()
+    const match = clickable.find((entry) => {
+      if (text(entry).includes(normalized)) return true
+      for (const attribute of entry.getAttributeNames()) {
+        const value = entry.getAttribute(attribute)
+        if (value?.includes(normalized)) return true
+      }
+      return Object.values((entry as HTMLElement).dataset ?? {}).some((value) => value?.includes(normalized))
+    }) as HTMLElement | undefined
+    if (!match || match.hasAttribute("disabled") || match.getAttribute("aria-disabled") === "true") return false
+    match.click()
+    return true
+  }, voiceId)
+  if (selected) return
+  throw jimengError({
+    category: "validation",
+    code: "JIMENG_LIP_SYNC_VOICE_OPTION_MISSING",
+    message: "Jimeng lip-sync workbench could not locate the requested voice. Open the voice picker, ensure the target voice is visible or preselected, then rerun the browser-backed submit.",
+    retryable: false,
+    details: { voiceId },
+  })
+}
 
 async function ensureJimengImageSettings(page: Page, ratio?: string, resolution?: "2k" | "4k"): Promise<void> {
   const current = await page.evaluate(() => {
@@ -243,6 +400,27 @@ async function clickJimengImageSubmit(page: Page): Promise<void> {
     category: "validation",
     code: "JIMENG_IMAGE_SUBMIT_BUTTON_MISSING",
     message: "Jimeng image workbench submit button is missing or disabled.",
+    retryable: false,
+  })
+}
+async function clickJimengLipSyncSubmit(page: Page): Promise<void> {
+  const clicked = await page.evaluate(() => {
+    const buttons = Array.from(document.querySelectorAll("button"))
+    const match = buttons
+      .filter((entry) => !(entry as HTMLButtonElement).disabled)
+      .find((entry) =>
+        (entry.className || "").toString().includes("generate-btn")
+        || (entry.className || "").toString().includes("submit-button")
+        || /生成|提交/i.test((entry.textContent || "").trim()))
+    if (!match) return false
+    ;(match as HTMLButtonElement).click()
+    return true
+  })
+  if (clicked) return
+  throw jimengError({
+    category: "validation",
+    code: "JIMENG_LIP_SYNC_SUBMIT_BUTTON_MISSING",
+    message: "Jimeng lip-sync workbench submit button is missing or disabled.",
     retryable: false,
   })
 }
