@@ -5,7 +5,7 @@ This folder is the parent-controlled context for running Jimeng/Dreamina impleme
 Parent agent responsibilities:
 
 - Preserve main context for orchestration only: packet selection, brief writing, file ownership, reviewer assignment, validation, status updates, and commits.
-- Do not use the parent as the default implementation worker. If implementation can be described as an owned file slice, delegate it to a subagent.
+- Do not use the parent as the default implementation worker. If implementation can be described as an owned file slice, delegate it to a subagent. Parent implementation should be the exception for tiny integration fixes or shared-contract decisions.
 - Keep the goal docs, endpoint registry, snapshots, `TASKS.md`, packet ledger/dashboard, and final commits consistent.
 - Assign one implementation worker brief per independent slice, then one fresh review worker brief per non-trivial completed slice.
 - Enforce file ownership. Reject patches that touch unassigned files.
@@ -32,8 +32,8 @@ Preferred worker split:
 ```txt
 Parent/orchestrator: GPT-5.5 main process
 Simple non-core implementation/read-only packet workers: jimeng-gemini-worker (gemini-3.5-flash)
-Fallback simple worker when Gemini is unavailable or rate-limited: jimeng-kimi-worker (kimi-latest) or a bounded GPT-5.5 `task` / `reviewer` subagent when correctness matters more than cost/throughput
-Core/shared-contract implementation: keep in GPT-5.5 main or a stronger GPT-5.5 subagent
+Trickier bounded implementation/review workers: GPT-5.5 `task` / `reviewer` subagents
+Fallback when Gemini is unavailable or rate-limited and GPT-5.5 subagents are not the right fit: jimeng-kimi-worker (kimi-latest)
 ```
 
 Use `jimeng-gemini-worker` for bounded edits that are not foundational for other work: fixture promotion, endpoint-specific schema/client wrappers, packet gap review, small docs/registry deltas, dashboard polish, and low-risk generated-code tightening. Do not use it as the final owner for shared transport, Effect layer design, cross-command CLI architecture, schema strategy, or irreversible provider workflow choices.
