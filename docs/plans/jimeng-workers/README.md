@@ -1,33 +1,53 @@
 # Jimeng Worker Orchestration
 
-This folder is the parent-controlled context for running Jimeng/Dreamina implementation workers in parallel with OMP `task` subagents. The parent/orchestrator is the main GPT-5.5 Codex process; workers use `.omp/agents/jimeng-gemini-worker.md` on Gemini 3.5 Flash.
+This folder is the parent-controlled context for running Jimeng/Dreamina implementation workers in parallel with OMP `task` subagents. The parent/orchestrator is the main GPT-5.5 Codex process; simple implementation and read-only planning workers use `.omp/agents/jimeng-gemini-worker.md` on Gemini 3.5 Flash by default, with `.omp/agents/jimeng-kimi-worker.md` as the latest-Kimi fallback when Gemini is unavailable or rate-limited. When Gemini is unstable and the slice is still bounded enough for a subagent, fall back to a GPT-5.5 `task` or `reviewer` subagent before pulling the work into the parent.
 
 Parent agent responsibilities:
 
-- Keep the goal docs, endpoint registry, snapshots, `TASKS.md`, and final commits consistent.
-- Assign one worker brief per independent slice.
+- Preserve main context for orchestration only: packet selection, brief writing, file ownership, reviewer assignment, validation, status updates, and commits.
+- Do not use the parent as the default implementation worker. If implementation can be described as an owned file slice, delegate it to a subagent.
+- Keep the goal docs, endpoint registry, snapshots, `TASKS.md`, packet ledger/dashboard, and final commits consistent.
+- Assign one implementation worker brief per independent slice, then one fresh review worker brief per non-trivial completed slice.
 - Enforce file ownership. Reject patches that touch unassigned files.
-- Run quick validation as each worker finishes.
+- Run quick validation as each accepted worker slice finishes.
 - Run full Jimeng validation before committing integrated work.
-- Record every worker agent id, model, brief version, result path, transcript path, and outcome in `session-log.md`.
-- Preserve `agent://<id>` outputs and `history://<id>` transcripts so we can later distill better prompts and workflow rules.
-- After the wave finishes, run the post-run analysis job through an OMP task subagent to measure time/cost/token/process quality and improve the next wave.
+- Record every implementation/review worker agent id, model, brief version, result path, transcript path, and outcome in `session-log.md`.
+- Preserve `agent://<id>` outputs and `history://<id>` transcripts so we can later distill better prompts and workflow rules without loading all details into the parent.
+- After a coherent reviewed group validates, run the post-run analysis job through an OMP task subagent to measure time/cost/token/process quality and improve the next pseudo-wave.
 
-Preferred worker agent:
+
+Efficiency protocol:
+- Use rolling pseudo-waves, not rigid batches. Launch independent implementation/review tasks together when their file ownership is disjoint, but integrate and validate each accepted slice as soon as it finishes. Do not wait for a slow or blocked sibling before updating SQLite and claiming the next independent packet.
+
+- Treat the packet status ledger as the source of truth before launching a worker. Do not re-check a completed or explicitly blocked packet unless the blocker changed or the ledger says the evidence is stale.
+- Each packet status must be one of `todo`, `in_progress`, `review`, `done`, or `blocked`, with an exact next command/probe. `blocked` requires a reason and unblock condition; `done` requires parent-observed validation.
+- Run implementation and review as separate agents when the implementation is non-trivial: one bounded implementation worker, then one fresh reviewer worker over the patch/result. The parent integrates only after the reviewer reports concrete issues or accepts the slice.
+- Keep the parent context thin. Workers return a compact artifact/result; reviewers inspect `agent://<impl-id>` / `history://<impl-id>` and the assigned files instead of making the parent carry the whole transcript.
+- The single source of truth for packet/workstream status is the SQLite dashboard DB, currently `data/jimeng-lab/artifact-log.sqlite`. Docs may describe policy and durable summaries, but they must not duplicate live packet status tables. Update packet rows with `jimeng-artifacts packet set|next`; update docs only after the ledger row is written.
+- The parent should not inspect full implementation files unless needed to resolve a reviewer finding, validate an integration error, or design a shared contract. Default parent inputs are worker final output, reviewer final output, focused validation output, and packet ledger state.
+- After a coherent set of slices is integrated, reviewed, and validated, make a scoped Git commit before starting the next risky/shared wave. The commit boundary is the recovery point across auto-compaction and prevents later waves from re-litigating finished status.
+- If the next step is blocked by live spend/capture/account mutation, ask once with the exact command/artifact path. After approval, continue; if not approved, keep work inside the same packet instead of switching to an easier family.
+Preferred worker split:
 
 ```txt
-jimeng-gemini-worker
+Parent/orchestrator: GPT-5.5 main process
+Simple non-core implementation/read-only packet workers: jimeng-gemini-worker (gemini-3.5-flash)
+Fallback simple worker when Gemini is unavailable or rate-limited: jimeng-kimi-worker (kimi-latest) or a bounded GPT-5.5 `task` / `reviewer` subagent when correctness matters more than cost/throughput
+Core/shared-contract implementation: keep in GPT-5.5 main or a stronger GPT-5.5 subagent
 ```
 
-The project agent pins:
+Use `jimeng-gemini-worker` for bounded edits that are not foundational for other work: fixture promotion, endpoint-specific schema/client wrappers, packet gap review, small docs/registry deltas, dashboard polish, and low-risk generated-code tightening. Do not use it as the final owner for shared transport, Effect layer design, cross-command CLI architecture, schema strategy, or irreversible provider workflow choices.
+
+The project worker agents pin:
 
 ```txt
-model: gemini-3.5-flash
+jimeng-gemini-worker: gemini-3.5-flash
+jimeng-kimi-worker: kimi-latest
 ```
 
-The project worker agent intentionally does not expose `bash`. This prevents Gemini workers from spending cycles on validation, git inspection, or provider commands that the GPT-5.5 parent must run once against the integrated tree.
+The project worker agent intentionally does not expose `bash`. This prevents simple workers from spending cycles on validation, git inspection, foreground browser automation, or provider commands that the GPT-5.5 parent must run once against the integrated tree.
 
-Project `.omp/config.yml` sets `task.isolation.mode: auto`. Prefer task isolation for writing workers: set `isolated: true` on each implementation task item so OMP creates a CoW workspace, captures the worker patch, and cleans the workspace after completion. Read-only planning workers can stay non-isolated unless they need scratch writes.
+Project `.omp/config.yml` sets `task.isolation.mode: apfs` on this macOS/APFS workstation. Prefer task isolation for writing workers: set `isolated: true` on each implementation task item so OMP creates an APFS CoW workspace, captures the worker patch, and cleans the workspace after completion. Read-only planning workers can stay non-isolated unless they need scratch writes.
 
 Launch workers from the parent GPT-5.5 process with one OMP `task` batch. Do not shell out to separate `omp` processes for normal worker fan-out.
 

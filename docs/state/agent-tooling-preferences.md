@@ -12,7 +12,7 @@ Durable preferences for local automation, browser control, and computer-use tool
 - For logged-in browser/API reversal work, prefer direct APIs, saved sessions, CDP network/DOM access, CuaDriver, and background browser-use flows over `bringToFront`, visible clicking, or foreground screenshots.
 - Avoid reactive focus-restoration hacks as the primary solution. AeroSpace/PID guards can remain as seatbelts, but new automation should not depend on stealing focus and jumping back.
 - Keep `TASKS.md` current during substantial repo work so agents can recover active, next, blocked, and done tasks without relying on conversation memory.
-- For React UI work, when adding or materially changing UI tests, prefer adding snapshot tests alongside behavior tests when that gives useful regression coverage and encourages composable UI structure.
+- For React UI work, avoid unit tests that render owned components to raw HTML strings or snapshot full markup. Prefer pre-render state/view-model assertions, interaction/keyboard tests where behavior matters, and visual/browser QA for rendered layout. Use snapshots for stable normalized data/contracts, generated reports, or focused design-system variant outputs when they protect an intentional invariant.
 - For UI/UX implementations, produce reviewer-saving proof artifacts after QA: a short recorded walkthrough video when practical, screenshots or visual diffs, and a concise report with commands and pass/fail findings. The artifact should show the changed workflow being exercised, not merely prove that a process exited.
 - For API reversal, provider setup, integrations, and backend behavior, choose proof tests that demonstrate the actual accomplishment: live or dry-run contract tests as appropriate, snapshot/fixture tests, decoded boundary assertions, and saved outputs/logs that let Arthur or a reviewer verify the work quickly.
 - For external APIs and provider JSON, validate runtime response shapes at the boundary with a permissive schema parser. Enforce the contract paths the pipeline relies on, allow additive extra fields, and record schema/proof artifacts so provider drift can be rerun and diagnosed later.
@@ -21,6 +21,13 @@ Durable preferences for local automation, browser control, and computer-use tool
 - For frontend API reversal, prefer a hybrid loop over pure static bundle reading: passive/background CDP capture for actual requests, `capture-analyze` or equivalent ranking for endpoint evidence, `discovery-worklist` or equivalent prioritization for the next small slice, structural/static search for request-builder semantics, explicit replay/probe for body variants, then a typed schema-backed command once the contract is stable.
 - When a Python utility needs third-party libraries, run it through `uv` with explicit dependencies, for example `uv run --with pillow python ...`; do not call `python3` directly for ad hoc library-backed scripts.
 - When installing missing local developer CLIs for agent work, prefer `mise` first so tools are user-level and reusable. Add repo dependencies only when the tool must be part of project CI or runtime reproducibility.
+
+- For OMP subagents, prefer `gemini-3.5-flash` for simple implementation, bounded edits, and read-only packet review that is not a core architecture surface other work will build on. Use GPT-5.5 in the main process, `oracle`, or a bounded `task` / `reviewer` subagent as the fallback while subscription/rate impact is acceptable. Use latest Kimi only when explicitly selected or when Gemini/GPT fallback is unavailable.
+- Generalize the Jimeng worker-packet pattern across workstreams: coordinator owns the task packet, exact owner paths, excluded paths, acceptance checks, and integration validation; workers avoid root manifests/configs and return proof commands rather than running project-wide gates.
+- Treat speech-to-text variants like “Gming” or “Jming” as Jimeng/Dreamina context when the surrounding request is about provider/API/UGC generation work.
+- For CLI work, prefer Effect APIs and Effect CLI for new command surfaces or substantial CLI refactors. Keep handwritten parsers only for tiny legacy surfaces or when converting them would distract from the requested change. Add lint guardrails for new custom parsers when practical.
+- For external JSON/file/process/API data, use Effect Schema boundary decoders before data enters core code. Avoid raw `JSON.parse` in core implementation; if raw parsing is unavoidable at an IO edge, immediately decode and return typed data.
+- For browser/UI verification, run headless/background first. Prefer CuaDriver for background visual/AX/browser flows that would otherwise steal focus; use CDP/Playwright/Puppeteer headless for DOM/network checks. Do not open foreground/visible browser automation while Arthur is using the machine unless he explicitly asks for it.
 
 ## Decision Log
 
@@ -58,4 +65,22 @@ Arthur clarified that Vitest snapshots feel significantly better after the Jimen
 
 Arthur clarified that "no-spend" should not be the primary work selector for Jimeng/Dreamina. It is a safety/proof constraint, not the priority function. The priority function is highest-value UGC API/workflow first, then speed/ease as a tie-breaker. When the valuable next step is paid or mutating, ask for explicit approval with concrete commands and expected artifacts.
 
+### 2026-06-13
+
+Arthur clarified the OMP model split: GPT-5.5 stays the parent/orchestrator; `gemini-3.5-flash` should be the default for simple non-core implementation workers and packet review; latest Kimi is the fallback only when Gemini is unavailable or rate-limited. Core abstractions and surfaces other work will build on should stay with GPT-5.5/main or a stronger implementation agent.
+
+Arthur also clarified the tooling default for ongoing Jimeng work: prefer Effect APIs and Effect CLI for command surfaces, and keep browser/UI checks headless/background. Use CuaDriver when visual/browser automation needs to run in the background without disrupting his active desktop.
+
 Broader lessons about decomposition, caching validated layers, and parallel agents live in `docs/state/agent-iteration-lessons.md`.
+
+### 2026-06-13 follow-up
+
+Arthur clarified that the Jimeng fast packet workflow should become the general repo workflow: packetized owner paths, exact validation, and coordinator-owned merge/QA. He also wants GPT-5.5 to be the fallback worker while subscription usage is acceptable, with Kimi demoted to explicit/unavailable fallback.
+
+Arthur wants repo implementation SOPs to converge on Effect: Effect CLI for command surfaces, Effect Schema for external JSON and file/process/API boundaries, and AST lint rules to prevent new bespoke CLI parsers or unvalidated JSON parsing.
+
+Arthur wants design and QA knowledge extracted into reusable agent skills/personas: a Refactoring UI-derived private design skill if the local PDF can be found and used, React static-analysis/design-review personas, and Effect AI docs distilled into implementation guidance.
+
+Arthur is considering Git checkpoint discipline now and Jujutsu later for stacked agent work. He also wants less scattered timestamp-only Markdown metadata; evaluate a centralized SQLite/ledger approach before moving docs wholesale.
+
+Arthur clarified that raw HTML string assertions and broad markup snapshots are the wrong default for owned React UI. They are appropriate for real HTML scraping/parsing boundaries, not for testing components we control. UI tests should target state before render, semantic behavior, and visual QA artifacts; snapshots belong to stable normalized contracts or narrow intentional component variants.
