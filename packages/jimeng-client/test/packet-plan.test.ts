@@ -31,8 +31,8 @@ describe("Jimeng packet plans", () => {
     expect(plan.examples[0]?.outputDir).toBe("data/jimeng-lab/packet-gen-parity-20260612/kbeauty-still")
     expect(plan.gaps[0]).toMatchObject({
       familyId: "G1",
-      endpoint: "/mweb/v1/aigc_draft/generate",
-      status: "partial",
+      endpoint: "/mweb/v1/execute_generate_audit",
+      status: "blocked",
     })
     expect(plan.promotionPlan.join("\n")).toContain("contract-infer --input data/jimeng-lab/packet-gen-parity-20260612")
     expect(plan.acceptance).toContain("`bun run jimeng:test` passes.")

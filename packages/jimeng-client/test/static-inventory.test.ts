@@ -154,8 +154,8 @@ const DEFAULT_STATUS_EXPECTATIONS: Partial<Record<string, JimengDiscoveryKnownSt
   "/lv/v1/cc_web/plane/preset_template_detail": "blocked",
   "/lv/v1/cc_web/plane/fuzzy_search_templates": "blocked",
   "/mweb/v1/video_generate/get_switch_model_queue_info": "blocked",
-  "/mweb/v1/video_generate/pre_process": "partial",
-  "/mweb/v1/video_generate/mget_pre_process_result": "partial",
+  "/mweb/v1/video_generate/pre_process": "blocked",
+  "/mweb/v1/video_generate/mget_pre_process_result": "blocked",
   "/mweb/v1/video_generate/face_auth/skip": "blocked",
   "/mweb/v1/video_generate/face_auth/skip/query": "blocked",
   "/mweb/v1/aigc_draft/cancel_generate": "blocked",
@@ -271,7 +271,7 @@ describe("Jimeng static inventory", () => {
         expect(result.items.map((item) => item.resource)).not.toContain(endpoint)
       }
       expectStatuses(result, DEFAULT_STATUS_EXPECTATIONS)
-      expectAction(result, "/mweb/v1/dreamina_subject/generate_voice", "approval_or_disposable_fixture")
+      expectAction(result, "/mweb/v1/dreamina_subject/generate_voice", "capture_exact_payload")
       expectAction(result, "/lv/v1/cc_web/replicate/search_templates", "capture_exact_payload")
       expectAction(result, "/lv/v1/cc_web/plane/batch_get_collection_templates", "capture_exact_payload")
       expectAction(result, "/mweb/v1/template/search", "probe_read_endpoint")

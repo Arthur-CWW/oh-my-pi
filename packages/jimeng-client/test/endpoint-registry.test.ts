@@ -73,8 +73,8 @@ describe("Jimeng endpoint registry", () => {
       valueRank: 1,
       workflow: "Generation parity and artifact proof",
       familyId: "G1",
-      endpoint: "/mweb/v1/aigc_draft/generate",
-      status: "partial",
+      endpoint: "/mweb/v1/execute_generate_audit",
+      status: "blocked",
     })
     expect(coverage.valueRankedGaps.find((gap) => gap.endpoint === "/mweb/v1/mget_story")).toMatchObject({
       valueRank: 6,
@@ -88,9 +88,9 @@ describe("Jimeng endpoint registry", () => {
 
     expect(markdown).toContain("| T1 | keep | CapCut/template mining | 16 | implemented=10, blocked=6 | 6 |")
     expect(markdown).toContain("## Value-Ranked Remaining Work")
-    expect(markdown).toContain("1. Generation parity and artifact proof - `G1 /mweb/v1/aigc_draft/generate`")
+    expect(markdown).toContain("1. Generation parity and artifact proof - `G1 /mweb/v1/execute_generate_audit`")
     expect(markdown).toContain("## Not Implemented Endpoints")
-    expect(markdown).toContain("- `/mweb/v1/aigc_draft/generate` - partial command=text2image-plan/text2image-compare/text2video-plan/omni-video-plan/text2video-compare/omni-video-compare/generation-contract/text2video/image2video/frames2video/lip-sync")
+    expect(markdown).toContain("- `/mweb/v1/execute_generate_audit` - blocked command=generate-audit-plan/request-plan-compare/executeJimengGenerateAudit")
     expect(markdown).toContain("Evidence:")
     expect(markdown).toContain("Next probe:")
   })
@@ -110,6 +110,7 @@ describe("Jimeng endpoint registry", () => {
     }
 
     const auditedButNotUnfinished = getJimengDiscoveryKnownEndpoints()
+      .filter((row) => row.status !== "implemented")
       .filter((row) => row.evidence.length > 0 || row.nextProbe)
       .map((row) => row.endpoint)
       .filter((endpoint) => !unfinished.includes(endpoint))
