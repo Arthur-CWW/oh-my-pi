@@ -17,14 +17,18 @@ Use this loop when continuing Jimeng/Dreamina API reversal. The goal is to imple
 
 Use this exact algorithm when a new Codex session resumes the workstream:
 
-1. Read the goal docs and current `git status --short`.
-2. Pick one packet from `docs/provider/jimeng-api-triage.md` by product value, not by safety or endpoint count.
-3. Write or refresh the packet manifest before code changes. The manifest can be committed as a short doc note or generated under ignored `data/**`; it must name the examples, sample source, output directory, promotion files, acceptance commands, and next handoff.
+1. Read the SQLite packet ledger/dashboard first (`jimeng-artifacts packet next --db data/jimeng-lab/artifact-log.sqlite`), then the goal docs only for policy. The ledger is the source of truth; prose docs are not.
+2. Pick the packet returned by the ledger unless its unblock condition is now true or the row is malformed. Skip packets marked `done`; skip `blocked` packets unless the unblock condition is now true.
+3. Create or refresh the packet manifest before code changes, then write the packet row back to SQLite. The manifest can be committed as a short doc note or generated under ignored `data/**`; it must name the examples, sample source, output directory, promotion files, acceptance commands, status, blocker if any, and next handoff command.
 4. If the packet needs live spend, mutation, fresh capture, unsafe credentials, or visible UI, ask once with the exact command/action list and artifact path. If approved, run the matrix. If not approved, keep working inside the same packet with fixtures, compare gates, request builders, schemas, and tests.
 5. Run `contract-infer` before hand-writing repeated schema/client/test code. If the packet still requires repetitive manual edits, improve `contract-infer` or add a narrow generator for that packet first.
 6. Promote generated drafts in one coherent chunk: schema boundary, typed service, CLI command, registry status, fixtures/cassettes, Vitest snapshots, and a short docs/QA note.
-7. Verify with replay tests, typecheck, Vitest snapshots, and media/artifact checks only when the packet creates media.
-8. End the session with an updated packet handoff: what is promoted, what command proves it, what remains blocked, and the exact next command.
+7. For non-trivial worker output, launch a fresh review worker before parent integration. The reviewer inspects the implementation worker result/transcript and assigned files, not the whole repo.
+8. Verify with replay tests, typecheck, Vitest snapshots, and media/artifact checks only when the packet creates media.
+9. Commit the integrated/reviewed/validated wave before starting the next wave.
+10. End the session with an updated packet handoff: what is promoted, what command proves it, what remains blocked, and the exact next command.
+
+Do not treat “classified as blocked” as sufficient finish for an important/high-value packet when a concrete unblock path is still runnable in the current environment. For `gen-parity`, `persona-voice`, `lip-sync-human`, `reference-controls`, and `template-mining`, keep pushing until the useful user-facing workflow is actually proven or the blocker is external/frontend-gated and already supported by the strongest practical evidence you can gather now.
 
 Do not start a session by browsing endpoints manually unless the selected packet has no usable samples, registry rows, or static evidence. Do not switch packets because the current one needs approval; either ask for approval or do adjacent preparation inside that packet.
 
@@ -45,12 +49,11 @@ acceptance: typecheck, unit tests, Vitest snapshots, replay/cassette proof, arti
 remaining gaps: blocked/unknown endpoints with reason and next probe
 ```
 
-The packet is the unit of progress. A good session should either finish one packet or leave a packet-local handoff with the exact next command. Avoid scattering partial work across unrelated families.
-
-Minimum packet manifest:
+The packet is the unit of progress. A good session should either finish one packet or leave a packet-local handoff with the exact next command and status. Avoid scattering partial work across unrelated families or re-checking a packet whose ledger status is already `done` or `blocked` with unchanged evidence.
 
 ```txt
 packet: gen-parity | persona-voice | lip-sync-human | reference-controls | template-mining
+ledger row: `jimeng-artifacts packet get --id <packet-id>`
 why now: one sentence tying it to the UGC product workflow
 examples: 2-5 useful examples, with expected media or normalized output
 sample source: live | passive-capture | replay | fixture, plus approval status
@@ -58,7 +61,7 @@ artifact root: data/jimeng-lab/<packet-run>/
 infer command: exact contract-infer command or "not needed because ..."
 promotion files: planned source/test/registry/docs files
 acceptance commands: focused tests, typecheck, Vitest snapshots
-handoff: exact next command if not complete
+handoff: exact next command and the `jimeng-artifacts packet set ...` update to write after validation
 ```
 
 This manifest is the cross-session coordination point. Keep raw JSON, media, signed URLs, and cassettes under ignored `data/**`; commit only redacted summaries, registry status, snapshots, and short QA notes.

@@ -5,7 +5,7 @@ Copy/paste this into Codex when restarting the long-running Jimeng/Dreamina work
 ```txt
 /goal Drive the Jimeng/Dreamina client extraction workstream to completion from @docs/plans/jimeng-dreamina-cli-goal.md, @docs/plans/jimeng-fast-contract-extraction.md, @docs/provider/jimeng-api-triage.md, @docs/plans/jimeng-workers/README.md, @docs/qa/jimeng-live-effect-generation-20260613.md, and @TASKS.md.
 
-You are mainly the main GPT-5.5 orchestrator. Own completion end-to-end: select the next packet, brief subagents, integrate/review their work, run validation, update the SQLite ledger/dashboard/docs, commit reviewed waves, and continue automatically until every high-value Jimeng/Dreamina keep-family is either implemented through typed client/CLI or classified with exact evidence as blocked/skipped/unknown. Do not stop at planning, scaffolding, partial proof, or a phase boundary.
+You are mainly the main GPT-5.5 orchestrator. Own completion end-to-end: select the next packet, brief subagents, integrate/review their work, run validation, update the SQLite ledger/dashboard/docs, commit reviewed waves, and continue automatically until the important/high-value Jimeng/Dreamina APIs are actually finished as working typed CLI/client workflows, not merely classified. Do not stop at planning, scaffolding, partial proof, or a phase boundary.
 
 Use OMP as the operating environment. Prefer OMP task subagents for implementation by default; use task isolation/APFS CoW worktrees when available so worker edits are reviewable before integration. Keep the main context thin: the parent is mainly an orchestrator, not the default implementation worker. The parent selects packets, resolves shared contracts, performs small integration fixes, validates, updates the source of truth, and decides blockers. Delegate bounded implementation packets to subagents; delegate fresh review of each non-trivial worker result to a separate reviewer subagent before integrating. Use Gemini 3.5 Flash for simple/non-core implementation and mechanical packet work. Use GPT-5.5 `task` / `reviewer` subagents for trickier, higher-risk, or more architecture-sensitive bounded implementations because they are smarter. Use latest Kimi only as a fallback when Gemini and GPT-5.5 subagent capacity are unavailable. If Gemini starts rate-limiting or thrashing on a bounded slice, fall back to a GPT-5.5 `task` or `reviewer` subagent before absorbing that slice into the parent. Prefer rolling pseudo-waves over rigid batches: keep independent implementation/review tasks in flight, integrate each accepted slice as it finishes, and do not wait for unrelated blocked packets before advancing the next claimable packet.
 
@@ -25,14 +25,16 @@ Work packet protocol:
 9. Continue to the next claimable packet immediately after ledger/docs/commit. If one packet is blocked, update its blocker/unblock condition and keep moving on other nonblocked packets; do not wait for exact waves to finish if independent work can proceed.
 
 Current known state to honor:
-- `persona-voice`, `reference-controls`, and `template-mining` are `done` in the SQLite ledger after fresh reviewer passes.
-- `gen-parity` is blocked only on a fresh background Jimeng UI text-to-image submit capture; no-spend diagnostics already confirmed valid session/credits/model (`total_credit=3954`, `high_aes_general_v50` available) and stale capture mismatch.
-- `lip-sync-human` is blocked on a real UI submit capture/live proof for talking-head output.
+- `gen-parity`, `persona-voice`, `reference-controls`, and `template-mining` are `done` in the SQLite ledger.
+- `gen-parity` now includes live-proven browser-backed text2image submit/poll/download; the remaining direct signer/a_bogus replay gap is an endpoint-level follow-up, not a packet blocker.
+- `lip-sync-human` is still blocked, but the blocker is now specific: browser-backed image/avatar submit wiring exists, yet the current `?type=lip_sync` route still renders a generic composer and the first live attempt failed with `JIMENG_LIP_SYNC_VOICE_OPTION_MISSING`.
 - `jimeng-dreamina` and `jimeng-browser-proxy` both support direct artifact DB logging; prefer that over post-hoc ingest.
 
 Completion definition:
-- Every high-value keep-family in @docs/provider/jimeng-api-triage.md is implemented through typed services/CLI/tests/dashboard proof, or classified in SQLite plus endpoint registry/triage as blocked/skipped/unknown with exact evidence, unblock condition, next command, and artifact path.
-- Live generation/mutation paths that claim to work have actual live proof artifacts or provider responses, not dry-run substitutes.
+- Important/high-value APIs must be finished, not just classified: generation parity (`G1`,`G2`,`A1` submit/poll/download paths we actually use), persona/voice (`P1`,`V1` core reusable persona/voice workflows), lip-sync/digital-human (`L1` talking-head path), reference controls (`R2` core swap/pose/style workflows), and template mining (`T1` useful template/profile mining paths) should each have a working typed CLI/client path with current proof artifacts where the logged-in frontend currently allows it.
+- Lower-value or supporting keep-family endpoints may still finish as `blocked` / `skipped` / `unknown`, but only with exact evidence, unblock condition, next command, and artifact path.
+- Do not call the goal complete while any important packet still has a concrete next probe or unblock path that is technically runnable in the current environment. For important APIs, `blocked` only counts as complete when the blocker is external or frontend/provider-gated and the repo already contains the strongest practical current evidence.
+- Live generation/mutation paths that claim to work need actual current proof artifacts or provider responses, not dry-run substitutes.
 - Package validation passes for affected Jimeng code; replay/snapshot tests cover contract/report outputs; playable/listenable artifacts are recorded for media-generating paths.
 - SQLite ledger is current; TASKS and QA docs summarize only durable outcomes; each reviewed wave has a scoped commit.
 ```
