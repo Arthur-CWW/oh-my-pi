@@ -29,6 +29,8 @@ Durable preferences for local automation, browser control, and computer-use tool
 - For external JSON/file/process/API data, use Effect Schema boundary decoders before data enters core code. Avoid raw `JSON.parse` in core implementation; if raw parsing is unavoidable at an IO edge, immediately decode and return typed data.
 - For browser/UI verification, run headless/background first. Prefer CuaDriver for background visual/AX/browser flows that would otherwise steal focus; use CDP/Playwright/Puppeteer headless for DOM/network checks. Do not open foreground/visible browser automation while Arthur is using the machine unless he explicitly asks for it.
 
+
+- For authenticated website debugging/reversal, start headless/background when possible, but switch quickly to a logged-in non-headless profile when state only settles in the real browser. Use CuaDriver for background UI state, headed CDP for DOM/network truth, save the winning request plus artifacts, then replay it directly to separate payload-parity bugs from provider denial.
 ## Decision Log
 
 ### 2026-06-09
