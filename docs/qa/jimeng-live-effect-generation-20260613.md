@@ -271,13 +271,25 @@ Observed live state:
 - all of those failures report `fail_code="1152"` before `/mweb/v1/aigc_draft/generate`;
 - scene `7` voice recommendation and `tts_generate` both succeed, so the remaining blocker is the role/avatar resource path, not voice/TTS.
 
-Current status:
+Current status changed after a headed background-browser repro:
 
-- `lip-sync-human` is now honestly blocked as provider/frontend-gated with the strongest practical current evidence in-repo.
+- the old provider-gated diagnosis was too strong;
+- in a non-headless background browser, the same digital-human route eventually enables submit after local role upload, voice selection, and real script entry;
+- saved headed proof roots:
+  - `data/jimeng-lab/packet-20260614-headed-digitalhuman-fullprep/`
+  - `data/jimeng-lab/packet-20260614-headed-digitalhuman-submit/`
+  - `data/jimeng-lab/packet-20260614-headed-digitalhuman-direct-replay/`
+- the headed submit fired `/mweb/v1/aigc_draft/generate` with `ret=0`, `submit_id=342aac3f-e66a-4c4e-963d-c8ae16fc26e0`, and `history_record_id=36094430514956`;
+- replaying that exact captured request directly through `jimeng-browser-proxy endpoint-probe` also returned `ret=0` without using the browser UI, so the useful blocker is now contract/payload parity, not provider denial.
 
-Next live probe only if new evidence appears:
+What changed in the headed run:
 
-- retry only when a new role/avatar source or frontend-only role flow is available that can yield non-empty scene-2 resource ids and enable the final submit button.
+- scene `2` still returned empty `resource_id_std` / `resource_id_loopy`, but no longer carried `fail_code="1152"` after the real headed flow settled on provider image URI `tos-cn-i-tb4s082cfz/38b35811cbdc4f24af3ba2c6b1643a3f`;
+- the final submit button became enabled in the headed browser even though the earlier headless/browser-only flow kept it disabled.
+
+Next implementation move:
+
+- diff the successful headed `/mweb/v1/aigc_draft/generate` contract against `buildJimengLipSyncImagePlan`, then promote a direct no-browser lip-sync submit path from the captured body/query.
 
 Validation after digital-human route hardening and disabled-submit diagnostics:
 
