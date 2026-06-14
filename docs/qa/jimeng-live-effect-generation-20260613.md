@@ -263,14 +263,21 @@ Observed live state:
 - upload/selection fires `imagex/submit_audit_job`, `algo_proxy`, `video_generate/pre_process` scene `2`, `video_generate/pre_process` scene `7`, and `tts_generate`;
 - no `/mweb/v1/aigc_draft/generate` request fires because the final submit button still stays disabled.
 
-Current strongest blocker:
-
 - scene `2` pre-process returns `ret=0` / `status=20` but still leaves `image_create_avatar_info.resource_id_std=""` and `resource_id_loopy=""`;
-- scene `7` voice recommendation and `tts_generate` both succeed, so the remaining blocker is likely the role/avatar resource path, not voice/TTS.
+- the same scene-2 failure now reproduces across every practical avatar source tested in this session:
+  - local hidden-file upload in `data/jimeng-lab/packet-20260614-digitalhuman-ui-probe/`,
+  - three saved subject avatars in `data/jimeng-lab/packet-20260614-all-subject-avatar-preprocess/normalized/summary.json`,
+  - the scene-7 matched provider image in `data/jimeng-lab/packet-20260614-matched-avatar-preprocess/normalized/summary.json`;
+- all of those failures report `fail_code="1152"` before `/mweb/v1/aigc_draft/generate`;
+- scene `7` voice recommendation and `tts_generate` both succeed, so the remaining blocker is the role/avatar resource path, not voice/TTS.
 
-Next live probe:
+Current status:
 
-- start from a saved subject/provider-avatar path that yields non-empty scene-2 resource ids, then rerun one browser-backed lip-sync submit/poll/download proof.
+- `lip-sync-human` is now honestly blocked as provider/frontend-gated with the strongest practical current evidence in-repo.
+
+Next live probe only if new evidence appears:
+
+- retry only when a new role/avatar source or frontend-only role flow is available that can yield non-empty scene-2 resource ids and enable the final submit button.
 
 Validation after digital-human route hardening and disabled-submit diagnostics:
 
