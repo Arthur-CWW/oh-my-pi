@@ -1,6 +1,6 @@
 # Jimeng Worker Orchestration
 
-This folder is the parent-controlled context for running Jimeng/Dreamina implementation workers in parallel with OMP `task` subagents. The parent/orchestrator is the main GPT-5.5 Codex process; simple implementation and read-only planning workers use `.omp/agents/jimeng-gemini-worker.md` on Gemini 3.5 Flash by default, with `.omp/agents/jimeng-kimi-worker.md` as the latest-Kimi fallback when Gemini is unavailable or rate-limited. When Gemini is unstable and the slice is still bounded enough for a subagent, fall back to a GPT-5.5 `task` or `reviewer` subagent before pulling the work into the parent.
+This folder is the parent-controlled context for running Jimeng/Dreamina implementation workers in parallel with OMP `task` subagents. The parent/orchestrator is the main GPT-5.5 Codex process; simple implementation and read-only planning workers use `.omp/agents/jimeng-gemini-worker.md` on the Antigravity subscription lane (`google-antigravity/gemini-3.5-flash-low`) by default, with `.omp/agents/jimeng-kimi-worker.md` as the latest-Kimi fallback when Gemini is unavailable or rate-limited. When Gemini is unstable and the slice is still bounded enough for a subagent, fall back to a GPT-5.5 `task` or `reviewer` subagent before pulling the work into the parent.
 
 Parent agent responsibilities:
 
@@ -31,7 +31,7 @@ Preferred worker split:
 
 ```txt
 Parent/orchestrator: GPT-5.5 main process
-Simple non-core implementation/read-only packet workers: jimeng-gemini-worker (gemini-3.5-flash)
+Simple non-core implementation/read-only packet workers: jimeng-gemini-worker (`google-antigravity/gemini-3.5-flash-low`)
 Trickier bounded implementation/review workers: GPT-5.5 `task` / `reviewer` subagents
 Fallback when Gemini is unavailable or rate-limited and GPT-5.5 subagents are not the right fit: jimeng-kimi-worker (kimi-latest)
 ```
@@ -41,7 +41,7 @@ Use `jimeng-gemini-worker` for bounded edits that are not foundational for other
 The project worker agents pin:
 
 ```txt
-jimeng-gemini-worker: gemini-3.5-flash
+jimeng-gemini-worker: google-antigravity/gemini-3.5-flash-low
 jimeng-kimi-worker: kimi-latest
 ```
 

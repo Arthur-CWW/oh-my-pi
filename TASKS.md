@@ -70,6 +70,7 @@ Jimeng artifact logging/template update, 2026-06-13: `jimeng-browser-proxy` now 
 | ID | Task | Date | Notes |
 |---|---|---|---|
 | T-2026-06-14-001 | Record authenticated browser capture-and-replay SOP | 2026-06-14 | Added the reusable “Authenticated Profile Capture-and-Replay” background-browser SOP under `packages/web-access/skills/background-browser-automation/SKILL.md` and synced the rule of thumb into `docs/state/agent-tooling-preferences.md`. |
+| T-2026-06-14-002 | Pin Jimeng Gemini workers to Antigravity lane | 2026-06-14 | Changed `.omp/agents/jimeng-gemini-worker.md` from bare `gemini-3.5-flash` to explicit `google-antigravity/gemini-3.5-flash-low` and synced the rule into worker docs/preferences so inherited `GEMINI_API_KEY` env does not silently route Jimeng subagents onto paid Gemini API billing. |
 | T-2026-06-09-006 | Decide fate of `scripts/imagegen-observe.py` | 2026-06-13 | Deleted the untracked standalone OpenAI Image API diagnostic wrapper instead of moving it into `packages/ugc-cli`; the CLI remains local-first/dry-run oriented. |
 | T-2026-06-09-001 | Finish CuaDriver-first browser/computer-use migration | 2026-06-09 | Cua-first skills/docs updated, AeroSpace PID guard disabled, and `cua_driver` Pi wrapper added. |
 | T-2026-06-09-010 | Archive CuaDriver technical writeup | 2026-06-09 | Saved under `docs/research/macos-background-computer-use/`. |
