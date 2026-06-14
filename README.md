@@ -53,6 +53,50 @@ For X/Twitter frontend capture, scope DOM inspection to the main content column/
 
 See `docs/twitter-archive-plan.md` for the implementation plan.
 
-## Jimeng
+## Jimeng quick review from repo root
 
-The Slotok `reverse-jimeng` direct API notes/client were brought over into `packages/jimeng-client` plus `docs/provider/jimeng-direct-client-endpoints.md`. Use dry-runs first; live runs can consume paid quota.
+Useful root commands:
+
+```bash
+# Start the SQLite-backed artifact/packet dashboard
+bun run jimeng:dashboard
+
+# Inspect packet queue state
+bun run jimeng:packet:next
+bun run jimeng:packet:get -- --id lip-sync-human
+
+# Re-materialize keep-family coverage into ignored review artifacts
+bun run jimeng:coverage
+
+# Run Jimeng package validation
+bun run jimeng:test
+bun run jimeng:typecheck
+
+# Direct CLIs from the repo root
+bun run jimeng:browser-proxy -- --help
+bun run jimeng:dreamina -- --help
+bun run jimeng:artifacts -- --help
+```
+
+Main review surfaces:
+
+- Dashboard: `http://127.0.0.1:4188/`
+- Packet/status ledger: `data/jimeng-lab/artifact-log.sqlite`
+- Current completion audit coverage: `data/jimeng-lab/completion-audit-keep-coverage-v3/normalized/triage-coverage-20260613175434-summary.json`
+- Main QA/proof note: `docs/qa/jimeng-live-effect-generation-20260613.md`
+- Current triage/blocked-next-work note: `docs/provider/jimeng-api-triage.md`
+
+Useful proof artifacts:
+
+- Browser-backed text2image success report:
+  - `data/jimeng-lab/proof-20260613-goal-text2image-cdp-ui/report/index.html`
+  - `data/jimeng-lab/proof-20260613-goal-text2image-cdp-ui/report/functions/text2image-image.html`
+- Current lip-sync blocker screenshot:
+  - `data/jimeng-lab/packet-20260613-lip-sync-human-unblock/lip-sync-generic-composer-blocker.png`
+
+Current status:
+
+- `gen-parity`, `persona-voice`, `reference-controls`, `template-mining`: done
+- `lip-sync-human`: blocked on locating/capturing the real lip-sync/digital-human workbench state; current `?type=lip_sync` route still renders a generic composer
+
+The Slotok `reverse-jimeng` direct API notes/client were brought over into `packages/jimeng-client` plus `docs/provider/jimeng-direct-client-endpoints.md`.
