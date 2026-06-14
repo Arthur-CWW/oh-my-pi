@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { createHash } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import {
@@ -5835,7 +5835,10 @@ async function runBrowserProxyCommand(args: CliArgs): Promise<void> {
 
     if (hasImageInput) {
       const referenceUploads: ReferenceUploadSummary[] = []
-      const imageUpload = args.image
+      const localBrowserImagePath = args.image && !args.dryRun && args.transportMode === "cdp-ui"
+        ? args.image
+        : undefined
+      const imageUpload = args.image && !localBrowserImagePath
         ? await uploadReferenceImage({
           session,
           dirs,
@@ -5848,31 +5851,39 @@ async function runBrowserProxyCommand(args: CliArgs): Promise<void> {
       if (imageUpload) referenceUploads.push(imageUpload)
       const imageReference = imageUpload
         ? lipSyncImageReferenceFromUploadSummary(imageUpload.image_upload)
-        : lipSyncImageReferenceFromArgs(args)
+        : localBrowserImagePath
+          ? null
+          : lipSyncImageReferenceFromArgs(args)
 
-      const plan = buildJimengLipSyncImagePlan({
-        prompt: args.prompt,
-        modelReqKey: args.modelReqKey,
-        videoMode: args.videoMode,
-        image: imageReference,
-        ttsInfo,
-      })
+      const plan = imageReference
+        ? buildJimengLipSyncImagePlan({
+          prompt: args.prompt,
+          modelReqKey: args.modelReqKey,
+          videoMode: args.videoMode,
+          image: imageReference,
+          ttsInfo,
+        })
+        : null
 
       if (args.dryRun) {
+        if (!plan || !imageReference) {
+          throw new Error("lip-sync image dry run requires a provider-backed image reference")
+        }
+        const dryRunPlan = plan
         const file = path.join(dirs.rawDir, `${runId}-dry-run-plan.json`)
         writeJson(file, {
-          plan,
+          plan: dryRunPlan,
           reference_uploads: referenceUploads,
           browser_session: redactSession(session),
         })
         writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
           command: "lip-sync",
-          mode: plan.mode,
-          status: plan.status,
-          reason: plan.reason,
-          model_req_key: plan.modelReqKey,
+          mode: dryRunPlan.mode,
+          status: dryRunPlan.status,
+          reason: dryRunPlan.reason,
+          model_req_key: dryRunPlan.modelReqKey,
           image_reference: imageReference,
-          tts_info: plan.providerInput.videoGenInputs.i2vOpt.realmanAvatar.ttsInfo,
+          tts_info: dryRunPlan.providerInput.videoGenInputs.i2vOpt.realmanAvatar.ttsInfo,
           reference_uploads: referenceUploads.map((upload) => ({
             index: upload.index,
             role: upload.role,
@@ -5882,7 +5893,7 @@ async function runBrowserProxyCommand(args: CliArgs): Promise<void> {
             width: upload.image_upload.pluginResults[0]?.imageWidth ?? null,
             height: upload.image_upload.pluginResults[0]?.imageHeight ?? null,
           })),
-          next_probe: plan.nextProbe,
+          next_probe: dryRunPlan.nextProbe,
         })
         console.log(`[jimeng-browser-proxy] lip-sync image dry run saved: ${file}`)
         return
@@ -5895,13 +5906,16 @@ async function runBrowserProxyCommand(args: CliArgs): Promise<void> {
       const submitWire = await submitJimengLipSyncImageInBrowser({
         cdpUrl: args.cdpUrl,
         targetUrl: args.targetUrl,
-        imageUri: imageReference.uri,
+        imageUri: imageReference?.uri ?? `file://${path.resolve(localBrowserImagePath ?? args.image ?? "")}`,
+        imagePath: localBrowserImagePath,
         voiceId: args.voiceId,
+        voiceLabel: args.voiceTitle ?? args.toneKey,
         text: ttsInfo.text,
+        actionText: args.prompt,
       })
       const parsedSubmit = parseJimengWorkbenchSubmitResponse({
         text: submitWire.text,
-        fallbackSubmitId: plan.submitId,
+        fallbackSubmitId: plan?.submitId ?? randomUUID(),
       })
       const submit = {
         ...parsedSubmit,
@@ -5930,8 +5944,8 @@ async function runBrowserProxyCommand(args: CliArgs): Promise<void> {
 
       writeJson(path.join(dirs.normalizedDir, `${runId}-result.json`), redactJimengProofForNormalized({
         command: "lip-sync",
-        mode: plan.mode,
-        plan,
+        mode: plan?.mode ?? "image",
+        ...(plan ? { plan } : { local_image_path: localBrowserImagePath }),
         reference_uploads: referenceUploads,
         submit,
         pollTrace: poll.trace,

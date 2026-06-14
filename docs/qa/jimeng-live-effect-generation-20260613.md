@@ -245,22 +245,48 @@ bun packages/jimeng-client/src/browser-proxy-cli.ts lip-sync \
 ```
 
 Background DOM/screenshot evidence under `data/jimeng-lab/packet-20260613-lip-sync-human-unblock/` shows that `https://jimeng.jianying.com/ai-tool/generate/?type=lip_sync` still renders a generic composer. After selecting a reusable recent image, the visible controls remained generic image-generation labels (`图片5.0 Lite`, `1:1`, `2K`, `时间`, `生成模式`, `操作类型`) and no confirmed lip-sync/voice-picker labels were visible. Screenshot: `data/jimeng-lab/packet-20260613-lip-sync-human-unblock/lip-sync-generic-composer-blocker.png`.
+### Stronger digital-human route evidence — 2026-06-14
 
-Validation after this update:
+Parent follow-up proved that the real browser-backed workbench is `https://jimeng.jianying.com/ai-tool/generate/?type=digitalHuman&workspace=undefined`, not `?type=lip_sync`.
+
+Saved probe bundle:
+
+- `data/jimeng-lab/packet-20260614-digitalhuman-ui-probe/normalized/digitalhuman-ui-summary.json`
+- `data/jimeng-lab/packet-20260614-digitalhuman-ui-probe/raw/digitalhuman-network.json`
+- `data/jimeng-lab/packet-20260614-digitalhuman-ui-probe/artifacts/digitalhuman-ui-state.png`
+
+Observed live state:
+
+- local role-image upload through the hidden `input[type=file][accept*=image]` populates the role slot preview;
+- selecting `直爽女大` through the digital-human voice picker succeeds and the UI shows the chosen voice;
+- the populated editor uses tagged ProseMirror paragraphs `角色说` and `动作描述`;
+- upload/selection fires `imagex/submit_audit_job`, `algo_proxy`, `video_generate/pre_process` scene `2`, `video_generate/pre_process` scene `7`, and `tts_generate`;
+- no `/mweb/v1/aigc_draft/generate` request fires because the final submit button still stays disabled.
+
+Current strongest blocker:
+
+- scene `2` pre-process returns `ret=0` / `status=20` but still leaves `image_create_avatar_info.resource_id_std=""` and `resource_id_loopy=""`;
+- scene `7` voice recommendation and `tts_generate` both succeed, so the remaining blocker is likely the role/avatar resource path, not voice/TTS.
+
+Next live probe:
+
+- start from a saved subject/provider-avatar path that yields non-empty scene-2 resource ids, then rerun one browser-backed lip-sync submit/poll/download proof.
+
+Validation after digital-human route hardening and disabled-submit diagnostics:
 
 ```txt
-bun test packages/jimeng-client/test/http-transport.test.ts packages/jimeng-client/test/client.test.ts packages/jimeng-client/test/text2image-plan-compare.test.ts packages/jimeng-client/test/endpoint-registry.test.ts
-25 pass, 0 fail
+bun test packages/jimeng-client/test/browser-session.test.ts packages/jimeng-client/test/lip-sync.test.ts
+8 pass, 0 fail
 
-bun test packages/jimeng-client/test/client.test.ts packages/jimeng-client/test/lip-sync.test.ts packages/jimeng-client/test/client-seams.test.ts
-20 pass, 0 fail
+bun run --cwd packages/jimeng-client typecheck
+passed
 
 bun run --cwd packages/jimeng-client test
-333 pass, 0 fail
+335 pass, 0 fail
 
 bun run --cwd packages/jimeng-client test:vitest
 6 files passed, 9 tests passed
 
-bun run --cwd packages/jimeng-client typecheck
-passed
+bun packages/jimeng-client/src/browser-proxy-cli.ts lip-sync --session data/jimeng-lab/raw/session-bundle-current.json --image data/jimeng-lab/ugc-studio-kbeauty-image/artifacts/jimeng-kbeauty-01.png --voice-id 7597003459665072686 --voice-title '直爽女大' --text '三秒告诉你为什么这款产品值得试。' --prompt '镜头推进，她拿起产品自然讲解，对着镜头微笑。' --dryRun --outDir data/jimeng-lab/packet-20260614-digitalhuman-ui-probe/dry-run-check
+[jimeng-browser-proxy] lip-sync image dry run saved: /Users/arthur/projects/pi-web-access/data/jimeng-lab/packet-20260614-digitalhuman-ui-probe/dry-run-check/raw/lip-sync-20260614023412-09lzqt-dry-run-plan.json
 ```

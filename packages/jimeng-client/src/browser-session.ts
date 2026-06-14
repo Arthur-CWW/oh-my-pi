@@ -1,3 +1,4 @@
+import path from "node:path"
 import type { Browser, Page } from "puppeteer-core"
 import { JimengError, jimengError } from "./errors"
 import { type JimengSessionBundle } from "./capture"
@@ -51,8 +52,11 @@ export interface JimengBrowserImageSubmitOptions extends JimengBrowserSessionOpt
 
 export interface JimengBrowserLipSyncImageSubmitOptions extends JimengBrowserSessionOptions {
   imageUri: string
+  imagePath?: string
   voiceId: string
+  voiceLabel?: string
   text: string
+  actionText?: string
   timeoutMs?: number
 }
 
@@ -64,7 +68,7 @@ export interface JimengBrowserSubmitWireResult {
 
 const JIMENG_WORKBENCH_SUBMIT_PATH = "/mweb/v1/aigc_draft/generate"
 const JIMENG_IMAGE_WORKBENCH_URL = "https://jimeng.jianying.com/ai-tool/generate/?type=image"
-const JIMENG_LIP_SYNC_WORKBENCH_URL = "https://jimeng.jianying.com/ai-tool/generate/?type=lip_sync"
+const JIMENG_LIP_SYNC_WORKBENCH_URL = "https://jimeng.jianying.com/ai-tool/generate/?type=digitalHuman&workspace=undefined"
 export function createJimengBrowserFetch(options: JimengBrowserFetchOptions): JimengFetch {
   return async (url, init) => {
     const puppeteer = await import("puppeteer-core")
@@ -157,10 +161,18 @@ export async function submitJimengLipSyncImageInBrowser(options: JimengBrowserLi
     await new Promise((resolve) => setTimeout(resolve, 3_000))
     await assertJimengBrowserSession(page, options.cdpUrl)
     await ensureJimengLipSyncWorkbench(page)
-    await selectJimengLipSyncImageAsset(page, options.imageUri)
+    await selectJimengLipSyncImageAsset(page, { imageUri: options.imageUri, imagePath: options.imagePath, timeoutMs: options.timeoutMs })
     await closeAssetDrawer(page)
-    await fillJimengLipSyncText(page, options.text)
-    await selectJimengLipSyncVoice(page, options.voiceId)
+    await selectJimengLipSyncVoice(page, { voiceId: options.voiceId, voiceLabel: options.voiceLabel })
+    await fillJimengLipSyncText(page, { speechText: options.text, actionText: options.actionText })
+    await assertJimengLipSyncSubmitEnabled(page, {
+      imageUri: options.imageUri,
+      imagePath: options.imagePath,
+      voiceId: options.voiceId,
+      voiceLabel: options.voiceLabel,
+      text: options.text,
+      actionText: options.actionText,
+    })
     const responsePromise = page.waitForResponse(
       (response) => response.url().includes(JIMENG_WORKBENCH_SUBMIT_PATH),
       { timeout: options.timeoutMs ?? 60_000 },
@@ -247,7 +259,7 @@ async function fillJimengPrompt(page: Page, prompt: string): Promise<void> {
 async function ensureJimengLipSyncWorkbench(page: Page): Promise<void> {
   const modeReady = await page.evaluate(() => {
     const text = (node: Element | null | undefined): string => (node?.textContent || "").replace(/\s+/g, " ").trim()
-    const clickable = Array.from(document.querySelectorAll("button, [role=\"tab\"], [role=\"button\"]"))
+    const clickable = Array.from(document.querySelectorAll("button, [role=\"tab\"], [role=\"button\"], [role=\"combobox\"]"))
     const lipSyncToggle = clickable.find((entry) => /数字人|口型|Lip Sync/i.test(text(entry)))
     if (lipSyncToggle) (lipSyncToggle as HTMLElement).click()
     const prompt = document.querySelector("div[role=\"textbox\"].ProseMirror, div.ProseMirror[contenteditable=\"true\"], textarea.prompt-input")
@@ -257,102 +269,151 @@ async function ensureJimengLipSyncWorkbench(page: Page): Promise<void> {
   throw jimengError({
     category: "validation",
     code: "JIMENG_LIP_SYNC_WORKBENCH_MISSING",
-    message: "Jimeng lip-sync workbench did not expose the expected prompt editor.",
+    message: "Jimeng digital-human workbench did not expose the expected script editor.",
     retryable: false,
   })
 }
 
-async function fillJimengLipSyncText(page: Page, text: string): Promise<void> {
-  const filled = await page.evaluate((nextText) => {
-    const applyText = (element: HTMLElement | null): boolean => {
-      if (!element) return false
-      if (element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement) {
-        const setter = Object.getOwnPropertyDescriptor(element.constructor.prototype, "value")?.set
-          ?? Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set
-          ?? Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set
-        setter?.call(element, nextText)
-        element.dispatchEvent(new InputEvent("input", { bubbles: true, data: nextText, inputType: "insertText" }))
-        element.dispatchEvent(new Event("change", { bubbles: true }))
-        return true
-      }
-      element.textContent = nextText
-      element.dispatchEvent(new InputEvent("input", { bubbles: true, data: nextText, inputType: "insertText" }))
-      element.dispatchEvent(new Event("change", { bubbles: true }))
+export function buildJimengLipSyncVoiceSelectionNeedles(input: {
+  voiceId: string
+  voiceLabel?: string | null
+}): string[] {
+  const raw = [input.voiceLabel ?? undefined, input.voiceId]
+  const needles: string[] = []
+  for (const value of raw) {
+    const normalized = value?.trim()
+    if (!normalized || needles.includes(normalized)) continue
+    needles.push(normalized)
+  }
+  return needles
+}
+
+async function fillJimengLipSyncText(page: Page, input: {
+  speechText: string
+  actionText?: string
+}): Promise<void> {
+  const filled = await page.evaluate(({ speechText, actionText }) => {
+    const editor = document.querySelector("div[role=\"textbox\"].ProseMirror, div.ProseMirror[contenteditable=\"true\"]") as HTMLElement | null
+    if (!editor) return false
+
+    const paragraphText = (paragraph: Element): string =>
+      Array.from(paragraph.childNodes)
+        .filter((node) => !(node instanceof HTMLElement && node.matches("[contenteditable=\"false\"], .react-renderer")))
+        .map((node) => node.textContent || "")
+        .join("")
+        .replace(/\u200b/g, "")
+        .trim()
+    const tagLabel = (paragraph: Element): string =>
+      (paragraph.querySelector("[contenteditable=\"false\"]")?.textContent || "")
+        .replace(/\s+/g, " ")
+        .trim()
+    const replaceParagraphText = (paragraph: Element, nextText: string): void => {
+      const preserved = Array.from(paragraph.childNodes).filter((node) => node instanceof HTMLElement && node.matches("[contenteditable=\"false\"], .react-renderer"))
+      paragraph.replaceChildren(...preserved.map((node) => node.cloneNode(true)), document.createTextNode(nextText))
+    }
+
+    const paragraphs = Array.from(editor.querySelectorAll("p"))
+    const speechParagraph = paragraphs.find((paragraph) => /角色说/.test(tagLabel(paragraph)))
+    const actionParagraph = paragraphs.find((paragraph) => /动作描述/.test(tagLabel(paragraph)))
+    if (speechParagraph) replaceParagraphText(speechParagraph, speechText)
+    if (actionParagraph && actionText !== undefined) replaceParagraphText(actionParagraph, actionText)
+
+    if (!speechParagraph) {
+      const textarea = document.querySelector("textarea.prompt-input") as HTMLTextAreaElement | null
+      if (!textarea) return false
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set
+      setter?.call(textarea, speechText)
+      textarea.dispatchEvent(new InputEvent("input", { bubbles: true, data: speechText, inputType: "insertText" }))
+      textarea.dispatchEvent(new Event("change", { bubbles: true }))
       return true
     }
-    return applyText(document.querySelector("textarea.prompt-input"))
-      || applyText(document.querySelector("div[role=\"textbox\"].ProseMirror") as HTMLElement | null)
-      || applyText(document.querySelector("div.ProseMirror[contenteditable=\"true\"]") as HTMLElement | null)
-  }, text)
+
+    editor.dispatchEvent(new InputEvent("input", { bubbles: true, data: speechText, inputType: "insertText" }))
+    editor.dispatchEvent(new Event("change", { bubbles: true }))
+    return paragraphText(speechParagraph) === speechText && (!actionParagraph || actionText === undefined || paragraphText(actionParagraph) === actionText)
+  }, input)
   if (filled) return
   throw jimengError({
     category: "validation",
     code: "JIMENG_LIP_SYNC_TEXT_EDITOR_MISSING",
-    message: "Jimeng lip-sync workbench text editor is missing.",
+    message: "Jimeng digital-human workbench script editor is missing or does not expose the tagged ProseMirror paragraphs.",
     retryable: false,
   })
 }
 
-async function selectJimengLipSyncImageAsset(page: Page, imageUri: string): Promise<void> {
-  const selected = await page.evaluate((targetImageUri) => {
-    const normalized = targetImageUri.trim()
-    const encoded = encodeURIComponent(normalized)
-    const allElements = Array.from(document.querySelectorAll("button, [role=\"button\"], [role=\"tab\"], label, li, div"))
-    const text = (node: Element | null | undefined): string => (node?.textContent || "").replace(/\s+/g, " ").trim()
-    const click = (node: Element | null | undefined): boolean => {
-      const clickable = (node instanceof HTMLElement ? node : node?.closest("button, [role=\"button\"], label, li, div")) as HTMLElement | null
-      if (!clickable || clickable.hasAttribute("disabled") || clickable.getAttribute("aria-disabled") === "true") return false
-      clickable.click()
-      return true
-    }
-    const valueMatches = (value: string | null | undefined): boolean => !!value && (value.includes(normalized) || value.includes(encoded))
-    const matchNode = allElements.find((entry) => {
-      for (const attribute of entry.getAttributeNames()) {
-        if (valueMatches(entry.getAttribute(attribute))) return true
-      }
-      const datasetValues = Object.values((entry as HTMLElement).dataset ?? {})
-      return datasetValues.some((value) => valueMatches(value))
+async function selectJimengLipSyncImageAsset(page: Page, input: {
+  imageUri: string
+  imagePath?: string
+  timeoutMs?: number
+}): Promise<void> {
+  if (!input.imagePath) {
+    throw jimengError({
+      category: "validation",
+      code: "JIMENG_LIP_SYNC_IMAGE_ASSET_MISSING",
+      message: "Jimeng digital-human workbench only has a confirmed local `--image` upload path right now. Provider-URI avatar reselection is still unsupported; preselect the role manually or rerun with --image.",
+      retryable: false,
+      details: { imageUri: input.imageUri, imagePath: null },
     })
-    if (click(matchNode)) return true
-    const imageMatch = Array.from(document.querySelectorAll("img")).find((entry) => valueMatches(entry.getAttribute("src")) || valueMatches(entry.getAttribute("data-src")))
-    return click(imageMatch)
-  }, imageUri)
-  if (selected) return
+  }
+
+  const uploadInput = await page.$('input[type="file"][accept*="image"]')
+  if (uploadInput) {
+    const responsePromise = page.waitForResponse(
+      (response) =>
+        response.url().includes("/mweb/v1/imagex/submit_audit_job")
+        || response.url().includes("/mweb/v1/algo_proxy")
+        || response.url().includes("/mweb/v1/video_generate/pre_process"),
+      { timeout: Math.min(input.timeoutMs ?? 60_000, 15_000) },
+    ).catch(() => null)
+    await uploadInput.uploadFile(path.resolve(input.imagePath))
+    await page.waitForFunction(
+      () => !!(document.querySelector('input[type="file"][accept*="image"]') as HTMLInputElement | null)?.files?.length,
+      { timeout: 5_000 },
+    )
+    await responsePromise
+    return
+  }
+
   throw jimengError({
     category: "validation",
     code: "JIMENG_LIP_SYNC_IMAGE_ASSET_MISSING",
-    message: "Jimeng lip-sync workbench could not locate the requested image asset. Preselect the avatar image in the open workbench, then rerun the browser-backed submit.",
+    message: "Jimeng digital-human workbench did not expose the hidden image upload input required for the confirmed local `--image` path.",
     retryable: false,
-    details: { imageUri },
+    details: { imageUri: input.imageUri, imagePath: input.imagePath },
   })
 }
 
-async function selectJimengLipSyncVoice(page: Page, voiceId: string): Promise<void> {
-  const selected = await page.evaluate((targetVoiceId) => {
-    const normalized = targetVoiceId.trim()
+async function selectJimengLipSyncVoice(page: Page, input: {
+  voiceId: string
+  voiceLabel?: string
+}): Promise<void> {
+  const selected = await page.evaluate((selection) => {
+    const needles = selection.needles
     const text = (node: Element | null | undefined): string => (node?.textContent || "").replace(/\s+/g, " ").trim()
-    const clickable = Array.from(document.querySelectorAll("button, [role=\"button\"], [role=\"option\"], li, div"))
-    const openVoicePicker = clickable.find((entry) => /音色|声音|配音|发音人|语音/i.test(text(entry)))
+    const queryClickable = (): Element[] => Array.from(document.querySelectorAll("button, [role=\"button\"], [role=\"option\"], [role=\"combobox\"], li, div"))
+    const openVoicePicker = queryClickable().find((entry) => /音色|声音|配音|发音人|语音/i.test(text(entry)))
     ;(openVoicePicker as HTMLElement | undefined)?.click()
-    const match = clickable.find((entry) => {
-      if (text(entry).includes(normalized)) return true
+    const match = queryClickable().find((entry) => needles.some((needle) => {
+      if (text(entry).includes(needle)) return true
       for (const attribute of entry.getAttributeNames()) {
         const value = entry.getAttribute(attribute)
-        if (value?.includes(normalized)) return true
+        if (value?.includes(needle)) return true
       }
-      return Object.values((entry as HTMLElement).dataset ?? {}).some((value) => value?.includes(normalized))
-    }) as HTMLElement | undefined
+      return Object.values((entry as HTMLElement).dataset ?? {}).some((value) => value?.includes(needle))
+    })) as HTMLElement | undefined
     if (!match || match.hasAttribute("disabled") || match.getAttribute("aria-disabled") === "true") return false
     match.click()
     return true
-  }, voiceId)
+  }, {
+    needles: buildJimengLipSyncVoiceSelectionNeedles(input),
+  })
   if (selected) return
   throw jimengError({
     category: "validation",
     code: "JIMENG_LIP_SYNC_VOICE_OPTION_MISSING",
-    message: "Jimeng lip-sync workbench could not locate the requested voice. Open the voice picker, ensure the target voice is visible or preselected, then rerun the browser-backed submit.",
+    message: "Jimeng digital-human workbench could not locate the requested voice by visible label/title or id fallback. Open the voice picker, ensure the target voice is visible or preselected, then rerun the browser-backed submit.",
     retryable: false,
-    details: { voiceId },
+    details: { voiceId: input.voiceId, voiceLabel: input.voiceLabel ?? null },
   })
 }
 
@@ -420,8 +481,56 @@ async function clickJimengLipSyncSubmit(page: Page): Promise<void> {
   throw jimengError({
     category: "validation",
     code: "JIMENG_LIP_SYNC_SUBMIT_BUTTON_MISSING",
-    message: "Jimeng lip-sync workbench submit button is missing or disabled.",
+    message: "Jimeng digital-human workbench submit button is missing.",
     retryable: false,
+  })
+}
+
+async function assertJimengLipSyncSubmitEnabled(page: Page, input: {
+  imageUri: string
+  imagePath?: string
+  voiceId: string
+  voiceLabel?: string
+  text: string
+  actionText?: string
+}): Promise<void> {
+  const state = await page.evaluate(() => {
+    const button = Array.from(document.querySelectorAll("button")).find((entry) =>
+      (entry.className || "").toString().includes("generate-btn")
+      || (entry.className || "").toString().includes("submit-button")
+      || /生成|提交/i.test((entry.textContent || "").trim()))
+    const editor = document.querySelector("div[role=\"textbox\"].ProseMirror, div.ProseMirror[contenteditable=\"true\"]")
+    const selectedVoice = Array.from(document.querySelectorAll("[aria-selected=\"true\"], [data-selected=\"true\"], .selected, .active"))
+      .map((entry) => (entry.textContent || "").replace(/\s+/g, " ").trim())
+      .find(Boolean) ?? null
+    return {
+      buttonText: (button?.textContent || "").replace(/\s+/g, " ").trim() || null,
+      disabled: button?.disabled ?? false,
+      ariaDisabled: button?.getAttribute("aria-disabled") ?? null,
+      editorText: (editor?.textContent || "").replace(/\s+/g, " ").trim() || null,
+      selectedVoice,
+      rolePreviewCount: document.querySelectorAll("img").length,
+    }
+  })
+  if (!state.disabled) return
+  throw jimengError({
+    category: "validation",
+    code: "JIMENG_LIP_SYNC_SUBMIT_DISABLED_AFTER_POPULATION",
+    message: "Jimeng digital-human workbench still keeps submit disabled after avatar, voice, and script population. The live UI is rejecting the prepared state before request dispatch.",
+    retryable: false,
+    details: {
+      imageUri: input.imageUri,
+      imagePath: input.imagePath ?? null,
+      voiceId: input.voiceId,
+      voiceLabel: input.voiceLabel ?? null,
+      textLength: input.text.length,
+      actionTextLength: input.actionText?.length ?? 0,
+      buttonText: state.buttonText,
+      ariaDisabled: state.ariaDisabled,
+      selectedVoice: state.selectedVoice,
+      editorText: state.editorText,
+      rolePreviewCount: state.rolePreviewCount,
+    },
   })
 }
 
