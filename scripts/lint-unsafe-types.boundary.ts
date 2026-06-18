@@ -42,6 +42,7 @@ const args = new Set(process.argv.slice(2));
 const update = args.has("--update");
 const strict = args.has("--strict");
 const scanWorktree = args.has("--worktree") || args.has("--all");
+const excludedTrackedPrefixes = ["browser-extensions/", "kimi-code-usage/", "oh-my-pi/"];
 const trackedSourceFiles = scanWorktree ? null : gitTrackedSourceFiles();
 const scanArgs = [
 	"scan",
@@ -139,18 +140,21 @@ function runAstGrep(args: string[]): ReturnType<typeof spawnSync> {
 	const direct = spawnSync("ast-grep", args, {
 		cwd: process.cwd(),
 		encoding: "utf8",
+		maxBuffer: 128 * 1024 * 1024,
 	});
 	if (!isMissingCommand(direct.error)) return direct;
 
 	const viaBunx = spawnSync("bunx", ["--bun", "@ast-grep/cli@0.42.2", ...args], {
 		cwd: process.cwd(),
 		encoding: "utf8",
+		maxBuffer: 128 * 1024 * 1024,
 	});
 	if (!isMissingCommand(viaBunx.error)) return viaBunx;
 
 	return spawnSync("bun", ["x", "--bun", "@ast-grep/cli@0.42.2", ...args], {
 		cwd: process.cwd(),
 		encoding: "utf8",
+		maxBuffer: 128 * 1024 * 1024,
 	});
 }
 
@@ -167,7 +171,7 @@ function gitTrackedSourceFiles(): string[] | null {
 	return git.stdout
 		.split("\n")
 		.map((file) => file.trim())
-		.filter(Boolean);
+		.filter((file) => file.length > 0 && !excludedTrackedPrefixes.some((prefix) => file.startsWith(prefix)));
 }
 
 function parseFindings(stdout: string): AstGrepFinding[] {

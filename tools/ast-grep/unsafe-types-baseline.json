@@ -4,6 +4,209 @@
   "matches": [
     {
       "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "apps/slotok-workbench/src/daemon/ugc-json-store.ts",
+      "text": "unknown",
+      "source": "function isObjectCounts(value: unknown): value is UgcWorkspaceBundleObjectCounts {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "apps/slotok-workbench/src/daemon/ugc-json-store.ts",
+      "text": "unknown",
+      "source": "function isShardManifest(value: unknown): value is UgcWorkspaceBundleShardManifest {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "apps/slotok-workbench/src/daemon/ugc-json-store.ts",
+      "text": "unknown",
+      "source": "function isStringArray(value: unknown): value is readonly string[] {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "apps/slotok-workbench/src/daemon/ugc-routes.ts",
+      "text": "unknown",
+      "source": "function decodeCleanRoomTemplateSpec(value: unknown): CleanRoomTemplateSpec | undefined {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "apps/slotok-workbench/src/daemon/ugc-routes.ts",
+      "text": "unknown",
+      "source": "function decodeFinalEditorClipPatches(value: unknown): readonly FinalEditorClipPatch[] | undefined {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "apps/slotok-workbench/src/daemon/ugc-routes.ts",
+      "text": "unknown",
+      "source": "function decodeFinalEditorTrackPatches(value: unknown): readonly FinalEditorTrackPatch[] | undefined {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "apps/slotok-workbench/src/daemon/ugc-routes.ts",
+      "text": "unknown",
+      "source": "function decodeNonNegativeNumber(value: unknown, label: string): number | undefined {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "apps/slotok-workbench/src/daemon/ugc-routes.ts",
+      "text": "unknown",
+      "source": "function decodePositiveNumber(value: unknown, label: string): number | undefined {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "apps/slotok-workbench/src/daemon/ugc-routes.ts",
+      "text": "unknown",
+      "source": "function decodeReferenceArchiveFormatOutputs(value: unknown): readonly ReferenceArchiveFormatOutput[] | undefined {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "apps/slotok-workbench/src/daemon/ugc-routes.ts",
+      "text": "unknown",
+      "source": "function isBranchStatus(value: unknown): value is BranchStatus {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "apps/slotok-workbench/src/daemon/ugc-routes.ts",
+      "text": "unknown",
+      "source": "function isCandidateStatus(value: unknown): value is CandidateStatus {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "apps/slotok-workbench/src/daemon/ugc-routes.ts",
+      "text": "unknown",
+      "source": "function isCleanRoomTemplateCategory(value: unknown): value is CleanRoomTemplateSpec[\"category\"] {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "apps/slotok-workbench/src/daemon/ugc-routes.ts",
+      "text": "unknown",
+      "source": "function isJsonValue(value: unknown): value is JsonValue {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "apps/slotok-workbench/src/daemon/ugc-routes.ts",
+      "text": "unknown",
+      "source": "function isPersonaStatus(value: unknown): value is PersonaPatch[\"status\"] {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "apps/slotok-workbench/src/daemon/ugc-routes.ts",
+      "text": "unknown",
+      "source": "function isProviderJobStatus(value: unknown): value is CreateProviderJobInput[\"status\"] {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "apps/slotok-workbench/src/daemon/ugc-routes.ts",
+      "text": "unknown",
+      "source": "function isReferenceArchiveFormatOutputKind(value: unknown): value is ReferenceArchiveFormatOutput[\"kind\"] {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "apps/slotok-workbench/src/daemon/ugc-routes.ts",
+      "text": "unknown",
+      "source": "function isReferenceArchiveStatus(value: unknown): value is UgcReferenceArchive[\"archiveStatus\"] {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "apps/slotok-workbench/src/daemon/ugc-routes.ts",
+      "text": "unknown",
+      "source": "function isReferenceSourcePolicy(value: unknown): value is UgcReferenceArchive[\"sourcePolicy\"] {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "apps/slotok-workbench/src/daemon/ugc-routes.ts",
+      "text": "unknown",
+      "source": "function isResearchPlatform(value: unknown): value is UgcResearchPlatform {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "apps/slotok-workbench/src/daemon/ugc-routes.ts",
+      "text": "unknown",
+      "source": "function isResearchTargetStatus(value: unknown): value is UgcResearchTargetStatus {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "apps/slotok-workbench/src/daemon/ugc-routes.ts",
+      "text": "unknown",
+      "source": "function isReviewAttachmentKind(value: unknown): value is ReviewAttachment[\"kind\"] {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "apps/slotok-workbench/src/daemon/ugc-routes.ts",
+      "text": "unknown",
+      "source": "function isReviewVerdict(value: unknown): value is ReviewVerdict {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "apps/slotok-workbench/src/daemon/ugc-routes.ts",
+      "text": "unknown",
+      "source": "function isStringArray(value: unknown): value is readonly string[] {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "apps/slotok-workbench/src/daemon/ugc-routes.ts",
+      "text": "unknown",
+      "source": "function isTemplateMiningJobStatus(value: unknown): value is UgcTemplateMiningJobStatus {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "apps/slotok-workbench/src/ugc/local-state.ts",
+      "text": "unknown",
+      "source": "export function isLocalState(value: unknown): value is UgcLocalState {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "apps/slotok-workbench/src/ugc/local-state.ts",
+      "text": "unknown",
+      "source": "export function isRecord(value: unknown): value is { readonly [key: string]: unknown } {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "apps/slotok-workbench/src/ugc/local-state.ts",
+      "text": "unknown",
+      "source": "export function isWorkspace(value: unknown): value is UgcStudioWorkspace {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/bench-harness/src/index.ts",
+      "text": "unknown",
+      "source": "export function decodeBenchPacket(value: unknown): BenchPacket {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/bench-harness/src/index.ts",
+      "text": "unknown",
+      "source": "export function decodeBenchRunRecord(value: unknown): BenchRunRecord {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
       "file": "packages/browser-use/index.ts",
       "text": "any",
       "source": "await page.keyboard.press(key as any)",
@@ -88,9 +291,569 @@
     },
     {
       "ruleId": "no-unsafe-any-unknown-ts",
-      "file": "packages/browser-use/index.ts",
+      "file": "packages/dst-mini/src/index.ts",
       "text": "unknown",
-      "source": "return (page.target() as unknown as { _targetId?: string })._targetId",
+      "source": "details: Record<string, unknown>",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/dynamic-workflows/src/agent.ts",
+      "text": "any",
+      "source": "await session.prompt(this.buildPrompt(prompt, options as AgentRunOptions<any>, Boolean(options.schema)));",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/dynamic-workflows/src/agent.ts",
+      "text": "any",
+      "source": "const capture: StructuredOutputCapture<any> = { called: false, value: undefined };",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/dynamic-workflows/src/agent.ts",
+      "text": "unknown",
+      "source": "customTools.push(createStructuredOutputTool({ schema: options.schema, capture }) as unknown as ToolDefinition);",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/dynamic-workflows/src/agent.ts",
+      "text": "any",
+      "source": "private buildPrompt(prompt: string, options: AgentRunOptions<any>, structured: boolean): string {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/dynamic-workflows/src/agent.ts",
+      "text": "unknown",
+      "source": "private lastAssistantText(messages: unknown[]): string {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/dynamic-workflows/src/display.ts",
+      "text": "unknown",
+      "source": "export function preview(value: unknown, max = 80): string {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/dynamic-workflows/src/display.ts",
+      "text": "unknown",
+      "source": "onUpdate: ((result: { content: Array<{ type: \"text\"; text: string }>; details: unknown }) => void) | undefined,",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/dynamic-workflows/src/display.ts",
+      "text": "unknown",
+      "source": "result?: unknown;",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/dynamic-workflows/src/structured-output.ts",
+      "text": "unknown",
+      "source": "export interface StructuredOutputCapture<T = unknown> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/dynamic-workflows/src/workflow-tool.ts",
+      "text": "unknown",
+      "source": "args?: unknown;",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/dynamic-workflows/src/workflow-tool.ts",
+      "text": "unknown",
+      "source": "const value = args as Record<string, unknown>;",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/dynamic-workflows/src/workflow-tool.ts",
+      "text": "any",
+      "source": "export function createWorkflowTool(options: WorkflowToolOptions = {}): ToolDefinition<typeof workflowToolSchema, any> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/dynamic-workflows/src/workflow-tool.ts",
+      "text": "unknown",
+      "source": "function isAbortError(error: unknown): boolean {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/dynamic-workflows/src/workflow-tool.ts",
+      "text": "unknown",
+      "source": "function normalizeWorkflowToolArgs(args: unknown): WorkflowToolInput {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/dynamic-workflows/src/workflow.ts",
+      "text": "unknown",
+      "source": "...stages: Array<(prev: unknown, original: unknown, index: number) => unknown>",
+      "count": 3
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/dynamic-workflows/src/workflow.ts",
+      "text": "any",
+      "source": "} as any);",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/dynamic-workflows/src/workflow.ts",
+      "text": "unknown",
+      "source": "args?: unknown;",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/dynamic-workflows/src/workflow.ts",
+      "text": "unknown",
+      "source": "const agent = async (prompt: unknown, agentOptions: unknown = {}) => {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/dynamic-workflows/src/workflow.ts",
+      "text": "unknown",
+      "source": "const out: Record<string, unknown> = {};",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/dynamic-workflows/src/workflow.ts",
+      "text": "unknown",
+      "source": "const parallel = async (thunks: Array<() => Promise<unknown>>) => {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/dynamic-workflows/src/workflow.ts",
+      "text": "unknown",
+      "source": "const pendingAgentRuns = new Set<Promise<unknown>>();",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/dynamic-workflows/src/workflow.ts",
+      "text": "unknown",
+      "source": "const phase = (title: unknown) => {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/dynamic-workflows/src/workflow.ts",
+      "text": "unknown",
+      "source": "error: (m: unknown) => log(`[error] ${String(m)}`),",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/dynamic-workflows/src/workflow.ts",
+      "text": "unknown",
+      "source": "export async function runWorkflow<T = unknown>(",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/dynamic-workflows/src/workflow.ts",
+      "text": "unknown",
+      "source": "export interface WorkflowRunResult<T = unknown> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/dynamic-workflows/src/workflow.ts",
+      "text": "unknown",
+      "source": "function assertStructuredCloneable(value: unknown, name: string): void {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/dynamic-workflows/src/workflow.ts",
+      "text": "unknown",
+      "source": "function estimateTokens(value: unknown): number {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/dynamic-workflows/src/workflow.ts",
+      "text": "unknown",
+      "source": "function evaluateLiteral(node: AnyNode, path: string): unknown {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/dynamic-workflows/src/workflow.ts",
+      "text": "unknown",
+      "source": "function isAstNode(value: unknown): value is AnyNode {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/dynamic-workflows/src/workflow.ts",
+      "text": "unknown",
+      "source": "function normalizeAgentOptions(value: unknown): AgentOptions {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/dynamic-workflows/src/workflow.ts",
+      "text": "unknown",
+      "source": "function optionalString(value: unknown, name: string): string | undefined {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/dynamic-workflows/src/workflow.ts",
+      "text": "unknown",
+      "source": "function requireString(value: unknown, name: string): string {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/dynamic-workflows/src/workflow.ts",
+      "text": "unknown",
+      "source": "function validateMeta(meta: unknown): asserts meta is WorkflowMeta {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/dynamic-workflows/src/workflow.ts",
+      "text": "unknown",
+      "source": "items: unknown[],",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/dynamic-workflows/src/workflow.ts",
+      "text": "unknown",
+      "source": "let value: unknown = item;",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/dynamic-workflows/src/workflow.ts",
+      "text": "unknown",
+      "source": "onAgentEnd?: (event: { label: string; phase?: string; result: unknown }) => void;",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/dynamic-workflows/src/workflow.ts",
+      "text": "any",
+      "source": "type AnyNode = Node & { [key: string]: any; start: number; end: number };",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/dynamic-workflows/src/workflow.ts",
+      "text": "unknown",
+      "source": "warn: (m: unknown) => log(`[warn] ${String(m)}`),",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/dynamic-workflows/test/workflow.test.ts",
+      "text": "any",
+      "source": "agent: fakeAgent as any,",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/dynamic-workflows/test/workflow.test.ts",
+      "text": "unknown",
+      "source": "const ended: Array<{ label: string; phase?: string; result: unknown }> = []",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/account-credit.ts",
+      "text": "unknown",
+      "source": "function kindOf(value: unknown): string | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/artifact-log.ts",
+      "text": "unknown",
+      "source": "function artifactLogEffectError(error: unknown): Error {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/capcut-templates.ts",
+      "text": "unknown",
+      "source": ">): Record<string, unknown> {",
+      "count": 5
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/capcut-templates.ts",
+      "text": "unknown",
+      "source": "body: unknown",
+      "count": 4
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/capcut-templates.ts",
+      "text": "unknown",
+      "source": "export function buildCapCutCollectionTemplatesRequest(query: CapCutCollectionTemplatesQuery): Record<string, unknown> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/capcut-templates.ts",
+      "text": "unknown",
+      "source": "export function buildCapCutTemplateCategoriesRequest(): Record<string, unknown> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/capcut-templates.ts",
+      "text": "unknown",
+      "source": "export function buildCapCutTemplateCollectionsRequest(query: CapCutTemplateCollectionsQuery = {}): Record<string, unknown> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/capcut-templates.ts",
+      "text": "unknown",
+      "source": "export function buildCapCutTemplateDetailRequest(query: CapCutTemplateDetailQuery): Record<string, unknown> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/capcut-templates.ts",
+      "text": "unknown",
+      "source": "export function parseCapCutCollectionTemplatesBody(body: unknown): {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/capcut-templates.ts",
+      "text": "unknown",
+      "source": "export function parseCapCutTemplateCategoriesBody(body: unknown): CapCutTemplateCategory[] {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/capcut-templates.ts",
+      "text": "unknown",
+      "source": "export function parseCapCutTemplateCollectionsBody(body: unknown): { collections: CapCutTemplateCollection[]; templateSource: string | null } {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/capcut-templates.ts",
+      "text": "unknown",
+      "source": "export function parseCapCutTemplateDetailBody(body: unknown): CapCutTemplateDetail {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/capcut-templates.ts",
+      "text": "unknown",
+      "source": "export function parseCapCutTemplateMiningBody(body: unknown, endpoint: CapCutTemplateMiningEndpoint | null = null): CapCutTemplateMiningParseResult {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/capcut-templates.ts",
+      "text": "unknown",
+      "source": "export function parseCapCutTemplateRatioCatalogBody(body: unknown): CapCutTemplateRatio[] {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/capcut-templates.ts",
+      "text": "unknown",
+      "source": "export function parseCapCutTemplateSceneCatalogBody(body: unknown): CapCutTemplateScene[] {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/capcut-templates.ts",
+      "text": "unknown",
+      "source": "export function summarizeCapCutTemplateCategories(result: Pick<CapCutTemplateCategoriesResult, \"categories\" | \"logId\" | \"responseTextSha256\">): Record<string, unknown> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/capcut-templates.ts",
+      "text": "unknown",
+      "source": "function asArray(value: unknown): unknown[] {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/capcut-templates.ts",
+      "text": "unknown",
+      "source": "function asRecord(value: unknown): Record<string, unknown> | null {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/capcut-templates.ts",
+      "text": "unknown",
+      "source": "function assertCapCutSuccess(body: unknown, operation: string): void {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/capcut-templates.ts",
+      "text": "unknown",
+      "source": "function assertHttpSuccess(status: number, body: unknown, operation: string): void {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/capcut-templates.ts",
+      "text": "unknown",
+      "source": "function booleanValue(value: unknown): boolean | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/capcut-templates.ts",
+      "text": "unknown",
+      "source": "function countMaterialCollections(materials: Record<string, unknown>): Record<string, number> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/capcut-templates.ts",
+      "text": "unknown",
+      "source": "function decodeCapCutMiningContract<A>(schema: Schema.Decoder<A>, value: unknown, operation: string): A {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/capcut-templates.ts",
+      "text": "unknown",
+      "source": "function errmsgValue(body: unknown): string | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/capcut-templates.ts",
+      "text": "unknown",
+      "source": "function numberFromStringOrNumber(value: unknown): number | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/capcut-templates.ts",
+      "text": "unknown",
+      "source": "function numberValue(value: unknown): number | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/capcut-templates.ts",
+      "text": "unknown",
+      "source": "function omitUndefined(record: Record<string, unknown>): Record<string, unknown> {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/capcut-templates.ts",
+      "text": "unknown",
+      "source": "function parseCapCutCollectionTemplateItem(item: unknown): CapCutCollectionTemplateItem {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/capcut-templates.ts",
+      "text": "unknown",
+      "source": "function parseCapCutEnvelopeBody(body: unknown, operation: string): z.infer<typeof CapCutEnvelopeSchema> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/capcut-templates.ts",
+      "text": "unknown",
+      "source": "function parseNumberJsonArrayField(value: unknown): number[] {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/capcut-templates.ts",
+      "text": "unknown",
+      "source": "function readSize(widthValue: unknown, heightValue: unknown): { width: number; height: number } | null {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/capcut-templates.ts",
+      "text": "unknown",
+      "source": "function retValue(body: unknown): string | number | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/capcut-templates.ts",
+      "text": "unknown",
+      "source": "function safeJson(value: string): unknown {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/capcut-templates.ts",
+      "text": "unknown",
+      "source": "function stringOrNumber(value: unknown): string | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/capcut-templates.ts",
+      "text": "unknown",
+      "source": "function stringValue(value: unknown): string | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/capcut-templates.ts",
+      "text": "unknown",
+      "source": "items: readonly unknown[]",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/capcut-templates.ts",
+      "text": "unknown",
+      "source": "ratiosBody: unknown",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/capcut-templates.ts",
+      "text": "unknown",
+      "source": "request: Record<string, unknown>",
+      "count": 4
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/capcut-templates.ts",
+      "text": "unknown",
+      "source": "return !!value && typeof value === \"object\" && !Array.isArray(value) ? value as Record<string, unknown> : null",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/capcut-templates.ts",
+      "text": "unknown",
+      "source": "scenesBody: unknown",
       "count": 1
     },
     {
@@ -167,8 +930,22 @@
       "ruleId": "no-unsafe-any-unknown-ts",
       "file": "packages/jimeng-client/src/capture.ts",
       "text": "unknown",
+      "source": "function getWorkbenchImageCoreParam(draft: Record<string, unknown>): Record<string, unknown> | null {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/capture.ts",
+      "text": "unknown",
       "source": "function isRecord(value: unknown): value is Record<string, unknown> {",
       "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/capture.ts",
+      "text": "unknown",
+      "source": "function patchWorkbenchImagePayload(body: Record<string, unknown>, prompt: string, submitId: string, seed: number | undefined): void {",
+      "count": 1
     },
     {
       "ruleId": "no-unsafe-any-unknown-ts",
@@ -181,11 +958,214 @@
       "ruleId": "no-unsafe-any-unknown-ts",
       "file": "packages/jimeng-client/src/capture.ts",
       "text": "unknown",
+      "source": "pollBody?: Record<string, unknown>",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/capture.ts",
+      "text": "unknown",
       "source": "submitBody: Record<string, unknown>",
       "count": 1
     },
     {
       "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/catalog.ts",
+      "text": "unknown",
+      "source": "}): Promise<{ request: CaptureRequestEntry; body: unknown; voices: JimengVoiceCatalogItem[]; responseTextSha256: string; httpStatus: number }> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/catalog.ts",
+      "text": "unknown",
+      "source": "body: Record<string, unknown>",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/catalog.ts",
+      "text": "unknown",
+      "source": "body: unknown",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/catalog.ts",
+      "text": "unknown",
+      "source": "const audioConfig: Record<string, unknown> = {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/catalog.ts",
+      "text": "unknown",
+      "source": "export function summarizeLipSyncConfigs(result: JimengLipSyncConfigResult): Record<string, unknown> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/catalog.ts",
+      "text": "unknown",
+      "source": "export function summarizeVoiceLibrary(voices: JimengVoiceCatalogItem[]): Record<string, unknown> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/catalog.ts",
+      "text": "unknown",
+      "source": "function asArray(value: unknown): unknown[] {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/catalog.ts",
+      "text": "unknown",
+      "source": "function asRecord(value: unknown): Record<string, unknown> | null {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/catalog.ts",
+      "text": "unknown",
+      "source": "function assertJimengSuccess(body: unknown, operation: string): void {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/catalog.ts",
+      "text": "unknown",
+      "source": "function booleanValue(value: unknown): boolean | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/catalog.ts",
+      "text": "unknown",
+      "source": "function buildTtsBody(input: JimengTtsInput & { itemPlatform: number }): Record<string, unknown> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/catalog.ts",
+      "text": "unknown",
+      "source": "function errmsgValue(body: unknown): string | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/catalog.ts",
+      "text": "unknown",
+      "source": "function extractTtsAudio(body: unknown): Uint8Array {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/catalog.ts",
+      "text": "unknown",
+      "source": "function isRecord(value: unknown): value is Record<string, unknown> {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/catalog.ts",
+      "text": "unknown",
+      "source": "function numberValue(value: unknown): number | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/catalog.ts",
+      "text": "unknown",
+      "source": "function parseEmotions(value: unknown): Array<{ emotion: string; speakerId: string }> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/catalog.ts",
+      "text": "unknown",
+      "source": "function parseTags(value: unknown): Array<{ type: string; value: string }> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/catalog.ts",
+      "text": "unknown",
+      "source": "function parseToneType(common: Record<string, unknown>): Record<string, unknown> {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/catalog.ts",
+      "text": "unknown",
+      "source": "function parseVoiceLibrary(body: unknown): JimengVoiceCatalogItem[] {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/catalog.ts",
+      "text": "unknown",
+      "source": "function retValue(body: unknown): string | number | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/catalog.ts",
+      "text": "unknown",
+      "source": "function safeJson(value: string): unknown {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/catalog.ts",
+      "text": "unknown",
+      "source": "function stringValue(value: unknown): string | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/catalog.ts",
+      "text": "unknown",
+      "source": "function summarizeCatalogBody(endpoint: JimengCatalogEndpointId, body: unknown): Record<string, unknown> {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/catalog.ts",
+      "text": "unknown",
+      "source": "function summarizeLipSyncModel(value: unknown): Record<string, unknown> | null {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/catalog.ts",
+      "text": "unknown",
+      "source": "function summarizeModel(value: unknown): Record<string, unknown> | null {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/catalog.ts",
+      "text": "unknown",
+      "source": "function summarizeSkill(value: unknown): Record<string, unknown> | null {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/catalog.ts",
+      "text": "unknown",
+      "source": "return !!value && typeof value === \"object\" && !Array.isArray(value) ? value as Record<string, unknown> : null",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/catalog.ts",
+      "text": "unknown",
+      "source": "summary: Record<string, unknown>",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
       "file": "packages/jimeng-client/src/cli.ts",
       "text": "unknown",
       "source": "function readJson(file: string): unknown {",
@@ -200,6 +1180,13 @@
     },
     {
       "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/commerce-benefits.ts",
+      "text": "unknown",
+      "source": "function kindOf(value: unknown): string | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
       "file": "packages/jimeng-client/src/dreamina-compatible-cli.ts",
       "text": "unknown",
       "source": "function readJson(file: string): unknown {",
@@ -210,6 +1197,13 @@
       "file": "packages/jimeng-client/src/dreamina-compatible-cli.ts",
       "text": "unknown",
       "source": "function writeJson(file: string, value: unknown): void {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/dreamina-compatible.ts",
+      "text": "unknown",
+      "source": "const parsed = JSON.parse(text) as unknown",
       "count": 1
     },
     {
@@ -217,6 +1211,209 @@
       "file": "packages/jimeng-client/src/errors.ts",
       "text": "unknown",
       "source": "[key: string]: unknown",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/explore.ts",
+      "text": "unknown",
+      "source": "body: unknown",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/explore.ts",
+      "text": "unknown",
+      "source": "export function buildExploreRequestBody(query: JimengExploreQuery = {}): Record<string, unknown> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/explore.ts",
+      "text": "unknown",
+      "source": "export function parseExploreTemplatesBody(body: unknown): Pick<JimengExploreTemplatesResult, \"hasMore\" | \"nextOffset\" | \"categoryId\" | \"requestId\" | \"items\"> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/explore.ts",
+      "text": "unknown",
+      "source": "export function parseOverseasShortVideosBody(body: unknown, request: Record<string, unknown> = {}): Pick<JimengOverseasShortVideosResult, \"hasMore\" | \"nextOffset\" | \"categoryId\" | \"requestId\" | \"items\"> {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/explore.ts",
+      "text": "unknown",
+      "source": "export function redactExploreTemplateItems(items: JimengExploreTemplateItem[]): Array<Record<string, unknown>> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/explore.ts",
+      "text": "unknown",
+      "source": "export function summarizeExploreShortVideos(result: Pick<JimengExploreTemplatesResult, \"items\" | \"hasMore\" | \"nextOffset\" | \"categoryId\" | \"requestId\">): Record<string, unknown> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/explore.ts",
+      "text": "unknown",
+      "source": "export function summarizeExploreTemplates(result: Pick<JimengExploreTemplatesResult, \"items\" | \"hasMore\" | \"nextOffset\" | \"categoryId\" | \"requestId\">): Record<string, unknown> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/explore.ts",
+      "text": "unknown",
+      "source": "function asArray(value: unknown): unknown[] {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/explore.ts",
+      "text": "unknown",
+      "source": "function asRecord(value: unknown): Record<string, unknown> | null {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/explore.ts",
+      "text": "unknown",
+      "source": "function assertJimengSuccess(body: unknown, operation: string): void {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/explore.ts",
+      "text": "unknown",
+      "source": "function booleanValue(value: unknown): boolean | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/explore.ts",
+      "text": "unknown",
+      "source": "function defaultExploreImageInfo(): Record<string, unknown> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/explore.ts",
+      "text": "unknown",
+      "source": "function errmsgValue(body: unknown): string | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/explore.ts",
+      "text": "unknown",
+      "source": "function field(record: Record<string, unknown> | null, snakeKey: string, camelKey?: string): unknown {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/explore.ts",
+      "text": "unknown",
+      "source": "function findGenerateCoreParam(content: unknown): Record<string, unknown> | null {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/explore.ts",
+      "text": "unknown",
+      "source": "function numberValue(value: unknown): number | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/explore.ts",
+      "text": "unknown",
+      "source": "function parseDraftContent(value: string | null): unknown {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/explore.ts",
+      "text": "unknown",
+      "source": "function parseExploreTemplateItem(value: unknown): JimengExploreTemplateItem | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/explore.ts",
+      "text": "unknown",
+      "source": "function retValue(body: unknown): string | number | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/explore.ts",
+      "text": "unknown",
+      "source": "function safeJson(value: string): unknown {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/explore.ts",
+      "text": "unknown",
+      "source": "function stringValue(value: unknown): string | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/explore.ts",
+      "text": "unknown",
+      "source": "request: Record<string, unknown>",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/explore.ts",
+      "text": "unknown",
+      "source": "return !!value && typeof value === \"object\" && !Array.isArray(value) ? value as Record<string, unknown> : null",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/generation-contract.ts",
+      "text": "unknown",
+      "source": "function jsonObject(value: unknown, operation: string): JsonObject {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/generation-contract.ts",
+      "text": "unknown",
+      "source": "function jsonValue(value: unknown): JsonValue {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/history-list.ts",
+      "text": "unknown",
+      "source": "function asRecord(value: unknown): JsonObject | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/history-list.ts",
+      "text": "unknown",
+      "source": "function historyListLookupKey(value: unknown, index: number): string {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/lip-sync.ts",
+      "text": "unknown",
+      "source": "decodeLipSyncContract(LipSyncImagePlanSchema, plan as unknown as JsonValue, \"image/avatar lip-sync plan\")",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/lip-sync.ts",
+      "text": "unknown",
+      "source": "decodeLipSyncContract(LipSyncVideoPlanSchema, plan as unknown as JsonValue, \"VOD lip-sync plan\")",
       "count": 1
     },
     {
@@ -333,6 +1530,48 @@
     },
     {
       "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/request-plan-compare.ts",
+      "text": "unknown",
+      "source": "function decodeCaptureContract<A>(schema: Schema.Decoder<A>, value: unknown, operation: string): A {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/request-plan-compare.ts",
+      "text": "unknown",
+      "source": "function parseRawNetworkCdpEvent(line: string, lineNumber: number): { method?: string, params?: Record<string, unknown> } | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/request-plan-compare.ts",
+      "text": "unknown",
+      "source": "function parseUnknownJson(text: string, operation: string): unknown {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/request-plan-compare.ts",
+      "text": "unknown",
+      "source": "function unknownRecord(value: unknown): Record<string, unknown> | null {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/request-plan-compare.ts",
+      "text": "unknown",
+      "source": "function unknownString(value: unknown): string | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/request-plan-compare.ts",
+      "text": "unknown",
+      "source": "return !!value && typeof value === \"object\" && !Array.isArray(value) ? value as Record<string, unknown> : null",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
       "file": "packages/jimeng-client/src/sse.ts",
       "text": "unknown",
       "source": "function asUuid(value: unknown): string | null {",
@@ -375,10 +1614,717 @@
     },
     {
       "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/text2image-plan-compare.ts",
+      "text": "unknown",
+      "source": "function decodeCaptureContract<A>(schema: Schema.Decoder<A>, value: unknown, operation: string): A {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/text2image-plan-compare.ts",
+      "text": "unknown",
+      "source": "function parseRawNetworkCdpEvent(line: string, lineNumber: number): { method?: string, params?: Record<string, unknown> } | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/text2image-plan-compare.ts",
+      "text": "unknown",
+      "source": "function parseUnknownJson(text: string, operation: string): unknown {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/text2image-plan-compare.ts",
+      "text": "unknown",
+      "source": "function unknownRecord(value: unknown): Record<string, unknown> | null {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/text2image-plan-compare.ts",
+      "text": "unknown",
+      "source": "function unknownString(value: unknown): string | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/text2image-plan-compare.ts",
+      "text": "unknown",
+      "source": "return !!value && typeof value === \"object\" && !Array.isArray(value) ? value as Record<string, unknown> : null",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/upload.ts",
+      "text": "unknown",
+      "source": "body: unknown",
+      "count": 7
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/upload.ts",
+      "text": "unknown",
+      "source": "export function summarizeUploadTokenBody(scene: JimengUploadTokenScene, body: unknown): JimengUploadTokenSummary {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/upload.ts",
+      "text": "unknown",
+      "source": "function asArray(value: unknown): unknown[] {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/upload.ts",
+      "text": "unknown",
+      "source": "function asRecord(value: unknown): Record<string, unknown> | null {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/upload.ts",
+      "text": "unknown",
+      "source": "function assertDirectUploadSuccess(body: unknown, operation: string): void {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/upload.ts",
+      "text": "unknown",
+      "source": "function assertImageXSuccess(body: unknown, operation: string): void {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/upload.ts",
+      "text": "unknown",
+      "source": "function assertJimengSuccess(body: unknown, operation: string): void {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/upload.ts",
+      "text": "unknown",
+      "source": "function assertVolcengineSuccess(body: unknown, operation: string): void {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/upload.ts",
+      "text": "unknown",
+      "source": "function errmsgValue(body: unknown): string | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/upload.ts",
+      "text": "unknown",
+      "source": "function isRecord(value: Record<string, unknown> | null): value is Record<string, unknown> {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/upload.ts",
+      "text": "unknown",
+      "source": "function numberValue(value: unknown): number | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/upload.ts",
+      "text": "unknown",
+      "source": "function parseApplyImageUploadBody(body: unknown): Omit<JimengImageXApplyResult, \"httpStatus\" | \"responseTextSha256\" | \"body\"> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/upload.ts",
+      "text": "unknown",
+      "source": "function parseApplyVodUploadBody(body: unknown): Omit<JimengVodApplyResult, \"httpStatus\" | \"responseTextSha256\" | \"body\"> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/upload.ts",
+      "text": "unknown",
+      "source": "function parseCommitImageUploadBody(body: unknown): Pick<JimengImageXCommitResult, \"imageUris\" | \"pluginResults\"> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/upload.ts",
+      "text": "unknown",
+      "source": "function parseCommitVodUploadBody(body: unknown): Pick<JimengVodCommitResult, \"results\" | \"vid\" | \"mid\" | \"sourceUri\" | \"posterUri\" | \"runId\" | \"videoMeta\"> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/upload.ts",
+      "text": "unknown",
+      "source": "function parseFallbackVodStore(node: Record<string, unknown> | undefined): JimengVodApplyResult[\"fallbackStoreInfo\"] {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/upload.ts",
+      "text": "unknown",
+      "source": "function parseImageUploadCredentials(body: unknown, overrideServiceId: string | undefined): JimengImageUploadCredentials {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/upload.ts",
+      "text": "unknown",
+      "source": "function parseVodUploadCredentials(body: unknown, overrideSpaceName: string | undefined): JimengVodUploadCredentials {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/upload.ts",
+      "text": "unknown",
+      "source": "function parseVodVideoMeta(value: unknown): JimengVodVideoMeta {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/upload.ts",
+      "text": "unknown",
+      "source": "function retValue(body: unknown): string | number | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/upload.ts",
+      "text": "unknown",
+      "source": "function safeJson(value: string): unknown {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/upload.ts",
+      "text": "unknown",
+      "source": "function stringRecord(value: unknown): Record<string, string> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/upload.ts",
+      "text": "unknown",
+      "source": "function stringValue(value: unknown): string | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/upload.ts",
+      "text": "unknown",
+      "source": "pluginResults: Array<Record<string, unknown>>",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/upload.ts",
+      "text": "unknown",
+      "source": "results: Array<Record<string, unknown>>",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/upload.ts",
+      "text": "unknown",
+      "source": "return !!value && typeof value === \"object\" && !Array.isArray(value) ? value as Record<string, unknown> : null",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/video-omni-compare.ts",
+      "text": "unknown",
+      "source": "function decodeCaptureContract<A>(schema: Schema.Decoder<A>, value: unknown, operation: string): A {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/video-omni-compare.ts",
+      "text": "unknown",
+      "source": "function parseRawNetworkCdpEvent(line: string, lineNumber: number): { method?: string, params?: Record<string, unknown> } | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/video-omni-compare.ts",
+      "text": "unknown",
+      "source": "function parseUnknownJson(text: string, operation: string): unknown {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/video-omni-compare.ts",
+      "text": "unknown",
+      "source": "function unknownRecord(value: unknown): Record<string, unknown> | null {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/video-omni-compare.ts",
+      "text": "unknown",
+      "source": "function unknownString(value: unknown): string | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/video-omni-compare.ts",
+      "text": "unknown",
+      "source": "return !!value && typeof value === \"object\" && !Array.isArray(value) ? value as Record<string, unknown> : null",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/video-plan-compare.ts",
+      "text": "unknown",
+      "source": "function decodeCaptureContract<A>(schema: Schema.Decoder<A>, value: unknown, operation: string): A {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/video-plan-compare.ts",
+      "text": "unknown",
+      "source": "function parseRawNetworkCdpEvent(line: string, lineNumber: number): { method?: string, params?: Record<string, unknown> } | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/video-plan-compare.ts",
+      "text": "unknown",
+      "source": "function parseUnknownJson(text: string, operation: string): unknown {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/video-plan-compare.ts",
+      "text": "unknown",
+      "source": "function unknownRecord(value: unknown): Record<string, unknown> | null {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/video-plan-compare.ts",
+      "text": "unknown",
+      "source": "function unknownString(value: unknown): string | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/video-plan-compare.ts",
+      "text": "unknown",
+      "source": "return !!value && typeof value === \"object\" && !Array.isArray(value) ? value as Record<string, unknown> : null",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/voice-clone.ts",
+      "text": "unknown",
+      "source": "body: unknown",
+      "count": 4
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/voice-clone.ts",
+      "text": "unknown",
+      "source": "export function buildJimengClonedVoiceDeleteRequest(input: JimengClonedVoiceDeleteInput): Record<string, unknown> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/voice-clone.ts",
+      "text": "unknown",
+      "source": "export function buildJimengClonedVoicesRequest(input: JimengClonedVoicesQuery = {}): Record<string, unknown> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/voice-clone.ts",
+      "text": "unknown",
+      "source": "export function buildJimengClonedVoiceUpdateRequest(input: JimengClonedVoiceUpdateInput): Record<string, unknown> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/voice-clone.ts",
+      "text": "unknown",
+      "source": "export function buildJimengVoiceCloneSubmitRequest(input: JimengVoiceCloneSubmitInput): Record<string, unknown> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/voice-clone.ts",
+      "text": "unknown",
+      "source": "export function buildJimengVoiceTaskQueryRequest(input: JimengVoiceTaskQueryInput): Record<string, unknown> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/voice-clone.ts",
+      "text": "unknown",
+      "source": "export function summarizeJimengClonedVoiceMutation(result: JimengClonedVoiceMutationResult): Record<string, unknown> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/voice-clone.ts",
+      "text": "unknown",
+      "source": "export function summarizeJimengClonedVoices(result: JimengClonedVoicesResult): Record<string, unknown> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/voice-clone.ts",
+      "text": "unknown",
+      "source": "export function summarizeJimengVoiceCloneSubmit(result: JimengVoiceCloneSubmitResult): Record<string, unknown> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/voice-clone.ts",
+      "text": "unknown",
+      "source": "export function summarizeJimengVoiceTaskQuery(result: JimengVoiceTaskQueryResult): Record<string, unknown> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/voice-clone.ts",
+      "text": "unknown",
+      "source": "export function validateJimengClonedVoiceDeleteRequest(request: Record<string, unknown>): void {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/voice-clone.ts",
+      "text": "unknown",
+      "source": "export function validateJimengClonedVoiceUpdateRequest(request: Record<string, unknown>): void {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/voice-clone.ts",
+      "text": "unknown",
+      "source": "export function validateJimengVoiceCloneSubmitRequest(request: Record<string, unknown>): void {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/voice-clone.ts",
+      "text": "unknown",
+      "source": "export function validateJimengVoiceTaskQueryRequest(request: Record<string, unknown>): void {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/voice-clone.ts",
+      "text": "unknown",
+      "source": "function asArray(value: unknown): unknown[] {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/voice-clone.ts",
+      "text": "unknown",
+      "source": "function asRecord(value: unknown): Record<string, unknown> | null {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/voice-clone.ts",
+      "text": "unknown",
+      "source": "function assertJimengSuccess(body: unknown, operation: string): void {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/voice-clone.ts",
+      "text": "unknown",
+      "source": "function booleanValue(value: unknown): boolean | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/voice-clone.ts",
+      "text": "unknown",
+      "source": "function buildVoiceAudio(input: JimengVoiceAudioReference): Record<string, unknown> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/voice-clone.ts",
+      "text": "unknown",
+      "source": "function decodeVoiceCloneContract<A>(schema: Schema.Decoder<A>, value: unknown, operation: string): A {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/voice-clone.ts",
+      "text": "unknown",
+      "source": "function errmsgValue(body: unknown): string | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/voice-clone.ts",
+      "text": "unknown",
+      "source": "function numberValue(value: unknown): number | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/voice-clone.ts",
+      "text": "unknown",
+      "source": "function parseClonedVoice(value: unknown): JimengClonedVoice | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/voice-clone.ts",
+      "text": "unknown",
+      "source": "function retValue(body: unknown): string | number | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/voice-clone.ts",
+      "text": "unknown",
+      "source": "function safeJson(value: string): unknown {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/voice-clone.ts",
+      "text": "unknown",
+      "source": "function stringValue(value: unknown): string | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/voice-clone.ts",
+      "text": "unknown",
+      "source": "function summarizeClonedVoice(voice: JimengClonedVoice): Record<string, unknown> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/voice-clone.ts",
+      "text": "unknown",
+      "source": "function summarizeVoiceTask(value: Record<string, unknown>): Record<string, unknown> {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/voice-clone.ts",
+      "text": "unknown",
+      "source": "function toJsonRecord(value: unknown): Record<string, unknown> {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/voice-clone.ts",
+      "text": "unknown",
+      "source": "request: Record<string, unknown>",
+      "count": 4
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/voice-clone.ts",
+      "text": "unknown",
+      "source": "return !!value && typeof value === \"object\" && !Array.isArray(value) ? value as Record<string, unknown> : null",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/voice-clone.ts",
+      "text": "unknown",
+      "source": "tasks: Array<Record<string, unknown>>",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/test/capcut-templates.test.ts",
+      "text": "unknown",
+      "source": "const collectionData = collectionBody.data as { item_list: unknown[] }",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/test/capcut-templates.test.ts",
+      "text": "unknown",
+      "source": "function capCutCategoriesBody(): Record<string, unknown> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/test/capcut-templates.test.ts",
+      "text": "unknown",
+      "source": "function capCutCollectionsBody(): Record<string, unknown> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/test/capcut-templates.test.ts",
+      "text": "unknown",
+      "source": "function capCutCollectionTemplatesBody(): Record<string, unknown> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/test/capcut-templates.test.ts",
+      "text": "unknown",
+      "source": "function capCutRatioCatalogBody(): Array<Record<string, unknown>> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/test/capcut-templates.test.ts",
+      "text": "unknown",
+      "source": "function capCutSceneCatalogBody(): Record<string, unknown> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/test/capcut-templates.test.ts",
+      "text": "unknown",
+      "source": "function capCutTemplateDetailBody(): Record<string, unknown> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
       "file": "packages/jimeng-client/test/capture.test.ts",
       "text": "any",
       "source": "const part = ((prepared.submitBody.messages as any[])[0].content.content_parts as any[])[0]",
       "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/test/catalog.test.ts",
+      "text": "unknown",
+      "source": "function lipSyncImageConfigBody(): Record<string, unknown> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/test/catalog.test.ts",
+      "text": "unknown",
+      "source": "function lipSyncVideoConfigBody(): Record<string, unknown> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/test/explore.test.ts",
+      "text": "unknown",
+      "source": "expect((body.image_info as { image_scene_list: unknown[] }).image_scene_list).toHaveLength(13)",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/test/explore.test.ts",
+      "text": "unknown",
+      "source": "function exploreBody(): Record<string, unknown> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/test/explore.test.ts",
+      "text": "unknown",
+      "source": "function overseasShortVideoBody(): Record<string, unknown> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/test/explore.test.ts",
+      "text": "unknown",
+      "source": "function shortVideoBody(): Record<string, unknown> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/test/lv-editor-catalog.test.ts",
+      "text": "unknown",
+      "source": "function lvCatalogBody(input: { categoryCount: number; effectCount: number; effectName: string }): Record<string, unknown> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/test/upload.test.ts",
+      "text": "unknown",
+      "source": "function applyImageUploadBody(): Record<string, unknown> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/test/upload.test.ts",
+      "text": "unknown",
+      "source": "function applyVodUploadBody(): Record<string, unknown> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/test/upload.test.ts",
+      "text": "unknown",
+      "source": "function commitImageUploadBody(): Record<string, unknown> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/test/upload.test.ts",
+      "text": "unknown",
+      "source": "function commitVodUploadBody(): Record<string, unknown> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/test/upload.test.ts",
+      "text": "unknown",
+      "source": "function jsonResponse(body: unknown, status = 200): Response {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/test/upload.test.ts",
+      "text": "unknown",
+      "source": "function uploadTokenBody(): Record<string, unknown> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/test/upload.test.ts",
+      "text": "unknown",
+      "source": "function videoUploadTokenBody(): Record<string, unknown> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/test/voice-clone.test.ts",
+      "text": "unknown",
+      "source": "}): Record<string, unknown> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/library-assistant/test/index.test.ts",
+      "text": "unknown",
+      "source": "expect(() => decodeAllowedSourcePolicy(invalidPolicy as unknown as object)).toThrow()",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/mermaid-preview/src/index.ts",
+      "text": "unknown",
+      "source": "function isPreviewMessage(message: unknown): message is {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/mermaid-preview/src/preview.ts",
+      "text": "unknown",
+      "source": "export function extractMessageText(message: { content: unknown }): string {",
+      "count": 1
     },
     {
       "ruleId": "no-unsafe-any-python",
@@ -487,10 +2433,465 @@
     },
     {
       "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/ugc-cli/src/cli.ts",
+      "text": "unknown",
+      "source": "function output(value: unknown, args: ParsedArgs): void {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/ugc-cli/src/cli.ts",
+      "text": "unknown",
+      "source": "function pretty(value: unknown): string {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/ugc-cli/src/planner.ts",
+      "text": "unknown",
+      "source": "export function buildTimeline(variant: VariantPlan): Record<string, unknown> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/ugc-cli/src/planner.ts",
+      "text": "unknown",
+      "source": "export function validateRecipe(value: unknown): value is RecipeJson {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/ugc-cli/src/planner.ts",
+      "text": "unknown",
+      "source": "input: { product: plan.product as unknown as Record<string, never> },",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/ugc-cli/src/store.ts",
+      "text": "unknown",
+      "source": "export function readJson(file: string): unknown {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/ugc-cli/src/store.ts",
+      "text": "unknown",
+      "source": "export function writeJson(file: string, value: unknown): void {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/ugc-cli/src/store.ts",
+      "text": "unknown",
+      "source": "params: Record<string, unknown>",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
       "file": "packages/web-access/scripts/smoke.ts",
       "text": "unknown",
       "source": "} catch (e: unknown) {",
       "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "packages/web-access/skills/used-hardware-buying-research/scripts/import_hardware_research.py",
+      "text": "Any",
+      "source": "def as_json(value: Any) -> str | None:",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "packages/web-access/skills/used-hardware-buying-research/scripts/import_hardware_research.py",
+      "text": "Any",
+      "source": "def insert_listings(conn: sqlite3.Connection, run_id: str, marketplace: str, items: list[dict[str, Any]]) -> int:",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "packages/web-access/skills/used-hardware-buying-research/scripts/import_hardware_research.py",
+      "text": "Any",
+      "source": "def insert_raw(conn: sqlite3.Connection, run_id: str, kind: str, records: Any) -> int:",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "packages/web-access/skills/used-hardware-buying-research/scripts/import_hardware_research.py",
+      "text": "Any",
+      "source": "def insert_run(conn: sqlite3.Connection, args: argparse.Namespace, scrape_run: Any) -> None:",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "packages/web-access/skills/used-hardware-buying-research/scripts/import_hardware_research.py",
+      "text": "Any",
+      "source": "def insert_sellers(conn: sqlite3.Connection, run_id: str, sellers: list[dict[str, Any]]) -> int:",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "packages/web-access/skills/used-hardware-buying-research/scripts/import_hardware_research.py",
+      "text": "Any",
+      "source": "def listing_key(run_id: str, item: dict[str, Any], index: int) -> str:",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "packages/web-access/skills/used-hardware-buying-research/scripts/import_hardware_research.py",
+      "text": "Any",
+      "source": "def load_json(path: Path, default: Any) -> Any:",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "packages/web-access/skills/used-hardware-buying-research/scripts/import_hardware_research.py",
+      "text": "Any",
+      "source": "def scalar(value: Any) -> str | int | float | None:",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "packages/web-access/skills/used-hardware-buying-research/scripts/import_hardware_research.py",
+      "text": "Any",
+      "source": "def seller_key(run_id: str, seller: dict[str, Any], index: int) -> str:",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "packages/web-access/skills/used-hardware-buying-research/scripts/import_hardware_research.py",
+      "text": "Any",
+      "source": "from typing import Any",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/agent-cockpit-extension.ts",
+      "text": "unknown",
+      "source": "anyPi.on?.(\"agent_end\", (_event: unknown, ctx: unknown) => {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/agent-cockpit-extension.ts",
+      "text": "unknown",
+      "source": "anyPi.on?.(\"agent_start\", (event: unknown, ctx: unknown) => {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/agent-cockpit-extension.ts",
+      "text": "unknown",
+      "source": "anyPi.on?.(\"session_shutdown\", (event: unknown, ctx: unknown) => {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/agent-cockpit-extension.ts",
+      "text": "unknown",
+      "source": "anyPi.on?.(\"session_start\", (event: unknown, ctx: unknown) => {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/agent-cockpit-extension.ts",
+      "text": "unknown",
+      "source": "anyPi.on?.(\"tool_call\", (event: unknown, ctx: unknown) => {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/agent-cockpit-extension.ts",
+      "text": "unknown",
+      "source": "anyPi.on?.(\"tool_result\", (event: unknown, ctx: unknown) => {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/agent-cockpit-extension.ts",
+      "text": "unknown",
+      "source": "anyPi.on?.(\"turn_start\", (_event: unknown, ctx: unknown) => {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/agent-cockpit-extension.ts",
+      "text": "unknown",
+      "source": "const anyPi = pi as unknown as { on?: (event: string, handler: (...args: unknown[]) => unknown) => void }",
+      "count": 3
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/agent-cockpit-extension.ts",
+      "text": "unknown",
+      "source": "const maybe = pi as unknown as { getSessionName?: () => string | null | undefined }",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/agent-cockpit-extension.ts",
+      "text": "unknown",
+      "source": "const publishFromEvent = (ctx: unknown, input: CockpitSessionInput) => {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/agent-cockpit-extension.ts",
+      "text": "unknown",
+      "source": "function asRecord(value: unknown): Record<string, unknown> {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/agent-cockpit-extension.ts",
+      "text": "unknown",
+      "source": "function baseInputFromContext(pi: ExtensionAPI, ctx: unknown): CockpitSessionInput {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/agent-cockpit-extension.ts",
+      "text": "unknown",
+      "source": "function bool(value: unknown): boolean | undefined {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/agent-cockpit-extension.ts",
+      "text": "unknown",
+      "source": "function inputFromParams(rawParams: unknown): CockpitSessionInput {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/agent-cockpit-extension.ts",
+      "text": "unknown",
+      "source": "function num(value: unknown): number | undefined {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/agent-cockpit-extension.ts",
+      "text": "unknown",
+      "source": "function safeCwd(ctx: unknown): string | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/agent-cockpit-extension.ts",
+      "text": "unknown",
+      "source": "function safeSessionFile(ctx: unknown): string | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/agent-cockpit-extension.ts",
+      "text": "unknown",
+      "source": "function str(value: unknown): string | undefined {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/agent-cockpit-extension.ts",
+      "text": "unknown",
+      "source": "function stringArray(value: unknown): string[] | undefined {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/agent-cockpit-extension.ts",
+      "text": "unknown",
+      "source": "return value && typeof value === \"object\" ? value as Record<string, unknown> : {}",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/agent-cockpit.ts",
+      "text": "unknown",
+      "source": "const panes = JSON.parse(panesOut || \"[]\") as unknown[]",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/agent-cockpit.ts",
+      "text": "unknown",
+      "source": "const raw = rawValue as Record<string, unknown>",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/agent-cockpit.ts",
+      "text": "unknown",
+      "source": "const tabs = JSON.parse(tabsOut || \"[]\") as unknown[]",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/agent-cockpit.ts",
+      "text": "unknown",
+      "source": "function getBool(raw: Record<string, unknown>, keys: string[]): boolean {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/agent-cockpit.ts",
+      "text": "unknown",
+      "source": "function getNumber(raw: Record<string, unknown>, keys: string[]): number | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/agent-cockpit.ts",
+      "text": "unknown",
+      "source": "function getString(raw: Record<string, unknown>, keys: string[]): string | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/agent-cockpit.ts",
+      "text": "unknown",
+      "source": "function normalizePane(rawValue: unknown, backend: TerminalBackend, terminalSession: string, now: number): TerminalPaneRecord | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/agent-cockpit.ts",
+      "text": "unknown",
+      "source": "function normalizeTab(rawValue: unknown, backend: TerminalBackend, terminalSession: string, now: number): TerminalTabRecord | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/agent-cockpit.ts",
+      "text": "unknown",
+      "source": "function sqliteJson(value: unknown): string {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/agent-cockpit.ts",
+      "text": "unknown",
+      "source": "geometry: unknown",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/agent-cockpit.ts",
+      "text": "unknown",
+      "source": "panes: unknown[]",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/agent-cockpit.ts",
+      "text": "unknown",
+      "source": "payload: parseJson<unknown>(row.payload_json, {}),",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/agent-cockpit.ts",
+      "text": "unknown",
+      "source": "payload: unknown",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/agent-cockpit.ts",
+      "text": "unknown",
+      "source": "payload?: unknown",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/agent-cockpit.ts",
+      "text": "unknown",
+      "source": "raw: unknown",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/agent-cockpit.ts",
+      "text": "unknown",
+      "source": "tabs: unknown[]",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/codex-usage/account.ts",
+      "text": "unknown",
+      "source": "export function extractAccountLabelFromCodexAuth(value: unknown): string | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/codex-usage/account.ts",
+      "text": "unknown",
+      "source": "function decodeJwtPayload(token: string): Record<string, unknown> | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/codex-usage/account.ts",
+      "text": "unknown",
+      "source": "function normalizeEmail(value: unknown): string | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/codex-usage/account.ts",
+      "text": "unknown",
+      "source": "return JSON.parse(Buffer.from(payload, \"base64url\").toString(\"utf8\")) as Record<string, unknown>",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/codex-usage/domain.ts",
+      "text": "unknown",
+      "source": "export function asObject(value: unknown): JsonObject | undefined {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/codex-usage/domain.ts",
+      "text": "unknown",
+      "source": "export function errorMessage(error: unknown): string {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/codex-usage/domain.ts",
+      "text": "unknown",
+      "source": "export type JsonObject = Record<string, unknown>",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/codex-usage/usage.ts",
+      "text": "unknown",
+      "source": "additional_rate_limits?: unknown",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/codex-usage/usage.ts",
+      "text": "unknown",
+      "source": "function rateLimitBucket(value: unknown): RateLimitBucket | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/codex-usage/usage.ts",
+      "text": "unknown",
+      "source": "function toPercentLeft(used: unknown): number | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/codex-usage/usage.ts",
+      "text": "unknown",
+      "source": "rate_limit?: unknown",
+      "count": 1
     },
     {
       "ruleId": "no-unsafe-any-unknown-ts",
@@ -602,6 +3003,13 @@
       "file": "packages/web-access/src/codex.ts",
       "text": "unknown",
       "source": "return value && typeof value === \"object\" ? value as Record<string, unknown> : undefined",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/computer-use.ts",
+      "text": "unknown",
+      "source": "rawAction: unknown,",
       "count": 1
     },
     {
@@ -900,9 +3308,9 @@
     },
     {
       "ruleId": "no-unsafe-any-unknown-ts",
-      "file": "packages/web-access/src/vim-lite.ts",
+      "file": "packages/web-access/test/codex-usage.test.ts",
       "text": "unknown",
-      "source": "return this as unknown as EditorInternals",
+      "source": "function jwt(payload: Record<string, unknown>): string {",
       "count": 1
     },
     {
@@ -931,20 +3339,6 @@
       "file": "packages/web-access/test/kagi.test.ts",
       "text": "unknown",
       "source": "const fixture: Array<{ data: unknown }> = [{",
-      "count": 1
-    },
-    {
-      "ruleId": "no-unsafe-any-unknown-ts",
-      "file": "packages/web-access/test/vim-lite.test.ts",
-      "text": "unknown",
-      "source": ";(editor as unknown as { pastes: Map<number, string> }).pastes.set(1, pasted)",
-      "count": 1
-    },
-    {
-      "ruleId": "no-unsafe-any-unknown-ts",
-      "file": "packages/web-access/test/vim-lite.test.ts",
-      "text": "unknown",
-      "source": "} as unknown as TUI",
       "count": 1
     },
     {
@@ -1001,6 +3395,118 @@
       "file": "scripts/archive-alex-x-articles.py",
       "text": "Any",
       "source": "from typing import Any",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "scripts/compare-x-browser-footprint.py",
+      "text": "Any",
+      "source": "def benchmark(browser: str, urls: list[str], args: argparse.Namespace) -> dict[str, Any]:",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "scripts/compare-x-browser-footprint.py",
+      "text": "Any",
+      "source": "def cdp_new_tab(port: int, url: str) -> dict[str, Any]:",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "scripts/compare-x-browser-footprint.py",
+      "text": "Any",
+      "source": "def cua_no_json(tool: str, payload: dict[str, Any], driver: str) -> str:",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "scripts/compare-x-browser-footprint.py",
+      "text": "Any",
+      "source": "def cua(tool: str, payload: dict[str, Any], driver: str) -> dict[str, Any]:",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "scripts/compare-x-browser-footprint.py",
+      "text": "Any",
+      "source": "def launch_browser(browser: str, urls: list[str], args: argparse.Namespace) -> dict[str, Any]:",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "scripts/compare-x-browser-footprint.py",
+      "text": "Any",
+      "source": "def normal_windows(app_name: str, pid: int, driver: str) -> list[dict[str, Any]]:",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "scripts/compare-x-browser-footprint.py",
+      "text": "Any",
+      "source": "def read_http_json(url: str, timeout: float = 10, method: str = \"GET\") -> Any:",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "scripts/compare-x-browser-footprint.py",
+      "text": "Any",
+      "source": "def summarize_roots(roots: list[int]) -> dict[str, Any]:",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "scripts/compare-x-browser-footprint.py",
+      "text": "Any",
+      "source": "def wait_for_any_window(app_name: str, pids: list[int], driver: str, timeout: float = 20) -> tuple[int, dict[str, Any]]:",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "scripts/compare-x-browser-footprint.py",
+      "text": "Any",
+      "source": "def wait_for_cdp(port: int, timeout: float = 20) -> dict[str, Any]:",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "scripts/compare-x-browser-footprint.py",
+      "text": "Any",
+      "source": "def wait_for_window(app_name: str, pid: int, driver: str, timeout: float = 20) -> dict[str, Any]:",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "scripts/compare-x-browser-footprint.py",
+      "text": "Any",
+      "source": "from typing import Any",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "scripts/compare-x-browser-footprint.py",
+      "text": "Any",
+      "source": "last: dict[int, list[dict[str, Any]]] = {}",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "scripts/compare-x-browser-footprint.py",
+      "text": "Any",
+      "source": "last: list[dict[str, Any]] = []",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "scripts/compare-x-browser-footprint.py",
+      "text": "Any",
+      "source": "payload: dict[str, Any] = {\"bundle_id\": CHROME_BUNDLE}",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "scripts/compare-x-browser-footprint.py",
+      "text": "Any",
+      "source": "result: dict[str, Any] = {",
       "count": 1
     },
     {
@@ -1162,6 +3668,27 @@
       "file": "scripts/eval-video-understanding.ts",
       "text": "unknown",
       "source": "usage?: Record<string, unknown>",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "scripts/setup-chromium-automation-profile.py",
+      "text": "Any",
+      "source": "def rsync_clone(source: Path, target: Path, replace: bool) -> dict[str, Any]:",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "scripts/setup-chromium-automation-profile.py",
+      "text": "Any",
+      "source": "from typing import Any",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-python",
+      "file": "scripts/setup-chromium-automation-profile.py",
+      "text": "Any",
+      "source": "results: list[dict[str, Any]] = []",
       "count": 1
     },
     {
