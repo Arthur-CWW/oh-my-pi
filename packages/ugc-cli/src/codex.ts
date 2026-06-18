@@ -52,6 +52,7 @@ export const CodexPreparedPayloadSchema = Schema.Struct({
     mediaUrl: Schema.String,
     workspaceId: Schema.optionalKey(Schema.String),
     targetIds: Schema.optionalKey(Schema.Array(Schema.String)),
+    referenceFrameUrls: Schema.optionalKey(Schema.Array(Schema.String)),
   }),
 })
 export type CodexPreparedPayload = typeof CodexPreparedPayloadSchema.Type
@@ -99,6 +100,13 @@ export function prepareCodexAnalyze(value: CodexAnalyzeInput): CodexPreparedResu
   const model = input.model?.trim() || DEFAULT_CODEX_MODEL
   const maxOutputTokens = normalizePositiveInteger(input.maxOutputTokens, DEFAULT_MAX_OUTPUT_TOKENS)
   const prompt = input.prompt?.trim() || defaultAnalysisPrompt(input.operation)
+  const referenceFrameUrls = normalizeReferenceFrameUrls(input.referenceFrameUrls)
+  if (input.operation === "video-understand" && referenceFrameUrls.length === 0) {
+    throw new Error("Codex video analysis requires prepared referenceFrameUrls")
+  }
+  if (input.operation === "video-understand" && referenceFrameUrls.includes(input.mediaUrl)) {
+    throw new Error("Codex video analysis referenceFrameUrls must contain extracted frames, not the raw mediaUrl")
+  }
   const payload: CodexPreparedPayload = {
     model,
     messages: [
@@ -108,7 +116,7 @@ export function prepareCodexAnalyze(value: CodexAnalyzeInput): CodexPreparedResu
       },
       {
         role: "user",
-        content: buildUserContent(input, prompt),
+        content: buildUserContent({ ...input, referenceFrameUrls }, prompt),
       },
     ],
     max_tokens: maxOutputTokens,
@@ -118,6 +126,7 @@ export function prepareCodexAnalyze(value: CodexAnalyzeInput): CodexPreparedResu
       mediaUrl: input.mediaUrl,
       ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}),
       ...(input.targetIds && input.targetIds.length > 0 ? { targetIds: input.targetIds } : {}),
+      ...(referenceFrameUrls.length > 0 ? { referenceFrameUrls } : {}),
     },
   }
   return {
@@ -196,6 +205,11 @@ function defaultAnalysisPrompt(operation: CodexAnalyzeOperation): string {
     return "Analyze the image for UGC creative review: subject, composition, product visibility, creator presence, text overlays, and compliance risks."
   }
   return "Analyze the video for UGC creative review: hook, scene flow, visible product moments, creator delivery, captions, retention risks, and reusable mechanics."
+}
+
+function normalizeReferenceFrameUrls(value: readonly string[] | undefined): readonly string[] {
+  if (!value) return []
+  return value.map((item) => item.trim()).filter((item) => item.length > 0)
 }
 
 function normalizePositiveInteger(value: number | undefined, fallback: number): number {

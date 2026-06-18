@@ -1,5 +1,6 @@
-import { decodeCodexAnalyzeInput, prepareCodexAnalyze, runCodexAnalyze, type CodexAnalyzeInput } from "@wirebabel/ugc-cli"
+import { decodeCodexAnalyzeInput, prepareCodexAnalyze, runCodexAnalyze, type CodexAnalyzeInput, type CodexPreparedResult } from "@wirebabel/ugc-cli"
 import { UgcJsonStore } from "./ugc-json-store"
+import { prepareCodexVideoFrames, type CodexFramePreparation, type CodexVideoFrameExtractor } from "./codex-video-frames"
 import { isRecord, toJsonValue, type BranchPatch, type BulkCandidateStatusPatch, type CandidateStatusPatch, type CleanRoomTemplateSpec, type CreateBranchInput, type CreateExportManifestInput, type CreateProviderJobInput, type CreateReferenceArchiveInput, type CreateResearchTargetInput, type CreateReviewNoteInput, type CreateTemplateMiningJobInput, type CreateWorkspaceBundleInput, type FinalEditorClipPatch, type FinalEditorPatch, type FinalEditorTrackPatch, type ImportWorkspaceBundleInput, type PersonaPatch, type ProviderJobPatch, type ReferenceArchiveFormatOutput, type ResearchTargetPatch, type TemplateMiningJobPatch, type UgcReferenceArchive, type UgcResearchPlatform, type UgcResearchTargetStatus, type UgcTemplateMiningJobStatus } from "../ugc/local-state"
 import type { BranchStatus, CandidateStatus, JsonValue, ReviewAttachment, ReviewVerdict } from "../renderer/ugcStudioModel"
 
@@ -8,9 +9,31 @@ interface CodexAnalysisJobRequest {
   readonly live: boolean
   readonly maxSpendUsd?: number
   readonly apiKey?: string
+  readonly posterUrl?: string | null
+  readonly candidateId?: string
 }
 
-export async function routeUgc(request: Request, store: UgcJsonStore): Promise<Response | null> {
+interface CandidateCodexAnalysisJobRequest {
+  readonly prompt?: string
+  readonly model?: string
+  readonly maxOutputTokens?: number
+  readonly referenceFrameUrls?: readonly string[]
+  readonly live: boolean
+  readonly maxSpendUsd?: number
+  readonly apiKey?: string
+}
+
+interface CodexFramePreparationContext {
+  readonly posterUrl?: string | null
+  readonly targetId?: string
+  readonly candidateId?: string
+}
+
+export interface RouteUgcOptions {
+  readonly codexFrameExtractor?: CodexVideoFrameExtractor
+}
+
+export async function routeUgc(request: Request, store: UgcJsonStore, options: RouteUgcOptions = {}): Promise<Response | null> {
   const url = new URL(request.url)
   if (!url.pathname.startsWith("/api/ugc/")) return null
 
@@ -50,6 +73,36 @@ export async function routeUgc(request: Request, store: UgcJsonStore): Promise<R
     return json(store.updateCandidate(id, decodeCandidateStatusPatch(await readJson(request))))
   }
 
+  if (request.method === "POST" && url.pathname.startsWith("/api/ugc/codex/candidates/") && url.pathname.endsWith("/analyze-video")) {
+    const candidateId = decodeURIComponent(url.pathname.slice("/api/ugc/codex/candidates/".length, -"/analyze-video".length))
+    if (!candidateId) return json({ error: "missing candidate id" }, 400)
+    const state = store.read()
+    const candidate = state.workspace.candidates.find((item) => item.id === candidateId)
+    if (!candidate) throw new Error(`candidate not found: ${candidateId}`)
+    if (!candidate.preview.videoUrl) throw new Error(`candidate has no preview video: ${candidateId}`)
+    const decoded = decodeCandidateCodexAnalysisJobRequest(await readJson(request))
+    const input: CodexAnalyzeInput = {
+      operation: "video-understand",
+      mediaUrl: candidate.preview.videoUrl,
+      workspaceId: state.workspace.id,
+      targetIds: [candidateId],
+      ...(decoded.prompt ? { prompt: decoded.prompt } : {}),
+      ...(decoded.model ? { model: decoded.model } : {}),
+      ...(decoded.maxOutputTokens === undefined ? {} : { maxOutputTokens: decoded.maxOutputTokens }),
+      ...(decoded.referenceFrameUrls ? { referenceFrameUrls: decoded.referenceFrameUrls } : {}),
+    }
+    return await createCodexProviderJob(store, options, {
+      input,
+      live: decoded.live,
+      maxSpendUsd: decoded.maxSpendUsd,
+      apiKey: decoded.apiKey,
+    }, {
+      posterUrl: candidate.preview.posterUrl,
+      targetId: candidateId,
+      candidateId,
+    })
+  }
+
   if (request.method === "POST" && url.pathname === "/api/ugc/branches") {
     return json(store.createBranch(decodeCreateBranch(await readJson(request))))
   }
@@ -73,46 +126,33 @@ export async function routeUgc(request: Request, store: UgcJsonStore): Promise<R
   }
 
   if (request.method === "POST" && url.pathname === "/api/ugc/codex/plan") {
-    const payload = await readJson(request)
-    if (!isRecord(payload)) throw new Error("Codex analysis plan request must be an object")
-    return json(prepareCodexAnalyze(decodeCodexAnalyzeInput(payload)))
+    const decoded = decodeCodexAnalysisJobRequest(await readJson(request))
+    const framePreparation = await prepareCodexVideoFrames({
+      workspaceDir: store.config.workspaceDir,
+      operation: decoded.input.operation,
+      mediaUrl: decoded.input.mediaUrl,
+      posterUrl: decoded.posterUrl,
+      referenceFrameUrls: decoded.input.referenceFrameUrls,
+      targetId: decoded.candidateId ?? decoded.input.targetIds?.[0],
+      candidateId: decoded.candidateId,
+      frameExtractor: options.codexFrameExtractor,
+      extractLocalFrames: false,
+    })
+    const prepared = prepareCodexAnalyze({
+      ...decoded.input,
+      mediaUrl: framePreparation.mediaUrl,
+      referenceFrameUrls: framePreparation.referenceFrameUrls,
+    })
+    return json(decoded.input.operation === "video-understand" ? { ...prepared, framePreparation } : prepared)
   }
 
   if (request.method === "POST" && (url.pathname === "/api/ugc/codex/jobs" || url.pathname === "/api/ugc/codex/create")) {
     const decoded = decodeCodexAnalysisJobRequest(await readJson(request))
-    const prepared = prepareCodexAnalyze(decoded.input)
-    if (!decoded.live) {
-      const state = store.createProviderJob({
-        provider: "codex",
-        operation: decoded.input.operation,
-        mode: "dry-run",
-        status: "planned",
-        targetIds: decoded.input.targetIds ?? [],
-        spendCapUsd: decoded.maxSpendUsd ?? prepared.estimatedCostUsd,
-        estimatedCostUsd: prepared.estimatedCostUsd,
-        request: toJsonValue(prepared),
-      })
-      return json({ job: state.providerJobs[0], prepared, state })
-    }
-
-    if (decoded.maxSpendUsd === undefined) throw new Error("Codex live analysis requires maxSpendUsd")
-    if (!decoded.apiKey) throw new Error("Codex live analysis requires an explicit apiKey")
-    const result = await runCodexAnalyze(decoded.input, {
-      apiKey: decoded.apiKey,
-      maxSpendUsd: decoded.maxSpendUsd,
+    return await createCodexProviderJob(store, options, decoded, {
+      posterUrl: decoded.posterUrl,
+      targetId: decoded.candidateId ?? decoded.input.targetIds?.[0],
+      candidateId: decoded.candidateId,
     })
-    const state = store.createProviderJob({
-      provider: "codex",
-      operation: decoded.input.operation,
-      mode: "live",
-      status: "succeeded",
-      targetIds: decoded.input.targetIds ?? [],
-      spendCapUsd: decoded.maxSpendUsd,
-      estimatedCostUsd: result.prepared.estimatedCostUsd,
-      request: toJsonValue(result.prepared),
-      response: result.response,
-    })
-    return json({ job: state.providerJobs[0], result, state })
   }
 
   if (request.method === "POST" && url.pathname.startsWith("/api/ugc/provider-jobs/")) {
@@ -169,6 +209,87 @@ export async function routeUgc(request: Request, store: UgcJsonStore): Promise<R
   }
 
   return null
+}
+
+async function createCodexProviderJob(store: UgcJsonStore, options: RouteUgcOptions, decoded: CodexAnalysisJobRequest, context: CodexFramePreparationContext): Promise<Response> {
+  if (decoded.live) {
+    if (decoded.maxSpendUsd === undefined) throw new Error("Codex live analysis requires maxSpendUsd")
+    if (!decoded.apiKey) throw new Error("Codex live analysis requires an explicit apiKey")
+  }
+  const framePreparation = await prepareCodexVideoFrames({
+    workspaceDir: store.config.workspaceDir,
+    operation: decoded.input.operation,
+    mediaUrl: decoded.input.mediaUrl,
+    posterUrl: context.posterUrl,
+    referenceFrameUrls: decoded.input.referenceFrameUrls,
+    targetId: context.targetId,
+    candidateId: context.candidateId,
+    frameExtractor: options.codexFrameExtractor,
+    extractLocalFrames: !decoded.live,
+  })
+  if (decoded.live) assertLiveCodexFrameRefsReachable(decoded.input, framePreparation)
+  const preparedInput: CodexAnalyzeInput = {
+    ...decoded.input,
+    mediaUrl: framePreparation.mediaUrl,
+    referenceFrameUrls: framePreparation.referenceFrameUrls,
+  }
+  const prepared = prepareCodexAnalyze(preparedInput)
+  const request = encodePreparedCodexRequest(prepared, framePreparation)
+  if (!decoded.live) {
+    const state = store.createProviderJob({
+      provider: "codex",
+      operation: preparedInput.operation,
+      mode: "dry-run",
+      status: "planned",
+      targetIds: preparedInput.targetIds ?? [],
+      spendCapUsd: decoded.maxSpendUsd ?? prepared.estimatedCostUsd,
+      estimatedCostUsd: prepared.estimatedCostUsd,
+      request,
+      artifactPaths: framePreparation.artifactPaths,
+    })
+    return json({ job: state.providerJobs[0], prepared, framePreparation, state })
+  }
+  const liveMaxSpendUsd = decoded.maxSpendUsd
+  const liveApiKey = decoded.apiKey
+  if (liveMaxSpendUsd === undefined) throw new Error("Codex live analysis requires maxSpendUsd")
+  if (!liveApiKey) throw new Error("Codex live analysis requires an explicit apiKey")
+
+  const result = await runCodexAnalyze(preparedInput, {
+    apiKey: liveApiKey,
+    maxSpendUsd: liveMaxSpendUsd,
+  })
+  const state = store.createProviderJob({
+    provider: "codex",
+    operation: preparedInput.operation,
+    mode: "live",
+    status: "succeeded",
+    targetIds: preparedInput.targetIds ?? [],
+    spendCapUsd: liveMaxSpendUsd,
+    estimatedCostUsd: result.prepared.estimatedCostUsd,
+    request: encodePreparedCodexRequest(result.prepared, framePreparation),
+    response: result.response,
+    artifactPaths: framePreparation.artifactPaths,
+  })
+  return json({ job: state.providerJobs[0], result, framePreparation, state })
+}
+
+function encodePreparedCodexRequest(prepared: CodexPreparedResult, framePreparation: CodexFramePreparation): JsonValue {
+  return toJsonValue({ ...prepared, framePreparation })
+}
+
+function assertLiveCodexFrameRefsReachable(input: CodexAnalyzeInput, framePreparation: CodexFramePreparation): void {
+  if (input.operation !== "video-understand") return
+  if (framePreparation.referenceFrameUrls.length === 0) {
+    throw new Error("Codex live video analysis requires externally reachable referenceFrameUrls; local frame extraction is dry-run only.")
+  }
+  const blockedUrl = framePreparation.referenceFrameUrls.find((url) => !isReachableCodexImageUrl(url))
+  if (blockedUrl) {
+    throw new Error(`Codex live video analysis requires externally reachable referenceFrameUrls; ${blockedUrl} is local or unsupported.`)
+  }
+}
+
+function isReachableCodexImageUrl(url: string): boolean {
+  return url.startsWith("https://") || url.startsWith("http://") || url.startsWith("data:image/")
 }
 
 async function readJson(request: Request): Promise<JsonValue> {
@@ -287,7 +408,22 @@ function decodeCodexAnalysisJobRequest(value: JsonValue): CodexAnalysisJobReques
   const live = value.live === true
   const maxSpendUsd = typeof value.maxSpendUsd === "number" ? value.maxSpendUsd : undefined
   const apiKey = typeof value.apiKey === "string" && value.apiKey.length > 0 ? value.apiKey : undefined
-  return { input, live, maxSpendUsd, apiKey }
+  const posterUrl = typeof value.posterUrl === "string" ? value.posterUrl : null
+  const candidateId = typeof value.candidateId === "string" && value.candidateId.length > 0 ? value.candidateId : undefined
+  return { input, live, maxSpendUsd, apiKey, posterUrl, candidateId }
+}
+
+function decodeCandidateCodexAnalysisJobRequest(value: JsonValue): CandidateCodexAnalysisJobRequest {
+  if (!isRecord(value)) return { live: false }
+  return {
+    ...(typeof value.prompt === "string" ? { prompt: value.prompt } : {}),
+    ...(typeof value.model === "string" ? { model: value.model } : {}),
+    ...(typeof value.maxOutputTokens === "number" ? { maxOutputTokens: value.maxOutputTokens } : {}),
+    ...(isStringArray(value.referenceFrameUrls) ? { referenceFrameUrls: value.referenceFrameUrls } : {}),
+    live: value.live === true,
+    maxSpendUsd: typeof value.maxSpendUsd === "number" ? value.maxSpendUsd : undefined,
+    apiKey: typeof value.apiKey === "string" && value.apiKey.length > 0 ? value.apiKey : undefined,
+  }
 }
 
 function decodeProviderJobPatch(value: JsonValue): ProviderJobPatch {

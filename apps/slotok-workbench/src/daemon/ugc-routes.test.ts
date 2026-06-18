@@ -1,9 +1,11 @@
+import { mkdir, writeFile } from "node:fs/promises"
 import { mkdtempSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"
 import { describe, expect, test } from "vitest"
 import { UgcJsonStore } from "./ugc-json-store"
 import { routeUgc } from "./ugc-routes"
+import type { CodexVideoFrameExtractor } from "./codex-video-frames"
 import type { UgcLocalState } from "../ugc/local-state"
 
 describe("routeUgc", () => {
@@ -240,18 +242,32 @@ describe("routeUgc", () => {
       mediaUrl: "file:///tmp/slotok/demo.mp4",
       targetIds: ["candidate_route_codex"],
       maxSpendUsd: 0.12,
+      referenceFrameUrls: [
+        "file:///tmp/slotok/frames/demo-01.jpg",
+        "file:///tmp/slotok/frames/demo-02.jpg",
+      ],
     }), store)
     const created = await createResponse?.json() as {
       readonly job?: {
         readonly provider?: string
         readonly operation?: string
         readonly mode?: string
+        readonly artifactPaths?: readonly string[]
         readonly request?: {
           readonly provider?: string
           readonly operation?: string
           readonly payload?: {
             readonly metadata?: {
               readonly mediaUrl?: string
+              readonly referenceFrameUrls?: readonly string[]
+            }
+          }
+          readonly framePreparation?: {
+            readonly referenceFrameUrls?: readonly string[]
+            readonly artifactPaths?: readonly string[]
+            readonly extraction?: {
+              readonly status?: string
+              readonly source?: string
             }
           }
         }
@@ -264,7 +280,130 @@ describe("routeUgc", () => {
     expect(created.job?.mode).toBe("dry-run")
     expect(created.job?.request?.provider).toBe("codex")
     expect(created.job?.request?.payload?.metadata?.mediaUrl).toBe("file:///tmp/slotok/demo.mp4")
+    expect(created.job?.request?.payload?.metadata?.referenceFrameUrls).toEqual([
+      "file:///tmp/slotok/frames/demo-01.jpg",
+      "file:///tmp/slotok/frames/demo-02.jpg",
+    ])
+    expect(created.job?.request?.framePreparation?.extraction?.status).toBe("supplied-reference-frames")
+    expect(created.job?.request?.framePreparation?.extraction?.source).toBe("referenceFrameUrls")
+    expect(created.job?.artifactPaths).toEqual([])
     expect(created.state?.providerJobs[0]?.provider).toBe("codex")
+  })
+
+  test("uses candidate fixture posters as skipped Codex video frame references", async () => {
+    const store = createStore()
+    const candidate = store.read().workspace.candidates.find((item) => item.preview.videoUrl?.startsWith("fixture://"))
+    if (!candidate) throw new Error("missing fixture video candidate")
+
+    const response = await routeUgc(jsonRequest(`/api/ugc/codex/candidates/${candidate.id}/analyze-video`, {
+      prompt: "Analyze the fixture candidate from prepared still frames.",
+    }), store)
+    const created = await response?.json() as {
+      readonly job?: {
+        readonly artifactPaths?: readonly string[]
+        readonly request?: {
+          readonly payload?: {
+            readonly metadata?: {
+              readonly mediaUrl?: string
+              readonly referenceFrameUrls?: readonly string[]
+            }
+          }
+          readonly framePreparation?: {
+            readonly referenceFrameUrls?: readonly string[]
+            readonly artifactPaths?: readonly string[]
+            readonly extraction?: {
+              readonly status?: string
+              readonly source?: string
+              readonly reason?: string
+            }
+          }
+        }
+      }
+    }
+
+    expect(created.job?.request?.payload?.metadata?.mediaUrl).toBe(candidate.preview.videoUrl)
+    expect(created.job?.request?.payload?.metadata?.referenceFrameUrls).toEqual([candidate.preview.posterUrl])
+    expect(created.job?.request?.framePreparation?.referenceFrameUrls).toEqual([candidate.preview.posterUrl])
+    expect(created.job?.request?.framePreparation?.artifactPaths).toEqual([])
+    expect(created.job?.request?.framePreparation?.extraction?.status).toBe("skipped")
+    expect(created.job?.request?.framePreparation?.extraction?.source).toBe("posterUrl")
+    expect(created.job?.request?.framePreparation?.extraction?.reason).toBe("fixture-media")
+    expect(created.job?.artifactPaths).toEqual([])
+  })
+
+  test("extracts local Codex video frames through an injected extractor", async () => {
+    const store = createStore()
+    const mediaPath = resolve(store.config.workspaceDir, "incoming", "demo.mp4")
+    const extractedMediaPaths: string[] = []
+    const fakeExtractor: CodexVideoFrameExtractor = {
+      async extract(input) {
+        extractedMediaPaths.push(input.mediaPath)
+        const framePath = resolve(input.outputDir, "frame-01.jpg")
+        await mkdir(input.outputDir, { recursive: true })
+        await writeFile(framePath, "fake jpeg")
+        return [framePath]
+      },
+    }
+
+    const response = await routeUgc(jsonRequest("/api/ugc/codex/jobs", {
+      operation: "video-understand",
+      mediaUrl: mediaPath,
+      candidateId: "candidate_local_extract",
+      targetIds: ["candidate_local_extract"],
+    }), store, { codexFrameExtractor: fakeExtractor })
+    const created = await response?.json() as {
+      readonly job?: {
+        readonly artifactPaths?: readonly string[]
+        readonly request?: {
+          readonly payload?: {
+            readonly metadata?: {
+              readonly mediaUrl?: string
+              readonly referenceFrameUrls?: readonly string[]
+            }
+          }
+          readonly framePreparation?: {
+            readonly referenceFrameUrls?: readonly string[]
+            readonly artifactPaths?: readonly string[]
+            readonly extraction?: {
+              readonly status?: string
+              readonly source?: string
+              readonly outputDir?: string
+            }
+          }
+        }
+      }
+    }
+
+    expect(extractedMediaPaths).toEqual([mediaPath])
+    expect(created.job?.request?.payload?.metadata?.mediaUrl?.startsWith("file://")).toBe(true)
+    expect(created.job?.request?.payload?.metadata?.referenceFrameUrls?.[0]?.startsWith("file://")).toBe(true)
+    expect(created.job?.request?.framePreparation?.artifactPaths).toEqual([
+      "assets/generated/codex-frames/candidate_local_extract/frame-01.jpg",
+    ])
+    expect(created.job?.request?.framePreparation?.extraction?.status).toBe("extracted")
+    expect(created.job?.request?.framePreparation?.extraction?.source).toBe("ffmpeg")
+    expect(created.job?.request?.framePreparation?.extraction?.outputDir).toBe("assets/generated/codex-frames/candidate_local_extract")
+    expect(created.job?.artifactPaths).toEqual([
+      "assets/generated/codex-frames/candidate_local_extract/frame-01.jpg",
+    ])
+  })
+
+  test("blocks live Codex video jobs from using local extracted frame URLs", async () => {
+    const store = createStore()
+    const mediaPath = resolve(store.config.workspaceDir, "incoming", "demo.mp4")
+    const fakeExtractor: CodexVideoFrameExtractor = {
+      async extract() {
+        throw new Error("live local extraction must not run")
+      },
+    }
+
+    await expect(routeUgc(jsonRequest("/api/ugc/codex/jobs", {
+      operation: "video-understand",
+      mediaUrl: mediaPath,
+      live: true,
+      maxSpendUsd: 0.25,
+      apiKey: "test-key",
+    }), store, { codexFrameExtractor: fakeExtractor })).rejects.toThrow("externally reachable referenceFrameUrls")
   })
 
   test("rejects live Codex analysis jobs without an explicit API key", async () => {

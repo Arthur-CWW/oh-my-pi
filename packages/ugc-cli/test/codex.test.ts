@@ -40,6 +40,46 @@ describe("codex media analysis adapter", () => {
     })
   })
 
+  test("builds a video-understand payload from prepared reference frames only", () => {
+    const prepared = prepareCodexAnalyze({
+      operation: "video-understand",
+      mediaUrl: "file:///tmp/private/local-video.mp4",
+      prompt: "Describe the hook and scene flow.",
+      referenceFrameUrls: [
+        "file:///tmp/frames/frame-01.jpg",
+        "file:///tmp/frames/frame-02.jpg",
+      ],
+    })
+
+    expect(prepared.payload.metadata.referenceFrameUrls).toEqual([
+      "file:///tmp/frames/frame-01.jpg",
+      "file:///tmp/frames/frame-02.jpg",
+    ])
+    expect(prepared.payload.messages[1]).toEqual({
+      role: "user",
+      content: [
+        { type: "text", text: "Describe the hook and scene flow.\n\nVideo URL: file:///tmp/private/local-video.mp4" },
+        { type: "image_url", image_url: { url: "file:///tmp/frames/frame-01.jpg" } },
+        { type: "image_url", image_url: { url: "file:///tmp/frames/frame-02.jpg" } },
+      ],
+    })
+  })
+
+  test("rejects video-understand payloads without prepared reference frames", () => {
+    expect(() => prepareCodexAnalyze({
+      operation: "video-understand",
+      mediaUrl: "file:///tmp/private/local-video.mp4",
+    })).toThrow("prepared referenceFrameUrls")
+  })
+
+  test("rejects raw video mediaUrl as a prepared reference frame", () => {
+    expect(() => prepareCodexAnalyze({
+      operation: "video-understand",
+      mediaUrl: "file:///tmp/private/local-video.mp4",
+      referenceFrameUrls: ["file:///tmp/private/local-video.mp4"],
+    })).toThrow("not the raw mediaUrl")
+  })
+
   test("live execution rejects spend caps before requiring credentials", async () => {
     delete process.env.CODEX_API_KEY
     delete process.env.OPENAI_API_KEY
@@ -47,6 +87,7 @@ describe("codex media analysis adapter", () => {
     await expect(Effect.runPromise(executeCodexAnalyze({
       operation: "video-understand",
       mediaUrl: "file:///tmp/private/local-video.mp4",
+      referenceFrameUrls: ["file:///tmp/frames/frame-01.jpg"],
     }, {
       maxSpendUsd: 0.01,
       fetch: failIfCalled,
