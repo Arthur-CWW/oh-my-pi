@@ -12,8 +12,9 @@ Current packages and absorbed tool repos:
 - `packages/twitter-archive` — local-first Twitter/X archive schema and future capture/search helpers.
 - `packages/jimeng-client` — Jimeng/Dreamina direct API helpers ported from Slotok reverse engineering.
 - `apps/tweet-viewer` — future local archive viewer.
-- `browser-extensions`, `kimi-code-usage`, `oh-my-pi`, and `kagi-reverse` — absorbed self-contained tool/research repos; keep their internal layouts and package managers intact.
+- `browser-extensions`, `kimi-code-usage`, and `oh-my-pi` — absorbed self-contained tool/runtime repos; keep their internal layouts and package managers intact.
 - `skills/pi-skills` — imported Pi core skills from `Arthur-CWW/skills` / upstream `badlogic/pi-skills`; no nested Git repo.
+- `docs/research/kagi` — archived Kagi reverse-engineering capture; active Kagi client code lives in `packages/web-access/src/kagi.ts`.
 - `workflows/*` — future archive/analyze/generate shortform-video workflows.
 
 The repo root is also a Pi package. `.pi/settings.json` points at `..` and `npm:pi-dynamic-workflows`. The root `package.json` `pi` manifest loads `packages/web-access/src/index.ts`, `packages/web-access/skills`, and the local dynamic-workflows prompt templates.

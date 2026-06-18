@@ -10,7 +10,7 @@ Current focus:
 - `browser-extensions` — self-contained pnpm monorepo for Chrome/Firefox/Helium extensions.
 - `kimi-code-usage` — Kimi coding-plan usage CLI/MCP package plus VS Code extension.
 - `oh-my-pi` — self-contained OMP/Bun/Rust/Python monorepo used for agent runtime work.
-- `kagi-reverse` — local Kagi reverse-engineering notes and probes.
+- `docs/research/kagi` — archived Kagi reverse-engineering capture; active Kagi client code lives in `packages/web-access/src/kagi.ts`.
 - `skills/pi-skills` — imported Pi core skills from `Arthur-CWW/skills` / upstream `badlogic/pi-skills`; no nested Git repo.
 
 ## Pi project package
@@ -40,7 +40,7 @@ apps/
 browser-extensions/ # browser extension monorepo
 kimi-code-usage/    # Kimi usage CLI/MCP and VS Code extension
 oh-my-pi/           # OMP runtime monorepo
-kagi-reverse/       # Kagi reverse-engineering notes/probes
+docs/research/kagi/ # archived Kagi reverse-engineering capture
 skills/
   pi-skills/        # imported Pi core skills
 workflows/
