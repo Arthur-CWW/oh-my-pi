@@ -94,12 +94,23 @@ export class UgcJsonStore {
   }
 
   read(): UgcLocalState {
+    const sqliteState = this.sqliteStore?.readValidState()
     const existing = readJsonFile(this.config.statePath)
-    if (isLocalState(existing)) {
-      const normalized = normalizeLocalState(existing)
-      if (JSON.stringify(normalized) !== JSON.stringify(existing)) return this.write(normalized)
-      if (this.sqliteStore?.needsInitialImport()) this.sqliteStore.writeState(normalized)
-      return normalized
+    const jsonState = isLocalState(existing) ? normalizeLocalState(existing) : null
+
+    if (sqliteState && jsonState && stateUpdatedAfter(jsonState, sqliteState)) {
+      return this.write(jsonState)
+    }
+
+    if (sqliteState) {
+      this.repairJsonArtifacts(sqliteState)
+      return sqliteState
+    }
+
+    if (jsonState) {
+      if (JSON.stringify(jsonState) !== JSON.stringify(existing)) return this.write(jsonState)
+      this.sqliteStore?.writeState(jsonState)
+      return jsonState
     }
 
     const created = createInitialLocalState(this.now())
@@ -540,6 +551,11 @@ export class UgcJsonStore {
     }
   }
 
+  private repairJsonArtifacts(state: UgcLocalState): void {
+    if (!jsonFileMatches(this.config.statePath, state)) writeJsonAtomic(this.config.statePath, state)
+    if (!workspaceShardsMatch(this.config.workspaceDir, state)) writeWorkspaceShards(this.config.workspaceDir, state)
+  }
+
   private updateWorkspace(update: (workspace: UgcStudioWorkspace) => UgcStudioWorkspace): UgcLocalState {
     const state = this.read()
     return this.write({ ...state, workspace: update(state.workspace) })
@@ -584,6 +600,12 @@ function stampState(state: UgcLocalState, now: string): UgcLocalState {
     workspace: { ...state.workspace, updatedAt: now },
     updatedAt: now,
   }
+}
+
+function stateUpdatedAfter(candidate: UgcLocalState, baseline: UgcLocalState): boolean {
+  const candidateTime = Date.parse(candidate.updatedAt)
+  const baselineTime = Date.parse(baseline.updatedAt)
+  return Number.isFinite(candidateTime) && Number.isFinite(baselineTime) && candidateTime > baselineTime
 }
 
 function normalizeLocalState(state: UgcLocalState): UgcLocalState {
@@ -635,7 +657,47 @@ function writeWorkspaceShards(workspaceDir: string, state: UgcLocalState): void 
 
 function writeCollection<T extends { readonly id: string }>(dir: string, records: readonly T[]): void {
   mkdirSync(dir, { recursive: true })
+  const expectedFiles = new Set(records.map((record) => `${record.id}.json`))
+  for (const fileName of readdirSync(dir)) {
+    if (fileName.endsWith(".json") && !expectedFiles.has(fileName)) rmSync(resolve(dir, fileName), { force: true })
+  }
   for (const record of records) writeJsonAtomic(resolve(dir, `${record.id}.json`), record)
+}
+
+function workspaceShardsMatch(workspaceDir: string, state: UgcLocalState): boolean {
+  return jsonFileMatches(resolve(workspaceDir, "workspace.json"), state.workspace)
+    && collectionMatches(resolve(workspaceDir, "personas"), state.workspace.personas)
+    && collectionMatches(resolve(workspaceDir, "campaigns"), [state.workspace.productBrief])
+    && collectionMatches(resolve(workspaceDir, "branches"), state.workspace.branchSnapshots)
+    && collectionMatches(resolve(workspaceDir, "candidates"), state.workspace.candidates)
+    && collectionMatches(resolve(workspaceDir, "notes"), state.workspace.reviewNotes)
+    && collectionMatches(resolve(workspaceDir, "provider-jobs"), state.providerJobs)
+    && collectionMatches(resolve(workspaceDir, "reference-archives"), state.referenceArchives)
+    && collectionMatches(resolve(workspaceDir, "exports"), state.exportManifests)
+    && collectionMatches(resolve(workspaceDir, "research-targets"), state.researchTargets)
+    && collectionMatches(resolve(workspaceDir, "template-mining-jobs"), state.templateMiningJobs)
+    && requiredWorkspaceDirsExist(workspaceDir)
+}
+
+function requiredWorkspaceDirsExist(workspaceDir: string): boolean {
+  return existsSync(resolve(workspaceDir, "assets/source"))
+    && existsSync(resolve(workspaceDir, "assets/generated"))
+    && existsSync(resolve(workspaceDir, "assets/exports"))
+    && existsSync(resolve(workspaceDir, "bundles"))
+}
+
+function collectionMatches<T extends { readonly id: string }>(dir: string, records: readonly T[]): boolean {
+  if (!existsSync(dir)) return false
+  const expectedFiles = new Set(records.map((record) => `${record.id}.json`))
+  for (const fileName of readdirSync(dir)) {
+    if (fileName.endsWith(".json") && !expectedFiles.has(fileName)) return false
+  }
+  return records.every((record) => jsonFileMatches(resolve(dir, `${record.id}.json`), record))
+}
+
+function jsonFileMatches(path: string, value: JsonSerializable): boolean {
+  const existing = readJsonFile(path)
+  return existing !== null && JSON.stringify(existing) === JSON.stringify(value)
 }
 
 function readJsonFile(path: string): JsonValue | null {

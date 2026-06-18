@@ -73,7 +73,9 @@ export async function routeUgc(request: Request, store: UgcJsonStore): Promise<R
   }
 
   if (request.method === "POST" && url.pathname === "/api/ugc/codex/plan") {
-    return json(prepareCodexAnalyze(decodeCodexAnalyzeInput(await readJson(request))))
+    const payload = await readJson(request)
+    if (!isRecord(payload)) throw new Error("Codex analysis plan request must be an object")
+    return json(prepareCodexAnalyze(decodeCodexAnalyzeInput(payload)))
   }
 
   if (request.method === "POST" && (url.pathname === "/api/ugc/codex/jobs" || url.pathname === "/api/ugc/codex/create")) {

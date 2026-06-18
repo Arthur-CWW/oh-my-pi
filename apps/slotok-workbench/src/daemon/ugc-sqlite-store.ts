@@ -1,8 +1,16 @@
 import type { Database as BunDatabase } from "bun:sqlite"
-import { existsSync, mkdirSync } from "node:fs"
+import { existsSync, mkdirSync, rmSync } from "node:fs"
 import { resolve } from "node:path"
 import type { JsonValue } from "../renderer/ugcStudioModel"
-import type { UgcLocalState } from "../ugc/local-state"
+import {
+  createInitialResearchTargets,
+  createInitialTemplateMiningJobs,
+  isLocalState,
+  referenceProfileToArchive,
+  type UgcLocalState,
+  type UgcResearchTarget,
+  type UgcTemplateMiningJob,
+} from "../ugc/local-state"
 
 export type UgcSqliteCollection =
   | "workspace"
@@ -58,11 +66,42 @@ export class UgcSqliteStore {
   }
 
   needsInitialImport(): boolean {
-    return !existsSync(this.config.sqlitePath)
+    return this.readValidState() === null
   }
 
   writeState(state: UgcLocalState): void {
     mkdirSync(this.config.workspaceDir, { recursive: true })
+    try {
+      this.writeStateToDatabase(state)
+    } catch (error) {
+      if (!(error instanceof Error) || !isRecoverableDatabaseFileError(error)) throw error
+      this.removeDatabaseFiles()
+      this.writeStateToDatabase(state)
+    }
+  }
+
+  readState(): UgcLocalState | null {
+    return this.readValidState()
+  }
+
+  readValidState(): UgcLocalState | null {
+    if (!existsSync(this.config.sqlitePath)) return null
+    try {
+      const db = this.openReadonly()
+      try {
+        const row = db.query<WorkspaceStateRow, []>("SELECT payload_json FROM workspace_state LIMIT 1").get()
+        if (!row) return null
+        const payload = JSON.parse(row.payload_json) as JsonValue
+        return isLocalState(payload) ? normalizeLocalState(payload) : null
+      } finally {
+        db.close()
+      }
+    } catch {
+      return null
+    }
+  }
+
+  private writeStateToDatabase(state: UgcLocalState): void {
     const db = this.openWritable()
     try {
       initializeSchema(db)
@@ -101,16 +140,12 @@ export class UgcSqliteStore {
     }
   }
 
-  readState(): UgcLocalState | null {
-    if (!existsSync(this.config.sqlitePath)) return null
-    const db = this.openReadonly()
-    try {
-      const row = db.query<WorkspaceStateRow, []>("SELECT payload_json FROM workspace_state LIMIT 1").get()
-      return row ? JSON.parse(row.payload_json) as UgcLocalState : null
-    } finally {
-      db.close()
-    }
+  private removeDatabaseFiles(): void {
+    rmSync(this.config.sqlitePath, { force: true })
+    rmSync(`${this.config.sqlitePath}-shm`, { force: true })
+    rmSync(`${this.config.sqlitePath}-wal`, { force: true })
   }
+
 
   readObjects(collection: UgcSqliteCollection): readonly JsonValue[] {
     if (!existsSync(this.config.sqlitePath)) return []
@@ -214,6 +249,41 @@ function stateObjectRecords(state: UgcLocalState): readonly CollectionRecord[] {
 function objectUpdatedAt(payload: object, fallback: string): string {
   const candidate = payload as { readonly updatedAt?: string }
   return candidate.updatedAt ?? fallback
+}
+
+function normalizeLocalState(state: UgcLocalState): UgcLocalState {
+  const legacyState = state as UgcLocalState & {
+    readonly researchTargets?: readonly UgcResearchTarget[]
+    readonly templateMiningJobs?: readonly UgcTemplateMiningJob[]
+  }
+  const referenceArchives = state.workspace.referenceProfiles.map((referenceProfile) => {
+    const defaultArchive = referenceProfileToArchive(state.workspace.id, referenceProfile, state.updatedAt)
+    const existing = state.referenceArchives.find((archive) => archive.referenceProfileId === referenceProfile.id)
+    return existing
+      ? {
+          ...defaultArchive,
+          ...existing,
+          sampleClipIds: existing.sampleClipIds ?? defaultArchive.sampleClipIds,
+          candidateFormatOutputs: existing.candidateFormatOutputs ?? defaultArchive.candidateFormatOutputs,
+          notes: existing.notes ?? defaultArchive.notes,
+        }
+      : defaultArchive
+  })
+  const orphanArchives = state.referenceArchives.filter((archive) => (
+    !state.workspace.referenceProfiles.some((referenceProfile) => referenceProfile.id === archive.referenceProfileId)
+  ))
+  return {
+    ...state,
+    referenceArchives: [...referenceArchives, ...orphanArchives],
+    researchTargets: legacyState.researchTargets ?? createInitialResearchTargets(state.workspace.id, state.updatedAt),
+    templateMiningJobs: legacyState.templateMiningJobs ?? createInitialTemplateMiningJobs(state.workspace.id, state.updatedAt),
+  }
+}
+
+function isRecoverableDatabaseFileError(error: Error): boolean {
+  return error.message.includes("not a database")
+    || error.message.includes("database disk image is malformed")
+    || error.message.includes("file is not a database")
 }
 
 function isUgcSqliteCollection(value: string): value is UgcSqliteCollection {

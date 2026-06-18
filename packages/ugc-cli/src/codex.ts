@@ -90,7 +90,7 @@ const CODEX_CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions"
 const IMAGE_UNDERSTAND_ESTIMATE_USD = 0.01
 const VIDEO_UNDERSTAND_ESTIMATE_USD = 0.03
 
-export function decodeCodexAnalyzeInput(value: unknown): CodexAnalyzeInput {
+export function decodeCodexAnalyzeInput(value: object): CodexAnalyzeInput {
   return Schema.decodeUnknownSync(CodexAnalyzeInputSchema)(value)
 }
 
