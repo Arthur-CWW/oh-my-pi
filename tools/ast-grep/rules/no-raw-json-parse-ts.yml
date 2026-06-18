@@ -1,0 +1,77 @@
+id: no-raw-json-parse-ts
+language: TypeScript
+files:
+  - "**/*.ts"
+  - "**/*.tsx"
+ignores:
+  - "**/*.d.ts"
+  - "**/*.gen.ts"
+  - "**/*.gen.tsx"
+  - "**/*.generated.ts"
+  - "**/*.generated.tsx"
+  - "**/generated/**"
+  - "**/vendor/**"
+  - "**/node_modules/**"
+  # Active provider/client boundary work is intentionally out of scope for this guardrail pass.
+  - "packages/jimeng-client/**"
+  # Named boundary/schema files may parse raw text only when they decode immediately.
+  - "**/*.boundary.ts"
+  - "**/*.boundary.tsx"
+  - "**/*.external.ts"
+  - "**/*.external.tsx"
+  - "**/*.schema.ts"
+  - "**/*.schema.tsx"
+  - "**/*schema.ts"
+  - "**/*schema.tsx"
+  - "**/*schemas.ts"
+  - "**/*schemas.tsx"
+  - "**/*api.ts"
+  - "**/*api.tsx"
+  - "**/*client.ts"
+  - "**/*client.tsx"
+  - "**/*config.ts"
+  - "**/*config.tsx"
+  - "**/*store.ts"
+  - "**/*store.tsx"
+  - "**/api/**"
+  - "**/apis/**"
+  - "**/client/**"
+  - "**/clients/**"
+  - "**/config/**"
+  - "**/external/**"
+  - "**/schema/**"
+  - "**/schemas/**"
+  - "**/store/**"
+  # Legacy non-Jimeng call sites are documented exceptions until their packages grow schemas.
+  - "packages/browser-use/index.ts"
+  - "packages/ugc-cli/src/kie.ts"
+  - "packages/web-access/src/agent-cockpit-cli.ts"
+  - "packages/web-access/src/agent-cockpit.ts"
+  - "packages/web-access/src/codex.ts"
+  - "packages/web-access/src/codex-usage/account.ts"
+  - "packages/web-access/src/codex-usage/files.ts"
+  - "packages/web-access/src/cua-driver.ts"
+  - "packages/web-access/src/frontend-session-store.ts"
+  - "packages/web-access/src/gemini.ts"
+  - "packages/web-access/src/kagi.ts"
+  - "packages/web-access/src/youtube.ts"
+  - "packages/twitter-archive/src/jsonl.ts"
+  - "apps/slotok-workbench/src/daemon/eval-store.ts"
+  - "apps/slotok-workbench/src/daemon/ugc-json-store.test.ts"
+  - "apps/slotok-workbench/src/daemon/ugc-json-store.ts"
+  - "apps/slotok-workbench/src/renderer/ReactUgcStudio.tsx"
+  - "apps/slotok-workbench/src/ugc/developer-graph.ts"
+  - "apps/slotok-workbench/src/ugc/local-state.ts"
+  - "scripts/eval-video-understanding.ts"
+message: "Avoid raw JSON.parse outside named boundary/schema modules."
+severity: error
+note: |
+  Decode external JSON at a named boundary using Effect Schema or another explicit schema,
+  then pass typed values into core code. Accepted boundary names include *.boundary.ts,
+  *.external.ts, *.schema.ts, */schemas/*, */clients/*, */api/*, config, and store modules.
+
+  Legacy file-level exceptions are listed in this rule so new raw parsing elsewhere fails.
+  For a one-line escape hatch use `// ast-grep-ignore: no-raw-json-parse-ts` with a
+  neighboring justification.
+rule:
+  pattern: JSON.parse($$$ARGS)

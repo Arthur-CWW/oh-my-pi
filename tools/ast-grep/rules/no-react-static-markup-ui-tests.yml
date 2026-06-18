@@ -1,0 +1,22 @@
+id: no-react-static-markup-ui-tests
+language: TypeScript
+files:
+  - "**/*.test.ts"
+  - "**/*.test.tsx"
+ignores:
+  - "**/vendor/**"
+  - "**/node_modules/**"
+  - "**/*.boundary.test.ts"
+  - "**/*.external.test.ts"
+message: "Avoid testing React UI by rendering raw HTML strings; test state/model behavior or use browser/visual QA."
+severity: warning
+note: |
+  Do not assert against renderToStaticMarkup output for owned React components.
+  Raw HTML string tests are appropriate for actual HTML scraping/parsing boundaries,
+  not for UI delivery. Prefer testing the pre-render model/state, semantic behavior,
+  or Playwright/visual QA for rendered UI.
+
+  If a test is truly about HTML parsing, keep it in a named boundary/external test
+  or use `// ast-grep-ignore: no-react-static-markup-ui-tests` with a justification.
+rule:
+  pattern: renderToStaticMarkup($$$ARGS)

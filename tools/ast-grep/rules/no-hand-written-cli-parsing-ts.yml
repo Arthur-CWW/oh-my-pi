@@ -1,0 +1,54 @@
+id: no-hand-written-cli-parsing-ts
+language: TypeScript
+files:
+  - "**/*.ts"
+  - "**/*.tsx"
+ignores:
+  - "**/*.d.ts"
+  - "**/*.gen.ts"
+  - "**/*.gen.tsx"
+  - "**/*.generated.ts"
+  - "**/*.generated.tsx"
+  - "**/generated/**"
+  - "**/vendor/**"
+  - "**/node_modules/**"
+  # Active provider/client boundary work is intentionally out of scope for this guardrail pass.
+  - "packages/jimeng-client/**"
+  # Boundary scripts may adapt argv before handing typed values to core code.
+  - "**/*.boundary.ts"
+  - "**/*.boundary.tsx"
+  - "**/*.external.ts"
+  - "**/*.external.tsx"
+  - "**/*.schema.ts"
+  - "**/*.schema.tsx"
+  - "**/boundary/**"
+  - "**/boundaries/**"
+  - "**/external/**"
+  - "**/schema/**"
+  - "**/schemas/**"
+  # Existing hand-written CLIs are documented exceptions until they move to Effect CLI.
+  - "packages/dst-mini/src/bench.ts"
+  - "packages/dst-mini/src/cli.ts"
+  - "packages/ugc-cli/src/cli.ts"
+  - "packages/web-access/src/agent-cockpit-cli.ts"
+  - "packages/web-access/src/chatgpt-cli.ts"
+  - "packages/web-access/src/cli.ts"
+  - "packages/web-access/src/frontend-browser-cli.ts"
+  - "packages/twitter-archive/src/import-legacy-sqlite.ts"
+  - "apps/slotok-workbench/src/daemon/server.ts"
+  - "scripts/eval-video-understanding.ts"
+message: "Avoid hand-written CLI parsing; use Effect CLI or a named boundary module."
+severity: error
+note: |
+  New command surfaces should use Effect CLI. If a thin argv adapter is unavoidable,
+  keep it in a named boundary file such as *.boundary.ts or *.external.ts and return
+  typed values before calling package implementation code.
+
+  Legacy file-level exceptions are listed in this rule so new hand-written parsers fail.
+  For a one-line escape hatch use `// ast-grep-ignore: no-hand-written-cli-parsing-ts`
+  with a neighboring justification.
+rule:
+  any:
+    - pattern: process.argv
+    - pattern: "function parseArgs($$$ARGS) { $$$BODY }"
+    - pattern: "function parseArgs($$$ARGS): $_ { $$$BODY }"

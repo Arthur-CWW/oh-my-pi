@@ -1,0 +1,7 @@
+id: no-react-static-markup-ui-tests
+valid:
+  - "expect(viewModel.labels).toEqual([\"Persona Atlas\"])"
+  - "expect(parseHtmlFragment(rawHtml).links).toHaveLength(2)"
+invalid:
+  - "const html = renderToStaticMarkup(React.createElement(ReactUgcStudio))"
+  - "expect(renderToStaticMarkup(React.createElement(App))).toContain(\"Dashboard\")"

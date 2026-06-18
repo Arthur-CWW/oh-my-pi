@@ -1,0 +1,9 @@
+id: no-raw-json-parse-ts
+valid:
+  - "const decoded = JsonPayloadSchema.decodeSync(text)"
+  - "const decoded = Schema.decodeUnknownSync(JsonPayloadSchema)(input)"
+  - "const cloned = structuredClone(value)"
+invalid:
+  - "const decoded = JSON.parse(text)"
+  - "async function readPayload(response: Response) { return JSON.parse(await response.text()) }"
+  - "const cloned = JSON.parse(JSON.stringify(value))"

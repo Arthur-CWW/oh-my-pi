@@ -1,0 +1,7 @@
+id: no-hand-written-cli-parsing-ts
+valid:
+  - "const command = Cli.Command.make(\"serve\")"
+  - "export async function main(options: ServeOptions): Promise<void> { return serve(options) }"
+invalid:
+  - "const args = process.argv.slice(2)"
+  - "function parseArgs(argv: string[]): Options { return { verbose: argv.includes(\"--verbose\") } }"
