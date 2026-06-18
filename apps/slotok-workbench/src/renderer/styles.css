@@ -80,9 +80,10 @@ body {
 .rugc-snapshot-tray,
 .rugc-provider aside,
 .rugc-provider section {
-  border: 1px solid #ddd8cf;
-  border-radius: 9px;
-  background: #fffefa;
+  border: 1px solid #e4e2dd;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.01);
 }
 
 .rugc-persona-card {
@@ -95,8 +96,8 @@ body {
 .rugc-persona-card.selected,
 .rugc-example-card.selected,
 .rugc-map-node.selected {
-  border-color: #75a7ff;
-  box-shadow: 0 0 0 2px #d8e7ff;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 1px #3b82f6;
 }
 
 .rugc-persona-portrait {
@@ -332,10 +333,10 @@ body {
 
 .rugc-review {
   display: grid;
-  grid-template-columns: 132px minmax(320px, 1fr) 248px;
+  grid-template-columns: 160px minmax(0, 1fr);
   grid-template-rows: minmax(332px, 1fr) auto;
-  gap: 10px;
-  min-width: 880px;
+  gap: 16px;
+  min-width: 100%;
 }
 
 .rugc-review-queue {
@@ -470,7 +471,7 @@ body {
   color: #202328;
 }
 
-.rugc-player-controls div {
+.rugc-player-controls .rugc-progress {
   position: relative;
   height: 4px;
   flex: 1;
@@ -478,7 +479,7 @@ body {
   background: #dfdbd3;
 }
 
-.rugc-player-controls div span {
+.rugc-player-controls .rugc-progress span {
   display: block;
   height: 100%;
   border-radius: inherit;
@@ -727,27 +728,28 @@ body {
 .rugc-editor {
   display: grid;
   grid-template-columns: 176px minmax(0, 1fr);
-  min-width: 900px;
-  min-height: 596px;
+  height: 100%;
+  min-height: 0;
   overflow: hidden;
-  border: 1px solid #303438;
+  border: 1px solid var(--line);
   border-radius: 12px;
-  background: #1b1f22;
-  color: #f2f2ee;
+  background: var(--surface);
+  color: var(--text);
 }
 
 .rugc-layer-list {
   display: grid;
   align-content: start;
   gap: 6px;
-  border-right: 1px solid #303438;
-  background: #202326;
+  border-right: 1px solid var(--line);
+  background: var(--sidebar);
   padding: 12px;
 }
 
 .rugc-layer-list h3 {
   margin: 0 0 5px;
   font-size: 13px;
+  color: var(--text);
 }
 
 .rugc-layer-row {
@@ -759,8 +761,8 @@ body {
 }
 
 .rugc-layer-row.selected {
-  background: #2a2e32;
-  box-shadow: inset 0 0 0 1px #4c83d3;
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent);
 }
 
 .rugc-layer-row.muted {
@@ -775,19 +777,19 @@ body {
   border-radius: 7px;
   background: transparent;
   padding: 7px;
-  color: #ededeb;
+  color: var(--text);
   text-align: left;
 }
 
 .rugc-layer-select:hover {
-  background: #2a2e32;
+  background: rgba(0,0,0,0.04);
 }
 
 .rugc-layer-select span {
   width: 10px;
   height: 10px;
   border-radius: 3px;
-  background: #72a7ff;
+  background: var(--accent);
 }
 
 .rugc-layer-select span.captions { background: #b06bf2; }
@@ -797,30 +799,32 @@ body {
 
 .rugc-layer-select em {
   grid-column: 2;
-  color: #9ca0a3;
+  color: var(--muted);
   font-style: normal;
   font-size: 10px;
 }
 
 .rugc-layer-toggle {
   min-height: 24px;
-  border: 1px solid #41464b;
+  border: 1px solid var(--line);
   border-radius: 6px;
-  background: #25292d;
-  color: #d4d6d6;
+  background: #ffffff;
+  color: var(--text);
   font-size: 10px;
 }
 
 .rugc-layer-toggle.active {
-  border-color: #5ca0ff;
-  background: #1d3655;
-  color: #eef6ff;
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .rugc-editor-canvas {
   display: grid;
-  grid-template-rows: 48px minmax(0, 1fr) 208px;
+  grid-template-rows: 38px minmax(0, 1fr) 128px;
   min-width: 0;
+  min-height: 0;
+  background: #ffffff;
 }
 
 .rugc-editor-toolbar {
@@ -828,15 +832,18 @@ body {
   align-items: center;
   justify-content: center;
   gap: 7px;
-  border-bottom: 1px solid #303438;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-muted);
 }
 
 .rugc-editor-toolbar button {
-  border: 1px solid #41464b;
+  border: 1px solid var(--line);
   border-radius: 7px;
-  background: #25292d;
+  background: #ffffff;
   padding: 5px 8px;
-  color: #e5e5df;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 500;
 }
 
 .rugc-phone-row {
@@ -845,34 +852,36 @@ body {
   align-content: center;
   justify-content: center;
   gap: 16px;
+  background: #fdfdfc;
 }
 
 .rugc-phone-row article {
   display: grid;
   align-content: space-between;
-  height: 236px;
-  border: 1px solid #4b4f53;
+  height: 136px;
+  border: 1px solid var(--line);
   border-radius: 8px;
-  background: linear-gradient(180deg, rgba(0,0,0,.08), rgba(0,0,0,.46)), #aa8d6f;
+  background: linear-gradient(180deg, rgba(255,255,255,0.7), rgba(255,255,255,0.9)), #f0ede6;
   padding: 10px;
 }
 
 .rugc-phone-row article.selected {
-  border-color: #5ca0ff;
-  box-shadow: 0 0 0 2px #5ca0ff;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
 }
 
 .rugc-phone-row article span {
-  color: #ffffffb8;
+  color: var(--muted);
   font-size: 10px;
 }
 
 .rugc-phone-row article strong,
 .rugc-phone-row article p {
   border-radius: 7px;
-  background: rgba(0,0,0,.70);
+  border: 1px solid var(--line);
+  background: #ffffff;
   padding: 7px;
-  color: white;
+  color: var(--text);
   text-align: center;
 }
 
@@ -885,9 +894,8 @@ body {
 .rugc-editor-timeline {
   display: grid;
   gap: 7px;
-  border-top: 1px solid #303438;
-  background: #202326;
-  padding: 10px 12px;
+  border-top: 1px solid var(--line);
+  padding: 7px 10px;
 }
 
 .rugc-editor-track {
@@ -898,15 +906,15 @@ body {
 }
 
 .rugc-editor-track > span {
-  color: #aeb0b0;
+  color: var(--muted);
   font-size: 11px;
 }
 
 .rugc-editor-track > div {
-  position: relative;
-  height: 23px;
+  height: 19px;
   border-radius: 5px;
-  background: #2a2e31;
+  background: var(--surface);
+  border: 1px solid var(--line);
 }
 
 .rugc-editor-track i {
@@ -914,7 +922,7 @@ body {
   top: 3px;
   bottom: 3px;
   border-radius: 4px;
-  background: #6da3ff;
+  background: var(--accent);
 }
 
 .rugc-timeline-clip {
@@ -922,20 +930,26 @@ body {
   top: 3px;
   bottom: 3px;
   overflow: hidden;
-  border: 1px solid rgba(255,255,255,.12);
+  border: 1px solid var(--line);
   border-radius: 4px;
-  background: #6da3ff;
-  color: #061325;
+  background: var(--accent-soft);
+  color: var(--accent);
   font-size: 10px;
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .rugc-timeline-clip.selected {
-  border-color: #eaf3ff;
-  box-shadow: 0 0 0 2px #5ca0ff;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent);
+  background: var(--accent);
+  color: #ffffff;
 }
+
 
 .rugc-provider {
   display: grid;

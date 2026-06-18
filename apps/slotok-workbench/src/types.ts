@@ -109,25 +109,31 @@ export interface EvalElementDetail extends EvalElementSummary {
   run?: EvalRunRow
   result: EvalResultRow
   frames: FrameRecord[]
-  parsed: unknown
+  parsed: JsonValue | null
   rawPreview?: string
   sectionAnnotations: Record<string, AnnotationRecord>
 }
 
-export interface AnnotationRecord {
+export type AnnotationStatus = "untriaged" | "interesting" | "good" | "bad" | "needs_rerun" | "follow_up"
+export type AnnotationRating = -2 | -1 | 0 | 1 | 2
+
+export interface AnnotationWriteInput {
   targetId: string
   targetKind: string
   title?: string
   note: string
   tags: string[]
-  status: "untriaged" | "interesting" | "good" | "bad" | "needs_rerun" | "follow_up"
-  rating: -2 | -1 | 0 | 1 | 2
+  status: AnnotationStatus
+  rating: AnnotationRating
+}
+
+export interface AnnotationRecord extends AnnotationWriteInput {
   createdAt: string
   updatedAt: string
 }
 
 export interface AnnotationStore {
-  schemaVersion: "pipeline-viewer.annotations/v1"
+  schemaVersion: "slotok-workbench.annotations/v1"
   updatedAt: string
   annotations: Record<string, AnnotationRecord>
 }
@@ -146,10 +152,24 @@ export interface BootstrapPayload {
   shortcuts: Array<{ key: string; description: string }>
 }
 
+export interface ActionJobRequest {
+  targetId: string
+  targetKind: "video_eval_result"
+  action: "rerun-video-eval"
+  scope: "selected" | "descendants"
+  provider?: string
+  maxFrames?: number
+  maxOutputTokens?: number
+}
+
 export interface ActionJob {
   id: string
   type: "rerun-video-eval"
   status: "queued" | "running" | "completed" | "failed"
+  dryRun: true
+  targetId: string
+  targetKind: "video_eval_result"
+  scope: "selected" | "descendants"
   createdAt: string
   updatedAt: string
   command: string[]

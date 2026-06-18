@@ -162,6 +162,9 @@ const views: Array<{ value: ReactView; label: string; shortLabel: string; icon: 
   { value: "provider", label: "KIE Proxy", shortLabel: "KIE", icon: Braces },
 ]
 
+export const reactUgcStudioViewMetadata: Array<Pick<(typeof views)[number], "value" | "label" | "shortLabel">> = views.map(({ value, label, shortLabel }) => ({ value, label, shortLabel }))
+
+
 const viewTabs: Array<TabItem<ReactView>> = views.map((view) => ({ value: view.value, label: view.shortLabel }))
 
 const fallbackCapabilities: KieCapability[] = [
@@ -712,7 +715,7 @@ export function ReactUgcStudio() {
       <WorkbenchMain>
         <Topbar activeViewMeta={activeViewMeta} />
         <WorkbenchContent className="grid-cols-[minmax(0,1fr)_314px]">
-          <WorkbenchCanvas className="grid grid-rows-[58px_minmax(0,1fr)] pb-[82px]">
+          <WorkbenchCanvas className="grid grid-rows-[58px_minmax(0,1fr)_auto]">
             <ViewToolbar activeView={activeView} onViewChange={setActiveView} />
             <div className="rugc-stage">
               <WorkspaceView
@@ -1124,96 +1127,92 @@ function BatchReview(props: { selectedCandidateId: string; onSelectCandidate: (i
   }
 
   return (
-    <div className="rugc-review">
-      <aside className="rugc-review-queue">
-        <h3>Candidate {Math.max(1, filteredCandidates.findIndex((candidate) => candidate.id === selectedCandidateId) + 1)} of {filteredCandidates.length}</h3>
-        <div className="rugc-review-filters">
+    <div className="rugc-review grid grid-cols-[160px_1fr] gap-4">
+      <aside className="rugc-review-queue flex flex-col gap-3 pr-2 border-r border-border/40 bg-transparent shadow-none border-t-0 border-b-0 border-l-0 rounded-none p-0">
+        <div className="flex flex-col gap-0.5">
+          <span className="text-[10px] font-semibold tracking-wider text-muted-foreground uppercase mb-1">Queue</span>
           {filterItems.map((item) => (
-            <button key={item.id} type="button" className={filter === item.id ? "active" : ""} onClick={() => setFilter(item.id)}>
-              <span />
-              {item.label}
-              <em>{item.count}</em>
+            <button
+              key={item.id}
+              type="button"
+              className={cn(
+                "flex items-center justify-between gap-2 px-2 py-1.5 text-[11px] rounded transition-colors text-left font-medium",
+                filter === item.id
+                  ? "bg-primary/10 text-primary font-semibold"
+                  : "text-muted-foreground hover:bg-muted/45 hover:text-foreground"
+              )}
+              onClick={() => setFilter(item.id)}
+            >
+              <span className="truncate">{item.label}</span>
+              <span className="shrink-0 text-[10px] text-muted-foreground">{item.count}</span>
             </button>
           ))}
         </div>
-        <label className="grid gap-1 text-[11px] text-muted-foreground">
+        <div className="h-px bg-border/40 my-1" />
+        <label className="flex flex-col gap-1 text-[10px] font-medium text-muted-foreground">
           Sort
-          <select value={sortBy} onChange={(event) => setSortBy(event.target.value as typeof sortBy)} className="h-8 rounded-md border border-input bg-background px-2 text-xs text-foreground">
+          <select
+            value={sortBy}
+            onChange={(event) => setSortBy(event.target.value as typeof sortBy)}
+            className="h-7 w-full rounded border border-input bg-transparent px-1.5 text-[11px] text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+          >
             <option value="score">Score</option>
             <option value="status">Status</option>
             <option value="persona">Persona</option>
           </select>
         </label>
-        <div className="rugc-shortcuts">
-          <strong>Keyboard shortcuts</strong>
-          <span>Space Play / Pause</span>
-          <span>1 Reject</span>
-          <span>2 Revise</span>
-          <span>3 Star</span>
-          <span>5 Fork</span>
-        </div>
       </aside>
-      <section className="rugc-player-wrap">
-        <div className="rugc-variant-strip">
+      <section className="rugc-player-wrap md:grid md:grid-cols-[64px_1fr] md:gap-4 lg:grid-cols-[74px_1fr]">
+        <div className="rugc-variant-strip flex md:flex-col md:items-center gap-2 overflow-x-auto md:overflow-x-visible">
           {filteredCandidates.map((candidate, index) => (
             <button
               key={candidate.id}
               type="button"
-              className={cn(candidate.id === props.selectedCandidateId && "active")}
+              className={cn("w-12 h-12 flex flex-col items-center justify-center border rounded-md transition-all", candidate.id === props.selectedCandidateId ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border bg-card hover:bg-muted/50")}
               onClick={() => props.onSelectCandidate(candidate.id)}
             >
               <MiniThumb status={candidate.status === "needs-revision" ? "risk" : "keep"} label={`${index + 1}`} />
-              <span>0:{String(candidate.durationSeconds).padStart(2, "0")}</span>
+              <span className="text-[9px] mt-1 font-mono text-muted-foreground">0:{String(candidate.durationSeconds).padStart(2, "0")}</span>
             </button>
           ))}
         </div>
-        <div className="rugc-player">
-          <span className="rugc-player-badge">9:16</span>
-          <div className="rugc-player-caption">
-            {selectedCandidate?.preview.transcript[0]?.text ?? "No transcript yet"}
+        <div className="rugc-player-container flex flex-col items-center bg-[#fcfbfa] border border-border/60 rounded-xl p-5 shadow-[0_1px_3px_rgba(0,0,0,0.02)] min-h-[460px] justify-between">
+          <div className="w-full flex justify-between items-center border-b border-border/40 pb-2 mb-3">
+            <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Vertical Video Review (9:16)</span>
+            <span className="px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[9px] font-mono font-medium">{selectedCandidate?.kind || "9:16 ARTIFACT"}</span>
+          </div>
+          <div className="phone-artboard flex flex-col justify-end p-4 bg-zinc-950 border border-zinc-900 rounded-[28px] shadow-2xl relative overflow-hidden w-[200px] h-[356px] transition-transform hover:scale-[1.01]">
+            <span className="rugc-player-badge absolute top-3 left-3 bg-black/70 backdrop-blur-md text-zinc-300 border border-white/10 px-2 py-0.5 rounded-full text-[9px] font-mono tracking-wider">PLAYING</span>
+            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/15 to-black/25 pointer-events-none" />
+            <div className="rugc-player-caption z-10 bg-black/85 backdrop-blur-sm p-3 rounded-xl border border-white/10 text-white text-[11px] leading-relaxed font-sans text-center shadow-lg">
+              {selectedCandidate?.preview.transcript[0]?.text ?? "No transcript yet"}
+            </div>
+          </div>
+          <div className="w-full max-w-[420px] bg-white border border-border/60 p-3.5 rounded-xl text-xs shadow-[0_1px_2px_rgba(0,0,0,0.01)] mt-4">
+            <span className="text-[9px] font-bold text-primary uppercase tracking-wider block mb-1">Selected Candidate Transcript</span>
+            <p className="text-foreground leading-relaxed font-normal text-[11.5px]">{selectedCandidate?.preview.transcript[0]?.text ?? "No transcript yet"}</p>
           </div>
         </div>
-        <div className="rugc-player-controls">
-          <Rewind size={14} />
-          <Pause size={14} />
-          <FastForward size={14} />
-          <div><span style={{ width: "36%" }} /></div>
-          <em>0:07 / 0:32</em>
-          <button type="button">1x</button>
-          <button type="button"><Eye size={13} /></button>
+        <div className="rugc-player-controls flex items-center justify-between gap-3 px-4 py-2 bg-card border border-border rounded-xl text-muted-foreground shadow-sm mt-2 w-full grid-column-2">
+          <div className="flex items-center gap-3">
+            <Button type="button" size="xs" variant="ghost" className="h-7 w-7 p-0 rounded-full" aria-label="Rewind"><Rewind size={13} /></Button>
+            <Button type="button" size="xs" variant="subtle" className="h-8 w-8 p-0 rounded-full bg-primary/10 text-primary hover:bg-primary/20" aria-label="Pause"><Pause size={13} /></Button>
+            <Button type="button" size="xs" variant="ghost" className="h-7 w-7 p-0 rounded-full" aria-label="Fast Forward"><FastForward size={13} /></Button>
+          </div>
+          <div className="flex-1 mx-3 flex items-center gap-3">
+            <span className="text-[10px] font-mono text-muted-foreground">0:07</span>
+            <div className="rugc-progress flex-1 h-1 bg-muted rounded-full overflow-hidden relative cursor-pointer">
+              <span className="absolute top-0 left-0 bottom-0 bg-primary rounded-full" style={{ width: "36%" }} />
+            </div>
+            <em className="text-[10px] font-mono font-normal text-muted-foreground">0:{String(selectedCandidate?.durationSeconds ?? 32).padStart(2, "0")}</em>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button type="button" size="xs" variant="outline" className="h-7 text-[10px] px-2 font-mono">1x speed</Button>
+            <Button type="button" size="xs" variant="ghost" className="h-7 w-7 p-0 rounded-full" aria-label="Inspect"><Eye size={13} /></Button>
+          </div>
         </div>
       </section>
-      <aside className="rugc-review-score">
-        <Tabs value="overview" items={[{ value: "overview", label: "Overview" }, { value: "transcript", label: "Transcript" }, { value: "json", label: "JSON" }]} onValueChange={() => undefined} />
-        <ScoreBar label="Hook Strength" value={selectedCandidate?.scorecard.hookStrength ?? 0} />
-        <ScoreBar label="Persona Fit" value={selectedCandidate?.scorecard.personaFit ?? 0} />
-        <ScoreBar label="CTA Pressure" value={selectedCandidate?.scorecard.conversionPotential ?? 0} warning />
-        <ScoreBar label="Authenticity" value={selectedCandidate?.scorecard.formatFit ?? 0} />
-        <ScoreBar label="Predicted Retention" value={selectedCandidate?.scorecard.overall ?? 0} />
-        <blockquote>She feels slightly scripted in the middle. CTA could be softer.</blockquote>
-        <Textarea value={noteDraft} onChange={(event) => setNoteDraft(event.target.value)} className="min-h-16" />
-        <div className="flex flex-wrap gap-2">
-          <Button size="xs" variant="workbench" onClick={() => applyStatusToSet("starred")}>Star {selectedSet.length}</Button>
-          <Button size="xs" variant="workbench" onClick={() => applyStatusToSet("needs-revision")}>Revise {selectedSet.length}</Button>
-          <Button size="xs" variant="outline" onClick={() => applyStatusToSet("rejected")}>Reject {selectedSet.length}</Button>
-          <Button
-            size="xs"
-            variant="subtle"
-            onClick={() => addReviewNote("revise", "Regenerate with lower-pressure delivery.")}
-          >
-            Add note
-          </Button>
-        </div>
-        <div className="grid gap-2">
-          <strong className="text-[11px] text-foreground">Notes</strong>
-          {selectedCandidateNotes.length ? selectedCandidateNotes.map((note) => (
-            <div key={note.id} className="rounded-md border border-border bg-background p-2 text-[11px] leading-4 text-muted-foreground">
-              <span className="font-semibold text-foreground">{note.verdict}</span> / {note.body}
-            </div>
-          )) : <p className="m-0 text-[11px] text-muted-foreground">No notes yet.</p>}
-        </div>
-      </aside>
-      <div className="col-span-full flex items-center justify-between gap-3 rounded-md border border-border bg-card px-3 py-2 shadow-sm">
+      <div className="col-span-full flex items-center justify-between gap-3 rounded-lg border border-border bg-card px-3 py-1.5 shadow-sm mt-2">
         <div className="min-w-0 text-[11px] text-muted-foreground">
           <strong className="text-foreground">{selectedSet.length}</strong> selected
           <span className="ml-2">Filter: {filterItems.find((item) => item.id === filter)?.label}</span>
@@ -1225,45 +1224,64 @@ function BatchReview(props: { selectedCandidateId: string; onSelectCandidate: (i
           <Button size="xs" variant="subtle" onClick={() => addReviewNote("revise", "Regenerate selected direction with a softer CTA.")}>Add note</Button>
         </div>
       </div>
-      <table className="rugc-review-table">
+      <table className="rugc-review-table mt-3 border border-border/30 rounded-xl overflow-hidden bg-white text-[11px] w-full border-collapse shadow-[0_1px_2px_rgba(0,0,0,0.01)]">
         <thead>
-          <tr>
-            <th>Select</th>
-            <th>Thumbnail</th>
-            <th>Persona</th>
-            <th>Format</th>
-            <th>Hook</th>
-            <th>CTA</th>
-            <th>Scores</th>
-            <th>Status</th>
+          <tr className="bg-muted/30 border-b border-border/50 text-muted-foreground">
+            <th className="px-3 py-2 text-left font-semibold">Select</th>
+            <th className="px-3 py-2 text-left font-semibold">Thumbnail</th>
+            <th className="px-3 py-2 text-left font-semibold">Persona</th>
+            <th className="px-3 py-2 text-left font-semibold">Format</th>
+            <th className="px-3 py-2 text-left font-semibold">Hook</th>
+            <th className="px-3 py-2 text-left font-semibold">CTA</th>
+            <th className="px-3 py-2 text-left font-semibold">Scores</th>
+            <th className="px-3 py-2 text-left font-semibold">Status</th>
           </tr>
         </thead>
         <tbody>
           {filteredCandidates.map((candidate, index) => (
-            <tr key={candidate.id} className={candidate.id === props.selectedCandidateId ? "active" : ""}>
-              <td>
+            <tr
+              key={candidate.id}
+              className={cn(
+                "border-b border-border/30 hover:bg-muted/10 cursor-pointer transition-colors",
+                candidate.id === props.selectedCandidateId && "bg-primary/5 text-foreground font-semibold active"
+              )}
+              onClick={() => props.onSelectCandidate(candidate.id)}
+            >
+              <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
                 <input
                   type="checkbox"
                   checked={selectedSetIds.includes(candidate.id)}
                   onChange={() => toggleSelectedSet(candidate.id)}
+                  className="rounded border-gray-300 text-primary focus:ring-primary h-3 w-3"
                   aria-label={`Select ${candidate.title}`}
                 />
-                <span className="ml-2">{index + 1}</span>
+                <span className="ml-2 text-muted-foreground font-mono">#{index + 1}</span>
               </td>
-              <td><MiniThumb status={candidate.status === "needs-revision" ? "risk" : "keep"} label="" /></td>
-              <td>{candidate.personaId?.includes("deadpan") ? "Runner" : "Lily"}</td>
-              <td>{candidate.kind}</td>
-              <td>{candidate.title}</td>
-              <td>{candidate.kind === "cta" ? "Direct" : "Soft"}</td>
-              <td>{candidate.scorecard.overall} / {candidate.scorecard.personaFit}</td>
-              <td><StatusPill status={candidate.status === "starred" ? "Approved" : candidate.status === "needs-revision" ? "In Review" : candidate.status === "rejected" ? "Rejected" : "Draft"} /></td>
+              <td className="px-3 py-2"><MiniThumb status={candidate.status === "needs-revision" ? "risk" : "keep"} label="" /></td>
+              <td className="px-3 py-2 font-medium">{candidate.personaId?.includes("deadpan") ? "Runner" : "Lily"}</td>
+              <td className="px-3 py-2 text-muted-foreground">{candidate.kind}</td>
+              <td className="px-3 py-2 font-medium truncate max-w-[150px]">{candidate.title}</td>
+              <td className="px-3 py-2 text-muted-foreground">{candidate.kind === "cta" ? "Direct" : "Soft"}</td>
+              <td className="px-3 py-2 font-mono font-medium text-foreground">{candidate.scorecard.overall} / {candidate.scorecard.personaFit}</td>
+              <td className="px-3 py-2">
+                <span className={cn(
+                  "inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border",
+                  candidate.status === "starred" ? "bg-amber-50 text-amber-700 border-amber-200" :
+                  candidate.status === "needs-revision" ? "bg-rose-50 text-rose-700 border-rose-200" :
+                  candidate.status === "rejected" ? "bg-zinc-50 text-zinc-700 border-zinc-200" :
+                  "bg-blue-50 text-blue-700 border-blue-200"
+                )}>
+                  {candidate.status === "starred" ? "Approved" : candidate.status === "needs-revision" ? "In Review" : candidate.status === "rejected" ? "Rejected" : "Draft"}
+                </span>
+              </td>
             </tr>
           ))}
         </tbody>
       </table>
     </div>
   )
-}
+  }
+
 
 function CampaignMap(props: { selectedBranchId: string; onSelectBranch: (id: string) => void; onSelectCandidate: (id: string) => void }) {
   const { workspace } = useUgcLocalState()
@@ -1419,12 +1437,12 @@ function FinalEditor(props: { selectedCandidateId: string; onSelectCandidate: (i
             </button>
           </div>
         ))}
-        <div className="mt-2 grid gap-2 border-t border-[#303438] pt-3">
-          <label className="grid gap-1 text-[10px] font-semibold uppercase text-[#9ca0a3]">
+        <div className="mt-2 grid gap-2 border-t border-border/40 pt-3">
+          <label className="grid gap-1 text-[10px] font-semibold uppercase text-muted-foreground">
             Candidate
             <select
               value={selectedCandidate?.id ?? ""}
-              className="h-8 rounded-md border border-[#41464b] bg-[#25292d] px-2 text-xs normal-case text-[#ededeb]"
+              className="h-8 rounded-md border border-border bg-background px-2 text-xs normal-case text-foreground focus:outline-none focus:ring-1 focus:ring-primary shadow-sm"
               onChange={(event) => selectCandidate(event.currentTarget.value)}
             >
               {workspace.candidates.map((candidate) => (
@@ -1460,7 +1478,7 @@ function FinalEditor(props: { selectedCandidateId: string; onSelectCandidate: (i
             </article>
           ))}
         </div>
-        <div className="grid grid-cols-[minmax(0,1fr)_300px] overflow-hidden border-t border-[#303438]">
+        <div className="grid grid-cols-[minmax(0,1fr)_260px] overflow-hidden border-t border-border/40">
           <div className="rugc-editor-timeline">
             {workspace.finalEditor.tracks.map((track) => (
               <div key={track.id} className={cn("rugc-editor-track", !track.visible && "opacity-45")}>
@@ -1487,26 +1505,26 @@ function FinalEditor(props: { selectedCandidateId: string; onSelectCandidate: (i
               </div>
             ))}
           </div>
-          <aside className="grid gap-2 overflow-auto border-l border-[#303438] bg-[#202326] p-3">
+          <aside className="grid gap-2 overflow-auto border-l border-border/40 bg-card p-3">
             <div>
               <strong className="text-xs">Clip edit</strong>
-              <p className="m-0 mt-1 text-[11px] leading-4 text-[#aeb0b0]">Timing and caption payload persist into the export manifest.</p>
+              <p className="m-0 mt-1 text-[11px] leading-4 text-muted-foreground">Timing and caption payload persist into the export manifest.</p>
             </div>
-            <label className="grid gap-1 text-[10px] font-semibold uppercase text-[#9ca0a3]">
+            <label className="grid gap-1 text-[10px] font-semibold uppercase text-muted-foreground">
               Clip label
               <Input value={clipLabelDraft} onChange={(event) => setClipLabelDraft(event.currentTarget.value)} />
             </label>
             <div className="grid grid-cols-2 gap-2">
-              <label className="grid gap-1 text-[10px] font-semibold uppercase text-[#9ca0a3]">
+              <label className="grid gap-1 text-[10px] font-semibold uppercase text-muted-foreground">
                 Start
                 <Input type="number" step="0.05" min="0" value={startDraft} onChange={(event) => setStartDraft(event.currentTarget.value)} />
               </label>
-              <label className="grid gap-1 text-[10px] font-semibold uppercase text-[#9ca0a3]">
+              <label className="grid gap-1 text-[10px] font-semibold uppercase text-muted-foreground">
                 Duration
                 <Input type="number" step="0.05" min="0.1" value={durationDraft} onChange={(event) => setDurationDraft(event.currentTarget.value)} />
               </label>
             </div>
-            <label className="grid gap-1 text-[10px] font-semibold uppercase text-[#9ca0a3]">
+            <label className="grid gap-1 text-[10px] font-semibold uppercase text-muted-foreground">
               Caption/Text payload
               <Textarea className="min-h-[74px]" value={clipTextDraft} onChange={(event) => setClipTextDraft(event.currentTarget.value)} />
             </label>
@@ -1514,7 +1532,7 @@ function FinalEditor(props: { selectedCandidateId: string; onSelectCandidate: (i
               Save clip edit
             </Button>
             <div className="min-h-0">
-              <div className="mb-1 text-[10px] font-semibold uppercase text-[#9ca0a3]">JSON diff preview</div>
+              <div className="mb-1 text-[10px] font-semibold uppercase text-muted-foreground">JSON diff preview</div>
               <pre className="rugc-json max-h-[138px]">{JSON.stringify(timelinePatchPreview, null, 2)}</pre>
             </div>
           </aside>
@@ -2195,6 +2213,7 @@ function Inspector(props: {
     energy: String(selectedFullPersona?.voice.energy ?? 60),
   })
   const [branchDecisionDraft, setBranchDecisionDraft] = React.useState(props.selectedBranch?.decisionNote ?? "")
+  const [reviewNoteDraft, setReviewNoteDraft] = React.useState("Needs a more casual middle beat and softer CTA.")
 
   React.useEffect(() => {
     setPersonaDraft({
@@ -2373,65 +2392,150 @@ function Inspector(props: {
       </InspectorFrame>
     )
   }
+  if (props.activeView === "review") {
+    const candidateNotes = props.selectedCandidate
+      ? workspace.reviewNotes.filter(
+          (note) =>
+            props.selectedCandidate!.reviewNoteIds.includes(note.id) ||
+            (note.attachedTo.kind === "candidate" && note.attachedTo.id === props.selectedCandidate!.id)
+        )
+      : []
+
+    const addReviewNoteLocal = (verdict: "keep" | "fork" | "revise" | "reject") => {
+      if (!props.selectedCandidate) return
+      props.onMutateLocal("/api/ugc/notes", {
+        attachedTo: { kind: "candidate", id: props.selectedCandidate.id },
+        verdict,
+        body: reviewNoteDraft,
+        requestedChange: "Regenerate selected direction with a softer CTA.",
+      })
+    }
+
+    const applyStatusLocal = (status: "queued" | "generating" | "ready" | "starred" | "rejected" | "needs-revision" | "exported") => {
+      if (!props.selectedCandidate) return
+      props.onMutateLocal("/api/ugc/candidates/status", { candidateIds: [props.selectedCandidate.id], status })
+    }
+
+    return (
+      <InspectorFrame>
+        <InspectorHeader title={props.selectedCandidate ? props.selectedCandidate.title : "Candidate details"} />
+        <InspectorCard title="Scorecard">
+          <div className="grid gap-1 py-1">
+            <ScoreBar label="Hook Strength" value={props.selectedCandidate?.scorecard.hookStrength ?? 0} />
+            <ScoreBar label="Persona Fit" value={props.selectedCandidate?.scorecard.personaFit ?? 0} />
+            <ScoreBar label="CTA Pressure" value={props.selectedCandidate?.scorecard.conversionPotential ?? 0} warning />
+            <ScoreBar label="Authenticity" value={props.selectedCandidate?.scorecard.formatFit ?? 0} />
+            <ScoreBar label="Predicted Retention" value={props.selectedCandidate?.scorecard.overall ?? 0} />
+          </div>
+          {props.selectedCandidate?.scorecard.overall && props.selectedCandidate.scorecard.overall < 75 && (
+            <blockquote className="m-0 mt-2 border-l-2 border-amber-300 pl-2 text-[11px] italic text-muted-foreground leading-normal">
+              She feels slightly scripted in the middle. CTA could be softer.
+            </blockquote>
+          )}
+        </InspectorCard>
+
+        <InspectorCard title="Review decision">
+          <Textarea
+            value={reviewNoteDraft}
+            onChange={(event) => setReviewNoteDraft(event.target.value)}
+            className="min-h-16 text-[11px] p-2 leading-relaxed bg-white border border-border rounded"
+            placeholder="Review notes draft..."
+          />
+          <div className="grid grid-cols-2 gap-1.5 mt-2">
+            <Button size="xs" variant="workbench" className="w-full text-[10.5px] py-1" onClick={() => applyStatusLocal("starred")}>Star</Button>
+            <Button size="xs" variant="workbench" className="w-full text-[10.5px] py-1" onClick={() => applyStatusLocal("needs-revision")}>Revise</Button>
+            <Button size="xs" variant="outline" className="w-full text-[10.5px] py-1" onClick={() => applyStatusLocal("rejected")}>Reject</Button>
+            <Button size="xs" variant="subtle" className="w-full text-[10.5px] py-1" onClick={() => addReviewNoteLocal("revise")}>Add note</Button>
+          </div>
+        </InspectorCard>
+
+        <InspectorCard title="Recent Notes">
+          <div className="grid gap-1.5">
+            {candidateNotes.length ? candidateNotes.map((note) => (
+              <div key={note.id} className="rounded border border-border/60 bg-white p-2 text-[10.5px] leading-relaxed text-muted-foreground shadow-[0_1px_1px_rgba(0,0,0,0.01)]">
+                <span className="font-semibold text-foreground uppercase text-[9px] tracking-wider">{note.verdict}</span> — {note.body}
+              </div>
+            )) : <p className="m-0 text-[10.5px] text-muted-foreground font-medium italic">No notes recorded yet.</p>}
+          </div>
+        </InspectorCard>
+
+        <InspectorCard title="Continuity JSON">
+          <pre className="rugc-json text-[10px] leading-relaxed max-h-[120px] overflow-auto border-none p-0 bg-transparent">{JSON.stringify({
+            persona: props.selectedPersona?.id,
+            stable: ["voice", "niche", "posting cadence"],
+            selectedCandidate: props.selectedCandidate?.id,
+          }, null, 2)}</pre>
+        </InspectorCard>
+      </InspectorFrame>
+    )
+  }
 
   return (
     <InspectorFrame>
-      <InspectorHeader title={props.activeView === "review" ? "Candidate" : "Inspector"} />
+      <InspectorHeader title="Inspector" />
       <InspectorCard title="Product brief">
-        <p>{workspace.productBrief.productName} / {workspace.productBrief.offer}</p>
-        <ScoreBar label="CTA posts" value={workspace.productBrief.campaignMix.ctaPostsPercent} />
-        <ScoreBar label="Profile posts" value={workspace.productBrief.campaignMix.personaBuildingPostsPercent} />
+        <p className="font-medium text-foreground text-[11px] mb-2">{workspace.productBrief.productName} / {workspace.productBrief.offer}</p>
+        <div className="grid gap-1.5">
+          <ScoreBar label="CTA posts" value={workspace.productBrief.campaignMix.ctaPostsPercent} />
+          <ScoreBar label="Profile posts" value={workspace.productBrief.campaignMix.personaBuildingPostsPercent} />
+        </div>
       </InspectorCard>
       <InspectorCard title="Selected persona">
         <MetricRow label="Name" value={props.selectedPersona?.name ?? "None"} />
         <MetricRow label="Lane" value={props.selectedPersona?.archetype ?? "None"} />
-        <label className="grid gap-1 py-1">
-          <span>Niche</span>
-          <Input value={personaDraft.niche} onChange={(event) => setPersonaDraft((draft) => ({ ...draft, niche: event.target.value }))} />
-        </label>
-        <label className="grid gap-1 py-1">
-          <span>Voice style</span>
-          <Input value={personaDraft.speakingStyle} onChange={(event) => setPersonaDraft((draft) => ({ ...draft, speakingStyle: event.target.value }))} />
-        </label>
-        <label className="grid gap-1 py-1">
-          <span>Accent</span>
-          <Input value={personaDraft.accent} onChange={(event) => setPersonaDraft((draft) => ({ ...draft, accent: event.target.value }))} />
-        </label>
-        <label className="grid gap-1 py-1">
-          <span>Energy</span>
-          <Input
-            type="number"
-            min={0}
-            max={100}
-            value={personaDraft.energy}
-            onChange={(event) => setPersonaDraft((draft) => ({ ...draft, energy: event.target.value }))}
-          />
-        </label>
-        <Button
-          size="xs"
-          variant="workbench"
-          disabled={props.busy || !props.selectedPersona}
-          onClick={() => {
-            if (!props.selectedPersona) return
-            props.onMutateLocal(`/api/ugc/personas/${props.selectedPersona.id}`, {
-              status: "selected",
-              profileBible: { niche: personaDraft.niche },
-              voice: {
-                accent: personaDraft.accent,
-                speakingStyle: personaDraft.speakingStyle,
-                energy: Number(personaDraft.energy),
-              },
-            })
-          }}
-        >
-          Save profile bible
-        </Button>
+        <div className="grid gap-2 mt-2 pt-2 border-t border-border/40">
+          <label className="grid gap-1 text-[10px] font-medium text-muted-foreground uppercase">
+            Niche
+            <Input value={personaDraft.niche} onChange={(event) => setPersonaDraft((draft) => ({ ...draft, niche: event.target.value }))} className="h-7 text-xs px-2" />
+          </label>
+          <label className="grid gap-1 text-[10px] font-medium text-muted-foreground uppercase">
+            Voice style
+            <Input value={personaDraft.speakingStyle} onChange={(event) => setPersonaDraft((draft) => ({ ...draft, speakingStyle: event.target.value }))} className="h-7 text-xs px-2" />
+          </label>
+          <label className="grid gap-1 text-[10px] font-medium text-muted-foreground uppercase">
+            Accent
+            <Input value={personaDraft.accent} onChange={(event) => setPersonaDraft((draft) => ({ ...draft, accent: event.target.value }))} className="h-7 text-xs px-2" />
+          </label>
+          <label className="grid gap-1 text-[10px] font-medium text-muted-foreground uppercase">
+            Energy
+            <Input
+              type="number"
+              min={0}
+              max={100}
+              value={personaDraft.energy}
+              onChange={(event) => setPersonaDraft((draft) => ({ ...draft, energy: event.target.value }))}
+              className="h-7 text-xs px-2"
+            />
+          </label>
+          <Button
+            size="xs"
+            variant="workbench"
+            disabled={props.busy || !props.selectedPersona}
+            onClick={() => {
+              if (!props.selectedPersona) return
+              props.onMutateLocal(`/api/ugc/personas/${props.selectedPersona.id}`, {
+                status: "selected",
+                profileBible: { niche: personaDraft.niche },
+                voice: {
+                  accent: personaDraft.accent,
+                  speakingStyle: personaDraft.speakingStyle,
+                  energy: Number(personaDraft.energy),
+                },
+              })
+            }}
+            className="w-full mt-1 text-[11px] py-1"
+          >
+            Save profile bible
+          </Button>
+        </div>
       </InspectorCard>
       <InspectorCard title="Selected candidate">
-        <p>{props.selectedCandidate?.preview.transcript[0]?.text ?? "No candidate selected."}</p>
-        <ScoreBar label="Overall" value={props.selectedCandidate?.scorecard.overall ?? 0} />
-        <ScoreBar label="Persona fit" value={props.selectedCandidate?.scorecard.personaFit ?? 0} />
-        <ScoreBar label="Conversion" value={props.selectedCandidate?.scorecard.conversionPotential ?? 0} warning />
+        <p className="text-muted-foreground text-[11px] leading-relaxed mb-3 italic">"{props.selectedCandidate?.preview.transcript[0]?.text ?? "No candidate selected."}"</p>
+        <div className="grid gap-1.5 mb-3">
+          <ScoreBar label="Overall" value={props.selectedCandidate?.scorecard.overall ?? 0} />
+          <ScoreBar label="Persona fit" value={props.selectedCandidate?.scorecard.personaFit ?? 0} />
+          <ScoreBar label="Conversion" value={props.selectedCandidate?.scorecard.conversionPotential ?? 0} warning />
+        </div>
         <Button
           size="xs"
           variant="workbench"
@@ -2440,12 +2544,13 @@ function Inspector(props: {
             if (!props.selectedCandidate) return
             props.onMutateLocal(`/api/ugc/candidates/${props.selectedCandidate.id}/status`, { status: "starred" })
           }}
+          className="w-full text-[11px] py-1"
         >
           Star candidate
         </Button>
       </InspectorCard>
       <InspectorCard title="Continuity JSON">
-        <pre className="rugc-json">{JSON.stringify({
+        <pre className="rugc-json text-[10px] leading-relaxed border-none p-0 bg-transparent">{JSON.stringify({
           persona: props.selectedPersona?.id,
           stable: ["voice", "niche", "posting cadence"],
           selectedCandidate: props.selectedCandidate?.id,
@@ -2493,7 +2598,7 @@ function CommandBar(props: { prompt: string; busy: boolean; onPromptChange: (val
     <CommandSurface
       value={props.prompt}
       onValueChange={props.onPromptChange}
-      className="absolute bottom-4 left-5 right-5 z-10"
+      className="mx-5 mb-4"
       leading={<Sparkles size={16} />}
       actions={(
         <>

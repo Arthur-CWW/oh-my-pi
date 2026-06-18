@@ -139,11 +139,11 @@ If tools cannot retrieve enough metadata/media:
 On the remote desktop/host:
 
 ```bash
-cd /Users/arthur/projects/pi-web-access
+cd /Users/arthur/agents/web-access
 export CLAUDE_TMUX_SOCKET_DIR="${TMPDIR:-/tmp}/claude-tmux-sockets"
 mkdir -p "$CLAUDE_TMUX_SOCKET_DIR"
 export SOCKET="$CLAUDE_TMUX_SOCKET_DIR/claude.sock"
-tmux -S "$SOCKET" new -d -s pleometric-archive -n archive 'cd /Users/arthur/projects/pi-web-access && exec bash'
+tmux -S "$SOCKET" new -d -s pleometric-archive -n archive 'cd /Users/arthur/agents/web-access && exec bash'
 ```
 
 Monitor:
@@ -191,7 +191,7 @@ With enough metadata to answer:
 ## Handoff prompt for a worker agent
 
 ```txt
-You are the Pleometric archive lane in /Users/arthur/projects/pi-web-access.
+You are the Pleometric archive lane in /Users/arthur/agents/web-access.
 Read docs/plans/README.md, docs/plans/pleometric-archive.md, and docs/twitter-archive-plan.md.
 Only edit packages/twitter-archive/**, apps/tweet-viewer/**, docs/twitter-archive-plan.md, and docs/plans/pleometric-archive.md unless explicitly handed off.
 Write raw/downloaded artifacts only under ignored data/twitter-archive/** and status notes under data/coordination/pleometric-archive.status.md.

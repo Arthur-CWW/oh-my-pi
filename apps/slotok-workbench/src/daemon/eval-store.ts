@@ -1,7 +1,10 @@
 import { Database } from "bun:sqlite"
-import { existsSync, readFileSync } from "node:fs"
+import { createHash } from "node:crypto"
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs"
 import { basename, dirname, resolve } from "node:path"
-import type { BootstrapPayload, EvalElementDetail, EvalElementSummary, EvalResultRow, EvalRunRow, FrameRecord } from "../types"
+import type { ActionJob, ActionJobRequest, AnnotationRecord, AnnotationStore, AnnotationWriteInput, BootstrapPayload, EvalElementDetail, EvalElementSummary, EvalResultRow, EvalRunRow, FrameRecord, JsonValue } from "../types"
+
+type JsonRecord = { [key: string]: JsonValue }
 
 export interface EvalStoreOptions {
   cwd?: string
@@ -56,7 +59,7 @@ export class EvalStore {
       },
       runs: this.listRuns(100),
       elements: this.listElements(limit),
-      annotations: {},
+      annotations: this.readAnnotations(),
       shortcuts: [
         { key: "j/k", description: "Move selection down/up" },
         { key: "gg/G", description: "Jump to first/last" },
@@ -66,6 +69,33 @@ export class EvalStore {
         { key: "r/R", description: "Rerun stage / descendants" },
       ],
     }
+  }
+
+  readAnnotations(): Record<string, AnnotationRecord> {
+    return decodeAnnotationStore(readJsonFile(this.config.annotationsPath))?.annotations ?? {}
+  }
+
+  getAnnotation(key: string): AnnotationRecord | null {
+    return this.readAnnotations()[key] ?? null
+  }
+
+  writeAnnotation(input: AnnotationWriteInput, key = annotationKey(input.targetKind, input.targetId)): { key: string; annotation: AnnotationRecord; annotations: Record<string, AnnotationRecord> } {
+    const store = this.readAnnotationStore()
+    const now = new Date().toISOString()
+    const existing = store.annotations[key]
+    const annotation: AnnotationRecord = {
+      ...input,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    }
+    store.annotations[key] = annotation
+    const nextStore: AnnotationStore = {
+      schemaVersion: "slotok-workbench.annotations/v1",
+      updatedAt: now,
+      annotations: store.annotations,
+    }
+    writeJsonFile(this.config.annotationsPath, nextStore)
+    return { key, annotation, annotations: nextStore.annotations }
   }
 
   listRuns(limit = 100): EvalRunRow[] {
@@ -133,9 +163,79 @@ export class EvalStore {
         frames: parseFrames(result.frames_json),
         parsed,
         rawPreview,
-        sectionAnnotations: {},
+        sectionAnnotations: annotationsForTarget(this.readAnnotations(), result.id),
       }
     })
+  }
+
+  createDryRunActionJob(input: ActionJobRequest): ActionJob | null {
+    if (!existsSync(this.config.sqlitePath)) return null
+    return withDb(this.config.sqlitePath, (db) => {
+      const result = db.query<EvalResultRow, [string]>("SELECT * FROM eval_results WHERE id = ? LIMIT 1").get(input.targetId)
+      if (!result) return null
+      const run = db.query<EvalRunRow, [string]>("SELECT * FROM eval_runs WHERE run_id = ? LIMIT 1").get(result.run_id) ?? undefined
+      const provider = input.provider ?? result.provider
+      const maxFrames = input.maxFrames ?? run?.max_frames ?? result.frame_count
+      const normalized: JsonRecord = {
+        action: input.action,
+        targetId: input.targetId,
+        targetKind: input.targetKind,
+        scope: input.scope,
+        provider,
+        maxFrames,
+      }
+      const maxOutputTokens = input.maxOutputTokens ?? run?.max_output_tokens ?? undefined
+      if (typeof maxOutputTokens === "number") normalized.maxOutputTokens = maxOutputTokens
+      const id = `action_${sha256(stableStringify(normalized)).slice(0, 16)}`
+      const outputDir = `data/provider-evals/video-understanding/reruns/${id}`
+      const command = [
+        "bun",
+        "scripts/eval-video-understanding.ts",
+        "--videos",
+        result.video_path,
+        "--providers",
+        provider,
+        "--limit",
+        "1",
+        "--max-frames",
+        String(maxFrames),
+        "--out",
+        outputDir,
+        "--cache-dir",
+        run?.cache_dir ?? "data/provider-evals/video-understanding/cache",
+        "--sqlite",
+        this.config.sqlitePath,
+      ]
+      if (typeof maxOutputTokens === "number") {
+        command.push("--max-output-tokens", String(maxOutputTokens))
+      }
+      const now = this.config.startedAt
+      return {
+        id,
+        type: "rerun-video-eval",
+        status: "completed",
+        dryRun: true,
+        targetId: input.targetId,
+        targetKind: input.targetKind,
+        scope: input.scope,
+        createdAt: now,
+        updatedAt: now,
+        command,
+        cwd: this.config.cwd,
+        exitCode: 0,
+        stdout: "Dry run only; provider command was planned but not executed.",
+        stderr: "",
+        outputDir,
+      }
+    })
+  }
+
+  private readAnnotationStore(): AnnotationStore {
+    return decodeAnnotationStore(readJsonFile(this.config.annotationsPath)) ?? {
+      schemaVersion: "slotok-workbench.annotations/v1",
+      updatedAt: this.config.startedAt,
+      annotations: {},
+    }
   }
 }
 
@@ -211,11 +311,11 @@ function parsedPathFor(row: Pick<EvalResultRow, "cache_path" | "parsed_path">): 
 
 function parseFrames(value: string): FrameRecord[] {
   try {
-    const parsed = JSON.parse(value)
+    const parsed = JSON.parse(value) as JsonValue
     if (!Array.isArray(parsed)) return []
     return parsed.flatMap((item): FrameRecord[] => {
-      if (!item || typeof item !== "object") return []
-      const record = item as Partial<FrameRecord>
+      if (!isRecord(item)) return []
+      const record = item
       if (typeof record.path !== "string" || typeof record.sha256 !== "string") return []
       return [{
         path: record.path,
@@ -230,10 +330,10 @@ function parseFrames(value: string): FrameRecord[] {
   }
 }
 
-function readJsonFile(path: string | undefined): unknown {
+function readJsonFile(path: string | undefined): JsonValue | null {
   if (!path || !existsSync(path)) return null
   try {
-    return JSON.parse(readFileSync(path, "utf8"))
+    return JSON.parse(readFileSync(path, "utf8")) as JsonValue
   } catch {
     return null
   }
@@ -249,6 +349,94 @@ function readTextPreview(path: string | undefined, maxChars = 12000): string | u
   }
 }
 
+function writeJsonFile(path: string, value: JsonValue | AnnotationStore): void {
+  mkdirSync(dirname(path), { recursive: true })
+  const tmpPath = `${path}.${process.pid}.tmp`
+  writeFileSync(tmpPath, `${JSON.stringify(value, null, 2)}\n`, "utf8")
+  renameSync(tmpPath, path)
+}
+
+function annotationsForTarget(annotations: Record<string, AnnotationRecord>, targetId: string): Record<string, AnnotationRecord> {
+  const matches: Record<string, AnnotationRecord> = {}
+  for (const [key, annotation] of Object.entries(annotations)) {
+    if (annotation.targetId === targetId) matches[key] = annotation
+  }
+  return matches
+}
+
+function annotationKey(targetKind: string, targetId: string): string {
+  return `${targetKind}:${targetId}`
+}
+
+function stableStringify(value: JsonValue): string {
+  if (Array.isArray(value)) return `[${value.map((item) => stableStringify(item)).join(",")}]`
+  if (isRecord(value)) {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableStringify(value[key] ?? null)}`).join(",")}}`
+  }
+  return JSON.stringify(value) ?? "null"
+}
+
+function sha256(value: string): string {
+  return createHash("sha256").update(value).digest("hex")
+}
+
 function nullableNumber(value: number | null | undefined): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null
+}
+
+function decodeAnnotationStore(value: JsonValue | null): AnnotationStore | null {
+  if (!isRecord(value)) return null
+  if (value.schemaVersion !== "slotok-workbench.annotations/v1") return null
+  if (typeof value.updatedAt !== "string") return null
+  if (!isRecord(value.annotations)) return null
+  const annotations: Record<string, AnnotationRecord> = {}
+  for (const [key, rawAnnotation] of Object.entries(value.annotations)) {
+    const annotation = decodeAnnotationRecord(rawAnnotation)
+    if (!annotation) return null
+    annotations[key] = annotation
+  }
+  return { schemaVersion: "slotok-workbench.annotations/v1", updatedAt: value.updatedAt, annotations }
+}
+
+function decodeAnnotationRecord(value: JsonValue): AnnotationRecord | null {
+  if (!isRecord(value)) return null
+  if (typeof value.targetId !== "string") return null
+  if (typeof value.targetKind !== "string") return null
+  if (typeof value.note !== "string") return null
+  if (!Array.isArray(value.tags) || !value.tags.every((tag) => typeof tag === "string")) return null
+  if (!isAnnotationStatus(value.status)) return null
+  if (!isAnnotationRating(value.rating)) return null
+  if (typeof value.createdAt !== "string") return null
+  if (typeof value.updatedAt !== "string") return null
+  const record: AnnotationRecord = {
+    targetId: value.targetId,
+    targetKind: value.targetKind,
+    note: value.note,
+    tags: value.tags,
+    status: value.status,
+    rating: value.rating,
+    createdAt: value.createdAt,
+    updatedAt: value.updatedAt,
+  }
+  if (typeof value.title === "string") record.title = value.title
+  return record
+}
+
+function isAnnotationStatus(value: JsonValue | undefined): value is AnnotationRecord["status"] {
+  return (
+    value === "untriaged"
+    || value === "interesting"
+    || value === "good"
+    || value === "bad"
+    || value === "needs_rerun"
+    || value === "follow_up"
+  )
+}
+
+function isAnnotationRating(value: JsonValue | undefined): value is AnnotationRecord["rating"] {
+  return value === -2 || value === -1 || value === 0 || value === 1 || value === 2
+}
+
+function isRecord(value: JsonValue | undefined | null): value is JsonRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
 }

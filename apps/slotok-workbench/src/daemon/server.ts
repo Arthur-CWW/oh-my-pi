@@ -12,6 +12,7 @@ import {
 import { EvalStore } from "./eval-store"
 import { UgcJsonStore } from "./ugc-json-store"
 import { routeUgc } from "./ugc-routes"
+import type { ActionJobRequest, AnnotationWriteInput, JsonValue } from "../types"
 
 const DEFAULT_PORT = 47522
 
@@ -54,29 +55,35 @@ function parseArgs(argv: string[]): ParsedArgs {
   return { once, port, cwd, sqlitePath }
 }
 
-const args = parseArgs(process.argv.slice(2))
-const store = new EvalStore({ cwd: args.cwd, sqlitePath: args.sqlitePath })
-const ugcStore = new UgcJsonStore({ cwd: args.cwd })
-
-if (args.once) {
-  console.log(JSON.stringify(store.bootstrap(), null, 2))
-  process.exit(0)
+if (import.meta.main) {
+  startDaemon(process.argv.slice(2))
 }
 
-const server = Bun.serve({
-  hostname: "127.0.0.1",
-  port: args.port,
-  fetch: (request) => route(request, store, ugcStore),
-})
+export function startDaemon(argv: string[]): void {
+  const args = parseArgs(argv)
+  const store = new EvalStore({ cwd: args.cwd, sqlitePath: args.sqlitePath })
+  const ugcStore = new UgcJsonStore({ cwd: args.cwd })
 
-console.log(JSON.stringify({
-  ok: true,
-  name: "slotok-daemon",
-  url: `http://${server.hostname}:${server.port}`,
-  sqlitePath: store.config.sqlitePath,
-}, null, 2))
+  if (args.once) {
+    console.log(JSON.stringify(store.bootstrap(), null, 2))
+    process.exit(0)
+  }
 
-async function route(request: Request, evalStore: EvalStore, ugcJsonStore: UgcJsonStore): Promise<Response> {
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: args.port,
+    fetch: (request) => route(request, store, ugcStore),
+  })
+
+  console.log(JSON.stringify({
+    ok: true,
+    name: "slotok-daemon",
+    url: `http://${server.hostname}:${server.port}`,
+    sqlitePath: store.config.sqlitePath,
+  }, null, 2))
+}
+
+export async function route(request: Request, evalStore: EvalStore, ugcJsonStore: UgcJsonStore): Promise<Response> {
   if (request.method === "OPTIONS") {
     return empty(204)
   }
@@ -106,6 +113,40 @@ async function route(request: Request, evalStore: EvalStore, ugcJsonStore: UgcJs
       return json(detail)
     }
 
+
+    if (request.method === "GET" && url.pathname === "/api/annotations") {
+      return json({ annotations: evalStore.readAnnotations() })
+    }
+
+    if (request.method === "GET" && url.pathname.startsWith("/api/annotations/")) {
+      const key = decodeURIComponent(url.pathname.slice("/api/annotations/".length))
+      if (!key) return json({ error: "missing annotation key" }, 400)
+      const annotation = evalStore.getAnnotation(key)
+      if (!annotation) return json({ error: "annotation not found" }, 404)
+      return json({ key, annotation })
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/annotations") {
+      const decoded = decodeAnnotationWriteInput(await request.json() as JsonValue)
+      if (!decoded.ok) return json({ error: decoded.error }, 400)
+      return json(evalStore.writeAnnotation(decoded.value))
+    }
+
+    if (request.method === "PUT" && url.pathname.startsWith("/api/annotations/")) {
+      const key = decodeURIComponent(url.pathname.slice("/api/annotations/".length))
+      if (!key) return json({ error: "missing annotation key" }, 400)
+      const decoded = decodeAnnotationWriteInput(await request.json() as JsonValue)
+      if (!decoded.ok) return json({ error: decoded.error }, 400)
+      return json(evalStore.writeAnnotation(decoded.value, key))
+    }
+
+    if (request.method === "POST" && (url.pathname === "/api/actions" || url.pathname === "/api/actions/rerun")) {
+      const decoded = decodeActionJobRequest(await request.json() as JsonValue, url.pathname === "/api/actions/rerun")
+      if (!decoded.ok) return json({ error: decoded.error }, 400)
+      const job = evalStore.createDryRunActionJob(decoded.value)
+      if (!job) return json({ error: "action target not found" }, 404)
+      return json({ job })
+    }
     if (request.method === "GET" && url.pathname === "/api/file") {
       const target = url.searchParams.get("path")
       if (!target) return json({ error: "missing path" }, 400)
@@ -151,6 +192,77 @@ async function route(request: Request, evalStore: EvalStore, ugcJsonStore: UgcJs
     const message = error instanceof Error ? error.message : String(error)
     return json({ error: message }, 500)
   }
+}
+
+type JsonRecord = { [key: string]: JsonValue }
+type DecodeResult<T> = { ok: true; value: T } | { ok: false; error: string }
+
+function decodeAnnotationWriteInput(value: JsonValue): DecodeResult<AnnotationWriteInput> {
+  if (!isRecord(value)) return { ok: false, error: "annotation body must be an object" }
+  if (typeof value.targetId !== "string" || value.targetId.length === 0) return { ok: false, error: "targetId is required" }
+  if (typeof value.targetKind !== "string" || value.targetKind.length === 0) return { ok: false, error: "targetKind is required" }
+  if (typeof value.note !== "string") return { ok: false, error: "note is required" }
+  if (!Array.isArray(value.tags) || !value.tags.every((tag) => typeof tag === "string")) return { ok: false, error: "tags must be strings" }
+  if (!isAnnotationStatus(value.status)) return { ok: false, error: "status is invalid" }
+  if (!isAnnotationRating(value.rating)) return { ok: false, error: "rating is invalid" }
+  const input: AnnotationWriteInput = {
+    targetId: value.targetId,
+    targetKind: value.targetKind,
+    note: value.note,
+    tags: value.tags,
+    status: value.status,
+    rating: value.rating,
+  }
+  if (typeof value.title === "string") input.title = value.title
+  return { ok: true, value: input }
+}
+
+function decodeActionJobRequest(value: JsonValue, defaultRerun: boolean): DecodeResult<ActionJobRequest> {
+  if (!isRecord(value)) return { ok: false, error: "action body must be an object" }
+  if (typeof value.targetId !== "string" || value.targetId.length === 0) return { ok: false, error: "targetId is required" }
+  const action = defaultRerun && value.action === undefined ? "rerun-video-eval" : value.action
+  if (action !== "rerun-video-eval") return { ok: false, error: "action must be rerun-video-eval" }
+  const targetKind = value.targetKind === undefined ? "video_eval_result" : value.targetKind
+  if (targetKind !== "video_eval_result") return { ok: false, error: "targetKind must be video_eval_result" }
+  const scope = value.scope === "descendants" ? "descendants" : "selected"
+  const input: ActionJobRequest = {
+    targetId: value.targetId,
+    targetKind,
+    action,
+    scope,
+  }
+  if (value.provider !== undefined) {
+    if (typeof value.provider !== "string" || value.provider.length === 0) return { ok: false, error: "provider must be a non-empty string" }
+    input.provider = value.provider
+  }
+  if (value.maxFrames !== undefined) {
+    if (typeof value.maxFrames !== "number" || !Number.isInteger(value.maxFrames) || value.maxFrames <= 0) return { ok: false, error: "maxFrames must be a positive integer" }
+    input.maxFrames = value.maxFrames
+  }
+  if (value.maxOutputTokens !== undefined) {
+    if (typeof value.maxOutputTokens !== "number" || !Number.isInteger(value.maxOutputTokens) || value.maxOutputTokens <= 0) return { ok: false, error: "maxOutputTokens must be a positive integer" }
+    input.maxOutputTokens = value.maxOutputTokens
+  }
+  return { ok: true, value: input }
+}
+
+function isAnnotationStatus(value: JsonValue | undefined): value is AnnotationWriteInput["status"] {
+  return (
+    value === "untriaged"
+    || value === "interesting"
+    || value === "good"
+    || value === "bad"
+    || value === "needs_rerun"
+    || value === "follow_up"
+  )
+}
+
+function isAnnotationRating(value: JsonValue | undefined): value is AnnotationWriteInput["rating"] {
+  return value === -2 || value === -1 || value === 0 || value === 1 || value === 2
+}
+
+function isRecord(value: JsonValue | undefined | null): value is JsonRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
 function limitParam(url: URL, fallback: number): number {
@@ -208,7 +320,7 @@ function empty(status: number): Response {
 function corsHeaders(extra: Record<string, string> = {}): Headers {
   return new Headers({
     "access-control-allow-origin": "*",
-    "access-control-allow-methods": "GET,POST,OPTIONS",
+    "access-control-allow-methods": "GET,POST,PUT,OPTIONS",
     "access-control-allow-headers": "content-type",
     "cache-control": "no-store",
     ...extra,

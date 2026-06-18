@@ -53,7 +53,7 @@ mkdir -p docs/qa/ugc-studio-multiview-demo
 bun - <<'BUN'
 import { chromium } from 'playwright';
 const base = 'http://127.0.0.1:47521/ugc-studio/';
-const outDir = '/Users/arthur/projects/pi-web-access/docs/qa/ugc-studio-multiview-demo';
+const outDir = '/Users/arthur/agents/web-access/docs/qa/ugc-studio-multiview-demo';
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage({ viewport: { width: 1440, height: 960 }, deviceScaleFactor: 1 });
 await page.goto(base, { waitUntil: 'networkidle' });
@@ -80,7 +80,7 @@ Video command:
 ```bash
 bun - <<'BUN'
 import { chromium } from 'playwright';
-const outDir = '/Users/arthur/projects/pi-web-access/docs/qa/ugc-studio-multiview-demo';
+const outDir = '/Users/arthur/agents/web-access/docs/qa/ugc-studio-multiview-demo';
 const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext({
   viewport: { width: 1440, height: 960 },
