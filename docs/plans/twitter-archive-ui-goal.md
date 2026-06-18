@@ -21,7 +21,7 @@ This document is the acceptance contract for the UI wave, not proof that the UI 
 ## Non-goals
 
 - No React, Solid, shadcn, or new UI runtime unless an implementation owner also wires all build, test, and package-local dev behavior in the same slice. Prefer boring TypeScript modules plus CSS extraction.
-- No X login automation, tokens/cookies, private or unofficial APIs, DMs, notifications, topics, unsupervised bookmark scraping, sidebars, recommendations, settings, private/locked accounts, or full Twitter interaction clone. Supervised bookmark captures must arrive as local archive data from the DevTools extension/server loop.
+- No X login automation, tokens/cookies, private or unofficial APIs, DMs, notifications, topics, unsupervised bookmark scraping, sidebars, recommendations, settings, private/locked accounts, or full Twitter interaction clone. Supervised bookmark captures must arrive as local archive data through the recommended authenticated capture hierarchy: Firefox WebExtension first, Violentmonkey userscript fallback second, dedicated Chrome DevTools capture still valid when needed.
 - No posting, liking, following, reposting/retweeting, bookmarking, replying, deleting, or other mutating Twitter/X actions.
 - No bypass/proxy/rate-limit/WAF behavior and no UI button that implies an unsupported network action.
 - No deep comments/replies explorer in this wave. Show reply context and shallow self-thread grouping from stored relationships; leave full conversation browsing for later.
@@ -63,6 +63,7 @@ The UI should be driven by SQLite-derived API data, not by ad hoc client state:
 - Media payloads expose type, local media route/path status, remote/archive source when stored, alt text when visible, dimensions/aspect metadata when known, poster/thumbnail/duration for video when known, and download status.
 - API responses keep `/api/state`, `/api/social-graph`, media-file route, note/attribute endpoints, existing shortcuts, and JSON/SSE shape conceptually compatible with package tests.
 - Markdown export payloads are derived from stored SQLite rows and local annotations. The default bookmark export root is `data/twitter-archive/markdown/bookmarks`; `TWITTER_ARCHIVE_MARKDOWN_ROOT=/Users/arthur/vault/sources/clippings/twitter-bookmarks` may redirect output straight into Arthur's Obsidian vault by filesystem path without launching Obsidian.
+- Authenticated capture inputs still arrive only through the local archive server: preferred Firefox WebExtension, Violentmonkey fallback userscript, or dedicated Chrome DevTools capture. The UI consumes only the resulting SQLite-derived local data.
 
 ## Acceptance Criteria
 
@@ -74,7 +75,7 @@ The UI should be driven by SQLite-derived API data, not by ad hoc client state:
 - Media and videos render in rounded grid/card layouts with inline video controls when available and sane image aspect handling.
 - Retweet/repost observations are displayed as attribution/relationship only; there is no retweet action.
 - `j`/`k` selection and `y` Markdown copy still work, and local note/tag/mark/attribute actions remain local-only.
-- The UI feedback loop remains local: note/tag/mark/attribute edits update SQLite and Markdown export state only, extension bookmark sync appears as local archive data, and no control implies a Twitter/X write.
+- The UI feedback loop remains local: note/tag/mark/attribute edits update SQLite and Markdown export state only, and authenticated capture inputs from the recommended Firefox WebExtension → userscript fallback → dedicated Chrome DevTools hierarchy appear only as local archive data; no control implies a Twitter/X write.
 - The UI keeps read-only safety boundaries obvious: captured metrics and relationships are observations; local annotations are archive metadata; no Twitter/X mutation is exposed.
 
 ## Current Implementation Handoff
