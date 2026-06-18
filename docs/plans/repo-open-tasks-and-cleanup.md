@@ -85,13 +85,16 @@ Candidates to split later:
 
 ### 4. Orchestration backlog
 
-From `docs/plans/symphony-lite.md` and `docs/plans/pi-agent-control-plane.md`:
+From `docs/plans/symphony-lite.md`, `docs/plans/pi-agent-control-plane.md`, and the coordination runbook:
 
-1. Persist workflow/run records instead of in-memory-only workflow subagents.
-2. Add `ask_arthur` / human-in-loop queue.
-3. Add reviewer personas and tool profiles.
-4. Add child Pi/Codex session spawning with cockpit registration.
-5. Keep tmux/Zellij as optional materialization, not source of truth.
+1. Add a repo-wide SQLite task ledger for packet status, owner paths, proof links, assignment records, and scheduling timestamps.
+2. Keep Markdown as the policy/rationale/proof-note layer; explicitly avoid migrating every small Markdown file in the first pass.
+3. Seed the ledger from `TASKS.md` rows, then add proof links to existing QA notes and session logs only when they affect review or scheduling.
+4. Persist workflow/run records instead of in-memory-only workflow subagents.
+5. Add `ask_arthur` / human-in-loop queue.
+6. Add reviewer personas and tool profiles.
+7. Add child Pi/Codex session spawning with cockpit registration.
+8. Keep tmux/Zellij as optional materialization, not source of truth.
 
 ### 5. Slotok / AI UGC backlog
 

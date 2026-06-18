@@ -7,7 +7,7 @@ These prompts use `@path/to/file.md` references where useful, so Pi can auto-inc
 ## Universal preface for all creative/video sessions
 
 ```txt
-You are working in /Users/arthur/projects/pi-web-access, a pi-workflows monorepo.
+You are working in /Users/arthur/agents/web-access, a pi-workflows monorepo.
 First read / include:
 - @AGENTS.md
 - @docs/state/README.md

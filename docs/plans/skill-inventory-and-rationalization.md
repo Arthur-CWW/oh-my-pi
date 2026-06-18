@@ -69,6 +69,7 @@ Useful, but noisy if global:
 - Austrian transport skills.
 - Sentry, Ghidra, OpenSCAD.
 - Used-hardware buying research.
+- `emusks-research` and similar unofficial/private API research skills — local opt-in only, never auto-loaded.
 - Codex plugin router skills except in projects that need them.
 
 ### Consolidate overlapping skill families
@@ -100,6 +101,7 @@ Useful, but noisy if global:
 | `commit` | Conventional commit workflow. | global `agent-stuff` | 21 | 0 | Keep global core; maybe vendor into personal core package. |
 | `debug-optimize-lcp` | DevTools MCP LCP/Core Web Vitals workflow. | ignored local `chrome-devtools-mcp` checkout | 1 | 0 | Fold into browser/perf reference; not default. |
 | `dreamina-cli` | Dreamina-specific image/video CLI prompt. | repo skill | 3 | 0 | Removed. Recreate later as provider-neutral media skill if needed. |
+| `emusks-research` | Local opt-in research skill for unofficial/private X APIs & scraper compliance. | repo local `skills/` | 0 | 0 | Local opt-in only; niche research, not default loaded. |
 | `find-skills` | Find/install skills. | global `~/.agents` | 1 | 0 | Keep manual/global if actively installing skills; otherwise disable. |
 | `frontend-design` | Distinctive frontend UI design guidance. | global `agent-stuff` | 4 | 0 | Keep global or vendor into frontend package; useful. |
 | `gccli` | Google Calendar CLI. | symlinked `pi-skills` | 0 | 0 | Merge into opt-in personal Google Workspace skill. |
@@ -145,6 +147,7 @@ packages/
   # moved out to private repo: git@github.com:Arthur-CWW/pi-personal-core-skills.git
   # repo root:
   skills/
+    emusks-research/                  # opt-in local research skill for unofficial X API ecosystems
     commit/
     uv/
     tmux/

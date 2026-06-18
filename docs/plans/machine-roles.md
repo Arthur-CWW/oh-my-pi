@@ -10,7 +10,7 @@ Use the main Mac, Framework laptop, and desktop GPU box in parallel without sour
 
 Role:
 
-- source-of-truth checkout at `/Users/arthur/projects/pi-web-access`
+- source-of-truth checkout at `/Users/arthur/agents/web-access`
 - logged-in browser profiles for Jimeng/Dreamina/X/ChatGPT/Gemini frontend work
 - Dreamina CLI and Chrome/Firefox cookie access
 - Gemini CLI video analysis

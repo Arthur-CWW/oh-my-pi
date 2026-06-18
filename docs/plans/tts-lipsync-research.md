@@ -177,7 +177,7 @@ Do not add provider code until the pipeline format owner has defined where adapt
 ## Handoff prompt for a worker agent
 
 ```txt
-You are the TTS/lipsync research lane in /Users/arthur/projects/pi-web-access.
+You are the TTS/lipsync research lane in /Users/arthur/agents/web-access.
 Read docs/plans/README.md and docs/plans/tts-lipsync-research.md.
 Only edit docs/plans/tts-lipsync-research.md unless explicitly handed off; write research outputs under ignored data/research/** and benchmark artifacts under data/tts-lipsync-bench/**.
 Run or launch the GPT-Pro research prompt if approved. Then produce a ranked recommendation and a tiny benchmark plan for the seal fixture. Do not edit Jimeng or Twitter archive code.
