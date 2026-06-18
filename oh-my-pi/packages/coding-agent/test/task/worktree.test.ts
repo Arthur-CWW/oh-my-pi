@@ -10,6 +10,7 @@ import {
 	mergeTaskBranches,
 	parseIsolationMode,
 } from "@oh-my-pi/pi-coding-agent/task/worktree";
+import * as git from "@oh-my-pi/pi-coding-agent/utils/git";
 import * as natives from "@oh-my-pi/pi-natives";
 
 async function runGit(repo: string, args: string[]): Promise<string> {
@@ -69,6 +70,8 @@ describe("worktree isolation helpers", () => {
 			await runGit(repo, ["init", "-q", "-b", BASE_BRANCH]);
 			await runGit(repo, ["config", "user.email", "test@example.com"]);
 			await runGit(repo, ["config", "user.name", "Test User"]);
+			await runGit(repo, ["config", "core.pager", ""]);
+			await runGit(repo, ["config", "diff.external", ""]);
 			await Promise.all([
 				fs.writeFile(path.join(repo, "merged.txt"), "base version\n"),
 				fs.writeFile(path.join(repo, "staged.txt"), "base staged\n"),
@@ -163,7 +166,7 @@ describe("worktree isolation helpers", () => {
 				const [mergedContent, status, cached, stashList] = await Promise.all([
 					fs.readFile(path.join(repo, "merged.txt"), "utf8"),
 					runGit(repo, ["status", "--porcelain=v1"]),
-					runGit(repo, ["diff", "--cached", "--", "staged.txt"]),
+					git.diff(repo, { cached: true, files: ["staged.txt"] }),
 					runGit(repo, ["stash", "list"]),
 				]);
 				expect(result).toEqual({ failed: [], merged: [TASK_BRANCH] });

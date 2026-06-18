@@ -338,6 +338,12 @@ function trimScalar(text: string | undefined): string | undefined {
 
 function buildDiffArgs(options: DiffOptions): string[] {
 	const args = ["diff"];
+	// Force a machine-readable unified patch and ignore user-defined external diff
+	// tools or format configuration so callers can parse/apply the output reliably.
+	const producePatch = !options.nameOnly && !options.stat && !options.numstat;
+	if (producePatch) {
+		args.push("--no-ext-diff", "-p", "--no-color");
+	}
 	if (options.binary) args.push("--binary");
 	if (options.cached) args.push("--cached");
 	if (options.nameOnly) args.push("--name-only");
@@ -1018,7 +1024,7 @@ export const diff = Object.assign(
 			headRef: string,
 			options: { binary?: boolean; signal?: AbortSignal; allowFailure?: boolean } = {},
 		): Promise<string> {
-			const args = ["diff-tree", "-r", "-p"];
+			const args = ["diff-tree", "-r", "-p", "--no-ext-diff", "--no-color"];
 			if (options.binary) args.push("--binary");
 			args.push(base, headRef);
 			if (options.allowFailure) {

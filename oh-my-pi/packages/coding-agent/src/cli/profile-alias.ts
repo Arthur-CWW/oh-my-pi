@@ -307,7 +307,7 @@ export async function installProfileAlias(options: ProfileAliasInstallOptions): 
 	}
 	const platform = options.platform ?? process.platform;
 	const homeDir = options.homeDir ?? os.homedir();
-	const env = options.env ?? process.env;
+	const env = options.env ?? (options.homeDir !== undefined ? {} : process.env);
 	const shell = normalizeShellName(options.shellPath ?? env.SHELL, platform, env);
 	const aliasName = validateAliasName(options.aliasName, shell);
 	const configPath = resolveShellConfigPath(shell, homeDir, platform, env);

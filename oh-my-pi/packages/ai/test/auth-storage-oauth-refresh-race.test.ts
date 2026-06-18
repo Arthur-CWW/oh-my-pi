@@ -5,6 +5,7 @@ import * as path from "node:path";
 import {
 	type AuthCredentialStore,
 	AuthStorage,
+	type AuthStorageOptions,
 	type CredentialDisabledEvent,
 	SqliteAuthCredentialStore,
 } from "@oh-my-pi/pi-ai/auth-storage";
@@ -22,6 +23,18 @@ describe("AuthStorage OAuth refresh race", () => {
 	let authStorage: AuthStorage | null = null;
 	let events: CredentialDisabledEvent[] = [];
 
+	const failingRefreshForRace: NonNullable<AuthStorageOptions["refreshOAuthCredential"]> = async (
+		_provider,
+		_credentialId,
+		credential,
+	) => {
+		if (credential.refresh === "stale-refresh") {
+			throw new Error(
+				'HTTP 400 invalid_grant {"error":"invalid_grant","error_description":"Refresh token not found or invalid"}',
+			);
+		}
+		return credential;
+	};
 	beforeEach(async () => {
 		tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-ai-auth-oauth-race-"));
 		store = await SqliteAuthCredentialStore.open(path.join(tempDir, "agent.db"));
@@ -116,6 +129,15 @@ describe("AuthStorage OAuth refresh race", () => {
 				expires: Date.now() - 60_000,
 			},
 		]);
+		// Drive the refresh failure deterministically so the test does not depend
+		// on the Anthropic token endpoint being reachable from the sanitized runner.
+		authStorage = new AuthStorage(store, {
+			onCredentialDisabled: event => {
+				events.push(event);
+			},
+			refreshOAuthCredential: failingRefreshForRace,
+		});
+		await authStorage.reload();
 		const storedBefore = store.listAuthCredentials("anthropic");
 		expect(storedBefore).toHaveLength(1);
 		const credentialId = storedBefore[0]!.id;
@@ -184,6 +206,16 @@ describe("AuthStorage OAuth refresh race", () => {
 				expires: Date.now() - 60_000,
 			},
 		]);
+
+		// Drive the refresh failure deterministically so the test does not depend
+		// on the Anthropic token endpoint being reachable from the sanitized runner.
+		authStorage = new AuthStorage(store, {
+			onCredentialDisabled: event => {
+				events.push(event);
+			},
+			refreshOAuthCredential: failingRefreshForRace,
+		});
+		await authStorage.reload();
 
 		vi.spyOn(oauthUtils, "getOAuthApiKey").mockImplementation(async () => {
 			throw new Error('invalid_grant {"error":"invalid_grant"}');

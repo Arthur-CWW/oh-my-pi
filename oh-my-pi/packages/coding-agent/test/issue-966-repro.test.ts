@@ -17,6 +17,8 @@ try {
 	await $\`git init --initial-branch=main\`.cwd(dir).quiet();
 	await $\`git config user.email tester@example.com\`.cwd(dir).quiet();
 	await $\`git config user.name Tester\`.cwd(dir).quiet();
+	await $\`git config core.pager ""\`.cwd(dir).quiet();
+	await $\`git config diff.external ""\`.cwd(dir).quiet();
 	await fs.writeFile(path.join(dir, "tracked.txt"), "base\\n");
 	await $\`git add tracked.txt\`.cwd(dir).quiet();
 	await $\`git commit -m baseline\`.cwd(dir).quiet();

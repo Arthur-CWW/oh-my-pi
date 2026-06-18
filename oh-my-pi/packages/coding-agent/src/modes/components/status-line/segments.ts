@@ -203,14 +203,17 @@ const pathSegment: StatusLineSegment = {
 		const opts = ctx.options.path ?? {};
 
 		const projectDir = getProjectDir();
-		const { scratch, relative } = classifyProjectDir(projectDir);
 		let pwd = projectDir;
+		let scratch = false;
+		let relative: string | null = null;
 
 		if (opts.stripWorkPrefix !== false) {
-			if (scratch) {
-				if (relative) pwd = relative;
+			const displayRootRelative = stripDisplayRoot(pwd);
+			if (displayRootRelative !== pwd) {
+				pwd = displayRootRelative;
 			} else {
-				pwd = stripDisplayRoot(pwd);
+				({ scratch, relative } = classifyProjectDir(pwd));
+				if (scratch && relative) pwd = relative;
 			}
 		}
 		if (opts.abbreviate !== false) {
