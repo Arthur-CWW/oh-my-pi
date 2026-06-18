@@ -13,7 +13,7 @@ OMP Kagi search now mirrors the `packages/web-access/src/kagi.ts` path: it ignor
 ## Proof commands
 
 ```bash
-bun scripts/smoke-omp-kagi-browser-session.ts
+bun scripts/smoke-omp-kagi-browser-session.boundary.ts
 OMP_DISABLE_MCP=1 /Users/arthur/.local/bin/omp q --provider kagi --compact "typescript release"
 ```
 
