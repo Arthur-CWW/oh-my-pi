@@ -1,0 +1,43 @@
+{
+  "id": "generation-parity",
+  "title": "AIGC Image/Video Generation Parity",
+  "workstream": "generation-core",
+  "difficulty": "medium",
+  "summary": "Verify prompt compliance, style accuracy, and video output parity across jimeng and dreamina models.",
+  "context": [
+    "docs/plans/generation-parity-plan.md",
+    "packages/jimeng-client/src/generate-audit.ts"
+  ],
+  "inputs": [
+    {
+      "path": "packages/jimeng-client/test/fixtures/generation-parity/text2image-request.json",
+      "description": "Text to image prompt request body for photorealistic character styling",
+      "approxBytes": 2100
+    },
+    {
+      "path": "packages/jimeng-client/test/fixtures/generation-parity/text2video-request.json",
+      "description": "Text to video request containing reference templates and camera motion params",
+      "approxBytes": 4500
+    },
+    {
+      "path": "packages/jimeng-client/test/fixtures/generation-parity/poll-auth-failure.json",
+      "description": "Polling error response containing expired session credentials signature",
+      "approxBytes": 850
+    }
+  ],
+  "acceptance": [
+    "Verify the model selection defaults match the environment config",
+    "Ensure prompt safety filters are executed prior to AIGC submit calls",
+    "Detect auth expiration in polling loop and trigger credential refresh event"
+  ],
+  "risks": [
+    "auth_required",
+    "rate_limited"
+  ],
+  "tags": [
+    "aigc",
+    "parity",
+    "image-gen",
+    "video-gen"
+  ]
+}

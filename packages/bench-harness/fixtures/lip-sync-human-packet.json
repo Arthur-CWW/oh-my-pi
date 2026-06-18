@@ -1,0 +1,49 @@
+{
+  "id": "lip-sync-human",
+  "title": "Lip-sync Human and Digital Avatar Workstream",
+  "workstream": "digital-avatar",
+  "difficulty": "hard",
+  "summary": "Evaluate lip-sync generation fidelity using voice cloning, temporal consistency checks, and face-mesh mapping on human avatars.",
+  "context": [
+    "docs/research/lip-sync-fidelity.md",
+    "docs/provider/capcut-lip-sync.md",
+    "packages/jimeng-client/src/lip-sync.ts"
+  ],
+  "inputs": [
+    {
+      "path": "packages/jimeng-client/test/fixtures/lip-sync-human-mini/submit-plan.json",
+      "description": "Draft request JSON for lip-sync avatar video submit including audio vid reference",
+      "approxBytes": 3450
+    },
+    {
+      "path": "packages/jimeng-client/test/fixtures/lip-sync-human-mini/preprocess-plan.json",
+      "description": "Preprocess options for video-to-avatar face keypoint extraction",
+      "approxBytes": 1890
+    },
+    {
+      "path": "packages/jimeng-client/test/fixtures/lip-sync-human-mini/poll-result-success.json",
+      "description": "Mock successful polling response for digital avatar status",
+      "approxBytes": 5200
+    },
+    {
+      "path": "packages/jimeng-client/test/fixtures/lip-sync-human-mini/poll-result-rate-limited.json",
+      "description": "Mock rate-limited polling error from capcut backend",
+      "approxBytes": 1120
+    }
+  ],
+  "acceptance": [
+    "The submission payload must validate against LipSyncVideoReferenceSchema without throwing",
+    "Video pre-processing must extract at least 68 landmark points",
+    "Rate-limit backoff logic should handle 429 status code and retry after header delay"
+  ],
+  "risks": [
+    "auth_required",
+    "rate_limited",
+    "provider_state"
+  ],
+  "tags": [
+    "lip-sync",
+    "capcut",
+    "avatar"
+  ]
+}

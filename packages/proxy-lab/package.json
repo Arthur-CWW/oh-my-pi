@@ -1,0 +1,21 @@
+{
+  "name": "@wirebabel/proxy-lab",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Compliant opt-in residential proxy simulator with synthetic-only request jobs",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test ./test"
+  },
+  "dependencies": {
+    "effect": "^4.0.0-beta.71"
+  },
+  "devDependencies": {
+    "bun-types": "^1.3.9",
+    "typescript": "^5.9.3"
+  }
+}
