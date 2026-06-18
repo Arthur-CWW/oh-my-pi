@@ -18,11 +18,18 @@ docs/                  Architecture notes and how-tos
 
 ## Current extensions
 
-- [`extensions/x-bookmark-sync-devtools`](extensions/x-bookmark-sync-devtools) — SolidJS + Tailwind DevTools panel that captures X/Twitter bookmark-related GraphQL/API responses.
+- [`extensions/x-bookmark-sync-devtools`](extensions/x-bookmark-sync-devtools) — SolidJS + Tailwind DevTools panel for dedicated Chrome/Chromium/Helium capture of X/Twitter bookmark-related GraphQL/API responses.
 - [`extensions/dev-browser`](extensions/dev-browser) — WXT extension for connecting a browser session to the dev-browser skill.
 - [`extensions/illiterati-tts`](extensions/illiterati-tts) — Vite + SolidJS MV3 offline TTS/alignment prototype.
 - [`extensions/illiterati-tts-opfs-parallel`](extensions/illiterati-tts-opfs-parallel) — parallel OPFS branch variant of the Illiterati TTS prototype.
 - [`extensions/youtube-stats-overlay`](extensions/youtube-stats-overlay) — clean-room YouTube stats overlay prototype with vidIQ-inspired dummy UI.
+
+## Authenticated X/Twitter capture direction
+
+- Preferred next path: a Firefox WebExtension for authenticated read-only capture and future browser-control/RPC work. In normal Firefox, develop with temporary unsigned install through `about:debugging#/runtime/this-firefox`; it must be reloaded after browser restart unless you move to a signed or policy-managed distribution.
+- Fallback extractor: a Violentmonkey userscript on authenticated `x.com`/`twitter.com` pages, using the same localhost health ping and lightweight `pageUrl`/`visibleTweets` ingest shape as the archive server.
+- Still-valid specialized lane: [`extensions/x-bookmark-sync-devtools`](extensions/x-bookmark-sync-devtools) for dedicated Chrome/Chromium/Helium profiles where DevTools network capture is the goal.
+- Eventual control stack: browser extension in the logged-in browser, localhost daemon/server for normalization and persistence, and an optional debugger/native bridge when extension DOM capture alone is insufficient.
 
 ## Shared packages
 

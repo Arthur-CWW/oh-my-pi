@@ -1,6 +1,6 @@
 # X Bookmark Sync DevTools
 
-Chrome/Chromium/Helium DevTools extension for capturing X/Twitter bookmark-related GraphQL/API responses and sending them to the local `twitter-archive` dev server.
+Chrome/Chromium/Helium DevTools extension for capturing X/Twitter bookmark-related GraphQL/API responses and sending them to the local `twitter-archive` dev server. It remains a valid dedicated-profile DevTools capture lane, but the recommended general authenticated path is the Firefox WebExtension, with the userscript kept as fallback.
 
 The extension UI is built with **SolidJS + Tailwind CSS v4 + Vite**. It is an extension-owned DevTools page, so the UI stack is isolated from the inspected website and is not injected into X/Twitter.
 
@@ -66,6 +66,62 @@ Reload behavior:
 - inspected X page state/logins stay in `~/.chrome-x-bookmark-sync`.
 
 CMUX built-in browser note: the controlled CMUX browser is WebKit/Safari-like and does not expose `chrome.runtime` or `chrome://extensions`, so Chrome extensions cannot be loaded there. Use this dedicated Chrome dev loop for extension work.
+
+## Recommended authenticated capture hierarchy
+
+### 1. Firefox WebExtension preferred
+
+- Preferred next path for authenticated X/Twitter capture and future browser-control/RPC evolution.
+- Firefox content script plus background script can reuse the archive server's lightweight visible-page ingest shape (`pageUrl` + `visibleTweets`) while adding host permissions, extension storage/alarms, browser actions/commands, and localhost RPC.
+- In normal Firefox, use temporary unsigned install via `about:debugging#/runtime/this-firefox`. It disappears on browser restart; persistent unsigned install generally needs a signed build or a policy-managed Developer/Nightly/ESR setup.
+
+### 2. Violentmonkey userscript fallback
+
+If the Firefox WebExtension is not available yet or install friction blocks progress, use the userscript instead:
+
+```text
+/Users/arthur/agents/browser-extensions/extensions/x-bookmark-sync-devtools/twitter-archive-sync.user.js
+```
+
+Recommended setup:
+
+1. Keep the local archive server running at `http://127.0.0.1:3420`.
+2. In Firefox, install/enable **Violentmonkey**.
+3. Create/import the userscript file above.
+4. Open an authenticated `x.com` page such as:
+   - `https://x.com/i/bookmarks`
+   - a profile page
+   - a search/list page
+5. Use the Violentmonkey menu commands:
+   - **Twitter archive: ping localhost health**
+   - **Twitter archive: sync visible tweets**
+
+What it does:
+
+- reads visible tweet cards from the current authenticated page DOM
+- sends normalized tweet/status records to `POST /x-bookmark-sync/ingest`
+- lets the local server write SQLite rows, archive jobs, and Markdown
+
+This is the manual fallback extractor, not the long-term RPC surface.
+
+### 3. This Chrome DevTools extension remains valid
+
+- Use it when you want dedicated Chrome/Chromium/Helium profile capture or DevTools-first network inspection of bookmark responses.
+- It observes network responses rather than visible DOM, so it remains useful for bookmark/network debugging even though the Firefox WebExtension is the preferred general authenticated path.
+
+## API surface summary
+
+| Path | Browser surface | Local API shape |
+|---|---|---|
+| Firefox WebExtension | Visible DOM via content script plus background messaging, host permissions, storage, and alarms. | `GET /api/health` plus `POST /x-bookmark-sync/ingest` with userscript-compatible `pageUrl` and `visibleTweets` payloads first, then richer extension RPC or optional native messaging later if needed. |
+| Violentmonkey userscript | Visible DOM on the current authenticated page only. | Same page-context `GET /api/health` ping and lightweight `POST /x-bookmark-sync/ingest` payload. |
+| Chrome DevTools extension | Observed network responses via DevTools APIs. | `POST /x-bookmark-sync/ingest` with response snapshots and derived tweet-like records. |
+
+## Eventual control stack
+
+- extension inside the logged-in browser for host-permission DOM capture, background commands, and user-invoked actions
+- localhost `twitter-archive` server/daemon for normalization, persistence, queueing, and reviewer-visible RPC
+- optional debugger/native bridge only when extension-visible DOM capture is insufficient, never for credential extraction or private API replay
 
 ## Helium launch helper
 

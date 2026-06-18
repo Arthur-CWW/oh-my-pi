@@ -21,6 +21,7 @@
     "launch:helium:x-bookmarks": "pnpm --filter x-bookmark-sync-devtools launch:helium",
     "skill:reverse-engineer": "pnpm --filter chrome-extension-reverse-engineering analyze reverse-engineering/vidiq-vision",
     "proxy:vidiq": "pnpm --filter vidiq-replay-proxy start",
-    "capture:vidiq-dom": "pnpm --filter vidiq-dom-capture capture"
+    "capture:vidiq-dom": "pnpm --filter vidiq-dom-capture capture",
+    "run:twitter-archive-firefox": "bun --cwd extensions/twitter-archive-firefox run run:firefox"
   }
 }

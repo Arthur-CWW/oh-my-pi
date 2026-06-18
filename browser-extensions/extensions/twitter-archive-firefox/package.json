@@ -1,0 +1,20 @@
+{
+  "name": "twitter-archive-firefox",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Firefox WebExtension for read-only authenticated X/Twitter visible-tweet capture into the local twitter-archive server.",
+  "scripts": {
+    "dev": "vite build --watch --mode development",
+    "typecheck": "tsc --noEmit",
+    "build": "vite build",
+    "check": "bun run typecheck && bun run build",
+    "run:firefox": "bun ../../scripts/run-twitter-archive-firefox.mjs"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.1.42",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.16",
+    "web-ext": "^10.4.0"
+  }
+}

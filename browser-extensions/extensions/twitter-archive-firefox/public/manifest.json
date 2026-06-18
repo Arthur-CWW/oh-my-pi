@@ -1,0 +1,49 @@
+{
+  "manifest_version": 2,
+  "name": "Twitter Archive Firefox",
+  "version": "0.1.0",
+  "description": "Read-only Firefox WebExtension that captures visible X/Twitter tweet cards and posts them to the local twitter-archive ingest endpoint.",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "twitter-archive-firefox@arthur.local",
+      "strict_min_version": "109.0"
+    }
+  },
+  "permissions": [
+    "activeTab",
+    "tabs",
+    "storage",
+    "contextMenus",
+    "https://x.com/*",
+    "https://twitter.com/*",
+    "http://127.0.0.1:3420/*",
+    "http://localhost:3420/*"
+  ],
+  "background": {
+    "scripts": ["background.js"]
+  },
+  "browser_action": {
+    "default_title": "Sync visible X/Twitter tweets"
+  },
+  "commands": {
+    "_execute_browser_action": {
+      "suggested_key": {
+        "default": "Alt+Shift+S"
+      },
+      "description": "Sync visible tweet cards from the active X/Twitter tab"
+    },
+    "ping-health": {
+      "suggested_key": {
+        "default": "Alt+Shift+H"
+      },
+      "description": "Ping the local twitter-archive health endpoint"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://x.com/*", "https://twitter.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
