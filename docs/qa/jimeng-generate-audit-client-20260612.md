@@ -12,7 +12,7 @@ Purpose: promote the high-value G1 `/mweb/v1/execute_generate_audit` material pr
 ## Proof
 
 ```bash
-cd /Users/arthur/projects/pi-web-access/packages/jimeng-client
+cd /Users/arthur/agents/web-access/packages/jimeng-client
 mise exec -- bun test ./test/generate-audit.test.ts
 ```
 

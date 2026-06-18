@@ -41,16 +41,19 @@ const MixSingleRequestSchema = Schema.Struct({
 const MixBatchRequestSchema = Schema.Struct({
   input_list: Schema.NonEmptyArray(MixInputSchema),
 })
+const MixAudioQueryParamsSchema = Schema.Struct({
+  babi_param: NonEmptyString,
+})
 
 export function buildJimengMixAudioVideoPlan(input: JimengMixAudioVideoInput): JimengMixAudioVideoPlan {
   const mode = input.mode ?? (input.inputList ? "batch" : "single")
   const request = input.body
     ? snakeCaseJsonObject(input.body)
     : buildMixRequestFromInputs(input, mode)
-  const queryParams = input.babiParam ? { babi_param: JSON.stringify(input.babiParam) } : null
+  const queryParams = buildMixAudioQueryParams(input.babiParam)
 
-  if (mode === "single") validateJimengMixAudioSingleRequest(request)
-  else validateJimengMixAudioBatchRequest(request)
+  validateJimengMixAudioVideoPlanRequest(request, mode)
+  validateJimengMixAudioQueryParams(queryParams)
 
   return {
     endpoint: mode === "single" ? JIMENG_MIX_AUDIO_VIDEO_ENDPOINT : JIMENG_MIX_AUDIO_VIDEOS_ENDPOINT,
@@ -92,6 +95,7 @@ export function summarizeJimengMixAudioVideoPlan(plan: JimengMixAudioVideoPlan):
     method: plan.method,
     mode: plan.mode,
     request_keys: Object.keys(plan.request).sort(),
+    required_request_paths: mixAudioRequestPaths(plan.request, plan.mode),
     input_count: plan.inputCount,
     has_babi_param: plan.hasBabiParam,
     query_param_keys: plan.queryParams ? Object.keys(plan.queryParams).sort() : [],
@@ -106,6 +110,15 @@ export function validateJimengMixAudioSingleRequest(request: JsonObject): void {
 
 export function validateJimengMixAudioBatchRequest(request: JsonObject): void {
   decodeMixAudioContract(MixBatchRequestSchema, request, "Jimeng mix_audio_videos request")
+}
+
+export function validateJimengMixAudioVideoPlanRequest(request: JsonObject, mode: JimengMixAudioMode): void {
+  if (mode === "single") validateJimengMixAudioSingleRequest(request)
+  else validateJimengMixAudioBatchRequest(request)
+}
+
+export function validateJimengMixAudioQueryParams(queryParams: JsonObject): void {
+  decodeMixAudioContract(MixAudioQueryParamsSchema, queryParams, "Jimeng mix_audio query params")
 }
 
 function buildMixRequestFromInputs(input: JimengMixAudioVideoInput, mode: JimengMixAudioMode): JsonObject {
@@ -132,6 +145,18 @@ function buildMixRequestFromInputs(input: JimengMixAudioVideoInput, mode: Jimeng
   }
 }
 
+function buildMixAudioQueryParams(babiParam: JsonObject | undefined): JsonObject {
+  if (!babiParam) {
+    throw jimengError({
+      category: "validation",
+      code: "JIMENG_MIX_AUDIO_BABI_PARAM_REQUIRED",
+      message: "mix-audio requires babiParam so the request matches the observed frontend endpoint contract.",
+      retryable: false,
+    })
+  }
+  return { babi_param: JSON.stringify(babiParam) }
+}
+
 function snakeCaseJsonObject(value: JsonObject): JsonObject {
   const converted = snakeCaseJsonValue(value)
   if (converted && typeof converted === "object" && !Array.isArray(converted)) return converted
@@ -153,6 +178,19 @@ function toSnakeCase(value: string): string {
     .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
     .replace(/[-\s]+/g, "_")
     .toLowerCase()
+}
+
+function mixAudioRequestPaths(request: JsonObject, mode: JimengMixAudioMode): string[] {
+  if (mode === "single" && isJsonObject(request.input)) {
+    return ["request.input.audio_vid", "request.input.video_item_id"].filter((path) => {
+      const key = path.endsWith("audio_vid") ? "audio_vid" : "video_item_id"
+      return typeof (request.input as JsonObject)[key] === "string"
+    })
+  }
+  if (mode === "batch" && Array.isArray(request.input_list) && request.input_list.length > 0) {
+    return ["request.input_list[].audio_vid", "request.input_list[].video_item_id"]
+  }
+  return []
 }
 
 function countMixInputs(request: JsonObject, mode: JimengMixAudioMode): number {

@@ -21,7 +21,12 @@ exports[`Jimeng video preprocess snapshots > snapshots lip-sync/digital-human pr
       "summary": {
         "endpoint": "/mweb/v1/video_generate/pre_process",
         "input_count": 1,
-        "live_submit": false,
+        "live_submit": {
+          "endpoint": "/mweb/v1/video_generate/pre_process",
+          "reason": "OMP fixture evidence covers request construction only; parent validation must use focused replay/compare before any live call.",
+          "status": "dry-run-plan",
+          "supported": false,
+        },
         "method": "POST",
         "mode": "image-create-avatar",
         "next_compare_command": "jimeng-browser-proxy request-plan-compare --plan <video-preprocess-plan.json> --rawNetwork <capture>/raw-network.jsonl",
@@ -33,6 +38,17 @@ exports[`Jimeng video preprocess snapshots > snapshots lip-sync/digital-human pr
         ],
         "scenes": [
           2,
+        ],
+        "task_shapes": [
+          {
+            "has_image_create_avatar": true,
+            "has_lip_sync_audio_detect": false,
+            "has_lip_sync_audio_silence": false,
+            "has_lip_sync_voice_match": false,
+            "scene": 2,
+            "scene_name": "ImageCreateAvatar",
+            "submit_id_present": true,
+          },
         ],
       },
     },
@@ -58,7 +74,12 @@ exports[`Jimeng video preprocess snapshots > snapshots lip-sync/digital-human pr
       "summary": {
         "endpoint": "/mweb/v1/video_generate/pre_process",
         "input_count": 1,
-        "live_submit": false,
+        "live_submit": {
+          "endpoint": "/mweb/v1/video_generate/pre_process",
+          "reason": "OMP fixture evidence covers request construction only; parent validation must use focused replay/compare before any live call.",
+          "status": "dry-run-plan",
+          "supported": false,
+        },
         "method": "POST",
         "mode": "voice-recommendation",
         "next_compare_command": "jimeng-browser-proxy request-plan-compare --plan <video-preprocess-plan.json> --rawNetwork <capture>/raw-network.jsonl",
@@ -70,6 +91,17 @@ exports[`Jimeng video preprocess snapshots > snapshots lip-sync/digital-human pr
         ],
         "scenes": [
           7,
+        ],
+        "task_shapes": [
+          {
+            "has_image_create_avatar": false,
+            "has_lip_sync_audio_detect": false,
+            "has_lip_sync_audio_silence": false,
+            "has_lip_sync_voice_match": true,
+            "scene": 7,
+            "scene_name": "LipSyncVoiceRecommendation",
+            "submit_id_present": true,
+          },
         ],
       },
     },
@@ -90,7 +122,12 @@ exports[`Jimeng video preprocess snapshots > snapshots lip-sync/digital-human pr
       "summary": {
         "endpoint": "/mweb/v1/video_generate/pre_process",
         "input_count": 1,
-        "live_submit": false,
+        "live_submit": {
+          "endpoint": "/mweb/v1/video_generate/pre_process",
+          "reason": "OMP fixture evidence covers request construction only; parent validation must use focused replay/compare before any live call.",
+          "status": "dry-run-plan",
+          "supported": false,
+        },
         "method": "POST",
         "mode": "audio-detect",
         "next_compare_command": "jimeng-browser-proxy request-plan-compare --plan <video-preprocess-plan.json> --rawNetwork <capture>/raw-network.jsonl",
@@ -102,6 +139,17 @@ exports[`Jimeng video preprocess snapshots > snapshots lip-sync/digital-human pr
         ],
         "scenes": [
           5,
+        ],
+        "task_shapes": [
+          {
+            "has_image_create_avatar": false,
+            "has_lip_sync_audio_detect": true,
+            "has_lip_sync_audio_silence": false,
+            "has_lip_sync_voice_match": false,
+            "scene": 5,
+            "scene_name": "LipSyncAudioDetect",
+            "submit_id_present": true,
+          },
         ],
       },
     },
@@ -120,7 +168,12 @@ exports[`Jimeng video preprocess snapshots > snapshots lip-sync/digital-human pr
       "summary": {
         "endpoint": "/mweb/v1/video_generate/pre_process",
         "input_count": 1,
-        "live_submit": false,
+        "live_submit": {
+          "endpoint": "/mweb/v1/video_generate/pre_process",
+          "reason": "OMP fixture evidence covers request construction only; parent validation must use focused replay/compare before any live call.",
+          "status": "dry-run-plan",
+          "supported": false,
+        },
         "method": "POST",
         "mode": "audio-silence",
         "next_compare_command": "jimeng-browser-proxy request-plan-compare --plan <video-preprocess-plan.json> --rawNetwork <capture>/raw-network.jsonl",
@@ -132,6 +185,17 @@ exports[`Jimeng video preprocess snapshots > snapshots lip-sync/digital-human pr
         ],
         "scenes": [
           6,
+        ],
+        "task_shapes": [
+          {
+            "has_image_create_avatar": false,
+            "has_lip_sync_audio_detect": false,
+            "has_lip_sync_audio_silence": true,
+            "has_lip_sync_voice_match": false,
+            "scene": 6,
+            "scene_name": "LipSyncAudioSilence",
+            "submit_id_present": true,
+          },
         ],
       },
     },
@@ -147,7 +211,12 @@ exports[`Jimeng video preprocess snapshots > snapshots lip-sync/digital-human pr
     },
     "summary": {
       "endpoint": "/mweb/v1/video_generate/mget_pre_process_result",
-      "live_submit": false,
+      "live_submit": {
+        "endpoint": "/mweb/v1/video_generate/mget_pre_process_result",
+        "reason": "OMP fixture evidence covers request construction only; parent validation must use focused replay/compare before any live call.",
+        "status": "dry-run-plan",
+        "supported": false,
+      },
       "method": "POST",
       "next_compare_command": "jimeng-browser-proxy request-plan-compare --plan <video-preprocess-query-plan.json> --rawNetwork <capture>/raw-network.jsonl",
       "request_keys": [

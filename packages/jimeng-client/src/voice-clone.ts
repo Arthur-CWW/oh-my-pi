@@ -1,10 +1,39 @@
 import { createHash, randomUUID } from "node:crypto"
+import { Schema } from "effect"
 import { type JimengSessionBundle } from "./capture"
 import { assertNoRiskError, JimengClient, type JimengFetch } from "./client"
 import { jimengError } from "./errors"
 
 const DEFAULT_QUERY = "aid=513695&device_platform=web&region=CN&web_version=7.5.0&da_version=3.3.17&aigc_features=app_lip_sync"
 const CLONED_VOICE_EFFECT_TYPE = 218
+
+const NonEmptyString = Schema.String.check(Schema.isMinLength(1))
+const OptionalNonEmptyString = Schema.optional(NonEmptyString)
+const PositiveNumber = Schema.Number.check(Schema.isGreaterThan(0))
+const VoiceAudioRequestSchema = Schema.Struct({
+  vid: NonEmptyString,
+  audio_url: OptionalNonEmptyString,
+  duration: PositiveNumber,
+  title: NonEmptyString,
+})
+const VoiceCloneSubmitRequestSchema = Schema.Struct({
+  submit_id: NonEmptyString,
+  scene: Schema.Literal(1),
+  voice_clone: Schema.Struct({
+    audio: VoiceAudioRequestSchema,
+    name: NonEmptyString,
+  }),
+})
+const VoiceTaskQueryRequestSchema = Schema.Struct({
+  task_id_list: Schema.NonEmptyArray(NonEmptyString),
+})
+const ClonedVoiceUpdateRequestSchema = Schema.Struct({
+  local_item_id: NonEmptyString,
+  name: NonEmptyString,
+})
+const ClonedVoiceDeleteRequestSchema = Schema.Struct({
+  local_item_id: NonEmptyString,
+})
 
 export const JimengCloneVoiceStatus = {
   Generating: 1,
@@ -153,7 +182,7 @@ export function buildJimengVoiceCloneSubmitRequest(input: JimengVoiceCloneSubmit
     })
   }
   const audio = buildVoiceAudio(input.audio)
-  return {
+  const request = {
     submit_id: input.submitId ?? randomUUID(),
     scene: JimengVoiceTaskScene.VoiceCloning,
     voice_clone: {
@@ -161,6 +190,8 @@ export function buildJimengVoiceCloneSubmitRequest(input: JimengVoiceCloneSubmit
       name,
     },
   }
+  validateJimengVoiceCloneSubmitRequest(request)
+  return request
 }
 
 export function buildJimengVoiceTaskQueryRequest(input: JimengVoiceTaskQueryInput): Record<string, unknown> {
@@ -173,7 +204,9 @@ export function buildJimengVoiceTaskQueryRequest(input: JimengVoiceTaskQueryInpu
       retryable: false,
     })
   }
-  return { task_id_list: taskIds }
+  const request = { task_id_list: taskIds }
+  validateJimengVoiceTaskQueryRequest(request)
+  return request
 }
 
 export function buildJimengClonedVoiceUpdateRequest(input: JimengClonedVoiceUpdateInput): Record<string, unknown> {
@@ -188,7 +221,9 @@ export function buildJimengClonedVoiceUpdateRequest(input: JimengClonedVoiceUpda
       details: { voiceIdPresent: !!voiceId, namePresent: !!name },
     })
   }
-  return { local_item_id: voiceId, name }
+  const request = { local_item_id: voiceId, name }
+  validateJimengClonedVoiceUpdateRequest(request)
+  return request
 }
 
 export function buildJimengClonedVoiceDeleteRequest(input: JimengClonedVoiceDeleteInput): Record<string, unknown> {
@@ -201,7 +236,25 @@ export function buildJimengClonedVoiceDeleteRequest(input: JimengClonedVoiceDele
       retryable: false,
     })
   }
-  return { local_item_id: voiceId }
+  const request = { local_item_id: voiceId }
+  validateJimengClonedVoiceDeleteRequest(request)
+  return request
+}
+
+export function validateJimengVoiceCloneSubmitRequest(request: Record<string, unknown>): void {
+  decodeVoiceCloneContract(VoiceCloneSubmitRequestSchema, request, "Jimeng voice clone submit request")
+}
+
+export function validateJimengVoiceTaskQueryRequest(request: Record<string, unknown>): void {
+  decodeVoiceCloneContract(VoiceTaskQueryRequestSchema, request, "Jimeng voice task query request")
+}
+
+export function validateJimengClonedVoiceUpdateRequest(request: Record<string, unknown>): void {
+  decodeVoiceCloneContract(ClonedVoiceUpdateRequestSchema, request, "Jimeng cloned voice update request")
+}
+
+export function validateJimengClonedVoiceDeleteRequest(request: Record<string, unknown>): void {
+  decodeVoiceCloneContract(ClonedVoiceDeleteRequestSchema, request, "Jimeng cloned voice delete request")
 }
 
 export async function fetchJimengClonedVoices(input: {
@@ -411,6 +464,7 @@ export function summarizeJimengClonedVoiceMutation(result: JimengClonedVoiceMuta
 
 function buildVoiceAudio(input: JimengVoiceAudioReference): Record<string, unknown> {
   const vid = input.vid.trim()
+  const title = input.title?.trim() ?? ""
   if (!vid) {
     throw jimengError({
       category: "validation",
@@ -419,11 +473,20 @@ function buildVoiceAudio(input: JimengVoiceAudioReference): Record<string, unkno
       retryable: false,
     })
   }
+  if (input.duration === undefined || input.duration <= 0 || !Number.isFinite(input.duration) || !title) {
+    throw jimengError({
+      category: "validation",
+      code: "VOICE_AUDIO_METADATA_REQUIRED",
+      message: "voice clone audio duration and title are required",
+      retryable: false,
+      details: { durationPresent: input.duration !== undefined, titlePresent: !!title },
+    })
+  }
   return {
     vid,
     ...(input.audioUrl ? { audio_url: input.audioUrl } : {}),
-    ...(input.duration !== undefined ? { duration: input.duration } : {}),
-    ...(input.title ? { title: input.title } : {}),
+    duration: input.duration,
+    title,
   }
 }
 
@@ -547,6 +610,21 @@ function assertPositiveInteger(value: number, field: string): void {
       message: `${field} must be a positive integer`,
       retryable: false,
       details: { field, value },
+    })
+  }
+}
+
+function decodeVoiceCloneContract<A>(schema: Schema.Decoder<A>, value: unknown, operation: string): A {
+  try {
+    return Schema.decodeUnknownSync(schema)(value)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    throw jimengError({
+      category: "validation",
+      code: "JIMENG_VOICE_CLONE_CONTRACT_CHANGED",
+      message: `${operation} did not match required fields.`,
+      retryable: false,
+      details: { operation, error: message },
     })
   }
 }

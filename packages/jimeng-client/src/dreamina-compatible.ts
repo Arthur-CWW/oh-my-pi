@@ -1,11 +1,14 @@
 import { jimengError } from "./errors"
 import {
+  findRequest,
   prepareFromCapture,
   VIDEO_MODEL_REQ_KEYS,
   type CaptureFile,
   type JimengSessionBundle,
   type PreparedJimengRun,
 } from "./capture"
+import { JIMENG_TEXT2IMAGE_DIRECT_ENDPOINT, validateJimengText2ImageDirectRequest } from "./text2image-plan"
+import { type JsonObject } from "./reference-image"
 
 export type DreaminaCompatCommand =
   | "text2image"
@@ -53,9 +56,9 @@ export const DREAMINA_COMPAT_CAPABILITIES: DreaminaCompatCapability[] = [
   },
   {
     command: "text2image",
-    status: "implemented",
+    status: "partial",
     directOp: "image",
-    notes: "Uses captured /mweb/v1/creation_agent/v2/conversation template when an image capture is supplied.",
+    notes: "Requires a current /mweb/v1/aigc_draft/generate text-to-image workbench capture; older /creation_agent/v2/conversation templates are rejected.",
   },
   {
     command: "image2video",
@@ -108,12 +111,7 @@ export function prepareDreaminaCompat(input: DreaminaCompatPrepareInput): Prepar
       })
 
     case "text2image":
-      return prepareFromCapture({
-        op: "image",
-        capture: input.capture,
-        session: input.session,
-        prompt: input.prompt,
-      })
+      return prepareText2ImageCompat(input)
 
     case "image2video":
       if (input.localImages?.length) {
@@ -172,6 +170,71 @@ export function getDreaminaCompatCapability(command: DreaminaCompatCommand): Dre
     status: "needs_capture",
     notes: "Unknown command; capture and catalog before implementing.",
   }
+}
+
+const IMAGE_AGENT_SUBMIT_PATH = "/mweb/v1/creation_agent/v2/conversation"
+
+function prepareText2ImageCompat(input: DreaminaCompatPrepareInput): PreparedJimengRun {
+  const directSubmit = findRequest(input.capture, JIMENG_TEXT2IMAGE_DIRECT_ENDPOINT)
+  if (!directSubmit?.postData) {
+    const hasStaleConversation = !!findRequest(input.capture, IMAGE_AGENT_SUBMIT_PATH)
+    throw text2ImageNeedsDirectCapture(hasStaleConversation
+      ? "capture contains the older /mweb/v1/creation_agent/v2/conversation agent template, but Dreamina text2image compatibility now relies on the direct workbench /mweb/v1/aigc_draft/generate shape"
+      : "capture is missing a /mweb/v1/aigc_draft/generate text-to-image submit request")
+  }
+
+  const submitBody = parseJsonObject(directSubmit.postData, "text2image direct submit request")
+  try {
+    validateJimengText2ImageDirectRequest(submitBody)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    throw jimengError({
+      category: "validation",
+      code: "DREAMINA_TEXT2IMAGE_CAPTURE_MISMATCH",
+      message: `text2image requires a current direct workbench image capture; supplied /aigc_draft/generate body did not match the text-to-image contract: ${message}`,
+      retryable: false,
+      details: { command: "text2image", endpoint: JIMENG_TEXT2IMAGE_DIRECT_ENDPOINT },
+    })
+  }
+
+  return prepareFromCapture({
+    op: "image",
+    capture: withoutConversationSubmit(input.capture),
+    session: input.session,
+    prompt: input.prompt,
+    seed: input.seed,
+  })
+}
+
+function withoutConversationSubmit(capture: CaptureFile): CaptureFile {
+  return {
+    entries: capture.entries.filter((entry) => typeof entry.url !== "string" || !entry.url.includes(IMAGE_AGENT_SUBMIT_PATH)),
+  }
+}
+function parseJsonObject(text: string, label: string): JsonObject {
+  try {
+    const parsed = JSON.parse(text) as unknown
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed as JsonObject
+  } catch {
+    // fall through to the schema-level validation error below
+  }
+  throw jimengError({
+    category: "validation",
+    code: "DREAMINA_TEXT2IMAGE_CAPTURE_MISMATCH",
+    message: `${label} must be a JSON object from a direct text-to-image workbench submit capture.`,
+    retryable: false,
+    details: { command: "text2image", endpoint: JIMENG_TEXT2IMAGE_DIRECT_ENDPOINT },
+  })
+}
+
+function text2ImageNeedsDirectCapture(reason: string) {
+  return jimengError({
+    category: "validation",
+    code: "DREAMINA_TEXT2IMAGE_DIRECT_CAPTURE_REQUIRED",
+    message: `text2image cannot be prepared from this capture: ${reason}. Refresh the UI capture for a text-to-image /mweb/v1/aigc_draft/generate submit before using Dreamina-compatible prepare.`,
+    retryable: false,
+    details: { command: "text2image", endpoint: JIMENG_TEXT2IMAGE_DIRECT_ENDPOINT },
+  })
 }
 
 function needsCapture(command: DreaminaCompatCommand) {

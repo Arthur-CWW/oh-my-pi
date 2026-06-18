@@ -11,6 +11,10 @@ const CONTROL_NET_DEFAULT_STRENGTH = 0.6
 const CONTROL_NET_DEFAULT_FIT_MODE = "center_crop"
 
 export type JimengControlNetKind = "pose" | "depth" | "canny"
+export type JimengReferenceControlKind = JimengControlNetKind | "style"
+export type JimengReferenceControlEvidenceStatus = "observed_provider_contract" | "catalog_only_missing_capture"
+export const JIMENG_CONTROL_NET_KINDS: readonly JimengControlNetKind[] = ["pose", "depth", "canny"]
+export const JIMENG_REFERENCE_CONTROL_KINDS: readonly JimengReferenceControlKind[] = ["pose", "depth", "canny", "style"]
 export type JimengControlNetFitMode = "center_crop" | "adapt_to_canvas"
 
 export interface JimengControlNetPreviewResult {
@@ -49,13 +53,56 @@ export interface JimengControlNetReferenceInspection {
   saveParams: JsonObject
 }
 
+export interface JimengReferenceControlEvidence {
+  control: JimengReferenceControlKind
+  previewSupported: boolean
+  status: JimengReferenceControlEvidenceStatus
+  providerEvidence: string
+  gap: string | null
+}
+
+export function parseJimengReferenceControlKind(value: string | undefined): JimengReferenceControlKind {
+  const normalized = (value ?? "pose").trim().toLowerCase()
+  if (isJimengReferenceControlKind(normalized)) return normalized
+  throw jimengError({
+    category: "validation",
+    code: "REFERENCE_CONTROL_KIND_INVALID",
+    message: "--control must be one of: pose, depth, canny, style.",
+    retryable: false,
+    details: { control: value ?? null },
+  })
+}
+
+export function jimengReferenceControlEvidence(control: JimengReferenceControlKind): JimengReferenceControlEvidence {
+  if (control === "style") {
+    return {
+      control,
+      previewSupported: false,
+      status: "catalog_only_missing_capture",
+      providerEvidence: "agent catalog high-value feat only",
+      gap: "No observed /mweb/v1/blend_preview style request/response or generation save_params capture is represented in source fixtures/tests.",
+    }
+  }
+  return {
+    control,
+    previewSupported: true,
+    status: "observed_provider_contract",
+    providerEvidence: "/mweb/v1/blend_preview request shape and save_params are represented in source fixtures/tests.",
+    gap: null,
+  }
+}
+
+function isJimengReferenceControlKind(value: string): value is JimengReferenceControlKind {
+  return (JIMENG_REFERENCE_CONTROL_KINDS as readonly string[]).includes(value)
+}
+
 export function parseJimengControlNetKind(value: string | undefined): JimengControlNetKind {
   const normalized = (value ?? "pose").trim().toLowerCase()
-  if (normalized === "pose" || normalized === "depth" || normalized === "canny") return normalized
+  if ((JIMENG_CONTROL_NET_KINDS as readonly string[]).includes(normalized)) return normalized as JimengControlNetKind
   throw jimengError({
     category: "validation",
     code: "CONTROL_NET_KIND_INVALID",
-    message: "--control must be one of: pose, depth, canny.",
+    message: "--control must be one of the observed provider preview controls: pose, depth, canny. style is catalog-only until a provider preview capture is available.",
     retryable: false,
     details: { control: value ?? null },
   })

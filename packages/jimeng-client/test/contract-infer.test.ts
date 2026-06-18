@@ -50,16 +50,35 @@ describe("Jimeng contract inference", () => {
     const subjectVoice = inference.endpoints.find((endpoint) => endpoint.endpoint === "/mweb/v1/dreamina_subject/generate_voice")
     expect(subjectVoice?.commands).toEqual(["subject-generate-voice"])
     expect(subjectVoice?.cli_flag_suggestions).toContain("--imageUri")
+    expect(subjectVoice?.effect_schema_ir.required_paths.map((entry) => entry.path)).toEqual([
+      "request",
+      "request.image_uri",
+    ])
 
     const voiceSubmit = inference.endpoints.find((endpoint) => endpoint.endpoint === "/mweb/v1/voice/submit_task")
     expect(voiceSubmit?.commands).toEqual(["voice-clone-submit"])
     expect(voiceSubmit?.cli_flag_suggestions).toEqual(expect.arrayContaining(["--audioVid", "--name"]))
+    expect(voiceSubmit?.effect_schema_ir.required_paths.map((entry) => entry.path)).toEqual(expect.arrayContaining([
+      "request.voice_clone.audio.vid",
+      "request.voice_clone.audio.duration",
+      "request.voice_clone.audio.title",
+      "request.voice_clone.name",
+    ]))
 
     const voiceQuery = inference.endpoints.find((endpoint) => endpoint.endpoint === "/mweb/v1/voice/query_task")
     expect(voiceQuery?.cli_flag_suggestions).toContain("--taskIds")
+    expect(voiceQuery?.effect_schema_ir.required_paths.map((entry) => entry.path)).toEqual(expect.arrayContaining([
+      "request.task_id_list",
+      "request.task_id_list[]",
+    ]))
 
     const mixAudio = inference.endpoints.find((endpoint) => endpoint.endpoint === "/mweb/v1/mix_audio_video")
     expect(mixAudio?.cli_flag_suggestions).toEqual(expect.arrayContaining(["--audioVid", "--videoItemId"]))
+    expect(mixAudio?.effect_schema_ir.required_paths.map((entry) => entry.path)).toEqual(expect.arrayContaining([
+      "request.input.audio_vid",
+      "request.input.video_item_id",
+      "query_params.babi_param",
+    ]))
   })
 
   test("extracts lip-sync and digital-human plan endpoints from packet plans", () => {
@@ -87,6 +106,7 @@ describe("Jimeng contract inference", () => {
       "--videoVid",
       "--voice-id",
     ]))
+    expect(generate?.observed_packet_slices).toEqual(expect.arrayContaining(["lip-sync-image-avatar", "lip-sync-vod"]))
 
     const preprocess = inference.endpoints.find((endpoint) => endpoint.endpoint === "/mweb/v1/video_generate/pre_process")
     expect(preprocess?.commands).toEqual(["video-preprocess-plan"])
@@ -94,7 +114,9 @@ describe("Jimeng contract inference", () => {
 
     const preprocessQuery = inference.endpoints.find((endpoint) => endpoint.endpoint === "/mweb/v1/video_generate/mget_pre_process_result")
     expect(preprocessQuery?.commands).toEqual(["video-preprocess-query-plan"])
-    expect(preprocessQuery?.cli_flag_suggestions).toContain("--submitId")
+    expect(preprocessQuery?.cli_flag_suggestions).toContain("--submitIds")
+    expect(preprocess?.observed_packet_slices).toContain("video-preprocess")
+    expect(preprocessQuery?.observed_packet_slices).toContain("video-preprocess-query")
   })
 
   test("writes scaffold files for review", () => {

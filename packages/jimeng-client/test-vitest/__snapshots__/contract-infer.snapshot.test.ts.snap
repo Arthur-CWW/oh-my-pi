@@ -110,6 +110,7 @@ exports[`Jimeng contract inference snapshots > snapshots lip-sync human packet c
     {
       "cli_flag_suggestions": [
         "--submitId",
+        "--submitIds",
       ],
       "commands": [
         "video-preprocess-query-plan",
@@ -122,30 +123,6 @@ exports[`Jimeng contract inference snapshots > snapshots lip-sync human packet c
         "name": "MwebV1VideoGenerateMgetPreProcessResultObservedSchema",
         "required_paths": [
           {
-            "path": "command",
-            "types": [
-              "string",
-            ],
-          },
-          {
-            "path": "endpoint",
-            "types": [
-              "string",
-            ],
-          },
-          {
-            "path": "live_submit",
-            "types": [
-              "boolean",
-            ],
-          },
-          {
-            "path": "method",
-            "types": [
-              "string",
-            ],
-          },
-          {
             "path": "request",
             "types": [
               "object",
@@ -155,6 +132,12 @@ exports[`Jimeng contract inference snapshots > snapshots lip-sync human packet c
             "path": "request.submit_id_list",
             "types": [
               "array",
+            ],
+          },
+          {
+            "path": "request.submit_id_list[]",
+            "types": [
+              "string",
             ],
           },
         ],
@@ -188,30 +171,6 @@ exports[`Jimeng contract inference snapshots > snapshots lip-sync human packet c
         "name": "MwebV1VideoGeneratePreProcessObservedSchema",
         "required_paths": [
           {
-            "path": "command",
-            "types": [
-              "string",
-            ],
-          },
-          {
-            "path": "endpoint",
-            "types": [
-              "string",
-            ],
-          },
-          {
-            "path": "live_submit",
-            "types": [
-              "boolean",
-            ],
-          },
-          {
-            "path": "method",
-            "types": [
-              "string",
-            ],
-          },
-          {
             "path": "request",
             "types": [
               "object",
@@ -221,6 +180,12 @@ exports[`Jimeng contract inference snapshots > snapshots lip-sync human packet c
             "path": "request.input_list",
             "types": [
               "array",
+            ],
+          },
+          {
+            "path": "request.input_list[]",
+            "types": [
+              "object",
             ],
           },
           {
@@ -674,33 +639,9 @@ exports[`Jimeng contract inference snapshots > snapshots persona-voice packet co
         "name": "MwebV1DreaminaSubjectGenerateVoiceObservedSchema",
         "required_paths": [
           {
-            "path": "command",
-            "types": [
-              "string",
-            ],
-          },
-          {
-            "path": "endpoint_sequence",
-            "types": [
-              "array",
-            ],
-          },
-          {
-            "path": "reason",
-            "types": [
-              "string",
-            ],
-          },
-          {
             "path": "request",
             "types": [
               "object",
-            ],
-          },
-          {
-            "path": "status",
-            "types": [
-              "string",
             ],
           },
           {
@@ -739,30 +680,6 @@ exports[`Jimeng contract inference snapshots > snapshots persona-voice packet co
         "mode": "permissive-required-paths",
         "name": "MwebV1MixAudioVideoObservedSchema",
         "required_paths": [
-          {
-            "path": "command",
-            "types": [
-              "string",
-            ],
-          },
-          {
-            "path": "endpoint",
-            "types": [
-              "string",
-            ],
-          },
-          {
-            "path": "live_submit",
-            "types": [
-              "boolean",
-            ],
-          },
-          {
-            "path": "method",
-            "types": [
-              "string",
-            ],
-          },
           {
             "path": "query_params",
             "types": [
@@ -829,39 +746,21 @@ exports[`Jimeng contract inference snapshots > snapshots persona-voice packet co
         "name": "MwebV1VoiceQueryTaskObservedSchema",
         "required_paths": [
           {
-            "path": "command",
-            "types": [
-              "string",
-            ],
-          },
-          {
-            "path": "endpoint_sequence",
-            "types": [
-              "array",
-            ],
-          },
-          {
-            "path": "reason",
-            "types": [
-              "string",
-            ],
-          },
-          {
             "path": "request",
             "types": [
               "object",
             ],
           },
           {
-            "path": "status",
-            "types": [
-              "string",
-            ],
-          },
-          {
             "path": "request.task_id_list",
             "types": [
               "array",
+            ],
+          },
+          {
+            "path": "request.task_id_list[]",
+            "types": [
+              "string",
             ],
           },
         ],
@@ -896,33 +795,9 @@ exports[`Jimeng contract inference snapshots > snapshots persona-voice packet co
         "name": "MwebV1VoiceSubmitTaskObservedSchema",
         "required_paths": [
           {
-            "path": "command",
-            "types": [
-              "string",
-            ],
-          },
-          {
-            "path": "endpoint_sequence",
-            "types": [
-              "array",
-            ],
-          },
-          {
-            "path": "reason",
-            "types": [
-              "string",
-            ],
-          },
-          {
             "path": "request",
             "types": [
               "object",
-            ],
-          },
-          {
-            "path": "status",
-            "types": [
-              "string",
             ],
           },
           {

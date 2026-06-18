@@ -8,7 +8,7 @@ The subject voice and voice-clone request-shape dry-runs also run without loadin
 
 ## Verification
 
-Run from `/Users/arthur/projects/pi-web-access`.
+Run from `/Users/arthur/agents/web-access`.
 
 ```bash
 bun run --cwd packages/jimeng-client test

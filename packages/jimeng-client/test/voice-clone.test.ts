@@ -22,6 +22,10 @@ import {
   summarizeJimengVoiceCloneSubmit,
   summarizeJimengVoiceTaskQuery,
   updateJimengClonedVoice,
+  validateJimengClonedVoiceDeleteRequest,
+  validateJimengClonedVoiceUpdateRequest,
+  validateJimengVoiceCloneSubmitRequest,
+  validateJimengVoiceTaskQueryRequest,
   type JimengFetch,
   type JimengSessionBundle,
 } from "../src"
@@ -94,6 +98,48 @@ describe("Jimeng voice clone helpers", () => {
     expect(() => buildJimengVoiceCloneSubmitRequest({ audio: { vid: "" }, name: "Voice" })).toThrow(JimengError)
     expect(() => buildJimengVoiceTaskQueryRequest({ taskIds: [] })).toThrow(JimengError)
     expect(() => buildJimengClonedVoiceUpdateRequest({ voiceId: "voice-1", name: "" })).toThrow(JimengError)
+  })
+
+  test("requires observed voice clone audio metadata", () => {
+    expect(() => buildJimengVoiceCloneSubmitRequest({
+      submitId: "submit-missing-metadata",
+      audio: { vid: "v0personaVoiceAudio", title: "persona-reference.wav" },
+      name: "Kbeauty voice",
+    })).toThrow(JimengError)
+    expect(() => validateJimengVoiceCloneSubmitRequest({
+      submit_id: "fixture-voice-submit",
+      scene: 1,
+      voice_clone: {
+        audio: { vid: "v0personaVoiceAudio" },
+        name: "packet disposable voice",
+      },
+    })).toThrow(JimengError)
+  })
+
+  test("validates observed voice clone dry-run request contracts", () => {
+    const submitRequest = {
+      submit_id: "fixture-voice-submit",
+      scene: 1,
+      voice_clone: {
+        audio: {
+          vid: "v0personaVoiceAudio",
+          duration: 3,
+          title: "persona-reference.wav",
+        },
+        name: "packet disposable voice",
+      },
+    }
+    const queryRequest = { task_id_list: ["fixture-voice-task"] }
+
+    expect(() => validateJimengVoiceCloneSubmitRequest(submitRequest)).not.toThrow()
+    expect(() => validateJimengVoiceTaskQueryRequest(queryRequest)).not.toThrow()
+    expect(() => validateJimengClonedVoiceUpdateRequest({ local_item_id: "voice-1", name: "renamed" })).not.toThrow()
+    expect(() => validateJimengClonedVoiceDeleteRequest({ local_item_id: "voice-1" })).not.toThrow()
+    expect(() => validateJimengVoiceCloneSubmitRequest({
+      ...submitRequest,
+      voice_clone: { audio: { vid: "" }, name: "packet disposable voice" },
+    })).toThrow(JimengError)
+    expect(() => validateJimengVoiceTaskQueryRequest({ task_id_list: [] })).toThrow(JimengError)
   })
 
   test("fetches cloned voices and summarizes without signed media URLs", async () => {
@@ -175,7 +221,7 @@ describe("Jimeng voice clone helpers", () => {
       session,
       voiceClone: {
         submitId: "submit-1",
-        audio: { vid: "v03870g10004d8k1u4nog65hb08dnhig", duration: 5 },
+        audio: { vid: "v03870g10004d8k1u4nog65hb08dnhig", duration: 5, title: "reference.mp3" },
         name: "Kbeauty voice",
       },
     })
@@ -189,6 +235,7 @@ describe("Jimeng voice clone helpers", () => {
         audio: {
           vid: "v03870g10004d8k1u4nog65hb08dnhig",
           duration: 5,
+          title: "reference.mp3",
         },
         name: "Kbeauty voice",
       },
@@ -293,7 +340,7 @@ describe("Jimeng voice clone helpers", () => {
         session,
         voiceClone: {
           submitId: "submit-1",
-          audio: { vid: "v03870g10004d8k1u4nog65hb08dnhig", duration: 5 },
+          audio: { vid: "v03870g10004d8k1u4nog65hb08dnhig", duration: 5, title: "reference.mp3" },
           name: "Kbeauty voice",
         },
       })
@@ -335,7 +382,7 @@ describe("Jimeng voice clone helpers", () => {
         session,
         voiceClone: {
           submitId: "submit-1",
-          audio: { vid: "v03870g10004d8k1u4nog65hb08dnhig", duration: 5 },
+          audio: { vid: "v03870g10004d8k1u4nog65hb08dnhig", duration: 5, title: "reference.mp3" },
           name: "Kbeauty voice",
         },
       })

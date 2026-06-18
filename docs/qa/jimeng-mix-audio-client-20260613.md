@@ -14,7 +14,7 @@ Purpose: promote the V1 `/mweb/v1/mix_audio_video` and `/mweb/v1/mix_audio_video
 ## Proof
 
 ```bash
-cd /Users/arthur/projects/pi-web-access/packages/jimeng-client
+cd /Users/arthur/agents/web-access/packages/jimeng-client
 mise exec -- bun test ./test/mix-audio.test.ts
 mise exec -- bun run typecheck
 ```

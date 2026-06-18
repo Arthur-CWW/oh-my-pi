@@ -13,7 +13,7 @@ Purpose: correct the persona/voice registry state to match the typed client surf
 ## Proof
 
 ```bash
-cd /Users/arthur/projects/pi-web-access/packages/jimeng-client
+cd /Users/arthur/agents/web-access/packages/jimeng-client
 mise exec -- bun test ./test/subjects.test.ts ./test/voice-clone.test.ts
 ```
 

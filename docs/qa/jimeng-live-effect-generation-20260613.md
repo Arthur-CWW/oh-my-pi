@@ -307,5 +307,5 @@ bun run --cwd packages/jimeng-client test:vitest
 6 files passed, 9 tests passed
 
 bun packages/jimeng-client/src/browser-proxy-cli.ts lip-sync --session data/jimeng-lab/raw/session-bundle-current.json --image data/jimeng-lab/ugc-studio-kbeauty-image/artifacts/jimeng-kbeauty-01.png --voice-id 7597003459665072686 --voice-title '直爽女大' --text '三秒告诉你为什么这款产品值得试。' --prompt '镜头推进，她拿起产品自然讲解，对着镜头微笑。' --dryRun --outDir data/jimeng-lab/packet-20260614-digitalhuman-ui-probe/dry-run-check
-[jimeng-browser-proxy] lip-sync image dry run saved: /Users/arthur/projects/pi-web-access/data/jimeng-lab/packet-20260614-digitalhuman-ui-probe/dry-run-check/raw/lip-sync-20260614023412-09lzqt-dry-run-plan.json
+[jimeng-browser-proxy] lip-sync image dry run saved: /Users/arthur/agents/web-access/data/jimeng-lab/packet-20260614-digitalhuman-ui-probe/dry-run-check/raw/lip-sync-20260614023412-09lzqt-dry-run-plan.json
 ```

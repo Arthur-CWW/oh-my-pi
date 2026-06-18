@@ -6,10 +6,13 @@ import {
   lipSyncImageReferenceFromUploadSummary,
   lipSyncVideoReferenceFromUploadSummary,
   normalizeTtsInfo,
+  summarizeJimengLipSyncImagePlan,
+  summarizeJimengLipSyncVideoPlan,
+  validateJimengLipSyncImagePlan,
+  validateJimengLipSyncVideoPlan,
   type JimengImageUploadSummary,
   type JimengVideoUploadSummary,
 } from "../src"
-
 describe("Jimeng lip-sync planning", () => {
   test("builds a dry-run image/avatar lip-sync provider input", () => {
     const plan = buildJimengLipSyncImagePlan({
@@ -43,6 +46,19 @@ describe("Jimeng lip-sync planning", () => {
       toneId: "7597003459665072686",
     })
     expect(plan.mockModelEvidence.processFlows[0]?.curProcessFlows).toEqual(["DAVideoProcessType.LipSyncImage"])
+    expect(summarizeJimengLipSyncImagePlan(plan)).toMatchObject({
+      mode: "image",
+      live_submit: { supported: false, code: "JIMENG_LIP_SYNC_LIVE_SUBMIT_UNSUPPORTED" },
+      origin_image: { image_uri_present: true, width: 1024, height: 1536 },
+      tts: { source_type: "text-to-speech", tone_id_present: true },
+    })
+
+    validateJimengLipSyncImagePlan(plan)
+    expect(plan.liveSubmit).toMatchObject({
+      supported: false,
+      code: "JIMENG_LIP_SYNC_LIVE_SUBMIT_UNSUPPORTED",
+      endpoint: "/mweb/v1/aigc_draft/generate",
+    })
   })
 
   test("builds a dry-run VOD lip-sync provider input", () => {
@@ -90,6 +106,19 @@ describe("Jimeng lip-sync planning", () => {
       speed: 1,
     })
     expect(plan.mockModelEvidence.processFlows[0]?.curProcessFlows).toEqual(["DAVideoProcessType.LipSyncUserVideo"])
+    expect(summarizeJimengLipSyncVideoPlan(plan)).toMatchObject({
+      mode: "video",
+      live_submit: { supported: false, code: "JIMENG_LIP_SYNC_LIVE_SUBMIT_UNSUPPORTED" },
+      origin_video: { vid_present: true, uri_present: true, width: 704, height: 1248, duration: 5.016667 },
+      tts: { source_type: "text-to-speech", tone_id_present: true },
+    })
+
+    validateJimengLipSyncVideoPlan(plan)
+    expect(plan.liveSubmit).toMatchObject({
+      supported: false,
+      code: "JIMENG_LIP_SYNC_LIVE_SUBMIT_UNSUPPORTED",
+      endpoint: "/mweb/v1/aigc_draft/generate",
+    })
   })
 
   test("derives lip-sync video reference from VOD upload summary", () => {

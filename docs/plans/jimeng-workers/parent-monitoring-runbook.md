@@ -1,20 +1,20 @@
 # Parent Monitoring Runbook
 
-The parent GPT-5.5 Codex process coordinates OMP `task` subagents running Gemini 3.5 Flash and integrates their output.
+The parent GPT-5.5 Codex process coordinates OMP `task` subagents running Gemini 3.5 Flash by default and integrates their output. If Gemini is unavailable or rate-limited, use the latest-Kimi fallback agent for the same simple implementation slices.
 
 ## Start A Wave
 
-Launch workers with the OMP task tool from the parent process. Use one batch so shared context is injected once and workers run in parallel. Use `isolated: true` for implementation/write workers; OMP will create a CoW workspace, return a patch/branch result, and clean the temporary workspace. Keep read-only planning workers non-isolated unless they need scratch writes.
+Launch workers with the OMP task tool from the parent process. Use one batch so shared context is injected once and workers run in parallel. Use `isolated: true` for implementation/write workers; project `.omp/config.yml` pins `task.isolation.mode: apfs`, so OMP should create an APFS CoW workspace, return a patch/branch result, and clean the temporary workspace. Keep read-only planning workers non-isolated unless they need scratch writes.
 
 Task batch:
 
 ```txt
-agent: jimeng-gemini-worker
+agent: jimeng-gemini-worker  # fallback: jimeng-kimi-worker
 context:
   # Goal
   Advance the Jimeng/Dreamina worker wave while GPT-5.5 remains the parent orchestrator.
   # Constraints
-  Workers run on Gemini 3.5 Flash via .omp/agents/jimeng-gemini-worker.md. Workers only touch assigned files, never central registry/docs/TASKS/snapshots unless explicitly assigned, never run tests/typecheck/lint/formatters/project-wide commands, and never make live/paid/mutating/visible-provider calls.
+  Workers run on Gemini 3.5 Flash via .omp/agents/jimeng-gemini-worker.md by default; fallback workers run on latest Kimi via .omp/agents/jimeng-kimi-worker.md when Gemini is unavailable or rate-limited. Workers only touch assigned files, never central registry/docs/TASKS/snapshots unless explicitly assigned, never run tests/typecheck/lint/formatters/project-wide commands, and never make live/paid/mutating/visible-provider calls.
   # Contract
   Parent owns registry/docs/snapshots/final validation/commits. Isolated write workers return patches through OMP; read-only workers return findings through agent output.
 tasks:
@@ -45,7 +45,7 @@ history://JimengMixAudio
 Check worker-owned diffs in the main repo after a writing worker finishes:
 
 ```bash
-cd /Users/arthur/projects/pi-web-access
+cd /Users/arthur/agents/web-access
 git diff -- packages/jimeng-client/src/mix-audio.ts packages/jimeng-client/test/mix-audio.test.ts
 ```
 
@@ -63,7 +63,7 @@ Reject a worker result if it:
 For Worker A after integrating/accepting its owned-file edits:
 
 ```bash
-cd /Users/arthur/projects/pi-web-access/packages/jimeng-client
+cd /Users/arthur/agents/web-access/packages/jimeng-client
 mise exec -- bun test ./test/mix-audio.test.ts
 mise exec -- bun run typecheck
 ```
@@ -84,7 +84,7 @@ Use `history://<id>` when reviewing process quality.
 For code workers:
 
 ```bash
-cd /Users/arthur/projects/pi-web-access
+cd /Users/arthur/agents/web-access
 git diff -- packages/jimeng-client/src/mix-audio.ts packages/jimeng-client/test/mix-audio.test.ts
 ```
 
@@ -101,11 +101,11 @@ Parent then updates:
 ## Final Validation
 
 ```bash
-cd /Users/arthur/projects/pi-web-access/packages/jimeng-client
+cd /Users/arthur/agents/web-access/packages/jimeng-client
 mise exec -- bun run test
 mise exec -- bun run test:vitest
 mise exec -- bun run typecheck
-cd /Users/arthur/projects/pi-web-access
+cd /Users/arthur/agents/web-access
 git diff --check
 ```
 

@@ -93,6 +93,54 @@ describe("Jimeng object segmentation helpers", () => {
     expect(result.responseTextSha256).toHaveLength(64)
   })
 
+  test("parses alternate observed mask containers and typed upstream no-object errors", async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = []
+    const successClient = new JimengClient({
+      fetch: mockFetch(JSON.stringify({
+        ret: "0",
+        errmsg: "success",
+        data: {
+          value: [
+            {
+              mask: {
+                uri: "tos-cn-i-tb4s082cfz/mask.png",
+                url: "https://signed.example.invalid/mask.png?X-Amz-Signature=secret",
+              },
+              rect: ["1", 2, "3", 4],
+              confidence: 0.88,
+              name: "foreground",
+            },
+          ],
+        },
+      }), requests),
+    })
+
+    const result = await segmentJimengObject({
+      client: successClient,
+      session,
+      imageUri: "tos-cn-i-tb4s082cfz/reference.png",
+      mode: "default",
+    })
+
+    expect(result.masks).toEqual([{
+      maskUri: "tos-cn-i-tb4s082cfz/mask.png",
+      maskUrl: "https://signed.example.invalid/mask.png?X-Amz-Signature=secret",
+      bbox: [1, 2, 3, 4],
+      score: 0.88,
+      label: "foreground",
+    }])
+
+    const failureClient = new JimengClient({
+      fetch: mockFetch(JSON.stringify({ ret: 2046, errmsg: "no object" }), []),
+    })
+    await expect(segmentJimengObject({
+      client: failureClient,
+      session,
+      imageUri: "tos-cn-i-tb4s082cfz/reference.png",
+      mode: "canvas",
+    })).rejects.toThrow("object segmentation failed")
+  })
+
   test("can segment objects through recorded and replayed HTTP transport cassettes", async () => {
     const dir = mkdtempSync(path.join(tmpdir(), "jimeng-reference-segmentation-cassette-"))
     try {

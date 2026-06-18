@@ -1,6 +1,6 @@
 # Jimeng Worker Post-Run Analysis
 
-Repo: `/Users/arthur/projects/pi-web-access`
+Repo: `/Users/arthur/agents/web-access`
 
 Mode: analysis. Prefer read-only unless explicitly asked to update docs.
 

@@ -58,7 +58,8 @@ describe("Jimeng video preprocess dry-run plans", () => {
       input_count: 1,
       scenes: [2],
       scene_names: ["ImageCreateAvatar"],
-      live_submit: false,
+      live_submit: { supported: false, status: "dry-run-plan", endpoint: "/mweb/v1/video_generate/pre_process" },
+      task_shapes: [{ scene_name: "ImageCreateAvatar", has_image_create_avatar: true }],
     })
   })
 
@@ -147,7 +148,7 @@ describe("Jimeng video preprocess dry-run plans", () => {
     expect(summarizeJimengVideoPreprocessQueryPlan(queryPlan)).toMatchObject({
       endpoint: "/mweb/v1/video_generate/mget_pre_process_result",
       submit_id_count: 2,
-      live_submit: false,
+      live_submit: { supported: false, status: "dry-run-plan", endpoint: "/mweb/v1/video_generate/mget_pre_process_result" },
     })
 
     const result = compareJimengRequestPlanWithRawNetwork({

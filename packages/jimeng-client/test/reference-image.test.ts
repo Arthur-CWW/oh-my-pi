@@ -3,6 +3,8 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import { describe, expect, test } from "bun:test"
 import {
+  buildJimengFaceRecognizeRequest,
+  buildJimengImageDescriptionRequest,
   createJimengHttpTransport,
   describeJimengImage,
   JimengClient,
@@ -27,6 +29,16 @@ describe("Jimeng reference image helpers", () => {
     expect(parseImageUri("tos-cn-i-tb4s082cfz/reference.png")).toBe("tos-cn-i-tb4s082cfz/reference.png")
     expect(() => parseImageUri(undefined)).toThrow(JimengError)
     expect(() => parseImageUri("https://example.invalid/reference.png")).toThrow(JimengError)
+  })
+
+  test("builds typed reference-image request bodies", () => {
+    expect(buildJimengImageDescriptionRequest({ imageUri: "tos-cn-i-tb4s082cfz/reference.png" })).toEqual({
+      file_uri: "tos-cn-i-tb4s082cfz/reference.png",
+    })
+    expect(buildJimengFaceRecognizeRequest({ imageUri: "tos-cn-i-tb4s082cfz/reference.png" })).toEqual({
+      image_uri_list: ["tos-cn-i-tb4s082cfz/reference.png"],
+    })
+    expect(() => buildJimengImageDescriptionRequest({ imageUri: "https://example.invalid/reference.png" })).toThrow(JimengError)
   })
 
   test("describes a provider image URI", async () => {

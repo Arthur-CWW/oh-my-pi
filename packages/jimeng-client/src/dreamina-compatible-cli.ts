@@ -1,9 +1,10 @@
 #!/usr/bin/env bun
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import { buildCookieHeaderFromCookieList, redactHeaders, type CaptureFile, type JimengSessionBundle } from "./capture"
 import { JimengClient } from "./client"
 import { DREAMINA_COMPAT_CAPABILITIES, prepareDreaminaCompat, type DreaminaCompatCommand } from "./dreamina-compatible"
+import { JimengArtifactLog, type JimengArtifactInput } from "./artifact-log"
 import { JimengError } from "./errors"
 
 const USAGE = `Usage: jimeng-dreamina <command> [options]
@@ -32,6 +33,9 @@ Common options:
   --noDownload                  Submit/poll but do not download artifacts
   --pollIntervalMs <ms>         Poll interval (default: 3000)
   --maxPolls <n>                Max polls (default: 30)
+  --artifact-db <file>          Optional SQLite dashboard DB to update with run/artifact status
+  --worker <id>                 Optional dashboard worker id
+  --artifact-notes <text>       Optional dashboard notes for this run
 
 Video options:
   --duration <sec>              Official-style duration alias
@@ -81,6 +85,34 @@ interface CliArgs {
   firstFrameUri?: string
   lastFrameUri?: string
   localImages: string[]
+  artifactDb?: string
+  worker?: string
+  artifactNotes?: string
+}
+
+interface ArtifactLogger {
+  log: JimengArtifactLog
+  runId: string
+  command: string
+  commandCwd: string
+  proofRoot: string
+  startedAtIso: string
+}
+
+interface ArtifactManifestEntry {
+  kind: string
+  url: string
+  saved_file: string
+}
+
+interface RunUpdate {
+  status: string
+  resultJson?: string
+  submitId?: string
+  historyId?: string
+  finishedAtIso?: string
+  prompt?: string
+  functionName?: string
 }
 
 async function main(argv: string[]): Promise<void> {
@@ -93,11 +125,45 @@ async function main(argv: string[]): Promise<void> {
   if (!args.capture) throw new Error("--capture is required")
   if (!args.sessionBundle && !args.cookiesFile) throw new Error("--session-bundle or --cookies-file is required")
   const runId = `${args.command}-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${Math.random().toString(36).slice(2, 8)}`
-  const dirs = ensureOutputDirs(path.resolve(args.outDir))
-  const capture = readJson(args.capture) as CaptureFile
+  const outDir = path.resolve(args.outDir)
+  const dirs = ensureOutputDirs(outDir)
+  const artifactLogger = openArtifactLogger(args, runId, argv, outDir)
+  try {
+    if (artifactLogger) {
+      upsertArtifactRun(artifactLogger, args, { status: "in_progress", prompt: args.prompt })
+      artifactLogger.log.addEvent({ runId, level: "info", message: "Dreamina-compatible CLI run started" })
+    }
+    await runDreaminaCommand(args, runId, dirs, artifactLogger)
+  } catch (error) {
+    if (artifactLogger) {
+      upsertArtifactRun(artifactLogger, args, {
+        status: "failed",
+        finishedAtIso: new Date().toISOString(),
+        prompt: args.prompt,
+      })
+      artifactLogger.log.addEvent({
+        runId,
+        level: "error",
+        message: error instanceof Error ? error.message : String(error),
+      })
+    }
+    throw error
+  } finally {
+    artifactLogger?.log.close()
+  }
+}
+
+async function runDreaminaCommand(
+  args: CliArgs,
+  runId: string,
+  dirs: { rawDir: string; normalizedDir: string; artifactsDir: string },
+  artifactLogger: ArtifactLogger | null,
+): Promise<void> {
+  const capture = readJson(requiredString(args.capture, "--capture")) as CaptureFile
   const session = loadSession(args)
+  const command = runnableCommand(args.command)
   const prepared = prepareDreaminaCompat({
-    command: args.command,
+    command,
     capture,
     session,
     prompt: args.prompt,
@@ -130,6 +196,18 @@ async function main(argv: string[]): Promise<void> {
   if (args.dryRun) {
     const file = path.join(dirs.rawDir, `${runId}-dry-run-plan.json`)
     writeJson(file, plan)
+    if (artifactLogger) {
+      upsertArtifactRun(artifactLogger, args, {
+        status: "dry_run",
+        functionName: `${args.command} / ${prepared.op}`,
+        resultJson: file,
+        submitId: prepared.submitId,
+        finishedAtIso: new Date().toISOString(),
+        prompt: args.prompt,
+      })
+      artifactLogger.log.replaceArtifacts(runId, [artifactInputForFile(runId, artifactLogger.proofRoot, file, "dry-run-plan")])
+      artifactLogger.log.addEvent({ runId, level: "info", message: `Dry run plan saved to ${path.relative(artifactLogger.proofRoot, file)}` })
+    }
     console.log(`[jimeng-dreamina] dry run saved: ${file}`)
     return
   }
@@ -138,6 +216,16 @@ async function main(argv: string[]): Promise<void> {
   console.log(`[jimeng-dreamina] live submit command=${args.command} op=${prepared.op}`)
   const submit = await client.submitPrepared(prepared)
   writeJson(path.join(dirs.rawDir, `${runId}-submit.json`), submit)
+  if (artifactLogger) {
+    upsertArtifactRun(artifactLogger, args, {
+      status: "in_progress",
+      functionName: `${args.command} / ${prepared.op}`,
+      submitId: submit.submitId,
+      historyId: submit.historyId ?? undefined,
+      prompt: args.prompt,
+    })
+    artifactLogger.log.addEvent({ runId, level: "info", message: `Submit accepted submitId=${submit.submitId}` })
+  }
   console.log(`[jimeng-dreamina] submit accepted submitId=${submit.submitId} historyId=${submit.historyId ?? "n/a"}`)
 
   const poll = await client.pollUntilTerminal({
@@ -154,7 +242,7 @@ async function main(argv: string[]): Promise<void> {
   console.log(`[jimeng-dreamina] poll complete status=${poll.record.status ?? "unknown"} trace=${poll.trace.length}`)
 
   const artifacts = args.noDownload ? [] : await client.downloadArtifacts(prepared.op, poll.record)
-  const manifest = []
+  const manifest: ArtifactManifestEntry[] = []
   for (let i = 0; i < artifacts.length; i += 1) {
     const artifact = artifacts[i]!
     const ext = artifact.kind === "video" ? "mp4" : "png"
@@ -163,7 +251,21 @@ async function main(argv: string[]): Promise<void> {
     manifest.push({ kind: artifact.kind, url: artifact.url, saved_file: file })
   }
 
-  writeJson(path.join(dirs.normalizedDir, `${runId}-result.json`), { plan, submit, pollTrace: poll.trace, artifacts: manifest })
+  const resultFile = path.join(dirs.normalizedDir, `${runId}-result.json`)
+  writeJson(resultFile, { plan, submit, pollTrace: poll.trace, artifacts: manifest })
+  if (artifactLogger) {
+    upsertArtifactRun(artifactLogger, args, {
+      status: "success",
+      functionName: `${args.command} / ${prepared.op}`,
+      resultJson: resultFile,
+      submitId: submit.submitId,
+      historyId: submit.historyId ?? undefined,
+      finishedAtIso: new Date().toISOString(),
+      prompt: args.prompt,
+    })
+    artifactLogger.log.replaceArtifacts(runId, manifest.map((artifact) => artifactInputForManifest(runId, artifactLogger.proofRoot, artifact)))
+    artifactLogger.log.addEvent({ runId, level: "info", message: `Run completed with ${manifest.length} artifacts` })
+  }
   console.log(`[jimeng-dreamina] done artifacts=${manifest.length}`)
 }
 
@@ -203,6 +305,9 @@ function parseArgs(argv: string[]): CliArgs {
     firstFrameUri: singleFlag(flags, "firstFrameUri"),
     lastFrameUri: singleFlag(flags, "lastFrameUri"),
     localImages: collectRepeated(flags, "image"),
+    artifactDb: singleFlag(flags, "artifact-db"),
+    worker: singleFlag(flags, "worker"),
+    artifactNotes: singleFlag(flags, "artifact-notes"),
   }
 }
 
@@ -257,6 +362,111 @@ function readJson(file: string): unknown {
 
 function writeJson(file: string, value: unknown): void {
   writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`, "utf8")
+}
+
+function openArtifactLogger(
+  args: CliArgs,
+  runId: string,
+  argv: string[],
+  proofRoot: string,
+): ArtifactLogger | null {
+  if (!args.artifactDb) return null
+  return {
+    log: new JimengArtifactLog({ dbPath: path.resolve(args.artifactDb) }),
+    runId,
+    command: buildReproCommand(argv),
+    commandCwd: process.cwd(),
+    proofRoot,
+    startedAtIso: new Date().toISOString(),
+  }
+}
+
+function upsertArtifactRun(logger: ArtifactLogger, args: CliArgs, update: RunUpdate): void {
+  logger.log.upsertRun({
+    id: logger.runId,
+    workerId: args.worker,
+    functionName: update.functionName ?? String(args.command),
+    command: logger.command,
+    commandCwd: logger.commandCwd,
+    status: update.status,
+    notes: args.artifactNotes,
+    proofRoot: logger.proofRoot,
+    resultJson: update.resultJson,
+    submitId: update.submitId,
+    historyId: update.historyId,
+    prompt: update.prompt,
+    startedAtIso: logger.startedAtIso,
+    finishedAtIso: update.finishedAtIso,
+  })
+}
+
+function artifactInputForManifest(runId: string, proofRoot: string, artifact: ArtifactManifestEntry): JimengArtifactInput {
+  return artifactInputForFile(runId, proofRoot, artifact.saved_file, artifact.kind, redactSignedUrlValue(artifact.url))
+}
+
+function artifactInputForFile(
+  runId: string,
+  proofRoot: string,
+  file: string,
+  kind: string,
+  urlRedacted?: string,
+): JimengArtifactInput {
+  const absolute = path.resolve(file)
+  return {
+    runId,
+    kind,
+    path: absolute,
+    relativePath: path.relative(proofRoot, absolute) || path.basename(absolute),
+    mime: mimeForFile(absolute),
+    sizeBytes: sizeForFile(absolute),
+    ...(urlRedacted ? { urlRedacted } : {}),
+  }
+}
+
+function mimeForFile(file: string): string {
+  const ext = path.extname(file).toLowerCase()
+  if (ext === ".mp4") return "video/mp4"
+  if (ext === ".png") return "image/png"
+  if (ext === ".jpg" || ext === ".jpeg") return "image/jpeg"
+  if (ext === ".webp") return "image/webp"
+  if (ext === ".json") return "application/json"
+  return "application/octet-stream"
+}
+
+function sizeForFile(file: string): number | null {
+  try {
+    return statSync(file).size
+  } catch {
+    return null
+  }
+}
+
+function redactSignedUrlValue(url: string): string {
+  try {
+    const parsed = new URL(url)
+    parsed.search = ""
+    return parsed.toString()
+  } catch {
+    return "[unparseable-url]"
+  }
+}
+
+function buildReproCommand(argv: string[]): string {
+  return ["bun", "packages/jimeng-client/src/dreamina-compatible-cli.ts", ...argv].map(shellQuote).join(" ")
+}
+function requiredString(value: string | undefined, label: string): string {
+  if (!value) throw new Error(`${label} is required`)
+  return value
+}
+
+function runnableCommand(command: CliArgs["command"]): DreaminaCompatCommand {
+  if (command === "capabilities") throw new Error("capabilities is not runnable")
+  return command
+}
+
+
+function shellQuote(value: string): string {
+  return /^[A-Za-z0-9_./:=,-]+$/.test(value) ? value : `'${value.replaceAll("'", "'\\''")}'`
 }
 
 if (import.meta.main) {

@@ -3,6 +3,7 @@ import { z } from "zod"
 import { type JimengSessionBundle } from "./capture"
 import { assertNoRiskError, JimengClient, type JimengFetch } from "./client"
 import { jimengError } from "./errors"
+import { jimengReferenceControlEvidence, JIMENG_REFERENCE_CONTROL_KINDS, type JimengReferenceControlKind } from "./reference-controls"
 import { type JsonObject, type JsonValue } from "./reference-image"
 import { JimengJsonObjectSchema, JimengJsonValueSchema, parseJimengApiEnvelope, parseJimengContract, parseJsonText } from "./schema"
 
@@ -346,6 +347,7 @@ export function summarizeJimengAgentCatalog(bundle: JimengAgentCatalogBundle): J
           model.feats.filter((feat) => /character|face_swap|bg_paint|ip_keep|byte_edit|pose|canny|depth|support_subject|style/i.test(feat))
         )),
         image_blend_controls: sortedUnique(imageModels.flatMap((model) => model.blendControls)),
+        image_reference_controls: summarizeReferenceControlCoverage(imageModels),
         video_option_keys: sortedUnique(videoModels.flatMap((model) => model.optionKeys)),
         video_input_media_types: sortedUnique(videoModels.flatMap((model) =>
           model.options.find((option) => option.key === "input_media_type")?.stringValues ?? []
@@ -359,6 +361,22 @@ export function summarizeJimengAgentCatalog(bundle: JimengAgentCatalogBundle): J
       },
     } : null,
   }
+}
+
+function summarizeReferenceControlCoverage(imageModels: JimengAgentModel[]): JsonObject[] {
+  return JIMENG_REFERENCE_CONTROL_KINDS.map((control) => {
+    const evidence = jimengReferenceControlEvidence(control)
+    return {
+      control,
+      preview_supported: evidence.previewSupported,
+      evidence_status: evidence.status,
+      provider_evidence: evidence.providerEvidence,
+      gap: evidence.gap,
+      catalog_feat_models: modelsWithFeat(imageModels, control),
+      catalog_blend_models: modelsWithBlendControl(imageModels, control),
+      catalog_feat_config_models: modelsWithFeatConfig(imageModels, control),
+    }
+  })
 }
 
 async function fetchAgentSkills(input: {
@@ -590,6 +608,27 @@ function summarizeModel(model: JimengAgentModel): JsonObject {
     compliance_confirmation_required: model.complianceConfirmationRequired,
     task_cancel_enabled: model.taskCancelEnabled,
   }
+}
+
+function modelsWithFeat(models: JimengAgentModel[], control: JimengReferenceControlKind): string[] {
+  return models
+    .filter((model) => model.feats.includes(control))
+    .map((model) => model.modelReqKey)
+    .sort()
+}
+
+function modelsWithBlendControl(models: JimengAgentModel[], control: JimengReferenceControlKind): string[] {
+  return models
+    .filter((model) => model.blendControls.includes(control))
+    .map((model) => model.modelReqKey)
+    .sort()
+}
+
+function modelsWithFeatConfig(models: JimengAgentModel[], control: JimengReferenceControlKind): string[] {
+  return models
+    .filter((model) => model.featConfigKeys.includes(control))
+    .map((model) => model.modelReqKey)
+    .sort()
 }
 
 function defaultValueForIndex(input: {

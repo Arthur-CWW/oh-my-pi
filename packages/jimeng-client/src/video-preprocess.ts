@@ -48,6 +48,7 @@ export interface JimengVideoPreprocessPlan {
   inputList: JsonObject[]
   inputCount: number
   scenes: number[]
+  liveSubmit: JimengVideoPreprocessLiveSubmitStatus
 }
 
 export interface JimengVideoPreprocessQueryPlan {
@@ -55,6 +56,14 @@ export interface JimengVideoPreprocessQueryPlan {
   method: "POST"
   request: JsonObject
   submitIds: string[]
+  liveSubmit: JimengVideoPreprocessLiveSubmitStatus
+}
+
+export interface JimengVideoPreprocessLiveSubmitStatus {
+  supported: boolean
+  status: "observed-helper" | "dry-run-plan"
+  endpoint: typeof JIMENG_VIDEO_PREPROCESS_ENDPOINT | typeof JIMENG_VIDEO_PREPROCESS_RESULT_ENDPOINT
+  reason: string
 }
 
 export interface JimengVideoPreprocessTaskSummary {
@@ -91,13 +100,60 @@ const DEFAULT_QUERY = "aid=513695&device_platform=web&region=cn&da_version=3.1.3
 
 const NonEmptyString = Schema.String.check(Schema.isMinLength(1))
 
+const ImageCreateAvatarTaskSchema = Schema.Struct({
+  submit_id: NonEmptyString,
+  scene: Schema.Literal(JimengVideoPreprocessScene.ImageCreateAvatar),
+  image_create_avatar: Schema.Struct({
+    image: Schema.Struct({
+      image_uri: NonEmptyString,
+    }),
+    detection_scene: Schema.Union([NonEmptyString, Schema.Number]),
+  }),
+})
+
+const LipSyncVoiceRecommendationTaskSchema = Schema.Struct({
+  submit_id: NonEmptyString,
+  scene: Schema.Literal(JimengVideoPreprocessScene.LipSyncVoiceRecommendation),
+  lip_sync_voice_match: Schema.Struct({
+    image_list: Schema.NonEmptyArray(Schema.Struct({
+      image_uri: NonEmptyString,
+    })),
+  }),
+})
+
+const LipSyncAudioDetectTaskSchema = Schema.Struct({
+  submit_id: NonEmptyString,
+  scene: Schema.Literal(JimengVideoPreprocessScene.LipSyncAudioDetect),
+  lip_sync_audio_detect: Schema.Struct({
+    audio: Schema.Struct({
+      vid: NonEmptyString,
+    }),
+  }),
+})
+
+const LipSyncAudioSilenceTaskSchema = Schema.Struct({
+  submit_id: NonEmptyString,
+  scene: Schema.Literal(JimengVideoPreprocessScene.LipSyncAudioSilence),
+  lip_sync_audio_silence: Schema.Struct({
+    prompt: NonEmptyString,
+  }),
+})
+
 const GenericTaskSchema = Schema.Struct({
   submit_id: NonEmptyString,
   scene: Schema.Number,
 })
 
+const VideoPreprocessTaskSchema = Schema.Union([
+  ImageCreateAvatarTaskSchema,
+  LipSyncVoiceRecommendationTaskSchema,
+  LipSyncAudioDetectTaskSchema,
+  LipSyncAudioSilenceTaskSchema,
+  GenericTaskSchema,
+])
+
 const VideoPreprocessRequestSchema = Schema.Struct({
-  input_list: Schema.NonEmptyArray(GenericTaskSchema),
+  input_list: Schema.NonEmptyArray(VideoPreprocessTaskSchema),
 })
 
 const VideoPreprocessQueryRequestSchema = Schema.Struct({
@@ -118,6 +174,7 @@ export function buildJimengVideoPreprocessPlan(input: JimengVideoPreprocessInput
     inputList,
     inputCount: inputList.length,
     scenes: inputList.map((task) => task.scene as number),
+    liveSubmit: preprocessLiveSubmitStatus(JIMENG_VIDEO_PREPROCESS_ENDPOINT, false),
   }
 }
 
@@ -132,6 +189,7 @@ export function buildJimengVideoPreprocessQueryPlan(submitIds: string[]): Jimeng
     method: "POST",
     request,
     submitIds: normalized,
+    liveSubmit: preprocessLiveSubmitStatus(JIMENG_VIDEO_PREPROCESS_RESULT_ENDPOINT, false),
   }
 }
 
@@ -216,7 +274,8 @@ export function summarizeJimengVideoPreprocessPlan(plan: JimengVideoPreprocessPl
     scenes: plan.scenes,
     scene_names: plan.scenes.map((scene) => sceneNameFromValue(scene) ?? `unknown:${scene}`),
     request_keys: Object.keys(plan.request).sort(),
-    live_submit: false,
+    task_shapes: plan.inputList.map(summarizePreprocessTaskShape),
+    live_submit: summarizePreprocessLiveSubmitStatus(plan.liveSubmit),
     next_compare_command: "jimeng-browser-proxy request-plan-compare --plan <video-preprocess-plan.json> --rawNetwork <capture>/raw-network.jsonl",
   }
 }
@@ -227,7 +286,7 @@ export function summarizeJimengVideoPreprocessQueryPlan(plan: JimengVideoPreproc
     method: plan.method,
     submit_id_count: plan.submitIds.length,
     request_keys: Object.keys(plan.request).sort(),
-    live_submit: false,
+    live_submit: summarizePreprocessLiveSubmitStatus(plan.liveSubmit),
     next_compare_command: "jimeng-browser-proxy request-plan-compare --plan <video-preprocess-query-plan.json> --rawNetwork <capture>/raw-network.jsonl",
   }
 }
@@ -336,17 +395,24 @@ function buildVideoPreprocessRequestFromInput(input: JimengVideoPreprocessInput,
 
 function validateVideoPreprocessTask(task: JsonObject): void {
   const scene = task.scene
-  if (scene === JimengVideoPreprocessScene.ImageCreateAvatar && !hasNestedObject(task, "image_create_avatar")) {
-    throw validationError("ImageCreateAvatar task requires image_create_avatar.")
+  if (scene === JimengVideoPreprocessScene.ImageCreateAvatar) {
+    if (!hasNestedObject(task, "image_create_avatar")) throw validationError("ImageCreateAvatar task requires image_create_avatar.")
+    decodeVideoPreprocessContract(ImageCreateAvatarTaskSchema, task, "ImageCreateAvatar video-preprocess task")
+    return
   }
-  if (scene === JimengVideoPreprocessScene.LipSyncVoiceRecommendation && !hasNestedObject(task, "lip_sync_voice_match")) {
-    throw validationError("LipSyncVoiceRecommendation task requires lip_sync_voice_match.")
+  if (scene === JimengVideoPreprocessScene.LipSyncVoiceRecommendation) {
+    if (!hasNestedObject(task, "lip_sync_voice_match")) throw validationError("LipSyncVoiceRecommendation task requires lip_sync_voice_match.")
+    decodeVideoPreprocessContract(LipSyncVoiceRecommendationTaskSchema, task, "LipSyncVoiceRecommendation video-preprocess task")
+    return
   }
-  if (scene === JimengVideoPreprocessScene.LipSyncAudioDetect && !hasNestedObject(task, "lip_sync_audio_detect")) {
-    throw validationError("LipSyncAudioDetect task requires lip_sync_audio_detect.")
+  if (scene === JimengVideoPreprocessScene.LipSyncAudioDetect) {
+    if (!hasNestedObject(task, "lip_sync_audio_detect")) throw validationError("LipSyncAudioDetect task requires lip_sync_audio_detect.")
+    decodeVideoPreprocessContract(LipSyncAudioDetectTaskSchema, task, "LipSyncAudioDetect video-preprocess task")
+    return
   }
-  if (scene === JimengVideoPreprocessScene.LipSyncAudioSilence && !hasNestedObject(task, "lip_sync_audio_silence")) {
-    throw validationError("LipSyncAudioSilence task requires lip_sync_audio_silence.")
+  if (scene === JimengVideoPreprocessScene.LipSyncAudioSilence) {
+    if (!hasNestedObject(task, "lip_sync_audio_silence")) throw validationError("LipSyncAudioSilence task requires lip_sync_audio_silence.")
+    decodeVideoPreprocessContract(LipSyncAudioSilenceTaskSchema, task, "LipSyncAudioSilence video-preprocess task")
   }
 }
 
@@ -492,6 +558,42 @@ function buildVideoPreprocessHeaders(session: JimengSessionBundle): Record<strin
     pf: "7",
     loc: "cn",
     appid: "513695",
+  }
+}
+
+function summarizePreprocessLiveSubmitStatus(status: JimengVideoPreprocessLiveSubmitStatus): JsonObject {
+  return {
+    supported: status.supported,
+    status: status.status,
+    endpoint: status.endpoint,
+    reason: status.reason,
+  }
+}
+
+function preprocessLiveSubmitStatus(
+  endpoint: typeof JIMENG_VIDEO_PREPROCESS_ENDPOINT | typeof JIMENG_VIDEO_PREPROCESS_RESULT_ENDPOINT,
+  supported: boolean,
+): JimengVideoPreprocessLiveSubmitStatus {
+  return {
+    supported,
+    status: supported ? "observed-helper" : "dry-run-plan",
+    endpoint,
+    reason: supported
+      ? "OMP helper can submit with an injected authenticated session and transport."
+      : "OMP fixture evidence covers request construction only; parent validation must use focused replay/compare before any live call.",
+  }
+}
+
+function summarizePreprocessTaskShape(task: JsonObject): JsonObject {
+  const scene = numberValue(task.scene)
+  return {
+    submit_id_present: !!stringValue(task.submit_id),
+    scene,
+    scene_name: scene === null ? null : sceneNameFromValue(scene) ?? `unknown:${scene}`,
+    has_image_create_avatar: hasNestedObject(task, "image_create_avatar"),
+    has_lip_sync_voice_match: hasNestedObject(task, "lip_sync_voice_match"),
+    has_lip_sync_audio_detect: hasNestedObject(task, "lip_sync_audio_detect"),
+    has_lip_sync_audio_silence: hasNestedObject(task, "lip_sync_audio_silence"),
   }
 }
 

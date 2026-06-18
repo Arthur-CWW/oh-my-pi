@@ -9,6 +9,8 @@ import {
   summarizeJimengMixAudioVideoPlan,
   validateJimengMixAudioBatchRequest,
   validateJimengMixAudioSingleRequest,
+  validateJimengMixAudioQueryParams,
+  validateJimengMixAudioVideoPlanRequest,
   executeJimengMixAudioVideo,
   summarizeJimengMixAudioVideoResult,
   createJimengHttpTransport,
@@ -39,11 +41,14 @@ describe("Jimeng audio/video mix dry-run plan", () => {
       babi_param: JSON.stringify({ pf: "7", scene: "ugc_voice_over" }),
     })
     expect(() => validateJimengMixAudioSingleRequest(plan.request)).not.toThrow()
+    expect(() => validateJimengMixAudioVideoPlanRequest(plan.request, "single")).not.toThrow()
+    expect(() => validateJimengMixAudioQueryParams(plan.queryParams ?? {})).not.toThrow()
     expect(summarizeJimengMixAudioVideoPlan(plan)).toMatchObject({
       endpoint: "/mweb/v1/mix_audio_video",
       input_count: 1,
       has_babi_param: true,
       live_submit: false,
+      required_request_paths: ["request.input.audio_vid", "request.input.video_item_id"],
     })
   })
 
@@ -68,6 +73,26 @@ describe("Jimeng audio/video mix dry-run plan", () => {
     expect(() => validateJimengMixAudioBatchRequest(plan.request)).not.toThrow()
   })
 
+  test("validates observed single mix-audio dry-run request contract", () => {
+    const plan = buildJimengMixAudioVideoPlan({
+      audioVid: "v0personaVoiceAudio",
+      videoItemId: "generated-video-item-123",
+      babiParam: { pf: "7", scene: "ugc_voice_over" },
+    })
+
+    expect(plan.request).toEqual({
+      input: {
+        audio_vid: "v0personaVoiceAudio",
+        video_item_id: "generated-video-item-123",
+      },
+    })
+    expect(plan.queryParams).toEqual({
+      babi_param: JSON.stringify({ pf: "7", scene: "ugc_voice_over" }),
+    })
+    expect(() => validateJimengMixAudioVideoPlanRequest(plan.request, "single")).not.toThrow()
+    expect(() => validateJimengMixAudioQueryParams(plan.queryParams ?? {})).not.toThrow()
+  })
+
   test("snake-cases raw frontend body JSON and rejects missing required paths", () => {
     const plan = buildJimengMixAudioVideoPlan({
       body: parseJimengMixAudioJsonObject({
@@ -77,6 +102,7 @@ describe("Jimeng audio/video mix dry-run plan", () => {
         },
         optionalFrontendField: true,
       }, "mix-audio body"),
+      babiParam: { pf: "7", scene: "ugc_voice_over" },
     })
 
     expect(plan.request).toMatchObject({
@@ -89,8 +115,16 @@ describe("Jimeng audio/video mix dry-run plan", () => {
 
     expect(() => buildJimengMixAudioVideoPlan({
       body: { input: { audio_vid: "v0voice123" } } satisfies JsonObject,
+      babiParam: { pf: "7", scene: "ugc_voice_over" },
     })).toThrow("mix_audio_video request did not match required fields")
     expect(() => buildJimengMixAudioVideoPlan({ audioVid: "v0voice123" })).toThrow("--videoItemId")
+  })
+
+  test("requires observed babi_param query contract", () => {
+    expect(() => buildJimengMixAudioVideoPlan({
+      audioVid: "v0voice123",
+      videoItemId: "generated-video-item-1",
+    })).toThrow("babiParam")
   })
 })
 
@@ -213,7 +247,8 @@ describe("Jimeng audio/video mix service execution", () => {
         inputList: [
           { audioVid: "v0voice-a", videoItemId: "video-item-a" },
           { audioVid: "v0voice-b", videoItemId: "video-item-b" },
-        ]
+        ],
+        babiParam: { pf: "7", scene: "ugc_voice_over" },
       }
     })
 
@@ -246,6 +281,7 @@ describe("Jimeng audio/video mix service execution", () => {
       mix: {
         audioVid: "v0voice123",
         videoItemId: "video-item-1",
+        babiParam: { pf: "7", scene: "ugc_voice_over" },
       }
     })).rejects.toThrow("returned ret=1000 errmsg=invalid parameter")
   })
@@ -354,6 +390,7 @@ describe("Jimeng audio/video mix service execution", () => {
         mix: {
           audioVid: "v0voice123",
           videoItemId: "video-item-1",
+          babiParam: { pf: "7", scene: "ugc_voice_over" },
         }
       })
 
@@ -374,6 +411,7 @@ describe("Jimeng audio/video mix service execution", () => {
         mix: {
           audioVid: "v0voice123",
           videoItemId: "video-item-1",
+          babiParam: { pf: "7", scene: "ugc_voice_over" },
         }
       })
 

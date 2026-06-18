@@ -47,7 +47,7 @@ jimeng-kimi-worker: kimi-latest
 
 The project worker agent intentionally does not expose `bash`. This prevents simple workers from spending cycles on validation, git inspection, foreground browser automation, or provider commands that the GPT-5.5 parent must run once against the integrated tree.
 
-Project `.omp/config.yml` sets `task.isolation.mode: apfs` on this macOS/APFS workstation. Prefer task isolation for writing workers: set `isolated: true` on each implementation task item so OMP creates an APFS CoW workspace, captures the worker patch, and cleans the workspace after completion. Read-only planning workers can stay non-isolated unless they need scratch writes.
+Project `.omp/config.yml` sets `task.isolation.mode: apfs` on this macOS/APFS workstation. Prefer task isolation for writing workers: set `isolated: true` on each implementation task item so OMP creates an APFS CoW workspace, captures the worker patch, and cleans the workspace after completion. Read-only planning workers can stay non-isolated unless they need scratch writes. OAuth-only subagent auth is no longer enforced by repo-local patches; use explicit subscription-lane model IDs such as `google-antigravity/gemini-3.5-flash-low` when avoiding inherited paid API-key lanes.
 
 Launch workers from the parent GPT-5.5 process with one OMP `task` batch. Do not shell out to separate `omp` processes for normal worker fan-out.
 
@@ -146,7 +146,7 @@ Parent-owned after workers finish:
 For a finished worker, run only the relevant focused checks first:
 
 ```bash
-cd /Users/arthur/projects/pi-web-access/packages/jimeng-client
+cd /Users/arthur/agents/web-access/packages/jimeng-client
 mise exec -- bun test ./test/<worker-test>.test.ts
 mise exec -- bun run typecheck
 ```
@@ -154,10 +154,10 @@ mise exec -- bun run typecheck
 After integration, run:
 
 ```bash
-cd /Users/arthur/projects/pi-web-access/packages/jimeng-client
+cd /Users/arthur/agents/web-access/packages/jimeng-client
 mise exec -- bun run test
 mise exec -- bun run test:vitest
 mise exec -- bun run typecheck
-cd /Users/arthur/projects/pi-web-access
+cd /Users/arthur/agents/web-access
 git diff --check
 ```

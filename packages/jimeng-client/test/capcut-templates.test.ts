@@ -26,6 +26,7 @@ import {
   parseCapCutTemplateRatioCatalogBody,
   parseCapCutTemplateSceneCatalogBody,
   parseCapCutEndpointProbeVariants,
+  parseCapCutTemplateMiningBody,
   readJimengHttpCassette,
   runCapCutEndpointProbe,
   summarizeCapCutCollectionTemplates,
@@ -33,6 +34,7 @@ import {
   summarizeCapCutTemplateCategories,
   summarizeCapCutTemplateCollections,
   summarizeCapCutTemplateDetail,
+  summarizeCapCutTemplateMining,
   summarizeCapCutTemplateStaticCatalog,
   type JimengFetch,
   type JimengSessionBundle,
@@ -226,6 +228,66 @@ describe("CapCut commercial template helpers", () => {
     })
     expect(JSON.stringify(summary)).not.toContain("signed.example.invalid")
     expect(JSON.stringify(summary)).not.toContain("x-signature=secret")
+  })
+
+  test("parses typed template mining rows from non-mutating search responses", () => {
+    const collectionBody = capCutCollectionTemplatesBody()
+    const collectionData = collectionBody.data as { item_list: unknown[] }
+    const result = parseCapCutTemplateMiningBody({
+      ret: "0",
+      errmsg: "success",
+      data: {
+        has_more: false,
+        cursor: 0,
+        template_source: "search",
+        template_list: collectionData.item_list,
+      },
+    }, "/lv/v1/cc_web/replicate/search_templates")
+    const summary = summarizeCapCutTemplateMining(result)
+
+    expect(result).toMatchObject({
+      endpoint: "/lv/v1/cc_web/replicate/search_templates",
+      blockedReason: null,
+      templateRowsPath: "data.template_list",
+      hasMore: false,
+      cursor: 0,
+    })
+    expect(result.templates[0]).toMatchObject({
+      id: "7369116096600771846",
+      title: "FACEBOOK ADS - BEAUTY",
+      author: { uid: "6995172659920372737", name: "DK Candra" },
+    })
+    expect(summary).toMatchObject({
+      status: "ok",
+      template_count: 1,
+      template_rows_path: "data.template_list",
+      templates: [
+        {
+          id: "7369116096600771846",
+          cover_url_present: true,
+          category_ids: [10032, 10034],
+        },
+      ],
+    })
+    expect(JSON.stringify(summary)).not.toContain("signed.example.invalid")
+    expect(JSON.stringify(summary)).not.toContain("x-signature=secret")
+  })
+
+  test("keeps exact blocked reasons for template mining probes that are still parked", () => {
+    const result = parseCapCutTemplateMiningBody({
+      ret: 1000,
+      errmsg: "param error",
+      data: null,
+    }, "/lv/v1/cc_web/plane/fuzzy_search_templates")
+
+    expect(summarizeCapCutTemplateMining(result)).toMatchObject({
+      endpoint: "/lv/v1/cc_web/plane/fuzzy_search_templates",
+      status: "blocked",
+      ret: 1000,
+      errmsg: "param error",
+      blocked_reason: "ret=1000: param error",
+      template_count: 0,
+    })
   })
 
   test("fetches template detail by web id and summarizes without raw template data", async () => {

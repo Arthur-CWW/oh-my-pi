@@ -60,7 +60,7 @@ This wave avoids central-file conflicts while still moving the highest-value pac
 
 ## GPT-5.5 Parent / OMP Subagent Orchestration
 
-Use OMP's default `task` subagents for worker fan-out. The main GPT-5.5 Codex process is the parent orchestrator/reviewer; implementation and read-only planning workers use the project agent `.omp/agents/jimeng-gemini-worker.md`, which pins Gemini 3.5 Flash for bounded worker slices.
+Use OMP's default `task` subagents for worker fan-out. The main GPT-5.5 Codex process is the parent orchestrator/reviewer; implementation and read-only planning workers use the project agent `.omp/agents/jimeng-gemini-worker.md`, which pins Gemini 3.5 Flash for bounded worker slices. If Gemini is unavailable or rate-limited, use `.omp/agents/jimeng-kimi-worker.md` as the latest-Kimi fallback for the same simple slices.
 
 ### Parent Responsibilities
 
@@ -75,7 +75,7 @@ Use OMP's default `task` subagents for worker fan-out. The main GPT-5.5 Codex pr
 Each worker brief should include:
 
 ```txt
-Repo: /Users/arthur/projects/pi-web-access
+Repo: /Users/arthur/agents/web-access
 Goal docs:
 - @docs/plans/jimeng-dreamina-cli-goal.md
 - @docs/plans/jimeng-fast-contract-extraction.md
@@ -115,13 +115,20 @@ Use agent:
 jimeng-gemini-worker
 ```
 
-The project agent sets:
+Fallback agent:
 
 ```txt
-model: gemini-3.5-flash
+jimeng-kimi-worker
 ```
 
-Project `.omp/config.yml` sets `task.isolation.mode: auto`. Prefer `isolated: true` for implementation/write workers so OMP creates a CoW workspace, captures the patch/branch result, and cleans the temporary workspace. Keep read-only planning workers non-isolated unless they need scratch writes.
+The project agents set:
+
+```txt
+jimeng-gemini-worker: gemini-3.5-flash
+jimeng-kimi-worker: kimi-latest
+```
+
+Project `.omp/config.yml` sets `task.isolation.mode: apfs` on this macOS/APFS workstation. Prefer `isolated: true` for implementation/write workers so OMP creates an APFS CoW workspace, captures the patch/branch result, and cleans the temporary workspace. Keep read-only planning workers non-isolated unless they need scratch writes.
 
 The task batch shape is:
 
@@ -157,11 +164,11 @@ Do not store credentials, cookies, signed URLs, or raw provider responses in wor
 5. Parent runs:
 
 ```bash
-cd /Users/arthur/projects/pi-web-access/packages/jimeng-client
+cd /Users/arthur/agents/web-access/packages/jimeng-client
 mise exec -- bun run test
 mise exec -- bun run test:vitest
 mise exec -- bun run typecheck
-cd /Users/arthur/projects/pi-web-access
+cd /Users/arthur/agents/web-access
 git diff --check
 ```
 
@@ -183,7 +190,7 @@ Promote `/mweb/v1/mix_audio_video` and `/mweb/v1/mix_audio_videos` from dry-run 
 Ready-to-run brief:
 
 ```txt
-Repo: /Users/arthur/projects/pi-web-access
+Repo: /Users/arthur/agents/web-access
 
 Read first:
 - @docs/plans/jimeng-dreamina-cli-goal.md
@@ -232,7 +239,7 @@ Do not run:
 - project-wide commands
 
 Parent validation after integration:
-- cd /Users/arthur/projects/pi-web-access/packages/jimeng-client
+- cd /Users/arthur/agents/web-access/packages/jimeng-client
 - mise exec -- bun test ./test/mix-audio.test.ts
 - mise exec -- bun run typecheck
 
@@ -254,7 +261,7 @@ Inspect `packages/jimeng-client/src/generation-contract.ts`, generation client/c
 Ready-to-run brief:
 
 ```txt
-Repo: /Users/arthur/projects/pi-web-access
+Repo: /Users/arthur/agents/web-access
 
 Read first:
 - @docs/plans/jimeng-dreamina-cli-goal.md
@@ -297,7 +304,7 @@ Inspect CapCut/Jimeng template code and proof references. Classify remaining blo
 Ready-to-run brief:
 
 ```txt
-Repo: /Users/arthur/projects/pi-web-access
+Repo: /Users/arthur/agents/web-access
 
 Read first:
 - @docs/plans/jimeng-dreamina-cli-goal.md

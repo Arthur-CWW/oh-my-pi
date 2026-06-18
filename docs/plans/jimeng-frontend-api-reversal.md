@@ -280,7 +280,7 @@ bun packages/jimeng-client/src/network-recorder.ts \
 ## Handoff prompt for a worker agent
 
 ```txt
-You are the Jimeng/Dreamina API reversal lane in /Users/arthur/projects/pi-web-access.
+You are the Jimeng/Dreamina API reversal lane in /Users/arthur/agents/web-access.
 Read docs/plans/README.md and docs/plans/jimeng-frontend-api-reversal.md.
 Only edit packages/jimeng-client/**, docs/provider/**, and docs/plans/jimeng-frontend-api-reversal.md unless explicitly handed off.
 Current direct-client baseline includes workbench text-to-image, config catalog probes, signed built-in voice feed replay, direct TTS, ImageX local image upload, and first-frame image-to-video with MP4 proof.

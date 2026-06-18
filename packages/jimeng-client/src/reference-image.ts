@@ -49,6 +49,14 @@ export interface JimengReferenceImageInspectionResult {
   faceRecognition: JimengFaceRecognizeResult | null
 }
 
+export function buildJimengImageDescriptionRequest(input: { imageUri: string }): JsonObject {
+  return { file_uri: parseImageUri(input.imageUri) }
+}
+
+export function buildJimengFaceRecognizeRequest(input: { imageUri: string }): JsonObject {
+  return { image_uri_list: [parseImageUri(input.imageUri)] }
+}
+
 export async function describeJimengImage(input: {
   client?: JimengClient
   fetch?: JimengFetch
@@ -58,7 +66,7 @@ export async function describeJimengImage(input: {
 }): Promise<JimengImageDescriptionResult> {
   const imageUri = parseImageUri(input.imageUri)
   const client = input.client ?? new JimengClient({ fetch: input.fetch })
-  const request = { file_uri: imageUri }
+  const request = buildJimengImageDescriptionRequest({ imageUri })
   const response = await client.requestText(buildReferenceImageUrl("/mweb/v1/get_image_description", input.babiParam), {
     method: "POST",
     headers: buildReferenceImageHeaders(input.session),
@@ -90,7 +98,7 @@ export async function recognizeJimengImageFaces(input: {
 }): Promise<JimengFaceRecognizeResult> {
   const imageUri = parseImageUri(input.imageUri)
   const client = input.client ?? new JimengClient({ fetch: input.fetch })
-  const request = { image_uri_list: [imageUri] }
+  const request = buildJimengFaceRecognizeRequest({ imageUri })
   const response = await client.requestText(buildReferenceImageUrl("/mweb/v1/face_recognize", input.babiParam), {
     method: "POST",
     headers: buildReferenceImageHeaders(input.session),

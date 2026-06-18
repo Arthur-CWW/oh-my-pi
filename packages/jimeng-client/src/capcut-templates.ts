@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto"
+import { Schema } from "effect"
 import { z } from "zod"
 import { type JimengSessionBundle } from "./capture"
 import { JimengClient, type JimengFetch } from "./client"
@@ -125,6 +126,24 @@ export interface CapCutCollectionTemplateItem {
   isMultiLang: boolean | null
   textThemeCoverCount: number
   textThemeEffectCount: number
+}
+
+export type CapCutTemplateMiningEndpoint =
+  | "/lv/v1/cc_web/replicate/search_templates"
+  | "/lv/v1/cc_web/plane/fuzzy_search_templates"
+  | "/lv/v1/cc_web/plane/batch_get_collection_templates"
+
+export interface CapCutTemplateMiningParseResult {
+  endpoint: CapCutTemplateMiningEndpoint | null
+  ret: string | number | null
+  errmsg: string | null
+  blockedReason: string | null
+  cursor: number | null
+  hasMore: boolean | null
+  templateSource: string | null
+  templateRowsPath: "data.item_list" | "data.template_list" | "data.templates" | null
+  dataKeys: string[]
+  templates: CapCutCollectionTemplateItem[]
 }
 
 export interface CapCutCollectionTemplatesResult {
@@ -671,6 +690,27 @@ export function parseCapCutCollectionTemplatesBody(body: unknown): {
   }
 }
 
+export function parseCapCutTemplateMiningBody(body: unknown, endpoint: CapCutTemplateMiningEndpoint | null = null): CapCutTemplateMiningParseResult {
+  const envelope = decodeCapCutMiningContract(CapCutTemplateMiningEnvelopeWireSchema, body, "CapCut template mining")
+  const data = envelope.data ?? null
+  const rows = data ? pickCapCutTemplateMiningRows(data) : { path: null, items: [] }
+  const ret = envelope.ret ?? null
+  const errmsg = envelope.errmsg ?? null
+  return {
+    endpoint,
+    ret,
+    errmsg,
+    blockedReason: capCutTemplateMiningBlockedReason(ret, errmsg),
+    cursor: data ? numberValue(data.new_cursor ?? data.cursor) : null,
+    hasMore: data ? booleanValue(data.has_more) : null,
+    templateSource: data ? stringValue(data.template_source) : null,
+    templateRowsPath: rows.path,
+    dataKeys: data ? Object.keys(data).sort() : [],
+    templates: rows.items.map(parseCapCutCollectionTemplateItem),
+  }
+}
+
+
 export function parseCapCutTemplateDetailBody(body: unknown): CapCutTemplateDetail {
   const envelope = parseCapCutEnvelopeBody(body, "CapCut template detail")
   const data = CapCutTemplateDetailDataSchema.parse(envelope.data)
@@ -818,6 +858,47 @@ export function summarizeCapCutCollectionTemplates(result: Pick<
     })),
   }
 }
+
+export function summarizeCapCutTemplateMining(result: Pick<
+  CapCutTemplateMiningParseResult,
+  "endpoint" | "ret" | "errmsg" | "blockedReason" | "cursor" | "hasMore" | "templateSource" | "templateRowsPath" | "dataKeys" | "templates"
+>): Record<string, unknown> {
+  return {
+    endpoint: result.endpoint,
+    status: result.blockedReason ? "blocked" : "ok",
+    ret: result.ret,
+    errmsg: result.errmsg,
+    blocked_reason: result.blockedReason,
+    cursor: result.cursor,
+    has_more: result.hasMore,
+    template_source: result.templateSource,
+    template_rows_path: result.templateRowsPath,
+    data_keys: result.dataKeys,
+    template_count: result.templates.length,
+    templates: result.templates.map((template) => ({
+      id: template.id,
+      numeric_id: template.numericId,
+      title: template.title,
+      short_title: template.shortTitle,
+      item_type: template.itemType,
+      status: template.status,
+      cover_url_present: template.coverUrlPresent,
+      cover_size: template.coverSize,
+      optimized_cover_url_keys: template.optimizedCoverUrlKeys,
+      category_ids: template.categoryIds,
+      author: template.author,
+      feature_count: template.featureCount,
+      template_version: template.templateVersion,
+      tags: template.tags,
+      scene_ids: template.sceneIds,
+      canvas_size: template.canvasSize,
+      is_multi_lang: template.isMultiLang,
+      text_theme_cover_count: template.textThemeCoverCount,
+      text_theme_effect_count: template.textThemeEffectCount,
+    })),
+  }
+}
+
 
 export function summarizeCapCutTemplateDetail(result: Pick<
   CapCutTemplateDetailResult,
@@ -971,6 +1052,28 @@ const CapCutTemplateDetailDataSchema = z.object({
   template_id: z.union([z.string(), z.number()]),
 }).passthrough()
 
+const OptionalCapCutString = Schema.optional(Schema.NullOr(Schema.String))
+const OptionalCapCutNumber = Schema.optional(Schema.NullOr(Schema.Number))
+const OptionalCapCutBoolean = Schema.optional(Schema.NullOr(Schema.Boolean))
+const CapCutStringOrNumberWireSchema = Schema.Union([Schema.String, Schema.Number])
+const CapCutTemplateMiningDataWireSchema = Schema.Struct({
+  item_list: Schema.optional(Schema.Array(Schema.Unknown)),
+  template_list: Schema.optional(Schema.Array(Schema.Unknown)),
+  templates: Schema.optional(Schema.Array(Schema.Unknown)),
+  has_more: OptionalCapCutBoolean,
+  new_cursor: OptionalCapCutNumber,
+  cursor: OptionalCapCutNumber,
+  template_source: OptionalCapCutString,
+})
+const CapCutTemplateMiningEnvelopeWireSchema = Schema.Struct({
+  ret: Schema.optional(Schema.NullOr(CapCutStringOrNumberWireSchema)),
+  errmsg: OptionalCapCutString,
+  data: Schema.optional(Schema.NullOr(CapCutTemplateMiningDataWireSchema)),
+})
+type CapCutTemplateMiningDataWire = Schema.Schema.Type<typeof CapCutTemplateMiningDataWireSchema>
+
+
+
 const CapCutProbeEndpointSchema = z.string()
   .min(1)
   .transform((value) => {
@@ -1071,7 +1174,39 @@ function omitUndefined(record: Record<string, unknown>): Record<string, unknown>
   return Object.fromEntries(Object.entries(record).filter(([, value]) => value !== undefined))
 }
 
-function parseCapCutCollectionTemplateItem(item: z.infer<typeof CapCutCollectionTemplatesDataSchema>["item_list"][number]): CapCutCollectionTemplateItem {
+function pickCapCutTemplateMiningRows(data: CapCutTemplateMiningDataWire): {
+  path: CapCutTemplateMiningParseResult["templateRowsPath"]
+  items: readonly unknown[]
+} {
+  if (data.item_list) return { path: "data.item_list", items: data.item_list }
+  if (data.template_list) return { path: "data.template_list", items: data.template_list }
+  if (data.templates) return { path: "data.templates", items: data.templates }
+  return { path: null, items: [] }
+}
+
+function capCutTemplateMiningBlockedReason(ret: string | number | null, errmsg: string | null): string | null {
+  if (ret === null || ret === "0" || ret === 0) return null
+  return errmsg ? `ret=${ret}: ${errmsg}` : `ret=${ret}`
+}
+
+function decodeCapCutMiningContract<A>(schema: Schema.Decoder<A>, value: unknown, operation: string): A {
+  try {
+    return Schema.decodeUnknownSync(schema)(value)
+  } catch (error) {
+    throw jimengError({
+      category: "upstream",
+      code: "CAPCUT_TEMPLATE_MINING_CONTRACT_CHANGED",
+      message: `${operation} response no longer matches the expected typed mining contract.`,
+      retryable: false,
+      details: {
+        operation,
+        error: error instanceof Error ? error.message : String(error),
+      },
+    })
+  }
+}
+
+function parseCapCutCollectionTemplateItem(item: unknown): CapCutCollectionTemplateItem {
   const record = asRecord(item) ?? {}
   const numericId = stringOrNumber(record.id)
   const id = stringValue(record.web_id) ?? numericId

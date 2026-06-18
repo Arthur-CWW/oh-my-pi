@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto"
+import { Schema } from "effect"
 import { type JimengSessionBundle } from "./capture"
 import { assertNoRiskError, JimengClient, type JimengFetch } from "./client"
 import { jimengError } from "./errors"
@@ -7,6 +8,11 @@ import { type JimengImageUploadSummary } from "./upload"
 
 const DEFAULT_QUERY = "aid=513695&web_version=7.5.0&da_version=3.3.17&aigc_features=app_lip_sync"
 const DEFAULT_WEB_ID = "7647092336736290330"
+
+const NonEmptyString = Schema.String.check(Schema.isMinLength(1))
+const SubjectVoiceRequestSchema = Schema.Struct({
+  image_uri: NonEmptyString,
+})
 
 export interface JimengSubjectsQuery {
   cursor?: number
@@ -234,7 +240,13 @@ export function buildJimengSubjectDeleteRequest(input: JimengSubjectDeleteInput)
 }
 
 export function buildJimengSubjectVoiceRequest(input: JimengSubjectVoiceInput): JsonObject {
-  return { image_uri: parseImageUri(input.imageUri) }
+  const request = { image_uri: parseImageUri(input.imageUri) }
+  validateJimengSubjectVoiceRequest(request)
+  return request
+}
+
+export function validateJimengSubjectVoiceRequest(request: JsonObject): void {
+  decodeSubjectContract(SubjectVoiceRequestSchema, request, "Jimeng subject voice request")
 }
 
 export async function fetchJimengSubjects(input: {
@@ -951,6 +963,21 @@ function extractCookieValue(cookie: string, name: string): string | null {
     if (rawKey === name) return decodeURIComponent(rawValue.join("="))
   }
   return null
+}
+
+function decodeSubjectContract<A>(schema: Schema.Decoder<A>, value: JsonValue, operation: string): A {
+  try {
+    return Schema.decodeUnknownSync(schema)(value)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    throw jimengError({
+      category: "validation",
+      code: "JIMENG_SUBJECT_CONTRACT_CHANGED",
+      message: `${operation} did not match required fields.`,
+      retryable: false,
+      details: { operation, error: message },
+    })
+  }
 }
 
 function assertJimengSuccess(body: JsonValue, operation = "subjects request"): void {

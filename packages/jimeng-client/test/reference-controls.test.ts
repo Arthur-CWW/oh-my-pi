@@ -10,13 +10,16 @@ import {
   defaultPoseDetectBabiParam,
   detectJimengPose,
   generateJimengControlNetPreview,
+  jimengReferenceControlEvidence,
   JimengClient,
   JimengError,
   normalizeJimengControlNetStrength,
   parseJimengControlNetFitMode,
   parseJimengControlNetKind,
+  parseJimengReferenceControlKind,
   readJimengHttpCassette,
   summarizeControlNetReferenceInspection,
+  type JimengControlNetKind,
   type JimengFetch,
   type JimengSessionBundle,
 } from "../src"
@@ -29,36 +32,45 @@ const session: JimengSessionBundle = {
 }
 
 describe("Jimeng reference control helpers", () => {
-  test("validates controlnet flags", () => {
+  test("validates observed ControlNet flags and explicit catalog-only gaps", () => {
     expect(parseJimengControlNetKind(undefined)).toBe("pose")
     expect(parseJimengControlNetKind("DEPTH")).toBe("depth")
+    expect(parseJimengReferenceControlKind("style")).toBe("style")
     expect(parseJimengControlNetFitMode(undefined)).toBe("center_crop")
     expect(parseJimengControlNetFitMode("adapt_to_canvas")).toBe("adapt_to_canvas")
     expect(normalizeJimengControlNetStrength(undefined)).toBe(0.6)
     expect(normalizeJimengControlNetStrength(60)).toBe(0.6)
     expect(normalizeJimengControlNetStrength(0.75)).toBe(0.75)
+    expect(jimengReferenceControlEvidence("style")).toMatchObject({
+      previewSupported: false,
+      status: "catalog_only_missing_capture",
+      gap: expect.stringContaining("No observed /mweb/v1/blend_preview style"),
+    })
     expect(() => parseJimengControlNetKind("style")).toThrow(JimengError)
+    expect(() => parseJimengReferenceControlKind("lineart")).toThrow(JimengError)
     expect(() => parseJimengControlNetFitMode("stretch")).toThrow(JimengError)
     expect(() => normalizeJimengControlNetStrength(120)).toThrow(JimengError)
   })
 
-  test("builds the frontend blend_preview request shape", () => {
-    expect(buildJimengControlNetPreviewRequest({
-      imageUri: "tos-cn-i-tb4s082cfz/reference.png",
-      control: "pose",
-      strength: 60,
-    })).toEqual({
-      model: "img2img_xl_sft",
-      ability: {
-        name: "control_net",
-        image_uri_list: ["tos-cn-i-tb4s082cfz/reference.png"],
-        control_net_list: [{
-          name: "pose",
-          strength: 0.6,
-          image_index: 0,
-        }],
-      },
-    })
+  test("builds observed frontend blend_preview request shapes for pose, depth, and canny", () => {
+    for (const control of ["pose", "depth", "canny"] as JimengControlNetKind[]) {
+      expect(buildJimengControlNetPreviewRequest({
+        imageUri: "tos-cn-i-tb4s082cfz/reference.png",
+        control,
+        strength: 60,
+      })).toEqual({
+        model: "img2img_xl_sft",
+        ability: {
+          name: "control_net",
+          image_uri_list: ["tos-cn-i-tb4s082cfz/reference.png"],
+          control_net_list: [{
+            name: control,
+            strength: 0.6,
+            image_index: 0,
+          }],
+        },
+      })
+    }
   })
 
   test("generates a controlnet preview for a provider image URI", async () => {
@@ -278,6 +290,39 @@ describe("Jimeng reference control helpers", () => {
     expect(summary.pose_detected).toBe(true)
     expect(JSON.stringify(summary)).not.toContain("signed.example.invalid")
     expect(JSON.stringify(summary)).not.toContain("X-Amz-Signature")
+  })
+
+  test("builds save params for every observed ControlNet control and leaves style catalog-only", () => {
+    for (const control of ["pose", "depth", "canny"] as JimengControlNetKind[]) {
+      expect(buildJimengControlNetSaveParams({
+        imageUri: "tos-cn-i-tb4s082cfz/reference.png",
+        control,
+        strength: 60,
+        previewImageUri: "tos-cn-i-tb4s082cfz/preview.png",
+        previewImageUrl: "https://signed.example.invalid/preview.png?X-Amz-Signature=secret",
+        fitMode: "adapt_to_canvas",
+      })).toMatchObject({
+        model: {
+          abilityName: "control_net",
+          controlNet: {
+            name: control,
+            strength: 0.6,
+            imageIndex: 0,
+            [control]: {
+              originImage: { imageUri: "tos-cn-i-tb4s082cfz/reference.png" },
+              previewImage: { imageUri: "tos-cn-i-tb4s082cfz/preview.png" },
+            },
+          },
+          extra: {
+            name: control,
+            fitMode: "adapt_to_canvas",
+            imageIndex: 0,
+          },
+        },
+      })
+      expect(jimengReferenceControlEvidence(control).previewSupported).toBe(true)
+    }
+    expect(jimengReferenceControlEvidence("style").previewSupported).toBe(false)
   })
 })
 

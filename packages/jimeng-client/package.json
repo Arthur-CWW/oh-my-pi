@@ -8,14 +8,17 @@
     ".": "./src/index.ts",
     "./cli": "./src/cli.ts",
     "./dreamina-compatible-cli": "./src/dreamina-compatible-cli.ts",
-    "./browser-proxy-cli": "./src/browser-proxy-cli.ts"
+    "./browser-proxy-cli": "./src/browser-proxy-cli.ts",
+    "./artifact-dashboard": "./src/artifact-dashboard.ts"
   },
   "bin": {
     "jimeng-direct": "./src/cli.ts",
     "jimeng-dreamina": "./src/dreamina-compatible-cli.ts",
-    "jimeng-browser-proxy": "./src/browser-proxy-cli.ts"
+    "jimeng-browser-proxy": "./src/browser-proxy-cli.ts",
+    "jimeng-artifacts": "./src/artifact-dashboard.ts"
   },
   "dependencies": {
+    "drizzle-orm": "^0.45.0",
     "effect": "^4.0.0-beta.71",
     "zod": "^4.3.6"
   },

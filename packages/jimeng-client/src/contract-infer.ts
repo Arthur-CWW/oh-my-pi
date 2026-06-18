@@ -53,6 +53,7 @@ export interface JimengContractEndpointSummary {
   effect_schema_ir: JimengEffectSchemaIr
   cli_flag_suggestions: readonly string[]
   registry_patch_draft: JsonObject
+  observed_packet_slices: readonly string[]
 }
 
 export interface JimengContractPathSummary {
@@ -220,6 +221,7 @@ export function writeJimengContractInferenceMarkdown(inference: JimengContractIn
       `- document kinds: ${endpoint.document_kinds.join(", ") || "unknown"}`,
       `- HTTP statuses: ${endpoint.http_statuses.join(", ") || "unknown"}`,
       `- ret values: ${endpoint.rets.join(", ") || "unknown"}`,
+      `- observed packet slices: ${endpoint.observed_packet_slices.length > 0 ? endpoint.observed_packet_slices.map((slice) => `\`${slice}\``).join(", ") : "none inferred"}`,
       "",
       "| Contract path | Types | Example |",
       "|---|---|---|",
@@ -325,11 +327,13 @@ function summarizeEndpoint(endpoint: string, documents: LoadedContractDocument[]
     .map((stat) => pathStatSummary(stat, documents.length))
     .filter((stat) => isUsefulPath(stat.path))
     .sort(comparePathSummary)
-  const strictRequiredPaths = observedPaths
+  const contractPaths = observedPaths.filter((stat) => isEndpointContractPath(stat.path))
+  const schemaCandidatePaths = contractPaths.length > 0 ? contractPaths : observedPaths
+  const strictRequiredPaths = schemaCandidatePaths
     .filter((stat) => stat.required && stat.path.split(".").length <= 8 && !isMostlyVolatilePath(stat.path))
     .slice(0, maxPaths)
   const frequentPathThreshold = Math.max(2, Math.ceil(documents.length / 2))
-  const frequentStablePaths = observedPaths
+  const frequentStablePaths = schemaCandidatePaths
     .filter((stat) => stat.sample_count >= frequentPathThreshold && stat.path.split(".").length <= 8 && !isMostlyVolatilePath(stat.path))
     .slice(0, maxPaths)
   const requiredPaths = strictRequiredPaths.length > 0 ? strictRequiredPaths : frequentStablePaths
@@ -360,6 +364,7 @@ function summarizeEndpoint(endpoint: string, documents: LoadedContractDocument[]
       note: "Generated scaffold only. Promote relied-on paths into hand-reviewed Effect Schema and keep provider-additive fields permissive.",
     },
     cli_flag_suggestions: inferCliFlagSuggestions(observedPaths),
+    observed_packet_slices: inferObservedPacketSlices(endpoint, documents, observedPaths),
     registry_patch_draft: {
       endpoint,
       status: "partial",
@@ -436,6 +441,7 @@ function inferCliFlagSuggestions(paths: readonly JimengContractPathSummary[]): s
     [/originVideo\.originVideo\.uri|video_uri|videoUri/i, "--videoUri"],
     [/video_item_id|videoItemId/i, "--videoItemId"],
     [/task_id_list|taskIds/i, "--taskIds"],
+    [/submit_id_list|submitIds/i, "--submitIds"],
     [/local_item_id|localItemId|voiceId/i, "--voice-id"],
     [/voice_clone\.name|request\.name/i, "--name"],
     [/ttsInfo\.speed|voice_speed|speech_speed/i, "--speed"],
@@ -456,6 +462,24 @@ function inferCliFlagSuggestions(paths: readonly JimengContractPathSummary[]): s
     if (pattern.test(pathText)) flags.add(flag)
   }
   return [...flags].sort()
+}
+
+function inferObservedPacketSlices(
+  endpoint: string,
+  documents: readonly LoadedContractDocument[],
+  paths: readonly JimengContractPathSummary[],
+): string[] {
+  const pathText = paths.map((entry) => entry.path).join("\n")
+  const commands = documents.map((document) => document.command ?? "").join("\n")
+  const relativePaths = documents.map((document) => document.relativePath).join("\n")
+  const combined = `${endpoint}\n${commands}\n${relativePaths}\n${pathText}`
+  const slices = new Set<string>()
+  if (/realmanAvatar|originImage|lip-sync-image/i.test(combined)) slices.add("lip-sync-image-avatar")
+  if (/lipSyncUserVideo|originVideo|lip-sync-video/i.test(combined)) slices.add("lip-sync-vod")
+  if (/image_create_avatar|LipSyncVoiceRecommendation|lip_sync_voice_match|video-preprocess/i.test(combined)) slices.add("video-preprocess")
+  if (/submit_id_list|mget_pre_process_result|preprocess-query/i.test(combined)) slices.add("video-preprocess-query")
+  if (/live_submit/i.test(combined)) slices.add("unsupported-live-submit-gap-observed")
+  return [...slices].sort()
 }
 
 function normalizeContractValue(value: JsonValue, keyHint = ""): JsonValue {
@@ -659,18 +683,31 @@ function stablePlaceholder(key: string, value: string): string {
   if (/submit|history|task|logid|log_id|generate_id|capflow|uuid|hash|md5/i.test(key)) return `[${key.toUpperCase()}]`
   return value
 }
-
 function isVolatilePathKey(key: string): boolean {
-  return /submit_id|submitId|history_id|historyId|task_id|taskId|logid|log_id|generate_id|capflow_id|created_time|finish_time|systime|uid|url|uri|cookie/i.test(key)
+  return /(^|\.|_)(id|uid|uri|url|logid|log_id|systime|created_time|finish_time|generate_id|submit_id|submitId|history_id|historyId|task_id|taskId|capflow_id|uuid|hash|md5)(\.|_|$)/i.test(key)
+}
+
+function isUsefulPath(contractPath: string): boolean {
+  return (!contractPath.endsWith("[]") || isEndpointContractPath(contractPath)) && !/browser_session|submit_headers|poll_headers|cookie/i.test(contractPath)
 }
 
 function isMostlyVolatilePath(contractPath: string): boolean {
   return /(^|\.)(id|uid|uri|url|cookie|logid|log_id|systime|created_time|finish_time|atIso|generate_id|history_group_key_md5|submit_id|submitId|history_id|historyId|task_id|taskId|capflow_id|response_text_sha256|responseTextSha256|saved_file|artifact|artifacts)(\.|$)/i.test(contractPath)
 }
 
-function isUsefulPath(contractPath: string): boolean {
-  return !contractPath.endsWith("[]") && !/browser_session|submit_headers|poll_headers|cookie/i.test(contractPath)
+function isEndpointContractPath(contractPath: string): boolean {
+  return contractPath === "request"
+    || contractPath.startsWith("request.")
+    || contractPath === "query_params"
+    || contractPath.startsWith("query_params.")
+    || contractPath === "body"
+    || contractPath.startsWith("body.")
+    || contractPath === "response"
+    || contractPath.startsWith("response.")
+    || contractPath === "data"
+    || contractPath.startsWith("data.")
 }
+
 
 function endpointSlug(endpoint: string): string {
   return endpoint.replace(/^https?:\/\/[^/]+/, "").replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-+|-+$/g, "").toLowerCase() || "endpoint"

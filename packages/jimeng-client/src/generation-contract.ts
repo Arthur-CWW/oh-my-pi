@@ -1,8 +1,13 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs"
 import path from "node:path"
+import { createHash } from "node:crypto"
 import { Schema } from "effect"
 import { jimengError } from "./errors"
 import { type JsonObject, type JsonValue } from "./reference-image"
+import { type JimengSessionBundle } from "./capture"
+import { JimengClient, type JimengFetch, assertNoRiskError } from "./client"
+import { buildJimengVideoDirectPlan, type JimengVideoPlanInput } from "./video-plan"
+import { buildJimengText2ImageDirectPlan, type JimengText2ImagePlanInput } from "./text2image-plan"
 
 export interface JimengGenerationProof {
   sourceFile?: string
@@ -501,3 +506,167 @@ function truncateForMarkdown(value: string, maxLength: number): string {
 function markdownCell(value: string): string {
   return value.replace(/\|/g, "\\|").replace(/\r?\n/g, " ")
 }
+
+export interface JimengGenerationResult {
+  endpoint: string
+  httpStatus: number
+  ret: string | number
+  errmsg: string
+  responseTextSha256: string
+  submitId: string
+  historyId: string | null
+  request: JsonObject
+  body: JsonObject
+}
+
+/**
+ * Dynamic generation of Jimeng POST headers from a session bundle
+ */
+export function buildJimengGenerationHeaders(session: JimengSessionBundle): Record<string, string> {
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+    "user-agent": session.userAgent ?? "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "referer": session.referer ?? "https://jimeng.jianying.com/ai-tool/image/generate",
+    "origin": session.origin ?? "https://jimeng.jianying.com",
+    "cookie": session.cookie,
+  }
+  if (session.msToken) {
+    headers.msToken = session.msToken
+  }
+  if (session.webId) {
+    headers.web_id = session.webId
+  }
+  return headers
+}
+
+/**
+ * Low-level text-to-video / image-to-video direct submitter
+ */
+export async function executeJimengVideoDirectSubmit(input: {
+  client?: JimengClient
+  fetch?: JimengFetch
+  session: JimengSessionBundle
+  config: JimengVideoPlanInput
+}): Promise<JimengGenerationResult> {
+  const plan = buildJimengVideoDirectPlan(input.config)
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
+
+  const url = `https://jimeng.jianying.com${plan.endpoint}?${plan.query}`
+  const response = await client.requestText(url, {
+    method: "POST",
+    headers: buildJimengGenerationHeaders(input.session),
+    body: JSON.stringify(plan.request),
+  })
+
+  const body = parseGenerationSubmitBody(response.text, "direct video generation submit", url)
+
+  assertNoRiskError(body, response.text)
+
+  const ret = stringOrNumberValue(body.ret) ?? -1
+  const errmsg = stringValue(body.errmsg) ?? "unknown"
+  if (ret !== 0) {
+    throw jimengError({
+      category: "upstream",
+      code: "GENERATION_SUBMIT_FAILED",
+      message: `Jimeng direct video generation submit failed (ret=${ret}, errmsg=${errmsg})`,
+      retryable: false,
+      details: { ret, errmsg },
+    })
+  }
+
+  const data = objectValue(body.data)
+  const aigc = objectValue(data?.aigc_data)
+  const task = objectValue(aigc?.task)
+  const submitId = stringValue(aigc?.submit_id) ?? stringValue(task?.submit_id) ?? plan.submitId
+  const historyId = stringValue(aigc?.history_record_id)
+
+  return {
+    endpoint: plan.endpoint,
+    httpStatus: response.status,
+    ret,
+    errmsg,
+    responseTextSha256: sha256(response.text),
+    submitId,
+    historyId,
+    request: plan.request,
+    body,
+  }
+}
+
+/**
+ * Low-level text-to-image direct submitter
+ */
+export async function executeJimengText2ImageSubmit(input: {
+  client?: JimengClient
+  fetch?: JimengFetch
+  session: JimengSessionBundle
+  config: JimengText2ImagePlanInput
+}): Promise<JimengGenerationResult> {
+  const plan = buildJimengText2ImageDirectPlan(input.config)
+  const client = input.client ?? new JimengClient({ fetch: input.fetch })
+
+  const url = `https://jimeng.jianying.com${plan.endpoint}?${plan.query}`
+  const response = await client.requestText(url, {
+    method: "POST",
+    headers: buildJimengGenerationHeaders(input.session),
+    body: JSON.stringify(plan.request),
+  })
+
+  const body = parseGenerationSubmitBody(response.text, "direct text-to-image generation submit", url)
+
+  assertNoRiskError(body, response.text)
+
+  const ret = stringOrNumberValue(body.ret) ?? -1
+  const errmsg = stringValue(body.errmsg) ?? "unknown"
+  if (ret !== 0) {
+    throw jimengError({
+      category: "upstream",
+      code: "GENERATION_SUBMIT_FAILED",
+      message: `Jimeng direct text-to-image generation submit failed (ret=${ret}, errmsg=${errmsg})`,
+      retryable: false,
+      details: { ret, errmsg },
+    })
+  }
+
+  const data = objectValue(body.data)
+  const aigc = objectValue(data?.aigc_data)
+  const task = objectValue(aigc?.task)
+  const submitId = stringValue(aigc?.submit_id) ?? stringValue(task?.submit_id) ?? plan.submitId
+  const historyId = stringValue(aigc?.history_record_id)
+
+  return {
+    endpoint: plan.endpoint,
+    httpStatus: response.status,
+    ret,
+    errmsg,
+    responseTextSha256: sha256(response.text),
+    submitId,
+    historyId,
+    request: plan.request,
+    body,
+  }
+}
+
+
+function parseGenerationSubmitBody(responseText: string, operation: string, url: string): JsonObject {
+  try {
+    return jsonObject(JSON.parse(responseText), operation)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    throw jimengError({
+      category: "upstream",
+      code: "JIMENG_GENERATION_RESPONSE_PARSE_FAILED",
+      message: `Failed to parse ${operation} response JSON: ${message}`,
+      retryable: false,
+      details: { url, error: message },
+    })
+  }
+}
+
+function stringOrNumberValue(value: JsonValue | undefined): string | number | null {
+  return typeof value === "string" || typeof value === "number" ? value : null
+}
+function sha256(text: string): string {
+  return createHash("sha256").update(text).digest("hex")
+}
+

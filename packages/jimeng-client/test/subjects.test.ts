@@ -26,6 +26,7 @@ import {
   summarizeJimengSubjectVoice,
   summarizeJimengSubjects,
   updateJimengSubject,
+  validateJimengSubjectVoiceRequest,
   type JimengFetch,
   type JimengImageUploadSummary,
   type JimengSessionBundle,
@@ -127,6 +128,12 @@ describe("Jimeng subject/persona helpers", () => {
     expect(() => buildJimengSubjectUpdateRequest({ subjectId: "", content: { name: "Persona" } })).toThrow(JimengError)
     expect(() => buildJimengSubjectUpdateRequest({ subjectId: "subject-1", content: {} })).toThrow(JimengError)
     expect(() => buildJimengSubjectDeleteRequest({ subjectIds: [] })).toThrow(JimengError)
+  })
+
+  test("validates observed subject voice dry-run request contract", () => {
+    const request = { image_uri: "tos-cn-i-tb4s082cfz/kbeauty-host.png" }
+    expect(() => validateJimengSubjectVoiceRequest(request)).not.toThrow()
+    expect(() => validateJimengSubjectVoiceRequest({ image_uri: "" })).toThrow(JimengError)
   })
 
   test("submits image audit jobs before subject creation", async () => {
