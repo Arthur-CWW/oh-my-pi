@@ -187,12 +187,13 @@ Done:
   - Developer Graph
   - KIE Proxy
 - daemon-backed local workspace loading with fixture fallback
-- local JSON store for workspace, personas, branches, candidates, notes, provider jobs, reference archives, exports, and assets directories
+- local JSON store plus write-through SQLite consolidation under `data/ugc-studio/workspaces/<workspace_id>/workspace.sqlite` for workspace, personas, branches, candidates, notes, provider jobs, reference archives, exports, research targets, and template mining jobs
 - persona profile-bible edits for niche, voice style, accent, and energy
 - branch decision-note editing and dead-end marking
 - candidate star/revise/reject actions and note creation
 - KIE dry-run/live-capped plan/create UI path
-- provider job records saved locally
+- Codex image/video media-analysis planning with dry-run provider job persistence and explicit live API-key/spend gates
+- provider job records saved locally across KIE, Codex, Jimeng, and local providers
 - export manifest records from final editor
 - workbench design-system foundation and route chrome migration
 - visual QA across eight views

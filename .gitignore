@@ -21,6 +21,7 @@ tmp/
 vault
 data/
 artifacts/
+VoiceInk/
 .cache/
 *.sqlite
 *.sqlite-*

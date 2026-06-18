@@ -39,6 +39,7 @@ import {
   type UgcWorkspaceBundleObjectCounts,
   type UgcWorkspaceBundleShardManifest,
 } from "../ugc/local-state"
+import { UgcSqliteStore } from "./ugc-sqlite-store"
 import type { BranchSnapshot, JsonValue, PersonaProfile, ReviewNote, UgcStudioWorkspace } from "../renderer/ugcStudioModel"
 
 export interface UgcJsonStoreOptions {
@@ -46,6 +47,7 @@ export interface UgcJsonStoreOptions {
   readonly root?: string
   readonly workspaceId?: string
   readonly now?: () => string
+  readonly sqliteSync?: boolean | UgcSqliteStore
 }
 
 export interface UgcJsonStoreConfig {
@@ -54,6 +56,7 @@ export interface UgcJsonStoreConfig {
   readonly workspaceId: string
   readonly workspaceDir: string
   readonly statePath: string
+  readonly sqlitePath: string
 }
 
 type JsonSerializable = JsonValue | object
@@ -61,19 +64,28 @@ type JsonSerializable = JsonValue | object
 export class UgcJsonStore {
   readonly config: UgcJsonStoreConfig
   readonly now: () => string
+  readonly sqliteStore: UgcSqliteStore | null
 
   constructor(options: UgcJsonStoreOptions = {}) {
     const cwd = resolve(options.cwd ?? findProjectRoot(process.cwd()))
     const root = resolve(cwd, options.root ?? "data/ugc-studio/workspaces")
     const workspaceId = options.workspaceId ?? "workspace_protein_bar_ads"
     const workspaceDir = resolve(root, workspaceId)
+    const statePath = resolve(workspaceDir, "state.json")
+    const sqlitePath = resolve(workspaceDir, "workspace.sqlite")
     this.config = {
       cwd,
       root,
       workspaceId,
       workspaceDir,
-      statePath: resolve(workspaceDir, "state.json"),
+      statePath,
+      sqlitePath,
     }
+    this.sqliteStore = options.sqliteSync === false
+      ? null
+      : options.sqliteSync instanceof UgcSqliteStore
+        ? options.sqliteSync
+        : new UgcSqliteStore({ workspaceDir, sqlitePath })
     this.now = options.now ?? (() => new Date().toISOString())
   }
 
@@ -86,6 +98,7 @@ export class UgcJsonStore {
     if (isLocalState(existing)) {
       const normalized = normalizeLocalState(existing)
       if (JSON.stringify(normalized) !== JSON.stringify(existing)) return this.write(normalized)
+      if (this.sqliteStore?.needsInitialImport()) this.sqliteStore.writeState(normalized)
       return normalized
     }
 
@@ -98,6 +111,7 @@ export class UgcJsonStore {
     const normalized = stampState(state, this.now())
     writeJsonAtomic(this.config.statePath, normalized)
     writeWorkspaceShards(this.config.workspaceDir, normalized)
+    this.sqliteStore?.writeState(normalized)
     return normalized
   }
 

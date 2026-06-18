@@ -11,6 +11,7 @@ describe("deriveUgcDeveloperGraph", () => {
       cwd: mkdtempSync(resolve(tmpdir(), "ugc-dev-graph-")),
       root: "ugc-workspaces",
       now: () => "2026-06-10T00:00:00.000Z",
+      sqliteSync: false,
     })
     const initial = store.read()
     const candidateId = initial.workspace.candidates[0]?.id ?? ""

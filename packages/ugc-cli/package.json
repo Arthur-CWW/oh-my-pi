@@ -16,6 +16,9 @@
     "ugc": "./src/cli.ts",
     "ugc-lab": "./src/cli.ts"
   },
+  "dependencies": {
+    "effect": "^4.0.0-beta.71"
+  },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "bun test"

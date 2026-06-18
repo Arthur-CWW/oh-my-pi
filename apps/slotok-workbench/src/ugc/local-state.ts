@@ -12,7 +12,7 @@ import {
   type UgcStudioWorkspace,
 } from "../renderer/ugcStudioModel"
 
-export type UgcProvider = "kie" | "jimeng" | "local"
+export type UgcProvider = "kie" | "jimeng" | "local" | "codex"
 export type UgcProviderJobMode = "dry-run" | "live"
 export type UgcProviderJobStatus = "planned" | "queued" | "running" | "succeeded" | "failed" | "blocked" | "completed"
 export type UgcExportStatus = "draft" | "queued" | "rendered" | "failed"

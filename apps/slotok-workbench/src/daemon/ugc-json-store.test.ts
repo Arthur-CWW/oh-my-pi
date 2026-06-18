@@ -122,6 +122,7 @@ describe("UgcJsonStore", () => {
       cwd: store.config.cwd,
       root: "ugc-workspaces",
       now: () => "2026-06-10T00:00:00.000Z",
+      sqliteSync: false,
     }).read()
     const archiveShard = JSON.parse(readFileSync(resolve(store.config.workspaceDir, "reference-archives", `${updated.referenceArchives[0]?.id}.json`), "utf8")) as {
       readonly candidateFormatOutputs?: readonly { readonly id: string }[]
@@ -296,5 +297,6 @@ function createStore(): UgcJsonStore {
     cwd,
     root: "ugc-workspaces",
     now: () => "2026-06-10T00:00:00.000Z",
+    sqliteSync: false,
   })
 }

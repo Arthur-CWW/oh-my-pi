@@ -211,6 +211,73 @@ describe("routeUgc", () => {
     expect(patchedJob?.error).toContain("credit cap")
   })
 
+
+  test("plans and persists Codex media analysis jobs as dry-run provider jobs", async () => {
+    const store = createStore()
+
+    const planResponse = await routeUgc(jsonRequest("/api/ugc/codex/plan", {
+      operation: "image-understand",
+      mediaUrl: "file:///tmp/slotok/hook-frame.jpg",
+      prompt: "Identify product visibility and caption risk.",
+      targetIds: ["candidate_route_codex"],
+    }), store)
+    const plan = await planResponse?.json() as {
+      readonly provider?: string
+      readonly operation?: string
+      readonly payload?: {
+        readonly metadata?: {
+          readonly operation?: string
+          readonly mediaUrl?: string
+        }
+      }
+    }
+    expect(plan.provider).toBe("codex")
+    expect(plan.operation).toBe("image-understand")
+    expect(plan.payload?.metadata?.mediaUrl).toBe("file:///tmp/slotok/hook-frame.jpg")
+
+    const createResponse = await routeUgc(jsonRequest("/api/ugc/codex/jobs", {
+      operation: "video-understand",
+      mediaUrl: "file:///tmp/slotok/demo.mp4",
+      targetIds: ["candidate_route_codex"],
+      maxSpendUsd: 0.12,
+    }), store)
+    const created = await createResponse?.json() as {
+      readonly job?: {
+        readonly provider?: string
+        readonly operation?: string
+        readonly mode?: string
+        readonly request?: {
+          readonly provider?: string
+          readonly operation?: string
+          readonly payload?: {
+            readonly metadata?: {
+              readonly mediaUrl?: string
+            }
+          }
+        }
+      }
+      readonly state?: UgcLocalState
+    }
+
+    expect(created.job?.provider).toBe("codex")
+    expect(created.job?.operation).toBe("video-understand")
+    expect(created.job?.mode).toBe("dry-run")
+    expect(created.job?.request?.provider).toBe("codex")
+    expect(created.job?.request?.payload?.metadata?.mediaUrl).toBe("file:///tmp/slotok/demo.mp4")
+    expect(created.state?.providerJobs[0]?.provider).toBe("codex")
+  })
+
+  test("rejects live Codex analysis jobs without an explicit API key", async () => {
+    const store = createStore()
+
+    await expect(routeUgc(jsonRequest("/api/ugc/codex/jobs", {
+      operation: "image-understand",
+      mediaUrl: "file:///tmp/slotok/hook-frame.jpg",
+      live: true,
+      maxSpendUsd: 0.25,
+    }), store)).rejects.toThrow("explicit apiKey")
+  })
+
   test("returns null for routes owned by other daemon handlers", async () => {
     const store = createStore()
     await expect(routeUgc(new Request("http://127.0.0.1/api/ugc/kie/capabilities"), store)).resolves.toBeNull()
@@ -224,6 +291,7 @@ function createStore(): UgcJsonStore {
     cwd,
     root: "ugc-workspaces",
     now: () => "2026-06-10T00:00:00.000Z",
+    sqliteSync: false,
   })
 }
 

@@ -12,7 +12,7 @@
     "dev:electron": "SLOTOK_RENDERER_URL=http://127.0.0.1:47521 electron .",
     "smoke:daemon": "bun src/daemon/server.ts --once",
     "visual:qa": "bun scripts/visual-qa.ts",
-    "test": "vitest run && bun test ./src/daemon/eval-store.bun.test.ts",
+    "test": "vitest run && bun test ./src/daemon/eval-store.bun.test.ts ./src/daemon/ugc-sqlite-store.bun.test.ts",
     "test:update": "vitest run --update",
     "build": "bun run build:renderer && bun run build:electron",
     "build:renderer": "vite build",

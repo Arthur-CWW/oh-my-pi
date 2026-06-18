@@ -1,6 +1,14 @@
+import { decodeCodexAnalyzeInput, prepareCodexAnalyze, runCodexAnalyze, type CodexAnalyzeInput } from "@wirebabel/ugc-cli"
 import { UgcJsonStore } from "./ugc-json-store"
-import { isRecord, type BranchPatch, type BulkCandidateStatusPatch, type CandidateStatusPatch, type CleanRoomTemplateSpec, type CreateBranchInput, type CreateExportManifestInput, type CreateProviderJobInput, type CreateReferenceArchiveInput, type CreateResearchTargetInput, type CreateReviewNoteInput, type CreateTemplateMiningJobInput, type CreateWorkspaceBundleInput, type FinalEditorClipPatch, type FinalEditorPatch, type FinalEditorTrackPatch, type ImportWorkspaceBundleInput, type PersonaPatch, type ProviderJobPatch, type ReferenceArchiveFormatOutput, type ResearchTargetPatch, type TemplateMiningJobPatch, type UgcReferenceArchive, type UgcResearchPlatform, type UgcResearchTargetStatus, type UgcTemplateMiningJobStatus } from "../ugc/local-state"
+import { isRecord, toJsonValue, type BranchPatch, type BulkCandidateStatusPatch, type CandidateStatusPatch, type CleanRoomTemplateSpec, type CreateBranchInput, type CreateExportManifestInput, type CreateProviderJobInput, type CreateReferenceArchiveInput, type CreateResearchTargetInput, type CreateReviewNoteInput, type CreateTemplateMiningJobInput, type CreateWorkspaceBundleInput, type FinalEditorClipPatch, type FinalEditorPatch, type FinalEditorTrackPatch, type ImportWorkspaceBundleInput, type PersonaPatch, type ProviderJobPatch, type ReferenceArchiveFormatOutput, type ResearchTargetPatch, type TemplateMiningJobPatch, type UgcReferenceArchive, type UgcResearchPlatform, type UgcResearchTargetStatus, type UgcTemplateMiningJobStatus } from "../ugc/local-state"
 import type { BranchStatus, CandidateStatus, JsonValue, ReviewAttachment, ReviewVerdict } from "../renderer/ugcStudioModel"
+
+interface CodexAnalysisJobRequest {
+  readonly input: CodexAnalyzeInput
+  readonly live: boolean
+  readonly maxSpendUsd?: number
+  readonly apiKey?: string
+}
 
 export async function routeUgc(request: Request, store: UgcJsonStore): Promise<Response | null> {
   const url = new URL(request.url)
@@ -62,6 +70,47 @@ export async function routeUgc(request: Request, store: UgcJsonStore): Promise<R
 
   if (request.method === "POST" && url.pathname === "/api/ugc/provider-jobs") {
     return json(store.createProviderJob(decodeCreateProviderJob(await readJson(request))))
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/ugc/codex/plan") {
+    return json(prepareCodexAnalyze(decodeCodexAnalyzeInput(await readJson(request))))
+  }
+
+  if (request.method === "POST" && (url.pathname === "/api/ugc/codex/jobs" || url.pathname === "/api/ugc/codex/create")) {
+    const decoded = decodeCodexAnalysisJobRequest(await readJson(request))
+    const prepared = prepareCodexAnalyze(decoded.input)
+    if (!decoded.live) {
+      const state = store.createProviderJob({
+        provider: "codex",
+        operation: decoded.input.operation,
+        mode: "dry-run",
+        status: "planned",
+        targetIds: decoded.input.targetIds ?? [],
+        spendCapUsd: decoded.maxSpendUsd ?? prepared.estimatedCostUsd,
+        estimatedCostUsd: prepared.estimatedCostUsd,
+        request: toJsonValue(prepared),
+      })
+      return json({ job: state.providerJobs[0], prepared, state })
+    }
+
+    if (decoded.maxSpendUsd === undefined) throw new Error("Codex live analysis requires maxSpendUsd")
+    if (!decoded.apiKey) throw new Error("Codex live analysis requires an explicit apiKey")
+    const result = await runCodexAnalyze(decoded.input, {
+      apiKey: decoded.apiKey,
+      maxSpendUsd: decoded.maxSpendUsd,
+    })
+    const state = store.createProviderJob({
+      provider: "codex",
+      operation: decoded.input.operation,
+      mode: "live",
+      status: "succeeded",
+      targetIds: decoded.input.targetIds ?? [],
+      spendCapUsd: decoded.maxSpendUsd,
+      estimatedCostUsd: result.prepared.estimatedCostUsd,
+      request: toJsonValue(result.prepared),
+      response: result.response,
+    })
+    return json({ job: state.providerJobs[0], result, state })
   }
 
   if (request.method === "POST" && url.pathname.startsWith("/api/ugc/provider-jobs/")) {
@@ -204,7 +253,7 @@ function decodeCreateReviewNote(value: JsonValue): CreateReviewNoteInput {
 
 function decodeCreateProviderJob(value: JsonValue): CreateProviderJobInput {
   if (!isRecord(value)) throw new Error("provider job request must be an object")
-  if (value.provider !== "kie" && value.provider !== "jimeng" && value.provider !== "local") throw new Error("provider job requires provider")
+  if (value.provider !== "kie" && value.provider !== "jimeng" && value.provider !== "local" && value.provider !== "codex") throw new Error("provider job requires provider")
   if (typeof value.operation !== "string") throw new Error("provider job requires operation")
   return {
     provider: value.provider,
@@ -219,6 +268,24 @@ function decodeCreateProviderJob(value: JsonValue): CreateProviderJobInput {
     artifactPaths: Array.isArray(value.artifactPaths) && value.artifactPaths.every((item) => typeof item === "string") ? value.artifactPaths : [],
     error: typeof value.error === "string" ? value.error : null,
   }
+}
+
+function decodeCodexAnalysisJobRequest(value: JsonValue): CodexAnalysisJobRequest {
+  if (!isRecord(value)) throw new Error("Codex analysis job request must be an object")
+  const input = decodeCodexAnalyzeInput({
+    operation: value.operation,
+    mediaUrl: value.mediaUrl,
+    ...(typeof value.prompt === "string" ? { prompt: value.prompt } : {}),
+    ...(typeof value.model === "string" ? { model: value.model } : {}),
+    ...(typeof value.maxOutputTokens === "number" ? { maxOutputTokens: value.maxOutputTokens } : {}),
+    ...(typeof value.workspaceId === "string" ? { workspaceId: value.workspaceId } : {}),
+    ...(isStringArray(value.targetIds) ? { targetIds: value.targetIds } : {}),
+    ...(isStringArray(value.referenceFrameUrls) ? { referenceFrameUrls: value.referenceFrameUrls } : {}),
+  })
+  const live = value.live === true
+  const maxSpendUsd = typeof value.maxSpendUsd === "number" ? value.maxSpendUsd : undefined
+  const apiKey = typeof value.apiKey === "string" && value.apiKey.length > 0 ? value.apiKey : undefined
+  return { input, live, maxSpendUsd, apiKey }
 }
 
 function decodeProviderJobPatch(value: JsonValue): ProviderJobPatch {
