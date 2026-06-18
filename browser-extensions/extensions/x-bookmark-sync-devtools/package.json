@@ -8,10 +8,11 @@
     "dev": "vite build --watch",
     "typecheck": "tsc --noEmit",
     "build": "vite build",
-    "check": "pnpm typecheck && pnpm build && node scripts/check-extension.mjs",
-    "zip": "pnpm build && node scripts/zip.mjs",
-    "launch:helium": "pnpm build && ./scripts/launch-helium.sh",
-    "launch:chrome": "pnpm build && bash ./scripts/launch-chrome.sh"
+    "check": "bun run typecheck && bun run build && bun scripts/check-extension.mjs",
+    "zip": "bun run build && bun scripts/zip.mjs",
+    "launch:helium": "bun run build && ./scripts/launch-helium.sh",
+    "launch:chrome": "bun run build && bash ./scripts/launch-chrome.sh",
+    "launch:chrome:dev": "bash ./scripts/dev-chrome.sh"
   },
   "dependencies": {
     "solid-js": "^1.9.13"

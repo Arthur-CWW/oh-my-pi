@@ -7,8 +7,8 @@ The extension UI is built with **SolidJS + Tailwind CSS v4 + Vite**. It is an ex
 ## Build
 
 ```bash
-cd /Users/arthur/agents/browser-extensions
-pnpm --filter x-bookmark-sync-devtools build
+cd /Users/arthur/agents/browser-extensions/extensions/x-bookmark-sync-devtools
+bun run build
 ```
 
 The built unpacked extension is:
@@ -31,8 +31,8 @@ The built unpacked extension is:
 ## Dedicated Chrome/Chromium launch helper
 
 ```bash
-cd /Users/arthur/agents/browser-extensions
-pnpm --filter x-bookmark-sync-devtools launch:chrome
+cd /Users/arthur/agents/browser-extensions/extensions/x-bookmark-sync-devtools
+bun run launch:chrome
 ```
 
 This builds first, then launches Chrome/Chromium with:
@@ -45,16 +45,33 @@ This builds first, then launches Chrome/Chromium with:
 It does not force-close or reuse your normal Chrome profile. Override the browser/profile when needed:
 
 ```bash
-CHROME_APP="Chromium" pnpm --filter x-bookmark-sync-devtools launch:chrome
-CHROME_BIN=/path/to/chrome CHROME_PROFILE=~/.x-bookmark-sync-chrome pnpm --filter x-bookmark-sync-devtools launch:chrome
-bash extensions/x-bookmark-sync-devtools/scripts/launch-chrome.sh https://x.com/i/bookmarks
+CHROME_APP="Chromium" bun run launch:chrome
+CHROME_BIN=/path/to/chrome CHROME_PROFILE=~/.x-bookmark-sync-chrome bun run launch:chrome
+bash scripts/launch-chrome.sh https://x.com/i/bookmarks
 ```
+
+## Dedicated Chrome dev loop
+
+```bash
+cd /Users/arthur/agents/browser-extensions/extensions/x-bookmark-sync-devtools
+bun run launch:chrome:dev
+```
+
+This starts `vite build --watch`, waits for `dist/manifest.json`, then launches the same dedicated Chrome profile with the unpacked extension loaded.
+
+Reload behavior:
+
+- panel CSS/JS changes: reopen/reload the **X Bookmarks** DevTools panel.
+- manifest/background/service-worker changes: click **Reload** for the extension on `chrome://extensions`.
+- inspected X page state/logins stay in `~/.chrome-x-bookmark-sync`.
+
+CMUX built-in browser note: the controlled CMUX browser is WebKit/Safari-like and does not expose `chrome.runtime` or `chrome://extensions`, so Chrome extensions cannot be loaded there. Use this dedicated Chrome dev loop for extension work.
 
 ## Helium launch helper
 
 ```bash
-cd /Users/arthur/agents/browser-extensions
-pnpm --filter x-bookmark-sync-devtools launch:helium
+cd /Users/arthur/agents/browser-extensions/extensions/x-bookmark-sync-devtools
+bun run launch:helium
 ```
 
 This keeps the existing Helium flow working: it builds first, uses a dedicated profile at `~/.helium-x-bookmark-sync`, loads `dist`, and opens `https://x.com/i/bookmarks` with DevTools auto-opened.
@@ -90,7 +107,7 @@ The endpoint can be changed in the panel. The default is the running `twitter-ar
 ## Development
 
 ```bash
-pnpm --filter x-bookmark-sync-devtools dev
+bun run dev
 ```
 
 This runs `vite build --watch`. After changes, reload the extension on `chrome://extensions` and reopen/reload DevTools.
@@ -98,6 +115,6 @@ This runs `vite build --watch`. After changes, reload the extension on `chrome:/
 ## Validate/package
 
 ```bash
-pnpm --filter x-bookmark-sync-devtools check
-pnpm --filter x-bookmark-sync-devtools zip
+bun run check
+bun run zip
 ```
