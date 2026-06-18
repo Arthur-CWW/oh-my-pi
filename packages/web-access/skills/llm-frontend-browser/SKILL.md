@@ -12,7 +12,7 @@ Use `llm_frontend_browser` sparingly. It drives a real logged-in browser profile
 Good fits:
 - Initial product/architecture planning where a high-effort external model answer is worth the wait.
 - Deep research or synthesis that needs ChatGPT Pro/frontend-only capabilities.
-- Opening provider-only frontend sessions such as Grok-on-X or Jimeng for manual/login/setup workflows.
+- Opening provider-only frontend sessions such as Grok or Jimeng for manual/login/setup workflows.
 - Cross-checking major design decisions before implementation.
 
 Avoid for:
@@ -23,10 +23,10 @@ Avoid for:
 ## Provider support
 
 - `setup`/`open`/`status`: `aistudio`, `deepseek`, `chatgpt`, `grok`, `jimeng`.
-- `prompt`: currently `aistudio` and `chatgpt` only.
-- `collect`/`wait`: currently `chatgpt` only.
+- `prompt`: `aistudio`, `chatgpt`, and `grok`.
+- `collect`/`wait`: `chatgpt` and best-effort `grok`.
 
-Use Grok/Jimeng support for background-safe session/profile setup until provider-specific prompt/download adapters are implemented.
+Use Jimeng support for background-safe session/profile setup until a provider-specific prompt/download adapter is implemented.
 
 ## Recommended async workflow for long research
 
@@ -71,7 +71,7 @@ llm_frontend_browser({ action: "collect", provider: "chatgpt", conversationUrl: 
 
 ## Blocking workflow
 
-Use blocking only for short prompts or when the user explicitly wants to wait:
+Use blocking only for short prompts or when the user explicitly wants to wait. Do not set long response timeouts when an async submit plus later `wait` will work.
 
 ```ts
 llm_frontend_browser({
@@ -82,6 +82,24 @@ llm_frontend_browser({
   responseTimeoutMs: 120000
 })
 ```
+
+## Grok / X Twitter Search
+
+Use `provider: "grok"` when the task specifically benefits from Grok's X/Twitter search surface. The dedicated profile opens `grok.com`. Ask Grok to search public X posts explicitly; do not use this for private/locked accounts, DMs, or broad scraping.
+
+```ts
+llm_frontend_browser({
+  action: "prompt",
+  provider: "grok",
+  prompt: [
+    "Search public X/Twitter posts for tweets from @openai about Codex.",
+    "Summarize the relevant posts, include dates/handles when visible, and say when evidence is weak."
+  ].join("\n"),
+  waitForResponse: false
+})
+```
+
+If the tool returns `needsHuman: true`, stop and ask Arthur to log into the dedicated Grok profile (`~/.pi/pi-web-access/helium-grok-profile`). It is not enough to be logged into another browser profile. Do not try to automate CAPTCHA, 2FA, passkeys, OAuth consent, or account challenges.
 
 ## Parallelism guidance
 

@@ -10,6 +10,8 @@ Use this skill when a task needs real native macOS GUI interaction while the hum
 
 CuaDriver's value is **background control**: capture a target app/window, inspect numbered Accessibility elements, act by `element_index`, then verify. Do not use foreground AppKit/XCTest/UI scripting patterns unless the user explicitly asks to watch or interact manually.
 
+Treat CuaDriver as the boundary for private macOS/SkyLight behavior. Do not reimplement or vendor those private API calls in this repo; call the maintained `cua-driver` interface instead.
+
 ## Hard no-foreground rules
 
 Do **not** use these for background app work:
@@ -28,11 +30,31 @@ open -n -g -a CuaDriver --args serve
 
 ## Prerequisites
 
+OMP users and models must prefer the high-level `computer_use` tool for safe inspected GUI flows. It enforces policy checks and ensures an inspect-act-verify loop. The raw `cua_driver` tool is available but should only be used for low-level debugging or when raw CLI access is required.
+
+Example of preferred `computer_use` workflow (using the **inspect-act-verify** loop):
+```ts
+// 1. Inspect: Get window state and element indices
+computer_use({ action: "capture", args: { appName: "Safari" } })
+
+// 2. Act: Click on layout element 5
+computer_use({ action: "click", args: { elementIndex: 5 } })
+
+// 3. Verify: Re-capture to verify state
+computer_use({ action: "capture", args: { appName: "Safari" } })
+```
+
+For low-level status or permissions setup:
+```ts
+cua_driver({ action: "status" })
+cua_driver({ action: "permissions" })
+```
+
+The raw CLI can also be used directly for debugging when the Pi tool is unavailable:
 ```bash
-command -v cua-driver
-open -n -g -a CuaDriver --args serve
-cua-driver status || true
-cua-driver permissions status || cua-driver check_permissions '{"prompt":false}' || true
+CUA_DRIVER="${CUA_DRIVER:-$(command -v cua-driver || printf /Applications/CuaDriver.app/Contents/MacOS/cua-driver)}"
+"$CUA_DRIVER" status || open -n -g -a CuaDriver --args serve
+"$CUA_DRIVER" permissions status --json || "$CUA_DRIVER" check_permissions '{"prompt":false}' || true
 ```
 
 If permissions are missing, stop and ask the user to grant Accessibility and Screen Recording to CuaDriver / the terminal context.
@@ -44,16 +66,16 @@ If permissions are missing, stop and ask the user to grant Accessibility and Scr
 Preferred for normal apps:
 
 ```bash
-cua-driver launch_app '{"bundle_id":"com.apple.calculator"}'
+"$CUA_DRIVER" launch_app '{"bundle_id":"com.apple.calculator"}'
 ```
 
 If the app is already running or was launched directly by a test script, list candidates:
 
 ```bash
-cua-driver list_apps '{}'
-cua-driver list_windows '{"on_screen_only":true}'
+"$CUA_DRIVER" list_apps '{}'
+"$CUA_DRIVER" list_windows '{"on_screen_only":true}'
 # or for a known pid:
-cua-driver list_windows '{"pid":12345}'
+"$CUA_DRIVER" list_windows '{"pid":12345}'
 ```
 
 For apps under test that need environment variables, launch the binary directly with foreground-suppression env vars and then use `list_windows` to resolve pid/window id.
@@ -61,14 +83,14 @@ For apps under test that need environment variables, launch the binary directly 
 ### 2. Snapshot before every element-indexed action
 
 ```bash
-cua-driver get_window_state '{"pid":12345,"window_id":67890}'
+"$CUA_DRIVER" get_window_state '{"pid":12345,"window_id":67890}'
 ```
 
 For large screenshots or text-only agents, write the image to disk:
 
 ```bash
 mkdir -p /tmp/cua-shot
-cua-driver get_window_state '{"pid":12345,"window_id":67890,"screenshot_out_file":"/tmp/cua-shot/state.jpg"}'
+"$CUA_DRIVER" get_window_state '{"pid":12345,"window_id":67890,"screenshot_out_file":"/tmp/cua-shot/state.jpg"}'
 ```
 
 Read the returned AX tree and screenshot together. Prefer `element_index` over pixels whenever an element exists.
@@ -76,18 +98,18 @@ Read the returned AX tree and screenshot together. Prefer `element_index` over p
 ### 3. Act by `element_index`
 
 ```bash
-cua-driver click '{"pid":12345,"window_id":67890,"element_index":7}'
-cua-driver double_click '{"pid":12345,"window_id":67890,"element_index":9}'
-cua-driver right_click '{"pid":12345,"window_id":67890,"element_index":12}'
-cua-driver set_value '{"pid":12345,"window_id":67890,"element_index":14,"value":"Option Label"}'
-cua-driver type_text '{"pid":12345,"window_id":67890,"element_index":15,"text":"hello"}'
-cua-driver press_key '{"pid":12345,"window_id":67890,"element_index":15,"key":"return"}'
+"$CUA_DRIVER" click '{"pid":12345,"window_id":67890,"element_index":7}'
+"$CUA_DRIVER" double_click '{"pid":12345,"window_id":67890,"element_index":9}'
+"$CUA_DRIVER" right_click '{"pid":12345,"window_id":67890,"element_index":12}'
+"$CUA_DRIVER" set_value '{"pid":12345,"window_id":67890,"element_index":14,"value":"Option Label"}'
+"$CUA_DRIVER" type_text '{"pid":12345,"window_id":67890,"element_index":15,"text":"hello"}'
+"$CUA_DRIVER" press_key '{"pid":12345,"window_id":67890,"element_index":15,"key":"return"}'
 ```
 
 Only use pixel coordinates when the target is custom-rendered and no useful AX element exists:
 
 ```bash
-cua-driver click '{"pid":12345,"window_id":67890,"x":420,"y":240}'
+"$CUA_DRIVER" click '{"pid":12345,"window_id":67890,"x":420,"y":240}'
 ```
 
 ### 4. Verify immediately
@@ -95,8 +117,24 @@ cua-driver click '{"pid":12345,"window_id":67890,"x":420,"y":240}'
 Always re-run `get_window_state` after a state-changing action. Element indices are snapshot-local and can go stale.
 
 ```bash
-cua-driver get_window_state '{"pid":12345,"window_id":67890}'
+"$CUA_DRIVER" get_window_state '{"pid":12345,"window_id":67890}'
 ```
+
+## Browser workflow
+
+For browser tasks that need the real logged-in GUI but should not disturb Arthur, use CuaDriver before foreground browser control.
+
+1. Resolve the browser pid/window with `launch_app`, `list_apps`, or `list_windows`.
+2. Try the browser-aware `page` tool for supported apps:
+
+```bash
+"$CUA_DRIVER" page '{"pid":12345,"window_id":67890,"action":"get_text"}'
+"$CUA_DRIVER" page '{"pid":12345,"window_id":67890,"action":"query_dom","selector":"main"}'
+"$CUA_DRIVER" page '{"pid":12345,"window_id":67890,"action":"click_element","selector":"button[aria-label*=Send]"}'
+```
+
+3. If the page API is sparse for that browser, use `get_window_state` + `element_index` and screenshots.
+4. Use CDP/Playwright/Puppeteer only when the task specifically needs DOM JavaScript, network capture, cookies, or a provider adapter such as `llm_frontend_browser`.
 
 ## App smoke-test pattern
 

@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent"
+import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent"
 import { Type } from "@sinclair/typebox"
 import { Effect, Result } from "effect"
 import { search } from "./search"
@@ -28,7 +28,14 @@ import {
 import { registerCodexResume } from "./codex"
 import registerVimLite from "./vim-lite"
 import { registerAgentCockpit } from "./agent-cockpit-extension"
+import { registerAgentHistory } from "./agent-history-extension"
 import { toErrorMessage } from "./schemas"
+import {
+  executeComputerUseAction,
+  getGlobalPolicyState,
+  runComputerUseAction,
+  setGlobalPolicyState,
+} from "./computer-use"
 
 function run<E, A>(effect: Effect.Effect<A, E>): Promise<A> {
   return Effect.runPromise(effect as Effect.Effect<A, E, never>)
@@ -47,12 +54,6 @@ function registerCuaDriver(pi: ExtensionAPI): void {
     label: "CuaDriver",
     description:
       "Background-safe macOS GUI/browser automation through installed cua-driver. Use capture/get_window_state before element-indexed actions.",
-    promptGuidelines: [
-      "Use cua_driver for local macOS app/browser GUI work that should not steal focus.",
-      "Start with action=list_apps/list_windows, then action=capture with pid/window_id before click/type/key/set_value.",
-      "Prefer element_index actions from the latest capture. Do not reuse element indices after the UI changes.",
-      "Do not use cua_driver for passwords, OAuth consent, 2FA, payment, privacy/security settings, or destructive actions without explicit user instruction.",
-    ],
     parameters: Type.Object({
       action: Type.String({
         description: "status, permissions, list_apps, list_windows, launch_app, capture, get_window_state, click, double_click, right_click, type_text, press_key, hotkey, scroll, drag, set_value, page, zoom, start_recording, or stop_recording",
@@ -107,6 +108,113 @@ function registerCuaDriver(pi: ExtensionAPI): void {
           error: "",
           json: result.data.json === null ? "" : JSON.stringify(result.data.json),
           text: result.data.text,
+        },
+      }
+    },
+  })
+}
+
+// ─── Tool: computer_use ──────────────────────────────────────────────
+
+function registerComputerUse(pi: ExtensionAPI): void {
+  pi.registerTool({
+    name: "computer_use",
+    label: "ComputerUse",
+    description:
+      "Higher-level background computer use extension. Executes safe action mapping, policy classification, and runs the action via CuaDriver.",
+    parameters: Type.Object({
+      action: Type.String({
+        description: "The computer use action: status, list_apps, get_app_state, capture, click, type, key",
+      }),
+      args: Type.Optional(Type.Any({ description: "JSON object containing arguments for the action" })),
+    }),
+    async execute(_callId, rawParams) {
+      const params = rawParams as {
+        action?: string
+        args?: Record<string, JsonValue>
+      }
+
+      const rawAction = {
+        type: params.action,
+        ...(params.args || {}),
+      }
+
+      const result = await runComputerUseAction(
+        rawAction,
+        getGlobalPolicyState(),
+        async (options) => {
+          const runRes = await run(
+            Effect.match(runCuaDriver(options), {
+              onFailure: (err) => ({ error: toErrorMessage(err), ok: false as const }),
+              onSuccess: (data) => ({ data, ok: true as const }),
+            })
+          )
+          if (!runRes.ok) {
+            throw new Error(runRes.error)
+          }
+          return runRes.data
+        }
+      )
+
+      if (result.updatedState && !result.error && result.allowed) {
+        setGlobalPolicyState(result.updatedState)
+      }
+
+      if (!result.allowed) {
+        return {
+          content: [{ type: "text", text: `Error: ${result.reason}` }],
+          details: {
+            action: params.action || "",
+            error: result.reason || "Policy violation",
+            json: JSON.stringify({
+              allowed: false,
+              reason: result.reason,
+              updatedState: result.updatedState,
+            }),
+            text: `Error: ${result.reason}`,
+          },
+        }
+      }
+
+      if (result.error) {
+        return {
+          content: [{ type: "text", text: `Error: ${result.error}` }],
+          details: {
+            action: params.action || "",
+            error: result.error,
+            json: JSON.stringify({
+              allowed: true,
+              mappedAction: result.mappedAction,
+              error: result.error,
+              updatedState: result.updatedState,
+            }),
+            text: `Error: ${result.error}`,
+          },
+        }
+      }
+
+      const output = result.output!
+      const outputText = output.json === null ? output.text : JSON.stringify(output.json, null, 2)
+      const text = [
+        `computer_use ${params.action}: ok`,
+        `Mapped CuaDriver action: ${result.mappedAction?.action}`,
+        `Updated policy state: ${JSON.stringify(result.updatedState)}`,
+        "",
+        truncateText(outputText, 24_000),
+      ].join("\n")
+
+      return {
+        content: [{ type: "text", text }],
+        details: {
+          action: params.action || "",
+          error: "",
+          json: JSON.stringify({
+            allowed: true,
+            mappedAction: result.mappedAction,
+            updatedState: result.updatedState,
+            output: output.json,
+          }),
+          text: output.text,
         },
       }
     },
@@ -433,11 +541,6 @@ function registerLlmFrontendBrowser(pi: ExtensionAPI): void {
     label: "LLM Frontend Browser",
     description:
       "Launch, open, inspect, prompt, or collect responses from a dedicated Helium/Chromium CDP profile for frontend LLM sites like AI Studio, ChatGPT, and Grok.",
-    promptGuidelines: [
-      "Use llm_frontend_browser for frontend LLM sites through a dedicated CDP profile instead of daily-driver browser automation.",
-      "Use llm_frontend_browser in background mode by default; do not pair it with page.bringToFront(), Target.activateTarget, DevTools UI, AppleScript activation, or OS-level click/type automation.",
-      "For X/Twitter-aware search, use provider=grok with an explicit prompt asking Grok to search public X posts and summarize sources; stop if the tool reports needsHuman/login.",
-    ],
     parameters: Type.Object({
       action: Type.Optional(Type.String({ description: "setup, open, google-login, chatgpt-login, prompt, collect, wait, sessions, projects, save-project, or status (default: status)" })),
       account: Type.Optional(Type.String({ description: "Optional Keychain account label for google-login/chatgpt-login" })),
@@ -747,6 +850,7 @@ function registerLlmFrontendBrowser(pi: ExtensionAPI): void {
 
 export default function (pi: ExtensionAPI): void {
   registerCuaDriver(pi)
+  registerComputerUse(pi)
   registerWebSearch(pi)
   registerFetchContent(pi)
   registerGetContent(pi)
@@ -757,4 +861,5 @@ export default function (pi: ExtensionAPI): void {
   registerCodexResume(pi)
   registerVimLite(pi)
   registerAgentCockpit(pi)
+  registerAgentHistory(pi)
 }

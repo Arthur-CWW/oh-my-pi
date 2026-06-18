@@ -4,10 +4,17 @@
   "private": true,
   "description": "Automatic Mermaid previews for Pi terminal sessions",
   "type": "module",
-  "keywords": ["pi-package", "pi", "extension", "mermaid"],
+  "keywords": [
+    "pi-package",
+    "pi",
+    "extension",
+    "mermaid"
+  ],
   "license": "MIT",
   "pi": {
-    "extensions": ["./src/index.ts"]
+    "extensions": [
+      "./src/index.ts"
+    ]
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.typecheck.json --noEmit",
@@ -18,14 +25,14 @@
     "beautiful-mermaid": "^1.1.3"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "*",
-    "@earendil-works/pi-tui": "*"
+    "@oh-my-pi/pi-coding-agent": "*",
+    "@oh-my-pi/pi-tui": "*"
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "^0.75.5",
-    "@earendil-works/pi-tui": "^0.75.5",
     "@types/node": "^25.2.3",
     "bun-types": "^1.3.9",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "@oh-my-pi/pi-coding-agent": "15.12.3",
+    "@oh-my-pi/pi-tui": "15.12.3"
   }
 }

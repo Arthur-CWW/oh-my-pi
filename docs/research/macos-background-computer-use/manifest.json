@@ -1,0 +1,15 @@
+{
+  "name": "macos-background-computer-use",
+  "createdAt": "2026-06-09",
+  "sources": [
+    {
+      "title": "Inside macOS Window Internals",
+      "author": "Francesco Bonacci",
+      "publisher": "trycua/cua",
+      "url": "https://github.com/trycua/cua/blob/main/blog/inside-macos-window-internals.md",
+      "rawUrl": "https://raw.githubusercontent.com/trycua/cua/main/blog/inside-macos-window-internals.md",
+      "localPath": "raw/inside-macos-window-internals.md",
+      "archivedAt": "2026-06-09"
+    }
+  ]
+}

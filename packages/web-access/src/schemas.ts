@@ -18,6 +18,9 @@ export class FrontendBrowserError extends Schema.TaggedErrorClass<FrontendBrowse
   reason: Schema.String,
 }) {}
 
+export class CuaDriverError extends Schema.TaggedErrorClass<CuaDriverError>()("CuaDriverError", {
+  reason: Schema.String,
+}) {}
 // ─── Content ──────────────────────────────────────────────────────────
 
 export const ExtractedContent = Schema.Struct({

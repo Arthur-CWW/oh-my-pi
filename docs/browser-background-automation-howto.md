@@ -2,13 +2,17 @@
 
 Use this note as context for future agents when the goal is to automate a logged-in browser without stealing focus from the user.
 
+## 2026-06-09 Status
+
+CuaDriver is now the preferred default for background browser GUI/visual automation on Arthur's Mac. Use this CDP note when the task needs browser protocol access: DOM JavaScript, network/API inspection, cookies, target/session management, or frontend provider adapters like `llm_frontend_browser`.
+
 ## Goal
 
-Control a browser through Chrome DevTools Protocol (CDP) while keeping the user's current app in the foreground. Do not use normal foreground browser automation unless the user explicitly asks to watch or interact manually.
+Control a browser without bringing it to the foreground. Prefer CuaDriver for visible GUI interaction and CDP for protocol-level work. Do not use normal foreground browser automation unless the user explicitly asks to watch or interact manually.
 
 ## Recommended Setup
 
-Use a dedicated Chromium-family app/profile for automation. Helium worked well because it can run separately from the user's normal Chrome profile.
+For CDP work, use a dedicated Chromium-family app/profile for automation. Helium worked well because it can run separately from the user's normal Chrome profile.
 
 Preferred shape:
 

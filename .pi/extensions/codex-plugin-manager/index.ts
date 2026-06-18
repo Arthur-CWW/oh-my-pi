@@ -4,7 +4,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
-const VENDOR_ROOT = process.env.PI_CODEX_PLUGIN_VENDOR_ROOT ?? "/Users/arthur/projects/pi-web-access/vendor/openai";
+const VENDOR_ROOT = process.env.PI_CODEX_PLUGIN_VENDOR_ROOT ?? "/Users/arthur/agents/web-access/vendor/openai";
 const CATALOG_PATH = join(VENDOR_ROOT, "codex-plugin-catalog.json");
 const ROUTER_SKILLS_ROOT = join(VENDOR_ROOT, "codex-plugin-router-skills");
 const DIRECT_SKILLS_ROOT = join(VENDOR_ROOT, "codex-pi-skills");

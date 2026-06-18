@@ -1,5 +1,5 @@
-import type { AssistantMessage } from "@earendil-works/pi-ai"
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent"
+import type { AssistantMessage } from "@oh-my-pi/pi-ai"
+import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent"
 import { errorMessage, type UsageSnapshot } from "./codex-usage/domain"
 import { readFooterDefaults } from "./codex-usage/files"
 import { composeFooterLine, formatModelVariants, formatStatsLeft, formatUsageVariants } from "./codex-usage/format"
@@ -22,14 +22,6 @@ class CodexUsageFooter {
   constructor(pi: ExtensionAPI) {
     pi.on("session_start", (_event, ctx) => this.start(ctx))
     pi.on("turn_end", (_event, ctx) => void this.refresh(ctx))
-    pi.on("model_select", (event, ctx) => {
-      this.requestRender?.()
-      void this.refresh(ctx, event.model.id)
-    })
-    pi.on("thinking_level_select", (event) => {
-      this.thinkingLevel = event.level
-      this.requestRender?.()
-    })
     pi.on("session_shutdown", (_event, ctx) => this.stop(ctx))
   }
 
@@ -50,22 +42,17 @@ class CodexUsageFooter {
 
     if (ctx.hasUI) {
       const generation = this.generation
-      ctx.ui.setFooter((tui, theme, footerData) => {
+      ctx.ui.setFooter((tui, theme) => {
         this.requestRender = () => {
           if (this.isCurrent(generation)) tui.requestRender()
         }
 
-        const disposeBranchListener = footerData.onBranchChange(() => {
-          if (this.isCurrent(generation)) tui.requestRender()
-        })
-
         return {
           dispose: () => {
-            disposeBranchListener()
             if (this.isCurrent(generation)) this.requestRender = undefined
           },
           invalidate() {},
-          render: (width: number) => [this.renderFooterLine(width, ctx, theme, footerData)],
+          render: (width: number) => [this.renderFooterLine(width, ctx, theme)],
         }
       })
     }
@@ -140,7 +127,6 @@ class CodexUsageFooter {
     width: number,
     ctx: ExtensionContext,
     theme: ExtensionContext["ui"]["theme"],
-    footerData: { getAvailableProviderCount(): number },
   ): string {
     let totalInput = 0
     let totalOutput = 0
@@ -176,7 +162,7 @@ class CodexUsageFooter {
     const modelVariants = formatModelVariants(theme, {
       modelId: ctx.model?.id,
       provider: ctx.model?.provider,
-      providerCount: footerData.getAvailableProviderCount(),
+      providerCount: 0,
       reasoning: ctx.model?.reasoning,
       thinkingLevel: this.thinkingLevel,
     })

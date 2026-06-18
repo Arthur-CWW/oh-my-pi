@@ -1,5 +1,5 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent"
-import { truncateToWidth, type Component } from "@earendil-works/pi-tui"
+import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent"
+import { truncateToWidth, type Component } from "@oh-my-pi/pi-tui"
 import {
   buildMermaidPreviewDetails,
   extractMessageText,

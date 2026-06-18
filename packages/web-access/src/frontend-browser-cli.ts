@@ -102,7 +102,9 @@ Examples:
   pi-llm-browser prompt --provider aistudio "Return exactly: ok"
   pi-llm-browser prompt --provider chatgpt --project youtube-video-essay --prompt-file prompt.md
   pi-llm-browser prompt --provider chatgpt --no-wait "Deep research question"
+  pi-llm-browser prompt --provider grok --no-wait "Search public X posts from @openai about Codex and summarize them"
   pi-llm-browser wait --provider chatgpt --session latest --response-timeout-ms 900000 --output-file research.md
+  pi-llm-browser wait --provider grok --session latest --response-timeout-ms 300000 --output-file grok-search.md
   pi-llm-browser prompt --provider chatgpt --continue "Continue from the last answer"
   pi-llm-browser projects --provider chatgpt --save-project youtube-video-essay --project-url https://chatgpt.com/project/...
   pi-llm-browser sessions --provider chatgpt --project youtube-video-essay

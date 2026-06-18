@@ -24,6 +24,15 @@ export function geminiApiKey(): string | null {
   return process.env.GEMINI_API_KEY ?? str("geminiApiKey") ?? null
 }
 
+function agentDir(): string {
+  const configured = process.env.PI_CODING_AGENT_DIR?.trim()
+  return configured ? configured : join(homedir(), ".omp", "agent")
+}
+
+export function webAccessStateDir(): string {
+  return join(agentDir(), "web-access")
+}
+
 export function kagiSessionPath(): string {
-  return join(homedir(), ".pi", "pi-web-access", "kagi-session.json")
+  return join(webAccessStateDir(), "kagi-session.json")
 }

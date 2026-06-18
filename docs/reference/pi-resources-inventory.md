@@ -19,9 +19,9 @@ Current important settings:
 // ~/.pi/agent/settings.json
 {
   "packages": [
-    "/Users/arthur/projects/pi-web-access/packages/web-access/src/codex-usage-status.ts",
+    "/Users/arthur/agents/web-access/packages/web-access/src/codex-usage-status.ts",
     {
-      "source": "/Users/arthur/projects/pi-web-access",
+      "source": "/Users/arthur/agents/web-access",
       "extensions": ["packages/web-access/src/index.ts"],
       "prompts": [],
       "themes": []
@@ -44,9 +44,9 @@ The broad global `agent-stuff` package used to be why skills like `anachb`, `oeb
 
 | Skill | What it does | Source path | Keep? |
 |---|---|---|---|
-| `background-browser-automation` | Safety rules for CDP/Playwright/Puppeteer/browser automation without stealing focus. | `packages/web-access/skills/background-browser-automation` | Keep project/global core. |
+| `background-browser-automation` | CuaDriver-first browser automation guidance plus CDP/Playwright/Puppeteer safety rules for protocol work without stealing focus. | `packages/web-access/skills/background-browser-automation` | Keep project/global core. |
 | `librarian` | Open-source/library research with source-backed GitHub permalinks. | `packages/web-access/skills/librarian` | Keep. High usage. |
-| `llm-frontend-browser` | ChatGPT/AI Studio/Grok frontend sessions through `llm_frontend_browser`. | `packages/web-access/skills/llm-frontend-browser` | Keep; improve async behavior later. |
+| `llm-frontend-browser` | ChatGPT/AI Studio/Grok frontend sessions through `llm_frontend_browser`. | `packages/web-access/skills/llm-frontend-browser` | Keep; async-first design still needs daemon/queue later. |
 | `macos-computer-use` | Background-safe native macOS GUI loops with CuaDriver. | `packages/web-access/skills/macos-computer-use` | Keep for VoiceInk/macOS validation. |
 | `rubber-duck-adversarial` | Cross-cutting critique/sanity-check mode. | `packages/web-access/skills/rubber-duck-adversarial` | Keep, if it does not over-trigger. |
 | `source-archive` | Archive public articles/videos/transcripts into repo-local research docs. | `packages/web-access/skills/source-archive` | Keep for research-heavy workflows. |
@@ -131,12 +131,12 @@ Source repo: `Arthur-CWW/skills` fork of `badlogic/pi-skills` at `/Users/arthur/
 
 | Extension | What it does | Source | Keep? |
 |---|---|---|---|
-| `browser-automation-guard.ts` | Global safety extension: injects browser-background policy and blocks focus-stealing browser commands/code unless `AGENT_ALLOW_FOREGROUND_BROWSER=1`. | `~/.pi/agent/extensions/browser-automation-guard.ts` | Keep; maybe vendor into this repo later. |
+| `browser-automation-guard.ts` | Global safety extension: injects browser-background policy and blocks focus-stealing browser commands/code unless `AGENT_ALLOW_FOREGROUND_BROWSER=1`. | `~/.pi/agent/extensions/browser-automation-guard.ts` | Keep as a seatbelt; prefer CuaDriver or CDP background targets as the primary solution. |
 | `codex-plugin-manager` | `/codex-plugins` UI; dynamically loads vendored Codex plugin router/direct skills. | `.pi/extensions/codex-plugin-manager/index.ts` | Track in repo if kept. |
 | `codex-usage-status.ts` | TUI footer for Codex usage/model/context/cost info. | `packages/web-access/src/codex-usage-status.ts` via global package entry | Keep if useful; move out of `web-access` eventually. |
 | `mermaid-preview/src` | Renders Mermaid diagrams in Pi messages as previews. | `packages/mermaid-preview/src/index.ts` | Keep; already separate package. |
 | `pi-dynamic-workflows:workflow.ts` | Adds deterministic workflow/fan-out tool and prompt templates from `pi-dynamic-workflows`. | `.pi/npm/node_modules/pi-dynamic-workflows` | Keep until local vendored dynamic workflow replaces it. |
-| `web-access/src` | Registers web search/content fetch/cookies/YouTube/Codex session/frontend LLM/cockpit/vim-lite tools and commands. | `packages/web-access/src/index.ts` | Keep, but split later. |
+| `web-access/src` | Registers web search/content fetch/cookies/YouTube/CuaDriver/Codex session/frontend LLM/cockpit/vim-lite tools and commands. | `packages/web-access/src/index.ts` | Keep, but split later. |
 
 ## Recommended final startup shape
 

@@ -3,7 +3,7 @@ import { readdir, realpath, stat } from "node:fs/promises"
 import { homedir } from "node:os"
 import { basename, isAbsolute, join, relative, resolve } from "node:path"
 import { createInterface } from "node:readline"
-import { SessionManager, type ExtensionAPI, type ExtensionCommandContext } from "@earendil-works/pi-coding-agent"
+import { SessionManager, type ExtensionAPI, type ExtensionCommandContext } from "@oh-my-pi/pi-coding-agent"
 import { Type } from "@sinclair/typebox"
 
 const DEFAULT_MAX_CHARS = 50_000
@@ -603,7 +603,7 @@ async function findImportedPiSession(session: CodexSessionInfo, cwd: string, all
   let stalePath: string | null = null
   for (const info of sessions) {
     try {
-      const imported = extractImportMarker(SessionManager.open(info.path))
+      const imported = extractImportMarker(await SessionManager.open(info.path))
       if (!imported || imported.codexSessionId !== session.id) continue
       if (imported.codexUpdatedAt === session.updatedAt) return { exact: true, path: info.path }
       stalePath ??= info.path
@@ -674,12 +674,7 @@ async function continueCodexSessionNatively(ctx: ExtensionCommandContext, sessio
       return
     }
 
-    const result = await ctx.switchSession(existing.path, {
-      withSession: async (nextCtx) => {
-        nextCtx.ui.setEditorText(kickoff)
-        nextCtx.ui.notify(`${note} Editor prefilled; submit when ready.`, "info")
-      },
-    })
+    const result = await ctx.switchSession(existing.path)
     if (result.cancelled) return
     return
   }
@@ -693,17 +688,7 @@ async function continueCodexSessionNatively(ctx: ExtensionCommandContext, sessio
     setup: async (sessionManager) => {
       sessionManager.appendCustomEntry(CODEX_IMPORT_ENTRY_TYPE, marker)
       sessionManager.appendCustomMessageEntry(CODEX_IMPORT_CONTEXT_TYPE, resume.context, false, marker)
-      sessionManager.appendSessionInfo(buildImportedSessionName(session))
-    },
-    withSession: async (nextCtx) => {
-      if (args.noSend) {
-        nextCtx.ui.setEditorText(kickoff)
-        nextCtx.ui.notify(`${note} Editor prefilled; submit when ready.`, "info")
-        return
-      }
-
-      await nextCtx.sendUserMessage(kickoff)
-      nextCtx.ui.notify(note, "info")
+      await sessionManager.setSessionName(buildImportedSessionName(session))
     },
   })
   if (result.cancelled) return
@@ -729,10 +714,6 @@ function registerCodexSessionTool(pi: ExtensionAPI): void {
     name: "codex_session",
     label: "Codex Session",
     description: "List or extract recent Codex CLI sessions so Pi can continue prior Codex work.",
-    promptSnippet: "List or extract recent Codex CLI sessions for the current project.",
-    promptGuidelines: [
-      "Use codex_session when the user asks to continue, inspect, or import a previous Codex CLI session in Pi.",
-    ],
     parameters: Type.Object({
       action: Type.Optional(Type.String({ description: "list or show (default: list)" })),
       all: Type.Optional(Type.Boolean({ description: "Include sessions from all directories, not just the current cwd" })),

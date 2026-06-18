@@ -1,5 +1,5 @@
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent"
-import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui"
+import type { ExtensionContext } from "@oh-my-pi/pi-coding-agent"
+import { Ellipsis, truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui"
 import type { UsageSnapshot } from "./domain"
 
 type FooterTheme = Pick<ExtensionContext["ui"]["theme"], "fg">
@@ -116,20 +116,20 @@ export function formatModelVariants(theme: FooterTheme, input: ModelFooterInput)
 export function composeFooterLine(width: number, left: string, rightVariants: string[]): string {
   const minPadding = 2
   const variants = rightVariants.filter(Boolean)
-  if (!variants.length) return truncateToWidth(left, width, "")
+  if (!variants.length) return truncateToWidth(left, width, Ellipsis.Omit)
 
   const shortest = variants[variants.length - 1]!
   let leftText = left
   const reserve = visibleWidth(shortest) + minPadding
   if (visibleWidth(leftText) + reserve > width) {
-    leftText = truncateToWidth(leftText, Math.max(0, width - reserve), "")
+    leftText = truncateToWidth(leftText, Math.max(0, width - reserve), Ellipsis.Omit)
   }
 
   const availableForRight = Math.max(0, width - visibleWidth(leftText) - minPadding)
-  const chosen = variants.find((value) => visibleWidth(value) <= availableForRight) ?? truncateToWidth(shortest, availableForRight, "")
-  if (!chosen) return truncateToWidth(leftText, width, "")
+  const chosen = variants.find((value) => visibleWidth(value) <= availableForRight) ?? truncateToWidth(shortest, availableForRight, Ellipsis.Omit)
+  if (!chosen) return truncateToWidth(leftText, width, Ellipsis.Omit)
 
   const paddingWidth = Math.max(minPadding, width - visibleWidth(leftText) - visibleWidth(chosen))
   const line = `${leftText}${" ".repeat(paddingWidth)}${chosen}`
-  return truncateToWidth(line, width, "")
+  return truncateToWidth(line, width, Ellipsis.Omit)
 }

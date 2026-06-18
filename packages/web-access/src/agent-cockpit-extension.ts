@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent"
+import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent"
 import { Type } from "@sinclair/typebox"
 import {
   formatSessionList,
@@ -159,10 +159,6 @@ export function registerAgentCockpit(pi: ExtensionAPI): void {
     name: "agent_cockpit",
     label: "Agent Cockpit",
     description: "Publish/list local Pi agent cockpit metadata stored in ~/.local/share/pi-cockpit/cockpit.sqlite.",
-    promptGuidelines: [
-      "Use agent_cockpit to publish or inspect local multi-agent session/workgroup metadata when coordinating Pi/Codex-like sessions.",
-      "Use agent_cockpit action=list or action=summary before making claims about what local cockpit sessions are registered.",
-    ],
     parameters: Type.Object({
       action: Type.Optional(Type.String({ description: "publish, heartbeat, list, summary, events, workgroup, zellij-snapshot (default: list)" })),
       activeWithinMs: Type.Optional(Type.Number({ description: "Only list sessions with heartbeat within this many milliseconds" })),

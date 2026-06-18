@@ -581,6 +581,119 @@ Why SQLite:
 
 Design rule: Zellij/tmux is the terminal substrate; SQLite is the semantic control-plane memory.
 
+
+## Repo-wide task ledger
+
+Arthur's centralized metadata idea should start as a repo-wide task ledger, not a full document database.
+
+The control-plane SQLite store should eventually hold two related but separate concerns:
+
+1. **runtime cockpit state**: live sessions, terminal panes, heartbeats, workgroups, and recent activity
+2. **task ledger state**: packet queue rows, owner path claims, proof links, review state, and scheduling timestamps
+
+Keeping both in SQLite lets the orchestrator answer questions like “what is the next unclaimed React QA packet?” or “which active agents own `apps/slotok-workbench/**`?” without rereading `TASKS.md`, QA notes, and session logs. Keeping the concerns separate prevents transient terminal details from becoming the task source of truth.
+
+### What stays Markdown
+
+Do not move every small Markdown file into SQLite. Markdown remains the right format for:
+
+- policy and SOP docs that humans edit directly
+- plans with rationale, tradeoffs, and historical context
+- QA notes with screenshots, command transcripts, and prose interpretation
+- state/lesson docs that should be readable outside the cockpit
+
+The ledger should point to these files by path and stable heading or artifact URL. It should not copy their prose unless a short summary is needed for list views.
+
+### What moves to SQLite first
+
+Move only high-churn coordination fields:
+
+- packet id, title, workstream, status, priority, and short summary
+- owner paths, excluded paths, and dirty paths that must be preserved
+- assigned worker/reviewer/session ids
+- proof links to QA notes, artifacts, session logs, data folders, and commits
+- created/updated/claimed/review-ready/done/stale timestamps
+- append-only status events
+
+These are the fields agents need for atomic claim/update decisions. They are also the fields most likely to become stale when duplicated across `TASKS.md`, QA notes, and handoff prose.
+
+### Minimal schema
+
+The first repo ledger can be four tables alongside the cockpit runtime tables:
+
+```sql
+create table task_packets (
+  id text primary key,
+  title text not null,
+  workstream text not null,
+  status text not null,
+  priority integer not null default 0,
+  source_doc text,
+  source_heading text,
+  summary text not null default '',
+  created_at text not null,
+  updated_at text not null,
+  claimed_at text,
+  review_ready_at text,
+  done_at text,
+  blocked_reason text
+);
+
+create table packet_ownership (
+  packet_id text not null references task_packets(id) on delete cascade,
+  path text not null,
+  kind text not null,
+  primary key (packet_id, path, kind)
+);
+
+create table packet_proofs (
+  id integer primary key autoincrement,
+  packet_id text not null references task_packets(id) on delete cascade,
+  kind text not null,
+  href text not null,
+  label text not null default '',
+  created_at text not null
+);
+
+create table packet_events (
+  id integer primary key autoincrement,
+  packet_id text not null references task_packets(id) on delete cascade,
+  event_type text not null,
+  actor text not null default '',
+  session_id text,
+  note text not null default '',
+  created_at text not null
+);
+```
+
+Use constrained status values in application code first; add SQL `check` constraints once the import path has proved the vocabulary. Store timestamps as UTC ISO-8601 text so shell, TypeScript, Rust, and SQLite can all sort them without adapters.
+
+### Migration from existing repo state
+
+1. Import `TASKS.md` rows as `task_packets` with `source_doc='TASKS.md'`; keep the Markdown file as the human index during the transition.
+2. Link existing `docs/qa/**` proof notes as `packet_proofs(kind='qa-note')`; do not inline the note body.
+3. Link session histories/logs only when they affect scheduling, review, or unblock decisions.
+4. For active multi-agent work, add owner/excluded paths from the task packet into `packet_ownership`.
+5. Teach coordinator commands to update SQLite first, then patch or regenerate short Markdown summaries.
+6. Once the loop is reliable, make `TASKS.md` a curated/generated view of the ledger instead of the place agents race to edit.
+
+This is intentionally incremental. A useful v0 can answer `next`, `claim`, `proof add`, `review-ready`, `block`, and `done` before any historical Markdown is fully normalized.
+
+### Agent query/update API
+
+Expose boring commands or tools over the ledger:
+
+```txt
+ledger next --workstream <name> [--path <prefix>]
+ledger claim <packet-id> --worker <id> --session <id>
+ledger paths <packet-id>
+ledger proof add <packet-id> --kind qa-note --href docs/qa/...
+ledger status <packet-id> review --note "proof ready"
+ledger status <packet-id> done --proof <href>
+```
+
+Agents should never infer packet availability from prose when the ledger exists. They query for eligible work, claim atomically, read owner/excluded paths, and write proof/status events. Markdown remains the reviewable explanation layer.
+
 ## Zellij API notes
 
 Source inspection shows Zellij has stronger APIs than tmux for cockpit-style integration. Repos inspected:

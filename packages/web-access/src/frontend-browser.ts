@@ -165,10 +165,10 @@ const PROVIDERS: Record<FrontendProvider, ProviderConfig> = {
   },
   grok: {
     defaultPort: 9339,
-    host: "x.com",
+    host: "grok.com",
     id: "grok",
     profileName: "helium-grok-profile",
-    url: "https://x.com/i/grok",
+    url: "https://grok.com/",
   },
   jimeng: {
     defaultPort: 9340,
@@ -559,6 +559,322 @@ async function typeInput(page: any, selector: string, value: string): Promise<bo
   return true
 }
 
+type FrontendAutomationPage = Parameters<typeof typeInput>[0]
+
+async function createGrokPromptPage(options: FrontendBrowserOptions) {
+  const promptOptions = {
+    ...options,
+    background: options.background ?? true,
+    provider: "grok" as const,
+  }
+  const launched = await launchBrowser(promptOptions)
+  const created = await createBackgroundPage(promptOptions, "https://grok.com/")
+  const status = await readStatus(promptOptions)
+  const selectedTab = status.tabs.find((tab) => tab.id === created.targetId)
+    ?? status.tabs.find((tab) => isProviderTab(tab, "x.com"))
+    ?? null
+  return {
+    browser: created.browser,
+    launched,
+    page: created.page,
+    selectedTab,
+  }
+}
+
+async function inspectGrokHumanBlocker(page: FrontendAutomationPage): Promise<string | null> {
+  return await page.evaluate(() => {
+    const visible = (el: Element) => {
+      const rect = el.getBoundingClientRect()
+      const style = window.getComputedStyle(el)
+      return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden"
+    }
+    const text = document.body?.innerText ?? ""
+    const controls = Array.from(document.querySelectorAll("button, a, [role='button']")).filter(visible)
+    const loginControl = controls.some((el) => /^(sign in|log in)$/i.test((el.textContent ?? "").trim()))
+    const loginPage = /\/i\/(?:flow\/)?login|\/i\/jf\/onboarding|\/auth|\/login|\/sign-in/i.test(location.pathname)
+      || /See what.s happening|Join X today|Continue with Google|Continue with Apple|Continue with X|Email or username|Sign in to Grok|Log in to Grok/i.test(text)
+    if (loginControl || loginPage) {
+      return "X/Grok login is required in the dedicated Grok browser profile before frontend prompt automation."
+    }
+    if (/captcha|verification|2-step|two-step|passkey|security code|approve|cloudflare|checking your browser/i.test(text)) {
+      return "X/Grok sign-in or browser challenge requires manual attention."
+    }
+    const termsPrompt = controls.some((el) => /accept|agree/i.test((el.textContent ?? "").trim()))
+      && /terms|privacy policy/i.test(text)
+    if (termsPrompt) {
+      return "X/Grok terms or policy prompt requires manual attention."
+    }
+    return null
+  })
+}
+
+async function fillGrokPrompt(page: FrontendAutomationPage, prompt: string): Promise<void> {
+  const focused = await page.evaluate(() => {
+    const visible = (el: Element) => {
+      const rect = el.getBoundingClientRect()
+      const style = window.getComputedStyle(el)
+      return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden"
+    }
+    const selectors = [
+      "main [contenteditable='true'][role='textbox']",
+      "main [contenteditable='true']",
+      "[data-testid*='grok' i] [contenteditable='true']",
+      "[contenteditable='true'][role='textbox']",
+      "textarea",
+      "[role='textbox']",
+    ]
+    const candidates = Array.from(new Set(selectors.flatMap((selector) => Array.from(document.querySelectorAll(selector)))))
+      .filter(visible)
+      .filter((el) => {
+        const label = [
+          el.getAttribute("aria-label") ?? "",
+          el.getAttribute("placeholder") ?? "",
+          el.textContent ?? "",
+        ].join("\n")
+        return !/search|phone|email|username|password/i.test(label)
+      }) as HTMLElement[]
+    candidates.sort((a, b) => {
+      const aRect = a.getBoundingClientRect()
+      const bRect = b.getBoundingClientRect()
+      const aArea = aRect.width * aRect.height
+      const bArea = bRect.width * bRect.height
+      if (aArea !== bArea) return bArea - aArea
+      return bRect.y - aRect.y
+    })
+    const input = candidates[0]
+    if (!input) return false
+
+    input.scrollIntoView({ block: "center", inline: "nearest" })
+    input.focus()
+    if (input instanceof HTMLTextAreaElement || input instanceof HTMLInputElement) {
+      const prototype = input instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
+      const setter = Object.getOwnPropertyDescriptor(prototype, "value")?.set
+      setter?.call(input, "")
+      input.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteContentBackward" }))
+      return true
+    }
+
+    document.getSelection()?.selectAllChildren(input)
+    document.execCommand("delete")
+    return true
+  })
+
+  if (!focused) {
+    throw new FrontendBrowserError({ reason: "Could not find Grok prompt textbox." })
+  }
+
+  const client = await page.target().createCDPSession()
+  try {
+    await client.send("Input.insertText", { text: prompt })
+  } finally {
+    await client.detach()
+  }
+}
+
+async function submitGrokPrompt(page: FrontendAutomationPage): Promise<boolean> {
+  for (let i = 0; i < 24; i++) {
+    const box = await page.evaluate(() => {
+      const visible = (el: Element) => {
+        const rect = el.getBoundingClientRect()
+        const style = window.getComputedStyle(el)
+        return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden"
+      }
+      const disabled = (el: Element) => {
+        const button = el as HTMLButtonElement
+        return Boolean(button.disabled) || el.hasAttribute("disabled") || el.getAttribute("aria-disabled") === "true"
+      }
+      const buttons = Array.from(document.querySelectorAll("main button, button, [role='button']"))
+        .filter(visible)
+        .filter((el) => !disabled(el))
+      const send = buttons.find((el) => /send|submit/i.test(el.getAttribute("aria-label") ?? ""))
+        ?? buttons.find((el) => /send|submit/i.test(el.getAttribute("data-testid") ?? ""))
+        ?? buttons.find((el) => /send|submit/i.test((el.textContent ?? "").trim()))
+      if (!send) return null
+      const rect = send.getBoundingClientRect()
+      return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }
+    })
+    if (box) {
+      await page.mouse.click(box.x, box.y)
+      return true
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250))
+  }
+  return false
+}
+
+async function extractGrokResponse(page: FrontendAutomationPage, prompt: string, baseline = ""): Promise<string> {
+  return await page.evaluate((submittedPrompt: string, previousText: string) => {
+    const normalize = (value: string) => value.replace(/\s+/g, " ").trim()
+    const clean = (value: string) => normalize(value)
+      .replace(/^Grok\s*/i, "")
+      .trim()
+    const normalizedPrompt = normalize(submittedPrompt)
+    const normalizedBaseline = normalize(previousText)
+    const visible = (el: Element) => {
+      const rect = el.getBoundingClientRect()
+      const style = window.getComputedStyle(el)
+      return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden"
+    }
+    const selectors = [
+      "main article",
+      "main [data-testid*='message' i]",
+      "main [data-testid*='cellInnerDiv' i]",
+      "main [class*='markdown' i]",
+      "main [role='listitem']",
+      "main",
+    ]
+    const reject = [
+      /See what.s happening/i,
+      /Continue with Google|Continue with Apple/i,
+      /^Home Notifications Messages/i,
+      /What do you want to know/i,
+      /Terms of Service|Privacy Policy|Cookie Policy/i,
+    ]
+    const accept = (text: string) => {
+      if (text.length < 2) return false
+      if (text === normalizedPrompt) return false
+      if (text === normalizedBaseline) return false
+      if (reject.some((pattern) => pattern.test(text))) return false
+      if (text.includes(normalizedPrompt) && text.length < normalizedPrompt.length + 20) return false
+      return true
+    }
+
+    for (const selector of selectors) {
+      const candidates = Array.from(new Set(Array.from(document.querySelectorAll(selector))))
+        .filter(visible)
+        .map((el) => {
+          const text = clean(el.textContent ?? "")
+          return text.includes(normalizedPrompt) ? clean(text.replace(normalizedPrompt, "")) : text
+        })
+        .filter(accept)
+      if (candidates.length) return candidates[candidates.length - 1]!
+    }
+    return ""
+  }, prompt, baseline)
+}
+
+async function isGrokResponseRunning(page: FrontendAutomationPage): Promise<boolean> {
+  return await page.evaluate(() => {
+    const visible = (el: Element) => {
+      const rect = el.getBoundingClientRect()
+      const style = window.getComputedStyle(el)
+      return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden"
+    }
+    return Array.from(document.querySelectorAll("main button, button, [role='button']"))
+      .filter(visible)
+      .some((el) => {
+        const label = [
+          el.getAttribute("aria-label") ?? "",
+          el.getAttribute("data-testid") ?? "",
+          el.textContent ?? "",
+        ].join("\n")
+        return /stop|cancel|generating|responding/i.test(label)
+      })
+  }).catch(() => false)
+}
+
+async function waitForGrokResponse(page: FrontendAutomationPage, prompt: string, timeoutMs: number, baseline: string): Promise<string> {
+  const deadline = Date.now() + timeoutMs
+  let best = ""
+  let last = ""
+  let stableTicks = 0
+  await new Promise((resolve) => setTimeout(resolve, 1_000))
+
+  while (Date.now() < deadline) {
+    const current = await extractGrokResponse(page, prompt, baseline).catch(() => "")
+    if (current.length > best.length) best = current
+    if (current && current === last) stableTicks++
+    else stableTicks = 0
+    last = current
+
+    const running = await isGrokResponseRunning(page)
+    if (best && !running && stableTicks >= 2) break
+    await new Promise((resolve) => setTimeout(resolve, 1_000))
+  }
+  return best
+}
+
+async function promptGrok(options: FrontendPromptOptions): Promise<FrontendPromptResult> {
+  const prompt = options.prompt.trim()
+  if (!prompt) throw new FrontendBrowserError({ reason: "Prompt is empty." })
+
+  const connection = options.conversationUrl || options.newChat === false
+    ? await connectProviderPage({
+      ...options,
+      background: options.background ?? true,
+      provider: "grok",
+    })
+    : await createGrokPromptPage(options)
+  const { browser, launched, page, selectedTab } = connection
+
+  try {
+    if (options.conversationUrl) {
+      await page.goto(options.conversationUrl, {
+        waitUntil: "domcontentloaded",
+        timeout: 30_000,
+      }).catch(() => {})
+    }
+    await page.waitForSelector("body", { timeout: 15_000 })
+    await page.waitForNetworkIdle({ idleTime: 1_000, timeout: 8_000 }).catch(() => {})
+
+    const humanReason = await inspectGrokHumanBlocker(page)
+    const title = redactText(await page.title())
+    const url = sanitizeUrl(page.url())
+    if (humanReason) {
+      const status = await readStatus({ ...options, provider: "grok" })
+      return {
+        ...status,
+        conversationUrl: null,
+        humanReason,
+        launched,
+        needsHuman: true,
+        outputFile: null,
+        projectKey: null,
+        projectUrl: null,
+        responseLength: 0,
+        responseText: "",
+        sessionId: null,
+        selectedTab,
+        submitted: false,
+        title,
+        url,
+      }
+    }
+
+    await fillGrokPrompt(page, prompt)
+    const responseBaseline = await extractGrokResponse(page, prompt).catch(() => "")
+    const submitted = await submitGrokPrompt(page)
+    if (!submitted) {
+      throw new FrontendBrowserError({ reason: "Could not find an enabled Grok send button." })
+    }
+
+    const responseText = options.waitForResponse === false
+      ? ""
+      : await waitForGrokResponse(page, prompt, options.responseTimeoutMs ?? 120_000, responseBaseline)
+    const status = await readStatus({ ...options, provider: "grok" })
+
+    return {
+      ...status,
+      conversationUrl: sanitizeUrl(page.url()),
+      humanReason: null,
+      launched,
+      needsHuman: false,
+      outputFile: null,
+      projectKey: null,
+      projectUrl: null,
+      responseLength: responseText.length,
+      responseText,
+      sessionId: null,
+      selectedTab,
+      submitted,
+      title: redactText(await page.title()),
+      url: sanitizeUrl(page.url()),
+    }
+  } finally {
+    await browser.disconnect()
+  }
+}
+
 async function findExistingPage(options: FrontendBrowserOptions, host: string) {
   const resolved = resolvedOptions(options)
   const puppeteer = await import("puppeteer-core")
@@ -601,7 +917,7 @@ async function createBackgroundPage(options: FrontendBrowserOptions, url: string
     )
     const page = await target.page()
     if (!page) throw new FrontendBrowserError({ reason: "Could not attach to created page." })
-    return { browser, page }
+    return { browser, page, targetId: created.targetId }
   } finally {
     await client.detach()
   }
@@ -1225,9 +1541,10 @@ async function promptProvider(options: FrontendPromptOptions): Promise<FrontendP
   let result: FrontendPromptResult
   if (provider === "aistudio") result = await promptAiStudio(prepared.options)
   else if (provider === "chatgpt") result = await promptChatGpt(prepared.options)
+  else if (provider === "grok") result = await promptGrok(prepared.options)
   else {
     throw new FrontendBrowserError({
-      reason: "Frontend prompt automation currently supports provider=aistudio or provider=chatgpt. Use setup/open/status for grok and jimeng until provider-specific prompt adapters are implemented.",
+      reason: "Frontend prompt automation currently supports provider=aistudio, provider=chatgpt, and provider=grok. Use setup/open/status for deepseek and jimeng until provider-specific prompt adapters are implemented.",
     })
   }
 
@@ -1251,6 +1568,83 @@ async function promptProvider(options: FrontendPromptOptions): Promise<FrontendP
     projectKey: session.projectKey,
     projectUrl: session.projectUrl,
     sessionId: session.id,
+  }
+}
+
+async function collectGrokResponse(options: FrontendCollectOptions): Promise<FrontendCollectResult> {
+  const provider = options.provider ?? "grok"
+  if (provider !== "grok") {
+    throw new FrontendBrowserError({ reason: "Grok collect/wait requires provider=grok." })
+  }
+
+  const session = options.session
+    ? await resolveFrontendSession(options.session, { project: options.project, provider })
+    : null
+  if (options.session && !session) {
+    throw new FrontendBrowserError({ reason: `Stored session not found: ${options.session}` })
+  }
+
+  const conversationUrl = options.conversationUrl?.trim() || session?.conversationUrl?.trim() || "https://grok.com/"
+  const { browser, launched, page, selectedTab } = await connectProviderPage({
+    ...options,
+    background: options.background ?? true,
+    provider: "grok",
+  })
+
+  try {
+    if (conversationUrl && page.url() !== conversationUrl) {
+      await page.goto(conversationUrl, {
+        waitUntil: "domcontentloaded",
+        timeout: 30_000,
+      }).catch(() => {})
+    }
+    await page.waitForSelector("body", { timeout: 15_000 })
+    await page.waitForNetworkIdle({ idleTime: 1_000, timeout: 8_000 }).catch(() => {})
+
+    const humanReason = await inspectGrokHumanBlocker(page)
+    if (humanReason) {
+      throw new FrontendBrowserError({ reason: humanReason })
+    }
+
+    const prompt = session?.prompt ?? ""
+    const responseBaseline = options.waitForResponse === false
+      ? ""
+      : session?.responseText || await extractGrokResponse(page, prompt).catch(() => "")
+    const responseText = options.waitForResponse === false
+      ? await extractGrokResponse(page, prompt).catch(() => "")
+      : await waitForGrokResponse(page, prompt, options.responseTimeoutMs ?? 120_000, responseBaseline)
+    const running = await isGrokResponseRunning(page)
+    const status = await readStatus({ ...options, provider: "grok" })
+    const title = redactText(await page.title())
+    const url = sanitizeUrl(page.url())
+    const savedResponseText = responseText || session?.responseText || ""
+    const saved = await saveFrontendSession({
+      conversationUrl: url || conversationUrl,
+      id: session?.id,
+      projectKey: session?.projectKey ?? null,
+      projectUrl: session?.projectUrl ?? null,
+      prompt: session?.prompt ?? `Collected response from ${conversationUrl}`,
+      provider,
+      responseText: savedResponseText,
+      title,
+    })
+    const outputFile = await writeOutputFile(options.outputFile, responseText)
+
+    return {
+      ...status,
+      conversationUrl: saved.conversationUrl,
+      launched,
+      outputFile,
+      responseLength: responseText.length,
+      responseText,
+      running,
+      selectedTab,
+      sessionId: saved.id,
+      title,
+      url,
+    }
+  } finally {
+    await browser.disconnect()
   }
 }
 
@@ -1338,6 +1732,13 @@ async function collectChatGptResponse(options: FrontendCollectOptions): Promise<
   } finally {
     await browser.disconnect()
   }
+}
+
+async function collectProviderResponse(options: FrontendCollectOptions): Promise<FrontendCollectResult> {
+  const provider = options.provider ?? "chatgpt"
+  if (provider === "chatgpt") return await collectChatGptResponse(options)
+  if (provider === "grok") return await collectGrokResponse(options)
+  throw new FrontendBrowserError({ reason: "Collect/wait currently supports provider=chatgpt or provider=grok only." })
 }
 
 function isChatGptAuthUrl(value: string): boolean {
@@ -1644,7 +2045,7 @@ export const collectFrontendBrowser = Effect.fn("collectFrontendBrowser")(functi
   options: FrontendCollectOptions,
 ) {
   return yield* Effect.tryPromise({
-    try: () => collectChatGptResponse(options),
+    try: () => collectProviderResponse(options),
     catch: (err) => err instanceof FrontendBrowserError
       ? err
       : new FrontendBrowserError({ reason: String(err) }),

@@ -129,6 +129,8 @@ Required safeguards:
 
 #### Phase A — CuaDriver wrapper MVP
 
+Status 2026-06-09: first thin wrapper exists as the `cua_driver` Pi tool in `packages/web-access/src/cua-driver.ts` and `src/index.ts`. It shells to installed `cua-driver call`, exposes a background-safe allowlist, includes command-mapping tests, and passes a live permissions smoke. Remaining Phase A work is the higher-level Hermes-style stateful `computer_use` schema with cached app/window context.
+
 - Finalize a Hermes-style `computer_use` Pi tool schema backed by installed `cua-driver`.
 - Add status/install checks: binary path, daemon status, Accessibility, Screen Recording.
 - Implement `capture/list_apps/focus_app/click/type/key/scroll/set_value/wait` by shelling to CuaDriver CLI or speaking MCP over stdio.

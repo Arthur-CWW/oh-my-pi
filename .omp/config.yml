@@ -1,3 +1,5 @@
 task:
   isolation:
-    mode: auto
+    mode: apfs
+providers:
+  webSearch: kagi

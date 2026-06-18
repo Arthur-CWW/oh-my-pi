@@ -1,11 +1,11 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent"
+import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent"
 import { Type } from "@sinclair/typebox"
 import { spawn } from "node:child_process"
 import { access, mkdir, readFile, writeFile } from "node:fs/promises"
 import { existsSync } from "node:fs"
 import { homedir, platform } from "node:os"
 import { basename, dirname, join } from "node:path"
-import puppeteer, { type Browser, type Page } from "puppeteer-core"
+import puppeteer, { type Browser, type Page, type Target } from "puppeteer-core"
 
 const DEFAULT_PORT = 9344
 const STATE_DIR = join(homedir(), ".pi", "pi-browser-use")
@@ -68,10 +68,14 @@ async function ensureStateDir(): Promise<void> {
   await mkdir(SCREENSHOT_DIR, { recursive: true })
 }
 
+function defaultBrowserApp(): string {
+  return platform() === "darwin" ? "Helium" : "Google Chrome"
+}
+
 function defaultOptions(options: BrowserOptions = {}) {
   const port = options.port ?? DEFAULT_PORT
   return {
-    browserApp: options.browserApp?.trim() || "Google Chrome",
+    browserApp: options.browserApp?.trim() || defaultBrowserApp(),
     browserPath: options.browserPath?.trim() || process.env.PI_BROWSER_USE_EXECUTABLE?.trim() || undefined,
     cdpUrl: options.cdpUrl?.trim() || `http://127.0.0.1:${port}`,
     port,
@@ -130,6 +134,39 @@ function macAppExecutable(appName: string): string[] {
   ]
 }
 
+function macAppBundleName(appName: string): string {
+  return appName.endsWith(".app") ? appName : `${appName}.app`
+}
+
+function macAppDisplayName(appName: string): string {
+  return basename(macAppBundleName(appName), ".app")
+}
+
+async function findMacBrowserApp(browserApp: string): Promise<string> {
+  const candidates = [
+    browserApp,
+    "Helium",
+    "Google Chrome",
+    "Chromium",
+    "Brave Browser",
+    "Microsoft Edge",
+  ]
+  const seen = new Set<string>()
+  for (const app of candidates) {
+    const displayName = macAppDisplayName(app)
+    if (seen.has(displayName)) continue
+    seen.add(displayName)
+    const bundleName = macAppBundleName(displayName)
+    if (
+      existsSync(join("/Applications", bundleName))
+      || existsSync(join(homedir(), "Applications", bundleName))
+    ) {
+      return displayName
+    }
+  }
+  throw new Error(`Could not find a Chrome/Chromium app bundle. Tried browserApp=${browserApp}`)
+}
+
 async function findBrowserExecutable(browserApp = "Google Chrome", browserPath?: string): Promise<string> {
   if (browserPath) {
     if (await canAccess(browserPath)) return browserPath
@@ -171,29 +208,42 @@ async function findBrowserExecutable(browserApp = "Google Chrome", browserPath?:
   )
 }
 
+function browserLaunchArgs(port: number, profileDir: string): string[] {
+  return [
+    `--remote-debugging-port=${port}`,
+    `--user-data-dir=${profileDir}`,
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-background-timer-throttling",
+    "--disable-renderer-backgrounding",
+    "--disable-backgrounding-occluded-windows",
+    "about:blank",
+  ]
+}
+
+async function launchBrowserProcess(resolved: ReturnType<typeof defaultOptions>): Promise<void> {
+  const args = browserLaunchArgs(resolved.port, resolved.profileDir)
+  const command = platform() === "darwin" && !resolved.browserPath
+    ? "open"
+    : await findBrowserExecutable(resolved.browserApp, resolved.browserPath)
+  const commandArgs = platform() === "darwin" && !resolved.browserPath
+    ? ["-g", "-na", await findMacBrowserApp(resolved.browserApp), "--args", ...args]
+    : args
+
+  const child = spawn(command, commandArgs, {
+    detached: true,
+    stdio: "ignore",
+  })
+  child.unref()
+}
+
 async function launchBrowser(options: BrowserOptions & { url?: string } = {}): Promise<BrowserUseState> {
   const resolved = defaultOptions(options)
   await ensureStateDir()
   await mkdir(resolved.profileDir, { recursive: true })
 
   if (!await waitForCdp(resolved.cdpUrl, 400)) {
-    const executable = await findBrowserExecutable(resolved.browserApp, resolved.browserPath)
-    const args = [
-      `--remote-debugging-port=${resolved.port}`,
-      `--user-data-dir=${resolved.profileDir}`,
-      "--no-first-run",
-      "--no-default-browser-check",
-      "--disable-background-timer-throttling",
-      "--disable-renderer-backgrounding",
-      "--disable-backgrounding-occluded-windows",
-    ]
-    if (options.url) args.push(options.url)
-
-    const child = spawn(executable, args, {
-      detached: true,
-      stdio: "ignore",
-    })
-    child.unref()
+    await launchBrowserProcess(resolved)
   }
 
   if (!await waitForCdp(resolved.cdpUrl, resolved.timeoutMs)) {
@@ -235,7 +285,33 @@ async function connect(options: BrowserOptions = {}): Promise<{ browser: Browser
 }
 
 function targetIdOfPage(page: Page): string | undefined {
-  return (page.target() as unknown as { _targetId?: string })._targetId
+  return (page.target() as { _targetId?: string })._targetId
+}
+
+function targetIdOfTarget(target: Target): string | undefined {
+  return (target as { _targetId?: string })._targetId
+}
+
+async function createBackgroundPage(browser: Browser, url = "about:blank"): Promise<Page> {
+  const browserTarget = browser.targets().find((target) => target.type() === "browser")
+  if (!browserTarget) throw new Error("No browser CDP target is available.")
+
+  const client = await browserTarget.createCDPSession()
+  try {
+    const created = await client.send("Target.createTarget", {
+      background: true,
+      url,
+    }) as { targetId: string }
+    const target = await browser.waitForTarget(
+      (candidate) => targetIdOfTarget(candidate) === created.targetId,
+      { timeout: 10_000 },
+    )
+    const page = await target.page()
+    if (!page) throw new Error(`Created target has no page: ${created.targetId}`)
+    return page
+  } finally {
+    await client.detach()
+  }
 }
 
 async function listTargets(cdpUrl: string): Promise<TargetInfo[]> {
@@ -510,7 +586,7 @@ async function clickSelector(page: Page, selector: string, clickCount: number, b
 
 function commonBrowserParams() {
   return {
-    browserApp: Type.Optional(Type.String({ description: "macOS app name (default: Google Chrome)" })),
+    browserApp: Type.Optional(Type.String({ description: "macOS app name (default: Helium on macOS, Google Chrome elsewhere)" })),
     browserPath: Type.Optional(Type.String({ description: "Chrome/Chromium executable path" })),
     cdpUrl: Type.Optional(Type.String({ description: "Existing CDP endpoint (default: http://127.0.0.1:9344)" })),
     port: Type.Optional(Type.Number({ description: "Remote debugging port (default: 9344)" })),
@@ -526,6 +602,7 @@ export default function registerBrowserUse(pi: ExtensionAPI): void {
     promptSnippet: "Launch/connect a CDP browser for browser automation.",
     promptGuidelines: [
       "Use browser_open before other browser_* tools when no browser session is active.",
+      "On macOS, prefer the default Helium automation profile and keep browser work in the background.",
       "Use browser_snapshot after page changes to refresh refs before browser_click/browser_type/browser_scroll.",
       "Browser tools operate a live browser; ask the user before submitting forms, sending messages, making purchases, deleting data, or transmitting sensitive data.",
     ],
@@ -542,10 +619,11 @@ export default function registerBrowserUse(pi: ExtensionAPI): void {
         try {
           let page = await activePage(browser, state).catch(() => null)
           if (params.url?.trim() && params.newTab) {
-            page = await browser.newPage()
-            await page.goto(params.url.trim(), { waitUntil: "domcontentloaded" })
+            page = await createBackgroundPage(browser, params.url.trim())
           } else if (params.url?.trim() && page && page.url() === "about:blank") {
             await page.goto(params.url.trim(), { waitUntil: "domcontentloaded" })
+          } else if (params.url?.trim() && !page) {
+            page = await createBackgroundPage(browser, params.url.trim())
           }
           const activeTargetId = page ? targetIdOfPage(page) : state.activeTargetId
           const nextState = { ...state, activeTargetId }
@@ -585,14 +663,12 @@ export default function registerBrowserUse(pi: ExtensionAPI): void {
         try {
           let activeTargetId = state.activeTargetId
           if (action === "new") {
-            const page = await browser.newPage()
-            if (params.url?.trim()) await page.goto(params.url.trim(), { waitUntil: "domcontentloaded" })
+            const page = await createBackgroundPage(browser, params.url?.trim() || "about:blank")
             activeTargetId = targetIdOfPage(page)
           } else if (action === "select") {
             if (!params.tabId?.trim()) return errorResult("tabId is required for action=select")
             const page = await pageByTargetId(browser, params.tabId.trim())
             if (!page) return errorResult(`No tab found: ${params.tabId}`)
-            await page.bringToFront()
             activeTargetId = params.tabId.trim()
           } else if (action === "close") {
             if (!params.tabId?.trim()) return errorResult("tabId is required for action=close")
@@ -671,7 +747,6 @@ export default function registerBrowserUse(pi: ExtensionAPI): void {
         try {
           const page = await activePage(browser, state, params.tabId)
           const activeTargetId = targetIdOfPage(page)
-          await page.bringToFront()
           const viewport = page.viewport() ?? { width: 0, height: 0 }
           const screenshotPath = join(SCREENSHOT_DIR, `${Date.now()}-${activeTargetId ?? "page"}.png`)
           await page.screenshot({ path: screenshotPath as `${string}.png`, fullPage: params.fullPage ?? false })
@@ -731,7 +806,6 @@ export default function registerBrowserUse(pi: ExtensionAPI): void {
         const { browser, state } = await connect(params)
         try {
           const page = await activePage(browser, state, params.tabId)
-          await page.bringToFront()
           const button = ["left", "right", "middle"].includes(params.button ?? "") ? params.button as "left" | "right" | "middle" : "left"
           const clickCount = Math.max(1, Math.floor(params.clickCount ?? 1))
           const selector = await resolveElementSelector(params, page)
@@ -767,7 +841,6 @@ export default function registerBrowserUse(pi: ExtensionAPI): void {
         const { browser, state } = await connect(params)
         try {
           const page = await activePage(browser, state, params.tabId)
-          await page.bringToFront()
           const selector = await resolveElementSelector(params, page)
           if (selector) {
             const element = await page.$(selector)
@@ -804,7 +877,6 @@ export default function registerBrowserUse(pi: ExtensionAPI): void {
         const { browser, state } = await connect(params)
         try {
           const page = await activePage(browser, state, params.tabId)
-          await page.bringToFront()
           await pressChord(page, params.key)
           return textResult(`Pressed ${params.key}. Call browser_snapshot to fetch updated state.`, { url: page.url() })
         } finally {
@@ -836,7 +908,6 @@ export default function registerBrowserUse(pi: ExtensionAPI): void {
         const { browser, state } = await connect(params)
         try {
           const page = await activePage(browser, state, params.tabId)
-          await page.bringToFront()
           const pages = Number.isFinite(params.pages) ? Math.max(0.05, params.pages ?? 1) : 1
           const viewport = page.viewport() ?? { width: 1000, height: 800 }
           let dx = params.deltaX ?? 0
