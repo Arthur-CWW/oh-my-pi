@@ -1,0 +1,10 @@
+{
+  "name": "@browser-extensions/agent-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Placeholder for local agent bridge daemon that receives browser captures and exposes them to LLM agents.",
+  "scripts": {
+    "check": "node -e \"console.log('agent-bridge placeholder ok')\""
+  }
+}

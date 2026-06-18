@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Illiterati Settings</title>
+    <style>
+      body {
+        font-family: ui-sans-serif, system-ui, sans-serif;
+        margin: 0;
+        padding: 16px;
+        background: #f8f8f8;
+        color: #121212;
+      }
+
+      main {
+        max-width: 960px;
+      }
+
+      h1,
+      h2 {
+        margin: 0 0 8px;
+      }
+
+      p {
+        margin: 8px 0;
+      }
+
+      .label {
+        display: block;
+        margin-top: 10px;
+        font-size: 12px;
+      }
+
+      textarea {
+        width: 100%;
+        box-sizing: border-box;
+        border: 1px solid #ccc;
+        border-radius: 8px;
+        padding: 8px;
+        font: 14px/1.45 ui-sans-serif, system-ui, sans-serif;
+        background: #fff;
+      }
+
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 10px;
+      }
+
+      button {
+        border: 0;
+        border-radius: 8px;
+        background: #111;
+        color: #fff;
+        padding: 8px 12px;
+        cursor: pointer;
+      }
+
+      button.mini {
+        font-size: 11px;
+        padding: 4px 8px;
+      }
+
+      #status {
+        margin-top: 10px;
+        font-size: 12px;
+      }
+
+      .clip-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 8px;
+        font-size: 12px;
+      }
+
+      .clip-table th,
+      .clip-table td {
+        text-align: left;
+        border-bottom: 1px solid #ddd;
+        padding: 6px;
+        vertical-align: top;
+      }
+
+      .hint {
+        color: #555;
+        font-size: 12px;
+      }
+
+      #logs {
+        max-height: 320px;
+        overflow: auto;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        padding: 8px;
+        background: #fff;
+      }
+
+      .log-row {
+        border-bottom: 1px solid #eee;
+        padding: 6px 0;
+      }
+
+      .log-row:last-child {
+        border-bottom: 0;
+      }
+
+      code {
+        display: block;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 11px;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/settings/main.tsx"></script>
+  </body>
+</html>

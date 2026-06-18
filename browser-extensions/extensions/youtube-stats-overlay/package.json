@@ -1,0 +1,22 @@
+{
+  "name": "youtube-stats-overlay",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Clean-room YouTube stats UI overlay inspired by reverse-engineered vidIQ UI patterns.",
+  "scripts": {
+    "dev": "vite build --watch --mode development",
+    "typecheck": "tsc --noEmit",
+    "build": "vite build",
+    "check": "pnpm typecheck && pnpm build"
+  },
+  "dependencies": {
+    "solid-js": "^1.9.13"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.1.42",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.16",
+    "vite-plugin-solid": "^2.11.12"
+  }
+}

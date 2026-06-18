@@ -1,0 +1,26 @@
+{
+  "name": "browser-extensions-monorepo",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.32.1",
+  "description": "Personal browser extension monorepo for agent-facing browser/API tooling.",
+  "scripts": {
+    "build": "pnpm -r --if-present build",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "check": "pnpm -r --if-present check",
+    "test": "pnpm -r --if-present test",
+    "build:dev-browser": "pnpm --filter dev-browser-extension build",
+    "build:illiterati-tts": "pnpm --filter illiterati-tts build",
+    "build:illiterati-tts-opfs-parallel": "pnpm --filter illiterati-tts-opfs-parallel build",
+    "build:youtube-stats-overlay": "pnpm --filter youtube-stats-overlay build",
+    "zip:x-bookmark-sync-devtools": "pnpm --filter x-bookmark-sync-devtools zip",
+    "zip:dev-browser": "pnpm --filter dev-browser-extension zip",
+    "smoke:illiterati-tts": "pnpm --filter illiterati-tts smoke",
+    "smoke:illiterati-tts-opfs-parallel": "pnpm --filter illiterati-tts-opfs-parallel smoke",
+    "launch:helium:x-bookmarks": "pnpm --filter x-bookmark-sync-devtools launch:helium",
+    "skill:reverse-engineer": "pnpm --filter chrome-extension-reverse-engineering analyze reverse-engineering/vidiq-vision",
+    "proxy:vidiq": "pnpm --filter vidiq-replay-proxy start",
+    "capture:vidiq-dom": "pnpm --filter vidiq-dom-capture capture"
+  }
+}

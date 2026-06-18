@@ -1,0 +1,17 @@
+{
+  "name": "@browser-extensions/capture-schema",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared capture and replay data types for browser API reverse-engineering tools.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "check": "pnpm typecheck"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3"
+  }
+}

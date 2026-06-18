@@ -1,0 +1,6 @@
+packages:
+  - "extensions/*"
+  - "packages/*"
+  - "skills/*"
+  - "tools/*"
+  - "reverse-engineering/*"

@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "YouTube Stats Overlay Prototype",
+  "version": "0.1.0",
+  "description": "Clean-room YouTube stats UI overlay with dummy data and a replaceable provider layer.",
+  "permissions": ["storage"],
+  "host_permissions": ["https://www.youtube.com/*"],
+  "content_scripts": [
+    {
+      "matches": ["https://www.youtube.com/*"],
+      "js": ["assets/content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

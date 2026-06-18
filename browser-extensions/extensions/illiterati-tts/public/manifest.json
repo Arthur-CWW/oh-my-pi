@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "Illiterati TTS Prototype",
+  "description": "Prototype architecture for offline TTS/alignment browser extension.",
+  "version": "0.1.0",
+  "permissions": ["activeTab", "scripting", "storage", "offscreen", "contextMenus", "unlimitedStorage"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "assets/background.js",
+    "type": "module"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  },
+  "action": {
+    "default_title": "Illiterati",
+    "default_popup": "popup.html"
+  },
+  "options_page": "settings.html",
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["assets/content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

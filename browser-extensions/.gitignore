@@ -1,0 +1,16 @@
+.DS_Store
+node_modules/
+dist/
+.output/
+.wxt/
+output/
+artifacts/
+*.zip
+.env
+.env.*
+*.log
+.logs/
+.tmp-playwright-profile/
+.browser-profiles/
+.helium-profiles/
+captures/

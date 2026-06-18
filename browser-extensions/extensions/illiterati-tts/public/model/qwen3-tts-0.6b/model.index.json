@@ -1,0 +1,9 @@
+{
+  "model": "Qwen3-TTS-0.6B",
+  "format": "mock-shard-index",
+  "created": "2026-02-13",
+  "shards": [
+    "decoder-shard-0001.bin",
+    "decoder-shard-0002.bin"
+  ]
+}

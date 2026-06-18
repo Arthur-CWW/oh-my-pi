@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "__tests__/**/*.ts",
+    "entrypoints/**/*.ts",
+    "services/**/*.ts",
+    "utils/**/*.ts",
+    "wxt.config.ts",
+    ".wxt/wxt.d.ts"
+  ],
+  "exclude": [".output", "vitest.config.ts"]
+}
