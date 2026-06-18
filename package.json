@@ -16,7 +16,7 @@
     "test": "cd packages/web-access && bun run test && cd ../mermaid-preview && bun run test && cd ../twitter-archive && bun run test && cd ../jimeng-client && bun run test && cd ../dynamic-workflows && bun run test && cd ../ugc-cli && bun run test && cd ../market-lab && bun run test && cd ../proxy-lab && bun run test && cd ../library-assistant && bun run test && cd ../bench-harness && bun run test && cd ../../apps/slotok-workbench && bun run test",
     "check": "bun run typecheck && bun run test && bun run lint",
     "lint": "bun run lint:unsafe-types && bun run lint:ast-grep && bun run lint:ast-grep:tests",
-    "lint:ast-grep": "bun run scripts/ast-grep.boundary.ts scan --config sgconfig.yml --off=no-unsafe-any-unknown-ts --off=no-unsafe-any-python --report-style=medium --globs '!browser-extensions/**' --globs '!kimi-code-usage/**' --globs '!oh-my-pi/**'",
+    "lint:ast-grep": "bun run scripts/ast-grep.boundary.ts scan --config sgconfig.yml --off=no-unsafe-any-unknown-ts --off=no-unsafe-any-python --report-style=medium --globs '!browser-extensions/**' --globs '!kimi-code-usage/**' --globs '!oh-my-pi/**' --globs '!vendor/**'",
     "lint:ast-grep:tests": "bun run scripts/check-ast-grep-tests.boundary.ts && bun run lint:unsafe-types:rules",
     "lint:unsafe-types": "bun run scripts/lint-unsafe-types.boundary.ts",
     "lint:unsafe-types:update-baseline": "bun run scripts/lint-unsafe-types.boundary.ts --update",

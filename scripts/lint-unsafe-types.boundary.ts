@@ -42,7 +42,7 @@ const args = new Set(process.argv.slice(2));
 const update = args.has("--update");
 const strict = args.has("--strict");
 const scanWorktree = args.has("--worktree") || args.has("--all");
-const excludedTrackedPrefixes = ["browser-extensions/", "kimi-code-usage/", "oh-my-pi/"];
+const excludedTrackedPrefixes = ["browser-extensions/", "kimi-code-usage/", "oh-my-pi/", "vendor/"];
 const trackedSourceFiles = scanWorktree ? null : gitTrackedSourceFiles();
 const scanArgs = [
 	"scan",

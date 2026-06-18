@@ -39,6 +39,14 @@ vendor/mitsuhiko/*
 !vendor/mitsuhiko/README.md
 !vendor/mitsuhiko/agent-stuff/
 !vendor/mitsuhiko/agent-stuff/**
+!vendor/noumena/
+vendor/noumena/*
+!vendor/noumena/code/
+!vendor/noumena/code/**
+vendor/noumena/code/node_modules/
+vendor/noumena/code/dist/
+vendor/noumena/code/.tmp/
+vendor/noumena/code/.git/
 packages/web-access/vendor/*
 !packages/web-access/vendor/kagi-chrome-extension/
 skills/chrome-devtools-mcp/
