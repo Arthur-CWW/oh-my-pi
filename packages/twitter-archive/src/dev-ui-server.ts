@@ -340,7 +340,15 @@ interface TweetAttributeRow {
   readonly updated_at: string
 }
 
+const localApiHeaders = {
+  "Access-Control-Allow-Headers": "Content-Type",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Private-Network": "true",
+}
+
 const jsonHeaders = {
+  ...localApiHeaders,
   "Cache-Control": "no-store",
   "Content-Type": "application/json; charset=utf-8",
 }
@@ -353,6 +361,12 @@ const clientHeaders = {
 const cssHeaders = {
   "Cache-Control": "no-store",
   "Content-Type": "text/css; charset=utf-8",
+}
+
+const DEV_UI_HEALTH_RESPONSE = {
+  ok: true,
+  service: "twitter-archive-dev-ui",
+  ingestPath: "/api/x-bookmark-sync/ingest",
 }
 
 export const startDevUiServer = Effect.fn("startDevUiServer")(function*(options: DevUiServerOptions = {}) {
@@ -447,11 +461,15 @@ function createRequestHandler(
         return await mediaFileResponse(mediaRoot, url.searchParams.get("path"))
       }
 
-      if (request.method === "GET" && (url.pathname === "/health" || url.pathname === "/api/health")) {
-        return jsonResponse({ ok: true, generatedAt: new Date().toISOString() })
+      if (request.method === "OPTIONS" && isLocalApiPreflightPath(url.pathname)) {
+        return optionsResponse()
       }
 
-      if (request.method === "POST" && (url.pathname === "/x-bookmark-sync/ingest" || url.pathname === "/api/x-bookmark-sync/ingest")) {
+      if (request.method === "GET" && isHealthPath(url.pathname)) {
+        return jsonResponse(DEV_UI_HEALTH_RESPONSE)
+      }
+
+      if (request.method === "POST" && isXBookmarkSyncIngestPath(url.pathname)) {
         return await handleXBookmarkSyncIngest(request, dataSource)
       }
 
@@ -850,48 +868,46 @@ class DevUiDataSource {
       }
     }
 
-    if (snapshot.source.extension === X_BOOKMARK_SYNC_SOURCE_LANE) {
-      for (const { record, capture, url, capturedAt } of tweetRecords.values()) {
-        const tweetId = tweetLikeId(record)
-        const username = normalizeUsername(record.screen_name)
-        const text = record.full_text.trim()
-        if (!tweetId || !username || text.length === 0) {
-          continue
-        }
-        const authorId = xBookmarkSyncAuthorId(username)
-        usersToUpsert.set(authorId, {
-          id: authorId,
-          username,
-          profileUrl: `https://x.com/${username}`,
-          capturedAt,
-        })
-        store.upsertTweets(
-          [
-            {
-              id: tweetId,
-              authorId,
-              username,
-              url,
-              text,
-              createdAt: normalizeTwitterCreatedAt(record.created_at),
-              mediaIds: [],
-              capturedAt,
-              source: "tool",
-            },
-          ],
+    for (const { record, capture, url, capturedAt } of tweetRecords.values()) {
+      const tweetId = tweetLikeId(record)
+      const username = normalizeUsername(record.screen_name)
+      const text = record.full_text.trim()
+      if (!tweetId || !username || text.length === 0) {
+        continue
+      }
+      const authorId = xBookmarkSyncAuthorId(username)
+      usersToUpsert.set(authorId, {
+        id: authorId,
+        username,
+        profileUrl: `https://x.com/${username}`,
+        capturedAt,
+      })
+      store.upsertTweets(
+        [
           {
-            sourceLane: X_BOOKMARK_SYNC_SOURCE_LANE,
-            sourceUrl: capture.request.url,
-            provenance: ingestProvenance(snapshot, capture, record),
+            id: tweetId,
+            authorId,
+            username,
+            url,
+            text,
+            createdAt: normalizeTwitterCreatedAt(record.created_at),
+            mediaIds: [],
+            capturedAt,
+            source: "tool",
           },
-        )
-      }
-      if (usersToUpsert.size > 0) {
-        store.upsertUsers([...usersToUpsert.values()], {
+        ],
+        {
           sourceLane: X_BOOKMARK_SYNC_SOURCE_LANE,
-          provenance: { source: X_BOOKMARK_SYNC_SOURCE_LANE },
-        })
-      }
+          sourceUrl: capture.request.url,
+          provenance: ingestProvenance(snapshot, capture, record),
+        },
+      )
+    }
+    if (usersToUpsert.size > 0) {
+      store.upsertUsers([...usersToUpsert.values()], {
+        sourceLane: X_BOOKMARK_SYNC_SOURCE_LANE,
+        provenance: { source: X_BOOKMARK_SYNC_SOURCE_LANE },
+      })
     }
 
     let archiveJobsEnqueued = 0
@@ -1313,6 +1329,18 @@ async function handleXBookmarkSyncIngest(request: Request, dataSource: DevUiData
   return jsonResponse(await dataSource.ingestXBookmarkSyncSnapshot(decoded), 202)
 }
 
+function isHealthPath(pathname: string): boolean {
+  return pathname === "/health" || pathname === "/api/health"
+}
+
+function isXBookmarkSyncIngestPath(pathname: string): boolean {
+  return pathname === "/x-bookmark-sync/ingest" || pathname === "/api/x-bookmark-sync/ingest"
+}
+
+function isLocalApiPreflightPath(pathname: string): boolean {
+  return isHealthPath(pathname) || isXBookmarkSyncIngestPath(pathname)
+}
+
 function streamState(dataSource: DevUiDataSource, limit: number): Response {
   const encoder = new TextEncoder()
   let interval: Timer | undefined
@@ -1370,22 +1398,25 @@ function decodeXBookmarkSyncCapture(value: JsonSafeValue): XBookmarkSyncCaptureI
   if (!isRecord(value)) {
     throw new Error("x-bookmark-sync capture must be an object")
   }
-  if (!isRecord(value.request)) {
-    throw new Error("x-bookmark-sync capture must include a request object")
-  }
-  const requestUrl = stringField(value.request, "url")
+  const request = isRecord(value.request) ? value.request : undefined
+  const requestUrl = firstNonEmpty(request ? stringField(request, "url") : undefined, stringField(value, "pageUrl"))
   if (!requestUrl) {
-    throw new Error("x-bookmark-sync capture request.url must be a non-empty string")
+    throw new Error("x-bookmark-sync capture must include request.url or pageUrl")
   }
+
+  const visibleTweetRecords = decodeVisibleTweetRecords(value.visibleTweets)
+  const explicitTweetLikeRecords = Array.isArray(value.tweetLike)
+    ? value.tweetLike.map(tweetLikeRecordFromJson).filter((record): record is XBookmarkSyncTweetLikeRecord => record !== undefined)
+    : []
 
   return {
     id: stringField(value, "id"),
     capturedAt: stringField(value, "capturedAt"),
     inspectedTabId: numberField(value, "inspectedTabId"),
     request: {
-      method: stringField(value.request, "method"),
+      method: request ? stringField(request, "method") : "GET",
       url: requestUrl,
-      headers: value.request.headers,
+      headers: request?.headers,
     },
     response: isRecord(value.response)
       ? {
@@ -1398,11 +1429,91 @@ function decodeXBookmarkSyncCapture(value: JsonSafeValue): XBookmarkSyncCaptureI
         }
       : undefined,
     timing: isRecord(value.timing) ? sanitizeJsonRecord(value.timing) : undefined,
-    tags: Array.isArray(value.tags) ? value.tags.filter((tag): tag is string => typeof tag === "string") : [],
-    tweetLike: Array.isArray(value.tweetLike) ? value.tweetLike.map(tweetLikeRecordFromJson).filter((record): record is XBookmarkSyncTweetLikeRecord => record !== undefined) : [],
-    json: value.json,
+    tags: Array.isArray(value.tags)
+      ? value.tags.filter((tag): tag is string => typeof tag === "string")
+      : visibleTweetRecords.length > 0
+        ? ["visible-tweets"]
+        : [],
+    tweetLike: mergeTweetLikeRecords(explicitTweetLikeRecords, visibleTweetRecords),
+    json: value.json ?? lightweightCaptureJson(requestUrl, value.visibleTweets),
     body: stringField(value, "body"),
     parseError: stringField(value, "parseError"),
+  }
+}
+
+function decodeVisibleTweetRecords(value: JsonSafeValue | undefined): XBookmarkSyncTweetLikeRecord[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+  const records: XBookmarkSyncTweetLikeRecord[] = []
+  for (const [index, tweet] of value.entries()) {
+    const record = visibleTweetLikeRecordFromJson(sanitizeJsonValue(tweet), `visibleTweets[${index}]`)
+    if (record) {
+      records.push(record)
+    }
+  }
+  return records
+}
+
+function visibleTweetLikeRecordFromJson(value: JsonSafeValue, path: string): XBookmarkSyncTweetLikeRecord | undefined {
+  const record = tweetLikeRecordFromJson(value)
+  if (!isRecord(value)) {
+    return record ? { ...record, path: record.path ?? path } : undefined
+  }
+  const url = firstNonEmpty(
+    record?.url,
+    stringField(value, "url"),
+    stringField(value, "statusUrl"),
+    stringField(recordField(value, "permalink"), "url"),
+  )
+  const fullText = firstNonEmpty(record?.full_text, stringField(value, "fullText"))
+  if (!fullText) {
+    return undefined
+  }
+  const statusId = url ? statusIdFromUrl(url) : undefined
+  const statusUsername = url ? statusUsernameFromUrl(url) : undefined
+  return {
+    rest_id: firstNonEmpty(record?.rest_id, scalarStringField(value, "tweetId"), statusId),
+    id_str: firstNonEmpty(record?.id_str, scalarStringField(value, "tweetId"), statusId),
+    full_text: fullText,
+    created_at: firstNonEmpty(record?.created_at, stringField(value, "createdAt")),
+    screen_name: firstNonEmpty(
+      record?.screen_name,
+      stringField(value, "username"),
+      stringField(value, "handle"),
+      stringField(recordField(value, "author"), "username"),
+      stringField(recordField(value, "author"), "screen_name"),
+      stringField(recordField(value, "user"), "username"),
+      stringField(recordField(value, "user"), "screen_name"),
+      statusUsername,
+    ),
+    path: record?.path ?? path,
+    url,
+  }
+}
+
+function mergeTweetLikeRecords(
+  ...recordGroups: ReadonlyArray<readonly XBookmarkSyncTweetLikeRecord[]>
+): XBookmarkSyncTweetLikeRecord[] {
+  const records = new Map<string, XBookmarkSyncTweetLikeRecord>()
+  for (const group of recordGroups) {
+    for (const record of group) {
+      const key = tweetLikeRecordKey(record)
+      if (!records.has(key)) {
+        records.set(key, record)
+      }
+    }
+  }
+  return [...records.values()]
+}
+
+function lightweightCaptureJson(pageUrl: string, visibleTweets: JsonSafeValue | undefined): Record<string, JsonSafeValue> | undefined {
+  if (!Array.isArray(visibleTweets)) {
+    return undefined
+  }
+  return {
+    pageUrl,
+    visibleTweets: visibleTweets.map((tweet) => sanitizeJsonValue(tweet)),
   }
 }
 
@@ -2215,6 +2326,16 @@ function mediaContentType(path: string): string {
 
 function jsonResponse(value: object | string | number | boolean | null, status = 200): Response {
   return new Response(JSON.stringify(value), { status, headers: jsonHeaders })
+}
+
+function optionsResponse(): Response {
+  return new Response(null, {
+    status: 204,
+    headers: {
+      ...localApiHeaders,
+      "Cache-Control": "no-store",
+    },
+  })
 }
 
 function htmlResponse(html: string): Response {
