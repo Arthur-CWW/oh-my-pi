@@ -10,6 +10,51 @@ Goal: build a local-first inspiration archive for selected public X/Twitter acco
 - Do not attempt to bypass auth, account challenges, private/locked accounts, deleted posts, or rate limits.
 - Store raw captures separately from normalized entities so parsers can be improved without re-scraping.
 
+
+## Account safety / ban avoidance
+
+Arthur may use a logged-in X Pro account and Grok for research, but the scraper must behave like a conservative archiver, not an evasion bot.
+
+Hard rules:
+
+- Prefer official/exported APIs when they satisfy the job. Use browser capture only when official surfaces are unavailable or too limited.
+- Use a dedicated browser profile for X research, preferably on Arthur's Framework laptop when we want headful/manual supervision. Do not touch DMs, notifications, settings, account/security pages, private/locked accounts, bookmarks, likes, follows, or unrelated recommendations.
+- Read only public/authorized content visible to the logged-in user in the main timeline/search/tweet-detail column.
+- Concurrency default: one browser tab, one navigation at a time, one media download at a time.
+- Add jittered delays, bounded pagination, checkpointing, and cache-before-fetch. Never tight-loop scroll, search, or refresh.
+- Stop immediately on login challenges, CAPTCHA, account-lock warnings, rate-limit banners, suspicious-activity notices, or repeated failed loads.
+- Never bypass rate limits, authentication, paywalls, or platform controls. Never use stealth/browser-fingerprint evasion.
+- Preserve provenance: original URL, author handle, tweet id, capture timestamp, query, and source mode.
+- Store raw captures locally for parser improvement, but summarize/distill strategy mechanics rather than keeping large unnecessary dumps of social content.
+
+Grok can be used directly in a logged-in `grok.com` headful browser as a research assistant over authorized X content. Prompt it for source discovery and thread candidates, then archive the underlying public tweet URLs and visible threads through the same safe capture queue. Treat Grok's summary as leads, not evidence; evidence is the captured source URLs.
+
+## High-quality scraper architecture
+
+The scraper should be package-local and boring:
+
+1. **Planner** builds explicit capture jobs: profile timeline, search query, tweet detail/thread, media fetch.
+2. **Policy gate** rejects private/locked/DM/bookmark/notification/settings URLs and blocks unsafe job kinds.
+3. **Queue/limiter** runs at low concurrency with jitter, exponential backoff, and global stop conditions.
+4. **Browser adapter** supports two modes: headful supervised Framework-laptop browser for Grok/X discovery, and dedicated logged-in CDP/CuaDriver profile for repeatable capture. Both read stable semantic surfaces (`main`, `article`, search textbox) and ignore sidebars/chrome.
+5. **Extractor** converts visible tweet cards/thread pages into typed raw records with source snippets and provenance.
+6. **Normalizer** deduplicates users/tweets/media/conversations by platform ids.
+7. **Archive store** writes content-addressed raw captures, JSONL entities, media metadata, run logs, and parser errors.
+8. **Reviewer loop** shows what was captured and why; a human can pause/kill/resume before more scrolling/searching.
+
+
+Headful Framework-laptop mode is for quality and account safety, not speed: the queue should pause between jobs, expose the next URL/query before navigation, and let Arthur kill/resume without losing checkpoints.
+
+For the trading strategy research lane, start with queries like:
+
+- `from:macrocephalopod \"trend following\"`
+- `from:macrocephalopod momentum OR trend OR turnover OR \"no trade\"`
+- `from:therobotjames \"trend following\"`
+- `from:therobotjames momentum OR turnover OR \"easy mode\"`
+- `from:ScottPh77711570 macrocephalopod OR trend OR momentum`
+
+Archive only the source tweets/threads needed to distill the strategy. The output should be a source-linked strategy brief, not a mirror of the accounts.
+
 ## X/Twitter frontend capture scope
 
 When using a logged-in browser frontend, keep scraping narrow:
