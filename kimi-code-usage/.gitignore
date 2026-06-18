@@ -1,0 +1,46 @@
+# Environment / Secrets
+.env
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+
+# Node.js
+node_modules/
+package-lock.json
+
+# VSCode Extension artifacts
+*.vsix
+vscode-extension/out/
+vscode-extension/archive/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+# Skill-generated analysis artifacts
+.understand-anything/
+.codegraph/
+
+# Python test artifacts
+.pytest_cache/
+.coverage
+.coverage.*
+
+# Node / Vitest coverage
+vscode-extension/coverage/
+
+# VS Code extension test runner
+.vscode-test/
+**/*.js.map
+tokscale-export-*.json
