@@ -285,6 +285,91 @@ export const socialGraphEdges = sqliteTable(
     index("social_graph_edges_batch_idx").on(table.importBatchId, table.importStatus),
   ],
 )
+export const accountSeeds = sqliteTable(
+  "account_seeds",
+  {
+    accountKey: text("account_key").primaryKey(),
+    platform: text("platform").notNull().default("x"),
+    username: text("username").notNull(),
+    displayName: text("display_name"),
+    avatarUrl: text("avatar_url"),
+    description: text("description"),
+    protected: integer("protected", { mode: "boolean" }),
+    verified: integer("verified", { mode: "boolean" }),
+    sourceLane: text("source_lane").notNull().default("unknown"),
+    sourceUrl: text("source_url"),
+    seedReason: text("seed_reason"),
+    seedScore: integer("seed_score").notNull().default(0),
+    observedAt: text("observed_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+    provenanceJson: text("provenance_json"),
+    dataJson: text("data_json").notNull(),
+  },
+  (table) => [
+    uniqueIndex("account_seeds_platform_username_idx").on(table.platform, table.username),
+    index("account_seeds_updated_at_idx").on(table.updatedAt),
+  ],
+)
+
+export const interactionSignals = sqliteTable(
+  "interaction_signals",
+  {
+    id: text("id").primaryKey(),
+    kind: text("kind").notNull(),
+    observedAt: text("observed_at").notNull(),
+    durationMs: integer("duration_ms"),
+    pageUrl: text("page_url").notNull(),
+    sourceUrl: text("source_url"),
+    tabId: text("tab_id"),
+    sessionId: text("session_id"),
+    tweetId: text("tweet_id"),
+    profileHandle: text("profile_handle"),
+    listId: text("list_id"),
+    searchQuery: text("search_query"),
+    confidence: integer("confidence"),
+    detailsJson: text("details_json"),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [
+    index("interaction_signals_kind_observed_at_idx").on(table.kind, table.observedAt),
+    index("interaction_signals_page_url_observed_at_idx").on(table.pageUrl, table.observedAt),
+    index("interaction_signals_tweet_id_observed_at_idx").on(table.tweetId, table.observedAt),
+    index("interaction_signals_profile_handle_observed_at_idx").on(table.profileHandle, table.observedAt),
+    index("interaction_signals_session_id_observed_at_idx").on(table.sessionId, table.observedAt),
+  ],
+)
+
+export const accountScoreSnapshots = sqliteTable(
+  "account_score_snapshots",
+  {
+    id: text("id").primaryKey(),
+    accountKey: text("account_key").notNull(),
+    score: integer("score").notNull(),
+    scoreComponentsJson: text("score_components_json").notNull(),
+    observedAt: text("observed_at").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [index("account_score_snapshots_account_observed_at_idx").on(table.accountKey, table.observedAt)],
+)
+
+export const promotedScrapeTargets = sqliteTable(
+  "promoted_scrape_targets",
+  {
+    id: text("id").primaryKey(),
+    targetType: text("target_type").notNull(),
+    targetValue: text("target_value").notNull(),
+    priority: integer("priority").notNull().default(0),
+    sourceSignalIdsJson: text("source_signal_ids_json"),
+    accountKey: text("account_key"),
+    status: text("status").notNull().default("pending"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    index("promoted_scrape_targets_status_priority_created_idx").on(table.status, table.priority, table.createdAt),
+    index("promoted_scrape_targets_target_idx").on(table.targetType, table.targetValue),
+  ],
+)
 
 
 export const twitterArchiveSchemaSql = `
@@ -553,6 +638,94 @@ CREATE INDEX IF NOT EXISTS social_graph_edges_target_idx
 CREATE INDEX IF NOT EXISTS social_graph_edges_batch_idx
   ON social_graph_edges (import_batch_id, import_status);
 
+CREATE TABLE IF NOT EXISTS account_seeds (
+  account_key TEXT PRIMARY KEY,
+  platform TEXT NOT NULL DEFAULT 'x',
+  username TEXT NOT NULL,
+  display_name TEXT,
+  avatar_url TEXT,
+  description TEXT,
+  protected INTEGER,
+  verified INTEGER,
+  source_lane TEXT NOT NULL DEFAULT 'unknown',
+  source_url TEXT,
+  seed_reason TEXT,
+  seed_score INTEGER NOT NULL DEFAULT 0,
+  observed_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  provenance_json TEXT,
+  data_json TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS account_seeds_platform_username_idx
+  ON account_seeds (platform, username);
+
+CREATE INDEX IF NOT EXISTS account_seeds_updated_at_idx
+  ON account_seeds (updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS interaction_signals (
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,
+  observed_at TEXT NOT NULL,
+  duration_ms INTEGER,
+  page_url TEXT NOT NULL,
+  source_url TEXT,
+  tab_id TEXT,
+  session_id TEXT,
+  tweet_id TEXT,
+  profile_handle TEXT,
+  list_id TEXT,
+  search_query TEXT,
+  confidence INTEGER,
+  details_json TEXT,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS interaction_signals_kind_observed_at_idx
+  ON interaction_signals (kind, observed_at DESC);
+
+CREATE INDEX IF NOT EXISTS interaction_signals_page_url_observed_at_idx
+  ON interaction_signals (page_url, observed_at DESC);
+
+CREATE INDEX IF NOT EXISTS interaction_signals_tweet_id_observed_at_idx
+  ON interaction_signals (tweet_id, observed_at DESC);
+
+CREATE INDEX IF NOT EXISTS interaction_signals_profile_handle_observed_at_idx
+  ON interaction_signals (profile_handle, observed_at DESC);
+
+CREATE INDEX IF NOT EXISTS interaction_signals_session_id_observed_at_idx
+  ON interaction_signals (session_id, observed_at DESC);
+
+CREATE TABLE IF NOT EXISTS account_score_snapshots (
+  id TEXT PRIMARY KEY,
+  account_key TEXT NOT NULL,
+  score INTEGER NOT NULL,
+  score_components_json TEXT NOT NULL,
+  observed_at TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS account_score_snapshots_account_observed_at_idx
+  ON account_score_snapshots (account_key, observed_at DESC);
+
+CREATE TABLE IF NOT EXISTS promoted_scrape_targets (
+  id TEXT PRIMARY KEY,
+  target_type TEXT NOT NULL,
+  target_value TEXT NOT NULL,
+  priority INTEGER NOT NULL DEFAULT 0,
+  source_signal_ids_json TEXT,
+  account_key TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS promoted_scrape_targets_status_priority_created_idx
+  ON promoted_scrape_targets (status, priority DESC, created_at ASC);
+
+CREATE INDEX IF NOT EXISTS promoted_scrape_targets_target_idx
+  ON promoted_scrape_targets (target_type, target_value);
+
 `
 
 export type RawPageRow = typeof rawPages.$inferSelect
@@ -565,3 +738,7 @@ export type TweetAttributeRow = typeof tweetAttributes.$inferSelect
 export type SocialGraphImportBatchRow = typeof socialGraphImportBatches.$inferSelect
 export type SocialGraphNodeRow = typeof socialGraphNodes.$inferSelect
 export type SocialGraphEdgeRow = typeof socialGraphEdges.$inferSelect
+export type AccountSeedRow = typeof accountSeeds.$inferSelect
+export type InteractionSignalRow = typeof interactionSignals.$inferSelect
+export type AccountScoreSnapshotRow = typeof accountScoreSnapshots.$inferSelect
+export type PromotedScrapeTargetRow = typeof promotedScrapeTargets.$inferSelect

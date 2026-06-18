@@ -5,12 +5,41 @@ Firefox Manifest V2 WebExtension for read-only authenticated X/Twitter capture. 
 ## What it does
 
 - toolbar button: sync visible tweet cards from the active `x.com` or `twitter.com` tab
+- background sync: every 60 seconds the background script checks all open `x.com`/`twitter.com` tabs and posts bounded visible tweet/signal snapshots to localhost
+- tab-load sync: when an X/Twitter tab completes navigation, the background script captures that tab once
 - browser-action context menu: **Sync visible tweets** and **Ping localhost health**
 - keyboard shortcuts:
   - `Alt+Shift+S` → sync visible tweets via `_execute_browser_action`
   - `Alt+Shift+H` → ping `http://127.0.0.1:3420/api/health`
 - localhost ingest target: `http://127.0.0.1:3420/api/x-bookmark-sync/ingest`
-- payload shape mirrors the existing lightweight userscript lane: visible tweet cards plus normalized `tweetLike` records inside a single capture snapshot
+- payload shape mirrors the existing lightweight userscript lane: visible tweet cards plus normalized `tweetLike` records inside a single capture snapshot, with lightweight read-only interaction signals
+
+## Signals
+
+The content script captures local, read-only observations while you browse X/Twitter:
+
+- `page_load` — content script injected on a supported X/Twitter page
+- `url_change` — SPA navigation detected via wrapped `history.pushState`/`replaceState`, `popstate`, `hashchange`, and a 1-second `location.href` poll fallback
+- `tab_visible` / `tab_hidden` — `document.visibilitychange` events
+- `tweet_visible` — a tweet card enters the viewport (IntersectionObserver)
+- `tweet_dwell` — a tweet card was visible for at least 500 ms and then left the viewport
+- `control_click` — click on a known control such as like/unlike, bookmark/removeBookmark, reply, retweet, share, or caret (`data-testid` match); uses a single capturing passive document listener
+- `thread_expand` — click on a tweet card that has an identifiable status link
+- `profile_visit` — navigation lands on a `/handle` profile page
+
+Each signal carries:
+
+- `signalId` — client-generated idempotent id for server-side upsert/ignore
+- `kind`, `observedAt` ISO timestamp, `pageUrl`
+- optional `durationMs`, `sourceUrl`, `tabId`, `sessionId`
+- optional `tweetId`, `profileHandle`, `listId`, `searchQuery`
+- optional `confidence` (0–1) and `details` object
+
+Signals are kept in a bounded in-memory buffer (latest 2000). The buffer is sent when you press `Alt+Shift+S`, click the toolbar button, choose **Sync visible tweets**, complete navigation in an X/Twitter tab, or during the 60-second background all-X-tabs pass. After the local server accepts a sync, the background script acknowledges the sent `signalId`s so the content script removes them from the pending buffer; failed POSTs keep the signals for retry. If no visible tweet cards parse but recent signals exist, the snapshot is still sent.
+
+## Future work
+
+- Browser-local persistence: today signals live in the content script's bounded pending buffer. A future iteration should store them in IndexedDB or a local SQLite database in the extension and sync batches to the server in the background, with the same idempotent `signalId` upsert behavior.
 
 ## Build
 
@@ -88,7 +117,7 @@ Each sync reads only visible tweet cards from the current page and sends:
 - quoted-status URL when visible
 - page metadata (`pageUrl`, `pageTitle`, `pageKind`)
 
-The background script wraps that DOM capture into the existing `x-bookmark-sync` snapshot envelope before POSTing to localhost.
+The background script wraps that DOM capture into the existing `x-bookmark-sync` snapshot envelope before POSTing to localhost, including any recent interaction signals captured by the content script.
 
 ## Safety and limitations
 

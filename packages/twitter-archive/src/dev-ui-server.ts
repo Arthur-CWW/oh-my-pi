@@ -14,7 +14,7 @@ import {
 } from "./effect-services"
 import type { JsonlLogDetails, JsonlLogLevel, JsonlLogValue } from "./jsonl-log"
 import type { ArchiveMedia, ArchiveTweet, ArchiveUser } from "./schema"
-import { TwitterArchiveSqliteStore, initTwitterArchiveSqliteStore, type SqliteArchiveJob, type SqliteArchiveJobStatus, type SqliteArchiveJobTargetType, type SqliteCaptureJob } from "./sqlite-store"
+import { TwitterArchiveSqliteStore, initTwitterArchiveSqliteStore, type SqliteArchiveJob, type SqliteArchiveJobStatus, type SqliteArchiveJobTargetType, type SqliteCaptureJob, type SqliteInteractionSignalInput } from "./sqlite-store"
 import { stableId } from "./normalize"
 import { DEV_UI_STYLES } from "./dev-ui-styles"
 
@@ -224,6 +224,7 @@ interface XBookmarkSyncSnapshotInput {
   readonly generatedAt?: string
   readonly captures: readonly XBookmarkSyncCaptureInput[]
   readonly incremental?: boolean
+  readonly signals?: readonly XBookmarkSyncSignalInput[]
 }
 
 interface XBookmarkSyncCaptureInput {
@@ -249,6 +250,7 @@ interface XBookmarkSyncCaptureInput {
   readonly json?: JsonSafeValue
   readonly body?: string
   readonly parseError?: string
+  readonly signals?: readonly XBookmarkSyncSignalInput[]
 }
 
 interface XBookmarkSyncTweetLikeRecord {
@@ -261,12 +263,31 @@ interface XBookmarkSyncTweetLikeRecord {
   readonly url?: string
 }
 
+interface XBookmarkSyncSignalInput {
+  readonly signalId?: string
+  readonly kind: string
+  readonly observedAt: string
+  readonly durationMs?: number
+  readonly pageUrl?: string
+  readonly sourceUrl?: string
+  readonly tabId?: number
+  readonly sessionId?: string
+  readonly tweetId?: string
+  readonly profileHandle?: string
+  readonly listId?: string
+  readonly searchQuery?: string
+  readonly confidence?: number
+  readonly details?: Record<string, JsonSafeValue>
+}
+
 interface XBookmarkSyncIngestSummary {
   readonly capturesReceived: number
   readonly tweetLikeRecords: number
   readonly archiveJobsEnqueued: number
   readonly markdownFilesWritten: number
+  readonly signalsReceived: number
 }
+
 
 interface XBookmarkSyncMarkdownEntry {
   readonly id: string
@@ -802,6 +823,15 @@ class DevUiDataSource {
     const usersToUpsert = new Map<string, ArchiveUser>()
     let rawPagesStored = 0
     let tweetLikeRecordsFound = 0
+    let signalsReceived = 0
+    for (const signal of snapshot.signals ?? []) {
+      const pageUrl = signal.pageUrl ?? signal.sourceUrl
+      if (!pageUrl) {
+        continue
+      }
+      store.insertInteractionSignal(buildInteractionSignalInput(signal, pageUrl))
+      signalsReceived += 1
+    }
 
     for (const capture of snapshot.captures) {
       const capturedAt = normalizeIsoDate(capture.capturedAt) ?? normalizeIsoDate(snapshot.generatedAt) ?? new Date().toISOString()
@@ -827,6 +857,14 @@ class DevUiDataSource {
         importStatus: "imported",
       })
       rawPagesStored += 1
+
+      for (const signal of capture.signals ?? []) {
+        const pageUrl = signal.pageUrl ?? storedRequestUrl
+        store.insertInteractionSignal(
+          buildInteractionSignalInput(signal, pageUrl, signal.sourceUrl ?? storedRequestUrl),
+        )
+        signalsReceived += 1
+      }
 
       for (const url of extractStatusUrlsFromCapture(capture)) {
         statusUrls.set(url, {
@@ -929,6 +967,7 @@ class DevUiDataSource {
       tweetLikeRecords: tweetLikeRecordsFound,
       archiveJobsEnqueued,
       markdownFilesWritten,
+      signalsReceived,
     }
   }
 
@@ -1355,7 +1394,6 @@ function streamState(dataSource: DevUiDataSource, limit: number): Response {
           controller.enqueue(encoder.encode(`event: error\ndata: ${JSON.stringify({ error: errorToMessage(error as Error | string | null | undefined) })}\n\n`))
         }
       }
-
       void send()
       interval = setInterval(() => void send(), 2_000)
     },
@@ -1391,6 +1429,7 @@ function decodeXBookmarkSyncSnapshot(value: JsonSafeValue): XBookmarkSyncSnapsho
     generatedAt: stringField(value, "generatedAt"),
     incremental: booleanField(value, "incremental"),
     captures: value.captures.map(decodeXBookmarkSyncCapture),
+    signals: decodeXBookmarkSyncSignals(value.signals),
   }
 }
 
@@ -1438,6 +1477,7 @@ function decodeXBookmarkSyncCapture(value: JsonSafeValue): XBookmarkSyncCaptureI
     json: value.json ?? lightweightCaptureJson(requestUrl, value.visibleTweets),
     body: stringField(value, "body"),
     parseError: stringField(value, "parseError"),
+    signals: decodeXBookmarkSyncSignals(value.signals),
   }
 }
 
@@ -1453,6 +1493,70 @@ function decodeVisibleTweetRecords(value: JsonSafeValue | undefined): XBookmarkS
     }
   }
   return records
+}
+
+function decodeXBookmarkSyncSignals(value: JsonSafeValue | undefined): XBookmarkSyncSignalInput[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+  const signals: XBookmarkSyncSignalInput[] = []
+  for (const item of value) {
+    const signal = decodeXBookmarkSyncSignal(sanitizeJsonValue(item))
+    if (signal) {
+      signals.push(signal)
+    }
+  }
+  return signals
+}
+
+function decodeXBookmarkSyncSignal(value: JsonSafeValue): XBookmarkSyncSignalInput | undefined {
+  if (!isRecord(value)) {
+    return undefined
+  }
+  const kind = stringField(value, "kind")
+  const observedAt = stringField(value, "observedAt")
+  if (!kind || !observedAt) {
+    return undefined
+  }
+  return {
+    signalId: stringField(value, "signalId") ?? stringField(value, "eventId"),
+    kind,
+    observedAt,
+    durationMs: numberField(value, "durationMs"),
+    pageUrl: stringField(value, "pageUrl"),
+    sourceUrl: stringField(value, "sourceUrl"),
+    tabId: numberField(value, "tabId"),
+    sessionId: stringField(value, "sessionId"),
+    tweetId: stringField(value, "tweetId"),
+    profileHandle: stringField(value, "profileHandle"),
+    listId: stringField(value, "listId"),
+    searchQuery: stringField(value, "searchQuery"),
+    confidence: numberField(value, "confidence"),
+    details: isRecord(value.details) ? sanitizeJsonRecord(value.details) : undefined,
+  }
+}
+
+function buildInteractionSignalInput(
+  signal: XBookmarkSyncSignalInput,
+  pageUrl: string,
+  sourceUrl?: string,
+): SqliteInteractionSignalInput {
+  return {
+    id: signal.signalId,
+    kind: signal.kind,
+    observedAt: signal.observedAt,
+    durationMs: signal.durationMs,
+    pageUrl,
+    sourceUrl: sourceUrl ?? signal.sourceUrl,
+    tabId: signal.tabId !== undefined ? String(signal.tabId) : undefined,
+    sessionId: signal.sessionId,
+    tweetId: signal.tweetId,
+    profileHandle: signal.profileHandle,
+    listId: signal.listId,
+    searchQuery: signal.searchQuery,
+    confidence: signal.confidence,
+    details: signal.details,
+  }
 }
 
 function visibleTweetLikeRecordFromJson(value: JsonSafeValue, path: string): XBookmarkSyncTweetLikeRecord | undefined {

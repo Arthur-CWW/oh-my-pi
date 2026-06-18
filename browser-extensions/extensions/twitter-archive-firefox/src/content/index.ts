@@ -11,6 +11,36 @@ type VisibleTweetRecord = {
   pageKind: string;
 };
 
+type SignalKind =
+  | "tab_visible"
+  | "tab_hidden"
+  | "url_change"
+  | "page_load"
+  | "tweet_visible"
+  | "tweet_dwell"
+  | "thread_expand"
+  | "control_click"
+  | "profile_visit";
+
+type SignalDetails = Record<string, string | number | boolean | null | undefined>;
+
+type InteractionSignal = {
+  signalId: string;
+  kind: SignalKind;
+  observedAt: string;
+  durationMs?: number;
+  pageUrl: string;
+  sourceUrl?: string;
+  tabId?: number;
+  sessionId: string;
+  tweetId?: string;
+  profileHandle?: string;
+  listId?: string;
+  searchQuery?: string;
+  confidence?: number;
+  details?: SignalDetails;
+};
+
 type CaptureResponse =
   | {
       ok: true;
@@ -18,6 +48,7 @@ type CaptureResponse =
       pageTitle: string;
       pageKind: string;
       visibleTweets: VisibleTweetRecord[];
+      signals: InteractionSignal[];
     }
   | {
       ok: false;
@@ -25,6 +56,7 @@ type CaptureResponse =
       pageTitle: string;
       pageKind: string;
       error: string;
+      signals: InteractionSignal[];
     };
 
 type StatusLink = {
@@ -42,6 +74,318 @@ const BLOCKED_PATH_PREFIXES = [
   "/settings",
   "/compose",
 ];
+
+const MAX_SIGNAL_BUFFER = 2000;
+const SESSION_ID = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+const SIGNALS: InteractionSignal[] = [];
+const OBSERVED_TWEETS = new Map<string, { visibleSince?: number; profileHandle?: string }>();
+const OBSERVED_ARTICLES = new WeakSet<HTMLElement>();
+
+function hashString(input: string): string {
+  let hash = 0;
+  for (let index = 0; index < input.length; index += 1) {
+    const code = input.charCodeAt(index);
+    hash = (hash << 5) - hash + code;
+    hash |= 0;
+  }
+  return Math.abs(hash).toString(36).slice(0, 10);
+}
+
+function generateSignalId(signal: Omit<InteractionSignal, "signalId">): string {
+  const observedMs = Date.parse(signal.observedAt);
+  const coarseBucket = Number.isFinite(observedMs) ? Math.floor(observedMs / 30_000) : signal.observedAt;
+  const exactBucket = signal.observedAt;
+  const bucket = signal.kind === "tweet_visible" || signal.kind === "tweet_dwell" ? coarseBucket : exactBucket;
+  const payload = JSON.stringify({
+    kind: signal.kind,
+    bucket,
+    pageUrl: signal.pageUrl,
+    sourceUrl: signal.sourceUrl,
+    tabId: signal.tabId,
+    sessionId: signal.sessionId,
+    tweetId: signal.tweetId,
+    profileHandle: signal.profileHandle,
+    listId: signal.listId,
+    searchQuery: signal.searchQuery,
+    details: signal.details,
+  });
+  return `sig-${hashString(payload)}`;
+}
+
+function pushSignal(signal: Omit<InteractionSignal, "signalId">): InteractionSignal {
+  const fullSignal: InteractionSignal = {
+    ...signal,
+    signalId: generateSignalId(signal),
+  };
+  if (SIGNALS.length >= MAX_SIGNAL_BUFFER) {
+    SIGNALS.shift();
+  }
+  SIGNALS.push(fullSignal);
+  return fullSignal;
+}
+
+function pageProfileHandle(): string | undefined {
+  const match = location.pathname.match(/^\/+([A-Za-z0-9_]+)\/?$/);
+  return match?.[1];
+}
+
+function pageSearchQuery(): string | undefined {
+  return new URLSearchParams(location.search).get("q") ?? undefined;
+}
+
+function pageStatusContext(): { tweetId?: string; profileHandle?: string } {
+  const match = location.pathname.match(/^\/+([A-Za-z0-9_]+)\/status\/(\d+)/);
+  if (!match) {
+    return {};
+  }
+  return { profileHandle: match[1], tweetId: match[2] };
+}
+
+let lastRecordedUrl = location.href;
+let urlPollInterval: number | undefined;
+
+function recordUrlChange(reason: string): void {
+  const currentUrl = location.href;
+  if (currentUrl === lastRecordedUrl) {
+    return;
+  }
+  const previousUrl = lastRecordedUrl;
+  lastRecordedUrl = currentUrl;
+  pushSignal({
+    kind: "url_change",
+    observedAt: new Date().toISOString(),
+    pageUrl: currentUrl,
+    sourceUrl: previousUrl,
+    sessionId: SESSION_ID,
+    details: { reason },
+  });
+
+  if (pageKind() === "profile") {
+    pushSignal({
+      kind: "profile_visit",
+      observedAt: new Date().toISOString(),
+      pageUrl: currentUrl,
+      sourceUrl: previousUrl,
+      sessionId: SESSION_ID,
+      profileHandle: pageProfileHandle(),
+    });
+  }
+}
+
+function startUrlChangeTracking(): void {
+  const originalPushState = history.pushState.bind(history);
+  history.pushState = (...args: Parameters<History["pushState"]>) => {
+    originalPushState(...args);
+    recordUrlChange("pushState");
+  };
+
+  const originalReplaceState = history.replaceState.bind(history);
+  history.replaceState = (...args: Parameters<History["replaceState"]>) => {
+    originalReplaceState(...args);
+    recordUrlChange("replaceState");
+  };
+
+  window.addEventListener("popstate", () => recordUrlChange("popstate"));
+  window.addEventListener("hashchange", () => recordUrlChange("hashchange"));
+  urlPollInterval = window.setInterval(() => recordUrlChange("poll"), 1000);
+}
+
+function currentPageContextSignal(): Pick<
+  InteractionSignal,
+  "profileHandle" | "tweetId" | "searchQuery"
+> {
+  const kind = pageKind();
+  if (kind === "profile") {
+    return { profileHandle: pageProfileHandle() };
+  }
+  if (kind === "search") {
+    return { searchQuery: pageSearchQuery() };
+  }
+  if (kind === "status") {
+    return pageStatusContext();
+  }
+  return {};
+}
+
+function startTabVisibilityTracking(): void {
+  document.addEventListener("visibilitychange", () => {
+    pushSignal({
+      kind: document.hidden ? "tab_hidden" : "tab_visible",
+      observedAt: new Date().toISOString(),
+      pageUrl: location.href,
+      sessionId: SESSION_ID,
+      ...currentPageContextSignal(),
+    });
+  });
+}
+
+const TWEET_VISIBILITY_OBSERVER = new IntersectionObserver(
+  (entries) => {
+    const now = Date.now();
+    for (const entry of entries) {
+      const article = entry.target as HTMLElement;
+      const primaryStatus = collectStatusLinks(article)[0];
+      if (!primaryStatus) {
+        continue;
+      }
+
+      if (entry.isIntersecting) {
+        if (!OBSERVED_TWEETS.has(primaryStatus.tweetId)) {
+          OBSERVED_TWEETS.set(primaryStatus.tweetId, {
+            visibleSince: now,
+            profileHandle: primaryStatus.username,
+          });
+          pushSignal({
+            kind: "tweet_visible",
+            observedAt: new Date(now).toISOString(),
+            pageUrl: location.href,
+            sessionId: SESSION_ID,
+            tweetId: primaryStatus.tweetId,
+            profileHandle: primaryStatus.username,
+            confidence: Math.round(entry.intersectionRatio * 100) / 100,
+            details: { intersectionRatio: entry.intersectionRatio },
+          });
+        }
+      } else {
+        const state = OBSERVED_TWEETS.get(primaryStatus.tweetId);
+        if (state?.visibleSince) {
+          const durationMs = now - state.visibleSince;
+          if (durationMs >= 500) {
+            pushSignal({
+              kind: "tweet_dwell",
+              observedAt: new Date(now).toISOString(),
+              durationMs,
+              pageUrl: location.href,
+              sessionId: SESSION_ID,
+              tweetId: primaryStatus.tweetId,
+              profileHandle: primaryStatus.username,
+              details: { intersectionRatio: entry.intersectionRatio },
+            });
+          }
+        }
+        OBSERVED_TWEETS.delete(primaryStatus.tweetId);
+      }
+    }
+  },
+  { threshold: [0, 0.25, 0.5, 0.75, 1] },
+);
+
+function observeTweetArticle(article: HTMLElement): void {
+  if (OBSERVED_ARTICLES.has(article)) {
+    return;
+  }
+  OBSERVED_ARTICLES.add(article);
+  TWEET_VISIBILITY_OBSERVER.observe(article);
+}
+
+function observeExistingTweetArticles(): void {
+  for (const article of document.querySelectorAll<HTMLElement>('article[data-testid="tweet"]')) {
+    observeTweetArticle(article);
+  }
+}
+
+function startTweetVisibilityTracking(): void {
+  observeExistingTweetArticles();
+
+  const mutationObserver = new MutationObserver(() => {
+    observeExistingTweetArticles();
+  });
+
+  if (document.body) {
+    mutationObserver.observe(document.body, { childList: true, subtree: true });
+  } else {
+    document.addEventListener("DOMContentLoaded", () => {
+      mutationObserver.observe(document.body, { childList: true, subtree: true });
+    });
+  }
+}
+
+const CONTROL_TEST_IDS = new Set([
+  "like",
+  "unlike",
+  "bookmark",
+  "removeBookmark",
+  "reply",
+  "retweet",
+  "share",
+  "caretdown",
+  "caret",
+]);
+
+function startControlClickTracking(): void {
+  document.addEventListener(
+    "click",
+    (event) => {
+      if (!(event.target instanceof Element)) {
+        return;
+      }
+      const target = event.target;
+
+      const controlElement = target.closest<HTMLElement>("[data-testid]");
+      const testId = controlElement?.getAttribute("data-testid") ?? undefined;
+
+      const article = target.closest<HTMLElement>("article");
+      const statusLink = article ? collectStatusLinks(article)[0] : undefined;
+
+      const expandedThread = testId === "tweet" && statusLink !== undefined;
+      const isKnownControl = testId ? CONTROL_TEST_IDS.has(testId) : false;
+
+      if (!isKnownControl && !expandedThread) {
+        return;
+      }
+
+      const kind: SignalKind = expandedThread ? "thread_expand" : "control_click";
+      const confidence = expandedThread ? 0.8 : 1;
+
+      pushSignal({
+        kind,
+        observedAt: new Date().toISOString(),
+        pageUrl: location.href,
+        sessionId: SESSION_ID,
+        tweetId: statusLink?.tweetId,
+        profileHandle: statusLink?.username,
+        confidence,
+        details: {
+          testId,
+          tagName: target.tagName.toLowerCase(),
+          ...(statusLink ? { statusUrl: statusLink.href } : {}),
+        },
+      });
+    },
+    { capture: true, passive: true },
+  );
+}
+
+function startSignalCapture(): void {
+  startUrlChangeTracking();
+  startTabVisibilityTracking();
+  startTweetVisibilityTracking();
+  startControlClickTracking();
+
+  pushSignal({
+    kind: "page_load",
+    observedAt: new Date().toISOString(),
+    pageUrl: location.href,
+    sessionId: SESSION_ID,
+    ...currentPageContextSignal(),
+  });
+
+  if (pageKind() === "profile") {
+    pushSignal({
+      kind: "profile_visit",
+      observedAt: new Date().toISOString(),
+      pageUrl: location.href,
+      sessionId: SESSION_ID,
+      profileHandle: pageProfileHandle(),
+    });
+  }
+
+  window.addEventListener("beforeunload", () => {
+    if (urlPollInterval !== undefined) {
+      window.clearInterval(urlPollInterval);
+    }
+  });
+}
 
 function pageKind(): string {
   const path = location.pathname;
@@ -226,8 +570,33 @@ function extractVisibleTweets(): VisibleTweetRecord[] {
   return Array.from(records.values());
 }
 
+function flushActiveDwellSignals(): void {
+  const now = Date.now();
+  for (const [tweetId, state] of OBSERVED_TWEETS.entries()) {
+    if (!state.visibleSince) {
+      continue;
+    }
+    const durationMs = now - state.visibleSince;
+    if (durationMs >= 500) {
+      pushSignal({
+        kind: "tweet_dwell",
+        observedAt: new Date(now).toISOString(),
+        durationMs,
+        pageUrl: location.href,
+        sessionId: SESSION_ID,
+        tweetId,
+        profileHandle: state.profileHandle,
+        details: { flushed: true },
+      });
+      state.visibleSince = now;
+    }
+  }
+}
+
 function buildCaptureResponse(): CaptureResponse {
+  flushActiveDwellSignals();
   const blockedReason = isCaptureBlocked();
+  const recentSignals = SIGNALS.slice();
   if (blockedReason) {
     return {
       ok: false,
@@ -235,6 +604,7 @@ function buildCaptureResponse(): CaptureResponse {
       pageTitle: document.title,
       pageKind: pageKind(),
       error: blockedReason,
+      signals: recentSignals,
     };
   }
 
@@ -244,16 +614,42 @@ function buildCaptureResponse(): CaptureResponse {
     pageTitle: document.title,
     pageKind: pageKind(),
     visibleTweets: extractVisibleTweets(),
+    signals: recentSignals,
   };
 }
 
-chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) => {
+function ackSignals(signalIds: readonly string[]): void {
+  if (signalIds.length === 0) {
+    return;
+  }
+  const acked = new Set(signalIds);
+  for (let index = SIGNALS.length - 1; index >= 0; index -= 1) {
+    if (acked.has(SIGNALS[index]?.signalId ?? "")) {
+      SIGNALS.splice(index, 1);
+    }
+  }
+}
+
+type RuntimeMessage = {
+  type?: string;
+  signalIds?: readonly string[];
+};
+
+
+startSignalCapture();
+
+chrome.runtime.onMessage.addListener((message: RuntimeMessage | null, _sender, sendResponse) => {
   if (!message || typeof message !== "object") {
     return;
   }
 
-  const messageType = (message as { type?: unknown }).type;
-  if (messageType !== "twitter-archive:capture-visible") {
+  if (message.type === "twitter-archive:ack-signals") {
+    ackSignals(Array.isArray(message.signalIds) ? message.signalIds : []);
+    sendResponse({ ok: true });
+    return;
+  }
+
+  if (message.type !== "twitter-archive:capture-visible") {
     return;
   }
 

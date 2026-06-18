@@ -20,6 +20,16 @@ Architecture is TypeScript/Bun/Effect v4 only, with no Rust: Effect services/lay
 | Chrome DevTools extension | DevTools network inspection in Chrome/Chromium/Helium. | POST network-response capture snapshots and tweet-like records to localhost. | Dedicated-profile bookmark/network debugging and DevTools-first capture. | Requires DevTools and a Chrome-like browser; weaker foundation for general browser control. |
 | Optional debugger/native bridge | Local daemon talking to CDP, BiDi, or native helper boundaries outside the page. | Localhost RPC between daemon and extension, never direct X private API replay. | Future tab discovery, debugger-only metadata, native affordances, or daemon-controlled browser coordination when DOM capture alone is insufficient. | Optional only; never used for credential extraction, private API replay, or mutation. |
 
+## Interaction Signals and Account Promotion
+
+The Firefox WebExtension should become the read-only signal collector for X sessions:
+
+- Track open X/Twitter tabs, URL changes, status/thread/profile/search/list pages, visible tweet ids, scroll position, visibility duration, thread/comment expansion, quote expansion, and clicks on stable page controls such as like/bookmark/reply/share as observed intent signals only.
+- Attach every signal to the nearest tweet id/status URL/profile/list/search query plus tab id, window/session id, observed timestamp, source lane, and confidence. These are local observations; the archive must not click buttons or call write endpoints on the user's behalf.
+- Keep four distinct SQLite concepts: seed accounts/lists, raw observed interaction signals, derived account/list score snapshots, and promoted scrape targets/jobs. Do not collapse taste scoring into tweet rows.
+- Promote accounts/lists when repeated dwell, completed thread reads, bookmark/like/reply observations, profile revisits, or user-created high-value lists indicate quality. Initial named clusters include TPOT/SIM-cluster accounts such as `@zephyr`, `@pleometric`, and `@teortaxes`.
+- Promotion creates bounded `archive_jobs` for public/account/list capture with provenance. Nitter/RSS feeds are opportunistic inputs because instances break and rate-limit; server-side workers should fall back to public HTML, Wayback/public archives, or user-provided exports rather than extension-side scraping.
+
 ## Goal
 
 Build a local-first archive for selected public Twitter/X material and user-supervised bookmark/network captures that can safely capture public profiles, timelines, tweet/thread URLs, browser-history-derived candidates, and bookmark DevTools responses without automating X login or mutating any account state.
@@ -147,6 +157,10 @@ Arthur's decision is to move SQLite access to Drizzle now, while keeping SQLite 
 - `social_graph_nodes(account_key, account_id, username, display_name, observed_at, provenance_json)` plus `social_graph_edges(source_account_key, target_account_key, relation, source_lane, observed_at, import_batch_id, import_status, provenance_json)` and `social_graph_import_batches(...)`.
 - `import_batches(source_lane, source_dataset, source_url, imported_at, importer_version, counters_json, provenance_json)`.
 - `tweet_annotations` or existing local notes/labels tables keyed by tweet id with `annotation_kind` (`note`, `tag`, `mark`), `value`, `created_at`, `updated_at`, and optional `source`/`author` for local tooling.
+- `account_seeds(handle_or_list_id, seed_kind, label, cluster, source, priority, created_at, provenance_json)` for explicit high-value accounts/lists such as TPOT/SIM-cluster seeds and user-created X lists.
+- `interaction_signals(signal_id, signal_kind, tweet_id, profile_handle, list_id, search_query, tab_id, session_id, observed_at, duration_ms, source_url, confidence, details_json)` for read-only extension observations: visible dwell, navigation, scroll/read depth, thread expansion, bookmark/like/reply/share clicks, and repeated profile visits.
+- `account_score_snapshots(account_key, score, score_version, scored_at, evidence_json)` for derived quality/ranking state computed from signals and imported history/bookmarks.
+- `promoted_scrape_targets(account_key_or_list_id, promotion_reason, source_score_snapshot_id, status, enqueued_job_id, created_at, provenance_json)` for the bridge from taste signals into bounded server-side archive jobs.
 - `run_events` / `parser_errors` for audit detail, including `runId`, `jobId`, source URL, status transition, and structured error/provenance payloads.
 
 Drizzle should mirror the status vocabulary as enum-like TypeScript constants over SQLite `text` columns, with check constraints where useful and indexes for queue polling (`capture_jobs(status, priority)`), media work (`archive_media(download_status)`), timeline rendering (`archive_tweets(author_id, created_at)`), metric/time filtering (`archive_tweets(created_at)` plus captured metric fields or generated columns), thread lookup (`conversation_id`, `thread_status`), quote lookup (`quoted_tweet_id`, `quote_status`), following graph lookup (`social_graph_edges(source_account_key, target_account_key, relation, observed_at)`), local categorization (`tweet_annotations(tweet_id, annotation_kind)`), and provenance (`source_lane`, `raw_cache_key`, `import_batch_id`). Keep the migration narrow: do not change capture semantics, status names, read-only metric payloads, local annotation meaning, or API payload meanings while moving the store boundary.

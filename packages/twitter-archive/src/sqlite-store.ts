@@ -1,14 +1,19 @@
 import { Database } from "bun:sqlite"
 import { and, desc, eq, sql } from "drizzle-orm"
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite"
+import { randomUUID } from "node:crypto"
 import { resolve } from "node:path"
 
 import { nowIso, stableId } from "./normalize"
 import type { ArchiveCaptureSource, ArchiveMedia, ArchiveMediaType, ArchiveTweet, ArchiveTweetTimelineProvenance, ArchiveUser } from "./schema"
 import {
+  accountScoreSnapshots,
+  accountSeeds,
   archiveJobs,
   captureJobs,
+  interactionSignals,
   media,
+  promotedScrapeTargets,
   rawPages,
   socialGraphEdges,
   socialGraphImportBatches,
@@ -22,6 +27,7 @@ import {
   waybackCdxEntries,
   type ArchiveJobRow,
   type CaptureJobRow,
+  type InteractionSignalRow,
   type RawPageRow,
   type SocialGraphEdgeRow,
   type SocialGraphImportBatchRow,
@@ -31,7 +37,6 @@ import {
   type TweetTimelineProvenanceRow,
   type WaybackCdxEntryRow,
 } from "./sqlite-schema"
-
 export type SqliteCaptureJobStatus = "pending" | "running" | "completed" | "failed"
 export type SqliteArchiveJobTargetType = "profile" | "status" | "search" | "wayback" | "following"
 export type SqliteArchiveJobStatus = "pending" | "claimed" | "completed" | "failed" | "skipped"
@@ -385,6 +390,52 @@ export interface SqliteSocialGraphSummary {
   recentEdges: readonly SqliteSocialGraphEdge[]
 }
 
+export interface SqliteInteractionSignalInput {
+  id?: string
+  kind: string
+  observedAt?: string
+  durationMs?: number
+  pageUrl: string
+  sourceUrl?: string
+  tabId?: string
+  sessionId?: string
+  tweetId?: string
+  profileHandle?: string
+  listId?: string
+  searchQuery?: string
+  confidence?: number
+  details?: SqliteJsonValue
+}
+
+export interface SqliteInteractionSignal {
+  id: string
+  kind: string
+  observedAt: string
+  durationMs?: number
+  pageUrl: string
+  sourceUrl?: string
+  tabId?: string
+  sessionId?: string
+  tweetId?: string
+  profileHandle?: string
+  listId?: string
+  searchQuery?: string
+  confidence?: number
+  details?: SqliteJsonValue
+  createdAt: string
+}
+
+export interface SqliteInteractionSignalListFilter {
+  kind?: string
+  tweetId?: string
+  profileHandle?: string
+  pageUrl?: string
+  sessionId?: string
+  tabId?: string
+  limit?: number
+  offset?: number
+}
+
 
 export interface SqliteUpsertResult {
   upserted: number
@@ -401,6 +452,10 @@ export interface TwitterArchiveSqliteCounts {
   socialGraphNodes: number
   socialGraphEdges: number
   socialGraphImportBatches: number
+  accountSeeds: number
+  interactionSignals: number
+  accountScoreSnapshots: number
+  promotedScrapeTargets: number
 }
 
 export interface SqliteArchiveListFilter {
@@ -419,6 +474,10 @@ type CountTable =
   | "social_graph_nodes"
   | "social_graph_edges"
   | "social_graph_import_batches"
+  | "account_seeds"
+  | "interaction_signals"
+  | "account_score_snapshots"
+  | "promoted_scrape_targets"
 type ExistingTableName = "raw_pages" | "capture_jobs" | "users" | "tweets" | "media"
 type TwitterArchiveDatabase = BunSQLiteDatabase
 
@@ -1038,7 +1097,98 @@ export class TwitterArchiveSqliteStore {
       socialGraphNodes: this.count("social_graph_nodes"),
       socialGraphEdges: this.count("social_graph_edges"),
       socialGraphImportBatches: this.count("social_graph_import_batches"),
+      accountSeeds: this.count("account_seeds"),
+      interactionSignals: this.count("interaction_signals"),
+      accountScoreSnapshots: this.count("account_score_snapshots"),
+      promotedScrapeTargets: this.count("promoted_scrape_targets"),
     }
+  }
+
+  insertInteractionSignal(input: SqliteInteractionSignalInput): SqliteInteractionSignal {
+    const createdAt = nowIso()
+    const observedAt = input.observedAt ?? createdAt
+    const id = input.id ?? `signal_${stableId([input.kind, input.pageUrl, observedAt, createdAt, randomUUID()]).slice(0, 32)}`
+    const detailsJson = input.details === undefined ? null : stringifyJson(input.details)
+
+    this.db
+      .insert(interactionSignals)
+      .values({
+        id,
+        kind: input.kind,
+        observedAt,
+        durationMs: input.durationMs ?? null,
+        pageUrl: input.pageUrl,
+        sourceUrl: input.sourceUrl ?? null,
+        tabId: input.tabId ?? null,
+        sessionId: input.sessionId ?? null,
+        tweetId: input.tweetId ?? null,
+        profileHandle: input.profileHandle ?? null,
+        listId: input.listId ?? null,
+        searchQuery: input.searchQuery ?? null,
+        confidence: input.confidence ?? null,
+        detailsJson,
+        createdAt,
+      })
+      .onConflictDoNothing({ target: interactionSignals.id })
+      .run()
+
+    return this.requireInteractionSignal(id)
+  }
+
+  getInteractionSignal(id: string): SqliteInteractionSignal | undefined {
+    const row = this.db.select().from(interactionSignals).where(eq(interactionSignals.id, id)).get()
+    return row ? interactionSignalFromRow(row) : undefined
+  }
+
+  requireInteractionSignal(id: string): SqliteInteractionSignal {
+    const signal = this.getInteractionSignal(id)
+    if (signal === undefined) {
+      throw new Error(`Interaction signal not found: ${id}`)
+    }
+    return signal
+  }
+
+  listInteractionSignals(filter: SqliteInteractionSignalListFilter = {}): SqliteInteractionSignal[] {
+    const { limit, offset } = normalizeListFilter(filter)
+    const conditions = []
+    if (filter.kind) {
+      conditions.push(eq(interactionSignals.kind, filter.kind))
+    }
+    if (filter.tweetId) {
+      conditions.push(eq(interactionSignals.tweetId, filter.tweetId))
+    }
+    if (filter.profileHandle) {
+      conditions.push(eq(interactionSignals.profileHandle, filter.profileHandle))
+    }
+    if (filter.pageUrl) {
+      conditions.push(eq(interactionSignals.pageUrl, filter.pageUrl))
+    }
+    if (filter.sessionId) {
+      conditions.push(eq(interactionSignals.sessionId, filter.sessionId))
+    }
+    if (filter.tabId) {
+      conditions.push(eq(interactionSignals.tabId, filter.tabId))
+    }
+
+    const rows =
+      conditions.length === 0
+        ? this.db
+            .select()
+            .from(interactionSignals)
+            .orderBy(desc(interactionSignals.observedAt), interactionSignals.id)
+            .limit(limit)
+            .offset(offset)
+            .all()
+        : this.db
+            .select()
+            .from(interactionSignals)
+            .where(and(...conditions))
+            .orderBy(desc(interactionSignals.observedAt), interactionSignals.id)
+            .limit(limit)
+            .offset(offset)
+            .all()
+
+    return rows.map(interactionSignalFromRow)
   }
 
   upsertSocialGraphImport(input: SqliteSocialGraphImportInput): SqliteSocialGraphImportResult {
@@ -1747,7 +1897,11 @@ export class TwitterArchiveSqliteStore {
     if (table === "media") return this.countMedia()
     if (table === "social_graph_nodes") return this.countSocialGraphNodes()
     if (table === "social_graph_edges") return this.countSocialGraphEdges()
-    return this.countSocialGraphImportBatches()
+    if (table === "social_graph_import_batches") return this.countSocialGraphImportBatches()
+    if (table === "account_seeds") return this.countAccountSeeds()
+    if (table === "interaction_signals") return this.countInteractionSignals()
+    if (table === "account_score_snapshots") return this.countAccountScoreSnapshots()
+    return this.countPromotedScrapeTargets()
   }
 
   private countRawPages(): number {
@@ -1798,6 +1952,26 @@ export class TwitterArchiveSqliteStore {
 
   private countSocialGraphImportBatches(): number {
     const row = this.db.select({ count: sql<number>`count(*)` }).from(socialGraphImportBatches).get()
+    return row?.count ?? 0
+  }
+
+  private countAccountSeeds(): number {
+    const row = this.db.select({ count: sql<number>`count(*)` }).from(accountSeeds).get()
+    return row?.count ?? 0
+  }
+
+  private countInteractionSignals(): number {
+    const row = this.db.select({ count: sql<number>`count(*)` }).from(interactionSignals).get()
+    return row?.count ?? 0
+  }
+
+  private countAccountScoreSnapshots(): number {
+    const row = this.db.select({ count: sql<number>`count(*)` }).from(accountScoreSnapshots).get()
+    return row?.count ?? 0
+  }
+
+  private countPromotedScrapeTargets(): number {
+    const row = this.db.select({ count: sql<number>`count(*)` }).from(promotedScrapeTargets).get()
     return row?.count ?? 0
   }
 
@@ -2079,6 +2253,27 @@ function socialGraphEdgeFromRow(row: SocialGraphEdgeRow): SqliteSocialGraphEdge 
     updatedAt: row.updatedAt,
   })
 }
+
+function interactionSignalFromRow(row: InteractionSignalRow): SqliteInteractionSignal {
+  return pruneUndefined({
+    id: row.id,
+    kind: row.kind,
+    observedAt: row.observedAt,
+    durationMs: row.durationMs ?? undefined,
+    pageUrl: row.pageUrl,
+    sourceUrl: row.sourceUrl ?? undefined,
+    tabId: row.tabId ?? undefined,
+    sessionId: row.sessionId ?? undefined,
+    tweetId: row.tweetId ?? undefined,
+    profileHandle: row.profileHandle ?? undefined,
+    listId: row.listId ?? undefined,
+    searchQuery: row.searchQuery ?? undefined,
+    confidence: row.confidence ?? undefined,
+    details: row.detailsJson ? parseJson(row.detailsJson, "interaction_signals.details_json") : undefined,
+    createdAt: row.createdAt,
+  })
+}
+
 
 function normalizeSocialGraphNodeJson(json: string, row: SocialGraphNodeRow): SqliteSocialGraphNode {
   const value = parseJson(json, "social_graph_nodes.data_json")

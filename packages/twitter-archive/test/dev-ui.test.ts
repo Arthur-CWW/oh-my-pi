@@ -539,4 +539,123 @@ describe("Twitter archive dev UI server", () => {
     expect(markdown).toContain("Reply tweet")
     expect(markdown).toContain("- Local annotations: local bookmark; archive attribute; note: local note")
   })
+
+  test("ingests x-bookmark-sync capture signals", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "twitter-archive-x-signals-"))
+    const dbPath = join(tempDir, "archive.sqlite")
+    const logPath = join(tempDir, "twitter-archive.jsonl")
+    const mediaRoot = join(tempDir, "media")
+    const port = 31_000 + Math.floor(Math.random() * 8_000)
+    let server: RunningDevUiServer | undefined
+
+    try {
+      server = await Effect.runPromise(
+        startDevUiServer({
+          env: {
+            TWITTER_ARCHIVE_DB: dbPath,
+            TWITTER_ARCHIVE_LOG: logPath,
+            TWITTER_ARCHIVE_PORT: String(port),
+            TWITTER_ARCHIVE_MEDIA_ROOT: mediaRoot,
+          },
+        }),
+      )
+
+      const snapshot = {
+        source: {
+          extension: "x-bookmark-sync-devtools",
+          version: "0.2.0",
+          inspectedTabId: 7,
+        },
+        generatedAt: "2026-06-18T01:00:00.000Z",
+        captures: [
+          {
+            id: "capture-signal-1",
+            capturedAt: "2026-06-18T01:00:01.000Z",
+            inspectedTabId: 7,
+            request: {
+              method: "GET",
+              url: "https://x.com/communalAI/status/98765",
+            },
+            response: {
+              status: 200,
+              statusText: "OK",
+              mimeType: "text/html",
+              headers: [{ name: "content-type", value: "text/html" }],
+            },
+            tags: ["signal-test"],
+            visibleTweets: [
+              {
+                fullText: "Signal test tweet",
+                url: "https://x.com/communalAI/status/98765",
+                username: "communalAI",
+              },
+            ],
+            signals: [
+              {
+                signalId: "sig-1",
+                kind: "tweet_visible",
+                observedAt: "2026-06-18T01:00:02.000Z",
+                pageUrl: "https://x.com/communalAI/status/98765",
+                tweetId: "98765",
+                profileHandle: "communalAI",
+                confidence: 0.9,
+              },
+            ],
+          },
+        ],
+        signals: [
+          {
+            signalId: "sig-global-1",
+            kind: "tab_visible",
+            observedAt: "2026-06-18T01:00:00.000Z",
+            pageUrl: "https://x.com/home",
+          },
+        ],
+      }
+
+      const ingestResponse = await fetch(`${server.url}/api/x-bookmark-sync/ingest`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(snapshot),
+      })
+      expect(ingestResponse.status).toBe(202)
+      expect(await ingestResponse.json()).toMatchObject({
+        capturesReceived: 1,
+        signalsReceived: 2,
+      })
+
+      const rawDb = new Database(dbPath, { readonly: true })
+      try {
+        const rows = rawDb
+          .query("SELECT id, kind, observed_at, page_url, tweet_id, profile_handle, confidence FROM interaction_signals ORDER BY observed_at")
+          .all() as Array<{
+            id: string
+            kind: string
+            observed_at: string
+            page_url: string | null
+            tweet_id: string | null
+            profile_handle: string | null
+            confidence: number | null
+          }>
+        expect(rows).toHaveLength(2)
+        expect(rows[0]).toMatchObject({
+          id: "sig-global-1",
+          kind: "tab_visible",
+          page_url: "https://x.com/home",
+        })
+        expect(rows[1]).toMatchObject({
+          id: "sig-1",
+          kind: "tweet_visible",
+          tweet_id: "98765",
+          profile_handle: "communalAI",
+          confidence: 0.9,
+        })
+      } finally {
+        rawDb.close()
+      }
+    } finally {
+      await server?.stop()
+      await rm(tempDir, { recursive: true, force: true })
+    }
+  })
 })

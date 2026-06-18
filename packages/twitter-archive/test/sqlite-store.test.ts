@@ -270,4 +270,66 @@ describe("Twitter archive sqlite store", () => {
       await rm(tempDir, { recursive: true, force: true })
     }
   })
+  test("stores and lists interaction signals keyed by tweet/profile/page/session without touching tweets", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "twitter-archive-sqlite-signals-"))
+    const store = initTwitterArchiveSqliteStore(join(tempDir, "archive.sqlite"))
+
+    try {
+      const signalA = store.insertInteractionSignal({
+        id: "signal-a",
+        kind: "tweet_visible",
+        observedAt: "2026-06-18T10:00:00.000Z",
+        pageUrl: "https://x.com/communalAI/status/1",
+        tweetId: "1",
+        profileHandle: "communalAI",
+        sessionId: "session-1",
+        tabId: "tab-1",
+        confidence: 95,
+        details: { viewportRatio: 0.5 },
+      })
+      const signalB = store.insertInteractionSignal({
+        kind: "tweet_dwell",
+        observedAt: "2026-06-18T10:00:05.000Z",
+        durationMs: 2500,
+        pageUrl: "https://x.com/communalAI/status/1",
+        tweetId: "1",
+        profileHandle: "communalAI",
+        sessionId: "session-1",
+      })
+      expect(signalB.kind).toBe("tweet_dwell")
+      expect(signalB.durationMs).toBe(2500)
+
+      const signalC = store.insertInteractionSignal({
+        kind: "profile_visit",
+        observedAt: "2026-06-18T10:01:00.000Z",
+        pageUrl: "https://x.com/communalAI",
+        profileHandle: "communalAI",
+        sessionId: "session-2",
+      })
+      expect(signalC.profileHandle).toBe("communalAI")
+
+      expect(store.getCounts()).toMatchObject({ interactionSignals: 3, tweets: 0, users: 0 })
+
+      expect(store.listInteractionSignals({ tweetId: "1" }).map((s) => s.kind)).toEqual(["tweet_dwell", "tweet_visible"])
+      expect(store.listInteractionSignals({ profileHandle: "communalAI" }).map((s) => s.kind)).toEqual([
+        "profile_visit",
+        "tweet_dwell",
+        "tweet_visible",
+      ])
+      expect(store.listInteractionSignals({ pageUrl: "https://x.com/communalAI" }).map((s) => s.kind)).toEqual([
+        "profile_visit",
+      ])
+      expect(store.listInteractionSignals({ sessionId: "session-1" }).map((s) => s.kind)).toEqual([
+        "tweet_dwell",
+        "tweet_visible",
+      ])
+
+      store.insertInteractionSignal({ id: "signal-a", kind: "tweet_visible", pageUrl: "https://x.com/communalAI/status/1" })
+      expect(store.getInteractionSignal("signal-a")?.tweetId).toBe("1")
+      expect(store.getCounts()).toMatchObject({ interactionSignals: 3 })
+    } finally {
+      store.close()
+      await rm(tempDir, { recursive: true, force: true })
+    }
+  })
 })

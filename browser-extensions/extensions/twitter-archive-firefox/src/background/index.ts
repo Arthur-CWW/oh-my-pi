@@ -11,6 +11,36 @@ type VisibleTweetRecord = {
   pageKind: string;
 };
 
+type SignalKind =
+  | "tab_visible"
+  | "tab_hidden"
+  | "url_change"
+  | "page_load"
+  | "tweet_visible"
+  | "tweet_dwell"
+  | "thread_expand"
+  | "control_click"
+  | "profile_visit";
+
+type SignalDetails = Record<string, string | number | boolean | null | undefined>;
+
+type InteractionSignal = {
+  signalId: string;
+  kind: SignalKind;
+  observedAt: string;
+  durationMs?: number;
+  pageUrl: string;
+  sourceUrl?: string;
+  tabId?: number;
+  sessionId: string;
+  tweetId?: string;
+  profileHandle?: string;
+  listId?: string;
+  searchQuery?: string;
+  confidence?: number;
+  details?: SignalDetails;
+};
+
 type CaptureResponse =
   | {
       ok: true;
@@ -18,6 +48,7 @@ type CaptureResponse =
       pageTitle: string;
       pageKind: string;
       visibleTweets: VisibleTweetRecord[];
+      signals: InteractionSignal[];
     }
   | {
       ok: false;
@@ -25,6 +56,7 @@ type CaptureResponse =
       pageTitle: string;
       pageKind: string;
       error: string;
+      signals: InteractionSignal[];
     };
 
 type ActionName = "sync-visible" | "ping-health";
@@ -36,9 +68,14 @@ type ActionResult = {
   status?: number;
   body?: string;
   tweetCount?: number;
+  signalCount?: number;
   pageUrl?: string;
   pageKind?: string;
   error?: string;
+};
+
+type CaptureSyncOptions = {
+  readonly silent?: boolean;
 };
 
 const INGEST_ENDPOINT = "http://127.0.0.1:3420/api/x-bookmark-sync/ingest";
@@ -48,6 +85,9 @@ const SYNC_MENU_ID = "twitter-archive-firefox-sync-visible";
 const HEALTH_MENU_ID = "twitter-archive-firefox-ping-health";
 const DEFAULT_TITLE = "Sync visible X/Twitter tweets";
 const SUPPORTED_TAB_PATTERN = /^https:\/\/(?:x|twitter)\.com\//;
+const BACKGROUND_SYNC_INTERVAL_MS = 60_000;
+let backgroundSyncRunning = false;
+
 
 function createContextMenus(): void {
   chrome.contextMenus.removeAll(() => {
@@ -122,6 +162,10 @@ async function finalizeResult(result: ActionResult): Promise<ActionResult> {
   return result;
 }
 
+async function finishSyncResult(result: ActionResult, options: CaptureSyncOptions): Promise<ActionResult> {
+  return options.silent ? result : finalizeResult(result);
+}
+
 async function getActiveTab(): Promise<chrome.tabs.Tab> {
   return new Promise<chrome.tabs.Tab>((resolve, reject) => {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
@@ -155,6 +199,19 @@ async function requestVisibleTweetCapture(tabId: number): Promise<CaptureRespons
     });
   });
 }
+
+async function acknowledgeSignals(tabId: number, signals: readonly InteractionSignal[]): Promise<void> {
+  const signalIds = signals.map((signal) => signal.signalId);
+  if (signalIds.length === 0) {
+    return;
+  }
+  await new Promise<void>((resolve) => {
+    chrome.tabs.sendMessage(tabId, { type: "twitter-archive:ack-signals", signalIds }, () => {
+      resolve();
+    });
+  });
+}
+
 
 function buildSnapshot(tabId: number, capture: Extract<CaptureResponse, { ok: true }>) {
   const capturedAt = new Date().toISOString();
@@ -191,8 +248,13 @@ function buildSnapshot(tabId: number, capture: Extract<CaptureResponse, { ok: tr
           startedDateTime: capturedAt,
           time: 0,
         },
-        tags: ["firefox-webextension", capture.pageKind, "visible-tweets"],
+        tags: ["firefox-webextension", capture.pageKind, "visible-tweets", "signals"],
         visibleTweets: capture.visibleTweets,
+        signals: capture.signals.map((signal) => ({
+          ...signal,
+          tabId: signal.tabId ?? tabId,
+          pageUrl: signal.pageUrl || capture.pageUrl,
+        })),
         tweetLike: capture.visibleTweets.map((tweet) => ({
           rest_id: tweet.tweetId,
           id_str: tweet.tweetId,
@@ -210,13 +272,14 @@ function buildSnapshot(tabId: number, capture: Extract<CaptureResponse, { ok: tr
           pageTitle: capture.pageTitle,
           pageKind: capture.pageKind,
           tweetCount: capture.visibleTweets.length,
+          signalCount: capture.signals.length,
         },
       },
     ],
   };
 }
 
-async function captureSyncResult(tab: chrome.tabs.Tab | undefined): Promise<ActionResult> {
+async function captureSyncResult(tab: chrome.tabs.Tab | undefined, options: CaptureSyncOptions = {}): Promise<ActionResult> {
   try {
     const activeTab = tab ?? (await getActiveTab());
     if (typeof activeTab.id !== "number") {
@@ -234,16 +297,20 @@ async function captureSyncResult(tab: chrome.tabs.Tab | undefined): Promise<Acti
       throw new Error(capture.error);
     }
 
-    if (capture.visibleTweets.length === 0) {
-      return finalizeResult({
-        action: "sync-visible",
-        ok: false,
-        recordedAt: new Date().toISOString(),
-        pageUrl: capture.pageUrl,
-        pageKind: capture.pageKind,
-        tweetCount: 0,
-        error: "No visible tweet cards were found on this page.",
-      });
+    const hasSignals = capture.signals.length > 0;
+    if (capture.visibleTweets.length === 0 && !hasSignals) {
+      return finishSyncResult(
+        {
+          action: "sync-visible",
+          ok: false,
+          recordedAt: new Date().toISOString(),
+          pageUrl: capture.pageUrl,
+          pageKind: capture.pageKind,
+          tweetCount: 0,
+          error: "No visible tweet cards or recent signals were found on this page.",
+        },
+        options,
+      );
     }
 
     const response = await fetch(INGEST_ENDPOINT, {
@@ -256,24 +323,77 @@ async function captureSyncResult(tab: chrome.tabs.Tab | undefined): Promise<Acti
     });
 
     const body = (await response.text()).slice(0, 500);
-    return finalizeResult({
+    if (response.ok) {
+      await acknowledgeSignals(activeTab.id, capture.signals);
+    }
+
+    return finishSyncResult(
+      {
+        action: "sync-visible",
+        ok: response.ok,
+        recordedAt: new Date().toISOString(),
+        status: response.status,
+        body,
+        tweetCount: capture.visibleTweets.length,
+        signalCount: capture.signals.length,
+        pageUrl: capture.pageUrl,
+        pageKind: capture.pageKind,
+        error: response.ok ? undefined : `Ingest returned ${response.status}.`,
+      },
+      options,
+    );
+  } catch (error) {
+    return finishSyncResult(
+      {
+        action: "sync-visible",
+        ok: false,
+        recordedAt: new Date().toISOString(),
+        error: error instanceof Error ? error.message : String(error),
+      },
+      options,
+    );
+  }
+}
+
+async function supportedTwitterTabs(): Promise<chrome.tabs.Tab[]> {
+  return new Promise<chrome.tabs.Tab[]>((resolve, reject) => {
+    chrome.tabs.query({ url: ["https://x.com/*", "https://twitter.com/*"] }, (tabs) => {
+      const runtimeError = chrome.runtime.lastError;
+      if (runtimeError) {
+        reject(new Error(runtimeError.message));
+        return;
+      }
+
+      resolve(tabs.filter((tab) => typeof tab.id === "number" && Boolean(tab.url) && SUPPORTED_TAB_PATTERN.test(tab.url ?? "")));
+    });
+  });
+}
+
+async function syncAllSupportedTabs(reason: string): Promise<void> {
+  if (backgroundSyncRunning) {
+    return;
+  }
+  backgroundSyncRunning = true;
+  try {
+    const tabs = await supportedTwitterTabs();
+    for (const tab of tabs) {
+      await captureSyncResult(tab, { silent: true });
+    }
+    await persistLastResult({
       action: "sync-visible",
-      ok: response.ok,
+      ok: true,
       recordedAt: new Date().toISOString(),
-      status: response.status,
-      body,
-      tweetCount: capture.visibleTweets.length,
-      pageUrl: capture.pageUrl,
-      pageKind: capture.pageKind,
-      error: response.ok ? undefined : `Ingest returned ${response.status}.`,
+      body: `background-sync:${reason}:tabs=${tabs.length}`,
     });
   } catch (error) {
-    return finalizeResult({
+    await finalizeResult({
       action: "sync-visible",
       ok: false,
       recordedAt: new Date().toISOString(),
       error: error instanceof Error ? error.message : String(error),
     });
+  } finally {
+    backgroundSyncRunning = false;
   }
 }
 
@@ -316,6 +436,17 @@ chrome.runtime.onStartup.addListener(() => {
   chrome.browserAction.setTitle({ title: DEFAULT_TITLE });
 });
 
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (changeInfo.status !== "complete") {
+    return;
+  }
+  if (typeof tabId !== "number" || !tab.url || !SUPPORTED_TAB_PATTERN.test(tab.url)) {
+    return;
+  }
+  window.setTimeout(() => void captureSyncResult({ ...tab, id: tabId }, { silent: true }), 2_000);
+});
+
+
 chrome.browserAction.onClicked.addListener((tab) => {
   void captureSyncResult(tab);
 });
@@ -336,6 +467,13 @@ chrome.commands.onCommand.addListener((command) => {
     void captureHealthResult();
   }
 });
+
+setInterval(() => {
+  void syncAllSupportedTabs("interval");
+}, BACKGROUND_SYNC_INTERVAL_MS);
+
+void syncAllSupportedTabs("startup");
+
 
 createContextMenus();
 chrome.browserAction.setTitle({ title: DEFAULT_TITLE });

@@ -16,6 +16,12 @@ declare namespace chrome {
       readonly url?: string
     }
 
+    interface RuntimeMessage {
+      readonly type?: string
+      readonly signalIds?: readonly string[]
+    }
+
+
     interface OnInstalledEvent {
       addListener(callback: (details: InstalledDetails) => void): void
     }
@@ -27,9 +33,9 @@ declare namespace chrome {
     interface OnMessageEvent {
       addListener(
         callback: (
-          message: unknown,
+          message: RuntimeMessage | null,
           sender: MessageSender,
-          sendResponse: (response: unknown) => void,
+          sendResponse: (response: object) => void,
         ) => boolean | void,
       ): void
     }
@@ -46,6 +52,17 @@ declare namespace chrome {
   }
 
   namespace tabs {
+    interface QueryInfo {
+      readonly active?: boolean
+      readonly currentWindow?: boolean
+      readonly url?: string | readonly string[]
+    }
+
+    interface ChangeInfo {
+      readonly status?: "loading" | "complete"
+      readonly url?: string
+    }
+
     interface Tab {
       readonly id?: number
       readonly url?: string
@@ -53,8 +70,11 @@ declare namespace chrome {
       readonly active?: boolean
     }
 
-    function query(queryInfo: { active?: boolean; currentWindow?: boolean }, callback: (tabs: Tab[]) => void): void
-    function sendMessage(tabId: number, message: unknown, callback: (response: unknown) => void): void
+    function query(queryInfo: QueryInfo, callback: (tabs: Tab[]) => void): void
+    function sendMessage(tabId: number, message: runtime.RuntimeMessage, callback: (response: object) => void): void
+    const onUpdated: {
+      addListener(callback: (tabId: number, changeInfo: ChangeInfo, tab: Tab) => void): void
+    }
   }
 
   namespace contextMenus {
