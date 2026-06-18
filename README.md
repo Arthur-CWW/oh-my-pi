@@ -1,16 +1,17 @@
-# pi-workflows
+# agents
 
-Monorepo for Pi extensions, skills, and local-first AI workflows.
+Monorepo for the agent control plane: Pi extensions, skills, browser tooling, local archives, and AI workflow tools.
 
 Current focus:
 
-- `packages/web-access` — existing Pi web/search/fetch/YouTube/frontend-LLM tools.
+- `packages/web-access` — Pi web/search/fetch/YouTube/frontend-LLM tools.
 - `packages/dynamic-workflows` — vendored `pi-dynamic-workflows` source/tests plus adversarial-review prompt template; the released npm package is installed project-locally for the active workflow tool.
 - `packages/browser-use` — clean-room CDP browser-use extension prototype.
-- `packages/twitter-archive` — planned local X/Twitter archive capture + normalization.
-- `packages/jimeng-client` — Jimeng/Dreamina direct API helpers ported from Slotok reverse engineering.
-- `apps/tweet-viewer` — planned local searchable archive viewer.
-- `workflows/*` — planned shortform-video archive, analysis, and generation pipelines.
+- `browser-extensions` — self-contained pnpm monorepo for Chrome/Firefox/Helium extensions.
+- `kimi-code-usage` — Kimi coding-plan usage CLI/MCP package plus VS Code extension.
+- `oh-my-pi` — self-contained OMP/Bun/Rust/Python monorepo used for agent runtime work.
+- `kagi-reverse` — local Kagi reverse-engineering notes and probes.
+- `skills/pi-skills` — imported Pi core skills from `Arthur-CWW/skills` / upstream `badlogic/pi-skills`; no nested Git repo.
 
 ## Pi project package
 
@@ -36,6 +37,12 @@ packages/
   jimeng-client/    # Jimeng direct client helpers
 apps/
   tweet-viewer/      # local archive browser/search UI skeleton
+browser-extensions/ # browser extension monorepo
+kimi-code-usage/    # Kimi usage CLI/MCP and VS Code extension
+oh-my-pi/           # OMP runtime monorepo
+kagi-reverse/       # Kagi reverse-engineering notes/probes
+skills/
+  pi-skills/        # imported Pi core skills
 workflows/
   archive-pleometric/
   analyze-videos/

@@ -13,6 +13,7 @@ pi-session-*
 *.mp4
 prompt.md
 -.en.vtt
+.DS_Store
 
 # Local scratch/artifacts
 codex-decomp/
@@ -24,7 +25,7 @@ artifacts/
 *.sqlite
 *.sqlite-*
 
-# Large/nested vendored repos and local skill checkouts
+# Large vendored repos and generated skill/tool checkouts
 vendor/*
 !vendor/openai/
 vendor/openai/*
@@ -41,5 +42,5 @@ packages/web-access/vendor/*
 !packages/web-access/vendor/kagi-chrome-extension/
 skills/chrome-devtools-mcp/
 packages/web-access/skills/chrome-devtools-mcp/
-packages/web-access/skills/pi-skills/
+skills/pi-skills/browser-tools/output/
 .pi/extensions/*.disabled

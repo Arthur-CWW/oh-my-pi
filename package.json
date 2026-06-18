@@ -1,19 +1,19 @@
 {
-  "name": "pi-workflows",
+  "name": "agents",
   "version": "0.1.0",
   "private": true,
-  "description": "Pi extensions, skills, and workflows for web access and shortform video pipelines",
+  "description": "Agent extensions, skills, tools, and local-first AI workflows",
   "type": "module",
   "workspaces": ["packages/*", "apps/*"],
   "keywords": ["pi-package", "pi", "workflows", "skills"],
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Arthur-CWW/pi-workflows.git"
+    "url": "git+https://github.com/Arthur-CWW/agents.git"
   },
   "scripts": {
-    "typecheck": "cd packages/web-access && bun run typecheck && cd ../mermaid-preview && bun run typecheck && cd ../twitter-archive && bun run typecheck && cd ../jimeng-client && bun run typecheck && cd ../dynamic-workflows && bun run typecheck && cd ../ugc-cli && bun run typecheck && cd ../../apps/slotok-workbench && bun run typecheck",
-    "test": "cd packages/web-access && bun run test && cd ../mermaid-preview && bun run test && cd ../twitter-archive && bun run test && cd ../jimeng-client && bun run test && cd ../dynamic-workflows && bun run test && cd ../ugc-cli && bun run test && cd ../../apps/slotok-workbench && bun run test",
+    "typecheck": "cd packages/web-access && bun run typecheck && cd ../mermaid-preview && bun run typecheck && cd ../twitter-archive && bun run typecheck && cd ../jimeng-client && bun run typecheck && cd ../dynamic-workflows && bun run typecheck && cd ../ugc-cli && bun run typecheck && cd ../market-lab && bun run typecheck && cd ../proxy-lab && bun run typecheck && cd ../library-assistant && bun run typecheck && cd ../bench-harness && bun run typecheck && cd ../../apps/slotok-workbench && bun run typecheck",
+    "test": "cd packages/web-access && bun run test && cd ../mermaid-preview && bun run test && cd ../twitter-archive && bun run test && cd ../jimeng-client && bun run test && cd ../dynamic-workflows && bun run test && cd ../ugc-cli && bun run test && cd ../market-lab && bun run test && cd ../proxy-lab && bun run test && cd ../library-assistant && bun run test && cd ../bench-harness && bun run test && cd ../../apps/slotok-workbench && bun run test",
     "check": "bun run typecheck && bun run test && bun run lint",
     "lint": "bun run lint:unsafe-types && bun run lint:ast-grep && bun run lint:ast-grep:tests",
     "lint:ast-grep": "bun run scripts/ast-grep.boundary.ts scan --config sgconfig.yml --off=no-unsafe-any-unknown-ts --off=no-unsafe-any-python --report-style=medium",
@@ -50,7 +50,15 @@
     "jimeng:coverage": "bun packages/jimeng-client/src/browser-proxy-cli.ts triage-coverage --decisions keep --outDir data/jimeng-lab/latest-keep-coverage",
     "jimeng:proof-report": "bun packages/jimeng-client/src/browser-proxy-cli.ts proof-report",
     "dynamic-workflows:typecheck": "cd packages/dynamic-workflows && bun run typecheck",
-    "dynamic-workflows:test": "cd packages/dynamic-workflows && bun run test"
+    "dynamic-workflows:test": "cd packages/dynamic-workflows && bun run test",
+    "market-lab:typecheck": "cd packages/market-lab && bun run typecheck",
+    "market-lab:test": "cd packages/market-lab && bun run test",
+    "proxy-lab:typecheck": "cd packages/proxy-lab && bun run typecheck",
+    "proxy-lab:test": "cd packages/proxy-lab && bun run test",
+    "library-assistant:typecheck": "cd packages/library-assistant && bun run typecheck",
+    "library-assistant:test": "cd packages/library-assistant && bun run test",
+    "bench-harness:typecheck": "cd packages/bench-harness && bun run typecheck",
+    "bench-harness:test": "cd packages/bench-harness && bun run test"
   },
   "pi": {
     "extensions": ["./packages/web-access/src/index.ts", "./packages/mermaid-preview/src/index.ts", "./packages/browser-use/index.ts"],
