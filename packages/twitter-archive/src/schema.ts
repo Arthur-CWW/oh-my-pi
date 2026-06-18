@@ -77,6 +77,15 @@ export interface ArchiveTweet {
   source?: ArchiveCaptureSource
 }
 
+export interface ArchiveTweetTimelineProvenance {
+  tweetId: string
+  sourceLane?: string
+  observedAt: string
+  retweetedByUsername?: string
+  retweetedByDisplayName?: string
+  detailUrl?: string
+}
+
 export interface ArchiveConversation {
   id: string
   rootTweetId?: string

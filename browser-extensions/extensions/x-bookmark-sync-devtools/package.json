@@ -10,7 +10,8 @@
     "build": "vite build",
     "check": "pnpm typecheck && pnpm build && node scripts/check-extension.mjs",
     "zip": "pnpm build && node scripts/zip.mjs",
-    "launch:helium": "pnpm build && ./scripts/launch-helium.sh"
+    "launch:helium": "pnpm build && ./scripts/launch-helium.sh",
+    "launch:chrome": "pnpm build && bash ./scripts/launch-chrome.sh"
   },
   "dependencies": {
     "solid-js": "^1.9.13"

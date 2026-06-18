@@ -1,0 +1,3 @@
+source_username,source_display_name,target_username,target_display_name,target_description,observed_at
+sourceUser,Source User,targetOne,Target One,Builds public tools,2026-06-18T00:00:00.000Z
+sourceUser,Source User,targetTwo,Target Two,Research notes,2026-06-18T00:00:00.000Z

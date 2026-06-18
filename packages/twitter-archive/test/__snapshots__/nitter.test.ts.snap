@@ -1,0 +1,135 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`Nitter timeline parsing parses profile, tweets, media, metrics, retweet marker, and next cursor 1`] = `
+{
+  "firstTweet": {
+    "authorId": "communalai",
+    "capturedAt": "2026-06-18T00:00:00.000Z",
+    "createdAt": "Jun 18, 2026 · 10:30 AM UTC",
+    "id": "1800000000000000001",
+    "mediaIds": [
+      "1800000000000000001-media-1",
+    ],
+    "publicMetrics": {
+      "likes": 1500,
+      "quotes": 2,
+      "replies": 3,
+      "reposts": 12,
+      "views": 22000,
+    },
+    "quotedTweetId": "1799999999999999999",
+    "quotedTweetUrl": "https://x.com/QuotedUser/status/1799999999999999999",
+    "source": "frontend",
+    "text": 
+"Shipping a Nitter archive lane for public timelines & threads.
+Saved HTML stays useful."
+,
+    "url": "https://x.com/CommunalAi/status/1800000000000000001",
+    "username": "CommunalAi",
+  },
+  "media": {
+    "altText": "Archive lane diagram",
+    "capturedAt": "2026-06-18T00:00:00.000Z",
+    "id": "1800000000000000001-media-1",
+    "previewImageUrl": "https://nitter.example/pic/media%2Farchive-lane.jpg%3Fname%3Dsmall",
+    "remoteUrl": "https://nitter.example/pic/media%2Farchive-lane.jpg%3Fname%3Dorig",
+    "source": "frontend",
+    "tweetId": "1800000000000000001",
+    "type": "image",
+  },
+  "nextCursor": {
+    "cursor": "DAABC==",
+    "url": "https://nitter.example/CommunalAi?cursor=DAABC%3D%3D",
+  },
+  "quotedTweet": {
+    "id": "1799999999999999999",
+    "text": "A visible quoted public post.",
+    "username": "QuotedUser",
+  },
+  "retweet": {
+    "needsDetailResolution": false,
+    "retweetedByDisplayName": "Communal AI",
+    "retweetedByUsername": "communalAI",
+    "tweetId": "1800000000000000002",
+  },
+  "user": {
+    "avatarUrl": "https://nitter.example/pic/profile%2Fcommunal.jpg",
+    "capturedAt": "2026-06-18T00:00:00.000Z",
+    "description": "Collective intelligence & public goods.",
+    "displayName": "Communal AI",
+    "id": "communalai",
+    "profileUrl": "https://x.com/CommunalAi",
+    "username": "CommunalAi",
+  },
+}
+`;
+
+exports[`Nitter timeline fetching caches raw pages and upserts parsed entities into sqlite 1`] = `
+[
+  {
+    "observedAt": "2026-06-18T00:00:00.000Z",
+    "retweetedByDisplayName": "Communal AI",
+    "retweetedByUsername": "CommunalAi",
+    "sourceLane": "nitter",
+    "tweetId": "1800000000000000002",
+  },
+]
+`;
+
+exports[`Nitter status detail parsing and resolution parses full status text, quote cards, media, and surrounding thread tweets 1`] = `
+{
+  "followUpConversationId": "1800000000000000003",
+  "parseStatus": "parsed",
+  "primaryTweet": {
+    "conversationId": "1800000000000000003",
+    "id": "1800000000000000003",
+    "mediaIds": [
+      "1800000000000000003-media-1",
+    ],
+    "quotedTweetId": "1799999999999999999",
+    "quotedTweetUrl": "https://x.com/QuotedUser/status/1799999999999999999",
+    "text": "This public timeline text is clipped in lists, but the status page exposes the complete text.",
+  },
+  "quote": {
+    "text": "Quoted card text from detail.",
+    "tweetId": "1799999999999999999",
+    "unavailable": false,
+    "url": "https://x.com/QuotedUser/status/1799999999999999999",
+    "username": "QuotedUser",
+  },
+  "quoteMedia": {
+    "id": "1799999999999999999-media-1",
+    "previewImageUrl": "https://nitter.example/pic/media%2Fquoted-small.jpg",
+    "remoteUrl": "https://nitter.example/pic/media%2Fquoted.jpg",
+  },
+  "quotedTweet": {
+    "id": "1799999999999999999",
+    "mediaIds": [
+      "1799999999999999999-media-1",
+    ],
+    "text": "Quoted card text from detail.",
+    "username": "QuotedUser",
+  },
+  "thread": [
+    {
+      "role": "context",
+      "tweetId": "1800000000000000000",
+    },
+    {
+      "role": "primary",
+      "tweetId": "1800000000000000003",
+    },
+    {
+      "role": "context",
+      "tweetId": "1800000000000000004",
+    },
+  ],
+}
+`;
+
+exports[`Nitter status detail parsing and resolution keeps quote status pending when detail exposes only a quote reference 1`] = `
+{
+  "quoteStatus": "pending",
+  "quoteUnavailableReason": "quoted tweet reference found without stored quoted content",
+}
+`;

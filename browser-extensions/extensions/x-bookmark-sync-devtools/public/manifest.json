@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "X Bookmark Sync DevTools",
   "version": "0.1.0",
-  "description": "Personal DevTools panel to capture X/Twitter bookmark-related GraphQL/API responses for local sync experiments.",
+  "description": "Read-only DevTools panel that captures X/Twitter bookmark network responses and posts them to the local twitter-archive server.",
   "devtools_page": "devtools.html",
   "background": {
     "service_worker": "background.js",

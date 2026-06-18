@@ -1,0 +1,18 @@
+{
+  "sourceAccount": {
+    "username": "sourceUser",
+    "displayName": "Source User"
+  },
+  "following": [
+    {
+      "username": "targetOne",
+      "displayName": "Target One"
+    },
+    {
+      "target": {
+        "username": "targetTwo",
+        "displayName": "Target Two"
+      }
+    }
+  ]
+}

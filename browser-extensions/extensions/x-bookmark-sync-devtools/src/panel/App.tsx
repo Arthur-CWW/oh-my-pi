@@ -45,7 +45,21 @@ type Capture = {
   parseError?: string;
 };
 
-const DEFAULT_ENDPOINT = "http://127.0.0.1:51747/x-bookmark-sync/ingest";
+type PostPhase = "idle" | "posting" | "success" | "error";
+
+type PostState = {
+  phase: PostPhase;
+  summary: string;
+};
+
+type ArchivePostResponse = {
+  status: number;
+  statusText: string;
+  summary: string;
+};
+
+
+const DEFAULT_ENDPOINT = "http://127.0.0.1:3420/x-bookmark-sync/ingest";
 const MAX_PREVIEW_CHARS = 80_000;
 
 const defaultSettings: Settings = {
@@ -56,19 +70,66 @@ const defaultSettings: Settings = {
   endpoint: DEFAULT_ENDPOINT,
 };
 
+function normalizeSettings(stored?: Partial<Settings>): Settings {
+  const next = { ...defaultSettings, ...(stored || {}) };
+  if (!next.endpoint) next.endpoint = DEFAULT_ENDPOINT;
+  return next;
+}
+
+function sanitizeResponseHeaders(headers: unknown[]): unknown[] {
+  return headers.filter((header) => {
+    if (!header || typeof header !== "object") return true;
+    const name = (header as { name?: unknown }).name;
+    return typeof name !== "string" || !isSensitiveHeaderName(name);
+  });
+}
+
+function isSensitiveHeaderName(name: string) {
+  const normalized = name.toLowerCase();
+  return (
+    normalized === "set-cookie" ||
+    normalized === "cookie" ||
+    normalized === "authorization" ||
+    normalized === "x-csrf-token"
+  );
+}
+
 export function App() {
   const [captures, setCaptures] = createSignal<Capture[]>([]);
   const [selectedId, setSelectedId] = createSignal<string | null>(null);
   const [settings, setSettings] = createSignal<Settings>(defaultSettings);
   const [status, setStatus] = createSignal({ text: "booting", error: false });
+  const [postState, setPostState] = createSignal<PostState>({
+    phase: "idle",
+    summary: "Ready to POST captured bookmark responses to the local archive.",
+  });
 
   const selectedCapture = createMemo(() => captures().find((capture) => capture.id === selectedId()) ?? null);
   const totalBodyBytes = createMemo(() => captures().reduce((sum, item) => sum + item.response.bodySize, 0));
   const tweetLikeCount = createMemo(() => captures().reduce((sum, item) => sum + item.tweetLike.length, 0));
+  const isPosting = createMemo(() => postState().phase === "posting");
+  const postButtonDisabled = createMemo(() => isPosting() || captures().length === 0);
+  const postSummaryClass = createMemo(() => {
+    switch (postState().phase) {
+      case "success":
+        return "border-emerald-400/30 bg-emerald-400/10 text-emerald-200";
+      case "error":
+        return "border-rose-400/40 bg-rose-500/10 text-rose-200";
+      case "posting":
+        return "border-amber-300/30 bg-amber-300/10 text-amber-100";
+      default:
+        return "border-slate-700 bg-slate-900/80 text-slate-300";
+    }
+  });
+
 
   onMount(async () => {
-    const stored = await storageGet<{ xBookmarkSyncSettings?: Settings }>(["xBookmarkSyncSettings"]);
-    setSettings({ ...defaultSettings, ...(stored.xBookmarkSyncSettings || {}) });
+    const stored = await storageGet<{ xBookmarkSyncSettings?: Partial<Settings> }>(["xBookmarkSyncSettings"]);
+    const nextSettings = normalizeSettings(stored.xBookmarkSyncSettings);
+    setSettings(nextSettings);
+    if (stored.xBookmarkSyncSettings?.endpoint !== nextSettings.endpoint) {
+      void storageSet({ xBookmarkSyncSettings: nextSettings });
+    }
     setStatus({ text: "listening", error: false });
 
     chrome.devtools.network.onRequestFinished.addListener((entry) => {
@@ -130,7 +191,7 @@ export function App() {
             mimeType: entry.response.content?.mimeType || "",
             bodySize: byteLength(safeBody),
             encoding: encoding || "",
-            headers: entry.response.headers || [],
+            headers: sanitizeResponseHeaders(entry.response.headers || []),
           },
           timing: {
             startedDateTime: entry.startedDateTime,
@@ -147,7 +208,14 @@ export function App() {
         setSelectedId((id) => id || capture.id);
 
         if (currentSettings.autoPost) {
-          await postSnapshot({ captures: [capture], source: snapshotSource(), incremental: true }, currentSettings.endpoint);
+          setPostState({ phase: "posting", summary: "Auto-posting latest capture to the local archive…" });
+          try {
+            const response = await postSnapshot({ captures: [capture], source: snapshotSource(), incremental: true }, currentSettings.endpoint);
+            setPostState({ phase: "success", summary: `Auto-posted latest capture: ${formatArchivePostResponse(response)}` });
+          } catch (error) {
+            setPostState({ phase: "error", summary: `Auto-post failed: ${(error as Error).message}` });
+            setStatus({ text: `post failed: ${(error as Error).message}`, error: true });
+          }
         }
       } catch (error) {
         setStatus({ text: `capture error: ${(error as Error).message}`, error: true });
@@ -156,12 +224,19 @@ export function App() {
   };
 
   const postCurrentSnapshot = async () => {
-    setStatus({ text: "posting…", error: false });
+    const captureCount = captures().length;
+    if (captureCount === 0 || isPosting()) return;
+
+    setStatus({ text: "posting to archive…", error: false });
+    setPostState({ phase: "posting", summary: `Posting ${captureCount} capture(s) to the local archive…` });
     try {
-      await postSnapshot(makeSnapshot(captures()), settings().endpoint);
-      setStatus({ text: `posted ${captures().length} capture(s)`, error: false });
+      const response = await postSnapshot(makeSnapshot(captures()), settings().endpoint);
+      const summary = formatArchivePostResponse(response);
+      setStatus({ text: `posted ${captureCount} capture(s)`, error: false });
+      setPostState({ phase: "success", summary: `Archive response: ${summary}` });
     } catch (error) {
       setStatus({ text: `post failed: ${(error as Error).message}`, error: true });
+      setPostState({ phase: "error", summary: `Archive POST failed: ${(error as Error).message}` });
     }
   };
 
@@ -176,7 +251,8 @@ export function App() {
             </div>
             <h1 class="text-lg font-semibold tracking-tight text-white">X Bookmark Sync</h1>
             <p class="mt-1 max-w-3xl text-xs text-slate-400">
-              Capture bookmark-related GraphQL/API responses from the inspected X/Twitter tab while DevTools is open.
+              Open DevTools on <span class="font-mono text-slate-300">x.com/i/bookmarks</span>, keep this panel open, then scroll.
+              It captures visible/network bookmark responses and can POST them to your local archive; read-only, it does not mutate X.
             </p>
           </div>
           <div
@@ -221,7 +297,7 @@ export function App() {
 
       <section class="flex flex-wrap items-center gap-3 border-b border-slate-800 bg-slate-900/60 px-4 py-3 text-xs">
         <label class="flex min-w-0 flex-1 basis-[420px] items-center gap-2 text-slate-400">
-          <span class="shrink-0">Local ingest</span>
+          <span class="shrink-0">Local archive endpoint</span>
           <input
             class="min-w-0 flex-1 rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 font-mono text-slate-100 outline-none focus:border-sky-400"
             type="url"
@@ -231,12 +307,21 @@ export function App() {
           />
         </label>
         <button
-          class="rounded-md border border-sky-400/40 bg-sky-400/10 px-3 py-1.5 text-sky-100 hover:bg-sky-400/20"
+          class={`rounded-md border px-3 py-1.5 transition ${
+            postButtonDisabled()
+              ? "cursor-not-allowed border-slate-700 bg-slate-800/70 text-slate-500"
+              : "border-sky-400/40 bg-sky-400/10 text-sky-100 hover:bg-sky-400/20"
+          }`}
+          disabled={postButtonDisabled()}
+          aria-busy={isPosting() ? "true" : "false"}
           onClick={() => void postCurrentSnapshot()}
         >
-          POST snapshot
+          {isPosting() ? "Posting…" : "Post to archive"}
         </button>
         <Toggle label="auto-post" checked={settings().autoPost} onChange={(autoPost) => patchSettings({ autoPost })} />
+        <div class={`basis-full rounded-md border px-3 py-2 font-mono text-[11px] ${postSummaryClass()}`}>
+          {postState().summary}
+        </div>
       </section>
 
       <section class="grid grid-cols-3 gap-2 border-b border-slate-800 bg-slate-950 px-4 py-3">
@@ -279,7 +364,7 @@ export function App() {
             </Show>
           </h2>
           <pre class="h-[calc(100%-33px)] overflow-auto whitespace-pre-wrap break-words p-3 font-mono text-[11px] leading-relaxed text-slate-300">
-            <Show when={selectedCapture()} fallback="Open or reload x.com/i/bookmarks with DevTools open, then wait for X/Twitter API responses.">
+            <Show when={selectedCapture()} fallback="Open DevTools on x.com/i/bookmarks, select the X Bookmarks panel, then scroll the bookmarks timeline to capture network responses.">
               {(capture) => JSON.stringify(capture(), null, 2)}
             </Show>
           </pre>
@@ -287,7 +372,7 @@ export function App() {
       </main>
 
       <footer class="border-t border-slate-800 bg-slate-950 px-4 py-2 text-[11px] text-slate-500">
-        DevTools panels only see requests captured while DevTools is open. Prefer storing parsed tweet data, not cookies or tokens.
+        Read-only DevTools capture: sees responses only while this panel is open, does not mutate X, and posts only to the configured localhost archive endpoint.
       </footer>
     </div>
   );
@@ -320,7 +405,7 @@ function EmptyRequests() {
   return (
     <div class="p-4 text-xs text-slate-500">
       <p class="font-medium text-slate-300">No captures yet.</p>
-      <p class="mt-1">Open the Network panel or reload X/Twitter with this panel visible.</p>
+      <p class="mt-1">Open DevTools on x.com/i/bookmarks, select this panel, then scroll the bookmarks timeline.</p>
     </div>
   );
 }
@@ -469,13 +554,86 @@ function snapshotSource() {
   };
 }
 
-async function postSnapshot(snapshot: unknown, endpoint: string) {
+async function postSnapshot(snapshot: unknown, endpoint: string): Promise<ArchivePostResponse> {
   const response = await fetch(endpoint || DEFAULT_ENDPOINT, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(snapshot),
   });
-  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+  const contentType = response.headers.get("content-type") || "";
+  const text = await response.text();
+  let responseBody: unknown = text;
+  if (contentType.includes("application/json") && text) {
+    const parsed = parseMaybeJson(text);
+    if (parsed.ok) responseBody = parsed.value;
+  }
+  const summary = summarizeResponseBody(responseBody) || "no response body";
+  if (!response.ok) throw new Error(`${response.status} ${response.statusText} · ${summary}`);
+  return { status: response.status, statusText: response.statusText, summary };
+}
+
+function formatArchivePostResponse(response: ArchivePostResponse) {
+  return `${response.status} ${response.statusText} · ${response.summary}`;
+}
+
+function summarizeResponseBody(value: unknown): string {
+  if (typeof value === "string") {
+    return trimOrUndefined(value.replace(/\s+/g, " ").trim(), 180) || "";
+  }
+  if (!value || typeof value !== "object") {
+    return String(value ?? "");
+  }
+
+  const record = value as Record<string, unknown>;
+  const preferredKeys = [
+    "message",
+    "status",
+    "captures",
+    "captureCount",
+    "processed",
+    "accepted",
+    "queued",
+    "inserted",
+    "updated",
+    "skipped",
+    "tweets",
+    "tweetCount",
+    "bookmarks",
+    "bookmarkCount",
+    "markdownFiles",
+    "markdownFilesWritten",
+    "errors",
+    "error",
+  ];
+  const parts: string[] = [];
+
+  for (const key of preferredKeys) {
+    if (key in record) {
+      const part = summarizeResponseField(key, record[key]);
+      if (part) parts.push(part);
+    }
+    if (parts.length >= 5) break;
+  }
+
+  if (parts.length === 0) {
+    for (const [key, item] of Object.entries(record)) {
+      const part = summarizeResponseField(key, item);
+      if (part) parts.push(part);
+      if (parts.length >= 5) break;
+    }
+  }
+
+  return parts.join(" · ");
+}
+
+function summarizeResponseField(key: string, value: unknown): string | null {
+  if (Array.isArray(value)) return `${key}: ${value.length}`;
+  if (typeof value === "number" || typeof value === "boolean") return `${key}: ${value}`;
+  if (typeof value === "string") {
+    const trimmed = trimOrUndefined(value.replace(/\s+/g, " ").trim(), 80);
+    return trimmed ? `${key}: ${trimmed}` : null;
+  }
+  return null;
 }
 
 function downloadJson(value: unknown, filename: string) {

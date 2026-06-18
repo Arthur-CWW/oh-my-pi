@@ -1,0 +1,28 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`Twitter archive dev UI server serves health and SQLite-derived archive state 1`] = `
+{
+  "externalReply": {
+    "kind": "reply",
+    "replyingTo": "otherUser",
+    "tweetIds": [
+      "tweet-3",
+    ],
+  },
+  "retweet": {
+    "displayName": "Communal AI",
+    "username": "communalAI",
+  },
+  "thread": {
+    "kind": "thread",
+    "tweetIds": [
+      "tweet-1",
+      "tweet-2",
+    ],
+  },
+  "unresolvedQuote": {
+    "hasQuotedTweet": false,
+    "quotedTweetId": "missing-quote",
+  },
+}
+`;
