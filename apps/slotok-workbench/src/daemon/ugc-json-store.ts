@@ -32,17 +32,22 @@ import {
   type UgcReferenceManifestAsset,
   type PersonaPatch,
   type ProviderJobPatch,
+  type ReferenceArchiveFormatOutput,
   type ResearchTargetPatch,
   type TemplateMiningJobPatch,
   type UgcWorkflowEvent,
   type UgcWorkflowEventType,
   type UgcExportManifest,
   type UgcLocalState,
+  type UgcProvider,
   type UgcProviderJob,
   type UgcReferenceArchive,
   type UgcResearchTarget,
   type UgcTemplateMiningJob,
   type UgcWorkflowRun,
+  type UgcWorkflowImportInput,
+  type UgcWorkflowImportResult,
+  type UgcWorkflowImportPlannedChanges,
   type UgcWorkflowRunStatus,
   type UgcWorkspaceBundle,
   type UgcWorkspaceBundleImportResult,
@@ -51,7 +56,7 @@ import {
   type WorkflowRunPatch,
 } from "../ugc/local-state"
 import { UgcSqliteStore } from "./ugc-sqlite-store"
-import type { BranchSnapshot, JsonValue, PersonaProfile, ReferenceProfile, ReviewNote, UgcStudioWorkspace } from "../renderer/ugcStudioModel"
+import type { BranchSnapshot, JsonValue, PersonaProfile, ReferenceProfile, ReviewAttachment, ReviewNote, UgcStudioWorkspace } from "../renderer/ugcStudioModel"
 
 export interface UgcJsonStoreOptions {
   readonly cwd?: string
@@ -282,8 +287,8 @@ export class UgcJsonStore {
       targetIds: input.targetIds ?? [],
       spendCapUsd: input.spendCapUsd ?? 0.5,
       estimatedCostUsd: input.estimatedCostUsd ?? null,
-      request: input.request,
-      response: input.response ?? null,
+      request: sanitizeWorkflowJsonValue(input.request),
+      response: input.response === undefined ? null : sanitizeWorkflowJsonValue(input.response),
       artifactPaths: input.artifactPaths ?? [],
       error: input.error ?? null,
     }
@@ -298,7 +303,7 @@ export class UgcJsonStore {
       return {
         ...job,
         status: patch.status ?? job.status,
-        response: patch.response === undefined ? job.response : patch.response,
+        response: patch.response === undefined ? job.response : sanitizeWorkflowJsonValue(patch.response),
         artifactPaths: patch.artifactPaths ?? job.artifactPaths,
         error: patch.error === undefined ? job.error : patch.error,
         updatedAt: now,
@@ -638,6 +643,87 @@ export class UgcJsonStore {
     return summarized
   }
 
+  importWorkflowHandoff(runId: string, input: UgcWorkflowImportInput, dryRun = true): UgcWorkflowImportResult {
+    const state = this.read()
+    const now = this.now()
+    const errors: string[] = []
+    const warnings: string[] = []
+    const run = state.workflowRuns.find((item) => item.id === runId) ?? null
+    if (!run) errors.push(`workflow run not found: ${runId}`)
+
+    const plan = planWorkflowImport(state, runId, input, now, errors, warnings)
+    const valid = errors.length === 0 && run !== null
+    let workflowRun: UgcWorkflowRun | null = null
+    let events: readonly UgcWorkflowEvent[] = []
+
+    if (valid && !dryRun && run) {
+      const artifactPaths = mergeStrings(run.artifactPaths, plan.artifactPaths)
+      const importedRecordIds = mergeStrings(run.importedRecordIds, plan.importedRecordIds)
+      const resultPayload = workflowImportResultPayload(input, plan)
+      const importEvent: UgcWorkflowEvent = {
+        schemaVersion: "ugc-studio.workflow-event.v1",
+        eventId: nextWorkflowEventId(state),
+        runId,
+        type: "import",
+        phase: run.currentPhase,
+        agentLabel: null,
+        message: `Imported workflow handoff for ${input.lane}`,
+        payload: resultPayload,
+        artifactPaths,
+        error: null,
+        createdAt: now,
+      }
+      const resultEvent: UgcWorkflowEvent = {
+        schemaVersion: "ugc-studio.workflow-event.v1",
+        eventId: importEvent.eventId + 1,
+        runId,
+        type: "result",
+        phase: run.currentPhase,
+        agentLabel: null,
+        message: "Workflow import result",
+        payload: resultPayload,
+        artifactPaths,
+        error: null,
+        createdAt: now,
+      }
+      const patchedRun: UgcWorkflowRun = {
+        ...run,
+        result: resultPayload,
+        importedRecordIds,
+        artifactPaths,
+        updatedAt: now,
+      }
+      const workflowEvents = [...state.workflowEvents, importEvent, resultEvent]
+      const summarizedRun = summarizeWorkflowRun(patchedRun, workflowEvents.filter((event) => event.runId === runId))
+      workflowRun = summarizedRun
+      this.write({
+        ...state,
+        workspace: plan.workspace,
+        providerJobs: plan.providerJobs,
+        referenceArchives: plan.referenceArchives,
+        workflowRuns: state.workflowRuns.map((item) => (item.id === runId ? summarizedRun : item)),
+        workflowEvents,
+      })
+      events = [importEvent, resultEvent]
+    }
+
+    return {
+      schemaVersion: "ugc-studio.workflow-import-result.v1",
+      dryRun,
+      valid,
+      imported: valid && !dryRun,
+      checkedAt: now,
+      runId,
+      lane: input.lane,
+      sourcePolicy: input.sourcePolicy,
+      plannedChanges: plan.plannedChanges,
+      errors,
+      warnings,
+      workflowRun,
+      events,
+    }
+  }
+
   exportWorkspaceBundle(input: CreateWorkspaceBundleInput = {}): UgcWorkspaceBundle {
     const state = this.read()
     const now = this.now()
@@ -770,6 +856,327 @@ export class UgcJsonStore {
     const state = this.read()
     return this.write({ ...state, workspace: update(state.workspace) })
   }
+}
+
+interface WorkflowImportPlan {
+  readonly workspace: UgcStudioWorkspace
+  readonly providerJobs: readonly UgcProviderJob[]
+  readonly referenceArchives: readonly UgcReferenceArchive[]
+  readonly plannedChanges: UgcWorkflowImportPlannedChanges
+  readonly artifactPaths: readonly string[]
+  readonly importedRecordIds: readonly string[]
+}
+
+function planWorkflowImport(
+  state: UgcLocalState,
+  runId: string,
+  input: UgcWorkflowImportInput,
+  now: string,
+  errors: string[],
+  warnings: string[],
+): WorkflowImportPlan {
+  let workspace = state.workspace
+  let providerJobs = state.providerJobs
+  let referenceArchives = state.referenceArchives
+  const providerJobIds: string[] = []
+  const referenceArchiveIds: string[] = []
+  const candidateIds: string[] = []
+  const noteIds: string[] = []
+  const importedRecordIds: string[] = []
+  const artifactPaths = [...new Set(input.artifactPaths ?? [])]
+  const seenIncomingProviderJobIds = new Set<string>()
+  const noteExistingIds = new Set(state.workspace.reviewNotes.map((note) => note.id))
+
+  if ((input.records?.length ?? 0) > 0) {
+    importedRecordIds.push(...recordImportIds(input.records ?? []))
+  }
+
+  for (const [index, jobInput] of (input.providerJobs ?? []).entries()) {
+    const jobId = jobInput.id?.trim() || uniqueWorkflowImportId("job", runId, index, new Set([...state.providerJobs.map((job) => job.id), ...providerJobIds]))
+    if (state.providerJobs.some((job) => job.id === jobId)) errors.push(`provider job id already exists: ${jobId}`)
+    if (seenIncomingProviderJobIds.has(jobId)) errors.push(`duplicate provider job id in workflow import: ${jobId}`)
+    seenIncomingProviderJobIds.add(jobId)
+    const targetIds = jobInput.targetIds ?? []
+    for (const targetId of targetIds) {
+      if (!workflowImportTargetExists(state, targetId)) errors.push(`provider job target id not found: ${targetId}`)
+    }
+    if (input.sourcePolicy !== "rights-cleared-source" && isGenerationProvider(jobInput.provider) && hasDirectGenerationInput(jobInput.request)) {
+      errors.push("sourcePolicy must be rights-cleared-source before public or inspiration source URLs/paths can be direct generation inputs")
+    }
+    const job: UgcProviderJob = {
+      schemaVersion: "ugc-studio.provider-job.v1",
+      id: jobId,
+      workspaceId: state.workspace.id,
+      provider: jobInput.provider,
+      operation: jobInput.operation,
+      mode: jobInput.mode ?? "dry-run",
+      status: jobInput.status ?? "planned",
+      createdAt: now,
+      updatedAt: now,
+      targetIds,
+      spendCapUsd: jobInput.spendCapUsd ?? 0.5,
+      estimatedCostUsd: jobInput.estimatedCostUsd ?? null,
+      request: sanitizeWorkflowJsonValue(jobInput.request),
+      response: jobInput.response === undefined || jobInput.response === null ? null : sanitizeWorkflowJsonValue(jobInput.response),
+      artifactPaths: jobInput.artifactPaths ?? [],
+      error: jobInput.error ?? null,
+    }
+    providerJobs = [job, ...providerJobs]
+    providerJobIds.push(job.id)
+    importedRecordIds.push(job.id)
+    artifactPaths.push(...job.artifactPaths)
+  }
+
+  for (const archiveInput of input.referenceArchives ?? []) {
+    const referenceProfile = state.workspace.referenceProfiles.find((reference) => reference.id === archiveInput.referenceProfileId)
+    if (!referenceProfile) {
+      errors.push(`reference profile not found: ${archiveInput.referenceProfileId}`)
+      continue
+    }
+    if (archiveInput.sourcePolicy !== undefined && archiveInput.sourcePolicy !== input.sourcePolicy) {
+      errors.push(`reference archive ${archiveInput.referenceProfileId} sourcePolicy must match workflow sourcePolicy`)
+    }
+    const existing = referenceArchives.find((archive) => archive.referenceProfileId === archiveInput.referenceProfileId)
+    const defaultArchive = referenceProfileToArchive(state.workspace.id, referenceProfile, now)
+    const archive: UgcReferenceArchive = {
+      ...defaultArchive,
+      ...existing,
+      archiveStatus: archiveInput.archiveStatus ?? existing?.archiveStatus ?? defaultArchive.archiveStatus,
+      sourcePolicy: archiveInput.sourcePolicy ?? input.sourcePolicy,
+      preservedMechanics: archiveInput.preservedMechanics === undefined ? existing?.preservedMechanics ?? defaultArchive.preservedMechanics : sanitizeWorkflowJsonValue(archiveInput.preservedMechanics),
+      sampleClipIds: existing?.sampleClipIds ?? defaultArchive.sampleClipIds,
+      swappedFields: archiveInput.swappedFields ?? existing?.swappedFields ?? defaultArchive.swappedFields,
+      blockedFields: archiveInput.blockedFields ?? existing?.blockedFields ?? defaultArchive.blockedFields,
+      guardrails: archiveInput.guardrails ?? existing?.guardrails ?? defaultArchive.guardrails,
+      candidateFormatOutputs: archiveInput.candidateFormatOutputs === undefined ? existing?.candidateFormatOutputs ?? defaultArchive.candidateFormatOutputs : sanitizeReferenceArchiveFormatOutputs(archiveInput.candidateFormatOutputs),
+      notes: archiveInput.notes ?? existing?.notes ?? [],
+      catalogVideos: existing?.catalogVideos ?? defaultArchive.catalogVideos,
+      referenceAssets: existing?.referenceAssets ?? defaultArchive.referenceAssets,
+      updatedAt: now,
+    }
+    referenceArchives = [archive, ...referenceArchives.filter((item) => item.id !== archive.id)]
+    referenceArchiveIds.push(archive.id)
+    importedRecordIds.push(archive.id)
+  }
+
+  for (const patch of input.candidatePatches ?? []) {
+    const candidate = workspace.candidates.find((item) => item.id === patch.candidateId)
+    if (!candidate) {
+      errors.push(`candidate not found: ${patch.candidateId}`)
+      continue
+    }
+    candidateIds.push(patch.candidateId)
+    importedRecordIds.push(patch.candidateId)
+    const patchNotes = patch.notes ?? []
+    const newNotes = patchNotes.map((note, index) => workflowImportReviewNote(workspace, runId, noteIds.length + index, now, {
+      author: "agent",
+      attachedTo: { kind: "candidate", id: patch.candidateId },
+      verdict: note.verdict ?? "revise",
+      body: note.body,
+      requestedChange: note.requestedChange ?? null,
+    }, noteExistingIds, errors))
+    noteIds.push(...newNotes.map((note) => note.id))
+    importedRecordIds.push(...newNotes.map((note) => note.id))
+    workspace = {
+      ...workspace,
+      candidates: workspace.candidates.map((item) => item.id === patch.candidateId
+        ? { ...item, status: patch.status ?? item.status, reviewNoteIds: [...item.reviewNoteIds, ...newNotes.map((note) => note.id)] }
+        : item),
+      reviewNotes: [...newNotes, ...workspace.reviewNotes],
+    }
+  }
+
+  for (const [index, noteInput] of (input.notes ?? []).entries()) {
+    const note = workflowImportReviewNote(workspace, runId, noteIds.length + index, now, noteInput, noteExistingIds, errors)
+    noteIds.push(note.id)
+    importedRecordIds.push(note.id)
+    workspace = {
+      ...workspace,
+      candidates: note.attachedTo.kind === "candidate"
+        ? workspace.candidates.map((candidate) => candidate.id === note.attachedTo.id ? { ...candidate, reviewNoteIds: [...candidate.reviewNoteIds, note.id] } : candidate)
+        : workspace.candidates,
+      personas: note.attachedTo.kind === "persona"
+        ? workspace.personas.map((persona) => persona.id === note.attachedTo.id ? { ...persona, notes: [...persona.notes, note.body] } : persona)
+        : workspace.personas,
+      reviewNotes: [note, ...workspace.reviewNotes],
+    }
+  }
+
+  if ((input.providerJobs?.length ?? 0) === 0 && (input.referenceArchives?.length ?? 0) === 0 && (input.candidatePatches?.length ?? 0) === 0 && (input.notes?.length ?? 0) === 0 && (input.records?.length ?? 0) === 0 && artifactPaths.length === 0 && input.result === undefined && input.metadata === undefined && input.resultMetadata === undefined) {
+    warnings.push("Workflow import payload contains no records, jobs, archives, notes, candidate patches, artifacts, result, or metadata.")
+  }
+
+  const plannedChanges: UgcWorkflowImportPlannedChanges = {
+    providerJobIds,
+    referenceArchiveIds,
+    candidateIds: [...new Set(candidateIds)],
+    noteIds,
+    artifactPaths: [...new Set(artifactPaths)],
+    importedRecordIds: [...new Set(importedRecordIds)],
+  }
+  return {
+    workspace,
+    providerJobs,
+    referenceArchives,
+    plannedChanges,
+    artifactPaths: plannedChanges.artifactPaths,
+    importedRecordIds: plannedChanges.importedRecordIds,
+  }
+}
+
+function workflowImportReviewNote(
+  workspace: UgcStudioWorkspace,
+  runId: string,
+  index: number,
+  now: string,
+  input: CreateReviewNoteInput,
+  existingIds: Set<string>,
+  errors: string[],
+): ReviewNote {
+  if (!workflowImportAttachmentExists(workspace, input.attachedTo)) {
+    errors.push(`note attachment not found: ${input.attachedTo.kind}:${input.attachedTo.id}`)
+  }
+  return {
+    id: uniqueWorkflowImportId("note", runId, index, existingIds),
+    author: input.author ?? "agent",
+    createdAt: now,
+    attachedTo: input.attachedTo,
+    verdict: input.verdict,
+    body: input.body,
+    requestedChange: input.requestedChange ?? null,
+    followUpActionId: null,
+  }
+}
+
+function workflowImportResultPayload(input: UgcWorkflowImportInput, plan: WorkflowImportPlan): JsonValue {
+  return sanitizeWorkflowJsonValue(toJsonValue({
+    lane: input.lane,
+    sourcePolicy: input.sourcePolicy,
+    records: input.records ?? [],
+    result: input.result ?? null,
+    metadata: input.metadata ?? input.resultMetadata ?? null,
+    plannedChanges: plan.plannedChanges,
+  }))
+}
+
+function sanitizeReferenceArchiveFormatOutputs(outputs: readonly ReferenceArchiveFormatOutput[]): readonly ReferenceArchiveFormatOutput[] {
+  return outputs.map((output) => ({ ...output, manifestJson: sanitizeWorkflowJsonValue(output.manifestJson) }))
+}
+
+function recordImportIds(records: readonly JsonValue[]): readonly string[] {
+  return records.flatMap((record) => (isRecord(record) && typeof record.id === "string" ? [record.id] : []))
+}
+
+function workflowImportTargetExists(state: UgcLocalState, targetId: string): boolean {
+  const workspace = state.workspace
+  return workspace.candidates.some((candidate) => candidate.id === targetId)
+    || workspace.referenceProfiles.some((reference) => reference.id === targetId)
+    || workspace.personas.some((persona) => persona.id === targetId)
+    || workspace.candidateBatches.some((batch) => batch.id === targetId)
+    || workspace.branchSnapshots.some((branch) => branch.id === targetId)
+    || workspace.formatStages.some((stage) => stage.id === targetId)
+    || state.providerJobs.some((job) => job.id === targetId)
+    || state.referenceArchives.some((archive) => archive.id === targetId || archive.referenceProfileId === targetId)
+}
+
+function workflowImportAttachmentExists(workspace: UgcStudioWorkspace, attachment: ReviewAttachment): boolean {
+  if (attachment.kind === "candidate") return workspace.candidates.some((candidate) => candidate.id === attachment.id)
+  if (attachment.kind === "persona") return workspace.personas.some((persona) => persona.id === attachment.id)
+  if (attachment.kind === "batch") return workspace.candidateBatches.some((batch) => batch.id === attachment.id)
+  if (attachment.kind === "branch") return workspace.branchSnapshots.some((branch) => branch.id === attachment.id)
+  if (attachment.kind === "stage") return workspace.formatStages.some((stage) => stage.id === attachment.id)
+  return workspace.referenceProfiles.some((reference) => reference.id === attachment.id)
+}
+
+function uniqueWorkflowImportId(kind: string, runId: string, index: number, existingIds: Set<string>): string {
+  const base = `${kind}_workflow_${slug(runId)}_${index + 1}`
+  let candidate = base
+  let suffix = 2
+  while (existingIds.has(candidate)) {
+    candidate = `${base}_${suffix}`
+    suffix += 1
+  }
+  existingIds.add(candidate)
+  return candidate
+}
+
+function isGenerationProvider(provider: UgcProvider): boolean {
+  return provider === "kie" || provider === "jimeng"
+}
+
+function hasDirectGenerationInput(value: JsonValue): boolean {
+  if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") return false
+  if (Array.isArray(value)) return value.some((item) => hasDirectGenerationInput(item))
+  const record = value as { readonly [key: string]: JsonValue }
+  for (const key of Object.keys(record)) {
+    const item = record[key]
+    if (isDirectGenerationInputKey(key) && directGenerationInputValuePresent(item)) return true
+    if (hasDirectGenerationInput(item ?? null)) return true
+  }
+  return false
+}
+
+function isDirectGenerationInputKey(key: string): boolean {
+  const normalized = key.toLowerCase().replace(/[^a-z0-9]+/g, "")
+  return normalized === "url"
+    || normalized === "urls"
+    || normalized === "path"
+    || normalized === "paths"
+    || normalized === "asseturl"
+    || normalized === "asseturls"
+    || normalized === "localpath"
+    || normalized === "localpaths"
+    || normalized === "file"
+    || normalized === "files"
+    || normalized === "media"
+    || normalized === "mediaurl"
+    || normalized === "mediaurls"
+    || normalized === "image"
+    || normalized === "images"
+    || normalized === "imageurl"
+    || normalized === "imageurls"
+    || normalized === "video"
+    || normalized === "videos"
+    || normalized === "videourl"
+    || normalized === "videourls"
+    || normalized === "audio"
+    || normalized === "audios"
+    || normalized === "audiourl"
+    || normalized === "audiourls"
+    || normalized === "sourceurl"
+    || normalized === "sourceurls"
+    || normalized === "sourcepath"
+    || normalized === "sourcepaths"
+    || normalized === "sourcefilepath"
+    || normalized === "sourcefilepaths"
+    || normalized === "sourceassetpath"
+    || normalized === "sourceassetpaths"
+    || normalized === "referenceframeurl"
+    || normalized === "referenceframeurls"
+    || normalized === "referenceimageurl"
+    || normalized === "referenceimageurls"
+    || normalized === "referencevideourl"
+    || normalized === "referencevideourls"
+    || normalized === "inputimage"
+    || normalized === "inputimages"
+    || normalized === "inputimageurl"
+    || normalized === "inputimageurls"
+    || normalized === "inputvideo"
+    || normalized === "inputvideos"
+    || normalized === "inputvideourl"
+    || normalized === "inputvideourls"
+    || normalized === "initimage"
+    || normalized === "initimages"
+    || normalized === "sourceimage"
+    || normalized === "sourceimages"
+    || normalized === "sourcevideo"
+    || normalized === "sourcevideos"
+}
+
+function directGenerationInputValuePresent(value: JsonValue | undefined): boolean {
+  if (typeof value === "string") return value.trim().length > 0
+  if (Array.isArray(value)) return value.length > 0
+  return isRecord(value)
 }
 
 const DEFAULT_REFERENCE_CATALOG_ROOTS = [
@@ -967,7 +1374,7 @@ function readReferenceManifestAsset(
   const title = firstString(value.title, value.title_label, value.label, value.notes) ?? rawId
   const mediaType = firstString(value.mediaType, value.media_type, value.contentType, value.content_type) ?? "application/octet-stream"
   const rights = firstString(value.rights, value.rights_notes) ?? manifestRights
-  const directGenerationInput = manifestAllowsDirectGeneration(value)
+  if (manifestAllowsDirectGeneration(value)) warnings.push(`Reference asset ${rawId} requested direct generation input, but public inspiration manifests are metadata-only.`)
   return {
     schemaVersion: "ugc-studio.reference-manifest-asset.v1",
     id: `reference_asset_${slug(provider)}_${slug(rawId)}`,
@@ -984,8 +1391,8 @@ function readReferenceManifestAsset(
     rights,
     provenance: `Imported from ${manifestPath}; source page and asset URLs are retained as metadata only.`,
     sourcePolicy: "metadata-only",
-    referenceOnly: !directGenerationInput,
-    directGenerationInput,
+    referenceOnly: true,
+    directGenerationInput: false,
     guardrails: REFERENCE_ASSET_MANIFEST_GUARDRAILS,
   }
 }
@@ -1709,21 +2116,16 @@ function sanitizeWorkflowJsonValue(value: JsonValue): JsonValue {
 
 function isSensitiveWorkflowKey(key: string): boolean {
   const normalized = key.toLowerCase().replace(/[^a-z0-9]+/g, "")
-  return normalized === "apikey"
-    || normalized === "token"
-    || normalized === "accesstoken"
-    || normalized === "refreshtoken"
-    || normalized === "secret"
-    || normalized === "clientsecret"
-    || normalized === "password"
-    || normalized === "credential"
-    || normalized === "credentials"
-    || normalized === "authorization"
-    || normalized === "authheader"
-    || normalized === "cookie"
-    || normalized === "cookies"
-    || normalized === "session"
-    || normalized === "sessiontoken"
+  return normalized.includes("apikey")
+    || normalized.includes("token")
+    || normalized.includes("secret")
+    || normalized.includes("password")
+    || normalized.includes("credential")
+    || normalized.includes("authorization")
+    || normalized.includes("authheader")
+    || normalized.includes("bearer")
+    || normalized.includes("cookie")
+    || normalized.includes("session")
 }
 
 function stampState(state: UgcLocalState, now: string): UgcLocalState {

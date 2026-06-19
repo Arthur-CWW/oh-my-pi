@@ -21,7 +21,7 @@ export type UgcResearchTargetStatus = "draft" | "queued" | "sampling" | "decompo
 export type UgcTemplateMiningJobStatus = "planned" | "queued" | "running" | "ready" | "blocked" | "done"
 export type UgcWorkflowRunStatus = "planned" | "queued" | "running" | "succeeded" | "failed" | "blocked" | "canceled"
 export type UgcWorkflowRunSource = "slotok" | "pi" | "omp" | "dynamic-workflow" | "local"
-export type UgcWorkflowEventType = "created" | "queued" | "started" | "phase" | "message" | "artifact" | "status" | "result" | "error" | "completed" | "blocked" | "canceled"
+export type UgcWorkflowEventType = "created" | "queued" | "started" | "phase" | "message" | "artifact" | "status" | "result" | "import" | "error" | "completed" | "blocked" | "canceled"
 
 export interface UgcWorkflowCounters {
   readonly [name: string]: number
@@ -482,6 +482,95 @@ export interface AppendWorkflowEventInput {
   readonly payload?: JsonValue | null
   readonly artifactPaths?: readonly string[]
   readonly error?: string | null
+}
+
+export type UgcWorkflowLane = "brainrot" | "ugc-ads"
+export type UgcWorkflowSourcePolicy = "metadata-only" | "abstract-mechanics" | "rights-cleared-source"
+
+export interface WorkflowProviderJobImportInput {
+  readonly id?: string
+  readonly provider: UgcProvider
+  readonly operation: string
+  readonly mode?: UgcProviderJobMode
+  readonly status?: UgcProviderJobStatus
+  readonly targetIds?: readonly string[]
+  readonly spendCapUsd?: number
+  readonly estimatedCostUsd?: number | null
+  readonly request: JsonValue
+  readonly response?: JsonValue | null
+  readonly artifactPaths?: readonly string[]
+  readonly error?: string | null
+}
+
+export interface WorkflowReferenceArchiveImportInput {
+  readonly referenceProfileId: string
+  readonly sourcePolicy?: UgcWorkflowSourcePolicy
+  readonly archiveStatus?: UgcReferenceArchive["archiveStatus"]
+  readonly preservedMechanics?: JsonValue
+  readonly swappedFields?: readonly string[]
+  readonly blockedFields?: readonly string[]
+  readonly guardrails?: readonly string[]
+  readonly candidateFormatOutputs?: readonly ReferenceArchiveFormatOutput[]
+  readonly notes?: readonly string[]
+}
+
+export interface WorkflowCandidateNotePatch {
+  readonly body: string
+  readonly verdict?: ReviewVerdict
+  readonly requestedChange?: string | null
+}
+
+export interface WorkflowCandidatePatchInput {
+  readonly candidateId: string
+  readonly status?: CandidateStatus
+  readonly notes?: readonly WorkflowCandidateNotePatch[]
+}
+
+export interface WorkflowNoteImportInput {
+  readonly author?: "arthur" | "agent"
+  readonly attachedTo: ReviewAttachment
+  readonly verdict: ReviewVerdict
+  readonly body: string
+  readonly requestedChange?: string | null
+}
+
+export interface UgcWorkflowImportInput {
+  readonly lane: UgcWorkflowLane
+  readonly sourcePolicy: UgcWorkflowSourcePolicy
+  readonly records?: readonly JsonValue[]
+  readonly providerJobs?: readonly WorkflowProviderJobImportInput[]
+  readonly candidatePatches?: readonly WorkflowCandidatePatchInput[]
+  readonly referenceArchives?: readonly WorkflowReferenceArchiveImportInput[]
+  readonly notes?: readonly WorkflowNoteImportInput[]
+  readonly artifactPaths?: readonly string[]
+  readonly result?: JsonValue | null
+  readonly metadata?: JsonValue
+  readonly resultMetadata?: JsonValue
+}
+
+export interface UgcWorkflowImportPlannedChanges {
+  readonly providerJobIds: readonly string[]
+  readonly referenceArchiveIds: readonly string[]
+  readonly candidateIds: readonly string[]
+  readonly noteIds: readonly string[]
+  readonly artifactPaths: readonly string[]
+  readonly importedRecordIds: readonly string[]
+}
+
+export interface UgcWorkflowImportResult {
+  readonly schemaVersion: "ugc-studio.workflow-import-result.v1"
+  readonly dryRun: boolean
+  readonly valid: boolean
+  readonly imported: boolean
+  readonly checkedAt: string
+  readonly runId: string
+  readonly lane: UgcWorkflowLane
+  readonly sourcePolicy: UgcWorkflowSourcePolicy
+  readonly plannedChanges: UgcWorkflowImportPlannedChanges
+  readonly errors: readonly string[]
+  readonly warnings: readonly string[]
+  readonly workflowRun: UgcWorkflowRun | null
+  readonly events: readonly UgcWorkflowEvent[]
 }
 
 export interface CreateExportManifestInput {

@@ -95,6 +95,7 @@ describe("UgcJsonStore", () => {
     expect(plan.videosPlanned).toBe(0)
     expect(plan.assetsPlanned).toBe(2)
     expect(store.read().workspace.referenceProfiles.length).toBe(initialReferenceProfileCount)
+    expect(plan.warnings.join("\n")).toContain("requested direct generation input")
 
     const imported = store.importReferenceCatalog({ roots: [], manifestPaths: [higgsfieldManifest, arcadsManifest] })
     const state = imported.state
@@ -467,6 +468,138 @@ describe("UgcJsonStore", () => {
     expect(bundle.shardManifest.collections.workflowEvents).toEqual(["workflow-events/1.json", "workflow-events/2.json", "workflow-events/3.json"])
   })
 
+  test("plans workflow handoff imports without mutating local state", () => {
+    const store = createStore()
+    const run = store.createWorkflowRun({ title: "Dry-run workflow import", source: "omp", lane: "ugc-ads" })
+    const before = store.read()
+    const candidateId = before.workspace.candidates[0]?.id ?? ""
+    if (!candidateId) throw new Error("missing candidate")
+
+    const result = store.importWorkflowHandoff(run.id, {
+      lane: "ugc-ads",
+      sourcePolicy: "metadata-only",
+      providerJobs: [{
+        provider: "local",
+        operation: "workflow-import-plan",
+        request: { apiKey: "sk-test", summary: "planned only" },
+      }],
+      notes: [{
+        author: "agent",
+        attachedTo: { kind: "candidate", id: candidateId },
+        verdict: "revise",
+        body: "Dry-run note should not persist.",
+      }],
+      artifactPaths: ["artifacts/workflows/dry-run/result.json"],
+      metadata: { token: "secret-token", visible: true },
+    })
+    const after = store.read()
+
+    expect(result.dryRun).toBe(true)
+    expect(result.valid).toBe(true)
+    expect(result.imported).toBe(false)
+    expect(result.plannedChanges.providerJobIds.length).toBe(1)
+    expect(result.plannedChanges.noteIds.length).toBe(1)
+    expect(after.providerJobs.length).toBe(before.providerJobs.length)
+    expect(after.workspace.reviewNotes.length).toBe(before.workspace.reviewNotes.length)
+    expect(after.workflowEvents.length).toBe(before.workflowEvents.length)
+  })
+
+  test("applies workflow provider jobs, candidate notes, status patches, and run events atomically", () => {
+    const store = createStore()
+    const run = store.createWorkflowRun({ title: "Apply workflow import", source: "pi", lane: "ugc-ads" })
+    const initial = store.read()
+    const candidateId = initial.workspace.candidates[0]?.id ?? ""
+    if (!candidateId) throw new Error("missing candidate")
+
+    const result = store.importWorkflowHandoff(run.id, {
+      lane: "ugc-ads",
+      sourcePolicy: "metadata-only",
+      providerJobs: [{
+        id: "job_workflow_import_local_plan",
+        provider: "local",
+        operation: "workflow-import-plan",
+        targetIds: [candidateId],
+        request: { openaiApiKey: "sk-test", bearerToken: "token-test", authorizationHeader: "Bearer test", prompt: "safe local planning" },
+        artifactPaths: ["artifacts/workflows/apply/provider.json"],
+      }],
+      candidatePatches: [{
+        candidateId,
+        status: "starred",
+        notes: [{ body: "Agent recommends starring this candidate.", verdict: "keep" }],
+      }],
+      notes: [{
+        author: "agent",
+        attachedTo: { kind: "candidate", id: candidateId },
+        verdict: "revise",
+        body: "Add a softer CTA in the final edit.",
+      }],
+      artifactPaths: ["artifacts/workflows/apply/result.json"],
+      result: { ok: true, authorization: "Bearer secret" },
+    }, false)
+    const state = store.read()
+    const candidate = state.workspace.candidates.find((item) => item.id === candidateId)
+    const runAfter = state.workflowRuns.find((item) => item.id === run.id)
+    const events = state.workflowEvents.filter((event) => event.runId === run.id)
+    const providerJob = state.providerJobs.find((job) => job.id === "job_workflow_import_local_plan")
+
+    expect(result.imported).toBe(true)
+    expect(candidate?.status).toBe("starred")
+    expect(candidate?.reviewNoteIds.length).toBe((initial.workspace.candidates[0]?.reviewNoteIds.length ?? 0) + 2)
+    expect(providerJob?.request).toMatchObject({ prompt: "safe local planning" })
+    expect(providerJob?.request).toMatchObject({ openaiApiKey: "[redacted]", bearerToken: "[redacted]", authorizationHeader: "[redacted]" })
+    expect(runAfter?.status).toBe("succeeded")
+    expect(runAfter?.importedRecordIds).toContain("job_workflow_import_local_plan")
+    expect(runAfter?.importedRecordIds).toContain(candidateId)
+    expect(runAfter?.artifactPaths).toContain("artifacts/workflows/apply/result.json")
+    expect(runAfter?.result).toMatchObject({ result: { ok: true, authorization: "[redacted]" } })
+    expect(events.map((event) => event.type)).toEqual(["created", "import", "result"])
+  })
+
+  test("rejects invalid workflow candidate imports without partial provider job writes", () => {
+    const store = createStore()
+    const run = store.createWorkflowRun({ title: "Invalid workflow import", source: "omp", lane: "ugc-ads" })
+    const before = store.read()
+
+    const result = store.importWorkflowHandoff(run.id, {
+      lane: "ugc-ads",
+      sourcePolicy: "metadata-only",
+      providerJobs: [{
+        id: "job_should_not_persist",
+        provider: "local",
+        operation: "workflow-import-plan",
+        request: { summary: "must not persist" },
+      }],
+      candidatePatches: [{ candidateId: "missing_candidate", status: "starred" }],
+    }, false)
+    const after = store.read()
+
+    expect(result.valid).toBe(false)
+    expect(result.imported).toBe(false)
+    expect(result.errors).toContain("candidate not found: missing_candidate")
+    expect(after.providerJobs.length).toBe(before.providerJobs.length)
+    expect(after.workflowEvents.length).toBe(before.workflowEvents.length)
+  })
+
+  test("blocks direct generation inputs from non-rights-cleared workflow sources", () => {
+    const store = createStore()
+    const run = store.createWorkflowRun({ title: "Guardrail workflow import", source: "omp", lane: "ugc-ads" })
+
+    const result = store.importWorkflowHandoff(run.id, {
+      lane: "ugc-ads",
+      sourcePolicy: "abstract-mechanics",
+      providerJobs: [{
+        provider: "kie",
+        operation: "generate-video",
+        request: { assetUrl: "https://example.com/inspiration.mp4", localPath: "data/ugc-studio/reference-assets/higgsfield/demo.mp4", prompt: "copy this" },
+      }],
+    }, false)
+
+    expect(result.valid).toBe(false)
+    expect(result.imported).toBe(false)
+    expect(result.errors.join("\n")).toContain("sourcePolicy must be rights-cleared-source")
+    expect(store.read().providerJobs.some((job) => job.operation === "generate-video")).toBe(false)
+  })
+
   test("reloads workflow telemetry from a SQLite workspace state source when JSON artifacts are absent", () => {
     const cwd = mkdtempSync(resolve(tmpdir(), "ugc-json-store-"))
     const sqliteStore = new CapturingSqliteStore({ workspaceDir: resolve(cwd, "ugc-workspaces", "workspace_protein_bar_ads") })
@@ -643,6 +776,7 @@ function writeProviderManifestFixture(cwd: string, manifestPath: string, provide
           bytes: 123,
           sha256: "fixture-higgsfield-sha",
           rights: "Public fixture; reference-only.",
+          directGenerationInput: true,
         },
       ],
       blockedAssets: [{ id: "blocked-higgsfield-demo" }],

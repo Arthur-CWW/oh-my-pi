@@ -185,6 +185,13 @@ interface WorkflowTelemetryController extends WorkflowTelemetryState {
   readonly createDemoRun: () => void
 }
 
+interface WorkflowImportRequestResult {
+  readonly ok: boolean
+  readonly status: number
+  readonly routeUnavailable: boolean
+  readonly payload: JsonValue
+}
+
 interface PersonaCardModel {
   id: string
   name: string
@@ -1120,6 +1127,77 @@ function workflowRouteMissing(response: Response): boolean {
   return response.status === 404 || response.status === 405
 }
 
+function workflowImportDryRunValid(value: JsonValue): boolean {
+  return jsonRecord(value)?.valid === true
+}
+
+function compactWorkflowImportResult(value: JsonValue): JsonValue {
+  const root = jsonRecord(value)
+  if (!root) return value
+  const compact: { [key: string]: JsonValue } = {}
+  for (const [key, entry] of Object.entries(root)) {
+    if (key === "state" || key === "importedState") {
+      const state = isLocalState(entry) ? entry : null
+      compact[key] = state ? {
+        schemaVersion: state.schemaVersion,
+        updatedAt: state.updatedAt,
+        workspaceId: state.workspace.id,
+        candidates: state.workspace.candidates.length,
+        providerJobs: state.providerJobs.length,
+        reviewNotes: state.workspace.reviewNotes.length,
+      } : "[omitted from compact preview]"
+    } else {
+      compact[key] = entry
+    }
+  }
+  return compact
+}
+
+function sampleWorkflowImportPayload(candidateId: string): JsonValue {
+  const payload: { [key: string]: JsonValue } = {
+    lane: "ugc-ads",
+    sourcePolicy: "metadata-only",
+    providerJobs: [
+      {
+        provider: "local",
+        operation: "workflow-demo-plan",
+        mode: "dry-run",
+        status: "planned",
+        targetIds: [],
+        spendCapUsd: 0,
+        estimatedCostUsd: 0,
+        request: {
+          summary: "UI demo dry-run",
+          cleanRoom: true,
+          sourcePolicy: "metadata-only",
+        },
+        response: {
+          plannedOnly: true,
+          liveProviderCalls: false,
+        },
+        artifactPaths: [],
+      },
+    ],
+    artifactPaths: [],
+    metadata: {
+      source: "ReactUgcStudio workflow import sample",
+      cleanRoom: "metadata-only local demo; no provider calls",
+    },
+  }
+  if (candidateId) {
+    payload.notes = [
+      {
+        author: "agent",
+        attachedTo: { kind: "candidate", id: candidateId },
+        verdict: "revise",
+        body: "Workflow demo note imported from a clean-room handoff payload.",
+        requestedChange: "Use the dry-run plan before applying this local note.",
+      },
+    ]
+  }
+  return payload
+}
+
 function workflowStatusTone(status: string): "success" | "danger" | "active" | "neutral" {
   if (["succeeded", "completed", "done", "imported"].includes(status)) return "success"
   if (["failed", "error", "blocked", "cancelled"].includes(status)) return "danger"
@@ -1389,18 +1467,20 @@ export function ReactUgcStudio() {
   const selectedCapability = capabilities.find((capability) => capability.operation === operation) ?? capabilities[0]
   const activeViewMeta = views.find((view) => view.value === activeView) ?? views[0]
 
-  React.useEffect(() => {
-    let cancelled = false
-    fetch(`${daemonBaseUrl}/api/ugc/workspace`)
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`daemon ${response.status}`)))
-      .then((payload: UgcLocalState) => {
-        if (!cancelled && payload.schemaVersion === "ugc-studio.local-state.v1") setLocalState(payload)
-      })
-      .catch(() => undefined)
-    return () => {
-      cancelled = true
+  const refreshWorkspaceState = React.useCallback(async (): Promise<void> => {
+    try {
+      const response = await fetch(`${daemonBaseUrl}/api/ugc/workspace`)
+      if (!response.ok) return
+      const payload = parseJson(await response.text())
+      if (isLocalState(payload)) setLocalState(payload)
+    } catch {
+      return
     }
   }, [])
+
+  React.useEffect(() => {
+    void refreshWorkspaceState()
+  }, [refreshWorkspaceState])
 
   React.useEffect(() => {
     if (!workspace.candidates.some((candidate) => candidate.id === selectedCandidateId)) {
@@ -1538,6 +1618,48 @@ export function ReactUgcStudio() {
     }
   }
 
+  async function importWorkflowHandoff(runId: string, payload: JsonValue, apply: boolean): Promise<WorkflowImportRequestResult> {
+    setBusy(true)
+    try {
+      const response = await fetch(`${daemonBaseUrl}/api/ugc/workflows/${encodeURIComponent(runId)}/import`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ payload, apply }),
+      })
+      const responsePayload = parseJson(await response.text())
+      const root = jsonRecord(responsePayload)
+      const compact = compactWorkflowImportResult(responsePayload)
+      if (response.ok && root) {
+        if (isLocalState(root.state)) setLocalState(root.state)
+        if (isLocalState(root.importedState)) setLocalState(root.importedState)
+      }
+      setResult(JSON.stringify(compact, null, 2))
+      if (response.ok && apply) await refreshWorkspaceState()
+      return {
+        ok: response.ok,
+        status: response.status,
+        routeUnavailable: workflowRouteMissing(response),
+        payload: responsePayload,
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      const responsePayload: JsonValue = {
+        error: message,
+        route: "/api/ugc/workflows/:runId/import",
+        unavailable: true,
+      }
+      setResult(JSON.stringify(responsePayload, null, 2))
+      return {
+        ok: false,
+        status: 0,
+        routeUnavailable: true,
+        payload: responsePayload,
+      }
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function callAnalysisToKie(body: AnalysisToKieInput) {
     setBusy(true)
     try {
@@ -1639,6 +1761,7 @@ export function ReactUgcStudio() {
                 bundleResult={bundleResult}
                 onExportWorkspaceBundle={exportWorkspaceBundle}
                 onImportWorkspaceBundle={importWorkspaceBundle}
+                onImportWorkflowHandoff={importWorkflowHandoff}
               />
             </div>
             <CommandBar prompt={prompt} onPromptChange={setPrompt} onRun={() => callKie("/api/ugc/kie/plan", request)} busy={busy} />
@@ -1825,6 +1948,7 @@ function WorkspaceView(props: {
   bundleResult: JsonValue | null
   onExportWorkspaceBundle: (label: string) => void
   onImportWorkspaceBundle: (bundle: unknown, dryRun: boolean) => void
+  onImportWorkflowHandoff: (runId: string, payload: JsonValue, apply: boolean) => Promise<WorkflowImportRequestResult>
 }) {
   if (props.activeView === "atlas") {
     return <PersonaAtlas selectedPersonaId={props.selectedPersonaId} onSelectPersona={props.onSelectPersona} />
@@ -1852,7 +1976,7 @@ function WorkspaceView(props: {
     return <FinalEditor selectedCandidateId={props.selectedCandidateId} onSelectCandidate={props.onSelectCandidate} onMutateLocal={props.onMutateLocal} />
   }
   if (props.activeView === "graph") {
-    return <DeveloperGraphView onMutateLocal={props.onMutateLocal} workspaceBundle={props.workspaceBundle} bundleResult={props.bundleResult} onExportWorkspaceBundle={props.onExportWorkspaceBundle} onImportWorkspaceBundle={props.onImportWorkspaceBundle} />
+    return <DeveloperGraphView onMutateLocal={props.onMutateLocal} workspaceBundle={props.workspaceBundle} bundleResult={props.bundleResult} onExportWorkspaceBundle={props.onExportWorkspaceBundle} onImportWorkspaceBundle={props.onImportWorkspaceBundle} onImportWorkflowHandoff={props.onImportWorkflowHandoff} />
   }
   return (
     <ProviderView
@@ -3023,24 +3147,115 @@ function ReferenceFormatOutputCard(props: { output: ReferenceArchiveFormatOutput
   )
 }
 
-function WorkflowTelemetryPanel() {
+function WorkflowTelemetryPanel(props: {
+  demoCandidateId: string
+  onImportWorkflowHandoff: (runId: string, payload: JsonValue, apply: boolean) => Promise<WorkflowImportRequestResult>
+}) {
   const telemetry = useWorkflowTelemetry()
   const [selectedRunId, setSelectedRunId] = React.useState("")
+  const [payloadText, setPayloadText] = React.useState("")
+  const [importBusy, setImportBusy] = React.useState<"dry-run" | "apply" | null>(null)
+  const [importRouteUnavailable, setImportRouteUnavailable] = React.useState(false)
+  const [importPreview, setImportPreview] = React.useState<JsonValue | null>(null)
+  const [importMessage, setImportMessage] = React.useState("Paste a handoff payload, dry-run it, then apply only after valid:true.")
+  const [dryRunPayloadText, setDryRunPayloadText] = React.useState("")
+  const [dryRunRunId, setDryRunRunId] = React.useState("")
+  const [dryRunValid, setDryRunValid] = React.useState(false)
   const selectedRun = telemetry.runs.find((run) => run.id === selectedRunId) ?? telemetry.runs[0]
   const activeRuns = telemetry.runs.filter((run) => workflowStatusTone(run.status) === "active")
   const selectedAgents = selectedRun ? activeWorkflowAgents(selectedRun.events) : []
   const latestEvent = selectedRun?.events[0]
+  const parsedPayload = payloadText.trim() ? parseJsonOrNull(payloadText) : null
+  const payloadProblem = !payloadText.trim()
+    ? "Paste a JSON handoff payload or load the safe sample."
+    : parsedPayload
+      ? null
+      : "Payload is not valid JSON."
+  const dryRunDisabled = Boolean(payloadProblem) || !selectedRun || importBusy !== null || importRouteUnavailable
+  const dryRunHelp = importRouteUnavailable
+    ? "Dry-run disabled because POST /api/ugc/workflows/:runId/import is unavailable."
+    : !selectedRun
+      ? "Select a workflow run before importing."
+      : payloadProblem ?? "Dry-run validates the selected run import without mutating workspace records."
+  const applyNeedsCurrentDryRun = !selectedRun || !dryRunValid || dryRunPayloadText !== payloadText || dryRunRunId !== selectedRun.id
+  const applyDisabled = applyNeedsCurrentDryRun || importBusy !== null || importRouteUnavailable
+  const applyHelp = importRouteUnavailable
+    ? "Apply disabled because the import route is unavailable."
+    : applyNeedsCurrentDryRun
+      ? "Apply disabled until this exact payload dry-run returns valid:true for the selected run."
+      : "Apply imports the validated handoff and refreshes workspace plus workflow telemetry."
   const createDisabled = telemetry.creating || !telemetry.routeAvailable || telemetry.postUnavailable
   const createHelp = !telemetry.routeAvailable
     ? "Create disabled until GET /api/ugc/workflows is available."
     : telemetry.postUnavailable
       ? "Create disabled because POST /api/ugc/workflows returned unavailable."
       : "Creates a daemon demo run when POST /api/ugc/workflows is implemented."
+
   React.useEffect(() => {
     if (!selectedRunId || !telemetry.runs.some((run) => run.id === selectedRunId)) {
       setSelectedRunId(telemetry.runs[0]?.id ?? "")
     }
   }, [selectedRunId, telemetry.runs])
+
+  function updatePayloadText(value: string) {
+    setPayloadText(value)
+    setDryRunValid(false)
+    setDryRunPayloadText("")
+    setDryRunRunId("")
+    setImportMessage("Payload changed; dry-run again before apply.")
+  }
+
+  function loadSamplePayload() {
+    updatePayloadText(JSON.stringify(sampleWorkflowImportPayload(props.demoCandidateId), null, 2))
+    setImportPreview(null)
+    setImportMessage(props.demoCandidateId
+      ? "Loaded a metadata-only sample with a local planned provider job and note attachment."
+      : "Loaded a metadata-only sample with a local planned provider job; no candidate note target is available.")
+  }
+
+  async function submitImport(apply: boolean) {
+    if (!selectedRun || !parsedPayload) return
+    const requestText = payloadText
+    const runId = selectedRun.id
+    setImportBusy(apply ? "apply" : "dry-run")
+    setImportMessage(apply ? "Applying validated handoff import…" : "Dry-running handoff import…")
+    try {
+      const response = await props.onImportWorkflowHandoff(runId, parsedPayload, apply)
+      const compact = compactWorkflowImportResult(response.payload)
+      setImportPreview(compact)
+      if (response.routeUnavailable) {
+        setImportRouteUnavailable(true)
+        setDryRunValid(false)
+        setImportMessage(`Import route unavailable: POST /api/ugc/workflows/${runId}/import returned ${response.status || "network error"}.`)
+        return
+      }
+      if (!response.ok) {
+        if (!apply) setDryRunValid(false)
+        setImportMessage(`Workflow import ${apply ? "apply" : "dry-run"} returned HTTP ${response.status}. Inspect the result JSON.`)
+        return
+      }
+      if (apply) {
+        telemetry.refresh()
+        setDryRunValid(false)
+        setDryRunPayloadText("")
+        setDryRunRunId("")
+        setImportMessage(workflowImportDryRunValid(response.payload)
+          ? "Import applied; workspace and workflow telemetry refresh requested."
+          : "Apply returned OK but did not confirm valid:true; telemetry refresh requested for the selected run.")
+        return
+      }
+      const valid = workflowImportDryRunValid(response.payload)
+      setDryRunValid(valid)
+      setDryRunPayloadText(requestText)
+      setDryRunRunId(runId)
+      telemetry.refresh()
+      setImportMessage(valid
+        ? "Dry-run confirmed valid:true. Apply is enabled for this exact payload and run."
+        : "Dry-run returned OK but did not confirm valid:true. Apply remains disabled.")
+    } finally {
+      setImportBusy(null)
+    }
+  }
 
   return (
     <div className="rugc-provider-note mt-3">
@@ -3079,8 +3294,8 @@ function WorkflowTelemetryPanel() {
         </div>
       </div>
 
-      <div className="mt-3 grid min-h-0 grid-cols-[minmax(0,1fr)_minmax(260px,0.78fr)] gap-3">
-        <div className="grid max-h-80 gap-2 overflow-auto pr-1">
+      <div className="mt-3 grid min-h-0 grid-cols-[minmax(0,1fr)_minmax(280px,0.9fr)] gap-3">
+        <div className="grid max-h-[42rem] gap-2 overflow-auto pr-1">
           {telemetry.runs.length ? telemetry.runs.slice(0, 8).map((run) => {
             const runAgents = activeWorkflowAgents(run.events)
             return (
@@ -3123,7 +3338,7 @@ function WorkflowTelemetryPanel() {
           )}
         </div>
 
-        <div className="grid max-h-80 gap-2 overflow-auto pr-1">
+        <div className="grid max-h-[42rem] gap-2 overflow-auto pr-1">
           {selectedRun ? (
             <>
               <div className="rounded-md border border-border bg-background p-2">
@@ -3178,6 +3393,40 @@ function WorkflowTelemetryPanel() {
                 </div>
               </div>
 
+              <div className="rounded-md border border-border bg-background p-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="m-0 text-[11px] font-semibold text-foreground">Import handoff payload</p>
+                  <Button size="xs" variant="workbench" onClick={loadSamplePayload}>
+                    <Copy size={12} /> Sample payload
+                  </Button>
+                </div>
+                <div className="mt-2 rounded-md border border-amber-200 bg-amber-50/70 p-2 text-[10px] leading-4 text-amber-800">
+                  Clean-room import only: use sourcePolicy metadata-only or abstract-mechanics unless rights-cleared proof exists. The sample records a local dry-run plan and note; it never calls a live provider.
+                </div>
+                <Textarea
+                  className="mt-2 min-h-28 font-mono text-[10px]"
+                  value={payloadText}
+                  onChange={(event) => updatePayloadText(event.currentTarget.value)}
+                  placeholder="{&quot;lane&quot;:&quot;ugc-ads&quot;,&quot;sourcePolicy&quot;:&quot;metadata-only&quot;,&quot;providerJobs&quot;:[...]}"
+                />
+                <div className="mt-2 grid grid-cols-2 gap-1">
+                  <Button size="xs" variant="workbench" disabled={dryRunDisabled} onClick={() => void submitImport(false)}>
+                    <CheckCircle2 size={12} /> {importBusy === "dry-run" ? "Dry-running…" : "Dry-run validate"}
+                  </Button>
+                  <Button size="xs" variant="selected" disabled={applyDisabled} onClick={() => void submitImport(true)}>
+                    <PlayCircle size={12} /> {importBusy === "apply" ? "Applying…" : "Apply import"}
+                  </Button>
+                </div>
+                <p className={cn("mt-2 text-[10px] leading-4", payloadProblem || applyDisabled ? "text-amber-700" : "text-muted-foreground")}>
+                  {importMessage} {dryRunDisabled ? dryRunHelp : applyHelp}
+                </p>
+                <pre className="rugc-json mt-2 max-h-36">{JSON.stringify(importPreview ?? {
+                  selectedRunId: selectedRun.id,
+                  dryRunReady: !dryRunDisabled,
+                  applyReady: !applyDisabled,
+                }, null, 2)}</pre>
+              </div>
+
               <pre className="rugc-json max-h-28">{selectedRun.errorPreview ? `error: ${selectedRun.errorPreview}` : selectedRun.resultPreview ? `result: ${selectedRun.resultPreview}` : JSON.stringify({ latestEvent: latestEvent?.message ?? null, raw: selectedRun.rawJson }, null, 2)}</pre>
             </>
           ) : (
@@ -3197,6 +3446,7 @@ function DeveloperGraphView(props: {
   bundleResult: JsonValue | null
   onExportWorkspaceBundle: (label: string) => void
   onImportWorkspaceBundle: (bundle: unknown, dryRun: boolean) => void
+  onImportWorkflowHandoff: (runId: string, payload: JsonValue, apply: boolean) => Promise<WorkflowImportRequestResult>
 }) {
   const localState = useUgcLocalState()
   const { workspace, providerJobs, exportManifests, researchTargets, templateMiningJobs } = localState
@@ -3240,7 +3490,7 @@ function DeveloperGraphView(props: {
           <span className="rounded bg-primary/10 px-2 py-1 text-primary">UGC Studio ads</span>
           <span className="rounded border border-border bg-card px-2 py-1">Brainrot creation / Pleometric</span>
         </div>
-        <WorkflowTelemetryPanel />
+        <WorkflowTelemetryPanel demoCandidateId={workspace.candidates[0]?.id ?? ""} onImportWorkflowHandoff={props.onImportWorkflowHandoff} />
         <div className="rugc-provider-note mt-3">
           <div className="flex items-center justify-between gap-2">
             <strong>Research and template proof queue</strong>

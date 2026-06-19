@@ -1,7 +1,7 @@
 import { decodeCodexAnalyzeInput, planKieFromAnalysis, prepareCodexAnalyze, prepareKieTask, runCodexAnalyze, type CodexAnalyzeInput, type CodexAnalyzeResult, type CodexLiveOptions, type CodexPreparedResult, type JsonValue as UgcCliJsonValue, type KieAnalysisPlanOperation, type KieAnalysisPlanTarget, type KieGenerateRequest, type KieProductLane } from "@wirebabel/ugc-cli"
 import { UgcJsonStore } from "./ugc-json-store"
 import { prepareCodexVideoFrames, type CodexFramePreparation, type CodexVideoFrameExtractor } from "./codex-video-frames"
-import { isRecord, toJsonValue, type AppendWorkflowEventInput, type BranchPatch, type BulkCandidateStatusPatch, type CandidateStatusPatch, type CleanRoomTemplateSpec, type CreateBranchInput, type CreateExportManifestInput, type CreateProviderJobInput, type CreateReferenceArchiveInput, type CreateResearchTargetInput, type CreateReviewNoteInput, type CreateTemplateMiningJobInput, type CreateWorkflowRunInput, type CreateWorkspaceBundleInput, type FinalEditorClipPatch, type FinalEditorPatch, type FinalEditorTrackPatch, type ImportWorkspaceBundleInput, type PersonaPatch, type ProviderJobPatch, type ReferenceArchiveFormatOutput, type ResearchTargetPatch, type TemplateMiningJobPatch, type UgcLocalState, type UgcReferenceArchive, type UgcReferenceCatalogImportInput, type UgcResearchPlatform, type UgcResearchTargetStatus, type UgcTemplateMiningJobStatus, type UgcWorkflowCounters, type UgcWorkflowEvent, type UgcWorkflowEventType, type UgcWorkflowRunSource, type UgcWorkflowRunStatus } from "../ugc/local-state"
+import { isRecord, toJsonValue, type AppendWorkflowEventInput, type BranchPatch, type BulkCandidateStatusPatch, type CandidateStatusPatch, type CleanRoomTemplateSpec, type CreateBranchInput, type CreateExportManifestInput, type CreateProviderJobInput, type CreateReferenceArchiveInput, type CreateResearchTargetInput, type CreateReviewNoteInput, type CreateTemplateMiningJobInput, type CreateWorkflowRunInput, type CreateWorkspaceBundleInput, type FinalEditorClipPatch, type FinalEditorPatch, type FinalEditorTrackPatch, type ImportWorkspaceBundleInput, type PersonaPatch, type ProviderJobPatch, type ReferenceArchiveFormatOutput, type ResearchTargetPatch, type TemplateMiningJobPatch, type UgcLocalState, type UgcReferenceArchive, type UgcReferenceCatalogImportInput, type UgcResearchPlatform, type UgcResearchTargetStatus, type UgcTemplateMiningJobStatus, type UgcWorkflowCounters, type UgcWorkflowEvent, type UgcWorkflowEventType, type UgcWorkflowImportInput, type UgcWorkflowRunSource, type UgcWorkflowRunStatus } from "../ugc/local-state"
 import type { BranchStatus, CandidateStatus, JsonValue, ReviewAttachment, ReviewVerdict } from "../renderer/ugcStudioModel"
 
 interface CodexAnalysisJobRequest {
@@ -74,6 +74,11 @@ interface WorkflowSseClient {
   readonly pollId: ReturnType<typeof setInterval>
 }
 
+interface WorkflowImportRouteRequest {
+  readonly payload: UgcWorkflowImportInput
+  readonly dryRun: boolean
+}
+
 const WORKFLOW_SSE_MAX_CLIENTS = 16
 const WORKFLOW_SSE_HEARTBEAT_MS = 15_000
 const WORKFLOW_SSE_POLL_MS = 1_000
@@ -103,6 +108,15 @@ export async function routeUgc(request: Request, store: UgcJsonStore, options: R
 
   if (request.method === "POST" && url.pathname === "/api/ugc/workflows") {
     return json({ workflowRun: store.createWorkflowRun(decodeCreateWorkflowRun(await readJson(request))) }, 201)
+  }
+
+  if (request.method === "POST" && url.pathname.startsWith("/api/ugc/workflows/") && url.pathname.endsWith("/import")) {
+    const runId = decodeURIComponent(url.pathname.slice("/api/ugc/workflows/".length, -"/import".length))
+    if (!runId) return json({ error: "missing workflow run id" }, 400)
+    const decoded = decodeWorkflowImportRequest(await readJson(request))
+    const result = store.importWorkflowHandoff(runId, decoded.payload, decoded.dryRun)
+    for (const event of result.events) broadcastWorkflowEvent(event)
+    return json(result, result.imported ? 201 : 200)
   }
 
   if (url.pathname.startsWith("/api/ugc/workflows/") && url.pathname.endsWith("/events")) {
@@ -910,6 +924,173 @@ function decodeAppendWorkflowEvent(value: JsonValue): AppendWorkflowEventInput {
   }
 }
 
+function decodeWorkflowImportRequest(value: JsonValue): WorkflowImportRouteRequest {
+  if (!isJsonRecord(value)) throw new Error("workflow import request must be an object")
+  assertAllowedKeys(value, ["payload", "apply"], "workflow import request")
+  if (value.apply !== undefined && typeof value.apply !== "boolean") throw new Error("workflow import apply must be a boolean")
+  if (!isJsonRecord(value.payload)) throw new Error("workflow import request requires payload")
+  return {
+    payload: decodeWorkflowImportPayload(value.payload),
+    dryRun: value.apply === true ? false : true,
+  }
+}
+
+function decodeWorkflowImportPayload(value: JsonValue): UgcWorkflowImportInput {
+  if (!isJsonRecord(value)) throw new Error("workflow import payload must be an object")
+  assertAllowedKeys(value, ["lane", "sourcePolicy", "records", "providerJobs", "candidatePatches", "referenceArchives", "notes", "artifactPaths", "result", "metadata", "resultMetadata"], "workflow import payload")
+  if (!isKieProductLane(value.lane)) throw new Error("workflow import payload requires lane: brainrot or ugc-ads")
+  if (!isReferenceSourcePolicy(value.sourcePolicy)) throw new Error("workflow import payload requires sourcePolicy")
+  return {
+    lane: value.lane,
+    sourcePolicy: value.sourcePolicy,
+    records: decodeJsonArray(value.records, "workflow import records"),
+    providerJobs: decodeWorkflowProviderJobImports(value.providerJobs),
+    candidatePatches: decodeWorkflowCandidatePatches(value.candidatePatches),
+    referenceArchives: decodeWorkflowReferenceArchiveImports(value.referenceArchives),
+    notes: decodeWorkflowNoteImports(value.notes),
+    artifactPaths: isStringArray(value.artifactPaths) ? value.artifactPaths : undefined,
+    result: value.result === undefined ? undefined : requireJsonValue(value.result, "workflow import result"),
+    metadata: value.metadata === undefined ? undefined : requireJsonValue(value.metadata, "workflow import metadata"),
+    resultMetadata: value.resultMetadata === undefined ? undefined : requireJsonValue(value.resultMetadata, "workflow import resultMetadata"),
+  }
+}
+
+function decodeWorkflowProviderJobImports(value: JsonValue | undefined): UgcWorkflowImportInput["providerJobs"] {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value)) throw new Error("workflow import providerJobs must be an array")
+  return value.map((item) => {
+    if (!isJsonRecord(item)) throw new Error("workflow import providerJobs entries must be objects")
+    assertAllowedKeys(item, ["id", "provider", "operation", "mode", "status", "targetIds", "spendCapUsd", "estimatedCostUsd", "request", "response", "artifactPaths", "error"], "workflow import providerJobs entry")
+    if (!isUgcProvider(item.provider)) throw new Error("workflow import provider job requires provider")
+    if (typeof item.operation !== "string" || item.operation.trim().length === 0) throw new Error("workflow import provider job requires operation")
+    if (item.mode !== undefined && item.mode !== "dry-run" && item.mode !== "live") throw new Error("workflow import provider job mode must be dry-run or live")
+    if (item.status !== undefined && !isProviderJobStatus(item.status)) throw new Error("workflow import provider job status is invalid")
+    const provider = item.provider
+    const operation = item.operation
+    const mode = item.mode === "live" || item.mode === "dry-run" ? item.mode : undefined
+    return {
+      id: typeof item.id === "string" && item.id.trim().length > 0 ? item.id : undefined,
+      provider,
+      operation,
+      mode,
+      status: isProviderJobStatus(item.status) ? item.status : undefined,
+      targetIds: isStringArray(item.targetIds) ? item.targetIds : undefined,
+      spendCapUsd: decodeOptionalFiniteNumber(item.spendCapUsd, "workflow import provider job spendCapUsd"),
+      estimatedCostUsd: item.estimatedCostUsd === null ? null : decodeOptionalFiniteNumber(item.estimatedCostUsd, "workflow import provider job estimatedCostUsd"),
+      request: item.request === undefined ? null : requireJsonValue(item.request, "workflow import provider job request"),
+      response: item.response === undefined || item.response === null ? null : requireJsonValue(item.response, "workflow import provider job response"),
+      artifactPaths: isStringArray(item.artifactPaths) ? item.artifactPaths : undefined,
+      error: item.error === undefined || item.error === null ? null : requireString(item.error, "workflow import provider job error"),
+    }
+  })
+}
+
+function decodeWorkflowReferenceArchiveImports(value: JsonValue | undefined): UgcWorkflowImportInput["referenceArchives"] {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value)) throw new Error("workflow import referenceArchives must be an array")
+  return value.map((item) => {
+    if (!isJsonRecord(item)) throw new Error("workflow import referenceArchives entries must be objects")
+    assertAllowedKeys(item, ["referenceProfileId", "sourcePolicy", "archiveStatus", "preservedMechanics", "swappedFields", "blockedFields", "guardrails", "candidateFormatOutputs", "notes"], "workflow import referenceArchives entry")
+    if (typeof item.referenceProfileId !== "string" || item.referenceProfileId.trim().length === 0) throw new Error("workflow import reference archive requires referenceProfileId")
+    if (item.sourcePolicy !== undefined && !isReferenceSourcePolicy(item.sourcePolicy)) throw new Error("workflow import reference archive sourcePolicy is invalid")
+    if (item.archiveStatus !== undefined && !isReferenceArchiveStatus(item.archiveStatus)) throw new Error("workflow import reference archive archiveStatus is invalid")
+    return {
+      referenceProfileId: item.referenceProfileId,
+      sourcePolicy: isReferenceSourcePolicy(item.sourcePolicy) ? item.sourcePolicy : undefined,
+      archiveStatus: isReferenceArchiveStatus(item.archiveStatus) ? item.archiveStatus : undefined,
+      preservedMechanics: item.preservedMechanics === undefined ? undefined : requireJsonValue(item.preservedMechanics, "workflow import reference archive preservedMechanics"),
+      swappedFields: isStringArray(item.swappedFields) ? item.swappedFields : undefined,
+      blockedFields: isStringArray(item.blockedFields) ? item.blockedFields : undefined,
+      guardrails: isStringArray(item.guardrails) ? item.guardrails : undefined,
+      candidateFormatOutputs: decodeReferenceArchiveFormatOutputs(item.candidateFormatOutputs),
+      notes: isStringArray(item.notes) ? item.notes : undefined,
+    }
+  })
+}
+
+function decodeWorkflowCandidatePatches(value: JsonValue | undefined): UgcWorkflowImportInput["candidatePatches"] {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value)) throw new Error("workflow import candidatePatches must be an array")
+  return value.map((item) => {
+    if (!isJsonRecord(item)) throw new Error("workflow import candidatePatches entries must be objects")
+    assertAllowedKeys(item, ["candidateId", "status", "notes"], "workflow import candidatePatches entry")
+    if (typeof item.candidateId !== "string" || item.candidateId.trim().length === 0) throw new Error("workflow import candidate patch requires candidateId")
+    if (item.status !== undefined && !isCandidateStatus(item.status)) throw new Error("workflow import candidate patch status is invalid")
+    return {
+      candidateId: item.candidateId,
+      status: isCandidateStatus(item.status) ? item.status : undefined,
+      notes: decodeWorkflowCandidatePatchNotes(item.notes),
+    }
+  })
+}
+
+function decodeWorkflowCandidatePatchNotes(value: JsonValue | undefined): NonNullable<NonNullable<UgcWorkflowImportInput["candidatePatches"]>[number]["notes"]> | undefined {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value)) throw new Error("workflow import candidate patch notes must be an array")
+  return value.map((item) => {
+    if (typeof item === "string") return { body: item }
+    if (!isJsonRecord(item)) throw new Error("workflow import candidate patch note entries must be strings or objects")
+    assertAllowedKeys(item, ["body", "verdict", "requestedChange"], "workflow import candidate patch note")
+    if (typeof item.body !== "string" || item.body.trim().length === 0) throw new Error("workflow import candidate patch note requires body")
+    if (item.verdict !== undefined && !isReviewVerdict(item.verdict)) throw new Error("workflow import candidate patch note verdict is invalid")
+    return {
+      body: item.body,
+      verdict: isReviewVerdict(item.verdict) ? item.verdict : undefined,
+      requestedChange: item.requestedChange === undefined || item.requestedChange === null ? null : requireString(item.requestedChange, "workflow import candidate patch note requestedChange"),
+    }
+  })
+}
+
+function decodeWorkflowNoteImports(value: JsonValue | undefined): UgcWorkflowImportInput["notes"] {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value)) throw new Error("workflow import notes must be an array")
+  return value.map((item) => {
+    if (!isJsonRecord(item)) throw new Error("workflow import notes entries must be objects")
+    assertAllowedKeys(item, ["author", "attachedTo", "verdict", "body", "requestedChange"], "workflow import notes entry")
+    if (item.author !== undefined && item.author !== "arthur" && item.author !== "agent") throw new Error("workflow import note author is invalid")
+    if (!isReviewVerdict(item.verdict)) throw new Error("workflow import note requires verdict")
+    if (typeof item.body !== "string" || item.body.trim().length === 0) throw new Error("workflow import note requires body")
+    return {
+      author: item.author === "arthur" ? "arthur" : "agent",
+      attachedTo: decodeReviewAttachment(item.attachedTo),
+      verdict: item.verdict,
+      body: item.body,
+      requestedChange: item.requestedChange === undefined || item.requestedChange === null ? null : requireString(item.requestedChange, "workflow import note requestedChange"),
+    }
+  })
+}
+function isJsonRecord(value: JsonValue | undefined | null): value is { readonly [key: string]: JsonValue } {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function assertAllowedKeys(value: { readonly [key: string]: JsonValue }, allowedKeys: readonly string[], label: string): void {
+  const allowed = new Set(allowedKeys)
+  const unknownKeys = Object.keys(value).filter((key) => !allowed.has(key))
+  if (unknownKeys.length > 0) throw new Error(`${label} has unsupported fields: ${unknownKeys.join(", ")}`)
+}
+
+function decodeJsonArray(value: JsonValue | undefined, label: string): readonly JsonValue[] | undefined {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value) || !value.every(isJsonValue)) throw new Error(`${label} must be an array of JSON values`)
+  return value
+}
+
+function requireJsonValue(value: JsonValue | undefined, label: string): JsonValue {
+  if (!isJsonValue(value)) throw new Error(`${label} must be JSON-safe`)
+  return value
+}
+
+function requireString(value: JsonValue | undefined, label: string): string {
+  if (typeof value !== "string") throw new Error(`${label} must be a string`)
+  return value
+}
+
+function decodeOptionalFiniteNumber(value: JsonValue | undefined, label: string): number | undefined {
+  if (value === undefined) return undefined
+  if (typeof value !== "number" || !Number.isFinite(value)) throw new Error(`${label} must be a finite number`)
+  return value
+}
+
 function decodeWorkflowCounters(value: JsonValue | undefined): UgcWorkflowCounters | undefined {
   if (!isRecord(value)) return undefined
   const counters: { [key: string]: number } = {}
@@ -944,7 +1125,7 @@ function decodeReferenceCatalogImport(value: JsonValue): UgcReferenceCatalogImpo
 }
 
 function decodeReviewAttachment(value: JsonValue | undefined): ReviewAttachment {
-  if (!isRecord(value)) throw new Error("note request requires attachedTo")
+  if (!isJsonRecord(value)) throw new Error("note request requires attachedTo")
   if (!isReviewAttachmentKind(value.kind) || typeof value.id !== "string") throw new Error("note request requires valid attachment")
   return { kind: value.kind, id: value.id }
 }
@@ -973,6 +1154,10 @@ function isReviewVerdict(value: unknown): value is ReviewVerdict {
 
 function isReviewAttachmentKind(value: unknown): value is ReviewAttachment["kind"] {
   return value === "persona" || value === "candidate" || value === "batch" || value === "branch" || value === "stage" || value === "reference-profile"
+}
+
+function isUgcProvider(value: JsonValue | undefined): value is CreateProviderJobInput["provider"] {
+  return value === "kie" || value === "jimeng" || value === "local" || value === "codex"
 }
 
 function isProviderJobStatus(value: unknown): value is CreateProviderJobInput["status"] {
@@ -1044,6 +1229,7 @@ function isWorkflowEventType(value: JsonValue | undefined): value is UgcWorkflow
     || value === "artifact"
     || value === "status"
     || value === "result"
+    || value === "import"
     || value === "error"
     || value === "completed"
     || value === "blocked"

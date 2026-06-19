@@ -81,11 +81,11 @@ Those manifests are local reference/inspiration inputs only. Preserve provenance
 
 ## Pi/OMP workflow telemetry lane
 
-Arthur may run creative execution as Pi/OMP dynamic workflows instead of forcing every creative step through the Slotok daemon. Treat this as "just another workflow" backed by `packages/dynamic-workflows` (`parseWorkflowScript` / `runWorkflow`) and documented in `workflows/slotok-creative-agents/README.md`.
+Arthur may run creative execution as Pi/OMP dynamic workflows instead of forcing every creative step through the Slotok daemon. Treat their returned JSON-safe handoff payloads as workflow results backed by Slotok state and documented in `workflows/slotok-creative-agents/README.md`; do not claim the daemon directly launches `runWorkflow` unless a backend worker route exists.
 
-Decision: Slotok owns the browser telemetry contract. `workflowEvents` is the append-only event log, and `workflowRuns` is the durable derived run snapshot. Dynamic workflows, Pi/OMP personas, daemon imports, and provider-job links are sources into that stream; `providerJobs` remain provider execution artifacts, not the workflow status model.
+Decision: Slotok owns the browser telemetry/import contract. `workflowEvents` is the append-only event log, and `workflowRuns` is the durable derived run snapshot. Pi/OMP personas, dynamic-workflow callback telemetry, daemon imports, and provider-job links are sources into that stream; `providerJobs` remain provider execution artifacts, not the workflow status model.
 
-- Primary live source: `packages/dynamic-workflows` callbacks (`onLog`, `onPhase`, `onAgentStart`, `onAgentEnd`) append `workflowEvents` and derive/update `workflowRuns`.
+- Callback telemetry mapping: `onPhase` -> literal `phase`, `onLog` -> literal `message`, `onAgentStart` -> literal `started` with `payload.kind = "agent-start"`, and `onAgentEnd` -> literal `message` with `payload.kind = "agent-end"`.
 - Browser read/stream contract:
   - `GET /api/ugc/workflows`
   - `GET /api/ugc/workflows?lane=ugc-ads&status=running&limit=25`
@@ -93,8 +93,11 @@ Decision: Slotok owns the browser telemetry contract. `workflowEvents` is the ap
   - `GET /api/ugc/workflows/<run_id>`
   - `GET /api/ugc/workflows/<run_id>/events?after=<event_id>&limit=100`
   - `POST /api/ugc/workflows/<run_id>/events`
+  - `POST /api/ugc/workflows/<run_id>/import` — implemented handoff dry-run/apply route
   - `GET /api/ugc/workflows/events/stream`
   - `GET /api/ugc/workflows/events/stream?runId=<run_id>&after=<event_id>`
+- Handoff import contract: request top level accepts only `payload` and `apply`; payload has `lane`, `sourcePolicy`, optional `records`, `providerJobs`, `candidatePatches`, `referenceArchives`, `notes`, `artifactPaths`, `result`, and `metadata`. Dry-run is default unless `apply: true` and returns HTTP `200`; valid apply returns HTTP `201`, imports safe provider jobs/reference archives/notes/candidate note-status patches, appends `import`/`result` workflow events, and updates imported record ids/artifact paths/result summary.
+- Clean-room guardrails: `metadata-only` and `abstract-mechanics` public/inspiration sources cannot become direct generation input; direct generation input requires `rights-cleared-source`; unknown or extra request/payload keys and unknown candidate/reference/note/provider targets reject; credential-like payload keys are redacted before persistence.
 - Browser behavior: subscribe by polling-backed SSE when available, retain the last event id, and fall back to polling the run events route with `after=<event_id>` without losing the timeline on reload.
 - Historical adapter only: OMP `omp stats` / `omp-stats` server (`/api/stats`, `/api/sync`) is usage-history/cost/sync data, not live workflow state.
 - Future adapter only: OMP `--mode rpc` can be normalized into `workflowEvents` when Slotok owns the child process; wrap it behind the Slotok daemon and never expose stdio directly to the browser. Do not claim this adapter is implemented until it exists.
@@ -102,7 +105,7 @@ Decision: Slotok owns the browser telemetry contract. `workflowEvents` is the ap
 
 Manual QA and exact route examples live in `docs/qa/slotok-workflow-telemetry.md`. Store this as event sourcing, not only current snapshots. Current agent status is derived from latest events, while raw event history remains inspectable for proof/replay.
 
-Slotok remains the local-first state viewer/reviewer. Pi/OMP personas perform creative operations and import structured JSON-safe results through daemon routes.
+Slotok remains the local-first state viewer/reviewer. Pi/OMP personas perform creative operations and import structured JSON-safe results through daemon routes after dry-run review; SQLite/local state remains the source of truth.
 
 ## Commit boundaries
 
@@ -146,4 +149,5 @@ Parent should use the exact checklists in `docs/qa/slotok-provider-pipeline.md` 
 7. Confirm no live provider success is claimed unless parent explicitly runs a live/capped action and records that proof separately.
 8. Confirm workflow status comes from `workflowRuns` plus append-only `workflowEvents`, not provider-job status.
 9. Confirm workflow telemetry write/read routes work for the backend pass (`POST /api/ugc/workflows`, `POST /api/ugc/workflows/<run_id>/events`, `GET /api/ugc/workflows/<run_id>/events?after=<event_id>&limit=100`) and the browser uses SSE (`GET /api/ugc/workflows/events/stream?runId=<run_id>&after=<event_id>`) with polling fallback.
-10. Confirm dynamic-workflows callbacks map into events, OMP stats are historical only, and OMP RPC/artifact polling are not claimed as implemented unless real daemon adapters exist.
+10. Confirm the handoff import route works: `POST /api/ugc/workflows/<run_id>/import`, dry-run by default with HTTP `200`, apply only with `apply: true` and HTTP `201`, invalid ids/sourcePolicy guardrails reject without mutation, unknown keys reject, and provider jobs remain provider artifacts.
+11. Confirm dynamic-workflow callbacks map into events with literal `phase`/`message`/`started` types and `payload.kind` for agent start/end, OMP stats are historical only, and OMP RPC/artifact polling/direct dynamic execution are not claimed as implemented unless real daemon adapters/routes exist.

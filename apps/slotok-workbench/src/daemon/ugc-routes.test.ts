@@ -741,6 +741,52 @@ describe("routeUgc", () => {
     await reader?.cancel()
   })
 
+  test("imports workflow handoff payloads through dry-run default and apply true route bodies", async () => {
+    const store = createStore()
+    const createdResponse = await routeUgc(jsonRequest("/api/ugc/workflows", {
+      title: "Workflow import route proof",
+      source: "omp",
+      lane: "ugc-ads",
+    }), store)
+    const created = await createdResponse?.json() as { readonly workflowRun?: { readonly id: string } }
+    const runId = created.workflowRun?.id ?? ""
+    const candidateId = store.read().workspace.candidates[0]?.id ?? ""
+    if (!runId || !candidateId) throw new Error("missing route import fixture")
+
+    const payload = {
+      lane: "ugc-ads",
+      sourcePolicy: "metadata-only",
+      providerJobs: [{
+        id: "job_route_workflow_import",
+        provider: "local",
+        operation: "route-workflow-import-plan",
+        targetIds: [candidateId],
+        request: { apiKey: "sk-route", summary: "route dry-run" },
+      }],
+      candidatePatches: [{ candidateId, status: "needs-revision", notes: ["Route candidate note."] }],
+      artifactPaths: ["artifacts/workflows/route-import/result.json"],
+      result: { token: "secret-route", ok: true },
+    }
+
+    const dryRunResponse = await routeUgc(jsonRequest(`/api/ugc/workflows/${encodeURIComponent(runId)}/import`, { payload }), store)
+    const dryRun = await dryRunResponse?.json() as { readonly dryRun?: boolean; readonly imported?: boolean; readonly valid?: boolean }
+    expect(dryRunResponse?.status).toBe(200)
+    expect(dryRun).toMatchObject({ dryRun: true, imported: false, valid: true })
+    expect(store.read().providerJobs.some((job) => job.id === "job_route_workflow_import")).toBe(false)
+
+    const applyResponse = await routeUgc(jsonRequest(`/api/ugc/workflows/${encodeURIComponent(runId)}/import`, { payload, apply: true }), store)
+    const applied = await applyResponse?.json() as { readonly imported?: boolean; readonly workflowRun?: { readonly status: string; readonly artifactPaths: readonly string[] }; readonly events?: readonly { readonly type: string }[] }
+    const state = store.read()
+
+    expect(applyResponse?.status).toBe(201)
+    expect(applied.imported).toBe(true)
+    expect(applied.workflowRun?.status).toBe("succeeded")
+    expect(applied.workflowRun?.artifactPaths).toContain("artifacts/workflows/route-import/result.json")
+    expect(applied.events?.map((event) => event.type)).toEqual(["import", "result"])
+    expect(state.providerJobs.find((job) => job.id === "job_route_workflow_import")?.request).toEqual({ apiKey: "[redacted]", summary: "route dry-run" })
+    expect(state.workflowEvents.filter((event) => event.runId === runId).map((event) => event.type)).toEqual(["created", "import", "result"])
+  })
+
   test("returns null for routes owned by other daemon handlers", async () => {
     const store = createStore()
     await expect(routeUgc(new Request("http://127.0.0.1/api/ugc/kie/capabilities"), store)).resolves.toBeNull()

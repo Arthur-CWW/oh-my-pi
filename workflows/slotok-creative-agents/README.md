@@ -42,9 +42,9 @@ Recommended personas:
    - Inputs: generated candidates and analysis.
    - Output: verdicts, notes, branch decisions, final timeline/export manifests.
 
-## Slotok handoff contract
+## Slotok handoff/import contract
 
-Each workflow should return JSON-safe records with:
+Each workflow returns one JSON-safe handoff payload. Slotok imports that payload through the daemon persistence boundary, never by direct SQLite edits.
 
 ```json
 {
@@ -54,25 +54,53 @@ Each workflow should return JSON-safe records with:
   "providerJobs": [],
   "candidatePatches": [],
   "referenceArchives": [],
-  "notes": []
+  "notes": [],
+  "artifactPaths": [],
+  "result": {}
 }
 ```
 
-Slotok imports these through daemon routes, not by manually editing SQLite.
+Implemented daemon import route:
+
+```text
+POST /api/ugc/workflows/<run_id>/import
+```
+
+Request shape:
+
+```json
+{
+  "payload": { "lane": "ugc-ads", "sourcePolicy": "abstract-mechanics" },
+  "apply": false
+}
+```
+
+Dry-run is the default. The route accepts only top-level `payload` and `apply` keys; omit `apply` or set `apply: false` to validate and receive `200` with `schemaVersion: "ugc-studio.workflow-import-result.v1"`, `plannedChanges`, `workflowRun: null`, and `events: []` without mutating local state. Set `apply: true` only after reviewing the dry-run summary; valid apply returns `201`, imports safe provider-job records, candidate status/note patches for existing candidates, reference archives, notes, artifact paths, and result metadata, then appends workflow `import`/`result` telemetry and updates the run's imported ids, artifacts, and result summary.
+
+Clean-room guardrails:
+
+- `lane` must be `brainrot` or `ugc-ads`.
+- `sourcePolicy` must be `metadata-only`, `abstract-mechanics`, or `rights-cleared-source`.
+- Unknown top-level request keys and unknown handoff payload keys are rejected by the route decoder.
+- Public/inspiration material with `metadata-only` or `abstract-mechanics` policy may become metadata, notes, mechanics, references, or provider-job context only; it must not become direct generation input.
+- Direct generation inputs require `rights-cleared-source`.
+- Candidate patches must reference existing candidate ids; unknown ids reject the import instead of creating detached state.
+- Provider-job payloads remain provider artifacts and should store redacted request/response JSON, mode, status, target ids, spend cap, artifacts, and errors. Do not use provider-job status as workflow status.
+- Credential-like keys in imported payloads are redacted before persistence.
 
 ## Telemetry contract
 
 Use event sourcing as the browser contract:
 
 - `workflowRuns` stores the durable run snapshot: id, lane, source, status, script/definition id, args summary, current phase, counters, result/import summary, error summary, and timestamps.
-- `workflowEvents` is append-only: phase/log/agent-start/agent-end/artifact/provider-job/result/import/error events linked by `runId` and ordered by event id. Do not rewrite prior events to hide state changes.
+- `workflowEvents` is append-only: literal `phase`, `message`, `started`, `artifact`, `status`, `result`, `import`, `error`, `completed`, `blocked`, and `canceled` events are linked by `runId` and ordered by event id. Agent starts/ends are represented through `agentLabel` and `payload.kind`; do not rewrite prior events to hide state changes.
 - The workbench derives "what agents are doing right now" from the latest events instead of trusting one mutable status blob.
 - `providerJobs` remain provider execution artifacts. A workflow event may link to a provider job id, but provider job status is not the workflow status model.
 - The Slotok daemon browser contract exposes SSE for live viewing and polling for fallback/replay.
 
 Exact route examples for QA:
 
-Core GET/POST routes and the polling-backed SSE stream were confirmed by the backend worker for this contract; parent QA still verifies them against the active daemon build.
+Core workflow telemetry and handoff/import routes are daemon routes; parent QA verifies them against the active daemon build.
 
 ```text
 GET http://127.0.0.1:47522/api/ugc/workflows
@@ -81,6 +109,7 @@ POST http://127.0.0.1:47522/api/ugc/workflows
 GET http://127.0.0.1:47522/api/ugc/workflows/<run_id>
 GET http://127.0.0.1:47522/api/ugc/workflows/<run_id>/events?after=<event_id>&limit=100
 POST http://127.0.0.1:47522/api/ugc/workflows/<run_id>/events
+POST http://127.0.0.1:47522/api/ugc/workflows/<run_id>/import
 GET http://127.0.0.1:47522/api/ugc/workflows/events/stream
 GET http://127.0.0.1:47522/api/ugc/workflows/events/stream?runId=<run_id>&after=<event_id>
 ```
@@ -92,9 +121,17 @@ Browser behavior:
 - Fall back to `GET /api/ugc/workflows/<run_id>/events?after=<event_id>&limit=100` when SSE is unavailable or closes.
 - Rebuild the visible timeline from `workflowRuns` plus `workflowEvents` after reload; do not rely on renderer memory.
 
+Event wording:
+
+- Dynamic-workflow `onPhase` appends a literal `phase` event.
+- Dynamic-workflow `onLog` appends a literal `message` event.
+- Dynamic-workflow `onAgentStart` appends a literal `started` event with `agentLabel` and `payload.kind = "agent-start"`.
+- Dynamic-workflow `onAgentEnd` appends a literal `message` event with `agentLabel` and `payload.kind = "agent-end"`.
+- Handoff apply appends workflow import/result telemetry while keeping imported provider-job detail in `providerJobs`.
+
 Adapters:
 
-- Dynamic workflows: map `runWorkflow` callbacks (`onLog`, `onPhase`, `onAgentStart`, `onAgentEnd`) directly into events and derived run snapshots.
+- Dynamic workflows: when a Pi/OMP workflow or future backend worker runs `runWorkflow`, map callbacks (`onLog`, `onPhase`, `onAgentStart`, `onAgentEnd`) directly into events and derived run snapshots. This document does not claim the daemon directly launches dynamic workflows until a worker route exists.
 - OMP RPC: future adapter only. When Slotok owns an `omp --mode rpc` child process, normalize stdio `AgentSessionEvent` and subagent progress frames into events behind the daemon. Do not expose stdio to the browser or claim this adapter is implemented before it exists.
 - OMP stats: historical only. Use `omp stats` / `omp-stats` routes such as `/api/stats` and `/api/sync` for usage/cost history, not live progress.
 - Artifact polling: future adapter only. Tail Pi/OMP session JSONL, plans, and artifact dirs into the same event table when Slotok did not launch the process; treat these as delayed observations.
@@ -114,7 +151,7 @@ Rules:
 - Use clean-room mechanics, not direct copying.
 - Preserve provenance and rights notes.
 - Do not make live provider calls unless live=true, cap is explicit, and the command records a provider job.
-- Return JSON-safe output matching the Slotok handoff contract.
+- Return JSON-safe output matching the Slotok handoff/import contract.
 
 Task:
 <analysis / creative strategy / generation planning / review>
@@ -124,6 +161,6 @@ Task:
 
 1. Store Slotok workflow definitions as wrappers around `packages/dynamic-workflows` scripts plus args/result metadata.
 2. Keep daemon routes as the persistence boundary for imported workflow outputs.
-3. Add import endpoints only for structured workflow outputs.
-4. Let Pi/OMP dynamic workflows fan out agents and tools; Slotok visualizes and reviews the results.
+3. Use `POST /api/ugc/workflows/<run_id>/import` for dry-run/apply handoff import; never edit SQLite directly.
+4. Let Pi/OMP dynamic workflows fan out agents and tools outside the browser; Slotok visualizes, imports, and reviews the results through daemon state.
 5. Use the running workbench at `http://127.0.0.1:47521/ugc-studio/` for manual QA.
