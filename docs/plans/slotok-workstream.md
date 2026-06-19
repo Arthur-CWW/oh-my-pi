@@ -79,6 +79,22 @@ data/ugc-studio/reference-assets/arcads/manifest.json
 
 Those manifests are local reference/inspiration inputs only. Preserve provenance and rights notes; do not feed Higgsfield/Arcads public assets into generation unless a manifest explicitly marks reuse allowed.
 
+## Pi/OMP workflow telemetry lane
+
+Arthur may run creative execution as Pi/OMP dynamic workflows instead of forcing every creative step through the Slotok daemon. Treat this as "just another workflow" backed by `packages/dynamic-workflows` (`parseWorkflowScript` / `runWorkflow`) and documented in `workflows/slotok-creative-agents/README.md`.
+
+Decision: Slotok owns the browser telemetry contract. Add append-only workflow/event state in Slotok, then adapt Pi/OMP/dynamic-workflows into it.
+
+- Primary live path: `packages/dynamic-workflows` callbacks (`onLog`, `onPhase`, `onAgentStart`, `onAgentEnd`) append `workflowEvents` and update `workflowRuns`.
+- Browser path: Slotok daemon exposes `GET /api/ugc/workflows`, `GET /api/ugc/workflows/:runId/events?after=<eventId>`, and `GET /api/ugc/workflows/events/stream` as SSE. UI subscribes by SSE and falls back to polling.
+- Historical adapter: OMP `omp stats` / `omp-stats` server is usage-history only (`/api/stats`, `/api/sync`), so use it later as a secondary adapter, not the live source of truth.
+- Process adapter: OMP `--mode rpc` can stream live `AgentSessionEvent`/subagent frames over stdio when Slotok owns the child process. Wrap that behind the Slotok daemon; never expose stdio directly to the browser.
+- Artifact adapter: Pi/OMP session JSONL, output artifacts, plans, and resource files can be polled/tail-imported later into the same event table.
+
+Store this as event sourcing, not only current snapshots. Current agent status is derived from latest events, while raw event history remains inspectable for proof/replay.
+
+Slotok remains the local-first state viewer/reviewer. Pi/OMP personas perform creative operations and import structured JSON-safe results through daemon routes.
+
 ## Commit boundaries
 
 Commit after green verification for each coherent slice:
@@ -114,6 +130,7 @@ Parent should use the exact checklist in `docs/qa/slotok-provider-pipeline.md` f
 1. Open `http://127.0.0.1:47521/ugc-studio/` and confirm daemon `http://127.0.0.1:47522`.
 2. Use `artifacts/slotok-dev/renderer.pid`, `daemon.pid`, `renderer.log`, and `daemon.log` only for dev-server status/errors.
 3. Confirm Codex analysis creates dry-run local provider jobs with frame/artifact metadata and survives reload.
-4. Confirm analysis-to-KIE is dry-run planning only, using the backend route when present or existing KIE plan/create surfaces with Codex context while the route is pending.
-5. Confirm Higgsfield/Arcads `manifestPaths` plan/import keeps assets reference-only with provenance and rights notes once that extension lands; while pending, inspect manifests directly and verify existing `roots` planning does not live-scrape or promote public assets into provider inputs.
-6. Confirm no live provider success is claimed unless parent explicitly runs a live/capped action and records that proof separately.
+4. Confirm live Codex remains explicit and capped: route validation requires `live: true` plus `maxSpendUsd`, then delegates auth to the runtime resolver/runner. The resolver supports API-key mode (`apiKey`, `CODEX_API_KEY`, `OPENAI_API_KEY`) and Codex ChatGPT OAuth session mode (`~/.codex/auth.json`, override `CODEX_AUTH_FILE`) as separate paths; do not treat OAuth access tokens as OpenAI API keys. Mark multimodal live OAuth analysis blocked/unsupported until parent validates a real Codex/ChatGPT backend endpoint.
+5. Confirm analysis-to-KIE is dry-run planning only, using the backend route when present or existing KIE plan/create surfaces with Codex context while the route is pending.
+6. Confirm Higgsfield/Arcads `manifestPaths` plan/import keeps assets reference-only with provenance and rights notes once that extension lands; while pending, inspect manifests directly and verify existing `roots` planning does not live-scrape or promote public assets into provider inputs.
+7. Confirm no live provider success is claimed unless parent explicitly runs a live/capped action and records that proof separately.
