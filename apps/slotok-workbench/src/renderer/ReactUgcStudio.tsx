@@ -3,11 +3,9 @@ import * as React from "react"
 import {
   ArrowUp,
   BarChart3,
-  Bell,
   Bot,
   Braces,
   CheckCircle2,
-  ChevronDown,
   CircleDollarSign,
   Clapperboard,
   Clock,
@@ -16,16 +14,11 @@ import {
   Eye,
   FastForward,
   FileJson,
-  Filter,
-  Folder,
   GitBranch,
   GitFork,
-  Grid2X2,
   Home,
-  Inbox,
   Layers3,
   MessageSquare,
-  MoreHorizontal,
   Network,
   Pause,
   Play,
@@ -33,20 +26,13 @@ import {
   Plus,
   RefreshCw,
   Rewind,
-  Search,
   Settings,
-  Share2,
-  SlidersHorizontal,
   Sparkles,
-  Star,
-  Table2,
   Target,
-  UserCircle,
   Wand2,
   XCircle,
   Zap,
 } from "lucide-react"
-import { Badge } from "./components/ui/badge"
 import { Button } from "./components/ui/button"
 import { Input } from "./components/ui/input"
 import { Tabs, type TabItem } from "./components/ui/tabs"
@@ -597,35 +583,77 @@ function projectPersonaCard(persona: PersonaProfile, index: number): PersonaCard
 }
 
 function projectExplorationRows(workspace: UgcStudioWorkspace): ExplorationRow[] {
-  return explorationRows.map((row) => {
-    if (row.id === "row_persona") {
-      return {
-        ...row,
-        items: workspace.personas.map((persona, index) => ({
-          id: `explore_${persona.id}`,
-          title: persona.displayName,
-          subtitle: persona.profileBible.niche,
-          score: Math.min(9.2, 7.6 + index * 0.4),
-          status: persona.status === "selected" ? "keep" : persona.status === "paused" ? "risk" : "review",
-          personaId: persona.id,
-        })),
-      }
-    }
-    if (row.id === "row_hook") {
-      return {
-        ...row,
-        items: workspace.candidates.slice(0, 5).map((candidate) => ({
-          id: `explore_${candidate.id}`,
-          title: candidate.title,
-          subtitle: candidate.kind,
-          score: candidate.scorecard.hookStrength / 10,
-          status: candidate.status === "rejected" ? "risk" : candidate.status === "starred" ? "keep" : "review",
-          candidateId: candidate.id,
-        })),
-      }
-    }
-    return row
-  })
+  const laneCounts = workspace.referenceProfiles.reduce(
+    (counts, profile) => {
+      if (profile.styleLane === "brainrot") counts.brainrot += 1
+      if (profile.styleLane === "ugc-ads") counts.ugcAds += 1
+      return counts
+    },
+    { brainrot: 0, ugcAds: 0 },
+  )
+  const averageHookStrength = workspace.candidates.length
+    ? workspace.candidates.reduce((sum, candidate) => sum + candidate.scorecard.hookStrength, 0) / workspace.candidates.length
+    : 0
+
+  return [
+    {
+      id: "row_product",
+      step: "1",
+      title: "Workspace focus",
+      description: workspace.title,
+      items: [
+        {
+          id: "workspace_candidates",
+          title: workspace.title,
+          subtitle: `${workspace.candidates.length} candidates / ${workspace.referenceProfiles.length} references`,
+          score: Math.max(0, Math.min(9.5, averageHookStrength / 10)),
+          status: "keep",
+        },
+        {
+          id: "workspace_lane_ugc_ads",
+          title: "UGC ads lane",
+          subtitle: `${laneCounts.ugcAds} tagged references`,
+          score: laneCounts.ugcAds > 0 ? 8 : 6,
+          status: laneCounts.ugcAds > 0 ? "keep" : "review",
+        },
+        {
+          id: "workspace_lane_brainrot",
+          title: "Brainrot lane",
+          subtitle: `${laneCounts.brainrot} tagged references`,
+          score: laneCounts.brainrot > 0 ? 8 : 6,
+          status: laneCounts.brainrot > 0 ? "keep" : "review",
+        },
+      ],
+    },
+    {
+      id: "row_persona",
+      step: "2",
+      title: "Persona",
+      description: "Pick the creator",
+      items: workspace.personas.map((persona, index) => ({
+        id: `explore_${persona.id}`,
+        title: persona.displayName,
+        subtitle: persona.profileBible.niche,
+        score: Math.min(9.2, 7.6 + index * 0.4),
+        status: persona.status === "selected" ? "keep" : persona.status === "paused" ? "risk" : "review",
+        personaId: persona.id,
+      })),
+    },
+    {
+      id: "row_hook",
+      step: "3",
+      title: "Hook",
+      description: "Why stop scrolling?",
+      items: workspace.candidates.slice(0, 5).map((candidate) => ({
+        id: `explore_${candidate.id}`,
+        title: candidate.title,
+        subtitle: candidate.kind,
+        score: candidate.scorecard.hookStrength / 10,
+        status: candidate.status === "rejected" ? "risk" : candidate.status === "starred" ? "keep" : "review",
+        candidateId: candidate.id,
+      })),
+    },
+  ]
 }
 
 function projectCampaignColumns(workspace: UgcStudioWorkspace): CampaignColumn[] {
@@ -1836,32 +1864,21 @@ export function ReactUgcStudio() {
 }
 
 function Sidebar(props: { activeView: ReactView; onViewChange: (view: ReactView) => void }) {
+  const workspace = useUgcLocalState().workspace
+  const candidates = workspace.candidates
+  const total = candidates.length
+  const ready = candidates.filter((candidate) => candidate.status === "ready").length
+  const starred = candidates.filter((candidate) => candidate.status === "starred").length
+  const exported = candidates.filter((candidate) => candidate.status === "exported").length
+  const rejected = candidates.filter((candidate) => candidate.status === "rejected").length
   return (
     <WorkbenchSidebar>
-      <div className="flex h-3 items-center gap-1.5" aria-hidden="true">
-        <span className="h-2 w-2 rounded-full bg-[#ff5f57]" />
-        <span className="h-2 w-2 rounded-full bg-[#ffbd2e]" />
-        <span className="h-2 w-2 rounded-full bg-[#28c840]" />
+      <div className="flex items-center gap-2">
+        <span className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-primary text-primary-foreground">
+          <Clapperboard size={14} />
+        </span>
+        <span className="truncate text-sm font-semibold">UGC Studio</span>
       </div>
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-primary text-primary-foreground">
-            <Clapperboard size={14} />
-          </span>
-          <Button type="button" variant="ghost" size="xs" className="min-w-0 px-1 font-semibold">
-            <span className="truncate">UGC Studio</span>
-            <ChevronDown size={12} />
-          </Button>
-        </div>
-      </div>
-      <Button type="button" variant="workbench" size="sm" className="w-full justify-between">
-        <span className="inline-flex items-center gap-2"><Plus size={13} /> New Command</span>
-        <kbd className="rounded border border-border bg-background px-1 text-[10px] text-muted-foreground">⌘N</kbd>
-      </Button>
-      <label className="flex items-center gap-2 rounded-md border border-border bg-card px-2 py-1.5">
-        <Search size={13} />
-        <Input value="" readOnly placeholder="Search personas, hooks..." className="h-5 border-0 bg-transparent p-0 text-xs shadow-none focus-visible:ring-0" />
-      </label>
       <SidebarSection title="Workspace">
         {views.map((view) => {
           const Icon = view.icon
@@ -1880,36 +1897,30 @@ function Sidebar(props: { activeView: ReactView; onViewChange: (view: ReactView)
           )
         })}
       </SidebarSection>
-      <SidebarSection title="Campaigns">
-        {["Summer Skincare", "Protein Bar Ads", "Hydration Boost", "Coffee Brand", "Archived"].map((label, index) => (
-          <SidebarRow key={label} type="button" active={index === 0} icon={<Folder size={13} />} className="h-7">
-            {label}
-          </SidebarRow>
-        ))}
+      <SidebarSection title="Candidates">
+        <div className="grid gap-1 px-1 text-xs text-muted-foreground">
+          <div className="flex items-center justify-between">
+            <span>Total</span>
+            <span>{total}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span>Ready</span>
+            <span>{ready}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span>Starred</span>
+            <span>{starred}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span>Exported</span>
+            <span>{exported}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span>Rejected</span>
+            <span>{rejected}</span>
+          </div>
+        </div>
       </SidebarSection>
-      <SidebarSection title="Review Queues">
-        {[
-          ["Needs My Review", "18"],
-          ["Starred", "7"],
-          ["Approved", "23"],
-          ["Rejected", "12"],
-        ].map(([label, count]) => (
-          <SidebarRow
-            key={label}
-            type="button"
-            icon={label === "Starred" ? <Star size={13} /> : label === "Approved" ? <CheckCircle2 size={13} /> : label === "Rejected" ? <XCircle size={13} /> : <Inbox size={13} />}
-            count={count}
-            className="h-7"
-          >
-            {label}
-          </SidebarRow>
-        ))}
-      </SidebarSection>
-      <div className="mt-auto flex items-center gap-2 border-t border-border pt-3">
-        <span className="grid h-6 w-6 place-items-center rounded-full bg-foreground text-[11px] text-background">A</span>
-        <strong>Arthur</strong>
-        <Badge className="ml-auto">Pro</Badge>
-      </div>
     </WorkbenchSidebar>
   )
 }
@@ -1917,9 +1928,8 @@ function Sidebar(props: { activeView: ReactView; onViewChange: (view: ReactView)
 function SidebarSection(props: { title: string; children: React.ReactNode }) {
   return (
     <section className="grid gap-1.5">
-      <h2 className="mx-1 flex items-center justify-between text-[10px] font-semibold uppercase tracking-normal text-muted-foreground">
+      <h2 className="mx-1 text-[10px] font-semibold uppercase tracking-normal text-muted-foreground">
         {props.title}
-        <Plus size={12} />
       </h2>
       <div className="grid gap-0.5">{props.children}</div>
     </section>
@@ -1927,50 +1937,31 @@ function SidebarSection(props: { title: string; children: React.ReactNode }) {
 }
 
 function Topbar(props: { activeViewMeta: (typeof views)[number] }) {
+  const workspace = useUgcLocalState().workspace
   return (
     <WorkbenchTopbar>
       <div className="flex min-w-0 items-center gap-2 text-muted-foreground">
         <Home size={13} />
         <span>UGC Studio</span>
         <span>/</span>
-        <span>Summer Skincare</span>
+        <span className="truncate">{workspace.title}</span>
         <span>/</span>
         <strong className="truncate text-foreground">{props.activeViewMeta.label}</strong>
-      </div>
-      <div className="hidden shrink-0 items-center gap-1 rounded-md border border-border bg-background px-1.5 py-1 text-[10px] font-semibold text-muted-foreground lg:flex">
-        <span className="rounded bg-primary/10 px-1.5 py-0.5 text-primary">UGC ads</span>
-        <span className="rounded px-1.5 py-0.5">Brainrot / Pleometric</span>
-      </div>
-      <div className="flex shrink-0 items-center gap-2">
-        <label className="flex h-8 w-48 items-center gap-2 rounded-md border border-border bg-card px-2">
-          <Search size={13} />
-          <Input value="" readOnly placeholder="Search" className="h-5 border-0 bg-transparent p-0 text-xs shadow-none focus-visible:ring-0" />
-          <kbd className="rounded border border-border bg-background px-1 text-[10px] text-muted-foreground">⌘K</kbd>
-        </label>
-        <Button type="button" size="icon-sm" variant="workbench" aria-label="Notifications"><Bell size={14} /></Button>
-        <Button type="button" size="icon-sm" variant="workbench" aria-label="History"><Clock size={14} /></Button>
-        <Button type="button" size="icon-sm" variant="subtle" className="rounded-full" aria-label="Arthur">A</Button>
-        <Button size="sm" variant="outline">Preview</Button>
-        <Button size="sm">Export</Button>
       </div>
     </WorkbenchTopbar>
   )
 }
 
 function ViewToolbar(props: { activeView: ReactView; onViewChange: (view: ReactView) => void }) {
+  const workspace = useUgcLocalState().workspace
   return (
     <div className="flex h-[58px] items-center justify-between gap-3 border-b border-border bg-card/80 px-4">
       <div className="min-w-[190px] flex-1">
-        <p className="m-0 truncate text-[11px] text-muted-foreground">Summer Skincare / creative search graph</p>
+        <p className="m-0 truncate text-[11px] text-muted-foreground">{workspace.title}</p>
         <h1 data-ugc-view-title className="m-0 mt-0.5 truncate text-[15px] font-bold tracking-normal text-foreground">{views.find((view) => view.value === props.activeView)?.label}</h1>
       </div>
       <ToolbarCluster className="max-w-[72%] shrink overflow-x-auto">
         <Tabs value={props.activeView} items={viewTabs} onValueChange={props.onViewChange} className="shrink-0" />
-        <Button type="button" size="xs" variant="workbench" className="shrink-0 max-[1400px]:hidden"><Grid2X2 size={13} /> Board</Button>
-        <Button type="button" size="xs" variant="workbench" className="shrink-0 max-[1400px]:hidden"><Table2 size={13} /> Table</Button>
-        <Button type="button" size="xs" variant="workbench" className="shrink-0 max-[1400px]:hidden"><Network size={13} /> Graph</Button>
-        <Button type="button" size="xs" variant="workbench" className="shrink-0 max-[1400px]:hidden"><Filter size={13} /> Filter</Button>
-        <Button type="button" size="xs" variant="workbench" className="shrink-0 max-[1400px]:hidden"><SlidersHorizontal size={13} /> Sort</Button>
       </ToolbarCluster>
     </div>
   )
@@ -4535,12 +4526,6 @@ function InspectorHeader(props: { title: string }) {
     <PanelHeader
       eyebrow="Inspector"
       title={props.title}
-      actions={(
-        <>
-          <Button type="button" size="xs" variant="selected">Creative</Button>
-          <Button type="button" size="xs" variant="ghost">JSON</Button>
-        </>
-      )}
       className="mb-0"
     />
   )
@@ -4588,13 +4573,6 @@ function CommandBar(props: { prompt: string; busy: boolean; onPromptChange: (val
       onValueChange={props.onPromptChange}
       className="mx-5 mb-4"
       leading={<Sparkles size={16} />}
-      actions={(
-        <>
-          <Button type="button" size="xs" variant="subtle"><Plus size={13} /> Add context</Button>
-          <Button type="button" size="xs" variant="subtle"><Target size={13} /> Targets</Button>
-          <Button type="button" size="xs" variant="subtle"><Settings size={13} /> Agent</Button>
-        </>
-      )}
       runButton={(
         <Button type="button" size="icon" onClick={props.onRun} disabled={props.busy} aria-label="Run command">
           <ArrowUp size={15} />

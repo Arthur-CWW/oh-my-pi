@@ -4,6 +4,10 @@
 
 Arthur wants this run as an ongoing orchestrated workstream: decompose work, dispatch subagents in parallel where safe, verify once per phase, and commit focused feature slices. Do not stop at phase boundaries.
 
+## Active V1 finish line
+
+`docs/plans/slotok-v1-done.md` is the active Slotok V1 release gate and blocker ledger. Keep `docs/plans/slotok-gold-doc.md` as product/architecture truth and this file as the execution/QA routing ledger. Historical slices do not clear V1 on their own.
+
 ## Product lanes
 
 Slotok has two first-class lanes:
@@ -117,7 +121,7 @@ Commit after green verification for each coherent slice:
 1. Core local-first V1 workflows.
 2. Public inspiration asset capture/manifests.
 3. Codex/KIE execution pipeline.
-4. Final visual QA/proof pass.
+4. Final visual QA/proof pass against `docs/plans/slotok-v1-done.md`.
 
 Current proof docs:
 

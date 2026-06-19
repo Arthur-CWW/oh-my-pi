@@ -2,6 +2,8 @@
 
 This is the project source-of-truth for continuing Slotok and UGC Studio implementation. Read this before editing Slotok UI, daemon, local state, provider-job, or UGC workflow code.
 
+`docs/plans/slotok-v1-done.md` is the active Slotok V1 finish line and blocker ledger. This gold doc remains the product and architecture source-of-truth; do not mark V1 done from this file alone.
+
 ## Product Thesis
 
 Slotok is a local-first AI video and UGC workbench.
@@ -426,18 +428,6 @@ Do not stage unrelated dirty files. The repo often has parallel Codex sessions e
 
 ## Completion Definition
 
-This goal is complete when the current V1 proof ledger shows:
+Use `docs/plans/slotok-v1-done.md` as the active V1 release gate.
 
-1. [ ] Slotok treats Pleometric-style brainrot creation and UGC Studio ads as first-class product lanes sharing the same local workspace ledger.
-2. [ ] SQLite is the canonical local workspace store and JSON is limited to bundle/import/export/backup compatibility.
-3. [ ] the local workspace opens from the daemon-backed SQLite path.
-4. [ ] persona profile-bible edits persist and reload.
-5. [ ] abstract reference mechanics archives persist and can use the preferred catalog roots `data/tiktok-catalogue/pleometric` and `data/tiktok-catalogue/mynameissico`; after the pending manifest import extension is verified, public Higgsfield/Arcads manifests import only as reference/inspiration records with rights/provenance notes.
-6. [ ] provider jobs are dry-run-first local records with request/response JSON, artifact paths, status, live mode, and spend cap fields; Codex analysis, analysis-to-KIE planning, and KIE generation require explicit live/capped gates before any provider spend.
-7. [ ] candidate batch review persists selected-set verdicts and notes.
-8. [ ] creative branches can fork, mark promising/dead-end, rollback/select active, and retain decision logs.
-9. [ ] final editor timeline/layer edits and export manifests persist.
-10. [ ] the developer graph derives from real local workspace state and exposes selected-node JSON.
-11. [ ] workspace bundles export/import the SQLite-backed workspace with object and asset manifests.
-12. [ ] workflow telemetry uses `workflowEvents` as append-only event history and `workflowRuns` as derived run snapshots; the browser uses SSE with polling fallback; the deterministic local demo launcher (`POST /api/ugc/workflows/demo`, the workflow-panel launcher copy/buttons, and `bun run demo:workflows`) creates visible runs/events/results/imported records while ending the run snapshot at `status: succeeded` and `currentPhase: "completed"`; handoff import has dry-run/apply guardrails through `POST /api/ugc/workflows/<run_id>/import`; dynamic-workflow callbacks feed telemetry only when a real runner provides them; OMP RPC/artifact polling/direct dynamic execution remain future adapters unless implemented; OMP stats remain historical only.
-13. [ ] typecheck, tests, build, visual QA, and manual proof steps are run by the parent and recorded in proof docs.
+This gold doc defines the product shape, architecture, and scope ledger. Slotok V1 is only done when the done-goal checklist is satisfied, its blockers are cleared or explicitly resolved, and parent proof is recorded against the active build.

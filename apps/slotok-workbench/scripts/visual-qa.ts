@@ -28,7 +28,12 @@ interface ViewAudit {
   overflowX: boolean
   title: string
   view: string
+  placeholderHits: string[]
+  fakeTopRightHits: string[]
 }
+
+const PLACEHOLDER_LABELS = ["Summer Skincare", "Hydration Boost", "Coffee Brand", "Archived"] as const
+const FAKE_TOP_RIGHT_LABELS = ["Notifications", "History", "Arthur", "Preview", "Export"] as const
 
 const processes: Array<ReturnType<typeof Bun.spawn>> = []
 
@@ -150,13 +155,43 @@ async function captureView(page: Page, name: string, screenshots: string[]): Pro
 }
 
 async function auditView(page: Page): Promise<ViewAudit> {
-  return page.evaluate(() => ({
-    commandBarVisible: Boolean(document.querySelector("[data-ugc-command-surface]")),
-    inspectorVisible: Boolean(document.querySelector("[data-ugc-inspector]")),
-    overflowX: document.documentElement.scrollWidth > window.innerWidth,
-    title: document.title,
-    view: document.querySelector("[data-ugc-view-title]")?.textContent?.trim() ?? "",
-  }))
+  return page.evaluate(
+    ([placeholderDenylist, fakeTopRightDenylist]) => {
+      const bodyTextNodes: string[] = []
+      const bodyWalker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null)
+      while (bodyWalker.nextNode()) {
+        const text = bodyWalker.currentNode.textContent?.trim()
+        if (text) bodyTextNodes.push(text)
+      }
+
+      const header = document.querySelector("header")
+      const topRightLabels: string[] = []
+      if (header) {
+        header.querySelectorAll("button, a, input, [aria-label]").forEach((el) => {
+          const text = el.textContent?.trim()
+          const aria = el.getAttribute("aria-label")
+          const placeholder = (el as HTMLInputElement).placeholder?.trim()
+          if (text) topRightLabels.push(text)
+          if (aria) topRightLabels.push(aria)
+          if (placeholder) topRightLabels.push(placeholder)
+        })
+      }
+
+      const placeholderHits = placeholderDenylist.filter((label) => bodyTextNodes.some((node) => node.includes(label)))
+      const fakeTopRightHits = fakeTopRightDenylist.filter((label) => topRightLabels.includes(label))
+
+      return {
+        commandBarVisible: Boolean(document.querySelector("[data-ugc-command-surface]")),
+        inspectorVisible: Boolean(document.querySelector("[data-ugc-inspector]")),
+        overflowX: document.documentElement.scrollWidth > window.innerWidth,
+        title: document.title,
+        view: document.querySelector("[data-ugc-view-title]")?.textContent?.trim() ?? "",
+        placeholderHits,
+        fakeTopRightHits,
+      }
+    },
+    [PLACEHOLDER_LABELS, FAKE_TOP_RIGHT_LABELS],
+  )
 }
 
 function viewFindings(audit: ViewAudit, expectedView: string): Finding[] {
@@ -166,6 +201,16 @@ function viewFindings(audit: ViewAudit, expectedView: string): Finding[] {
     finding(audit.commandBarVisible, `${expectedView}: command bar remains visible`, `commandBar=${audit.commandBarVisible}`),
     finding(audit.inspectorVisible, `${expectedView}: inspector remains visible`, `inspector=${audit.inspectorVisible}`),
     finding(!audit.overflowX, `${expectedView}: no document horizontal overflow`, `overflowX=${audit.overflowX}`),
+    finding(
+      audit.placeholderHits.length === 0,
+      `${expectedView}: no placeholder campaign labels`,
+      audit.placeholderHits.join(", ") || "none detected",
+    ),
+    finding(
+      audit.fakeTopRightHits.length === 0,
+      `${expectedView}: no fake top-right controls`,
+      audit.fakeTopRightHits.join(", ") || "none detected",
+    ),
   ]
 }
 
