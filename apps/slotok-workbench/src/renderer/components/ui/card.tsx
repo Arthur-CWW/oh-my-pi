@@ -4,14 +4,14 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "../../lib/cn"
 
 export const cardVariants = cva(
-  "border border-border bg-card text-card-foreground",
+  "border border-border bg-card text-card-foreground transition-all duration-150",
   {
     variants: {
       variant: {
-        default: "rounded-lg shadow-sm",
+        default: "rounded-lg shadow-[0_1px_3px_rgba(0,0,0,0.05),0_1px_2px_rgba(0,0,0,0.03)]",
         flat: "rounded-md shadow-none",
-        panel: "rounded-lg shadow-[0_1px_2px_rgba(20,22,25,0.04)]",
-        selected: "rounded-lg border-primary/60 shadow-[0_0_0_1px_hsl(var(--primary)/0.25)]",
+        panel: "rounded-lg shadow-[0_1px_3px_rgba(0,0,0,0.05),0_1px_2px_rgba(0,0,0,0.03)]",
+        selected: "rounded-lg border-primary shadow-[0_0_0_1px_hsl(var(--primary))]",
       },
       density: {
         default: "",

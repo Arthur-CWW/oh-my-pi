@@ -20,6 +20,23 @@ Do not treat shadcn as a dependency that hides styling. The project owns the cop
 - Radius scale: controls `6px`, panels `8px`, larger canvas/floating surfaces `10-12px`.
 - Letter spacing stays `0`.
 
+## Chorus-Inspired, Slotok-Owned Style Guide
+
+Use Chorus as a workbench reference, not as a brand clone.
+
+- Layout: fixed left rail on desktop, central scroll-owned canvas, right inspector. At tablet/mobile widths collapse to a single column: sidebar becomes a compact horizontal/nav drawer pattern, inspector stacks below or becomes a sheet/detail panel.
+- Material: off-white app background, white panels, muted zinc/slate borders, shallow shadows. Use outlines and surface tint before gradients.
+- Typography: clean system sans, 11-12px labels, 13-14px body, 15-17px screen titles. Long creative/workflow text gets readable line-height and local scroll; no squeezed single-line paragraphs unless it is a table/list row.
+- Spacing: 4px micro gaps, 8px control gaps, 12px panel gaps, 16px view padding. Avoid ad-hoc 7/9/14px spacing except inside legacy media geometry.
+- Radius: 6px controls, 8-10px rows/cards, 12px panels/floating command surfaces. Avoid bubbly SaaS cards.
+- State: selected rows use subtle fill plus a 1px accent outline; focus uses tight ring-1. Error/warning/success colors stay sparse and semantic.
+- Overflow: document never scrolls horizontally. Main shell height is viewport-bound. `.rugc-stage` and `[data-ugc-inspector]` own vertical scrolling. Tables/strips/maps may scroll locally but must not widen the document.
+- Responsive breakpoints:
+  - desktop ≥1280px: sidebar + canvas + inspector.
+  - tablet 900-1279px: narrower sidebar/inspector, wrapped toolbars/actions, local horizontal scroll only for tables/maps.
+  - narrow/mobile <900px: one-column workbench with view content first, inspector below/sheet, command surface full-width, cards auto-fit. No fixed `min-width` on body or top-level views.
+- Do not copy Chorus labels, icons, product names, chat content, or exact pixel layout. Copy the restraint: quiet surfaces, dense readable panes, selected/focused outlines, and native-app calm.
+
 ## Component Rules
 
 - New UI should start from primitives in `components/ui/` and composed workbench components in `design-system/workbench.tsx`.

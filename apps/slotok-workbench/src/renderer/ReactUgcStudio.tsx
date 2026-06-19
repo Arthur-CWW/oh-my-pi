@@ -1532,6 +1532,48 @@ export function ReactUgcStudio() {
   const selectedBranch = workspace.branchSnapshots.find((branch) => branch.id === selectedBranchId) ?? workspace.branchSnapshots[0]
   const selectedCapability = capabilities.find((capability) => capability.operation === operation) ?? capabilities[0]
   const activeViewMeta = views.find((view) => view.value === activeView) ?? views[0]
+  const [leftPanelOpen, setLeftPanelOpen] = React.useState(true)
+  const [inspectorOpen, setInspectorOpen] = React.useState(true)
+
+  React.useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      const target = event.target
+      const editing = target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement || (target instanceof HTMLElement && target.isContentEditable)
+      if (editing) return
+      if (event.key === "[") {
+        event.preventDefault()
+        setLeftPanelOpen((open) => !open)
+        return
+      }
+      if (event.key === "]") {
+        event.preventDefault()
+        setInspectorOpen((open) => !open)
+        return
+      }
+      if (event.altKey && !event.metaKey && !event.ctrlKey && !event.shiftKey) {
+        const index = Number(event.key)
+        const view = Number.isInteger(index) ? views[index - 1] : undefined
+        if (view) {
+          event.preventDefault()
+          setActiveView(view.value)
+        }
+      }
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [])
+
+  React.useEffect(() => {
+    function applyResponsivePanels() {
+      if (window.innerWidth < 900) {
+        setLeftPanelOpen(false)
+        setInspectorOpen(false)
+      }
+    }
+    applyResponsivePanels()
+    window.addEventListener("resize", applyResponsivePanels)
+    return () => window.removeEventListener("resize", applyResponsivePanels)
+  }, [])
 
   const refreshWorkspaceState = React.useCallback(async (): Promise<void> => {
     try {
@@ -1796,14 +1838,18 @@ export function ReactUgcStudio() {
 
   return (
     <UgcLocalStateContext.Provider value={localState}>
-    <WorkbenchShell className="react-ugc-theme" data-ugc-studio-root>
-      <Sidebar activeView={activeView} onViewChange={setActiveView} />
+    <WorkbenchShell className={cn("react-ugc-theme min-h-0 min-w-0", leftPanelOpen ? "grid-cols-[220px_minmax(0,1fr)]" : "grid-cols-[52px_minmax(0,1fr)]")} data-ugc-studio-root>
+      {leftPanelOpen ? (
+        <Sidebar activeView={activeView} onViewChange={setActiveView} onCollapse={() => setLeftPanelOpen(false)} />
+      ) : (
+        <CollapsedSidebar activeView={activeView} onViewChange={setActiveView} onExpand={() => setLeftPanelOpen(true)} />
+      )}
       <WorkbenchMain>
-        <Topbar activeViewMeta={activeViewMeta} />
-        <WorkbenchContent className="grid-cols-[minmax(0,1fr)_314px]">
-          <WorkbenchCanvas className="grid grid-rows-[58px_minmax(0,1fr)_auto]">
+        <Topbar activeViewMeta={activeViewMeta} leftPanelOpen={leftPanelOpen} inspectorOpen={inspectorOpen} onToggleLeftPanel={() => setLeftPanelOpen((open) => !open)} onToggleInspector={() => setInspectorOpen((open) => !open)} />
+        <WorkbenchContent className={inspectorOpen ? undefined : "grid-cols-[minmax(0,1fr)]"}>
+          <WorkbenchCanvas className="grid grid-rows-[58px_minmax(0,1fr)_auto] min-h-0 min-w-0">
             <ViewToolbar activeView={activeView} onViewChange={setActiveView} />
-            <div className="rugc-stage">
+            <div className="rugc-stage min-h-0 min-w-0">
               <WorkspaceView
                 activeView={activeView}
                 selectedCandidateId={selectedCandidateId}
@@ -1835,21 +1881,23 @@ export function ReactUgcStudio() {
             </div>
             <CommandBar prompt={prompt} onPromptChange={setPrompt} onRun={() => callKie("/api/ugc/kie/plan", request)} busy={busy} />
           </WorkbenchCanvas>
-          <Inspector
-            activeView={activeView}
-            selectedPersona={selectedPersona}
-            selectedCandidate={selectedCandidate}
-            selectedBranch={selectedBranch}
-            selectedCapability={selectedCapability}
-            result={result}
-            busy={busy}
-            onMutateLocal={mutateLocal}
-            onPlanAnalysisToKie={callAnalysisToKie}
-            workspaceBundle={workspaceBundle}
-            bundleResult={bundleResult}
-            onExportWorkspaceBundle={exportWorkspaceBundle}
-            onImportWorkspaceBundle={importWorkspaceBundle}
-          />
+          {inspectorOpen ? (
+            <Inspector
+              activeView={activeView}
+              selectedPersona={selectedPersona}
+              selectedCandidate={selectedCandidate}
+              selectedBranch={selectedBranch}
+              selectedCapability={selectedCapability}
+              result={result}
+              busy={busy}
+              onMutateLocal={mutateLocal}
+              onPlanAnalysisToKie={callAnalysisToKie}
+              workspaceBundle={workspaceBundle}
+              bundleResult={bundleResult}
+              onExportWorkspaceBundle={exportWorkspaceBundle}
+              onImportWorkspaceBundle={importWorkspaceBundle}
+            />
+          ) : null}
         </WorkbenchContent>
       </WorkbenchMain>
     </WorkbenchShell>
@@ -1857,7 +1905,7 @@ export function ReactUgcStudio() {
   )
 }
 
-function Sidebar(props: { activeView: ReactView; onViewChange: (view: ReactView) => void }) {
+function Sidebar(props: { activeView: ReactView; onViewChange: (view: ReactView) => void; onCollapse: () => void }) {
   const workspace = useUgcLocalState().workspace
   const candidates = workspace.candidates
   const total = candidates.length
@@ -1871,10 +1919,13 @@ function Sidebar(props: { activeView: ReactView; onViewChange: (view: ReactView)
         <span className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-primary text-primary-foreground">
           <Clapperboard size={14} />
         </span>
-        <span className="truncate text-sm font-semibold">UGC Studio</span>
+        <span className="min-w-0 flex-1 truncate text-sm font-semibold">UGC Studio</span>
+        <Button type="button" size="xs" variant="ghost" onClick={props.onCollapse} aria-label="Collapse workspace sidebar" title="Collapse workspace sidebar ([)">
+          Hide
+        </Button>
       </div>
       <SidebarSection title="Workspace">
-        {views.map((view) => {
+        {views.map((view, index) => {
           const Icon = view.icon
           return (
             <SidebarRow
@@ -1883,7 +1934,7 @@ function Sidebar(props: { activeView: ReactView; onViewChange: (view: ReactView)
               active={props.activeView === view.value}
               icon={<Icon size={14} />}
               aria-label={view.label}
-              shortcut={`g${view.value.slice(0, 1)}`}
+              shortcut={`⌥${index + 1}`}
               onClick={() => props.onViewChange(view.value)}
             >
               {view.label}
@@ -1919,6 +1970,34 @@ function Sidebar(props: { activeView: ReactView; onViewChange: (view: ReactView)
   )
 }
 
+function CollapsedSidebar(props: { activeView: ReactView; onViewChange: (view: ReactView) => void; onExpand: () => void }) {
+  return (
+    <WorkbenchSidebar className="items-center gap-2 px-2">
+      <Button type="button" size="icon-sm" variant="selected" onClick={props.onExpand} aria-label="Expand workspace sidebar" title="Expand workspace sidebar ([)">
+        <Clapperboard size={14} />
+      </Button>
+      <div className="grid gap-1">
+        {views.map((view, index) => {
+          const Icon = view.icon
+          return (
+            <Button
+              key={view.value}
+              type="button"
+              size="icon-sm"
+              variant={props.activeView === view.value ? "selected" : "ghost"}
+              onClick={() => props.onViewChange(view.value)}
+              aria-label={view.label}
+              title={`${view.label} (Alt+${index + 1})`}
+            >
+              <Icon size={14} />
+            </Button>
+          )
+        })}
+      </div>
+    </WorkbenchSidebar>
+  )
+}
+
 function SidebarSection(props: { title: string; children: React.ReactNode }) {
   return (
     <section className="grid gap-1.5">
@@ -1930,7 +2009,7 @@ function SidebarSection(props: { title: string; children: React.ReactNode }) {
   )
 }
 
-function Topbar(props: { activeViewMeta: (typeof views)[number] }) {
+function Topbar(props: { activeViewMeta: (typeof views)[number]; leftPanelOpen: boolean; inspectorOpen: boolean; onToggleLeftPanel: () => void; onToggleInspector: () => void }) {
   const workspace = useUgcLocalState().workspace
   return (
     <WorkbenchTopbar>
@@ -1942,6 +2021,11 @@ function Topbar(props: { activeViewMeta: (typeof views)[number] }) {
         <span>/</span>
         <strong className="truncate text-foreground">{props.activeViewMeta.label}</strong>
       </div>
+      <div className="flex shrink-0 items-center gap-1">
+        <Button type="button" size="xs" variant={props.leftPanelOpen ? "workbench" : "selected"} onClick={props.onToggleLeftPanel} title="Toggle workspace sidebar ([)">{props.leftPanelOpen ? "Hide nav" : "Show nav"}</Button>
+        <Button type="button" size="xs" variant={props.inspectorOpen ? "workbench" : "selected"} onClick={props.onToggleInspector} title="Toggle inspector (])">{props.inspectorOpen ? "Hide inspector" : "Show inspector"}</Button>
+        <span className="hidden text-[10px] text-muted-foreground lg:inline">Alt+1-8 views</span>
+      </div>
     </WorkbenchTopbar>
   )
 }
@@ -1949,12 +2033,12 @@ function Topbar(props: { activeViewMeta: (typeof views)[number] }) {
 function ViewToolbar(props: { activeView: ReactView; onViewChange: (view: ReactView) => void }) {
   const workspace = useUgcLocalState().workspace
   return (
-    <div className="flex h-[58px] items-center justify-between gap-3 border-b border-border bg-card/80 px-4">
-      <div className="min-w-[190px] flex-1">
+    <div className="flex h-[58px] min-w-0 items-center justify-between gap-3 border-b border-border bg-card/80 px-4">
+      <div className="min-w-0 w-36 shrink-0">
         <p className="m-0 truncate text-[11px] text-muted-foreground">{workspace.title}</p>
         <h1 data-ugc-view-title className="m-0 mt-0.5 truncate text-[15px] font-bold tracking-normal text-foreground">{views.find((view) => view.value === props.activeView)?.label}</h1>
       </div>
-      <ToolbarCluster className="max-w-[72%] shrink overflow-x-auto">
+      <ToolbarCluster className="min-w-0 flex-1 justify-end overflow-x-auto">
         <Tabs value={props.activeView} items={viewTabs} onValueChange={props.onViewChange} className="shrink-0" />
       </ToolbarCluster>
     </div>
@@ -2071,7 +2155,7 @@ function PersonaAtlas(props: {
           >
             <div className={cn("rugc-persona-portrait", persona.color)}>
               <span>{persona.name.split(" ").map((part) => part[0]).join("")}</span>
-              <em>{persona.clips} clips</em>
+              <em>{persona.clips} {persona.clips === 1 ? "clip" : "clips"}</em>
             </div>
             <div className="rugc-persona-body">
               <header>
@@ -2376,12 +2460,12 @@ function BatchReview(props: { selectedCandidateId: string; onSelectCandidate: (i
           </div>
         </div>
       </section>
-      <div className="col-span-full flex items-center justify-between gap-3 rounded-lg border border-border bg-card px-3 py-1.5 shadow-sm mt-2">
+      <div className="col-span-full flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card px-3 py-1.5 shadow-sm mt-2">
         <div className="min-w-0 text-[11px] text-muted-foreground">
           <strong className="text-foreground">{selectedSet.length}</strong> selected
           <span className="ml-2">Filter: {filterItems.find((item) => item.id === filter)?.label}</span>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex flex-wrap items-center gap-1.5 justify-end">
           <Button size="xs" variant="workbench" onClick={() => setSelectedSetIds(filteredCandidates.map((candidate) => candidate.id))}>Select visible</Button>
           <Button size="xs" variant="ghost" onClick={() => setSelectedSetIds([])}>Clear</Button>
           <Button size="xs" variant="workbench" onClick={() => applyStatusToSet("starred")}>Star selected</Button>
@@ -2390,60 +2474,62 @@ function BatchReview(props: { selectedCandidateId: string; onSelectCandidate: (i
           <Button size="xs" variant="subtle" onClick={() => addReviewNote("revise", "Regenerate selected direction with a softer CTA.")}>Add note</Button>
         </div>
       </div>
-      <table className="rugc-review-table mt-3 border border-border/30 rounded-xl overflow-hidden bg-white text-[11px] w-full border-collapse shadow-[0_1px_2px_rgba(0,0,0,0.01)]">
-        <thead>
-          <tr className="bg-muted/30 border-b border-border/50 text-muted-foreground">
-            <th className="px-3 py-2 text-left font-semibold">Select</th>
-            <th className="px-3 py-2 text-left font-semibold">Thumbnail</th>
-            <th className="px-3 py-2 text-left font-semibold">Persona</th>
-            <th className="px-3 py-2 text-left font-semibold">Format</th>
-            <th className="px-3 py-2 text-left font-semibold">Hook</th>
-            <th className="px-3 py-2 text-left font-semibold">CTA</th>
-            <th className="px-3 py-2 text-left font-semibold">Scores</th>
-            <th className="px-3 py-2 text-left font-semibold">Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          {filteredCandidates.map((candidate, index) => (
-            <tr
-              key={candidate.id}
-              className={cn(
-                "border-b border-border/30 hover:bg-muted/10 cursor-pointer transition-colors",
-                candidate.id === props.selectedCandidateId && "bg-primary/5 text-foreground font-semibold active"
-              )}
-              onClick={() => props.onSelectCandidate(candidate.id)}
-            >
-              <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
-                <input
-                  type="checkbox"
-                  checked={selectedSetIds.includes(candidate.id)}
-                  onChange={() => toggleSelectedSet(candidate.id)}
-                  className="rounded border-gray-300 text-primary focus:ring-primary h-3 w-3"
-                  aria-label={`Select ${candidate.title}`}
-                />
-                <span className="ml-2 text-muted-foreground font-mono">#{index + 1}</span>
-              </td>
-              <td className="px-3 py-2"><MiniThumb status={candidate.status === "needs-revision" ? "risk" : "keep"} label="" /></td>
-              <td className="px-3 py-2 font-medium">{candidate.personaId?.includes("deadpan") ? "Runner" : "Lily"}</td>
-              <td className="px-3 py-2 text-muted-foreground">{candidate.kind}</td>
-              <td className="px-3 py-2 font-medium truncate max-w-[150px]">{candidate.title}</td>
-              <td className="px-3 py-2 text-muted-foreground">{candidate.kind === "cta" ? "Direct" : "Soft"}</td>
-              <td className="px-3 py-2 font-mono font-medium text-foreground">{candidate.scorecard.overall} / {candidate.scorecard.personaFit}</td>
-              <td className="px-3 py-2">
-                <span className={cn(
-                  "inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border",
-                  candidate.status === "starred" ? "bg-amber-50 text-amber-700 border-amber-200" :
-                  candidate.status === "needs-revision" ? "bg-rose-50 text-rose-700 border-rose-200" :
-                  candidate.status === "rejected" ? "bg-zinc-50 text-zinc-700 border-zinc-200" :
-                  "bg-blue-50 text-blue-700 border-blue-200"
-                )}>
-                  {candidate.status === "starred" ? "Approved" : candidate.status === "needs-revision" ? "In Review" : candidate.status === "rejected" ? "Rejected" : "Draft"}
-                </span>
-              </td>
+      <div className="col-span-full w-full overflow-x-auto border border-border/30 rounded-xl bg-white shadow-[0_1px_2px_rgba(0,0,0,0.01)] mt-3">
+        <table className="rugc-review-table border-none w-full border-collapse text-[11px]" style={{ minWidth: "800px" }}>
+          <thead>
+            <tr className="bg-muted/30 border-b border-border/50 text-muted-foreground">
+              <th className="px-3 py-2 text-left font-semibold">Select</th>
+              <th className="px-3 py-2 text-left font-semibold">Thumbnail</th>
+              <th className="px-3 py-2 text-left font-semibold">Persona</th>
+              <th className="px-3 py-2 text-left font-semibold">Format</th>
+              <th className="px-3 py-2 text-left font-semibold">Hook</th>
+              <th className="px-3 py-2 text-left font-semibold">CTA</th>
+              <th className="px-3 py-2 text-left font-semibold">Scores</th>
+              <th className="px-3 py-2 text-left font-semibold">Status</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {filteredCandidates.map((candidate, index) => (
+              <tr
+                key={candidate.id}
+                className={cn(
+                  "border-b border-border/30 hover:bg-muted/10 cursor-pointer transition-colors",
+                  candidate.id === props.selectedCandidateId && "bg-primary/5 text-foreground font-semibold active"
+                )}
+                onClick={() => props.onSelectCandidate(candidate.id)}
+              >
+                <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                  <input
+                    type="checkbox"
+                    checked={selectedSetIds.includes(candidate.id)}
+                    onChange={() => toggleSelectedSet(candidate.id)}
+                    className="rounded border-gray-300 text-primary focus:ring-primary h-3 w-3"
+                    aria-label={`Select ${candidate.title}`}
+                  />
+                  <span className="ml-2 text-muted-foreground font-mono">#{index + 1}</span>
+                </td>
+                <td className="px-3 py-2"><MiniThumb status={candidate.status === "needs-revision" ? "risk" : "keep"} label="" /></td>
+                <td className="px-3 py-2 font-medium">{candidate.personaId?.includes("deadpan") ? "Runner" : "Lily"}</td>
+                <td className="px-3 py-2 text-muted-foreground">{candidate.kind}</td>
+                <td className="px-3 py-2 font-medium truncate max-w-[150px]">{candidate.title}</td>
+                <td className="px-3 py-2 text-muted-foreground">{candidate.kind === "cta" ? "Direct" : "Soft"}</td>
+                <td className="px-3 py-2 font-mono font-medium text-foreground">{candidate.scorecard.overall} / {candidate.scorecard.personaFit}</td>
+                <td className="px-3 py-2">
+                  <span className={cn(
+                    "inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border",
+                    candidate.status === "starred" ? "bg-amber-50 text-amber-700 border-amber-200" :
+                    candidate.status === "needs-revision" ? "bg-rose-50 text-rose-700 border-rose-200" :
+                    candidate.status === "rejected" ? "bg-zinc-50 text-zinc-700 border-zinc-200" :
+                    "bg-blue-50 text-blue-700 border-blue-200"
+                  )}>
+                    {candidate.status === "starred" ? "Approved" : candidate.status === "needs-revision" ? "In Review" : candidate.status === "rejected" ? "Rejected" : "Draft"}
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
   }
@@ -3424,50 +3510,48 @@ function WorkflowTelemetryPanel(props: {
   }
 
   return (
-    <div className="rugc-provider-note mt-3">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div className="min-w-0">
+    <PanelCard tone="default" density="compact" className="mt-4 p-4 shadow-[0_1px_3px_rgba(0,0,0,0.02)] border border-border/70 rounded-xl">
+      <PanelHeader
+        eyebrow="Event-sourced telemetry"
+        title="Workflow Telemetry"
+        actions={
           <div className="flex items-center gap-2">
-            <Bot size={15} className="text-muted-foreground" />
-            <strong>Workflow telemetry</strong>
             <StatusBadge tone={telemetry.streamStatus === "live" ? "success" : telemetry.streamStatus === "unavailable" ? "danger" : "active"}>
               {telemetry.streamStatus}
             </StatusBadge>
+            <Button size="xs" variant="workbench" onClick={() => void telemetry.refresh()}>
+              <RefreshCw size={13} /> Refresh
+            </Button>
           </div>
-          <p className="mt-1">Event-sourced demo/import telemetry from Slotok daemon routes; future Pi/OMP or dynamic-workflow adapters must arrive through these same events.</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-1.5">
-          <Button size="xs" variant="workbench" onClick={() => void telemetry.refresh()}>
-            <RefreshCw size={13} /> Refresh
-          </Button>
-        </div>
-      </div>
+        }
+      />
+      <p className="text-xs text-muted-foreground mt-[-8px] mb-3">Event-sourced demo/import telemetry from Slotok daemon routes; future Pi/OMP or dynamic-workflow adapters must arrive through these same events.</p>
 
-      <div className="mt-2 grid grid-cols-4 gap-2">
+      <div className="grid grid-cols-4 gap-3 bg-muted/30 p-2.5 rounded-lg border border-border/40">
         <MetricRow label="Runs" value={String(telemetry.runs.length)} />
         <MetricRow label="Active" value={String(activeRuns.length)} />
         <MetricRow label="Brainrot" value={String(telemetry.runs.filter((run) => run.lane === "brainrot").length)} />
         <MetricRow label="UGC ads" value={String(telemetry.runs.filter((run) => run.lane === "ugc-ads").length)} />
       </div>
 
-      <div className="mt-2 rounded-md border border-border bg-background p-2 text-[10px] leading-4 text-muted-foreground">
+      <div className="mt-2.5 rounded-lg border border-border/80 bg-background/50 p-2.5 text-[10px] leading-relaxed text-muted-foreground">
         <div className="flex items-start gap-2">
           {telemetry.streamStatus === "unavailable" ? <XCircle size={13} className="mt-0.5 text-red-700" /> : <Clock size={13} className="mt-0.5" />}
           <span>{telemetry.message}</span>
         </div>
       </div>
 
-      <div className="mt-3 rounded-md border border-primary/30 bg-primary/5 p-2">
+      <div className="mt-4 rounded-xl border border-primary/20 bg-primary/5 p-3.5 shadow-sm hover:border-primary/30 transition-all">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div className="min-w-0">
             <p className="text-[11px] font-semibold text-foreground">Deterministic local demo workflow launcher</p>
-            <p className="mt-1 text-[10px] leading-4 text-muted-foreground">
+            <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
               Start here: click <span className="font-semibold text-foreground">Run both demos</span> to trigger clean-room local planning runs, replay workflow events, and refresh workspace state. No live providers, no OMP RPC, no real background subagents.
             </p>
           </div>
           <StatusBadge tone="active">clean-room local</StatusBadge>
         </div>
-        <div className="mt-2 flex flex-wrap gap-1.5">
+        <div className="mt-3 flex flex-wrap gap-1.5">
           <Button size="xs" variant="outline" disabled={telemetry.demoRunningLane !== null} onClick={() => void telemetry.runDemoWorkflow("brainrot")}>
             <PlayCircle size={12} /> {telemetry.demoRunningLane === "brainrot" ? "Running brainrot…" : "Run brainrot demo"}
           </Button>
@@ -3478,16 +3562,16 @@ function WorkflowTelemetryPanel(props: {
             <Plus size={12} /> {telemetry.demoRunningLane === "all" ? "Running both…" : "Run both demos"}
           </Button>
         </div>
-        <p className={cn("mt-2 text-[10px] leading-4", telemetry.demoRouteUnavailable ? "text-amber-700" : "text-muted-foreground")}>
+        <p className={cn("mt-2 text-[10px] leading-relaxed", telemetry.demoRouteUnavailable ? "text-amber-700" : "text-muted-foreground")}>
           {telemetry.demoRouteUnavailable
             ? "Demo launcher route unavailable in this daemon build. The buttons stay visible so you can retry after the backend route lands."
             : "These buttons post to /api/ugc/workflows/demo and then refresh workflow telemetry plus /api/ugc/workspace."}
         </p>
-        <pre className="rugc-json mt-2 max-h-32">{JSON.stringify(demoPreview, null, 2)}</pre>
+        <pre className="rugc-json mt-2.5 max-h-32">{JSON.stringify(demoPreview, null, 2)}</pre>
       </div>
 
-      <div className="mt-3 grid min-h-0 grid-cols-[minmax(0,1fr)_minmax(280px,0.9fr)] gap-3">
-        <div className="grid max-h-[42rem] gap-2 overflow-auto pr-1">
+      <div className="mt-4 grid min-h-0 grid-cols-[minmax(0,1fr)_minmax(280px,0.9fr)] gap-4">
+        <div className="grid max-h-[42rem] gap-2.5 overflow-auto pr-1">
           {telemetry.runs.length ? telemetry.runs.slice(0, 8).map((run) => {
             const runAgents = activeWorkflowAgents(run.events)
             return (
@@ -3495,8 +3579,8 @@ function WorkflowTelemetryPanel(props: {
                 key={run.id}
                 type="button"
                 className={cn(
-                  "rounded-md border border-border bg-card p-2 text-left shadow-sm hover:bg-accent",
-                  selectedRun?.id === run.id && "border-primary/60 bg-primary/10",
+                  "rounded-lg border p-3 text-left shadow-[0_1px_2px_rgba(0,0,0,0.02)] transition-all hover:bg-accent/40",
+                  selectedRun?.id === run.id ? "border-primary/50 bg-primary/5 ring-1 ring-primary/20" : "border-border bg-card",
                 )}
                 onClick={() => setSelectedRunId(run.id)}
               >
@@ -3508,10 +3592,10 @@ function WorkflowTelemetryPanel(props: {
                   <span className="truncate">{run.currentPhase}</span>
                   <ProductLaneBadge lane={run.lane} />
                 </div>
-                <div className="mt-1 grid gap-0.5 text-[10px] text-muted-foreground">
+                <div className="mt-1.5 grid gap-0.5 text-[10px] text-muted-foreground border-t border-border/30 pt-1.5">
                   {runAgents.length ? runAgents.slice(0, 3).map((event) => (
                     <span key={workflowEventKey(event)} className="truncate">
-                      {event.agent}: {event.message}
+                      <strong>{event.agent}</strong>: {event.message}
                     </span>
                   )) : (
                     <span className="truncate">{run.events[0]?.message ?? "No events replayed yet"}</span>
@@ -3520,7 +3604,7 @@ function WorkflowTelemetryPanel(props: {
               </button>
             )
           }) : (
-            <div className="grid min-h-32 place-items-center rounded-md border border-dashed border-border bg-background p-4 text-center">
+            <div className="grid min-h-32 place-items-center rounded-lg border border-dashed border-border bg-background p-4 text-center">
               <div>
                 <GitBranch className="mx-auto text-muted-foreground" size={22} />
                 <p className="mt-2 text-[11px] font-semibold text-foreground">No workflow runs</p>
@@ -3530,10 +3614,10 @@ function WorkflowTelemetryPanel(props: {
           )}
         </div>
 
-        <div className="grid max-h-[42rem] gap-2 overflow-auto pr-1">
+        <div className="grid max-h-[42rem] gap-3 overflow-auto pr-1">
           {selectedRun ? (
             <>
-              <div className="rounded-md border border-border bg-background p-2">
+              <div className="rounded-lg border border-border bg-background p-3">
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <strong className="block truncate text-[11px] text-foreground">{selectedRun.source}</strong>
@@ -3541,7 +3625,7 @@ function WorkflowTelemetryPanel(props: {
                   </div>
                   <ProductLaneBadge lane={selectedRun.lane} />
                 </div>
-                <div className="mt-2 grid gap-1">
+                <div className="mt-2.5 grid gap-1 border-t border-border/30 pt-2.5">
                   <MetricRow label="Status" value={selectedRun.status} />
                   <MetricRow label="Phase" value={selectedRun.currentPhase} />
                   <MetricRow label="Actors in events" value={selectedAgents.length ? selectedAgents.map((event) => event.agent).filter(Boolean).join(", ") : latestEvent?.agent ?? "none"} />
@@ -3549,26 +3633,26 @@ function WorkflowTelemetryPanel(props: {
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-1">
+              <div className="grid grid-cols-3 gap-1.5">
                 {selectedRun.counters.slice(0, 6).map((counter) => (
-                  <div key={counter.label} className="rounded border border-border bg-card px-2 py-1">
-                    <span className="block truncate text-[9px] uppercase tracking-[0.16em] text-muted-foreground">{counter.label}</span>
-                    <strong className="text-[11px] text-foreground">{counter.value}</strong>
+                  <div key={counter.label} className="rounded-lg border border-border bg-card p-2 shadow-sm">
+                    <span className="block truncate text-[9px] uppercase tracking-wider text-muted-foreground">{workflowCounterLabel(counter.label)}</span>
+                    <strong className="text-xs font-semibold text-foreground">{counter.value}</strong>
                   </div>
                 ))}
               </div>
 
-              <div className="rounded-md border border-border bg-background p-2">
-                <p className="m-0 text-[11px] font-semibold text-foreground">Latest events</p>
-                <div className="mt-2 grid gap-1.5">
+              <div className="rounded-lg border border-border bg-background p-3">
+                <p className="m-0 text-xs font-semibold text-foreground">Latest Events</p>
+                <div className="mt-2.5 grid gap-2">
                   {selectedRun.events.slice(0, 6).map((event) => (
-                    <div key={workflowEventKey(event)} className="rounded border border-border bg-card p-2">
+                    <div key={workflowEventKey(event)} className="rounded-lg border border-border bg-card p-2.5 shadow-[0_1px_2px_rgba(0,0,0,0.01)]">
                       <div className="flex items-center justify-between gap-2">
                         <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[9px] font-semibold text-primary">{event.type}</span>
                         <span className="truncate text-[9px] text-muted-foreground">{event.createdAt ?? event.phase ?? "event log"}</span>
                       </div>
-                      <p className="mt-1 line-clamp-2 text-[10px] leading-4 text-muted-foreground">
-                        {event.agent ? `${event.agent}: ` : ""}{event.message}
+                      <p className="mt-1.5 line-clamp-2 text-[10px] leading-relaxed text-muted-foreground">
+                        {event.agent ? <strong>{event.agent}: </strong> : ""}{event.message}
                       </p>
                     </div>
                   ))}
@@ -3576,23 +3660,23 @@ function WorkflowTelemetryPanel(props: {
                 </div>
               </div>
 
-              <div className="rounded-md border border-border bg-background p-2">
-                <p className="m-0 text-[11px] font-semibold text-foreground">Artifacts</p>
-                <div className="mt-1 grid gap-1 text-[10px] text-muted-foreground">
+              <div className="rounded-lg border border-border bg-background p-3">
+                <p className="m-0 text-xs font-semibold text-foreground">Artifacts</p>
+                <div className="mt-1.5 grid gap-1.5 text-[10px] text-muted-foreground">
                   {selectedRun.artifactPaths.length ? selectedRun.artifactPaths.slice(0, 6).map((path) => (
-                    <span key={path} className="truncate"><FileJson size={11} className="mr-1 inline" />{path}</span>
+                    <span key={path} className="truncate"><FileJson size={11} className="mr-1.5 inline" />{path}</span>
                   )) : <span>none yet</span>}
                 </div>
               </div>
 
-              <div className="rounded-md border border-border bg-background p-2">
+              <div className="rounded-lg border border-border bg-background p-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="m-0 text-[11px] font-semibold text-foreground">Import handoff payload</p>
+                  <p className="m-0 text-xs font-semibold text-foreground">Import handoff payload</p>
                   <Button size="xs" variant="workbench" onClick={loadSamplePayload}>
                     <Copy size={12} /> Sample payload
                   </Button>
                 </div>
-                <div className="mt-2 rounded-md border border-amber-200 bg-amber-50/70 p-2 text-[10px] leading-4 text-amber-800">
+                <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50/70 p-2.5 text-[10px] leading-relaxed text-amber-800">
                   Clean-room import only: use sourcePolicy metadata-only or abstract-mechanics unless rights-cleared proof exists. The sample records a local dry-run plan and note; it never calls a live provider.
                 </div>
                 <Textarea
@@ -3601,7 +3685,7 @@ function WorkflowTelemetryPanel(props: {
                   onChange={(event) => updatePayloadText(event.currentTarget.value)}
                   placeholder="{&quot;lane&quot;:&quot;ugc-ads&quot;,&quot;sourcePolicy&quot;:&quot;metadata-only&quot;,&quot;providerJobs&quot;:[...]}"
                 />
-                <div className="mt-2 grid grid-cols-2 gap-1">
+                <div className="mt-2 grid grid-cols-2 gap-1.5">
                   <Button size="xs" variant="workbench" disabled={dryRunDisabled} onClick={() => void submitImport(false)}>
                     <CheckCircle2 size={12} /> {importBusy === "dry-run" ? "Dry-running…" : "Dry-run validate"}
                   </Button>
@@ -3609,7 +3693,7 @@ function WorkflowTelemetryPanel(props: {
                     <PlayCircle size={12} /> {importBusy === "apply" ? "Applying…" : "Apply import"}
                   </Button>
                 </div>
-                <p className={cn("mt-2 text-[10px] leading-4", payloadProblem || applyDisabled ? "text-amber-700" : "text-muted-foreground")}>
+                <p className={cn("mt-2 text-[10px] leading-relaxed", payloadProblem || applyDisabled ? "text-amber-700" : "text-muted-foreground")}>
                   {importMessage} {dryRunDisabled ? dryRunHelp : applyHelp}
                 </p>
                 <pre className="rugc-json mt-2 max-h-36">{JSON.stringify(importPreview ?? {
@@ -3622,13 +3706,13 @@ function WorkflowTelemetryPanel(props: {
               <pre className="rugc-json max-h-28">{selectedRun.errorPreview ? `error: ${selectedRun.errorPreview}` : selectedRun.resultPreview ? `result: ${selectedRun.resultPreview}` : JSON.stringify({ latestEvent: latestEvent?.message ?? null, raw: selectedRun.rawJson }, null, 2)}</pre>
             </>
           ) : (
-            <div className="rounded-md border border-dashed border-border bg-background p-3 text-[11px] leading-4 text-muted-foreground">
+            <div className="rounded-lg border border-dashed border-border bg-background p-3.5 text-[11px] leading-relaxed text-muted-foreground">
               Select a workflow run to inspect event-derived phase, actors/roles in events, artifacts, result, and error previews.
             </div>
           )}
         </div>
       </div>
-    </div>
+    </PanelCard>
   )
 }
 

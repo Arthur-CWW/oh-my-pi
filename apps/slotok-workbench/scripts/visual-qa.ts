@@ -32,6 +32,11 @@ interface ViewAudit {
   commandBarVisible: boolean
   inspectorVisible: boolean
   overflowX: boolean
+  bodyOverflowY: boolean
+  rootHeight: number
+  viewportHeight: number
+  stageLocalScroll: boolean
+  inspectorLocalScroll: boolean
   title: string
   view: string
   placeholderHits: string[]
@@ -79,6 +84,15 @@ interface CoreLoopAudit {
 
 const PLACEHOLDER_LABELS = ["Summer Skincare", "Hydration Boost", "Coffee Brand", "Archived"] as const
 const FAKE_TOP_RIGHT_LABELS = ["Notifications", "History", "Arthur", "Preview", "Export"] as const
+const QA_VIEWS = [
+  ["Exploration Board", "02-exploration-board.png"],
+  ["Batch Review", "03-batch-review.png"],
+  ["Campaign Branch Map", "04-campaign-map.png"],
+  ["Reference Archive", "05-reference-archive.png"],
+  ["Final Layer Editor", "06-final-editor.png"],
+  ["Developer Graph", "07-developer-graph.png"],
+  ["KIE Proxy", "08-kie-proxy.png"],
+] as const
 const REFERENCE_CATALOG_ROOTS = [
   "data/tiktok-catalogue/pleometric",
   "data/tiktok-catalogue/mynameissico",
@@ -115,15 +129,7 @@ try {
     await captureView(page, "01-persona-atlas.png", screenshots)
     findings.push(...viewFindings(await auditView(page), "Persona Atlas"))
 
-    for (const view of [
-      ["Exploration Board", "02-exploration-board.png"],
-      ["Batch Review", "03-batch-review.png"],
-      ["Campaign Branch Map", "04-campaign-map.png"],
-      ["Reference Archive", "05-reference-archive.png"],
-      ["Final Layer Editor", "06-final-editor.png"],
-      ["Developer Graph", "07-developer-graph.png"],
-      ["KIE Proxy", "08-kie-proxy.png"],
-    ] as const) {
+    for (const view of QA_VIEWS) {
       await page.getByRole("button", { name: new RegExp(`^${escapeRegExp(view[0])}\\b`) }).click()
       await page.waitForTimeout(100)
       if (view[0] === "Developer Graph") coreLoop = await exerciseCoreLoop(page)
@@ -132,6 +138,8 @@ try {
     }
 
     findings.push(...coreLoopFindings(coreLoop))
+    findings.push(...await auditResponsiveViewport(browser, 1024, 768, "tablet"))
+    findings.push(...await auditMobileViewport(browser, 390, 844, "mobile"))
     await writeReport(findings, screenshots)
     printSummary(findings)
   } finally {
@@ -304,10 +312,18 @@ async function auditView(page: Page): Promise<ViewAudit> {
       const placeholderHits = placeholderDenylist.filter((label) => bodyTextNodes.some((node) => node.includes(label)))
       const fakeTopRightHits = fakeTopRightDenylist.filter((label) => topRightLabels.some((node) => node.includes(label)))
 
+      const stage = document.querySelector(".rugc-stage")
+      const inspector = document.querySelector("[data-ugc-inspector]")
+      const root = document.querySelector("[data-ugc-studio-root]")
       return {
         commandBarVisible: Boolean(document.querySelector("[data-ugc-command-surface]")),
-        inspectorVisible: Boolean(document.querySelector("[data-ugc-inspector]")),
+        inspectorVisible: Boolean(inspector),
         overflowX: document.documentElement.scrollWidth > window.innerWidth,
+        bodyOverflowY: document.documentElement.scrollHeight > window.innerHeight + 1,
+        rootHeight: Math.round(root?.getBoundingClientRect().height ?? 0),
+        viewportHeight: window.innerHeight,
+        stageLocalScroll: Boolean(stage && stage.scrollHeight >= stage.clientHeight && getComputedStyle(stage).overflowY !== "visible"),
+        inspectorLocalScroll: Boolean(inspector && inspector.scrollHeight >= inspector.clientHeight && getComputedStyle(inspector).overflowY !== "visible"),
         title: document.title,
         view: document.querySelector("[data-ugc-view-title]")?.textContent?.trim() ?? "",
         placeholderHits,
@@ -316,6 +332,42 @@ async function auditView(page: Page): Promise<ViewAudit> {
     },
     [PLACEHOLDER_LABELS, FAKE_TOP_RIGHT_LABELS],
   )
+}
+
+async function auditResponsiveViewport(browser: Browser, width: number, height: number, label: string): Promise<readonly Finding[]> {
+  const page = await newPage(browser, width, height)
+  try {
+    await page.goto(ugcUrl, { waitUntil: "load" })
+    await page.waitForSelector("[data-ugc-studio-root]", { timeout: 20_000 })
+    const findings: Finding[] = []
+    findings.push(...responsiveViewFindings(await auditView(page), "Persona Atlas", label))
+    for (const view of QA_VIEWS) {
+      await page.getByRole("button", { name: new RegExp(`^${escapeRegExp(view[0])}\\b`) }).click()
+      await page.waitForTimeout(50)
+      findings.push(...responsiveViewFindings(await auditView(page), view[0], label))
+    }
+    return findings
+  } finally {
+    await page.close()
+  }
+}
+
+async function auditMobileViewport(browser: Browser, width: number, height: number, label: string): Promise<readonly Finding[]> {
+  const page = await newPage(browser, width, height)
+  try {
+    await page.goto(ugcUrl, { waitUntil: "load" })
+    await page.waitForSelector("[data-ugc-studio-root]", { timeout: 20_000 })
+    const findings: Finding[] = []
+    findings.push(...mobileViewFindings(await auditView(page), "Persona Atlas", label))
+    for (const view of QA_VIEWS) {
+      await page.getByRole("button", { name: new RegExp(`^${escapeRegExp(view[0])}\\b`) }).click()
+      await page.waitForTimeout(50)
+      findings.push(...mobileViewFindings(await auditView(page), view[0], label))
+    }
+    return findings
+  } finally {
+    await page.close()
+  }
 }
 
 async function seedReferenceInputs(): Promise<ReferenceSeedAudit> {
@@ -518,6 +570,9 @@ function viewFindings(audit: ViewAudit, expectedView: string): Finding[] {
     finding(audit.commandBarVisible, `${expectedView}: command bar remains visible`, `commandBar=${audit.commandBarVisible}`),
     finding(audit.inspectorVisible, `${expectedView}: inspector remains visible`, `inspector=${audit.inspectorVisible}`),
     finding(!audit.overflowX, `${expectedView}: no document horizontal overflow`, `overflowX=${audit.overflowX}`),
+    finding(!audit.bodyOverflowY, `${expectedView}: no document vertical overflow`, `bodyOverflowY=${audit.bodyOverflowY}, rootHeight=${audit.rootHeight}, viewportHeight=${audit.viewportHeight}`),
+    finding(audit.stageLocalScroll, `${expectedView}: stage owns vertical scroll`, `stageLocalScroll=${audit.stageLocalScroll}`),
+    finding(audit.inspectorLocalScroll, `${expectedView}: inspector owns vertical scroll`, `inspectorLocalScroll=${audit.inspectorLocalScroll}`),
     finding(
       audit.placeholderHits.length === 0,
       `${expectedView}: no placeholder campaign labels`,
@@ -528,6 +583,26 @@ function viewFindings(audit: ViewAudit, expectedView: string): Finding[] {
       `${expectedView}: no fake top-right controls`,
       audit.fakeTopRightHits.join(", ") || "none detected",
     ),
+  ]
+}
+
+function responsiveViewFindings(audit: ViewAudit, expectedView: string, viewportLabel: string): Finding[] {
+  return [
+    finding(audit.view === expectedView, `${expectedView} ${viewportLabel}: view activates`, `view=${audit.view}`),
+    finding(!audit.overflowX, `${expectedView} ${viewportLabel}: no document horizontal overflow`, `overflowX=${audit.overflowX}`),
+    finding(!audit.bodyOverflowY, `${expectedView} ${viewportLabel}: no document vertical overflow`, `bodyOverflowY=${audit.bodyOverflowY}, rootHeight=${audit.rootHeight}, viewportHeight=${audit.viewportHeight}`),
+    finding(audit.stageLocalScroll, `${expectedView} ${viewportLabel}: stage owns vertical scroll`, `stageLocalScroll=${audit.stageLocalScroll}`),
+    finding(audit.inspectorLocalScroll, `${expectedView} ${viewportLabel}: inspector owns vertical scroll`, `inspectorLocalScroll=${audit.inspectorLocalScroll}`),
+  ]
+}
+
+function mobileViewFindings(audit: ViewAudit, expectedView: string, viewportLabel: string): Finding[] {
+  return [
+    finding(audit.view === expectedView, `${expectedView} ${viewportLabel}: view activates`, `view=${audit.view}`),
+    finding(audit.commandBarVisible, `${expectedView} ${viewportLabel}: command bar remains visible`, `commandBar=${audit.commandBarVisible}`),
+    finding(!audit.overflowX, `${expectedView} ${viewportLabel}: no document horizontal overflow`, `overflowX=${audit.overflowX}`),
+    finding(!audit.bodyOverflowY, `${expectedView} ${viewportLabel}: no document vertical overflow`, `bodyOverflowY=${audit.bodyOverflowY}, rootHeight=${audit.rootHeight}, viewportHeight=${audit.viewportHeight}`),
+    finding(audit.stageLocalScroll, `${expectedView} ${viewportLabel}: stage owns vertical scroll`, `stageLocalScroll=${audit.stageLocalScroll}`),
   ]
 }
 

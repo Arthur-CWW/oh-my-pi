@@ -30,6 +30,9 @@ Renderer daemon calls proxied from `http://127.0.0.1:47522` to `http://127.0.0.1
 - PASS **Persona Atlas: command bar remains visible** - commandBar=true
 - PASS **Persona Atlas: inspector remains visible** - inspector=true
 - PASS **Persona Atlas: no document horizontal overflow** - overflowX=false
+- PASS **Persona Atlas: no document vertical overflow** - bodyOverflowY=false, rootHeight=720, viewportHeight=720
+- PASS **Persona Atlas: stage owns vertical scroll** - stageLocalScroll=true
+- PASS **Persona Atlas: inspector owns vertical scroll** - inspectorLocalScroll=true
 - PASS **Persona Atlas: no placeholder campaign labels** - none detected
 - PASS **Persona Atlas: no fake top-right controls** - none detected
 - PASS **Exploration Board: app title loads** - title=Slotok Workbench
@@ -37,6 +40,9 @@ Renderer daemon calls proxied from `http://127.0.0.1:47522` to `http://127.0.0.1
 - PASS **Exploration Board: command bar remains visible** - commandBar=true
 - PASS **Exploration Board: inspector remains visible** - inspector=true
 - PASS **Exploration Board: no document horizontal overflow** - overflowX=false
+- PASS **Exploration Board: no document vertical overflow** - bodyOverflowY=false, rootHeight=720, viewportHeight=720
+- PASS **Exploration Board: stage owns vertical scroll** - stageLocalScroll=true
+- PASS **Exploration Board: inspector owns vertical scroll** - inspectorLocalScroll=true
 - PASS **Exploration Board: no placeholder campaign labels** - none detected
 - PASS **Exploration Board: no fake top-right controls** - none detected
 - PASS **Batch Review: app title loads** - title=Slotok Workbench
@@ -44,6 +50,9 @@ Renderer daemon calls proxied from `http://127.0.0.1:47522` to `http://127.0.0.1
 - PASS **Batch Review: command bar remains visible** - commandBar=true
 - PASS **Batch Review: inspector remains visible** - inspector=true
 - PASS **Batch Review: no document horizontal overflow** - overflowX=false
+- PASS **Batch Review: no document vertical overflow** - bodyOverflowY=false, rootHeight=720, viewportHeight=720
+- PASS **Batch Review: stage owns vertical scroll** - stageLocalScroll=true
+- PASS **Batch Review: inspector owns vertical scroll** - inspectorLocalScroll=true
 - PASS **Batch Review: no placeholder campaign labels** - none detected
 - PASS **Batch Review: no fake top-right controls** - none detected
 - PASS **Campaign Branch Map: app title loads** - title=Slotok Workbench
@@ -51,6 +60,9 @@ Renderer daemon calls proxied from `http://127.0.0.1:47522` to `http://127.0.0.1
 - PASS **Campaign Branch Map: command bar remains visible** - commandBar=true
 - PASS **Campaign Branch Map: inspector remains visible** - inspector=true
 - PASS **Campaign Branch Map: no document horizontal overflow** - overflowX=false
+- PASS **Campaign Branch Map: no document vertical overflow** - bodyOverflowY=false, rootHeight=720, viewportHeight=720
+- PASS **Campaign Branch Map: stage owns vertical scroll** - stageLocalScroll=true
+- PASS **Campaign Branch Map: inspector owns vertical scroll** - inspectorLocalScroll=true
 - PASS **Campaign Branch Map: no placeholder campaign labels** - none detected
 - PASS **Campaign Branch Map: no fake top-right controls** - none detected
 - PASS **Reference Archive: app title loads** - title=Slotok Workbench
@@ -58,6 +70,9 @@ Renderer daemon calls proxied from `http://127.0.0.1:47522` to `http://127.0.0.1
 - PASS **Reference Archive: command bar remains visible** - commandBar=true
 - PASS **Reference Archive: inspector remains visible** - inspector=true
 - PASS **Reference Archive: no document horizontal overflow** - overflowX=false
+- PASS **Reference Archive: no document vertical overflow** - bodyOverflowY=false, rootHeight=720, viewportHeight=720
+- PASS **Reference Archive: stage owns vertical scroll** - stageLocalScroll=true
+- PASS **Reference Archive: inspector owns vertical scroll** - inspectorLocalScroll=true
 - PASS **Reference Archive: no placeholder campaign labels** - none detected
 - PASS **Reference Archive: no fake top-right controls** - none detected
 - PASS **Final Layer Editor: app title loads** - title=Slotok Workbench
@@ -65,6 +80,9 @@ Renderer daemon calls proxied from `http://127.0.0.1:47522` to `http://127.0.0.1
 - PASS **Final Layer Editor: command bar remains visible** - commandBar=true
 - PASS **Final Layer Editor: inspector remains visible** - inspector=true
 - PASS **Final Layer Editor: no document horizontal overflow** - overflowX=false
+- PASS **Final Layer Editor: no document vertical overflow** - bodyOverflowY=false, rootHeight=720, viewportHeight=720
+- PASS **Final Layer Editor: stage owns vertical scroll** - stageLocalScroll=true
+- PASS **Final Layer Editor: inspector owns vertical scroll** - inspectorLocalScroll=true
 - PASS **Final Layer Editor: no placeholder campaign labels** - none detected
 - PASS **Final Layer Editor: no fake top-right controls** - none detected
 - PASS **Developer Graph: app title loads** - title=Slotok Workbench
@@ -72,6 +90,9 @@ Renderer daemon calls proxied from `http://127.0.0.1:47522` to `http://127.0.0.1
 - PASS **Developer Graph: command bar remains visible** - commandBar=true
 - PASS **Developer Graph: inspector remains visible** - inspector=true
 - PASS **Developer Graph: no document horizontal overflow** - overflowX=false
+- PASS **Developer Graph: no document vertical overflow** - bodyOverflowY=false, rootHeight=720, viewportHeight=720
+- PASS **Developer Graph: stage owns vertical scroll** - stageLocalScroll=true
+- PASS **Developer Graph: inspector owns vertical scroll** - inspectorLocalScroll=true
 - PASS **Developer Graph: no placeholder campaign labels** - none detected
 - PASS **Developer Graph: no fake top-right controls** - none detected
 - PASS **KIE Proxy: app title loads** - title=Slotok Workbench
@@ -79,6 +100,9 @@ Renderer daemon calls proxied from `http://127.0.0.1:47522` to `http://127.0.0.1
 - PASS **KIE Proxy: command bar remains visible** - commandBar=true
 - PASS **KIE Proxy: inspector remains visible** - inspector=true
 - PASS **KIE Proxy: no document horizontal overflow** - overflowX=false
+- PASS **KIE Proxy: no document vertical overflow** - bodyOverflowY=false, rootHeight=720, viewportHeight=720
+- PASS **KIE Proxy: stage owns vertical scroll** - stageLocalScroll=true
+- PASS **KIE Proxy: inspector owns vertical scroll** - inspectorLocalScroll=true
 - PASS **KIE Proxy: no placeholder campaign labels** - none detected
 - PASS **KIE Proxy: no fake top-right controls** - none detected
 - PASS **core loop: browser demo launcher completes** - no error
@@ -88,4 +112,84 @@ Renderer daemon calls proxied from `http://127.0.0.1:47522` to `http://127.0.0.1
 - PASS **core loop: demo run reaches completed success** - status=succeeded, phase=completed
 - PASS **core loop: event-sourced run timeline recorded** - events=created, queued, phase, message, import, result, completed
 - PASS **core loop: local dry-run provider plan persists** - operation=demo-brainrot-local-plan, mode=dry-run, status=completed
+- PASS **Persona Atlas tablet: view activates** - view=Persona Atlas
+- PASS **Persona Atlas tablet: no document horizontal overflow** - overflowX=false
+- PASS **Persona Atlas tablet: no document vertical overflow** - bodyOverflowY=false, rootHeight=768, viewportHeight=768
+- PASS **Persona Atlas tablet: stage owns vertical scroll** - stageLocalScroll=true
+- PASS **Persona Atlas tablet: inspector owns vertical scroll** - inspectorLocalScroll=true
+- PASS **Exploration Board tablet: view activates** - view=Exploration Board
+- PASS **Exploration Board tablet: no document horizontal overflow** - overflowX=false
+- PASS **Exploration Board tablet: no document vertical overflow** - bodyOverflowY=false, rootHeight=768, viewportHeight=768
+- PASS **Exploration Board tablet: stage owns vertical scroll** - stageLocalScroll=true
+- PASS **Exploration Board tablet: inspector owns vertical scroll** - inspectorLocalScroll=true
+- PASS **Batch Review tablet: view activates** - view=Batch Review
+- PASS **Batch Review tablet: no document horizontal overflow** - overflowX=false
+- PASS **Batch Review tablet: no document vertical overflow** - bodyOverflowY=false, rootHeight=768, viewportHeight=768
+- PASS **Batch Review tablet: stage owns vertical scroll** - stageLocalScroll=true
+- PASS **Batch Review tablet: inspector owns vertical scroll** - inspectorLocalScroll=true
+- PASS **Campaign Branch Map tablet: view activates** - view=Campaign Branch Map
+- PASS **Campaign Branch Map tablet: no document horizontal overflow** - overflowX=false
+- PASS **Campaign Branch Map tablet: no document vertical overflow** - bodyOverflowY=false, rootHeight=768, viewportHeight=768
+- PASS **Campaign Branch Map tablet: stage owns vertical scroll** - stageLocalScroll=true
+- PASS **Campaign Branch Map tablet: inspector owns vertical scroll** - inspectorLocalScroll=true
+- PASS **Reference Archive tablet: view activates** - view=Reference Archive
+- PASS **Reference Archive tablet: no document horizontal overflow** - overflowX=false
+- PASS **Reference Archive tablet: no document vertical overflow** - bodyOverflowY=false, rootHeight=768, viewportHeight=768
+- PASS **Reference Archive tablet: stage owns vertical scroll** - stageLocalScroll=true
+- PASS **Reference Archive tablet: inspector owns vertical scroll** - inspectorLocalScroll=true
+- PASS **Final Layer Editor tablet: view activates** - view=Final Layer Editor
+- PASS **Final Layer Editor tablet: no document horizontal overflow** - overflowX=false
+- PASS **Final Layer Editor tablet: no document vertical overflow** - bodyOverflowY=false, rootHeight=768, viewportHeight=768
+- PASS **Final Layer Editor tablet: stage owns vertical scroll** - stageLocalScroll=true
+- PASS **Final Layer Editor tablet: inspector owns vertical scroll** - inspectorLocalScroll=true
+- PASS **Developer Graph tablet: view activates** - view=Developer Graph
+- PASS **Developer Graph tablet: no document horizontal overflow** - overflowX=false
+- PASS **Developer Graph tablet: no document vertical overflow** - bodyOverflowY=false, rootHeight=768, viewportHeight=768
+- PASS **Developer Graph tablet: stage owns vertical scroll** - stageLocalScroll=true
+- PASS **Developer Graph tablet: inspector owns vertical scroll** - inspectorLocalScroll=true
+- PASS **KIE Proxy tablet: view activates** - view=KIE Proxy
+- PASS **KIE Proxy tablet: no document horizontal overflow** - overflowX=false
+- PASS **KIE Proxy tablet: no document vertical overflow** - bodyOverflowY=false, rootHeight=768, viewportHeight=768
+- PASS **KIE Proxy tablet: stage owns vertical scroll** - stageLocalScroll=true
+- PASS **KIE Proxy tablet: inspector owns vertical scroll** - inspectorLocalScroll=true
+- PASS **Persona Atlas mobile: view activates** - view=Persona Atlas
+- PASS **Persona Atlas mobile: command bar remains visible** - commandBar=true
+- PASS **Persona Atlas mobile: no document horizontal overflow** - overflowX=false
+- PASS **Persona Atlas mobile: no document vertical overflow** - bodyOverflowY=false, rootHeight=844, viewportHeight=844
+- PASS **Persona Atlas mobile: stage owns vertical scroll** - stageLocalScroll=true
+- PASS **Exploration Board mobile: view activates** - view=Exploration Board
+- PASS **Exploration Board mobile: command bar remains visible** - commandBar=true
+- PASS **Exploration Board mobile: no document horizontal overflow** - overflowX=false
+- PASS **Exploration Board mobile: no document vertical overflow** - bodyOverflowY=false, rootHeight=844, viewportHeight=844
+- PASS **Exploration Board mobile: stage owns vertical scroll** - stageLocalScroll=true
+- PASS **Batch Review mobile: view activates** - view=Batch Review
+- PASS **Batch Review mobile: command bar remains visible** - commandBar=true
+- PASS **Batch Review mobile: no document horizontal overflow** - overflowX=false
+- PASS **Batch Review mobile: no document vertical overflow** - bodyOverflowY=false, rootHeight=844, viewportHeight=844
+- PASS **Batch Review mobile: stage owns vertical scroll** - stageLocalScroll=true
+- PASS **Campaign Branch Map mobile: view activates** - view=Campaign Branch Map
+- PASS **Campaign Branch Map mobile: command bar remains visible** - commandBar=true
+- PASS **Campaign Branch Map mobile: no document horizontal overflow** - overflowX=false
+- PASS **Campaign Branch Map mobile: no document vertical overflow** - bodyOverflowY=false, rootHeight=844, viewportHeight=844
+- PASS **Campaign Branch Map mobile: stage owns vertical scroll** - stageLocalScroll=true
+- PASS **Reference Archive mobile: view activates** - view=Reference Archive
+- PASS **Reference Archive mobile: command bar remains visible** - commandBar=true
+- PASS **Reference Archive mobile: no document horizontal overflow** - overflowX=false
+- PASS **Reference Archive mobile: no document vertical overflow** - bodyOverflowY=false, rootHeight=844, viewportHeight=844
+- PASS **Reference Archive mobile: stage owns vertical scroll** - stageLocalScroll=true
+- PASS **Final Layer Editor mobile: view activates** - view=Final Layer Editor
+- PASS **Final Layer Editor mobile: command bar remains visible** - commandBar=true
+- PASS **Final Layer Editor mobile: no document horizontal overflow** - overflowX=false
+- PASS **Final Layer Editor mobile: no document vertical overflow** - bodyOverflowY=false, rootHeight=844, viewportHeight=844
+- PASS **Final Layer Editor mobile: stage owns vertical scroll** - stageLocalScroll=true
+- PASS **Developer Graph mobile: view activates** - view=Developer Graph
+- PASS **Developer Graph mobile: command bar remains visible** - commandBar=true
+- PASS **Developer Graph mobile: no document horizontal overflow** - overflowX=false
+- PASS **Developer Graph mobile: no document vertical overflow** - bodyOverflowY=false, rootHeight=844, viewportHeight=844
+- PASS **Developer Graph mobile: stage owns vertical scroll** - stageLocalScroll=true
+- PASS **KIE Proxy mobile: view activates** - view=KIE Proxy
+- PASS **KIE Proxy mobile: command bar remains visible** - commandBar=true
+- PASS **KIE Proxy mobile: no document horizontal overflow** - overflowX=false
+- PASS **KIE Proxy mobile: no document vertical overflow** - bodyOverflowY=false, rootHeight=844, viewportHeight=844
+- PASS **KIE Proxy mobile: stage owns vertical scroll** - stageLocalScroll=true
 

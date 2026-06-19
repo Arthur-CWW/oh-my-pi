@@ -13,8 +13,7 @@ export function WorkbenchShell(props: React.HTMLAttributes<HTMLElement>) {
     <main
       {...props}
       className={cn(
-        "grid min-h-screen grid-cols-[220px_minmax(0,1fr)] overflow-hidden text-xs tracking-normal",
-        ugcDesignTokens.surface.app,
+        "grid h-dvh min-h-0 grid-cols-[220px_minmax(0,1fr)] overflow-hidden text-xs tracking-normal bg-background text-foreground",
         props.className,
       )}
     />
@@ -25,13 +24,13 @@ export function WorkbenchSidebar(props: React.HTMLAttributes<HTMLElement>) {
   return (
     <aside
       {...props}
-      className={cn("flex min-h-screen flex-col gap-3 p-3", ugcDesignTokens.surface.sidebar, props.className)}
+      className={cn("flex h-dvh min-h-0 flex-col gap-3 overflow-hidden p-3 border-r border-border/80 bg-muted/30", props.className)}
     />
   )
 }
 
 export function WorkbenchMain(props: React.HTMLAttributes<HTMLElement>) {
-  return <section {...props} className={cn("flex min-h-screen min-w-0 flex-col", props.className)} />
+  return <section {...props} className={cn("flex h-dvh min-h-0 min-w-0 flex-col overflow-hidden", props.className)} />
 }
 
 export function WorkbenchTopbar(props: React.HTMLAttributes<HTMLElement>) {
@@ -39,7 +38,7 @@ export function WorkbenchTopbar(props: React.HTMLAttributes<HTMLElement>) {
     <header
       {...props}
       className={cn(
-        "flex h-12 shrink-0 items-center justify-between border-b border-border bg-card/80 px-4",
+        "flex h-12 shrink-0 items-center justify-between border-b border-border/85 bg-white px-4",
         props.className,
       )}
     />
@@ -47,20 +46,20 @@ export function WorkbenchTopbar(props: React.HTMLAttributes<HTMLElement>) {
 }
 
 export function WorkbenchContent(props: React.HTMLAttributes<HTMLDivElement>) {
-  return <div {...props} className={cn("grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_276px]", props.className)} />
+  return <div {...props} className={cn("grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(300px,30vw)] overflow-hidden", props.className)} />
 }
 
 export function WorkbenchCanvas(props: React.HTMLAttributes<HTMLElement>) {
   return (
     <section
       {...props}
-      className={cn("relative min-w-0 overflow-hidden border-r border-border", ugcDesignTokens.surface.canvas, props.className)}
+      className={cn("relative min-w-0 overflow-hidden border-r border-border bg-background", props.className)}
     />
   )
 }
 
 export function InspectorPanel(props: React.HTMLAttributes<HTMLElement>) {
-  return <aside {...props} className={cn("min-w-0 overflow-auto bg-[#f4f3ef] p-3", props.className)} />
+  return <aside {...props} className={cn("min-h-0 min-w-0 overflow-x-hidden overflow-y-auto bg-muted/30 border-l border-border/80 p-3", props.className)} />
 }
 
 export function PanelCard(props: React.HTMLAttributes<HTMLDivElement> & VariantProps<typeof panelCardVariants>) {
@@ -71,10 +70,10 @@ export function PanelCard(props: React.HTMLAttributes<HTMLDivElement> & VariantP
 const panelCardVariants = cva("overflow-hidden", {
   variants: {
     tone: {
-      default: ugcDesignTokens.surface.panel,
-      muted: ugcDesignTokens.surface.panelMuted,
-      floating: ugcDesignTokens.surface.floating,
-      selected: "border-primary/60 bg-card shadow-[0_0_0_1px_hsl(var(--primary)/0.24)]",
+      default: "border border-zinc-200 bg-white text-zinc-900 shadow-[0_1px_3px_rgba(0,0,0,0.05),0_1px_2px_rgba(0,0,0,0.03)]",
+      muted: "border border-zinc-200 bg-zinc-50 text-zinc-900",
+      floating: "border border-zinc-200 bg-white/95 shadow-md backdrop-blur-md",
+      selected: "border-primary bg-white shadow-[0_0_0_1.5px_hsl(var(--primary))]",
     },
     density: {
       compact: "p-2",
@@ -117,19 +116,19 @@ export function SidebarRow(props: ButtonProps & {
       type="button"
       variant={active ? "selected" : "ghost"}
       size="sm"
-      className={cn("w-full justify-start px-2 font-normal", className)}
+      className={cn("w-full justify-start rounded-md px-2.5 font-medium", className)}
       {...buttonProps}
     >
       {icon}
       <span className="min-w-0 flex-1 truncate text-left">{children}</span>
-      {shortcut ? <kbd className="rounded border border-border bg-background px-1 text-[10px] text-muted-foreground">{shortcut}</kbd> : null}
-      {count !== undefined ? <span className="text-[11px] text-muted-foreground">{count}</span> : null}
+      {shortcut ? <kbd className="rounded-[4px] border border-zinc-200 bg-zinc-50 px-1.5 text-[10px] font-semibold text-zinc-500">{shortcut}</kbd> : null}
+      {count !== undefined ? <span className="text-[11px] text-zinc-500">{count}</span> : null}
     </Button>
   )
 }
 
 export function ToolbarCluster(props: React.HTMLAttributes<HTMLDivElement>) {
-  return <div {...props} className={cn("flex items-center gap-1 rounded-lg border border-border bg-card p-1 shadow-sm", props.className)} />
+  return <div {...props} className={cn("flex min-w-0 items-center gap-1 overflow-x-auto rounded-xl border border-zinc-200 bg-white p-1 shadow-sm", props.className)} />
 }
 
 export function MetricRow(props: {
@@ -139,9 +138,9 @@ export function MetricRow(props: {
   readonly className?: string
 }) {
   return (
-    <div className={cn("flex items-center justify-between gap-3 py-1.5", props.className)}>
-      <span className={ugcDesignTokens.text.label}>{props.label}</span>
-      <strong className={cn("min-w-0 truncate text-right text-xs font-semibold", props.tone && props.tone !== "neutral" && toneClasses(props.tone))}>
+    <div className={cn("grid grid-cols-[minmax(5.5rem,0.42fr)_minmax(0,1fr)] items-start gap-3 py-1.5", props.className)}>
+      <span className={cn(ugcDesignTokens.text.label, "pt-0.5")}>{props.label}</span>
+      <strong className={cn("min-w-0 break-words text-right text-xs font-semibold leading-5", props.tone && props.tone !== "neutral" && toneClasses(props.tone))}>
         {props.value}
       </strong>
     </div>
@@ -195,12 +194,12 @@ export function CommandSurface(props: {
   readonly className?: string
 }) {
   return (
-    <PanelCard data-ugc-command-surface tone="floating" density="compact" className={cn("flex items-end gap-2", props.className)}>
+    <PanelCard data-ugc-command-surface tone="floating" density="compact" className={cn("flex min-w-0 items-end gap-2 rounded-xl", props.className)}>
       {props.leading ? <div className="grid h-8 w-8 shrink-0 place-items-center text-primary">{props.leading}</div> : null}
       <Textarea
         value={props.value}
         onChange={(event) => props.onValueChange(event.target.value)}
-        className="min-h-10 flex-1 border-0 bg-transparent p-1 shadow-none focus-visible:ring-0"
+        className="min-h-10 min-w-0 flex-1 border-0 bg-transparent p-1 shadow-none focus-visible:ring-0"
       />
       {props.actions ? <div className="flex shrink-0 items-center gap-1">{props.actions}</div> : null}
       {props.runButton}

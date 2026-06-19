@@ -5,7 +5,7 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "../../lib/cn"
 
 export const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md border border-transparent font-medium tracking-normal transition-colors disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md border border-transparent font-medium tracking-normal transition-colors disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 focus-visible:border-primary",
   {
     variants: {
       variant: {
@@ -13,9 +13,9 @@ export const buttonVariants = cva(
         secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/80",
         outline: "border-border bg-background hover:bg-accent hover:text-accent-foreground",
         ghost: "hover:bg-accent hover:text-accent-foreground",
-        subtle: "border-border bg-muted/45 text-foreground hover:bg-muted",
+        subtle: "border-border bg-muted/40 text-foreground hover:bg-muted",
         workbench: "border-border bg-card text-foreground shadow-[0_1px_2px_rgba(20,22,25,0.04)] hover:bg-accent",
-        selected: "border-primary/55 bg-primary/10 text-primary hover:bg-primary/15",
+        selected: "bg-primary/10 text-primary border-primary/20 font-semibold shadow-none hover:bg-primary/15",
         destructive: "bg-red-600 text-white hover:bg-red-700",
       },
       size: {
