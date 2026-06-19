@@ -83,15 +83,24 @@ Those manifests are local reference/inspiration inputs only. Preserve provenance
 
 Arthur may run creative execution as Pi/OMP dynamic workflows instead of forcing every creative step through the Slotok daemon. Treat this as "just another workflow" backed by `packages/dynamic-workflows` (`parseWorkflowScript` / `runWorkflow`) and documented in `workflows/slotok-creative-agents/README.md`.
 
-Decision: Slotok owns the browser telemetry contract. Add append-only workflow/event state in Slotok, then adapt Pi/OMP/dynamic-workflows into it.
+Decision: Slotok owns the browser telemetry contract. `workflowEvents` is the append-only event log, and `workflowRuns` is the durable derived run snapshot. Dynamic workflows, Pi/OMP personas, daemon imports, and provider-job links are sources into that stream; `providerJobs` remain provider execution artifacts, not the workflow status model.
 
-- Primary live path: `packages/dynamic-workflows` callbacks (`onLog`, `onPhase`, `onAgentStart`, `onAgentEnd`) append `workflowEvents` and update `workflowRuns`.
-- Browser path: Slotok daemon exposes `GET /api/ugc/workflows`, `GET /api/ugc/workflows/:runId/events?after=<eventId>`, and `GET /api/ugc/workflows/events/stream` as SSE. UI subscribes by SSE and falls back to polling.
-- Historical adapter: OMP `omp stats` / `omp-stats` server is usage-history only (`/api/stats`, `/api/sync`), so use it later as a secondary adapter, not the live source of truth.
-- Process adapter: OMP `--mode rpc` can stream live `AgentSessionEvent`/subagent frames over stdio when Slotok owns the child process. Wrap that behind the Slotok daemon; never expose stdio directly to the browser.
-- Artifact adapter: Pi/OMP session JSONL, output artifacts, plans, and resource files can be polled/tail-imported later into the same event table.
+- Primary live source: `packages/dynamic-workflows` callbacks (`onLog`, `onPhase`, `onAgentStart`, `onAgentEnd`) append `workflowEvents` and derive/update `workflowRuns`.
+- Browser read/stream contract:
+  - `GET /api/ugc/workflows`
+  - `GET /api/ugc/workflows?lane=ugc-ads&status=running&limit=25`
+  - `POST /api/ugc/workflows`
+  - `GET /api/ugc/workflows/<run_id>`
+  - `GET /api/ugc/workflows/<run_id>/events?after=<event_id>&limit=100`
+  - `POST /api/ugc/workflows/<run_id>/events`
+  - `GET /api/ugc/workflows/events/stream`
+  - `GET /api/ugc/workflows/events/stream?runId=<run_id>&after=<event_id>`
+- Browser behavior: subscribe by polling-backed SSE when available, retain the last event id, and fall back to polling the run events route with `after=<event_id>` without losing the timeline on reload.
+- Historical adapter only: OMP `omp stats` / `omp-stats` server (`/api/stats`, `/api/sync`) is usage-history/cost/sync data, not live workflow state.
+- Future adapter only: OMP `--mode rpc` can be normalized into `workflowEvents` when Slotok owns the child process; wrap it behind the Slotok daemon and never expose stdio directly to the browser. Do not claim this adapter is implemented until it exists.
+- Future adapter only: Pi/OMP session JSONL, output artifacts, plans, and resource files can be polled/tail-imported later into the same event table as delayed observations.
 
-Store this as event sourcing, not only current snapshots. Current agent status is derived from latest events, while raw event history remains inspectable for proof/replay.
+Manual QA and exact route examples live in `docs/qa/slotok-workflow-telemetry.md`. Store this as event sourcing, not only current snapshots. Current agent status is derived from latest events, while raw event history remains inspectable for proof/replay.
 
 Slotok remains the local-first state viewer/reviewer. Pi/OMP personas perform creative operations and import structured JSON-safe results through daemon routes.
 
@@ -111,6 +120,7 @@ docs/qa/slotok-provider-pipeline.md
 docs/research/slotok-reference-assets.md
 docs/qa/slotok-analysis-results-ui.md
 docs/qa/ugc-local-first-v1.md
+docs/qa/slotok-workflow-telemetry.md
 ```
 
 ## Verification gates
@@ -125,7 +135,7 @@ cd apps/slotok-workbench && bun run visual:qa
 
 ## Manual visual QA checklist
 
-Parent should use the exact checklist in `docs/qa/slotok-provider-pipeline.md` for the provider/media pass:
+Parent should use the exact checklists in `docs/qa/slotok-provider-pipeline.md` for the provider/media pass and `docs/qa/slotok-workflow-telemetry.md` for the workflow telemetry pass:
 
 1. Open `http://127.0.0.1:47521/ugc-studio/` and confirm daemon `http://127.0.0.1:47522`.
 2. Use `artifacts/slotok-dev/renderer.pid`, `daemon.pid`, `renderer.log`, and `daemon.log` only for dev-server status/errors.
@@ -134,3 +144,6 @@ Parent should use the exact checklist in `docs/qa/slotok-provider-pipeline.md` f
 5. Confirm analysis-to-KIE is dry-run planning only, using the backend route when present or existing KIE plan/create surfaces with Codex context while the route is pending.
 6. Confirm Higgsfield/Arcads `manifestPaths` plan/import keeps assets reference-only with provenance and rights notes once that extension lands; while pending, inspect manifests directly and verify existing `roots` planning does not live-scrape or promote public assets into provider inputs.
 7. Confirm no live provider success is claimed unless parent explicitly runs a live/capped action and records that proof separately.
+8. Confirm workflow status comes from `workflowRuns` plus append-only `workflowEvents`, not provider-job status.
+9. Confirm workflow telemetry write/read routes work for the backend pass (`POST /api/ugc/workflows`, `POST /api/ugc/workflows/<run_id>/events`, `GET /api/ugc/workflows/<run_id>/events?after=<event_id>&limit=100`) and the browser uses SSE (`GET /api/ugc/workflows/events/stream?runId=<run_id>&after=<event_id>`) with polling fallback.
+10. Confirm dynamic-workflows callbacks map into events, OMP stats are historical only, and OMP RPC/artifact polling are not claimed as implemented unless real daemon adapters exist.

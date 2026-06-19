@@ -19,6 +19,14 @@ export type UgcExportStatus = "draft" | "queued" | "rendered" | "failed"
 export type UgcResearchPlatform = "tiktok" | "instagram" | "youtube-shorts" | "web" | "internal"
 export type UgcResearchTargetStatus = "draft" | "queued" | "sampling" | "decomposed" | "blocked" | "done"
 export type UgcTemplateMiningJobStatus = "planned" | "queued" | "running" | "ready" | "blocked" | "done"
+export type UgcWorkflowRunStatus = "planned" | "queued" | "running" | "succeeded" | "failed" | "blocked" | "canceled"
+export type UgcWorkflowRunSource = "slotok" | "pi" | "omp" | "dynamic-workflow" | "local"
+export type UgcWorkflowEventType = "created" | "queued" | "started" | "phase" | "message" | "artifact" | "status" | "result" | "error" | "completed" | "blocked" | "canceled"
+
+export interface UgcWorkflowCounters {
+  readonly [name: string]: number
+}
+
 
 export interface UgcWorkspaceSummary {
   readonly id: string
@@ -31,6 +39,8 @@ export interface UgcWorkspaceSummary {
   readonly exportCount: number
   readonly researchTargetCount: number
   readonly templateMiningJobCount: number
+  readonly workflowRunCount: number
+  readonly workflowEventCount: number
 }
 
 export interface UgcWorkspaceBundle {
@@ -57,6 +67,8 @@ export interface UgcWorkspaceBundleObjectCounts {
   readonly exportManifests: number
   readonly researchTargets: number
   readonly templateMiningJobs: number
+  readonly workflowRuns: number
+  readonly workflowEvents: number
 }
 
 export interface UgcReferenceCatalogVideoPaths {
@@ -150,6 +162,8 @@ export interface UgcWorkspaceBundleShardManifest {
     readonly exports: readonly string[]
     readonly researchTargets: readonly string[]
     readonly templateMiningJobs: readonly string[]
+    readonly workflowRuns: readonly string[]
+    readonly workflowEvents: readonly string[]
     readonly bundles: readonly string[]
   }
   readonly assets: {
@@ -285,6 +299,40 @@ export interface CleanRoomTemplateSpec {
   readonly proofNotes: readonly string[]
 }
 
+export interface UgcWorkflowRun {
+  readonly schemaVersion: "ugc-studio.workflow-run.v1"
+  readonly id: string
+  readonly workspaceId: string
+  readonly lane: string
+  readonly status: UgcWorkflowRunStatus
+  readonly title: string
+  readonly source: UgcWorkflowRunSource
+  readonly scriptId: string | null
+  readonly args: JsonValue
+  readonly result: JsonValue | null
+  readonly error: string | null
+  readonly currentPhase: string | null
+  readonly counters: UgcWorkflowCounters
+  readonly importedRecordIds: readonly string[]
+  readonly artifactPaths: readonly string[]
+  readonly createdAt: string
+  readonly updatedAt: string
+}
+
+export interface UgcWorkflowEvent {
+  readonly schemaVersion: "ugc-studio.workflow-event.v1"
+  readonly eventId: number
+  readonly runId: string
+  readonly type: UgcWorkflowEventType
+  readonly phase: string | null
+  readonly agentLabel: string | null
+  readonly message: string | null
+  readonly payload: JsonValue | null
+  readonly artifactPaths: readonly string[]
+  readonly error: string | null
+  readonly createdAt: string
+}
+
 export interface UgcLocalState {
   readonly schemaVersion: "ugc-studio.local-state.v1"
   readonly workspace: UgcStudioWorkspace
@@ -293,6 +341,8 @@ export interface UgcLocalState {
   readonly referenceArchives: readonly UgcReferenceArchive[]
   readonly researchTargets: readonly UgcResearchTarget[]
   readonly templateMiningJobs: readonly UgcTemplateMiningJob[]
+  readonly workflowRuns: readonly UgcWorkflowRun[]
+  readonly workflowEvents: readonly UgcWorkflowEvent[]
   readonly updatedAt: string
 }
 
@@ -400,6 +450,40 @@ export interface TemplateMiningJobPatch {
   readonly error?: string | null
 }
 
+export interface CreateWorkflowRunInput {
+  readonly lane?: string
+  readonly status?: UgcWorkflowRunStatus
+  readonly title: string
+  readonly source?: UgcWorkflowRunSource
+  readonly scriptId?: string | null
+  readonly args?: JsonValue
+  readonly currentPhase?: string | null
+  readonly counters?: UgcWorkflowCounters
+  readonly importedRecordIds?: readonly string[]
+  readonly artifactPaths?: readonly string[]
+}
+
+export interface WorkflowRunPatch {
+  readonly status?: UgcWorkflowRunStatus
+  readonly title?: string
+  readonly result?: JsonValue | null
+  readonly error?: string | null
+  readonly currentPhase?: string | null
+  readonly counters?: UgcWorkflowCounters
+  readonly importedRecordIds?: readonly string[]
+  readonly artifactPaths?: readonly string[]
+}
+
+export interface AppendWorkflowEventInput {
+  readonly type: UgcWorkflowEventType
+  readonly phase?: string | null
+  readonly agentLabel?: string | null
+  readonly message?: string | null
+  readonly payload?: JsonValue | null
+  readonly artifactPaths?: readonly string[]
+  readonly error?: string | null
+}
+
 export interface CreateExportManifestInput {
   readonly label?: string
   readonly selectedCandidateId?: string
@@ -448,6 +532,8 @@ export function createInitialLocalState(now = new Date().toISOString()): UgcLoca
     referenceArchives: workspace.referenceProfiles.map((referenceProfile) => referenceProfileToArchive(workspace.id, referenceProfile, now)),
     researchTargets: createInitialResearchTargets(workspace.id, now),
     templateMiningJobs: createInitialTemplateMiningJobs(workspace.id, now),
+    workflowRuns: [],
+    workflowEvents: [],
     updatedAt: now,
   }
 }
@@ -464,6 +550,8 @@ export function summarizeLocalState(state: UgcLocalState): UgcWorkspaceSummary {
     exportCount: state.exportManifests.length,
     researchTargetCount: state.researchTargets.length,
     templateMiningJobCount: state.templateMiningJobs.length,
+    workflowRunCount: state.workflowRuns.length,
+    workflowEventCount: state.workflowEvents.length,
   }
 }
 
@@ -581,6 +669,8 @@ export function isLocalState(value: unknown): value is UgcLocalState {
   if (!Array.isArray(value.providerJobs) || !Array.isArray(value.exportManifests) || !Array.isArray(value.referenceArchives)) return false
   if ("researchTargets" in value && !Array.isArray(value.researchTargets)) return false
   if ("templateMiningJobs" in value && !Array.isArray(value.templateMiningJobs)) return false
+  if ("workflowRuns" in value && !Array.isArray(value.workflowRuns)) return false
+  if ("workflowEvents" in value && !Array.isArray(value.workflowEvents)) return false
   return typeof value.updatedAt === "string"
 }
 

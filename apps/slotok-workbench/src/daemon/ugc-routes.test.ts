@@ -7,6 +7,7 @@ import type { CodexAnalyzeInput, CodexAnalyzeResult, CodexLiveOptions } from "@w
 import { UgcJsonStore } from "./ugc-json-store"
 import { routeUgc } from "./ugc-routes"
 import type { CodexVideoFrameExtractor } from "./codex-video-frames"
+import { createSlotokWorkflowCallbacks, registerSlotokWorkflowRun, type SlotokWorkflowEventInput, type SlotokWorkflowRunInput } from "./ugc-workflow-adapter"
 import type { UgcLocalState } from "../ugc/local-state"
 
 describe("routeUgc", () => {
@@ -683,10 +684,141 @@ describe("routeUgc", () => {
     expect(planned.state?.providerJobs[0]?.provider).toBe("kie")
   })
 
+  test("serves workflow runs, append-only event polling, and SSE startup", async () => {
+    const store = createStore()
+    const createdResponse = await routeUgc(jsonRequest("/api/ugc/workflows", {
+      title: "Dynamic workflow proof",
+      source: "dynamic-workflow",
+      scriptId: "workflow-proof",
+      args: { prompt: "safe", apiKey: "sk-test" },
+      lane: "analysis",
+    }), store)
+    const created = await createdResponse?.json() as { readonly workflowRun?: { readonly id: string; readonly args: { readonly apiKey?: string } } }
+    const runId = created.workflowRun?.id ?? ""
+
+    expect(createdResponse?.status).toBe(201)
+    expect(runId).not.toBe("")
+    expect(created.workflowRun?.args.apiKey).toBe("[redacted]")
+
+    const phaseResponse = await routeUgc(jsonRequest(`/api/ugc/workflows/${encodeURIComponent(runId)}/events`, {
+      type: "phase",
+      phase: "scouting",
+      agentLabel: "Pi Scout",
+      message: "Entered scouting",
+      payload: { token: "secret-token", visible: true },
+    }), store)
+    const phase = await phaseResponse?.json() as { readonly event?: { readonly eventId: number; readonly payload: { readonly token?: string } } }
+    const completedResponse = await routeUgc(jsonRequest(`/api/ugc/workflows/${encodeURIComponent(runId)}/events`, {
+      type: "completed",
+      message: "Done",
+      payload: { importedRecordIds: ["candidate_1"] },
+      artifactPaths: ["artifacts/workflows/result.json"],
+    }), store)
+    const completed = await completedResponse?.json() as { readonly event?: { readonly eventId: number }; readonly workflowRun?: { readonly status: string; readonly artifactPaths: readonly string[] } }
+
+    expect(phaseResponse?.status).toBe(201)
+    expect(phase.event?.payload.token).toBe("[redacted]")
+    expect(completed.workflowRun?.status).toBe("succeeded")
+    expect(completed.workflowRun?.artifactPaths).toContain("artifacts/workflows/result.json")
+
+    const eventsResponse = await routeUgc(new Request(`http://127.0.0.1/api/ugc/workflows/${encodeURIComponent(runId)}/events?after=${phase.event?.eventId ?? 0}`), store)
+    const events = await eventsResponse?.json() as { readonly events?: readonly { readonly eventId: number; readonly type: string }[] }
+    expect(events.events?.map((event) => event.eventId)).toEqual([completed.event?.eventId])
+
+    const emptyResponse = await routeUgc(new Request(`http://127.0.0.1/api/ugc/workflows/${encodeURIComponent(runId)}/events?after=${completed.event?.eventId ?? 0}`), store)
+    const empty = await emptyResponse?.json() as { readonly events?: readonly object[] }
+    expect(empty.events).toEqual([])
+
+    const listResponse = await routeUgc(new Request("http://127.0.0.1/api/ugc/workflows"), store)
+    const list = await listResponse?.json() as { readonly workflowRuns?: readonly { readonly id: string }[] }
+    expect(list.workflowRuns?.[0]?.id).toBe(runId)
+
+    const streamResponse = await routeUgc(new Request("http://127.0.0.1/api/ugc/workflows/events/stream?after=0"), store)
+    expect(streamResponse?.headers.get("content-type")).toContain("text/event-stream")
+    const reader = streamResponse?.body?.getReader()
+    const startup = await reader?.read()
+    expect(new TextDecoder().decode(startup?.value)).toContain("event: ready")
+    await reader?.cancel()
+  })
+
   test("returns null for routes owned by other daemon handlers", async () => {
     const store = createStore()
     await expect(routeUgc(new Request("http://127.0.0.1/api/ugc/kie/capabilities"), store)).resolves.toBeNull()
     await expect(routeUgc(new Request("http://127.0.0.1/api/health"), store)).resolves.toBeNull()
+  })
+})
+
+describe("Slotok workflow adapter", () => {
+  test("registers dynamic workflow runs and appends callback events without executing scripts", () => {
+    const runs: SlotokWorkflowRunInput[] = []
+    const events: { readonly runId: string; readonly input: SlotokWorkflowEventInput }[] = []
+    const store: {
+      readonly createWorkflowRun: (input: SlotokWorkflowRunInput) => { readonly id: string }
+      readonly appendWorkflowEvent: (runId: string, input: SlotokWorkflowEventInput) => void
+    } = {
+      createWorkflowRun(input) {
+        runs.push(input)
+        return { id: `workflow_${runs.length}` }
+      },
+      appendWorkflowEvent(runId, input) {
+        events.push({ runId, input })
+      },
+    }
+
+    const run = registerSlotokWorkflowRun(store, {
+      title: "Dynamic workflow proof",
+      workflowName: "Proof workflow",
+      scriptId: "workflow-proof",
+      scriptPath: "workflows/proof.js",
+      args: { prompt: "safe", token: "secret-token" },
+      metadata: { workspace: "slotok" },
+    })
+    const result: { apiKey: string; count: bigint; child?: { readonly parent: object } } = {
+      apiKey: "sk-test",
+      count: 9n,
+    }
+    result.child = { parent: result }
+
+    const callbacks = createSlotokWorkflowCallbacks(store, run.id)
+    callbacks.onLog("planning complete")
+    callbacks.onPhase("scouting")
+    callbacks.onAgentStart({ label: "Pi Scout", phase: "scouting", prompt: "collect evidence" })
+    callbacks.onAgentEnd({ label: "Pi Scout", phase: "scouting", result })
+
+    expect(runs).toEqual([{
+      title: "Dynamic workflow proof",
+      source: "dynamic-workflow",
+      scriptId: "workflow-proof",
+      args: {
+        workflowName: "Proof workflow",
+        scriptId: "workflow-proof",
+        scriptPath: "workflows/proof.js",
+        args: { prompt: "safe", token: "[redacted]" },
+        metadata: { workspace: "slotok" },
+      },
+    }])
+    expect(events.map((event) => event.input.type)).toEqual(["message", "phase", "started", "message"])
+    expect(events.map((event) => event.runId)).toEqual(["workflow_1", "workflow_1", "workflow_1", "workflow_1"])
+    expect(events[1]?.input).toMatchObject({ type: "phase", phase: "scouting", message: "scouting" })
+    expect(events[2]?.input).toMatchObject({
+      type: "started",
+      phase: "scouting",
+      agentLabel: "Pi Scout",
+      payload: { kind: "agent-start", prompt: "collect evidence" },
+    })
+    expect(events[3]?.input).toMatchObject({
+      type: "message",
+      phase: "scouting",
+      agentLabel: "Pi Scout",
+      payload: {
+        kind: "agent-end",
+        resultJson: {
+          apiKey: "[redacted]",
+          count: "9n",
+          child: { parent: "[circular]" },
+        },
+      },
+    })
   })
 })
 

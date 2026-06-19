@@ -106,6 +106,8 @@ Current object families:
 - research targets
 - template mining jobs
 - assets
+- workflow runs
+- workflow events
 
 ### Agent-directed creative search
 
@@ -236,6 +238,7 @@ Current phase ledger delta:
 - Preferred local reference catalog roots are `data/tiktok-catalogue/pleometric` and `data/tiktok-catalogue/mynameissico`.
 - Visual/manual QA should use `http://127.0.0.1:47521/ugc-studio/`, daemon `http://127.0.0.1:47522`, and the PID/log files under `artifacts/slotok-dev/`.
 - Public Higgsfield and Arcads assets are local reference/inspiration manifests only; pending reference-catalog `manifestPaths` planning/import should preserve provenance and rights notes and must not treat those assets as generation inputs unless a manifest explicitly allows it.
+- Workflow telemetry contract: `workflowEvents` is append-only, `workflowRuns` is the durable derived snapshot, core read/write routes include `GET/POST /api/ugc/workflows` and `GET/POST /api/ugc/workflows/<run_id>/events`, the browser stream route is polling-backed SSE at `GET /api/ugc/workflows/events/stream`, and dynamic-workflows callbacks (`onLog`, `onPhase`, `onAgentStart`, `onAgentEnd`) are the primary live source. OMP RPC and artifact polling are future adapters only; OMP stats are historical usage data only.
 - The current phase still needs parent verification after the active backend/data workers finish; do not treat this ledger update as a fresh passing gate.
 
 Proof files:
@@ -253,6 +256,7 @@ Proof files:
 - `docs/qa/ugc-studio-branch-workflow.md`
 - `docs/qa/ugc-studio-final-editor.md`
 - `docs/qa/ugc-studio-developer-graph.md`
+- `docs/qa/slotok-workflow-telemetry.md`
 
 Current proof command set for the parent orchestrator:
 
@@ -308,6 +312,19 @@ Status: implemented in the historical V1 slice; re-verify against current provid
 - [ ] Parent verifies no KIE, Gemini, Jimeng, or Codex live spend occurs during current proof unless explicitly triggered through a live/capped action.
 - [ ] Parent verifies `POST /api/ugc/kie/analysis-to-kie` produces a dry-run KIE plan from selected candidate/Codex provider-job context after the route lands; while pending, parent verifies the same dry-run invariant through existing KIE plan/create surfaces without live generation.
 - [ ] Parent verifies Codex live analysis remains gated by explicit live intent, spend cap, API key, and reachable frame references; this phase does not claim live Codex success unless parent runs it separately.
+
+### Workflow Telemetry
+
+Status: current phase proof target.
+
+- [ ] Parent verifies workflow status is represented by `workflowRuns` as durable derived snapshots and `workflowEvents` as append-only event history, not by provider-job status.
+- [ ] Parent verifies the browser uses polling-backed SSE when available through `GET /api/ugc/workflows/events/stream` or `GET /api/ugc/workflows/events/stream?runId=<run_id>&after=<event_id>`.
+- [ ] Parent verifies the browser falls back to polling `GET /api/ugc/workflows/<run_id>/events?after=<event_id>&limit=100` and preserves the timeline across reloads.
+- [ ] Parent verifies `GET/POST /api/ugc/workflows` exposes run snapshots, `GET /api/ugc/workflows?lane=ugc-ads&status=running&limit=25` filters snapshots, and `GET/POST /api/ugc/workflows/<run_id>/events` reads/appends event history with lane, status, current phase, counters, timestamps, result/error summaries, and source metadata available in the derived run state.
+- [ ] Parent verifies dynamic-workflows callbacks map into events: `onPhase` -> phase, `onLog` -> log, `onAgentStart` -> agent-start, and `onAgentEnd` -> agent-end.
+- [ ] Parent verifies provider jobs are linked from workflow events when relevant but remain provider execution artifacts, not workflow status.
+- [ ] Parent verifies OMP stats (`/api/stats`, `/api/sync`) are treated as historical usage/cost data only.
+- [ ] Parent verifies no UI/docs claim OMP RPC or Pi/OMP artifact-polling adapters are implemented until real adapters exist behind the Slotok daemon.
 
 ### Batch Review Workflow
 
@@ -417,4 +434,5 @@ This goal is complete when the current V1 proof ledger shows:
 9. [ ] final editor timeline/layer edits and export manifests persist.
 10. [ ] the developer graph derives from real local workspace state and exposes selected-node JSON.
 11. [ ] workspace bundles export/import the SQLite-backed workspace with object and asset manifests.
-12. [ ] typecheck, tests, build, visual QA, and manual proof steps are run by the parent and recorded in proof docs.
+12. [ ] workflow telemetry uses `workflowEvents` as append-only event history and `workflowRuns` as derived run snapshots; the browser uses SSE with polling fallback; dynamic-workflows callbacks feed the stream; OMP RPC/artifact polling remain future adapters unless implemented; OMP stats remain historical only.
+13. [ ] typecheck, tests, build, visual QA, and manual proof steps are run by the parent and recorded in proof docs.

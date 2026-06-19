@@ -131,6 +131,60 @@ interface CodexJobMediaSummary {
   readonly framePreparation: string | null
 }
 
+type WorkflowStreamStatus = "loading" | "live" | "polling" | "unavailable"
+
+interface WorkflowCounter {
+  readonly label: string
+  readonly value: string
+}
+
+interface WorkflowEventTelemetry {
+  readonly id?: string
+  readonly runId: string
+  readonly type: string
+  readonly lane: ProductLane
+  readonly phase?: string
+  readonly agent?: string
+  readonly message: string
+  readonly artifactPath?: string
+  readonly resultPreview?: string
+  readonly errorPreview?: string
+  readonly createdAt?: string
+  readonly sequence?: number
+  readonly rawJson: JsonValue
+}
+
+interface WorkflowRunTelemetry {
+  readonly id: string
+  readonly lane: ProductLane
+  readonly status: string
+  readonly title: string
+  readonly source: string
+  readonly currentPhase: string
+  readonly counters: readonly WorkflowCounter[]
+  readonly events: readonly WorkflowEventTelemetry[]
+  readonly artifactPaths: readonly string[]
+  readonly resultPreview?: string
+  readonly errorPreview?: string
+  readonly createdAt?: string
+  readonly updatedAt?: string
+  readonly rawJson: JsonValue
+}
+
+interface WorkflowTelemetryState {
+  readonly runs: readonly WorkflowRunTelemetry[]
+  readonly streamStatus: WorkflowStreamStatus
+  readonly routeAvailable: boolean
+  readonly postUnavailable: boolean
+  readonly message: string
+  readonly creating: boolean
+}
+
+interface WorkflowTelemetryController extends WorkflowTelemetryState {
+  readonly refresh: () => void
+  readonly createDemoRun: () => void
+}
+
 interface PersonaCardModel {
   id: string
   name: string
@@ -761,6 +815,533 @@ function jsonRecord(value: unknown): { readonly [key: string]: JsonValue } | nul
 function jsonStringArray(value: JsonValue | undefined | null): readonly string[] {
   if (!Array.isArray(value)) return []
   return value.filter((item): item is string => typeof item === "string")
+}
+
+function jsonArtifactRefs(value: JsonValue | undefined | null): readonly string[] {
+  if (value === undefined || value === null) return []
+  if (typeof value === "string") return [value]
+  if (Array.isArray(value)) return value.flatMap(jsonArtifactRefs)
+  const root = jsonRecord(value)
+  if (!root) return []
+  const direct = jsonText(root.path) ?? jsonText(root.artifactPath) ?? jsonText(root.url) ?? jsonText(root.id)
+  return direct ? [direct] : []
+}
+
+function jsonArray(value: JsonValue | undefined | null): readonly JsonValue[] {
+  return Array.isArray(value) ? value : []
+}
+
+function jsonText(value: JsonValue | undefined | null): string | null {
+  if (typeof value === "string") return value
+  if (typeof value === "number" || typeof value === "boolean") return String(value)
+  return null
+}
+
+function previewJsonValue(value: JsonValue | undefined | null): string | undefined {
+  if (value === undefined || value === null) return undefined
+  const text = typeof value === "string" ? value : JSON.stringify(value)
+  return text.length > 240 ? `${text.slice(0, 237)}…` : text
+}
+
+function workflowPayloadRuns(payload: JsonValue): readonly JsonValue[] {
+  if (Array.isArray(payload)) return payload
+  const root = jsonRecord(payload)
+  if (!root) return []
+  const directRun = jsonRecord(root.run)
+  if (directRun) return [root.run]
+  if (typeof root.id === "string" || typeof root.runId === "string") return [payload]
+  return jsonArray(root.workflowRuns).length ? jsonArray(root.workflowRuns)
+    : jsonArray(root.workflows).length ? jsonArray(root.workflows)
+      : jsonArray(root.runs).length ? jsonArray(root.runs)
+        : jsonArray(root.data)
+}
+
+function workflowPayloadEvents(payload: JsonValue): readonly JsonValue[] {
+  if (Array.isArray(payload)) return payload
+  const root = jsonRecord(payload)
+  if (!root) return []
+  const directEvent = jsonRecord(root.event)
+  if (directEvent) return [root.event]
+  if (typeof root.runId === "string" && typeof root.type === "string") return [payload]
+  return jsonArray(root.workflowEvents).length ? jsonArray(root.workflowEvents)
+    : jsonArray(root.events).length ? jsonArray(root.events)
+      : jsonArray(root.data)
+}
+
+function normalizeWorkflowEvents(payload: JsonValue): readonly WorkflowEventTelemetry[] {
+  return workflowPayloadEvents(payload)
+    .map(normalizeWorkflowEvent)
+    .filter((event): event is WorkflowEventTelemetry => event !== null)
+}
+
+function normalizeWorkflowRuns(payload: JsonValue): readonly WorkflowRunTelemetry[] {
+  return workflowPayloadRuns(payload)
+    .map(normalizeWorkflowRun)
+    .filter((run): run is WorkflowRunTelemetry => run !== null)
+}
+
+function normalizeWorkflowRun(value: JsonValue): WorkflowRunTelemetry | null {
+  const root = jsonRecord(value)
+  if (!root) return null
+  const id = jsonText(root.id) ?? jsonText(root.runId) ?? jsonText(root.workflowRunId)
+  if (!id) return null
+  const events = [
+    ...normalizeWorkflowEvents(root.workflowEvents ?? []),
+    ...normalizeWorkflowEvents(root.events ?? []),
+    ...normalizeWorkflowEvents(root.recentEvents ?? []),
+  ].filter((event) => event.runId === id)
+  const eventStatus = workflowStatusFromEvents(events)
+  const eventPhase = workflowPhaseFromEvents(events)
+  const status = eventStatus !== "queued" ? eventStatus : jsonText(root.status) ?? jsonText(root.state) ?? "queued"
+  const source = jsonText(root.scriptId) ?? jsonText(root.definitionId) ?? jsonText(root.workflowId) ?? jsonText(root.source) ?? "workflow"
+  const title = jsonText(root.title) ?? jsonText(root.name) ?? source
+  const artifactPaths = workflowArtifactPaths(root, events)
+  const resultPreview = workflowResultPreview(root, events)
+  const errorPreview = workflowErrorPreview(root, events)
+  return {
+    id,
+    lane: workflowLane(root, events, `${source} ${title}`),
+    status,
+    title,
+    source,
+    currentPhase: eventPhase ?? jsonText(root.currentPhase) ?? jsonText(root.phase) ?? jsonText(root.currentStep) ?? "queued",
+    counters: workflowCounters(root, events, artifactPaths),
+    events: sortWorkflowEvents(events),
+    artifactPaths,
+    resultPreview,
+    errorPreview,
+    createdAt: jsonText(root.createdAt) ?? undefined,
+    updatedAt: jsonText(root.updatedAt) ?? jsonText(root.finishedAt) ?? undefined,
+    rawJson: value,
+  }
+}
+
+function normalizeWorkflowEvent(value: JsonValue): WorkflowEventTelemetry | null {
+  const root = jsonRecord(value)
+  if (!root) return null
+  const runId = jsonText(root.runId) ?? jsonText(root.workflowRunId)
+  const type = jsonText(root.type) ?? jsonText(root.eventType)
+  if (!runId || !type) return null
+  const phase = jsonText(root.phase) ?? jsonText(root.currentPhase) ?? jsonText(root.step) ?? undefined
+  const agent = jsonText(root.agent) ?? jsonText(root.agentId) ?? jsonText(root.persona) ?? jsonText(root.role) ?? jsonText(root.source) ?? undefined
+  const artifactPath = jsonArtifactRefs(root.artifactPath ?? root.path ?? root.artifact ?? root.url)[0]
+  const message = jsonText(root.message)
+    ?? jsonText(root.log)
+    ?? jsonText(root.text)
+    ?? jsonText(root.summary)
+    ?? artifactPath
+    ?? phase
+    ?? type
+  return {
+    id: jsonText(root.id) ?? jsonText(root.eventId) ?? undefined,
+    runId,
+    type,
+    lane: workflowLane(root, [], `${phase ?? ""} ${agent ?? ""} ${message}`),
+    phase,
+    agent,
+    message,
+    artifactPath,
+    resultPreview: previewJsonValue(root.result ?? root.output ?? root.records),
+    errorPreview: previewJsonValue(root.error),
+    createdAt: jsonText(root.createdAt) ?? jsonText(root.timestamp) ?? jsonText(root.time) ?? undefined,
+    sequence: typeof root.sequence === "number" ? root.sequence : typeof root.seq === "number" ? root.seq : undefined,
+    rawJson: value,
+  }
+}
+
+function workflowLane(root: { readonly [key: string]: JsonValue }, events: readonly WorkflowEventTelemetry[], fallbackText: string): ProductLane {
+  const explicitLane = jsonText(root.lane) ?? jsonText(root.productLane)
+  if (explicitLane === "brainrot" || explicitLane === "ugc-ads") return explicitLane
+  const eventLane = events.find((event) => event.lane === "brainrot")?.lane
+  return eventLane ?? normalizeProductLane(fallbackText)
+}
+
+function workflowArtifactPaths(root: { readonly [key: string]: JsonValue }, events: readonly WorkflowEventTelemetry[]): readonly string[] {
+  const direct = [
+    ...jsonArtifactRefs(root.artifactPaths),
+    ...jsonArtifactRefs(root.artifacts),
+    ...jsonArtifactRefs(root.importedRecords),
+    ...jsonArtifactRefs(root.imports),
+  ]
+  const fromEvents = events.map((event) => event.artifactPath).filter((path): path is string => Boolean(path))
+  return uniqueStrings([...direct, ...fromEvents]).slice(0, 12)
+}
+
+function workflowResultPreview(root: { readonly [key: string]: JsonValue }, events: readonly WorkflowEventTelemetry[]): string | undefined {
+  return events.find((event) => event.resultPreview)?.resultPreview
+    ?? previewJsonValue(root.result ?? root.output ?? root.resultJson)
+}
+
+function workflowErrorPreview(root: { readonly [key: string]: JsonValue }, events: readonly WorkflowEventTelemetry[]): string | undefined {
+  return events.find((event) => event.errorPreview)?.errorPreview
+    ?? previewJsonValue(root.error)
+}
+
+function workflowCounters(root: { readonly [key: string]: JsonValue }, events: readonly WorkflowEventTelemetry[], artifactPaths: readonly string[]): readonly WorkflowCounter[] {
+  const explicit = jsonRecord(root.counters) ?? jsonRecord(root.counts) ?? jsonRecord(root.metrics)
+  if (explicit) {
+    const counters = Object.entries(explicit)
+      .map(([label, value]) => ({ label: workflowCounterLabel(label), value: jsonText(value) ?? previewJsonValue(value) ?? "n/a" }))
+      .slice(0, 6)
+    if (counters.length) return counters
+  }
+  const eventTypes = events.map((event) => event.type)
+  return [
+    { label: "events", value: String(events.length) },
+    { label: "agents", value: String(new Set(events.map((event) => event.agent).filter(Boolean)).size) },
+    { label: "artifacts", value: String(artifactPaths.length) },
+    { label: "errors", value: String(eventTypes.filter((type) => type === "error").length) },
+    { label: "imports", value: String(eventTypes.filter((type) => type === "import").length) },
+    { label: "results", value: String(eventTypes.filter((type) => type === "result").length) },
+  ]
+}
+
+function workflowCounterLabel(label: string): string {
+  return label.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/[-_]/g, " ").toLowerCase()
+}
+
+function workflowStatusFromEvents(events: readonly WorkflowEventTelemetry[]): string {
+  const latest = sortWorkflowEvents(events)[0]
+  if (!latest) return "queued"
+  if (latest.type === "error") return "failed"
+  if (latest.type === "result" || latest.type === "import") return "succeeded"
+  if (latest.type === "agent-end") return activeWorkflowAgents(events).length ? "running" : "waiting"
+  if (latest.type === "phase" || latest.type === "log" || latest.type.startsWith("agent-") || latest.type === "artifact") return "running"
+  return latest.type
+}
+
+function workflowPhaseFromEvents(events: readonly WorkflowEventTelemetry[]): string | null {
+  return sortWorkflowEvents(events).find((event) => event.phase)?.phase ?? null
+}
+
+function activeWorkflowAgents(events: readonly WorkflowEventTelemetry[]): readonly WorkflowEventTelemetry[] {
+  const latestByAgent = new Map<string, WorkflowEventTelemetry>()
+  for (const event of sortWorkflowEvents(events).slice().reverse()) {
+    if (event.agent) latestByAgent.set(event.agent, event)
+  }
+  return Array.from(latestByAgent.values()).filter((event) => event.type === "agent-start" || event.type === "agent-progress" || event.type === "log" || event.type === "phase")
+}
+
+function sortWorkflowEvents(events: readonly WorkflowEventTelemetry[]): readonly WorkflowEventTelemetry[] {
+  return [...events].sort((left, right) => workflowEventOrder(right) - workflowEventOrder(left))
+}
+
+function workflowEventOrder(event: WorkflowEventTelemetry): number {
+  if (typeof event.sequence === "number") return event.sequence
+  if (event.createdAt) {
+    const time = Date.parse(event.createdAt)
+    if (Number.isFinite(time)) return time
+  }
+  return 0
+}
+
+function workflowEventKey(event: WorkflowEventTelemetry): string {
+  return event.id ?? `${event.runId}:${event.sequence ?? event.createdAt ?? ""}:${event.type}:${event.message}`
+}
+
+function mergeWorkflowRuns(existingRuns: readonly WorkflowRunTelemetry[], incomingRuns: readonly WorkflowRunTelemetry[]): readonly WorkflowRunTelemetry[] {
+  const byId = new Map(existingRuns.map((run) => [run.id, run]))
+  for (const incoming of incomingRuns) {
+    const existing = byId.get(incoming.id)
+    byId.set(incoming.id, existing ? mergeWorkflowRunEvents(incoming, existing.events) : incoming)
+  }
+  return Array.from(byId.values()).sort((left, right) => workflowRunOrder(right) - workflowRunOrder(left))
+}
+
+function mergeWorkflowEvent(runs: readonly WorkflowRunTelemetry[], event: WorkflowEventTelemetry): readonly WorkflowRunTelemetry[] {
+  const existing = runs.find((run) => run.id === event.runId)
+  const run = existing ?? workflowRunFromEvent(event)
+  const merged = mergeWorkflowRunEvents(run, [event])
+  return mergeWorkflowRuns(runs.filter((item) => item.id !== event.runId), [merged])
+}
+
+function mergeWorkflowRunEvents(run: WorkflowRunTelemetry, events: readonly WorkflowEventTelemetry[]): WorkflowRunTelemetry {
+  const byKey = new Map<string, WorkflowEventTelemetry>()
+  for (const event of [...run.events, ...events]) byKey.set(workflowEventKey(event), event)
+  const mergedEvents = sortWorkflowEvents(Array.from(byKey.values())).slice(0, 32)
+  const root = jsonRecord(run.rawJson) ?? {}
+  const artifactPaths = workflowArtifactPaths(root, mergedEvents)
+  const derivedStatus = workflowStatusFromEvents(mergedEvents)
+  return {
+    ...run,
+    status: derivedStatus === "queued" ? run.status : derivedStatus,
+    currentPhase: workflowPhaseFromEvents(mergedEvents) ?? run.currentPhase,
+    counters: workflowCounters(root, mergedEvents, artifactPaths),
+    events: mergedEvents,
+    artifactPaths,
+    resultPreview: workflowResultPreview(root, mergedEvents) ?? run.resultPreview,
+    errorPreview: workflowErrorPreview(root, mergedEvents) ?? run.errorPreview,
+    updatedAt: mergedEvents[0]?.createdAt ?? run.updatedAt,
+  }
+}
+
+function workflowRunFromEvent(event: WorkflowEventTelemetry): WorkflowRunTelemetry {
+  const rawJson: JsonValue = { id: event.runId, lane: event.lane, status: workflowStatusFromEvents([event]), currentPhase: event.phase ?? "event stream" }
+  const root = jsonRecord(rawJson) ?? {}
+  return {
+    id: event.runId,
+    lane: event.lane,
+    status: workflowStatusFromEvents([event]),
+    title: event.agent ? `${event.agent} workflow` : "Workflow run",
+    source: "event stream",
+    currentPhase: event.phase ?? "event stream",
+    counters: workflowCounters(root, [event], event.artifactPath ? [event.artifactPath] : []),
+    events: [event],
+    artifactPaths: event.artifactPath ? [event.artifactPath] : [],
+    resultPreview: event.resultPreview,
+    errorPreview: event.errorPreview,
+    createdAt: event.createdAt,
+    updatedAt: event.createdAt,
+    rawJson,
+  }
+}
+
+function workflowRunOrder(run: WorkflowRunTelemetry): number {
+  const latestEvent = run.events[0]
+  if (latestEvent) return workflowEventOrder(latestEvent)
+  const updated = run.updatedAt ?? run.createdAt
+  if (!updated) return 0
+  const time = Date.parse(updated)
+  return Number.isFinite(time) ? time : 0
+}
+
+function workflowLatestCursor(run: WorkflowRunTelemetry): string | null {
+  const latest = run.events[0]
+  if (!latest) return null
+  if (typeof latest.sequence === "number") return String(latest.sequence)
+  return latest.id ?? latest.createdAt ?? null
+}
+
+function uniqueStrings(values: readonly string[]): readonly string[] {
+  return Array.from(new Set(values.filter(Boolean)))
+}
+
+function workflowRouteMissing(response: Response): boolean {
+  return response.status === 404 || response.status === 405
+}
+
+function workflowStatusTone(status: string): "success" | "danger" | "active" | "neutral" {
+  if (["succeeded", "completed", "done", "imported"].includes(status)) return "success"
+  if (["failed", "error", "blocked", "cancelled"].includes(status)) return "danger"
+  if (["queued", "running", "active", "agent-start", "agent-progress", "phase", "log"].includes(status)) return "active"
+  return "neutral"
+}
+
+function useWorkflowTelemetry(): WorkflowTelemetryController {
+  const [state, setState] = React.useState<WorkflowTelemetryState>({
+    runs: [],
+    streamStatus: "loading",
+    routeAvailable: false,
+    postUnavailable: false,
+    message: "Loading workflow telemetry from the Slotok daemon…",
+    creating: false,
+  })
+  const runsRef = React.useRef<readonly WorkflowRunTelemetry[]>([])
+
+  const loadWorkflowSnapshot = React.useCallback(async (): Promise<readonly WorkflowRunTelemetry[]> => {
+    try {
+      const response = await fetch(`${daemonBaseUrl}/api/ugc/workflows`)
+      const text = await response.text()
+      if (workflowRouteMissing(response)) {
+        setState((previous) => ({
+          ...previous,
+          runs: [],
+          streamStatus: "unavailable",
+          routeAvailable: false,
+          postUnavailable: previous.postUnavailable,
+          message: "Daemon telemetry route is unavailable: GET /api/ugc/workflows returned 404/405.",
+        }))
+        return []
+      }
+      if (!response.ok) {
+        setState((previous) => ({
+          ...previous,
+          streamStatus: previous.streamStatus === "live" ? "live" : "polling",
+          routeAvailable: true,
+          message: `Workflow telemetry route returned ${response.status}.`,
+        }))
+        return runsRef.current
+      }
+      const payload = parseJson(text)
+      const incomingRuns = normalizeWorkflowRuns(payload)
+      setState((previous) => ({
+        ...previous,
+        runs: mergeWorkflowRuns(previous.runs, incomingRuns),
+        streamStatus: previous.streamStatus === "live" ? "live" : "polling",
+        routeAvailable: true,
+        message: incomingRuns.length ? "Workflow telemetry is replaying from the daemon event log." : "Workflow telemetry route is available; no workflow runs have been recorded yet.",
+      }))
+      return incomingRuns.length ? incomingRuns : runsRef.current
+    } catch {
+      setState((previous) => ({
+        ...previous,
+        streamStatus: "unavailable",
+        routeAvailable: false,
+        postUnavailable: previous.postUnavailable,
+        message: "Daemon telemetry route is unavailable: could not connect to /api/ugc/workflows.",
+      }))
+      return []
+    }
+  }, [])
+
+  const loadWorkflowEvents = React.useCallback(async (runs: readonly WorkflowRunTelemetry[]) => {
+    for (const run of runs.slice(0, 8)) {
+      const after = workflowLatestCursor(run)
+      const url = `${daemonBaseUrl}/api/ugc/workflows/${encodeURIComponent(run.id)}/events${after ? `?after=${encodeURIComponent(after)}` : ""}`
+      try {
+        const response = await fetch(url)
+        if (!response.ok) continue
+        const payload = parseJson(await response.text())
+        const events = normalizeWorkflowEvents(payload)
+        if (events.length) {
+          setState((previous) => ({
+            ...previous,
+            runs: events.reduce((runsSoFar, event) => mergeWorkflowEvent(runsSoFar, event), previous.runs),
+          }))
+        }
+      } catch {
+        continue
+      }
+    }
+  }, [])
+
+  const refresh = React.useCallback(() => {
+    void (async () => {
+      const runs = await loadWorkflowSnapshot()
+      await loadWorkflowEvents(runs)
+    })()
+  }, [loadWorkflowEvents, loadWorkflowSnapshot])
+
+  const createDemoRun = React.useCallback(() => {
+    void (async () => {
+      setState((previous) => ({ ...previous, creating: true }))
+      try {
+        const response = await fetch(`${daemonBaseUrl}/api/ugc/workflows`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            lane: "ugc-ads",
+            scriptId: "slotok-workbench-telemetry-demo",
+            args: {
+              source: "ReactUgcStudio",
+              prompt: "Create a compact demo workflow run for workbench telemetry QA.",
+            },
+            demo: true,
+          }),
+        })
+        const text = await response.text()
+        if (workflowRouteMissing(response)) {
+          setState((previous) => ({
+            ...previous,
+            creating: false,
+            postUnavailable: true,
+            message: "Create-run route is unavailable: POST /api/ugc/workflows returned 404/405.",
+          }))
+          return
+        }
+        const payload = parseJson(text)
+        const runs = normalizeWorkflowRuns(payload)
+        const events = normalizeWorkflowEvents(payload)
+        setState((previous) => ({
+          ...previous,
+          creating: false,
+          routeAvailable: true,
+          runs: events.reduce((runsSoFar, event) => mergeWorkflowEvent(runsSoFar, event), mergeWorkflowRuns(previous.runs, runs)),
+          message: response.ok ? "Demo workflow run request was accepted by the daemon." : `Demo workflow run returned ${response.status}: ${previewJsonValue(payload) ?? "no response body"}`,
+        }))
+        if (response.ok && !runs.length) refresh()
+      } catch {
+        setState((previous) => ({
+          ...previous,
+          creating: false,
+          postUnavailable: true,
+          message: "Create-run route is unavailable: could not connect to POST /api/ugc/workflows.",
+        }))
+      }
+    })()
+  }, [refresh])
+
+  React.useEffect(() => {
+    runsRef.current = state.runs
+  }, [state.runs])
+
+  React.useEffect(() => {
+    let cancelled = false
+    let pollTimer = 0
+    let pollingStarted = false
+    let eventSource: EventSource | null = null
+
+    function beginPolling(message: string) {
+      if (pollingStarted || cancelled) return
+      pollingStarted = true
+      setState((previous) => ({
+        ...previous,
+        streamStatus: previous.streamStatus === "unavailable" ? "unavailable" : "polling",
+        message,
+      }))
+      schedulePoll()
+    }
+
+    function schedulePoll() {
+      if (cancelled) return
+      pollTimer = window.setTimeout(() => {
+        void (async () => {
+          const runs = await loadWorkflowSnapshot()
+          await loadWorkflowEvents(runs.length ? runs : runsRef.current)
+          schedulePoll()
+        })()
+      }, 4000)
+    }
+
+    void (async () => {
+      const runs = await loadWorkflowSnapshot()
+      await loadWorkflowEvents(runs)
+      if (cancelled) return
+      if (typeof EventSource === "undefined") {
+        beginPolling("EventSource is unavailable in this renderer; polling workflow events.")
+        return
+      }
+      const source = new EventSource(`${daemonBaseUrl}/api/ugc/workflows/events/stream`)
+      eventSource = source
+      source.onopen = () => {
+        if (!cancelled) {
+          setState((previous) => ({
+            ...previous,
+            streamStatus: "live",
+            routeAvailable: true,
+            message: "Live workflow event stream connected.",
+          }))
+        }
+      }
+      source.onmessage = (message: MessageEvent<string>) => {
+        const events = normalizeWorkflowEvents(parseJson(message.data))
+        if (!events.length) return
+        setState((previous) => ({
+          ...previous,
+          runs: events.reduce((runsSoFar, event) => mergeWorkflowEvent(runsSoFar, event), previous.runs),
+          streamStatus: "live",
+          routeAvailable: true,
+          message: "Live workflow event stream connected.",
+        }))
+      }
+      source.onerror = () => {
+        source.close()
+        beginPolling("Workflow event stream is unavailable; polling run events as fallback.")
+      }
+    })()
+
+    return () => {
+      cancelled = true
+      if (eventSource) eventSource.close()
+      if (pollTimer) window.clearTimeout(pollTimer)
+    }
+  }, [loadWorkflowEvents, loadWorkflowSnapshot])
+
+  return {
+    ...state,
+    refresh,
+    createDemoRun,
+  }
 }
 
 function codexJobMediaSummary(job: UgcProviderJob): CodexJobMediaSummary {
@@ -2442,6 +3023,174 @@ function ReferenceFormatOutputCard(props: { output: ReferenceArchiveFormatOutput
   )
 }
 
+function WorkflowTelemetryPanel() {
+  const telemetry = useWorkflowTelemetry()
+  const [selectedRunId, setSelectedRunId] = React.useState("")
+  const selectedRun = telemetry.runs.find((run) => run.id === selectedRunId) ?? telemetry.runs[0]
+  const activeRuns = telemetry.runs.filter((run) => workflowStatusTone(run.status) === "active")
+  const selectedAgents = selectedRun ? activeWorkflowAgents(selectedRun.events) : []
+  const latestEvent = selectedRun?.events[0]
+  const createDisabled = telemetry.creating || !telemetry.routeAvailable || telemetry.postUnavailable
+  const createHelp = !telemetry.routeAvailable
+    ? "Create disabled until GET /api/ugc/workflows is available."
+    : telemetry.postUnavailable
+      ? "Create disabled because POST /api/ugc/workflows returned unavailable."
+      : "Creates a daemon demo run when POST /api/ugc/workflows is implemented."
+  React.useEffect(() => {
+    if (!selectedRunId || !telemetry.runs.some((run) => run.id === selectedRunId)) {
+      setSelectedRunId(telemetry.runs[0]?.id ?? "")
+    }
+  }, [selectedRunId, telemetry.runs])
+
+  return (
+    <div className="rugc-provider-note mt-3">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <Bot size={15} className="text-muted-foreground" />
+            <strong>Workflow telemetry</strong>
+            <StatusBadge tone={telemetry.streamStatus === "live" ? "success" : telemetry.streamStatus === "unavailable" ? "danger" : "active"}>
+              {telemetry.streamStatus}
+            </StatusBadge>
+          </div>
+          <p className="mt-1">Event-sourced agent runs from Slotok workflows, dynamic-workflow adapters, and OMP/persona lanes.</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Button size="xs" variant="workbench" onClick={telemetry.refresh}>
+            <RefreshCw size={13} /> Refresh
+          </Button>
+          <Button size="xs" variant="outline" disabled={createDisabled} onClick={telemetry.createDemoRun}>
+            <Plus size={13} /> {telemetry.creating ? "Creating…" : "Create demo run"}
+          </Button>
+        </div>
+      </div>
+
+      <div className="mt-2 grid grid-cols-4 gap-2">
+        <MetricRow label="Runs" value={String(telemetry.runs.length)} />
+        <MetricRow label="Active" value={String(activeRuns.length)} />
+        <MetricRow label="Brainrot" value={String(telemetry.runs.filter((run) => run.lane === "brainrot").length)} />
+        <MetricRow label="UGC ads" value={String(telemetry.runs.filter((run) => run.lane === "ugc-ads").length)} />
+      </div>
+
+      <div className="mt-2 rounded-md border border-border bg-background p-2 text-[10px] leading-4 text-muted-foreground">
+        <div className="flex items-start gap-2">
+          {telemetry.streamStatus === "unavailable" ? <XCircle size={13} className="mt-0.5 text-red-700" /> : <Clock size={13} className="mt-0.5" />}
+          <span>{telemetry.message} {createHelp}</span>
+        </div>
+      </div>
+
+      <div className="mt-3 grid min-h-0 grid-cols-[minmax(0,1fr)_minmax(260px,0.78fr)] gap-3">
+        <div className="grid max-h-80 gap-2 overflow-auto pr-1">
+          {telemetry.runs.length ? telemetry.runs.slice(0, 8).map((run) => {
+            const runAgents = activeWorkflowAgents(run.events)
+            return (
+              <button
+                key={run.id}
+                type="button"
+                className={cn(
+                  "rounded-md border border-border bg-card p-2 text-left shadow-sm hover:bg-accent",
+                  selectedRun?.id === run.id && "border-primary/60 bg-primary/10",
+                )}
+                onClick={() => setSelectedRunId(run.id)}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <strong className="min-w-0 truncate text-[11px] text-foreground">{run.title}</strong>
+                  <StatusBadge tone={workflowStatusTone(run.status)}>{run.status}</StatusBadge>
+                </div>
+                <div className="mt-1 flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+                  <span className="truncate">{run.currentPhase}</span>
+                  <ProductLaneBadge lane={run.lane} />
+                </div>
+                <div className="mt-1 grid gap-0.5 text-[10px] text-muted-foreground">
+                  {runAgents.length ? runAgents.slice(0, 3).map((event) => (
+                    <span key={workflowEventKey(event)} className="truncate">
+                      {event.agent}: {event.message}
+                    </span>
+                  )) : (
+                    <span className="truncate">{run.events[0]?.message ?? "No events replayed yet"}</span>
+                  )}
+                </div>
+              </button>
+            )
+          }) : (
+            <div className="grid min-h-32 place-items-center rounded-md border border-dashed border-border bg-background p-4 text-center">
+              <div>
+                <GitBranch className="mx-auto text-muted-foreground" size={22} />
+                <p className="mt-2 text-[11px] font-semibold text-foreground">No workflow runs</p>
+                <p className="mt-1 text-[10px] leading-4 text-muted-foreground">Telemetry routes can land independently; this panel stays quiet until the daemon exposes the event log.</p>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="grid max-h-80 gap-2 overflow-auto pr-1">
+          {selectedRun ? (
+            <>
+              <div className="rounded-md border border-border bg-background p-2">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <strong className="block truncate text-[11px] text-foreground">{selectedRun.source}</strong>
+                    <span className="block truncate text-[10px] text-muted-foreground">{selectedRun.id}</span>
+                  </div>
+                  <ProductLaneBadge lane={selectedRun.lane} />
+                </div>
+                <div className="mt-2 grid gap-1">
+                  <MetricRow label="Status" value={selectedRun.status} />
+                  <MetricRow label="Phase" value={selectedRun.currentPhase} />
+                  <MetricRow label="Agents now" value={selectedAgents.length ? selectedAgents.map((event) => event.agent).filter(Boolean).join(", ") : latestEvent?.agent ?? "idle"} />
+                  <MetricRow label="Artifacts" value={String(selectedRun.artifactPaths.length)} />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-1">
+                {selectedRun.counters.slice(0, 6).map((counter) => (
+                  <div key={counter.label} className="rounded border border-border bg-card px-2 py-1">
+                    <span className="block truncate text-[9px] uppercase tracking-[0.16em] text-muted-foreground">{counter.label}</span>
+                    <strong className="text-[11px] text-foreground">{counter.value}</strong>
+                  </div>
+                ))}
+              </div>
+
+              <div className="rounded-md border border-border bg-background p-2">
+                <p className="m-0 text-[11px] font-semibold text-foreground">Latest events</p>
+                <div className="mt-2 grid gap-1.5">
+                  {selectedRun.events.slice(0, 6).map((event) => (
+                    <div key={workflowEventKey(event)} className="rounded border border-border bg-card p-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[9px] font-semibold text-primary">{event.type}</span>
+                        <span className="truncate text-[9px] text-muted-foreground">{event.createdAt ?? event.phase ?? "event log"}</span>
+                      </div>
+                      <p className="mt-1 line-clamp-2 text-[10px] leading-4 text-muted-foreground">
+                        {event.agent ? `${event.agent}: ` : ""}{event.message}
+                      </p>
+                    </div>
+                  ))}
+                  {selectedRun.events.length === 0 ? <span className="text-[10px] text-muted-foreground">No events replayed for this run yet.</span> : null}
+                </div>
+              </div>
+
+              <div className="rounded-md border border-border bg-background p-2">
+                <p className="m-0 text-[11px] font-semibold text-foreground">Artifacts</p>
+                <div className="mt-1 grid gap-1 text-[10px] text-muted-foreground">
+                  {selectedRun.artifactPaths.length ? selectedRun.artifactPaths.slice(0, 6).map((path) => (
+                    <span key={path} className="truncate"><FileJson size={11} className="mr-1 inline" />{path}</span>
+                  )) : <span>none yet</span>}
+                </div>
+              </div>
+
+              <pre className="rugc-json max-h-28">{selectedRun.errorPreview ? `error: ${selectedRun.errorPreview}` : selectedRun.resultPreview ? `result: ${selectedRun.resultPreview}` : JSON.stringify({ latestEvent: latestEvent?.message ?? null, raw: selectedRun.rawJson }, null, 2)}</pre>
+            </>
+          ) : (
+            <div className="rounded-md border border-dashed border-border bg-background p-3 text-[11px] leading-4 text-muted-foreground">
+              Select a workflow run to inspect event-derived phase, active agents, artifacts, result, and error previews.
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function DeveloperGraphView(props: {
   onMutateLocal: (path: string, body: object) => void
   workspaceBundle: UgcWorkspaceBundle | null
@@ -2491,6 +3240,7 @@ function DeveloperGraphView(props: {
           <span className="rounded bg-primary/10 px-2 py-1 text-primary">UGC Studio ads</span>
           <span className="rounded border border-border bg-card px-2 py-1">Brainrot creation / Pleometric</span>
         </div>
+        <WorkflowTelemetryPanel />
         <div className="rugc-provider-note mt-3">
           <div className="flex items-center justify-between gap-2">
             <strong>Research and template proof queue</strong>

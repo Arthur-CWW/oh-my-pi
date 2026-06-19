@@ -14,6 +14,7 @@ import {
   type BulkCandidateStatusPatch,
   type CandidateStatusPatch,
   type CleanRoomTemplateSpec,
+  type AppendWorkflowEventInput,
   type CreateBranchInput,
   type CreateExportManifestInput,
   type CreateProviderJobInput,
@@ -21,6 +22,7 @@ import {
   type CreateResearchTargetInput,
   type CreateReviewNoteInput,
   type CreateTemplateMiningJobInput,
+  type CreateWorkflowRunInput,
   type CreateWorkspaceBundleInput,
   type FinalEditorPatch,
   type ImportWorkspaceBundleInput,
@@ -32,16 +34,21 @@ import {
   type ProviderJobPatch,
   type ResearchTargetPatch,
   type TemplateMiningJobPatch,
+  type UgcWorkflowEvent,
+  type UgcWorkflowEventType,
   type UgcExportManifest,
   type UgcLocalState,
   type UgcProviderJob,
   type UgcReferenceArchive,
   type UgcResearchTarget,
   type UgcTemplateMiningJob,
+  type UgcWorkflowRun,
+  type UgcWorkflowRunStatus,
   type UgcWorkspaceBundle,
   type UgcWorkspaceBundleImportResult,
   type UgcWorkspaceBundleObjectCounts,
   type UgcWorkspaceBundleShardManifest,
+  type WorkflowRunPatch,
 } from "../ugc/local-state"
 import { UgcSqliteStore } from "./ugc-sqlite-store"
 import type { BranchSnapshot, JsonValue, PersonaProfile, ReferenceProfile, ReviewNote, UgcStudioWorkspace } from "../renderer/ugcStudioModel"
@@ -99,16 +106,17 @@ export class UgcJsonStore {
 
   read(): UgcLocalState {
     const sqliteState = this.sqliteStore?.readValidState()
+    const normalizedSqliteState = sqliteState ? normalizeLocalState(sqliteState) : null
     const existing = readJsonFile(this.config.statePath)
     const jsonState = isLocalState(existing) ? normalizeLocalState(existing) : null
 
-    if (sqliteState && jsonState && stateUpdatedAfter(jsonState, sqliteState)) {
+    if (normalizedSqliteState && jsonState && stateUpdatedAfter(jsonState, normalizedSqliteState)) {
       return this.write(jsonState)
     }
 
-    if (sqliteState) {
-      this.#repairJsonArtifacts(sqliteState)
-      return sqliteState
+    if (normalizedSqliteState) {
+      this.#repairJsonArtifacts(normalizedSqliteState)
+      return normalizedSqliteState
     }
 
     if (jsonState) {
@@ -501,6 +509,133 @@ export class UgcJsonStore {
       notes: input.notes ?? [],
     }
     return this.write({ ...state, exportManifests: [manifest, ...state.exportManifests] })
+  }
+
+  listWorkflowRuns(): readonly UgcWorkflowRun[] {
+    const state = this.read()
+    return state.workflowRuns.map((run) => summarizeWorkflowRun(run, state.workflowEvents.filter((event) => event.runId === run.id)))
+  }
+
+  listWorkflowEvents(runId: string, afterEventId = 0): readonly UgcWorkflowEvent[] {
+    const state = this.read()
+    if (!state.workflowRuns.some((run) => run.id === runId)) throw new Error(`workflow run not found: ${runId}`)
+    return state.workflowEvents
+      .filter((event) => event.runId === runId && event.eventId > afterEventId)
+      .sort((left, right) => left.eventId - right.eventId)
+  }
+
+  listWorkflowEventsAfter(afterEventId = 0): readonly UgcWorkflowEvent[] {
+    return this.read().workflowEvents
+      .filter((event) => event.eventId > afterEventId)
+      .sort((left, right) => left.eventId - right.eventId)
+  }
+
+  createWorkflowRun(input: CreateWorkflowRunInput): UgcWorkflowRun {
+    const state = this.read()
+    const now = this.now()
+    const title = input.title.trim() || "Workflow run"
+    const run: UgcWorkflowRun = {
+      schemaVersion: "ugc-studio.workflow-run.v1",
+      id: `workflow_${input.source ?? "slotok"}_${slug(title)}_${Date.now().toString(36)}`,
+      workspaceId: state.workspace.id,
+      lane: input.lane?.trim() || "default",
+      status: input.status ?? "queued",
+      title,
+      source: input.source ?? "slotok",
+      scriptId: input.scriptId ?? null,
+      args: sanitizeWorkflowJsonValue(input.args ?? null),
+      result: null,
+      error: null,
+      currentPhase: input.currentPhase ?? null,
+      counters: input.counters ?? {},
+      importedRecordIds: input.importedRecordIds ?? [],
+      artifactPaths: input.artifactPaths ?? [],
+      createdAt: now,
+      updatedAt: now,
+    }
+    const event: UgcWorkflowEvent = {
+      schemaVersion: "ugc-studio.workflow-event.v1",
+      eventId: nextWorkflowEventId(state),
+      runId: run.id,
+      type: "created",
+      phase: run.currentPhase,
+      agentLabel: null,
+      message: `Created ${run.title}`,
+      payload: { status: run.status },
+      artifactPaths: run.artifactPaths,
+      error: null,
+      createdAt: now,
+    }
+    const summarized = summarizeWorkflowRun(run, [event])
+    this.write({
+      ...state,
+      workflowRuns: [summarized, ...state.workflowRuns],
+      workflowEvents: [...state.workflowEvents, event],
+    })
+    return summarized
+  }
+
+  appendWorkflowEvent(runId: string, input: AppendWorkflowEventInput): UgcWorkflowEvent {
+    const state = this.read()
+    const run = state.workflowRuns.find((item) => item.id === runId)
+    if (!run) throw new Error(`workflow run not found: ${runId}`)
+    const now = this.now()
+    const event: UgcWorkflowEvent = {
+      schemaVersion: "ugc-studio.workflow-event.v1",
+      eventId: nextWorkflowEventId(state),
+      runId,
+      type: input.type,
+      phase: input.phase ?? null,
+      agentLabel: input.agentLabel ?? null,
+      message: input.message ?? null,
+      payload: input.payload === undefined ? null : sanitizeWorkflowJsonValue(input.payload),
+      artifactPaths: input.artifactPaths ?? [],
+      error: input.error ?? null,
+      createdAt: now,
+    }
+    const workflowEvents = [...state.workflowEvents, event]
+    const workflowRuns = state.workflowRuns.map((item) => (
+      item.id === runId ? summarizeWorkflowRun(item, workflowEvents.filter((candidate) => candidate.runId === runId)) : item
+    ))
+    this.write({ ...state, workflowRuns, workflowEvents })
+    return event
+  }
+
+  updateWorkflowRun(runId: string, patch: WorkflowRunPatch): UgcWorkflowRun {
+    const state = this.read()
+    const run = state.workflowRuns.find((item) => item.id === runId)
+    if (!run) throw new Error(`workflow run not found: ${runId}`)
+    const now = this.now()
+    const statusEvent: UgcWorkflowEvent | null = patch.status === undefined ? null : {
+      schemaVersion: "ugc-studio.workflow-event.v1",
+      eventId: nextWorkflowEventId(state),
+      runId,
+      type: eventTypeForStatus(patch.status),
+      phase: patch.currentPhase ?? run.currentPhase,
+      agentLabel: null,
+      message: null,
+      payload: { status: patch.status },
+      artifactPaths: patch.artifactPaths ?? [],
+      error: patch.error ?? null,
+      createdAt: now,
+    }
+    const patched: UgcWorkflowRun = {
+      ...run,
+      title: patch.title?.trim() || run.title,
+      status: patch.status ?? run.status,
+      result: patch.result === undefined ? run.result : sanitizeWorkflowJsonValue(patch.result),
+      error: patch.error === undefined ? run.error : patch.error,
+      currentPhase: patch.currentPhase === undefined ? run.currentPhase : patch.currentPhase,
+      counters: patch.counters ?? run.counters,
+      importedRecordIds: patch.importedRecordIds ?? run.importedRecordIds,
+      artifactPaths: patch.artifactPaths ?? run.artifactPaths,
+      updatedAt: now,
+    }
+    const workflowEvents = statusEvent ? [...state.workflowEvents, statusEvent] : state.workflowEvents
+    const summarized = summarizeWorkflowRun(patched, workflowEvents.filter((event) => event.runId === runId))
+    const workflowRuns = state.workflowRuns.map((item) => (item.id === runId ? summarized : item))
+    this.write({ ...state, workflowRuns, workflowEvents })
+    return summarized
   }
 
   exportWorkspaceBundle(input: CreateWorkspaceBundleInput = {}): UgcWorkspaceBundle {
@@ -1488,6 +1623,109 @@ function createTemplateSpecFromTarget(target: UgcResearchTarget): CleanRoomTempl
   }
 }
 
+function nextWorkflowEventId(state: UgcLocalState): number {
+  return state.workflowEvents.reduce((max, event) => Math.max(max, event.eventId), 0) + 1
+}
+
+function summarizeWorkflowRun(run: UgcWorkflowRun, events: readonly UgcWorkflowEvent[]): UgcWorkflowRun {
+  let status = run.status
+  let result = run.result
+  let error = run.error
+  let currentPhase = run.currentPhase
+  let updatedAt = run.updatedAt
+  let artifactPaths = run.artifactPaths
+  for (const event of [...events].sort((left, right) => left.eventId - right.eventId)) {
+    const eventStatus = workflowStatusForEvent(event)
+    if (eventStatus) status = eventStatus
+    if (event.phase) currentPhase = event.phase
+    if (event.artifactPaths.length > 0) artifactPaths = mergeStrings(artifactPaths, event.artifactPaths)
+    if (event.error) error = event.error
+    if ((event.type === "result" || event.type === "completed") && event.payload !== null) result = event.payload
+    updatedAt = event.createdAt
+  }
+  return { ...run, status, result, error, currentPhase, artifactPaths, updatedAt }
+}
+
+function workflowStatusForEvent(event: UgcWorkflowEvent): UgcWorkflowRunStatus | null {
+  if (event.type === "queued") return "queued"
+  if (event.type === "started" || event.type === "phase" || event.type === "message" || event.type === "artifact") return "running"
+  if (event.type === "result" || event.type === "completed") return "succeeded"
+  if (event.type === "error") return "failed"
+  if (event.type === "blocked") return "blocked"
+  if (event.type === "canceled") return "canceled"
+  if ((event.type === "status" || event.type === "created") && isRecord(event.payload) && isWorkflowRunStatus(event.payload.status)) return event.payload.status
+  return null
+}
+
+function eventTypeForStatus(status: UgcWorkflowRunStatus): UgcWorkflowEventType {
+  if (status === "queued") return "queued"
+  if (status === "running") return "started"
+  if (status === "succeeded") return "completed"
+  if (status === "failed") return "error"
+  if (status === "blocked") return "blocked"
+  if (status === "canceled") return "canceled"
+  return "status"
+}
+
+function isWorkflowRunStatus(value: JsonValue | undefined): value is UgcWorkflowRunStatus {
+  return value === "planned"
+    || value === "queued"
+    || value === "running"
+    || value === "succeeded"
+    || value === "failed"
+    || value === "blocked"
+    || value === "canceled"
+}
+
+function mergeStrings(existing: readonly string[], incoming: readonly string[]): readonly string[] {
+  return [...new Set([...existing, ...incoming])]
+}
+
+function sanitizeWorkflowRun(run: UgcWorkflowRun): UgcWorkflowRun {
+  return {
+    ...run,
+    args: sanitizeWorkflowJsonValue(run.args),
+    result: run.result === null ? null : sanitizeWorkflowJsonValue(run.result),
+  }
+}
+
+function sanitizeWorkflowEvent(event: UgcWorkflowEvent): UgcWorkflowEvent {
+  return {
+    ...event,
+    payload: event.payload === null ? null : sanitizeWorkflowJsonValue(event.payload),
+  }
+}
+
+function sanitizeWorkflowJsonValue(value: JsonValue): JsonValue {
+  if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value
+  if (Array.isArray(value)) return value.map((item) => sanitizeWorkflowJsonValue(item))
+  const sanitized: { [key: string]: JsonValue } = {}
+  const record = value as { readonly [key: string]: JsonValue }
+  for (const key of Object.keys(record)) {
+    sanitized[key] = isSensitiveWorkflowKey(key) ? "[redacted]" : sanitizeWorkflowJsonValue(record[key] ?? null)
+  }
+  return sanitized
+}
+
+function isSensitiveWorkflowKey(key: string): boolean {
+  const normalized = key.toLowerCase().replace(/[^a-z0-9]+/g, "")
+  return normalized === "apikey"
+    || normalized === "token"
+    || normalized === "accesstoken"
+    || normalized === "refreshtoken"
+    || normalized === "secret"
+    || normalized === "clientsecret"
+    || normalized === "password"
+    || normalized === "credential"
+    || normalized === "credentials"
+    || normalized === "authorization"
+    || normalized === "authheader"
+    || normalized === "cookie"
+    || normalized === "cookies"
+    || normalized === "session"
+    || normalized === "sessiontoken"
+}
+
 function stampState(state: UgcLocalState, now: string): UgcLocalState {
   return {
     ...state,
@@ -1506,6 +1744,8 @@ function normalizeLocalState(state: UgcLocalState): UgcLocalState {
   const legacyState = state as UgcLocalState & {
     readonly researchTargets?: readonly UgcResearchTarget[]
     readonly templateMiningJobs?: readonly UgcTemplateMiningJob[]
+    readonly workflowRuns?: readonly UgcWorkflowRun[]
+    readonly workflowEvents?: readonly UgcWorkflowEvent[]
   }
   const referenceArchives = state.workspace.referenceProfiles.map((referenceProfile) => {
     const defaultArchive = referenceProfileToArchive(state.workspace.id, referenceProfile, state.updatedAt)
@@ -1525,11 +1765,18 @@ function normalizeLocalState(state: UgcLocalState): UgcLocalState {
   const orphanArchives = state.referenceArchives
     .filter((archive) => !state.workspace.referenceProfiles.some((referenceProfile) => referenceProfile.id === archive.referenceProfileId))
     .map((archive) => ({ ...archive, referenceAssets: archive.referenceAssets ?? [] }))
+  const workflowEvents = [...(legacyState.workflowEvents ?? [])]
+    .map((event) => sanitizeWorkflowEvent(event))
+    .sort((left, right) => left.eventId - right.eventId)
   return {
     ...state,
     referenceArchives: [...referenceArchives, ...orphanArchives],
     researchTargets: legacyState.researchTargets ?? createInitialResearchTargets(state.workspace.id, state.updatedAt),
     templateMiningJobs: legacyState.templateMiningJobs ?? createInitialTemplateMiningJobs(state.workspace.id, state.updatedAt),
+    workflowEvents,
+    workflowRuns: (legacyState.workflowRuns ?? [])
+      .map((run) => sanitizeWorkflowRun(run))
+      .map((run) => summarizeWorkflowRun(run, workflowEvents.filter((event) => event.runId === run.id))),
   }
 }
 
@@ -1546,6 +1793,8 @@ function writeWorkspaceShards(workspaceDir: string, state: UgcLocalState): void 
   writeCollection(resolve(workspaceDir, "exports"), state.exportManifests)
   writeCollection(resolve(workspaceDir, "research-targets"), state.researchTargets)
   writeCollection(resolve(workspaceDir, "template-mining-jobs"), state.templateMiningJobs)
+  writeCollection(resolve(workspaceDir, "workflow-runs"), state.workflowRuns)
+  writeWorkflowEventCollection(resolve(workspaceDir, "workflow-events"), state.workflowEvents)
   mkdirSync(resolve(workspaceDir, "assets/source"), { recursive: true })
   mkdirSync(resolve(workspaceDir, "assets/generated"), { recursive: true })
   mkdirSync(resolve(workspaceDir, "assets/exports"), { recursive: true })
@@ -1561,6 +1810,15 @@ function writeCollection<T extends { readonly id: string }>(dir: string, records
   for (const record of records) writeJsonAtomic(resolve(dir, `${record.id}.json`), record)
 }
 
+function writeWorkflowEventCollection(dir: string, records: readonly UgcWorkflowEvent[]): void {
+  mkdirSync(dir, { recursive: true })
+  const expectedFiles = new Set(records.map((record) => `${record.eventId}.json`))
+  for (const fileName of readdirSync(dir)) {
+    if (fileName.endsWith(".json") && !expectedFiles.has(fileName)) rmSync(resolve(dir, fileName), { force: true })
+  }
+  for (const record of records) writeJsonAtomic(resolve(dir, `${record.eventId}.json`), record)
+}
+
 function workspaceShardsMatch(workspaceDir: string, state: UgcLocalState): boolean {
   return jsonFileMatches(resolve(workspaceDir, "workspace.json"), state.workspace)
     && collectionMatches(resolve(workspaceDir, "personas"), state.workspace.personas)
@@ -1574,6 +1832,8 @@ function workspaceShardsMatch(workspaceDir: string, state: UgcLocalState): boole
     && collectionMatches(resolve(workspaceDir, "exports"), state.exportManifests)
     && collectionMatches(resolve(workspaceDir, "research-targets"), state.researchTargets)
     && collectionMatches(resolve(workspaceDir, "template-mining-jobs"), state.templateMiningJobs)
+    && collectionMatches(resolve(workspaceDir, "workflow-runs"), state.workflowRuns)
+    && workflowEventCollectionMatches(resolve(workspaceDir, "workflow-events"), state.workflowEvents)
     && requiredWorkspaceDirsExist(workspaceDir)
 }
 
@@ -1591,6 +1851,15 @@ function collectionMatches<T extends { readonly id: string }>(dir: string, recor
     if (fileName.endsWith(".json") && !expectedFiles.has(fileName)) return false
   }
   return records.every((record) => jsonFileMatches(resolve(dir, `${record.id}.json`), record))
+}
+
+function workflowEventCollectionMatches(dir: string, records: readonly UgcWorkflowEvent[]): boolean {
+  if (!existsSync(dir)) return false
+  const expectedFiles = new Set(records.map((record) => `${record.eventId}.json`))
+  for (const fileName of readdirSync(dir)) {
+    if (fileName.endsWith(".json") && !expectedFiles.has(fileName)) return false
+  }
+  return records.every((record) => jsonFileMatches(resolve(dir, `${record.eventId}.json`), record))
 }
 
 function jsonFileMatches(path: string, value: JsonSerializable): boolean {
@@ -1641,6 +1910,8 @@ function bundleObjectCounts(state: UgcLocalState): UgcWorkspaceBundleObjectCount
     exportManifests: state.exportManifests.length,
     researchTargets: state.researchTargets.length,
     templateMiningJobs: state.templateMiningJobs.length,
+    workflowRuns: state.workflowRuns.length,
+    workflowEvents: state.workflowEvents.length,
   }
 }
 
@@ -1660,6 +1931,8 @@ function createShardManifest(state: UgcLocalState, workspaceDir: string, current
       exports: state.exportManifests.map((item) => `exports/${item.id}.json`),
       researchTargets: state.researchTargets.map((item) => `research-targets/${item.id}.json`),
       templateMiningJobs: state.templateMiningJobs.map((item) => `template-mining-jobs/${item.id}.json`),
+      workflowRuns: state.workflowRuns.map((item) => `workflow-runs/${item.id}.json`),
+      workflowEvents: state.workflowEvents.map((item) => `workflow-events/${item.eventId}.json`),
       bundles: [...bundlePaths].sort(),
     },
     assets: {
@@ -1722,6 +1995,7 @@ function decodeWorkspaceBundle(value: JsonValue | UgcWorkspaceBundle): UgcWorksp
   if (typeof value.exportedAt !== "string" || typeof value.sourceStateUpdatedAt !== "string") return null
   if (!isLocalState(value.state)) return null
   if (!isObjectCounts(value.objectCounts) || !isShardManifest(value.shardManifest)) return null
+  const state = normalizeLocalState(value.state)
   return {
     schemaVersion: "ugc-studio.workspace-bundle.v1",
     id: value.id,
@@ -1729,10 +2003,10 @@ function decodeWorkspaceBundle(value: JsonValue | UgcWorkspaceBundle): UgcWorksp
     label: value.label,
     exportedAt: value.exportedAt,
     sourceStateUpdatedAt: value.sourceStateUpdatedAt,
-    summary: summarizeLocalState(value.state),
+    summary: summarizeLocalState(state),
     objectCounts: value.objectCounts,
     shardManifest: value.shardManifest,
-    state: value.state,
+    state,
   }
 }
 
@@ -1747,6 +2021,17 @@ function validateWorkspaceBundle(bundle: UgcWorkspaceBundle): { readonly errors:
   }
   if (bundle.shardManifest.collections.referenceProfiles.length !== bundle.state.workspace.referenceProfiles.length) {
     errors.push("Bundle shardManifest.collections.referenceProfiles does not match state payload.")
+  }
+  if (bundle.shardManifest.collections.workflowRuns.length !== bundle.state.workflowRuns.length) {
+    errors.push("Bundle shardManifest.collections.workflowRuns does not match state payload.")
+  }
+  if (bundle.shardManifest.collections.workflowEvents.length !== bundle.state.workflowEvents.length) {
+    errors.push("Bundle shardManifest.collections.workflowEvents does not match state payload.")
+  }
+  for (const event of bundle.state.workflowEvents) {
+    if (!bundle.state.workflowRuns.some((run) => run.id === event.runId)) {
+      errors.push(`Workflow event ${event.eventId} references missing run ${event.runId}.`)
+    }
   }
   const expectedReferenceAssets = referenceCatalogAssetPaths(bundle.state)
   if (JSON.stringify(bundle.shardManifest.localAssets.referenceCatalog) !== JSON.stringify(expectedReferenceAssets)) {
@@ -1799,6 +2084,8 @@ function isObjectCounts(value: unknown): value is UgcWorkspaceBundleObjectCounts
     && typeof value.exportManifests === "number"
     && typeof value.researchTargets === "number"
     && typeof value.templateMiningJobs === "number"
+    && typeof value.workflowRuns === "number"
+    && typeof value.workflowEvents === "number"
 }
 
 function isShardManifest(value: unknown): value is UgcWorkspaceBundleShardManifest {
@@ -1814,6 +2101,8 @@ function isShardManifest(value: unknown): value is UgcWorkspaceBundleShardManife
     && isStringArray(value.collections.exports)
     && isStringArray(value.collections.researchTargets)
     && isStringArray(value.collections.templateMiningJobs)
+    && isStringArray(value.collections.workflowRuns)
+    && isStringArray(value.collections.workflowEvents)
     && isStringArray(value.collections.bundles)
     && typeof value.assets.source === "string"
     && typeof value.assets.generated === "string"

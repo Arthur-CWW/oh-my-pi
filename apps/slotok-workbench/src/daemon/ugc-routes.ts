@@ -1,7 +1,7 @@
 import { decodeCodexAnalyzeInput, planKieFromAnalysis, prepareCodexAnalyze, prepareKieTask, runCodexAnalyze, type CodexAnalyzeInput, type CodexAnalyzeResult, type CodexLiveOptions, type CodexPreparedResult, type JsonValue as UgcCliJsonValue, type KieAnalysisPlanOperation, type KieAnalysisPlanTarget, type KieGenerateRequest, type KieProductLane } from "@wirebabel/ugc-cli"
 import { UgcJsonStore } from "./ugc-json-store"
 import { prepareCodexVideoFrames, type CodexFramePreparation, type CodexVideoFrameExtractor } from "./codex-video-frames"
-import { isRecord, toJsonValue, type BranchPatch, type BulkCandidateStatusPatch, type CandidateStatusPatch, type CleanRoomTemplateSpec, type CreateBranchInput, type CreateExportManifestInput, type CreateProviderJobInput, type CreateReferenceArchiveInput, type CreateResearchTargetInput, type CreateReviewNoteInput, type CreateTemplateMiningJobInput, type CreateWorkspaceBundleInput, type FinalEditorClipPatch, type FinalEditorPatch, type FinalEditorTrackPatch, type ImportWorkspaceBundleInput, type PersonaPatch, type ProviderJobPatch, type ReferenceArchiveFormatOutput, type ResearchTargetPatch, type TemplateMiningJobPatch, type UgcLocalState, type UgcReferenceArchive, type UgcReferenceCatalogImportInput, type UgcResearchPlatform, type UgcResearchTargetStatus, type UgcTemplateMiningJobStatus } from "../ugc/local-state"
+import { isRecord, toJsonValue, type AppendWorkflowEventInput, type BranchPatch, type BulkCandidateStatusPatch, type CandidateStatusPatch, type CleanRoomTemplateSpec, type CreateBranchInput, type CreateExportManifestInput, type CreateProviderJobInput, type CreateReferenceArchiveInput, type CreateResearchTargetInput, type CreateReviewNoteInput, type CreateTemplateMiningJobInput, type CreateWorkflowRunInput, type CreateWorkspaceBundleInput, type FinalEditorClipPatch, type FinalEditorPatch, type FinalEditorTrackPatch, type ImportWorkspaceBundleInput, type PersonaPatch, type ProviderJobPatch, type ReferenceArchiveFormatOutput, type ResearchTargetPatch, type TemplateMiningJobPatch, type UgcLocalState, type UgcReferenceArchive, type UgcReferenceCatalogImportInput, type UgcResearchPlatform, type UgcResearchTargetStatus, type UgcTemplateMiningJobStatus, type UgcWorkflowCounters, type UgcWorkflowEvent, type UgcWorkflowEventType, type UgcWorkflowRunSource, type UgcWorkflowRunStatus } from "../ugc/local-state"
 import type { BranchStatus, CandidateStatus, JsonValue, ReviewAttachment, ReviewVerdict } from "../renderer/ugcStudioModel"
 
 interface CodexAnalysisJobRequest {
@@ -66,6 +66,20 @@ export interface RouteUgcOptions {
   readonly codexAnalyzeRunner?: CodexAnalyzeRunner
 }
 
+interface WorkflowSseClient {
+  readonly id: string
+  lastEventId: number
+  readonly controller: ReadableStreamDefaultController<Uint8Array>
+  readonly heartbeatId: ReturnType<typeof setInterval>
+  readonly pollId: ReturnType<typeof setInterval>
+}
+
+const WORKFLOW_SSE_MAX_CLIENTS = 16
+const WORKFLOW_SSE_HEARTBEAT_MS = 15_000
+const WORKFLOW_SSE_POLL_MS = 1_000
+const workflowSseEncoder = new TextEncoder()
+const workflowSseClients = new Set<WorkflowSseClient>()
+
 export async function routeUgc(request: Request, store: UgcJsonStore, options: RouteUgcOptions = {}): Promise<Response | null> {
   const url = new URL(request.url)
   if (!url.pathname.startsWith("/api/ugc/")) return null
@@ -76,6 +90,32 @@ export async function routeUgc(request: Request, store: UgcJsonStore, options: R
 
   if (request.method === "GET" && url.pathname === "/api/ugc/workspaces") {
     return json({ workspaces: [store.summary()] })
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/ugc/workflows/events/stream") {
+    const afterEventId = decodeAfterEventId(url.searchParams.get("after"))
+    return workflowEventsStream(store, afterEventId)
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/ugc/workflows") {
+    return json({ workflowRuns: store.listWorkflowRuns() })
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/ugc/workflows") {
+    return json({ workflowRun: store.createWorkflowRun(decodeCreateWorkflowRun(await readJson(request))) }, 201)
+  }
+
+  if (url.pathname.startsWith("/api/ugc/workflows/") && url.pathname.endsWith("/events")) {
+    const runId = decodeURIComponent(url.pathname.slice("/api/ugc/workflows/".length, -"/events".length))
+    if (!runId) return json({ error: "missing workflow run id" }, 400)
+    if (request.method === "GET") {
+      return json({ events: store.listWorkflowEvents(runId, decodeAfterEventId(url.searchParams.get("after"))) })
+    }
+    if (request.method === "POST") {
+      const event = store.appendWorkflowEvent(runId, decodeAppendWorkflowEvent(await readJson(request)))
+      broadcastWorkflowEvent(event)
+      return json({ event, workflowRun: store.listWorkflowRuns().find((run) => run.id === runId) ?? null }, 201)
+    }
   }
 
   if (request.method === "POST" && url.pathname === "/api/ugc/workspace/reset") {
@@ -839,6 +879,47 @@ function decodePositiveNumber(value: unknown, label: string): number | undefined
   return value
 }
 
+function decodeCreateWorkflowRun(value: JsonValue): CreateWorkflowRunInput {
+  if (!isRecord(value)) throw new Error("workflow run request must be an object")
+  if (typeof value.title !== "string" || value.title.trim().length === 0) throw new Error("workflow run requires title")
+  return {
+    title: value.title,
+    lane: typeof value.lane === "string" ? value.lane : undefined,
+    status: isWorkflowRunStatus(value.status) ? value.status : undefined,
+    source: isWorkflowRunSource(value.source) ? value.source : "slotok",
+    scriptId: typeof value.scriptId === "string" ? value.scriptId : null,
+    args: isJsonValue(value.args) ? value.args : null,
+    currentPhase: typeof value.currentPhase === "string" ? value.currentPhase : null,
+    counters: decodeWorkflowCounters(value.counters),
+    importedRecordIds: isStringArray(value.importedRecordIds) ? value.importedRecordIds : undefined,
+    artifactPaths: isStringArray(value.artifactPaths) ? value.artifactPaths : undefined,
+  }
+}
+
+function decodeAppendWorkflowEvent(value: JsonValue): AppendWorkflowEventInput {
+  if (!isRecord(value)) throw new Error("workflow event request must be an object")
+  if (!isWorkflowEventType(value.type)) throw new Error("workflow event requires valid type")
+  return {
+    type: value.type,
+    phase: typeof value.phase === "string" ? value.phase : null,
+    agentLabel: typeof value.agentLabel === "string" ? value.agentLabel : null,
+    message: typeof value.message === "string" ? value.message : null,
+    payload: isJsonValue(value.payload) ? value.payload : null,
+    artifactPaths: isStringArray(value.artifactPaths) ? value.artifactPaths : undefined,
+    error: typeof value.error === "string" ? value.error : null,
+  }
+}
+
+function decodeWorkflowCounters(value: JsonValue | undefined): UgcWorkflowCounters | undefined {
+  if (!isRecord(value)) return undefined
+  const counters: { [key: string]: number } = {}
+  for (const key of Object.keys(value)) {
+    const count = value[key]
+    if (typeof count === "number" && Number.isFinite(count)) counters[key] = count
+  }
+  return counters
+}
+
 function decodeCreateWorkspaceBundle(value: JsonValue): CreateWorkspaceBundleInput {
   if (!isRecord(value)) return {}
   return { label: typeof value.label === "string" ? value.label : undefined }
@@ -940,6 +1021,36 @@ function isTemplateMiningJobStatus(value: unknown): value is UgcTemplateMiningJo
   return value === "planned" || value === "queued" || value === "running" || value === "ready" || value === "blocked" || value === "done"
 }
 
+function isWorkflowRunStatus(value: JsonValue | undefined): value is UgcWorkflowRunStatus {
+  return value === "planned"
+    || value === "queued"
+    || value === "running"
+    || value === "succeeded"
+    || value === "failed"
+    || value === "blocked"
+    || value === "canceled"
+}
+
+function isWorkflowRunSource(value: JsonValue | undefined): value is UgcWorkflowRunSource {
+  return value === "slotok" || value === "pi" || value === "omp" || value === "dynamic-workflow" || value === "local"
+}
+
+function isWorkflowEventType(value: JsonValue | undefined): value is UgcWorkflowEventType {
+  return value === "created"
+    || value === "queued"
+    || value === "started"
+    || value === "phase"
+    || value === "message"
+    || value === "artifact"
+    || value === "status"
+    || value === "result"
+    || value === "error"
+    || value === "completed"
+    || value === "blocked"
+    || value === "canceled"
+}
+
+
 function isCleanRoomTemplateCategory(value: unknown): value is CleanRoomTemplateSpec["category"] {
   return value === "format" || value === "pose" || value === "caption" || value === "hook" || value === "cta" || value === "persona-building"
 }
@@ -980,6 +1091,87 @@ function isJsonValue(value: unknown): value is JsonValue {
   if (Array.isArray(value)) return value.every(isJsonValue)
   if (!isRecord(value)) return false
   return Object.values(value).every(isJsonValue)
+}
+
+function decodeAfterEventId(value: string | null): number {
+  if (!value) return 0
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 0
+}
+
+function workflowEventsStream(store: UgcJsonStore, afterEventId: number): Response {
+  if (workflowSseClients.size >= WORKFLOW_SSE_MAX_CLIENTS) {
+    return json({ error: "too many workflow event stream clients" }, 503)
+  }
+  let client: WorkflowSseClient | null = null
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      const nextClient: WorkflowSseClient = {
+        id: `workflow_sse_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`,
+        lastEventId: afterEventId,
+        controller,
+        heartbeatId: setInterval(() => {
+          if (client) sendWorkflowSse(client, "heartbeat", { lastEventId: client.lastEventId })
+        }, WORKFLOW_SSE_HEARTBEAT_MS),
+        pollId: setInterval(() => {
+          if (client) pollWorkflowSseClient(client, store)
+        }, WORKFLOW_SSE_POLL_MS),
+      }
+      client = nextClient
+      workflowSseClients.add(nextClient)
+      const currentLastEventId = store.read().workflowEvents.reduce((max, event) => Math.max(max, event.eventId), afterEventId)
+      sendWorkflowSse(nextClient, "ready", { lastEventId: currentLastEventId })
+      pollWorkflowSseClient(nextClient, store)
+    },
+    cancel() {
+      if (client) closeWorkflowSseClient(client, false)
+    },
+  })
+  return new Response(stream, {
+    headers: corsHeaders({
+      "content-type": "text/event-stream; charset=utf-8",
+      "connection": "keep-alive",
+      "x-accel-buffering": "no",
+    }),
+  })
+}
+
+function pollWorkflowSseClient(client: WorkflowSseClient, store: UgcJsonStore): void {
+  try {
+    for (const event of store.listWorkflowEventsAfter(client.lastEventId)) {
+      sendWorkflowSse(client, "workflow-event", { event })
+      client.lastEventId = Math.max(client.lastEventId, event.eventId)
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "workflow event stream failed"
+    sendWorkflowSse(client, "error", { message })
+    closeWorkflowSseClient(client, true)
+  }
+}
+
+function broadcastWorkflowEvent(event: UgcWorkflowEvent): void {
+  for (const client of workflowSseClients) {
+    if (event.eventId <= client.lastEventId) continue
+    sendWorkflowSse(client, "workflow-event", { event })
+    client.lastEventId = event.eventId
+  }
+}
+
+function sendWorkflowSse(client: WorkflowSseClient, eventName: string, data: object): void {
+  client.controller.enqueue(workflowSseEncoder.encode(`event: ${eventName}\ndata: ${JSON.stringify(data)}\n\n`))
+}
+
+function closeWorkflowSseClient(client: WorkflowSseClient, closeController: boolean): void {
+  clearInterval(client.heartbeatId)
+  clearInterval(client.pollId)
+  workflowSseClients.delete(client)
+  if (closeController) {
+    try {
+      client.controller.close()
+    } catch {
+      return
+    }
+  }
 }
 
 function json(value: object, status = 200): Response {

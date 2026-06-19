@@ -64,17 +64,40 @@ Slotok imports these through daemon routes, not by manually editing SQLite.
 
 Use event sourcing as the browser contract:
 
-- `workflowRuns` stores the durable run snapshot: id, lane, status, script/definition id, args, current phase, counters, result, imported records, and timestamps.
-- `workflowEvents` is append-only: phase/log/agent-start/agent-progress/agent-end/artifact/result/import/error events linked by `runId`.
+- `workflowRuns` stores the durable run snapshot: id, lane, source, status, script/definition id, args summary, current phase, counters, result/import summary, error summary, and timestamps.
+- `workflowEvents` is append-only: phase/log/agent-start/agent-end/artifact/provider-job/result/import/error events linked by `runId` and ordered by event id. Do not rewrite prior events to hide state changes.
 - The workbench derives "what agents are doing right now" from the latest events instead of trusting one mutable status blob.
-- Slotok daemon exposes SSE for live viewing and polling for fallback/replay.
+- `providerJobs` remain provider execution artifacts. A workflow event may link to a provider job id, but provider job status is not the workflow status model.
+- The Slotok daemon browser contract exposes SSE for live viewing and polling for fallback/replay.
+
+Exact route examples for QA:
+
+Core GET/POST routes and the polling-backed SSE stream were confirmed by the backend worker for this contract; parent QA still verifies them against the active daemon build.
+
+```text
+GET http://127.0.0.1:47522/api/ugc/workflows
+GET http://127.0.0.1:47522/api/ugc/workflows?lane=ugc-ads&status=running&limit=25
+POST http://127.0.0.1:47522/api/ugc/workflows
+GET http://127.0.0.1:47522/api/ugc/workflows/<run_id>
+GET http://127.0.0.1:47522/api/ugc/workflows/<run_id>/events?after=<event_id>&limit=100
+POST http://127.0.0.1:47522/api/ugc/workflows/<run_id>/events
+GET http://127.0.0.1:47522/api/ugc/workflows/events/stream
+GET http://127.0.0.1:47522/api/ugc/workflows/events/stream?runId=<run_id>&after=<event_id>
+```
+
+Browser behavior:
+
+- Subscribe to `/api/ugc/workflows/events/stream` by polling-backed SSE when available.
+- Keep the last event id from SSE/polling.
+- Fall back to `GET /api/ugc/workflows/<run_id>/events?after=<event_id>&limit=100` when SSE is unavailable or closes.
+- Rebuild the visible timeline from `workflowRuns` plus `workflowEvents` after reload; do not rely on renderer memory.
 
 Adapters:
 
-- Dynamic workflows: map `runWorkflow` callbacks directly into events.
-- OMP RPC: when Slotok owns an `omp --mode rpc` child process, normalize stdio `AgentSessionEvent` and subagent progress frames into events.
-- OMP stats: use `omp stats` / `omp-stats` only for historical usage/cost analytics, not live progress.
-- Artifact polling: tail Pi/OMP session JSONL, plans, and artifact dirs into the same event table when Slotok did not launch the process.
+- Dynamic workflows: map `runWorkflow` callbacks (`onLog`, `onPhase`, `onAgentStart`, `onAgentEnd`) directly into events and derived run snapshots.
+- OMP RPC: future adapter only. When Slotok owns an `omp --mode rpc` child process, normalize stdio `AgentSessionEvent` and subagent progress frames into events behind the daemon. Do not expose stdio to the browser or claim this adapter is implemented before it exists.
+- OMP stats: historical only. Use `omp stats` / `omp-stats` routes such as `/api/stats` and `/api/sync` for usage/cost history, not live progress.
+- Artifact polling: future adapter only. Tail Pi/OMP session JSONL, plans, and artifact dirs into the same event table when Slotok did not launch the process; treat these as delayed observations.
 
 ## Prompt skeleton
 

@@ -1,9 +1,10 @@
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
-import { existsSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"
 import { describe, expect, test } from "vitest"
 import { UgcJsonStore } from "./ugc-json-store"
+import { UgcSqliteStore } from "./ugc-sqlite-store"
+import type { UgcLocalState } from "../ugc/local-state"
 
 describe("UgcJsonStore", () => {
   test("bootstraps a repo-local workspace and writes JSON object shards", () => {
@@ -19,6 +20,29 @@ describe("UgcJsonStore", () => {
     expect(existsSync(resolve(store.config.workspaceDir, "personas", `${state.workspace.personas[0]?.id}.json`))).toBe(true)
     expect(existsSync(resolve(store.config.workspaceDir, "research-targets", `${state.researchTargets[0]?.id}.json`))).toBe(true)
     expect(existsSync(resolve(store.config.workspaceDir, "assets", "generated"))).toBe(true)
+  })
+
+  test("defaults legacy local state without workflow telemetry arrays", () => {
+    const store = createStore()
+    const state = store.read()
+    const payload = JSON.parse(JSON.stringify(state)) as {
+      workflowRuns?: readonly object[]
+      workflowEvents?: readonly object[]
+    }
+    delete payload.workflowRuns
+    delete payload.workflowEvents
+    writeFileSync(store.config.statePath, JSON.stringify(payload, null, 2))
+
+    const reloaded = new UgcJsonStore({
+      cwd: store.config.cwd,
+      root: "ugc-workspaces",
+      now: () => "2026-06-10T00:00:00.000Z",
+      sqliteSync: false,
+    }).read()
+
+    expect(reloaded.workflowRuns).toEqual([])
+    expect(reloaded.workflowEvents).toEqual([])
+    expect(reloaded.workflowRuns.length).toBe(0)
   })
 
   test("plans and imports local TikTok reference catalog metadata without CDN fields", () => {
@@ -399,6 +423,78 @@ describe("UgcJsonStore", () => {
     expect(job?.updatedAt).toBe("2026-06-10T00:00:00.000Z")
   })
 
+  test("creates workflow runs with append-only events, bundle counts, and JSON shards", () => {
+    const store = createStore()
+    const run = store.createWorkflowRun({
+      title: "Pi agent workflow",
+      source: "pi",
+      lane: "analysis",
+      scriptId: "pi-workflow",
+      args: { prompt: "inspect", apiKey: "sk-secret" },
+    })
+    const started = store.appendWorkflowEvent(run.id, {
+      type: "phase",
+      phase: "scouting",
+      agentLabel: "Pi Scout",
+      message: "Scouting references",
+      payload: { authorization: "Bearer secret", visible: true },
+    })
+    const completed = store.appendWorkflowEvent(run.id, {
+      type: "completed",
+      message: "Imported records",
+      payload: { result: "ok" },
+      artifactPaths: ["artifacts/workflows/pi-workflow/result.json"],
+    })
+    const state = store.read()
+    const summarized = state.workflowRuns.find((item) => item.id === run.id)
+    const events = store.listWorkflowEvents(run.id, started.eventId)
+    const bundle = store.exportWorkspaceBundle({ label: "Workflow telemetry bundle" })
+
+    expect(run.args).toEqual({ prompt: "inspect", apiKey: "[redacted]" })
+    expect(started.eventId).toBe(2)
+    expect(completed.eventId).toBe(started.eventId + 1)
+    expect(state.workflowEvents.map((event) => event.eventId)).toEqual([1, 2, 3])
+    expect(summarized?.status).toBe("succeeded")
+    expect(summarized?.currentPhase).toBe("scouting")
+    expect(summarized?.artifactPaths).toContain("artifacts/workflows/pi-workflow/result.json")
+    expect(state.workflowEvents.find((event) => event.eventId === started.eventId)?.payload).toEqual({ authorization: "[redacted]", visible: true })
+    expect(events.map((event) => event.eventId)).toEqual([completed.eventId])
+    expect(existsSync(resolve(store.config.workspaceDir, "workflow-runs", `${run.id}.json`))).toBe(true)
+    expect(existsSync(resolve(store.config.workspaceDir, "workflow-events", `${completed.eventId}.json`))).toBe(true)
+    expect(bundle.objectCounts.workflowRuns).toBe(1)
+    expect(bundle.objectCounts.workflowEvents).toBe(3)
+    expect(bundle.shardManifest.collections.workflowRuns).toEqual([`workflow-runs/${run.id}.json`])
+    expect(bundle.shardManifest.collections.workflowEvents).toEqual(["workflow-events/1.json", "workflow-events/2.json", "workflow-events/3.json"])
+  })
+
+  test("reloads workflow telemetry from a SQLite workspace state source when JSON artifacts are absent", () => {
+    const cwd = mkdtempSync(resolve(tmpdir(), "ugc-json-store-"))
+    const sqliteStore = new CapturingSqliteStore({ workspaceDir: resolve(cwd, "ugc-workspaces", "workspace_protein_bar_ads") })
+    const store = new UgcJsonStore({
+      cwd,
+      root: "ugc-workspaces",
+      now: () => "2026-06-10T00:00:00.000Z",
+      sqliteSync: sqliteStore,
+    })
+    const run = store.createWorkflowRun({ title: "SQLite workflow", source: "omp", args: { token: "secret" } })
+    store.appendWorkflowEvent(run.id, { type: "completed", message: "Done", payload: { ok: true } })
+    rmSync(store.config.statePath, { force: true })
+    rmSync(resolve(store.config.workspaceDir, "workflow-runs"), { recursive: true, force: true })
+    rmSync(resolve(store.config.workspaceDir, "workflow-events"), { recursive: true, force: true })
+
+    const reloaded = new UgcJsonStore({
+      cwd,
+      root: "ugc-workspaces",
+      now: () => "2026-06-10T00:00:00.000Z",
+      sqliteSync: sqliteStore,
+    }).read()
+
+    expect(reloaded.workflowRuns.find((item) => item.id === run.id)?.status).toBe("succeeded")
+    expect(reloaded.workflowRuns.find((item) => item.id === run.id)?.args).toEqual({ token: "[redacted]" })
+    expect(reloaded.workflowEvents.filter((event) => event.runId === run.id).length).toBe(2)
+    expect(existsSync(resolve(store.config.workspaceDir, "workflow-runs", `${run.id}.json`))).toBe(true)
+  })
+
   test("updates selected candidate sets in one local transaction", () => {
     const store = createStore()
     const initial = store.read()
@@ -473,6 +569,18 @@ describe("UgcJsonStore", () => {
     expect(JSON.stringify(timeline)).toContain("softer opening hook")
   })
 })
+
+class CapturingSqliteStore extends UgcSqliteStore {
+  state: UgcLocalState | null = null
+
+  override writeState(state: UgcLocalState): void {
+    this.state = JSON.parse(JSON.stringify(state)) as UgcLocalState
+  }
+
+  override readValidState(): UgcLocalState | null {
+    return this.state
+  }
+}
 
 function createStore(): UgcJsonStore {
   const cwd = mkdtempSync(resolve(tmpdir(), "ugc-json-store-"))
