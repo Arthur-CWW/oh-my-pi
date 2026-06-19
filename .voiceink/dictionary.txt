@@ -1,0 +1,17 @@
+# VoiceInk project dictionary for the agents / Slotok workstream
+# One enabled term per line.
+VoiceInk
+voicing
+project directory
+pleometric
+mise
+cua-driver
+cuadriver
+C-U-A driver
+Codex
+Slotok
+KIE
+Jimeng
+Dreamina
+mynameissico
+staceypilled
