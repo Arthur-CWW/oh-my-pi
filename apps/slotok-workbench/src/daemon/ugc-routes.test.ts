@@ -213,6 +213,47 @@ describe("routeUgc", () => {
     expect(patchedJob?.error).toContain("credit cap")
   })
 
+  test("plans and imports local TikTok reference catalog metadata through dry-run-first routes", async () => {
+    const store = createStore()
+    const root = await writeCatalogFixture(store.config.cwd, "data/tiktok-catalogue/pleometric")
+    const initialReferenceProfileCount = store.read().workspace.referenceProfiles.length
+
+    const planResponse = await routeUgc(jsonRequest("/api/ugc/reference-catalog/plan", { roots: [root] }), store)
+    const plan = await planResponse?.json() as {
+      readonly valid?: boolean
+      readonly dryRun?: boolean
+      readonly imported?: boolean
+      readonly videosPlanned?: number
+      readonly state?: UgcLocalState | null
+    }
+
+    expect(plan.valid).toBe(true)
+    expect(plan.dryRun).toBe(true)
+    expect(plan.imported).toBe(false)
+    expect(plan.videosPlanned).toBe(2)
+    expect(plan.state).toBeNull()
+    expect(store.read().workspace.referenceProfiles.length).toBe(initialReferenceProfileCount)
+
+    const importResponse = await routeUgc(jsonRequest("/api/ugc/reference-catalog/import", { roots: [root] }), store)
+    const imported = await importResponse?.json() as {
+      readonly valid?: boolean
+      readonly imported?: boolean
+      readonly state?: UgcLocalState | null
+    }
+    const archive = imported.state?.referenceArchives.find((item) => item.id === "archive_reference_tiktok_pleometric")
+    const providerJob = imported.state?.providerJobs.find((job) => job.id === "job_local_reference_catalog_import_pleometric")
+
+    expect(imported.valid).toBe(true)
+    expect(imported.imported).toBe(true)
+    expect(archive?.catalogVideos.length).toBe(2)
+    expect(archive?.catalogVideos[0]?.paths.infoJson).toBe(`${root}/2026-03-05_7613899553590234375.info.json`)
+    expect(archive?.catalogVideos[0]?.engagement.views).toBe(1200)
+    expect(providerJob?.provider).toBe("local")
+    expect(JSON.stringify(providerJob?.request)).not.toContain("https://cdn.example")
+    expect(JSON.stringify(providerJob?.request)).not.toContain("Cookie")
+  })
+
+
 
   test("plans and persists Codex media analysis jobs as dry-run provider jobs", async () => {
     const store = createStore()
@@ -406,6 +447,7 @@ describe("routeUgc", () => {
     }), store, { codexFrameExtractor: fakeExtractor })).rejects.toThrow("externally reachable referenceFrameUrls")
   })
 
+
   test("rejects live Codex analysis jobs without an explicit API key", async () => {
     const store = createStore()
 
@@ -445,4 +487,32 @@ function jsonRequest(path: string, body: object): Request {
 async function readState(response: Response | null): Promise<UgcLocalState> {
   if (!response) throw new Error("missing response")
   return await response.json() as UgcLocalState
+}
+
+async function writeCatalogFixture(cwd: string, root: string): Promise<string> {
+  const absoluteRoot = resolve(cwd, root)
+  await mkdir(absoluteRoot, { recursive: true })
+  await writeCatalogVideo(absoluteRoot, "2026-03-05_7613899553590234375", "7613899553590234375", 1200, 45)
+  await writeCatalogVideo(absoluteRoot, "2026-03-08_7614988205481331976", "7614988205481331976", 2400, 67)
+  return root
+}
+
+async function writeCatalogVideo(root: string, stem: string, id: string, views: number, likes: number): Promise<void> {
+  await writeFile(resolve(root, `${stem}.info.json`), `${JSON.stringify({
+    id,
+    title: `Fixture TikTok ${id}`,
+    uploader: "Fixture Creator",
+    uploader_id: "pleometric",
+    duration: 12.5,
+    view_count: views,
+    like_count: likes,
+    comment_count: 6,
+    share_count: 3,
+    save_count: 2,
+    webpage_url: `https://www.tiktok.com/@fixture/video/${id}`,
+    http_headers: { Cookie: "session=secret" },
+    formats: [{ url: `https://cdn.example/${id}.mp4`, cookies: "secret" }],
+  })}\n`)
+  await writeFile(resolve(root, `${stem}.jpg`), "poster")
+  await writeFile(resolve(root, `${stem}.mp4`), "video")
 }

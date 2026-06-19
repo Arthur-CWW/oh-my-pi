@@ -75,7 +75,7 @@ Each component should be separately editable, inspectable, replaceable, cacheabl
 
 - Preverbal/vibe qualities matter; tags like `seal` or `rocket` are not enough.
 - Chinese visual-generation prompts are preferred for Jimeng/Dreamina-style models; dialogue can still be English.
-- The system should support both brainrot art videos and less-brainrotty AI UGC/ad videos.
+- The system has two primary product directions: `brainrot` creation (Pleometric-style surreal/postmodern meme video pipelines) and `ugc-ads` / UGC Studio for making ads. Treat them as first-class lanes/facets in workspace data, reference tagging, filters, prompts, provider defaults, and UI copy.
 - For AI UGC experiments, prefer cheap pay-as-you-go APIs over another creator SaaS subscription.
 - This lane is mostly hacking/learning, not production. Cheap iteration can default to Kie or similar providers; keep fal/others as fallback or benchmark.
 - Provider/API reversal should rank by UGC workflow value first, implementation speed second, and no-spend/ease only as a safety gate or tie-breaker. Do not substitute low-value safe reads for higher-value generation, persona/voice, lip-sync, reference-control, or template-mining gaps. When credits are tiny, use dry-run JSON planning and cheap image routes inside the highest-value workflow family; live video/avatar routes need explicit user action and a small spend cap.

@@ -70,7 +70,7 @@ import {
 } from "./design-system/workbench"
 import { cn } from "./lib/cn"
 import { ugcStudioWorkspace, type BranchSnapshot, type CandidateStatus, type CreativeCandidate, type JsonValue, type PersonaProfile, type ReferenceProfile, type ReviewVerdict, type UgcStudioWorkspace } from "./ugcStudioModel"
-import { createInitialLocalState, isLocalState, referenceProfileToArchive, type ReferenceArchiveFormatOutput, type UgcExportManifest, type UgcLocalState, type UgcProviderJob, type UgcProviderJobStatus, type UgcReferenceArchive } from "../ugc/local-state"
+import { createInitialLocalState, isLocalState, referenceProfileToArchive, type ReferenceArchiveFormatOutput, type UgcExportManifest, type UgcLocalState, type UgcProviderJob, type UgcProviderJobStatus, type UgcReferenceArchive, type UgcWorkspaceBundle, type UgcWorkspaceBundleImportResult } from "../ugc/local-state"
 import { deriveUgcDeveloperGraph, type DerivedGraphFamily } from "../ugc/developer-graph"
 
 type ReactView = "atlas" | "explore" | "review" | "campaign" | "reference" | "editor" | "graph" | "provider"
@@ -559,6 +559,98 @@ function parseJson(text: string): JsonValue {
   }
 }
 
+function parseJsonOrNull(text: string): JsonValue | null {
+  try {
+    return JSON.parse(text) as JsonValue
+  } catch {
+    return null
+  }
+}
+
+function isWorkspaceBundle(value: unknown): value is UgcWorkspaceBundle {
+  const root = jsonRecord(value)
+  return root?.schemaVersion === "ugc-studio.workspace-bundle.v1"
+    && typeof root.id === "string"
+    && jsonRecord(root.state)?.schemaVersion === "ugc-studio.local-state.v1"
+}
+
+function isWorkspaceBundleImportResult(value: unknown): value is UgcWorkspaceBundleImportResult {
+  const root = jsonRecord(value)
+  return root?.schemaVersion === "ugc-studio.workspace-bundle-import-result.v1"
+    && typeof root.dryRun === "boolean"
+    && typeof root.valid === "boolean"
+    && typeof root.imported === "boolean"
+}
+
+function compactBundleExportResult(bundle: UgcWorkspaceBundle): JsonValue {
+  return {
+    action: "export",
+    bundleId: bundle.id,
+    label: bundle.label,
+    exportedAt: bundle.exportedAt,
+    objectCounts: bundleObjectCountsJson(bundle.objectCounts),
+    shardManifest: {
+      workspace: bundle.shardManifest.workspace,
+      collections: {
+        personas: bundle.shardManifest.collections.personas,
+        campaigns: bundle.shardManifest.collections.campaigns,
+        branches: bundle.shardManifest.collections.branches,
+        candidates: bundle.shardManifest.collections.candidates,
+        notes: bundle.shardManifest.collections.notes,
+        providerJobs: bundle.shardManifest.collections.providerJobs,
+        referenceArchives: bundle.shardManifest.collections.referenceArchives,
+        exports: bundle.shardManifest.collections.exports,
+        researchTargets: bundle.shardManifest.collections.researchTargets,
+        templateMiningJobs: bundle.shardManifest.collections.templateMiningJobs,
+        bundles: bundle.shardManifest.collections.bundles,
+      },
+      assets: {
+        source: bundle.shardManifest.assets.source,
+        generated: bundle.shardManifest.assets.generated,
+        exports: bundle.shardManifest.assets.exports,
+      },
+    },
+  }
+}
+
+function compactBundleImportResult(result: UgcWorkspaceBundleImportResult): JsonValue {
+  return {
+    action: result.dryRun ? "import dry-run" : "import apply",
+    valid: result.valid,
+    imported: result.imported,
+    bundleId: result.bundleId,
+    workspaceId: result.workspaceId,
+    errors: result.errors,
+    warnings: result.warnings,
+    objectCounts: result.objectCounts ? bundleObjectCountsJson(result.objectCounts) : null,
+    checkedAt: result.checkedAt,
+  }
+}
+
+function bundleObjectCountsJson(counts: UgcWorkspaceBundle["objectCounts"]): JsonValue {
+  return {
+    personas: counts.personas,
+    branches: counts.branches,
+    candidates: counts.candidates,
+    notes: counts.notes,
+    providerJobs: counts.providerJobs,
+    referenceArchives: counts.referenceArchives,
+    exportManifests: counts.exportManifests,
+    researchTargets: counts.researchTargets,
+    templateMiningJobs: counts.templateMiningJobs,
+  }
+}
+
+function mergeCaptionPayload(payload: JsonValue | null, text: string, editableFields: readonly string[]): JsonValue {
+  const root = jsonRecord(payload)
+  return {
+    ...(root ?? {}),
+    text,
+    source: "final-editor",
+    editableFields,
+  }
+}
+
 function splitLines(text: string): readonly string[] {
   return text.split(/\r?\n/g).map((line) => line.trim()).filter(Boolean)
 }
@@ -589,7 +681,7 @@ function extractKieTaskId(value: JsonValue | null): string | null {
   return typeof data?.taskId === "string" ? data.taskId : null
 }
 
-function jsonRecord(value: JsonValue | undefined | null): { readonly [key: string]: JsonValue } | null {
+function jsonRecord(value: unknown): { readonly [key: string]: JsonValue } | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null
   return value as { readonly [key: string]: JsonValue }
 }
@@ -635,6 +727,8 @@ export function ReactUgcStudio() {
   const [prompt, setPrompt] = React.useState("Make the selected personas less polished and generate 8 warmer hooks")
   const [result, setResult] = React.useState("Dry-run a KIE payload to verify routing without spending credits.")
   const [busy, setBusy] = React.useState(false)
+  const [workspaceBundle, setWorkspaceBundle] = React.useState<UgcWorkspaceBundle | null>(null)
+  const [bundleResult, setBundleResult] = React.useState<JsonValue | null>(null)
   const personaCards = React.useMemo(() => workspace.personas.map(projectPersonaCard), [workspace.personas])
   const selectedCandidate = workspace.candidates.find((candidate) => candidate.id === selectedCandidateId) ?? workspace.candidates[0]
   const selectedPersona = personaCards.find((persona) => persona.id === selectedPersonaId) ?? personaCards[0]
@@ -734,6 +828,63 @@ export function ReactUgcStudio() {
     }
   }
 
+  async function exportWorkspaceBundle(label: string) {
+    setBusy(true)
+    try {
+      const response = await fetch(`${daemonBaseUrl}/api/ugc/workspace/bundles/export`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ label }),
+      })
+      const text = await response.text()
+      const payload = parseJson(text)
+      if (response.ok && isWorkspaceBundle(payload)) {
+        const compact = compactBundleExportResult(payload)
+        setWorkspaceBundle(payload)
+        setBundleResult(compact)
+        setResult(JSON.stringify(compact, null, 2))
+        return
+      }
+      setBundleResult(payload)
+      setResult(JSON.stringify(payload, null, 2))
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      setBundleResult({ error: message })
+      setResult(message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function importWorkspaceBundle(bundle: unknown, dryRun: boolean) {
+    setBusy(true)
+    try {
+      const response = await fetch(`${daemonBaseUrl}/api/ugc/workspace/bundles/import`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bundle, dryRun }),
+      })
+      const text = await response.text()
+      const payload = parseJson(text)
+      if (response.ok && isWorkspaceBundleImportResult(payload)) {
+        const compact = compactBundleImportResult(payload)
+        setBundleResult(compact)
+        setResult(JSON.stringify(compact, null, 2))
+        if (isWorkspaceBundle(bundle)) setWorkspaceBundle(bundle)
+        if (payload.importedState && isLocalState(payload.importedState)) setLocalState(payload.importedState)
+        return
+      }
+      setBundleResult(payload)
+      setResult(JSON.stringify(payload, null, 2))
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      setBundleResult({ error: message })
+      setResult(message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function persistProviderJob(body: KieRequest, responseJson: JsonValue, mode: "dry-run" | "live") {
     const response = await fetch(`${daemonBaseUrl}/api/ugc/provider-jobs`, {
       method: "POST",
@@ -780,6 +931,10 @@ export function ReactUgcStudio() {
                 onOperationChange={setOperation}
                 onCallKie={callKie}
                 onMutateLocal={mutateLocal}
+                workspaceBundle={workspaceBundle}
+                bundleResult={bundleResult}
+                onExportWorkspaceBundle={exportWorkspaceBundle}
+                onImportWorkspaceBundle={importWorkspaceBundle}
               />
             </div>
             <CommandBar prompt={prompt} onPromptChange={setPrompt} onRun={() => callKie("/api/ugc/kie/plan", request)} busy={busy} />
@@ -902,6 +1057,10 @@ function Topbar(props: { activeViewMeta: (typeof views)[number] }) {
         <span>/</span>
         <strong className="truncate text-foreground">{props.activeViewMeta.label}</strong>
       </div>
+      <div className="hidden shrink-0 items-center gap-1 rounded-md border border-border bg-background px-1.5 py-1 text-[10px] font-semibold text-muted-foreground lg:flex">
+        <span className="rounded bg-primary/10 px-1.5 py-0.5 text-primary">UGC ads</span>
+        <span className="rounded px-1.5 py-0.5">Brainrot / Pleometric</span>
+      </div>
       <div className="flex shrink-0 items-center gap-2">
         <label className="flex h-8 w-48 items-center gap-2 rounded-md border border-border bg-card px-2">
           <Search size={13} />
@@ -954,6 +1113,10 @@ function WorkspaceView(props: {
   onOperationChange: (operation: KieOperation) => void
   onCallKie: (path: string, body?: KieRequest) => void
   onMutateLocal: (path: string, body: object) => void
+  workspaceBundle: UgcWorkspaceBundle | null
+  bundleResult: JsonValue | null
+  onExportWorkspaceBundle: (label: string) => void
+  onImportWorkspaceBundle: (bundle: unknown, dryRun: boolean) => void
 }) {
   if (props.activeView === "atlas") {
     return <PersonaAtlas selectedPersonaId={props.selectedPersonaId} onSelectPersona={props.onSelectPersona} />
@@ -972,7 +1135,7 @@ function WorkspaceView(props: {
     return <BatchReview selectedCandidateId={props.selectedCandidateId} onSelectCandidate={props.onSelectCandidate} onMutateLocal={props.onMutateLocal} />
   }
   if (props.activeView === "campaign") {
-    return <CampaignMap selectedBranchId={props.selectedBranchId} onSelectBranch={props.onSelectBranch} onSelectCandidate={props.onSelectCandidate} />
+    return <CampaignMap selectedBranchId={props.selectedBranchId} onSelectBranch={props.onSelectBranch} onSelectCandidate={props.onSelectCandidate} onMutateLocal={props.onMutateLocal} />
   }
   if (props.activeView === "reference") {
     return <ReferenceArchiveView onMutateLocal={props.onMutateLocal} />
@@ -981,7 +1144,7 @@ function WorkspaceView(props: {
     return <FinalEditor selectedCandidateId={props.selectedCandidateId} onSelectCandidate={props.onSelectCandidate} onMutateLocal={props.onMutateLocal} />
   }
   if (props.activeView === "graph") {
-    return <DeveloperGraphView onMutateLocal={props.onMutateLocal} />
+    return <DeveloperGraphView onMutateLocal={props.onMutateLocal} workspaceBundle={props.workspaceBundle} bundleResult={props.bundleResult} onExportWorkspaceBundle={props.onExportWorkspaceBundle} onImportWorkspaceBundle={props.onImportWorkspaceBundle} />
   }
   return (
     <ProviderView
@@ -1206,6 +1369,40 @@ function BatchReview(props: { selectedCandidateId: string; onSelectCandidate: (i
             <option value="persona">Persona</option>
           </select>
         </label>
+        <div className="rounded-md border border-border/60 bg-background p-2 text-[10px] leading-4 text-muted-foreground">
+          <strong className="block text-[10px] uppercase tracking-wider text-foreground">Keyboard review</strong>
+          <span className="block">1 reject selected</span>
+          <span className="block">2 needs revision</span>
+          <span className="block">3 star selected</span>
+          <span className="block">5 fork note</span>
+        </div>
+        <div className="grid gap-2 rounded-md border border-border/60 bg-background p-2">
+          <div className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+            <strong className="text-foreground">Selected set</strong>
+            <span>{selectedSet.length} active</span>
+          </div>
+          <div className="grid grid-cols-2 gap-1">
+            <Button size="xs" variant="workbench" onClick={() => setSelectedSetIds(filteredCandidates.map((candidate) => candidate.id))}>Select visible</Button>
+            <Button size="xs" variant="ghost" onClick={() => setSelectedSetIds([])}>Clear</Button>
+          </div>
+        </div>
+        <div className="grid gap-2 rounded-md border border-border/60 bg-background p-2">
+          <strong className="text-[10px] uppercase tracking-wider text-foreground">Note draft</strong>
+          <Textarea className="min-h-20 text-[11px]" value={noteDraft} onChange={(event) => setNoteDraft(event.currentTarget.value)} />
+          <div className="grid grid-cols-2 gap-1">
+            <Button size="xs" variant="workbench" onClick={() => addReviewNote("keep")}>Keep note</Button>
+            <Button size="xs" variant="outline" onClick={() => addReviewNote("reject")}>Reject note</Button>
+          </div>
+        </div>
+        <div className="grid gap-1 rounded-md border border-border/60 bg-background p-2">
+          <strong className="text-[10px] uppercase tracking-wider text-foreground">Verdict history</strong>
+          {selectedCandidateNotes.length ? selectedCandidateNotes.slice(0, 4).map((note) => (
+            <div key={note.id} className="rounded border border-border bg-card p-1.5 text-[10px] leading-4">
+              <span className="font-semibold text-foreground">{note.verdict}</span>
+              <span className="ml-1 text-muted-foreground">{note.body}</span>
+            </div>
+          )) : <span className="text-[10px] text-muted-foreground">No notes for selected candidate.</span>}
+        </div>
       </aside>
       <section className="rugc-player-wrap md:grid md:grid-cols-[64px_1fr] md:gap-4 lg:grid-cols-[74px_1fr]">
         <div className="rugc-variant-strip flex md:flex-col md:items-center gap-2 overflow-x-auto md:overflow-x-visible">
@@ -1263,6 +1460,8 @@ function BatchReview(props: { selectedCandidateId: string; onSelectCandidate: (i
           <span className="ml-2">Filter: {filterItems.find((item) => item.id === filter)?.label}</span>
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          <Button size="xs" variant="workbench" onClick={() => setSelectedSetIds(filteredCandidates.map((candidate) => candidate.id))}>Select visible</Button>
+          <Button size="xs" variant="ghost" onClick={() => setSelectedSetIds([])}>Clear</Button>
           <Button size="xs" variant="workbench" onClick={() => applyStatusToSet("starred")}>Star selected</Button>
           <Button size="xs" variant="workbench" onClick={() => applyStatusToSet("needs-revision")}>Revise selected</Button>
           <Button size="xs" variant="outline" onClick={() => applyStatusToSet("rejected")}>Reject selected</Button>
@@ -1328,9 +1527,27 @@ function BatchReview(props: { selectedCandidateId: string; onSelectCandidate: (i
   }
 
 
-function CampaignMap(props: { selectedBranchId: string; onSelectBranch: (id: string) => void; onSelectCandidate: (id: string) => void }) {
+function CampaignMap(props: { selectedBranchId: string; onSelectBranch: (id: string) => void; onSelectCandidate: (id: string) => void; onMutateLocal: (path: string, body: object) => void }) {
   const { workspace } = useUgcLocalState()
   const columns = projectCampaignColumns(workspace)
+  const selectedBranch = workspace.branchSnapshots.find((branch) => branch.id === props.selectedBranchId) ?? workspace.branchSnapshots[0]
+  const selectedCandidates = selectedBranch ? workspace.candidates.filter((candidate) => selectedBranch.selectedCandidateIds.includes(candidate.id)) : []
+  function patchSelectedBranch(status: BranchSnapshot["status"], decisionNote: string) {
+    if (!selectedBranch) return
+    props.onMutateLocal(`/api/ugc/branches/${selectedBranch.id}`, { status, decisionNote })
+  }
+  function forkSelectedBranch() {
+    if (!selectedBranch) return
+    props.onMutateLocal("/api/ugc/branches", {
+      parentId: selectedBranch.id,
+      title: `${selectedBranch.title} fork`,
+      focus: selectedBranch.focus,
+      selectedPersonaIds: selectedBranch.selectedPersonaIds,
+      selectedCandidateIds: selectedBranch.selectedCandidateIds,
+      candidateBatchIds: selectedBranch.candidateBatchIds,
+      decisionNote: "Forked from campaign map controls.",
+    })
+  }
   return (
     <div className="rugc-map">
       <div className="rugc-map-canvas">
@@ -1363,16 +1580,29 @@ function CampaignMap(props: { selectedBranchId: string; onSelectBranch: (id: str
       </div>
       <div className="rugc-snapshot-tray">
         <div>
-          <strong>Snapshot 18</strong>
-          <p>Benefit Hook, created May 27. Fork selected winners into softer CTA variants.</p>
-          <span>+27% vs parent</span>
+          <strong>{selectedBranch?.title ?? "No snapshot selected"}</strong>
+          <p>{selectedBranch?.decisionNote ?? "Select a branch snapshot to inspect rollback and fork controls."}</p>
+          <span>{selectedBranch ? `${selectedBranch.status} / ${selectedBranch.childIds.length} forks` : "no branch"}</span>
+          <div className="mt-2 grid grid-cols-4 gap-1.5">
+            <Button size="xs" variant="workbench" disabled={!selectedBranch} onClick={() => patchSelectedBranch("active", "Rolled back to this branch from campaign map.")}>Rollback active</Button>
+            <Button size="xs" variant="workbench" disabled={!selectedBranch} onClick={() => patchSelectedBranch("promising", "Selected as promising from campaign map.")}>Select promising</Button>
+            <Button size="xs" variant="outline" disabled={!selectedBranch} onClick={forkSelectedBranch}>Fork</Button>
+            <Button size="xs" variant="ghost" disabled={!selectedBranch} onClick={() => patchSelectedBranch("dead-end", "Marked dead-end from campaign map controls.")}>Dead end</Button>
+          </div>
         </div>
         <div className="rugc-preview-strip">
-          {workspace.candidates.slice(0, 3).map((candidate) => (
+          {(selectedCandidates.length ? selectedCandidates : workspace.candidates.slice(0, 3)).map((candidate) => (
             <button key={candidate.id} type="button" onClick={() => props.onSelectCandidate(candidate.id)}>
               <MiniThumb status="keep" label="" />
               <PlayCircle size={22} />
               <span>{candidate.title}</span>
+            </button>
+          ))}
+        </div>
+        <div className="mt-2 grid max-h-24 gap-1 overflow-auto text-[10px] leading-4 text-muted-foreground">
+          {workspace.branchSnapshots.slice(0, 6).map((branch) => (
+            <button key={branch.id} type="button" className="rounded border border-border bg-card px-2 py-1 text-left hover:bg-accent" onClick={() => props.onSelectBranch(branch.id)}>
+              <strong className="text-foreground">{branch.title}</strong> — {branch.status}: {branch.decisionNote}
             </button>
           ))}
         </div>
@@ -1392,6 +1622,9 @@ function FinalEditor(props: { selectedCandidateId: string; onSelectCandidate: (i
   const [clipTextDraft, setClipTextDraft] = React.useState(clipTextFromPayload(selectedClip, selectedCandidate))
   const [startDraft, setStartDraft] = React.useState(String(selectedClip?.startSeconds ?? 0))
   const [durationDraft, setDurationDraft] = React.useState(String(selectedClip?.durationSeconds ?? 1))
+  const [clipPayloadDraft, setClipPayloadDraft] = React.useState(JSON.stringify(selectedClip?.payloadJson ?? { text: clipTextFromPayload(selectedClip, selectedCandidate) }, null, 2))
+  const parsedClipPayload = React.useMemo(() => parseJsonOrNull(clipPayloadDraft), [clipPayloadDraft])
+  const captionPayloadPreview = selectedClip ? mergeCaptionPayload(parsedClipPayload, clipTextDraft.trim() || selectedClip.label, selectedClip.editableFields) : null
   const timelinePatchPreview = React.useMemo(() => ({
     selectedCandidateId: selectedCandidate?.id ?? null,
     trackUpdate: selectedTrack ? {
@@ -1405,9 +1638,9 @@ function FinalEditor(props: { selectedCandidateId: string; onSelectCandidate: (i
       label: clipLabelDraft,
       startSeconds: numberDraft(startDraft, selectedClip.startSeconds),
       durationSeconds: numberDraft(durationDraft, selectedClip.durationSeconds),
-      payloadJson: { text: clipTextDraft, source: "final-editor" },
+      payloadJson: captionPayloadPreview,
     } : null,
-  }), [clipLabelDraft, clipTextDraft, durationDraft, selectedCandidate?.id, selectedClip, selectedTrack, startDraft])
+  }), [captionPayloadPreview, clipLabelDraft, durationDraft, selectedCandidate?.id, selectedClip, selectedTrack, startDraft])
 
   React.useEffect(() => {
     if (!workspace.finalEditor.tracks.some((track) => track.id === selectedTrackId)) {
@@ -1424,6 +1657,7 @@ function FinalEditor(props: { selectedCandidateId: string; onSelectCandidate: (i
     setClipTextDraft(clipTextFromPayload(selectedClip, selectedCandidate))
     setStartDraft(String(selectedClip?.startSeconds ?? 0))
     setDurationDraft(String(selectedClip?.durationSeconds ?? 1))
+    setClipPayloadDraft(JSON.stringify(selectedClip?.payloadJson ?? { text: clipTextFromPayload(selectedClip, selectedCandidate) }, null, 2))
   }, [selectedCandidate, selectedClip])
 
   function selectCandidate(candidateId: string) {
@@ -1446,11 +1680,7 @@ function FinalEditor(props: { selectedCandidateId: string; onSelectCandidate: (i
           label: clipLabelDraft.trim() || selectedClip.label,
           startSeconds: numberDraft(startDraft, selectedClip.startSeconds),
           durationSeconds: Math.max(0.1, numberDraft(durationDraft, selectedClip.durationSeconds)),
-          payloadJson: {
-            text: clipTextDraft.trim() || selectedClip.label,
-            source: "final-editor",
-            editableFields: selectedClip.editableFields,
-          },
+          payloadJson: mergeCaptionPayload(parsedClipPayload, clipTextDraft.trim() || selectedClip.label, selectedClip.editableFields),
         },
       ],
     })
@@ -1572,6 +1802,11 @@ function FinalEditor(props: { selectedCandidateId: string; onSelectCandidate: (i
             <label className="grid gap-1 text-[10px] font-semibold uppercase text-muted-foreground">
               Caption/Text payload
               <Textarea className="min-h-[74px]" value={clipTextDraft} onChange={(event) => setClipTextDraft(event.currentTarget.value)} />
+            </label>
+            <label className="grid gap-1 text-[10px] font-semibold uppercase text-muted-foreground">
+              Caption payload JSON
+              <Textarea className="min-h-[92px] font-mono text-[10px]" value={clipPayloadDraft} onChange={(event) => setClipPayloadDraft(event.currentTarget.value)} />
+              <span className={cn("text-[10px] normal-case", parsedClipPayload ? "text-muted-foreground" : "text-amber-700")}>{parsedClipPayload ? "Valid JSON; text field is merged from caption draft." : "Invalid JSON; save falls back to caption text payload."}</span>
             </label>
             <Button size="xs" variant="selected" disabled={!selectedTrack || !selectedClip} onClick={saveSelectedClip}>
               Save clip edit
@@ -1962,19 +2197,36 @@ function ReferenceFormatOutputCard(props: { output: ReferenceArchiveFormatOutput
   )
 }
 
-function DeveloperGraphView(props: { onMutateLocal: (path: string, body: object) => void }) {
+function DeveloperGraphView(props: {
+  onMutateLocal: (path: string, body: object) => void
+  workspaceBundle: UgcWorkspaceBundle | null
+  bundleResult: JsonValue | null
+  onExportWorkspaceBundle: (label: string) => void
+  onImportWorkspaceBundle: (bundle: unknown, dryRun: boolean) => void
+}) {
   const localState = useUgcLocalState()
   const { workspace, providerJobs, exportManifests, researchTargets, templateMiningJobs } = localState
   const derivedGraph = React.useMemo(() => deriveUgcDeveloperGraph(localState), [localState])
   const [selectedNodeId, setSelectedNodeId] = React.useState(derivedGraph.nodes[0]?.id ?? "")
+  const [bundleImportText, setBundleImportText] = React.useState("")
   const selectedNode = derivedGraph.nodes.find((node) => node.id === selectedNodeId) ?? derivedGraph.nodes[0]
   const families: DerivedGraphFamily[] = ["brief", "persona", "reference", "branch", "candidate", "provider-job", "export", "research", "template"]
+  const bundleImportPayload = bundleImportText.trim() ? parseJson(bundleImportText) : props.workspaceBundle
 
   React.useEffect(() => {
     if (!derivedGraph.nodes.some((node) => node.id === selectedNodeId)) {
       setSelectedNodeId(derivedGraph.nodes[0]?.id ?? "")
     }
   }, [derivedGraph.nodes, selectedNodeId])
+
+  React.useEffect(() => {
+    if (props.workspaceBundle) setBundleImportText(JSON.stringify(props.workspaceBundle, null, 2))
+  }, [props.workspaceBundle])
+
+  function importBundle(dryRun: boolean) {
+    if (!bundleImportPayload) return
+    props.onImportWorkspaceBundle(bundleImportPayload, dryRun)
+  }
 
   return (
     <div className="rugc-provider rugc-dev-graph">
@@ -1988,6 +2240,54 @@ function DeveloperGraphView(props: { onMutateLocal: (path: string, body: object)
           <MetricRow label="Jobs" value={String(providerJobs.length)} />
           <MetricRow label="Exports" value={String(exportManifests.length)} />
           <MetricRow label="Research" value={String(researchTargets.length + templateMiningJobs.length)} />
+        </div>
+        <div className="mt-3 flex flex-wrap items-center gap-2 rounded-md border border-border bg-background p-2 text-[10px] font-semibold text-muted-foreground">
+          <span className="text-foreground">Lane facet</span>
+          <span className="rounded bg-primary/10 px-2 py-1 text-primary">UGC Studio ads</span>
+          <span className="rounded border border-border bg-card px-2 py-1">Brainrot creation / Pleometric</span>
+        </div>
+        <div className="rugc-provider-note mt-3">
+          <div className="flex items-center justify-between gap-2">
+            <strong>Research and template proof queue</strong>
+            <StatusBadge tone="active">{researchTargets.length + templateMiningJobs.length}</StatusBadge>
+          </div>
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <div className="grid gap-2">
+              {researchTargets.slice(0, 4).map((target) => (
+                <div key={target.id} className="rounded border border-border bg-card p-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <strong className="truncate text-[11px] text-foreground">{target.niche}</strong>
+                    <StatusBadge tone={developerNodeTone(target.status)}>{target.status}</StatusBadge>
+                  </div>
+                  <p className="mt-1 line-clamp-2 text-[10px]">{target.query}</p>
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {(["queued", "sampling", "decomposed", "done", "blocked"] as const).map((status) => (
+                      <Button key={status} size="xs" variant={target.status === status ? "selected" : "workbench"} onClick={() => props.onMutateLocal(`/api/ugc/research-targets/${target.id}`, { status })}>{status}</Button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="grid gap-2">
+              {templateMiningJobs.slice(0, 4).map((job) => (
+                <div key={job.id} className="rounded border border-border bg-card p-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <strong className="truncate text-[11px] text-foreground">{job.templateSpec.title}</strong>
+                    <StatusBadge tone={developerNodeTone(job.status)}>{job.status}</StatusBadge>
+                  </div>
+                  <div className="mt-1 grid gap-0.5 text-[10px] text-muted-foreground">
+                    {job.templateSpec.proofNotes.slice(0, 3).map((note) => <span key={note} className="truncate">proof: {note}</span>)}
+                    {job.error ? <span className="text-red-700">error: {job.error}</span> : null}
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {(["queued", "running", "ready", "done", "blocked"] as const).map((status) => (
+                      <Button key={status} size="xs" variant={job.status === status ? "selected" : "workbench"} onClick={() => props.onMutateLocal(`/api/ugc/template-mining-jobs/${job.id}`, { status })}>{status}</Button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
         <div className="mt-3 grid gap-3">
           {families.map((family) => {
@@ -2028,16 +2328,23 @@ function DeveloperGraphView(props: { onMutateLocal: (path: string, body: object)
         </div>
         <div className="rugc-provider-note mt-3">
           <strong>Workspace bundle</strong>
-          <p>Export the current local workspace, object shards, asset paths, provider jobs, archives, research queues, templates, and export manifests.</p>
-          <Button
-            size="xs"
-            variant="workbench"
-            onClick={() => props.onMutateLocal("/api/ugc/workspace/bundles/export", {
-              label: `${workspace.title} developer export`,
-            })}
-          >
-            <Download size={13} /> Export bundle
-          </Button>
+          <p>Export the current local workspace, object shards, asset paths, provider jobs, archives, research queues, templates, and export manifests. Import defaults to validation dry-run; Apply writes only after a valid pasted or current bundle is chosen.</p>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <Button
+              size="xs"
+              variant="workbench"
+              onClick={() => props.onExportWorkspaceBundle(`${workspace.title} developer export`)}
+            >
+              <Download size={13} /> Export bundle
+            </Button>
+            <Button size="xs" variant="ghost" disabled={!props.workspaceBundle} onClick={() => props.workspaceBundle && setBundleImportText(JSON.stringify(props.workspaceBundle, null, 2))}>
+              Use current export
+            </Button>
+            <Button size="xs" variant="workbench" disabled={!bundleImportPayload} onClick={() => importBundle(true)}>Dry-run import</Button>
+            <Button size="xs" variant="outline" disabled={!bundleImportPayload} onClick={() => importBundle(false)}>Apply import</Button>
+          </div>
+          <Textarea className="mt-2 min-h-32 font-mono text-[10px]" value={bundleImportText} onChange={(event) => setBundleImportText(event.currentTarget.value)} placeholder="Paste ugc-studio.workspace-bundle.v1 JSON here, or export and reuse current bundle." />
+          <pre className="rugc-json mt-2 max-h-32">{JSON.stringify(props.bundleResult ?? { currentBundleId: props.workspaceBundle?.id ?? null, ready: Boolean(bundleImportPayload) }, null, 2)}</pre>
         </div>
       </section>
       <aside>
@@ -2100,6 +2407,7 @@ function ProviderView(props: {
   const [selectedJobId, setSelectedJobId] = React.useState(providerJobs[0]?.id ?? "")
   const selectedJob = providerJobs.find((job) => job.id === selectedJobId) ?? providerJobs[0]
   const kieTaskId = extractKieTaskId(selectedJob?.response ?? null)
+  const selectedCodexMedia = selectedJob?.provider === "codex" ? codexJobMediaSummary(selectedJob) : null
 
   React.useEffect(() => {
     if (!providerJobs.some((job) => job.id === selectedJobId)) setSelectedJobId(providerJobs[0]?.id ?? "")
@@ -2195,11 +2503,12 @@ function ProviderView(props: {
                   <MetricRow label="Mode" value={selectedJob.mode} />
                   <MetricRow label="Estimate" value={selectedJob.estimatedCostUsd === null ? "n/a" : `$${selectedJob.estimatedCostUsd.toFixed(2)}`} />
                   <MetricRow label="Artifacts" value={String(selectedJob.artifactPaths.length)} />
+                  <MetricRow label="KIE task" value={kieTaskId ?? "n/a"} />
                 </div>
               </div>
 
               <div className="grid grid-cols-3 gap-1">
-                {(["queued", "running", "succeeded", "blocked", "failed"] satisfies UgcProviderJobStatus[]).map((status) => (
+                {(["planned", "queued", "running", "succeeded", "completed", "blocked", "failed"] satisfies UgcProviderJobStatus[]).map((status) => (
                   <Button
                     key={status}
                     size="xs"
@@ -2212,9 +2521,14 @@ function ProviderView(props: {
               </div>
 
               {kieTaskId ? (
-                <Button size="xs" variant="workbench" onClick={() => props.onCallKie(`/api/ugc/kie/tasks/${kieTaskId}`)}>
-                  <RefreshCw size={13} /> Poll KIE task
-                </Button>
+                <div className="rounded-md border border-border bg-background p-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="truncate font-mono text-[10px] text-muted-foreground">taskId: {kieTaskId}</span>
+                    <Button size="xs" variant="workbench" onClick={() => props.onCallKie(`/api/ugc/kie/tasks/${kieTaskId}`)}>
+                      <RefreshCw size={13} /> Poll KIE task
+                    </Button>
+                  </div>
+                </div>
               ) : null}
 
               <div className="rounded-md border border-border bg-background p-2">
@@ -2223,6 +2537,19 @@ function ProviderView(props: {
                   {selectedJob.artifactPaths.length ? selectedJob.artifactPaths.map((path) => <span key={path} className="truncate">{path}</span>) : <span>none</span>}
                 </div>
               </div>
+
+              {selectedCodexMedia ? (
+                <div className="rounded-md border border-border bg-background p-2">
+                  <p className="m-0 text-[11px] font-semibold text-foreground">Codex dry-run frames</p>
+                  <div className="mt-1 grid gap-1 text-[11px] text-muted-foreground">
+                    <MetricRow label="Prepared" value={selectedCodexMedia.framePreparation ?? "n/a"} />
+                    <MetricRow label="Frames" value={String(selectedCodexMedia.frameCount)} />
+                    <MetricRow label="Media" value={selectedCodexMedia.mediaUrl ?? "n/a"} />
+                    <CodexRefList label="Reference frames" values={selectedCodexMedia.referenceFrameUrls} />
+                    <CodexRefList label="Frame artifact paths" values={selectedCodexMedia.artifactPaths} />
+                  </div>
+                </div>
+              ) : null}
 
               <pre className="rugc-json">{JSON.stringify({
                 request: selectedJob.request,

@@ -1,7 +1,7 @@
 import { decodeCodexAnalyzeInput, prepareCodexAnalyze, runCodexAnalyze, type CodexAnalyzeInput, type CodexPreparedResult } from "@wirebabel/ugc-cli"
 import { UgcJsonStore } from "./ugc-json-store"
 import { prepareCodexVideoFrames, type CodexFramePreparation, type CodexVideoFrameExtractor } from "./codex-video-frames"
-import { isRecord, toJsonValue, type BranchPatch, type BulkCandidateStatusPatch, type CandidateStatusPatch, type CleanRoomTemplateSpec, type CreateBranchInput, type CreateExportManifestInput, type CreateProviderJobInput, type CreateReferenceArchiveInput, type CreateResearchTargetInput, type CreateReviewNoteInput, type CreateTemplateMiningJobInput, type CreateWorkspaceBundleInput, type FinalEditorClipPatch, type FinalEditorPatch, type FinalEditorTrackPatch, type ImportWorkspaceBundleInput, type PersonaPatch, type ProviderJobPatch, type ReferenceArchiveFormatOutput, type ResearchTargetPatch, type TemplateMiningJobPatch, type UgcReferenceArchive, type UgcResearchPlatform, type UgcResearchTargetStatus, type UgcTemplateMiningJobStatus } from "../ugc/local-state"
+import { isRecord, toJsonValue, type BranchPatch, type BulkCandidateStatusPatch, type CandidateStatusPatch, type CleanRoomTemplateSpec, type CreateBranchInput, type CreateExportManifestInput, type CreateProviderJobInput, type CreateReferenceArchiveInput, type CreateResearchTargetInput, type CreateReviewNoteInput, type CreateTemplateMiningJobInput, type CreateWorkspaceBundleInput, type FinalEditorClipPatch, type FinalEditorPatch, type FinalEditorTrackPatch, type ImportWorkspaceBundleInput, type PersonaPatch, type ProviderJobPatch, type ReferenceArchiveFormatOutput, type ResearchTargetPatch, type TemplateMiningJobPatch, type UgcReferenceArchive, type UgcReferenceCatalogImportInput, type UgcResearchPlatform, type UgcResearchTargetStatus, type UgcTemplateMiningJobStatus } from "../ugc/local-state"
 import type { BranchStatus, CandidateStatus, JsonValue, ReviewAttachment, ReviewVerdict } from "../renderer/ugcStudioModel"
 
 interface CodexAnalysisJobRequest {
@@ -55,6 +55,14 @@ export async function routeUgc(request: Request, store: UgcJsonStore, options: R
 
   if (request.method === "POST" && url.pathname === "/api/ugc/workspace/bundles/import") {
     return json(store.importWorkspaceBundle(decodeImportWorkspaceBundle(await readJson(request))))
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/ugc/reference-catalog/plan") {
+    return json(store.planReferenceCatalogImport(decodeReferenceCatalogImport(await readJson(request))))
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/ugc/reference-catalog/import") {
+    return json(store.importReferenceCatalog(decodeReferenceCatalogImport(await readJson(request))))
   }
 
   if (request.method === "POST" && url.pathname.startsWith("/api/ugc/personas/")) {
@@ -594,6 +602,13 @@ function decodeImportWorkspaceBundle(value: JsonValue): ImportWorkspaceBundleInp
     }
   }
   return { bundle: value, dryRun: true }
+}
+
+function decodeReferenceCatalogImport(value: JsonValue): UgcReferenceCatalogImportInput {
+  if (!isRecord(value)) return {}
+  return {
+    roots: isStringArray(value.roots) ? value.roots : undefined,
+  }
 }
 
 function decodeReviewAttachment(value: JsonValue | undefined): ReviewAttachment {

@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs"
-import { dirname, resolve } from "node:path"
+import { basename, dirname, relative, resolve } from "node:path"
 import {
   candidateById,
   createInitialLocalState,
@@ -24,6 +24,9 @@ import {
   type CreateWorkspaceBundleInput,
   type FinalEditorPatch,
   type ImportWorkspaceBundleInput,
+  type UgcReferenceCatalogImportInput,
+  type UgcReferenceCatalogImportResult,
+  type UgcReferenceCatalogVideo,
   type PersonaPatch,
   type ProviderJobPatch,
   type ResearchTargetPatch,
@@ -40,7 +43,7 @@ import {
   type UgcWorkspaceBundleShardManifest,
 } from "../ugc/local-state"
 import { UgcSqliteStore } from "./ugc-sqlite-store"
-import type { BranchSnapshot, JsonValue, PersonaProfile, ReviewNote, UgcStudioWorkspace } from "../renderer/ugcStudioModel"
+import type { BranchSnapshot, JsonValue, PersonaProfile, ReferenceProfile, ReviewNote, UgcStudioWorkspace } from "../renderer/ugcStudioModel"
 
 export interface UgcJsonStoreOptions {
   readonly cwd?: string
@@ -103,7 +106,7 @@ export class UgcJsonStore {
     }
 
     if (sqliteState) {
-      this.repairJsonArtifacts(sqliteState)
+      this.#repairJsonArtifacts(sqliteState)
       return sqliteState
     }
 
@@ -132,7 +135,7 @@ export class UgcJsonStore {
   }
 
   updatePersona(personaId: string, patch: PersonaPatch): UgcLocalState {
-    return this.updateWorkspace((workspace) => {
+    return this.#updateWorkspace((workspace) => {
       const personas = workspace.personas.map((persona) => {
         if (persona.id !== personaId) return persona
         return patchPersona(persona, patch)
@@ -145,7 +148,7 @@ export class UgcJsonStore {
   }
 
   updateCandidate(candidateId: string, patch: CandidateStatusPatch): UgcLocalState {
-    return this.updateWorkspace((workspace) => {
+    return this.#updateWorkspace((workspace) => {
       const candidates = workspace.candidates.map((candidate) => (
         candidate.id === candidateId ? { ...candidate, status: patch.status } : candidate
       ))
@@ -159,7 +162,7 @@ export class UgcJsonStore {
   updateCandidates(patch: BulkCandidateStatusPatch): UgcLocalState {
     const candidateIds = new Set(patch.candidateIds)
     if (candidateIds.size === 0) throw new Error("candidate bulk status patch requires candidateIds")
-    return this.updateWorkspace((workspace) => {
+    return this.#updateWorkspace((workspace) => {
       let updatedCount = 0
       const candidates = workspace.candidates.map((candidate) => {
         if (!candidateIds.has(candidate.id)) return candidate
@@ -175,7 +178,7 @@ export class UgcJsonStore {
   }
 
   updateBranch(branchId: string, patch: BranchPatch): UgcLocalState {
-    return this.updateWorkspace((workspace) => {
+    return this.#updateWorkspace((workspace) => {
       const branchSnapshots = workspace.branchSnapshots.map((branch) => {
         if (branch.id !== branchId) return branch
         return {
@@ -236,7 +239,7 @@ export class UgcJsonStore {
       requestedChange: input.requestedChange ?? null,
       followUpActionId: null,
     }
-    return this.updateWorkspace((workspace) => {
+    return this.#updateWorkspace((workspace) => {
       const candidates = workspace.candidates.map((candidate) => {
         if (input.attachedTo.kind !== "candidate" || candidate.id !== input.attachedTo.id) return candidate
         return { ...candidate, reviewNoteIds: [...candidate.reviewNoteIds, note.id] }
@@ -317,6 +320,7 @@ export class UgcJsonStore {
       guardrails: input.guardrails ?? existing?.guardrails ?? defaultArchive.guardrails,
       candidateFormatOutputs: input.candidateFormatOutputs ?? existing?.candidateFormatOutputs ?? defaultArchive.candidateFormatOutputs,
       notes: input.notes ?? existing?.notes ?? [],
+      catalogVideos: existing?.catalogVideos ?? defaultArchive.catalogVideos,
       updatedAt: now,
     }
     return this.write({
@@ -332,6 +336,14 @@ export class UgcJsonStore {
       throw new Error(`reference archive not found: ${archiveId}`)
     }
     return this.write({ ...state, referenceArchives })
+  }
+
+  planReferenceCatalogImport(input: UgcReferenceCatalogImportInput = {}): UgcReferenceCatalogImportResult {
+    return this.#createReferenceCatalogImportResult(input, true)
+  }
+
+  importReferenceCatalog(input: UgcReferenceCatalogImportInput = {}): UgcReferenceCatalogImportResult {
+    return this.#createReferenceCatalogImportResult(input, false)
   }
 
   createResearchTarget(input: CreateResearchTargetInput): UgcLocalState {
@@ -419,7 +431,7 @@ export class UgcJsonStore {
   }
 
   updateFinalEditor(patch: FinalEditorPatch): UgcLocalState {
-    return this.updateWorkspace((workspace) => {
+    return this.#updateWorkspace((workspace) => {
       if (patch.selectedCandidateId && !candidateById(workspace, patch.selectedCandidateId)) {
         throw new Error(`candidate not found: ${patch.selectedCandidateId}`)
       }
@@ -529,8 +541,14 @@ export class UgcJsonStore {
       errors.push("Bundle state schema is not ugc-studio.local-state.v1.")
     }
 
+    if (bundle) {
+      const validation = validateWorkspaceBundle(bundle)
+      errors.push(...validation.errors)
+      warnings.push(...validation.warnings)
+    }
+
     if (bundle && bundle.state.workspace.id !== this.config.workspaceId) {
-      warnings.push(`Bundle workspace ${bundle.state.workspace.id} will replace current workspace ${this.config.workspaceId} if applied.`)
+      errors.push(`Bundle workspace ${bundle.state.workspace.id} does not match current workspace ${this.config.workspaceId}.`)
     }
 
     const valid = errors.length === 0 && Boolean(bundle)
@@ -551,15 +569,450 @@ export class UgcJsonStore {
     }
   }
 
-  private repairJsonArtifacts(state: UgcLocalState): void {
+  #createReferenceCatalogImportResult(input: UgcReferenceCatalogImportInput, dryRun: boolean): UgcReferenceCatalogImportResult {
+    const now = this.now()
+    const roots = (input.roots && input.roots.length > 0 ? input.roots : DEFAULT_REFERENCE_CATALOG_ROOTS)
+      .map((root) => normalizeRelativePath(this.config.cwd, root))
+    const errors: string[] = []
+    const warnings: string[] = []
+    const groups = readReferenceCatalogGroups(this.config.cwd, roots, warnings)
+    if (groups.length === 0) errors.push("Reference catalog import found no readable metadata records.")
+    const state = this.read()
+    const plannedState = applyReferenceCatalogGroups(state, groups, now)
+    const providerJobIds = groups.map((group) => referenceCatalogProviderJobId(group.handle))
+    const valid = errors.length === 0
+    const importedState = valid && !dryRun ? this.write(plannedState) : null
+
+    return {
+      schemaVersion: "ugc-studio.reference-catalog-import-result.v1",
+      dryRun,
+      valid,
+      imported: Boolean(importedState),
+      checkedAt: now,
+      roots,
+      videosPlanned: groups.reduce((count, group) => count + group.videos.length, 0),
+      referenceProfileIds: groups.map((group) => referenceCatalogProfileId(group.handle)),
+      archiveIds: groups.map((group) => referenceCatalogArchiveId(group.handle)),
+      providerJobIds,
+      researchTargetIds: groups.map((group) => referenceCatalogResearchTargetId(group.handle)),
+      templateMiningJobIds: groups.map((group) => referenceCatalogTemplateJobId(group.handle)),
+      errors,
+      warnings,
+      state: importedState,
+    }
+  }
+
+  #repairJsonArtifacts(state: UgcLocalState): void {
     if (!jsonFileMatches(this.config.statePath, state)) writeJsonAtomic(this.config.statePath, state)
     if (!workspaceShardsMatch(this.config.workspaceDir, state)) writeWorkspaceShards(this.config.workspaceDir, state)
   }
 
-  private updateWorkspace(update: (workspace: UgcStudioWorkspace) => UgcStudioWorkspace): UgcLocalState {
+  #updateWorkspace(update: (workspace: UgcStudioWorkspace) => UgcStudioWorkspace): UgcLocalState {
     const state = this.read()
     return this.write({ ...state, workspace: update(state.workspace) })
   }
+}
+
+const DEFAULT_REFERENCE_CATALOG_ROOTS = [
+  "data/tiktok-catalogue/pleometric",
+  "data/tiktok-catalogue/mynameissico",
+]
+
+const REFERENCE_CATALOG_GUARDRAILS = [
+  "Metadata-only local catalogue import; do not open, copy, upload, or reuse source media.",
+  "Do not persist expiring CDN URLs, request headers, cookies, or format URLs from info JSON.",
+  "Use only abstract mechanics, local path provenance, duration, engagement counts, and rewritten hooks.",
+  "Replace creator identity, face, voice, exact captions, source pixels, brand marks, and audio.",
+]
+
+interface ReferenceCatalogGroup {
+  readonly root: string
+  readonly handle: string
+  readonly displayName: string
+  readonly lane: "brainrot" | "ugc-ads"
+  readonly videos: readonly UgcReferenceCatalogVideo[]
+}
+
+function readReferenceCatalogGroups(cwd: string, roots: readonly string[], warnings: string[]): readonly ReferenceCatalogGroup[] {
+  const groups: ReferenceCatalogGroup[] = []
+  for (const root of roots) {
+    const absoluteRoot = resolve(cwd, root)
+    if (!existsSync(absoluteRoot)) {
+      warnings.push(`Reference catalog root not found: ${root}`)
+      continue
+    }
+    const handle = slug(basename(absoluteRoot)).replace(/_/g, "")
+    let infoJsonNames: string[]
+    try {
+      infoJsonNames = readdirSync(absoluteRoot)
+        .filter((fileName) => fileName.endsWith(".info.json"))
+        .sort()
+    } catch {
+      warnings.push(`Reference catalog root is unreadable: ${root}`)
+      continue
+    }
+    if (infoJsonNames.length === 0) {
+      warnings.push(`Reference catalog root has no info JSON files: ${root}`)
+      continue
+    }
+    const videos: UgcReferenceCatalogVideo[] = []
+    for (const fileName of infoJsonNames) {
+      const video = readReferenceCatalogVideo(cwd, root, absoluteRoot, fileName, handle, warnings)
+      if (video) videos.push(video)
+    }
+    if (videos.length === 0) {
+      warnings.push(`Reference catalog root produced no readable videos: ${root}`)
+      continue
+    }
+    groups.push({
+      root,
+      handle,
+      displayName: `@${handle}`,
+      lane: handle === "pleometric" ? "brainrot" : "ugc-ads",
+      videos,
+    })
+  }
+  return groups
+}
+
+function readReferenceCatalogVideo(cwd: string, root: string, absoluteRoot: string, fileName: string, handle: string, warnings: string[]): UgcReferenceCatalogVideo | null {
+  const infoJsonPath = resolve(absoluteRoot, fileName)
+  const parsed = readJsonFile(infoJsonPath)
+  if (!isRecord(parsed)) {
+    warnings.push(`Reference catalog info JSON is unreadable: ${normalizeRelativePath(cwd, infoJsonPath)}`)
+    return null
+  }
+  const stem = fileName.slice(0, -".info.json".length)
+  const videoId = typeof parsed.id === "string" && parsed.id.length > 0 ? parsed.id : stem.split("_").at(-1) ?? stem
+  const referenceProfileId = referenceCatalogProfileId(handle)
+  const mp4Path = normalizeRelativePath(cwd, resolve(absoluteRoot, `${stem}.mp4`))
+  const posterPath = normalizeRelativePath(cwd, resolve(absoluteRoot, `${stem}.jpg`))
+  const uploader = firstString(parsed.uploader, parsed.creator, parsed.channel, parsed.author, parsed.uploader_id) ?? `@${handle}`
+  const metadataHandle = handleFromMetadata(handle, parsed)
+  return {
+    schemaVersion: "ugc-studio.reference-catalog-video.v1",
+    id: referenceCatalogClipId(metadataHandle, videoId),
+    referenceProfileId,
+    videoId,
+    catalogueRoot: root,
+    uploader,
+    handle: `@${metadataHandle}`,
+    title: firstString(parsed.title, parsed.fulltitle, parsed.description) ?? `${metadataHandle} TikTok ${videoId}`,
+    durationSeconds: firstFiniteNumber(parsed.duration, parsed.duration_seconds),
+    engagement: {
+      views: firstFiniteNumber(parsed.view_count, parsed.play_count),
+      likes: firstFiniteNumber(parsed.like_count, parsed.digg_count),
+      comments: firstFiniteNumber(parsed.comment_count),
+      shares: firstFiniteNumber(parsed.share_count, parsed.repost_count),
+      saves: firstFiniteNumber(parsed.save_count, parsed.collect_count),
+    },
+    paths: {
+      mp4: existsSync(resolve(absoluteRoot, `${stem}.mp4`)) ? mp4Path : null,
+      infoJson: normalizeRelativePath(cwd, infoJsonPath),
+      poster: existsSync(resolve(absoluteRoot, `${stem}.jpg`)) ? posterPath : null,
+    },
+    sourcePolicy: "metadata-only",
+    guardrails: REFERENCE_CATALOG_GUARDRAILS,
+  }
+}
+
+function applyReferenceCatalogGroups(state: UgcLocalState, groups: readonly ReferenceCatalogGroup[], now: string): UgcLocalState {
+  if (groups.length === 0) return state
+  const referenceProfiles = upsertById(state.workspace.referenceProfiles, groups.map((group) => referenceCatalogProfile(state.workspace.id, group)))
+  const archives = upsertById(state.referenceArchives, groups.map((group) => referenceCatalogArchive(state.workspace.id, group, now)))
+  const researchTargets = upsertById(state.researchTargets, groups.map((group) => referenceCatalogResearchTarget(state.workspace.id, group, now)))
+  const templateMiningJobs = upsertById(state.templateMiningJobs, groups.map((group) => referenceCatalogTemplateJob(state.workspace.id, group, now)))
+  const providerJobs = upsertById(state.providerJobs, groups.map((group) => referenceCatalogProviderJob(state.workspace.id, group, now)))
+  return {
+    ...state,
+    workspace: {
+      ...state.workspace,
+      referenceProfiles,
+    },
+    referenceArchives: archives,
+    researchTargets,
+    templateMiningJobs,
+    providerJobs,
+  }
+}
+
+function referenceCatalogProfile(workspaceId: string, group: ReferenceCatalogGroup): ReferenceProfile {
+  const referenceProfileId = referenceCatalogProfileId(group.handle)
+  return {
+    id: referenceProfileId,
+    platform: "tiktok",
+    handle: `@${group.handle}`,
+    displayName: `${group.displayName} local ${group.lane === "brainrot" ? "brainrot" : "UGC ads"} catalogue`,
+    rightsStatus: "public-research-target",
+    archiveStatus: "sampled",
+    styleLane: group.lane,
+    useCase: group.lane === "brainrot"
+      ? "Brainrot creation mechanics mined from local TikTok metadata."
+      : "UGC ads mechanics mined from local TikTok metadata.",
+    cleanRoomBoundary: REFERENCE_CATALOG_GUARDRAILS,
+    sampleClips: group.videos.map((video) => ({
+      id: video.id,
+      title: video.title,
+      sourceUrl: null,
+      durationSeconds: video.durationSeconds ?? 0,
+      storagePolicy: "store-metadata-only",
+      extractedFields: [
+        "local mp4 path",
+        "info JSON path",
+        "poster path",
+        "duration",
+        "engagement counts",
+        "title",
+      ],
+    })),
+    extractedMechanics: {
+      poseTiming: "Derive timing only from metadata and later clean-room review; no source pixels are reused.",
+      gestureRhythm: "Catalogue import preserves high-level pacing and engagement signals only.",
+      shotStructure: [`workspace:${workspaceId}`, `lane:${group.lane}`, "metadata-only reference catalogue"],
+      captionTemplate: "Rewrite all captions; imported titles are research labels, not reusable copy.",
+      hookFamilies: group.lane === "brainrot"
+        ? ["absurd contrast hook", "rapid curiosity loop", "format escalation"]
+        : ["problem proof hook", "routine insert", "product payoff"],
+      ctaPatterns: group.lane === "brainrot" ? ["non-ad retention loop"] : ["soft product CTA", "proof-led CTA"],
+      nonAdPatterns: ["no source identity cloning", "no exact caption reuse", "no media reuse"],
+    },
+    remixFields: [
+      {
+        id: `remix_field_${group.handle}_metadata_timing`,
+        label: "Metadata timing",
+        mode: "abstract",
+        sourceField: "reference.catalogVideos.durationSeconds",
+        targetField: "candidate.recipe.editCadence",
+        rationale: "Use duration distribution as a high-level editing constraint only.",
+        confidence: 0.72,
+      },
+      {
+        id: `remix_field_${group.handle}_creator_identity`,
+        label: "Creator identity",
+        mode: "blocked",
+        sourceField: "reference.creatorIdentity",
+        targetField: "persona.identity",
+        rationale: "Reference creators remain research sources and are never copied.",
+        confidence: 1,
+      },
+      {
+        id: `remix_field_${group.handle}_local_media`,
+        label: "Local source media",
+        mode: "blocked",
+        sourceField: "reference.catalogVideos.paths.mp4",
+        targetField: "candidate.rawMedia",
+        rationale: "Local mp4 paths prove provenance but are not opened or reused by catalog import.",
+        confidence: 1,
+      },
+    ],
+  }
+}
+
+function referenceCatalogArchive(workspaceId: string, group: ReferenceCatalogGroup, now: string): UgcReferenceArchive {
+  const referenceProfileId = referenceCatalogProfileId(group.handle)
+  return {
+    schemaVersion: "ugc-studio.reference-archive.v1",
+    id: referenceCatalogArchiveId(group.handle),
+    workspaceId,
+    referenceProfileId,
+    title: `${group.displayName} clean-room ${group.lane} archive`,
+    rightsStatus: "public-research-target",
+    archiveStatus: "sampled",
+    createdAt: now,
+    updatedAt: now,
+    sourcePolicy: "metadata-only",
+    preservedMechanics: toJsonValue({
+      lane: group.lane,
+      videos: group.videos.length,
+      durationSeconds: summarizeNullableNumbers(group.videos.map((video) => video.durationSeconds)),
+      views: summarizeNullableNumbers(group.videos.map((video) => video.engagement.views)),
+      catalogueRoots: [group.root],
+      importedFields: ["mp4 path", "infoJson path", "poster path", "uploader", "handle", "title", "duration", "engagement counts"],
+      excludedFields: ["formats", "formats.url", "url", "webpage_url", "http_headers", "cookies"],
+    }),
+    sampleClipIds: group.videos.map((video) => video.id),
+    swappedFields: ["creator identity", "voice", "exact captions", "product", "CTA"],
+    blockedFields: ["source pixels", "source audio", "source face", "expiring CDN URLs", "headers", "cookies", "formats[].url"],
+    guardrails: REFERENCE_CATALOG_GUARDRAILS,
+    candidateFormatOutputs: [
+      {
+        id: `format_${referenceProfileId}_metadata_template`,
+        title: `${group.displayName} ${group.lane} metadata template`,
+        kind: "format-template",
+        summary: "Use local catalogue metadata to plan clean-room timing, hook families, and review targets without opening media files.",
+        stageIds: ["stage_reference_profile", "stage_edit_style", "stage_hook"],
+        candidateIds: [],
+        manifestJson: toJsonValue({
+          lane: group.lane,
+          videoIds: group.videos.map((video) => video.videoId),
+          localAssetPaths: group.videos.map((video) => video.paths),
+        }),
+      },
+    ],
+    notes: ["Seeded from local TikTok catalogue metadata only."],
+    catalogVideos: group.videos,
+  }
+}
+
+function referenceCatalogResearchTarget(workspaceId: string, group: ReferenceCatalogGroup, now: string): UgcResearchTarget {
+  return {
+    schemaVersion: "ugc-studio.research-target.v1",
+    id: referenceCatalogResearchTargetId(group.handle),
+    workspaceId,
+    platform: "tiktok",
+    niche: group.lane === "brainrot" ? "brainrot creation reference mechanics" : "UGC ads reference mechanics",
+    query: `${group.displayName} local TikTok catalogue metadata clean-room ${group.lane} mechanics`,
+    status: "decomposed",
+    priority: group.lane === "brainrot" ? 1 : 2,
+    sourcePolicy: "metadata-only",
+    createdAt: now,
+    updatedAt: now,
+    templateJobIds: [referenceCatalogTemplateJobId(group.handle)],
+    notes: [`Local metadata import from ${group.root}; no live scraping or media reads.`],
+  }
+}
+
+function referenceCatalogTemplateJob(workspaceId: string, group: ReferenceCatalogGroup, now: string): UgcTemplateMiningJob {
+  return {
+    schemaVersion: "ugc-studio.template-mining-job.v1",
+    id: referenceCatalogTemplateJobId(group.handle),
+    workspaceId,
+    researchTargetId: referenceCatalogResearchTargetId(group.handle),
+    status: "ready",
+    createdAt: now,
+    updatedAt: now,
+    templateSpec: {
+      schemaVersion: "ugc-studio.clean-room-template.v1",
+      id: `template_${group.handle}_reference_catalog`,
+      title: `${group.displayName} ${group.lane} clean-room template`,
+      category: group.lane === "brainrot" ? "format" : "hook",
+      preservedMechanics: toJsonValue({
+        lane: group.lane,
+        sourcePolicy: "metadata-only",
+        catalogueRoot: group.root,
+        videoCount: group.videos.length,
+        engagement: summarizeNullableNumbers(group.videos.map((video) => video.engagement.views)),
+      }),
+      swapSlots: ["synthetic persona", "product", "hook copy", "caption copy", "voice", "CTA"],
+      blockedFields: ["source face", "source voice", "exact captions", "source pixels", "source audio", "brand marks"],
+      proofNotes: REFERENCE_CATALOG_GUARDRAILS,
+    },
+    candidateIds: [],
+    error: null,
+  }
+}
+
+function referenceCatalogProviderJob(workspaceId: string, group: ReferenceCatalogGroup, now: string): UgcProviderJob {
+  return {
+    schemaVersion: "ugc-studio.provider-job.v1",
+    id: referenceCatalogProviderJobId(group.handle),
+    workspaceId,
+    provider: "local",
+    operation: "reference-catalog-import",
+    mode: "dry-run",
+    status: "completed",
+    createdAt: now,
+    updatedAt: now,
+    targetIds: [referenceCatalogProfileId(group.handle), referenceCatalogArchiveId(group.handle)],
+    spendCapUsd: 0,
+    estimatedCostUsd: 0,
+    request: toJsonValue({
+      sourcePolicy: "metadata-only",
+      lane: group.lane,
+      catalogueRoot: group.root,
+      videoCount: group.videos.length,
+      videos: group.videos.map((video) => ({
+        id: video.id,
+        videoId: video.videoId,
+        uploader: video.uploader,
+        handle: video.handle,
+        title: video.title,
+        durationSeconds: video.durationSeconds,
+        engagement: video.engagement,
+        paths: video.paths,
+        sourcePolicy: video.sourcePolicy,
+        guardrails: video.guardrails,
+      })),
+      excludedFields: ["formats", "formats.url", "url", "webpage_url", "http_headers", "cookies"],
+    }),
+    response: null,
+    artifactPaths: group.videos.flatMap((video) => [video.paths.infoJson, video.paths.poster, video.paths.mp4].filter(isString)),
+    error: null,
+  }
+}
+
+function referenceCatalogProfileId(handle: string): string {
+  return `reference_tiktok_${slug(handle)}`
+}
+
+function referenceCatalogArchiveId(handle: string): string {
+  return `archive_${referenceCatalogProfileId(handle)}`
+}
+
+function referenceCatalogClipId(handle: string, videoId: string): string {
+  return `clip_${slug(handle)}_${slug(videoId)}`
+}
+
+function referenceCatalogResearchTargetId(handle: string): string {
+  return `research_tiktok_${slug(handle)}_reference_catalog`
+}
+
+function referenceCatalogTemplateJobId(handle: string): string {
+  return `template_job_tiktok_${slug(handle)}_reference_catalog`
+}
+
+function referenceCatalogProviderJobId(handle: string): string {
+  return `job_local_reference_catalog_import_${slug(handle)}`
+}
+
+function upsertById<T extends { readonly id: string }>(existing: readonly T[], incoming: readonly T[]): readonly T[] {
+  const incomingIds = new Set(incoming.map((item) => item.id))
+  return [...incoming, ...existing.filter((item) => !incomingIds.has(item.id))]
+}
+
+function normalizeRelativePath(cwd: string, path: string): string {
+  const absolute = resolve(cwd, path)
+  const relativePath = relative(cwd, absolute)
+  return relativePath.startsWith("..") ? absolute : relativePath || "."
+}
+
+function handleFromMetadata(fallback: string, metadata: { readonly [key: string]: JsonValue }): string {
+  const raw = firstString(metadata.uploader_id, metadata.channel_id, metadata.uploader, metadata.channel, metadata.creator, metadata.author) ?? fallback
+  return slug(raw.replace(/^@/, "")).replace(/_/g, "") || fallback
+}
+
+function firstString(...values: readonly (JsonValue | undefined)[]): string | null {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim().length > 0) return value.trim()
+  }
+  return null
+}
+
+function firstFiniteNumber(...values: readonly (JsonValue | undefined)[]): number | null {
+  for (const value of values) {
+    if (typeof value === "number" && Number.isFinite(value)) return value
+    if (typeof value === "string" && value.trim().length > 0) {
+      const parsed = Number(value)
+      if (Number.isFinite(parsed)) return parsed
+    }
+  }
+  return null
+}
+
+function summarizeNullableNumbers(values: readonly (number | null)[]): JsonValue {
+  const numbers = values.filter((value): value is number => typeof value === "number" && Number.isFinite(value))
+  if (numbers.length === 0) return { count: 0, min: null, max: null, average: null }
+  const total = numbers.reduce((sum, value) => sum + value, 0)
+  return {
+    count: numbers.length,
+    min: Math.min(...numbers),
+    max: Math.max(...numbers),
+    average: Math.round((total / numbers.length) * 100) / 100,
+  }
+}
+
+function isString(value: string | null): value is string {
+  return typeof value === "string"
 }
 
 function patchPersona(persona: PersonaProfile, patch: PersonaPatch): PersonaProfile {
@@ -623,6 +1076,7 @@ function normalizeLocalState(state: UgcLocalState): UgcLocalState {
           sampleClipIds: existing.sampleClipIds ?? defaultArchive.sampleClipIds,
           candidateFormatOutputs: existing.candidateFormatOutputs ?? defaultArchive.candidateFormatOutputs,
           notes: existing.notes ?? defaultArchive.notes,
+          catalogVideos: existing.catalogVideos ?? defaultArchive.catalogVideos,
         }
       : defaultArchive
   })
@@ -641,6 +1095,7 @@ function writeWorkspaceShards(workspaceDir: string, state: UgcLocalState): void 
   writeJsonAtomic(resolve(workspaceDir, "workspace.json"), state.workspace)
   writeCollection(resolve(workspaceDir, "personas"), state.workspace.personas)
   writeCollection(resolve(workspaceDir, "campaigns"), [state.workspace.productBrief])
+  writeCollection(resolve(workspaceDir, "reference-profiles"), state.workspace.referenceProfiles)
   writeCollection(resolve(workspaceDir, "branches"), state.workspace.branchSnapshots)
   writeCollection(resolve(workspaceDir, "candidates"), state.workspace.candidates)
   writeCollection(resolve(workspaceDir, "notes"), state.workspace.reviewNotes)
@@ -668,6 +1123,7 @@ function workspaceShardsMatch(workspaceDir: string, state: UgcLocalState): boole
   return jsonFileMatches(resolve(workspaceDir, "workspace.json"), state.workspace)
     && collectionMatches(resolve(workspaceDir, "personas"), state.workspace.personas)
     && collectionMatches(resolve(workspaceDir, "campaigns"), [state.workspace.productBrief])
+    && collectionMatches(resolve(workspaceDir, "reference-profiles"), state.workspace.referenceProfiles)
     && collectionMatches(resolve(workspaceDir, "branches"), state.workspace.branchSnapshots)
     && collectionMatches(resolve(workspaceDir, "candidates"), state.workspace.candidates)
     && collectionMatches(resolve(workspaceDir, "notes"), state.workspace.reviewNotes)
@@ -734,6 +1190,7 @@ function slug(value: string): string {
 function bundleObjectCounts(state: UgcLocalState): UgcWorkspaceBundleObjectCounts {
   return {
     personas: state.workspace.personas.length,
+    referenceProfiles: state.workspace.referenceProfiles.length,
     branches: state.workspace.branchSnapshots.length,
     candidates: state.workspace.candidates.length,
     notes: state.workspace.reviewNotes.length,
@@ -752,6 +1209,7 @@ function createShardManifest(state: UgcLocalState, workspaceDir: string, current
     collections: {
       personas: state.workspace.personas.map((item) => `personas/${item.id}.json`),
       campaigns: [`campaigns/${state.workspace.productBrief.id}.json`],
+      referenceProfiles: state.workspace.referenceProfiles.map((item) => `reference-profiles/${item.id}.json`),
       branches: state.workspace.branchSnapshots.map((item) => `branches/${item.id}.json`),
       candidates: state.workspace.candidates.map((item) => `candidates/${item.id}.json`),
       notes: state.workspace.reviewNotes.map((item) => `notes/${item.id}.json`),
@@ -767,6 +1225,12 @@ function createShardManifest(state: UgcLocalState, workspaceDir: string, current
       generated: "assets/generated",
       exports: "assets/exports",
     },
+    localAssets: {
+      source: listFilesRecursive(resolve(workspaceDir, "assets/source"), "assets/source"),
+      generated: listFilesRecursive(resolve(workspaceDir, "assets/generated"), "assets/generated"),
+      exports: listFilesRecursive(resolve(workspaceDir, "assets/exports"), "assets/exports"),
+      referenceCatalog: referenceCatalogAssetPaths(state),
+    },
   }
 }
 
@@ -776,6 +1240,34 @@ function listJsonFiles(dir: string, relativePrefix: string): readonly string[] {
     .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
     .map((entry) => `${relativePrefix}/${entry.name}`)
     .sort()
+}
+
+function listFilesRecursive(dir: string, relativePrefix: string): readonly string[] {
+  if (!existsSync(dir)) return []
+  const paths: string[] = []
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const relativePath = `${relativePrefix}/${entry.name}`
+    const absolutePath = resolve(dir, entry.name)
+    if (entry.isDirectory()) {
+      paths.push(...listFilesRecursive(absolutePath, relativePath))
+    } else if (entry.isFile()) {
+      paths.push(relativePath)
+    }
+  }
+  return paths.sort()
+}
+
+function referenceCatalogAssetPaths(state: UgcLocalState): readonly string[] {
+  const paths = new Set<string>()
+  for (const archive of state.referenceArchives) {
+    const catalogVideos = archive.catalogVideos ?? []
+    for (const video of catalogVideos) {
+      paths.add(video.paths.infoJson)
+      if (video.paths.poster) paths.add(video.paths.poster)
+      if (video.paths.mp4) paths.add(video.paths.mp4)
+    }
+  }
+  return [...paths].sort()
 }
 
 function cloneStateForBundle(state: UgcLocalState): UgcLocalState {
@@ -802,9 +1294,49 @@ function decodeWorkspaceBundle(value: JsonValue | UgcWorkspaceBundle): UgcWorksp
   }
 }
 
+function validateWorkspaceBundle(bundle: UgcWorkspaceBundle): { readonly errors: readonly string[]; readonly warnings: readonly string[] } {
+  const errors: string[] = []
+  const warnings: string[] = []
+  const expectedCounts = bundleObjectCounts(bundle.state)
+  for (const key of Object.keys(expectedCounts) as readonly (keyof UgcWorkspaceBundleObjectCounts)[]) {
+    if (bundle.objectCounts[key] !== expectedCounts[key]) {
+      errors.push(`Bundle objectCounts.${key} does not match state payload.`)
+    }
+  }
+  if (bundle.shardManifest.collections.referenceProfiles.length !== bundle.state.workspace.referenceProfiles.length) {
+    errors.push("Bundle shardManifest.collections.referenceProfiles does not match state payload.")
+  }
+  const expectedReferenceAssets = referenceCatalogAssetPaths(bundle.state)
+  if (JSON.stringify(bundle.shardManifest.localAssets.referenceCatalog) !== JSON.stringify(expectedReferenceAssets)) {
+    errors.push("Bundle localAssets.referenceCatalog does not match reference archive local paths.")
+  }
+  const blockedRemoteAsset = bundle.shardManifest.localAssets.referenceCatalog.find((path) => path.startsWith("http://") || path.startsWith("https://"))
+  if (blockedRemoteAsset) {
+    errors.push(`Bundle reference catalog asset must be local, got ${blockedRemoteAsset}.`)
+  }
+  for (const archive of bundle.state.referenceArchives) {
+    const catalogVideos = archive.catalogVideos ?? []
+    for (const video of catalogVideos) {
+      if (video.sourcePolicy !== "metadata-only") errors.push(`Reference catalog video ${video.id} must be metadata-only.`)
+      if (video.paths.infoJson.startsWith("http://") || video.paths.infoJson.startsWith("https://")) {
+        errors.push(`Reference catalog video ${video.id} infoJson path must be local.`)
+      }
+      if (video.paths.mp4 && (video.paths.mp4.startsWith("http://") || video.paths.mp4.startsWith("https://"))) {
+        errors.push(`Reference catalog video ${video.id} mp4 path must be local.`)
+      }
+      if (video.paths.poster && (video.paths.poster.startsWith("http://") || video.paths.poster.startsWith("https://"))) {
+        errors.push(`Reference catalog video ${video.id} poster path must be local.`)
+      }
+    }
+  }
+  if (bundle.shardManifest.localAssets.source.length === 0) warnings.push("Bundle has no workspace source asset files.")
+  return { errors, warnings }
+}
+
 function isObjectCounts(value: unknown): value is UgcWorkspaceBundleObjectCounts {
   if (!isRecord(value)) return false
   return typeof value.personas === "number"
+    && typeof value.referenceProfiles === "number"
     && typeof value.branches === "number"
     && typeof value.candidates === "number"
     && typeof value.notes === "number"
@@ -816,9 +1348,10 @@ function isObjectCounts(value: unknown): value is UgcWorkspaceBundleObjectCounts
 }
 
 function isShardManifest(value: unknown): value is UgcWorkspaceBundleShardManifest {
-  if (!isRecord(value) || typeof value.workspace !== "string" || !isRecord(value.collections) || !isRecord(value.assets)) return false
+  if (!isRecord(value) || typeof value.workspace !== "string" || !isRecord(value.collections) || !isRecord(value.assets) || !isRecord(value.localAssets)) return false
   return isStringArray(value.collections.personas)
     && isStringArray(value.collections.campaigns)
+    && isStringArray(value.collections.referenceProfiles)
     && isStringArray(value.collections.branches)
     && isStringArray(value.collections.candidates)
     && isStringArray(value.collections.notes)
@@ -831,6 +1364,10 @@ function isShardManifest(value: unknown): value is UgcWorkspaceBundleShardManife
     && typeof value.assets.source === "string"
     && typeof value.assets.generated === "string"
     && typeof value.assets.exports === "string"
+    && isStringArray(value.localAssets.source)
+    && isStringArray(value.localAssets.generated)
+    && isStringArray(value.localAssets.exports)
+    && isStringArray(value.localAssets.referenceCatalog)
 }
 
 function isStringArray(value: unknown): value is readonly string[] {

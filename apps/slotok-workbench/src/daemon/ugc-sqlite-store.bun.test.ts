@@ -154,6 +154,43 @@ describe("UgcSqliteStore", () => {
     expect(persistedSqliteState?.providerJobs).toHaveLength(0)
   })
 
+  test("rejects mismatched bundle imports without mutating SQLite", () => {
+    const store = createStore()
+    const bundle = store.exportWorkspaceBundle({ label: "Mismatched SQLite bundle" })
+    const stateBefore = store.read()
+    const sqliteStateBefore = store.sqliteStore?.readState()
+    if (!sqliteStateBefore) throw new Error("missing SQLite state")
+    const mismatchedBundle = {
+      ...bundle,
+      workspaceId: "workspace_other_sqlite",
+      state: {
+        ...bundle.state,
+        workspace: {
+          ...bundle.state.workspace,
+          id: "workspace_other_sqlite",
+          title: "Imported Other SQLite Workspace",
+        },
+      },
+    }
+
+    const dryRun = store.importWorkspaceBundle({ bundle: mismatchedBundle, dryRun: true })
+
+    expect(dryRun.valid).toBe(false)
+    expect(dryRun.dryRun).toBe(true)
+    expect(dryRun.imported).toBe(false)
+    expect(dryRun.errors).toContain("Bundle workspace workspace_other_sqlite does not match current workspace workspace_sqlite_test.")
+    expect(store.sqliteStore?.readState()).toEqual(sqliteStateBefore)
+    expect(store.read()).toEqual(stateBefore)
+
+    const applied = store.importWorkspaceBundle({ bundle: mismatchedBundle, dryRun: false })
+
+    expect(applied.valid).toBe(false)
+    expect(applied.imported).toBe(false)
+    expect(applied.importedState).toBeNull()
+    expect(store.sqliteStore?.readState()).toEqual(sqliteStateBefore)
+    expect(store.read()).toEqual(stateBefore)
+  })
+
   test("keeps per-collection SQLite rows in sync after JSON store mutations", () => {
     const store = createStore()
     let state = store.read()

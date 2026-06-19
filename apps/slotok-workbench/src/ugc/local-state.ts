@@ -48,6 +48,7 @@ export interface UgcWorkspaceBundle {
 
 export interface UgcWorkspaceBundleObjectCounts {
   readonly personas: number
+  readonly referenceProfiles: number
   readonly branches: number
   readonly candidates: number
   readonly notes: number
@@ -58,11 +59,64 @@ export interface UgcWorkspaceBundleObjectCounts {
   readonly templateMiningJobs: number
 }
 
+export interface UgcReferenceCatalogVideoPaths {
+  readonly mp4: string | null
+  readonly infoJson: string
+  readonly poster: string | null
+}
+
+export interface UgcReferenceCatalogEngagement {
+  readonly views: number | null
+  readonly likes: number | null
+  readonly comments: number | null
+  readonly shares: number | null
+  readonly saves: number | null
+}
+
+export interface UgcReferenceCatalogVideo {
+  readonly schemaVersion: "ugc-studio.reference-catalog-video.v1"
+  readonly id: string
+  readonly referenceProfileId: string
+  readonly videoId: string
+  readonly catalogueRoot: string
+  readonly uploader: string
+  readonly handle: string
+  readonly title: string
+  readonly durationSeconds: number | null
+  readonly engagement: UgcReferenceCatalogEngagement
+  readonly paths: UgcReferenceCatalogVideoPaths
+  readonly sourcePolicy: "metadata-only"
+  readonly guardrails: readonly string[]
+}
+
+export interface UgcReferenceCatalogImportInput {
+  readonly roots?: readonly string[]
+}
+
+export interface UgcReferenceCatalogImportResult {
+  readonly schemaVersion: "ugc-studio.reference-catalog-import-result.v1"
+  readonly dryRun: boolean
+  readonly valid: boolean
+  readonly imported: boolean
+  readonly checkedAt: string
+  readonly roots: readonly string[]
+  readonly videosPlanned: number
+  readonly referenceProfileIds: readonly string[]
+  readonly archiveIds: readonly string[]
+  readonly providerJobIds: readonly string[]
+  readonly researchTargetIds: readonly string[]
+  readonly templateMiningJobIds: readonly string[]
+  readonly errors: readonly string[]
+  readonly warnings: readonly string[]
+  readonly state: UgcLocalState | null
+}
+
 export interface UgcWorkspaceBundleShardManifest {
   readonly workspace: string
   readonly collections: {
     readonly personas: readonly string[]
     readonly campaigns: readonly string[]
+    readonly referenceProfiles: readonly string[]
     readonly branches: readonly string[]
     readonly candidates: readonly string[]
     readonly notes: readonly string[]
@@ -77,6 +131,12 @@ export interface UgcWorkspaceBundleShardManifest {
     readonly source: string
     readonly generated: string
     readonly exports: string
+  }
+  readonly localAssets: {
+    readonly source: readonly string[]
+    readonly generated: readonly string[]
+    readonly exports: readonly string[]
+    readonly referenceCatalog: readonly string[]
   }
 }
 
@@ -146,6 +206,7 @@ export interface UgcReferenceArchive {
   readonly guardrails: readonly string[]
   readonly candidateFormatOutputs: readonly ReferenceArchiveFormatOutput[]
   readonly notes: readonly string[]
+  readonly catalogVideos: readonly UgcReferenceCatalogVideo[]
 }
 
 export interface ReferenceArchiveFormatOutput {
@@ -451,6 +512,7 @@ export function referenceProfileToArchive(workspaceId: string, referenceProfile:
     guardrails: referenceProfile.cleanRoomBoundary,
     candidateFormatOutputs: referenceProfileToFormatOutputs(referenceProfile),
     notes: [],
+    catalogVideos: [],
   }
 }
 

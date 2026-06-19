@@ -12,6 +12,13 @@ It is not a simple ad generator. It is closer to:
 Cursor/Zed for AI TikTok, UGC, video-understanding, provider jobs, and infinite creative remixing.
 ```
 
+Primary product lanes:
+
+- Brainrot creation: Pleometric-style short-form idea generation, remixing, batch review, branch exploration, final editing, and export.
+- UGC Studio for ads: persona/profile-bible exploration, clean-room reference mechanics, ad candidate batches, provider jobs, final editing, and export manifests.
+
+Both lanes share Slotok's local SQLite workspace ledger, provider job queue, branch/review model, developer graph, and proof discipline.
+
 Slotok owns the creative and media pipeline:
 
 - product and niche briefs
@@ -31,6 +38,21 @@ Primary route:
 
 ```txt
 http://127.0.0.1:47521/ugc-studio/
+```
+
+Local daemon:
+
+```txt
+http://127.0.0.1:47522
+```
+
+Dev server PID/log convention:
+
+```txt
+artifacts/slotok-dev/renderer.pid
+artifacts/slotok-dev/daemon.pid
+artifacts/slotok-dev/renderer.log
+artifacts/slotok-dev/daemon.log
 ```
 
 Main app:
@@ -61,6 +83,14 @@ Current local data root:
 data/ugc-studio/workspaces/<workspace_id>/
 ```
 
+Canonical workspace database:
+
+```txt
+data/ugc-studio/workspaces/<workspace_id>/workspace.sqlite
+```
+
+SQLite is canonical for the V1 workspace ledger. JSON is retained only for bundle import/export, backups, compatibility fixtures, and inspectable proof artifacts.
+
 Current object families:
 
 - workspace
@@ -72,9 +102,10 @@ Current object families:
 - provider jobs
 - reference archives
 - export manifests
+- final editor state
+- research targets
+- template mining jobs
 - assets
-
-JSON is the default serialization format. Add another format only with a concrete reason.
 
 ### Agent-directed creative search
 
@@ -131,7 +162,8 @@ Provider work must be dry-run-first. Live calls need explicit capped actions and
 
 Current useful provider direction:
 
-- KIE is the cheap/default UGC generation provider in the app.
+- KIE is the cheap/default UGC generation provider in the app, but live KIE calls are never routine proof work.
+- Codex media analysis is represented as dry-run-first local provider jobs unless the user explicitly chooses a live/capped path.
 - Jimeng/Dreamina reversal is a separate workstream. Consume it through contracts and local job records; do not edit its reversal code from Slotok UI slices unless explicitly assigned.
 - Gemini and KIE credits are limited. Be frugal and do not run live generation for routine UI/proof work.
 
@@ -175,7 +207,7 @@ Implementation rule:
 
 ## Current Implementation Status
 
-Done:
+Historical V1 proof reports show the local-first workflow slices are implemented:
 
 - React UGC Studio route with eight views:
   - Persona Atlas
@@ -185,41 +217,50 @@ Done:
   - Reference Archive
   - Final Layer Editor
   - Developer Graph
-  - KIE Proxy
+  - KIE Proxy / provider jobs
 - daemon-backed local workspace loading with fixture fallback
-- local JSON store plus write-through SQLite consolidation under `data/ugc-studio/workspaces/<workspace_id>/workspace.sqlite` for workspace, personas, branches, candidates, notes, provider jobs, reference archives, exports, research targets, and template mining jobs
 - persona profile-bible edits for niche, voice style, accent, and energy
-- branch decision-note editing and dead-end marking
-- candidate star/revise/reject actions and note creation
+- reference mechanics archive editing with clean-room guardrails
+- workspace bundle export/import with dry-run validation and object/asset manifests
+- provider job records with statuses, request/response JSON, artifact paths, dry-run/live mode, and spend caps
+- candidate batch selected-set status actions, keyboard review controls, filters/sorts, and note history
+- creative branch fork, active/rollback selection, promising/dead-end marking, and decision logs
+- final-editor selected candidate, layer visibility/lock, clip timing/text/caption payload, JSON diff preview, and export manifests
+- developer graph derived from local workspace state with selected-node JSON
 - KIE dry-run/live-capped plan/create UI path
 - Codex image/video media-analysis planning with dry-run provider job persistence, selected-candidate analysis-results UI, prepared frame/artifact visibility, and explicit live API-key/spend gates
-- provider job records saved locally across KIE, Codex, Jimeng, and local providers
-- export manifest records from final editor
-- workbench design-system foundation and route chrome migration
-- visual QA across eight views
+
+Current phase ledger delta:
+
+- SQLite is the canonical workspace store under `data/ugc-studio/workspaces/<workspace_id>/workspace.sqlite`; JSON remains compatibility/export/import/backup only.
+- Preferred local reference catalog roots are `data/tiktok-catalogue/pleometric` and `data/tiktok-catalogue/mynameissico`.
+- Visual/manual QA should use `http://127.0.0.1:47521/ugc-studio/`, daemon `http://127.0.0.1:47522`, and the PID/log files under `artifacts/slotok-dev/`.
+- The current phase still needs parent verification after the active backend/data workers finish; do not treat this ledger update as a fresh passing gate.
 
 Proof files:
 
 - `docs/qa/ugc-local-first-v1.md`
 - `docs/qa/slotok-visual-qa.md`
 - `docs/qa/slotok-analysis-results-ui.md`
+- `docs/qa/slotok-v1-goal-proof.md`
+- `docs/qa/ugc-studio-reference-archive.md`
+- `docs/qa/ugc-studio-workspace-bundle.md`
+- `docs/qa/ugc-studio-provider-jobs.md`
+- `docs/qa/ugc-studio-batch-review.md`
+- `docs/qa/ugc-studio-branch-workflow.md`
+- `docs/qa/ugc-studio-final-editor.md`
+- `docs/qa/ugc-studio-developer-graph.md`
 
-Current proof command set:
+Current proof command set for the parent orchestrator:
 
 ```bash
 bun run slotok:typecheck
 bun run slotok:test
 bun run slotok:build
-cd apps/slotok-workbench && bun run visual:qa
-```
-
-If `visual:qa` is run directly, use:
-
-```bash
 cd apps/slotok-workbench && /Users/arthur/.bun/bin/bun scripts/visual-qa.ts
 ```
 
-## Implementation Sequence
+## V1 Scope Ledger
 
 Work in small, proven, committed slices. After each slice:
 
@@ -229,99 +270,82 @@ Work in small, proven, committed slices. After each slice:
 4. Write or update a proof doc under `docs/qa/`.
 5. Commit only the scoped files.
 
-### 1. Reference Archive V1
+### SQLite Canonical Workspace
 
-Goal: make reference-profile remix an actual local-first workflow, not just a placeholder view.
+Status: current phase proof target.
 
-Implement:
+- [ ] Parent verifies `workspace.sqlite` is the canonical source for workspace, personas, branches, candidates, notes, provider jobs, reference archives, exports, final-editor state, research targets, template mining jobs, and asset manifests.
+- [ ] Parent verifies JSON paths are limited to import/export/backup/compatibility fixtures.
+- [ ] Parent verifies reload reads from the local daemon/SQLite path, not renderer memory.
 
-- richer reference archive objects for source policy, preserved mechanics, swapped fields, blocked fields, notes, and candidate format outputs
-- UI to select a reference profile and edit/archive its mechanics
-- local daemon routes for update/delete or patching archive records
-- proof that archive specs persist and reload
+### Reference Catalog Roots
 
-Do not scrape or download real profiles yet. Use fixture/local abstract mechanics only.
+Status: current phase proof target.
 
-### 2. Workspace Import/Export Bundle
+- [ ] Parent verifies reference catalog import/selection can use `data/tiktok-catalogue/pleometric` and `data/tiktok-catalogue/mynameissico`.
+- [ ] Parent verifies missing catalog roots degrade safely without live scraping or provider calls.
+- [x] Historical proof covers clean-room reference mechanics archive editing without source-media cloning: `docs/qa/ugc-studio-reference-archive.md`.
 
-Goal: make a UGC workspace portable and inspectable.
+### Workspace Import/Export Bundle
 
-Implement:
+Status: implemented in the historical V1 slice; re-verify against SQLite canonical storage in the current phase.
 
-- export local workspace bundle manifest as JSON
-- include workspace, personas, branches, candidates, notes, provider jobs, reference archives, exports, and asset manifest paths
-- import validation path, dry-run first
-- proof doc with generated manifest fixture
+- [x] Bundle export writes a manifest with workspace summary, object counts, shard manifest, asset paths, and full local state payload.
+- [x] Bundle import has a dry-run validation path before explicit apply.
+- [ ] Parent verifies bundle export/import now round-trips through the SQLite-canonical workspace and preserves final-editor/provider/reference state.
 
-### 3. Provider Job Queue V1
+### Provider Job Queue
 
-Goal: turn provider actions into visible local jobs.
+Status: implemented in the historical V1 slice; re-verify against current provider queue UI and storage.
 
-Implement:
+- [x] Local provider jobs include statuses, target links, request/response JSON, artifact paths, error text, dry-run/live mode, and spend cap.
+- [x] KIE live generation remains explicit and capped.
+- [x] Codex media analysis is represented as a dry-run-first provider job with prepared frame/artifact metadata.
+- [ ] Parent verifies no KIE, Gemini, Jimeng, or Codex live spend occurs during current proof unless explicitly triggered through a live/capped action.
 
-- provider job list/detail view or inspector section
-- job statuses: planned, queued, running, succeeded, failed, blocked
-- artifact references and cached request/response preview
-- KIE task polling via existing daemon/CLI contracts where available
-- no live spend by default
+### Batch Review Workflow
 
-### 4. Batch Review Workflow V1
+Status: implemented in the historical V1 slice; re-verify against current workspace state.
 
-Goal: make babble-and-prune fast.
+- [x] Selected-set actions persist verdict/status changes.
+- [x] Keyboard-friendly review controls, filters/sorts, note draft, and note history are visible.
+- [ ] Parent verifies candidate verdicts and notes survive reload through SQLite.
 
-Implement:
+### Branch / Fork / Rollback
 
-- selected-set actions across candidates
-- keyboard-friendly review controls
-- note and verdict history visible per candidate
-- filter/sort by status, score, persona, branch
-- proof with persisted status/note changes
+Status: implemented in the historical V1 slice; re-verify against current workspace state.
 
-### 5. Branch/Fork/Rollback V1
+- [x] Campaign branches can be forked and linked to parent snapshots.
+- [x] Branches can be marked promising, dead-end, or active/rollback-selected.
+- [x] Campaign map/inspector exposes a decision log.
+- [ ] Parent verifies branch changes survive reload through SQLite.
 
-Goal: make creative exploration reversible.
+### Final Editor Persistence
 
-Implement:
+Status: implemented in the historical V1 slice; re-verify against current workspace state.
 
-- create branch snapshot from selected personas/candidates
-- fork from branch
-- mark branch dead-end
-- rollback/select promising branch
-- visible decision log in campaign map/inspector
+- [x] Selected candidate, track visibility/lock, clip timing, clip labels, and caption/text payload JSON can be edited.
+- [x] Export manifests capture the full current timeline JSON.
+- [x] Inspector shows a JSON diff preview.
+- [ ] Parent verifies final-editor edits and export manifests survive reload through SQLite.
 
-### 6. Final Editor Persistence V1
+### Developer Graph
 
-Goal: make timeline/layer edits real local data.
+Status: implemented in the historical V1 slice; re-verify against current workspace state.
 
-Implement:
+- [x] Graph nodes derive from product brief, personas, reference archives, branches, candidates, provider jobs, exports, research targets, and template mining jobs.
+- [x] Graph edges show inputs, outputs, artifacts, forks, provider targets, and exports.
+- [x] Selected graph nodes expose raw JSON.
+- [ ] Parent verifies graph contents update from actual SQLite-backed workspace state after edits.
 
-- edit track visibility/lock
-- edit clip timing/text/caption payloads
-- save export manifests with full timeline JSON
-- preview JSON diff in inspector
+### Visual Dev Server / Proof Convention
 
-### 7. Niche/Template Research Queue
+Status: current phase convention.
 
-Goal: prepare the later research feature without live scraping.
-
-Implement:
-
-- local research target records
-- template mining queue records
-- clean-room template schema
-- status/proof UI
-
-No live scraping until explicitly approved.
-
-### 8. Developer Graph From Real State
-
-Goal: make the graph explain the actual local workspace.
-
-Implement:
-
-- derive graph nodes from personas, candidates, branches, provider jobs, and exports
-- show inputs/outputs/artifacts consistently
-- expose raw JSON for selected graph node
+- [ ] Parent opens `http://127.0.0.1:47521/ugc-studio/`.
+- [ ] Parent confirms daemon health at `http://127.0.0.1:47522`.
+- [ ] Parent uses `artifacts/slotok-dev/renderer.pid`, `daemon.pid`, `renderer.log`, and `daemon.log` for local dev-server status only.
+- [ ] Parent does not inspect credentials/cookies and does not run live provider work during proof unless explicitly live/capped.
 
 ## File Ownership Guide
 
@@ -374,15 +398,17 @@ Do not stage unrelated dirty files. The repo often has parallel Codex sessions e
 
 ## Completion Definition
 
-This goal is complete when the V1 UGC Studio can:
+This goal is complete when the current V1 proof ledger shows:
 
-1. open a local workspace
-2. create/edit persona profile bibles
-3. archive abstract reference mechanics
-4. generate or dry-run provider jobs with local request/response records
-5. review candidate batches with persistent verdicts and notes
-6. fork/rollback creative branches
-7. persist final timeline/export manifests
-8. inspect the local developer graph
-9. export/import workspace bundles
-10. pass typecheck, tests, build, and visual QA with proof docs
+1. [ ] Slotok treats Pleometric-style brainrot creation and UGC Studio ads as first-class product lanes sharing the same local workspace ledger.
+2. [ ] SQLite is the canonical local workspace store and JSON is limited to bundle/import/export/backup compatibility.
+3. [ ] the local workspace opens from the daemon-backed SQLite path.
+4. [ ] persona profile-bible edits persist and reload.
+5. [ ] abstract reference mechanics archives persist and can use the preferred catalog roots `data/tiktok-catalogue/pleometric` and `data/tiktok-catalogue/mynameissico` without live scraping.
+6. [ ] provider jobs are dry-run-first local records with request/response JSON, artifact paths, status, live mode, and spend cap fields; live KIE/Codex work is explicit and capped.
+7. [ ] candidate batch review persists selected-set verdicts and notes.
+8. [ ] creative branches can fork, mark promising/dead-end, rollback/select active, and retain decision logs.
+9. [ ] final editor timeline/layer edits and export manifests persist.
+10. [ ] the developer graph derives from real local workspace state and exposes selected-node JSON.
+11. [ ] workspace bundles export/import the SQLite-backed workspace with object and asset manifests.
+12. [ ] typecheck, tests, build, visual QA, and manual proof steps are run by the parent and recorded in proof docs.
