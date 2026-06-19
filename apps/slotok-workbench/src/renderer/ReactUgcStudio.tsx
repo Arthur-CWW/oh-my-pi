@@ -56,7 +56,7 @@ import {
 } from "./design-system/workbench"
 import { cn } from "./lib/cn"
 import { ugcStudioWorkspace, type BranchSnapshot, type CandidateStatus, type CreativeCandidate, type JsonValue, type PersonaProfile, type ReferenceProfile, type ReviewVerdict, type UgcStudioWorkspace } from "./ugcStudioModel"
-import { createInitialLocalState, isLocalState, referenceProfileToArchive, type ReferenceArchiveFormatOutput, type UgcExportManifest, type UgcLocalState, type UgcProviderJob, type UgcProviderJobStatus, type UgcReferenceArchive, type UgcReferenceManifestAsset, type UgcWorkspaceBundle, type UgcWorkspaceBundleImportResult } from "../ugc/local-state"
+import { createInitialLocalState, isLocalState, referenceProfileToArchive, type CreateProviderJobInput, type ReferenceArchiveFormatOutput, type UgcExportManifest, type UgcLocalState, type UgcProviderJob, type UgcProviderJobStatus, type UgcReferenceArchive, type UgcReferenceManifestAsset, type UgcWorkspaceBundle, type UgcWorkspaceBundleImportResult } from "../ugc/local-state"
 import { deriveUgcDeveloperGraph, type DerivedGraphFamily } from "../ugc/developer-graph"
 
 type ReactView = "atlas" | "explore" | "review" | "campaign" | "reference" | "editor" | "graph" | "provider"
@@ -190,8 +190,9 @@ interface PersonaCardModel {
   status: "Approved" | "In Review" | "Draft" | "Rejected"
   clips: number
   branches: number
-  followers: string
-  conversions: string
+  weeklyPosts: number
+  conversionPlanPosts: number
+  contentLanes: number
   color: string
 }
 
@@ -302,120 +303,6 @@ const fallbackCapabilities: KieCapability[] = [
   },
 ]
 
-const personaCards: PersonaCardModel[] = [
-  {
-    id: "persona_lena_park",
-    name: "Lena Park",
-    archetype: "Skincare Minimalist",
-    niche: "Barrier repair, sensitive skin",
-    voice: "Calm, clear",
-    accent: "American / West Coast",
-    status: "Approved",
-    clips: 7,
-    branches: 4,
-    followers: "24k",
-    conversions: "3",
-    color: "rose",
-  },
-  {
-    id: "persona_maya_thompson",
-    name: "Maya Thompson",
-    archetype: "Science Nerd",
-    niche: "Ingredients, myth-busting",
-    voice: "Warm, explanatory",
-    accent: "American / Midwest",
-    status: "In Review",
-    clips: 4,
-    branches: 3,
-    followers: "18k",
-    conversions: "2",
-    color: "blue",
-  },
-  {
-    id: "persona_sofia_rivera",
-    name: "Sofia Rivera",
-    archetype: "Lifestyle",
-    niche: "Glow habit stacking",
-    voice: "Upbeat, friendly",
-    accent: "American / East Coast",
-    status: "Approved",
-    clips: 3,
-    branches: 3,
-    followers: "31k",
-    conversions: "4",
-    color: "green",
-  },
-  {
-    id: "persona_jade_lin",
-    name: "Jade Lin",
-    archetype: "Relatable",
-    niche: "Hormone-friendly routines",
-    voice: "Direct, casual",
-    accent: "American / West Coast",
-    status: "Rejected",
-    clips: 2,
-    branches: 1,
-    followers: "9k",
-    conversions: "0",
-    color: "slate",
-  },
-  {
-    id: "persona_chloe_bennett",
-    name: "Chloe Bennett",
-    archetype: "Athletic",
-    niche: "Post-workout reset",
-    voice: "Soft, aspirational",
-    accent: "British / relaxed",
-    status: "In Review",
-    clips: 5,
-    branches: 2,
-    followers: "21k",
-    conversions: "2",
-    color: "amber",
-  },
-  {
-    id: "persona_hana_kim",
-    name: "Hana Kim",
-    archetype: "Trend Spotter",
-    niche: "K-beauty timing",
-    voice: "Bright, excited",
-    accent: "Korean-accented English",
-    status: "Approved",
-    clips: 6,
-    branches: 3,
-    followers: "42k",
-    conversions: "5",
-    color: "violet",
-  },
-  {
-    id: "persona_ava_rodriguez",
-    name: "Ava Rodriguez",
-    archetype: "Practical",
-    niche: "Simple skin systems",
-    voice: "Gentle, empathetic",
-    accent: "American / South",
-    status: "Draft",
-    clips: 1,
-    branches: 2,
-    followers: "13k",
-    conversions: "1",
-    color: "cyan",
-  },
-  {
-    id: "persona_tara_singh",
-    name: "Tara Singh",
-    archetype: "Performance",
-    niche: "Gym bag rituals",
-    voice: "Energetic, motivating",
-    accent: "Australian",
-    status: "In Review",
-    clips: 4,
-    branches: 2,
-    followers: "27k",
-    conversions: "2",
-    color: "pink",
-  },
-]
 
 const explorationRows: ExplorationRow[] = [
   {
@@ -512,8 +399,8 @@ const campaignColumns: CampaignColumn[] = [
     title: "02 Personas",
     subtitle: "3 families",
     nodes: [
-      { id: "node_clean_girl", title: "Clean Girl", meta: "Minimalist", score: "+17%", status: "good" },
-      { id: "node_energy", title: "Energetic Bestie", meta: "Fun, bubbly", score: "-5%", status: "risk" },
+      { id: "node_clean_girl", title: "Clean Girl", meta: "Minimalist", score: "signal +17", status: "good" },
+      { id: "node_energy", title: "Energetic Bestie", meta: "Fun, bubbly", score: "signal -5", status: "risk" },
       { id: "node_science", title: "Skincare Nerd", meta: "Informative", score: "new", status: "active" },
     ],
   },
@@ -522,10 +409,10 @@ const campaignColumns: CampaignColumn[] = [
     title: "03 Formats",
     subtitle: "6 explorations",
     nodes: [
-      { id: "node_talking", title: "Talking Head", meta: "direct", score: "+4%", status: "good" },
-      { id: "node_routine", title: "Routine", meta: "GRWM", score: "+6%", status: "good" },
-      { id: "node_demo", title: "Product Demo", meta: "macro proof", score: "+9%", status: "good", candidateId: "candidate_soft_demo_01" },
-      { id: "node_story", title: "Storytime", meta: "paused", score: "-7%", status: "risk" },
+      { id: "node_talking", title: "Talking Head", meta: "direct", score: "signal +4", status: "good" },
+      { id: "node_routine", title: "Routine", meta: "GRWM", score: "signal +6", status: "good" },
+      { id: "node_demo", title: "Product Demo", meta: "macro proof", score: "signal +9", status: "good", candidateId: "candidate_soft_demo_01" },
+      { id: "node_story", title: "Storytime", meta: "paused", score: "signal -7", status: "risk" },
     ],
   },
   {
@@ -533,10 +420,10 @@ const campaignColumns: CampaignColumn[] = [
     title: "04 Hooks",
     subtitle: "12 batches",
     nodes: [
-      { id: "node_curiosity", title: "Curiosity Hook", meta: "5 variants", score: "+18%", status: "good" },
-      { id: "node_benefit", title: "Benefit Hook", meta: "5 variants", score: "+21%", status: "active" },
-      { id: "node_relatable", title: "Relatable Hook", meta: "4 variants", score: "+8%", status: "good" },
-      { id: "node_trend", title: "Trend Hook", meta: "3 variants", score: "-22%", status: "dead" },
+      { id: "node_curiosity", title: "Curiosity Hook", meta: "5 variants", score: "signal +18", status: "good" },
+      { id: "node_benefit", title: "Benefit Hook", meta: "5 variants", score: "signal +21", status: "active" },
+      { id: "node_relatable", title: "Relatable Hook", meta: "4 variants", score: "signal +8", status: "good" },
+      { id: "node_trend", title: "Trend Hook", meta: "3 variants", score: "signal -22", status: "dead" },
     ],
   },
   {
@@ -544,9 +431,9 @@ const campaignColumns: CampaignColumn[] = [
     title: "05 Campaign Mix",
     subtitle: "CTA / non-CTA",
     nodes: [
-      { id: "node_theory", title: "CTA Theory", meta: "70% CTA", score: "+20%", status: "good" },
-      { id: "node_blend", title: "Balanced Mix", meta: "50% CTA", score: "+31%", status: "active" },
-      { id: "node_community", title: "Community First", meta: "20% CTA", score: "+12%", status: "good" },
+      { id: "node_theory", title: "CTA Theory", meta: "70% CTA", score: "signal +20", status: "good" },
+      { id: "node_blend", title: "Balanced Mix", meta: "50% CTA", score: "signal +31", status: "active" },
+      { id: "node_community", title: "Community First", meta: "20% CTA", score: "signal +12", status: "good" },
     ],
   },
   {
@@ -554,9 +441,9 @@ const campaignColumns: CampaignColumn[] = [
     title: "06 Checkpoints",
     subtitle: "Metrics & decisions",
     nodes: [
-      { id: "node_checkpoint_a", title: "Checkpoint A", meta: "May 23", score: "CTR 2.8", status: "good" },
-      { id: "node_checkpoint_b", title: "Checkpoint B", meta: "May 28", score: "CTR 3.7", status: "active" },
-      { id: "node_checkpoint_c", title: "Checkpoint C", meta: "May 30", score: "CVR 5.7", status: "good" },
+      { id: "node_checkpoint_a", title: "Checkpoint A", meta: "May 23", score: "click signal 2.8", status: "good" },
+      { id: "node_checkpoint_b", title: "Checkpoint B", meta: "May 28", score: "click signal 3.7", status: "active" },
+      { id: "node_checkpoint_c", title: "Checkpoint C", meta: "May 30", score: "CTA signal 5.7", status: "good" },
     ],
   },
 ]
@@ -576,9 +463,113 @@ function projectPersonaCard(persona: PersonaProfile, index: number): PersonaCard
     status: personaStatusLabel(persona.status),
     clips: persona.sampleClipIds.length,
     branches: persona.branchSnapshotIds.length,
-    followers: `${24 + index * 7}k`,
-    conversions: String(Math.max(1, persona.postingStrategy.weeklyCadence.filter((item) => item.purpose === "conversion").length)),
+    weeklyPosts: persona.postingStrategy.weeklyCadence.reduce((sum, item) => sum + item.postsPerWeek, 0),
+    conversionPlanPosts: persona.postingStrategy.weeklyCadence
+      .filter((item) => item.purpose === "conversion")
+      .reduce((sum, item) => sum + item.postsPerWeek, 0),
+    contentLanes: persona.postingStrategy.contentLanes.length,
     color: ["rose", "violet", "blue", "green", "amber", "cyan"][index % 6] ?? "slate",
+  }
+}
+
+function productLaneForPersona(persona: PersonaProfile): ProductLane {
+  return normalizeProductLane(`${persona.genreLane} ${persona.profileBible.niche} ${persona.profileBible.specialInterests.join(" ")} ${persona.profileBible.promotes.join(" ")}`)
+}
+
+function personaLinkedBranches(workspace: UgcStudioWorkspace, persona: PersonaProfile, selectedBranch: BranchSnapshot | undefined): readonly BranchSnapshot[] {
+  const linkedBranches = workspace.branchSnapshots.filter((branch) => personaBranchLinked(persona, branch))
+  if (!selectedBranch || !personaBranchLinked(persona, selectedBranch)) return linkedBranches
+  return [selectedBranch, ...linkedBranches.filter((branch) => branch.id !== selectedBranch.id)]
+}
+
+function personaBranchLinked(persona: PersonaProfile, branch: BranchSnapshot): boolean {
+  return persona.branchSnapshotIds.includes(branch.id) || branch.selectedPersonaIds.includes(persona.id)
+}
+
+function personaCandidates(workspace: UgcStudioWorkspace, persona: PersonaProfile): readonly CreativeCandidate[] {
+  return workspace.candidates.filter((candidate) => candidate.personaId === persona.id)
+}
+
+function personaReviewNotes(workspace: UgcStudioWorkspace, persona: PersonaProfile): readonly string[] {
+  const attachedNotes = workspace.reviewNotes
+    .filter((note) => note.attachedTo.kind === "persona" && note.attachedTo.id === persona.id)
+    .map((note) => note.body)
+  return [...persona.notes, ...attachedNotes]
+}
+
+function personaProviderJobs(providerJobs: readonly UgcProviderJob[], persona: PersonaProfile, branches: readonly BranchSnapshot[], candidates: readonly CreativeCandidate[]): readonly UgcProviderJob[] {
+  const targetIds = new Set([persona.id, ...branches.map((branch) => branch.id), ...candidates.map((candidate) => candidate.id)])
+  return providerJobs.filter((job) => job.targetIds.some((targetId) => targetIds.has(targetId))).slice(0, 3)
+}
+
+function averageCandidateScore(candidates: readonly CreativeCandidate[], selector: (candidate: CreativeCandidate) => number): number {
+  if (!candidates.length) return 0
+  return Math.round(candidates.reduce((sum, candidate) => sum + selector(candidate), 0) / candidates.length)
+}
+
+function personaAtlasSummary(persona: PersonaProfile, branches: readonly BranchSnapshot[], candidates: readonly CreativeCandidate[]): string {
+  if (!candidates.length) {
+    return `${persona.displayName} has no attached candidates yet; queue a local plan to generate persona-building directions from the saved niche, voice, cadence, and ${branches.length} linked branch${branches.length === 1 ? "" : "es"}.`
+  }
+  return `${persona.displayName} has ${candidates.length} attached candidate${candidates.length === 1 ? "" : "s"} with internal persona-fit ${averageCandidateScore(candidates, (candidate) => candidate.scorecard.personaFit)}/100 and hook ${averageCandidateScore(candidates, (candidate) => candidate.scorecard.hookStrength)}/100 across ${branches.length} linked branch${branches.length === 1 ? "" : "es"}.`
+}
+
+function buildPersonaDirectionsProviderJob(workspace: UgcStudioWorkspace, persona: PersonaProfile, selectedBranch: BranchSnapshot | undefined): CreateProviderJobInput {
+  const branches = personaLinkedBranches(workspace, persona, selectedBranch)
+  const linkedSelectedBranch = selectedBranch && personaBranchLinked(persona, selectedBranch) ? selectedBranch : undefined
+  const candidates = personaCandidates(workspace, persona)
+  const branchIds = branches.map((branch) => branch.id)
+  const candidateIds = candidates.map((candidate) => candidate.id)
+  const lane = productLaneForPersona(persona)
+  const request: JsonValue = {
+    schemaVersion: "ugc-studio.persona-atlas-plan.v1",
+    source: "persona-atlas",
+    lane,
+    workspaceId: workspace.id,
+    selectedPersonaId: persona.id,
+    selectedBranchId: linkedSelectedBranch?.id ?? null,
+    persona: {
+      id: persona.id,
+      displayName: persona.displayName,
+      genreLane: persona.genreLane,
+      niche: persona.profileBible.niche,
+      audiencePromise: persona.profileBible.audiencePromise,
+      speakingStyle: persona.voice.speakingStyle,
+      accent: persona.voice.accent,
+      energy: persona.voice.energy,
+      weeklyPosts: persona.postingStrategy.weeklyCadence.reduce((sum, item) => sum + item.postsPerWeek, 0),
+      conversionPlanPosts: persona.postingStrategy.weeklyCadence
+        .filter((item) => item.purpose === "conversion")
+        .reduce((sum, item) => sum + item.postsPerWeek, 0),
+    },
+    branchIds,
+    candidateIds,
+    noteCount: persona.notes.length + workspace.reviewNotes.filter((note) => note.attachedTo.kind === "persona" && note.attachedTo.id === persona.id).length,
+    instruction: "Build local persona-direction prompts from saved workspace state only. No provider call, scraping, or synthetic metrics.",
+    expectedOutputs: ["persona-building angles", "non-CTA story beats", "voice guardrails", "candidate seed prompts"],
+  }
+  return {
+    provider: "local",
+    operation: "persona-directions",
+    mode: "dry-run",
+    status: "completed",
+    targetIds: uniqueStrings([persona.id, ...branchIds, ...candidateIds]),
+    spendCapUsd: 0,
+    estimatedCostUsd: 0,
+    request,
+    response: {
+      plannedOnly: true,
+      liveProviderCalls: false,
+      persisted: "local provider job",
+      summary: personaAtlasSummary(persona, branches, candidates),
+      directions: [
+        `Open with a ${lane === "brainrot" ? "deadpan absurdity" : "micro-stakes proof"} hook anchored in ${persona.profileBible.niche}.`,
+        `Keep the voice ${persona.voice.speakingStyle.toLowerCase()} with ${String(persona.voice.energy).toLowerCase()} energy and ${persona.voice.accent.toLowerCase()} accent cues.`,
+        `Use ${Math.max(1, candidateIds.length)} existing candidate references to draft warmer branch variants before introducing a CTA.`,
+        `Preserve the audience promise "${persona.profileBible.audiencePromise}" while avoiding over-scripted creator language.`,
+      ],
+    },
+    artifactPaths: [],
   }
 }
 
@@ -1525,6 +1516,7 @@ export function ReactUgcStudio() {
   const [localState, setLocalState] = React.useState<UgcLocalState>(fallbackLocalState)
   const workspace = localState.workspace
   const [selectedCandidateId, setSelectedCandidateId] = React.useState(fallbackLocalState.workspace.finalEditor.selectedCandidateId)
+  const [finalEditorMode, setFinalEditorMode] = React.useState<FinalEditorMode>("select")
   const [selectedPersonaId, setSelectedPersonaId] = React.useState(fallbackLocalState.workspace.personas[0]?.id ?? "")
   const [selectedBranchId, setSelectedBranchId] = React.useState(fallbackLocalState.workspace.branchSnapshots[0]?.id ?? "")
   const [capabilities, setCapabilities] = React.useState<KieCapability[]>(fallbackCapabilities)
@@ -1817,6 +1809,7 @@ export function ReactUgcStudio() {
                 selectedCandidateId={selectedCandidateId}
                 selectedPersonaId={selectedPersonaId}
                 selectedBranchId={selectedBranchId}
+                finalEditorMode={finalEditorMode}
                 operation={operation}
                 capabilities={capabilities}
                 selectedCapability={selectedCapability}
@@ -1824,6 +1817,7 @@ export function ReactUgcStudio() {
                 busy={busy}
                 request={request}
                 onSelectCandidate={setSelectedCandidateId}
+                onFinalEditorModeChange={setFinalEditorMode}
                 onSelectPersona={setSelectedPersonaId}
                 onSelectBranch={setSelectedBranchId}
                 onOperationChange={setOperation}
@@ -1972,6 +1966,7 @@ function WorkspaceView(props: {
   selectedCandidateId: string
   selectedPersonaId: string
   selectedBranchId: string
+  finalEditorMode: FinalEditorMode
   operation: KieOperation
   capabilities: KieCapability[]
   selectedCapability: KieCapability | undefined
@@ -1979,6 +1974,7 @@ function WorkspaceView(props: {
   busy: boolean
   request: KieRequest
   onSelectCandidate: (id: string) => void
+  onFinalEditorModeChange: (mode: FinalEditorMode) => void
   onSelectPersona: (id: string) => void
   onSelectBranch: (id: string) => void
   onOperationChange: (operation: KieOperation) => void
@@ -1994,7 +1990,7 @@ function WorkspaceView(props: {
   onRefreshWorkspaceState: () => Promise<void>
 }) {
   if (props.activeView === "atlas") {
-    return <PersonaAtlas selectedPersonaId={props.selectedPersonaId} onSelectPersona={props.onSelectPersona} />
+    return <PersonaAtlas selectedPersonaId={props.selectedPersonaId} selectedBranchId={props.selectedBranchId} busy={props.busy} onSelectPersona={props.onSelectPersona} onMutateLocal={props.onMutateLocal} />
   }
   if (props.activeView === "explore") {
     return (
@@ -2016,7 +2012,7 @@ function WorkspaceView(props: {
     return <ReferenceArchiveView onMutateLocal={props.onMutateLocal} onReferenceCatalog={props.onReferenceCatalog} />
   }
   if (props.activeView === "editor") {
-    return <FinalEditor selectedCandidateId={props.selectedCandidateId} onSelectCandidate={props.onSelectCandidate} onMutateLocal={props.onMutateLocal} />
+    return <FinalEditor selectedCandidateId={props.selectedCandidateId} editorMode={props.finalEditorMode} onEditorModeChange={props.onFinalEditorModeChange} onSelectCandidate={props.onSelectCandidate} onMutateLocal={props.onMutateLocal} />
   }
   if (props.activeView === "graph") {
     return (
@@ -2047,9 +2043,22 @@ function WorkspaceView(props: {
   )
 }
 
-function PersonaAtlas(props: { selectedPersonaId: string; onSelectPersona: (id: string) => void }) {
-  const { workspace } = useUgcLocalState()
+function PersonaAtlas(props: {
+  selectedPersonaId: string
+  selectedBranchId: string
+  busy: boolean
+  onSelectPersona: (id: string) => void
+  onMutateLocal: (path: string, body: object) => void
+}) {
+  const { workspace, providerJobs } = useUgcLocalState()
   const personaCards = workspace.personas.map(projectPersonaCard)
+  const selectedPersona = workspace.personas.find((persona) => persona.id === props.selectedPersonaId) ?? workspace.personas[0]
+  const selectedBranch = workspace.branchSnapshots.find((branch) => branch.id === props.selectedBranchId)
+  const selectedBranches = selectedPersona ? personaLinkedBranches(workspace, selectedPersona, selectedBranch) : []
+  const selectedCandidates = selectedPersona ? personaCandidates(workspace, selectedPersona) : []
+  const selectedNotes = selectedPersona ? personaReviewNotes(workspace, selectedPersona) : []
+  const selectedJobs = selectedPersona ? personaProviderJobs(providerJobs, selectedPersona, selectedBranches, selectedCandidates) : []
+  const selectedLane = selectedPersona ? productLaneForPersona(selectedPersona) : "ugc-ads"
   return (
     <div className="rugc-atlas">
       <div className="rugc-atlas-grid">
@@ -2076,8 +2085,8 @@ function PersonaAtlas(props: { selectedPersonaId: string; onSelectPersona: (id: 
                 <dt>Niche</dt><dd>{persona.niche}</dd>
               </dl>
               <footer>
-                <span>{persona.branches} branches</span>
-                <span>{persona.followers} followers / {persona.conversions} conversion</span>
+                <span>{persona.branches} branches / {persona.contentLanes} lanes</span>
+                <span>{persona.weeklyPosts} posts/wk · {persona.conversionPlanPosts} CTA-plan</span>
               </footer>
             </div>
           </button>
@@ -2086,11 +2095,38 @@ function PersonaAtlas(props: { selectedPersonaId: string; onSelectPersona: (id: 
       <div className="rugc-agent-panel">
         <header>
           <Bot size={15} />
-          <strong>Agent critique</strong>
+          <strong>Workspace summary</strong>
         </header>
-        <p>Strong first signal is calm skincare POV. Hook performance above average in tests.</p>
-        <p>Consider more personal story moments. Too many CTA-first product angles.</p>
-        <button type="button">Generate 12 persona directions</button>
+        {selectedPersona ? (
+          <>
+            <div className="grid grid-cols-2 gap-2">
+              <MetricRow label="Niche" value={selectedPersona.profileBible.niche} />
+              <MetricRow label="Lane" value={productLaneLabel(selectedLane)} />
+              <MetricRow label="Notes" value={String(selectedNotes.length)} />
+              <MetricRow label="Candidates" value={String(selectedCandidates.length)} />
+            </div>
+            <p>{personaAtlasSummary(selectedPersona, selectedBranches, selectedCandidates)}</p>
+            <p>Linked branches: {selectedBranches.map((branch) => branch.title).join(", ") || "none yet"}</p>
+            <div className="grid gap-1 text-[11px] leading-4 text-muted-foreground">
+              <strong className="text-foreground">Attached notes/provider artifacts</strong>
+              {selectedNotes.length ? selectedNotes.slice(0, 2).map((note, index) => <span key={`${index}_${note}`}>{note}</span>) : <span>No persona notes attached.</span>}
+              {selectedJobs.length ? selectedJobs.map((job) => (
+                <span key={job.id}>{job.operation} · {job.status} · {job.artifactPaths.length ? job.artifactPaths.join(", ") : "no artifacts"}</span>
+              )) : <span>No provider artifacts attached to this persona.</span>}
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="workbench"
+              disabled={props.busy}
+              onClick={() => props.onMutateLocal("/api/ugc/provider-jobs", buildPersonaDirectionsProviderJob(workspace, selectedPersona, selectedBranch))}
+            >
+              Generate local persona directions artifact
+            </Button>
+          </>
+        ) : (
+          <p>No persona exists in this workspace yet.</p>
+        )}
       </div>
     </div>
   )
@@ -2497,9 +2533,26 @@ function CampaignMap(props: { selectedBranchId: string; onSelectBranch: (id: str
   )
 }
 
-function FinalEditor(props: { selectedCandidateId: string; onSelectCandidate: (id: string) => void; onMutateLocal: (path: string, body: object) => void }) {
+type FinalEditorMode = "select" | "text" | "captions" | "json"
+
+const finalEditorModes: readonly { readonly value: FinalEditorMode; readonly label: string }[] = [
+  { value: "select", label: "Select" },
+  { value: "text", label: "Text" },
+  { value: "captions", label: "Captions" },
+  { value: "json", label: "JSON" },
+]
+
+function finalEditorModeLabel(mode: FinalEditorMode): string {
+  if (mode === "select") return "Select"
+  if (mode === "text") return "Text"
+  if (mode === "captions") return "Captions"
+  return "JSON"
+}
+
+function FinalEditor(props: { selectedCandidateId: string; editorMode: FinalEditorMode; onEditorModeChange: (mode: FinalEditorMode) => void; onSelectCandidate: (id: string) => void; onMutateLocal: (path: string, body: object) => void }) {
   const { workspace } = useUgcLocalState()
   const selectedCandidate = workspace.candidates.find((candidate) => candidate.id === props.selectedCandidateId) ?? workspace.candidates[0]
+  const editorMode = props.editorMode
   const [selectedTrackId, setSelectedTrackId] = React.useState(workspace.finalEditor.tracks[0]?.id ?? "")
   const selectedTrack = workspace.finalEditor.tracks.find((track) => track.id === selectedTrackId) ?? workspace.finalEditor.tracks[0]
   const [selectedClipId, setSelectedClipId] = React.useState(selectedTrack?.clips[0]?.id ?? "")
@@ -2615,7 +2668,21 @@ function FinalEditor(props: { selectedCandidateId: string; onSelectCandidate: (i
       </aside>
       <section className="rugc-editor-canvas">
         <div className="rugc-editor-toolbar">
-          {["Select", "Crop", "Text", "Captions", "Audio", "JSON"].map((label) => <button key={label} type="button">{label}</button>)}
+          {finalEditorModes.map((mode) => (
+            <button
+              key={mode.value}
+              type="button"
+              aria-pressed={editorMode === mode.value}
+              className={cn(editorMode === mode.value && "active")}
+              style={editorMode === mode.value ? { borderColor: "hsl(var(--primary))", background: "hsl(var(--accent))", color: "hsl(var(--primary))" } : undefined}
+              onClick={() => props.onEditorModeChange(mode.value)}
+            >
+              {mode.label}
+            </button>
+          ))}
+          <span className="ml-auto text-[10px] font-semibold uppercase text-muted-foreground">
+            Session mode: {finalEditorModeLabel(editorMode)}
+          </span>
           <Button
             size="xs"
             variant="workbench"
@@ -2627,7 +2694,7 @@ function FinalEditor(props: { selectedCandidateId: string; onSelectCandidate: (i
                 timeline: workspace.finalEditor,
                 pendingPatch: timelinePatchPreview,
               },
-              notes: ["Created from Final Layer Editor", "Includes visible JSON diff preview as pendingPatch."],
+              notes: ["Created from Final Layer Editor", "Includes pendingPatch from the current clip editor state."],
             })}
           >
             Save export manifest
@@ -2671,39 +2738,80 @@ function FinalEditor(props: { selectedCandidateId: string; onSelectCandidate: (i
           </div>
           <aside className="grid gap-2 overflow-auto border-l border-border/40 bg-card p-3">
             <div>
-              <strong className="text-xs">Clip edit</strong>
-              <p className="m-0 mt-1 text-[11px] leading-4 text-muted-foreground">Timing and caption payload persist into the export manifest.</p>
+              <strong className="text-xs">{finalEditorModeLabel(editorMode)} mode</strong>
+              <p className="m-0 mt-1 text-[11px] leading-4 text-muted-foreground">
+                Current-session mode. Toolbar buttons switch the real controls shown for the selected clip.
+              </p>
             </div>
-            <label className="grid gap-1 text-[10px] font-semibold uppercase text-muted-foreground">
-              Clip label
-              <Input value={clipLabelDraft} onChange={(event) => setClipLabelDraft(event.currentTarget.value)} />
-            </label>
-            <div className="grid grid-cols-2 gap-2">
-              <label className="grid gap-1 text-[10px] font-semibold uppercase text-muted-foreground">
-                Start
-                <Input type="number" step="0.05" min="0" value={startDraft} onChange={(event) => setStartDraft(event.currentTarget.value)} />
-              </label>
-              <label className="grid gap-1 text-[10px] font-semibold uppercase text-muted-foreground">
-                Duration
-                <Input type="number" step="0.05" min="0.1" value={durationDraft} onChange={(event) => setDurationDraft(event.currentTarget.value)} />
-              </label>
-            </div>
-            <label className="grid gap-1 text-[10px] font-semibold uppercase text-muted-foreground">
-              Caption/Text payload
-              <Textarea className="min-h-[74px]" value={clipTextDraft} onChange={(event) => setClipTextDraft(event.currentTarget.value)} />
-            </label>
-            <label className="grid gap-1 text-[10px] font-semibold uppercase text-muted-foreground">
-              Caption payload JSON
-              <Textarea className="min-h-[92px] font-mono text-[10px]" value={clipPayloadDraft} onChange={(event) => setClipPayloadDraft(event.currentTarget.value)} />
-              <span className={cn("text-[10px] normal-case", parsedClipPayload ? "text-muted-foreground" : "text-amber-700")}>{parsedClipPayload ? "Valid JSON; text field is merged from caption draft." : "Invalid JSON; save falls back to caption text payload."}</span>
-            </label>
-            <Button size="xs" variant="selected" disabled={!selectedTrack || !selectedClip} onClick={saveSelectedClip}>
-              Save clip edit
-            </Button>
-            <div className="min-h-0">
-              <div className="mb-1 text-[10px] font-semibold uppercase text-muted-foreground">JSON diff preview</div>
-              <pre className="rugc-json max-h-[138px]">{JSON.stringify(timelinePatchPreview, null, 2)}</pre>
-            </div>
+            {editorMode === "select" ? (
+              <>
+                <div className="rounded-md border border-border bg-background p-2 text-[11px] leading-4 text-muted-foreground">
+                  <div className="mb-1 text-[10px] font-semibold uppercase text-foreground">Current selection</div>
+                  <p className="m-0">Candidate: {selectedCandidate?.title ?? "None"}</p>
+                  <p className="m-0">Track: {selectedTrack?.label ?? "None"}</p>
+                  <p className="m-0">Clip: {selectedClip?.label ?? "None"}</p>
+                </div>
+                <div className="rounded-md border border-dashed border-border bg-background p-2 text-[11px] leading-4 text-muted-foreground">
+                  Use the layer list, candidate selector, and timeline clips to change selection. Text, Captions, and JSON modes expose saveable edits for that selected clip.
+                </div>
+              </>
+            ) : null}
+            {editorMode === "text" ? (
+              <>
+                <label className="grid gap-1 text-[10px] font-semibold uppercase text-muted-foreground">
+                  Clip label
+                  <Input value={clipLabelDraft} onChange={(event) => setClipLabelDraft(event.currentTarget.value)} />
+                </label>
+                <label className="grid gap-1 text-[10px] font-semibold uppercase text-muted-foreground">
+                  Text payload
+                  <Textarea className="min-h-[98px]" value={clipTextDraft} onChange={(event) => setClipTextDraft(event.currentTarget.value)} />
+                </label>
+                <Button size="xs" variant="selected" disabled={!selectedTrack || !selectedClip} onClick={saveSelectedClip}>
+                  Save text edit
+                </Button>
+              </>
+            ) : null}
+            {editorMode === "captions" ? (
+              <>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="grid gap-1 text-[10px] font-semibold uppercase text-muted-foreground">
+                    Start
+                    <Input type="number" step="0.05" min="0" value={startDraft} onChange={(event) => setStartDraft(event.currentTarget.value)} />
+                  </label>
+                  <label className="grid gap-1 text-[10px] font-semibold uppercase text-muted-foreground">
+                    Duration
+                    <Input type="number" step="0.05" min="0.1" value={durationDraft} onChange={(event) => setDurationDraft(event.currentTarget.value)} />
+                  </label>
+                </div>
+                <label className="grid gap-1 text-[10px] font-semibold uppercase text-muted-foreground">
+                  Caption/Text payload
+                  <Textarea className="min-h-[98px]" value={clipTextDraft} onChange={(event) => setClipTextDraft(event.currentTarget.value)} />
+                </label>
+                <Button size="xs" variant="selected" disabled={!selectedTrack || !selectedClip} onClick={saveSelectedClip}>
+                  Save caption edit
+                </Button>
+              </>
+            ) : null}
+            {editorMode === "json" ? (
+              <>
+                <label className="grid gap-1 text-[10px] font-semibold uppercase text-muted-foreground">
+                  Merged text field
+                  <Textarea className="min-h-[62px]" value={clipTextDraft} onChange={(event) => setClipTextDraft(event.currentTarget.value)} />
+                </label>
+                <label className="grid gap-1 text-[10px] font-semibold uppercase text-muted-foreground">
+                  Caption payload JSON
+                  <Textarea className="min-h-[112px] font-mono text-[10px]" value={clipPayloadDraft} onChange={(event) => setClipPayloadDraft(event.currentTarget.value)} />
+                  <span className={cn("text-[10px] normal-case", parsedClipPayload ? "text-muted-foreground" : "text-amber-700")}>{parsedClipPayload ? "Valid JSON; text field is merged from caption draft." : "Invalid JSON; save falls back to caption text payload."}</span>
+                </label>
+                <Button size="xs" variant="selected" disabled={!selectedTrack || !selectedClip} onClick={saveSelectedClip}>
+                  Save JSON payload
+                </Button>
+                <div className="min-h-0">
+                  <div className="mb-1 text-[10px] font-semibold uppercase text-muted-foreground">JSON diff preview</div>
+                  <pre className="rugc-json max-h-[138px]">{JSON.stringify(timelinePatchPreview, null, 2)}</pre>
+                </div>
+              </>
+            ) : null}
           </aside>
         </div>
       </section>
@@ -3326,7 +3434,7 @@ function WorkflowTelemetryPanel(props: {
               {telemetry.streamStatus}
             </StatusBadge>
           </div>
-          <p className="mt-1">Event-sourced agent runs from Slotok workflows, dynamic-workflow adapters, and clean-room local planning lanes.</p>
+          <p className="mt-1">Event-sourced demo/import telemetry from Slotok daemon routes; future Pi/OMP or dynamic-workflow adapters must arrive through these same events.</p>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
           <Button size="xs" variant="workbench" onClick={() => void telemetry.refresh()}>
@@ -3436,7 +3544,7 @@ function WorkflowTelemetryPanel(props: {
                 <div className="mt-2 grid gap-1">
                   <MetricRow label="Status" value={selectedRun.status} />
                   <MetricRow label="Phase" value={selectedRun.currentPhase} />
-                  <MetricRow label="Agents now" value={selectedAgents.length ? selectedAgents.map((event) => event.agent).filter(Boolean).join(", ") : latestEvent?.agent ?? "idle"} />
+                  <MetricRow label="Actors in events" value={selectedAgents.length ? selectedAgents.map((event) => event.agent).filter(Boolean).join(", ") : latestEvent?.agent ?? "none"} />
                   <MetricRow label="Artifacts" value={String(selectedRun.artifactPaths.length)} />
                 </div>
               </div>
@@ -3515,7 +3623,7 @@ function WorkflowTelemetryPanel(props: {
             </>
           ) : (
             <div className="rounded-md border border-dashed border-border bg-background p-3 text-[11px] leading-4 text-muted-foreground">
-              Select a workflow run to inspect event-derived phase, active agents, artifacts, result, and error previews.
+              Select a workflow run to inspect event-derived phase, actors/roles in events, artifacts, result, and error previews.
             </div>
           )}
         </div>
@@ -4121,9 +4229,9 @@ function Inspector(props: {
           </div>
         </InspectorCard>
         <InspectorCard title="Metrics">
-          <ScoreBar label="CTR" value={82} />
-          <ScoreBar label="CVR" value={64} />
-          <ScoreBar label="Hook hold" value={78} />
+          <ScoreBar label="Internal click signal" value={82} />
+          <ScoreBar label="Internal CTA signal" value={64} />
+          <ScoreBar label="Hook hold signal" value={78} />
         </InspectorCard>
         <InspectorCard title="Decision log">
           <div className="grid gap-2">

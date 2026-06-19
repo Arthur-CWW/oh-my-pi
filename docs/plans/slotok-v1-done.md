@@ -13,8 +13,8 @@ This is the current primary target.
 Slotok V1-local is done when Arthur can:
 
 - open the browser app
-- trigger useful local workflows from the UI
-- inspect workflow telemetry, imports, provider plans, references, review state, editor state, and exports
+- trigger deterministic local demo workflows and reviewed handoff imports from the UI
+- inspect demo/import workflow telemetry, provider plans, references, review state, editor state, and exports
 - reload and keep working from SQLite-backed state
 
 Without claiming:

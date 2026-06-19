@@ -83,11 +83,11 @@ data/ugc-studio/reference-assets/arcads/manifest.json
 
 Those manifests are local reference/inspiration inputs only. Preserve provenance and rights notes; do not feed Higgsfield/Arcads public assets into generation unless a manifest explicitly marks reuse allowed.
 
-## Pi/OMP workflow telemetry lane
+## Workflow telemetry/import lane (Pi/OMP future-only)
 
-Arthur may run creative execution as Pi/OMP dynamic workflows instead of forcing every creative step through the Slotok daemon. Treat their returned JSON-safe handoff payloads as workflow results backed by Slotok state and documented in `workflows/slotok-creative-agents/README.md`; do not claim the daemon directly launches `runWorkflow` unless a backend worker route exists.
+V1-local does not launch or supervise Pi/OMP. Arthur may run creative work outside Slotok and paste/import JSON-safe handoff payloads; the browser treats those imports plus deterministic demos as workflow results backed by Slotok state. Real Pi/OMP or `runWorkflow` execution behind Slotok is V2-only until a backend worker/adapter route exists.
 
-Decision: Slotok owns the browser telemetry/import contract. `workflowEvents` is the append-only event log, and `workflowRuns` is the durable derived run snapshot. Pi/OMP personas, dynamic-workflow callback telemetry, daemon imports, and provider-job links are sources into that stream; `providerJobs` remain provider execution artifacts, not the workflow status model.
+Decision: Slotok owns the browser telemetry/import contract for local demos and imported handoffs. `workflowEvents` is the append-only event log, and `workflowRuns` is the durable derived run snapshot. Current sources are daemon demo/import routes and provider-job links; future Pi/OMP personas and dynamic-workflow callback telemetry may feed the same stream only through real daemon adapters. `providerJobs` remain provider execution artifacts, not the workflow status model.
 
 - Callback telemetry mapping: `onPhase` -> literal `phase`, `onLog` -> literal `message`, `onAgentStart` -> literal `started` with `payload.kind = "agent-start"`, and `onAgentEnd` -> literal `message` with `payload.kind = "agent-end"`.
 - Browser read/stream contract:
@@ -110,9 +110,9 @@ Decision: Slotok owns the browser telemetry/import contract. `workflowEvents` is
 - Future adapter only: OMP `--mode rpc` can be normalized into `workflowEvents` when Slotok owns the child process; wrap it behind the Slotok daemon and never expose stdio directly to the browser. Do not claim this adapter is implemented until it exists.
 - Future adapter only: Pi/OMP session JSONL, output artifacts, plans, and resource files can be polled/tail-imported later into the same event table as delayed observations.
 
-Manual QA and exact route examples live in `docs/qa/slotok-workflow-telemetry.md`. Store this as event sourcing, not only current snapshots. Current agent status is derived from latest events, while raw event history remains inspectable for proof/replay.
+Manual QA and exact route examples live in `docs/qa/slotok-workflow-telemetry.md`. Store this as event sourcing, not only current snapshots. Current event actor/status is derived from latest events, while raw event history remains inspectable for proof/replay.
 
-Slotok remains the local-first state viewer/reviewer. Pi/OMP personas perform creative operations and import structured JSON-safe results through daemon routes after dry-run review; SQLite/local state remains the source of truth.
+Slotok remains the local-first state viewer/reviewer. In V1, Pi/OMP results arrive only as reviewed JSON-safe handoff imports; future Pi/OMP personas may perform creative operations outside the browser once a real adapter exists. SQLite/local state remains the source of truth.
 
 ## Commit boundaries
 

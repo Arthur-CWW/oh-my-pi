@@ -1,25 +1,27 @@
 # slotok-creative-agents
 
-Pi/OMP workflow direction for Slotok creative execution.
+Future Pi/OMP adapter direction for Slotok creative execution. V1-local is daemon import, telemetry, and deterministic demo only.
 
 ## Decision
 
-Slotok does not need to force every creative step through the app daemon. Treat Pi/OMP as an execution lane: launch persona/tool workflows that read Slotok workspace context, run creative/research/provider tasks, and write structured results back as local provider jobs, reference archives, candidates, or export manifests.
+V1-local does not launch or supervise Pi/OMP. The implemented surface is Slotok daemon import and telemetry: deterministic local demo workflows, dry-run/apply handoff import, and browser event replay.
 
-The Slotok app remains the local-first workbench and state viewer. Pi/OMP agents are the creative operators.
+Future V2 may treat Pi/OMP as an execution lane: Pi/OMP workflows could read Slotok workspace context outside the browser, run creative/research/provider tasks, and return structured results as local provider jobs, reference archives, candidates, or export manifests. Until a real daemon adapter owns launch/supervision, do not claim live Pi/OMP execution.
 
-Use the existing `packages/dynamic-workflows` primitive (`parseWorkflowScript` / `runWorkflow`) rather than inventing a second workflow DSL. Slotok-specific workflow definitions should be persisted wrappers around dynamic-workflow scripts, arguments, results, and imported records.
+The Slotok app remains the local-first workbench and state viewer. Today it imports and reviews JSON-safe handoffs; future Pi/OMP agents may become creative operators.
+
+Use the existing `packages/dynamic-workflows` primitive (`parseWorkflowScript` / `runWorkflow`) for future real adapters rather than inventing a second workflow DSL. Slotok-specific workflow definitions should be persisted wrappers around dynamic-workflow scripts, arguments, results, and imported records once a worker/adapter route exists.
 
 ## Product lanes
 
 - `brainrot` — Pleometric-style surreal/postmodern shortform creation.
 - `ugc-ads` — UGC Studio for making ads: personas, hooks, product demo, proof, CTA, variants, review.
 
-Every workflow prompt should carry one lane and preserve it in output metadata.
+Future workflow prompts should carry one lane and preserve it in output metadata.
 
-## Workflow roles
+## Future workflow roles
 
-Recommended personas:
+Planning personas for future external/adapter workflows; the current V1 UI does not launch them:
 
 1. **Reference miner**
    - Inputs: local catalog roots, public inspiration manifests, X/article URLs.
@@ -94,7 +96,7 @@ Use event sourcing as the browser contract:
 
 - `workflowRuns` stores the durable run snapshot: id, lane, source, status, script/definition id, args summary, current phase, counters, result/import summary, error summary, and timestamps.
 - `workflowEvents` is append-only: literal `phase`, `message`, `started`, `artifact`, `status`, `result`, `import`, `error`, `completed`, `blocked`, and `canceled` events are linked by `runId` and ordered by event id. Agent starts/ends are represented through `agentLabel` and `payload.kind`; do not rewrite prior events to hide state changes.
-- The workbench derives "what agents are doing right now" from the latest events instead of trusting one mutable status blob.
+- The workbench derives "actors/roles visible in events" from the latest events instead of trusting one mutable status blob.
 - `providerJobs` remain provider execution artifacts. A workflow event may link to a provider job id, but provider job status is not the workflow status model.
 - The Slotok daemon browser contract exposes SSE for live viewing and polling for fallback/replay.
 
@@ -131,12 +133,12 @@ Event wording:
 
 Adapters:
 
-- Dynamic workflows: when a Pi/OMP workflow or future backend worker runs `runWorkflow`, map callbacks (`onLog`, `onPhase`, `onAgentStart`, `onAgentEnd`) directly into events and derived run snapshots. This document does not claim the daemon directly launches dynamic workflows until a worker route exists.
+- Dynamic workflows: future adapter only. When a Pi/OMP workflow or backend worker runs `runWorkflow` under a real daemon adapter, map callbacks (`onLog`, `onPhase`, `onAgentStart`, `onAgentEnd`) directly into events and derived run snapshots. This document does not claim the daemon directly launches dynamic workflows until a worker route exists.
 - OMP RPC: future adapter only. When Slotok owns an `omp --mode rpc` child process, normalize stdio `AgentSessionEvent` and subagent progress frames into events behind the daemon. Do not expose stdio to the browser or claim this adapter is implemented before it exists.
 - OMP stats: historical only. Use `omp stats` / `omp-stats` routes such as `/api/stats` and `/api/sync` for usage/cost history, not live progress.
 - Artifact polling: future adapter only. Tail Pi/OMP session JSONL, plans, and artifact dirs into the same event table when Slotok did not launch the process; treat these as delayed observations.
 
-## Prompt skeleton
+## Future prompt skeleton
 
 ```text
 You are a Slotok creative operator.
@@ -157,10 +159,10 @@ Task:
 <analysis / creative strategy / generation planning / review>
 ```
 
-## Implementation path
+## V2 implementation path
 
-1. Store Slotok workflow definitions as wrappers around `packages/dynamic-workflows` scripts plus args/result metadata.
+1. Future real adapters should store Slotok workflow definitions as wrappers around `packages/dynamic-workflows` scripts plus args/result metadata.
 2. Keep daemon routes as the persistence boundary for imported workflow outputs.
 3. Use `POST /api/ugc/workflows/<run_id>/import` for dry-run/apply handoff import; never edit SQLite directly.
-4. Let Pi/OMP dynamic workflows fan out agents and tools outside the browser; Slotok visualizes, imports, and reviews the results through daemon state.
-5. Use the running workbench at `http://127.0.0.1:47521/ugc-studio/` for manual QA.
+4. Only after a real adapter exists, let Pi/OMP dynamic workflows fan out agents and tools outside the browser; Slotok visualizes, imports, and reviews the results through daemon state.
+5. Use the running workbench at `http://127.0.0.1:47521/ugc-studio/` for V1 import/telemetry/demo QA; do not mark adapter execution complete without a real daemon route.
