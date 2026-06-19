@@ -24,6 +24,8 @@ export type UgcSqliteCollection =
   | "exports"
   | "research-targets"
   | "template-mining-jobs"
+  | "workflow-runs"
+  | "workflow-events"
 
 export interface UgcSqliteStoreOptions {
   readonly workspaceDir: string
@@ -155,7 +157,9 @@ export class UgcSqliteStore {
         SELECT payload_json
         FROM objects
         WHERE collection = ?
-        ORDER BY id ASC
+        ORDER BY
+          CASE WHEN collection = 'workflow-events' THEN CAST(id AS INTEGER) END ASC,
+          id ASC
       `).all(collection)
       return rows.map((row) => JSON.parse(row.payload_json) as JsonValue)
     } finally {
@@ -176,6 +180,8 @@ export class UgcSqliteStore {
       exports: 0,
       "research-targets": 0,
       "template-mining-jobs": 0,
+      "workflow-runs": 0,
+      "workflow-events": 0,
     }
     if (!existsSync(this.config.sqlitePath)) return counts
     const db = this.openReadonly()
@@ -243,18 +249,22 @@ function stateObjectRecords(state: UgcLocalState): readonly CollectionRecord[] {
     ...state.exportManifests.map((payload) => ({ collection: "exports" as const, id: payload.id, payload })),
     ...state.researchTargets.map((payload) => ({ collection: "research-targets" as const, id: payload.id, payload })),
     ...state.templateMiningJobs.map((payload) => ({ collection: "template-mining-jobs" as const, id: payload.id, payload })),
+    ...state.workflowRuns.map((payload) => ({ collection: "workflow-runs" as const, id: payload.id, payload })),
+    ...state.workflowEvents.map((payload) => ({ collection: "workflow-events" as const, id: String(payload.eventId), payload })),
   ]
 }
 
 function objectUpdatedAt(payload: object, fallback: string): string {
-  const candidate = payload as { readonly updatedAt?: string }
-  return candidate.updatedAt ?? fallback
+  const candidate = payload as { readonly updatedAt?: string; readonly createdAt?: string }
+  return candidate.updatedAt ?? candidate.createdAt ?? fallback
 }
 
 function normalizeLocalState(state: UgcLocalState): UgcLocalState {
-  const legacyState = state as UgcLocalState & {
+  const legacyState = state as {
     readonly researchTargets?: readonly UgcResearchTarget[]
     readonly templateMiningJobs?: readonly UgcTemplateMiningJob[]
+    readonly workflowRuns?: UgcLocalState["workflowRuns"]
+    readonly workflowEvents?: UgcLocalState["workflowEvents"]
   }
   const referenceArchives = state.workspace.referenceProfiles.map((referenceProfile) => {
     const defaultArchive = referenceProfileToArchive(state.workspace.id, referenceProfile, state.updatedAt)
@@ -277,6 +287,8 @@ function normalizeLocalState(state: UgcLocalState): UgcLocalState {
     referenceArchives: [...referenceArchives, ...orphanArchives],
     researchTargets: legacyState.researchTargets ?? createInitialResearchTargets(state.workspace.id, state.updatedAt),
     templateMiningJobs: legacyState.templateMiningJobs ?? createInitialTemplateMiningJobs(state.workspace.id, state.updatedAt),
+    workflowRuns: legacyState.workflowRuns ?? [],
+    workflowEvents: [...(legacyState.workflowEvents ?? [])].sort((left, right) => left.eventId - right.eventId),
   }
 }
 
@@ -298,6 +310,8 @@ function isUgcSqliteCollection(value: string): value is UgcSqliteCollection {
     || value === "exports"
     || value === "research-targets"
     || value === "template-mining-jobs"
+    || value === "workflow-runs"
+    || value === "workflow-events"
 }
 
 function loadDatabase(): typeof import("bun:sqlite").Database {

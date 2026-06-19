@@ -1,5 +1,5 @@
 import { mkdir, writeFile } from "node:fs/promises"
-import { existsSync, mkdtempSync, readFileSync } from "node:fs"
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"
 import { describe, expect, test } from "vitest"
@@ -326,6 +326,28 @@ describe("routeUgc", () => {
     expect(archive?.referenceAssets[0]?.referenceOnly).toBe(true)
     expect(archive?.referenceAssets[0]?.directGenerationInput).toBe(false)
     expect(providerJob?.artifactPaths).toEqual([higgsfieldManifest])
+
+    const guardedResponse = await routeUgc(jsonRequest("/api/ugc/provider-jobs", {
+      provider: "kie",
+      operation: "image-to-video",
+      targetIds: [archive?.id ?? ""],
+      request: { imageUrl: archive?.referenceAssets[0]?.assetUrl ?? "", prompt: "copy this public reference" },
+    }), store)
+    const guarded = await guardedResponse?.json() as { readonly error?: string }
+    expect(guardedResponse?.status).toBe(400)
+    expect(guarded.error).toContain("metadata-only, abstract-mechanics, or public reference assets cannot be direct generation inputs")
+    expect(store.read().providerJobs.some((job) => job.operation === "image-to-video")).toBe(false)
+
+    const unknownTargetResponse = await routeUgc(jsonRequest("/api/ugc/provider-jobs", {
+      provider: "kie",
+      operation: "image-to-video",
+      targetIds: ["foo"],
+      request: { mediaUrl: "https://example.com/public-inspiration.mp4", prompt: "copy this unproven public reference" },
+    }), store)
+    const unknownTarget = await unknownTargetResponse?.json() as { readonly error?: string }
+    expect(unknownTargetResponse?.status).toBe(400)
+    expect(unknownTarget.error).toContain("metadata-only, abstract-mechanics, or public reference assets cannot be direct generation inputs")
+    expect(store.read().providerJobs.some((job) => job.operation === "image-to-video")).toBe(false)
   })
 
 
@@ -815,6 +837,7 @@ describe("routeUgc", () => {
     expect(JSON.parse(readFileSync(handoffPath, "utf8"))).toMatchObject({ lane: "brainrot" })
   })
 
+
   test("creates a UGC ads demo workflow from imported manifests and updates the demo candidate", async () => {
     const store = createStore()
     await seedDemoWorkflowFixtures(store)
@@ -971,6 +994,14 @@ function createStore(): UgcJsonStore {
     root: "ugc-workspaces",
     now: () => "2026-06-10T00:00:00.000Z",
     sqliteSync: false,
+  })
+}
+
+function createSqliteStore(cwd = mkdtempSync(resolve(tmpdir(), "ugc-routes-sqlite-"))): UgcJsonStore {
+  return new UgcJsonStore({
+    cwd,
+    root: "ugc-workspaces",
+    now: () => "2026-06-10T00:00:00.000Z",
   })
 }
 

@@ -102,6 +102,7 @@ describe("UgcJsonStore", () => {
     const higgsfieldArchive = state?.referenceArchives.find((item) => item.id === "archive_reference_provider_higgsfield_assets")
     const arcadsArchive = state?.referenceArchives.find((item) => item.id === "archive_reference_provider_arcads_assets")
     const providerJob = state?.providerJobs.find((job) => job.id === "job_local_reference_asset_manifest_import_higgsfield")
+    const higgsfieldProfile = state?.workspace.referenceProfiles.find((item) => item.id === "reference_provider_higgsfield_assets")
     const bundle = store.exportWorkspaceBundle({ label: "Provider reference manifest bundle" })
 
     expect(imported.valid).toBe(true)
@@ -111,8 +112,12 @@ describe("UgcJsonStore", () => {
     expect(higgsfieldArchive?.referenceAssets[0]?.localPath).toBe("data/ugc-studio/reference-assets/higgsfield/marketing-slides/hyper.mp4")
     expect(higgsfieldArchive?.referenceAssets[0]?.sourceUrl).toBe("https://higgsfield.ai/marketing-studio-intro")
     expect(higgsfieldArchive?.referenceAssets[0]?.assetUrl).toBe("https://static.higgsfield.ai/marketing/slides/hyper-mini.mp4")
+    expect(higgsfieldArchive?.referenceAssets[0]?.rights).toBe("Public fixture; reference-only.")
+    expect(higgsfieldArchive?.referenceAssets[0]?.provenance).toContain("Captured from the Higgsfield public marketing page")
+    expect(higgsfieldArchive?.referenceAssets[0]?.provenance).toContain(higgsfieldManifest)
     expect(higgsfieldArchive?.referenceAssets[0]?.referenceOnly).toBe(true)
     expect(higgsfieldArchive?.referenceAssets[0]?.directGenerationInput).toBe(false)
+    expect(higgsfieldProfile?.sampleClips[0]?.sourceUrl).toBeNull()
     expect(arcadsArchive?.referenceAssets[0]?.localPath).toBe("data/ugc-studio/reference-assets/arcads/arcads-og-image.png")
     expect(arcadsArchive?.referenceAssets[0]?.sourceUrl).toBe("https://www.arcads.ai/")
     expect(providerJob?.artifactPaths).toEqual([higgsfieldManifest])
@@ -148,6 +153,30 @@ describe("UgcJsonStore", () => {
     expect(imported.errors).toEqual([])
     expect(imported.warnings).toContain(missingRootWarning)
     expect(archive?.catalogVideos[0]?.paths.infoJson).toBe(`${root}/2026-03-05_7613899553590234375.info.json`)
+  })
+
+  test("missing reference catalog roots are safe no-op imports", () => {
+    const store = createStore()
+    const initial = store.read()
+    const missingRoot = "data/tiktok-catalogue/missing-local-root"
+
+    const plan = store.planReferenceCatalogImport({ roots: [missingRoot], manifestPaths: [] })
+
+    expect(plan.valid).toBe(true)
+    expect(plan.imported).toBe(false)
+    expect(plan.videosPlanned).toBe(0)
+    expect(plan.assetsPlanned).toBe(0)
+    expect(plan.state).toBeNull()
+    expect(plan.warnings).toContain(`Reference catalog root not found: ${missingRoot}`)
+    expect(plan.warnings).toContain("Reference catalog import found no readable metadata records or asset manifests.")
+    expect(store.read()).toEqual(initial)
+
+    const imported = store.importReferenceCatalog({ roots: [missingRoot], manifestPaths: [] })
+
+    expect(imported.valid).toBe(true)
+    expect(imported.imported).toBe(false)
+    expect(imported.state).toBeNull()
+    expect(store.read()).toEqual(initial)
   })
 
   test("persists persona, candidate, branch, notes, provider job, reference archive, and export mutations", () => {
@@ -580,11 +609,15 @@ describe("UgcJsonStore", () => {
     expect(after.workflowEvents.length).toBe(before.workflowEvents.length)
   })
 
-  test("blocks direct generation inputs from non-rights-cleared workflow sources", () => {
+  test("blocks public reference assets from direct generation workflow inputs", () => {
     const store = createStore()
+    const higgsfieldManifest = writeProviderManifestFixture(store.config.cwd, "data/ugc-studio/reference-assets/higgsfield/manifest.json", "higgsfield")
+    store.importReferenceCatalog({ roots: [], manifestPaths: [higgsfieldManifest] })
     const run = store.createWorkflowRun({ title: "Guardrail workflow import", source: "omp", lane: "ugc-ads" })
+    const archive = store.read().referenceArchives.find((item) => item.id === "archive_reference_provider_higgsfield_assets")
+    if (!archive) throw new Error("missing imported provider reference archive")
 
-    const result = store.importWorkflowHandoff(run.id, {
+    const abstractResult = store.importWorkflowHandoff(run.id, {
       lane: "ugc-ads",
       sourcePolicy: "abstract-mechanics",
       providerJobs: [{
@@ -594,9 +627,60 @@ describe("UgcJsonStore", () => {
       }],
     }, false)
 
-    expect(result.valid).toBe(false)
-    expect(result.imported).toBe(false)
-    expect(result.errors.join("\n")).toContain("sourcePolicy must be rights-cleared-source")
+    expect(abstractResult.valid).toBe(false)
+    expect(abstractResult.imported).toBe(false)
+    expect(abstractResult.errors.join("\n")).toContain("sourcePolicy must be rights-cleared-source")
+
+    const publicAssetResult = store.importWorkflowHandoff(run.id, {
+      lane: "ugc-ads",
+      sourcePolicy: "rights-cleared-source",
+      providerJobs: [{
+        provider: "kie",
+        operation: "generate-video",
+        targetIds: [archive.id],
+        request: { imageUrl: archive.referenceAssets[0]?.assetUrl ?? "", prompt: "copy this public demo" },
+      }],
+    }, false)
+
+    expect(publicAssetResult.valid).toBe(false)
+    expect(publicAssetResult.imported).toBe(false)
+    expect(publicAssetResult.errors.join("\n")).toContain("metadata-only, abstract-mechanics, or public reference assets cannot be direct generation inputs")
+
+
+    const unknownExternalResult = store.importWorkflowHandoff(run.id, {
+      lane: "ugc-ads",
+      sourcePolicy: "rights-cleared-source",
+      providerJobs: [{
+        provider: "kie",
+        operation: "generate-video",
+        request: { mediaUrl: "https://example.com/public-inspiration.mp4", prompt: "copy this unproven public asset" },
+      }],
+    }, false)
+
+    expect(unknownExternalResult.valid).toBe(false)
+    expect(unknownExternalResult.imported).toBe(false)
+    expect(unknownExternalResult.errors.join("\n")).toContain("metadata-only, abstract-mechanics, or public reference assets cannot be direct generation inputs")
+    const rightsClearedReferenceProfileId = store.read().workspace.referenceProfiles.find((profile) => profile.rightsStatus === "rights-cleared")?.id
+    if (!rightsClearedReferenceProfileId) throw new Error("missing rights-cleared reference profile")
+    const sameHandoffResult = store.importWorkflowHandoff(run.id, {
+      lane: "ugc-ads",
+      sourcePolicy: "metadata-only",
+      referenceArchives: [{
+        referenceProfileId: rightsClearedReferenceProfileId,
+        sourcePolicy: "metadata-only",
+        notes: ["Downgraded to metadata-only inside this handoff."],
+      }],
+      providerJobs: [{
+        provider: "kie",
+        operation: "generate-video",
+        targetIds: [`archive_${rightsClearedReferenceProfileId}`],
+        request: { mediaUrl: "https://example.com/metadata-only-reference.mp4", prompt: "copy this handoff reference" },
+      }],
+    }, false)
+
+    expect(sameHandoffResult.valid).toBe(false)
+    expect(sameHandoffResult.imported).toBe(false)
+    expect(sameHandoffResult.errors.join("\n")).toContain("metadata-only, abstract-mechanics, or public reference assets cannot be direct generation inputs")
     expect(store.read().providerJobs.some((job) => job.operation === "generate-video")).toBe(false)
   })
 
@@ -776,6 +860,7 @@ function writeProviderManifestFixture(cwd: string, manifestPath: string, provide
           bytes: 123,
           sha256: "fixture-higgsfield-sha",
           rights: "Public fixture; reference-only.",
+          provenance: "Captured from the Higgsfield public marketing page for local reference audit.",
           directGenerationInput: true,
         },
       ],

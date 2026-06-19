@@ -23,6 +23,7 @@
     "lint:unsafe-types:strict": "bun run scripts/lint-unsafe-types.boundary.ts --strict",
     "lint:unsafe-types:rules": "bun run scripts/ast-grep.boundary.ts test --config sgconfig.yml --skip-snapshot-tests",
     "slotok:check": "bun run slotok:typecheck && bun run slotok:test && bun run slotok:build",
+    "slotok:ci": "bun run slotok:typecheck && bun run slotok:test && bun run slotok:build && bun run lint:unsafe-types && bun run slotok:visual:qa",
     "slotok:build": "cd apps/slotok-workbench && bun run build",
     "slotok:daemon": "cd apps/slotok-workbench && bun run dev:daemon",
     "slotok:smoke": "cd apps/slotok-workbench && bun run smoke:daemon",

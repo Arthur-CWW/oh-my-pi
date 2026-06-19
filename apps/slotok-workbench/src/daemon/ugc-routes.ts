@@ -233,7 +233,11 @@ export async function routeUgc(request: Request, store: UgcJsonStore, options: R
   }
 
   if (request.method === "POST" && url.pathname === "/api/ugc/provider-jobs") {
-    return json(store.createProviderJob(decodeCreateProviderJob(await readJson(request))))
+    try {
+      return json(store.createProviderJob(decodeCreateProviderJob(await readJson(request))))
+    } catch (error) {
+      return json({ error: error instanceof Error ? error.message : "provider job create failed" }, 400)
+    }
   }
 
   if (request.method === "POST" && url.pathname === "/api/ugc/codex/plan") {

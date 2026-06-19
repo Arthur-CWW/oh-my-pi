@@ -273,6 +273,7 @@ export class UgcJsonStore {
 
   createProviderJob(input: CreateProviderJobInput): UgcLocalState {
     const state = this.read()
+    assertProviderJobDirectInputPolicy(state, input.provider, input.targetIds ?? [], input.request)
     const now = this.now()
     const job: UgcProviderJob = {
       schemaVersion: "ugc-studio.provider-job.v1",
@@ -803,13 +804,14 @@ export class UgcJsonStore {
     const warnings: string[] = []
     const catalogGroups = readReferenceCatalogGroups(this.config.cwd, roots, warnings)
     const manifestGroups = readReferenceAssetManifestGroups(this.config.cwd, manifestPaths, warnings)
-    if (catalogGroups.length === 0 && manifestGroups.length === 0) {
-      errors.push("Reference catalog import found no readable metadata records or asset manifests.")
+    const plannedRecords = catalogGroups.length + manifestGroups.length
+    if (plannedRecords === 0) {
+      warnings.push("Reference catalog import found no readable metadata records or asset manifests.")
     }
     const state = this.read()
     const plannedState = applyReferenceCatalogImports(state, catalogGroups, manifestGroups, now)
     const valid = errors.length === 0
-    const importedState = valid && !dryRun ? this.write(plannedState) : null
+    const importedState = valid && plannedRecords > 0 && !dryRun ? this.write(plannedState) : null
 
     return {
       schemaVersion: "ugc-studio.reference-catalog-import-result.v1",
@@ -886,6 +888,7 @@ function planWorkflowImport(
   const artifactPaths = [...new Set(input.artifactPaths ?? [])]
   const seenIncomingProviderJobIds = new Set<string>()
   const noteExistingIds = new Set(state.workspace.reviewNotes.map((note) => note.id))
+  const incomingProtectedReferenceTargetIds = workflowImportProtectedReferenceTargetIds(input)
 
   if ((input.records?.length ?? 0) > 0) {
     importedRecordIds.push(...recordImportIds(input.records ?? []))
@@ -903,6 +906,7 @@ function planWorkflowImport(
     if (input.sourcePolicy !== "rights-cleared-source" && isGenerationProvider(jobInput.provider) && hasDirectGenerationInput(jobInput.request)) {
       errors.push("sourcePolicy must be rights-cleared-source before public or inspiration source URLs/paths can be direct generation inputs")
     }
+    errors.push(...providerJobDirectInputPolicyErrors(state, jobInput.provider, targetIds, jobInput.request, incomingProtectedReferenceTargetIds))
     const job: UgcProviderJob = {
       schemaVersion: "ugc-studio.provider-job.v1",
       id: jobId,
@@ -1179,6 +1183,100 @@ function directGenerationInputValuePresent(value: JsonValue | undefined): boolea
   return isRecord(value)
 }
 
+function assertProviderJobDirectInputPolicy(state: UgcLocalState, provider: UgcProvider, targetIds: readonly string[], request: JsonValue): void {
+  const errors = providerJobDirectInputPolicyErrors(state, provider, targetIds, request, new Set<string>())
+  if (errors.length > 0) throw new Error(errors[0])
+}
+
+function providerJobDirectInputPolicyErrors(state: UgcLocalState, provider: UgcProvider, targetIds: readonly string[], request: JsonValue, incomingProtectedReferenceTargetIds: ReadonlySet<string>): readonly string[] {
+  if (!isGenerationProvider(provider) || !hasDirectGenerationInput(request)) return []
+  if (targetIds.some((targetId) => incomingProtectedReferenceTargetIds.has(targetId) || isProtectedReferenceTarget(state, targetId))) return [PROTECTED_REFERENCE_DIRECT_INPUT_ERROR]
+  const directInputValues = collectDirectGenerationInputStrings(request)
+  return directInputValues.some((value) => isProtectedReferenceInputValue(state, value) || isUnprovenExternalDirectInputValue(state, value, targetIds))
+    ? [PROTECTED_REFERENCE_DIRECT_INPUT_ERROR]
+    : []
+}
+
+function workflowImportProtectedReferenceTargetIds(input: UgcWorkflowImportInput): ReadonlySet<string> {
+  const ids = new Set<string>()
+  for (const archive of input.referenceArchives ?? []) {
+    const sourcePolicy = archive.sourcePolicy ?? input.sourcePolicy
+    if (sourcePolicy === "rights-cleared-source") continue
+    ids.add(archive.referenceProfileId)
+    ids.add(`archive_${archive.referenceProfileId}`)
+  }
+  return ids
+}
+
+const PROTECTED_REFERENCE_DIRECT_INPUT_ERROR = "metadata-only, abstract-mechanics, or public reference assets cannot be direct generation inputs"
+
+function isProtectedReferenceTarget(state: UgcLocalState, targetId: string): boolean {
+  const referenceProfile = state.workspace.referenceProfiles.find((profile) => profile.id === targetId)
+  if (referenceProfile && isProtectedReferenceRights(referenceProfile.rightsStatus)) return true
+  const archive = state.referenceArchives.find((item) => item.id === targetId || item.referenceProfileId === targetId)
+  return archive !== undefined && (archive.sourcePolicy !== "rights-cleared-source" || isProtectedReferenceRights(archive.rightsStatus))
+}
+
+function isProtectedReferenceRights(rightsStatus: ReferenceProfile["rightsStatus"]): boolean {
+  return rightsStatus === "public-research-target" || rightsStatus === "abstract-only"
+}
+
+function collectDirectGenerationInputStrings(value: JsonValue): readonly string[] {
+  const values: string[] = []
+  collectDirectGenerationInputStringsInto(value, false, values)
+  return [...new Set(values)]
+}
+
+function collectDirectGenerationInputStringsInto(value: JsonValue | undefined, directContext: boolean, values: string[]): void {
+  if (value === undefined || value === null || typeof value === "number" || typeof value === "boolean") return
+  if (typeof value === "string") {
+    if (directContext && value.trim().length > 0) values.push(value.trim())
+    return
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) collectDirectGenerationInputStringsInto(item, directContext, values)
+    return
+  }
+  const record = value as { readonly [key: string]: JsonValue }
+  for (const key of Object.keys(record)) {
+    collectDirectGenerationInputStringsInto(record[key], directContext || isDirectGenerationInputKey(key), values)
+  }
+}
+
+function isProtectedReferenceInputValue(state: UgcLocalState, value: string): boolean {
+  const normalizedValue = normalizeGuardrailPath(value)
+  if (isProtectedReferenceAssetPath(normalizedValue)) return true
+  for (const archive of state.referenceArchives) {
+    if (archive.sourcePolicy === "rights-cleared-source" && !isProtectedReferenceRights(archive.rightsStatus)) continue
+    if (archive.referenceAssets.some((asset) => referenceAssetValues(asset).some((item) => normalizeGuardrailPath(item) === normalizedValue))) return true
+    if (archive.catalogVideos.some((video) => referenceCatalogVideoValues(video).some((item) => normalizeGuardrailPath(item) === normalizedValue))) return true
+  }
+  return false
+}
+
+function referenceAssetValues(asset: UgcReferenceManifestAsset): readonly string[] {
+  return [asset.localPath, asset.sourceUrl, asset.assetUrl, asset.manifestPath].filter(isString)
+}
+
+function referenceCatalogVideoValues(video: UgcReferenceCatalogVideo): readonly string[] {
+  return [video.paths.infoJson, video.paths.mp4, video.paths.poster].filter(isString)
+}
+
+function normalizeGuardrailPath(value: string): string {
+  return value.replace(/^file:\/\//, "").replace(/^\/+/, "")
+}
+
+function isProtectedReferenceAssetPath(value: string): boolean {
+  return value.startsWith("data/ugc-studio/reference-assets/")
+    || value.includes("/data/ugc-studio/reference-assets/")
+    || value.startsWith("data/tiktok-catalogue/")
+    || value.includes("/data/tiktok-catalogue/")
+}
+
+function isUnprovenExternalDirectInputValue(state: UgcLocalState, value: string, targetIds: readonly string[]): boolean {
+  return (value.startsWith("http://") || value.startsWith("https://")) && !targetIds.some((targetId) => workflowImportTargetExists(state, targetId))
+}
+
 const DEFAULT_REFERENCE_CATALOG_ROOTS = [
   "data/tiktok-catalogue/pleometric",
   "data/tiktok-catalogue/mynameissico",
@@ -1374,6 +1472,7 @@ function readReferenceManifestAsset(
   const title = firstString(value.title, value.title_label, value.label, value.notes) ?? rawId
   const mediaType = firstString(value.mediaType, value.media_type, value.contentType, value.content_type) ?? "application/octet-stream"
   const rights = firstString(value.rights, value.rights_notes) ?? manifestRights
+  const provenance = referenceAssetProvenance(manifestPath, firstString(value.provenance, value.provenanceNotes, value.provenance_notes, value.notes))
   if (manifestAllowsDirectGeneration(value)) warnings.push(`Reference asset ${rawId} requested direct generation input, but public inspiration manifests are metadata-only.`)
   return {
     schemaVersion: "ugc-studio.reference-manifest-asset.v1",
@@ -1389,7 +1488,7 @@ function readReferenceManifestAsset(
     sha256: firstString(value.sha256),
     captureTimestamp: firstString(value.captureTimestamp, value.capture_timestamp),
     rights,
-    provenance: `Imported from ${manifestPath}; source page and asset URLs are retained as metadata only.`,
+    provenance,
     sourcePolicy: "metadata-only",
     referenceOnly: true,
     directGenerationInput: false,
@@ -1649,7 +1748,7 @@ function referenceAssetProfile(workspaceId: string, group: ReferenceAssetManifes
     sampleClips: group.assets.map((asset) => ({
       id: asset.id,
       title: asset.title,
-      sourceUrl: asset.sourceUrl ?? asset.assetUrl,
+      sourceUrl: null,
       durationSeconds: 0,
       storagePolicy: "store-metadata-only",
       extractedFields: [
@@ -1941,6 +2040,12 @@ function manifestAllowsDirectGeneration(value: JsonValue): boolean {
     || value.direct_generation_input === true
     || value.generationInputAllowed === true
     || value.generation_input_allowed === true
+}
+
+function referenceAssetProvenance(manifestPath: string, assetProvenance: string | null): string {
+  const suffix = `Imported from ${manifestPath}; source page and asset URLs are retained as metadata only.`
+  if (!assetProvenance) return suffix
+  return assetProvenance.includes(manifestPath) ? assetProvenance : `${assetProvenance} ${suffix}`
 }
 
 function isReferenceManifestAsset(value: UgcReferenceManifestAsset | null): value is UgcReferenceManifestAsset {
