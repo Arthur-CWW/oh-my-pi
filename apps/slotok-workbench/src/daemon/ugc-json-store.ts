@@ -27,6 +27,7 @@ import {
   type UgcReferenceCatalogImportInput,
   type UgcReferenceCatalogImportResult,
   type UgcReferenceCatalogVideo,
+  type UgcReferenceManifestAsset,
   type PersonaPatch,
   type ProviderJobPatch,
   type ResearchTargetPatch,
@@ -321,6 +322,7 @@ export class UgcJsonStore {
       candidateFormatOutputs: input.candidateFormatOutputs ?? existing?.candidateFormatOutputs ?? defaultArchive.candidateFormatOutputs,
       notes: input.notes ?? existing?.notes ?? [],
       catalogVideos: existing?.catalogVideos ?? defaultArchive.catalogVideos,
+      referenceAssets: existing?.referenceAssets ?? defaultArchive.referenceAssets,
       updatedAt: now,
     }
     return this.write({
@@ -571,15 +573,20 @@ export class UgcJsonStore {
 
   #createReferenceCatalogImportResult(input: UgcReferenceCatalogImportInput, dryRun: boolean): UgcReferenceCatalogImportResult {
     const now = this.now()
-    const roots = (input.roots && input.roots.length > 0 ? input.roots : DEFAULT_REFERENCE_CATALOG_ROOTS)
+    const useDefaultInputs = input.roots === undefined && input.manifestPaths === undefined
+    const roots = (useDefaultInputs ? DEFAULT_REFERENCE_CATALOG_ROOTS : input.roots ?? [])
       .map((root) => normalizeRelativePath(this.config.cwd, root))
+    const manifestPaths = (useDefaultInputs ? DEFAULT_REFERENCE_ASSET_MANIFEST_PATHS : input.manifestPaths ?? [])
+      .map((manifestPath) => normalizeRelativePath(this.config.cwd, manifestPath))
     const errors: string[] = []
     const warnings: string[] = []
-    const groups = readReferenceCatalogGroups(this.config.cwd, roots, warnings)
-    if (groups.length === 0) errors.push("Reference catalog import found no readable metadata records.")
+    const catalogGroups = readReferenceCatalogGroups(this.config.cwd, roots, warnings)
+    const manifestGroups = readReferenceAssetManifestGroups(this.config.cwd, manifestPaths, warnings)
+    if (catalogGroups.length === 0 && manifestGroups.length === 0) {
+      errors.push("Reference catalog import found no readable metadata records or asset manifests.")
+    }
     const state = this.read()
-    const plannedState = applyReferenceCatalogGroups(state, groups, now)
-    const providerJobIds = groups.map((group) => referenceCatalogProviderJobId(group.handle))
+    const plannedState = applyReferenceCatalogImports(state, catalogGroups, manifestGroups, now)
     const valid = errors.length === 0
     const importedState = valid && !dryRun ? this.write(plannedState) : null
 
@@ -590,12 +597,29 @@ export class UgcJsonStore {
       imported: Boolean(importedState),
       checkedAt: now,
       roots,
-      videosPlanned: groups.reduce((count, group) => count + group.videos.length, 0),
-      referenceProfileIds: groups.map((group) => referenceCatalogProfileId(group.handle)),
-      archiveIds: groups.map((group) => referenceCatalogArchiveId(group.handle)),
-      providerJobIds,
-      researchTargetIds: groups.map((group) => referenceCatalogResearchTargetId(group.handle)),
-      templateMiningJobIds: groups.map((group) => referenceCatalogTemplateJobId(group.handle)),
+      manifestPaths,
+      videosPlanned: catalogGroups.reduce((count, group) => count + group.videos.length, 0),
+      assetsPlanned: manifestGroups.reduce((count, group) => count + group.assets.length, 0),
+      referenceProfileIds: [
+        ...catalogGroups.map((group) => referenceCatalogProfileId(group.handle)),
+        ...manifestGroups.map((group) => referenceAssetProfileId(group.provider)),
+      ],
+      archiveIds: [
+        ...catalogGroups.map((group) => referenceCatalogArchiveId(group.handle)),
+        ...manifestGroups.map((group) => referenceAssetArchiveId(group.provider)),
+      ],
+      providerJobIds: [
+        ...catalogGroups.map((group) => referenceCatalogProviderJobId(group.handle)),
+        ...manifestGroups.map((group) => referenceAssetProviderJobId(group.provider)),
+      ],
+      researchTargetIds: [
+        ...catalogGroups.map((group) => referenceCatalogResearchTargetId(group.handle)),
+        ...manifestGroups.map((group) => referenceAssetResearchTargetId(group.provider)),
+      ],
+      templateMiningJobIds: [
+        ...catalogGroups.map((group) => referenceCatalogTemplateJobId(group.handle)),
+        ...manifestGroups.map((group) => referenceAssetTemplateJobId(group.provider)),
+      ],
       errors,
       warnings,
       state: importedState,
@@ -618,11 +642,24 @@ const DEFAULT_REFERENCE_CATALOG_ROOTS = [
   "data/tiktok-catalogue/mynameissico",
 ]
 
+const DEFAULT_REFERENCE_ASSET_MANIFEST_PATHS = [
+  "data/ugc-studio/reference-assets/higgsfield/manifest.json",
+  "data/ugc-studio/reference-assets/arcads/manifest.json",
+]
+
 const REFERENCE_CATALOG_GUARDRAILS = [
   "Metadata-only local catalogue import; do not open, copy, upload, or reuse source media.",
   "Do not persist expiring CDN URLs, request headers, cookies, or format URLs from info JSON.",
   "Use only abstract mechanics, local path provenance, duration, engagement counts, and rewritten hooks.",
   "Replace creator identity, face, voice, exact captions, source pixels, brand marks, and audio.",
+]
+
+const REFERENCE_ASSET_MANIFEST_GUARDRAILS = [
+  "Manifest JSON import only; do not open, copy, upload, or reuse downloaded media bytes.",
+  "Public provider assets are inspiration/reference only and are not direct generation inputs.",
+  "Retain local paths, source pages, asset URLs, rights notes, and byte/hash metadata for provenance.",
+  "Use abstract mechanics and clean-room summaries only unless a manifest explicitly records cleared rights.",
+  "Replace provider demos, creator identity, product pixels, actor likeness, voice, copy, brand marks, and audio.",
 ]
 
 interface ReferenceCatalogGroup {
@@ -632,6 +669,22 @@ interface ReferenceCatalogGroup {
   readonly lane: "brainrot" | "ugc-ads"
   readonly videos: readonly UgcReferenceCatalogVideo[]
 }
+
+interface ReferenceAssetManifestGroup {
+  readonly manifestPath: string
+  readonly provider: string
+  readonly displayName: string
+  readonly lane: "ugc-ads"
+  readonly sourcePages: readonly string[]
+  readonly rightsSummary: string
+  readonly useGuidance: string
+  readonly captureTimestamp: string | null
+  readonly assets: readonly UgcReferenceManifestAsset[]
+  readonly blockedAssetCount: number
+  readonly failedDownloadCount: number
+  readonly evidenceFileCount: number
+}
+
 
 function readReferenceCatalogGroups(cwd: string, roots: readonly string[], warnings: string[]): readonly ReferenceCatalogGroup[] {
   const groups: ReferenceCatalogGroup[] = []
@@ -716,23 +769,120 @@ function readReferenceCatalogVideo(cwd: string, root: string, absoluteRoot: stri
   }
 }
 
-function applyReferenceCatalogGroups(state: UgcLocalState, groups: readonly ReferenceCatalogGroup[], now: string): UgcLocalState {
-  if (groups.length === 0) return state
-  const referenceProfiles = upsertById(state.workspace.referenceProfiles, groups.map((group) => referenceCatalogProfile(state.workspace.id, group)))
-  const archives = upsertById(state.referenceArchives, groups.map((group) => referenceCatalogArchive(state.workspace.id, group, now)))
-  const researchTargets = upsertById(state.researchTargets, groups.map((group) => referenceCatalogResearchTarget(state.workspace.id, group, now)))
-  const templateMiningJobs = upsertById(state.templateMiningJobs, groups.map((group) => referenceCatalogTemplateJob(state.workspace.id, group, now)))
-  const providerJobs = upsertById(state.providerJobs, groups.map((group) => referenceCatalogProviderJob(state.workspace.id, group, now)))
+function readReferenceAssetManifestGroups(cwd: string, manifestPaths: readonly string[], warnings: string[]): readonly ReferenceAssetManifestGroup[] {
+  const groups: ReferenceAssetManifestGroup[] = []
+  for (const manifestPath of manifestPaths) {
+    const absoluteManifestPath = resolve(cwd, manifestPath)
+    const parsed = readJsonFile(absoluteManifestPath)
+    if (!isRecord(parsed)) {
+      warnings.push(`Reference asset manifest is unreadable: ${manifestPath}`)
+      continue
+    }
+    const provider = slug(firstString(parsed.provider) ?? basename(dirname(absoluteManifestPath)))
+    const sourcePages = stringArray(parsed.sourcePages).length > 0 ? stringArray(parsed.sourcePages) : stringArray(parsed.source_pages)
+    const rightsSummary = firstString(parsed.rightsSummary, parsed.rights_notes, parsed.usage_boundary)
+      ?? summarizeRightsRecord(parsed.robots_and_rights_notes)
+      ?? `${provider} public provider asset manifest; reference/inspiration metadata only.`
+    const useGuidance = firstString(parsed.useGuidance)
+      ?? summarizeRightsRecord(parsed.robots_and_rights_notes)
+      ?? "Reference/inspiration only; do not use as a direct generation input or reusable output asset."
+    const rawAssets = Array.isArray(parsed.assets) ? parsed.assets : []
+    const assets = rawAssets
+      .map((asset, index) => readReferenceManifestAsset(cwd, manifestPath, provider, rightsSummary, asset, index, warnings))
+      .filter(isReferenceManifestAsset)
+    if (assets.length === 0) {
+      warnings.push(`Reference asset manifest has no readable assets: ${manifestPath}`)
+      continue
+    }
+    groups.push({
+      manifestPath,
+      provider,
+      displayName: providerDisplayName(provider),
+      lane: "ugc-ads",
+      sourcePages,
+      rightsSummary,
+      useGuidance,
+      captureTimestamp: firstString(parsed.captureTimestamp, parsed.capture_timestamp),
+      assets,
+      blockedAssetCount: arrayLength(parsed.blockedAssets) + arrayLength(parsed.blocked_assets),
+      failedDownloadCount: arrayLength(parsed.failedDownloads) + arrayLength(parsed.failed_downloads),
+      evidenceFileCount: arrayLength(parsed.evidenceFiles) + arrayLength(parsed.evidence_files),
+    })
+  }
+  return groups
+}
+
+function readReferenceManifestAsset(
+  cwd: string,
+  manifestPath: string,
+  provider: string,
+  manifestRights: string,
+  value: JsonValue,
+  index: number,
+  warnings: string[],
+): UgcReferenceManifestAsset | null {
+  if (!isRecord(value)) {
+    warnings.push(`Reference asset manifest ${manifestPath} has a non-object asset at index ${index}.`)
+    return null
+  }
+  const rawId = firstString(value.id) ?? `asset-${index + 1}`
+  const sourceUrl = firstString(value.sourcePageUrl, value.source_page_url, value.sourceUrl, value.source_url)
+  const assetUrl = firstString(value.assetUrl, value.asset_url, value.finalUrl, value.final_url)
+  const localPath = normalizeManifestLocalPath(cwd, manifestPath, firstString(value.localPath, value.local_path, value.local))
+  const title = firstString(value.title, value.title_label, value.label, value.notes) ?? rawId
+  const mediaType = firstString(value.mediaType, value.media_type, value.contentType, value.content_type) ?? "application/octet-stream"
+  const rights = firstString(value.rights, value.rights_notes) ?? manifestRights
+  const directGenerationInput = manifestAllowsDirectGeneration(value)
+  return {
+    schemaVersion: "ugc-studio.reference-manifest-asset.v1",
+    id: `reference_asset_${slug(provider)}_${slug(rawId)}`,
+    provider,
+    title,
+    mediaType,
+    localPath,
+    sourceUrl,
+    assetUrl,
+    manifestPath,
+    byteLength: firstFiniteNumber(value.bytes, value.byte_length, value.byteLength),
+    sha256: firstString(value.sha256),
+    captureTimestamp: firstString(value.captureTimestamp, value.capture_timestamp),
+    rights,
+    provenance: `Imported from ${manifestPath}; source page and asset URLs are retained as metadata only.`,
+    sourcePolicy: "metadata-only",
+    referenceOnly: !directGenerationInput,
+    directGenerationInput,
+    guardrails: REFERENCE_ASSET_MANIFEST_GUARDRAILS,
+  }
+}
+
+
+function applyReferenceCatalogImports(
+  state: UgcLocalState,
+  catalogGroups: readonly ReferenceCatalogGroup[],
+  manifestGroups: readonly ReferenceAssetManifestGroup[],
+  now: string,
+): UgcLocalState {
+  if (catalogGroups.length === 0 && manifestGroups.length === 0) return state
+  const catalogReferenceProfiles = catalogGroups.map((group) => referenceCatalogProfile(state.workspace.id, group))
+  const manifestReferenceProfiles = manifestGroups.map((group) => referenceAssetProfile(state.workspace.id, group))
+  const catalogArchives = catalogGroups.map((group) => referenceCatalogArchive(state.workspace.id, group, now))
+  const manifestArchives = manifestGroups.map((group) => referenceAssetArchive(state.workspace.id, group, now))
+  const catalogResearchTargets = catalogGroups.map((group) => referenceCatalogResearchTarget(state.workspace.id, group, now))
+  const manifestResearchTargets = manifestGroups.map((group) => referenceAssetResearchTarget(state.workspace.id, group, now))
+  const catalogTemplateJobs = catalogGroups.map((group) => referenceCatalogTemplateJob(state.workspace.id, group, now))
+  const manifestTemplateJobs = manifestGroups.map((group) => referenceAssetTemplateJob(state.workspace.id, group, now))
+  const catalogProviderJobs = catalogGroups.map((group) => referenceCatalogProviderJob(state.workspace.id, group, now))
+  const manifestProviderJobs = manifestGroups.map((group) => referenceAssetProviderJob(state.workspace.id, group, now))
   return {
     ...state,
     workspace: {
       ...state.workspace,
-      referenceProfiles,
+      referenceProfiles: upsertById(state.workspace.referenceProfiles, [...catalogReferenceProfiles, ...manifestReferenceProfiles]),
     },
-    referenceArchives: archives,
-    researchTargets,
-    templateMiningJobs,
-    providerJobs,
+    referenceArchives: upsertById(state.referenceArchives, [...catalogArchives, ...manifestArchives]),
+    researchTargets: upsertById(state.researchTargets, [...catalogResearchTargets, ...manifestResearchTargets]),
+    templateMiningJobs: upsertById(state.templateMiningJobs, [...catalogTemplateJobs, ...manifestTemplateJobs]),
+    providerJobs: upsertById(state.providerJobs, [...catalogProviderJobs, ...manifestProviderJobs]),
   }
 }
 
@@ -851,6 +1001,7 @@ function referenceCatalogArchive(workspaceId: string, group: ReferenceCatalogGro
     ],
     notes: ["Seeded from local TikTok catalogue metadata only."],
     catalogVideos: group.videos,
+    referenceAssets: [],
   }
 }
 
@@ -941,6 +1092,212 @@ function referenceCatalogProviderJob(workspaceId: string, group: ReferenceCatalo
   }
 }
 
+function referenceAssetProfile(workspaceId: string, group: ReferenceAssetManifestGroup): ReferenceProfile {
+  const referenceProfileId = referenceAssetProfileId(group.provider)
+  return {
+    id: referenceProfileId,
+    platform: "internal-pack",
+    handle: group.provider,
+    displayName: `${group.displayName} public inspiration asset manifest`,
+    rightsStatus: "public-research-target",
+    archiveStatus: "sampled",
+    styleLane: group.lane,
+    useCase: "UGC ads inspiration mechanics from public provider demo asset metadata.",
+    cleanRoomBoundary: REFERENCE_ASSET_MANIFEST_GUARDRAILS,
+    sampleClips: group.assets.map((asset) => ({
+      id: asset.id,
+      title: asset.title,
+      sourceUrl: asset.sourceUrl ?? asset.assetUrl,
+      durationSeconds: 0,
+      storagePolicy: "store-metadata-only",
+      extractedFields: [
+        "manifest path",
+        "local path",
+        "source URL",
+        "asset URL",
+        "media type",
+        "rights notes",
+        "hash and byte length",
+      ],
+    })),
+    extractedMechanics: {
+      poseTiming: "Use only abstract motion, framing, and editing mechanics observed from manifest metadata or later clean-room review.",
+      gestureRhythm: "Provider demo assets remain provenance references; local media files are not opened by import.",
+      shotStructure: [`workspace:${workspaceId}`, `provider:${group.provider}`, "reference-only provider asset manifest"],
+      captionTemplate: "Rewrite all captions and copy; provider demo text is not reusable source copy.",
+      hookFamilies: ["AI UGC demo proof", "product transformation", "creator-style ad setup"],
+      ctaPatterns: ["proof-led CTA", "tool capability CTA", "product outcome CTA"],
+      nonAdPatterns: ["no direct media reuse", "no provider demo cloning", "no actor likeness reuse"],
+    },
+    remixFields: [
+      {
+        id: `remix_field_${group.provider}_manifest_mechanics`,
+        label: "Provider demo mechanics",
+        mode: "abstract",
+        sourceField: "reference.referenceAssets.provenance",
+        targetField: "candidate.recipe.shotStructure",
+        rationale: "Use public provider demos only as abstract inspiration for clean-room shot planning.",
+        confidence: 0.7,
+      },
+      {
+        id: `remix_field_${group.provider}_local_assets`,
+        label: "Provider local media",
+        mode: "blocked",
+        sourceField: "reference.referenceAssets.localPath",
+        targetField: "candidate.rawMedia",
+        rationale: "Local paths prove provenance but imported assets are reference-only and not direct generation inputs.",
+        confidence: 1,
+      },
+    ],
+  }
+}
+
+function referenceAssetArchive(workspaceId: string, group: ReferenceAssetManifestGroup, now: string): UgcReferenceArchive {
+  const referenceProfileId = referenceAssetProfileId(group.provider)
+  return {
+    schemaVersion: "ugc-studio.reference-archive.v1",
+    id: referenceAssetArchiveId(group.provider),
+    workspaceId,
+    referenceProfileId,
+    title: `${group.displayName} provider inspiration asset archive`,
+    rightsStatus: "public-research-target",
+    archiveStatus: "sampled",
+    createdAt: now,
+    updatedAt: now,
+    sourcePolicy: "metadata-only",
+    preservedMechanics: toJsonValue({
+      lane: group.lane,
+      provider: group.provider,
+      manifestPath: group.manifestPath,
+      sourcePages: group.sourcePages,
+      assets: group.assets.length,
+      blockedAssets: group.blockedAssetCount,
+      failedDownloads: group.failedDownloadCount,
+      evidenceFiles: group.evidenceFileCount,
+      importedFields: ["manifest path", "localPath", "sourceUrl", "assetUrl", "mediaType", "rights", "byteLength", "sha256"],
+      excludedFields: ["media bytes", "cookies", "headers", "direct generation inputs"],
+    }),
+    sampleClipIds: group.assets.map((asset) => asset.id),
+    swappedFields: ["provider demo", "actor likeness", "voice", "exact copy", "product", "CTA"],
+    blockedFields: ["source pixels", "source audio", "provider demo reuse", "actor cloning", "brand marks", "direct generation input"],
+    guardrails: REFERENCE_ASSET_MANIFEST_GUARDRAILS,
+    candidateFormatOutputs: [
+      {
+        id: `format_${referenceProfileId}_manifest_template`,
+        title: `${group.displayName} reference-only provider mechanics template`,
+        kind: "format-template",
+        summary: "Use provider asset manifest metadata to plan clean-room UGC ad mechanics without reading or uploading media bytes.",
+        stageIds: ["stage_reference_profile", "stage_format", "stage_hook"],
+        candidateIds: [],
+        manifestJson: toJsonValue({
+          lane: group.lane,
+          provider: group.provider,
+          sourcePolicy: "metadata-only",
+          referenceOnly: group.assets.every((asset) => asset.referenceOnly),
+          directGenerationInput: group.assets.some((asset) => asset.directGenerationInput),
+          manifestPath: group.manifestPath,
+          assets: group.assets.map((asset) => referenceAssetManifestSummary(asset)),
+        }),
+      },
+    ],
+    notes: [group.rightsSummary, group.useGuidance],
+    catalogVideos: [],
+    referenceAssets: group.assets,
+  }
+}
+
+function referenceAssetResearchTarget(workspaceId: string, group: ReferenceAssetManifestGroup, now: string): UgcResearchTarget {
+  return {
+    schemaVersion: "ugc-studio.research-target.v1",
+    id: referenceAssetResearchTargetId(group.provider),
+    workspaceId,
+    platform: "web",
+    niche: `${group.displayName} public provider inspiration mechanics`,
+    query: `${group.displayName} public demo asset manifest clean-room UGC ads mechanics`,
+    status: "decomposed",
+    priority: 2,
+    sourcePolicy: "metadata-only",
+    createdAt: now,
+    updatedAt: now,
+    templateJobIds: [referenceAssetTemplateJobId(group.provider)],
+    notes: [
+      `Local manifest import from ${group.manifestPath}; manifest JSON only, media bytes not read.`,
+      group.rightsSummary,
+      "Reference-only public inspiration assets; not direct generation inputs.",
+    ],
+  }
+}
+
+function referenceAssetTemplateJob(workspaceId: string, group: ReferenceAssetManifestGroup, now: string): UgcTemplateMiningJob {
+  return {
+    schemaVersion: "ugc-studio.template-mining-job.v1",
+    id: referenceAssetTemplateJobId(group.provider),
+    workspaceId,
+    researchTargetId: referenceAssetResearchTargetId(group.provider),
+    status: "ready",
+    createdAt: now,
+    updatedAt: now,
+    templateSpec: {
+      schemaVersion: "ugc-studio.clean-room-template.v1",
+      id: `template_${group.provider}_reference_assets`,
+      title: `${group.displayName} reference-only provider asset template`,
+      category: "format",
+      preservedMechanics: toJsonValue({
+        lane: group.lane,
+        provider: group.provider,
+        sourcePolicy: "metadata-only",
+        referenceOnly: group.assets.every((asset) => asset.referenceOnly),
+        directGenerationInput: group.assets.some((asset) => asset.directGenerationInput),
+        manifestPath: group.manifestPath,
+        assetCount: group.assets.length,
+      }),
+      swapSlots: ["synthetic persona", "product", "hook copy", "caption copy", "voice", "CTA", "brand visuals"],
+      blockedFields: ["source face", "source voice", "exact captions", "source pixels", "source audio", "provider brand marks"],
+      proofNotes: REFERENCE_ASSET_MANIFEST_GUARDRAILS,
+    },
+    candidateIds: [],
+    error: null,
+  }
+}
+
+function referenceAssetProviderJob(workspaceId: string, group: ReferenceAssetManifestGroup, now: string): UgcProviderJob {
+  return {
+    schemaVersion: "ugc-studio.provider-job.v1",
+    id: referenceAssetProviderJobId(group.provider),
+    workspaceId,
+    provider: "local",
+    operation: "reference-asset-manifest-import",
+    mode: "dry-run",
+    status: "completed",
+    createdAt: now,
+    updatedAt: now,
+    targetIds: [referenceAssetProfileId(group.provider), referenceAssetArchiveId(group.provider)],
+    spendCapUsd: 0,
+    estimatedCostUsd: 0,
+    request: toJsonValue({
+      sourcePolicy: "metadata-only",
+      referenceOnly: group.assets.every((asset) => asset.referenceOnly),
+      directGenerationInput: group.assets.some((asset) => asset.directGenerationInput),
+      lane: group.lane,
+      provider: group.provider,
+      manifestPath: group.manifestPath,
+      sourcePages: group.sourcePages,
+      rightsSummary: group.rightsSummary,
+      useGuidance: group.useGuidance,
+      assetCount: group.assets.length,
+      blockedAssetCount: group.blockedAssetCount,
+      failedDownloadCount: group.failedDownloadCount,
+      evidenceFileCount: group.evidenceFileCount,
+      assets: group.assets.map((asset) => referenceAssetManifestSummary(asset)),
+      excludedFields: ["media bytes", "cookies", "headers", "direct generation inputs"],
+    }),
+    response: null,
+    artifactPaths: [group.manifestPath],
+    error: null,
+  }
+}
+
+
 function referenceCatalogProfileId(handle: string): string {
   return `reference_tiktok_${slug(handle)}`
 }
@@ -964,6 +1321,90 @@ function referenceCatalogTemplateJobId(handle: string): string {
 function referenceCatalogProviderJobId(handle: string): string {
   return `job_local_reference_catalog_import_${slug(handle)}`
 }
+
+function referenceAssetProfileId(provider: string): string {
+  return `reference_provider_${slug(provider)}_assets`
+}
+
+function referenceAssetArchiveId(provider: string): string {
+  return `archive_${referenceAssetProfileId(provider)}`
+}
+
+function referenceAssetResearchTargetId(provider: string): string {
+  return `research_provider_${slug(provider)}_reference_assets`
+}
+
+function referenceAssetTemplateJobId(provider: string): string {
+  return `template_job_provider_${slug(provider)}_reference_assets`
+}
+
+function referenceAssetProviderJobId(provider: string): string {
+  return `job_local_reference_asset_manifest_import_${slug(provider)}`
+}
+
+function referenceAssetManifestSummary(asset: UgcReferenceManifestAsset): JsonValue {
+  return toJsonValue({
+    id: asset.id,
+    provider: asset.provider,
+    title: asset.title,
+    mediaType: asset.mediaType,
+    localPath: asset.localPath,
+    sourceUrl: asset.sourceUrl,
+    assetUrl: asset.assetUrl,
+    manifestPath: asset.manifestPath,
+    byteLength: asset.byteLength,
+    sha256: asset.sha256,
+    rights: asset.rights,
+    sourcePolicy: asset.sourcePolicy,
+    referenceOnly: asset.referenceOnly,
+    directGenerationInput: asset.directGenerationInput,
+  })
+}
+
+function providerDisplayName(provider: string): string {
+  if (provider === "higgsfield") return "Higgsfield"
+  if (provider === "arcads") return "Arcads"
+  return provider
+    .split("_")
+    .filter((part) => part.length > 0)
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(" ")
+}
+
+function stringArray(value: JsonValue | undefined): readonly string[] {
+  if (!Array.isArray(value)) return []
+  return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => item.trim())
+}
+
+function arrayLength(value: JsonValue | undefined): number {
+  return Array.isArray(value) ? value.length : 0
+}
+
+function summarizeRightsRecord(value: JsonValue | undefined): string | null {
+  if (!isRecord(value)) return null
+  const parts = Object.values(value).filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+  return parts.length > 0 ? parts.join(" ") : null
+}
+
+function normalizeManifestLocalPath(cwd: string, manifestPath: string, localPath: string | null): string | null {
+  if (!localPath) return null
+  if (localPath.startsWith("http://") || localPath.startsWith("https://")) return null
+  if (localPath.startsWith("data/")) return normalizeRelativePath(cwd, localPath)
+  return normalizeRelativePath(cwd, resolve(dirname(resolve(cwd, manifestPath)), localPath))
+}
+
+function manifestAllowsDirectGeneration(value: JsonValue): boolean {
+  if (!isRecord(value)) return false
+  return value.directGenerationInput === true
+    || value.direct_generation_input === true
+    || value.generationInputAllowed === true
+    || value.generation_input_allowed === true
+}
+
+function isReferenceManifestAsset(value: UgcReferenceManifestAsset | null): value is UgcReferenceManifestAsset {
+  return value !== null
+}
+
 
 function upsertById<T extends { readonly id: string }>(existing: readonly T[], incoming: readonly T[]): readonly T[] {
   const incomingIds = new Set(incoming.map((item) => item.id))
@@ -1077,12 +1518,13 @@ function normalizeLocalState(state: UgcLocalState): UgcLocalState {
           candidateFormatOutputs: existing.candidateFormatOutputs ?? defaultArchive.candidateFormatOutputs,
           notes: existing.notes ?? defaultArchive.notes,
           catalogVideos: existing.catalogVideos ?? defaultArchive.catalogVideos,
+          referenceAssets: existing.referenceAssets ?? defaultArchive.referenceAssets,
         }
       : defaultArchive
   })
-  const orphanArchives = state.referenceArchives.filter((archive) => (
-    !state.workspace.referenceProfiles.some((referenceProfile) => referenceProfile.id === archive.referenceProfileId)
-  ))
+  const orphanArchives = state.referenceArchives
+    .filter((archive) => !state.workspace.referenceProfiles.some((referenceProfile) => referenceProfile.id === archive.referenceProfileId))
+    .map((archive) => ({ ...archive, referenceAssets: archive.referenceAssets ?? [] }))
   return {
     ...state,
     referenceArchives: [...referenceArchives, ...orphanArchives],
@@ -1326,6 +1768,18 @@ function validateWorkspaceBundle(bundle: UgcWorkspaceBundle): { readonly errors:
       }
       if (video.paths.poster && (video.paths.poster.startsWith("http://") || video.paths.poster.startsWith("https://"))) {
         errors.push(`Reference catalog video ${video.id} poster path must be local.`)
+      }
+    }
+    const referenceAssets = archive.referenceAssets ?? []
+    for (const asset of referenceAssets) {
+      if (asset.sourcePolicy !== "metadata-only" && asset.sourcePolicy !== "abstract-mechanics") {
+        errors.push(`Reference manifest asset ${asset.id} must be metadata-only or abstract-mechanics.`)
+      }
+      if (asset.referenceOnly === asset.directGenerationInput) {
+        errors.push(`Reference manifest asset ${asset.id} must be either reference-only or explicitly direct-generation allowed.`)
+      }
+      if (asset.localPath && (asset.localPath.startsWith("http://") || asset.localPath.startsWith("https://"))) {
+        errors.push(`Reference manifest asset ${asset.id} localPath must be local.`)
       }
     }
   }

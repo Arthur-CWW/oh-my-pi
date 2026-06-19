@@ -55,6 +55,47 @@ describe("UgcJsonStore", () => {
     expect(JSON.stringify(providerJob?.request)).not.toContain("Cookie")
   })
 
+  test("plans and imports provider reference asset manifests as metadata-only guardrail records", () => {
+    const store = createStore()
+    const higgsfieldManifest = writeProviderManifestFixture(store.config.cwd, "data/ugc-studio/reference-assets/higgsfield/manifest.json", "higgsfield")
+    const arcadsManifest = writeProviderManifestFixture(store.config.cwd, "data/ugc-studio/reference-assets/arcads/manifest.json", "arcads")
+    const initialReferenceProfileCount = store.read().workspace.referenceProfiles.length
+
+    const plan = store.planReferenceCatalogImport({ roots: [], manifestPaths: [higgsfieldManifest, arcadsManifest] })
+
+    expect(plan.valid).toBe(true)
+    expect(plan.dryRun).toBe(true)
+    expect(plan.imported).toBe(false)
+    expect(plan.roots).toEqual([])
+    expect(plan.manifestPaths).toEqual([higgsfieldManifest, arcadsManifest])
+    expect(plan.videosPlanned).toBe(0)
+    expect(plan.assetsPlanned).toBe(2)
+    expect(store.read().workspace.referenceProfiles.length).toBe(initialReferenceProfileCount)
+
+    const imported = store.importReferenceCatalog({ roots: [], manifestPaths: [higgsfieldManifest, arcadsManifest] })
+    const state = imported.state
+    const higgsfieldArchive = state?.referenceArchives.find((item) => item.id === "archive_reference_provider_higgsfield_assets")
+    const arcadsArchive = state?.referenceArchives.find((item) => item.id === "archive_reference_provider_arcads_assets")
+    const providerJob = state?.providerJobs.find((job) => job.id === "job_local_reference_asset_manifest_import_higgsfield")
+    const bundle = store.exportWorkspaceBundle({ label: "Provider reference manifest bundle" })
+
+    expect(imported.valid).toBe(true)
+    expect(imported.imported).toBe(true)
+    expect(higgsfieldArchive?.sourcePolicy).toBe("metadata-only")
+    expect(higgsfieldArchive?.catalogVideos).toEqual([])
+    expect(higgsfieldArchive?.referenceAssets[0]?.localPath).toBe("data/ugc-studio/reference-assets/higgsfield/marketing-slides/hyper.mp4")
+    expect(higgsfieldArchive?.referenceAssets[0]?.sourceUrl).toBe("https://higgsfield.ai/marketing-studio-intro")
+    expect(higgsfieldArchive?.referenceAssets[0]?.assetUrl).toBe("https://static.higgsfield.ai/marketing/slides/hyper-mini.mp4")
+    expect(higgsfieldArchive?.referenceAssets[0]?.referenceOnly).toBe(true)
+    expect(higgsfieldArchive?.referenceAssets[0]?.directGenerationInput).toBe(false)
+    expect(arcadsArchive?.referenceAssets[0]?.localPath).toBe("data/ugc-studio/reference-assets/arcads/arcads-og-image.png")
+    expect(arcadsArchive?.referenceAssets[0]?.sourceUrl).toBe("https://www.arcads.ai/")
+    expect(providerJob?.artifactPaths).toEqual([higgsfieldManifest])
+    expect(JSON.stringify(providerJob?.request)).toContain("https://static.higgsfield.ai/marketing/slides/hyper-mini.mp4")
+    expect(bundle.shardManifest.localAssets.referenceCatalog).toEqual([])
+  })
+
+
   test("default reference catalog roots warn on missing roots and import readable records", () => {
     const store = createStore()
     const root = writeCatalogFixture(store.config.cwd, "data/tiktok-catalogue/mynameissico")
@@ -469,6 +510,62 @@ function writeCatalogVideo(root: string, stem: string, id: string, views: number
   })}\n`)
   writeFileSync(resolve(root, `${stem}.jpg`), "poster")
   writeFileSync(resolve(root, `${stem}.mp4`), "video")
+}
+
+function writeProviderManifestFixture(cwd: string, manifestPath: string, provider: "higgsfield" | "arcads"): string {
+  const absoluteManifestPath = resolve(cwd, manifestPath)
+  mkdirSync(resolve(absoluteManifestPath, ".."), { recursive: true })
+  if (provider === "higgsfield") {
+    writeFileSync(absoluteManifestPath, `${JSON.stringify({
+      provider,
+      captureTimestamp: "2026-06-19T00:00:00.000Z",
+      manifestPath,
+      sourcePages: ["https://higgsfield.ai/marketing-studio-intro"],
+      rightsSummary: "Public Higgsfield fixture asset for reference/inspiration only; no rights grant.",
+      useGuidance: "Metadata only; not a direct generation input.",
+      assets: [
+        {
+          id: "marketing-slide-hyper-video",
+          title: "Hyper Motion",
+          assetUrl: "https://static.higgsfield.ai/marketing/slides/hyper-mini.mp4",
+          local: "marketing-slides/hyper.mp4",
+          localPath: "data/ugc-studio/reference-assets/higgsfield/marketing-slides/hyper.mp4",
+          mediaType: "video/mp4",
+          sourcePageUrl: "https://higgsfield.ai/marketing-studio-intro",
+          bytes: 123,
+          sha256: "fixture-higgsfield-sha",
+          rights: "Public fixture; reference-only.",
+        },
+      ],
+      blockedAssets: [{ id: "blocked-higgsfield-demo" }],
+    })}\n`)
+    return manifestPath
+  }
+  writeFileSync(absoluteManifestPath, `${JSON.stringify({
+    provider,
+    capture_timestamp: "2026-06-19T00:00:00.000Z",
+    source_pages: ["https://www.arcads.ai/"],
+    robots_and_rights_notes: {
+      terms: "Arcads fixture terms note; reference/inspiration only.",
+      usage_boundary: "Do not use as a direct generation input.",
+    },
+    assets: [
+      {
+        id: "arcads-og-image",
+        source_url: "https://www.arcads.ai/",
+        asset_url: "https://cdn.example.invalid/arcads-og-image.png",
+        local_path: "data/ugc-studio/reference-assets/arcads/arcads-og-image.png",
+        media_type: "image/png",
+        title_label: "Arcads OpenGraph marketing image",
+        byte_length: 456,
+        rights_notes: "Public fixture; reference-only.",
+      },
+    ],
+    blocked_assets: [{ id: "blocked-arcads-avatar" }],
+    failed_downloads: [{ id: "forbidden-demo" }],
+    evidence_files: [{ id: "page-evidence" }],
+  })}\n`)
+  return manifestPath
 }
 
 function basenameForRoot(root: string): string {

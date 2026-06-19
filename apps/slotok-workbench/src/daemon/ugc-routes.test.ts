@@ -3,6 +3,7 @@ import { mkdtempSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"
 import { describe, expect, test } from "vitest"
+import type { CodexAnalyzeInput, CodexAnalyzeResult, CodexLiveOptions } from "@wirebabel/ugc-cli"
 import { UgcJsonStore } from "./ugc-json-store"
 import { routeUgc } from "./ugc-routes"
 import type { CodexVideoFrameExtractor } from "./codex-video-frames"
@@ -213,6 +214,41 @@ describe("routeUgc", () => {
     expect(patchedJob?.error).toContain("credit cap")
   })
 
+  test("surfaces mismatched workspace bundle dry-run errors without mutating route state", async () => {
+    const store = createStore()
+    const initial = store.read()
+    const bundle = store.exportWorkspaceBundle({ label: "Route mismatched bundle" })
+    const mismatchedBundle = {
+      ...bundle,
+      workspaceId: "workspace_other_route",
+      state: {
+        ...bundle.state,
+        workspace: {
+          ...bundle.state.workspace,
+          id: "workspace_other_route",
+          title: "Imported Other Route Workspace",
+        },
+      },
+    }
+
+    const dryRunResponse = await routeUgc(jsonRequest("/api/ugc/workspace/bundles/import", {
+      bundle: mismatchedBundle,
+      dryRun: true,
+    }), store)
+    const dryRun = await dryRunResponse?.json() as {
+      readonly valid?: boolean
+      readonly dryRun?: boolean
+      readonly imported?: boolean
+      readonly errors?: readonly string[]
+    }
+
+    expect(dryRun.valid).toBe(false)
+    expect(dryRun.dryRun).toBe(true)
+    expect(dryRun.imported).toBe(false)
+    expect(dryRun.errors).toContain("Bundle workspace workspace_other_route does not match current workspace workspace_protein_bar_ads.")
+    expect(store.read()).toEqual(initial)
+  })
+
   test("plans and imports local TikTok reference catalog metadata through dry-run-first routes", async () => {
     const store = createStore()
     const root = await writeCatalogFixture(store.config.cwd, "data/tiktok-catalogue/pleometric")
@@ -252,6 +288,45 @@ describe("routeUgc", () => {
     expect(JSON.stringify(providerJob?.request)).not.toContain("https://cdn.example")
     expect(JSON.stringify(providerJob?.request)).not.toContain("Cookie")
   })
+
+  test("plans and imports provider reference asset manifests through existing reference catalog routes", async () => {
+    const store = createStore()
+    const higgsfieldManifest = await writeProviderManifestFixture(store.config.cwd, "data/ugc-studio/reference-assets/higgsfield/manifest.json", "higgsfield")
+
+    const planResponse = await routeUgc(jsonRequest("/api/ugc/reference-catalog/plan", { roots: [], manifestPaths: [higgsfieldManifest] }), store)
+    const plan = await planResponse?.json() as {
+      readonly valid?: boolean
+      readonly dryRun?: boolean
+      readonly videosPlanned?: number
+      readonly assetsPlanned?: number
+      readonly manifestPaths?: readonly string[]
+      readonly state?: UgcLocalState | null
+    }
+
+    expect(plan.valid).toBe(true)
+    expect(plan.dryRun).toBe(true)
+    expect(plan.videosPlanned).toBe(0)
+    expect(plan.assetsPlanned).toBe(1)
+    expect(plan.manifestPaths).toEqual([higgsfieldManifest])
+    expect(plan.state).toBeNull()
+
+    const importResponse = await routeUgc(jsonRequest("/api/ugc/reference-catalog/import", { roots: [], manifestPaths: [higgsfieldManifest] }), store)
+    const imported = await importResponse?.json() as {
+      readonly valid?: boolean
+      readonly imported?: boolean
+      readonly state?: UgcLocalState | null
+    }
+    const archive = imported.state?.referenceArchives.find((item) => item.id === "archive_reference_provider_higgsfield_assets")
+    const providerJob = imported.state?.providerJobs.find((job) => job.id === "job_local_reference_asset_manifest_import_higgsfield")
+
+    expect(imported.valid).toBe(true)
+    expect(imported.imported).toBe(true)
+    expect(archive?.referenceAssets[0]?.localPath).toBe("data/ugc-studio/reference-assets/higgsfield/marketing-slides/hyper.mp4")
+    expect(archive?.referenceAssets[0]?.referenceOnly).toBe(true)
+    expect(archive?.referenceAssets[0]?.directGenerationInput).toBe(false)
+    expect(providerJob?.artifactPaths).toEqual([higgsfieldManifest])
+  })
+
 
 
 
@@ -429,7 +504,7 @@ describe("routeUgc", () => {
     ])
   })
 
-  test("blocks live Codex video jobs from using local extracted frame URLs", async () => {
+  test("persists blocked live Codex video jobs instead of sending local frame URLs", async () => {
     const store = createStore()
     const mediaPath = resolve(store.config.workspaceDir, "incoming", "demo.mp4")
     const fakeExtractor: CodexVideoFrameExtractor = {
@@ -438,25 +513,174 @@ describe("routeUgc", () => {
       },
     }
 
-    await expect(routeUgc(jsonRequest("/api/ugc/codex/jobs", {
+    const response = await routeUgc(jsonRequest("/api/ugc/codex/jobs", {
       operation: "video-understand",
       mediaUrl: mediaPath,
+      referenceFrameUrls: ["file:///tmp/slotok/frames/frame-01.jpg"],
       live: true,
       maxSpendUsd: 0.25,
       apiKey: "test-key",
-    }), store, { codexFrameExtractor: fakeExtractor })).rejects.toThrow("externally reachable referenceFrameUrls")
+    }), store, { codexFrameExtractor: fakeExtractor })
+    const payload = await response?.json() as {
+      readonly job?: {
+        readonly mode?: string
+        readonly status?: string
+        readonly error?: string | null
+        readonly response?: { readonly phase?: string } | null
+      }
+      readonly state?: UgcLocalState
+      readonly error?: string
+    }
+
+    expect(response?.status).toBe(400)
+    expect(payload.job?.mode).toBe("live")
+    expect(payload.job?.status).toBe("blocked")
+    expect(payload.job?.error).toContain("externally reachable referenceFrameUrls")
+    expect(payload.job?.response?.phase).toBe("live-preparation")
+    expect(payload.state?.providerJobs[0]?.status).toBe("blocked")
   })
 
-
-  test("rejects live Codex analysis jobs without an explicit API key", async () => {
+  test("persists failed live Codex requirement and provider errors as provider jobs", async () => {
     const store = createStore()
 
-    await expect(routeUgc(jsonRequest("/api/ugc/codex/jobs", {
+    const missingKeyResponse = await routeUgc(jsonRequest("/api/ugc/codex/jobs", {
       operation: "image-understand",
-      mediaUrl: "file:///tmp/slotok/hook-frame.jpg",
+      mediaUrl: "https://cdn.example/hook-frame.jpg",
       live: true,
       maxSpendUsd: 0.25,
-    }), store)).rejects.toThrow("explicit apiKey")
+    }), store)
+    const missingKey = await missingKeyResponse?.json() as {
+      readonly job?: {
+        readonly status?: string
+        readonly error?: string | null
+        readonly request?: { readonly provider?: string }
+        readonly response?: { readonly phase?: string } | null
+      }
+    }
+
+    expect(missingKeyResponse?.status).toBe(400)
+    expect(missingKey.job?.status).toBe("failed")
+    expect(missingKey.job?.error).toContain("explicit apiKey")
+    expect(missingKey.job?.request?.provider).toBe("codex")
+    expect(missingKey.job?.response?.phase).toBe("live-requirements")
+
+    const failingRunner = async (_input: CodexAnalyzeInput, _options: CodexLiveOptions): Promise<CodexAnalyzeResult> => {
+      throw new Error("Codex HTTP 500: provider unavailable")
+    }
+    const providerErrorResponse = await routeUgc(jsonRequest("/api/ugc/codex/jobs", {
+      operation: "image-understand",
+      mediaUrl: "https://cdn.example/hook-frame.jpg",
+      live: true,
+      maxSpendUsd: 0.25,
+      apiKey: "test-key",
+    }), store, { codexAnalyzeRunner: failingRunner })
+    const providerError = await providerErrorResponse?.json() as {
+      readonly job?: {
+        readonly status?: string
+        readonly error?: string | null
+        readonly response?: { readonly phase?: string } | null
+      }
+      readonly state?: UgcLocalState
+    }
+
+    expect(providerErrorResponse?.status).toBe(502)
+    expect(providerError.job?.status).toBe("failed")
+    expect(providerError.job?.error).toContain("provider unavailable")
+    expect(providerError.job?.response?.phase).toBe("live-execution")
+    expect(providerError.state?.providerJobs[0]?.status).toBe("failed")
+  })
+
+  test("creates KIE dry-run plans from selected Codex analysis jobs", async () => {
+    const store = createStore()
+    const candidate = store.read().workspace.candidates[0]
+    if (!candidate) throw new Error("missing candidate")
+    const runner = async (input: CodexAnalyzeInput, _options: CodexLiveOptions): Promise<CodexAnalyzeResult> => ({
+      mode: "live",
+      prepared: {
+        provider: "codex",
+        endpoint: "POST /v1/chat/completions",
+        operation: input.operation,
+        model: input.model ?? "gpt-4.1-mini",
+        estimatedCostUsd: 0.01,
+        payload: {
+          model: input.model ?? "gpt-4.1-mini",
+          messages: [
+            { role: "system", content: "stub" },
+            { role: "user", content: [{ type: "text", text: input.prompt ?? "Analyze the hook" }, { type: "image_url", image_url: { url: input.mediaUrl } }] },
+          ],
+          max_tokens: input.maxOutputTokens ?? 900,
+          metadata: {
+            provider: "codex",
+            operation: input.operation,
+            mediaUrl: input.mediaUrl,
+            targetIds: input.targetIds ?? [],
+          },
+        },
+      },
+      response: {
+        choices: [{ message: { content: "Hook opens with a messy cold open, fast caption beat, then product proof." } }],
+      },
+    })
+    const analysisResponse = await routeUgc(jsonRequest("/api/ugc/codex/jobs", {
+      operation: "image-understand",
+      mediaUrl: "https://cdn.example/hook-frame.jpg",
+      prompt: "Extract hook, caption, and proof mechanics.",
+      targetIds: [candidate.id],
+      live: true,
+      maxSpendUsd: 0.25,
+      apiKey: "test-key",
+    }), store, { codexAnalyzeRunner: runner })
+    const analysis = await analysisResponse?.json() as {
+      readonly job?: { readonly id?: string }
+    }
+    const analysisJobId = analysis.job?.id ?? ""
+
+    const kieResponse = await routeUgc(jsonRequest("/api/ugc/kie/analysis-to-kie", {
+      analysisJobId,
+      lane: "ugc-ads",
+      targetId: candidate.id,
+      targetKind: "candidate",
+    }), store)
+    const planned = await kieResponse?.json() as {
+      readonly job?: {
+        readonly provider?: string
+        readonly operation?: string
+        readonly mode?: string
+        readonly status?: string
+        readonly request?: {
+          readonly operation?: string
+          readonly kieRequest?: {
+            readonly operation?: string
+            readonly prompt?: string
+            readonly imageUrl?: string
+            readonly referenceImageUrls?: readonly string[]
+          }
+          readonly analysisToKie?: {
+            readonly sourceJobId?: string
+            readonly lane?: string
+            readonly target?: { readonly id?: string; readonly kind?: string }
+          }
+        }
+      }
+      readonly prepared?: { readonly provider?: string; readonly operation?: string }
+      readonly state?: UgcLocalState
+    }
+
+    expect(kieResponse?.status).toBe(200)
+    expect(planned.job?.provider).toBe("kie")
+    expect(planned.job?.operation).toBe("analysis-to-kie")
+    expect(planned.job?.mode).toBe("dry-run")
+    expect(planned.job?.status).toBe("planned")
+    expect(planned.prepared?.provider).toBe("kie")
+    expect(planned.prepared?.operation).toBe("video-text")
+    expect(planned.job?.request?.kieRequest?.prompt).toContain("Product lane: ugc-ads")
+    expect(planned.job?.request?.kieRequest?.prompt).toContain("Hook opens with a messy cold open")
+    expect(planned.job?.request?.kieRequest?.imageUrl).toBeUndefined()
+    expect(planned.job?.request?.kieRequest?.referenceImageUrls).toBeUndefined()
+    expect(planned.job?.request?.analysisToKie?.sourceJobId).toBe(analysisJobId)
+    expect(planned.job?.request?.analysisToKie?.target?.id).toBe(candidate.id)
+    expect(planned.job?.request?.analysisToKie?.target?.kind).toBe("candidate")
+    expect(planned.state?.providerJobs[0]?.provider).toBe("kie")
   })
 
   test("returns null for routes owned by other daemon handlers", async () => {
@@ -515,4 +739,30 @@ async function writeCatalogVideo(root: string, stem: string, id: string, views: 
   })}\n`)
   await writeFile(resolve(root, `${stem}.jpg`), "poster")
   await writeFile(resolve(root, `${stem}.mp4`), "video")
+}
+
+async function writeProviderManifestFixture(cwd: string, manifestPath: string, provider: "higgsfield"): Promise<string> {
+  const absoluteManifestPath = resolve(cwd, manifestPath)
+  await mkdir(resolve(absoluteManifestPath, ".."), { recursive: true })
+  await writeFile(absoluteManifestPath, `${JSON.stringify({
+    provider,
+    captureTimestamp: "2026-06-19T00:00:00.000Z",
+    manifestPath,
+    sourcePages: ["https://higgsfield.ai/marketing-studio-intro"],
+    rightsSummary: "Public Higgsfield fixture asset for reference/inspiration only; no rights grant.",
+    useGuidance: "Metadata only; not a direct generation input.",
+    assets: [
+      {
+        id: "marketing-slide-hyper-video",
+        title: "Hyper Motion",
+        assetUrl: "https://static.higgsfield.ai/marketing/slides/hyper-mini.mp4",
+        localPath: "data/ugc-studio/reference-assets/higgsfield/marketing-slides/hyper.mp4",
+        mediaType: "video/mp4",
+        sourcePageUrl: "https://higgsfield.ai/marketing-studio-intro",
+        bytes: 123,
+        rights: "Public fixture; reference-only.",
+      },
+    ],
+  })}\n`)
+  return manifestPath
 }

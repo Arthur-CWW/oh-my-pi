@@ -228,13 +228,14 @@ Historical V1 proof reports show the local-first workflow slices are implemented
 - final-editor selected candidate, layer visibility/lock, clip timing/text/caption payload, JSON diff preview, and export manifests
 - developer graph derived from local workspace state with selected-node JSON
 - KIE dry-run/live-capped plan/create UI path
-- Codex image/video media-analysis planning with dry-run provider job persistence, selected-candidate analysis-results UI, prepared frame/artifact visibility, and explicit live API-key/spend gates
+- Codex image/video media-analysis planning with dry-run provider job persistence, selected-candidate analysis-results UI, prepared frame/artifact visibility, analysis-to-KIE dry-run planning contract, and explicit live API-key/spend gates
 
 Current phase ledger delta:
 
 - SQLite is the canonical workspace store under `data/ugc-studio/workspaces/<workspace_id>/workspace.sqlite`; JSON remains compatibility/export/import/backup only.
 - Preferred local reference catalog roots are `data/tiktok-catalogue/pleometric` and `data/tiktok-catalogue/mynameissico`.
 - Visual/manual QA should use `http://127.0.0.1:47521/ugc-studio/`, daemon `http://127.0.0.1:47522`, and the PID/log files under `artifacts/slotok-dev/`.
+- Public Higgsfield and Arcads assets are local reference/inspiration manifests only; pending reference-catalog `manifestPaths` planning/import should preserve provenance and rights notes and must not treat those assets as generation inputs unless a manifest explicitly allows it.
 - The current phase still needs parent verification after the active backend/data workers finish; do not treat this ledger update as a fresh passing gate.
 
 Proof files:
@@ -243,6 +244,8 @@ Proof files:
 - `docs/qa/slotok-visual-qa.md`
 - `docs/qa/slotok-analysis-results-ui.md`
 - `docs/qa/slotok-v1-goal-proof.md`
+- `docs/qa/slotok-provider-pipeline.md`
+- `docs/research/slotok-reference-assets.md`
 - `docs/qa/ugc-studio-reference-archive.md`
 - `docs/qa/ugc-studio-workspace-bundle.md`
 - `docs/qa/ugc-studio-provider-jobs.md`
@@ -285,6 +288,7 @@ Status: current phase proof target.
 - [ ] Parent verifies reference catalog import/selection can use `data/tiktok-catalogue/pleometric` and `data/tiktok-catalogue/mynameissico`.
 - [ ] Parent verifies missing catalog roots degrade safely without live scraping or provider calls.
 - [x] Historical proof covers clean-room reference mechanics archive editing without source-media cloning: `docs/qa/ugc-studio-reference-archive.md`.
+- [ ] Parent verifies public Higgsfield/Arcads manifests can be planned/imported through `POST /api/ugc/reference-catalog/plan` and `POST /api/ugc/reference-catalog/import` after the pending `manifestPaths` extension lands; while pending, parent inspects manifests directly and verifies existing reference-catalog `roots` planning does not live-scrape or promote public assets into provider inputs.
 
 ### Workspace Import/Export Bundle
 
@@ -302,6 +306,8 @@ Status: implemented in the historical V1 slice; re-verify against current provid
 - [x] KIE live generation remains explicit and capped.
 - [x] Codex media analysis is represented as a dry-run-first provider job with prepared frame/artifact metadata.
 - [ ] Parent verifies no KIE, Gemini, Jimeng, or Codex live spend occurs during current proof unless explicitly triggered through a live/capped action.
+- [ ] Parent verifies `POST /api/ugc/kie/analysis-to-kie` produces a dry-run KIE plan from selected candidate/Codex provider-job context after the route lands; while pending, parent verifies the same dry-run invariant through existing KIE plan/create surfaces without live generation.
+- [ ] Parent verifies Codex live analysis remains gated by explicit live intent, spend cap, API key, and reachable frame references; this phase does not claim live Codex success unless parent runs it separately.
 
 ### Batch Review Workflow
 
@@ -404,8 +410,8 @@ This goal is complete when the current V1 proof ledger shows:
 2. [ ] SQLite is the canonical local workspace store and JSON is limited to bundle/import/export/backup compatibility.
 3. [ ] the local workspace opens from the daemon-backed SQLite path.
 4. [ ] persona profile-bible edits persist and reload.
-5. [ ] abstract reference mechanics archives persist and can use the preferred catalog roots `data/tiktok-catalogue/pleometric` and `data/tiktok-catalogue/mynameissico` without live scraping.
-6. [ ] provider jobs are dry-run-first local records with request/response JSON, artifact paths, status, live mode, and spend cap fields; live KIE/Codex work is explicit and capped.
+5. [ ] abstract reference mechanics archives persist and can use the preferred catalog roots `data/tiktok-catalogue/pleometric` and `data/tiktok-catalogue/mynameissico`; after the pending manifest import extension is verified, public Higgsfield/Arcads manifests import only as reference/inspiration records with rights/provenance notes.
+6. [ ] provider jobs are dry-run-first local records with request/response JSON, artifact paths, status, live mode, and spend cap fields; Codex analysis, analysis-to-KIE planning, and KIE generation require explicit live/capped gates before any provider spend.
 7. [ ] candidate batch review persists selected-set verdicts and notes.
 8. [ ] creative branches can fork, mark promising/dead-end, rollback/select active, and retain decision logs.
 9. [ ] final editor timeline/layer edits and export manifests persist.

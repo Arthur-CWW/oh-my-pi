@@ -3,7 +3,7 @@ import { resolve } from "node:path"
 import type { JsonValue } from "./types"
 
 type JsonRecord = { [key: string]: JsonValue }
-type KieOperation =
+export type KieOperation =
   | "image-text"
   | "image-to-image"
   | "video-text"
@@ -11,7 +11,6 @@ type KieOperation =
   | "reference-to-video"
   | "avatar"
   | "omni-video"
-
 export interface KieCapability {
   operation: KieOperation
   model: string
@@ -41,6 +40,32 @@ export interface KieGenerateRequest {
   seed?: number
   generateAudio?: boolean
   nsfwChecker?: boolean
+}
+
+export type KieProductLane = "brainrot" | "ugc-ads"
+export type KieAnalysisPlanOperation = "video-text" | "image-text"
+
+
+export interface KieAnalysisPlanTarget {
+  readonly kind: "candidate" | "reference"
+  readonly id: string
+  readonly title: string
+  readonly summary?: string
+  readonly lane?: string
+  readonly notes?: readonly string[]
+  readonly metadata?: JsonValue
+}
+
+export interface KieAnalysisPlanInput {
+  readonly lane: KieProductLane
+  readonly target: KieAnalysisPlanTarget
+  readonly codexRequest: JsonValue
+  readonly codexResponse?: JsonValue | null
+  readonly operation?: KieAnalysisPlanOperation
+  readonly aspectRatio?: string
+  readonly durationSec?: number
+  readonly resolution?: string
+  readonly quality?: "basic" | "standard" | "pro"
 }
 
 export interface KiePreparedTask {
@@ -194,6 +219,29 @@ export function prepareKieTask(input: KieGenerateRequest): KiePreparedTask {
   }
 }
 
+export function planKieFromAnalysis(input: KieAnalysisPlanInput): KieGenerateRequest {
+  const prompt = [
+    `Product lane: ${input.lane}`,
+    `Target: ${input.target.kind} ${input.target.id} — ${input.target.title}`,
+    input.target.lane ? `Target lane: ${input.target.lane}` : "",
+    input.target.summary ? `Target summary: ${input.target.summary}` : "",
+    input.target.notes && input.target.notes.length > 0 ? `Target notes: ${input.target.notes.join("; ")}` : "",
+    `Original analysis prompt: ${extractCodexPrompt(input.codexRequest) ?? "Summarize reusable UGC mechanics from the selected analysis."}`,
+    `Media: ${extractCodexMediaSummary(input.codexRequest)}`,
+    `Codex observations: ${extractCodexObservation(input.codexResponse) ?? "No live Codex response is attached yet; make a dry-run generation plan from the request context only."}`,
+    "Generate a clean-room UGC concept. Use public/reference material only as inspiration, not as direct generation input. Avoid logos, watermarks, source faces, source voices, and copyrighted text.",
+  ].filter((line) => line.length > 0).join("\n")
+
+  return {
+    operation: input.operation ?? "video-text",
+    prompt,
+    aspectRatio: input.aspectRatio ?? "9:16",
+    durationSec: input.durationSec ?? 5,
+    resolution: input.resolution ?? "720p",
+    ...(input.quality ? { quality: input.quality } : {}),
+  }
+}
+
 export async function createKieTask(input: KieGenerateRequest, options: KieCreateOptions = {}): Promise<KieCreateResult> {
   const prepared = prepareKieTask(input)
   if (!options.live) return { mode: "dry-run", prepared }
@@ -343,6 +391,54 @@ function nonEmpty(values: string[], message: string): string[] {
   const filtered = values.filter((value) => value.trim().length > 0)
   if (filtered.length === 0) throw new Error(message)
   return filtered
+}
+
+function extractCodexPrompt(requestValue: JsonValue): string | null {
+  const request = jsonRecord(requestValue)
+  const payload = jsonRecord(request?.payload)
+  const messages = payload?.messages
+  if (!Array.isArray(messages)) return null
+  for (const messageValue of messages) {
+    const message = jsonRecord(messageValue)
+    if (message?.role !== "user") continue
+    const content = message.content
+    if (typeof content === "string") return content
+    if (!Array.isArray(content)) continue
+    for (const contentValue of content) {
+      const contentItem = jsonRecord(contentValue)
+      if (contentItem?.type === "text" && typeof contentItem.text === "string") return contentItem.text
+    }
+  }
+  return null
+}
+
+function extractCodexMediaSummary(requestValue: JsonValue): string {
+  const request = jsonRecord(requestValue)
+  const payload = jsonRecord(request?.payload)
+  const metadata = jsonRecord(payload?.metadata)
+  const mediaUrl = typeof metadata?.mediaUrl === "string" ? metadata.mediaUrl : "not recorded"
+  const referenceFrameUrls = metadata?.referenceFrameUrls
+  const referenceFrameCount = Array.isArray(referenceFrameUrls) ? referenceFrameUrls.filter((url) => typeof url === "string").length : 0
+  return referenceFrameCount > 0 ? `${mediaUrl} (${referenceFrameCount} prepared reference frames)` : mediaUrl
+}
+
+function extractCodexObservation(responseValue: JsonValue | null | undefined): string | null {
+  const response = jsonRecord(responseValue)
+  if (!response) return null
+  if (typeof response.output_text === "string") return response.output_text
+  const choices = response.choices
+  if (!Array.isArray(choices)) return null
+  for (const choiceValue of choices) {
+    const choice = jsonRecord(choiceValue)
+    const message = jsonRecord(choice?.message)
+    if (typeof message?.content === "string") return message.content
+  }
+  return null
+}
+
+function jsonRecord(value: JsonValue | null | undefined): JsonRecord | null {
+  if (value === null || value === undefined || typeof value !== "object" || Array.isArray(value)) return null
+  return value
 }
 
 async function fetchJson<T>(url: string, init: RequestInit): Promise<T> {

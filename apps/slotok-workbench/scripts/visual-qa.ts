@@ -60,7 +60,7 @@ try {
       ["Developer Graph", "07-developer-graph.png"],
       ["KIE Proxy", "08-kie-proxy.png"],
     ] as const) {
-      await page.getByRole("button", { name: view[0] }).click()
+      await page.getByRole("button", { name: new RegExp(`^${escapeRegExp(view[0])}\\b`) }).click()
       await page.waitForTimeout(100)
       await captureView(page, view[1], screenshots)
       findings.push(...viewFindings(await auditView(page), view[0]))
@@ -177,6 +177,10 @@ function screenshotPath(name: string): string {
   return join(artifactRoot, name)
 }
 
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+}
 async function writeReport(findings: Finding[], screenshots: string[]): Promise<void> {
   const lines = [
     "# Slotok Visual QA",

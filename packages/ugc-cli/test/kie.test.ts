@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { createKieTask, prepareKieTask } from "../src/kie"
+import { createKieTask, planKieFromAnalysis, prepareKieTask } from "../src/kie"
 
 describe("kie provider adapter", () => {
   test("builds a Seedream text-to-image payload without a live call", () => {
@@ -36,6 +36,43 @@ describe("kie provider adapter", () => {
     expect(result.prepared.model).toBe("bytedance/v1-lite-text-to-video")
   })
 
+
+  test("plans a dry-run KIE request from Codex analysis ingredients", () => {
+    const request = planKieFromAnalysis({
+      lane: "brainrot",
+      target: {
+        kind: "candidate",
+        id: "candidate_hook",
+        title: "Cold open test",
+        summary: "Messy desk hook with fast caption cadence.",
+        lane: "brainrot",
+        notes: ["preserve chaotic timing", "swap source identity"],
+      },
+      codexRequest: {
+        provider: "codex",
+        operation: "video-understand",
+        payload: {
+          messages: [
+            { role: "system", content: "stub" },
+            { role: "user", content: [{ type: "text", text: "Extract reusable hook mechanics." }] },
+          ],
+          metadata: {
+            mediaUrl: "file:///tmp/demo.mp4",
+            referenceFrameUrls: ["file:///tmp/frame-01.jpg", "file:///tmp/frame-02.jpg"],
+          },
+        },
+      },
+      codexResponse: {
+        choices: [{ message: { content: "Three quick cuts, creator points at product, caption lands before CTA." } }],
+      },
+    })
+
+    expect(request.operation).toBe("video-text")
+    expect(request.prompt).toContain("Product lane: brainrot")
+    expect(request.prompt).toContain("Extract reusable hook mechanics.")
+    expect(request.prompt).toContain("Three quick cuts")
+    expect(request.referenceImageUrls).toBeUndefined()
+  })
   test("live create blocks requests above the spend cap before reading credentials", async () => {
     await expect(createKieTask({
       operation: "image-text",

@@ -94,6 +94,20 @@ describe("codex media analysis adapter", () => {
     }))).rejects.toThrow("exceeds max $0.01")
   })
 
+  test("live video execution rejects local reference frames before credentials or network", async () => {
+    delete process.env.CODEX_API_KEY
+    delete process.env.OPENAI_API_KEY
+
+    await expect(Effect.runPromise(executeCodexAnalyze({
+      operation: "video-understand",
+      mediaUrl: "file:///tmp/private/local-video.mp4",
+      referenceFrameUrls: ["file:///tmp/frames/frame-01.jpg"],
+    }, {
+      maxSpendUsd: 0.25,
+      fetch: failIfCalled,
+    }))).rejects.toThrow("externally reachable referenceFrameUrls")
+  })
+
   test("resolves CODEX_API_KEY before OPENAI_API_KEY", () => {
     process.env.CODEX_API_KEY = "codex-test-key"
     process.env.OPENAI_API_KEY = "openai-test-key"

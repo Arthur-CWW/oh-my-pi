@@ -89,8 +89,31 @@ export interface UgcReferenceCatalogVideo {
   readonly guardrails: readonly string[]
 }
 
+export interface UgcReferenceManifestAsset {
+  readonly schemaVersion: "ugc-studio.reference-manifest-asset.v1"
+  readonly id: string
+  readonly provider: string
+  readonly title: string
+  readonly mediaType: string
+  readonly localPath: string | null
+  readonly sourceUrl: string | null
+  readonly assetUrl: string | null
+  readonly manifestPath: string
+  readonly byteLength: number | null
+  readonly sha256: string | null
+  readonly captureTimestamp: string | null
+  readonly rights: string
+  readonly provenance: string
+  readonly sourcePolicy: "metadata-only" | "abstract-mechanics"
+  readonly referenceOnly: boolean
+  readonly directGenerationInput: boolean
+  readonly guardrails: readonly string[]
+}
+
+
 export interface UgcReferenceCatalogImportInput {
   readonly roots?: readonly string[]
+  readonly manifestPaths?: readonly string[]
 }
 
 export interface UgcReferenceCatalogImportResult {
@@ -100,7 +123,9 @@ export interface UgcReferenceCatalogImportResult {
   readonly imported: boolean
   readonly checkedAt: string
   readonly roots: readonly string[]
+  readonly manifestPaths: readonly string[]
   readonly videosPlanned: number
+  readonly assetsPlanned: number
   readonly referenceProfileIds: readonly string[]
   readonly archiveIds: readonly string[]
   readonly providerJobIds: readonly string[]
@@ -207,6 +232,7 @@ export interface UgcReferenceArchive {
   readonly candidateFormatOutputs: readonly ReferenceArchiveFormatOutput[]
   readonly notes: readonly string[]
   readonly catalogVideos: readonly UgcReferenceCatalogVideo[]
+  readonly referenceAssets: readonly UgcReferenceManifestAsset[]
 }
 
 export interface ReferenceArchiveFormatOutput {
@@ -513,6 +539,7 @@ export function referenceProfileToArchive(workspaceId: string, referenceProfile:
     candidateFormatOutputs: referenceProfileToFormatOutputs(referenceProfile),
     notes: [],
     catalogVideos: [],
+    referenceAssets: [],
   }
 }
 

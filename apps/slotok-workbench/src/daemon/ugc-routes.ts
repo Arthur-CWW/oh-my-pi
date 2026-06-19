@@ -1,7 +1,7 @@
-import { decodeCodexAnalyzeInput, prepareCodexAnalyze, runCodexAnalyze, type CodexAnalyzeInput, type CodexPreparedResult } from "@wirebabel/ugc-cli"
+import { decodeCodexAnalyzeInput, planKieFromAnalysis, prepareCodexAnalyze, prepareKieTask, runCodexAnalyze, type CodexAnalyzeInput, type CodexAnalyzeResult, type CodexLiveOptions, type CodexPreparedResult, type JsonValue as UgcCliJsonValue, type KieAnalysisPlanOperation, type KieAnalysisPlanTarget, type KieGenerateRequest, type KieProductLane } from "@wirebabel/ugc-cli"
 import { UgcJsonStore } from "./ugc-json-store"
 import { prepareCodexVideoFrames, type CodexFramePreparation, type CodexVideoFrameExtractor } from "./codex-video-frames"
-import { isRecord, toJsonValue, type BranchPatch, type BulkCandidateStatusPatch, type CandidateStatusPatch, type CleanRoomTemplateSpec, type CreateBranchInput, type CreateExportManifestInput, type CreateProviderJobInput, type CreateReferenceArchiveInput, type CreateResearchTargetInput, type CreateReviewNoteInput, type CreateTemplateMiningJobInput, type CreateWorkspaceBundleInput, type FinalEditorClipPatch, type FinalEditorPatch, type FinalEditorTrackPatch, type ImportWorkspaceBundleInput, type PersonaPatch, type ProviderJobPatch, type ReferenceArchiveFormatOutput, type ResearchTargetPatch, type TemplateMiningJobPatch, type UgcReferenceArchive, type UgcReferenceCatalogImportInput, type UgcResearchPlatform, type UgcResearchTargetStatus, type UgcTemplateMiningJobStatus } from "../ugc/local-state"
+import { isRecord, toJsonValue, type BranchPatch, type BulkCandidateStatusPatch, type CandidateStatusPatch, type CleanRoomTemplateSpec, type CreateBranchInput, type CreateExportManifestInput, type CreateProviderJobInput, type CreateReferenceArchiveInput, type CreateResearchTargetInput, type CreateReviewNoteInput, type CreateTemplateMiningJobInput, type CreateWorkspaceBundleInput, type FinalEditorClipPatch, type FinalEditorPatch, type FinalEditorTrackPatch, type ImportWorkspaceBundleInput, type PersonaPatch, type ProviderJobPatch, type ReferenceArchiveFormatOutput, type ResearchTargetPatch, type TemplateMiningJobPatch, type UgcLocalState, type UgcReferenceArchive, type UgcReferenceCatalogImportInput, type UgcResearchPlatform, type UgcResearchTargetStatus, type UgcTemplateMiningJobStatus } from "../ugc/local-state"
 import type { BranchStatus, CandidateStatus, JsonValue, ReviewAttachment, ReviewVerdict } from "../renderer/ugcStudioModel"
 
 interface CodexAnalysisJobRequest {
@@ -29,8 +29,41 @@ interface CodexFramePreparationContext {
   readonly candidateId?: string
 }
 
+interface AnalysisToKieJobRequest {
+  readonly analysisJobId: string
+  readonly lane: KieProductLane
+  readonly targetId?: string
+  readonly targetKind?: "candidate" | "reference"
+  readonly operation?: KieAnalysisPlanOperation
+  readonly aspectRatio?: string
+  readonly durationSec?: number
+  readonly resolution?: string
+  readonly quality?: KieGenerateRequest["quality"]
+}
+
+type CodexAnalyzeRunner = (input: CodexAnalyzeInput, options: CodexLiveOptions) => Promise<CodexAnalyzeResult>
+
+interface CodexLiveFailureRecord {
+  readonly status: "failed" | "blocked"
+  readonly statusCode: number
+  readonly message: string
+}
+
+interface AnalysisTargetResolution {
+  readonly target: KieAnalysisPlanTarget
+  readonly targetIds: readonly string[]
+}
+
+interface AnalysisToKieMetadata {
+  readonly sourceProvider: "codex"
+  readonly sourceJobId: string
+  readonly lane: KieProductLane
+  readonly target: KieAnalysisPlanTarget
+}
+
 export interface RouteUgcOptions {
   readonly codexFrameExtractor?: CodexVideoFrameExtractor
+  readonly codexAnalyzeRunner?: CodexAnalyzeRunner
 }
 
 export async function routeUgc(request: Request, store: UgcJsonStore, options: RouteUgcOptions = {}): Promise<Response | null> {
@@ -163,6 +196,10 @@ export async function routeUgc(request: Request, store: UgcJsonStore, options: R
     })
   }
 
+  if (request.method === "POST" && url.pathname === "/api/ugc/kie/analysis-to-kie") {
+    return createKieProviderJobFromAnalysis(store, decodeAnalysisToKieJobRequest(await readJson(request)))
+  }
+
   if (request.method === "POST" && url.pathname.startsWith("/api/ugc/provider-jobs/")) {
     const id = decodeURIComponent(url.pathname.slice("/api/ugc/provider-jobs/".length))
     if (!id) return json({ error: "missing provider job id" }, 400)
@@ -220,10 +257,6 @@ export async function routeUgc(request: Request, store: UgcJsonStore, options: R
 }
 
 async function createCodexProviderJob(store: UgcJsonStore, options: RouteUgcOptions, decoded: CodexAnalysisJobRequest, context: CodexFramePreparationContext): Promise<Response> {
-  if (decoded.live) {
-    if (decoded.maxSpendUsd === undefined) throw new Error("Codex live analysis requires maxSpendUsd")
-    if (!decoded.apiKey) throw new Error("Codex live analysis requires an explicit apiKey")
-  }
   const framePreparation = await prepareCodexVideoFrames({
     workspaceDir: store.config.workspaceDir,
     operation: decoded.input.operation,
@@ -235,13 +268,35 @@ async function createCodexProviderJob(store: UgcJsonStore, options: RouteUgcOpti
     frameExtractor: options.codexFrameExtractor,
     extractLocalFrames: !decoded.live,
   })
-  if (decoded.live) assertLiveCodexFrameRefsReachable(decoded.input, framePreparation)
   const preparedInput: CodexAnalyzeInput = {
     ...decoded.input,
     mediaUrl: framePreparation.mediaUrl,
     referenceFrameUrls: framePreparation.referenceFrameUrls,
   }
-  const prepared = prepareCodexAnalyze(preparedInput)
+
+  let prepared: CodexPreparedResult
+  try {
+    if (decoded.live) assertLiveCodexFrameRefsReachable(preparedInput, framePreparation)
+    prepared = prepareCodexAnalyze(preparedInput)
+  } catch (error) {
+    if (!decoded.live) throw error
+    const failure = codexLiveFailure(error instanceof Error ? error : new Error(String(error)), "blocked")
+    const state = store.createProviderJob({
+      provider: "codex",
+      operation: preparedInput.operation,
+      mode: "live",
+      status: failure.status,
+      targetIds: preparedInput.targetIds ?? [],
+      spendCapUsd: decoded.maxSpendUsd ?? 0,
+      estimatedCostUsd: null,
+      request: encodeUnpreparedCodexRequest(preparedInput, framePreparation),
+      response: toJsonValue({ phase: "live-preparation", error: { message: failure.message } }),
+      error: failure.message,
+      artifactPaths: framePreparation.artifactPaths,
+    })
+    return json({ job: state.providerJobs[0], error: failure.message, framePreparation, state }, failure.statusCode)
+  }
+
   const request = encodePreparedCodexRequest(prepared, framePreparation)
   if (!decoded.live) {
     const state = store.createProviderJob({
@@ -257,28 +312,198 @@ async function createCodexProviderJob(store: UgcJsonStore, options: RouteUgcOpti
     })
     return json({ job: state.providerJobs[0], prepared, framePreparation, state })
   }
+
   const liveMaxSpendUsd = decoded.maxSpendUsd
   const liveApiKey = decoded.apiKey
-  if (liveMaxSpendUsd === undefined) throw new Error("Codex live analysis requires maxSpendUsd")
-  if (!liveApiKey) throw new Error("Codex live analysis requires an explicit apiKey")
+  if (liveMaxSpendUsd === undefined || !liveApiKey) {
+    const message = liveMaxSpendUsd === undefined ? "Codex live analysis requires maxSpendUsd" : "Codex live analysis requires an explicit apiKey"
+    const state = store.createProviderJob({
+      provider: "codex",
+      operation: preparedInput.operation,
+      mode: "live",
+      status: "failed",
+      targetIds: preparedInput.targetIds ?? [],
+      spendCapUsd: liveMaxSpendUsd ?? 0,
+      estimatedCostUsd: prepared.estimatedCostUsd,
+      request,
+      response: toJsonValue({ phase: "live-requirements", error: { message } }),
+      error: message,
+      artifactPaths: framePreparation.artifactPaths,
+    })
+    return json({ job: state.providerJobs[0], prepared, error: message, framePreparation, state }, 400)
+  }
 
-  const result = await runCodexAnalyze(preparedInput, {
-    apiKey: liveApiKey,
-    maxSpendUsd: liveMaxSpendUsd,
+  try {
+    const runner = options.codexAnalyzeRunner ?? runCodexAnalyze
+    const result = await runner(preparedInput, {
+      apiKey: liveApiKey,
+      maxSpendUsd: liveMaxSpendUsd,
+    })
+    const state = store.createProviderJob({
+      provider: "codex",
+      operation: preparedInput.operation,
+      mode: "live",
+      status: "succeeded",
+      targetIds: preparedInput.targetIds ?? [],
+      spendCapUsd: liveMaxSpendUsd,
+      estimatedCostUsd: result.prepared.estimatedCostUsd,
+      request: encodePreparedCodexRequest(result.prepared, framePreparation),
+      response: result.response,
+      artifactPaths: framePreparation.artifactPaths,
+    })
+    return json({ job: state.providerJobs[0], result, framePreparation, state })
+  } catch (error) {
+    const failure = codexLiveFailure(error instanceof Error ? error : new Error(String(error)), "failed")
+    const state = store.createProviderJob({
+      provider: "codex",
+      operation: preparedInput.operation,
+      mode: "live",
+      status: failure.status,
+      targetIds: preparedInput.targetIds ?? [],
+      spendCapUsd: liveMaxSpendUsd,
+      estimatedCostUsd: prepared.estimatedCostUsd,
+      request,
+      response: toJsonValue({ phase: "live-execution", error: { message: failure.message } }),
+      error: failure.message,
+      artifactPaths: framePreparation.artifactPaths,
+    })
+    return json({ job: state.providerJobs[0], prepared, error: failure.message, framePreparation, state }, failure.statusCode)
+  }
+}
+
+function createKieProviderJobFromAnalysis(store: UgcJsonStore, decoded: AnalysisToKieJobRequest): Response {
+  const state = store.read()
+  const sourceJob = state.providerJobs.find((job) => job.id === decoded.analysisJobId)
+  if (!sourceJob) return json({ error: `analysis job not found: ${decoded.analysisJobId}` }, 404)
+  if (sourceJob.provider !== "codex") return json({ error: `analysis-to-kie requires a Codex provider job: ${decoded.analysisJobId}` }, 400)
+
+  const resolved = resolveAnalysisTarget(state, sourceJob.targetIds, decoded)
+  const kieRequest = planKieFromAnalysis({
+    lane: decoded.lane,
+    target: resolved.target,
+    codexRequest: toUgcCliJsonValue(sourceJob.request),
+    codexResponse: sourceJob.response === null ? null : toUgcCliJsonValue(sourceJob.response),
+    ...(decoded.operation ? { operation: decoded.operation } : {}),
+    ...(decoded.aspectRatio ? { aspectRatio: decoded.aspectRatio } : {}),
+    ...(decoded.durationSec === undefined ? {} : { durationSec: decoded.durationSec }),
+    ...(decoded.resolution ? { resolution: decoded.resolution } : {}),
+    ...(decoded.quality ? { quality: decoded.quality } : {}),
   })
-  const state = store.createProviderJob({
-    provider: "codex",
-    operation: preparedInput.operation,
-    mode: "live",
-    status: "succeeded",
-    targetIds: preparedInput.targetIds ?? [],
-    spendCapUsd: liveMaxSpendUsd,
-    estimatedCostUsd: result.prepared.estimatedCostUsd,
-    request: encodePreparedCodexRequest(result.prepared, framePreparation),
-    response: result.response,
-    artifactPaths: framePreparation.artifactPaths,
+  const prepared = prepareKieTask(kieRequest)
+  const analysisToKie: AnalysisToKieMetadata = {
+    sourceProvider: "codex",
+    sourceJobId: sourceJob.id,
+    lane: decoded.lane,
+    target: resolved.target,
+  }
+  const updatedState = store.createProviderJob({
+    provider: "kie",
+    operation: "analysis-to-kie",
+    mode: "dry-run",
+    status: "planned",
+    targetIds: resolved.targetIds.length > 0 ? resolved.targetIds : [sourceJob.id],
+    spendCapUsd: prepared.estimatedCostUsd,
+    estimatedCostUsd: prepared.estimatedCostUsd,
+    request: toJsonValue({ ...prepared, kieRequest, analysisToKie }),
+    artifactPaths: [],
   })
-  return json({ job: state.providerJobs[0], result, framePreparation, state })
+  return json({ job: updatedState.providerJobs[0], kieRequest, prepared, sourceJob, target: resolved.target, state: updatedState })
+}
+
+function resolveAnalysisTarget(state: UgcLocalState, sourceTargetIds: readonly string[], decoded: AnalysisToKieJobRequest): AnalysisTargetResolution {
+  const targetId = decoded.targetId ?? sourceTargetIds[0]
+  const candidate = targetId ? state.workspace.candidates.find((item) => item.id === targetId) : undefined
+  if (candidate && decoded.targetKind !== "reference") {
+    const transcript = candidate.preview.transcript.map((line) => line.text).join(" ")
+    const visibleInputs = candidate.preview.visibleInputs.map((item) => `${item.label}: ${item.value}`)
+    return {
+      targetIds: [candidate.id],
+      target: {
+        kind: "candidate",
+        id: candidate.id,
+        title: candidate.title,
+        summary: transcript || visibleInputs.join("; ") || undefined,
+        lane: candidate.kind,
+        notes: [...candidate.scorecard.issues, ...candidate.tags],
+        metadata: toUgcCliJsonValue(toJsonValue({
+          stageId: candidate.stageId,
+          batchId: candidate.batchId,
+          personaId: candidate.personaId,
+          referenceProfileId: candidate.referenceProfileId,
+          visibleInputs,
+          scorecard: candidate.scorecard,
+        })),
+      },
+    }
+  }
+
+  const referenceProfile = targetId ? state.workspace.referenceProfiles.find((item) => item.id === targetId) : undefined
+  if (referenceProfile) {
+    return {
+      targetIds: [referenceProfile.id],
+      target: {
+        kind: "reference",
+        id: referenceProfile.id,
+        title: referenceProfile.displayName,
+        summary: referenceProfile.useCase,
+        lane: referenceProfile.styleLane,
+        notes: referenceProfile.cleanRoomBoundary,
+        metadata: toUgcCliJsonValue(toJsonValue({
+          platform: referenceProfile.platform,
+          handle: referenceProfile.handle,
+          rightsStatus: referenceProfile.rightsStatus,
+          archiveStatus: referenceProfile.archiveStatus,
+          extractedMechanics: referenceProfile.extractedMechanics,
+        })),
+      },
+    }
+  }
+
+  const referenceArchive = targetId ? state.referenceArchives.find((item) => item.id === targetId || item.referenceProfileId === targetId) : undefined
+  if (referenceArchive) {
+    return {
+      targetIds: [referenceArchive.referenceProfileId],
+      target: {
+        kind: "reference",
+        id: referenceArchive.referenceProfileId,
+        title: referenceArchive.title,
+        summary: referenceArchive.notes.join("; ") || undefined,
+        lane: referenceArchive.sourcePolicy,
+        notes: referenceArchive.guardrails,
+        metadata: toUgcCliJsonValue(toJsonValue({
+          archiveStatus: referenceArchive.archiveStatus,
+          preservedMechanics: referenceArchive.preservedMechanics,
+          candidateFormatOutputs: referenceArchive.candidateFormatOutputs.map((item) => ({ id: item.id, title: item.title, kind: item.kind, summary: item.summary })),
+        })),
+      },
+    }
+  }
+
+  const fallbackKind = decoded.targetKind ?? "candidate"
+  const fallbackId = targetId ?? decoded.analysisJobId
+  return {
+    targetIds: targetId ? [targetId] : [],
+    target: {
+      kind: fallbackKind,
+      id: fallbackId,
+      title: fallbackId,
+      summary: `Codex ${sourceTargetIds.length > 0 ? "target" : "analysis job"} ${decoded.analysisJobId}`,
+    },
+  }
+}
+
+function encodeUnpreparedCodexRequest(input: CodexAnalyzeInput, framePreparation: CodexFramePreparation): JsonValue {
+  return toJsonValue({ provider: "codex", operation: input.operation, input, framePreparation })
+}
+
+function codexLiveFailure(error: Error, defaultStatus: "failed" | "blocked"): CodexLiveFailureRecord {
+  const message = error.message
+  const blocked = defaultStatus === "blocked" || message.includes("exceeds max") || message.includes("non-negative maxSpendUsd")
+  return {
+    status: blocked ? "blocked" : "failed",
+    statusCode: blocked ? 400 : 502,
+    message,
+  }
 }
 
 function encodePreparedCodexRequest(prepared: CodexPreparedResult, framePreparation: CodexFramePreparation): JsonValue {
@@ -302,6 +527,10 @@ function isReachableCodexImageUrl(url: string): boolean {
 
 async function readJson(request: Request): Promise<JsonValue> {
   return await request.json() as JsonValue
+}
+
+function toUgcCliJsonValue(value: JsonValue): UgcCliJsonValue {
+  return JSON.parse(JSON.stringify(value)) as UgcCliJsonValue
 }
 
 function decodePersonaPatch(value: JsonValue): PersonaPatch {
@@ -431,6 +660,27 @@ function decodeCandidateCodexAnalysisJobRequest(value: JsonValue): CandidateCode
     live: value.live === true,
     maxSpendUsd: typeof value.maxSpendUsd === "number" ? value.maxSpendUsd : undefined,
     apiKey: typeof value.apiKey === "string" && value.apiKey.length > 0 ? value.apiKey : undefined,
+  }
+}
+
+function decodeAnalysisToKieJobRequest(value: JsonValue): AnalysisToKieJobRequest {
+  if (!isRecord(value)) throw new Error("analysis-to-kie request must be an object")
+  if (typeof value.analysisJobId !== "string" || value.analysisJobId.trim().length === 0) throw new Error("analysis-to-kie requires analysisJobId")
+  if (!isKieProductLane(value.lane)) throw new Error("analysis-to-kie requires lane: brainrot or ugc-ads")
+  if (value.live === true) throw new Error("analysis-to-kie only creates dry-run KIE plans")
+  if (value.operation !== undefined && !isKieAnalysisPlanOperation(value.operation)) throw new Error("analysis-to-kie operation must be video-text or image-text")
+  if (value.targetKind !== undefined && !isAnalysisTargetKind(value.targetKind)) throw new Error("analysis-to-kie targetKind must be candidate or reference")
+  if (value.quality !== undefined && !isKieQuality(value.quality)) throw new Error("analysis-to-kie quality must be basic, standard, or pro")
+  return {
+    analysisJobId: value.analysisJobId,
+    lane: value.lane,
+    targetId: typeof value.targetId === "string" && value.targetId.length > 0 ? value.targetId : undefined,
+    targetKind: isAnalysisTargetKind(value.targetKind) ? value.targetKind : undefined,
+    operation: isKieAnalysisPlanOperation(value.operation) ? value.operation : undefined,
+    aspectRatio: typeof value.aspectRatio === "string" && value.aspectRatio.length > 0 ? value.aspectRatio : undefined,
+    durationSec: decodePositiveNumber(value.durationSec, "durationSec"),
+    resolution: typeof value.resolution === "string" && value.resolution.length > 0 ? value.resolution : undefined,
+    quality: isKieQuality(value.quality) ? value.quality : undefined,
   }
 }
 
@@ -608,6 +858,7 @@ function decodeReferenceCatalogImport(value: JsonValue): UgcReferenceCatalogImpo
   if (!isRecord(value)) return {}
   return {
     roots: isStringArray(value.roots) ? value.roots : undefined,
+    manifestPaths: isStringArray(value.manifestPaths) ? value.manifestPaths : undefined,
   }
 }
 
@@ -651,6 +902,22 @@ function isProviderJobStatus(value: unknown): value is CreateProviderJobInput["s
     || value === "failed"
     || value === "blocked"
     || value === "completed"
+}
+
+function isKieProductLane(value: JsonValue | undefined): value is KieProductLane {
+  return value === "brainrot" || value === "ugc-ads"
+}
+
+function isAnalysisTargetKind(value: JsonValue | undefined): value is AnalysisToKieJobRequest["targetKind"] {
+  return value === "candidate" || value === "reference"
+}
+
+function isKieAnalysisPlanOperation(value: JsonValue | undefined): value is KieAnalysisPlanOperation {
+  return value === "video-text" || value === "image-text"
+}
+
+function isKieQuality(value: JsonValue | undefined): value is KieGenerateRequest["quality"] {
+  return value === "basic" || value === "standard" || value === "pro"
 }
 
 function isReferenceSourcePolicy(value: unknown): value is UgcReferenceArchive["sourcePolicy"] {

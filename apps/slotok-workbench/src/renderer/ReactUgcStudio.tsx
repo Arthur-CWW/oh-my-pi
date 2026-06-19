@@ -70,7 +70,7 @@ import {
 } from "./design-system/workbench"
 import { cn } from "./lib/cn"
 import { ugcStudioWorkspace, type BranchSnapshot, type CandidateStatus, type CreativeCandidate, type JsonValue, type PersonaProfile, type ReferenceProfile, type ReviewVerdict, type UgcStudioWorkspace } from "./ugcStudioModel"
-import { createInitialLocalState, isLocalState, referenceProfileToArchive, type ReferenceArchiveFormatOutput, type UgcExportManifest, type UgcLocalState, type UgcProviderJob, type UgcProviderJobStatus, type UgcReferenceArchive, type UgcWorkspaceBundle, type UgcWorkspaceBundleImportResult } from "../ugc/local-state"
+import { createInitialLocalState, isLocalState, referenceProfileToArchive, type ReferenceArchiveFormatOutput, type UgcExportManifest, type UgcLocalState, type UgcProviderJob, type UgcProviderJobStatus, type UgcReferenceArchive, type UgcReferenceManifestAsset, type UgcWorkspaceBundle, type UgcWorkspaceBundleImportResult } from "../ugc/local-state"
 import { deriveUgcDeveloperGraph, type DerivedGraphFamily } from "../ugc/developer-graph"
 
 type ReactView = "atlas" | "explore" | "review" | "campaign" | "reference" | "editor" | "graph" | "provider"
@@ -96,6 +96,25 @@ interface KieRequest {
   imageUrl?: string
   maxSpendUsd?: number
   live?: boolean
+}
+
+type ProductLane = "brainrot" | "ugc-ads"
+type LaneFilter = "all" | ProductLane
+
+interface AnalysisToKieInput {
+  readonly analysisJobId: string
+  readonly lane: ProductLane
+  readonly targetId?: string
+  readonly targetKind?: "candidate" | "reference"
+  readonly operation?: KieOperation
+}
+
+interface InspirationManifest {
+  readonly provider: "higgsfield" | "arcads"
+  readonly label: string
+  readonly manifestPath: string
+  readonly lane: ProductLane
+  readonly summary: string
 }
 
 interface UgcMutationEnvelope {
@@ -180,6 +199,29 @@ export const reactUgcStudioViewMetadata: Array<Pick<(typeof views)[number], "val
 
 
 const viewTabs: Array<TabItem<ReactView>> = views.map((view) => ({ value: view.value, label: view.shortLabel }))
+
+const productLaneFilters: Array<{ value: LaneFilter; label: string }> = [
+  { value: "all", label: "All lanes" },
+  { value: "brainrot", label: "Brainrot" },
+  { value: "ugc-ads", label: "UGC ads" },
+]
+
+const inspirationManifests: InspirationManifest[] = [
+  {
+    provider: "higgsfield",
+    label: "Higgsfield mechanics",
+    manifestPath: "data/ugc-studio/reference-assets/higgsfield/manifest.json",
+    lane: "brainrot",
+    summary: "Reference-only motion, effects, and framing mechanics.",
+  },
+  {
+    provider: "arcads",
+    label: "Arcads UGC ads",
+    manifestPath: "data/ugc-studio/reference-assets/arcads/manifest.json",
+    lane: "ugc-ads",
+    summary: "Reference-only ad structure, avatar pacing, and CTA patterns.",
+  },
+]
 
 const fallbackCapabilities: KieCapability[] = [
   {
@@ -641,6 +683,36 @@ function bundleObjectCountsJson(counts: UgcWorkspaceBundle["objectCounts"]): Jso
   }
 }
 
+function normalizeProductLane(text: string): ProductLane {
+  const lower = text.toLowerCase()
+  return lower.includes("brainrot") || lower.includes("pleometric") ? "brainrot" : "ugc-ads"
+}
+
+function productLaneLabel(lane: ProductLane): string {
+  return lane === "brainrot" ? "Brainrot" : "UGC ads"
+}
+
+function productLaneForReference(reference: ReferenceProfile): ProductLane {
+  return normalizeProductLane(`${reference.styleLane} ${reference.useCase} ${reference.cleanRoomBoundary.join(" ")}`)
+}
+
+function productLaneForResearchTarget(target: { readonly niche: string; readonly query: string; readonly notes: readonly string[] }): ProductLane {
+  return normalizeProductLane(`${target.niche} ${target.query} ${target.notes.join(" ")}`)
+}
+
+function productLaneForCandidate(candidate: CreativeCandidate | undefined): ProductLane {
+  if (!candidate) return "ugc-ads"
+  return normalizeProductLane(`${candidate.kind} ${candidate.stageId} ${candidate.tags.join(" ")} ${candidate.recipe.sourceStageIds.join(" ")} ${candidate.preview.visibleInputs.map((input) => `${input.label} ${input.value}`).join(" ")}`)
+}
+
+function productLaneForProviderJob(job: UgcProviderJob, workspace: UgcStudioWorkspace): ProductLane {
+  const targetCandidate = workspace.candidates.find((candidate) => job.targetIds.includes(candidate.id))
+  if (targetCandidate) return productLaneForCandidate(targetCandidate)
+  const targetReference = workspace.referenceProfiles.find((reference) => job.targetIds.includes(reference.id))
+  if (targetReference) return productLaneForReference(targetReference)
+  return normalizeProductLane(`${job.operation} ${job.provider} ${JSON.stringify(job.request)}`)
+}
+
 function mergeCaptionPayload(payload: JsonValue | null, text: string, editableFields: readonly string[]): JsonValue {
   const root = jsonRecord(payload)
   return {
@@ -885,6 +957,55 @@ export function ReactUgcStudio() {
     }
   }
 
+  async function callAnalysisToKie(body: AnalysisToKieInput) {
+    setBusy(true)
+    try {
+      const response = await fetch(`${daemonBaseUrl}/api/ugc/kie/analysis-to-kie`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      })
+      const text = await response.text()
+      if (response.status === 404) {
+        setResult(JSON.stringify({
+          unavailable: true,
+          route: "/api/ugc/kie/analysis-to-kie",
+          message: "Analysis-to-KIE dry-run route is not available in this daemon yet. Keep the Codex analysis job selected and retry after backend route rollout.",
+          request: body,
+        }, null, 2))
+        return
+      }
+      const payload = parseJson(text)
+      const root = jsonRecord(payload)
+      if (response.ok && root && isLocalState(root.state)) setLocalState(root.state)
+      setResult(JSON.stringify(payload, null, 2))
+    } catch (error) {
+      setResult(error instanceof Error ? error.message : String(error))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function callReferenceCatalog(path: "/api/ugc/reference-catalog/plan" | "/api/ugc/reference-catalog/import", manifestPaths: readonly string[]) {
+    setBusy(true)
+    try {
+      const response = await fetch(`${daemonBaseUrl}${path}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ manifestPaths }),
+      })
+      const text = await response.text()
+      const payload = parseJson(text)
+      const root = jsonRecord(payload)
+      if (response.ok && root && isLocalState(root.state)) setLocalState(root.state)
+      setResult(JSON.stringify(payload, null, 2))
+    } catch (error) {
+      setResult(error instanceof Error ? error.message : String(error))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function persistProviderJob(body: KieRequest, responseJson: JsonValue, mode: "dry-run" | "live") {
     const response = await fetch(`${daemonBaseUrl}/api/ugc/provider-jobs`, {
       method: "POST",
@@ -931,6 +1052,8 @@ export function ReactUgcStudio() {
                 onOperationChange={setOperation}
                 onCallKie={callKie}
                 onMutateLocal={mutateLocal}
+                onPlanAnalysisToKie={callAnalysisToKie}
+                onReferenceCatalog={callReferenceCatalog}
                 workspaceBundle={workspaceBundle}
                 bundleResult={bundleResult}
                 onExportWorkspaceBundle={exportWorkspaceBundle}
@@ -948,6 +1071,7 @@ export function ReactUgcStudio() {
             result={result}
             busy={busy}
             onMutateLocal={mutateLocal}
+            onPlanAnalysisToKie={callAnalysisToKie}
           />
         </WorkbenchContent>
       </WorkbenchMain>
@@ -992,6 +1116,7 @@ function Sidebar(props: { activeView: ReactView; onViewChange: (view: ReactView)
               type="button"
               active={props.activeView === view.value}
               icon={<Icon size={14} />}
+              aria-label={view.label}
               shortcut={`g${view.value.slice(0, 1)}`}
               onClick={() => props.onViewChange(view.value)}
             >
@@ -1113,6 +1238,8 @@ function WorkspaceView(props: {
   onOperationChange: (operation: KieOperation) => void
   onCallKie: (path: string, body?: KieRequest) => void
   onMutateLocal: (path: string, body: object) => void
+  onPlanAnalysisToKie: (body: AnalysisToKieInput) => void
+  onReferenceCatalog: (path: "/api/ugc/reference-catalog/plan" | "/api/ugc/reference-catalog/import", manifestPaths: readonly string[]) => void
   workspaceBundle: UgcWorkspaceBundle | null
   bundleResult: JsonValue | null
   onExportWorkspaceBundle: (label: string) => void
@@ -1138,7 +1265,7 @@ function WorkspaceView(props: {
     return <CampaignMap selectedBranchId={props.selectedBranchId} onSelectBranch={props.onSelectBranch} onSelectCandidate={props.onSelectCandidate} onMutateLocal={props.onMutateLocal} />
   }
   if (props.activeView === "reference") {
-    return <ReferenceArchiveView onMutateLocal={props.onMutateLocal} />
+    return <ReferenceArchiveView onMutateLocal={props.onMutateLocal} onReferenceCatalog={props.onReferenceCatalog} />
   }
   if (props.activeView === "editor") {
     return <FinalEditor selectedCandidateId={props.selectedCandidateId} onSelectCandidate={props.onSelectCandidate} onMutateLocal={props.onMutateLocal} />
@@ -1157,6 +1284,7 @@ function WorkspaceView(props: {
       onOperationChange={props.onOperationChange}
       onCallKie={props.onCallKie}
       onMutateLocal={props.onMutateLocal}
+      onPlanAnalysisToKie={props.onPlanAnalysisToKie}
     />
   )
 }
@@ -1836,13 +1964,21 @@ function numberDraft(value: string, fallback: number): number {
 type ReferenceSourcePolicy = UgcReferenceArchive["sourcePolicy"]
 type ReferenceArchiveStatus = UgcReferenceArchive["archiveStatus"]
 
-function ReferenceArchiveView(props: { onMutateLocal: (path: string, body: object) => void }) {
+function ReferenceArchiveView(props: {
+  onMutateLocal: (path: string, body: object) => void
+  onReferenceCatalog: (path: "/api/ugc/reference-catalog/plan" | "/api/ugc/reference-catalog/import", manifestPaths: readonly string[]) => void
+}) {
   const { workspace, referenceArchives, researchTargets, templateMiningJobs } = useUgcLocalState()
   const [selectedReferenceId, setSelectedReferenceId] = React.useState(workspace.referenceProfiles[0]?.id ?? "")
   const [selectedResearchTargetId, setSelectedResearchTargetId] = React.useState(researchTargets[0]?.id ?? "")
-  const selectedReference = workspace.referenceProfiles.find((reference) => reference.id === selectedReferenceId) ?? workspace.referenceProfiles[0]
-  const selectedResearchTarget = researchTargets.find((target) => target.id === selectedResearchTargetId) ?? researchTargets[0]
+  const [laneFilter, setLaneFilter] = React.useState<LaneFilter>("all")
+  const visibleReferences = workspace.referenceProfiles.filter((reference) => laneFilter === "all" || productLaneForReference(reference) === laneFilter)
+  const visibleResearchTargets = researchTargets.filter((target) => laneFilter === "all" || productLaneForResearchTarget(target) === laneFilter)
+  const selectedReference = visibleReferences.find((reference) => reference.id === selectedReferenceId) ?? visibleReferences[0] ?? (laneFilter === "all" ? workspace.referenceProfiles[0] : undefined)
+  const selectedResearchTarget = visibleResearchTargets.find((target) => target.id === selectedResearchTargetId) ?? visibleResearchTargets[0] ?? (laneFilter === "all" ? researchTargets[0] : undefined)
+  const selectedLane = selectedReference ? productLaneForReference(selectedReference) : "ugc-ads"
   const selectedTemplateJobs = selectedResearchTarget ? templateMiningJobs.filter((job) => job.researchTargetId === selectedResearchTarget.id) : []
+  const inspirationAssets = referenceArchives.flatMap((archive) => archive.referenceAssets)
   const persistedArchive = referenceArchives.find((archive) => archive.referenceProfileId === selectedReference?.id)
   const defaultArchive = selectedReference ? referenceProfileToArchive(workspace.id, selectedReference, workspace.updatedAt) : null
   const selectedArchive = persistedArchive ?? defaultArchive
@@ -1855,16 +1991,16 @@ function ReferenceArchiveView(props: { onMutateLocal: (path: string, body: objec
   const [notesDraft, setNotesDraft] = React.useState((selectedArchive?.notes ?? []).join("\n"))
 
   React.useEffect(() => {
-    if (!workspace.referenceProfiles.some((reference) => reference.id === selectedReferenceId)) {
-      setSelectedReferenceId(workspace.referenceProfiles[0]?.id ?? "")
+    if (!visibleReferences.some((reference) => reference.id === selectedReferenceId)) {
+      setSelectedReferenceId(visibleReferences[0]?.id ?? (laneFilter === "all" ? workspace.referenceProfiles[0]?.id ?? "" : ""))
     }
-  }, [selectedReferenceId, workspace.referenceProfiles])
+  }, [laneFilter, selectedReferenceId, visibleReferences, workspace.referenceProfiles])
 
   React.useEffect(() => {
-    if (!researchTargets.some((target) => target.id === selectedResearchTargetId)) {
-      setSelectedResearchTargetId(researchTargets[0]?.id ?? "")
+    if (!visibleResearchTargets.some((target) => target.id === selectedResearchTargetId)) {
+      setSelectedResearchTargetId(visibleResearchTargets[0]?.id ?? (laneFilter === "all" ? researchTargets[0]?.id ?? "" : ""))
     }
-  }, [researchTargets, selectedResearchTargetId])
+  }, [laneFilter, researchTargets, selectedResearchTargetId, visibleResearchTargets])
 
   React.useEffect(() => {
     setSourcePolicy(selectedArchive?.sourcePolicy ?? "abstract-mechanics")
@@ -1878,10 +2014,28 @@ function ReferenceArchiveView(props: { onMutateLocal: (path: string, body: objec
 
   if (!selectedReference || !selectedArchive) {
     return (
-      <div className="grid h-full place-items-center p-6">
-        <PanelCard className="max-w-sm text-center">
-          <PanelHeader title="No reference profiles" />
-          <p className="text-xs leading-5 text-muted-foreground">Add a profile target before creating archive specs.</p>
+      <div className="grid h-full min-h-0 grid-cols-[220px_minmax(0,1fr)] gap-3 overflow-hidden p-3">
+        <PanelCard className="min-h-0 overflow-auto" density="compact">
+          <PanelHeader
+            eyebrow="Reference targets"
+            title="Archive"
+            actions={<StatusBadge tone="active">{referenceArchives.length}</StatusBadge>}
+          />
+          <div className="mb-3">
+            <LaneFacet value={laneFilter} onChange={setLaneFilter} />
+          </div>
+          <p className="rounded-md border border-dashed border-border bg-background px-2.5 py-2 text-[10.5px] leading-4 text-muted-foreground">
+            {workspace.referenceProfiles.length ? "No reference targets match this lane." : "Add a profile target before creating archive specs."}
+          </p>
+        </PanelCard>
+        <PanelCard className="min-h-0 overflow-auto" density="compact">
+          <PanelHeader title={workspace.referenceProfiles.length ? "No references in this lane" : "No reference profiles"} />
+          <p className="text-xs leading-5 text-muted-foreground">{workspace.referenceProfiles.length ? "Import reference-only inspiration manifests or switch to All lanes." : "Add a profile target before creating archive specs."}</p>
+          <InspirationManifestPanel
+            assets={inspirationAssets}
+            laneFilter={laneFilter}
+            onReferenceCatalog={props.onReferenceCatalog}
+          />
         </PanelCard>
       </div>
     )
@@ -1963,8 +2117,11 @@ function ReferenceArchiveView(props: { onMutateLocal: (path: string, body: objec
           title="Archive"
           actions={<StatusBadge tone="active">{referenceArchives.length}</StatusBadge>}
         />
+        <div className="mb-3">
+          <LaneFacet value={laneFilter} onChange={setLaneFilter} />
+        </div>
         <div className="grid gap-2">
-          {workspace.referenceProfiles.map((reference) => {
+          {visibleReferences.map((reference) => {
             const archive = referenceArchives.find((item) => item.referenceProfileId === reference.id)
             return (
               <button
@@ -1978,6 +2135,10 @@ function ReferenceArchiveView(props: { onMutateLocal: (path: string, body: objec
               >
                 <span className="truncate text-xs font-semibold text-foreground">{reference.displayName}</span>
                 <span className="truncate text-[11px] text-muted-foreground">{reference.platform} / {reference.handle}</span>
+                <span className="flex items-center justify-between gap-2">
+                  <ProductLaneBadge lane={productLaneForReference(reference)} />
+                  <span className="truncate text-[10px] text-muted-foreground">{reference.styleLane}</span>
+                </span>
                 <span className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
                   <span>{archive?.archiveStatus ?? reference.archiveStatus}</span>
                   <span>{archive?.sourcePolicy ?? sourcePolicyFor(reference)}</span>
@@ -1989,10 +2150,10 @@ function ReferenceArchiveView(props: { onMutateLocal: (path: string, body: objec
         <div className="mt-3 border-t border-border pt-3">
           <div className="mb-2 flex items-center justify-between gap-2">
             <span className="text-[11px] font-semibold text-foreground">Research queue</span>
-            <StatusBadge>{researchTargets.length}</StatusBadge>
+            <StatusBadge>{visibleResearchTargets.length}/{researchTargets.length}</StatusBadge>
           </div>
           <div className="grid gap-2">
-            {researchTargets.slice(0, 4).map((target) => (
+            {visibleResearchTargets.slice(0, 4).map((target) => (
               <button
                 key={target.id}
                 type="button"
@@ -2004,6 +2165,10 @@ function ReferenceArchiveView(props: { onMutateLocal: (path: string, body: objec
               >
                 <span className="truncate text-[11px] font-semibold text-foreground">{target.niche}</span>
                 <span className="truncate text-[10px] text-muted-foreground">{target.platform} / {target.status}</span>
+                <span className="flex items-center justify-between gap-2">
+                  <ProductLaneBadge lane={productLaneForResearchTarget(target)} />
+                  <span className="truncate text-[10px] text-muted-foreground">{target.sourcePolicy}</span>
+                </span>
               </button>
             ))}
           </div>
@@ -2017,7 +2182,12 @@ function ReferenceArchiveView(props: { onMutateLocal: (path: string, body: objec
         <PanelHeader
           eyebrow={selectedReference.styleLane}
           title={selectedReference.displayName}
-          actions={<StatusBadge tone={sourcePolicy === "rights-cleared-source" ? "success" : "warning"}>{sourcePolicy}</StatusBadge>}
+          actions={(
+            <div className="flex items-center gap-1.5">
+              <ProductLaneBadge lane={selectedLane} />
+              <StatusBadge tone={sourcePolicy === "rights-cleared-source" ? "success" : "warning"}>{sourcePolicy}</StatusBadge>
+            </div>
+          )}
         />
         <div className="min-h-0 overflow-auto pr-1">
           <div className="grid grid-cols-2 gap-2">
@@ -2048,7 +2218,8 @@ function ReferenceArchiveView(props: { onMutateLocal: (path: string, body: objec
             </label>
           </div>
 
-          <div className="mt-3 grid grid-cols-3 gap-2">
+          <div className="mt-3 grid grid-cols-4 gap-2">
+            <MetricRow label="Lane" value={productLaneLabel(selectedLane)} />
             <MetricRow label="Rights" value={selectedReference.rightsStatus} />
             <MetricRow label="Samples" value={String(selectedReference.sampleClips.length)} />
             <MetricRow label="Outputs" value={String(outputs.length)} />
@@ -2137,6 +2308,12 @@ function ReferenceArchiveView(props: { onMutateLocal: (path: string, body: objec
             )}
           </div>
 
+          <InspirationManifestPanel
+            assets={inspirationAssets}
+            laneFilter={laneFilter}
+            onReferenceCatalog={props.onReferenceCatalog}
+          />
+
           <div className="mt-3 grid grid-cols-[minmax(0,1fr)_260px] gap-2">
             <div className="rounded-md border border-border bg-background p-3">
               <p className="m-0 text-[11px] font-semibold text-foreground">Sample clips</p>
@@ -2177,6 +2354,74 @@ function ReferenceArchiveView(props: { onMutateLocal: (path: string, body: objec
           </div>
         </div>
       </PanelCard>
+    </div>
+  )
+}
+
+function InspirationManifestPanel(props: {
+  assets: readonly UgcReferenceManifestAsset[]
+  laneFilter: LaneFilter
+  onReferenceCatalog: (path: "/api/ugc/reference-catalog/plan" | "/api/ugc/reference-catalog/import", manifestPaths: readonly string[]) => void
+}) {
+  const manifests = inspirationManifests.filter((manifest) => props.laneFilter === "all" || manifest.lane === props.laneFilter)
+  return (
+    <div className="mt-3 grid gap-2 rounded-md border border-amber-200 bg-amber-50/70 p-3">
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <p className="m-0 text-[11px] font-semibold text-amber-900">Higgsfield / Arcads inspiration manifests</p>
+          <p className="m-0 mt-0.5 text-[10px] leading-4 text-amber-800">
+            Reference-only: study inspiration/mechanics/provenance only. Do not pass these assets as direct generation input unless a manifest explicitly marks them rights-cleared.
+          </p>
+        </div>
+        <StatusBadge tone="warning">{props.assets.length} assets</StatusBadge>
+      </div>
+      <div className="grid gap-2">
+        {manifests.map((manifest) => {
+          const assets = props.assets.filter((asset) => asset.manifestPath === manifest.manifestPath || asset.manifestPath.endsWith(manifest.manifestPath))
+          const unsafeInputs = assets.filter((asset) => asset.directGenerationInput)
+          return (
+            <div key={manifest.manifestPath} className="rounded-md border border-amber-200 bg-card p-2">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <strong className="truncate text-[11px] text-foreground">{manifest.label}</strong>
+                    <ProductLaneBadge lane={manifest.lane} />
+                  </div>
+                  <p className="m-0 mt-1 text-[10px] leading-4 text-muted-foreground">{manifest.summary}</p>
+                  <p className="m-0 mt-1 truncate font-mono text-[10px] text-muted-foreground">{manifest.manifestPath}</p>
+                </div>
+                <StatusBadge tone={assets.length ? "success" : "neutral"}>{assets.length ? "imported" : "not imported"}</StatusBadge>
+              </div>
+              <div className="mt-2 grid grid-cols-3 gap-2">
+                <MetricRow label="Assets" value={String(assets.length)} />
+                <MetricRow label="Reference only" value={assets.length ? assets.every((asset) => asset.referenceOnly) ? "yes" : "mixed" : "pending"} />
+                <MetricRow label="Gen input" value={unsafeInputs.length ? `${unsafeInputs.length} flagged` : "blocked"} />
+              </div>
+              {assets.length ? (
+                <div className="mt-2 grid max-h-24 gap-1 overflow-auto">
+                  {assets.slice(0, 4).map((asset) => (
+                    <div key={asset.id} className="rounded border border-border/60 bg-background px-2 py-1 text-[10px] leading-4 text-muted-foreground">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="truncate font-semibold text-foreground">{asset.title}</span>
+                        <span>{asset.sourcePolicy}</span>
+                      </div>
+                      <p className="m-0 truncate">{asset.provenance}</p>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              <div className="mt-2 flex items-center justify-end gap-2">
+                <Button size="xs" variant="workbench" onClick={() => props.onReferenceCatalog("/api/ugc/reference-catalog/plan", [manifest.manifestPath])}>
+                  Plan ingest
+                </Button>
+                <Button size="xs" variant="outline" onClick={() => props.onReferenceCatalog("/api/ugc/reference-catalog/import", [manifest.manifestPath])}>
+                  Import reference-only
+                </Button>
+              </div>
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }
@@ -2402,16 +2647,23 @@ function ProviderView(props: {
   onOperationChange: (operation: KieOperation) => void
   onCallKie: (path: string, body?: KieRequest) => void
   onMutateLocal: (path: string, body: object) => void
+  onPlanAnalysisToKie: (body: AnalysisToKieInput) => void
 }) {
-  const { providerJobs } = useUgcLocalState()
+  const { providerJobs, workspace } = useUgcLocalState()
   const [selectedJobId, setSelectedJobId] = React.useState(providerJobs[0]?.id ?? "")
-  const selectedJob = providerJobs.find((job) => job.id === selectedJobId) ?? providerJobs[0]
+  const [laneFilter, setLaneFilter] = React.useState<LaneFilter>("all")
+  const visibleProviderJobs = providerJobs.filter((job) => laneFilter === "all" || productLaneForProviderJob(job, workspace) === laneFilter)
+  const selectedJob = visibleProviderJobs.find((job) => job.id === selectedJobId) ?? visibleProviderJobs[0] ?? (laneFilter === "all" ? providerJobs[0] : undefined)
+  const selectedLane = selectedJob ? productLaneForProviderJob(selectedJob, workspace) : "ugc-ads"
+  const selectedTargetCandidate = selectedJob ? workspace.candidates.find((candidate) => selectedJob.targetIds.includes(candidate.id)) : undefined
+  const selectedTargetReference = selectedJob ? workspace.referenceProfiles.find((reference) => selectedJob.targetIds.includes(reference.id)) : undefined
   const kieTaskId = extractKieTaskId(selectedJob?.response ?? null)
   const selectedCodexMedia = selectedJob?.provider === "codex" ? codexJobMediaSummary(selectedJob) : null
+  const canPlanSelectedCodex = Boolean(selectedJob?.provider === "codex" && selectedCodexMedia && (selectedCodexMedia.mediaUrl || selectedCodexMedia.frameCount > 0 || selectedCodexMedia.artifactCount > 0))
 
   React.useEffect(() => {
-    if (!providerJobs.some((job) => job.id === selectedJobId)) setSelectedJobId(providerJobs[0]?.id ?? "")
-  }, [providerJobs, selectedJobId])
+    if (!visibleProviderJobs.some((job) => job.id === selectedJobId)) setSelectedJobId(visibleProviderJobs[0]?.id ?? (laneFilter === "all" ? providerJobs[0]?.id ?? "" : ""))
+  }, [laneFilter, providerJobs, selectedJobId, visibleProviderJobs])
 
   return (
     <div className="grid h-full min-h-0 grid-cols-[minmax(0,1fr)_320px] gap-3 overflow-hidden p-3">
@@ -2421,18 +2673,21 @@ function ProviderView(props: {
           title="Provider jobs"
           actions={<StatusBadge tone="active">{providerJobs.length}</StatusBadge>}
         />
+        <div className="mb-3">
+          <LaneFacet value={laneFilter} onChange={setLaneFilter} />
+        </div>
         <div className="min-h-0 overflow-auto pr-1">
-          {providerJobs.length === 0 ? (
+          {visibleProviderJobs.length === 0 ? (
             <div className="grid h-full min-h-52 place-items-center rounded-md border border-dashed border-border bg-background p-6 text-center">
               <div>
                 <Braces className="mx-auto text-muted-foreground" size={26} />
-                <p className="mt-2 text-xs font-semibold text-foreground">No provider jobs yet</p>
-                <p className="mt-1 text-[11px] leading-4 text-muted-foreground">Dry-run or live capped KIE calls create local job records.</p>
+                <p className="mt-2 text-xs font-semibold text-foreground">{providerJobs.length ? "No provider jobs in this lane" : "No provider jobs yet"}</p>
+                <p className="mt-1 text-[11px] leading-4 text-muted-foreground">{providerJobs.length ? "Switch lanes or create a Codex/KIE dry-run job." : "Dry-run or live capped KIE calls create local job records."}</p>
               </div>
             </div>
           ) : (
             <div className="grid gap-2">
-              {providerJobs.map((job) => (
+              {visibleProviderJobs.map((job) => (
                 <button
                   key={job.id}
                   type="button"
@@ -2447,7 +2702,10 @@ function ProviderView(props: {
                     <StatusBadge tone={providerJobStatusTone(job.status)}>{displayProviderJobStatus(job.status)}</StatusBadge>
                   </span>
                   <span className="text-[11px] text-muted-foreground">{job.provider} / {job.mode} / cap ${job.spendCapUsd.toFixed(2)}</span>
-                  <span className="truncate text-[10px] text-muted-foreground">{job.updatedAt}</span>
+                  <span className="flex items-center justify-between gap-2">
+                    <ProductLaneBadge lane={productLaneForProviderJob(job, workspace)} />
+                    <span className="truncate text-[10px] text-muted-foreground">{job.updatedAt}</span>
+                  </span>
                 </button>
               ))}
             </div>
@@ -2496,11 +2754,16 @@ function ProviderView(props: {
                     <p className="m-0 truncate text-xs font-semibold text-foreground">{selectedJob.operation}</p>
                     <p className="m-0 mt-0.5 text-[11px] text-muted-foreground">{selectedJob.id}</p>
                   </div>
-                  <StatusBadge tone={providerJobStatusTone(selectedJob.status)}>{displayProviderJobStatus(selectedJob.status)}</StatusBadge>
+                  <div className="flex items-center gap-1.5">
+                    <ProductLaneBadge lane={selectedLane} />
+                    <StatusBadge tone={providerJobStatusTone(selectedJob.status)}>{displayProviderJobStatus(selectedJob.status)}</StatusBadge>
+                  </div>
                 </div>
                 <div className="mt-2 grid gap-1">
                   <MetricRow label="Provider" value={selectedJob.provider} />
                   <MetricRow label="Mode" value={selectedJob.mode} />
+                  <MetricRow label="Lane" value={productLaneLabel(selectedLane)} />
+                  <MetricRow label="Target" value={selectedTargetCandidate?.title ?? selectedTargetReference?.displayName ?? selectedJob.targetIds[0] ?? "n/a"} />
                   <MetricRow label="Estimate" value={selectedJob.estimatedCostUsd === null ? "n/a" : `$${selectedJob.estimatedCostUsd.toFixed(2)}`} />
                   <MetricRow label="Artifacts" value={String(selectedJob.artifactPaths.length)} />
                   <MetricRow label="KIE task" value={kieTaskId ?? "n/a"} />
@@ -2538,24 +2801,51 @@ function ProviderView(props: {
                 </div>
               </div>
 
-              {selectedCodexMedia ? (
-                <div className="rounded-md border border-border bg-background p-2">
-                  <p className="m-0 text-[11px] font-semibold text-foreground">Codex dry-run frames</p>
-                  <div className="mt-1 grid gap-1 text-[11px] text-muted-foreground">
+              <div className="rounded-md border border-border bg-background p-2">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <p className="m-0 text-[11px] font-semibold text-foreground">Codex → KIE dry-run</p>
+                    <p className="m-0 mt-0.5 text-[10px] leading-4 text-muted-foreground">
+                      {selectedCodexMedia ? "Prepare a planned KIE job from this selected Codex analysis without live provider spend." : "Select a Codex analysis job with prepared media before planning KIE."}
+                    </p>
+                  </div>
+                  <Button
+                    size="xs"
+                    variant="workbench"
+                    disabled={props.busy || !canPlanSelectedCodex}
+                    onClick={() => {
+                      if (!selectedJob) return
+                      props.onPlanAnalysisToKie({
+                        analysisJobId: selectedJob.id,
+                        lane: selectedLane,
+                        operation: props.operation,
+                        ...(selectedTargetCandidate ? { targetId: selectedTargetCandidate.id, targetKind: "candidate" as const } : selectedTargetReference ? { targetId: selectedTargetReference.id, targetKind: "reference" as const } : {}),
+                      })
+                    }}
+                  >
+                    <Zap size={13} /> Plan KIE
+                  </Button>
+                </div>
+                {selectedCodexMedia ? (
+                  <div className="mt-2 grid gap-1 text-[11px] text-muted-foreground">
                     <MetricRow label="Prepared" value={selectedCodexMedia.framePreparation ?? "n/a"} />
                     <MetricRow label="Frames" value={String(selectedCodexMedia.frameCount)} />
                     <MetricRow label="Media" value={selectedCodexMedia.mediaUrl ?? "n/a"} />
                     <CodexRefList label="Reference frames" values={selectedCodexMedia.referenceFrameUrls} />
                     <CodexRefList label="Frame artifact paths" values={selectedCodexMedia.artifactPaths} />
                   </div>
-                </div>
-              ) : null}
+                ) : null}
+              </div>
 
               <pre className="rugc-json">{JSON.stringify({
                 request: selectedJob.request,
                 response: selectedJob.response,
                 error: selectedJob.error,
               }, null, 2)}</pre>
+            </div>
+          ) : providerJobs.length ? (
+            <div className="rounded-md border border-dashed border-border bg-background p-3 text-[11px] leading-4 text-muted-foreground">
+              No provider job matches the selected lane. Switch to All lanes or create a Codex/KIE dry-run for this lane.
             </div>
           ) : (
             <pre className="rugc-json">{props.result}</pre>
@@ -2575,6 +2865,7 @@ function Inspector(props: {
   result: string
   busy: boolean
   onMutateLocal: (path: string, body: object) => void
+  onPlanAnalysisToKie: (body: AnalysisToKieInput) => void
 }) {
   const { workspace, providerJobs, exportManifests, referenceArchives } = useUgcLocalState()
   const selectedFullPersona = workspace.personas.find((persona) => persona.id === props.selectedPersona?.id)
@@ -2811,6 +3102,7 @@ function Inspector(props: {
           providerJobs={providerJobs}
           busy={props.busy}
           onMutateLocal={props.onMutateLocal}
+          onPlanAnalysisToKie={props.onPlanAnalysisToKie}
         />
 
         <InspectorCard title="Review decision">
@@ -2933,6 +3225,7 @@ function Inspector(props: {
         providerJobs={providerJobs}
         busy={props.busy}
         onMutateLocal={props.onMutateLocal}
+        onPlanAnalysisToKie={props.onPlanAnalysisToKie}
       />
       <InspectorCard title="Continuity JSON">
         <pre className="rugc-json text-[10px] leading-relaxed border-none p-0 bg-transparent">{JSON.stringify({
@@ -2950,6 +3243,7 @@ function CodexAnalysisSection(props: {
   providerJobs: readonly UgcProviderJob[]
   busy: boolean
   onMutateLocal: (path: string, body: object) => void
+  onPlanAnalysisToKie: (body: AnalysisToKieInput) => void
 }) {
   const candidateId = props.candidate?.id ?? ""
   const jobs = candidateId
@@ -2961,6 +3255,7 @@ function CodexAnalysisSection(props: {
       ? props.candidate.preview.posterUrl ? "video + poster" : "video only"
       : "missing video"
     : "no candidate"
+  const candidateLane = productLaneForCandidate(props.candidate)
 
   return (
     <InspectorCard title="Codex analysis">
@@ -2968,6 +3263,9 @@ function CodexAnalysisSection(props: {
         <div className="min-w-0">
           <p className="m-0 text-[11px] font-medium text-foreground">Local video-understand jobs</p>
           <p className="m-0 mt-0.5 text-[10px] text-muted-foreground">{mediaLabel} / dry-run default</p>
+          <div className="mt-1">
+            <ProductLaneBadge lane={candidateLane} />
+          </div>
         </div>
         <Button
           type="button"
@@ -2996,6 +3294,7 @@ function CodexAnalysisSection(props: {
       <div className="grid gap-2">
         {jobs.length ? jobs.map((job) => {
           const media = codexJobMediaSummary(job)
+          const canPlanJob = Boolean(media.mediaUrl || media.frameCount > 0 || media.artifactCount > 0)
           return (
             <div key={job.id} className="grid gap-2 rounded-md border border-border/70 bg-background p-2.5">
               <div className="flex items-start justify-between gap-2">
@@ -3003,12 +3302,16 @@ function CodexAnalysisSection(props: {
                   <p className="m-0 truncate text-xs font-semibold text-foreground">{job.operation}</p>
                   <p className="m-0 mt-0.5 truncate text-[10px] text-muted-foreground">{job.id}</p>
                 </div>
-                <StatusBadge tone={providerJobStatusTone(job.status)}>{displayProviderJobStatus(job.status)}</StatusBadge>
+                <div className="flex items-center gap-1.5">
+                  <ProductLaneBadge lane={candidateLane} />
+                  <StatusBadge tone={providerJobStatusTone(job.status)}>{displayProviderJobStatus(job.status)}</StatusBadge>
+                </div>
               </div>
               <div className="grid gap-1">
                 <MetricRow label="Operation" value={job.operation} />
                 <MetricRow label="Status" value={displayProviderJobStatus(job.status)} />
                 <MetricRow label="Mode" value={job.mode} />
+                <MetricRow label="Lane" value={productLaneLabel(candidateLane)} />
                 <MetricRow label="Updated" value={job.updatedAt} />
                 <MetricRow label="Frames" value={String(media.frameCount)} />
                 <MetricRow label="Artifacts" value={String(media.artifactCount)} />
@@ -3017,6 +3320,23 @@ function CodexAnalysisSection(props: {
               {media.mediaUrl ? <p className="m-0 truncate text-[10px] text-muted-foreground">media: {media.mediaUrl}</p> : null}
               <CodexRefList label="Reference frames" values={media.referenceFrameUrls} />
               <CodexRefList label="Artifact paths" values={media.artifactPaths} />
+              <Button
+                type="button"
+                size="xs"
+                variant="workbench"
+                disabled={props.busy || !props.candidate || !canPlanJob}
+                onClick={() => {
+                  if (!props.candidate) return
+                  props.onPlanAnalysisToKie({
+                    analysisJobId: job.id,
+                    lane: candidateLane,
+                    targetId: props.candidate.id,
+                    targetKind: "candidate",
+                  })
+                }}
+              >
+                <Zap size={13} /> Plan KIE dry-run
+              </Button>
               <div className="grid gap-1">
                 <CodexJsonPreview label="Request JSON" value={job.request} />
                 <CodexJsonPreview label="Response JSON" value={job.response} />
@@ -3024,9 +3344,12 @@ function CodexAnalysisSection(props: {
             </div>
           )
         }) : (
-          <p className="m-0 rounded-md border border-border/60 bg-background px-2.5 py-2 text-[10.5px] text-muted-foreground">
-            No Codex jobs target this candidate yet.
-          </p>
+          <div className="grid gap-2 rounded-md border border-border/60 bg-background px-2.5 py-2 text-[10.5px] text-muted-foreground">
+            <p className="m-0">No Codex jobs target this candidate yet.</p>
+            <Button type="button" size="xs" variant="workbench" disabled>
+              Plan KIE dry-run requires a selected Codex analysis job
+            </Button>
+          </div>
         )}
       </div>
     </InspectorCard>
@@ -3088,6 +3411,32 @@ function InspectorCard(props: { title: string; children: React.ReactNode }) {
       <h3 className="m-0 text-xs font-semibold tracking-normal text-foreground">{props.title}</h3>
       {props.children}
     </PanelCard>
+  )
+}
+
+function ProductLaneBadge(props: { lane: ProductLane }) {
+  return (
+    <StatusBadge tone={props.lane === "brainrot" ? "active" : "success"}>
+      {productLaneLabel(props.lane)}
+    </StatusBadge>
+  )
+}
+
+function LaneFacet(props: { value: LaneFilter; onChange: (value: LaneFilter) => void }) {
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {productLaneFilters.map((lane) => (
+        <Button
+          key={lane.value}
+          type="button"
+          size="xs"
+          variant={props.value === lane.value ? "selected" : "workbench"}
+          onClick={() => props.onChange(lane.value)}
+        >
+          {lane.label}
+        </Button>
+      ))}
+    </div>
   )
 }
 

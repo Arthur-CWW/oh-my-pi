@@ -148,6 +148,11 @@ export function executeCodexAnalyze(input: CodexAnalyzeInput, options: CodexLive
     if (prepared.estimatedCostUsd > options.maxSpendUsd) {
       return yield* Effect.fail(new Error(`Codex live request blocked: estimated $${prepared.estimatedCostUsd.toFixed(2)} exceeds max $${options.maxSpendUsd.toFixed(2)}`))
     }
+    yield* Effect.try({
+      try: () => assertReachableLiveReferenceFrames(prepared),
+      catch: (error) => error instanceof Error ? error : new Error(String(error)),
+    })
+
 
     const apiKey = yield* Effect.try({
       try: () => resolveCodexApiKey(options),
@@ -210,6 +215,19 @@ function defaultAnalysisPrompt(operation: CodexAnalyzeOperation): string {
 function normalizeReferenceFrameUrls(value: readonly string[] | undefined): readonly string[] {
   if (!value) return []
   return value.map((item) => item.trim()).filter((item) => item.length > 0)
+}
+
+function assertReachableLiveReferenceFrames(prepared: CodexPreparedResult): void {
+  if (prepared.operation !== "video-understand") return
+  const referenceFrameUrls = prepared.payload.metadata.referenceFrameUrls ?? []
+  const blockedUrl = referenceFrameUrls.find((url) => !isReachableLiveImageUrl(url))
+  if (blockedUrl) {
+    throw new Error(`Codex live video analysis requires externally reachable referenceFrameUrls; ${blockedUrl} is local or unsupported.`)
+  }
+}
+
+function isReachableLiveImageUrl(url: string): boolean {
+  return url.startsWith("https://") || url.startsWith("http://") || url.startsWith("data:image/")
 }
 
 function normalizePositiveInteger(value: number | undefined, fallback: number): number {
