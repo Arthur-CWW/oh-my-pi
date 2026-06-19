@@ -1,7 +1,10 @@
+import { mkdirSync, writeFileSync } from "node:fs"
+import { dirname, resolve } from "node:path"
 import { decodeCodexAnalyzeInput, planKieFromAnalysis, prepareCodexAnalyze, prepareKieTask, runCodexAnalyze, type CodexAnalyzeInput, type CodexAnalyzeResult, type CodexLiveOptions, type CodexPreparedResult, type JsonValue as UgcCliJsonValue, type KieAnalysisPlanOperation, type KieAnalysisPlanTarget, type KieGenerateRequest, type KieProductLane } from "@wirebabel/ugc-cli"
 import { UgcJsonStore } from "./ugc-json-store"
 import { prepareCodexVideoFrames, type CodexFramePreparation, type CodexVideoFrameExtractor } from "./codex-video-frames"
-import { isRecord, toJsonValue, type AppendWorkflowEventInput, type BranchPatch, type BulkCandidateStatusPatch, type CandidateStatusPatch, type CleanRoomTemplateSpec, type CreateBranchInput, type CreateExportManifestInput, type CreateProviderJobInput, type CreateReferenceArchiveInput, type CreateResearchTargetInput, type CreateReviewNoteInput, type CreateTemplateMiningJobInput, type CreateWorkflowRunInput, type CreateWorkspaceBundleInput, type FinalEditorClipPatch, type FinalEditorPatch, type FinalEditorTrackPatch, type ImportWorkspaceBundleInput, type PersonaPatch, type ProviderJobPatch, type ReferenceArchiveFormatOutput, type ResearchTargetPatch, type TemplateMiningJobPatch, type UgcLocalState, type UgcReferenceArchive, type UgcReferenceCatalogImportInput, type UgcResearchPlatform, type UgcResearchTargetStatus, type UgcTemplateMiningJobStatus, type UgcWorkflowCounters, type UgcWorkflowEvent, type UgcWorkflowEventType, type UgcWorkflowImportInput, type UgcWorkflowRunSource, type UgcWorkflowRunStatus } from "../ugc/local-state"
+import { createUgcDemoWorkflowHandoff, type UgcDemoWorkflowHandoff, type UgcDemoWorkflowLane, type UgcDemoWorkflowRouteLane } from "./ugc-demo-workflows"
+import { isRecord, toJsonValue, type AppendWorkflowEventInput, type BranchPatch, type BulkCandidateStatusPatch, type CandidateStatusPatch, type CleanRoomTemplateSpec, type CreateBranchInput, type CreateExportManifestInput, type CreateProviderJobInput, type CreateReferenceArchiveInput, type CreateResearchTargetInput, type CreateReviewNoteInput, type CreateTemplateMiningJobInput, type CreateWorkflowRunInput, type CreateWorkspaceBundleInput, type FinalEditorClipPatch, type FinalEditorPatch, type FinalEditorTrackPatch, type ImportWorkspaceBundleInput, type PersonaPatch, type ProviderJobPatch, type ReferenceArchiveFormatOutput, type ResearchTargetPatch, type TemplateMiningJobPatch, type UgcLocalState, type UgcReferenceArchive, type UgcReferenceCatalogImportInput, type UgcResearchPlatform, type UgcResearchTargetStatus, type UgcTemplateMiningJobStatus, type UgcWorkflowCounters, type UgcWorkflowEvent, type UgcWorkflowEventType, type UgcWorkflowImportInput, type UgcWorkflowImportResult, type UgcWorkflowRun, type UgcWorkflowRunSource, type UgcWorkflowRunStatus } from "../ugc/local-state"
 import type { BranchStatus, CandidateStatus, JsonValue, ReviewAttachment, ReviewVerdict } from "../renderer/ugcStudioModel"
 
 interface CodexAnalysisJobRequest {
@@ -79,6 +82,10 @@ interface WorkflowImportRouteRequest {
   readonly dryRun: boolean
 }
 
+interface DemoWorkflowRouteRequest {
+  readonly lane: UgcDemoWorkflowRouteLane
+}
+
 const WORKFLOW_SSE_MAX_CLIENTS = 16
 const WORKFLOW_SSE_HEARTBEAT_MS = 15_000
 const WORKFLOW_SSE_POLL_MS = 1_000
@@ -104,6 +111,15 @@ export async function routeUgc(request: Request, store: UgcJsonStore, options: R
 
   if (request.method === "GET" && url.pathname === "/api/ugc/workflows") {
     return json({ workflowRuns: store.listWorkflowRuns() })
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/ugc/workflows/demo") {
+    const decoded = decodeDemoWorkflowRouteRequest(await readJson(request))
+    try {
+      return json(launchDemoWorkflows(store, decoded), 201)
+    } catch (error) {
+      return json({ error: error instanceof Error ? error.message : "demo workflow launch failed" }, 409)
+    }
   }
 
   if (request.method === "POST" && url.pathname === "/api/ugc/workflows") {
@@ -463,6 +479,48 @@ function createKieProviderJobFromAnalysis(store: UgcJsonStore, decoded: Analysis
   })
   return json({ job: updatedState.providerJobs[0], kieRequest, prepared, sourceJob, target: resolved.target, state: updatedState })
 }
+
+function launchDemoWorkflows(store: UgcJsonStore, request: DemoWorkflowRouteRequest): { readonly workflowRuns: readonly UgcWorkflowRun[]; readonly importResults: readonly UgcWorkflowImportResult[] } {
+  const lanes: readonly UgcDemoWorkflowLane[] = request.lane === "all" ? ["brainrot", "ugc-ads"] : [request.lane]
+  const workflowRuns: UgcWorkflowRun[] = []
+  const importResults: UgcWorkflowImportResult[] = []
+
+  for (const lane of lanes) {
+    const handoff = createUgcDemoWorkflowHandoff(store.read(), lane)
+    writeDemoWorkflowArtifacts(store, handoff)
+    const created = store.createWorkflowRun(handoff.runInput)
+    const queuedEvent = store.appendWorkflowEvent(created.id, handoff.queuedEvent)
+    const phaseEvent = store.appendWorkflowEvent(created.id, handoff.phaseEvent)
+    const messageEvent = store.appendWorkflowEvent(created.id, handoff.messageEvent)
+    for (const event of [queuedEvent, phaseEvent, messageEvent]) broadcastWorkflowEvent(event)
+
+    const importResult = store.importWorkflowHandoff(created.id, handoff.importInput, false)
+    for (const event of importResult.events) broadcastWorkflowEvent(event)
+    if (!importResult.valid || !importResult.imported) {
+      throw new Error(importResult.errors[0] ?? `demo workflow ${lane} import failed`)
+    }
+
+    const completedEvent = store.appendWorkflowEvent(created.id, {
+      ...handoff.completedEvent,
+      payload: toJsonValue({ completion: handoff.completedEvent.payload ?? null, plannedChanges: importResult.plannedChanges }),
+    })
+    broadcastWorkflowEvent(completedEvent)
+    const workflowRun = store.listWorkflowRuns().find((run) => run.id === created.id)
+    if (!workflowRun) throw new Error(`demo workflow ${lane} run disappeared after launch`)
+    workflowRuns.push(workflowRun)
+    importResults.push(importResult)
+  }
+  return { workflowRuns, importResults }
+}
+
+function writeDemoWorkflowArtifacts(store: UgcJsonStore, handoff: UgcDemoWorkflowHandoff): void {
+  const artifactPath = handoff.runInput.artifactPaths?.[0]
+  if (typeof artifactPath !== "string" || artifactPath.trim().length === 0) return
+  const absolutePath = resolve(store.config.cwd, artifactPath)
+  mkdirSync(dirname(absolutePath), { recursive: true })
+  writeFileSync(absolutePath, `${JSON.stringify(handoff.importInput, null, 2)}\n`)
+}
+
 
 function resolveAnalysisTarget(state: UgcLocalState, sourceTargetIds: readonly string[], decoded: AnalysisToKieJobRequest): AnalysisTargetResolution {
   const targetId = decoded.targetId ?? sourceTargetIds[0]
@@ -893,6 +951,13 @@ function decodePositiveNumber(value: unknown, label: string): number | undefined
   return value
 }
 
+function decodeDemoWorkflowRouteRequest(value: JsonValue): DemoWorkflowRouteRequest {
+  if (!isJsonRecord(value)) throw new Error("demo workflow request must be an object")
+  assertAllowedKeys(value, ["lane"], "demo workflow request")
+  if (!isDemoWorkflowRouteLane(value.lane)) throw new Error("demo workflow lane must be brainrot, ugc-ads, or all")
+  return { lane: value.lane }
+}
+
 function decodeCreateWorkflowRun(value: JsonValue): CreateWorkflowRunInput {
   if (!isRecord(value)) throw new Error("workflow run request must be an object")
   if (typeof value.title !== "string" || value.title.trim().length === 0) throw new Error("workflow run requires title")
@@ -1204,6 +1269,10 @@ function isResearchTargetStatus(value: unknown): value is UgcResearchTargetStatu
 
 function isTemplateMiningJobStatus(value: unknown): value is UgcTemplateMiningJobStatus {
   return value === "planned" || value === "queued" || value === "running" || value === "ready" || value === "blocked" || value === "done"
+}
+
+function isDemoWorkflowRouteLane(value: JsonValue | undefined): value is UgcDemoWorkflowRouteLane {
+  return value === "brainrot" || value === "ugc-ads" || value === "all"
 }
 
 function isWorkflowRunStatus(value: JsonValue | undefined): value is UgcWorkflowRunStatus {

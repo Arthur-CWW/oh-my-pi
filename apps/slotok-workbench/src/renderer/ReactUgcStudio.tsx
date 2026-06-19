@@ -100,6 +100,7 @@ interface KieRequest {
 
 type ProductLane = "brainrot" | "ugc-ads"
 type LaneFilter = "all" | ProductLane
+type WorkflowDemoLane = ProductLane | "all"
 
 interface AnalysisToKieInput {
   readonly analysisJobId: string
@@ -175,14 +176,15 @@ interface WorkflowTelemetryState {
   readonly runs: readonly WorkflowRunTelemetry[]
   readonly streamStatus: WorkflowStreamStatus
   readonly routeAvailable: boolean
-  readonly postUnavailable: boolean
+  readonly demoRouteUnavailable: boolean
   readonly message: string
-  readonly creating: boolean
+  readonly demoRunningLane: WorkflowDemoLane | null
+  readonly demoResult: JsonValue | null
 }
 
 interface WorkflowTelemetryController extends WorkflowTelemetryState {
-  readonly refresh: () => void
-  readonly createDemoRun: () => void
+  readonly refresh: () => Promise<void>
+  readonly runDemoWorkflow: (lane: WorkflowDemoLane) => Promise<void>
 }
 
 interface WorkflowImportRequestResult {
@@ -854,25 +856,29 @@ function workflowPayloadRuns(payload: JsonValue): readonly JsonValue[] {
   if (Array.isArray(payload)) return payload
   const root = jsonRecord(payload)
   if (!root) return []
-  const directRun = jsonRecord(root.run)
-  if (directRun) return [root.run]
+  const directRun = root.run ?? root.workflowRun ?? root.createdRun ?? root.createdWorkflowRun
+  if (jsonRecord(directRun)) return [directRun]
   if (typeof root.id === "string" || typeof root.runId === "string") return [payload]
-  return jsonArray(root.workflowRuns).length ? jsonArray(root.workflowRuns)
-    : jsonArray(root.workflows).length ? jsonArray(root.workflows)
-      : jsonArray(root.runs).length ? jsonArray(root.runs)
-        : jsonArray(root.data)
+  return jsonArray(root.createdWorkflowRuns).length ? jsonArray(root.createdWorkflowRuns)
+    : jsonArray(root.createdRuns).length ? jsonArray(root.createdRuns)
+      : jsonArray(root.workflowRuns).length ? jsonArray(root.workflowRuns)
+        : jsonArray(root.workflows).length ? jsonArray(root.workflows)
+          : jsonArray(root.runs).length ? jsonArray(root.runs)
+            : jsonArray(root.data)
 }
 
 function workflowPayloadEvents(payload: JsonValue): readonly JsonValue[] {
   if (Array.isArray(payload)) return payload
   const root = jsonRecord(payload)
   if (!root) return []
-  const directEvent = jsonRecord(root.event)
-  if (directEvent) return [root.event]
+  const directEvent = root.event ?? root.workflowEvent ?? root.createdEvent ?? root.createdWorkflowEvent
+  if (jsonRecord(directEvent)) return [directEvent]
   if (typeof root.runId === "string" && typeof root.type === "string") return [payload]
-  return jsonArray(root.workflowEvents).length ? jsonArray(root.workflowEvents)
-    : jsonArray(root.events).length ? jsonArray(root.events)
-      : jsonArray(root.data)
+  return jsonArray(root.createdWorkflowEvents).length ? jsonArray(root.createdWorkflowEvents)
+    : jsonArray(root.createdEvents).length ? jsonArray(root.createdEvents)
+      : jsonArray(root.workflowEvents).length ? jsonArray(root.workflowEvents)
+        : jsonArray(root.events).length ? jsonArray(root.events)
+          : jsonArray(root.data)
 }
 
 function normalizeWorkflowEvents(payload: JsonValue): readonly WorkflowEventTelemetry[] {
@@ -1126,6 +1132,32 @@ function uniqueStrings(values: readonly string[]): readonly string[] {
 function workflowRouteMissing(response: Response): boolean {
   return response.status === 404 || response.status === 405
 }
+function workflowDemoLaneLabel(lane: WorkflowDemoLane): string {
+  if (lane === "all") return "both demos"
+  return lane === "brainrot" ? "brainrot demo" : "UGC ads demo"
+}
+
+function compactWorkflowDemoResult(value: JsonValue, lane: WorkflowDemoLane, status: number): JsonValue {
+  const root = jsonRecord(value)
+  const runs = normalizeWorkflowRuns(value)
+  const events = normalizeWorkflowEvents(value)
+  const importResults = jsonArray(root?.importResults ?? root?.imports ?? null)
+  return {
+    route: "/api/ugc/workflows/demo",
+    lane,
+    status,
+    runCount: runs.length,
+    eventCount: events.length,
+    importCount: importResults.length,
+    runs: runs.slice(0, 4).map((run) => ({
+      id: run.id,
+      lane: run.lane,
+      status: run.status,
+      title: run.title,
+    })),
+    preview: previewJsonValue(value) ?? null,
+  }
+}
 
 function workflowImportDryRunValid(value: JsonValue): boolean {
   return jsonRecord(value)?.valid === true
@@ -1205,14 +1237,15 @@ function workflowStatusTone(status: string): "success" | "danger" | "active" | "
   return "neutral"
 }
 
-function useWorkflowTelemetry(): WorkflowTelemetryController {
+function useWorkflowTelemetry(onRefreshWorkspaceState: () => Promise<void>): WorkflowTelemetryController {
   const [state, setState] = React.useState<WorkflowTelemetryState>({
     runs: [],
     streamStatus: "loading",
     routeAvailable: false,
-    postUnavailable: false,
+    demoRouteUnavailable: false,
     message: "Loading workflow telemetry from the Slotok daemon…",
-    creating: false,
+    demoRunningLane: null,
+    demoResult: null,
   })
   const runsRef = React.useRef<readonly WorkflowRunTelemetry[]>([])
 
@@ -1226,7 +1259,6 @@ function useWorkflowTelemetry(): WorkflowTelemetryController {
           runs: [],
           streamStatus: "unavailable",
           routeAvailable: false,
-          postUnavailable: previous.postUnavailable,
           message: "Daemon telemetry route is unavailable: GET /api/ugc/workflows returned 404/405.",
         }))
         return []
@@ -1255,7 +1287,6 @@ function useWorkflowTelemetry(): WorkflowTelemetryController {
         ...previous,
         streamStatus: "unavailable",
         routeAvailable: false,
-        postUnavailable: previous.postUnavailable,
         message: "Daemon telemetry route is unavailable: could not connect to /api/ugc/workflows.",
       }))
       return []
@@ -1283,61 +1314,78 @@ function useWorkflowTelemetry(): WorkflowTelemetryController {
     }
   }, [])
 
-  const refresh = React.useCallback(() => {
-    void (async () => {
-      const runs = await loadWorkflowSnapshot()
-      await loadWorkflowEvents(runs)
-    })()
+  const refresh = React.useCallback(async () => {
+    const runs = await loadWorkflowSnapshot()
+    await loadWorkflowEvents(runs.length ? runs : runsRef.current)
   }, [loadWorkflowEvents, loadWorkflowSnapshot])
 
-  const createDemoRun = React.useCallback(() => {
-    void (async () => {
-      setState((previous) => ({ ...previous, creating: true }))
-      try {
-        const response = await fetch(`${daemonBaseUrl}/api/ugc/workflows`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            lane: "ugc-ads",
-            scriptId: "slotok-workbench-telemetry-demo",
-            args: {
-              source: "ReactUgcStudio",
-              prompt: "Create a compact demo workflow run for workbench telemetry QA.",
-            },
-            demo: true,
-          }),
-        })
-        const text = await response.text()
-        if (workflowRouteMissing(response)) {
-          setState((previous) => ({
-            ...previous,
-            creating: false,
-            postUnavailable: true,
-            message: "Create-run route is unavailable: POST /api/ugc/workflows returned 404/405.",
-          }))
-          return
+  const runDemoWorkflow = React.useCallback(async (lane: WorkflowDemoLane) => {
+    setState((previous) => ({
+      ...previous,
+      demoRunningLane: lane,
+      message: `Running deterministic local ${workflowDemoLaneLabel(lane)} with clean-room mechanics only…`,
+    }))
+    try {
+      const response = await fetch(`${daemonBaseUrl}/api/ugc/workflows/demo`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lane }),
+      })
+      const text = await response.text()
+      const payload: JsonValue = text.trim() ? parseJson(text) : {}
+      if (workflowRouteMissing(response)) {
+        const demoResult: JsonValue = {
+          unavailable: true,
+          route: "/api/ugc/workflows/demo",
+          lane,
+          status: response.status,
+          message: "Demo workflow route is unavailable in this daemon.",
         }
-        const payload = parseJson(text)
-        const runs = normalizeWorkflowRuns(payload)
-        const events = normalizeWorkflowEvents(payload)
         setState((previous) => ({
           ...previous,
-          creating: false,
-          routeAvailable: true,
-          runs: events.reduce((runsSoFar, event) => mergeWorkflowEvent(runsSoFar, event), mergeWorkflowRuns(previous.runs, runs)),
-          message: response.ok ? "Demo workflow run request was accepted by the daemon." : `Demo workflow run returned ${response.status}: ${previewJsonValue(payload) ?? "no response body"}`,
+          demoRunningLane: null,
+          demoRouteUnavailable: true,
+          demoResult,
+          message: `Demo workflow route unavailable: POST /api/ugc/workflows/demo returned ${response.status}.`,
         }))
-        if (response.ok && !runs.length) refresh()
-      } catch {
+        return
+      }
+      const incomingRuns = normalizeWorkflowRuns(payload)
+      const incomingEvents = normalizeWorkflowEvents(payload)
+      setState((previous) => ({
+        ...previous,
+        demoRunningLane: null,
+        demoRouteUnavailable: false,
+        runs: incomingEvents.reduce((runsSoFar, event) => mergeWorkflowEvent(runsSoFar, event), mergeWorkflowRuns(previous.runs, incomingRuns)),
+        demoResult: compactWorkflowDemoResult(payload, lane, response.status),
+        message: response.ok
+          ? `Deterministic local ${workflowDemoLaneLabel(lane)} finished. Refreshing workflow telemetry and workspace state…`
+          : `Demo workflow request returned ${response.status}. Inspect the compact result JSON.`,
+      }))
+      if (response.ok) {
+        await Promise.all([refresh(), onRefreshWorkspaceState()])
         setState((previous) => ({
           ...previous,
-          creating: false,
-          postUnavailable: true,
-          message: "Create-run route is unavailable: could not connect to POST /api/ugc/workflows.",
+          message: `Deterministic local ${workflowDemoLaneLabel(lane)} requested cleanly. Workflow telemetry and workspace refresh have been requested.`,
         }))
       }
-    })()
-  }, [refresh])
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      const demoResult: JsonValue = {
+        unavailable: true,
+        route: "/api/ugc/workflows/demo",
+        lane,
+        error: message,
+      }
+      setState((previous) => ({
+        ...previous,
+        demoRunningLane: null,
+        demoRouteUnavailable: true,
+        demoResult,
+        message: "Demo workflow route is unavailable: could not connect to POST /api/ugc/workflows/demo.",
+      }))
+    }
+  }, [onRefreshWorkspaceState, refresh])
 
   React.useEffect(() => {
     runsRef.current = state.runs
@@ -1364,16 +1412,14 @@ function useWorkflowTelemetry(): WorkflowTelemetryController {
       if (cancelled) return
       pollTimer = window.setTimeout(() => {
         void (async () => {
-          const runs = await loadWorkflowSnapshot()
-          await loadWorkflowEvents(runs.length ? runs : runsRef.current)
+          await refresh()
           schedulePoll()
         })()
       }, 4000)
     }
 
     void (async () => {
-      const runs = await loadWorkflowSnapshot()
-      await loadWorkflowEvents(runs)
+      await refresh()
       if (cancelled) return
       if (typeof EventSource === "undefined") {
         beginPolling("EventSource is unavailable in this renderer; polling workflow events.")
@@ -1413,12 +1459,12 @@ function useWorkflowTelemetry(): WorkflowTelemetryController {
       if (eventSource) eventSource.close()
       if (pollTimer) window.clearTimeout(pollTimer)
     }
-  }, [loadWorkflowEvents, loadWorkflowSnapshot])
+  }, [refresh])
 
   return {
     ...state,
     refresh,
-    createDemoRun,
+    runDemoWorkflow,
   }
 }
 
@@ -1575,11 +1621,11 @@ export function ReactUgcStudio() {
         const compact = compactBundleExportResult(payload)
         setWorkspaceBundle(payload)
         setBundleResult(compact)
-        setResult(JSON.stringify(compact, null, 2))
+        setResult(JSON.stringify(compact))
         return
       }
       setBundleResult(payload)
-      setResult(JSON.stringify(payload, null, 2))
+      setResult(JSON.stringify(payload))
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       setBundleResult({ error: message })
@@ -1602,13 +1648,13 @@ export function ReactUgcStudio() {
       if (response.ok && isWorkspaceBundleImportResult(payload)) {
         const compact = compactBundleImportResult(payload)
         setBundleResult(compact)
-        setResult(JSON.stringify(compact, null, 2))
+        setResult(JSON.stringify(compact))
         if (isWorkspaceBundle(bundle)) setWorkspaceBundle(bundle)
         if (payload.importedState && isLocalState(payload.importedState)) setLocalState(payload.importedState)
         return
       }
       setBundleResult(payload)
-      setResult(JSON.stringify(payload, null, 2))
+      setResult(JSON.stringify(payload))
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       setBundleResult({ error: message })
@@ -1762,6 +1808,7 @@ export function ReactUgcStudio() {
                 onExportWorkspaceBundle={exportWorkspaceBundle}
                 onImportWorkspaceBundle={importWorkspaceBundle}
                 onImportWorkflowHandoff={importWorkflowHandoff}
+                onRefreshWorkspaceState={refreshWorkspaceState}
               />
             </div>
             <CommandBar prompt={prompt} onPromptChange={setPrompt} onRun={() => callKie("/api/ugc/kie/plan", request)} busy={busy} />
@@ -1776,6 +1823,10 @@ export function ReactUgcStudio() {
             busy={busy}
             onMutateLocal={mutateLocal}
             onPlanAnalysisToKie={callAnalysisToKie}
+            workspaceBundle={workspaceBundle}
+            bundleResult={bundleResult}
+            onExportWorkspaceBundle={exportWorkspaceBundle}
+            onImportWorkspaceBundle={importWorkspaceBundle}
           />
         </WorkbenchContent>
       </WorkbenchMain>
@@ -1949,6 +2000,7 @@ function WorkspaceView(props: {
   onExportWorkspaceBundle: (label: string) => void
   onImportWorkspaceBundle: (bundle: unknown, dryRun: boolean) => void
   onImportWorkflowHandoff: (runId: string, payload: JsonValue, apply: boolean) => Promise<WorkflowImportRequestResult>
+  onRefreshWorkspaceState: () => Promise<void>
 }) {
   if (props.activeView === "atlas") {
     return <PersonaAtlas selectedPersonaId={props.selectedPersonaId} onSelectPersona={props.onSelectPersona} />
@@ -1976,7 +2028,17 @@ function WorkspaceView(props: {
     return <FinalEditor selectedCandidateId={props.selectedCandidateId} onSelectCandidate={props.onSelectCandidate} onMutateLocal={props.onMutateLocal} />
   }
   if (props.activeView === "graph") {
-    return <DeveloperGraphView onMutateLocal={props.onMutateLocal} workspaceBundle={props.workspaceBundle} bundleResult={props.bundleResult} onExportWorkspaceBundle={props.onExportWorkspaceBundle} onImportWorkspaceBundle={props.onImportWorkspaceBundle} onImportWorkflowHandoff={props.onImportWorkflowHandoff} />
+    return (
+      <DeveloperGraphView
+        onMutateLocal={props.onMutateLocal}
+        workspaceBundle={props.workspaceBundle}
+        bundleResult={props.bundleResult}
+        onExportWorkspaceBundle={props.onExportWorkspaceBundle}
+        onImportWorkspaceBundle={props.onImportWorkspaceBundle}
+        onImportWorkflowHandoff={props.onImportWorkflowHandoff}
+        onRefreshWorkspaceState={props.onRefreshWorkspaceState}
+      />
+    )
   }
   return (
     <ProviderView
@@ -2570,8 +2632,11 @@ function FinalEditor(props: { selectedCandidateId: string; onSelectCandidate: (i
               selectedCandidateId: selectedCandidate?.id,
               label: `${selectedCandidate?.title ?? "Candidate"} draft export`,
               presetId: workspace.finalEditor.exportPresets[0]?.id,
-              timelineJson: workspace.finalEditor,
-              notes: ["Created from Final Layer Editor"],
+              timelineJson: {
+                timeline: workspace.finalEditor,
+                pendingPatch: timelinePatchPreview,
+              },
+              notes: ["Created from Final Layer Editor", "Includes visible JSON diff preview as pendingPatch."],
             })}
           >
             Save export manifest
@@ -3150,8 +3215,9 @@ function ReferenceFormatOutputCard(props: { output: ReferenceArchiveFormatOutput
 function WorkflowTelemetryPanel(props: {
   demoCandidateId: string
   onImportWorkflowHandoff: (runId: string, payload: JsonValue, apply: boolean) => Promise<WorkflowImportRequestResult>
+  onRefreshWorkspaceState: () => Promise<void>
 }) {
-  const telemetry = useWorkflowTelemetry()
+  const telemetry = useWorkflowTelemetry(props.onRefreshWorkspaceState)
   const [selectedRunId, setSelectedRunId] = React.useState("")
   const [payloadText, setPayloadText] = React.useState("")
   const [importBusy, setImportBusy] = React.useState<"dry-run" | "apply" | null>(null)
@@ -3184,12 +3250,13 @@ function WorkflowTelemetryPanel(props: {
     : applyNeedsCurrentDryRun
       ? "Apply disabled until this exact payload dry-run returns valid:true for the selected run."
       : "Apply imports the validated handoff and refreshes workspace plus workflow telemetry."
-  const createDisabled = telemetry.creating || !telemetry.routeAvailable || telemetry.postUnavailable
-  const createHelp = !telemetry.routeAvailable
-    ? "Create disabled until GET /api/ugc/workflows is available."
-    : telemetry.postUnavailable
-      ? "Create disabled because POST /api/ugc/workflows returned unavailable."
-      : "Creates a daemon demo run when POST /api/ugc/workflows is implemented."
+  const demoPreview = telemetry.demoResult ?? {
+    route: "/api/ugc/workflows/demo",
+    nextClick: "Run both demos",
+    lanes: ["brainrot", "ugc-ads", "all"],
+    cleanRoom: true,
+    liveProviders: false,
+  }
 
   React.useEffect(() => {
     if (!selectedRunId || !telemetry.runs.some((run) => run.id === selectedRunId)) {
@@ -3235,7 +3302,7 @@ function WorkflowTelemetryPanel(props: {
         return
       }
       if (apply) {
-        telemetry.refresh()
+        await telemetry.refresh()
         setDryRunValid(false)
         setDryRunPayloadText("")
         setDryRunRunId("")
@@ -3248,7 +3315,7 @@ function WorkflowTelemetryPanel(props: {
       setDryRunValid(valid)
       setDryRunPayloadText(requestText)
       setDryRunRunId(runId)
-      telemetry.refresh()
+      await telemetry.refresh()
       setImportMessage(valid
         ? "Dry-run confirmed valid:true. Apply is enabled for this exact payload and run."
         : "Dry-run returned OK but did not confirm valid:true. Apply remains disabled.")
@@ -3268,14 +3335,11 @@ function WorkflowTelemetryPanel(props: {
               {telemetry.streamStatus}
             </StatusBadge>
           </div>
-          <p className="mt-1">Event-sourced agent runs from Slotok workflows, dynamic-workflow adapters, and OMP/persona lanes.</p>
+          <p className="mt-1">Event-sourced agent runs from Slotok workflows, dynamic-workflow adapters, and clean-room local planning lanes.</p>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
-          <Button size="xs" variant="workbench" onClick={telemetry.refresh}>
+          <Button size="xs" variant="workbench" onClick={() => void telemetry.refresh()}>
             <RefreshCw size={13} /> Refresh
-          </Button>
-          <Button size="xs" variant="outline" disabled={createDisabled} onClick={telemetry.createDemoRun}>
-            <Plus size={13} /> {telemetry.creating ? "Creating…" : "Create demo run"}
           </Button>
         </div>
       </div>
@@ -3290,8 +3354,37 @@ function WorkflowTelemetryPanel(props: {
       <div className="mt-2 rounded-md border border-border bg-background p-2 text-[10px] leading-4 text-muted-foreground">
         <div className="flex items-start gap-2">
           {telemetry.streamStatus === "unavailable" ? <XCircle size={13} className="mt-0.5 text-red-700" /> : <Clock size={13} className="mt-0.5" />}
-          <span>{telemetry.message} {createHelp}</span>
+          <span>{telemetry.message}</span>
         </div>
+      </div>
+
+      <div className="mt-3 rounded-md border border-primary/30 bg-primary/5 p-2">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div className="min-w-0">
+            <p className="text-[11px] font-semibold text-foreground">Deterministic local demo workflow launcher</p>
+            <p className="mt-1 text-[10px] leading-4 text-muted-foreground">
+              Start here: click <span className="font-semibold text-foreground">Run both demos</span> to trigger clean-room local planning runs, replay workflow events, and refresh workspace state. No live providers, no OMP RPC, no real background subagents.
+            </p>
+          </div>
+          <StatusBadge tone="active">clean-room local</StatusBadge>
+        </div>
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          <Button size="xs" variant="outline" disabled={telemetry.demoRunningLane !== null} onClick={() => void telemetry.runDemoWorkflow("brainrot")}>
+            <PlayCircle size={12} /> {telemetry.demoRunningLane === "brainrot" ? "Running brainrot…" : "Run brainrot demo"}
+          </Button>
+          <Button size="xs" variant="outline" disabled={telemetry.demoRunningLane !== null} onClick={() => void telemetry.runDemoWorkflow("ugc-ads")}>
+            <PlayCircle size={12} /> {telemetry.demoRunningLane === "ugc-ads" ? "Running UGC ads…" : "Run UGC ads demo"}
+          </Button>
+          <Button size="xs" variant="selected" disabled={telemetry.demoRunningLane !== null} onClick={() => void telemetry.runDemoWorkflow("all")}>
+            <Plus size={12} /> {telemetry.demoRunningLane === "all" ? "Running both…" : "Run both demos"}
+          </Button>
+        </div>
+        <p className={cn("mt-2 text-[10px] leading-4", telemetry.demoRouteUnavailable ? "text-amber-700" : "text-muted-foreground")}>
+          {telemetry.demoRouteUnavailable
+            ? "Demo launcher route unavailable in this daemon build. The buttons stay visible so you can retry after the backend route lands."
+            : "These buttons post to /api/ugc/workflows/demo and then refresh workflow telemetry plus /api/ugc/workspace."}
+        </p>
+        <pre className="rugc-json mt-2 max-h-32">{JSON.stringify(demoPreview, null, 2)}</pre>
       </div>
 
       <div className="mt-3 grid min-h-0 grid-cols-[minmax(0,1fr)_minmax(280px,0.9fr)] gap-3">
@@ -3332,7 +3425,7 @@ function WorkflowTelemetryPanel(props: {
               <div>
                 <GitBranch className="mx-auto text-muted-foreground" size={22} />
                 <p className="mt-2 text-[11px] font-semibold text-foreground">No workflow runs</p>
-                <p className="mt-1 text-[10px] leading-4 text-muted-foreground">Telemetry routes can land independently; this panel stays quiet until the daemon exposes the event log.</p>
+                <p className="mt-1 text-[10px] leading-4 text-muted-foreground">Click Run both demos above once the demo route exists, or use Refresh while waiting for telemetry routes to land.</p>
               </div>
             </div>
           )}
@@ -3447,6 +3540,7 @@ function DeveloperGraphView(props: {
   onExportWorkspaceBundle: (label: string) => void
   onImportWorkspaceBundle: (bundle: unknown, dryRun: boolean) => void
   onImportWorkflowHandoff: (runId: string, payload: JsonValue, apply: boolean) => Promise<WorkflowImportRequestResult>
+  onRefreshWorkspaceState: () => Promise<void>
 }) {
   const localState = useUgcLocalState()
   const { workspace, providerJobs, exportManifests, researchTargets, templateMiningJobs } = localState
@@ -3490,7 +3584,11 @@ function DeveloperGraphView(props: {
           <span className="rounded bg-primary/10 px-2 py-1 text-primary">UGC Studio ads</span>
           <span className="rounded border border-border bg-card px-2 py-1">Brainrot creation / Pleometric</span>
         </div>
-        <WorkflowTelemetryPanel demoCandidateId={workspace.candidates[0]?.id ?? ""} onImportWorkflowHandoff={props.onImportWorkflowHandoff} />
+        <WorkflowTelemetryPanel
+          demoCandidateId={workspace.candidates[0]?.id ?? ""}
+          onImportWorkflowHandoff={props.onImportWorkflowHandoff}
+          onRefreshWorkspaceState={props.onRefreshWorkspaceState}
+        />
         <div className="rugc-provider-note mt-3">
           <div className="flex items-center justify-between gap-2">
             <strong>Research and template proof queue</strong>
@@ -3589,7 +3687,7 @@ function DeveloperGraphView(props: {
             <Button size="xs" variant="outline" disabled={!bundleImportPayload} onClick={() => importBundle(false)}>Apply import</Button>
           </div>
           <Textarea className="mt-2 min-h-32 font-mono text-[10px]" value={bundleImportText} onChange={(event) => setBundleImportText(event.currentTarget.value)} placeholder="Paste ugc-studio.workspace-bundle.v1 JSON here, or export and reuse current bundle." />
-          <pre className="rugc-json mt-2 max-h-32">{JSON.stringify(props.bundleResult ?? { currentBundleId: props.workspaceBundle?.id ?? null, ready: Boolean(bundleImportPayload) }, null, 2)}</pre>
+          <pre className="rugc-json mt-2 max-h-32">{JSON.stringify(props.bundleResult ?? { currentBundleId: props.workspaceBundle?.id ?? null, ready: Boolean(bundleImportPayload) })}</pre>
         </div>
       </section>
       <aside>
@@ -3866,6 +3964,10 @@ function Inspector(props: {
   busy: boolean
   onMutateLocal: (path: string, body: object) => void
   onPlanAnalysisToKie: (body: AnalysisToKieInput) => void
+  workspaceBundle: UgcWorkspaceBundle | null
+  bundleResult: JsonValue | null
+  onExportWorkspaceBundle: (label: string) => void
+  onImportWorkspaceBundle: (bundle: unknown, dryRun: boolean) => void
 }) {
   const { workspace, providerJobs, exportManifests, referenceArchives } = useUgcLocalState()
   const selectedFullPersona = workspace.personas.find((persona) => persona.id === props.selectedPersona?.id)
@@ -3877,6 +3979,8 @@ function Inspector(props: {
   })
   const [branchDecisionDraft, setBranchDecisionDraft] = React.useState(props.selectedBranch?.decisionNote ?? "")
   const [reviewNoteDraft, setReviewNoteDraft] = React.useState("Needs a more casual middle beat and softer CTA.")
+  const [bundleImportText, setBundleImportText] = React.useState("")
+  const inspectorBundlePayload = bundleImportText.trim() ? parseJson(bundleImportText) : props.workspaceBundle
 
   React.useEffect(() => {
     setPersonaDraft({
@@ -3890,6 +3994,43 @@ function Inspector(props: {
   React.useEffect(() => {
     setBranchDecisionDraft(props.selectedBranch?.decisionNote ?? "")
   }, [props.selectedBranch?.decisionNote, props.selectedBranch?.id])
+
+  React.useEffect(() => {
+    if (props.workspaceBundle) setBundleImportText(JSON.stringify(props.workspaceBundle, null, 2))
+  }, [props.workspaceBundle])
+
+  function importInspectorBundle(dryRun: boolean) {
+    if (!inspectorBundlePayload) return
+    props.onImportWorkspaceBundle(inspectorBundlePayload, dryRun)
+  }
+
+  if (props.activeView === "graph") {
+    return (
+      <InspectorFrame>
+        <InspectorHeader title="Developer Graph" />
+        <InspectorCard title="Workspace bundle">
+          <MetricRow label="Current export" value={props.workspaceBundle?.id ?? "none"} />
+          <MetricRow label="Objects" value={props.workspaceBundle ? String(Object.values(props.workspaceBundle.objectCounts).reduce((sum, count) => sum + count, 0)) : "n/a"} />
+          <div className="grid grid-cols-2 gap-1.5">
+            <Button size="xs" variant="workbench" disabled={props.busy} onClick={() => props.onExportWorkspaceBundle(`${workspace.title} inspector export`)}>Export</Button>
+            <Button size="xs" variant="ghost" disabled={!props.workspaceBundle} onClick={() => props.workspaceBundle && setBundleImportText(JSON.stringify(props.workspaceBundle, null, 2))}>Use current</Button>
+            <Button size="xs" variant="workbench" disabled={!inspectorBundlePayload || props.busy} onClick={() => importInspectorBundle(true)}>Dry-run</Button>
+            <Button size="xs" variant="outline" disabled={!inspectorBundlePayload || props.busy} onClick={() => importInspectorBundle(false)}>Apply</Button>
+          </div>
+          <Textarea className="min-h-28 font-mono text-[10px]" value={bundleImportText} onChange={(event) => setBundleImportText(event.currentTarget.value)} placeholder="Paste workspace bundle JSON, or export/use current bundle." />
+        </InspectorCard>
+        <InspectorCard title="Validation result">
+          <pre className="rugc-json">{JSON.stringify(props.bundleResult ?? { ready: Boolean(inspectorBundlePayload), currentBundleId: props.workspaceBundle?.id ?? null })}</pre>
+        </InspectorCard>
+        <InspectorCard title="Graph scope">
+          <MetricRow label="Personas" value={String(workspace.personas.length)} />
+          <MetricRow label="Candidates" value={String(workspace.candidates.length)} />
+          <MetricRow label="Provider jobs" value={String(providerJobs.length)} />
+          <MetricRow label="Exports" value={String(exportManifests.length)} />
+        </InspectorCard>
+      </InspectorFrame>
+    )
+  }
 
   if (props.activeView === "provider") {
     return (

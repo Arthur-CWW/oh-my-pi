@@ -2,9 +2,9 @@
 
 Date: 2026-06-19
 
-Scope: workflow telemetry contract and parent manual QA target for the Slotok workbench browser. This document covers `workflowRuns`, `workflowEvents`, SSE live updates, polling fallback, dynamic-workflows callback ingestion, and the structured workflow handoff import contract.
+Scope: workflow telemetry contract, deterministic local demo launcher contract, and parent manual QA target for the Slotok workbench browser. This document covers `workflowRuns`, `workflowEvents`, SSE live updates, polling fallback, demo launcher route/button/script entrypoints, dynamic-workflows callback ingestion, and the structured workflow handoff import contract.
 
-This proof ledger does not claim that OMP RPC, Pi/OMP artifact-polling adapters, or direct dynamic workflow execution are implemented. It also does not claim live provider execution. Provider jobs remain local provider execution artifacts; workflow status is derived from workflow telemetry. The workflow handoff import store/type contract and daemon route are present; parent owns active-daemon QA.
+This proof ledger does not claim that OMP RPC, Pi/OMP artifact-polling adapters, or direct dynamic workflow execution are implemented. It also does not claim live provider execution. Demo launcher runs are deterministic local planning only: clean-room, local SQLite-backed, and explicitly not real Pi/OMP RPC or background-subagent execution. Provider jobs remain local provider execution artifacts; workflow status is derived from workflow telemetry. Parent owns active-daemon QA for the launcher, telemetry, and import routes.
 
 ## Local Dev Surface
 
@@ -38,17 +38,18 @@ Expected event families:
 | `started` | dynamic-workflows `onAgentStart` | Marks an agent/persona as active with `agentLabel`, phase, and `payload.kind = "agent-start"`. |
 | `artifact` | daemon artifact discovery/import | Links local artifact paths or manifest ids without embedding large media payloads. |
 | `import` / `result` | daemon handoff import | Records structured workflow outputs and imported Slotok records. Imported provider-job detail remains in `providerJobs`. |
-| `status` / `completed` / `blocked` / `canceled` | daemon status updates | Derives status fields on the run snapshot without deleting prior events. |
+| `status` / `completed` / `blocked` / `canceled` | daemon status event types | Derives status fields on the run snapshot without deleting prior events. For the demo launcher, a `completed` event yields snapshot `status: succeeded` with `currentPhase: "completed"`; `completed` is not a durable run status. |
 | `error` | daemon/dynamic-workflow failures | Records failure state and derives failed run status from the event stream. |
 
 ## Exact Route Examples
 
-Implemented telemetry and handoff/import routes for parent QA:
+Parent should verify the merged build exposes these workflow telemetry and demo-launcher routes:
 
 ```txt
 GET http://127.0.0.1:47522/api/ugc/workflows
 GET http://127.0.0.1:47522/api/ugc/workflows?lane=ugc-ads&status=running&limit=25
 POST http://127.0.0.1:47522/api/ugc/workflows
+POST http://127.0.0.1:47522/api/ugc/workflows/demo
 GET http://127.0.0.1:47522/api/ugc/workflows/<run_id>
 GET http://127.0.0.1:47522/api/ugc/workflows/<run_id>/events?after=<event_id>&limit=100
 POST http://127.0.0.1:47522/api/ugc/workflows/<run_id>/events
@@ -71,6 +72,23 @@ Polling fallback invariant:
 2. If SSE is unavailable, closes, or returns a non-event-stream response, the browser polls `GET /api/ugc/workflows/<run_id>/events?after=<last_event_id>&limit=100`.
 3. Polling uses the last seen event id and appends only newer events.
 4. A reload can reconstruct the same visible timeline from `workflowRuns` plus `workflowEvents` without relying on renderer memory.
+
+## Demo Launcher Contract
+
+Parent should verify the merged build exposes all three deterministic local demo launcher entrypoints:
+
+- Header copy in the Local Workspace Graph workflow telemetry panel: `Deterministic local demo workflow launcher`, with the prompt `Start here: click Run both demos, clean-room local only, no live providers/OMP RPC/background subagents.`
+- Browser buttons in that panel: `Run brainrot demo`, `Run UGC ads demo`, and `Run both demos`.
+- Daemon route: `POST /api/ugc/workflows/demo` with body `{ "lane": "brainrot" | "ugc-ads" | "all" }`.
+- Companion script: from `apps/slotok-workbench`, run `bun run demo:workflows [brainrot|ugc-ads|all]`; default lane is `all`, and it should POST to the running daemon so the resulting runs appear in the browser telemetry panel.
+
+Behavior invariants:
+
+- The launcher is deterministic clean-room local planning only. It is not OMP RPC, not live Pi/OMP execution, not direct `runWorkflow`, and not a live provider call surface.
+- Each launch creates browser-visible workflow run snapshot(s), appends queued/phase/message/completed/import/result events, and updates run status to `succeeded` with `currentPhase: "completed"`, plus populated `result`, `importedRecordIds`, and `artifactPaths`.
+- The launcher passes a generated workflow handoff through the existing import pipeline so imported records, result summaries, and workflow events survive refresh/reload from local SQLite.
+- Expected demo records stay local and guardrail-safe: `brainrot` should center Pleometric clean-room reference records such as `reference_tiktok_pleometric` / `archive_reference_tiktok_pleometric`; `ugc-ads` should center `reference_tiktok_mynameissico`, already-imported vendor manifest context, and `candidate_soft_demo_01`.
+- If the launcher route is unavailable, the browser should show a graceful `POST /api/ugc/workflows/demo` unavailable/not-enabled message instead of crashing.
 
 ## Handoff Import Contract
 
@@ -143,26 +161,34 @@ Parent should perform this exact manual checklist after backend/UI workers finis
 1. Open `http://127.0.0.1:47521/ugc-studio/` and confirm the workbench loads from daemon `http://127.0.0.1:47522`.
 2. Confirm `artifacts/slotok-dev/renderer.pid` and `artifacts/slotok-dev/daemon.pid` identify the intended local dev servers; use `renderer.log` and `daemon.log` only for server status/errors.
 3. Confirm the workbench has a native Slotok workflow/proof surface, not a generic dashboard, and that workflow status is shown as run phase, agent activity, event timeline, artifacts/imports, and errors.
-4. Request `GET http://127.0.0.1:47522/api/ugc/workflows` and confirm it returns workflow run snapshots or an empty list with a stable shape.
-5. Create a run through the implemented UI/backend path or `POST http://127.0.0.1:47522/api/ugc/workflows`, then capture its `<run_id>`.
-6. Confirm `workflowRuns` reflects the run id, lane, source, status, current phase, counters, imported record ids, artifact paths, timestamps, and result/error summary.
-7. Append test events through `POST http://127.0.0.1:47522/api/ugc/workflows/<run_id>/events` or observe callback-derived events from a real runner when one is present.
-8. Confirm callback event wording: `onPhase` creates `phase`; `onLog` creates `message`; `onAgentStart` creates `started` with `payload.kind = "agent-start"`; `onAgentEnd` creates `message` with `payload.kind = "agent-end"`.
-9. Open `GET http://127.0.0.1:47522/api/ugc/workflows/<run_id>/events?after=<event_id>&limit=100` and confirm polling after the last seen event returns only newer events.
-10. Open `GET http://127.0.0.1:47522/api/ugc/workflows/events/stream?runId=<run_id>&after=<event_id>` and confirm polling-backed SSE emits `workflow-event` frames with stable ids.
-11. Simulate SSE absence by using a browser/network path where the stream is unavailable, or by validating the UI fallback state if the stream closes; confirm the UI polls events instead of losing the run timeline.
-12. Reload the workbench and confirm the same run timeline reconstructs from daemon state rather than renderer memory.
-13. Verify the active daemon exposes `POST /api/ugc/workflows/<run_id>/import` and accepts only `{ "payload": <handoff>, "apply": <boolean> }` at the top level.
-14. Dry-run a handoff import with `{ "payload": { "lane": "ugc-ads", "sourcePolicy": "abstract-mechanics", "candidatePatches": [], "providerJobs": [], "referenceArchives": [], "notes": [] }, "apply": false }`; confirm `dryRun: true`, `imported: false`, planned changes, and no state mutation.
-15. Apply a valid handoff with `apply: true` that imports a safe local provider job, candidate note/status patch for an existing candidate, reference archive data, artifact path, and result metadata; confirm imported records persist through reload.
-16. Confirm apply appends `import` and `result` workflow events and updates the run's imported record ids, artifact paths, and result summary.
-17. Confirm invalid candidate ids, reference profile ids, note attachments, or provider target ids reject without mutating state.
-18. Confirm `metadata-only` and `abstract-mechanics` source policies reject direct generation input, while `rights-cleared-source` is required before source material can be used that way.
-19. Confirm credential-like keys in handoff records, provider-job requests/responses, result, or metadata are redacted before persistence.
-20. Confirm provider-job links stay links: provider execution detail remains in `providerJobs`, while workflow progress/status stays in `workflowRuns`/`workflowEvents`.
-21. Confirm OMP stats, if inspected, are treated as historical usage only and do not drive live active-agent or run status UI.
-22. Confirm no UI copy claims OMP RPC, Pi/OMP artifact polling, or direct dynamic workflow execution are implemented unless real daemon adapters/routes/processes exist in the active build.
-23. Confirm no live provider success is claimed unless the parent deliberately ran an explicit live/capped action and recorded that proof separately.
+4. Confirm the Local Workspace Graph workflow telemetry panel header reads `Deterministic local demo workflow launcher` and the helper copy says `Start here: click Run both demos, clean-room local only, no live providers/OMP RPC/background subagents.`
+5. Confirm the workflow telemetry panel exposes `Run brainrot demo`, `Run UGC ads demo`, and `Run both demos`. If the active build still shows the older single-button `Create demo run` flow over generic `POST /api/ugc/workflows`, treat it as pre-cutover and do not sign off the dedicated demo-launcher checklist.
+6. From `apps/slotok-workbench`, run `bun run demo:workflows brainrot` and confirm the companion script targets the running daemon and causes a demo run to appear in the browser telemetry panel.
+7. Request `GET http://127.0.0.1:47522/api/ugc/workflows` and confirm it returns workflow run snapshots or an empty list with a stable shape before launching new demos.
+8. Click `Run brainrot demo` and confirm the browser sends `POST http://127.0.0.1:47522/api/ugc/workflows/demo` with `{ "lane": "brainrot" }`.
+9. Capture the returned brainrot `<run_id>` from the in-panel result JSON or refreshed run list, then confirm `workflowRuns` reflects lane `brainrot`, `status: succeeded`, `currentPhase: "completed"`, counters, imported record ids, artifact paths, timestamps, and result summary.
+10. Confirm the brainrot run timeline shows queued/phase/message/completed/import/result events and that imported records/results reference clean-room Pleometric demo data such as `reference_tiktok_pleometric` / `archive_reference_tiktok_pleometric`, not live provider output.
+11. Click `Run UGC ads demo` and confirm the browser sends `POST http://127.0.0.1:47522/api/ugc/workflows/demo` with `{ "lane": "ugc-ads" }`.
+12. Capture the returned UGC ads `<run_id>` and confirm the run snapshot reflects lane `ugc-ads`, `status: succeeded`, `currentPhase: "completed"`, imported record ids, artifact paths, and result summary.
+13. Confirm the UGC ads run imports/updates the expected safe local records, especially `reference_tiktok_mynameissico`, existing vendor-manifest context, and `candidate_soft_demo_01`, without promoting source media into direct generation input.
+14. Click `Run both demos` and confirm the browser sends `{ "lane": "all" }`, returns or refreshes into both lanes, and shows a compact result JSON block instead of crashing.
+15. Select one of the demo runs and confirm the panel shows the full event timeline, imported ids/artifacts/result preview, and a stable selected-run detail view.
+16. Open `GET http://127.0.0.1:47522/api/ugc/workflows/<run_id>/events?after=<event_id>&limit=100` and confirm polling after the last seen event returns only newer events.
+17. Open `GET http://127.0.0.1:47522/api/ugc/workflows/events/stream?runId=<run_id>&after=<event_id>` and confirm polling-backed SSE emits `workflow-event` frames with stable ids.
+18. Simulate SSE absence by using a browser/network path where the stream is unavailable, or by validating the UI fallback state if the stream closes; confirm the UI polls events instead of losing the run timeline.
+19. Reload the workbench and confirm the same demo runs, events, imported records, and result summaries reconstruct from daemon state rather than renderer memory.
+20. With a demo run selected, click `Sample payload` and confirm the editor loads a metadata-only sample with a local planned provider job and, when a candidate target exists, a local note attachment.
+21. Click `Dry-run validate` and confirm the preview reports `valid: true`, `dryRun: true`, `imported: false`, planned changes, and no state mutation.
+22. Click `Apply import` and confirm the run persists a local planned provider job, note/artifact/result updates, appended `import` and `result` events, and refreshed imported record ids.
+23. Refresh or reload again and confirm those imported records, artifact paths, and result summaries remain visible for the selected run.
+24. Confirm invalid candidate ids, reference profile ids, note attachments, or provider target ids reject without mutating state.
+25. Confirm `metadata-only` and `abstract-mechanics` source policies reject direct generation input, while `rights-cleared-source` is required before source material can be used that way.
+26. Confirm credential-like keys in handoff records, provider-job requests/responses, result, or metadata are redacted before persistence.
+27. Confirm provider-job links stay links: provider execution detail remains in `providerJobs`, while workflow progress/status stays in `workflowRuns`/`workflowEvents`.
+28. Confirm callback event wording remains stable when present: `onPhase` creates `phase`; `onLog` creates `message`; `onAgentStart` creates `started` with `payload.kind = "agent-start"`; `onAgentEnd` creates `message` with `payload.kind = "agent-end"`.
+29. Confirm OMP stats, if inspected, are treated as historical usage only and do not drive live active-agent or run status UI.
+30. Confirm no UI copy claims OMP RPC, Pi/OMP artifact polling, or direct dynamic workflow execution are implemented unless real daemon adapters/routes/processes exist in the active build.
+31. Confirm no live provider success is claimed unless the parent deliberately ran an explicit live/capped action and recorded that proof separately.
 
 ## Verification Status
 

@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "bun run dev:renderer",
     "dev:daemon": "bun src/daemon/server.ts",
+    "demo:workflows": "bun scripts/run-demo-workflows.ts",
     "dev:renderer": "vite --host 127.0.0.1 --port 47521",
     "dev:electron": "SLOTOK_RENDERER_URL=http://127.0.0.1:47521 electron .",
     "smoke:daemon": "bun src/daemon/server.ts --once",

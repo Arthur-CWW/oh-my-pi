@@ -1,5 +1,5 @@
 import { mkdir, writeFile } from "node:fs/promises"
-import { mkdtempSync } from "node:fs"
+import { existsSync, mkdtempSync, readFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"
 import { describe, expect, test } from "vitest"
@@ -787,6 +787,81 @@ describe("routeUgc", () => {
     expect(state.workflowEvents.filter((event) => event.runId === runId).map((event) => event.type)).toEqual(["created", "import", "result"])
   })
 
+  test("creates a browser-visible brainrot demo workflow from safe reference mechanics", async () => {
+    const store = createStore()
+    await seedDemoWorkflowFixtures(store)
+
+    const response = await routeUgc(jsonRequest("/api/ugc/workflows/demo", { lane: "brainrot" }), store)
+    const launched = await response?.json() as DemoWorkflowRouteResponse
+    const run = launched.workflowRuns?.[0]
+    if (!run) throw new Error("missing brainrot demo workflow run")
+    const state = store.read()
+    const providerJob = state.providerJobs.find((job) => job.operation === "demo-brainrot-local-plan")
+    const archive = state.referenceArchives.find((item) => item.id === "archive_reference_tiktok_pleometric")
+
+    const handoffPath = resolve(store.config.cwd, "artifacts/workflows/demo/brainrot/handoff.json")
+    expect(response?.status).toBe(201)
+    expect(launched.importResults?.[0]).toMatchObject({ imported: true, valid: true, lane: "brainrot", sourcePolicy: "abstract-mechanics" })
+    expect(run).toMatchObject({ lane: "brainrot", status: "succeeded", currentPhase: "completed" })
+    expect(run.importedRecordIds).toEqual(expect.arrayContaining(["demo_handoff_brainrot", "archive_reference_tiktok_pleometric"]))
+    expect(run.artifactPaths).toContain("artifacts/workflows/demo/brainrot/handoff.json")
+    expect(state.workflowEvents.filter((event) => event.runId === run.id).map((event) => event.type)).toEqual(["created", "queued", "phase", "message", "import", "result", "completed"])
+    expect(providerJob?.provider).toBe("local")
+    expect(JSON.stringify(providerJob?.request)).not.toContain("https://cdn.example")
+    expect(JSON.stringify(providerJob?.request)).not.toContain("Cookie")
+    expect(archive?.sourcePolicy).toBe("abstract-mechanics")
+    expect(JSON.stringify(archive?.candidateFormatOutputs)).not.toContain("https://cdn.example")
+    expect(existsSync(handoffPath)).toBe(true)
+    expect(JSON.parse(readFileSync(handoffPath, "utf8"))).toMatchObject({ lane: "brainrot" })
+  })
+
+  test("creates a UGC ads demo workflow from imported manifests and updates the demo candidate", async () => {
+    const store = createStore()
+    await seedDemoWorkflowFixtures(store)
+
+    const response = await routeUgc(jsonRequest("/api/ugc/workflows/demo", { lane: "ugc-ads" }), store)
+    const launched = await response?.json() as DemoWorkflowRouteResponse
+    const run = launched.workflowRuns?.[0]
+    if (!run) throw new Error("missing ugc-ads demo workflow run")
+    const state = store.read()
+    const providerJob = state.providerJobs.find((job) => job.operation === "demo-ugc-ads-local-plan")
+    const candidate = state.workspace.candidates.find((item) => item.id === "candidate_soft_demo_01")
+    const candidateNotes = state.workspace.reviewNotes.filter((note) => candidate?.reviewNoteIds.includes(note.id))
+
+    const handoffPath = resolve(store.config.cwd, "artifacts/workflows/demo/ugc-ads/handoff.json")
+    expect(response?.status).toBe(201)
+    expect(launched.importResults?.[0]?.plannedChanges.candidateIds).toEqual(["candidate_soft_demo_01"])
+    expect(run).toMatchObject({ lane: "ugc-ads", status: "succeeded", currentPhase: "completed" })
+    expect(run.importedRecordIds).toEqual(expect.arrayContaining(["demo_handoff_ugc_ads", "candidate_soft_demo_01", "archive_reference_tiktok_mynameissico"]))
+    expect(run.artifactPaths).toContain("artifacts/workflows/demo/ugc-ads/handoff.json")
+    expect(providerJob?.provider).toBe("local")
+    expect(providerJob?.targetIds).toEqual(expect.arrayContaining(["candidate_soft_demo_01", "reference_tiktok_mynameissico", "reference_provider_higgsfield_assets"]))
+    expect(JSON.stringify(providerJob?.request)).not.toContain("localPath")
+    expect(JSON.stringify(providerJob?.request)).not.toContain("assetUrl")
+    expect(existsSync(handoffPath)).toBe(true)
+    expect(JSON.parse(readFileSync(handoffPath, "utf8"))).toMatchObject({ lane: "ugc-ads" })
+    expect(candidate?.status).toBe("ready")
+    expect(candidateNotes.some((note) => note.body.includes("metadata-only UGC ads handoff"))).toBe(true)
+  })
+
+  test("creates both demo workflow lanes with the all launcher", async () => {
+    const store = createStore()
+    await seedDemoWorkflowFixtures(store)
+
+    const response = await routeUgc(jsonRequest("/api/ugc/workflows/demo", { lane: "all" }), store)
+    const launched = await response?.json() as DemoWorkflowRouteResponse
+    const lanes = launched.workflowRuns?.map((run) => run.lane)
+    const state = store.read()
+
+    expect(response?.status).toBe(201)
+    expect(lanes).toEqual(["brainrot", "ugc-ads"])
+    expect(launched.importResults?.map((result) => result.imported)).toEqual([true, true])
+    expect(launched.workflowRuns?.every((run) => run.status === "succeeded" && run.currentPhase === "completed")).toBe(true)
+    expect(state.workflowRuns.filter((run) => run.scriptId === "slotok-demo-workflows").length).toBe(2)
+    expect(state.providerJobs.some((job) => job.operation === "demo-brainrot-local-plan")).toBe(true)
+    expect(state.providerJobs.some((job) => job.operation === "demo-ugc-ads-local-plan")).toBe(true)
+  })
+
   test("returns null for routes owned by other daemon handlers", async () => {
     const store = createStore()
     await expect(routeUgc(new Request("http://127.0.0.1/api/ugc/kie/capabilities"), store)).resolves.toBeNull()
@@ -868,6 +943,27 @@ describe("Slotok workflow adapter", () => {
   })
 })
 
+interface DemoWorkflowRouteResponse {
+  readonly workflowRuns?: readonly {
+    readonly id: string
+    readonly lane: string
+    readonly status: string
+    readonly currentPhase: string | null
+    readonly scriptId: string | null
+    readonly importedRecordIds: readonly string[]
+    readonly artifactPaths: readonly string[]
+  }[]
+  readonly importResults?: readonly {
+    readonly imported: boolean
+    readonly valid: boolean
+    readonly lane: string
+    readonly sourcePolicy: string
+    readonly plannedChanges: {
+      readonly candidateIds: readonly string[]
+    }
+  }[]
+}
+
 function createStore(): UgcJsonStore {
   const cwd = mkdtempSync(resolve(tmpdir(), "ugc-routes-"))
   return new UgcJsonStore({
@@ -891,20 +987,32 @@ async function readState(response: Response | null): Promise<UgcLocalState> {
   return await response.json() as UgcLocalState
 }
 
-async function writeCatalogFixture(cwd: string, root: string): Promise<string> {
+async function seedDemoWorkflowFixtures(store: UgcJsonStore): Promise<void> {
+  const pleometricRoot = await writeCatalogFixture(store.config.cwd, "data/tiktok-catalogue/pleometric", "pleometric")
+  const mynameissicoRoot = await writeCatalogFixture(store.config.cwd, "data/tiktok-catalogue/mynameissico", "mynameissico")
+  const higgsfieldManifest = await writeProviderManifestFixture(store.config.cwd, "data/ugc-studio/reference-assets/higgsfield/manifest.json", "higgsfield")
+  const importResponse = await routeUgc(jsonRequest("/api/ugc/reference-catalog/import", {
+    roots: [pleometricRoot, mynameissicoRoot],
+    manifestPaths: [higgsfieldManifest],
+  }), store)
+  const imported = await importResponse?.json() as { readonly valid?: boolean; readonly imported?: boolean }
+  if (!imported.valid || !imported.imported) throw new Error("missing demo workflow fixture imports")
+}
+
+async function writeCatalogFixture(cwd: string, root: string, handle = "pleometric"): Promise<string> {
   const absoluteRoot = resolve(cwd, root)
   await mkdir(absoluteRoot, { recursive: true })
-  await writeCatalogVideo(absoluteRoot, "2026-03-05_7613899553590234375", "7613899553590234375", 1200, 45)
-  await writeCatalogVideo(absoluteRoot, "2026-03-08_7614988205481331976", "7614988205481331976", 2400, 67)
+  await writeCatalogVideo(absoluteRoot, "2026-03-05_7613899553590234375", "7613899553590234375", 1200, 45, handle)
+  await writeCatalogVideo(absoluteRoot, "2026-03-08_7614988205481331976", "7614988205481331976", 2400, 67, handle)
   return root
 }
 
-async function writeCatalogVideo(root: string, stem: string, id: string, views: number, likes: number): Promise<void> {
+async function writeCatalogVideo(root: string, stem: string, id: string, views: number, likes: number, handle: string): Promise<void> {
   await writeFile(resolve(root, `${stem}.info.json`), `${JSON.stringify({
     id,
     title: `Fixture TikTok ${id}`,
     uploader: "Fixture Creator",
-    uploader_id: "pleometric",
+    uploader_id: handle,
     duration: 12.5,
     view_count: views,
     like_count: likes,
@@ -919,24 +1027,24 @@ async function writeCatalogVideo(root: string, stem: string, id: string, views: 
   await writeFile(resolve(root, `${stem}.mp4`), "video")
 }
 
-async function writeProviderManifestFixture(cwd: string, manifestPath: string, provider: "higgsfield"): Promise<string> {
+async function writeProviderManifestFixture(cwd: string, manifestPath: string, provider: "higgsfield" | "arcads"): Promise<string> {
   const absoluteManifestPath = resolve(cwd, manifestPath)
   await mkdir(resolve(absoluteManifestPath, ".."), { recursive: true })
   await writeFile(absoluteManifestPath, `${JSON.stringify({
     provider,
     captureTimestamp: "2026-06-19T00:00:00.000Z",
     manifestPath,
-    sourcePages: ["https://higgsfield.ai/marketing-studio-intro"],
-    rightsSummary: "Public Higgsfield fixture asset for reference/inspiration only; no rights grant.",
+    sourcePages: [`https://${provider}.example/reference-assets`],
+    rightsSummary: `Public ${provider} fixture asset for reference/inspiration only; no rights grant.`,
     useGuidance: "Metadata only; not a direct generation input.",
     assets: [
       {
         id: "marketing-slide-hyper-video",
         title: "Hyper Motion",
-        assetUrl: "https://static.higgsfield.ai/marketing/slides/hyper-mini.mp4",
-        localPath: "data/ugc-studio/reference-assets/higgsfield/marketing-slides/hyper.mp4",
+        assetUrl: `https://static.${provider}.example/marketing/slides/hyper-mini.mp4`,
+        localPath: `data/ugc-studio/reference-assets/${provider}/marketing-slides/hyper.mp4`,
         mediaType: "video/mp4",
-        sourcePageUrl: "https://higgsfield.ai/marketing-studio-intro",
+        sourcePageUrl: `https://${provider}.example/reference-assets`,
         bytes: 123,
         rights: "Public fixture; reference-only.",
       },
