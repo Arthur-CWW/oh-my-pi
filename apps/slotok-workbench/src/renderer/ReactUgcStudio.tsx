@@ -70,7 +70,7 @@ import {
 } from "./design-system/workbench"
 import { cn } from "./lib/cn"
 import { ugcStudioWorkspace, type BranchSnapshot, type CandidateStatus, type CreativeCandidate, type JsonValue, type PersonaProfile, type ReferenceProfile, type ReviewVerdict, type UgcStudioWorkspace } from "./ugcStudioModel"
-import { createInitialLocalState, referenceProfileToArchive, type ReferenceArchiveFormatOutput, type UgcExportManifest, type UgcLocalState, type UgcProviderJob, type UgcProviderJobStatus, type UgcReferenceArchive } from "../ugc/local-state"
+import { createInitialLocalState, isLocalState, referenceProfileToArchive, type ReferenceArchiveFormatOutput, type UgcExportManifest, type UgcLocalState, type UgcProviderJob, type UgcProviderJobStatus, type UgcReferenceArchive } from "../ugc/local-state"
 import { deriveUgcDeveloperGraph, type DerivedGraphFamily } from "../ugc/developer-graph"
 
 type ReactView = "atlas" | "explore" | "review" | "campaign" | "reference" | "editor" | "graph" | "provider"
@@ -96,6 +96,20 @@ interface KieRequest {
   imageUrl?: string
   maxSpendUsd?: number
   live?: boolean
+}
+
+interface UgcMutationEnvelope {
+  readonly state?: UgcLocalState
+  readonly error?: string
+}
+
+interface CodexJobMediaSummary {
+  readonly mediaUrl: string | null
+  readonly referenceFrameUrls: readonly string[]
+  readonly artifactPaths: readonly string[]
+  readonly frameCount: number
+  readonly artifactCount: number
+  readonly framePreparation: string | null
 }
 
 interface PersonaCardModel {
@@ -580,6 +594,35 @@ function jsonRecord(value: JsonValue | undefined | null): { readonly [key: strin
   return value as { readonly [key: string]: JsonValue }
 }
 
+function jsonStringArray(value: JsonValue | undefined | null): readonly string[] {
+  if (!Array.isArray(value)) return []
+  return value.filter((item): item is string => typeof item === "string")
+}
+
+function codexJobMediaSummary(job: UgcProviderJob): CodexJobMediaSummary {
+  const requestRoot = jsonRecord(job.request)
+  const payload = jsonRecord(requestRoot?.payload ?? null)
+  const metadata = jsonRecord(payload?.metadata ?? null)
+  const framePreparation = jsonRecord(requestRoot?.framePreparation ?? null)
+  const extraction = jsonRecord(framePreparation?.extraction ?? null)
+  const referenceFrameUrls = jsonStringArray(metadata?.referenceFrameUrls ?? framePreparation?.referenceFrameUrls ?? null)
+  const metadataArtifactPaths = jsonStringArray(metadata?.artifactPaths ?? null)
+  const preparedArtifactPaths = jsonStringArray(framePreparation?.artifactPaths ?? null)
+  const artifactPaths = metadataArtifactPaths.length ? metadataArtifactPaths : preparedArtifactPaths.length ? preparedArtifactPaths : job.artifactPaths
+  const extractedFrameCount = typeof extraction?.frameCount === "number" ? extraction.frameCount : null
+  const mediaUrl = typeof metadata?.mediaUrl === "string" ? metadata.mediaUrl : null
+  const frameStatus = typeof extraction?.status === "string" ? extraction.status : null
+  const frameSource = typeof extraction?.source === "string" ? extraction.source : null
+  return {
+    mediaUrl,
+    referenceFrameUrls,
+    artifactPaths,
+    frameCount: extractedFrameCount ?? (referenceFrameUrls.length || artifactPaths.length),
+    artifactCount: artifactPaths.length,
+    framePreparation: frameStatus && frameSource ? `${frameStatus} / ${frameSource}` : frameStatus,
+  }
+}
+
 export function ReactUgcStudio() {
   const [activeView, setActiveView] = React.useState<ReactView>("atlas")
   const [localState, setLocalState] = React.useState<UgcLocalState>(fallbackLocalState)
@@ -675,13 +718,15 @@ export function ReactUgcStudio() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       })
-      const payload = await response.json() as UgcLocalState | { error?: string }
-      if (!response.ok || !("schemaVersion" in payload) || payload.schemaVersion !== "ugc-studio.local-state.v1") {
+      const payload = await response.json() as UgcLocalState | UgcMutationEnvelope
+      const envelopeState = "state" in payload ? payload.state : undefined
+      const nextState = isLocalState(payload) ? payload : isLocalState(envelopeState) ? envelopeState : null
+      if (!response.ok || !nextState) {
         setResult(JSON.stringify(payload, null, 2))
         return
       }
-      setLocalState(payload)
-      setResult(JSON.stringify({ ok: true, path, updatedAt: payload.updatedAt }, null, 2))
+      setLocalState(nextState)
+      setResult(JSON.stringify({ ok: true, path, updatedAt: nextState.updatedAt }, null, 2))
     } catch (error) {
       setResult(error instanceof Error ? error.message : String(error))
     } finally {
@@ -2434,6 +2479,13 @@ function Inspector(props: {
           )}
         </InspectorCard>
 
+        <CodexAnalysisSection
+          candidate={props.selectedCandidate}
+          providerJobs={providerJobs}
+          busy={props.busy}
+          onMutateLocal={props.onMutateLocal}
+        />
+
         <InspectorCard title="Review decision">
           <Textarea
             value={reviewNoteDraft}
@@ -2549,6 +2601,12 @@ function Inspector(props: {
           Star candidate
         </Button>
       </InspectorCard>
+      <CodexAnalysisSection
+        candidate={props.selectedCandidate}
+        providerJobs={providerJobs}
+        busy={props.busy}
+        onMutateLocal={props.onMutateLocal}
+      />
       <InspectorCard title="Continuity JSON">
         <pre className="rugc-json text-[10px] leading-relaxed border-none p-0 bg-transparent">{JSON.stringify({
           persona: props.selectedPersona?.id,
@@ -2557,6 +2615,119 @@ function Inspector(props: {
         }, null, 2)}</pre>
       </InspectorCard>
     </InspectorFrame>
+  )
+}
+
+function CodexAnalysisSection(props: {
+  candidate: CreativeCandidate | undefined
+  providerJobs: readonly UgcProviderJob[]
+  busy: boolean
+  onMutateLocal: (path: string, body: object) => void
+}) {
+  const candidateId = props.candidate?.id ?? ""
+  const jobs = candidateId
+    ? props.providerJobs.filter((job) => job.provider === "codex" && job.targetIds.includes(candidateId))
+    : []
+  const hasPreviewVideo = Boolean(props.candidate?.preview.videoUrl)
+  const mediaLabel = props.candidate
+    ? hasPreviewVideo
+      ? props.candidate.preview.posterUrl ? "video + poster" : "video only"
+      : "missing video"
+    : "no candidate"
+
+  return (
+    <InspectorCard title="Codex analysis">
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <p className="m-0 text-[11px] font-medium text-foreground">Local video-understand jobs</p>
+          <p className="m-0 mt-0.5 text-[10px] text-muted-foreground">{mediaLabel} / dry-run default</p>
+        </div>
+        <Button
+          type="button"
+          size="xs"
+          variant="workbench"
+          disabled={props.busy || !props.candidate || !hasPreviewVideo}
+          onClick={() => {
+            if (!props.candidate || !props.candidate.preview.videoUrl) return
+            props.onMutateLocal(`/api/ugc/codex/candidates/${encodeURIComponent(props.candidate.id)}/analyze-video`, {
+              live: false,
+              prompt: "Analyze the selected candidate video from prepared local frames.",
+            })
+          }}
+          className="shrink-0 text-[10.5px]"
+        >
+          Analyze selected
+        </Button>
+      </div>
+
+      {!props.candidate || !hasPreviewVideo ? (
+        <div className="rounded-md border border-dashed border-border bg-background px-2.5 py-2 text-[10.5px] leading-4 text-muted-foreground">
+          Select a candidate with preview video metadata to prepare a dry-run Codex analysis job.
+        </div>
+      ) : null}
+
+      <div className="grid gap-2">
+        {jobs.length ? jobs.map((job) => {
+          const media = codexJobMediaSummary(job)
+          return (
+            <div key={job.id} className="grid gap-2 rounded-md border border-border/70 bg-background p-2.5">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="m-0 truncate text-xs font-semibold text-foreground">{job.operation}</p>
+                  <p className="m-0 mt-0.5 truncate text-[10px] text-muted-foreground">{job.id}</p>
+                </div>
+                <StatusBadge tone={providerJobStatusTone(job.status)}>{displayProviderJobStatus(job.status)}</StatusBadge>
+              </div>
+              <div className="grid gap-1">
+                <MetricRow label="Operation" value={job.operation} />
+                <MetricRow label="Status" value={displayProviderJobStatus(job.status)} />
+                <MetricRow label="Mode" value={job.mode} />
+                <MetricRow label="Updated" value={job.updatedAt} />
+                <MetricRow label="Frames" value={String(media.frameCount)} />
+                <MetricRow label="Artifacts" value={String(media.artifactCount)} />
+                <MetricRow label="Prepared" value={media.framePreparation ?? "n/a"} />
+              </div>
+              {media.mediaUrl ? <p className="m-0 truncate text-[10px] text-muted-foreground">media: {media.mediaUrl}</p> : null}
+              <CodexRefList label="Reference frames" values={media.referenceFrameUrls} />
+              <CodexRefList label="Artifact paths" values={media.artifactPaths} />
+              <div className="grid gap-1">
+                <CodexJsonPreview label="Request JSON" value={job.request} />
+                <CodexJsonPreview label="Response JSON" value={job.response} />
+              </div>
+            </div>
+          )
+        }) : (
+          <p className="m-0 rounded-md border border-border/60 bg-background px-2.5 py-2 text-[10.5px] text-muted-foreground">
+            No Codex jobs target this candidate yet.
+          </p>
+        )}
+      </div>
+    </InspectorCard>
+  )
+}
+
+function CodexRefList(props: { label: string; values: readonly string[] }) {
+  return (
+    <div className="rounded-md border border-border/50 bg-card/70 px-2 py-1.5">
+      <p className="m-0 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{props.label}</p>
+      <div className="mt-1 grid max-h-20 gap-0.5 overflow-auto text-[10px] leading-4 text-muted-foreground">
+        {props.values.length ? props.values.map((value) => (
+          <span key={value} className="truncate font-mono">{value}</span>
+        )) : <span>none</span>}
+      </div>
+    </div>
+  )
+}
+
+function CodexJsonPreview(props: { label: string; value: JsonValue | null }) {
+  return (
+    <details className="rounded-md border border-border/50 bg-card/70 px-2 py-1.5 text-[10px] text-muted-foreground">
+      <summary className="flex cursor-pointer items-center gap-1 font-semibold text-foreground">
+        <FileJson size={11} />
+        {props.label}
+      </summary>
+      <pre className="rugc-json mt-1 max-h-28 overflow-auto border-none bg-transparent p-0 text-[10px] leading-relaxed">{JSON.stringify(props.value, null, 2)}</pre>
+    </details>
   )
 }
 

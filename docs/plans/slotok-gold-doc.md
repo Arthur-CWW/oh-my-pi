@@ -192,7 +192,7 @@ Done:
 - branch decision-note editing and dead-end marking
 - candidate star/revise/reject actions and note creation
 - KIE dry-run/live-capped plan/create UI path
-- Codex image/video media-analysis planning with dry-run provider job persistence and explicit live API-key/spend gates
+- Codex image/video media-analysis planning with dry-run provider job persistence, selected-candidate analysis-results UI, prepared frame/artifact visibility, and explicit live API-key/spend gates
 - provider job records saved locally across KIE, Codex, Jimeng, and local providers
 - export manifest records from final editor
 - workbench design-system foundation and route chrome migration
@@ -202,6 +202,7 @@ Proof files:
 
 - `docs/qa/ugc-local-first-v1.md`
 - `docs/qa/slotok-visual-qa.md`
+- `docs/qa/slotok-analysis-results-ui.md`
 
 Current proof command set:
 
