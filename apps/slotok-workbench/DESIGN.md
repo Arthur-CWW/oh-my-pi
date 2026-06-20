@@ -208,3 +208,22 @@ Slotok uses tonal layering first and shallow shadows second. Static surfaces are
 - **Don't** use decorative glassmorphism, ornamental gradients, or hero-metric SaaS templates.
 - **Don't** hide spendful/live/provider actions behind ambiguous labels.
 - **Don't** allow document-level horizontal overflow on desktop, tablet, or phone widths.
+
+
+## 7. Component Contract
+
+### Primitive-First
+
+Prefer shadcn/ui Radix primitives (Dialog, Sheet, Popover, Tooltip, Collapsible, Toggle, Select, Tabs, Dropdown Menu, Command, etc.) over raw `<div>` plus custom CSS. Custom CSS is reserved for token overrides (colors, radii, shadows), density tuning, and layout composition.
+
+### New Components
+
+When no shadcn component exists, wrap the closest Radix primitive. Every overlay must have a visible backdrop. Every drawer/sheet must animate open and close, with reduced-motion fallback. Every button must set `appearance: none` and `border-style: solid`. Do not ship a custom component that duplicates a Radix primitive's overlay, animation, focus-ring, Escape-close, or focus-management behavior.
+
+### QA Contract
+
+`bun run visual:qa` must assert:
+
+- drawer/sheet overlays are opaque and cover the viewport at every responsive breakpoint where they can open;
+- no button uses browser-default `outset`/`inset`/`ridge`/`groove` border styles or native `appearance`;
+- every collapsible panel has a CSS transition/animation or an explicit reduced-motion fallback.
