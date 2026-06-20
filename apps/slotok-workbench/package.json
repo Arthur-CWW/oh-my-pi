@@ -15,6 +15,7 @@
     "smoke:daemon": "bun src/daemon/server.ts --once",
     "visual:qa": "bun scripts/visual-qa.ts",
     "visual:qa:reuse": "SLOTOK_VISUAL_QA_REUSE_SERVERS=1 bun scripts/visual-qa.ts",
+    "design:detect": "bunx --bun impeccable detect src/renderer",
     "test": "vitest run && bun test ./src/daemon/eval-store.bun.test.ts ./src/daemon/ugc-sqlite-store.bun.test.ts",
     "test:update": "vitest run --update",
     "build": "bun run build:renderer && bun run build:electron",
