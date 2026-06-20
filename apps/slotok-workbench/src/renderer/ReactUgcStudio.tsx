@@ -1916,9 +1916,11 @@ export function ReactUgcStudio() {
         </WorkbenchContent>
       </WorkbenchMain>
     </WorkbenchShell>
-    <NavDrawer open={isMobile && navDrawerOpen} onOpenChange={setNavDrawerOpen}>
-      <SidebarBody activeView={activeView} onViewChange={(view) => { setActiveView(view); setNavDrawerOpen(false) }} onCollapse={() => setNavDrawerOpen(false)} />
-    </NavDrawer>
+    {isMobile ? (
+      <NavDrawer open={navDrawerOpen} onOpenChange={setNavDrawerOpen}>
+        <SidebarBody activeView={activeView} onViewChange={(view) => { setActiveView(view); setNavDrawerOpen(false) }} onCollapse={() => setNavDrawerOpen(false)} />
+      </NavDrawer>
+    ) : null}
     </UgcLocalStateContext.Provider>
   )
 }
@@ -2018,6 +2020,7 @@ function CollapsedSidebar(props: { activeView: ReactView; onViewChange: (view: R
               variant={props.activeView === view.value ? "selected" : "ghost"}
               onClick={() => props.onViewChange(view.value)}
               aria-label={view.label}
+              data-ugc-nav-row={view.value}
               title={`${view.label} (Alt+${index + 1})`}
             >
               <Icon size={14} />

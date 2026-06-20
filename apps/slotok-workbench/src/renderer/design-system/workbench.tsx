@@ -1,6 +1,6 @@
 /** @jsxImportSource react */
 import * as React from "react"
-import * as DialogPrimitive from "@radix-ui/react-dialog"
+import { Sheet, SheetContent, SheetDescription, SheetTitle } from "../components/ui/sheet"
 import { cva, type VariantProps } from "class-variance-authority"
 import { Badge, type BadgeProps } from "../components/ui/badge"
 import { Button } from "../components/ui/button"
@@ -234,22 +234,18 @@ export function NavDrawer(props: {
   readonly children: React.ReactNode
 }) {
   return (
-    <DialogPrimitive.Root open={props.open} onOpenChange={props.onOpenChange}>
-      <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-zinc-900/30 backdrop-blur-[1px]" />
-        <DialogPrimitive.Content
-          className={cn(
-            WorkbenchSidebar({}).props.className,
-            "fixed inset-y-0 left-0 z-50 w-[260px] max-w-[82vw] border-r",
-          )}
-          data-ugc-nav-drawer
-        >
-          <DialogPrimitive.Title className="sr-only">Workspace navigation</DialogPrimitive.Title>
-          <DialogPrimitive.Description className="sr-only">Switch Slotok workbench views.</DialogPrimitive.Description>
-          {props.children}
-        </DialogPrimitive.Content>
-      </DialogPrimitive.Portal>
-    </DialogPrimitive.Root>
+    <Sheet open={props.open} onOpenChange={props.onOpenChange}>
+      <SheetContent
+        side="bottom"
+        showClose={false}
+        className="rugc-drawer-content flex max-h-[85vh] flex-col gap-3 overflow-x-hidden overflow-y-auto rounded-t-xl border-t border-border bg-background p-3 text-foreground"
+        data-ugc-nav-drawer
+      >
+        <SheetTitle className="sr-only">Workspace navigation</SheetTitle>
+        <SheetDescription className="sr-only">Switch Slotok workbench views.</SheetDescription>
+        {props.children}
+      </SheetContent>
+    </Sheet>
   )
 }
 

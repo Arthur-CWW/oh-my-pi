@@ -290,7 +290,14 @@ async function captureView(page: Page, name: string, screenshots: string[]): Pro
 async function switchView(page: Page, viewLabel: string, mobile: boolean): Promise<void> {
   if (mobile) {
     await page.getByRole("button", { name: /^Open navigation\b/ }).click({ force: true })
-    await page.locator(`[data-ugc-nav-row][aria-label="${viewLabel}"]`).click({ force: true })
+    await page.waitForFunction(() => {
+      const drawer = document.querySelector("[data-ugc-nav-drawer]")
+      if (!drawer) return false
+      const rect = drawer.getBoundingClientRect()
+      return Math.abs(rect.bottom - window.innerHeight) <= 2 && rect.top < window.innerHeight - 48
+    })
+    await page.locator("[data-ugc-nav-drawer]").locator(`[data-ugc-nav-row][aria-label="${viewLabel}"]`).click({ force: true })
+    await page.waitForTimeout(200)
     return
   }
   await page.locator(`[data-ugc-nav-row][aria-label="${viewLabel}"]`).click({ force: true })
@@ -359,6 +366,7 @@ async function auditResponsiveViewport(browser: Browser, width: number, height: 
     await page.goto(ugcUrl, { waitUntil: "load" })
     await page.waitForSelector("[data-ugc-studio-root]", { timeout: 20_000 })
     const findings: Finding[] = []
+    findings.push(...await auditDockedNavToggle(page, label))
     findings.push(...responsiveViewFindings(await auditView(page), "Persona Atlas", label))
     for (const view of QA_VIEWS) {
       await switchView(page, view[0], false)
@@ -371,12 +379,30 @@ async function auditResponsiveViewport(browser: Browser, width: number, height: 
   }
 }
 
+async function auditDockedNavToggle(page: Page, viewportLabel: string): Promise<readonly Finding[]> {
+  await page.getByRole("button", { name: /navigation/i }).click({ force: true })
+  await page.waitForTimeout(50)
+  const audit = await page.evaluate(() => ({
+    hasDrawer: Boolean(document.querySelector("[data-ugc-nav-drawer]")),
+    hasOverlay: Boolean(document.querySelector("[data-ugc-nav-drawer-overlay]")),
+    navRowsVisible: document.querySelectorAll("[data-ugc-nav-row]").length > 0,
+  }))
+  await page.getByRole("button", { name: /navigation/i }).click({ force: true })
+  await page.waitForTimeout(50)
+  return [
+    finding(!audit.hasDrawer, `Docked nav ${viewportLabel}: no modal drawer`, JSON.stringify(audit)),
+    finding(!audit.hasOverlay, `Docked nav ${viewportLabel}: no backdrop overlay`, JSON.stringify(audit)),
+    finding(audit.navRowsVisible, `Docked nav ${viewportLabel}: icon rail remains usable`, JSON.stringify(audit)),
+  ]
+}
+
 async function auditMobileViewport(browser: Browser, width: number, height: number, label: string): Promise<readonly Finding[]> {
   const page = await newPage(browser, width, height)
   try {
     await page.goto(ugcUrl, { waitUntil: "load" })
     await page.waitForSelector("[data-ugc-studio-root]", { timeout: 20_000 })
     const findings: Finding[] = []
+    findings.push(...await auditMobileDrawer(page, label))
     findings.push(...mobileViewFindings(await auditView(page), "Persona Atlas", label))
     for (const view of QA_VIEWS) {
       await switchView(page, view[0], true)
@@ -387,6 +413,50 @@ async function auditMobileViewport(browser: Browser, width: number, height: numb
   } finally {
     await page.close()
   }
+}
+
+async function auditMobileDrawer(page: Page, viewportLabel: string): Promise<readonly Finding[]> {
+  await page.getByRole("button", { name: /^Open navigation\b/ }).click({ force: true })
+  await page.waitForSelector("[data-ugc-nav-drawer]", { timeout: 5_000 })
+  await page.waitForFunction(() => {
+    const drawer = document.querySelector("[data-ugc-nav-drawer]")
+    if (!drawer) return false
+    const rect = drawer.getBoundingClientRect()
+    return Math.abs(rect.bottom - window.innerHeight) <= 2 && rect.top < window.innerHeight - 48
+  })
+  await page.waitForFunction(() => {
+    const overlay = document.querySelector("[data-ugc-nav-drawer-overlay]")
+    if (!overlay) return false
+    const style = getComputedStyle(overlay)
+    return style.backgroundColor !== "rgba(0, 0, 0, 0)" && Number(style.opacity) > 0.2
+  })
+  const audit = await page.evaluate(() => {
+    const overlay = document.querySelector("[data-ugc-nav-drawer-overlay]")
+    const drawer = document.querySelector("[data-ugc-nav-drawer]")
+    const overlayRect = overlay?.getBoundingClientRect()
+    const drawerRect = drawer?.getBoundingClientRect()
+    const overlayStyle = overlay ? getComputedStyle(overlay) : null
+    const drawerStyle = drawer ? getComputedStyle(drawer) : null
+    return {
+      hasOverlay: Boolean(overlay),
+      hasDrawer: Boolean(drawer),
+      overlayCoversViewport: Boolean(overlayRect && overlayRect.left <= 0 && overlayRect.top <= 0 && overlayRect.right >= window.innerWidth && overlayRect.bottom >= window.innerHeight),
+      overlayVisible: Boolean(overlayStyle && overlayStyle.backgroundColor !== "rgba(0, 0, 0, 0)" && overlayStyle.opacity !== "0"),
+      drawerOpaque: Boolean(drawerStyle && drawerStyle.backgroundColor !== "rgba(0, 0, 0, 0)"),
+      drawerAnimated: Boolean(drawerStyle && (drawerStyle.animationName !== "none" || drawerStyle.transitionProperty.includes("transform") || drawerStyle.transitionProperty === "all")),
+      drawerAboveOverlay: Boolean(overlayStyle && drawerStyle && Number(drawerStyle.zIndex) > Number(overlayStyle.zIndex)),
+    }
+  })
+  await page.keyboard.press("Escape")
+  return [
+    finding(audit.hasOverlay, `Nav drawer ${viewportLabel}: overlay is mounted`, JSON.stringify(audit)),
+    finding(audit.hasDrawer, `Nav drawer ${viewportLabel}: drawer is mounted`, JSON.stringify(audit)),
+    finding(audit.overlayCoversViewport, `Nav drawer ${viewportLabel}: overlay covers viewport`, JSON.stringify(audit)),
+    finding(audit.overlayVisible, `Nav drawer ${viewportLabel}: overlay visually dims page`, JSON.stringify(audit)),
+    finding(audit.drawerOpaque, `Nav drawer ${viewportLabel}: drawer surface is opaque`, JSON.stringify(audit)),
+    finding(audit.drawerAnimated, `Nav drawer ${viewportLabel}: drawer has transition animation`, JSON.stringify(audit)),
+    finding(audit.drawerAboveOverlay, `Nav drawer ${viewportLabel}: drawer stacks above overlay`, JSON.stringify(audit)),
+  ]
 }
 
 async function seedReferenceInputs(): Promise<ReferenceSeedAudit> {
