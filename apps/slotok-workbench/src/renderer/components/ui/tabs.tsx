@@ -5,6 +5,7 @@ import { cn } from "../../lib/cn"
 export interface TabItem<T extends string> {
   value: T
   label: string
+  ariaLabel?: string
 }
 
 export function Tabs<T extends string>(props: {
@@ -20,6 +21,8 @@ export function Tabs<T extends string>(props: {
         <button
           key={item.value}
           type="button"
+          aria-label={item.ariaLabel ?? item.label}
+          data-ugc-view-tab={item.value}
           className={cn(
             "rounded-[4px] border border-transparent bg-transparent font-medium text-zinc-500 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25",
             props.size === "sm" ? "px-2.5 py-1 text-[11px]" : "px-3.5 py-1.5 text-xs",

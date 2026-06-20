@@ -18,8 +18,12 @@ import {
   GitFork,
   Home,
   Layers3,
+  Menu,
   MessageSquare,
   Network,
+  PanelLeft,
+  PanelLeftClose,
+  PanelRight,
   Pause,
   Play,
   PlayCircle,
@@ -39,8 +43,11 @@ import { Tabs, type TabItem } from "./components/ui/tabs"
 import { Textarea } from "./components/ui/textarea"
 import {
   CommandSurface,
+  EmptyState,
+  InspectorActionResult,
   InspectorPanel,
   MetricRow,
+  NavDrawer,
   PanelCard,
   PanelHeader,
   ScoreMeter,
@@ -248,7 +255,7 @@ const views: Array<{ value: ReactView; label: string; shortLabel: string; icon: 
 export const reactUgcStudioViewMetadata: Array<Pick<(typeof views)[number], "value" | "label" | "shortLabel">> = views.map(({ value, label, shortLabel }) => ({ value, label, shortLabel }))
 
 
-const viewTabs: Array<TabItem<ReactView>> = views.map((view) => ({ value: view.value, label: view.shortLabel }))
+const viewTabs: Array<TabItem<ReactView>> = views.map((view) => ({ value: view.value, label: view.shortLabel, ariaLabel: view.label }))
 
 const productLaneFilters: Array<{ value: LaneFilter; label: string }> = [
   { value: "all", label: "All lanes" },
@@ -1534,6 +1541,23 @@ export function ReactUgcStudio() {
   const activeViewMeta = views.find((view) => view.value === activeView) ?? views[0]
   const [leftPanelOpen, setLeftPanelOpen] = React.useState(true)
   const [inspectorOpen, setInspectorOpen] = React.useState(true)
+  const [navDrawerOpen, setNavDrawerOpen] = React.useState(false)
+  const [isMobile, setIsMobile] = React.useState(() => typeof window !== "undefined" && window.innerWidth < 900)
+
+  React.useEffect(() => {
+    function applyResponsivePanels() {
+      const mobile = window.innerWidth < 900
+      setIsMobile(mobile)
+      if (mobile) {
+        setLeftPanelOpen(false)
+        setInspectorOpen(false)
+        setNavDrawerOpen(false)
+      }
+    }
+    applyResponsivePanels()
+    window.addEventListener("resize", applyResponsivePanels)
+    return () => window.removeEventListener("resize", applyResponsivePanels)
+  }, [])
 
   React.useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -1542,7 +1566,8 @@ export function ReactUgcStudio() {
       if (editing) return
       if (event.key === "[") {
         event.preventDefault()
-        setLeftPanelOpen((open) => !open)
+        if (window.innerWidth < 900) setNavDrawerOpen((open) => !open)
+        else setLeftPanelOpen((open) => !open)
         return
       }
       if (event.key === "]") {
@@ -1561,18 +1586,6 @@ export function ReactUgcStudio() {
     }
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
-  }, [])
-
-  React.useEffect(() => {
-    function applyResponsivePanels() {
-      if (window.innerWidth < 900) {
-        setLeftPanelOpen(false)
-        setInspectorOpen(false)
-      }
-    }
-    applyResponsivePanels()
-    window.addEventListener("resize", applyResponsivePanels)
-    return () => window.removeEventListener("resize", applyResponsivePanels)
   }, [])
 
   const refreshWorkspaceState = React.useCallback(async (): Promise<void> => {
@@ -1838,17 +1851,19 @@ export function ReactUgcStudio() {
 
   return (
     <UgcLocalStateContext.Provider value={localState}>
-    <WorkbenchShell className={cn("react-ugc-theme min-h-0 min-w-0", leftPanelOpen ? "grid-cols-[220px_minmax(0,1fr)]" : "grid-cols-[52px_minmax(0,1fr)]")} data-ugc-studio-root>
-      {leftPanelOpen ? (
-        <Sidebar activeView={activeView} onViewChange={setActiveView} onCollapse={() => setLeftPanelOpen(false)} />
-      ) : (
-        <CollapsedSidebar activeView={activeView} onViewChange={setActiveView} onExpand={() => setLeftPanelOpen(true)} />
-      )}
+    <WorkbenchShell className={cn("react-ugc-theme min-h-0 min-w-0", !isMobile && leftPanelOpen ? "grid-cols-[220px_minmax(0,1fr)]" : !isMobile ? "grid-cols-[52px_minmax(0,1fr)]" : "grid-cols-[minmax(0,1fr)]")} data-ugc-studio-root>
+      {!isMobile ? (
+        leftPanelOpen ? (
+          <Sidebar activeView={activeView} onViewChange={setActiveView} onCollapse={() => setLeftPanelOpen(false)} />
+        ) : (
+          <CollapsedSidebar activeView={activeView} onViewChange={setActiveView} onExpand={() => setLeftPanelOpen(true)} />
+        )
+      ) : null}
       <WorkbenchMain>
-        <Topbar activeViewMeta={activeViewMeta} leftPanelOpen={leftPanelOpen} inspectorOpen={inspectorOpen} onToggleLeftPanel={() => setLeftPanelOpen((open) => !open)} onToggleInspector={() => setInspectorOpen((open) => !open)} />
+        <Topbar activeViewMeta={activeViewMeta} navDocked={!isMobile && leftPanelOpen} inspectorOpen={inspectorOpen} isMobile={isMobile} onToggleNav={() => (isMobile ? setNavDrawerOpen((open) => !open) : setLeftPanelOpen((open) => !open))} onToggleInspector={() => setInspectorOpen((open) => !open)} />
         <WorkbenchContent className={inspectorOpen ? undefined : "grid-cols-[minmax(0,1fr)]"}>
           <WorkbenchCanvas className="grid grid-rows-[58px_minmax(0,1fr)_auto] min-h-0 min-w-0">
-            <ViewToolbar activeView={activeView} onViewChange={setActiveView} />
+            <ViewToolbar activeView={activeView} onViewChange={setActiveView} isMobile={isMobile} />
             <div className="rugc-stage min-h-0 min-w-0">
               <WorkspaceView
                 activeView={activeView}
@@ -1901,11 +1916,34 @@ export function ReactUgcStudio() {
         </WorkbenchContent>
       </WorkbenchMain>
     </WorkbenchShell>
+    <NavDrawer open={isMobile && navDrawerOpen} onOpenChange={setNavDrawerOpen}>
+      <SidebarBody activeView={activeView} onViewChange={(view) => { setActiveView(view); setNavDrawerOpen(false) }} onCollapse={() => setNavDrawerOpen(false)} />
+    </NavDrawer>
     </UgcLocalStateContext.Provider>
   )
 }
 
-function Sidebar(props: { activeView: ReactView; onViewChange: (view: ReactView) => void; onCollapse: () => void }) {
+function navRows(activeView: ReactView, onViewChange: (view: ReactView) => void) {
+  return views.map((view, index) => {
+    const Icon = view.icon
+    return (
+      <SidebarRow
+        key={view.value}
+        type="button"
+        active={activeView === view.value}
+        icon={<Icon size={14} />}
+        aria-label={view.label}
+        data-ugc-nav-row={view.value}
+        shortcut={`${index + 1}`}
+        onClick={() => onViewChange(view.value)}
+      >
+        {view.label}
+      </SidebarRow>
+    )
+  })
+}
+
+function SidebarBody(props: { activeView: ReactView; onViewChange: (view: ReactView) => void; onCollapse: () => void }) {
   const workspace = useUgcLocalState().workspace
   const candidates = workspace.candidates
   const total = candidates.length
@@ -1914,33 +1952,18 @@ function Sidebar(props: { activeView: ReactView; onViewChange: (view: ReactView)
   const exported = candidates.filter((candidate) => candidate.status === "exported").length
   const rejected = candidates.filter((candidate) => candidate.status === "rejected").length
   return (
-    <WorkbenchSidebar>
+    <>
       <div className="flex items-center gap-2">
         <span className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-primary text-primary-foreground">
           <Clapperboard size={14} />
         </span>
         <span className="min-w-0 flex-1 truncate text-sm font-semibold">UGC Studio</span>
-        <Button type="button" size="xs" variant="ghost" onClick={props.onCollapse} aria-label="Collapse workspace sidebar" title="Collapse workspace sidebar ([)">
-          Hide
+        <Button type="button" size="icon-sm" variant="ghost" onClick={props.onCollapse} aria-label="Hide workspace sidebar" title="Hide workspace sidebar ([)">
+          <PanelLeftClose size={14} />
         </Button>
       </div>
       <SidebarSection title="Workspace">
-        {views.map((view, index) => {
-          const Icon = view.icon
-          return (
-            <SidebarRow
-              key={view.value}
-              type="button"
-              active={props.activeView === view.value}
-              icon={<Icon size={14} />}
-              aria-label={view.label}
-              shortcut={`⌥${index + 1}`}
-              onClick={() => props.onViewChange(view.value)}
-            >
-              {view.label}
-            </SidebarRow>
-          )
-        })}
+        {navRows(props.activeView, props.onViewChange)}
       </SidebarSection>
       <SidebarSection title="Candidates">
         <div className="grid gap-1 px-1 text-xs text-muted-foreground">
@@ -1966,6 +1989,14 @@ function Sidebar(props: { activeView: ReactView; onViewChange: (view: ReactView)
           </div>
         </div>
       </SidebarSection>
+    </>
+  )
+}
+
+function Sidebar(props: { activeView: ReactView; onViewChange: (view: ReactView) => void; onCollapse: () => void }) {
+  return (
+    <WorkbenchSidebar>
+      <SidebarBody activeView={props.activeView} onViewChange={props.onViewChange} onCollapse={props.onCollapse} />
     </WorkbenchSidebar>
   )
 }
@@ -2009,36 +2040,41 @@ function SidebarSection(props: { title: string; children: React.ReactNode }) {
   )
 }
 
-function Topbar(props: { activeViewMeta: (typeof views)[number]; leftPanelOpen: boolean; inspectorOpen: boolean; onToggleLeftPanel: () => void; onToggleInspector: () => void }) {
+function Topbar(props: { activeViewMeta: (typeof views)[number]; navDocked: boolean; inspectorOpen: boolean; isMobile: boolean; onToggleNav: () => void; onToggleInspector: () => void }) {
   const workspace = useUgcLocalState().workspace
   return (
     <WorkbenchTopbar>
       <div className="flex min-w-0 items-center gap-2 text-muted-foreground">
-        <Home size={13} />
-        <span>UGC Studio</span>
-        <span>/</span>
+        {props.isMobile ? (
+          <Button type="button" size="icon-sm" variant="ghost" onClick={props.onToggleNav} aria-label="Open navigation" title="Open navigation ( [ )">
+            <Menu size={15} />
+          </Button>
+        ) : (
+          <Button type="button" size="icon-sm" variant="ghost" onClick={props.onToggleNav} aria-label={props.navDocked ? "Hide navigation" : "Show navigation"} title="Toggle navigation ( [ )">
+            {props.navDocked ? <PanelLeftClose size={15} /> : <PanelLeft size={15} />}
+          </Button>
+        )}
+        <Home size={13} className="hidden sm:block" />
+        <span className="hidden sm:inline">UGC Studio</span>
+        <span className="hidden sm:inline">/</span>
         <span className="truncate">{workspace.title}</span>
         <span>/</span>
-        <strong className="truncate text-foreground">{props.activeViewMeta.label}</strong>
+        <strong className="truncate text-foreground" data-ugc-view-title>{props.activeViewMeta.label}</strong>
       </div>
       <div className="flex shrink-0 items-center gap-1">
-        <Button type="button" size="xs" variant={props.leftPanelOpen ? "workbench" : "selected"} onClick={props.onToggleLeftPanel} title="Toggle workspace sidebar ([)">{props.leftPanelOpen ? "Hide nav" : "Show nav"}</Button>
-        <Button type="button" size="xs" variant={props.inspectorOpen ? "workbench" : "selected"} onClick={props.onToggleInspector} title="Toggle inspector (])">{props.inspectorOpen ? "Hide inspector" : "Show inspector"}</Button>
+        <Button type="button" size="icon-sm" variant={props.inspectorOpen ? "ghost" : "secondary"} onClick={props.onToggleInspector} aria-label={props.inspectorOpen ? "Hide inspector" : "Show inspector"} title="Toggle inspector ( ] )">
+          <PanelRight size={15} />
+        </Button>
         <span className="hidden text-[10px] text-muted-foreground lg:inline">Alt+1-8 views</span>
       </div>
     </WorkbenchTopbar>
   )
 }
 
-function ViewToolbar(props: { activeView: ReactView; onViewChange: (view: ReactView) => void }) {
-  const workspace = useUgcLocalState().workspace
+function ViewToolbar(props: { activeView: ReactView; onViewChange: (view: ReactView) => void; isMobile?: boolean }) {
   return (
-    <div className="flex h-[58px] min-w-0 items-center justify-between gap-3 border-b border-border bg-card/80 px-4">
-      <div className="min-w-0 w-36 shrink-0">
-        <p className="m-0 truncate text-[11px] text-muted-foreground">{workspace.title}</p>
-        <h1 data-ugc-view-title className="m-0 mt-0.5 truncate text-[15px] font-bold tracking-normal text-foreground">{views.find((view) => view.value === props.activeView)?.label}</h1>
-      </div>
-      <ToolbarCluster className="min-w-0 flex-1 justify-end overflow-x-auto">
+    <div className="flex h-[58px] min-w-0 items-center gap-3 border-b border-border bg-card/80 px-4">
+      <ToolbarCluster className="min-w-0 flex-1 overflow-x-auto">
         <Tabs value={props.activeView} items={viewTabs} onValueChange={props.onViewChange} className="shrink-0" />
       </ToolbarCluster>
     </div>
@@ -2143,10 +2179,18 @@ function PersonaAtlas(props: {
   const selectedNotes = selectedPersona ? personaReviewNotes(workspace, selectedPersona) : []
   const selectedJobs = selectedPersona ? personaProviderJobs(providerJobs, selectedPersona, selectedBranches, selectedCandidates) : []
   const selectedLane = selectedPersona ? productLaneForPersona(selectedPersona) : "ugc-ads"
+  const lastPersonaJob = selectedJobs.length ? selectedJobs[selectedJobs.length - 1] : undefined
+  const actionState: "idle" | "running" | "done" | "errored" = lastPersonaJob
+    ? (lastPersonaJob.status === "running" || lastPersonaJob.status === "queued" || lastPersonaJob.status === "blocked"
+      ? "running"
+      : lastPersonaJob.status === "failed"
+        ? "errored"
+        : "done")
+    : "idle"
   return (
     <div className="rugc-atlas">
       <div className="rugc-atlas-grid">
-        {personaCards.map((persona) => (
+        {personaCards.length ? personaCards.map((persona) => (
           <button
             key={persona.id}
             type="button"
@@ -2174,7 +2218,13 @@ function PersonaAtlas(props: {
               </footer>
             </div>
           </button>
-        ))}
+        )) : (
+          <EmptyState
+            icon={<Sparkles size={16} />}
+            title="No personas yet"
+            body="Create a persona to start the atlas. Personas drive candidates, branches, and provider jobs across the workspace."
+          />
+        )}
       </div>
       <div className="rugc-agent-panel">
         <header>
@@ -2198,6 +2248,11 @@ function PersonaAtlas(props: {
                 <span key={job.id}>{job.operation} · {job.status} · {job.artifactPaths.length ? job.artifactPaths.join(", ") : "no artifacts"}</span>
               )) : <span>No provider artifacts attached to this persona.</span>}
             </div>
+            <InspectorActionResult
+              state={actionState}
+              summary={lastPersonaJob ? lastPersonaJob.operation : undefined}
+              detail={lastPersonaJob && lastPersonaJob.artifactPaths.length ? lastPersonaJob.artifactPaths.join(", ") : undefined}
+            />
             <Button
               type="button"
               size="sm"

@@ -28,6 +28,7 @@ Renderer daemon calls proxied from `http://127.0.0.1:47522` to `http://127.0.0.1
 - PASS **Persona Atlas: app title loads** - title=Slotok Workbench
 - PASS **Persona Atlas: view activates** - view=Persona Atlas
 - PASS **Persona Atlas: command bar remains visible** - commandBar=true
+- PASS **Persona Atlas: command bar docks inside canvas** - commandBarInsideCanvas=true
 - PASS **Persona Atlas: inspector remains visible** - inspector=true
 - PASS **Persona Atlas: no document horizontal overflow** - overflowX=false
 - PASS **Persona Atlas: no document vertical overflow** - bodyOverflowY=false, rootHeight=720, viewportHeight=720
@@ -38,6 +39,7 @@ Renderer daemon calls proxied from `http://127.0.0.1:47522` to `http://127.0.0.1
 - PASS **Exploration Board: app title loads** - title=Slotok Workbench
 - PASS **Exploration Board: view activates** - view=Exploration Board
 - PASS **Exploration Board: command bar remains visible** - commandBar=true
+- PASS **Exploration Board: command bar docks inside canvas** - commandBarInsideCanvas=true
 - PASS **Exploration Board: inspector remains visible** - inspector=true
 - PASS **Exploration Board: no document horizontal overflow** - overflowX=false
 - PASS **Exploration Board: no document vertical overflow** - bodyOverflowY=false, rootHeight=720, viewportHeight=720
@@ -48,6 +50,7 @@ Renderer daemon calls proxied from `http://127.0.0.1:47522` to `http://127.0.0.1
 - PASS **Batch Review: app title loads** - title=Slotok Workbench
 - PASS **Batch Review: view activates** - view=Batch Review
 - PASS **Batch Review: command bar remains visible** - commandBar=true
+- PASS **Batch Review: command bar docks inside canvas** - commandBarInsideCanvas=true
 - PASS **Batch Review: inspector remains visible** - inspector=true
 - PASS **Batch Review: no document horizontal overflow** - overflowX=false
 - PASS **Batch Review: no document vertical overflow** - bodyOverflowY=false, rootHeight=720, viewportHeight=720
@@ -58,6 +61,7 @@ Renderer daemon calls proxied from `http://127.0.0.1:47522` to `http://127.0.0.1
 - PASS **Campaign Branch Map: app title loads** - title=Slotok Workbench
 - PASS **Campaign Branch Map: view activates** - view=Campaign Branch Map
 - PASS **Campaign Branch Map: command bar remains visible** - commandBar=true
+- PASS **Campaign Branch Map: command bar docks inside canvas** - commandBarInsideCanvas=true
 - PASS **Campaign Branch Map: inspector remains visible** - inspector=true
 - PASS **Campaign Branch Map: no document horizontal overflow** - overflowX=false
 - PASS **Campaign Branch Map: no document vertical overflow** - bodyOverflowY=false, rootHeight=720, viewportHeight=720
@@ -68,6 +72,7 @@ Renderer daemon calls proxied from `http://127.0.0.1:47522` to `http://127.0.0.1
 - PASS **Reference Archive: app title loads** - title=Slotok Workbench
 - PASS **Reference Archive: view activates** - view=Reference Archive
 - PASS **Reference Archive: command bar remains visible** - commandBar=true
+- PASS **Reference Archive: command bar docks inside canvas** - commandBarInsideCanvas=true
 - PASS **Reference Archive: inspector remains visible** - inspector=true
 - PASS **Reference Archive: no document horizontal overflow** - overflowX=false
 - PASS **Reference Archive: no document vertical overflow** - bodyOverflowY=false, rootHeight=720, viewportHeight=720
@@ -78,6 +83,7 @@ Renderer daemon calls proxied from `http://127.0.0.1:47522` to `http://127.0.0.1
 - PASS **Final Layer Editor: app title loads** - title=Slotok Workbench
 - PASS **Final Layer Editor: view activates** - view=Final Layer Editor
 - PASS **Final Layer Editor: command bar remains visible** - commandBar=true
+- PASS **Final Layer Editor: command bar docks inside canvas** - commandBarInsideCanvas=true
 - PASS **Final Layer Editor: inspector remains visible** - inspector=true
 - PASS **Final Layer Editor: no document horizontal overflow** - overflowX=false
 - PASS **Final Layer Editor: no document vertical overflow** - bodyOverflowY=false, rootHeight=720, viewportHeight=720
@@ -88,6 +94,7 @@ Renderer daemon calls proxied from `http://127.0.0.1:47522` to `http://127.0.0.1
 - PASS **Developer Graph: app title loads** - title=Slotok Workbench
 - PASS **Developer Graph: view activates** - view=Developer Graph
 - PASS **Developer Graph: command bar remains visible** - commandBar=true
+- PASS **Developer Graph: command bar docks inside canvas** - commandBarInsideCanvas=true
 - PASS **Developer Graph: inspector remains visible** - inspector=true
 - PASS **Developer Graph: no document horizontal overflow** - overflowX=false
 - PASS **Developer Graph: no document vertical overflow** - bodyOverflowY=false, rootHeight=720, viewportHeight=720
@@ -98,6 +105,7 @@ Renderer daemon calls proxied from `http://127.0.0.1:47522` to `http://127.0.0.1
 - PASS **KIE Proxy: app title loads** - title=Slotok Workbench
 - PASS **KIE Proxy: view activates** - view=KIE Proxy
 - PASS **KIE Proxy: command bar remains visible** - commandBar=true
+- PASS **KIE Proxy: command bar docks inside canvas** - commandBarInsideCanvas=true
 - PASS **KIE Proxy: inspector remains visible** - inspector=true
 - PASS **KIE Proxy: no document horizontal overflow** - overflowX=false
 - PASS **KIE Proxy: no document vertical overflow** - bodyOverflowY=false, rootHeight=720, viewportHeight=720

@@ -1,5 +1,6 @@
 /** @jsxImportSource react */
 import * as React from "react"
+import * as DialogPrimitive from "@radix-ui/react-dialog"
 import { cva, type VariantProps } from "class-variance-authority"
 import { Badge, type BadgeProps } from "../components/ui/badge"
 import { Button, type ButtonProps } from "../components/ui/button"
@@ -204,5 +205,69 @@ export function CommandSurface(props: {
       {props.actions ? <div className="flex shrink-0 items-center gap-1">{props.actions}</div> : null}
       {props.runButton}
     </PanelCard>
+  )
+}
+
+export function EmptyState(props: {
+  readonly icon?: React.ReactNode
+  readonly title: string
+  readonly body?: React.ReactNode
+  readonly action?: React.ReactNode
+  readonly className?: string
+}) {
+  return (
+    <div className={cn("flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 py-10 text-center text-muted-foreground", props.className)}>
+      {props.icon ? <div className="grid h-10 w-10 place-items-center rounded-full border border-zinc-200 bg-zinc-50 text-zinc-400">{props.icon}</div> : null}
+      <div className="grid gap-1">
+        <p className="text-sm font-semibold text-foreground">{props.title}</p>
+        {props.body ? <p className="max-w-sm text-xs leading-5">{props.body}</p> : null}
+      </div>
+      {props.action}
+    </div>
+  )
+}
+
+export function NavDrawer(props: {
+  readonly open: boolean
+  readonly onOpenChange: (open: boolean) => void
+  readonly children: React.ReactNode
+}) {
+  return (
+    <DialogPrimitive.Root open={props.open} onOpenChange={props.onOpenChange}>
+      <DialogPrimitive.Portal>
+        <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-zinc-900/30 backdrop-blur-[1px]" />
+        <DialogPrimitive.Content
+          className={cn(
+            WorkbenchSidebar({}).props.className,
+            "fixed inset-y-0 left-0 z-50 w-[260px] max-w-[82vw] border-r",
+          )}
+          data-ugc-nav-drawer
+        >
+          <DialogPrimitive.Title className="sr-only">Workspace navigation</DialogPrimitive.Title>
+          <DialogPrimitive.Description className="sr-only">Switch Slotok workbench views.</DialogPrimitive.Description>
+          {props.children}
+        </DialogPrimitive.Content>
+      </DialogPrimitive.Portal>
+    </DialogPrimitive.Root>
+  )
+}
+
+export function InspectorActionResult(props: {
+  readonly state: "idle" | "running" | "done" | "errored"
+  readonly summary?: string
+  readonly detail?: string
+  readonly className?: string
+}) {
+  const tone: UgcTone = props.state === "errored" ? "danger" : props.state === "done" ? "success" : props.state === "running" ? "active" : "neutral"
+  const label = props.state === "idle" ? "Not run yet" : props.state === "running" ? "Running…" : props.state === "done" ? "Last result" : "Failed"
+  return (
+    <div className={cn("grid gap-1 rounded-md border border-zinc-200 bg-zinc-50/60 p-2 text-[11px] leading-4", props.className)}>
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-medium text-foreground">{label}</span>
+        <StatusBadge tone={tone}>{props.state}</StatusBadge>
+      </div>
+      {props.summary ? <span className="truncate text-zinc-700">{props.summary}</span> : null}
+      {props.detail ? <span className="text-muted-foreground">{props.detail}</span> : null}
+    </div>
   )
 }

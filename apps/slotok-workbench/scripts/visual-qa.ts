@@ -30,6 +30,7 @@ interface Finding {
 
 interface ViewAudit {
   commandBarVisible: boolean
+  commandBarInsideCanvas: boolean
   inspectorVisible: boolean
   overflowX: boolean
   bodyOverflowY: boolean
@@ -130,7 +131,7 @@ try {
     findings.push(...viewFindings(await auditView(page), "Persona Atlas"))
 
     for (const view of QA_VIEWS) {
-      await page.getByRole("button", { name: new RegExp(`^${escapeRegExp(view[0])}\\b`) }).click()
+      await switchView(page, view[0], false)
       await page.waitForTimeout(100)
       if (view[0] === "Developer Graph") coreLoop = await exerciseCoreLoop(page)
       await captureView(page, view[1], screenshots)
@@ -286,6 +287,15 @@ async function captureView(page: Page, name: string, screenshots: string[]): Pro
   screenshots.push(name)
 }
 
+async function switchView(page: Page, viewLabel: string, mobile: boolean): Promise<void> {
+  if (mobile) {
+    await page.getByRole("button", { name: /^Open navigation\b/ }).click({ force: true })
+    await page.locator(`[data-ugc-nav-row][aria-label="${viewLabel}"]`).click({ force: true })
+    return
+  }
+  await page.locator(`[data-ugc-nav-row][aria-label="${viewLabel}"]`).click({ force: true })
+}
+
 async function auditView(page: Page): Promise<ViewAudit> {
   return page.evaluate(
     ([placeholderDenylist, fakeTopRightDenylist]) => {
@@ -315,8 +325,17 @@ async function auditView(page: Page): Promise<ViewAudit> {
       const stage = document.querySelector(".rugc-stage")
       const inspector = document.querySelector("[data-ugc-inspector]")
       const root = document.querySelector("[data-ugc-studio-root]")
+      const commandBar = document.querySelector("[data-ugc-command-surface]")
+      const canvas = document.querySelector(".rugc-stage")?.parentElement ?? null
+      let commandBarInsideCanvas = false
+      if (commandBar && canvas) {
+        const cb = commandBar.getBoundingClientRect()
+        const cc = canvas.getBoundingClientRect()
+        commandBarInsideCanvas = cb.top >= cc.top - 1 && cb.bottom <= cc.bottom + 1
+      }
       return {
-        commandBarVisible: Boolean(document.querySelector("[data-ugc-command-surface]")),
+        commandBarVisible: Boolean(commandBar),
+        commandBarInsideCanvas,
         inspectorVisible: Boolean(inspector),
         overflowX: document.documentElement.scrollWidth > window.innerWidth,
         bodyOverflowY: document.documentElement.scrollHeight > window.innerHeight + 1,
@@ -342,7 +361,7 @@ async function auditResponsiveViewport(browser: Browser, width: number, height: 
     const findings: Finding[] = []
     findings.push(...responsiveViewFindings(await auditView(page), "Persona Atlas", label))
     for (const view of QA_VIEWS) {
-      await page.getByRole("button", { name: new RegExp(`^${escapeRegExp(view[0])}\\b`) }).click()
+      await switchView(page, view[0], false)
       await page.waitForTimeout(50)
       findings.push(...responsiveViewFindings(await auditView(page), view[0], label))
     }
@@ -360,7 +379,7 @@ async function auditMobileViewport(browser: Browser, width: number, height: numb
     const findings: Finding[] = []
     findings.push(...mobileViewFindings(await auditView(page), "Persona Atlas", label))
     for (const view of QA_VIEWS) {
-      await page.getByRole("button", { name: new RegExp(`^${escapeRegExp(view[0])}\\b`) }).click()
+      await switchView(page, view[0], true)
       await page.waitForTimeout(50)
       findings.push(...mobileViewFindings(await auditView(page), view[0], label))
     }
@@ -568,6 +587,7 @@ function viewFindings(audit: ViewAudit, expectedView: string): Finding[] {
     finding(audit.title === "Slotok Workbench", `${expectedView}: app title loads`, `title=${audit.title}`),
     finding(audit.view === expectedView, `${expectedView}: view activates`, `view=${audit.view}`),
     finding(audit.commandBarVisible, `${expectedView}: command bar remains visible`, `commandBar=${audit.commandBarVisible}`),
+    finding(audit.commandBarInsideCanvas, `${expectedView}: command bar docks inside canvas`, `commandBarInsideCanvas=${audit.commandBarInsideCanvas}`),
     finding(audit.inspectorVisible, `${expectedView}: inspector remains visible`, `inspector=${audit.inspectorVisible}`),
     finding(!audit.overflowX, `${expectedView}: no document horizontal overflow`, `overflowX=${audit.overflowX}`),
     finding(!audit.bodyOverflowY, `${expectedView}: no document vertical overflow`, `bodyOverflowY=${audit.bodyOverflowY}, rootHeight=${audit.rootHeight}, viewportHeight=${audit.viewportHeight}`),

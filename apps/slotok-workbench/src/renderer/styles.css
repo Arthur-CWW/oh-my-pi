@@ -72,14 +72,19 @@ body {
 .rugc-atlas {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   gap: 12px;
+  height: 100%;
+  min-height: 0;
+  align-content: start;
 }
 
 .rugc-atlas-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(176px, 100%), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
   gap: 12px;
   min-width: 0;
+  align-content: start;
 }
 
 .rugc-persona-card,
@@ -117,17 +122,17 @@ body {
   display: grid;
   place-items: center;
   height: 130px;
-  background: linear-gradient(135deg, #e4d3c6, #f7eee3);
+  background: linear-gradient(135deg, #e4e4e7, #f4f4f5);
 }
 
-.rugc-persona-portrait.rose { background: linear-gradient(135deg, #f0d1cf, #efe4d2 58%, #d9e3e7); }
-.rugc-persona-portrait.blue { background: linear-gradient(135deg, #d7e3f4, #f0e3d7); }
-.rugc-persona-portrait.green { background: linear-gradient(135deg, #d9eadb, #f1e1d4); }
-.rugc-persona-portrait.slate { background: linear-gradient(135deg, #d8dbe2, #efe7dd); }
-.rugc-persona-portrait.amber { background: linear-gradient(135deg, #ead7b5, #dfe8e2); }
-.rugc-persona-portrait.violet { background: linear-gradient(135deg, #dfd5f1, #f0dfd4); }
-.rugc-persona-portrait.cyan { background: linear-gradient(135deg, #cfebef, #f0e4d1); }
-.rugc-persona-portrait.pink { background: linear-gradient(135deg, #f0ccd9, #dce7ef); }
+.rugc-persona-portrait.rose { background: linear-gradient(135deg, #fde7ed, #f1f0ec 58%, #dfe6ec); }
+.rugc-persona-portrait.blue { background: linear-gradient(135deg, #dfe9f6, #ecf0f4); }
+.rugc-persona-portrait.green { background: linear-gradient(135deg, #dcefe0, #eef1ee); }
+.rugc-persona-portrait.slate { background: linear-gradient(135deg, #d8dbe2, #ecebe9); }
+.rugc-persona-portrait.amber { background: linear-gradient(135deg, #ece2d0, #e6ebe5); }
+.rugc-persona-portrait.violet { background: linear-gradient(135deg, #e2dcef, #efece9); }
+.rugc-persona-portrait.cyan { background: linear-gradient(135deg, #d6edef, #ece9df); }
+.rugc-persona-portrait.pink { background: linear-gradient(135deg, #f3d9e4, #dde6ee); }
 
 .rugc-persona-portrait > span {
   display: grid;
@@ -204,10 +209,12 @@ body {
 }
 
 .rugc-persona-body dd {
+  display: -webkit-box;
   overflow: hidden;
   margin: 0;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .rugc-persona-body footer {
