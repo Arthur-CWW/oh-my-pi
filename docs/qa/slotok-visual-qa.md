@@ -120,46 +120,48 @@ Renderer daemon calls proxied from `http://127.0.0.1:47522` to `http://127.0.0.1
 - PASS **core loop: demo run reaches completed success** - status=succeeded, phase=completed
 - PASS **core loop: event-sourced run timeline recorded** - events=created, queued, phase, message, import, result, completed
 - PASS **core loop: local dry-run provider plan persists** - operation=demo-brainrot-local-plan, mode=dry-run, status=completed
+- PASS **Docked nav tablet: no modal drawer** - {"hasDrawer":false,"hasOverlay":false,"navRowsVisible":true}
+- PASS **Docked nav tablet: no backdrop overlay** - {"hasDrawer":false,"hasOverlay":false,"navRowsVisible":true}
+- PASS **Docked nav tablet: icon rail remains usable** - {"hasDrawer":false,"hasOverlay":false,"navRowsVisible":true}
 - PASS **Persona Atlas tablet: view activates** - view=Persona Atlas
 - PASS **Persona Atlas tablet: no document horizontal overflow** - overflowX=false
 - PASS **Persona Atlas tablet: no document vertical overflow** - bodyOverflowY=false, rootHeight=768, viewportHeight=768
 - PASS **Persona Atlas tablet: stage owns vertical scroll** - stageLocalScroll=true
-- PASS **Persona Atlas tablet: inspector owns vertical scroll** - inspectorLocalScroll=true
 - PASS **Exploration Board tablet: view activates** - view=Exploration Board
 - PASS **Exploration Board tablet: no document horizontal overflow** - overflowX=false
 - PASS **Exploration Board tablet: no document vertical overflow** - bodyOverflowY=false, rootHeight=768, viewportHeight=768
 - PASS **Exploration Board tablet: stage owns vertical scroll** - stageLocalScroll=true
-- PASS **Exploration Board tablet: inspector owns vertical scroll** - inspectorLocalScroll=true
 - PASS **Batch Review tablet: view activates** - view=Batch Review
 - PASS **Batch Review tablet: no document horizontal overflow** - overflowX=false
 - PASS **Batch Review tablet: no document vertical overflow** - bodyOverflowY=false, rootHeight=768, viewportHeight=768
 - PASS **Batch Review tablet: stage owns vertical scroll** - stageLocalScroll=true
-- PASS **Batch Review tablet: inspector owns vertical scroll** - inspectorLocalScroll=true
 - PASS **Campaign Branch Map tablet: view activates** - view=Campaign Branch Map
 - PASS **Campaign Branch Map tablet: no document horizontal overflow** - overflowX=false
 - PASS **Campaign Branch Map tablet: no document vertical overflow** - bodyOverflowY=false, rootHeight=768, viewportHeight=768
 - PASS **Campaign Branch Map tablet: stage owns vertical scroll** - stageLocalScroll=true
-- PASS **Campaign Branch Map tablet: inspector owns vertical scroll** - inspectorLocalScroll=true
 - PASS **Reference Archive tablet: view activates** - view=Reference Archive
 - PASS **Reference Archive tablet: no document horizontal overflow** - overflowX=false
 - PASS **Reference Archive tablet: no document vertical overflow** - bodyOverflowY=false, rootHeight=768, viewportHeight=768
 - PASS **Reference Archive tablet: stage owns vertical scroll** - stageLocalScroll=true
-- PASS **Reference Archive tablet: inspector owns vertical scroll** - inspectorLocalScroll=true
 - PASS **Final Layer Editor tablet: view activates** - view=Final Layer Editor
 - PASS **Final Layer Editor tablet: no document horizontal overflow** - overflowX=false
 - PASS **Final Layer Editor tablet: no document vertical overflow** - bodyOverflowY=false, rootHeight=768, viewportHeight=768
 - PASS **Final Layer Editor tablet: stage owns vertical scroll** - stageLocalScroll=true
-- PASS **Final Layer Editor tablet: inspector owns vertical scroll** - inspectorLocalScroll=true
 - PASS **Developer Graph tablet: view activates** - view=Developer Graph
 - PASS **Developer Graph tablet: no document horizontal overflow** - overflowX=false
 - PASS **Developer Graph tablet: no document vertical overflow** - bodyOverflowY=false, rootHeight=768, viewportHeight=768
 - PASS **Developer Graph tablet: stage owns vertical scroll** - stageLocalScroll=true
-- PASS **Developer Graph tablet: inspector owns vertical scroll** - inspectorLocalScroll=true
 - PASS **KIE Proxy tablet: view activates** - view=KIE Proxy
 - PASS **KIE Proxy tablet: no document horizontal overflow** - overflowX=false
 - PASS **KIE Proxy tablet: no document vertical overflow** - bodyOverflowY=false, rootHeight=768, viewportHeight=768
 - PASS **KIE Proxy tablet: stage owns vertical scroll** - stageLocalScroll=true
-- PASS **KIE Proxy tablet: inspector owns vertical scroll** - inspectorLocalScroll=true
+- PASS **Nav drawer mobile: overlay is mounted** - {"hasOverlay":true,"hasDrawer":true,"overlayCoversViewport":true,"overlayVisible":true,"drawerOpaque":true,"drawerAnimated":true,"drawerAboveOverlay":true}
+- PASS **Nav drawer mobile: drawer is mounted** - {"hasOverlay":true,"hasDrawer":true,"overlayCoversViewport":true,"overlayVisible":true,"drawerOpaque":true,"drawerAnimated":true,"drawerAboveOverlay":true}
+- PASS **Nav drawer mobile: overlay covers viewport** - {"hasOverlay":true,"hasDrawer":true,"overlayCoversViewport":true,"overlayVisible":true,"drawerOpaque":true,"drawerAnimated":true,"drawerAboveOverlay":true}
+- PASS **Nav drawer mobile: overlay visually dims page** - {"hasOverlay":true,"hasDrawer":true,"overlayCoversViewport":true,"overlayVisible":true,"drawerOpaque":true,"drawerAnimated":true,"drawerAboveOverlay":true}
+- PASS **Nav drawer mobile: drawer surface is opaque** - {"hasOverlay":true,"hasDrawer":true,"overlayCoversViewport":true,"overlayVisible":true,"drawerOpaque":true,"drawerAnimated":true,"drawerAboveOverlay":true}
+- PASS **Nav drawer mobile: drawer has transition animation** - {"hasOverlay":true,"hasDrawer":true,"overlayCoversViewport":true,"overlayVisible":true,"drawerOpaque":true,"drawerAnimated":true,"drawerAboveOverlay":true}
+- PASS **Nav drawer mobile: drawer stacks above overlay** - {"hasOverlay":true,"hasDrawer":true,"overlayCoversViewport":true,"overlayVisible":true,"drawerOpaque":true,"drawerAnimated":true,"drawerAboveOverlay":true}
 - PASS **Persona Atlas mobile: view activates** - view=Persona Atlas
 - PASS **Persona Atlas mobile: command bar remains visible** - commandBar=true
 - PASS **Persona Atlas mobile: no document horizontal overflow** - overflowX=false
