@@ -17,27 +17,41 @@ colors:
   danger: "#d64545"
 typography:
   title:
-    fontFamily: "Inter, SF Pro Text, Aptos, Segoe UI, ui-sans-serif, system-ui, sans-serif"
+    fontFamily: "SF Pro Text, Aptos, Segoe UI, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif"
     fontSize: "14px"
     fontWeight: 600
     lineHeight: 1.43
     letterSpacing: "0"
   body:
-    fontFamily: "Inter, SF Pro Text, Aptos, Segoe UI, ui-sans-serif, system-ui, sans-serif"
+    fontFamily: "SF Pro Text, Aptos, Segoe UI, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif"
     fontSize: "12px"
     fontWeight: 400
     lineHeight: 1.67
     letterSpacing: "0"
   label:
-    fontFamily: "Inter, SF Pro Text, Aptos, Segoe UI, ui-sans-serif, system-ui, sans-serif"
+    fontFamily: "SF Pro Text, Aptos, Segoe UI, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif"
     fontSize: "11px"
     fontWeight: 500
     lineHeight: 1.45
     letterSpacing: "0"
+  mono:
+    fontFamily: "SF Mono, ui-monospace, Menlo, Consolas, monospace"
+    fontSize: "11px"
+    fontWeight: 400
+    lineHeight: 1.55
+    letterSpacing: "0"
 rounded:
+  hairline: "3px"
+  micro: "4px"
+  compact: "5px"
   control: "6px"
+  control-soft: "7px"
   panel: "8px"
+  row: "10px"
   canvas: "12px"
+  card: "14px"
+  overlay: "16px"
+  pill: "999px"
 spacing:
   xs: "4px"
   sm: "8px"
@@ -106,9 +120,9 @@ The palette is restrained zinc/off-white with one blue primary accent for select
 
 ## 3. Typography
 
-**Display Font:** Inter / system sans
-**Body Font:** Inter / SF Pro Text / Aptos / Segoe UI / system sans
-**Label/Mono Font:** system sans unless a code/path context needs mono locally
+**Display Font:** SF Pro Text / Aptos / Segoe UI / system sans
+**Body Font:** SF Pro Text / Aptos / Segoe UI / system sans
+**Label/Mono Font:** SF Mono / ui-monospace / Menlo / Consolas only for IDs, paths, JSON, payloads, and timeline/code data
 
 **Character:** Product-native, compact, and readable. No display-font theatrics; hierarchy comes from weight, spacing, and placement.
 
@@ -117,7 +131,7 @@ The palette is restrained zinc/off-white with one blue primary accent for select
 - **Title** (600, 14-16px, 20-24px line-height): active view names, panel titles, selected object names.
 - **Body** (400, 12-13px, 20px line-height): workflow events, review copy, descriptions, notes.
 - **Label** (500, 11px, 16px line-height): metadata labels, chips, table headers, status descriptors.
-- **Data/Code** (11-12px mono only when needed): IDs, file paths, JSON, provider payload snippets.
+- **Data/Code** (400, 11-12px mono, 17px line-height): IDs, file paths, JSON, provider payload snippets, and timeline/code data.
 
 ### Named Rules
 
@@ -141,7 +155,7 @@ Slotok uses tonal layering first and shallow shadows second. Static surfaces are
 
 ### Buttons
 
-- **Shape:** 6px radius, compact 28-36px heights.
+- **Shape:** 6px radius, compact 28-36px heights. Pills use 999px only for chips, tags, and tiny status dots.
 - **Primary:** blue fill with white text, reserved for spendful/live/apply actions or the main submit affordance.
 - **Selected:** blue-tinted fill with blue text and subtle border; used for active nav, selected filters, and current mode.
 - **Hover / Focus:** subtle background shift plus tight blue focus ring. Do not invent new button shapes per view.
