@@ -3,8 +3,9 @@ import * as React from "react"
 import * as DialogPrimitive from "@radix-ui/react-dialog"
 import { cva, type VariantProps } from "class-variance-authority"
 import { Badge, type BadgeProps } from "../components/ui/badge"
-import { Button, type ButtonProps } from "../components/ui/button"
+import { Button } from "../components/ui/button"
 import { Card } from "../components/ui/card"
+import { Sidebar as SidebarPrimitive, SidebarMenuButton, type SidebarMenuButtonProps } from "../components/ui/sidebar"
 import { Textarea } from "../components/ui/textarea"
 import { cn } from "../lib/cn"
 import { toneClasses, ugcDesignTokens, type UgcTone } from "./tokens"
@@ -22,11 +23,11 @@ export function WorkbenchShell(props: React.HTMLAttributes<HTMLElement>) {
 }
 
 export function WorkbenchSidebar(props: React.HTMLAttributes<HTMLElement>) {
+  const { className, children, ...rest } = props
   return (
-    <aside
-      {...props}
-      className={cn("flex h-dvh min-h-0 flex-col gap-3 overflow-hidden p-3 border-r border-border/80 bg-muted/30", props.className)}
-    />
+    <SidebarPrimitive {...rest} className={cn("gap-3 p-3", className)}>
+      {children}
+    </SidebarPrimitive>
   )
 }
 
@@ -105,7 +106,7 @@ export function PanelHeader(props: {
   )
 }
 
-export function SidebarRow(props: ButtonProps & {
+export function SidebarRow(props: SidebarMenuButtonProps & {
   readonly active?: boolean
   readonly icon?: React.ReactNode
   readonly shortcut?: string
@@ -113,18 +114,18 @@ export function SidebarRow(props: ButtonProps & {
 }) {
   const { active, icon, shortcut, count, children, className, ...buttonProps } = props
   return (
-    <Button
+    <SidebarMenuButton
       type="button"
-      variant={active ? "selected" : "ghost"}
-      size="sm"
-      className={cn("w-full justify-start rounded-md px-2.5 font-medium", className)}
+      variant={active ? "selected" : "default"}
+      size="default"
+      className={cn("w-full justify-start rounded-md px-2.5", className)}
       {...buttonProps}
     >
       {icon}
       <span className="min-w-0 flex-1 truncate text-left">{children}</span>
       {shortcut ? <kbd className="rounded-[4px] border border-zinc-200 bg-zinc-50 px-1.5 text-[10px] font-semibold text-zinc-500">{shortcut}</kbd> : null}
       {count !== undefined ? <span className="text-[11px] text-zinc-500">{count}</span> : null}
-    </Button>
+    </SidebarMenuButton>
   )
 }
 

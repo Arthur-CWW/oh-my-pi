@@ -1862,7 +1862,7 @@ export function ReactUgcStudio() {
       <WorkbenchMain>
         <Topbar activeViewMeta={activeViewMeta} navDocked={!isMobile && leftPanelOpen} inspectorOpen={inspectorOpen} isMobile={isMobile} onToggleNav={() => (isMobile ? setNavDrawerOpen((open) => !open) : setLeftPanelOpen((open) => !open))} onToggleInspector={() => setInspectorOpen((open) => !open)} />
         <WorkbenchContent className={inspectorOpen ? undefined : "grid-cols-[minmax(0,1fr)]"}>
-          <WorkbenchCanvas className="grid grid-rows-[58px_minmax(0,1fr)_auto] min-h-0 min-w-0">
+          <WorkbenchCanvas className={cn("grid min-h-0 min-w-0", isMobile ? "grid-rows-[minmax(0,1fr)_auto]" : "grid-rows-[58px_minmax(0,1fr)_auto]")}>
             <ViewToolbar activeView={activeView} onViewChange={setActiveView} isMobile={isMobile} />
             <div className="rugc-stage min-h-0 min-w-0">
               <WorkspaceView
@@ -2072,10 +2072,11 @@ function Topbar(props: { activeViewMeta: (typeof views)[number]; navDocked: bool
 }
 
 function ViewToolbar(props: { activeView: ReactView; onViewChange: (view: ReactView) => void; isMobile?: boolean }) {
+  if (props.isMobile) return null
   return (
-    <div className="flex h-[58px] min-w-0 items-center gap-3 border-b border-border bg-card/80 px-4">
-      <ToolbarCluster className="min-w-0 flex-1 overflow-x-auto">
-        <Tabs value={props.activeView} items={viewTabs} onValueChange={props.onViewChange} className="shrink-0" />
+    <div className="flex h-[52px] min-w-0 items-center gap-2 border-b border-border bg-card/80 px-3 sm:h-[58px] sm:px-4">
+      <ToolbarCluster className="min-w-0 flex-1 overflow-x-auto rounded-lg">
+        <Tabs value={props.activeView} items={viewTabs} onValueChange={props.onViewChange} size={props.isMobile ? "sm" : "md"} className="min-w-max shrink-0" />
       </ToolbarCluster>
     </div>
   )

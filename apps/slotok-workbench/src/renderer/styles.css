@@ -81,7 +81,8 @@ body {
 
 .rugc-atlas-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 420px));
+  justify-content: start;
   gap: 12px;
   min-width: 0;
   align-content: start;
@@ -1189,6 +1190,35 @@ body {
   }
 }
 
+@media (max-width: 900px) {
+  .rugc-stage {
+    padding: 12px;
+  }
+
+  .rugc-atlas-grid {
+    grid-template-columns: repeat(2, minmax(min(300px, 100%), 420px));
+  }
+
+  .rugc-persona-card {
+    min-height: 0;
+  }
+}
+
+@media (max-width: 560px) {
+  .rugc-stage {
+    padding: 10px 8px 96px;
+  }
+
+  .rugc-atlas {
+    height: auto;
+    min-height: 100%;
+  }
+
+  .rugc-atlas-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .route-index {
   display: grid;
   place-items: center;
@@ -1821,7 +1851,11 @@ input {
   font: inherit;
 }
 
-button { color: inherit; }
+.react-ugc-theme button {
+  appearance: none;
+  border-style: solid;
+  color: inherit;
+}
 
 h1,
 h2,
