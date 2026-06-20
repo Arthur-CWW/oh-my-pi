@@ -1518,6 +1518,9 @@ function codexJobMediaSummary(job: UgcProviderJob): CodexJobMediaSummary {
   }
 }
 
+const MOBILE_WORKBENCH_WIDTH = 900
+const COMPACT_WORKBENCH_WIDTH = 1180
+
 export function ReactUgcStudio() {
   const [activeView, setActiveView] = React.useState<ReactView>("atlas")
   const [localState, setLocalState] = React.useState<UgcLocalState>(fallbackLocalState)
@@ -1539,18 +1542,28 @@ export function ReactUgcStudio() {
   const selectedBranch = workspace.branchSnapshots.find((branch) => branch.id === selectedBranchId) ?? workspace.branchSnapshots[0]
   const selectedCapability = capabilities.find((capability) => capability.operation === operation) ?? capabilities[0]
   const activeViewMeta = views.find((view) => view.value === activeView) ?? views[0]
-  const [leftPanelOpen, setLeftPanelOpen] = React.useState(true)
-  const [inspectorOpen, setInspectorOpen] = React.useState(true)
+  const [leftPanelOpen, setLeftPanelOpen] = React.useState(() => typeof window === "undefined" || window.innerWidth >= COMPACT_WORKBENCH_WIDTH)
+  const [inspectorOpen, setInspectorOpen] = React.useState(() => typeof window === "undefined" || window.innerWidth >= COMPACT_WORKBENCH_WIDTH)
   const [navDrawerOpen, setNavDrawerOpen] = React.useState(false)
-  const [isMobile, setIsMobile] = React.useState(() => typeof window !== "undefined" && window.innerWidth < 900)
+  const [isMobile, setIsMobile] = React.useState(() => typeof window !== "undefined" && window.innerWidth < MOBILE_WORKBENCH_WIDTH)
+  const [isCompact, setIsCompact] = React.useState(() => typeof window !== "undefined" && window.innerWidth >= MOBILE_WORKBENCH_WIDTH && window.innerWidth < COMPACT_WORKBENCH_WIDTH)
 
   React.useEffect(() => {
     function applyResponsivePanels() {
-      const mobile = window.innerWidth < 900
+      const width = window.innerWidth
+      const mobile = width < MOBILE_WORKBENCH_WIDTH
+      const compact = width >= MOBILE_WORKBENCH_WIDTH && width < COMPACT_WORKBENCH_WIDTH
       setIsMobile(mobile)
+      setIsCompact(compact)
       if (mobile) {
         setLeftPanelOpen(false)
         setInspectorOpen(false)
+        setNavDrawerOpen(false)
+      } else if (compact) {
+        setLeftPanelOpen(false)
+        setInspectorOpen(false)
+        setNavDrawerOpen(false)
+      } else {
         setNavDrawerOpen(false)
       }
     }
@@ -1566,7 +1579,7 @@ export function ReactUgcStudio() {
       if (editing) return
       if (event.key === "[") {
         event.preventDefault()
-        if (window.innerWidth < 900) setNavDrawerOpen((open) => !open)
+        if (window.innerWidth < MOBILE_WORKBENCH_WIDTH) setNavDrawerOpen((open) => !open)
         else setLeftPanelOpen((open) => !open)
         return
       }
@@ -1851,17 +1864,25 @@ export function ReactUgcStudio() {
 
   return (
     <UgcLocalStateContext.Provider value={localState}>
-    <WorkbenchShell className={cn("react-ugc-theme min-h-0 min-w-0", !isMobile && leftPanelOpen ? "grid-cols-[220px_minmax(0,1fr)]" : !isMobile ? "grid-cols-[52px_minmax(0,1fr)]" : "grid-cols-[minmax(0,1fr)]")} data-ugc-studio-root>
+    <WorkbenchShell
+      className={cn(
+        "react-ugc-theme min-h-0 min-w-0",
+        isMobile ? "grid-cols-[minmax(0,1fr)]" : isCompact ? "grid-cols-[52px_minmax(0,1fr)]" : leftPanelOpen ? "grid-cols-[220px_minmax(0,1fr)]" : "grid-cols-[52px_minmax(0,1fr)]",
+      )}
+      data-ugc-studio-root
+    >
       {!isMobile ? (
-        leftPanelOpen ? (
+        isCompact ? (
+          <CollapsedSidebar activeView={activeView} onViewChange={setActiveView} />
+        ) : leftPanelOpen ? (
           <Sidebar activeView={activeView} onViewChange={setActiveView} onCollapse={() => setLeftPanelOpen(false)} />
         ) : (
           <CollapsedSidebar activeView={activeView} onViewChange={setActiveView} onExpand={() => setLeftPanelOpen(true)} />
         )
       ) : null}
       <WorkbenchMain>
-        <Topbar activeViewMeta={activeViewMeta} navDocked={!isMobile && leftPanelOpen} inspectorOpen={inspectorOpen} isMobile={isMobile} onToggleNav={() => (isMobile ? setNavDrawerOpen((open) => !open) : setLeftPanelOpen((open) => !open))} onToggleInspector={() => setInspectorOpen((open) => !open)} />
-        <WorkbenchContent className={inspectorOpen ? undefined : "grid-cols-[minmax(0,1fr)]"}>
+        <Topbar activeViewMeta={activeViewMeta} navDocked={!isMobile && !isCompact && leftPanelOpen} inspectorOpen={inspectorOpen && !isCompact} isCompact={isCompact} isMobile={isMobile} onToggleNav={() => (isMobile ? setNavDrawerOpen((open) => !open) : setLeftPanelOpen((open) => !open))} onToggleInspector={() => setInspectorOpen((open) => !open)} />
+        <WorkbenchContent className={inspectorOpen && !isCompact ? undefined : "grid-cols-[minmax(0,1fr)]"}>
           <WorkbenchCanvas className={cn("grid min-h-0 min-w-0", isMobile ? "grid-rows-[minmax(0,1fr)_auto]" : "grid-rows-[58px_minmax(0,1fr)_auto]")}>
             <ViewToolbar activeView={activeView} onViewChange={setActiveView} isMobile={isMobile} />
             <div className="rugc-stage min-h-0 min-w-0">
@@ -1896,7 +1917,7 @@ export function ReactUgcStudio() {
             </div>
             <CommandBar prompt={prompt} onPromptChange={setPrompt} onRun={() => callKie("/api/ugc/kie/plan", request)} busy={busy} />
           </WorkbenchCanvas>
-          {inspectorOpen ? (
+          {inspectorOpen && !isCompact ? (
             <Inspector
               activeView={activeView}
               selectedPersona={selectedPersona}
@@ -2002,13 +2023,18 @@ function Sidebar(props: { activeView: ReactView; onViewChange: (view: ReactView)
     </WorkbenchSidebar>
   )
 }
-
-function CollapsedSidebar(props: { activeView: ReactView; onViewChange: (view: ReactView) => void; onExpand: () => void }) {
+function CollapsedSidebar(props: { activeView: ReactView; onViewChange: (view: ReactView) => void; onExpand?: () => void }) {
   return (
     <WorkbenchSidebar className="items-center gap-2 px-2">
-      <Button type="button" size="icon-sm" variant="selected" onClick={props.onExpand} aria-label="Expand workspace sidebar" title="Expand workspace sidebar ([)">
-        <Clapperboard size={14} />
-      </Button>
+      {props.onExpand ? (
+        <Button type="button" size="icon-sm" variant="selected" onClick={props.onExpand} aria-label="Expand workspace sidebar" title="Expand workspace sidebar ([)">
+          <Clapperboard size={14} />
+        </Button>
+      ) : (
+        <span className="grid h-7 w-7 place-items-center rounded-md bg-primary text-primary-foreground" aria-label="Compact workspace rail">
+          <Clapperboard size={14} />
+        </span>
+      )}
       <div className="grid gap-1">
         {views.map((view, index) => {
           const Icon = view.icon
@@ -2043,7 +2069,7 @@ function SidebarSection(props: { title: string; children: React.ReactNode }) {
   )
 }
 
-function Topbar(props: { activeViewMeta: (typeof views)[number]; navDocked: boolean; inspectorOpen: boolean; isMobile: boolean; onToggleNav: () => void; onToggleInspector: () => void }) {
+function Topbar(props: { activeViewMeta: (typeof views)[number]; navDocked: boolean; inspectorOpen: boolean; isCompact: boolean; isMobile: boolean; onToggleNav: () => void; onToggleInspector: () => void }) {
   const workspace = useUgcLocalState().workspace
   return (
     <WorkbenchTopbar>
@@ -2052,6 +2078,10 @@ function Topbar(props: { activeViewMeta: (typeof views)[number]; navDocked: bool
           <Button type="button" size="icon-sm" variant="ghost" onClick={props.onToggleNav} aria-label="Open navigation" title="Open navigation ( [ )">
             <Menu size={15} />
           </Button>
+        ) : props.isCompact ? (
+          <span className="grid h-7 w-7 place-items-center rounded-md border border-border bg-muted/50 text-muted-foreground" aria-label="Compact navigation rail">
+            <PanelLeft size={15} />
+          </span>
         ) : (
           <Button type="button" size="icon-sm" variant="ghost" onClick={props.onToggleNav} aria-label={props.navDocked ? "Hide navigation" : "Show navigation"} title="Toggle navigation ( [ )">
             {props.navDocked ? <PanelLeftClose size={15} /> : <PanelLeft size={15} />}

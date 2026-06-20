@@ -1194,10 +1194,8 @@ body {
   .rugc-snapshot-tray {
     grid-template-columns: 190px minmax(0, 1fr);
   }
-
-  .rugc-editor {
-    grid-template-columns: 148px minmax(0, 1fr);
-    min-width: 0;
+  .rugc-atlas-grid {
+    grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 420px));
   }
 
   .rugc-layer-list {

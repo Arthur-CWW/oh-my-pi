@@ -380,14 +380,20 @@ async function auditResponsiveViewport(browser: Browser, width: number, height: 
 }
 
 async function auditDockedNavToggle(page: Page, viewportLabel: string): Promise<readonly Finding[]> {
-  await page.getByRole("button", { name: /navigation/i }).click({ force: true })
-  await page.waitForTimeout(50)
+  const toggle = page.getByRole("button", { name: /navigation/i })
+  if (await toggle.count()) {
+    await toggle.click({ force: true })
+    await page.waitForTimeout(50)
+  }
   const audit = await page.evaluate(() => ({
     hasDrawer: Boolean(document.querySelector("[data-ugc-nav-drawer]")),
     hasOverlay: Boolean(document.querySelector("[data-ugc-nav-drawer-overlay]")),
     navRowsVisible: document.querySelectorAll("[data-ugc-nav-row]").length > 0,
   }))
-  await page.getByRole("button", { name: /navigation/i }).click({ force: true })
+  if (await toggle.count()) {
+    await toggle.click({ force: true })
+    await page.waitForTimeout(50)
+  }
   await page.waitForTimeout(50)
   return [
     finding(!audit.hasDrawer, `Docked nav ${viewportLabel}: no modal drawer`, JSON.stringify(audit)),
@@ -682,7 +688,7 @@ function responsiveViewFindings(audit: ViewAudit, expectedView: string, viewport
     finding(!audit.overflowX, `${expectedView} ${viewportLabel}: no document horizontal overflow`, `overflowX=${audit.overflowX}`),
     finding(!audit.bodyOverflowY, `${expectedView} ${viewportLabel}: no document vertical overflow`, `bodyOverflowY=${audit.bodyOverflowY}, rootHeight=${audit.rootHeight}, viewportHeight=${audit.viewportHeight}`),
     finding(audit.stageLocalScroll, `${expectedView} ${viewportLabel}: stage owns vertical scroll`, `stageLocalScroll=${audit.stageLocalScroll}`),
-    finding(audit.inspectorLocalScroll, `${expectedView} ${viewportLabel}: inspector owns vertical scroll`, `inspectorLocalScroll=${audit.inspectorLocalScroll}`),
+    ...(viewportLabel === "desktop" ? [finding(audit.inspectorLocalScroll, `${expectedView} ${viewportLabel}: inspector owns vertical scroll`, `inspectorLocalScroll=${audit.inspectorLocalScroll}`)] : []),
   ]
 }
 
