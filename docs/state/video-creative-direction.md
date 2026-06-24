@@ -59,6 +59,11 @@ inspiration archive
 → remix
 ```
 
+Terminal-state direction: think bigger than short-video rendering. The long-term endpoint is an **ASMR universe / audio-visual novel / lightweight game-like experience** where characters, entities, speakers, props, overlays, and rooms are layered as editable artifacts. It should feel closer to a small mobile-friendly game engine than a static render: Live2D/VRM/WebGL/WebAudio first, Unreal-like ideas only if they can be reduced into portable primitives. Spatial audio matters: speakers/entities should be movable in 2D/3D space like game objects, with ASMR voice/foley/music tied to scene state.
+
+Pleometric/artifact-library direction: after the current ASMR/Seedance proof, critique before building. Do not jump straight to an “artifact combinator language.” First design the smallest system an agent would actually want to use: a SQLite-backed library of entities/artifacts/effects with previews, metadata, and simple composition actions. The user mostly views and tweaks through an ad hoc web/HyperFrames-like viewer; agents operate the data/code path. Effects/combinators can emerge from repeated operations such as line trains, synchronized copies, JoJo/aura overlays, camera moves, cut rhythms, masks, and audio-sync bindings.
+
+
 Each component should be separately editable, inspectable, replaceable, cacheable, and reusable.
 
 ## Operating principles

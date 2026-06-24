@@ -1,0 +1,226 @@
+{
+  "schemaVersion": "asmr-companion.goal6-artifact-inventory.v1",
+  "createdAt": "2026-06-24T00:00:00.000Z",
+  "changedFiles": [
+    "docs/qa/asmr-companion-goal6-final-handoff-20260624.md",
+    "docs/qa/asmr-companion-goal6-artifact-inventory-20260624.json"
+  ],
+  "goal6Commit": null,
+  "reviewFirst": [
+    {
+      "rank": 1,
+      "path": "data/asmr-companion/goal5-pipeline-proof/reviewer-report.html",
+      "why": "Fastest reviewer-facing summary of the integrated Goal 5 proof and placeholder state."
+    },
+    {
+      "rank": 2,
+      "path": "data/asmr-companion/goal5-pipeline-proof/remotion-render/recreate.mp4",
+      "why": "Real rendered MP4 output; contains placeholder footage for the missing Goal 2 clip."
+    },
+    {
+      "rank": 3,
+      "path": "data/asmr-companion/goal5-pipeline-proof/goal5-workflow-handoff.json",
+      "why": "Exact Goal 5 materialize/render commands and media-readiness flags."
+    },
+    {
+      "rank": 4,
+      "path": "data/asmr-companion/goal2/seedance-parent-proof/normalized/generated-video-clips.v1.json",
+      "why": "Explains why Goal 5 had to render a placeholder instead of a live Seedance MP4."
+    },
+    {
+      "rank": 5,
+      "path": "data/asmr-companion/goal3-spatial-proof/goal3-close-whisper-binaural.wav",
+      "why": "Real audio proof consumed by Goal 5."
+    },
+    {
+      "rank": 6,
+      "path": "data/asmr-companion/goal4-planning/goal4-pipeline-handoff.bundle.json",
+      "why": "Goal 5 planning input bundle with prompts, motion, caption plan, and upstream refs."
+    }
+  ],
+  "rerunCommands": [
+    {
+      "order": 1,
+      "goal": 2,
+      "exactness": "observed",
+      "command": "cd packages/jimeng-client && bun test ./test/seedance-image2video-plan.test.ts"
+    },
+    {
+      "order": 2,
+      "goal": 2,
+      "exactness": "observed",
+      "command": "cd packages/jimeng-client && bun run typecheck"
+    },
+    {
+      "order": 3,
+      "goal": 2,
+      "exactness": "reconstructed-from-artifact",
+      "command": "bun packages/jimeng-client/src/browser-proxy-cli.ts seedance-image2video-plan --prompt \"Original ASMR companion raises one hand under moonlit server shrine glow, no text\" --firstFrameUri tos://fixture/seedance/first-frame-candidate-001.png --firstFrameHash aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --runId seedance-parent-proof-001 --createdAt 2026-06-24T00:00:00.000Z --seed 2026062401 --durationSec 5 --ratio 9:16 --outDir data/asmr-companion/goal2/seedance-parent-proof"
+    },
+    {
+      "order": 4,
+      "goal": 3,
+      "exactness": "observed",
+      "command": "cd packages/spatial-audio-renderer && bun run typecheck"
+    },
+    {
+      "order": 5,
+      "goal": 3,
+      "exactness": "observed",
+      "command": "cd packages/spatial-audio-renderer && bun test test/render.test.ts"
+    },
+    {
+      "order": 6,
+      "goal": 3,
+      "exactness": "observed",
+      "command": "bun packages/spatial-audio-renderer/src/cli.ts render --voice-assets packages/media-contracts/fixtures/valid/voice-assets.v1.json --stems packages/spatial-audio-renderer/fixtures/asmr-scene/asmr-stems.v1.json --spatial packages/spatial-audio-renderer/fixtures/asmr-scene/spatial-audio-manifest.v1.json --outDir data/asmr-companion/goal3-spatial-proof"
+    },
+    {
+      "order": 7,
+      "goal": 4,
+      "exactness": "observed",
+      "command": "cd packages/pleometric-planner && bun run typecheck"
+    },
+    {
+      "order": 8,
+      "goal": 4,
+      "exactness": "observed",
+      "command": "cd packages/pleometric-planner && bun test ./test/planner.test.ts"
+    },
+    {
+      "order": 9,
+      "goal": 4,
+      "exactness": "observed",
+      "command": "bun packages/pleometric-planner/src/cli.ts build-handoff --card packages/pleometric-planner/fixtures/cards/asmr-companion-moonlit.card.json --card packages/pleometric-planner/fixtures/cards/high-aura-orbit.card.json --generated-clips data/asmr-companion/goal2/seedance-parent-proof/normalized/generated-video-clips.v1.json --spatial-render-output data/asmr-companion/goal3-spatial-proof/goal3-close-whisper-binaural.render-output.json --out data/asmr-companion/goal4-planning/goal4-pipeline-handoff.bundle.json"
+    },
+    {
+      "order": 10,
+      "goal": 5,
+      "exactness": "observed",
+      "command": "bun workflows/tiktok-recreate/goal5-asmr-handoff.ts --handoff data/asmr-companion/goal4-planning/goal4-pipeline-handoff.bundle.json --generated-clips data/asmr-companion/goal2/seedance-parent-proof/normalized/generated-video-clips.v1.json --spatial-render-output data/asmr-companion/goal3-spatial-proof/goal3-close-whisper-binaural.render-output.json --outDir data/asmr-companion/goal5-pipeline-proof --createdAt 2026-06-24T00:00:00.000Z --proofId goal5-asmr-seedance-render-proof-001"
+    },
+    {
+      "order": 11,
+      "goal": 5,
+      "exactness": "observed",
+      "command": "bun test workflows/tiktok-recreate/goal5-asmr-handoff.test.ts"
+    },
+    {
+      "order": 12,
+      "goal": 5,
+      "exactness": "observed",
+      "command": "bun run remotion-renderer:render -- --manifest data/asmr-companion/goal5-pipeline-proof/remotion-context.json --layer-plan data/asmr-companion/goal5-pipeline-proof/goal5-layer-plan.json --persona-manifest data/asmr-companion/goal5-pipeline-proof/persona-manifest.json --out data/asmr-companion/goal5-pipeline-proof/remotion-render --audio-manifest data/asmr-companion/goal3-spatial-proof/goal3-close-whisper-binaural.render-output.json --generated-clips-manifest data/asmr-companion/goal2/seedance-parent-proof/normalized/generated-video-clips.v1.json"
+    },
+    {
+      "order": 13,
+      "goal": 5,
+      "exactness": "observed",
+      "command": "bun run tiktok-recreate:hyperframes -- --layer-plan data/asmr-companion/goal5-pipeline-proof/goal5-layer-plan.json --out data/asmr-companion/goal5-pipeline-proof/hyperframes --audio data/asmr-companion/goal3-spatial-proof/goal3-close-whisper-binaural.wav"
+    }
+  ],
+  "artifacts": [
+    {
+      "goal": 2,
+      "path": "docs/qa/asmr-seedance-goal2-runbook-20260624.md",
+      "kind": "runbook",
+      "state": "documentation",
+      "reviewValue": "Defines Goal 2 dry-run vs live split and preflight commands."
+    },
+    {
+      "goal": 2,
+      "path": "data/asmr-companion/goal2/seedance-parent-proof/raw/seedance-parent-proof-001-dry-run-plan.json",
+      "kind": "request-plan",
+      "state": "dry-run",
+      "reviewValue": "Direct first-frame video submit body with no provider submit."
+    },
+    {
+      "goal": 2,
+      "path": "data/asmr-companion/goal2/seedance-parent-proof/normalized/seedance-parent-proof-001-summary.json",
+      "kind": "summary",
+      "state": "dry-run",
+      "reviewValue": "Records live_submit=false, synthid_marked=false, conditioning_applied=false, and planned MP4 path."
+    },
+    {
+      "goal": 2,
+      "path": "data/asmr-companion/goal2/seedance-parent-proof/normalized/generated-video-clips.v1.json",
+      "kind": "manifest",
+      "state": "dry-run",
+      "reviewValue": "Downstream manifest consumed by Goals 4 and 5."
+    },
+    {
+      "goal": 3,
+      "path": "data/asmr-companion/goal3-spatial-proof/goal3-close-whisper-binaural.wav",
+      "kind": "audio",
+      "state": "real-media",
+      "reviewValue": "Real binaural/stereo output consumed by Goal 5."
+    },
+    {
+      "goal": 3,
+      "path": "data/asmr-companion/goal3-spatial-proof/goal3-close-whisper-binaural.render-output.json",
+      "kind": "manifest",
+      "state": "real-generated-json",
+      "reviewValue": "Contains the audio hash, duration, channels, and source manifest refs."
+    },
+    {
+      "goal": 4,
+      "path": "data/asmr-companion/goal4-planning/goal4-pipeline-handoff.bundle.json",
+      "kind": "handoff-bundle",
+      "state": "real-generated-json",
+      "reviewValue": "Goal 5 planning input bundle with promptOutputs, upstream refs, and ownership boundaries."
+    },
+    {
+      "goal": 5,
+      "path": "data/asmr-companion/goal5-pipeline-proof/reviewer-report.html",
+      "kind": "review-report",
+      "state": "real-generated-html",
+      "reviewValue": "Fastest human-facing summary of the integrated proof."
+    },
+    {
+      "goal": 5,
+      "path": "data/asmr-companion/goal5-pipeline-proof/goal5-workflow-handoff.json",
+      "kind": "workflow-handoff",
+      "state": "real-generated-json",
+      "reviewValue": "Top-level Goal 5 handoff, commands, and media-readiness flags."
+    },
+    {
+      "goal": 5,
+      "path": "data/asmr-companion/goal5-pipeline-proof/generated-clips.resolved.json",
+      "kind": "resolved-clips",
+      "state": "real-generated-json",
+      "reviewValue": "Records mediaAvailable=false and the placeholder fallback."
+    },
+    {
+      "goal": 5,
+      "path": "data/asmr-companion/goal5-pipeline-proof/media/first-frame-candidate-seedance-dry-run.placeholder.svg",
+      "kind": "placeholder-media",
+      "state": "deterministic-placeholder",
+      "reviewValue": "Visible placeholder used in place of the missing Goal 2 MP4."
+    },
+    {
+      "goal": 5,
+      "path": "data/asmr-companion/goal5-pipeline-proof/remotion-render/recreate.mp4",
+      "kind": "video",
+      "state": "real-media-with-placeholder-clip",
+      "reviewValue": "Real rendered MP4 output from Goal 5."
+    },
+    {
+      "goal": 5,
+      "path": "data/asmr-companion/goal5-pipeline-proof/hyperframes/index.html",
+      "kind": "hyperframes-project",
+      "state": "real-generated-html-project",
+      "reviewValue": "Openable HyperFrames project output."
+    },
+    {
+      "goal": 5,
+      "path": "data/asmr-companion/goal5-pipeline-proof/hyperframes/manifest.json",
+      "kind": "hyperframes-manifest",
+      "state": "real-generated-json-project",
+      "reviewValue": "Confirms renderRan=false and audioAttached=false in the current proof bundle."
+    }
+  ],
+  "exploratoryNext": [
+    "Replace the Goal 2 dry-run manifest with a live Seedance submit/poll/download artifact and rerun Goal 5 against the updated generated-video-clips manifest.",
+    "T-2026-06-24-002: design the Pleometric artifact library and ASMR universe system.",
+    "Realtime Airi-like companion runtime remains backlog after Goals 3, 5, and 6 proof."
+  ]
+}
