@@ -134,6 +134,20 @@
       "data/asmr-companion/goal3-spatial-proof/goal3-close-whisper-binaural.render-output.json"
     ],
     "sourceInspirationIds": ["abstract-status-walk", "abstract-aura-sidekick", "goal2-seedance-constraints"],
+    "providerRoute": {
+      "provider": "goal4-local-planner",
+      "model": "brainrot-referential-prompt-plan.v1",
+      "endpoint": "buildPromptPlan",
+      "seed": 2026062405,
+      "providerParams": {
+        "targetI2VProvider": "jimeng-seedance",
+        "ratio": "9:16",
+        "durationSec": 5,
+        "fps": 24,
+        "imageConditioningOwner": "goal2_seedance"
+      }
+    },
+    "vibeAxes": ["brainrot-density", "aura-edit", "artifact-consciousness", "caption-safe-composition"],
     "planningNotes": [
       "The courier, receipt bird, rain plaza, captions, and beat intent are fixture choices tuned for Seedance-stable first-frame motion.",
       "The handoff references Goal 2 and Goal 3 accepted manifests without duplicating provider or audio internals."

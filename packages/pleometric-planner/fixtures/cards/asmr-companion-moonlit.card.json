@@ -134,6 +134,20 @@
       "data/asmr-companion/goal3-spatial-proof/goal3-close-whisper-binaural.render-output.json"
     ],
     "sourceInspirationIds": ["abstract-aura-mechanics", "goal3-binaural-proof"],
+    "providerRoute": {
+      "provider": "goal4-local-planner",
+      "model": "brainrot-referential-prompt-plan.v1",
+      "endpoint": "buildPromptPlan",
+      "seed": 2026062404,
+      "providerParams": {
+        "targetI2VProvider": "jimeng-seedance",
+        "ratio": "9:16",
+        "durationSec": 5,
+        "fps": 24,
+        "imageConditioningOwner": "goal2_seedance"
+      }
+    },
+    "vibeAxes": ["asmr-intimacy", "aura-edit", "artifact-consciousness", "caption-safe-composition"],
     "planningNotes": [
       "Prompt language emphasizes stable first-frame conditioning: no text glyphs, watermark-like texture, over-compressed shimmer, or identity drift.",
       "Provider, audio, and renderer internals are referenced by manifest path only."

@@ -73,11 +73,23 @@ export interface BrainrotAudioIntent {
   goal3BindingHint: string
 }
 
+export type ProviderParamValue = string | number | boolean
+
+export interface ProviderRouteMetadata {
+  provider: string
+  model: string
+  endpoint: string
+  seed: number
+  providerParams: Record<string, ProviderParamValue>
+}
+
 export interface BrainrotPipelineMetadata {
   createdAt: string
   authoringMode: "original_planning" | "local_remix_art_piece" | string
   upstreamManifestRefs: string[]
   sourceInspirationIds: string[]
+  providerRoute: ProviderRouteMetadata
+  vibeAxes: string[]
   planningNotes: string[]
 }
 
@@ -129,6 +141,12 @@ export interface BrainrotPromptPlan {
     captionBeats: string[]
     overlayMotifs: string[]
     cutRhythm: string
+  }
+  pipelineMetadata: {
+    providerRoute: ProviderRouteMetadata
+    upstreamManifestRefs: string[]
+    sourceInspirationIds: string[]
+    vibeAxes: string[]
   }
   pipelineMetadataNotes: string[]
   handoffTargets: BrainrotReferentialMirrorHandoff[]
@@ -294,6 +312,13 @@ export function validateBrainrotReferentialMirrorCard(card: BrainrotReferentialM
   requireString(card.audioIntent.goal3BindingHint, "card.audioIntent.goal3BindingHint")
   requireString(card.pipelineMetadata.createdAt, "card.pipelineMetadata.createdAt")
   requireString(card.pipelineMetadata.authoringMode, "card.pipelineMetadata.authoringMode")
+  requireNonEmptyArray(card.pipelineMetadata.upstreamManifestRefs, "card.pipelineMetadata.upstreamManifestRefs")
+  requireNonEmptyArray(card.pipelineMetadata.sourceInspirationIds, "card.pipelineMetadata.sourceInspirationIds")
+  requireString(card.pipelineMetadata.providerRoute.provider, "card.pipelineMetadata.providerRoute.provider")
+  requireString(card.pipelineMetadata.providerRoute.model, "card.pipelineMetadata.providerRoute.model")
+  requireString(card.pipelineMetadata.providerRoute.endpoint, "card.pipelineMetadata.providerRoute.endpoint")
+  requirePositiveNumber(card.pipelineMetadata.providerRoute.seed, "card.pipelineMetadata.providerRoute.seed")
+  requireNonEmptyArray(card.pipelineMetadata.vibeAxes, "card.pipelineMetadata.vibeAxes")
   requireNonEmptyArray(card.pipelineMetadata.planningNotes, "card.pipelineMetadata.planningNotes")
 
   assertAvoidListDoesNotAppearInPositivePromptFields(card)
@@ -359,6 +384,18 @@ export function buildPromptPlan(card: BrainrotReferentialMirrorCard, _options: B
       captionBeats: [...card.layers.edit.captionBeats],
       overlayMotifs: [...card.layers.edit.overlayMotifs],
       cutRhythm: card.layers.edit.cutRhythm,
+    },
+    pipelineMetadata: {
+      providerRoute: {
+        provider: card.pipelineMetadata.providerRoute.provider,
+        model: card.pipelineMetadata.providerRoute.model,
+        endpoint: card.pipelineMetadata.providerRoute.endpoint,
+        seed: card.pipelineMetadata.providerRoute.seed,
+        providerParams: { ...card.pipelineMetadata.providerRoute.providerParams },
+      },
+      upstreamManifestRefs: [...card.pipelineMetadata.upstreamManifestRefs],
+      sourceInspirationIds: [...card.pipelineMetadata.sourceInspirationIds],
+      vibeAxes: [...card.pipelineMetadata.vibeAxes],
     },
     pipelineMetadataNotes: buildPipelineMetadataNotes(card),
     handoffTargets: card.handoffs.map((handoff) => ({

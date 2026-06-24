@@ -35,6 +35,12 @@ describe("Goal 4 referential mirror planner", () => {
     expect(firstPlan.prompts.imagePrompt.text).toContain("Prompt-planned short-video first frame for Moonlit Server Shrine Companion.")
     expect(firstPlan.prompts.imagePrompt.text).toContain("Recognition chain: quiet companion invitation -> server-shrine glow -> near-ear whisper movement -> mythic aura hold.")
     expect(firstPlan.prompts.seedanceMotionPrompt.controls).toMatchObject({ ratio: "9:16", durationSec: 5, fps: 24 })
+    expect(firstPlan.pipelineMetadata.providerRoute).toMatchObject({
+      provider: "goal4-local-planner",
+      endpoint: "buildPromptPlan",
+      seed: 2026062404,
+    })
+    expect(firstPlan.pipelineMetadata.vibeAxes).toContain("artifact-consciousness")
     expect(firstPlan.promptHash.value).toMatch(/^[a-f0-9]{64}$/)
   })
 
