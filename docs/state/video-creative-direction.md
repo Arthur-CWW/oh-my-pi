@@ -50,8 +50,8 @@ inspiration archive
 → prop/brainrot assets
 → backgrounds/scenes
 → motion/video generation
-→ TTS/audio
-→ lipsync or fake mouth-motion
+→ TTS / ASMR stems / spatial audio
+→ lipsync, avatar control, or fake mouth-motion
 → subtitles/text overlays
 → filters/effects
 → final render
@@ -68,7 +68,7 @@ Each component should be separately editable, inspectable, replaceable, cacheabl
 1. **Separate layers when possible.** Do not one-shot the whole video if characters, background, props, captions, voice, lipsync, and effects can be edited separately.
 2. **Do not ask video models to render readable text.** Add subtitles, typography, UI labels, and captions in post.
 3. **Generate reusable primitives, not just final outputs.** Characters, props, overlays, backgrounds, caption styles, filters, and audio stings should be remixable.
-4. **Track provenance and metadata.** Important assets should record prompt, provider/model, tags, intended use, vibe notes, dimensions/duration, alpha/mask/loopability, and workflow usage.
+4. **Track pipeline metadata as DAG state, not bureaucracy.** Store prompt, provider/model, endpoint, parameters, tags, intended use, vibe notes, dimensions/duration, artifact paths, and workflow usage when that helps reconstruct, compare, rerun, or swap providers. This metadata should converge into centralized SQLite; do not turn it into legalistic provenance busywork.
 5. **Avoid account/rate-limit stupidity.** Do not brute-force auth/risk controls or get accounts banned.
 
 ### Strong preferences
@@ -78,27 +78,29 @@ Each component should be separately editable, inspectable, replaceable, cacheabl
 - The system has two primary product directions: `brainrot` creation (Pleometric-style surreal/postmodern meme video pipelines) and `ugc-ads` / UGC Studio for making ads. Treat them as first-class lanes/facets in workspace data, reference tagging, filters, prompts, provider defaults, and UI copy.
 - For AI UGC experiments, prefer cheap pay-as-you-go APIs over another creator SaaS subscription.
 - This lane is mostly hacking/learning, not production. Cheap iteration can default to Kie or similar providers; keep fal/others as fallback or benchmark.
-- Provider/API reversal should rank by UGC workflow value first, implementation speed second, and no-spend/ease only as a safety gate or tie-breaker. Do not substitute low-value safe reads for higher-value generation, persona/voice, lip-sync, reference-control, or template-mining gaps. When credits are tiny, use dry-run JSON planning and cheap image routes inside the highest-value workflow family; live video/avatar routes need explicit user action and a small spend cap.
+- Provider/API reversal should rank by UGC workflow value first, implementation speed second, and no-spend/ease only as a tie-breaker. Do not substitute low-value safe reads for higher-value generation, persona/voice, lip-sync, reference-control, or template-mining gaps. When credits are tiny, use dry-run JSON planning and cheap image routes inside the highest-value workflow family; live video/avatar routes are fine inside a named cap with provider, output root, and stop conditions.
 - For bulk video understanding/tagging, prefer API benchmarks with local caches/error logs over subscription UI automation; compare OpenRouter/Kie/direct Google on real corpus samples before committing spend.
 - Code quality still matters: provider adapters, logging, manifests, spend caps, retries/fallbacks, and reproducible metadata over throwaway spaghetti.
+- For Seedance/Jimeng image-to-video, the priority is better video quality. Gemini/Gemini-app/SynthID artifacting is a pixel-conditioning problem: SynthID encodes generation metadata into pixels, which can damage later I2V conditioning. Keep provider/endpoint/model metadata in the pipeline DB/manifests; remove or condition pixel artifacts when they hurt the video.
+- For AI companion / AI girlfriend work, split realtime intimacy from offline media generation: realtime loop is persona + memory + STT/TTS + WebAudio spatial ASMR + VRM/Live2D avatar; Seedance/Dreamina/Sonic/Remotion belong to offline render/candidate lanes.
 
 ### Tooling notes
 
 - Use `@path/to/file` references in Pi/LLM prompts when supported.
-- Dreamina/Jimeng direct tooling should live-submit by default; `--dryRun` is the explicit opt-out. Keep commands clear, short, logged, concurrency-1, and credit-aware.
-- KIE-backed UGC generation should be the current cheap/default frontend provider while Jimeng reversal remains in progress. Keep KIE dry-run-first in the browser, use Seedream/ByteDance Lite as the frugal routes, and only submit live jobs through explicit capped actions.
-- Jimeng/Dreamina should use a background browser-session proxy while endpoints are still moving: keep a logged-in Helium/CDP profile as the token/session holder, refresh session bundles from it, then graduate stable operations into direct `fetch` clients. Keep reversing every UGC-useful GenAI endpoint, not only text-to-image: reference uploads, persona/subject/character tools, voice, lip-sync/digital human, pose/style/depth controls, image/video generation, canvas edits, asset library, and explore/template APIs. Pick the most important endpoint family first, then the fastest implementation inside that family.
+- Jimeng/Seedance direct tooling may live-submit inside an approved bounded envelope; `--dryRun` remains the explicit no-spend path outside that envelope. Keep commands clear, short, logged, concurrency-1, credit-aware, and artifact-backed under ignored `data/**`. For the current ASMR overnight run, Arthur confirmed Jimeng is logged in on Firefox and Chrome; prefer those existing profiles or an ignored refreshed session bundle, with Helium only as fallback. Do not assume Dreamina works unless Arthur reconfirms it.
+- KIE-backed UGC generation should be the current cheap/default frontend provider while Jimeng reversal remains in progress. Keep KIE dry-run-first in the browser, use Seedream/ByteDance Lite as the frugal routes, and only submit live jobs through named capped envelope actions.
+- Jimeng should use a background browser-session proxy while endpoints are still moving: reuse an already logged-in Firefox/Chrome profile or ignored session bundle as the token/session holder, refresh session bundles from it, then graduate stable operations into direct `fetch` clients. Keep reversing every UGC-useful GenAI endpoint, not only text-to-image: reference uploads, persona/subject/character tools, voice, lip-sync/digital human, pose/style/depth controls, image/video generation, canvas edits, asset library, and explore/template APIs. Pick the most important endpoint family first, then the fastest implementation inside that family.
 - Jimeng's voice layer is now a usable UGC primitive: built-in voices can be cataloged from the signed `dreamina_tone` feed, and `/mweb/v1/tts_generate` returns base64 MP3 audio for direct TTS. Use this for quick persona voice prototyping while custom voice clone and subject voice generation still need separate captured contracts.
 - Jimeng local reference-image upload is now a usable UGC primitive: `jimeng-browser-proxy upload-image --file <path>` turns a local PNG/JPEG/WebP into a committed ImageX provider URI under `tos-cn-i-tb4s082cfz/...`. Use this for first-frame image-to-video, reference/persona, and image-to-image payload work instead of browser-assisted image upload when possible.
 - Jimeng reference-image inspection is now a usable no-spend primitive: `jimeng-browser-proxy describe-image --image <path>` uploads to ImageX when needed, then calls `/mweb/v1/get_image_description` and `/mweb/v1/face_recognize`. Use it to preflight persona/reference images and record provider URI plus description/face-count metadata before wiring deeper pose/control/reference controls.
 - Jimeng ControlNet preview is now a usable no-spend UGC primitive: `jimeng-browser-proxy controlnet-preview --image <path> --control pose|depth|canny` uploads to ImageX when needed, calls `/mweb/v1/blend_preview`, saves a local preview PNG, and records the frontend save-param patch for later pose/depth/outline reference payloads. Pose also calls `/mweb/v1/pose_detect`. Style/reference payload controls remain next mapping targets.
 - Jimeng object/saliency segmentation is now a usable no-spend UGC primitive: `jimeng-browser-proxy object-mask --image <path> --mode canvas|default|both` uploads to ImageX when needed, calls `/mweb/v1/saliency_seg`, and saves local mask PNGs. Use this for persona cutouts, object isolation, background-paint/reference workflows, and later clean composition controls.
-- Jimeng saved subject/persona lifecycle is now usable for no-spend CRUD: `jimeng-browser-proxy subjects --limit 20`, `subject-create`, `subject-update`, and `subject-delete` call `/mweb/v1/dreamina_subject/{get,create,update,delete}` and record subject ids/names/image refs/voice refs while redacting signed media URLs. `subject-generate-voice --dryRun` records the known `image_uri` request shape, but live subject voice generation and custom voice clone still need explicit spend approval or captured UI submits.
+- Jimeng saved subject/persona lifecycle is now usable for no-spend CRUD: `jimeng-browser-proxy subjects --limit 20`, `subject-create`, `subject-update`, and `subject-delete` call `/mweb/v1/dreamina_subject/{get,create,update,delete}` and record subject ids/names/image refs/voice refs while redacting signed media URLs. `subject-generate-voice --dryRun` records the known `image_uri` request shape, but live subject voice generation and custom voice clone still need an approved envelope or captured UI submit inside its cap.
 - Jimeng overseas/alternate short-video feed mining is now a usable no-spend primitive: `jimeng-browser-proxy overseas-short-videos --limit 5` calls `/mweb/v1/feed_short_video` and records durable video ids, durations, dimensions, audio flags, ranking signals, and metadata effect ids while redacting signed cover/media URLs. Use it alongside `short-videos` for reference-profile and niche-template research.
-- Jimeng first-frame image-to-video is now a usable UGC primitive: `jimeng-browser-proxy image2video --image <path>` uploads a local reference still, injects `first_frame_image`, submits/polls/downloads an MP4, and exposes duration, ratio, resolution, model, and seed flags. Next Jimeng reversal priority is VOD/video upload plus end-frame/multi-frame/deeper reference controls, not an async daemon.
+- Jimeng first-frame image-to-video is now a usable UGC primitive: `jimeng-browser-proxy image2video --image <path>` uploads a local reference still, injects `first_frame_image`, submits/polls/downloads an MP4 when inside an approved envelope, and exposes duration, ratio, resolution, model, and seed flags. Next Jimeng reversal priority is VOD/video upload plus end-frame/multi-frame/deeper reference controls, not an async daemon.
 - For provider/API proof-of-work, tests are necessary but not sufficient when the output is media. Save local artifact bundles under ignored `data/**` with the exact command, manifest, and playable/listenable audio or video so Arthur can inspect the result directly.
 - Jimeng/Dreamina proof prompts should be useful, Chinese, and in-distribution for AI UGC work. Avoid throwaway demo prompts; use Korean-beauty, TikTok-profile, persona, reference-upload, product demo, hook/CTA, or campaign prompts that could actually feed the UGC pipeline.
-- For Jimeng/Dreamina reversal, use approved bounded live/capture matrices as the fastest source of truth when credits are available: run useful Chinese UGC examples, save raw/normalized JSON and artifacts, infer contracts/scaffolds from them, then test through replayed fixtures and Vitest snapshots. Do not keep hand-writing dry-run planners unless live capture is blocked, risky, or needed as a compare gate.
+- For Jimeng/Dreamina reversal, use approved bounded live/capture matrices as the fastest source of truth when credits are available: run useful Chinese UGC examples inside the named provider cap and `data/**` output root, save raw/normalized JSON and artifacts, infer contracts/scaffolds from them, then test through replayed fixtures and Vitest snapshots. Do not keep hand-writing dry-run planners unless live capture is blocked, risky, or needed as a compare gate.
 - Jimeng/Dreamina CLI work can become async-by-default later, after API contracts settle: submit/write a local job record first, optionally `--wait`/`--sync`, then persist request/response JSON, artifacts, and normalized summaries under ignored `data/**`. Do not jump to the daemon/job phase while endpoint coverage is still the active work.
 - Jimeng/Dreamina reverse-engineering should checkpoint one feature slice at a time. After a coherent API section is implemented, tested, proven, and documented, git save that slice before moving to the next feature.
 - For the UGC/video pipeline, keep serialization JSON-first: recipes, manifests, timelines, provider prompt cards, and reports should be plain versioned JSON unless there is a strong later reason to add another format.
@@ -127,7 +129,7 @@ Each component should be separately editable, inspectable, replaceable, cacheabl
 - ComfyUI-style node graphs are useful as a developer/pipeline view, but the primary creative UI should operate at higher abstractions: persona collections, format explorations, campaign branches, snapshot history, and agent instructions.
 - Future reference-profile workflows should decompose a TikTok/influencer/faceless profile into reusable mechanics: pose/timing, gesture rhythm, shot structure, caption/text template, hook families, voice-line structure, CTA pattern, and posting strategy. The swapped output should use a synthetic/right-cleared persona, voice, product, hook copy, and captions.
 - Korean-beauty/K-pop-idol-like influencer aesthetics are a genre worth exploring for AI UGC persona work because they are visually optimized and striking; keep this as a creative lane rather than treating the pasted ABG paywall/onboarding screen as a UX reference.
-- Keeping prompts/provenance/tags/vibes in a centralized SQLite catalog.
+- Keep prompts, provider/model/endpoint choices, params, artifact paths, tags, vibes, and rerun lineage in a centralized SQLite catalog so the DAG can reconstruct artifacts and rerun steps with different providers.
 - Using the prototype to discover the pipeline architecture, not to optimize one throwaway video.
 
 ## Prototype concepts
@@ -183,12 +185,12 @@ Each asset should answer:
 - Is it loopable?
 - Does it have alpha or a usable mask?
 - What prompt generated it?
-- What provider/model generated it?
+- What provider, model, endpoint, and parameters generated it?
 - What source/internet reference inspired it?
 - What semantic tags apply?
 - What vibe axes does it activate?
 - Does it conflict with subtitles?
-- Which workflow runs used it?
+- Which workflow runs, DAG nodes, and provider jobs used it?
 
 Runtime DB target:
 
@@ -266,31 +268,31 @@ Campaign generation should support mixed posting strategies:
 - non-CTA persona-building posts, dances, edits, trends, or cutesy/viral filler where strategically useful
 - A/B tests across hooks, CTAs, personas, formats, scripts, captions, and proof slots
 
-Reference-profile remixing should be treated as a later workstream:
+Reference/profile remixing should be treated as an editable local artpiece/workflow lane:
 
 ```txt
-public/right-cleared profile archive
+reference archive
 → video/sample selection
 → pose/timing/gesture extraction
 → transcript/voice-line and hook-template extraction
 → caption/text/template extraction
 → format/profile bible
-→ synthetic persona + voice + product swap
+→ persona / voice / product / remix swap
 → generated batch
-→ compare against abstract mechanics, not original identity
+→ compare against the desired vibe/mechanics
 ```
 
 Useful variants:
 
-- faceless profile cloning is lower-risk and easier because the style is mostly templates, timing, b-roll, hooks, captions, and posting strategy
-- creator/profile remixing needs explicit consent or a clean-room abstracted style boundary before voice/likeness are touched
-- niche research should eventually discover successful profiles/campaigns/templates in a target market and turn them into abstract reusable format templates
+- faceless profile cloning is easier because the style is mostly templates, timing, b-roll, hooks, captions, and posting strategy
+- direct source references, characters, music, trademarks, or likeness can be used as local remix/artpiece ingredients when Arthur wants that; do not auto-convert them into hard avoid-lists
+- niche research should eventually discover successful profiles/campaigns/templates in a target market and turn them into reusable format templates
 
-Important ethical/product constraint:
+Important source/reference preference:
 
-- Clone high-level format mechanics and pacing, not private identities or copyrighted videos verbatim.
-- Generated personas should be synthetic or rights-cleared; avoid designing the system around cloning real private people or exploiting protected identity traits without clear consent and policy checks.
-- Do not preserve or imitate a real creator's recognizable face, voice, private identity, trademarked branding, or exact copyrighted media without consent. Preserve abstract mechanics and timing; swap identity, product, script, and rendered text.
+- Do not inject unsolicited “clean-room,” “rights-safe,” “protected-reference,” or legalistic provenance gates into creative plans.
+- Keep source/reference notes only when they help iteration, search, reruns, comparison, or handoff.
+- If a workflow is meant for public/commercial release, handle clearance as a later explicit distribution constraint, not as a default constraint on local remix exploration.
 
 Tool leads, source URLs, provider price tables, and market teardowns belong in:
 
@@ -312,6 +314,17 @@ Active lanes, run coordination, and implementation tasks belong in `docs/plans/`
 Start with `docs/plans/README.md` for the current lane map.
 
 ## Care log
+
+### 2026-06-20
+
+Arthur clarified:
+
+- TikTok references are bootstrap fuel stock for our own generation pipeline, not the final goal. Decompose reference videos to extract structural mechanics (hook, pacing, shot rhythm, caption templates, CTA patterns), then feed those mechanics into synthetic generation. Do not treat TikTok as a distribution target or clone destination.
+- Decomposition should support interchangeable analysis lanes: frame/VTT screenshot+transcript analysis and native full-video Gemini understanding. Implement both lanes, run them on the same reference, and compare/evaluate which captures structural detail better per format or content category.
+- Use OMP/Antigravity OAuth (`google-antigravity/gemini-3.5-flash-low`) for Gemini Flash orchestration and decomposition where possible. OMP account ranking should pick the higher-headroom account when multiple Antigravity OAuth logins are available, so decomposition runs do not silently burn paid API quota.
+- Use specialized personas or sort docs per pipeline stage to inject intelligence and refine skills. Each pipeline stage (decomposition, persona generation, script/hook, asset generation, TTS/audio, composition, review) should have a tailored agent brief with stage-specific heuristics, quality gates, and reference examples.
+- OMP `--mode rpc` and `rpc-ui` can stream `AgentSessionEvent` and subagent events. This is a documented future path for a Slotok web monitoring bridge that would surface live pipeline orchestration in the workbench. Document as planned, not as implemented — no live RPC bridge or Slotok event ingestion exists yet.
+- Use Jimeng reverse-engineered APIs for persona/profile creation and remix exploration. Direct creator/source references are allowed for local artpiece experiments when Arthur wants them; for public/commercial outputs, decide any identity/clearance boundary explicitly at that later distribution step instead of injecting it into every creative plan.
 
 ### 2026-06-09
 

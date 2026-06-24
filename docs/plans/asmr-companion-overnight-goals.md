@@ -85,9 +85,11 @@ Inter-workstream gates:
 
 ## Goal 2 live-access reference
 
-This section is a reference owned by **goal 2**. Other goals may consume its resulting manifests and proof artifacts, but they do not own provider access, access preflight, Jimeng/Seedance provenance gates, or live provider stop conditions.
+This section is a reference owned by **goal 2**. Other goals may consume its resulting manifests and proof artifacts, but they do not own provider access, access preflight, Jimeng/Seedance quality-conditioning decisions, or live provider stop conditions.
 
-Goal: make paid/subscription access explicit, auditable, and optional for the Jimeng/Seedance I2V lane. Arthur can approve **one standing live-access approval** for this pass. Inside that approval, GPT-5.5-capable senior agents may run live E2E provider tests unattended without further approval; outside it, they fall back to dry-run/local fixtures or stop. Every live command, request/response manifest, provider job id, cost/credit observation, and media artifact must be recorded after the fact under the approved ignored `data/**` output root.
+Goal: improve Jimeng/Seedance I2V quality, especially first-frame artifacts from image generation. Arthur approved a standing live-access envelope for this pass, so senior agents may run live E2E provider tests when they need them for proof instead of treating live generation as a hard blocker. Record enough command/output/artifact paths under the approved ignored `data/**` root to resume and compare results; do not overbuild provenance policy.
+
+Goal 2 operator runbook: `docs/qa/asmr-seedance-goal2-runbook-20260624.md` records the `seedance-image2video-plan` command, generated-video-clips.v1 artifact paths, live preflight commands, caps, rate-limit handling, and stop conditions for this lane.
 
 Access lanes:
 
@@ -121,7 +123,7 @@ Max live jobs: caps above; generation concurrency 1 unless Arthur writes otherwi
 Allowed outputs: provider-neutral manifests, raw/normalized JSON, provider job metadata, downloaded media, logs, and replay commands
 ```
 
-Arthur confirmed standing live-access approval in-session for this run: use the approval block above, checkpoint commits are approved, use existing codebase/provider caps where they are already safer or more specific, and stop on 429 exhaustion, 401/403/auth/CAPTCHA, 1019, shark-not-pass, cap/cost surprises, secret exposure, sudo/project-wide command need, or any request to hide/omit provenance records.
+Arthur confirmed standing live-access approval in-session for this run: use the approval block above, checkpoint commits are approved, use existing codebase/provider caps where they are already safer or more specific, and stop on 429 exhaustion, 401/403/auth/CAPTCHA, 1019, shark-not-pass, cap/cost surprises, secret exposure, sudo/project-wide command need, or any request to hide/omit material run records.
 
 Rate-limit and provider-error handling:
 
@@ -141,9 +143,9 @@ OpenAI/ChatGPT/Codex subscription handling:
 Subscription policy:
 
 - Prefer subscription-backed browser/session lanes where we already pay, but keep the implementation contract provider-neutral.
-- Every live provider lane must have a dry-run command that produces the same manifest shape without spend.
+- Every live provider lane should keep a dry-run command for reproducible iteration, but live tests are allowed when they are the shortest path to judging quality.
 - Store credentials/session captures only in ignored local paths or OS/browser profiles; manifests may record provider/account class but never secrets.
-- Senior agents may execute live provider tests only inside the standing live-access approval. They must record exact commands and artifacts after the fact; they must not ask command-by-command while staying inside the approval.
+- Senior agents may execute live provider tests inside the standing live-access approval. They must record exact commands and artifacts after the fact; they must not ask command-by-command while staying inside the approval.
 - For Jimeng, prefer the already logged-in Firefox/Chrome profiles Arthur confirmed. Use CuaDriver/browser-control only to operate the normal logged-in browser surface if a session refresh needs human-like navigation; do not scrape or print cookies/tokens.
 
 Bare-minimum access preflight commands before live E2E:
@@ -171,15 +173,14 @@ Access checklist for Arthur before live E2E:
 4. Confirm which subscription lanes are usable through OMP/tool-managed auth: GPT-5.5/Codex, Antigravity/Gemini, AI Studio/Gemini, Kimi, direct API keys. Current frontend browser automation is best-effort; do not make the run depend on it unless login/session preflight succeeds.
 5. Confirm whether live proof may generate one canonical Seedance clip, one voice sample, both, or dry-run only.
 
-## Hard constraints
+## operating constraints
 
-- Do not call live paid generation providers outside the standing live-access approval Arthur approved for this run.
+- Live paid generation is allowed inside Arthur's standing live-access approval when it is needed for end-to-end quality testing; prefer existing codebase/provider caps and record outputs under the approved `data/**` roots.
 - Do not run any project-wide commands during the overnight run, including build/test/lint/format; use only scoped checkpoint commands for touched packages/files and record them.
 - Do not use sudo, write secrets, or commit/session-print credentials.
-- Integrate reverse-SynthID/Synthid-Bypass-informed image conditioning inside goal 2 as a quality step between image generation and Jimeng/Seedance I2V. Do not frame it as a blocker; the problem is video conditioning artifacts.
-- Keep AI-origin/provenance disclosure in manifests and final records. Removing or reducing a first-frame image watermark/noise pattern for I2V quality does not remove the requirement to disclose the image source, conditioning steps, and generated-video provenance.
-- Gemini or other vision models may analyze disposable copies only; analysis output must be sidecar JSON. If Gemini-generated or Gemini-edited pixels are used as a first-frame candidate, goal 2 owns the conditioning/removal step plus A/B proof before I2V.
-- Keep generated media, audio stems, provenance, provider jobs, and render outputs manifest-backed and reproducible.
+- Integrate reverse-SynthID/Synthid-Bypass-informed image conditioning inside goal 2 as a quality step between image generation and Jimeng/Seedance I2V. The core problem is video artifacts/conditioning quality, not a provenance gate.
+- Keep generated media, audio stems, provider jobs, endpoint/model choices, prompts, parameters, and render outputs as internal pipeline metadata so runs can be reconstructed, compared, and rerun with different providers. The metadata belongs in manifests now and should converge into the centralized SQLite catalog; it is not a disclosure/safety policy.
+- Gemini or other vision models may analyze or generate first-frame candidates. If generated/edited pixels produce better I2V after conditioning, prioritize the quality result and keep enough sidecar/DB metadata to rerun it.
 - Tests should be close to the relevant package test directories. Each orchestrator runs scoped checkpoint tests and a workstream E2E proof; the coordinator runs scoped integrated verification at every handoff and final full E2E at the end.
 - Preserve user work in the repo. Touch only the owner paths named in the assigned goal unless a callsite requires a narrow documented change.
 
@@ -187,7 +188,7 @@ Definition of done for the overnight pass:
 
 - Dry-run end-to-end path exists from a recipe/context object to: analysis manifest, Pleometric-style prompt/recipe card, voice/stem manifest, spatial-audio manifest/render proof, Jimeng/Seedance dry-run plan, generated-clip manifest shape, existing TikTok recreation workflow handoff, Remotion/HyperFrames composition input, and final proof bundle.
 - Each workstream has its own reviewer-rerunnable E2E proof artifact before it is accepted.
-- Final proof runs the whole dry-run path through goals 1–5 outputs. Live E2E proof is allowed only inside the standing live-access approval. A fixture/demo path using local media remains acceptable if live access hits a stop condition.
+- Final proof runs the whole path through goals 1–5 outputs. Live E2E proof is allowed inside the standing live-access approval; a fixture/demo path remains acceptable only if live access hits a stop condition.
 - The proof artifact explains exactly what ran, where outputs are, which commands rerun it, and which live-provider calls were skipped or stopped.
 
 ## Dependency graph and workstream order
@@ -209,9 +210,9 @@ graph TD
 Main sequence:
 
 1. **Goal 1 — Contract spine**: shared manifest contracts and reusable fixtures only. It does not own provider code, audio renderers, prompt planners, or composition internals.
-2. **Goal 2 — SynthID-conditioned Jimeng/Seedance I2V + access**: canonical first-frame provenance, reverse-SynthID/Synthid-Bypass-informed conditioning/removal, Jimeng/Seedance dry-run/live command split, and access/preflight. This blocks downstream video generation/composition.
+2. **Goal 2 — SynthID-conditioned Jimeng/Seedance I2V + access**: reverse-SynthID/Synthid-Bypass-informed conditioning/removal, Jimeng/Seedance dry-run/live command split, and access/preflight. This blocks downstream video generation/composition because first-frame artifacts meaningfully affect I2V quality.
 3. **Goal 3 — Spatial/binaural ASMR audio**: local/WebAudio/FFmpeg or provider TTS as needed, producing stems, manifests, stereo/binaural proof, and a renderer-consumable master.
-4. **Goal 4 — Pleometric referential planning**: rights-safe prompt/recipe planning that consumes goals 1–3 outputs/contracts and hands off to the existing video pipeline. It does not own provider access or renderer internals.
+4. **Goal 4 — Pleometric referential planning**: local remix/prompt/recipe planning that consumes goals 1–3 outputs/contracts and hands off to the existing video pipeline. It does not own provider access or renderer internals.
 5. **Goal 5 — Existing video generation/render pipeline integration**: make `workflows/tiktok-recreate`, Jimeng video plan artifacts, Remotion, and HyperFrames handoff work end-to-end from goal 4 plans plus goals 2–3 media outputs.
 6. **Goal 6 — Final integrated proof/handoff**: collect accepted outputs, run final full E2E proof, and write operator handoff only. It does not take ownership of upstream internals unless the owning workstream is unavailable and the fix is narrow/coordinator-owned.
 
@@ -236,12 +237,12 @@ The meta-orchestrator owns this checklist during the overnight run. Fill `Owner`
 
 | Goal | Workstream | Owner tab/agent | Status | Blocked by | Commit(s) | Workstream E2E proof | Integration gate / Artifact(s) |
 |---|---|---|---|---|---|---|---|
-| meta | Meta-orchestrator loop | `Main` / `coord-asmr-seedance` | active | none |  | `agent://preflightblockers` | Root orchestrator active; Goal Mode active; Codex-style OMP compaction configured globally; Goals 1–3 accepted, so Goal 4 is ready |
+| meta | Meta-orchestrator loop | `Main` / `coord-asmr-seedance` | active | none |  | `agent://preflightblockers` | Root orchestrator active; Goal Mode active; Codex-style OMP compaction configured globally; Goals 1–4 accepted, so Goal 5 is ready |
 | 1 | Contract spine and fixture bundle | `goal1contracts` | accepted | none | `1d4228fa` | `cd packages/media-contracts && bun run typecheck`; `cd packages/media-contracts && bun test test/fixture-validation.test.ts` | Exports `@wirebabel/media-contracts`; valid/invalid fixtures under `packages/media-contracts/fixtures/`; root fixed tsconfig/test typing and accepted proof |
 | 2 | SynthID-conditioned Seedance I2V + access/preflight | `goal2seedanceResume` | accepted | none | `3f2b1b49` | `cd packages/jimeng-client && bun test ./test/seedance-image2video-plan.test.ts`; `cd packages/jimeng-client && bun run typecheck`; dry-run CLI proof under `data/asmr-companion/goal2/seedance-parent-proof/` | Emits `normalized/generated-video-clips.v1.json`, first-frame conditioning sidecar, and Goal 2 runbook `docs/qa/asmr-seedance-goal2-runbook-20260624.md`; live E2E remains gated by standing approval + preflight |
 | 3 | Spatial/binaural ASMR audio | `goal3spatialResume` | accepted | none | `57182f28` | `cd packages/spatial-audio-renderer && bun run typecheck`; `cd packages/spatial-audio-renderer && bun test test/render.test.ts`; CLI proof under `data/asmr-companion/goal3-spatial-proof/` | Rendered `goal3-close-whisper-binaural.wav` and `.render-output.json`; Remotion can consume via `--audio-manifest` |
-| 4 | Pleometric planning and pipeline handoff | `goal-4-prompt-system` | pending | none |  |  | prompt bundle consumes upstream Goal 2 clip plan and Goal 3 audio proof |
-| 5 | TikTok/Jimeng/Remotion/HyperFrames integration | `goal-5-video-pipeline` | pending | goals 1, 2, 3, 4 |  |  | render pipeline E2E proof |
+| 4 | Pleometric planning and pipeline handoff | `goal4planning` | accepted | none | `4e40f278` | `cd packages/pleometric-planner && bun run typecheck`; `cd packages/pleometric-planner && bun test ./test/planner.test.ts`; CLI proof under `data/asmr-companion/goal4-planning/goal4-pipeline-handoff.bundle.json` | Emits `goal4-pleometric-pipeline-handoff.v1` with internal provider/endpoint/DAG metadata for Goal 5 |
+| 5 | TikTok/Jimeng/Remotion/HyperFrames integration | `goal-5-video-pipeline` | pending | none |  |  | render pipeline E2E proof; consume Goal 4 handoff plus Goal 2/3 artifacts |
 | 6 | Final integrated proof/handoff | `goal-6-proof` | pending | goals 1–5 accepted |  |  | final full E2E proof bundle |
 | backlog | Realtime Airi-like companion runtime | `backlog-airi-runtime` | parked | goals 3, 5, 6 |  |  | not overnight scope |
 
@@ -250,7 +251,7 @@ Status values: `pending`, `active`, `blocked`, `proof-ready`, `accepted`, `parke
 Recommended sequence:
 
 1. Start `goal-1-contracts` first because it sets the only shared shapes/fixtures.
-2. Start `goal-2-seedance-access` after goal 1 exports enough `analysis-tags.v1` / `generated-video-clips.v1` shape to validate provenance and generated clip plans.
+2. Start `goal-2-seedance-access` after goal 1 exports enough `analysis-tags.v1` / `generated-video-clips.v1` shape to validate generated clip plans and conditioning handoff.
 3. Start `goal-3-spatial-audio` after goal 1 exports enough `voice-assets.v1`, `asmr-stems.v1`, and `spatial-audio-manifest.v1` shape.
 4. Start `goal-4-prompt-system` after goals 2 and 3 have accepted E2E proof artifacts to consume.
 5. Start `goal-5-video-pipeline` after goal 4 hands off a concrete prompt/recipe bundle and goals 2–3 have media/manifest artifacts.
@@ -289,7 +290,7 @@ Explicit non-ownership:
 Workstream checkpoints:
 1. Schema foundation: choose contract location, implement decoders/types, add valid/invalid fixture tests, commit `goal-1: contract schema foundation`.
 2. Cross-stream fixtures: add representative valid fixtures for analysis tags, prompt card placeholder, voice/stems, spatial audio, and generated clips, commit `goal-1: shared fixture bundle`.
-3. Invalid fixture coverage: prove malformed critical fields fail: missing source hash/provenance, unsafe derivative input path, invalid timestamps, invalid spatial coordinates, generated clip without provider/model/job provenance, commit `goal-1: contract validation coverage`.
+3. Invalid fixture coverage: prove malformed critical fields fail where they affect downstream reliability: missing source hash/provenance, unsafe derivative input path, invalid timestamps, invalid spatial coordinates, generated clip without provider/model/job details, commit `goal-1: contract validation coverage`.
 4. Export announcement: report exported names and fixture paths to the meta-orchestrator, commit `goal-1: contract handoff notes` if docs changed.
 
 Workstream E2E proof:
@@ -298,7 +299,7 @@ Workstream E2E proof:
 
 Acceptance:
 - Other workstreams can import or read the contract fixtures without guessing shape.
-- Goal 2 can validate first-frame provenance, SynthID conditioning records, and generated clip manifests.
+- Goal 2 can validate SynthID conditioning records and generated clip manifests.
 - Goal 3 can validate voice/stem/spatial manifests.
 ```
 
@@ -307,7 +308,7 @@ Acceptance:
 ```txt
 /goal synthid-conditioned-seedance-access-workstream
 
-You are the orchestrator for the provider-quality lane: canonical first-frame provenance, reverse-SynthID/Synthid-Bypass-informed image conditioning/removal before Jimeng/Seedance I2V, Jimeng/Seedance dry-run planning, live-access preflight, and generated-clip plan artifacts. This is a blocker for downstream video generation and composition because SynthID-like image artifacts meaningfully affect image-to-video conditioning. Dreamina is out of scope for this overnight run unless Arthur later confirms it works.
+You are the orchestrator for the provider-quality lane: reverse-SynthID/Synthid-Bypass-informed image conditioning/removal before Jimeng/Seedance I2V, Jimeng/Seedance dry-run planning, live-access preflight, and generated-clip plan artifacts. This is a blocker for downstream video generation and composition because image-generation artifacts meaningfully affect image-to-video conditioning. Dreamina is out of scope for this overnight run unless Arthur later confirms it works.
 
 Context:
 - Read `docs/plans/asmr-companion-seedance-pipeline.md`, especially SynthID conditioning/removal and repo insertion points.
@@ -329,13 +330,13 @@ Explicit non-ownership:
 
 Workstream checkpoints:
 1. Dry-run CLI alias: add a clear command such as `seedance-image2video-plan` over the existing first-frame video plan path, commit `goal-2: seedance dry-run alias`.
-2. SynthID conditioning stage: accept canonical first-frame URI/path/hash plus sidecar provenance; integrate a reverse-SynthID/Synthid-Bypass-informed preprocessing step for Gemini/SynthID-marked image candidates; record pre/post hashes and conditioning parameters, commit `goal-2: first-frame synthid conditioning`.
+2. SynthID conditioning stage: accept canonical first-frame URI/path/hash plus optional sidecar details; integrate a reverse-SynthID/Synthid-Bypass-informed preprocessing step for Gemini/SynthID-marked image candidates; record pre/post hashes and conditioning parameters when they affect comparison, commit `goal-2: first-frame synthid conditioning`.
 3. Generated clip plan artifact: emit `generated-video-clips.v1` compatible dry-run output with provider/model/duration/ratio/first-frame/hash/params, commit `goal-2: generated clip plan artifact`.
 4. Access readiness: document exact session/API/subscription prerequisites, dry-run/live command split, standing live-access command templates, output roots, budget caps, rate-limit handling, and stop conditions, commit `goal-2: provider access runbook`.
 
 Workstream E2E proof:
 - Good direct first-frame fixture passes through the no-spend Jimeng/Seedance I2V plan command and emits a `generated-video-clips.v1` artifact.
-- Gemini/SynthID-marked first-frame fixture passes through the conditioning/removal stage, records pre/post provenance, and then emits a generated-clip plan rather than being blocked.
+- Gemini/SynthID-marked first-frame fixture passes through the conditioning/removal stage, records pre/post quality-relevant details, and then emits a generated-clip plan rather than being blocked.
 - A/B proof compares unconditioned vs conditioned first-frame inputs for downstream I2V readiness; live provider calls run only inside the approved standing live-access approval.
 
 Acceptance:
@@ -389,11 +390,11 @@ Acceptance:
 ```txt
 /goal pleometric-referential-planning-workstream
 
-You are the orchestrator for creative planning only: convert the Pleometric explanation into original, rights-safe recipe cards and prompt bundles that consume goals 1–3 outputs and hand off into the existing video generation/render pipeline. Do not own provider access, audio rendering, or renderer internals.
+You are the orchestrator for creative planning only: convert the Pleometric explanation into local remix/art-piece recipe cards and prompt bundles that consume goals 1–3 outputs and hand off into the existing video generation/render pipeline. Do not own provider access, audio rendering, or renderer internals.
 
 Context:
 - Read the Pleometric section in `docs/plans/asmr-companion-seedance-pipeline.md`.
-- Source tweet/post is a mechanics reference only; do not clone Tom Tucker, Tom and Jerry, iShowSpeed, Family Guy, exact music, or trademarked character/media assets.
+- Source posts/media can be used as remix/mechanics references. Do not treat Tom Tucker, Tom and Jerry, iShowSpeed, Family Guy, exact music, trademarks, or likeness as hard-banned; keep source notes only when they help iteration, search, reruns, comparison, or handoff.
 - Consume goal 1 recipe/manifest shapes, goal 2 generated clip plan constraints, and goal 3 audio manifest/proof paths.
 - Handoff target is the existing `workflows/tiktok-recreate` pipeline plus Jimeng plan and Remotion/HyperFrames inputs owned by goal 5.
 
@@ -409,19 +410,19 @@ Explicit non-ownership:
 - No final integrated proof beyond this planning handoff E2E.
 
 Workstream checkpoints:
-1. Recipe card shape: implement or document `brainrot_referential_mirror_card` with nodes, recognition chain, source lineage, handoffs, avoid-list, layers, provider prompts, and provenance, commit `goal-4: referential mirror card schema`.
-2. Fixture cards: add at least one ASMR companion concept and one high-aura short-video concept, both original and rights-safe, commit `goal-4: original prompt fixtures`.
-3. Prompt planner: generate image prompt, Seedance motion prompt, audio/music intent reference, caption/overlay plan, and safety/provenance notes from a card, commit `goal-4: prompt planner`.
+1. Recipe card shape: implement or document `brainrot_referential_mirror_card` with nodes, recognition chain, source lineage, handoffs, reference policy, layers, provider prompts, pipeline metadata, and DAG inputs/outputs, commit `goal-4: referential mirror card schema`.
+2. Fixture cards: add at least one ASMR companion concept and one high-aura short-video concept, with remix/source references recorded as internal pipeline metadata when useful, commit `goal-4: prompt fixtures`.
+3. Prompt planner: generate image prompt, Seedance motion prompt, audio/music intent reference, caption/overlay plan, and provider/endpoint/parameter metadata from a card, commit `goal-4: prompt planner`.
 4. Handoff bundle: emit a deterministic bundle that references goal 2 generated-clip plan constraints and goal 3 audio proof path/manifest without copying their internals, commit `goal-4: pipeline handoff bundle`.
-5. Determinism/safety tests: snapshot prompt output and enforce avoid-list/protected-reference exclusion, commit `goal-4: prompt safety tests`.
+5. Determinism/metadata tests: snapshot prompt output and enforce internal provider/endpoint/DAG metadata preservation, commit `goal-4: prompt metadata tests`.
 
 Workstream E2E proof:
-- Run a clean-room prompt bundle generation from fixture card to pipeline handoff JSON.
-- Prove avoid-list enforcement catches protected source names or exact asset references.
+- Run a prompt bundle generation from fixture card to pipeline handoff JSON.
+- Prove provider/endpoint/DAG metadata is preserved for rerun and provider-swap workflows.
 - Show the handoff includes references to upstream clip/audio manifests rather than duplicating provider or renderer logic.
 
 Acceptance:
-- Goal 5 can consume prompt-card outputs without copying protected references.
+- Goal 5 can consume prompt-card outputs with internal provider/endpoint/DAG metadata intact.
 - Provider, audio, and renderer ownership remains with goals 2, 3, and 5.
 ```
 
@@ -545,7 +546,7 @@ Do not launch the backlog realtime Airi-like runtime during this overnight run u
 ## Collision rules
 
 - Goal 1 owns shared schemas/contracts/fixtures and announces exact exported names early.
-- Goal 2 owns Jimeng/Seedance access, preflight, provenance gates, generated clip plan artifacts, and live provider stop conditions.
+- Goal 2 owns Jimeng/Seedance access, preflight, conditioning quality gates, generated clip plan artifacts, and live provider stop conditions.
 - Goal 3 owns audio stems, spatial/binaural rendering, and audio proof artifacts.
 - Goal 4 owns creative planning and handoff bundles only; it consumes goals 1–3 outputs.
 - Goal 5 owns `workflows/tiktok-recreate`, Remotion/HyperFrames integration, and final media pipeline mechanics; it consumes goals 1–4 outputs.
@@ -566,8 +567,8 @@ bun packages/jimeng-client/src/browser-proxy-cli.ts <dry-run-command> --outDir d
 Verification order:
 
 1. Goal 1: run the contract fixture validation proof.
-2. Goal 2: run the direct first-frame dry-run, Gemini/SynthID-marked conditioning proof, pre/post provenance proof, and generated-clip plan proof; run live commands only inside the approved standing live-access approval.
+2. Goal 2: run the direct first-frame dry-run, Gemini/SynthID-marked conditioning proof, pre/post quality comparison proof, and generated-clip plan proof; run live commands inside the approved standing live-access approval when needed.
 3. Goal 3: run the audio render proof and inspect/listen to the rendered stereo/binaural file.
-4. Goal 4: run the prompt/planning handoff proof and protected-reference rejection proof.
+4. Goal 4: run the prompt/planning handoff proof and internal provider/endpoint/DAG metadata proof.
 5. Goal 5: run the workflow/render pipeline proof using goal 4 handoff, goal 2 generated clip manifest, and goal 3 audio master.
 6. Goal 6: run final full E2E dry-run from recipe/context through final render/proof bundle and record exact artifacts.
