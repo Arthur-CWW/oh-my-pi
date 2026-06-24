@@ -1,0 +1,142 @@
+{
+  "schemaVersion": "brainrot_referential_mirror_card.v1",
+  "conceptId": "high_aura_orbit_courier",
+  "title": "High Aura Orbit Courier",
+  "originalityBoundary": "Short-video aura concept; remix mechanics are abstracted into a courier, prop, setting, captions, and image-conditioning intent.",
+  "referentialMirrorGraph": [
+    {
+      "nodeId": "courier-arrival-status",
+      "node": "tiny raincoat courier steps into a closed convenience plaza as the puddles bend toward them",
+      "viewerRecognition": "recognizes a dramatic entrance inflated beyond the ordinary errand",
+      "sourceLineage": [
+        {
+          "label": "status-walk-mechanic",
+          "sourceKind": "abstract_mechanic",
+          "mechanic": "an ordinary walk is framed as legendary arrival through slow timing and exaggerated environmental respect",
+          "referencePosture": "abstract_mechanics",
+          "pipelineNote": "mechanic only; character, costume, setting, and prop are new"
+        }
+      ],
+      "handoffTo": ["image_prompt", "seedance_motion_prompt", "caption_overlay_plan"],
+      "avoid": ["text glyph artifacts", "warped mascot-like face", "brand-shaped logo noise"]
+    },
+    {
+      "nodeId": "comet-receipt-prop",
+      "node": "glowing receipt bird unfolds into a small comet ring above the courier's shoulder",
+      "viewerRecognition": "recognizes the side-prop as the hype witness that certifies the aura",
+      "sourceLineage": [
+        {
+          "label": "sidekick-aura-certifier",
+          "sourceKind": "abstract_mechanic",
+          "mechanic": "secondary character or prop mirrors the main pose so viewers read the moment as mythic",
+          "referencePosture": "abstract_mechanics",
+          "pipelineNote": "new prop language; no exact pose is required for the generation prompt"
+        }
+      ],
+      "handoffTo": ["overlay_plan", "goal5_renderer_motion_notes"],
+      "avoid": ["known mascot face", "rarity-badge text artifacts"]
+    }
+  ],
+  "recognitionChain": [
+    "ordinary errand",
+    "puddles orbit the courier",
+    "receipt bird certifies status",
+    "absurd cosmic importance"
+  ],
+  "sourceLineage": [
+    {
+      "label": "local-aura-remix-mechanics",
+      "sourceKind": "abstract_mechanic",
+      "mechanic": "status walk, material glow, witness prop, cosmic background, and bass-drop edit translated into an original courier gag",
+      "referencePosture": "abstract_mechanics",
+      "pipelineNote": "keeps referential mechanics visible while prioritizing generation-stable prompt inputs"
+    }
+  ],
+  "handoffs": [
+    {
+      "target": "goal2_seedance",
+      "consumes": ["prompts.seedanceMotionPrompt", "layers.i2vControls"],
+      "emits": ["I2V motion prompt intent"],
+      "ownershipBoundary": "Goal 2 owns Seedance constraints and provider clip proof; this card only supplies prompt intent."
+    },
+    {
+      "target": "goal3_spatial_audio",
+      "consumes": ["audioIntent"],
+      "emits": ["music and spatial reference intent"],
+      "ownershipBoundary": "Goal 3 remains owner of audio proof and any future stems or mix changes."
+    },
+    {
+      "target": "goal5_video_pipeline",
+      "consumes": ["caption overlay plan", "prompt plan", "upstream manifest references"],
+      "emits": ["short-video composition intent"],
+      "ownershipBoundary": "Goal 5 owns workflow ingestion, renderer schema, and final output manifests."
+    }
+  ],
+  "avoidList": [
+    "text glyph artifacts",
+    "warped mascot-like face",
+    "brand-shaped logo noise",
+    "rarity-badge text artifacts",
+    "over-compressed rain shimmer"
+  ],
+  "layers": {
+    "primaryCharacter": "small original courier in oversized translucent raincoat, paper crown, confident closed-mouth smile",
+    "secondaryPropOrCharacter": "origami receipt bird with comet-tail ink trail orbiting the courier's shoulder",
+    "background": "empty midnight convenience plaza reflected in puddles that bend into a miniature galaxy",
+    "audio": "original high-energy distorted 808 and metallic clap pattern, rain ticks moving wide, no exact track reference",
+    "edit": {
+      "captionBeats": [
+        "bro delivered one sparkling water",
+        "why did the weather salute",
+        "aura receipt: approved"
+      ],
+      "overlayMotifs": [
+        "tiny receipt-stamp burst",
+        "puddle orbit rings",
+        "one-frame crown glint"
+      ],
+      "cutRhythm": "snap caption on first footstep, half-second hold, then comet-ring flash on the beat"
+    },
+    "i2vControls": {
+      "ratio": "9:16",
+      "durationSec": 5,
+      "fps": 24,
+      "camera": "low vertical tracking shot rising to heroic medium close-up",
+      "motion": "courier slow step, puddle rings rotate, receipt bird unfolds, crown glints once",
+      "timing": "0-1.5s low step, 1.5-3.5s orbit reveal, 3.5-5s confident pose freeze",
+      "stability": "preserve courier proportions, receipt bird silhouette, raincoat translucency, and puddle galaxy layout"
+    }
+  },
+  "providerPrompts": {
+    "image": {
+      "subject": "original tiny courier in translucent raincoat at midnight convenience plaza, origami receipt bird orbit, puddle galaxy, confident aura pose",
+      "style": "hyper-stylized vertical short-video keyframe, glossy rain texture, comedic mythic scale, silver teal and sodium amber palette",
+      "lighting": "wet neon bounce, rim-lit raincoat edges, small crown glint, soft galaxy reflection in puddles, no visible text",
+      "negative": "no generated text, no logo-like glyph, no noisy watermark texture, no warped face, no over-compressed rain shimmer"
+    },
+    "seedance": {
+      "motion": "slow heroic step, puddle orbit rings, receipt bird comet trail, one crown glint, confident pose freeze",
+      "camera": "vertical 9:16 low tracking shot with gentle rise and minimal warping",
+      "stability": "keep courier identity stable, no face morph, no extra limbs, no text artifacts, preserve prop silhouette",
+      "negative": "no text, no logo-like glyph, no face morph, no abrupt scene swap, no compression shimmer"
+    }
+  },
+  "audioIntent": {
+    "spatialReference": "Use Goal 3 audio proof as a timing-safe local master reference if a final composition needs spatial ASMR bed under the aura beat.",
+    "musicReference": "High-aura beat: distorted 808, metallic claps, rain tick percussion, short vocal-like synth chop built for this concept.",
+    "goal3BindingHint": "Goal 4 supplies music/spatial intent only; use Goal 3 render-output manifest path for any available WAV binding."
+  },
+  "pipelineMetadata": {
+    "createdAt": "2026-06-24T00:00:00.000Z",
+    "authoringMode": "original_planning",
+    "upstreamManifestRefs": [
+      "data/asmr-companion/goal2/seedance-parent-proof/normalized/generated-video-clips.v1.json",
+      "data/asmr-companion/goal3-spatial-proof/goal3-close-whisper-binaural.render-output.json"
+    ],
+    "sourceInspirationIds": ["abstract-status-walk", "abstract-aura-sidekick", "goal2-seedance-constraints"],
+    "planningNotes": [
+      "The courier, receipt bird, rain plaza, captions, and beat intent are fixture choices tuned for Seedance-stable first-frame motion.",
+      "The handoff references Goal 2 and Goal 3 accepted manifests without duplicating provider or audio internals."
+    ]
+  }
+}

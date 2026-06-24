@@ -1,0 +1,142 @@
+{
+  "schemaVersion": "brainrot_referential_mirror_card.v1",
+  "conceptId": "asmr_companion_moonlit_server_shrine",
+  "title": "Moonlit Server Shrine Companion",
+  "originalityBoundary": "Original synthetic ASMR companion concept; uses abstract intimacy, mythic status, and first-frame artifact-reduction mechanics.",
+  "referentialMirrorGraph": [
+    {
+      "nodeId": "soft-presence-lock",
+      "node": "soft companion presence locks eye contact while raising two fingers in a tiny hush gesture",
+      "viewerRecognition": "recognizes a quiet ritual intro before the aura beat lands",
+      "sourceLineage": [
+        {
+          "label": "slow-walk-status-mechanic",
+          "sourceKind": "abstract_mechanic",
+          "mechanic": "cinematic nonchalance becomes calm confidence through slow micro-motion",
+          "referencePosture": "abstract_mechanics",
+          "pipelineNote": "mechanic only; no source frame, voice, or exact scene is used"
+        }
+      ],
+      "handoffTo": ["image_prompt", "seedance_motion_prompt", "caption_overlay_plan"],
+      "avoid": ["stray text glyphs", "watermark-like texture", "unstable duplicate face"]
+    },
+    {
+      "nodeId": "near-ear-binaural-payoff",
+      "node": "close whisper alternates left and right as tiny light particles rise from glass cables",
+      "viewerRecognition": "recognizes ASMR proximity and a private companion loop",
+      "sourceLineage": [
+        {
+          "label": "binaural-whisper-proof",
+          "sourceKind": "upstream_manifest",
+          "mechanic": "Goal 3 close whisper, foley taps, room bed, and head-relative motion become the audio intent reference",
+          "referencePosture": "upstream_manifest",
+          "pipelineNote": "references the accepted Goal 3 render-output manifest path only"
+        }
+      ],
+      "handoffTo": ["audio_intent_reference", "goal5_renderer_audio_binding"],
+      "avoid": ["unmanifested voice asset", "untracked audio swap"]
+    }
+  ],
+  "recognitionChain": [
+    "quiet companion invitation",
+    "server-shrine glow",
+    "near-ear whisper movement",
+    "mythic aura hold"
+  ],
+  "sourceLineage": [
+    {
+      "label": "aura-mechanics",
+      "sourceKind": "abstract_mechanic",
+      "mechanic": "status pose, cosmic background, material glints, and bass-drop timing translated into an original ASMR companion beat",
+      "referencePosture": "abstract_mechanics",
+      "pipelineNote": "local prompt-planning reference with abstract mechanics"
+    }
+  ],
+  "handoffs": [
+    {
+      "target": "goal2_seedance",
+      "consumes": ["prompts.seedanceMotionPrompt", "layers.i2vControls"],
+      "emits": ["first-frame I2V prompt intent"],
+      "ownershipBoundary": "Goal 2 owns provider upload, submit, generated clip manifests, SynthID conditioning, and raw provider artifacts."
+    },
+    {
+      "target": "goal3_spatial_audio",
+      "consumes": ["audioIntent"],
+      "emits": ["spatial audio intent reference"],
+      "ownershipBoundary": "Goal 3 owns voice assets, stems, spatial manifests, and rendered WAV proof."
+    },
+    {
+      "target": "goal5_video_pipeline",
+      "consumes": ["prompt plan", "caption overlay plan", "upstream manifest references"],
+      "emits": ["renderer-ready planning handoff"],
+      "ownershipBoundary": "Goal 5 owns workflow ingestion and Remotion/HyperFrames mapping."
+    }
+  ],
+  "avoidList": [
+    "stray text glyphs",
+    "watermark-like texture",
+    "unstable duplicate face",
+    "over-compressed shimmer",
+    "untracked audio swap"
+  ],
+  "layers": {
+    "primaryCharacter": "synthetic moonlit companion with translucent pearl jacket, soft eyes, and calm hand gesture",
+    "secondaryPropOrCharacter": "small floating glass moth assistant tracing a halo around a microphone capsule",
+    "background": "moonlit server shrine opening into a quiet black-sky aperture with silver cable constellations",
+    "audio": "binaural whisper left-right call and response, soft brush taps, low room heartbeat, original heavy 808 pulse after the hush",
+    "edit": {
+      "captionBeats": [
+        "stay close",
+        "the room is listening",
+        "aura: hush mode"
+      ],
+      "overlayMotifs": [
+        "thin silver waveform halo",
+        "tiny cable-firefly particles",
+        "single aura flash on gesture lock"
+      ],
+      "cutRhythm": "slow two-beat intro, one held stare, then a restrained bass-synced glow pulse"
+    },
+    "i2vControls": {
+      "ratio": "9:16",
+      "durationSec": 5,
+      "fps": 24,
+      "camera": "subtle 35mm push-in from chest-up to close whisper framing",
+      "motion": "micro hand raise, eyelid soften, glass moth orbit, cable particles drift upward",
+      "timing": "0-2s hush stillness, 2-4s whisper gesture, 4-5s mythic aura lock",
+      "stability": "preserve face design, hands, moth silhouette, and server-shrine geometry"
+    }
+  },
+  "providerPrompts": {
+    "image": {
+      "subject": "synthetic moonlit ASMR companion at a glowing server shrine, pearl jacket, soft hush gesture, glass moth microphone assistant",
+      "style": "cinematic vertical first frame, luminous anime-adjacent realism, platinum and midnight blue palette, tactile glass and brushed metal details",
+      "lighting": "moon rim light, screen glow from below, soft eyelight, fine aura particles, no visible text",
+      "negative": "no generated text, no logo-like glyph, no noisy watermark texture, no compression shimmer, no extra fingers"
+    },
+    "seedance": {
+      "motion": "slow push-in, tiny hand gesture, glass moth orbit, cable constellation shimmer, calm eye contact",
+      "camera": "vertical 9:16 cinematic close-up, minimal parallax, gentle handheld breathing",
+      "stability": "identity locked, no face drift, no extra fingers, no text artifacts, preserve first-frame composition",
+      "negative": "no text, no logo-like glyph, no sudden cuts, no noisy watermark texture, no identity drift"
+    }
+  },
+  "audioIntent": {
+    "spatialReference": "Bind to Goal 3 render proof: data/asmr-companion/goal3-spatial-proof/goal3-close-whisper-binaural.render-output.json",
+    "musicReference": "Original aura bed: restrained distorted 808 pulse, soft sub swell, airy metallic ticks, short loop built for this concept",
+    "goal3BindingHint": "Use rendered stereo master path from the Goal 3 render-output manifest; do not inspect or rewrite stem automation."
+  },
+  "pipelineMetadata": {
+    "createdAt": "2026-06-24T00:00:00.000Z",
+    "authoringMode": "original_planning",
+    "upstreamManifestRefs": [
+      "data/asmr-companion/goal2/seedance-parent-proof/normalized/generated-video-clips.v1.json",
+      "data/asmr-companion/goal3-spatial-proof/goal3-close-whisper-binaural.render-output.json"
+    ],
+    "sourceInspirationIds": ["abstract-aura-mechanics", "goal3-binaural-proof"],
+    "planningNotes": [
+      "Prompt language emphasizes stable first-frame conditioning: no text glyphs, watermark-like texture, over-compressed shimmer, or identity drift.",
+      "Provider, audio, and renderer internals are referenced by manifest path only."
+    ]
+  }
+}
