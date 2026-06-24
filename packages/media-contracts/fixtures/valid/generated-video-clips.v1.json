@@ -1,0 +1,61 @@
+{
+  "schemaVersion": "generated-video-clips.v1",
+  "manifestId": "generated-video-clips-platinum-moonlit-001",
+  "createdAt": "2026-06-24T00:05:00.000Z",
+  "clips": [
+    {
+      "clipId": "seedance-platinum-moonlit-clip-001",
+      "providerJob": {
+        "provider": "jimeng-seedance",
+        "model": "jimeng-video-seedance-2.0",
+        "jobId": "fixture-job-seedance-001",
+        "submittedAt": "2026-06-24T00:06:00.000Z",
+        "completedAt": "2026-06-24T00:07:00.000Z",
+        "accountClass": "fixture-dry-run"
+      },
+      "prompt": {
+        "text": "Original synthetic ASMR companion in a moonlit server shrine, slow eye contact, soft aura glints, no text.",
+        "negativePrompt": "real person likeness, protected character, logos, readable text",
+        "promptHash": {
+          "algorithm": "sha256",
+          "value": "3333333333333333333333333333333333333333333333333333333333333333"
+        }
+      },
+      "firstFrame": {
+        "sourceAssetId": "first-frame-candidate-001",
+        "originalHash": {
+          "algorithm": "sha256",
+          "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "conditionedHash": {
+          "algorithm": "sha256",
+          "value": "4444444444444444444444444444444444444444444444444444444444444444"
+        },
+        "providerUri": "tos://fixture/seedance/first-frame-candidate-001-conditioned.png",
+        "conditioningManifestPath": "data/asmr-companion/fixtures/conditioning/first-frame-candidate-001.conditioning.json"
+      },
+      "generation": {
+        "seed": 2026062401,
+        "durationSec": 5,
+        "ratio": "9:16",
+        "fps": 24,
+        "dryRun": true
+      },
+      "artifact": {
+        "path": "data/asmr-companion/fixtures/video/seedance-platinum-moonlit-clip-001.mp4",
+        "mediaType": "video/mp4",
+        "hash": {
+          "algorithm": "sha256",
+          "value": "5555555555555555555555555555555555555555555555555555555555555555"
+        },
+        "byteLength": 16384
+      },
+      "provenance": {
+        "runId": "seedance-fixture-run-001",
+        "requestPath": "data/asmr-companion/fixtures/video/seedance-platinum-moonlit-clip-001.request.json",
+        "responsePath": "data/asmr-companion/fixtures/video/seedance-platinum-moonlit-clip-001.response.json",
+        "providerWatermark": "provider-generated video provenance retained in manifest; fixture dry-run has no live media watermark."
+      }
+    }
+  ]
+}

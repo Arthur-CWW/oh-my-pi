@@ -1,0 +1,34 @@
+{
+  "schemaVersion": "voice-assets.v1",
+  "manifestId": "voice-assets-platinum-moonlit-001",
+  "createdAt": "2026-06-24T00:02:00.000Z",
+  "voices": [
+    {
+      "voiceAssetId": "voice-companion-soft-whisper-001",
+      "displayName": "Soft synthetic ASMR companion whisper",
+      "provider": "fixture-local-tts",
+      "model": "synthetic-whisper-v0",
+      "voiceId": "fixture-soft-whisper",
+      "consent": {
+        "status": "synthetic",
+        "sourceRecord": "Synthetic fixture voice; no real speaker clone or protected voice imitation.",
+        "provenancePath": "data/asmr-companion/fixtures/voice/voice-companion-soft-whisper-001.provenance.json"
+      },
+      "deliveryStyle": {
+        "language": "en-US",
+        "pace": "slow",
+        "affect": "warm, close, sleep-safe, low intensity",
+        "asmrStyle": ["close-left whisper", "close-right whisper", "breathy reassurance"]
+      },
+      "preview": {
+        "path": "data/asmr-companion/fixtures/voice/voice-companion-soft-whisper-001.preview.wav",
+        "mediaType": "audio/wav",
+        "hash": {
+          "algorithm": "sha256",
+          "value": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        },
+        "byteLength": 4096
+      }
+    }
+  ]
+}

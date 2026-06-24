@@ -1,0 +1,49 @@
+{
+  "schemaVersion": "generated-video-clips.v1",
+  "manifestId": "invalid-missing-provider-model-job",
+  "createdAt": "2026-06-24T00:05:00.000Z",
+  "clips": [
+    {
+      "clipId": "seedance-platinum-moonlit-clip-001",
+      "providerJob": {
+        "provider": "jimeng-seedance",
+        "submittedAt": "2026-06-24T00:06:00.000Z"
+      },
+      "prompt": {
+        "text": "Original synthetic ASMR companion in a moonlit server shrine.",
+        "promptHash": {
+          "algorithm": "sha256",
+          "value": "3333333333333333333333333333333333333333333333333333333333333333"
+        }
+      },
+      "firstFrame": {
+        "sourceAssetId": "first-frame-candidate-001",
+        "originalHash": {
+          "algorithm": "sha256",
+          "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "conditionedHash": {
+          "algorithm": "sha256",
+          "value": "4444444444444444444444444444444444444444444444444444444444444444"
+        },
+        "providerUri": "tos://fixture/seedance/first-frame-candidate-001-conditioned.png",
+        "conditioningManifestPath": "data/asmr-companion/fixtures/conditioning/first-frame-candidate-001.conditioning.json"
+      },
+      "generation": {
+        "durationSec": 5,
+        "ratio": "9:16",
+        "fps": 24,
+        "dryRun": true
+      },
+      "artifact": {
+        "path": "data/asmr-companion/fixtures/video/seedance-platinum-moonlit-clip-001.mp4",
+        "mediaType": "video/mp4"
+      },
+      "provenance": {
+        "runId": "seedance-fixture-run-001",
+        "requestPath": "data/asmr-companion/fixtures/video/seedance-platinum-moonlit-clip-001.request.json",
+        "responsePath": "data/asmr-companion/fixtures/video/seedance-platinum-moonlit-clip-001.response.json"
+      }
+    }
+  ]
+}

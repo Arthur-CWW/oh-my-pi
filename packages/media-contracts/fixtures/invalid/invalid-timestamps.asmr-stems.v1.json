@@ -1,0 +1,37 @@
+{
+  "schemaVersion": "asmr-stems.v1",
+  "manifestId": "invalid-timestamps-asmr-stems",
+  "createdAt": "2026-24-06 00:03:00",
+  "timeline": {
+    "durationSec": 4,
+    "sampleRateHz": 48000,
+    "frameRate": 24
+  },
+  "stems": [
+    {
+      "stemId": "voice-main-001",
+      "kind": "voice",
+      "role": "main close whisper narration",
+      "artifact": {
+        "path": "data/asmr-companion/fixtures/stems/voice-main-001.wav",
+        "mediaType": "audio/wav",
+        "hash": {
+          "algorithm": "sha256",
+          "value": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        }
+      },
+      "timing": {
+        "startSec": 3.5,
+        "durationSec": 2,
+        "fadeInSec": 0.15,
+        "fadeOutSec": 0.4,
+        "loop": false
+      },
+      "channels": "mono",
+      "provenance": {
+        "generator": "fixture-local-tts",
+        "sourceVoiceAssetId": "voice-companion-soft-whisper-001"
+      }
+    }
+  ]
+}

@@ -1,0 +1,41 @@
+{
+  "schemaVersion": "spatial-audio-manifest.v1",
+  "manifestId": "invalid-spatial-coordinates",
+  "createdAt": "2026-06-24T00:04:00.000Z",
+  "stemsManifestPath": "packages/media-contracts/fixtures/valid/asmr-stems.v1.json",
+  "durationSec": 12,
+  "renderer": {
+    "engine": "webaudio-pannernode",
+    "version": "fixture-renderer-v0"
+  },
+  "mix": {
+    "outputPath": "data/asmr-companion/fixtures/spatial/platinum-moonlit-binaural.wav",
+    "loudnessTargetLufs": -18
+  },
+  "objects": [
+    {
+      "stemId": "voice-main-001",
+      "bus": "voice",
+      "automation": [
+        {
+          "timeSec": 0,
+          "gainDb": -2,
+          "position": {
+            "azimuthDeg": 270,
+            "elevationDeg": 5,
+            "distanceMeters": 0
+          },
+          "occlusion": 0,
+          "reverbSend": 0.15
+        }
+      ]
+    }
+  ],
+  "provenance": {
+    "stemsManifestHash": {
+      "algorithm": "sha256",
+      "value": "2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    "renderRunId": "spatial-fixture-render-001"
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "schemaVersion": "analysis-tags.v1",
+  "manifestId": "invalid-missing-source-provenance",
+  "createdAt": "2026-06-24T00:00:00.000Z",
+  "sourceAsset": {
+    "assetId": "first-frame-candidate-001",
+    "uri": "local-reference://asmr-companion/first-frame-candidate-001.png",
+    "mediaType": "image/png",
+    "hash": {
+      "algorithm": "sha256",
+      "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  },
+  "analyzer": {
+    "provider": "fixture-local",
+    "model": "metadata-only-reviewer-v0",
+    "runId": "analysis-fixture-run-001",
+    "analyzedAt": "2026-06-24T00:01:00.000Z"
+  },
+  "tags": [],
+  "analysisCopies": [],
+  "generationInputs": [
+    {
+      "kind": "canonical_source_hash",
+      "sourceAssetId": "first-frame-candidate-001",
+      "sourceHash": {
+        "algorithm": "sha256",
+        "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "intendedUse": "first_frame_provenance"
+    }
+  ],
+  "sidecars": []
+}
