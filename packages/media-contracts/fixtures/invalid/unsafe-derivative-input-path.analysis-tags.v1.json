@@ -26,7 +26,7 @@
   "tags": [],
   "analysisCopies": [
     {
-      "path": "/tmp/gemini-remake-used-as-generation-input.png",
+      "path": "data/asmr-companion/fixtures/analysis/gemini-remake-analysis-copy.png",
       "sourceHash": {
         "algorithm": "sha256",
         "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -36,12 +36,13 @@
   ],
   "generationInputs": [
     {
-      "kind": "canonical_source_hash",
+      "kind": "provider_uri",
       "sourceAssetId": "first-frame-candidate-001",
       "sourceHash": {
         "algorithm": "sha256",
         "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
       },
+      "providerUri": "file:///tmp/gemini-remake-used-as-generation-input.png",
       "intendedUse": "first_frame_provenance"
     }
   ],

@@ -486,6 +486,9 @@ function assertIsoTimestamp(value: string, operation: string, label: string): vo
 }
 
 function assertProviderUri(value: string, operation: string, label: string): void {
+  if (/^(?:file|local-reference):/i.test(value)) {
+    throw new AsmrContractValidationError(operation, `${label} must be an uploaded provider URI, not a local derivative path`)
+  }
   if (!/^[a-z][a-z0-9+.-]*:\/\/.+/i.test(value) && !/^[a-z][a-z0-9+.-]*:.+/i.test(value)) {
     throw new AsmrContractValidationError(operation, `${label} must be a provider URI`)
   }

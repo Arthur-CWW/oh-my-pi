@@ -51,6 +51,7 @@ export interface JimengVideoPlanInput {
   nowMs?: number
   firstFrameUri?: string
   lastFrameUri?: string
+  idFactory?: () => string
 }
 
 export type JimengVideoOmniMaterialKind = "image" | "video" | 1 | 2
@@ -293,14 +294,15 @@ export function buildJimengVideoDirectPlan(input: JimengVideoPlanInput): JimengV
   const fps = parseFps(input.fps)
   const videoMode = parseVideoMode(input.videoMode)
   const seed = parseSeed(input.seed)
-  const submitId = input.submitId?.trim() || randomUUID()
-  const componentId = randomUUID()
-  const draftId = randomUUID()
+  const makeId = input.idFactory ?? randomUUID
+  const submitId = input.submitId?.trim() || makeId()
+  const componentId = makeId()
+  const draftId = makeId()
   const nowMs = Math.floor(input.nowMs ?? Date.now())
 
   const videoInput: JsonObject = {
     type: "",
-    id: randomUUID(),
+    id: makeId(),
     min_version: DRAFT_MIN_VERSION,
     prompt,
     video_mode: videoMode,
@@ -352,7 +354,7 @@ export function buildJimengVideoDirectPlan(input: JimengVideoPlanInput): JimengV
       aigc_mode: "workbench",
       metadata: {
         type: "",
-        id: randomUUID(),
+        id: makeId(),
         created_platform: 3,
         created_platform_version: "",
         created_time_in_ms: String(nowMs),
@@ -361,13 +363,13 @@ export function buildJimengVideoDirectPlan(input: JimengVideoPlanInput): JimengV
       generate_type: "gen_video",
       abilities: {
         type: "",
-        id: randomUUID(),
+        id: makeId(),
         gen_video: {
           type: "",
-          id: randomUUID(),
+          id: makeId(),
           text_to_video_params: {
             type: "",
-            id: randomUUID(),
+            id: makeId(),
             video_gen_inputs: [videoInput],
             video_aspect_ratio: ratio,
             seed,

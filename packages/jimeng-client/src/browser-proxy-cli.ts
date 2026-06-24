@@ -204,6 +204,11 @@ import {
   summarizeJimengVideoOmniReferencePlan,
 } from "./video-plan"
 import {
+  assertSeedanceSafeManifestPath,
+  buildSeedanceImage2VideoDryRunPlan,
+  summarizeSeedanceImage2VideoDryRunPlan,
+} from "./seedance-image2video-plan"
+import {
   buildJimengGenerateAuditPlan,
   parseJimengGenerateAuditMaterialsJson,
   summarizeJimengGenerateAuditPlan,
@@ -398,9 +403,9 @@ Commands:
   text2image-plan Build a no-spend direct text-to-image submit body
   text2image-compare Offline compare a direct text-to-image dry-run plan against captured UI submit
   text2video-plan Build a no-spend direct text/image/frames-to-video submit body
+  seedance-image2video-plan Build a no-spend Seedance I2V first-frame plan plus generated-video-clips.v1 manifest
   text2video-compare Offline compare a direct video dry-run plan against captured UI submit
   omni-video-plan Build a dry-run Seedance omni-reference mixed image/video submit body
-  omni-video-compare Offline compare an omni-reference dry-run plan against captured UI submit
   generate-audit-plan Build a dry-run generation material pre-audit body
   mix-audio-plan Build a dry-run audio/video mix task request body and babi_param query
   video-preprocess-plan Build a dry-run lip-sync/digital-human pre-process task body
@@ -619,14 +624,25 @@ Options:
   --name <text>                  Subject/persona name, max 20 chars
   --description <text>           Subject/persona description
   --workspaceId <id>             Jimeng workspace id for subject/persona creation
-  --image <path>                 Local first-frame image for image2video or image/avatar lip-sync
-  --lastImage <path>             Local end-frame image for frames2video
+  --image <path>                 Local first-frame image for image2video, seedance-image2video-plan, or image/avatar lip-sync
+  --firstFramePath <path>        Repo-relative canonical first-frame path for seedance-image2video-plan
+  --firstFrameHash <sha256>      Canonical first-frame sha256 for seedance-image2video-plan
+  --firstFrameProvenance <file>  analysis-tags.v1 sidecar for first-frame provenance/SynthID evidence
   --firstFrameUri <uri>          Existing Jimeng/ImageX provider URI for image2video
-  --lastFrameUri <uri>           Existing provider URI for end-frame experiments
+  --conditionedFirstFrameUri <uri> Provider URI placeholder or uploaded URI after first-frame conditioning
   --ratio <ratio>                Video aspect ratio flag patched into text_to_video_params
   --videoResolution <value>      Video resolution value patched into video_gen_inputs and sceneOptions
   --modelVersion <value>         Confirmed shorthand model version, e.g. 3.0fast
   --modelReqKey <value>          Raw confirmed model_req_key override
+  --sourceAssetId <id>           Source asset id for generated-video-clips.v1 firstFrame.sourceAssetId
+  --conditioningParams <json|file> Optional deterministic SynthID-conditioning params JSON
+  --conditionedFirstFrameHash <sha256> Actual conditioned frame sha256; defaults to dry-run record hash when SynthID-marked
+  --conditioningManifestPath <path> Repo-relative conditioning sidecar path for generated-video-clips.v1
+  --manifestId <id>              generated-video-clips.v1 manifest id
+  --clipId <id>                  generated-video-clips.v1 clip id
+  --runId <id>                   Deterministic dry-run run id/provider job placeholder
+  --createdAt <iso>              Deterministic UTC timestamp for dry-run manifests
+  --synthIdMarked <bool>         Force SynthID/Gemini conditioning path for dry-run planning
   --seed <n>                     Deterministic seed, 0..4294967295
   --prompt <text>               Generation prompt
   --outDir <dir>                Output directory (default: data/jimeng-lab/browser-proxy)
@@ -772,6 +788,16 @@ Examples:
     --plan data/jimeng-lab/text2video-plan/raw/text2video-plan-<run>-dry-run-plan.json \\
     --rawNetwork data/jimeng-captures/<capture>/raw-network.jsonl \\
     --outDir data/jimeng-lab/text2video-compare
+
+  jimeng-browser-proxy seedance-image2video-plan \\
+    --prompt "Original ASMR companion raises one hand under moonlit server shrine glow, no text" \\
+    --firstFrameUri tos://fixture/seedance/first-frame-candidate-001.png \\
+    --firstFrameHash aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \\
+    --firstFrameProvenance data/asmr-companion/goal2/analysis-tags.v1.json \\
+    --synthIdMarked true \\
+    --durationSec 5 \\
+    --ratio 9:16 \\
+    --outDir data/asmr-companion/goal2/seedance-plan
 
   jimeng-browser-proxy omni-video-plan \\
     --prompt "@image_file_1 as the new host, mimic timing and hand motion from @video_file_1, Korean beauty UGC phone video" \\
@@ -973,6 +999,7 @@ interface CliArgs {
     | "text2image-plan"
     | "text2image-compare"
     | "text2video-plan"
+    | "seedance-image2video-plan"
     | "text2video-compare"
     | "omni-video-plan"
     | "omni-video-compare"
@@ -1178,6 +1205,19 @@ interface CliArgs {
   image?: string
   lastImage?: string
   firstFrameUri?: string
+  firstFramePath?: string
+  firstFrameHash?: string
+  firstFrameProvenance?: string
+  conditionedFirstFrameUri?: string
+  conditionedFirstFrameHash?: string
+  conditioningParams?: string
+  conditioningManifestPath?: string
+  sourceAssetId?: string
+  manifestId?: string
+  clipId?: string
+  runId?: string
+  createdAt?: string
+  synthIdMarked?: boolean
   lastFrameUri?: string
   ratio?: string
   videoResolution?: string
@@ -1219,7 +1259,7 @@ interface BrowserProxyRunUpdate {
   finishedAtIso?: string
 }
 
-async function main(argv: string[]): Promise<void> {
+export async function runJimengBrowserProxyCli(argv: string[]): Promise<void> {
   const args = parseArgs(argv)
   const artifactLogger = openBrowserProxyArtifactLogger(args, argv)
   try {
@@ -1563,6 +1603,81 @@ async function runBrowserProxyCommand(args: CliArgs): Promise<void> {
       summary: summarizeJimengVideoDirectPlan(plan),
     })
     console.log(`[jimeng-browser-proxy] text2video-plan saved model=${plan.modelReqKey} resolution=${plan.videoResolution} ratio=${plan.ratio} duration=${plan.durationSec}s live_submit=false`)
+    return
+  }
+
+  if (args.command === "seedance-image2video-plan") {
+    if (!args.prompt) throw new Error("seedance-image2video-plan requires --prompt")
+    const dirs = ensureOutputDirs(path.resolve(args.outDir))
+    const createdAt = args.createdAt?.trim() || new Date().toISOString()
+    const runId = args.runId?.trim() || `seedance-image2video-plan-${createdAt.replace(/[-:.TZ]/g, "").slice(0, 14)}`
+    const videoMode = args.videoMode ? Number(args.videoMode) : undefined
+    const rawPlanFile = path.join(dirs.rawDir, `${runId}-dry-run-plan.json`)
+    const responseFile = path.join(dirs.normalizedDir, `${runId}-dry-run-response-placeholder.json`)
+    const generatedManifestFile = path.join(dirs.normalizedDir, "generated-video-clips.v1.json")
+    const conditioningManifestPath = args.conditioningManifestPath ?? browserProxyManifestPath(args.outDir, "normalized", `${runId}-first-frame-conditioning.json`)
+    const conditioningManifestFile = path.resolve(conditioningManifestPath)
+    mkdirSync(path.dirname(conditioningManifestFile), { recursive: true })
+    const plan = buildSeedanceImage2VideoDryRunPlan({
+      prompt: args.prompt,
+      negativePrompt: args.negativePrompt,
+      modelVersion: args.modelVersion,
+      modelReqKey: args.modelReqKey,
+      ratio: args.ratio,
+      videoResolution: args.videoResolution,
+      durationSec: args.durationSec,
+      fps: args.fps,
+      videoMode,
+      seed: args.seed,
+      submitId: args.submitId,
+      manifestId: args.manifestId,
+      clipId: args.clipId,
+      runId,
+      createdAt,
+      requestPath: browserProxyManifestPath(args.outDir, "raw", `${runId}-dry-run-plan.json`),
+      responsePath: browserProxyManifestPath(args.outDir, "normalized", `${runId}-dry-run-response-placeholder.json`),
+      artifactPath: browserProxyManifestPath(args.outDir, "artifacts", `${runId}.mp4`),
+      firstFrame: {
+        sourceAssetId: args.sourceAssetId,
+        firstFrameUri: args.firstFrameUri,
+        firstFramePath: args.firstFramePath ?? args.image,
+        firstFrameHash: args.firstFrameHash,
+        firstFrameProvenancePath: args.firstFrameProvenance,
+        synthIdMarked: args.synthIdMarked,
+        conditioningParams: args.conditioningParams ? parseJsonObjectFlag(readInlineOrFile(args.conditioningParams), "--conditioningParams") : undefined,
+        conditioningManifestPath,
+        conditionedFirstFrameUri: args.conditionedFirstFrameUri,
+        conditionedFirstFrameHash: args.conditionedFirstFrameHash,
+        createdAt,
+      },
+    })
+    writeJson(rawPlanFile, {
+      command: args.command,
+      endpoint: plan.videoPlan.endpoint,
+      method: plan.videoPlan.method,
+      query: plan.videoPlan.query,
+      request: plan.videoPlan.request,
+      draft_content: plan.videoPlan.draftContent,
+      metrics_extra: plan.videoPlan.metricsExtra,
+      conditioning_manifest: plan.conditioningManifest,
+      generated_video_clips_manifest: plan.generatedVideoClipsManifest,
+      live_submit: false,
+    })
+    writeJson(conditioningManifestFile, plan.conditioningManifest)
+    writeJson(responseFile, {
+      command: args.command,
+      dry_run: true,
+      submitted: false,
+      provider_job_id: plan.generatedVideoClipsManifest.clips[0].providerJob.jobId,
+      stop_condition: "no-spend dry-run planning command; no live provider request was sent",
+    })
+    writeJson(generatedManifestFile, plan.generatedVideoClipsManifest)
+    writeJson(path.join(dirs.normalizedDir, `${runId}-summary.json`), {
+      command: args.command,
+      summary: summarizeSeedanceImage2VideoDryRunPlan(plan),
+      generated_video_clips_manifest_path: browserProxyManifestPath(args.outDir, "normalized", "generated-video-clips.v1.json"),
+    })
+    console.log(`[jimeng-browser-proxy] seedance-image2video-plan saved model=${plan.videoPlan.modelReqKey} ratio=${plan.videoPlan.ratio} duration=${plan.videoPlan.durationSec}s synthid=${plan.conditioningManifest.synthId.marked ? "conditioned" : "unmarked"} live_submit=false`)
     return
   }
 
@@ -6175,6 +6290,7 @@ async function runBrowserProxyCommand(args: CliArgs): Promise<void> {
 }
 
 function parseArgs(argv: string[]): CliArgs {
+  argv = withInvokedCommandAlias(argv)
   if (argv.includes("--help") || argv.includes("-h") || argv.length === 0) {
     console.log(USAGE)
     process.exit(0)
@@ -6196,6 +6312,7 @@ function parseArgs(argv: string[]): CliArgs {
     && command !== "text2image-plan"
     && command !== "text2image-compare"
     && command !== "text2video-plan"
+    && command !== "seedance-image2video-plan"
     && command !== "text2video-compare"
     && command !== "omni-video-plan"
     && command !== "omni-video-compare"
@@ -6552,6 +6669,19 @@ function parseArgs(argv: string[]): CliArgs {
     image: flags.image,
     lastImage: flags.lastImage,
     firstFrameUri: flags.firstFrameUri,
+    firstFramePath: flags.firstFramePath,
+    firstFrameHash: flags.firstFrameHash,
+    firstFrameProvenance: flags.firstFrameProvenance,
+    conditionedFirstFrameUri: flags.conditionedFirstFrameUri,
+    conditionedFirstFrameHash: flags.conditionedFirstFrameHash,
+    conditioningParams: flags.conditioningParams,
+    conditioningManifestPath: flags.conditioningManifestPath,
+    sourceAssetId: flags.sourceAssetId,
+    manifestId: flags.manifestId,
+    clipId: flags.clipId,
+    runId: flags.runId,
+    createdAt: flags.createdAt,
+    synthIdMarked: parseOptionalBooleanFlag(flags.synthIdMarked, "--synthIdMarked"),
     lastFrameUri: flags.lastFrameUri,
     ratio: flags.ratio,
     videoResolution: flags.videoResolution,
@@ -6574,6 +6704,14 @@ function parseArgs(argv: string[]): CliArgs {
     worker: flags.worker,
     artifactNotes: flags["artifact-notes"],
   }
+}
+
+function withInvokedCommandAlias(argv: string[]): string[] {
+  const invoked = path.basename(process.argv[1] ?? "")
+  if (invoked === "seedance-image2video-plan" && argv[0] !== "seedance-image2video-plan") {
+    return ["seedance-image2video-plan", ...argv]
+  }
+  return argv
 }
 
 function openBrowserProxyArtifactLogger(args: CliArgs, argv: string[]): BrowserProxyArtifactLogger | null {
@@ -6812,6 +6950,20 @@ function isSensitiveBrowserProxyFlag(key: string): boolean {
 
 function shellQuote(value: string): string {
   return /^[A-Za-z0-9_./:=,-]+$/.test(value) ? value : `'${value.replaceAll("'", "'\\''")}'`
+}
+
+function browserProxyManifestPath(...segments: string[]): string {
+  for (const segment of segments) {
+    if (path.isAbsolute(segment) || segment.startsWith("~")) {
+      throw new Error(`seedance generated-video manifest path must be repo-relative: ${segment}`)
+    }
+  }
+  const manifestPath = segments
+    .flatMap((segment) => segment.split(/[\\/]+/))
+    .filter((segment) => segment.length > 0)
+    .join("/")
+  assertSeedanceSafeManifestPath(manifestPath, "seedance generated-video manifest path")
+  return manifestPath
 }
 
 function loadSession(args: CliArgs): Promise<JimengSessionBundle> | JimengSessionBundle {
@@ -7237,7 +7389,7 @@ function slug(value: string): string {
 }
 
 if (import.meta.main) {
-  main(process.argv.slice(2)).catch((error) => {
+  runJimengBrowserProxyCli(process.argv.slice(2)).catch((error) => {
     if (error instanceof JimengError) {
       console.error(JSON.stringify(error.toJSON(), null, 2))
       process.exit(error.retryable ? 2 : 1)
