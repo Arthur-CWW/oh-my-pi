@@ -1,0 +1,76 @@
+{
+  "schemaVersion": "spatial-audio-render-output.v1",
+  "createdAt": "1970-01-01T00:00:00.000Z",
+  "renderer": {
+    "engine": "local-deterministic-stereo",
+    "version": "goal3-local-deterministic-stereo-v1"
+  },
+  "audioPath": "packages/spatial-audio-renderer/test-output/render-Tl0g34/goal3-close-whisper-binaural.wav",
+  "output": {
+    "audioPath": "packages/spatial-audio-renderer/test-output/render-Tl0g34/goal3-close-whisper-binaural.wav",
+    "mediaType": "audio/wav",
+    "channels": 2,
+    "sampleRateHz": 48000,
+    "durationSec": 8,
+    "frames": 384000,
+    "sha256": "96574c1452f8de6ea2ea6abf58321f82206ce30d74e88477368c9b674163bba0",
+    "byteLength": 1536044,
+    "peak": 0.34358838200569153,
+    "nonSilent": true
+  },
+  "source": {
+    "voiceAssetsManifestPath": "packages/media-contracts/fixtures/valid/voice-assets.v1.json",
+    "stemsManifestPath": "packages/spatial-audio-renderer/fixtures/asmr-scene/asmr-stems.v1.json",
+    "spatialAudioManifestPath": "packages/spatial-audio-renderer/fixtures/asmr-scene/spatial-audio-manifest.v1.json",
+    "voiceAssetsManifestId": "voice-assets-platinum-moonlit-001",
+    "stemsManifestId": "asmr-stems-goal3-close-whisper-movement-001",
+    "spatialAudioManifestId": "spatial-audio-goal3-close-whisper-movement-001"
+  },
+  "provenance": {
+    "renderRunId": "goal3-local-render-proof-001",
+    "buses": [
+      "ambience",
+      "foley",
+      "voice"
+    ],
+    "objects": [
+      {
+        "stemId": "whisper-left-001",
+        "bus": "voice",
+        "kind": "voice",
+        "role": "close-left synthetic whisper phrase",
+        "generator": "goal3-deterministic-local-voice-tone",
+        "sourceVoiceAssetId": "voice-companion-soft-whisper-001"
+      },
+      {
+        "stemId": "whisper-right-001",
+        "bus": "voice",
+        "kind": "whisper_double",
+        "role": "close-right synthetic whisper answer",
+        "generator": "goal3-deterministic-local-whisper-double",
+        "sourceVoiceAssetId": "voice-companion-soft-whisper-001"
+      },
+      {
+        "stemId": "behind-near-far-motion-001",
+        "bus": "ambience",
+        "kind": "breath",
+        "role": "behind-you near-to-far breath movement",
+        "generator": "goal3-deterministic-local-breath-noise"
+      },
+      {
+        "stemId": "soft-brush-tap-loop-001",
+        "bus": "foley",
+        "kind": "foley",
+        "role": "soft brush and tap loop alternating ears",
+        "generator": "goal3-deterministic-local-foley-loop"
+      },
+      {
+        "stemId": "heartbeat-room-bed-001",
+        "bus": "ambience",
+        "kind": "heartbeat",
+        "role": "low heartbeat and room-tone bed",
+        "generator": "goal3-deterministic-local-heartbeat-bed"
+      }
+    ]
+  }
+}

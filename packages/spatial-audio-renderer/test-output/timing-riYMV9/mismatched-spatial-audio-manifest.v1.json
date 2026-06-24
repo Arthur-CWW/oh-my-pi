@@ -1,0 +1,176 @@
+{
+  "schemaVersion": "spatial-audio-manifest.v1",
+  "manifestId": "spatial-audio-goal3-close-whisper-movement-001",
+  "createdAt": "2026-06-24T03:01:00.000Z",
+  "stemsManifestPath": "packages/media-contracts/fixtures/valid/asmr-stems.v1.json",
+  "durationSec": 8,
+  "renderer": {
+    "engine": "offline-audio-context",
+    "version": "goal3-local-deterministic-stereo-v1"
+  },
+  "mix": {
+    "outputPath": "data/asmr-companion/goal3-spatial-proof/goal3-close-whisper-binaural.wav",
+    "loudnessTargetLufs": -18,
+    "truePeakDb": -1
+  },
+  "objects": [
+    {
+      "stemId": "whisper-left-001",
+      "bus": "voice",
+      "automation": [
+        {
+          "timeSec": 0.25,
+          "gainDb": -6,
+          "position": {
+            "azimuthDeg": -82,
+            "elevationDeg": 3,
+            "distanceMeters": 0.12
+          },
+          "occlusion": 0,
+          "reverbSend": 0.05
+        },
+        {
+          "timeSec": 1.95,
+          "gainDb": -7,
+          "position": {
+            "azimuthDeg": -58,
+            "elevationDeg": 5,
+            "distanceMeters": 0.22
+          },
+          "occlusion": 0.03,
+          "reverbSend": 0.08
+        }
+      ]
+    },
+    {
+      "stemId": "whisper-right-001",
+      "bus": "voice",
+      "automation": [
+        {
+          "timeSec": 1.65,
+          "gainDb": -6.5,
+          "position": {
+            "azimuthDeg": 82,
+            "elevationDeg": 2,
+            "distanceMeters": 0.12
+          },
+          "occlusion": 0,
+          "reverbSend": 0.05
+        },
+        {
+          "timeSec": 3.45,
+          "gainDb": -7.5,
+          "position": {
+            "azimuthDeg": 55,
+            "elevationDeg": 4,
+            "distanceMeters": 0.24
+          },
+          "occlusion": 0.02,
+          "reverbSend": 0.07
+        }
+      ]
+    },
+    {
+      "stemId": "behind-near-far-motion-001",
+      "bus": "ambience",
+      "automation": [
+        {
+          "timeSec": 3,
+          "gainDb": -10,
+          "position": {
+            "azimuthDeg": 178,
+            "elevationDeg": -4,
+            "distanceMeters": 0.25
+          },
+          "occlusion": 0.12,
+          "reverbSend": 0.18
+        },
+        {
+          "timeSec": 4.15,
+          "gainDb": -12,
+          "position": {
+            "azimuthDeg": -165,
+            "elevationDeg": -2,
+            "distanceMeters": 0.9
+          },
+          "occlusion": 0.18,
+          "reverbSend": 0.28
+        },
+        {
+          "timeSec": 5.4,
+          "gainDb": -16,
+          "position": {
+            "azimuthDeg": 170,
+            "elevationDeg": 0,
+            "distanceMeters": 2.4
+          },
+          "occlusion": 0.08,
+          "reverbSend": 0.35
+        }
+      ]
+    },
+    {
+      "stemId": "soft-brush-tap-loop-001",
+      "bus": "foley",
+      "automation": [
+        {
+          "timeSec": 1,
+          "gainDb": -14,
+          "position": {
+            "azimuthDeg": -70,
+            "elevationDeg": -6,
+            "distanceMeters": 0.18
+          },
+          "occlusion": 0.05,
+          "reverbSend": 0.04
+        },
+        {
+          "timeSec": 3.8,
+          "gainDb": -13,
+          "position": {
+            "azimuthDeg": 70,
+            "elevationDeg": -5,
+            "distanceMeters": 0.18
+          },
+          "occlusion": 0.05,
+          "reverbSend": 0.04
+        },
+        {
+          "timeSec": 7.5,
+          "gainDb": -15,
+          "position": {
+            "azimuthDeg": -35,
+            "elevationDeg": -4,
+            "distanceMeters": 0.32
+          },
+          "occlusion": 0.08,
+          "reverbSend": 0.08
+        }
+      ]
+    },
+    {
+      "stemId": "heartbeat-room-bed-001",
+      "bus": "ambience",
+      "automation": [
+        {
+          "timeSec": 0,
+          "gainDb": -20,
+          "position": {
+            "azimuthDeg": 0,
+            "elevationDeg": -12,
+            "distanceMeters": 2.8
+          },
+          "occlusion": 0,
+          "reverbSend": 0.3
+        }
+      ]
+    }
+  ],
+  "provenance": {
+    "stemsManifestHash": {
+      "algorithm": "sha256",
+      "value": "9999999999999999999999999999999999999999999999999999999999999999"
+    },
+    "renderRunId": "goal3-local-render-proof-001"
+  }
+}

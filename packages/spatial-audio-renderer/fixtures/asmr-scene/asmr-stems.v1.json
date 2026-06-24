@@ -1,0 +1,152 @@
+{
+  "schemaVersion": "asmr-stems.v1",
+  "manifestId": "asmr-stems-goal3-close-whisper-movement-001",
+  "createdAt": "2026-06-24T03:00:00.000Z",
+  "timeline": {
+    "durationSec": 8,
+    "sampleRateHz": 48000,
+    "frameRate": 24
+  },
+  "stems": [
+    {
+      "stemId": "whisper-left-001",
+      "kind": "voice",
+      "role": "close-left synthetic whisper phrase",
+      "artifact": {
+        "path": "data/asmr-companion/goal3-fixtures/stems/whisper-left-001.wav",
+        "mediaType": "audio/wav",
+        "hash": {
+          "algorithm": "sha256",
+          "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "byteLength": 48000
+      },
+      "timing": {
+        "startSec": 0.25,
+        "durationSec": 1.8,
+        "fadeInSec": 0.05,
+        "fadeOutSec": 0.18,
+        "loop": false
+      },
+      "channels": "mono",
+      "provenance": {
+        "generator": "goal3-deterministic-local-voice-tone",
+        "sourceVoiceAssetId": "voice-companion-soft-whisper-001",
+        "sourceHash": {
+          "algorithm": "sha256",
+          "value": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        },
+        "notes": "Generated in-memory by the local proof renderer; no live provider TTS."
+      }
+    },
+    {
+      "stemId": "whisper-right-001",
+      "kind": "whisper_double",
+      "role": "close-right synthetic whisper answer",
+      "artifact": {
+        "path": "data/asmr-companion/goal3-fixtures/stems/whisper-right-001.wav",
+        "mediaType": "audio/wav",
+        "hash": {
+          "algorithm": "sha256",
+          "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "byteLength": 48000
+      },
+      "timing": {
+        "startSec": 1.65,
+        "durationSec": 1.9,
+        "fadeInSec": 0.06,
+        "fadeOutSec": 0.2,
+        "loop": false
+      },
+      "channels": "mono",
+      "provenance": {
+        "generator": "goal3-deterministic-local-whisper-double",
+        "sourceVoiceAssetId": "voice-companion-soft-whisper-001",
+        "sourceHash": {
+          "algorithm": "sha256",
+          "value": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        },
+        "notes": "Generated in-memory by the local proof renderer; no live provider TTS."
+      }
+    },
+    {
+      "stemId": "behind-near-far-motion-001",
+      "kind": "breath",
+      "role": "behind-you near-to-far breath movement",
+      "artifact": {
+        "path": "data/asmr-companion/goal3-fixtures/stems/behind-near-far-motion-001.wav",
+        "mediaType": "audio/wav",
+        "hash": {
+          "algorithm": "sha256",
+          "value": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        },
+        "byteLength": 96000
+      },
+      "timing": {
+        "startSec": 3.0,
+        "durationSec": 2.4,
+        "fadeInSec": 0.12,
+        "fadeOutSec": 0.35,
+        "loop": false
+      },
+      "channels": "mono",
+      "provenance": {
+        "generator": "goal3-deterministic-local-breath-noise",
+        "notes": "Synthetic breath-like filtered noise for behind/near/far motion proof."
+      }
+    },
+    {
+      "stemId": "soft-brush-tap-loop-001",
+      "kind": "foley",
+      "role": "soft brush and tap loop alternating ears",
+      "artifact": {
+        "path": "data/asmr-companion/goal3-fixtures/stems/soft-brush-tap-loop-001.wav",
+        "mediaType": "audio/wav",
+        "hash": {
+          "algorithm": "sha256",
+          "value": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        },
+        "byteLength": 96000
+      },
+      "timing": {
+        "startSec": 1.0,
+        "durationSec": 6.5,
+        "fadeInSec": 0.2,
+        "fadeOutSec": 0.5,
+        "loop": true
+      },
+      "channels": "mono",
+      "provenance": {
+        "generator": "goal3-deterministic-local-foley-loop",
+        "notes": "Synthetic brush noise plus tap transients, looped by renderer."
+      }
+    },
+    {
+      "stemId": "heartbeat-room-bed-001",
+      "kind": "heartbeat",
+      "role": "low heartbeat and room-tone bed",
+      "artifact": {
+        "path": "data/asmr-companion/goal3-fixtures/stems/heartbeat-room-bed-001.wav",
+        "mediaType": "audio/wav",
+        "hash": {
+          "algorithm": "sha256",
+          "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        },
+        "byteLength": 192000
+      },
+      "timing": {
+        "startSec": 0,
+        "durationSec": 8,
+        "fadeInSec": 0.3,
+        "fadeOutSec": 0.8,
+        "loop": true
+      },
+      "channels": "mono",
+      "provenance": {
+        "generator": "goal3-deterministic-local-heartbeat-bed",
+        "notes": "Synthetic low heartbeat pulse with room tone; no sampled reference media."
+      }
+    }
+  ]
+}

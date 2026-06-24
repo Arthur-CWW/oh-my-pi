@@ -1,0 +1,61 @@
+{
+  "schemaVersion": "spatial-audio-render-output.v1",
+  "createdAt": "1970-01-01T00:00:00.000Z",
+  "renderer": {
+    "engine": "local-deterministic-stereo",
+    "version": "goal3-local-deterministic-stereo-v1"
+  },
+  "audioPath": "packages/spatial-audio-renderer/test-output/media-fixture-1V0SUp/platinum-moonlit-binaural.wav",
+  "output": {
+    "audioPath": "packages/spatial-audio-renderer/test-output/media-fixture-1V0SUp/platinum-moonlit-binaural.wav",
+    "mediaType": "audio/wav",
+    "channels": 2,
+    "sampleRateHz": 48000,
+    "durationSec": 12,
+    "frames": 576000,
+    "sha256": "8d0c9349c8ecf37b50bc889380d76168e04287e572df1a2d411802a5a56dfd69",
+    "byteLength": 2304044,
+    "peak": 0.48026224970817566,
+    "nonSilent": true
+  },
+  "source": {
+    "voiceAssetsManifestPath": "packages/media-contracts/fixtures/valid/voice-assets.v1.json",
+    "stemsManifestPath": "packages/media-contracts/fixtures/valid/asmr-stems.v1.json",
+    "spatialAudioManifestPath": "packages/media-contracts/fixtures/valid/spatial-audio-manifest.v1.json",
+    "voiceAssetsManifestId": "voice-assets-platinum-moonlit-001",
+    "stemsManifestId": "asmr-stems-platinum-moonlit-001",
+    "spatialAudioManifestId": "spatial-audio-platinum-moonlit-001"
+  },
+  "provenance": {
+    "renderRunId": "spatial-fixture-render-001",
+    "buses": [
+      "ambience",
+      "foley",
+      "voice"
+    ],
+    "objects": [
+      {
+        "stemId": "voice-main-001",
+        "bus": "voice",
+        "kind": "voice",
+        "role": "main close whisper narration",
+        "generator": "fixture-local-tts",
+        "sourceVoiceAssetId": "voice-companion-soft-whisper-001"
+      },
+      {
+        "stemId": "foley-ear-taps-001",
+        "bus": "foley",
+        "kind": "foley",
+        "role": "gentle alternating ear taps",
+        "generator": "fixture-foley-library"
+      },
+      {
+        "stemId": "room-tone-001",
+        "bus": "ambience",
+        "kind": "room_tone",
+        "role": "low moonlit server room ambience",
+        "generator": "fixture-ambience-generator"
+      }
+    ]
+  }
+}

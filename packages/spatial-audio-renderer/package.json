@@ -1,0 +1,28 @@
+{
+  "name": "@wirebabel/spatial-audio-renderer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Deterministic local stereo/binaural ASMR renderer proof for media-contract manifests",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./cli": "./src/cli.ts"
+  },
+  "bin": {
+    "spatial-audio-renderer": "./src/cli.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test ./test",
+    "proof": "bun src/cli.ts render --voice-assets packages/media-contracts/fixtures/valid/voice-assets.v1.json --stems packages/spatial-audio-renderer/fixtures/asmr-scene/asmr-stems.v1.json --spatial packages/spatial-audio-renderer/fixtures/asmr-scene/spatial-audio-manifest.v1.json --outDir data/asmr-companion/goal3-spatial-proof"
+  },
+  "dependencies": {
+    "@wirebabel/media-contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "bun-types": "^1.3.9",
+    "typescript": "^5.9.3"
+  }
+}
