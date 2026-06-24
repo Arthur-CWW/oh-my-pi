@@ -39,6 +39,8 @@ Accepted upstream commits and root-run verification:
 
 | Goal | Commit(s) | Root-ran commands | Proof/output root |
 |---|---|---|---|
+| 1 (prereq) | `1d4228fa` | `cd packages/media-contracts && bun run typecheck`  
+`cd packages/media-contracts && bun test test/fixture-validation.test.ts` | `packages/media-contracts/fixtures/` |
 | 2 | `3f2b1b49` | `cd packages/jimeng-client && bun test ./test/seedance-image2video-plan.test.ts`  
 `cd packages/jimeng-client && bun run typecheck`  
 `[INFERENCE] bun packages/jimeng-client/src/browser-proxy-cli.ts seedance-image2video-plan --prompt "Original ASMR companion raises one hand under moonlit server shrine glow, no text" --firstFrameUri tos://fixture/seedance/first-frame-candidate-001.png --firstFrameHash aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --runId seedance-parent-proof-001 --createdAt 2026-06-24T00:00:00.000Z --seed 2026062401 --durationSec 5 --ratio 9:16 --outDir data/asmr-companion/goal2/seedance-parent-proof` | `data/asmr-companion/goal2/seedance-parent-proof/` |
@@ -56,9 +58,10 @@ Accepted upstream commits and root-run verification:
 Notes:
 
 - Goal 2’s exact saved proof command was not preserved verbatim in the proof directory; the command above is reconstructed from the saved artifact fields plus the CLI’s documented argument shape.
-- Goal 1 was already accepted upstream at `1d4228fa`, but this final handoff inventories Goal 2–5 outputs as requested.
+- Goal 1 is listed here as an accepted prerequisite because the full reviewer rerun order starts at the contract spine, even though the artifact inventory below stays focused on Goal 2–5 outputs.
 
 ## What root actually ran and what produced artifacts
+- Goal 1 root run revalidated the contract spine and shared fixtures under `packages/media-contracts/fixtures/`; it is a prerequisite acceptance, not part of the Goal 2–5 artifact inventory below.
 
 - Goal 2 root run produced the dry-run proof folder `data/asmr-companion/goal2/seedance-parent-proof/`, including `generated-video-clips.v1.json`, the dry-run request plan, the response placeholder, and the conditioning sidecar shape. It did **not** produce a local Seedance MP4.
 - Goal 3 root run produced real media at `data/asmr-companion/goal3-spatial-proof/goal3-close-whisper-binaural.wav` plus `goal3-close-whisper-binaural.render-output.json`.
@@ -113,19 +116,22 @@ A machine-readable inventory also lives at `docs/qa/asmr-companion-goal6-artifac
 
 ## Exact rerun order for a human reviewer
 
-1. Goal 2
+1. Goal 1 prerequisite
+   - `cd packages/media-contracts && bun run typecheck`
+   - `cd packages/media-contracts && bun test test/fixture-validation.test.ts`
+2. Goal 2
    - `cd packages/jimeng-client && bun test ./test/seedance-image2video-plan.test.ts`
    - `cd packages/jimeng-client && bun run typecheck`
    - `[INFERENCE] bun packages/jimeng-client/src/browser-proxy-cli.ts seedance-image2video-plan --prompt "Original ASMR companion raises one hand under moonlit server shrine glow, no text" --firstFrameUri tos://fixture/seedance/first-frame-candidate-001.png --firstFrameHash aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --runId seedance-parent-proof-001 --createdAt 2026-06-24T00:00:00.000Z --seed 2026062401 --durationSec 5 --ratio 9:16 --outDir data/asmr-companion/goal2/seedance-parent-proof`
-2. Goal 3
+3. Goal 3
    - `cd packages/spatial-audio-renderer && bun run typecheck`
    - `cd packages/spatial-audio-renderer && bun test test/render.test.ts`
    - `bun packages/spatial-audio-renderer/src/cli.ts render --voice-assets packages/media-contracts/fixtures/valid/voice-assets.v1.json --stems packages/spatial-audio-renderer/fixtures/asmr-scene/asmr-stems.v1.json --spatial packages/spatial-audio-renderer/fixtures/asmr-scene/spatial-audio-manifest.v1.json --outDir data/asmr-companion/goal3-spatial-proof`
-3. Goal 4
+4. Goal 4
    - `cd packages/pleometric-planner && bun run typecheck`
    - `cd packages/pleometric-planner && bun test ./test/planner.test.ts`
    - `bun packages/pleometric-planner/src/cli.ts build-handoff --card packages/pleometric-planner/fixtures/cards/asmr-companion-moonlit.card.json --card packages/pleometric-planner/fixtures/cards/high-aura-orbit.card.json --generated-clips data/asmr-companion/goal2/seedance-parent-proof/normalized/generated-video-clips.v1.json --spatial-render-output data/asmr-companion/goal3-spatial-proof/goal3-close-whisper-binaural.render-output.json --out data/asmr-companion/goal4-planning/goal4-pipeline-handoff.bundle.json`
-4. Goal 5
+5. Goal 5
    - `bun workflows/tiktok-recreate/goal5-asmr-handoff.ts --handoff data/asmr-companion/goal4-planning/goal4-pipeline-handoff.bundle.json --generated-clips data/asmr-companion/goal2/seedance-parent-proof/normalized/generated-video-clips.v1.json --spatial-render-output data/asmr-companion/goal3-spatial-proof/goal3-close-whisper-binaural.render-output.json --outDir data/asmr-companion/goal5-pipeline-proof --createdAt 2026-06-24T00:00:00.000Z --proofId goal5-asmr-seedance-render-proof-001`
    - `bun test workflows/tiktok-recreate/goal5-asmr-handoff.test.ts`
    - `bun run remotion-renderer:render -- --manifest data/asmr-companion/goal5-pipeline-proof/remotion-context.json --layer-plan data/asmr-companion/goal5-pipeline-proof/goal5-layer-plan.json --persona-manifest data/asmr-companion/goal5-pipeline-proof/persona-manifest.json --out data/asmr-companion/goal5-pipeline-proof/remotion-render --audio-manifest data/asmr-companion/goal3-spatial-proof/goal3-close-whisper-binaural.render-output.json --generated-clips-manifest data/asmr-companion/goal2/seedance-parent-proof/normalized/generated-video-clips.v1.json`
