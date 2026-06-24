@@ -1,0 +1,26 @@
+{
+  "sourceProfile": "https://www.tiktok.com/@samuelszuchan",
+  "manifestPath": "data/video-recreation/samuelszuchan/bootstrap-20260620/manifest.json",
+  "decompositionPaths": [
+    "data/video-recreation/samuelszuchan/bootstrap-20260620/antigravity-frame-decompositions/2026-05-20_7641985194186001678.json",
+    "data/video-recreation/samuelszuchan/bootstrap-20260620/antigravity-frame-decompositions/2026-05-20_7642051300770712845.json",
+    "data/video-recreation/samuelszuchan/bootstrap-20260620/antigravity-frame-decompositions/2026-05-20_7642101474981367054.json"
+  ],
+  "lane": "frame-vtt-omp-antigravity",
+  "model": "google-antigravity/gemini-3.5-flash-low",
+  "jimengPersonaMode": "synthetic-narrator",
+  "kieMode": "dry-run",
+  "kieOutDir": "data/video-recreation/samuelszuchan/bootstrap-20260620/plates",
+  "kieMaxSpendUsd": 0.25,
+  "minimaxMode": "dry-run",
+  "minimaxOutDir": "data/video-recreation/samuelszuchan/bootstrap-20260620/tts",
+  "minimaxVoiceId": "289066744107112",
+  "renderOutDir": "data/video-recreation/samuelszuchan/bootstrap-20260620/renders",
+  "renderPlatesManifest": "data/video-recreation/samuelszuchan/bootstrap-20260620/plates/manifest.json",
+  "renderPersonaManifest": "data/video-recreation/samuelszuchan/bootstrap-20260620/jimeng-persona-manifest.json",
+  "goal4HandoffBundle": "data/asmr-companion/goal4-planning/goal4-pipeline-handoff.bundle.json",
+  "generatedClipsManifest": "data/asmr-companion/goal2/seedance-parent-proof/normalized/generated-video-clips.v1.json",
+  "spatialAudioRenderOutput": "data/asmr-companion/goal3-spatial-proof/goal3-close-whisper-binaural.render-output.json",
+  "goal5OutDir": "data/asmr-companion/goal5-pipeline-proof",
+  "hyperframesOutDir": "data/asmr-companion/goal5-pipeline-proof/hyperframes"
+}

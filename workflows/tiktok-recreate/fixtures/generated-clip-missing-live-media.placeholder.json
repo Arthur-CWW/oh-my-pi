@@ -1,0 +1,7 @@
+{
+  "schemaVersion": "tiktok-recreate.generated-clip-placeholder.v1",
+  "placeholderId": "generated-clip-missing-live-media",
+  "purpose": "Deterministic render-safe fallback when a generated-video-clips.v1 manifest records a planned MP4 artifact but the live provider media file is absent locally.",
+  "renderBehavior": "ClipLayer renders a labeled synthetic gradient instead of attempting to decode a missing MP4.",
+  "explicitMissingMedia": true
+}
