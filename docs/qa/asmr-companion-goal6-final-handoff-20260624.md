@@ -6,7 +6,7 @@ This is the reviewer-facing closeout for Goals 2–5 plus the final Goal 6 proof
 
 - `docs/qa/asmr-companion-goal6-final-handoff-20260624.md`
 - `docs/qa/asmr-companion-goal6-artifact-inventory-20260624.json`
-- Goal 6 commit hash: none created in this handoff
+- Goal 6 commit hashes: `898d2686`, `7674f316`; current review-fix changes are in the working tree until committed.
 
 ## What to review first
 
@@ -27,7 +27,7 @@ This is the reviewer-facing closeout for Goals 2–5 plus the final Goal 6 proof
 
 | Goal | Implemented now | Primary proof artifact(s) | Status |
 |---|---|---|---|
-| 2 | Seedance first-frame dry-run planner, generated-clips manifest, conditioning sidecar shape, runbook, and provider-swap-ready planned MP4 path | `data/asmr-companion/goal2/seedance-parent-proof/normalized/generated-video-clips.v1.json`, `docs/qa/asmr-seedance-goal2-runbook-20260624.md` | Implemented as dry-run only in the accepted proof bundle |
+| 2 | Seedance first-frame dry-run planner, generated-clips manifest, shared-contract conditioning sidecar, marked-conditioning dry-run proof, runbook, and provider-swap-ready planned MP4 path | `data/asmr-companion/goal2/seedance-parent-proof/normalized/generated-video-clips.v1.json`, `data/asmr-companion/goal2/seedance-marked-conditioning-proof/normalized/seedance-marked-conditioning-proof-001-first-frame-conditioning.json`, `docs/qa/asmr-seedance-goal2-runbook-20260624.md` | Implemented as dry-run only in the accepted proof bundle; marked-conditioning proof is dry-run/no provider submit |
 | 3 | Deterministic spatial/binaural audio renderer output with render manifest | `data/asmr-companion/goal3-spatial-proof/goal3-close-whisper-binaural.wav`, `data/asmr-companion/goal3-spatial-proof/goal3-close-whisper-binaural.render-output.json` | Real media produced |
 | 4 | Pleometric planning + Goal 5 handoff bundle with prompt strings, motion prompts, caption plan, and upstream manifest refs | `data/asmr-companion/goal4-planning/goal4-pipeline-handoff.bundle.json` | Implemented |
 | 5 | Goal 4 → Goal 5 materialization, resolved generated-clip handling, Remotion render, HyperFrames project bundle, reviewer HTML, and explicit missing-media placeholder behavior | `data/asmr-companion/goal5-pipeline-proof/goal5-workflow-handoff.json`, `data/asmr-companion/goal5-pipeline-proof/reviewer-report.html` | Implemented; video lane still placeholder-backed |
@@ -117,19 +117,19 @@ A machine-readable inventory also lives at `docs/qa/asmr-companion-goal6-artifac
 ## Exact rerun order for a human reviewer
 
 1. Goal 1 prerequisite
-   - `cd packages/media-contracts && bun run typecheck`
-   - `cd packages/media-contracts && bun test test/fixture-validation.test.ts`
+   - `(cd packages/media-contracts && bun run typecheck)`
+   - `(cd packages/media-contracts && bun test test/fixture-validation.test.ts)`
 2. Goal 2
-   - `cd packages/jimeng-client && bun test ./test/seedance-image2video-plan.test.ts`
-   - `cd packages/jimeng-client && bun run typecheck`
+   - `(cd packages/jimeng-client && bun test ./test/seedance-image2video-plan.test.ts)`
+   - `(cd packages/jimeng-client && bun run typecheck)`
    - `[INFERENCE] bun packages/jimeng-client/src/browser-proxy-cli.ts seedance-image2video-plan --prompt "Original ASMR companion raises one hand under moonlit server shrine glow, no text" --firstFrameUri tos://fixture/seedance/first-frame-candidate-001.png --firstFrameHash aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --runId seedance-parent-proof-001 --createdAt 2026-06-24T00:00:00.000Z --seed 2026062401 --durationSec 5 --ratio 9:16 --outDir data/asmr-companion/goal2/seedance-parent-proof`
 3. Goal 3
-   - `cd packages/spatial-audio-renderer && bun run typecheck`
-   - `cd packages/spatial-audio-renderer && bun test test/render.test.ts`
+   - `(cd packages/spatial-audio-renderer && bun run typecheck)`
+   - `(cd packages/spatial-audio-renderer && bun test test/render.test.ts)`
    - `bun packages/spatial-audio-renderer/src/cli.ts render --voice-assets packages/media-contracts/fixtures/valid/voice-assets.v1.json --stems packages/spatial-audio-renderer/fixtures/asmr-scene/asmr-stems.v1.json --spatial packages/spatial-audio-renderer/fixtures/asmr-scene/spatial-audio-manifest.v1.json --outDir data/asmr-companion/goal3-spatial-proof`
 4. Goal 4
-   - `cd packages/pleometric-planner && bun run typecheck`
-   - `cd packages/pleometric-planner && bun test ./test/planner.test.ts`
+   - `(cd packages/pleometric-planner && bun run typecheck)`
+   - `(cd packages/pleometric-planner && bun test ./test/planner.test.ts)`
    - `bun packages/pleometric-planner/src/cli.ts build-handoff --card packages/pleometric-planner/fixtures/cards/asmr-companion-moonlit.card.json --card packages/pleometric-planner/fixtures/cards/high-aura-orbit.card.json --generated-clips data/asmr-companion/goal2/seedance-parent-proof/normalized/generated-video-clips.v1.json --spatial-render-output data/asmr-companion/goal3-spatial-proof/goal3-close-whisper-binaural.render-output.json --out data/asmr-companion/goal4-planning/goal4-pipeline-handoff.bundle.json`
 5. Goal 5
    - `bun workflows/tiktok-recreate/goal5-asmr-handoff.ts --handoff data/asmr-companion/goal4-planning/goal4-pipeline-handoff.bundle.json --generated-clips data/asmr-companion/goal2/seedance-parent-proof/normalized/generated-video-clips.v1.json --spatial-render-output data/asmr-companion/goal3-spatial-proof/goal3-close-whisper-binaural.render-output.json --outDir data/asmr-companion/goal5-pipeline-proof --createdAt 2026-06-24T00:00:00.000Z --proofId goal5-asmr-seedance-render-proof-001`
@@ -137,6 +137,11 @@ A machine-readable inventory also lives at `docs/qa/asmr-companion-goal6-artifac
    - `bun run remotion-renderer:render -- --manifest data/asmr-companion/goal5-pipeline-proof/remotion-context.json --layer-plan data/asmr-companion/goal5-pipeline-proof/goal5-layer-plan.json --persona-manifest data/asmr-companion/goal5-pipeline-proof/persona-manifest.json --out data/asmr-companion/goal5-pipeline-proof/remotion-render --audio-manifest data/asmr-companion/goal3-spatial-proof/goal3-close-whisper-binaural.render-output.json --generated-clips-manifest data/asmr-companion/goal2/seedance-parent-proof/normalized/generated-video-clips.v1.json`
    - `bun run tiktok-recreate:hyperframes -- --layer-plan data/asmr-companion/goal5-pipeline-proof/goal5-layer-plan.json --out data/asmr-companion/goal5-pipeline-proof/hyperframes --audio data/asmr-companion/goal3-spatial-proof/goal3-close-whisper-binaural.wav`
 
+
+## Checkout/review note
+
+- Proof media under `data/asmr-companion/**` is ignored local output by repo policy. The paths above are stable after running the rerun commands, not checkout-committed media assets.
+- The source files and contracts needed to regenerate the proof are tracked or staged for this review-fix pass; reviewer media paths should be regenerated when absent.
 ## Blockers / caveats
 
 - Goal 2 is still dry-run in the accepted proof bundle. The planned MP4 path is `data/asmr-companion/goal2/seedance-parent-proof/artifacts/seedance-parent-proof-001.mp4`, but no local MP4 exists there.
@@ -144,7 +149,7 @@ A machine-readable inventory also lives at `docs/qa/asmr-companion-goal6-artifac
   - `data/asmr-companion/goal5-pipeline-proof/generated-clips.resolved.json` (`mediaAvailable: false`)
   - `data/asmr-companion/goal5-pipeline-proof/goal5-layer-plan.json` (`mode: "deterministic-placeholder"`)
   - `data/asmr-companion/goal5-pipeline-proof/reviewer-report.html`
-- The accepted Goal 2 sample is not a positive SynthID-marked conditioning example: `data/asmr-companion/goal2/seedance-parent-proof/normalized/seedance-parent-proof-001-summary.json` records `synthid_marked: false` and `conditioning_applied: false`.
+- The downstream Goal 2 parent proof remains unmarked (`synthid_marked: false`, `conditioning_applied: false`) so Goal 5 stays placeholder-backed. A separate positive marked-conditioning dry-run proof exists at `data/asmr-companion/goal2/seedance-marked-conditioning-proof/normalized/seedance-marked-conditioning-proof-001-first-frame-conditioning.json` and records `synthId.marked=true`, `conditioning.applied=true`, and a changed conditioned frame hash.
 - The Goal 5 HyperFrames output is a project bundle, not a rendered MP4 in this proof root. `data/asmr-companion/goal5-pipeline-proof/hyperframes/manifest.json` records `renderRan: false` and `audioAttached: false`.
 - The Goal 5 Remotion MP4 is reviewable output, but it is not proof of a live Seedance generation lane; it is proof that the pipeline composes correctly around a missing generated clip.
 

@@ -15,6 +15,7 @@ export const ASMR_CONTRACT_SCHEMA_VERSIONS = [
   "asmr-stems.v1",
   "spatial-audio-manifest.v1",
   "generated-video-clips.v1",
+  "seedance-first-frame-conditioning.v1",
 ] as const
 
 export type AsmrContractSchemaVersion = typeof ASMR_CONTRACT_SCHEMA_VERSIONS[number]
@@ -301,13 +302,53 @@ export const GeneratedVideoClipsV1Schema = Schema.Struct({
 })
 export type GeneratedVideoClipsV1 = typeof GeneratedVideoClipsV1Schema.Type
 
+const ConditioningParamValueSchema = Schema.Union([
+  Schema.Null,
+  Schema.String,
+  Schema.Number,
+  Schema.Boolean,
+  Schema.Array(Schema.String),
+])
+
+export const SeedanceFirstFrameConditioningV1Schema = Schema.Struct({
+  schemaVersion: Schema.Literal("seedance-first-frame-conditioning.v1"),
+  dryRun: Schema.Boolean,
+  createdAt: NonEmptyString,
+  sourceAssetId: NonEmptyString,
+  firstFrame: Schema.Struct({
+    canonicalUri: NonEmptyString,
+    originalHash: NonEmptyString,
+    conditionedHash: NonEmptyString,
+    conditionedProviderUri: NonEmptyString,
+  }),
+  synthId: Schema.Struct({
+    marked: Schema.Boolean,
+    evidence: Schema.Array(Schema.String),
+  }),
+  conditioning: Schema.Struct({
+    applied: Schema.Boolean,
+    method: NonEmptyString,
+    params: Schema.Record(Schema.String, ConditioningParamValueSchema),
+    hashKind: Schema.Union([
+      Schema.Literal("sha256-of-dry-run-conditioning-record"),
+      Schema.Literal("sha256-of-conditioned-first-frame"),
+    ]),
+  }),
+  provenance: Schema.Struct({
+    sidecarSchemaVersion: Schema.optional(Schema.Literal("analysis-tags.v1")),
+    aiOriginDisclosed: Schema.optional(Schema.Boolean),
+    disclosure: Schema.optional(NonEmptyString),
+  }),
+})
+export type SeedanceFirstFrameConditioningV1 = typeof SeedanceFirstFrameConditioningV1Schema.Type
+
 export type AsmrContractManifest =
   | AnalysisTagsV1
   | VoiceAssetsV1
   | AsmrStemsV1
   | SpatialAudioManifestV1
   | GeneratedVideoClipsV1
-
+  | SeedanceFirstFrameConditioningV1
 export function decodeAnalysisTagsV1(value: unknown, operation = "analysis-tags.v1 manifest"): AnalysisTagsV1 {
   return decodeContract(AnalysisTagsV1Schema, value, operation, validateAnalysisTagsV1)
 }
@@ -328,6 +369,10 @@ export function decodeGeneratedVideoClipsV1(value: unknown, operation = "generat
   return decodeContract(GeneratedVideoClipsV1Schema, value, operation, validateGeneratedVideoClipsV1)
 }
 
+export function decodeSeedanceFirstFrameConditioningV1(value: unknown, operation = "seedance-first-frame-conditioning.v1 manifest"): SeedanceFirstFrameConditioningV1 {
+  return decodeContract(SeedanceFirstFrameConditioningV1Schema, value, operation, validateSeedanceFirstFrameConditioningV1)
+}
+
 export function decodeAsmrContractManifest(value: unknown, operation = "ASMR media contract manifest"): AsmrContractManifest {
   const schemaVersion = schemaVersionOf(value, operation)
   switch (schemaVersion) {
@@ -341,6 +386,8 @@ export function decodeAsmrContractManifest(value: unknown, operation = "ASMR med
       return decodeSpatialAudioManifestV1(value, operation)
     case "generated-video-clips.v1":
       return decodeGeneratedVideoClipsV1(value, operation)
+    case "seedance-first-frame-conditioning.v1":
+      return decodeSeedanceFirstFrameConditioningV1(value, operation)
     default:
       throw new AsmrContractValidationError(operation, `unsupported schemaVersion: ${schemaVersion}`)
   }
@@ -457,6 +504,19 @@ function validateGeneratedVideoClipsV1(manifest: GeneratedVideoClipsV1, operatio
     assertArtifact(clip.artifact, operation, `clips.${clip.clipId}.artifact`)
     assertSafeManifestPath(clip.provenance.requestPath, `${operation} clips.${clip.clipId}.provenance.requestPath`)
     assertSafeManifestPath(clip.provenance.responsePath, `${operation} clips.${clip.clipId}.provenance.responsePath`)
+  }
+}
+
+function validateSeedanceFirstFrameConditioningV1(manifest: SeedanceFirstFrameConditioningV1, operation: string): void {
+  assertIsoTimestamp(manifest.createdAt, operation, "createdAt")
+  assertSha256({ algorithm: "sha256", value: manifest.firstFrame.originalHash }, operation, "firstFrame.originalHash")
+  assertSha256({ algorithm: "sha256", value: manifest.firstFrame.conditionedHash }, operation, "firstFrame.conditionedHash")
+  assertProviderUri(manifest.firstFrame.conditionedProviderUri, operation, "firstFrame.conditionedProviderUri")
+  if (manifest.synthId.marked && manifest.synthId.evidence.length === 0) {
+    throw new AsmrContractValidationError(operation, "synthId.evidence is required when synthId.marked is true")
+  }
+  if (manifest.synthId.marked && !manifest.conditioning.applied) {
+    throw new AsmrContractValidationError(operation, "conditioning.applied must be true when synthId.marked is true")
   }
 }
 

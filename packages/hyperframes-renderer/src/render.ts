@@ -516,15 +516,32 @@ function renderSplitRevealLayer(layer: Layer): string {
   return placeholderDiv(layer);
 }
 
+function positionCoordinates(position: string | undefined): { x: number; y: number } {
+  if (position === "bottom-center") return { x: 0.5, y: 0.82 };
+  if (position === "top-center") return { x: 0.5, y: 0.18 };
+  if (position === "center" || position === undefined) return { x: 0.5, y: 0.5 };
+  if (position === "bottom-left") return { x: 0.12, y: 0.82 };
+  if (position === "bottom-right") return { x: 0.88, y: 0.82 };
+  return { x: 0.5, y: 0.5 };
+}
+
 function renderTypographyLayer(layer: Layer): string {
-  const lines = isArray(layer.props.lines) ? layer.props.lines : [];
+  const lines = isArray(layer.props.lines)
+    ? layer.props.lines
+    : stringProp(layer.props.text)
+      ? [{
+          text: stringProp(layer.props.text),
+          variant: stringProp(layer.props.variant) ?? "caption",
+          color: stringProp(layer.props.color) ?? "#ffffff",
+        }]
+      : [];
   const align = stringProp(layer.props.align) ?? "center";
   const position = isObject(layer.props.position)
     ? {
         x: numberProp(layer.props.position.x) ?? 0.5,
         y: numberProp(layer.props.position.y) ?? 0.5,
       }
-    : { x: 0.5, y: 0.5 };
+    : positionCoordinates(stringProp(layer.props.position));
   const fontFamily = stringProp(layer.props.fontFamily) ?? "sans-serif";
   const maxWidth = numberProp(layer.props.maxWidth) ?? 0.9;
   const lineHeight = numberProp(layer.props.lineHeight) ?? 1.25;

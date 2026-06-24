@@ -1,0 +1,33 @@
+{
+  "name": "@wirebabel/hyperframes-renderer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Minimal local HyperFrames project emitter for TikTok recreation comparisons",
+  "type": "module",
+  "main": "./src/render.ts",
+  "types": "./src/render.ts",
+  "exports": {
+    ".": {
+      "types": "./src/render.ts",
+      "import": "./src/render.ts"
+    },
+    "./render": {
+      "types": "./src/render.ts",
+      "import": "./src/render.ts"
+    }
+  },
+  "bin": {
+    "hyperframes-render": "./src/render.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "echo \"no tests yet\"",
+    "render": "bun x tsx src/render.ts"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.0"
+  }
+}

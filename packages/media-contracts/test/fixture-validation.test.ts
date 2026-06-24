@@ -4,6 +4,7 @@ import {
   decodeAsmrContractManifest,
   decodeAsmrStemsV1,
   decodeGeneratedVideoClipsV1,
+  decodeSeedanceFirstFrameConditioningV1,
   decodeSpatialAudioManifestV1,
   decodeVoiceAssetsV1,
 } from "../src/index"
@@ -52,6 +53,11 @@ const validFixtures = [
     schemaVersion: "generated-video-clips.v1",
     decode: decodeGeneratedVideoClipsV1,
   },
+  {
+    name: "seedance-first-frame-conditioning.v1.json",
+    schemaVersion: "seedance-first-frame-conditioning.v1",
+    decode: decodeSeedanceFirstFrameConditioningV1,
+  },
 ] satisfies ReadonlyArray<ValidFixture>
 
 const invalidFixtures = [
@@ -78,6 +84,10 @@ const invalidFixtures = [
   {
     name: "missing-provider-model-job.generated-video-clips.v1.json",
     decode: decodeGeneratedVideoClipsV1,
+  },
+  {
+    name: "missing-synthid-evidence.seedance-first-frame-conditioning.v1.json",
+    decode: decodeSeedanceFirstFrameConditioningV1,
   },
 ] satisfies ReadonlyArray<InvalidFixture>
 
@@ -113,5 +123,12 @@ describe("ASMR media contract fixture bundle", () => {
     expect(clip.providerJob.model).toContain("seedance")
     expect(clip.providerJob.jobId).toBeTruthy()
     expect(clip.firstFrame.originalHash.value).not.toBe(clip.firstFrame.conditionedHash.value)
+  })
+
+  test("Seedance first-frame conditioning fixture validates SynthID-marked conditioning", () => {
+    const decoded = decodeSeedanceFirstFrameConditioningV1(readMediaContractFixture("valid", "seedance-first-frame-conditioning.v1.json"))
+    expect(decoded.synthId.marked).toBe(true)
+    expect(decoded.conditioning.applied).toBe(true)
+    expect(decoded.synthId.evidence.length).toBeGreaterThan(0)
   })
 })

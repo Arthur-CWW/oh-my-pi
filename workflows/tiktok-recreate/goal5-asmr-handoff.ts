@@ -38,8 +38,10 @@ export function buildGoal5Artifacts(args: Args): Record<string, unknown> {
   const generatedClips = readJson(args.generatedClips, "Goal 2 generated clip manifest")
   const spatialRender = readJson(args.spatialRenderOutput, "Goal 3 spatial render-output manifest")
 
-  const promptOutputs = arrayProp(handoff, "promptOutputs")
-  if (promptOutputs.length === 0) throw new Error("Goal 4 handoff has no promptOutputs")
+  const promptOutputs = "promptOutputs" in handoff
+    ? arrayProp(handoff, "promptOutputs")
+    : arrayProp(handoff, "promptPlans")
+  if (promptOutputs.length === 0) throw new Error("Goal 4 handoff has no promptOutputs or promptPlans")
   const firstPrompt = objectProp(promptOutputs[0], "promptOutputs[0]")
   const conceptId = stringProp(firstPrompt, "conceptId")
   const title = promptTitle(handoff, conceptId) ?? conceptId
@@ -121,7 +123,7 @@ export function buildGoal5Artifacts(args: Args): Record<string, unknown> {
           endFrame: clipFrames,
         },
         caption: captions[0] ?? "stay close",
-        motionCue: stringProp(firstPrompt, "seedanceMotionPrompt"),
+        motionCue: seedanceMotionPromptText(firstPrompt),
         layers: [
           layer("BackgroundLayer", 0, { seed: conceptId, gradient: "moonlit-server-shrine" }),
           layer("ClipLayer", 10, clipLayerProps),
@@ -425,6 +427,20 @@ function promptTitle(handoff: JsonObject, conceptId: string): string | undefined
     if (obj && obj.conceptId === conceptId) return optionalString(obj, "title")
   }
   return undefined
+}
+
+function seedanceMotionPromptText(promptOutput: JsonObject): string {
+  const direct = optionalString(promptOutput, "seedanceMotionPrompt")
+  if (direct) return direct
+  const prompts = promptOutput.prompts
+  if (typeof prompts !== "object" || prompts === null || Array.isArray(prompts)) {
+    throw new Error("seedanceMotionPrompt must be a string or promptPlans[].prompts.seedanceMotionPrompt.text")
+  }
+  const seedanceMotionPrompt = (prompts as JsonObject).seedanceMotionPrompt
+  if (typeof seedanceMotionPrompt !== "object" || seedanceMotionPrompt === null || Array.isArray(seedanceMotionPrompt)) {
+    throw new Error("promptPlans[].prompts.seedanceMotionPrompt must be an object")
+  }
+  return stringProp(seedanceMotionPrompt as JsonObject, "text")
 }
 
 function captionBeats(promptOutput: JsonObject): string[] {

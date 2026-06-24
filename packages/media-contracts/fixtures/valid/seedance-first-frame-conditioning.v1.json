@@ -1,0 +1,31 @@
+{
+  "schemaVersion": "seedance-first-frame-conditioning.v1",
+  "dryRun": true,
+  "createdAt": "2026-06-24T00:00:00.000Z",
+  "sourceAssetId": "first-frame-candidate-001",
+  "firstFrame": {
+    "canonicalUri": "tos://fixture/seedance/first-frame-candidate-001.png",
+    "originalHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "conditionedHash": "4444444444444444444444444444444444444444444444444444444444444444",
+    "conditionedProviderUri": "tos://fixture/seedance/first-frame-candidate-001-conditioned.png"
+  },
+  "synthId": {
+    "marked": true,
+    "evidence": ["fixture-gemini-synthid-signal"]
+  },
+  "conditioning": {
+    "applied": true,
+    "method": "dry-run-synthid-quality-conditioning-v1",
+    "params": {
+      "planned_only": true,
+      "deterministic": true,
+      "source_signal": "fixture-synthid-marked-first-frame",
+      "operations": ["reduce-first-frame-watermark-noise", "preserve-reconstructable-provider-metadata"]
+    },
+    "hashKind": "sha256-of-conditioned-first-frame"
+  },
+  "provenance": {
+    "sidecarSchemaVersion": "analysis-tags.v1",
+    "disclosure": "Internal pipeline metadata records provider and conditioning steps for rerun/provider swap."
+  }
+}
