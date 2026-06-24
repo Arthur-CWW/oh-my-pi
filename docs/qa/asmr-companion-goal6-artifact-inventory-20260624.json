@@ -38,6 +38,14 @@
       "why": "Goal 5 planning input bundle with prompts, motion, caption plan, and upstream refs."
     }
   ],
+  "prerequisiteGoal1": {
+    "commit": "1d4228fa",
+    "commands": [
+      "cd packages/media-contracts && bun run typecheck",
+      "cd packages/media-contracts && bun test test/fixture-validation.test.ts"
+    ],
+    "note": "Accepted prerequisite for the full rerun order; Goal 1 outputs are not re-inventoried below because this artifact inventory is intentionally focused on Goal 2–5 outputs."
+  },
   "rerunCommands": [
     {
       "order": 1,
