@@ -397,6 +397,7 @@ Commands:
   packet-plan   Write the next value-ranked packet manifest and approval prompt
   contract-infer Infer schema/test/registry scaffolds from saved proof JSON/artifacts
   proof-report   Render a local HTML/Markdown report for generated proof artifacts
+  triage-coverage Render registry coverage and value-ranked gaps for keep/maybe/skip families
   catalog       Probe non-generating model/tool/persona/voice config endpoints
   agent-catalog Fetch normalized agent skills and image/video model catalog
   image-models  Fetch no-spend image generation model/config catalog
@@ -655,6 +656,16 @@ Options:
   --artifact-notes <text>       Optional dashboard notes for this run
   --durationSec <sec>           Video duration seconds for text2video (default from capture/client)
 
+Passive capture companion:
+  Network recording is implemented by the separate current command below; use browser-proxy
+  capture-analyze/discovery-worklist on its output:
+    bun packages/jimeng-client/src/network-recorder.ts --help
+    bun packages/jimeng-client/src/network-recorder.ts \\
+      --cdp http://127.0.0.1:9340 \\
+      --target-url jimeng.jianying.com \\
+      --flow lip-sync-human-digitalhuman-setup \\
+      --durationSec 0
+
 Examples:
   jimeng-browser-proxy capture-analyze \\
     --rawNetwork data/jimeng-captures/20260610-subject-create-ui/raw-network.jsonl \\
@@ -666,6 +677,10 @@ Examples:
     --probeCandidates data/jimeng-lab/capture-analysis-subject-create/raw/capture-analyze-<stamp>-endpoint-probe-candidates.json \\
     --staticRoot packages/jimeng-client/src \\
     --outDir data/jimeng-lab/discovery-worklist-subject-create
+
+  jimeng-browser-proxy triage-coverage \\
+    --decisions keep \\
+    --outDir data/jimeng-lab/triage-coverage-keep
 
   jimeng-browser-proxy static-locate \\
     --analysis data/jimeng-lab/capture-analysis-subject-create/normalized/capture-analyze-<stamp>-analysis.json \\

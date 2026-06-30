@@ -86,6 +86,30 @@ export interface JimengDiscoveryTriageCoverage {
   statusCounts: Record<JimengDiscoveryTriageStatusKey, number>
   families: JimengDiscoveryTriageFamilyCoverage[]
   valueRankedGaps: JimengDiscoveryValueRankedGap[]
+  selectedPacket: JimengDiscoveryPacketQueueItem
+}
+
+export type JimengDiscoveryPacketId =
+  | "gen-parity"
+  | "persona-voice"
+  | "lip-sync-human"
+  | "reference-controls"
+  | "template-mining"
+  | "supporting-reads"
+
+export type JimengDiscoveryPacketStatus = "complete" | "active" | "blocked" | "parked"
+
+export interface JimengDiscoveryPacketQueueItem {
+  id: JimengDiscoveryPacketId
+  title: string
+  valueRank: number
+  families: JimengDiscoveryTriageFamilyId[]
+  status: JimengDiscoveryPacketStatus
+  goal: string
+  whyNow: string
+  evidence: string[]
+  blocker: string | null
+  nextCommand: string | null
 }
 
 export function getJimengDiscoveryKnownEndpoints(): JimengDiscoveryKnownEndpoint[] {
@@ -102,6 +126,22 @@ export function getJimengDiscoveryKnownEndpointNote(endpoint: string): string | 
 
 export function getJimengDiscoveryTriageFamilies(): JimengDiscoveryTriageFamily[] {
   return TRIAGE_FAMILIES.map((family) => ({ ...family, endpoints: [...family.endpoints] }))
+}
+
+export function getJimengDiscoveryPacketQueue(): JimengDiscoveryPacketQueueItem[] {
+  return PACKET_QUEUE.map(clonePacketQueueItem)
+}
+
+export function selectJimengDiscoveryNextPacket(): JimengDiscoveryPacketQueueItem {
+  const nextPacket = [...PACKET_QUEUE]
+    .filter((packet) => packet.status !== "complete" && packet.status !== "parked")
+    .sort((left, right) =>
+      jimengPacketStatusRank(left.status) - jimengPacketStatusRank(right.status)
+      || left.valueRank - right.valueRank
+      || left.id.localeCompare(right.id),
+    )[0]
+
+  return clonePacketQueueItem(nextPacket ?? PACKET_QUEUE.find((packet) => packet.id === "supporting-reads") ?? PACKET_QUEUE[0]!)
 }
 
 export function parseJimengDiscoveryTriageDecisions(value: string | undefined): JimengDiscoveryTriageDecision[] {
@@ -169,6 +209,7 @@ export function summarizeJimengDiscoveryTriageCoverage(input: {
     statusCounts,
     families,
     valueRankedGaps: buildJimengDiscoveryValueRankedGaps(families, knownByEndpoint),
+    selectedPacket: selectJimengDiscoveryNextPacket(),
   }
 }
 
@@ -187,6 +228,22 @@ export function writeJimengDiscoveryTriageCoverageMarkdown(coverage: JimengDisco
 
   for (const family of coverage.families) {
     lines.push(`| ${family.id} | ${family.decision} | ${family.title} | ${family.endpointCount} | ${formatTriageStatusCounts(family.statusCounts)} | ${family.notImplementedEndpoints.length} |`)
+  }
+
+  const selectedPacket = coverage.selectedPacket
+  lines.push(
+    "",
+    "## Selected Next Packet",
+    "",
+    `- Packet: \`${selectedPacket.id}\` - ${selectedPacket.status} - ${selectedPacket.title}`,
+    `- Families: ${selectedPacket.families.join(", ")}`,
+    `- Why now: ${selectedPacket.whyNow}`,
+  )
+  if (selectedPacket.blocker) {
+    lines.push(`- Blocker: ${selectedPacket.blocker}`)
+  }
+  if (selectedPacket.nextCommand) {
+    lines.push(`- Next command: \`${selectedPacket.nextCommand}\``)
   }
 
   if (coverage.valueRankedGaps.length > 0) {
@@ -330,6 +387,121 @@ function formatTriageStatusCounts(statusCounts: Record<JimengDiscoveryTriageStat
     .filter((status) => statusCounts[status] > 0)
     .map((status) => `${status}=${statusCounts[status]}`)
     .join(", ")
+}
+
+const PACKET_QUEUE: JimengDiscoveryPacketQueueItem[] = [
+  {
+    id: "gen-parity",
+    title: "Generation parity and artifact proof",
+    valueRank: 1,
+    families: ["G1", "G2", "A1"],
+    status: "complete",
+    goal: "Submit, poll, download, and schema-check useful image/video generations from typed clients.",
+    whyNow: "User-facing image/video generation parity is implemented and live-proven; remaining G1/G2 rows are endpoint-level direct-signer or material-helper follow-ups, not the next packet.",
+    evidence: [
+      "docs/qa/jimeng-generation-direct-submit-client-20260613.md",
+      "data/jimeng-lab/proof-20260612-live-generation-matrix/generation-contract/normalized/generation-contract/",
+      "data/jimeng-captures/20260613-goal-text2image-submit-refresh/",
+    ],
+    blocker: "Pure direct text-to-image replay still needs frontend signer/a_bogus recovery, but browser-backed generation parity is not blocked on that transport gap.",
+    nextCommand: null,
+  },
+  {
+    id: "persona-voice",
+    title: "Persona and voice",
+    valueRank: 2,
+    families: ["P1", "V1", "G2"],
+    status: "blocked",
+    goal: "Create or reuse a persona, generate/apply voice, and keep persona profile metadata stable.",
+    whyNow: "Typed request helpers and replay tests exist; live advancement now needs disposable source audio or subject voice UI capture plus approval for quota/account mutation.",
+    evidence: [
+      "docs/qa/jimeng-persona-voice-client-status-20260612.md",
+      "docs/qa/jimeng-persona-voice-contract-infer-20260612.md",
+      "data/jimeng-lab/proof-20260612-persona-voice-contract-infer/",
+    ],
+    blocker: "No disposable approved voice-clone or subject-generated-voice live fixture is currently available.",
+    nextCommand: "bun packages/jimeng-client/src/network-recorder.ts --cdp http://127.0.0.1:9340 --target-url jimeng.jianying.com --flow persona-voice-submit --durationSec 120",
+  },
+  {
+    id: "lip-sync-human",
+    title: "Lip-sync and digital human",
+    valueRank: 3,
+    families: ["L1", "V1", "G2", "A1"],
+    status: "active",
+    goal: "Turn image/avatar or VOD references into talking-head UGC assets with typed pre-process, submit, poll, and artifact lookup.",
+    whyNow: "This is the highest-value unfinished packet with active route evidence: generation parity is complete for user-facing workflows, persona/voice mutation is fixture-blocked, and the digital-human workbench is the next concrete capture target.",
+    evidence: [
+      "docs/qa/jimeng-video-preprocess-plan-20260612.md",
+      "docs/qa/jimeng-lip-sync-human-preprocess-client-20260612.md",
+      "docs/qa/jimeng-lip-sync-human-contract-infer-20260612.md",
+      "data/jimeng-lab/proof-20260612-lip-sync-human-contract-infer/",
+    ],
+    blocker: "Fresh passive capture is still needed from the true digital-human/talking-head workbench before approval-gated pre_process or lip-sync submit replay; the generic ?type=lip_sync composer route is not sufficient.",
+    nextCommand: "bun packages/jimeng-client/src/network-recorder.ts --cdp http://127.0.0.1:9340 --target-url \"https://jimeng.jianying.com/ai-tool/digitalHuman?type=digitalHuman&workspace=undefined\" --flow lip-sync-human-digitalhuman-submit --durationSec 120",
+  },
+  {
+    id: "reference-controls",
+    title: "Reference controls",
+    valueRank: 4,
+    families: ["R2", "G1", "G2"],
+    status: "parked",
+    goal: "Swap person/style/pose while preserving timing, composition, or template structure.",
+    whyNow: "Reference previews and omni-reference planners are useful, but they should wait until the active lip-sync-human packet is captured or blocked harder.",
+    evidence: [
+      "docs/qa/jimeng-omni-video-plan-20260611.md",
+    ],
+    blocker: "Needs passive all-around-reference capture compare and spend approval before live submit/poll/download.",
+    nextCommand: null,
+  },
+  {
+    id: "template-mining",
+    title: "Template and niche mining",
+    valueRank: 5,
+    families: ["T1", "R1"],
+    status: "parked",
+    goal: "Mine hooks, captions, templates, profile patterns, and faceless formats.",
+    whyNow: "Template mining remains valuable but lower priority than the active talking-head UGC packet.",
+    evidence: [
+      "docs/provider/jimeng-api-triage.md",
+    ],
+    blocker: "Several CapCut search/preset rows need exact signed UI captures.",
+    nextCommand: null,
+  },
+  {
+    id: "supporting-reads",
+    title: "Supporting reads",
+    valueRank: 6,
+    families: ["A1", "Q1", "C1", "S1"],
+    status: "parked",
+    goal: "Fill history, asset, runtime, quota, and story/archive reads only when they unblock a higher-value packet.",
+    whyNow: "Do not choose supporting reads while lip-sync-human has a concrete capture path.",
+    evidence: [
+      "docs/provider/jimeng-api-triage.md",
+    ],
+    blocker: null,
+    nextCommand: null,
+  },
+]
+
+function jimengPacketStatusRank(status: JimengDiscoveryPacketStatus): number {
+  switch (status) {
+    case "active":
+      return 1
+    case "blocked":
+      return 2
+    case "parked":
+      return 3
+    case "complete":
+      return 99
+  }
+}
+
+function clonePacketQueueItem(packet: JimengDiscoveryPacketQueueItem): JimengDiscoveryPacketQueueItem {
+  return {
+    ...packet,
+    families: [...packet.families],
+    evidence: [...packet.evidence],
+  }
 }
 
 const TRIAGE_FAMILIES: JimengDiscoveryTriageFamily[] = [

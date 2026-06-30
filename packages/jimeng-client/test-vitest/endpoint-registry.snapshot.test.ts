@@ -18,6 +18,13 @@ interface KeepFamilyGapSnapshot {
     readonly command: string | null
     readonly nextProbe: string | null
   }>
+  readonly selectedPacket: {
+    readonly id: string
+    readonly status: string
+    readonly families: readonly string[]
+    readonly blocker: string | null
+    readonly nextCommand: string | null
+  }
   readonly families: ReadonlyArray<{
     readonly id: string
     readonly title: string
@@ -49,6 +56,13 @@ function buildKeepFamilyGapSnapshot(): KeepFamilyGapSnapshot {
       command: gap.command,
       nextProbe: gap.nextProbe,
     })),
+    selectedPacket: {
+      id: coverage.selectedPacket.id,
+      status: coverage.selectedPacket.status,
+      families: coverage.selectedPacket.families,
+      blocker: coverage.selectedPacket.blocker,
+      nextCommand: coverage.selectedPacket.nextCommand,
+    },
     families: coverage.families.map((family) => ({
       id: family.id,
       title: family.title,

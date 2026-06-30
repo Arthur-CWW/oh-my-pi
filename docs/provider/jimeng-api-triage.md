@@ -16,7 +16,7 @@ skip: W1,N1,U1,D1,M1,P2,X1
 
 `keep` means implement typed service/CLI support. `maybe` means keep cataloged but do not actively build. `skip` means leave as `cataloged_only` or `blocked` with a reason.
 
-The machine-readable mirror for these family IDs lives in `packages/jimeng-client/src/endpoint-registry.ts`. Run `jimeng-browser-proxy triage-coverage --decisions keep` to materialize the current registry coverage as JSON and Markdown. The latest keep-family report has 62 unique endpoints, 0 missing registry rows, 40 implemented endpoints, 11 partial endpoints, 2 dry-run-only endpoints, and 10 blocked endpoints. Unfinished keep-family rows must carry evidence paths and a concrete next probe in the registry; Vitest snapshots cover the normalized gap object and generated Markdown report.
+The machine-readable mirror for these family IDs lives in `packages/jimeng-client/src/endpoint-registry.ts`. Run `jimeng-browser-proxy triage-coverage --decisions keep` to materialize the current registry coverage as JSON and Markdown, including the selected next packet from `selectJimengDiscoveryNextPacket()`. The latest keep-family report has 62 unique endpoints, 0 missing registry rows, 40 implemented endpoints, 11 partial endpoints, 2 dry-run-only endpoints, and 10 blocked endpoints. Unfinished keep-family rows must carry evidence paths and a concrete next probe in the registry; Vitest snapshots cover the normalized gap object and generated Markdown report.
 
 ## Priority Model
 
@@ -81,10 +81,10 @@ For each selected packet, the target deliverable is not just "an endpoint works.
 
 This keeps the triage doc as the decision layer. It should not become a raw progress database or a hand-written mirror of every provider response.
 
-Current recommended next packets:
+Current recommended next packets (mirrored by `selectJimengDiscoveryNextPacket()` in `packages/jimeng-client/src/endpoint-registry.ts`; `pickNextJimengPacketId()` delegates to that selector):
 
-1. `lip-sync-human`: packet remains the top remaining keep-family, but it is currently blocked by real UI entry-state evidence. Browser-backed image/avatar submit wiring exists; the current `?type=lip_sync` route still renders a generic composer with no confirmed voice-picker controls, so the next step is capturing or locating the true talking-head workbench state, then rerunning one live submit/poll/download proof.
-2. `supporting-reads`: only when they directly unblock the remaining lip-sync-human route/DOM capture work or the direct signer follow-up for `/mweb/v1/aigc_draft/generate`.
+1. `lip-sync-human`: selected next. It is the highest-value unfinished packet with an active capture path: generation parity is complete for useful user-facing image/video workflows, persona/voice live mutation is still disposable-fixture blocked, and the digital-human workbench is the concrete next target. Remaining blocker: capture the true talking-head route rather than the generic `?type=lip_sync` composer, then approve one pre-process/submit/poll/download proof. Exact passive-capture command: `bun packages/jimeng-client/src/network-recorder.ts --cdp http://127.0.0.1:9340 --target-url "https://jimeng.jianying.com/ai-tool/digitalHuman?type=digitalHuman&workspace=undefined" --flow lip-sync-human-digitalhuman-submit --durationSec 120`.
+2. `supporting-reads`: only when they directly unblock the selected `lip-sync-human` route/DOM capture work or the direct signer follow-up for `/mweb/v1/aigc_draft/generate`.
 3. `gen-parity`: packet is done for useful image/video CLI workflows; revisit only for the endpoint-level direct signer/a_bogus follow-up after lip-sync is cleared or when that transport gap becomes the highest-value blocker.
 
 ## Keep
@@ -164,6 +164,21 @@ Why it is not important now:
 - Direct video plans: use `jimeng-browser-proxy text2video-plan` to build a no-session dry-run request and `jimeng-browser-proxy text2video-compare` to compare it against a passive raw CDP/capture-template submit request before live submit is claimed.
 - Simple dry-run request plans, including subject voice generation and voice clone submit/query/update/delete, can use `jimeng-browser-proxy request-plan-compare` to compare the planned request body against passive raw CDP/capture-template traffic without live provider calls.
 - Lip-sync plans: keep using `jimeng-browser-proxy lip-sync-compare` because the meaningful payload is nested under provider-specific `videoGenInputs`.
+
+## Passive Capture Queue
+
+For T-2026-06-09-025, passive capture should serve the highest-value keep packets without running live submit/mutation. Use `network-recorder.ts` to observe one already-open Jimeng UI flow at a time, then run `jimeng-browser-proxy capture-analyze` and `discovery-worklist` before adding registry or client changes.
+
+Priority order for the next capture pass:
+
+1. Lip-sync/digital-human setup: true workbench route, role media wiring, voice picker fields, and payload compare evidence. This is the selected `lip-sync-human` packet capture; stop before pre-process submit or generation.
+2. Persona setup: subject create/update form state, subject image references, and subject voice-generation setup.
+3. Reference controls: describe image, face validation, pose/depth/canny/style/reference preview setup.
+4. Video reference setup: VOD upload/select, first/end-frame, multi-frame, and multimodal composer setup.
+5. Read/setup-only surfaces: asset library, Explore/template, and infinite-canvas metadata.
+6. Canvas edit setup: inpaint, erase, expand, cutout, and local-edit request shape before apply/export.
+
+Stop before paid generate, subject create/update/delete, voice clone submit, subject voice-generation submit, canvas apply/export, pre-process submit, or any account mutation unless a separate approval names the exact action and artifact path.
 
 ## Latest Gap Notes
 

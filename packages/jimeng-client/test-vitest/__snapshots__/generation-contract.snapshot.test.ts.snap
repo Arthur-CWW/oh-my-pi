@@ -31,7 +31,7 @@ exports[`Jimeng generation contract snapshots > snapshots normalized generation 
 exports[`Jimeng generation contract snapshots > snapshots normalized generation proof summaries 2`] = `
 "# Jimeng Generation Contract Report
 
-Input: \`/Users/arthur/projects/pi-web-access/packages/jimeng-client/test/fixtures/contract-infer/live-matrix-mini\`
+Input: \`test/fixtures/contract-infer/live-matrix-mini\`
 Proofs: 1
 Skipped JSON files: 0
 

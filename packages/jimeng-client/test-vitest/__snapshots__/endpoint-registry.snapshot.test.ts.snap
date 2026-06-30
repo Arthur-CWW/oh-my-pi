@@ -397,6 +397,18 @@ exports[`Jimeng endpoint registry snapshots > snapshots keep-family gap summary 
       "title": "Assets/history/queue/video info",
     },
   ],
+  "selectedPacket": {
+    "blocker": "Fresh passive capture is still needed from the true digital-human/talking-head workbench before approval-gated pre_process or lip-sync submit replay; the generic ?type=lip_sync composer route is not sufficient.",
+    "families": [
+      "L1",
+      "V1",
+      "G2",
+      "A1",
+    ],
+    "id": "lip-sync-human",
+    "nextCommand": "bun packages/jimeng-client/src/network-recorder.ts --cdp http://127.0.0.1:9340 --target-url "https://jimeng.jianying.com/ai-tool/digitalHuman?type=digitalHuman&workspace=undefined" --flow lip-sync-human-digitalhuman-submit --durationSec 120",
+    "status": "active",
+  },
   "statusCounts": {
     "blocked": 21,
     "captured_only": 0,

@@ -2,7 +2,7 @@
 
 Brief version: `2026-06-12.wave1.a`
 
-Repo: `/Users/arthur/agents/web-access`
+Repo: `/Users/arthur/agents`
 
 ## Read First
 
@@ -118,7 +118,7 @@ Use mock responses with permissive but realistic rows, for example:
 Do not run these commands. Recommend them for the parent after integration:
 
 ```bash
-cd /Users/arthur/agents/web-access/packages/jimeng-client
+cd /Users/arthur/agents/packages/jimeng-client
 mise exec -- bun test ./test/mix-audio.test.ts
 mise exec -- bun run typecheck
 ```

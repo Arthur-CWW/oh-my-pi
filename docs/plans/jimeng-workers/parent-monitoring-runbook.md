@@ -45,7 +45,7 @@ history://JimengMixAudio
 Check worker-owned diffs in the main repo after a writing worker finishes:
 
 ```bash
-cd /Users/arthur/agents/web-access
+cd /Users/arthur/agents
 git diff -- packages/jimeng-client/src/mix-audio.ts packages/jimeng-client/test/mix-audio.test.ts
 ```
 
@@ -63,7 +63,7 @@ Reject a worker result if it:
 For Worker A after integrating/accepting its owned-file edits:
 
 ```bash
-cd /Users/arthur/agents/web-access/packages/jimeng-client
+cd /Users/arthur/agents/packages/jimeng-client
 mise exec -- bun test ./test/mix-audio.test.ts
 mise exec -- bun run typecheck
 ```
@@ -84,7 +84,7 @@ Use `history://<id>` when reviewing process quality.
 For code workers:
 
 ```bash
-cd /Users/arthur/agents/web-access
+cd /Users/arthur/agents
 git diff -- packages/jimeng-client/src/mix-audio.ts packages/jimeng-client/test/mix-audio.test.ts
 ```
 
@@ -101,11 +101,11 @@ Parent then updates:
 ## Final Validation
 
 ```bash
-cd /Users/arthur/agents/web-access/packages/jimeng-client
+cd /Users/arthur/agents/packages/jimeng-client
 mise exec -- bun run test
 mise exec -- bun run test:vitest
 mise exec -- bun run typecheck
-cd /Users/arthur/agents/web-access
+cd /Users/arthur/agents
 git diff --check
 ```
 

@@ -9,6 +9,7 @@ describe("Jimeng packet plan snapshots", () => {
   it.effect("snapshots the next gen-parity packet plan", () =>
     Effect.sync(() => {
       const plan = buildJimengPacketPlan({
+        packetId: "gen-parity",
         artifactRoot: "data/jimeng-lab/packet-gen-parity-20260612",
       })
 

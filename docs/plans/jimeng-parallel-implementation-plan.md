@@ -60,119 +60,36 @@ This wave avoids central-file conflicts while still moving the highest-value pac
 
 ## GPT-5.5 Parent / OMP Subagent Orchestration
 
-Use OMP's default `task` subagents for worker fan-out. The main GPT-5.5 Codex process is the parent orchestrator/reviewer; implementation and read-only planning workers use the project agent `.omp/agents/jimeng-gemini-worker.md`, which pins Gemini 3.5 Flash for bounded worker slices. If Gemini is unavailable or rate-limited, use `.omp/agents/jimeng-kimi-worker.md` as the latest-Kimi fallback for the same simple slices.
+Follow the repo-wide packet SOP in `docs/plans/new-workstream-subagent-packets.md#repo-wide-packet-workerreviewer-sop`. This Jimeng plan keeps only Jimeng-specific ownership, launch, and verification details.
 
-### Parent Responsibilities
+### Jimeng-specific ownership deltas
 
-- Keep the active goal, triage docs, endpoint registry, snapshots, and final commits consistent.
-- Create one worker brief per packet/slice.
-- Assign disjoint file ownership before workers start.
-- Reject worker patches that touch unassigned files or mix multiple packets.
-- Run final integration tests and update central docs/snapshots after worker patches land.
+- Parent owns `packages/jimeng-client/src/endpoint-registry.ts`, provider triage/goal docs, `TASKS.md`, endpoint/packet snapshots, final integration verification, and scoped commits.
+- Workers own only their named source/test/proof slice, such as `mix-audio`, `generation-contract`, or `template-mining`.
+- Excluded unless explicitly assigned: central registry, provider triage docs, root/package manifests, snapshots, unrelated dirty files, credentials, cookies, signed URLs, raw provider responses, and live quota-spending calls.
+- Worker output should add any parent-owned registry/docs changes as recommendations, not inline edits.
 
-### Worker Brief Contract
+### OMP launch and handoff
 
-Each worker brief should include:
+- Launch workers from the GPT-5.5 parent process with OMP `task` subagents, not shell-launched `omp` processes.
+- Use `jimeng-gemini-worker`; fall back to `jimeng-kimi-worker` for the same bounded slices if Gemini is unavailable or rate-limited.
+- Prefer `isolated: true` for implementation/write workers on this APFS workstation; keep read-only planning workers non-isolated unless they need scratch writes.
+- Durable handoff is `agent://<id>` / `history://<id>` plus the returned patch. Non-isolated read-only workers may also write ignored notes under `data/jimeng-lab/worker-results/<packet>-<worker>-result.md`.
 
-```txt
-Repo: /Users/arthur/agents/web-access
-Goal docs:
-- @docs/plans/jimeng-dreamina-cli-goal.md
-- @docs/plans/jimeng-fast-contract-extraction.md
-- @docs/provider/jimeng-api-triage.md
-- @TASKS.md
+### Jimeng root-run validation
 
-Task:
-<one concrete slice>
-
-Owned files:
-- <exact file 1>
-- <exact file 2>
-
-Do not edit:
-- packages/jimeng-client/src/endpoint-registry.ts
-- docs/provider/jimeng-api-triage.md
-- docs/plans/jimeng-dreamina-cli-goal.md
-- TASKS.md
-- snapshots, unless explicitly assigned
-- unrelated dirty files
-
-Required output:
-- files changed
-- behavior implemented or findings
-- commands run, if any
-- recommended parent validation commands
-- parent-owned registry/docs changes recommended
-```
-
-### OMP Task Launch Pattern
-
-Launch workers from the GPT-5.5 parent process with one `task` batch, not shell-launched `omp` processes. Keep shared context in the task `context` field and pass each worker brief path in its assignment.
-
-Use agent:
-
-```txt
-jimeng-gemini-worker
-```
-
-Fallback agent:
-
-```txt
-jimeng-kimi-worker
-```
-
-The project agents set:
-
-```txt
-jimeng-gemini-worker: gemini-3.5-flash
-jimeng-kimi-worker: kimi-latest
-```
-
-Project `.omp/config.yml` sets `task.isolation.mode: apfs` on this macOS/APFS workstation. Prefer `isolated: true` for implementation/write workers so OMP creates an APFS CoW workspace, captures the patch/branch result, and cleans the temporary workspace. Keep read-only planning workers non-isolated unless they need scratch writes.
-
-The task batch shape is:
-
-```txt
-agent: jimeng-gemini-worker
-context: # Goal / # Constraints / # Contract
-tasks:
-  - id: JimengMixAudio
-    isolated: true
-    assignment: read @docs/plans/jimeng-workers/worker-a-mix-audio.md and complete only that implementation slice; return the full result in final agent output
-  - id: JimengGenContract
-    assignment: read @docs/plans/jimeng-workers/worker-b-generation-contract.md and complete only that read-only slice
-  - id: JimengTemplateMining
-    assignment: read @docs/plans/jimeng-workers/worker-c-template-mining.md and complete only that read-only slice
-```
-
-Workers should not run tests, typecheck, lint, formatters, or project-wide commands. The parent runs quick validation after each result and full validation after integration.
-
-For isolated workers, the durable handoff is `agent://<id>` / `history://<id>` plus the returned patch. Do not rely on ignored `data/**` result files from isolated workspaces. Non-isolated read-only workers may still write ignored result files under:
-
-```txt
-data/jimeng-lab/worker-results/<packet>-<worker>-result.md
-```
-
-Do not store credentials, cookies, signed URLs, or raw provider responses in worker result files or agent output.
-
-### Merge Protocol
-
-1. Worker finishes and reports through `agent://<id>` / `history://<id>` plus any ignored result file.
-2. Parent reviews only the worker-owned files and rejects edits outside scope.
-3. Parent applies or keeps only the approved owned-file changes.
-4. Parent updates central registry/docs/snapshots.
-5. Parent runs:
+After approved worker patches are integrated, the parent/root should run:
 
 ```bash
-cd /Users/arthur/agents/web-access/packages/jimeng-client
+cd /Users/arthur/agents/packages/jimeng-client
 mise exec -- bun run test
 mise exec -- bun run test:vitest
 mise exec -- bun run typecheck
-cd /Users/arthur/agents/web-access
+cd /Users/arthur/agents
 git diff --check
 ```
 
-6. Parent commits a scoped checkpoint.
+For smaller packets, workers should recommend the narrowest package-local subset first, then the parent decides whether to run the full Jimeng validation above.
 
 ### First OMP Worker Briefs
 
@@ -190,7 +107,7 @@ Promote `/mweb/v1/mix_audio_video` and `/mweb/v1/mix_audio_videos` from dry-run 
 Ready-to-run brief:
 
 ```txt
-Repo: /Users/arthur/agents/web-access
+Repo: /Users/arthur/agents
 
 Read first:
 - @docs/plans/jimeng-dreamina-cli-goal.md
@@ -239,7 +156,7 @@ Do not run:
 - project-wide commands
 
 Parent validation after integration:
-- cd /Users/arthur/agents/web-access/packages/jimeng-client
+- cd /Users/arthur/agents/packages/jimeng-client
 - mise exec -- bun test ./test/mix-audio.test.ts
 - mise exec -- bun run typecheck
 
@@ -261,7 +178,7 @@ Inspect `packages/jimeng-client/src/generation-contract.ts`, generation client/c
 Ready-to-run brief:
 
 ```txt
-Repo: /Users/arthur/agents/web-access
+Repo: /Users/arthur/agents
 
 Read first:
 - @docs/plans/jimeng-dreamina-cli-goal.md
@@ -304,7 +221,7 @@ Inspect CapCut/Jimeng template code and proof references. Classify remaining blo
 Ready-to-run brief:
 
 ```txt
-Repo: /Users/arthur/agents/web-access
+Repo: /Users/arthur/agents
 
 Read first:
 - @docs/plans/jimeng-dreamina-cli-goal.md

@@ -275,7 +275,7 @@ export function writeJimengGenerationContractReportMarkdown(report: JimengGenera
   const lines = [
     "# Jimeng Generation Contract Report",
     "",
-    `Input: \`${report.input_path}\``,
+    `Input: \`${formatGenerationContractInputPath(report.input_path)}\``,
     `Proofs: ${report.proof_count}`,
     `Skipped JSON files: ${report.skipped_json_count}`,
     "",
@@ -294,6 +294,12 @@ export function writeJimengGenerationContractReportMarkdown(report: JimengGenera
     ].map(markdownCell).join(" | ").replace(/^/, "| ").replace(/$/, " |"))
   }
   return `${lines.join("\n")}\n`
+}
+
+function formatGenerationContractInputPath(inputPath: string): string {
+  const relative = path.relative(process.cwd(), inputPath)
+  if (relative && !relative.startsWith("..") && !path.isAbsolute(relative)) return relative
+  return inputPath
 }
 
 export function writeJimengGenerationContractReportOutputs(report: JimengGenerationContractReport, outDir: string): JimengGenerationContractOutputFiles {
@@ -669,4 +675,3 @@ function stringOrNumberValue(value: JsonValue | undefined): string | number | nu
 function sha256(text: string): string {
   return createHash("sha256").update(text).digest("hex")
 }
-

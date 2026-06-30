@@ -146,7 +146,7 @@ Parent-owned after workers finish:
 For a finished worker, run only the relevant focused checks first:
 
 ```bash
-cd /Users/arthur/agents/web-access/packages/jimeng-client
+cd /Users/arthur/agents/packages/jimeng-client
 mise exec -- bun test ./test/<worker-test>.test.ts
 mise exec -- bun run typecheck
 ```
@@ -154,10 +154,10 @@ mise exec -- bun run typecheck
 After integration, run:
 
 ```bash
-cd /Users/arthur/agents/web-access/packages/jimeng-client
+cd /Users/arthur/agents/packages/jimeng-client
 mise exec -- bun run test
 mise exec -- bun run test:vitest
 mise exec -- bun run typecheck
-cd /Users/arthur/agents/web-access
+cd /Users/arthur/agents
 git diff --check
 ```

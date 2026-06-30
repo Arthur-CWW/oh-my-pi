@@ -11,31 +11,27 @@ import {
 } from "../src/packet-plan"
 
 describe("Jimeng packet plans", () => {
-  test("chooses gen-parity as the next value-ranked packet from registry gaps", () => {
-    expect(pickNextJimengPacketId()).toBe("gen-parity")
+  test("chooses lip-sync-human as the next packet from registry packet selection", () => {
+    expect(pickNextJimengPacketId()).toBe("lip-sync-human")
 
     const plan = buildJimengPacketPlan({
-      artifactRoot: "data/jimeng-lab/packet-gen-parity-20260612",
+      artifactRoot: "data/jimeng-lab/packet-lip-sync-human-20260624",
     })
 
-    expect(plan.packetId).toBe("gen-parity")
-    expect(plan.familyIds).toEqual(["G1", "G2", "A1"])
+    expect(plan.packetId).toBe("lip-sync-human")
+    expect(plan.familyIds).toEqual(["L1", "V1", "G2", "A1"])
     expect(plan.approvalRequired).toBe(true)
-    expect(plan.approvalPrompt).toContain("Approve running the gen-parity packet with concurrency 1?")
+    expect(plan.approvalPrompt).toContain("Approve running the lip-sync-human packet with concurrency 1?")
     expect(plan.examples.map((example) => example.id)).toEqual([
-      "kbeauty-still",
-      "faceless-hook-video",
-      "reference-omni-video",
-      "material-audit",
+      "avatar-preprocess",
+      "image-lipsync",
     ])
-    expect(plan.examples[0]?.outputDir).toBe("data/jimeng-lab/packet-gen-parity-20260612/kbeauty-still")
-    expect(plan.gaps[0]).toMatchObject({
-      familyId: "G1",
-      endpoint: "/mweb/v1/execute_generate_audit",
-      status: "blocked",
-    })
-    expect(plan.promotionPlan.join("\n")).toContain("contract-infer --input data/jimeng-lab/packet-gen-parity-20260612")
-    expect(plan.acceptance).toContain("`bun run jimeng:test` passes.")
+    expect(plan.examples[0]?.outputDir).toBe("data/jimeng-lab/packet-lip-sync-human-20260624/avatar-preprocess")
+    expect(plan.gaps.some((gap) => gap.familyId === "G2" && gap.endpoint === "/mweb/v1/mpack_image")).toBe(true)
+    expect(plan.gaps.some((gap) => gap.familyId === "V1" && gap.endpoint === "/mweb/v1/mix_audio_video")).toBe(true)
+    expect(plan.gaps.some((gap) => gap.familyId === "L1" && gap.endpoint === "/mweb/v1/video_generate/pre_process")).toBe(true)
+    expect(plan.promotionPlan.join("\n")).toContain("Run contract-infer over pre-process/result and lip-sync generation samples.")
+    expect(plan.acceptance).toContain("Approved lip-sync media artifact is playable and tied to a typed history record.")
   })
 
   test("renders an approval-ready markdown packet plan without live provider access", () => {

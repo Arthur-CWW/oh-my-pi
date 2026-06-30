@@ -2,7 +2,7 @@
 
 Brief version: `2026-06-12.wave1.c`
 
-Repo: `/Users/arthur/agents/web-access`
+Repo: `/Users/arthur/agents`
 
 Mode: read-only. Do not edit files.
 

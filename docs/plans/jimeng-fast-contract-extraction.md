@@ -82,6 +82,24 @@ The generator should prefer small stable contracts over exhaustive mirrored prov
 
 If a session finds itself manually copying JSON shapes, writing long assertion walls, or making nearly identical registry/test edits, stop and add that transformation to the factory before continuing. The goal is to make the next packet cheaper than the current one.
 
+## Passive Capture Packet
+
+When the next packet is T-2026-06-09-025 passive capture, use the packet factory but make the sample source explicit:
+
+```txt
+packet: reference-controls | persona-voice | lip-sync-human | template-mining | supporting-reads
+sample source: passive-capture only; no live submit, no mutation, no credit spend
+capture root: data/jimeng-captures/<timestamp>-<flow>/
+analysis root: data/jimeng-lab/capture-analysis-<flow>/
+worklist root: data/jimeng-lab/discovery-worklist-<flow>/
+promotion gate: capture-analyze + discovery-worklist + compare gate before any direct client change
+```
+
+Passive capture means the recorder observes an existing background Jimeng page while the UI is navigated; it does not press submit, create personas, launch voice clone jobs, apply canvas edits, or spend credits. If a useful flow cannot expose the request body until a submit/mutation button is pressed, mark the packet blocked with the exact UI state and approval command instead of substituting a lower-value read endpoint.
+
+For reference/persona/video/canvas packets, capture the selected packet's no-submit blocker first; as of T-2026-06-09-024 that means lip-sync/digital-human route and DOM setup before any pre-process or generate submit. Then capture adjacent setup flows in this order unless the ledger selects a narrower packet: subject/persona voice setup, reference-control setup, video-reference/multimodal setup, read-only asset/template/canvas metadata, and canvas edit setup. Each captured flow should produce `raw-network.jsonl`, `redacted-summary.md`, `capture-analyze` output, `discovery-worklist` output, and a single next compare/replay command.
+
+
 ## Scaffold-Then-Promote
 
 The fastest method is to generate scaffolds from saved contracts, then hand-tighten them:

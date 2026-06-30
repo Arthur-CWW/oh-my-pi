@@ -4,6 +4,7 @@ import { Schema } from "effect"
 import {
   type JimengDiscoveryTriageFamilyId,
   type JimengDiscoveryValueRankedGap,
+  selectJimengDiscoveryNextPacket,
   summarizeJimengDiscoveryTriageCoverage,
 } from "./endpoint-registry"
 import { jimengError } from "./errors"
@@ -211,10 +212,7 @@ export function writeJimengPacketPlanOutputs(plan: JimengPacketPlan, outDir: str
 }
 
 export function pickNextJimengPacketId(): JimengPacketId {
-  const coverage = summarizeJimengDiscoveryTriageCoverage({ decisions: ["keep"] })
-  const firstGap = coverage.valueRankedGaps[0]
-  if (!firstGap) return "supporting-reads"
-  return packetIdFromFamily(firstGap.familyId)
+  return selectJimengDiscoveryNextPacket().id
 }
 
 export function writeJimengPacketPlanMarkdown(plan: JimengPacketPlan): string {

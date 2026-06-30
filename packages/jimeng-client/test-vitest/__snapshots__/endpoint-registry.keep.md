@@ -17,6 +17,14 @@
 | T1 | keep | CapCut/template mining | 16 | implemented=10, blocked=6 | 6 |
 | A1 | keep | Assets/history/queue/video info | 6 | implemented=6 | 0 |
 
+## Selected Next Packet
+
+- Packet: `lip-sync-human` - active - Lip-sync and digital human
+- Families: L1, V1, G2, A1
+- Why now: This is the highest-value unfinished packet with active route evidence: generation parity is complete for user-facing workflows, persona/voice mutation is fixture-blocked, and the digital-human workbench is the next concrete capture target.
+- Blocker: Fresh passive capture is still needed from the true digital-human/talking-head workbench before approval-gated pre_process or lip-sync submit replay; the generic ?type=lip_sync composer route is not sufficient.
+- Next command: `bun packages/jimeng-client/src/network-recorder.ts --cdp http://127.0.0.1:9340 --target-url "https://jimeng.jianying.com/ai-tool/digitalHuman?type=digitalHuman&workspace=undefined" --flow lip-sync-human-digitalhuman-submit --durationSec 120`
+
 ## Value-Ranked Remaining Work
 
 1. Generation parity and artifact proof - `G1 /mweb/v1/execute_generate_audit` - blocked command=generate-audit-plan/request-plan-compare/executeJimengGenerateAudit - Blocked on live frontend context: generate-audit-plan and executeJimengGenerateAudit cover material transform and replay/cassette behavior, but there is no passive capture of the frontend /mweb/v1/execute_generate_audit request around a real generation submit proving the complete top-level context and provider response.
