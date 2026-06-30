@@ -1,6 +1,6 @@
 # Jimeng Worker Orchestration
 
-This folder is the parent-controlled context for running Jimeng/Dreamina implementation workers in parallel with OMP `task` subagents. The parent/orchestrator is the main GPT-5.5 Codex process; simple implementation and read-only planning workers use `.omp/agents/jimeng-gemini-worker.md` on the Antigravity subscription lane (`google-antigravity/gemini-3.5-flash-low`) by default, with `.omp/agents/jimeng-kimi-worker.md` as the latest-Kimi fallback when Gemini is unavailable or rate-limited. When Gemini is unstable and the slice is still bounded enough for a subagent, fall back to a GPT-5.5 `task` or `reviewer` subagent before pulling the work into the parent.
+This folder is the parent-controlled context for running Jimeng/Dreamina implementation workers in parallel with OMP `task` subagents. The parent/orchestrator is the main GPT-5.5 Codex process. For Jimeng worker/code generation, prefer the Codex subscription-backed OMP/Codex lane (`task/default`, `reviewer/default`, or explicit GPT-5.5 task agents) before Gemini or Kimi. Use `.omp/agents/jimeng-gemini-worker.md` only for cheap bounded read-only scouts when Codex capacity should be reserved, and use `.omp/agents/jimeng-kimi-worker.md` only when explicitly chosen or when Codex/Gemini are unavailable.
 
 Parent agent responsibilities:
 
@@ -32,23 +32,23 @@ Preferred worker split:
 
 ```txt
 Parent/orchestrator: GPT-5.5 main process
-Simple non-core implementation/read-only packet workers: jimeng-gemini-worker (`google-antigravity/gemini-3.5-flash-low`)
-Trickier bounded implementation/review workers: GPT-5.5 `task` / `reviewer` subagents
-Fallback when Gemini is unavailable or rate-limited and GPT-5.5 subagents are not the right fit: jimeng-kimi-worker (kimi-latest)
+Implementation and review workers: Codex subscription-backed GPT-5.5 `task/default` / `reviewer/default` subagents
+Cheap bounded read-only scouts, when useful: jimeng-gemini-worker (`google-antigravity/gemini-3.5-flash-low`)
+Fallback only when explicitly chosen or Codex/Gemini are unavailable: jimeng-kimi-worker (kimi-latest)
 ```
 
-Use `jimeng-gemini-worker` for bounded edits that are not foundational for other work: fixture promotion, endpoint-specific schema/client wrappers, packet gap review, small docs/registry deltas, dashboard polish, and low-risk generated-code tightening. Do not use it as the final owner for shared transport, Effect layer design, cross-command CLI architecture, schema strategy, or irreversible provider workflow choices.
+Use Codex subscription-backed workers for bounded implementation/review work, especially contract promotion, schema/client wrappers, CLI behavior, and any patch expected to be integrated. `jimeng-gemini-worker` is still acceptable for narrow read-only packet gap reviews or cheap scouts. Do not use Gemini or Kimi as the final owner for shared transport, Effect layer design, cross-command CLI architecture, schema strategy, or irreversible provider workflow choices.
 
-The project worker agents pin:
+Fallback worker agents:
 
 ```txt
 jimeng-gemini-worker: google-antigravity/gemini-3.5-flash-low
 jimeng-kimi-worker: kimi-latest
 ```
 
-The project worker agent intentionally does not expose `bash`. This prevents simple workers from spending cycles on validation, git inspection, foreground browser automation, or provider commands that the GPT-5.5 parent must run once against the integrated tree.
+The lightweight project worker agents intentionally do not expose `bash`. This prevents simple workers from spending cycles on validation, git inspection, foreground browser automation, or provider commands that the GPT-5.5 parent must run once against the integrated tree.
 
-Project `.omp/config.yml` sets `task.isolation.mode: apfs` on this macOS/APFS workstation. Prefer task isolation for writing workers: set `isolated: true` on each implementation task item so OMP creates an APFS CoW workspace, captures the worker patch, and cleans the workspace after completion. Read-only planning workers can stay non-isolated unless they need scratch writes. OAuth-only subagent auth is no longer enforced by repo-local patches; use explicit subscription-lane model IDs such as `google-antigravity/gemini-3.5-flash-low` when avoiding inherited paid API-key lanes.
+Project `.omp/config.yml` sets `task.isolation.mode: apfs` on this macOS/APFS workstation. Prefer task isolation for writing workers: set `isolated: true` on each implementation task item so OMP creates an APFS CoW workspace, captures the worker patch, and cleans the workspace after completion. Read-only planning workers can stay non-isolated unless they need scratch writes. Use Codex subscription-backed task/reviewer agents for worker/code generation by default; use explicit third-party subscription-lane model IDs only when deliberately routing away from Codex.
 
 Launch workers from the parent GPT-5.5 process with one OMP `task` batch. Do not shell out to separate `omp` processes for normal worker fan-out.
 

@@ -1,6 +1,6 @@
 # Jimeng Worker Session Log
 
-Parent-owned log for OMP task subagent sessions. Main process/orchestrator is GPT-5.5; workers use Gemini 3.5 Flash through `.omp/agents/jimeng-gemini-worker.md` by default, with `.omp/agents/jimeng-kimi-worker.md` (`kimi-latest`) as the fallback when Gemini is unavailable or rate-limited. Keep this lightweight and update it when workers start, finish, fail, or are abandoned. Detailed traces and result files belong under ignored `data/**`.
+Parent-owned log for OMP task subagent sessions. Main process/orchestrator is GPT-5.5; new Jimeng implementation/review workers should use the Codex subscription-backed OMP/Codex lane (`task/default`, `reviewer/default`, or explicit GPT-5.5 task agents) by default. Gemini remains available for cheap bounded read-only scouts; Kimi is fallback only when explicitly chosen or Codex/Gemini are unavailable. Keep this lightweight and update it when workers start, finish, fail, or are abandoned. Detailed traces and result files belong under ignored `data/**`.
 
 ## Wave 1
 
@@ -75,7 +75,7 @@ Parent-owned log for OMP task subagent sessions. Main process/orchestrator is GP
 
 | Worker | Agent ID | Worker Model | Parent Model | Brief | Mode | Status | Result | Transcript | Notes |
 |---|---|---|---|---|---|---|---|---|---|
-| AA lip-sync contract promotion | pending | `jimeng-gemini-worker` or `task/default` | `gpt-5.5` | `worker-d-lip-sync-contract-promotion.md` | write | not launched | pending | pending | Launch only after the approved browser-backed image/avatar upload plus submit/poll/download proof exists under `data/jimeng-lab/packet-lip-sync-human-20260630/packet-artifacts/image-lipsync/`. |
+| AA lip-sync contract promotion | pending | `task/default` or explicit GPT-5.5 task | `gpt-5.5` | `worker-d-lip-sync-contract-promotion.md` | write | not launched | pending | pending | Launch only after the approved browser-backed image/avatar upload plus submit/poll/download proof exists under `data/jimeng-lab/packet-lip-sync-human-20260630/packet-artifacts/image-lipsync/`. |
 | AB lip-sync contract review | pending | `reviewer/default` | `gpt-5.5` | `worker-e-lip-sync-contract-review.md` | review | not launched | pending | pending | Launch only after Worker AA returns a patch. |
 ## Metrics
 

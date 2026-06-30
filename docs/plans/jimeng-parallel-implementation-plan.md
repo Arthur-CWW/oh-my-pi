@@ -90,7 +90,8 @@ Follow the repo-wide packet SOP in `docs/plans/new-workstream-subagent-packets.m
 ### OMP launch and handoff
 
 - Launch workers from the GPT-5.5 parent process with OMP `task` subagents, not shell-launched `omp` processes.
-- Use `jimeng-gemini-worker`; fall back to `jimeng-kimi-worker` for the same bounded slices if Gemini is unavailable or rate-limited.
+- Use Codex subscription-backed OMP/Codex workers (`task/default`, `reviewer/default`, or explicit GPT-5.5 task agents) for implementation and review by default.
+- Use `jimeng-gemini-worker` only for cheap bounded read-only scouts when useful; use `jimeng-kimi-worker` only when explicitly chosen or Codex/Gemini are unavailable.
 - Prefer `isolated: true` for implementation/write workers on this APFS workstation; keep read-only planning workers non-isolated unless they need scratch writes.
 - Durable handoff is `agent://<id>` / `history://<id>` plus the returned patch. Non-isolated read-only workers may also write ignored notes under `data/jimeng-lab/worker-results/<packet>-<worker>-result.md`.
 

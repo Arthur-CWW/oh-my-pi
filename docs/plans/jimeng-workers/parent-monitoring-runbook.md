@@ -1,6 +1,6 @@
 # Parent Monitoring Runbook
 
-The parent GPT-5.5 Codex process coordinates OMP `task` subagents running Gemini 3.5 Flash by default and integrates their output. If Gemini is unavailable or rate-limited, use the latest-Kimi fallback agent for the same simple implementation slices.
+The parent GPT-5.5 Codex process coordinates OMP `task` subagents and integrates their output. For Jimeng worker/code generation, use Codex subscription-backed `task/default`, `reviewer/default`, or explicit GPT-5.5 task agents by default. Use Gemini Flash only for cheap bounded read-only scouts when useful; use latest Kimi only when explicitly chosen or when Codex/Gemini are unavailable.
 
 ## Start A Wave
 
@@ -15,15 +15,15 @@ bun packages/jimeng-client/src/artifact-dashboard.ts packet next --db data/jimen
 
 If this returns no claimable packet and `lip-sync-human` is still blocked on live upload/submit approval, do not launch a worker wave. The next parent action is the approval request for the live proof. Launch workers only after approval produces fresh proof evidence, or after the ledger returns a non-blocked packet.
 
-Historical Wave 1 batch shape:
+Historical Wave 1 batch shape, kept as a structure example only. For new implementation/review waves, replace the `agent` with Codex subscription-backed `task/default` or `reviewer/default` unless deliberately launching a cheap read-only Gemini scout:
 
 ```txt
-agent: jimeng-gemini-worker  # fallback: jimeng-kimi-worker
+agent: task/default  # review workers: reviewer/default; cheap read-only scout fallback: jimeng-gemini-worker
 context:
   # Goal
   Advance the Jimeng/Dreamina worker wave while GPT-5.5 remains the parent orchestrator.
   # Constraints
-  Workers run on Gemini 3.5 Flash via .omp/agents/jimeng-gemini-worker.md by default; fallback workers run on latest Kimi via .omp/agents/jimeng-kimi-worker.md when Gemini is unavailable or rate-limited. Workers only touch assigned files, never central registry/docs/TASKS/snapshots unless explicitly assigned, never run tests/typecheck/lint/formatters/project-wide commands, and never make live/paid/mutating/visible-provider calls.
+  Workers run on the Codex subscription-backed OMP/Codex lane by default. Workers only touch assigned files, never central registry/docs/TASKS/snapshots unless explicitly assigned, never run tests/typecheck/lint/formatters/project-wide commands, and never make live/paid/mutating/visible-provider calls.
   # Contract
   Parent owns registry/docs/snapshots/final validation/commits. Isolated write workers return patches through OMP; read-only workers return findings through agent output.
 tasks:
@@ -120,7 +120,7 @@ git diff --check
 
 ## Post-Run Analysis
 
-After the wave is integrated or abandoned, run the post-run analysis as another OMP task subagent using `.omp/agents/jimeng-gemini-worker.md`, or run it in the parent if no subagent is needed. Keep the parent GPT-5.5 process responsible for deciding which lessons become durable docs.
+After the wave is integrated or abandoned, run the post-run analysis as another Codex subscription-backed OMP task subagent, or run it in the parent if no subagent is needed. Keep the parent GPT-5.5 process responsible for deciding which lessons become durable docs.
 
 The parent should then review the generated report, update `session-log.md` metrics, and fold durable lessons into:
 
