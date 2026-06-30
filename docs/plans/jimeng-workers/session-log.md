@@ -70,6 +70,13 @@ Parent-owned log for OMP task subagent sessions. Main process/orchestrator is GP
 | X digital-human artifact scout | `LipSyncArtifactScout` | `explore/default` | `gpt-5.5` | inline assignment: inspect packet manifest and proof roots | read-only | completed | `agent://LipSyncArtifactScout` | `history://LipSyncArtifactScout` | Accepted as packet/ledger audit: the old packet manifest still had placeholder commands and no concrete live proof bundle. |
 | Y digital-human ui submit impl | `DigitalHumanUiSubmitImpl` | `task/default` | `gpt-5.5` | inline assignment: retarget browser-backed lip-sync to the real digital-human workbench | write | completed | `agent://DigitalHumanUiSubmitImpl` | `history://DigitalHumanUiSubmitImpl` | Accepted with parent review-driven fixes after isolated merge friction: browser session now targets `?type=digitalHuman&workspace=undefined`, supports hidden local `--image` upload, prefers visible voice labels, passes `voiceTitle`/`prompt` from CLI, and throws `JIMENG_LIP_SYNC_SUBMIT_DISABLED_AFTER_POPULATION` when the real UI still blocks submit. |
 | Z digital-human ui review | `DigitalHumanUiSubmitReview2` | `reviewer/default` | `gpt-5.5` | inline assignment: review integrated digital-human browser patch | review | completed | `agent://DigitalHumanUiSubmitReview2` | `history://DigitalHumanUiSubmitReview2` | Reviewer rejected the first pass because live `--image` still depended on pre-uploaded provider assets and provider-URI DOM matching remained unsupported magic; parent removed the dependency, rejected provider-URI-only selection explicitly, then reran focused/package validation. |
+
+## Wave 9 Prepared
+
+| Worker | Agent ID | Worker Model | Parent Model | Brief | Mode | Status | Result | Transcript | Notes |
+|---|---|---|---|---|---|---|---|---|---|
+| AA lip-sync contract promotion | pending | `jimeng-gemini-worker` or `task/default` | `gpt-5.5` | `worker-d-lip-sync-contract-promotion.md` | write | not launched | pending | pending | Launch only after the approved browser-backed image/avatar upload plus submit/poll/download proof exists under `data/jimeng-lab/packet-lip-sync-human-20260630/packet-artifacts/image-lipsync/`. |
+| AB lip-sync contract review | pending | `reviewer/default` | `gpt-5.5` | `worker-e-lip-sync-contract-review.md` | review | not launched | pending | pending | Launch only after Worker AA returns a patch. |
 ## Metrics
 
 Fill this table after each worker finishes. Use `unknown` instead of guessing.

@@ -130,6 +130,11 @@ If OMP does not expose cost directly, record token counts and model id so cost c
 
 Historical waves through Wave 8 are recorded in `session-log.md`. As of the 2026-06-30 checkpoint, `lip-sync-human` is the only highest-value remaining packet and it is blocked on explicit approval for a browser-backed image/avatar upload plus submit/poll/download proof. No new worker should be launched until either that proof exists and needs contract promotion/review, or the SQLite packet ledger returns a new claimable row.
 
+Post-approval lip-sync briefs are ready:
+
+- `worker-d-lip-sync-contract-promotion.md` for a bounded implementation worker;
+- `worker-e-lip-sync-contract-review.md` for the fresh reviewer worker over that patch.
+
 ## Historical Wave 1
 
 | Worker | Mode | Brief | Write scope |

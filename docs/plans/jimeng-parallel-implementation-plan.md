@@ -9,6 +9,8 @@ Standalone worker briefs and the parent runbook live in `docs/plans/jimeng-worke
 - `docs/plans/jimeng-workers/worker-a-mix-audio.md`
 - `docs/plans/jimeng-workers/worker-b-generation-contract.md`
 - `docs/plans/jimeng-workers/worker-c-template-mining.md`
+- `docs/plans/jimeng-workers/worker-d-lip-sync-contract-promotion.md`
+- `docs/plans/jimeng-workers/worker-e-lip-sync-contract-review.md`
 
 ## Current High-Value State
 
@@ -66,6 +68,11 @@ Historical Wave 1 (`mix-audio`, `generation-contract`, and `template-mining`) is
 - `packages/jimeng-client/src/lip-sync.ts`;
 - `packages/jimeng-client/src/video-preprocess.ts`;
 - focused tests under `packages/jimeng-client/test/lip-sync*.test.ts` or `video-preprocess.test.ts`.
+
+The ready post-approval briefs are:
+
+- implementation: `docs/plans/jimeng-workers/worker-d-lip-sync-contract-promotion.md`;
+- review: `docs/plans/jimeng-workers/worker-e-lip-sync-contract-review.md`.
 
 The parent still owns central registry, triage docs, `TASKS.md`, packet ledger writes, and Vitest snapshots. If approval is not granted, do not switch to low-value supporting reads merely to keep workers busy.
 
