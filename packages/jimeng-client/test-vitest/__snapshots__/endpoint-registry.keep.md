@@ -22,8 +22,8 @@
 - Packet: `lip-sync-human` - active - Lip-sync and digital human
 - Families: L1, V1, G2, A1
 - Why now: This is the highest-value unfinished packet with active route evidence: generation parity is complete for user-facing workflows, persona/voice mutation is fixture-blocked, and the digital-human workbench is the next concrete capture target.
-- Blocker: Fresh passive capture is still needed from the true digital-human/talking-head workbench before approval-gated pre_process or lip-sync submit replay; the generic ?type=lip_sync composer route is not sufficient.
-- Next command: `bun packages/jimeng-client/src/network-recorder.ts --cdp http://127.0.0.1:9340 --target-url "https://jimeng.jianying.com/ai-tool/digitalHuman?type=digitalHuman&workspace=undefined" --flow lip-sync-human-digitalhuman-submit --durationSec 120`
+- Blocker: Background passive capture now confirms the digital-human route and voice panel, but pre-process/generate payloads do not emit until role/avatar, voice, and script state advances toward provider task creation.
+- Next command: `bun packages/jimeng-client/src/browser-proxy-cli.ts lip-sync --transport cdp-ui --cdp http://127.0.0.1:9340 --target-url "type=digitalHuman" --image <local-persona-image.png> --voice-id <voice-id-or-visible-label> --voice-title "直爽女大" --text "三秒告诉你为什么这款产品值得试。" --outDir data/jimeng-lab/packet-lip-sync-human-20260630/packet-artifacts/image-lipsync --pollIntervalMs 3000 --maxPolls 30`
 
 ## Value-Ranked Remaining Work
 

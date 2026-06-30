@@ -431,13 +431,14 @@ const PACKET_QUEUE: JimengDiscoveryPacketQueueItem[] = [
     goal: "Turn image/avatar or VOD references into talking-head UGC assets with typed pre-process, submit, poll, and artifact lookup.",
     whyNow: "This is the highest-value unfinished packet with active route evidence: generation parity is complete for user-facing workflows, persona/voice mutation is fixture-blocked, and the digital-human workbench is the next concrete capture target.",
     evidence: [
+      "docs/qa/jimeng-lip-sync-digitalhuman-passive-capture-20260630.md",
       "docs/qa/jimeng-video-preprocess-plan-20260612.md",
       "docs/qa/jimeng-lip-sync-human-preprocess-client-20260612.md",
       "docs/qa/jimeng-lip-sync-human-contract-infer-20260612.md",
       "data/jimeng-lab/proof-20260612-lip-sync-human-contract-infer/",
     ],
-    blocker: "Fresh passive capture is still needed from the true digital-human/talking-head workbench before approval-gated pre_process or lip-sync submit replay; the generic ?type=lip_sync composer route is not sufficient.",
-    nextCommand: "bun packages/jimeng-client/src/network-recorder.ts --cdp http://127.0.0.1:9340 --target-url \"https://jimeng.jianying.com/ai-tool/digitalHuman?type=digitalHuman&workspace=undefined\" --flow lip-sync-human-digitalhuman-submit --durationSec 120",
+    blocker: "Background passive capture now confirms the digital-human route and voice panel, but pre-process/generate payloads do not emit until role/avatar, voice, and script state advances toward provider task creation.",
+    nextCommand: "bun packages/jimeng-client/src/browser-proxy-cli.ts lip-sync --transport cdp-ui --cdp http://127.0.0.1:9340 --target-url \"type=digitalHuman\" --image <local-persona-image.png> --voice-id <voice-id-or-visible-label> --voice-title \"直爽女大\" --text \"三秒告诉你为什么这款产品值得试。\" --outDir data/jimeng-lab/packet-lip-sync-human-20260630/packet-artifacts/image-lipsync --pollIntervalMs 3000 --maxPolls 30",
   },
   {
     id: "reference-controls",

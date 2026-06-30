@@ -27,8 +27,8 @@ describe("Jimeng triage packet coverage", () => {
       families: ["L1", "V1", "G2", "A1"],
     })
     expect(selected.whyNow).toContain("generation parity is complete")
-    expect(selected.blocker).toContain("Fresh passive capture")
-    expect(selected.nextCommand).toContain("network-recorder")
+    expect(selected.blocker).toContain("Background passive capture now confirms")
+    expect(selected.nextCommand).toContain("browser-proxy-cli.ts lip-sync")
     expect(selected.nextCommand).toContain("digitalHuman")
   })
 
@@ -50,10 +50,10 @@ describe("Jimeng triage packet coverage", () => {
     expect(coverage.selectedPacket.id).toBe("lip-sync-human")
     expect(markdown).toContain("## Selected Next Packet")
     expect(markdown).toContain("- Packet: `lip-sync-human` - active - Lip-sync and digital human")
-    expect(markdown).toContain("Next command: `bun packages/jimeng-client/src/network-recorder.ts")
-    expect(selected.evidence).toContain("docs/qa/jimeng-lip-sync-human-contract-infer-20260612.md")
+    expect(markdown).toContain("Next command: `bun packages/jimeng-client/src/browser-proxy-cli.ts lip-sync")
+    expect(selected.evidence).toContain("docs/qa/jimeng-lip-sync-digitalhuman-passive-capture-20260630.md")
     expect(selected.nextCommand).toBe(
-      "bun packages/jimeng-client/src/network-recorder.ts --cdp http://127.0.0.1:9340 --target-url \"https://jimeng.jianying.com/ai-tool/digitalHuman?type=digitalHuman&workspace=undefined\" --flow lip-sync-human-digitalhuman-submit --durationSec 120",
+      "bun packages/jimeng-client/src/browser-proxy-cli.ts lip-sync --transport cdp-ui --cdp http://127.0.0.1:9340 --target-url \"type=digitalHuman\" --image <local-persona-image.png> --voice-id <voice-id-or-visible-label> --voice-title \"直爽女大\" --text \"三秒告诉你为什么这款产品值得试。\" --outDir data/jimeng-lab/packet-lip-sync-human-20260630/packet-artifacts/image-lipsync --pollIntervalMs 3000 --maxPolls 30",
     )
   })
 
