@@ -10,6 +10,15 @@ Standalone worker briefs and the parent runbook live in `docs/plans/jimeng-worke
 - `docs/plans/jimeng-workers/worker-b-generation-contract.md`
 - `docs/plans/jimeng-workers/worker-c-template-mining.md`
 
+## Current High-Value State
+
+As of the 2026-06-30 checkpoint, the SQLite packet ledger reports no claimable non-blocked packet. `gen-parity`, `persona-voice`, `reference-controls`, and `template-mining` have already had worker waves and are done, skipped, or parked. `lip-sync-human` is the highest-value remaining packet, but it is approval-gated because the next useful proof uploads an image/avatar, may create provider task state, and may spend credits.
+
+Do not relaunch the historical Wave 1 workers unless a new regression or stale-evidence row explicitly reopens their packet. The next useful parallel work should be created only after either:
+
+- Arthur approves the live `lip-sync-human` proof, producing fresh request/response/artifact evidence for contract promotion; or
+- `jimeng-artifacts packet next` returns a new claimable packet that is not `blocked`, `done`, or `skipped`.
+
 ## Remaining High-Value Work
 
 1. `gen-parity`
@@ -49,14 +58,16 @@ Standalone worker briefs and the parent runbook live in `docs/plans/jimeng-worke
 - Workers must not revert unrelated repo changes or edit files outside their ownership.
 - Workers should return: files changed, commands run if any, summary of behavior, recommended parent validation commands, and any central registry/docs changes the parent should make.
 
-## Recommended First Parallel Wave
+## Next Parallel Wave Policy
 
-1. Parent: finish persona/voice registry correction for existing typed helpers and refresh snapshots.
-2. Worker A: implement typed replay-tested `mix-audio` service helpers from the existing dry-run plan.
-3. Worker B: inspect `generation-contract` and propose the smallest typed submit/poll/artifact promotion that can be done without live spend.
-4. Worker C: inspect template-mining gaps and identify which blocked CapCut/Jimeng template endpoint can be promoted from existing fixtures versus which requires passive UI capture.
+Historical Wave 1 (`mix-audio`, `generation-contract`, and `template-mining`) is complete; see `docs/plans/jimeng-workers/session-log.md`. The next write worker should be a `lip-sync-human` contract-promotion worker, but only after the parent has gathered an approved live proof bundle. Its likely ownership should be limited to the observed contract files, for example:
 
-This wave avoids central-file conflicts while still moving the highest-value packets forward.
+- `packages/jimeng-client/src/browser-session.ts` only if the UI submit path needs a small fix from the proof;
+- `packages/jimeng-client/src/lip-sync.ts`;
+- `packages/jimeng-client/src/video-preprocess.ts`;
+- focused tests under `packages/jimeng-client/test/lip-sync*.test.ts` or `video-preprocess.test.ts`.
+
+The parent still owns central registry, triage docs, `TASKS.md`, packet ledger writes, and Vitest snapshots. If approval is not granted, do not switch to low-value supporting reads merely to keep workers busy.
 
 ## GPT-5.5 Parent / OMP Subagent Orchestration
 

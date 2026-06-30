@@ -6,7 +6,16 @@ The parent GPT-5.5 Codex process coordinates OMP `task` subagents running Gemini
 
 Launch workers with the OMP task tool from the parent process. Use one batch so shared context is injected once and workers run in parallel. Use `isolated: true` for implementation/write workers; project `.omp/config.yml` pins `task.isolation.mode: apfs`, so OMP should create an APFS CoW workspace, return a patch/branch result, and clean the temporary workspace. Keep read-only planning workers non-isolated unless they need scratch writes.
 
-Task batch:
+Before launching, query the packet ledger:
+
+```bash
+cd /Users/arthur/agents
+bun packages/jimeng-client/src/artifact-dashboard.ts packet next --db data/jimeng-lab/artifact-log.sqlite
+```
+
+If this returns no claimable packet and `lip-sync-human` is still blocked on live upload/submit approval, do not launch a worker wave. The next parent action is the approval request for the live proof. Launch workers only after approval produces fresh proof evidence, or after the ledger returns a non-blocked packet.
+
+Historical Wave 1 batch shape:
 
 ```txt
 agent: jimeng-gemini-worker  # fallback: jimeng-kimi-worker
@@ -27,7 +36,7 @@ tasks:
     assignment: Read docs/plans/jimeng-workers/worker-c-template-mining.md and complete only that read-only planning slice.
 ```
 
-Record these planned agent ids in `docs/plans/jimeng-workers/session-log.md` before launch.
+Record planned agent ids in `docs/plans/jimeng-workers/session-log.md` before launch. Do not reuse completed historical ids for new work.
 
 ## Monitor
 
@@ -60,11 +69,11 @@ Reject a worker result if it:
 
 ## Quick Validation
 
-For Worker A after integrating/accepting its owned-file edits:
+For a code worker after integrating/accepting its owned-file edits:
 
 ```bash
 cd /Users/arthur/agents/packages/jimeng-client
-mise exec -- bun test ./test/mix-audio.test.ts
+mise exec -- bun test ./test/<worker-test>.test.ts
 mise exec -- bun run typecheck
 ```
 

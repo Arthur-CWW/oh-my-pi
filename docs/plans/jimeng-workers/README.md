@@ -23,10 +23,11 @@ Efficiency protocol:
 - Each packet status must be one of `todo`, `in_progress`, `review`, `done`, or `blocked`, with an exact next command/probe. `blocked` requires a reason and unblock condition; `done` requires parent-observed validation.
 - Run implementation and review as separate agents when the implementation is non-trivial: one bounded implementation worker, then one fresh reviewer worker over the patch/result. The parent integrates only after the reviewer reports concrete issues or accepts the slice.
 - Keep the parent context thin. Workers return a compact artifact/result; reviewers inspect `agent://<impl-id>` / `history://<impl-id>` and the assigned files instead of making the parent carry the whole transcript.
-- The single source of truth for packet/workstream status is the SQLite dashboard DB, currently `data/jimeng-lab/artifact-log.sqlite`. Docs may describe policy and durable summaries, but they must not duplicate live packet status tables. Update packet rows with `jimeng-artifacts packet set|next`; update docs only after the ledger row is written.
+- The single source of truth for packet/workstream status is the SQLite dashboard DB, currently `data/jimeng-lab/artifact-log.sqlite`. Docs may describe policy and durable summaries, but they must not duplicate live packet status tables. Update packet rows with `jimeng-artifacts packet set|get|next` or, from the repo root when the package bin is unavailable, `bun packages/jimeng-client/src/artifact-dashboard.ts packet set|get|next`; update docs only after the ledger row is written.
 - The parent should not inspect full implementation files unless needed to resolve a reviewer finding, validate an integration error, or design a shared contract. Default parent inputs are worker final output, reviewer final output, focused validation output, and packet ledger state.
 - After a coherent set of slices is integrated, reviewed, and validated, make a scoped Git commit before starting the next risky/shared wave. The commit boundary is the recovery point across auto-compaction and prevents later waves from re-litigating finished status.
 - If the next step is blocked by live spend/capture/account mutation, ask once with the exact command/artifact path. After approval, continue; if not approved, keep work inside the same packet instead of switching to an easier family.
+- If `packet next` returns none and the highest-value packet is approval-gated, do not launch workers for already-completed packets. Ask for the approval-gated proof or wait for a new claimable packet; workers should not be used as filler.
 Preferred worker split:
 
 ```txt
@@ -125,7 +126,11 @@ If OMP does not expose cost directly, record token counts and model id so cost c
 - Parent summarizes only deltas: changed files, validation result, blocker, next action.
 - If a worker discovers missing context, it should ask for one precise file or fact rather than broad repo exploration.
 
-## Wave 1
+## Current Launch Gate
+
+Historical waves through Wave 8 are recorded in `session-log.md`. As of the 2026-06-30 checkpoint, `lip-sync-human` is the only highest-value remaining packet and it is blocked on explicit approval for a browser-backed image/avatar upload plus submit/poll/download proof. No new worker should be launched until either that proof exists and needs contract promotion/review, or the SQLite packet ledger returns a new claimable row.
+
+## Historical Wave 1
 
 | Worker | Mode | Brief | Write scope |
 |---|---|---|---|
