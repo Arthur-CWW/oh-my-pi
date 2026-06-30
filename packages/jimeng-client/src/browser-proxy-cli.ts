@@ -35,6 +35,7 @@ import {
 import {
   createJimengBrowserFetch,
   loadJimengSessionFromBrowser,
+  preflightJimengLipSyncImageInBrowser,
   submitJimengLipSyncImageInBrowser,
   submitJimengText2ImageInBrowser,
 } from "./browser-session"
@@ -648,6 +649,7 @@ Options:
   --prompt <text>               Generation prompt
   --outDir <dir>                Output directory (default: data/jimeng-lab/browser-proxy)
   --dryRun                      Write patched plan only; image2video still uploads --image to obtain a provider URI
+  --preflight                   For lip-sync cdp-ui, populate/check current workbench state and stop before submit/upload
   --noDownload                  Submit/poll but do not download artifacts
   --pollIntervalMs <ms>         Poll interval (default: 3000)
   --maxPolls <n>                Max polls (default: 30)
@@ -1247,6 +1249,7 @@ interface CliArgs {
   prompt?: string
   outDir: string
   dryRun: boolean
+  preflight: boolean
   noDownload: boolean
   pollIntervalMs: number
   maxPolls: number
@@ -5964,6 +5967,32 @@ async function runBrowserProxyCommand(args: CliArgs): Promise<void> {
     }
 
     if (hasImageInput) {
+      if (args.preflight) {
+        if (args.transportMode !== "cdp-ui") {
+          throw new Error("lip-sync preflight is only implemented with --transport cdp-ui")
+        }
+        if (args.image) {
+          throw new Error("lip-sync preflight does not upload local images; preselect a role/avatar in the browser and pass --imageUri current")
+        }
+        const preflight = await preflightJimengLipSyncImageInBrowser({
+          cdpUrl: args.cdpUrl,
+          targetUrl: args.targetUrl,
+          imageUri: args.imageUri ?? "current",
+          voiceId: args.voiceId,
+          voiceLabel: args.voiceTitle ?? args.toneKey,
+          text: ttsInfo.text,
+          actionText: args.prompt,
+        })
+        writeJson(path.join(dirs.normalizedDir, `${runId}-preflight.json`), redactJimengProofForNormalized({
+          command: "lip-sync",
+          mode: "image-preflight",
+          transport: "cdp-ui",
+          preflight,
+        }))
+        console.log(`[jimeng-browser-proxy] lip-sync preflight saved submitReady=${preflight.submitReady}`)
+        return
+      }
+
       const referenceUploads: ReferenceUploadSummary[] = []
       const localBrowserImagePath = args.image && !args.dryRun && args.transportMode === "cdp-ui"
         ? args.image
@@ -6711,6 +6740,7 @@ function parseArgs(argv: string[]): CliArgs {
     prompt: flags.prompt,
     outDir: flags.outDir ?? "data/jimeng-lab/browser-proxy",
     dryRun: flags.dryRun === "true",
+    preflight: flags.preflight === "true",
     noDownload: flags.noDownload === "true",
     pollIntervalMs: Number(flags.pollIntervalMs ?? 3000),
     maxPolls: Number(flags.maxPolls ?? 30),

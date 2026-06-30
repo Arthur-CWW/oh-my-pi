@@ -27,7 +27,7 @@ describe("Jimeng triage packet coverage", () => {
       families: ["L1", "V1", "G2", "A1"],
     })
     expect(selected.whyNow).toContain("generation parity is complete")
-    expect(selected.blocker).toContain("Background passive capture now confirms")
+    expect(selected.blocker).toContain("Background CDP preflight now confirms")
     expect(selected.nextCommand).toContain("browser-proxy-cli.ts lip-sync")
     expect(selected.nextCommand).toContain("digitalHuman")
   })
@@ -53,7 +53,7 @@ describe("Jimeng triage packet coverage", () => {
     expect(markdown).toContain("Next command: `bun packages/jimeng-client/src/browser-proxy-cli.ts lip-sync")
     expect(selected.evidence).toContain("docs/qa/jimeng-lip-sync-digitalhuman-passive-capture-20260630.md")
     expect(selected.nextCommand).toBe(
-      "bun packages/jimeng-client/src/browser-proxy-cli.ts lip-sync --transport cdp-ui --cdp http://127.0.0.1:9340 --target-url \"type=digitalHuman\" --image <local-persona-image.png> --voice-id <voice-id-or-visible-label> --voice-title \"直爽女大\" --text \"三秒告诉你为什么这款产品值得试。\" --outDir data/jimeng-lab/packet-lip-sync-human-20260630/packet-artifacts/image-lipsync --pollIntervalMs 3000 --maxPolls 30",
+      "bun packages/jimeng-client/src/browser-proxy-cli.ts lip-sync --transport cdp-ui --cdp http://127.0.0.1:9340 --target-url \"type=digitalHuman\" --image <local-persona-image.png> --voice-id <voice-id-or-visible-label> --voice-title \"直爽女大\" --text \"三秒告诉你为什么这款产品值得试。\" --prompt \"自然看镜头，轻微点头，语气直接。\" --outDir data/jimeng-lab/packet-lip-sync-human-20260630/packet-artifacts/image-lipsync --pollIntervalMs 3000 --maxPolls 30",
     )
   })
 

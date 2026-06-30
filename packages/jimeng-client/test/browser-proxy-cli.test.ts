@@ -21,12 +21,14 @@ describe("jimeng-browser-proxy normalized proof redaction", () => {
       "replay",
       "--cassette=data/jimeng-lab/cassettes/example.json",
       "--dryRun",
+      "--preflight",
     ])).toEqual({
       channel: "asset",
       keyword: "",
       transport: "replay",
       cassette: "data/jimeng-lab/cassettes/example.json",
       dryRun: "true",
+      preflight: "true",
     })
   })
 

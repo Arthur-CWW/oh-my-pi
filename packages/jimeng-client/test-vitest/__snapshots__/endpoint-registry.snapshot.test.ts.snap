@@ -208,7 +208,7 @@ exports[`Jimeng endpoint registry snapshots > snapshots keep-family gap summary 
             "data/jimeng-lab/proof-20260612-lip-sync-human-contract-infer/preprocess/",
           ],
           "nextProbe": "Passively capture the real lip-sync/digital-human pre-process submit flow after entering the actual talking-head workbench state, compare it with video-preprocess-plan using request-plan-compare, then record/replay through submitJimengVideoPreprocess only after explicit approval because it creates task state.",
-          "note": "Blocked at live lip-sync entry state: pre-process request bodies are modeled and typed service/cassette replay exists, but the current ?type=lip_sync route still renders a generic composer with no confirmed voice-picker controls, and the first browser-backed lip-sync attempt failed with JIMENG_LIP_SYNC_VOICE_OPTION_MISSING.",
+          "note": "Blocked at provider task creation: request bodies are modeled and typed service/cassette replay exists, and background CDP preflight now proves the true digital-human route, voice picker, and script/action editor population. A live pre_process payload still requires approved role/avatar upload or preselected avatar state that enables generation.",
           "status": "blocked",
         },
         {
@@ -222,7 +222,7 @@ exports[`Jimeng endpoint registry snapshots > snapshots keep-family gap summary 
             "data/jimeng-lab/proof-20260612-lip-sync-human-contract-infer/preprocess-query/",
           ],
           "nextProbe": "Use task ids from a captured or approved video_generate/pre_process flow gathered from the real lip-sync/digital-human workbench state, compare with video-preprocess-query-plan, then record/replay through fetchJimengVideoPreprocessResults.",
-          "note": "Blocked on upstream pre_process task ids from the true lip-sync/digital-human workbench: submit_id_list lookup is modeled and typed service/cassette replay exists, but no live task ids can be produced until the real talking-head route and voice-picker DOM are captured and pre_process is passively compared/approved.",
+          "note": "Blocked on upstream pre_process task ids from the true lip-sync/digital-human workbench: submit_id_list lookup is modeled and typed service/cassette replay exists, but no live task ids can be produced until an approved role/avatar upload or submit flow creates provider task state.",
           "status": "blocked",
         },
         {
@@ -398,7 +398,7 @@ exports[`Jimeng endpoint registry snapshots > snapshots keep-family gap summary 
     },
   ],
   "selectedPacket": {
-    "blocker": "Background passive capture now confirms the digital-human route and voice panel, but pre-process/generate payloads do not emit until role/avatar, voice, and script state advances toward provider task creation.",
+    "blocker": "Background CDP preflight now confirms the digital-human route, voice picker, and TipTap script/action editor population without upload or submit. Provider pre-process/generate payloads still require approved role/avatar upload or preselected avatar state that enables generation and advances toward provider task creation.",
     "families": [
       "L1",
       "V1",
@@ -406,7 +406,7 @@ exports[`Jimeng endpoint registry snapshots > snapshots keep-family gap summary 
       "A1",
     ],
     "id": "lip-sync-human",
-    "nextCommand": "bun packages/jimeng-client/src/browser-proxy-cli.ts lip-sync --transport cdp-ui --cdp http://127.0.0.1:9340 --target-url "type=digitalHuman" --image <local-persona-image.png> --voice-id <voice-id-or-visible-label> --voice-title "直爽女大" --text "三秒告诉你为什么这款产品值得试。" --outDir data/jimeng-lab/packet-lip-sync-human-20260630/packet-artifacts/image-lipsync --pollIntervalMs 3000 --maxPolls 30",
+    "nextCommand": "bun packages/jimeng-client/src/browser-proxy-cli.ts lip-sync --transport cdp-ui --cdp http://127.0.0.1:9340 --target-url "type=digitalHuman" --image <local-persona-image.png> --voice-id <voice-id-or-visible-label> --voice-title "直爽女大" --text "三秒告诉你为什么这款产品值得试。" --prompt "自然看镜头，轻微点头，语气直接。" --outDir data/jimeng-lab/packet-lip-sync-human-20260630/packet-artifacts/image-lipsync --pollIntervalMs 3000 --maxPolls 30",
     "status": "active",
   },
   "statusCounts": {

@@ -60,6 +60,31 @@ export interface JimengBrowserLipSyncImageSubmitOptions extends JimengBrowserSes
   timeoutMs?: number
 }
 
+export interface JimengBrowserLipSyncWorkbenchState {
+  buttonText: string | null
+  disabled: boolean
+  ariaDisabled: string | null
+  editorText: string | null
+  selectedVoice: string | null
+  rolePreviewCount: number
+  visibleVoiceLabels: readonly string[]
+  bodyTextPreview: string
+}
+
+export interface JimengBrowserLipSyncImagePreflightResult {
+  workflow: "lip-sync-image"
+  url: string
+  title: string
+  imageUri: string
+  imagePath: string | null
+  voiceId: string
+  voiceLabel: string | null
+  textLength: number
+  actionTextLength: number
+  submitReady: boolean
+  state: JimengBrowserLipSyncWorkbenchState
+}
+
 export interface JimengBrowserSubmitWireResult {
   status: number
   text: string
@@ -198,6 +223,57 @@ export async function submitJimengLipSyncImageInBrowser(options: JimengBrowserLi
   }
 }
 
+export async function preflightJimengLipSyncImageInBrowser(options: JimengBrowserLipSyncImageSubmitOptions): Promise<JimengBrowserLipSyncImagePreflightResult> {
+  if (options.imagePath) {
+    throw jimengError({
+      category: "validation",
+      code: "JIMENG_LIP_SYNC_PREFLIGHT_UPLOAD_DISABLED",
+      message: "Lip-sync preflight does not upload local images. Preselect a role/avatar in the browser or pass --imageUri current without --image.",
+      retryable: false,
+      details: { imagePath: options.imagePath },
+    })
+  }
+
+  const puppeteer = await import("puppeteer-core")
+  const browser = await puppeteer.connect({ browserURL: options.cdpUrl, protocolTimeout: 600_000 })
+
+  try {
+    const page = await resolveJimengPage(browser, options)
+    await page.goto(JIMENG_LIP_SYNC_WORKBENCH_URL, { waitUntil: "domcontentloaded" })
+    await new Promise((resolve) => setTimeout(resolve, 3_000))
+    await assertJimengBrowserSession(page, options.cdpUrl)
+    await ensureJimengLipSyncWorkbench(page)
+    await closeAssetDrawer(page)
+    await selectJimengLipSyncVoice(page, { voiceId: options.voiceId, voiceLabel: options.voiceLabel })
+    await fillJimengLipSyncText(page, { speechText: options.text, actionText: options.actionText })
+    const state = await readJimengLipSyncWorkbenchState(page)
+    return {
+      workflow: "lip-sync-image",
+      url: page.url(),
+      title: await page.title(),
+      imageUri: options.imageUri,
+      imagePath: null,
+      voiceId: options.voiceId,
+      voiceLabel: options.voiceLabel ?? null,
+      textLength: options.text.length,
+      actionTextLength: options.actionText?.length ?? 0,
+      submitReady: !state.disabled && state.ariaDisabled !== "true",
+      state,
+    }
+  } catch (error) {
+    if (error instanceof JimengError) throw error
+    throw jimengError({
+      category: "transport",
+      code: "JIMENG_BROWSER_UI_PREFLIGHT_FAILED",
+      message: error instanceof Error ? error.message : String(error),
+      retryable: true,
+      details: { cdpUrl: options.cdpUrl, targetUrl: options.targetUrl ?? null, workflow: "lip-sync-image-preflight" },
+    })
+  } finally {
+    await browser.disconnect()
+  }
+}
+
 export async function loadJimengSessionFromBrowser(options: JimengBrowserSessionOptions): Promise<JimengSessionBundle> {
   const puppeteer = await import("puppeteer-core")
   const browser = await puppeteer.connect({ browserURL: options.cdpUrl })
@@ -296,6 +372,49 @@ async function fillJimengLipSyncText(page: Page, input: {
     const editor = document.querySelector("div[role=\"textbox\"].ProseMirror, div.ProseMirror[contenteditable=\"true\"]") as HTMLElement | null
     if (!editor) return false
 
+    interface TipTapTextNode {
+      type: "text"
+      text: string
+    }
+    interface TipTapParagraphTagNode {
+      type: "paragraph-tag"
+      attrs: { type: "speech" | "prompt" }
+    }
+    interface TipTapParagraphNode {
+      type: "paragraph"
+      content: Array<TipTapParagraphTagNode | TipTapTextNode>
+    }
+    interface TipTapDoc {
+      type: "doc"
+      content: TipTapParagraphNode[]
+    }
+    interface TipTapEditorHandle {
+      commands?: {
+        setContent?: (content: TipTapDoc, emitUpdate?: boolean) => boolean
+      }
+      getJSON?: () => TipTapDoc
+    }
+    const tiptapEditor = (editor as HTMLElement & { editor?: TipTapEditorHandle }).editor
+    const setContent = tiptapEditor?.commands?.setContent
+    if (setContent) {
+      const content: TipTapDoc = {
+        type: "doc",
+        content: [
+          { type: "paragraph", content: [{ type: "paragraph-tag", attrs: { type: "speech" } }, { type: "text", text: speechText }] },
+          {
+            type: "paragraph",
+            content: actionText
+              ? [{ type: "paragraph-tag", attrs: { type: "prompt" } }, { type: "text", text: actionText }]
+              : [{ type: "paragraph-tag", attrs: { type: "prompt" } }],
+          },
+        ],
+      }
+      setContent.call(tiptapEditor, content, true)
+      const json = tiptapEditor?.getJSON?.()
+      const flattened = json?.content.flatMap((paragraph) => paragraph.content).filter((node): node is TipTapTextNode => node.type === "text").map((node) => node.text) ?? []
+      if (flattened.includes(speechText) && (actionText === undefined || flattened.includes(actionText))) return true
+    }
+
     const paragraphText = (paragraph: Element): string =>
       Array.from(paragraph.childNodes)
         .filter((node) => !(node instanceof HTMLElement && node.matches("[contenteditable=\"false\"], .react-renderer")))
@@ -313,8 +432,16 @@ async function fillJimengLipSyncText(page: Page, input: {
     }
 
     const paragraphs = Array.from(editor.querySelectorAll("p"))
-    const speechParagraph = paragraphs.find((paragraph) => /角色说/.test(tagLabel(paragraph)))
-    const actionParagraph = paragraphs.find((paragraph) => /动作描述/.test(tagLabel(paragraph)))
+    const contentParagraphForTag = (tagPattern: RegExp): Element | undefined => {
+      const tagParagraphIndex = paragraphs.findIndex((paragraph) => tagPattern.test(tagLabel(paragraph)))
+      if (tagParagraphIndex < 0) return undefined
+      const tagParagraph = paragraphs[tagParagraphIndex]
+      if (!tagParagraph) return undefined
+      return paragraphText(tagParagraph) ? tagParagraph : paragraphs.slice(tagParagraphIndex + 1).find((paragraph) => !tagLabel(paragraph))
+    }
+
+    const speechParagraph = contentParagraphForTag(/角色说|说话内容/)
+    const actionParagraph = contentParagraphForTag(/动作描述/)
     if (speechParagraph) replaceParagraphText(speechParagraph, speechText)
     if (actionParagraph && actionText !== undefined) replaceParagraphText(actionParagraph, actionText)
 
@@ -387,27 +514,37 @@ async function selectJimengLipSyncVoice(page: Page, input: {
   voiceId: string
   voiceLabel?: string
 }): Promise<void> {
-  const selected = await page.evaluate((selection) => {
-    const needles = selection.needles
-    const text = (node: Element | null | undefined): string => (node?.textContent || "").replace(/\s+/g, " ").trim()
-    const queryClickable = (): Element[] => Array.from(document.querySelectorAll("button, [role=\"button\"], [role=\"option\"], [role=\"combobox\"], li, div"))
-    const openVoicePicker = queryClickable().find((entry) => /音色|声音|配音|发音人|语音/i.test(text(entry)))
-    ;(openVoicePicker as HTMLElement | undefined)?.click()
-    const match = queryClickable().find((entry) => needles.some((needle) => {
-      if (text(entry).includes(needle)) return true
-      for (const attribute of entry.getAttributeNames()) {
-        const value = entry.getAttribute(attribute)
-        if (value?.includes(needle)) return true
+  const needles = buildJimengLipSyncVoiceSelectionNeedles(input)
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    const selected = await page.evaluate((selection) => {
+      const visible = (entry: Element): boolean => {
+        const rect = entry.getBoundingClientRect()
+        const style = getComputedStyle(entry)
+        return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden"
       }
-      return Object.values((entry as HTMLElement).dataset ?? {}).some((value) => value?.includes(needle))
-    })) as HTMLElement | undefined
-    if (!match || match.hasAttribute("disabled") || match.getAttribute("aria-disabled") === "true") return false
-    match.click()
-    return true
-  }, {
-    needles: buildJimengLipSyncVoiceSelectionNeedles(input),
-  })
-  if (selected) return
+      const text = (node: Element | null | undefined): string => (node?.textContent || "").replace(/\s+/g, " ").trim()
+      const queryClickable = (): Element[] => Array.from(document.querySelectorAll("button, [role=\"button\"], [role=\"option\"], [role=\"combobox\"], li, div"))
+        .filter(visible)
+        .sort((left, right) => text(left).length - text(right).length)
+      const openVoicePicker = queryClickable().find((entry) => /^(音色|声音|配音|发音人|语音)$|^(全部音色|我的音色)$/i.test(text(entry)))
+        ?? queryClickable().find((entry) => text(entry).length <= 12 && /音色|声音|配音|发音人|语音/i.test(text(entry)))
+      ;(openVoicePicker as HTMLElement | undefined)?.click()
+      const match = queryClickable().find((entry) => selection.needles.some((needle) => {
+        const label = text(entry)
+        if (label === needle || (label.length <= Math.max(needle.length + 8, 24) && label.includes(needle))) return true
+        for (const attribute of entry.getAttributeNames()) {
+          const value = entry.getAttribute(attribute)
+          if (value?.includes(needle)) return true
+        }
+        return Object.values((entry as HTMLElement).dataset ?? {}).some((value) => value?.includes(needle))
+      })) as HTMLElement | undefined
+      if (!match || match.hasAttribute("disabled") || match.getAttribute("aria-disabled") === "true") return false
+      match.click()
+      return true
+    }, { needles })
+    if (selected) return
+    await new Promise((resolve) => setTimeout(resolve, 500))
+  }
   throw jimengError({
     category: "validation",
     code: "JIMENG_LIP_SYNC_VOICE_OPTION_MISSING",
@@ -494,24 +631,7 @@ async function assertJimengLipSyncSubmitEnabled(page: Page, input: {
   text: string
   actionText?: string
 }): Promise<void> {
-  const state = await page.evaluate(() => {
-    const button = Array.from(document.querySelectorAll("button")).find((entry) =>
-      (entry.className || "").toString().includes("generate-btn")
-      || (entry.className || "").toString().includes("submit-button")
-      || /生成|提交/i.test((entry.textContent || "").trim()))
-    const editor = document.querySelector("div[role=\"textbox\"].ProseMirror, div.ProseMirror[contenteditable=\"true\"]")
-    const selectedVoice = Array.from(document.querySelectorAll("[aria-selected=\"true\"], [data-selected=\"true\"], .selected, .active"))
-      .map((entry) => (entry.textContent || "").replace(/\s+/g, " ").trim())
-      .find(Boolean) ?? null
-    return {
-      buttonText: (button?.textContent || "").replace(/\s+/g, " ").trim() || null,
-      disabled: button?.disabled ?? false,
-      ariaDisabled: button?.getAttribute("aria-disabled") ?? null,
-      editorText: (editor?.textContent || "").replace(/\s+/g, " ").trim() || null,
-      selectedVoice,
-      rolePreviewCount: document.querySelectorAll("img").length,
-    }
-  })
+  const state = await readJimengLipSyncWorkbenchState(page)
   if (!state.disabled) return
   throw jimengError({
     category: "validation",
@@ -531,6 +651,40 @@ async function assertJimengLipSyncSubmitEnabled(page: Page, input: {
       editorText: state.editorText,
       rolePreviewCount: state.rolePreviewCount,
     },
+  })
+}
+
+async function readJimengLipSyncWorkbenchState(page: Page): Promise<JimengBrowserLipSyncWorkbenchState> {
+  return page.evaluate(() => {
+    const visible = (entry: Element): boolean => {
+      const rect = entry.getBoundingClientRect()
+      const style = getComputedStyle(entry)
+      return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden"
+    }
+    const text = (entry: Element | null | undefined): string => (entry?.textContent || "").replace(/\s+/g, " ").trim()
+    const button = Array.from(document.querySelectorAll("button")).find((entry) =>
+      (entry.className || "").toString().includes("generate-btn")
+      || (entry.className || "").toString().includes("submit-button")
+      || /生成|提交/i.test(text(entry)))
+    const editor = document.querySelector("div[role=\"textbox\"].ProseMirror, div.ProseMirror[contenteditable=\"true\"]")
+    const selectedVoice = Array.from(document.querySelectorAll("[aria-selected=\"true\"], [data-selected=\"true\"], .selected, .active"))
+      .map((entry) => text(entry))
+      .find(Boolean) ?? null
+    const visibleVoiceLabels = Array.from(document.querySelectorAll("button, [role=\"button\"], [role=\"option\"], li, div"))
+      .filter(visible)
+      .map((entry) => text(entry))
+      .filter((value) => value && value.length <= 32 && /多情感|女声|男声|女大|男大|大叔|软妹|甜妹|低音炮|直爽|温柔/.test(value))
+      .slice(0, 40)
+    return {
+      buttonText: text(button) || null,
+      disabled: button instanceof HTMLButtonElement ? button.disabled : false,
+      ariaDisabled: button?.getAttribute("aria-disabled") ?? null,
+      editorText: text(editor) || null,
+      selectedVoice,
+      rolePreviewCount: document.querySelectorAll("img").length,
+      visibleVoiceLabels,
+      bodyTextPreview: (document.body?.innerText || "").replace(/\s+/g, " ").trim().slice(0, 1200),
+    }
   })
 }
 

@@ -21,6 +21,9 @@ This pass used the dedicated background Helium Jimeng profile on CDP `http://127
 - Config refresh:
   - `data/jimeng-lab/packet-lip-sync-human-20260630/lip-sync-config-refresh/normalized/lip-sync-config-20260630013325-summary.json`
   - Result: image lip-sync models are `dreamina_lib_sync_image_master_1.5` and `dreamina_lib_sync_image_quick_1.5`; VOD/base model is `dreamina_lib_sync_base`.
+- No-submit workbench preflight:
+  - `data/jimeng-lab/packet-lip-sync-human-20260630/preflight-current-role/normalized/lip-sync-20260630015959-dfon15-preflight.json`
+  - Result: `jimeng-browser-proxy lip-sync --preflight --transport cdp-ui` reached the real `type=digitalHuman` route, selected visible voice label `直爽女大`, populated TipTap `说话内容` and `动作描述`, and stopped before upload/submit/poll/download. `submitReady=false` in the no-upload state because the current workbench did not expose an enabled generate button.
 
 ## Background DOM State
 
@@ -32,7 +35,9 @@ Read-only DOM inspection confirmed the real route and logged-in workbench state:
 
 ## Status
 
-The old blocker "find the real route" is cleared. The remaining blocker is that pre-process and submit payloads are not emitted until a role/avatar plus voice/script state is populated and the provider workflow is advanced toward task creation.
+The old blocker "find the real route" is cleared. The script/voice preflight path is also cleared for background CDP automation: the live TipTap editor exposes an `editor.commands.setContent` API, and the preflight artifact shows populated `说话内容` plus `动作描述` without provider spend.
+
+The remaining blocker is provider task creation: pre-process and submit payloads are not emitted until an approved role/avatar upload or preselected avatar state enables generation and the workflow advances toward task creation.
 
 Next step requires explicit approval because it may upload/create provider task state and spend credits:
 
@@ -45,6 +50,7 @@ bun packages/jimeng-client/src/browser-proxy-cli.ts lip-sync \
   --voice-id <voice-id-or-visible-label> \
   --voice-title "直爽女大" \
   --text "三秒告诉你为什么这款产品值得试。" \
+  --prompt "自然看镜头，轻微点头，语气直接。" \
   --outDir data/jimeng-lab/packet-lip-sync-human-20260630/packet-artifacts/image-lipsync \
   --pollIntervalMs 3000 \
   --maxPolls 30

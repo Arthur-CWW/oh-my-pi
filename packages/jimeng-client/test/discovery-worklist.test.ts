@@ -151,7 +151,7 @@ describe("Jimeng discovery worklist", () => {
       const preProcess = worklist.items.find((item) => item.endpoint === "/mweb/v1/video_generate/pre_process")
       expect(preProcess?.known_status).toBe("blocked")
       expect(preProcess?.recommended_action).toBe("static_capture_needed")
-      expect(preProcess?.reason).toContain("generic composer")
+      expect(preProcess?.reason).toContain("background CDP preflight now proves")
       const preProcessResult = worklist.items.find((item) => item.endpoint === "/mweb/v1/video_generate/mget_pre_process_result")
       expect(preProcessResult?.known_status).toBe("blocked")
       expect(preProcessResult?.recommended_action).toBe("static_capture_needed")
