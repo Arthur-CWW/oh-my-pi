@@ -11,7 +11,7 @@ extensions/            Browser extensions, one package per extension
 packages/              Shared TS libraries and build tooling
 skills/                Agent skills with TypeScript helpers
 tools/                 Local daemons/CLIs used by agents or native/browser bridges
-reverse-engineering/   Unpacked extension case studies and source snapshots
+reveng/   Unpacked extension case studies and source snapshots
 scripts/               Repo-level checks/smoke helpers
 docs/                  Architecture notes and how-tos
 ```
@@ -38,7 +38,7 @@ docs/                  Architecture notes and how-tos
 ## Skills
 
 - [`skills/dev-browser`](skills/dev-browser) — persistent browser automation skill and relay server.
-- [`skills/chrome-extension-reverse-engineering`](skills/chrome-extension-reverse-engineering) — workflow and TypeScript analyzer for unpacked Chrome extension reverse engineering.
+- [`skills/chrome-extension-reveng`](skills/chrome-extension-reveng) — workflow and TypeScript analyzer for unpacked Chrome extension reveng.
 
 ## Tools
 
@@ -48,7 +48,7 @@ docs/                  Architecture notes and how-tos
 
 ## Reverse engineering
 
-- [`reverse-engineering/vidiq-vision`](reverse-engineering/vidiq-vision) — local installed snapshot of vidIQ Vision for YouTube, Chrome Web Store ID `pachckjkecffpdphbpmfolblodfkgbhl`.
+- [`reveng/vidiq-vision`](reveng/vidiq-vision) — local installed snapshot of vidIQ Vision for YouTube, Chrome Web Store ID `pachckjkecffpdphbpmfolblodfkgbhl`.
 
 ## Commands
 
@@ -95,11 +95,11 @@ This repo now consolidates source from:
 - `/Users/arthur/projects/dev-browser/skills/dev-browser` -> `skills/dev-browser`
 - `/Users/arthur/projects/illiterati/extension` -> `extensions/illiterati-tts`
 - `/Users/arthur/projects/illiterati-thread-b-parallel/extension` -> `extensions/illiterati-tts-opfs-parallel`
-- `/Users/arthur/Library/Application Support/Google/Chrome/Default/Extensions/pachckjkecffpdphbpmfolblodfkgbhl/3.196.2_0` -> `reverse-engineering/vidiq-vision`
+- `/Users/arthur/Library/Application Support/Google/Chrome/Default/Extensions/pachckjkecffpdphbpmfolblodfkgbhl/3.196.2_0` -> `reveng/vidiq-vision`
 
 ## Direction
 
-The long-term target is a general API reverse-engineering/proxying toolkit for LLM agents:
+The long-term target is a general API reveng/proxying toolkit for LLM agents:
 
 - capture internal API traffic from existing logged-in browsers,
 - keep browser automation in the background,

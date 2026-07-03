@@ -872,7 +872,7 @@ Maximize useful API coverage and proof quality while keeping live submissions co
 
 ## Complete Enough Definition
 
-For this project, "complete enough" means each useful API has enough surface area exposed that future pipelines can parameterize it without another frontend reverse-engineering pass.
+For this project, "complete enough" means each useful API has enough surface area exposed that future pipelines can parameterize it without another frontend reveng pass.
 
 That means:
 

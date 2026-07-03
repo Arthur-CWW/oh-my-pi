@@ -32,7 +32,7 @@ const KIE_PRICE_USD_PER_M: Record<string, { input?: number; output?: number }> =
 
 const DEFAULT_PROMPT_FILE = "docs/prompts/pleometric-video-layer-decomposition.md"
 
-const FALLBACK_PROMPT = `You are analyzing shortform AI/TikTok videos for a creative reverse-engineering archive.
+const FALLBACK_PROMPT = `You are analyzing shortform AI/TikTok videos for a creative reveng archive.
 Return compact JSON only. Decompose the sampled keyframes into subject/background/motion/editing/audio/post-processing layers, reconstruct plausible generation prompts and editing steps, and propose a clean-room original workflow recipe.`
 
 interface Args {

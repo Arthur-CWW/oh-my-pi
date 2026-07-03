@@ -12,7 +12,7 @@ This document defines the plan, architecture, and phase-by-phase implementation 
 - **Metadata Inspection**: Publicly documented SQL standards and catalog schemas (`information_schema.tables`, `information_schema.columns`, `pg_catalog`, `sqlite_schema`) to query database layouts.
 
 ### 1.2 Out of Scope
-- **Proprietary Decompilation**: No decompilation, unpacking, or reverse engineering of TablePlus, pgAdmin (proprietary plugins), JetBrains DataGrip, or other commercial database management tools.
+- **Proprietary Decompilation**: No decompilation, unpacking, or reveng of TablePlus, pgAdmin (proprietary plugins), JetBrains DataGrip, or other commercial database management tools.
 - **License/DRM Bypass**: No circumventing of licensing screens, activation limits, trial periods, or serial verification of TablePlus or any other proprietary workbench.
 - **Protected Asset Extraction**: No extracting of icons, SVG paths, proprietary stylesheet variables, themes, font files, or local binary extensions from commercial clients.
 - **Proprietary Protocol Cloning**: No trying to reverse-engineer private/undocumented cloud sync protocols or proprietary team sharing features of commercial workbench services.
@@ -27,7 +27,7 @@ TablePlus may be used strictly as an **observational UX/product reference** for 
 
 ## 2. Lab Artifacts for Database Workbench
 
-As part of the clean-room process, development of the Database Workbench is guided by the Reverse Engineering Lab. All discovery runs on database catalogs and protocol behaviors must be recorded in the following lab artifacts:
+As part of the clean-room process, development of the Database Workbench is guided by the RevEng Lab. All discovery runs on database catalogs and protocol behaviors must be recorded in the following lab artifacts:
 
 1. **`authorization.md`**
    - States target database systems, driver versions, and access scope.

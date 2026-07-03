@@ -7,7 +7,7 @@ Date: 2026-06-14
 - Start with planning and dry-run scaffolds. No paid provider setup, live trading, live proxy traffic, book downloads, app decompilation, or production network exposure without an explicit approval packet.
 - Use chunkier subagent assignments than the saturation probes: each worker should own a coherent package/docs slice and produce durable artifacts, not one-file trivia.
 - Keep coordinator-owned globals (`TASKS.md`, root manifests, `.omp/**`, `AGENTS.md`, `docs/state/**`) out of worker lanes unless a packet names them.
-- Risky workstreams need scope and approval gates before implementation: trading, proxy resale, restricted book downloads, and reverse engineering.
+- Risky workstreams need scope and approval gates before implementation: trading, proxy resale, restricted book downloads, and reveng.
 
 ## Repo-wide packet worker/reviewer SOP
 
@@ -295,7 +295,7 @@ Acceptance: patch plan and test list; no direct global install mutation without 
 
 ## Workstream F — Reverse engineering / decompilation skill
 
-Goal: create a reverse-engineering skill for permitted targets: owned binaries, open-source binaries, malware samples in a lab, file formats/protocols for interoperability, and clean-room product analysis. Do not decompile proprietary apps to clone code/assets.
+Goal: create a reveng skill for permitted targets: owned binaries, open-source binaries, malware samples in a lab, file formats/protocols for interoperability, and clean-room product analysis. Do not decompile proprietary apps to clone code/assets.
 
 TablePlus boundary:
 
@@ -307,7 +307,7 @@ Subagent packets:
 
 ### F1. Reverse-engineering skill operating rules
 
-Owner paths: `skills/research/reverse-engineering/SKILL.md`.
+Owner paths: `skills/research/reveng/SKILL.md`.
 
 Change: write skill with scope preflight, target classification, allowed tools, artifact hygiene, and refusal cases.
 
@@ -315,7 +315,7 @@ Acceptance: no instructions for bypassing licenses/DRM or cloning proprietary ap
 
 ### F2. Local binary analysis lab plan
 
-Owner paths: `docs/plans/reverse-engineering-lab.md`.
+Owner paths: `docs/plans/reveng-lab.md`.
 
 Change: define isolated lab layout, allowed sample types, toolchain candidates, artifact paths, and reporting template.
 

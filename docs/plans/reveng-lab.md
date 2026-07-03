@@ -1,4 +1,4 @@
-# Reverse Engineering Lab Plan
+# RevEng Lab Plan
 
 ## Purpose
 

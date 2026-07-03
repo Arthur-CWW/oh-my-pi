@@ -10,7 +10,7 @@ const mode = (process.env.VIDIQ_PROXY_MODE ?? "proxy") as Mode;
 const workspaceRoot = path.resolve(import.meta.dirname, "../../..");
 const cacheRoot = path.join(
   workspaceRoot,
-  "reverse-engineering/vidiq-vision/captures/http-cache",
+  "reveng/vidiq-vision/captures/http-cache",
 );
 
 function setCors(res: ServerResponse) {

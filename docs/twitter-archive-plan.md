@@ -152,7 +152,7 @@ Extend the existing `llm_frontend_browser` package/tool with provider adapters o
 - `aistudio` — existing
 - `grok` — use X subscription frontend for X-aware search/summarization when useful
 - `jimeng` — use frontend video generation subscription and download generated outputs
-- `packages/jimeng-client` — direct API helper ported from Slotok reverse engineering for capture-template dry-runs and carefully bounded live submit/poll/download runs
+- `packages/jimeng-client` — direct API helper ported from Slotok reveng for capture-template dry-runs and carefully bounded live submit/poll/download runs
 
 Keep provider automation background-safe. Never accept terms, solve CAPTCHA, or bypass account challenges automatically.
 

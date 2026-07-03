@@ -74,5 +74,5 @@ Latest results:
 
 - No live scraping was added or run.
 - No live provider generation was run for this proof. Provider flows remain local dry-run/job-record first to preserve the small KIE/Gemini credit budget.
-- Jimeng/Dreamina reverse-engineering files were not edited by this Slotok UI workstream.
+- Jimeng/Dreamina reveng files were not edited by this Slotok UI workstream.
 - The repo has unrelated dirty files from parallel sessions; commits for this goal staged only scoped Slotok/UGC files and QA docs.

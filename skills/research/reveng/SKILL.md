@@ -1,11 +1,11 @@
 ---
-name: reverse-engineering
-description: Plan and execute reverse-engineering work for owned, open-source, explicitly permitted, or public interoperability targets with clean-room documentation and artifact hygiene.
+name: reveng
+description: Plan and execute reveng work for owned, open-source, explicitly permitted, or public interoperability targets with clean-room documentation and artifact hygiene.
 ---
 
-# Reverse Engineering
+# RevEng
 
-Use this skill when the user asks for reverse engineering of an in-scope target: owned binaries, open-source projects, explicitly permitted third-party targets, documented file formats or protocols, interoperability work, vulnerability research on systems the user is authorized to test, or migration/recovery of the user's own data.
+Use this skill when the user asks for reveng of an in-scope target: owned binaries, open-source projects, explicitly permitted third-party targets, documented file formats or protocols, interoperability work, vulnerability research on systems the user is authorized to test, or migration/recovery of the user's own data.
 
 Before inspection, identify the target, why it is in scope, and the intended output.
 

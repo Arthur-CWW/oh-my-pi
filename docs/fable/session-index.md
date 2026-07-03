@@ -182,7 +182,7 @@ Codex sessions with empty `first_user` and no label assignment. Most are in `/Us
 ### `security_exclude` (45 sessions)
 
 **NEVER include in Fable training data.** Covers:
-- **Cybersecurity / reverse-engineering**: Apple PCC (Private Cloud Compute) inspection, vphone-cli iOS virtualization, security research on `security-pcc` repo
+- **Cybersecurity / reveng**: Apple PCC (Private Cloud Compute) inspection, vphone-cli iOS virtualization, security research on `security-pcc` repo
 - **Anti-detection / proxy**: session annotation indicates browser-fingerprint, proxy, and anti-detection topics
 - **Vphone / iOS agent lab**: virtual iPhone, simple iOS app for LLM-agent workflows (parked for later)
 

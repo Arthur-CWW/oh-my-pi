@@ -10,7 +10,7 @@ Current focus:
 - `browser-extensions` — self-contained pnpm monorepo for Chrome/Firefox/Helium extensions.
 - `kimi-code-usage` — Kimi coding-plan usage CLI/MCP package plus VS Code extension.
 - `oh-my-pi` — self-contained OMP/Bun/Rust/Python monorepo used for agent runtime work.
-- `docs/research/kagi` — archived Kagi reverse-engineering capture; active Kagi client code lives in `packages/web-access/src/kagi.ts`.
+- `docs/research/kagi` — archived Kagi reveng capture; active Kagi client code lives in `packages/web-access/src/kagi.ts`.
 - `skills/` — first-party passive skills grouped by domain (`core`, `browser`, `provider`, `research`, `design`, `media`); imported skill repos live under `vendor/<source>/...` and are loaded explicitly.
 - `catalog/workspaces.yml` — YAML ownership/discovery registry for ad hoc context roots, packet handoffs, and session path aliases.
 
@@ -69,7 +69,7 @@ apps/
 browser-extensions/ # browser extension monorepo
 kimi-code-usage/    # Kimi usage CLI/MCP and VS Code extension
 oh-my-pi/           # OMP runtime monorepo
-docs/research/kagi/ # archived Kagi reverse-engineering capture
+docs/research/kagi/ # archived Kagi reveng capture
 catalog/            # YAML workspace/capability/context registry
 skills/             # first-party domain-grouped skills
 vendor/             # vendored source trees and imported skill repos

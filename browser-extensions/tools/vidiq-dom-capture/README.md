@@ -22,7 +22,7 @@ pnpm capture:vidiq-dom
 Snapshots are written under:
 
 ```text
-/Users/arthur/projects/browser-extensions/reverse-engineering/vidiq-vision/captures/dom
+/Users/arthur/projects/browser-extensions/reveng/vidiq-vision/captures/dom
 ```
 
 Environment options:

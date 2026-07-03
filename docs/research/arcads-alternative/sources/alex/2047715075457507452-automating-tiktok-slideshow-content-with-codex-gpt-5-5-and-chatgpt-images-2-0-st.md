@@ -41,7 +41,7 @@ This is the full pipeline. No fluff, no "10x your content" nonsense. Just the ex
 Here's what you'll learn:
 
 - How to steal viral slideshow formats without getting flagged for plagiarism
-- Why GPT-5.5 in Codex is the unlock for reverse-engineering slide structures
+- Why GPT-5.5 in Codex is the unlock for reveng slide structures
 - How to use ChatGPT Images 2.0 to generate entire 8-slide decks with character continuity
 - How to combine Pinterest scraping with AI generation to cut costs by ~85%
 - Self-hosting Postiz to schedule to 50+ TikTok accounts without getting bans
@@ -56,7 +56,7 @@ Slideshows need 5-10 images, a hook, and a CTA. That's it. The algorithm treats 
 
 The bottleneck used to be:
 
-1. Finding formats that work (scrolling, saving, manually reverse-engineering)
+1. Finding formats that work (scrolling, saving, manually reveng)
 2. Generating on-brand images with consistent text and style
 3. Cost of generating 7-8 AI images per post at scale
 4. Posting at scale without bans

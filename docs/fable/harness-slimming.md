@@ -51,7 +51,7 @@ These were removed from the default profile but remain available on disk. If a w
 | `./vendor/stablyai/orca/orca-emulator` | Orca vendor |
 | `./vendor/stablyai/orca/orca-linear` | Orca vendor |
 | `./vendor/stablyai/orca/orchestration` | Orca vendor |
-| `./skills/research/reverse-engineering` | Reverse engineering |
+| `./skills/research/reveng` | Reverse engineering |
 | `./skills/research/used-hardware-buying-research` | Used hardware |
 | `./vendor/badlogic/pi-skills/vscode` | VSCode |
 | `./skills/research/emusks-research` | One-off research |
@@ -130,7 +130,7 @@ The manifest slim above was only one of several discovery sources; sessions stil
 
 | Source | Archived to | Moved |
 |---|---|---|
-| `~/.omp/agent/skills/` (30 entries) | `~/.omp/agent/skills-archive/` | agent-communication, emusks-research, godmode, impeccable-design-review, lawful-reverse-engineering, used-hardware-buying-research, vscode |
+| `~/.omp/agent/skills/` (30 entries) | `~/.omp/agent/skills-archive/` | agent-communication, emusks-research, godmode, impeccable-design-review, lawful-reveng, used-hardware-buying-research, vscode |
 | `~/.claude/skills/` (6 entries) | `~/.claude/skills-archive/` | all six (cua-driver, design-dna, vercel-composition-patterns, vercel-react-best-practices, vercel-react-view-transitions, web-design-guidelines) — all redundant with repo copies |
 | `~/.agents/skills/` (12 entries) | `~/.agents/skills-archive/` | computer-use, cua-driver, design-dna, orca-cli, orchestration, vercel-*, web-design-guidelines (9); kept codex-system, find-skills, reflect |
 | `~/.omp/agent/managed-skills/` (25 autolearn-generated) | `~/.omp/agent/managed-skills-archive/` | archive-noisy-mcp-server, cmux-workstream-orchestration, hanly-playcover-permissive-patch, mobile-app-protocol-reveng, omp-print-prompt-file-runner, omp-slack-agent-server, proxmark3-macos-debug, symphony-elixir-otp-spike, tailscale-ssh-auth-browser, telegram-cloud-archive, vim-lite-parity-debugging, voiceink-permission-ux, vphone-cli-safe-amfi, vphone-mcp-vendoring, vphone-red-blue-lab, zig-cache-cleanup (16); kept 9 durable ones (arthur-*, writing-without-ai-tells, ai-companion-rtc-testbed, audio-diarization-pipeline, browser-context-sync, sideline-annotation-card, wrapped-commentary-learning-card-db, agent-skill-vendoring) |

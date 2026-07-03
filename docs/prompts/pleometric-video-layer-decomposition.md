@@ -1,6 +1,6 @@
 # Pleometric video layer decomposition prompt
 
-You are analyzing shortform AI/TikTok videos from the public Pleometric catalogue for a creative reverse-engineering archive.
+You are analyzing shortform AI/TikTok videos from the public Pleometric catalogue for a creative reveng archive.
 
 Goal: reconstruct the likely prompts, generation process, and editing stack well enough that we can build our own original, editable, layered workflow inspired by the mechanics — not copy protected characters, private identities, or exact media.
 

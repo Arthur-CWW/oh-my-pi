@@ -21,7 +21,7 @@
     "smoke:illiterati-tts": "pnpm --filter illiterati-tts smoke",
     "smoke:illiterati-tts-opfs-parallel": "pnpm --filter illiterati-tts-opfs-parallel smoke",
     "launch:helium:x-bookmarks": "pnpm --filter x-bookmark-sync-devtools launch:helium",
-    "skill:reverse-engineer": "pnpm --filter chrome-extension-reverse-engineering analyze reverse-engineering/vidiq-vision",
+    "skill:reverse-engineer": "pnpm --filter chrome-extension-reveng analyze reveng/vidiq-vision",
     "proxy:vidiq": "pnpm --filter vidiq-replay-proxy start",
     "capture:vidiq-dom": "pnpm --filter vidiq-dom-capture capture",
     "run:twitter-archive-firefox": "bun --cwd extensions/twitter-archive-firefox run run:firefox"

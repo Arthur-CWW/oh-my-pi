@@ -286,7 +286,7 @@ CapCut is useful as a reference for:
 - templates
 - beauty/background/motion features
 
-But it should be a separate reverse-engineering task later.
+But it should be a separate reveng task later.
 
 Initial safe approach:
 

@@ -33,7 +33,7 @@ homeRoots:
     owns:
       - research
       - prototypes
-      - reverse-engineering evidence
+      - reveng evidence
       - notebooks
     tags: [research, prototypes, reveng]
   vault:
@@ -113,7 +113,7 @@ adHocContextPolicy:
     - Prefer absolute path references, OMP customDirectories, or packet links.
     - Promote to agents only when the artifact becomes reusable agent capability.
     - Promote to products only when it becomes product implementation.
-    - Keep raw reverse-engineering evidence in exploratory or a dedicated RevEng root.
+    - Keep raw reveng evidence in exploratory or a dedicated RevEng root.
 
 contextRoots:
   # Add temporary cross-workspace context roots here when a task needs nearby access.

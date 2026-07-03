@@ -44,7 +44,7 @@ git commit -m "fable: onboard Anthropic Fable advisor context and default skill 
 Manual call‑outs before committing:
 
 - `skills/design/impeccable-design-review/` exists on disk but is listed as **Removed** in `docs/fable/harness-slimming.md`. Decide whether to keep it in the commit (available but not loaded) or leave it untracked.
-- `skills/research/` (`reverse-engineering/`, `emusks-research/`, `used-hardware-buying-research/`) is intentionally **not** added here; it is excluded from the Fable default profile.
+- `skills/research/` (`reveng/`, `emusks-research/`, `used-hardware-buying-research/`) is intentionally **not** added here; it is excluded from the Fable default profile.
 - `.omp/mcp.archived-porkbun.json` is **not** included because it looks like archived credentials.
 
 ---
@@ -90,8 +90,8 @@ git commit -m "sync: bulk pre-Fable implementation, docs, and packages"
 
 Manual review items in this commit:
 
-- `docs/plans/reverse-engineering-lab.md` and `docs/plans/residential-proxy-sourcing.md` touch excluded domains. Decide whether to keep them in the bulk commit or leave them untracked.
-- `docs/research/vibe_re_xsql.md` and `docs/research/vibe_re_xsql.gemini-flash-url.md` are reverse‑engineering research notes. Same manual decision.
+- `docs/plans/reveng-lab.md` and `docs/plans/residential-proxy-sourcing.md` touch excluded domains. Decide whether to keep them in the bulk commit or leave them untracked.
+- `docs/research/vibe_re_xsql.md` and `docs/research/vibe_re_xsql.gemini-flash-url.md` are reveng research notes. Same manual decision.
 - `cooking-with-openai-research-chief-mark-chen-transcript.md` is a raw transcript; include it only if you want it in the repo.
 
 ---
@@ -104,7 +104,7 @@ These should **not** be committed without explicit review:
 |---|---|
 | Runtime artifacts / secrets | `erl_crash.dump`, `omp-session-*.html`, `telegram_upload_session.session`, `packages/spatial-audio-renderer/test-output/` |
 | Vendored external checkouts | `vendor/` (large third‑party skill/tool trees; partially ignored by `.gitignore`) |
-| Cybersecurity / vphone / reverse‑engineering / proxy implementation | `vphone-cli/`, `apps/ios-qa-controller/`, `packages/ios-control/`, `packages/proxy-lab/` |
+| Cybersecurity / vphone / reveng / proxy implementation | `vphone-cli/`, `apps/ios-qa-controller/`, `packages/ios-control/`, `packages/proxy-lab/` |
 | Duplicate skill copies | `.github/skills/impeccable/`, `.pi/skills/impeccable/` (triplicate the same `skills/design/impeccable-design-review/` content) |
 | Large binary / raw transcript | `docs/research/vibe_re_xsql.pdf` |
 | Already ignored by `.gitignore` | `node_modules/`, `data/`, `artifacts/`, `tmp/`, `*.sqlite`, `*.mp4`, `.env`, `.DS_Store`, etc. |
@@ -124,7 +124,7 @@ These should **not** be committed without explicit review:
 - `skills/design/impeccable-design-review/` — on‑disk but removed from default profile; decide keep vs. delete.
 - `packages/web-access/src/discord-agent-server.ts`, `godmode.ts`, `wise-statements.ts` — external service, jailbreak, and financial API implementations; leave for separate review.
 - `packages/proxy-lab/` — proxy provider matrix and scenarios; separate review.
-- `docs/plans/reverse-engineering-lab.md`, `docs/plans/residential-proxy-sourcing.md`, `docs/plans/jimeng-frontend-api-reversal.md`, `docs/research/vibe_re_xsql.md` — reverse‑engineering / proxy domain docs; bulk commit is OK, but do not feed them into Fable context.
+- `docs/plans/reveng-lab.md`, `docs/plans/residential-proxy-sourcing.md`, `docs/plans/jimeng-frontend-api-reversal.md`, `docs/research/vibe_re_xsql.md` — reveng / proxy domain docs; bulk commit is OK, but do not feed them into Fable context.
 
 ---
 
@@ -152,6 +152,6 @@ Treat the following as **main streams**:
 3. Personal second-brain / shared context (Twitter/X archive + HSK deck + Mochi clone + Diamond Age Primer / Nick Land reader + personal library + annotation app + browser history / Twitter graph / personal knowledge graph)
 4. Agent harness / cyborgism (`oh-my-pi/`, `packages/web-access/`, `.omp/`, high-score `agent_harness` sessions)
 
-Cybersecurity, vphone, proxy, and reverse-engineering lanes are present but routed away from Fable.
+Cybersecurity, vphone, proxy, and reveng lanes are present but routed away from Fable.
 
 In the current dirty tree, the visible learning/second‑brain candidates are mostly the `packages/borges-library/` book tooling and the reading lists under `docs/research/slotok-design-books-*.md`; the main app repos (`~/apps/mochi-lite`, `~/apps/hsk-deck`, etc.) are outside this repo and are not part of this commit plan.

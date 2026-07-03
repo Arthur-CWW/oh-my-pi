@@ -1,6 +1,6 @@
 # YouTube Stats Overlay Prototype
 
-Clean-room YouTube stats UI prototype inspired by the vidIQ surfaces documented in `reverse-engineering/vidiq-vision`.
+Clean-room YouTube stats UI prototype inspired by the vidIQ surfaces documented in `reveng/vidiq-vision`.
 
 This package intentionally uses dummy data. The data layer is isolated in `src/content/index.tsx` so it can later be replaced with a cheap YouTube scraper/API provider.
 

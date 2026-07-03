@@ -10,7 +10,7 @@
 
 - Apps like looksmaxing, height growth, hair growth, and weight loss generate strong revenue by building armies of AI influencers on TikTok, driving $20k–$40k/month organically from one app with high profit margins.
 
-- Design consistent character using JSON prompt from Nano Banana by reverse-engineering successful looksmaxing accounts via Claude, including negative constraints for realistic bedroom selfie vibe and tired, serious mood.
+- Design consistent character using JSON prompt from Nano Banana by reveng successful looksmaxing accounts via Claude, including negative constraints for realistic bedroom selfie vibe and tired, serious mood.
 
 - Animate with restraint in Veo 3 using minimal micro-motion like slow head tilt or subtle blink to avoid face morphing, then stitch short clips for implied transformations.
 
@@ -52,7 +52,7 @@ The fix is treating your character like a brand spec. Not a prompt, a schema.
 
 Pro tip before you start writing the spec from scratch: you don't have to. Find a looksmaxing account whose aesthetic is already working (high likes, strong engagement, clean visual identity) and download their TikTok slideshow images. Drop those images into Claude and ask it to generate a structured JSON prompt that captures the character, lighting, mood, and camera style. You get a battle-tested aesthetic spec in 30 seconds instead of guessing what "looksmaxing lighting" means.
 
-This is reverse-engineering at its finest. The algorithm already told you which faces and which lighting work, you're just extracting the recipe. From there, tweak the JSON to make the character your own (different face structure, different hair, different wardrobe) while keeping the proven aesthetic dialed in.
+This is reveng at its finest. The algorithm already told you which faces and which lighting work, you're just extracting the recipe. From there, tweak the JSON to make the character your own (different face structure, different hair, different wardrobe) while keeping the proven aesthetic dialed in.
 
 Here's what a good spec looks like once you have it:
 

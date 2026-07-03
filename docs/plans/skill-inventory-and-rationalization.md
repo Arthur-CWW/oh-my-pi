@@ -182,7 +182,7 @@ Those personas are review lenses, not default blockers; the coordinator picks th
 | `frontend-design` | Distinctive frontend UI design guidance. | global `agent-stuff` | 4 | 0 | Keep global or vendor into frontend package; useful. |
 | `gccli` | Google Calendar CLI. | symlinked `pi-skills` | 0 | 0 | Merge into opt-in personal Google Workspace skill. |
 | `gdcli` | Google Drive CLI. | symlinked `pi-skills` | 0 | 0 | Merge into opt-in personal Google Workspace skill. |
-| `ghidra` | Ghidra headless binary reverse engineering. | global `agent-stuff` | 1 | 0 | Specialist opt-in; not global. |
+| `ghidra` | Ghidra headless binary reveng. | global `agent-stuff` | 1 | 0 | Specialist opt-in; not global. |
 | `github` | `gh` CLI issue/PR/run/API workflows. | global `agent-stuff` | 1 | 0 | Keep global core despite low explicit loads; broadly useful. |
 | `gmcli` | Gmail CLI. | symlinked `pi-skills` | 1 | 0 | Merge into opt-in personal Google Workspace skill. |
 | `google-workspace` | Direct Google Workspace APIs helper. | global `agent-stuff` | 1 | 0 | Prefer this over separate gc/gd/gm skills; opt-in due personal data. |

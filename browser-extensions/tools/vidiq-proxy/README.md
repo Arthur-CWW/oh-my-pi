@@ -1,6 +1,6 @@
 # vidIQ Replay Proxy
 
-Local cache/replay proxy for vidIQ reverse-engineering experiments.
+Local cache/replay proxy for vidIQ reveng experiments.
 
 Run from the monorepo root:
 
@@ -21,4 +21,4 @@ http://127.0.0.1:4873/https/api.vidiq.com/v2/...
 http://127.0.0.1:4873/https/youtube-videos.vidiq.com/youtube/videos/...
 ```
 
-Cache files are written under `reverse-engineering/vidiq-vision/captures/http-cache/`.
+Cache files are written under `reveng/vidiq-vision/captures/http-cache/`.

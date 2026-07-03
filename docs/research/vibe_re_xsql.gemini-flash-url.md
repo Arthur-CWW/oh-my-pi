@@ -5,7 +5,7 @@ REcon 2026, Montreal
 ---
 
 ## 1. Motivation
-* **Problem**: Every reverse engineering tool has its own API (IDAPython/IDC, Java/PyGhidra, C++ SDK/Python API, r2pipe).
+* **Problem**: Every reveng tool has its own API (IDAPython/IDC, Java/PyGhidra, C++ SDK/Python API, r2pipe).
     * Humans must re-learn APIs when switching tools.
     * AI agents require tool-specific "glue" to operate effectively.
 * **The "MCP" Fallacy**: Reaching for the Model Context Protocol (MCP) with one-tool-per-operation (e.g., `list_functions`, `rename_function`) is inefficient.

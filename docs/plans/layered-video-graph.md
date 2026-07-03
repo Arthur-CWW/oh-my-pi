@@ -218,7 +218,7 @@ Do not build a full graph runner yet. First:
 4. Keep JSON recipe/manifests as import/export edges around the catalog.
 5. Add local deterministic composition helpers first: subtitles, ffmpeg compose, mux, analysis.
 6. Link Jimeng/TTS/lipsync provider outputs through provider-job metadata; do not make this slice own provider orchestration.
-7. Keep CapCut reverse engineering as a separate lane if needed.
+7. Keep CapCut reveng as a separate lane if needed.
 
 
 ## Pleometric artifact library v0

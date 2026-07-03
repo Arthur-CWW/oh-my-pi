@@ -12,7 +12,7 @@ _Published on April 23, 2026 by Francesco Bonacci_
 
 ---
 
-Following OpenAI's [Codex Computer-Use announcement](https://openai.com/index/codex-for-almost-everything/) and the great work of the Sky team, we've been down a rabbit hole reverse-engineering macOS window management internals. I want to tell you what we found, and where I think we're headed next.
+Following OpenAI's [Codex Computer-Use announcement](https://openai.com/index/codex-for-almost-everything/) and the great work of the Sky team, we've been down a rabbit hole reveng macOS window management internals. I want to tell you what we found, and where I think we're headed next.
 
 Let me back up. Since 2024 I've watched a lot of GUI agents-based products ship and fail, mostly because of the embedded nature of desktop inputs being synchronous: one cursor and one keyboard for one focused window.
 

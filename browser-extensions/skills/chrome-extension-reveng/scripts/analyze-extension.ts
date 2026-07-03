@@ -43,7 +43,7 @@ type Manifest = {
   >;
 };
 
-const targetArg = process.argv[2] ?? "reverse-engineering/vidiq-vision";
+const targetArg = process.argv[2] ?? "reveng/vidiq-vision";
 
 function findWorkspaceRoot(start: string) {
   let current = start;

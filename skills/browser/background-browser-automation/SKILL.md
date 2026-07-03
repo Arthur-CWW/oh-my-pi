@@ -1,6 +1,6 @@
 ---
 name: background-browser-automation
-description: Background-safe browser automation guidance with CuaDriver first, plus Playwright/Puppeteer/CDP patterns for DOM, scraping, API reverse engineering, and network request inspection. Use when automating browsers or debugging web apps without stealing focus.
+description: Background-safe browser automation guidance with CuaDriver first, plus Playwright/Puppeteer/CDP patterns for DOM, scraping, API reveng, and network request inspection. Use when automating browsers or debugging web apps without stealing focus.
 ---
 
 # Background Browser Automation

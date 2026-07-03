@@ -64,7 +64,7 @@ Source: formerly `git:github.com/mitsuhiko/agent-stuff`; a reference snapshot is
 | `apple-mail` | Search/read local Apple Mail storage and attachments. | Sensitive personal-data opt-in only. |
 | `commit` | Commit workflow; read before making git commits. | Keep as global core; included in `pi-personal-core-skills`. |
 | `frontend-design` | Distinctive frontend/UI design guidance. | Keep as global core; included in `pi-personal-core-skills`. |
-| `ghidra` | Headless Ghidra reverse engineering. | Specialist opt-in only. |
+| `ghidra` | Headless Ghidra reveng. | Specialist opt-in only. |
 | `github` | Use `gh` CLI for issues, PRs, runs, and API calls. | Keep as global core; included in `pi-personal-core-skills`. |
 | `google-workspace` | Google Drive/Docs/Calendar/Gmail/Sheets/etc. via local helper scripts. | Useful but personal-data opt-in only. Prefer this over separate `gmcli`/`gdcli`/`gccli`. |
 | `mermaid` | Mermaid chart creation/editing with validation. | Keep as global core; included in `pi-personal-core-skills`. |

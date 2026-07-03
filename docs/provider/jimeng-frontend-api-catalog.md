@@ -160,7 +160,7 @@ Use dynamic and static tools together:
 
 Latest no-spend `/mweb/v1/get_common_config` rate sweep completed `2048/2048` read-only requests at concurrency `2048` with HTTP `200` and `ret=0`; no HTTP `429`, auth, or risk-control stop was observed on that endpoint, though tail latency stretched sharply at the top tier. The `2048` run used an IP/SNI override because the local macOS resolver temporarily had no DNS configuration. Treat this as a config-endpoint bound only; it is not a generation-submit limit. The external `iptag/jimeng-api` project does not publish a hard limit; it load-balances comma-separated bearer tokens randomly and uses polling/retry behavior.
 
-The shared `JimengClient` request boundary now opens a local cooldown after `ret=1019` or raw `shark not pass` responses. Follow-up calls during cooldown fail locally as `RISK_CONTROL_COOLDOWN_ACTIVE`, which protects live reverse-engineering loops from repeatedly hitting provider risk control.
+The shared `JimengClient` request boundary now opens a local cooldown after `ret=1019` or raw `shark not pass` responses. Follow-up calls during cooldown fail locally as `RISK_CONTROL_COOLDOWN_ACTIVE`, which protects live reveng loops from repeatedly hitting provider risk control.
 
 `iptag/jimeng-api` also confirmed a useful no-spend credit read endpoint, `/commerce/v1/benefits/user_credit`, with a required `sign` header derived from `md5("9e2c|<endpoint-last-7>|7|8.4.0|<device-time>||11ac")`. This is implemented as `jimeng-browser-proxy account-credit`. The mutating daily-claim endpoint `/commerce/v1/benefits/credit_receive` remains intentionally unimplemented.
 

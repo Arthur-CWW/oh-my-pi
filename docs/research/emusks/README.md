@@ -26,7 +26,7 @@ This directory contains research notes concerning unofficial Twitter/X API clien
 |---|---|---|
 | **Account Bans & Suspensions** | **Critical**. Direct requests mimicking app signatures lack realistic browser signatures, canvas setups, and TLS fingerprints. Accounts are routinely and instantly flagged/blacklisted. | **Very Low**. Browser automation (Helium/CuaDriver) executes standard JS, handles service workers, and shares the natural system browser profile. |
 | **Authentication Stability** | **Brittle**. Relying on leaked bearer tokens or extracted credentials fails as soon as tokens expire or when X enforces client-bound token rotation. | **High**. User session state (cookies, local storage) is persisted and updated naturally by the browser engine. |
-| **Legal Compliance** | **Non-Compliant**. Reverse-engineering and spoofing network security headers violates platform terms of service. | **Compliant**. Interacts through standard visual/DOM interfaces, avoiding reverse engineering of cryptographic handshakes. |
+| **Legal Compliance** | **Non-Compliant**. Reverse-engineering and spoofing network security headers violates platform terms of service. | **Compliant**. Interacts through standard visual/DOM interfaces, avoiding reveng of cryptographic handshakes. |
 | **Maintenance Burden** | **Extremely High**. Requires updating query hashes, request headers, and routing paths every time the web/mobile app updates. | **Low**. The DOM structure and visual layer change far less frequently than backend GraphQL endpoint variables. |
 
 ---

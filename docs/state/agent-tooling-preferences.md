@@ -52,7 +52,7 @@ Arthur clarified that missing developer CLI tooling should preferably be install
 
 Arthur clarified that API/provider integrations should use runtime schema validation, not just TypeScript interfaces or lint. The schema should be permissive about extra JSON fields but strict about the response paths the pipeline depends on, so future provider changes fail with clear contract-drift errors and can be rerun from saved proof commands.
 
-Arthur clarified that API reverse engineering should be sped up with mixed dynamic/static tooling. Use CDP network truth, `ast-grep`/targeted bundle search, and explicit replay/probe tools together; avoid spending long stretches reading minified bundles when a captured request plus replay comparison can prove the contract faster.
+Arthur clarified that API reveng should be sped up with mixed dynamic/static tooling. Use CDP network truth, `ast-grep`/targeted bundle search, and explicit replay/probe tools together; avoid spending long stretches reading minified bundles when a captured request plus replay comparison can prove the contract faster.
 
 The Jimeng/Dreamina workflow now has `jimeng-browser-proxy capture-analyze` and `jimeng-browser-proxy discovery-worklist` for this loop. After each meaningful `jimeng-network-recorder` capture, run `capture-analyze` first to rank endpoints, classify replay risk, summarize shapes, and emit local candidate JSON; then run `discovery-worklist` to merge analyzer/probe/static evidence into a prioritized next-slice queue before reading frontend bundles by hand.
 

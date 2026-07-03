@@ -3,4 +3,4 @@ packages:
   - "packages/*"
   - "skills/*"
   - "tools/*"
-  - "reverse-engineering/*"
+  - "reveng/*"

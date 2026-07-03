@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Shared capture and replay data types for browser API reverse-engineering tools.",
+  "description": "Shared capture and replay data types for browser API reveng tools.",
   "exports": {
     ".": "./src/index.ts"
   },

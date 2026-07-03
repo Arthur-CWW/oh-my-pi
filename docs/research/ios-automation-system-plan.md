@@ -1922,7 +1922,7 @@ DeviceCheck uses the Secure Enclave Processor (SEP) to generate per-device, per-
 
 `vphoned_accessibility.m` is a stub with `@"accessibility_tree not yet implemented — requires XPC research"`. To get the accessibility tree natively (without WDA dependency), we need to implement one of the approaches listed in the stub:
 
-1. **XPC to `com.apple.accessibility.AXRuntime`:** The AX runtime exposes an XPC service that can enumerate the accessibility tree for any process. This requires reverse engineering the XPC protocol. Reference: iOS's `UIAccessibility` framework uses private XPC channels through `AXRuntime`.
+1. **XPC to `com.apple.accessibility.AXRuntime`:** The AX runtime exposes an XPC service that can enumerate the accessibility tree for any process. This requires reveng the XPC protocol. Reference: iOS's `UIAccessibility` framework uses private XPC channels through `AXRuntime`.
 
 2. **AXUIElement private API:** `AXUIElementCopyAttributeValue` and friends are part of the HIServices/Accessibility framework but may not be available on iOS (they are macOS APIs). The iOS equivalent is the private `AXRuntime.framework`.
 

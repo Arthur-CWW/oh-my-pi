@@ -1,6 +1,6 @@
 # Video understanding provider benchmark
 
-Goal: compare cost/reliability/quality for tagging and reverse-engineering many shortform videos.
+Goal: compare cost/reliability/quality for tagging and reveng many shortform videos.
 
 ## Current default stance
 

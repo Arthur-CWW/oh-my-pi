@@ -1,4 +1,4 @@
-# Reverse Engineering
+# RevEng
 
 Case studies and unpacked extension sources live here. Keep extraction notes and source snapshots separate from reusable implementation code.
 
@@ -14,5 +14,5 @@ The target UI behavior is YouTube augmentation: injected badges, thumbnail metri
 
 - Put reusable TypeScript under `packages/`.
 - Put reusable CLI or agent tooling under `tools/`.
-- Put reverse-engineering workflow docs and scripts under `skills/chrome-extension-reverse-engineering/`.
+- Put reveng workflow docs and scripts under `skills/chrome-extension-reveng/`.
 - Keep copied extension source free of `.git`, browser profiles, build outputs, and local secrets.

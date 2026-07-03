@@ -18,7 +18,7 @@ extensions/            Browser extensions, one package per extension
 packages/              Shared TypeScript libraries used by extensions/tools
 skills/                Agent skills and skill-specific TypeScript helpers
 tools/                 Local daemons/CLIs for agents and native bridges
-reverse-engineering/   Unpacked extension case studies and source snapshots
+reveng/   Unpacked extension case studies and source snapshots
 scripts/               Repo-level build/check/smoke scripts
 docs/                  Architecture notes and operational how-tos
 ```
@@ -46,7 +46,7 @@ pnpm skill:reverse-engineer
 
 ## Reverse engineering rule
 
-Keep copied third-party or target extension source under `reverse-engineering/`. Move reusable code into `packages/`, and keep agent workflow instructions under `skills/`.
+Keep copied third-party or target extension source under `reveng/`. Move reusable code into `packages/`, and keep agent workflow instructions under `skills/`.
 
 ## Browser automation rule
 

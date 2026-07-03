@@ -59,7 +59,7 @@ Every dispatch specifies: **owner paths** (explicit files), **excluded paths**, 
 
 ## Exclusions and non-goals
 
-- Cybersecurity, reverse-engineering, vphone, proxy, anti-detection: not Fable lanes. Route away or leave to non-Fable sessions.
+- Cybersecurity, reveng, vphone, proxy, anti-detection: not Fable lanes. Route away or leave to non-Fable sessions.
 - Built-in `autolearn`: inadequate, do not fix. Curated docs + session index are the memory substrate for now.
 - Menial ops (file moves, lint loops, dep bumps): workers, never Fable tokens.
 - No moralizing or legalistic language in docs or decisions.

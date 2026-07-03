@@ -2,7 +2,7 @@
   "name": "@wirebabel/jimeng-client",
   "version": "0.1.0",
   "private": true,
-  "description": "Local-first Jimeng/Dreamina direct client helpers ported from Slotok reverse engineering",
+  "description": "Local-first Jimeng/Dreamina direct client helpers ported from Slotok reveng",
   "type": "module",
   "exports": {
     ".": "./src/index.ts",

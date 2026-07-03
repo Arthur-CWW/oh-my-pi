@@ -8,7 +8,7 @@ This doc records the obsolete default MCP and custom Claude Code clutter removed
 
 **Removed:** the active `vphone` MCP server entry.
 
-- **Why:** vphone is cybersecurity/reverse-engineering/red-team tooling (virtual phone control / anti-detection lab adjacent). It is not advisor/orchestrator context for Fable and was adding project-level MCP surface that every OMP session would load.
+- **Why:** vphone is cybersecurity/reveng/red-team tooling (virtual phone control / anti-detection lab adjacent). It is not advisor/orchestrator context for Fable and was adding project-level MCP surface that every OMP session would load.
 - **How:** the file was replaced with a valid empty MCP config (`mcpServers: {}`) while preserving the OMP MCP schema reference.
 - **What was left alone:** `.omp/mcp.archived-porkbun.json` was kept as-is. It is already archived and not loaded by OMP.
 

@@ -36,7 +36,7 @@ const limit = Number(process.env.VIDIQ_CAPTURE_LIMIT ?? "80");
 const workspaceRoot = path.resolve(import.meta.dirname, "../../..");
 const outputDir =
   process.env.VIDIQ_CAPTURE_OUT_DIR ??
-  path.join(workspaceRoot, "reverse-engineering/vidiq-vision/captures/dom");
+  path.join(workspaceRoot, "reveng/vidiq-vision/captures/dom");
 
 function timestampSlug(date = new Date()) {
   return date.toISOString().replace(/[:.]/g, "-");

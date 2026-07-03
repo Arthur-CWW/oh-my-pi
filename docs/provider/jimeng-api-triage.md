@@ -1,6 +1,6 @@
 # Jimeng API Triage
 
-This file is the fast decision layer for Jimeng/Dreamina reverse engineering. It answers: which API families matter for the UGC app, which are optional, and which should stay parked unless the product direction changes.
+This file is the fast decision layer for Jimeng/Dreamina reveng. It answers: which API families matter for the UGC app, which are optional, and which should stay parked unless the product direction changes.
 
 Evidence paths can point at ignored `data/**` proof bundles; do not commit raw cookies, signed URLs, or private account payloads.
 

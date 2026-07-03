@@ -8,7 +8,7 @@ This repo is shaped like a small monorepo: independent browser extensions plus s
 browser-extensions/
   extensions/
     x-bookmark-sync-devtools/   First DevTools capture prototype
-    api-lens/                   Future general API reverse-engineering extension
+    api-lens/                   Future general API reveng extension
   packages/
     capture-schema/             Shared capture/replay data types
     browser-control/            Future CDP/BiDi attach helpers
@@ -21,7 +21,7 @@ browser-extensions/
 
 ## Long-term product shape
 
-The useful target is not a single DevTools panel. It is a local agent-facing API reverse-engineering system:
+The useful target is not a single DevTools panel. It is a local agent-facing API reveng system:
 
 1. **Browser extension capture layer**
    - Observe request URLs, headers, request bodies, response bodies where available.
@@ -62,7 +62,7 @@ Create `extensions/api-lens` as the general tool rather than making the X bookma
 
 Suggested modes:
 
-- `passive-devtools`: custom DevTools panel for interactive reverse engineering.
+- `passive-devtools`: custom DevTools panel for interactive reveng.
 - `debugger-capture`: Chrome/Helium background-ish capture using `chrome.debugger`.
 - `page-hook`: optional Requestly-style fetch/XHR hook.
 - `firefox-stream`: Firefox build using response stream filtering.

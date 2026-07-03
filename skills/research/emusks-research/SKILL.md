@@ -75,7 +75,7 @@ The following activities are out of scope for this skill and must not be request
 | **Mechanism** | Standard headful browser execution (Helium/CuaDriver/Playwright) mimicking regular user interaction. | Direct HTTP requests to undocumented/private endpoints (e.g., `/i/api/graphql/...`) using forged headers. |
 | **Stability** | Resilient to API/GraphQL schema updates; behaves exactly like a human user. | Extremely brittle; breaks instantly on any changes to private routes, keys, or query hashes. |
 | **Account Safety** | Very high. Operates within normal human browsing patterns. | Critical risk. Triggers automated security/bot flags, leading to instant account suspension or IP block. |
-| **Terms/Compliance** | Compliant with standard platform interface terms. Avoids reverse engineering of network security controls. | Violates platform terms of service regarding unauthorized API access and client impersonation. |
+| **Terms/Compliance** | Compliant with standard platform interface terms. Avoids reveng of network security controls. | Violates platform terms of service regarding unauthorized API access and client impersonation. |
 | **Bearer/Secret Reuse** | None. Standard cookies/session tokens handled naturally by browser. | Relies on extracting/reusing static bearer tokens or forging client-app signatures. |
 
 ---
