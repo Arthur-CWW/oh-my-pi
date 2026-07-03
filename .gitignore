@@ -16,6 +16,13 @@ prompt.md
 .DS_Store
 
 # Local scratch/artifacts
+# Session exports, crash dumps, and test output
+erl_crash.dump
+omp-session-*.html
+telegram_upload_session.session
+packages/spatial-audio-renderer/test-output/
+.omp/bin/*.bak.*
+
 codex-decomp/
 tmp/
 vault
