@@ -1,0 +1,15 @@
+[project]
+name = "vphone-mcp"
+version = "0.1.0"
+description = "MCP server for programmatic control of vphone-cli iOS VMs"
+requires-python = ">=3.10"
+dependencies = [
+    "mcp[cli]>=1.2.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project.scripts]
+vphone-mcp = "vphone_mcp.server:main"

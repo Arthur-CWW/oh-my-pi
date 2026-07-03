@@ -1,0 +1,16 @@
+{
+  "$schema": "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/coding-agent/src/config/mcp-schema.json",
+  "archivedAt": "2026-06-24",
+  "reason": "Removed from active MCP discovery because it was noisy and unrelated to current work; restore into .omp/mcp.json only when Porkbun domain/DNS automation is explicitly needed.",
+  "mcpServers": {
+    "porkbun": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@porkbunllc/mcp-server"],
+      "env": {
+        "PORKBUN_API_KEY": "!printf '%s' \"$PORKBUN_API_KEY\"",
+        "PORKBUN_SECRET_API_KEY": "!printf '%s' \"$PORKBUN_SECRET_API_KEY\""
+      }
+    }
+  }
+}
