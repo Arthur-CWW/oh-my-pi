@@ -42,3 +42,58 @@ Result: **7 pass / 2 fail / 1 not-verifiable** (10/10 verdicts rendered).
 - node_repl sandbox had no filesystem or network access, and ncode lane 403'd; all live interaction ran through self-contained Bun CDP driver scripts (`/tmp/studio-qa-driver.ts`, `/tmp/studio-qa-probe.ts`) fired by Main, with progressive JSON results polled from disk.
 - "Contentful viewport" uses a PNG-size heuristic (blank/solid frames compress to ~KBs; observed clips were 200KB+).
 - Provenance ledger is shared with the live 4600 instance (both watch specs/); the agent-row test may have produced a duplicate row from the 4600 watcher — expected behavior, noted for ledger readers.
+
+## Delta re-QA (same day, post-StudioEditor fixes)
+
+Fresh instance on port 4632 (new bundle built at boot, private distDir `/tmp/studio-qa-dist2`), same CDP method, orbit-halo spec, non-mutating run.
+
+| Item | Verdict | Evidence |
+|------|---------|----------|
+| Playhead moves during playback | PASS | Timeline svg line idx 17 (playhead) x1 310 → 370 over 1s while frame readout 155/299 → 185/299. Fixed. |
+| Position scrubber drag changes value + canvas | FAIL | Position field found ([0, 0, 0.25]), `scrollIntoView` applied, then `document.elementFromPoint` at the X-scrub's own rect center returned **null** — the span is not hit-testable at its reported coordinates in a 1600×1000 headless window, so CDP pointer input never reaches the drag handler; values unchanged after +120px drag. (canvasChanged=true in the raw data is selection flash-overlay decay, not object movement.) Bloom-strength scrub in the short pass panel responds to identical input, so this is specific to the object panel's geometry — likely clipping/overflow of the inspector rail. Shot: 04-delta-mid-drag.png |
+| Escape closes ? overlay | PASS | `?` → overlay `display:grid`, hidden=false; Escape → `hidden` class set, `display:none`. Fixed. |
+
+## Delta re-QA 2: scrubber hit-test fix
+
+Fresh instance on port 4633 (`PORT=4633 bun src/server.ts`, fresh bundle with the CSS fix: `.rail` overflow removed, `.inspector-wrap` min-width:0), headless Chrome CDP :9233, 1600×1000 viewport forced via `Emulation.setDeviceMetricsOverride`. First spec auto-loaded, object `plate-grid` selected in the tree. Two runs, identical outcome. Neither 4600 nor scene.localhost:1355 was touched; server + Chrome killed after each run.
+
+| Check | Verdict | Evidence |
+|-------|---------|----------|
+| (a) Position X scrub hit-testable at its rect center | FAIL | `document.elementFromPoint` at the span's rect center → **null** (both runs). New diagnostic: the failure is NOT rail clipping of the span — the **entire `#inspector-container` renders at y = −428.5** (rect bottom 15.5, i.e. ~97% above the viewport top) in a correct 1600×1000 viewport (`innerHeight` 1000). The span sits ~107px below the container top (y −321), correctly placed *within* the container; the container itself is displaced above the screen. `scrollIntoView({block:'center'})` and manual `container.scrollTop` both leave scrollTop at 0 and move nothing. |
+| (b) CDP drag changes displayed value | FAIL | mousedown + 3×mousemove (+40px each) + mouseup at the span's reported center (y ≈ −311): Position X displayed "0" before/mid/after (expected +1.2 at step 0.01/px). Consequence of (a): pointer coordinates above the viewport never reach the handler. |
+| (c) Canvas re-renders from the drag | FAIL (not attributable) | Paused canvas clips before/after differ by only 3 bytes (387,066 vs 387,063) with the value unchanged — residual flash/animation decay, not object movement. No position change occurred, so no attributable re-render. |
+
+**Conclusion: the overflow/min-width CSS fix is insufficient.** The original "rail clips the scrub spans" diagnosis was incomplete: with the fix in place the scrub geometry inside the inspector is fine, but the inspector's top rail row is displaced ~460px above the viewport (layout blow-out or phantom scroll of `.studio-view`/document at studio boot — bloom scrub in the shorter pass panel worked in earlier QA because that panel's fields land within the on-screen sliver). Follow-up probe staged at `/tmp/scrubfix-driver3.ts` (resets every scrolled ancestor to 0 before re-testing) — not yet run.
+
+Screenshot: `05-scrubfix-mid-drag.png` (full viewport mid-drag, run 2). Raw data: `/tmp/scrubfix-result.json`, `/tmp/scrubfix-result2.json`; canvas clips `/tmp/scrubfix-canvas-{a,b}.png`.
+
+## Delta re-QA 3: inspector scroll fix
+
+Instance on port 4636 (`PORT=4636 bun --watch src/server.ts`), cmux split browser, default viewport 1206x993. First spec auto-loaded (`beat-grid.scene.json`), object `plate-grid` (24 clones, many fields) selected in tree.
+
+### Root cause
+
+Missing `</nav>` closing tag in the HTML template (`src/ui/main.ts` line 69). The `<nav class="topnav">` opened on line 65 was never closed before `<section id="reports-view">`. In HTML5, `<nav>` does NOT auto-close when the parser encounters `<section>`, `<div>`, or `<footer>` — all are valid flow content children. The browser nested **every sibling** (reports-view, studio-view, label-view, help-overlay, footer) inside the nav.
+
+Since `.topnav` is styled `display: flex; height: 32px; align-items: center`, the 937px-tall `.studio-view` became a flex child centered in a 32px container: `top = (32 - 937) / 2 = -452.5`, placing the entire studio grid 453px above the viewport. `elementFromPoint` at the Position X scrub's rect center (y=-307) returned null because the element was physically above y=0. `scrollIntoView` was a no-op because the inspector-container's scroll chain was intact (height constrained at 440.5px, scrollHeight 844px, overflow-y: auto) — the content was scrollable, but the entire grid was displaced.
+
+Previous hypotheses about `overflow: hidden` on `.inspector-wrap` or missing `min-height: 0` on grid children were incorrect — the scroll chain was never broken; the positioning was.
+
+### Fix
+
+One line: added `</nav>` after the last button in the topnav template, before `<section id="reports-view">`.
+
+### Verdicts
+
+| Check | Verdict | Evidence |
+|-------|---------|----------|
+| (a) Position X scrub visible (boundingRect.top >= 0) | PASS | `rect.top = 168.5` (was -316.5). `studio-view.rect.top = 32` (was -453), correctly below nav. |
+| (b) `elementFromPoint(rect center)` === span | PASS | Returns `<span class="scrub-value">` with text "0". Hit-test confirmed. |
+| (c) `scrollIntoView` works | PASS | Scrolled inspector-container to bottom (scrollTop=403), then `scrollIntoView({block:'center'})` on Position X span brought it back to scrollTop=0 with rect.top=168.5. |
+| (d) CDP drag changes displayed value | PASS | `tab.drag` from Position X center +80px right: value "0" → "0.8". |
+| (e) Canvas re-renders from the drag | PASS | Pre/post-drag screenshots differ (SHA1 `a261b2b7...` vs `4cc56ad6...`). Dirty dot appeared in source editor header. |
+| (f) Source editor renders and scrolls | PASS | CodeMirror editor visible (rect.top=529.5, height=439.5), scrollable (scrollHeight > clientHeight). |
+| (g) Timeline/viewport unaffected | PASS | Timeline SVG present (rect.top=829, height=140). Canvas visible (width=414.5, height=737). |
+| (h) Typecheck + tests green | PASS | `bun run typecheck` clean, `bun test` 125 pass / 0 fail / 303 expect() calls. |
+
+Screenshot: `inspector-scroll-fix-post-drag.png` — full studio after Position X drag to 0.8, showing correct layout with inspector, source editor, timeline, and viewport all visible.

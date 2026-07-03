@@ -67,6 +67,7 @@ app.innerHTML = `
     <button class="nav-btn active" data-view="reports">reports</button>
     <button class="nav-btn" data-view="studio">studio</button>
     <button class="nav-btn" data-view="label">label</button>
+  </nav>
   <section id="reports-view" class="reports-view">
     <div id="report-feed" class="report-feed muted">loading reports\u2026</div>
   </section>
@@ -739,8 +740,8 @@ footer { height: 24px; display: flex; align-items: center; padding: 0 var(--spac
 .studio-view { height: calc(100vh - 32px - 24px); display: grid; grid-template-columns: 220px minmax(400px, 1fr) 320px; gap: 1px; background: var(--panel-border); }
 
 /* -- Rails -- */
-.rail { background: var(--panel-bg); display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
-.rail.right { display: grid; grid-template-rows: 1fr 1fr; }
+.rail { background: var(--panel-bg); display: flex; flex-direction: column; min-height: 0; }
+.rail.right { display: grid; grid-template-rows: 1fr 1fr; overflow: hidden; }
 
 /* -- Center stage -- */
 .stage-col { background: var(--canvas); display: grid; grid-template-rows: 26px minmax(0, 1fr) 34px 140px; min-height: 0; }
@@ -789,7 +790,7 @@ footer { height: 24px; display: flex; align-items: center; padding: 0 var(--spac
 .popup-menu button:hover { background: var(--panel-bg-active); color: var(--accent); }
 
 /* === Inspector (right rail top) === */
-.inspector-wrap { overflow: hidden; display: flex; flex-direction: column; min-height: 0; }
+.inspector-wrap { overflow: hidden; display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 .inspector-wrap .panel-title { height: var(--panel-header-height); display: flex; align-items: center; padding: 0 var(--space-2); color: var(--text-secondary); text-transform: uppercase; font-size: var(--panel-header-label); letter-spacing: var(--tracking-upper); border-bottom: 1px solid var(--panel-border); flex-shrink: 0; }
 .inspector-container { flex: 1; overflow-y: auto; padding: var(--space-2); }
 .inspector-empty { color: var(--text-dim); font-size: var(--text-sm); padding: var(--space-4); text-align: center; }

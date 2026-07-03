@@ -1,5 +1,15 @@
 // ---------------------------------------------------------------------------
 // Label view — yazi-style three-pane media labeler
+//
+// Rendering strategy (2026-07-03 rewrite):
+//   • TanStack virtual-core virtualizes grid rows — only visible + overscan
+//     rows exist in the DOM.
+//   • Cells are stable DOM elements: navigation (j/k/h/l) toggles CSS
+//     classes on ≤2 cells, never rebuilds the grid.
+//   • Media discipline: cells render a dark placeholder with type/duration
+//     badges. Only the focused cell + detail pane get a <video> element
+//     (max 2 in the DOM at any time).
+//   • Full grid rebuild only on data changes (load, filter, sort).
 // ---------------------------------------------------------------------------
 
 import {
@@ -10,6 +20,20 @@ import {
   visualRange,
   nextUnlabeled,
 } from "./keymap";
+import {
+  type CellPatch,
+  computeMovePatch,
+  computeVisualPatch,
+  computeMarkPatch,
+  computeClearPatch,
+  computeLabelPatch,
+} from "./view-model";
+import {
+  Virtualizer,
+  observeElementRect,
+  observeElementOffset,
+  elementScroll,
+} from "@tanstack/virtual-core";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -76,13 +100,22 @@ let statusEl: HTMLElement | null = null;
 
 // DOM references (created once on mount)
 let groupsPane: HTMLElement;
-let gridPane: HTMLElement;
+let gridPane: HTMLElement;       // scroll container
+let gridInner: HTMLElement;      // absolute-positioned inner for virtualizer
 let detailPane: HTMLElement;
 let filterInput: HTMLInputElement;
 let helpOverlayEl: HTMLElement;
 
-// Track playing video so we stop it on blur
-let activeVideo: HTMLVideoElement | null = null;
+// Virtualizer
+let virtualizer: Virtualizer<HTMLElement, HTMLElement> | null = null;
+let virtualizerCleanup: (() => void) | null = null;
+/** Map from filtered-index → live cell DOM element (only cells in visible rows). */
+const cellMap = new Map<number, HTMLElement>();
+/** Map from row index → live row DOM element. */
+const rowMap = new Map<number, HTMLElement>();
+
+// Video discipline: at most 2 <video> elements in the DOM at any time
+let focusedCellVideo: HTMLVideoElement | null = null;
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -95,6 +128,7 @@ export function mountLabelView(root: HTMLElement, statusLine: HTMLElement): void
     root.innerHTML = buildShell();
     groupsPane = root.querySelector<HTMLElement>(".label-groups")!;
     gridPane = root.querySelector<HTMLElement>(".label-grid")!;
+    gridInner = root.querySelector<HTMLElement>(".label-grid-inner")!;
     detailPane = root.querySelector<HTMLElement>(".label-detail")!;
     filterInput = root.querySelector<HTMLInputElement>(".label-filter-input")!;
     helpOverlayEl = root.querySelector<HTMLElement>(".label-help-overlay")!;
@@ -107,7 +141,9 @@ export function mountLabelView(root: HTMLElement, statusLine: HTMLElement): void
 }
 
 export function unmountLabelView(): void {
-  pauseActive();
+  teardownFocusedVideo();
+  if (virtualizerCleanup) { virtualizerCleanup(); virtualizerCleanup = null; }
+  virtualizer = null;
 }
 
 export function handleLabelKeydown(e: KeyboardEvent): void {
@@ -119,9 +155,8 @@ export function handleLabelKeydown(e: KeyboardEvent): void {
       state.filterFocused = false;
       return;
     }
-    return; // let input handle other keys
+    return;
   }
-  // Inline add-group input
   if (target instanceof HTMLInputElement && target.classList.contains("group-add-input")) {
     if (e.key === "Escape") { e.preventDefault(); target.remove(); return; }
     if (e.key === "Enter") {
@@ -144,7 +179,6 @@ export function handleLabelKeydown(e: KeyboardEvent): void {
     inspecting: state.inspecting,
   };
 
-  // 'a' for add-group (not in keymap — only relevant in label view)
   if (e.key === "a" && !state.inspecting && !state.filterFocused) {
     e.preventDefault();
     promptAddGroup();
@@ -169,7 +203,26 @@ function buildShell(): string {
         <div class="label-toolbar">
           <input type="text" class="label-filter-input" placeholder="/ filter (group:name)" />
         </div>
-        <div class="label-grid"></div>
+        <div class="label-grid">
+          <div class="label-grid-inner"></div>
+        </div>
+        <div class="label-hint-strip">
+          <kbd>j</kbd><kbd>k</kbd><kbd>h</kbd><kbd>l</kbd> nav
+          <span class="hint-sep">·</span>
+          <kbd>v</kbd> visual
+          <span class="hint-sep">·</span>
+          <kbd>space</kbd> mark
+          <span class="hint-sep">·</span>
+          <kbd>1-9</kbd> group
+          <span class="hint-sep">·</span>
+          <kbd>i</kbd> inspect
+          <span class="hint-sep">·</span>
+          <kbd>u</kbd> unlabel
+          <span class="hint-sep">·</span>
+          <kbd>/</kbd> filter
+          <span class="hint-sep">·</span>
+          <kbd>?</kbd> help
+        </div>
       </section>
       <aside class="label-detail"></aside>
     </div>
@@ -194,7 +247,7 @@ async function loadData(): Promise<void> {
     applyFilter();
     renderAll();
   } catch (err) {
-    if (gridPane) gridPane.innerHTML = `<div class="label-empty">Failed to load corpus</div>`;
+    if (gridPane) gridInner.innerHTML = `<div class="label-empty">Failed to load corpus</div>`;
   }
 }
 
@@ -223,7 +276,6 @@ function applyFilter(): void {
     }
   }
 
-  // Sort
   indices = sortIndices(indices);
   state.filteredIndices = indices;
   state.focus = Math.min(state.focus, Math.max(0, indices.length - 1));
@@ -240,13 +292,13 @@ function sortIndices(indices: number[]): number[] {
         const bl = items[b]!.labels.length;
         if (al === 0 && bl > 0) return -1;
         if (al > 0 && bl === 0) return 1;
-        return a - b; // preserve original order within groups
+        return a - b;
       });
     case "date":
       return indices.slice().sort((a, b) => {
         const da = items[a]!.date ?? "";
         const db = items[b]!.date ?? "";
-        return da < db ? 1 : da > db ? -1 : 0; // newest first
+        return da < db ? 1 : da > db ? -1 : 0;
       });
     case "duration":
       return indices.slice().sort((a, b) => {
@@ -256,44 +308,79 @@ function sortIndices(indices: number[]): number[] {
 }
 
 // ---------------------------------------------------------------------------
-// Action dispatch
+// Action dispatch — incremental updates for navigation, full for data changes
 // ---------------------------------------------------------------------------
 
 function applyAction(action: LabelAction): void {
   switch (action.type) {
-    case "move":
+    case "move": {
+      const oldFocus = state.focus;
+      const oldAnchor = state.visualAnchor;
       state.focus = action.index;
-      renderGrid();
+
+      // Focus patches: O(2) cell mutations
+      const focusPatches = computeMovePatch(oldFocus, state.focus);
+      applyCellPatches(focusPatches);
+
+      // Visual range patches (if in visual mode)
+      if (state.visualAnchor !== null) {
+        const vp = computeVisualPatch(oldAnchor, oldFocus, state.visualAnchor, state.focus);
+        applyCellPatches(vp);
+      }
+
+      // Swap video element between cells
+      updateFocusedVideo(oldFocus, state.focus);
+
       renderDetail();
       updateStatus();
       scrollFocusIntoView();
       break;
+    }
 
-    case "visual-start":
+    case "visual-start": {
       state.visualAnchor = state.focus;
-      renderGrid();
+      // The focused cell gains "visual"
+      const cell = cellMap.get(state.focus);
+      if (cell) cell.classList.add("visual");
+      updateStatus();
       break;
+    }
 
-    case "visual-clear":
+    case "visual-clear": {
+      const patches = computeClearPatch(state.visualAnchor, state.focus, state.marks);
       state.visualAnchor = null;
       state.marks = new Set();
-      renderGrid();
+      applyCellPatches(patches);
+      updateStatus();
       break;
+    }
 
     case "toggle-mark": {
+      const wasMarked = state.marks.has(action.index);
+      const patches = computeMarkPatch(action.index, wasMarked);
       const next = new Set(state.marks);
-      if (next.has(action.index)) next.delete(action.index);
+      if (wasMarked) next.delete(action.index);
       else next.add(action.index);
       state.marks = next;
-      renderGrid();
+      applyCellPatches(patches);
+      updateStatus();
       break;
     }
 
     case "assign-group": {
       const group = groupForKey(action.key);
       if (group === null) break;
-      const realIndices = action.indices.map((fi) => state.filteredIndices[fi]).filter((i): i is number => i !== undefined);
+      const realIndices = action.indices
+        .map((fi) => state.filteredIndices[fi])
+        .filter((i): i is number => i !== undefined);
       void assignBatch(realIndices, group.name);
+
+      // Update labeled class on affected cells
+      for (const fi of action.indices) {
+        const lp = computeLabelPatch(fi, true);
+        applyCellPatches(lp);
+      }
+
       // Advance to next unlabeled
       const labeledSet = buildLabeledSet();
       for (const ri of realIndices) labeledSet.add(ri);
@@ -302,18 +389,42 @@ function applyAction(action: LabelAction): void {
         const fi = state.filteredIndices.indexOf(ri);
         if (fi >= 0) mappedSet.add(fi);
       }
+      const oldFocus = state.focus;
       state.focus = nextUnlabeled(state.focus, state.filteredIndices.length, mappedSet);
       state.visualAnchor = null;
       state.marks = new Set();
+
+      // Focus move patches
+      applyCellPatches(computeMovePatch(oldFocus, state.focus));
+      updateFocusedVideo(oldFocus, state.focus);
+
       flashGroup(group.name);
-      renderAll();
+      renderDetail();
+      renderGroups();
+      updateStatus();
+      scrollFocusIntoView();
       break;
     }
 
     case "unassign": {
-      const realIndices = action.indices.map((fi) => state.filteredIndices[fi]).filter((i): i is number => i !== undefined);
+      const realIndices = action.indices
+        .map((fi) => state.filteredIndices[fi])
+        .filter((i): i is number => i !== undefined);
       void unassignBatch(realIndices);
-      renderAll();
+      // Update labeled class
+      for (const fi of action.indices) {
+        const lp = computeLabelPatch(fi, false);
+        applyCellPatches(lp);
+        // Also update chips in the cell
+        const cell = cellMap.get(fi);
+        if (cell) {
+          const meta = cell.querySelector(".grid-meta");
+          if (meta) meta.innerHTML = "";
+        }
+      }
+      renderDetail();
+      renderGroups();
+      updateStatus();
       break;
     }
 
@@ -349,18 +460,29 @@ function applyAction(action: LabelAction): void {
 }
 
 // ---------------------------------------------------------------------------
+// Patch application
+// ---------------------------------------------------------------------------
+
+function applyCellPatches(patches: CellPatch[]): void {
+  for (const p of patches) {
+    const cell = cellMap.get(p.index);
+    if (!cell) continue;
+    if (p.add) for (const c of p.add) cell.classList.add(c);
+    if (p.remove) for (const c of p.remove) cell.classList.remove(c);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // API calls (optimistic — fire and don't await in the render path)
 // ---------------------------------------------------------------------------
 
 async function assignBatch(itemIndices: number[], groupName: string): Promise<void> {
-  // Optimistic local update
   for (const idx of itemIndices) {
     const item = state.items[idx];
     if (item !== undefined && !item.labels.includes(groupName)) {
       item.labels.push(groupName);
     }
   }
-  // Fire PUTs
   for (const idx of itemIndices) {
     const item = state.items[idx];
     if (item === undefined) continue;
@@ -368,9 +490,8 @@ async function assignBatch(itemIndices: number[], groupName: string): Promise<vo
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ mediaPath: item.file, group: groupName, op: "add" }),
-    }).catch(() => {/* optimistic — ignore */});
+    }).catch(() => {});
   }
-  // Refresh group counts
   void refreshGroups();
 }
 
@@ -383,7 +504,7 @@ async function unassignBatch(itemIndices: number[]): Promise<void> {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ mediaPath: item.file, group: g, op: "remove" }),
-      }).catch(() => {/* optimistic */});
+      }).catch(() => {});
     }
     item.labels = [];
   }
@@ -432,25 +553,298 @@ function labeledCount(): number {
   return count;
 }
 
-function pauseActive(): void {
-  if (activeVideo !== null) {
-    activeVideo.pause();
-    activeVideo = null;
-  }
-}
-
-function scrollFocusIntoView(): void {
-  const cell = gridPane?.querySelector<HTMLElement>(".grid-cell.focused");
-  cell?.scrollIntoView({ block: "nearest" });
+function assetPath(file: string): string {
+  return `/asset?path=data/inspiration/pleometric/${encodeURIComponent(file)}`;
 }
 
 // ---------------------------------------------------------------------------
-// Rendering
+// Video discipline — max 2 <video> in DOM: focused cell + detail pane
+// ---------------------------------------------------------------------------
+
+function teardownFocusedVideo(): void {
+  if (focusedCellVideo !== null) {
+    focusedCellVideo.pause();
+    focusedCellVideo.removeAttribute("src");
+    focusedCellVideo.remove();
+    focusedCellVideo = null;
+  }
+}
+
+function updateFocusedVideo(oldFocus: number, newFocus: number): void {
+  teardownFocusedVideo();
+
+  if (oldFocus === newFocus) return;
+
+  const cell = cellMap.get(newFocus);
+  if (!cell) return;
+
+  const itemIdx = state.filteredIndices[newFocus];
+  if (itemIdx === undefined) return;
+  const item = state.items[itemIdx]!;
+
+  // Only create video for non-gif media
+  const ext = item.file.split(".").pop()?.toLowerCase();
+  if (ext === "gif") return;
+
+  const video = document.createElement("video");
+  video.src = assetPath(item.file);
+  video.className = "grid-thumb grid-thumb-video";
+  video.muted = true;
+  video.loop = true;
+  video.playsInline = true;
+  // Insert before .grid-meta (or append)
+  const meta = cell.querySelector(".grid-meta");
+  if (meta) cell.insertBefore(video, meta);
+  else cell.appendChild(video);
+  video.play().catch(() => {});
+  focusedCellVideo = video;
+}
+
+/** Mount video on the focused cell if it's currently visible in the DOM. */
+function ensureFocusedVideo(): void {
+  teardownFocusedVideo();
+  const cell = cellMap.get(state.focus);
+  if (!cell) return;
+
+  const itemIdx = state.filteredIndices[state.focus];
+  if (itemIdx === undefined) return;
+  const item = state.items[itemIdx]!;
+
+  const ext = item.file.split(".").pop()?.toLowerCase();
+  if (ext === "gif") return;
+
+  const video = document.createElement("video");
+  video.src = assetPath(item.file);
+  video.className = "grid-thumb grid-thumb-video";
+  video.muted = true;
+  video.loop = true;
+  video.playsInline = true;
+  const meta = cell.querySelector(".grid-meta");
+  if (meta) cell.insertBefore(video, meta);
+  else cell.appendChild(video);
+  video.play().catch(() => {});
+  focusedCellVideo = video;
+}
+
+// ---------------------------------------------------------------------------
+// Virtualizer setup
+// ---------------------------------------------------------------------------
+
+function computeRowHeight(): number {
+  if (!gridPane) return 160;
+  const gap = 8;
+  const pad = 16; // 8px left + 8px right from row padding
+  const w = gridPane.clientWidth - pad - (state.cols - 1) * gap;
+  return Math.floor(w / state.cols);
+}
+
+function setupVirtualizer(): void {
+  // Cleanup previous
+  if (virtualizerCleanup) { virtualizerCleanup(); virtualizerCleanup = null; }
+  cellMap.clear();
+  rowMap.clear();
+  gridInner.innerHTML = "";
+
+  const totalItems = state.filteredIndices.length;
+  if (totalItems === 0) {
+    gridInner.innerHTML = `<div class="label-empty">${
+      state.items.length === 0 ? "No corpus loaded" : "No items match filter"
+    }</div>`;
+    return;
+  }
+
+  const totalRows = Math.ceil(totalItems / state.cols);
+  const rowHeight = computeRowHeight();
+  const interRowGap = 8;
+
+  virtualizer = new Virtualizer<HTMLElement, HTMLElement>({
+    count: totalRows,
+    getScrollElement: () => gridPane,
+    estimateSize: () => rowHeight + interRowGap,
+    gap: 0,
+    paddingStart: 8,
+    paddingEnd: 8,
+    observeElementRect,
+    observeElementOffset,
+    scrollToFn: elementScroll,
+    onChange: () => {
+      renderVirtualRows();
+    },
+  });
+
+  // Mount
+  virtualizerCleanup = virtualizer._didMount();
+  virtualizer._willUpdate();
+
+  // Initial render
+  renderVirtualRows();
+}
+
+// ---------------------------------------------------------------------------
+// Virtual row rendering
+// ---------------------------------------------------------------------------
+
+function renderVirtualRows(): void {
+  if (!virtualizer || !gridInner) return;
+
+  const items = virtualizer.getVirtualItems();
+  const totalSize = virtualizer.getTotalSize();
+
+  gridInner.style.height = `${totalSize}px`;
+
+  // Determine which rows the virtualizer wants visible
+  const visibleRowIndices = new Set(items.map((v) => v.index));
+
+  // Remove rows that scrolled out
+  for (const [rowIdx, rowEl] of rowMap) {
+    if (!visibleRowIndices.has(rowIdx)) {
+      // Remove cells from cellMap
+      const startFi = rowIdx * state.cols;
+      for (let c = 0; c < state.cols; c++) {
+        const fi = startFi + c;
+        // If the focused video is on this cell, tear it down
+        if (fi === state.focus) teardownFocusedVideo();
+        cellMap.delete(fi);
+      }
+      rowEl.remove();
+      rowMap.delete(rowIdx);
+    }
+  }
+
+  // Create/update visible rows
+  for (const vItem of items) {
+    const existing = rowMap.get(vItem.index);
+    if (existing) {
+      // Just update position
+      existing.style.transform = `translateY(${vItem.start}px)`;
+      existing.style.height = `${vItem.size}px`;
+      continue;
+    }
+
+    // Create new row
+    const rowEl = document.createElement("div");
+    rowEl.className = "grid-row";
+    rowEl.style.position = "absolute";
+    rowEl.style.top = "0";
+    rowEl.style.left = "0";
+    rowEl.style.width = "100%";
+    rowEl.style.transform = `translateY(${vItem.start}px)`;
+    rowEl.style.height = `${vItem.size}px`;
+    rowEl.style.display = "grid";
+    rowEl.style.gridTemplateColumns = `repeat(${state.cols}, 1fr)`;
+    rowEl.style.gap = "8px";
+    rowEl.style.padding = "0 8px";
+    rowEl.style.boxSizing = "border-box";
+
+    const startFi = vItem.index * state.cols;
+    const totalItems = state.filteredIndices.length;
+
+    for (let c = 0; c < state.cols && startFi + c < totalItems; c++) {
+      const fi = startFi + c;
+      const cell = createCell(fi);
+      rowEl.appendChild(cell);
+      cellMap.set(fi, cell);
+    }
+
+    gridInner.appendChild(rowEl);
+    rowMap.set(vItem.index, rowEl);
+  }
+
+  // Ensure focused video is mounted if focused cell just became visible
+  if (focusedCellVideo === null && cellMap.has(state.focus)) {
+    ensureFocusedVideo();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Cell creation — placeholder-first, no media elements
+// ---------------------------------------------------------------------------
+
+function createCell(fi: number): HTMLElement {
+  const itemIdx = state.filteredIndices[fi]!;
+  const item = state.items[itemIdx]!;
+
+  const cell = document.createElement("div");
+  cell.className = "grid-cell";
+  cell.dataset.fi = String(fi);
+
+  // Apply current state classes
+  if (fi === state.focus) cell.classList.add("focused");
+  if (state.marks.has(fi)) cell.classList.add("marked");
+  if (state.visualAnchor !== null) {
+    const [vLo, vHi] = visualRange(state.visualAnchor, state.focus);
+    if (fi >= vLo && fi <= vHi) cell.classList.add("visual");
+  }
+  if (item.labels.length > 0) cell.classList.add("labeled");
+
+  // Placeholder (dark tile + badges) — NO media element
+  const placeholder = document.createElement("div");
+  placeholder.className = "grid-placeholder";
+
+  const typeBadge = document.createElement("span");
+  typeBadge.className = "grid-badge grid-badge-type";
+  typeBadge.textContent = item.mediaType;
+  placeholder.appendChild(typeBadge);
+
+  if (item.durationSeconds !== undefined) {
+    const durBadge = document.createElement("span");
+    durBadge.className = "grid-badge grid-badge-dur";
+    durBadge.textContent = formatDuration(item.durationSeconds);
+    placeholder.appendChild(durBadge);
+  }
+
+  cell.appendChild(placeholder);
+
+  // Label chips
+  const meta = document.createElement("div");
+  meta.className = "grid-meta";
+  for (const l of item.labels) {
+    const chip = document.createElement("span");
+    chip.className = "grid-chip";
+    chip.textContent = l;
+    meta.appendChild(chip);
+  }
+  cell.appendChild(meta);
+
+  // Click handler
+  cell.addEventListener("click", () => {
+    const oldFocus = state.focus;
+    state.focus = fi;
+    applyCellPatches(computeMovePatch(oldFocus, fi));
+    updateFocusedVideo(oldFocus, fi);
+    renderDetail();
+    updateStatus();
+  });
+
+  return cell;
+}
+
+function formatDuration(s: number): string {
+  if (s < 60) return `${s.toFixed(1)}s`;
+  const m = Math.floor(s / 60);
+  const sec = Math.round(s % 60);
+  return `${m}:${String(sec).padStart(2, "0")}`;
+}
+
+// ---------------------------------------------------------------------------
+// Scroll to focused cell
+// ---------------------------------------------------------------------------
+
+function scrollFocusIntoView(): void {
+  if (!virtualizer) return;
+  const row = Math.floor(state.focus / state.cols);
+  const items = virtualizer.getVirtualItems();
+  if (items.some((v) => v.index === row)) return; // already visible
+  virtualizer.scrollToIndex(row, { align: "auto" });
+}
+
+// ---------------------------------------------------------------------------
+// Rendering — full rebuilds only for data changes
 // ---------------------------------------------------------------------------
 
 function renderAll(): void {
   renderGroups();
-  renderGrid();
+  setupVirtualizer();
   renderDetail();
   renderHelp();
   updateStatus();
@@ -482,80 +876,6 @@ function renderGroups(): void {
   `;
 }
 
-function renderGrid(): void {
-  if (!gridPane) return;
-  pauseActive();
-  const indices = state.filteredIndices;
-  if (indices.length === 0) {
-    gridPane.innerHTML = `<div class="label-empty">${state.items.length === 0 ? "No corpus loaded" : "No items match filter"}</div>`;
-    return;
-  }
-
-  // Compute visual range
-  let vLo = -1, vHi = -1;
-  if (state.visualAnchor !== null) {
-    [vLo, vHi] = visualRange(state.visualAnchor, state.focus);
-  }
-
-  const cells = indices.map((itemIdx, fi) => {
-    const item = state.items[itemIdx]!;
-    const isFocused = fi === state.focus;
-    const isMarked = state.marks.has(fi);
-    const isVisual = fi >= vLo && fi <= vHi;
-    const classes = ["grid-cell"];
-    if (isFocused) classes.push("focused");
-    if (isMarked) classes.push("marked");
-    if (isVisual) classes.push("visual");
-    if (item.labels.length > 0) classes.push("labeled");
-
-    const ext = item.file.split(".").pop()?.toLowerCase();
-    const isRealGif = ext === "gif";
-    const assetPath = `/asset?path=data/inspiration/pleometric/${encodeURIComponent(item.file)}`;
-
-    let thumb: string;
-    if (isRealGif) {
-      thumb = `<img src="${assetPath}" class="grid-thumb" loading="lazy" />`;
-    } else {
-      // For focused cell, we'll play it via JS after render
-      thumb = `<video src="${assetPath}" class="grid-thumb" preload="metadata" muted loop playsinline></video>`;
-    }
-
-    const chips = item.labels.map((l) => `<span class="grid-chip">${esc(l)}</span>`).join("");
-
-    return `<div class="${classes.join(" ")}" data-fi="${fi}">
-      ${thumb}
-      <div class="grid-meta">${chips}</div>
-    </div>`;
-  }).join("");
-
-  gridPane.innerHTML = cells;
-  gridPane.style.setProperty("--label-cols", String(state.cols));
-
-  // Play focused video
-  const focusedCell = gridPane.querySelector<HTMLElement>(".grid-cell.focused");
-  if (focusedCell) {
-    const video = focusedCell.querySelector<HTMLVideoElement>("video");
-    if (video) {
-      activeVideo = video;
-      video.play().catch(() => {});
-    }
-    focusedCell.scrollIntoView({ block: "nearest" });
-  }
-
-  // Wire click handlers
-  for (const cell of gridPane.querySelectorAll<HTMLElement>(".grid-cell")) {
-    cell.addEventListener("click", () => {
-      const fi = Number(cell.dataset.fi);
-      if (!Number.isNaN(fi)) {
-        state.focus = fi;
-        renderGrid();
-        renderDetail();
-        updateStatus();
-      }
-    });
-  }
-}
-
 function renderDetail(): void {
   if (!detailPane) return;
   const fi = state.focus;
@@ -565,13 +885,13 @@ function renderDetail(): void {
     return;
   }
   const item = state.items[itemIdx]!;
-  const assetPath = `/asset?path=data/inspiration/pleometric/${encodeURIComponent(item.file)}`;
+  const src = assetPath(item.file);
   const ext = item.file.split(".").pop()?.toLowerCase();
   const isRealGif = ext === "gif";
 
   const preview = isRealGif
-    ? `<img src="${assetPath}" class="detail-preview" />`
-    : `<video src="${assetPath}" class="detail-preview" autoplay muted loop playsinline></video>`;
+    ? `<img src="${src}" class="detail-preview" />`
+    : `<video src="${src}" class="detail-preview" autoplay muted loop playsinline></video>`;
 
   const chips = item.labels.length > 0
     ? item.labels.map((l) => `<span class="detail-chip">${esc(l)}</span>`).join("")
@@ -625,9 +945,7 @@ function wireFilterInput(): void {
   filterInput.addEventListener("input", () => {
     state.filterText = filterInput.value;
     applyFilter();
-    renderGrid();
-    renderDetail();
-    updateStatus();
+    renderAll();
   });
   filterInput.addEventListener("focus", () => { state.filterFocused = true; });
   filterInput.addEventListener("blur", () => { state.filterFocused = false; });
@@ -637,13 +955,10 @@ function wireGroupsPane(): void {
   groupsPane.addEventListener("click", (e) => {
     const row = (e.target as HTMLElement).closest<HTMLElement>(".group-row");
     if (row?.dataset.group) {
-      // Click group → filter to that group
       state.filterText = `group:${row.dataset.group}`;
       filterInput.value = state.filterText;
       applyFilter();
-      renderGrid();
-      renderDetail();
-      updateStatus();
+      renderAll();
     }
   });
 }
@@ -652,7 +967,12 @@ function wireGridResize(): void {
   if (!gridPane) return;
   const computeCols = () => {
     const w = gridPane.clientWidth;
+    const oldCols = state.cols;
     state.cols = Math.max(2, Math.floor(w / 160));
+    if (oldCols !== state.cols && state.filteredIndices.length > 0) {
+      // Rebuild virtualizer with new column count
+      setupVirtualizer();
+    }
   };
   const ro = new ResizeObserver(computeCols);
   ro.observe(gridPane);
@@ -772,7 +1092,7 @@ export function labelCss(): string {
   outline: none;
 }
 
-/* -- Center grid -- */
+/* -- Center pane -- */
 .label-center {
   background: var(--canvas);
   display: flex;
@@ -803,18 +1123,19 @@ export function labelCss(): string {
   outline: none;
   box-shadow: var(--focus-ring);
 }
+
+/* -- Virtual grid -- */
 .label-grid {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: var(--space-2);
-  display: grid;
-  grid-template-columns: repeat(var(--label-cols, 4), 1fr);
-  gap: var(--space-2);
-  align-content: start;
+  position: relative;
+}
+.label-grid-inner {
+  position: relative;
+  width: 100%;
 }
 .label-empty {
-  grid-column: 1 / -1;
   color: var(--text-dim);
   font-size: var(--text-sm);
   text-align: center;
@@ -853,12 +1174,48 @@ export function labelCss(): string {
   border-radius: 50%;
   background: var(--success);
 }
-.grid-thumb {
+
+/* -- Placeholder (dark tile + badges) -- */
+.grid-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  background: var(--panel-bg-elevated);
+}
+.grid-badge {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  padding: 1px 5px;
+  border-radius: var(--radius-xs);
+  line-height: 1.3;
+}
+.grid-badge-type {
+  background: var(--panel-bg-active);
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-upper);
+  font-weight: 600;
+}
+.grid-badge-dur {
+  background: transparent;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* -- Focused cell video overlays placeholder -- */
+.grid-thumb-video {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
-  display: block;
+  z-index: 1;
 }
+
 .grid-meta {
   position: absolute;
   bottom: 0;
@@ -868,6 +1225,7 @@ export function labelCss(): string {
   gap: 2px;
   padding: 2px;
   flex-wrap: wrap;
+  z-index: 2;
 }
 .grid-chip {
   background: rgba(0,0,0,0.7);
@@ -879,6 +1237,39 @@ export function labelCss(): string {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* -- Hint strip (permanent, bottom of center pane) -- */
+.label-hint-strip {
+  flex-shrink: 0;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0 var(--space-2);
+  background: var(--panel-bg);
+  border-top: 1px solid var(--panel-border-subtle);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.label-hint-strip kbd {
+  display: inline-block;
+  padding: 0 3px;
+  border-radius: var(--radius-xs);
+  background: var(--panel-bg-active);
+  border: 1px solid var(--panel-border);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  line-height: 1.5;
+}
+.hint-sep {
+  color: var(--text-dim);
+  margin: 0 1px;
 }
 
 /* -- Detail pane (right) -- */

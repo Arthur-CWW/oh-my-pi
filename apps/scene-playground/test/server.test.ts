@@ -31,6 +31,10 @@ async function startTestServer(options: { sseHeartbeatMs?: number } = {}): Promi
   return testServer;
 }
 
+function byteFixture(length: number): Uint8Array {
+  return Uint8Array.from({ length }, (_, index) => index % 256);
+}
+
 afterEach(async () => {
   while (servers.length > 0) {
     const testServer = servers.pop();
@@ -80,6 +84,56 @@ describe("scene playground routes", () => {
     expect(allowed.headers.get("content-type")).toBe("image/png");
     expect(await allowed.arrayBuffer()).toHaveProperty("byteLength", 4);
     expect(rejected.status).toBe(403);
+  });
+
+  test("serves asset byte ranges and HEAD probes", async () => {
+    const testServer = await startTestServer();
+    const fixture = byteFixture(256);
+    await writeFile(join(testServer.root, "workflows/scene-lab/assets/clip.mp4"), fixture);
+    const url = `${testServer.baseUrl}/asset?path=${encodeURIComponent("workflows/scene-lab/assets/clip.mp4")}`;
+
+    const full = await fetch(url);
+    expect(full.status).toBe(200);
+    expect(full.headers.get("accept-ranges")).toBe("bytes");
+    expect(full.headers.get("content-length")).toBe("256");
+    expect(full.headers.get("content-type")).toBe("video/mp4");
+    expect(await full.arrayBuffer()).toHaveProperty("byteLength", 256);
+
+    const firstHundred = await fetch(url, { headers: { range: "bytes=0-99" } });
+    expect(firstHundred.status).toBe(206);
+    expect(firstHundred.headers.get("content-range")).toBe("bytes 0-99/256");
+    expect(firstHundred.headers.get("content-length")).toBe("100");
+    expect(Array.from(new Uint8Array(await firstHundred.arrayBuffer()))).toEqual(Array.from(fixture.slice(0, 100)));
+
+    const openEnded = await fetch(url, { headers: { range: "bytes=200-" } });
+    expect(openEnded.status).toBe(206);
+    expect(openEnded.headers.get("content-range")).toBe("bytes 200-255/256");
+    expect(Array.from(new Uint8Array(await openEnded.arrayBuffer()))).toEqual(Array.from(fixture.slice(200)));
+
+    const clamped = await fetch(url, { headers: { range: "bytes=200-999" } });
+    expect(clamped.status).toBe(206);
+    expect(clamped.headers.get("content-range")).toBe("bytes 200-255/256");
+    expect(Array.from(new Uint8Array(await clamped.arrayBuffer()))).toEqual(Array.from(fixture.slice(200)));
+
+    const unsatisfiable = await fetch(url, { headers: { range: "bytes=300-400" } });
+    expect(unsatisfiable.status).toBe(416);
+    expect(unsatisfiable.headers.get("content-range")).toBe("bytes */256");
+
+    const malformed = await fetch(url, { headers: { range: "bytes=-10" } });
+    expect(malformed.status).toBe(416);
+    expect(malformed.headers.get("content-range")).toBe("bytes */256");
+
+    const rangeHead = await fetch(url, { method: "HEAD", headers: { range: "bytes=0-99" } });
+    expect(rangeHead.status).toBe(206);
+    expect(rangeHead.headers.get("content-range")).toBe("bytes 0-99/256");
+    expect(rangeHead.headers.get("content-length")).toBe("100");
+    expect(await rangeHead.arrayBuffer()).toHaveProperty("byteLength", 0);
+
+    const head = await fetch(url, { method: "HEAD" });
+    expect(head.status).toBe(200);
+    expect(head.headers.get("accept-ranges")).toBe("bytes");
+    expect(head.headers.get("content-length")).toBe("256");
+    expect(await head.arrayBuffer()).toHaveProperty("byteLength", 0);
   });
 
   test("reports an unbuilt scene runtime with a helpful 404", async () => {
@@ -162,6 +216,7 @@ describe("report routes", () => {
     await mkdir(reportDir, { recursive: true });
     await writeFile(join(reportDir, "report.md"), "title: Serve Test\ndate: 2026-07-03\nagent: Bot\nstatus: shipped\n\nBody here.", "utf8");
     await writeFile(join(reportDir, "proof.png"), new Uint8Array([137, 80, 78, 71]));
+    await writeFile(join(reportDir, "demo.mp4"), byteFixture(256));
 
     const mdResponse = await fetch(`${testServer.baseUrl}/report?path=${encodeURIComponent("workflows/scene-lab/reports/2026-07-03-serve-test/report.md")}`);
     expect(mdResponse.status).toBe(200);
@@ -172,6 +227,29 @@ describe("report routes", () => {
     const imgResponse = await fetch(`${testServer.baseUrl}/report?path=${encodeURIComponent("workflows/scene-lab/reports/2026-07-03-serve-test/proof.png")}`);
     expect(imgResponse.status).toBe(200);
     expect(imgResponse.headers.get("content-type")).toBe("image/png");
+
+    const videoUrl = `${testServer.baseUrl}/report?path=${encodeURIComponent("workflows/scene-lab/reports/2026-07-03-serve-test/demo.mp4")}`;
+    const videoResponse = await fetch(videoUrl);
+    expect(videoResponse.status).toBe(200);
+    expect(videoResponse.headers.get("content-type")).toBe("video/mp4");
+    expect(videoResponse.headers.get("accept-ranges")).toBe("bytes");
+    expect(await videoResponse.arrayBuffer()).toHaveProperty("byteLength", 256);
+
+    const rangedVideo = await fetch(videoUrl, { headers: { range: "bytes=0-99" } });
+    expect(rangedVideo.status).toBe(206);
+    expect(rangedVideo.headers.get("content-range")).toBe("bytes 0-99/256");
+    expect(await rangedVideo.arrayBuffer()).toHaveProperty("byteLength", 100);
+
+    const rangedHeadVideo = await fetch(videoUrl, { method: "HEAD", headers: { range: "bytes=0-99" } });
+    expect(rangedHeadVideo.status).toBe(206);
+    expect(rangedHeadVideo.headers.get("content-range")).toBe("bytes 0-99/256");
+    expect(rangedHeadVideo.headers.get("content-length")).toBe("100");
+    expect(await rangedHeadVideo.arrayBuffer()).toHaveProperty("byteLength", 0);
+
+    const headVideo = await fetch(videoUrl, { method: "HEAD" });
+    expect(headVideo.status).toBe(200);
+    expect(headVideo.headers.get("content-length")).toBe("256");
+    expect(await headVideo.arrayBuffer()).toHaveProperty("byteLength", 0);
   });
 
   test("rejects report path traversal", async () => {

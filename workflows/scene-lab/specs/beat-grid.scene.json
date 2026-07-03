@@ -5,7 +5,9 @@
   "fps": 30,
   "durationSeconds": 10,
   "background": "#050507",
-  "timeline": { "bpm": 120 },
+  "timeline": {
+    "bpm": 120
+  },
   "assets": [
     {
       "id": "plate1",
@@ -20,15 +22,31 @@
   ],
   "camera": {
     "fov": 48,
-    "position": [0, 0, 9],
-    "lookAt": [0, 0, 0],
+    "position": [
+      0,
+      0,
+      9
+    ],
+    "lookAt": [
+      0,
+      0,
+      0
+    ],
     "tracks": [
       {
         "prop": "position.z",
         "mode": "keyframes",
         "keyframes": [
-          { "t": 0, "v": 9, "ease": "linear" },
-          { "t": 10, "v": 6.7, "ease": "inOut" }
+          {
+            "t": 0,
+            "v": 9,
+            "ease": "linear"
+          },
+          {
+            "t": 10,
+            "v": 6.7,
+            "ease": "inOut"
+          }
         ]
       }
     ]
@@ -38,9 +56,20 @@
       "id": "plate-grid",
       "kind": "plane",
       "asset": "plate1",
-      "size": [1.55, 2.05],
-      "position": [0, 0, 0],
-      "rotation": [0, 0, 0],
+      "size": [
+        1.55,
+        2.05
+      ],
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
       "scale": 1,
       "opacity": 1,
       "clone": {
@@ -55,18 +84,38 @@
         {
           "prop": "scale",
           "mode": "beat",
-          "beat": { "every": 1, "from": 0.9, "to": 1.14, "attack": 0.04, "decay": 0.22 }
+          "beat": {
+            "every": 1,
+            "from": 0.9,
+            "to": 1.14,
+            "attack": 0.04,
+            "decay": 0.22
+          }
         },
         {
           "prop": "rotation.z",
           "mode": "osc",
-          "osc": { "amp": 0.025, "freqBeats": 0.5, "phasePerClone": 0.18, "center": 0 }
+          "osc": {
+            "amp": 0.025,
+            "freqBeats": 0.5,
+            "phasePerClone": 0.18,
+            "center": 0
+          }
         }
       ]
     }
   ],
   "post": [
-    { "pass": "vhs", "params": { "strength": 0.14 } }
+    {
+      "pass": "vhs",
+      "params": {
+        "strength": 0.14
+      }
+    }
   ],
-  "audio": { "asset": "narration", "offsetSeconds": 0, "gainDb": 0 }
+  "audio": {
+    "asset": "narration",
+    "offsetSeconds": 0,
+    "gainDb": 0
+  }
 }

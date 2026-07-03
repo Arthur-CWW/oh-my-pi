@@ -242,6 +242,96 @@ describe("label keymap", () => {
 });
 
 // ---------------------------------------------------------------------------
+// View-model patch computation tests
+// ---------------------------------------------------------------------------
+
+import {
+  computeMovePatch,
+  computeMarkPatch,
+  computeVisualPatch,
+  computeClearPatch,
+  computeLabelPatch,
+  type CellPatch,
+} from "../src/ui/label/view-model";
+
+describe("label view-model patches", () => {
+  test("focus move produces exactly 2 patches (O(2), not O(n))", () => {
+    const patches = computeMovePatch(5, 9);
+    expect(patches).toHaveLength(2);
+    expect(patches[0]).toEqual({ index: 5, remove: ["focused"] });
+    expect(patches[1]).toEqual({ index: 9, add: ["focused"] });
+  });
+
+  test("focus move to same index produces 0 patches", () => {
+    expect(computeMovePatch(3, 3)).toEqual([]);
+  });
+
+  test("mark toggle add produces 1 patch", () => {
+    const patches = computeMarkPatch(7, false);
+    expect(patches).toEqual([{ index: 7, add: ["marked"] }]);
+  });
+
+  test("mark toggle remove produces 1 patch", () => {
+    const patches = computeMarkPatch(7, true);
+    expect(patches).toEqual([{ index: 7, remove: ["marked"] }]);
+  });
+
+  test("visual-start: null→anchor produces add patches for the range", () => {
+    // anchor=3 focus=3 → single cell visual
+    const patches = computeVisualPatch(null, 3, 3, 3);
+    expect(patches).toEqual([{ index: 3, add: ["visual"] }]);
+  });
+
+  test("visual move extends range incrementally", () => {
+    // anchor=2, move focus from 3 to 5: old range [2,3], new range [2,5]
+    const patches = computeVisualPatch(2, 3, 2, 5);
+    // Cells 2,3 stay; cells 4,5 are added
+    const added = patches.filter((p) => p.add?.includes("visual"));
+    const removed = patches.filter((p) => p.remove?.includes("visual"));
+    expect(added).toHaveLength(2);
+    expect(removed).toHaveLength(0);
+    expect(added.map((p) => p.index).sort((a, b) => a - b)).toEqual([4, 5]);
+  });
+
+  test("visual shrink removes cells from range", () => {
+    // anchor=2, move focus from 5 back to 3: old range [2,5], new range [2,3]
+    const patches = computeVisualPatch(2, 5, 2, 3);
+    const removed = patches.filter((p) => p.remove?.includes("visual"));
+    expect(removed).toHaveLength(2);
+    expect(removed.map((p) => p.index).sort((a, b) => a - b)).toEqual([4, 5]);
+  });
+
+  test("visual clear: anchor→null removes all visual cells", () => {
+    const patches = computeVisualPatch(2, 5, null, 5);
+    const removed = patches.filter((p) => p.remove?.includes("visual"));
+    expect(removed).toHaveLength(4); // cells 2,3,4,5
+  });
+
+  test("computeClearPatch removes visual + marks", () => {
+    const marks = new Set([1, 7, 10]);
+    const patches = computeClearPatch(3, 5, marks);
+    // visual range [3,5] → 3 remove-visual patches
+    // marks {1,7,10} → 3 remove-marked patches
+    const visualRemoves = patches.filter((p) => p.remove?.includes("visual"));
+    const markRemoves = patches.filter((p) => p.remove?.includes("marked"));
+    expect(visualRemoves).toHaveLength(3);
+    expect(markRemoves).toHaveLength(3);
+  });
+
+  test("computeClearPatch with no visual/marks is empty", () => {
+    expect(computeClearPatch(null, 5, new Set())).toEqual([]);
+  });
+
+  test("computeLabelPatch adds labeled class", () => {
+    expect(computeLabelPatch(4, true)).toEqual([{ index: 4, add: ["labeled"] }]);
+  });
+
+  test("computeLabelPatch removes labeled class", () => {
+    expect(computeLabelPatch(4, false)).toEqual([{ index: 4, remove: ["labeled"] }]);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Server route tests
 // ---------------------------------------------------------------------------
 

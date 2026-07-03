@@ -335,10 +335,57 @@ function mimeFor(path: string): string {
   return "application/octet-stream";
 }
 
-async function serveFile(path: string): Promise<Response> {
+interface ParsedRange {
+  start: number;
+  end: number;
+}
+
+function parseByteRange(rangeHeader: string | null, size: number): ParsedRange | null {
+  if (rangeHeader === null) return null;
+  const match = /^bytes=(\d+)-(\d*)$/.exec(rangeHeader.trim());
+  if (match === null) return null;
+  const startText = match[1]!;
+  const endText = match[2]!;
+  const start = Number.parseInt(startText, 10);
+  if (!Number.isSafeInteger(start) || start >= size) return null;
+  const end = endText === "" ? size - 1 : Number.parseInt(endText, 10);
+  if (!Number.isSafeInteger(end) || end < start) return null;
+  return { start, end: Math.min(end, size - 1) };
+}
+
+async function serveFile(path: string, request?: Request): Promise<Response> {
   const info = await stat(path);
   if (!info.isFile()) return textResponse("Not found", 404);
-  return new Response(Bun.file(path), { headers: { "content-type": mimeFor(path) } });
+  if (request === undefined) return new Response(Bun.file(path), { headers: { "content-type": mimeFor(path) } });
+  const isHead = request.method === "HEAD";
+  const size = info.size;
+  const contentType = mimeFor(path);
+  const rangeHeader = request.headers.get("range");
+  const baseHeaders = {
+    "accept-ranges": "bytes",
+    "content-type": contentType,
+  };
+  if (rangeHeader === null) {
+    return new Response(isHead ? null : Bun.file(path), {
+      headers: { ...baseHeaders, "content-length": String(size) },
+    });
+  }
+  const range = parseByteRange(rangeHeader, size);
+  if (range === null) {
+    return new Response(null, {
+      status: 416,
+      headers: { ...baseHeaders, "content-range": `bytes */${size}`, "content-length": "0" },
+    });
+  }
+  const contentLength = range.end - range.start + 1;
+  return new Response(isHead ? null : Bun.file(path).slice(range.start, range.end + 1), {
+    status: 206,
+    headers: {
+      ...baseHeaders,
+      "content-length": String(contentLength),
+      "content-range": `bytes ${range.start}-${range.end}/${size}`,
+    },
+  });
 }
 
 async function buildUi(appDir: string, distDir: string): Promise<void> {
@@ -563,10 +610,10 @@ export async function createScenePlaygroundApp(options: ServerOptions = {}): Pro
       if (url.pathname === "/api/assets" && request.method === "GET") {
         return jsonResponse(await listAssets(paths));
       }
-      if (url.pathname === "/asset" && request.method === "GET") {
+      if (url.pathname === "/asset" && (request.method === "GET" || request.method === "HEAD")) {
         const assetPath = resolveAssetPath(paths, url.searchParams.get("path") ?? "");
         if (assetPath === null) return jsonResponse({ error: "Asset path must be an allowed media file inside data/video-recreation, workflows/scene-lab/assets, or workflows/scene-lab/renders" }, { status: 403 });
-        return serveFile(assetPath);
+        return serveFile(assetPath, request);
       }
       if (url.pathname === "/api/renders" && request.method === "GET") {
         return jsonResponse(await listRenders(paths));
@@ -665,10 +712,10 @@ export async function createScenePlaygroundApp(options: ServerOptions = {}): Pro
       if (url.pathname === "/api/reports" && request.method === "GET") {
         return jsonResponse(await listReports(paths));
       }
-      if (url.pathname === "/report" && request.method === "GET") {
+      if (url.pathname === "/report" && (request.method === "GET" || request.method === "HEAD")) {
         const reportPath = resolveReportPath(paths, url.searchParams.get("path") ?? "");
         if (reportPath === null) return jsonResponse({ error: "Path must be inside workflows/scene-lab/reports and be .md, .png, .mp4, or .json" }, { status: 403 });
-        return serveFile(reportPath);
+        return serveFile(reportPath, request);
       }
       if (url.pathname === "/runtime.js" && request.method === "GET") {
         if (!existsSync(paths.runtimePath)) {

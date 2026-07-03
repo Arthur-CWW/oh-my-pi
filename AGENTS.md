@@ -28,6 +28,7 @@ Invariants. Most are also static lints — push every lesson down the guardrail 
 - **React UI**: test state/view models and interaction, not rendered markup. Visual/browser QA for UI.
 - **Cross-runtime**: avoid native modules unless deliberately isolated. `bun-types` in typecheck configs.
 - **Self-contained packages** (Arthur, 2026-07-03). Each app/package owns its scripts, deps, and run commands in its OWN `package.json`; NEVER add new scripts or deps to the root `package.json`. Existing root entries are legacy — migrate them into their package when you next touch that package, don't extend them. Run docs say `cd <pkg> && bun run dev`, not root aliases.
+- **Vanilla UI perf** (earned 2026-07-03): virtualize large grids/lists with `@tanstack/virtual-core` (framework-agnostic; works clean in vanilla TS). Navigation/selection updates patch CSS classes on stable DOM — NEVER rebuild a media grid on keynav (recreated `<video>` elements = reload flashes). Cap live media elements (~2); offscreen cells are placeholders. React/React-compiler/Million evaluated and not adopted for vanilla apps.
 
 ## Coordination
 
