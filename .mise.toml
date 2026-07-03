@@ -2,6 +2,18 @@
 erlang = "28.5"
 elixir = "1.20.1-otp-28"
 
+[tasks.dev-proxy]
+description = "Run the checked-in Portless dev-domain proxy in the foreground"
+run = "bun run dev-proxy"
+
+[tasks.dev-proxy-render]
+description = "Render infra/dev-proxy/Caddyfile from .dev-domains.json"
+run = "bun run dev-proxy:render"
+
+[tasks.dev-proxy-reload]
+description = "Reload the running Portless dev-domain proxy after registry edits"
+run = "bun run dev-proxy:reload"
+
 [tasks.symphonyx-install]
 description = "Install the local SymphonyX CLI globally into ~/.cargo/bin"
 run = "cargo install --path packages/symphony-lite-rs --locked --force"

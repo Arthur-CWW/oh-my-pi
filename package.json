@@ -55,6 +55,10 @@
     "jimeng:browser-proxy": "bun packages/jimeng-client/src/browser-proxy-cli.ts",
     "jimeng:artifacts": "bun packages/jimeng-client/src/artifact-dashboard.ts",
     "jimeng:dashboard": "bun packages/jimeng-client/src/artifact-dashboard.ts serve --db data/jimeng-lab/artifact-log.sqlite --root . --port 4188",
+    "dev-proxy": "bun scripts/dev-proxy.ts run",
+    "dev-proxy:render": "bun scripts/dev-proxy.ts render",
+    "dev-proxy:reload": "bun scripts/dev-proxy.ts reload",
+    "dev-proxy:validate": "bun scripts/dev-proxy.ts validate",
     "jimeng:packet:next": "bun packages/jimeng-client/src/artifact-dashboard.ts packet next --db data/jimeng-lab/artifact-log.sqlite",
     "jimeng:packet:get": "bun packages/jimeng-client/src/artifact-dashboard.ts packet get --db data/jimeng-lab/artifact-log.sqlite",
     "jimeng:coverage": "bun packages/jimeng-client/src/browser-proxy-cli.ts triage-coverage --decisions keep --outDir data/jimeng-lab/latest-keep-coverage",
@@ -110,6 +114,7 @@
       "./skills/core/proof-of-work-qa",
       "./skills/core/rubber-duck-adversarial",
       "./skills/core/source-archive",
+      "./skills/core/vault-ops",
       "./vendor/badlogic/pi-skills/transcribe",
       "./vendor/badlogic/pi-skills/youtube-transcript",
       "./packages/borges-library/skills/borges-library"

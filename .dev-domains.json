@@ -1,0 +1,23 @@
+{
+  "listen": ":80",
+  "domains": [
+    {
+      "name": "robomp",
+      "port": 6543,
+      "description": "Robomp dashboard exposed by vendor/oh-my-pi/python/robomp/docker-compose.yml (host 6543 -> container 8080).",
+      "command": "cd vendor/oh-my-pi && bun run robomp:up"
+    },
+    {
+      "name": "jimeng",
+      "port": 4188,
+      "description": "Jimeng artifact dashboard from the root package.json jimeng:dashboard script.",
+      "command": "bun run jimeng:dashboard"
+    },
+    {
+      "name": "example",
+      "port": 3000,
+      "enabled": false,
+      "description": "Copy this entry for a project dev server; do not enable sibling WIP apps unless their owner asks."
+    }
+  ]
+}

@@ -1049,6 +1049,7 @@ export class AgentSession {
 	#retryPromise: Promise<void> | undefined = undefined;
 	#retryResolve: (() => void) | undefined = undefined;
 	#activeRetryFallback: ActiveRetryFallbackState | undefined = undefined;
+	#contentFilterRerouteFailures = 0;
 	// Todo completion reminder state
 	#todoReminderCount = 0;
 	/**
@@ -2312,6 +2313,7 @@ export class AgentSession {
 						attempt: this.#retryAttempt,
 					});
 					this.#retryAttempt = 0;
+					this.#contentFilterRerouteFailures = 0;
 				}
 			}
 
@@ -9161,6 +9163,16 @@ export class AgentSession {
 	 * Context overflow errors are NOT retryable (handled by compaction instead).
 	 * Usage-limit errors are retryable because the retry handler performs credential switching.
 	 */
+	#isAnthropicOutputContentFilterError(errorMessage: string): boolean {
+		return /anthropic stream error\s*\(\s*invalid_request_error\s*\):\s*output blocked by content filter/i.test(
+			errorMessage,
+		);
+	}
+
+	#contentFilterFailureMessage(): string {
+		return "Anthropic content filter blocked subagent output after fallback retries.";
+	}
+
 	#isRetryableError(message: AssistantMessage): boolean {
 		if (message.stopReason !== "error" || !message.errorMessage) return false;
 
@@ -9168,6 +9180,7 @@ export class AgentSession {
 		const contextWindow = this.model?.contextWindow ?? 0;
 		if (isContextOverflow(message, contextWindow)) return false;
 
+		if (this.#isAnthropicOutputContentFilterError(message.errorMessage)) return true;
 		if (this.#isClassifierRefusal(message)) return true;
 		if (this.#streamInterruptedAfterObservableOutput(message)) return false;
 		if (this.#isStaleOpenAIResponsesReplayError(message)) return true;
@@ -9514,9 +9527,25 @@ export class AgentSession {
 		const retrySettings = this.settings.getGroup("retry");
 		if (!retrySettings.enabled) return false;
 		const classifierRefusal = this.#isClassifierRefusal(message);
-
 		const generation = this.#promptGeneration;
 		this.#retryAttempt++;
+		const errorMessage = message.errorMessage || "Unknown error";
+		const contentFilterBlocked = this.#isAnthropicOutputContentFilterError(errorMessage);
+		if (contentFilterBlocked && this.#activeRetryFallback) {
+			this.#contentFilterRerouteFailures++;
+			if (this.#contentFilterRerouteFailures >= 2) {
+				await this.#emitSessionEvent({
+					type: "auto_retry_end",
+					success: false,
+					attempt: Math.max(1, this.#retryAttempt - 1),
+					finalError: this.#contentFilterFailureMessage(),
+				});
+				this.#retryAttempt = 0;
+				this.#contentFilterRerouteFailures = 0;
+				this.#resolveRetry();
+				return false;
+			}
+		}
 
 		// Create retry promise on first attempt so waitForRetry() can await it
 		// Ensure only one promise exists (avoid orphaned promises from concurrent calls)
@@ -9532,14 +9561,14 @@ export class AgentSession {
 				type: "auto_retry_end",
 				success: false,
 				attempt: this.#retryAttempt - 1,
-				finalError: message.errorMessage,
+				finalError: contentFilterBlocked ? this.#contentFilterFailureMessage() : message.errorMessage,
 			});
 			this.#retryAttempt = 0;
+			this.#contentFilterRerouteFailures = 0;
 			this.#resolveRetry(); // Resolve so waitForRetry() completes
 			return false;
 		}
 
-		const errorMessage = message.errorMessage || "Unknown error";
 		const staleOpenAIResponsesReplayError = this.#isStaleOpenAIResponsesReplayError(message);
 		const parsedRetryAfterMs = this.#parseRetryAfterMsFromError(errorMessage);
 		let delayMs = staleOpenAIResponsesReplayError
@@ -9600,7 +9629,7 @@ export class AgentSession {
 
 		const currentSelector = this.model ? formatRetryFallbackSelector(this.model, this.thinkingLevel) : undefined;
 		if (!staleOpenAIResponsesReplayError && !switchedCredential && currentSelector) {
-			if (retrySettings.modelFallback) {
+			if (retrySettings.modelFallback && (!contentFilterBlocked || this.#retryAttempt > 1)) {
 				if (!classifierRefusal) {
 					this.#noteRetryFallbackCooldown(currentSelector, parsedRetryAfterMs, errorMessage);
 				}
@@ -9614,6 +9643,7 @@ export class AgentSession {
 		}
 		if (classifierRefusal && !switchedModel) {
 			this.#retryAttempt = 0;
+			this.#contentFilterRerouteFailures = 0;
 			this.#resolveRetry();
 			return false;
 		}
@@ -9629,6 +9659,7 @@ export class AgentSession {
 		if (maxDelayMs > 0 && delayMs > maxDelayMs && !switchedCredential && !switchedModel) {
 			const attempt = this.#retryAttempt;
 			this.#retryAttempt = 0;
+			this.#contentFilterRerouteFailures = 0;
 			await this.#emitSessionEvent({
 				type: "auto_retry_end",
 				success: false,
@@ -9666,6 +9697,7 @@ export class AgentSession {
 			// Aborted during sleep - emit end event so UI can clean up
 			const attempt = this.#retryAttempt;
 			this.#retryAttempt = 0;
+			this.#contentFilterRerouteFailures = 0;
 			this.#retryAbortController = undefined;
 			await this.#emitSessionEvent({
 				type: "auto_retry_end",
@@ -9749,6 +9781,7 @@ export class AgentSession {
 
 		// Reset retry budget for a fresh attempt
 		this.#retryAttempt = 0;
+		this.#contentFilterRerouteFailures = 0;
 
 		// Re-attempt the turn
 		this.#scheduleAgentContinue({ delayMs: 1 });

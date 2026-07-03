@@ -118,3 +118,6 @@ streams/primer/wrapped-commentary-reader/
 
 # ToS-removed content (archived locally, never committed)
 .archive/
+
+# Local Obsidian vault symlink
+/vault
