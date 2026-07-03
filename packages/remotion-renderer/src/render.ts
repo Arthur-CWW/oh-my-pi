@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import fs from "node:fs";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { bundle } from "@remotion/bundler";
 import { renderMedia, selectComposition } from "@remotion/renderer";
 import { layerPlanSchema } from "./compositions/TiktokRecreate";
@@ -27,6 +27,9 @@ type GeneratedClipResolution = {
   missingLiveMediaReason?: string;
 };
 
+type CaptionCue = NonNullable<TiktokRecreateProps["captionCues"]>[number];
+type CaptionStyle = "word" | "phrase";
+
 function usage(): string {
   return `
 Usage: render.ts --manifest <path> --persona-manifest <path> --out <dir> [options]
@@ -47,6 +50,9 @@ Optional:
   --fps               Frames per second (default: 30)
   --width             Video width (default: 1080)
   --height            Video height (default: 1920)
+  --frame-range       Optional Remotion frame range slice, formatted <start>-<end>
+  --captions          Optional WEBVTT captions file
+  --caption-style     Caption style: word (default) or phrase
 
 Examples:
   tsx packages/remotion-renderer/src/render.ts \\
@@ -86,6 +92,72 @@ function parseArgs(argv: string[]) {
   }
   return flags;
 }
+
+function parseFrameRange(value: string | undefined): [number, number] | undefined {
+  if (!value) return undefined;
+  const match = /^(\d+)-(\d+)$/.exec(value);
+  if (!match) fail("--frame-range must be formatted <start>-<end>");
+  const start = Number(match[1]);
+  const end = Number(match[2]);
+  if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end < start) {
+    fail("--frame-range must use non-negative integers with end >= start");
+  }
+  return [start, end];
+}
+
+function parseVttTime(value: string): number {
+  const match = /^(\d{2}):(\d{2}):(\d{2})\.(\d{3})$/.exec(value.trim());
+  if (!match) throw new Error(`Invalid WEBVTT timestamp: ${value}`);
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  const seconds = Number(match[3]);
+  const millis = Number(match[4]);
+  return hours * 3600 + minutes * 60 + seconds + millis / 1000;
+}
+
+function parseWebVttCaptions(filePath: string, fps: number, style: CaptionStyle): CaptionCue[] {
+  const text = fs.readFileSync(path.resolve(filePath), "utf8");
+  const lines = text.replace(/^\uFEFF/, "").split(/\r?\n/);
+  const cues: CaptionCue[] = [];
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i].trim();
+    const timing = /^(\d{2}:\d{2}:\d{2}\.\d{3})\s+-->\s+(\d{2}:\d{2}:\d{2}\.\d{3})/.exec(line);
+    if (!timing) continue;
+
+    const startFrame = Math.round(parseVttTime(timing[1]) * fps);
+    const endFrame = Math.max(startFrame + 1, Math.round(parseVttTime(timing[2]) * fps));
+    const textLines: string[] = [];
+    i += 1;
+    for (; i < lines.length; i += 1) {
+      const cueLine = lines[i].trim();
+      if (!cueLine) break;
+      textLines.push(cueLine);
+    }
+
+    const cueText = textLines.join(" ").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+    if (!cueText) continue;
+
+    if (style === "phrase") {
+      cues.push({ text: cueText, startFrame, endFrame });
+      continue;
+    }
+
+    const words = cueText.split(/\s+/).filter(Boolean);
+    const duration = endFrame - startFrame;
+    words.forEach((word, index) => {
+      const wordStart = startFrame + Math.round((duration * index) / words.length);
+      const wordEnd =
+        index === words.length - 1
+          ? endFrame
+          : startFrame + Math.round((duration * (index + 1)) / words.length);
+      cues.push({ text: word, startFrame: wordStart, endFrame: Math.max(wordStart + 1, wordEnd) });
+    });
+  }
+
+  return cues;
+}
+
 
 function readJsonFile(filePath: string): unknown {
   const resolved = path.resolve(filePath);
@@ -364,76 +436,45 @@ function extractAudioPath(
   return undefined;
 }
 
-function toRenderableUrl(value: string): string {
-  if (value.startsWith("http://") || value.startsWith("https://") || value.startsWith("data:")) {
-    return value;
-  }
-  const resolved = path.resolve(value);
-  if (!fs.existsSync(resolved)) {
-    return value.startsWith("file://") ? value : pathToFileURL(resolved).href;
-  }
-  const ext = path.extname(resolved).toLowerCase();
-  const mime = ext === ".png"
-    ? "image/png"
-    : ext === ".jpg" || ext === ".jpeg"
-      ? "image/jpeg"
-      : ext === ".webp"
-        ? "image/webp"
-        : ext === ".gif"
-          ? "image/gif"
-          : ext === ".svg"
-            ? "image/svg+xml"
-            : ext === ".mp4"
-              ? "video/mp4"
-              : ext === ".mov"
-                ? "video/quicktime"
-                : ext === ".webm"
-                  ? "video/webm"
-                  : ext === ".mp3"
-                    ? "audio/mpeg"
-                    : ext === ".wav"
-                      ? "audio/wav"
-                      : ext === ".ogg" || ext === ".opus"
-                        ? "audio/ogg"
-                        : ext === ".m4a"
-                          ? "audio/mp4"
-                          : ext === ".aac"
-                            ? "audio/aac"
-                            : ext === ".flac"
-                              ? "audio/flac"
-                              : "application/octet-stream";
-  const bytes = fs.readFileSync(resolved);
-  return `data:${mime};base64,${bytes.toString("base64")}`;
+const LAYER_ASSET_KEYS = new Set([
+  "src",
+  "plateUrl",
+  "imageUrl",
+  "fromPlate",
+  "toPlate",
+  "videoUrl",
+  "clipUrl",
+  "placeholderImage",
+  "placeholderImagePath",
+  "placeholderMediaPath",
+]);
+
+function isPassthroughAsset(value: string): boolean {
+  return (
+    value.startsWith("http://") ||
+    value.startsWith("https://") ||
+    value.startsWith("data:") ||
+    value.startsWith("blob:")
+  );
 }
 
-// Resolve local media paths inside layer props to renderable URLs.
+function resolveLocalAssetPath(value: string): string | undefined {
+  if (isPassthroughAsset(value)) return undefined;
+  const localPath = value.startsWith("file://") ? fileURLToPath(value) : path.resolve(value);
+  return fs.existsSync(localPath) ? localPath : undefined;
+}
+
+// Normalize existing local media references without serializing bytes into inputProps.
 function resolveLayerPlanUrls(layerPlan: LayerPlan): LayerPlan {
-  const assetKeys = new Set([
-    "src",
-    "plateUrl",
-    "imageUrl",
-    "fromPlate",
-    "toPlate",
-    "videoUrl",
-    "clipUrl",
-    "placeholderImage",
-    "placeholderImagePath",
-    "placeholderMediaPath",
-  ])
-  const urlMap = new Map<string, string>()
+  const urlMap = new Map<string, string>();
 
   const toAssetUrl = (value: string): string => {
-    if (value.startsWith("data:") || value.startsWith("http://") || value.startsWith("https://")) {
-      return value
+    if (isPassthroughAsset(value)) return value;
+    if (!urlMap.has(value)) {
+      urlMap.set(value, resolveLocalAssetPath(value) ?? value);
     }
-    const resolved = path.resolve(value)
-    if (!fs.existsSync(resolved)) return value
-    const ext = path.extname(resolved).toLowerCase()
-    if (ext === ".mp4" || ext === ".mov" || ext === ".webm") {
-      return pathToFileURL(resolved).href
-    }
-    return toRenderableUrl(resolved)
-  }
+    return urlMap.get(value)!;
+  };
 
   return {
     beats: layerPlan.beats.map((beat) => ({
@@ -441,9 +482,8 @@ function resolveLayerPlanUrls(layerPlan: LayerPlan): LayerPlan {
       layers: beat.layers.map((layer) => {
         const nextProps: Record<string, unknown> = {}
         for (const [key, value] of Object.entries(layer.props)) {
-          if (assetKeys.has(key) && typeof value === "string") {
-            if (!urlMap.has(value)) urlMap.set(value, toAssetUrl(value))
-            nextProps[key] = urlMap.get(value)!
+          if (LAYER_ASSET_KEYS.has(key) && typeof value === "string") {
+            nextProps[key] = toAssetUrl(value)
           } else {
             nextProps[key] = value
           }
@@ -541,6 +581,21 @@ function applyGeneratedClipManifest(layerPlan: LayerPlan, clips: GeneratedClipRe
   };
 }
 
+function injectPresenterPersona(layerPlan: LayerPlan, personaImagePath: string | undefined): LayerPlan {
+  if (!personaImagePath) return layerPlan;
+  return {
+    beats: layerPlan.beats.map((beat) => ({
+      ...beat,
+      layers: beat.layers.map((layer) => {
+        if (layer.type !== "PresenterLayer") return layer;
+        const props = layer.props as Record<string, unknown>;
+        if (typeof props.src === "string" && props.src.length > 0) return layer;
+        return { ...layer, props: { ...props, src: personaImagePath } };
+      }),
+    })),
+  };
+}
+
 function buildInputProps(options: {
   manifest: Record<string, unknown>;
   decomposition: Record<string, unknown> | null;
@@ -554,6 +609,7 @@ function buildInputProps(options: {
   height: number;
   layerPlan: LayerPlan | undefined;
   layerPlanExtras: Record<string, unknown>;
+  captionCues: CaptionCue[] | undefined;
 }): TiktokRecreateProps {
   const {
     manifest,
@@ -568,6 +624,7 @@ function buildInputProps(options: {
     height,
     layerPlan,
     layerPlanExtras,
+    captionCues,
   } = options;
 
   // Resolve target video: layer-plan extras > manifest id > decomposition lookup > first video.
@@ -646,24 +703,21 @@ function buildInputProps(options: {
     });
   })();
 
-  const personaImagePath = extractPersonaImageUrl(personaManifest);
-  const platePaths = extractPlates(platesManifest);
-  const personaImageUrl = personaImagePath ? toRenderableUrl(personaImagePath) : undefined;
-  const plates = platePaths?.map(toRenderableUrl);
+  const personaImageUrl = extractPersonaImageUrl(personaManifest);
+  const plates = extractPlates(platesManifest);
 
   // Audio precedence: explicit --audio > layer-plan ttsManifest > --audio-manifest.
-  let rawAudioPath: string | undefined = audioPath;
-  if (!rawAudioPath && typeof layerPlanExtras.ttsManifest === "string") {
+  let audioUrl: string | undefined = audioPath;
+  if (!audioUrl && typeof layerPlanExtras.ttsManifest === "string") {
     const tts = readJsonFile(layerPlanExtras.ttsManifest);
     if (tts && typeof tts === "object") {
       const ttsDir = path.dirname(path.resolve(layerPlanExtras.ttsManifest));
-      rawAudioPath = extractAudioPath(tts, ttsDir);
+      audioUrl = extractAudioPath(tts, ttsDir);
     }
   }
-  if (!rawAudioPath) {
-    rawAudioPath = extractAudioPath(audioManifest, audioManifestDir);
+  if (!audioUrl) {
+    audioUrl = extractAudioPath(audioManifest, audioManifestDir);
   }
-  const audioUrl = rawAudioPath ? toRenderableUrl(rawAudioPath) : undefined;
 
   return {
     sourceVideoId,
@@ -678,6 +732,51 @@ function buildInputProps(options: {
     width,
     height,
     fps,
+    captionCues,
+  };
+}
+
+function stageInputAssets(inputProps: TiktokRecreateProps, outDir: string): TiktokRecreateProps {
+  const publicDir = path.resolve(outDir, "public");
+  const assetsDir = path.join(publicDir, "assets");
+  fs.mkdirSync(assetsDir, { recursive: true });
+  const staged = new Map<string, string>();
+
+  const stageValue = (value: string | undefined): string | undefined => {
+    if (!value) return value;
+    const sourcePath = resolveLocalAssetPath(value);
+    if (!sourcePath) return value;
+    const existing = staged.get(sourcePath);
+    if (existing) return existing;
+
+    const basename = path.basename(sourcePath).replace(/[^a-zA-Z0-9._-]/g, "_");
+    const relative = `assets/${staged.size}-${basename}`;
+    fs.copyFileSync(sourcePath, path.join(publicDir, relative));
+    staged.set(sourcePath, relative);
+    return relative;
+  };
+
+  const layerPlan = inputProps.layerPlan
+    ? {
+        beats: inputProps.layerPlan.beats.map((beat) => ({
+          ...beat,
+          layers: beat.layers.map((layer) => {
+            const nextProps: Record<string, unknown> = {};
+            for (const [key, value] of Object.entries(layer.props)) {
+              nextProps[key] = LAYER_ASSET_KEYS.has(key) && typeof value === "string" ? stageValue(value) : value;
+            }
+            return { ...layer, props: nextProps };
+          }),
+        })),
+      }
+    : undefined;
+
+  return {
+    ...inputProps,
+    layerPlan,
+    personaImageUrl: stageValue(inputProps.personaImageUrl),
+    plates: inputProps.plates?.map((plate) => stageValue(plate) ?? plate),
+    audioUrl: stageValue(inputProps.audioUrl),
   };
 }
 
@@ -707,6 +806,15 @@ async function main() {
   if (!Number.isFinite(fps) || fps <= 0) fail("--fps must be a positive number");
   if (!Number.isFinite(width) || width <= 0) fail("--width must be a positive number");
   if (!Number.isFinite(height) || height <= 0) fail("--height must be a positive number");
+  const frameRange = parseFrameRange(flags["frame-range"]);
+  const captionStyleFlag = flags["caption-style"] ?? "word";
+  if (captionStyleFlag !== "word" && captionStyleFlag !== "phrase") {
+    fail("--caption-style must be either word or phrase");
+  }
+  const captionStyle = captionStyleFlag as CaptionStyle;
+  const captionPath = flags["captions"];
+  const captionCues = captionPath ? parseWebVttCaptions(captionPath, fps, captionStyle) : undefined;
+
 
   const manifest = assertObject(
     readJsonFile(manifestPath),
@@ -719,6 +827,7 @@ async function main() {
     readJsonFile(personaManifestPath),
     "persona manifest"
   );
+  const personaImagePath = extractPersonaImageUrl(personaManifest);
   const platesManifest = flags["plates-manifest"]
     ? readJsonFile(flags["plates-manifest"])
     : null;
@@ -775,12 +884,16 @@ async function main() {
       };
     });
 
+    const parsedLayerPlan = layerPlanSchema.parse({ beats: normalizedBeats });
     layerPlan = resolveLayerPlanUrls(
-      applyGeneratedClipManifest(layerPlanSchema.parse({ beats: normalizedBeats }), generatedClipResolutions)
+      injectPresenterPersona(
+        applyGeneratedClipManifest(parsedLayerPlan, generatedClipResolutions),
+        personaImagePath,
+      )
     );
   }
 
-  const inputProps = buildInputProps({
+  const rawInputProps = buildInputProps({
     manifest,
     decomposition,
     personaManifest,
@@ -793,9 +906,11 @@ async function main() {
     height,
     layerPlan,
     layerPlanExtras,
+    captionCues,
   });
 
   fs.mkdirSync(path.resolve(outDir), { recursive: true });
+  const inputProps = stageInputAssets(rawInputProps, outDir);
 
   const entryPoint = path.resolve(
     import.meta.dirname,
@@ -805,8 +920,10 @@ async function main() {
   console.log("Bundling Remotion composition...");
   const serveUrl = await bundle({
     entryPoint,
+    publicDir: path.resolve(outDir, "public"),
     webpackOverride: (config) => config,
   });
+
 
   console.log("Selecting composition...");
   const composition = await selectComposition({
@@ -826,6 +943,7 @@ async function main() {
     codec: "h264",
     outputLocation: outputPath,
     inputProps,
+    ...(frameRange ? { frameRange } : {}),
   });
 
   const resultManifest = {
@@ -840,6 +958,8 @@ async function main() {
     relativeMp4: path.relative(process.cwd(), outputPath),
     ...(inputProps.audioUrl ? { audioUrl: inputProps.audioUrl } : {}),
     ...(audioManifestPath ? { audioManifestPath } : {}),
+    ...(frameRange ? { frameRange } : {}),
+    ...(captionPath ? { captionPath, captionStyle, captionCueCount: captionCues?.length ?? 0 } : {}),
     ...(generatedClipsManifestPath
       ? {
           generatedClipsManifestPath,

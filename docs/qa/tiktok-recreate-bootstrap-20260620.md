@@ -203,3 +203,49 @@ bun run tiktok-recreate:hyperframes -- \
   --audio data/asmr-companion/goal3-spatial-proof/goal3-close-whisper-binaural.wav && \
 bun -e 'const fs = require("node:fs"); const handoff = JSON.parse(fs.readFileSync("data/asmr-companion/goal5-pipeline-proof/goal5-workflow-handoff.json", "utf8")); const manifest = JSON.parse(fs.readFileSync("data/asmr-companion/goal5-pipeline-proof/hyperframes-review-surface/manifest.json", "utf8")); const refs = manifest.reviewSurface?.artifactLibraryRefs ?? []; if (!handoff.reviewSurface?.vocabulary) throw new Error("missing handoff reviewSurface vocabulary"); if (!refs.some((ref) => String(ref.pathOrUrl).includes("goal3-close-whisper-binaural.wav"))) throw new Error("missing spatial audio artifact ref"); if (!refs.some((ref) => String(ref.pathOrUrl).includes(".placeholder.svg"))) throw new Error("missing placeholder artifact ref");'
 ```
+
+## Reconstruction working end-to-end — 2026-07-03
+
+First working end-to-end recreation with side-by-side proof (playground stream first goal). The layered Remotion render previously produced 129.8s of black frames plus static chrome; root causes were in the renderer, not the assets or the layer plan.
+
+### Root causes fixed (packages/remotion-renderer)
+
+1. **Sequence-local frame double-offset.** Every layer primitive computed `localFrame = useCurrentFrame() - beatStartFrame` inside `<Sequence from={startFrame}>`, where `useCurrentFrame()` is already sequence-local. All beats with `startFrame > 0` spent their entire duration at negative local frames → enter-animation opacity ≤ 0 → invisible. Only beat 0 (0–2.52s) ever rendered.
+2. **Native `<img>` tags (6 sites).** Remotion does not wait for native image loads before frame capture; replaced with Remotion `<Img>`.
+3. **PlateLayer Ken Burns transform.** `translate(${x - 50}%, ${y - 50}%)` with centered offsets (x=0 at center) shifted plates half a screen up-left; fixed to `translate(${x}%, ${y}%)`.
+4. **inputProps asset inlining.** Plates/persona were base64-inlined into `inputProps` and duplicated per beat (~292MB serialized for the 32-beat plan), killing the headless page at `selectComposition` (`ProtocolError: target closed`). Replaced with Remotion `publicDir` staging: local assets are copied to `<out>/public/assets/` once and referenced via `staticFile()` relative paths.
+
+### New renderer capabilities
+
+- `--captions <path.vtt>` + `--caption-style word|phrase` (default `word`): parses WEBVTT, distributes each cue's duration across its words, renders a TikTok-style one-word serif caption track lower-center; colliding plan `TypographyLayer` captions are suppressed.
+- `--frame-range <start>-<end>`: renders a slice for fast iteration.
+- PresenterLayer beats with `props.src: null` get the Jimeng persona image injected from `--persona-manifest` (synthetic narrator replaces original creator likeness).
+- New side-by-side proof tool: `scripts/tiktok-recreate-side-by-side.boundary.ts` (`bun run tiktok-recreate:side-by-side`), ffmpeg hstack with ORIGINAL/RECREATION labels + run manifest.
+
+### Proof artifacts (local, gitignored)
+
+- Full recreation: `data/video-recreation/samuelszuchan/bootstrap-20260620/renders/2026-05-20_7642101474981367054-v2/recreate.mp4` (129.88s, 1080×1920, AAC narration)
+- **Side-by-side proof**: `data/video-recreation/samuelszuchan/bootstrap-20260620/renders/2026-05-20_7642101474981367054-v2-side-by-side/side-by-side.mp4` (1080×960, original left / recreation right, run manifest alongside)
+- Fix slice + inspected frames: `renders/2026-05-20_7642101474981367054-fix-slice/` (`frame-003s.png` … `frame-028s.png`)
+- Before-state comparison (black render): `renders/2026-05-20_7642101474981367054-side-by-side-smoke/`
+
+Visual QA sampled 7 timestamps across the full duration: every recreation frame composed (plates track the script — slipper/skyline/Maybach/wine cellar), per-word captions sync with the original (one word of drift at cue boundaries from even word distribution), CounterLayer renders the unemployment stat, synthetic persona appears in presenter beats.
+
+### Rerun commands
+
+```bash
+bun run remotion-renderer:render -- \
+  --manifest data/video-recreation/samuelszuchan/bootstrap-20260620/2026-05-20_7642101474981367054.context.json \
+  --layer-plan data/video-recreation/samuelszuchan/bootstrap-20260620/birthrate-layer-plan.json \
+  --persona-manifest data/video-recreation/samuelszuchan/bootstrap-20260620/jimeng-persona-manifest.json \
+  --plates-manifest data/video-recreation/samuelszuchan/bootstrap-20260620/plates-documentary/manifest.json \
+  --captions data/source-archives/tiktok/samuelszuchan/videos/2026-05-20_7642101474981367054.eng-US.vtt \
+  --out data/video-recreation/samuelszuchan/bootstrap-20260620/renders/2026-05-20_7642101474981367054-v2
+
+bun run tiktok-recreate:side-by-side -- \
+  --original data/source-archives/tiktok/samuelszuchan/videos/2026-05-20_7642101474981367054.mp4 \
+  --recreate data/video-recreation/samuelszuchan/bootstrap-20260620/renders/2026-05-20_7642101474981367054-v2/recreate.mp4 \
+  --out data/video-recreation/samuelszuchan/bootstrap-20260620/renders/2026-05-20_7642101474981367054-v2-side-by-side
+```
+
+Remaining quality gaps (not blockers): only 5 unique plates rotate across 32 beats; presenter uses a static persona still (no motion/lipsync); caption word timing is evenly distributed within cues rather than ASR-aligned.

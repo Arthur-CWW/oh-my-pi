@@ -226,6 +226,23 @@ bun run remotion-renderer:render \
   --audio-manifest data/video-recreation/samuelszuchan/bootstrap-20260620/tts/2026-05-20_7641985194186001678/tts-manifest.json
 ```
 
+Renderer flags added 2026-07-03 (first working end-to-end recreation; see `docs/qa/tiktok-recreate-bootstrap-20260620.md`):
+
+- `--captions <path.vtt>` — burn a TikTok-style caption track from a WEBVTT file; `--caption-style word` (default) splits each cue into one-word captions, `phrase` keeps whole cues.
+- `--frame-range <start>-<end>` — render a slice for fast iteration.
+- Local assets (plates, persona, audio) are staged into `<out>/public/assets/` and served via Remotion `staticFile()`; PresenterLayer beats with `src: null` get the persona image from `--persona-manifest`.
+
+### Side-by-side proof
+
+```bash
+bun run tiktok-recreate:side-by-side -- \
+  --original data/source-archives/tiktok/samuelszuchan/videos/2026-05-20_7642101474981367054.mp4 \
+  --recreate data/video-recreation/samuelszuchan/bootstrap-20260620/renders/2026-05-20_7642101474981367054-v2/recreate.mp4 \
+  --out data/video-recreation/samuelszuchan/bootstrap-20260620/renders/2026-05-20_7642101474981367054-v2-side-by-side
+```
+
+Produces `side-by-side.mp4` (original left, recreation right, ORIGINAL/RECREATION labels) and a run `manifest.json` with the exact ffmpeg argv and input durations. Flags: `--audio original|recreate` (default `recreate`), `--height <px>` (default 960).
+
 The Remotion planner produces:
 
 - A composition spec (duration, resolution, fps, background).

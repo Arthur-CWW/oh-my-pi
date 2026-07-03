@@ -4,10 +4,12 @@ import {
   AbsoluteFill,
   Audio,
   Easing,
+  Img,
   OffthreadVideo,
   interpolate,
   Sequence,
   spring,
+  staticFile,
   useCurrentFrame,
   useVideoConfig,
 } from "remotion"
@@ -52,6 +54,12 @@ export type LayerPlan = z.infer<typeof layerPlanSchema>
 
 // ── Main composition schema ────────────────────────────────────────────────
 
+const captionCueSchema = z.object({
+  text: z.string(),
+  startFrame: z.number(),
+  endFrame: z.number(),
+})
+
 export const tiktokRecreateSchema = z.object({
   sourceVideoId: z.string(),
   title: z.string(),
@@ -73,6 +81,7 @@ export const tiktokRecreateSchema = z.object({
   width: z.number().optional(),
   height: z.number().optional(),
   fps: z.number().optional(),
+  captionCues: z.array(captionCueSchema).optional(),
 })
 
 export type TiktokRecreateProps = z.infer<typeof tiktokRecreateSchema>
@@ -103,7 +112,7 @@ function generateDocumentaryGradient(seed: string): string {
 function useBeatProgress(startFrame: number, endFrame: number) {
   const frame = useCurrentFrame()
   const duration = Math.max(1, endFrame - startFrame)
-  const local = Math.max(0, Math.min(frame - startFrame, duration))
+  const local = Math.max(0, Math.min(frame, duration))
   return local / duration
 }
 
@@ -144,6 +153,38 @@ function getLinesText(props: Record<string, unknown>): string {
   return (props.text as string) || ""
 }
 
+function hasCaptionVariant(props: Record<string, unknown>): boolean {
+  const lines = props.lines
+  if (!Array.isArray(lines)) return false
+  return lines.some(
+    (line) =>
+      line &&
+      typeof line === "object" &&
+      (line as Record<string, unknown>).variant === "caption",
+  )
+}
+
+function collidesWithCaptionTrack(props: Record<string, unknown>): boolean {
+  if (hasCaptionVariant(props)) return true
+  const position = props.position
+  if (!position || typeof position !== "object") return false
+  const y = (position as Record<string, unknown>).y
+  return typeof y === "number" && y >= 0.66
+}
+
+function resolveAssetSrc(value: string): string {
+  if (
+    value.startsWith("http://") ||
+    value.startsWith("https://") ||
+    value.startsWith("data:") ||
+    value.startsWith("blob:") ||
+    value.startsWith("file:")
+  ) {
+    return value
+  }
+  return staticFile(value)
+}
+
 function resolvePosition(
   position: unknown,
 ): { left?: string; top?: string; transform?: string; textAlign?: string } {
@@ -174,6 +215,7 @@ interface LayerComponentProps {
   beatEndFrame: number
   layer: LayerDef
   index: number
+  hasCaptionTrack?: boolean
 }
 
 // ── Layer primitives ───────────────────────────────────────────────────────
@@ -183,8 +225,7 @@ const BackgroundLayer: React.FC<LayerComponentProps> = ({
   beatEndFrame,
   layer,
 }) => {
-  const frame = useCurrentFrame()
-  const localFrame = frame - beatStartFrame
+  const localFrame = useCurrentFrame()
   const duration = Math.max(1, beatEndFrame - beatStartFrame)
   const props = layer.props as Record<string, unknown>
   const color = (props.color as string) || DARK_BG
@@ -199,7 +240,7 @@ const BackgroundLayer: React.FC<LayerComponentProps> = ({
     <AbsoluteFill
       style={{
         backgroundColor: color,
-        backgroundImage: imageUrl ? `url(${imageUrl})` : undefined,
+        backgroundImage: imageUrl ? `url(${resolveAssetSrc(imageUrl)})` : undefined,
         backgroundSize: "cover",
         backgroundPosition: "center",
         opacity,
@@ -227,8 +268,7 @@ const GridOverlay: React.FC<LayerComponentProps> = ({
   beatEndFrame,
   layer,
 }) => {
-  const frame = useCurrentFrame()
-  const localFrame = frame - beatStartFrame
+  const localFrame = useCurrentFrame()
   const duration = Math.max(1, beatEndFrame - beatStartFrame)
   const props = layer.props as Record<string, unknown>
   const gridColor = (props.color as string) || "rgba(255,42,42,0.06)"
@@ -311,8 +351,8 @@ const PlateLayer: React.FC<LayerComponentProps> = ({
     ? interpolate(progress, [0, 1], [startScale, endScale], { extrapolateLeft: "clamp", extrapolateRight: "clamp" })
     : baseScale
 
-  const localFrame = frame - beatStartFrame
-  const enter = interpolate(localFrame, [0, 12], [0, 1], { extrapolateRight: "clamp" })
+  const localFrame = frame
+  const enter = interpolate(localFrame, [0, 12], [0.85, 1], { extrapolateRight: "clamp" })
 
   if (!plateUrl) {
     const gradient = generateDocumentaryGradient(`${visualFunction}-${index}`)
@@ -338,14 +378,14 @@ const PlateLayer: React.FC<LayerComponentProps> = ({
   return (
     <AbsoluteFill
       style={{
-        transform: `translate(${x - 50}%, ${y - 50}%) scale(${scale})`,
+        transform: `translate(${x}%, ${y}%) scale(${scale})`,
         transformOrigin: "center center",
         overflow: "hidden",
         opacity: enter,
       }}
     >
-      <img
-        src={plateUrl}
+      <Img
+        src={resolveAssetSrc(plateUrl)}
         alt=""
         style={{
           position: "absolute",
@@ -395,7 +435,7 @@ const ClipLayer: React.FC<LayerComponentProps> = ({
   const objectFit = (props.objectFit as React.CSSProperties["objectFit"]) || "cover"
   const opacity = (props.opacity as number) ?? 1
   const progress = useBeatProgress(beatStartFrame, beatEndFrame)
-  const localFrame = frame - beatStartFrame
+  const localFrame = frame
   const enter = interpolate(localFrame, [0, 12], [0, 1], { extrapolateRight: "clamp" })
   const drift = interpolate(progress, [0, 1], [-2, 2], { extrapolateLeft: "clamp", extrapolateRight: "clamp" })
   const glow = interpolate(progress, [0, 0.5, 1], [0.18, 0.32, 0.18], {
@@ -407,7 +447,7 @@ const ClipLayer: React.FC<LayerComponentProps> = ({
     return (
       <AbsoluteFill style={{ background: "#02040a", opacity: enter }}>
         <OffthreadVideo
-          src={clipUrl}
+          src={resolveAssetSrc(clipUrl)}
           muted
           style={{
             width: "100%",
@@ -448,8 +488,8 @@ const ClipLayer: React.FC<LayerComponentProps> = ({
         }}
       />
       {placeholderImage ? (
-        <img
-          src={placeholderImage}
+        <Img
+          src={resolveAssetSrc(placeholderImage)}
           alt=""
           style={{
             position: "absolute",
@@ -490,9 +530,8 @@ const ClipLayer: React.FC<LayerComponentProps> = ({
   )
 }
 
-const PresenterLayer: React.FC<LayerComponentProps> = ({ beatStartFrame, layer }) => {
-  const frame = useCurrentFrame()
-  const localFrame = frame - beatStartFrame
+const PresenterLayer: React.FC<LayerComponentProps> = ({ layer }) => {
+  const localFrame = useCurrentFrame()
   const props = layer.props as Record<string, unknown>
   const src = props.src as string | null | undefined
   const position = (props.position as string) || "lowerThird"
@@ -541,7 +580,7 @@ const PresenterLayer: React.FC<LayerComponentProps> = ({ beatStartFrame, layer }
     <div style={containerStyle}>
       <div style={maskStyle}>
         {src ? (
-          <img src={src} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+          <Img src={resolveAssetSrc(src)} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
         ) : (
           <div
             style={{
@@ -569,9 +608,8 @@ const PresenterLayer: React.FC<LayerComponentProps> = ({ beatStartFrame, layer }
   )
 }
 
-const TypographyLayer: React.FC<LayerComponentProps> = ({ beatStartFrame, beatEndFrame, layer }) => {
-  const frame = useCurrentFrame()
-  const localFrame = frame - beatStartFrame
+const TypographyLayer: React.FC<LayerComponentProps> = ({ beatStartFrame, beatEndFrame, layer, hasCaptionTrack }) => {
+  const localFrame = useCurrentFrame()
   const props = layer.props as Record<string, unknown>
   const text = getLinesText(props)
   const fontSize = (props.fontSize as number) || 52
@@ -579,6 +617,8 @@ const TypographyLayer: React.FC<LayerComponentProps> = ({ beatStartFrame, beatEn
   const align = (props.align as string) || "center"
   const position = props.position as { x: number; y: number; anchor?: string } | undefined
   const maxWidth = (props.maxWidth as number) ?? 0.9
+
+  if (hasCaptionTrack && collidesWithCaptionTrack(props)) return null
 
   const duration = Math.max(1, beatEndFrame - beatStartFrame)
   const opacity = interpolate(localFrame, [0, Math.min(18, duration * 0.15)], [0, 1], {
@@ -636,8 +676,7 @@ const TypographyLayer: React.FC<LayerComponentProps> = ({ beatStartFrame, beatEn
 }
 
 const CounterLayer: React.FC<LayerComponentProps> = ({ beatStartFrame, beatEndFrame, layer }) => {
-  const frame = useCurrentFrame()
-  const localFrame = frame - beatStartFrame
+  const localFrame = useCurrentFrame()
   const duration = Math.max(1, beatEndFrame - beatStartFrame)
   const props = layer.props as Record<string, unknown>
   const from = (props.startValue as number) ?? 0
@@ -698,9 +737,8 @@ const CounterLayer: React.FC<LayerComponentProps> = ({ beatStartFrame, beatEndFr
   )
 }
 
-const FlashOverlay: React.FC<LayerComponentProps> = ({ beatStartFrame, layer }) => {
-  const frame = useCurrentFrame()
-  const localFrame = frame - beatStartFrame
+const FlashOverlay: React.FC<LayerComponentProps> = ({ layer }) => {
+  const localFrame = useCurrentFrame()
   const props = layer.props as Record<string, unknown>
   const flashColor = (props.color as string) || "#ffffff"
   const intensity = (props.intensity as number) ?? 0.9
@@ -730,8 +768,7 @@ const SplitRevealLayer: React.FC<LayerComponentProps> = ({
   beatEndFrame,
   layer,
 }) => {
-  const frame = useCurrentFrame()
-  const localFrame = frame - beatStartFrame
+  const localFrame = useCurrentFrame()
   const duration = Math.max(1, beatEndFrame - beatStartFrame)
   const props = layer.props as Record<string, unknown>
   const direction = (props.direction as string) || "horizontal"
@@ -748,8 +785,8 @@ const SplitRevealLayer: React.FC<LayerComponentProps> = ({
   return (
     <AbsoluteFill style={{ pointerEvents: "none" }}>
       {fromPlate ? (
-        <img
-          src={fromPlate}
+        <Img
+          src={resolveAssetSrc(fromPlate)}
           alt=""
           style={{
             position: "absolute",
@@ -762,8 +799,8 @@ const SplitRevealLayer: React.FC<LayerComponentProps> = ({
         />
       ) : null}
       {toPlate ? (
-        <img
-          src={toPlate}
+        <Img
+          src={resolveAssetSrc(toPlate)}
           alt=""
           style={{
             position: "absolute",
@@ -833,7 +870,7 @@ const LAYER_COMPONENTS: Record<string, React.FC<LayerComponentProps>> = {
 
 // ── Beat renderer ──────────────────────────────────────────────────────────
 
-const BeatRenderer: React.FC<{ beat: Beat }> = ({ beat }) => {
+const BeatRenderer: React.FC<{ beat: Beat; hasCaptionTrack: boolean }> = ({ beat, hasCaptionTrack }) => {
   const { startFrame, endFrame, layers } = beat
   const duration = Math.max(1, endFrame - startFrame)
 
@@ -852,6 +889,7 @@ const BeatRenderer: React.FC<{ beat: Beat }> = ({ beat }) => {
               beatEndFrame={endFrame}
               layer={layer}
               index={i}
+              hasCaptionTrack={hasCaptionTrack}
             />
           )
         })}
@@ -880,8 +918,8 @@ const SegmentPlate: React.FC<{
       }}
     >
       {plateUrl ? (
-        <img
-          src={plateUrl}
+        <Img
+          src={resolveAssetSrc(plateUrl)}
           alt=""
           style={{
             width: "100%",
@@ -971,6 +1009,46 @@ const ProgressBar: React.FC<{ durationInFrames: number }> = ({ durationInFrames 
   )
 }
 
+const CaptionTrack: React.FC<{ cues: Array<{ text: string; startFrame: number; endFrame: number }> }> = ({
+  cues,
+}) => {
+  const frame = useCurrentFrame()
+  const cue = cues.find((item) => frame >= item.startFrame && frame < item.endFrame)
+  if (!cue) return null
+
+  return (
+    <div
+      style={{
+        position: "absolute",
+        top: "72%",
+        left: 0,
+        right: 0,
+        transform: "translateY(-50%)",
+        display: "flex",
+        justifyContent: "center",
+        padding: "0 72px",
+        textAlign: "center",
+        pointerEvents: "none",
+        zIndex: 900,
+      }}
+    >
+      <div
+        style={{
+          color: "#fff",
+          fontFamily: "Georgia, 'Times New Roman', Times, serif",
+          fontSize: 64,
+          fontWeight: 700,
+          lineHeight: 1.08,
+          textShadow: "0 2px 18px rgba(0,0,0,0.9)",
+          whiteSpace: "pre-line",
+        }}
+      >
+        {cue.text}
+      </div>
+    </div>
+  )
+}
+
 // ── Composition ────────────────────────────────────────────────────────────
 
 export const TiktokRecreate: React.FC<TiktokRecreateProps> = ({
@@ -982,6 +1060,7 @@ export const TiktokRecreate: React.FC<TiktokRecreateProps> = ({
   personaImageUrl,
   audioUrl,
   layerPlan,
+  captionCues,
 }) => {
   const { width, height } = useVideoConfig()
 
@@ -1009,7 +1088,7 @@ export const TiktokRecreate: React.FC<TiktokRecreateProps> = ({
     >
       {/* ── Content: beats or segments ── */}
       {layerPlan && layerPlan.beats.length > 0
-        ? layerPlan.beats.map((beat, i) => <BeatRenderer key={i} beat={beat} />)
+        ? layerPlan.beats.map((beat, i) => <BeatRenderer key={i} beat={beat} hasCaptionTrack={!!captionCues?.length} />)
         : safeSegments.map((segment, index) => {
             const plateUrl =
               plates && plates.length > 0
@@ -1031,10 +1110,12 @@ export const TiktokRecreate: React.FC<TiktokRecreateProps> = ({
                   visualFunction={segment.visualFunction}
                   plateUrl={plateUrl}
                 />
-                <SegmentCaption caption={segment.caption} />
+                {!captionCues?.length ? <SegmentCaption caption={segment.caption} /> : null}
               </Sequence>
             )
           })}
+
+      {captionCues?.length ? <CaptionTrack cues={captionCues} /> : null}
 
       {/* ── Chrome (both modes) ── */}
       {title ? (
@@ -1073,7 +1154,7 @@ export const TiktokRecreate: React.FC<TiktokRecreateProps> = ({
       </div>
 
       <ProgressBar durationInFrames={durationInFrames} />
-      {audioUrl ? <Audio src={audioUrl} /> : null}
+      {audioUrl ? <Audio src={resolveAssetSrc(audioUrl)} /> : null}
     </AbsoluteFill>
   )
 }

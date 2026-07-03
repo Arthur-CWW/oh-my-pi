@@ -24,6 +24,8 @@ A **creative engine**, closer to a game engine than a video pipeline: programmat
 
 **Make reconstruction actually work.** The video-recreation pipeline has never produced a working end-to-end result. One reference TikTok from `data/video-recreation/` decomposed and rebuilt — plates, props, captions, TTS — into a rendered candidate, side-by-side with the original. Fix or bypass whatever is broken in `workflows/tiktok-recreate/`; goal over implementation. Proof: side-by-side video + rerun command.
 
+**Done 2026-07-03.** Four renderer bugs fixed (beat-local frame double-offset, native `<img>` capture races, Ken Burns transform, ~292MB inputProps inlining → publicDir staging) plus VTT word-caption track and persona injection. Proof + rerun commands: `docs/qa/tiktok-recreate-bootstrap-20260620.md` § "Reconstruction working end-to-end — 2026-07-03"; side-by-side at `data/video-recreation/samuelszuchan/bootstrap-20260620/renders/2026-05-20_7642101474981367054-v2-side-by-side/side-by-side.mp4`. Next frontier: creative fidelity (unique plates per beat, presenter motion, ASR-aligned captions).
+
 ## Owns
 
 `apps/slotok-workbench/`, `packages/hyperframes-renderer/`, `packages/remotion-renderer/`, `packages/jimeng-client/`, `packages/ugc-cli/`, `workflows/tiktok-recreate/`, `data/{ugc-studio,assets,tiktok-catalogue,jimeng-lab,video-recreation,workflow-runs,dreamina}/`, this directory.
