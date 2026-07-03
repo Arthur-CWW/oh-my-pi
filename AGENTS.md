@@ -27,6 +27,7 @@ Invariants. Most are also static lints — push every lesson down the guardrail 
 - **Tests**: `test/` dirs close to source, never colocated `*.test.ts`. Test behavior, not defaults. No mocks.
 - **React UI**: test state/view models and interaction, not rendered markup. Visual/browser QA for UI.
 - **Cross-runtime**: avoid native modules unless deliberately isolated. `bun-types` in typecheck configs.
+- **Self-contained packages** (Arthur, 2026-07-03). Each app/package owns its scripts, deps, and run commands in its OWN `package.json`; NEVER add new scripts or deps to the root `package.json`. Existing root entries are legacy — migrate them into their package when you next touch that package, don't extend them. Run docs say `cd <pkg> && bun run dev`, not root aliases.
 
 ## Coordination
 

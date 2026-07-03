@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Xanadu</title>
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <p class="product-mark">Xanadu</p>
+          <h1>Finished artifacts, live from the workstream</h1>
+        </div>
+        <label class="needs-toggle">
+          <input id="needs-filter" type="checkbox" />
+          <span>Needs Arthur</span>
+        </label>
+      </header>
+
+      <section id="status" class="status" aria-live="polite">Connecting to the feed.</section>
+      <section id="feed" class="feed" aria-label="Xanadu feed"></section>
+      <template id="empty-template">
+        <article class="empty-state">
+          <h2>No entries yet</h2>
+          <p>Post a proof, question, or demo with <code>bun run post</code> and it will appear here.</p>
+        </article>
+      </template>
+    </main>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
