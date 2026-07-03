@@ -59,3 +59,13 @@ Concretely: serialize Firefox/Chrome history, Tree Style Tab trees, and attentio
 - **Playable, not operated.** Pipelines should feel like instruments: babble wide, prune fast, flip through candidates, fork what sings.
 - **The archive feeds the dome.** Second-brain material (tweets, transcripts, library) is creative fuel and companion memory, not a filing cabinet.
 - **Guard the trance.** Porlock defense in every layer: small default context, background automation, dormant skills, no interruptions that cost the vision.
+
+## Programmatic scene lane (2026-07-03)
+
+The new video lane sharpens the Pleometric lesson: the interesting move is not asking VideoGen to hallucinate a finished short. It is treating shortform as code-generated motion graphics over a reusable asset pile. VideoGen can make plates, personas, and odd textures; the creative engine makes them dance.
+
+The core grammar is layered clones synced to the beat: one plate becomes a grid, halo, spiral, ticker, or scatter field; each clone inherits the same motion but with stagger and phase offsets until the field feels alive. This is where cheap models can help: write small scene specs, vary clone count/layout/beat response, render proof, prune.
+
+Style transplant stays visual, never topical. Borrow the grammar of found internet vernaculars — Y2K chrome, VHS home video, 2000s web ads, documentary grids — without borrowing their subject matter or cruft. The useful thing in an old banner ad is the pulsing button-look, starburst, drop shadow, garish palette, and desperate layout rhythm, not what the ad was selling.
+
+Architecture follows the same split: one runtime, two hosts. `apps/scene-playground` is the live instrument for watching, steering, and forking. `packages/scene-renderer` is the deterministic offline renderer for checks, stills, frame ranges, and MP4 proof. Both consume the same JSON scene spec, so taste iteration and final render do not drift apart.

@@ -1,0 +1,27 @@
+{
+  "schemaVersion": "scene-render.v1",
+  "specPath": "/Users/arthur/agents/workflows/scene-lab/specs/orbit-halo.scene.json",
+  "flags": {
+    "runtimePath": "/Users/arthur/agents/packages/scene-renderer/dist/runtime.js",
+    "keepFrames": false
+  },
+  "frameCount": 300,
+  "output": "/Users/arthur/agents/workflows/scene-lab/renders/orbit-halo/scene.mp4",
+  "ffmpegArgv": [
+    "-y",
+    "-framerate",
+    "30",
+    "-start_number",
+    "0",
+    "-i",
+    "/Users/arthur/agents/workflows/scene-lab/renders/orbit-halo/frames/%06d.png",
+    "-c:v",
+    "libx264",
+    "-pix_fmt",
+    "yuv420p",
+    "-movflags",
+    "+faststart",
+    "/Users/arthur/agents/workflows/scene-lab/renders/orbit-halo/scene.mp4"
+  ],
+  "createdAt": "2026-07-03T11:47:07.409Z"
+}

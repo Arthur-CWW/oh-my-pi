@@ -1,0 +1,63 @@
+{
+  "schemaVersion": "scene.v1",
+  "width": 720,
+  "height": 1280,
+  "fps": 30,
+  "durationSeconds": 8,
+  "background": "#02020a",
+  "timeline": { "bpm": 132 },
+  "assets": [],
+  "camera": {
+    "fov": 46,
+    "position": [0, 0, 7],
+    "lookAt": [0, 0, 0],
+    "tracks": []
+  },
+  "objects": [
+    {
+      "id": "chrome-title",
+      "kind": "text",
+      "text": "SCENE LAB",
+      "font": "900 118px Impact, Arial Black, sans-serif",
+      "color": "#d9f7ff",
+      "size": [6.2, 1.2],
+      "position": [0, 0, 0],
+      "rotation": [0, 0, 0],
+      "scale": 1,
+      "opacity": 1,
+      "tracks": [
+        {
+          "prop": "position.y",
+          "mode": "keyframes",
+          "keyframes": [
+            { "t": 0, "v": 3.2, "ease": "outElastic" },
+            { "t": 0.75, "v": 0.2, "ease": "outElastic" },
+            { "t": 7.5, "v": 0.2, "ease": "linear" }
+          ]
+        },
+        {
+          "prop": "scale",
+          "mode": "beat",
+          "beat": { "every": 1, "from": 1, "to": 1.08, "attack": 0.035, "decay": 0.2 }
+        },
+        {
+          "prop": "rotation.z",
+          "mode": "osc",
+          "osc": { "amp": 0.035, "freqBeats": 0.5, "phasePerClone": 0, "center": 0 }
+        }
+      ]
+    }
+  ],
+  "post": [
+    {
+      "pass": "chromaticAberration",
+      "params": { "strength": 0.24 },
+      "beatReactive": { "param": "strength", "every": 1, "amount": 0.18, "decay": 0.24 }
+    },
+    {
+      "pass": "glitch",
+      "params": { "strength": 0.08 },
+      "beatReactive": { "param": "strength", "every": 1, "amount": 0.45, "decay": 0.16 }
+    }
+  ]
+}

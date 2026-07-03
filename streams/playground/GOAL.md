@@ -26,9 +26,13 @@ A **creative engine**, closer to a game engine than a video pipeline: programmat
 
 **Done 2026-07-03.** Four renderer bugs fixed (beat-local frame double-offset, native `<img>` capture races, Ken Burns transform, ~292MB inputProps inlining → publicDir staging) plus VTT word-caption track and persona injection. Proof + rerun commands: `docs/qa/tiktok-recreate-bootstrap-20260620.md` § "Reconstruction working end-to-end — 2026-07-03"; side-by-side at `data/video-recreation/samuelszuchan/bootstrap-20260620/renders/2026-05-20_7642101474981367054-v2-side-by-side/side-by-side.mp4`. Next frontier: creative fidelity (unique plates per beat, presenter motion, ASR-aligned captions).
 
+## Scene lane (2026-07-03)
+
+Code-driven video is now a first-class lane: `scene.v1` JSON specs → live playground preview (`apps/scene-playground`, port 4600, review-feed default view) → deterministic Three.js render (`packages/scene-renderer`). Pleometric-style grammar: clone fields, beat-synced tracks, retro shader passes. Manual + cookbook: `docs/plans/scene-lab.md`. Working dirs: `workflows/scene-lab/{specs,renders,reports}/`. Convention: agents drop proof reports into `workflows/scene-lab/reports/` — the playground feed is the review contract. Lane is self-contained (no root package.json coupling); Remotion remains recreate-lane only.
+
 ## Owns
 
-`apps/slotok-workbench/`, `packages/hyperframes-renderer/`, `packages/remotion-renderer/`, `packages/jimeng-client/`, `packages/ugc-cli/`, `workflows/tiktok-recreate/`, `data/{ugc-studio,assets,tiktok-catalogue,jimeng-lab,video-recreation,workflow-runs,dreamina}/`, this directory.
+`apps/slotok-workbench/`, `apps/scene-playground/`, `packages/hyperframes-renderer/`, `packages/remotion-renderer/`, `packages/scene-renderer/`, `packages/jimeng-client/`, `packages/ugc-cli/`, `workflows/tiktok-recreate/`, `workflows/scene-lab/`, `data/{ugc-studio,assets,tiktok-catalogue,jimeng-lab,video-recreation,workflow-runs,dreamina}/`, this directory.
 
 ## Excludes
 

@@ -53,6 +53,8 @@ The harness (OMP/meta) is not a ranked project — it improves **while** the str
 
 Route around refusal basins instead of arguing with the wrong model. Old "GPT-5.5 must be parent / Gemini simple-only / Kimi fallback-only" prescriptions are dead: use the right model for the job.
 
+Conserve Fable: Fable orchestrates only — decomposition, contracts, gating, verification. All implementation, research, and drafting goes to cheaper lanes: Opus-class for creative/design shaping, GPT-5.5 for straightforward implementation, Gemini Flash for bounded scouts. Fable writing code directly is the exception reserved for trivial inline fixes.
+
 ## Subagent contract (packet)
 
 Every dispatch specifies: **owner paths** (explicit files), **excluded paths**, **model lane**, **the change** with APIs/patterns, **acceptance** (observable), **non-goals**. Workers skip formatters/linters/test suites; Fable gates once per phase. Subagents may be full agents with bounded recursion when the task warrants — they are not required to be one-shot drones. Substantial work ships with proof artifacts (`proof-of-work-qa`): screenshots, logs, fixtures, rerun commands.

@@ -1,0 +1,58 @@
+{
+  "name": "@wirebabel/scene-renderer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Deterministic offline Three.js scene renderer for code-driven video lanes",
+  "type": "module",
+  "main": "./src/render.ts",
+  "types": "./src/render.ts",
+  "exports": {
+    ".": {
+      "types": "./src/render.ts",
+      "import": "./src/render.ts"
+    },
+    "./render": {
+      "types": "./src/render.ts",
+      "import": "./src/render.ts"
+    },
+    "./schema": {
+      "types": "./src/schema.ts",
+      "import": "./src/schema.ts"
+    },
+    "./stage": {
+      "types": "./src/stage.ts",
+      "import": "./src/stage.ts"
+    },
+    "./capture": {
+      "types": "./src/capture.ts",
+      "import": "./src/capture.ts"
+    },
+    "./check": {
+      "types": "./src/check.ts",
+      "import": "./src/check.ts"
+    }
+  },
+  "bin": {
+    "scene-render": "./src/render.ts",
+    "scene-check": "./src/check.ts"
+  },
+  "scripts": {
+    "build:runtime": "bun build src/runtime/index.ts --outfile dist/runtime.js --format iife --target browser",
+    "render": "bun src/render.ts",
+    "check": "bun src/check.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "effect": "^4.0.0-beta.71",
+    "puppeteer": "^24.0.0",
+    "three": "^0.166.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/three": "^0.166.0",
+    "bun-types": "^1.3.9",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.0"
+  }
+}
