@@ -23,6 +23,9 @@ advisor:
   scope: subagents
   model: deepseek/deepseek-reasoner-v4
 
+auth:
+  codexRefresh: manual
+
 task:
   enableLsp: true
   eager: always

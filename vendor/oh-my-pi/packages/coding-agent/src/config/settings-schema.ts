@@ -328,6 +328,11 @@ export const SETTINGS_SCHEMA = {
 	// per-machine overrides remain trivial.
 	"auth.broker.url": { type: "string", default: undefined },
 	"auth.broker.token": { type: "string", default: undefined },
+	"auth.codexRefresh": {
+		type: "enum",
+		values: ["auto", "manual"] as const,
+		default: "auto",
+	},
 
 	autoResume: {
 		type: "boolean",

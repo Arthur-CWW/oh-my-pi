@@ -1,4 +1,6 @@
 import type { Api, ApiKeyResolver, AuthStorage, Model } from "@oh-my-pi/pi-ai";
+import { isCodexRefreshManual, warnCodexRefreshGated } from "./codex-refresh-policy";
+
 
 /** Model slice accepted by the model-form `resolver(model, sessionId)` overload. */
 export type ApiKeyResolverModel = Pick<Model<Api>, "provider" | "baseUrl" | "id">;
@@ -61,6 +63,10 @@ export function createApiKeyResolver(
 			// reset) and the outer whole-turn retry layer.
 			await registry.authStorage.rotateSessionCredential(provider, sessionId, { error, modelId, signal });
 			return registry.getApiKeyForProvider(provider, sessionId, { baseUrl, modelId });
+		}
+		if (provider === "openai-codex" && isCodexRefreshManual()) {
+			warnCodexRefreshGated();
+			return undefined;
 		}
 		return registry.getApiKeyForProvider(provider, sessionId, { baseUrl, modelId, forceRefresh: true, signal });
 	};

@@ -63,6 +63,12 @@ import { isBunTestRuntime, isRecord, logger } from "@oh-my-pi/pi-utils";
 import { parseModelString, resolveProviderModelReference } from "../config/model-resolver";
 import type { AuthStorage, OAuthCredential } from "../session/auth-storage";
 import { type ApiKeyResolverModel, type ApiKeyResolverOptions, createApiKeyResolver } from "./api-key-resolver";
+import {
+	getCodexOAuthCredentials,
+	getFreshCodexOAuthCredential,
+	isCodexRefreshManual,
+	warnCodexRefreshGated,
+} from "./codex-refresh-policy";
 import type { ConfigError, ConfigFile } from "./config-file";
 import {
 	DISCOVERY_DEFAULT_MAX_TOKENS,
@@ -1852,6 +1858,17 @@ export class ModelRegistry {
 		if (this.#keylessProviders.has(model.provider) && !this.authStorage.hasAuth(model.provider)) {
 			return kNoAuth;
 		}
+		if (model.provider === "openai-codex" && isCodexRefreshManual()) {
+			const credentials = getCodexOAuthCredentials(this.authStorage);
+			if (credentials.length > 0) {
+				const credential = getFreshCodexOAuthCredential(this.authStorage);
+				if (!credential) {
+					warnCodexRefreshGated();
+					return undefined;
+				}
+				return credential.access;
+			}
+		}
 		return this.authStorage.getApiKey(model.provider, sessionId, { baseUrl: model.baseUrl, modelId: model.id });
 	}
 
@@ -1871,6 +1888,17 @@ export class ModelRegistry {
 		if (commandKey.configured) return commandKey.value;
 		if (this.#keylessProviders.has(provider) && !this.authStorage.hasAuth(provider)) {
 			return kNoAuth;
+		}
+		if (provider === "openai-codex" && isCodexRefreshManual() && !options?.forceRefresh) {
+			const credentials = getCodexOAuthCredentials(this.authStorage);
+			if (credentials.length > 0) {
+				const credential = getFreshCodexOAuthCredential(this.authStorage);
+				if (!credential) {
+					warnCodexRefreshGated();
+					return undefined;
+				}
+				return credential.access;
+			}
 		}
 		return this.authStorage.getApiKey(provider, sessionId, {
 			baseUrl: options?.baseUrl,

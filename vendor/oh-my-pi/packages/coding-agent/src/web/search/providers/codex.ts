@@ -7,7 +7,7 @@
  * SQLite store, never POSTs the broker sentinel to an OpenAI token endpoint.
  */
 import * as os from "node:os";
-import { type AuthStorage, type FetchImpl, type OAuthAccess, withOAuthAccess } from "@oh-my-pi/pi-ai";
+import { type AuthStorage, type FetchImpl, type OAuthAccess, isAuthRetryableError, withOAuthAccess } from "@oh-my-pi/pi-ai";
 import { decodeJwt } from "@oh-my-pi/pi-ai/oauth/openai-codex";
 import { getBundledModels } from "@oh-my-pi/pi-catalog/models";
 import { $env, readSseJson } from "@oh-my-pi/pi-utils";
@@ -17,6 +17,13 @@ import { SearchProviderError } from "../../../web/search/types";
 import type { SearchParams } from "./base";
 import { SearchProvider } from "./base";
 import { classifyProviderHttpError, withHardTimeout } from "./utils";
+import {
+	getCodexOAuthCredentials,
+	getFreshCodexOAuthCredential,
+	isCodexRefreshManual,
+	warnCodexRefreshGated,
+} from "../../../config/codex-refresh-policy";
+
 
 const CODEX_BASE_URL = "https://chatgpt.com/backend-api";
 const CODEX_RESPONSES_PATH = "/codex/responses";
@@ -495,7 +502,28 @@ async function callCodexSearch(
  *   `gpt-5-codex-mini` first on ChatGPT accounts, which OpenAI rejects.
  */
 export async function searchCodex(params: SearchParams): Promise<SearchResponse> {
-	const seed = await findCodexAuth(params.authStorage, params.sessionId, params.signal);
+	const manualRefresh = isCodexRefreshManual();
+	const storedCodexCredentials = manualRefresh ? getCodexOAuthCredentials(params.authStorage) : [];
+	const freshCredential =
+		manualRefresh && storedCodexCredentials.length > 0
+			? getFreshCodexOAuthCredential(params.authStorage)
+			: undefined;
+	if (manualRefresh && storedCodexCredentials.length > 0 && !freshCredential) {
+		warnCodexRefreshGated();
+		throw new Error("Codex web search unavailable: manual refresh mode is active and no fresh Codex credential exists.");
+	}
+	const seed = freshCredential
+		? {
+				access: {
+					accessToken: freshCredential.access,
+					accountId: freshCredential.accountId,
+					email: freshCredential.email,
+					projectId: freshCredential.projectId,
+					enterpriseUrl: freshCredential.enterpriseUrl,
+				},
+				accountId: freshCredential.accountId ?? getAccountIdFromJwt(freshCredential.access),
+			}
+		: await findCodexAuth(params.authStorage, params.sessionId, params.signal);
 	if (!seed) {
 		throw new Error(
 			"No Codex OAuth credentials found. Login with 'omp /login openai-codex' to enable Codex web search.",
@@ -504,45 +532,50 @@ export async function searchCodex(params: SearchParams): Promise<SearchResponse>
 
 	const configuredModel = getConfiguredModel();
 	const modelCandidates = configuredModel ? [configuredModel] : getDefaultModelCandidates();
+	const runWithAccess = async (access: OAuthAccess) => {
+		// Derive ALL auth material from the access this attempt received —
+		// a refreshed/rotated credential carries a different bearer and
+		// ChatGPT account id than the seed.
+		const accountId = access.accountId ?? getAccountIdFromJwt(access.accessToken);
+		if (!accountId) {
+			throw new Error("Codex OAuth credential is missing a ChatGPT account id");
+		}
+		const auth = { accessToken: access.accessToken, accountId };
 
-	const result = await withOAuthAccess(
-		params.authStorage,
-		"openai-codex",
-		async access => {
-			// Derive ALL auth material from the access this attempt received —
-			// a refreshed/rotated credential carries a different bearer and
-			// ChatGPT account id than the seed.
-			const accountId = access.accountId ?? getAccountIdFromJwt(access.accessToken);
-			if (!accountId) {
-				throw new Error("Codex OAuth credential is missing a ChatGPT account id");
-			}
-			const auth = { accessToken: access.accessToken, accountId };
+		let lastError: unknown;
+		for (let index = 0; index < modelCandidates.length; index += 1) {
+			const modelId = modelCandidates[index];
+			if (!modelId) continue;
 
-			let lastError: unknown;
-			for (let index = 0; index < modelCandidates.length; index += 1) {
-				const modelId = modelCandidates[index];
-				if (!modelId) continue;
-
-				try {
-					return await callCodexSearch(auth, params.query, {
-						signal: params.signal,
-						systemPrompt: params.systemPrompt,
-						searchContextSize: "high",
-						modelId,
-						fetch: params.fetch,
-					});
-				} catch (error) {
-					lastError = error;
-					const isLastCandidate = index === modelCandidates.length - 1;
-					if (configuredModel || isLastCandidate || !shouldRetryWithNextDefaultModel(error)) {
-						throw error;
-					}
+			try {
+				return await callCodexSearch(auth, params.query, {
+					signal: params.signal,
+					systemPrompt: params.systemPrompt,
+					searchContextSize: "high",
+					modelId,
+					fetch: params.fetch,
+				});
+			} catch (error) {
+				lastError = error;
+				const isLastCandidate = index === modelCandidates.length - 1;
+				if (configuredModel || isLastCandidate || !shouldRetryWithNextDefaultModel(error)) {
+					throw error;
 				}
 			}
-			throw lastError ?? new Error("Codex search failed without returning a result");
-		},
-		{ sessionId: params.sessionId, signal: params.signal, seed: seed.access },
-	);
+		}
+		throw lastError ?? new Error("Codex search failed without returning a result");
+	};
+
+	const result = manualRefresh
+		? await runWithAccess(seed.access).catch(error => {
+				if (isAuthRetryableError(error)) warnCodexRefreshGated();
+				throw error;
+			})
+		: await withOAuthAccess(params.authStorage, "openai-codex", runWithAccess, {
+				sessionId: params.sessionId,
+				signal: params.signal,
+				seed: seed.access,
+			});
 
 	let sources = result.sources;
 
