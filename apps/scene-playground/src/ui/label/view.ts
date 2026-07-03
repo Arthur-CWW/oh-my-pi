@@ -777,21 +777,35 @@ function createCell(fi: number): HTMLElement {
   }
   if (item.labels.length > 0) cell.classList.add("labeled");
 
-  // Placeholder (dark tile + badges) — NO media element
+  // Placeholder with thumbnail + badges — NO media element
   const placeholder = document.createElement("div");
   placeholder.className = "grid-placeholder";
+
+  // Thumbnail image (lazy-loaded from /api/thumb)
+  const thumbSrc = `/api/thumb?path=data/inspiration/pleometric/${encodeURIComponent(item.file)}`;
+  const thumbImg = document.createElement("img");
+  thumbImg.src = thumbSrc;
+  thumbImg.className = "grid-thumb-img";
+  thumbImg.loading = "lazy";
+  thumbImg.alt = "";
+  placeholder.appendChild(thumbImg);
+
+  // Badges overlay
+  const badgeRow = document.createElement("div");
+  badgeRow.className = "grid-badge-row";
 
   const typeBadge = document.createElement("span");
   typeBadge.className = "grid-badge grid-badge-type";
   typeBadge.textContent = item.mediaType;
-  placeholder.appendChild(typeBadge);
+  badgeRow.appendChild(typeBadge);
 
   if (item.durationSeconds !== undefined) {
     const durBadge = document.createElement("span");
     durBadge.className = "grid-badge grid-badge-dur";
     durBadge.textContent = formatDuration(item.durationSeconds);
-    placeholder.appendChild(durBadge);
+    badgeRow.appendChild(durBadge);
   }
+  placeholder.appendChild(badgeRow);
 
   cell.appendChild(placeholder);
 
@@ -1175,16 +1189,29 @@ export function labelCss(): string {
   background: var(--success);
 }
 
-/* -- Placeholder (dark tile + badges) -- */
+/* -- Placeholder (thumbnail + badges) -- */
 .grid-placeholder {
+  position: relative;
   width: 100%;
   height: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-1);
   background: var(--panel-bg-elevated);
+  overflow: hidden;
+}
+.grid-thumb-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.grid-badge-row {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  gap: 3px;
+  padding: 3px;
+  background: linear-gradient(transparent, rgba(0,0,0,0.6));
 }
 .grid-badge {
   font-family: var(--font-mono);
@@ -1194,7 +1221,7 @@ export function labelCss(): string {
   line-height: 1.3;
 }
 .grid-badge-type {
-  background: var(--panel-bg-active);
+  background: rgba(0,0,0,0.5);
   color: var(--text-secondary);
   text-transform: uppercase;
   letter-spacing: var(--tracking-upper);

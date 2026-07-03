@@ -73,6 +73,7 @@ interface AppPaths {
   specsDir: string;
   rendersDir: string;
   reportsDir: string;
+  thumbsDir: string;
   assetRoots: string[];
   streamRoots: string[];
   runtimePath: string;
@@ -184,6 +185,7 @@ async function ensureLabDirs(paths: AppPaths): Promise<void> {
   await mkdir(paths.specsDir, { recursive: true });
   await mkdir(paths.rendersDir, { recursive: true });
   await mkdir(paths.reportsDir, { recursive: true });
+  await mkdir(paths.thumbsDir, { recursive: true });
 }
 
 async function listSpecs(paths: AppPaths, ledger: Ledger): Promise<SpecEntry[]> {
@@ -513,6 +515,96 @@ function parseArgs(argv: string[]): { port: number; open: boolean } {
   return { port, open };
 }
 
+// ---------------------------------------------------------------------------
+// Thumbnail generation (ffmpeg frame extraction with concurrency limit)
+// ---------------------------------------------------------------------------
+
+const THUMB_MAX_CONCURRENT = 3;
+const THUMB_WIDTH = 360;
+
+/** In-flight ffmpeg jobs keyed by cache path. Waiters share the same promise. */
+const thumbInflight = new Map<string, Promise<string | null>>();
+let thumbActive = 0;
+const thumbQueue: Array<() => void> = [];
+
+function thumbCacheKey(mediaPath: string): string {
+  return createHash("sha1").update(mediaPath).digest("hex") + ".jpg";
+}
+
+async function acquireThumbSlot(): Promise<void> {
+  if (thumbActive < THUMB_MAX_CONCURRENT) { thumbActive++; return; }
+  await new Promise<void>((resolve) => thumbQueue.push(resolve));
+  thumbActive++;
+}
+
+function releaseThumbSlot(): void {
+  thumbActive--;
+  const next = thumbQueue.shift();
+  if (next) next();
+}
+
+async function generateThumb(
+  mediaAbsPath: string,
+  cachePath: string,
+  durationHint?: number,
+): Promise<string | null> {
+  // Seek to 10% of duration or 0.5s, whichever is positive
+  const seekSec = durationHint !== undefined && durationHint > 1
+    ? Math.max(0.1, durationHint * 0.1)
+    : 0.5;
+
+  await acquireThumbSlot();
+  try {
+    const proc = Bun.spawn([
+      "ffmpeg", "-y",
+      "-ss", String(seekSec),
+      "-i", mediaAbsPath,
+      "-frames:v", "1",
+      "-vf", `scale=${THUMB_WIDTH}:-2`,
+      "-q:v", "5",
+      cachePath,
+    ], { stdout: "ignore", stderr: "ignore" });
+    const exitCode = await proc.exited;
+    if (exitCode !== 0 || !existsSync(cachePath)) return null;
+    return cachePath;
+  } catch {
+    return null;
+  } finally {
+    releaseThumbSlot();
+  }
+}
+
+async function getOrCreateThumb(
+  paths: AppPaths,
+  requestPath: string,
+): Promise<string | null> {
+  // Validate: same guard as /asset — must be inside streamRoots and be a video/gif
+  const trimmed = requestPath.trim();
+  if (trimmed.length === 0) return null;
+  const rel = trimmed.startsWith("/") ? trimmed.slice(1) : trimmed;
+  const target = resolve(paths.repoRoot, rel);
+  if (!paths.streamRoots.some((root) => isInside(root, target))) return null;
+  const ext = extname(target).toLowerCase();
+  if (ext !== ".mp4" && ext !== ".gif") return null;
+  if (!existsSync(target)) return null;
+
+  const cacheFile = thumbCacheKey(rel);
+  const cachePath = join(paths.thumbsDir, cacheFile);
+
+  // Serve from cache
+  if (existsSync(cachePath)) return cachePath;
+
+  // Deduplicate in-flight
+  const existing = thumbInflight.get(cachePath);
+  if (existing) return existing;
+
+  const promise = generateThumb(target, cachePath).finally(() => {
+    thumbInflight.delete(cachePath);
+  });
+  thumbInflight.set(cachePath, promise);
+  return promise;
+}
+
 export async function createScenePlaygroundApp(options: ServerOptions = {}): Promise<ScenePlaygroundApp> {
   const appDir = resolve(options.appDir ?? APP_DIR);
   const repoRoot = resolve(options.repoRoot ?? REPO_ROOT);
@@ -524,6 +616,7 @@ export async function createScenePlaygroundApp(options: ServerOptions = {}): Pro
     specsDir: join(repoRoot, "workflows/scene-lab/specs"),
     rendersDir: join(repoRoot, "workflows/scene-lab/renders"),
     reportsDir: join(repoRoot, "workflows/scene-lab/reports"),
+    thumbsDir: join(repoRoot, "data/scene-lab/thumbs"),
     assetRoots: [join(repoRoot, "data/video-recreation"), join(repoRoot, "workflows/scene-lab/assets"), join(repoRoot, "data/inspiration")],
     streamRoots: [join(repoRoot, "data/video-recreation"), join(repoRoot, "workflows/scene-lab/assets"), join(repoRoot, "workflows/scene-lab/renders"), join(repoRoot, "data/inspiration")],
     runtimePath: join(repoRoot, "packages/scene-renderer/dist/runtime.js"),
@@ -614,6 +707,16 @@ export async function createScenePlaygroundApp(options: ServerOptions = {}): Pro
         const assetPath = resolveAssetPath(paths, url.searchParams.get("path") ?? "");
         if (assetPath === null) return jsonResponse({ error: "Asset path must be an allowed media file inside data/video-recreation, workflows/scene-lab/assets, or workflows/scene-lab/renders" }, { status: 403 });
         return serveFile(assetPath, request);
+      }
+      if (url.pathname === "/api/thumb" && request.method === "GET") {
+        const thumbPath = await getOrCreateThumb(paths, url.searchParams.get("path") ?? "");
+        if (thumbPath === null) return textResponse("Not found or unsupported media type", 404);
+        return new Response(Bun.file(thumbPath), {
+          headers: {
+            "content-type": "image/jpeg",
+            "cache-control": "public, max-age=86400, immutable",
+          },
+        });
       }
       if (url.pathname === "/api/renders" && request.method === "GET") {
         return jsonResponse(await listRenders(paths));
