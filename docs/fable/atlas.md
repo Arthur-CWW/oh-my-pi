@@ -8,7 +8,7 @@ Pure locator: where things live. No policy (that's [`charter.md`](charter.md)). 
 |---|---|---|
 | Companion | `apps/ai-companion-rtc/`, `packages/spatial-audio-renderer/` | `apps/ai-companion-rtc/docs/goal.md` |
 | Playground | `apps/slotok-workbench/`, `packages/{hyperframes-renderer,remotion-renderer,jimeng-client,ugc-cli}/`, `workflows/tiktok-recreate/` | `docs/state/video-creative-direction.md`, `docs/state/ugc-studio-style-direction.md`, `docs/state/creative-framing.md` |
-| Memory palace | `packages/{twitter-archive,borges-library}/`, `browser-extensions/extensions/twitter-archive-firefox/`; external: `~/apps/mochi-lite`, `~/apps/hsk-deck`, `~/apps/japanese-vocab`, `~/vault`, `~/github/hashcards` | `docs/twitter-archive-plan.md`, `docs/plans/twitter-archive-goal.md` |
+| Primer | `packages/{twitter-archive,borges-library}/`, `browser-extensions/extensions/twitter-archive-firefox/`; external: `~/apps/mochi-lite`, `~/apps/hsk-deck`, `~/apps/japanese-vocab`, `~/vault`, `~/github/hashcards` | `docs/twitter-archive-plan.md`, `docs/plans/twitter-archive-goal.md` |
 | Harness | `oh-my-pi/`, `packages/{web-access,dynamic-workflows}/`, `.omp/`, `skills/` | [`harness-brief.md`](harness-brief.md), [`harness-slimming.md`](harness-slimming.md) |
 
 Historical plans (banner-marked, reference only): `docs/plans/slotok-workbench.md` (retired Solid stack), `docs/plans/symphony-lite-rust-runner.md` (Elixir won), `docs/plans/asmr-companion-overnight-goals.md`.
@@ -35,11 +35,11 @@ Historical plans (banner-marked, reference only): `docs/plans/slotok-workbench.m
 |---|---|
 | Companion | `~/github/airi` (4.7G companion project), `~/github/Open-LLM-VTuber`, `~/github/VRCFaceTracking`, `~/github/aiavatarkit`, `~/github/SillyTavern-Launcher`, `~/github/grok-tools` |
 | Playground | `~/ComfyUI` (1.1G runtime), `~/Downloads/_Organized/Images_Media` (1.1G) |
-| Memory palace | `~/apps/{mochi-lite,hsk-deck,japanese-vocab,minimal-srs,ultimate-chinese,yomitan}`, `~/github/hashcards`, `~/Zotero` (1.2G), `~/Documents/{mochi,algorithms,papers}`, `~/Downloads/_Organized/Books_Papers_Research` (3.3G: 221 PDFs/23 EPUBs), `~/vault/{library,Clippings,books,notes}` , `~/archives/{gay-primer,youtube-transcripts}` |
+| Primer | `~/apps/{mochi-lite,hsk-deck,japanese-vocab,minimal-srs,ultimate-chinese,yomitan}`, `~/github/hashcards`, `~/Zotero` (1.2G), `~/Documents/{mochi,algorithms,papers}`, `~/Downloads/_Organized/Books_Papers_Research` (3.3G: 221 PDFs/23 EPUBs), `~/vault/{library,Clippings,books,notes}`, `~/archives/{gay-primer,youtube-transcripts}` |
 | Harness | `~/vault/prompts` (prompt library), `~/github/pi-personal-core-skills`, `~/archives/claude-code-decomp` |
 | Unsorted dumps worth triage | `~/Downloads/_Organized/{Archives 8.1G, Courses_Datasets_Libraries 9.8G, Web_Saves, Other_Review}`, `~/archives/{newsletters 6.3G, tweets}`, `~/Documents/usb-archive` |
 
-Full scan report: `agent://ExternalDocsScan` (session artifact) — regenerate with an `explore` scout if stale.
+Full inventory with sizes: [`external-inventory.md`](external-inventory.md). Notable: `~/exploratory/systems/wrapped-commentary-reader` (754M — annotation reader + saved transcript/podcast artifacts from a prior session, Primer feedstock).
 
 ## Sessions and memory
 

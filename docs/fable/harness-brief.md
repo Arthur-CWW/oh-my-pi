@@ -17,6 +17,23 @@ Every agent gets the same system prompt: all skills, all tools, all lanes, regar
 - **Subagents are contract-shaped** (packet: owner paths, exclusions, lane, acceptance, non-goals) so failures are attributable — the prerequisite for the dreaming loop.
 - **Friction log over grand redesign.** Keep a running list of OMP bugs/dislikes and harness papercuts; batch them into worker-sized fixes.
 
+## Encoding expertise: the guardrail ladder
+
+Skills are only one rung. Preferences and hard-won lessons get encoded at the *cheapest layer that catches them* (Lopopolo's harness-persona writing is the reference here — adapt the ideas, not his token budget):
+
+1. **Static lints** — deterministic, zero-token. AST rules via ast-grep/eslint: no `any`/`unknown` outside typed boundary modules, schema validation at API edges instead of typecasting, banned patterns. `bun run lint:unsafe-types` is the existing seed; grow this ratchet whenever an agent repeats a class of mistake.
+2. **First-mistake warnings** — cheap dynamic tripwires: hooks/checks that fire the first time an agent does X in a session (writes a colocated test file, reaches for a formatter, invents token storage), injecting one corrective line instead of preloading the rule for everyone.
+3. **Dynamic review rules** — things no static rule can express: taste, architecture drift, silent scope-shrink. Encoded as reviewer-lane prompts (GPT-5.5 adversarial passes) with a named checklist per stream, run at phase gates, not continuously.
+4. **Personas/skills** — full procedures for recurring workflows, dormant until routed.
+
+Rule of thumb: push every lesson as far *down* the ladder as it can go. A lint is worth a hundred prompt lines.
+
+## The factory, scaled honestly (1x → 10x)
+
+End state: a recursive production loop — code, assets, distribution (TikTok/ads), revenue — where positive input→output ROI funds scaling the inputs (the hedge-fund logic: a scalable strategy must be scaled fast, before the edge closes; taste is the part of the edge that doesn't close). But "code is cheap" is token-trillionaire talk; the honest **1x version** on one Max plan is: cmux/tmux monitoring, mostly-local runs, a few machines, branch-per-workstream, human at the phase gates. Build the loop so each stage can be *upgraded independently* when revenue allows — never architect for the 10x budget today.
+
+**Human-as-golden-seed.** Remove the human from the loop everywhere except where taste and cost live. Arthur's input is treated like data labeling: a small set of golden judgments (annotations, picks, rankings) that calibrate an automated selection function, which then scales the judgment out — evals for creative work. UI/UX is the one lane where human input is the product spec itself.
+
 ## Layered architecture sketch
 
 ```mermaid

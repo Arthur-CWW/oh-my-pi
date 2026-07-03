@@ -15,7 +15,7 @@ Coleridge's *Kubla Khan* plus Ted Nelson's Project Xanadu — one name that alre
 | Poem | Stream | Reading |
 |---|---|---|
 | The stately pleasure-dome | **Playground / creative engine** | A built environment for sensory delight — closer to a game engine than a video pipeline. Programmatic, remixable assets (characters, props, audio, effects) that get reused everywhere: UGC video, companion bodies and stages, later even algorithm/RL visualization. Sunny domes, caves of ice: maximal contrast, engineered atmosphere. |
-| Caverns measureless to man | **Memory palace** (second brain) | The archive underneath: tweets, history, transcripts, books, cards — in service of pushing the frontier (HSK Chinese, maths, physics, deep engagement). Nelson's Xanadu — transclusion, everything linked to its source — is literally the second-brain spec, sixty years early. |
+| Caverns measureless to man | **Primer** (perfect tutor) | The archive underneath — tweets, history, transcripts, books, cards; Nelson's Xanadu (transclusion, everything linked to its source) is literally its spec, sixty years early. But the caverns are substrate: the *product* is Stephenson's Primer — a perfect tutor built on them, pushing the frontier (HSK Chinese, maths, physics, deep engagement) and tutoring the agents with the same shared context. |
 | The damsel with a dulcimer | **Companion** | "Could I revive within me her symphony and song… I would build that dome in air." The companion is *heard* before it is seen — which is why ASMR/spatial audio is the underexplored core, and why the Pygmalion dynamic (falling for the creation) is a feature to design for, not an accident. |
 | Kubla's decree | **Harness** | The dome gets *decreed* — infrastructure that turns intent into built environment. Orchestration, routing, memory, proof. A background lane: it improves while the dome is built, never instead of it. |
 | The person from Porlock | The enemy | The visitor who interrupted the poem; it was never finished. Administrative noise, bloated context, menial loops, focus theft. Harness design is Porlock defense. |
@@ -25,6 +25,15 @@ Coleridge's *Kubla Khan* plus Ted Nelson's Project Xanadu — one name that alre
 - **Hyperhuman × acceleration, positive valence.** The quadrant is right; the doom is optional. Keep Land as a coordinate — intensity, machinic desire, "nothing human makes it out" as a *dare* rather than a verdict — and take the positive pole from Pearce's paradise engineering.
 - **Positive wireheading, said plainly.** The companion and the playground are pleasure-tech. Not "engagement," not "retention" — delight, intimacy, aesthetic overwhelm. Building it honestly means building it *well*: local-first, yours, auditable, tuned to one person rather than extractive at scale.
 - **Hedonism with craft.** The difference between wireheading and Xanadu is architecture. A dopamine drip has no structure; a pleasure-dome has load-bearing walls, caves of ice, a river running through it. Layered, remixable, cacheable media; a companion with memory and latency budgets; an archive with provenance. Craft is what makes the pleasure durable.
+
+## The idea-space we're building in
+
+Neighboring concepts, and where Xanadu sits among them:
+
+- **Dead internet theory → heavenbanning.** The pessimistic read: everything online is bots. The optimistic inversion (heavenbanning): being surrounded by tireless synthetic minds tuned to you is *paradise* if they're yours, local, and honest about what they are. Xanadu is heavenbanning with consent and craft — a private internet that loves you back.
+- **Pleometric's remix-evolution thesis.** Shortform media evolves like porn did: fastest-mutating medium wins; creativity emerges from infinite remixes under a selection function (the recommendation algorithm as taste, tongue firmly in cheek). We adopt the *mechanism* and swap the selector: instead of an engagement algorithm, a taste function seeded by Arthur's golden picks and scaled by agents. Same evolutionary engine, different fitness landscape.
+- **Borges' Library of Babel.** The infinite library already contains every remix; the library is worthless without a librarian. Babble is cheap — the whole value is the selection function. This is why annotation, ranking, and the prune surface are first-class product features, not afterthoughts.
+- **Stephenson's Primer.** The sci-fi tutor is instantiable *now* — most of these futurism concepts are; the constraint is ambition, not technology. That conviction is the mood of the whole workspace.
 
 ## Closeness through the ear
 

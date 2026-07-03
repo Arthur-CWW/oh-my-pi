@@ -17,7 +17,7 @@ Fable's window is short (days, not months — Algernon rule). The highest-levera
 
 ## The frame
 
-The long project is **Xanadu**: an engineered pleasure-dome — hyperhuman, accelerative, positive-valence. Companion, playground, and memory palace are three faces of one thing: infrastructure for delight that knows you; the harness is the substrate they all run on. Full framing: [`docs/state/creative-framing.md`](../state/creative-framing.md). Guard against the person from Porlock: administrative noise is the enemy of the vision, in the work and in the harness itself.
+The long project is **Xanadu**: an engineered pleasure-dome — hyperhuman, accelerative, positive-valence. Companion, playground, and Primer are three faces of one thing: infrastructure for delight that knows you; the harness is the substrate they all run on. Full framing: [`docs/state/creative-framing.md`](../state/creative-framing.md). Guard against the person from Porlock: administrative noise is the enemy of the vision, in the work and in the harness itself.
 
 ## Streams
 
@@ -25,7 +25,7 @@ The long project is **Xanadu**: an engineered pleasure-dome — hyperhuman, acce
 |---|--------|------|--------------|
 | 1 | **Companion** | Explore AI-companion *form factors*, not one app: realtime voice-to-avatar (Annie/Grok as one reference), VTuber/VR and Live2D avatars as **hot-swappable models**, Pygmalion dynamics (falling for the creation — Pleometric's angle). The underexplored core is **ASMR/audio**: spatial 3D audio, object-interaction sounds, mic-caressing, environmental closeness — presence simulated through the ear, not just the voice. Local-first, measurable latency. | *Love and Deepspace*, anime/VTuber culture, ASMR craft; behavioral references, never copied assets. Testbed: `apps/ai-companion-rtc`. |
 | 2 | **Playground** (creative engine) | A **creative engine**, closer to a game engine than a video pipeline: programmatic, cacheable, remixable assets (characters, props, audio, effects, shaders) that get *reused* across UGC video, companion avatars/scenes, and later code/algorithm/RL visualization. A shared playground where Arthur and agents co-create. | ComfyUI-freedom × Figma-for-UGC; brainrot/cute-menace/abstract-Chinese-internet as lanes, not endpoints; babble-and-prune. |
-| 3 | **Memory palace** (second brain) | Queryable shared context for Arthur and agents — Twitter/X, browser history, transcripts, SRS, library — in service of a concrete purpose: **studying Chinese (HSK), relearning maths and physics deeply**, and pushing Arthur's personal frontier. Not an archive for its own sake. | Matuschak, Borretti/hashcards, Diamond Age Primer; tacit-knowledge extraction. |
+| 3 | **Primer** (perfect tutor) | A Diamond Age Primer: the archive (Twitter/X, browser history, transcripts, SRS, library) is the *substrate*; the product is a perfect tutor that pushes Arthur's frontier — **Chinese (HSK), maths, physics, deep engagement** — and gives agents the same queryable shared context. Not an archive for its own sake. | Stephenson's Primer, Matuschak, Borretti/hashcards; tacit-knowledge extraction. |
 | — | Trading/market research | Opportunistic only; public surfaces, paper simulation. | — |
 
 Companion and playground overlap on purpose: the engine's assets are the companion's body and stage.
