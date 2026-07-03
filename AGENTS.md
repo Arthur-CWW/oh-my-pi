@@ -36,6 +36,12 @@ Invariants. Most are also static lints — push every lesson down the guardrail 
 - **Subagent packets**: owner paths, excluded paths, model lane, acceptance criteria, non-goals. Workers skip formatters/linters — the coordinator gates.
 - **Proof artifacts** for substantial work: screenshots, logs, fixtures, rerun commands (`proof-of-work-qa` skill).
 
+## Review surfaces (Arthur, 2026-07-03 — repeatable patterns)
+
+- **Bret Victor rule.** Artifacts show the *behavior itself* and invite direct manipulation — playable, draggable, runnable in place. A number or a static file is a failure when the thing itself could be experienced. Design every proof asking: "can Arthur *feel* this in one click?"
+- **Portless per stream.** Every stream's review surface is a self-contained local app behind a stable name: `bunx portless <name> <cmd>` → `http://<name>.localhost:1355`. No port numbers, no collisions across parallel OMP sessions.
+- **Artifact-viewer/dashboard pattern.** Finished work → entry in a feed ledger (JSONL + schema) → live dashboard card with inline media, runnable actions, and **error logs of every run**. Taste forks → `question` entries answered in-place. Arthur reviews products, not commits. Reference implementations: `apps/xanadu` (companion), `packages/primer-daemon` dashboard (primer) — converge these into a shared package when a third consumer appears.
+
 ## Hard rules
 
 - **No `sudo`** without Arthur's explicit approval via `ask` (exact command, cwd, why, reversibility).

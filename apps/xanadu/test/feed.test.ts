@@ -50,6 +50,30 @@ describe("feed schema", () => {
 
     expect(entry).toEqual(baseEntry)
   })
+
+  test("decodes old artifacts and new embed artifacts", () => {
+    const oldArtifactEntry = decodeFeedEntry({
+      ...baseEntry,
+      id: "entry-old-artifact",
+      artifacts: [{ label: "Audio", path: "data/x.wav", media: "audio" }],
+    })
+    const embedEntry = decodeFeedEntry({
+      ...baseEntry,
+      id: "entry-embed-artifact",
+      artifacts: [{ label: "Loop", media: "embed", url: "https://example.com/loop" }],
+    })
+    const parsed = parseFeedJsonl(
+      [
+        JSON.stringify({ ...baseEntry, id: "entry-bad-media", artifacts: [{ label: "Bad", path: "data/x.bin", media: "binary" }] }),
+        JSON.stringify(embedEntry),
+      ].join("\n"),
+    )
+
+    expect(oldArtifactEntry.artifacts[0]?.url).toBeUndefined()
+    expect(embedEntry.artifacts[0]?.url).toBe("https://example.com/loop")
+    expect(parsed.warnings).toHaveLength(1)
+    expect(parsed.entries.map((entry) => entry.id)).toEqual(["entry-embed-artifact"])
+  })
 })
 
 describe("artifact whitelist", () => {

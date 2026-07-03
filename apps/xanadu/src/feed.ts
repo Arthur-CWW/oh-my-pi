@@ -27,11 +27,13 @@ export const ArtifactMediaSchema = Schema.Union([
   Schema.Literal("markdown"),
   Schema.Literal("text"),
   Schema.Literal("json"),
+  Schema.Literal("embed"),
 ])
 
 export const ArtifactSchema = Schema.Struct({
   label: NonEmptyStringSchema,
-  path: NonEmptyStringSchema,
+  path: Schema.optional(NonEmptyStringSchema),
+  url: Schema.optional(NonEmptyStringSchema),
   media: ArtifactMediaSchema,
 })
 
@@ -60,6 +62,7 @@ export const FeedEntrySchema = Schema.Struct({
   links: Schema.optional(Schema.Array(LinkSchema)),
   needsInput: Schema.optional(Schema.Boolean),
   tags: Schema.optional(Schema.Array(NonEmptyStringSchema)),
+  parentId: Schema.optional(NonEmptyStringSchema),
 })
 
 export type FeedKind = Schema.Schema.Type<typeof FeedKindSchema>
@@ -82,6 +85,7 @@ export interface FeedEntry {
   readonly links: readonly FeedLink[]
   readonly needsInput: boolean
   readonly tags: readonly string[]
+  readonly parentId?: string
 }
 
 export interface FeedLineWarning {
@@ -128,18 +132,15 @@ function normalizeFeedEntry(entry: FeedEntryWire): FeedEntry {
     links: entry.links ?? [],
     needsInput: entry.needsInput ?? false,
     tags: entry.tags ?? [],
+    ...(entry.parentId ? { parentId: entry.parentId } : {}),
   }
 }
 
-function parseJsonLine(line: string): unknown {
-  return JSON.parse(line)
+function parseJsonLine(line: string): object {
+  return JSON.parse(line) as object
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
-}
-
-export function decodeFeedEntry(value: unknown): FeedEntry {
+export function decodeFeedEntry(value: object): FeedEntry {
   return normalizeFeedEntry(Schema.decodeUnknownSync(FeedEntrySchema)(value))
 }
 
@@ -154,7 +155,7 @@ export function parseFeedJsonl(text: string): FeedParseResult {
     try {
       entries.push(decodeFeedEntry(parseJsonLine(line)))
     } catch (error) {
-      warnings.push({ line: index + 1, message: errorMessage(error) })
+      warnings.push({ line: index + 1, message: error instanceof Error ? error.message : String(error) })
     }
   }
 
@@ -294,6 +295,8 @@ export function contentTypeForPath(path: string): string {
     case ".jpg":
     case ".jpeg":
       return "image/jpeg"
+    case ".html":
+      return "text/html; charset=utf-8"
     case ".md":
       return "text/markdown; charset=utf-8"
     case ".json":

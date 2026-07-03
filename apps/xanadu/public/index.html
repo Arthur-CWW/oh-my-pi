@@ -13,13 +13,16 @@
           <p class="product-mark">Xanadu</p>
           <h1>Finished artifacts, live from the workstream</h1>
         </div>
-        <label class="needs-toggle">
-          <input id="needs-filter" type="checkbox" />
-          <span>Needs Arthur</span>
-        </label>
+        <button id="system-toggle" class="system-toggle" type="button">System log</button>
       </header>
 
+      <section class="control-strip" aria-label="Feed filters">
+        <button id="needs-filter" class="filter-button" type="button" aria-pressed="false">Needs Arthur</button>
+        <div id="active-filters" class="active-filters" aria-live="polite"></div>
+      </section>
+
       <section id="status" class="status" aria-live="polite">Connecting to the feed.</section>
+      <aside id="system-log" class="system-log" aria-label="System log" hidden></aside>
       <section id="feed" class="feed" aria-label="Xanadu feed"></section>
       <template id="empty-template">
         <article class="empty-state">

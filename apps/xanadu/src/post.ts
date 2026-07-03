@@ -23,7 +23,7 @@ interface ParsedArgs {
 }
 
 const kinds = new Set<FeedKind>(["proof", "demo", "note", "decision", "question", "progress"])
-const mediaKinds = new Set<ArtifactMedia>(["audio", "video", "image", "markdown", "text", "json"])
+const mediaKinds = new Set<ArtifactMedia>(["audio", "video", "image", "markdown", "text", "json", "embed"])
 
 function usage(): string {
   return [
@@ -33,7 +33,7 @@ function usage(): string {
     "  --stream <name>                         Stream name, default companion",
     "  --kind <proof|demo|note|decision|question|progress>",
     "  --summary <markdown>                    Card summary markdown",
-    "  --artifact 'label=Name,path=file,media=audio'        Repeatable",
+    "  --artifact 'label=Name,path=file,media=audio[,url=https://...]' Repeatable; embed may use url",
     "  --action 'label=Run,cwd=apps/x,command=bun run test' Repeatable",
     "  --link 'label=Name,href=https://example.test'        Repeatable",
     "  --tag <tag>                             Repeatable",
@@ -61,11 +61,11 @@ function parseArtifact(spec: string): FeedArtifact {
   const values = splitSpec(spec)
   const media = requiredSpecValue(values, "media", spec)
   if (!mediaKinds.has(media as ArtifactMedia)) throw new Error(`Unsupported artifact media: ${media}`)
-  return {
-    label: requiredSpecValue(values, "label", spec),
-    path: requiredSpecValue(values, "path", spec),
-    media: media as ArtifactMedia,
-  }
+  const label = requiredSpecValue(values, "label", spec)
+  const path = values.get("path")
+  const url = values.get("url")
+  if (!path && !url) throw new Error(`Artifact needs path or url: ${spec}`)
+  return { label, ...(path ? { path } : {}), ...(url ? { url } : {}), media: media as ArtifactMedia }
 }
 
 function parseAction(spec: string): FeedAction {

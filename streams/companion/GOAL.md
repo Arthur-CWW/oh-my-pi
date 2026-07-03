@@ -34,7 +34,11 @@ Explore AI-companion **form factors**, not one app. Realtime voice-to-avatar (An
 
 ## Second goal
 
-**Felt presence.** The same loop with a real whisper-register voice (Kokoro `af_nicole` behind the TTS adapter) so commit→firstAudio measures a real pipeline, plus the Xanadu dashboard as the standing review surface. Then: babble-and-prune voice/persona variants as playable dashboard entries for Arthur's taste pass.
+**Felt presence.** Real voice in the loop + Xanadu dashboard as the standing review surface. **Partially proven 2026-07-03** (testbed `4f35155`): Kokoro `af_nicole` live, median commit→firstAudio 102ms. **Arthur's verdict: voice rejected** — "not a pleasing VTuber ASMR voice". Keep as placeholder; the real path is the voice-clone lane fed by VTuber/ASMR references (`notes/voice-hunt.md`, `data/voice-refs/`). Entertainment register, not assistant: latency and vibe beat intelligence.
+
+## Third goal
+
+**Talk to it.** Full realtime loop Arthur can speak to: mic → VAD/STT (parakeet-mlx + Silero) → fast cheap LLM (Gemini Flash / Kimi lane; NEVER the Codex subscription) → Kokoro → presence layer, with barge-in and per-segment latency printed. Plus "the ghost room": a mesmerizing interactive binaural scene (orbits, behind-you passes, distance swells — reference vocabulary from `data/youtube-liked-asmr-refs`, e.g. 3D Sound Test, Vox Akuma binaural). Proof: a live conversation + a scene you can drag sources around in, both reachable from the dashboard.
 
 ## Owns
 
