@@ -15,7 +15,7 @@ Agents waste fewer tokens, get only the context they can use, and hand off clean
 
 ## Owns
 
-`oh-my-pi/`, `packages/web-access/`, `packages/dynamic-workflows/`, `.omp/`, `skills/`, `docs/fable/`, `catalog/workspaces.yml`, this directory.
+`vendor/oh-my-pi/`, `packages/web-access/`, `packages/dynamic-workflows/`, `.omp/`, `skills/`, `docs/fable/`, `catalog/workspaces.yml`, this directory.
 
 ## Excludes
 

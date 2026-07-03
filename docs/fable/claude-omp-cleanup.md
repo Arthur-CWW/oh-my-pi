@@ -18,7 +18,7 @@ To re-enable the vphone MCP server, replace the contents of `.omp/mcp.json` with
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/coding-agent/src/config/mcp-schema.json",
+  "$schema": "https://raw.githubusercontent.com/can1357/vendor/oh-my-pi/main/packages/coding-agent/src/config/mcp-schema.json",
   "mcpServers": {
     "vphone": {
       "type": "stdio",

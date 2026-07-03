@@ -57,14 +57,14 @@ Includes:
 
 - UGC / video pipeline: `apps/slotok-workbench/`, `packages/hyperframes-renderer/`, `packages/market-lab/`, plus TikTok scripts and `workflows/tiktok-recreate/`.
 - Twitter / X archive: `browser-extensions/`, `packages/twitter-archive/`.
-- Agent harness / runtime: `oh-my-pi/`, `packages/symphony-lite-rs/`, `packages/symphony-lite-elixir/`, `packages/ast-grep-guard/`.
+- Agent harness / runtime: `vendor/oh-my-pi/`, `packages/symphony-lite-rs/`, `packages/symphony-lite-elixir/`, `packages/ast-grep-guard/`.
 - Library / research: `packages/borges-library/`, `docs/` (plans, QA, state, research, reference).
 - Misc safe files: `tools/`, `scripts/`, `sgconfig.yml`, `catalog/workspaces.yml`, `cooking-with-openai-research-chief-mark-chen-transcript.md`.
 
 Commands:
 
 ```bash
-git add apps/slotok-workbench/ browser-extensions/ docs/ oh-my-pi/ \
+git add apps/slotok-workbench/ browser-extensions/ docs/ vendor/oh-my-pi/ \
   packages/ast-grep-guard/ packages/borges-library/ packages/hyperframes-renderer/ \
   packages/market-lab/ packages/symphony-lite-rs/ packages/symphony-lite-elixir/ \
   packages/twitter-archive/ packages/web-access/ scripts/ tools/ workflows/ \
@@ -150,7 +150,7 @@ Treat the following as **main streams**:
 1. AI companion / VRM / realtime avatar (`apps/ai-companion-rtc/`, `chatbot_rtc` sessions)
 2. UGC / media creative playground (`apps/slotok-workbench/`, `ugc_video` sessions)
 3. Personal second-brain / shared context (Twitter/X archive + HSK deck + Mochi clone + Diamond Age Primer / Nick Land reader + personal library + annotation app + browser history / Twitter graph / personal knowledge graph)
-4. Agent harness / cyborgism (`oh-my-pi/`, `packages/web-access/`, `.omp/`, high-score `agent_harness` sessions)
+4. Agent harness / cyborgism (`vendor/oh-my-pi/`, `packages/web-access/`, `.omp/`, high-score `agent_harness` sessions)
 
 Cybersecurity, vphone, proxy, and reveng lanes are present but routed away from Fable.
 

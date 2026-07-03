@@ -13,7 +13,7 @@
 
 | Name | Original absolute path | Action | Description |
 | --- | --- | --- | --- |
-| `oh-my-pi/` | `/Users/arthur/agents/oh-my-pi` | in-repo | OMP fork. |
+| `vendor/oh-my-pi/` | `/Users/arthur/agents/oh-my-pi` | in-repo | OMP fork. |
 | `packages/web-access` | `/Users/arthur/agents/packages/web-access` | in-repo | Web access/browser tooling package. |
 | `packages/dynamic-workflows` | `/Users/arthur/agents/packages/dynamic-workflows` | in-repo | Dynamic workflow runtime and tooling package. |
 | `.omp/` | `/Users/arthur/agents/.omp` | in-repo | Harness configs, including `fable-config.yml`. |

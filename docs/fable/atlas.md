@@ -15,7 +15,7 @@ Pure locator: where things live. No policy (that's [`charter.md`](charter.md)). 
 | Companion | `apps/ai-companion-rtc/`, `packages/spatial-audio-renderer/` | `apps/ai-companion-rtc/docs/goal.md` |
 | Playground | `apps/slotok-workbench/`, `packages/{hyperframes-renderer,remotion-renderer,jimeng-client,ugc-cli}/`, `workflows/tiktok-recreate/` | `docs/state/video-creative-direction.md`, `docs/state/ugc-studio-style-direction.md`, `docs/state/creative-framing.md` |
 | Primer | `packages/{twitter-archive,borges-library}/`, `browser-extensions/extensions/twitter-archive-firefox/`; external: `~/apps/mochi-lite`, `~/apps/hsk-deck`, `~/apps/japanese-vocab`, `~/vault`, `~/github/hashcards` | `docs/twitter-archive-plan.md`, `docs/plans/twitter-archive-goal.md` |
-| Harness | `oh-my-pi/`, `packages/{web-access,dynamic-workflows}/`, `.omp/`, `skills/` | [`harness-brief.md`](harness-brief.md), [`harness-slimming.md`](harness-slimming.md) |
+| Harness | `vendor/oh-my-pi/`, `packages/{web-access,dynamic-workflows}/`, `.omp/`, `skills/` | [`harness-brief.md`](harness-brief.md), [`harness-slimming.md`](harness-slimming.md) |
 
 Historical plans (banner-marked, reference only): `docs/plans/slotok-workbench.md` (retired Solid stack), `docs/plans/symphony-lite-rust-runner.md` (Elixir won), `docs/plans/asmr-companion-overnight-goals.md`.
 
@@ -66,8 +66,8 @@ Full inventory with sizes: [`external-inventory.md`](external-inventory.md). Not
 | Workspace | `.omp/config.yml` | Kagi search, apfs isolation, soft budget 40 |
 | Fable overlay | `.omp/fable-config.yml` | advisor off, `slow/complex/plan → gpt-5.5`, `designer → opus-4-6`, autolearn off. Launch: `omp --config ./.omp/fable-config.yml --model <fable-model-id>` |
 | Skill manifest | `package.json` `pi.skills` | Slim 20-skill profile; ledger + restore steps in [`harness-slimming.md`](harness-slimming.md) |
-| Custom agents | `.omp/agents/` | jimeng-gemini-worker, jimeng-kimi-worker, prose-deepseek-v4-pro, prose-glm-5-2; built-ins (reviewer/designer/explore/plan/…) live in `oh-my-pi/packages/coding-agent/src/prompts/agents/` |
-| Fable-subagent guard | `oh-my-pi/packages/coding-agent/src/config/model-resolver.ts` | Blocks subagent selectors containing `fable` |
+| Custom agents | `.omp/agents/` | jimeng-gemini-worker, jimeng-kimi-worker, prose-deepseek-v4-pro, prose-glm-5-2; built-ins (reviewer/designer/explore/plan/…) live in `vendor/oh-my-pi/packages/coding-agent/src/prompts/agents/` |
+| Fable-subagent guard | `vendor/oh-my-pi/packages/coding-agent/src/config/model-resolver.ts` | Blocks subagent selectors containing `fable` |
 | Auth / quotas | `omp auth-broker`, `omp token <provider>`, `omp usage`, `OMP_PROFILE` | Reuse; never invent token storage |
 
 ## Repo topology & ownership

@@ -26,7 +26,7 @@ Explore AI-companion **form factors**, not one app. Realtime voice-to-avatar (An
 
 ## Excludes
 
-Other `streams/*`, `oh-my-pi/`, playground packages. Cross-stream reusables graduate into `packages/` instead of being reached into.
+Other `streams/*`, `vendor/oh-my-pi/`, playground packages. Cross-stream reusables graduate into `packages/` instead of being reached into.
 
 ## Map
 

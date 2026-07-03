@@ -111,7 +111,7 @@ Net effect today:
 ### Implementation gaps / current guardrails
 
 1. **No true per-agent advisor split yet.** The committed `.omp/fable-config.yml` disables advisor for the whole Fable session (`advisor.enabled: false`, `advisor.subagents: false`). If Arthur later wants non-Fable workers to carry an advisor while main Fable does not, OMP needs a cleaner per-agent advisor policy.
-2. **Fable-subagent guard is now hardcoded in OMP.** `oh-my-pi/packages/coding-agent/src/config/model-resolver.ts` blocks resolved subagent models whose selector contains `fable` and falls back to non-Fable `pi/task`, `pi/smol`, or `pi/slow` lanes. Main sessions can still run Fable.
+2. **Fable-subagent guard is now hardcoded in OMP.** `vendor/oh-my-pi/packages/coding-agent/src/config/model-resolver.ts` blocks resolved subagent models whose selector contains `fable` and falls back to non-Fable `pi/task`, `pi/smol`, or `pi/slow` lanes. Main sessions can still run Fable.
 3. **Fable model ID is not committed.** Launch Fable with `--model <actual-fable-model-id>` plus the local overlay once the model is available.
 
 ### Committed `--config` overlay
