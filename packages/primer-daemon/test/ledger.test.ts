@@ -1,13 +1,19 @@
 import { describe, expect, test } from "bun:test"
-import { existsSync, mkdtempSync, rmSync } from "node:fs"
-import { tmpdir } from "node:os"
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs"
 import { dirname, join } from "node:path"
 
 import { addCard, addNote, listCards, listNotes, openLedger } from "../src/ledger"
+const TEST_TMP_ROOT = new URL(".tmp/", import.meta.url).pathname
+
+function makeTempDir(prefix: string): string {
+  mkdirSync(TEST_TMP_ROOT, { recursive: true })
+  return mkdtempSync(join(TEST_TMP_ROOT, prefix))
+}
+
 
 describe("ledger", () => {
   test("openLedger creates parent dirs and is idempotent", () => {
-    const root = mkdtempSync(join(tmpdir(), "primer-ledger-"))
+    const root = makeTempDir("primer-ledger-")
     try {
       const ledgerPath = join(root, "nested", "daemon-ledger.sqlite")
       expect(existsSync(dirname(ledgerPath))).toBe(false)
@@ -48,7 +54,7 @@ describe("ledger", () => {
   })
 
   test("addNote round-trips sources and lists newest first", () => {
-    const root = mkdtempSync(join(tmpdir(), "primer-ledger-"))
+    const root = makeTempDir("primer-ledger-")
     try {
       const db = openLedger(join(root, "ledger.sqlite"))
       try {
@@ -86,7 +92,7 @@ describe("ledger", () => {
   })
 
   test("addCard round-trips with candidate default status", () => {
-    const root = mkdtempSync(join(tmpdir(), "primer-ledger-"))
+    const root = makeTempDir("primer-ledger-")
     try {
       const db = openLedger(join(root, "ledger.sqlite"))
       try {
@@ -116,7 +122,7 @@ describe("ledger", () => {
   })
 
   test("note sources stay with their notes and cascade on delete", () => {
-    const root = mkdtempSync(join(tmpdir(), "primer-ledger-"))
+    const root = makeTempDir("primer-ledger-")
     try {
       const db = openLedger(join(root, "ledger.sqlite"))
       try {
