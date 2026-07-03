@@ -16,7 +16,7 @@ Arthur and Fable are distinct entities. Fable is not an extension of Arthur, nor
 
 3. **Build the personal second-brain / shared-context monorepo.** Combine Twitter/X inspiration, browser history, transcripts, SRS, annotation, and personal library into a queryable shared memory for Arthur and agents. This is the Andy Matuschak / Fernando Borretti / Hashcards / tacit-knowledge lane: HSK Chinese deck work, Mochi/SRS clone, Diamond Age Primer / Nick Land reader, personal library, math/complex learning, Chrome/Firefox history, Twitter graph, and practitioner-podcast transcript extraction. The built-in `autolearn` system is currently inadequate; **do not fix it**. Treat it as a non-goal / possible future replacement and document it as such.
 
-4. **Improve the agent harness / cyborgism / self-improvement memory.** Better tools, orchestration, memory, packetized workflows, and durable state so future agents waste fewer tokens and hand off cleanly. See [`docs/plans/symphony-lite-goal.md`](../plans/symphony-lite-goal.md), [`docs/plans/skill-inventory-and-rationalization.md`](../plans/skill-inventory-and-rationalization.md), and [`docs/state/symphony-lite-direction.md`](../state/symphony-lite-direction.md).
+4. **Improve the agent harness / cyborgism / self-improvement memory.** This is broader than the Symphony label. Symphony Lite is one possible control-plane layer; the larger workstream is OMP itself: prompts, skills, model routing, tool exposure, subagent contracts, session memory, proof loops, and self-iteration so future agents waste fewer tokens and hand off cleanly. Take inspiration from Hermes where useful: compact reusable skills, recurring automations, vault-aware source workflows, and explicit routing between skill, subagent, and automation. See [`docs/plans/symphony-lite-goal.md`](../plans/symphony-lite-goal.md), [`docs/plans/skill-inventory-and-rationalization.md`](../plans/skill-inventory-and-rationalization.md), and [`docs/state/symphony-lite-direction.md`](../state/symphony-lite-direction.md).
 
 ### Optional / opportunistic
 
@@ -49,6 +49,20 @@ These are the places where Fable can add the most value:
 - **Taste and product direction.** Preserve the weird memetic ambition and avoid flattening into generic dashboards or talking-head generators.
 - **Workflow and architecture design.** Packetized agent workflows, durable state, fast iteration loops, cached validated layers, and clear handoffs.
 - **Cross-cutting standards.** Local-first architecture, background-safe automation, Effect/Schema/CLI conventions, SQLite-backed ledgers, and JSON-first manifests.
+
+
+## Agent harness principles
+
+The harness workstream is continuous meta-work, not a one-off cleanup.
+
+The canonical, chunkier brief is [`docs/fable/workstream-map.md#agent-harness--omp-workstream--canonical-framing`](workstream-map.md#agent-harness--omp-workstream--canonical-framing). This section is only the short orientation.
+
+- **Route capabilities to the agents that can use them well.** Codex has native/built-in computer-use affordances and has been trained around them; other agents may be better with CuaDriver, browser/CDP, read-only research, or pure code edits. Do not expose every tool to every agent by default.
+- **Search/memory providers should feel ambient.** Kagi should be the default web-search lane when agents need outside context. Twitter/X, browser history, vault, and session corpus should become queryable shared context, but not necessarily as giant always-on tools in every prompt.
+- **Prefer small reusable procedures over bloated context.** A good skill is a compact procedure invoked only when relevant. A bad skill is a permanent prompt tax.
+- **Self-iteration should be deliberate.** The desired future shape is a daily/periodic "dreaming" automation: ingest recent failures, refusals, wasted-token loops, missing-context moments, and repeated manual fixes; propose skill/subagent/config improvements; then require review before changing the default harness.
+- **Do not auto-grow the harness.** The failure mode is dumping every lesson into default context until all agents become slower and more confused. Prefer routing, retrieval, and dormant skills over always-on instructions.
+- **Track refusal and capability basins.** Different model families refuse or mishandle different tasks: book/library retrieval, browser auth, computer use, prompt writing, design, implementation, etc. Encode these as routing knowledge for Fable and OMP rather than trying to force one model to do everything.
 
 ## Routing boundaries
 

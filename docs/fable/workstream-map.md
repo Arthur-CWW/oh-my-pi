@@ -13,6 +13,61 @@ Use this as a locator map. It names goals, inspirations, and folders; it intenti
 
 Trading / market research remains opportunistic. Cybersecurity, vphone, proxy, anti-detection, and reverse-engineering implementation lanes are routed away from Fable unless Arthur explicitly starts a separate non-Fable session.
 
+## Agent harness / OMP workstream — canonical framing
+
+This stream is not "the Symphony project." Symphony Lite is one possible layer. The actual target is the whole OMP harness: prompts, skill discovery, model routing, tool access, subagent contracts, daily self-improvement, and retrieval surfaces.
+
+Fable should treat this as a continuous meta-workstream that improves while the other streams run. Do not implement all of this immediately; use it as the design brief for future harness iterations.
+
+### Layered architecture inspiration
+
+```mermaid
+flowchart TD
+  A[Arthur goals, rants, preferences, failures] --> B[Fable advisor / high-level orchestrator]
+  B --> C[Routing layer: choose agent, model, tool budget, context budget]
+  C --> D[Execution agents: Codex, GPT implementers, Kimi, Gemini Flash, reviewers, researchers]
+  C --> E[Ambient retrieval: Kagi, Twitter/X, browser history, vault, sessions]
+  D --> F[Proof artifacts: tests, screenshots, logs, diffs, session summaries]
+  E --> B
+  F --> G[Daily dreaming loop: failures -> candidate skills/config changes]
+  G --> H[Human/Fable review gate]
+  H --> C
+```
+
+Hermes inspiration: compact reusable skills, explicit skill/subagent/automation choice, vault-aware source workflows, and recurring automations. Do not copy Hermes mechanically; port the useful ontology into OMP.
+
+### Routing matrix sketch
+
+| Need | Preferred lane | Why |
+|---|---|---|
+| High-level synthesis, prompt taste, project ontology | Fable main session | Scarce advisor role; best used for goals, taste, cross-workstream routing. |
+| Implementation-heavy code changes | Codex/GPT-5.5 or `gpt-implementer` | Strong logic and code execution; not the final prompt/taste author. |
+| Native computer use / GUI action where Codex has advantage | Codex lane first, CuaDriver/Computer Use where appropriate | Codex has built-in computer-use affordances and is likely trained around that interaction style. |
+| Browser protocol / network / auth extraction | CDP/browser tools or authenticated web worker | More precise than generic computer use; preserves sessions. |
+| Cheap bounded implementation or review | Kimi / Gemini Flash workers | Good for scoped work when the main model should stay scarce. |
+| Search / outside web context | Kagi by default | Use Kagi as the default search provider, not generic Google fallback. |
+| Twitter/X inspiration and social graph | Twitter/X archive and browser-context retrieval | Should become ambient shared context; not necessarily a heavy always-on tool. |
+| Vault / sources / notes | Direct filesystem/vault-aware retrieval | Use as memory substrate without dumping it all into default context. |
+| Book/library retrieval that some models refuse | Borges/library-specific lane or Kimi researcher | Route around model-specific refusal basins instead of arguing with the wrong agent. |
+
+### Daily "dreaming" self-improvement loop
+
+Desired future automation, not immediate implementation:
+
+1. Collect the day's agent failures: refusals, bad prompt-writing, wrong tool routing, wasted context, broken assumptions, repeated manual corrections, missing state, and verification misses.
+2. Cluster them by cause: missing skill, bloated skill, wrong model, wrong tool, missing retrieval surface, stale doc, bad default prompt, bad subagent contract.
+3. Propose small harness patches: disable a default tool, add a dormant skill, move instructions from default prompt into a skill, update model routing, add an index, or create a scheduled maintenance task.
+4. Require a review gate before changes land. The loop proposes; Fable/Arthur decides.
+5. Keep proof: before/after failure example, changed file, and how to verify the fix.
+
+### Context-budget discipline
+
+- Default context should stay small. The harness should retrieve context when needed instead of loading every skill, plan, and source.
+- Prefer dormant skills and explicit routing over always-on instructions.
+- Every default tool/skill must earn its prompt tax.
+- Search providers such as Kagi and shared memory providers such as Twitter/X or browser history should be easy to invoke, but not necessarily preloaded as text.
+- If a capability is only good for one agent family, route it there rather than exposing it everywhere.
+
 ## Session and auth locations
 
 | Thing | Location / command | Notes |

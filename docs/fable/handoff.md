@@ -8,7 +8,7 @@ Quick checklist for starting the next Fable OMP session in `~/agents`.
 2. [`docs/fable/context.md`](context.md) — what Fable is optimizing, ignoring, and routing.
 3. [`docs/fable/preferences.md`](preferences.md) — working style, model routing, and subagent policy.
 4. [`docs/fable/session-index.md`](session-index.md) — how to find valuable sessions without reading everything.
-5. [`docs/fable/workstream-map.md`](workstream-map.md) — where repos/folders/sessions live.
+5. [`docs/fable/workstream-map.md`](workstream-map.md) — canonical repo/workstream map; its Agent Harness / OMP section is the chunky brief for harness iteration.
 6. [`docs/fable/transcription-notes.md`](transcription-notes.md) — likely dictation corrections and unresolved aliases.
 
 ## Orient
@@ -23,7 +23,7 @@ Quick checklist for starting the next Fable OMP session in `~/agents`.
 - **AI companion / RTC testbed**: [`apps/ai-companion-rtc/docs/goal.md`](../../apps/ai-companion-rtc/docs/goal.md)
 - **UGC / creative playground**: [`docs/state/video-creative-direction.md`](../state/video-creative-direction.md), [`docs/plans/ugc-studio-workstreams.md`](../plans/ugc-studio-workstreams.md), [`docs/plans/slotok-workbench.md`](../plans/slotok-workbench.md)
 - **Personal second-brain / shared context**: [`docs/fable/workstream-map.md`](workstream-map.md), [`docs/twitter-archive-plan.md`](../twitter-archive-plan.md), [`docs/plans/twitter-archive-goal.md`](../plans/twitter-archive-goal.md), `packages/borges-library`, `~/apps/mochi-lite`, `~/apps/hsk-deck`, `~/vault`, `~/github/hashcards`.
-- **Agent harness**: [`docs/plans/symphony-lite-goal.md`](../plans/symphony-lite-goal.md), [`docs/state/symphony-lite-direction.md`](../state/symphony-lite-direction.md)
+- **Agent harness / OMP self-iteration**: start with [`docs/fable/workstream-map.md#agent-harness--omp-workstream--canonical-framing`](workstream-map.md#agent-harness--omp-workstream--canonical-framing), then [`docs/fable/preferences.md`](preferences.md), [`docs/fable/harness-slimming.md`](harness-slimming.md), [`docs/plans/symphony-lite-goal.md`](../plans/symphony-lite-goal.md), and [`docs/state/symphony-lite-direction.md`](../state/symphony-lite-direction.md). Treat Symphony as one possible layer, not the whole harness.
 
 ## Find previous sessions
 
