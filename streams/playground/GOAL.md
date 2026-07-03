@@ -30,4 +30,4 @@ Other `streams/*`, harness internals. The companion's stages/bodies are *consume
 
 ## Map
 
-Live taste docs: `docs/state/video-creative-direction.md`, `docs/state/ugc-studio-style-direction.md`. Historical (banner-marked): `docs/plans/slotok-workbench.md`, `docs/plans/ugc-studio-workstreams.md`. External: `~/ComfyUI`. Material inventory: [`docs/fable/atlas.md`](../../docs/fable/atlas.md) artifacts table.
+Live taste docs: `docs/state/video-creative-direction.md`, `docs/state/ugc-studio-style-direction.md`. Historical (banner-marked): `docs/plans/slotok-workbench.md`, `docs/plans/ugc-studio-workstreams.md`. External: `~/ComfyUI` (symlinked in `repos/`). Material inventory: [`INDEX.md`](INDEX.md) and the artifacts table in [`docs/fable/atlas.md`](../../docs/fable/atlas.md).

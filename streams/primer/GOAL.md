@@ -20,7 +20,7 @@ The archive (Twitter/X, browser history, transcripts, SRS, library) is the **sub
 
 ## Owns
 
-`packages/twitter-archive/`, `packages/borges-library/`, `browser-extensions/extensions/twitter-archive-firefox/`, `data/twitter-archive/`, `docs/plans/primer-intuitions.md`, `docs/twitter-archive-plan.md`, this directory.
+`packages/twitter-archive/`, `packages/borges-library/`, `browser-extensions/extensions/twitter-archive-firefox/`, `data/twitter-archive/`, `docs/plans/primer-intuitions.md`, `docs/twitter-archive-plan.md`, this directory (incl. the relocated `wrapped-commentary-reader/`).
 
 ## Excludes
 
@@ -28,4 +28,4 @@ Other `streams/*`. External learning apps (`~/apps/mochi-lite`, `~/apps/hsk-deck
 
 ## Map
 
-Distilled session intuitions: `docs/plans/primer-intuitions.md` (generated from prior OMP sessions). Annotation reader + saved transcript/podcast artifacts: `~/exploratory/systems/wrapped-commentary-reader` (754M). Dæmon prototype: `~/exploratory/browser-context-sync/` (vision, Arthur-Primer ontology, source-trust docs, sync SQLite at `~/state/browser-context/browser_context.sqlite`). Feedstock: see Primer rows in [`docs/fable/external-inventory.md`](../../docs/fable/external-inventory.md) (books dump, Zotero, vault library, gay-primer archive). Skills: `browser-context-sync`, `sideline-annotation-card`, `wrapped-commentary-learning-card-db`, `audio-diarization-pipeline`.
+Distilled session intuitions: `docs/plans/primer-intuitions.md`. Annotation reader + saved transcript/podcast artifacts: `wrapped-commentary-reader/` (relocated here from `~/exploratory/systems/`). Dæmon prototype: `~/exploratory/browser-context-sync/` (vision, Arthur-Primer ontology, source-trust docs; sync SQLite at `~/state/browser-context/browser_context.sqlite`). Feedstock and linked repos: [`INDEX.md`](INDEX.md); fuller externals in [`docs/fable/external-inventory.md`](../../docs/fable/external-inventory.md). Skills: `browser-context-sync`, `sideline-annotation-card`, `wrapped-commentary-learning-card-db`, `audio-diarization-pipeline`.

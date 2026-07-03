@@ -6,7 +6,7 @@ Starting a Fable OMP session in `~/agents`:
 omp --config ./.omp/fable-config.yml --model <fable-model-id>
 ```
 
-(The overlay kills the advisor, binds `reviewer→GPT-5.5` and `designer→Opus`, disables autolearn. Without it, `pi/slow` lanes degrade through the fable-guard.)
+(The overlay kills the advisor, binds worker lanes to GPT-5.5 medium/high, `designer→Opus`, keeps Kimi only for feedstock retrieval, disables autolearn. Without it, `pi/slow` lanes degrade through the fable-guard.)
 
 ## Read (in order, nothing else by default)
 
@@ -15,28 +15,29 @@ omp --config ./.omp/fable-config.yml --model <fable-model-id>
 3. `TASKS.md` — active and next rows.
 4. Whatever Arthur points at.
 
-## Sharded sessions (one per stream)
+## Per-stream sessions (sharding)
 
-Run parallel Fable sessions, one per stream, same launch command. Each stream has a self-contained boot doc with the exact first-message prompt, first moves, and etiquette:
+Fable shards into parallel sessions, **one per stream**, each owning one lane:
 
-- [`streams/harness/HANDOFF.md`](../../streams/harness/HANDOFF.md)
-- [`streams/companion/HANDOFF.md`](../../streams/companion/HANDOFF.md)
-- [`streams/playground/HANDOFF.md`](../../streams/playground/HANDOFF.md)
-- [`streams/primer/HANDOFF.md`](../../streams/primer/HANDOFF.md)
+| Stream | First read after charter |
+|---|---|
+| Companion | [`streams/companion/GOAL.md`](../../streams/companion/GOAL.md) |
+| Playground | [`streams/playground/GOAL.md`](../../streams/playground/GOAL.md) |
+| Primer | [`streams/primer/GOAL.md`](../../streams/primer/GOAL.md) |
+| Harness (background) | [`streams/harness/GOAL.md`](../../streams/harness/GOAL.md) |
 
-Parallel etiquette:
+Rules for a sharded session:
 
-- Stay inside your GOAL.md **owner paths**; its Excludes section is binding.
-- Cross-stream reuse goes through `packages/` — graduate a shared lib, never reach into a sibling's paths.
-- Shared-context changes (charter, framing, atlas) are committed promptly; pull before editing them.
-- Coordinate via `TASKS.md` rows, not by editing another stream's files.
-- Harness is background: any session may *log* friction, only the harness session lands harness changes.
-- Model-role note: subagent lanes bind at session launch — config changes require a fresh session to take effect.
+- **Own your lane.** Stay inside your GOAL.md's owner paths. Cross-stream reusables graduate into `packages/` — never reach into a sibling's paths.
+- **Shared context is charter + framing.** Changes to them (or anything under `docs/fable/`, `docs/state/`) are harness-lane work: commit promptly so sibling sessions pick them up; keep such edits rare and deliberate.
+- **Coordinate via artifacts, not memory.** TASKS.md rows, committed docs, and `streams/<x>/INDEX.md` are the interfaces between sessions.
+- Each stream dir colocates its material: `GOAL.md` (goals/NFRs), `INDEX.md` (tracked index of everything), `repos/` (symlinks to external repos), `inspiration/`, `feedstock/` (gitignored; originals logged in INDEX.md).
 
 ## Retrieve on demand
 
 - Harness iteration: [`harness-brief.md`](harness-brief.md), then [`harness-slimming.md`](harness-slimming.md).
-- Previous sessions: [`session-index.md`](session-index.md) → `data/fable-prep/`.
+- Previous sessions: [`session-index.md`](session-index.md) → `data/fable-prep/` (records now carry a `model` field — Fable vs GPT-5.5 vs Kimi attribution).
+- External resources: [`external-inventory.md`](external-inventory.md).
 - Dictation ambiguity: [`transcription-notes.md`](transcription-notes.md).
 - Creative north star: `docs/state/creative-framing.md`, `docs/state/video-creative-direction.md`.
 

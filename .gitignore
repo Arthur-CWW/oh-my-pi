@@ -107,3 +107,9 @@ vendor/badlogic/pi-skills/browser-tools/output/
 
 # Nested local-first AI companion RTC testbed (separate git repo)
 apps/ai-companion-rtc/
+
+# stream reference material (moved/symlinked, indexed in tracked INDEX.md files)
+streams/*/inspiration/
+streams/*/feedstock/
+streams/*/repos/
+streams/primer/wrapped-commentary-reader/

@@ -2,6 +2,12 @@
 
 Pure locator: where things live. No policy (that's [`charter.md`](charter.md)). Retrieve sections as needed; don't preload.
 
+## Streams (session roots)
+
+`streams/<x>/` is each sharded session's home: `GOAL.md` (ownership + NFRs + open questions), `INDEX.md` (tracked index), `repos/`+`inspiration/`+`feedstock/` (gitignored symlinks/material, originals logged in INDEX.md). Sharding rules: [`handoff.md`](handoff.md).
+
+**Repo topology.** Polyrepo with a shared spine: `~/agents` = harness + Primer substrate + incubator. Products graduate to their own repos (under `~/products`) when they stop being testbeds, taking their `inspiration/`/`feedstock/` along. Shared TS libraries live in `packages/` and get published under the `@wirebabel` npm scope when a graduated repo consumes them (`bun link` for local dev). Cross-repo context registry: `catalog/workspaces.yml`.
+
 ## Code by stream
 
 | Stream | Code | Live docs |
