@@ -12,8 +12,8 @@
     "url": "git+https://github.com/Arthur-CWW/agents.git"
   },
   "scripts": {
-    "typecheck": "cd packages/web-access && bun run typecheck && cd ../mermaid-preview && bun run typecheck && cd ../twitter-archive && bun run typecheck && cd ../jimeng-client && bun run typecheck && cd ../dynamic-workflows && bun run typecheck && cd ../ugc-cli && bun run typecheck && cd ../market-lab && bun run typecheck && cd ../proxy-lab && bun run typecheck && cd ../library-assistant && bun run typecheck && cd ../borges-library && bun run typecheck && cd ../bench-harness && bun run typecheck && cd ../media-contracts && bun run typecheck && cd ../remotion-renderer && bun run typecheck && cd ../hyperframes-renderer && bun run typecheck && cd ../realtime-avatar && bun run typecheck && cd ../primer-daemon && bun run typecheck && cd ../../apps/slotok-workbench && bun run typecheck",
-    "test": "cd packages/web-access && bun run test && cd ../mermaid-preview && bun run test && cd ../twitter-archive && bun run test && cd ../jimeng-client && bun run test && cd ../dynamic-workflows && bun run test && cd ../ugc-cli && bun run test && cd ../market-lab && bun run test && cd ../proxy-lab && bun run test && cd ../library-assistant && bun run test && cd ../borges-library && bun run test && cd ../bench-harness && bun run test && cd ../media-contracts && bun run test && cd ../remotion-renderer && bun run test && cd ../hyperframes-renderer && bun run test && cd ../realtime-avatar && bun run test && cd ../primer-daemon && bun run test && cd ../../apps/slotok-workbench && bun run test",
+    "typecheck": "cd packages/web-access && bun run typecheck && cd ../mermaid-preview && bun run typecheck && cd ../twitter-archive && bun run typecheck && cd ../jimeng-client && bun run typecheck && cd ../dynamic-workflows && bun run typecheck && cd ../ugc-cli && bun run typecheck && cd ../market-lab && bun run typecheck && cd ../proxy-lab && bun run typecheck && cd ../library-assistant && bun run typecheck && cd ../borges-library && bun run typecheck && cd ../bench-harness && bun run typecheck && cd ../media-contracts && bun run typecheck && cd ../remotion-renderer && bun run typecheck && cd ../hyperframes-renderer && bun run typecheck && cd ../realtime-avatar && bun run typecheck && cd ../../apps/slotok-workbench && bun run typecheck",
+    "test": "cd packages/web-access && bun run test && cd ../mermaid-preview && bun run test && cd ../twitter-archive && bun run test && cd ../jimeng-client && bun run test && cd ../dynamic-workflows && bun run test && cd ../ugc-cli && bun run test && cd ../market-lab && bun run test && cd ../proxy-lab && bun run test && cd ../library-assistant && bun run test && cd ../borges-library && bun run test && cd ../bench-harness && bun run test && cd ../media-contracts && bun run test && cd ../remotion-renderer && bun run test && cd ../hyperframes-renderer && bun run test && cd ../realtime-avatar && bun run test && cd ../../apps/slotok-workbench && bun run test",
     "check": "bun run typecheck && bun run test && bun run lint",
     "lint": "bun run lint:unsafe-types && bun run lint:ast-grep && bun run lint:ast-grep:tests",
     "lint:ast-grep": "bun run scripts/ast-grep.boundary.ts scan --config sgconfig.yml --off=no-unsafe-any-unknown-ts --off=no-unsafe-any-python --report-style=medium --globs '!browser-extensions/**' --globs '!kimi-code-usage/**' --globs '!vendor/oh-my-pi/**' --globs '!vendor/**'",
@@ -48,9 +48,6 @@
     "cockpit": "bun packages/web-access/src/agent-cockpit-cli.ts",
     "twitter-archive:typecheck": "cd packages/twitter-archive && bun run typecheck",
     "twitter-archive:test": "cd packages/twitter-archive && bun run test",
-    "primer-daemon:typecheck": "cd packages/primer-daemon && bun run typecheck",
-    "primer-daemon:test": "cd packages/primer-daemon && bun run test",
-    "primer": "bun packages/primer-daemon/src/cli.ts",
     "jimeng:typecheck": "cd packages/jimeng-client && bun run typecheck",
     "jimeng:test": "cd packages/jimeng-client && bun run test",
     "jimeng:cli": "bun packages/jimeng-client/src/cli.ts",

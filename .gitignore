@@ -35,6 +35,8 @@ VoiceInk/
 
 # Large vendored repos and generated skill/tool checkouts
 vendor/*
+!vendor/oh-my-pi/
+!vendor/oh-my-pi/**
 !vendor/openai/
 vendor/openai/*
 !vendor/openai/README.md

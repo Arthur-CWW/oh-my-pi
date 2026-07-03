@@ -16,6 +16,9 @@ Running ledger of OMP/harness papercuts and maintenance tasks. Any session may a
 | 2026-07-03 | Eval-bridge `agent()` abort quirk. Explicit-model probe completed but bridge raised `subagent 'task' failed` after an abort event. | n/a | medium |
 | 2026-07-03 | Advisory reliability. Advisor injected confidently wrong advisories during harness work. | n/a | medium |
 | 2026-07-03 | `task` subagent runs hit a hard ~400s wall-clock cap ("The operation timed out", exit 1) with no partial-result surfacing in the job result; a gpt-implementer packet of ~15 file writes at current lane latency (~30s/tool-call) cannot fit. Workaround: slice packets to <10 tool calls or re-wake the idle agent via irc. Wanted: configurable per-spawn timeout and a timeout result that lists files already written. | n/a | medium |
+| 2026-07-03 | Root package.json is a cross-stream collision point: per-package script aliases + hand-maintained typecheck/test mega-chains mean every new package edits the shared root (two Fable streams collided on it today). Arthur decision: packages self-contained (see agent-tooling-preferences.md). Wanted: migrate root chains to workspace-filtered scripts (`bun run --filter`) after auditing which packages currently pass their own gates. | package.json:15 | medium |
+| 2026-07-03 | Subagent sandbox blocks SQLite/tmp writes for spawned Bun (EPERM on mkdtemp and DB creation in os.tmpdir and repo test dirs), so workers cannot run their own fixture-based test smokes; coordinator must gate in the parent shell. Also forced repo-local `test/.tmp` fixture dirs. | n/a | medium |
+| 2026-07-03 | Anthropic content filter killed a designer (Opus) run twice mid-emission of a large single-file HTML template ("Output blocked by content filtering policy"); workaround: instruct chunked writes (<~150 lines per tool call). | n/a | medium |
 
 ## Fixed
 
