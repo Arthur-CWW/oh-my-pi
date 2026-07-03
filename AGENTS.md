@@ -10,11 +10,11 @@ Current packages and absorbed tool repos:
 - `packages/dynamic-workflows` — vendored `pi-dynamic-workflows` source/tests plus local adversarial-review prompt template; the released `npm:pi-dynamic-workflows` package is installed project-locally for the active workflow tool.
 - `packages/browser-use` — clean-room CDP browser-use extension prototype.
 - `packages/twitter-archive` — local-first Twitter/X archive schema and future capture/search helpers.
-- `packages/jimeng-client` — Jimeng/Dreamina direct API helpers ported from Slotok reverse engineering.
+- `packages/jimeng-client` — Jimeng/Dreamina direct API helpers for UGC generation workflows.
 - `apps/tweet-viewer` — future local archive viewer.
 - `browser-extensions`, `kimi-code-usage`, and `oh-my-pi` — absorbed self-contained tool/runtime repos; keep their internal layouts and package managers intact.
 - `skills/` — first-party passive OMP/Pi skills, grouped by immediate discovery parents (`core`, `browser`, `provider`, `research`, `design`, `media`). Vendored/imported skills stay under `vendor/<source>/...` and are only loaded by explicit config.
-- `docs/research/kagi` — archived Kagi reverse-engineering capture; active Kagi client code lives in `packages/web-access/src/kagi.ts`.
+- `docs/research/kagi` — archived Kagi integration reference; active Kagi client code lives in `packages/web-access/src/kagi.ts`.
 - `workflows/*` — future archive/analyze/generate shortform-video workflows.
 - `catalog/workspaces.yml` — YAML registry for workspace ownership, ad hoc context roots, capability discovery parents, packet policy, and session path-alias conventions. Update this before moving cross-workspace work.
 
@@ -106,6 +106,5 @@ docs/twitter-archive-plan.md      Twitter/X archive and shortform pipeline plan
 - No colocated `*.test.ts` beside impl files
 - Twitter/X capture should be respectful: low concurrency, jitter/backoff, disk cache/entity dedupe, no private/locked content
 - Browser-based Twitter/X scraping should inspect only the main content/tweet column plus search input; ignore sidebars/trends/DMs/navigation chrome
-- Jimeng/Dreamina API work is value-first: prioritize the highest-value UGC workflows before speed/ease/no-spend. Arthur may pronounce or dictate it as “Gming”; treat that as `J-I-M-E-N-G`. Paid or mutating live/direct runs need explicit approval with exact commands and artifact paths; keep generation concurrency 1 and stop on risk-control (`1019` / `shark not pass`) errors.
+- Jimeng/Dreamina API work is value-first: prioritize the highest-value UGC workflows before speed/ease/no-spend. Arthur may pronounce or dictate it as "Gming"; treat that as `J-I-M-E-N-G`. Paid or mutating live runs need explicit approval with exact commands and artifact paths; keep generation concurrency 1 and stop on provider rate-limit errors.
 - Sudo: NEVER run `sudo` without Arthur's explicit approval. Use `ask` with: exact command, cwd, why needed, what it changes, whether reversible. See `docs/prompts/sudo-approval.md` for the full protocol. Arthur authenticates via fingerprint — approval is the gate.
-- vphone-cli AMFI: NEVER recommend or set global `amfi_get_out_of_my_way=1` on Arthur's daily-driver Mac by default. It destabilized VoiceInk, Karabiner, Firefox/TCC/HID flows after SIP changes. Prefer targeted `make amfidont_allow_vphone` / `amfidont --path ~/agents/vphone-cli` with explicit approval; use global AMFI boot-args only as a last-resort, time-boxed experiment with a rollback command (`sudo nvram -d boot-args && sudo reboot`) stated up front.
