@@ -24,7 +24,7 @@ The archive (Twitter/X, browser history, transcripts, SRS, library) is the **sub
 
 ## Owns
 
-`packages/twitter-archive/`, `packages/borges-library/`, `browser-extensions/extensions/twitter-archive-firefox/`, `data/twitter-archive/`, `docs/plans/primer-intuitions.md`, `docs/twitter-archive-plan.md`, this directory (incl. the relocated `wrapped-commentary-reader/`).
+`packages/twitter-archive/`, `packages/borges-library/`, `packages/primer-daemon/`, `browser-extensions/extensions/twitter-archive-firefox/`, `data/twitter-archive/`, `data/primer/` (daemon ledger, gitignored), `docs/plans/primer-intuitions.md`, `docs/twitter-archive-plan.md`, this directory (incl. the relocated `wrapped-commentary-reader/`).
 
 ## Excludes
 
@@ -32,4 +32,4 @@ Other `streams/*`. External learning apps (`~/apps/mochi-lite`, `~/apps/hsk-deck
 
 ## Map
 
-Distilled session intuitions: `docs/plans/primer-intuitions.md`. Annotation reader + saved transcript/podcast artifacts: `wrapped-commentary-reader/` (relocated here from `~/exploratory/systems/`). Dæmon prototype: `~/exploratory/browser-context-sync/` (vision, Arthur-Primer ontology, source-trust docs; sync SQLite at `~/state/browser-context/browser_context.sqlite`). Feedstock and linked repos: [`INDEX.md`](INDEX.md); fuller externals in [`docs/fable/external-inventory.md`](../../docs/fable/external-inventory.md). Skills: `browser-context-sync`, `sideline-annotation-card`, `wrapped-commentary-learning-card-db`, `audio-diarization-pipeline`.
+Distilled session intuitions: `docs/plans/primer-intuitions.md`. Annotation reader + saved transcript/podcast artifacts: `wrapped-commentary-reader/` (relocated here from `~/exploratory/systems/`). Dæmon prototype: `~/exploratory/browser-context-sync/` (vision, Arthur-Primer ontology, source-trust docs; sync SQLite at `~/state/browser-context/browser_context.sqlite`). **Dæmon query path: `packages/primer-daemon/`** — `bun run primer ask "..."` answers from browser-context + twitter archive + reader annotations with provenance; write-back ledger at `data/primer/daemon-ledger.sqlite`; proof: `docs/qa/primer-daemon-first-answers.md`. Feedstock and linked repos: [`INDEX.md`](INDEX.md); fuller externals in [`docs/fable/external-inventory.md`](../../docs/fable/external-inventory.md). Skills: `browser-context-sync`, `sideline-annotation-card`, `wrapped-commentary-learning-card-db`, `audio-diarization-pipeline`.
