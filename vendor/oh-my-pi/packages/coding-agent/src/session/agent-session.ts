@@ -194,7 +194,7 @@ import type { Goal, GoalModeState } from "../goals/state";
 import type { HindsightSessionState } from "../hindsight/state";
 import { type LocalProtocolOptions, resolveLocalUrlToPath } from "../internal-urls";
 import { IrcBus, type IrcMessage } from "../irc/bus";
-import { IrcExternalBus, resolveIrcExternalPeerName } from "../irc/bus-external";
+import { IrcExternalBus, resolveIrcExternalPeerName, type IrcExternalPeerState } from "../irc/bus-external";
 import { resolveMemoryBackend } from "../memory-backend";
 import { getMnemopiSessionState, type MnemopiSessionState, setMnemopiSessionState } from "../mnemopi/state";
 import { containsOrchestrate, ORCHESTRATE_NOTICE } from "../modes/orchestrate";
@@ -1124,6 +1124,7 @@ export class AgentSession {
 	#pendingIrcAsides: CustomMessage[] = [];
 	#ircExternalSessionId: string | undefined;
 	#ircExternalPeerName: string | undefined;
+	#ircExternalPeerState: Exclude<IrcExternalPeerState, "unknown"> | undefined;
 	// Agent identity (registry id) used for IRC routing and job ownership.
 	#agentId: string | undefined;
 	#agentKind: "main" | "sub" = "main";
@@ -1291,8 +1292,11 @@ export class AgentSession {
 		this.#promptInFlightCount = Math.max(0, this.#promptInFlightCount - 1);
 		if (this.#promptInFlightCount === 0) {
 			this.#releasePowerAssertion();
-			this.#flushPendingAgentEnd();
+			const emittedAgentEnd = this.#flushPendingAgentEnd();
 			this.#drainStrandedQueuedMessages();
+			if (!emittedAgentEnd && this.#ircExternalPeerState === "working" && !this.agent.state.isStreaming) {
+				this.#updateExternalIrcPeerState("idle");
+			}
 		}
 	}
 
@@ -1369,15 +1373,19 @@ export class AgentSession {
 	#resetInFlight(): void {
 		this.#promptInFlightCount = 0;
 		this.#releasePowerAssertion();
-		this.#flushPendingAgentEnd();
+		const emittedAgentEnd = this.#flushPendingAgentEnd();
 		this.#drainStrandedQueuedMessages();
+		if (!emittedAgentEnd && this.#ircExternalPeerState === "working" && !this.agent.state.isStreaming) {
+			this.#updateExternalIrcPeerState("idle");
+		}
 	}
 
-	#flushPendingAgentEnd(): void {
+	#flushPendingAgentEnd(): boolean {
 		const pending = this.#pendingAgentEndEmit;
-		if (!pending) return;
+		if (!pending) return false;
 		this.#pendingAgentEndEmit = undefined;
 		this.#emit(pending);
+		return true;
 	}
 
 	constructor(config: AgentSessionConfig) {
@@ -1512,6 +1520,9 @@ export class AgentSession {
 		this.#obfuscator = config.obfuscator;
 		this.#agentId = config.agentId;
 		this.#agentKind = config.agentKind ?? "main";
+		if (this.#agentKind === "main") {
+			this.#updateExternalIrcPeerState("idle");
+		}
 		this.#providerSessionId = config.providerSessionId;
 		this.agent.setAssistantMessageEventInterceptor((message, assistantMessageEvent) => {
 			const event: AgentEvent = {
@@ -2062,6 +2073,11 @@ export class AgentSession {
 
 	/** Emit an event to all listeners */
 	#emit(event: AgentSessionEvent): void {
+		if (event.type === "agent_start") {
+			this.#updateExternalIrcPeerState("working");
+		} else if (event.type === "agent_end") {
+			this.#updateExternalIrcPeerState("waiting_input");
+		}
 		// Copy array before iteration to avoid mutation during iteration.
 		const listeners = [...this.#eventListeners];
 		for (const l of listeners) {
@@ -10415,7 +10431,7 @@ export class AgentSession {
 	 * message landed after the turn's last aside drain). Called at the start
 	 * of the next prompt so the model still sees them.
 	 */
-	#registerExternalIrcPeer(): { bus: IrcExternalBus; name: string } {
+	#registerExternalIrcPeer(): { bus: IrcExternalBus; sessionId: string; name: string } {
 		const cwd = this.sessionManager.getCwd();
 		const sessionId = this.#ircExternalSessionId ?? `${cwd}:${process.pid}`;
 		this.#ircExternalSessionId = sessionId;
@@ -10429,7 +10445,18 @@ export class AgentSession {
 		this.#ircExternalPeerName = name;
 		const bus = IrcExternalBus.global();
 		bus.registerPeer({ sessionId, name, cwd, pid: process.pid });
-		return { bus, name };
+		return { bus, sessionId, name };
+	}
+
+	#updateExternalIrcPeerState(state: Exclude<IrcExternalPeerState, "unknown">): void {
+		if (this.#agentKind !== "main" || this.#isDisposed || this.#ircExternalPeerState === state) return;
+		try {
+			const { bus, sessionId } = this.#registerExternalIrcPeer();
+			bus.updatePeerState(sessionId, state);
+			this.#ircExternalPeerState = state;
+		} catch (error) {
+			logger.warn("Failed to update external IRC peer state", { error: String(error) });
+		}
 	}
 
 	#pollExternalIrcMessages(): void {

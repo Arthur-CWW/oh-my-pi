@@ -5,7 +5,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { runIrcCommand, type IrcCliIo } from "@oh-my-pi/pi-coding-agent/cli/irc-cli";
 import { isSubcommand, resolveCliArgv } from "@oh-my-pi/pi-coding-agent/cli-commands";
-import { IrcExternalBus, resolveIrcExternalPeerName } from "@oh-my-pi/pi-coding-agent/irc/bus-external";
+import { getIrcExternalPeerDisplayState, IrcExternalBus, resolveIrcExternalPeerName } from "@oh-my-pi/pi-coding-agent/irc/bus-external";
 import { IrcTool } from "@oh-my-pi/pi-coding-agent/tools/irc";
 
 const cleanupRoots: string[] = [];
@@ -183,6 +183,108 @@ describe("IrcExternalBus", () => {
 			}
 
 			expect(bus.listPeers().map(peer => peer.name)).toEqual(["fresh"]);
+		} finally {
+			bus.close();
+		}
+	});
+
+	it("upserts peer state changes without registerPeer overwriting state", async () => {
+		const dbPath = await tempDbPath();
+		const bus = new IrcExternalBus(dbPath);
+		try {
+			bus.registerPeer({ sessionId: "session-a", name: "peer-a", cwd: "/tmp/project-a", pid: 111 });
+			expect(bus.listPeers().find(peer => peer.name === "peer-a")?.state).toBe("unknown");
+
+			bus.updatePeerState("session-a", "working");
+			expect(bus.listPeers().find(peer => peer.name === "peer-a")?.state).toBe("working");
+
+			bus.updatePeerState("session-a", "waiting_input");
+			expect(bus.listPeers().find(peer => peer.name === "peer-a")?.state).toBe("waiting_input");
+
+			bus.registerPeer({ sessionId: "session-a", name: "peer-a", cwd: "/tmp/project-a", pid: 111 });
+			expect(bus.listPeers().find(peer => peer.name === "peer-a")?.state).toBe("waiting_input");
+		} finally {
+			bus.close();
+		}
+	});
+
+	it("derives disconnected display state for stale peers", async () => {
+		const dbPath = await tempDbPath();
+		const bus = new IrcExternalBus(dbPath);
+		const nowMs = Date.now();
+		try {
+			bus.registerPeer({ sessionId: "fresh-session", name: "fresh", cwd: "/tmp/fresh", pid: 333 });
+			bus.updatePeerState("fresh-session", "working");
+			const db = new Database(dbPath);
+			try {
+				db.run("PRAGMA busy_timeout = 3000");
+				db.query(
+					"INSERT INTO peers (session_id, name, cwd, pid, last_seen, state, state_ts) VALUES ($sessionId, $name, $cwd, $pid, $lastSeen, $state, $stateTs)",
+				).run({
+					$sessionId: "stale-session",
+					$name: "stale",
+					$cwd: "/tmp/stale",
+					$pid: 444,
+					$lastSeen: new Date(nowMs - 20 * 60 * 1000).toISOString(),
+					$state: "working",
+					$stateTs: new Date(nowMs - 20 * 60 * 1000).toISOString(),
+				});
+			} finally {
+				db.close();
+			}
+
+			expect(bus.listPeers().map(peer => peer.name)).toEqual(["fresh"]);
+			const allPeers = bus.listPeers({ includeStale: true });
+			expect(allPeers.map(peer => peer.name).sort()).toEqual(["fresh", "stale"]);
+			expect(getIrcExternalPeerDisplayState(allPeers.find(peer => peer.name === "stale")!, nowMs)).toBe("disconnected");
+			expect(getIrcExternalPeerDisplayState(allPeers.find(peer => peer.name === "fresh")!, nowMs)).toBe("working");
+		} finally {
+			bus.close();
+		}
+	});
+
+	it("migrates a database created without peer state columns", async () => {
+		const dbPath = await tempDbPath();
+		const db = new Database(dbPath);
+		try {
+			db.run("PRAGMA busy_timeout = 3000");
+			db.run(`
+				CREATE TABLE peers (
+					session_id TEXT PRIMARY KEY,
+					name TEXT,
+					cwd TEXT,
+					pid INTEGER,
+					last_seen TEXT
+				)
+			`);
+			db.run(`
+				CREATE TABLE messages (
+					id INTEGER PRIMARY KEY,
+					ts TEXT,
+					from_peer TEXT,
+					to_peer TEXT,
+					body TEXT,
+					delivered INTEGER DEFAULT 0
+				)
+			`);
+			db.query("INSERT INTO peers (session_id, name, cwd, pid, last_seen) VALUES ($sessionId, $name, $cwd, $pid, $lastSeen)").run({
+				$sessionId: "legacy-session",
+				$name: "legacy",
+				$cwd: "/tmp/legacy",
+				$pid: 555,
+				$lastSeen: new Date().toISOString(),
+			});
+		} finally {
+			db.close();
+		}
+
+		const bus = new IrcExternalBus(dbPath);
+		try {
+			expect(bus.listPeers().map(peer => ({ name: peer.name, state: peer.state, stateTs: peer.stateTs }))).toEqual([
+				{ name: "legacy", state: "unknown", stateTs: null },
+			]);
+			bus.updatePeerState("legacy-session", "idle");
+			expect(bus.listPeers()[0]?.state).toBe("idle");
 		} finally {
 			bus.close();
 		}

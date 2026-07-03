@@ -12,4 +12,15 @@ Do **not** use `tmux send-keys` / `cmux send` to talk to a session — that type
 
 Retired: `omp-mail` (stopgap SQLite mailbox) — script archived at `skills-attic/omp-mail.ts`, skill at `~/.omp/agent/skills-archive/omp-mail/`. The old `scripts/omp-mail.ts` path prints a pointer to `omp irc` and exits 1.
 
+
+Peer presence also lives on the IRC bus, not a second store: `peers.state` is updated by the main session lifecycle and `state_ts` records the transition time. Stale peers are displayed as `disconnected` when `last_seen` is older than 10 minutes; that value is derived and never stored.
+
+| State | Meaning |
+|---|---|
+| `working` | Agent turn in progress (model streaming or tool execution) |
+| `waiting_input` | Session has finished a turn and is showing the prompt / waiting for user input |
+| `idle` | Session is live but no turn is running |
+| `unknown` | Legacy or newly registered peer before its first lifecycle update |
+| `disconnected` | Derived display state for stale heartbeats (>10 min), not stored |
+
 Verification note (2026-07-03): CLI core round-trip verified against a temp bus (send → inbox → list). Direct `bun main.ts` invocation is silent in dev; the command works through the built `omp` binary.

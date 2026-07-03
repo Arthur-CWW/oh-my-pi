@@ -15,6 +15,7 @@
  * Replaces the old SessionObserverOverlayComponent (ctrl+s observer).
  */
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import type { AgentMessage, AgentTool } from "@oh-my-pi/pi-agent-core";
 import type { Usage } from "@oh-my-pi/pi-ai";
@@ -26,6 +27,12 @@ import type { KeyId } from "../../config/keybindings";
 import { settings } from "../../config/settings";
 import type { MessageRenderer } from "../../extensibility/extensions/types";
 import { IrcBus } from "../../irc/bus";
+import {
+	IRC_EXTERNAL_STALE_MS,
+	IrcExternalBus,
+	type IrcExternalPeer,
+	isIrcExternalPeerFresh,
+} from "../../irc/bus-external";
 import { AgentLifecycleManager } from "../../registry/agent-lifecycle";
 import { type AgentRef, AgentRegistry, type AgentStatus, MAIN_AGENT_ID } from "../../registry/agent-registry";
 import type { AgentSession } from "../../session/agent-session";
@@ -42,7 +49,7 @@ import {
 import type { SessionMessageEntry } from "../../session/session-entries";
 import { parseSessionEntries } from "../../session/session-loader";
 import { createIrcMessageCard } from "../../tools/irc";
-import { replaceTabs, TRUNCATE_LENGTHS, truncateToWidth } from "../../tools/render-utils";
+import { replaceTabs, shortenPath, TRUNCATE_LENGTHS, truncateToWidth } from "../../tools/render-utils";
 import { canonicalizeMessage } from "../../utils/thinking-display";
 import type { ObservableSession, SessionObserverRegistry } from "../session-observer-registry";
 import { getEditorTheme, theme } from "../theme/theme";
@@ -96,6 +103,70 @@ function statusBadge(status: AgentStatus): string {
 			return theme.fg("muted", `${theme.status.shadowed} parked`);
 		case "aborted":
 			return theme.fg("error", `${theme.status.aborted} aborted`);
+	}
+}
+
+export type AgentHubExternalPeerState = "working" | "waiting_input" | "idle" | "unknown";
+type AgentHubExternalPeerDisplayState = AgentHubExternalPeerState | "disconnected";
+
+export type AgentHubExternalPeer = IrcExternalPeer & {
+	state?: AgentHubExternalPeerState | null;
+	stateTs?: string | null;
+};
+
+export interface AgentHubExternalPeerDataSource {
+	listPeers(options?: {
+		excludeSessionId?: string;
+		staleMs?: number;
+		includeStale?: boolean;
+	}): AgentHubExternalPeer[];
+}
+
+interface ExternalPeerRow {
+	peer: AgentHubExternalPeer;
+	displayIndex: number;
+	state: AgentHubExternalPeerDisplayState;
+}
+
+function externalIrcDbPath(): string {
+	return path.join(os.homedir(), ".omp", "agent", "irc-bus.sqlite");
+}
+
+function parseTimestampMs(value: string): number | undefined {
+	const parsed = Date.parse(value);
+	return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function formatLastSeenAge(lastSeen: string): string {
+	const parsed = parseTimestampMs(lastSeen);
+	if (parsed === undefined) return "unknown age";
+	return formatAge(Math.max(1, Math.round((Date.now() - parsed) / 1000)));
+}
+
+function externalStateBadge(state: AgentHubExternalPeerDisplayState): string {
+	switch (state) {
+		case "working":
+			return theme.fg("accent", `${theme.status.running} working`);
+		case "waiting_input":
+			return theme.fg("warning", `${theme.status.enabled} waiting_input`);
+		case "idle":
+			return theme.fg("success", `${theme.status.enabled} idle`);
+		case "disconnected":
+			return theme.fg("muted", `${theme.status.shadowed} disconnected`);
+		case "unknown":
+			return theme.fg("muted", `${theme.status.shadowed} unknown`);
+	}
+}
+
+function normalizeExternalPeerState(state: AgentHubExternalPeer["state"]): AgentHubExternalPeerState {
+	switch (state) {
+		case "working":
+		case "waiting_input":
+		case "idle":
+		case "unknown":
+			return state;
+		default:
+			return "unknown";
 	}
 }
 
@@ -236,12 +307,18 @@ export interface AgentHubDeps {
 	sessionFile?: string | null;
 	/** Collab guest: route actions/transcripts to the host instead of local sessions. */
 	remote?: AgentHubRemote;
+	/** Cross-session IRC bus reader for sibling OMP instances; null disables it for deterministic tests. */
+	externalIrc?: AgentHubExternalPeerDataSource | null;
+	/** Current external IRC session id; defaults to the session registration convention `${cwd}:${pid}`. */
+	externalSessionId?: string;
 }
 
 export class AgentHubOverlayComponent extends Container {
 	#registry: AgentRegistry;
 	#observers: SessionObserverRegistry;
 	#irc: IrcBus;
+	#externalBus: AgentHubExternalPeerDataSource | null | undefined;
+	#externalSessionId: string;
 	#lifecycle: () => AgentLifecycleManager;
 	#onDone: () => void;
 	#requestRender: () => void;
@@ -257,6 +334,9 @@ export class AgentHubOverlayComponent extends Container {
 	// Table state
 	#view: "table" | "chat" = "table";
 	#rows: AgentRef[] = [];
+	#externalRows: ExternalPeerRow[] = [];
+	#externalOrder = new Map<string, number>();
+	#nextExternalDisplayIndex = 0;
 	#selectedRow = 0;
 	#notice: string | undefined;
 
@@ -318,6 +398,8 @@ export class AgentHubOverlayComponent extends Container {
 		this.#getTool = deps.getTool;
 		this.#getMessageRenderer = deps.getMessageRenderer;
 		this.#cwd = deps.cwd ?? getProjectDir();
+		this.#externalBus = deps.externalIrc;
+		this.#externalSessionId = deps.externalSessionId ?? `${this.#cwd}:${process.pid}`;
 		this.#hideThinkingBlock = deps.hideThinkingBlock;
 		this.#expandKeys = deps.expandKeys ?? ["ctrl+o"];
 		this.#focusAgent = deps.focusAgent;
@@ -328,7 +410,10 @@ export class AgentHubOverlayComponent extends Container {
 
 		this.#unsubscribers.push(this.#registry.onChange(() => this.#onDataChange()));
 		this.#unsubscribers.push(this.#observers.onChange(() => this.#onDataChange()));
-		this.#ageTimer = setInterval(() => this.#requestRender(), AGE_TICK_MS);
+		this.#ageTimer = setInterval(() => {
+			this.#refreshRows();
+			this.#requestRender();
+		}, AGE_TICK_MS);
 		this.#ageTimer.unref?.();
 
 		if (!this.#remote) registerPersistedSubagents(this.#registry, deps.sessionFile);
@@ -341,7 +426,7 @@ export class AgentHubOverlayComponent extends Container {
 	 * gesture reads this to stay inert when there is nothing to open.
 	 */
 	get isEmpty(): boolean {
-		return this.#rows.length === 0;
+		return this.#totalTableRows() === 0;
 	}
 
 	/** Tear down every subscription and timer. Called by the overlay owner on close. */
@@ -415,14 +500,89 @@ export class AgentHubOverlayComponent extends Container {
 
 	/** Stable roster order: first appearance wins; status/activity only affect display columns. */
 	#refreshRows(): void {
-		const selectedId = this.#rows[this.#selectedRow]?.id;
+		const selectedKey = this.#selectedTableKey();
 		this.#rows = this.#registry
 			.list()
 			.filter(ref => ref.id !== MAIN_AGENT_ID)
 			.sort((a, b) => a.spawnIndex - b.spawnIndex);
+		this.#externalRows = this.#loadExternalRows();
 
-		const keptIndex = selectedId ? this.#rows.findIndex(ref => ref.id === selectedId) : -1;
-		this.#selectedRow = keptIndex >= 0 ? keptIndex : Math.min(this.#selectedRow, Math.max(0, this.#rows.length - 1));
+		const keptIndex = selectedKey ? this.#findTableIndex(selectedKey) : -1;
+		const totalRows = this.#totalTableRows();
+		this.#selectedRow = keptIndex >= 0 ? keptIndex : Math.min(this.#selectedRow, Math.max(0, totalRows - 1));
+	}
+
+	#totalTableRows(): number {
+		return this.#rows.length + this.#externalRows.length;
+	}
+
+	#selectedTableKey(): string | undefined {
+		const internal = this.#selectedInternalRef();
+		if (internal) return `agent:${internal.id}`;
+		const external = this.#selectedExternalRow();
+		return external ? `external:${external.peer.sessionId}` : undefined;
+	}
+
+	#findTableIndex(key: string): number {
+		if (key.startsWith("agent:")) {
+			const id = key.slice("agent:".length);
+			return this.#rows.findIndex(ref => ref.id === id);
+		}
+		if (!key.startsWith("external:")) return -1;
+		const sessionId = key.slice("external:".length);
+		const externalIndex = this.#externalRows.findIndex(row => row.peer.sessionId === sessionId);
+		return externalIndex >= 0 ? this.#rows.length + externalIndex : -1;
+	}
+
+	#selectedInternalRef(): AgentRef | undefined {
+		return this.#selectedRow < this.#rows.length ? this.#rows[this.#selectedRow] : undefined;
+	}
+
+	#selectedExternalRow(): ExternalPeerRow | undefined {
+		const externalIndex = this.#selectedRow - this.#rows.length;
+		return externalIndex >= 0 ? this.#externalRows[externalIndex] : undefined;
+	}
+
+	#loadExternalRows(): ExternalPeerRow[] {
+		if (this.#remote) return [];
+		const bus = this.#resolveExternalBus();
+		if (!bus) return [];
+		let peers: AgentHubExternalPeer[];
+		try {
+			peers = bus.listPeers({
+				excludeSessionId: this.#externalSessionId,
+				includeStale: true,
+				staleMs: IRC_EXTERNAL_STALE_MS,
+			});
+		} catch (error) {
+			logger.debug("Agent hub: external IRC peers unavailable", { error: String(error) });
+			return [];
+		}
+		return peers
+			.map(peer => {
+				let displayIndex = this.#externalOrder.get(peer.sessionId);
+				if (displayIndex === undefined) {
+					displayIndex = this.#nextExternalDisplayIndex++;
+					this.#externalOrder.set(peer.sessionId, displayIndex);
+				}
+				const state = isIrcExternalPeerFresh(peer.lastSeen) ? normalizeExternalPeerState(peer.state) : "disconnected";
+				return { peer, displayIndex, state };
+			})
+			.sort((a, b) => a.displayIndex - b.displayIndex);
+	}
+
+	#resolveExternalBus(): AgentHubExternalPeerDataSource | undefined {
+		if (this.#externalBus === null) return undefined;
+		if (this.#externalBus) return this.#externalBus;
+		if (!fs.existsSync(externalIrcDbPath())) return undefined;
+		try {
+			this.#externalBus = IrcExternalBus.global();
+			return this.#externalBus;
+		} catch (error) {
+			logger.debug("Agent hub: failed to open external IRC bus", { error: String(error) });
+			this.#externalBus = null;
+			return undefined;
+		}
 	}
 
 	/** Subscribe to the chat agent's live session (if any) for transcript refreshes. Idempotent per session. */
@@ -473,25 +633,35 @@ export class AgentHubOverlayComponent extends Container {
 		lines.push(` ${theme.fg("accent", "Agent Hub")}${counts ? theme.fg("dim", `${theme.sep.dot}${counts}`) : ""}`);
 		lines.push(...new DynamicBorder().render(width));
 
-		if (this.#rows.length === 0) {
+		const totalRows = this.#totalTableRows();
+		if (totalRows === 0) {
 			lines.push(` ${theme.fg("dim", "no subagents yet — task spawns appear here")}`);
 		} else {
 			const termHeight = process.stdout.rows || 40;
 			// Chrome: 2 borders + title + notice? + blank + hints + border
 			const maxVisible = Math.max(3, termHeight - 7 - (this.#notice ? 1 : 0));
 			let start = 0;
-			if (this.#rows.length > maxVisible) {
+			if (totalRows > maxVisible) {
 				start = Math.min(
 					Math.max(0, this.#selectedRow - Math.floor(maxVisible / 2)),
-					this.#rows.length - maxVisible,
+					totalRows - maxVisible,
 				);
 			}
-			const end = Math.min(start + maxVisible, this.#rows.length);
+			const end = Math.min(start + maxVisible, totalRows);
+			let externalHeaderShown = false;
 			for (let i = start; i < end; i++) {
-				lines.push(this.#renderRow(this.#rows[i], i === this.#selectedRow, width));
+				if (i < this.#rows.length) {
+					lines.push(this.#renderRow(this.#rows[i], i === this.#selectedRow, width));
+					continue;
+				}
+				if (!externalHeaderShown) {
+					lines.push(` ${theme.fg("dim", "external peers")}`);
+					externalHeaderShown = true;
+				}
+				lines.push(this.#renderExternalRow(this.#externalRows[i - this.#rows.length], i === this.#selectedRow, width));
 			}
-			if (end < this.#rows.length) {
-				lines.push(` ${theme.fg("dim", `… ${this.#rows.length - end} more`)}`);
+			if (end < totalRows) {
+				lines.push(` ${theme.fg("dim", `… ${totalRows - end} more`)}`);
 			}
 		}
 
@@ -499,7 +669,7 @@ export class AgentHubOverlayComponent extends Container {
 			lines.push(` ${theme.fg("error", sanitizeLine(this.#notice, Math.max(10, width - 2)))}`);
 		}
 		lines.push("");
-		lines.push(` ${theme.fg("dim", "j/k:select  Enter:open  r:revive  x:kill  Esc/←←:close")}`);
+		lines.push(` ${theme.fg("dim", "j/k:select  Enter:open/hint  r:revive  x:kill  Esc/←←:close")}`);
 		lines.push(...new DynamicBorder().render(width));
 		return lines;
 	}
@@ -514,6 +684,7 @@ export class AgentHubOverlayComponent extends Container {
 			const count = counts[status];
 			if (count > 0) parts.push(`${count} ${status}`);
 		}
+		if (this.#externalRows.length > 0) parts.push(`${this.#externalRows.length} external`);
 		return parts.join(theme.sep.dot);
 	}
 
@@ -538,6 +709,19 @@ export class AgentHubOverlayComponent extends Container {
 		return truncateToWidth(` ${cursor} ${parts.join(theme.sep.dot)}`, Math.max(10, width - 1));
 	}
 
+	#renderExternalRow(row: ExternalPeerRow, selected: boolean, width: number): string {
+		const cursor = selected ? theme.fg("accent", theme.nav.cursor) : " ";
+		const peer = row.peer;
+		const parts: string[] = [
+			externalStateBadge(row.state),
+			theme.bold(replaceTabs(peer.name || peer.sessionId)),
+			theme.fg("dim", "external"),
+			theme.fg("dim", replaceTabs(shortenPath(peer.cwd))),
+			theme.fg("dim", formatLastSeenAge(peer.lastSeen)),
+		];
+		return truncateToWidth(` ${cursor} ${parts.join(theme.sep.dot)}`, Math.max(10, width - 1));
+	}
+
 	#handleTableInput(keyData: string): void {
 		if (matchesAppInterrupt(keyData)) {
 			this.#onDone();
@@ -554,22 +738,24 @@ export class AgentHubOverlayComponent extends Container {
 			return;
 		}
 		if (keyData === "j" || matchesSelectDown(keyData)) {
-			if (this.#rows.length > 0) {
-				this.#selectedRow = Math.min(this.#selectedRow + 1, this.#rows.length - 1);
+			const totalRows = this.#totalTableRows();
+			if (totalRows > 0) {
+				this.#selectedRow = Math.min(this.#selectedRow + 1, totalRows - 1);
 			}
 			this.#requestRender();
 			return;
 		}
 		if (keyData === "k" || matchesSelectUp(keyData)) {
-			if (this.#rows.length > 0) {
+			if (this.#totalTableRows() > 0) {
 				this.#selectedRow = Math.max(this.#selectedRow - 1, 0);
 			}
 			this.#requestRender();
 			return;
 		}
 		if (matchesKey(keyData, "enter") || keyData === "\r" || keyData === "\n") {
-			const selected = this.#rows[this.#selectedRow];
+			const selected = this.#selectedInternalRef();
 			if (selected) this.#activateAgent(selected);
+			else this.#showExternalPeerHint();
 			return;
 		}
 		if (keyData === "r") {
@@ -580,6 +766,13 @@ export class AgentHubOverlayComponent extends Container {
 			this.#killSelected();
 			return;
 		}
+	}
+
+	#showExternalPeerHint(): void {
+		const row = this.#selectedExternalRow();
+		if (!row) return;
+		this.#notice = `message with: omp irc send ${row.peer.name || row.peer.sessionId} …`;
+		this.#requestRender();
 	}
 
 	/**
@@ -612,8 +805,11 @@ export class AgentHubOverlayComponent extends Container {
 	}
 
 	#reviveSelected(): void {
-		const ref = this.#rows[this.#selectedRow];
-		if (!ref) return;
+		const ref = this.#selectedInternalRef();
+		if (!ref) {
+			this.#showExternalPeerHint();
+			return;
+		}
 		if (ref.status !== "parked") {
 			this.#notice = `Agent "${ref.id}" is ${ref.status} — only parked agents can be revived.`;
 			this.#requestRender();
@@ -666,8 +862,11 @@ export class AgentHubOverlayComponent extends Container {
 	}
 
 	#killSelected(): void {
-		const ref = this.#rows[this.#selectedRow];
-		if (!ref) return;
+		const ref = this.#selectedInternalRef();
+		if (!ref) {
+			this.#showExternalPeerHint();
+			return;
+		}
 		this.#notice = undefined;
 		if (this.#remote) {
 			this.#remote.kill(ref.id);

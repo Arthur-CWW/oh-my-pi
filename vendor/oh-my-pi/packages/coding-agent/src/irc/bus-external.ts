@@ -3,12 +3,18 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
+
+export type IrcExternalPeerState = "unknown" | "working" | "waiting_input" | "idle";
+export type IrcExternalPeerDisplayState = IrcExternalPeerState | "disconnected";
+
 export interface IrcExternalPeer {
 	sessionId: string;
 	name: string;
 	cwd: string;
 	pid: number;
 	lastSeen: string;
+	state: IrcExternalPeerState;
+	stateTs: string | null;
 }
 
 export interface IrcExternalMessage {
@@ -25,6 +31,8 @@ interface PeerRow {
 	cwd: string;
 	pid: number;
 	last_seen: string;
+	state: string;
+	state_ts: string | null;
 }
 
 interface MessageRow {
@@ -33,6 +41,10 @@ interface MessageRow {
 	from_peer: string;
 	to_peer: string;
 	body: string;
+}
+
+interface TableInfoRow {
+	name: string;
 }
 
 export interface IrcExternalRegistration {
@@ -57,6 +69,18 @@ function parseTime(value: string): number {
 
 export function isIrcExternalPeerFresh(lastSeen: string, nowMs = Date.now(), staleMs = IRC_EXTERNAL_STALE_MS): boolean {
 	return nowMs - parseTime(lastSeen) <= staleMs;
+}
+
+function normalizePeerState(value: string): IrcExternalPeerState {
+	return value === "working" || value === "waiting_input" || value === "idle" ? value : "unknown";
+}
+
+export function getIrcExternalPeerDisplayState(
+	peer: Pick<IrcExternalPeer, "lastSeen" | "state">,
+	nowMs = Date.now(),
+	staleMs = IRC_EXTERNAL_STALE_MS,
+): IrcExternalPeerDisplayState {
+	return isIrcExternalPeerFresh(peer.lastSeen, nowMs, staleMs) ? peer.state : "disconnected";
 }
 
 function sanitizePeerComponent(value: string): string {
@@ -91,6 +115,8 @@ function toPeer(row: PeerRow): IrcExternalPeer {
 		cwd: row.cwd,
 		pid: row.pid,
 		lastSeen: row.last_seen,
+		state: normalizePeerState(row.state),
+		stateTs: row.state_ts,
 	};
 }
 
@@ -121,6 +147,25 @@ export class IrcExternalBus {
 
 	readonly #db: Database;
 
+	#ensurePeerStateColumns(): void {
+		const columns = new Set(this.#db.query<TableInfoRow, []>("PRAGMA table_info(peers)").all().map(column => column.name));
+		if (!columns.has("state")) {
+			this.#db.run("ALTER TABLE peers ADD COLUMN state TEXT NOT NULL DEFAULT 'unknown'");
+		}
+		if (!columns.has("state_ts")) {
+			this.#db.run("ALTER TABLE peers ADD COLUMN state_ts TEXT");
+		}
+	}
+
+	#getPeerBySessionId(sessionId: string): IrcExternalPeer | undefined {
+		const row = this.#db
+			.query<PeerRow, { $sessionId: string }>(
+				"SELECT session_id, name, cwd, pid, last_seen, state, state_ts FROM peers WHERE session_id = $sessionId",
+			)
+			.get({ $sessionId: sessionId });
+		return row ? toPeer(row) : undefined;
+	}
+
 	constructor(readonly dbPath: string = DEFAULT_DB_PATH) {
 		fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 		this.#db = new Database(dbPath);
@@ -132,9 +177,12 @@ export class IrcExternalBus {
 				name TEXT,
 				cwd TEXT,
 				pid INTEGER,
-				last_seen TEXT
+				last_seen TEXT,
+				state TEXT NOT NULL DEFAULT 'unknown',
+				state_ts TEXT
 			)
 		`);
+		this.#ensurePeerStateColumns();
 		this.#db.run(`
 			CREATE TABLE IF NOT EXISTS messages (
 				id INTEGER PRIMARY KEY,
@@ -173,7 +221,7 @@ export class IrcExternalBus {
 				$pid: pid,
 				$lastSeen: lastSeen,
 			});
-		return { sessionId: peer.sessionId, name: peer.name, cwd: peer.cwd, pid, lastSeen };
+		return this.#getPeerBySessionId(peer.sessionId) ?? { sessionId: peer.sessionId, name: peer.name, cwd: peer.cwd, pid, lastSeen, state: "unknown", stateTs: null };
 	}
 
 	heartbeat(sessionId: string): void {
@@ -183,11 +231,30 @@ export class IrcExternalBus {
 		});
 	}
 
+	updatePeerState(sessionId: string, state: Exclude<IrcExternalPeerState, "unknown">): void {
+		const ts = nowIso();
+		this.#db
+			.query(
+				`INSERT INTO peers (session_id, name, cwd, pid, last_seen, state, state_ts)
+				 VALUES ($sessionId, $sessionId, '', $pid, $ts, $state, $ts)
+				 ON CONFLICT(session_id) DO UPDATE SET
+					state = excluded.state,
+					state_ts = excluded.state_ts,
+					last_seen = excluded.last_seen`,
+			)
+			.run({
+				$sessionId: sessionId,
+				$pid: process.pid,
+				$state: state,
+				$ts: ts,
+			});
+	}
+
 	listPeers(options: { excludeSessionId?: string; staleMs?: number; includeStale?: boolean } = {}): IrcExternalPeer[] {
 		const nowMs = Date.now();
 		const staleMs = options.staleMs ?? IRC_EXTERNAL_STALE_MS;
 		return this.#db
-			.query<PeerRow, []>("SELECT session_id, name, cwd, pid, last_seen FROM peers ORDER BY last_seen DESC")
+			.query<PeerRow, []>("SELECT session_id, name, cwd, pid, last_seen, state, state_ts FROM peers ORDER BY last_seen DESC")
 			.all()
 			.filter(
 				row =>
@@ -200,7 +267,7 @@ export class IrcExternalBus {
 	findPeerByName(name: string, options: { excludeSessionId?: string } = {}): IrcExternalPeer | undefined {
 		const rows = this.#db
 			.query<PeerRow, { $name: string }>(
-				"SELECT session_id, name, cwd, pid, last_seen FROM peers WHERE name = $name ORDER BY last_seen DESC",
+				"SELECT session_id, name, cwd, pid, last_seen, state, state_ts FROM peers WHERE name = $name ORDER BY last_seen DESC",
 			)
 			.all({ $name: name });
 		const row = rows.find(candidate => candidate.session_id !== options.excludeSessionId && isIrcExternalPeerFresh(candidate.last_seen));

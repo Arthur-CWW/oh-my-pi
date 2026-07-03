@@ -10,7 +10,7 @@ Sends short text messages to agents in this process or other OMP sessions on thi
 - `op: "inbox"` — drain pending messages without blocking (`peek: true` leaves them unread).
 - `replyTo` — id of the message you are answering, so the sender can correlate.
 - Replies arrive only when the recipient sends one. Exception: `await: true` to a peer stuck mid-turn (async execution disabled, e.g. blocked in a synchronous task spawn) gets a side-channel auto-reply from its context. For background on a peer, `read` `history://<id>` instead of interrogating it.
-- Peers marked `[external]` in `op: "list"` are other OMP processes on this machine; send to them by peer name. `await: true` and `op: "wait"` are in-process-only for v1 — use `op: "inbox"` to check for external replies.
+- Peers marked `[external, STATE]` in `op: "list"` are other OMP processes on this machine; send to them by peer name. `STATE` is `working`, `waiting_input`, `idle`, `unknown`, or derived `disconnected`. `await: true` and `op: "wait"` are in-process-only for v1 — use `op: "inbox"` to check for external replies.
 </instruction>
 
 <when_to_use>
@@ -39,5 +39,5 @@ Applies to sending and replying.
 - `send`: per-recipient receipts; with `await: true`, also the reply (or timeout notice).
 - `wait`: the consumed message, or a clean timeout notice.
 - `inbox`: pending messages, oldest first.
-- `list`: peers with status, unread count, parent, last activity.
+- `list`: peers with status/state, unread count, parent, last activity.
 </output>

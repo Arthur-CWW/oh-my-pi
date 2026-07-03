@@ -7,7 +7,11 @@
  */
 import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
 import { IrcBus } from "@oh-my-pi/pi-coding-agent/irc/bus";
-import { AgentHubOverlayComponent } from "@oh-my-pi/pi-coding-agent/modes/components/agent-hub";
+import {
+	AgentHubOverlayComponent,
+	type AgentHubExternalPeer,
+	type AgentHubExternalPeerDataSource,
+} from "@oh-my-pi/pi-coding-agent/modes/components/agent-hub";
 import { SessionObserverRegistry } from "@oh-my-pi/pi-coding-agent/modes/session-observer-registry";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
@@ -39,7 +43,10 @@ function stubStdoutGeometry(cols: number): GeometryStub {
 	};
 }
 
-function makeHub(agents: AgentRegistry) {
+function makeHub(
+	agents: AgentRegistry,
+	options: { externalIrc?: AgentHubExternalPeerDataSource | null; externalSessionId?: string } = {},
+) {
 	return new AgentHubOverlayComponent({
 		observers: new SessionObserverRegistry(),
 		hubKeys: [],
@@ -48,6 +55,8 @@ function makeHub(agents: AgentRegistry) {
 		registry: agents,
 		irc: new IrcBus(agents),
 		focusAgent: async () => {},
+		externalIrc: options.externalIrc ?? null,
+		externalSessionId: options.externalSessionId,
 	});
 }
 
@@ -61,6 +70,26 @@ function renderedAgentIds(hub: AgentHubOverlayComponent): string[] {
 				parts.length >= 4 && ["running", "idle", "parked", "aborted"].some(status => parts[0].endsWith(status)),
 		)
 		.map(parts => parts[1]!);
+}
+
+function renderedExternalPeerNames(hub: AgentHubOverlayComponent): string[] {
+	return hub
+		.render(120)
+		.map(line => Bun.stripANSI(line))
+		.map(line => line.split(" · "))
+		.filter(parts => parts.length >= 5 && parts[2] === "external")
+		.map(parts => parts[1]!);
+}
+
+function externalPeer(sessionId: string, name: string, lastSeen: string, state: AgentHubExternalPeer["state"]): AgentHubExternalPeer {
+	return {
+		sessionId,
+		name,
+		cwd: `/tmp/${name}`,
+		pid: 100,
+		lastSeen,
+		state,
+	};
 }
 
 describe("Agent hub row ordering", () => {
@@ -113,6 +142,71 @@ describe("Agent hub row ordering", () => {
 
 		expect(renderedAgentIds(hub)).toEqual(["A", "B", "C", "D"]);
 
+		hub.dispose();
+	});
+
+	it("keeps external peers in first-seen order and appends newcomers", () => {
+		geometry = stubStdoutGeometry(120);
+		const now = vi.spyOn(Date, "now");
+		now.mockReturnValue(Date.parse("2026-07-03T00:00:00.000Z"));
+		const lastSeen = new Date(Date.now()).toISOString();
+		const agents = new AgentRegistry();
+		let peers = [
+			externalPeer("external:alpha", "alpha", lastSeen, "working"),
+			externalPeer("external:beta", "beta", lastSeen, "idle"),
+		];
+		const externalIrc: AgentHubExternalPeerDataSource = {
+			listPeers: () => peers,
+		};
+
+		const hub = makeHub(agents, { externalIrc, externalSessionId: "this-session" });
+		expect(renderedExternalPeerNames(hub)).toEqual(["alpha", "beta"]);
+		hub.handleInput("\r");
+		expect(Bun.stripANSI(hub.render(120).join("\n"))).toContain("message with: omp irc send alpha …");
+
+		peers = [
+			externalPeer("external:beta", "beta", lastSeen, "idle"),
+			externalPeer("external:alpha", "alpha", lastSeen, "working"),
+			externalPeer("external:gamma", "gamma", lastSeen, "waiting_input"),
+		];
+		agents.register({ id: "refresh", displayName: "Refresh", kind: "sub", session: {} as AgentSession });
+
+		expect(renderedExternalPeerNames(hub)).toEqual(["alpha", "beta", "gamma"]);
+		hub.dispose();
+	});
+
+	it("shows unknown state when external peer state is absent", () => {
+		geometry = stubStdoutGeometry(120);
+		const now = vi.spyOn(Date, "now");
+		now.mockReturnValue(Date.parse("2026-07-03T00:00:00.000Z"));
+		const lastSeen = new Date(Date.now()).toISOString();
+		const agents = new AgentRegistry();
+		const externalIrc: AgentHubExternalPeerDataSource = {
+			listPeers: () => [externalPeer("external:nemo", "nemo", lastSeen, undefined)],
+		};
+
+		const hub = makeHub(agents, { externalIrc, externalSessionId: "this-session" });
+		const rendered = Bun.stripANSI(hub.render(120).join("\n"));
+
+		expect(rendered).toContain("nemo");
+		expect(rendered).toContain("unknown");
+		hub.dispose();
+	});
+
+	it("hides external peers when the bus is absent", () => {
+		geometry = stubStdoutGeometry(120);
+		const agents = new AgentRegistry();
+		const externalIrc: AgentHubExternalPeerDataSource = {
+			listPeers: () => {
+				throw new Error("ENOENT: no IRC bus file");
+			},
+		};
+
+		const hub = makeHub(agents, { externalIrc, externalSessionId: "this-session" });
+		const rendered = Bun.stripANSI(hub.render(120).join("\n"));
+
+		expect(rendered).not.toContain("external peers");
+		expect(rendered).toContain("no subagents yet");
 		hub.dispose();
 	});
 });

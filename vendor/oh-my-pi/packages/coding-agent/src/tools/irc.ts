@@ -17,7 +17,7 @@ import { z } from "zod/v4";
 import type { Settings } from "../config/settings";
 import type { RenderResultOptions } from "../extensibility/custom-tools/types";
 import { IrcBus, type IrcDeliveryReceipt, type IrcMessage } from "../irc/bus";
-import { IrcExternalBus, resolveIrcExternalPeerName } from "../irc/bus-external";
+import { getIrcExternalPeerDisplayState, IrcExternalBus, resolveIrcExternalPeerName } from "../irc/bus-external";
 import type { Theme } from "../modes/theme/theme";
 import ircDescription from "../prompts/tools/irc.md" with { type: "text" };
 import type { AgentRegistry } from "../registry/agent-registry";
@@ -202,7 +202,7 @@ export class IrcTool implements AgentTool<typeof ircSchema, IrcDetails> {
 					id: peer.name,
 					displayName: "[external]",
 					kind: "external",
-					status: "external",
+					status: getIrcExternalPeerDisplayState(peer),
 					unread: external.bus.unreadCount(peer.name),
 					lastActivity: Date.parse(peer.lastSeen) || Date.now(),
 					cwd: peer.cwd,
@@ -222,7 +222,7 @@ export class IrcTool implements AgentTool<typeof ircSchema, IrcDetails> {
 						peer.unread > 0 ? `unread ${peer.unread}` : undefined,
 						`active ${formatDuration(Date.now() - peer.lastActivity)} ago`,
 					].filter(Boolean);
-					lines.push(`- ${peer.id} [external] — ${extras.join(", ")}`);
+					lines.push(`- ${peer.id} [external, ${peer.status}] — ${extras.join(", ")}`);
 					continue;
 				}
 				const extras = [
@@ -493,7 +493,7 @@ const BODY_LINES_COLLAPSED = 2;
 const BODY_LINES_EXPANDED = 12;
 const BODY_LINE_WIDTH = 100;
 
-const PEER_STATUS_ORDER: Record<string, number> = { running: 0, idle: 1, parked: 2, external: 3 };
+const PEER_STATUS_ORDER: Record<string, number> = { running: 0, working: 0, waiting_input: 1, idle: 2, parked: 3, unknown: 4, disconnected: 5, external: 6 };
 
 function ircGlyph(theme: Theme): string {
 	return theme.styledSymbol("tool.irc", "accent");
@@ -517,10 +517,18 @@ function peerStatusBadge(status: string, theme: Theme): string {
 	switch (status) {
 		case "running":
 			return theme.fg("accent", `${theme.status.running} running`);
+		case "working":
+			return theme.fg("accent", `${theme.status.running} working`);
+		case "waiting_input":
+			return theme.fg("warning", `${theme.status.pending} waiting_input`);
 		case "idle":
 			return theme.fg("success", `${theme.status.enabled} idle`);
 		case "parked":
 			return theme.fg("muted", `${theme.status.shadowed} parked`);
+		case "unknown":
+			return theme.fg("muted", `${theme.status.shadowed} unknown`);
+		case "disconnected":
+			return theme.fg("muted", `${theme.status.shadowed} disconnected`);
 		case "external":
 			return theme.fg("accent", "[external]");
 		default:

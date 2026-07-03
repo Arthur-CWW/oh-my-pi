@@ -1,5 +1,6 @@
 import {
 	IRC_EXTERNAL_STALE_MS,
+	getIrcExternalPeerDisplayState,
 	IrcExternalBus,
 	type IrcExternalMessage,
 	type IrcExternalPeer,
@@ -58,7 +59,7 @@ function handleList(bus: IrcExternalBus, io: IrcCliIo, nowMs: number): IrcCliCom
 		return { exitCode: 0 };
 	}
 
-	io.stdout.write("NAME\tSTATUS\tLAST SEEN\tPID\tCWD\n");
+	io.stdout.write("NAME\tSTATE\tSTATUS\tLAST SEEN\tPID\tCWD\n");
 	for (const peer of peers) {
 		io.stdout.write(formatPeer(peer, nowMs));
 	}
@@ -110,7 +111,8 @@ function fail(io: IrcCliIo, message: string, usage?: string): IrcCliCommandResul
 function formatPeer(peer: IrcExternalPeer, nowMs: number): string {
 	const lastSeenMs = Date.parse(peer.lastSeen) || 0;
 	const status = isIrcExternalPeerFresh(peer.lastSeen, nowMs, IRC_EXTERNAL_STALE_MS) ? "fresh" : "stale";
-	return `${peer.name}\t${status}\t${formatAge(nowMs - lastSeenMs)} ago\t${peer.pid}\t${peer.cwd}\n`;
+	const state = getIrcExternalPeerDisplayState(peer, nowMs, IRC_EXTERNAL_STALE_MS);
+	return `${peer.name}\t${state}\t${status}\t${formatAge(nowMs - lastSeenMs)} ago\t${peer.pid}\t${peer.cwd}\n`;
 }
 
 function formatMessage(message: IrcExternalMessage): string {
