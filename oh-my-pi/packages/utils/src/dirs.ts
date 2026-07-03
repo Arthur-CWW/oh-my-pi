@@ -22,8 +22,9 @@ export const APP_NAME: string = "omp";
 /** Config directory name (e.g. ".omp") */
 export const CONFIG_DIR_NAME: string = ".omp";
 
-/** Version (e.g. "1.0.0") */
-export const VERSION: string = version;
+/** Version (e.g. "1.0.0" or "1.0.0+fork.abcdef1" for local fork binaries) */
+const FORK_HASH = process.env.PI_FORK_HASH?.trim();
+export const VERSION: string = FORK_HASH ? `${version}+fork.${FORK_HASH}` : version;
 
 /** Minimum Bun version */
 export const MIN_BUN_VERSION: string = engines.bun.replace(/[^0-9.]/g, "");

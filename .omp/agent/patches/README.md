@@ -1,6 +1,6 @@
-# OMP self-heal patches
+# Legacy OMP self-heal patches
 
-`mise run omp-heal-install` symlinks these repo-owned files into `~/.omp/agent`, where the local `omp` wrapper can use them after `omp update`.
+These repo-owned patch artifacts are retained as history for the retired upstream-install overlay model. The active `mise run omp-install` path now builds and installs Arthur's `~/agents/oh-my-pi` fork directly and does not apply these patches. If the upstream-download path is ever needed for archaeology, use `mise run omp-install-upstream-legacy` explicitly.
 
 ## beautiful-mermaid CJK width patch
 

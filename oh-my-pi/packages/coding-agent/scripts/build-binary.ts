@@ -37,11 +37,39 @@ async function runCommand(
 	}
 }
 
+async function readCommand(command: string[], cwd: string = repoRoot): Promise<string> {
+	const proc = Bun.spawn(command, {
+		cwd,
+		env: Bun.env,
+		stdout: "pipe",
+		stderr: "inherit",
+	});
+	const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+	if (exitCode !== 0) {
+		throw new Error(`Command failed with exit code ${exitCode}: ${command.join(" ")}`);
+	}
+	return stdout;
+}
+
+async function readForkHash(): Promise<string> {
+	const explicit = Bun.env.PI_FORK_HASH?.trim();
+	if (explicit) return explicit;
+	try {
+		const sha = (await readCommand(["git", "rev-parse", "--short=12", "HEAD"])).trim();
+		if (/^[0-9a-f]{7,40}$/i.test(sha)) return sha;
+	} catch (err) {
+		console.warn(`Unable to derive fork hash from git: ${err instanceof Error ? err.message : String(err)}`);
+	}
+	return "unknown";
+}
+
+
 async function main(): Promise<void> {
 	await runCommand(["bun", "--cwd=../stats", "scripts/generate-client-bundle.ts", "--generate"]);
 	try {
 		await runCommand(["bun", "--cwd=../natives", "run", "embed:native"]);
 		try {
+			const forkHash = await readForkHash();
 			const buildEnv = shouldAdhocSignDarwinBinary() ? { ...Bun.env, BUN_NO_CODESIGN_MACHO_BINARY: "1" } : Bun.env;
 			await runCommand(
 				[
@@ -57,6 +85,8 @@ async function main(): Promise<void> {
 					'process.env.PI_COMPILED="true"',
 					"--define",
 					`process.env.PI_TINY_TRANSFORMERS_VERSION=${JSON.stringify(transformersVersion)}`,
+					"--define",
+					`process.env.PI_FORK_HASH=${JSON.stringify(forkHash)}`,
 					"--external",
 					"mupdf",
 					"--external",

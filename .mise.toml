@@ -11,7 +11,7 @@ description = "Run SymphonyX Rust tests"
 run = "cargo test --manifest-path packages/symphony-lite-rs/Cargo.toml"
 
 [tasks.omp-link]
-description = "Symlink repo-owned OMP wrapper, post-update maintenance, self-heal script, patches, and repair context"
+description = "Symlink repo-owned OMP wrapper, post-update maintenance, legacy self-heal assets, patches, and skill discovery support"
 run = '''
 set -euo pipefail
 repo_root="${MISE_PROJECT_ROOT:-$(pwd)}"
@@ -27,8 +27,73 @@ ln -sfn "${repo_root}/skills/core/spec-driven-overlays/SKILL.md" "${HOME}/.omp/a
 echo "omp-link: linked OMP files from ${repo_root}"
 '''
 
+[tasks.omp-build-fork]
+description = "Build OMP from the local oh-my-pi fork and install it to ~/.bun/bin/omp"
+run = '''
+set -euo pipefail
+repo_root="${MISE_PROJECT_ROOT:-$(pwd)}"
+package_dir="${repo_root}/oh-my-pi/packages/coding-agent"
+artifact="${package_dir}/dist/omp"
+target="${HOME}/.bun/bin/omp"
+target_dir="$(dirname "${target}")"
+backup=""
+
+restore_on_failure() {
+  status=$?
+  if [[ "${status}" -ne 0 && -n "${backup}" && -f "${backup}" ]]; then
+    cp -p "${backup}" "${target}"
+    chmod 755 "${target}"
+    echo "omp-build-fork: restored ${target} from ${backup}" >&2
+  fi
+  exit "${status}"
+}
+trap restore_on_failure EXIT
+
+if [[ ! -d "${package_dir}" ]]; then
+  echo "omp-build-fork: fork package directory missing: ${package_dir}" >&2
+  exit 1
+fi
+
+mkdir -p "${target_dir}"
+
+if [[ -e "${target}" ]]; then
+  timestamp="$(date +%Y%m%d-%H%M%S)"
+  backup="${target}.bak-${timestamp}"
+  cp -p "${target}" "${backup}"
+  chmod 755 "${backup}"
+  echo "omp-build-fork: backed up ${target} to ${backup}"
+else
+  echo "omp-build-fork: no existing ${target}; installing after successful fork build"
+fi
+
+bun --cwd="${package_dir}" run build
+
+if [[ ! -x "${artifact}" ]]; then
+  echo "omp-build-fork: build artifact missing or not executable: ${artifact}" >&2
+  exit 1
+fi
+
+tmp="$(mktemp "${target_dir}/.omp.XXXXXXXX")"
+cp "${artifact}" "${tmp}"
+chmod 755 "${tmp}"
+mv "${tmp}" "${target}"
+
+if [[ ! -x "${target}" ]]; then
+  echo "omp-build-fork: installed binary is not executable: ${target}" >&2
+  exit 1
+fi
+
+MISE_PROJECT_ROOT="${repo_root}" mise run omp-link
+"${HOME}/.local/bin/omp" --version
+echo "omp-build-fork: installed fork build to ${target}"
+'''
+
 [tasks.omp-install]
-description = "Install upstream OMP with bun, link repo-owned files, then apply local patches"
+description = "Build and install OMP from the local oh-my-pi fork"
+run = "mise run omp-build-fork"
+
+[tasks.omp-install-upstream-legacy]
+description = "LEGACY: install upstream OMP with bun, link repo-owned files, then apply retired local patches"
 run = '''
 set -euo pipefail
 bun add -g @oh-my-pi/pi-coding-agent@latest
@@ -38,39 +103,73 @@ mise run omp-link
 '''
 
 [tasks.omp-update]
-description = "Update upstream OMP through the repo wrapper; post-update maintenance runs automatically"
+description = "Explain the manual fork-based OMP update flow"
 run = '''
 set -euo pipefail
-mise run omp-link
-"${HOME}/.local/bin/omp" update
+cat <<'EOF'
+OMP updates are fork-based now; this task intentionally does not download or replace binaries.
+
+Manual update flow:
+  cd ~/agents/oh-my-pi
+  git fetch upstream
+  git merge upstream/main    # or rebase/cherry-pick deliberately
+  # run focused fork tests for the merge
+  cd ~/agents
+  mise run omp-install
+
+The legacy upstream download path is: mise run omp-install-upstream-legacy
+EOF
 '''
 
 [tasks.omp-doctor]
-description = "Verify OMP wrapper symlinks, upstream binary, self-heal patch, and skill discovery"
+description = "Verify OMP wrapper symlinks and the installed fork-built binary"
 run = '''
 set -euo pipefail
-python3 - <<'PY'
+repo_root="${MISE_PROJECT_ROOT:-$(pwd)}"
+python3 - "${repo_root}" <<'PY'
+import os
+import sys
 from pathlib import Path
 
+repo_root = Path(sys.argv[1]).resolve()
 checks = {
-    "~/.local/bin/omp": Path.home() / ".local/bin/omp",
-    "~/.local/bin/omp-post-update": Path.home() / ".local/bin/omp-post-update",
-    "~/.omp/agent/bin/omp-self-heal": Path.home() / ".omp/agent/bin/omp-self-heal",
-    "~/.omp/agent/patches/beautiful-mermaid@1.1.3.patch": Path.home() / ".omp/agent/patches/beautiful-mermaid@1.1.3.patch",
-    "~/.omp/agent/patches/cmux-omp-resume-env.md": Path.home() / ".omp/agent/patches/cmux-omp-resume-env.md",
-    "~/.omp/agent/patches/cmux-shell-noclobber.md": Path.home() / ".omp/agent/patches/cmux-shell-noclobber.md",
-    "~/.omp/agent/skills/spec-driven-overlays/SKILL.md": Path.home() / ".omp/agent/skills/spec-driven-overlays/SKILL.md",
+    "~/.local/bin/omp": (Path.home() / ".local/bin/omp", repo_root / ".omp/bin/omp"),
+    "~/.local/bin/omp-post-update": (Path.home() / ".local/bin/omp-post-update", repo_root / ".omp/bin/omp-post-update"),
+    "~/.omp/agent/bin/omp-self-heal": (Path.home() / ".omp/agent/bin/omp-self-heal", repo_root / ".omp/agent/bin/omp-self-heal"),
+    "~/.omp/agent/skills/spec-driven-overlays/SKILL.md": (
+        Path.home() / ".omp/agent/skills/spec-driven-overlays/SKILL.md",
+        repo_root / "skills/core/spec-driven-overlays/SKILL.md",
+    ),
 }
 
-for label, path in checks.items():
+for label, (path, expected) in checks.items():
     if not path.is_symlink():
         raise SystemExit(f"{label} is not a symlink")
     if not path.exists():
         raise SystemExit(f"{label} target is missing: {path.resolve()}")
+    if path.resolve() != expected.resolve():
+        raise SystemExit(f"{label} points to {path.resolve()}, expected {expected.resolve()}")
     print(f"{label} -> {path.resolve()}")
+
+binary = Path.home() / ".bun/bin/omp"
+if not binary.is_file():
+    raise SystemExit(f"installed OMP binary missing: {binary}")
+if not os.access(binary, os.X_OK):
+    raise SystemExit(f"installed OMP binary is not executable: {binary}")
+payload = binary.read_bytes()
+if b"shouldEnableAdvisor" not in payload:
+    raise SystemExit("installed OMP binary does not contain fork advisor symbol shouldEnableAdvisor")
+print(f"{binary} is executable and contains shouldEnableAdvisor")
 PY
-"${HOME}/.local/bin/omp" --version
-"${HOME}/.omp/agent/bin/omp-self-heal"
+version="$("${HOME}/.local/bin/omp" --version)"
+printf '%s\n' "${version}"
+case "${version}" in
+  *+fork.*) ;;
+  *)
+    echo "omp-doctor: expected fork build stamp (+fork.<sha>) in version output" >&2
+    exit 1
+    ;;
+esac
 python3 - <<'PY'
 from pathlib import Path
 zshenv = Path.home() / ".zshenv"
@@ -100,48 +199,21 @@ for f in files:
         raise SystemExit(f"cmux shell integration noclobber marker missing in {f}")
     print(f"cmux shell integration noclobber marker present in {f}")
 PY
-python3 - <<'PY'
-import json
-from pathlib import Path
-pkg = Path.home() / ".bun/install/global/node_modules/beautiful-mermaid/package.json"
-target = Path.home() / ".bun/install/global/node_modules/beautiful-mermaid/dist/index.js"
-version = json.loads(pkg.read_text()).get("version", "")
-text = target.read_text(errors="replace")
-missing = [needle for needle in ("WIDE_PAD", "graphemeSegmenter", "displayWidth") if needle not in text]
-if missing:
-    raise SystemExit(f"beautiful-mermaid CJK markers missing: {missing}. If version is no longer 1.1.3, check upstream and regenerate/remove the patch.")
-if version != "1.1.3":
-    print(f"beautiful-mermaid {version} has CJK markers; overlay may be obsolete upstream")
-else:
-    print("beautiful-mermaid CJK patch markers present")
-PY
-python3 - <<'PY'
-from pathlib import Path
-root = Path.home() / ".bun/install/global/node_modules/@oh-my-pi/pi-coding-agent/src/modes/components"
-agent_hub = root / "agent-hub.ts"
-transcript_viewer = root / "agent-transcript-viewer.ts"
-text = ""
-for path in (agent_hub, transcript_viewer):
-    if path.exists():
-        text += path.read_text(errors="replace") + "\n"
-if "R:revive" in text or 'keyData === "R"' in text or '#reviveChatAgent' in text:
-    print("Agent Hub explicit parked revive markers present")
-else:
-    print("Agent Hub explicit parked revive overlay not installed. Optional repair: mise run omp-agent-heal")
-PY
-bun -e 'import { loadSkills } from "/Users/arthur/.bun/install/global/node_modules/@oh-my-pi/pi-coding-agent/src/extensibility/skills.ts"; const expected = ["browser-control","cua-driver","browser-tools","jimeng-browser-proxy","borges-library","remotion-best-practices"]; const result = await loadSkills({ cwd: process.cwd() }); const names = result.skills.map(skill => skill.name); const missing = expected.filter(name => !names.includes(name)); const collisions = result.warnings.filter(w => String(w.message).includes("name collision")); console.log(JSON.stringify({ count: result.skills.length, missing, collisionCount: collisions.length }, null, 2)); if (missing.length || collisions.length) process.exit(1);'
+echo "omp-doctor: fork-built OMP install verified"
 '''
 
 [tasks.omp-agent-heal]
-description = "Ask upstream OMP's default agent to repair spec-driven overlays"
+description = "LEGACY no-op: OMP behavior now lives in the local oh-my-pi fork"
 run = '''
 set -euo pipefail
-repo_root="${MISE_PROJECT_ROOT:-$(pwd)}"
-"${HOME}/.local/bin/omp" -p --auto-approve \
-  @"${repo_root}/skills/core/spec-driven-overlays/SKILL.md" \
-  @"${repo_root}/.omp/patches/README.md" \
-  @"${repo_root}/.omp/patches/agent-hub-r-revive.md" \
-  "Repair the installed upstream OMP package to satisfy the Agent Hub explicit parked revive spec. Work only in ~/.bun/install/global/node_modules/@oh-my-pi/pi-coding-agent and only on files required for this spec. Do not modify this repo. After editing, run mise run omp-doctor from ${repo_root} and report the result."
+cat <<'EOF'
+omp-agent-heal is retired.
+
+OMP-local behavior now lives as commits in ~/agents/oh-my-pi. Update or repair the fork directly, then run:
+  mise run omp-install
+
+Historical overlay specs remain under .omp/patches/ and .omp/agent/patches/.
+EOF
 '''
 
 [tasks.cmux-omp-resume-doctor]
