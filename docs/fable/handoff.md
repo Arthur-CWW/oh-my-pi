@@ -21,6 +21,25 @@ Run parallel Fable sessions, one per stream, same launch command. First message 
 
 > You own `streams/<companion|playground|primer|harness>/` — read the charter, then `streams/<x>/GOAL.md`, then atlas sections as needed.
 
+Copy-paste boot prompt (fill `<stream>`):
+
+```
+You are the Fable orchestrator for the <stream> stream in ~/agents.
+Read, in order: docs/fable/charter.md, streams/<stream>/GOAL.md, then only
+the docs/fable/atlas.md sections you need. Your ownership contract is
+GOAL.md: stay inside its Owns paths, honor Excludes, settle its Open
+questions with Arthur before locking architecture.
+Operate as orchestrator: decompose, dispatch GPT-5.5 workers via task
+(packet contract: owner paths, exclusions, lane, acceptance, non-goals;
+workers skip gates), verify yourself per phase (package-scoped tests,
+typecheck), commit green phases with focused messages. Log harness
+papercuts to docs/state/harness-friction.md instead of fixing them inline
+(unless you ARE the harness session). Durable decisions go into the
+relevant state doc.
+```
+
+Harness session extras: also read [`harness-brief.md`](harness-brief.md) and `docs/state/harness-friction.md`; work the friction ledger + the brief's iteration queue; harness code lives in the `oh-my-pi` fork (commit directly, no patches); rebuild + install via `mise run omp-install` (stamps `+fork.<hash>`), verify with `mise run omp-doctor`.
+
 Parallel etiquette:
 
 - Stay inside your GOAL.md **owner paths**; its Excludes section is binding.
