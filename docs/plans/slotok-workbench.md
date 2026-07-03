@@ -1,5 +1,7 @@
 # Slotok Workbench Plan
 
+> **Status 2026-07-03:** Historical — the Electron/SolidJS stack prescribed here was retired 2026-06-09 in favor of React + Tailwind + shadcn (see `docs/state/ugc-studio-style-direction.md` and `docs/plans/ugc-studio-workstreams.md`). Keep for product-thinking reference; do not implement from it.
+
 Slotok is the AI TikTok/video/UGC remix workbench/product. It is separate from Symphony Lite/SymphonyX, which is the meta-agent orchestration harness that can help build and operate Slotok.
 
 Working tagline:

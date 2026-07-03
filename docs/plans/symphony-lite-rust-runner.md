@@ -1,5 +1,7 @@
 # SymphonyX / Symphony Lite Rust runner/TUI design
 
+> **Status 2026-07-03:** Superseded by the Elixir/OTP decision (see `docs/plans/symphony-lite-goal.md` and `docs/state/symphony-lite-direction.md`). The Rust runner is a comparison baseline only.
+
 This document maps OpenAI Symphony-style layers onto a small repo-local Rust implementation for Arthur's meta-agent orchestration harness.
 
 Naming convention for now:

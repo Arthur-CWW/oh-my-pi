@@ -72,6 +72,8 @@ Arthur clarified that "no-spend" should not be the primary work selector for Jim
 
 Arthur clarified the OMP model split: GPT-5.5 stays the parent/orchestrator; `gemini-3.5-flash` should be the default for simple non-core implementation workers and packet review; latest Kimi is the fallback only when Gemini is unavailable or rate-limited. Core abstractions and surfaces other work will build on should stay with GPT-5.5/main or a stronger implementation agent.
 
+> **Status 2026-07-03:** Superseded for Fable-orchestrated sessions — Fable routes by fit (see `docs/fable/charter.md`); this split remains only a default for non-Fable GPT-orchestrated sessions.
+
 Arthur also clarified the tooling default for ongoing Jimeng work: prefer Effect APIs and Effect CLI for command surfaces, and keep browser/UI checks headless/background. Use CuaDriver when visual/browser automation needs to run in the background without disrupting his active desktop.
 
 Broader lessons about decomposition, caching validated layers, and parallel agents live in `docs/state/agent-iteration-lessons.md`.

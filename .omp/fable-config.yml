@@ -3,15 +3,19 @@
 # Do not put the Fable model ID here until it is known; pass it at launch time.
 
 modelRoles:
-  smol: kimi-code/kimi-for-coding
-  task: kimi-code/kimi-for-coding
-  implementer: kimi-code/kimi-for-coding
+  # GPT-5.5 medium = small/bounded tasks; :high = harder work.
+  # Kimi is NOT a default worker (subscription likely cancelled): keep it only
+  # for refusal-basin feedstock retrieval (books/resources GPT declines) via
+  # research/authenticated_web, with GPT fallback chains covering outages.
+  smol: openai-codex/gpt-5.5:medium
+  task: openai-codex/gpt-5.5:medium
+  implementer: openai-codex/gpt-5.5:high
+  maintenance: openai-codex/gpt-5.5:medium
   research: kimi-code/kimi-for-coding
   authenticated_web: kimi-code/kimi-for-coding
-  maintenance: kimi-code/kimi-for-coding
-  complex: openai-codex/gpt-5.5
-  plan: openai-codex/gpt-5.5
-  slow: openai-codex/gpt-5.5
+  complex: openai-codex/gpt-5.5:high
+  plan: openai-codex/gpt-5.5:high
+  slow: openai-codex/gpt-5.5:high
   designer: anthropic/claude-opus-4-6
 
 advisor:

@@ -124,6 +124,19 @@ omp --config ./.omp/fable-config.yml --model <actual-fable-model-id>
 
 The overlay disables the advisor/autolearn, binds worker roles to non-Fable lanes, keeps Kagi search, and intentionally omits a DeepSeek advisor role and a Fable default model.
 
+## 3b. Global-dir + managed-skills archive pass (2026-07-03)
+
+The manifest slim above was only one of several discovery sources; sessions still loaded ~64 skills. Applied a reversible archive pass across the leaking sources (moves only, restore = `mv` back):
+
+| Source | Archived to | Moved |
+|---|---|---|
+| `~/.omp/agent/skills/` (30 entries) | `~/.omp/agent/skills-archive/` | agent-communication, emusks-research, godmode, impeccable-design-review, lawful-reverse-engineering, used-hardware-buying-research, vscode |
+| `~/.claude/skills/` (6 entries) | `~/.claude/skills-archive/` | all six (cua-driver, design-dna, vercel-composition-patterns, vercel-react-best-practices, vercel-react-view-transitions, web-design-guidelines) — all redundant with repo copies |
+| `~/.agents/skills/` (12 entries) | `~/.agents/skills-archive/` | computer-use, cua-driver, design-dna, orca-cli, orchestration, vercel-*, web-design-guidelines (9); kept codex-system, find-skills, reflect |
+| `~/.omp/agent/managed-skills/` (25 autolearn-generated) | `~/.omp/agent/managed-skills-archive/` | archive-noisy-mcp-server, cmux-workstream-orchestration, hanly-playcover-permissive-patch, mobile-app-protocol-reveng, omp-print-prompt-file-runner, omp-slack-agent-server, proxmark3-macos-debug, symphony-elixir-otp-spike, tailscale-ssh-auth-browser, telegram-cloud-archive, vim-lite-parity-debugging, voiceink-permission-ux, vphone-cli-safe-amfi, vphone-mcp-vendoring, vphone-red-blue-lab, zig-cache-cleanup (16); kept 9 durable ones (arthur-*, writing-without-ai-tells, ai-companion-rtc-testbed, audio-diarization-pipeline, browser-context-sync, sideline-annotation-card, wrapped-commentary-learning-card-db, agent-skill-vendoring) |
+
+Notes: `managed-skills/` is autolearn's store — autolearn is disabled but its generated skills still load, so this dir needs a re-check whenever autolearn is ever re-enabled. Remaining known duplication: ~23 entries in `~/.omp/agent/skills/` overlap the repo manifest for `~/agents` sessions (deduped by name at load, but they also serve non-agents workspaces — left in place deliberately).
+
 ## 4. How to restore a removed skill
 
 1. Open `package.json`.

@@ -1,5 +1,7 @@
 # ASMR Companion + SynthID-Conditioned Seedance Overnight Goals
 
+> **Status 2026-07-03:** Historical overnight-run doc. The "GPT-5.5-capable agents only" guardrail is deprecated — route by fit per `docs/fable/charter.md`. The associated `TASKS.md` row was completed 2026-07-03.
+
 Generated: 2026-06-24
 
 Use this as the orchestration brief for a `/goal`-driven overnight implementation pass. Use only GPT-5.5-capable implementation agents for the main work. The main overnight scope is the staged offline media pipeline: contracts, SynthID-conditioned Jimeng/Seedance image-to-video, spatial/binaural ASMR audio, Pleometric planning, existing video/render integration, and final proof. The realtime Airi-like companion runtime is backlog, gated on a successful ASMR audio + media pipeline proof.

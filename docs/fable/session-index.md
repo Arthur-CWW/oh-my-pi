@@ -13,7 +13,7 @@
 |---|---|---|
 | AI companion / RTC | `chatbot_rtc` | [`apps/ai-companion-rtc/docs/goal.md`](../../apps/ai-companion-rtc/docs/goal.md) |
 | UGC / creative playground | `ugc_video` | [`docs/state/video-creative-direction.md`](../state/video-creative-direction.md), [`docs/plans/ugc-studio-workstreams.md`](../plans/ugc-studio-workstreams.md) |
-| Personal second-brain / shared context | `twitter_archive` + `learning_memory` | [`docs/fable/workstream-map.md`](workstream-map.md), [`docs/twitter-archive-plan.md`](../twitter-archive-plan.md), `~/apps/mochi-lite`, `~/apps/hsk-deck`, `~/vault`, `~/github/hashcards` |
+| Personal second-brain / shared context | `twitter_archive` + `learning_memory` | [`docs/fable/atlas.md`](atlas.md), [`docs/twitter-archive-plan.md`](../twitter-archive-plan.md), `~/apps/mochi-lite`, `~/apps/hsk-deck`, `~/vault`, `~/github/hashcards` |
 | Agent harness | `agent_harness` | [`docs/plans/symphony-lite-goal.md`](../plans/symphony-lite-goal.md), [`docs/state/symphony-lite-direction.md`](../state/symphony-lite-direction.md) |
 | _Noise / skip_ | `menial_ops`, `uncategorized`, `security_exclude` | — |
 
@@ -63,7 +63,6 @@ Note: session transcripts are often speech-to-text via VoiceInk; uncommon words 
 
 Key source docs:
 - `docs/plans/asmr-companion-overnight-goals.md`
-- `docs/plans/asmr-companion-seedance-chinese-text-frontier.md`
 - `TASKS.md` rows `T-2026-06-24-001`
 
 Highest-value JSONLs (see corpus summary for full `chatbot_rtc` candidate list):
