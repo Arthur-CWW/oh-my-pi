@@ -20,6 +20,10 @@ A **creative engine**, closer to a game engine than a video pipeline: programmat
 - Realtime canvas or seconds-per-candidate offline render for v1?
 - Private instrument first, or shareable outputs from v1?
 
+## First goal
+
+**Make reconstruction actually work.** The video-recreation pipeline has never produced a working end-to-end result. One reference TikTok from `data/video-recreation/` decomposed and rebuilt — plates, props, captions, TTS — into a rendered candidate, side-by-side with the original. Fix or bypass whatever is broken in `workflows/tiktok-recreate/`; goal over implementation. Proof: side-by-side video + rerun command.
+
 ## Owns
 
 `apps/slotok-workbench/`, `packages/hyperframes-renderer/`, `packages/remotion-renderer/`, `packages/jimeng-client/`, `packages/ugc-cli/`, `workflows/tiktok-recreate/`, `data/{ugc-studio,assets,tiktok-catalogue,jimeng-lab,video-recreation,workflow-runs,dreamina}/`, this directory.

@@ -49,7 +49,7 @@ The harness (OMP/meta) is not a ranked project — it improves **while** the str
 | Web search | Kagi |
 | UGC generation | Jimeng/Dreamina — dry-run default, live spend only inside a named cap with approval |
 | Feedstock retrieval GPT refuses (books, resources, downloads) | Kimi — refusal-basin lane only, not a default worker (subscription likely cancelled; GPT fallback chains cover outages); Borges library lane for books |
-| Native macOS GUI (background) | CuaDriver; CDP/Playwright for DOM/network/auth |
+| Computer use / GUI automation | By lane: Codex/GPT-5.5 sessions → Codex computer-use plugin (trained for it); other lanes → CuaDriver (`computer_use` tool, background-safe); DOM/network/cookies/auth → CDP/Playwright — never GUI automation for protocol work |
 
 Route around refusal basins instead of arguing with the wrong model. Old "GPT-5.5 must be parent / Gemini simple-only / Kimi fallback-only" prescriptions are dead: use the right model for the job.
 

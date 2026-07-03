@@ -20,6 +20,10 @@ Explore AI-companion **form factors**, not one app. Realtime voice-to-avatar (An
 - Is audio-only ASMR-presence an acceptable v1 milestone (no face)?
 - Day-1 memory: episodic recall vs persona/vibe continuity?
 
+## First goal
+
+**Presence through headphones.** A loop you can put headphones on and *feel*: spatialized close-talk voice plus at least one object-interaction sound (mic touch, fabric, tapping) with measured, printed end-to-end latency. Audio-only is fine if the avatar isn't ready — the ear is the wedge. Proof: a recorded demo clip + the latency number + rerun command.
+
 ## Owns
 
 `apps/ai-companion-rtc/` (testbed; graduates to its own repo when it stops being a testbed), `packages/spatial-audio-renderer/`, `data/asmr-companion/`, `data/youtube-liked-asmr-refs/`, this directory.

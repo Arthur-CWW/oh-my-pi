@@ -18,6 +18,10 @@ The archive (Twitter/X, browser history, transcripts, SRS, library) is the **sub
 - SRS loop built into this ecosystem vs generating cards into mochi-lite/anki? (leaning: feed existing apps first; the substrate is the moat, not the review UI)
 - First interface: agent-queryable (tool/MCP) or Arthur-browsable (UI)?
 
+## First goal
+
+**The dæmon answers.** An agent that can be asked "what have I been reading about X?" and answers from the substrate (browser-context SQLite + wrapped-commentary-reader artifacts + twitter archive), with sources linked — then writes one useful thing back (an annotation or a card candidate). Query path before review UI. Proof: transcript of three real questions answered with provenance + rerun command.
+
 ## Owns
 
 `packages/twitter-archive/`, `packages/borges-library/`, `browser-extensions/extensions/twitter-archive-firefox/`, `data/twitter-archive/`, `docs/plans/primer-intuitions.md`, `docs/twitter-archive-plan.md`, this directory (incl. the relocated `wrapped-commentary-reader/`).
