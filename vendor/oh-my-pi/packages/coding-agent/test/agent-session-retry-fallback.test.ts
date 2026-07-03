@@ -1029,7 +1029,7 @@ describe("AgentSession retry fallback", () => {
 			throw new Error("Expected bundled test models to exist");
 		}
 
-		const contentFilterError = "Anthropic stream error (invalid_request_error): Output blocked by content filter";
+		const contentFilterError = "invalid_request_error: Output blocked by content filter";
 		const cleanFailure = "Anthropic content filter blocked subagent output after fallback retries.";
 		const requestedModels: string[] = [];
 		const fallbackAppliedEvents: Array<Extract<AgentSessionEvent, { type: "retry_fallback_applied" }>> = [];

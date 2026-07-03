@@ -17,6 +17,7 @@ import { z } from "zod/v4";
 import type { Settings } from "../config/settings";
 import type { RenderResultOptions } from "../extensibility/custom-tools/types";
 import { IrcBus, type IrcDeliveryReceipt, type IrcMessage } from "../irc/bus";
+import { IrcExternalBus, resolveIrcExternalPeerName } from "../irc/bus-external";
 import type { Theme } from "../modes/theme/theme";
 import ircDescription from "../prompts/tools/irc.md" with { type: "text" };
 import type { AgentRegistry } from "../registry/agent-registry";
@@ -71,6 +72,8 @@ interface IrcPeerInfo {
 	unread: number;
 	lastActivity: number;
 	activity?: string;
+	cwd?: string;
+	external?: boolean;
 }
 
 export interface IrcDetails {
@@ -180,7 +183,7 @@ export class IrcTool implements AgentTool<typeof ircSchema, IrcDetails> {
 
 	#executeList(registry: AgentRegistry, senderId: string): AgentToolResult<IrcDetails> {
 		const bus = IrcBus.global();
-		const peers = registry
+		const localPeers: IrcPeerInfo[] = registry
 			.list()
 			.filter(ref => ref.id !== senderId && ref.status !== "aborted")
 			.map(ref => ({
@@ -193,12 +196,35 @@ export class IrcTool implements AgentTool<typeof ircSchema, IrcDetails> {
 				lastActivity: ref.lastActivity,
 				activity: ref.activity,
 			}));
+		const external = this.#registerExternalPeer();
+		const externalPeers: IrcPeerInfo[] = external
+			? external.bus.listPeers({ excludeSessionId: external.sessionId }).map(peer => ({
+					id: peer.name,
+					displayName: "[external]",
+					kind: "external",
+					status: "external",
+					unread: external.bus.unreadCount(peer.name),
+					lastActivity: Date.parse(peer.lastSeen) || Date.now(),
+					cwd: peer.cwd,
+					external: true,
+				}))
+			: [];
+		const peers = [...localPeers, ...externalPeers];
 		const lines: string[] = [];
 		if (peers.length === 0) {
 			lines.push("No other agents.");
 		} else {
 			lines.push(`${peers.length} peer(s):`);
 			for (const peer of peers) {
+				if (peer.external) {
+					const extras = [
+						peer.cwd ? `cwd ${peer.cwd}` : undefined,
+						peer.unread > 0 ? `unread ${peer.unread}` : undefined,
+						`active ${formatDuration(Date.now() - peer.lastActivity)} ago`,
+					].filter(Boolean);
+					lines.push(`- ${peer.id} [external] — ${extras.join(", ")}`);
+					continue;
+				}
 				const extras = [
 					peer.activity || undefined,
 					peer.unread > 0 ? `unread ${peer.unread}` : undefined,
@@ -242,6 +268,31 @@ export class IrcTool implements AgentTool<typeof ircSchema, IrcDetails> {
 				from: senderId,
 				to,
 			});
+		}
+
+		const external = this.#registerExternalPeer();
+		if (external?.name === to) {
+			return errorResult("Cannot send an IRC message to yourself.", { op: "send", from: senderId, to });
+		}
+		const localTarget = !isBroadcast ? registry.get(to) : undefined;
+		const externalTarget =
+			!isBroadcast && !localTarget && external
+				? external.bus.findPeerByName(to, { excludeSessionId: external.sessionId })
+				: undefined;
+		if (externalTarget) {
+			if (params.await) {
+				return errorResult("`await:true` is in-process-only; external peers receive fire-and-forget messages.", {
+					op: "send",
+					from: senderId,
+					to,
+				});
+			}
+			external.bus.sendMessage({ fromPeer: external.name, toPeer: externalTarget.name, body: message });
+			const receipts: IrcDeliveryReceipt[] = [{ to: externalTarget.name, outcome: "injected" }];
+			return {
+				content: [{ type: "text", text: `Delivered to 1 peer(s):\n- ${externalTarget.name}: injected` }],
+				details: { op: "send", from: senderId, to, receipts },
+			};
 		}
 
 		const bus = IrcBus.global();
@@ -368,7 +419,18 @@ export class IrcTool implements AgentTool<typeof ircSchema, IrcDetails> {
 	}
 
 	#executeInbox(senderId: string, params: IrcParams): AgentToolResult<IrcDetails> {
-		const messages = IrcBus.global().inbox(senderId, { peek: params.peek });
+		const localMessages = IrcBus.global().inbox(senderId, { peek: params.peek });
+		const external = this.#registerExternalPeer();
+		const externalMessages: IrcMessage[] = external
+			? external.bus.drainMessages(external.name, { peek: params.peek }).map(message => ({
+					id: `external:${message.id}`,
+					from: message.fromPeer,
+					to: senderId,
+					body: message.body,
+					ts: Date.parse(message.ts) || Date.now(),
+				}))
+			: [];
+		const messages = [...localMessages, ...externalMessages];
 		if (messages.length === 0) {
 			return {
 				content: [{ type: "text", text: "Inbox empty." }],
@@ -383,6 +445,18 @@ export class IrcTool implements AgentTool<typeof ircSchema, IrcDetails> {
 			content: [{ type: "text", text: lines.join("\n") }],
 			details: { op: "inbox", from: senderId, inbox: messages },
 		};
+	}
+
+	#registerExternalPeer(): { bus: IrcExternalBus; sessionId: string; name: string } {
+		const sessionId = `${this.session.cwd}:${process.pid}`;
+		const bus = IrcExternalBus.global();
+		const name = resolveIrcExternalPeerName({
+			configuredName: this.session.settings.get("irc.peerName"),
+			cwd: this.session.cwd,
+			sessionId,
+		});
+		bus.registerPeer({ sessionId, name, cwd: this.session.cwd, pid: process.pid });
+		return { bus, sessionId, name };
 	}
 
 	#resolveTimeoutMs(params: IrcParams): number {
@@ -419,7 +493,7 @@ const BODY_LINES_COLLAPSED = 2;
 const BODY_LINES_EXPANDED = 12;
 const BODY_LINE_WIDTH = 100;
 
-const PEER_STATUS_ORDER: Record<string, number> = { running: 0, idle: 1, parked: 2 };
+const PEER_STATUS_ORDER: Record<string, number> = { running: 0, idle: 1, parked: 2, external: 3 };
 
 function ircGlyph(theme: Theme): string {
 	return theme.styledSymbol("tool.irc", "accent");
@@ -447,6 +521,8 @@ function peerStatusBadge(status: string, theme: Theme): string {
 			return theme.fg("success", `${theme.status.enabled} idle`);
 		case "parked":
 			return theme.fg("muted", `${theme.status.shadowed} parked`);
+		case "external":
+			return theme.fg("accent", "[external]");
 		default:
 			return theme.fg("error", `${theme.status.aborted} ${status}`);
 	}
@@ -717,12 +793,18 @@ function renderListResult(details: Partial<IrcDetails>, expanded: boolean, theme
 			maxCollapsed: PREVIEW_LIMITS.COLLAPSED_ITEMS,
 			itemType: "peer",
 			renderItem: peer => {
-				const kindText = peer.parentId ? `${peer.kind}${theme.sep.dot}of ${peer.parentId}` : peer.kind;
+				const kindText = peer.external
+					? peer.cwd
+						? `cwd ${peer.cwd}`
+						: "external"
+					: peer.parentId
+						? `${peer.kind}${theme.sep.dot}of ${peer.parentId}`
+						: peer.kind;
 				const unread = peer.unread > 0 ? ` ${formatBadge(`${peer.unread} unread`, "warning", theme)}` : "";
 				const age = messageAge(peer.lastActivity);
 				const activity = peer.activity ? ` ${theme.fg("dim", replaceTabs(peer.activity))}` : "";
-				const name = theme.fg("dim", replaceTabs(peer.displayName));
-				return `${peerStatusBadge(peer.status, theme)} ${theme.bold(replaceTabs(peer.id))} ${name} ${theme.fg("dim", kindText)}${activity}${unread}${age ? ` ${theme.fg("dim", age)}` : ""}`;
+				const name = peer.external ? "" : ` ${theme.fg("dim", replaceTabs(peer.displayName))}`;
+				return `${peerStatusBadge(peer.status, theme)} ${theme.bold(replaceTabs(peer.id))}${name} ${theme.fg("dim", kindText)}${activity}${unread}${age ? ` ${theme.fg("dim", age)}` : ""}`;
 			},
 		},
 		theme,

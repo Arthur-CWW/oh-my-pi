@@ -388,17 +388,33 @@ export const SETTINGS_SCHEMA = {
 			tab: "model",
 			group: "Advisor",
 			label: "Enable Advisor",
-			description: "Enable the advisor on the main session (Fable-model sessions never get an advisor).",
+			description: "Enable the advisor runtime. Advisor scope controls whether it attaches to main sessions, subagents, or both.",
 		},
 	},
-	"advisor.subagents": {
-		type: "boolean",
-		default: false,
+	"advisor.scope": {
+		type: "enum",
+		values: ["all", "main", "subagents"] as const,
+		default: "all",
 		ui: {
 			tab: "model",
 			group: "Advisor",
-			label: "Advisor for Subagents",
-			description: "Enable the advisor on spawned task/eval subagents, independent of advisor.enabled.",
+			label: "Advisor Scope",
+			description: "Choose which session kinds get an advisor when advisor.enabled is on.",
+			options: [
+				{ value: "all", label: "All sessions", description: "Attach advisor to main sessions and spawned subagents" },
+				{ value: "main", label: "Main only", description: "Attach advisor only to main sessions" },
+				{ value: "subagents", label: "Subagents only", description: "Attach advisor only to spawned subagents" },
+			],
+		},
+	},
+	"advisor.model": {
+		type: "string",
+		default: undefined,
+		ui: {
+			tab: "model",
+			group: "Advisor",
+			label: "Advisor Model",
+			description: "Optional advisor model selector. Falls back to modelRoles.advisor when unset.",
 		},
 	},
 	"advisor.syncBacklog": {
@@ -3346,6 +3362,18 @@ export const SETTINGS_SCHEMA = {
 				{ value: "120000", label: "2 minutes" },
 				{ value: "300000", label: "5 minutes" },
 			],
+		},
+	},
+
+	"irc.peerName": {
+		type: "string",
+		default: "",
+		ui: {
+			tab: "tools",
+			group: "Execution",
+			label: "IRC Peer Name",
+			description:
+				"Custom peer name for the machine-wide IRC bus; defaults to the working directory basename plus a stable suffix.",
 		},
 	},
 

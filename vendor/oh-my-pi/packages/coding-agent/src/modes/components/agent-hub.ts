@@ -85,8 +85,6 @@ function sanitizeLine(text: string, maxWidth?: number): string {
 	return truncateToWidth(replaceTabs(text), maxWidth ?? contentWidth());
 }
 
-const STATUS_ORDER: Record<AgentStatus, number> = { running: 0, idle: 1, parked: 2, aborted: 3 };
-
 /** Glyph + status word, colored per theme status conventions. */
 function statusBadge(status: AgentStatus): string {
 	switch (status) {
@@ -261,8 +259,6 @@ export class AgentHubOverlayComponent extends Container {
 	#rows: AgentRef[] = [];
 	#selectedRow = 0;
 	#notice: string | undefined;
-	/** Captured row order from the first refresh; keeps the hub stable while open. */
-	#rowOrder: Map<string, number> | undefined;
 
 	// Chat state
 	#chatAgentId: string | undefined;
@@ -417,33 +413,13 @@ export class AgentHubOverlayComponent extends Container {
 		this.#requestRender();
 	}
 
+	/** Stable roster order: first appearance wins; status/activity only affect display columns. */
 	#refreshRows(): void {
 		const selectedId = this.#rows[this.#selectedRow]?.id;
-		const refs = this.#registry.list().filter(ref => ref.id !== MAIN_AGENT_ID);
-
-		if (!this.#rowOrder) {
-			// First refresh (usually the constructor): order by status, then recency.
-			this.#rows = refs.sort(
-				(a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || b.lastActivity - a.lastActivity,
-			);
-			this.#rowOrder = new Map(this.#rows.map((ref, i) => [ref.id, i]));
-		} else {
-			// After the hub is open, freeze the relative order so keyboard selection
-			// does not jump around as agents heartbeat or update activity. New agents
-			// are appended at the end and then stay put.
-			this.#rows = refs.sort((a, b) => {
-				const statusDiff = STATUS_ORDER[a.status] - STATUS_ORDER[b.status];
-				if (statusDiff !== 0) return statusDiff;
-				const aOrder = this.#rowOrder!.get(a.id) ?? Number.MAX_SAFE_INTEGER;
-				const bOrder = this.#rowOrder!.get(b.id) ?? Number.MAX_SAFE_INTEGER;
-				return aOrder - bOrder;
-			});
-			for (const ref of this.#rows) {
-				if (!this.#rowOrder.has(ref.id)) {
-					this.#rowOrder.set(ref.id, this.#rowOrder.size);
-				}
-			}
-		}
+		this.#rows = this.#registry
+			.list()
+			.filter(ref => ref.id !== MAIN_AGENT_ID)
+			.sort((a, b) => a.spawnIndex - b.spawnIndex);
 
 		const keptIndex = selectedId ? this.#rows.findIndex(ref => ref.id === selectedId) : -1;
 		this.#selectedRow = keptIndex >= 0 ? keptIndex : Math.min(this.#selectedRow, Math.max(0, this.#rows.length - 1));

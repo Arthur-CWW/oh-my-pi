@@ -3,12 +3,16 @@ import { Key, matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const VENDOR_ROOT = process.env.PI_CODEX_PLUGIN_VENDOR_ROOT ?? "/Users/arthur/agents/web-access/vendor/openai";
+const PLUGIN_MANAGER_DIR = dirname(fileURLToPath(import.meta.url));
+const VENDOR_ROOT = process.env.PI_CODEX_PLUGIN_VENDOR_ROOT ?? join(PLUGIN_MANAGER_DIR, "..", "..", "..", "vendor", "openai");
 const CATALOG_PATH = join(VENDOR_ROOT, "codex-plugin-catalog.json");
 const ROUTER_SKILLS_ROOT = join(VENDOR_ROOT, "codex-plugin-router-skills");
 const DIRECT_SKILLS_ROOT = join(VENDOR_ROOT, "codex-pi-skills");
 const CONFIG_PATH = process.env.PI_CODEX_PLUGIN_CONFIG ?? join(process.env.HOME ?? ".", ".pi/agent/codex-plugin-manager.json");
+const CODEX_PROVIDER = "openai-codex";
+const CODEX_ONLY_PLUGINS = new Set(["computer-use"]);
 
 type PluginMode = "router" | "skills";
 
@@ -48,7 +52,7 @@ function readCatalog(): PluginCatalogEntry[] {
 function defaultConfig(catalog: PluginCatalogEntry[]): ManagerConfig {
   const enabled: Record<string, EnabledPluginConfig> = {};
   for (const plugin of catalog) {
-    if (plugin.id === "build-macos-apps" || plugin.id === "build-ios-apps") {
+    if (plugin.id === "build-macos-apps" || plugin.id === "build-ios-apps" || plugin.id === "computer-use") {
       enabled[plugin.id] = { mode: "router" };
     }
   }
@@ -83,6 +87,19 @@ function skillPathsFor(catalog: PluginCatalogEntry[], config: ManagerConfig): st
     if (existsSync(root)) paths.push(root);
   }
   return paths;
+}
+
+function skillPathsForLane(
+  catalog: PluginCatalogEntry[],
+  config: ManagerConfig,
+  modelProvider: string | undefined,
+): string[] {
+  const paths = skillPathsFor(catalog, config);
+  if (!modelProvider || modelProvider === CODEX_PROVIDER) return paths;
+  return paths.filter((path) => {
+    const pluginId = path.split(/[\\/]/).pop();
+    return !pluginId || !CODEX_ONLY_PLUGINS.has(pluginId);
+  });
 }
 
 class PluginManagerComponent implements Component {
@@ -175,10 +192,10 @@ class PluginManagerComponent implements Component {
 }
 
 export default function registerCodexPluginManager(pi: ExtensionAPI) {
-  pi.on("resources_discover", async () => {
+  pi.on("resources_discover", async (_event, ctx) => {
     const catalog = readCatalog();
     const config = readConfig(catalog);
-    return { skillPaths: skillPathsFor(catalog, config) };
+    return { skillPaths: skillPathsForLane(catalog, config, ctx.model?.provider) };
   });
 
   pi.registerCommand("codex-plugins", {

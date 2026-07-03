@@ -29,7 +29,16 @@ export interface SessionEntryBase {
 	timestamp: string;
 }
 
-export interface SessionMessageEntry extends SessionEntryBase {
+export interface SessionMessageAttribution {
+	/** Resolved request selector in "provider/modelId[:thinkingLevel]" format. */
+	model?: string;
+	/** Effective thinking level used for this message, when tracked separately. */
+	thinkingLevel?: string | null;
+	/** Advisor model selector when an advisor injection influenced this turn. */
+	advisor?: string;
+}
+
+export interface SessionMessageEntry extends SessionEntryBase, SessionMessageAttribution {
 	type: "message";
 	message: AgentMessage;
 }

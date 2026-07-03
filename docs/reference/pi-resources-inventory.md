@@ -1,6 +1,6 @@
 # Pi Resources Inventory
 
-Date: 2026-06-09; Last updated: 2026-06-24
+Date: 2026-06-09; Last updated: 2026-07-03
 
 This explains what the skills/extensions in the current Pi startup list do and where they come from.
 
@@ -49,7 +49,7 @@ This table lists the durable core skills; root `package.json` is the canonical s
 | `background-browser-automation` | CuaDriver-first browser automation guidance plus CDP/Playwright/Puppeteer safety rules for protocol work without stealing focus. | `skills/browser/background-browser-automation` | Keep project/global core. |
 | `librarian` | Open-source/library research with source-backed GitHub permalinks. | `skills/core/librarian` | Keep. High usage. |
 | `llm-frontend-browser` | ChatGPT/AI Studio/Grok frontend sessions through `llm_frontend_browser`. | `skills/browser/llm-frontend-browser` | Keep; async-first design still needs daemon/queue later. |
-| `cua-driver` | CuaDriver-backed background macOS GUI automation. Prefer the safe high-level `computer_use` tool; use raw `cua_driver` only for status/debug/low-level flows. | `skills/browser/cua-driver` | Keep for VoiceInk/macOS validation. |
+| `cua-driver` | CuaDriver-backed background macOS GUI automation for non-Codex lanes. Codex/GPT lanes should use `codex-plugin-computer-use` instead. | `skills/browser/cua-driver` | Keep for VoiceInk/macOS validation and non-Codex workers. |
 | `rubber-duck-adversarial` | Cross-cutting critique/sanity-check mode. | `skills/core/rubber-duck-adversarial` | Keep, if it does not over-trigger. |
 | `source-archive` | Archive public articles/videos/transcripts into repo-local research docs. | `skills/core/source-archive` | Keep for research-heavy workflows. |
 
@@ -89,7 +89,7 @@ Source: formerly `git:github.com/mitsuhiko/agent-stuff`; a reference snapshot is
 
 ### Project Codex plugin router skills
 
-Loaded by `.pi/extensions/codex-plugin-manager/index.ts` from `vendor/openai/codex-plugin-router-skills` based on `~/.pi/agent/codex-plugin-manager.json`.
+The plugin manager extension reads `vendor/openai/codex-plugin-router-skills` based on `~/.pi/agent/codex-plugin-manager.json`; until the harness wires `resources_discover` into session startup, `codex-plugin-computer-use` is also listed directly in root `package.json` as a hidden skill so `gpt-implementer` can autoload it.
 
 Current default enables:
 
@@ -97,13 +97,13 @@ Current default enables:
 |---|---|---|
 | `codex-plugin-build-macos-apps` | Codex macOS app workflows: Xcode, SwiftUI, AppKit interop, logs, test/debug/instrumentation. | Keep opt-in/project-local; useful for VoiceInk. |
 | `codex-plugin-build-ios-apps` | Codex iOS workflows: App Intents, SwiftUI, simulator/debug/perf/leaks. | Keep opt-in/project-local. |
+| `codex-plugin-computer-use` | Codex desktop computer-use workflows through OpenAI's Codex computer-use plugin. | Enabled for Codex/GPT lanes via `gpt-implementer` autoload; direct hidden package skill until `resources_discover` is wired; per-lane filtering is present in `codex-plugin-manager` for that future seam. |
 
 Other vendored router skills available but should remain disabled unless needed:
 
 | Skill | What it does | Recommendation |
 |---|---|---|
 | `codex-plugin-browser` | Codex in-app browser control for local pages/files. | Disabled; overlaps with browser tools. |
-| `codex-plugin-computer-use` | Codex desktop computer-use workflows. | Disabled; CuaDriver path is preferred here. |
 | `codex-plugin-creative-production` | Campaigns, images, mood boards, product placements, visual styles. | Maybe reference for future media workflows. |
 | `codex-plugin-data-analytics` | Data quality, dashboards, KPI/report/notebook workflows. | Disabled unless data-analysis project. |
 | `codex-plugin-fal` | Fal AI media workflows. | Reference for future KIE/Kier/Fal replacement design. |

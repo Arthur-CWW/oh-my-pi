@@ -247,7 +247,8 @@ describe("ACP lazy startup", () => {
 
 		type ObservedAdvisorSettings = {
 			enabled: boolean;
-			subagents: boolean;
+			scope: "all" | "main" | "subagents";
+			model: string | undefined;
 		};
 
 		const runProtocolStartup = async (mode: "rpc" | "rpc-ui" | "acp"): Promise<ObservedAdvisorSettings> => {
@@ -256,7 +257,8 @@ describe("ACP lazy startup", () => {
 			const authStorage = await AuthStorage.create(path.join(cwd, "auth.db"));
 			const settings = Settings.isolated({
 				"advisor.enabled": true,
-				"advisor.subagents": true,
+				"advisor.scope": "subagents",
+				"advisor.model": "deepseek/deepseek-reasoner-v4",
 			});
 			let observed: ObservedAdvisorSettings | undefined;
 			const stopMessage = "stop test protocol mode";
@@ -283,14 +285,16 @@ describe("ACP lazy startup", () => {
 						createAgentSession: async () => {
 							observed = {
 								enabled: settings.get("advisor.enabled"),
-								subagents: settings.get("advisor.subagents"),
+								scope: settings.get("advisor.scope"),
+								model: settings.get("advisor.model"),
 							};
 							throw new Error(stopMessage);
 						},
 						runAcpMode: async () => {
 							observed = {
 								enabled: settings.get("advisor.enabled"),
-								subagents: settings.get("advisor.subagents"),
+								scope: settings.get("advisor.scope"),
+								model: settings.get("advisor.model"),
 							};
 							throw new Error(stopMessage);
 						},
@@ -313,7 +317,8 @@ describe("ACP lazy startup", () => {
 		for (const mode of ["rpc", "rpc-ui", "acp"] as const) {
 			await expect(runProtocolStartup(mode)).resolves.toEqual({
 				enabled: false,
-				subagents: false,
+				scope: "all",
+				model: undefined,
 			});
 		}
 	});

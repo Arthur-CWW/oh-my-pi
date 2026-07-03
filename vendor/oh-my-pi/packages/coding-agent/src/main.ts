@@ -143,7 +143,8 @@ const HOST_DEFAULTED_SETTING_PATHS: SettingPath[] = [
 	// Advisor is interactive-session assistance. Protocol hosts opt in explicitly
 	// instead of inheriting a user's globally-enabled local preference.
 	"advisor.enabled",
-	"advisor.subagents",
+	"advisor.scope",
+	"advisor.model",
 ];
 
 const RPC_BACKGROUND_DEFAULTED_SETTING_PATHS: SettingPath[] = [

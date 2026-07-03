@@ -1,6 +1,7 @@
 ---
 name: "codex-plugin-computer-use"
 description: "Control desktop apps through Codex Computer Use: screenshots, accessibility-driven app operation, and scoped GUI tasks on macOS. Review before enabling because it can affect host apps."
+hide: true
 ---
 
 # Computer Use (Codex plugin router)

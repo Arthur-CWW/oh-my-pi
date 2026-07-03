@@ -1,9 +1,9 @@
 /**
  * Regression: the agent hub row order must be stable while the hub is open.
  *
- * The hub is sorted by lastActivity on first open, but after that keyboard
- * selection must not jump around as agents heartbeat or update activity. New
- * agents that appear while the hub is open are appended at the end.
+ * Agent positions follow first appearance (registry spawn order), not
+ * lastActivity/status. Keyboard selection must not jump around as agents
+ * heartbeat or update activity. New agents append at the end.
  */
 import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
 import { IrcBus } from "@oh-my-pi/pi-coding-agent/irc/bus";
@@ -77,7 +77,7 @@ describe("Agent hub row ordering", () => {
 		AgentRegistry.resetGlobalForTests();
 	});
 
-	it("freezes the initial lastActivity order while the hub is open", () => {
+	it("freezes spawn order while the hub is open", () => {
 		geometry = stubStdoutGeometry(120);
 		const now = vi.spyOn(Date, "now");
 		const agents = new AgentRegistry();
@@ -99,10 +99,10 @@ describe("Agent hub row ordering", () => {
 		agents.register({ id: "C", displayName: "Gamma", kind: "sub", session: sessionC });
 
 		const hub = makeHub(agents);
-		expect(renderedAgentIds(hub)).toEqual(["C", "B", "A"]);
+		expect(renderedAgentIds(hub)).toEqual(["A", "B", "C"]);
 
-		// Bump A's lastActivity far ahead of the others. The hub is already open,
-		// so the captured order must not change.
+		// Bump A's lastActivity far ahead of the others. Activity changes are
+		// display-only and must not move a spawned row.
 		now.mockReturnValue(4000);
 		agents.setActivity("A", "still running");
 
@@ -111,7 +111,7 @@ describe("Agent hub row ordering", () => {
 		const sessionD = {} as AgentSession;
 		agents.register({ id: "D", displayName: "Delta", kind: "sub", session: sessionD });
 
-		expect(renderedAgentIds(hub)).toEqual(["C", "B", "A", "D"]);
+		expect(renderedAgentIds(hub)).toEqual(["A", "B", "C", "D"]);
 
 		hub.dispose();
 	});

@@ -11,11 +11,15 @@ Every agent gets the same system prompt: all skills, all tools, all lanes, regar
 ## Principles
 
 - **Every default earns its prompt tax.** Prefer dormant skills, retrieval, and routing over always-on instructions. Do not auto-grow the harness; the failure mode is dumping every lesson into default context until all agents get slower and dumber.
-- **Route capabilities to the agents that can use them.** Codex has native computer-use training; others do better with CuaDriver or CDP or pure edits. A capability good for one family is routed there, not exposed everywhere.
+- **Match the training.** Route work to the harness surface each model was RL'd on: Codex/GPT-5.5 lanes use the Codex computer-use plugin (never CuaDriver); Opus's designer lane uses Claude Code's design-mode workflow; CuaDriver serves lanes without native CU training. GPT-5.5 `:medium` is the Pareto default — `:high` only for genuinely hard work. Generalized: scaffolding is inversely proportional to model strength — weak models get the happy path, frontier models get wiggle room and the right to build their own tools.
 - **Ambient providers, not preloaded text.** Kagi, Twitter/X archive, browser history, vault, session corpus should be easy to invoke, never giant always-on prompt blocks.
 - **Track refusal/capability basins** per model family (book retrieval, browser auth, computer use, prompt craft, design) and encode as routing knowledge.
 - **Subagents are contract-shaped** (packet: owner paths, exclusions, lane, acceptance, non-goals) so failures are attributable — the prerequisite for the dreaming loop.
 - **Friction log over grand redesign.** Keep a running list of OMP bugs/dislikes and harness papercuts; batch them into worker-sized fixes.
+- **One way per thing.** Never two mechanisms for one job. One messaging channel (the irc bus — agents via the `irc` tool, humans/scripts via `omp irc`), one reload verb (`/restart`), one skill per procedure. When a second mechanism appears, consolidate and delete the loser. Agents may *use* the one way differently per their training; the mechanism stays singular.
+- **Fewer, powerful, recombinable skills** (Lopopolo). A skill should be a strong primitive that composes with code — agents recombine skills programmatically, not just MCP-shaped invocation. Prefer deleting three narrow skills for one powerful one.
+- **Memory hygiene.** Durable memory/context (charter, state docs, skills, session distillates) must never carry security/reveng/anti-detection payload — it trips provider content filters (observed: Anthropic stream kills) and poisons every future session. Those lanes keep material in their own excluded workspaces; durable docs may only *name* the exclusion.
+- **Plan for succession.** The frontier model rotates (Fable → GPT-5.6 expected within a week). Everything durable must be model-agnostic: charters and skills address "the frontier orchestrator", routing is expressed as roles, and per-model affordances live in routing tables so a model swap is a one-table edit.
 
 ## Encoding expertise: the guardrail ladder
 

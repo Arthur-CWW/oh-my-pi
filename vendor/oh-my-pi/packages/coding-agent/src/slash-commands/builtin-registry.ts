@@ -27,6 +27,7 @@ import { resolveMemoryBackend } from "../memory-backend";
 import { theme } from "../modes/theme/theme";
 import type { InteractiveModeContext } from "../modes/types";
 import type { AgentSession, FreshSessionResult } from "../session/agent-session";
+import { buildRestartSpawnSpec, spawnRestartProcess } from "../cli/restart-session";
 import { formatShakeSummary, type ShakeMode } from "../session/shake-types";
 import { urlHyperlinkAlways } from "../tui";
 import { getChangelogPath, parseChangelog } from "../utils/changelog";
@@ -109,6 +110,39 @@ const shutdownHandlerTui = (_command: ParsedSlashCommand, runtime: TuiSlashComma
 	void runtime.ctx.shutdown();
 	return commandConsumed();
 };
+
+async function restartHandlerTui(_command: ParsedSlashCommand, runtime: TuiSlashCommandRuntime): Promise<SlashCommandResult> {
+	const ctx = runtime.ctx;
+	ctx.editor.setText("");
+	if (ctx.session.isStreaming) {
+		ctx.showWarning("Wait for the current response to finish or abort it before restarting.");
+		return commandConsumed();
+	}
+
+	const sessionId = ctx.sessionManager.getSessionId();
+	if (!sessionId || !ctx.sessionManager.getSessionFile()) {
+		ctx.showError("Cannot restart an in-memory session. Start without --no-session so /restart can resume from JSONL.");
+		return commandConsumed();
+	}
+
+	try {
+		await ctx.sessionManager.ensureOnDisk();
+		await ctx.sessionManager.flush();
+		await ctx.sessionManager.saveDraft("");
+	} catch (err) {
+		ctx.showError(`Restart failed while saving the session: ${errorMessage(err)}`);
+		return commandConsumed();
+	}
+
+	const spec = buildRestartSpawnSpec({
+		sessionId,
+		cwd: ctx.sessionManager.getCwd(),
+	});
+	ctx.showStatus(`Restarting ${APP_NAME} --resume ${sessionId}…`);
+	spawnRestartProcess(spec);
+	await ctx.shutdown();
+	return commandConsumed();
+}
 
 async function handleUsageResetCommand(
 	arg: string,
@@ -1209,6 +1243,11 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 			runtime.ctx.editor.setText("");
 			await runtime.ctx.handleSSHCommand(command.text);
 		},
+	},
+	{
+		name: "restart",
+		description: "Restart OMP and resume this session",
+		handleTui: restartHandlerTui,
 	},
 	{
 		name: "new",

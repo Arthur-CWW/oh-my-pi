@@ -5,35 +5,52 @@ import type { Model } from "@oh-my-pi/pi-ai";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { createSubagentSettings } from "@oh-my-pi/pi-coding-agent/task/executor";
 import { AgentSession, shouldEnableAdvisor } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { TempDir } from "@oh-my-pi/pi-utils";
 
 describe("shouldEnableAdvisor", () => {
-	it("follows the advisor kind flags and blocks Fable models", () => {
-		expect(
-			shouldEnableAdvisor(
-				"main",
-				Settings.isolated({ "advisor.enabled": true }),
-				"anthropic/claude-sonnet-4-5",
-			),
-		).toBe(true);
-		expect(shouldEnableAdvisor("main", Settings.isolated({ "advisor.enabled": true }), "openai/fable")).toBe(false);
-		expect(
-			shouldEnableAdvisor(
-				"sub",
-				Settings.isolated({ "advisor.enabled": false, "advisor.subagents": true }),
-				"anthropic/claude-sonnet-4-5",
-			),
-		).toBe(true);
-		expect(
-			shouldEnableAdvisor(
-				"sub",
-				Settings.isolated({ "advisor.enabled": true, "advisor.subagents": false }),
-				"anthropic/claude-sonnet-4-5",
-			),
-		).toBe(false);
+	const nonFableModel = "anthropic/claude-sonnet-4-5";
+
+	function advisorSettings(enabled: boolean, scope: "all" | "main" | "subagents"): Settings {
+		return Settings.isolated({ "advisor.enabled": enabled, "advisor.scope": scope });
+	}
+
+	it("honors advisor.scope for main sessions and spawned subagent settings", () => {
+		const cases: Array<{ scope: "all" | "main" | "subagents"; main: boolean; subagent: boolean }> = [
+			{ scope: "subagents", main: false, subagent: true },
+			{ scope: "all", main: true, subagent: true },
+			{ scope: "main", main: true, subagent: false },
+		];
+
+		for (const testCase of cases) {
+			const baseSettings = advisorSettings(true, testCase.scope);
+			const subagentSettings = createSubagentSettings(baseSettings);
+
+			expect(subagentSettings.get("advisor.enabled")).toBe(true);
+			expect(subagentSettings.get("advisor.scope")).toBe(testCase.scope);
+			expect(shouldEnableAdvisor("main", baseSettings, nonFableModel)).toBe(testCase.main);
+			expect(shouldEnableAdvisor("sub", subagentSettings, nonFableModel)).toBe(testCase.subagent);
+		}
+	});
+
+	it("inherits advisor.enabled=false into spawned subagent settings", () => {
+		const baseSettings = advisorSettings(false, "subagents");
+		const subagentSettings = createSubagentSettings(baseSettings);
+
+		expect(subagentSettings.get("advisor.enabled")).toBe(false);
+		expect(subagentSettings.get("advisor.scope")).toBe("subagents");
+		expect(shouldEnableAdvisor("sub", subagentSettings, nonFableModel)).toBe(false);
+	});
+
+	it("blocks Fable models regardless of scope", () => {
+		const baseSettings = advisorSettings(true, "all");
+		const subagentSettings = createSubagentSettings(baseSettings);
+
+		expect(shouldEnableAdvisor("main", baseSettings, "openai/fable")).toBe(false);
+		expect(shouldEnableAdvisor("sub", subagentSettings, "openai/fable")).toBe(false);
 	});
 });
 

@@ -7,6 +7,7 @@ compatibility: macOS with cua-driver installed and Accessibility + Screen Record
 # CuaDriver
 
 Use this skill when a task needs real native macOS GUI interaction while the human keeps using the desktop.
+Codex/GPT lanes: use the Codex `codex-plugin-computer-use` plugin instead; CuaDriver remains the default for non-Codex lanes.
 
 CuaDriver is the boundary for private macOS/SkyLight behavior. Do not reimplement or vendor those private API calls in this repo; call the maintained `cua-driver` interface instead.
 

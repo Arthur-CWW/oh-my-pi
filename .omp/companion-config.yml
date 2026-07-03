@@ -19,11 +19,9 @@ modelRoles:
   designer: anthropic/claude-opus-4-6
 
 advisor:
-  # New gate (fork 90c64256): Fable-model sessions never get an advisor;
-  # enabled gates non-Fable mains, subagents gates workers independently.
   enabled: true
-  subagents: true
-  syncBacklog: "off"
+  scope: subagents
+  model: deepseek/deepseek-reasoner-v4
 
 task:
   enableLsp: true

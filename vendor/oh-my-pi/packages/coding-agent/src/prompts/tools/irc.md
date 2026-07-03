@@ -1,4 +1,4 @@
-Sends short text messages to other agents in this process and receives theirs.
+Sends short text messages to agents in this process or other OMP sessions on this machine and receives theirs.
 
 <instruction>
 - Main agent is `Main`; subagents reuse their task id (`AuthLoader`, or `AuthLoader-2` when the name repeats).
@@ -10,6 +10,7 @@ Sends short text messages to other agents in this process and receives theirs.
 - `op: "inbox"` — drain pending messages without blocking (`peek: true` leaves them unread).
 - `replyTo` — id of the message you are answering, so the sender can correlate.
 - Replies arrive only when the recipient sends one. Exception: `await: true` to a peer stuck mid-turn (async execution disabled, e.g. blocked in a synchronous task spawn) gets a side-channel auto-reply from its context. For background on a peer, `read` `history://<id>` instead of interrogating it.
+- Peers marked `[external]` in `op: "list"` are other OMP processes on this machine; send to them by peer name. `await: true` and `op: "wait"` are in-process-only for v1 — use `op: "inbox"` to check for external replies.
 </instruction>
 
 <when_to_use>

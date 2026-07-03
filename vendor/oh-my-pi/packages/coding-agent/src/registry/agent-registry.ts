@@ -35,6 +35,8 @@ export interface AgentRef {
 	sessionFile: string | null;
 	createdAt: number;
 	lastActivity: number;
+	/** Fixed session-local appearance order; lower values were registered first. */
+	readonly spawnIndex: number;
 	/** Short gist of what the agent is currently doing (latest intent or tool), for the work-aware roster. Display-only. */
 	activity?: string;
 }
@@ -72,9 +74,11 @@ export class AgentRegistry {
 	}
 
 	readonly #refs = new Map<string, AgentRef>();
+	#nextSpawnIndex = 0;
 	readonly #listeners = new Set<RegistryListener>();
 
 	register(input: RegisterInput): AgentRef {
+		const existing = this.#refs.get(input.id);
 		const now = Date.now();
 		const ref: AgentRef = {
 			id: input.id,
@@ -86,6 +90,7 @@ export class AgentRegistry {
 			sessionFile: input.sessionFile ?? null,
 			createdAt: now,
 			lastActivity: now,
+			spawnIndex: existing?.spawnIndex ?? this.#nextSpawnIndex++,
 		};
 		this.#refs.set(ref.id, ref);
 		this.#emit({ type: "registered", ref });
@@ -111,8 +116,8 @@ export class AgentRegistry {
 	 * `running` agent has current work: a heartbeat for any other status is
 	 * dropped, so a late progress flush can't resurrect activity on a ref that
 	 * `setStatus` just cleared. Every running heartbeat refreshes `lastActivity`
-	 * — even when the gist text is unchanged — so the roster's "active … ago" and
-	 * recency sort track real work, not just the last status change.
+	 * — even when the gist text is unchanged — so the roster's "active … ago"
+	 * status column tracks real work, not just the last status change.
 	 * The gist is normalized to one bounded line (`oneLineLabel`) so model-derived
 	 * intent text can neither break the roster nor smuggle terminal escapes —
 	 * every caller is safe without sanitizing at its own call site.

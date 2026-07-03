@@ -194,6 +194,7 @@ import type { Goal, GoalModeState } from "../goals/state";
 import type { HindsightSessionState } from "../hindsight/state";
 import { type LocalProtocolOptions, resolveLocalUrlToPath } from "../internal-urls";
 import { IrcBus, type IrcMessage } from "../irc/bus";
+import { IrcExternalBus, resolveIrcExternalPeerName } from "../irc/bus-external";
 import { resolveMemoryBackend } from "../memory-backend";
 import { getMnemopiSessionState, type MnemopiSessionState, setMnemopiSessionState } from "../mnemopi/state";
 import { containsOrchestrate, ORCHESTRATE_NOTICE } from "../modes/orchestrate";
@@ -953,14 +954,45 @@ function isAdvisorCard(message: AgentMessage): message is CustomMessage {
 	return message.role === "custom" && message.customType === "advisor";
 }
 
+function formatModelAttribution(
+	model: { provider: string; id: string } | undefined,
+	thinkingLevel: string | undefined,
+): string | undefined {
+	if (!model) return undefined;
+	const selector = `${model.provider}/${model.id}`;
+	return thinkingLevel ? `${selector}:${thinkingLevel}` : selector;
+}
+
 export function shouldEnableAdvisor(
 	kind: "main" | string,
 	settings: Pick<Settings, "get">,
 	modelSelector: string | undefined,
 ): boolean {
+	if (!settings.get("advisor.enabled")) return false;
 	if (modelSelector?.toLowerCase().includes("fable")) return false;
-	if (kind === "main") return !!settings.get("advisor.enabled");
-	return !!settings.get("advisor.subagents");
+	const scope = settings.get("advisor.scope");
+	if (scope === "all") return true;
+	if (kind === "main") return scope === "main";
+	return scope === "subagents";
+}
+
+function resolveAdvisorSelection(
+	settings: Settings,
+	availableModels: Model[],
+	modelRegistry: ModelRegistry,
+): { model: Model; thinkingLevel?: ThinkingLevel } | undefined {
+	const advisorModel = settings.get("advisor.model");
+	if (advisorModel) {
+		const resolved = resolveModelRoleValue(advisorModel, availableModels, {
+			settings,
+			matchPreferences: getModelMatchPreferences(settings),
+			modelRegistry,
+		});
+		if (resolved.model) {
+			return { model: resolved.model, thinkingLevel: resolved.thinkingLevel };
+		}
+	}
+	return resolveRoleSelection(["advisor"], settings, availableModels, modelRegistry);
 }
 
 function queueChipText(message: AgentMessage): string {
@@ -1090,6 +1122,8 @@ export class AgentSession {
 	// Incoming IRC messages received while a turn was streaming; drained as
 	// non-interrupting asides at the next step boundary (see the aside provider).
 	#pendingIrcAsides: CustomMessage[] = [];
+	#ircExternalSessionId: string | undefined;
+	#ircExternalPeerName: string | undefined;
 	// Agent identity (registry id) used for IRC routing and job ownership.
 	#agentId: string | undefined;
 	#agentKind: "main" | "sub" = "main";
@@ -1305,6 +1339,33 @@ export class AgentSession {
 		this.agent.emitExternalEvent({ type: "message_end", message: card });
 	}
 
+	#advisorAttributionIfInfluenced(message: AssistantMessage): string | undefined {
+		if (!this.#advisorAgent) return undefined;
+
+		const messages = this.agent.state.messages;
+		const end = messages.lastIndexOf(message);
+		for (let i = (end >= 0 ? end : messages.length) - 1; i >= 0; i--) {
+			const prior = messages[i];
+			if (prior.role === "assistant") return undefined;
+			if (isAdvisorCard(prior)) {
+				return formatModelAttribution(this.#advisorAgent.state.model, this.#advisorAgent.state.thinkingLevel);
+			}
+		}
+		return undefined;
+	}
+
+	#sessionMessageAttribution(message: AssistantMessage): {
+		model?: string;
+		thinkingLevel?: string;
+		advisor?: string;
+	} {
+		return {
+			model: formatModelAttribution({ provider: message.provider, id: message.model }, this.#thinkingLevel),
+			thinkingLevel: this.#thinkingLevel,
+			advisor: this.#advisorAttributionIfInfluenced(message),
+		};
+	}
+
 	#resetInFlight(): void {
 		this.#promptInFlightCount = 0;
 		this.#releasePowerAssertion();
@@ -1413,6 +1474,7 @@ export class AgentSession {
 		// each step boundary as non-interrupting asides (see Agent.getAsideMessages),
 		// so they reach the model between requests without waiting for a yield.
 		this.agent.setAsideMessageProvider(() => {
+			this.#pollExternalIrcMessages();
 			const pendingIrc = this.#pendingIrcAsides;
 			this.#pendingIrcAsides = [];
 			const thunks: AsideMessage[] = pendingIrc.map(record => () => record);
@@ -1507,8 +1569,10 @@ export class AgentSession {
 		const activeModelSelector = this.model ? formatModelString(this.model) : undefined;
 		this.#advisorEnabled = shouldEnableAdvisor(this.#agentKind, this.settings, activeModelSelector);
 		if (!this.#advisorEnabled && activeModelSelector?.toLowerCase().includes("fable")) {
+			const scope = this.settings.get("advisor.scope");
 			const kindAdvisorFlag =
-				this.#agentKind === "main" ? this.settings.get("advisor.enabled") : this.settings.get("advisor.subagents");
+				this.settings.get("advisor.enabled") &&
+				(scope === "all" || (this.#agentKind === "main" ? scope === "main" : scope === "subagents"));
 			if (kindAdvisorFlag) {
 				logger.debug("advisor disabled for Fable-model session", {
 					kind: this.#agentKind,
@@ -1532,8 +1596,7 @@ export class AgentSession {
 		if (this.#advisorRuntime) return true;
 		if (!this.#advisorEnabled) return false;
 
-		const advisorSel = resolveRoleSelection(
-			["advisor"],
+		const advisorSel = resolveAdvisorSelection(
 			this.settings,
 			this.#modelRegistry.getAvailable(),
 			this.#modelRegistry,
@@ -1666,8 +1729,7 @@ export class AgentSession {
 		const targetModel = await this.#resolveContextPromotionTarget(currentModel, contextWindow);
 		if (!targetModel) return false;
 
-		const advisorSel = resolveRoleSelection(
-			["advisor"],
+		const advisorSel = resolveAdvisorSelection(
 			this.settings,
 			this.#modelRegistry.getAvailable(),
 			this.#modelRegistry,
@@ -2249,10 +2311,12 @@ export class AgentSession {
 				if (event.message.role === "custom" && event.message.customType === "ttsr-injection") {
 					this.#markTtsrInjected(this.#extractTtsrRuleNames(event.message.details));
 				}
+			} else if (event.message.role === "assistant") {
+				// Regular assistant message - persist with turn-level provenance.
+				this.sessionManager.appendMessage(event.message, this.#sessionMessageAttribution(event.message));
 			} else if (
 				event.message.role === "user" ||
 				event.message.role === "developer" ||
-				event.message.role === "assistant" ||
 				event.message.role === "toolResult" ||
 				event.message.role === "fileMention"
 			) {
@@ -9164,9 +9228,7 @@ export class AgentSession {
 	 * Usage-limit errors are retryable because the retry handler performs credential switching.
 	 */
 	#isAnthropicOutputContentFilterError(errorMessage: string): boolean {
-		return /anthropic stream error\s*\(\s*invalid_request_error\s*\):\s*output blocked by content filter/i.test(
-			errorMessage,
-		);
+		return /invalid_request_error/i.test(errorMessage) && /output blocked by content filter/i.test(errorMessage);
 	}
 
 	#contentFilterFailureMessage(): string {
@@ -10353,7 +10415,51 @@ export class AgentSession {
 	 * message landed after the turn's last aside drain). Called at the start
 	 * of the next prompt so the model still sees them.
 	 */
+	#registerExternalIrcPeer(): { bus: IrcExternalBus; name: string } {
+		const cwd = this.sessionManager.getCwd();
+		const sessionId = this.#ircExternalSessionId ?? `${cwd}:${process.pid}`;
+		this.#ircExternalSessionId = sessionId;
+		const name =
+			this.#ircExternalPeerName ??
+			resolveIrcExternalPeerName({
+				configuredName: this.settings.get("irc.peerName"),
+				cwd,
+				sessionId,
+			});
+		this.#ircExternalPeerName = name;
+		const bus = IrcExternalBus.global();
+		bus.registerPeer({ sessionId, name, cwd, pid: process.pid });
+		return { bus, name };
+	}
+
+	#pollExternalIrcMessages(): void {
+		if (this.#isDisposed) return;
+		const { bus, name } = this.#registerExternalIrcPeer();
+		const messages = bus.pollMessages(name);
+		for (const message of messages) {
+			const timestamp = Date.parse(message.ts) || Date.now();
+			const record: CustomMessage = {
+				role: "custom",
+				customType: "irc:incoming",
+				content: prompt.render(ircIncomingTemplate, {
+					from: message.fromPeer,
+					message: message.body,
+					replyTo: "",
+					autoReplied: false,
+				}),
+				display: true,
+				details: { id: `external:${message.id}`, from: message.fromPeer, message: message.body },
+				attribution: "agent",
+				timestamp,
+			};
+			void this.#emitSessionEvent({ type: "irc_message", message: record });
+			this.#pendingIrcAsides.push(record);
+			bus.markDelivered(message.id);
+		}
+	}
+
 	#flushPendingIrcAsides(): void {
+		this.#pollExternalIrcMessages();
 		if (this.#pendingIrcAsides.length === 0) return;
 		const records = this.#pendingIrcAsides;
 		this.#pendingIrcAsides = [];
