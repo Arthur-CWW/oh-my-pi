@@ -12,6 +12,7 @@ import {
 	type SettingPath,
 	Settings,
 } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { resolveAgentModelPatterns } from "@oh-my-pi/pi-coding-agent/config/model-resolver";
 import { getProjectAgentDir, Snowflake } from "@oh-my-pi/pi-utils";
 import { YAML } from "bun";
 import { beginSettingsTest, restoreSettingsTestState, type SettingsTestState } from "./helpers/settings-test-state";
@@ -347,7 +348,7 @@ describe("Settings", () => {
 			expect(settings.getModelRole("default")).toBe("anthropic/claude-sonnet-4-5");
 		});
 
-		it("keeps the live role value aligned when saving over a runtime override", () => {
+		it("does not mirror persisted role saves into runtime overrides", () => {
 			const settings = Settings.isolated({
 				modelRoles: { default: "anthropic/claude-sonnet-4-5" },
 			});
@@ -355,11 +356,40 @@ describe("Settings", () => {
 			settings.overrideModelRoles({ default: "openai/gpt-5.2-codex" });
 			settings.setModelRole("default", "anthropic/claude-opus-4-5");
 
-			expect(settings.getModelRole("default")).toBe("anthropic/claude-opus-4-5");
+			expect(settings.getModelRole("default")).toBe("openai/gpt-5.2-codex");
 
 			settings.clearOverride("modelRoles");
 
 			expect(settings.getModelRole("default")).toBe("anthropic/claude-opus-4-5");
+		});
+
+		it("honors reloaded disk roles after an unrelated runtime model override", async () => {
+			await writeSettings({
+				modelRoles: {
+					default: "kimi-code/kimi-for-coding",
+					task: "kimi-code/kimi-for-coding",
+				},
+			});
+
+			const settings = await Settings.init({ cwd: projectDir, agentDir });
+			settings.overrideModelRoles({ default: "kimi-code/kimi-for-coding" });
+			settings.setModelRole("task", "kimi-code/kimi-for-coding");
+			await settings.flush();
+
+			await writeSettings({
+				modelRoles: {
+					default: "anthropic/claude-fable-5:medium",
+					task: "openai-codex/gpt-5.5:medium",
+				},
+			});
+
+			await settings.reloadFromDisk();
+
+			expect(settings.getModelRole("default")).toBe("kimi-code/kimi-for-coding");
+			expect(settings.getModelRole("task")).toBe("openai-codex/gpt-5.5:medium");
+			expect(resolveAgentModelPatterns({ agentModel: "pi/task", settings })).toEqual([
+				"openai-codex/gpt-5.5:medium",
+			]);
 		});
 	});
 

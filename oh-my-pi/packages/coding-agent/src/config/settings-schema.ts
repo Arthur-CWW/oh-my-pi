@@ -388,8 +388,7 @@ export const SETTINGS_SCHEMA = {
 			tab: "model",
 			group: "Advisor",
 			label: "Enable Advisor",
-			description:
-				"Pair a second model (assigned to the 'advisor' role) that passively reviews each turn and injects notes.",
+			description: "Enable the advisor on the main session (Fable-model sessions never get an advisor).",
 		},
 	},
 	"advisor.subagents": {
@@ -399,7 +398,7 @@ export const SETTINGS_SCHEMA = {
 			tab: "model",
 			group: "Advisor",
 			label: "Advisor for Subagents",
-			description: "Also enable the advisor on spawned task/eval subagents.",
+			description: "Enable the advisor on spawned task/eval subagents, independent of advisor.enabled.",
 		},
 	},
 	"advisor.syncBacklog": {

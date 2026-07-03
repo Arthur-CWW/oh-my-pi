@@ -534,18 +534,7 @@ export class Settings {
 	 */
 	setModelRole(role: ModelRole | string, modelId: string): void {
 		const current = shallowStringRecord(getByPath(this.#global, ["modelRoles"]));
-		const runtimeOverrides = getByPath(this.#overrides, ["modelRoles"]);
-		const updateRuntimeOverride =
-			!!runtimeOverrides &&
-			typeof runtimeOverrides === "object" &&
-			!Array.isArray(runtimeOverrides) &&
-			Object.hasOwn(runtimeOverrides, role);
-
 		this.set("modelRoles", { ...current, [role]: modelId });
-
-		if (updateRuntimeOverride) {
-			this.override("modelRoles", { ...shallowStringRecord(runtimeOverrides), [role]: modelId });
-		}
 	}
 
 	/**

@@ -5,10 +5,37 @@ import type { Model } from "@oh-my-pi/pi-ai";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
+import { AgentSession, shouldEnableAdvisor } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { TempDir } from "@oh-my-pi/pi-utils";
+
+describe("shouldEnableAdvisor", () => {
+	it("follows the advisor kind flags and blocks Fable models", () => {
+		expect(
+			shouldEnableAdvisor(
+				"main",
+				Settings.isolated({ "advisor.enabled": true }),
+				"anthropic/claude-sonnet-4-5",
+			),
+		).toBe(true);
+		expect(shouldEnableAdvisor("main", Settings.isolated({ "advisor.enabled": true }), "openai/fable")).toBe(false);
+		expect(
+			shouldEnableAdvisor(
+				"sub",
+				Settings.isolated({ "advisor.enabled": false, "advisor.subagents": true }),
+				"anthropic/claude-sonnet-4-5",
+			),
+		).toBe(true);
+		expect(
+			shouldEnableAdvisor(
+				"sub",
+				Settings.isolated({ "advisor.enabled": true, "advisor.subagents": false }),
+				"anthropic/claude-sonnet-4-5",
+			),
+		).toBe(false);
+	});
+});
 
 describe("AgentSession advisor toggle", () => {
 	let sharedDir: TempDir;

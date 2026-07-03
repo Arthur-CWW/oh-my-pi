@@ -953,6 +953,16 @@ function isAdvisorCard(message: AgentMessage): message is CustomMessage {
 	return message.role === "custom" && message.customType === "advisor";
 }
 
+export function shouldEnableAdvisor(
+	kind: "main" | string,
+	settings: Pick<Settings, "get">,
+	modelSelector: string | undefined,
+): boolean {
+	if (modelSelector?.toLowerCase().includes("fable")) return false;
+	if (kind === "main") return !!settings.get("advisor.enabled");
+	return !!settings.get("advisor.subagents");
+}
+
 function queueChipText(message: AgentMessage): string {
 	if (message.role === "custom") {
 		return readQueueChipText(message.details) ?? queuedTextContent(message) ?? "";
@@ -1493,7 +1503,18 @@ export class AgentSession {
 			},
 		});
 
-		this.#advisorEnabled = this.settings.get("advisor.enabled") as boolean;
+		const activeModelSelector = this.model ? formatModelString(this.model) : undefined;
+		this.#advisorEnabled = shouldEnableAdvisor(this.#agentKind, this.settings, activeModelSelector);
+		if (!this.#advisorEnabled && activeModelSelector?.toLowerCase().includes("fable")) {
+			const kindAdvisorFlag =
+				this.#agentKind === "main" ? this.settings.get("advisor.enabled") : this.settings.get("advisor.subagents");
+			if (kindAdvisorFlag) {
+				logger.debug("advisor disabled for Fable-model session", {
+					kind: this.#agentKind,
+					model: activeModelSelector,
+				});
+			}
+		}
 		if (this.#advisorEnabled) this.#buildAdvisorRuntime();
 
 		// Always subscribe to agent events for internal handling
@@ -1509,7 +1530,6 @@ export class AgentSession {
 		if (this.#isDisposed) return false;
 		if (this.#advisorRuntime) return true;
 		if (!this.#advisorEnabled) return false;
-		if (this.#agentKind !== "main" && !this.settings.get("advisor.subagents")) return false;
 
 		const advisorSel = resolveRoleSelection(
 			["advisor"],
