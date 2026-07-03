@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url"
 import type { Database } from "bun:sqlite"
 import { Schema } from "effect"
 
+import { resolveAskSynthesisConfig, synthesizeAnswer } from "./ask-synthesis"
 import { extractTerms } from "./cli"
 import { renderDashboardPage } from "./dashboard-page"
 import { askEvidence } from "./evidence"
@@ -21,6 +22,7 @@ import { resolveDaemonPaths, type DaemonPaths } from "./paths"
 export interface DashboardOptions {
   port: number
   paths: DaemonPaths
+  env?: Record<string, string | undefined>
 }
 
 export type DashboardServer = Bun.Server<undefined>
@@ -51,7 +53,8 @@ const DEFAULT_NOTE_LIMIT = 50
 const DEFAULT_CARD_LIMIT = 100
 const DEFAULT_PROGRESS_LIMIT = 100
 const PACKAGE_DIR = fileURLToPath(new URL("../", import.meta.url))
-const PROOF_DIR = resolve(PACKAGE_DIR, "../../docs/qa")
+const DEFAULT_PROOF_DIR = resolve(PACKAGE_DIR, "../../docs/qa")
+const MAX_ANSWER_ERROR_LENGTH = 500
 const PositiveInteger = Schema.Number.check(Schema.isFinite(), Schema.isInt(), Schema.isGreaterThanOrEqualTo(1))
 
 const AskRequestSchema = Schema.Struct({
@@ -82,11 +85,12 @@ type CardStatusRequest = Schema.Schema.Type<typeof CardStatusRequestSchema>
 type ProgressRequest = Schema.Schema.Type<typeof ProgressRequestSchema>
 
 export function startDashboard(options: DashboardOptions): DashboardServer {
+  const env = options.env ?? process.env
   return Bun.serve({
     port: options.port,
     async fetch(request) {
       try {
-        return await handleRequest(request, options.paths)
+        return await handleRequest(request, options.paths, env)
       } catch (error) {
         return jsonError(error instanceof Error ? error.message : "internal server error", 500)
       }
@@ -94,7 +98,7 @@ export function startDashboard(options: DashboardOptions): DashboardServer {
   })
 }
 
-async function handleRequest(request: Request, paths: DaemonPaths): Promise<Response> {
+async function handleRequest(request: Request, paths: DaemonPaths, env: Record<string, string | undefined>): Promise<Response> {
   const url = new URL(request.url)
   const pathname = url.pathname
 
@@ -105,16 +109,17 @@ async function handleRequest(request: Request, paths: DaemonPaths): Promise<Resp
   }
 
   if (request.method === "GET" && pathname === "/api/status") return handleStatus(paths)
-  if (request.method === "POST" && pathname === "/api/ask") return handleAsk(request, paths)
+  if (request.method === "GET" && pathname === "/api/ask/config") return handleAskConfig(env)
+  if (request.method === "POST" && pathname === "/api/ask") return handleAsk(request, paths, env)
   if (request.method === "GET" && pathname === "/api/notes") return handleNotes(url, paths)
   if (request.method === "GET" && pathname === "/api/cards") return handleCards(url, paths)
   if (request.method === "POST" && pathname === "/api/cards/status") return handleCardStatus(request, paths)
   if (request.method === "GET" && pathname === "/api/progress") return handleProgressList(url, paths)
   if (request.method === "POST" && pathname === "/api/progress") return handleProgressCreate(request, paths)
   if (request.method === "GET" && pathname === "/api/proofs") {
-    return jsonResponse(scanProofs().map(({ name, title, mtime }) => ({ name, title, mtime })))
+    return jsonResponse(scanProofs(env).map(({ name, title, mtime }) => ({ name, title, mtime })))
   }
-  if (request.method === "GET" && pathname.startsWith("/api/proofs/")) return handleProof(pathname)
+  if (request.method === "GET" && pathname.startsWith("/api/proofs/")) return handleProof(pathname, env)
 
   return jsonError("unknown route", 404)
 }
@@ -134,18 +139,41 @@ function handleStatus(paths: DaemonPaths): Response {
   )
 }
 
-async function handleAsk(request: Request, paths: DaemonPaths): Promise<Response> {
+async function handleAsk(request: Request, paths: DaemonPaths, env: Record<string, string | undefined>): Promise<Response> {
   const body = await decodeJson(request, AskRequestSchema)
   if (body instanceof Response) return body
 
   const terms = extractTerms(body.question)
   const evidence = askEvidence(paths, terms, body.limit ?? DEFAULT_ASK_LIMIT)
+  const config = resolveAskSynthesisConfig(env)
+  let answer: { text: string; model: string; elapsedMs: number } | null = null
+  let answerError: string | null = null
+
+  if (!config.enabled) {
+    answerError = "synthesis disabled"
+  } else if (evidence.hits.length === 0) {
+    answerError = "no evidence hits"
+  } else {
+    try {
+      answer = await synthesizeAnswer(body.question, evidence.hits, config)
+    } catch (error) {
+      answerError = answerFailure(error)
+    }
+  }
+
   return jsonResponse({
     question: body.question,
     terms,
     hits: evidence.hits,
     skipped: evidence.skipped,
+    answer,
+    answerError,
   })
+}
+
+function handleAskConfig(env: Record<string, string | undefined>): Response {
+  const config = resolveAskSynthesisConfig(env)
+  return jsonResponse({ model: config.model, synthesisEnabled: config.enabled })
 }
 
 function handleNotes(url: URL, paths: DaemonPaths): Response {
@@ -193,14 +221,14 @@ async function handleProgressCreate(request: Request, paths: DaemonPaths): Promi
   )
 }
 
-function handleProof(pathname: string): Response {
+function handleProof(pathname: string, env: Record<string, string | undefined>): Response {
   const encodedName = pathname.slice("/api/proofs/".length)
   if (encodedName.length === 0 || encodedName.includes("/")) return jsonError("unknown proof", 404)
 
   const name = decodePathSegment(encodedName)
   if (name === null) return jsonError("unknown proof", 404)
 
-  const proofs = new Map(scanProofs().map((proof) => [proof.name, proof]))
+  const proofs = new Map(scanProofs(env).map((proof) => [proof.name, proof]))
   const proof = proofs.get(name)
   if (proof === undefined) return jsonError("unknown proof", 404)
 
@@ -261,13 +289,14 @@ function parseLimit(url: URL, defaultLimit: number): number | null {
   return limit
 }
 
-function scanProofs(): ProofEntry[] {
-  if (!existsSync(PROOF_DIR)) return []
+function scanProofs(env: Record<string, string | undefined>): ProofEntry[] {
+  const proofDir = env.PRIMER_PROOFS_DIR ?? DEFAULT_PROOF_DIR
+  if (!existsSync(proofDir)) return []
 
-  return readdirSync(PROOF_DIR, { withFileTypes: true })
-    .filter((entry) => entry.isFile() && entry.name.endsWith(".md"))
+  return readdirSync(proofDir, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && /^primer-.*\.md$/u.test(entry.name))
     .map((entry) => {
-      const path = resolve(PROOF_DIR, entry.name)
+      const path = resolve(proofDir, entry.name)
       const stat = statSync(path)
       return {
         name: entry.name,
@@ -285,6 +314,11 @@ function proofTitle(path: string, fallback: string): string {
     if (line.startsWith("# ")) return line.slice(2).trim() || fallback
   }
   return fallback
+}
+
+function answerFailure(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error)
+  return message.slice(0, MAX_ANSWER_ERROR_LENGTH)
 }
 
 function decodePathSegment(segment: string): string | null {
@@ -310,6 +344,7 @@ if (import.meta.main) {
   const server = startDashboard({
     port: Number(process.env.PORT ?? 4177),
     paths: resolveDaemonPaths(process.env),
+    env: process.env,
   })
   console.log(`Primer dashboard listening on http://localhost:${server.port}`)
 }

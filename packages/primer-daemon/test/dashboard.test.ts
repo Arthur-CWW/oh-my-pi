@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test"
-import { mkdirSync, rmSync } from "node:fs"
+import { mkdirSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { Database } from "bun:sqlite"
 
+import { buildSynthesisPrompt, isForbiddenModel, resolveAskSynthesisConfig } from "../src/ask-synthesis"
 import { startDashboard } from "../src/dashboard"
 import { addCard, openLedger } from "../src/ledger"
 import { resolveDaemonPaths, type DaemonPaths } from "../src/paths"
@@ -16,11 +17,19 @@ interface DashboardFixture {
   baseUrl: string
 }
 
+interface AskAnswer {
+  text: string
+  model: string
+  elapsedMs: number
+}
+
 interface AskResponse {
   question: string
   terms: string[]
   hits: EvidenceHit[]
   skipped: string[]
+  answer: AskAnswer | null
+  answerError: string | null
 }
 
 interface CardResponse {
@@ -35,6 +44,17 @@ interface ProgressResponse {
   body: string | null
   refs: string[]
   createdAt: string
+}
+
+interface AskConfigResponse {
+  model: string
+  synthesisEnabled: boolean
+}
+
+interface ProofSummaryResponse {
+  name: string
+  title: string
+  mtime: string
 }
 
 interface ErrorResponse {
@@ -64,10 +84,13 @@ function makeDashboardPaths(name: string): DaemonPaths {
   })
 }
 
-async function withDashboard(run: (fixture: DashboardFixture) => Promise<void>): Promise<void> {
+async function withDashboard(
+  run: (fixture: DashboardFixture) => Promise<void>,
+  env: Record<string, string | undefined> = {},
+): Promise<void> {
   const paths = makeDashboardPaths(`dashboard-${nextDashboardId}`)
   nextDashboardId += 1
-  const server = startDashboard({ port: 0, paths })
+  const server = startDashboard({ port: 0, paths, env: { PRIMER_ASK_SYNTHESIS: "0", ...env } })
   try {
     await run({ paths, baseUrl: `http://localhost:${server.port}` })
   } finally {
@@ -170,6 +193,52 @@ CREATE TABLE concepts (
   }
 }
 
+describe("ask synthesis helpers", () => {
+  test("resolves model config and refuses forbidden lanes", () => {
+    expect(resolveAskSynthesisConfig({})).toEqual({
+      model: "google-antigravity/gemini-3.5-flash",
+      enabled: true,
+    })
+    expect(resolveAskSynthesisConfig({ PRIMER_ASK_MODEL: "openrouter/custom-flash" })).toEqual({
+      model: "openrouter/custom-flash",
+      enabled: true,
+    })
+    expect(resolveAskSynthesisConfig({ PRIMER_ASK_SYNTHESIS: "0" })).toEqual({
+      model: "google-antigravity/gemini-3.5-flash",
+      enabled: false,
+    })
+    expect(resolveAskSynthesisConfig({ PRIMER_ASK_MODEL: "vendor/Fable-pro" })).toEqual({
+      model: "vendor/Fable-pro",
+      enabled: false,
+    })
+    expect(resolveAskSynthesisConfig({ PRIMER_ASK_MODEL: "vendor/mythos-pro" })).toEqual({
+      model: "vendor/mythos-pro",
+      enabled: false,
+    })
+    expect(isForbiddenModel("vendor/Fable-pro")).toBe(true)
+    expect(isForbiddenModel("vendor/Mythos-pro")).toBe(true)
+  })
+
+  test("builds prompts with the question and evidence refs", () => {
+    const prompt = buildSynthesisPrompt("What did the browser show?", [
+      {
+        source: "browser",
+        kind: "event",
+        ref: "browser:events:241",
+        url: "https://example.test/event",
+        title: "Browser Event",
+        snippet: "Arthur looked at the primer stream.",
+        timestamp: "2026-07-03T08:00:00.000Z",
+        score: 12,
+      },
+    ])
+
+    expect(prompt).toContain("What did the browser show?")
+    expect(prompt).toContain("browser:events:241")
+    expect(prompt).toContain("Arthur looked at the primer stream.")
+  })
+})
+
 describe("dashboard", () => {
   test("serves the dashboard page", async () => {
     await withDashboard(async ({ baseUrl }) => {
@@ -182,20 +251,40 @@ describe("dashboard", () => {
     })
   })
 
-  test("answers questions with extracted terms and evidence hits", async () => {
+  test("exposes ask synthesis config", async () => {
     await withDashboard(async ({ baseUrl }) => {
+      const { response, body } = await requestJson<AskConfigResponse>(baseUrl, "/api/ask/config")
+
+      expect(response.status).toBe(200)
+      expect(body).toEqual({
+        model: "openrouter/custom-flash",
+        synthesisEnabled: true,
+      })
+    }, { PRIMER_ASK_MODEL: "openrouter/custom-flash", PRIMER_ASK_SYNTHESIS: undefined })
+  })
+
+  test("answers questions with retrieval hits while synthesis is disabled", async () => {
+    await withDashboard(async ({ baseUrl }) => {
+      const config = await requestJson<AskConfigResponse>(baseUrl, "/api/ask/config")
       const { response, body } = await requestJson<AskResponse>(baseUrl, "/api/ask", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ question: "Find cybernetics", limit: 5 }),
       })
 
+      expect(config.response.status).toBe(200)
+      expect(config.body).toEqual({
+        model: "google-antigravity/gemini-3.5-flash",
+        synthesisEnabled: false,
+      })
       expect(response.status).toBe(200)
       expect(body.question).toBe("Find cybernetics")
       expect(body.terms).toEqual(["find", "cybernetics"])
       expect(body.hits.map((hit) => hit.ref)).toContain("browser:tab_entries:1")
       expect(body.skipped).toEqual([])
-    })
+      expect(body.answer).toBeNull()
+      expect(body.answerError).toBe("synthesis disabled")
+    }, { PRIMER_ASK_SYNTHESIS: "0" })
   })
 
   test("updates card status and 404s unknown card ids", async () => {
@@ -245,6 +334,29 @@ describe("dashboard", () => {
       expect(listed.response.status).toBe(200)
       expect(listed.body[0]).toMatchObject({ id: created.body.id, kind: "proof", title: "Dashboard proof" })
     })
+  })
+
+  test("lists only primer stream proofs and 404s other markdown files", async () => {
+    const proofDir = join(TEST_TMP_ROOT, "proof-scope")
+    rmSync(proofDir, { force: true, recursive: true })
+    mkdirSync(proofDir, { recursive: true })
+    writeFileSync(join(proofDir, "primer-x.md"), "# Primer X\n\nProof body.\n")
+    writeFileSync(join(proofDir, "other-stream.md"), "# Other Stream\n\nShould not be served.\n")
+
+    try {
+      await withDashboard(async ({ baseUrl }) => {
+        const listed = await requestJson<ProofSummaryResponse[]>(baseUrl, "/api/proofs")
+        const forbidden = await requestJson<ErrorResponse>(baseUrl, "/api/proofs/other-stream.md")
+
+        expect(listed.response.status).toBe(200)
+        expect(listed.body.map((proof) => proof.name)).toEqual(["primer-x.md"])
+        expect(listed.body[0]?.title).toBe("Primer X")
+        expect(forbidden.response.status).toBe(404)
+        expect(typeof forbidden.body.error).toBe("string")
+      }, { PRIMER_PROOFS_DIR: proofDir })
+    } finally {
+      rmSync(proofDir, { force: true, recursive: true })
+    }
   })
 
   test("404s unknown proof names", async () => {

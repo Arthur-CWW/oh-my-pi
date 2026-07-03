@@ -43,3 +43,17 @@ Already running in the background of this session — open `http://primer.localh
 1. Finish a task → write `docs/qa/<task>.md` proof (the review contract) → it appears in the Proofs panel automatically.
 2. Append a `progress` entry (`kind: milestone|proof|commit|info`) referencing the proof — the feed is the glanceable session state.
 3. Card candidates accumulate for Arthur's approve/reject; approved cards are the future mochi-export queue.
+
+## v2 — after Arthur's first review (2026-07-03)
+
+Feedback addressed: "I don't know what I'm looking at" / "what can I ask?" / "what model?" / other streams' proofs leaking in / half-pane viewport / vim navigation.
+
+- **Ask now answers with a model.** Retrieval (deterministic, local) feeds an LLM synthesis step running on Arthur's subscriptions via OMP oneshot: default `google-antigravity/gemini-3.5-flash` (`PRIMER_ASK_MODEL` to override, `PRIMER_ASK_SYNTHESIS=0` to disable). Code-level guard refuses fable/mythos model ids — the orchestrator model can never be called from the product. Answer renders with inline [ref] citation chips, model chip, elapsed time; evidence collapsed beneath. Graceful retrieval-only mode when the lane is down.
+- **Orientation**: header one-liner, per-panel captions, explanatory empty states, three example-question chips, "answers via <model>" attribution by the input.
+- **Proofs scoped to primer**: only `docs/qa/primer-*.md` is listed/served (convention recorded in agent-tooling-preferences.md: `docs/qa/<stream>-<task>.md`).
+- **Vim keys**: j/k items, [/] panels, Enter open, a/r approve/reject cards, g/G, Esc/q close, ? keymap overlay. Keys inert while typing.
+- **Narrow-first**: single column ≤1199px tuned for the cmux half-pane (~650–900px); proof viewer becomes a full overlay at narrow widths.
+
+QA (headless, 720px): UI ask "Nick Land and Meltdown" → synthesized answer citing browser events AND reader annotations (11/13/15/35), model chip + 3.3s; ? overlay, panel cycling, j/k focus ring all exercised. Screenshot: [`primer-dashboard/dashboard-v2-ask.png`](primer-dashboard/dashboard-v2-ask.png). Gate: in-package `bun run check` — typecheck clean, 28 tests / 107 assertions.
+
+Queued preference (not yet built): migrate chat components to shadcn/chatcn when the page graduates to a build step; Opus lane owns UI.

@@ -4,7 +4,7 @@ import { join } from "node:path"
 
 import { addCard, addNote, addProgress, listCards, listNotes, listProgress, openLedger, setCardStatus } from "../src/ledger"
 
-const TEST_TMP_ROOT = new URL(".", import.meta.url).pathname
+const TEST_TMP_ROOT = new URL(".tmp/", import.meta.url).pathname
 
 function ledgerPath(name: string): string {
   return join(TEST_TMP_ROOT, `${name}-${Date.now()}-${Math.random().toString(16).slice(2)}.sqlite`)
