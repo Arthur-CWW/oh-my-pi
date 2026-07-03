@@ -15,6 +15,21 @@ omp --config ./.omp/fable-config.yml --model <fable-model-id>
 3. `TASKS.md` — active and next rows.
 4. Whatever Arthur points at.
 
+## Sharded sessions (one per stream)
+
+Run parallel Fable sessions, one per stream, same launch command. First message convention:
+
+> You own `streams/<companion|playground|primer|harness>/` — read the charter, then `streams/<x>/GOAL.md`, then atlas sections as needed.
+
+Parallel etiquette:
+
+- Stay inside your GOAL.md **owner paths**; its Excludes section is binding.
+- Cross-stream reuse goes through `packages/` — graduate a shared lib, never reach into a sibling's paths.
+- Shared-context changes (charter, framing, atlas) are committed promptly; pull before editing them.
+- Coordinate via `TASKS.md` rows, not by editing another stream's files.
+- Harness is background: any session may *log* friction, only the harness session lands harness changes.
+- Model-role note: subagent lanes bind at session launch — config changes require a fresh session to take effect.
+
 ## Retrieve on demand
 
 - Harness iteration: [`harness-brief.md`](harness-brief.md), then [`harness-slimming.md`](harness-slimming.md).

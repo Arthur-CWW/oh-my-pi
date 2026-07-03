@@ -64,6 +64,17 @@ Full inventory with sizes: [`external-inventory.md`](external-inventory.md). Not
 | Fable-subagent guard | `oh-my-pi/packages/coding-agent/src/config/model-resolver.ts` | Blocks subagent selectors containing `fable` |
 | Auth / quotas | `omp auth-broker`, `omp token <provider>`, `omp usage`, `OMP_PROFILE` | Reuse; never invent token storage |
 
+## Repo topology & ownership
+
+**Polyrepo with a spine.** `~/agents` = harness + Primer substrate + incubator. Products graduate to their own repos (under `~/products`) when they become products — taking their `streams/<x>/` charter and inspiration with them. Shared TypeScript libs live in `~/agents/packages/*`; when a graduated repo consumes one, publish it under the existing `@wirebabel` npm scope (`bun link` for local dev — Bun workspaces don't span repos, npm does). Registry: `catalog/workspaces.yml`.
+
+| Stream | Contract | Owner paths (summary) |
+|---|---|---|
+| Companion | `streams/companion/GOAL.md` | `apps/ai-companion-rtc`, `packages/spatial-audio-renderer`, `data/{asmr-companion,youtube-liked-asmr-refs}` |
+| Playground | `streams/playground/GOAL.md` | `apps/slotok-workbench`, `packages/{hyperframes,remotion}-renderer`, `packages/{jimeng-client,ugc-cli}`, `workflows/tiktok-recreate`, UGC `data/` buckets |
+| Primer | `streams/primer/GOAL.md` | `packages/{twitter-archive,borges-library}`, `browser-extensions/…/twitter-archive-firefox`, `data/twitter-archive`, primer docs |
+| Harness | `streams/harness/GOAL.md` | `oh-my-pi`, `packages/{web-access,dynamic-workflows}`, `.omp`, `skills`, `docs/fable`, `catalog/workspaces.yml` |
+
 ## Cleanup ledgers (historical)
 
 [`claude-omp-cleanup.md`](claude-omp-cleanup.md) — MCP/hook clutter removal record. [`git-cleanup-plan.md`](git-cleanup-plan.md) — pre-Fable commit plan.

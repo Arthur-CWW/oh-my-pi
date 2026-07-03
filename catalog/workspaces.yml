@@ -1,5 +1,5 @@
 schemaVersion: 1
-updated: 2026-06-24
+updated: 2026-07-03
 purpose: >-
   Stable workspace and context-root registry for agents. Folders express ownership;
   this catalog expresses availability, task context, and safe cross-workspace handoff.
@@ -83,6 +83,15 @@ repoRoots:
   workflows:
     path: /Users/arthur/agents/workflows
     kind: workflow-definitions
+  streams:
+    path: /Users/arthur/agents/streams
+    kind: stream-charters
+    rule: >-
+      one dir per Fable stream (companion, playground, primer, harness); GOAL.md is the
+      session contract (goal, NFRs, owner paths, exclusions, open questions). Shared
+      context is docs/fable/charter.md + docs/state/creative-framing.md; sharded
+      sessions read charter -> streams/<x>/GOAL.md per docs/fable/handoff.md.
+    tags: [agents, fable, streams, ownership]
   vendor:
     path: /Users/arthur/agents/vendor
     kind: vendored-source
