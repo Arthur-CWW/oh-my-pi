@@ -12,6 +12,7 @@ import {
 	resolveModelFromString,
 	resolveModelOverride,
 	resolveModelRoleValue,
+	resolveModelOverrideWithAuthFallback,
 	resolveModelScope,
 } from "@oh-my-pi/pi-coding-agent/config/model-resolver";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
@@ -643,6 +644,53 @@ describe("resolveModelOverride", () => {
 		expect(result.model?.id).toBe("qwen/qwen3-coder:exacto");
 		expect(result.thinkingLevel).toBe(Effort.High);
 		expect(result.explicitThinkingLevel).toBe(true);
+	});
+
+});
+
+describe("resolveModelOverrideWithAuthFallback", () => {
+	test("blocks Fable for subagents and falls back to a non-Fable task lane", async () => {
+		const fable = buildModel({
+			id: "claude-fable-1",
+			name: "Claude Fable",
+			api: "anthropic-messages",
+			provider: "anthropic",
+			baseUrl: "https://api.anthropic.com",
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 15, output: 75, cacheRead: 1.5, cacheWrite: 18.75 },
+			contextWindow: 200000,
+			maxTokens: 8192,
+		});
+		const worker = buildModel({
+			id: "moonshotai/kimi-k2",
+			name: "Kimi K2",
+			api: "anthropic-messages",
+			provider: "openrouter",
+			baseUrl: "https://openrouter.ai/api/v1",
+			reasoning: false,
+			input: ["text"],
+			cost: { input: 0.15, output: 0.6, cacheRead: 0.015, cacheWrite: 0.15 },
+			contextWindow: 128000,
+			maxTokens: 4096,
+		});
+		const settings = Settings.isolated();
+		settings.setModelRole("task", "anthropic/claude-fable-1");
+		settings.setModelRole("smol", "openrouter/moonshotai/kimi-k2");
+		const registry = {
+			getAvailable: () => [fable, worker],
+			getApiKey: async () => "test-key",
+		} as Parameters<typeof resolveModelOverrideWithAuthFallback>[2];
+
+		const result = await resolveModelOverrideWithAuthFallback(
+			["pi/task"],
+			"anthropic/claude-fable-1",
+			registry,
+			settings,
+		);
+
+		expect(result.model?.id).toBe("moonshotai/kimi-k2");
+		expect(result.authFallbackUsed).toBe(true);
 	});
 });
 describe("resolveCliModel", () => {

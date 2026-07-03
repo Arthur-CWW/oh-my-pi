@@ -47,6 +47,11 @@ function pickDefaultAvailableModel(availableModels: Model<Api>[]): Model<Api> | 
 	return availableModels[0];
 }
 
+function isBlockedSubagentModel(model: Model<Api>): boolean {
+	const selector = `${model.provider}/${model.id}`.toLowerCase();
+	return selector.includes("fable");
+}
+
 export interface ScopedModel {
 	model: Model<Api>;
 	thinkingLevel?: ThinkingLevel;
@@ -962,6 +967,33 @@ export async function resolveModelOverrideWithAuthFallback(
 	authFallbackUsed: boolean;
 }> {
 	const primary = resolveModelOverride(modelPatterns, modelRegistry, settings);
+	if (primary.model && isBlockedSubagentModel(primary.model)) {
+		const fallbackPatterns = [
+			...(parentActiveModelPattern ? [parentActiveModelPattern] : []),
+			"pi/task",
+			"pi/smol",
+			"pi/slow",
+		];
+
+		for (const fallbackPattern of fallbackPatterns) {
+			const fallback = resolveModelOverride([fallbackPattern], modelRegistry, settings);
+			if (!fallback.model || isBlockedSubagentModel(fallback.model)) continue;
+			const fallbackKey = await modelRegistry.getApiKey(fallback.model);
+			if (fallbackKey === kNoAuth || isAuthenticated(fallbackKey)) {
+				logger.warn("Blocked Fable subagent model; falling back to a non-Fable model", {
+					requested: modelPatterns,
+					fallbackPattern,
+					resolvedProvider: fallback.model.provider,
+					resolvedModel: fallback.model.id,
+				});
+				return { ...fallback, authFallbackUsed: true };
+			}
+		}
+
+		logger.warn("Blocked Fable subagent model; no non-Fable fallback was available", { requested: modelPatterns });
+		return { model: undefined, thinkingLevel: undefined, explicitThinkingLevel: false, authFallbackUsed: false };
+	}
+
 	if (!primary.model || !parentActiveModelPattern) {
 		return { ...primary, authFallbackUsed: false };
 	}
@@ -975,11 +1007,11 @@ export async function resolveModelOverrideWithAuthFallback(
 	if (!fallback.model) {
 		return { ...primary, authFallbackUsed: false };
 	}
-	if (modelsAreEqual(fallback.model, primary.model)) {
+	if (modelsAreEqual(fallback.model, primary.model) || isBlockedSubagentModel(fallback.model)) {
 		return { ...primary, authFallbackUsed: false };
 	}
 	const fallbackKey = await modelRegistry.getApiKey(fallback.model);
-	if (!isAuthenticated(fallbackKey)) {
+	if (fallbackKey !== kNoAuth && !isAuthenticated(fallbackKey)) {
 		return { ...primary, authFallbackUsed: false };
 	}
 
