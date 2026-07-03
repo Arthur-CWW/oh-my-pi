@@ -270,37 +270,61 @@ interface SessionListHeader {
 	timestamp?: string;
 }
 
+function titleFromLeadingEntries(
+	entries: Array<Record<string, unknown>>,
+	sessionIndex: number,
+): { title?: string; titleSource?: "auto" | "user" } {
+	for (let i = 0; i < sessionIndex; i++) {
+		const entry = entries[i];
+		if (entry?.type !== "title" || typeof entry.title !== "string") continue;
+		const titleSource = entry.source === "user" || entry.titleSource === "user" ? "user" : "auto";
+		return { title: entry.title, titleSource };
+	}
+	return {};
+}
+
+function sessionListHeaderFromRecord(
+	parsedHeader: Record<string, unknown>,
+	leadingTitle?: { title?: string },
+): SessionListHeader | undefined {
+	if (parsedHeader.type !== "session" || typeof parsedHeader.id !== "string") return undefined;
+	return {
+		type: "session",
+		id: parsedHeader.id,
+		cwd: typeof parsedHeader.cwd === "string" ? parsedHeader.cwd : undefined,
+		title: typeof parsedHeader.title === "string" ? parsedHeader.title : leadingTitle?.title,
+		parentSession: typeof parsedHeader.parentSession === "string" ? parsedHeader.parentSession : undefined,
+		timestamp: typeof parsedHeader.timestamp === "string" ? parsedHeader.timestamp : undefined,
+	};
+}
+
 function parseSessionListHeader(
 	content: string,
 	entries: Array<Record<string, unknown>>,
 ): SessionListHeader | undefined {
-	const parsedHeader = entries[0];
-	if (parsedHeader?.type === "session" && typeof parsedHeader.id === "string") {
+	const directHeader = entries[0] ? sessionListHeaderFromRecord(entries[0]) : undefined;
+	if (directHeader) return directHeader;
+
+	const sessionIndex = entries.findIndex(entry => entry?.type === "session" && typeof entry.id === "string");
+	if (sessionIndex > 0) {
+		return sessionListHeaderFromRecord(entries[sessionIndex], titleFromLeadingEntries(entries, sessionIndex));
+	}
+
+	for (const firstLine of content.split("\n", 8)) {
+		if (extractStringProperty(firstLine, "type") !== "session") continue;
+		const id = extractStringProperty(firstLine, "id");
+		if (!id) return undefined;
 		return {
 			type: "session",
-			id: parsedHeader.id,
-			cwd: typeof parsedHeader.cwd === "string" ? parsedHeader.cwd : undefined,
-			title: typeof parsedHeader.title === "string" ? parsedHeader.title : undefined,
-			parentSession: typeof parsedHeader.parentSession === "string" ? parsedHeader.parentSession : undefined,
-			timestamp: typeof parsedHeader.timestamp === "string" ? parsedHeader.timestamp : undefined,
+			id,
+			cwd: extractStringProperty(firstLine, "cwd"),
+			title: extractStringProperty(firstLine, "title"),
+			parentSession: extractStringProperty(firstLine, "parentSession"),
+			timestamp: extractStringProperty(firstLine, "timestamp"),
 		};
 	}
 
-	const firstLineEnd = content.indexOf("\n");
-	const firstLine = firstLineEnd === -1 ? content : content.slice(0, firstLineEnd);
-	if (extractStringProperty(firstLine, "type") !== "session") return undefined;
-
-	const id = extractStringProperty(firstLine, "id");
-	if (!id) return undefined;
-
-	return {
-		type: "session",
-		id,
-		cwd: extractStringProperty(firstLine, "cwd"),
-		title: extractStringProperty(firstLine, "title"),
-		parentSession: extractStringProperty(firstLine, "parentSession"),
-		timestamp: extractStringProperty(firstLine, "timestamp"),
-	};
+	return undefined;
 }
 
 function getSessionListWorkerCount(fileCount: number): number {

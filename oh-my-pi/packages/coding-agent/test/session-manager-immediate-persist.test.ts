@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import { MemorySessionStorage } from "@oh-my-pi/pi-coding-agent/session/session-storage";
 import { TempDir } from "@oh-my-pi/pi-utils";
 
 const tempDirs: TempDir[] = [];
@@ -61,6 +62,21 @@ function messageContent(entry: Record<string, unknown>): unknown {
 	return (message as { content?: unknown }).content;
 }
 
+class AtomicOnlyStorage extends MemorySessionStorage {
+	syncWrites = 0;
+	atomicSyncWrites = 0;
+
+	override writeTextSync(filePath: string, content: string): void {
+		this.syncWrites++;
+		super.writeTextSync(filePath, content);
+	}
+
+	override writeTextAtomicSync(filePath: string, content: string): void {
+		this.atomicSyncWrites++;
+		super.writeTextSync(filePath, content);
+	}
+}
+
 describe("SessionManager immediate JSONL persistence", () => {
 	it("writes the first assistant turn and later entries before appendMessage returns", () => {
 		const cwd = makeTempDir("@pi-immediate-cwd-");
@@ -86,5 +102,25 @@ describe("SessionManager immediate JSONL persistence", () => {
 		expect(entries).toHaveLength(4);
 		expect(messageRole(entries[3] ?? {})).toBe("user");
 		expect(messageContent(entries[3] ?? {})).toBe("written immediately");
+	});
+
+	it("uses atomic synchronous rewrite when the first assistant turn materializes the file", async () => {
+		const cwd = makeTempDir("@pi-atomic-cwd-");
+		const sessionDir = path.join(cwd, "sessions");
+		const storage = new AtomicOnlyStorage();
+		const manager = SessionManager.create(cwd, sessionDir, storage);
+		const sessionFile = manager.getSessionFile();
+		if (!sessionFile) throw new Error("Expected a persisted session file path");
+
+		manager.appendMessage({ role: "user", content: "queued before assistant", timestamp: Date.now() });
+		manager.appendMessage(assistantMessage("hello"));
+
+		expect(storage.atomicSyncWrites).toBe(1);
+		expect(storage.syncWrites).toBe(0);
+		const entries = JSON.parse(`[${(await storage.readText(sessionFile)).trimEnd().split("\n").join(",")}]`) as Array<
+			Record<string, unknown>
+		>;
+		expect(entries[0]?.type).toBe("session");
+		expect(messageRole(entries[2] ?? {})).toBe("assistant");
 	});
 });

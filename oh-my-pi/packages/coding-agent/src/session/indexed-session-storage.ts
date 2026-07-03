@@ -116,6 +116,10 @@ export class IndexedSessionStorage implements SessionStorage {
 		this.#enqueuePath(path, () => this.#backend.writeFull(path, content, mtimeMs), { trackDrain: true });
 	}
 
+	writeTextAtomicSync(path: string, content: string): void {
+		this.writeTextSync(path, content);
+	}
+
 	statSync(path: string): SessionStorageStat {
 		const entry = this.#index.get(path);
 		if (!entry) throw enoent(path);

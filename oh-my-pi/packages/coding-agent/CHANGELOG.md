@@ -5,6 +5,7 @@
 ### Fixed
 
 - Agent Hub now opens parked-agent history read-only on Enter instead of reviving the agent, with `R` as the explicit revive shortcut from the history view.
+- Fixed session resume/listing recovery for JSONL journals where a title metadata record was written before the session header, and changed synchronous first-write rewrites to use atomic replacement instead of in-place truncation.
 
 ## [16.0.1] - 2026-06-15
 

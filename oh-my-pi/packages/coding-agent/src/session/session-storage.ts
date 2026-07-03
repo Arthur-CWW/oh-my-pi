@@ -40,6 +40,7 @@ export interface SessionStorage {
 	readTextSlices(path: string, prefixBytes: number, suffixBytes: number): Promise<[string, string]>;
 	writeText(path: string, content: string): Promise<void>;
 	writeTextAtomic(path: string, content: string): Promise<void>;
+	writeTextAtomicSync(path: string, content: string): void;
 	rename(path: string, nextPath: string): Promise<void>;
 	unlink(path: string): Promise<void>;
 	deleteSessionWithArtifacts(sessionPath: string): Promise<void>;
@@ -139,6 +140,76 @@ export class FileSessionStorage implements SessionStorage {
 	writeTextSync(fpath: string, content: string): void {
 		this.ensureDirSync(path.dirname(fpath));
 		fs.writeFileSync(fpath, content);
+	}
+
+	writeTextAtomicSync(fpath: string, content: string): void {
+		const dir = path.resolve(fpath, "..");
+		const tempPath = path.join(dir, `.${path.basename(fpath)}.${Snowflake.next()}.tmp`);
+		this.ensureDirSync(dir);
+		try {
+			fs.writeFileSync(tempPath, content);
+			try {
+				fs.renameSync(tempPath, fpath);
+				return;
+			} catch (err) {
+				if (!hasFsCode(err, "EPERM")) throw toError(err);
+				this.#replaceSessionFileAfterEpermSync(tempPath, fpath, err);
+			}
+		} catch (err) {
+			try {
+				fs.unlinkSync(tempPath);
+			} catch (cleanupErr) {
+				if (!isEnoent(cleanupErr)) {
+					logger.warn("Failed to remove session rewrite temp file", {
+						sessionFile: fpath,
+						tempPath,
+						error: toError(cleanupErr).message,
+					});
+				}
+			}
+			throw toError(err);
+		}
+	}
+
+	#replaceSessionFileAfterEpermSync(tempPath: string, targetPath: string, renameError: unknown): void {
+		const dir = path.resolve(targetPath, "..");
+		const backupPath = path.join(dir, `${path.basename(targetPath)}.${Snowflake.next()}.bak`);
+		try {
+			fs.renameSync(targetPath, backupPath);
+		} catch (moveAsideError) {
+			if (isEnoent(moveAsideError)) {
+				fs.renameSync(tempPath, targetPath);
+				return;
+			}
+			throw toError(renameError);
+		}
+		try {
+			fs.renameSync(tempPath, targetPath);
+		} catch (replaceError) {
+			try {
+				fs.renameSync(backupPath, targetPath);
+			} catch (rollbackErr) {
+				const rollbackError = toError(rollbackErr);
+				throw new Error(
+					`Failed to replace session file after EPERM (original: ${toError(renameError).message}; retry: ${
+						toError(replaceError).message
+					}; rollback: ${rollbackError.message})`,
+					{ cause: toError(renameError) },
+				);
+			}
+			throw toError(replaceError);
+		}
+		try {
+			fs.unlinkSync(backupPath);
+		} catch (err) {
+			if (!isEnoent(err)) {
+				logger.warn("Failed to remove session rewrite backup", {
+					sessionFile: targetPath,
+					backupPath,
+					error: toError(err).message,
+				});
+			}
+		}
 	}
 
 	statSync(path: string): SessionStorageStat {
@@ -502,6 +573,10 @@ export class MemorySessionStorage implements SessionStorage {
 
 	writeTextSync(path: string, content: string): void {
 		this.#files.set(path, createMemoryFileEntry(content, Date.now()));
+	}
+
+	writeTextAtomicSync(path: string, content: string): void {
+		this.writeTextSync(path, content);
 	}
 
 	/**

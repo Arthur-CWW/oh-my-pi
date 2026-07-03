@@ -457,9 +457,10 @@ export class SessionManager {
 	}
 
 	/**
-	 * Synchronously rewrite the whole file (header + entries) and keep no open
-	 * writer; the next append re-opens one. `writeTextSync` returns with the
-	 * bytes in the kernel page cache, so the file is software-crash durable.
+	 * Synchronously rewrite the whole file (header + entries) through the storage
+	 * atomic-replace path and keep no open writer; the next append re-opens one.
+	 * This protects live journals from process crashes between truncate and
+	 * replacement, but does not claim power-loss fsync durability.
 	 */
 	#rewriteSynchronously(): void {
 		if (!this.#persist || !this.#sessionFile) return;
@@ -469,7 +470,7 @@ export class SessionManager {
 			this.#diskEpoch++;
 			this.#diskTail = Promise.resolve();
 			this.#closeWriterEventually();
-			this.#storage.writeTextSync(this.#sessionFile, body);
+			this.#storage.writeTextAtomicSync(this.#sessionFile, body);
 			this.#fileIsCurrent = true;
 			this.#rewriteRequired = false;
 		} catch (err) {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import type { SessionStatus } from "@oh-my-pi/pi-coding-agent/session/session-listing";
+import { resolveResumableSession, type SessionStatus } from "@oh-my-pi/pi-coding-agent/session/session-listing";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { MemorySessionStorage } from "@oh-my-pi/pi-coding-agent/session/session-storage";
 
@@ -85,5 +85,27 @@ describe("SessionManager.list session status (tail derivation)", () => {
 
 		const status = await statusById(storage);
 		expect(status.get("huge-complete")).toBe("unknown");
+	});
+});
+
+describe("Session discovery recovery", () => {
+	it("resumes and opens a session whose title record was written before its header", async () => {
+		const storage = new MemorySessionStorage();
+		const sessionPath = `${SESSION_DIR}/title-prefixed.jsonl`;
+		storage.writeTextSync(
+			sessionPath,
+			line({ type: "title", v: 1, title: "Recovered title", source: "auto" }) +
+				header("title-prefixed") +
+				user("recover me"),
+		);
+
+		const match = await resolveResumableSession("title-prefixed", "/proj", SESSION_DIR, storage);
+		expect(match?.scope).toBe("local");
+		expect(match?.session.id).toBe("title-prefixed");
+		expect(match?.session.title).toBe("Recovered title");
+
+		const manager = await SessionManager.open(sessionPath, SESSION_DIR, storage);
+		expect(manager.getSessionId()).toBe("title-prefixed");
+		expect(manager.getSessionName()).toBe("Recovered title");
 	});
 });

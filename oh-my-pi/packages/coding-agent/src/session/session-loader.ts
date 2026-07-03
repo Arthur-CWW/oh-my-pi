@@ -12,6 +12,38 @@ export function parseSessionEntries(content: string): FileEntry[] {
 	return parseJsonlLenient<FileEntry>(content);
 }
 
+function isSessionHeader(entry: FileEntry | undefined): entry is SessionHeader {
+	return entry?.type === "session" && typeof entry.id === "string";
+}
+
+function recoverLeadingTitle(entries: FileEntry[], sessionIndex: number): { title?: string; titleSource?: "auto" | "user" } {
+	for (let i = 0; i < sessionIndex; i++) {
+		const entry = entries[i] as { type?: unknown; title?: unknown; source?: unknown; titleSource?: unknown };
+		if (entry.type !== "title" || typeof entry.title !== "string") continue;
+		const source = entry.source === "user" || entry.titleSource === "user" ? "user" : "auto";
+		return { title: entry.title, titleSource: source };
+	}
+	return {};
+}
+
+function normalizeSessionEntries(entries: FileEntry[]): FileEntry[] {
+	if (entries.length === 0) return entries;
+	if (isSessionHeader(entries[0])) return entries;
+
+	const sessionIndex = entries.findIndex(isSessionHeader);
+	if (sessionIndex < 0) return [];
+
+	const header = { ...entries[sessionIndex] } as SessionHeader;
+	if (!header.title) {
+		const recoveredTitle = recoverLeadingTitle(entries, sessionIndex);
+		if (recoveredTitle.title) {
+			header.title = recoveredTitle.title;
+			header.titleSource = recoveredTitle.titleSource;
+		}
+	}
+	return [header, ...entries.slice(sessionIndex + 1)];
+}
+
 /** Exported for testing */
 export async function loadEntriesFromFile(
 	filePath: string,
@@ -25,15 +57,7 @@ export async function loadEntriesFromFile(
 		throw err;
 	}
 	const entries = parseJsonlLenient<FileEntry>(content);
-
-	// Validate session header
-	if (entries.length === 0) return entries;
-	const header = entries[0] as SessionHeader;
-	if (header.type !== "session" || typeof header.id !== "string") {
-		return [];
-	}
-
-	return entries;
+	return normalizeSessionEntries(entries);
 }
 
 /**
