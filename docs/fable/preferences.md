@@ -31,8 +31,8 @@ Fable is scarce. Default to delegating to cheaper/capable workers. Current subsc
 | Resource | When to use |
 |---|---|
 | **Anthropic Max 20x / Fable** | High-level synthesis, taste, prioritization, orchestration. Do not burn on implementation. |
-| **Codex 20x Max / GPT-5.5 Pro / deep-research** | Complex implementation, logic, architecture, review, and deep-research tasks. |
-| **GPT-5.5 logic lane** | Implementation-heavy reasoning where Codex/GPT-5.5 is the strongest fit. |
+| **Codex 20x Max / GPT-5.5 Pro / deep-research** | Complex implementation, logic, architecture review, and deep-research tasks. Do not rely on GPT as the main prompt-writing/taste layer; Arthur finds it too literal/myopic for prompt craft. |
+| **GPT-5.5 logic lane** | Implementation-heavy reasoning and code changes where Codex/GPT-5.5 is the strongest fit. |
 | **Opus** | Design/UX/visual strength when taste and craft matter most. |
 | **Kimi cheap worker** | Bounded implementation/review/fallback when Gemini/Codex are unavailable or cost-sensitive. |
 | **Gemini Flash cheap worker** | Cheap read-only scouts, decomposition, cataloging, and non-core research. Default to Antigravity OAuth (`google-antigravity/gemini-3.5-flash-low`) for Jimeng/Gemini orchestration so paid API quota is not silently burned. |
@@ -43,7 +43,10 @@ Fable is scarce. Default to delegating to cheaper/capable workers. Current subsc
 ## OMP advisor / subagent policy
 
 - **Do not spawn Fable subagents.** Fable is the single high-level orchestrator per session. If a subagent is needed, spawn a cheaper, bounded worker (`kimi-implementer`, `gpt-implementer`, `gemini-3.5-flash`, `explore`, `reviewer`, etc.) with an explicit, scoped assignment.
-- The global OMP default advisor is `deepseek/deepseek-v4-pro` with `advisor.subagents true`; keep that for lower-level advisor work. Fable overrides only when Arthur invokes it directly.
+- **No main-session advisor for Fable.** Do not wrap Fable in a weaker advisor loop.
+- **DeepSeek is not the default Fable advisor.** Use it only as an explicit, bounded cross-check when it is actually useful; prefer subscription-backed coding lanes before burning paid API quota.
+- **Prompt craft is a taste task.** Fable should write or directly supervise high-level prompts and orchestration prompts. GPT workers can implement, test, and refactor, but should not be trusted as the final taste/prompt author without review.
+- **Default chat bridge is Discord only.** Slack and Telegram agent-server surfaces may remain as dormant code/history, but the default OMP harness should register Discord as the active chat bridge.
 - Use `task` subagents for parallel, bounded slices; use `explore` for read-only codebase scouts; use `reviewer` for adversarial/security passes.
 - Keep subagent assignments concrete: exact files, non-goals, acceptance criteria, and model routing.
 

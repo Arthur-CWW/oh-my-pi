@@ -230,8 +230,10 @@ export async function exportSessionToHtml(
 	}
 
 	const html = await generateHtml(sessionData, opts.themeName);
-	const outputPath = opts.outputPath || `${APP_NAME}-session-${path.basename(sessionFile, ".jsonl")}.html`;
+	const outputPath =
+		opts.outputPath || path.join(".omp", `${APP_NAME}-session-${path.basename(sessionFile, ".jsonl")}.html`);
 
+	await fs.mkdir(path.dirname(outputPath), { recursive: true });
 	await Bun.write(outputPath, html);
 	return outputPath;
 }
@@ -259,8 +261,10 @@ export async function exportFromFile(inputPath: string, options?: ExportOptions 
 	}
 
 	const html = await generateHtml(sessionData, opts.themeName);
-	const outputPath = opts.outputPath || `${APP_NAME}-session-${path.basename(inputPath, ".jsonl")}.html`;
+	const outputPath =
+		opts.outputPath || path.join(".omp", `${APP_NAME}-session-${path.basename(inputPath, ".jsonl")}.html`);
 
+	await fs.mkdir(path.dirname(outputPath), { recursive: true });
 	await Bun.write(outputPath, html);
 	return outputPath;
 }

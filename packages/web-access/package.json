@@ -21,8 +21,7 @@
     "pi-web-search": "./src/cli.ts",
     "pi-chatgpt": "./src/chatgpt-cli.ts",
     "pi-llm-browser": "./src/frontend-browser-cli.ts",
-    "pi-cockpit": "./src/agent-cockpit-cli.ts",
-    "pi-slack-agent-server-gateway": "./src/slack-agent-server-gateway.boundary.ts"
+    "pi-cockpit": "./src/agent-cockpit-cli.ts"
   },
   "files": [
     "src",

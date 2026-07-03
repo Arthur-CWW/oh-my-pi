@@ -74,12 +74,8 @@ git add apps/slotok-workbench/ browser-extensions/ docs/ oh-my-pi/ \
   ':(exclude)packages/spatial-audio-renderer/test-output/' \
   ':(exclude)packages/web-access/src/discord-agent-server*' \
   ':(exclude)packages/web-access/src/godmode.ts' \
-  ':(exclude)packages/web-access/src/slack-agent-server*' \
-  ':(exclude)packages/web-access/src/telegram-agent-server*' \
   ':(exclude)packages/web-access/src/wise-statements.ts' \
   ':(exclude)packages/web-access/test/discord-agent-server.test.ts' \
-  ':(exclude)packages/web-access/test/slack-agent-server.test.ts' \
-  ':(exclude)packages/web-access/test/telegram-agent-server.test.ts' \
   ':(exclude)packages/web-access/test/wise-statements.test.ts' \
   ':(exclude)docs/qa/vphone-red-blue-20260625.md' \
   ':(exclude)docs/plans/vphone-red-blue-goal.md' \
@@ -126,7 +122,7 @@ These should **not** be committed without explicit review:
 
 - `.omp/mcp.archived-porkbun.json` — likely archived credentials; keep untracked.
 - `skills/design/impeccable-design-review/` — on‑disk but removed from default profile; decide keep vs. delete.
-- `packages/web-access/src/discord-agent-server.ts`, `slack-agent-server.ts`, `telegram-agent-server.ts`, `godmode.ts`, `wise-statements.ts` — external service, jailbreak, and financial API implementations; leave for separate review.
+- `packages/web-access/src/discord-agent-server.ts`, `godmode.ts`, `wise-statements.ts` — external service, jailbreak, and financial API implementations; leave for separate review.
 - `packages/proxy-lab/` — proxy provider matrix and scenarios; separate review.
 - `docs/plans/reverse-engineering-lab.md`, `docs/plans/residential-proxy-sourcing.md`, `docs/plans/jimeng-frontend-api-reversal.md`, `docs/research/vibe_re_xsql.md` — reverse‑engineering / proxy domain docs; bulk commit is OK, but do not feed them into Fable context.
 
