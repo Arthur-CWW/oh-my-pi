@@ -3,7 +3,6 @@ import { type PtyRunResult, PtySession } from "@oh-my-pi/pi-natives";
 import {
 	type Component,
 	extractPrintableText,
-	matchesKey,
 	padding,
 	parseKey,
 	parseKittySequence,
@@ -15,6 +14,7 @@ import type * as XtermModule from "@xterm/headless";
 import type { Terminal as XtermTerminalType } from "@xterm/headless";
 import { Settings } from "../config/settings";
 import type { Theme } from "../modes/theme/theme";
+import { matchesAppInterrupt } from "../modes/utils/keybinding-matchers";
 import { OutputSink, type OutputSummary } from "../session/streaming-output";
 import { sanitizeWithOptionalSixelPassthrough } from "../utils/sixel";
 import { resolveOutputMaxColumns, resolveOutputSinkHeadBytes } from "./output-meta";
@@ -201,7 +201,7 @@ class BashInteractiveOverlayComponent implements Component {
 	}
 
 	handleInput(data: string): void {
-		if (this.#state === "running" && (matchesKey(data, "escape") || matchesKey(data, "esc"))) {
+		if (this.#state === "running" && matchesAppInterrupt(data)) {
 			this.#onDismiss();
 			return;
 		}

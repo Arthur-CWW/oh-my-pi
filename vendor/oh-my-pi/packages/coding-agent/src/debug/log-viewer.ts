@@ -1,13 +1,6 @@
-import {
-	type Component,
-	extractPrintableText,
-	matchesKey,
-	padding,
-	replaceTabs,
-	truncateToWidth,
-	visibleWidth,
-} from "@oh-my-pi/pi-tui";
+import { type Component, extractPrintableText, padding, replaceTabs, truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui";
 import { sanitizeText } from "@oh-my-pi/pi-utils";
+import { matchesAppInterrupt } from "../modes/utils/keybinding-matchers";
 import { theme } from "../modes/theme/theme";
 import { copyToClipboard } from "../utils/clipboard";
 import {
@@ -501,7 +494,7 @@ export class DebugLogViewerComponent implements Component {
 	}
 
 	handleInput(keyData: string): void {
-		if (matchesKey(keyData, "escape") || matchesKey(keyData, "esc")) {
+		if (matchesAppInterrupt(keyData)) {
 			this.#onExit();
 			return;
 		}

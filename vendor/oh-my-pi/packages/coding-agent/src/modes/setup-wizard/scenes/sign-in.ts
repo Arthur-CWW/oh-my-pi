@@ -4,6 +4,7 @@ import type { OAuthProvider } from "@oh-my-pi/pi-ai/oauth/types";
 import { Input, matchesKey, type SgrMouseEvent, wrapTextWithAnsi } from "@oh-my-pi/pi-tui";
 import { getAgentDbPath } from "@oh-my-pi/pi-utils";
 import { OAuthSelectorComponent } from "../../components/oauth-selector";
+import { matchesAppInterrupt } from "../../utils/keybinding-matchers";
 import { theme } from "../../theme/theme";
 import type { SetupSceneHost, SetupTab } from "./types";
 
@@ -62,7 +63,7 @@ export class SignInTab implements SetupTab {
 
 	handleInput(data: string): void {
 		if (this.#loggingInProvider) {
-			if (matchesKey(data, "escape") || matchesKey(data, "ctrl+c")) {
+			if (matchesAppInterrupt(data) || matchesKey(data, "ctrl+c")) {
 				this.#loginAbort?.abort();
 			}
 			return;

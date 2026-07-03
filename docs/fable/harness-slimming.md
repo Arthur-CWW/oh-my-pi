@@ -14,16 +14,13 @@ This is a **default slim profile** for the root `pi.skills` manifest. It trims n
 | `./vendor/badlogic/pi-skills/gccli` | Google Workspace CLI |
 | `./vendor/badlogic/pi-skills/gdcli` | Google Workspace CLI |
 | `./vendor/badlogic/pi-skills/gmcli` | Google Workspace CLI |
-| `./skills/provider/jimeng-browser-proxy` | Jimeng UGC / provider workflows |
 | `./skills/core/librarian` | Research / library lookup |
 | `./skills/browser/llm-frontend-browser` | LLM frontend browser access |
 | `./skills/core/oracle` | Cross-check / advisory review |
 | `./skills/core/proof-of-work-qa` | Proof-of-work QA artifacts |
-| `./skills/media/remotion` | Remotion / video generation |
 | `./skills/core/rubber-duck-adversarial` | Adversarial critique / sanity checks |
 | `./skills/core/source-archive` | Source archive / reference capture |
 | `./vendor/badlogic/pi-skills/transcribe` | Transcribe / audio-to-text |
-| `./skills/provider/twitter-x-context` | Twitter / X context |
 | `./vendor/badlogic/pi-skills/youtube-transcript` | YouTube transcript extraction |
 | `./packages/borges-library/skills/borges-library` | Book / creative reference library |
 
@@ -55,7 +52,6 @@ These were removed from the default profile but remain available on disk. If a w
 | `./skills/research/used-hardware-buying-research` | Used hardware |
 | `./vendor/badlogic/pi-skills/vscode` | VSCode |
 | `./skills/research/emusks-research` | One-off research |
-| `./skills/design/impeccable-design-review` | Design review |
 
 ## 3. Advisor & model routing slimming
 
@@ -136,6 +132,37 @@ The manifest slim above was only one of several discovery sources; sessions stil
 | `~/.omp/agent/managed-skills/` (25 autolearn-generated) | `~/.omp/agent/managed-skills-archive/` | archive-noisy-mcp-server, cmux-workstream-orchestration, hanly-playcover-permissive-patch, mobile-app-protocol-reveng, omp-print-prompt-file-runner, omp-slack-agent-server, proxmark3-macos-debug, symphony-elixir-otp-spike, tailscale-ssh-auth-browser, telegram-cloud-archive, vim-lite-parity-debugging, voiceink-permission-ux, vphone-cli-safe-amfi, vphone-mcp-vendoring, vphone-red-blue-lab, zig-cache-cleanup (16); kept 9 durable ones (arthur-*, writing-without-ai-tells, ai-companion-rtc-testbed, audio-diarization-pipeline, browser-context-sync, sideline-annotation-card, wrapped-commentary-learning-card-db, agent-skill-vendoring) |
 
 Notes: `managed-skills/` is autolearn's store — autolearn is disabled but its generated skills still load, so this dir needs a re-check whenever autolearn is ever re-enabled. Remaining known duplication: ~23 entries in `~/.omp/agent/skills/` overlap the repo manifest for `~/agents` sessions (deduped by name at load, but they also serve non-agents workspaces — left in place deliberately).
+
+## Stream-local skill split (2026-07-03)
+
+Stream-specific skills now live beside the stream that owns them. Global `pi.skills` keeps cross-stream tools only; stream sessions opt into local skills through `skills.customDirectories` in a `--config` overlay.
+
+| Stream | Old path | New path |
+|---|---|---|
+| playground | `skills/provider/jimeng-browser-proxy` | `streams/playground/skills/jimeng-browser-proxy` |
+| playground | `skills/media/remotion` | `streams/playground/skills/remotion` |
+| playground | `skills/design/impeccable-design-review` | `streams/playground/skills/impeccable-design-review` |
+| primer | `skills/provider/twitter-x-context` | `streams/primer/skills/twitter-x-context` |
+| primer | `~/.omp/agent/managed-skills/browser-context-sync` | `streams/primer/skills/browser-context-sync` |
+| primer | `~/.omp/agent/managed-skills/sideline-annotation-card` | `streams/primer/skills/sideline-annotation-card` |
+| primer | `~/.omp/agent/managed-skills/wrapped-commentary-learning-card-db` | `streams/primer/skills/wrapped-commentary-learning-card-db` |
+| primer | `~/.omp/agent/managed-skills/audio-diarization-pipeline` | `streams/primer/skills/audio-diarization-pipeline` |
+| companion | `~/.omp/agent/managed-skills/ai-companion-rtc-testbed` | `streams/companion/skills/ai-companion-rtc-testbed` |
+| harness | `skills/core/spec-driven-overlays` | `streams/harness/skills/spec-driven-overlays` |
+| harness | `~/.omp/agent/skills/hermes-omp-bridge` | `streams/harness/skills/hermes-omp-bridge` |
+| harness | `~/.omp/agent/skills/hermes-skill-porting` | `streams/harness/skills/hermes-skill-porting` |
+| harness | `~/.omp/agent/managed-skills/agent-skill-vendoring` | `streams/harness/skills/agent-skill-vendoring` |
+| attic | `skills/research/emusks-research` | `skills-attic/research/emusks-research` |
+| attic | `skills/research/reveng` | `skills-attic/research/reveng` |
+| attic | `skills/research/used-hardware-buying-research` | `skills-attic/research/used-hardware-buying-research` |
+
+Config mechanism: OMP exposes `skills.customDirectories` as an array setting, passes explicit `--config` overlays into `Settings.init`, merges those overlays after global/project config, and scans each custom directory as a `custom:user` skill source. Arrays replace rather than concatenate during merge, so each overlay enumerates every custom directory it needs: `.omp/fable-config.yml` lists harness skills, and `.omp/{companion,playground,primer}-config.yml` list both harness and stream-local skills.
+
+Restore steps:
+
+1. Move the directory back from its `streams/<stream>/skills/` or `skills-attic/research/` path to the old path above.
+2. If the skill should be global again, add its path back to `package.json` `pi.skills`; otherwise keep it out of `pi.skills` and load it through the relevant `.omp/<stream>-config.yml`.
+3. For home-origin skills, move the directory back to `~/.omp/agent/skills/` or `~/.omp/agent/managed-skills/` if it must be global outside this repo.
 
 ## 4. How to restore a removed skill
 

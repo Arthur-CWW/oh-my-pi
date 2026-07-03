@@ -1,72 +1,40 @@
 # AGENTS.md
 
-## Project
+## What this is
 
-Personal browser-extension monorepo for agent-facing browser tooling.
+`browser-extensions` is a pnpm monorepo for agent-facing Chrome/Firefox/Helium extensions, replay tools, and browser API reverse-engineering helpers.
 
-Primary goals:
+Keep extension packages under `extensions/`, shared code under `packages/`, local daemons/CLIs under `tools/`, workflow skills under `skills/`, and copied target-extension source under `reveng/`.
 
-- Build many small Chrome/Firefox/Helium extensions under `extensions/`.
-- Share protocol/storage/replay code under `packages/`.
-- Put local CLIs, agent bridges, and smoke tools under `tools/` or `scripts/`.
-- Prefer background-safe browser automation: do not steal user focus unless asked.
-
-## Layout
-
-```text
-extensions/            Browser extensions, one package per extension
-packages/              Shared TypeScript libraries used by extensions/tools
-skills/                Agent skills and skill-specific TypeScript helpers
-tools/                 Local daemons/CLIs for agents and native bridges
-reveng/   Unpacked extension case studies and source snapshots
-scripts/               Repo-level build/check/smoke scripts
-docs/                  Architecture notes and operational how-tos
-```
-
-## Commands
+## Build and verify
 
 ```bash
-pnpm build       # build all packages/extensions with a build script
-pnpm typecheck   # typecheck all packages/extensions with a typecheck script
-pnpm check       # run all package checks
-pnpm test        # run package tests when present
+pnpm build                         # recursive package builds
+pnpm typecheck                     # recursive typechecks
+pnpm check                         # recursive package checks
+pnpm test                          # recursive package tests
+pnpm zip:x-bookmark-sync-devtools  # build + zip X bookmark DevTools extension
+pnpm smoke:illiterati-tts          # build + smoke illiterati TTS
+pnpm skill:reverse-engineer        # analyze reveng/vidiq-vision
 ```
 
-Extension-specific:
+Use `pnpm --filter <package> <script>` for one extension/tool; verify the script exists in that package first.
 
-```bash
-pnpm --filter x-bookmark-sync-devtools build
-pnpm --filter x-bookmark-sync-devtools check
-pnpm --filter x-bookmark-sync-devtools zip
-pnpm --filter dev-browser-extension build
-pnpm --filter illiterati-tts build
-pnpm --filter illiterati-tts smoke
-pnpm skill:reverse-engineer
-```
+## Invariants
 
-## Reverse engineering rule
+- Browser automation stays background-safe. Do not steal user focus unless explicitly asked.
+- Do not use `page.bringToFront()`, `Target.activateTarget`, AppleScript `activate`, macOS Accessibility click/type automation, or foreground `open` without `-g`.
+- Prefer a dedicated automation browser/profile, CDP/BiDi, DOM evaluation, CDP input events, `Target.createTarget({ background: true })`, `open -g -na "Helium" --args ...`, or an AeroSpace quarantine workspace when a window is unavoidable.
+- Keep copied third-party extension source in `reveng/`; promote reusable code to `packages/` and agent workflow instructions to `skills/`.
+- Dependencies are personal-tooling pragmatic but intentional. Share a package when more than one extension needs the same code.
 
-Keep copied third-party or target extension source under `reveng/`. Move reusable code into `packages/`, and keep agent workflow instructions under `skills/`.
+## Orientation
 
-## Browser automation rule
-
-Use a dedicated automation browser/profile and CDP/BiDi. Avoid foreground UI automation.
-
-Do not use:
-
-- `page.bringToFront()`
-- `Target.activateTarget`
-- AppleScript `activate`
-- macOS Accessibility click/type automation
-- launching URLs with `open` unless using `-g`
-
-Prefer:
-
-- `open -g -na "Helium" --args ...`
-- `Target.createTarget({ background: true })`
-- DOM evaluation and CDP input events
-- an AeroSpace quarantine workspace for unavoidable browser windows
-
-## Dependency policy
-
-This is personal tooling, but keep direct dependencies intentional. Prefer shared libraries in `packages/` when more than one extension needs the same code.
+| What | Where |
+|---|---|
+| Extension packages | `extensions/` |
+| Shared libraries | `packages/` |
+| Agent skills | `skills/` |
+| Local tools and bridges | `tools/` |
+| Reverse-engineering snapshots | `reveng/` |
+| Architecture/testing/background automation notes | `docs/` |

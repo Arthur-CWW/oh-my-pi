@@ -52,6 +52,13 @@ describe("KeybindingsManager", () => {
 		expect(newLineKeys).toContain("shift+enter");
 	});
 
+	it("ships Ghostty macOS Option-arrow aliases for word navigation", () => {
+		const keybindings = new KeybindingsManager(TUI_KEYBINDINGS);
+
+		expect(keybindings.getKeys("tui.editor.cursorWordLeft")).toContain("super+alt+left");
+		expect(keybindings.getKeys("tui.editor.cursorWordRight")).toContain("super+alt+right");
+	});
+
 	it("exports the canonical alias helpers used by matching", () => {
 		const aliases = new Set<string>();
 		for (const key of ["esc", "return", "?", "shift+a"] as const) {

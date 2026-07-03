@@ -1,4 +1,5 @@
 import { matchesKey, replaceTabs, ScrollView, Text, truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui";
+import { matchesAppInterrupt } from "../modes/utils/keybinding-matchers";
 import type { Theme } from "../modes/theme/theme";
 import { formatElapsed, formatNum, isBetter } from "./helpers";
 import { currentResults, findBaselineMetric, findBaselineRunNumber, findBaselineSecondary } from "./state";
@@ -91,7 +92,7 @@ export function createDashboardController(): DashboardController {
 								(runtime.runningExperiment ? 1 : 0);
 							const viewportRows = Math.max(4, (process.stdout.rows ?? 40) - 4);
 							const maxScroll = Math.max(0, totalRows - viewportRows);
-							if (matchesKey(data, "escape") || matchesKey(data, "esc") || data === "q") {
+							if (matchesAppInterrupt(data) || data === "q") {
 								done(undefined);
 								return;
 							}

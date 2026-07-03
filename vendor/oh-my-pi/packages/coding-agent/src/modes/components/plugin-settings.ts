@@ -31,18 +31,19 @@ import {
 } from "../../extensibility/plugins/marketplace";
 import type { InstalledPlugin, PluginSettingSchema } from "../../extensibility/plugins/types";
 import { getSelectListTheme, getSettingsListTheme, theme } from "../../modes/theme/theme";
+import { matchesAppInterrupt } from "../../modes/utils/keybinding-matchers";
 import { shortenPath } from "../../tools/render-utils";
 import { DynamicBorder } from "./dynamic-border";
 
 /**
- * Forwards a keystroke to `input`, but cancels via `onCancel` when the user presses Escape.
+ * Forwards a keystroke to `input`, but cancels via the configured app interrupt key.
  */
 export function handleInputOrEscape(
 	data: string,
 	input: { handleInput(data: string): void },
 	onCancel: () => void,
 ): void {
-	if (data === "\x1b" || data === "\x1b\x1b") {
+	if (matchesAppInterrupt(data)) {
 		onCancel();
 		return;
 	}
@@ -725,11 +726,10 @@ export class PluginSettingsComponent extends Container {
 
 	handleInput(data: string): void {
 		if (!this.#viewComponent) {
-			// The list view mounts asynchronously (npm + marketplace listing).
 			// Until it does — or if listing rejected and no view ever mounted —
-			// Escape must still close the panel instead of leaving /settings
-			// non-dismissible.
-			if (data === "\x1b" || data === "\x1b\x1b") {
+			// the configured interrupt key must still close the panel instead of
+			// leaving /settings non-dismissible.
+			if (matchesAppInterrupt(data)) {
 				this.callbacks.onClose();
 			}
 			return;

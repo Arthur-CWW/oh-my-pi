@@ -46,7 +46,7 @@ import { replaceTabs, TRUNCATE_LENGTHS, truncateToWidth } from "../../tools/rend
 import { canonicalizeMessage } from "../../utils/thinking-display";
 import type { ObservableSession, SessionObserverRegistry } from "../session-observer-registry";
 import { getEditorTheme, theme } from "../theme/theme";
-import { matchesSelectDown, matchesSelectUp } from "../utils/keybinding-matchers";
+import { matchesAppInterrupt, matchesSelectDown, matchesSelectUp } from "../utils/keybinding-matchers";
 import { createAdvisorMessageCard } from "./advisor-message";
 import { AssistantMessageComponent } from "./assistant-message";
 import { createBackgroundTanDispatchBlock } from "./background-tan-message";
@@ -563,7 +563,7 @@ export class AgentHubOverlayComponent extends Container {
 	}
 
 	#handleTableInput(keyData: string): void {
-		if (matchesKey(keyData, "escape")) {
+		if (matchesAppInterrupt(keyData)) {
 			this.#onDone();
 			return;
 		}
@@ -855,7 +855,7 @@ export class AgentHubOverlayComponent extends Container {
 	#handleChatInput(keyData: string): void {
 		const editorEmpty = this.#editor.getText().trim() === "";
 
-		if (matchesKey(keyData, "escape")) {
+		if (matchesAppInterrupt(keyData)) {
 			if (!editorEmpty) {
 				this.#editor.setText("");
 				this.#requestRender();

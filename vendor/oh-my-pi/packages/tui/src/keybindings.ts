@@ -66,11 +66,11 @@ export const TUI_KEYBINDINGS = {
 		description: "Move cursor right",
 	},
 	"tui.editor.cursorWordLeft": {
-		defaultKeys: ["alt+left", "ctrl+left", "alt+b"],
+		defaultKeys: ["alt+left", "ctrl+left", "super+alt+left", "alt+b"],
 		description: "Move cursor word left",
 	},
 	"tui.editor.cursorWordRight": {
-		defaultKeys: ["alt+right", "ctrl+right", "alt+f"],
+		defaultKeys: ["alt+right", "ctrl+right", "super+alt+right", "alt+f"],
 		description: "Move cursor word right",
 	},
 	"tui.editor.cursorLineStart": {

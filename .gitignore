@@ -113,3 +113,6 @@ streams/*/inspiration/
 streams/*/feedstock/
 streams/*/repos/
 streams/primer/wrapped-commentary-reader/
+
+# ToS-removed content (archived locally, never committed)
+.archive/

@@ -103,16 +103,13 @@
       "./vendor/badlogic/pi-skills/gccli",
       "./vendor/badlogic/pi-skills/gdcli",
       "./vendor/badlogic/pi-skills/gmcli",
-      "./skills/provider/jimeng-browser-proxy",
       "./skills/core/librarian",
       "./skills/browser/llm-frontend-browser",
       "./skills/core/oracle",
       "./skills/core/proof-of-work-qa",
-      "./skills/media/remotion",
       "./skills/core/rubber-duck-adversarial",
       "./skills/core/source-archive",
       "./vendor/badlogic/pi-skills/transcribe",
-      "./skills/provider/twitter-x-context",
       "./vendor/badlogic/pi-skills/youtube-transcript",
       "./packages/borges-library/skills/borges-library"
     ]

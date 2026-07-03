@@ -1,6 +1,6 @@
-# Fable session overlay.
-# Use with: omp --config ./.omp/fable-config.yml --model <actual-fable-model-id>
-# Do not put the Fable model ID here until it is known; pass it at launch time.
+# Companion stream session overlay.
+# Use with: omp --config ./.omp/companion-config.yml --model <model-id>
+# Starts from ./.omp/fable-config.yml and adds companion-local skills.
 
 modelRoles:
   # GPT-5.5 medium = small/bounded tasks; :high = harder work.
@@ -39,7 +39,7 @@ providers:
 autolearn:
   enabled: false
 
-
 skills:
   customDirectories:
     - ./streams/harness/skills
+    - ./streams/companion/skills

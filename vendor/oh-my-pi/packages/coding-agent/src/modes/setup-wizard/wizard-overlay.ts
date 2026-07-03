@@ -1,6 +1,7 @@
 import { type Component, matchesKey, padding, parseSgrMouse, truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui";
 import { APP_NAME } from "@oh-my-pi/pi-utils";
 import { gradientLogo, PI_LOGO } from "../components/welcome";
+import { matchesAppInterrupt } from "../utils/keybinding-matchers";
 import { theme } from "../theme/theme";
 import type { InteractiveModeContext } from "../types";
 import { renderSetupOutro, SETUP_OUTRO_MS } from "./scenes/outro";
@@ -102,7 +103,7 @@ export class SetupWizardComponent implements Component {
 				matchesKey(data, "enter") ||
 				matchesKey(data, "return") ||
 				matchesKey(data, "space") ||
-				matchesKey(data, "escape")
+				matchesAppInterrupt(data)
 			) {
 				this.#beginScene();
 			}
@@ -113,7 +114,7 @@ export class SetupWizardComponent implements Component {
 				matchesKey(data, "enter") ||
 				matchesKey(data, "return") ||
 				matchesKey(data, "space") ||
-				matchesKey(data, "escape")
+				matchesAppInterrupt(data)
 			) {
 				this.#complete();
 			}
