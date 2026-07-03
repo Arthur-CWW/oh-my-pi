@@ -1,75 +1,61 @@
-import { json } from "@codemirror/lang-json";
-import { oneDark } from "@codemirror/theme-one-dark";
-import { EditorView, basicSetup } from "codemirror";
+// ---------------------------------------------------------------------------
+// Scene Playground — main orchestrator
+// Preserves: reports view, SSE, markdown renderer, all existing routes/panes
+// New: studio v2 with tree, inspector, viewport, timeline, source, keymap
+// ---------------------------------------------------------------------------
 
-type AssetKind = "image" | "audio" | "video";
-type JsonPrimitive = string | number | boolean | null;
-type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
-type JsonObject = { [key: string]: JsonValue };
+import "./error-report";
 
-interface SpecEntry {
-  path: string;
-  mtime: string;
-  bytes: number;
-}
+import {
+  type AssetEntry,
+  type JsonValue,
+  type ReportEntry,
+  type RenderEntry,
+  type SceneSpec,
+  type Selection,
+  type SpecEntry,
+  addObject,
+  addOrEnsureAsset,
+  clamp,
+  createDebounce,
+  escapeHtml,
+  moveKeyframe,
+  parseSpec,
+  rewriteAssetsForPreview,
+  serializeSpec,
+  specDurationInFrames,
+  stemFromPath,
+} from "./studio/state";
+import { renderTree, type TreeCallbacks } from "./studio/tree";
+import { renderInspector, type InspectorCallbacks } from "./studio/inspector";
+import { createViewport, type ViewportHandle } from "./studio/viewport";
+import { renderTimeline, type TimelineCallbacks } from "./studio/timeline";
+import { createSourceEditor, getDoc, setDoc, setDirtyDot, setSpecLabel, type SourceState } from "./studio/source";
+import { applyDelete, KEYMAP_HELP, mapKey } from "./studio/keymap";
+import { mountLabelView, unmountLabelView, handleLabelKeydown, labelCss } from "./label/view";
 
-interface AssetEntry {
-  path: string;
-  kind: AssetKind;
-  bytes: number;
-}
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
 
-interface RenderEntry {
-  path: string;
-  mtime: string;
-  bytes: number;
-  manifest: JsonValue | null;
-}
+let spec: SceneSpec | null = null;
+let selection: Selection = { type: "none" };
+let selectedSpecPath = "";
+let playing = true;
+let currentFrame = 0;
+let currentView: "reports" | "studio" | "label" = "reports";
+let studioInitialized = false;
+let specsList: SpecEntry[] = [];
+let filesystemAssets: AssetEntry[] = [];
+let sourceState: SourceState | null = null;
+let viewportHandle: ViewportHandle | null = null;
+let helpVisible = false;
 
-interface ReportEntry {
-  path: string;
-  title: string;
-  date: string;
-  agent: string;
-  status: string;
-  excerpt: string;
-  media: string[];
-  mtime: string;
-}
+const DEBOUNCE_MS = 150;
 
-interface SceneRuntimeGlobal {
-  init(spec: JsonValue, opts: { width: number; height: number; fps: number; assetBaseUrl: string }): Promise<void>;
-  renderFrame(frame: number): void;
-  durationInFrames(): number;
-  start(): void;
-  stop(): void;
-}
-
-interface SceneAsset extends JsonObject {
-  id: string;
-  kind: string;
-  path: string;
-}
-
-interface SceneTimeline extends JsonObject {
-  bpm?: number;
-  beats?: number[];
-}
-
-interface SceneSpec extends JsonObject {
-  width: number;
-  height: number;
-  fps: number;
-  durationSeconds: number;
-  assets?: SceneAsset[];
-  timeline?: SceneTimeline;
-}
-
-declare global {
-  interface Window {
-    SceneRuntime?: SceneRuntimeGlobal;
-  }
-}
+// ---------------------------------------------------------------------------
+// DOM shell
+// ---------------------------------------------------------------------------
 
 const app = document.querySelector<HTMLDivElement>("#app");
 if (app === null) throw new Error("#app missing");
@@ -80,61 +66,152 @@ app.innerHTML = `
     <span class="brand">scene playground</span>
     <button class="nav-btn active" data-view="reports">reports</button>
     <button class="nav-btn" data-view="studio">studio</button>
-  </nav>
+    <button class="nav-btn" data-view="label">label</button>
   <section id="reports-view" class="reports-view">
-    <div id="report-feed" class="report-feed muted">loading reports…</div>
+    <div id="report-feed" class="report-feed muted">loading reports\u2026</div>
   </section>
-  <div id="studio-view" class="studio-view" style="display:none">
-    <aside class="rail left">
-      <div class="panel"><div class="panel-title">specs</div><div id="spec-list" class="list muted">loading…</div></div>
-      <div class="panel grow"><div class="panel-title">assets</div><div id="asset-list" class="tree muted">loading…</div></div>
+  <div id="studio-view" class="studio-view hidden">
+    <aside class="rail left" id="tree-rail">
+      <div id="tree-container" class="tree-container"></div>
     </aside>
     <section class="stage-col">
       <div id="runtime-state" class="runtime-state">runtime pending</div>
       <div id="preview" class="preview"></div>
-      <div class="transport">
-        <button id="play-toggle">pause</button>
-        <input id="scrub" type="range" min="0" max="0" value="0" />
-        <span id="beat" class="beat">beat</span>
-        <span id="frame-readout">0 / 0</span>
-      </div>
-      <div class="panel renders"><div class="panel-title">renders</div><div id="render-list" class="render-list muted">loading…</div></div>
+      <div id="transport" class="transport"></div>
+      <div id="timeline-container" class="timeline-container"></div>
     </section>
-    <aside class="rail right">
-      <div class="editor-head"><span id="current-spec">no spec selected</span><button id="save-spec">save</button></div>
-      <div id="editor" class="editor"></div>
+    <aside class="rail right" id="inspector-rail">
+      <div class="inspector-wrap">
+        <div class="panel-title">Inspector</div>
+        <div id="inspector-container" class="inspector-container"></div>
+      </div>
+      <div class="source-wrap">
+        <div id="editor-head" class="editor-head"></div>
+        <div id="editor-container" class="editor-container"></div>
+      </div>
     </aside>
   </div>
-  <footer id="status">SSE: connecting…</footer>
+  <div id="label-view" class="label-view-root hidden"></div>
+  <div id="help-overlay" class="help-overlay hidden"></div>
+  <footer id="status">SSE: connecting\u2026</footer>
 `;
 
-const reportFeed = mustElement<HTMLDivElement>("report-feed");
-const specList = mustElement<HTMLDivElement>("spec-list");
-const assetList = mustElement<HTMLDivElement>("asset-list");
-const renderList = mustElement<HTMLDivElement>("render-list");
-const statusLine = mustElement<HTMLElement>("status");
-const runtimeState = mustElement<HTMLDivElement>("runtime-state");
-const preview = mustElement<HTMLDivElement>("preview");
-const playToggle = mustElement<HTMLButtonElement>("play-toggle");
-const scrub = mustElement<HTMLInputElement>("scrub");
-const beat = mustElement<HTMLSpanElement>("beat");
-const frameReadout = mustElement<HTMLSpanElement>("frame-readout");
-const currentSpec = mustElement<HTMLSpanElement>("current-spec");
-const saveSpec = mustElement<HTMLButtonElement>("save-spec");
-const reportsView = mustElement<HTMLElement>("reports-view");
-const studioView = mustElement<HTMLDivElement>("studio-view");
+const reportFeed = mustEl<HTMLDivElement>("report-feed");
+const reportsView = mustEl<HTMLElement>("reports-view");
+const studioView = mustEl<HTMLDivElement>("studio-view");
+const statusLine = mustEl<HTMLElement>("status");
+const runtimeState = mustEl<HTMLDivElement>("runtime-state");
+const preview = mustEl<HTMLDivElement>("preview");
+const treeContainer = mustEl<HTMLDivElement>("tree-container");
+const inspectorContainer = mustEl<HTMLDivElement>("inspector-container");
+const editorHead = mustEl<HTMLDivElement>("editor-head");
+const editorContainer = mustEl<HTMLDivElement>("editor-container");
+const transportContainer = mustEl<HTMLDivElement>("transport");
+const timelineContainer = mustEl<HTMLDivElement>("timeline-container");
+const helpOverlay = mustEl<HTMLDivElement>("help-overlay");
 
-let selectedSpecPath = "";
-let editor = new EditorView({
-  parent: mustElement<HTMLDivElement>("editor"),
-  doc: "",
-  extensions: [basicSetup, json(), oneDark, EditorView.lineWrapping],
-});
-let playing = true;
-let beatTimer = 0;
-let currentSpecObject: SceneSpec | null = null;
-let studioInitialized = false;
-let currentView: "reports" | "studio" = "reports";
+// ---------------------------------------------------------------------------
+// Debounced reinit pipeline
+// ---------------------------------------------------------------------------
+
+let reinitGeneration = 0;
+const reinitDebounce = createDebounce(() => void reinitPipeline(), DEBOUNCE_MS);
+
+async function reinitPipeline(): Promise<void> {
+  if (spec === null || window.SceneRuntime === undefined) return;
+  const gen = ++reinitGeneration;
+  const savedFrame = viewportHandle !== null ? viewportHandle.getFrame() : currentFrame;
+
+  window.SceneRuntime.stop();
+  const liveSpec = rewriteAssetsForPreview(spec);
+  await window.SceneRuntime.init(liveSpec as unknown as JsonValue, {
+    width: liveSpec.width, height: liveSpec.height, fps: liveSpec.fps, assetBaseUrl: "",
+  });
+
+  // Stale generation — a newer reinit was requested during await; bail
+  if (gen !== reinitGeneration) return;
+
+  const canvas = document.querySelector<HTMLCanvasElement>("canvas#scene");
+  if (canvas !== null) {
+    preview.textContent = "";
+    preview.append(canvas);
+  }
+
+  const total = specDurationInFrames(liveSpec);
+  const frame = clamp(savedFrame, 0, Math.max(0, total - 1));
+  window.SceneRuntime.renderFrame(frame);
+  currentFrame = frame;
+
+  if (playing) window.SceneRuntime.start();
+
+  runtimeState.textContent = spec.assets?.some((a) => a.kind === "videoFrames")
+    ? "runtime ready \u2014 videoFrames: offline-only" : "runtime ready";
+  runtimeState.classList.remove("error");
+
+  // Sync source editor
+  if (sourceState !== null && sourceState.mode === "editor") {
+    setDoc(sourceState.editor, serializeSpec(spec));
+  }
+
+  updateViewport();
+}
+
+// ---------------------------------------------------------------------------
+// Panel refresh
+// ---------------------------------------------------------------------------
+
+function refreshPanels(): void {
+  if (spec === null) return;
+
+  const treeCbs: TreeCallbacks = {
+    onSelect(sel) { selection = sel; refreshPanels(); if (viewportHandle !== null && sel.type === "object") viewportHandle.flashObject(); },
+    onMutate() { touchSpec(); },
+    onLoadSpec(path) { void loadSpec(path); },
+  };
+  renderTree(treeContainer, spec, selection, specsList, selectedSpecPath, filesystemAssets, treeCbs);
+
+  const inspCbs: InspectorCallbacks = { onChange() { touchSpec(true); } };
+  renderInspector(inspectorContainer, spec, selection, inspCbs);
+
+  const tlCbs: TimelineCallbacks = {
+    onSeek(frame) { seekToFrame(frame); },
+    onKeyframeDrag(objectId, trackIndex, kfIndex, newT) {
+      if (spec !== null) { moveKeyframe(spec, { objectId }, trackIndex, kfIndex, newT); reinitDebounce.schedule(); }
+    },
+  };
+  renderTimeline(timelineContainer, spec, currentFrame, selection, tlCbs);
+
+  updateViewport();
+}
+
+function updateViewport(): void {
+  if (viewportHandle !== null && spec !== null) {
+    viewportHandle.updateState(playing, currentFrame, spec);
+  }
+}
+
+function touchSpec(skipPanelRefresh = false): void {
+  if (sourceState !== null) {
+    sourceState.dirty = true;
+    setDirtyDot(editorHead, true);
+  }
+  if (!skipPanelRefresh) refreshPanels();
+  reinitDebounce.schedule();
+}
+
+function seekToFrame(frame: number): void {
+  currentFrame = frame;
+  playing = false;
+  if (window.SceneRuntime !== undefined) {
+    window.SceneRuntime.stop();
+    window.SceneRuntime.renderFrame(frame);
+  }
+  refreshPanels();
+}
+
+// ---------------------------------------------------------------------------
+// Boot
+// ---------------------------------------------------------------------------
 
 await boot();
 
@@ -144,128 +221,316 @@ async function boot(): Promise<void> {
   connectEvents();
 }
 
-async function initStudio(): Promise<void> {
-  if (studioInitialized) return;
-  studioInitialized = true;
-  await ensureRuntime();
-  await Promise.all([refreshSpecs(), refreshAssets(), refreshRenders()]);
-}
-
 function wireEvents(): void {
   for (const btn of document.querySelectorAll<HTMLButtonElement>(".nav-btn")) {
     btn.addEventListener("click", () => {
-      const target = btn.dataset.view as "reports" | "studio" | undefined;
-      if (target === undefined || target === currentView) return;
-      switchView(target);
+      const target = btn.dataset.view as "reports" | "studio" | "label" | undefined;
+      if (target !== undefined && target !== currentView) switchView(target);
     });
   }
-  saveSpec.addEventListener("click", saveCurrentSpec);
-  playToggle.addEventListener("click", () => {
-    setPlayback(!playing);
+
+  // Global keymap
+  window.addEventListener("keydown", (e) => {
+    if (currentView === "label") { handleLabelKeydown(e); return; }
+    if (currentView !== "studio") return;
+    const target = e.target;
+    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) {
+      // Inside form controls: only handle Escape
+      if (e.key === "Escape") { (target as HTMLElement).blur(); e.preventDefault(); }
+      return;
+    }
+    // Check if inside CodeMirror
+    if (target instanceof HTMLElement && target.closest(".cm-editor") !== null) return;
+
+    // Close help overlay on Escape or ?
+    if (helpVisible && (e.key === "Escape" || e.key === "?")) {
+      e.preventDefault();
+      toggleHelp();
+      return;
+    }
+
+    const action = mapKey(e.key, e.shiftKey, spec, selection);
+    switch (action.type) {
+      case "select":
+        e.preventDefault();
+        selection = action.selection;
+        refreshPanels();
+        if (viewportHandle !== null && action.selection.type === "object") viewportHandle.flashObject();
+        break;
+      case "play-toggle":
+        e.preventDefault();
+        togglePlayback();
+        break;
+      case "delete":
+        if (spec !== null) {
+          e.preventDefault();
+          selection = applyDelete(spec, selection);
+          touchSpec();
+        }
+        break;
+      case "step-frame": {
+        e.preventDefault();
+        if (spec === null) break;
+        const bpm = spec.timeline?.bpm ?? 120;
+        const step = action.big ? Math.round(spec.fps * 60 / bpm) : 1;
+        seekToFrame(clamp(currentFrame + action.direction * step, 0, Math.max(0, specDurationInFrames(spec) - 1)));
+        break;
+      }
+      case "focus-inspector":
+        e.preventDefault();
+        inspectorContainer.querySelector<HTMLElement>(".scrub-value, select, input")?.focus();
+        break;
+      case "focus-tree":
+        e.preventDefault();
+        treeContainer.querySelector<HTMLElement>(".tree-row")?.focus();
+        break;
+      case "show-help":
+        e.preventDefault();
+        toggleHelp();
+        break;
+      case "none":
+        break;
+    }
   });
-  scrub.addEventListener("input", () => {
-    if (window.SceneRuntime === undefined) return;
-    setPlayback(false);
-    const frame = Number.parseInt(scrub.value, 10);
-    window.SceneRuntime.renderFrame(frame);
-    updateFrameReadout(frame);
-  });
-  window.setInterval(updateBeatIndicator, 50);
 }
 
-function setPlayback(nextPlaying: boolean): void {
-  if (window.SceneRuntime === undefined) return;
-  window.SceneRuntime.stop();
-  playing = nextPlaying;
-  playToggle.textContent = playing ? "pause" : "play";
-  if (playing) window.SceneRuntime.start();
+function togglePlayback(): void {
+  playing = !playing;
+  if (window.SceneRuntime !== undefined) {
+    if (playing) window.SceneRuntime.start();
+    else window.SceneRuntime.stop();
+  }
+  updateViewport();
 }
 
+function toggleHelp(): void {
+  helpVisible = !helpVisible;
+  helpOverlay.classList.toggle("hidden", !helpVisible);
+  if (helpVisible) {
+    helpOverlay.innerHTML = `<div class="help-card"><h3>Keyboard Shortcuts</h3><table>${
+      KEYMAP_HELP.map(([key, desc]) => `<tr><td><kbd>${escapeHtml(key)}</kbd></td><td>${escapeHtml(desc)}</td></tr>`).join("")
+    }</table><p class="help-dismiss">Press <kbd>?</kbd> or <kbd>Esc</kbd> to close</p></div>`;
+    helpOverlay.addEventListener("click", () => toggleHelp(), { once: true });
+  }
+}
 
-function switchView(target: "reports" | "studio"): void {
+function switchView(target: "reports" | "studio" | "label"): void {
+  if (currentView === "label") unmountLabelView();
   currentView = target;
   for (const btn of document.querySelectorAll<HTMLButtonElement>(".nav-btn")) {
     btn.classList.toggle("active", btn.dataset.view === target);
   }
+  reportsView.classList.toggle("hidden", target !== "reports");
+  studioView.classList.toggle("hidden", target !== "studio");
+  const labelView = document.getElementById("label-view");
+  if (labelView !== null) labelView.classList.toggle("hidden", target !== "label");
   if (target === "reports") {
-    reportsView.style.display = "";
-    studioView.style.display = "none";
-  } else {
-    reportsView.style.display = "none";
-    studioView.style.display = "grid";
+    // Pause runtime and viewport RAF when leaving studio
+    if (window.SceneRuntime !== undefined) window.SceneRuntime.stop();
+    if (viewportHandle !== null) viewportHandle.destroy();
+    playing = false;
+  } else if (target === "studio") {
     void initStudio();
-    editor.requestMeasure();
+  } else if (target === "label") {
+    const lv = document.getElementById("label-view");
+    const st = document.getElementById("status");
+    if (lv !== null && st !== null) mountLabelView(lv, st);
   }
 }
 
 // ---------------------------------------------------------------------------
-// Reports
+// Studio init
+// ---------------------------------------------------------------------------
+
+async function initStudio(): Promise<void> {
+  if (studioInitialized) return;
+  studioInitialized = true;
+
+  await ensureRuntime();
+
+  // Fetch specs and assets in parallel
+  const [specs, assets] = await Promise.all([
+    fetchJson<SpecEntry[]>("/api/specs"),
+    fetchJson<AssetEntry[]>("/api/assets"),
+  ]);
+  specsList = specs;
+  filesystemAssets = assets;
+
+  // Create source editor
+  sourceState = createSourceEditor(editorContainer, editorHead, {
+    onSave() { void saveCurrentSpec(); },
+    onSpecParsed(text) {
+      try {
+        spec = parseSpec(text);
+        refreshPanels();
+        reinitDebounce.schedule();
+      } catch { /* invalid json, ignore */ }
+    },
+  });
+
+  // Create viewport
+  viewportHandle = createViewport(preview, transportContainer, {
+    onPlayToggle(p) {
+      playing = p;
+      if (window.SceneRuntime !== undefined) {
+        if (p) window.SceneRuntime.start();
+        else window.SceneRuntime.stop();
+      }
+    },
+    onScrub(frame) {
+      currentFrame = frame;
+      playing = false;
+      if (window.SceneRuntime !== undefined) {
+        window.SceneRuntime.stop();
+        window.SceneRuntime.renderFrame(frame);
+      }
+      updateViewport();
+    },
+    onFrameTick(frame) {
+      currentFrame = frame;
+      // Lightweight playhead update — move the SVG line without rebuilding timeline
+      const ph = timelineContainer.querySelector<SVGLineElement>(".timeline-svg line[stroke='#ff4fd8']");
+      if (ph !== null && spec !== null) {
+        const px = String((frame / spec.fps) * 60); // PX_PER_SEC = 60
+        ph.setAttribute("x1", px);
+        ph.setAttribute("x2", px);
+        // Auto-scroll playhead into view
+        const containerWidth = timelineContainer.clientWidth;
+        const pxNum = Number(px);
+        if (containerWidth > 0 && pxNum > timelineContainer.scrollLeft + containerWidth - 40) {
+          timelineContainer.scrollLeft = pxNum - containerWidth / 2;
+        }
+      }
+    },
+  });
+
+  // Handle insert-asset custom event from inspector
+  inspectorContainer.addEventListener("insert-asset", ((e: CustomEvent) => {
+    if (spec === null) return;
+    const { assetId, kind, path } = e.detail as { assetId: string; kind: string; path: string };
+    addOrEnsureAsset(spec, assetId, kind, path);
+    addObject(spec, "plane", assetId);
+    touchSpec();
+  }) as EventListener);
+
+  // Load first spec
+  if (specs.length > 0) {
+    await loadSpec(specs[0]!.path);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Spec loading / saving
+// ---------------------------------------------------------------------------
+
+async function loadSpec(path: string): Promise<void> {
+  selectedSpecPath = path;
+  const text = await fetchText(`/api/spec?path=${encodeURIComponent(path)}`);
+  try {
+    spec = parseSpec(text);
+  } catch (err) {
+    runtimeState.textContent = err instanceof Error ? err.message : "invalid JSON";
+    runtimeState.classList.add("error");
+    return;
+  }
+
+  if (sourceState !== null) {
+    setDoc(sourceState.editor, text);
+    sourceState.dirty = false;
+    setDirtyDot(editorHead, false);
+  }
+  setSpecLabel(editorHead, path);
+
+  currentFrame = 0;
+  selection = { type: "none" };
+
+  if (window.SceneRuntime !== undefined) {
+    const liveSpec = rewriteAssetsForPreview(spec);
+    window.SceneRuntime.stop();
+    await window.SceneRuntime.init(liveSpec as unknown as JsonValue, {
+      width: liveSpec.width, height: liveSpec.height, fps: liveSpec.fps, assetBaseUrl: "",
+    });
+    const canvas = document.querySelector<HTMLCanvasElement>("canvas#scene");
+    if (canvas !== null) { preview.textContent = ""; preview.append(canvas); }
+    if (playing) window.SceneRuntime.start();
+    runtimeState.textContent = spec.assets?.some((a) => a.kind === "videoFrames")
+      ? "runtime ready \u2014 videoFrames: offline-only" : "runtime ready";
+    runtimeState.classList.remove("error");
+  }
+
+  refreshPanels();
+}
+
+async function saveCurrentSpec(): Promise<void> {
+  if (selectedSpecPath.length === 0 || sourceState === null) return;
+  // If in source mode, use the source pane text; else use editor
+  const text = getDoc(sourceState.editor);
+  const response = await fetch(`/api/spec?path=${encodeURIComponent(selectedSpecPath)}`, { method: "PUT", body: text });
+  if (!response.ok) throw new Error(await response.text());
+  sourceState.dirty = false;
+  setDirtyDot(editorHead, false);
+  statusLine.textContent = `saved ${selectedSpecPath}`;
+
+  // Re-parse to keep in sync
+  try {
+    spec = parseSpec(text);
+    refreshPanels();
+    reinitDebounce.schedule();
+  } catch { /* leave spec as-is */ }
+}
+
+// ---------------------------------------------------------------------------
+// Reports (preserved from v1)
 // ---------------------------------------------------------------------------
 
 async function refreshReports(): Promise<void> {
   const reports = await fetchJson<ReportEntry[]>("/api/reports");
   reportFeed.textContent = "";
-  if (reports.length === 0) {
-    reportFeed.textContent = "no reports yet";
-    return;
-  }
-  for (const report of reports) {
-    reportFeed.append(createReportCard(report));
-  }
+  if (reports.length === 0) { reportFeed.textContent = "no reports yet"; return; }
+  for (const report of reports) reportFeed.append(createReportCard(report));
 }
 
 function createReportCard(report: ReportEntry): HTMLElement {
   const card = document.createElement("article");
   card.className = "report-card";
-
   const statusClass = report.status === "shipped" ? "status-shipped"
     : report.status === "partial" ? "status-partial"
-    : report.status === "blocked" ? "status-blocked"
-    : "";
+    : report.status === "blocked" ? "status-blocked" : "";
 
   let mediaHtml = "";
   for (const mediaPath of report.media) {
     const src = `/report?path=${encodeURIComponent(mediaPath)}`;
     const name = mediaPath.split("/").pop() ?? mediaPath;
-    if (/\.png$/i.test(name)) {
-      mediaHtml += `<img src="${escapeHtml(src)}" alt="${escapeHtml(name)}" loading="lazy" />`;
-    } else if (/\.mp4$/i.test(name)) {
-      mediaHtml += `<video src="${escapeHtml(src)}" preload="metadata" controls></video>`;
-    }
+    if (/\.png$/i.test(name)) mediaHtml += `<img src="${escapeHtml(src)}" alt="${escapeHtml(name)}" loading="lazy" />`;
+    else if (/\.mp4$/i.test(name)) mediaHtml += `<video src="${escapeHtml(src)}" preload="metadata" controls></video>`;
   }
 
   card.innerHTML = `<div class="report-head">
-      <h3 class="report-title">${escapeHtml(report.title)}</h3>
-      <div class="report-meta">
-        <time>${escapeHtml(report.date)}</time>
-        <span class="report-agent">${escapeHtml(report.agent)}</span>
-        ${statusClass.length > 0 ? `<span class="status-pill ${statusClass}">${escapeHtml(report.status)}</span>` : ""}
-      </div>
+    <h3 class="report-title">${escapeHtml(report.title)}</h3>
+    <div class="report-meta">
+      <time>${escapeHtml(report.date)}</time>
+      <span class="report-agent">${escapeHtml(report.agent)}</span>
+      ${statusClass.length > 0 ? `<span class="status-pill ${statusClass}">${escapeHtml(report.status)}</span>` : ""}
     </div>
-    <p class="report-excerpt">${escapeHtml(report.excerpt)}</p>
-    ${mediaHtml.length > 0 ? `<div class="report-media">${mediaHtml}</div>` : ""}
-    <button class="report-toggle" data-report-path="${escapeHtml(report.path)}">expand</button>
-    <div class="report-body"></div>`;
+  </div>
+  <p class="report-excerpt">${escapeHtml(report.excerpt)}</p>
+  ${mediaHtml.length > 0 ? `<div class="report-media">${mediaHtml}</div>` : ""}
+  <button class="report-toggle" data-report-path="${escapeHtml(report.path)}">expand</button>
+  <div class="report-body"></div>`;
 
   const toggle = card.querySelector<HTMLButtonElement>(".report-toggle");
   const body = card.querySelector<HTMLDivElement>(".report-body");
   if (toggle !== null && body !== null) {
     toggle.addEventListener("click", async () => {
-      if (body.classList.contains("open")) {
-        body.classList.remove("open");
-        toggle.textContent = "expand";
-        return;
-      }
+      if (body.classList.contains("open")) { body.classList.remove("open"); toggle.textContent = "expand"; return; }
       if (body.innerHTML.length === 0) {
         const md = await fetchText(`/report?path=${encodeURIComponent(report.path + "/report.md")}`);
-        const stripped = stripFrontMatter(md);
-        body.innerHTML = renderMarkdown(stripped);
+        body.innerHTML = renderMarkdown(stripFrontMatter(md));
       }
       body.classList.add("open");
       toggle.textContent = "collapse";
     });
   }
-
   return card;
 }
 
@@ -278,7 +543,7 @@ function stripFrontMatter(md: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Minimal markdown renderer
+// Minimal markdown renderer (preserved)
 // ---------------------------------------------------------------------------
 
 function renderMarkdown(md: string): string {
@@ -289,42 +554,23 @@ function renderMarkdown(md: string): string {
   const para: string[] = [];
 
   function flushParagraph(): void {
-    if (para.length > 0) {
-      out.push(`<p>${para.join(" ")}</p>`);
-      para.length = 0;
-    }
+    if (para.length > 0) { out.push(`<p>${para.join(" ")}</p>`); para.length = 0; }
   }
-
   function closeList(): void {
-    if (inList) {
-      out.push("</ul>");
-      inList = false;
-    }
+    if (inList) { out.push("</ul>"); inList = false; }
   }
 
   for (const line of lines) {
     if (inCode) {
-      if (line.trimStart().startsWith("```")) {
-        inCode = false;
-        out.push("</code></pre>");
-      } else {
-        out.push(escapeHtml(line) + "\n");
-      }
+      if (line.trimStart().startsWith("```")) { inCode = false; out.push("</code></pre>"); }
+      else out.push(escapeHtml(line) + "\n");
       continue;
     }
-
-    if (line.trimStart().startsWith("```")) {
-      flushParagraph();
-      closeList();
-      inCode = true;
-      out.push("<pre><code>");
-      continue;
-    }
+    if (line.trimStart().startsWith("```")) { flushParagraph(); closeList(); inCode = true; out.push("<pre><code>"); continue; }
 
     const headingMatch = /^(#{1,6})\s+(.+)/.exec(line);
     if (headingMatch !== null) {
-      flushParagraph();
-      closeList();
+      flushParagraph(); closeList();
       const level = headingMatch[1]!.length;
       out.push(`<h${level}>${inlineMarkdown(headingMatch[2]!)}</h${level}>`);
       continue;
@@ -333,25 +579,16 @@ function renderMarkdown(md: string): string {
     const listMatch = /^[-*]\s+(.+)/.exec(line);
     if (listMatch !== null) {
       flushParagraph();
-      if (!inList) {
-        inList = true;
-        out.push("<ul>");
-      }
+      if (!inList) { inList = true; out.push("<ul>"); }
       out.push(`<li>${inlineMarkdown(listMatch[1]!)}</li>`);
       continue;
     }
 
-    if (line.trim() === "") {
-      flushParagraph();
-      closeList();
-      continue;
-    }
-
+    if (line.trim() === "") { flushParagraph(); closeList(); continue; }
     closeList();
     para.push(inlineMarkdown(line));
   }
-  flushParagraph();
-  closeList();
+  flushParagraph(); closeList();
   if (inCode) out.push("</code></pre>");
   return out.join("");
 }
@@ -360,18 +597,24 @@ function inlineMarkdown(text: string): string {
   let result = escapeHtml(text);
   result = result.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
   result = result.replace(/`([^`]+)`/g, "<code>$1</code>");
-  result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+  result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_match, label: string, href: string) => {
+    const decoded = href.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"');
+    if (/^(https?:\/\/|\/|#|\.)/i.test(decoded)) {
+      return `<a href="${href}" target="_blank">${label}</a>`;
+    }
+    return label;
+  });
   return result;
 }
 
 // ---------------------------------------------------------------------------
-// Studio — specs, assets, renders, runtime preview
+// Runtime / SSE (preserved)
 // ---------------------------------------------------------------------------
 
 async function ensureRuntime(): Promise<void> {
   const response = await fetch("/runtime.js", { cache: "no-store" });
   if (!response.ok) {
-    runtimeState.textContent = "runtime not built — build packages/scene-renderer/dist/runtime.js for live preview";
+    runtimeState.textContent = "runtime not built \u2014 build packages/scene-renderer first";
     runtimeState.classList.add("error");
     return;
   }
@@ -380,198 +623,41 @@ async function ensureRuntime(): Promise<void> {
   runtimeState.classList.remove("error");
 }
 
-async function refreshSpecs(): Promise<void> {
-  const specs = await fetchJson<SpecEntry[]>("/api/specs");
-  specList.textContent = "";
-  if (specs.length === 0) {
-    specList.textContent = "no specs yet — create *.scene.json under workflows/scene-lab/specs";
-    return;
-  }
-  for (const spec of specs) {
-    const button = document.createElement("button");
-    button.className = `row ${spec.path === selectedSpecPath ? "active" : ""}`;
-    button.innerHTML = `<span>${escapeHtml(spec.path)}</span><time>${new Date(spec.mtime).toLocaleTimeString()}</time>`;
-    button.addEventListener("click", () => loadSpec(spec.path));
-    specList.append(button);
-  }
-  const firstSpec = specs[0];
-  if (selectedSpecPath.length === 0 && firstSpec !== undefined) await loadSpec(firstSpec.path);
+async function loadRuntimeScript(): Promise<void> {
+  const prior = document.querySelector<HTMLScriptElement>("script[data-scene-runtime]");
+  prior?.remove();
+  const { promise, resolve, reject } = Promise.withResolvers<void>();
+  const script = document.createElement("script");
+  script.dataset.sceneRuntime = "true";
+  script.src = `/runtime.js?cache=${Date.now()}`;
+  script.onload = () => resolve();
+  script.onerror = () => reject(new Error("runtime.js load failed"));
+  document.head.append(script);
+  await promise;
 }
-
-async function loadSpec(path: string): Promise<void> {
-  selectedSpecPath = path;
-  currentSpec.textContent = path;
-  const text = await fetchText(`/api/spec?path=${encodeURIComponent(path)}`);
-  editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: text } });
-  await initPreviewFromEditor();
-  await refreshSpecs();
-}
-
-async function saveCurrentSpec(): Promise<void> {
-  if (selectedSpecPath.length === 0) return;
-  const response = await fetch(`/api/spec?path=${encodeURIComponent(selectedSpecPath)}`, { method: "PUT", body: editor.state.doc.toString() });
-  if (!response.ok) throw new Error(await response.text());
-  statusLine.textContent = `saved ${selectedSpecPath}`;
-  await initPreviewFromEditor();
-  await refreshSpecs();
-}
-
-async function initPreviewFromEditor(): Promise<void> {
-  if (window.SceneRuntime === undefined) return;
-  let spec: SceneSpec;
-  try {
-    spec = parseSceneSpec(editor.state.doc.toString());
-  } catch (error) {
-    runtimeState.textContent = error instanceof Error ? error.message : "invalid JSON";
-    runtimeState.classList.add("error");
-    return;
-  }
-  const liveSpec = rewriteAssetsForPreview(spec);
-  currentSpecObject = liveSpec;
-  preview.textContent = "";
-  window.SceneRuntime.stop();
-  await window.SceneRuntime.init(liveSpec, { width: liveSpec.width, height: liveSpec.height, fps: liveSpec.fps, assetBaseUrl: "" });
-  const canvas = document.querySelector<HTMLCanvasElement>("canvas#scene");
-  if (canvas !== null) preview.append(canvas);
-  const totalFrames = window.SceneRuntime.durationInFrames();
-  scrub.max = String(Math.max(0, totalFrames - 1));
-  scrub.value = "0";
-  setPlayback(true);
-  updateFrameReadout(0);
-  runtimeState.textContent = spec.assets?.some((asset) => asset.kind === "videoFrames") === true ? "runtime ready — videoFrames: offline-only" : "runtime ready";
-  runtimeState.classList.remove("error");
-}
-
-function parseSceneSpec(source: string): SceneSpec {
-  const parsed = JSON.parse(source) as JsonValue;
-  if (parsed === null || Array.isArray(parsed) || typeof parsed !== "object") throw new Error("scene spec must be a JSON object");
-  const object = parsed as JsonObject;
-  if (typeof object.width !== "number" || typeof object.height !== "number" || typeof object.fps !== "number" || typeof object.durationSeconds !== "number") {
-    throw new Error("scene spec needs numeric width, height, fps, durationSeconds");
-  }
-  return object as SceneSpec;
-}
-
-function rewriteAssetsForPreview(spec: SceneSpec): SceneSpec {
-  const copy = structuredClone(spec) as SceneSpec;
-  const skipped = new Set<string>();
-  copy.assets = (copy.assets ?? []).flatMap((asset) => {
-    if (asset.kind === "videoFrames") {
-      skipped.add(asset.id);
-      return [];
-    }
-    return [{ ...asset, path: `asset?path=${encodeURIComponent(asset.path)}` }];
-  });
-  if (skipped.size > 0 && Array.isArray(copy.objects)) {
-    copy.objects = copy.objects.filter((value) => {
-      if (value === null || Array.isArray(value) || typeof value !== "object") return true;
-      const asset = (value as JsonObject).asset;
-      return typeof asset !== "string" || !skipped.has(asset);
-    });
-  }
-  return copy;
-}
-
-async function refreshAssets(): Promise<void> {
-  const assets = await fetchJson<AssetEntry[]>("/api/assets");
-  assetList.textContent = "";
-  if (assets.length === 0) {
-    assetList.textContent = "no allowed assets found";
-    return;
-  }
-  for (const asset of assets) {
-    const button = document.createElement("button");
-    button.className = "row asset";
-    button.innerHTML = `<span>${escapeHtml(asset.path)}</span><b>${asset.kind}</b>`;
-    button.addEventListener("click", async () => {
-      const snippet = JSON.stringify({ id: stem(asset.path), kind: asset.kind === "video" ? "videoFrames" : asset.kind, path: asset.path });
-      await navigator.clipboard.writeText(snippet);
-      statusLine.textContent = `copied asset snippet: ${asset.path}`;
-    });
-    assetList.append(button);
-  }
-}
-
-async function refreshRenders(): Promise<void> {
-  const renders = await fetchJson<RenderEntry[]>("/api/renders");
-  renderList.textContent = "";
-  if (renders.length === 0) {
-    renderList.textContent = "no renders yet";
-    return;
-  }
-  for (const render of renders) {
-    const card = document.createElement("article");
-    card.className = "render-card";
-    const manifest = render.manifest === null ? "no manifest" : escapeHtml(JSON.stringify(render.manifest).slice(0, 180));
-    card.innerHTML = `<video controls src="/asset?path=${encodeURIComponent(render.path)}"></video><div><b>${escapeHtml(render.path)}</b><small>${manifest}</small></div>`;
-    renderList.append(card);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// SSE
-// ---------------------------------------------------------------------------
 
 function connectEvents(): void {
   const source = new EventSource("/events");
-  source.onopen = () => {
-    statusLine.textContent = "SSE: connected";
-  };
+  source.onopen = () => { statusLine.textContent = "SSE: connected"; };
   source.onmessage = async (message) => {
     const event = JSON.parse(message.data) as { type: string; path: string };
     statusLine.textContent = `SSE: ${event.type} ${event.path}`;
     if (event.type === "spec-changed") {
-      await refreshSpecs();
+      specsList = await fetchJson<SpecEntry[]>("/api/specs");
       if (event.path === selectedSpecPath) await loadSpec(selectedSpecPath);
-    } else if (event.type === "render-added") {
-      await refreshRenders();
+      else refreshPanels();
     } else if (event.type === "report-added") {
       await refreshReports();
       const first = reportFeed.firstElementChild;
-      if (first !== null) {
-        first.classList.add("flash");
-        window.setTimeout(() => first.classList.remove("flash"), 2400);
-      }
+      if (first !== null) { first.classList.add("flash"); setTimeout(() => first.classList.remove("flash"), 2400); }
     }
   };
-  source.onerror = () => {
-    statusLine.textContent = "SSE: reconnecting…";
-  };
+  source.onerror = () => { statusLine.textContent = "SSE: reconnecting\u2026"; };
 }
 
 // ---------------------------------------------------------------------------
-// Shared utilities
+// Utilities (preserved)
 // ---------------------------------------------------------------------------
-
-function updateBeatIndicator(): void {
-  if (currentSpecObject === null) return;
-  const bpm = currentSpecObject.timeline?.bpm ?? 120;
-  const secondsPerBeat = 60 / bpm;
-  const phase = (performance.now() / 1000) % secondsPerBeat;
-  if (phase < 0.08 && performance.now() - beatTimer > 180) {
-    beatTimer = performance.now();
-    beat.classList.add("flash");
-    window.setTimeout(() => beat.classList.remove("flash"), 110);
-  }
-}
-
-function updateFrameReadout(frame: number): void {
-  const max = Number.parseInt(scrub.max, 10);
-  frameReadout.textContent = `${frame} / ${max}`;
-}
-
-async function loadRuntimeScript(): Promise<void> {
-  const prior = document.querySelector<HTMLScriptElement>("script[data-scene-runtime]");
-  prior?.remove();
-  await new Promise<void>((resolve, reject) => {
-    const script = document.createElement("script");
-    script.dataset.sceneRuntime = "true";
-    script.src = `/runtime.js?cache=${Date.now()}`;
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error("runtime.js loaded but did not execute"));
-    document.head.append(script);
-  });
-}
 
 async function fetchJson<T>(path: string): Promise<T> {
   const response = await fetch(path, { cache: "no-store" });
@@ -585,98 +671,181 @@ async function fetchText(path: string): Promise<string> {
   return response.text();
 }
 
-function mustElement<T extends HTMLElement>(id: string): T {
+function mustEl<T extends HTMLElement>(id: string): T {
   const element = document.getElementById(id);
   if (element === null) throw new Error(`#${id} missing`);
   return element as T;
 }
 
-function escapeHtml(value: string): string {
-  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
-}
-
-function stem(path: string): string {
-  return path.split("/").at(-1)?.replace(/\.[^.]+$/, "") ?? "asset";
-}
+// ---------------------------------------------------------------------------
+// CSS — uses design tokens from tokens.css, all Studio v2 + report styles
+// ---------------------------------------------------------------------------
 
 function css(): string {
   return `
-:root { color-scheme: dark; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background: #07070a; color: #e8e8ee; }
-* { box-sizing: border-box; }
-body { margin: 0; overflow: hidden; }
-button { font: inherit; color: inherit; background: #171720; border: 1px solid #333342; border-radius: 6px; padding: 6px 8px; cursor: pointer; }
-button:hover, .row.active { border-color: #8ef7ff; color: #8ef7ff; }
+/* === Reset & base (token-aware) === */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: var(--font-mono); background: var(--canvas); color: var(--text-primary); overflow: hidden; }
+button { font: inherit; color: var(--text-primary); background: var(--panel-bg-hover); border: 1px solid var(--panel-border); border-radius: var(--radius-sm); padding: var(--space-1) var(--space-2); cursor: pointer; font-size: var(--text-sm); transition: border-color var(--dur-quick) var(--ease-out); }
+button:hover { border-color: var(--panel-border-strong); }
+button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+select, input[type="text"], input[type="number"] { font: inherit; background: var(--control-bg); border: 1px solid var(--control-border); border-radius: var(--radius-sm); color: var(--text-primary); padding: 2px var(--space-1); font-size: var(--text-sm); }
+select:focus, input:focus { outline: none; box-shadow: var(--focus-ring); }
+.hidden { display: none !important; }
 
-/* top nav */
-.topnav { height: 34px; display: flex; align-items: center; gap: 2px; padding: 0 12px; background: #0d0d12; border-bottom: 1px solid #242431; }
-.brand { color: #ff4fd8; letter-spacing: .08em; text-transform: uppercase; font-weight: 800; margin-right: 16px; font-size: 13px; }
-.nav-btn { background: none; border: 1px solid transparent; color: #77778a; text-transform: uppercase; font-size: 11px; letter-spacing: .06em; padding: 4px 10px; border-radius: 4px; }
-.nav-btn:hover { color: #e8e8ee; border-color: transparent; }
-.nav-btn.active { color: #8ef7ff; background: #171720; border-color: #333342; }
+/* === Top nav === */
+.topnav { height: 32px; display: flex; align-items: center; gap: 2px; padding: 0 var(--space-3); background: var(--panel-bg); border-bottom: 1px solid var(--panel-border); }
+.brand { color: var(--accent-2); letter-spacing: var(--tracking-upper); text-transform: uppercase; font-weight: 800; margin-right: var(--space-4); font-size: var(--text-sm); }
+.nav-btn { background: none; border: 1px solid transparent; color: var(--text-muted); text-transform: uppercase; font-size: var(--text-xs); letter-spacing: var(--tracking-nav); padding: 3px var(--space-2); border-radius: var(--radius-sm); }
+.nav-btn:hover { color: var(--text-primary); }
+.nav-btn.active { color: var(--accent); background: var(--panel-bg-hover); border-color: var(--panel-border); }
 
-/* views */
-.reports-view { height: calc(100vh - 34px - 28px); overflow-y: auto; padding: 24px 32px; }
-.studio-view { height: calc(100vh - 34px - 28px); display: grid; grid-template-columns: 300px minmax(420px, 1fr) 430px; gap: 1px; background: #242431; }
+/* === Footer === */
+footer { height: 24px; display: flex; align-items: center; padding: 0 var(--space-2); background: var(--panel-bg); color: var(--accent); border-top: 1px solid var(--panel-border); font-size: var(--text-xs); }
 
-/* report feed */
+/* === Reports view (preserved) === */
+.reports-view { height: calc(100vh - 32px - 24px); overflow-y: auto; padding: var(--space-6) var(--space-8); }
 .report-feed { max-width: 820px; }
-.report-card { border: 1px solid #282836; background: #111119; border-radius: 10px; padding: 18px 22px; margin-bottom: 14px; transition: border-color 1.8s cubic-bezier(.16,1,.3,1); }
-.report-card.flash { border-color: #8ef7ff; box-shadow: 0 0 16px rgba(142,247,255,.12); }
-.report-head { margin-bottom: 4px; }
-.report-title { font-size: 15px; font-weight: 700; margin: 0 0 6px; color: #e8e8ee; }
-.report-meta { display: flex; gap: 12px; align-items: center; font-size: 12px; color: #77778a; }
-.report-agent { color: #a7a7b4; }
-.status-pill { padding: 2px 8px; border-radius: 999px; font-size: 10px; text-transform: uppercase; letter-spacing: .05em; font-weight: 600; }
-.status-shipped { background: #0a1710; color: #99ffb5; border: 1px solid #1d3d28; }
-.status-partial { background: #1b1a0d; color: #ffd666; border: 1px solid #504022; }
-.status-blocked { background: #1b0d10; color: #ffb4b4; border: 1px solid #50222c; }
-.report-excerpt { color: #a7a7b4; font-size: 13px; line-height: 1.55; margin: 10px 0; }
-.report-media { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; }
-.report-media img { max-width: 200px; max-height: 140px; border-radius: 6px; border: 1px solid #282836; object-fit: cover; }
-.report-media video { max-width: 240px; max-height: 140px; border-radius: 6px; border: 1px solid #282836; background: #050507; }
-.report-toggle { color: #8ef7ff; cursor: pointer; font-size: 11px; background: none; border: none; padding: 2px 0; letter-spacing: .04em; text-transform: uppercase; }
-.report-toggle:hover { color: #c4fbff; border: none; }
-.report-body { display: none; margin-top: 12px; padding-top: 12px; border-top: 1px solid #282836; color: #c8c8d0; font-size: 13px; line-height: 1.6; }
+.report-card { border: 1px solid var(--panel-border); background: var(--panel-bg); border-radius: var(--radius); padding: var(--space-4) var(--space-6); margin-bottom: var(--space-3); transition: border-color 1.8s var(--ease-spring); }
+.report-card.flash { border-color: var(--accent); box-shadow: 0 0 16px color-mix(in oklab, var(--accent), transparent 80%); }
+.report-head { margin-bottom: var(--space-1); }
+.report-title { font-size: var(--text-lg); font-weight: 700; margin: 0 0 var(--space-1); color: var(--text-primary); }
+.report-meta { display: flex; gap: var(--space-3); align-items: center; font-size: var(--text-sm); color: var(--text-muted); }
+.report-agent { color: var(--text-secondary); }
+.status-pill { padding: 2px var(--space-2); border-radius: var(--radius-pill); font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
+.status-shipped { background: var(--success-bg); color: var(--success); border: 1px solid var(--success-border); }
+.status-partial { background: var(--warn-bg); color: var(--warn); border: 1px solid var(--warn-border); }
+.status-blocked { background: var(--error-bg); color: var(--error); border: 1px solid var(--error-border); }
+.report-excerpt { color: var(--text-secondary); font-size: var(--text-md); line-height: var(--leading-body); margin: var(--space-2) 0; }
+.report-media { display: flex; gap: var(--space-2); flex-wrap: wrap; margin: var(--space-2) 0; }
+.report-media img { max-width: 200px; max-height: 140px; border-radius: var(--radius); border: 1px solid var(--panel-border); object-fit: cover; }
+.report-media video { max-width: 240px; max-height: 140px; border-radius: var(--radius); border: 1px solid var(--panel-border); background: var(--canvas); }
+.report-toggle { color: var(--accent); cursor: pointer; font-size: var(--text-xs); background: none; border: none; padding: 2px 0; letter-spacing: 0.04em; text-transform: uppercase; }
+.report-toggle:hover { color: var(--accent-hover); border: none; }
+.report-body { display: none; margin-top: var(--space-3); padding-top: var(--space-3); border-top: 1px solid var(--panel-border); color: var(--text-secondary); font-size: var(--text-md); line-height: 1.6; }
 .report-body.open { display: block; }
-.report-body h1, .report-body h2, .report-body h3 { color: #e8e8ee; margin: 14px 0 6px; }
-.report-body h1 { font-size: 16px; } .report-body h2 { font-size: 14px; } .report-body h3 { font-size: 13px; }
-.report-body pre { background: #0a0a12; border: 1px solid #282836; border-radius: 6px; padding: 10px 12px; overflow-x: auto; margin: 8px 0; }
-.report-body code { font-family: inherit; font-size: 12px; color: #d4d4e8; }
-.report-body p code { background: #171720; padding: 1px 5px; border-radius: 3px; }
+.report-body h1, .report-body h2, .report-body h3 { color: var(--text-primary); margin: 14px 0 6px; }
+.report-body h1 { font-size: 16px; } .report-body h2 { font-size: 14px; } .report-body h3 { font-size: var(--text-md); }
+.report-body pre { background: var(--canvas); border: 1px solid var(--panel-border); border-radius: var(--radius); padding: var(--space-2) var(--space-3); overflow-x: auto; margin: var(--space-2) 0; }
+.report-body code { font-family: var(--font-mono); font-size: var(--text-sm); color: var(--text-primary); }
+.report-body p code { background: var(--panel-bg-hover); padding: 1px 5px; border-radius: var(--radius-xs); }
 .report-body ul { padding-left: 20px; margin: 6px 0; }
 .report-body li { margin-bottom: 3px; }
-.report-body a { color: #8ef7ff; text-decoration: none; }
+.report-body a { color: var(--accent); text-decoration: none; }
 .report-body a:hover { text-decoration: underline; }
-.report-body strong { color: #e8e8ee; }
+.report-body strong { color: var(--text-primary); }
 
-/* studio (existing layout, moved into view container) */
-.rail, .stage-col { background: #0d0d12; min-height: 0; }
-.rail { display: flex; flex-direction: column; padding: 12px; gap: 12px; }
-.panel { border: 1px solid #282836; background: #111119; border-radius: 10px; min-height: 0; overflow: hidden; }
-.panel.grow { flex: 1; }
-.panel-title, .editor-head { height: 32px; display: flex; align-items: center; justify-content: space-between; padding: 0 10px; border-bottom: 1px solid #282836; color: #a7a7b4; text-transform: uppercase; font-size: 12px; }
-.list, .tree { height: calc(100% - 32px); overflow: auto; padding: 8px; }
-.row { width: 100%; display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; margin-bottom: 6px; text-align: left; }
-.row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.row time, .row b, small { color: #77778a; font-size: 11px; font-weight: 500; }
-.stage-col { display: grid; grid-template-rows: 32px minmax(0, 1fr) 42px 260px; }
-.runtime-state { display: flex; align-items: center; padding: 0 12px; color: #99ffb5; background: #0a1710; border-bottom: 1px solid #1d3d28; }
-.runtime-state.error { color: #ffb4b4; background: #1b0d10; border-color: #50222c; }
-.preview { position: relative; overflow: hidden; display: grid; place-items: center; background: radial-gradient(circle at 50% 35%, #1c1c2a, #050507 70%); }
-.preview canvas { max-width: 100%; max-height: 100%; width: auto !important; height: auto !important; box-shadow: 0 0 40px #000; }
-.transport { display: grid; grid-template-columns: 90px 1fr 72px 120px; gap: 10px; align-items: center; padding: 6px 10px; background: #101018; border-top: 1px solid #282836; border-bottom: 1px solid #282836; }
-.beat { text-align: center; border: 1px solid #333342; border-radius: 999px; padding: 4px; color: #77778a; }
-.beat.flash { color: #07070a; background: #8ef7ff; box-shadow: 0 0 22px #8ef7ff; }
-.renders { border: 0; border-radius: 0; }
-.render-list { display: flex; gap: 10px; overflow-x: auto; padding: 10px; height: calc(100% - 32px); }
-.render-card { width: 220px; flex: 0 0 220px; display: grid; gap: 6px; }
-.render-card video { width: 220px; height: 124px; background: #000; }
-.render-card b, .render-card small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.right { padding: 0; }
-.editor-head { height: 38px; }
-.editor { height: calc(100% - 38px); overflow: hidden; }
-.cm-editor { height: 100%; font-size: 13px; }
-footer { height: 28px; display: flex; align-items: center; padding: 0 10px; background: #050507; color: #8ef7ff; border-top: 1px solid #242431; font-size: 12px; }
-.muted { color: #77778a; font-size: 12px; }
+/* === Studio v2 grid === */
+.studio-view { height: calc(100vh - 32px - 24px); display: grid; grid-template-columns: 220px minmax(400px, 1fr) 320px; gap: 1px; background: var(--panel-border); }
+
+/* -- Rails -- */
+.rail { background: var(--panel-bg); display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.rail.right { display: grid; grid-template-rows: 1fr 1fr; }
+
+/* -- Center stage -- */
+.stage-col { background: var(--canvas); display: grid; grid-template-rows: 26px minmax(0, 1fr) 34px 140px; min-height: 0; }
+.runtime-state { display: flex; align-items: center; padding: 0 var(--space-3); color: var(--success); background: var(--success-bg); border-bottom: 1px solid var(--success-border); font-size: var(--text-xs); }
+.runtime-state.error { color: var(--error); background: var(--error-bg); border-color: var(--error-border); }
+.preview { position: relative; overflow: hidden; display: grid; place-items: center; background: radial-gradient(circle at 50% 35%, var(--panel-bg-elevated), var(--canvas) 70%); }
+.preview canvas { max-width: 100%; max-height: 100%; width: auto !important; height: auto !important; box-shadow: 0 0 40px rgba(0,0,0,0.6); }
+
+/* -- Transport -- */
+.transport { display: grid; grid-template-columns: 72px 1fr 56px 110px auto; gap: var(--space-2); align-items: center; padding: 0 var(--space-2); background: var(--panel-bg); border-top: 1px solid var(--panel-border); border-bottom: 1px solid var(--panel-border); font-size: var(--text-sm); }
+.transport-btn { font-size: var(--text-xs); text-transform: uppercase; letter-spacing: var(--tracking-upper); padding: var(--space-1) var(--space-2); }
+.transport-scrub { width: 100%; accent-color: var(--accent); }
+.beat { text-align: center; border: 1px solid var(--panel-border); border-radius: var(--radius-pill); padding: 2px var(--space-1); color: var(--text-muted); font-size: var(--text-xs); transition: all var(--dur-quick); }
+.beat.flash { color: var(--canvas); background: var(--accent); box-shadow: 0 0 14px var(--accent); }
+.frame-readout { color: var(--text-secondary); font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
+.res-badge { color: var(--text-dim); font-size: var(--text-xs); }
+
+/* -- Timeline -- */
+.timeline-container { height: 140px; overflow-x: auto; overflow-y: hidden; background: var(--canvas); border-top: 1px solid var(--panel-border); }
+.timeline-svg { min-width: 100%; display: block; }
+
+/* === Tree (left rail) === */
+.tree-container { height: 100%; overflow-y: auto; padding: var(--space-1) 0; font-size: var(--text-sm); }
+.tree-spec-selector { padding: var(--space-1) var(--space-2); border-bottom: 1px solid var(--panel-border-subtle); }
+.tree-spec-dropdown { width: 100%; font-size: var(--text-xs); background: var(--control-bg); border: 1px solid var(--control-border); border-radius: var(--radius-sm); color: var(--text-primary); padding: 3px var(--space-1); }
+.tree-section-header { display: flex; align-items: center; padding: var(--space-1) var(--space-2); color: var(--text-secondary); text-transform: uppercase; font-size: var(--text-xs); letter-spacing: var(--tracking-upper); cursor: pointer; gap: var(--space-1); user-select: none; }
+.tree-toggle { width: 12px; color: var(--text-dim); }
+.tree-plus { background: none; border: 1px solid var(--panel-border); color: var(--text-muted); padding: 0 5px; font-size: 14px; line-height: 1; border-radius: var(--radius-sm); margin-left: auto; }
+.tree-plus:hover { color: var(--accent); border-color: var(--accent); }
+.tree-row { display: flex; align-items: center; padding: 3px var(--space-2) 3px 16px; cursor: pointer; gap: var(--space-1); border-left: 2px solid transparent; font-size: var(--text-sm); transition: background var(--dur-quick); }
+.tree-row:hover { background: var(--panel-bg-hover); }
+.tree-row.active { border-left-color: var(--accent); background: var(--panel-bg-active); color: var(--accent); }
+.tree-row:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.tree-row-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.tree-row-kind { color: var(--text-dim); font-size: var(--text-xs); }
+.clone-badge { color: var(--accent-2); font-size: var(--text-xs); }
+.tree-delete, .tree-mini-btn { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 14px; padding: 0 2px; }
+.tree-delete:hover { color: var(--error); }
+.tree-mini-btn:hover { color: var(--accent); }
+.tree-row-btns { display: flex; gap: 1px; margin-left: auto; }
+.tree-children { padding-left: var(--space-2); }
+
+/* Popup menu */
+.popup-menu { background: var(--panel-bg-elevated); border: 1px solid var(--panel-border-strong); border-radius: var(--radius); padding: var(--space-1); z-index: 100; box-shadow: var(--elev-raised); min-width: 120px; }
+.popup-menu button { display: block; width: 100%; text-align: left; background: none; border: none; padding: var(--space-1) var(--space-2); cursor: pointer; font-size: var(--text-sm); border-radius: var(--radius-xs); }
+.popup-menu button:hover { background: var(--panel-bg-active); color: var(--accent); }
+
+/* === Inspector (right rail top) === */
+.inspector-wrap { overflow: hidden; display: flex; flex-direction: column; min-height: 0; }
+.inspector-wrap .panel-title { height: var(--panel-header-height); display: flex; align-items: center; padding: 0 var(--space-2); color: var(--text-secondary); text-transform: uppercase; font-size: var(--panel-header-label); letter-spacing: var(--tracking-upper); border-bottom: 1px solid var(--panel-border); flex-shrink: 0; }
+.inspector-container { flex: 1; overflow-y: auto; padding: var(--space-2); }
+.inspector-empty { color: var(--text-dim); font-size: var(--text-sm); padding: var(--space-4); text-align: center; }
+.inspector-section { margin-bottom: var(--space-2); }
+.inspector-section h4 { margin: 0 0 var(--space-1); font-size: var(--text-xs); color: var(--text-secondary); text-transform: uppercase; letter-spacing: var(--tracking-upper); border-bottom: 1px solid var(--panel-border-subtle); padding-bottom: 3px; font-weight: 600; }
+.inspector-field { display: flex; align-items: center; gap: var(--space-1); margin: 3px 0; min-height: 22px; }
+.inspector-field label { color: var(--text-muted); font-size: var(--text-xs); min-width: 52px; text-align: right; flex-shrink: 0; }
+.inspector-field input, .inspector-field select { flex: 1; min-width: 0; }
+.inspector-field input[type="color"] { width: 28px; height: 20px; padding: 0; border: 1px solid var(--control-border); flex: 0; }
+.scrub-value { color: var(--accent); font-size: var(--text-sm); font-weight: 600; cursor: ew-resize; user-select: none; min-width: 44px; text-align: center; background: var(--control-bg); padding: 2px var(--space-1); border-radius: var(--radius-sm); border: 1px solid var(--control-border); transition: border-color var(--dur-quick); }
+.scrub-value:hover { border-color: var(--accent); }
+.scrub-value:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.axis-label { color: var(--text-dim); font-size: 9px; width: 10px; text-align: center; flex-shrink: 0; }
+.scrub-live { color: var(--success); font-size: var(--text-xs); margin-left: 2px; }
+.inspector-btn { width: 100%; margin-top: var(--space-1); padding: var(--space-1); font-size: var(--text-xs); background: var(--control-bg); border: 1px solid var(--control-border); color: var(--text-secondary); border-radius: var(--radius-sm); cursor: pointer; }
+.inspector-btn:hover { border-color: var(--accent); color: var(--accent); }
+.inspector-btn-inline { background: none; border: none; cursor: pointer; font-size: 16px; padding: 0 2px; }
+.inspector-textarea { width: 100%; background: var(--control-bg); border: 1px solid var(--control-border); color: var(--text-primary); font-size: var(--text-xs); font-family: var(--font-mono); padding: var(--space-1); border-radius: var(--radius-sm); resize: vertical; min-height: 36px; }
+.info-value { color: var(--text-secondary); font-size: var(--text-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+
+/* Track editor */
+.track-editor { background: var(--panel-bg-elevated); border: 1px solid var(--panel-border); border-radius: var(--radius); padding: var(--space-1); margin: var(--space-1) 0; }
+.track-head { display: flex; justify-content: space-between; align-items: center; font-size: var(--text-xs); color: var(--text-secondary); margin-bottom: var(--space-1); padding-bottom: 2px; border-bottom: 1px solid var(--panel-border-subtle); }
+.keyframe-table { width: 100%; border-collapse: collapse; margin: var(--space-1) 0; }
+.keyframe-table th, .keyframe-table td { padding: 2px 3px; font-size: var(--text-xs); text-align: left; }
+.keyframe-table th { color: var(--text-dim); font-weight: 500; }
+.keyframe-table input { width: 100%; min-width: 0; }
+
+/* === Source editor (right rail bottom) === */
+.source-wrap { overflow: hidden; display: flex; flex-direction: column; min-height: 0; border-top: 1px solid var(--panel-border); }
+.editor-head { height: var(--panel-header-height); display: flex; align-items: center; gap: var(--space-2); padding: 0 var(--space-2); border-bottom: 1px solid var(--panel-border); flex-shrink: 0; }
+.source-spec-label { color: var(--text-secondary); font-size: var(--text-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.dirty-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent-2); flex-shrink: 0; }
+.tab-btn { background: none; border: 1px solid transparent; color: var(--text-muted); font-size: var(--text-xs); padding: 2px var(--space-2); border-radius: var(--radius-sm); text-transform: uppercase; letter-spacing: var(--tracking-nav); }
+.tab-btn.active { color: var(--accent); border-color: var(--panel-border); background: var(--panel-bg-hover); }
+.save-btn { font-size: var(--text-xs); padding: 2px var(--space-2); background: var(--panel-bg-hover); }
+.editor-container { flex: 1; overflow: hidden; position: relative; }
+.editor { height: 100%; overflow: hidden; }
+.source-view { height: 100%; overflow: auto; padding: var(--space-3); font-family: var(--font-mono); font-size: var(--text-md); white-space: pre-wrap; color: var(--text-secondary); background: var(--canvas); }
+.cm-editor { height: 100%; font-size: var(--text-md); }
+
+/* === Flash overlay === */
+@keyframes flash-outline { 0% { opacity: 1; } 100% { opacity: 0; } }
+.flash-overlay { position: absolute; inset: 0; border: 2px solid var(--accent); border-radius: var(--radius-sm); pointer-events: none; z-index: 2; animation: flash-outline 0.5s var(--ease-out) forwards; }
+
+/* === Help overlay === */
+.help-overlay { position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,0.6); display: grid; place-items: center; }
+.help-card { background: var(--panel-bg-elevated); border: 1px solid var(--panel-border-strong); border-radius: var(--radius-md); padding: var(--space-6); max-width: 400px; box-shadow: var(--elev-raised); }
+.help-card h3 { font-size: var(--text-lg); margin-bottom: var(--space-3); color: var(--text-primary); }
+.help-card table { width: 100%; border-collapse: collapse; }
+.help-card td { padding: 3px var(--space-2); font-size: var(--text-sm); color: var(--text-secondary); }
+.help-card kbd { background: var(--panel-bg-active); border: 1px solid var(--panel-border); border-radius: var(--radius-xs); padding: 1px 5px; font-family: var(--font-mono); font-size: var(--text-xs); color: var(--text-primary); }
+.help-dismiss { margin-top: var(--space-3); text-align: center; font-size: var(--text-xs); color: var(--text-dim); }
+
+/* === Shared === */
+.muted { color: var(--text-muted); font-size: var(--text-sm); }
+${labelCss()}
 `;
 }

@@ -41,6 +41,9 @@ Invariants. Most are also static lints — push every lesson down the guardrail 
 - **Bret Victor rule.** Artifacts show the *behavior itself* and invite direct manipulation — playable, draggable, runnable in place. A number or a static file is a failure when the thing itself could be experienced. Design every proof asking: "can Arthur *feel* this in one click?"
 - **Portless per stream.** Every stream's review surface is a self-contained local app behind a stable name: `bunx portless <name> <cmd>` → `http://<name>.localhost:1355`. No port numbers, no collisions across parallel OMP sessions.
 - **Artifact-viewer/dashboard pattern.** Finished work → entry in a feed ledger (JSONL + schema) → live dashboard card with inline media, runnable actions, and **error logs of every run**. Taste forks → `question` entries answered in-place. Arthur reviews products, not commits. Reference implementations: `apps/xanadu` (companion), `packages/primer-daemon` dashboard (primer) — converge these into a shared package when a third consumer appears.
+- **One error log per app.** Backend errors AND browser errors (`window.onerror`/`unhandledrejection` POSTed to the app server) append to a single `data/<app>/errors.log`. Before claiming any UI/server work done, READ that file — "done" with fresh errors in the log is not done.
+- **Dev server always running.** The active stream keeps its dashboard/dev server up in the background so Arthur can glance anytime — supervised: a `dev:up` restart-loop script + `bun --watch` hot reload + a `/healthz` route (see `apps/scene-playground/scripts/dev-up.sh`). Never QA against Arthur's live instance — boot your own.
+- **Delegate the checking.** Browser QA, code review, and verification runs happen in subagents (GPT-5.5 for pedantic code review; GPT/Kimi lanes for computer-use QA), never in the orchestrator's main thread.
 
 ## Hard rules
 

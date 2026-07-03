@@ -1,0 +1,110 @@
+/* ───────────────────────────────────────────────────────────────────────────
+ * Scene Studio — design tokens
+ *
+ * Dark, dense, monospace-first editor for beat-synced Three.js scenes.
+ * Adapted from live-booted Open Design web app dark-mode tokens +
+ * static analysis of vendor/nexu-io--open-design/design-systems/
+ * (Linear, Mission Control, HUD, Cursor).
+ *
+ * Extraction path: LIVE BOOT — OD daemon + web runtime started via
+ * pnpm tools-dev start web --namespace agents-local, Node 24.13.1,
+ * computed CSS custom properties extracted from running dark-mode page.
+ * ─────────────────────────────────────────────────────────────────────── */
+
+:root {
+  color-scheme: dark;
+
+  /* ─── Surface scale (cool-neutral, code-editor density) ──────────── */
+  --canvas:              #0f1012;  /* deepest background, viewport surround */
+  --panel-bg:            #18191c;  /* sidebar rails, inspector panels */
+  --panel-bg-elevated:   #1e2024;  /* cards, dropdowns, floating surfaces */
+  --panel-bg-hover:      #25272c;  /* row hover, button rest state */
+  --panel-bg-active:     #2a2d33;  /* selected row, active header */
+
+  /* ─── Text (near-white primary, not pure white — Linear convention) ─ */
+  --text-primary:        #e8e4dc;  /* body, headings */
+  --text-secondary:      #9a9690;  /* labels, descriptions */
+  --text-muted:          #6e6b65;  /* metadata, placeholders */
+  --text-dim:            #4e4b46;  /* disabled, grid labels, de-emphasized */
+
+  /* ─── Border (semi-transparent white — Linear pattern) ───────────── */
+  --panel-border:        rgba(255, 255, 255, 0.08);  /* card edges, inputs */
+  --panel-border-strong: rgba(255, 255, 255, 0.14);  /* hover/active, dividers */
+  --panel-border-subtle: rgba(255, 255, 255, 0.05);  /* row separators */
+
+  /* ─── Accent ──────────────────────────────────────────────────────── */
+  --accent:              #5b8def;  /* cool blue — selected, active, playhead */
+  --accent-hover:        #7aa8ff;  /* lighter hover variant */
+  --accent-2:            #d4a054;  /* warm amber — beat markers, temporal data */
+
+  /* ─── Semantic state (text/bg/border triplets — OD pattern) ──────── */
+  --success:             #4caf72;
+  --success-bg:          #0f2a18;
+  --success-border:      #1a4028;
+  --warn:                #e09a40;
+  --warn-bg:             #2a1a04;
+  --warn-border:         #4a3010;
+  --error:               #e06b65;
+  --error-bg:            #2a0e0c;
+  --error-border:        #451714;
+
+  /* ─── Typography ──────────────────────────────────────────────────── */
+  --font-mono:  "Berkeley Mono", "JetBrains Mono", ui-monospace,
+    SFMono-Regular, Menlo, Consolas, monospace;
+  --font-sans:  -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "Microsoft YaHei UI", "Noto Sans", Roboto, "Helvetica Neue",
+    Arial, sans-serif;
+
+  /* Type scale — dense, editor-first (10–18px) ──────────────────── */
+  --text-xs:    10px;   /* micro-labels, status pill text */
+  --text-sm:    11px;   /* metadata, timestamps, inspector labels */
+  --text-base:  12px;   /* body, list rows, inspector values */
+  --text-md:    13px;   /* code editor, report body */
+  --text-lg:    15px;   /* report titles, section headings */
+  --text-xl:    18px;   /* panel titles (rare) */
+
+  --leading-body:  1.4;
+  --leading-tight: 1.2;
+  --tracking-upper: 0.08em;  /* uppercase micro-labels — MC pattern */
+  --tracking-nav:   0.06em;  /* nav buttons */
+
+  /* ─── Spacing (4px grid — dense Mission Control variant) ──────────── */
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-3:  12px;
+  --space-4:  16px;
+  --space-6:  24px;
+  --space-8:  32px;
+  --space-12: 48px;
+
+  /* ─── Radius (tight for code-editor density) ──────────────────────── */
+  --radius-xs:   3px;    /* inline code, micro-chips */
+  --radius-sm:   4px;    /* buttons, inputs, controls */
+  --radius:      6px;    /* cards, menus */
+  --radius-md:   8px;    /* modals, featured containers */
+  --radius-lg:  12px;    /* large panels */
+  --radius-pill: 999px;  /* status pills */
+
+  /* ─── Control sizing (compact — OD primitives tightened) ──────────── */
+  --control-bg:         rgba(255, 255, 255, 0.04);  /* ghost button rest */
+  --control-border:     rgba(255, 255, 255, 0.08);  /* button/input border */
+
+  /* ─── Panel chrome ────────────────────────────────────────────────── */
+  --panel-header-height: 28px;
+  --panel-header-label:  11px;
+  --panel-padding:       8px;
+
+  /* ─── Elevation (luminance stepping — Linear pattern) ─────────────── */
+  --elev-ring:   0 0 0 1px var(--panel-border);
+  --elev-raised: 0 2px 8px rgba(0, 0, 0, 0.4);
+
+  /* ─── Focus ───────────────────────────────────────────────────────── */
+  --focus-ring: 0 0 0 2px color-mix(in oklab, var(--accent), transparent 40%);
+
+  /* ─── Motion (OD web canonical durations + Arc spring) ────────────── */
+  --dur-quick:   120ms;
+  --dur-enter:   200ms;
+  --dur-exit:    140ms;
+  --ease-out:    cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-spring: cubic-bezier(0.32, 0.72, 0, 1);
+}

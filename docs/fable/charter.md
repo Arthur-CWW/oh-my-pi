@@ -55,6 +55,12 @@ Route around refusal basins instead of arguing with the wrong model. Old "GPT-5.
 
 Conserve Fable: Fable orchestrates only — decomposition, contracts, gating, verification. All implementation, research, and drafting goes to cheaper lanes: Opus-class for creative/design shaping, GPT-5.5 for straightforward implementation, Gemini Flash for bounded scouts. Fable writing code directly is the exception reserved for trivial inline fixes.
 
+UI/UX routing (Arthur, 2026-07-03): anything design- or web-facing that is not straight-up logic — visual design, UI implementation, UX flows, dashboards, editor chrome — goes to the Opus/designer lane, never GPT-5.5. GPT-5.5 on UI produces functional-but-fucked interfaces; it stays on logic, pipelines, and harness code. The loop is complementary: **Opus creates, GPT-5.5 reviews** — after design-lane work lands, a GPT-5.5 pass checks correctness, edge cases, and consistency (the detail-precision Opus lacks; Opus is more creative but dumber). Verification/QA browser passes are also delegated (GPT-5.5 or Kimi preferred for computer-use QA), never run on Fable tokens.
+
+Model A/B practice (Arthur, 2026-07-03): lane assignments are hypotheses, not doctrine. When comparable UI/design tasks come up, occasionally run the same brief on two candidate models (e.g. Opus point-versions, GPT vs Kimi for computer use) and compare on TWO axes: output quality and steerability — how well the orchestrator can control them mid-flight ("they're your hands"). Record verdicts here.
+
+Interaction design defaults (Arthur, 2026-07-03): Arthur is vim-native — every viewer/editor we build gets vim-style keys (j/k lists, modal focus, / filter, ? keymap overlay). Design against dead software (Bret Victor): artifacts stay live, edits give immediate visible feedback, understanding never requires staring at code. SQLite everywhere for state; artifact/workflow edits carry provenance (human vs agent) so human-added entropy is tracked — future: cursor-style prediction of human edits.
+
 ## Subagent contract (packet)
 
 Every dispatch specifies: **owner paths** (explicit files), **excluded paths**, **model lane**, **the change** with APIs/patterns, **acceptance** (observable), **non-goals**. Workers skip formatters/linters/test suites; Fable gates once per phase. Subagents may be full agents with bounded recursion when the task warrants — they are not required to be one-shot drones. Substantial work ships with proof artifacts (`proof-of-work-qa`): screenshots, logs, fixtures, rerun commands.

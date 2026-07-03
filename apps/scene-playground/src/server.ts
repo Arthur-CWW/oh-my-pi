@@ -1,18 +1,24 @@
+import { createHash } from "node:crypto";
 import { copyFile, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { existsSync, watch } from "node:fs";
 import type { FSWatcher } from "node:fs";
 import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
+import { openLedger, type EditRecord, type EditStats, type Ledger } from "./ledger";
+import { openLabels, type LabelsStore, type GroupWithCount, type LabelRow } from "./labels";
+import { appendError, caughtErrorInput, listRecentErrors, type ErrorLogEntry } from "./errors";
 
 const APP_DIR = resolve(import.meta.dir, "..");
 const REPO_ROOT = resolve(APP_DIR, "../..");
 const DEFAULT_PORT = 4600;
-const ASSET_EXTENSIONS: Record<string, true> = { ".png": true, ".jpg": true, ".jpeg": true, ".webp": true, ".mp3": true, ".wav": true, ".mp4": true };
+const ASSET_EXTENSIONS: Record<string, true> = { ".png": true, ".jpg": true, ".jpeg": true, ".webp": true, ".mp3": true, ".wav": true, ".mp4": true, ".gif": true };
 const IMAGE_EXTENSIONS: Record<string, true> = { ".png": true, ".jpg": true, ".jpeg": true, ".webp": true };
 const AUDIO_EXTENSIONS: Record<string, true> = { ".mp3": true, ".wav": true };
 const VIDEO_EXTENSIONS: Record<string, true> = { ".mp4": true };
 const MAX_ASSETS = 500;
 const MAX_ASSET_DEPTH = 4;
 const SSE_HEARTBEAT_MS = 20_000;
+const RECENT_PUT_HASH_TTL_MS = 30_000;
+const WATCH_DUPLICATE_WINDOW_MS = 500;
 
 export interface ServerOptions {
   repoRoot?: string;
@@ -33,6 +39,9 @@ interface SpecEntry {
   path: string;
   mtime: string;
   bytes: number;
+  lastActor: "human" | "agent" | null;
+  humanEdits: number;
+  agentEdits: number;
 }
 
 interface RenderEntry {
@@ -55,7 +64,7 @@ interface ReportEntry {
 
 type JsonPrimitive = string | number | boolean | null;
 type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
-type JsonPayload = JsonValue | SpecEntry[] | AssetEntry[] | RenderEntry[] | ReportEntry[] | { error: string } | { ok: true; path: string };
+type JsonPayload = JsonValue | SpecEntry[] | AssetEntry[] | RenderEntry[] | ReportEntry[] | EditRecord[] | EditStats | ErrorLogEntry[] | { error: string } | { ok: true; path: string };
 
 interface AppPaths {
   repoRoot: string;
@@ -72,6 +81,16 @@ interface AppPaths {
 interface EventClient {
   send: (event: string) => void;
   close: () => void;
+}
+
+interface RecentPutEntry {
+  contentHash: string;
+  ts: number;
+}
+
+interface RecentWatchHashEntry {
+  contentHash: string;
+  ts: number;
 }
 
 export interface ScenePlaygroundApp {
@@ -92,6 +111,22 @@ function jsonResponse(value: JsonPayload, init: ResponseInit = {}): Response {
 
 function textResponse(message: string, status = 200): Response {
   return new Response(message, { status, headers: { "content-type": "text/plain; charset=utf-8" } });
+}
+
+interface ClientErrorBody {
+  message: string;
+  stack?: string;
+  url?: string;
+}
+
+function decodeClientErrorBody(value: unknown): ClientErrorBody | null {
+  if (typeof value !== "object" || value === null) return null;
+  const record = value as Record<string, unknown>;
+  if (typeof record.message !== "string" || record.message.trim().length === 0) return null;
+  const body: ClientErrorBody = { message: record.message };
+  if (typeof record.stack === "string") body.stack = record.stack;
+  if (typeof record.url === "string") body.url = record.url;
+  return body;
 }
 
 function toRepoPath(repoRoot: string, absolutePath: string): string {
@@ -151,7 +186,7 @@ async function ensureLabDirs(paths: AppPaths): Promise<void> {
   await mkdir(paths.reportsDir, { recursive: true });
 }
 
-async function listSpecs(paths: AppPaths): Promise<SpecEntry[]> {
+async function listSpecs(paths: AppPaths, ledger: Ledger): Promise<SpecEntry[]> {
   await mkdir(paths.specsDir, { recursive: true });
   const entries: SpecEntry[] = [];
   async function walk(dir: string): Promise<void> {
@@ -162,7 +197,9 @@ async function listSpecs(paths: AppPaths): Promise<SpecEntry[]> {
         await walk(childPath);
       } else if (child.isFile() && child.name.endsWith(".scene.json")) {
         const info = await stat(childPath);
-        entries.push({ path: toRepoPath(paths.repoRoot, childPath), mtime: info.mtime.toISOString(), bytes: info.size });
+        const path = toRepoPath(paths.repoRoot, childPath);
+        const stats = ledger.statsForPath(path);
+        entries.push({ path, mtime: info.mtime.toISOString(), bytes: info.size, lastActor: stats.lastActor, humanEdits: stats.humanEdits, agentEdits: stats.agentEdits });
       }
     }
   }
@@ -316,6 +353,8 @@ async function buildUi(appDir: string, distDir: string): Promise<void> {
     define: { "process.env.NODE_ENV": JSON.stringify("development") },
   });
   await copyFile(join(appDir, "src/ui/index.html"), join(distDir, "index.html"));
+  const tokensPath = join(appDir, "src/ui/tokens.css");
+  if (existsSync(tokensPath)) await copyFile(tokensPath, join(distDir, "tokens.css"));
 }
 
 function watchUi(appDir: string, distDir: string): FSWatcher[] {
@@ -346,8 +385,43 @@ function emitEvent(clients: Set<EventClient>, event: JsonValue): void {
   for (const client of clients) client.send(payload);
 }
 
-function watchLab(paths: AppPaths, clients: Set<EventClient>): FSWatcher[] {
+function watchLab(paths: AppPaths, clients: Set<EventClient>, ledger: Ledger, recentPuts: Map<string, RecentPutEntry>, recentWatchHashes: Map<string, RecentWatchHashEntry>): FSWatcher[] {
   const watchers: FSWatcher[] = [];
+  const recordAgentEditFromDisk = (fullPath: string, checkRecentPut: boolean): void => {
+    void (async () => {
+      if (!existsSync(fullPath)) return;
+      const content = await readFile(fullPath, "utf8");
+      const contentHash = createHash("sha256").update(content).digest("hex");
+      const now = Date.now();
+      if (checkRecentPut) {
+        const recentPut = recentPuts.get(fullPath);
+        if (recentPut !== undefined) {
+          if (now - recentPut.ts > RECENT_PUT_HASH_TTL_MS) {
+            recentPuts.delete(fullPath);
+          } else if (recentPut.contentHash === contentHash) {
+            recentPuts.delete(fullPath);
+            return;
+          }
+        }
+      }
+
+      const recentWatchHash = recentWatchHashes.get(fullPath);
+      if (recentWatchHash !== undefined && recentWatchHash.contentHash === contentHash && now - recentWatchHash.ts < WATCH_DUPLICATE_WINDOW_MS) return;
+      const path = toRepoPath(paths.repoRoot, fullPath);
+      const latest = ledger.latestForPath(path);
+      if (latest?.contentHash === contentHash) {
+        recentWatchHashes.set(fullPath, { contentHash, ts: now });
+        return;
+      }
+
+      const agentId = process.env.SCENE_AGENT_ID;
+      ledger.recordEdit({ path, actor: "agent", agentHint: agentId && agentId.length > 0 ? agentId : null, content });
+      recentWatchHashes.set(fullPath, { contentHash, ts: now });
+    })().catch((error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[scene-playground] failed to record ledger edit for ${fullPath}: ${message}`);
+    });
+  };
   const addWatch = (dir: string, type: "spec-changed" | "render-added" | "report-added"): void => {
     if (!existsSync(dir)) return;
     watchers.push(
@@ -358,6 +432,8 @@ function watchLab(paths: AppPaths, clients: Set<EventClient>): FSWatcher[] {
         if (type === "spec-changed" && !fullPath.endsWith(".scene.json")) return;
         if (type === "render-added" && basename(fullPath) !== "scene.mp4" && basename(fullPath) !== "manifest.json") return;
         if (type === "report-added" && basename(fullPath) !== "report.md") return;
+        if (type === "spec-changed") recordAgentEditFromDisk(fullPath, true);
+        if (type === "report-added") recordAgentEditFromDisk(fullPath, false);
         const emitPath = type === "report-added" ? dirname(fullPath) : fullPath;
         emitEvent(clients, { type, path: toRepoPath(paths.repoRoot, emitPath) });
       }),
@@ -370,7 +446,8 @@ function watchLab(paths: AppPaths, clients: Set<EventClient>): FSWatcher[] {
 }
 
 function parseArgs(argv: string[]): { port: number; open: boolean } {
-  let port = DEFAULT_PORT;
+  const envPort = process.env.PORT !== undefined ? Number.parseInt(process.env.PORT, 10) : Number.NaN;
+  let port = Number.isInteger(envPort) && envPort > 0 ? envPort : DEFAULT_PORT;
   let open = false;
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -400,21 +477,41 @@ export async function createScenePlaygroundApp(options: ServerOptions = {}): Pro
     specsDir: join(repoRoot, "workflows/scene-lab/specs"),
     rendersDir: join(repoRoot, "workflows/scene-lab/renders"),
     reportsDir: join(repoRoot, "workflows/scene-lab/reports"),
-    assetRoots: [join(repoRoot, "data/video-recreation"), join(repoRoot, "workflows/scene-lab/assets")],
-    streamRoots: [join(repoRoot, "data/video-recreation"), join(repoRoot, "workflows/scene-lab/assets"), join(repoRoot, "workflows/scene-lab/renders")],
+    assetRoots: [join(repoRoot, "data/video-recreation"), join(repoRoot, "workflows/scene-lab/assets"), join(repoRoot, "data/inspiration")],
+    streamRoots: [join(repoRoot, "data/video-recreation"), join(repoRoot, "workflows/scene-lab/assets"), join(repoRoot, "workflows/scene-lab/renders"), join(repoRoot, "data/inspiration")],
     runtimePath: join(repoRoot, "packages/scene-renderer/dist/runtime.js"),
   };
   await ensureLabDirs(paths);
   if (options.buildUi ?? true) await buildUi(appDir, distDir);
+  const errorLogPath = join(repoRoot, "data/scene-lab/errors.log");
+  const ledger = openLedger(join(repoRoot, "data/scene-lab/ledger.sqlite"));
+  const labels = openLabels(join(repoRoot, "data/scene-lab/labels.sqlite"));
   const clients = new Set<EventClient>();
+  const recentPuts = new Map<string, RecentPutEntry>();
+  const recentWatchHashes = new Map<string, RecentWatchHashEntry>();
   const sseHeartbeatMs = options.sseHeartbeatMs ?? SSE_HEARTBEAT_MS;
-  const watchers = [...watchLab(paths, clients), ...(options.watchUi ? watchUi(appDir, distDir) : [])];
+  const watchers = [...watchLab(paths, clients, ledger, recentPuts, recentWatchHashes), ...(options.watchUi ? watchUi(appDir, distDir) : [])];
+  const appendServerError = async (error: unknown, requestUrl?: string): Promise<void> => {
+    try {
+      await appendError(caughtErrorInput("server", error, requestUrl), errorLogPath);
+    } catch (appendFailure) {
+      console.error("[scene-playground] failed to append server error", appendFailure);
+    }
+  };
+  const onUnhandledRejection = (reason: unknown): void => {
+    void appendServerError(reason);
+  };
+  const onUncaughtException = (error: Error): void => {
+    void appendServerError(error);
+  };
+  process.on("unhandledRejection", onUnhandledRejection);
+  process.on("uncaughtException", onUncaughtException);
 
   const fetchHandler = async (request: Request): Promise<Response> => {
     const url = new URL(request.url);
     try {
       if (url.pathname === "/api/specs" && request.method === "GET") {
-        return jsonResponse(await listSpecs(paths));
+        return jsonResponse(await listSpecs(paths, ledger));
       }
       if (url.pathname === "/api/spec" && request.method === "GET") {
         const specPath = resolveSpecPath(paths, url.searchParams.get("path") ?? "");
@@ -425,8 +522,43 @@ export async function createScenePlaygroundApp(options: ServerOptions = {}): Pro
         const specPath = resolveSpecPath(paths, url.searchParams.get("path") ?? "");
         if (specPath === null) return jsonResponse({ error: "Spec path must stay inside workflows/scene-lab/specs and end with .scene.json" }, { status: 400 });
         await mkdir(dirname(specPath), { recursive: true });
-        await writeFile(specPath, await request.text(), "utf8");
-        return jsonResponse({ ok: true, path: toRepoPath(paths.repoRoot, specPath) });
+        const content = await request.text();
+        const path = toRepoPath(paths.repoRoot, specPath);
+        const edit = ledger.recordEdit({ path, actor: "human", content });
+        recentPuts.set(specPath, { contentHash: edit.contentHash, ts: Date.now() });
+        await writeFile(specPath, content, "utf8");
+        return jsonResponse({ ok: true, path });
+      }
+      if (url.pathname === "/healthz") {
+        return jsonResponse({ ok: true, app: "scene-playground", ts: new Date().toISOString() });
+      }
+      if (url.pathname === "/api/ledger" && request.method === "GET") {
+        const rawLimit = url.searchParams.get("limit");
+        const limit = rawLimit === null ? 50 : Number.parseInt(rawLimit, 10);
+        return jsonResponse(ledger.listRecent(limit));
+      }
+      if (url.pathname === "/api/ledger/stats" && request.method === "GET") {
+        const specPath = resolveSpecPath(paths, url.searchParams.get("path") ?? "");
+        if (specPath === null) return jsonResponse({ error: "Spec path must stay inside workflows/scene-lab/specs and end with .scene.json" }, { status: 400 });
+        return jsonResponse(ledger.statsForPath(toRepoPath(paths.repoRoot, specPath)));
+      }
+      if (url.pathname === "/api/client-errors" && request.method === "POST") {
+        let parsed: unknown;
+        try {
+          parsed = await request.json();
+        } catch {
+          return jsonResponse({ error: "Body must be JSON with message (string), optional stack, optional url" }, { status: 400 });
+        }
+        const body = decodeClientErrorBody(parsed);
+        if (body === null) return jsonResponse({ error: "Body must include message (non-empty string), optional stack, optional url" }, { status: 400 });
+        const errorInput = { source: "client", message: body.message, ...(body.stack === undefined ? {} : { stack: body.stack }), ...(body.url === undefined ? {} : { url: body.url }) } as const;
+        await appendError(errorInput, errorLogPath);
+        return new Response(null, { status: 204 });
+      }
+      if (url.pathname === "/api/errors" && request.method === "GET") {
+        const rawLimit = url.searchParams.get("limit");
+        const limit = rawLimit === null ? 50 : Number.parseInt(rawLimit, 10);
+        return jsonResponse(await listRecentErrors(limit, errorLogPath));
       }
       if (url.pathname === "/api/assets" && request.method === "GET") {
         return jsonResponse(await listAssets(paths));
@@ -472,6 +604,64 @@ export async function createScenePlaygroundApp(options: ServerOptions = {}): Pro
           },
         });
       }
+      // ---- Label routes ----
+      if (url.pathname === "/api/corpus" && request.method === "GET") {
+        const manifestPath = join(repoRoot, "data/inspiration/pleometric/manifest.json");
+        if (!existsSync(manifestPath)) return jsonResponse([]);
+        const raw = JSON.parse(await readFile(manifestPath, "utf8")) as { items?: Array<Record<string, unknown>> };
+        const items = raw.items ?? [];
+        const allLabels = labels.allLabels();
+        const labelsByMedia = new Map<string, string[]>();
+        for (const l of allLabels) {
+          const arr = labelsByMedia.get(l.media_path);
+          if (arr !== undefined) arr.push(l.grp);
+          else labelsByMedia.set(l.media_path, [l.grp]);
+        }
+        const corpus = items.map((item) => ({
+          ...item,
+          labels: labelsByMedia.get(item.file as string) ?? [],
+        }));
+        return jsonResponse(corpus as unknown as JsonPayload);
+      }
+      if (url.pathname === "/api/labels" && request.method === "GET") {
+        const all = labels.allLabels();
+        return jsonResponse(all as unknown as JsonPayload);
+      }
+      if (url.pathname === "/api/labels" && request.method === "PUT") {
+        const body = (await request.json()) as { mediaPath?: string; group?: string; op?: string };
+        const mediaPath = body.mediaPath;
+        const group = body.group;
+        const op = body.op;
+        if (typeof mediaPath !== "string" || typeof group !== "string" || (op !== "add" && op !== "remove")) {
+          return jsonResponse({ error: "Body requires mediaPath (string), group (string), op ('add'|'remove')" }, { status: 400 });
+        }
+        // Guard: only allow media paths inside data/inspiration
+        const inspirationRoot = join(repoRoot, "data/inspiration");
+        const target = resolve(inspirationRoot, mediaPath);
+        if (!isInside(inspirationRoot, target)) {
+          return jsonResponse({ error: "Media path must be inside data/inspiration" }, { status: 403 });
+        }
+        if (op === "add") {
+          labels.assign(mediaPath, group);
+        } else {
+          labels.unassign(mediaPath, group);
+        }
+        // Provenance: record in ledger
+        const content = JSON.stringify({ op, mediaPath, group });
+        ledger.recordEdit({ path: `data/inspiration/pleometric/${mediaPath}`, actor: "human", content });
+        return jsonResponse({ ok: true } as unknown as JsonPayload);
+      }
+      if (url.pathname === "/api/label-groups" && request.method === "GET") {
+        return jsonResponse(labels.groupsWithCounts() as unknown as JsonPayload);
+      }
+      if (url.pathname === "/api/label-groups" && request.method === "PUT") {
+        const body = (await request.json()) as { name?: string; key?: string };
+        if (typeof body.name !== "string" || body.name.trim().length === 0) {
+          return jsonResponse({ error: "Body requires name (non-empty string)" }, { status: 400 });
+        }
+        const row = labels.ensureGroup(body.name.trim(), body.key ?? undefined);
+        return jsonResponse(row as unknown as JsonPayload);
+      }
       if (url.pathname === "/api/reports" && request.method === "GET") {
         return jsonResponse(await listReports(paths));
       }
@@ -491,6 +681,7 @@ export async function createScenePlaygroundApp(options: ServerOptions = {}): Pro
       if (!isInside(paths.distDir, staticPath) || !existsSync(staticPath)) return textResponse("Not found", 404);
       return serveFile(staticPath);
     } catch (error) {
+      await appendServerError(error, url.href);
       const message = error instanceof Error ? error.message : "Unexpected server error";
       return jsonResponse({ error: message }, { status: 500 });
     }
@@ -501,7 +692,13 @@ export async function createScenePlaygroundApp(options: ServerOptions = {}): Pro
     paths,
     close() {
       for (const watcher of watchers) watcher.close();
+      recentWatchHashes.clear();
+      recentPuts.clear();
       for (const client of clients) client.close();
+      process.off("unhandledRejection", onUnhandledRejection);
+      process.off("uncaughtException", onUncaughtException);
+      ledger.close();
+      labels.close();
       clients.clear();
     },
   };

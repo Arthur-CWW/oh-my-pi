@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "start": "bun src/server.ts",
+    "dev": "bunx portless scene bun --watch src/server.ts",
+    "dev:up": "./scripts/dev-up.sh",
     "typecheck": "tsc --noEmit",
     "test": "bun test"
   },
