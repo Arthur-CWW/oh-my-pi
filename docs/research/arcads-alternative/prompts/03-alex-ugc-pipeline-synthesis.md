@@ -6,7 +6,7 @@ You are analyzing Alex Nguyen's public AI UGC / AI influencer / TikTok slideshow
 
 Important constraints:
 
-- Extract high-level mechanics, not exact private identities or copyrighted posts.
+- Extract high-level mechanics, not exact private identities or protected posts.
 - Do not propose platform-evasion or fake-geography tooling. If account-warmup material appears, treat it only as risk/context. Build safe principles: manual review, drafts, low volume, quality, transparency, compliance.
 - The goal is to build a modular AI UGC production system, not a spam bot.
 
@@ -50,7 +50,7 @@ For each:
 - reusable templates;
 - what should be metadata in an asset catalog;
 - failure modes;
-- legal/ethical constraints.
+- product/scope constraints.
 
 ### 3. Product features to extract
 

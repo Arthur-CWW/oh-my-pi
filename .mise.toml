@@ -1,3 +1,7 @@
+[tools]
+erlang = "28.5"
+elixir = "1.20.1-otp-28"
+
 [tasks.symphonyx-install]
 description = "Install the local SymphonyX CLI globally into ~/.cargo/bin"
 run = "cargo install --path packages/symphony-lite-rs --locked --force"
@@ -5,3 +9,205 @@ run = "cargo install --path packages/symphony-lite-rs --locked --force"
 [tasks.symphonyx-test]
 description = "Run SymphonyX Rust tests"
 run = "cargo test --manifest-path packages/symphony-lite-rs/Cargo.toml"
+
+[tasks.omp-link]
+description = "Symlink repo-owned OMP wrapper, post-update maintenance, self-heal script, patches, and repair context"
+run = '''
+set -euo pipefail
+repo_root="${MISE_PROJECT_ROOT:-$(pwd)}"
+mkdir -p "${HOME}/.local/bin" "${HOME}/.omp/agent/bin" "${HOME}/.omp/agent/patches" "${HOME}/.omp/agent/skills/spec-driven-overlays"
+ln -sfn "${repo_root}/.omp/bin/omp" "${HOME}/.local/bin/omp"
+ln -sfn "${repo_root}/.omp/bin/omp-post-update" "${HOME}/.local/bin/omp-post-update"
+ln -sfn "${repo_root}/.omp/agent/bin/omp-self-heal" "${HOME}/.omp/agent/bin/omp-self-heal"
+ln -sfn "${repo_root}/.omp/agent/patches/beautiful-mermaid@1.1.3.patch" "${HOME}/.omp/agent/patches/beautiful-mermaid@1.1.3.patch"
+ln -sfn "${repo_root}/.omp/agent/patches/README.md" "${HOME}/.omp/agent/patches/README.md"
+ln -sfn "${repo_root}/.omp/patches/cmux-omp-resume-env.md" "${HOME}/.omp/agent/patches/cmux-omp-resume-env.md"
+ln -sfn "${repo_root}/.omp/patches/cmux-shell-noclobber.md" "${HOME}/.omp/agent/patches/cmux-shell-noclobber.md"
+ln -sfn "${repo_root}/skills/core/spec-driven-overlays/SKILL.md" "${HOME}/.omp/agent/skills/spec-driven-overlays/SKILL.md"
+echo "omp-link: linked OMP files from ${repo_root}"
+'''
+
+[tasks.omp-install]
+description = "Install upstream OMP with bun, link repo-owned files, then apply local patches"
+run = '''
+set -euo pipefail
+bun add -g @oh-my-pi/pi-coding-agent@latest
+mise run omp-link
+"${HOME}/.omp/agent/bin/omp-self-heal"
+"${HOME}/.local/bin/omp" --version
+'''
+
+[tasks.omp-update]
+description = "Update upstream OMP through the repo wrapper; post-update maintenance runs automatically"
+run = '''
+set -euo pipefail
+mise run omp-link
+"${HOME}/.local/bin/omp" update
+'''
+
+[tasks.omp-doctor]
+description = "Verify OMP wrapper symlinks, upstream binary, self-heal patch, and skill discovery"
+run = '''
+set -euo pipefail
+python3 - <<'PY'
+from pathlib import Path
+
+checks = {
+    "~/.local/bin/omp": Path.home() / ".local/bin/omp",
+    "~/.local/bin/omp-post-update": Path.home() / ".local/bin/omp-post-update",
+    "~/.omp/agent/bin/omp-self-heal": Path.home() / ".omp/agent/bin/omp-self-heal",
+    "~/.omp/agent/patches/beautiful-mermaid@1.1.3.patch": Path.home() / ".omp/agent/patches/beautiful-mermaid@1.1.3.patch",
+    "~/.omp/agent/patches/cmux-omp-resume-env.md": Path.home() / ".omp/agent/patches/cmux-omp-resume-env.md",
+    "~/.omp/agent/patches/cmux-shell-noclobber.md": Path.home() / ".omp/agent/patches/cmux-shell-noclobber.md",
+    "~/.omp/agent/skills/spec-driven-overlays/SKILL.md": Path.home() / ".omp/agent/skills/spec-driven-overlays/SKILL.md",
+}
+
+for label, path in checks.items():
+    if not path.is_symlink():
+        raise SystemExit(f"{label} is not a symlink")
+    if not path.exists():
+        raise SystemExit(f"{label} target is missing: {path.resolve()}")
+    print(f"{label} -> {path.resolve()}")
+PY
+"${HOME}/.local/bin/omp" --version
+"${HOME}/.omp/agent/bin/omp-self-heal"
+python3 - <<'PY'
+from pathlib import Path
+zshenv = Path.home() / ".zshenv"
+text = zshenv.resolve().read_text(errors="replace") if zshenv.exists() or zshenv.is_symlink() else ""
+if ".local/share/mise/shims" not in text:
+    raise SystemExit(f"cmux OMP resume invariant failed: {zshenv} does not add mise shims in .zshenv")
+print("cmux OMP resume .zshenv invariant present")
+PY
+tmp="${TMPDIR:-/tmp}/cmux-omp-resume-doctor.$$.$RANDOM.zsh"
+printf '%s\n' '#!/bin/zsh' 'set -e' 'command -v bun' '"$HOME/.bun/bin/omp" --version >/dev/null' > "${tmp}"
+chmod 700 "${tmp}"
+env -i HOME="${HOME}" PATH="/usr/bin:/bin" /bin/zsh "${tmp}"
+rm -f "${tmp}"
+echo "cmux OMP sparse-zsh resume test passed"
+python3 - <<'PY'
+from pathlib import Path
+marker = '} >|"$shim_path" 2>/dev/null || return 0'
+files = [
+    Path("/Applications/cmux.app/Contents/Resources/shell-integration/cmux-zsh-integration.zsh"),
+    Path("/Applications/cmux.app/Contents/Resources/shell-integration/cmux-bash-integration.bash"),
+]
+for f in files:
+    if not f.exists():
+        raise SystemExit(f"cmux shell integration missing: {f}")
+    text = f.read_text(errors="replace")
+    if marker not in text:
+        raise SystemExit(f"cmux shell integration noclobber marker missing in {f}")
+    print(f"cmux shell integration noclobber marker present in {f}")
+PY
+python3 - <<'PY'
+import json
+from pathlib import Path
+pkg = Path.home() / ".bun/install/global/node_modules/beautiful-mermaid/package.json"
+target = Path.home() / ".bun/install/global/node_modules/beautiful-mermaid/dist/index.js"
+version = json.loads(pkg.read_text()).get("version", "")
+text = target.read_text(errors="replace")
+missing = [needle for needle in ("WIDE_PAD", "graphemeSegmenter", "displayWidth") if needle not in text]
+if missing:
+    raise SystemExit(f"beautiful-mermaid CJK markers missing: {missing}. If version is no longer 1.1.3, check upstream and regenerate/remove the patch.")
+if version != "1.1.3":
+    print(f"beautiful-mermaid {version} has CJK markers; overlay may be obsolete upstream")
+else:
+    print("beautiful-mermaid CJK patch markers present")
+PY
+python3 - <<'PY'
+from pathlib import Path
+root = Path.home() / ".bun/install/global/node_modules/@oh-my-pi/pi-coding-agent/src/modes/components"
+agent_hub = root / "agent-hub.ts"
+transcript_viewer = root / "agent-transcript-viewer.ts"
+text = ""
+for path in (agent_hub, transcript_viewer):
+    if path.exists():
+        text += path.read_text(errors="replace") + "\n"
+if "R:revive" in text or 'keyData === "R"' in text or '#reviveChatAgent' in text:
+    print("Agent Hub explicit parked revive markers present")
+else:
+    print("Agent Hub explicit parked revive overlay not installed. Optional repair: mise run omp-agent-heal")
+PY
+bun -e 'import { loadSkills } from "/Users/arthur/.bun/install/global/node_modules/@oh-my-pi/pi-coding-agent/src/extensibility/skills.ts"; const expected = ["browser-control","cua-driver","browser-tools","jimeng-browser-proxy","borges-library","remotion-best-practices"]; const result = await loadSkills({ cwd: process.cwd() }); const names = result.skills.map(skill => skill.name); const missing = expected.filter(name => !names.includes(name)); const collisions = result.warnings.filter(w => String(w.message).includes("name collision")); console.log(JSON.stringify({ count: result.skills.length, missing, collisionCount: collisions.length }, null, 2)); if (missing.length || collisions.length) process.exit(1);'
+'''
+
+[tasks.omp-agent-heal]
+description = "Ask upstream OMP's default agent to repair spec-driven overlays"
+run = '''
+set -euo pipefail
+repo_root="${MISE_PROJECT_ROOT:-$(pwd)}"
+"${HOME}/.local/bin/omp" -p --auto-approve \
+  @"${repo_root}/skills/core/spec-driven-overlays/SKILL.md" \
+  @"${repo_root}/.omp/patches/README.md" \
+  @"${repo_root}/.omp/patches/agent-hub-r-revive.md" \
+  "Repair the installed upstream OMP package to satisfy the Agent Hub explicit parked revive spec. Work only in ~/.bun/install/global/node_modules/@oh-my-pi/pi-coding-agent and only on files required for this spec. Do not modify this repo. After editing, run mise run omp-doctor from ${repo_root} and report the result."
+'''
+
+[tasks.cmux-omp-resume-doctor]
+description = "Self-heal and verify cmux OMP session restore can find Bun through mise shims"
+run = '''
+set -euo pipefail
+mise run omp-link
+"${HOME}/.omp/agent/bin/omp-self-heal"
+'''
+
+[tasks.cmux-omp-resume-agent-heal]
+description = "Ask OMP to repair cmux OMP resume PATH self-heal if deterministic doctor fails"
+run = '''
+set -euo pipefail
+repo_root="${MISE_PROJECT_ROOT:-$(pwd)}"
+"${HOME}/.local/bin/omp" -p --auto-approve \
+  @"${repo_root}/.omp/patches/cmux-omp-resume-env.md" \
+  "Repair the cmux OMP resume PATH invariant. Context: cmux agent-hook auto-resume can launch a generated non-interactive #!/bin/zsh script; that script reads ~/.zshenv but not interactive .zshrc; OMP's ~/.bun/bin/omp uses #!/usr/bin/env bun; therefore ~/.zshenv must put ~/.local/share/mise/shims on PATH before OMP runs. Work only on repo-owned dotfiles/self-heal/mise task files needed for this invariant. Do not patch cmux.app, vendored cmux source, or Bun-managed ~/.bun/bin/omp unless the spec proves the dotfile path cannot work. After editing, run mise run cmux-omp-resume-doctor from ${repo_root} and report the result."
+'''
+
+[tasks.cmux-omp-heal]
+description = "Alias for cmux-omp-resume-agent-heal"
+run = "mise run cmux-omp-resume-agent-heal"
+
+[tasks.cmux-shell-noclobber-doctor]
+description = "Self-heal and verify cmux shell integration uses noclobber-safe redirection"
+run = '''
+set -euo pipefail
+mise run omp-link
+"${HOME}/.omp/agent/bin/omp-self-heal"
+'''
+
+[tasks.cmux-shell-noclobber-agent-heal]
+description = "Ask OMP to repair cmux shell integration noclobber fix if deterministic doctor fails"
+run = '''
+set -euo pipefail
+repo_root="${MISE_PROJECT_ROOT:-$(pwd)}"
+"${HOME}/.local/bin/omp" -p --auto-approve \
+  @"${repo_root}/.omp/patches/cmux-shell-noclobber.md" \
+  @"${repo_root}/.omp/patches/README.md" \
+  "Repair the cmux shell integration noclobber invariant. Context: cmux's _cmux_install_cli_command_shim function writes a generated CLI shim using } >\"$shim_path\" 2>/dev/null || return 0, which fails when the user's shell has set -o noclobber because the redirection refuses to overwrite the existing shim. The fix is to change the marker to } >|\"$shim_path\" 2>/dev/null || return 0 in both /Applications/cmux.app/Contents/Resources/shell-integration/cmux-zsh-integration.zsh and /Applications/cmux.app/Contents/Resources/shell-integration/cmux-bash-integration.bash. Work only on those two installed cmux.app files. Do not modify this repo. After editing, run mise run omp-doctor from ${repo_root} and report the result."
+'''
+
+[tasks.symphony-elixir-check]
+description = "Format-check, compile, and test the Symphony Lite Elixir package"
+run = '''
+set -euo pipefail
+cd packages/symphony-lite-elixir
+mise exec erlang@28.5 elixir@1.20.1-otp-28 -- mix format --check-formatted
+mise exec erlang@28.5 elixir@1.20.1-otp-28 -- mix compile --warnings-as-errors
+mise exec erlang@28.5 elixir@1.20.1-otp-28 -- mix test
+'''
+
+[tasks.symphony-elixir-test]
+description = "Run Symphony Lite Elixir tests"
+run = "cd packages/symphony-lite-elixir && mise exec erlang@28.5 elixir@1.20.1-otp-28 -- mix test"
+
+[tasks.symphony-elixir-build]
+description = "Build the Symphony Lite Elixir CLI escript"
+run = "cd packages/symphony-lite-elixir && mise exec erlang@28.5 elixir@1.20.1-otp-28 -- mix escript.build"
+
+[tasks.symphony-elixir-spike]
+description = "Build and run the Symphony Lite Elixir bounded spike"
+run = '''
+set -euo pipefail
+cd packages/symphony-lite-elixir
+mise exec erlang@28.5 elixir@1.20.1-otp-28 -- mix escript.build
+mise exec erlang@28.5 elixir@1.20.1-otp-28 -- ./bin/symphony_lite_elixir spike --root ../../data/symphony-lite-elixir-spike/run --task-list ../../data/symphony-lite-elixir-spike/tasks.txt --json
+'''

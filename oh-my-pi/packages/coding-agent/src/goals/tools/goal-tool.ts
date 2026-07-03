@@ -15,7 +15,7 @@ import { completionBudgetReport, remainingTokens } from "../runtime";
 import type { Goal, GoalStatus, GoalToolDetails } from "../state";
 
 const goalSchema = z.object({
-	op: z.enum(["create", "get", "complete", "resume", "drop"]).describe("goal operation"),
+	op: z.enum(["create", "update", "get", "complete", "resume", "drop"]).describe("goal operation"),
 	objective: z.string().describe("goal objective").optional(),
 	token_budget: z.number().int().describe("token budget").optional(),
 });
@@ -43,10 +43,10 @@ export function buildGoalToolResponse(
 	};
 }
 
-function validateCreateParams(params: GoalToolInput): { objective: string; tokenBudget?: number } {
+function validateWriteParams(params: GoalToolInput, op: "create" | "update"): { objective: string; tokenBudget?: number } {
 	const objective = params.objective?.trim();
 	if (!objective) {
-		throw new ToolError("objective is required when op=create");
+		throw new ToolError(`objective is required when op=${op}`);
 	}
 	const tokenBudget = params.token_budget;
 	if (tokenBudget !== undefined && (!Number.isInteger(tokenBudget) || tokenBudget <= 0)) {
@@ -82,8 +82,11 @@ export class GoalTool implements AgentTool<typeof goalSchema, GoalToolDetails> {
 
 		let response: GoalToolResponse;
 		if (params.op === "create") {
-			const created = await runtime.createGoal(validateCreateParams(params));
+			const created = await runtime.createGoal(validateWriteParams(params, "create"));
 			response = buildGoalToolResponse(created.goal);
+		} else if (params.op === "update") {
+			const updated = await runtime.replaceGoal(validateWriteParams(params, "update"));
+			response = buildGoalToolResponse(updated.goal);
 		} else if (params.op === "get") {
 			const state = this.#session.getGoalModeState?.();
 			response = buildGoalToolResponse(state?.goal ?? null);
@@ -128,6 +131,8 @@ function describeOp(op: string | undefined): string {
 	switch (op) {
 		case "create":
 			return "set";
+		case "update":
+			return "update";
 		case "complete":
 			return "complete";
 		case "get":
@@ -166,11 +171,11 @@ export const goalToolRenderer = {
 		const description = describeOp(args.op);
 		const meta: string[] = [];
 		const trimmedObjective = args.objective?.trim();
-		if (args.op === "create" && trimmedObjective) {
+		if ((args.op === "create" || args.op === "update") && trimmedObjective) {
 			const objective = truncateToWidth(trimmedObjective, TRUNCATE_LENGTHS.TITLE);
 			meta.push(uiTheme.italic(uiTheme.fg("muted", `"${objective}"`)));
 		}
-		if (args.op === "create" && args.token_budget !== undefined) {
+		if ((args.op === "create" || args.op === "update") && args.token_budget !== undefined) {
 			meta.push(`budget ${formatNumber(args.token_budget)}`);
 		}
 		return new Text(renderStatusLine({ icon: "pending", title: "Goal", description, meta }, uiTheme), 0, 0);

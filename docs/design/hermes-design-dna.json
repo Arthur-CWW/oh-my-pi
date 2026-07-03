@@ -1,0 +1,229 @@
+{
+  "meta": {
+    "name": "Hermes Agent Website DNA",
+    "description": "Design DNA extracted from the rendered Hermes Agent marketing site for reuse as a reference style, not a clone.",
+    "source_references": [
+      "https://hermes-agent.nousresearch.com/",
+      "artifacts/hermes-dna/hero.png",
+      "artifacts/hermes-dna/fullpage.png"
+    ],
+    "created_at": "2026-06-22"
+  },
+  "design_system": {
+    "color": {
+      "palette_type": "monochrome electric-blue with white editorial contrast",
+      "primary": { "hex": "#0000f2", "role": "full-bleed brand field, section background, dominant identity color" },
+      "secondary": { "hex": "#f5f5f5", "role": "primary text, engraved line art, icons, reversed UI chrome" },
+      "accent": { "hex": "#edff45", "role": "rare high-energy accent token observed in CSS, not dominant in captured hero" },
+      "neutral": {
+        "scale": ["#ffffff", "#f5f5f5", "#d9d9ee", "#6f72a8", "#0000f2"],
+        "usage": "white/off-white for typography and cards, pale lavender-gray inside product screenshot surfaces, primary blue as the only large color field"
+      },
+      "semantic": {
+        "success": "#edff45",
+        "warning": "#edff45",
+        "error": "#f5f5f5",
+        "info": "#f5f5f5"
+      },
+      "surface": {
+        "background": "#0000f2",
+        "card": "#f5f5f5",
+        "elevated": "#ffffff"
+      },
+      "contrast_strategy": "Extreme two-tone contrast: saturated blue field against white text and white engraved imagery. Controls invert to white cards with blue text."
+    },
+    "typography": {
+      "type_scale": {
+        "display": { "size": "clamp(44px, 7vw, 96px)", "weight": 300, "line_height": 0.88, "tracking": "0.03em" },
+        "heading_1": { "size": "44-96px", "weight": 300, "line_height": 0.88, "tracking": "0.03em" },
+        "heading_2": { "size": "22px", "weight": 300, "line_height": 1.0, "tracking": "0" },
+        "heading_3": { "size": "14px", "weight": 700, "line_height": 1.15, "tracking": "0.08em" },
+        "body": { "size": "16px", "weight": 400, "line_height": 1.45, "tracking": "0" },
+        "body_small": { "size": "13px", "weight": 400, "line_height": 1.45, "tracking": "0" },
+        "caption": { "size": "10-11px", "weight": 700, "line_height": 1.2, "tracking": "0.18em" },
+        "overline": { "size": "9-10px", "weight": 700, "line_height": 1.2, "tracking": "0.2em" }
+      },
+      "font_families": {
+        "heading": "High-contrast editorial display serif similar to Didot/Bodoni/Times Display",
+        "body": "ui-sans-serif, system-ui, sans-serif",
+        "mono": "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace"
+      },
+      "font_style_notes": "Identity comes from all-caps editorial serif headings, tiny tracked uppercase metadata, and monospace terminal commands."
+    },
+    "spacing": {
+      "base_unit": "4px",
+      "scale": ["4px", "8px", "12px", "16px", "24px", "32px", "48px", "72px", "96px"],
+      "content_density": "Sparse hero with large negative space; dense only inside terminal and product screenshot components.",
+      "section_rhythm": "Large viewport-height blocks with strong vertical gaps; content aligns to generous left margins."
+    },
+    "layout": {
+      "grid_system": "Full-bleed viewport sections with a top horizontal nav, left-aligned hero copy, right-dominant illustration, and below-fold card/grid feature sections.",
+      "max_content_width": "none for hero field; content columns visually constrained to roughly 520px on desktop",
+      "columns": "2-column hero: left content rail plus right illustration/art rail; feature sections use repeated media/text panels.",
+      "gutter": "32-80px depending on viewport",
+      "breakpoints": { "mobile": "<768px", "tablet": "768-1024px", "desktop": ">=1024px" },
+      "alignment_tendency": "Left-aligned functional content balanced by centered top logo and right-heavy hero art."
+    },
+    "shape": {
+      "border_radius": { "small": "0px", "medium": "6px", "large": "10px", "pill": "999px" },
+      "border_usage": "Most links and nav are borderless. Terminal card uses a subtle white/gray boundary; product screenshots are framed by their own image edges.",
+      "divider_style": "Thin, low-contrast dividers inside terminal/tabs; no heavy section rules."
+    },
+    "elevation": {
+      "shadow_style": "Minimal; depth mostly comes from scale, cropping, and high-contrast line art. Terminal card has a soft practical shadow.",
+      "levels": {
+        "low": "0 1px 2px rgba(0,0,0,0.08)",
+        "medium": "0 8px 24px rgba(0,0,0,0.12)",
+        "high": "0 18px 48px rgba(0,0,0,0.18)"
+      },
+      "depth_cues": "Illustration overlap, radiating linework, card inversion, and screenshot cropping rather than stacked shadows."
+    },
+    "iconography": {
+      "style": "Simple white platform/social glyphs plus ornate engraved hero illustration",
+      "stroke_weight": "1.5-2px for UI icons; hairline to medium engraved strokes for artwork",
+      "size_scale": ["12px", "16px", "24px", "32px"],
+      "preferred_set": "Lucide-like thin UI icons paired with custom engraved mythological artwork"
+    },
+    "motion": {
+      "easing": "cubic-bezier(.4, 0, .2, 1)",
+      "duration_scale": { "micro": "150ms", "normal": "220ms", "macro": "400ms" },
+      "entrance_pattern": "No visible entrance motion in captured still; likely simple fades/slides if present.",
+      "exit_pattern": "No visible exit motion in captured still.",
+      "philosophy": "Motion is secondary; static brand impact carries the page."
+    },
+    "components": {
+      "button_style": "Text-link buttons with uppercase serif labels; key download action pairs a platform icon with small text. Primary command card is a white rounded terminal surface.",
+      "input_style": "Terminal/code card rather than form inputs: white field, compact tabs, blue monospace command text.",
+      "card_style": "Few real cards; when present, white/off-white rectangles on blue with small radius and restrained shadow.",
+      "navigation_pattern": "Wide top nav spread across the page, centered stacked brand mark, small social icons underneath.",
+      "modal_style": "Not observed; if needed, use stark blue backdrop with white panel and editorial serif heading.",
+      "list_style": "Feature list uses numbered sections (#1, #2...) with image plus concise copy; labels are tiny uppercase.",
+      "component_notes": "Reusable units: hero art block, top nav wordmarks, terminal install card, platform download tiles, numbered feature panels."
+    }
+  },
+  "design_style": {
+    "aesthetic": {
+      "mood": "mythic, electric, editorial, open-source, technically ceremonial",
+      "visual_metaphor": "A classical messenger/deity fused with developer terminal ritual and desktop-agent product proof.",
+      "era_influence": "High-fashion editorial typography plus 1980s/1990s developer terminal cues and classical engraving.",
+      "genre": "AI developer-tool marketing page with editorial art direction",
+      "personality_traits": ["mythic", "confident", "minimal", "ceremonial", "technical", "strange-but-controlled"],
+      "adjectives": ["electric", "engraved", "serifed", "monochrome", "ritualistic", "precise"]
+    },
+    "visual_language": {
+      "complexity": "Medium-high: layout is simple, but artwork and typographic voice are highly distinctive.",
+      "ornamentation": "High in illustration/radiating motifs, low in UI chrome.",
+      "whitespace_usage": "Large, dramatic negative space around hero copy; dense command card only where function matters.",
+      "visual_weight_distribution": "Dominant color field and massive serif headline balanced by oversized right-side illustration.",
+      "focal_strategy": "Hero headline first, mythological art second, terminal install card third.",
+      "contrast_level": "Very high",
+      "texture_usage": "Engraved line texture in hero artwork; otherwise flat color."
+    },
+    "composition": {
+      "hierarchy_method": "Scale, all-caps serif contrast, whitespace, and color inversion.",
+      "balance_type": "Asymmetric hero with centered nav anchor.",
+      "flow_direction": "Top nav → left hero headline → install/download card → platform/feature proof sections.",
+      "grouping_strategy": "Sparse labeled clusters; each cluster gets a tiny uppercase label before the functional element.",
+      "negative_space_role": "Primary; empty blue field makes typography and artwork feel monumental."
+    },
+    "imagery": {
+      "photo_treatment": "No photography observed; product screenshots are lightly washed/pale and embedded as proof artifacts.",
+      "illustration_style": "Classical engraved mythological figure, monochrome white/blue, with radiating geometric bursts.",
+      "graphic_elements": "Sunburst rays, line-art figure, platform glyphs, terminal card, product screenshots.",
+      "pattern_usage": "No repeating pattern; radial burst linework acts as local ornament.",
+      "image_shape": "Large irregular illustration cutout; rectangular screenshot crops."
+    },
+    "interaction_feel": {
+      "feedback_style": "Likely minimal text/link hover states; still capture shows no overt animation state.",
+      "hover_behavior": "Expected subtle opacity/color changes, not chunky transforms.",
+      "transition_personality": "Fast and restrained.",
+      "loading_style": "Not observed; should use simple typographic or terminal-like feedback if adapted.",
+      "microinteraction_density": "Low"
+    },
+    "brand_voice_in_ui": {
+      "tone": "Direct, mythic, developer-native",
+      "formality": "Medium-formal editorial",
+      "cta_style": "Command-oriented: Install, Download, terminal curl command.",
+      "empty_state_approach": "Not observed; adapt with concise technical copy and tiny uppercase labels.",
+      "error_tone": "Not observed; use calm terminal-style diagnostics."
+    }
+  },
+  "visual_effects": {
+    "overview": {
+      "effect_intensity": "medium",
+      "performance_tier": "lightweight",
+      "fallback_strategy": "Static blue field, static line art, and ordinary white cards must preserve identity if all motion/effects are disabled.",
+      "primary_technology": "CSS plus raster/WebP artwork; no confirmed WebGL/canvas from captured evidence."
+    },
+    "background_effects": {
+      "type": "solid-color-field",
+      "description": "Full-viewport saturated electric-blue background.",
+      "technology": "CSS background-color",
+      "params": { "color_palette": ["#0000f2", "#f5f5f5"], "speed": "none", "density": "full", "opacity": 1, "blend_mode": "normal" }
+    },
+    "particle_systems": {
+      "enabled": false,
+      "type": "none",
+      "description": "No particle system visible in rendered screenshot.",
+      "technology": "none",
+      "params": { "count": 0, "shape": "none", "size_range": "none", "movement_pattern": "none", "color_behavior": "none", "interaction": "none", "spawn_area": "none" }
+    },
+    "3d_elements": {
+      "enabled": false,
+      "type": "none",
+      "description": "No live 3D renderer visible; mythological figure is rendered as static image/line art.",
+      "technology": "none",
+      "params": { "renderer": "none", "lighting": "none", "camera": "none", "materials": "none", "geometry": "none", "post_processing": "none", "interaction_model": "none" }
+    },
+    "shader_effects": {
+      "enabled": false,
+      "type": "none",
+      "description": "No shader distortion visible in the screenshot.",
+      "technology": "none",
+      "params": { "uniforms": {}, "vertex_manipulation": "none", "fragment_output": "none", "noise_type": "none", "distortion": "none" }
+    },
+    "scroll_effects": {
+      "parallax": { "enabled": false, "layers": [], "depth_range": "none", "speed_curve": "none observed" },
+      "scroll_triggered_animations": { "enabled": false, "trigger_points": [], "animation_type": "none observed", "scrub_behavior": "none observed" },
+      "scroll_morphing": { "enabled": false, "description": "No scroll morphing observed from still capture." }
+    },
+    "text_effects": {
+      "type": "editorial-all-caps",
+      "description": "Impact comes from large all-caps serif type, tight line-height, and wide tracking rather than animated text.",
+      "technology": "CSS typography",
+      "params": { "split_strategy": "manual line breaks", "animation_per_unit": "none observed", "stagger": "none observed", "effect_style": "static high-contrast serif" }
+    },
+    "cursor_effects": {
+      "enabled": false,
+      "type": "none",
+      "description": "No custom cursor visible or inferred from screenshot.",
+      "params": { "shape": "none", "size": "none", "blend_mode": "none", "trail": false, "interaction_zone": "none" }
+    },
+    "image_effects": {
+      "type": "engraved-monochrome-artwork",
+      "description": "Static WebP/raster artwork treated as white/blue engraving over a solid blue field.",
+      "technology": "optimized image assets",
+      "params": { "filter_pipeline": "monochrome white/blue", "hover_transform": "none observed", "reveal_animation": "none observed", "distortion_type": "none" }
+    },
+    "glassmorphism_neumorphism": {
+      "enabled": false,
+      "style": "none",
+      "params": { "blur_radius": "0px", "transparency": "none", "border_treatment": "none", "shadow_type": "none", "light_source_angle": "none" }
+    },
+    "canvas_drawings": {
+      "enabled": false,
+      "type": "none",
+      "description": "No canvas drawing visible in rendered screenshot.",
+      "technology": "none",
+      "params": { "draw_method": "none", "animation_loop": "none", "color_scheme": "none", "responsiveness": "none", "interaction": "none" }
+    },
+    "svg_animations": {
+      "enabled": false,
+      "type": "inline-icons-static",
+      "description": "SVG icons appear static; no SVG path animation observed.",
+      "technology": "inline SVG icons",
+      "params": { "path_animation": "none observed", "morphing": "none observed", "stroke_animation": "none observed" }
+    },
+    "composite_notes": "Hermes' reusable DNA is not generic blue SaaS. It is a specific combination: electric-blue flood, monumental high-contrast serif type, tiny uppercase labels, static engraved mythological art, developer terminal card, and sparse UI chrome. For Slotok/Hermes-inspired internal work, reuse the composition logic and typographic drama without copying the Hermes name, exact illustration, or brand-blue dominance unless making a separate reference-mode experiment."
+  }
+}

@@ -46,7 +46,7 @@ Each component should be swappable, cacheable, and independently reviewable.
 
 ## Node graph model
 
-A graph node is a pure-ish transform whenever possible:
+A graph node is a useful mental model for planning; in v0 it should be stored as SQLite rows plus JSON metadata, not a new DSL:
 
 ```yaml
 - id: seal_character
@@ -84,7 +84,7 @@ A graph node is a pure-ish transform whenever possible:
 
 ## Serialization implications
 
-The recipe format should support:
+An eventual recipe/export format should support these concepts, but the first implementation should keep them as queryable catalog rows and JSON blobs:
 
 - DAG `needs` dependencies
 - stable asset IDs
@@ -134,14 +134,129 @@ For less-brainrot AI UGC later, the same graph can swap:
 - `effects=glitch brainrot` → `effects=CapCut-style clean captions + jump cuts`
 - `analysis=surreal quality` → `analysis=UGC hook/retention/compliance rubric`
 
-The graph should also support cloning popular formats ethically by capturing high-level structure, not copying identities or proprietary content verbatim.
+The graph should also support remixing popular formats by capturing high-level structure while keeping identities, source media, and literal copy choices as explicit source/use decisions rather than default constraints.
+
+## Niche / template-mining node
+
+`T-2026-06-09-022` feeds this graph through abstract template nodes, not through copied whole videos or live scraped media.
+
+Input sources for the current lane:
+
+- local product/niche brief
+- manual analyst notes
+- local clips selected for this workflow with source/use notes
+- approved source digests/manifests already saved locally
+- existing `referenceArchives` and artifact-library entries
+
+No live TikTok/X/CapCut/Arcads scraping, credential reads, or provider generation is part of the first proof.
+
+Template node shape:
+
+```yaml
+- id: template_faceless_skincare_proof_v0
+  kind: template.format_structure
+  provider: local
+  input:
+    researchTargetId: research_faceless_skincare_ugc
+    sourceUse: structure-notes
+  output:
+    sqlite:
+      collection: template-mining-jobs
+      path: data/ugc-studio/workspaces/<workspace_id>/workspace.sqlite
+    artifactLibrary:
+      referenceArchiveFormatOutput:
+        kind: format-template
+        manifestJson:
+          hookFamily: quiet problem recognition
+          sceneBeats:
+            - problem close-up
+            - routine insert
+            - proof texture
+            - soft CTA
+          editCadence: 2-3 second cuts
+          captionLayout: two safe-area blocks plus proof line
+          assetSlots:
+            - synthetic persona or hands
+            - product packshot
+            - proof/demo visual
+            - background
+          swapSlots:
+            - persona
+            - product
+            - hook copy
+            - proof asset
+            - CTA copy
+            - voice
+          sourceFields:
+            - face/body identity
+            - voice
+            - exact captions
+            - source pixels/audio
+            - brand marks
+          sourceUse:
+            default: swap-or-omit
+            allowWhenRecorded: true
+```
+
+Graph invariant: templates preserve mechanics and expose slots. Source likeness, source audio, exact captions, brand marks, and source media are normal metadata/source-use fields; generated lanes swap or omit them unless a specific local remix, artifact, or distribution plan records otherwise.
+
+First local proof:
+
+```bash
+cd apps/slotok-workbench && /Users/arthur/.bun/bin/bun test src/daemon/ugc-sqlite-store.bun.test.ts -t "keeps per-collection SQLite rows in sync after JSON store mutations"
+```
+
+The proof path is `apps/slotok-workbench/src/daemon/ugc-sqlite-store.bun.test.ts`; the SQLite assertion covers `objects.collection = 'research-targets'` and `objects.collection = 'template-mining-jobs'`. For daemon-backed manual proof, inspect `data/ugc-studio/workspaces/<workspace_id>/workspace.sqlite`.
 
 ## Near-term implementation recommendation
 
 Do not build a full graph runner yet. First:
 
-1. Encode graph concepts in a JSON recipe schema.
-2. Make `asset` and `stage output` references explicit.
-3. Add local deterministic nodes first: subtitles, ffmpeg compose, mux, analysis.
-4. Add Jimeng/TTS/lipsync provider nodes only after API research stabilizes.
-5. Keep CapCut reverse engineering as a separate lane if needed.
+1. Create the SQLite artifact catalog and import real accepted proof artifacts.
+2. Make `entity`, `asset`, `effect`, `composition`, `provider_job`, and `stage output` references explicit.
+3. Add the simple review viewer before any visual node editor.
+4. Keep JSON recipe/manifests as import/export edges around the catalog.
+5. Add local deterministic composition helpers first: subtitles, ffmpeg compose, mux, analysis.
+6. Link Jimeng/TTS/lipsync provider outputs through provider-job metadata; do not make this slice own provider orchestration.
+7. Keep CapCut reverse engineering as a separate lane if needed.
+
+
+## Pleometric artifact library v0
+
+The next useful step is not a full graph runner or a new artifact-combinator DSL. Build a tiny local catalog that lets agents record reusable creative primitives and lets Arthur review/tweak them quickly.
+
+Practical shape:
+
+```txt
+data/asset-catalog/assets.sqlite
+```
+
+Minimum SQLite-backed concepts:
+
+- `entities`: durable characters/speakers/objects such as seal host, ASMR companion, dangling keys, aura figure, product, room, or abstract meme object.
+- `assets`: concrete files or provider refs attached to entities: image, video, audio, mask, caption style, prompt card, reference clip, rendered output.
+- `effects`: named reusable operations with parameters, not codegen magic: aura glow, synchronized copies, line train, object mask, caption-safe blur, beat zoom, camera pan, spatial-audio move.
+- `compositions`: small layer stacks/timelines that reference assets/effects and can export Remotion/HyperFrames inputs.
+- `provider_jobs`: internal DAG state for prompt, provider/model/endpoint, request params, output refs, hashes, rerun lineage, and stop conditions.
+
+Keep the first UI deliberately humble:
+
+- one local viewer page over SQLite rows and artifact paths
+- media preview cards for image/video/audio/masks
+- raw JSON/details pane for provider/DAG metadata
+- composition preview as an ordered layer list before trying a full canvas editor
+- lightweight Arthur tweaks: tags, vibe notes, keep/reject, chosen preview image, caption-safe flag, and composition notes
+
+Do not prematurely design:
+
+- a general-purpose visual node editor
+- a custom DSL for combinators
+- provider orchestration beyond recording job metadata and linking existing command outputs
+- global taxonomy migration before real assets reveal the useful fields
+
+Concrete first slice:
+
+1. Extend the existing `docs/schemas/video-asset-catalog-v0.sql` rather than replacing it. Map the first import onto current tables: `asset` / `asset_variant` for media, `generation` / `prompt` / `asset_generation` for provider jobs, `tag` / `asset_tag` / `asset_vibe_score` for searchable traits, `provenance_ref` for source/job lineage, and `asset_usage` / `annotation` for composition notes.
+2. Add a tiny catalog CLI or script that imports one existing Goal 4 handoff bundle plus one Goal 5 render proof into `data/asset-catalog/assets.sqlite`.
+3. Add a read-only viewer route/page that lists existing catalog rows as entities/assets/effects/compositions/provider jobs through views or query projections, without inventing duplicate table names in the first pass.
+4. Prove the slice by importing the accepted ASMR companion proof artifacts and opening one composition that shows the generated clip, spatial audio master, captions/overlays, and provider metadata as internal DAG state.

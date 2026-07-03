@@ -7,7 +7,24 @@ Date: 2026-06-14
 - Start with planning and dry-run scaffolds. No paid provider setup, live trading, live proxy traffic, book downloads, app decompilation, or production network exposure without an explicit approval packet.
 - Use chunkier subagent assignments than the saturation probes: each worker should own a coherent package/docs slice and produce durable artifacts, not one-file trivia.
 - Keep coordinator-owned globals (`TASKS.md`, root manifests, `.omp/**`, `AGENTS.md`, `docs/state/**`) out of worker lanes unless a packet names them.
-- Risky workstreams need compliance gates before implementation: trading, proxy resale, copyrighted books, and reverse engineering.
+- Risky workstreams need scope and approval gates before implementation: trading, proxy resale, restricted book downloads, and reverse engineering.
+
+## Repo-wide packet worker/reviewer SOP
+
+Applies to T-2026-06-13-001 and T-2026-06-13-004 follow-up packets across Jimeng, ASMR, Symphony, Slotok, provider, design, and repo-hygiene workstreams. Domain docs can add local constraints, but should link here instead of copying policy blocks.
+
+Every packet brief should stay concise and include:
+
+- Owner paths: exact files/globs the worker may edit, including tests, fixtures, schemas, docs, and proof paths when those are part of the slice. Assign only one active writer per file; if a fix/review loop must overlap, the brief names the primary owner and tells later workers to coordinate before editing or stand down when superseded.
+- Excluded paths: coordinator-owned globals (`TASKS.md`, root manifests, `.omp/**`, `AGENTS.md`, `docs/state/**`), central registries/snapshots unless assigned, unrelated dirty files, secrets, credentials, cookies, signed URLs, and any paid/live provider path without an approval packet.
+- Proof artifacts: smallest durable evidence for the claim, either package-local tests/fixtures, a tracked `docs/qa/*` note, or an ignored `artifacts/<workstream>/<packet>/` bundle referenced from the worker output. The proof must exercise the real behavior under review; test-only seams are acceptable only when the root runner/runtime cannot load a native/live dependency, and then the packet must include a separate real-runtime proof command or artifact.
+- Root-run verification: workers list the exact commands the root/parent should run, including cwd, runtime (`bun`, `bunx --bun`, `vitest`, provider/live/dry-run mode), and expected artifact paths. Workers normally do not run gates, formatters, project-wide commands, paid provider calls, or live smoke checks. If the named command is impossible under the worker constraints or runtime, the worker reports that as a blocker instead of weakening the proof.
+- Retry/resume behavior: if a worker is revived after yielding or after another worker has touched the same path, it re-reads the current files/history and either reports the already-complete state or performs only the newly assigned delta. It does not keep editing from stale context or broaden the slice just because a previous yield was rejected.
+- Guardrail and prompt-drift checks: baseline or allowlist changes must be exact-finding or exact-file with a reason and must not hide new owned findings broadly. Prompt/spec examples must be checked against current schemas, route constants, and fixture names before being copied into docs.
+- Reviewer persona split: assign reviewers by risk, not by availability. Common splits are API/contract, provider access and cost/auth, runtime/package boundaries, UX/media output, proof/QA, and repo hygiene. Reviewers inspect owner/excluded paths, proof sufficiency, root-run commands, and findings across blocker / important / nit severity.
+
+Worker output should include changed files, the core invariant, proof artifacts created or required, what each proof does and does not prove, commands intentionally not run, recommended root validation commands, and concrete blockers with the next safe command or approval needed.
+
 
 ## Workstream A — Realtime market data and trading bot
 
@@ -22,7 +39,7 @@ Recommended first product shape:
 
 Provider shortlist:
 
-- Crypto direct exchange feeds: Coinbase Advanced Trade, Kraken, Binance where legally/regionally available. Best for execution-aligned WebSocket order book/trade streams.
+- Crypto direct exchange feeds: Coinbase Advanced Trade, Kraken, Binance where supported in the user's region. Best for execution-aligned WebSocket order book/trade streams.
 - Abstraction: CCXT for REST/exchange normalization; consider CCXT Pro only if WebSocket abstraction is worth the paid dependency.
 - Aggregated/historical data: Kaiko, CoinAPI, Databento, Polygon, CoinGecko/CoinMarketCap for broad metadata/context.
 - Paper/live execution later: exchange sandbox where available; Alpaca is a good paper-first broker for equities/crypto-style workflows, but crypto exchange-native paper support varies.
@@ -35,8 +52,8 @@ Cheap stock-data path:
 - Cheap historical/backtest candidate: Tiingo free/internal-use tier if its current terms still match the historical 500 symbols/month and 50 requests/hour pattern; verify directly before coding.
 - Learning/small API fallback: Alpha Vantage free is very tight (25 API requests/day); premium starts around $49.99/mo for 75 requests/min and unlocks realtime/delayed entitlement steps through Alpha X Terminal.
 - Developer quote/news candidate: Finnhub is worth verifying for free realtime quote availability and current per-minute limits; use only documented endpoints and terms.
-- Avoid for production: unofficial Yahoo/yfinance/Stooq-style scraping. It is brittle, may violate terms, and creates hidden legal/availability risk.
-- Do not decompile or copy a proprietary app's private market-data API. Allowed research is official docs, public terms, permitted packet capture of our own traffic only when terms allow, and clean-room adapters to lawful endpoints.
+- Avoid for production: unofficial Yahoo/yfinance/Stooq-style scraping. It is brittle, may violate terms, and creates hidden availability risk.
+- Do not decompile or copy a proprietary app's private market-data API. Allowed research is official docs, public terms, permitted packet capture of our own traffic only when terms allow, and clean-room adapters to permitted endpoints.
 
 Initial strategy direction:
 
@@ -97,7 +114,7 @@ Owner paths: `docs/plans/market-data-provider-matrix.md`.
 
 Change: verify current official pricing/terms for Alpaca, Twelve Data, Alpha Vantage, Tiingo, Finnhub, Tradier, MarketData.app, Polygon/Massive, Nasdaq Data Link, IBKR, and any broker-provided paper trading feeds. Explicitly separate personal/internal, business/internal, display, redistribution, delayed, realtime, WebSocket, historical, and paper-execution rights.
 
-Acceptance: source-linked table; v0 recommendation for cheapest lawful stock data path; no scraping/private API/decompile plan.
+Acceptance: source-linked table; v0 recommendation for cheapest permitted stock data path; no scraping/private API/decompile plan.
 
 ### A6. Momentum/trend strategy distillation
 
@@ -121,7 +138,7 @@ Goal: build an index/rebalance simulator before a trading bot. This is safer tha
 
 V0 index rules:
 
-- Universe: top N crypto assets by market cap/liquidity from a lawful metadata provider.
+- Universe: top N crypto assets by market cap/liquidity from a permitted metadata provider.
 - Exclusions: stablecoins, wrapped duplicates, low liquidity, assets missing price history.
 - Weighting: market-cap weighted with caps, or equal-weighted.
 - Rebalance: weekly/monthly simulation first.
@@ -155,9 +172,9 @@ Acceptance: fixture snapshots of portfolio state and rebalance orders.
 
 ## Workstream C — Compliant residential proxy service
 
-Goal: if pursued, build only an opt-in bandwidth-sharing network with consent, revocation, transparent install/uninstall, abuse controls, and legal review. Do not build scraping evasion, stealth installs, botnet acquisition, malware-like persistence, CAPTCHA bypass, credential stuffing, or ToS-evading automation.
+Goal: if pursued, build only an opt-in bandwidth-sharing network with consent, revocation, transparent install/uninstall, abuse controls, and approval review. Do not build scraping evasion, stealth installs, botnet acquisition, malware-like persistence, CAPTCHA bypass, credential stuffing, or ToS-evading automation.
 
-Required compliance gates before code:
+Required scope gates before code:
 
 - Written consent UX and participant terms.
 - Clear compensation/bandwidth accounting.
@@ -166,15 +183,15 @@ Required compliance gates before code:
 - Use-case policy and abuse desk.
 - Destination allow/deny policy; no credential abuse, spam, account creation, or protected service bypass.
 - Kill switch by customer, device, ASN, country, destination, and traffic pattern.
-- Logging policy reviewed for privacy law.
+- Logging and retention rules reviewed for required privacy obligations.
 
 Subagent packets:
 
-### C1. Legal/compliance requirements plan
+### C1. Consent and abuse-control requirements plan
 
 Owner paths: `docs/plans/compliant-residential-proxy.md`.
 
-Change: write the compliance checklist, prohibited uses, customer onboarding policy, participant consent requirements, retention policy, and abuse response runbook.
+Change: write the scope checklist, prohibited uses, customer onboarding rules, participant consent requirements, retention rules, and abuse response runbook.
 
 Acceptance: explicit no-go list and approval gates before network implementation.
 
@@ -196,13 +213,13 @@ Acceptance: deterministic policy tests and kill-switch tests.
 
 ## Workstream D — Rights-aware library/book assistant
 
-Original request included LibGen/Anna Archive. Do not wire this repo to pirate book downloads or copyright circumvention. Allowed direction: a rights-aware library assistant that searches metadata and downloads only lawful/public-domain/open-access/user-owned documents.
+Original request included LibGen/Anna Archive. Do not wire this repo to pirate book downloads or access-control circumvention. Allowed direction: a rights-aware library assistant that searches metadata and downloads only public-domain, open-access, user-owned, or otherwise permitted documents.
 
 Allowed source integrations:
 
 - Project Gutenberg and Standard Ebooks for public-domain books.
 - arXiv, PubMed Central, DOAJ/OpenAlex/Crossref metadata for open papers.
-- Open Library / Internet Archive metadata and controlled digital lending links where legal for the user; do not bypass lending controls.
+- Open Library / Internet Archive metadata and controlled digital lending links where allowed for the user's account and region; do not bypass lending controls.
 - Local user-provided PDFs/EPUBs and owned files.
 - Publisher/library APIs the user has credentials/rights for.
 
@@ -228,13 +245,13 @@ Acceptance: fixtures with public-domain sample files or tiny generated documents
 
 Owner paths: `packages/library-assistant/src/sources/{gutenberg,standard-ebooks}.ts`, tests.
 
-Change: implement legal source search/download with source attribution and license/public-domain metadata.
+Change: implement permitted-source search/download with source attribution and license/public-domain metadata.
 
 Acceptance: tests use fixtures; live smoke command gated.
 
 ### D4. AI reading skill
 
-Owner paths: `packages/web-access/skills/library-assistant/**`.
+Owner paths: `skills/library-assistant/**`.
 
 Change: skill for summarizing owned/public-domain documents, extracting diagrams into markdown/ASCII where appropriate, and preserving citations.
 
@@ -278,7 +295,7 @@ Acceptance: patch plan and test list; no direct global install mutation without 
 
 ## Workstream F — Reverse engineering / decompilation skill
 
-Goal: create a lawful reverse-engineering skill for permitted targets: owned binaries, open-source binaries, malware samples in a lab, file formats/protocols for interoperability, and clean-room product analysis. Do not decompile proprietary apps to clone code/assets.
+Goal: create a reverse-engineering skill for permitted targets: owned binaries, open-source binaries, malware samples in a lab, file formats/protocols for interoperability, and clean-room product analysis. Do not decompile proprietary apps to clone code/assets.
 
 TablePlus boundary:
 
@@ -288,11 +305,11 @@ TablePlus boundary:
 
 Subagent packets:
 
-### F1. Reverse-engineering skill guardrails
+### F1. Reverse-engineering skill operating rules
 
-Owner paths: `packages/web-access/skills/reverse-engineering/SKILL.md`.
+Owner paths: `skills/research/reverse-engineering/SKILL.md`.
 
-Change: write skill with legal/ethical preflight, target classification, allowed tools, artifact hygiene, and refusal cases.
+Change: write skill with scope preflight, target classification, allowed tools, artifact hygiene, and refusal cases.
 
 Acceptance: no instructions for bypassing licenses/DRM or cloning proprietary apps.
 

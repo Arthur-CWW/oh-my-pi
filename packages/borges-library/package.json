@@ -1,0 +1,33 @@
+{
+  "name": "@wirebabel/borges-library",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Borges Library — search and download books from the extended library",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "download:batch": "bun ./download-batch.ts",
+    "download:kaufmann": "bun ./download-kaufmann.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@sinclair/typebox": "^0.34.48",
+    "effect": "^4.0.0-beta.71"
+  },
+  "peerDependencies": {
+    "@oh-my-pi/pi-coding-agent": "*"
+  },
+  "devDependencies": {
+    "@oh-my-pi/pi-coding-agent": "15.12.3",
+    "bun-types": "^1.3.9",
+    "typescript": "^5.9.3"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  }
+}

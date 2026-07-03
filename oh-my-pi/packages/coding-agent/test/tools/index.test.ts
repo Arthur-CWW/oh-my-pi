@@ -239,7 +239,7 @@ describe("createTools", () => {
 		const requestedTools = await createTools(session, ["read"]);
 		expect(requestedTools.map(t => t.name)).toEqual(["read", "resolve"]);
 	});
-	it("auto-includes goal when goal mode is active", async () => {
+	it("auto-includes goal when goal mode is enabled", async () => {
 		const session = createTestSession({
 			settings: createSettingsWithOverrides({
 				"goal.enabled": true,
@@ -250,6 +250,20 @@ describe("createTools", () => {
 		const names = tools.map(t => t.name);
 
 		expect(names).toEqual(["read", "goal", "resolve"]);
+	});
+
+	it("exposes goal tool before goal mode is active when goal.enabled is true", async () => {
+		const session = createTestSession({
+			settings: createSettingsWithOverrides({
+				"goal.enabled": true,
+			}),
+			getGoalModeState: () => undefined,
+		});
+		const defaultTools = await createTools(session);
+		const explicitTools = await createTools(session, ["goal"]);
+
+		expect(defaultTools.map(t => t.name)).toContain("goal");
+		expect(explicitTools.map(t => t.name)).toEqual(["goal", "resolve"]);
 	});
 
 	it("includes search_tool_bm25 when MCP tool discovery is enabled and executable", async () => {

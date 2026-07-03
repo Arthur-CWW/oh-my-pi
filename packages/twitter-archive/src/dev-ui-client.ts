@@ -1,3 +1,6 @@
+import { createElement } from "react"
+import { createRoot, type Root } from "react-dom/client"
+import { ReaderControlsIsland } from "./reader-controls-island"
 import type {
   DevUiLogEventView,
   DevUiMediaView,
@@ -10,10 +13,12 @@ import type {
 } from "./dev-ui-server"
 import { buildTweetGroupMarkdown } from "./dev-ui-markdown"
 import type { SqliteCaptureJob } from "./sqlite-store"
+import initSqlJs, { type Database, type SqlJsStatic } from "sql.js"
 
-type ActiveLane = "tweets" | "media" | "jobs"
+type ActiveLane = "tweets" | "media" | "jobs" | "reader"
 type TweetSortMode = "latest" | "likes" | "replies" | "reposts" | "quotes" | "views"
 type TweetMetricSortMode = Exclude<TweetSortMode, "latest">
+type ReaderSortMode = "likes" | "newest" | "oldest" | "longest" | "reposts" | "replies" | "views"
 type TweetFilterKey = "media" | "quotes" | "replies" | "localNotes" | "bookmarks" | "attributes"
 type FrontendLogDetails = { readonly [key: string]: string | number | boolean | null }
 type ProfileSummary = {
@@ -35,7 +40,76 @@ const TWEET_FILTERS: ReadonlyArray<readonly [TweetFilterKey, string]> = [
   ["attributes", "Attributes"],
 ]
 
+interface QueryResult {
+  readonly columns: readonly string[]
+  readonly rows: ReadonlyArray<Record<string, string | number | boolean | null>>
+  readonly rowCount: number
+}
 
+const READER_TEXT_SQL = "coalesce(json_extract(t.data_json, '$.text'), json_extract(t.data_json, '$.full_text'))"
+const READER_MEDIA_COUNT_SQL = "(SELECT count(*) FROM media m WHERE m.tweet_id = t.id)"
+const READER_SELECT_SQL = `SELECT
+  t.created_at,
+  t.username,
+  t.url,
+  ${READER_TEXT_SQL} AS text,
+  length(${READER_TEXT_SQL}) AS char_count,
+  json_extract(t.captured_metrics_json, '$.likes') AS likes,
+  json_extract(t.captured_metrics_json, '$.reposts') AS reposts,
+  json_extract(t.captured_metrics_json, '$.replies') AS replies,
+  json_extract(t.captured_metrics_json, '$.quotes') AS quotes,
+  json_extract(t.captured_metrics_json, '$.views') AS views,
+  ${READER_MEDIA_COUNT_SQL} AS media_count,
+  json_extract(t.data_json, '$.quotedTweetId') AS quote_id,
+  json_extract(t.data_json, '$.quotedTweetUrl') AS quote_url,
+  (SELECT group_concat(n.body, ' \\u00b7 ') FROM tweet_notes n WHERE n.tweet_id = t.id) AS labels
+FROM tweets t`
+const DEFAULT_READER_SQL = buildReaderSql("from:voooooogel min_likes:100", "likes")
+
+const LONG_POSTS_SQL = buildReaderSql("filter:long", "longest")
+
+const MEDIA_MEMES_SQL = buildReaderSql("has:media", "newest")
+
+const FICTION_LABELS_SQL = `SELECT
+  t.created_at,
+  t.username,
+  t.url,
+  coalesce(json_extract(t.data_json, '$.text'), json_extract(t.data_json, '$.full_text')) AS text,
+  length(coalesce(json_extract(t.data_json, '$.text'), json_extract(t.data_json, '$.full_text'))) AS char_count,
+  json_extract(t.captured_metrics_json, '$.likes') AS likes,
+  json_extract(t.captured_metrics_json, '$.reposts') AS reposts,
+  json_extract(t.captured_metrics_json, '$.replies') AS replies,
+  json_extract(t.captured_metrics_json, '$.quotes') AS quotes,
+  json_extract(t.captured_metrics_json, '$.views') AS views,
+  (SELECT count(*) FROM media m WHERE m.tweet_id = t.id) AS media_count,
+  json_extract(t.data_json, '$.quotedTweetId') AS quote_id,
+  json_extract(t.data_json, '$.quotedTweetUrl') AS quote_url,
+  (SELECT group_concat(n.body, ' \\u00b7 ') FROM tweet_notes n WHERE n.tweet_id = t.id) AS labels
+FROM tweets t
+WHERE EXISTS (
+  SELECT 1 FROM tweet_notes n
+  WHERE n.tweet_id = t.id
+    AND (n.body LIKE '%fiction%' OR n.body LIKE '%story%')
+)
+ORDER BY t.created_at DESC
+LIMIT 100`
+
+const READER_PRESETS: ReadonlyArray<readonly [string, string]> = [
+  ["Voooooogel >100 likes", DEFAULT_READER_SQL],
+  ["Long posts", LONG_POSTS_SQL],
+  ["Media/memes", MEDIA_MEMES_SQL],
+  ["Short stories/fiction labels", FICTION_LABELS_SQL],
+]
+const READER_SORT_OPTIONS: ReadonlyArray<readonly [ReaderSortMode, string]> = [
+  ["likes", "Likes desc"],
+  ["newest", "Newest"],
+  ["oldest", "Oldest"],
+  ["longest", "Longest"],
+  ["reposts", "Most reposted"],
+  ["replies", "Most replied"],
+  ["views", "Most viewed"],
+]
+const READER_STATIC_SUGGESTIONS = ["filter:long", "has:media", "has:quote", "min_likes:100"] as const
 const app = requireElement("app")
 const searchInput = document.createElement("input")
 const sortSelect = document.createElement("select")
@@ -44,6 +118,12 @@ const untilInput = document.createElement("input")
 const controlsToggleButton = document.createElement("button")
 const summaryElement = document.createElement("section")
 const controlsElement = document.createElement("section")
+const readerControlsElement = document.createElement("section")
+const readerSqlTextarea = document.createElement("textarea")
+const readerBuilderMount = document.createElement("div")
+let readerControlsRoot: Root | undefined
+const readerPresetContainer = document.createElement("div")
+const readerStatusElement = document.createElement("div")
 const filterControlsElement = document.createElement("div")
 const profileElement = document.createElement("section")
 const laneTitle = document.createElement("h2")
@@ -67,6 +147,17 @@ let lastError: string | undefined
 let eventSource: EventSource | undefined
 let controlsExpanded = false
 let toastTimer: number | undefined
+let readerSql = DEFAULT_READER_SQL
+let readerFilterCommand = "from:voooooogel min_likes:100"
+let readerSortMode: ReaderSortMode = "likes"
+let readerSqlControlledByBuilder = true
+let readerUsernameSuggestions: readonly string[] = []
+let latestQueryResult: QueryResult | undefined
+let readerQueryError: string | undefined
+let readerDebounceTimer: number | undefined
+let readerDb: Database | undefined
+let readerDbLoading = false
+let sqlJsPromise: Promise<SqlJsStatic> | undefined
 bootstrap()
 void refreshState("initial_load")
 connectStateStream()
@@ -81,6 +172,7 @@ function bootstrap(): void {
     render()
   })
   setupTweetControls()
+  setupReaderControls()
 
   controlsToggleButton.className = "tab controls-toggle"
   controlsToggleButton.type = "button"
@@ -99,6 +191,7 @@ function bootstrap(): void {
 
   summaryElement.className = "summary"
   controlsElement.className = "controls-panel"
+  readerControlsElement.className = "reader-controls"
   syncControlsPanelVisibility()
   profileElement.className = "profile-panel"
   contentElement.className = "content"
@@ -111,6 +204,7 @@ function bootstrap(): void {
     el("section", { className: "lane", attrs: { "aria-live": "polite" } }, [
       el("div", { className: "lane-header" }, [el("div", {}, [laneTitle, laneSubtitle]), updatedElement]),
       controlsElement,
+      readerControlsElement,
       summaryElement,
       profileElement,
       contentElement,
@@ -129,6 +223,7 @@ function buildTabs(): HTMLElement {
     ["tweets", "1 Tweets"],
     ["media", "2 Media"],
     ["jobs", "3 Jobs/logs"],
+    ["reader", "4 Reader"],
   ]
 
   for (const [lane, label] of tabDefinitions) {
@@ -192,6 +287,160 @@ function setupTweetControls(): void {
   )
 }
 
+function setupReaderControls(): void {
+  readerBuilderMount.className = "reader-builder-island"
+
+  readerSqlTextarea.className = "reader-sql"
+  readerSqlTextarea.placeholder = "SELECT ..."
+  readerSqlTextarea.spellcheck = false
+  readerSqlTextarea.wrap = "soft"
+  readerSqlTextarea.setAttribute("aria-label", "Generated SQL query")
+  readerSqlTextarea.title = "Generated SQL query; scroll inside this field to inspect or edit the full SELECT."
+  readerSqlTextarea.value = readerSql
+  readerSqlTextarea.addEventListener("input", () => {
+    readerSqlControlledByBuilder = false
+    readerSql = readerSqlTextarea.value
+    scheduleReaderQuery(450)
+    syncReaderBuilderControls()
+  })
+
+  readerPresetContainer.className = "reader-presets"
+  for (const [label, sql] of READER_PRESETS) {
+    const button = el("button", { className: "reader-preset", text: label, attrs: { "aria-label": label } }, [], { type: "button", title: `Load preset: ${label}` })
+    button.addEventListener("click", () => {
+      readerSqlControlledByBuilder = false
+      readerSql = sql
+      readerSqlTextarea.value = sql
+      syncReaderBuilderControls()
+      void executeQuery()
+    })
+    readerPresetContainer.append(button)
+  }
+
+  readerStatusElement.className = "reader-status"
+
+  readerControlsElement.replaceChildren(
+    readerBuilderMount,
+    el("label", { className: "reader-field" }, [el("span", { text: "SQL query (scrollable)" }), readerSqlTextarea]),
+    readerPresetContainer,
+    readerStatusElement,
+  )
+  syncReaderBuilderControls()
+}
+
+function applyReaderBuilderChange(): void {
+  readerSqlControlledByBuilder = true
+  readerSql = buildReaderSql(readerFilterCommand, readerSortMode)
+  if (document.activeElement !== readerSqlTextarea) {
+    readerSqlTextarea.value = readerSql
+  }
+  syncReaderBuilderControls()
+  scheduleReaderQuery(250)
+}
+
+function scheduleReaderQuery(delayMs: number): void {
+  if (readerDebounceTimer) window.clearTimeout(readerDebounceTimer)
+  readerDebounceTimer = window.setTimeout(() => {
+    readerDebounceTimer = undefined
+    void executeQuery()
+  }, delayMs)
+}
+
+function syncReaderBuilderControls(): void {
+  if (!readerControlsRoot) {
+    readerControlsRoot = createRoot(readerBuilderMount)
+  }
+  readerControlsRoot.render(createElement(ReaderControlsIsland, {
+    command: readerFilterCommand,
+    sortMode: readerSortMode,
+    sortOptions: READER_SORT_OPTIONS.map(([value, label]) => ({ value, label })),
+    suggestions: readerSuggestionValues(),
+    usernameSuggestionCount: readerUsernameSuggestions.length,
+    builderControlsSql: readerSqlControlledByBuilder,
+    tokenChips: readerFilterTokens(readerFilterCommand),
+    sortLabel: readerSortModeLabel(readerSortMode),
+    onCommandChange: (command: string) => {
+      readerFilterCommand = command
+      applyReaderBuilderChange()
+    },
+    onSortModeChange: (sortMode: string) => {
+      if (isReaderSortMode(sortMode)) {
+        readerSortMode = sortMode
+        applyReaderBuilderChange()
+      }
+    },
+  }))
+}
+
+function readerSuggestionValues(): readonly string[] {
+  return [
+    ...READER_STATIC_SUGGESTIONS,
+    ...readerUsernameSuggestions.map((username) => `from:${username}`),
+  ]
+}
+
+function readerSortModeLabel(sortMode: ReaderSortMode): string {
+  return READER_SORT_OPTIONS.find(([mode]) => mode === sortMode)?.[1].toLocaleLowerCase() ?? sortMode
+}
+
+function readerFilterTokens(command: string): string[] {
+  return command.split(/\s+/).map((token) => token.trim()).filter((token) => token.length > 0)
+}
+
+function buildReaderSql(command: string, sortMode: ReaderSortMode): string {
+  const whereClauses = readerWhereClauses(command)
+  const whereSql = whereClauses.length > 0 ? `\nWHERE ${whereClauses.join("\n  AND ")}` : ""
+  return `${READER_SELECT_SQL}${whereSql}
+ORDER BY ${readerOrderBySql(sortMode)}
+LIMIT 100`
+}
+
+function readerWhereClauses(command: string): string[] {
+  const clauses: string[] = []
+  for (const token of readerFilterTokens(command)) {
+    const lowerToken = token.toLocaleLowerCase()
+    if (lowerToken.startsWith("from:")) {
+      const username = token.slice("from:".length).trim().replace(/^@/, "")
+      if (username) clauses.push(`lower(t.username) = lower(${sqlStringLiteral(username)})`)
+    } else if (lowerToken === "filter:long") {
+      clauses.push(`length(${READER_TEXT_SQL}) >= 1000`)
+    } else if (lowerToken === "has:media") {
+      clauses.push(`${READER_MEDIA_COUNT_SQL} > 0`)
+    } else if (lowerToken === "has:quote") {
+      clauses.push("(json_extract(t.data_json, '$.quotedTweetId') IS NOT NULL OR json_extract(t.data_json, '$.quotedTweetUrl') IS NOT NULL)")
+    } else if (lowerToken.startsWith("min_likes:")) {
+      const minimumLikes = Number.parseInt(lowerToken.slice("min_likes:".length), 10)
+      if (Number.isFinite(minimumLikes)) clauses.push(`coalesce(json_extract(t.captured_metrics_json, '$.likes'), 0) >= ${Math.max(0, minimumLikes)}`)
+    } else {
+      clauses.push(`lower(${READER_TEXT_SQL}) LIKE ${sqlStringLiteral(`%${escapeSqlLike(token.toLocaleLowerCase())}%`)} ESCAPE '\\'`)
+    }
+  }
+  return clauses
+}
+
+function readerOrderBySql(sortMode: ReaderSortMode): string {
+  if (sortMode === "newest") return "t.created_at DESC"
+  if (sortMode === "oldest") return "t.created_at ASC"
+  if (sortMode === "longest") return "char_count DESC, t.created_at DESC"
+  if (sortMode === "reposts") return "reposts DESC, t.created_at DESC"
+  if (sortMode === "replies") return "replies DESC, t.created_at DESC"
+  if (sortMode === "views") return "views DESC, t.created_at DESC"
+  return "likes DESC, t.created_at DESC"
+}
+
+function sqlStringLiteral(value: string): string {
+  const escaped = value.replace(/'/g, "''")
+  return `'${escaped}'`
+}
+
+function escapeSqlLike(value: string): string {
+  return value
+    .replace(/\\/g, "\\\\")
+    .replace(/%/g, "\\%")
+    .replace(/_/g, "\\_")
+}
+
+
 function toggleControlsPanel(): void {
   controlsExpanded = !controlsExpanded
   syncControlsPanelVisibility()
@@ -206,6 +455,8 @@ function expandControlsPanel(): void {
 
 function syncControlsPanelVisibility(): void {
   controlsElement.hidden = activeLane !== "tweets" || !controlsExpanded
+  readerControlsElement.hidden = activeLane !== "reader"
+  controlsToggleButton.hidden = activeLane === "reader"
   controlsToggleButton.setAttribute("aria-expanded", String(controlsExpanded))
   controlsToggleButton.textContent = controlsExpanded ? "Hide filters" : "Filters"
 }
@@ -215,6 +466,11 @@ function option(value: TweetSortMode, label: string): HTMLOptionElement {
   element.value = value
   element.textContent = label
   return element
+}
+
+
+function isReaderSortMode(value: string): value is ReaderSortMode {
+  return READER_SORT_OPTIONS.some(([mode]) => mode === value)
 }
 
 async function refreshState(reason: string): Promise<void> {
@@ -270,6 +526,10 @@ function render(): void {
   renderSummary(latestState)
   if (activeLane === "tweets") {
     renderTweets(latestState.tweetGroups)
+  } else if (activeLane === "reader") {
+    summaryElement.replaceChildren()
+    profileElement.replaceChildren()
+    renderReader()
   } else {
     profileElement.replaceChildren()
     if (activeLane === "media") renderMedia(latestState.media)
@@ -514,6 +774,283 @@ function renderEvent(event: DevUiLogEventView): HTMLElement {
   ])
 }
 
+async function loadReaderDatabase(): Promise<void> {
+  if (readerDb || readerDbLoading) return
+  readerDbLoading = true
+  readerQueryError = undefined
+  render()
+
+  try {
+    if (!sqlJsPromise) {
+      sqlJsPromise = initSqlJs({
+        locateFile: (file) => `/assets/${file}`,
+      })
+    }
+    const SQL = await sqlJsPromise
+    const response = await fetch("/data/twitter-archive.sqlite")
+    if (!response.ok) {
+      throw new Error(`Failed to load archive database: HTTP ${response.status}`)
+    }
+    const buffer = await response.arrayBuffer()
+    const bytes = new Uint8Array(buffer)
+    readerDb = new SQL.Database(bytes)
+    logFrontend("dev_ui_db_loaded", { bytes: bytes.length })
+    loadReaderUsernameSuggestions()
+  } catch (error) {
+    readerDb = undefined
+    readerQueryError = error instanceof Error ? error.message : String(error)
+    logFrontend("dev_ui_db_load_failed", { error: readerQueryError })
+    readerUsernameSuggestions = []
+    syncReaderBuilderControls()
+  } finally {
+    readerDbLoading = false
+  }
+  render()
+}
+
+function loadReaderUsernameSuggestions(): void {
+  if (!readerDb) {
+    readerUsernameSuggestions = []
+    syncReaderBuilderControls()
+    return
+  }
+
+  try {
+    const stmt = readerDb.prepare("SELECT username FROM tweets WHERE username IS NOT NULL AND trim(username) <> '' GROUP BY username ORDER BY count(*) DESC, lower(username)")
+    const usernames: string[] = []
+    try {
+      while (stmt.step()) {
+        const value = stmt.getAsObject()["username"]
+        if (typeof value === "string" && value.trim().length > 0) {
+          usernames.push(value.trim())
+        }
+      }
+    } finally {
+      stmt.free()
+    }
+    readerUsernameSuggestions = usernames
+  } catch (error) {
+    readerUsernameSuggestions = []
+    const message = error instanceof Error ? error.message : String(error)
+    logFrontend("dev_ui_username_suggestions_failed", { error: message })
+  }
+  syncReaderBuilderControls()
+}
+
+async function executeQuery(): Promise<void> {
+  const sql = readerSql.trim()
+  if (!sql) {
+    readerQueryError = "Enter a SQL query."
+    latestQueryResult = undefined
+    render()
+    return
+  }
+
+  await loadReaderDatabase()
+  if (!readerDb) {
+    if (!readerQueryError) {
+      readerQueryError = "Database not loaded."
+    }
+    latestQueryResult = undefined
+    render()
+    return
+  }
+
+  try {
+    const stmt = readerDb.prepare(sql)
+    const columns = stmt.getColumnNames()
+    const rows: Record<string, string | number | boolean | null>[] = []
+    while (stmt.step()) {
+      const sqlRow = stmt.getAsObject()
+      const row: Record<string, string | number | boolean | null> = {}
+      for (const [key, value] of Object.entries(sqlRow)) {
+        row[key] =
+          value === null || typeof value === "number" || typeof value === "string" || typeof value === "boolean"
+            ? value
+            : String(value)
+      }
+      rows.push(row)
+    }
+    stmt.free()
+    latestQueryResult = { columns, rows, rowCount: rows.length }
+    readerQueryError = undefined
+    logFrontend("dev_ui_query_executed", { rowCount: rows.length, columns: columns.length })
+  } catch (error) {
+    latestQueryResult = undefined
+    readerQueryError = error instanceof Error ? error.message : String(error)
+    logFrontend("dev_ui_query_failed", { error: readerQueryError })
+  }
+  render()
+}
+
+function renderReader(): void {
+  laneTitle.textContent = "SQL Reader"
+  laneSubtitle.textContent = "Read-only SELECT against the local archive."
+
+  if (!readerDb && !readerDbLoading && !readerQueryError) {
+    void loadReaderDatabase()
+  }
+  syncReaderBuilderControls()
+
+  if (document.activeElement !== readerSqlTextarea) {
+    readerSqlTextarea.value = readerSql
+  }
+
+  if (readerDbLoading) {
+    readerStatusElement.textContent = "Loading database…"
+    readerStatusElement.className = "reader-status"
+  } else if (readerQueryError) {
+    readerStatusElement.textContent = readerQueryError
+    readerStatusElement.className = "reader-status reader-status-error"
+  } else if (latestQueryResult) {
+    readerStatusElement.textContent = `${latestQueryResult.rowCount} row${latestQueryResult.rowCount === 1 ? "" : "s"} returned`
+    readerStatusElement.className = "reader-status"
+  } else {
+    readerStatusElement.textContent = "Type a SELECT query or choose a preset."
+    readerStatusElement.className = "reader-status"
+  }
+
+  if (readerDbLoading) {
+    contentElement.replaceChildren(el("div", { className: "empty", text: "Loading archive database…" }))
+    return
+  }
+
+  if (!latestQueryResult) {
+    contentElement.replaceChildren(el("div", { className: "empty", text: readerQueryError ? "Query failed." : "Run a query to see results." }))
+    return
+  }
+
+  if (latestQueryResult.rows.length === 0) {
+    contentElement.replaceChildren(el("div", { className: "empty", text: "No rows returned." }))
+    return
+  }
+
+  contentElement.replaceChildren(...latestQueryResult.rows.map(renderReaderRow))
+}
+
+function renderReaderRow(row: Record<string, string | number | boolean | null>, index: number): HTMLElement {
+  const date = stringValue(row, "created_at") ?? stringValue(row, "captured_at") ?? stringValue(row, "date")
+  const username = stringValue(row, "username") ?? stringValue(row, "handle")
+  const url = stringValue(row, "url") ?? tweetUrlFromId(stringValue(row, "id") ?? stringValue(row, "tweet_id"), username)
+  const text = stringValue(row, "text") ?? stringValue(row, "full_text") ?? stringValue(row, "body")
+  const labels = labelPillsFromRow(row)
+  const metaFields: Record<string, true> = {
+    created_at: true,
+    captured_at: true,
+    date: true,
+    username: true,
+    handle: true,
+    url: true,
+    text: true,
+    full_text: true,
+    body: true,
+    labels: true,
+    label: true,
+    category: true,
+    topics: true,
+    tags: true,
+    likes: true,
+    reposts: true,
+    replies: true,
+    quotes: true,
+    views: true,
+    char_count: true,
+    media_count: true,
+  }
+
+  const header = el("div", { className: "reader-card-header" })
+  if (date) {
+    header.append(el("time", { text: formatDate(date), attrs: { datetime: date } }))
+  }
+  if (url) {
+    const link = el("a", { text: url, attrs: { href: url, target: "_blank", rel: "noreferrer" } })
+    header.append(link)
+  } else if (stringValue(row, "id") || stringValue(row, "tweet_id")) {
+    header.append(el("span", { text: `id ${stringValue(row, "id") ?? stringValue(row, "tweet_id")}` }))
+  }
+
+  const metrics = el("div", { className: "reader-metrics" })
+  const metricNames = [
+    ["likes", "Likes"],
+    ["reposts", "Reposts"],
+    ["replies", "Replies"],
+    ["quotes", "Quotes"],
+    ["views", "Views"],
+    ["char_count", "Chars"],
+    ["media_count", "Media"],
+  ] as const
+  for (const [key, label] of metricNames) {
+    const value = numericValue(row, key)
+    if (value !== undefined) {
+      metrics.append(el("span", { text: `${label} ${value}` }))
+    }
+  }
+
+  const quoteId = stringValue(row, "quote_id") ?? stringValue(row, "quoted_tweet_id")
+  const quoteUrl = stringValue(row, "quote_url") ?? stringValue(row, "quoted_tweet_url")
+  const quoteMeta = el("div", { className: "reader-quote" })
+  if (quoteId) {
+    quoteMeta.append(el("span", { text: `Quote ${quoteId}` }))
+  }
+  if (quoteUrl) {
+    quoteMeta.append(el("a", { text: "quote link", attrs: { href: quoteUrl, target: "_blank", rel: "noreferrer" } }))
+  }
+
+  const extras = el("div", { className: "reader-extras" })
+  for (const [key, value] of Object.entries(row)) {
+    if (value === null || value === undefined || metaFields[key]) continue
+    extras.append(el("div", { className: "reader-extra" }, [el("span", { text: `${key}:` }), el("span", { text: String(value) })]))
+  }
+
+  const children: Node[] = [el("div", { className: "reader-card-index", text: String(index + 1) })]
+  if (header.children.length > 0) children.push(header)
+  if (metrics.children.length > 0) children.push(metrics)
+  if (labels.length > 0) {
+    children.push(el("div", { className: "reader-labels" }, labels.map((label) => pill(label))))
+  }
+  if (quoteMeta.children.length > 0) children.push(quoteMeta)
+  if (text) {
+    children.push(el("p", { className: "reader-text", text: text }))
+  }
+  if (extras.children.length > 0) children.push(extras)
+
+  return el("article", { className: "card reader-card" }, children)
+}
+
+function labelPillsFromRow(row: Record<string, string | number | boolean | null>): string[] {
+  const segments: string[] = []
+  for (const key of ["labels", "label", "category", "topics", "tags"]) {
+    const value = row[key]
+    if (typeof value === "string" && value.trim().length > 0) {
+      segments.push(...splitLabelText(value))
+    }
+  }
+  return [...new Set(segments)]
+}
+
+function splitLabelText(value: string): string[] {
+  return value
+    .split(/\s*[\n\r\/\u00b7,]+\s*/)
+    .map((segment) => segment.trim())
+    .filter((segment) => segment.length > 0)
+}
+
+function stringValue(row: Record<string, string | number | boolean | null>, key: string): string | undefined {
+  const value = row[key]
+  return typeof value === "string" ? value : undefined
+}
+
+function numericValue(row: Record<string, string | number | boolean | null>, key: string): number | undefined {
+  const value = row[key]
+  return typeof value === "number" ? value : undefined
+}
+
+function tweetUrlFromId(id: string | undefined, username: string | undefined): string | undefined {
+  if (!id) return undefined
+  if (username) return `https://x.com/${encodeURIComponent(username)}/status/${encodeURIComponent(id)}`
+  return `https://x.com/i/web/status/${encodeURIComponent(id)}`
+}
+
 function setLane(lane: ActiveLane): void {
   activeLane = lane
   render()
@@ -707,6 +1244,10 @@ function handleShortcut(event: KeyboardEvent): void {
     setLane("jobs")
     return
   }
+  if (event.key === "4") {
+    setLane("reader")
+    return
+  }
   if (event.key === "?") {
     showHelp()
   }
@@ -726,6 +1267,7 @@ function buildHelpDialog(): void {
       shortcut("1", "Open tweets lane"),
       shortcut("2", "Open media lane"),
       shortcut("3", "Open jobs/logs lane"),
+      shortcut("4", "Open SQL reader lane"),
       shortcut("?", "Show this help"),
     ]),
     el("form", { attrs: { method: "dialog" } }, [el("button", { className: "tab", text: "Close" }, [], { type: "submit" })]),

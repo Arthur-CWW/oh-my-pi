@@ -336,7 +336,7 @@ Speculation: critics may see this as state power reaching into sacred succession
 
 But again, the key point is not that everyone must share one interpretation.
 
-The key point is that the document creates a system where unauthorized reincarnation affairs are not just theologically disputed. They may be legally punished.
+The key point is that the document creates a system where unauthorized reincarnation affairs are not just theologically disputed. They can be punished through the state system.
 
 That is why the story lands so hard.
 

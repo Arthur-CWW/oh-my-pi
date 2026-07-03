@@ -14,6 +14,8 @@
     "build:illiterati-tts": "pnpm --filter illiterati-tts build",
     "build:illiterati-tts-opfs-parallel": "pnpm --filter illiterati-tts-opfs-parallel build",
     "build:youtube-stats-overlay": "pnpm --filter youtube-stats-overlay build",
+    "build:tab-auto-discard": "pnpm --filter tab-auto-discard build",
+    "zip:tab-auto-discard": "pnpm --filter tab-auto-discard zip",
     "zip:x-bookmark-sync-devtools": "pnpm --filter x-bookmark-sync-devtools zip",
     "zip:dev-browser": "pnpm --filter dev-browser-extension zip",
     "smoke:illiterati-tts": "pnpm --filter illiterati-tts smoke",

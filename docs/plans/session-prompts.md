@@ -4,6 +4,10 @@ Use these prompts to start parallel Pi sessions without worktrees. Every worker 
 
 These prompts use `@path/to/file.md` references where useful, so Pi can auto-include the referenced file context in the prompt.
 
+## Operational model preference
+
+For parallel Pi/OMP sessions under T-2026-06-13-006, prefer Gemini Flash for bounded non-core workers. Use GPT-5.5/Oracle as the fallback or reviewer lane when Flash output is too risky, incomplete, or reasoning-heavy and subscription impact is acceptable. Do not route workers to Kimi by default; keep it as an explicit last-resort/unavailable fallback. This preference is operational documentation only, not an OMP config change.
+
 ## Universal preface for all creative/video sessions
 
 ```txt
@@ -198,7 +202,7 @@ Runtime paths:
 - data/twitter-archive/ugc-sources/**
 - data/coordination/ai-ugc-format-mining.status.md
 
-Do not clone private identities or copyrighted videos verbatim. Capture high-level format mechanics and pacing.
+Do not clone private identities or protected videos verbatim. Capture high-level format mechanics and pacing.
 ```
 
 ## Desktop GPU / ComfyUI rehab session
@@ -228,6 +232,6 @@ Runtime paths on desktop:
 Do not edit tracked source on desktop initially. Do not download huge models without checking disk and asking if needed.
 ```
 
-## GPT-Pro research prompt currently queued/used
+## Archived GPT-Pro research prompts
 
-See `docs/plans/tts-lipsync-research.md` for the shorter prompt. The current recommended GPT-Pro prompt is a combined research prompt covering TTS, lipsync, stylized animal faces, modular graph/layer compatibility, and AI UGC tools.
+See `docs/plans/gpt-pro-prompts.md` for archived high-effort research handoff prompts. Current parallel-worker routing should follow the operational model preference above instead of treating GPT-Pro as the default worker lane.

@@ -30,7 +30,7 @@ Clean-room constraints:
 - Use public sources only.
 - Do not infer private internals as fact.
 - Separate evidence vs inference vs speculation.
-- Clone high-level format mechanics and workflows, not private identities/copyrighted media/trademarks.
+- Clone high-level format mechanics and workflows, not private identities/protected media/trademarks.
 
 ## Public sources to browse first
 

@@ -6,18 +6,19 @@
 
 Current packages and absorbed tool repos:
 
-- `packages/web-access` — Pi tools for web search, content fetching, YouTube transcripts, Chrome cookies, Codex session import, frontend LLM browser sessions, and the `vim-lite` Pi input editor.
+- `packages/web-access` — published active extension/tool bundle (`@wirebabel/pi-web-access`) for web search, content fetching, YouTube transcripts, Chrome cookies, Codex session import, frontend LLM browser sessions, and the `vim-lite` Pi input editor. This package name is kept for npm compatibility pending a future package split.
 - `packages/dynamic-workflows` — vendored `pi-dynamic-workflows` source/tests plus local adversarial-review prompt template; the released `npm:pi-dynamic-workflows` package is installed project-locally for the active workflow tool.
 - `packages/browser-use` — clean-room CDP browser-use extension prototype.
 - `packages/twitter-archive` — local-first Twitter/X archive schema and future capture/search helpers.
 - `packages/jimeng-client` — Jimeng/Dreamina direct API helpers ported from Slotok reverse engineering.
 - `apps/tweet-viewer` — future local archive viewer.
 - `browser-extensions`, `kimi-code-usage`, and `oh-my-pi` — absorbed self-contained tool/runtime repos; keep their internal layouts and package managers intact.
-- `skills/pi-skills` — imported Pi core skills from `Arthur-CWW/skills` / upstream `badlogic/pi-skills`; no nested Git repo.
+- `skills/` — first-party passive OMP/Pi skills, grouped by immediate discovery parents (`core`, `browser`, `provider`, `research`, `design`, `media`). Vendored/imported skills stay under `vendor/<source>/...` and are only loaded by explicit config.
 - `docs/research/kagi` — archived Kagi reverse-engineering capture; active Kagi client code lives in `packages/web-access/src/kagi.ts`.
 - `workflows/*` — future archive/analyze/generate shortform-video workflows.
+- `catalog/workspaces.yml` — YAML registry for workspace ownership, ad hoc context roots, capability discovery parents, packet policy, and session path-alias conventions. Update this before moving cross-workspace work.
 
-The repo root is also a Pi package. `.pi/settings.json` points at `..` and `npm:pi-dynamic-workflows`. The root `package.json` `pi` manifest loads `packages/web-access/src/index.ts`, `packages/web-access/skills`, and the local dynamic-workflows prompt templates.
+The repo root is also a Pi package. `.pi/settings.json` points at `..` and `npm:pi-dynamic-workflows`. The root `package.json` `pi` manifest loads `packages/web-access/src/index.ts`, concrete grouped `skills/...` paths, selected vendored skill roots such as `vendor/badlogic/pi-skills`, and the local dynamic-workflows prompt templates. OMP custom skill discovery must point at each immediate skill parent because OMP scans one level deep. For ad hoc sibling-folder context, add an absolute path or packet reference to `catalog/workspaces.yml` instead of moving the folder into this repo.
 
 Top-level task tracking lives in `TASKS.md`. For substantial multi-step work, read it early and update it when task status changes.
 
@@ -85,6 +86,7 @@ docs/twitter-archive-plan.md      Twitter/X archive and shortform pipeline plan
 
 ## Persistent Preferences
 
+- Durable docs, skills, and artifacts should avoid moralizing, legalistic, or cover-my-ass labels. State concrete scope, authorization basis, provenance, and proof requirements instead.
 - For video/creative/AI UGC work, read and maintain `docs/state/README.md` and `docs/state/video-creative-direction.md`; when Arthur gives new durable preferences or direction in a session, update the relevant state doc so it stays synchronized.
 - For local macOS GUI/browser automation, interpret “cooler driver”, “cuadriver”, and “C-U-A driver” as `cua-driver` / CuaDriver. Prefer CuaDriver for background native app control and visual browser automation before Computer Use, foreground browser control, or reactive AeroSpace focus guards. Keep CDP/Playwright/Puppeteer for DOM, network, cookies, and protocol-level browser work.
 - Do not use the Orca orchestration skill for normal repo coordination in this workspace. Use OMP's built-in `task`/IRC orchestration, and use `cua-driver` for computer-use / GUI automation when DOM/CDP tools are not the better fit.
@@ -105,3 +107,5 @@ docs/twitter-archive-plan.md      Twitter/X archive and shortform pipeline plan
 - Twitter/X capture should be respectful: low concurrency, jitter/backoff, disk cache/entity dedupe, no private/locked content
 - Browser-based Twitter/X scraping should inspect only the main content/tweet column plus search input; ignore sidebars/trends/DMs/navigation chrome
 - Jimeng/Dreamina API work is value-first: prioritize the highest-value UGC workflows before speed/ease/no-spend. Arthur may pronounce or dictate it as “Gming”; treat that as `J-I-M-E-N-G`. Paid or mutating live/direct runs need explicit approval with exact commands and artifact paths; keep generation concurrency 1 and stop on risk-control (`1019` / `shark not pass`) errors.
+- Sudo: NEVER run `sudo` without Arthur's explicit approval. Use `ask` with: exact command, cwd, why needed, what it changes, whether reversible. See `docs/prompts/sudo-approval.md` for the full protocol. Arthur authenticates via fingerprint — approval is the gate.
+- vphone-cli AMFI: NEVER recommend or set global `amfi_get_out_of_my_way=1` on Arthur's daily-driver Mac by default. It destabilized VoiceInk, Karabiner, Firefox/TCC/HID flows after SIP changes. Prefer targeted `make amfidont_allow_vphone` / `amfidont --path ~/agents/vphone-cli` with explicit approval; use global AMFI boot-args only as a last-resort, time-boxed experiment with a rollback command (`sudo nvram -d boot-args && sudo reboot`) stated up front.

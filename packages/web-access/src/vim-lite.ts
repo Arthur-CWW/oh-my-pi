@@ -69,7 +69,7 @@ const KEY_LEFT = "\x1b[D"
 
 const HELP_LINES = [
   "vim-lite: Esc normal · i/a/I/A insert · o/O new line · Enter submits",
-  "motions: h j k l · w b e · 0 ^ $ · gg/G · counts like 3w or 2dd",
+  "motions: h j k l · w/W b/B e/E · 0 ^ $ · gg/G · counts like 3w or 2dd",
   "visual: v charwise · V linewise · o swap end · d/c/y/x/s operate on selection",
   "clipboard: y / yy / Y / visual y copy to system clipboard · p/P paste from it · deletes stay internal",
   "paste markers: gx toggles Pi large-paste marker expansion/collapse",
@@ -159,6 +159,7 @@ export class VimLiteEditor extends CustomEditor {
   private expandedPastes: ExpandedPaste[] = []
   private insertSessionStart: Snapshot | undefined
   private historyCommandThisInput = false
+  private vimVerticalCol: number | undefined
 
   decorateText = (text: string): string => text
 
@@ -446,8 +447,11 @@ export class VimLiteEditor extends CustomEditor {
       case "k":
       case "l":
       case "w":
+      case "W":
       case "b":
+      case "B":
       case "e":
+      case "E":
       case "0":
       case "^":
       case "$":
@@ -571,8 +575,11 @@ export class VimLiteEditor extends CustomEditor {
       case "k":
       case "l":
       case "w":
+      case "W":
       case "b":
+      case "B":
       case "e":
+      case "E":
       case "0":
       case "^":
       case "$":
@@ -692,7 +699,7 @@ export class VimLiteEditor extends CustomEditor {
       return
     }
 
-    if (["h", "l", "w", "b", "e", "0", "^", "$"].includes(key)) {
+    if (["h", "l", "w", "W", "b", "B", "e", "E", "0", "^", "$"].includes(key)) {
       this.operateByMotion(pending.op, key, motionCount, motionExplicit, pending.registerName)
       this.resetPending()
       return
@@ -918,40 +925,63 @@ export class VimLiteEditor extends CustomEditor {
   }
 
   private applyMotion(motion: string, count: number, explicit: boolean): void {
-    const e = this.e()
+    const resetVerticalColumn = () => {
+      this.vimVerticalCol = undefined
+    }
+
     switch (motion) {
       case "h":
-        for (let i = 0; i < count; i++) e.moveCursor(0, -1)
+        resetVerticalColumn()
+        for (let i = 0; i < count; i++) this.moveHorizontal(-1)
         break
       case "l":
-        for (let i = 0; i < count; i++) e.moveCursor(0, 1)
+        resetVerticalColumn()
+        for (let i = 0; i < count; i++) this.moveHorizontal(1)
         break
       case "j":
-        for (let i = 0; i < count; i++) e.moveCursor(1, 0)
+        for (let i = 0; i < count; i++) this.moveLogicalLine(1)
         break
       case "k":
-        for (let i = 0; i < count; i++) e.moveCursor(-1, 0)
+        for (let i = 0; i < count; i++) this.moveLogicalLine(-1)
         break
       case "w":
+        resetVerticalColumn()
         for (let i = 0; i < count; i++) this.moveWordForward()
         break
+      case "W":
+        resetVerticalColumn()
+        for (let i = 0; i < count; i++) this.moveWordForward(true)
+        break
       case "b":
+        resetVerticalColumn()
         for (let i = 0; i < count; i++) this.moveWordBackward()
         break
+      case "B":
+        resetVerticalColumn()
+        for (let i = 0; i < count; i++) this.moveWordBackward(true)
+        break
       case "e":
+        resetVerticalColumn()
         for (let i = 0; i < count; i++) this.moveWordEnd()
         break
+      case "E":
+        resetVerticalColumn()
+        for (let i = 0; i < count; i++) this.moveWordEnd(true)
+        break
       case "0":
-        e.moveToLineStart()
+        resetVerticalColumn()
+        this.e().moveToLineStart()
         break
       case "^":
+        resetVerticalColumn()
         this.moveFirstNonBlank()
         break
       case "$":
+        resetVerticalColumn()
         if (count > 1 || explicit) {
-          for (let i = 1; i < count; i++) e.moveCursor(1, 0)
+          for (let i = 1; i < count; i++) this.moveLogicalLine(1)
         }
-        e.moveToLineEnd()
+        this.e().moveToLineEnd()
         break
     }
   }
@@ -1133,7 +1163,21 @@ export class VimLiteEditor extends CustomEditor {
     this.notifyChange()
   }
 
-  private moveWordForward(): void {
+  private moveHorizontal(delta: -1 | 1): void {
+    const cursor = this.getEditorCursor()
+    const line = this.getEditorLines()[cursor.line] ?? ""
+    this.setCursor(cursor.line, delta < 0 ? this.prevCol(line, cursor.col) : this.nextCol(line, cursor.col))
+  }
+
+  private moveLogicalLine(delta: -1 | 1): void {
+    const lines = this.getEditorLines()
+    const cursor = this.getEditorCursor()
+    const targetLine = clamp(cursor.line + delta, 0, Math.max(0, lines.length - 1))
+    this.vimVerticalCol ??= cursor.col
+    this.setCursor(targetLine, clamp(this.vimVerticalCol, 0, (lines[targetLine] ?? "").length))
+  }
+
+  private moveWordForward(big = false): void {
     const e = this.e()
     let lineIdx = e.state.cursorLine
     let col = e.state.cursorCol
@@ -1152,12 +1196,12 @@ export class VimLiteEditor extends CustomEditor {
         continue
       }
 
-      const kind = this.charKindAt(line, i)
+      const kind = this.motionCharKindAt(line, i, big)
       if (kind === "space") {
-        while (i < line.length && this.charKindAt(line, i) === "space") i = this.nextCol(line, i)
+        while (i < line.length && this.motionCharKindAt(line, i, big) === "space") i = this.nextCol(line, i)
       } else {
-        while (i < line.length && this.charKindAt(line, i) === kind) i = this.nextCol(line, i)
-        while (i < line.length && this.charKindAt(line, i) === "space") i = this.nextCol(line, i)
+        while (i < line.length && this.motionCharKindAt(line, i, big) === kind) i = this.nextCol(line, i)
+        while (i < line.length && this.motionCharKindAt(line, i, big) === "space") i = this.nextCol(line, i)
       }
 
       if (i < line.length) {
@@ -1174,7 +1218,7 @@ export class VimLiteEditor extends CustomEditor {
     }
   }
 
-  private moveWordBackward(): void {
+  private moveWordBackward(big = false): void {
     const e = this.e()
     let lineIdx = e.state.cursorLine
     let col = e.state.cursorCol
@@ -1193,14 +1237,14 @@ export class VimLiteEditor extends CustomEditor {
         continue
       }
 
-      while (i > 0 && this.charKindAt(line, this.prevCol(line, i)) === "space") i = this.prevCol(line, i)
+      while (i > 0 && this.motionCharKindAt(line, this.prevCol(line, i), big) === "space") i = this.prevCol(line, i)
       if (i <= 0) {
         this.setCursor(lineIdx, 0)
         return
       }
 
-      const kind = this.charKindAt(line, this.prevCol(line, i))
-      while (i > 0 && this.charKindAt(line, this.prevCol(line, i)) === kind) i = this.prevCol(line, i)
+      const kind = this.motionCharKindAt(line, this.prevCol(line, i), big)
+      while (i > 0 && this.motionCharKindAt(line, this.prevCol(line, i), big) === kind) i = this.prevCol(line, i)
       this.setCursor(lineIdx, i)
       return
     }
@@ -1215,7 +1259,7 @@ export class VimLiteEditor extends CustomEditor {
     this.setEditorCursor({ line: cursor.line, col: this.prevCol(line, line.length) })
   }
 
-  private moveWordEnd(): void {
+  private moveWordEnd(big = false): void {
     const e = this.e()
     let lineIdx = e.state.cursorLine
     let col = e.state.cursorCol
@@ -1224,11 +1268,11 @@ export class VimLiteEditor extends CustomEditor {
       const line = e.state.lines[lineIdx] ?? ""
       let i = lineIdx === e.state.cursorLine ? Math.min(this.nextCol(line, col), line.length) : 0
 
-      while (i < line.length && this.charKindAt(line, i) === "space") i = this.nextCol(line, i)
+      while (i < line.length && this.motionCharKindAt(line, i, big) === "space") i = this.nextCol(line, i)
       if (i < line.length) {
-        const kind = this.charKindAt(line, i)
+        const kind = this.motionCharKindAt(line, i, big)
         let end = i
-        while (this.nextCol(line, end) < line.length && this.charKindAt(line, this.nextCol(line, end)) === kind) {
+        while (this.nextCol(line, end) < line.length && this.motionCharKindAt(line, this.nextCol(line, end), big) === kind) {
           end = this.nextCol(line, end)
         }
         this.setCursor(lineIdx, end)
@@ -1241,6 +1285,11 @@ export class VimLiteEditor extends CustomEditor {
 
     const lastLine = e.state.lines.length - 1
     this.setCursor(lastLine, (e.state.lines[lastLine] ?? "").length)
+  }
+
+  private motionCharKindAt(line: string, col: number, big: boolean): "space" | "word" | "punct" {
+    if (!big) return this.charKindAt(line, col)
+    return this.charKindAt(line, col) === "space" ? "space" : "word"
   }
 
   private charKind(char: string): "space" | "word" | "punct" {
@@ -1573,19 +1622,18 @@ export class VimLiteEditor extends CustomEditor {
     const lines = this.getEditorLines()
     const line = clamp(cursor.line, 0, Math.max(0, lines.length - 1))
     const col = clamp(cursor.col, 0, (lines[line] ?? "").length)
-    const publicEditor = this.asEditorCompat()
-    publicEditor.moveToMessageStart?.()
-    this.moveToLineStartCompat()
-    for (let i = 0; i < line; i++) super.handleInput(KEY_DOWN)
-    this.moveToLineStartCompat()
-    for (let i = 0; i < col; i++) super.handleInput(KEY_RIGHT)
+    let offset = col
+    for (let i = 0; i < line; i++) offset += (lines[i] ?? "").length + 1
+
+    this.asEditorCompat().moveToMessageStart?.()
+    for (let i = 0; i < offset; i++) super.handleInput(KEY_RIGHT)
   }
 
   private movePublicCursor(deltaLine: number, deltaCol: number): void {
-    const verticalKey = deltaLine < 0 ? KEY_UP : KEY_DOWN
-    for (let i = 0; i < Math.abs(deltaLine); i++) super.handleInput(verticalKey)
-    const horizontalKey = deltaCol < 0 ? KEY_LEFT : KEY_RIGHT
-    for (let i = 0; i < Math.abs(deltaCol); i++) super.handleInput(horizontalKey)
+    const lineDelta = deltaLine < 0 ? -1 : 1
+    for (let i = 0; i < Math.abs(deltaLine); i++) this.moveLogicalLine(lineDelta)
+    const colDelta = deltaCol < 0 ? -1 : 1
+    for (let i = 0; i < Math.abs(deltaCol); i++) this.moveHorizontal(colDelta)
   }
 
   private moveToLineStartCompat(): void {

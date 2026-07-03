@@ -1,6 +1,6 @@
 # Pi Resources Inventory
 
-Date: 2026-06-09
+Date: 2026-06-09; Last updated: 2026-06-24
 
 This explains what the skills/extensions in the current Pi startup list do and where they come from.
 
@@ -40,16 +40,19 @@ The broad global `agent-stuff` package used to be why skills like `anachb`, `oeb
 
 ## Active startup skills
 
-### Project-local / this repo
+### Core project-local / this repo
+
+This table lists the durable core skills; root `package.json` is the canonical startup manifest and the vendored Badlogic subset is called out below.
 
 | Skill | What it does | Source path | Keep? |
 |---|---|---|---|
-| `background-browser-automation` | CuaDriver-first browser automation guidance plus CDP/Playwright/Puppeteer safety rules for protocol work without stealing focus. | `packages/web-access/skills/background-browser-automation` | Keep project/global core. |
-| `librarian` | Open-source/library research with source-backed GitHub permalinks. | `packages/web-access/skills/librarian` | Keep. High usage. |
-| `llm-frontend-browser` | ChatGPT/AI Studio/Grok frontend sessions through `llm_frontend_browser`. | `packages/web-access/skills/llm-frontend-browser` | Keep; async-first design still needs daemon/queue later. |
-| `macos-computer-use` | Background-safe native macOS GUI loops with CuaDriver. | `packages/web-access/skills/macos-computer-use` | Keep for VoiceInk/macOS validation. |
-| `rubber-duck-adversarial` | Cross-cutting critique/sanity-check mode. | `packages/web-access/skills/rubber-duck-adversarial` | Keep, if it does not over-trigger. |
-| `source-archive` | Archive public articles/videos/transcripts into repo-local research docs. | `packages/web-access/skills/source-archive` | Keep for research-heavy workflows. |
+| `background-browser-automation` | CuaDriver-first browser automation guidance plus CDP/Playwright/Puppeteer safety rules for protocol work without stealing focus. | `skills/browser/background-browser-automation` | Keep project/global core. |
+| `librarian` | Open-source/library research with source-backed GitHub permalinks. | `skills/core/librarian` | Keep. High usage. |
+| `llm-frontend-browser` | ChatGPT/AI Studio/Grok frontend sessions through `llm_frontend_browser`. | `skills/browser/llm-frontend-browser` | Keep; async-first design still needs daemon/queue later. |
+| `cua-driver` | CuaDriver-backed background macOS GUI automation. Prefer the safe high-level `computer_use` tool; use raw `cua_driver` only for status/debug/low-level flows. | `skills/browser/cua-driver` | Keep for VoiceInk/macOS validation. |
+| `rubber-duck-adversarial` | Cross-cutting critique/sanity-check mode. | `skills/core/rubber-duck-adversarial` | Keep, if it does not over-trigger. |
+| `source-archive` | Archive public articles/videos/transcripts into repo-local research docs. | `skills/core/source-archive` | Keep for research-heavy workflows. |
+
 
 ### Former global `agent-stuff` skills
 
@@ -110,22 +113,22 @@ Other vendored router skills available but should remain disabled unless needed:
 | `codex-plugin-public-equity-investing` | Public equity research/modeling workflows. | Disable. |
 | `codex-plugin-sales` | Sales meeting/account/deal/CRM workflows. | Disable. |
 
-## Skills that used to appear but are no longer project-loaded
+## Badlogic `pi-skills` vendored skills and stale-checkout status
 
-These came from `packages/web-access/skills/pi-skills -> ~/.pi/skills/pi-skills`. The broad project skill directory was narrowed, so they no longer appear in this repo startup unless loaded elsewhere.
+These were formerly exposed through a `pi-skills` symlink under `packages/web-access/skills/`. That repo-local symlink path is gone; root `package.json` now points directly at the vendored source paths under `vendor/badlogic/pi-skills/` for the subset still intentionally project-listed.
 
-Source repo: `Arthur-CWW/skills` fork of `badlogic/pi-skills` at `/Users/arthur/.pi/skills/pi-skills`.
+Source repo: `Arthur-CWW/skills` fork of `badlogic/pi-skills`. The repo copy is vendored at `vendor/badlogic/pi-skills/`. Remaining non-repo cleanup: archive or remove `/Users/arthur/.pi/skills/pi-skills/` after preserving any needed `browser-tools/output/jimeng-lab/raw/` captures.
 
 | Skill | What it does | Recommendation |
 |---|---|---|
-| `brave-search` | Brave Search API web search/content extraction. | Do not load; this repo has `web_search`/`fetch_content`. |
-| `browser-tools` | Interactive visible CDP browser automation. | Fold into one browser skill if needed. |
-| `gccli` | Google Calendar CLI: list calendars/events, create/update events, availability. | Do not global-load; personal-data opt-in. |
-| `gdcli` | Google Drive CLI: list/search/upload/download/share. | Do not global-load; personal-data opt-in. |
-| `gmcli` | Gmail CLI: search/read/send/drafts/labels/attachments. | Do not global-load; personal-data opt-in. |
-| `transcribe` | Groq Whisper transcription for audio files. | Media opt-in only. |
-| `vscode` | VS Code file/diff helper. | Optional if VS Code is the chosen UI. |
-| `youtube-transcript` | Fetch YouTube transcripts. | Usually use repo `youtube_transcript` tool/skill docs instead. |
+| `brave-search` | Brave Search API web search/content extraction. | Currently loaded from the vendored path; remove from `package.json` later only if `web_search`/`fetch_content` fully covers the workflow. |
+| `browser-tools` | Interactive visible CDP browser automation. | Currently loaded from the vendored path; fold into the browser-control/background-browser guidance when a concrete browser workflow needs the consolidation. |
+| `gccli` | Google Calendar CLI: list calendars/events, create/update events, availability. | Currently loaded from the vendored path; keep personal-data access explicit and avoid global symlink/checkouts. |
+| `gdcli` | Google Drive CLI: list/search/upload/download/share. | Currently loaded from the vendored path; keep personal-data access explicit and avoid global symlink/checkouts. |
+| `gmcli` | Gmail CLI: search/read/send/drafts/labels/attachments. | Currently loaded from the vendored path; keep personal-data access explicit and avoid global symlink/checkouts. |
+| `transcribe` | Groq Whisper transcription for audio files. | Currently loaded from the vendored path; move only if media-package consolidation needs it. |
+| `vscode` | VS Code file/diff helper. | Currently loaded from the vendored path; optional UI helper. |
+| `youtube-transcript` | Fetch YouTube transcripts. | Currently loaded from the vendored path; consolidate later with repo `youtube_transcript` tooling if duplication becomes costly. |
 
 ## Active startup extensions
 
@@ -155,7 +158,7 @@ Default project skills in this repo should stay:
 - `background-browser-automation`
 - `librarian`
 - `llm-frontend-browser`
-- `macos-computer-use`
+- `cua-driver`
 - `rubber-duck-adversarial`
 - `source-archive`
 

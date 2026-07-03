@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Agent Hub now opens parked-agent history read-only on Enter instead of reviving the agent, with `R` as the explicit revive shortcut from the history view.
+
 ## [16.0.1] - 2026-06-15
 
 ### Breaking Changes

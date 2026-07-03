@@ -1,0 +1,479 @@
+{
+  "lane": "ugc-ads",
+  "sourcePolicy": "abstract-mechanics",
+  "records": [],
+  "providerJobs": [
+    {
+      "id": "antigravity-decomp-2026-05-20_7641985194186001678",
+      "provider": "codex",
+      "operation": "antigravity-frame-decomposition",
+      "mode": "dry-run",
+      "status": "completed",
+      "targetIds": [],
+      "spendCapUsd": 0,
+      "estimatedCostUsd": null,
+      "request": {
+        "sourceVideoId": "2026-05-20_7641985194186001678",
+        "sourceProfile": "https://www.tiktok.com/@samuelszuchan",
+        "inputPolicy": "abstract-mechanics",
+        "frameSampleCount": 8
+      },
+      "response": {
+        "sourceVideoId": "2026-05-20_7641985194186001678",
+        "formatFamily": "analytical_documentary_short",
+        "hookPattern": "subversive_definition",
+        "scriptStructure": [
+          "concept_subversion_hook",
+          "personal_anecdote_victim",
+          "loophole_mechanics_explanation",
+          "perpetrator_and_scale_introduction",
+          "consequences_and_fatalities",
+          "judicial_climax",
+          "systemic_indictment_conclusion"
+        ],
+        "visualStructure": [
+          "minimalist_monochrome_with_red_accent",
+          "glowing_serif_typography",
+          "stylized_maps_and_diagrams",
+          "faceless_silhouette_portraits",
+          "slow_zooms_on_documents_and_money"
+        ],
+        "captionStyle": [
+          "serif_font",
+          "glowing_white_and_red_text",
+          "centered_low_third_placement",
+          "word_by_word_underlines_for_emphasis"
+        ],
+        "pacingNotes": [
+          "rapid_delivery_with_short_pauses",
+          "cut_on_every_major_phrase_boundary",
+          "1_to_3_second_visual_intervals"
+        ],
+        "retentionDevices": [
+          "bold_conceptual_hooks",
+          "on_screen_numeric_counters",
+          "progressive_node_link_reveal",
+          "color_flashes_for_risk_terms"
+        ],
+        "timelineSegments": 7,
+        "remotionEquivalents": [
+          "MapSlideComponent with PercentageOverlay",
+          "CurrencyFanComponent with GlowingLabels",
+          "AuctionDocumentComponent with SilhouetteOverlay",
+          "NodeDiagramComponent with AnimatedConnections",
+          "MetricStatsComponent with GlowingNumbers",
+          "StaticVisualWithGlowOverlay",
+          "DocumentScaleComponent with CityscapeBackground"
+        ],
+        "slideVisualPromptsCount": 6
+      },
+      "artifactPaths": [
+        "data/video-recreation/samuelszuchan/bootstrap-20260620/antigravity-frame-decompositions/2026-05-20_7641985194186001678.json"
+      ],
+      "error": null
+    },
+    {
+      "id": "jimeng-persona-2026-05-20_7641985194186001678",
+      "provider": "jimeng",
+      "operation": "synthetic-persona-generation",
+      "mode": "dry-run",
+      "status": "planned",
+      "targetIds": [],
+      "spendCapUsd": 0.5,
+      "estimatedCostUsd": 0.5,
+      "request": {
+        "sourceVideoId": "2026-05-20_7641985194186001678",
+        "personaPromptZh": "一个极简写实风格的韩国年轻上班族三维肖像，五官模糊或面部被阴影遮挡，置于暗色调的首尔都市背景中，红色霓虹微光，表达失落与迷茫，电影级质感，8k分辨率",
+        "personaDescriptionZh": "用于代替原片中口播主持人的写实剪影虚拟韩国青年形象，体现受害者群体特征",
+        "slideVisualPromptCount": 6,
+        "concurrency": 1,
+        "outDir": "data/video-recreation/samuelszuchan/bootstrap-20260620/jimeng-personas/2026-05-20_7641985194186001678",
+        "note": "Run explicitly with outDir/artifact paths and concurrency 1. Not executed during handoff generation."
+      },
+      "response": null,
+      "artifactPaths": [],
+      "error": null
+    },
+    {
+      "id": "remotion-render-2026-05-20_7641985194186001678",
+      "provider": "local",
+      "operation": "remotion-render",
+      "mode": "dry-run",
+      "status": "planned",
+      "targetIds": [],
+      "spendCapUsd": 0,
+      "estimatedCostUsd": 0,
+      "request": {
+        "sourceVideoId": "2026-05-20_7641985194186001678",
+        "remotionLayers": [
+          "BackgroundNoiseLayer",
+          "AssetSlideLayer",
+          "DynamicVectorTextLayer",
+          "AudioSpectrumLayer"
+        ],
+        "remotionEquivalents": [
+          {
+            "segment": "0-9",
+            "component": "MapSlideComponent with PercentageOverlay"
+          },
+          {
+            "segment": "9-18",
+            "component": "CurrencyFanComponent with GlowingLabels"
+          },
+          {
+            "segment": "18-26",
+            "component": "AuctionDocumentComponent with SilhouetteOverlay"
+          },
+          {
+            "segment": "26-44",
+            "component": "NodeDiagramComponent with AnimatedConnections"
+          },
+          {
+            "segment": "44-58",
+            "component": "MetricStatsComponent with GlowingNumbers"
+          },
+          {
+            "segment": "58-78",
+            "component": "StaticVisualWithGlowOverlay"
+          },
+          {
+            "segment": "78-96",
+            "component": "DocumentScaleComponent with CityscapeBackground"
+          }
+        ],
+        "durationSeconds": 116,
+        "scriptGenerationPrompt": "Write a 90-second documentary-style script about the Jeonse housing crisis in South Korea. The script must explain the gap-investment mechanism, highlight Nam Heon-gi, describe the 15-year fraud sentence reduced to 7 years, and conclude with the court's reasoning that he was just doing standard Korean real estate. Maintain an analytical, serious tone with punchy sentences."
+      },
+      "response": null,
+      "artifactPaths": [],
+      "error": null
+    },
+    {
+      "id": "antigravity-decomp-2026-05-20_7642051300770712845",
+      "provider": "codex",
+      "operation": "antigravity-frame-decomposition",
+      "mode": "dry-run",
+      "status": "completed",
+      "targetIds": [],
+      "spendCapUsd": 0,
+      "estimatedCostUsd": null,
+      "request": {
+        "sourceVideoId": "2026-05-20_7642051300770712845",
+        "sourceProfile": "https://www.tiktok.com/@samuelszuchan",
+        "inputPolicy": "abstract-mechanics",
+        "frameSampleCount": 8
+      },
+      "response": {
+        "sourceVideoId": "2026-05-20_7642051300770712845",
+        "formatFamily": "Historical Essay / Video Podcast hybrid",
+        "hookPattern": "Specific historical anecdote hook introducing a strange proposal to solve national debt.",
+        "scriptStructure": [
+          "Historical hook (0-15s)",
+          "Grassroots collection details (15-30s)",
+          "Campaign failure & suppression (30-45s)",
+          "Extraction of the sacrifice template (45-55s)",
+          "IMF crisis & corporate failure context (55-80s)",
+          "Modern gold collection parallel (80-105s)",
+          "Comparative structural critique (105-126s)"
+        ],
+        "visualStructure": [
+          "Paper grid background with serif text",
+          "Tilted photo assets linked by dashed lines",
+          "Dark infographic cards with red accents",
+          "Host talking-head cutouts",
+          "Symbolic physics-based asset animations"
+        ],
+        "captionStyle": [
+          "Centered lowercase serif subtitles",
+          "Static serif nameplates for key nouns"
+        ],
+        "pacingNotes": [
+          "Steady, measured speech delivery",
+          "Visual change every 3 seconds",
+          "Bipolar visual rhythm: bright historical paper vs dark modern finance"
+        ],
+        "retentionDevices": [
+          "On-screen ratio metrics",
+          "Tectonic slide transitions",
+          "Symbolic falling assets"
+        ],
+        "timelineSegments": 7,
+        "remotionEquivalents": [
+          "GridBackground with TiltedImage and SerifText.",
+          "ChalkboardBackground with icon particles.",
+          "DataSlide with red container and text overlays.",
+          "VideoPlayer with masked host and serif subtitle.",
+          "TextCard with animated percentage counters.",
+          "PhysicsEngine canvas with falling SVGs.",
+          "SplitScreen host video and old archive loop."
+        ],
+        "slideVisualPromptsCount": 4
+      },
+      "artifactPaths": [
+        "data/video-recreation/samuelszuchan/bootstrap-20260620/antigravity-frame-decompositions/2026-05-20_7642051300770712845.json"
+      ],
+      "error": null
+    },
+    {
+      "id": "jimeng-persona-2026-05-20_7642051300770712845",
+      "provider": "jimeng",
+      "operation": "synthetic-persona-generation",
+      "mode": "dry-run",
+      "status": "planned",
+      "targetIds": [],
+      "spendCapUsd": 0.5,
+      "estimatedCostUsd": 0.5,
+      "request": {
+        "sourceVideoId": "2026-05-20_7642051300770712845",
+        "personaPromptZh": "一位戴眼镜、穿深色毛衣的年轻学者，在简约明亮的录音棚内对着专业麦克风录制视频。写实，高清。",
+        "personaDescriptionZh": "学术知性男性，适合历史与财经科普。",
+        "slideVisualPromptCount": 4,
+        "concurrency": 1,
+        "outDir": "data/video-recreation/samuelszuchan/bootstrap-20260620/jimeng-personas/2026-05-20_7642051300770712845",
+        "note": "Run explicitly with outDir/artifact paths and concurrency 1. Not executed during handoff generation."
+      },
+      "response": null,
+      "artifactPaths": [],
+      "error": null
+    },
+    {
+      "id": "remotion-render-2026-05-20_7642051300770712845",
+      "provider": "local",
+      "operation": "remotion-render",
+      "mode": "dry-run",
+      "status": "planned",
+      "targetIds": [],
+      "spendCapUsd": 0,
+      "estimatedCostUsd": 0,
+      "request": {
+        "sourceVideoId": "2026-05-20_7642051300770712845",
+        "remotionLayers": [
+          "GridBackground",
+          "TiltedCardAnimator",
+          "HostVideoPresenter",
+          "StaticSerifSubtitles",
+          "PhysicsAssetEmitter"
+        ],
+        "remotionEquivalents": [
+          {
+            "segment": "0-15",
+            "component": "GridBackground with TiltedImage and SerifText."
+          },
+          {
+            "segment": "15-30",
+            "component": "ChalkboardBackground with icon particles."
+          },
+          {
+            "segment": "30-45",
+            "component": "DataSlide with red container and text overlays."
+          },
+          {
+            "segment": "45-55",
+            "component": "VideoPlayer with masked host and serif subtitle."
+          },
+          {
+            "segment": "55-80",
+            "component": "TextCard with animated percentage counters."
+          },
+          {
+            "segment": "80-105",
+            "component": "PhysicsEngine canvas with falling SVGs."
+          },
+          {
+            "segment": "105-126",
+            "component": "SplitScreen host video and old archive loop."
+          }
+        ],
+        "durationSeconds": 126,
+        "scriptGenerationPrompt": "Write a 120-second essay script comparing a grassroots historical debt campaign with a corporate bailout. Maintain a critical, structural tone regarding private-to-public debt transfer."
+      },
+      "response": null,
+      "artifactPaths": [],
+      "error": null
+    },
+    {
+      "id": "antigravity-decomp-2026-05-20_7642101474981367054",
+      "provider": "codex",
+      "operation": "antigravity-frame-decomposition",
+      "mode": "dry-run",
+      "status": "completed",
+      "targetIds": [],
+      "spendCapUsd": 0,
+      "estimatedCostUsd": null,
+      "request": {
+        "sourceVideoId": "2026-05-20_7642101474981367054",
+        "sourceProfile": "https://www.tiktok.com/@samuelszuchan",
+        "inputPolicy": "abstract-mechanics",
+        "frameSampleCount": 8
+      },
+      "response": {
+        "sourceVideoId": "2026-05-20_7642101474981367054",
+        "formatFamily": "Short-form video essay / cultural analysis",
+        "hookPattern": "Bold claim of censorship combined with high-contrast graphic asset and serif typography.",
+        "scriptStructure": [
+          "Hook",
+          "Genre explanation",
+          "Target audience profiling",
+          "Economic hurdles (hukou, house prices)",
+          "Thematic messaging critique",
+          "Censorship actions",
+          "Systemic implications"
+        ],
+        "visualStructure": [
+          "Host talking head with warm color grading",
+          "High-contrast B&W stills with zoom effects",
+          "Consistent dark grid background overlay",
+          "Minimal serif text overlays"
+        ],
+        "captionStyle": [
+          "Georgia/serif font",
+          "Centered or bottom-aligned",
+          "Single word or short phrase delivery"
+        ],
+        "pacingNotes": [
+          "Slow, measured speech rate",
+          "Visual cuts synchronized with punctuation"
+        ],
+        "retentionDevices": [
+          "Visual gridlines",
+          "Red color pops against B&W",
+          "Stark economic data points"
+        ],
+        "timelineSegments": 9,
+        "remotionEquivalents": [
+          "KenBurnsImage + SerifTypography",
+          "KenBurnsImage + SerifTypography",
+          "VideoPresenter + SerifTypography",
+          "KenBurnsImage + SerifTypography",
+          "KenBurnsImage + SerifTypography",
+          "VideoPresenter + SerifTypography",
+          "VideoPresenter + SerifTypography",
+          "KenBurnsImage + SerifTypography",
+          "VideoPresenter + SerifTypography"
+        ],
+        "slideVisualPromptsCount": 5
+      },
+      "artifactPaths": [
+        "data/video-recreation/samuelszuchan/bootstrap-20260620/antigravity-frame-decompositions/2026-05-20_7642101474981367054.json"
+      ],
+      "error": null
+    },
+    {
+      "id": "jimeng-persona-2026-05-20_7642101474981367054",
+      "provider": "jimeng",
+      "operation": "synthetic-persona-generation",
+      "mode": "dry-run",
+      "status": "planned",
+      "targetIds": [],
+      "spendCapUsd": 0.5,
+      "estimatedCostUsd": 0.5,
+      "request": {
+        "sourceVideoId": "2026-05-20_7642101474981367054",
+        "personaPromptZh": "写实青年男主持，戴眼镜，米色衬衫，面对专业麦克风，录音室背景，温和光线。",
+        "personaDescriptionZh": "学术型短视频博主，斯文冷静，米色衬衫，戴黑框眼镜。",
+        "slideVisualPromptCount": 5,
+        "concurrency": 1,
+        "outDir": "data/video-recreation/samuelszuchan/bootstrap-20260620/jimeng-personas/2026-05-20_7642101474981367054",
+        "note": "Run explicitly with outDir/artifact paths and concurrency 1. Not executed during handoff generation."
+      },
+      "response": null,
+      "artifactPaths": [],
+      "error": null
+    },
+    {
+      "id": "remotion-render-2026-05-20_7642101474981367054",
+      "provider": "local",
+      "operation": "remotion-render",
+      "mode": "dry-run",
+      "status": "planned",
+      "targetIds": [],
+      "spendCapUsd": 0,
+      "estimatedCostUsd": 0,
+      "request": {
+        "sourceVideoId": "2026-05-20_7642101474981367054",
+        "remotionLayers": [
+          "BackgroundGrid",
+          "VideoPresenter",
+          "KenBurnsImage",
+          "SerifTypography",
+          "AudioTrack"
+        ],
+        "remotionEquivalents": [
+          {
+            "segment": "0-5",
+            "component": "KenBurnsImage + SerifTypography"
+          },
+          {
+            "segment": "5-12",
+            "component": "KenBurnsImage + SerifTypography"
+          },
+          {
+            "segment": "12-18",
+            "component": "VideoPresenter + SerifTypography"
+          },
+          {
+            "segment": "18-28",
+            "component": "KenBurnsImage + SerifTypography"
+          },
+          {
+            "segment": "28-35",
+            "component": "KenBurnsImage + SerifTypography"
+          },
+          {
+            "segment": "35-50",
+            "component": "VideoPresenter + SerifTypography"
+          },
+          {
+            "segment": "50-75",
+            "component": "VideoPresenter + SerifTypography"
+          },
+          {
+            "segment": "75-100",
+            "component": "KenBurnsImage + SerifTypography"
+          },
+          {
+            "segment": "100-129",
+            "component": "VideoPresenter + SerifTypography"
+          }
+        ],
+        "durationSeconds": 129,
+        "scriptGenerationPrompt": "Write a cultural essay script comparing censorship with economic indicators. Tone: analytical, measured, brief sentences. Hook: '[X] banned [Y]. Here's why.'"
+      },
+      "response": null,
+      "artifactPaths": [],
+      "error": null
+    }
+  ],
+  "candidatePatches": [],
+  "referenceArchives": [],
+  "notes": [],
+  "artifactPaths": [
+    "data/video-recreation/samuelszuchan/bootstrap-20260620/manifest.json",
+    "data/video-recreation/samuelszuchan/bootstrap-20260620/antigravity-frame-decompositions/2026-05-20_7641985194186001678.json",
+    "data/video-recreation/samuelszuchan/bootstrap-20260620/frames/2026-05-20_7641985194186001678",
+    "data/video-recreation/samuelszuchan/bootstrap-20260620/antigravity-frame-decompositions/2026-05-20_7642051300770712845.json",
+    "data/video-recreation/samuelszuchan/bootstrap-20260620/frames/2026-05-20_7642051300770712845",
+    "data/video-recreation/samuelszuchan/bootstrap-20260620/antigravity-frame-decompositions/2026-05-20_7642101474981367054.json",
+    "data/video-recreation/samuelszuchan/bootstrap-20260620/frames/2026-05-20_7642101474981367054"
+  ],
+  "result": {
+    "summary": {
+      "sourceProfile": "https://www.tiktok.com/@samuelszuchan",
+      "videoCount": 3,
+      "decompositionCount": 3,
+      "plannedProviderJobCount": 9,
+      "referenceArchiveCount": 0
+    }
+  },
+  "metadata": {
+    "schemaVersion": "tiktok-recreate-handoff.v1",
+    "manifestSchemaVersion": "tiktok-recreate.bootstrap.v1",
+    "generatedAt": "2026-06-21T00:22:42.509Z",
+    "generator": "scripts/tiktok-recreate-handoff.boundary.ts"
+  },
+  "resultMetadata": {
+    "cleanRoomPolicy": "abstract-mechanics",
+    "sourceMediaExcluded": true,
+    "rightsStatus": "public-research-target"
+  }
+}

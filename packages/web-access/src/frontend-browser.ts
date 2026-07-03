@@ -179,6 +179,25 @@ const PROVIDERS: Record<FrontendProvider, ProviderConfig> = {
   },
 }
 
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`
+}
+
+export function buildGrokLoginRecoveryStep(prompt: string, outputPath?: string | null): string {
+  const trimmedPrompt = prompt.trim()
+  const outputFile = outputFilePath(outputPath ?? undefined)
+  const outputArg = outputFile ? ` --output-file ${shellQuote(outputFile)}` : ""
+  const waitCommand = `pi-llm-browser wait --provider grok --session latest --response-timeout-ms 300000${outputArg}`
+  const submitClause = trimmedPrompt
+    ? `after login, submit without blocking via \`pi-llm-browser prompt --provider grok --no-wait${outputArg} ${shellQuote(trimmedPrompt)}\`, then collect later with \`${waitCommand}\`.`
+    : `after login, collect later with \`${waitCommand}\`; this blocked recovery did not have prompt text, so do not resubmit a guessed prompt.`
+  return `Manual recovery: ask Arthur to run \`pi-llm-browser setup --provider grok\` and sign into Grok in the dedicated Helium profile; ${submitClause}`
+}
+
+function withGrokRecoveryStep(reason: string, prompt: string, outputPath?: string | null): string {
+  return `${reason} ${buildGrokLoginRecoveryStep(prompt, outputPath)}`
+}
+
 function execFilePromise(file: string, args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
     execFile(file, args, (err) => {
@@ -355,9 +374,15 @@ function redactText(value: string): string {
   return value.replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[email]")
 }
 
-async function writeOutputFile(path: string | undefined, text: string): Promise<string | null> {
+function outputFilePath(path: string | undefined): string | null {
   const trimmed = path?.trim()
+  return trimmed || null
+}
+
+async function writeOutputFile(path: string | undefined, text: string): Promise<string | null> {
+  const trimmed = outputFilePath(path)
   if (!trimmed) return null
+  if (!text) return trimmed
   await mkdir(dirname(trimmed), { recursive: true })
   await writeFile(trimmed, text, "utf-8")
   return trimmed
@@ -590,7 +615,7 @@ async function inspectGrokHumanBlocker(page: FrontendAutomationPage): Promise<st
     }
     const text = document.body?.innerText ?? ""
     const controls = Array.from(document.querySelectorAll("button, a, [role='button']")).filter(visible)
-    const loginControl = controls.some((el) => /^(sign in|log in)$/i.test((el.textContent ?? "").trim()))
+    const loginControl = controls.some((el) => /^(sign in|log in|sign up|join)(\b|$)/i.test((el.textContent ?? "").trim()))
     const loginPage = /\/i\/(?:flow\/)?login|\/i\/jf\/onboarding|\/auth|\/login|\/sign-in/i.test(location.pathname)
       || /See what.s happening|Join X today|Continue with Google|Continue with Apple|Continue with X|Email or username|Sign in to Grok|Log in to Grok/i.test(text)
     if (loginControl || loginPage) {
@@ -1507,6 +1532,7 @@ async function preparePromptOptions(options: FrontendPromptOptions): Promise<{
       ...prepared,
       conversationUrl: session.conversationUrl ?? prepared.conversationUrl,
       newChat: false,
+      outputFile: prepared.outputFile ?? session.outputPath ?? undefined,
       project: prepared.project ?? session.projectKey ?? undefined,
       projectKey: prepared.projectKey ?? session.projectKey ?? undefined,
       projectUrl: prepared.projectUrl ?? session.projectUrl ?? undefined,
@@ -1548,18 +1574,47 @@ async function promptProvider(options: FrontendPromptOptions): Promise<FrontendP
     })
   }
 
-  if (!result.submitted) return result
+  if (!result.submitted) {
+    const outputFile = outputFilePath(prepared.options.outputFile) ?? prepared.session?.outputPath ?? null
+    const recoveryStep = provider === "grok" && result.humanReason ? buildGrokLoginRecoveryStep(prepared.options.prompt, outputFile) : null
+    const humanReason = recoveryStep && result.humanReason ? `${result.humanReason} ${recoveryStep}` : result.humanReason
+    if (!result.needsHuman && !outputFile) return result
+    const session = await saveFrontendSession({
+      blockerReason: humanReason,
+      conversationUrl: result.conversationUrl ?? result.url,
+      outputPath: outputFile,
+      projectKey: prepared.options.projectKey ?? prepared.project?.key ?? prepared.session?.projectKey ?? null,
+      projectUrl: prepared.options.projectUrl ?? prepared.project?.url ?? prepared.session?.projectUrl ?? null,
+      prompt: prepared.options.prompt,
+      provider,
+      recoveryStep,
+      responseText: result.responseText,
+      title: result.title,
+    })
+    return {
+      ...result,
+      humanReason,
+      conversationUrl: session.conversationUrl,
+      outputFile,
+      projectKey: session.projectKey,
+      projectUrl: session.projectUrl,
+      sessionId: session.id,
+    }
+  }
 
+  const outputFile = await writeOutputFile(prepared.options.outputFile, result.responseText)
   const session = await saveFrontendSession({
     conversationUrl: result.conversationUrl ?? result.url,
+    outputPath: outputFile ?? prepared.session?.outputPath ?? null,
     projectKey: prepared.options.projectKey ?? prepared.project?.key ?? prepared.session?.projectKey ?? null,
     projectUrl: prepared.options.projectUrl ?? prepared.project?.url ?? prepared.session?.projectUrl ?? null,
     prompt: prepared.options.prompt,
     provider,
     responseText: result.responseText,
     title: result.title,
+    blockerReason: null,
+    recoveryStep: null,
   })
-  const outputFile = await writeOutputFile(prepared.options.outputFile, result.responseText)
 
   return {
     ...result,
@@ -1603,7 +1658,24 @@ async function collectGrokResponse(options: FrontendCollectOptions): Promise<Fro
 
     const humanReason = await inspectGrokHumanBlocker(page)
     if (humanReason) {
-      throw new FrontendBrowserError({ reason: humanReason })
+      const recoveryOutputFile = outputFilePath(options.outputFile) ?? session?.outputPath ?? null
+      const blockerReason = withGrokRecoveryStep(humanReason, session?.prompt ?? "", recoveryOutputFile)
+      if (session) {
+        await saveFrontendSession({
+          blockerReason,
+          conversationUrl,
+          id: session.id,
+          outputPath: recoveryOutputFile,
+          projectKey: session.projectKey,
+          projectUrl: session.projectUrl,
+          prompt: session.prompt,
+          provider,
+          recoveryStep: buildGrokLoginRecoveryStep(session.prompt, recoveryOutputFile),
+          responseText: session.responseText,
+          title: session.title,
+        })
+      }
+      throw new FrontendBrowserError({ reason: blockerReason })
     }
 
     const prompt = session?.prompt ?? ""
@@ -1618,17 +1690,20 @@ async function collectGrokResponse(options: FrontendCollectOptions): Promise<Fro
     const title = redactText(await page.title())
     const url = sanitizeUrl(page.url())
     const savedResponseText = responseText || session?.responseText || ""
+    const outputFile = await writeOutputFile(options.outputFile ?? session?.outputPath ?? undefined, responseText)
     const saved = await saveFrontendSession({
+      blockerReason: null,
       conversationUrl: url || conversationUrl,
       id: session?.id,
+      outputPath: outputFile ?? session?.outputPath ?? null,
       projectKey: session?.projectKey ?? null,
       projectUrl: session?.projectUrl ?? null,
       prompt: session?.prompt ?? `Collected response from ${conversationUrl}`,
       provider,
       responseText: savedResponseText,
+      recoveryStep: null,
       title,
     })
-    const outputFile = await writeOutputFile(options.outputFile, responseText)
 
     return {
       ...status,
@@ -1704,9 +1779,11 @@ async function collectChatGptResponse(options: FrontendCollectOptions): Promise<
     }
 
     const savedResponseText = responseText || session?.responseText || ""
+    const outputFile = await writeOutputFile(options.outputFile ?? session?.outputPath ?? undefined, responseText)
     const saved = await saveFrontendSession({
       conversationUrl: landedConversation ? url : conversationUrl,
       id: session?.id,
+      outputPath: outputFile ?? session?.outputPath ?? null,
       projectKey: session?.projectKey ?? null,
       projectUrl: session?.projectUrl ?? null,
       prompt: session?.prompt ?? `Collected response from ${conversationUrl}`,
@@ -1714,7 +1791,6 @@ async function collectChatGptResponse(options: FrontendCollectOptions): Promise<
       responseText: savedResponseText,
       title,
     })
-    const outputFile = await writeOutputFile(options.outputFile, responseText)
 
     return {
       ...status,

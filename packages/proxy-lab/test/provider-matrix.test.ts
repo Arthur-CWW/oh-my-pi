@@ -1,11 +1,13 @@
 import { describe, expect, test } from "bun:test"
 import {
+  consentBasedUsEgressComparisons,
+  consentBasedUsEgressInfrastructureScenarios,
   defaultProviderMatrix,
+  providerEconomics,
   providersByCategory,
   providersByRisk,
   providersByUseCase,
   lowestRiskUsEgressProviders,
-  type ProxyProvider,
 } from "../src"
 
 describe("Provider matrix", () => {
@@ -52,5 +54,37 @@ describe("Provider matrix", () => {
     })
     expect(cheapOrFree.every((p) => ["free", "cheap"].includes(p.costTier))).toBe(true)
     expect(cheapOrFree.some((p) => p.id === "dataimpulse")).toBe(true)
+  })
+
+  test("provider economics covers plan-only cheap commercial entries", () => {
+    const economicsProviderIds = new Set(providerEconomics.map((e) => e.providerId))
+    const providerIds = new Set(defaultProviderMatrix.map((p) => p.id))
+    expect(providerEconomics.every((e) => providerIds.has(e.providerId))).toBe(true)
+    expect(defaultProviderMatrix.some((p) => p.id === "proxying")).toBe(true)
+    expect(defaultProviderMatrix.some((p) => p.id === "proxy-cheap-seller")).toBe(true)
+    expect(economicsProviderIds.has("proxying")).toBe(true)
+    expect(economicsProviderIds.has("proxy-cheap-seller")).toBe(true)
+    expect(defaultProviderMatrix.some((p) => p.id === "academic-corporate-trial-arbitrage")).toBe(true)
+    expect(economicsProviderIds.has("academic-corporate-trial-arbitrage")).toBe(true)
+  })
+
+  test("consent-based US egress comparisons expose normalized cost basis and provenance", () => {
+    const comparisons = consentBasedUsEgressComparisons()
+    expect(comparisons.length).toBeGreaterThan(0)
+    expect(comparisons.every((option) => option.usEgress)).toBe(true)
+    expect(comparisons.every((option) => option.normalizedCostBasis.length > 0)).toBe(true)
+    expect(comparisons.some((option) => option.providerId === "evomi-static" && option.normalizedCostBasis === "monthly-ip-price-divided-by-plan-fair-use-gb")).toBe(true)
+    expect(comparisons.some((option) => option.providerId === "browsercash" && option.normalizedCostBasis === "browser-hour-pricing-not-bandwidth-normalized")).toBe(true)
+    expect(comparisons.some((option) => option.consentProvenance === "compromised-or-open")).toBe(false)
+    expect(comparisons.some((option) => option.consentProvenance === "third-party-resale")).toBe(false)
+  })
+
+  test("infrastructure scenarios normalize consent-based US egress economics", () => {
+    const scenarios = consentBasedUsEgressInfrastructureScenarios()
+    expect(scenarios.length).toBeGreaterThan(0)
+    expect(scenarios.every((scenario) => scenario.usEgress)).toBe(true)
+    expect(scenarios.every((scenario) => scenario.normalizedCostUsdPerGb.min <= scenario.normalizedCostUsdPerGb.max)).toBe(true)
+    expect(scenarios.some((scenario) => scenario.id === "mobile-proxy-farm" && scenario.consentProvenance === "owned-account")).toBe(true)
+    expect(scenarios.some((scenario) => scenario.id === "isp-wisp-partnership" && scenario.consentProvenance === "isp-contract")).toBe(true)
   })
 })

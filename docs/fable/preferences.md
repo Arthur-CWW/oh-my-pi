@@ -8,7 +8,7 @@ Fable is scarce — one expensive session, not a fleet. Delegate implementation,
 
 ## Priorities and exclusions
 
-- The five primary workstreams in [`context.md`](context.md) are main Fable streams. Trading/market research is opportunistic.
+- The four primary workstreams in [`context.md`](context.md) are main Fable streams. Trading/market research is opportunistic.
 - Cybersecurity, reverse-engineering, vphone, proxy, and anti-detection lanes are not Fable advisory context. Route them to the appropriate specialized worker or exclude them.
 - No moralizing or legalistic language in docs or decisions.
 - The built-in `autolearn` system is inadequate; do not fix it. Document as a non-goal / possible future replacement.
@@ -16,7 +16,7 @@ Fable is scarce — one expensive session, not a fleet. Delegate implementation,
 ## Durable taste
 
 - **Creative instrument, not black-box generator.** The video pipeline should feel like editable layers / ComfyUI graph nodes: characters, backgrounds, props, captions, voice, lipsync, and effects are separate, cacheable, remixable artifacts.
-- **Creative playground (Torment-Nexus-inspired).** The end goal is a surreal UGC/media asset playground where agents and humans co-create weird, layered, remixable shortform media. Brainrot and format decomposition are fuel, not the destination.
+- **Creative playground.** The end goal is a usable, open-ended UGC/media asset playground where agents and humans co-create weird, layered, remixable shortform media. Torment-Nexus/brainrot energy and format decomposition are taste references and fuel, not product labels or fixed implementation plans.
 - **UI/UX should be minimal, keyboard-friendly, and workbench-like.** Codex/Chorus-style light workbench is the visual north star; avoid heavy dark dashboards. Figma-for-UGC-ads: open canvas, floating command surface, playable candidates, branch snapshots, and developer graph as a secondary view.
 - **Keep the weird energy alive.** Brainrot, post-labor-dread, cute-menace, abstract-Chinese-internet, anime aura edits, and niche meme aesthetics are intentional creative lanes, not accidents to sand off.
 - **AI companion.** Realtime intimacy, spatial ASMR, VRM/Live2D/WebGL, local-first where possible, measurable voice-to-avatar latency.

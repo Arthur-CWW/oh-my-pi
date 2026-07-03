@@ -44,9 +44,9 @@ Build a small, inspectable, local-first agent orchestration harness where an orc
 - `persona`: prompt lens plus success/failure criteria.
 - `artifact`: markdown, JSON, patch, screenshot, logs, eval result, or generated media.
 - `synthesis`: final compact result that references artifacts instead of inlining everything.
-- Cross-agent communication should stay simple: edit the shared source-of-truth docs/state directly, append a concise entry to `docs/coordination/agent-edit-log.md`, and rely on git diff/log as the durable audit trail. Do not build agent chat, per-agent inboxes, message queues, cursors, or broker semantics unless a concrete later workflow proves they are needed. Tmux status messages may point another pane at the changed file/log entry, but the repo file and git history are the source of truth.
+- Cross-agent communication stays simple and three-tiered: built-in OMP `irc` is for live same-process subagents; OMP collab is for optional encrypted live attach/watch/steer across sessions; durable coordination is source-of-truth doc/SQLite updates, with concise notes only when ownership or scope changed. Do not rebuild agent chat, per-agent inboxes, message queues, cursors, or custom broker semantics unless a concrete workflow proves they are needed.
 - `ask_human` / `ask_arthur`: structured questions from subagents with urgency, options, recommendation, default behavior, and persisted answers.
-- `central_orchestrator`: the human-facing Pi/LLM session that decides, steers, and synthesizes through one Symphony Lite API, while the Rust service owns durable state and child process lifecycle.
+- `central_orchestrator`: the human-facing Pi/LLM session that decides, steers, and synthesizes through one Symphony Lite API, while the chosen runtime service owns durable state and child process lifecycle.
 
 ## Context modes
 
@@ -72,7 +72,7 @@ Symphony Lite should expose enough state for a future GUI/workbench:
 
 Use `agent_cockpit` as the current local session registry where possible.
 
-Implementation direction as of 2026-06-08: a Rust local runner/TUI/server is a good fit for Symphony Lite core. It should use SQLite as source of truth, control child Pi agents through `pi --mode rpc` by default, support Codex through `codex app-server --listen stdio://`, expose a single API/tool for the central Pi orchestrator, and make tmux/Zellij materialization lazy/optional rather than the primary protocol. The TUI should feel closer to k9s/lazydocker than a static dashboard: fast resource lists, live state, filters, describe panes, logs, and explicit actions.
+Implementation direction as of 2026-06-23: the runtime boundary is JSON/SQLite/API first. The existing Rust package remains the working prototype, but the next core step is a bounded Elixir/OTP spike because OpenAI Symphony's reference implementation maps agent orchestration to OTP supervision, process registries, restart policy, and Phoenix observability. Elixir may own orchestration if it proves simpler end-to-end; Rust remains a good TUI/client layer and TypeScript remains the Pi extension/web/control-panel layer.
 
 The API should be AI-first and shared by humans and agents: same nouns/actions through the SymphonyX CLI/JSON API first, with TUI and future GUI as clients. Pi agents should normally use the CLI via a skill; do not create parallel Pi tools for every command until there is clear friction. Agents should get stable JSON envelopes, bounded previews, handles/IDs, append-only events, and idempotent/scriptable commands so a central Pi orchestrator can recover after compaction by calling `status` rather than remembering everything.
 
@@ -82,11 +82,15 @@ SymphonyX should behave like a repo-local singleton daemon, similar in spirit to
 
 ## Care log
 
+### 2026-06-23
+
+Arthur split the effort into `control-plane-core` and `dream-memory`. He decided to try Elixir/OTP seriously for the orchestrator because OTP supervision, process isolation, restart policy, and built-in observability directly map to the reliability/retries/concurrency problems an agent harness faces, and may remove a lot of infrastructure code that Rust/TS would have to grow by hand. The bounded spike package is `packages/symphony-lite-elixir`; use `mise exec erlang@28.5 elixir@1.20.1-otp-28 -- ...` for Erlang/Elixir installs and commands, and use the `symphony-elixir-test`, `symphony-elixir-build`, and `symphony-elixir-spike` mise tasks for verification. `control-plane-core` owns the local SQLite/session/event/task ledger, runtime registry, child runner handles, and cockpit/SymphonyX APIs. Local files and `TASKS.md` are first-class task sources through adapters, not second-class fallbacks behind Linear or GitHub. `dream-memory` consumes completed sessions/events as evidence, scores repeated patterns, stages candidates, and materializes memory/docs/lints/skills only after review; skills are derived artifacts, not the memory database. OMP collab is optional live attach/watch/steer transport, not a registry, queue, or source of truth. The overarching durable goal for this workstream is now captured in `docs/plans/symphony-lite-goal.md`.
+
 ### 2026-06-08
 
 Arthur clarified that Symphony Lite is separate from Slotok. Slotok is the video/remix product; Symphony Lite is the meta-agent orchestration/harness used to build and improve everything. High-signal source material includes Ryan Lopopolo's public harness-engineering writing, Latent Space interview, Twitter/X posts and quote-tweets, OpenAI Codex/Symphony/auto-review materials, and the Codex GUI plugin/workflow surface.
 
-Implemented first SymphonyX Rust slice under `packages/symphony-lite-rs`: SQLite schema, status/events/search/ask commands, text `watch`, ratatui/crossterm `tui` with vim-like navigation and daemon autostart, daemon stub, Pi RPC one-shot runner, Codex app-server one-shot runner, stable JSON envelopes, SQLite-first structured event storage, opt-in `--file-logs` sidecars, final-message preview, and `insta` snapshots for JSON/event shapes.
+Implemented first SymphonyX Rust iteration under `packages/symphony-lite-rs`: SQLite schema, status/events/search/ask commands, text `watch`, ratatui/crossterm `tui` with vim-like navigation and daemon autostart, daemon stub, Pi RPC one-shot runner, Codex app-server one-shot runner, stable JSON envelopes, SQLite-first structured event storage, opt-in `--file-logs` sidecars, final-message preview, and `insta` snapshots for JSON/event shapes.
 
 Arthur clarified during Slotok planning that durable workflow semantics are required even for starting subagents. A separate Pi agent in tmux pane `%5` left a coordination note at `data/coordination/slotok-symphony-durable-workflows-handoff.md` for the SymphonyX implementation agent in pane `%1`: current in-memory dynamic-workflow fan-out is useful but insufficient; workflow runs and subagent starts need durable IDs, context-mode semantics, attach/resume handles, artifacts, and review/synthesis handles.
 

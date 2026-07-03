@@ -1,19 +1,19 @@
 # Clean-Room Database Workbench Plan
 
-This document defines the plan, architecture, and phase-by-phase implementation strategy for a clean-room Database Workbench client. The workbench is an interoperable database client designed to connect to, query, and manage local or user-permitted databases (SQLite, PostgreSQL, MySQL/MariaDB) safely and legally.
+This document defines the plan, architecture, and phase-by-phase implementation strategy for a clean-room Database Workbench client. The workbench is an interoperable database client designed to connect to, query, and manage local or user-permitted databases (SQLite, PostgreSQL, MySQL/MariaDB) within the allowed scope.
 
 ---
 
-## 1. Scope and Hard Guardrails
+## 1. Scope and Operating Rules
 
 ### 1.1 Allowed Targets
 - **Database Engines**: Standard open-source database servers (PostgreSQL, MariaDB, SQLite, DuckDB) running locally, in Docker containers, or on explicitly authorized staging/development servers.
 - **Protocols and Drivers**: Standard, publicly documented network wire protocols (PostgreSQL Frontend/Backend protocol, MySQL client/server protocol) and open-source driver libraries (e.g., `pg`, `mysql2`, `better-sqlite3`, or Rust equivalent drivers).
 - **Metadata Inspection**: Publicly documented SQL standards and catalog schemas (`information_schema.tables`, `information_schema.columns`, `pg_catalog`, `sqlite_schema`) to query database layouts.
 
-### 1.2 Out of Scope & Prohibited Activities
+### 1.2 Out of Scope
 - **Proprietary Decompilation**: No decompilation, unpacking, or reverse engineering of TablePlus, pgAdmin (proprietary plugins), JetBrains DataGrip, or other commercial database management tools.
-- **License/DRM Bypass**: Absolutely no circumventing of licensing screens, activation limits, trial periods, or serial verification of TablePlus or any other proprietary workbench.
+- **License/DRM Bypass**: No circumventing of licensing screens, activation limits, trial periods, or serial verification of TablePlus or any other proprietary workbench.
 - **Protected Asset Extraction**: No extracting of icons, SVG paths, proprietary stylesheet variables, themes, font files, or local binary extensions from commercial clients.
 - **Proprietary Protocol Cloning**: No trying to reverse-engineer private/undocumented cloud sync protocols or proprietary team sharing features of commercial workbench services.
 
@@ -27,7 +27,7 @@ TablePlus may be used strictly as an **observational UX/product reference** for 
 
 ## 2. Lab Artifacts for Database Workbench
 
-As part of the clean-room process, development of the Database Workbench is guided by the Lawful Reverse-Engineering Lab. All discovery runs on database catalogs and protocol behaviors must be recorded in the following lab artifacts:
+As part of the clean-room process, development of the Database Workbench is guided by the Reverse Engineering Lab. All discovery runs on database catalogs and protocol behaviors must be recorded in the following lab artifacts:
 
 1. **`authorization.md`**
    - States target database systems, driver versions, and access scope.
@@ -52,6 +52,15 @@ As part of the clean-room process, development of the Database Workbench is guid
 
 6. **`implementation-notes.md`**
    - Details how the final client codebase implements connection pooling, SSH tunneling, metadata parsing, and transaction controls based strictly on the clean-room specification.
+
+## 2.1 Control-Plane SQLite Boundary
+
+The repo-wide task metadata ledger is a control-plane concern, not a Database Workbench product package.
+
+- The first ledger implementation should extend the existing Symphony Lite/control-plane SQLite seam instead of creating a second database package here.
+- The workbench may later open `data/symphony-lite/**` or `~/.local/share/pi-cockpit/cockpit.sqlite` as ordinary SQLite targets for inspection, using the same clean-room catalog/query APIs as any other user-permitted database.
+- Workbench UI state, saved connections, and query history must remain separate from task scheduling state. The workbench is a client/inspector of the ledger, not the authority for packet claims or status transitions.
+- Any migration from `TASKS.md` or packet ledgers belongs in the control-plane importer; the workbench should not parse task Markdown or domain packet dashboards itself.
 
 ---
 
@@ -112,7 +121,7 @@ As part of the clean-room process, development of the Database Workbench is guid
   2. Run security checks ensuring no SQL injection vulnerability in metadata extraction queries (e.g., parameterized catalog queries).
   3. Validate connection sanitization to prevent connecting to unauthorized internal networks.
   4. Finalize the `validation-report.md` outlining the verification matrix.
-- **Deliverables**: Clean validation log, production-ready prototype build steps, and security compliance notes.
+- **Deliverables**: Clean validation log, production-ready prototype build steps, and security notes.
 
 ---
 

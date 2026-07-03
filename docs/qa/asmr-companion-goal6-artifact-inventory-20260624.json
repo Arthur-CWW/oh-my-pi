@@ -3,7 +3,8 @@
   "createdAt": "2026-06-24T00:00:00.000Z",
   "changedFiles": [
     "docs/qa/asmr-companion-goal6-final-handoff-20260624.md",
-    "docs/qa/asmr-companion-goal6-artifact-inventory-20260624.json"
+    "docs/qa/asmr-companion-goal6-artifact-inventory-20260624.json",
+    "packages/hyperframes-renderer/src/render.ts"
   ],
   "goal6Commit": [
     "898d2686",
@@ -39,6 +40,11 @@
       "rank": 6,
       "path": "data/asmr-companion/goal4-planning/goal4-pipeline-handoff.bundle.json",
       "why": "Goal 5 planning input bundle with prompts, motion, caption plan, and upstream refs."
+    },
+    {
+      "rank": 7,
+      "path": "data/asmr-companion/goal5-pipeline-proof/hyperframes/manifest.json",
+      "why": "Regenerated reviewSurface proof: artifactLibraryRefs assert the original placeholder SVG and planned Seedance MP4 path, not copied assets/asset-*.svg paths."
     }
   ],
   "prerequisiteGoal1": {
@@ -127,6 +133,12 @@
       "goal": 5,
       "exactness": "observed",
       "command": "bun run tiktok-recreate:hyperframes -- --layer-plan data/asmr-companion/goal5-pipeline-proof/goal5-layer-plan.json --out data/asmr-companion/goal5-pipeline-proof/hyperframes --audio data/asmr-companion/goal3-spatial-proof/goal3-close-whisper-binaural.wav"
+    },
+    {
+      "order": 14,
+      "goal": 5,
+      "exactness": "reviewSurface-assertion",
+      "command": "bun -e 'const fs = require(\"node:fs\"); const manifest = JSON.parse(fs.readFileSync(\"data/asmr-companion/goal5-pipeline-proof/hyperframes/manifest.json\", \"utf8\")); const refs = manifest.reviewSurface?.artifactLibraryRefs ?? []; if (!refs.some((ref) => String(ref.pathOrUrl) === \"data/asmr-companion/goal5-pipeline-proof/media/first-frame-candidate-seedance-dry-run.placeholder.svg\")) throw new Error(\"missing original placeholder proof path\"); if (!refs.some((ref) => String(ref.pathOrUrl) === \"data/asmr-companion/goal2/seedance-parent-proof/artifacts/seedance-parent-proof-001.mp4\")) throw new Error(\"missing planned generated clip artifact path\"); if (refs.some((ref) => String(ref.pathOrUrl).startsWith(\"assets/asset-\"))) throw new Error(\"reviewSurface leaked copied asset path\");'"
     }
   ],
   "artifacts": [
@@ -143,6 +155,13 @@
       "kind": "manifest",
       "state": "dry-run",
       "reviewValue": "Downstream manifest consumed by Goals 4 and 5."
+    },
+    {
+      "goal": 2,
+      "path": "data/asmr-companion/goal2/seedance-parent-proof/artifacts/seedance-parent-proof-001.mp4",
+      "kind": "planned-generated-video",
+      "state": "planned-dry-run-missing-media",
+      "reviewValue": "Stable planned Seedance MP4 artifact path recorded by generated-video-clips.v1.json and asserted in regenerated HyperFrames reviewSurface artifactLibraryRefs."
     },
     {
       "goal": 2,
@@ -219,7 +238,7 @@
       "path": "data/asmr-companion/goal5-pipeline-proof/hyperframes/manifest.json",
       "kind": "hyperframes-manifest",
       "state": "real-generated-json-project",
-      "reviewValue": "Confirms renderRan=false and audioAttached=false in the current proof bundle."
+      "reviewValue": "Regenerated HyperFrames manifest proof: reviewSurface.artifactLibraryRefs must keep stable source proof refs such as data/asmr-companion/goal5-pipeline-proof/media/first-frame-candidate-seedance-dry-run.placeholder.svg and data/asmr-companion/goal2/seedance-parent-proof/artifacts/seedance-parent-proof-001.mp4 while copied assets/asset-*.svg remain renderer-only."
     },
     {
       "goal": 5,

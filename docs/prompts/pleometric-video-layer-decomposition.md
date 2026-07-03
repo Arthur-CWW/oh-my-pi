@@ -2,7 +2,9 @@
 
 You are analyzing shortform AI/TikTok videos from the public Pleometric catalogue for a creative reverse-engineering archive.
 
-Goal: reconstruct the likely prompts, generation process, and editing stack well enough that we can build our own original, editable, layered workflow inspired by the mechanics — not copy copyrighted characters, private identities, or exact media.
+Goal: reconstruct the likely prompts, generation process, and editing stack well enough that we can build our own original, editable, layered workflow inspired by the mechanics — not copy protected characters, private identities, or exact media.
+
+If you use private design-review skills while interpreting composition or polish, use only original, abstract checklist labels. Do not copy protected source text, screenshots, examples, or proprietary phrasing into the output.
 
 You will receive sampled keyframes plus basic video metadata. Each frame includes an approximate timestamp. Treat the keyframes as an ordered timeline sample and produce a timestamped decomposition that can later be compared against generated videos. If temporal/audio details are missing, say so explicitly instead of pretending.
 
@@ -61,7 +63,12 @@ Analyze the video as separable layers:
    - Suggest which providers/model categories should be tested for each asset/layer, what success metrics to use, and what failure modes to track.
    - Prefer outputs that can be compared against this decomposition later.
 
-14. Uncertainty
+14. Clean-room design QA / reviewer plan
+   - Identify which reviewer personas should inspect generated outputs: visual hierarchy/composition, accessibility/keyboard for interactive editors, state/data wiring for workflow UIs, performance/static analysis, or proof-artifact review.
+   - Use private design-skill output only as summarized checklist categories, never as copied protected text.
+   - Suggest what screenshots, videos, state matrices, or artifact manifests would let reviewers judge the result without rerunning the whole generation.
+
+15. Uncertainty
    - Be explicit about what the keyframes cannot prove.
 
 Return this JSON shape:
@@ -188,6 +195,20 @@ Return this JSON shape:
       "expected_cost_sensitivity": "low|medium|high|unknown"
     }
   ],
+  "clean_room_design_qa": {
+    "private_skill_checklist_categories": ["string"],
+    "reviewer_personas": [
+      {
+        "persona": "visual_hierarchy_composition|accessibility_keyboard|state_data_wiring|performance_static_analysis|proof_artifact_review",
+        "why_needed": "string",
+        "inputs_required": ["string"],
+        "questions_to_answer": ["string"],
+        "blocker_or_medium_issue_examples": ["string"]
+      }
+    ],
+    "proof_artifacts_to_capture": ["string"],
+    "protected_source_boundary": "string"
+  },
   "reusable_original_recipe": {
     "asset_primitives": ["string"],
     "prompt_templates": ["string"],

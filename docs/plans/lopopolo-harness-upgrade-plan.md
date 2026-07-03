@@ -11,7 +11,7 @@ What already matches the pattern:
 - Root `AGENTS.md` is short and mostly acts as a table of contents.
 - Project commands are explicit (`bun run typecheck`, `bun run test`, `bun run check`, smoke/help commands).
 - Durable preferences are separated from research docs (`docs/state/` vs `docs/research/`).
-- Skills and tools are first-class (`packages/web-access/skills`, Pi extension tools, dynamic workflows).
+- Skills and tools are first-class (`skills/`, Pi extension tools, dynamic workflows).
 - Browser automation has safety guidance and background-safe defaults.
 
 Main gaps:

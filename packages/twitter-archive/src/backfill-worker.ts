@@ -366,7 +366,7 @@ export async function runNitterBackfillWorker(options: NitterBackfillWorkerOptio
   const now = options.now ?? (() => new Date().toISOString())
   const store = initTwitterArchiveSqliteStore(options.dbPath)
   try {
-    ensureBackfillTargetsTable(store)
+    ensureNitterBackfillTargetsTable(store)
     await appendTwitterArchiveJsonlLog(options.logPath, {
       component: "nitter-backfill-worker",
       level: "info",
@@ -915,7 +915,7 @@ async function runMediaCycle(options: {
   }
 }
 
-function ensureBackfillTargetsTable(store: TwitterArchiveSqliteStore): void {
+export function ensureNitterBackfillTargetsTable(store: TwitterArchiveSqliteStore): void {
   store.sqlite.exec(`
     CREATE TABLE IF NOT EXISTS nitter_backfill_targets (
       handle_key TEXT NOT NULL,

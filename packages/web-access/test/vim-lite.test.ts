@@ -383,6 +383,110 @@ describe("VimLiteEditor", () => {
     press(editor, "gx")
     expect(editor.getText()).toBe(`${pasted}\n[Paste #1, +12 lines]`)
   })
+  test("normal mode line motions stay logical before word motions on wrapped input", () => {
+    const editor = createEditor()
+    editor.setText(`${`firstword ${"longword ".repeat(12)}tail`}\nsecond alpha beta\nthird gamma delta`)
+    editor.handleInput("\x1b")
+
+    press(editor, "gg")
+    editor.render(24)
+    press(editor, "j")
+    expect(editor.getCursor()).toEqual({ line: 1, col: 0 })
+
+    press(editor, "w")
+    expect(editor.getCursor()).toEqual({ line: 1, col: "second ".length })
+
+    press(editor, "b")
+    expect(editor.getCursor()).toEqual({ line: 1, col: 0 })
+    expect(renderSnapshot(editor, 24)).toContain("[s]econd alpha beta")
+  })
+
+  test("expanded large-paste line motions feed the same cursor to word motions", () => {
+    const editor = createEditor()
+    const pasted = Array.from({ length: 12 }, (_, index) => `row${index + 1} ${"longword ".repeat(6)}alpha beta`).join("\n")
+
+    editor.handleInput(`\x1b[200~${pasted}\x1b[201~`)
+    editor.handleInput("\x1b")
+    press(editor, "gx")
+
+    editor.render(24)
+    press(editor, "j")
+    expect(editor.getCursor()).toEqual({ line: 1, col: 0 })
+
+    press(editor, "w")
+    expect(editor.getCursor()).toEqual({ line: 1, col: "row2 ".length })
+
+    press(editor, "b")
+    expect(editor.getCursor()).toEqual({ line: 1, col: 0 })
+    expect(renderSnapshot(editor, 24)).toContain("[r]ow2")
+  })
+
+  test("normal and visual WORD motions use Vim whitespace semantics", () => {
+    const text = "foo-bar baz_qux zap"
+    const normalCases = [
+      { keys: "0W", cursor: { line: 0, col: "foo-bar ".length } },
+      { keys: "0E", cursor: { line: 0, col: "foo-bar".length - 1 } },
+      { keys: "0WW", cursor: { line: 0, col: "foo-bar baz_qux ".length } },
+      { keys: "0WB", cursor: { line: 0, col: 0 } },
+      { keys: "0wB", cursor: { line: 0, col: 0 } },
+    ]
+
+    for (const { keys, cursor } of normalCases) {
+      const editor = createEditor()
+      editor.setText(text)
+      editor.handleInput("\x1b")
+      press(editor, keys)
+      expect(editor.getCursor()).toEqual(cursor)
+    }
+
+    let clipboardText = ""
+    const clipboard: ClipboardAdapter = {
+      readText: () => clipboardText,
+      writeText(text: string) {
+        clipboardText = text
+        return true
+      },
+    }
+    const yank = (keys: string): string => {
+      const editor = createEditor(clipboard)
+      clipboardText = ""
+      editor.setText(text)
+      editor.handleInput("\x1b")
+      press(editor, keys)
+      press(editor, "y")
+      return clipboardText
+    }
+
+    expect(yank("0vW")).toBe("foo-bar b")
+    expect(yank("0vE")).toBe("foo-bar")
+    expect(yank("0vWW")).toBe("foo-bar baz_qux z")
+    expect(yank("0vWB")).toBe("f")
+    expect(yank("0WvE")).toBe("baz_qux")
+  })
+
+  test("visual line and word motions share one logical cursor on wrapped input", () => {
+    let clipboardText = ""
+    const clipboard: ClipboardAdapter = {
+      readText: () => clipboardText,
+      writeText(text: string) {
+        clipboardText = text
+        return true
+      },
+    }
+    const firstLine = `firstword ${"longword ".repeat(12)}tail`
+    const editor = createEditor(clipboard)
+    editor.setText(`${firstLine}\nsecond alpha beta\nthird gamma delta`)
+    editor.handleInput("\x1b")
+
+    press(editor, "gg")
+    editor.render(24)
+    press(editor, "vjw")
+
+    expect(editor.getCursor()).toEqual({ line: 1, col: "second ".length })
+    press(editor, "y")
+    expect(clipboardText).toBe(`${firstLine}\nsecond a`)
+  })
+
   test("normal mode word motions render one clamped cursor", () => {
     const editor = createEditor()
     editor.focused = true

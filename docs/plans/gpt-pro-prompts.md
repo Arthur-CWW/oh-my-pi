@@ -6,6 +6,10 @@ Status: submitted asynchronously via `llm_frontend_browser` on 2026-06-03. Runti
 
 When using a Pi prompt or LLM handoff that supports file expansion, prefer including context with `@file` references rather than copying large docs by hand.
 
+## Operational model preference
+
+T-2026-06-13-006: keep GPT-Pro/GPT-5.5 as the fallback worker and oracle lane, not the default worker lane. Use Gemini Flash for bounded non-core workers first; escalate to GPT-5.5/Oracle when the slice needs stronger reasoning, review, or recovery and the subscription impact remains acceptable. Treat Kimi as an explicit last-resort/unavailable fallback until access and reliability are restored. This is a documentation preference only; do not change OMP config from this prompt file.
+
 ```txt
 You are doing high-effort product/technical research for a macOS/TypeScript/ffmpeg video workflow project.
 
@@ -50,7 +54,7 @@ Research tasks:
    - Identify current tools/products that decompose or generate AI UGC/ad videos with swappable influencer/persona/hook/product/captions.
    - We saw references to Bluma, Arcads AI, Higgsfield Marketing Studio, viral.app, Fastlane/Fast Lane, RentAHuman, Hooked, Affogato, HeyGen/Synthesia/Creatify-style tools.
    - Explain which are closest to a node-based/de-edit/remix workflow and what we can learn from them.
-   - Focus on ethical high-level format decomposition, not copying private identities or copyrighted videos verbatim.
+   - Focus on permission-scoped high-level format decomposition, not copying private identities or source videos verbatim.
 
 5. Concrete benchmark plan
    - Provide an exact 1-day benchmark plan using a single stylized seal image and this dialogue:
@@ -124,7 +128,7 @@ Research tasks:
    - Include architecture, node graph model, asset catalog tables, provider adapters, queueing/polling, ffmpeg/Remotion render stack, TTS/lipsync stack, caption system, format-template schema, and analytics.
    - Include what to build first in 1 week, 1 month, and 3 months.
    - Include what to outsource to APIs vs build locally/open-source.
-   - Include anti-goals and legal/ethical constraints: do not clone private identities, do not copy proprietary videos verbatim, do not bypass paywalls or terms, avoid deceptive disclosure issues.
+   - Include anti-goals and source/provenance constraints: do not clone private identities, do not copy proprietary videos verbatim, do not bypass paywalls or terms, avoid deceptive disclosure issues.
 
 5. Competitive differentiation for us
    - We want editable layers and reversible graph nodes, not a black-box generator.
@@ -144,6 +148,45 @@ Return:
 - Build roadmap: 1-day benchmark, 1-week MVP, 1-month prototype, 3-month product.
 - Risks/unknowns and fastest validation tests.
 ```
+
+## Recoverable async run convention
+
+For new GPT-Pro / Oracle-style handoffs, record enough state that a later agent can resume without guessing or starting a duplicate paid/frontend job:
+
+- session id: `llm_frontend_browser` `sessionId` or Oracle session id
+- provider/backend: `chatgpt`, `grok`, `aistudio`, `oracle-browser`, etc.
+- conversation URL when the provider exposes one
+- output path under ignored `data/research/**` or another explicit artifact path
+- prompt bundle inputs as repo-relative `@file` or `--file` references, never pasted secrets
+- retry-after timestamp and exact provider banner when blocked by quota/rate limit
+
+Current frontend-browser SQLite session ledger (`~/.pi/pi-web-access/frontend-browser.sqlite`, table `frontend_sessions`) persists `id`, `provider`, project key/URL, `conversation_url`, `output_path`, `blocker_reason`, `recovery_step`, title, prompt, last response text, and created/updated timestamps. Queue-level `retry_after` is not implemented there yet; until it is, put retry timestamps in the run note next to the session id.
+
+Recovered-state invariant: a stored session id plus either `conversationUrl` or `outputPath` must be enough to call `wait`/`collect` or read the completed artifact without re-submitting the prompt. If both are missing, treat the run as unrecoverable and create a new ledger row only after a deliberate resubmission.
+
+## Grok frontend blocker recovery
+
+T-2026-06-09-002 is blocked only on the dedicated Grok Helium profile login state, not on code discovery. A non-login status check found the Grok CDP port running with zero tabs; that does not verify login, and agents must not open a login flow to fix it. The code path is `promptGrok` / `collectGrokResponse` in `packages/web-access/src/frontend-browser.ts`: `inspectGrokHumanBlocker` treats visible `Sign in`, `Log in`, `Sign up`, X/Grok login copy, CAPTCHA/passkey/2FA/security-code copy, and terms prompts as `needsHuman`/manual blockers. Blocked prompt attempts are saved to the frontend session ledger with `blocker_reason` and `recovery_step` so a later agent can recover the exact non-blocking next action. Agents must not automate that login or read secrets.
+
+Non-blocking recovery is manual-first and generated from the blocked attempt. Ask Arthur to open and log into the exact dedicated profile, then use the `Human reason:` recovery text instead of a copied example. The generated text shell-quotes the current blocked prompt and uses the requested `--output-file` or stored session `output_path` when one exists; if no output path exists, the generated prompt/wait commands omit `--output-file` instead of inventing one:
+
+With an output path:
+
+```bash
+pi-llm-browser setup --provider grok
+pi-llm-browser prompt --provider grok --no-wait --output-file '<requested-or-stored-output-path>' '<current-blocked-prompt>'
+pi-llm-browser wait --provider grok --session latest --response-timeout-ms 300000 --output-file '<requested-or-stored-output-path>'
+```
+
+Without an output path:
+
+```bash
+pi-llm-browser setup --provider grok
+pi-llm-browser prompt --provider grok --no-wait '<current-blocked-prompt>'
+pi-llm-browser wait --provider grok --session latest --response-timeout-ms 300000
+```
+
+If the generated prompt or wait command prints `Needs human: yes`, leave the task blocked with the exact `Human reason:` text; do not retry with another browser profile.
 
 ## Follow-up collection commands
 

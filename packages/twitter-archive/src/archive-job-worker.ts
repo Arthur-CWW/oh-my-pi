@@ -5,9 +5,11 @@ import {
   resolveNitterTweetDetails,
   type NitterFetchFunction,
 } from "./nitter"
+import { captureNitterFollowingToSqlite } from "./following-graph"
 import {
   initTwitterArchiveSqliteStore,
   type SqliteArchiveJob,
+  type SqliteJsonRecord,
   type TwitterArchiveSqliteStore,
 } from "./sqlite-store"
 
@@ -71,6 +73,19 @@ async function dispatchArchiveJob(job: SqliteArchiveJob, store: TwitterArchiveSq
   const jobOptions = archiveJobOptionsRecord(job.options)
   const baseUrl = jobOptions.baseUrl ?? workerOptions.baseUrl
 
+  if (job.targetType === "following") {
+    const username = parseProfileTarget(job.targetValue)
+    const provenance = isRecord(job.provenance) ? job.provenance : undefined
+    return captureNitterFollowingToSqlite(username, {
+      store,
+      baseUrl,
+      fetch: workerOptions.fetchFn,
+      maxPages: jobOptions.maxPages,
+      observedAt: job.createdAt,
+      provenance,
+    })
+  }
+
   if (job.targetType === "profile") {
     const username = parseProfileTarget(job.targetValue)
     return captureNitterTimelineToSqlite(username, {
@@ -109,6 +124,10 @@ function openArchiveJobWorkerStore(options: ArchiveJobWorkerOptions): { store: T
     throw new Error("runArchiveJobWorkerOnce requires dbPath or store")
   }
   return { store: initTwitterArchiveSqliteStore(options.dbPath), closeStore: true }
+}
+
+function isRecord(value: SqliteArchiveJob["options"]): value is SqliteJsonRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
 function archiveJobOptionsRecord(options: SqliteArchiveJob["options"]): ArchiveJobOptionsRecord {
@@ -182,9 +201,6 @@ function numberField(record: ArchiveJobJsonRecord, key: string): number | undefi
   return typeof value === "number" && Number.isFinite(value) ? value : undefined
 }
 
-function isRecord(value: SqliteArchiveJob["options"]): value is ArchiveJobJsonRecord {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-}
 
 function errorToMessage(error: Error | string | null | undefined): string {
   return error instanceof Error ? error.message : String(error)

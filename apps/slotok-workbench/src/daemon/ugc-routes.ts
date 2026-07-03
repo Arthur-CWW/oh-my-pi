@@ -178,6 +178,27 @@ export async function routeUgc(request: Request, store: UgcJsonStore, options: R
     return json(store.updateCandidates(decodeBulkCandidateStatusPatch(await readJson(request))))
   }
 
+
+  if (url.pathname.startsWith("/api/ugc/candidates/") && url.pathname.endsWith("/annotations")) {
+    const candidateId = decodeURIComponent(url.pathname.slice("/api/ugc/candidates/".length, -"/annotations".length))
+    if (!candidateId) return json({ error: "missing candidate id" }, 400)
+    const state = store.read()
+    if (!state.workspace.candidates.some((candidate) => candidate.id === candidateId)) {
+      return json({ error: `candidate not found: ${candidateId}` }, 404)
+    }
+    if (request.method === "GET") {
+      return json({ candidateId, annotations: candidateAnnotations(state, candidateId) })
+    }
+    if (request.method === "POST") {
+      const updated = store.createReviewNote(decodeCreateCandidateAnnotation(candidateId, await readJson(request)))
+      return json({
+        candidateId,
+        annotation: candidateAnnotations(updated, candidateId)[0] ?? null,
+        state: updated,
+      }, 201)
+    }
+  }
+
   if (request.method === "POST" && url.pathname.startsWith("/api/ugc/candidates/") && url.pathname.endsWith("/status")) {
     const id = decodeURIComponent(url.pathname.slice("/api/ugc/candidates/".length, -"/status".length))
     if (!id) return json({ error: "missing candidate id" }, 400)
@@ -328,6 +349,14 @@ export async function routeUgc(request: Request, store: UgcJsonStore, options: R
   }
 
   return null
+}
+
+function candidateAnnotations(state: UgcLocalState, candidateId: string) {
+  const candidate = state.workspace.candidates.find((item) => item.id === candidateId)
+  const linkedNoteIds = new Set(candidate?.reviewNoteIds ?? [])
+  return state.workspace.reviewNotes.filter((note) => (
+    (note.attachedTo.kind === "candidate" && note.attachedTo.id === candidateId) || linkedNoteIds.has(note.id)
+  ))
 }
 
 async function createCodexProviderJob(store: UgcJsonStore, options: RouteUgcOptions, decoded: CodexAnalysisJobRequest, context: CodexFramePreparationContext): Promise<Response> {
@@ -726,6 +755,20 @@ function decodeCreateReviewNote(value: JsonValue): CreateReviewNoteInput {
     requestedChange: typeof value.requestedChange === "string" ? value.requestedChange : null,
   }
 }
+
+function decodeCreateCandidateAnnotation(candidateId: string, value: JsonValue): CreateReviewNoteInput {
+  if (!isRecord(value)) throw new Error("candidate annotation request must be an object")
+  if (typeof value.body !== "string" || value.body.trim().length === 0) throw new Error("candidate annotation requires a body")
+  if (value.verdict !== undefined && !isReviewVerdict(value.verdict)) throw new Error("candidate annotation verdict is invalid")
+  return {
+    author: value.author === "agent" ? "agent" : "arthur",
+    attachedTo: { kind: "candidate", id: candidateId },
+    verdict: isReviewVerdict(value.verdict) ? value.verdict : "watch-again",
+    body: value.body,
+    requestedChange: value.requestedChange === undefined || value.requestedChange === null ? null : requireString(value.requestedChange, "candidate annotation requestedChange"),
+  }
+}
+
 
 function decodeCreateProviderJob(value: JsonValue): CreateProviderJobInput {
   if (!isRecord(value)) throw new Error("provider job request must be an object")

@@ -1,4 +1,5 @@
 export * from "./schemas"
 export * from "./signals"
 export * from "./simulation"
+export * from "./simulator"
 export * from "./providers"

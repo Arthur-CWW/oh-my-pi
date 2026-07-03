@@ -65,6 +65,13 @@ The UI should be driven by SQLite-derived API data, not by ad hoc client state:
 - Markdown export payloads are derived from stored SQLite rows and local annotations. The default bookmark export root is `data/twitter-archive/markdown/bookmarks`; `TWITTER_ARCHIVE_MARKDOWN_ROOT=/Users/arthur/vault/sources/clippings/twitter-bookmarks` may redirect output straight into Arthur's Obsidian vault by filesystem path without launching Obsidian.
 - Authenticated capture inputs still arrive only through the local archive server: preferred Firefox WebExtension, Violentmonkey fallback userscript, or dedicated Chrome DevTools capture. The UI consumes only the resulting SQLite-derived local data.
 
+
+## Ban-safe Candidate Queue Continuation
+
+- `@pleometric` and artifact-extraction candidates should appear in the UI only as SQLite-derived queue/status rows until an explicit bounded capture is approved. The visible fields are `sourceLane`, `targetType`, `targetValue`, `status`, `priority`, `attempts`, `createdAt`/`claimedAt`/`finishedAt`, and provenance detail such as `promotionReason` or `artifactExtractionCandidateId`; the viewer must not silently start a scraper when these rows are displayed.
+- Candidate rows promoted from read-only signals, browser history, bookmarks, or local artifact-extraction notes use `status = pending` only when the target is public/profile/status/list material and the stored provenance explains the source. Missing approval or source metadata stays as blocker provenance before promotion; `skipped` records policy/private/deleted/rate-limit outcomes with the existing skip reason vocabulary.
+- The next no-live-scrape proof for this UI slice is to seed or import a tiny local fixture/candidate set into `archive_jobs`, open `bun run dev`, and confirm `/api/archive-jobs` plus the collapsed controls show the `@pleometric`/artifact candidate rows and statuses without issuing network requests. A public backfill command for `@pleometric` remains a separate opt-in archival action owned by the scraper worker.
+
 ## Acceptance Criteria
 
 - First viewport looks like a Twitter/Nitter middle-column archive feed, not an admin panel; top controls no longer take half the screen, controls are collapsed by default, `f` toggles them, and `/` expands and focuses search.
@@ -102,6 +109,17 @@ Browser smoke while `bun run dev` is active:
 - Open at least one media-file URL from the UI/API and confirm local media routing still works.
 - Exercise `j`, `k`, `y`, `f`, `/`, note/tag/mark/attribute controls, collapsed filters/sort/jobs/logs/provenance panes, resolved quote cards, reply context, retweet attribution, and media/video grids.
 - Create or edit one local note/tag/mark/attribute and confirm the UI reflects a local SQLite/Markdown-backed archive change rather than a Twitter/X action.
+
+No-live-scrape queue proof for the `@pleometric`/artifact-extraction continuation:
+
+```sh
+cd packages/twitter-archive
+tmpdir="$(mktemp -d)"
+printf '%s\n' '{"candidates":[{"username":"pleometric","priority":7,"provenance":{"source":"artifact-extraction-candidate","artifactExtractionCandidateId":"pleometric-proof-1"}}]}' > "$tmpdir/pleometric-artifact-candidates.json"
+bun src/browser-history-queue.ts "$tmpdir/pleometric-artifact-candidates.json" --db "$tmpdir/archive.sqlite"
+```
+
+Expected result: JSON with one enqueued job and zero skipped candidates; the resulting local SQLite queue row has `targetType = profile`, `targetValue = pleometric`, preserved artifact-candidate provenance, and no public HTML fetch.
 
 If a fresh public capture is explicitly allowed for a broader archive smoke, the existing bounded command remains:
 

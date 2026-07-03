@@ -1,0 +1,34 @@
+# Fable session overlay.
+# Use with: omp --config ./.omp/fable-config.yml --model <actual-fable-model-id>
+# Do not put the Fable model ID here until it is known; pass it at launch time.
+
+modelRoles:
+  smol: kimi-code/kimi-for-coding
+  task: kimi-code/kimi-for-coding
+  implementer: kimi-code/kimi-for-coding
+  research: kimi-code/kimi-for-coding
+  authenticated_web: kimi-code/kimi-for-coding
+  maintenance: kimi-code/kimi-for-coding
+  complex: openai-codex/gpt-5.5
+  plan: openai-codex/gpt-5.5
+  slow: openai-codex/gpt-5.5
+  designer: anthropic/claude-opus-4-6
+
+advisor:
+  enabled: false
+  subagents: false
+  syncBacklog: "off"
+
+task:
+  enableLsp: true
+  eager: always
+  maxRecursionDepth: -1
+  softRequestBudget: 40
+  isolation:
+    mode: apfs
+
+providers:
+  webSearch: kagi
+
+autolearn:
+  enabled: false

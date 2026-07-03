@@ -1,0 +1,172 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Repo-owned deterministic self-heal for local OMP overlays and shell integration
+# assumptions that upstream updates or dotfile churn can break. See
+# .omp/agent/patches/README.md and .omp/patches/README.md.
+SOURCE="${BASH_SOURCE[0]}"
+while [[ -L "${SOURCE}" ]]; do
+  DIR="$(cd -P "$(dirname "${SOURCE}")" >/dev/null 2>&1 && pwd)"
+  SOURCE="$(readlink "${SOURCE}")"
+  [[ "${SOURCE}" != /* ]] && SOURCE="${DIR}/${SOURCE}"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "${SOURCE}")" >/dev/null 2>&1 && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." >/dev/null 2>&1 && pwd)"
+
+PATCH_FILE="${OMP_BEAUTIFUL_MERMAID_PATCH:-${REPO_ROOT}/.omp/agent/patches/beautiful-mermaid@1.1.3.patch}"
+MERMAID_DIR="${OMP_BEAUTIFUL_MERMAID_DIR:-${HOME}/.bun/install/global/node_modules/beautiful-mermaid}"
+TARGET="${MERMAID_DIR}/dist/index.js"
+PACKAGE_JSON="${MERMAID_DIR}/package.json"
+ZSHENV_PATH="${OMP_CMUX_ZSHENV:-${HOME}/.zshenv}"
+
+ensure_cmux_omp_resume_env() {
+  python3 - "${ZSHENV_PATH}" <<'PY'
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1]).expanduser()
+target = path.resolve() if path.exists() or path.is_symlink() else path
+if target.exists():
+    text = target.read_text(errors="replace")
+else:
+    text = "#!/usr/bin/env zsh\n# Minimal zsh environment for all shell invocations.\n"
+
+needle = ".local/share/mise/shims"
+if needle in text:
+    print(f"omp-self-heal: cmux OMP resume PATH already includes mise shims in {target}")
+    raise SystemExit(0)
+
+block = """
+# cmux OMP restore: cmux agent-hook resume launchers run non-interactive zsh
+# scripts, so make mise shims (and therefore bun) available before any OMP
+# shebang using /usr/bin/env bun can execute.
+case ":$PATH:" in
+  *":$HOME/.local/share/mise/shims:"*) ;;
+  *) export PATH="$HOME/.local/share/mise/shims:$PATH" ;;
+esac
+""".lstrip("\n")
+
+lines = text.splitlines()
+insert_at = None
+for index, line in enumerate(lines):
+    if line.startswith("export ZSH_COMPDUMP="):
+        insert_at = index + 1
+        break
+if insert_at is None:
+    for index, line in enumerate(lines):
+        if line.startswith("export ZDOTDIR="):
+            insert_at = index + 1
+            break
+if insert_at is None:
+    insert_at = 1 if lines and lines[0].startswith("#!") else 0
+
+next_lines = lines[:insert_at] + block.rstrip("\n").splitlines() + lines[insert_at:]
+target.parent.mkdir(parents=True, exist_ok=True)
+target.write_text("\n".join(next_lines).rstrip("\n") + "\n")
+print(f"omp-self-heal: added mise shims to cmux OMP resume PATH in {target}")
+PY
+}
+
+verify_cmux_omp_resume_env() {
+  local tmp
+  tmp="${TMPDIR:-/tmp}/cmux-omp-resume-test.$$.$RANDOM.zsh"
+  printf '%s\n' \
+    '#!/bin/zsh' \
+    'set -e' \
+    'command -v bun' \
+    '"$HOME/.bun/bin/omp" --version >/dev/null' \
+    > "${tmp}"
+  chmod 700 "${tmp}"
+  env -i HOME="${HOME}" PATH="/usr/bin:/bin" /bin/zsh "${tmp}" >/dev/null
+  rm -f "${tmp}"
+  echo "omp-self-heal: cmux OMP sparse-zsh resume test passed"
+}
+
+heal_beautiful_mermaid() {
+  if [[ ! -f "${PATCH_FILE}" ]]; then
+    echo "omp-self-heal: missing patch file: ${PATCH_FILE}" >&2
+    exit 1
+  fi
+  if [[ ! -f "${TARGET}" ]]; then
+    echo "omp-self-heal: missing beautiful-mermaid target: ${TARGET}" >&2
+    exit 1
+  fi
+
+  local package_version
+  package_version="$(python3 - "${PACKAGE_JSON}" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+try:
+    print(json.loads(Path(sys.argv[1]).read_text()).get("version", ""))
+except Exception:
+    print("")
+PY
+)"
+
+  if python3 - "${TARGET}" <<'PY'
+import sys
+from pathlib import Path
+text = Path(sys.argv[1]).read_text(errors="replace")
+raise SystemExit(0 if "WIDE_PAD" in text and "graphemeSegmenter" in text and "displayWidth" in text else 1)
+PY
+  then
+    if [[ "${package_version}" != "1.1.3" ]]; then
+      echo "omp-self-heal: beautiful-mermaid ${package_version} already has CJK markers; patch may be obsolete"
+    else
+      echo "omp-self-heal: beautiful-mermaid CJK patch already applied"
+    fi
+    return 0
+  fi
+
+  if [[ "${package_version}" != "1.1.3" ]]; then
+    echo "omp-self-heal: beautiful-mermaid is ${package_version:-unknown}, but patch targets 1.1.3" >&2
+    echo "omp-self-heal: check whether upstream fixed CJK widths; otherwise regenerate .omp/agent/patches/beautiful-mermaid@1.1.3.patch" >&2
+    exit 1
+  fi
+
+  (
+    cd "${MERMAID_DIR}"
+    patch -N -p1 < "${PATCH_FILE}"
+  )
+
+  echo "omp-self-heal: applied beautiful-mermaid CJK patch"
+}
+
+heal_cmux_shell_noclobber() {
+  local zsh_target bash_target
+  zsh_target="/Applications/cmux.app/Contents/Resources/shell-integration/cmux-zsh-integration.zsh"
+  bash_target="/Applications/cmux.app/Contents/Resources/shell-integration/cmux-bash-integration.bash"
+
+  python3 - "${zsh_target}" "${bash_target}" <<'PY'
+import sys
+from pathlib import Path
+
+OLD = '} >"$shim_path" 2>/dev/null || return 0'
+NEW = '} >|"$shim_path" 2>/dev/null || return 0'
+
+def heal(path: Path) -> None:
+    if not path.exists():
+        print(f"omp-self-heal: cmux shell integration missing (upstream-obsolete?): {path}")
+        return
+    text = path.read_text(errors="replace")
+    if NEW in text:
+        print(f"omp-self-heal: cmux shell integration noclobber already applied in {path}")
+        return
+    if OLD not in text:
+        print(f"omp-self-heal: cmux shell integration marker missing in {path}; upstream may have changed (upstream-obsolete)")
+        return
+    path.write_text(text.replace(OLD, NEW))
+    print(f"omp-self-heal: applied cmux shell integration noclobber fix to {path}")
+
+for arg in sys.argv[1:]:
+    heal(Path(arg).expanduser())
+PY
+}
+
+
+ensure_cmux_omp_resume_env
+verify_cmux_omp_resume_env
+heal_beautiful_mermaid
+heal_cmux_shell_noclobber

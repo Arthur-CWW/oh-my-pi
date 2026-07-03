@@ -172,6 +172,57 @@ Capture one flow at a time and write a short redacted summary.
 | Canvas edit tools | Medium | inpaint, erase, expand, cutout, local edit payloads |
 | Explore/template mining | Medium | public template/feed detail endpoints for clean-room format abstraction |
 
+
+## Next Passive Capture Flow
+
+This is the next T-2026-06-09-025 capture lane. Do not run live submit/mutation from this plan; it only describes the passive capture sequence to run when a logged-in Jimeng tab is available and capture is approved.
+
+1. Refresh or reuse the background session, then create a packet manifest for the family being captured:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts packet-plan \
+  --packet reference-controls \
+  --outDir data/jimeng-lab/passive-reference-controls-<date>
+```
+
+2. Record one UI flow at a time with the background CDP recorder. Arthur or an already-open page may drive the UI; the recorder should only attach and write network data:
+
+```bash
+bun packages/jimeng-client/src/network-recorder.ts \
+  --cdp http://127.0.0.1:9340 \
+  --target-url jimeng.jianying.com \
+  --flow reference-controls-pose-depth-canny \
+  --durationSec 0
+```
+
+3. Preferred passive flow order starts with the currently selected keep-packet blocker, then fans out to adjacent reference/persona/video/canvas setup flows:
+
+| Order | Flow | Stop before | Expected outputs |
+|---:|---|---|---|
+| 1 | Lip-sync/digital-human route and DOM setup | pre-process or generate submit unless explicitly approved | true workbench route/state, role media wiring, voice-picker fields, image/VOD reference wiring |
+| 2 | Persona/subject: subject create/update form setup and subject voice generation setup | create/update/generate submit unless explicitly approved | subject image role fields, workspace ids, voice/persona request builders |
+| 3 | Reference image tools: describe image, face validation, pose/depth/canny/style/reference previews | generation submit | upload/reference ids, preview task ids, strength/control fields |
+| 4 | Video references: VOD upload/select, first/end-frame and multi-frame composer setup, multimodal video composer setup | paid generate click | VOD/image reference schema, `material_list` / `videoGenInputs` mappings, duration/ratio/model fields |
+| 5 | Asset library, Explore/template reads, infinite-canvas project/detail reads | account mutation or publish/export | stable read endpoints, cursor/query fields, workspace/project ids |
+| 6 | Canvas edit tools: inpaint, erase, expand, cutout, local edit setup | edit/apply/export mutation unless explicitly approved | canvas project ids, mask/material payload shape, operation names |
+
+4. Immediately normalize the capture into reviewable local outputs:
+
+```bash
+bun packages/jimeng-client/src/browser-proxy-cli.ts capture-analyze \
+  --captureDir data/jimeng-captures/<timestamp>-<flow> \
+  --staticRoot packages/jimeng-client/src \
+  --outDir data/jimeng-lab/capture-analysis-<flow>
+
+bun packages/jimeng-client/src/browser-proxy-cli.ts discovery-worklist \
+  --analysis data/jimeng-lab/capture-analysis-<flow>/normalized/capture-analyze-<stamp>-analysis.json \
+  --probeCandidates data/jimeng-lab/capture-analysis-<flow>/raw/capture-analyze-<stamp>-endpoint-probe-candidates.json \
+  --staticRoot packages/jimeng-client/src \
+  --outDir data/jimeng-lab/discovery-worklist-<flow>
+```
+
+5. Promote only redacted facts: endpoint, method, stable request/response paths, whether the action is read/upload/generate/mutate, evidence path, and the next compare or replay command. Keep raw captures, cookies, session bundles, signed URLs, temporary upload credentials, and generated media under ignored `data/**`.
+
 ## Phase 3: Endpoint catalog updates
 
 Update `docs/provider/jimeng-direct-client-endpoints.md` with confirmed facts only:
@@ -246,7 +297,7 @@ Pass criteria:
 
 ## Background CDP recorder sketch
 
-Use the background-safe pattern from `packages/web-access/skills/background-browser-automation/SKILL.md`.
+Use the background-safe pattern from `skills/background-browser-automation/SKILL.md`.
 
 Important: attach network listeners to the target page and avoid `Target.activateTarget`, `page.bringToFront`, or DevTools UI.
 

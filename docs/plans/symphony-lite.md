@@ -85,11 +85,18 @@ Possible transports, in order:
 
 ## Runtime design docs
 
+- [`symphony-lite-goal.md`](./symphony-lite-goal.md) — overarching durable goal and non-negotiable boundaries for the control-plane-core workstream.
 - [`symphony-lite-rust-runner.md`](./symphony-lite-rust-runner.md) — proposed Rust SQLite/TUI/server runtime, Pi RPC child-agent runner, central Pi orchestrator API, and k9s/lazydocker-inspired TUI shape.
 
-## Implementation lanes
+The centralized task metadata ledger from T-2026-06-13-005 is part of Packet B/control-plane-core. It should reuse the selected Symphony Lite ledger seam and the existing cockpit SQLite/runtime model; it is not a separate database workbench package.
 
-### Lane A — Dynamic workflow v2
+## Workstreams / packets
+
+### Workstream 1: `control-plane-core`
+
+Durable local control plane and orchestration surface. SQLite/ledger data is the source of truth for workflow runs, subagent starts, events, external sessions, task packets, and human-in-loop questions.
+
+#### Packet A — Dynamic workflow v2
 
 Owner paths:
 
@@ -104,24 +111,26 @@ Tasks:
 - implement context modes: `prompt-only`, `summary`, `fork-current`
 - record child artifacts/transcripts instead of only final strings
 
-### Lane B — Rust runner / central orchestrator API
+#### Packet B — Runtime substrate spike / central orchestrator API
 
 Owner paths:
 
 - `packages/symphony-lite-rs/**`
+- `packages/symphony-lite-elixir/**`
 - `docs/plans/symphony-lite-rust-runner.md`
-
 Tasks:
 
-- create Rust SQLite-backed runner/TUI/server skeleton
+- implement an Elixir/OTP substrate spike using local-file/TASKS.md task sources, SQLite ledger, JSON CLI/API, and dry-run/Pi/OMP runner boundaries; compare against the existing Rust SQLite runner/TUI path using the acceptance checklist in `docs/plans/pi-agent-control-plane.md`
 - control child Pi agents through `pi --mode rpc` by default
 - support Codex child agents through `codex app-server --listen stdio://`
 - expose one stable `symphony_lite`/`symphonyx` API for central Pi orchestrator, TUI, and future GUI
-- make SQLite the source of truth for important state/events; keep sidecar logs opt-in/debug-only
+- make SQLite/ledger state the source of truth for important state/events; keep sidecar logs opt-in/debug-only
 - keep tmux materialization lazy/optional for human attach/debugging
 - implement k9s/lazydocker-style resource views over workflows, subagents, questions, artifacts, and events
 
-### Lane C — Cockpit/tmux session control
+If Elixir wins the spike, it owns orchestration/supervision only; Rust TUI and TypeScript/Pi/web clients remain clients of the same JSON/SQLite/API contract.
+
+#### Packet C — Cockpit/tmux session control
 
 Owner paths:
 
@@ -135,7 +144,7 @@ Tasks:
 - expose attach commands and transcript/session paths
 - support kill/resume/status
 
-### Lane D — Ask Arthur / human-in-loop
+#### Packet D — Ask Arthur / human-in-loop
 
 Owner paths:
 
@@ -149,7 +158,7 @@ Tasks:
 - add non-blocking question queue
 - add timeout/default behavior
 
-### Lane E — Reviewer personas and tool profiles
+#### Packet E — Reviewer personas and tool profiles
 
 Owner paths:
 
@@ -163,7 +172,11 @@ Tasks:
 - add a standard review workflow for diffs/plans
 - test on one real change
 
-### Lane F — Lopopolo/Codex/Symphony corpus
+### Workstream 2: `dream-memory`
+
+Delayed evidence/promotion stream. Skills, docs, lints, and memory are materialized only after evidence and review.
+
+#### Packet F — Lopopolo/Codex/Symphony corpus
 
 Owner paths:
 
@@ -175,9 +188,9 @@ Tasks:
 - archive missing high-signal X/Twitter posts and quote tweets
 - inspect `openai/codex` and `openai/symphony`
 - distill plugin/workflow/persona/permission patterns
-- update this plan with concrete implementation ideas
+- feed concrete implementation ideas into `control-plane-core` or candidate memory
 
-### Lane G — Model/cost benchmark for subagents
+#### Packet G — Model/cost benchmark for subagents
 
 Owner paths:
 
@@ -188,6 +201,7 @@ Tasks:
 - benchmark smaller/cheaper models on reviewer lanes
 - compare subscription-backed Codex/Pi vs direct API cost/quality where measurable
 - record latency, cost, pass/fail quality, and fit by persona/tool profile
+- use results as evidence for `dream-memory` promotion decisions
 
 ## Orchestrator herding loop
 
@@ -202,14 +216,18 @@ The orchestrator should be able to run a lightweight loop across active subagent
 
 Current limitation: in-memory `workflow` subagents cannot be attached/resumed after completion; only their returned result is available. Real herding requires persisted child sessions or tmux/Zellij/Codex/Pi workers registered in cockpit.
 
-## Near-term priority order
+## Active / next packets
 
-1. Keep using current `workflow` for quick fan-out architecture/review.
-2. Add a minimal persisted workflow/run record and child artifact format.
-3. Add `ask_arthur` schema + queue so agents can request input cleanly.
-4. Add reviewer personas + tool profiles.
-5. Add tmux/cockpit child-session spawning for long-lived agents.
-6. Add true fork-current context only after persisted runs/tool profiles are stable.
+These are the current priority packets across workstreams. Status moves in `TASKS.md` during the transition and in the SQLite task metadata ledger once the first import/claim/proof slice is live.
+
+1. **Packet B** (`control-plane-core`): implement the Elixir/OTP substrate spike as the primary path, starting with the centralized task metadata ledger (`task_packets`, `packet_ownership`, `packet_proofs`, `packet_events`), local `TASKS.md` import, packet-ledger source pointers, JSON CLI/API commands, and dry-run/Pi/OMP runner boundaries; keep the Rust/TS path as the comparison baseline only if the spike does not satisfy the acceptance checklist.
+2. **Packet A** (`control-plane-core`): add minimal persisted workflow/run record and child artifact format to the same runtime contract.
+3. **Packet D** (`control-plane-core`): define `ask_arthur` schema + queue so agents can request input cleanly.
+4. **Packet E** (`control-plane-core`): add reviewer personas + tool profiles.
+5. **Packet C** (`control-plane-core`): add tmux/cockpit child-session spawning for long-lived agents.
+6. **Packet F** (`dream-memory`): archive high-signal Lopopolo/Codex/Symphony sources as evidence for later promotion.
+7. **Packet G** (`dream-memory`): start model/cost benchmarks as evidence for promotion decisions.
+8. Add true `fork-current` context only after persisted runs/tool profiles are stable.
 
 ## Open questions
 

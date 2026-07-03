@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite"
-import { existsSync, mkdtempSync, mkdirSync, readFileSync } from "node:fs"
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, resolve } from "node:path"
 import { describe, expect, test } from "bun:test"
@@ -142,6 +142,49 @@ describe("EvalStore daemon annotations and dry-run actions", () => {
     }), evalStore, ugcStore)
 
     expect(response.status).toBe(400)
+  })
+
+  test("rejects unsafe HyperFrames render requests before spawning renderer work", async () => {
+    const { evalStore, ugcStore } = createStores()
+
+    const missingBootstrapField = await route(jsonRequest("/api/ugc/hyperframes/render", {
+      sampleId: "sample-1",
+    }), evalStore, ugcStore)
+    expect(missingBootstrapField.status).toBe(400)
+
+    const unsafeSampleId = await route(jsonRequest("/api/ugc/hyperframes/render", {
+      bootstrapRoot: ".",
+      sampleId: "../sample-1",
+    }), evalStore, ugcStore)
+    expect(unsafeSampleId.status).toBe(400)
+
+    const bootstrapRoot = resolve(evalStore.config.cwd, "bootstrap")
+    mkdirSync(bootstrapRoot, { recursive: true })
+    const missingLayerPlan = await route(jsonRequest("/api/ugc/hyperframes/render", {
+      bootstrapRoot: "bootstrap",
+      sampleId: "sample-1",
+    }), evalStore, ugcStore)
+    expect(missingLayerPlan.status).toBe(404)
+    expect(await missingLayerPlan.json()).toEqual({ error: "birthrate-layer-plan.json not found" })
+
+    const outsideRoot = mkdtempSync(resolve(tmpdir(), "slotok-daemon-outside-"))
+    const outsideBootstrap = await route(jsonRequest("/api/ugc/hyperframes/render", {
+      bootstrapRoot: outsideRoot,
+      sampleId: "sample-1",
+    }), evalStore, ugcStore)
+    expect(outsideBootstrap.status).toBe(403)
+
+    writeFileSync(resolve(bootstrapRoot, "birthrate-layer-plan.json"), "{}")
+    const rendererPath = resolve(evalStore.config.cwd, "packages/hyperframes-renderer/src/render.ts")
+    mkdirSync(dirname(rendererPath), { recursive: true })
+    writeFileSync(rendererPath, "")
+    const missingAudio = await route(jsonRequest("/api/ugc/hyperframes/render", {
+      bootstrapRoot: "bootstrap",
+      sampleId: "sample-1",
+      audio: "missing.wav",
+    }), evalStore, ugcStore)
+    expect(missingAudio.status).toBe(404)
+    expect(await missingAudio.json()).toEqual({ error: "audio not found" })
   })
 })
 

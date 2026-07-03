@@ -1,3 +1,5 @@
+# Rule IDs in this directory include static slop checks; scripts/lint-unsafe-types.boundary.ts
+# ratchets legacy unsafe-type findings plus exact owned React raw-HTML test call text.
 ruleDirs:
   - tools/ast-grep/rules
 testConfigs:

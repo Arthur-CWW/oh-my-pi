@@ -1,16 +1,15 @@
 import { execFile } from "node:child_process"
-import { mkdir, mkdtemp, rm } from "node:fs/promises"
+import { existsSync } from "node:fs"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { parseHTML } from "linkedom"
-import { Readability } from "@mozilla/readability"
 import { createServer } from "node:net"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
-import TurndownService from "turndown"
+import { basename, dirname, join, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
+import { Defuddle } from "defuddle/node"
 import { Effect, Result, Schedule } from "effect"
 import { queryApi, isWebAvailable, queryWeb, isApiAvailable } from "./gemini"
 import { type ExtractedContent, toErrorMessage } from "./schemas"
-
-const turndown = new TurndownService({ headingStyle: "atx", codeBlockStyle: "fenced" })
 
 const HTTP_HEADERS = {
   "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
@@ -25,6 +24,8 @@ const BROWSER_MS = 120_000
 const MAX_CONTENT = 500_000
 
 const EXTRACT = "Extract the complete readable content from this URL as clean markdown. Include the page title, all text content, code blocks, and tables. Do not summarize. URL: "
+const PBS_MEDIA_RE = /https:\/\/pbs\.twimg\.com\/media\/[^\s)"'?]+/g
+const TWITTER_ASSET_ROOT = resolveTwitterAssetRoot()
 
 // ─── Helpers ──────────────────────────────────────────────────────────
 
@@ -85,32 +86,103 @@ export function shouldReturnEarly(httpError: string): boolean {
   return /^HTTP 4/.test(httpError) && !/^HTTP (401|403|429)\b/.test(httpError)
 }
 
-function extractFromHtml(html: string, url: string): ExtractedContent {
-  const article = (() => {
-    try {
-      const { document } = parseHTML(html)
-      return new Readability(document as unknown as Document).parse()
-    } catch {
-      return null
-    }
-  })()
+function findWorkspaceRoot(): string {
+  let dir = dirname(fileURLToPath(import.meta.url))
+  for (;;) {
+    if (existsSync(join(dir, "TASKS.md")) && existsSync(join(dir, "package.json"))) return dir
+    const parent = dirname(dir)
+    if (parent === dir) return process.cwd()
+    dir = parent
+  }
+}
 
-  if (!article) {
-    const bodyText = html.replace(/<script[\s\S]*?<\/script>/gi, "").replace(/<[^>]+>/g, " ").trim()
-    const scripts = (html.match(/<script/gi) || []).length
-    const isJs = !bodyText || (bodyText.length < 500 && scripts > 3)
-    return {
-      url,
-      title: extractTitle(html, url),
-      content: "",
-      error: isJs ? "js-rendered" : "readability-failed",
+function resolveTwitterAssetRoot(): string {
+  const configured = process.env.PI_TWITTER_X_ASSET_ROOT
+  return configured ? resolve(configured) : join(findWorkspaceRoot(), "docs/research/twitter-x/assets")
+}
+
+function isTwitterUrl(url: string): boolean {
+  try {
+    const host = new URL(url).hostname.toLowerCase()
+    return host === "x.com" || host === "twitter.com" || host.endsWith(".x.com") || host.endsWith(".twitter.com")
+  } catch {
+    return false
+  }
+}
+
+function twitterAssetSlug(url: string): string {
+  try {
+    const parsed = new URL(url)
+    const parts = parsed.pathname.split("/").filter(Boolean)
+    const handle = parts[0]?.replace(/^@/, "") ?? "twitter"
+    const status = parts.includes("status") ? parts[parts.indexOf("status") + 1] : parts.at(-1)
+    return `${handle}-${status ?? "post"}`.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 80) || "tweet"
+  } catch {
+    return "tweet"
+  }
+}
+
+function mediaFileName(url: string, contentType: string | null): string {
+  const raw = basename(url).replace(/\?.*/, "")
+  const stem = raw.replace(/\.[^.]+$/, "")
+  const ext = contentType?.includes("png")
+    ? ".png"
+    : contentType?.includes("webp")
+      ? ".webp"
+      : contentType?.includes("gif")
+        ? ".gif"
+        : (raw.match(/\.(jpg|jpeg|png|webp|gif)$/i)?.[0].toLowerCase() ?? ".jpg")
+  return `${stem}${ext}`
+}
+
+async function localizeTwitterImages(markdown: string, slug: string): Promise<string> {
+  const urls = [...new Set(markdown.match(PBS_MEDIA_RE) ?? [])]
+  if (!urls.length) return markdown
+
+  const assetDir = join(TWITTER_ASSET_ROOT, slug)
+  await mkdir(assetDir, { recursive: true })
+
+  const localPaths = new Map<string, string>()
+  await Promise.all(urls.map(async (url) => {
+    try {
+      const response = await fetch(url, {
+        headers: { "User-Agent": HTTP_HEADERS["User-Agent"] },
+        signal: AbortSignal.timeout(15_000),
+      })
+      if (!response.ok) return
+      const fileName = mediaFileName(url, response.headers.get("content-type"))
+      await writeFile(join(assetDir, fileName), Buffer.from(await response.arrayBuffer()))
+      localPaths.set(url, `assets/${slug}/${fileName}`)
+    } catch {
+      // Keep the remote URL if asset capture fails.
     }
+  }))
+
+  let localized = markdown
+  for (const [remote, local] of localPaths) localized = localized.replaceAll(remote, local)
+  return localized
+}
+
+async function extractFromHtml(html: string, url: string): Promise<ExtractedContent> {
+  // Early detection: JS-heavy pages
+  const bodyText = html.replace(/<script[\s\S]*?<\/script>/gi, "").replace(/<[^>]+>/g, " ").trim()
+  const scripts = (html.match(/<script/gi) || []).length
+  const isJs = !bodyText || (bodyText.length < 500 && scripts > 3)
+  if (isJs) {
+    return { url, title: extractTitle(html, url), content: "", error: "js-rendered" }
   }
 
-  const md = turndown.turndown(article.content)
-  const title = article.title || extractTitle(html, url)
-  if (md.length < 100) return { url, title, content: md, error: "incomplete" }
-  return { url, title, content: truncateContent(md), error: null }
+  try {
+    const { document } = parseHTML(html)
+    const result = await Defuddle(document, url, { markdown: true })
+    const title = result.title || extractTitle(html, url)
+    const extracted = result.content || ""
+    const content = truncateContent(process.env.PI_AUTO_LOCALIZE_TWITTER_IMAGES === "0" || !isTwitterUrl(url) ? extracted : await localizeTwitterImages(extracted, twitterAssetSlug(url)))
+    if (content.length < 100) return { url, title, content, error: "incomplete" }
+    return { url, title, content, error: null }
+  } catch {
+    return { url, title: extractTitle(html, url), content: "", error: "defuddle-failed" }
+  }
 }
 
 async function freePort(): Promise<number> {
@@ -238,7 +310,7 @@ async function extractViaBrowserApp(url: string, app: string, signal?: AbortSign
       const snapshot = await waitForExtractableHtml(page, signal)
       if (looksLikeBlockedPage(snapshot.title, snapshot.text, snapshot.html)) return null
 
-      const extracted = extractFromHtml(snapshot.html, url)
+      const extracted = await extractFromHtml(snapshot.html, url)
       if (!extracted.error) return extracted
 
       if (snapshot.text.trim().length > 500) {
@@ -259,7 +331,7 @@ async function extractViaBrowserApp(url: string, app: string, signal?: AbortSign
   }
 }
 
-// ─── HTTP + Readability ───────────────────────────────────────────────
+// ─── HTTP + Defuddle ──────────────────────────────────────────────────
 
 const extractViaHttp = Effect.fn("extractViaHttp")(function* (
   url: string,
@@ -294,7 +366,10 @@ const extractViaHttp = Effect.fn("extractViaHttp")(function* (
     }
   }
 
-  return extractFromHtml(text, url)
+  return yield* Effect.tryPromise({
+    try: () => extractFromHtml(text, url),
+    catch: (err) => ({ url, title: "", content: "", error: toErrorMessage(err) }),
+  })
 })
 
 // ─── Jina Reader fallback ─────────────────────────────────────────────
@@ -412,7 +487,7 @@ const extractOne = Effect.fn("extractOne")(function* (
   return {
     ...http,
     error: http.error
-      ? `${http.error}. Tried Readability, Jina, background browser, Gemini — all unavailable.`
+      ? `${http.error}. Tried Defuddle, Jina, background browser, Gemini — all unavailable.`
       : "Could not extract content",
   }
 })

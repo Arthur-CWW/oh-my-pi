@@ -83,4 +83,38 @@ describe("frontend session store", () => {
     const latest = await resolveFrontendSession("latest", { project: key, provider: "chatgpt" })
     expect(latest?.conversationUrl).toBe("https://chatgpt.com/c/test-second")
   })
+
+  it("lists persisted output paths and Grok recovery metadata", async () => {
+    const id = `test-grok-blocked-${Date.now()}`
+    await saveFrontendSession({
+      blockerReason: "Grok login needs human approval. Run recovery.",
+      conversationUrl: "https://grok.com/share/test-blocked",
+      id,
+      outputPath: "data/research/grok-output.md",
+      prompt: "recover this blocked Grok prompt",
+      provider: "grok",
+      recoveryStep: "pi-llm-browser wait --provider grok --session latest --output-file data/research/grok-output.md",
+      responseText: "",
+      title: "Blocked Grok Prompt",
+    })
+
+    const [listed] = await listFrontendSessions({ provider: "grok", limit: 1 })
+    expect(listed?.id).toBe(id)
+    expect(listed?.outputPath).toBe("data/research/grok-output.md")
+    expect(listed?.blockerReason).toContain("human approval")
+    expect(listed?.recoveryStep).toContain("--output-file data/research/grok-output.md")
+
+    await saveFrontendSession({
+      conversationUrl: listed?.conversationUrl,
+      id,
+      outputPath: listed?.outputPath,
+      prompt: listed?.prompt ?? "recover this blocked Grok prompt",
+      provider: "grok",
+      responseText: "collected response",
+      title: listed?.title,
+    })
+    const resolved = await resolveFrontendSession(id, { provider: "grok" })
+    expect(resolved?.outputPath).toBe("data/research/grok-output.md")
+    expect(resolved?.responseText).toBe("collected response")
+  })
 })

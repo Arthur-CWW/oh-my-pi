@@ -21,7 +21,7 @@ Locked-use mode is **not** a TypeScript-only Pi extension. It requires a reviewe
 - `codex-decomp/docs/computer-use-findings.md` records high-level architecture observations for reference only.
 - `packages/web-access/src/index.ts` shows how this repo registers Pi extension tools.
 - `docs/research/hermes-cua-computer-use.md` records the Hermes Agent / trycua inspection.
-- `packages/web-access/skills/macos-computer-use/SKILL.md` is the current Pi skill for using installed CuaDriver from agent loops.
+- `skills/cua-driver/SKILL.md` is the current Pi skill for using installed CuaDriver from agent loops.
 
 ## 2026-06 CuaDriver / Hermes update
 

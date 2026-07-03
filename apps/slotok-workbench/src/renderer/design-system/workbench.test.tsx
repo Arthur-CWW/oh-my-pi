@@ -1,71 +1,54 @@
 import { describe, expect, test } from "vitest"
 import * as React from "react"
 import { renderToStaticMarkup } from "react-dom/server"
-import { Play } from "lucide-react"
-import { Button } from "../components/ui/button"
-import { Input } from "../components/ui/input"
-import { Select } from "../components/ui/select"
-import {
-  CommandSurface,
-  InspectorPanel,
-  MetricRow,
-  PanelCard,
-  PanelHeader,
-  ScoreMeter,
-  SidebarRow,
-  StatusBadge,
-  ToolbarCluster,
-  WorkbenchCanvas,
-  WorkbenchContent,
-  WorkbenchMain,
-  WorkbenchShell,
-  WorkbenchSidebar,
-  WorkbenchTopbar,
-} from "./workbench"
+import { ReactUgcStudio } from "../ReactUgcStudio"
+
+const stableWorkbenchTokens = {
+  shell: ["grid", "h-dvh", "min-h-0", "overflow-hidden", "bg-background", "text-foreground"],
+  content: ["grid", "min-h-0", "flex-1", "overflow-hidden"],
+  commandSurface: ["overflow-hidden", "border-zinc-200", "bg-white/95", "shadow-md", "backdrop-blur-md", "p-2", "flex", "items-end", "rounded-xl"],
+  commandTextarea: ["min-h-10", "min-w-0", "flex-1", "border-0", "bg-transparent", "focus-visible:ring-0"],
+} as const
+
+function stableClassTokens(html: string, pattern: RegExp, expectedTokens: readonly string[]): readonly string[] {
+  const className = html.match(pattern)?.[1]
+  expect(className).toBeDefined()
+  const tokens = new Set(className!.split(/\s+/))
+  const stableTokens = expectedTokens.filter((token) => tokens.has(token))
+  expect(stableTokens).toEqual(expectedTokens)
+  return stableTokens
+}
+
+function stableCopy(html: string, text: string): string {
+  expect(html).toContain(text)
+  return text
+}
+
 
 describe("UGC workbench design system", () => {
-  test("renders stable shell, primitive, and composed component variants", () => {
+  test("asserts focused workbench invariants from the real provider surface", () => {
     const html = renderToStaticMarkup(
-      <WorkbenchShell>
-        <WorkbenchSidebar>
-          <SidebarRow active icon={<Play size={12} />} shortcut="ga" count={3}>Persona Atlas</SidebarRow>
-        </WorkbenchSidebar>
-        <WorkbenchMain>
-          <WorkbenchTopbar>
-            <ToolbarCluster>
-              <Button size="xs" variant="workbench">Board</Button>
-              <Button size="xs" variant="ghost">Table</Button>
-            </ToolbarCluster>
-          </WorkbenchTopbar>
-          <WorkbenchContent>
-            <WorkbenchCanvas>
-              <PanelCard tone="selected">
-                <PanelHeader eyebrow="Workspace" title="Exploration Board" actions={<StatusBadge tone="agent">Agent ready</StatusBadge>} />
-                <Input value="Korean-beauty fitness lane" readOnly />
-                <Select value="dry-run" disabled>
-                  <option value="dry-run">Dry run</option>
-                </Select>
-                <ScoreMeter label="Hook strength" value={82} tone="success" />
-              </PanelCard>
-              <CommandSurface
-                value="Generate 8 warmer hooks"
-                onValueChange={() => undefined}
-                leading={<Play size={12} />}
-                actions={<Button size="xs" variant="subtle">Targets</Button>}
-                runButton={<Button size="icon-sm"><Play size={12} /></Button>}
-              />
-            </WorkbenchCanvas>
-            <InspectorPanel>
-              <MetricRow label="Status" value="Local-first" tone="success" />
-            </InspectorPanel>
-          </WorkbenchContent>
-        </WorkbenchMain>
-      </WorkbenchShell>,
+      React.createElement(ReactUgcStudio, { initialView: "provider" }),
     )
 
-    expect(html).toContain("Persona Atlas")
-    expect(html).toContain("Exploration Board")
-    expect(html).toContain("Generate 8 warmer hooks")
-    expect(html).toMatchSnapshot()
+    expect({
+      copy: {
+        activeNavigation: stableCopy(html, "KIE Proxy"),
+        panelEyebrow: stableCopy(html, "Local provider controls"),
+        panelTitle: stableCopy(html, "KIE route controls"),
+        providerQueue: stableCopy(html, "Provider jobs"),
+        localBoundary: stableCopy(html, "Default action prepares local dry-run JSON"),
+        liveBoundary: stableCopy(html, "Send live ($0.05 cap)"),
+        commandPrompt: stableCopy(html, "Make the selected personas less polished and generate 8 warmer hooks"),
+      },
+      layout: {
+        shell: stableClassTokens(html, /<main class="([^"]+)"/, stableWorkbenchTokens.shell),
+        content: stableClassTokens(html, /<div class="([^"]*flex-1[^"]*overflow-hidden[^"]*)"/, stableWorkbenchTokens.content),
+      },
+      commandSurface: {
+        surface: stableClassTokens(html, /<div data-ugc-command-surface="true" class="([^"]+)"/, stableWorkbenchTokens.commandSurface),
+        textarea: stableClassTokens(html, /<textarea class="([^"]+)"/, stableWorkbenchTokens.commandTextarea),
+      },
+    }).toMatchSnapshot()
   })
 })

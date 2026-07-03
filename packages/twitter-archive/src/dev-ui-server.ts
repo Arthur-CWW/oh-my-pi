@@ -1,4 +1,5 @@
 import { Database } from "bun:sqlite"
+import { fileURLToPath } from "node:url"
 import { mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises"
 import { dirname, extname, isAbsolute, join, relative, resolve } from "node:path"
 
@@ -14,7 +15,7 @@ import {
 } from "./effect-services"
 import type { JsonlLogDetails, JsonlLogLevel, JsonlLogValue } from "./jsonl-log"
 import type { ArchiveMedia, ArchiveTweet, ArchiveUser } from "./schema"
-import { TwitterArchiveSqliteStore, initTwitterArchiveSqliteStore, type SqliteArchiveJob, type SqliteArchiveJobStatus, type SqliteArchiveJobTargetType, type SqliteCaptureJob, type SqliteInteractionSignalInput } from "./sqlite-store"
+import { TwitterArchiveSqliteStore, initTwitterArchiveSqliteStore, type SqliteArchiveJob, type SqliteArchiveJobStatus, type SqliteArchiveJobTargetType, type SqliteCaptureJob, type SqliteInteractionSignalInput, type SqliteSocialGraphAccountInput } from "./sqlite-store"
 import { stableId } from "./normalize"
 import { DEV_UI_STYLES } from "./dev-ui-styles"
 
@@ -31,6 +32,7 @@ export interface DevUiServerOptions {
   readonly env?: TwitterArchiveConfigEnv
   readonly hostname?: string
   readonly clientEntryPath?: string
+  readonly watchHandles?: ReadonlySet<string>
 }
 
 export interface RunningDevUiServer {
@@ -218,6 +220,14 @@ type TweetAttributeInput = Schema.Schema.Type<typeof TweetAttributeInputSchema>
 type ArchiveJobInput = Schema.Schema.Type<typeof ArchiveJobInputSchema>
 
 const X_BOOKMARK_SYNC_SOURCE_LANE = "x-bookmark-sync-devtools"
+const WEBEXTENSION_FOLLOWING_SYNC_SOURCE = "webextension-following-sync"
+const FOLLOWING_PROFILE_JOB_LIMIT = 250
+const FOLLOWING_PROFILE_JOB_PRIORITY = 1
+const STATUS_REFERENCE_PRIORITY = 5
+const FOLLOWED_AUTHOR_STATUS_PRIORITY = 6
+const WATCHED_HANDLE_THREAD_STATUS_PRIORITY = 7
+const FOLLOWED_REPLY_TO_WATCHED_HANDLE_STATUS_PRIORITY = 8
+const LONG_POST_STATUS_PRIORITY = 9
 
 interface XBookmarkSyncSnapshotInput {
   readonly source: Record<string, JsonSafeValue>
@@ -247,6 +257,7 @@ interface XBookmarkSyncCaptureInput {
   readonly timing?: Record<string, JsonSafeValue>
   readonly tags: readonly string[]
   readonly tweetLike: readonly XBookmarkSyncTweetLikeRecord[]
+  readonly followingAccounts?: readonly FollowingAccountRecord[]
   readonly json?: JsonSafeValue
   readonly body?: string
   readonly parseError?: string
@@ -261,6 +272,21 @@ interface XBookmarkSyncTweetLikeRecord {
   readonly screen_name?: string
   readonly path?: string
   readonly url?: string
+  readonly has_read_more?: boolean
+  readonly is_long_post_candidate?: boolean
+  readonly in_reply_to_screen_name?: string
+  readonly in_reply_to_status_id_str?: string
+  readonly conversation_id_str?: string
+  readonly quoted_status_id_str?: string
+  readonly quoted_status_screen_name?: string
+  readonly quoted_status_url?: string
+}
+
+interface FollowingAccountRecord {
+  readonly username: string
+  readonly displayName?: string
+  readonly profileUrl?: string
+  readonly avatarUrl?: string
 }
 
 interface XBookmarkSyncSignalInput {
@@ -286,6 +312,9 @@ interface XBookmarkSyncIngestSummary {
   readonly archiveJobsEnqueued: number
   readonly markdownFilesWritten: number
   readonly signalsReceived: number
+  readonly followingEdgesAdded?: number
+  readonly followedProfileJobsEnqueued?: number
+  readonly longPostStatusJobsEnqueued?: number
 }
 
 
@@ -298,6 +327,25 @@ interface XBookmarkSyncMarkdownEntry {
   readonly capturedAt: string
   readonly requestUrl?: string
   readonly provenance: Record<string, JsonSafeValue>
+  readonly longPostCandidate?: boolean
+}
+
+type XBookmarkSyncStatusJobReason =
+  | "status-reference"
+  | "long-post-read-more"
+  | "followed-author"
+  | "followed-reply-to-watched-handle"
+  | "quote-status-reference"
+  | "watched-handle-thread"
+
+interface XBookmarkSyncStatusJobContext {
+  reasons: Set<XBookmarkSyncStatusJobReason>
+  priority: number
+  details: Record<string, JsonSafeValue | undefined>
+}
+
+interface FollowedUsernameRow {
+  readonly username: string
 }
 
 type JsonSafeValue = null | string | number | boolean | readonly JsonSafeValue[] | { readonly [key: string]: JsonSafeValue }
@@ -361,6 +409,9 @@ interface TweetAttributeRow {
   readonly updated_at: string
 }
 
+const SQL_WASM_BROWSER_PATH = fileURLToPath(import.meta.resolve("sql.js/dist/sql-wasm-browser.wasm"))
+const SQL_WASM_PATH = fileURLToPath(import.meta.resolve("sql.js/dist/sql-wasm.wasm"))
+
 const localApiHeaders = {
   "Access-Control-Allow-Headers": "Content-Type",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
@@ -384,6 +435,16 @@ const cssHeaders = {
   "Content-Type": "text/css; charset=utf-8",
 }
 
+const wasmHeaders = {
+  "Cache-Control": "no-store",
+  "Content-Type": "application/wasm",
+}
+
+const octetStreamHeaders = {
+  "Cache-Control": "no-store",
+  "Content-Type": "application/octet-stream",
+}
+
 const DEV_UI_HEALTH_RESPONSE = {
   ok: true,
   service: "twitter-archive-dev-ui",
@@ -396,14 +457,22 @@ export const startDevUiServer = Effect.fn("startDevUiServer")(function*(options:
   const logger = makeTwitterArchiveJsonlLogger(config.logPath)
   const hostname = options.hostname ?? firstNonEmpty(process.env.TWITTER_ARCHIVE_DEV_HOST, process.env.HOST) ?? DEFAULT_DEV_UI_HOSTNAME
 
-  return yield* Effect.provide(startDevUiServerFromServices(hostname, options.clientEntryPath), [
-    Layer.succeed(TwitterArchiveConfig, config),
-    Layer.succeed(TwitterArchiveJsonlLogger, logger),
-  ])
+  return yield* Effect.provide(
+    startDevUiServerFromServices(
+      hostname,
+      mergeWatchedHandles(parseWatchedHandles(env.TWITTER_ARCHIVE_WATCH_HANDLES), options.watchHandles),
+      options.clientEntryPath,
+    ),
+    [
+      Layer.succeed(TwitterArchiveConfig, config),
+      Layer.succeed(TwitterArchiveJsonlLogger, logger),
+    ],
+  )
 })
 
 const startDevUiServerFromServices = Effect.fn("startDevUiServerFromServices")(function*(
   hostname: string,
+  watchedHandles: ReadonlySet<string>,
   clientEntryPath?: string,
 ) {
   const config = yield* TwitterArchiveConfig
@@ -420,8 +489,8 @@ const startDevUiServerFromServices = Effect.fn("startDevUiServerFromServices")(f
       schemaStore.close()
 
       const clientScript = await buildDevUiClient(clientEntryPath ?? join(import.meta.dir, "dev-ui-client.ts"))
-      const dataSource = new DevUiDataSource(config.dbPath, config.logPath, config.mediaRoot, config.markdownRoot)
-      const requestHandler = createRequestHandler(dataSource, clientScript, logger, config.mediaRoot)
+      const dataSource = new DevUiDataSource(config.dbPath, config.logPath, config.mediaRoot, config.markdownRoot, watchedHandles)
+      const requestHandler = createRequestHandler(dataSource, clientScript, logger, config.mediaRoot, config.dbPath)
       const server = Bun.serve({
         hostname,
         port: config.port,
@@ -461,6 +530,7 @@ function createRequestHandler(
   clientScript: string,
   logger: TwitterArchiveJsonlLoggerService,
   mediaRoot: string,
+  dbPath: string,
 ): (request: Request) => Response | Promise<Response> {
   return async (request: Request) => {
     const url = new URL(request.url)
@@ -476,6 +546,15 @@ function createRequestHandler(
 
       if (request.method === "GET" && url.pathname === "/assets/dev-ui.css") {
         return new Response(DEV_UI_STYLES, { headers: cssHeaders })
+      }
+
+      if (request.method === "GET" && url.pathname === "/data/twitter-archive.sqlite") {
+        const dbBytes = await readFile(dbPath)
+        return new Response(dbBytes, { headers: octetStreamHeaders })
+      }
+      if (request.method === "GET" && (url.pathname === "/assets/sql-wasm.wasm" || url.pathname === "/assets/sql-wasm-browser.wasm")) {
+        const wasmBytes = await readFile(url.pathname.endsWith("sql-wasm-browser.wasm") ? SQL_WASM_BROWSER_PATH : SQL_WASM_PATH)
+        return new Response(wasmBytes, { headers: wasmHeaders })
       }
 
       if (request.method === "GET" && url.pathname === "/media-file") {
@@ -592,6 +671,7 @@ class DevUiDataSource {
     private readonly logPath: string,
     private readonly mediaRoot: string,
     private readonly markdownRoot: string,
+    private readonly watchedHandles: ReadonlySet<string>,
   ) {
     this.db = new Database(dbPath)
     this.initAnnotationTables()
@@ -819,11 +899,17 @@ class DevUiDataSource {
   async ingestXBookmarkSyncSnapshot(snapshot: XBookmarkSyncSnapshotInput): Promise<XBookmarkSyncIngestSummary> {
     const store = new TwitterArchiveSqliteStore(this.db)
     const statusUrls = new Map<string, XBookmarkSyncMarkdownEntry>()
+    const statusJobContexts = new Map<string, XBookmarkSyncStatusJobContext>()
     const tweetRecords = new Map<string, { record: XBookmarkSyncTweetLikeRecord; capture: XBookmarkSyncCaptureInput; url: string; capturedAt: string }>()
     const usersToUpsert = new Map<string, ArchiveUser>()
+    const followedUsernames = this.followedUsernamesFromSocialGraph()
     let rawPagesStored = 0
     let tweetLikeRecordsFound = 0
     let signalsReceived = 0
+    let followingEdgesAdded = 0
+    let followedProfileJobsEnqueued = 0
+    let longPostStatusJobsEnqueued = 0
+    let archiveJobsEnqueued = 0
     for (const signal of snapshot.signals ?? []) {
       const pageUrl = signal.pageUrl ?? signal.sourceUrl
       if (!pageUrl) {
@@ -866,6 +952,69 @@ class DevUiDataSource {
         signalsReceived += 1
       }
 
+      if (capture.followingAccounts && capture.followingAccounts.length > 0) {
+        const sourceUsername = followingSourceUsernameFromUrl(storedRequestUrl)
+        if (sourceUsername) {
+          const provenance = ingestProvenance(snapshot, capture)
+          const importResult = store.upsertSocialGraphImport({
+            sourceAccount: socialGraphAccountFromUsername(sourceUsername, capturedAt),
+            targetAccounts: capture.followingAccounts.map((account) =>
+              socialGraphAccountFromFollowingRecord(account, capturedAt),
+            ),
+            relation: "following",
+            sourceLane: X_BOOKMARK_SYNC_SOURCE_LANE,
+            observedAt: capturedAt,
+            provenance,
+          })
+          followingEdgesAdded += importResult.edgesUpserted
+          for (const account of capture.followingAccounts) {
+            const username = normalizeUsername(account.username)
+            if (username) {
+              followedUsernames.add(username.toLowerCase())
+            }
+          }
+          store.enqueueArchiveJob({
+            sourceLane: X_BOOKMARK_SYNC_SOURCE_LANE,
+            targetType: "following",
+            targetValue: sourceUsername,
+            priority: 3,
+            provenance: followAwareJobProvenance(provenance, "following-import", {
+              followAwareSource: WEBEXTENSION_FOLLOWING_SYNC_SOURCE,
+              sourceUsername,
+            }),
+          })
+          archiveJobsEnqueued += 1
+
+          for (const account of uniqueFollowingAccounts(capture.followingAccounts).slice(0, FOLLOWING_PROFILE_JOB_LIMIT)) {
+            const username = normalizeUsername(account.username)
+            if (!username) {
+              continue
+            }
+            store.enqueueArchiveJob({
+              id: archiveJobId(X_BOOKMARK_SYNC_SOURCE_LANE, "profile", username),
+              sourceLane: X_BOOKMARK_SYNC_SOURCE_LANE,
+              targetType: "profile",
+              targetValue: username,
+              priority: FOLLOWING_PROFILE_JOB_PRIORITY,
+              options: followAwareJobOptions("following-imported-account", {
+                source: WEBEXTENSION_FOLLOWING_SYNC_SOURCE,
+                maxPages: 1,
+                profileJobLimit: FOLLOWING_PROFILE_JOB_LIMIT,
+                username,
+              }),
+              provenance: followAwareJobProvenance(provenance, "following-imported-account", {
+                followAwareSource: WEBEXTENSION_FOLLOWING_SYNC_SOURCE,
+                importedFollowingUsername: username,
+                sourceUsername,
+                profileJobLimit: FOLLOWING_PROFILE_JOB_LIMIT,
+              }),
+            })
+            archiveJobsEnqueued += 1
+            followedProfileJobsEnqueued += 1
+          }
+        }
+      }
+
       for (const url of extractStatusUrlsFromCapture(capture)) {
         statusUrls.set(url, {
           id: statusIdFromUrl(url) ?? stableId([url]).slice(0, 16),
@@ -876,6 +1025,21 @@ class DevUiDataSource {
           requestUrl: storedRequestUrl,
           provenance: ingestProvenance(snapshot, capture),
         })
+        addStatusJobReason(statusJobContexts, url, "status-reference", STATUS_REFERENCE_PRIORITY, {
+          statusUrlSource: "capture",
+        })
+        const statusUsername = statusUsernameFromUrl(url)
+        if (isFollowedUsername(followedUsernames, statusUsername)) {
+          addStatusJobReason(statusJobContexts, url, "followed-author", FOLLOWED_AUTHOR_STATUS_PRIORITY, {
+            authorUsername: statusUsername,
+            followAwareSource: WEBEXTENSION_FOLLOWING_SYNC_SOURCE,
+          })
+        }
+        if (isWatchedHandle(this.watchedHandles, statusUsername)) {
+          addStatusJobReason(statusJobContexts, url, "watched-handle-thread", WATCHED_HANDLE_THREAD_STATUS_PRIORITY, {
+            watchedHandle: normalizeUsername(statusUsername)?.toLowerCase(),
+          })
+        }
       }
 
       const extractedTweetLikeRecords = extractTweetLikeRecordsFromCapture(capture)
@@ -893,6 +1057,7 @@ class DevUiDataSource {
         if (!tweetRecords.has(key)) {
           tweetRecords.set(key, { record, capture, url, capturedAt })
         }
+        const provenance = ingestProvenance(snapshot, capture, record)
         statusUrls.set(url, {
           id: tweetId,
           username,
@@ -901,8 +1066,54 @@ class DevUiDataSource {
           source: X_BOOKMARK_SYNC_SOURCE_LANE,
           capturedAt,
           requestUrl: storedRequestUrl,
-          provenance: ingestProvenance(snapshot, capture, record),
+          provenance,
+          longPostCandidate: isLongPostCandidateRecord(record),
         })
+
+        if (isLongPostCandidateRecord(record)) {
+          addStatusJobReason(statusJobContexts, url, "long-post-read-more", LONG_POST_STATUS_PRIORITY, {
+            authorUsername: username,
+            hasReadMore: record.has_read_more,
+            isLongPostCandidate: record.is_long_post_candidate,
+          })
+        }
+        if (isFollowedUsername(followedUsernames, username)) {
+          addStatusJobReason(statusJobContexts, url, "followed-author", FOLLOWED_AUTHOR_STATUS_PRIORITY, {
+            authorUsername: username,
+            followAwareSource: WEBEXTENSION_FOLLOWING_SYNC_SOURCE,
+          })
+        }
+        const replyTargetUsername = normalizeUsername(record.in_reply_to_screen_name)
+        if (isFollowedUsername(followedUsernames, username) && isWatchedHandle(this.watchedHandles, replyTargetUsername)) {
+          addStatusJobReason(statusJobContexts, url, "followed-reply-to-watched-handle", FOLLOWED_REPLY_TO_WATCHED_HANDLE_STATUS_PRIORITY, {
+            authorUsername: username,
+            replyToUsername: normalizeUsername(replyTargetUsername)?.toLowerCase(),
+            replyToStatusId: record.in_reply_to_status_id_str,
+            followAwareSource: WEBEXTENSION_FOLLOWING_SYNC_SOURCE,
+          })
+        }
+        if (isWatchedHandle(this.watchedHandles, username)) {
+          addStatusJobReason(statusJobContexts, url, "watched-handle-thread", WATCHED_HANDLE_THREAD_STATUS_PRIORITY, {
+            watchedHandle: username.toLowerCase(),
+          })
+        }
+        for (const quotedStatusUrl of quotedStatusUrlsFromTweetRecord(record)) {
+          const quoteProvenance = followAwareJobProvenance(provenance, "quote-status-reference", {
+            quoteSourceStatusUrl: url,
+          })
+          statusUrls.set(quotedStatusUrl, {
+            id: statusIdFromUrl(quotedStatusUrl) ?? stableId([quotedStatusUrl]).slice(0, 16),
+            username: statusUsernameFromUrl(quotedStatusUrl),
+            url: quotedStatusUrl,
+            source: X_BOOKMARK_SYNC_SOURCE_LANE,
+            capturedAt,
+            requestUrl: storedRequestUrl,
+            provenance: quoteProvenance,
+          })
+          addStatusJobReason(statusJobContexts, quotedStatusUrl, "quote-status-reference", STATUS_REFERENCE_PRIORITY, {
+            quoteSourceStatusUrl: url,
+          })
+        }
       }
     }
 
@@ -948,16 +1159,30 @@ class DevUiDataSource {
       })
     }
 
-    let archiveJobsEnqueued = 0
     for (const [url, entry] of statusUrls) {
+      const context = statusJobContexts.get(url) ?? fallbackStatusJobContext()
+      const reasons = [...context.reasons]
+      const primaryReason = primaryStatusJobReason(context)
       store.enqueueArchiveJob({
+        id: archiveJobId(X_BOOKMARK_SYNC_SOURCE_LANE, "status", url),
         sourceLane: X_BOOKMARK_SYNC_SOURCE_LANE,
         targetType: "status",
         targetValue: url,
-        priority: 5,
-        provenance: entry.provenance,
+        priority: context.priority,
+        options: followAwareJobOptions(primaryReason, {
+          archiveJobReasons: reasons,
+          username: statusUsernameFromUrl(url),
+          ...context.details,
+        }),
+        provenance: followAwareJobProvenance(entry.provenance, primaryReason, {
+          archiveJobReasons: reasons,
+          ...context.details,
+        }),
       })
       archiveJobsEnqueued += 1
+      if (entry.longPostCandidate) {
+        longPostStatusJobsEnqueued += 1
+      }
     }
 
     const markdownFilesWritten = await writeXBookmarkSyncMarkdown([...statusUrls.values()], this.markdownBookmarksDir())
@@ -968,7 +1193,31 @@ class DevUiDataSource {
       archiveJobsEnqueued,
       markdownFilesWritten,
       signalsReceived,
+      followingEdgesAdded: followingEdgesAdded > 0 ? followingEdgesAdded : undefined,
+      followedProfileJobsEnqueued: followedProfileJobsEnqueued > 0 ? followedProfileJobsEnqueued : undefined,
+      longPostStatusJobsEnqueued: longPostStatusJobsEnqueued > 0 ? longPostStatusJobsEnqueued : undefined,
     }
+  }
+
+  private followedUsernamesFromSocialGraph(): Set<string> {
+    const rows = this.db
+      .prepare(
+        `SELECT DISTINCT target.username AS username
+         FROM social_graph_edges edge
+         INNER JOIN social_graph_nodes target
+           ON target.account_key = edge.target_account_key
+         WHERE edge.relation = 'following'
+           AND edge.import_status = 'imported'`,
+      )
+      .all() as FollowedUsernameRow[]
+    const usernames = new Set<string>()
+    for (const row of rows) {
+      const username = normalizeUsername(row.username)
+      if (username) {
+        usernames.add(username.toLowerCase())
+      }
+    }
+    return usernames
   }
 
   private markdownBookmarksDir(): string {
@@ -1474,11 +1723,39 @@ function decodeXBookmarkSyncCapture(value: JsonSafeValue): XBookmarkSyncCaptureI
         ? ["visible-tweets"]
         : [],
     tweetLike: mergeTweetLikeRecords(explicitTweetLikeRecords, visibleTweetRecords),
+    followingAccounts: decodeFollowingAccounts(value.followingAccounts),
     json: value.json ?? lightweightCaptureJson(requestUrl, value.visibleTweets),
     body: stringField(value, "body"),
     parseError: stringField(value, "parseError"),
     signals: decodeXBookmarkSyncSignals(value.signals),
   }
+}
+
+function decodeFollowingAccounts(value: JsonSafeValue | undefined): FollowingAccountRecord[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined
+  }
+  const accounts: FollowingAccountRecord[] = []
+  for (const item of value) {
+    if (!isRecord(item)) {
+      continue
+    }
+    const username = firstNonEmpty(
+      stringField(item, "username"),
+      stringField(item, "screen_name"),
+      stringField(item, "handle"),
+    )
+    if (!username) {
+      continue
+    }
+    accounts.push({
+      username: normalizeUsername(username) ?? username,
+      displayName: stringField(item, "displayName") ?? stringField(item, "display_name") ?? undefined,
+      profileUrl: stringField(item, "profileUrl") ?? stringField(item, "profile_url") ?? undefined,
+      avatarUrl: stringField(item, "avatarUrl") ?? stringField(item, "avatar_url") ?? undefined,
+    })
+  }
+  return accounts.length > 0 ? accounts : undefined
 }
 
 function decodeVisibleTweetRecords(value: JsonSafeValue | undefined): XBookmarkSyncTweetLikeRecord[] {
@@ -1593,6 +1870,40 @@ function visibleTweetLikeRecordFromJson(value: JsonSafeValue, path: string): XBo
     ),
     path: record?.path ?? path,
     url,
+    has_read_more: record?.has_read_more ?? booleanField(value, "hasReadMore") ?? booleanField(value, "has_read_more") ?? undefined,
+    is_long_post_candidate: record?.is_long_post_candidate ?? booleanField(value, "isLongPostCandidate") ?? booleanField(value, "is_long_post_candidate") ?? undefined,
+    in_reply_to_screen_name: firstNonEmpty(
+      record?.in_reply_to_screen_name,
+      stringField(value, "replyToUsername"),
+      stringField(value, "replyToHandle"),
+      stringField(value, "inReplyToScreenName"),
+      stringField(value, "in_reply_to_screen_name"),
+      stringField(recordField(value, "replyTo"), "username"),
+      stringField(recordField(value, "replyTo"), "screen_name"),
+    ),
+    in_reply_to_status_id_str: firstNonEmpty(
+      record?.in_reply_to_status_id_str,
+      scalarStringField(value, "replyToTweetId"),
+      scalarStringField(value, "inReplyToStatusId"),
+      scalarStringField(value, "in_reply_to_status_id_str"),
+      statusIdFromUrl(firstNonEmpty(stringField(value, "replyToUrl"), stringField(recordField(value, "replyTo"), "url")) ?? ""),
+    ),
+    conversation_id_str: firstNonEmpty(record?.conversation_id_str, scalarStringField(value, "conversationId"), scalarStringField(value, "conversation_id_str")),
+    quoted_status_id_str: firstNonEmpty(record?.quoted_status_id_str, scalarStringField(value, "quotedStatusId"), scalarStringField(value, "quoted_status_id_str")),
+    quoted_status_screen_name: firstNonEmpty(
+      record?.quoted_status_screen_name,
+      stringField(value, "quotedStatusUsername"),
+      stringField(value, "quotedStatusHandle"),
+      stringField(recordField(value, "quotedStatus"), "username"),
+      stringField(recordField(value, "quotedStatus"), "screen_name"),
+    ),
+    quoted_status_url: firstNonEmpty(
+      record?.quoted_status_url,
+      stringField(value, "quotedStatusUrl"),
+      stringField(value, "quoteStatusUrl"),
+      stringField(value, "quoteUrl"),
+      stringField(recordField(value, "quotedStatus"), "url"),
+    ),
   }
 }
 
@@ -1625,19 +1936,22 @@ function tweetLikeRecordFromJson(value: JsonSafeValue): XBookmarkSyncTweetLikeRe
   if (!isRecord(value)) {
     return undefined
   }
+  const legacy = recordField(value, "legacy")
   const fullText = firstNonEmpty(
     stringField(value, "full_text"),
-    stringField(recordField(value, "legacy"), "full_text"),
+    stringField(legacy, "full_text"),
     stringField(value, "text"),
   )
   if (!fullText) {
     return undefined
   }
+  const quotedStatus = recordField(value, "quoted_status") ?? recordField(value, "quotedStatus")
+  const quotedStatusPermalink = recordField(value, "quoted_status_permalink") ?? recordField(value, "quotedStatusPermalink")
   return {
     rest_id: firstNonEmpty(scalarStringField(value, "rest_id"), scalarStringField(value, "id")),
-    id_str: firstNonEmpty(scalarStringField(value, "id_str"), scalarStringField(recordField(value, "legacy"), "id_str")),
+    id_str: firstNonEmpty(scalarStringField(value, "id_str"), scalarStringField(legacy, "id_str")),
     full_text: fullText,
-    created_at: firstNonEmpty(stringField(value, "created_at"), stringField(recordField(value, "legacy"), "created_at")),
+    created_at: firstNonEmpty(stringField(value, "created_at"), stringField(legacy, "created_at")),
     screen_name: firstNonEmpty(
       stringField(value, "screen_name"),
       stringField(recordField(recordField(recordField(value, "core"), "user_results"), "result"), "screen_name"),
@@ -1649,6 +1963,48 @@ function tweetLikeRecordFromJson(value: JsonSafeValue): XBookmarkSyncTweetLikeRe
     ),
     path: stringField(value, "path"),
     url: stringField(value, "url"),
+    has_read_more: booleanField(value, "has_read_more") ?? booleanField(value, "hasReadMore") ?? undefined,
+    is_long_post_candidate: booleanField(value, "is_long_post_candidate") ?? booleanField(value, "isLongPostCandidate") ?? undefined,
+    in_reply_to_screen_name: firstNonEmpty(
+      stringField(value, "in_reply_to_screen_name"),
+      stringField(legacy, "in_reply_to_screen_name"),
+      stringField(value, "replyToUsername"),
+      stringField(value, "replyToHandle"),
+      stringField(value, "inReplyToScreenName"),
+      stringField(recordField(value, "replyTo"), "username"),
+      stringField(recordField(value, "replyTo"), "screen_name"),
+    ),
+    in_reply_to_status_id_str: firstNonEmpty(
+      scalarStringField(value, "in_reply_to_status_id_str"),
+      scalarStringField(legacy, "in_reply_to_status_id_str"),
+      scalarStringField(value, "replyToTweetId"),
+      scalarStringField(value, "inReplyToStatusId"),
+    ),
+    conversation_id_str: firstNonEmpty(scalarStringField(value, "conversation_id_str"), scalarStringField(legacy, "conversation_id_str"), scalarStringField(value, "conversationId")),
+    quoted_status_id_str: firstNonEmpty(
+      scalarStringField(value, "quoted_status_id_str"),
+      scalarStringField(legacy, "quoted_status_id_str"),
+      scalarStringField(quotedStatus, "id_str"),
+      scalarStringField(quotedStatus, "rest_id"),
+      scalarStringField(value, "quotedStatusId"),
+    ),
+    quoted_status_screen_name: firstNonEmpty(
+      stringField(value, "quoted_status_screen_name"),
+      stringField(quotedStatus, "screen_name"),
+      stringField(recordField(quotedStatus, "user"), "screen_name"),
+      stringField(recordField(recordField(quotedStatus, "user"), "legacy"), "screen_name"),
+      stringField(value, "quotedStatusUsername"),
+      stringField(value, "quotedStatusHandle"),
+    ),
+    quoted_status_url: firstNonEmpty(
+      stringField(value, "quoted_status_url"),
+      stringField(value, "quotedStatusUrl"),
+      stringField(value, "quoteStatusUrl"),
+      stringField(value, "quoteUrl"),
+      stringField(quotedStatusPermalink, "expanded"),
+      stringField(quotedStatusPermalink, "url"),
+      stringField(quotedStatus, "url"),
+    ),
   }
 }
 
@@ -1795,6 +2151,196 @@ function tweetLikeId(record: XBookmarkSyncTweetLikeRecord): string | undefined {
   return id && /^\d+$/.test(id) ? id : undefined
 }
 
+function followingSourceUsernameFromUrl(url: string): string | undefined {
+  try {
+    const segments = new URL(url).pathname.split("/").filter(Boolean)
+    const followingIndex = segments.findIndex((segment) => segment === "following")
+    const username = followingIndex > 0 ? normalizeUsername(segments[followingIndex - 1]) : undefined
+    return username && username.toLowerCase() !== "web" && username.toLowerCase() !== "i" ? username : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function socialGraphAccountFromFollowingRecord(record: FollowingAccountRecord, observedAt: string): SqliteSocialGraphAccountInput {
+  return {
+    username: normalizeUsername(record.username) ?? record.username,
+    displayName: record.displayName,
+    profileUrl: record.profileUrl,
+    avatarUrl: record.avatarUrl,
+    observedAt,
+  }
+}
+
+function socialGraphAccountFromUsername(username: string, observedAt: string): SqliteSocialGraphAccountInput {
+  const normalized = normalizeUsername(username) ?? username
+  return {
+    username: normalized,
+    profileUrl: `https://x.com/${normalized}`,
+    observedAt,
+  }
+}
+
+function isLongPostCandidateRecord(record: XBookmarkSyncTweetLikeRecord): boolean {
+  return record.has_read_more === true || record.is_long_post_candidate === true
+}
+
+function statusUrlFromTweetRecord(record: XBookmarkSyncTweetLikeRecord): string | undefined {
+  const tweetId = tweetLikeId(record)
+  const username = normalizeUsername(record.screen_name)
+  if (!tweetId || !username) {
+    return undefined
+  }
+  return normalizeStatusUrl(record.url) ?? `https://x.com/${username}/status/${tweetId}`
+}
+
+function quotedStatusUrlsFromTweetRecord(record: XBookmarkSyncTweetLikeRecord): string[] {
+  const urls = new Set<string>()
+  addNormalizedStatusUrl(urls, record.quoted_status_url)
+  const quotedStatusId = record.quoted_status_id_str
+  const quotedUsername = normalizeUsername(record.quoted_status_screen_name)
+  if (quotedStatusId && /^\d+$/.test(quotedStatusId) && quotedUsername) {
+    urls.add(`https://x.com/${quotedUsername}/status/${quotedStatusId}`)
+  }
+  return [...urls]
+}
+
+function isFollowedUsername(followedUsernames: ReadonlySet<string>, username: string | undefined): boolean {
+  const normalized = normalizeUsername(username)
+  return normalized ? followedUsernames.has(normalized.toLowerCase()) : false
+}
+
+function isWatchedHandle(watchedHandles: ReadonlySet<string>, username: string | undefined): boolean {
+  const normalized = normalizeUsername(username)
+  return normalized ? watchedHandles.has(normalized.toLowerCase()) : false
+}
+
+function uniqueFollowingAccounts(accounts: readonly FollowingAccountRecord[]): FollowingAccountRecord[] {
+  const unique = new Map<string, FollowingAccountRecord>()
+  for (const account of accounts) {
+    const username = normalizeUsername(account.username)
+    if (username && !unique.has(username.toLowerCase())) {
+      unique.set(username.toLowerCase(), account)
+    }
+  }
+  return [...unique.values()]
+}
+function archiveJobId(sourceLane: string, targetType: SqliteArchiveJobTargetType, targetValue: string): string {
+  return `archive_job_${stableId([sourceLane, targetType, targetValue, ""]).slice(0, 24)}`
+}
+
+function addStatusJobReason(
+  contexts: Map<string, XBookmarkSyncStatusJobContext>,
+  url: string | undefined,
+  reason: XBookmarkSyncStatusJobReason,
+  priority: number,
+  details: Record<string, JsonSafeValue | undefined> = {},
+): void {
+  const normalizedUrl = normalizeStatusUrl(url)
+  if (!normalizedUrl) {
+    return
+  }
+  const context = contexts.get(normalizedUrl)
+  if (!context) {
+    contexts.set(normalizedUrl, {
+      reasons: new Set([reason]),
+      priority,
+      details: pruneJsonRecord(details),
+    })
+    return
+  }
+  context.reasons.add(reason)
+  context.priority = Math.max(context.priority, priority)
+  context.details = pruneJsonRecord({
+    ...context.details,
+    ...details,
+  })
+}
+
+function fallbackStatusJobContext(): XBookmarkSyncStatusJobContext {
+  return {
+    reasons: new Set(["status-reference"]),
+    priority: STATUS_REFERENCE_PRIORITY,
+    details: {},
+  }
+}
+
+function primaryStatusJobReason(context: XBookmarkSyncStatusJobContext): XBookmarkSyncStatusJobReason {
+  const priorityByReason: Record<XBookmarkSyncStatusJobReason, number> = {
+    "status-reference": STATUS_REFERENCE_PRIORITY,
+    "long-post-read-more": LONG_POST_STATUS_PRIORITY,
+    "followed-author": FOLLOWED_AUTHOR_STATUS_PRIORITY,
+    "followed-reply-to-watched-handle": FOLLOWED_REPLY_TO_WATCHED_HANDLE_STATUS_PRIORITY,
+    "quote-status-reference": STATUS_REFERENCE_PRIORITY,
+    "watched-handle-thread": WATCHED_HANDLE_THREAD_STATUS_PRIORITY,
+  }
+  let selected: XBookmarkSyncStatusJobReason = "status-reference"
+  let selectedPriority = STATUS_REFERENCE_PRIORITY
+  for (const reason of context.reasons) {
+    const priority = priorityByReason[reason]
+    const isSamePrioritySpecificReason =
+      priority === selectedPriority && selected === "status-reference" && reason !== "status-reference"
+    if (priority > selectedPriority || isSamePrioritySpecificReason) {
+      selected = reason
+      selectedPriority = priority
+    }
+  }
+  return selected
+}
+
+function followAwareJobOptions(
+  reason: string,
+  details: Record<string, JsonSafeValue | undefined>,
+): Record<string, JsonSafeValue> {
+  return pruneJsonRecord({
+    reason,
+    ...details,
+  })
+}
+
+function followAwareJobProvenance(
+  provenance: Record<string, JsonSafeValue>,
+  reason: string,
+  details: Record<string, JsonSafeValue | undefined>,
+): Record<string, JsonSafeValue> {
+  return pruneJsonRecord({
+    ...provenance,
+    archiveJobReason: reason,
+    ...details,
+  })
+}
+
+function parseWatchedHandles(value: string | undefined): ReadonlySet<string> {
+  const handles = new Set<string>()
+  if (!value) {
+    return handles
+  }
+  for (const part of value.split(/[,\s]+/)) {
+    const username = normalizeUsername(part)
+    if (username) {
+      handles.add(username.toLowerCase())
+    }
+  }
+  return handles
+}
+
+function mergeWatchedHandles(
+  envHandles: ReadonlySet<string>,
+  optionHandles: ReadonlySet<string> | undefined,
+): ReadonlySet<string> {
+  if (!optionHandles || optionHandles.size === 0) {
+    return envHandles
+  }
+  const handles = new Set(envHandles)
+  for (const handle of optionHandles) {
+    const username = normalizeUsername(handle)
+    if (username) {
+      handles.add(username.toLowerCase())
+    }
+  }
+  return handles
+}
+
 function tweetLikeRecordKey(record: XBookmarkSyncTweetLikeRecord): string {
   return firstNonEmpty(tweetLikeId(record), record.path, record.full_text) ?? stableId([record.full_text])
 }
@@ -1874,6 +2420,8 @@ function ingestProvenance(
     capturedAt: capture.capturedAt,
     requestUrl: redactSensitiveUrl(capture.request.url),
     tweetPath: record?.path,
+    hasReadMore: record?.has_read_more,
+    isLongPostCandidate: record?.is_long_post_candidate,
   })
 }
 

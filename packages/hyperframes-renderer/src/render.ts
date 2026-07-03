@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// Intentional package boundary: decodes layer-plan JSON and emits HTML/manifest artifacts.
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -52,8 +53,10 @@ interface LayerPlan {
   fps: number;
   sourceManifest?: string;
   ttsManifest?: string;
+  audioPath?: string;
   palette?: Record<string, string>;
   plateAssets?: Record<string, PlateAsset>;
+  reviewVocabulary?: Record<string, unknown>;
   beats: Beat[];
 }
 
@@ -256,8 +259,10 @@ function validateLayerPlan(value: unknown): LayerPlan {
     fps: getNumber(value, "fps"),
     sourceManifest: getOptionalString(value, "sourceManifest"),
     ttsManifest: getOptionalString(value, "ttsManifest"),
+    audioPath: getOptionalString(value, "audioPath"),
     palette: validatePalette(value.palette),
     plateAssets: validatePlateAssets(value.plateAssets),
+    reviewVocabulary: getOptionalObject(value, "reviewVocabulary"),
     beats,
   };
 }
@@ -409,6 +414,7 @@ function renderFlashOverlay(layer: Layer, palette?: Record<string, string>): str
   return `<div class="layer layer-flash" data-layer-type="FlashOverlay" style="${layerBaseStyle(layer)}background-color:${escapeHtml(color)};opacity:${intensity};mix-blend-mode:${escapeHtml(blend)};pointer-events:none;"></div>`;
 }
 const ASSET_PROP_KEYS = new Set(["src", "plateUrl", "fromPlate", "toPlate", "imageUrl", "videoUrl", "clipUrl", "placeholderImage", "placeholderImagePath", "placeholderMediaPath"]);
+const REVIEW_SURFACE_REF_KEYS = [...ASSET_PROP_KEYS, "artifactPath", "plannedArtifactPath"];
 
 
 function resolveAssetPath(value: string, baseDir: string): string | null {
@@ -705,6 +711,81 @@ function renderBeatClip(beat: Beat, palette?: Record<string, string>): string {
         </div>`;
 }
 
+function layerMediaRefs(layer: Layer): string[] {
+  const refs: string[] = [];
+  const seen = new Set<string>();
+  for (const key of REVIEW_SURFACE_REF_KEYS) {
+    const value = stringProp(layer.props[key]);
+    if (value && !seen.has(value)) {
+      seen.add(value);
+      refs.push(value);
+    }
+  }
+  return refs;
+}
+
+function reviewSurfaceMediaType(layer: Layer, pathOrUrl: string): string | null {
+  if (pathOrUrl.endsWith(".svg")) return "image/svg+xml";
+  return stringProp(layer.props.mediaType) ?? null;
+}
+
+function buildReviewSurface(plan: LayerPlan): unknown {
+  const layerTypes = new Set<string>();
+  const effects = new Set<string>();
+  const artifactRefs = new Map<string, Record<string, unknown>>();
+  if (plan.ttsManifest) {
+    artifactRefs.set(plan.ttsManifest, {
+      pathOrUrl: plan.ttsManifest,
+      layerType: null,
+      mediaType: "audio/manifest",
+      generatedClipId: null,
+      placeholder: false,
+    });
+  }
+  if (plan.audioPath) {
+    artifactRefs.set(plan.audioPath, {
+      pathOrUrl: plan.audioPath,
+      layerType: null,
+      mediaType: "audio",
+      generatedClipId: null,
+      placeholder: false,
+    });
+  }
+
+  for (const beat of plan.beats) {
+    for (const layer of beat.layers) {
+      layerTypes.add(layer.type);
+      if (layer.in.variant) effects.add(`transition:${layer.in.variant}`);
+      if (layer.out.variant) effects.add(`transition:${layer.out.variant}`);
+      if (layer.type === "FlashOverlay" || layer.type === "GridOverlay" || layer.type === "SplitRevealLayer") {
+        effects.add(`layer:${layer.type}`);
+      }
+
+      for (const pathOrUrl of layerMediaRefs(layer)) {
+        if (!artifactRefs.has(pathOrUrl)) {
+          artifactRefs.set(pathOrUrl, {
+            pathOrUrl,
+            layerType: layer.type,
+            mediaType: reviewSurfaceMediaType(layer, pathOrUrl),
+            generatedClipId: stringProp(layer.props.generatedClipId) ?? stringProp(layer.props.clipId) ?? null,
+            placeholder: layer.props.placeholderMediaPath === pathOrUrl || layer.props.placeholderImagePath === pathOrUrl || layer.props.placeholderImage === pathOrUrl,
+            plannedArtifact: layer.props.plannedArtifactPath === pathOrUrl || layer.props.artifactPath === pathOrUrl,
+          });
+        }
+      }
+    }
+  }
+
+  return {
+    schemaVersion: "tiktok-recreate.review-surface.v1",
+    declaredVocabulary: plan.reviewVocabulary ?? null,
+    layerTypes: Array.from(layerTypes).sort(),
+    effectVocabulary: Array.from(effects).sort(),
+    artifactLibraryRefs: Array.from(artifactRefs.values()).sort((a, b) => String(a.pathOrUrl).localeCompare(String(b.pathOrUrl))),
+  };
+}
+
+
 function generateIndexHtml(plan: LayerPlan, opts: { workflowId: string; modelId: string; compositionId: string }): string {
   const clips = plan.beats.map((beat) => renderBeatClip(beat, plan.palette)).join("\n        ");
   const background = plan.palette?.background ?? "#0a0a0c";
@@ -757,7 +838,7 @@ function generateIndexHtml(plan: LayerPlan, opts: { workflowId: string; modelId:
 </html>`;
 }
 
-function generateHyperframesJson(plan: LayerPlan, opts: { workflowId: string; modelId: string; compositionId: string }): unknown {
+function generateHyperframesJson(plan: LayerPlan, opts: { workflowId: string; modelId: string; compositionId: string }, reviewSurfacePlan: LayerPlan = plan): unknown {
   const totalLayers = plan.beats.reduce((sum, beat) => sum + beat.layers.length, 0);
   return {
     schemaVersion: "hyperframes.project.v1",
@@ -774,6 +855,7 @@ function generateHyperframesJson(plan: LayerPlan, opts: { workflowId: string; mo
     workflowId: opts.workflowId,
     modelId: opts.modelId,
     textPolicy: "post-layer",
+    reviewSurface: buildReviewSurface(reviewSurfacePlan),
     source: {
       videoId: plan.videoId,
       title: plan.title,
@@ -831,7 +913,8 @@ function generateManifestJson(
   renderError: string | null,
   audioAttached: boolean,
   audioSource: string | null,
-  audioMuxError: string | null
+  audioMuxError: string | null,
+  reviewSurfacePlan: LayerPlan = plan
 ): unknown {
   return {
     schemaVersion: "tiktok-recreate.hyperframes-render.v1",
@@ -842,6 +925,7 @@ function generateManifestJson(
     modelId: opts.modelId,
     renderer: "hyperframes",
     textPolicy: "post-layer",
+    reviewSurface: buildReviewSurface(reviewSurfacePlan),
     paths: {
       indexHtml: "index.html",
       hyperframesJson: "hyperframes.json",
@@ -909,6 +993,7 @@ async function main(): Promise<void> {
     fail(`Failed to read layer plan: ${err instanceof Error ? err.message : String(err)}`);
   }
 
+  const reviewSurfacePlan = plan;
   fs.mkdirSync(args.out, { recursive: true });
   plan = rewriteLayerPlanAssets(plan, { layerPlanPath: args.layerPlan, outDir: args.out });
 
@@ -926,7 +1011,7 @@ async function main(): Promise<void> {
     workflowId: args.workflowId,
     modelId: args.modelId,
     compositionId,
-  });
+  }, reviewSurfacePlan);
   fs.writeFileSync(path.join(args.out, "hyperframes.json"), JSON.stringify(hyperframesJson, null, 2), "utf8");
 
   const hyperframePlanJson = generateHyperframePlanJson(plan, {
@@ -1001,7 +1086,8 @@ async function main(): Promise<void> {
     renderError,
     audioAttached,
     audioSource,
-    audioMuxError
+    audioMuxError,
+    reviewSurfacePlan
   );
   fs.writeFileSync(path.join(args.out, "manifest.json"), JSON.stringify(manifestJson, null, 2), "utf8");
 

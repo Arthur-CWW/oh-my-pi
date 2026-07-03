@@ -158,7 +158,53 @@ Swap:
 - brand marks
 - source pixels/audio unless rights-cleared
 
-Use public, user-owned, rights-cleared, or faceless sources first. Do not clone a real creator's recognizable face, voice, private identity, exact captions, copyrighted media, or brand marks without consent.
+Use public, user-owned, rights-cleared, or faceless sources first. Do not clone a real creator's recognizable face, voice, private identity, exact captions, protected media, or brand marks without consent.
+
+### Niche / template mining (`T-2026-06-09-022`)
+
+Template mining starts as a local planning lane, not a scraper. The first useful loop is:
+
+```txt
+niche/product brief
+→ local/manual source notes or approved archive manifests
+→ research target
+→ clean-room template mining job
+→ artifact-library format output
+→ optional local candidate dry-run
+→ Slotok developer graph edge
+```
+
+Allowed inputs for the current slice:
+
+- Product/niche brief, audience, offer, banned claims, and local proof assets.
+- User-owned or rights-cleared clips and exports.
+- Public product/docs pages or source digests already archived by an approved research lane.
+- Manual notes describing hook family, shot rhythm, caption layout, CTA pattern, and asset slots.
+
+Disallowed until a separate approved capture lane exists: live TikTok/X/CapCut/Arcads scraping, paywalled template extraction, credential/cookie reads, source-pixel reuse as generation input, and provider spend.
+
+Canonical storage:
+
+- `UgcResearchTarget` records the queue item: `platform`, `niche`, `query`, `status`, `priority`, `sourcePolicy`, notes, and linked `templateJobIds`.
+- `UgcTemplateMiningJob` records the normalized template: `templateSpec`, status, candidate links, and blocker/error state.
+- `CleanRoomTemplateSpec` carries the reusable mechanics: `category`, `preservedMechanics`, `swapSlots`, `blockedFields`, and `proofNotes`.
+- SQLite path: `data/ugc-studio/workspaces/<workspace_id>/workspace.sqlite`; rows live in `objects` with `collection` values `research-targets` and `template-mining-jobs`.
+- JSON copies are only import/export/backup/compatibility artifacts.
+
+Artifact-library handoff:
+
+- Promote reusable outputs into `referenceArchives[].candidateFormatOutputs`.
+- Use `kind: "format-template"`, `"caption-template"`, `"hook-family"`, or `"cta-pattern"` depending on the output.
+- Put only abstract mechanics in `manifestJson`: scene beats, edit cadence, caption safe areas, proof slot, product/demo slot, CTA shape, and reusable layer slots.
+- Link generated candidates through `templateMiningJobs[].candidateIds` only after a dry-run/local candidate plan or explicit capped provider job.
+
+First local proof command:
+
+```bash
+cd apps/slotok-workbench && /Users/arthur/.bun/bin/bun test src/daemon/ugc-sqlite-store.bun.test.ts -t "keeps per-collection SQLite rows in sync after JSON store mutations"
+```
+
+First proof path: `apps/slotok-workbench/src/daemon/ugc-sqlite-store.bun.test.ts`; the SQLite assertion covers `objects.collection IN ('research-targets', 'template-mining-jobs')`. Daemon-backed manual storage path is `data/ugc-studio/workspaces/<workspace_id>/workspace.sqlite`.
 
 ### Provider spend policy
 
@@ -286,6 +332,16 @@ Status: current phase proof target.
 - [ ] Parent verifies `workspace.sqlite` is the canonical source for workspace, personas, branches, candidates, notes, provider jobs, reference archives, exports, final-editor state, research targets, template mining jobs, and asset manifests.
 - [ ] Parent verifies JSON paths are limited to import/export/backup/compatibility fixtures.
 - [ ] Parent verifies reload reads from the local daemon/SQLite path, not renderer memory.
+
+### Template Mining Queue
+
+Status: current phase local proof target for `T-2026-06-09-022`.
+
+- [ ] Parent verifies a niche/manual-source input can create a `research-targets` row and linked `template-mining-jobs` row without live scraping or provider spend.
+- [ ] Parent verifies the normalized `CleanRoomTemplateSpec` records preserved mechanics, swap slots, blocked fields, and proof notes.
+- [ ] Parent verifies a reusable template output can be represented as `referenceArchives[].candidateFormatOutputs[].manifestJson` for artifact-library discovery.
+- [ ] Parent verifies the Developer Graph shows the `research target -> template job -> candidate/export` path when template jobs have candidate links.
+- [ ] First narrow proof command/path: `cd apps/slotok-workbench && /Users/arthur/.bun/bin/bun test src/daemon/ugc-sqlite-store.bun.test.ts -t "keeps per-collection SQLite rows in sync after JSON store mutations"`; inspect `apps/slotok-workbench/src/daemon/ugc-sqlite-store.bun.test.ts` and daemon-backed `data/ugc-studio/workspaces/<workspace_id>/workspace.sqlite`.
 
 ### Reference Catalog Roots
 

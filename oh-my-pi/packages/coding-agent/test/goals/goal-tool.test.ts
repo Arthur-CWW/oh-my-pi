@@ -141,6 +141,64 @@ describe("GoalTool", () => {
 		).rejects.toThrow("cannot create a new goal because this session already has a goal");
 	});
 
+	it("updates an active goal without using the slash command path", async () => {
+		const harness = createRuntimeHarness();
+		await harness.runtime.createGoal({ objective: "Existing", tokenBudget: 100 });
+		const tool = new GoalTool(
+			createToolSession({
+				getGoalRuntime: () => harness.runtime,
+				getGoalModeState: () => harness.getState(),
+			}),
+		);
+
+		const result = await tool.execute("call-update", {
+			op: "update",
+			objective: "  Refined goal  ",
+			token_budget: 25,
+		});
+
+		expect(result.details).toMatchObject({
+			op: "update",
+			remainingTokens: 25,
+			completionBudgetReport: null,
+		});
+		expect(result.details?.goal?.objective).toBe("Refined goal");
+		expect(result.details?.goal?.tokenBudget).toBe(25);
+		expect(result.details?.goal?.status).toBe("active");
+		expect(harness.getState()?.enabled).toBe(true);
+		expect(harness.getState()?.goal.objective).toBe("Refined goal");
+	});
+
+	it("rejects op=update when no goal is active", async () => {
+		const harness = createRuntimeHarness();
+		const tool = new GoalTool(
+			createToolSession({
+				getGoalRuntime: () => harness.runtime,
+				getGoalModeState: () => harness.getState(),
+			}),
+		);
+
+		await expect(tool.execute("call-update", { op: "update", objective: "New goal" })).rejects.toThrow(
+			"cannot replace goal because no goal is active",
+		);
+	});
+
+	it("rejects op=update when the objective is missing or only whitespace", async () => {
+		const harness = createRuntimeHarness();
+		await harness.runtime.createGoal({ objective: "Existing" });
+		const tool = new GoalTool(
+			createToolSession({
+				getGoalRuntime: () => harness.runtime,
+				getGoalModeState: () => harness.getState(),
+			}),
+		);
+
+		await expect(tool.execute("call-empty-update", { op: "update", objective: "   \t\n" })).rejects.toThrow(
+			"objective is required when op=update",
+		);
+		expect(harness.getState()?.goal.objective).toBe("Existing");
+	});
+
 	it("rejects complete when no goal is active", async () => {
 		const harness = createRuntimeHarness();
 		const tool = new GoalTool(

@@ -72,6 +72,16 @@ vendor/zanwei/*
 vendor/stablyai/*
 !vendor/stablyai/orca/
 !vendor/stablyai/orca/**
+!vendor/alipay/
+vendor/alipay/*
+!vendor/alipay/payment-skills/
+!vendor/alipay/payment-skills/**
+vendor/alipay/payment-skills/.git/
+!vendor/wechatpay-apiv3/
+vendor/wechatpay-apiv3/*
+!vendor/wechatpay-apiv3/wechatpay-skills/
+!vendor/wechatpay-apiv3/wechatpay-skills/**
+vendor/wechatpay-apiv3/wechatpay-skills/.git/
 !vendor/nexu-io--open-design/
 !vendor/nexu-io--open-design/**
 vendor/nexu-io--open-design/.git/

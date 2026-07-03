@@ -24,7 +24,7 @@ Columns below:
   - `background-browser-automation`
   - `librarian`
   - `llm-frontend-browser`
-  - `macos-computer-use`
+  - `cua-driver`
   - `rubber-duck-adversarial`
   - `source-archive`
 
@@ -39,7 +39,7 @@ These are directly tied to current repo tools/workflows and have enough reuse:
 - `librarian` — source-backed open-source/library research.
 - `llm-frontend-browser` — ChatGPT/AI Studio/Grok frontend sessions.
 - `background-browser-automation` — background CDP/Playwright safety rules.
-- `macos-computer-use` — CuaDriver background macOS UI loops.
+- `cua-driver` — CuaDriver background macOS UI loops (use the `computer_use` tool; raw `cua_driver` only for low-level/debug).
 - `source-archive` — archive source material into repo-local research docs.
 - `rubber-duck-adversarial` — critique/sanity-check mode.
 
@@ -83,12 +83,88 @@ Useful, but noisy if global:
 3. **Workspace/personal data family**: `gmcli`, `gdcli`, `gccli`, `google-workspace`, `apple-mail` should become one opt-in personal-data skill, disabled by default.
 4. **Media generation family**: removed Dreamina-specific skill. If needed later, create a provider-neutral `ai-media-generation` skill in `packages/ugc-cli` or a media package, not in web-access.
 
+### Private design skill extraction
+
+`T-2026-06-13-003` should produce a private, summarized design-review skill, not a committed copy of any protected design book. The source search starts on Arthur's machine, not in public shadow libraries:
+
+- likely owned-source locations to check first: `~/Downloads/`, `~/Documents/`, `~/Desktop/`, `~/Library/Mobile Documents/`, `~/Library/CloudStorage/`, and Apple Books storage under `~/Library/Containers/com.apple.BKAgentService/Data/Documents/iBooks/Books/`
+- supporting local design-skill references that are already skill-shaped: `vendor/mitsuhiko/agent-stuff/skills/frontend-design/SKILL.md` and the ignored local design-skill checkout under `tmp/open-design/skills/`
+- do not use `packages/borges-library` or downloaded public-library copies as the basis for a private licensed-skill extraction
+
+Extraction output should live outside this repo unless Arthur explicitly approves vendoring:
+
+```txt
+git@github.com:Arthur-CWW/pi-personal-core-skills.git
+  skills/refactoring-ui-private/SKILL.md
+  skills/refactoring-ui-private/checklists/design-review.md
+```
+
+If global availability is needed, make `~/.agents/skills/refactoring-ui-private` a symlink to that private repo checkout. This repo should only reference the private skill by name in worker briefs and workflow docs.
+
+The extracted skill should summarize reusable heuristics in original wording:
+
+- hierarchy and visual priority: size, weight, contrast, spacing, grouping, and affordance emphasis
+- layout composition: spacing scale, alignment, density, empty-state shape, and responsive hierarchy
+- component polish: borders, radius, shadows, icon/text balance, active states, and disabled/error treatments
+- copy and data presentation: labels, numeric emphasis, table density, progressive disclosure, and scan paths
+- anti-slop checklist: generic gradients, unmotivated decoration, weak contrast, inconsistent primitives, fake controls, and uninspected interaction states
+
+Do not copy chapter text, screenshots, examples, tables, or proprietary phrasing. Keep any extraction notes under ignored `data/private-design-skills/refactoring-ui/` and redact source-page text from committed QA reports.
+
+Next safe source-check command from `~/agents` records only metadata, not book text:
+
+```bash
+mkdir -p data/private-design-skills/refactoring-ui && python3 - <<'PY'
+from pathlib import Path
+import hashlib, json, time
+roots = [Path.home() / p for p in [
+    "Downloads",
+    "Documents",
+    "Desktop",
+    "Library/Mobile Documents",
+    "Library/CloudStorage",
+    "Library/Containers/com.apple.BKAgentService/Data/Documents/iBooks/Books",
+]]
+rows = []
+for root in roots:
+    if not root.exists():
+        continue
+    for path in root.rglob("*"):
+        name = path.name.lower()
+        if path.is_file() and path.suffix.lower() in {".pdf", ".epub", ".mobi", ".azw3"} and "refactoring" in name and "ui" in name:
+            h = hashlib.sha256()
+            with path.open("rb") as f:
+                for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                    h.update(chunk)
+            st = path.stat()
+            rows.append({
+                "path": str(path),
+                "bytes": st.st_size,
+                "mtime": time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(st.st_mtime)),
+                "sha256": h.hexdigest(),
+            })
+out = Path("data/private-design-skills/refactoring-ui/source-candidates.json")
+out.write_text(json.dumps(rows, indent=2) + "\n")
+print(f"wrote {out} with {len(rows)} candidate(s)")
+PY
+```
+
+`T-2026-06-13-004` should then split UI QA into reviewer personas that can be invoked independently from implementation workers:
+
+1. visual hierarchy and composition reviewer
+2. accessibility and keyboard reviewer
+3. state/data wiring reviewer
+4. performance and static-analysis reviewer
+5. proof-artifact reviewer
+
+Those personas are review lenses, not default blockers; the coordinator picks the lenses that match changed UI states and attaches their findings to the QA report.
+
 ## Inventory
 
 | Skill | What it does | Source | Pi | Codex | Recommendation |
 |---|---|---:|---:|---:|---|
 | `a11y-debugging` | Chrome DevTools MCP accessibility audit workflow. | ignored local `chrome-devtools-mcp` checkout | 1 | 0 | Fold into browser/devtools reference; do not auto-load. |
-| `agent-communication` | Simple cross-agent repo-state coordination log protocol. | repo skill | 2 | 0 | Retire as a skill; keep protocol in `AGENTS.md`/docs if still wanted. |
+| `agent-communication` | Simple cross-agent repo-state coordination log protocol. | former repo skill; deleted 2026-06-23 | 2 | 0 | Arthur chose deletion outright on 2026-06-23; no longer auto-loaded and not a repo skill. |
 | `anachb` | Austrian VOR public-transport queries. | global `agent-stuff` | 0 | 0 | Personal/travel opt-in only. |
 | `apple-mail` | Search/read local Apple Mail and attachments. | global `agent-stuff` | 0 | 0 | Sensitive personal-data opt-in; not global. |
 | `background-browser-automation` | Background-safe Playwright/Puppeteer/CDP rules. | repo skill | 13 | 1 | Keep as canonical browser safety skill. |
@@ -112,7 +188,7 @@ Useful, but noisy if global:
 | `google-workspace` | Direct Google Workspace APIs helper. | global `agent-stuff` | 1 | 0 | Prefer this over separate gc/gd/gm skills; opt-in due personal data. |
 | `librarian` | Evidence-backed OSS/library research with permalinks. | repo skill | 26 | 0 | Keep auto-loaded. High signal. |
 | `llm-frontend-browser` | ChatGPT/AI Studio/frontend LLM browser automation. | repo skill | 14 | 1 | Keep, but improve async/non-blocking API. |
-| `macos-computer-use` | CuaDriver background native macOS GUI automation. | repo skill | 1 | 0 | Keep for VoiceInk/macOS UI validation. |
+| `cua-driver` | CuaDriver background native macOS GUI automation. | repo skill | 1 | 0 | Keep for VoiceInk/macOS UI validation. |
 | `mermaid` | Mermaid chart authoring/validation. | global `agent-stuff` | 2 | 0 | Keep global core or move to docs/diagram package. |
 | `native-web-search` | Native web search trigger. | global `agent-stuff` | 9 | 0 | Consolidate with research skill; avoid duplicate search skills. |
 | `oebb-scotty` | Austrian ÖBB train planner. | global `agent-stuff` | 0 | 0 | Personal/travel opt-in only. |
@@ -136,40 +212,45 @@ Useful, but noisy if global:
 
 ```txt
 packages/
-  web-access/skills/
-    background-browser-automation/    # keep
-    librarian/                        # keep
-    llm-frontend-browser/             # keep
-    macos-computer-use/               # keep
-    rubber-duck-adversarial/          # keep
-    source-archive/                   # keep
+  web-access/                         # currently published active extension/tool bundle; skills moved to repo root
+    src/
 
-  # moved out to private repo: git@github.com:Arthur-CWW/pi-personal-core-skills.git
-  # repo root:
-  skills/
-    emusks-research/                  # opt-in local research skill for unofficial X API ecosystems
-    commit/
-    uv/
-    tmux/
-    github/
-    mermaid/
-    frontend-design/
+ # repo root:
+ skills/                               # repo-level global skill convention
+  background-browser-automation/      # keep
+  librarian/                          # keep
+  llm-frontend-browser/               # keep
+  cua-driver/                         # keep
+  rubber-duck-adversarial/            # keep
+  source-archive/                     # keep
+  emusks-research/                    # opt-in local research skill for unofficial X API ecosystems
 
-  personal-data-skills/               # opt-in only
-    google-workspace/                 # includes Gmail/Drive/Calendar modes
-    apple-mail/
+ # moved out to private repo: git@github.com:Arthur-CWW/pi-personal-core-skills.git
+  commit/
+  uv/
+  tmux/
+  github/
+  mermaid/
+  frontend-design/
 
-  browser-skills/                     # optional future consolidation
-    browser-automation/               # includes CDP, visible browser, DevTools, a11y, LCP refs
+ personal-data-skills/                 # opt-in only
+  google-workspace/                   # includes Gmail/Drive/Calendar modes
+  apple-mail/
 
-  media-workflows/skills/             # future, if needed
-    ai-media-generation/              # provider-neutral, not Dreamina-specific
+ browser-skills/                       # optional future consolidation
+  browser-automation/                 # includes CDP, visible browser, DevTools, a11y, LCP refs
+
+ media-workflows/skills/               # future, if needed
+  ai-media-generation/                # provider-neutral, not Dreamina-specific
 ```
+
+## Resolved decisions
+
+- 2026-06-23: Arthur chose deletion outright for `agent-communication`; the repo skill was removed and nothing was moved into `AGENTS.md` / `docs/coordination/agent-edit-log.md`.
 
 ## Open decisions
 
-1. Should `agent-communication` be deleted outright, or should its useful parts move into `AGENTS.md` / `docs/coordination/agent-edit-log.md` and then delete the skill?
-2. Should `used-hardware-buying-research` become its own personal package, or remain in this monorepo but disabled from auto-load?
-3. Global settings have switched from broad `git:github.com/mitsuhiko/agent-stuff` to private `git:git@github.com:Arthur-CWW/pi-personal-core-skills@main`.
-4. Should the ignored `chrome-devtools-mcp` checkout be removed from `packages/web-access/skills/` entirely and reintroduced only as a proper vendored package when needed?
-5. Should the untracked `.pi/extensions/codex-plugin-manager/` be committed as the official way to opt into Codex plugin skills?
+1. Should `used-hardware-buying-research` become its own personal package, or remain in this monorepo but disabled from auto-load?
+2. Global settings have switched from broad `git:github.com/mitsuhiko/agent-stuff` to private `git:git@github.com:Arthur-CWW/pi-personal-core-skills@main`.
+3. Should the ignored `chrome-devtools-mcp` checkout be removed from `packages/web-access/skills/` entirely and reintroduced only as a proper vendored package when needed?
+4. Should the untracked `.pi/extensions/codex-plugin-manager/` be committed as the official way to opt into Codex plugin skills?

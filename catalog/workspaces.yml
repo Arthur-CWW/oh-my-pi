@@ -1,0 +1,177 @@
+schemaVersion: 1
+updated: 2026-06-24
+purpose: >-
+  Stable workspace and context-root registry for agents. Folders express ownership;
+  this catalog expresses availability, task context, and safe cross-workspace handoff.
+
+principles:
+  - canonical_location_follows_ownership
+  - availability_follows_config
+  - cross_cutting_meaning_follows_tags_and_indexes
+  - implementation_transfer_follows_packets
+  - session_continuity_follows_stable_ids_and_path_aliases
+  - scheduling_state_follows_sqlite_ledgers
+
+homeRoots:
+  agents:
+    path: /Users/arthur/agents
+    kind: agent-control-plane
+    owns:
+      - OMP/Pi/Codex/Hermes extensions and tools
+      - reusable first-party skills
+      - reusable workflows and local agent apps while co-evolving
+    tags: [agents, omp, pi, skills, extensions, workflows]
+  products:
+    path: /Users/arthur/products
+    kind: product-workspace
+    owns:
+      - shipped or product-shaped apps and worktrees
+    tags: [products]
+  exploratory:
+    path: /Users/arthur/exploratory
+    kind: research-workspace
+    owns:
+      - research
+      - prototypes
+      - reverse-engineering evidence
+      - notebooks
+    tags: [research, prototypes, reveng]
+  vault:
+    path: /Users/arthur/vault
+    kind: knowledge-vault
+    owns:
+      - durable notes
+      - source clippings
+      - indexes
+      - promote workbench
+    tags: [vault, knowledge, index]
+  state:
+    path: /Users/arthur/state
+    kind: runtime-state
+    owns:
+      - generated databases
+      - audits
+      - migration/session repair artifacts
+      - control-plane SQLite ledgers and generated task metadata indexes
+    tags: [state, generated, sessions]
+
+repoRoots:
+  skills:
+    path: /Users/arthur/agents/skills
+    kind: first-party-skills
+    rule: direct skills live one level below each domain parent
+    discoveryParents:
+      - /Users/arthur/agents/skills/core
+      - /Users/arthur/agents/skills/browser
+      - /Users/arthur/agents/skills/provider
+      - /Users/arthur/agents/skills/research
+      - /Users/arthur/agents/skills/design
+      - /Users/arthur/agents/skills/media
+  vendoredPiSkills:
+    path: /Users/arthur/agents/vendor/badlogic/pi-skills
+    kind: vendored-skills
+    discoveryParents:
+      - /Users/arthur/agents/vendor/badlogic/pi-skills
+  extensions:
+    path: /Users/arthur/agents/packages
+    kind: extension-packages
+    activeEntrypoints:
+      - /Users/arthur/agents/packages/web-access/src/index.ts
+      - /Users/arthur/agents/packages/mermaid-preview/src/index.ts
+      - /Users/arthur/agents/packages/browser-use/index.ts
+      - /Users/arthur/agents/packages/borges-library/src/index.ts
+  workflows:
+    path: /Users/arthur/agents/workflows
+    kind: workflow-definitions
+  vendor:
+    path: /Users/arthur/agents/vendor
+    kind: vendored-source
+    rule: reference/imported source; do not auto-load unless listed explicitly
+  ohMyPiFork:
+    path: /Users/arthur/agents/oh-my-pi
+    kind: first-class-fork
+    rule: keep at repo root while actively forking OMP
+  openDesign:
+    path: /Users/arthur/agents/vendor/nexu-io--open-design
+    kind: vendored-design-runtime
+    rule: vendored upstream source; local-first run path via root open-design:* scripts with OD_DATA_DIR under data/open-design
+    tags: [open-design, local-first, design, sqlite]
+
+adHocContextPolicy:
+  default: add_absolute_path_here_or_in_project_packet_before_moving_files
+  rules:
+    - Do not move a folder into agents only to make it visible to agents.
+    - Prefer absolute path references, OMP customDirectories, or packet links.
+    - Promote to agents only when the artifact becomes reusable agent capability.
+    - Promote to products only when it becomes product implementation.
+    - Keep raw reverse-engineering evidence in exploratory or a dedicated RevEng root.
+
+contextRoots:
+  # Add temporary cross-workspace context roots here when a task needs nearby access.
+  # A future session-remap/catalog tool should read these and expose them to agents.
+  - id: home-workspace-index
+    path: /Users/arthur/WORKSPACE_INDEX.md
+    kind: workspace-index
+    tags: [ontology, lifecycle-roots]
+  - id: home-workspace-db
+    path: /Users/arthur/workspace.sqlite
+    kind: workspace-index-db
+    tags: [ontology, lifecycle-roots]
+
+  - id: agents-control-plane-ledger
+    path: /Users/arthur/agents/data/symphony-lite
+    kind: control-plane-ledger-root
+    tags: [agents, control-plane, sqlite, task-ledger]
+  - id: pi-cockpit-ledger
+    path: /Users/arthur/.local/share/pi-cockpit/cockpit.sqlite
+    kind: cockpit-runtime-db
+    tags: [agents, cockpit, sqlite, runtime-state]
+  - id: asmr-companion-goal6-proof
+    path: /Users/arthur/agents/docs/qa/asmr-companion-goal6-final-handoff-20260624.md
+    kind: proof-handoff
+    tags: [agents, asmr, seedance, proof, commit-cacf7653]
+  - id: asmr-companion-goal6-inventory
+    path: /Users/arthur/agents/docs/qa/asmr-companion-goal6-artifact-inventory-20260624.json
+    kind: proof-inventory
+    tags: [agents, asmr, seedance, proof, commit-cacf7653]
+
+packetPolicy:
+  rootCandidates:
+    - /Users/arthur/exploratory/packets
+    - /Users/arthur/vault/promote
+    - /Users/arthur/agents/docs/provider
+    - /Users/arthur/agents/docs/plans
+  requiredFields:
+    - id
+    - ownerRoot
+    - consumerRoot
+    - evidenceLinks
+    - cleanRoomBoundary
+    - implementationTargets
+    - acceptanceChecks
+    - proofLinks
+  taskLedger:
+    sourceOfTruth: sqlite-after-import
+    canonicalRuntimeRoot: /Users/arthur/agents/data/symphony-lite
+    firstImplementationTarget: /Users/arthur/agents/packages/symphony-lite-elixir
+    markdownRole: policy-and-human-summary
+    migrationSources:
+      - TASKS.md
+      - packet manifests under packetPolicy.rootCandidates
+      - domain SQLite packet ledgers when an adapter exists
+    minimalTables:
+      - task_packets
+      - packet_ownership
+      - packet_proofs
+      - packet_events
+
+sessionContinuity:
+  problem: current agent sessions are keyed primarily by cwd path
+  targetIdentity:
+    - workspaceId
+    - packetId_or_taskId
+    - pathAliases
+  mitigation:
+    - record old and new paths before moving workspaces
+    - repair OMP/Pi/Codex session metadata with a reusable session-remap tool
+    - keep path aliases in /Users/arthur/WORKSPACE_INDEX.md or workspace.sqlite

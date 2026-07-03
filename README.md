@@ -4,14 +4,15 @@ Monorepo for the agent control plane: Pi extensions, skills, browser tooling, lo
 
 Current focus:
 
-- `packages/web-access` — Pi web/search/fetch/YouTube/frontend-LLM tools.
+- `packages/web-access` — Pi web/search/fetch/YouTube/frontend-LLM tools. (published active extension/tool bundle, pending package split).
 - `packages/dynamic-workflows` — vendored `pi-dynamic-workflows` source/tests plus adversarial-review prompt template; the released npm package is installed project-locally for the active workflow tool.
 - `packages/browser-use` — clean-room CDP browser-use extension prototype.
 - `browser-extensions` — self-contained pnpm monorepo for Chrome/Firefox/Helium extensions.
 - `kimi-code-usage` — Kimi coding-plan usage CLI/MCP package plus VS Code extension.
 - `oh-my-pi` — self-contained OMP/Bun/Rust/Python monorepo used for agent runtime work.
 - `docs/research/kagi` — archived Kagi reverse-engineering capture; active Kagi client code lives in `packages/web-access/src/kagi.ts`.
-- `skills/pi-skills` — imported Pi core skills from `Arthur-CWW/skills` / upstream `badlogic/pi-skills`; no nested Git repo.
+- `skills/` — first-party passive skills grouped by domain (`core`, `browser`, `provider`, `research`, `design`, `media`); imported skill repos live under `vendor/<source>/...` and are loaded explicitly.
+- `catalog/workspaces.yml` — YAML ownership/discovery registry for ad hoc context roots, packet handoffs, and session path aliases.
 
 ## Pi project package
 
@@ -24,6 +25,34 @@ pi --help
 bun run lint
 bun run typecheck
 bun run test
+```
+
+### Porkbun MCP server
+
+`bun run mcp:porkbun` starts the official Porkbun MCP server on stdio for manual smoke tests:
+
+```bash
+bun run mcp:porkbun
+```
+
+To make tools available to an MCP client, use the repo-local `.omp/mcp.json` or add the config below. Export `PORKBUN_API_KEY` and `PORKBUN_SECRET_API_KEY` for live API calls; doc/search tools work without credentials.
+
+MCP client config:
+
+```json
+{
+  "mcpServers": {
+    "porkbun": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@porkbunllc/mcp-server"],
+      "env": {
+        "PORKBUN_API_KEY": "!printf '%s' \"$PORKBUN_API_KEY\"",
+        "PORKBUN_SECRET_API_KEY": "!printf '%s' \"$PORKBUN_SECRET_API_KEY\""
+      }
+    }
+  }
+}
 ```
 
 ## Structure
@@ -41,8 +70,9 @@ browser-extensions/ # browser extension monorepo
 kimi-code-usage/    # Kimi usage CLI/MCP and VS Code extension
 oh-my-pi/           # OMP runtime monorepo
 docs/research/kagi/ # archived Kagi reverse-engineering capture
-skills/
-  pi-skills/        # imported Pi core skills
+catalog/            # YAML workspace/capability/context registry
+skills/             # first-party domain-grouped skills
+vendor/             # vendored source trees and imported skill repos
 workflows/
   archive-pleometric/
   analyze-videos/

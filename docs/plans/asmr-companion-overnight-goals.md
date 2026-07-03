@@ -87,7 +87,7 @@ Inter-workstream gates:
 
 This section is a reference owned by **goal 2**. Other goals may consume its resulting manifests and proof artifacts, but they do not own provider access, access preflight, Jimeng/Seedance quality-conditioning decisions, or live provider stop conditions.
 
-Goal: improve Jimeng/Seedance I2V quality, especially first-frame artifacts from image generation. Arthur approved a standing live-access envelope for this pass, so senior agents may run live E2E provider tests when they need them for proof instead of treating live generation as a hard blocker. Record enough command/output/artifact paths under the approved ignored `data/**` root to resume and compare results; do not overbuild provenance policy.
+Goal: improve Jimeng/Seedance I2V quality, especially first-frame artifacts from image generation. Arthur approved a standing live-access envelope for this pass, so senior agents may run live E2E provider tests when they need them for proof instead of treating live generation as a hard blocker. Record enough command/output/artifact paths under the approved ignored `data/**` root to resume and compare results; keep run records useful, not policy-heavy.
 
 Goal 2 operator runbook: `docs/qa/asmr-seedance-goal2-runbook-20260624.md` records the `seedance-image2video-plan` command, generated-video-clips.v1 artifact paths, live preflight commands, caps, rate-limit handling, and stop conditions for this lane.
 
@@ -99,7 +99,7 @@ Access lanes:
 | KIE / MiniMax / adjacent video APIs | Comparative I2V/T2V plans or fallback providers | API key or existing account config in ignored local config/env | Allowed inside the approval if keys work, with its own cap and output subroot |
 | OMP / LLM subscriptions | GPT-5.5 implementation agents; Antigravity/Gemini, Kimi, ChatGPT/OpenAI Pro/Codex, and AI Studio/Gemini artifact generation or review where already authenticated | Use OMP/tool-managed OAuth/session resolution; do not extract, print, or copy raw OAuth/security tokens. OMP `task` agents remain the main implementation lane; Oracle-style prompt+file bundling/manual or recoverable browser sessions are acceptable for external review. Current `llm_frontend_browser` is best-effort only and must not be an overnight dependency. | Use GPT-5.5/Codex primarily for orchestration; prefer Antigravity/Gemini then Kimi for image/artifact generation; use Codex/OpenAI image generation only as fallback so orchestration quota stays available |
 | Voice/TTS | Synthetic whisper variants and ASMR delivery for goal 3 | Local/WebAudio/FFmpeg/Kokoro/OpenAI-compatible prototype first; provider APIs later for quality | Local/no-spend is allowed; live provider TTS is allowed inside the approval and recorded in `voice-assets.v1` |
-| YouTube/reference research | Metadata/transcripts/audio references | Local browser cookies and `yt-dlp`/transcript tooling already proved enough | Analysis/reference only; do not redistribute source media |
+| YouTube/reference research | Metadata/transcripts/audio references | Local browser cookies and `yt-dlp`/transcript tooling already proved enough | Analysis/reference only; source media export is not part of this lane |
 
 Standing live-access approval Arthur can approve for this pass:
 
@@ -178,8 +178,8 @@ Access checklist for Arthur before live E2E:
 - Live paid generation is allowed inside Arthur's standing live-access approval when it is needed for end-to-end quality testing; prefer existing codebase/provider caps and record outputs under the approved `data/**` roots.
 - Do not run any project-wide commands during the overnight run, including build/test/lint/format; use only scoped checkpoint commands for touched packages/files and record them.
 - Do not use sudo, write secrets, or commit/session-print credentials.
-- Integrate reverse-SynthID/Synthid-Bypass-informed image conditioning inside goal 2 as a quality step between image generation and Jimeng/Seedance I2V. The core problem is video artifacts/conditioning quality, not a provenance gate.
-- Keep generated media, audio stems, provider jobs, endpoint/model choices, prompts, parameters, and render outputs as internal pipeline metadata so runs can be reconstructed, compared, and rerun with different providers. The metadata belongs in manifests now and should converge into the centralized SQLite catalog; it is not a disclosure/safety policy.
+- Integrate reverse-SynthID/Synthid-Bypass-informed image conditioning inside goal 2 as a quality step between image generation and Jimeng/Seedance I2V. The core problem is video artifacts/conditioning quality, not proving origin metadata.
+- Keep generated media, audio stems, provider jobs, endpoint/model choices, prompts, parameters, and render outputs as internal pipeline metadata so runs can be reconstructed, compared, and rerun with different providers. The metadata belongs in manifests now and should converge into the centralized SQLite catalog; it is run/debug state, not public policy text.
 - Gemini or other vision models may analyze or generate first-frame candidates. If generated/edited pixels produce better I2V after conditioning, prioritize the quality result and keep enough sidecar/DB metadata to rerun it.
 - Tests should be close to the relevant package test directories. Each orchestrator runs scoped checkpoint tests and a workstream E2E proof; the coordinator runs scoped integrated verification at every handoff and final full E2E at the end.
 - Preserve user work in the repo. Touch only the owner paths named in the assigned goal unless a callsite requires a narrow documented change.
@@ -218,6 +218,27 @@ Main sequence:
 
 Coordinator rule: launch the next workstream only when its blockers in this graph have accepted proof. Temporary local fixtures are allowed only inside the owning workstream’s E2E proof when an upstream blocker explicitly exported them for that purpose.
 
+
+## Post-proof continuation — T-2026-06-24-002 Pleometric artifact-library v0
+
+After Goals 1–6 are accepted, the practical continuation is a small artifact-library slice, not a second overnight provider run and not a full combinator language.
+
+First implementation slice:
+
+1. Define a SQLite catalog schema for `entities`, `assets`, `effects`, `compositions`, and `provider_jobs`.
+2. Import the accepted ASMR proof artifacts as one reviewable composition: generated/placeholder clip, spatial audio master, captions/overlays, prompt/handoff bundle, and provider/DAG metadata.
+3. Add a simple viewer over the catalog: card list, media preview, raw JSON/details pane, tags/vibe notes, keep/reject, and composition notes.
+4. Keep provider metadata internal to rerun/debug/swap-provider workflows; do not turn it into a clearance checklist.
+5. Let effects emerge as named rows plus JSON params for repeated operations: aura overlays, line trains, synchronized copies, object masks, beat zooms, camera moves, caption-safe treatments, and spatial-audio bindings.
+
+Non-goals for this slice:
+
+- no visual node editor
+- no new DSL
+- no live provider spend
+- no global taxonomy migration
+- no renderer/provider ownership changes
+
 ## Backlog after overnight proof
 
 ### Realtime Airi-like companion runtime
@@ -227,7 +248,7 @@ This is not a main overnight goal. Start it only after goal 3 produces a usable 
 Backlog ownership when unblocked:
 
 - Persona, memory, STT/TTS boundaries, realtime response planning, spatial-audio intents, and VRM/Live2D stage controls.
-- Project AIRI may be used as architecture reference only; do not clone branding, character assets, or identity.
+- Project AIRI may be used as architecture reference; keep its branding, character assets, and identity separate from this runtime.
 - Reuse `voice-assets.v1`, `asmr-stems.v1`, and `spatial-audio-manifest.v1` from goal 1 and rendered/intended spatial behaviors from goal 3.
 - Keep realtime UI/runtime work separate from offline video generation and render pipeline ownership.
 
@@ -290,7 +311,7 @@ Explicit non-ownership:
 Workstream checkpoints:
 1. Schema foundation: choose contract location, implement decoders/types, add valid/invalid fixture tests, commit `goal-1: contract schema foundation`.
 2. Cross-stream fixtures: add representative valid fixtures for analysis tags, prompt card placeholder, voice/stems, spatial audio, and generated clips, commit `goal-1: shared fixture bundle`.
-3. Invalid fixture coverage: prove malformed critical fields fail where they affect downstream reliability: missing source hash/provenance, unsafe derivative input path, invalid timestamps, invalid spatial coordinates, generated clip without provider/model/job details, commit `goal-1: contract validation coverage`.
+3. Invalid fixture coverage: prove malformed critical fields fail where they affect downstream reliability: missing source/run hash, invalid derivative input path, invalid timestamps, invalid spatial coordinates, generated clip without provider/model/job details, commit `goal-1: contract validation coverage`.
 4. Export announcement: report exported names and fixture paths to the meta-orchestrator, commit `goal-1: contract handoff notes` if docs changed.
 
 Workstream E2E proof:
@@ -371,7 +392,7 @@ Explicit non-ownership:
 
 Workstream checkpoints:
 1. Manifest reader + fixture scene: consume `spatial-audio-manifest.v1` with local generated stems/test tones or provider TTS output, commit `goal-3: spatial audio fixture scene`.
-2. Renderer MVP: render a short stereo WAV/M4A proof supporting start/end, gain, fade, azimuth, elevation, distance, loop, bus, and provenance, commit `goal-3: spatial renderer mvp`.
+2. Renderer MVP: render a short stereo WAV/M4A proof supporting start/end, gain, fade, azimuth, elevation, distance, loop, bus, and source/job lineage, commit `goal-3: spatial renderer mvp`.
 3. ASMR reference mapping: include close-left whisper, close-right whisper, behind/near/far movement, soft brush/tap loop, and room tone or heartbeat bed, commit `goal-3: asmr scene mapping`.
 4. Audio proof tests: validate duration, stereo channel count, non-silent output, timing constraints, artifact paths, and manifest round-trip, commit `goal-3: spatial audio proof tests`.
 
@@ -431,7 +452,7 @@ Acceptance:
 ```txt
 /goal asmr-video-pipeline-integration-workstream
 
-You are the orchestrator for making the existing video generation/render path work end-to-end: `workflows/tiktok-recreate`, Jimeng video plan artifacts, Remotion composition, and HyperFrames handoff. Consume goals 1–4 outputs/contracts. Do not own provider access, first-frame provenance rules, audio rendering internals, or Pleometric prompt mechanics.
+You are the orchestrator for making the existing video generation/render path work end-to-end: `workflows/tiktok-recreate`, Jimeng video plan artifacts, Remotion composition, and HyperFrames handoff. Consume goals 1–4 outputs/contracts. Do not own provider access, first-frame conditioning metadata, audio rendering internals, or Pleometric prompt mechanics.
 
 Context:
 - Workflow files: `workflows/tiktok-recreate/workflow.js`, `workflows/tiktok-recreate/README.md`.

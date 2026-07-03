@@ -87,12 +87,14 @@ const PLACEHOLDER_LABELS = ["Summer Skincare", "Hydration Boost", "Coffee Brand"
 const FAKE_TOP_RIGHT_LABELS = ["Notifications", "History", "Arthur", "Preview", "Export"] as const
 const QA_VIEWS = [
   ["Exploration Board", "02-exploration-board.png"],
-  ["Batch Review", "03-batch-review.png"],
-  ["Campaign Branch Map", "04-campaign-map.png"],
-  ["Reference Archive", "05-reference-archive.png"],
+  ["Campaign Branch Map", "03-campaign-map.png"],
+  ["KIE Proxy", "04-kie-proxy.png"],
+  ["Batch Review", "05-batch-review.png"],
   ["Final Layer Editor", "06-final-editor.png"],
-  ["Developer Graph", "07-developer-graph.png"],
-  ["KIE Proxy", "08-kie-proxy.png"],
+  ["Reference Archive", "07-reference-archive.png"],
+  ["Developer Graph", "08-developer-graph.png"],
+  ["Pipeline Debug", "09-pipeline-debug.png"],
+  ["HyperFrames", "10-hyperframes.png"],
 ] as const
 const REFERENCE_CATALOG_ROOTS = [
   "data/tiktok-catalogue/pleometric",
@@ -127,8 +129,8 @@ try {
 
     findings.push(...referenceSeedFindings(referenceSeed))
 
-    await captureView(page, "01-persona-atlas.png", screenshots)
-    findings.push(...viewFindings(await auditView(page), "Persona Atlas"))
+    await captureView(page, "01-artifact-browser.png", screenshots)
+    findings.push(...viewFindings(await auditView(page), "Browse Artifacts"))
 
     for (const view of QA_VIEWS) {
       await switchView(page, view[0], false)
@@ -300,7 +302,12 @@ async function switchView(page: Page, viewLabel: string, mobile: boolean): Promi
     await page.waitForTimeout(200)
     return
   }
-  await page.locator(`[data-ugc-nav-row][aria-label="${viewLabel}"]`).click({ force: true })
+  const sidebarRows = page.locator(`[data-ugc-nav-row][aria-label="${viewLabel}"]`)
+  if (await sidebarRows.count()) {
+    await sidebarRows.first().click({ force: true })
+    return
+  }
+  await page.locator(`button[aria-label="${viewLabel}"]`).first().click({ force: true })
 }
 
 async function auditView(page: Page): Promise<ViewAudit> {
@@ -367,7 +374,7 @@ async function auditResponsiveViewport(browser: Browser, width: number, height: 
     await page.waitForSelector("[data-ugc-studio-root]", { timeout: 20_000 })
     const findings: Finding[] = []
     findings.push(...await auditDockedNavToggle(page, label))
-    findings.push(...responsiveViewFindings(await auditView(page), "Persona Atlas", label))
+    findings.push(...responsiveViewFindings(await auditView(page), "Browse Artifacts", label))
     for (const view of QA_VIEWS) {
       await switchView(page, view[0], false)
       await page.waitForTimeout(50)
@@ -388,7 +395,7 @@ async function auditDockedNavToggle(page: Page, viewportLabel: string): Promise<
   const audit = await page.evaluate(() => ({
     hasDrawer: Boolean(document.querySelector("[data-ugc-nav-drawer]")),
     hasOverlay: Boolean(document.querySelector("[data-ugc-nav-drawer-overlay]")),
-    navRowsVisible: document.querySelectorAll("[data-ugc-nav-row]").length > 0,
+    navRowsVisible: document.querySelectorAll("[data-ugc-nav-row]").length > 0 || document.querySelectorAll('button[aria-label="Browse Artifacts"], button[aria-label="Exploration Board"]').length > 0,
   }))
   if (await toggle.count()) {
     await toggle.click({ force: true })
@@ -409,7 +416,7 @@ async function auditMobileViewport(browser: Browser, width: number, height: numb
     await page.waitForSelector("[data-ugc-studio-root]", { timeout: 20_000 })
     const findings: Finding[] = []
     findings.push(...await auditMobileDrawer(page, label))
-    findings.push(...mobileViewFindings(await auditView(page), "Persona Atlas", label))
+    findings.push(...mobileViewFindings(await auditView(page), "Browse Artifacts", label))
     for (const view of QA_VIEWS) {
       await switchView(page, view[0], true)
       await page.waitForTimeout(50)

@@ -350,6 +350,7 @@ async function runInTabWithSnapshot(
 	if (tab.pending.size > 0) throw new ToolError(`Tab ${JSON.stringify(name)} is busy`);
 	const id = Snowflake.next();
 	const { promise, resolve, reject } = Promise.withResolvers<RunResultOk>();
+	observeRunPromiseRejection(promise);
 	const pending: PendingRun = {
 		resolve,
 		reject,
@@ -610,6 +611,10 @@ async function closeOrphanTarget(tab: WorkerTabSession): Promise<void> {
 	}
 }
 
+function observeRunPromiseRejection(promise: Promise<RunResultOk>): void {
+	void promise.catch(() => undefined);
+}
+
 async function waitForClosed(tab: WorkerTabSession): Promise<void> {
 	const { promise, resolve } = Promise.withResolvers<void>();
 	const unsubscribe = tab.worker.onMessage(msg => {
@@ -790,6 +795,17 @@ export function initializeTabWorkerForTest(
 	timeoutMs: number,
 ): Promise<ReadyInfo> {
 	return initializeTabWorker(worker, payload, timeoutMs);
+}
+
+export function observeRunPromiseRejectionForTest(promise: Promise<RunResultOk>): void {
+	observeRunPromiseRejection(promise);
+}
+
+export function registerTabForTest(tab: TabSession): () => void {
+	tabs.set(tab.name, tab);
+	return () => {
+		if (tabs.get(tab.name) === tab) tabs.delete(tab.name);
+	};
 }
 
 function errorFromWorkerEvent(event: ErrorEvent): Error {

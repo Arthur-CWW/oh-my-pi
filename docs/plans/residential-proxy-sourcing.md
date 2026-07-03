@@ -2,7 +2,7 @@
 
 Security-research orientation: map options from clean commercial to grey/free,
 with cost, risk, and jurisdictional notes for an Australia-based researcher who
-needs US egress. This is not legal advice; verify locally before using any
+needs US egress. Verify jurisdiction-specific requirements before using any
 option.
 
 ## Context: Kimi and local LLMs
@@ -106,21 +106,21 @@ abuse.
 ## Grey market / higher-risk sources
 
 These are the areas security researchers study but generally should not use for
-production automation without strong legal review.
+production automation without a target-specific risk review.
 
 | Category | How it works | Risk |
 |---|---|---|
 | **Resold ISP/customer accounts** | Someone sells access to a residential connection (router admin, VPN into an ISP-issued gateway). | High — likely violates ISP ToS; may be tied to identity fraud. |
-| **SIM farms / mobile proxies** | A rack of US SIMs with modems providing rotating mobile IPs. | Moderate–high. Legal if you own the SIMs and contracts; illegal if using stolen/cloned SIMs or bypassing carrier ToS. |
+| **SIM farms / mobile proxies** | A rack of US SIMs with modems providing rotating mobile IPs. | Moderate–high. Lower risk if you own the SIMs and contracts; illegal if using stolen/cloned SIMs or bypassing carrier ToS. |
 | **Bulletproof / offshore hosts** | Providers that ignore abuse reports; often mix datacenter and compromised residential IPs. | Very high — frequent association with fraud, malware, and sanctions evasion. |
 | **Compromised IoT / botnet proxies** | Malware infects routers/cameras and sells SOCKS access. | Criminal in AU/US under computer-misuse and fraud statutes. Do not use. |
-| **Public free proxy lists** | Aggregated open SOCKS/HTTP proxies, many from misconfigured devices or malware. | Very high — traffic interception, credential theft, and legal exposure. |
+| **Public free proxy lists** | Aggregated open SOCKS/HTTP proxies, many from misconfigured devices or malware. | Very high — traffic interception, credential theft, and abuse-report exposure. |
 | **Academic / corporate trial arbitrage** | Repeated free trials using different identities/cards. | High — fraud if identity/card info is fabricated or stolen. |
 
 ## Setting up residential proxy infrastructure in Australia
 
-If you want to run the infrastructure rather than just buy proxies, the lawful
-paths are:
+If you want to run the infrastructure rather than just buy proxies, the
+consent-based paths are:
 
 ### P2P app / SDK network (lowest cost at scale)
 
@@ -171,7 +171,7 @@ once you pass a few terabytes per month.
 - Monthly participant payout: $20–$50/mo.
 - Effective bandwidth cost can reach **$0.30–$0.80/GB** if the node is busy.
 
-## Australia-specific legal notes
+## Australia-specific statutory notes
 
 - **Spam Act 2003** and **Criminal Code (Cth)** computer offences apply to
   abusive automated access.
@@ -184,7 +184,7 @@ once you pass a few terabytes per month.
 
 ## Recommendation for a US-egress research setup
 
-1. **Start cheap and lawful**: Webshare free datacenter tier + Windscribe free
+1. **Start cheap and consent-based**: Webshare free datacenter tier + Windscribe free
    for quick US checks.
 2. **Validate target tolerance**: test whether your targets block VPN/datacenter
    ASNs before buying residential traffic.
@@ -196,7 +196,7 @@ once you pass a few terabytes per month.
    to understand P2P proxyware economics; avoid compromised/botnet/public-list
    sources entirely.
 
-## Setting up a lawful US residential proxy pool
+## Setting up a consent-based US residential proxy pool
 
 The US has the highest demand for residential IPs, so building a pool there is
 valuable but also the most scrutinized. The only sustainable path is
@@ -221,7 +221,7 @@ valuable but also the most scrutinized. The only sustainable path is
    $0.10–$0.50/GB.
 4. Central gateway with auth, session rotation, geo-routing, bandwidth
    metering, and abuse filtering.
-5. US legal entity (Delaware LLC or C-Corp) with EIN, privacy policy, and
+5. US operating entity (Delaware LLC or C-Corp) with EIN, privacy policy, and
    abuse response process.
 
 **Compliance**: FTC Act (no deception), CAN-SPAM (downstream customers must
@@ -283,16 +283,16 @@ privacy), and DMCA safe-harbor registration.
 | Health checker | Remove blocked or poor-quality IPs |
 | Log store | Minimal logs for abuse response |
 
-### Cheapest lawful US entry point
+### Cheapest consent-based US entry point
 
 1. Start with 5–10 mobile nodes in different cities (~$2,000 hardware,
    ~$500/mo SIMs).
 2. Test IP quality against real targets.
 3. Recruit 20–50 fixed-line participants via an opt-in program.
-4. Build a P2P app once revenue and legal counsel are in place.
+4. Build a P2P app once revenue and counsel-reviewed contracts are in place.
 5. Incorporate and document consent before scaling past a pilot.
 
-### What is not lawful
+### Prohibited sources and uses
 
 - Malware-installed proxy software on strangers’ devices.
 - Buying compromised router proxies.
@@ -391,6 +391,23 @@ This is a working example of the hybrid model:
 - https://driver.dev/
 - Alex Spring / @aibrowsers public statements on X/Twitter.
 
+## Typed data coverage in `packages/proxy-lab`
+
+- Provider-level facts from the pricing/risk tables are mirrored in
+  `defaultProviderMatrix` and `providerEconomics`, including plan-only entries
+  for Proxying, Proxy-Cheap / Proxy-Seller, and academic/corporate trial
+  arbitrage.
+- `consentBasedUsEgressComparisons()` returns review rows with consent
+  provenance, concrete risk facts, `normalizedCostBasis`, and
+  `normalizedCostUsdPerGb` where bandwidth-normalized data exists, so
+  commercial, static, VPN, P2P, hosted-browser, and self-operated US egress
+  options can be compared without re-reading prose.
+- Infrastructure build-out facts are mirrored in
+  `usEgressInfrastructureScenarios` and
+  `consentBasedUsEgressInfrastructureScenarios()`, covering P2P app networks,
+  owned mobile farms, fixed-line opt-in nodes, ISP/WISP partnerships, US eSIM
+  hotspots, and residential co-location.
+
 ## Research next steps
 
 - Build an evaluation harness that measures IP reputation, ASN type, block rate,
@@ -398,7 +415,7 @@ This is a working example of the hybrid model:
 - Capture provider response headers, TLS fingerprint, and WebRTC leaks to
   classify whether an IP is really residential.
 - Document kill-switch / policy logic in `packages/proxy-lab` so any live
-  testing has automatic abuse-guard rails.
+  testing has automatic abuse controls.
 
 ## Sources
 

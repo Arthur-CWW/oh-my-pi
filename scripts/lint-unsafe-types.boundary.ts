@@ -38,25 +38,141 @@ type BaselineFile = {
 };
 
 const baselinePath = "tools/ast-grep/unsafe-types-baseline.json";
+const unsafeTypeRuleFilter = "^no-unsafe-any";
+const ratchetedStaticGuardrailRuleFilter = "^no-react-static-markup-ui-tests$";
+const ratchetedStaticGuardrailBaseline: BaselineEntry[] = [
+	staticGuardrailBaselineEntry(
+		"apps/slotok-workbench/src/renderer/ReactUgcStudio.test.ts",
+		`
+renderToStaticMarkup(
+      React.createElement(ReactUgcStudio, { initialView: "provider" }),
+    )
+`,
+	),
+	staticGuardrailBaselineEntry(
+		"apps/slotok-workbench/src/renderer/ReactUgcStudio.test.ts",
+		`stableCopy(html, "Local provider controls")`,
+	),
+	staticGuardrailBaselineEntry(
+		"apps/slotok-workbench/src/renderer/ReactUgcStudio.test.ts",
+		`stableCopy(html, "KIE route controls")`,
+	),
+	staticGuardrailBaselineEntry(
+		"apps/slotok-workbench/src/renderer/ReactUgcStudio.test.ts",
+		`stableCopy(html, "Operation")`,
+	),
+	staticGuardrailBaselineEntry(
+		"apps/slotok-workbench/src/renderer/ReactUgcStudio.test.ts",
+		`stableCopy(html, "image-text / seedream/5-lite-text-to-image")`,
+	),
+	staticGuardrailBaselineEntry(
+		"apps/slotok-workbench/src/renderer/ReactUgcStudio.test.ts",
+		`stableCopy(html, "Seedream 5 Lite text-to-image")`,
+	),
+	staticGuardrailBaselineEntry(
+		"apps/slotok-workbench/src/renderer/ReactUgcStudio.test.ts",
+		`stableCopy(html, "local dry-run JSON")`,
+	),
+	staticGuardrailBaselineEntry(
+		"apps/slotok-workbench/src/renderer/ReactUgcStudio.test.ts",
+		`stableCopy(html, "capped provider request")`,
+	),
+	staticGuardrailBaselineEntry(
+		"apps/slotok-workbench/src/renderer/ReactUgcStudio.test.ts",
+		`stableCopy(html, "Plan dry-run JSON")`,
+	),
+	staticGuardrailBaselineEntry(
+		"apps/slotok-workbench/src/renderer/ReactUgcStudio.test.ts",
+		`stableCopy(html, "Send live ($0.05 cap)")`,
+	),
+	staticGuardrailBaselineEntry(
+		"apps/slotok-workbench/src/renderer/ReactUgcStudio.test.ts",
+		`stableClassTokens(html, /<label class="([^"]+)"><span class="[^"]+">Operation<\\/span><select/, stablePrimitiveTokens.field)`,
+	),
+	staticGuardrailBaselineEntry(
+		"apps/slotok-workbench/src/renderer/ReactUgcStudio.test.ts",
+		`stableClassTokens(html, /<span class="([^"]+)">Operation<\\/span><select/, stablePrimitiveTokens.fieldLabel)`,
+	),
+	staticGuardrailBaselineEntry(
+		"apps/slotok-workbench/src/renderer/ReactUgcStudio.test.ts",
+		`stableClassTokens(html, /<select class="([^"]+)"/, stablePrimitiveTokens.select)`,
+	),
+	staticGuardrailBaselineEntry(
+		"apps/slotok-workbench/src/renderer/ReactUgcStudio.test.ts",
+		`stableClassTokens(html, /<div class="([^"]+)"><strong>Seedream 5 Lite text-to-image<\\/strong>/, stablePrimitiveTokens.note)`,
+	),
+	staticGuardrailBaselineEntry(
+		"apps/slotok-workbench/src/renderer/ReactUgcStudio.test.ts",
+		`expect(html).toContain(text)`,
+	),
+	staticGuardrailBaselineEntry(
+		"apps/slotok-workbench/src/renderer/ReactUgcStudio.test.ts",
+		`expect(html).toContain("data-ugc-studio-root")`,
+	),
+	staticGuardrailBaselineEntry(
+		"apps/slotok-workbench/src/renderer/ReactUgcStudio.test.ts",
+		`expect(html).toContain("KIE route controls")`,
+	),
+	staticGuardrailBaselineEntry(
+		"apps/slotok-workbench/src/renderer/ReactUgcStudio.test.ts",
+		`expect(html).toContain("Seedream 5 Lite text-to-image")`,
+	),
+	staticGuardrailBaselineEntry(
+		"apps/slotok-workbench/src/renderer/ReactUgcStudio.test.ts",
+		`expect(html).toContain("Default action prepares local dry-run JSON")`,
+	),
+	staticGuardrailBaselineEntry(
+		"apps/slotok-workbench/src/renderer/ReactUgcStudio.test.ts",
+		`expect(html).toContain("Send live ($0.05 cap)")`,
+	),
+	staticGuardrailBaselineEntry(
+		"packages/jimeng-client/test/artifact-dashboard.test.ts",
+		`expect(html).toContain("Packet queue")`,
+	),
+	staticGuardrailBaselineEntry(
+		"packages/jimeng-client/test/proof-renderer.test.ts",
+		`expect(html).toContain("<video controls src=\\"../artifacts/video.mp4\\"></video>")`,
+	),
+	staticGuardrailBaselineEntry(
+		"packages/jimeng-client/test/proof-renderer.test.ts",
+		`expect(html).toContain("normalized/text2video-result.json")`,
+	),
+	staticGuardrailBaselineEntry(
+		"packages/jimeng-client/test/proof-renderer.test.ts",
+		`expect(html).toContain("https://cdn.example.test/video.mp4")`,
+	),
+	staticGuardrailBaselineEntry(
+		"packages/jimeng-client/test/proof-renderer.test.ts",
+		`expect(html).toContain("No <code>normalized/*-result.json</code> files found.")`,
+	),
+	staticGuardrailBaselineEntry(
+		"packages/twitter-archive/test/dev-ui.test.ts",
+		`expect(html).toContain("/assets/dev-ui.css")`,
+	),
+	staticGuardrailBaselineEntry(
+		"packages/jimeng-client/test/proof-renderer.test.ts",
+		`expect(html).not.toContain("secret-token")`,
+	),
+	staticGuardrailBaselineEntry(
+		"packages/jimeng-client/test/proof-renderer.test.ts",
+		`expect(html).not.toContain(fixture.root)`,
+	),
+	staticGuardrailBaselineEntry(
+		"packages/twitter-archive/test/dev-ui.test.ts",
+		`expect(html).not.toContain("<style>")`,
+	),
+];
 const args = new Set(process.argv.slice(2));
 const update = args.has("--update");
 const strict = args.has("--strict");
 const scanWorktree = args.has("--worktree") || args.has("--all");
 const excludedTrackedPrefixes = ["browser-extensions/", "kimi-code-usage/", "oh-my-pi/", "vendor/"];
 const trackedSourceFiles = scanWorktree ? null : gitTrackedSourceFiles();
-const scanArgs = [
-	"scan",
-	"--config",
-	"sgconfig.yml",
-	"--filter",
-	"^no-unsafe-any",
-	"--json=stream",
-];
+const scanArgs = buildScanArgs(unsafeTypeRuleFilter, trackedSourceFiles);
 if (trackedSourceFiles && trackedSourceFiles.length === 0) {
 	console.log("Unsafe type lint skipped: no git-tracked TypeScript/Python files.");
 	process.exit(0);
 }
-if (trackedSourceFiles) scanArgs.push(...trackedSourceFiles);
 
 const scan = runAstGrep(scanArgs);
 
@@ -81,7 +197,8 @@ if (strict) {
 		printEntries(current, current.length);
 		process.exit(1);
 	}
-	console.log("Unsafe type lint passed with zero findings.");
+	const guardrailSummary = checkRatchetedStaticGuardrails(trackedSourceFiles);
+	console.log(`Unsafe type lint passed with zero findings. ${guardrailSummary}`);
 	process.exit(0);
 }
 
@@ -112,8 +229,9 @@ const baseline = readBaseline(baselinePath);
 const diff = diffEntries(baseline.matches, current);
 
 if (diff.added.length === 0 && diff.removed.length === 0) {
+	const guardrailSummary = checkRatchetedStaticGuardrails(trackedSourceFiles);
 	console.log(
-		`Unsafe type lint passed: ${findings.length} known finding(s), no new any/unknown/Any usage.`,
+		`Unsafe type lint passed: ${findings.length} known finding(s), no new any/unknown/Any usage. ${guardrailSummary}`,
 	);
 	process.exit(0);
 }
@@ -135,6 +253,55 @@ if (diff.removed.length > 0) {
 }
 
 process.exit(1);
+
+function buildScanArgs(ruleFilter: string, sourceFiles: string[] | null): string[] {
+	const args = [
+		"scan",
+		"--config",
+		"sgconfig.yml",
+		"--filter",
+		ruleFilter,
+		"--json=stream",
+	];
+	if (sourceFiles) args.push(...sourceFiles);
+	return args;
+}
+
+function checkRatchetedStaticGuardrails(sourceFiles: string[] | null): string {
+	const guardrailScan = runAstGrep(buildScanArgs(ratchetedStaticGuardrailRuleFilter, sourceFiles));
+	if (guardrailScan.error) {
+		console.error("Failed to run ast-grep. Install Bun or add @ast-grep/cli to this workspace.");
+		console.error(guardrailScan.error.message);
+		process.exit(127);
+	}
+
+	const guardrailFindings = parseFindings(guardrailScan.stdout);
+	if (guardrailScan.status !== 0 && guardrailFindings.length === 0) {
+		console.error(guardrailScan.stderr.trim() || "ast-grep failed before producing JSON output.");
+		process.exit(guardrailScan.status ?? 1);
+	}
+
+	const guardrailDiff = diffEntries(ratchetedStaticGuardrailBaseline, summarizeStaticGuardrailFindings(guardrailFindings));
+	if (guardrailDiff.added.length === 0 && guardrailDiff.removed.length === 0) {
+		return `Static guardrail lint passed: ${guardrailFindings.length} known raw-HTML React test finding(s), no new owned React raw-HTML assertions.`;
+	}
+
+	if (guardrailDiff.added.length > 0) {
+		console.error(`Static guardrail lint failed: ${guardrailDiff.addedCount} new raw-HTML React test finding(s).`);
+		console.error("Use state/view-model assertions for owned React components, or move true HTML parsing tests to boundary/external files.");
+		printEntries(guardrailDiff.added, Math.min(guardrailDiff.added.length, 25));
+	}
+
+	if (guardrailDiff.removed.length > 0) {
+		console.error(
+			`Static guardrail baseline is stale: ${guardrailDiff.removedCount} known finding(s) disappeared. ` +
+				"Remove the corresponding inline ratchet entry in scripts/lint-unsafe-types.boundary.ts.",
+		);
+		if (guardrailDiff.added.length === 0) printEntries(guardrailDiff.removed, Math.min(guardrailDiff.removed.length, 25));
+	}
+
+	process.exit(1);
+}
 
 function runAstGrep(args: string[]): ReturnType<typeof spawnSync> {
 	const direct = spawnSync("ast-grep", args, {
@@ -189,16 +356,7 @@ function parseFindings(stdout: string): AstGrepFinding[] {
 function summarize(findings: AstGrepFinding[]): CurrentEntry[] {
 	const byKey = new Map<string, CurrentEntry>();
 	for (const finding of findings) {
-		const entry: CurrentEntry = {
-			ruleId: finding.ruleId,
-			file: normalizePath(finding.file),
-			text: finding.text,
-			source: normalizeSource(finding.lines),
-			count: 1,
-			lineNumber: finding.range.start.line + 1,
-			column: finding.range.start.column + 1,
-			message: finding.message,
-		};
+		const entry = currentEntryFromFinding(finding);
 		const key = entryKey(entry);
 		const existing = byKey.get(key);
 		if (existing) {
@@ -210,6 +368,61 @@ function summarize(findings: AstGrepFinding[]): CurrentEntry[] {
 		}
 	}
 	return [...byKey.values()].sort(compareEntries);
+}
+
+function currentEntryFromFinding(finding: AstGrepFinding, count = 1): CurrentEntry {
+	return {
+		ruleId: finding.ruleId,
+		file: normalizePath(finding.file),
+		text: finding.text,
+		source: normalizeSource(finding.lines),
+		count,
+		lineNumber: finding.range.start.line + 1,
+		column: finding.range.start.column + 1,
+		message: finding.message,
+	};
+}
+
+function summarizeStaticGuardrailFindings(findings: AstGrepFinding[]): CurrentEntry[] {
+	const byKey = new Map<string, CurrentEntry>();
+	for (const finding of findings) {
+		const entry = currentStaticGuardrailEntryFromFinding(finding);
+		const key = entryKey(entry);
+		const existing = byKey.get(key);
+		if (existing) {
+			existing.count += 1;
+			existing.lineNumber = Math.min(existing.lineNumber, entry.lineNumber);
+			existing.column = Math.min(existing.column, entry.column);
+		} else {
+			byKey.set(key, entry);
+		}
+	}
+	return [...byKey.values()].sort(compareEntries);
+}
+
+function currentStaticGuardrailEntryFromFinding(finding: AstGrepFinding, count = 1): CurrentEntry {
+	const normalizedText = normalizeSource(finding.text);
+	return {
+		ruleId: finding.ruleId,
+		file: normalizePath(finding.file),
+		text: normalizedText,
+		source: normalizedText,
+		count,
+		lineNumber: finding.range.start.line + 1,
+		column: finding.range.start.column + 1,
+		message: finding.message,
+	};
+}
+
+function staticGuardrailBaselineEntry(file: string, markupCall: string): BaselineEntry {
+	const normalizedMarkupCall = normalizeSource(markupCall);
+	return {
+		ruleId: "no-react-static-markup-ui-tests",
+		file,
+		text: normalizedMarkupCall,
+		source: normalizedMarkupCall,
+		count: 1,
+	};
 }
 
 function diffEntries(baseline: BaselineEntry[], current: CurrentEntry[]) {

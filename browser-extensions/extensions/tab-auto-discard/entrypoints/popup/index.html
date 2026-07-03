@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tab Auto-Discard</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main class="popup">
+      <header class="popup__header">
+        <h1>Tab Auto-Discard</h1>
+        <p>Automatically discard inactive tabs with the browser's native discard API.</p>
+      </header>
+
+      <form id="settings-form" class="settings-form">
+        <label class="checkbox-row">
+          <input id="enabled" type="checkbox" />
+          <span>Enable auto-discarding</span>
+        </label>
+
+        <label class="field-group">
+          <span class="field-label">Discard after idle minutes</span>
+          <input id="idle-minutes" type="number" min="1" step="1" inputmode="numeric" />
+        </label>
+
+        <label class="field-group">
+          <span class="field-label">Scope</span>
+          <select id="scope">
+            <option value="x-only">X and Twitter tabs only</option>
+            <option value="all-tabs">All normal tabs</option>
+            <option value="match-patterns">Match include patterns</option>
+          </select>
+        </label>
+
+        <label id="include-patterns-group" class="field-group">
+          <span class="field-label">Include patterns</span>
+          <textarea
+            id="include-patterns"
+            rows="4"
+            spellcheck="false"
+            placeholder="One wildcard URL pattern per line"
+          ></textarea>
+          <span class="field-hint">Used only when scope is set to match include patterns.</span>
+        </label>
+
+        <label class="field-group">
+          <span class="field-label">Exclude patterns</span>
+          <textarea
+            id="exclude-patterns"
+            rows="5"
+            spellcheck="false"
+            placeholder="One wildcard URL pattern per line"
+          ></textarea>
+          <span class="field-hint">Matching tabs are always skipped.</span>
+        </label>
+
+        <div class="checkbox-list">
+          <label class="checkbox-row">
+            <input id="skip-pinned" type="checkbox" />
+            <span>Skip pinned tabs</span>
+          </label>
+          <label class="checkbox-row">
+            <input id="skip-audible" type="checkbox" />
+            <span>Skip audible tabs</span>
+          </label>
+        </div>
+      </form>
+
+      <p id="status" class="status" aria-live="polite">Loading settings…</p>
+
+      <button id="discard-now" type="button" class="discard-button">
+        Discard matching inactive tabs now
+      </button>
+    </main>
+
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

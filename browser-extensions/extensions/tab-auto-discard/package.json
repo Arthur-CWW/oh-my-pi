@@ -1,0 +1,24 @@
+{
+  "name": "tab-auto-discard",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Cross-browser extension that discards idle matching tabs with the native browser discard API.",
+  "scripts": {
+    "dev": "wxt",
+    "dev:firefox": "wxt --browser firefox",
+    "build": "wxt build",
+    "build:firefox": "wxt build --browser firefox",
+    "zip": "wxt zip",
+    "zip:firefox": "wxt zip --browser firefox",
+    "test": "vitest run",
+    "typecheck": "wxt prepare && tsc --noEmit -p tsconfig.check.json",
+    "check": "pnpm typecheck && pnpm test && pnpm build && pnpm build:firefox"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.1.32",
+    "typescript": "^5.0.0",
+    "vitest": "^3.0.0",
+    "wxt": "^0.20.0"
+  }
+}

@@ -56,6 +56,10 @@ interface CollectionRecord {
   readonly payload: object
 }
 
+interface BunSqliteModule {
+  readonly Database: typeof import("bun:sqlite").Database
+}
+
 export class UgcSqliteStore {
   readonly config: UgcSqliteStoreConfig
 
@@ -162,6 +166,22 @@ export class UgcSqliteStore {
           id ASC
       `).all(collection)
       return rows.map((row) => JSON.parse(row.payload_json) as JsonValue)
+    } finally {
+      db.close()
+    }
+  }
+
+  readObject(collection: UgcSqliteCollection, id: string): JsonValue | null {
+    if (!existsSync(this.config.sqlitePath)) return null
+    const db = this.openReadonly()
+    try {
+      const row = db.query<ObjectRow, [string, string]>(`
+        SELECT payload_json
+        FROM objects
+        WHERE collection = ? AND id = ?
+        LIMIT 1
+      `).get(collection, id)
+      return row ? JSON.parse(row.payload_json) as JsonValue : null
     } finally {
       db.close()
     }
@@ -315,5 +335,13 @@ function isUgcSqliteCollection(value: string): value is UgcSqliteCollection {
 }
 
 function loadDatabase(): typeof import("bun:sqlite").Database {
-  return import.meta.require("bun:sqlite").Database as typeof import("bun:sqlite").Database
+  const importMetaRequire = (import.meta as ImportMeta & { readonly require?: (specifier: string) => unknown }).require
+  if (typeof importMetaRequire === "function") {
+    return (importMetaRequire("bun:sqlite") as BunSqliteModule).Database
+  }
+  const globalRequire = (globalThis as typeof globalThis & { readonly require?: (specifier: string) => unknown }).require
+  if (typeof globalRequire === "function") {
+    return (globalRequire("bun:sqlite") as BunSqliteModule).Database
+  }
+  throw new Error("bun:sqlite is only available when running UgcSqliteStore under Bun")
 }

@@ -6,6 +6,7 @@ import { Badge, type BadgeProps } from "../components/ui/badge"
 import { Button } from "../components/ui/button"
 import { Card } from "../components/ui/card"
 import { Sidebar as SidebarPrimitive, SidebarMenuButton, type SidebarMenuButtonProps } from "../components/ui/sidebar"
+import { Select } from "../components/ui/select"
 import { Textarea } from "../components/ui/textarea"
 import { cn } from "../lib/cn"
 import { toneClasses, ugcDesignTokens, type UgcTone } from "./tokens"
@@ -131,6 +132,45 @@ export function SidebarRow(props: SidebarMenuButtonProps & {
 
 export function ToolbarCluster(props: React.HTMLAttributes<HTMLDivElement>) {
   return <div {...props} className={cn("flex min-w-0 items-center gap-1 overflow-x-auto rounded-xl border border-zinc-200 bg-white p-1 shadow-sm", props.className)} />
+}
+
+export function WorkbenchField(props: React.LabelHTMLAttributes<HTMLLabelElement> & {
+  readonly label: React.ReactNode
+  readonly description?: React.ReactNode
+  readonly labelClassName?: string
+}) {
+  const { children, className, description, label, labelClassName, ...rest } = props
+  return (
+    <label {...rest} className={cn("grid gap-1.5", className)}>
+      <span className={cn(ugcDesignTokens.text.label, labelClassName)}>{label}</span>
+      {children}
+      {description ? <span className="text-[10px] leading-4 text-muted-foreground">{description}</span> : null}
+    </label>
+  )
+}
+
+export function WorkbenchSelect(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
+  return (
+    <Select
+      {...props}
+      className={cn(
+        "min-w-0 border-input text-foreground focus-visible:ring-ring",
+        props.className,
+      )}
+    />
+  )
+}
+
+export function WorkbenchNote(props: React.HTMLAttributes<HTMLDivElement>) {
+  return (
+    <div
+      {...props}
+      className={cn(
+        "rounded-lg border border-zinc-200 bg-zinc-50 p-2.5 text-[11px] leading-4 text-muted-foreground [&_p]:m-0 [&_p]:mt-1 [&_strong]:text-foreground",
+        props.className,
+      )}
+    />
+  )
 }
 
 export function MetricRow(props: {

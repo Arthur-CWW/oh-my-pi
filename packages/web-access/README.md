@@ -2,6 +2,8 @@
 
 Web search, content fetching, YouTube transcripts, Chrome cookie access, and Codex session import for Pi coding agent.
 
+Skills that were previously co-located in this package have moved to the repo-level `skills/` directory; this package remains the published active extension/tool bundle (`@wirebabel/pi-web-access`) pending a future package split.
+
 Works with **zero config** on macOS — reads Chrome cookies for Gemini and Firefox cookies for Kagi. No API keys needed.
 
 ## Install
@@ -243,6 +245,11 @@ Set `CHROME_DEBUG_URL` to your Chrome DevTools endpoint (default: `http://localh
 
 - `PI_FETCH_BROWSER_APP` — macOS browser app name to use for background extraction (default tries `Google Chrome`, then Chromium/Brave/Edge)
 - `PI_DISABLE_BROWSER_FALLBACK=1` — disable the background browser fallback entirely
+
+Twitter/X image localization for `fetch_content`:
+
+- `PI_TWITTER_X_ASSET_ROOT` — directory for downloaded Twitter/X images (default: `docs/research/twitter-x/assets`)
+- `PI_AUTO_LOCALIZE_TWITTER_IMAGES=0` — disable automatic image download and URL rewriting for Twitter/X URLs
 
 ## Testing
 

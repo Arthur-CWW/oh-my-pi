@@ -19,4 +19,11 @@ note: |
   If a test is truly about HTML parsing, keep it in a named boundary/external test
   or use `// ast-grep-ignore: no-react-static-markup-ui-tests` with a justification.
 rule:
-  pattern: renderToStaticMarkup($$$ARGS)
+  any:
+    - pattern: renderToStaticMarkup($$$ARGS)
+    - pattern: expect(html).toContain($$$ARGS)
+    - pattern: expect(html).toMatch($$$ARGS)
+    - pattern: expect(html).not.toContain($$$ARGS)
+    - pattern: expect(html).not.toMatch($$$ARGS)
+    - pattern: stableCopy(html, $TEXT)
+    - pattern: stableClassTokens(html, $PATTERN, $TOKENS)

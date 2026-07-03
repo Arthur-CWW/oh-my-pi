@@ -149,12 +149,13 @@ git diff --stat
 
 ## Stream priority note (latest steering)
 
-Treat the following as **main streams** of equal advisory weight:
+Treat the following as **main streams**:
 
 1. AI companion / VRM / realtime avatar (`apps/ai-companion-rtc/`, `chatbot_rtc` sessions)
-2. UGC / TikTok distribution + asset/workbench pipeline (`apps/slotok-workbench/`, `ugc_video` sessions)
-3. Learning / second‑brain (HSK deck, Mochi clone, Diamond Age Primer / Nick Land reader, personal library, annotation app, browser history / Twitter graph / personal knowledge graph)
+2. UGC / media creative playground (`apps/slotok-workbench/`, `ugc_video` sessions)
+3. Personal second-brain / shared context (Twitter/X archive + HSK deck + Mochi clone + Diamond Age Primer / Nick Land reader + personal library + annotation app + browser history / Twitter graph / personal knowledge graph)
+4. Agent harness / cyborgism (`oh-my-pi/`, `packages/web-access/`, `.omp/`, high-score `agent_harness` sessions)
 
-Twitter/X archive and agent harness/cyborgism are **supporting infrastructure**. Cybersecurity, vphone, proxy, and reverse‑engineering lanes are present but routed away from Fable.
+Cybersecurity, vphone, proxy, and reverse-engineering lanes are present but routed away from Fable.
 
 In the current dirty tree, the visible learning/second‑brain candidates are mostly the `packages/borges-library/` book tooling and the reading lists under `docs/research/slotok-design-books-*.md`; the main app repos (`~/apps/mochi-lite`, `~/apps/hsk-deck`, etc.) are outside this repo and are not part of this commit plan.

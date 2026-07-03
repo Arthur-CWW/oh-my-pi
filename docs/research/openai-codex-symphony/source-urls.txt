@@ -1,0 +1,58 @@
+# OpenAI Symphony upstream sources read for this reuse map
+# All URLs fetched 2026-06-23 from the public openai/symphony repository.
+
+## Top-level spec and README
+https://github.com/openai/symphony
+https://github.com/openai/symphony/blob/main/SPEC.md
+
+## Elixir reference implementation docs
+https://github.com/openai/symphony/blob/main/elixir/README.md
+https://github.com/openai/symphony/blob/main/elixir/Makefile
+
+## OTP application / supervision tree
+https://github.com/openai/symphony/blob/main/elixir/lib/symphony_elixir.ex
+
+## Core runtime modules
+https://github.com/openai/symphony/blob/main/elixir/lib/symphony_elixir/orchestrator.ex
+https://github.com/openai/symphony/blob/main/elixir/lib/symphony_elixir/agent_runner.ex
+https://github.com/openai/symphony/blob/main/elixir/lib/symphony_elixir/workspace.ex
+https://github.com/openai/symphony/blob/main/elixir/lib/symphony_elixir/workflow.ex
+https://github.com/openai/symphony/blob/main/elixir/lib/symphony_elixir/workflow_store.ex
+https://github.com/openai/symphony/blob/main/elixir/lib/symphony_elixir/config.ex
+https://github.com/openai/symphony/blob/main/elixir/lib/symphony_elixir/config/schema.ex
+https://github.com/openai/symphony/blob/main/elixir/lib/symphony_elixir/prompt_builder.ex
+
+## Codex app-server integration
+https://github.com/openai/symphony/blob/main/elixir/lib/symphony_elixir/codex/app_server.ex
+https://github.com/openai/symphony/blob/main/elixir/lib/symphony_elixir/codex/dynamic_tool.ex
+
+## Tracker adapters
+https://github.com/openai/symphony/blob/main/elixir/lib/symphony_elixir/tracker.ex
+https://github.com/openai/symphony/blob/main/elixir/lib/symphony_elixir/tracker/memory.ex
+https://github.com/openai/symphony/blob/main/elixir/lib/symphony_elixir/linear/adapter.ex
+https://github.com/openai/symphony/blob/main/elixir/lib/symphony_elixir/linear/client.ex
+https://github.com/openai/symphony/blob/main/elixir/lib/symphony_elixir/linear/issue.ex
+
+## Observability / status surface
+https://github.com/openai/symphony/blob/main/elixir/lib/symphony_elixir/status_dashboard.ex
+https://github.com/openai/symphony/blob/main/elixir/lib/symphony_elixir/http_server.ex
+
+## Web layer (JSON API + LiveView dashboard)
+https://github.com/openai/symphony/blob/main/elixir/lib/symphony_elixir_web/router.ex
+https://github.com/openai/symphony/blob/main/elixir/lib/symphony_elixir_web/presenter.ex
+https://github.com/openai/symphony/blob/main/elixir/lib/symphony_elixir_web/observability_pubsub.ex
+https://github.com/openai/symphony/blob/main/elixir/lib/symphony_elixir_web/live/dashboard_live.ex
+https://github.com/openai/symphony/blob/main/elixir/lib/symphony_elixir_web/controllers/observability_api_controller.ex
+
+## CLI entrypoint
+https://github.com/openai/symphony/blob/main/elixir/lib/symphony_elixir/cli.ex
+
+## Supporting context
+https://openai.com/index/open-source-codex-orchestration-symphony/
+
+
+## Additional Elixir agent-framework reference
+https://github.com/agentjido/jido
+
+## Local upstream mirror
+vendor/openai/symphony

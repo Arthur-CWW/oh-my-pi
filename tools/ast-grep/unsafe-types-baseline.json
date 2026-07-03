@@ -172,6 +172,20 @@
     },
     {
       "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "apps/slotok-workbench/src/daemon/ugc-sqlite-store.ts",
+      "text": "unknown",
+      "source": "const globalRequire = (globalThis as typeof globalThis & { readonly require?: (specifier: string) => unknown }).require",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "apps/slotok-workbench/src/daemon/ugc-sqlite-store.ts",
+      "text": "unknown",
+      "source": "const importMetaRequire = (import.meta as ImportMeta & { readonly require?: (specifier: string) => unknown }).require",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
       "file": "apps/slotok-workbench/src/ugc/local-state.ts",
       "text": "unknown",
       "source": "export function isLocalState(value: unknown): value is UgcLocalState {",
@@ -574,6 +588,237 @@
       "file": "packages/dynamic-workflows/test/workflow.test.ts",
       "text": "unknown",
       "source": "const ended: Array<{ label: string; phase?: string; result: unknown }> = []",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/hyperframes-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "): unknown {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/hyperframes-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "const artifactRefs = new Map<string, Record<string, unknown>>();",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/hyperframes-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "const audioPaths = (manifestObj as Record<string, unknown>)[\"audioPaths\"];",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/hyperframes-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "const mp3 = (audioPaths as Record<string, unknown>)[\"mp3\"];",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/hyperframes-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "const props: Record<string, unknown> = {};",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/hyperframes-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "const rewriteValue = (value: unknown): unknown => {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/hyperframes-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "function buildReviewSurface(plan: LayerPlan): unknown {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/hyperframes-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "function generateHyperframePlanJson(plan: LayerPlan, opts: { workflowId: string; modelId: string }, generatedAt: string): unknown {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/hyperframes-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "function generateHyperframesJson(plan: LayerPlan, opts: { workflowId: string; modelId: string; compositionId: string }, reviewSurfacePlan: LayerPlan = plan): unknown {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/hyperframes-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "function getArray(obj: Record<string, unknown>, key: string): unknown[] {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/hyperframes-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "function getNumber(obj: Record<string, unknown>, key: string): number {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/hyperframes-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "function getObject(obj: Record<string, unknown>, key: string): Record<string, unknown> {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/hyperframes-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "function getOptionalNumber(obj: Record<string, unknown>, key: string): number | undefined {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/hyperframes-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "function getOptionalObject(obj: Record<string, unknown>, key: string): Record<string, unknown> | undefined {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/hyperframes-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "function getOptionalString(obj: Record<string, unknown>, key: string): string | undefined {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/hyperframes-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "function getString(obj: Record<string, unknown>, key: string): string {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/hyperframes-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "function isArray(value: unknown): value is unknown[] {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/hyperframes-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "function isNumber(value: unknown): value is number {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/hyperframes-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "function isObject(value: unknown): value is Record<string, unknown> {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/hyperframes-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "function isString(value: unknown): value is string {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/hyperframes-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "function numberProp(value: unknown): number | undefined {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/hyperframes-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "function placeholderColor(props: Record<string, unknown>): string {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/hyperframes-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "function readJsonFile(filePath: string): unknown {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/hyperframes-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "function stringProp(value: unknown): string | undefined {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/hyperframes-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "function validateBeat(value: unknown): Beat {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/hyperframes-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "function validateLayer(value: unknown): Layer {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/hyperframes-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "function validateLayerPlan(value: unknown): LayerPlan {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/hyperframes-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "function validatePalette(value: unknown): Record<string, string> | undefined {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/hyperframes-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "function validatePlateAssets(value: unknown): Record<string, PlateAsset> | undefined {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/hyperframes-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "function validateTransition(value: unknown): Transition {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/hyperframes-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "main().catch((err: unknown) => {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/hyperframes-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "props: Record<string, unknown>;",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/hyperframes-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "reviewVocabulary?: Record<string, unknown>;",
       "count": 1
     },
     {
@@ -1176,6 +1421,104 @@
       "file": "packages/jimeng-client/src/cli.ts",
       "text": "unknown",
       "source": "function writeJson(file: string, value: unknown): void {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/client.ts",
+      "text": "unknown",
+      "source": "[key: string]: unknown",
+      "count": 3
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/client.ts",
+      "text": "unknown",
+      "source": "}): Record<string, unknown> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/client.ts",
+      "text": "unknown",
+      "source": "export function assertNoRiskError(body: unknown, rawText: string): void {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/client.ts",
+      "text": "unknown",
+      "source": "export function detectRiskControlSignal(body: unknown, rawText: string): { ret: unknown; errmsg: string | null } | null {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/client.ts",
+      "text": "unknown",
+      "source": "function asHistoryRecord(value: unknown): JimengHistoryRecord | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/client.ts",
+      "text": "unknown",
+      "source": "function asRecord(value: unknown): Record<string, unknown> | null {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/client.ts",
+      "text": "unknown",
+      "source": "function asString(value: unknown): string | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/client.ts",
+      "text": "unknown",
+      "source": "function effectError(error: unknown): Error {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/client.ts",
+      "text": "unknown",
+      "source": "function safeJson(value: string): unknown {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/client.ts",
+      "text": "unknown",
+      "source": "pollBody?: Record<string, unknown>",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/client.ts",
+      "text": "unknown",
+      "source": "responseBody: unknown",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/client.ts",
+      "text": "unknown",
+      "source": "responseBody: unknown,",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/client.ts",
+      "text": "unknown",
+      "source": "return !!value && typeof value === \"object\" && !Array.isArray(value) ? value as Record<string, unknown> : null",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/jimeng-client/src/client.ts",
+      "text": "unknown",
+      "source": "this.#fetch = options.fetch ?? (fetch as unknown as JimengFetch)",
       "count": 1
     },
     {
@@ -2314,6 +2657,90 @@
     },
     {
       "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/media-contracts/src/index.ts",
+      "text": "unknown",
+      "source": "const schemaVersion = (value as Record<string, unknown>).schemaVersion",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/media-contracts/src/index.ts",
+      "text": "unknown",
+      "source": "export function decodeAnalysisTagsV1(value: unknown, operation = \"analysis-tags.v1 manifest\"): AnalysisTagsV1 {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/media-contracts/src/index.ts",
+      "text": "unknown",
+      "source": "export function decodeAsmrContractManifest(value: unknown, operation = \"ASMR media contract manifest\"): AsmrContractManifest {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/media-contracts/src/index.ts",
+      "text": "unknown",
+      "source": "export function decodeAsmrStemsV1(value: unknown, operation = \"asmr-stems.v1 manifest\"): AsmrStemsV1 {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/media-contracts/src/index.ts",
+      "text": "unknown",
+      "source": "export function decodeGeneratedVideoClipsV1(value: unknown, operation = \"generated-video-clips.v1 manifest\"): GeneratedVideoClipsV1 {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/media-contracts/src/index.ts",
+      "text": "unknown",
+      "source": "export function decodeSeedanceFirstFrameConditioningV1(value: unknown, operation = \"seedance-first-frame-conditioning.v1 manifest\"): SeedanceFirstFrameConditioningV1 {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/media-contracts/src/index.ts",
+      "text": "unknown",
+      "source": "export function decodeSpatialAudioManifestV1(value: unknown, operation = \"spatial-audio-manifest.v1 manifest\"): SpatialAudioManifestV1 {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/media-contracts/src/index.ts",
+      "text": "unknown",
+      "source": "export function decodeVoiceAssetsV1(value: unknown, operation = \"voice-assets.v1 manifest\"): VoiceAssetsV1 {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/media-contracts/src/index.ts",
+      "text": "unknown",
+      "source": "function schemaVersionOf(value: unknown, operation: string): AsmrContractSchemaVersion | string {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/media-contracts/src/index.ts",
+      "text": "unknown",
+      "source": "value: unknown,",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/media-contracts/test/fixtures/read-fixture.ts",
+      "text": "unknown",
+      "source": "export function readMediaContractFixture(kind: \"valid\" | \"invalid\", fixtureName: string): unknown {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/media-contracts/test/fixtures/read-fixture.ts",
+      "text": "unknown",
+      "source": "return JSON.parse(readFileSync(fixturePath, \"utf8\")) as unknown",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
       "file": "packages/mermaid-preview/src/index.ts",
       "text": "unknown",
       "source": "function isPreviewMessage(message: unknown): message is {",
@@ -2324,6 +2751,405 @@
       "file": "packages/mermaid-preview/src/preview.ts",
       "text": "unknown",
       "source": "export function extractMessageText(message: { content: unknown }): string {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/pleometric-planner/src/cli.ts",
+      "text": "unknown",
+      "source": "function readJson(path: string): unknown {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/pleometric-planner/src/cli.ts",
+      "text": "unknown",
+      "source": "return JSON.parse(readFileSync(path, \"utf8\")) as unknown",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/pleometric-planner/src/index.ts",
+      "text": "unknown",
+      "source": "export function buildGoal2GeneratedVideoReference(value: unknown, manifestPath: string): Goal2GeneratedVideoReference {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/pleometric-planner/src/index.ts",
+      "text": "unknown",
+      "source": "export function buildSpatialAudioRenderOutputReference(value: unknown, renderOutputPath: string): SpatialAudioRenderOutputReference {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/pleometric-planner/src/index.ts",
+      "text": "unknown",
+      "source": "export function decodeBrainrotReferentialMirrorCard(value: unknown): BrainrotReferentialMirrorCard {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/pleometric-planner/src/index.ts",
+      "text": "unknown",
+      "source": "function asNumber(value: unknown, label: string): number {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/pleometric-planner/src/index.ts",
+      "text": "unknown",
+      "source": "function asRecord(value: unknown, label: string): Record<string, unknown> {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/pleometric-planner/src/index.ts",
+      "text": "unknown",
+      "source": "function asString(value: unknown, label: string): string {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/pleometric-planner/src/index.ts",
+      "text": "unknown",
+      "source": "function requirePositiveNumber(value: unknown, label: string): asserts value is number {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/pleometric-planner/src/index.ts",
+      "text": "unknown",
+      "source": "function requireString(value: unknown, label: string): asserts value is string {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/pleometric-planner/src/index.ts",
+      "text": "unknown",
+      "source": "generatedClipsManifest: unknown",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/pleometric-planner/src/index.ts",
+      "text": "unknown",
+      "source": "return value as Record<string, unknown>",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/pleometric-planner/src/index.ts",
+      "text": "unknown",
+      "source": "spatialRenderOutput: unknown",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/pleometric-planner/test/planner.test.ts",
+      "text": "unknown",
+      "source": "function readJson(filePath: string): unknown {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/pleometric-planner/test/planner.test.ts",
+      "text": "unknown",
+      "source": "return JSON.parse(readFileSync(filePath, \"utf8\")) as unknown",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/remotion-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "(subjectCreate as Record<string, unknown>)[\"mainImage\"]",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/remotion-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "(v as Record<string, unknown>)[\"id\"] === id",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/remotion-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "(v): v is Record<string, unknown> =>",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/remotion-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "Array.isArray((imageGen as Record<string, unknown>)[\"artifactPaths\"])",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/remotion-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "Array.isArray((subjectCreate as Record<string, unknown>)[\"artifactPaths\"])",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/remotion-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "audioManifest: unknown | null | undefined,",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/remotion-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "audioManifest: unknown | null | undefined;",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/remotion-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "const fromJob = resolveFromObject(first as Record<string, unknown>);",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/remotion-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "const fromOutput = resolveFromObject(output as Record<string, unknown>);",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/remotion-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "const fromResult = resolveFromObject(result as Record<string, unknown>);",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/remotion-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "const layerPlanExtras: Record<string, unknown> = {};",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/remotion-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "const mainImage = (subjectCreate as Record<string, unknown>)[\"mainImage\"];",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/remotion-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "const mp3 = (audioPaths as Record<string, unknown>)[\"mp3\"];",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/remotion-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "const nextProps: Record<string, unknown> = {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/remotion-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "const nextProps: Record<string, unknown> = {}",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/remotion-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "const obj = a as Record<string, unknown>;",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/remotion-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "const obj = first as Record<string, unknown>;",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/remotion-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "const paths = (imageGen as Record<string, unknown>)[\"artifactPaths\"] as string[];",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/remotion-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "const paths = (subjectCreate as Record<string, unknown>)[\"artifactPaths\"] as string[];",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/remotion-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "const props = layer.props as Record<string, unknown>;",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/remotion-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "const resolveFromObject = (obj: Record<string, unknown>): string | undefined => {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/remotion-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "const resultPlatePaths = (job as Record<string, unknown>)[\"resultPlatePaths\"];",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/remotion-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "decomposition: Record<string, unknown> | null;",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/remotion-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "function assertObject(value: unknown, label: string): Record<string, unknown> {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/remotion-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "function extractPersonaImageUrl(personaManifest: Record<string, unknown>): string | undefined {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/remotion-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "function getArray(obj: Record<string, unknown>, key: string): unknown[] {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/remotion-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "function getNumber(obj: Record<string, unknown>, key: string, fallback?: number): number {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/remotion-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "function getString(obj: Record<string, unknown>, key: string): string {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/remotion-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "function readJsonFile(filePath: string): unknown {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/remotion-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "generatedClipsManifest: unknown | null | undefined,",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/remotion-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "layerPlanExtras: Record<string, unknown>;",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/remotion-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "let video: Record<string, unknown>;",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/remotion-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "manifest: Record<string, unknown>;",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/remotion-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "personaManifest: Record<string, unknown>;",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/remotion-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "platesManifest: unknown | null | undefined",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/remotion-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "platesManifest: unknown | null | undefined;",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/remotion-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "return (mainImage as Record<string, unknown>)[\"image_uri\"] as string;",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/remotion-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "return value as Record<string, unknown>;",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/remotion-renderer/src/render.ts",
+      "text": "unknown",
+      "source": "typeof (mainImage as Record<string, unknown>)[\"image_uri\"] === \"string\"",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/spatial-audio-renderer/src/index.ts",
+      "text": "unknown",
+      "source": "function readJson(filePath: string): unknown {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/spatial-audio-renderer/src/index.ts",
+      "text": "unknown",
+      "source": "function writeJson(filePath: string, value: unknown): void {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/spatial-audio-renderer/src/index.ts",
+      "text": "unknown",
+      "source": "return JSON.parse(readFileSync(resolved, \"utf8\")) as unknown",
       "count": 1
     },
     {
@@ -2380,6 +3206,20 @@
       "file": "packages/twitter-archive/legacy/tweet-archives-app/waybacktweets/waybacktweets/_cli.py",
       "text": "Any",
       "source": "from typing import Any, Optional",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/twitter-archive/src/capture-classifier.boundary.ts",
+      "text": "unknown",
+      "source": "const parsed: unknown = JSON.parse(body);",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/twitter-archive/src/dev-ui-client.ts",
+      "text": "unknown",
+      "source": "async function postAnnotation(path: string, payload: unknown): Promise<void> {",
       "count": 1
     },
     {
@@ -2493,76 +3333,6 @@
       "text": "unknown",
       "source": "} catch (e: unknown) {",
       "count": 2
-    },
-    {
-      "ruleId": "no-unsafe-any-python",
-      "file": "packages/web-access/skills/used-hardware-buying-research/scripts/import_hardware_research.py",
-      "text": "Any",
-      "source": "def as_json(value: Any) -> str | None:",
-      "count": 1
-    },
-    {
-      "ruleId": "no-unsafe-any-python",
-      "file": "packages/web-access/skills/used-hardware-buying-research/scripts/import_hardware_research.py",
-      "text": "Any",
-      "source": "def insert_listings(conn: sqlite3.Connection, run_id: str, marketplace: str, items: list[dict[str, Any]]) -> int:",
-      "count": 1
-    },
-    {
-      "ruleId": "no-unsafe-any-python",
-      "file": "packages/web-access/skills/used-hardware-buying-research/scripts/import_hardware_research.py",
-      "text": "Any",
-      "source": "def insert_raw(conn: sqlite3.Connection, run_id: str, kind: str, records: Any) -> int:",
-      "count": 1
-    },
-    {
-      "ruleId": "no-unsafe-any-python",
-      "file": "packages/web-access/skills/used-hardware-buying-research/scripts/import_hardware_research.py",
-      "text": "Any",
-      "source": "def insert_run(conn: sqlite3.Connection, args: argparse.Namespace, scrape_run: Any) -> None:",
-      "count": 1
-    },
-    {
-      "ruleId": "no-unsafe-any-python",
-      "file": "packages/web-access/skills/used-hardware-buying-research/scripts/import_hardware_research.py",
-      "text": "Any",
-      "source": "def insert_sellers(conn: sqlite3.Connection, run_id: str, sellers: list[dict[str, Any]]) -> int:",
-      "count": 1
-    },
-    {
-      "ruleId": "no-unsafe-any-python",
-      "file": "packages/web-access/skills/used-hardware-buying-research/scripts/import_hardware_research.py",
-      "text": "Any",
-      "source": "def listing_key(run_id: str, item: dict[str, Any], index: int) -> str:",
-      "count": 1
-    },
-    {
-      "ruleId": "no-unsafe-any-python",
-      "file": "packages/web-access/skills/used-hardware-buying-research/scripts/import_hardware_research.py",
-      "text": "Any",
-      "source": "def load_json(path: Path, default: Any) -> Any:",
-      "count": 2
-    },
-    {
-      "ruleId": "no-unsafe-any-python",
-      "file": "packages/web-access/skills/used-hardware-buying-research/scripts/import_hardware_research.py",
-      "text": "Any",
-      "source": "def scalar(value: Any) -> str | int | float | None:",
-      "count": 1
-    },
-    {
-      "ruleId": "no-unsafe-any-python",
-      "file": "packages/web-access/skills/used-hardware-buying-research/scripts/import_hardware_research.py",
-      "text": "Any",
-      "source": "def seller_key(run_id: str, seller: dict[str, Any], index: int) -> str:",
-      "count": 1
-    },
-    {
-      "ruleId": "no-unsafe-any-python",
-      "file": "packages/web-access/skills/used-hardware-buying-research/scripts/import_hardware_research.py",
-      "text": "Any",
-      "source": "from typing import Any",
-      "count": 1
     },
     {
       "ruleId": "no-unsafe-any-unknown-ts",
@@ -3077,13 +3847,6 @@
     },
     {
       "ruleId": "no-unsafe-any-unknown-ts",
-      "file": "packages/web-access/src/fetch.ts",
-      "text": "unknown",
-      "source": "return new Readability(document as unknown as Document).parse()",
-      "count": 1
-    },
-    {
-      "ruleId": "no-unsafe-any-unknown-ts",
       "file": "packages/web-access/src/frontend-browser.ts",
       "text": "any",
       "source": "async function clickChatGptLoginStep(page: any, credential: GoogleCredential, clicked: string[]): Promise<boolean> {",
@@ -3290,6 +4053,20 @@
       "file": "packages/web-access/src/kagi.ts",
       "text": "unknown",
       "source": "export function parseResults(events: Array<{ data: unknown }>): Array<{ title: string; url: string; snippet: string }> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/schemas.ts",
+      "text": "unknown",
+      "source": "const reason = (err as { reason?: unknown }).reason",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "packages/web-access/src/schemas.ts",
+      "text": "unknown",
+      "source": "export function toErrorMessage(err: unknown): string {",
       "count": 1
     },
     {
@@ -3671,6 +4448,34 @@
       "count": 1
     },
     {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "scripts/lint-unsafe-types.boundary.ts",
+      "text": "unknown",
+      "source": "const parsed = JSON.parse(readFileSync(path, \"utf8\")) as unknown;",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "scripts/lint-unsafe-types.boundary.ts",
+      "text": "unknown",
+      "source": "const parsed = JSON.parse(trimmed) as unknown;",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "scripts/lint-unsafe-types.boundary.ts",
+      "text": "unknown",
+      "source": "function asAstGrepFinding(value: unknown): AstGrepFinding | null {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "scripts/lint-unsafe-types.boundary.ts",
+      "text": "unknown",
+      "source": "function isRecord(value: unknown): value is Record<string, unknown> {",
+      "count": 2
+    },
+    {
       "ruleId": "no-unsafe-any-python",
       "file": "scripts/setup-chromium-automation-profile.py",
       "text": "Any",
@@ -3766,6 +4571,76 @@
       "file": "scripts/validate-workflow-prototype.py",
       "text": "Any",
       "source": "from typing import Any",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "workflows/tiktok-recreate/goal5-asmr-handoff.test.ts",
+      "text": "unknown",
+      "source": "const files = result.files as Record<string, unknown>",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "workflows/tiktok-recreate/goal5-asmr-handoff.test.ts",
+      "text": "unknown",
+      "source": "const handoff = result.handoff as { outputs: Record<string, string>; mediaReadiness: Record<string, unknown> }",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "workflows/tiktok-recreate/goal5-asmr-handoff.test.ts",
+      "text": "unknown",
+      "source": "const layerPlan = files[handoff.outputs.layerPlan] as { beats: Array<{ layers: Array<{ type: string; props: Record<string, unknown> }> }> }",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "workflows/tiktok-recreate/goal5-asmr-handoff.ts",
+      "text": "unknown",
+      "source": "const clipLayerProps: Record<string, unknown> = {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "workflows/tiktok-recreate/goal5-asmr-handoff.ts",
+      "text": "unknown",
+      "source": "export function buildGoal5Artifacts(args: Args): Record<string, unknown> {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "workflows/tiktok-recreate/goal5-asmr-handoff.ts",
+      "text": "unknown",
+      "source": "function arrayProp(obj: JsonObject, key: string): unknown[] {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "workflows/tiktok-recreate/goal5-asmr-handoff.ts",
+      "text": "unknown",
+      "source": "function layer(type: string, zIndex: number, props: Record<string, unknown>): Record<string, unknown> {",
+      "count": 2
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "workflows/tiktok-recreate/goal5-asmr-handoff.ts",
+      "text": "unknown",
+      "source": "function objectProp(value: unknown, label: string): JsonObject {",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "workflows/tiktok-recreate/goal5-asmr-handoff.ts",
+      "text": "unknown",
+      "source": "let cursor: unknown = obj",
+      "count": 1
+    },
+    {
+      "ruleId": "no-unsafe-any-unknown-ts",
+      "file": "workflows/tiktok-recreate/goal5-asmr-handoff.ts",
+      "text": "unknown",
+      "source": "type JsonObject = Record<string, unknown>",
       "count": 1
     }
   ]

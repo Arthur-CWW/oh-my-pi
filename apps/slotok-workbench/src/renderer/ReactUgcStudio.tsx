@@ -14,10 +14,12 @@ import {
   Eye,
   FastForward,
   FileJson,
+  FolderOpen,
   GitBranch,
   GitFork,
   Home,
   Layers3,
+  LayoutGrid,
   Menu,
   MessageSquare,
   Network,
@@ -37,9 +39,10 @@ import {
   XCircle,
   Zap,
 } from "lucide-react"
+import { Badge } from "./components/ui/badge"
 import { Button } from "./components/ui/button"
+import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card"
 import { Input } from "./components/ui/input"
-import { Tabs, type TabItem } from "./components/ui/tabs"
 import { Textarea } from "./components/ui/textarea"
 import {
   CommandSurface,
@@ -56,7 +59,10 @@ import {
   ToolbarCluster,
   WorkbenchCanvas,
   WorkbenchContent,
+  WorkbenchField,
   WorkbenchMain,
+  WorkbenchNote,
+  WorkbenchSelect,
   WorkbenchShell,
   WorkbenchSidebar,
   WorkbenchTopbar,
@@ -65,8 +71,21 @@ import { cn } from "./lib/cn"
 import { ugcStudioWorkspace, type BranchSnapshot, type CandidateStatus, type CreativeCandidate, type JsonValue, type PersonaProfile, type ReferenceProfile, type ReviewVerdict, type UgcStudioWorkspace } from "./ugcStudioModel"
 import { createInitialLocalState, isLocalState, referenceProfileToArchive, type CreateProviderJobInput, type ReferenceArchiveFormatOutput, type UgcExportManifest, type UgcLocalState, type UgcProviderJob, type UgcProviderJobStatus, type UgcReferenceArchive, type UgcReferenceManifestAsset, type UgcWorkspaceBundle, type UgcWorkspaceBundleImportResult } from "../ugc/local-state"
 import { deriveUgcDeveloperGraph, type DerivedGraphFamily } from "../ugc/developer-graph"
+import { ArtifactBrowserView } from "./views/ArtifactBrowserView"
+import { HyperFramesView } from "./views/HyperFramesView"
 
-type ReactView = "atlas" | "explore" | "review" | "campaign" | "reference" | "editor" | "graph" | "provider"
+type ReactView = "atlas" | "explore" | "review" | "campaign" | "reference" | "editor" | "graph" | "provider" | "pipeline" | "browser" | "hyperframes"
+type ReactViewGroup = "Create" | "Review" | "Inspect" | "Browse"
+interface ReactViewDefinition {
+  value: ReactView
+  label: string
+  shortLabel: string
+  icon: React.ComponentType<{ className?: string; size?: number }>
+}
+export interface ReactUgcStudioProps {
+  readonly initialView?: ReactView
+}
+
 type KieOperation = "image-text" | "image-to-image" | "video-text" | "image-to-video" | "reference-to-video" | "avatar" | "omni-video"
 
 interface KieCapability {
@@ -241,21 +260,39 @@ const fallbackLocalState = createInitialLocalState(ugcStudioWorkspace.updatedAt)
 const UgcLocalStateContext = React.createContext<UgcLocalState>(fallbackLocalState)
 const daemonBaseUrl = "http://127.0.0.1:47522"
 
-const views: Array<{ value: ReactView; label: string; shortLabel: string; icon: React.ComponentType<{ className?: string; size?: number }> }> = [
+const createViews: readonly ReactViewDefinition[] = [
   { value: "atlas", label: "Persona Atlas", shortLabel: "Atlas", icon: Sparkles },
   { value: "explore", label: "Exploration Board", shortLabel: "Explore", icon: Wand2 },
-  { value: "review", label: "Batch Review", shortLabel: "Review", icon: Play },
   { value: "campaign", label: "Campaign Branch Map", shortLabel: "Campaign", icon: GitBranch },
-  { value: "reference", label: "Reference Archive", shortLabel: "Refs", icon: Copy },
-  { value: "editor", label: "Final Layer Editor", shortLabel: "Editor", icon: Layers3 },
-  { value: "graph", label: "Developer Graph", shortLabel: "Graph", icon: Network },
   { value: "provider", label: "KIE Proxy", shortLabel: "KIE", icon: Braces },
 ]
 
+const reviewViews: readonly ReactViewDefinition[] = [
+  { value: "review", label: "Batch Review", shortLabel: "Review", icon: Play },
+  { value: "editor", label: "Final Layer Editor", shortLabel: "Editor", icon: Layers3 },
+]
+
+const inspectViews: readonly ReactViewDefinition[] = [
+  { value: "reference", label: "Reference Archive", shortLabel: "Refs", icon: Copy },
+  { value: "graph", label: "Developer Graph", shortLabel: "Graph", icon: Network },
+  { value: "pipeline", label: "Pipeline Debug", shortLabel: "Pipeline", icon: GitFork },
+]
+
+const browseViews: readonly ReactViewDefinition[] = [
+  { value: "browser", label: "Browse Artifacts", shortLabel: "Browse", icon: FolderOpen },
+  { value: "hyperframes", label: "HyperFrames", shortLabel: "HFrames", icon: LayoutGrid },
+]
+
+const viewGroups: readonly { readonly title: ReactViewGroup; readonly views: readonly ReactViewDefinition[] }[] = [
+  { title: "Create", views: createViews },
+  { title: "Review", views: reviewViews },
+  { title: "Inspect", views: inspectViews },
+  { title: "Browse", views: browseViews },
+]
+
+const views: readonly ReactViewDefinition[] = viewGroups.flatMap((group) => group.views)
+
 export const reactUgcStudioViewMetadata: Array<Pick<(typeof views)[number], "value" | "label" | "shortLabel">> = views.map(({ value, label, shortLabel }) => ({ value, label, shortLabel }))
-
-
-const viewTabs: Array<TabItem<ReactView>> = views.map((view) => ({ value: view.value, label: view.shortLabel, ariaLabel: view.label }))
 
 const productLaneFilters: Array<{ value: LaneFilter; label: string }> = [
   { value: "all", label: "All lanes" },
@@ -1521,8 +1558,8 @@ function codexJobMediaSummary(job: UgcProviderJob): CodexJobMediaSummary {
 const MOBILE_WORKBENCH_WIDTH = 900
 const COMPACT_WORKBENCH_WIDTH = 1180
 
-export function ReactUgcStudio() {
-  const [activeView, setActiveView] = React.useState<ReactView>("atlas")
+export function ReactUgcStudio(props: ReactUgcStudioProps) {
+  const [activeView, setActiveView] = React.useState<ReactView>(props.initialView ?? "browser")
   const [localState, setLocalState] = React.useState<UgcLocalState>(fallbackLocalState)
   const workspace = localState.workspace
   const [selectedCandidateId, setSelectedCandidateId] = React.useState(fallbackLocalState.workspace.finalEditor.selectedCandidateId)
@@ -1589,8 +1626,8 @@ export function ReactUgcStudio() {
         return
       }
       if (event.altKey && !event.metaKey && !event.ctrlKey && !event.shiftKey) {
-        const index = Number(event.key)
-        const view = Number.isInteger(index) ? views[index - 1] : undefined
+        const shortcutIndex = event.key === "0" ? 9 : Number(event.key) - 1
+        const view = Number.isInteger(shortcutIndex) && shortcutIndex >= 0 ? views[shortcutIndex] : undefined
         if (view) {
           event.preventDefault()
           setActiveView(view.value)
@@ -1946,8 +1983,15 @@ export function ReactUgcStudio() {
   )
 }
 
-function navRows(activeView: ReactView, onViewChange: (view: ReactView) => void) {
-  return views.map((view, index) => {
+function viewShortcut(view: ReactViewDefinition): string | undefined {
+  const index = views.indexOf(view)
+  if (index < 0) return undefined
+  if (index < 9) return `${index + 1}`
+  return index === 9 ? "0" : undefined
+}
+
+function navRows(groupViews: readonly ReactViewDefinition[], activeView: ReactView, onViewChange: (view: ReactView) => void) {
+  return groupViews.map((view) => {
     const Icon = view.icon
     return (
       <SidebarRow
@@ -1957,7 +2001,7 @@ function navRows(activeView: ReactView, onViewChange: (view: ReactView) => void)
         icon={<Icon size={14} />}
         aria-label={view.label}
         data-ugc-nav-row={view.value}
-        shortcut={`${index + 1}`}
+        shortcut={viewShortcut(view)}
         onClick={() => onViewChange(view.value)}
       >
         {view.label}
@@ -1985,9 +2029,11 @@ function SidebarBody(props: { activeView: ReactView; onViewChange: (view: ReactV
           <PanelLeftClose size={14} />
         </Button>
       </div>
-      <SidebarSection title="Workspace">
-        {navRows(props.activeView, props.onViewChange)}
-      </SidebarSection>
+      {viewGroups.map((group) => (
+        <SidebarSection key={group.title} title={group.title}>
+          {navRows(group.views, props.activeView, props.onViewChange)}
+        </SidebarSection>
+      ))}
       <SidebarSection title="Candidates">
         <div className="grid gap-1 px-1 text-xs text-muted-foreground">
           <div className="flex items-center justify-between">
@@ -2035,24 +2081,28 @@ function CollapsedSidebar(props: { activeView: ReactView; onViewChange: (view: R
           <Clapperboard size={14} />
         </span>
       )}
-      <div className="grid gap-1">
-        {views.map((view, index) => {
-          const Icon = view.icon
-          return (
-            <Button
-              key={view.value}
-              type="button"
-              size="icon-sm"
-              variant={props.activeView === view.value ? "selected" : "ghost"}
-              onClick={() => props.onViewChange(view.value)}
-              aria-label={view.label}
-              data-ugc-nav-row={view.value}
-              title={`${view.label} (Alt+${index + 1})`}
-            >
-              <Icon size={14} />
-            </Button>
-          )
-        })}
+      <div className="grid gap-2">
+        {viewGroups.map((group) => (
+          <div key={group.title} className="grid gap-1 border-t border-border/70 pt-2 first:border-t-0 first:pt-0">
+            {group.views.map((view) => {
+              const Icon = view.icon
+              const shortcut = viewShortcut(view)
+              return (
+                <Button
+                  key={view.value}
+                  type="button"
+                  size="icon-sm"
+                  variant={props.activeView === view.value ? "selected" : "ghost"}
+                  onClick={() => props.onViewChange(view.value)}
+                  aria-label={view.label}
+                  title={`${group.title}: ${view.label}${shortcut ? ` (Alt+${shortcut})` : ""}`}
+                >
+                  <Icon size={14} />
+                </Button>
+              )
+            })}
+          </div>
+        ))}
       </div>
     </WorkbenchSidebar>
   )
@@ -2098,7 +2148,7 @@ function Topbar(props: { activeViewMeta: (typeof views)[number]; navDocked: bool
         <Button type="button" size="icon-sm" variant={props.inspectorOpen ? "ghost" : "secondary"} onClick={props.onToggleInspector} aria-label={props.inspectorOpen ? "Hide inspector" : "Show inspector"} title="Toggle inspector ( ] )">
           <PanelRight size={15} />
         </Button>
-        <span className="hidden text-[10px] text-muted-foreground lg:inline">Alt+1-8 views</span>
+        <span className="hidden text-[10px] text-muted-foreground lg:inline">Alt+1-0 primary views</span>
       </div>
     </WorkbenchTopbar>
   )
@@ -2107,14 +2157,757 @@ function Topbar(props: { activeViewMeta: (typeof views)[number]; navDocked: bool
 function ViewToolbar(props: { activeView: ReactView; onViewChange: (view: ReactView) => void; isMobile?: boolean }) {
   if (props.isMobile) return null
   return (
-    <div className="flex h-[52px] min-w-0 items-center gap-2 border-b border-border bg-card/80 px-3 sm:h-[58px] sm:px-4">
-      <ToolbarCluster className="min-w-0 flex-1 overflow-x-auto rounded-lg">
-        <Tabs value={props.activeView} items={viewTabs} onValueChange={props.onViewChange} size={props.isMobile ? "sm" : "md"} className="min-w-max shrink-0" />
-      </ToolbarCluster>
+    <div className="flex h-[52px] min-w-0 items-center gap-2 overflow-x-auto border-b border-border bg-card/80 px-3 sm:h-[58px] sm:px-4">
+      {viewGroups.map((group) => (
+        <div key={group.title} className="flex min-w-max items-center gap-1.5">
+          <span className="pl-1 text-[10px] font-semibold uppercase tracking-normal text-muted-foreground">{group.title}</span>
+          <ToolbarCluster className="rounded-lg">
+            {group.views.map((view) => {
+              const Icon = view.icon
+              return (
+                <Button
+                  key={view.value}
+                  type="button"
+                  size="xs"
+                  variant={props.activeView === view.value ? "selected" : "ghost"}
+                  className="gap-1.5"
+                  aria-label={view.label}
+                  onClick={() => props.onViewChange(view.value)}
+                >
+                  <Icon size={13} />
+                  <span>{view.shortLabel}</span>
+                </Button>
+              )
+            })}
+          </ToolbarCluster>
+        </div>
+      ))}
     </div>
   )
 }
 
+// ── Pipeline Debug ──────────────────────────────────────────────
+
+type ArtifactMediaType = "json" | "image" | "audio" | "video" | "text" | "unknown"
+
+interface PipelineArtifact {
+  readonly key: string
+  readonly label: string
+  readonly path: string
+  readonly primary?: boolean
+  readonly mediaType: ArtifactMediaType
+}
+
+interface PipelineStage {
+  readonly id: string
+  readonly label: string
+  readonly description: string
+  readonly artifacts: readonly PipelineArtifact[]
+}
+
+const DEFAULT_BOOTSTRAP_ROOT = "data/video-recreation/samuelszuchan/bootstrap-20260620"
+const DEFAULT_SAMPLE_ID = "2026-05-20_7642101474981367054"
+
+function detectArtifactMediaType(filename: string): ArtifactMediaType {
+  const ext = filename.split(".").pop()?.toLowerCase() ?? ""
+  if (ext === "json") return "json"
+  if (["png", "jpg", "jpeg", "webp", "gif", "svg", "bmp"].includes(ext)) return "image"
+  if (["mp3", "wav", "ogg", "flac", "m4a", "aac"].includes(ext)) return "audio"
+  if (["mp4", "webm", "mov", "avi"].includes(ext)) return "video"
+  if (["vtt", "txt", "md"].includes(ext)) return "text"
+  return "unknown"
+}
+
+function resolveArtifactPath(path: string, bootstrapRoot: string): string {
+  if (path.startsWith("data/") || path.startsWith("/")) return path
+  const root = bootstrapRoot.replace(/\/+$/, "")
+  return `${root}/${path}`
+}
+
+function buildPipelineStages(bootstrapRoot: string, sampleId: string): readonly PipelineStage[] {
+  const sourceBase = "data/source-archives/tiktok/samuelszuchan/videos"
+  const artifact = (label: string, rel: string, primary?: boolean): PipelineArtifact => {
+    return {
+      key: rel,
+      label,
+      path: rel,
+      primary,
+      mediaType: detectArtifactMediaType(resolveArtifactPath(rel, bootstrapRoot)),
+    }
+  }
+  return [
+    {
+      id: "plan",
+      label: "Plan",
+      description: "Chapter manifest and birthrate layer plan for timeline-level debugging.",
+      artifacts: [
+        artifact("Chapter manifest", "chapter-manifest-merged.json", true),
+        artifact("Birthrate layer plan", "birthrate-layer-plan.json", true),
+      ],
+    },
+    {
+      id: "source",
+      label: "Source",
+      description: "Original TikTok source video, context JSON, info, and captured frames.",
+      artifacts: [
+        artifact("Context JSON", `${sampleId}.context.json`, true),
+        artifact("Source MP4", `${sourceBase}/${sampleId}.mp4`),
+        artifact("Info JSON", `${sourceBase}/${sampleId}.info.json`),
+        artifact("Frame 001", `frames/${sampleId}/frame_001.jpg`),
+      ],
+    },
+    {
+      id: "decomposition",
+      label: "Decomposition",
+      description: "Scene/chapter manifests, Gemini decomposition outputs, and prompt files for one-video debugging.",
+      artifacts: [
+        artifact("Chapter manifest", "chapter-manifest-merged.json", true),
+        artifact("Birthrate layer plan", "birthrate-layer-plan.json"),
+        artifact("Frame decomposition JSON", `antigravity-frame-decompositions/${sampleId}.json`),
+        artifact("Scene breakdown v1", `${sampleId}-scene-breakdown-v1.md`),
+        artifact("Prompt v2", "decomposition-prompt-v2.md"),
+        artifact("Scene pass1 prompt", "decomposition-pass1-scenes.md"),
+      ],
+    },
+    {
+      id: "persona",
+      label: "Persona",
+      description: "Jimeng persona manifest and generated subject/persona artifacts.",
+      artifacts: [
+        artifact("Persona manifest", "jimeng-persona-manifest.json", true),
+        artifact("Normalized persona result", "jimeng-persona/normalized/text2image-20260621001007-42h60x-result.json"),
+      ],
+    },
+    {
+      id: "plates",
+      label: "Plates",
+      description: "KIE image-plate requests, outputs, and stage manifest.",
+      artifacts: [
+        artifact("Plate image (0)", `plates-live/plates/${sampleId}_slide_0/0.png`, true),
+        artifact("Plate request", `plates/requests/${sampleId}_slide_0_request.json`),
+        artifact("Plate response", `plates-live/responses/${sampleId}_slide_0_response.json`),
+        artifact("Plates manifest", "plates/manifest.json"),
+      ],
+    },
+    {
+      id: "tts",
+      label: "TTS",
+      description: "MiniMax TTS narration audio, manifest, and request/response payloads.",
+      artifacts: [
+        artifact("Narration MP3", `tts/${sampleId}/audio/narration.mp3`, true),
+        artifact("TTS manifest", `tts/${sampleId}/tts-manifest.json`),
+        artifact("TTS request", `tts/${sampleId}/tts-request.json`),
+        artifact("TTS response", `tts/${sampleId}/audio/narration.response.json`),
+      ],
+    },
+    {
+      id: "render",
+      label: "Render",
+      description: "Composite render output manifest, first-frame preview, and final MP4.",
+      artifacts: [
+        artifact("Final MP4", `renders/${sampleId}/final.mp4`, true),
+        artifact("Render manifest", `renders/${sampleId}/manifest.json`),
+        artifact("Render frame", `renders/${sampleId}/frame-001.png`),
+      ],
+    },
+    {
+      id: "import",
+      label: "Import",
+      description: "Slotok workflow handoff payloads and import verification artifacts.",
+      artifacts: [
+        artifact("Handoff", "slotok-handoff.json", true),
+        artifact("Handoff v5", "slotok-handoff-v5.json"),
+        artifact("Handoff verify", "slotok-handoff.verify.json"),
+        artifact("Manifest", "manifest.json"),
+      ],
+    },
+    {
+      id: "workflows",
+      label: "Workflows",
+      description: "Renderer- and model-specific workflow lanes from the workflow-comparison manifest.",
+      artifacts: [
+        artifact("Workflow comparison", "workflow-comparison.json", true),
+      ],
+    },
+    {
+      id: "comparison",
+      label: "Outputs",
+      description: "Rendered comparison outputs and sampled proof frames for Remotion and HyperFrames.",
+      artifacts: [
+        artifact("Remotion layered MP4", `renders/${sampleId}-layered/recreate.mp4`),
+        artifact("Remotion layered manifest", `renders/${sampleId}-layered/manifest.json`),
+        artifact("HyperFrames MP4", `renders/${sampleId}-hyperframes/recreate.mp4`),
+        artifact("HyperFrames manifest", `renders/${sampleId}-hyperframes/manifest.json`),
+        artifact("HyperFrames frame 003", `renders/${sampleId}-hyperframes/frame-003.png`),
+        artifact("HyperFrames frame 030", `renders/${sampleId}-hyperframes/frame-030.png`),
+      ],
+    },
+  ]
+}
+
+async function probeArtifact(fullPath: string): Promise<"ready" | "missing" | "error"> {
+  try {
+    const response = await fetch(`${daemonBaseUrl}/api/file?path=${encodeURIComponent(fullPath)}`)
+    if (response.ok) {
+      await response.body?.cancel?.()
+      return "ready"
+    }
+    return response.status === 404 ? "missing" : "error"
+  } catch {
+    return "error"
+  }
+}
+
+interface PlanEntryViewModel {
+  readonly id: string
+  readonly title: string
+  readonly startSeconds?: number
+  readonly endSeconds?: number
+  readonly startFrame?: number
+  readonly endFrame?: number
+  readonly mode?: string
+  readonly layerCount?: number
+  readonly note?: string
+  readonly caption?: string
+  readonly visualProof?: readonly string[]
+  readonly transition?: string
+  readonly raw: Record<string, JsonValue>
+}
+
+function normalizePlanEntries(
+  kind: "chapters" | "beats",
+  entries: readonly Record<string, JsonValue>[],
+): readonly PlanEntryViewModel[] {
+  return entries.map((entry, index) => {
+    const id = jsonText(entry.id ?? entry.chapter_id ?? entry.beat_id ?? entry.beatIndex) ?? `${kind}-${index + 1}`
+    const title = jsonText(entry.chapter_title ?? entry.title ?? entry.label ?? entry.caption ?? entry.beat_id ?? id) ??
+      `${kind === "chapters" ? "Chapter" : "Beat"} ${index + 1}`
+    const note = jsonText(entry.storyteller_note ?? entry.storytellerNote ?? entry.note)
+    const caption = jsonText(entry.caption ?? entry.captionText)
+    const mode = jsonText(entry.dominant_mode ?? entry.dominantMode ?? entry.mode)
+    const transition = jsonText(entry.transition)
+    const layers = jsonArray(entry.layers)
+    const visualProof = jsonStringArray(entry.visual_proof ?? entry.visualProof)
+
+    let startSeconds: number | undefined
+    let endSeconds: number | undefined
+    let startFrame: number | undefined
+    let endFrame: number | undefined
+
+    if (typeof entry.start_seconds === "number") startSeconds = entry.start_seconds
+    else if (typeof entry.start === "number") startSeconds = entry.start
+    if (typeof entry.end_seconds === "number") endSeconds = entry.end_seconds
+    else if (typeof entry.end === "number") endSeconds = entry.end
+
+    const timeRange = jsonRecord(entry.timeRange)
+    if (timeRange) {
+      if (typeof timeRange.start === "number") startSeconds = timeRange.start
+      if (typeof timeRange.end === "number") endSeconds = timeRange.end
+    }
+
+    if (typeof entry.start_frame === "number") startFrame = entry.start_frame
+    if (typeof entry.end_frame === "number") endFrame = entry.end_frame
+
+    return {
+      id,
+      title,
+      startSeconds,
+      endSeconds,
+      startFrame,
+      endFrame,
+      mode: mode ?? undefined,
+      layerCount: layers.length > 0 ? layers.length : undefined,
+      note: note ?? undefined,
+      caption: caption ?? undefined,
+      visualProof: visualProof.length > 0 ? visualProof : undefined,
+      transition: transition ?? undefined,
+      raw: entry,
+    }
+  })
+}
+interface ComparisonLaneViewModel {
+  readonly id: string
+  readonly label: string
+  readonly renderer: string
+  readonly model?: string
+  readonly priority?: string
+  readonly status?: string
+  readonly licensePosture?: string
+  readonly raw: Record<string, JsonValue>
+}
+
+function normalizeComparisonLanes(
+  lanes: readonly Record<string, JsonValue>[],
+): readonly ComparisonLaneViewModel[] {
+  return lanes.map((lane, index) => {
+    const id = jsonText(lane.workflowId ?? lane.id ?? lane.key) ?? `lane-${index + 1}`
+    const label = jsonText(lane.label ?? lane.title) ?? id
+    const renderer = jsonText(lane.renderer ?? lane.engine) ?? "unknown"
+    const model = jsonText(lane.modelId ?? lane.model) ?? undefined
+    const priority = typeof lane.priority === "number" ? String(lane.priority) : jsonText(lane.priority) ?? undefined
+    const status = jsonText(lane.status) ?? undefined
+    const scorecard = jsonRecord(lane.scorecard)
+    const licensePosture = (scorecard ? jsonText(scorecard["license"]) : undefined) ?? jsonText(lane.licensePosture ?? lane.license) ?? undefined
+    return { id, label, renderer, model, priority, status, licensePosture, raw: lane }
+  })
+}
+
+type StructuredPreview =
+  | { readonly kind: "chapters" | "beats"; readonly entries: readonly PlanEntryViewModel[] }
+  | { readonly kind: "comparison"; readonly lanes: readonly ComparisonLaneViewModel[] }
+  | null
+
+function PipelineDebugView() {
+  const [bootstrapRootDraft, setBootstrapRootDraft] = React.useState(DEFAULT_BOOTSTRAP_ROOT)
+  const [bootstrapRoot, setBootstrapRoot] = React.useState(DEFAULT_BOOTSTRAP_ROOT)
+  const [sampleIdDraft, setSampleIdDraft] = React.useState(DEFAULT_SAMPLE_ID)
+  const [sampleId, setSampleId] = React.useState(DEFAULT_SAMPLE_ID)
+  const [selectedKey, setSelectedKey] = React.useState<string | null>(null)
+  const [selectedEntryIndex, setSelectedEntryIndex] = React.useState<number | null>(null)
+  const [previewContent, setPreviewContent] = React.useState<string | null>(null)
+  const [previewError, setPreviewError] = React.useState<string | null>(null)
+  const [previewBusy, setPreviewBusy] = React.useState(false)
+  const [artifactStatuses, setArtifactStatuses] = React.useState<Record<string, "ready" | "missing" | "error" | "pending">>({})
+  const [daemonStatus, setDaemonStatus] = React.useState<"ok" | "error" | "checking">("checking")
+
+  const stages = React.useMemo(() => buildPipelineStages(bootstrapRoot, sampleId), [bootstrapRoot, sampleId])
+  const allArtifacts = React.useMemo(() => stages.flatMap((stage) => stage.artifacts), [stages])
+
+  React.useEffect(() => {
+    let cancelled = false
+    fetch(`${daemonBaseUrl}/api/bootstrap`)
+      .then((response) => (response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`))))
+      .then(() => { if (!cancelled) setDaemonStatus("ok") })
+      .catch(() => { if (!cancelled) setDaemonStatus("error") })
+    return () => { cancelled = true }
+  }, [])
+
+  React.useEffect(() => {
+    const next: Record<string, "ready" | "missing" | "error" | "pending"> = {}
+    for (const artifact of allArtifacts) next[artifact.key] = "pending"
+    setArtifactStatuses(next)
+
+    let cancelled = false
+    async function checkAll() {
+      for (const artifact of allArtifacts) {
+        if (cancelled) return
+        const status = await probeArtifact(`${bootstrapRoot}/${artifact.path}`)
+        if (cancelled) return
+        setArtifactStatuses((prev) => ({ ...prev, [artifact.key]: status }))
+      }
+    }
+    void checkAll()
+    return () => { cancelled = true }
+  }, [allArtifacts])
+
+  const selectedArtifact = React.useMemo(
+    () => allArtifacts.find((artifact) => artifact.key === selectedKey) ?? null,
+    [allArtifacts, selectedKey],
+  )
+
+  const structuredPreview = React.useMemo((): StructuredPreview => {
+  if (!previewContent || selectedArtifact?.mediaType !== "json") return null
+  try {
+    const parsed = JSON.parse(previewContent) as JsonValue
+    const parsedRecord = jsonRecord(parsed)
+    if (parsedRecord) {
+      const chapters = parsedRecord["chapters"]
+      if (Array.isArray(chapters)) {
+        return { kind: "chapters", entries: normalizePlanEntries("chapters", chapters.filter((item): item is Record<string, JsonValue> => Boolean(item) && typeof item === "object" && !Array.isArray(item)) ) }
+      }
+      const beats = parsedRecord["beats"]
+      if (Array.isArray(beats)) {
+        return { kind: "beats", entries: normalizePlanEntries("beats", beats.filter((item): item is Record<string, JsonValue> => Boolean(item) && typeof item === "object" && !Array.isArray(item)) ) }
+      }
+      const schemaVersion = jsonText(parsedRecord["schemaVersion"])
+      if (schemaVersion === "tiktok-recreate.workflow-comparison.v1") {
+        const lanes = parsedRecord["lanes"]
+        if (Array.isArray(lanes)) {
+          return {
+            kind: "comparison",
+            lanes: normalizeComparisonLanes(lanes.filter((item): item is Record<string, JsonValue> => Boolean(item) && typeof item === "object" && !Array.isArray(item))),
+          }
+        }
+      }
+    }
+  } catch {
+    // ignore parse errors and fall back to raw JSON preview
+  }
+  return null
+}, [previewContent, selectedArtifact])
+
+  async function selectArtifact(key: string) {
+    setSelectedKey(key)
+    setPreviewContent(null)
+    setPreviewError(null)
+    setSelectedEntryIndex(null)
+    const artifact = allArtifacts.find((item) => item.key === key)
+    if (!artifact || (artifact.mediaType !== "json" && artifact.mediaType !== "text")) return
+    setPreviewBusy(true)
+    try {
+      const response = await fetch(`${daemonBaseUrl}/api/file?path=${encodeURIComponent(`${bootstrapRoot}/${artifact.path}`)}`)
+      if (!response.ok) {
+        setPreviewError(`HTTP ${response.status}`)
+        return
+      }
+      const text = await response.text()
+      if (artifact.mediaType === "json") {
+        try {
+          setPreviewContent(JSON.stringify(JSON.parse(text), null, 2))
+        } catch {
+          setPreviewContent(text)
+        }
+      } else {
+        setPreviewContent(text)
+      }
+    } catch (error) {
+      setPreviewError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setPreviewBusy(false)
+    }
+  }
+
+  function applyParams() {
+    const root = bootstrapRootDraft.trim()
+    const sample = sampleIdDraft.trim()
+    if (!root || !sample) return
+    setBootstrapRoot(root)
+    setSampleId(sample)
+    setSelectedKey(null)
+    setPreviewContent(null)
+    setPreviewError(null)
+    setSelectedEntryIndex(null)
+  }
+
+  function resetParams() {
+    setBootstrapRootDraft(DEFAULT_BOOTSTRAP_ROOT)
+    setSampleIdDraft(DEFAULT_SAMPLE_ID)
+    setBootstrapRoot(DEFAULT_BOOTSTRAP_ROOT)
+    setSampleId(DEFAULT_SAMPLE_ID)
+    setSelectedKey(null)
+    setPreviewContent(null)
+    setPreviewError(null)
+    setSelectedEntryIndex(null)
+  }
+
+  const stagesWithStatus = React.useMemo(() => {
+    return stages.map((stage) => {
+      const primary = stage.artifacts.find((artifact) => artifact.primary)
+      const primaryStatus = primary ? artifactStatuses[primary.key] ?? "pending" : "pending"
+      const secondaryStatuses = stage.artifacts
+        .filter((artifact) => !artifact.primary)
+        .map((artifact) => artifactStatuses[artifact.key] ?? "pending")
+      const anySecondaryReady = secondaryStatuses.some((status) => status === "ready")
+      const allPending = [primaryStatus, ...secondaryStatuses].every((status) => status === "pending")
+      const allMissing = [primaryStatus, ...secondaryStatuses].every((status) => status === "missing")
+      let tone: "success" | "danger" | "active" | "neutral" = "neutral"
+      let label = "missing"
+      if (primaryStatus === "ready") { tone = "success"; label = "ready" }
+      else if (primaryStatus === "error") { tone = "danger"; label = "error" }
+      else if (allPending) { tone = "active"; label = "checking" }
+      else if (anySecondaryReady) { tone = "active"; label = "partial" }
+      else if (allMissing) { tone = "neutral"; label = "missing" }
+      else { tone = "active"; label = "partial" }
+      return { ...stage, statusLabel: label, tone }
+    })
+  }, [stages, artifactStatuses])
+
+  const fileUrl = (path: string) => `${daemonBaseUrl}/api/file?path=${encodeURIComponent(`${bootstrapRoot}/${path}`)}`
+
+  return (
+    <div className="grid h-full min-h-0 grid-cols-[minmax(0,1fr)_380px] gap-3 overflow-hidden p-3">
+      {/* ── Left: stage cards ── */}
+      <PanelCard className="grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden" density="compact">
+        <PanelHeader
+          eyebrow="Pipeline Debug"
+          title="Stage-by-stage pipeline inspection"
+          actions={
+            <div className="flex items-center gap-2">
+              <StatusBadge tone={daemonStatus === "ok" ? "success" : daemonStatus === "error" ? "danger" : "active"}>
+                {daemonStatus === "ok" ? "connected" : daemonStatus === "error" ? "daemon error" : "connecting…"}
+              </StatusBadge>
+              <Button size="xs" variant="workbench" onClick={resetParams}>
+                <RefreshCw size={13} /> Reset
+              </Button>
+            </div>
+          }
+        />
+        <div className="mb-3 flex items-center gap-2">
+          <Input
+            className="h-7 flex-1 text-[10px] font-mono"
+            value={bootstrapRootDraft}
+            onChange={(event) => setBootstrapRootDraft(event.currentTarget.value)}
+            onKeyDown={(event) => { if (event.key === "Enter") applyParams() }}
+            placeholder="bootstrap root"
+          />
+          <Input
+            className="h-7 w-[210px] text-[10px] font-mono"
+            value={sampleIdDraft}
+            onChange={(event) => setSampleIdDraft(event.currentTarget.value)}
+            onKeyDown={(event) => { if (event.key === "Enter") applyParams() }}
+            placeholder="sample id"
+          />
+          <Button size="xs" variant="selected" onClick={applyParams} disabled={!bootstrapRootDraft.trim() || !sampleIdDraft.trim()}>
+            <Eye size={13} /> Load
+          </Button>
+        </div>
+        <div className="grid gap-2 overflow-auto pr-1">
+          {stagesWithStatus.map((stage) => (
+            <div key={stage.id} className="rounded-lg border border-border bg-card p-3 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
+              <div className="flex items-center justify-between gap-2">
+                <strong className="text-[11px] text-foreground">{stage.label}</strong>
+                <StatusBadge tone={stage.tone}>{stage.statusLabel}</StatusBadge>
+              </div>
+              <p className="mt-0.5 text-[10px] text-muted-foreground">{stage.description}</p>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {stage.artifacts.map((artifact) => {
+                  const status = artifactStatuses[artifact.key] ?? "pending"
+                  const dotTone = status === "ready" ? "bg-green-500" : status === "error" ? "bg-red-500" : "bg-muted-foreground/40"
+                  return (
+                    <button
+                      key={artifact.key}
+                      type="button"
+                      className={cn(
+                        "inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-mono transition-colors hover:bg-accent",
+                        selectedKey === artifact.key ? "border-primary/60 bg-primary/10 text-primary" : "border-border bg-background text-muted-foreground",
+                      )}
+                      onClick={() => selectArtifact(artifact.key)}
+                    >
+                      <span className={cn("inline-block h-1.5 w-1.5 rounded-full", dotTone)} />
+                      {artifact.label}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      </PanelCard>
+
+      {/* ── Right: preview pane ── */}
+      <PanelCard className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden" density="compact">
+        <PanelHeader
+          eyebrow="Preview"
+          title={selectedArtifact?.label ?? "Select an artifact"}
+          actions={selectedArtifact ? (
+            <span className="max-w-[180px] truncate font-mono text-[10px] text-muted-foreground" title={selectedArtifact.path}>
+              {selectedArtifact.path.split("/").pop()}
+            </span>
+          ) : undefined}
+        />
+        <div className="min-h-0 overflow-auto">
+          {!selectedArtifact ? (
+            <div className="grid place-items-center gap-2 py-12 text-center text-[11px] text-muted-foreground">
+              <FileJson size={28} className="opacity-30" />
+              <p>Click an artifact above to preview it here</p>
+              <p className="max-w-[260px] text-[10px] leading-4">JSON and text are fetched and pretty-printed. Images, audio, and video stream directly from the daemon file route.</p>
+            </div>
+          ) : previewBusy ? (
+            <div className="grid place-items-center gap-2 py-12 text-[11px] text-muted-foreground">
+              <RefreshCw size={18} className="animate-spin" />
+              <p>Loading…</p>
+            </div>
+          ) : previewError ? (
+            <div className="m-2 rounded-md border border-red-200 bg-red-50/70 p-3 text-[10px] leading-relaxed text-red-800">{previewError}</div>
+          ) : selectedArtifact.mediaType === "json" || selectedArtifact.mediaType === "text" ? (
+            structuredPreview ? (
+              structuredPreview.kind === "comparison" ? (
+                <div className="grid min-h-0 grid-rows-[minmax(0,1fr)_auto] overflow-hidden">
+                  <div className="overflow-auto">
+                    <div className="sticky top-0 z-10 border-b border-border/50 bg-card px-2 py-1 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      Comparison lanes ({structuredPreview.lanes.length})
+                    </div>
+                    {structuredPreview.lanes.map((lane, idx) => {
+                      const active = idx === selectedEntryIndex
+                      return (
+                        <Card
+                          key={`comparison-${idx}`}
+                          variant={active ? "selected" : "flat"}
+                          density="compact"
+                          className="mx-1 my-0.5 cursor-pointer hover:border-primary/50"
+                          onClick={() => setSelectedEntryIndex(active ? null : idx)}
+                        >
+                          <CardHeader className="p-2 pb-1">
+                            <div className="flex items-center justify-between gap-2">
+                              <CardTitle className="truncate text-[11px]">{lane.label}</CardTitle>
+                              <Badge variant={lane.renderer === "hyperframes" ? "success" : "info"} className="text-[9px]">{lane.renderer}</Badge>
+                            </div>
+                            <div className="mt-1 flex flex-wrap gap-1">
+                              {lane.status && <Badge variant={lane.status === "proven" ? "success" : "warning"} className="text-[9px]">{lane.status}</Badge>}
+                              {lane.model && <Badge variant="agent" className="text-[9px]">{lane.model}</Badge>}
+                              {lane.priority && <Badge variant="outline" className="text-[9px]">{lane.priority}</Badge>}
+                              {lane.licensePosture && <Badge variant={lane.licensePosture === "apache-2.0" ? "success" : "danger"} className="text-[9px]">{lane.licensePosture}</Badge>}
+                            </div>
+                          </CardHeader>
+                        </Card>
+                      )
+                    })}
+                  </div>
+                  {selectedEntryIndex !== null && structuredPreview.lanes[selectedEntryIndex] && (() => {
+                    const lane = structuredPreview.lanes[selectedEntryIndex]
+                    const scorecard = jsonRecord(lane.raw.scorecard)
+                    const purpose = jsonText(lane.raw.purpose)
+                    const roleSplit = jsonText(lane.raw.roleSplit)
+                    const notes = jsonText(lane.raw.notes)
+                    const inputs = jsonArray(lane.raw.inputs).map(jsonText).filter((value): value is string => Boolean(value))
+                    const outputs = jsonArray(lane.raw.outputs).map(jsonText).filter((value): value is string => Boolean(value))
+                    const commands = jsonArray(lane.raw.commands).map(jsonText).filter((value): value is string => Boolean(value))
+                    return <Card variant="flat" density="compact" className="m-2 border-dashed">
+                      <CardHeader className="p-2 pb-1">
+                        <CardTitle className="text-[11px]">{lane.label}</CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-2 p-2 pt-0 text-[10px]">
+                        {purpose && <p className="leading-relaxed text-muted-foreground">{purpose}</p>}
+                        {roleSplit && <p><span className="font-semibold text-foreground">Role:</span> {roleSplit}</p>}
+                        {scorecard && <div className="flex flex-wrap gap-1">
+                          {jsonText(scorecard.license) && <Badge variant={jsonText(scorecard.license) === "apache-2.0" ? "success" : "danger"} className="text-[9px]">license: {jsonText(scorecard.license)}</Badge>}
+                          {jsonText(scorecard.maturity) && <Badge variant="outline" className="text-[9px]">maturity: {jsonText(scorecard.maturity)}</Badge>}
+                          {jsonText(scorecard.repoIntegration) && <Badge variant="outline" className="text-[9px]">repo: {jsonText(scorecard.repoIntegration)}</Badge>}
+                          {jsonText(scorecard.commercialUse) && <Badge variant="outline" className="text-[9px]">commercial: {jsonText(scorecard.commercialUse)}</Badge>}
+                        </div>}
+                        {inputs.length > 0 && <details><summary className="cursor-pointer font-semibold">Inputs ({inputs.length})</summary><ul className="mt-1 space-y-1 font-mono text-[9px] text-muted-foreground">{inputs.map((value) => <li key={value}>{value}</li>)}</ul></details>}
+                        {outputs.length > 0 && <details><summary className="cursor-pointer font-semibold">Outputs ({outputs.length})</summary><ul className="mt-1 space-y-1 font-mono text-[9px] text-muted-foreground">{outputs.map((value) => <li key={value}>{value}</li>)}</ul></details>}
+                        {commands.length > 0 && <details><summary className="cursor-pointer font-semibold">Commands ({commands.length})</summary><pre className="mt-1 whitespace-pre-wrap break-all rounded-md bg-muted/50 p-2 font-mono text-[9px]">{commands.join("\n")}</pre></details>}
+                        {notes && <p className="leading-relaxed text-muted-foreground">{notes}</p>}
+                      </CardContent>
+                    </Card>
+                  })()}
+                  <div className="overflow-auto border-t border-border/40 bg-muted/20" style={{ maxHeight: "160px" }}>
+                    <div className="sticky top-0 z-10 flex items-center justify-between border-b border-border/50 bg-muted/40 px-2 py-0.5 text-[9px] font-mono text-muted-foreground">
+                      <span>
+                        {selectedEntryIndex !== null
+                          ? `Lane ${selectedEntryIndex + 1} JSON`
+                          : "Raw JSON (comparison)"}
+                      </span>
+                      {selectedEntryIndex !== null && (
+                        <button type="button" onClick={() => setSelectedEntryIndex(null)} className="text-[9px] text-primary hover:underline">
+                          Show all
+                        </button>
+                      )}
+                    </div>
+                    <pre className="rugc-json whitespace-pre-wrap break-all p-2 text-[9px] leading-relaxed">
+                      {selectedEntryIndex !== null && structuredPreview.lanes[selectedEntryIndex]
+                        ? JSON.stringify(structuredPreview.lanes[selectedEntryIndex].raw, null, 2)
+                        : previewContent}
+                    </pre>
+                  </div>
+                </div>
+              ) : (
+                <div className="grid min-h-0 grid-rows-[minmax(0,1fr)_auto] overflow-hidden">
+                  <div className="overflow-auto">
+                    <div className="sticky top-0 z-10 border-b border-border/50 bg-card px-2 py-1 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      {structuredPreview.kind === "chapters" ? "Chapters" : "Beats"} ({structuredPreview.entries.length})
+                    </div>
+                    {structuredPreview.entries.map((entry, idx) => {
+                      const active = idx === selectedEntryIndex
+                      const startLabel = entry.startSeconds !== undefined ? `${entry.startSeconds.toFixed(1)}s`
+                        : entry.startFrame !== undefined ? `${entry.startFrame}f`
+                        : undefined
+                      const endLabel = entry.endSeconds !== undefined ? `${entry.endSeconds.toFixed(1)}s`
+                        : entry.endFrame !== undefined ? `${entry.endFrame}f`
+                        : undefined
+                      const timeRange = startLabel ? `${startLabel}${endLabel ? ` – ${endLabel}` : ""}` : undefined
+                      const subtitle = entry.mode ?? entry.transition ?? (entry.layerCount !== undefined ? `${entry.layerCount} layers` : undefined)
+                      const note = entry.note ?? entry.caption
+                      return (
+                        <button
+                          key={`${structuredPreview.kind}-${idx}`}
+                          type="button"
+                          onClick={() => setSelectedEntryIndex(active ? null : idx)}
+                          className={cn(
+                            "flex w-full flex-col border-b border-border/30 px-2 py-1.5 text-left text-[10px] transition-colors hover:bg-accent/70",
+                            active && "border-l-[3px] border-l-primary bg-primary/10",
+                          )}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className={cn("truncate font-semibold", active ? "text-primary" : "text-foreground")}>{entry.title}</span>
+                            {timeRange && <span className="shrink-0 font-mono text-[9px] tabular-nums text-muted-foreground">{timeRange}</span>}
+                          </div>
+                          {(subtitle || note || entry.visualProof) && (
+                            <div className="mt-0.5 text-[9px] leading-relaxed text-muted-foreground">
+                              {subtitle && <span className="font-medium text-foreground/70">{subtitle}</span>}
+                              {subtitle && note && <span className="mx-1 opacity-40">·</span>}
+                              {note && <span className="line-clamp-2">{note}</span>}
+                              {entry.visualProof && (
+                                <span className="ml-1 inline-flex flex-wrap gap-1">
+                                  {entry.visualProof.map((proof, pidx) => (
+                                    <span key={pidx} className="inline-block rounded bg-primary/10 px-1 py-0 text-[8px] text-primary/80">{proof}</span>
+                                  ))}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </button>
+                      )
+                    })}
+                  </div>
+                  <div className="overflow-auto border-t border-border/40 bg-muted/20" style={{ maxHeight: "160px" }}>
+                    <div className="sticky top-0 z-10 flex items-center justify-between border-b border-border/50 bg-muted/40 px-2 py-0.5 text-[9px] font-mono text-muted-foreground">
+                      <span>
+                        {selectedEntryIndex !== null
+                          ? `Entry ${selectedEntryIndex + 1} JSON`
+                          : `Raw JSON (${structuredPreview.kind})`}
+                      </span>
+                      {selectedEntryIndex !== null && (
+                        <button
+                          type="button"
+                          onClick={() => setSelectedEntryIndex(null)}
+                          className="text-[9px] text-primary hover:underline"
+                        >
+                          Show all
+                        </button>
+                      )}
+                    </div>
+                    <pre className="rugc-json whitespace-pre-wrap break-all p-2 text-[9px] leading-relaxed">
+                      {selectedEntryIndex !== null && structuredPreview.entries[selectedEntryIndex]
+                        ? JSON.stringify(structuredPreview.entries[selectedEntryIndex].raw, null, 2)
+                        : previewContent}
+                    </pre>
+                  </div>
+                </div>
+              )
+            ) : (
+              <pre className="rugc-json m-2 max-h-full overflow-auto text-[10px] leading-relaxed">{previewContent ?? " "}</pre>
+            )
+          ) : selectedArtifact.mediaType === "image" ? (
+            <div className="p-2">
+              <img src={fileUrl(selectedArtifact.path)} alt={selectedArtifact.label} className="h-auto max-w-full rounded-md border border-border" />
+            </div>
+          ) : selectedArtifact.mediaType === "audio" ? (
+            <div className="p-3">
+              <audio controls src={fileUrl(selectedArtifact.path)} className="w-full" />
+            </div>
+          ) : selectedArtifact.mediaType === "video" ? (
+            <div className="p-2">
+              <video controls src={fileUrl(selectedArtifact.path)} className="h-auto max-w-full rounded-md border border-border" />
+            </div>
+          ) : (
+            <div className="grid place-items-center py-12 text-[11px] text-muted-foreground">
+              <p>Preview not available for this file type</p>
+            </div>
+          )}
+
+          {selectedArtifact && !previewBusy && (
+            <div className="mx-2 mb-2 mt-4 rounded-md border border-border/60 bg-muted/30 p-2 text-[10px] text-muted-foreground">
+              <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-2 gap-y-0.5">
+                <span className="font-semibold">Path:</span>
+                <span className="truncate font-mono">{selectedArtifact.path}</span>
+                <span className="font-semibold">Type:</span>
+                <span>{selectedArtifact.mediaType}</span>
+                <span className="font-semibold">Status:</span>
+                <StatusBadge
+                  tone={artifactStatuses[selectedArtifact.key] === "ready" ? "success" : artifactStatuses[selectedArtifact.key] === "error" ? "danger" : "neutral"}
+                >
+                  {artifactStatuses[selectedArtifact.key] ?? "pending"}
+                </StatusBadge>
+              </div>
+            </div>
+          )}
+        </div>
+      </PanelCard>
+    </div>
+  )
+}
 function WorkspaceView(props: {
   activeView: ReactView
   selectedCandidateId: string
@@ -2180,6 +2973,15 @@ function WorkspaceView(props: {
         onRefreshWorkspaceState={props.onRefreshWorkspaceState}
       />
     )
+  }
+  if (props.activeView === "pipeline") {
+    return <PipelineDebugView />
+  }
+  if (props.activeView === "browser") {
+    return <ArtifactBrowserView bootstrapRoot={DEFAULT_BOOTSTRAP_ROOT} sampleId={DEFAULT_SAMPLE_ID} daemonBaseUrl={daemonBaseUrl} />
+  }
+  if (props.activeView === "hyperframes") {
+    return <HyperFramesView bootstrapRoot={DEFAULT_BOOTSTRAP_ROOT} sampleId={DEFAULT_SAMPLE_ID} daemonBaseUrl={daemonBaseUrl} />
   }
   return (
     <ProviderView
@@ -2452,18 +3254,21 @@ function BatchReview(props: { selectedCandidateId: string; onSelectCandidate: (i
           ))}
         </div>
         <div className="h-px bg-border/40 my-1" />
-        <label className="flex flex-col gap-1 text-[10px] font-medium text-muted-foreground">
-          Sort
-          <select
+        <WorkbenchField
+          label="Sort"
+          className="flex flex-col gap-1"
+          labelClassName="text-[10px] font-medium text-muted-foreground"
+        >
+          <WorkbenchSelect
             value={sortBy}
             onChange={(event) => setSortBy(event.target.value as typeof sortBy)}
-            className="h-7 w-full rounded border border-input bg-transparent px-1.5 text-[11px] text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+            className="h-7 w-full rounded px-1.5 text-[11px] shadow-none focus-visible:ring-1"
           >
             <option value="score">Score</option>
             <option value="status">Status</option>
             <option value="persona">Persona</option>
-          </select>
-        </label>
+          </WorkbenchSelect>
+        </WorkbenchField>
         <div className="rounded-md border border-border/60 bg-background p-2 text-[10px] leading-4 text-muted-foreground">
           <strong className="block text-[10px] uppercase tracking-wider text-foreground">Keyboard review</strong>
           <span className="block">1 reject selected</span>
@@ -2827,18 +3632,21 @@ function FinalEditor(props: { selectedCandidateId: string; editorMode: FinalEdit
           </div>
         ))}
         <div className="mt-2 grid gap-2 border-t border-border/40 pt-3">
-          <label className="grid gap-1 text-[10px] font-semibold uppercase text-muted-foreground">
-            Candidate
-            <select
+          <WorkbenchField
+            label="Candidate"
+            className="grid gap-1"
+            labelClassName="text-[10px] font-semibold uppercase text-muted-foreground"
+          >
+            <WorkbenchSelect
               value={selectedCandidate?.id ?? ""}
-              className="h-8 rounded-md border border-border bg-background px-2 text-xs normal-case text-foreground focus:outline-none focus:ring-1 focus:ring-primary shadow-sm"
+              className="normal-case"
               onChange={(event) => selectCandidate(event.currentTarget.value)}
             >
               {workspace.candidates.map((candidate) => (
                 <option key={candidate.id} value={candidate.id}>{candidate.title}</option>
               ))}
-            </select>
-          </label>
+            </WorkbenchSelect>
+          </WorkbenchField>
         </div>
       </aside>
       <section className="rugc-editor-canvas">
@@ -3235,31 +4043,27 @@ function ReferenceArchiveView(props: {
         />
         <div className="min-h-0 overflow-auto pr-1">
           <div className="grid grid-cols-2 gap-2">
-            <label className="grid gap-1.5">
-              <span className="text-[11px] font-medium text-muted-foreground">Source policy</span>
-              <select
+            <WorkbenchField label="Source policy">
+              <WorkbenchSelect
                 value={sourcePolicy}
-                className="h-8 rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 onChange={(event) => setSourcePolicy(event.target.value as ReferenceSourcePolicy)}
               >
                 <option value="abstract-mechanics">abstract mechanics</option>
                 <option value="metadata-only">metadata only</option>
                 <option value="rights-cleared-source">rights-cleared source</option>
-              </select>
-            </label>
-            <label className="grid gap-1.5">
-              <span className="text-[11px] font-medium text-muted-foreground">Archive status</span>
-              <select
+              </WorkbenchSelect>
+            </WorkbenchField>
+            <WorkbenchField label="Archive status">
+              <WorkbenchSelect
                 value={archiveStatus}
-                className="h-8 rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 onChange={(event) => setArchiveStatus(event.target.value as ReferenceArchiveStatus)}
               >
                 <option value="not-started">not started</option>
                 <option value="queued">queued</option>
                 <option value="sampled">sampled</option>
                 <option value="decomposed">decomposed</option>
-              </select>
-            </label>
+              </WorkbenchSelect>
+            </WorkbenchField>
           </div>
 
           <div className="mt-3 grid grid-cols-4 gap-2">
@@ -4084,12 +4888,10 @@ function ProviderView(props: {
       </PanelCard>
 
       <PanelCard className="grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden" density="compact">
-        <PanelHeader eyebrow="KIE proxy" title="Route controls" actions={<CircleDollarSign size={14} />} />
-        <label className="grid gap-1.5">
-          <span className="text-[11px] font-medium text-muted-foreground">Operation</span>
-          <select
+        <PanelHeader eyebrow="Local provider controls" title="KIE route controls" actions={<CircleDollarSign size={14} />} />
+        <WorkbenchField label="Operation">
+          <WorkbenchSelect
             value={props.operation}
-            className="h-8 rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             onChange={(event) => props.onOperationChange(event.target.value as KieOperation)}
           >
             {props.capabilities.map((capability) => (
@@ -4097,21 +4899,22 @@ function ProviderView(props: {
                 {capability.operation} / {capability.model}
               </option>
             ))}
-          </select>
-        </label>
-        <div className="rugc-provider-note">
-          <strong>{props.selectedCapability?.label}</strong>
-          <p>{props.selectedCapability?.notes}</p>
-        </div>
+          </WorkbenchSelect>
+        </WorkbenchField>
+        <WorkbenchNote>
+          <strong>{props.selectedCapability?.label ?? "Select a KIE capability"}</strong>
+          <p>{props.selectedCapability?.notes ?? "Choose a local planning route before preparing a dry-run request."}</p>
+          <p>Default action prepares local dry-run JSON; the live action sends a capped provider request only when enabled.</p>
+        </WorkbenchNote>
         <div className="grid grid-cols-2 gap-2">
-          <Button size="xs" onClick={() => props.onCallKie("/api/ugc/kie/plan", props.request)} disabled={props.busy}>Dry-run JSON</Button>
+          <Button size="xs" onClick={() => props.onCallKie("/api/ugc/kie/plan", props.request)} disabled={props.busy}>Plan dry-run JSON</Button>
           <Button
             size="xs"
             variant="outline"
             onClick={() => props.onCallKie("/api/ugc/kie/create", { ...props.request, live: true, maxSpendUsd: 0.05 })}
             disabled={props.busy || (props.selectedCapability?.estimatedCostUsd ?? 1) > 0.05}
           >
-            Live $0.05 cap
+            Send live ($0.05 cap)
           </Button>
         </div>
 

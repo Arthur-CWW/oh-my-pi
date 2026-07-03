@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SOURCE="${BASH_SOURCE[0]}"
+while [[ -L "${SOURCE}" ]]; do
+  DIR="$(cd -P "$(dirname "${SOURCE}")" >/dev/null 2>&1 && pwd)"
+  SOURCE="$(readlink "${SOURCE}")"
+  [[ "${SOURCE}" != /* ]] && SOURCE="${DIR}/${SOURCE}"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "${SOURCE}")" >/dev/null 2>&1 && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." >/dev/null 2>&1 && pwd)"
+SELF_HEAL="${OMP_SELF_HEAL:-${HOME}/.omp/agent/bin/omp-self-heal}"
+
+run_doctor() {
+  if command -v mise >/dev/null 2>&1; then
+    (cd "${REPO_ROOT}" && mise run omp-doctor)
+  else
+    echo "omp-post-update: mise not found; cannot run omp-doctor" >&2
+    return 127
+  fi
+}
+
+if command -v mise >/dev/null 2>&1; then
+  (cd "${REPO_ROOT}" && mise run omp-link)
+else
+  echo "omp-post-update: mise not found; continuing with existing links" >&2
+fi
+
+if [[ ! -x "${SELF_HEAL}" ]]; then
+  echo "omp-post-update: self-heal script missing: ${SELF_HEAL}" >&2
+  run_doctor || true
+  exit 1
+fi
+
+if ! "${SELF_HEAL}"; then
+  echo "omp-post-update: deterministic patch failed; running doctor" >&2
+  run_doctor || true
+  exit 1
+fi
+
+run_doctor

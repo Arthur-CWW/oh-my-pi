@@ -19,10 +19,12 @@ expression: snapshot
     "pid_file": "[pid-file]",
     "running": false
   },
+  "events": [],
   "questions": [],
   "recommended_actions": [
     "run `symphonyx up` before mutating commands"
   ],
+  "refreshed": "[refreshed]",
   "sessions": [],
   "workflows": []
 }

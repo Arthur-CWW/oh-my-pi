@@ -4,12 +4,13 @@
  * One overlay, two views:
  * - Table view: every registered agent except Main (Main IS the ambient
  *   chat), live from the global AgentRegistry — status, unread irc count,
- *   current/last task, last activity. Select with j/k, Enter opens a chat,
- *   `r` revives a parked agent, `x` aborts + releases one.
+ *   current/last task, last activity. Select with j/k; Enter focuses live agents
+ *   and opens parked agents read-only; `r` revives a parked agent, `x` aborts +
+ *   releases one.
  * - Chat view: per-agent transcript (incremental session-file tail, absorbed
- *   from the old session observer overlay) plus an input line. Submitting
- *   revives a parked agent, then prompts/steers it; the message lands in the
- *   agent's persisted history via the normal prompt path.
+ *   from the old session observer overlay) plus an input line. `R` revives the
+ *   parked agent explicitly; submitting a message also revives a parked agent,
+ *   then lands in the agent's persisted history via the normal prompt path.
  *
  * Replaces the old SessionObserverOverlayComponent (ctrl+s observer).
  */
@@ -606,13 +607,18 @@ export class AgentHubOverlayComponent extends Container {
 	}
 
 	/**
-	 * Enter on a row: focus the main view on the agent's live session and close
-	 * the hub. The transcript then renders through the regular session pipeline —
+	 * Enter on a row: parked agents open the in-hub transcript without revival;
+	 * live agents focus the main view on the agent session and close the hub. The
+	 * focused transcript then renders through the regular session pipeline —
 	 * exact parity by construction. Collab guests (no local sessions) keep the
 	 * in-hub chat view.
 	 */
 	#activateAgent(ref: AgentRef): void {
 		this.#notice = undefined;
+		if (ref.status === "parked") {
+			this.openChat(ref.id);
+			return;
+		}
 		const focusAgent = this.#focusAgent;
 		if (this.#remote || !focusAgent) {
 			this.openChat(ref.id);
@@ -620,7 +626,7 @@ export class AgentHubOverlayComponent extends Container {
 		}
 		void (async () => {
 			try {
-				await focusAgent(ref.id); // ensureLive inside revives parked agents; no parking, no session files
+				await focusAgent(ref.id);
 				this.#onDone();
 			} catch (error) {
 				this.#notice = error instanceof Error ? error.message : String(error);
@@ -650,6 +656,36 @@ export class AgentHubOverlayComponent extends Container {
 				this.#notice = error instanceof Error ? error.message : String(error);
 				this.#requestRender();
 			});
+		this.#requestRender();
+	}
+
+	#reviveChatAgent(): void {
+		const id = this.#chatAgentId;
+		if (!id) return;
+		const ref = this.#registry.get(id);
+		if (!ref) return;
+		if (ref.status !== "parked") {
+			this.#notice = `Agent "${id}" is ${ref.status} — only parked agents can be revived.`;
+			this.#requestRender();
+			return;
+		}
+		this.#notice = undefined;
+		if (this.#remote) {
+			this.#remote.revive(id);
+			this.#scheduleChatRefresh();
+			this.#requestRender();
+			return;
+		}
+		this.#lifecycle()
+			.ensureLive(id)
+			.then(() => {
+				this.#attachLiveSession();
+				this.#scheduleChatRefresh();
+			})
+			.catch((error: unknown) => {
+				this.#notice = error instanceof Error ? error.message : String(error);
+			})
+			.finally(() => this.#requestRender());
 		this.#requestRender();
 	}
 
@@ -734,10 +770,12 @@ export class AgentHubOverlayComponent extends Container {
 	#buildChatFooterLines(): string[] {
 		const lines: string[] = [];
 		const observed = this.#chatAgentId ? this.#observableFor(this.#chatAgentId) : undefined;
+		const ref = this.#chatAgentId ? this.#registry.get(this.#chatAgentId) : undefined;
 		const statsLine = this.#buildStatsLine(observed);
 		if (statsLine) lines.push(` ${statsLine}`);
+		const reviveHint = ref?.status === "parked" ? "  R:revive" : "";
 		lines.push(
-			` ${theme.fg("dim", `Enter:send  Esc:back  ←←:parent  ${this.#expandKeys[0] ?? "ctrl+o"}:expand  empty input: j/k:scroll  g/G:top/bottom`)}`,
+			` ${theme.fg("dim", `Enter:send  Esc:back  ←←:parent${reviveHint}  ${this.#expandKeys[0] ?? "ctrl+o"}:expand  empty input: j/k:scroll  g/G:top/bottom`)}`,
 		);
 		return lines;
 	}
@@ -835,6 +873,13 @@ export class AgentHubOverlayComponent extends Container {
 				this.#requestRender();
 				return;
 			}
+		}
+
+		// `R` explicitly revives a parked transcript without sending a message or
+		// focusing the main view.
+		if (editorEmpty && keyData === "R") {
+			this.#reviveChatAgent();
+			return;
 		}
 
 		// Double-tap left on an empty editor hops to the parent session —

@@ -103,44 +103,26 @@ Net effect today:
 ### Desired policy
 
 - **Main Fable session** should have **no advisor**. Fable is a distinct model creature with its own preferences and working style, not an extension of Arthur; its advisor/Primer policy reflects that separation. Fable is the high-level advisor/orchestrator; adding another advisor layer on top is expensive and redundant.
-- **Subagents and non-Fable workers** may keep the DeepSeek advisor when the work benefits from it (e.g., prose review, oracle cross-check, adversarial critique). It should not be on by default for every bounded worker.
+- **DeepSeek should be minimal.** Use it only for explicit advisor/oracle/prose/adversarial passes; prefer coding subscriptions and frontend sessions for normal work.
 - **Fable must never spawn a Fable subagent**. Fable is the scarce high-level model; worker execution should be delegated to cheaper/capable lanes: Kimi, Gemini Flash, Antigravity, or GPT-5.5.
 - **Subagents can be full agents** when the task warrants it: they may have explicit goals, bounded recursion, and appropriate model/tool sets. They are not required to be minimal one-shot workers.
 - **OMP autolearn is currently not trusted** for Fable preparation. Fable should rely on curated docs (`docs/fable/`), the session index, and the homey system instead of hoping autolearn will surface the right context.
 
 ### Implementation gaps / current guardrails
 
-1. **No clean per-session advisor toggle.** OMP supports `--config <path>` overlays, but `advisor.enabled` and `advisor.subagents` are still global settings within a running session. Verify overlay merge behavior before relying on "main Fable advisor off, subagent advisor on" as an operational split.
+1. **No true per-agent advisor split yet.** The committed `.omp/fable-config.yml` disables advisor for the whole Fable session (`advisor.enabled: false`, `advisor.subagents: false`). If Arthur later wants non-Fable workers to carry an advisor while main Fable does not, OMP needs a cleaner per-agent advisor policy.
 2. **Fable-subagent guard is now hardcoded in OMP.** `oh-my-pi/packages/coding-agent/src/config/model-resolver.ts` blocks resolved subagent models whose selector contains `fable` and falls back to non-Fable `pi/task`, `pi/smol`, or `pi/slow` lanes. Main sessions can still run Fable.
-3. **No Fable-specific model-role overlay is committed.** The global `modelRoles` map is shared; create a local overlay only after the exact Fable model ID is known.
+3. **Fable model ID is not committed.** Launch Fable with `--model <actual-fable-model-id>` plus the local overlay once the model is available.
 
-### Desired `--config` overlay (illustrative)
+### Committed `--config` overlay
 
-The global config at `/Users/arthur/.omp/agent/config.yml` should stay untouched. A Fable session can be launched with a local overlay that turns off the advisor and rebinds task/implementer to cheaper lanes:
+The global config at `/Users/arthur/.omp/agent/config.yml` stays untouched. A Fable session can be launched with the committed overlay:
 
-```yaml
-# .omp/fable-config.yml (proposed, not yet created)
-modelRoles:
-  default: openai-codex/gpt-5.5
-  smol: kimi-code/kimi-for-coding
-  task: kimi-code/kimi-for-coding
-  implementer: kimi-code/kimi-for-coding
-  research: kimi-code/kimi-for-coding
-  authenticated_web: kimi-code/kimi-for-coding
-  maintenance: kimi-code/kimi-for-coding
-  complex: openai-codex/gpt-5.5
-  plan: openai-codex/gpt-5.5
-  slow: openai-codex/gpt-5.5
-  designer: anthropic/claude-opus-4-6
-  advisor: deepseek/deepseek-v4-pro
-advisor:
-  enabled: false
-  subagents: true
-task:
-  maxRecursionDepth: 8
+```bash
+omp --config ./.omp/fable-config.yml --model <actual-fable-model-id>
 ```
 
-Note: the exact `--config` path and merge semantics have not been verified against OMP 16.3.3; confirm with `omp --help` or a test session before relying on this overlay.
+The overlay disables the advisor/autolearn, binds worker roles to non-Fable lanes, keeps Kagi search, and intentionally omits a DeepSeek advisor role and a Fable default model.
 
 ## 4. How to restore a removed skill
 

@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REAL_OMP="${OMP_REAL:-${HOME}/.bun/bin/omp}"
+POST_UPDATE="${OMP_POST_UPDATE:-${HOME}/.local/bin/omp-post-update}"
+IS_UPDATE=0
+IS_UPDATE_CHECK=0
+if [[ "${1:-}" == "update" ]]; then
+  IS_UPDATE=1
+  for arg in "$@"; do
+    if [[ "${arg}" == "--check" || "${arg}" == "-c" ]]; then
+      IS_UPDATE_CHECK=1
+      break
+    fi
+  done
+fi
+
+if [[ ! -x "${REAL_OMP}" ]]; then
+  echo "omp: upstream binary not found: ${REAL_OMP}" >&2
+  echo "omp: run 'mise run omp-install' from ~/agents" >&2
+  exit 127
+fi
+
+set +e
+if [[ "${IS_UPDATE}" -eq 1 ]]; then
+  REAL_OMP_BIN_DIR="$(dirname "${REAL_OMP}")"
+  PATH="${REAL_OMP_BIN_DIR}:${PATH}" "${REAL_OMP}" "$@"
+else
+  "${REAL_OMP}" "$@"
+fi
+status=$?
+set -e
+
+if [[ "${IS_UPDATE}" -eq 1 && "${IS_UPDATE_CHECK}" -eq 0 && "${status}" -eq 0 ]]; then
+  if [[ -x "${POST_UPDATE}" ]]; then
+    "${POST_UPDATE}"
+  else
+    echo "omp: post-update maintenance script not found: ${POST_UPDATE}" >&2
+    echo "omp: run 'mise run omp-link' from ~/agents" >&2
+    exit 1
+  fi
+fi
+
+exit "${status}"

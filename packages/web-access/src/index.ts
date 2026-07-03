@@ -29,13 +29,28 @@ import { registerCodexResume } from "./codex"
 import registerVimLite from "./vim-lite"
 import { registerAgentCockpit } from "./agent-cockpit-extension"
 import { registerAgentHistory } from "./agent-history-extension"
+import { registerTelegramAgentServer } from "./telegram-agent-server-extension.boundary"
+import { registerDiscordAgentServer } from "./discord-agent-server-extension.boundary"
+import { registerSlackAgentServer } from "./slack-agent-server-extension.boundary"
+import { registerGodmode } from "./godmode"
+import { registerSymphonyxOpen } from "./symphonyx-open"
 import { toErrorMessage } from "./schemas"
+import {
+  redactWiseTokenText,
+  runWiseStatementsAction,
+  type WiseStatementsAction,
+  type WiseStatementType,
+} from "./wise-statements"
 import {
   executeComputerUseAction,
   getGlobalPolicyState,
   runComputerUseAction,
   setGlobalPolicyState,
 } from "./computer-use"
+
+// Boundary note for T-2026-06-09-005:
+// this entrypoint is the temporary registration seam while web-access is split.
+// Keep candidate packages behind register* calls here; do not move files in no-move cleanup slices.
 
 function run<E, A>(effect: Effect.Effect<A, E>): Promise<A> {
   return Effect.runPromise(effect as Effect.Effect<A, E, never>)
@@ -709,7 +724,10 @@ function registerLlmFrontendBrowser(pi: ExtensionAPI): void {
             `Updated: ${new Date(session.updatedAt).toISOString()}`,
             ...(session.projectKey ? [`Project: ${session.projectKey}`] : []),
             ...(session.conversationUrl ? [`Conversation: ${session.conversationUrl}`] : []),
+            ...(session.outputPath ? [`Output file: ${session.outputPath}`] : []),
             ...(session.title ? [`Title: ${session.title}`] : []),
+            ...(session.blockerReason ? [`Blocker: ${trim(session.blockerReason, 160)}`] : []),
+            ...(session.recoveryStep ? [`Recovery: ${trim(session.recoveryStep, 220)}`] : []),
             `Prompt: ${trim(session.prompt, 120)}`,
             ...(session.responseText ? [`Response: ${trim(session.responseText, 160)}`] : []),
           ].join("\n")).join("\n\n")
@@ -846,6 +864,81 @@ function registerLlmFrontendBrowser(pi: ExtensionAPI): void {
   })
 }
 
+// ─── Tool: wise_statements ─────────────────────────────────────────────
+
+function registerWiseStatements(pi: ExtensionAPI): void {
+  pi.registerTool({
+    name: "wise_statements",
+    label: "Wise Statements",
+    description:
+      "Read-only Wise API helper for config, profiles, balances, and balance statements. GET-only; no transfers, quotes, recipients, purchases, cancellations, or writes.",
+    parameters: Type.Object({
+      action: Type.Optional(Type.String({ description: "config, profiles, balances, or statement" })),
+      apiToken: Type.Optional(Type.String({ description: "Wise API token. Prefer WISE_API_TOKEN or WISE_TOKEN env; tool output redacts it." })),
+      token: Type.Optional(Type.String({ description: "Alias for apiToken; never persisted." })),
+      sandbox: Type.Optional(Type.Boolean({ description: "Use https://api.wise-sandbox.com instead of https://api.wise.com." })),
+      profileId: Type.Optional(Type.String({ description: "Wise profile id for balances and statement actions." })),
+      balanceId: Type.Optional(Type.String({ description: "Wise balance id for the statement action." })),
+      currency: Type.Optional(Type.String({ description: "Statement currency, e.g. GBP or USD." })),
+      intervalStart: Type.Optional(Type.String({ description: "Statement interval start ISO date/time." })),
+      intervalEnd: Type.Optional(Type.String({ description: "Statement interval end ISO date/time. Must be within 469 days of intervalStart." })),
+      statementType: Type.Optional(Type.String({ description: "Wise statement type; COMPACT by default, FLAT optional." })),
+    }),
+    async execute(_callId, rawParams) {
+      const params = rawParams as {
+        action?: string
+        apiToken?: string
+        token?: string
+        sandbox?: boolean
+        profileId?: string
+        balanceId?: string
+        currency?: string
+        intervalStart?: string
+        intervalEnd?: string
+        statementType?: string
+      }
+      const action: WiseStatementsAction =
+        params.action === "profiles" || params.action === "balances" || params.action === "statement" || params.action === "config"
+          ? params.action
+          : "config"
+      const statementType: WiseStatementType | undefined =
+        params.statementType === "FLAT" || params.statementType === "COMPACT" ? params.statementType : undefined
+      const explicitToken = typeof params.apiToken === "string" && params.apiToken.trim()
+        ? params.apiToken
+        : typeof params.token === "string" && params.token.trim()
+          ? params.token
+          : undefined
+
+      const result = await run(Effect.match(runWiseStatementsAction({
+        action,
+        apiToken: typeof params.apiToken === "string" ? params.apiToken : undefined,
+        token: typeof params.token === "string" ? params.token : undefined,
+        sandbox: typeof params.sandbox === "boolean" ? params.sandbox : undefined,
+        profileId: typeof params.profileId === "string" ? params.profileId : undefined,
+        balanceId: typeof params.balanceId === "string" ? params.balanceId : undefined,
+        currency: typeof params.currency === "string" ? params.currency : undefined,
+        intervalStart: typeof params.intervalStart === "string" ? params.intervalStart : undefined,
+        intervalEnd: typeof params.intervalEnd === "string" ? params.intervalEnd : undefined,
+        statementType,
+      }), {
+        onFailure: (err) => ({
+          ok: false as const,
+          text: `Wise statements error: ${redactWiseTokenText(toErrorMessage(err), explicitToken)}`,
+        }),
+        onSuccess: (response) => ({
+          ok: true as const,
+          text: response.text,
+          details: response.details,
+        }),
+      }))
+
+      return result.ok
+        ? { content: [{ type: "text", text: result.text }], details: result.details }
+        : { content: [{ type: "text", text: result.text }] }
+    },
+  })
+}
+
 // ─── Entrypoint ───────────────────────────────────────────────────────
 
 export default function (pi: ExtensionAPI): void {
@@ -862,4 +955,10 @@ export default function (pi: ExtensionAPI): void {
   registerVimLite(pi)
   registerAgentCockpit(pi)
   registerAgentHistory(pi)
+  registerTelegramAgentServer(pi)
+  registerDiscordAgentServer(pi)
+  registerSlackAgentServer(pi)
+  registerWiseStatements(pi)
+  registerGodmode(pi)
+  registerSymphonyxOpen(pi)
 }

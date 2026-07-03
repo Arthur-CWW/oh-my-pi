@@ -26,6 +26,9 @@
 - Cross-platform tests (macOS + Ubuntu verified)
 - Vendored Kagi Chrome extension for auth protocol tracking
 - 27 tests across 4 test files
+- `/godmode` command — LLM jailbreaking toolkit (Parseltongue obfuscation, ULTRAPLINIAN multi-model racing, GODMODE CLASSIC templates, auto-jailbreak)
+- OMP skill at `~/.omp/agent/skills/godmode/` with scripts, templates, and references
+- Python scripts ported from G0DM0D3/L1B3RT4S (AGPL-3.0) by elder-plinius
 
 ## 0.10.3
 

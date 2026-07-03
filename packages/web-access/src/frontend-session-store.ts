@@ -18,14 +18,17 @@ export interface FrontendProjectRecord {
 
 export interface FrontendSessionRecord {
   conversationUrl: string | null
+  blockerReason: string | null
   createdAt: number
   id: string
+  outputPath: string | null
   projectKey: string | null
   projectUrl: string | null
   prompt: string
   provider: FrontendProvider
   responseText: string
   title: string | null
+  recoveryStep: string | null
   updatedAt: number
 }
 
@@ -40,15 +43,22 @@ interface StoredProjectRow {
 
 interface StoredSessionRow {
   conversation_url: string | null
+  blocker_reason: string | null
   created_at: number
   id: string
+  output_path: string | null
   project_key: string | null
   project_url: string | null
   prompt: string
   provider: FrontendProvider
   response_text: string
+  recovery_step: string | null
   title: string | null
   updated_at: number
+}
+
+interface TableInfoRow {
+  name: string
 }
 
 export function frontendSessionDbPath(): string {
@@ -94,9 +104,12 @@ CREATE TABLE IF NOT EXISTS frontend_sessions (
   project_key TEXT,
   project_url TEXT,
   conversation_url TEXT,
+  output_path TEXT,
+  blocker_reason TEXT,
   title TEXT,
   prompt TEXT NOT NULL,
   response_text TEXT NOT NULL DEFAULT '',
+  recovery_step TEXT,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
@@ -107,6 +120,20 @@ CREATE INDEX IF NOT EXISTS idx_frontend_sessions_provider_updated
 CREATE INDEX IF NOT EXISTS idx_frontend_sessions_project_updated
   ON frontend_sessions(project_key, updated_at DESC);
 `)
+
+  const columnsJson = await runSql(`.mode json
+PRAGMA table_info(frontend_sessions);
+`)
+  const columns = JSON.parse(columnsJson.trim() || "[]") as TableInfoRow[]
+  for (const [name, alterSql] of [
+    ["output_path", "ALTER TABLE frontend_sessions ADD COLUMN output_path TEXT;"],
+    ["blocker_reason", "ALTER TABLE frontend_sessions ADD COLUMN blocker_reason TEXT;"],
+    ["recovery_step", "ALTER TABLE frontend_sessions ADD COLUMN recovery_step TEXT;"],
+  ] as const) {
+    if (!columns.some((column) => column.name === name)) {
+      await runSql(alterSql)
+    }
+  }
 }
 
 function projectFromRow(row: StoredProjectRow): FrontendProjectRecord {
@@ -123,13 +150,16 @@ function projectFromRow(row: StoredProjectRow): FrontendProjectRecord {
 function sessionFromRow(row: StoredSessionRow): FrontendSessionRecord {
   return {
     conversationUrl: row.conversation_url,
+    blockerReason: row.blocker_reason,
     createdAt: row.created_at,
     id: row.id,
+    outputPath: row.output_path,
     projectKey: row.project_key,
     projectUrl: row.project_url,
     prompt: row.prompt,
     provider: row.provider,
     responseText: row.response_text,
+    recoveryStep: row.recovery_step,
     title: row.title,
     updatedAt: row.updated_at,
   }
@@ -217,11 +247,14 @@ LIMIT 1;
 
 export async function saveFrontendSession(input: {
   conversationUrl?: string | null
+  blockerReason?: string | null
   id?: string
+  outputPath?: string | null
   projectKey?: string | null
   projectUrl?: string | null
   prompt: string
   provider: FrontendProvider
+  recoveryStep?: string | null
   responseText?: string
   title?: string | null
 }): Promise<FrontendSessionRecord> {
@@ -230,16 +263,19 @@ export async function saveFrontendSession(input: {
   const now = Date.now()
   await runSql(`
 INSERT INTO frontend_sessions (
-  id, provider, project_key, project_url, conversation_url, title, prompt, response_text, created_at, updated_at
+  id, provider, project_key, project_url, conversation_url, output_path, blocker_reason, title, prompt, response_text, recovery_step, created_at, updated_at
 ) VALUES (
   ${sqliteValue(id)},
   ${sqliteValue(input.provider)},
   ${sqliteValue(input.projectKey ?? null)},
   ${sqliteValue(input.projectUrl ?? null)},
   ${sqliteValue(input.conversationUrl ?? null)},
+  ${sqliteValue(input.outputPath ?? null)},
+  ${sqliteValue(input.blockerReason ?? null)},
   ${sqliteValue(input.title ?? null)},
   ${sqliteValue(input.prompt)},
   ${sqliteValue(input.responseText ?? "")},
+  ${sqliteValue(input.recoveryStep ?? null)},
   ${now},
   ${now}
 )
@@ -248,20 +284,26 @@ ON CONFLICT(id) DO UPDATE SET
   project_key = excluded.project_key,
   project_url = excluded.project_url,
   conversation_url = excluded.conversation_url,
+  output_path = excluded.output_path,
+  blocker_reason = excluded.blocker_reason,
   title = excluded.title,
   prompt = excluded.prompt,
   response_text = excluded.response_text,
+  recovery_step = excluded.recovery_step,
   updated_at = excluded.updated_at;
 `)
   return {
     conversationUrl: input.conversationUrl ?? null,
+    blockerReason: input.blockerReason ?? null,
     createdAt: now,
     id,
+    outputPath: input.outputPath ?? null,
     projectKey: input.projectKey ?? null,
     projectUrl: input.projectUrl ?? null,
     prompt: input.prompt,
     provider: input.provider,
     responseText: input.responseText ?? "",
+    recoveryStep: input.recoveryStep ?? null,
     title: input.title ?? null,
     updatedAt: now,
   }
@@ -278,7 +320,7 @@ export async function listFrontendSessions(options: {
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : ""
   const limit = Math.max(1, Math.min(options.limit ?? 20, 100))
   const rows = await queryJson<StoredSessionRow>(`
-SELECT id, provider, project_key, project_url, conversation_url, title, prompt, response_text, created_at, updated_at
+SELECT id, provider, project_key, project_url, conversation_url, output_path, blocker_reason, title, prompt, response_text, recovery_step, created_at, updated_at
 FROM frontend_sessions
 ${where}
 ORDER BY updated_at DESC
@@ -299,7 +341,7 @@ export async function resolveFrontendSession(ref: string, options: {
   }
 
   const rows = await queryJson<StoredSessionRow>(`
-SELECT id, provider, project_key, project_url, conversation_url, title, prompt, response_text, created_at, updated_at
+SELECT id, provider, project_key, project_url, conversation_url, output_path, blocker_reason, title, prompt, response_text, recovery_step, created_at, updated_at
 FROM frontend_sessions
 WHERE id LIKE ${sqliteValue(`${raw}%`)}
 ORDER BY updated_at DESC

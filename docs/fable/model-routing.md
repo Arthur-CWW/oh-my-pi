@@ -36,7 +36,7 @@ This doc records the model and subscription inventory available to the `~/agents
 | **GPT-5.5 / Codex 20x Max** | Strong logic implementation, code reasoning, planning, fallback judgment | Complex implementers, plan agents, orchestrator fallback, integration reviews | Replacing Fable's high-level advisor role |
 | **Kimi for Coding** | Cheap, fast, capable bounded worker | Narrow edits, searches, small refactors, Jimeng helper, maintenance tasks | High-stakes design decisions, Fable-orchestrator replacement |
 | **Gemini 3.5 Flash (Antigravity)** | Cheapest bounded worker, good for dashboard polish, fixture promotion, packet review | Non-core Jimeng/Dreamina slices, low-risk edits, large-context summarization | Core architecture, provider-sensitive logic |
-| **DeepSeek V4 Pro** | Deep advisor-style reasoning, adversarial critique, prose/AI-tell diagnosis | Oracle cross-check, adversarial review, writing-without-AI-tells critique | Default worker execution (overkill and slower) |
+| **DeepSeek V4 Pro** | Deep advisor-style reasoning, adversarial critique, prose/AI-tell diagnosis | Minimal, explicit-use oracle/prose/adversarial passes only | Default advisor/runtime execution; avoid spending API quota when coding subscriptions can cover the work |
 | **GLM 5.2** | Prose rewrite, detector diagnosis, second opinion on AI-tell triggers | Cross-check drafts, identify Pangram-style triggers | General implementation work |
 
 ---
@@ -168,6 +168,7 @@ providers:
 - **Allowed work:** Synthesis, architecture decisions, product direction, delegation design, cross-workstream review.
 - **Forbidden work:** Menial edits, implementation plumbing, spawning Fable subagents.
 - **Context source:** Curated docs (`docs/fable/`, `docs/state/`, `docs/plans/`), `docs/fable/session-index.md`, and the homey system. **Do not rely on OMP autolearn** for Fable prep; it is currently not trusted.
+- **Auth/source of quota:** Use OMP's existing auth broker, profile, token, usage, and frontend-session mechanisms. Do not create parallel token stores or print secrets.
 
 ### Subagent workers
 
@@ -175,14 +176,14 @@ providers:
 - **Cheap / high-volume lane:** Gemini 3.5 Flash Low (`google-antigravity/gemini-3.5-flash-low`).
 - **Complex logic fallback:** GPT-5.5 (`openai-codex/gpt-5.5`).
 - **Design-heavy lane:** Claude Opus 4.6 (`anthropic/claude-opus-4-6`).
-- **Advisor-assisted lane:** DeepSeek V4 Pro (`deepseek/deepseek-v4-pro`) when the task explicitly benefits from adversarial/oracle/prose review.
+- **Minimal API lane:** DeepSeek V4 Pro (`deepseek/deepseek-v4-pro`) only when explicitly useful for adversarial/oracle/prose review; prefer subscription-backed coding/front-end LLM lanes for normal work.
 
 ### Routing rules
 
 1. **Fable → never spawn Fable.** If a task looks like it needs "another Fable", route it to GPT-5.5 or a specialized subagent instead.
 2. **Fable → delegate execution.** Fable should describe the goal and hand it to a cheaper worker. Fable should not write hundreds of lines of implementation code unless the task is genuinely high-level architecture.
 3. **Subagents can be full agents.** Give them explicit goals, bounded `maxRecursionDepth`, and the right tool set. Do not force every subagent into a single-turn worker mold.
-4. **Keep DeepSeek advisor for subagents and non-Fable workers when useful.** Prose review, oracle, and adversarial critique subagents should keep it; ordinary Kimi/Gemini workers should not pay the advisor tax.
+4. **Minimize DeepSeek.** Use it only for explicit advisor/oracle/prose passes; do not keep a DeepSeek advisor attached to ordinary Fable work.
 5. **Use curated context, not autolearn.** Workers receive the docs/session-index/homey context the parent provides; they do not independently mine the session corpus.
 
 ---
@@ -191,54 +192,23 @@ providers:
 
 Goal: keep `/Users/arthur/.omp/agent/config.yml` untouched, but run Fable with a different advisor/model setting than the rest of the workspace.
 
-OMP supports config overlays via `--config <path>` (confirm exact flag with `omp --help`). A local overlay file can override only the keys that differ from the global config.
-
-### Proposed Fable overlay (`.omp/fable-config.yml`)
-
-```yaml
-# Proposed overlay for a Fable-only session.
-# Not yet created or verified; merge semantics need a test run.
-modelRoles:
-  default: anthropic/fable-main        # or the actual Fable model ID once provisioned
-  smol: kimi-code/kimi-for-coding
-  task: kimi-code/kimi-for-coding
-  implementer: kimi-code/kimi-for-coding
-  research: kimi-code/kimi-for-coding
-  authenticated_web: kimi-code/kimi-for-coding
-  maintenance: kimi-code/kimi-for-coding
-  complex: openai-codex/gpt-5.5
-  plan: openai-codex/gpt-5.5
-  slow: openai-codex/gpt-5.5
-  designer: anthropic/claude-opus-4-6
-  advisor: deepseek/deepseek-v4-pro
-advisor:
-  enabled: false
-  subagents: true
-task:
-  maxRecursionDepth: 8
-  softRequestBudget: 40
-providers:
-  webSearch: kagi
-```
-
-### How to use it
+OMP supports config overlays via `--config <path>` (verified in `omp --help` on 16.3.3). This repo now includes [`.omp/fable-config.yml`](../../.omp/fable-config.yml), which disables the advisor and binds worker roles to non-Fable lanes. Launch Fable by passing the actual model at runtime:
 
 ```bash
-# Example invocation; verify the exact flag before relying on it.
-omp --config ./.omp/fable-config.yml
+omp --config ./.omp/fable-config.yml --model <actual-fable-model-id>
 ```
 
-If `--config` is not supported in this form, the alternative is to keep the overlay as a documented recipe and apply it by starting the session from a wrapper script or by setting the relevant model roles explicitly in the prompt.
+The overlay intentionally does **not** contain a Fable model ID or a DeepSeek advisor model role. It only sets worker defaults, disables advisor/autolearn, keeps Kagi search, and leaves Fable selection to the launch command.
 
 ---
 
 ## Implementation gaps / current guardrails
 
 1. **No Fable model role in global config.** The global `modelRoles` map has no dedicated Fable slot; add it only after the actual model ID is provisioned, preferably through a Fable-specific overlay.
-2. **No clean per-session advisor split.** OMP supports `--config <path>` overlays, but `advisor.enabled` and `advisor.subagents` remain session-global once merged. Desired policy is clear: Fable main advisor off; non-Fable subagent advisor available when useful.
+2. **No true per-agent advisor split yet.** The committed overlay disables advisor for the whole Fable session (`advisor.enabled: false`, `advisor.subagents: false`). If Arthur later wants non-Fable workers to carry an advisor while main Fable does not, OMP needs a cleaner per-agent advisor policy.
 3. **Anti-Fable subagent guard is implemented.** `oh-my-pi/packages/coding-agent/src/config/model-resolver.ts` prevents resolved subagent models containing `fable` from running and falls back to non-Fable task/smol/slow lanes when possible.
-4. **Autolearn disabled and not trusted.** `autolearn.enabled: false` in the global config; even if enabled, Fable should not rely on it. Curated docs and the session index are the source of truth.
-5. **Overlay still needs one smoke test when Fable exists.** The exact Fable model ID is unknown, so the proposed overlay remains a recipe rather than a runnable committed profile.
+4. **Autolearn disabled and not trusted.** `autolearn.enabled: false` in the global config and in `.omp/fable-config.yml`; even if enabled, Fable should not rely on it. Curated docs and the session index are the source of truth.
+5. **Fable model ID still unknown.** The overlay is runnable only when paired with `--model <actual-fable-model-id>`.
 
 ---
 

@@ -54,6 +54,7 @@ COPY --parents \
     packages/*/package.json \
     packages/tsconfig.workspace.json \
     python/robomp/web/package.json \
+    patches/*.patch \
     crates/*/Cargo.toml \
     /pi/
 
@@ -173,6 +174,7 @@ COPY --parents \
     packages/*/package.json \
     packages/tsconfig.workspace.json \
     python/robomp/web/package.json \
+    patches/*.patch \
     /pi/
 
 RUN bun install --frozen-lockfile --ignore-scripts

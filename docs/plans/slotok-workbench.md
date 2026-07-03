@@ -293,6 +293,16 @@ Start with dry-run commands:
 
 Then connect to real provider calls with explicit confirmation/spend caps.
 
+### T-2026-06-10-064 design-system migration note
+
+2026-06-24 slice: migrated the repeated native `label` + `select` form-control pattern in the review queue, final-editor candidate picker, reference archive controls, and KIE route controls to owned workbench primitives (`WorkbenchField`, `WorkbenchSelect`). The KIE route card copy now names local dry-run JSON as the default action and reserves live wording for the capped provider request button.
+
+Root verification command for this slice:
+
+```sh
+bun --cwd apps/slotok-workbench vitest run src/renderer/ReactUgcStudio.test.ts src/renderer/design-system/workbench.test.tsx
+```
+
 ### 8. CDP/UI iteration harness
 
 Use CDP/Playwright to:

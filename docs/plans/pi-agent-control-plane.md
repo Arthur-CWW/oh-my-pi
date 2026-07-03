@@ -2,7 +2,7 @@
 
 Status: living draft v0
 Owner: Arthur + Pi
-Scope: tmux-first, TypeScript-first local control plane for managing many Pi agent sessions
+Scope: local control plane for managing Pi/OMP/Codex-like agent sessions. Two linked workstreams: `control-plane-core` (SQLite/event/session/task ledger plus runner API) and `dream-memory` (delayed evidence/promotion stream). Runtime substrate is chosen by a small vertical spike: reuse existing Rust/TS only if it stays simpler than an Elixir/OTP core. OMP collab is an optional `live attach/watch/steer channel`, never the source of truth.
 
 ## Why this exists
 
@@ -33,6 +33,23 @@ Split the system into three layers:
    - later: richer dashboard or remote status surface
 
 The orchestrator chat/session is **not** the source of truth. It is a client of the control plane.
+
+## Collab reuse boundary
+
+OMP/SymphonyX collaboration features are an optional `live attach/watch/steer channel` across sessions. They are useful for:
+
+- live attach to a running child agent
+- watch progress without owning the session
+- steer or interrupt within the runner's native capabilities
+
+They are explicitly **not**:
+
+- the source of truth for workflow state
+- a registry or database
+- a durable transcript store or task queue
+- a learning store
+
+Durable state lives in the repo-local SQLite/event/session/task ledger. Store only view links/evidence handles/credential references in the ledger by default, never full collab write links.
 
 ## Problem statement
 
@@ -105,8 +122,8 @@ Implications:
 Implication:
 
 - we must build the central cross-process registry ourselves
-- tmux should remain a thin launcher/transport layer
-- most logic should live in TypeScript
+- TypeScript should own the Pi publisher/connector path
+- durable orchestration and ledger ownership should follow the Elixir/OTP vs Rust/TS spike, behind the same JSON/SQLite/API contract
 
 ## Product framing
 
@@ -120,7 +137,7 @@ Working name candidates:
 
 Recommended framing:
 
-> A TypeScript-first local control plane for supervising many Pi runs inside tmux.
+> A local SQLite-first agent control plane for supervising Pi/OMP/Codex-like runs, with Elixir/Rust/TypeScript clients behind one JSON/SQLite/API contract and tmux/Zellij as optional live attach surfaces.
 
 ## Inspiration
 
@@ -141,8 +158,8 @@ Most relevant lessons from Symphony:
 
 ## Design principles
 
-1. **TypeScript-first**: tmux is a transport layer, not the main logic layer.
-2. **Local-first**: no remote service required for the MVP.
+1. **SQLite-first control-plane boundary**: the selected runtime core owns durable SQLite state, process lifecycle, CLI/API contracts, and supervision; TypeScript is used where it has leverage (Pi extension publisher, Pi-specific tools, optional SDK/RPC adapter), and Rust remains a strong TUI/portable-client path.
+2. **Local-first**: no remote service required.
 3. **Deterministic control plane**: chat/orchestrator is a client, not the authority.
 4. **Human attention is the scarce resource**: optimize for supervision cost.
 5. **Stable compressed summaries**: status line should not be noisy or jittery.
@@ -154,7 +171,7 @@ Most relevant lessons from Symphony:
 
 ## Architecture
 
-Current preferred architecture is now **Rust core + small TypeScript Pi connector**, unless Pi SDK/RPC integration turns out to require more TypeScript.
+Current preferred architecture for the next slice is an **Elixir/OTP ledger/orchestration spike behind a stable JSON/SQLite/API contract**, with Rust TUI/client work and the TypeScript Pi connector kept as clients unless the spike fails the acceptance checklist.
 
 ```txt
 +-------------------------+       +---------------------------+
@@ -165,8 +182,8 @@ Current preferred architecture is now **Rust core + small TypeScript Pi connecto
              +----------------+  +----------------+
                               v  v
                     +-----------------------+
-                    | Rust control-plane    |
-                    | daemon / CLI / TUI    |
+                    | SQLite control-plane  |
+                    | core + JSON/CLI/API   |
                     +----+-------------+----+
                          |             |
                          |             |
@@ -184,15 +201,16 @@ TypeScript should be used where it has leverage:
 - Pi-specific tool registration
 - optional Pi SDK/RPC adapter if the Node APIs are required
 
-Rust should own the portable core:
+The selected control-plane core should own the portable authority:
 
 - runtime registry
 - workgroup state
-- CLI/TUI cockpit
 - config parsing
 - persistence
-- terminal backend adapters
-- remote attachment abstraction
+- runner orchestration
+- terminal/backend attachment abstractions
+
+If Elixir/OTP owns orchestration after the spike, Rust should stay focused on TUI/client duties instead of carrying a second ledger authority.
 
 
 ## System components
@@ -506,9 +524,9 @@ Therefore:
 
 This implies that deeper review features should push the system toward one-worktree-per-session or one-worktree-per-workgroup.
 
-## Rust core vs TypeScript core
+## Runtime core choice: Elixir/OTP, Rust, or TypeScript
 
-A Rust core is attractive if this becomes a serious local CLI/TUI project.
+A Rust core remains attractive if this becomes primarily a standalone local CLI/TUI project.
 
 Benefits:
 
@@ -528,7 +546,8 @@ Costs:
 
 Recommendation:
 
-- use Rust for the control-plane core if the intended endpoint is a standalone cockpit/orchestrator project
+- run the Elixir/OTP vertical spike first because the active Symphony Lite goal needs supervision, task-source imports, and ledger-backed orchestration
+- keep Rust as the TUI/portable-client path unless the spike shows Rust should own the durable core
 - keep a thin TS Pi extension that publishes events and exposes Pi tools
 - keep all runner/terminal backends behind explicit interfaces so the core is not Pi-locked
 
@@ -582,16 +601,27 @@ Why SQLite:
 Design rule: Zellij/tmux is the terminal substrate; SQLite is the semantic control-plane memory.
 
 
-## Repo-wide task ledger
+## Repo-wide task metadata ledger
 
-Arthur's centralized metadata idea should start as a repo-wide task ledger, not a full document database.
+T-2026-06-13-005 should land as a centralized **task metadata ledger**, not a document database and not a second standalone database package.
 
-The control-plane SQLite store should eventually hold two related but separate concerns:
+The control-plane SQLite store owns two related but separate concerns:
 
 1. **runtime cockpit state**: live sessions, terminal panes, heartbeats, workgroups, and recent activity
-2. **task ledger state**: packet queue rows, owner path claims, proof links, review state, and scheduling timestamps
+2. **task metadata state**: packet queue rows, owner path claims, proof links, review state, source pointers, and scheduling timestamps
 
-Keeping both in SQLite lets the orchestrator answer questions like “what is the next unclaimed React QA packet?” or “which active agents own `apps/slotok-workbench/**`?” without rereading `TASKS.md`, QA notes, and session logs. Keeping the concerns separate prevents transient terminal details from becoming the task source of truth.
+Keeping both in SQLite lets the orchestrator answer questions like “what is the next unclaimed React QA packet?” or “which active agents own `apps/slotok-workbench/**`?” without rereading `TASKS.md`, QA notes, domain packet ledgers, and session logs. Keeping the concerns separate prevents transient terminal details from becoming the task source of truth.
+
+### Existing seams
+
+Use the seams already in the repo:
+
+- `packages/web-access/src/agent-cockpit*` owns the current cockpit/runtime pilot and `~/.local/share/pi-cockpit/cockpit.sqlite`.
+- `packages/symphony-lite-elixir/lib/symphony_lite_elixir/ledger.ex` already has workflow, agent, external-session, event, and packet tables behind the `symphony_lite`/`symphonyx` JSON CLI spike.
+- `packages/symphony-lite-rs` remains the Rust/TUI comparison path and future client, not a reason to introduce a parallel task-ledger package.
+- `catalog/workspaces.yml` names workspace roots and packet policy; ledger rows should reference those stable roots and packet paths rather than inventing new path semantics.
+
+Do **not** create `packages/task-ledger`, `packages/database-workbench-ledger`, or another SQLite wrapper for this slice. Extend the chosen Symphony Lite ledger seam first; expose boring JSON/CLI commands over it; let the database workbench inspect the resulting SQLite file later as a generic SQLite database.
 
 ### What stays Markdown
 
@@ -609,17 +639,18 @@ The ledger should point to these files by path and stable heading or artifact UR
 Move only high-churn coordination fields:
 
 - packet id, title, workstream, status, priority, and short summary
+- source pointer: Markdown path/heading, packet-manifest path, or external packet-ledger row reference
 - owner paths, excluded paths, and dirty paths that must be preserved
 - assigned worker/reviewer/session ids
 - proof links to QA notes, artifacts, session logs, data folders, and commits
 - created/updated/claimed/review-ready/done/stale timestamps
 - append-only status events
 
-These are the fields agents need for atomic claim/update decisions. They are also the fields most likely to become stale when duplicated across `TASKS.md`, QA notes, and handoff prose.
+These are the fields agents need for atomic claim/update decisions. They are also the fields most likely to become stale when duplicated across `TASKS.md`, QA notes, packet-ledger dashboards, and handoff prose.
 
-### Minimal schema
+### Minimal canonical table list
 
-The first repo ledger can be four tables alongside the cockpit runtime tables:
+The first repo ledger needs four scheduling tables alongside the runtime cockpit/workflow tables:
 
 ```sql
 create table task_packets (
@@ -666,24 +697,27 @@ create table packet_events (
 );
 ```
 
-Use constrained status values in application code first; add SQL `check` constraints once the import path has proved the vocabulary. Store timestamps as UTC ISO-8601 text so shell, TypeScript, Rust, and SQLite can all sort them without adapters.
+Use constrained status values in application code first; add SQL `check` constraints once the import path has proved the vocabulary across `TASKS.md`, packet manifests, and existing domain packet ledgers. Store timestamps as UTC ISO-8601 text so shell, TypeScript, Rust, Elixir, and SQLite can all sort them without adapters.
 
 ### Migration from existing repo state
 
 1. Import `TASKS.md` rows as `task_packets` with `source_doc='TASKS.md'`; keep the Markdown file as the human index during the transition.
-2. Link existing `docs/qa/**` proof notes as `packet_proofs(kind='qa-note')`; do not inline the note body.
-3. Link session histories/logs only when they affect scheduling, review, or unblock decisions.
-4. For active multi-agent work, add owner/excluded paths from the task packet into `packet_ownership`.
-5. Teach coordinator commands to update SQLite first, then patch or regenerate short Markdown summaries.
-6. Once the loop is reliable, make `TASKS.md` a curated/generated view of the ledger instead of the place agents race to edit.
+2. Import repo packet manifests and domain packet ledgers as source pointers, not copied prose. For a SQLite packet ledger, store the DB path in `source_doc` and the table/row key in `source_heading`, then add proof links for the artifacts a reviewer needs.
+3. Link existing `docs/qa/**` proof notes as `packet_proofs(kind='qa-note')`; do not inline the note body.
+4. Link session histories/logs only when they affect scheduling, review, or unblock decisions.
+5. For active multi-agent work, add owner/excluded paths from the task packet into `packet_ownership`.
+6. Teach coordinator commands to update SQLite first, then patch or regenerate short Markdown summaries.
+7. Once the loop is reliable, make `TASKS.md` a curated/generated view of the ledger instead of the place agents race to edit.
 
-This is intentionally incremental. A useful v0 can answer `next`, `claim`, `proof add`, `review-ready`, `block`, and `done` before any historical Markdown is fully normalized.
+This is intentionally incremental. A useful v0 can answer `next`, `claim`, `paths`, `proof add`, `review-ready`, `block`, and `done` before any historical Markdown is fully normalized.
 
 ### Agent query/update API
 
 Expose boring commands or tools over the ledger:
 
 ```txt
+ledger import --source TASKS.md
+ledger import --source data/<domain>/<packet-ledger>.sqlite
 ledger next --workstream <name> [--path <prefix>]
 ledger claim <packet-id> --worker <id> --session <id>
 ledger paths <packet-id>
@@ -693,6 +727,18 @@ ledger status <packet-id> done --proof <href>
 ```
 
 Agents should never infer packet availability from prose when the ledger exists. They query for eligible work, claim atomically, read owner/excluded paths, and write proof/status events. Markdown remains the reviewable explanation layer.
+
+### First implementation slice
+
+The first code slice should extend the existing `packages/symphony-lite-elixir` ledger/CLI rather than adding a package:
+
+1. Add a migration-safe schema update for the four task metadata tables above, preserving any existing rows from the current spike schema.
+2. Add a `TASKS.md` importer that maps task id/title/source/summary into `task_packets` and leaves long prose in Markdown.
+3. Add a packet-ledger importer interface that can read another SQLite packet dashboard by adapter and store only the source pointer plus proof links.
+4. Implement `next`, `claim`, `paths`, `proof add`, and `status` against the same ledger root used by `status --json`.
+5. Add one fixture-backed smoke path that imports `TASKS.md`, claims T-2026-06-13-005, attaches this plan update as proof, and returns bounded JSON.
+
+Root should validate that slice with the package-local Symphony Lite Elixir test/smoke command, not with repo-wide gates.
 
 ## Zellij API notes
 
@@ -843,7 +889,7 @@ Costs:
 Recommendation:
 
 - do not make tmux/zellij mandatory in the domain model
-- for MVP, use tmux because it already solves live attach for current workflows
+- for the v0 pilot, use tmux because it already solves live attach for current workflows
 - design a `TerminalBackend` interface with at least:
   - `none` for RPC/headless workers
   - `tmux` for current local/remote attach
@@ -865,7 +911,7 @@ Live attach is valuable, especially for remote sessions. If live remote attach m
 
 ### Technical
 
-- TypeScript-first implementation
+- SQLite-first core with stable Elixir/Rust/TypeScript client boundaries
 - minimal dependencies
 - local-first operation
 - deterministic hot path; no LLM needed for navigation
@@ -895,44 +941,70 @@ Live attach is valuable, especially for remote sessions. If live remote attach m
 - allow future worktree launcher / orchestrator features
 - allow later non-tmux clients
 
-## MVP
+## Runtime substrate checkpoint: Elixir/OTP vs Rust/TS
 
-### Phase 1: make tabs legible
+OTP is Elixir/Erlang's production pattern set for supervised concurrent systems: lightweight processes, message mailboxes, registries, supervisors, restart strategy, application lifecycle, tracing/introspection, and hot-code upgrade/reload support.
 
-- publisher extension sets better titles
-- publisher tracks status icon/state
-- simple registry of live sessions
-- existing tmux bar becomes much more readable
+OpenAI Symphony's Elixir reference implementation polls Linear, creates a workspace per issue, launches `codex app-server`, keeps Codex working until done or blocked, exposes a Phoenix LiveView dashboard plus a JSON API, and has a `make all` command plus optional live end-to-end tests.
 
-### Phase 2: popup cockpit
+OpenAI's Symphony README labels the Elixir implementation prototype software for evaluation and recommends implementing a hardened version from `SPEC.md`.
 
-- popup switcher in TypeScript
-- search
-- grouped list
-- preview pane
-- hint chords
-- switch and review open
+The repo should not make the TUI depend on Elixir. The boundary is JSON/SQLite/control API: Elixir may own orchestration; Rust may own TUI; TypeScript may own Pi extension/web/control-panel views.
 
-### Phase 3: workgroups + orchestrator tools
+The next implementation decision is a tiny vertical spike, not a rewrite. Build the smallest core that can run end-to-end and compare code/operational simplicity.
 
-- workgroup model
-- assign/unassign sessions
-- role metadata
-- orchestrator Pi session tools
-- stale/blocked reporting
+### Spike acceptance
 
-### Phase 4: trustworthy review mode
+- Start two dry-run child runs from a local task list.
+- Persist workflow/session/event rows.
+- Expose `status --json` or `/api/state` with bounded previews.
+- Mark one worker blocked and one done.
+- Simulate one crashed worker and show restart or explicit failed state.
+- Run one command that proves the whole path without a TUI.
 
-- launch isolated worktree-backed sessions
-- session-specific diff mode
-- reviewer-agent support
+## Workstreams / packets
 
-### Phase 5: orchestration layer
+### Workstream 1: `control-plane-core`
 
-- spawn/manage role-specific workers
-- templates for planner/implementer/reviewer groups
-- issue/task-driven workgroup creation
-- more Symphony-like local automation
+Durable local control plane and orchestration surface. Owner paths:
+
+- `packages/symphony-lite-rs/**`
+- `packages/symphony-lite-elixir/**`
+- `packages/web-access/src/agent-cockpit*`
+- `docs/plans/pi-agent-control-plane.md`
+- `docs/plans/symphony-lite.md`
+- `docs/state/symphony-lite-direction.md`
+
+Tasks:
+
+- maintain SQLite/ledger data as source of truth for workflow runs, subagent starts, events, external sessions, and task packet state
+- run the Elixir/OTP vs Rust/TS vertical spike before committing to a runtime rewrite
+- expose one stable JSON/CLI/API contract for central Pi orchestrator, Rust TUI, and future TypeScript web/control-panel clients
+- support Pi RPC and Codex app-server runners
+- keep tmux/Zellij materialization lazy/optional for human attach/debugging
+- add task metadata ledger (`task_packets`, `packet_ownership`, `packet_proofs`, `packet_events`) imported from `TASKS.md` and existing packet-ledger source pointers
+- expose deterministic commands/endpoints: `import`, `next`, `claim`, `paths`, `proof add`, `status`
+- keep orchestrator Pi/OMP session as a client, not the authority
+
+### Workstream 2: `dream-memory`
+
+Delayed evidence/promotion stream. Skills, docs, lints, and memory are materialized only after evidence and review. Owner paths:
+
+- future `docs/plans/dream-memory/**`
+- `data/dream-memory/**` or equivalent repo-local ledger
+- future runtime module/package only after promotion, not inside the first runtime spike
+
+Tasks:
+
+- collect evidence in SQLite/ledger evidence/candidate/proposal tables or equivalent repo-local store
+- require review before promoting any candidate to memory/docs/lints/skills
+- materialize skills only after evidence and review, never from raw auto-generation
+- keep this stream separate from `control-plane-core`; it consumes control-plane events but does not own them
+- plan-level in `docs/state/symphony-lite-direction.md`; not currently implemented in the Rust package or Elixir spike
+
+### Link between workstreams
+
+`control-plane-core` produces durable workflow/subagent events; `dream-memory` may read those events as evidence, but promotion decisions write reviewed repo artifacts, not runtime state. Runtime state remains in the control-plane ledger; learning candidates remain in the Dream ledger.
 
 ## Open questions
 
@@ -947,13 +1019,12 @@ Live attach is valuable, especially for remote sessions. If live remote attach m
 
 ## Vendor / research strategy
 
-We should likely vendor or mirror reference materials for design inspiration, but not depend on a foreign runtime for the MVP.
+We should likely vendor or mirror reference materials for design inspiration, but not depend on a foreign runtime for the v0 pilot.
 
 Recommended:
 
 - vendor the Symphony spec and README as reference material
 - adapt ideas into local TS architecture
-- do not adopt the Elixir runtime as a direct dependency for the MVP
 
 Possible layout:
 
@@ -978,14 +1049,7 @@ Elixir is useful for Symphony because it is excellent at long-running orchestrat
 - Phoenix LiveView gives a dashboard/status surface with relatively little code.
 - Hot reload and live state inspection are strong during development.
 
-Why not start with Elixir here:
-
-- this repo is TypeScript-first and already has Pi extension/tooling code in TS
-- Pi SDK/RPC integration is easier from TypeScript
-- adding Elixir early would make the local dev stack heavier
-- the first hard problem is the control-plane model, not distributed runtime supervision
-
-Recommendation: copy Symphony's architecture/spec ideas first, not the Elixir runtime. Reconsider Elixir only if the TS control plane grows into a true always-on multi-worker supervisor and TypeScript process management becomes the bottleneck.
+Do a bounded Elixir/OTP vertical spike before a rewrite. If the Elixir spike satisfies the acceptance checklist with less glue and clearer supervision than the existing Rust/TS path, promote Elixir to the orchestration core while keeping Rust TUI and TypeScript/Pi/web clients behind JSON/SQLite/API boundaries. If not, keep Rust/TS and copy only Symphony's architecture.
 
 ## Symphony layer breakdown
 
@@ -1184,7 +1248,7 @@ Design rule: the control plane is agent-runner agnostic; Pi is the first runner 
 - Pi extension publishes metadata/events
 - cockpit can switch/preview/review based on registry + session files
 
-Best MVP path.
+Best v0 pilot path.
 
 ### 2. Launch Pi sessions from the control plane
 

@@ -1,4 +1,13 @@
 export {}
+type FollowingAccountRecord = {
+  username: string;
+  displayName?: string;
+  profileUrl?: string;
+  avatarUrl?: string;
+  sourceHandle?: string;
+  pageKind?: string;
+};
+
 type VisibleTweetRecord = {
   tweetId: string;
   statusUrl: string;
@@ -9,6 +18,8 @@ type VisibleTweetRecord = {
   quoteStatusUrl?: string;
   createdAt?: string;
   pageKind: string;
+  hasReadMore?: boolean;
+  isLongPostCandidate?: boolean;
 };
 
 type SignalKind =
@@ -48,6 +59,8 @@ type CaptureResponse =
       pageTitle: string;
       pageKind: string;
       visibleTweets: VisibleTweetRecord[];
+      followingAccounts?: FollowingAccountRecord[];
+      followingSourceHandle?: string;
       signals: InteractionSignal[];
     }
   | {
@@ -74,12 +87,31 @@ const BLOCKED_PATH_PREFIXES = [
   "/settings",
   "/compose",
 ];
+const NON_PROFILE_PATHS: Record<string, true> = {
+  compose: true,
+  explore: true,
+  home: true,
+  i: true,
+  jobs: true,
+  login: true,
+  logout: true,
+  messages: true,
+  notifications: true,
+  privacy: true,
+  search: true,
+  settings: true,
+  tos: true,
+}
 
 const MAX_SIGNAL_BUFFER = 2000;
 const SESSION_ID = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 const SIGNALS: InteractionSignal[] = [];
 const OBSERVED_TWEETS = new Map<string, { visibleSince?: number; profileHandle?: string }>();
-const OBSERVED_ARTICLES = new WeakSet<HTMLElement>();
+let OBSERVED_ARTICLES = new WeakSet<HTMLElement>();
+const FOLLOWING_ACCOUNTS_BY_SOURCE = new Map<string, Map<string, FollowingAccountRecord>>();
+const URL_POLL_INTERVAL_MS = 10_000;
+const MUTATION_SCAN_DEBOUNCE_MS = 500;
+const TWEET_VISIBILITY_THRESHOLDS = [0, 0.5, 1];
 
 function hashString(input: string): string {
   let hash = 0;
@@ -129,6 +161,11 @@ function pageProfileHandle(): string | undefined {
   return match?.[1];
 }
 
+function pageFollowingHandle(): string | undefined {
+  const match = location.pathname.match(/^\/+([A-Za-z0-9_]+)\/following\/?/);
+  return match?.[1];
+}
+
 function pageSearchQuery(): string | undefined {
   return new URLSearchParams(location.search).get("q") ?? undefined;
 }
@@ -143,6 +180,10 @@ function pageStatusContext(): { tweetId?: string; profileHandle?: string } {
 
 let lastRecordedUrl = location.href;
 let urlPollInterval: number | undefined;
+let tweetMutationObserver: MutationObserver | undefined;
+let tweetScanTimeout: number | undefined;
+let followingMutationObserver: MutationObserver | undefined;
+let followingScanTimeout: number | undefined;
 
 function recordUrlChange(reason: string): void {
   const currentUrl = location.href;
@@ -159,17 +200,37 @@ function recordUrlChange(reason: string): void {
     sessionId: SESSION_ID,
     details: { reason },
   });
+  syncFollowingCaptureTracking();
 
-  if (pageKind() === "profile") {
+  if (pageKind() === "profile" || pageKind() === "following") {
     pushSignal({
       kind: "profile_visit",
       observedAt: new Date().toISOString(),
       pageUrl: currentUrl,
       sourceUrl: previousUrl,
       sessionId: SESSION_ID,
-      profileHandle: pageProfileHandle(),
+      profileHandle: pageProfileHandle() ?? pageFollowingHandle(),
     });
   }
+}
+
+function clearUrlPollInterval(): void {
+  if (urlPollInterval === undefined) {
+    return;
+  }
+  window.clearInterval(urlPollInterval);
+  urlPollInterval = undefined;
+}
+
+function syncUrlPollInterval(): void {
+  if (document.hidden) {
+    clearUrlPollInterval();
+    return;
+  }
+  if (urlPollInterval !== undefined) {
+    return;
+  }
+  urlPollInterval = window.setInterval(() => recordUrlChange("poll"), URL_POLL_INTERVAL_MS);
 }
 
 function startUrlChangeTracking(): void {
@@ -187,7 +248,8 @@ function startUrlChangeTracking(): void {
 
   window.addEventListener("popstate", () => recordUrlChange("popstate"));
   window.addEventListener("hashchange", () => recordUrlChange("hashchange"));
-  urlPollInterval = window.setInterval(() => recordUrlChange("poll"), 1000);
+  syncUrlPollInterval();
+  document.addEventListener("visibilitychange", syncUrlPollInterval);
 }
 
 function currentPageContextSignal(): Pick<
@@ -195,8 +257,8 @@ function currentPageContextSignal(): Pick<
   "profileHandle" | "tweetId" | "searchQuery"
 > {
   const kind = pageKind();
-  if (kind === "profile") {
-    return { profileHandle: pageProfileHandle() };
+  if (kind === "profile" || kind === "following") {
+    return { profileHandle: pageProfileHandle() ?? pageFollowingHandle() };
   }
   if (kind === "search") {
     return { searchQuery: pageSearchQuery() };
@@ -216,6 +278,9 @@ function startTabVisibilityTracking(): void {
       sessionId: SESSION_ID,
       ...currentPageContextSignal(),
     });
+    if (document.hidden) {
+      flushActiveDwellSignals();
+    }
   });
 }
 
@@ -267,7 +332,7 @@ const TWEET_VISIBILITY_OBSERVER = new IntersectionObserver(
       }
     }
   },
-  { threshold: [0, 0.25, 0.5, 0.75, 1] },
+  { threshold: TWEET_VISIBILITY_THRESHOLDS },
 );
 
 function observeTweetArticle(article: HTMLElement): void {
@@ -279,25 +344,75 @@ function observeTweetArticle(article: HTMLElement): void {
 }
 
 function observeExistingTweetArticles(): void {
+  if (document.hidden) {
+    return;
+  }
   for (const article of document.querySelectorAll<HTMLElement>('article[data-testid="tweet"]')) {
     observeTweetArticle(article);
   }
 }
 
-function startTweetVisibilityTracking(): void {
-  observeExistingTweetArticles();
-
-  const mutationObserver = new MutationObserver(() => {
+function scheduleTweetArticleScan(): void {
+  if (document.hidden || tweetScanTimeout !== undefined) {
+    return;
+  }
+  tweetScanTimeout = window.setTimeout(() => {
+    tweetScanTimeout = undefined;
     observeExistingTweetArticles();
-  });
+  }, MUTATION_SCAN_DEBOUNCE_MS);
+}
+
+function clearTweetArticleScan(): void {
+  if (tweetScanTimeout === undefined) {
+    return;
+  }
+  window.clearTimeout(tweetScanTimeout);
+  tweetScanTimeout = undefined;
+}
+
+function stopTweetVisibilityTracking(): void {
+  clearTweetArticleScan();
+  tweetMutationObserver?.disconnect();
+  tweetMutationObserver = undefined;
+  TWEET_VISIBILITY_OBSERVER.disconnect();
+  OBSERVED_ARTICLES = new WeakSet<HTMLElement>();
+  flushActiveDwellSignals();
+  OBSERVED_TWEETS.clear();
+}
+
+function startVisibleTweetVisibilityTracking(): void {
+  if (document.hidden || tweetMutationObserver !== undefined) {
+    return;
+  }
+  observeExistingTweetArticles();
+  tweetMutationObserver = new MutationObserver(scheduleTweetArticleScan);
 
   if (document.body) {
-    mutationObserver.observe(document.body, { childList: true, subtree: true });
+    tweetMutationObserver.observe(document.body, { childList: true, subtree: true });
   } else {
-    document.addEventListener("DOMContentLoaded", () => {
-      mutationObserver.observe(document.body, { childList: true, subtree: true });
-    });
+    document.addEventListener(
+      "DOMContentLoaded",
+      () => {
+        if (!document.hidden) {
+          tweetMutationObserver?.observe(document.body, { childList: true, subtree: true });
+        }
+      },
+      { once: true },
+    );
   }
+}
+
+function syncTweetVisibilityTracking(): void {
+  if (document.hidden) {
+    stopTweetVisibilityTracking();
+    return;
+  }
+  startVisibleTweetVisibilityTracking();
+}
+
+function startTweetVisibilityTracking(): void {
+  syncTweetVisibilityTracking();
+  document.addEventListener("visibilitychange", syncTweetVisibilityTracking);
 }
 
 const CONTROL_TEST_IDS = new Set([
@@ -360,8 +475,8 @@ function startSignalCapture(): void {
   startUrlChangeTracking();
   startTabVisibilityTracking();
   startTweetVisibilityTracking();
+  syncFollowingCaptureTracking();
   startControlClickTracking();
-
   pushSignal({
     kind: "page_load",
     observedAt: new Date().toISOString(),
@@ -370,20 +485,20 @@ function startSignalCapture(): void {
     ...currentPageContextSignal(),
   });
 
-  if (pageKind() === "profile") {
+  if (pageKind() === "profile" || pageKind() === "following") {
     pushSignal({
       kind: "profile_visit",
       observedAt: new Date().toISOString(),
       pageUrl: location.href,
       sessionId: SESSION_ID,
-      profileHandle: pageProfileHandle(),
+      profileHandle: pageProfileHandle() ?? pageFollowingHandle(),
     });
   }
 
   window.addEventListener("beforeunload", () => {
-    if (urlPollInterval !== undefined) {
-      window.clearInterval(urlPollInterval);
-    }
+    clearUrlPollInterval();
+    stopTweetVisibilityTracking();
+    stopFollowingCaptureTracking();
   });
 }
 
@@ -394,6 +509,9 @@ function pageKind(): string {
   }
   if (/^\/[A-Za-z0-9_]+\/status\/\d+/.test(path)) {
     return "status";
+  }
+  if (/^\/[A-Za-z0-9_]+\/following/.test(path)) {
+    return "following";
   }
   if (/^\/[A-Za-z0-9_]+$/.test(path)) {
     return "profile";
@@ -536,6 +654,202 @@ function replyContext(root: ParentNode): string | undefined {
 }
 
 
+function extractFollowingAccounts(): FollowingAccountRecord[] {
+  const records = new Map<string, FollowingAccountRecord>();
+  const baseUrl = "https://x.com";
+
+  for (const link of document.querySelectorAll<HTMLAnchorElement>("a[href^='/']")) {
+    const usernameMatch = link.pathname.match(/^\/+([A-Za-z0-9_]{1,15})\/?$/);
+    if (!usernameMatch) {
+      continue;
+    }
+    const username = usernameMatch[1];
+    const usernameKey = username.toLowerCase();
+    if (NON_PROFILE_PATHS[usernameKey] || records.has(usernameKey)) {
+      continue;
+    }
+
+    const cell = link.closest<HTMLElement>("[data-testid='cellInnerDiv']") ?? link.closest<HTMLElement>("div[role='row']") ?? link.parentElement;
+    if (!cell) {
+      continue;
+    }
+    if (!cell.innerText.includes(`@${username}`)) {
+      continue;
+    }
+
+
+    const avatar = cell.querySelector<HTMLImageElement>("img[src*='/profile_images/']") ??
+      cell.querySelector<HTMLImageElement>("img[alt]:not([alt=''])") ??
+      Array.from(cell.querySelectorAll<HTMLImageElement>("img")).find((image) => image.width >= 32 || image.height >= 32);
+
+    const displayName = extractDisplayNameFromCell(cell, username);
+    const profileUrl = `${baseUrl}/${username}`;
+    const avatarUrl = avatar?.currentSrc || avatar?.src || undefined;
+
+    records.set(usernameKey, {
+      username,
+      displayName,
+      profileUrl,
+      avatarUrl,
+    });
+  }
+
+  return Array.from(records.values());
+}
+
+
+function followingSessionAccounts(sourceHandle: string): Map<string, FollowingAccountRecord> {
+  const key = sourceHandle.toLowerCase();
+  const existing = FOLLOWING_ACCOUNTS_BY_SOURCE.get(key);
+  if (existing) {
+    return existing;
+  }
+
+  const sessionAccounts = new Map<string, FollowingAccountRecord>();
+  FOLLOWING_ACCOUNTS_BY_SOURCE.set(key, sessionAccounts);
+  return sessionAccounts;
+}
+
+function mergeFollowingAccount(
+  sourceHandle: string,
+  existing: FollowingAccountRecord | undefined,
+  observed: FollowingAccountRecord,
+): FollowingAccountRecord {
+  return {
+    username: observed.username,
+    displayName: observed.displayName ?? existing?.displayName,
+    profileUrl: observed.profileUrl ?? existing?.profileUrl,
+    avatarUrl: observed.avatarUrl ?? existing?.avatarUrl,
+    sourceHandle,
+    pageKind: "following",
+  };
+}
+
+function rememberFollowingAccounts(sourceHandle: string, observedAccounts: readonly FollowingAccountRecord[]): void {
+  const sessionAccounts = followingSessionAccounts(sourceHandle);
+  for (const observed of observedAccounts) {
+    if (!observed.username) {
+      continue;
+    }
+    const key = observed.username.toLowerCase();
+    sessionAccounts.set(key, mergeFollowingAccount(sourceHandle, sessionAccounts.get(key), observed));
+  }
+}
+
+
+function scanCurrentFollowingPage(): void {
+  const sourceHandle = pageFollowingHandle();
+  if (!sourceHandle) {
+    return;
+  }
+
+  rememberFollowingAccounts(sourceHandle, extractFollowingAccounts());
+}
+
+function followingAccountsForCapture(sourceHandle: string): FollowingAccountRecord[] {
+  scanCurrentFollowingPage();
+  return Array.from(followingSessionAccounts(sourceHandle).values());
+}
+
+function clearFollowingAccountScan(): void {
+  if (followingScanTimeout === undefined) {
+    return;
+  }
+  window.clearTimeout(followingScanTimeout);
+  followingScanTimeout = undefined;
+}
+
+function scheduleFollowingAccountScan(): void {
+  if (pageKind() !== "following") {
+    stopFollowingCaptureTracking();
+    return;
+  }
+  if (followingScanTimeout !== undefined) {
+    return;
+  }
+  followingScanTimeout = window.setTimeout(() => {
+    followingScanTimeout = undefined;
+    scanCurrentFollowingPage();
+  }, MUTATION_SCAN_DEBOUNCE_MS);
+}
+
+function stopFollowingCaptureTracking(): void {
+  clearFollowingAccountScan();
+  followingMutationObserver?.disconnect();
+  followingMutationObserver = undefined;
+}
+
+function startFollowingMutationObserver(): void {
+  if (pageKind() !== "following" || followingMutationObserver !== undefined) {
+    return;
+  }
+
+  scanCurrentFollowingPage();
+  followingMutationObserver = new MutationObserver(scheduleFollowingAccountScan);
+
+  if (document.body) {
+    followingMutationObserver.observe(document.body, { childList: true, subtree: true });
+  } else {
+    document.addEventListener(
+      "DOMContentLoaded",
+      () => {
+        if (pageKind() === "following") {
+          followingMutationObserver?.observe(document.body, { childList: true, subtree: true });
+          scanCurrentFollowingPage();
+        }
+      },
+      { once: true },
+    );
+  }
+}
+
+function syncFollowingCaptureTracking(): void {
+  if (pageKind() !== "following") {
+    stopFollowingCaptureTracking();
+    return;
+  }
+  startFollowingMutationObserver();
+}
+
+
+function extractDisplayNameFromCell(cell: HTMLElement, username: string): string | undefined {
+  const ownText = Array.from(cell.childNodes)
+    .filter((node): node is Text => node.nodeType === Node.TEXT_NODE)
+    .map((node) => node.textContent?.trim())
+    .filter((text): text is string => Boolean(text) && text.length > 0 && text !== `@${username}` && !text.startsWith("@"));
+  if (ownText.length > 0) {
+    return ownText[0];
+  }
+
+  for (const span of cell.querySelectorAll<HTMLElement>("span")) {
+    const text = span.innerText.trim();
+    if (text.length > 0 && text !== `@${username}` && !text.startsWith("@") && text.length < 80) {
+      return text;
+    }
+  }
+
+  return undefined;
+}
+
+function readMoreAffordanceText(text: string): boolean {
+  const normalized = text.trim().toLowerCase();
+  return /^(?:show\s+more|read\s+more|see\s+more)$/.test(normalized);
+}
+
+function hasReadMoreAffordance(article: HTMLElement): boolean {
+  for (const element of article.querySelectorAll<HTMLElement>("button, a, span, div[role='button']")) {
+    const visibleText = element.innerText?.trim() || element.getAttribute("aria-label")?.trim() || "";
+    if (readMoreAffordanceText(visibleText)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isLongPostCandidate(article: HTMLElement): boolean {
+  return hasReadMoreAffordance(article);
+}
+
 function extractVisibleTweets(): VisibleTweetRecord[] {
   const records = new Map<string, VisibleTweetRecord>();
   const currentPageKind = pageKind();
@@ -564,6 +878,8 @@ function extractVisibleTweets(): VisibleTweetRecord[] {
       quoteStatusUrl,
       createdAt: article.querySelector<HTMLTimeElement>("time")?.dateTime?.trim() || undefined,
       pageKind: currentPageKind,
+      hasReadMore: hasReadMoreAffordance(article),
+      isLongPostCandidate: isLongPostCandidate(article),
     });
   }
 
@@ -597,12 +913,14 @@ function buildCaptureResponse(): CaptureResponse {
   flushActiveDwellSignals();
   const blockedReason = isCaptureBlocked();
   const recentSignals = SIGNALS.slice();
+  const currentPageKind = pageKind();
+  const followingSourceHandle = currentPageKind === "following" ? pageFollowingHandle() : undefined;
   if (blockedReason) {
     return {
       ok: false,
       pageUrl: location.href,
       pageTitle: document.title,
-      pageKind: pageKind(),
+      pageKind: currentPageKind,
       error: blockedReason,
       signals: recentSignals,
     };
@@ -612,8 +930,10 @@ function buildCaptureResponse(): CaptureResponse {
     ok: true,
     pageUrl: location.href,
     pageTitle: document.title,
-    pageKind: pageKind(),
+    pageKind: currentPageKind,
     visibleTweets: extractVisibleTweets(),
+    followingAccounts: followingSourceHandle ? followingAccountsForCapture(followingSourceHandle) : undefined,
+    followingSourceHandle,
     signals: recentSignals,
   };
 }

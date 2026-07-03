@@ -265,6 +265,17 @@ The proof directory includes `reviewer-report.html`, `goal5-workflow-handoff.jso
 
 Because the accepted Goal 2 artifact is a dry-run manifest, no live Seedance MP4 exists at the planned MP4 path. The layer plan makes this explicit with `ClipLayer.props.missingLiveMedia=true`, retains the planned MP4 path for rerun/provider-swap metadata, and points both Remotion and HyperFrames at the deterministic placeholder media.
 
+### Goal 5 review vocabulary
+
+The ASMR handoff now carries a compact artifact/layer/effect vocabulary in `goal5-layer-plan.json`, `goal5-workflow-handoff.json`, `hyperframes-animation-map.json`, and the generated `reviewer-report.html`.
+
+- **Artifact** means a reusable media/proof file with provenance: Seedance generated clip MP4s when present, deterministic placeholder SVGs when live media is absent, Goal 3 spatial audio, and renderer outputs. Artifact-library consumers should key on these paths before looking at renderer implementation details.
+- **Layer** means a renderer primitive in the layer plan. `ClipLayer` and placeholder media are artifact-backed; `TypographyLayer` is post-render text; `BackgroundLayer`, `GridOverlay`, and `FlashOverlay` are renderer-generated clean-room layers.
+- **Effect** means renderer behavior that changes presentation without becoming a reusable source asset: fade transitions, placeholder fallback, audio holds, grid depth cues, and flash/glow overlays.
+
+The HyperFrames renderer also emits `reviewSurface` in both `hyperframes.json` and `manifest.json`, including `layerTypes`, `effectVocabulary`, and `artifactLibraryRefs` so reviewers can inventory reusable artifacts without reading the generated HTML.
+
+
 Render commands from the materialized handoff:
 
 ```bash
@@ -281,6 +292,25 @@ bun run tiktok-recreate:hyperframes -- \
   --out data/asmr-companion/goal5-pipeline-proof/hyperframes \
   --audio data/asmr-companion/goal3-spatial-proof/goal3-close-whisper-binaural.wav
 ```
+
+Review-surface verification command from the repo root (dry-run renderer project write; no provider spend):
+
+```bash
+bun test workflows/tiktok-recreate/goal5-asmr-handoff.test.ts && \
+bun workflows/tiktok-recreate/goal5-asmr-handoff.ts \
+  --handoff data/asmr-companion/goal4-planning/goal4-pipeline-handoff.bundle.json \
+  --generated-clips data/asmr-companion/goal2/seedance-parent-proof/normalized/generated-video-clips.v1.json \
+  --spatial-render-output data/asmr-companion/goal3-spatial-proof/goal3-close-whisper-binaural.render-output.json \
+  --outDir data/asmr-companion/goal5-pipeline-proof \
+  --createdAt 2026-06-24T00:00:00.000Z \
+  --proofId goal5-asmr-seedance-render-proof-001 && \
+bun run tiktok-recreate:hyperframes -- \
+  --layer-plan data/asmr-companion/goal5-pipeline-proof/goal5-layer-plan.json \
+  --out data/asmr-companion/goal5-pipeline-proof/hyperframes-review-surface \
+  --audio data/asmr-companion/goal3-spatial-proof/goal3-close-whisper-binaural.wav && \
+bun -e 'const fs = require("node:fs"); const handoff = JSON.parse(fs.readFileSync("data/asmr-companion/goal5-pipeline-proof/goal5-workflow-handoff.json", "utf8")); const manifest = JSON.parse(fs.readFileSync("data/asmr-companion/goal5-pipeline-proof/hyperframes-review-surface/manifest.json", "utf8")); const refs = manifest.reviewSurface?.artifactLibraryRefs ?? []; if (!handoff.reviewSurface?.vocabulary) throw new Error("missing handoff reviewSurface vocabulary"); if (!refs.some((ref) => String(ref.pathOrUrl).includes("goal3-close-whisper-binaural.wav"))) throw new Error("missing spatial audio artifact ref"); if (!refs.some((ref) => String(ref.pathOrUrl).includes(".placeholder.svg"))) throw new Error("missing placeholder artifact ref");'
+```
+
 
 ## Handoff generation
 

@@ -13,14 +13,13 @@
 |---|---|---|
 | AI companion / RTC | `chatbot_rtc` | [`apps/ai-companion-rtc/docs/goal.md`](../../apps/ai-companion-rtc/docs/goal.md) |
 | UGC / creative playground | `ugc_video` | [`docs/state/video-creative-direction.md`](../state/video-creative-direction.md), [`docs/plans/ugc-studio-workstreams.md`](../plans/ugc-studio-workstreams.md) |
-| Twitter/X archive | `twitter_archive` | [`docs/twitter-archive-plan.md`](../twitter-archive-plan.md), [`docs/plans/twitter-archive-goal.md`](../plans/twitter-archive-goal.md) |
-| Learning / second-brain | `learning_memory` | `apps/mochi-lite`, `apps/hsk-deck`, `apps/japanese-vocab`, `vault` |
+| Personal second-brain / shared context | `twitter_archive` + `learning_memory` | [`docs/fable/workstream-map.md`](workstream-map.md), [`docs/twitter-archive-plan.md`](../twitter-archive-plan.md), `~/apps/mochi-lite`, `~/apps/hsk-deck`, `~/vault`, `~/github/hashcards` |
 | Agent harness | `agent_harness` | [`docs/plans/symphony-lite-goal.md`](../plans/symphony-lite-goal.md), [`docs/state/symphony-lite-direction.md`](../state/symphony-lite-direction.md) |
 | _Noise / skip_ | `menial_ops`, `uncategorized`, `security_exclude` | — |
 
 ### Filtering rule
 
-- `chatbot_rtc`, `ugc_video`, `twitter_archive`, `learning_memory` → high-value; read top-scored sessions
+- `chatbot_rtc`, `ugc_video`, combined `twitter_archive` + `learning_memory` → high-value; read top-scored sessions
 - `agent_harness` → scan only deep-selected sessions with alpha > 2000
 - `menial_ops`, `uncategorized`, `security_exclude` → skip
 

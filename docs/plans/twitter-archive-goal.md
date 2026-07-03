@@ -27,9 +27,11 @@ Everything in this workstream is TypeScript on Bun with Effect v4 boundaries. Do
 - Capture adapter boundary: the Firefox WebExtension and Violentmonkey fallback send lightweight visible-page payloads such as `pageUrl` plus `visibleTweets` and health pings to localhost, while the Chrome DevTools extension sends observed network-response snapshots; the local server normalizes all of them into one SQLite/Markdown pipeline.
 - Signal capture is a first-class extension/workstream concern. The Firefox WebExtension should observe read-only user intent signals such as open X tabs, URL/status navigation, visible tweet dwell time, scroll depth, expanded thread/comment viewing, quote/thread expansion, like/bookmark/reply button clicks as observations, and repeated profile visits. Store these as local signal/event rows tied to nearest tweet/profile/status URL plus source tab/session metadata; never trigger the corresponding Twitter/X mutation from the archive system.
 - Account promotion is derived from signals, not hard-coded taste. Repeated dwell/thread-completion/bookmark/like/reply/profile-visit signals should score accounts and lists as high-value candidates for explicit queue promotion, e.g. TPOT/SIM-cluster accounts such as `@zephyr`, `@pleometric`, `@teortaxes`, and user-created X lists. Promotion enqueues safe public/archive/RSS/Nitter-style capture jobs with provenance and caps; it must not scrape private follow graphs or use authenticated write APIs.
+- `@pleometric` and artifact-extraction candidates enter the system as explicit `archive_jobs` rows before any scraper runs. The queue/status fields to preserve are `sourceLane`, `targetType`, `targetValue`, `status`, `priority`, `attempts`, timestamps, and provenance detail such as `promotionReason` or `artifactExtractionCandidateId`; showing these rows in the UI is not permission to scrape.
 - Markdown export defaults to `data/twitter-archive/markdown/bookmarks`. To export directly into Arthur's Obsidian vault later, set `TWITTER_ARCHIVE_MARKDOWN_ROOT=/Users/arthur/vault/sources/clippings/twitter-bookmarks`; this is direct filesystem output, not an Obsidian app launch. If a different vault path is needed, configure that env var explicitly instead of guessing.
 - Browser-history ranking outputs live under `data/twitter-archive/history-analysis.json` and `.csv`. Those derived candidate lists feed `archive_jobs`, then the normal archive worker claims the jobs; history analysis is not a scraper and does not store unrelated raw browsing history in archive artifacts.
 - Media download is a worker pipeline, not UI state: download images/videos/GIFs from archived media remote URLs into a durable media directory with low concurrency, local caching, and idempotent `localPath` updates.
+- Reference-profile archive exports are derived views over existing Twitter archive rows, not a new scraper lane: `ReferenceProfileArchiveExport` composes `ArchiveUser`, sampled tweet/media ids, timeline provenance, and abstract mechanics so UGC Studio can reuse archived evidence without duplicating source media or archive IDs.
 - Append scraper, import, following-graph, media worker, server, and frontend events to one JSONL stream with `component`, timestamp, level, event name, and structured details plus `runId`/`jobId` where available.
 
 ## Shared Pipeline-Stage Status Model
@@ -74,6 +76,7 @@ SQLite remains the shared source of truth: statuses and local annotations live i
 | Signals and promotion | Store extension-observed dwell/navigation/thread-expansion/bookmark/like/reply/profile-visit signals separately from tweets, derive account/list score snapshots, and promote explicit high-value accounts/lists into bounded public/archive/RSS/Nitter-style server jobs with provenance. |
 | Markdown export | Bookmark captures and local annotation/yank flows write Markdown under `data/twitter-archive/markdown/bookmarks` by default, or under `TWITTER_ARCHIVE_MARKDOWN_ROOT` for a direct filesystem Obsidian vault path such as `/Users/arthur/vault/sources/clippings/twitter-bookmarks`. |
 | Following graph | Capture/import public or user-exported following/follower edges into generic SQLite graph tables with observed-at/source provenance; no authenticated scraping or follow/unfollow mutation. |
+| Reference-profile export | Package-level `ReferenceProfileArchiveExport` handoff for UGC reference profiles: compose one profile, sampled tweets/media, source lane/URL/capture metadata, pose/timing/hook/caption/CTA mechanics, preserve/swap/blocked lists, and evidence ids from existing SQLite/archive records. |
 | Media downloads | Low-concurrency worker that downloads archived remote media URLs to a durable media directory and updates local paths idempotently. |
 | Orchestration/docs | Keep this goal, workstream spec, and `TASKS.md` aligned after meaningful implementation waves. |
 
@@ -86,6 +89,7 @@ SQLite remains the shared source of truth: statuses and local annotations live i
 - The local feedback loop is explicit: dev UI local notes/tags/marks/attributes and extension bookmark sync create/update local SQLite rows and Markdown exports only; captured Twitter metrics/relationships remain read-only observations.
 - Browser-history analysis produces `data/twitter-archive/history-analysis.json` and `.csv` ranking outputs, imports candidate profile/status targets into `archive_jobs`, and leaves normal workers responsible for capture.
 - Signal-derived promotion can rank high-value accounts/lists from repeated dwell, profile visits, completed thread reads, bookmark/like/reply observations, and explicit list seeds, then enqueue bounded server-side scrape targets without extension-side scraping or X mutation.
+- Reference-profile handoff can be proven locally without live capture by constructing a `ReferenceProfileArchiveExport` from existing archive rows and checking mechanic evidence ids resolve to stored tweets/media/provenance instead of raw source-media copies.
 - Extension safety and install constraints are visible to reviewers: the recommended Firefox WebExtension uses temporary unsigned install via `about:debugging` in normal Firefox, the DevTools lane remains valid for dedicated Chrome-like profiles, all capture lanes run only while the user has X open and is scrolling/visiting pages, save no cookies/tokens, mutate nothing on X, and post only to localhost.
 - Media download is idempotent and bounded; reruns do not duplicate downloaded files or corrupt existing `localPath` rows.
 - Unified JSONL logs include scraper, import, following-graph, media, server, and frontend events with component/run/job context.
@@ -106,6 +110,16 @@ bun run dev
 For dev UI smoke, open the local server, confirm the API exposes progress/tweets/media/jobs/events/logs/provenance/quotes from SQLite, and confirm the browser shows the Twitter/Nitter-like single-column viewer without requiring a live scraper. Also confirm the sticky sort/filter controls change the visible tweet rows, `f` toggles the collapsed filters, `/` expands controls and focuses search, `j`/`k` moves the selected group, and `y` copies the selected tweet/thread group as Markdown with a visible status toast.
 For bookmark-extension smoke, while `bun run dev` is active on `http://127.0.0.1:3420`, open the DevTools panel on X under the user's control, capture a small bookmark/network response, post it to the local endpoint, and verify SQLite/API state plus Markdown output under `data/twitter-archive/markdown/bookmarks` or `TWITTER_ARCHIVE_MARKDOWN_ROOT`. Do not inspect or store cookies/tokens, and do not perform X mutations.
 For browser-history queue smoke, review `data/twitter-archive/history-analysis.json`/`.csv`, import a bounded candidate set into `archive_jobs`, then confirm the worker claims those jobs through the same SQLite queue path as other archive work.
+For the `@pleometric`/artifact-extraction continuation, the no-live-scrape queue proof is:
+
+```sh
+cd packages/twitter-archive
+tmpdir="$(mktemp -d)"
+printf '%s\n' '{"candidates":[{"username":"pleometric","priority":7,"provenance":{"source":"artifact-extraction-candidate","artifactExtractionCandidateId":"pleometric-proof-1"}}]}' > "$tmpdir/pleometric-artifact-candidates.json"
+bun src/browser-history-queue.ts "$tmpdir/pleometric-artifact-candidates.json" --db "$tmpdir/archive.sqlite"
+```
+
+Expected result is one queued profile job for `pleometric`, zero skipped candidates, preserved artifact-candidate provenance, and no public HTML fetch.
 
 Additional explicit backfill targets such as `@pleometric`, `@teortaxes`, and `@teortaxestex` should be validated with separate bounded commands after the shared status model is wired; they are not hidden defaults for the `@communalAI` smoke path.
 

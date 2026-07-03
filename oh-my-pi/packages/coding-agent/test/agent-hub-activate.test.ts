@@ -1,7 +1,7 @@
 /**
- * Hub Enter contract: activating a non-remote agent row delegates to the
- * `focusAgent` dep (session focus proxy) and closes the hub on success; a
- * focus failure keeps the hub open and surfaces the error as a notice.
+ * Hub Enter contract: live rows delegate to the `focusAgent` dep and close the
+ * hub on success; parked rows open read-only history without revival. Focus
+ * failures keep the hub open and surface the error as a notice.
  */
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
@@ -11,22 +11,27 @@ import { SelectorController } from "@oh-my-pi/pi-coding-agent/modes/controllers/
 import { SessionObserverRegistry } from "@oh-my-pi/pi-coding-agent/modes/session-observer-registry";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
-import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
+import { AgentLifecycleManager } from "@oh-my-pi/pi-coding-agent/registry/agent-lifecycle";
+import { AgentRegistry, type AgentStatus } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { TempDir } from "@oh-my-pi/pi-utils";
 
 const AGENT_ID = "Worker";
 
-function makeHub(focusAgent: (id: string) => Promise<void>) {
+function makeHub(
+	focusAgent: (id: string) => Promise<void>,
+	options: { status?: AgentStatus; sessionFile?: string | null; lifecycle?: AgentLifecycleManager } = {},
+) {
 	const agents = new AgentRegistry();
+	const status = options.status ?? "running";
 	agents.register({
 		id: AGENT_ID,
 		displayName: AGENT_ID,
 		kind: "sub",
 		parentId: "Main",
-		session: { subscribe: () => () => {} } as unknown as AgentSession,
-		sessionFile: null,
-		status: "running",
+		session: status === "parked" ? null : ({ subscribe: () => () => {} } as unknown as AgentSession),
+		sessionFile: options.sessionFile ?? null,
+		status,
 	});
 	let doneCalls = 0;
 	const done = Promise.withResolvers<void>();
@@ -41,9 +46,10 @@ function makeHub(focusAgent: (id: string) => Promise<void>) {
 		requestRender: () => renderRequested.resolve(),
 		registry: agents,
 		irc: new IrcBus(agents),
+		lifecycle: options.lifecycle,
 		focusAgent,
 	});
-	return { hub, doneCalls: () => doneCalls, done: done.promise, renderRequested: renderRequested.promise };
+	return { hub, agents, doneCalls: () => doneCalls, done: done.promise, renderRequested: renderRequested.promise };
 }
 
 describe("Agent hub Enter activation", () => {
@@ -72,6 +78,78 @@ describe("Agent hub Enter activation", () => {
 		expect(focusedIds).toEqual([AGENT_ID]);
 		expect(doneCalls()).toBe(1);
 		hub.dispose();
+	});
+
+	it("Enter on a parked row opens history without reviving it", async () => {
+		using tempDir = TempDir.createSync("@omp-agent-hub-parked-open-");
+		const sessionFile = `${tempDir.path()}/Worker.jsonl`;
+		await Bun.write(sessionFile, "");
+		const focusedIds: string[] = [];
+		const { hub, agents, doneCalls } = makeHub(
+			async id => {
+				focusedIds.push(id);
+			},
+			{ status: "parked", sessionFile },
+		);
+
+		hub.handleInput("\r");
+
+		const rendered = Bun.stripANSI(hub.render(120).join("\n"));
+		expect(focusedIds).toEqual([]);
+		expect(doneCalls()).toBe(0);
+		expect(agents.get(AGENT_ID)?.status).toBe("parked");
+		expect(rendered).toContain(`Agent Hub > ${AGENT_ID}`);
+		expect(rendered).toContain("No messages yet.");
+		expect(rendered).toContain("R:revive");
+		hub.dispose();
+	});
+
+	it("R in parked history revives without focusing the main view", async () => {
+		using tempDir = TempDir.createSync("@omp-agent-hub-parked-revive-");
+		const sessionFile = `${tempDir.path()}/Worker.jsonl`;
+		await Bun.write(sessionFile, "");
+		const agents = new AgentRegistry();
+		agents.register({
+			id: AGENT_ID,
+			displayName: AGENT_ID,
+			kind: "sub",
+			parentId: "Main",
+			session: null,
+			sessionFile,
+			status: "parked",
+		});
+		const lifecycle = new AgentLifecycleManager(agents);
+		const revived = Promise.withResolvers<void>();
+		agents.onChange(event => {
+			if (event.type === "status_changed" && event.ref.id === AGENT_ID && event.ref.status === "idle") {
+				revived.resolve();
+			}
+		});
+		const session = { subscribe: () => () => {} } as unknown as AgentSession;
+		lifecycle.adopt(AGENT_ID, { idleTtlMs: 0, revive: async () => session });
+		let focusCalls = 0;
+		const hub = new AgentHubOverlayComponent({
+			observers: new SessionObserverRegistry(),
+			hubKeys: [],
+			onDone: () => {},
+			requestRender: () => {},
+			registry: agents,
+			irc: new IrcBus(agents),
+			lifecycle,
+			focusAgent: async () => {
+				focusCalls++;
+			},
+		});
+
+		hub.handleInput("\r");
+		hub.handleInput("R");
+		await revived.promise;
+
+		expect(focusCalls).toBe(0);
+		expect(agents.get(AGENT_ID)?.status).toBe("idle");
+		expect(agents.get(AGENT_ID)?.session).toBe(session);
+		hub.dispose();
+		await lifecycle.dispose();
 	});
 
 	it("a focus failure keeps the hub open and shows the error as a notice", async () => {

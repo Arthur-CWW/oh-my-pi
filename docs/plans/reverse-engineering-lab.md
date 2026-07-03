@@ -1,10 +1,10 @@
-# Lawful Reverse Engineering Lab Plan
+# Reverse Engineering Lab Plan
 
 ## Purpose
 
 Create a local, opt-in lab for interoperability, migration, debugging, education, and authorized security research. The lab is not a decompilation service and is not a way to clone proprietary products, bypass license/DRM/auth controls, or extract assets.
 
-## Hard guardrails
+## Scope rules
 
 Allowed targets only:
 
@@ -65,7 +65,7 @@ Exit criteria:
 
 - Target and permission basis are written down.
 - Allowed and forbidden techniques are explicit.
-- Samples have a lawful source.
+- Samples have a permitted source.
 
 ### Phase 1: Inventory
 

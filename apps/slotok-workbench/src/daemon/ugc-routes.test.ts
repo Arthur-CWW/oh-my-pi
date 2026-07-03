@@ -1,5 +1,5 @@
 import { mkdir, writeFile } from "node:fs/promises"
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { existsSync, mkdtempSync, readFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"
 import { describe, expect, test } from "vitest"
@@ -213,6 +213,65 @@ describe("routeUgc", () => {
     expect(patchedJob?.status).toBe("blocked")
     expect(patchedJob?.artifactPaths).toContain("artifacts/provider/kie_task_route/manifest.json")
     expect(patchedJob?.error).toContain("credit cap")
+  })
+
+  test("returns candidate annotations linked by reviewNoteIds", async () => {
+    const store = createStore()
+    const response = await routeUgc(new Request("http://127.0.0.1/api/ugc/candidates/candidate_soft_demo_01/annotations"), store)
+    expect(response?.status).toBe(200)
+    const payload = await response?.json() as {
+      readonly annotations?: readonly {
+        readonly id?: string
+        readonly attachedTo?: { readonly kind?: string; readonly id?: string }
+      }[]
+    }
+    const linkedRevision = payload.annotations?.find((annotation) => annotation.id === "note_soft_demo_revision")
+    expect(linkedRevision?.attachedTo).toEqual({ kind: "batch", id: "batch_hooks_round_02" })
+  })
+
+  test("persists candidate annotations through SQLite-backed route state without native SQLite", async () => {
+    const store = createStore()
+    const initial = store.read()
+    const candidateId = initial.workspace.candidates[0]?.id ?? ""
+    if (!candidateId) throw new Error("missing candidate")
+
+    const annotationResponse = await routeUgc(jsonRequest(`/api/ugc/candidates/${candidateId}/annotations`, {
+      body: "Watch the opening pause before export.",
+      requestedChange: "Trim 0.5s from the hook lead-in.",
+    }), store)
+    expect(annotationResponse?.status).toBe(201)
+    const annotationPayload = await annotationResponse?.json() as {
+      readonly annotation?: {
+        readonly id?: string
+        readonly body?: string
+        readonly verdict?: string
+        readonly requestedChange?: string | null
+      } | null
+      readonly state?: UgcLocalState
+    }
+    const annotationId = annotationPayload.annotation?.id ?? ""
+    expect(annotationPayload.annotation?.body).toBe("Watch the opening pause before export.")
+    expect(annotationPayload.annotation?.verdict).toBe("watch-again")
+    expect(annotationPayload.annotation?.requestedChange).toBe("Trim 0.5s from the hook lead-in.")
+    expect(annotationPayload.state?.workspace.candidates.find((candidate) => candidate.id === candidateId)?.reviewNoteIds).toContain(annotationId)
+
+    const listResponse = await routeUgc(new Request(`http://127.0.0.1/api/ugc/candidates/${candidateId}/annotations`), store)
+    expect(listResponse?.status).toBe(200)
+    const listPayload = await listResponse?.json() as {
+      readonly annotations?: readonly {
+        readonly id?: string
+        readonly body?: string
+      }[]
+    }
+    expect(listPayload.annotations?.map((annotation) => annotation.id)).toContain(annotationId)
+    expect(listPayload.annotations?.[0]?.body).toBe("Watch the opening pause before export.")
+
+    const noteCountBeforeMissingCandidate = store.read().workspace.reviewNotes.length
+    const missingResponse = await routeUgc(jsonRequest("/api/ugc/candidates/missing_candidate/annotations", {
+      body: "This should not persist.",
+    }), store)
+    expect(missingResponse?.status).toBe(404)
+    expect(store.read().workspace.reviewNotes.length).toBe(noteCountBeforeMissingCandidate)
   })
 
   test("surfaces mismatched workspace bundle dry-run errors without mutating route state", async () => {
@@ -994,14 +1053,6 @@ function createStore(): UgcJsonStore {
     root: "ugc-workspaces",
     now: () => "2026-06-10T00:00:00.000Z",
     sqliteSync: false,
-  })
-}
-
-function createSqliteStore(cwd = mkdtempSync(resolve(tmpdir(), "ugc-routes-sqlite-"))): UgcJsonStore {
-  return new UgcJsonStore({
-    cwd,
-    root: "ugc-workspaces",
-    now: () => "2026-06-10T00:00:00.000Z",
   })
 }
 

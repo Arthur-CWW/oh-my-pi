@@ -209,6 +209,39 @@ describe("Twitter archive dev UI server", () => {
       expect(clientScript).toContain("Toggle search and filters")
       expect(clientScript).toContain("Copy selected tweet/thread Markdown")
       expect(clientScript).toContain("Sort")
+
+      const dbResponse = await fetch(`${server.url}/data/twitter-archive.sqlite`)
+      expect(dbResponse.status).toBe(200)
+      expect(dbResponse.headers.get("content-type")).toBe("application/octet-stream")
+      const dbBytes = new Uint8Array(await dbResponse.arrayBuffer())
+      const expectedDbBytes = await readFile(dbPath)
+      expect(Array.from(dbBytes)).toEqual(Array.from(expectedDbBytes))
+
+      const wasmResponse = await fetch(`${server.url}/assets/sql-wasm.wasm`)
+      expect(wasmResponse.status).toBe(200)
+      expect(wasmResponse.headers.get("content-type")).toBe("application/wasm")
+      const wasmBytes = new Uint8Array(await wasmResponse.arrayBuffer())
+      expect(wasmBytes[0]).toBe(0)
+      expect(wasmBytes[1]).toBe(97)
+      expect(wasmBytes[2]).toBe(115)
+      expect(wasmBytes[3]).toBe(109)
+      const browserWasmResponse = await fetch(`${server.url}/assets/sql-wasm-browser.wasm`)
+      expect(browserWasmResponse.status).toBe(200)
+      expect(browserWasmResponse.headers.get("content-type")).toBe("application/wasm")
+      const browserWasmBytes = new Uint8Array(await browserWasmResponse.arrayBuffer())
+      expect(browserWasmBytes[0]).toBe(0)
+      expect(browserWasmBytes[1]).toBe(97)
+      expect(browserWasmBytes[2]).toBe(115)
+      expect(browserWasmBytes[3]).toBe(109)
+
+
+      const queryResponse = await fetch(`${server.url}/api/query`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sql: "SELECT 1" }),
+      })
+      expect(queryResponse.status).toBe(404)
+
       const state = (await fetch(`${server.url}/api/state`).then((response) => response.json())) as DevUiState
       expect(state.summary.counts.tweets).toBe(5)
       expect(state.summary.counts.media).toBe(2)
@@ -456,6 +489,218 @@ describe("Twitter archive dev UI server", () => {
       } finally {
         rawDb.close()
       }
+    } finally {
+      await server?.stop()
+      await rm(tempDir, { recursive: true, force: true })
+    }
+  })
+
+  test("ingests following accounts and read-more long candidates", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "twitter-archive-x-following-"))
+    const dbPath = join(tempDir, "archive.sqlite")
+    const logPath = join(tempDir, "twitter-archive.jsonl")
+    const mediaRoot = join(tempDir, "media")
+    const port = 31_000 + Math.floor(Math.random() * 8_000)
+    let server: RunningDevUiServer | undefined
+
+    try {
+      server = await Effect.runPromise(
+        startDevUiServer({
+          env: {
+            TWITTER_ARCHIVE_DB: dbPath,
+            TWITTER_ARCHIVE_LOG: logPath,
+            TWITTER_ARCHIVE_PORT: String(port),
+            TWITTER_ARCHIVE_MEDIA_ROOT: mediaRoot,
+            TWITTER_ARCHIVE_WATCH_HANDLES: "phoebs",
+          },
+        }),
+      )
+
+      const snapshot = {
+        source: {
+          extension: "twitter-archive-firefox",
+          client: "firefox-webextension",
+        },
+        generatedAt: "2026-07-01T12:00:00.000Z",
+        incremental: true,
+        captures: [
+          {
+            id: "following-capture-1",
+            capturedAt: "2026-07-01T12:00:01.000Z",
+            inspectedTabId: 7,
+            pageUrl: "https://x.com/voooooogel/following",
+            request: {
+              method: "DOM",
+              url: "https://x.com/voooooogel/following",
+              headers: {},
+            },
+            response: {
+              status: 200,
+              statusText: "DOM_CAPTURE",
+              mimeType: "text/html",
+              bodySize: 0,
+              encoding: "utf-8",
+              headers: {},
+            },
+            tags: ["firefox-webextension", "following", "visible-tweets", "signals"],
+            followingAccounts: [
+              {
+                username: "phoebs",
+                displayName: "Phoebs",
+                profileUrl: "https://x.com/phoebs",
+                avatarUrl: "https://pbs.twimg.com/profile_images/phoebs.jpg",
+              },
+              {
+                username: "communalAI",
+                displayName: "Communal AI",
+                profileUrl: "https://x.com/communalAI",
+              },
+            ],
+            visibleTweets: [
+              {
+                tweetId: "999",
+                statusUrl: "https://x.com/phoebs/status/999",
+                username: "phoebs",
+                fullText: "Visible truncated long post",
+                pageKind: "following",
+                mediaUrls: [],
+                createdAt: "2026-07-01T11:59:00.000Z",
+                hasReadMore: true,
+                isLongPostCandidate: true,
+              },
+            ],
+            signals: [],
+          },
+        ],
+      }
+
+      const ingestResponse = await fetch(`${server.url}/api/x-bookmark-sync/ingest`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(snapshot),
+      })
+      expect(ingestResponse.status).toBe(202)
+      expect(await ingestResponse.json()).toMatchObject({
+        capturesReceived: 1,
+        tweetLikeRecords: 1,
+        archiveJobsEnqueued: 4,
+        followingEdgesAdded: 2,
+        followedProfileJobsEnqueued: 2,
+        longPostStatusJobsEnqueued: 1,
+      })
+
+      const profileJobs = (await fetch(`${server.url}/api/archive-jobs?targetType=profile`).then((response) => response.json())) as SqliteArchiveJob[]
+      expect(profileJobs).toHaveLength(2)
+      expect(profileJobs.map((job) => job.targetValue).sort()).toEqual(["communalAI", "phoebs"])
+      expect(profileJobs.every((job) => job.priority === 1)).toBe(true)
+      expect(JSON.stringify(profileJobs)).toContain("webextension-following-sync")
+      expect(JSON.stringify(profileJobs)).toContain("following-imported-account")
+
+      const followAwareSnapshot = {
+        source: {
+          extension: "twitter-archive-firefox",
+          client: "firefox-webextension",
+        },
+        generatedAt: "2026-07-01T12:01:00.000Z",
+        incremental: true,
+        captures: [
+          {
+            id: "follow-aware-capture-1",
+            capturedAt: "2026-07-01T12:01:01.000Z",
+            inspectedTabId: 7,
+            pageUrl: "https://x.com/home",
+            request: {
+              method: "DOM",
+              url: "https://x.com/home",
+              headers: {},
+            },
+            response: {
+              status: 200,
+              statusText: "DOM_CAPTURE",
+              mimeType: "text/html",
+              bodySize: 0,
+              encoding: "utf-8",
+              headers: {},
+            },
+            tags: ["firefox-webextension", "visible-tweets"],
+            visibleTweets: [
+              {
+                tweetId: "1000",
+                statusUrl: "https://x.com/communalAI/status/1000",
+                username: "communalAI",
+                fullText: "Visible followed author post",
+                pageKind: "home",
+                mediaUrls: [],
+                createdAt: "2026-07-01T11:58:00.000Z",
+              },
+              {
+                tweetId: "1001",
+                statusUrl: "https://x.com/communalAI/status/1001",
+                username: "communalAI",
+                fullText: "Visible followed reply to watched handle",
+                pageKind: "home",
+                mediaUrls: [],
+                createdAt: "2026-07-01T11:57:00.000Z",
+                replyToUsername: "phoebs",
+                replyToTweetId: "998",
+              },
+            ],
+            signals: [],
+          },
+        ],
+      }
+      const followAwareIngestResponse = await fetch(`${server.url}/api/x-bookmark-sync/ingest`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(followAwareSnapshot),
+      })
+      expect(followAwareIngestResponse.status).toBe(202)
+      expect(await followAwareIngestResponse.json()).toMatchObject({
+        capturesReceived: 1,
+        tweetLikeRecords: 2,
+        archiveJobsEnqueued: 2,
+      })
+
+      const statusJobs = (await fetch(`${server.url}/api/archive-jobs?targetType=status`).then((response) => response.json())) as SqliteArchiveJob[]
+      expect(statusJobs).toHaveLength(3)
+      const longPostJob = statusJobs.find((job) => job.targetValue === "https://x.com/phoebs/status/999")
+      const followedAuthorJob = statusJobs.find((job) => job.targetValue === "https://x.com/communalAI/status/1000")
+      const replyToWatchedJob = statusJobs.find((job) => job.targetValue === "https://x.com/communalAI/status/1001")
+      expect(longPostJob).toMatchObject({
+        targetType: "status",
+        targetValue: "https://x.com/phoebs/status/999",
+        priority: 9,
+      })
+      expect(JSON.stringify(longPostJob?.options)).toContain("long-post-read-more")
+      expect(JSON.stringify(longPostJob?.provenance)).toContain("hasReadMore")
+      expect(followedAuthorJob).toMatchObject({
+        targetType: "status",
+        targetValue: "https://x.com/communalAI/status/1000",
+        priority: 6,
+      })
+      expect(JSON.stringify(followedAuthorJob?.options)).toContain("followed-author")
+      expect(JSON.stringify(followedAuthorJob?.provenance)).toContain("webextension-following-sync")
+      expect(replyToWatchedJob).toMatchObject({
+        targetType: "status",
+        targetValue: "https://x.com/communalAI/status/1001",
+        priority: 8,
+      })
+      expect(JSON.stringify(replyToWatchedJob?.options)).toContain("followed-reply-to-watched-handle")
+      expect(JSON.stringify(replyToWatchedJob?.provenance)).toContain("replyToUsername")
+      expect(longPostJob?.priority).toBeGreaterThan(replyToWatchedJob?.priority ?? 0)
+
+      const followingJobs = (await fetch(`${server.url}/api/archive-jobs?targetType=following`).then((response) => response.json())) as SqliteArchiveJob[]
+      expect(followingJobs).toHaveLength(1)
+      expect(followingJobs[0]).toMatchObject({
+        targetType: "following",
+        targetValue: "voooooogel",
+      })
+
+      const state = (await fetch(`${server.url}/api/state`).then((response) => response.json())) as DevUiState
+      expect(state.socialGraph.followingEdges).toBe(2)
+      expect(state.socialGraph.topSources[0]?.username).toBe("voooooogel")
+      expect(state.tweetGroups.flatMap((group) => group.tweets).some((tweet) => tweet.id === "999")).toBe(true)
+      expect(state.tweetGroups.flatMap((group) => group.tweets).some((tweet) => tweet.id === "1001")).toBe(true)
     } finally {
       await server?.stop()
       await rm(tempDir, { recursive: true, force: true })

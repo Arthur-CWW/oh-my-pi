@@ -33,6 +33,28 @@ const DEFAULT_CREATED_AT = "2026-06-24T00:00:00.000Z"
 const DEFAULT_PROOF_ID = "goal5-asmr-seedance-render-proof-001"
 const DEFAULT_PLACEHOLDER = "workflows/tiktok-recreate/fixtures/generated-clip-missing-live-media.placeholder.json"
 
+
+const GOAL5_REVIEW_VOCABULARY = {
+  schemaVersion: "tiktok-recreate.review-vocabulary.v1",
+  artifacts: [
+    { term: "generatedClip", meaning: "Seedance-produced or planned MP4 media; reusable as a primary ClipLayer source when present." },
+    { term: "placeholderMedia", meaning: "Deterministic local SVG used when a dry-run generated clip has no live MP4 on disk." },
+    { term: "spatialAudio", meaning: "Goal 3 binaural WAV/render-output consumed as the final soundtrack, not as visual media." },
+    { term: "rendererOutput", meaning: "Renderer-specific HTML/JSON/MP4 outputs derived from the layer plan." },
+  ],
+  layers: [
+    { term: "BackgroundLayer", meaning: "Procedural clean-room base visual; not an imported media artifact." },
+    { term: "ClipLayer", meaning: "Primary generated video or placeholder media layer with provider provenance in props." },
+    { term: "TypographyLayer", meaning: "Post-render caption/text overlay; generated media assets must remain text-free." },
+    { term: "GridOverlay", meaning: "Renderer-side spatial depth cue used during audio-tail holds." },
+    { term: "FlashOverlay", meaning: "Renderer-side transient glow/accent effect over the generated clip." },
+  ],
+  effects: [
+    { term: "fade transition", meaning: "Layer-level in/out opacity timing shared by Remotion and HyperFrames mappings." },
+    { term: "placeholder fallback", meaning: "Explicit missing-live-media behavior, never an implicit failed video decode." },
+    { term: "audio hold", meaning: "Visual hold segment that preserves the longer spatial-audio duration after the generated clip ends." },
+  ],
+} as const
 export function buildGoal5Artifacts(args: Args): Record<string, unknown> {
   const handoff = readJson(args.handoff, "Goal 4 handoff bundle")
   const generatedClips = readJson(args.generatedClips, "Goal 2 generated clip manifest")
@@ -110,6 +132,7 @@ export function buildGoal5Artifacts(args: Args): Record<string, unknown> {
       accent: "#a8c8ff",
       aura: "#b7d7ff",
     },
+    reviewVocabulary: GOAL5_REVIEW_VOCABULARY,
     beats: [
       {
         beatIndex: 0,
@@ -197,6 +220,7 @@ export function buildGoal5Artifacts(args: Args): Record<string, unknown> {
     createdAt: args.createdAt,
     proofId: args.proofId,
     sourceLayerPlan: layerPlanPath,
+    reviewVocabulary: GOAL5_REVIEW_VOCABULARY,
     rendererCompatibility: {
       remotionComposition: "TiktokRecreate",
       hyperframesProjectCommand: `bun run tiktok-recreate:hyperframes -- --layer-plan ${layerPlanPath} --out ${hyperframesOutDir} --audio ${audioPath}`,
@@ -246,6 +270,16 @@ export function buildGoal5Artifacts(args: Args): Record<string, unknown> {
       remotionOutDir,
       hyperframesOutDir,
     },
+    reviewSurface: {
+      vocabulary: GOAL5_REVIEW_VOCABULARY,
+      artifactLibraryReuse: {
+        generatedClip: primaryClip.artifactPath,
+        placeholderMedia: placeholderMediaPath,
+        spatialAudio: audioPath,
+      },
+      layerTypes: ["BackgroundLayer", "ClipLayer", "TypographyLayer", "FlashOverlay", "GridOverlay"],
+      effectTypes: ["fade transition", "placeholder fallback", "audio hold"],
+    },
     rendererCommands: {
       materializeGoal5Handoff: `bun workflows/tiktok-recreate/goal5-asmr-handoff.ts --handoff ${args.handoff} --generated-clips ${args.generatedClips} --spatial-render-output ${args.spatialRenderOutput} --outDir ${args.outDir} --createdAt ${args.createdAt} --proofId ${args.proofId}`,
       remotion: `bun run remotion-renderer:render -- --manifest ${remotionManifestPath} --layer-plan ${layerPlanPath} --persona-manifest ${personaManifestPath} --out ${remotionOutDir} --audio-manifest ${args.spatialRenderOutput} --generated-clips-manifest ${args.generatedClips}`,
@@ -286,6 +320,7 @@ export function buildGoal5Artifacts(args: Args): Record<string, unknown> {
         remotionCommand: workflowHandoff.rendererCommands.remotion,
         hyperframesCommand: workflowHandoff.rendererCommands.hyperframes,
         missingLiveMediaReason: primaryClip.missingLiveMediaReason ?? "Generated clip MP4 is available; placeholder retained for deterministic inspection.",
+        reviewVocabulary: GOAL5_REVIEW_VOCABULARY,
       }),
     },
     handoff: workflowHandoff,
@@ -509,6 +544,7 @@ function buildReviewerReport(input: {
   remotionCommand: string
   hyperframesCommand: string
   missingLiveMediaReason: string
+  reviewVocabulary: typeof GOAL5_REVIEW_VOCABULARY
 }): string {
   const esc = (value: string) =>
     value
@@ -558,6 +594,9 @@ function buildReviewerReport(input: {
       <li><code>${esc(input.layerPlanPath)}</code> — Remotion/HyperFrames-compatible layer plan.</li>
       <li><code>${esc(input.hyperframesMapPath)}</code> — concrete HyperFrames compatibility mapping.</li>
     </ul>
+    <h2>Artifact / layer / effect vocabulary</h2>
+    <p>This review surface is intentionally small so artifact-library consumers can distinguish reusable media from renderer-only layers and effects.</p>
+    <pre>${esc(JSON.stringify(input.reviewVocabulary, null, 2))}</pre>
     <h2>Reviewer commands</h2>
     <pre>${esc(input.materializeCommand)}
 

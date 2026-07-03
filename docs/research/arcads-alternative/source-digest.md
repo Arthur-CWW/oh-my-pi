@@ -14,7 +14,7 @@ This is the handoff digest for GPT Pro / future Pi sessions. It summarizes the l
 
 ## Clean-room constraint
 
-Build a similar/better modular workflow from public behavior, public docs, public API descriptions, and first principles. Do not steal code, bypass paywalls, clone private identities, copy trademarks, or re-upload/copy copyrighted videos. For UGC/reference-video work, clone structure/format mechanics, not exact identity/media.
+Build a similar/better modular workflow from public behavior, public docs, public API descriptions, and first principles. Do not steal code, bypass paywalls, clone private identities, copy trademarks, or re-upload/copy protected videos. For UGC/reference-video work, clone structure/format mechanics, not exact identity/media.
 
 ## Arcads product claims and feature surface
 
@@ -283,7 +283,7 @@ Queue separate prompts instead of one giant one:
 2. Open/open-API replication architecture and prototype plan.
 3. Alex pipeline/UGC format factory synthesis.
 4. Model/API vendor menu and cost/quality/speed tradeoffs.
-5. Legal/ethical/defensible product strategy and moat.
+5. Product boundaries, defensible strategy, and moat.
 
 ## Desired output style from GPT Pro
 

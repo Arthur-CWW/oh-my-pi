@@ -80,6 +80,13 @@ Slotok should feel honest:
 - [ ] Persona/profile-bible edits, branch state, candidate notes, provider links, workflow runs/events, and developer-graph data survive reload from local state.
 - [ ] Workspace bundle export/import round-trips the SQLite-backed workspace, including assets and manifests needed by the V1 surfaces.
 
+
+#### 2026-06-24 V1-local persistence/API slice
+
+- Candidate annotations now have a daemon API: `GET /api/ugc/candidates/<candidate_id>/annotations` lists local note history, and `POST /api/ugc/candidates/<candidate_id>/annotations` creates a local `ReviewNote` attached to an existing candidate.
+- The write path is local-only: no provider, Pi, or OMP adapter is invoked; omitted verdicts default to `watch-again`; unknown candidate ids return before mutation; SQLite-backed stores persist the annotation in the `notes` object collection.
+- Targeted reviewer command: `cd apps/slotok-workbench && bunx --bun vitest run src/daemon/ugc-routes.test.ts -t "persists candidate annotations through SQLite-backed route state"`.
+
 ### D. Reference ingestion
 
 - [ ] Preferred local catalog roots `data/tiktok-catalogue/pleometric` and `data/tiktok-catalogue/mynameissico` import/select correctly and degrade safely when roots are missing.

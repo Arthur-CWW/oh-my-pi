@@ -70,7 +70,7 @@ Simplest and often most robust.
 
 ## Do you need a Mac?
 
-For macOS app builds/tests/VMs: yes, practically and legally use Apple hardware.
+For macOS app builds/tests/VMs: yes, use Apple hardware in practice.
 
 Options:
 

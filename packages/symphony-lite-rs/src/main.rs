@@ -56,12 +56,23 @@ enum Commands {
     Up(UpArgs),
     Down(JsonFlag),
     Run(RunArgs),
+    Spike(SpikeArgs),
     Sync(JsonFlag),
     Watch(WatchArgs),
     Tui(WatchArgs),
     Events(EventsCommand),
     Search(SearchArgs),
     Ask(AskCommand),
+    Open(OpenArgs),
+    Restart(RestartArgs),
+}
+
+#[derive(Args, Debug)]
+struct SpikeArgs {
+    #[arg(long)]
+    task_list: PathBuf,
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(Args, Debug, Clone, Copy)]
@@ -180,6 +191,50 @@ struct AskAnswerArgs {
     json: bool,
 }
 
+#[derive(Subcommand, Debug)]
+enum OpenTarget {
+    Agent {
+        id: String,
+        #[arg(long)]
+        json: bool,
+    },
+    Session {
+        provider: String,
+        id: String,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Args, Debug)]
+struct OpenArgs {
+    #[command(subcommand)]
+    target: OpenTarget,
+}
+
+#[derive(Args, Debug)]
+struct RestartArgs {
+    #[arg(long)]
+    agent: String,
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Serialize)]
+struct OpenOutput {
+    kind: String,
+    id: String,
+    target: String,
+    opened: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct RestartOutput {
+    #[serde(flatten)]
+    run: RunOutput,
+    source_agent_id: String,
+}
+
 #[derive(Clone, Debug)]
 struct Paths {
     root: PathBuf,
@@ -206,46 +261,20 @@ struct ApiError {
     details: Value,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 struct StatusOutput {
     daemon: DaemonStatus,
     counts: Counts,
     workflows: Vec<WorkflowSummary>,
     agents: Vec<AgentSummary>,
-    questions: Vec<QuestionSummary>,
     sessions: Vec<ExternalSessionSummary>,
+    questions: Vec<QuestionSummary>,
+    events: Vec<EventRecord>,
     recommended_actions: Vec<String>,
+    refreshed: String,
 }
 
-#[derive(Serialize)]
-struct DaemonStatus {
-    running: bool,
-    pid: Option<u32>,
-    pid_file: String,
-}
-
-#[derive(Serialize, Default)]
-struct Counts {
-    workflows: i64,
-    agents_planned: i64,
-    agents_running: i64,
-    agents_blocked: i64,
-    agents_done: i64,
-    agents_failed: i64,
-    questions_open: i64,
-    external_sessions: i64,
-}
-
-#[derive(Serialize)]
-struct WorkflowSummary {
-    id: String,
-    status: String,
-    title: Option<String>,
-    objective: Option<String>,
-    updated_at: String,
-}
-
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 struct AgentSummary {
     id: String,
     workflow_id: String,
@@ -258,9 +287,38 @@ struct AgentSummary {
     artifact_dir: String,
     summary: Option<String>,
     last_event_at: Option<String>,
+    dry_run: bool,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
+struct WorkflowSummary {
+    id: String,
+    status: String,
+    title: Option<String>,
+    objective: Option<String>,
+    updated_at: String,
+}
+
+#[derive(Debug, Serialize)]
+struct DaemonStatus {
+    running: bool,
+    pid: Option<u32>,
+    pid_file: PathBuf,
+}
+
+#[derive(Debug, Serialize, Default)]
+struct Counts {
+    workflows: i64,
+    agents_planned: i64,
+    agents_running: i64,
+    agents_blocked: i64,
+    agents_done: i64,
+    agents_failed: i64,
+    questions_open: i64,
+    external_sessions: i64,
+}
+
+#[derive(Debug, Serialize)]
 struct QuestionSummary {
     id: String,
     workflow_id: String,
@@ -272,7 +330,7 @@ struct QuestionSummary {
     updated_at: String,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 struct ExternalSessionSummary {
     id: String,
     provider: String,
@@ -287,8 +345,7 @@ struct ExternalSessionSummary {
 struct SyncOutput {
     codex_sessions_indexed: usize,
 }
-
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 struct RunOutput {
     workflow_id: String,
     subagent_id: String,
@@ -303,7 +360,25 @@ struct RunOutput {
     dry_run: bool,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
+struct SpikeAgentInfo {
+    agent_id: String,
+    role: String,
+    status: String,
+}
+
+#[derive(Debug, Serialize)]
+struct SpikeOutput {
+    workflow_id: String,
+    done_agent_id: String,
+    blocked_agent_id: String,
+    failed_agent_id: String,
+    status: StatusOutput,
+    acceptance: Vec<String>,
+    agents: Vec<SpikeAgentInfo>,
+}
+
+#[derive(Debug, Serialize)]
 struct EventRecord {
     id: i64,
     workflow_id: String,
@@ -412,6 +487,27 @@ fn run_main() -> Result<()> {
                 println!("artifacts: {}", output.artifact_dir);
             }
         }
+        Commands::Spike(args) => {
+            ensure_dirs(&paths)?;
+            let json_mode = args.json;
+            let conn = open_db(&paths)?;
+            init_schema(&conn)?;
+            let output = run_spike(&paths, &conn, args)?;
+            if json_mode {
+                print_json(&output)?;
+            } else {
+                println!("spike workflow: {}", output.workflow_id);
+                println!(
+                    "done: {} blocked: {} failed: {}",
+                    output.done_agent_id, output.blocked_agent_id, output.failed_agent_id
+                );
+                println!(
+                    "workflows: {} agents: {}",
+                    output.status.counts.workflows,
+                    output.status.agents.len()
+                );
+            }
+        }
         Commands::Sync(args) => {
             ensure_dirs(&paths)?;
             let conn = open_db(&paths)?;
@@ -507,6 +603,37 @@ fn run_main() -> Result<()> {
                 )?;
             }
         },
+        Commands::Open(args) => {
+            ensure_dirs(&paths)?;
+            let conn = open_db(&paths)?;
+            init_schema(&conn)?;
+            let output = open_target(&paths, &conn, &args)?;
+            let json_mode = open_args_json(&args);
+            if json_mode {
+                print_json(&output)?;
+            } else if output.opened {
+                println!("opened {}", output.target);
+            } else {
+                println!("{}", output.target);
+            }
+        }
+        Commands::Restart(args) => {
+            ensure_dirs(&paths)?;
+            let json_mode = args.json;
+            let conn = open_db(&paths)?;
+            init_schema(&conn)?;
+            let output = restart_agent(&paths, &conn, &args)?;
+            if json_mode {
+                print_json(&output)?;
+            } else {
+                println!("restarted {} -> {}", args.agent, output.run.subagent_id);
+                println!(
+                    "workflow: {} status: {}",
+                    output.run.workflow_id, output.run.status
+                );
+                println!("artifacts: {}", output.run.artifact_dir);
+            }
+        }
     }
 
     Ok(())
@@ -599,6 +726,7 @@ fn init_schema(conn: &Connection) -> Result<()> {
           model text,
           context_mode text not null,
           runner_kind text not null,
+          dry_run integer not null default 0,
           pid integer,
           session_file text,
           session_id text,
@@ -607,6 +735,7 @@ fn init_schema(conn: &Connection) -> Result<()> {
           summary text,
           foreign key(workflow_id) references workflow_runs(id)
         );
+
 
         create table if not exists agent_events(
           id integer primary key autoincrement,
@@ -664,6 +793,22 @@ fn init_schema(conn: &Connection) -> Result<()> {
         create index if not exists idx_external_sessions_provider on external_sessions(provider, updated_at desc);
         ",
     )?;
+
+    let dry_run_exists: bool = conn
+        .query_row(
+            "select 1 from pragma_table_info('subagents') where name='dry_run'",
+            [],
+            |_row| Ok(true),
+        )
+        .optional()?
+        .unwrap_or(false);
+    if !dry_run_exists {
+        conn.execute(
+            "alter table subagents add column dry_run integer not null default 0",
+            [],
+        )?;
+    }
+
     Ok(())
 }
 
@@ -703,9 +848,11 @@ fn status_output(paths: &Paths, conn: &Connection) -> Result<StatusOutput> {
         counts,
         workflows,
         agents,
-        questions,
         sessions,
+        questions,
+        events: recent_events(conn, None, 20)?,
         recommended_actions,
+        refreshed: now_iso(),
     })
 }
 
@@ -732,7 +879,7 @@ fn query_workflows(conn: &Connection, limit: i64) -> Result<Vec<WorkflowSummary>
 
 fn query_agents(conn: &Connection, limit: i64) -> Result<Vec<AgentSummary>> {
     let mut stmt = conn.prepare(
-        "select id, workflow_id, status, role, persona, tool_profile, session_id, session_file, artifact_dir, summary, last_event_at from subagents order by updated_at desc limit ?1",
+        "select id, workflow_id, status, role, persona, tool_profile, session_id, session_file, artifact_dir, summary, last_event_at, dry_run from subagents order by updated_at desc limit ?1",
     )?;
     let rows = stmt.query_map([limit], |row| {
         Ok(AgentSummary {
@@ -747,6 +894,7 @@ fn query_agents(conn: &Connection, limit: i64) -> Result<Vec<AgentSummary>> {
             artifact_dir: row.get(8)?,
             summary: row.get(9)?,
             last_event_at: row.get(10)?,
+            dry_run: row.get(11)?,
         })
     })?;
     rows.collect::<std::result::Result<Vec<_>, _>>()
@@ -978,6 +1126,7 @@ struct TuiState {
     status: Option<StatusOutput>,
     events: Vec<EventRecord>,
     last_refresh: String,
+    status_message: String,
 }
 
 impl TuiState {
@@ -993,6 +1142,7 @@ impl TuiState {
             status: None,
             events: Vec::new(),
             last_refresh: String::new(),
+            status_message: String::new(),
         }
     }
 
@@ -1039,6 +1189,20 @@ impl TuiState {
             .workflows
             .get(self.selected_workflow)
             .map(|workflow| workflow.id.as_str())
+    }
+
+    fn selected_agent(&self) -> Option<&AgentSummary> {
+        self.status
+            .as_ref()?
+            .agents
+            .get(self.selected_agent)
+    }
+
+    fn selected_session(&self) -> Option<&ExternalSessionSummary> {
+        self.status
+            .as_ref()?
+            .sessions
+            .get(self.selected_session)
     }
 
     fn move_down(&mut self) {
@@ -1129,7 +1293,7 @@ fn run_tui_loop(
             .unwrap_or(Duration::ZERO);
         if event::poll(timeout)? {
             if let CrosstermEvent::Key(key) = event::read()? {
-                match handle_tui_key(state, key) {
+                match handle_tui_key(state, key, paths, conn) {
                     TuiAction::Quit => return Ok(()),
                     TuiAction::Refresh => {
                         state.refresh(paths, conn)?;
@@ -1146,7 +1310,12 @@ fn run_tui_loop(
     }
 }
 
-fn handle_tui_key(state: &mut TuiState, key: KeyEvent) -> TuiAction {
+fn handle_tui_key(
+    state: &mut TuiState,
+    key: KeyEvent,
+    paths: &Paths,
+    conn: &Connection,
+) -> TuiAction {
     if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
         return TuiAction::Quit;
     }
@@ -1191,6 +1360,22 @@ fn handle_tui_key(state: &mut TuiState, key: KeyEvent) -> TuiAction {
             }
             TuiAction::Continue
         }
+        KeyCode::Char('o') => {
+            let result = tui_open_selected(state, paths, conn);
+            state.status_message = match result {
+                Ok(msg) => msg,
+                Err(err) => format!("open error: {err}"),
+            };
+            TuiAction::Continue
+        }
+        KeyCode::Char('R') => {
+            let result = tui_restart_selected_agent(state, paths, conn);
+            state.status_message = match result {
+                Ok(msg) => msg,
+                Err(err) => format!("restart error: {err}"),
+            };
+            TuiAction::Continue
+        }
         KeyCode::Char('j') | KeyCode::Down => {
             state.move_down();
             TuiAction::Continue
@@ -1209,6 +1394,88 @@ fn handle_tui_key(state: &mut TuiState, key: KeyEvent) -> TuiAction {
         }
         _ => TuiAction::Continue,
     }
+}
+
+fn tui_open_selected(state: &mut TuiState, _paths: &Paths, conn: &Connection) -> Result<String> {
+    match state.view {
+        TuiView::Workflows => {
+            let workflow_id = state
+                .selected_workflow_id()
+                .ok_or_else(|| anyhow!("no workflow selected"))?
+                .to_string();
+            let workdir: String = conn.query_row(
+                "select workdir from workflow_runs where id=?1",
+                [&workflow_id],
+                |row| row.get(0),
+            )?;
+            let path = PathBuf::from(workdir);
+            os_open(&path)?;
+            Ok(format!("opened workflow dir: {}", path.display()))
+        }
+        TuiView::Agents => {
+            let agent = state
+                .selected_agent()
+                .ok_or_else(|| anyhow!("no agent selected"))?;
+            let target = agent
+                .session_file
+                .as_ref()
+                .filter(|p| !p.is_empty() && Path::new(p).exists())
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from(&agent.artifact_dir));
+            os_open(&target)?;
+            Ok(format!("opened agent {}: {}", agent.id, target.display()))
+        }
+        TuiView::Sessions => {
+            let session = state
+                .selected_session()
+                .ok_or_else(|| anyhow!("no session selected"))?;
+            let target = session
+                .session_file
+                .as_ref()
+                .filter(|p| !p.is_empty() && Path::new(p).exists())
+                .map(PathBuf::from)
+                .or_else(|| {
+                    session
+                        .cwd
+                        .as_ref()
+                        .filter(|p| !p.is_empty())
+                        .map(PathBuf::from)
+                })
+                .ok_or_else(|| anyhow!("session has no openable target"))?;
+            os_open(&target)?;
+            Ok(format!(
+                "opened session {}: {}",
+                session.id,
+                target.display()
+            ))
+        }
+        _ => Ok("open: select a workflow, agent, or session".to_string()),
+    }
+}
+
+fn tui_restart_selected_agent(
+    state: &mut TuiState,
+    paths: &Paths,
+    conn: &Connection,
+) -> Result<String> {
+    let agent = state
+        .selected_agent()
+        .ok_or_else(|| anyhow!("no agent selected"))?;
+    if !agent.dry_run {
+        bail!(
+            "restarting live agent {} from the TUI is not supported; use `symphonyx restart --agent {}` from the CLI",
+            agent.id, agent.id
+        );
+    }
+    let args = RestartArgs {
+        agent: agent.id.clone(),
+        json: false,
+    };
+    let output = restart_agent(paths, conn, &args)?;
+    Ok(format!(
+        "restarted {} -> {} in workflow {}",
+        output.source_agent_id, output.run.subagent_id, output.run.workflow_id
+    ))
 }
 
 fn render_tui(frame: &mut Frame<'_>, state: &TuiState) {
@@ -1392,7 +1659,7 @@ fn render_tui_event_stream(frame: &mut Frame<'_>, area: ratatui::layout::Rect, s
 }
 
 fn render_tui_footer(frame: &mut Frame<'_>, area: ratatui::layout::Rect, state: &TuiState) {
-    let text = Line::from(vec![
+    let keys = Line::from(vec![
         Span::styled(
             "q",
             Style::default()
@@ -1420,21 +1687,21 @@ fn render_tui_footer(frame: &mut Frame<'_>, area: ratatui::layout::Rect, state: 
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::raw(" workflows/agents/sessions/events  "),
+        Span::raw(" views  "),
         Span::styled(
-            "enter",
+            "o",
             Style::default()
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::raw(" filter workflow  "),
+        Span::raw(" open  "),
         Span::styled(
-            "c",
+            "R",
             Style::default()
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::raw(" clear filter  "),
+        Span::raw(" restart dry-run  "),
         Span::styled(
             "r",
             Style::default()
@@ -1443,6 +1710,28 @@ fn render_tui_footer(frame: &mut Frame<'_>, area: ratatui::layout::Rect, state: 
         ),
         Span::raw(format!(" refresh  view={}", state.view.title())),
     ]);
+    let message_style = if state.status_message.starts_with("error:") || state.status_message.starts_with("open error:") || state.status_message.starts_with("restart error:") {
+        Style::default().fg(Color::Red)
+    } else {
+        Style::default().fg(Color::Yellow)
+    };
+    let message = Line::from(vec![
+        Span::styled(
+            "status:",
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            if state.status_message.is_empty() {
+                " ready"
+            } else {
+                &state.status_message
+            },
+            message_style,
+        ),
+    ]);
+    let text = vec![keys, message];
     frame.render_widget(Paragraph::new(text), area);
 }
 
@@ -1503,7 +1792,7 @@ fn selected_detail_text(state: &TuiState) -> String {
             .get(state.selected_event)
             .map(|event| serde_json::to_string_pretty(event).unwrap_or_else(|_| "event".to_string()))
             .unwrap_or_else(|| "No events yet.".to_string()),
-        (TuiView::Help, _) => "Keyboard\n\nq / Esc / Ctrl-C  quit\nj/k or ↑/↓       move selection\ng / G             jump top/bottom\nw                 workflows view\na                 agents view\ns                 sessions view\ne                 events view\nTab               cycle view\nEnter             filter events to selected workflow\nc                 clear workflow filter\nr                 refresh now\n? / h             help\n\nThe TUI auto-starts the repo-local SymphonyX daemon and syncs local sessions when needed.".to_string(),
+        (TuiView::Help, _) => "Keyboard\n\nq / Esc / Ctrl-C  quit\nj/k or ↑/↓       move selection\ng / G             jump top/bottom\nw                 workflows view\na                 agents view\ns                 sessions view\ne                 events view\no                 open selected workflow/agent/session\nR                 restart selected dry-run agent\nTab               cycle view\nEnter             filter events to selected workflow\nc                 clear workflow filter\nr                 refresh now\n? / h             help\n\nThe TUI auto-starts the repo-local SymphonyX daemon and syncs local sessions when needed.".to_string(),
         (_, None) => "Loading…".to_string(),
     }
 }
@@ -1539,6 +1828,187 @@ fn answer_question(conn: &Connection, question_id: &str, answer: &str) -> Result
     }
     Ok(())
 }
+fn is_terminal_status(status: &str) -> bool {
+    matches!(
+        status,
+        "done" | "failed" | "aborted" | "blocked" | "stale" | "offline"
+    )
+}
+
+fn os_open(path: &Path) -> Result<()> {
+    let path_str = path.display().to_string();
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open").arg(&path_str).spawn()?.wait()?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        Command::new("xdg-open").arg(&path_str).spawn()?.wait()?;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        Command::new("cmd").args(["/C", "start", "", &path_str]).spawn()?.wait()?;
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    {
+        bail!("os open not supported on this platform");
+    }
+    Ok(())
+}
+
+fn open_args_json(args: &OpenArgs) -> bool {
+    match &args.target {
+        OpenTarget::Agent { json, .. } | OpenTarget::Session { json, .. } => *json,
+    }
+}
+
+
+fn open_target(_paths: &Paths, conn: &Connection, args: &OpenArgs) -> Result<OpenOutput> {
+    match &args.target {
+        OpenTarget::Agent { id, json } => {
+            let row: (Option<String>, String) = conn.query_row(
+                "select session_file, artifact_dir from subagents where id=?1",
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )?;
+            let target = row
+                .0
+                .filter(|p| !p.is_empty() && Path::new(p).exists())
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from(&row.1));
+            let opened = if *json {
+                false
+            } else {
+                os_open(&target)?;
+                true
+            };
+            Ok(OpenOutput {
+                kind: "agent".to_string(),
+                id: id.clone(),
+                target: target.display().to_string(),
+                opened,
+            })
+        }
+        OpenTarget::Session { provider, id, json } => {
+            let row: (Option<String>, Option<String>) = conn.query_row(
+                "select session_file, cwd from external_sessions where provider=?1 and id=?2",
+                [provider, id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )?;
+            let target = row
+                .0
+                .filter(|p| !p.is_empty() && Path::new(p).exists())
+                .map(PathBuf::from)
+                .or_else(|| row.1.filter(|p| !p.is_empty()).map(PathBuf::from))
+                .ok_or_else(|| anyhow!("session has no session_file or cwd: {provider}/{id}"))?;
+            let opened = if *json {
+                false
+            } else {
+                os_open(&target)?;
+                true
+            };
+            Ok(OpenOutput {
+                kind: "session".to_string(),
+                id: id.clone(),
+                target: target.display().to_string(),
+                opened,
+            })
+        }
+    }
+}
+
+fn restart_agent(paths: &Paths, conn: &Connection, args: &RestartArgs) -> Result<RestartOutput> {
+    let source_id = args.agent.clone();
+    let row: (String, String, String, Option<String>, String, Option<String>, String, i64, String) = conn.query_row(
+        "select workflow_id, status, role, persona, tool_profile, model, context_mode, dry_run, runner_kind from subagents where id=?1",
+        [&source_id],
+        |row| {
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+                row.get(5)?,
+                row.get(6)?,
+                row.get(7)?,
+                row.get(8)?,
+            ))
+        },
+    )?;
+    let (
+        source_workflow_id,
+        source_status,
+        role,
+        persona,
+        tool_profile,
+        model,
+        context_mode,
+        dry_run_flag,
+        runner_kind,
+    ) = row;
+    let dry_run = dry_run_flag != 0;
+
+    if !is_terminal_status(&source_status) {
+        bail!(
+            "cannot restart agent {source_id}: status is {source_status}; restart is only allowed for terminal statuses (done, failed, aborted, blocked, stale, offline)"
+        );
+    }
+
+    let source_artifact_dir: String = conn.query_row(
+        "select artifact_dir from subagents where id=?1",
+        [&source_id],
+        |row| row.get(0),
+    )?;
+    let prompt_path = PathBuf::from(source_artifact_dir).join("prompt.md");
+    if !prompt_path.is_file() {
+        bail!(
+            "cannot restart agent {source_id}: prompt artifact not readable at {}",
+            prompt_path.display()
+        );
+    }
+
+    let source_title: Option<String> = conn.query_row(
+        "select title from workflow_runs where id=?1",
+        [source_workflow_id.clone()],
+        |row| row.get::<_, Option<String>>(0),
+    )?;
+    let runner = if dry_run {
+        "pi-rpc".to_string()
+    } else {
+        runner_kind.clone()
+    };
+
+    let title = Some(format!(
+        "restart of {} ({})",
+        source_id,
+        source_title.unwrap_or_else(|| "untitled".to_string())
+    ));
+    let objective = Some(format!(
+        "re-run agent {source_id} from workflow {source_workflow_id} with runner {runner_kind}"
+    ));
+
+    let run_args = RunArgs {
+        title,
+        objective,
+        prompt: prompt_path,
+        tool_profile,
+        runner,
+        persona,
+        role: Some(role),
+        model,
+        context_mode,
+        json: args.json,
+        dry_run,
+        file_logs: false,
+        timeout_seconds: 900,
+    };
+    let output = run_agent(paths, conn, run_args)?;
+    Ok(RestartOutput {
+        run: output,
+        source_agent_id: source_id,
+    })
+}
 
 fn run_agent(paths: &Paths, conn: &Connection, args: RunArgs) -> Result<RunOutput> {
     let profile = ToolProfile::from_name(&args.tool_profile)?;
@@ -1567,8 +2037,8 @@ fn run_agent(paths: &Paths, conn: &Connection, args: RunArgs) -> Result<RunOutpu
         params![workflow_id, now, title, args.objective, std::env::current_dir()?.display().to_string(), json!({"schema":"symphonyx.workflow/v0"}).to_string()],
     )?;
     conn.execute(
-        "insert into subagents(id, workflow_id, created_at, updated_at, status, role, persona, tool_profile, model, context_mode, runner_kind, artifact_dir, summary) values (?1, ?2, ?3, ?3, 'planned', ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'planned')",
-        params![agent_id, workflow_id, now, role, args.persona, args.tool_profile, args.model, args.context_mode, runner.as_str(), artifact_dir.display().to_string()],
+        "insert into subagents(id, workflow_id, created_at, updated_at, status, role, persona, tool_profile, model, context_mode, runner_kind, dry_run, artifact_dir, summary) values (?1, ?2, ?3, ?3, 'planned', ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'planned')",
+        params![agent_id, workflow_id, now, role, args.persona, args.tool_profile, args.model, args.context_mode, runner.as_str(), args.dry_run as i64, artifact_dir.display().to_string()],
     )?;
 
     append_event(
@@ -1796,6 +2266,216 @@ fn run_agent(paths: &Paths, conn: &Connection, args: RunArgs) -> Result<RunOutpu
         final_message_preview,
         file_logs: args.file_logs,
         dry_run: false,
+    })
+}
+fn read_task_list(path: &Path) -> Result<Vec<String>> {
+    let text =
+        fs::read_to_string(path).with_context(|| format!("read task list {}", path.display()))?;
+    let mut tasks = Vec::new();
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        tasks.push(trimmed.to_string());
+    }
+    Ok(tasks)
+}
+
+fn run_spike(paths: &Paths, conn: &Connection, args: SpikeArgs) -> Result<SpikeOutput> {
+    let mut tasks = read_task_list(&args.task_list)?;
+    if tasks.len() < 2 {
+        bail!(
+            "task list must contain at least two tasks, found {}",
+            tasks.len()
+        );
+    }
+
+    let workflow_id = new_id("wf");
+    let done_agent_id = new_id("agent");
+    let blocked_agent_id = new_id("agent");
+    let failed_agent_id = new_id("agent");
+    let now = now_iso();
+    let workdir = std::env::current_dir()?.display().to_string();
+
+    conn.execute(
+        "insert into workflow_runs(id, created_at, updated_at, status, title, objective, workdir, config_json) values (?1, ?2, ?2, 'running', ?3, ?4, ?5, ?6)",
+        params![
+            workflow_id,
+            now,
+            "runtime substrate spike",
+            "prove SQLite/event/session/task path for control-plane-core",
+            workdir,
+            json!({"schema":"symphonyx.runtime-spike/v0"}).to_string()
+        ],
+    )?;
+
+    append_event(
+        conn,
+        &workflow_id,
+        None,
+        "workflow.spike.started",
+        json!({"task_count": tasks.len()}),
+    )?;
+
+    let done_task = tasks.remove(0);
+    let blocked_task = tasks.remove(0);
+    let failed_task = "simulate crashed worker with explicit failed state".to_string();
+
+    let agents = vec![
+        (
+            done_agent_id.clone(),
+            "spike-done-worker",
+            done_task,
+            "done",
+            "dry-run done",
+        ),
+        (
+            blocked_agent_id.clone(),
+            "spike-blocked-worker",
+            blocked_task,
+            "blocked",
+            "dry-run blocked",
+        ),
+        (
+            failed_agent_id.clone(),
+            "spike-crash-simulation",
+            failed_task,
+            "failed",
+            "simulated crash / explicit failed state",
+        ),
+    ];
+
+    for (agent_id, role, task_text, final_status, final_summary_prefix) in agents {
+        let artifact_dir = paths.runs_dir.join(&workflow_id).join(&agent_id);
+        fs::create_dir_all(&artifact_dir)?;
+        let prompt_path = artifact_dir.join("prompt.md");
+        fs::write(&prompt_path, &task_text)?;
+
+        conn.execute(
+            "insert into subagents(id, workflow_id, created_at, updated_at, status, role, persona, tool_profile, model, context_mode, runner_kind, dry_run, artifact_dir, summary) values (?1, ?2, ?3, ?3, 'planned', ?4, ?5, ?6, ?7, ?8, ?9, 1, ?10, 'planned')",
+            params![
+                agent_id,
+                workflow_id,
+                now,
+                role,
+                Option::<String>::None,
+                "reviewer-readonly",
+                Option::<String>::None,
+                "prompt-only",
+                "dry-run",
+                artifact_dir.display().to_string()
+            ],
+        )?;
+
+        append_artifact(
+            conn,
+            &workflow_id,
+            Some(&agent_id),
+            "text",
+            "prompt",
+            &prompt_path,
+        )?;
+
+        append_event(
+            conn,
+            &workflow_id,
+            Some(&agent_id),
+            "agent.planned",
+            json!({
+                "role": role,
+                "runner": "dry-run",
+                "prompt_path": prompt_path,
+            }),
+        )?;
+
+        set_agent_status(
+            conn,
+            &workflow_id,
+            &agent_id,
+            "running",
+            &format!("running: {}", preview(&task_text, 120)),
+        )?;
+
+        let final_summary = format!("{}: {}", final_summary_prefix, preview(&task_text, 120));
+        set_agent_status(conn, &workflow_id, &agent_id, final_status, &final_summary)?;
+    }
+
+    append_event(
+        conn,
+        &workflow_id,
+        Some(&failed_agent_id),
+        "agent.crash_simulated",
+        json!({"reason":"explicit failed state for acceptance proof"}),
+    )?;
+
+    let session_id = format!("{workflow_id}-crashed");
+    conn.execute(
+        "insert into external_sessions(id, provider, status, title, cwd, session_file, updated_at, meta_json) values (?1, ?2, 'failed', ?3, ?4, ?5, ?6, ?7)
+         on conflict(provider, id) do update set status='failed', title=?3, cwd=?4, session_file=?5, updated_at=?6, meta_json=?7",
+        params![
+            session_id,
+            "symphonyx-spike",
+            "simulated crashed worker",
+            workdir,
+            Option::<String>::None,
+            now_iso(),
+            json!({"failed_agent_id": failed_agent_id, "reason":"simulated crash / explicit failed state"}).to_string()
+        ],
+    )?;
+
+    append_event(
+        conn,
+        &workflow_id,
+        None,
+        "session.observed",
+        json!({
+            "provider": "symphonyx-spike",
+            "session_id": session_id,
+            "status": "failed",
+            "failed_agent_id": failed_agent_id,
+        }),
+    )?;
+
+    set_workflow_status(conn, &workflow_id, "blocked")?;
+
+    let status = status_output(paths, conn)?;
+    let agent_infos = vec![
+        SpikeAgentInfo {
+            agent_id: done_agent_id.clone(),
+            role: "spike-done-worker".to_string(),
+            status: "done".to_string(),
+        },
+        SpikeAgentInfo {
+            agent_id: blocked_agent_id.clone(),
+            role: "spike-blocked-worker".to_string(),
+            status: "blocked".to_string(),
+        },
+        SpikeAgentInfo {
+            agent_id: failed_agent_id.clone(),
+            role: "spike-crash-simulation".to_string(),
+            status: "failed".to_string(),
+        },
+    ];
+
+    let acceptance = vec![
+        "read local task list".to_string(),
+        "created one workflow".to_string(),
+        "created dry-run done worker".to_string(),
+        "created dry-run blocked worker".to_string(),
+        "persisted workflow/subagent/session/event rows".to_string(),
+        "simulated crashed worker with explicit failed state".to_string(),
+        "returned bounded status/proof JSON without TUI".to_string(),
+    ];
+
+    Ok(SpikeOutput {
+        workflow_id,
+        done_agent_id,
+        blocked_agent_id,
+        failed_agent_id,
+        status,
+        acceptance,
+        agents: agent_infos,
     })
 }
 
@@ -2976,7 +3656,7 @@ fn daemon_status(paths: &Paths) -> DaemonStatus {
     DaemonStatus {
         running,
         pid,
-        pid_file: paths.pid_file.display().to_string(),
+        pid_file: paths.pid_file.clone(),
     }
 }
 
@@ -3147,6 +3827,7 @@ mod tests {
 
         let mut snapshot = serde_json::to_value(&status).unwrap();
         snapshot["daemon"]["pid_file"] = json!("[pid-file]");
+        snapshot["refreshed"] = json!("[refreshed]");
         insta::assert_json_snapshot!("status_empty", snapshot);
     }
 
@@ -3420,5 +4101,296 @@ mod tests {
         assert!(Path::new(&output.artifact_dir)
             .join("transcript.jsonl")
             .exists());
+    }
+    #[test]
+    fn spike_command_persists_workflow_agents_session_events() {
+        let dir = tempdir().unwrap();
+        let paths = Paths::new(dir.path().join("symx"), None).unwrap();
+        ensure_dirs(&paths).unwrap();
+        let conn = open_db(&paths).unwrap();
+        init_schema(&conn).unwrap();
+
+        let task_list = dir.path().join("tasks.txt");
+        fs::write(
+            &task_list,
+            "# header comment\n\nFirst task for done worker\nSecond task for blocked worker\n",
+        )
+        .unwrap();
+
+        let output = run_spike(
+            &paths,
+            &conn,
+            SpikeArgs {
+                task_list: task_list.clone(),
+                json: true,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(output.status.counts.workflows, 1);
+        assert_eq!(output.status.counts.agents_done, 1);
+        assert_eq!(output.status.counts.agents_blocked, 1);
+        assert_eq!(output.status.counts.agents_failed, 1);
+        assert_eq!(output.status.counts.external_sessions, 1);
+        assert_eq!(output.status.agents.len(), 3);
+
+        let statuses: Vec<String> = output
+            .status
+            .agents
+            .iter()
+            .map(|a| a.status.clone())
+            .collect();
+        assert!(statuses.contains(&"done".to_string()));
+        assert!(statuses.contains(&"blocked".to_string()));
+        assert!(statuses.contains(&"failed".to_string()));
+
+        let events = tail_events(&conn, Some(&output.workflow_id), 0, 100).unwrap();
+        let types: Vec<String> = events.iter().map(|e| e.event_type.clone()).collect();
+        assert!(
+            types.contains(&"agent.crash_simulated".to_string()),
+            "missing agent.crash_simulated in {:?}",
+            types
+        );
+        assert!(
+            types.contains(&"session.observed".to_string()),
+            "missing session.observed in {:?}",
+            types
+        );
+
+        let session: i64 = conn
+            .query_row(
+                "select count(*) from external_sessions where provider='symphonyx-spike'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(session, 1);
+
+        let artifact_rows: i64 = conn
+            .query_row(
+                "select count(*) from artifacts where kind='text' and role='prompt'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(artifact_rows, 3);
+
+        fs::write(&task_list, "only one task\n").unwrap();
+        let err = run_spike(
+            &paths,
+            &conn,
+            SpikeArgs {
+                task_list,
+                json: true,
+            },
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("at least two tasks"));
+    }
+    fn insert_test_agent(
+        conn: &Connection,
+        paths: &Paths,
+        id: &str,
+        workflow_id: &str,
+        status: &str,
+        dry_run: bool,
+    ) -> PathBuf {
+        let now = now_iso();
+        let artifact_dir = paths.runs_dir.join(workflow_id).join(id);
+        fs::create_dir_all(&artifact_dir).unwrap();
+        conn.execute(
+            "insert into workflow_runs(id, created_at, updated_at, status, workdir, config_json) values (?1, ?2, ?2, 'done', '/tmp', '{}')",
+            params![workflow_id, now],
+        )
+        .unwrap();
+        conn.execute(
+            "insert into subagents(id, workflow_id, created_at, updated_at, status, role, persona, tool_profile, model, context_mode, runner_kind, dry_run, artifact_dir, summary) values (?1, ?2, ?3, ?3, ?4, 'worker', 'rubber-duck', 'reviewer-readonly', 'gpt-test', 'prompt-only', 'codex-app-server', ?5, ?6, ?4)",
+            params![id, workflow_id, now, status, dry_run as i64, artifact_dir.display().to_string()],
+        )
+        .unwrap();
+        artifact_dir
+    }
+
+    #[test]
+    fn open_target_agent_prefers_session_file_then_artifact_dir() {
+        let dir = tempdir().unwrap();
+        let paths = Paths::new(dir.path().join("symx"), None).unwrap();
+        ensure_dirs(&paths).unwrap();
+        let conn = open_db(&paths).unwrap();
+        init_schema(&conn).unwrap();
+
+        let artifact_dir = insert_test_agent(
+            &conn, &paths, "agent_a", "wf_a", "done", true,
+        );
+        fs::write(artifact_dir.join("prompt.md"), "task").unwrap();
+
+        // No session_file: resolves to artifact_dir.
+        let out = open_target(
+            &paths,
+            &conn,
+            &OpenArgs {
+                target: OpenTarget::Agent {
+                    id: "agent_a".to_string(),
+                    json: true,
+                },
+            },
+        )
+        .unwrap();
+        assert_eq!(out.kind, "agent");
+        assert_eq!(out.id, "agent_a");
+        assert_eq!(out.target, artifact_dir.display().to_string());
+        assert!(!out.opened);
+
+        // With session_file present: resolves to session_file.
+        let session_file = dir.path().join("session_a.json");
+        fs::write(&session_file, "{}").unwrap();
+        conn.execute(
+            "update subagents set session_file=?1 where id='agent_a'",
+            [session_file.display().to_string()],
+        )
+        .unwrap();
+        let out = open_target(
+            &paths,
+            &conn,
+            &OpenArgs {
+                target: OpenTarget::Agent {
+                    id: "agent_a".to_string(),
+                    json: true,
+                },
+            },
+        )
+        .unwrap();
+        assert_eq!(out.target, session_file.display().to_string());
+    }
+
+    #[test]
+    fn open_target_session_prefers_session_file_then_cwd() {
+        let dir = tempdir().unwrap();
+        let paths = Paths::new(dir.path().join("symx"), None).unwrap();
+        ensure_dirs(&paths).unwrap();
+        let conn = open_db(&paths).unwrap();
+        init_schema(&conn).unwrap();
+
+        let cwd = dir.path().join("session_cwd");
+        fs::create_dir_all(&cwd).unwrap();
+        conn.execute(
+            "insert into external_sessions(id, provider, status, title, cwd, session_file, updated_at, meta_json) values (?1, 'codex', 'done', 'test', ?2, null, ?3, '{}')",
+            params!["sess_1", cwd.display().to_string(), now_iso()],
+        )
+        .unwrap();
+
+        let out = open_target(
+            &paths,
+            &conn,
+            &OpenArgs {
+                target: OpenTarget::Session {
+                    provider: "codex".to_string(),
+                    id: "sess_1".to_string(),
+                    json: true,
+                },
+            },
+        )
+        .unwrap();
+        assert_eq!(out.kind, "session");
+        assert_eq!(out.target, cwd.display().to_string());
+
+        let session_file = dir.path().join("sess_1.json");
+        fs::write(&session_file, "{}").unwrap();
+        conn.execute(
+            "update external_sessions set session_file=?1 where provider='codex' and id='sess_1'",
+            [session_file.display().to_string()],
+        )
+        .unwrap();
+        let out = open_target(
+            &paths,
+            &conn,
+            &OpenArgs {
+                target: OpenTarget::Session {
+                    provider: "codex".to_string(),
+                    id: "sess_1".to_string(),
+                    json: true,
+                },
+            },
+        )
+        .unwrap();
+        assert_eq!(out.target, session_file.display().to_string());
+    }
+
+    #[test]
+    fn restart_rejects_non_terminal_statuses() {
+        let dir = tempdir().unwrap();
+        let paths = Paths::new(dir.path().join("symx"), None).unwrap();
+        ensure_dirs(&paths).unwrap();
+        let conn = open_db(&paths).unwrap();
+        init_schema(&conn).unwrap();
+
+        for status in ["planned", "starting", "running", "idle"] {
+            let agent_id = format!("agent_{status}");
+            let wf_id = format!("wf_{status}");
+            let artifact_dir = insert_test_agent(
+                &conn, &paths, &agent_id, &wf_id, status, true,
+            );
+            fs::write(artifact_dir.join("prompt.md"), "task").unwrap();
+
+            let err = restart_agent(
+                &paths,
+                &conn,
+                &RestartArgs {
+                    agent: agent_id,
+                    json: true,
+                },
+            )
+            .unwrap_err()
+            .to_string();
+            assert!(
+                err.contains("cannot restart") && err.contains(status),
+                "expected rejection for {status}, got: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn restart_creates_new_run_for_terminal_dry_run_agent() {
+        let dir = tempdir().unwrap();
+        let paths = Paths::new(dir.path().join("symx"), None).unwrap();
+        ensure_dirs(&paths).unwrap();
+        let conn = open_db(&paths).unwrap();
+        init_schema(&conn).unwrap();
+
+        let agent_id = "agent_done";
+        let wf_id = "wf_done";
+        let artifact_dir = insert_test_agent(
+            &conn, &paths, agent_id, wf_id, "done", true,
+        );
+        fs::write(artifact_dir.join("prompt.md"), "original task").unwrap();
+
+        let output = restart_agent(
+            &paths,
+            &conn,
+            &RestartArgs {
+                agent: agent_id.to_string(),
+                json: true,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(output.source_agent_id, agent_id);
+        assert_ne!(output.run.subagent_id, agent_id);
+        assert_eq!(output.run.status, "done");
+        assert!(output.run.dry_run);
+        assert!(
+            Path::new(&output.run.artifact_dir).join("prompt.md").exists(),
+            "new prompt artifact should be copied"
+        );
+
+        let restarted_count: i64 = conn
+            .query_row(
+                "select count(*) from subagents where id=?1",
+                [&output.run.subagent_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(restarted_count, 1);
     }
 }

@@ -18,7 +18,7 @@ The product I want is not just another black-box AI ad generator. It should be a
 
 Clean-room constraints:
 
-- copy workflow/format mechanics, not code/private identities/copyrighted media/trademarks;
+- copy workflow/format mechanics, not code/private identities/protected media/trademarks;
 - user-provided/licensed media only;
 - no platform-evasion tooling;
 - safe disclosure/consent around AI actors and clones.
@@ -95,14 +95,14 @@ Design the UX for the first internal tool:
 - export;
 - metadata.
 
-### 5. Legal/ethical/product guardrails
+### 5. Product boundaries and platform constraints
 
-Give guardrails for:
+Cover boundaries for:
 
 - actor cloning;
 - influencer/persona generation;
 - reference video decomposition;
-- copyrighted media;
+- protected media;
 - ad claims;
 - platform posting/scheduling;
 - disclosure.
