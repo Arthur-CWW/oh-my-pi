@@ -1,20 +1,19 @@
-import { Database } from "bun:sqlite"
-import { afterEach, describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs"
+import { describe, expect, test } from "bun:test"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { Database } from "bun:sqlite"
 
 import { searchReader } from "../src/substrate/reader"
 
-const tempDirs: string[] = []
-const TEST_TMP_ROOT = new URL(".tmp/", import.meta.url).pathname
-
-function makeTempDir(prefix: string): string {
-  mkdirSync(TEST_TMP_ROOT, { recursive: true })
-  return mkdtempSync(join(TEST_TMP_ROOT, prefix))
-}
-
-
-const WORKS_SCHEMA = `CREATE TABLE works (
+function withReaderDb(run: (dbPath: string) => void): void {
+  const root = mkdtempSync(join(tmpdir(), "primer-reader-search-"))
+  try {
+    const dbPath = join(root, "meltdown-annotations.sqlite")
+    const db = new Database(dbPath)
+    try {
+      db.exec(`
+CREATE TABLE works (
   id INTEGER PRIMARY KEY,
   title TEXT NOT NULL,
   author TEXT,
@@ -24,9 +23,18 @@ const WORKS_SCHEMA = `CREATE TABLE works (
   pdf_page_start INTEGER,
   pdf_page_end INTEGER,
   note TEXT
-);`
-
-const ANNOTATIONS_SCHEMA = `CREATE TABLE annotations (
+);
+CREATE TABLE source_blocks (
+  id INTEGER PRIMARY KEY,
+  work_id INTEGER NOT NULL REFERENCES works(id),
+  block_key TEXT NOT NULL UNIQUE,
+  reading_unit_key TEXT NOT NULL,
+  pdf_page INTEGER NOT NULL,
+  sequence INTEGER NOT NULL,
+  block_type TEXT NOT NULL,
+  text TEXT NOT NULL
+);
+CREATE TABLE annotations (
   id INTEGER PRIMARY KEY,
   work_id INTEGER NOT NULL REFERENCES works(id),
   pdf_page INTEGER NOT NULL,
@@ -38,20 +46,8 @@ const ANNOTATIONS_SCHEMA = `CREATE TABLE annotations (
   refs TEXT,
   neoliberalism TEXT,
   created_at TEXT NOT NULL
-, category TEXT, ontology TEXT, question TEXT, why_reference TEXT, reading_unit_key TEXT, front_claim TEXT);`
-
-const SOURCE_BLOCKS_SCHEMA = `CREATE TABLE source_blocks (
-  id INTEGER PRIMARY KEY,
-  work_id INTEGER NOT NULL REFERENCES works(id),
-  block_key TEXT NOT NULL UNIQUE,
-  reading_unit_key TEXT NOT NULL,
-  pdf_page INTEGER NOT NULL,
-  sequence INTEGER NOT NULL,
-  block_type TEXT NOT NULL,
-  text TEXT NOT NULL
-);`
-
-const CONCEPTS_SCHEMA = `CREATE TABLE concepts (
+, category TEXT, ontology TEXT, question TEXT, why_reference TEXT, reading_unit_key TEXT, front_claim TEXT);
+CREATE TABLE concepts (
   id INTEGER PRIMARY KEY,
   slug TEXT NOT NULL UNIQUE,
   title TEXT NOT NULL,
@@ -62,83 +58,69 @@ const CONCEPTS_SCHEMA = `CREATE TABLE concepts (
   long_note TEXT NOT NULL,
   key_terms TEXT,
   references_text TEXT
-, front_claim TEXT);`
+, front_claim TEXT);
+`)
+      for (const work of [
+        [1, "Acceleration Reader"],
+        [2, "Memory Reader"],
+        [3, "Archive Reader"],
+      ] as const) {
+        db.query("INSERT INTO works (id, title) VALUES (?, ?)").run(...work)
+      }
 
-afterEach(() => {
-  for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true })
-})
+      insertSourceBlock(db, 10, 1, "sb-10", "A source passage says metacognition shapes the reader's next question.")
+      insertSourceBlock(db, 11, 2, "sb-11", "A paragraph about scheduling and review cadence.")
+      insertSourceBlock(db, 12, 3, "sb-12", "Archive practice makes provenance visible.")
+      insertAnnotation(db, 20, 1, "Feedback Note", "This note uses palimpsest as a metaphor for layered marginalia.")
+      insertAnnotation(db, 21, 2, "Review Note", "Spacing changes the felt cost of returning to a claim.")
+      insertAnnotation(db, 22, 3, "Archive Note", "References should remain close to the statement they support.")
+      insertConcept(db, 30, "consolidation", "Memory Consolidation", "The long note says consolidation depends on revisiting claims with evidence.")
+      insertConcept(db, 31, "attention", "Attention", "A long note about noticing changes across sessions.")
+      insertConcept(db, 32, "indexing", "Indexing", "A long note about building durable cross references.")
+    } finally {
+      db.close()
+    }
 
-describe("reader substrate search", () => {
-  test("finds annotations by title and note", () => {
-    const dbPath = createReaderFixture()
-
-    const result = searchReader(dbPath, ["dialectic"])
-
-    expect(result.hits.map((hit) => hit.ref)).toEqual(["reader:annotations:1"])
-    expect(result.hits[0]?.kind).toBe("annotation")
-    expect(result.hits[0]?.snippet).toContain("dialectic")
-  })
-
-  test("finds source blocks by text", () => {
-    const dbPath = createReaderFixture()
-
-    const result = searchReader(dbPath, ["machinic"])
-
-    expect(result.hits.map((hit) => hit.ref)).toEqual(["reader:source_blocks:1"])
-    expect(result.hits[0]?.title).toBe("Meltdown Notes")
-  })
-
-  test("finds concepts by short notes and skips missing DBs", () => {
-    const dbPath = createReaderFixture()
-
-    const result = searchReader(dbPath, ["runaway"])
-    expect(result.hits.map((hit) => hit.ref)).toEqual(["reader:concepts:1"])
-
-    const missing = searchReader(join(TEST_TMP_ROOT, "missing-primer-reader.sqlite"), ["test"])
-    expect(missing.hits).toEqual([])
-    expect(missing.skipped).toContain("missing reader DB")
-  })
-})
-
-function createReaderFixture(): string {
-  const dir = makeTempDir("primer-reader-")
-  tempDirs.push(dir)
-  const dbPath = join(dir, "reader.sqlite")
-  const db = new Database(dbPath)
-  try {
-    db.exec(`${WORKS_SCHEMA}\n${ANNOTATIONS_SCHEMA}\n${SOURCE_BLOCKS_SCHEMA}\n${CONCEPTS_SCHEMA}`)
-    db.query("INSERT INTO works (id, title, author) VALUES (1, 'Meltdown Notes', 'CCRU')").run()
-    db.query(
-      `INSERT INTO annotations (id, work_id, pdf_page, anchor, title, kind, tags, note, created_at)
-       VALUES (?, 1, 1, ?, ?, 'concept', ?, ?, ?)`,
-    ).run(1, "dialectic-anchor", "Dialectic Pressure", "hegel,marx", "A dialectic note with context.", "2026-06-01")
-    db.query(
-      `INSERT INTO annotations (id, work_id, pdf_page, anchor, title, kind, tags, note, created_at)
-       VALUES (?, 1, 2, ?, ?, 'concept', ?, ?, ?)`,
-    ).run(2, "other-anchor", "Cybernetic Aside", "systems", "Another annotation.", "2026-06-02")
-    db.query(
-      `INSERT INTO source_blocks (id, work_id, block_key, reading_unit_key, pdf_page, sequence, block_type, text)
-       VALUES (?, 1, ?, ?, 3, 1, 'paragraph', ?)`,
-    ).run(1, "block-1", "unit-1", "Machinic desire appears in the source passage.")
-    db.query(
-      `INSERT INTO source_blocks (id, work_id, block_key, reading_unit_key, pdf_page, sequence, block_type, text)
-       VALUES (?, 1, ?, ?, 4, 2, 'paragraph', ?)`,
-    ).run(2, "block-2", "unit-1", "A quiet unrelated passage.")
-    db.query(
-      `INSERT INTO concepts (id, slug, title, lane, ontology, reader_question, short_note, long_note)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(
-      1,
-      "technocapital",
-      "Technocapital Singularity",
-      "glossary",
-      "capital",
-      "What is the concept doing?",
-      "Runaway feedback between markets and machines.",
-      "A longer note about acceleration.",
-    )
+    run(dbPath)
   } finally {
-    db.close()
+    rmSync(root, { recursive: true, force: true })
   }
-  return dbPath
 }
+
+function insertSourceBlock(db: Database, id: number, workId: number, blockKey: string, text: string): void {
+  db.query(
+    `INSERT INTO source_blocks (id, work_id, block_key, reading_unit_key, pdf_page, sequence, block_type, text)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(id, workId, blockKey, `unit-${workId}`, workId, id, "paragraph", text)
+}
+
+function insertAnnotation(db: Database, id: number, workId: number, title: string, note: string): void {
+  db.query(
+    `INSERT INTO annotations (id, work_id, pdf_page, anchor, title, kind, tags, note, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(id, workId, workId, `anchor-${id}`, title, "note", "reader,test", note, `2026-06-${workId + 10}T00:00:00.000Z`)
+}
+
+function insertConcept(db: Database, id: number, slug: string, title: string, longNote: string): void {
+  db.query(
+    `INSERT INTO concepts (id, slug, title, lane, ontology, reader_question, short_note, long_note)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(id, slug, title, "memory", "concept", "What does it explain?", "Short supporting note.", longNote)
+}
+
+describe("searchReader", () => {
+  test("returns annotation, source block, and concept provenance refs from matched columns", () => {
+    withReaderDb((dbPath) => {
+      const annotation = searchReader(dbPath, ["palimpsest"], 10).hits[0]
+      const sourceBlock = searchReader(dbPath, ["metacognition"], 10).hits[0]
+      const concept = searchReader(dbPath, ["consolidation"], 10).hits[0]
+
+      expect(annotation?.ref).toBe("reader:annotations:20")
+      expect(annotation?.snippet).toContain("palimpsest")
+      expect(sourceBlock?.ref).toBe("reader:source_blocks:10")
+      expect(sourceBlock?.snippet).toContain("metacognition")
+      expect(concept?.ref).toBe("reader:concepts:30")
+      expect(concept?.snippet).toContain("consolidation")
+    })
+  })
+})

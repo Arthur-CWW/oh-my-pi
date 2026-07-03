@@ -9,7 +9,11 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "bun test"
+    "test": "bun test",
+    "check": "bun run typecheck && bun run test",
+    "cli": "bun src/cli.ts",
+    "dashboard": "bun src/dashboard.ts",
+    "dev": "bunx portless@latest primer bun src/dashboard.ts"
   },
   "dependencies": {
     "effect": "^4.0.0-beta.71"

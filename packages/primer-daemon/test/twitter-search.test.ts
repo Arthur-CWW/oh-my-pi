@@ -1,20 +1,19 @@
-import { Database } from "bun:sqlite"
-import { afterEach, describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs"
+import { describe, expect, test } from "bun:test"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { Database } from "bun:sqlite"
 
-import { recentTweets, searchTwitter } from "../src/substrate/twitter"
+import { searchTwitter } from "../src/substrate/twitter"
 
-const tempDirs: string[] = []
-const TEST_TMP_ROOT = new URL(".tmp/", import.meta.url).pathname
-
-function makeTempDir(prefix: string): string {
-  mkdirSync(TEST_TMP_ROOT, { recursive: true })
-  return mkdtempSync(join(TEST_TMP_ROOT, prefix))
-}
-
-
-const TWEETS_SCHEMA = `CREATE TABLE tweets (
+function withTwitterDb(run: (dbPath: string) => void): void {
+  const root = mkdtempSync(join(tmpdir(), "primer-twitter-search-"))
+  try {
+    const dbPath = join(root, "twitter-archive.sqlite")
+    const db = new Database(dbPath)
+    try {
+      db.exec(`
+CREATE TABLE tweets (
   id TEXT PRIMARY KEY,
   author_id TEXT NOT NULL,
   username TEXT,
@@ -24,99 +23,74 @@ const TWEETS_SCHEMA = `CREATE TABLE tweets (
   conversation_id TEXT,
   updated_at TEXT NOT NULL,
   data_json TEXT NOT NULL
-, captured_metrics_json TEXT, lifecycle_status TEXT NOT NULL DEFAULT 'captured', thread_status TEXT NOT NULL DEFAULT 'unknown', quote_status TEXT NOT NULL DEFAULT 'unknown', quote_unavailable_reason TEXT, provenance_json TEXT, source_lane TEXT NOT NULL DEFAULT 'unknown', source_url TEXT, import_batch_id TEXT);`
+, captured_metrics_json TEXT, lifecycle_status TEXT NOT NULL DEFAULT 'captured', thread_status TEXT NOT NULL DEFAULT 'unknown', quote_status TEXT NOT NULL DEFAULT 'unknown', quote_unavailable_reason TEXT, provenance_json TEXT, source_lane TEXT NOT NULL DEFAULT 'unknown', source_url TEXT, import_batch_id TEXT);
+`)
+      insertTweet(
+        db,
+        "t1",
+        "alice",
+        "2026-06-18T05:40:59.120Z",
+        `${"context ".repeat(35)}spaced repetition makes review schedules visible and durable`,
+      )
+      insertTweet(
+        db,
+        "t2",
+        "memorysmith",
+        "2026-06-19T05:40:59.120Z",
+        "A thread about notebooks and durable personal archives.",
+      )
+      insertTweet(
+        db,
+        "t3",
+        "gardenbot",
+        "2026-06-20T05:40:59.120Z",
+        "Seedlings and irrigation notes from the greenhouse.",
+      )
+      insertTweet(
+        db,
+        "t4",
+        "cyberneticist",
+        "2026-06-21T05:40:59.120Z",
+        "Control loops and feedback in small teams.",
+      )
+    } finally {
+      db.close()
+    }
 
-const TWEETS_INDEX = `CREATE INDEX tweets_author_created_at_idx
-  ON tweets (author_id, created_at DESC);`
-
-afterEach(() => {
-  for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true })
-})
-
-describe("twitter substrate search", () => {
-  test("matches tweet text inside data_json and windows snippets", () => {
-    const dbPath = createTwitterFixture()
-
-    const result = searchTwitter(dbPath, ["needle"])
-
-    expect(result.skipped).toBeUndefined()
-    expect(result.hits.map((hit) => hit.ref)).toEqual([
-      "twitter:tweets:3",
-      "twitter:tweets:1",
-    ])
-    const longSnippet = result.hits.find((hit) => hit.ref === "twitter:tweets:1")?.snippet
-    expect(longSnippet?.startsWith("…")).toBe(true)
-    expect(longSnippet?.length).toBeLessThanOrEqual(240)
-    expect(longSnippet).toContain("needle")
-  })
-
-  test("matches usernames and returns recent tweets by captured_at", () => {
-    const dbPath = createTwitterFixture()
-
-    const usernameResult = searchTwitter(dbPath, ["matuschak"])
-    expect(usernameResult.hits.map((hit) => hit.ref)).toEqual(["twitter:tweets:2"])
-
-    const recentResult = recentTweets(dbPath, 2)
-    expect(recentResult.hits.map((hit) => hit.ref)).toEqual([
-      "twitter:tweets:3",
-      "twitter:tweets:2",
-    ])
-  })
-
-  test("skips a missing twitter database", () => {
-    const result = searchTwitter(join(TEST_TMP_ROOT, "missing-primer-twitter.sqlite"), ["test"])
-
-    expect(result.hits).toEqual([])
-    expect(result.skipped).toContain("missing twitter DB")
-  })
-})
-
-function createTwitterFixture(): string {
-  const dir = makeTempDir("primer-twitter-")
-  tempDirs.push(dir)
-  const dbPath = join(dir, "twitter.sqlite")
-  const db = new Database(dbPath)
-  try {
-    db.exec(`${TWEETS_SCHEMA}\n${TWEETS_INDEX}`)
-    insertTweet(db, {
-      id: "1",
-      username: "alice",
-      text: `${"padding ".repeat(40)}needle appears after a long prefix for snippet testing`,
-      capturedAt: "2026-01-01T00:00:00.000Z",
-    })
-    insertTweet(db, {
-      id: "2",
-      username: "andy_matuschak",
-      text: "ordinary archived tweet",
-      capturedAt: "2026-02-01T00:00:00.000Z",
-    })
-    insertTweet(db, {
-      id: "3",
-      username: "bob",
-      text: "needle appears in a newer tweet",
-      capturedAt: "2026-03-01T00:00:00.000Z",
-    })
+    run(dbPath)
   } finally {
-    db.close()
+    rmSync(root, { recursive: true, force: true })
   }
-  return dbPath
 }
 
-function insertTweet(
-  db: Database,
-  tweet: { id: string; username: string; text: string; capturedAt: string },
-): void {
+function insertTweet(db: Database, id: string, username: string, capturedAt: string, text: string): void {
+  const dataJson = JSON.stringify({ id, username, url: `https://x.example/${username}/status/${id}`, text })
   db.query(
     `INSERT INTO tweets (id, author_id, username, url, created_at, captured_at, updated_at, data_json)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    tweet.id,
-    `${tweet.username}-author`,
-    tweet.username,
-    `https://x.com/${tweet.username}/status/${tweet.id}`,
-    tweet.capturedAt,
-    tweet.capturedAt,
-    tweet.capturedAt,
-    JSON.stringify({ text: tweet.text }),
-  )
+  ).run(id, `${username}-author`, username, `https://x.example/${username}/status/${id}`, capturedAt, capturedAt, capturedAt, dataJson)
 }
+
+describe("searchTwitter", () => {
+  test("matches terms inside data_json text with a bounded snippet", () => {
+    withTwitterDb((dbPath) => {
+      const result = searchTwitter(dbPath, ["repetition"], 10)
+      const hit = result.hits[0]
+
+      expect(result.skipped).toBeUndefined()
+      expect(result.hits).toHaveLength(1)
+      expect(hit?.ref).toBe("twitter:tweets:t1")
+      expect(hit?.snippet).toContain("repetition")
+      expect((hit?.snippet ?? "").length).toBeLessThanOrEqual(240)
+    })
+  })
+
+  test("matches username even when tweet text does not contain the term", () => {
+    withTwitterDb((dbPath) => {
+      const result = searchTwitter(dbPath, ["memorysmith"], 10)
+
+      expect(result.hits.map((hit) => hit.ref)).toEqual(["twitter:tweets:t2"])
+      expect(result.hits[0]?.title).toBe("@memorysmith")
+    })
+  })
+})

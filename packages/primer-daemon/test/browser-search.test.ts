@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Database } from "bun:sqlite"
 
@@ -7,16 +8,9 @@ import { searchBrowser } from "../src/substrate/browser"
 
 const TAB_ENTRY_OLD_MS = 1_700_000_000_000
 const EVENT_NEW_MS = 1_700_003_600_000
-const TEST_TMP_ROOT = new URL(".tmp/", import.meta.url).pathname
-
-function makeTempDir(prefix: string): string {
-  mkdirSync(TEST_TMP_ROOT, { recursive: true })
-  return mkdtempSync(join(TEST_TMP_ROOT, prefix))
-}
-
 
 function withBrowserDb(run: (dbPath: string) => void): void {
-  const root = makeTempDir("primer-browser-search-")
+  const root = mkdtempSync(join(tmpdir(), "primer-browser-search-"))
   try {
     const dbPath = join(root, "browser_context.sqlite")
     const db = new Database(dbPath)
@@ -62,7 +56,6 @@ CREATE TABLE events (
       db.query(
         "INSERT INTO tab_entries (id, tab_id, entry_index, url, title, last_accessed) VALUES (?, ?, ?, ?, ?, ?)",
       ).run(4, 4, 0, "https://dedupe.example/spaced", "Spaced Repetition older", TAB_ENTRY_OLD_MS)
-
       db.query(
         "INSERT INTO events (id, event_type, observed_at, browser, url, title) VALUES (?, ?, ?, ?, ?, ?)",
       ).run(10, "tab_updated", EVENT_NEW_MS, "firefox", "https://dedupe.example/spaced", "Spaced Repetition newer")
@@ -93,7 +86,6 @@ describe("searchBrowser", () => {
       expect(result.skipped).toBeUndefined()
       expect(result.hits.map((hit) => hit.ref)).toEqual(["browser:tab_entries:1"])
       expect(result.hits[0]?.title).toBe("Vector Memory Index")
-
       expect(searchBrowser(dbPath, ["vector", "absent"], { limit: 10 }).hits).toHaveLength(0)
     })
   })

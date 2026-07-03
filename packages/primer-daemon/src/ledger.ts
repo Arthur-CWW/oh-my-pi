@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs"
+import { existsSync, mkdirSync } from "node:fs"
 import { dirname } from "node:path"
 import { Database } from "bun:sqlite"
 import { Schema } from "effect"
@@ -14,6 +14,15 @@ export interface CardInput {
   back: string
   sourceRef?: string
   url?: string
+}
+
+export type CardStatus = "candidate" | "approved" | "rejected"
+
+export interface ProgressInput {
+  kind: string
+  title: string
+  body?: string
+  refs?: string[]
 }
 
 export interface NoteSourceRow {
@@ -37,12 +46,23 @@ export interface CardRow {
   back: string
   sourceRef: string | null
   url: string | null
-  status: string
+  status: CardStatus
+  createdAt: string
+}
+
+export interface ProgressRow {
+  id: number
+  kind: string
+  title: string
+  body: string | null
+  refs: string[]
   createdAt: string
 }
 
 const PositiveInteger = Schema.Number.check(Schema.isFinite(), Schema.isInt(), Schema.isGreaterThanOrEqualTo(1))
 const NullableString = Schema.NullOr(Schema.String)
+const CardStatusSchema = Schema.Union([Schema.Literal("candidate"), Schema.Literal("approved"), Schema.Literal("rejected")])
+const StringArraySchema = Schema.Array(Schema.String)
 
 const RawNoteRowSchema = Schema.Struct({
   id: PositiveInteger,
@@ -69,17 +89,29 @@ const RawCardRowSchema = Schema.Struct({
   back: Schema.String,
   source_ref: NullableString,
   url: NullableString,
-  status: Schema.String,
+  status: CardStatusSchema,
   created_at: Schema.String,
 })
 
 type RawCardRow = Schema.Schema.Type<typeof RawCardRowSchema>
+
+const RawProgressRowSchema = Schema.Struct({
+  id: PositiveInteger,
+  kind: Schema.String,
+  title: Schema.String,
+  body: NullableString,
+  refs_json: Schema.String,
+  created_at: Schema.String,
+})
+
+type RawProgressRow = Schema.Schema.Type<typeof RawProgressRowSchema>
 type NoRows = Record<string, never>
 
 const DEFAULT_LIMIT = 20
+const DEFAULT_PROGRESS_LIMIT = 100
 
 export function openLedger(path: string): Database {
-  mkdirSync(dirname(path), { recursive: true })
+  if (!existsSync(dirname(path))) mkdirSync(dirname(path), { recursive: true })
   const db = new Database(path)
   db.exec("PRAGMA foreign_keys = ON")
   db.exec(`
@@ -103,6 +135,14 @@ CREATE TABLE IF NOT EXISTS card_candidates (
   source_ref TEXT,
   url TEXT,
   status TEXT NOT NULL DEFAULT 'candidate',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS progress (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind TEXT NOT NULL,
+  title TEXT NOT NULL,
+  body TEXT,
+  refs_json TEXT NOT NULL DEFAULT '[]',
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 `)
@@ -186,17 +226,80 @@ export function listCards(db: Database, limit = DEFAULT_LIMIT): CardRow[] {
        LIMIT ?`,
     )
     .all(normalizedLimit)
-    .map((row) => {
-      const card = Schema.decodeUnknownSync(RawCardRowSchema)(row)
-      return {
-        id: card.id,
-        front: card.front,
-        back: card.back,
-        sourceRef: card.source_ref,
-        url: card.url,
-        status: card.status,
-        createdAt: card.created_at,
-      }
-    })
+    .map((row) => decodeCardRow(row))
+}
+
+export function setCardStatus(db: Database, id: number, status: CardStatus): CardRow | null {
+  const result = db
+    .query<NoRows, [CardStatus, number]>(
+      `UPDATE card_candidates
+       SET status = ?
+       WHERE id = ?`,
+    )
+    .run(status, id)
+  if (result.changes === 0) return null
+
+  const row = db
+    .query<RawCardRow, [number]>(
+      `SELECT id, front, back, source_ref, url, status, created_at
+       FROM card_candidates
+       WHERE id = ?`,
+    )
+    .get(id)
+  if (row === null) throw new Error("updated card could not be reloaded")
+  return decodeCardRow(row)
+}
+
+export function addProgress(db: Database, input: ProgressInput): ProgressRow {
+  const refsJson = JSON.stringify(input.refs ?? []) ?? "[]"
+  const row = db
+    .query<RawProgressRow, [string, string, string | null, string]>(
+      `INSERT INTO progress (kind, title, body, refs_json)
+       VALUES (?, ?, ?, ?)
+       RETURNING id, kind, title, body, refs_json, created_at`,
+    )
+    .get(input.kind, input.title, input.body ?? null, refsJson)
+  if (row === null) throw new Error("progress insert did not return a row")
+  return decodeProgressRow(row)
+}
+
+export function listProgress(db: Database, limit = DEFAULT_PROGRESS_LIMIT): ProgressRow[] {
+  const normalizedLimit = Number.isFinite(limit) && limit > 0 ? Math.trunc(limit) : DEFAULT_PROGRESS_LIMIT
+  return db
+    .query<RawProgressRow, [number]>(
+      `SELECT id, kind, title, body, refs_json, created_at
+       FROM progress
+       ORDER BY datetime(created_at) DESC, id DESC
+       LIMIT ?`,
+    )
+    .all(normalizedLimit)
+    .map((row) => decodeProgressRow(row))
+}
+
+function decodeCardRow(row: RawCardRow): CardRow {
+  const card = Schema.decodeUnknownSync(RawCardRowSchema)(row)
+  return {
+    id: card.id,
+    front: card.front,
+    back: card.back,
+    sourceRef: card.source_ref,
+    url: card.url,
+    status: card.status,
+    createdAt: card.created_at,
+  }
+}
+
+function decodeProgressRow(row: RawProgressRow): ProgressRow {
+  const progress = Schema.decodeUnknownSync(RawProgressRowSchema)(row)
+  const parsedRefs: unknown = JSON.parse(progress.refs_json)
+  const refs = [...Schema.decodeUnknownSync(StringArraySchema)(parsedRefs)]
+  return {
+    id: progress.id,
+    kind: progress.kind,
+    title: progress.title,
+    body: progress.body,
+    refs,
+    createdAt: progress.created_at,
+  }
 }
 

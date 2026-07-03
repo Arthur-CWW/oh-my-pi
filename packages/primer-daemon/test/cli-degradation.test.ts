@@ -1,21 +1,15 @@
 import { describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { searchBrowser } from "../src/substrate/browser"
 import { searchReader } from "../src/substrate/reader"
 import { searchTwitter } from "../src/substrate/twitter"
-const TEST_TMP_ROOT = new URL(".tmp/", import.meta.url).pathname
-
-function makeTempDir(prefix: string): string {
-  mkdirSync(TEST_TMP_ROOT, { recursive: true })
-  return mkdtempSync(join(TEST_TMP_ROOT, prefix))
-}
-
 
 describe("substrate missing-file degradation", () => {
   test("returns empty hits and skip details instead of throwing", () => {
-    const root = makeTempDir("primer-missing-substrate-")
+    const root = mkdtempSync(join(tmpdir(), "primer-missing-substrate-"))
     try {
       const missingBrowser = join(root, "missing-browser.sqlite")
       const missingTwitter = join(root, "missing-twitter.sqlite")

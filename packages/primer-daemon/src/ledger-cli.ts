@@ -1,5 +1,5 @@
 import type { DaemonPaths } from "./paths"
-import { addCard, addNote, listCards, listNotes, openLedger, type CardInput, type NoteInput } from "./ledger"
+import { addCard, addNote, addProgress, listCards, listNotes, listProgress, openLedger, type CardInput, type NoteInput, type ProgressInput } from "./ledger"
 
 type FlagValue = string | boolean | string[]
 
@@ -14,12 +14,17 @@ const NOTE_LIST_USAGE = "Usage: primer note list [--limit N] [--json]"
 const CARD_COMMAND_USAGE = "Usage: primer card <add|list> [options]"
 const CARD_ADD_USAGE = "Usage: primer card add --front F --back B [--source-ref R] [--url U]"
 const CARD_LIST_USAGE = "Usage: primer card list [--limit N] [--json]"
+const PROGRESS_COMMAND_USAGE = "Usage: primer progress <add|list> [options]"
+const PROGRESS_ADD_USAGE = "Usage: primer progress add --kind K --title T [--body B] [--ref R]..."
+const PROGRESS_LIST_USAGE = "Usage: primer progress list [--limit N] [--json]"
 const DEFAULT_LIMIT = 20
 
 const NOTE_ADD_FLAGS: Record<string, true> = { question: true, body: true, source: true }
 const NOTE_LIST_FLAGS: Record<string, true> = { limit: true, json: true }
 const CARD_ADD_FLAGS: Record<string, true> = { front: true, back: true, "source-ref": true, url: true }
 const CARD_LIST_FLAGS: Record<string, true> = { limit: true, json: true }
+const PROGRESS_ADD_FLAGS: Record<string, true> = { kind: true, title: true, body: true, ref: true }
+const PROGRESS_LIST_FLAGS: Record<string, true> = { limit: true, json: true }
 
 export async function runNoteCommand(argv: string[], paths: DaemonPaths): Promise<number> {
   const parsed = parseArgs(argv)
@@ -160,6 +165,81 @@ export async function runCardCommand(argv: string[], paths: DaemonPaths): Promis
   }
 
   process.stderr.write(`${CARD_COMMAND_USAGE}\n`)
+  return 2
+}
+
+export async function runProgressCommand(argv: string[], paths: DaemonPaths): Promise<number> {
+  const parsed = parseArgs(argv)
+  const subcommand = parsed.positionals[0]
+  if (subcommand === "add") {
+    if (parsed.positionals.length !== 1 || !hasOnlyAllowedFlags(parsed.flags, PROGRESS_ADD_FLAGS)) {
+      process.stderr.write(`${PROGRESS_ADD_USAGE}\n`)
+      return 2
+    }
+
+    const kindValue = parsed.flags.kind
+    const titleValue = parsed.flags.title
+    const bodyValue = parsed.flags.body
+    if (
+      typeof kindValue !== "string" ||
+      typeof titleValue !== "string" ||
+      (bodyValue !== undefined && typeof bodyValue !== "string")
+    ) {
+      process.stderr.write(`${PROGRESS_ADD_USAGE}\n`)
+      return 2
+    }
+
+    const refs = repeatedStringFlag(parsed.flags.ref)
+    if (refs === null) {
+      process.stderr.write(`${PROGRESS_ADD_USAGE}\n`)
+      return 2
+    }
+
+    const input: ProgressInput = { kind: kindValue, title: titleValue }
+    if (typeof bodyValue === "string") input.body = bodyValue
+    if (refs.length > 0) input.refs = refs
+
+    const db = openLedger(paths.ledgerDb)
+    try {
+      const row = addProgress(db, input)
+      process.stdout.write(`progress ${row.id}\n`)
+      return 0
+    } finally {
+      db.close()
+    }
+  }
+
+  if (subcommand === "list") {
+    if (parsed.positionals.length !== 1 || !hasOnlyAllowedFlags(parsed.flags, PROGRESS_LIST_FLAGS) || (parsed.flags.json !== undefined && parsed.flags.json !== true)) {
+      process.stderr.write(`${PROGRESS_LIST_USAGE}\n`)
+      return 2
+    }
+
+    const limit = parseLimitFlag(parsed.flags.limit)
+    if (limit === null) {
+      process.stderr.write(`${PROGRESS_LIST_USAGE}\n`)
+      return 2
+    }
+
+    const db = openLedger(paths.ledgerDb)
+    try {
+      const rows = listProgress(db, limit)
+      if (parsed.flags.json === true) {
+        process.stdout.write(`${JSON.stringify(rows, null, 2)}\n`)
+        return 0
+      }
+      for (const row of rows) {
+        const body = row.body === null ? "" : ` — ${row.body}`
+        const refs = row.refs.length === 0 ? "" : ` (${row.refs.join(", ")})`
+        process.stdout.write(`#${row.id} [${row.kind}] ${row.title}${body}${refs}\n`)
+      }
+      return 0
+    } finally {
+      db.close()
+    }
+  }
+
+  process.stderr.write(`${PROGRESS_COMMAND_USAGE}\n`)
   return 2
 }
 
