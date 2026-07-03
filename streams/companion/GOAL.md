@@ -13,12 +13,12 @@ Explore AI-companion **form factors**, not one app. Realtime voice-to-avatar (An
 - Avatar layer hot-swappable (audio-only / Live2D / VRM are skins, not forks).
 - Behavioral references only — never copied assets from Grok/LADS/VTubers.
 
-## Open questions (answer before committing architecture)
+## Settled questions (Arthur interview, 2026-07-03)
 
-- Latency floor: what round-trip actually breaks intimacy? (sub-500ms vs ~1.5s + good turn-taking)
-- Hard-local inference/TTS, or cloud voice behind a local presence layer?
-- Is audio-only ASMR-presence an acceptable v1 milestone (no face)?
-- Day-1 memory: episodic recall vs persona/vibe continuity?
+- **Latency floor: exploratory — build to *experience* both regimes.** Sub-500ms ideal for conversational scenes, but the deeper answer is **scene modes as a first-class axis**: *conversational* (live, latency-critical) vs *cinematic* (pre-rendered / background-generated intimate vignettes, Love-and-Deepspace register, low interactivity — the offline `spatial-audio-renderer` feeds this lane). Track the quality/latency/cost pareto frontier per voice engine; never lock into the small-model route — voice engines are hot-swappable experiences, and pre-rendering is a legitimate latency weapon.
+- **Inference locality: local-first for now** (dev speed), everything behind adapters; may change later. Iterate fast, nothing set in stone. The *data* stays local regardless (fixed above).
+- **Audio-only v1: yes** — the ear is the wedge.
+- **Day-1 memory: leaning persona/vibe continuity**, but interchangeable — memory behind an adapter too. Decide by feel once the loop exists.
 
 ## First goal
 
