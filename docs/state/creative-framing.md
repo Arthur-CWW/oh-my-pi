@@ -22,7 +22,7 @@ Coleridge's *Kubla Khan* plus Ted Nelson's Project Xanadu — one name that alre
 
 ## Coordinates, honestly named
 
-- **Hyperhuman × acceleration, positive valence.** The quadrant is right; the doom is optional. Keep Land as a coordinate — intensity, machinic desire, "nothing human makes it out" as a *dare* rather than a verdict — and take the positive pole from Pearce's paradise engineering.
+- **Cyberpositive, not doomer Land.** The "white-pilled Land" Arthur keeps reaching for already exists — Land named it himself: *Cyberpositive* (Plant & Land, 1994). Early CCRU writing is ecstatic, not pessimistic: runaway positive feedback as rave, not warning. The doom is the later crust. We keep the early register — intensity, machinic desire, acceleration as *jouissance* — and pair it with Pearce's paradise engineering as the explicit positive pole. Related CCRU tool we use daily: **hyperstition** — fictions that make themselves real. Xanadu is a hyperstition run on purpose; "these sci-fi concepts are instantiable now" is the whole method.
 - **Positive wireheading, said plainly.** The companion and the playground are pleasure-tech. Not "engagement," not "retention" — delight, intimacy, aesthetic overwhelm. Building it honestly means building it *well*: local-first, yours, auditable, tuned to one person rather than extractive at scale.
 - **Hedonism with craft.** The difference between wireheading and Xanadu is architecture. A dopamine drip has no structure; a pleasure-dome has load-bearing walls, caves of ice, a river running through it. Layered, remixable, cacheable media; a companion with memory and latency budgets; an archive with provenance. Craft is what makes the pleasure durable.
 
@@ -32,8 +32,9 @@ Neighboring concepts, and where Xanadu sits among them:
 
 - **Dead internet theory → heavenbanning.** The pessimistic read: everything online is bots. The optimistic inversion (heavenbanning): being surrounded by tireless synthetic minds tuned to you is *paradise* if they're yours, local, and honest about what they are. Xanadu is heavenbanning with consent and craft — a private internet that loves you back.
 - **Pleometric's remix-evolution thesis.** Shortform media evolves like porn did: fastest-mutating medium wins; creativity emerges from infinite remixes under a selection function (the recommendation algorithm as taste, tongue firmly in cheek). We adopt the *mechanism* and swap the selector: instead of an engagement algorithm, a taste function seeded by Arthur's golden picks and scaled by agents. Same evolutionary engine, different fitness landscape.
-- **Borges' Library of Babel.** The infinite library already contains every remix; the library is worthless without a librarian. Babble is cheap — the whole value is the selection function. This is why annotation, ranking, and the prune surface are first-class product features, not afterthoughts.
+- **The Library of Babble** (Borges × TikTok). Borges' Library contained every possible book and was hell — men dying in hexagons, no working librarian, the catalog itself lost in the stacks. The recommendation algorithm is history's first *working* Librarian of Babel — but it serves the house, not the reader. Our move: the same infinite shelves (generative babble — one letter off from Babel, and the name contains the method), with a librarian who serves *you*, calibrated by golden picks. Pierre Menard is the other Borges key: authorship *is* remix — rewriting the Quixote word-for-word is a new work. The infinite layer of creation of revealed preferences: make what people demonstrably love, selected by a taste function you own.
 - **Stephenson's Primer.** The sci-fi tutor is instantiable *now* — most of these futurism concepts are; the constraint is ambition, not technology. That conviction is the mood of the whole workspace.
+- **Funes the Memorious — the Primer's warning.** Borges' Funes remembers everything and understands nothing; perfect recall without abstraction is paralysis. Arthur's version: reading without memorization isn't accretive, "it's just vibes" — but the answer isn't raw recall, it's *structured* memory: SRS, annotation, compression into concepts. The Primer memorizes so that engagement deepens, never as an end in itself.
 
 ## Closeness through the ear
 
@@ -42,6 +43,12 @@ ASMR is wildly popular and almost untouched by AI-companion work — that mismat
 - Spatial/3D audio is a first-class companion capability, not a post-effect (`packages/spatial-audio-renderer` exists for this).
 - The sound of *touching things* matters as much as speech: object foley, mic interaction, environmental gesture.
 - Avatar form factors (VRM/VTuber, Live2D, audio-only) are hot-swappable bodies over the same presence layer.
+
+## The dæmon
+
+The browser-history muse — the thing Arthur described as "like a JoJo stand" — has an exact literary name: the **dæmon**, in both senses at once. Pullman's dæmon: the external soul that walks beside you, made of what you are. Unix daemon: a background process, always running, never in the way. And the strict classical grounding: the Muses are daughters of **Mnemosyne** — Memory — so a muse built from your reading history isn't a metaphor, it's the literal genealogy. Socrates called his the *daimonion*: the quiet voice that accompanies.
+
+Concretely: serialize Firefox/Chrome history, Tree Style Tab trees, and attention events into a queryable substrate (the `browser-context-sync` lane), and let agents ride it — your dæmon is the part of the harness that has *read everything you've read*. It feeds the Primer (what to memorize), the playground (what you found beautiful), and the companion (who you are).
 
 ## What this implies for the work
 
