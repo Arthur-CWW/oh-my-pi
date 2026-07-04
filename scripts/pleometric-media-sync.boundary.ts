@@ -1,24 +1,23 @@
 #!/usr/bin/env bun
 /**
- * Public Pleometric media corpus sync.
+ * Public Nitter media corpus sync.
  *
- * Respectful defaults: public Nitter only, concurrency 1, 1-3s jitter, hard cap 60 video/GIF items.
+ * Respectful defaults: public Nitter only, concurrency 1, 1-3s jitter, hard cap 150 video/GIF items.
  */
 import { Database } from "bun:sqlite"
-import { existsSync, mkdirSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, extname, join, relative, resolve } from "node:path"
 
-const HANDLE = "pleometric"
+const DEFAULT_HANDLE = "pleometric"
 const SCHEMA_VERSION = "pleometric-corpus.v1" as const
 const DEFAULT_BASE_URL = "https://nitter.tiekoetter.com"
-const DEFAULT_DATA_DIR = "data/inspiration/pleometric"
-const DEFAULT_REPORT_DIR = "workflows/scene-lab/reports/2026-07-03-pleometric-corpus"
 const DEFAULT_DB_PATH = "data/twitter-archive/twitter-archive.sqlite"
 const MAX_ITEMS = 150
 const MAX_PAGES = 25
 const USER_AGENT = "curl/8.0"
 
 interface Args {
+  handle: string
   baseUrl: string
   dataDir: string
   reportDir: string
@@ -66,7 +65,7 @@ interface SyncReport {
   archiveSqlite: { path: string; pleometricMediaRows: number; pleometricVideoGifRows: number }
   fetch: { baseUrl: string; pagesFetched: number; stopReason: string; walls: string[] }
   files: { manifest: string; contactSheet: string; dataDir: string }
-  counts: { items: number; filesOnDisk: number }
+  counts: { items: number; existingAtStart: number; newItems: number; filesOnDisk: number }
   dateRange?: { earliest: string; latest: string }
 }
 
@@ -74,19 +73,24 @@ async function main(argv: string[]): Promise<void> {
   const args = parseArgs(argv)
   const dataDir = resolve(args.dataDir)
   const reportDir = resolve(args.reportDir)
+  const manifestPath = join(dataDir, "manifest.json")
   mkdirSync(dataDir, { recursive: true })
   mkdirSync(reportDir, { recursive: true })
 
-  const tools = await probeTools(["yt-dlp", "gallery-dl", "ffmpeg", "ffprobe"])
-  const archiveSqlite = queryLocalArchive(args.dbPath)
-
-  const manifestItems: ManifestItem[] = []
+  const existingManifest = loadExistingManifest(manifestPath)
+  const startingItemCount = existingManifest?.items.length ?? 0
+  const manifestItems = existingManifest ? [...existingManifest.items] : []
   const seenSourceUrls = new Set<string>()
   const mediaOrdinalByTweet = new Map<string, number>()
+  seedResumeState(manifestItems, seenSourceUrls, mediaOrdinalByTweet)
+
+  const tools = await probeTools(["yt-dlp", "gallery-dl", "ffmpeg", "ffprobe"])
+  const archiveSqlite = queryLocalArchive(args.dbPath, args.handle)
+
   let pagesFetched = 0
   let stopReason = "max-pages"
   const walls: string[] = []
-  let nextUrl: string | undefined = `${trimSlash(args.baseUrl)}/${HANDLE}/media?view=timeline`
+  let nextUrl: string | undefined = `${trimSlash(args.baseUrl)}/${args.handle}/media?view=timeline`
 
   for (let page = 0; page < args.maxPages && manifestItems.length < args.maxItems && nextUrl; page += 1) {
     const response = await fetch(nextUrl, { headers: { accept: "text/html,application/xhtml+xml", "user-agent": USER_AGENT } })
@@ -109,7 +113,7 @@ async function main(argv: string[]): Promise<void> {
       break
     }
 
-    for (const media of extractPrimaryVideoItems(body)) {
+    for (const media of extractPrimaryVideoItems(body, args.handle)) {
       if (manifestItems.length >= args.maxItems) break
       if (seenSourceUrls.has(media.sourceUrl)) continue
       seenSourceUrls.add(media.sourceUrl)
@@ -132,8 +136,11 @@ async function main(argv: string[]): Promise<void> {
         height: probe.height,
         durationSeconds: probe.durationSeconds,
       })
+      writeManifest(manifestPath, args.handle, manifestItems, startingItemCount)
       if (manifestItems.length < args.maxItems) await sleep(jitterMs())
     }
+
+    writeManifest(manifestPath, args.handle, manifestItems, startingItemCount)
 
     const cursorUrl = extractNextCursorUrl(body, args.baseUrl, nextUrl)
     if (!cursorUrl) {
@@ -145,17 +152,9 @@ async function main(argv: string[]): Promise<void> {
   }
 
   if (manifestItems.length >= args.maxItems) stopReason = "max-items"
+  writeManifest(manifestPath, args.handle, manifestItems, startingItemCount)
 
-  const manifest: Manifest = {
-    schemaVersion: SCHEMA_VERSION,
-    handle: HANDLE,
-    generatedAt: new Date().toISOString(),
-    items: manifestItems,
-  }
-  const manifestPath = join(dataDir, "manifest.json")
-  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
-
-  const contactSheetPath = join(reportDir, "pleometric-contact-sheet.png")
+  const contactSheetPath = join(reportDir, `${args.handle}-contact-sheet.png`)
   if (manifestItems.length > 0) {
     await buildContactSheet(manifestItems.slice(0, 24), dataDir, reportDir, contactSheetPath)
   }
@@ -171,7 +170,7 @@ async function main(argv: string[]): Promise<void> {
       contactSheet: relative(process.cwd(), contactSheetPath),
       dataDir: relative(process.cwd(), dataDir),
     },
-    counts: { items: manifestItems.length, filesOnDisk: manifestItems.length + 1 },
+    counts: { items: manifestItems.length, existingAtStart: startingItemCount, newItems: manifestItems.length - startingItemCount, filesOnDisk: manifestItems.length + 1 },
     dateRange: dateRange(manifestItems),
   }
   writeFileSync(join(reportDir, "sync-summary.json"), `${JSON.stringify(report, null, 2)}\n`)
@@ -179,10 +178,11 @@ async function main(argv: string[]): Promise<void> {
 }
 
 function parseArgs(argv: string[]): Args {
-  const args: Args = {
+  let handle = DEFAULT_HANDLE
+  let dataDir: string | undefined
+  let reportDir: string | undefined
+  const args = {
     baseUrl: DEFAULT_BASE_URL,
-    dataDir: DEFAULT_DATA_DIR,
-    reportDir: DEFAULT_REPORT_DIR,
     dbPath: DEFAULT_DB_PATH,
     maxItems: MAX_ITEMS,
     maxPages: MAX_PAGES,
@@ -191,6 +191,11 @@ function parseArgs(argv: string[]): Args {
     const flag = argv[i]
     const value = argv[i + 1]
     switch (flag) {
+      case "--handle":
+        if (!value) throw new Error("--handle requires a value")
+        handle = validHandle(value)
+        i += 1
+        break
       case "--base-url":
         if (!value) throw new Error("--base-url requires a value")
         args.baseUrl = value
@@ -198,12 +203,12 @@ function parseArgs(argv: string[]): Args {
         break
       case "--data-dir":
         if (!value) throw new Error("--data-dir requires a value")
-        args.dataDir = value
+        dataDir = value
         i += 1
         break
       case "--report-dir":
         if (!value) throw new Error("--report-dir requires a value")
-        args.reportDir = value
+        reportDir = value
         i += 1
         break
       case "--db":
@@ -223,13 +228,91 @@ function parseArgs(argv: string[]): Args {
         break
       case "--help":
       case "-h":
-        console.log("Usage: bun scripts/pleometric-media-sync.boundary.ts [--max-items 60] [--max-pages 10]")
+        console.log([
+          "Usage: bun scripts/pleometric-media-sync.boundary.ts [options]",
+          "",
+          "Options:",
+          "  --handle <h>       Nitter/Twitter handle to sync (default: pleometric)",
+          "  --base-url <url>   Public Nitter base URL",
+          "  --data-dir <dir>   Corpus dir (default: data/inspiration/<handle>)",
+          "  --report-dir <dir> Report dir (default: workflows/scene-lab/reports/<YYYY-MM-DD>-<handle>-corpus)",
+          "  --db <path>        Local twitter archive sqlite path",
+          "  --max-items <n>    Total corpus cap after merge (ceiling: 150)",
+          "  --max-pages <n>    Page fetch cap (ceiling: 25)",
+        ].join("\n"))
         process.exit(0)
       default:
         throw new Error(`Unknown argument: ${flag}`)
     }
   }
-  return args
+  return {
+    handle,
+    dataDir: dataDir ?? defaultDataDir(handle),
+    reportDir: reportDir ?? defaultReportDir(handle),
+    ...args,
+  }
+}
+
+function defaultDataDir(handle: string): string {
+  return `data/inspiration/${handle}`
+}
+
+function defaultReportDir(handle: string): string {
+  return `workflows/scene-lab/reports/${todayIsoDate()}-${handle}-corpus`
+}
+
+function todayIsoDate(): string {
+  return new Date().toISOString().slice(0, 10)
+}
+
+function validHandle(value: string): string {
+  if (!/^[A-Za-z0-9_]{1,15}$/.test(value)) throw new Error("--handle must be a Twitter/Nitter handle")
+  return value
+}
+
+function loadExistingManifest(manifestPath: string): Manifest | undefined {
+  if (!existsSync(manifestPath)) return undefined
+  const parsed = JSON.parse(readFileSync(manifestPath, "utf8")) as Partial<Manifest>
+  if (parsed.schemaVersion !== SCHEMA_VERSION) throw new Error(`unsupported manifest schema at ${manifestPath}`)
+  if (typeof parsed.handle !== "string") throw new Error(`manifest handle missing at ${manifestPath}`)
+  if (typeof parsed.generatedAt !== "string") throw new Error(`manifest generatedAt missing at ${manifestPath}`)
+  if (!Array.isArray(parsed.items)) throw new Error(`manifest items missing at ${manifestPath}`)
+  return {
+    schemaVersion: SCHEMA_VERSION,
+    handle: parsed.handle,
+    generatedAt: parsed.generatedAt,
+    items: parsed.items as ManifestItem[],
+  }
+}
+
+function seedResumeState(
+  items: ManifestItem[],
+  seenSourceUrls: Set<string>,
+  mediaOrdinalByTweet: Map<string, number>,
+): void {
+  for (const item of items) {
+    seenSourceUrls.add(item.sourceUrl)
+    const current = mediaOrdinalByTweet.get(item.tweetId) ?? 0
+    mediaOrdinalByTweet.set(item.tweetId, Math.max(current, ordinalFromFile(item.file) ?? current + 1))
+  }
+}
+
+function ordinalFromFile(fileName: string): number | undefined {
+  const value = Number(fileName.match(/-(\d+)\.[^.]+$/)?.[1])
+  return Number.isInteger(value) && value > 0 ? value : undefined
+}
+
+function writeManifest(manifestPath: string, handle: string, items: ManifestItem[], minimumItemCount: number): void {
+  if (items.length < minimumItemCount) {
+    throw new Error(`refusing to shrink manifest from ${minimumItemCount} to ${items.length} items`)
+  }
+  const manifest: Manifest = {
+    schemaVersion: SCHEMA_VERSION,
+    handle,
+    generatedAt: new Date().toISOString(),
+    items,
+  }
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
 }
 
 function positiveInteger(raw: string, name: string): number {
@@ -238,18 +321,18 @@ function positiveInteger(raw: string, name: string): number {
   return value
 }
 
-function queryLocalArchive(dbPath: string): SyncReport["archiveSqlite"] {
+function queryLocalArchive(dbPath: string, handle: string): SyncReport["archiveSqlite"] {
   if (!existsSync(dbPath)) return { path: dbPath, pleometricMediaRows: 0, pleometricVideoGifRows: 0 }
   const db = new Database(dbPath, { readonly: true })
   try {
     const row = db
-      .query<{ mediaRows: number; videoGifRows: number }, []>(
+      .query<{ mediaRows: number; videoGifRows: number }, [string]>(
         `SELECT count(*) AS mediaRows,
           sum(CASE WHEN m.type IN ('video','gif') THEN 1 ELSE 0 END) AS videoGifRows
          FROM tweets t JOIN media m ON m.tweet_id = t.id
-         WHERE lower(t.username) = 'pleometric'`,
+         WHERE lower(t.username) = lower(?)`,
       )
-      .get()
+      .get(handle)
     return { path: dbPath, pleometricMediaRows: row?.mediaRows ?? 0, pleometricVideoGifRows: row?.videoGifRows ?? 0 }
   } finally {
     db.close()
@@ -346,13 +429,16 @@ async function run(argv: string[]): Promise<void> {
   if (code !== 0) throw new Error(`${argv[0]} failed (${code}): ${stderr}`)
 }
 
-function extractPrimaryVideoItems(html: string): RawVideoItem[] {
+function extractPrimaryVideoItems(html: string, handle: string): RawVideoItem[] {
   const items: RawVideoItem[] = []
-  const chunks = html.split(/<div class="timeline-item[^"]*" data-username="pleometric">/)
+  const escapedHandle = escapeRegExp(handle)
+  const escapedLowerHandle = escapeRegExp(handle.toLowerCase())
+  const chunks = html.split(new RegExp(`<div class="timeline-item[^"]*" data-username="${escapedLowerHandle}">`))
+  const statusPattern = new RegExp(`href="/${escapedHandle}/status/(\\d+)#m"`, "i")
   for (let i = 1; i < chunks.length; i += 1) {
     const chunk = chunks[i]
     const primary = chunk.split(/<div class="quote quote-big"|<div class="quote "/)[0] ?? chunk
-    const tweetId = primary.match(/href="\/pleometric\/status\/(\d+)#m"/)?.[1]
+    const tweetId = primary.match(statusPattern)?.[1]
     if (!tweetId) continue
     const date = decodeHtmlEntities(primary.match(/class="tweet-date"><a [^>]*title="([^"]+)"/)?.[1] ?? "")
     const textHtml = primary.match(/<div class="tweet-content media-body"[^>]*>([\s\S]*?)<\/div>/)?.[1] ?? ""
