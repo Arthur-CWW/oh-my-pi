@@ -620,11 +620,21 @@ Local research notes:
 - `docs/research/pi-agent-control-plane/odysseus0z-orchestration-notes.md`
 - `docs/research/pi-agent-control-plane/source-urls.txt`
 
-Reference ideas only:
+Influences (where the ideas came from):
 
-- OpenAI harness engineering: agents use composable code primitives, not only UI/tool wrappers.
-- OpenAI Symphony: work items, isolated workspaces, supervised runners, and dashboard/API separation.
-- Codex app: projects, worktrees, review, parallel threads.
-- Dan Luu, filesystem error handling: rationale for SQLite over ad-hoc durable JSON files.
-- Lopopolo-style archive/GC lifecycle: active state, periodic archive, post-processing/distillation.
-- George / `@odysseus0z` notes on Linear/worker orchestration and overnight ticket throughput.
+- thebes / `@voooooogel` — what survives stronger models: filesystem as the collaboration substrate, spawn + onboarding interview, forking as the primary multi-agent mode (cache-aware, cold now / warm later), transcripts-as-data. Also the Opus-3 cross-instance-reasoning thread: RLVR myopia is why the plane must make past instances queryable (legible memory, succession notes).
+- andrew blinn / `@disconcision` — "multiple agents is a human conceptual affordance": ledger rows are primary; "agent" is a view over rows.
+- xjdr / `@_xjdr` — jj-drafts + sapling-stacks SCM, review/merge as the bottleneck past ~10 sessions, push-to-wake over polling, "intelligence is in the harness". Archived: `docs/research/xjdr/`.
+- Kubernetes / k9s — control plane vs clients; the TUI is a client of the plane, never the truth.
+- Erlang/OTP — supervision trees, hot code swap, distribution; parked as substrate, adopted as requirements (supervised background tasks, hot-swap contract).
+- TigerBeetle — DST plus its simulator viewer: a deterministic event log can be re-rendered as anything, including a game (the 2D-grid view idea).
+- OpenCode — client/server + multi-attach + default tracing; comparison and piecemeal-adoption verdicts in `docs/research/opencode-vs-omp.md`.
+- Replicache / Rocicorp Zero — change-sourcing (WAL/replication tailing) pattern for local-first sync; informs the watch-for-row-change question.
+- Antithesis — full deterministic-simulation testing environment; the scaled-down DST ambition lives in `docs/state/side-quests.md`.
+- Kleppmann, DDIA — log-centric design and derived data: everything but the ledger must be rebuildable from the ledger.
+- OpenAI harness engineering — agents use composable code primitives, not only UI/tool wrappers.
+- OpenAI Symphony — work items, isolated workspaces, supervised runners, dashboard/API separation.
+- Codex app — projects, worktrees, review, parallel threads.
+- Dan Luu, filesystem error handling — rationale for SQLite over ad-hoc durable JSON files.
+- Lopopolo — archive/GC lifecycle: active state, periodic archive, post-processing/distillation.
+- George / `@odysseus0z` — Linear/worker orchestration and overnight ticket throughput.

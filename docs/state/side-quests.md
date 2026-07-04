@@ -1,0 +1,14 @@
+# Side quests
+
+Global ledger of side ideas, hard problems, and niche ambitions — captured so they stop living in rants and can be queued/fleshed out later. Not a task list: entries graduate to TASKS.md or a stream when picked up. Add rows freely; delete only when done or explicitly killed.
+
+| Added | Idea | Notes / trigger | Status |
+|---|---|---|---|
+| 2026-07-04 | **Scaled-down deterministic simulation testing (DST)** | Antithesis-style full DST is overkill; want the cheap 80%: deterministic scheduler + seeded fault injection for state machines and concurrency code specifically (control-plane daemon, message bus, packet claims). Most app code settles for e2e/fuzz. Research dispatched 2026-07-04 → `docs/research/dst-scaled-down.md`. TigerBeetle sim viewer as UX north star. | researching |
+| 2026-07-04 | **Memory setup benchmark** | Benchmark local memory systems for the harness: OMP's shipped `memory.md`/mnemosyne vs hand-rolled distillation vs nothing. Needs telemetry (M1) to score. Constraint: legible/auditable only. Also in friction log. | queued |
+| 2026-07-04 | **One-big-SQLite consolidation** | All the per-service cache/state DBs confuse agents; desire: one DB file, many tables. Honest counterpoint: SQLite is single-writer-per-file — merging write-heavy DBs creates contention and coupling. Middle path: keep per-service files, add a catalog DB + `ATTACH` for cross-DB queries; the control-plane ledger becomes the hub. Turso/libSQL multi-writer noted. Revisit at M1 schema design. | idea |
+| 2026-07-04 | **Wait-on-row / change sourcing over SQLite** | "Block until this row changes" — SQLite has no LISTEN/NOTIFY. Options: `PRAGMA data_version` polling, `update_hook` (in-process only), WAL-tailing (Litestream pattern; Replicache/Rocicorp-Zero do this against Postgres replication). Boring answer for us: the plane daemon owns all writes → in-process PubSub + SSE; DB-level CDC only needed if writers bypass the daemon. Decide at M2 (EventBus). | idea |
+| 2026-07-04 | **Boundary-lint redesign** | Kill `*.boundary.ts` filename convention: check the invariant (`Schema.parseJson`) not the filename; line-level pragmas ratcheted by count; delete glob allowlist. Designed 2026-07-04 (session notes), not executed. One packet when wanted. | designed |
+| 2026-07-04 | **Human harness: Anki/flashcards** | "Fix the human harness later": DDIA PDF → annotations/flashcards extraction pipeline; spaced repetition setup. After agent-harness work stabilizes. | queued |
+| 2026-07-04 | **Commit↔session provenance beyond trailers (jj)** | xjdr's jj-drafts + sapling-stacks is the far end; our v1 is commit trailers + commits table (spec M3). Revisit jj when concurrent-agent commit contention actually bites. | queued |
+| 2026-07-04 | **Fable session tree + resume bugs** | Loved concept, broken behavior (resume fails on some sessions; tree view misbehaves). Needs repro capture at next occurrence — see friction log. | needs repro |
