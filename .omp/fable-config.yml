@@ -1,6 +1,11 @@
 # Fable session overlay.
-# Use with: omp --config ./.omp/fable-config.yml --model <actual-fable-model-id>
-# Do not put the Fable model ID here until it is known; pass it at launch time.
+# Use with: omp --config ./.omp/fable-config.yml
+# Orchestration defaults to Fable MEDIUM (Arthur, 2026-07-03): the orchestrator
+# routes and gates, it doesn't think hard — never default above :medium.
+# Pass --model anthropic/claude-fable-5:high explicitly only when a session
+# genuinely needs it.
+
+model: anthropic/claude-fable-5:medium
 
 modelRoles:
   # GPT-5.5 medium = small/bounded tasks; :high = harder work.

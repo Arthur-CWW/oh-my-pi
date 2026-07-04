@@ -1,6 +1,10 @@
 # Playground stream session overlay.
-# Use with: omp --config ./.omp/playground-config.yml --model <model-id>
+# Use with: omp --config ./.omp/playground-config.yml
 # Starts from ./.omp/fable-config.yml and adds playground-local skills.
+# Orchestration defaults to Fable MEDIUM (Arthur, 2026-07-03) — never default
+# above :medium; pass --model ...:high explicitly only when truly needed.
+
+model: anthropic/claude-fable-5:medium
 
 modelRoles:
   # GPT-5.5 medium = small/bounded tasks; :high = harder work.
