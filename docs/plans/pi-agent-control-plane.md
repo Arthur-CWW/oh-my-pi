@@ -604,8 +604,8 @@ Each milestone must be independently shippable and prove itself with something A
 
 ## Open questions
 
-1. Typed DB choice: `@effect/sql` vs Drizzle-with-Effect-wrapper. Criterion: weaker models must be able to write correct queries against it.
-2. Package location: new `packages/control-plane` vs extending `packages/web-access` cockpit code. Recommendation: new package with cockpit code as donor seams.
+1. ~~Typed DB choice~~ SETTLED 2026-07-04: Drizzle over `bun:sqlite` in thin Effect services; `@effect/sql` rejected (rationale in `docs/plans/control-plane-m1.md`).
+2. ~~Package location~~ SETTLED 2026-07-04: new `packages/control-plane`; cockpit code donor concepts only (`docs/plans/control-plane-m1.md`).
 3. Turso/libSQL trigger: second machine, first remote worker, or another threshold?
 4. Onboarding interview: how much of the thebes-style interview should be formalized vs left emergent?
 
