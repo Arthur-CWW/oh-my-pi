@@ -59,6 +59,12 @@ UI/UX routing (Arthur, 2026-07-03): anything design- or web-facing that is not s
 
 Model A/B practice (Arthur, 2026-07-03): lane assignments are hypotheses, not doctrine. When comparable UI/design tasks come up, occasionally run the same brief on two candidate models (e.g. Opus point-versions, GPT vs Kimi for computer use) and compare on TWO axes: output quality and steerability — how well the orchestrator can control them mid-flight ("they're your hands"). Record verdicts here.
 
+Lane temperaments (Fable, observed 2026-07-03 across ~35 spawns — the packet style each hand needs):
+- **Opus/designer**: give it a TELOS, not a spec ("glanceability IS the product"); it exceeds the brief when the goal is vivid (booted Open Design unprompted, studied five design systems). Directing it is editing, not operating. Over-specified packets waste its range.
+- **GPT-5.5**: a good lathe — total literalism, loud failures, superb pedantic review (found the `javascript:` href blocker). The packet must be COMPLETE: every ambiguity left in becomes a defect returned. Sandbox learned-helplessness is real; expect "please run this for me" and pre-arrange the audit-then-fire protocol.
+- **Kimi**: most inventive under constraint — sandboxed to uselessness, it invented the staged-driver protocol (writes audited scripts for a privileged agent to fire). Needs teardown supervision and explicit wall-clock slicing; verify its instances are actually dead.
+- **Gemini flash (Antigravity)**: capability is not lane-portable — fine as a one-shot (vision role) but spun out agentically (60 requests, zero output) on a two-question task. Use for stateless calls, not loops.
+
 Interaction design defaults (Arthur, 2026-07-03): Arthur is vim-native — every viewer/editor we build gets vim-style keys (j/k lists, modal focus, / filter, ? keymap overlay). Design against dead software (Bret Victor): artifacts stay live, edits give immediate visible feedback, understanding never requires staring at code. SQLite everywhere for state; artifact/workflow edits carry provenance (human vs agent) so human-added entropy is tracked — future: cursor-style prediction of human edits.
 
 ## Subagent contract (packet)
