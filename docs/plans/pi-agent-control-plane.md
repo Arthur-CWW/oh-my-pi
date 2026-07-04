@@ -1,55 +1,26 @@
 # Pi agent control plane / cockpit spec
 
-Status: living draft v0
-Owner: Arthur + Pi
-Scope: local control plane for managing Pi/OMP/Codex-like agent sessions. Two linked workstreams: `control-plane-core` (SQLite/event/session/task ledger plus runner API) and `dream-memory` (delayed evidence/promotion stream). Runtime substrate is chosen by a small vertical spike: reuse existing Rust/TS only if it stays simpler than an Elixir/OTP core. OMP collab is an optional `live attach/watch/steer channel`, never the source of truth.
+Status: spec v1
+Date: 2026-07-04
+Owner: Arthur + Pi/OMP/Codex harness adapters
+Scope: local, harness-agnostic agent control plane for supervising sessions, packets, telemetry, provenance, review, fork, and steer workflows.
+Changelog: v1 replaces v0's runtime spike/Symphony framing with the L0-L4 substrate/control-plane spec, first-class telemetry, provenance, contracts, guardrails, and M1-M4 slices.
 
 ## Why this exists
 
-The current pain is not mainly tmux colors or status-line formatting. The real problem is human attention cost when supervising many concurrent Pi sessions.
+The current pain is not tmux colors or status-line formatting. The real problem is human attention cost when supervising many concurrent agent sessions.
 
 Symptoms:
 
-- too many generic tmux tabs with redundant names
+- too many generic terminal tabs with redundant names
 - poor discoverability of which session is doing what
 - high context-switching cost when monitoring many agents
-- no central live registry of active Pi sessions
+- no central live registry of active Pi/OMP/Codex-like sessions
 - no trustworthy human review surface for each agent run
+- background failures and provider refusals cascade invisibly
+- context-budget tuning is manual and hard to compare
 
-This project aims to turn a pile of tmux tabs into a small local **agent control plane**.
-
-## Core idea
-
-Split the system into three layers:
-
-1. **Publisher extensions** inside each Pi session
-   - publish session metadata and state
-2. **Deterministic control plane**
-   - aggregate cross-process runtime state
-   - own workgroups, roles, and session membership
-3. **Clients**
-   - tmux popup cockpit
-   - orchestrator Pi session
-   - later: richer dashboard or remote status surface
-
-The orchestrator chat/session is **not** the source of truth. It is a client of the control plane.
-
-## Collab reuse boundary
-
-OMP/SymphonyX collaboration features are an optional `live attach/watch/steer channel` across sessions. They are useful for:
-
-- live attach to a running child agent
-- watch progress without owning the session
-- steer or interrupt within the runner's native capabilities
-
-They are explicitly **not**:
-
-- the source of truth for workflow state
-- a registry or database
-- a durable transcript store or task queue
-- a learning store
-
-Durable state lives in the repo-local SQLite/event/session/task ledger. Store only view links/evidence handles/credential references in the ledger by default, never full collab write links.
+This project turns a pile of tabs and session logs into a small local agent control plane.
 
 ## Problem statement
 
@@ -57,32 +28,378 @@ Arthur wants to manage a group of long-running agent sessions in a way that is:
 
 - fast like terminal workflows
 - legible like a GUI
-- scriptable like tmux
-- extensible like Pi extensions
+- scriptable like tmux and CLIs
+- extensible like harness extensions
 - structured enough to support orchestrator and reviewer agents
 
-The system should support:
+The system must support:
 
-- fast switching between many agent sessions
-- grouping sessions into working groups
+- fast switching between many sessions
+- grouping sessions into workgroups and packets
 - seeing current state at a glance
-- opening a deeper human review view for one session
-- eventually supervising orchestrated multi-agent work, not just raw tabs
+- opening a deeper human review view for one session or packet
+- supervising orchestrated multi-agent work, not just raw tabs
+- collecting telemetry that can answer whether a model, prompt, or context mix is working
 
 ## Key design insight
 
-The horizontal tmux status line is a **summary surface**, not the control plane.
-
-The real control plane should live in a structured vertical/searchable UI.
+The horizontal terminal status line is a summary surface, not the control plane.
 
 ```txt
-status line  = tiny, stable, glanceable
-popup cockpit = searchable, grouped, navigable, previewable
-review mode   = inspect one session deeply
-orchestrator  = natural-language manager over the same runtime state
+status line       = tiny, stable, glanceable
+TUI board         = searchable, grouped, navigable, previewable
+HTML review       = deep log/session/artifact viewer
+orchestrator      = natural-language client over the same runtime state
+SQLite/event log  = source of durable truth
 ```
 
-## Work routing quadrant
+The orchestrator chat/session is not the source of truth. It is a client of the plane.
+
+## Vocabulary and layer model
+
+Vocabulary:
+
+- **session**: a harness process or run, such as OMP, Pi, Codex, or a shell-backed worker.
+- **agent**: a context/persona inside a session. Stable ids and personas are handles, not the durable truth by themselves.
+- **plane**: daemon plus ledger substrate that owns durable rows and contracts.
+- **operator**: human or LLM client that manages work through the plane.
+- **view**: dumb client over the plane, such as TUI, HTML viewer, CLI, or HTTP/SSE consumer.
+- **packet**: a work contract: assignment, ownership paths, lane/model, acceptance, non-goals, budget.
+- **branch**: a node in a session tree, created by fork, resume, model swap, or context variant.
+
+Ledger rows are primary: session, branch, turn, event, artifact, packet, model call, commit. "Agent" and "workgroup" are views over those rows.
+
+| Layer | Name | Responsibilities | Authority rule |
+|---|---|---|---|
+| L4 | views/operators | k9s-style TUI, HTML viewers, 2D-grid experiments, LLM operator sessions | Read/write only through L2/L3 APIs. No private truth. |
+| L3 | control plane | work items, packets, routing, supervision, fallback policy, spawn/fork/hot-swap orchestration | Clients of L2. Owns policy decisions, not raw persistence. |
+| L2 | substrate | event ledger, telemetry, message bus, artifact/context store, provenance index | Durable, harness-agnostic, library + CLI with `--json`, importable from TypeScript and Python. |
+| L1 | session harness | OMP daily driver, Pi, Codex, shell/PTY runners | Publishers/clients of L2, never authorities. |
+| L0 | models/providers | model APIs, kv-cache, provider-gated warm forking | Capabilities exposed upward; no control-plane state. |
+
+## Settled decisions (2026-07-04)
+
+| Decision | Spec |
+|---|---|
+| Runtime | Bun + Effect v4. Effect Schema at every boundary, TaggedErrorClass errors, Effect CLI. No OMP rewrite; the plane is new code beside the harnesses. |
+| Storage | SQLite on one machine. SQLite is the local durable cache/index; archive tier is files. libSQL/Turso is the multi-machine escape hatch. Prefer per-machine daemon + HTTP federation over replicated writes when a second machine joins. |
+| Typed DB access | OPEN: evaluate `@effect/sql` vs Drizzle-with-Effect-wrapper. Criterion: weaker models such as Kimi must be able to write correct queries against it. Recommendation for first slice: choose the boring option that yields clearer generated types and simpler examples, then document the rejected option. |
+| Harness stance | Harness-agnostic by construction. OMP stays daily driver; `pi --mode rpc` and `codex app-server` adapters are first-class. Harness choice must stop mattering to L2/L3. |
+| Event model | Not stiff. Event payloads are versioned open unions. Unknown event kinds and future payload versions are preserved, not dropped or coerced. |
+| Telemetry | No OpenTelemetry. Use custom Effect-native instrumentation that emits this schema. |
+| Elixir/OTP | Parked behind the JSON/SQLite contract; revisit only if supervision/distribution needs prove out. |
+
+Storage rationale:
+
+- Durable state goes through SQLite, not ad-hoc JSON files. Dan Luu's filesystem-error work is the warning: file APIs fail in more ways than most programs handle.
+- JSONL/session files remain artifacts and append logs, but the queryable index and coordination state live in SQLite.
+- Archive lifecycle follows the Lopopolo-style pattern: active local state, periodic compressed archive, then GC/distillation.
+
+## Architecture by layer
+
+### L0: models/providers
+
+Provider capabilities are recorded, not assumed:
+
+- provider and model ids
+- effort/thinking level knobs
+- token accounting and cache read/write accounting
+- provider support for kv-cache and warm fork
+- refusal/content-filter/error classes
+- raw request and response artifact handles
+
+Warm fork belongs here. L3 fork contracts must not change when a provider later supports shared kv-cache.
+
+### L1: session harness adapters
+
+First-class adapters:
+
+| Adapter | Uses | Notes |
+|---|---|---|
+| OMP publisher | existing OMP session, tool lifecycle, IRC bus | Daily driver. Publishes rows and receives steer messages. |
+| Pi RPC | `pi --mode rpc` or SDK/runtime mode | Programmatic launch/resume/fork path. |
+| Pi publisher | existing interactive Pi session + extension | Good for observing normal terminal workflows. |
+| Codex app-server | Codex JSON-RPC/app-server runner | Reference-compatible runner, not a privileged architecture. |
+| tmux/zellij process | terminal attach/capture/send | Attachment and preview only; not semantic replay or durable truth. |
+| direct PTY | controlled local process | Later option if replacing multiplexers is worth the scope. |
+
+Harness facts preserved from v0:
+
+- Pi has session files and session APIs, but no built-in cross-process live registry.
+- Pi has UI hooks such as `ctx.ui.setTitle(...)`, `ctx.ui.setStatus(...)`, and `ctx.ui.setFooter(...)`.
+- tmux and zellij provide attach, capture, pane/tab metadata, and survivable terminal sessions.
+- Current terminal naming is too redundant and too tied to cwd/pane title.
+
+L1 publishes normalized lifecycle events and artifacts. L1 does not decide packet state, review state, provenance, or fallback policy.
+
+### L2: substrate
+
+L2 ships as a library and CLI with the same surface:
+
+- TypeScript import surface for OMP/Pi/web clients.
+- Python import surface for evals, notebooks, and scripts.
+- CLI commands emit bounded JSON with `--json`.
+- HTTP/SSE can wrap the same library; no separate data model.
+
+L2 owns:
+
+- SQLite schema and migrations
+- append-only event ledger
+- model/search/provider telemetry
+- message bus for attach/steer/interview
+- artifact store and context manifests
+- commit/session provenance index
+- archive and GC lifecycle hooks
+
+### L3: control plane
+
+L3 owns policy and supervision:
+
+- packet queue, routing, claim/update, owner path conflicts
+- workgroups as views over packets/sessions/branches
+- runner selection and model/lane assignment
+- background task supervision and failure events
+- fallback-model policy from telemetry
+- fork/hot-swap/resume orchestration
+- guardrails-in-loop for weak lanes
+
+The control plane mutates L2 through typed commands. Every mutation writes an event row.
+
+### L4: views/operators
+
+L4 clients are replaceable:
+
+- k9s-style TUI for glanceable status and quick drill
+- HTML viewers for after-the-fact review of logs, sessions, model calls, artifacts, diffs, and provenance
+- CLI for scripts and weak-model-safe interaction
+- LLM operator sessions for planning, routing, and review
+- future 2D-grid experiments over the same rows
+
+HTML viewers are the primary deep-review surface. TUI is glance-only plus quick navigation.
+
+## Data flow
+
+```txt
+L0 provider call
+  -> L1 harness adapter records raw request/response artifact handles
+  -> L2 writes model_calls + turn/event rows
+  -> L3 updates packet/session/branch state if needed
+  -> L4 views query or subscribe over CLI/HTTP/SSE
+```
+
+Rules:
+
+- Never infer durable state from terminal scrollback.
+- Never hide raw prompts, requests, tool commands, or process facts behind a UI abstraction.
+- Unknown event kinds must round-trip through storage and JSON APIs.
+- Retries and fallbacks keep chains: original error, `retryOf`, `fallbackFrom`, and final outcome.
+
+## L2 ledger and schemas
+
+Primary durable row families:
+
+| Row family | Purpose | Notes |
+|---|---|---|
+| `sessions` | Harness process/run identity | Stable handles, machine, harness kind, workspace, current status. |
+| `branches` | Session tree nodes | Created by fork, resume, model swap, or context variant. |
+| `turns` | Per-turn execution record | Context size, tool/edit/time/yield proxies. |
+| `events` | Append-only generic events | Versioned open union with preserved unknown payloads. |
+| `model_calls` | Highest-leverage telemetry | Required fields below. |
+| `provider_calls` | Search/Kagi/other provider calls | Same outcome/error discipline as model calls. |
+| `artifacts` | Raw requests, transcripts, diffs, outputs, context manifests | Retention policy explicit per artifact. |
+| `packets` | L3 work contracts | Spawn packet fields below plus state. |
+| `commits` | Git provenance reverse index | Commit trailers point back to rows. |
+
+Workgroup/session/review objects remain useful, but they are views over these rows, not separate sources of truth.
+
+## Telemetry schema
+
+`model_calls` is first because it answers the highest-leverage questions.
+
+Required columns:
+
+| Column | Meaning |
+|---|---|
+| `ts` | UTC timestamp. |
+| `machine` | Machine id. |
+| `session` | Session id. |
+| `branchId` | Branch within the session tree. |
+| `agent` | Agent/persona handle. |
+| `model` | Model id. |
+| `provider` | Provider id. |
+| `effort` / `thinkingLevel` | Provider-specific reasoning knob, normalized where possible. |
+| `promptHash` | User/developer prompt hash. |
+| `systemPromptHash` | System prompt hash. |
+| `skillProfile` | Loaded skills/rules/profile id. |
+| `contextManifest` | Artifact id describing context composition. |
+| `packetId` | Packet/work contract id. |
+| `tokensIn` | Prompt/input tokens. |
+| `tokensOut` | Output tokens. |
+| `cacheRead` | Provider cache-read tokens/units. |
+| `cacheWrite` | Provider cache-write tokens/units. |
+| `cost` | Provider cost in normalized currency units. |
+| `latencyMs` | End-to-end latency. |
+| `outcome` | `ok`, `error`, `refusal`, `contentFilter`, or `abort`. |
+| `errorClass` | Typed error class when outcome is not `ok`. |
+| `retryOf` | Prior model_call id if this is a retry. |
+| `fallbackFrom` | Prior model/model_call id if this is a fallback. |
+| `rawRequestArtifact` | Exact request payload artifact. Required for legibility. |
+| `rawResponseArtifact` | Exact response payload artifact or retention marker. |
+
+Second priority: search/provider calls such as Kagi, browser/search APIs, vector search, and remote service calls. Required shape: timestamp, session, branch, packet, provider, operation, input hash, raw request artifact, latency, outcome, error class, cost/usage if known.
+
+Third priority: generic events. Required event kinds:
+
+- `spawn`
+- `turn`
+- `toolCall`
+- `error`
+- `yield`
+- `hotswap`
+- `fork`
+- `resume`
+- session-mutation events listed below
+
+### Session-mutation event kinds
+
+These events are durable per session and per branch of the session tree:
+
+| Event kind | Required payload |
+|---|---|
+| `modelSwap` | `{from, to, branchId}`. Swapping models mid-session or between branches must mark the durable store. |
+| `compaction` | `{beforeTokens, afterTokens, strategy}`. |
+| `branch` / `fork` | `{parentBranch, atTurn}` plus child branch id. |
+| `hotswap` | What changed, when, and which code/tools/prompt were swapped. |
+| `resume` | Source branch/session, resume turn, and context artifact. |
+
+### Per-turn telemetry
+
+Every turn row records:
+
+| Field | Meaning |
+|---|---|
+| `contextTokens` | Tokens at turn start. |
+| `toolCalls` | Count and optional compact summary of tool calls. |
+| `editBytes` | Bytes inserted/deleted/changed through edit/write operations when available. |
+| `turnDurationMs` | Wall-clock turn duration. |
+| `yieldKind` | `done`, `blocked`, `handoff`, `error`, `timeout`, or harness-specific open-union value. |
+| `affectSelfReport` | Model self-report glyph or short note. |
+| `affectSignals` | Instrumented signals: retry streaks, error rates, advisory disagreement, aborts, fallback pressure. |
+
+Affect has two channels: self-report plus instrumented signals. Drift between them is visible and queryable.
+
+### Telemetry purposes
+
+Telemetry must support:
+
+- finding unknown errors: provider reliability, refusals, content filters, background breakage
+- fallback-model policy with data, not vibes
+- eval variants: fork context, run variants, compare rows
+- global routing lessons, such as model × work-type weaknesses and useful steering patterns
+- dreaming-loop inputs after review, not automatic opaque memory writes
+
+## Hypotheses this schema can answer
+
+1. **Does Fable/Claude output quality or productivity degrade past N context tokens?**
+   - Join `turns.contextTokens` with productivity proxies: `toolCalls`, `editBytes`, `turnDurationMs`, `yieldKind`, and review outcome.
+2. **Is compaction destructive for GPT-5.5?**
+   - Compare turn outcomes and review results before/after `compaction` events for the same packet/model/lane.
+3. **What model × work-type affect patterns matter?**
+   - Join affect self-report and instrumented signals with packet lane/work type, model, provider, and outcome.
+
+Storage note: SQLite is fine and swappable later. The schema contract matters more than the first local DB adapter.
+
+## Context-budget experiments
+
+Context composition is a first-class experiment axis alongside model and prompt.
+
+Every spawn row records:
+
+- `skillProfile`
+- `promptHash`
+- `systemPromptHash`
+- `contextManifest`
+- transcript depth and selected excerpts
+- loaded policy/rule files
+- model/provider/lane
+
+Fork comparisons should vary one declared axis where possible:
+
+- skills loaded
+- system-prompt weight
+- doc excerpts
+- transcript depth
+- model/provider
+- compaction strategy
+
+Without a context manifest, comparisons are misleading and must not be treated as eval evidence.
+
+## Provenance and archive lifecycle
+
+Requirement: tie commits to agent sessions and context used.
+
+Mechanism:
+
+- Harness writes git commit trailers at commit time:
+  - `Agent-Session: <sessionId>`
+  - `Agent: <agentId>`
+  - `Packet: <packetId>`
+- L2 writes `commits{sha, sessionId, agentId, packetId, ts}` for reverse lookup.
+- Do not store transcripts in git.
+- Jujutsu is a compatible future, not adopted in v1.
+
+Archive lifecycle:
+
+1. **Active**: SQLite rows plus JSONL/session artifacts are local and queryable.
+2. **Weekly archive**: compress session artifacts; optionally move off disk.
+3. **GC dry run**: show rows/artifacts that would be removed and retained summaries.
+4. **GC apply**: remove cold artifacts only after indexes and retained artifacts are valid.
+5. **Distillation hooks**: produce reviewed inputs for memory/routing systems. This is separate from the runtime ledger and never opaque.
+
+## L3 packets, routing, and supervision
+
+The packet is the L3 work contract. It is not prose buried in a planning doc.
+
+Spawn packet fields:
+
+```ts
+interface SpawnPacket {
+  id: string
+  role: string
+  assignment: string
+  ownerPaths: string[]
+  excludedPaths: string[]
+  lane: string
+  model?: string
+  acceptance: string[]
+  nonGoals: string[]
+  timeoutSec?: number
+  budget?: {
+    tokens?: number
+    cost?: number
+    wallClockSec?: number
+    toolCalls?: number
+  }
+}
+```
+
+Packet rows keep high-churn coordination fields:
+
+- packet id, title, workstream/lane, status, priority, short summary
+- source pointer: Markdown path/heading, packet manifest, issue id, or external ledger row
+- owner/excluded/dirty paths
+- assigned worker/reviewer/session/branch ids
+- proof links to QA notes, artifacts, session logs, data folders, and commits
+- created/updated/claimed/review-ready/done/stale timestamps
+- append-only status events
+
+Agents query the ledger for eligible work, claim atomically, read owner/excluded paths, and write proof/status events. They do not infer packet availability from prose when the ledger exists.
+
+### Onboarding interview
+
+The spawn path includes a first-class interview step. A worker may interrogate the spawner over the message bus before starting. The interview transcript is an artifact and can be attached to the packet.
+
+### Routing quadrant
 
 A useful framing is to classify work by novelty and difficulty/ambiguity.
 
@@ -97,7 +414,7 @@ A useful framing is to classify work by novelty and difficulty/ambiguity.
 novel ◄───────────────────────────┼───────────────────────────► straightforward
                                   │
       short interactive           │       batch autonomous
-      one-off Pi chat             │       queue/worktree/review packet
+      one-off Pi/OMP chat         │       queue/worktree/review packet
       maybe no control plane      │       control plane most useful
                                   │
                                   ▼
@@ -107,1213 +424,190 @@ novel ◄───────────────────────�
 Implications:
 
 - tmux/zellij live attach is mainly for novel + difficult/exploratory work.
-- Symphony-style orchestration is mainly for straightforward or well-specified work that can run autonomously.
-- The control plane is most valuable when many runs are happening without live human supervision.
-- Exploratory sessions still benefit from titles, status, and grouping, but may not need heavy orchestration.
+- Autonomous supervised orchestration is mainly for straightforward or well-specified work that can run without live human supervision.
+- The control plane is most valuable when many runs are happening at once.
+- Exploratory sessions still benefit from titles, status, grouping, and steer, but may not need heavy orchestration.
 - The system should route work to the right execution mode instead of treating every task as an interactive tab.
 
-## Current platform facts
+## Contracts: fork, hot-swap, steer
 
-- Pi has session files and session APIs, but **no built-in cross-process live registry**.
-- Pi has per-process UI hooks like `ctx.ui.setTitle(...)`, `ctx.ui.setStatus(...)`, and `ctx.ui.setFooter(...)`.
-- tmux already provides a popup primitive, capture-pane, and chooser-like interactions.
-- current tmux window naming is mostly derived from pane title / cwd and is too redundant.
+### Fork contract
 
-Implication:
-
-- we must build the central cross-process registry ourselves
-- TypeScript should own the Pi publisher/connector path
-- durable orchestration and ledger ownership should follow the Elixir/OTP vs Rust/TS spike, behind the same JSON/SQLite/API contract
-
-## Product framing
-
-Working name candidates:
-
-- Pi cockpit
-- Pi control plane
-- Pi agent board
-- Pi tmux cockpit
-- Pi local symphony
-
-Recommended framing:
-
-> A local SQLite-first agent control plane for supervising Pi/OMP/Codex-like runs, with Elixir/Rust/TypeScript clients behind one JSON/SQLite/API contract and tmux/Zellij as optional live attach surfaces.
-
-## Inspiration
-
-Main inspirations:
-
-- OpenAI harness engineering
-- OpenAI Symphony
-- Codex app parallel threads/worktrees/review surface
-- local tmux workflows
-
-Most relevant lessons from Symphony:
-
-- use one authoritative runtime state
-- treat work items as primary and sessions as implementation detail
-- keep UI secondary to the control plane
-- isolate runs/workspaces where possible
-- keep policy in-repo
-
-## Design principles
-
-1. **SQLite-first control-plane boundary**: the selected runtime core owns durable SQLite state, process lifecycle, CLI/API contracts, and supervision; TypeScript is used where it has leverage (Pi extension publisher, Pi-specific tools, optional SDK/RPC adapter), and Rust remains a strong TUI/portable-client path.
-2. **Local-first**: no remote service required.
-3. **Deterministic control plane**: chat/orchestrator is a client, not the authority.
-4. **Human attention is the scarce resource**: optimize for supervision cost.
-5. **Stable compressed summaries**: status line should not be noisy or jittery.
-6. **Search and hint chords beat numeric tabs**: window indexes are not the main navigation model.
-7. **Review must be trustworthy**: per-session diff views require isolated worktrees or equivalent provenance.
-8. **Graceful degradation**: non-Pi panes and missing metadata should still work.
-9. **No LLM in the hot path**: navigation and rendering should not depend on model calls.
-10. **Workgroups over raw tabs**: the core object should become a workgroup/run, not a tmux window number.
-
-## Architecture
-
-Current preferred architecture for the next slice is an **Elixir/OTP ledger/orchestration spike behind a stable JSON/SQLite/API contract**, with Rust TUI/client work and the TypeScript Pi connector kept as clients unless the spike fails the acceptance checklist.
-
-```txt
-+-------------------------+       +---------------------------+
-| Pi worker session       |       | Pi worker session         |
-| TS publisher extension  |       | TS publisher extension    |
-+------------+------------+       +-------------+-------------+
-             |                                    |
-             +----------------+  +----------------+
-                              v  v
-                    +-----------------------+
-                    | SQLite control-plane  |
-                    | core + JSON/CLI/API   |
-                    +----+-------------+----+
-                         |             |
-                         |             |
-              +----------+--+       +--+----------------+
-              | terminal     |       | orchestrator Pi   |
-              | backend      |       | session + tools   |
-              | tmux/zellij/ |       +-------------------+
-              | direct pty   |
-              +--------------+
-```
-
-TypeScript should be used where it has leverage:
-
-- Pi extension publisher
-- Pi-specific tool registration
-- optional Pi SDK/RPC adapter if the Node APIs are required
-
-The selected control-plane core should own the portable authority:
-
-- runtime registry
-- workgroup state
-- config parsing
-- persistence
-- runner orchestration
-- terminal/backend attachment abstractions
-
-If Elixir/OTP owns orchestration after the spike, Rust should stay focused on TUI/client duties instead of carrying a second ledger authority.
-
-
-## System components
-
-### 1. Publisher extension (inside each Pi session)
-
-Responsibilities:
-
-- compute good short title
-- publish session state
-- track recent activity
-- track touched files
-- expose role/workgroup metadata
-- update tmux-visible title
-
-Initial implementation:
-
-- `packages/web-access/src/agent-cockpit.ts` — SQLite schema/store, session/workgroup/event records, terminal snapshot normalization
-- `packages/web-access/src/agent-cockpit-extension.ts` — Pi publisher/tool integration
-- `packages/web-access/src/agent-cockpit-cli.ts` — local CLI prototype
-
-### 2. Control-plane daemon
-
-Responsibilities:
-
-- own authoritative live registry
-- reconcile heartbeats/session disappearance
-- manage workgroups and membership
-- expose local read/write API to clients
-- support eventual orchestration features
-
-Likely later implementation location:
-
-- `packages/control-plane/**` or a Rust crate once the TS pilot proves the object model
-
-### 3. tmux cockpit client
-
-Responsibilities:
-
-- search and switch between sessions
-- display grouped sessions
-- show previews and session metadata
-- open review mode
-- provide hint chords for direct jump
-
-Likely implementation location:
-
-- `packages/tmux-cockpit/**`
-
-### 4. Orchestrator Pi session
-
-Responsibilities:
-
-- conversational management of workgroups
-- summarization / coordination / spawn suggestions
-- structured tools over control-plane state
-
-This should be a normal Pi session with extra tools, not the source of truth.
-
-### 5. Optional worktree manager
-
-Responsibilities:
-
-- launch new sessions in isolated git worktrees
-- make review/diff mode trustworthy
-- support role-specific workers later
-
-## Core runtime objects
-
-### Session
+Spawn variant:
 
 ```ts
-interface SessionRecord {
-  sessionId: string
-  tmuxTarget?: string
-  projectKey: string
-  workspacePath?: string
-  worktreePath?: string
-  branch?: string
-  title: string
-  role?: string
-  groupId?: string
-  status: "starting" | "running" | "idle" | "blocked" | "review" | "error" | "done"
-  lastHeartbeatAt: string
-  lastActivityAt?: string
-  lastSummary?: string
-  filesTouched?: string[]
-  paneTitle?: string
-  cwd?: string
-  provider?: string
-  model?: string
-}
+{ fork: { fromTranscript: string, atTurn: number } }
 ```
 
-### Workgroup
-
-```ts
-interface WorkgroupRecord {
-  id: string
-  name: string
-  goal?: string
-  projectKey: string
-  status: "active" | "blocked" | "review" | "done" | "archived"
-  priority?: number
-  sessionIds: string[]
-  createdAt: string
-  updatedAt: string
-}
-```
-
-### Review surface
-
-```ts
-interface ReviewRecord {
-  sessionId: string
-  filesTouched: string[]
-  branch?: string
-  worktreePath?: string
-  recentOutput?: string
-  lastSummary?: string
-  diffMode: "none" | "repo" | "worktree-trustworthy"
-}
-```
-
-## Workgroups
-
-Workgroups are a first-class grouping abstraction.
-
-A workgroup is not just “all tabs in the same cwd”. It is a semantic cluster such as:
-
-- search revamp
-- jimeng reversal
-- reviewer pass for UGC CLI
-- orchestration experiments
-
-A workgroup may include roles like:
-
-- orchestrator
-- planner
-- implementer
-- reviewer
-- QA
-- monitor
-
-Initial grouping may be manual or semiautomatic.
-
-Longer term, workgroups may be created by:
-
-- direct user action in cockpit
-- orchestrator tools
-- issue/task imports
-- launch templates
-
-## UI surfaces
-
-### 1. tmux status line (compressed summary only)
-
-Goals:
-
-- preserve current tmux workflow
-- avoid repeated cwd spam
-- show short distinctive labels
-- show state icon before title
-- optionally compress multiple sessions in one project/workgroup
-
-Example shape:
+Requirements:
 
-```txt
-[web] ◐ asset  ○ jimeng  ○ review  +4   [auto] ○ main
-```
+- Cold fork now: child ingests transcript/context artifact and starts as a new branch.
+- Warm fork later: provider kv-cache slot at L0; no L3 contract change.
+- Workspace fork uses APFS clonefile (`cp -c`) for cheap copy-on-write working trees when available.
+- If clonefile semantics are unavailable, M4 must fail explicitly or choose a declared fallback; it must not silently trust an expensive or lossy copy.
+- Forks are eval primitives: fork, run variants, compare telemetry rows.
 
-Status line rules:
+### Hot-swap contract
 
-- no repeated full repo name on every tab
-- state icon first
-- title only shows distinctive task text
-- overflow collapses to `+N`
+Requirements:
 
-### 2. Popup cockpit (primary navigation UI)
+- Pause the agent at a completion boundary.
+- Swap code, tools, prompt, or harness adapter.
+- Resume with an explicit `hotswap` event injected into context.
+- The agent must know it was swapped: what changed and when.
+- KV-cache invalidation is acceptable because hot-swap is rare.
+- OMP has `/reload` and extension reload today; missing pieces are pause-at-boundary plus durable swap metadata.
 
-Goals:
+### Steer channel / collaboration boundary
 
-- vertical searchable list
-- grouped by project/workgroup
-- preview on selection
-- hint chords for instant switch
-- keyboard-first human UX
+The existing IRC/collab bus is surfaced through L2 as the attach/watch/steer channel.
 
-Sketch:
+Useful for:
 
-```txt
-┌──────────────────── Agents ────────────────────┐
-│ Search: jim                                    │
-│                                                │
-│ Group / project                                │
-│ search revamp                                  │
-│   jk  ◐  asset-library                         │
-│   jl  ○  jimeng-reversal                       │
-│   j;  !  reviewer-1                            │
-│                                                │
-│ Preview                                        │
-│ recent pane output / last summary / blockers   │
-│                                                │
-│ Enter switch • Tab review • / search • Esc     │
-└────────────────────────────────────────────────┘
-```
+- live attach to a running child agent
+- watch progress without owning the session
+- steer or interrupt within the runner's native capabilities
+- tell an orchestrator why it might be steering incorrectly
+- support server mode and TUI mode with the same message path
 
-### 3. Review mode
+Explicitly not:
 
-Purpose:
+- source of truth for workflow state
+- registry or database
+- durable transcript store
+- task queue
+- learning store
 
-- inspect one agent run deeply
-- show touched files, branch/worktree, output, summary
-- later show trustworthy diff when backed by isolated worktree
+Durable state lives in SQLite rows and artifacts. Store view links, evidence handles, and credential references in the ledger by default, not full collab write links.
 
-Sketch:
+## L4 monitoring and review surfaces
 
-```txt
-┌ meta ────────┬──────── changed files / diff ────────┐
-│ ◐ running    │ src/foo.ts   +23 -4                 │
-│ branch: ...  │ src/bar.ts   +12 -0                 │
-│ worktree: .. │ ...                                 │
-│ last: 20s    │                                     │
-├ recent output┼─────────────────────────────────────┤
-│ tool calls / last assistant summary / blockers     │
-└──────────────┴─────────────────────────────────────┘
-```
+Requirements:
 
-### 4. Orchestrator session
+| Surface | Requirement |
+|---|---|
+| High-level board | Show which agents/sessions exist, what they are doing, contracts, lanes, statuses, blockers, and artifacts produced. Must be checkable quickly. |
+| Low-level drill | Open logs, subagent transcripts, model calls, raw requests, tool calls, diffs, and persistent mistakes. |
+| Attach-and-steer | Available from server and TUI modes through the L2 bus. |
+| Legibility | Every model call has a "show raw request" affordance. Actual code/processes/tool calls are visible. |
+| HTML viewers | Primary after-the-fact review surface, built with React/Solid/custom components per artifact type over the same API/ledger. |
+| TUI | Glanceable, searchable, keyboard-first, quick drill only. Not the primary deep-review surface. |
+| Status line | Tiny stable summary only; no noisy or jittery model-derived labels. |
 
-Purpose:
+Navigation concepts preserved from v0:
 
-- user can talk to a dedicated “manager” agent
-- group sessions into workgroups
-- inspect progress across groups
-- spawn review/planning sessions later
-- summarize blockers and stale runs
+- Do not rely on tmux window numbers as the main navigation primitive.
+- Search and hint chords beat numeric tabs.
+- Titles prefer manual override, explicit session name, derived short task title, then workspace fallback.
+- Update titles on task boundaries, not every tool call.
+- Review views must state diff trust level: no isolated worktree means touched files/recent output only; isolated worktree means trustworthy session-specific diff.
 
-Example requests:
+## Guardrails in the loop
 
-- “group these 4 sessions into search revamp”
-- “show blocked sessions”
-- “rename the generic pi-web-access sessions based on recent intent”
-- “create a reviewer session for workgroup A”
+Weak lanes get immediate corrective scaffolding; strong lanes keep freedom and code-first primitives.
 
-## Navigation model
+Requirements:
 
-Do not rely on tmux window numbers as the main navigation primitive.
+- Lint-on-write hooks run inside the loop for weak lanes.
+- Rules can be ast-grep, eslint, schema-at-boundary checks, no-any/unknown checks, or banned-pattern checks.
+- A failing hook injects one corrective line into the session context.
+- Guardrails are data/rule files and can be formalized progressively.
+- Do not turn these into broad repo-wide format/lint gates for every lane.
+- Scaffolding is inversely proportional to model strength.
 
-Preferred interaction:
+## Error handling requirements
 
-- `prefix + g` opens cockpit
-- type to search
-- `j/k` move selection
-- `Enter` switches to session
-- `Tab` opens review mode
-- hint chords allow direct switch without arrowing
+Typed error taxonomy uses Effect `TaggedErrorClass` classes at boundaries.
 
-### Hint chord design
+Initial taxonomy:
 
-Reasoning:
+| Error class | Examples | Required handling |
+|---|---|---|
+| `ProviderError` | 5xx, timeouts, malformed response | Model/provider call row with retry/fallback chain. |
+| `ProviderRefusal` | refusal, safety stop | Outcome `refusal`; do not hide behind fallback success. |
+| `ContentFilter` | provider filter or blocked output | Outcome `contentFilter`; keep raw metadata allowed by policy. |
+| `HarnessError` | OMP/Pi/Codex adapter failure | Session event plus supervised task failure row. |
+| `ToolError` | tool crash, invalid args, permission failure | Tool event and turn outcome linkage. |
+| `StorageError` | SQLite write/migration/archive failure | Stop mutation path; leave prior rows valid. |
+| `ArtifactError` | raw request/transcript/diff artifact missing or corrupt | Mark artifact invalid; do not pretend review is complete. |
+| `BudgetExceeded` | token/cost/wall-clock/tool-call budget | Abort or steer according to packet policy. |
+| `GuardrailViolation` | weak-lane lint/rule failure | Inject corrective line and record rule id. |
+| `SupervisorError` | background task died | Failure event row; never silent. |
 
-- `Ctrl+1..9` is ergonomically poor
-- left-hand numeric navigation does not scale
-- right-hand-only chords are better for repeated switching
+Crash-safety invariants:
 
-Initial idea:
+- Every background task is supervised.
+- Every background failure writes a failure event row.
+- A dead session leaves valid rows and no persistent corruption.
+- No silent state mutation by an orchestrator or view.
+- Fallback policy is telemetry-driven and preserves original failures.
 
-- use deterministic visible two-key hints from a right-hand-friendly alphabet
-- assign hints in the popup, not permanently in the status line
+## Code-first primitives: library + CLI parity
 
-Candidate alphabet:
+The most important harness property: models use and compose primitives in code, not only through tool calls.
 
-```txt
-j k l ; u i o p n m , .
-```
+L2/L3 primitives must be callable from TypeScript, Python, and CLI:
 
-## Naming strategy
+- spawn packet
+- claim/update packet
+- publish event
+- record model/provider call
+- attach/steer
+- fork context
+- resume branch
+- hot-swap at boundary
+- query status
+- open raw request/artifact
+- compare telemetry variants
 
-Order of precedence for a session title:
+CLI parity rule: if a primitive exists in the library, a bounded `--json` command exists for it, and both use the same schema.
 
-1. manual title override
-2. explicit Pi session name
-3. derived short task title from recent user intent
-4. fallback to repo/workspace name
+This enables loops, forks, pipelines, custom tools, and eval harnesses written on the fly. Tool calls alone are not enough.
 
-Rules:
+## Existing donor code / current pilot
 
-- prefer short distinctive nouns/phrases
-- avoid repeating repo name unless needed for disambiguation
-- update on task boundary, not every tool call
-- allow an icon/state prefix
+Current donor seams, not the v1 architecture:
 
-Example titles:
+- `packages/web-access/src/agent-cockpit.ts`: SQLite schema/store, session/workgroup/event records, terminal snapshot normalization.
+- `packages/web-access/src/agent-cockpit-extension.ts`: Pi publisher/tool integration.
+- `packages/web-access/src/agent-cockpit-cli.ts`: local CLI prototype.
+- `packages/web-access/test/agent-cockpit.test.ts`: M1-style fixture proof donor.
 
-- `◐ asset-library`
-- `○ jimeng-reversal`
-- `! reviewer-blocked`
-- `○ automations-main`
+Current pilot table names may inform migration, but v1 schema is the contract above. Terminal multiplexers remain optional L1/L4 attachment adapters, not the semantic substrate.
 
-## Review truth model
+Symphony is an architecture reference for work items, workspace isolation, dashboard/API split, and supervised workers. It is not the v1 runtime or UX frame.
 
-Important constraint:
+## Non-goals
 
-A per-session git diff is only trustworthy if the session is isolated from other sessions, typically via a worktree or equivalent dedicated checkout.
+- OpenTelemetry.
+- Distributed consensus.
+- Multi-machine replicated writes.
+- Elixir now.
+- Rewriting OMP or Pi.
+- Storing transcripts in git.
+- Steganographic or opaque memory encodings.
+- TUI as the primary deep-review surface.
+- Terminal multiplexer as semantic authority.
+- Automatic dream-memory promotion without reviewed evidence.
+- Building a full terminal multiplexer.
 
-Therefore:
+## Milestones and acceptance proofs
 
-- no worktree -> review mode may show touched files, recent output, summary, and repo diff caveats
-- isolated worktree -> review mode may show trustworthy session-specific git diff
+Each milestone must be independently shippable and prove itself with something Arthur can click or run.
 
-This implies that deeper review features should push the system toward one-worktree-per-session or one-worktree-per-workgroup.
-
-## Runtime core choice: Elixir/OTP, Rust, or TypeScript
-
-A Rust core remains attractive if this becomes primarily a standalone local CLI/TUI project.
-
-Benefits:
-
-- single fast native binary for daemon + CLI + cockpit TUI
-- strong fit for terminal UIs (`ratatui`/`crossterm`) and process management
-- easier distribution without Node/Bun runtime assumptions
-- good filesystem/config/state robustness
-- safer long-running daemon behavior than ad-hoc scripts
-- cleaner remote/SSH/process abstractions if designed early
-
-Costs:
-
-- Pi extension APIs are TypeScript, so a TS connector remains necessary
-- Pi SDK integration may be easier in TypeScript; Rust may need to talk through JSON/RPC/stdio/local HTTP
-- more initial scaffolding than a small TS prototype
-- if the project remains Pi-specific, Rust may be premature
-
-Recommendation:
-
-- run the Elixir/OTP vertical spike first because the active Symphony Lite goal needs supervision, task-source imports, and ledger-backed orchestration
-- keep Rust as the TUI/portable-client path unless the spike shows Rust should own the durable core
-- keep a thin TS Pi extension that publishes events and exposes Pi tools
-- keep all runner/terminal backends behind explicit interfaces so the core is not Pi-locked
-
-## Metadata storage: Zellij/tmux vs our SQLite
-
-Zellij exposes useful terminal/session metadata, but it should not be the authoritative store for Pi/workgroup metadata.
-
-Zellij can provide:
-
-- sessions/tabs/panes
-- active tab/pane state
-- pane title
-- pane command/cwd in list responses
-- plugin events for tab/pane/session updates
-- pipe messages for plugin communication
-- session metadata/layout cache files
-
-But our domain metadata should live in our own store:
-
-- Pi session id
-- workgroup id/membership
-- role
-- current objective
-- semantic status
-- files touched
-- summary
-- review packet metadata
-- durable links to Pi session JSONL/logs/artifacts
-
-Recommended store:
-
-```txt
-~/.local/share/pi-cockpit/cockpit.sqlite
-```
-
-or repo-local for early development:
-
-```txt
-data/control-plane/cockpit.sqlite
-```
-
-Why SQLite:
-
-- one local file
-- easy querying from Rust and TypeScript
-- durable across terminal multiplexer restarts
-- can store event log + current snapshots
-- avoids overloading Zellij/tmux names/titles with semantic state
-- makes later non-Zellij clients possible
-
-Design rule: Zellij/tmux is the terminal substrate; SQLite is the semantic control-plane memory.
-
-
-## Repo-wide task metadata ledger
-
-T-2026-06-13-005 should land as a centralized **task metadata ledger**, not a document database and not a second standalone database package.
-
-The control-plane SQLite store owns two related but separate concerns:
-
-1. **runtime cockpit state**: live sessions, terminal panes, heartbeats, workgroups, and recent activity
-2. **task metadata state**: packet queue rows, owner path claims, proof links, review state, source pointers, and scheduling timestamps
-
-Keeping both in SQLite lets the orchestrator answer questions like “what is the next unclaimed React QA packet?” or “which active agents own `apps/slotok-workbench/**`?” without rereading `TASKS.md`, QA notes, domain packet ledgers, and session logs. Keeping the concerns separate prevents transient terminal details from becoming the task source of truth.
-
-### Existing seams
-
-Use the seams already in the repo:
-
-- `packages/web-access/src/agent-cockpit*` owns the current cockpit/runtime pilot and `~/.local/share/pi-cockpit/cockpit.sqlite`.
-- `packages/symphony-lite-elixir/lib/symphony_lite_elixir/ledger.ex` already has workflow, agent, external-session, event, and packet tables behind the `symphony_lite`/`symphonyx` JSON CLI spike.
-- `packages/symphony-lite-rs` remains the Rust/TUI comparison path and future client, not a reason to introduce a parallel task-ledger package.
-- `catalog/workspaces.yml` names workspace roots and packet policy; ledger rows should reference those stable roots and packet paths rather than inventing new path semantics.
-
-Do **not** create `packages/task-ledger`, `packages/database-workbench-ledger`, or another SQLite wrapper for this slice. Extend the chosen Symphony Lite ledger seam first; expose boring JSON/CLI commands over it; let the database workbench inspect the resulting SQLite file later as a generic SQLite database.
-
-### What stays Markdown
-
-Do not move every small Markdown file into SQLite. Markdown remains the right format for:
-
-- policy and SOP docs that humans edit directly
-- plans with rationale, tradeoffs, and historical context
-- QA notes with screenshots, command transcripts, and prose interpretation
-- state/lesson docs that should be readable outside the cockpit
-
-The ledger should point to these files by path and stable heading or artifact URL. It should not copy their prose unless a short summary is needed for list views.
-
-### What moves to SQLite first
-
-Move only high-churn coordination fields:
-
-- packet id, title, workstream, status, priority, and short summary
-- source pointer: Markdown path/heading, packet-manifest path, or external packet-ledger row reference
-- owner paths, excluded paths, and dirty paths that must be preserved
-- assigned worker/reviewer/session ids
-- proof links to QA notes, artifacts, session logs, data folders, and commits
-- created/updated/claimed/review-ready/done/stale timestamps
-- append-only status events
-
-These are the fields agents need for atomic claim/update decisions. They are also the fields most likely to become stale when duplicated across `TASKS.md`, QA notes, packet-ledger dashboards, and handoff prose.
-
-### Minimal canonical table list
-
-The first repo ledger needs four scheduling tables alongside the runtime cockpit/workflow tables:
-
-```sql
-create table task_packets (
-  id text primary key,
-  title text not null,
-  workstream text not null,
-  status text not null,
-  priority integer not null default 0,
-  source_doc text,
-  source_heading text,
-  summary text not null default '',
-  created_at text not null,
-  updated_at text not null,
-  claimed_at text,
-  review_ready_at text,
-  done_at text,
-  blocked_reason text
-);
-
-create table packet_ownership (
-  packet_id text not null references task_packets(id) on delete cascade,
-  path text not null,
-  kind text not null,
-  primary key (packet_id, path, kind)
-);
-
-create table packet_proofs (
-  id integer primary key autoincrement,
-  packet_id text not null references task_packets(id) on delete cascade,
-  kind text not null,
-  href text not null,
-  label text not null default '',
-  created_at text not null
-);
-
-create table packet_events (
-  id integer primary key autoincrement,
-  packet_id text not null references task_packets(id) on delete cascade,
-  event_type text not null,
-  actor text not null default '',
-  session_id text,
-  note text not null default '',
-  created_at text not null
-);
-```
-
-Use constrained status values in application code first; add SQL `check` constraints once the import path has proved the vocabulary across `TASKS.md`, packet manifests, and existing domain packet ledgers. Store timestamps as UTC ISO-8601 text so shell, TypeScript, Rust, Elixir, and SQLite can all sort them without adapters.
-
-### Migration from existing repo state
-
-1. Import `TASKS.md` rows as `task_packets` with `source_doc='TASKS.md'`; keep the Markdown file as the human index during the transition.
-2. Import repo packet manifests and domain packet ledgers as source pointers, not copied prose. For a SQLite packet ledger, store the DB path in `source_doc` and the table/row key in `source_heading`, then add proof links for the artifacts a reviewer needs.
-3. Link existing `docs/qa/**` proof notes as `packet_proofs(kind='qa-note')`; do not inline the note body.
-4. Link session histories/logs only when they affect scheduling, review, or unblock decisions.
-5. For active multi-agent work, add owner/excluded paths from the task packet into `packet_ownership`.
-6. Teach coordinator commands to update SQLite first, then patch or regenerate short Markdown summaries.
-7. Once the loop is reliable, make `TASKS.md` a curated/generated view of the ledger instead of the place agents race to edit.
-
-This is intentionally incremental. A useful v0 can answer `next`, `claim`, `paths`, `proof add`, `review-ready`, `block`, and `done` before any historical Markdown is fully normalized.
-
-### Agent query/update API
-
-Expose boring commands or tools over the ledger:
-
-```txt
-ledger import --source TASKS.md
-ledger import --source data/<domain>/<packet-ledger>.sqlite
-ledger next --workstream <name> [--path <prefix>]
-ledger claim <packet-id> --worker <id> --session <id>
-ledger paths <packet-id>
-ledger proof add <packet-id> --kind qa-note --href docs/qa/...
-ledger status <packet-id> review --note "proof ready"
-ledger status <packet-id> done --proof <href>
-```
-
-Agents should never infer packet availability from prose when the ledger exists. They query for eligible work, claim atomically, read owner/excluded paths, and write proof/status events. Markdown remains the reviewable explanation layer.
-
-### First implementation slice
-
-The first code slice should extend the existing `packages/symphony-lite-elixir` ledger/CLI rather than adding a package:
-
-1. Add a migration-safe schema update for the four task metadata tables above, preserving any existing rows from the current spike schema.
-2. Add a `TASKS.md` importer that maps task id/title/source/summary into `task_packets` and leaves long prose in Markdown.
-3. Add a packet-ledger importer interface that can read another SQLite packet dashboard by adapter and store only the source pointer plus proof links.
-4. Implement `next`, `claim`, `paths`, `proof add`, and `status` against the same ledger root used by `status --json`.
-5. Add one fixture-backed smoke path that imports `TASKS.md`, claims T-2026-06-13-005, attaches this plan update as proof, and returns bounded JSON.
-
-Root should validate that slice with the package-local Symphony Lite Elixir test/smoke command, not with repo-wide gates.
-
-## Zellij API notes
-
-Source inspection shows Zellij has stronger APIs than tmux for cockpit-style integration. Repos inspected:
-
-- `zellij-org/zellij` cloned to `/tmp/pi-zellij-src` at `e9173cba163506491becbeacad162315d6e8f726`
-- `zellij-org/zellij-org.github.io` cloned to `/tmp/pi-zellij-website` at `049a2b3639363137007d0d8b6cb0671a60ca5892`
-
-Zellij has website markdown docs under `docs/src/**` in the website repo.
-
-Key findings:
-
-- plugin events include `TabUpdate`, `PaneUpdate`, `SessionUpdate`, `ListClients`, `CwdChanged`, `CommandChanged`, and pane render reports
-- `TabInfo` has stable `tab_id`, position, name, active state, dimensions, and pane counts
-- `PaneInfo` has id, title, focus/floating/suppressed/exited state, geometry, command, plugin URL, and colors
-- CLI actions include listing panes/tabs as JSON, renaming tabs/sessions, writing chars, dumping screen, subscribing to pane output, and piping messages to plugins
-- Zellij writes session metadata/layout cache files unless `disable_session_metadata` is enabled
-
-This suggests a possible architecture:
-
-```txt
-Zellij plugin/sidebar/status plugin
-  reads Zellij tab/pane events
-  reads/writes cockpit SQLite
-  receives messages from external CLI or Pi publisher
-
-Pi publisher extension
-  writes semantic agent metadata to SQLite/API
-
-Rust cockpit CLI/TUI
-  queries SQLite
-  optionally drives Zellij actions
-```
-
-Potential advantage: a Zellij plugin could replace a separate tmux-style popup for navigation/status once the small local pilot proves useful.
-
-## Implemented v0 pilot
-
-A first TS pilot now exists inside `packages/web-access`.
-
-Files:
-
-- `packages/web-access/src/agent-cockpit.ts`
-- `packages/web-access/src/agent-cockpit-extension.ts`
-- `packages/web-access/src/agent-cockpit-cli.ts`
-- `packages/web-access/test/agent-cockpit.test.ts`
-
-Implemented:
-
-- SQLite DB at `~/.local/share/pi-cockpit/cockpit.sqlite` by default
-- `cockpit_sessions` table for semantic session metadata
-- `cockpit_workgroups` table for manual group metadata
-- `cockpit_events` append-only event log
-- `terminal_tabs` and `terminal_panes` snapshot tables for Zellij/tmux-like substrate state
-- CLI commands: `init`, `publish`, `heartbeat`, `list`, `summary`, `event`, `events`, `workgroup`, `zellij-snapshot`
-- Pi tool: `agent_cockpit`
-- passive Pi lifecycle publisher for `session_start`, `agent_start`, `turn_start`, `tool_call`, `tool_result`, `agent_end`, and `session_shutdown`
-- Zellij snapshot importer using `zellij action list-panes --all --json` and `zellij action list-tabs --all --json`
-
-Try it:
-
-```bash
-bun run cockpit init
-bun run cockpit publish --id demo --title Demo --status running --workgroup pilot --role worker --objective "try cockpit"
-bun run cockpit list
-bun run cockpit summary
-bun run cockpit zellij-snapshot --session <zellij-session-name>
-```
-
-The CLI is also exposed as `pi-cockpit` from `packages/web-access`.
-
-Validation:
-
-```bash
-cd packages/web-access && bun test test/agent-cockpit.test.ts
-cd packages/web-access && bun run typecheck
-```
-
-Current limitation: this is still a local SQLite + CLI/tool prototype, not a long-running reconciler daemon or full TUI.
-
-## Small local pilot: zellij/tmux only
-
-Before building the full control plane, test whether a simpler local workspace is enough.
-
-Pilot shape:
-
-- one zellij/tmux session on Arthur's computer
-- one tab/pane per Pi worker
-- one tab/pane for the orchestrator Pi session
-- manually or script-launched tabs with good names
-- use multiplexer attach/detach, layout, and scrollback
-- no central daemon initially, only optional Pi publisher metadata
-
-This may be sufficient for running a few agents in parallel when the goal is exploratory supervision rather than autonomous fleet orchestration.
-
-What this pilot does **not** solve well:
-
-- semantic replay/fork across Pi sessions
-- trustworthy per-session diffs without worktrees
-- durable workgroup state
-- autonomous queue/retry/reconcile behavior
-- cross-machine registry beyond what the multiplexer can attach to
-
-Decision rule:
-
-- if the work is mostly a few exploratory sessions, prefer zellij/tmux pilot
-- if the work becomes many autonomous runs, add the control-plane daemon
-
-## Terminal backend: tmux, zellij, or direct PTY
-
-Terminal multiplexers should be optional backends, not the core architecture.
-
-### tmux / zellij backend
-
-Use an existing multiplexer for live attachment and remote resilience.
-
-Benefits:
-
-- attach/detach is solved
-- scrollback/capture is solved
-- remote network drops are survivable
-- multiple viewers are possible
-- user can still manually intervene with familiar terminal tools
-
-Costs:
-
-- extra adapter/config/keybinding layer
-- UI is constrained by tmux/zellij semantics
-- semantic replay/fork still needs Pi session data, not terminal scrollback
-
-### Direct PTY backend
-
-The Rust core can eventually run workers directly under a PTY.
-
-Benefits:
-
-- no tmux/zellij dependency
-- one integrated UI model
-- full control over recording, replay, resizing, and input routing
-
-Costs:
-
-- much more implementation complexity
-- must build attach/detach, scrollback, resize, signal handling, input forwarding, and remote streaming
-- remote sessions become fragile unless a daemon is running on the remote host
-- easy to accidentally rebuild a terminal multiplexer badly
-
-Recommendation:
-
-- do not make tmux/zellij mandatory in the domain model
-- for the v0 pilot, use tmux because it already solves live attach for current workflows
-- design a `TerminalBackend` interface with at least:
-  - `none` for RPC/headless workers
-  - `tmux` for current local/remote attach
-  - `zellij` later if its plugin model becomes compelling
-  - `pty` later only if replacing multiplexers is worth the scope
-
-Live attach is valuable, especially for remote sessions. If live remote attach matters, tmux/zellij usually reduce complexity rather than add it. Avoiding them means the Rust core must become a remote PTY multiplexer.
-
-## Non-functional requirements
-
-### Product / UX
-
-- keyboard-first
-- fast enough to feel terminal-native
-- glanceable status summaries
-- low context-switching cost
-- human legibility first for the control-plane UI
-- chat/orchestrator is optional, not mandatory for basic use
-
-### Technical
-
-- SQLite-first core with stable Elixir/Rust/TypeScript client boundaries
-- minimal dependencies
-- local-first operation
-- deterministic hot path; no LLM needed for navigation
-- resilient to missing metadata and non-Pi panes
-- no focus stealing except explicit popup open
-- stable rendering with dozens of sessions
-- clean separation between authority and clients
-
-### Safety / correctness
-
-- review views must clearly indicate trust level of diff provenance
-- state reconciliation should tolerate dead panes and crashed sessions
-- write actions should be explicit and auditable
-- the orchestrator session should not be able to silently mutate state without tool calls
-
-### Performance
-
-- popup open should feel effectively instant
-- session discovery should scale to at least dozens of sessions without lag
-- preview should avoid excessive shelling or large output churn
-- background publishers should have negligible overhead on active Pi sessions
-
-### Extensibility
-
-- support workgroups and roles from day 1 in the data model
-- allow future issue-tracker / Linear / GitHub integration
-- allow future worktree launcher / orchestrator features
-- allow later non-tmux clients
-
-## Runtime substrate checkpoint: Elixir/OTP vs Rust/TS
-
-OTP is Elixir/Erlang's production pattern set for supervised concurrent systems: lightweight processes, message mailboxes, registries, supervisors, restart strategy, application lifecycle, tracing/introspection, and hot-code upgrade/reload support.
-
-OpenAI Symphony's Elixir reference implementation polls Linear, creates a workspace per issue, launches `codex app-server`, keeps Codex working until done or blocked, exposes a Phoenix LiveView dashboard plus a JSON API, and has a `make all` command plus optional live end-to-end tests.
-
-OpenAI's Symphony README labels the Elixir implementation prototype software for evaluation and recommends implementing a hardened version from `SPEC.md`.
-
-The repo should not make the TUI depend on Elixir. The boundary is JSON/SQLite/control API: Elixir may own orchestration; Rust may own TUI; TypeScript may own Pi extension/web/control-panel views.
-
-The next implementation decision is a tiny vertical spike, not a rewrite. Build the smallest core that can run end-to-end and compare code/operational simplicity.
-
-### Spike acceptance
-
-- Start two dry-run child runs from a local task list.
-- Persist workflow/session/event rows.
-- Expose `status --json` or `/api/state` with bounded previews.
-- Mark one worker blocked and one done.
-- Simulate one crashed worker and show restart or explicit failed state.
-- Run one command that proves the whole path without a TUI.
-
-## Workstreams / packets
-
-### Workstream 1: `control-plane-core`
-
-Durable local control plane and orchestration surface. Owner paths:
-
-- `packages/symphony-lite-rs/**`
-- `packages/symphony-lite-elixir/**`
-- `packages/web-access/src/agent-cockpit*`
-- `docs/plans/pi-agent-control-plane.md`
-- `docs/plans/symphony-lite.md`
-- `docs/state/symphony-lite-direction.md`
-
-Tasks:
-
-- maintain SQLite/ledger data as source of truth for workflow runs, subagent starts, events, external sessions, and task packet state
-- run the Elixir/OTP vs Rust/TS vertical spike before committing to a runtime rewrite
-- expose one stable JSON/CLI/API contract for central Pi orchestrator, Rust TUI, and future TypeScript web/control-panel clients
-- support Pi RPC and Codex app-server runners
-- keep tmux/Zellij materialization lazy/optional for human attach/debugging
-- add task metadata ledger (`task_packets`, `packet_ownership`, `packet_proofs`, `packet_events`) imported from `TASKS.md` and existing packet-ledger source pointers
-- expose deterministic commands/endpoints: `import`, `next`, `claim`, `paths`, `proof add`, `status`
-- keep orchestrator Pi/OMP session as a client, not the authority
-
-### Workstream 2: `dream-memory`
-
-Delayed evidence/promotion stream. Skills, docs, lints, and memory are materialized only after evidence and review. Owner paths:
-
-- future `docs/plans/dream-memory/**`
-- `data/dream-memory/**` or equivalent repo-local ledger
-- future runtime module/package only after promotion, not inside the first runtime spike
-
-Tasks:
-
-- collect evidence in SQLite/ledger evidence/candidate/proposal tables or equivalent repo-local store
-- require review before promoting any candidate to memory/docs/lints/skills
-- materialize skills only after evidence and review, never from raw auto-generation
-- keep this stream separate from `control-plane-core`; it consumes control-plane events but does not own them
-- plan-level in `docs/state/symphony-lite-direction.md`; not currently implemented in the Rust package or Elixir spike
-
-### Link between workstreams
-
-`control-plane-core` produces durable workflow/subagent events; `dream-memory` may read those events as evidence, but promotion decisions write reviewed repo artifacts, not runtime state. Runtime state remains in the control-plane ledger; learning candidates remain in the Dream ledger.
+| Milestone | Slice | Acceptance proof |
+|---|---|---|
+| M1 | Event ledger + model-call telemetry: schema, Effect instrumentation library, OMP publisher extension writing rows. | Run a local fixture or OMP publisher simulation that writes `sessions`, `turns`, `model_calls`, provider calls, artifacts, and generic events to SQLite. Run CLI `status --json` or `model-calls --json` showing model/provider/token/cost/latency/outcome/contextManifest and raw-request artifact linkage. |
+| M2 | Status/query API plus first HTML log/session viewer. | Start daemon/API, run `status --json`, and open an HTML viewer that reads the same rows, shows high-level board, drills into one session, and opens a raw model request. SSE updates are visible during a fixture run. |
+| M3 | Provenance: commit trailers, commits table, archive/GC lifecycle. | Make a commit through the harness path with `Agent-Session`, `Agent`, and `Packet` trailers. Query `commits` by sha/session/packet. Run archive/GC dry-run showing active -> weekly compressed archive -> retained distillation hooks, with no transcripts stored in git. |
+| M4 | Fork + hot-swap experiments. | Cold-fork a packet from a transcript artifact into APFS clonefile workspace variants, vary context composition in `contextManifest`, compare telemetry rows, then pause/swap/resume an OMP-forked agent and show the `hotswap` event injected into its context/log. |
 
 ## Open questions
 
-1. Should the control-plane daemon be a long-running process or an on-demand local service started by the cockpit?
-2. What local IPC shape is best: JSON file + file watch, unix socket, or simple HTTP on localhost?
-3. How much session state should be persisted across restarts?
-4. Should workgroups be mostly manual at first, or inferred from session names/launch templates?
-5. When should worktrees become mandatory for certain kinds of sessions?
-6. Should orchestrator actions be approval-gated?
-7. Should the tmux status line itself reflect workgroups, or only the popup?
-8. How should remote tmux sessions or SSH-hosted workers fit into the model?
-
-## Vendor / research strategy
-
-We should likely vendor or mirror reference materials for design inspiration, but not depend on a foreign runtime for the v0 pilot.
-
-Recommended:
-
-- vendor the Symphony spec and README as reference material
-- adapt ideas into local TS architecture
-
-Possible layout:
-
-```txt
-vendor/symphony/
-  SPEC.md
-  elixir-README.md
-
-docs/research/pi-agent-control-plane/
-  README.md
-  source-urls.txt
-  *.md
-```
-
-## Elixir / Symphony adoption notes
-
-Elixir is useful for Symphony because it is excellent at long-running orchestration:
-
-- BEAM lightweight processes make many concurrent workers cheap.
-- OTP supervision trees make crash/restart behavior explicit.
-- Message passing fits an orchestrator that owns state and receives worker events.
-- Phoenix LiveView gives a dashboard/status surface with relatively little code.
-- Hot reload and live state inspection are strong during development.
-
-Do a bounded Elixir/OTP vertical spike before a rewrite. If the Elixir spike satisfies the acceptance checklist with less glue and clearer supervision than the existing Rust/TS path, promote Elixir to the orchestration core while keeping Rust TUI and TypeScript/Pi/web clients behind JSON/SQLite/API boundaries. If not, keep Rust/TS and copy only Symphony's architecture.
-
-## Symphony layer breakdown
-
-Symphony is easiest to understand as layered control-plane architecture, not as a UI project.
-
-### 1. Policy layer
-
-Repo-owned instructions that define how agents should do work.
-
-In Symphony:
-
-- `WORKFLOW.md` prompt body
-- team workflow rules
-- handoff states and proof expectations
-
-For Pi cockpit:
-
-- a repo-owned workflow/control-plane doc
-- role prompts for orchestrator, implementer, reviewer, QA
-- rules for when work is review-ready, blocked, stale, or done
-
-### 2. Configuration layer
-
-Typed settings derived from repo-owned config and environment.
-
-In Symphony:
-
-- parses `WORKFLOW.md` front matter
-- validates tracker/workspace/agent/codex settings
-- supports dynamic reload
-
-For Pi cockpit:
-
-- control-plane config
-- tmux/zellij adapter settings
-- workspace/worktree roots
-- concurrency/session limits
-- title/status preferences
-
-### 3. Integration layer
-
-Adapters to outside systems.
-
-In Symphony:
-
-- Linear client
-- tracker normalization
-- issue state fetch/update support
-
-For Pi cockpit:
-
-- tmux adapter
-- optional zellij adapter
-- Pi session-file reader
-- optional GitHub/Linear adapters later
-
-### 4. Coordination layer
-
-The deterministic brain that owns runtime state.
-
-In Symphony:
-
-- orchestrator poll loop
-- claimed/running/retry state
-- dispatch eligibility
-- reconciliation
-- backoff/stall handling
-
-For Pi cockpit:
-
-- live session registry
-- workgroup membership
-- stale/dead session reconciliation
-- blocked/review/done state
-- future worker dispatch
-
-### 5. Execution layer
-
-Creates workspaces and runs agents.
-
-In Symphony:
-
-- workspace manager
-- Codex app-server runner
-- hook execution
-- subprocess lifecycle
-
-For Pi cockpit:
-
-- launch Pi worker sessions
-- optional SDK/RPC-managed Pi runtime
-- optional tmux/zellij-attached worker process
-- worktree manager for isolated reviewable runs
-
-### 6. Observability / status layer
-
-Human and machine surfaces over runtime state.
-
-In Symphony:
-
-- structured logs
-- optional dashboard/API
-- runtime state JSON
-
-For Pi cockpit:
-
-- tmux status summary
-- popup cockpit
-- review mode
-- orchestrator Pi tools
-- optional local HTTP/JSON API
-
-### 7. Agentic manager layer
-
-This is not a separate Symphony layer in the spec, but it emerges in use: an agent can act as a manager over the deterministic service.
-
-For Pi cockpit:
-
-- the orchestrator Pi session should use tools against the control plane
-- it can group, rename, summarize, spawn reviewers, and explain progress
-- it should not be the authoritative runtime state itself
-
-## Symphony mapping for Pi
-
-We can reuse most of Symphony's shape with substitutions:
-
-| Symphony concept | Pi control-plane equivalent |
-|---|---|
-| Linear issue | local workgroup / task / future GitHub or Linear issue |
-| Orchestrator runtime state | TS control-plane registry |
-| Workspace manager | git worktree/session workspace manager |
-| Codex app-server agent runner | Pi SDK/RPC runner or tmux-attached Pi process |
-| Codex update events | Pi publisher extension events / RPC events |
-| Phoenix dashboard/API | tmux cockpit, orchestrator tools, optional local HTTP API |
-| WORKFLOW.md | repo-owned control-plane workflow/policy doc |
-
-The API/application layer should be replaceable. tmux or zellij can be the live attachment/status surface while the control plane stays independent.
-
-## Agent-runner abstraction
-
-To make the design agnostic to Pi or Codex, define a small control-plane-facing runner interface and implement adapters.
-
-The control plane should not know whether a worker is Codex, Pi, Claude Code, a shell command, or a remote SSH worker. It should only know about normalized lifecycle events and capabilities.
-
-```ts
-interface AgentRunner {
-  kind: string
-  capabilities: AgentRunnerCapabilities
-  start(input: AgentStartInput): Promise<AgentHandle>
-  attach?(target: AgentTarget): Promise<AttachInfo>
-  stop(target: AgentTarget, reason: string): Promise<void>
-  resume?(target: AgentTarget): Promise<AgentHandle>
-  fork?(target: AgentTarget, fork: ForkRequest): Promise<AgentHandle>
-}
-
-interface AgentRunnerCapabilities {
-  liveEvents: boolean
-  semanticReplay: boolean
-  forkSession: boolean
-  attachTerminal: boolean
-  worktreeIsolation: boolean
-  programmaticInput: boolean
-}
-```
-
-Normalized events:
-
-```ts
-type AgentEvent =
-  | { type: "started"; runId: string; target?: AgentTarget }
-  | { type: "heartbeat"; runId: string; at: string }
-  | { type: "status"; runId: string; status: SessionRecord["status"]; message?: string }
-  | { type: "tool"; runId: string; name: string; paths?: string[]; summary?: string }
-  | { type: "tokens"; runId: string; input?: number; output?: number; cost?: number }
-  | { type: "needs_input"; runId: string; reason: string }
-  | { type: "finished"; runId: string; outcome: "done" | "error" | "cancelled" }
-```
-
-Initial adapters:
-
-| Adapter | What it uses | Strength | Weakness |
-|---|---|---|---|
-| `pi-publisher` | existing interactive Pi + extension | easiest for current tmux workflow | cannot fully control process lifecycle |
-| `pi-rpc` | Pi RPC mode / SDK runtime | best for programmatic orchestration | less native interactive TUI unless mirrored into tmux |
-| `codex-app-server` | Codex app-server JSON-RPC | closest to Symphony reference model | Codex-specific |
-| `tmux-process` | tmux process + capture-pane/send-keys | works with anything terminal-based | semantic replay/fork are weak |
-| `zellij-process` | zellij plugin/process APIs | richer terminal plugin path | migration cost and keybinding changes |
-
-Design rule: the control plane is agent-runner agnostic; Pi is the first runner adapter, not a hard-coded assumption.
-
-## Three integration modes for Pi
-
-### 1. Observe existing Pi sessions
-
-- user starts Pi normally in tmux
-- Pi extension publishes metadata/events
-- cockpit can switch/preview/review based on registry + session files
-
-Best v0 pilot path.
-
-### 2. Launch Pi sessions from the control plane
-
-- control plane creates worktree/workspace
-- starts Pi in RPC/SDK or interactive mode
-- registers run/session lifecycle itself
-
-Best path for Symphony-like orchestration.
-
-### 3. Hybrid managed + attachable
-
-- control plane launches or owns the worker
-- tmux/zellij exposes the worker for human attach
-- Pi session files provide semantic replay/fork
-
-Likely long-term ideal.
-
-## Attach, replay, and fork model
-
-There are several levels of "view or control a session" and they should not be confused:
-
-1. **Live attach**
-   - tmux/zellij attaches to the running TTY process.
-   - Best for watching or manually steering an active session.
-
-2. **Terminal preview**
-   - `tmux capture-pane`/zellij equivalent shows recent terminal output.
-   - Useful for cockpit previews, but not semantic enough for review/fork.
-
-3. **Semantic replay**
-   - read Pi session JSONL via `SessionManager` and render the conversation/tool timeline.
-   - Best for review mode, summaries, and history browsing.
-
-4. **Fork/resume**
-   - use Pi session APIs/SDK to resume or fork from a saved session entry.
-   - This is more trustworthy than trying to reconstruct state from terminal output.
-
-5. **Runtime takeover / programmatic steering**
-   - requires a Pi RPC/SDK-run session, or a connector protocol in the live Pi process.
-   - Keyboard injection into tmux should be a fallback, not the primary orchestration API.
-
-Design rule: tmux/zellij is excellent for attachment and preview, but Pi session files and SDK/RPC are the better layer for replay, fork, and orchestration.
-
-## Near-term implementation sketch
-
-```txt
-packages/control-plane/
-  src/daemon.ts
-  src/types.ts
-  src/store.ts
-  src/server.ts
-  src/reconcile.ts
-  src/groups.ts
-
-packages/tmux-cockpit/
-  src/cli.ts
-  src/ui.ts
-  src/review.ts
-  src/hints.ts
-  src/tmux.ts
-
-packages/web-access/src/
-  control-plane-publisher.ts
-  orchestrator-tools.ts
-```
+1. Typed DB choice: `@effect/sql` vs Drizzle-with-Effect-wrapper. Criterion: weaker models must be able to write correct queries against it.
+2. Package location: new `packages/control-plane` vs extending `packages/web-access` cockpit code. Recommendation: new package with cockpit code as donor seams.
+3. Turso/libSQL trigger: second machine, first remote worker, or another threshold?
+4. Onboarding interview: how much of the thebes-style interview should be formalized vs left emergent?
 
 ## References
 
@@ -1326,10 +620,11 @@ Local research notes:
 - `docs/research/pi-agent-control-plane/odysseus0z-orchestration-notes.md`
 - `docs/research/pi-agent-control-plane/source-urls.txt`
 
-Primary public sources:
+Reference ideas only:
 
-- OpenAI, “Harness engineering: leveraging Codex in an agent-first world”
-- OpenAI, “An open-source spec for Codex orchestration: Symphony”
-- `openai/symphony` spec and reference implementation notes
-- Codex app docs on projects, worktrees, review, and parallel threads
-- George / `@odysseus0z` notes on Linear/worker orchestration and overnight ticket throughput
+- OpenAI harness engineering: agents use composable code primitives, not only UI/tool wrappers.
+- OpenAI Symphony: work items, isolated workspaces, supervised runners, and dashboard/API separation.
+- Codex app: projects, worktrees, review, parallel threads.
+- Dan Luu, filesystem error handling: rationale for SQLite over ad-hoc durable JSON files.
+- Lopopolo-style archive/GC lifecycle: active state, periodic archive, post-processing/distillation.
+- George / `@odysseus0z` notes on Linear/worker orchestration and overnight ticket throughput.
