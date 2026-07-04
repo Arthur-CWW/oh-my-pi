@@ -26,12 +26,13 @@ packages/control-plane/
     ledger.ts           # LedgerStore: open/close + typed write/query ops
     errors.ts           # TaggedErrorClass: StorageError, ArtifactError
     telemetry.ts        # (P3) Effect instrumentation: withModelCall etc.
-    cli.ts              # (P5) Effect CLI: status/model-calls/events --json
+    ingest.ts           # (P4) outbox tailer: JSONL -> idempotent batch inserts
+    cli.ts              # (P5) Effect CLI: status/model-calls/events/ingest --json
     index.ts            # public exports
   test/                 # bun test; fixtures under test/.tmp (repo-local, NOT os.tmpdir)
 ```
 
-DB location: every API takes explicit `dbPath`; `defaultLedgerPath()` = `$AGENT_CONTROL_PLANE_DB` else `~/.agent-control-plane/ledger.sqlite`. WAL mode on open.
+DB location: every API takes explicit `dbPath`; `defaultLedgerPath()` = `$AGENT_CONTROL_PLANE_DB` else `~/.agent-control-plane/ledger.sqlite`. Open with WAL + `synchronous=NORMAL`.
 
 ## Schema contract (migration 0001 creates all families)
 
@@ -40,7 +41,7 @@ Column types: ids/enums/hashes TEXT, timestamps INTEGER ms UTC, counts/costs INT
 - `sessions`: id PK, machine, harness, workspace, title, status, createdAt, updatedAt, meta JSON
 - `branches`: id PK, sessionId, parentBranchId?, kind (root|fork|resume|modelSwap|contextVariant|…), atTurn?, createdAt, meta JSON
 - `turns`: id PK, sessionId, branchId, seq, startedAt, endedAt?, contextTokens, toolCalls, toolCallSummary? JSON, editBytes, turnDurationMs, yieldKind, affectSelfReport?, affectSignals? JSON
-- `events`: id PK, ts, sessionId?, branchId?, packetId?, kind, payloadVersion, payload JSON — payload preserved verbatim, unknown kinds included
+- `events`: id PK (publisher-assigned, `${sessionId}:${seq}` when seq-scoped), ts, sessionId?, seq?, branchId?, packetId?, kind, payloadVersion, payload JSON — payload preserved verbatim, unknown kinds included. UNIQUE(sessionId, seq) partial index where seq NOT NULL.
 - `model_calls`: id PK + exactly the spec v1 required columns (ts, machine, session, branchId, agent, model, provider, effort, promptHash, systemPromptHash, skillProfile, contextManifest, packetId, tokensIn, tokensOut, cacheRead, cacheWrite, cost, latencyMs, outcome, errorClass?, retryOf?, fallbackFrom?, rawRequestArtifact, rawResponseArtifact)
 - `provider_calls`: id PK, ts, sessionId, branchId?, packetId?, provider, operation, inputHash, rawRequestArtifact?, latencyMs, outcome, errorClass?, cost?, usage? JSON
 - `artifacts`: id PK, ts, sessionId?, kind, contentPath?, contentInline?, sha256, bytes, retention, meta JSON — exactly one of contentPath/contentInline set
@@ -48,6 +49,18 @@ Column types: ids/enums/hashes TEXT, timestamps INTEGER ms UTC, counts/costs INT
 - `commits`: sha PK, sessionId, agentId?, packetId?, ts
 
 M1 write paths required for: sessions, branches, turns, events, model_calls, provider_calls, artifacts. packets/commits tables exist in schema (M3 fills them).
+
+### Ingestion contract (binding — spec v1 "Durability and ingestion contract", commit b13d33fb)
+
+No queue is ever the only copy of an event; write path is durable-source-first (outbox pattern):
+
+- Publishers NEVER write SQLite. They synchronously append JSONL lines to their own outbox file first; the tailer/daemon is the ledger's only writer.
+- Event ids are assigned at the publisher, never at ingest. Ledger inserts are `INSERT OR IGNORE` on the publisher-assigned key — idempotent write ops report `{inserted: boolean}`; at-least-once tailing + idempotent writes = effectively exactly-once.
+- Group commit: batch inserts (N events or T ms) run in ONE transaction. The store exposes a batch/transaction primitive (`ingestBatch(rows)` or `withTransaction`) for the tailer.
+- Wire format (outbox line, Effect Schema decoded): `{v: 1, kind: "session"|"branch"|"turn"|"event"|"modelCall"|"providerCall"|"artifact", sessionId, seq, ts, payload}` — `seq` is a per-outbox monotonic integer; unknown `kind`/future `v` lines are preserved as generic events, never dropped.
+- DST invariant: ingesting the same outbox twice (or resuming after a seeded crash mid-batch) yields no missing and no duplicated rows.
+
+M1 ships the one-shot catch-up tailer (`ingestOutbox(path, db)` + CLI `ingest`); the long-running daemon arrives in M2.
 
 ## LedgerStore API (the inter-packet contract)
 
