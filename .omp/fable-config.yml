@@ -39,7 +39,7 @@ task:
   enableLsp: true
   eager: always
   maxRecursionDepth: -1
-  softRequestBudget: 40
+  softRequestBudget: 80
   isolation:
     mode: apfs
 
