@@ -27,7 +27,7 @@ description = "Symlink repo-owned OMP wrapper, post-update maintenance, legacy s
 run = '''
 set -euo pipefail
 repo_root="${MISE_PROJECT_ROOT:-$(pwd)}"
-mkdir -p "${HOME}/.local/bin" "${HOME}/.omp/agent/bin" "${HOME}/.omp/agent/patches" "${HOME}/.omp/agent/skills/spec-driven-overlays"
+mkdir -p "${HOME}/.local/bin" "${HOME}/.omp/agent/bin" "${HOME}/.omp/agent/patches"
 ln -sfn "${repo_root}/.omp/bin/omp" "${HOME}/.local/bin/omp"
 ln -sfn "${repo_root}/.omp/bin/omp-post-update" "${HOME}/.local/bin/omp-post-update"
 ln -sfn "${repo_root}/.omp/agent/bin/omp-self-heal" "${HOME}/.omp/agent/bin/omp-self-heal"
@@ -35,7 +35,6 @@ ln -sfn "${repo_root}/.omp/agent/patches/beautiful-mermaid@1.1.3.patch" "${HOME}
 ln -sfn "${repo_root}/.omp/agent/patches/README.md" "${HOME}/.omp/agent/patches/README.md"
 ln -sfn "${repo_root}/.omp/patches/cmux-omp-resume-env.md" "${HOME}/.omp/agent/patches/cmux-omp-resume-env.md"
 ln -sfn "${repo_root}/.omp/patches/cmux-shell-noclobber.md" "${HOME}/.omp/agent/patches/cmux-shell-noclobber.md"
-ln -sfn "${repo_root}/skills/core/spec-driven-overlays/SKILL.md" "${HOME}/.omp/agent/skills/spec-driven-overlays/SKILL.md"
 echo "omp-link: linked OMP files from ${repo_root}"
 '''
 
@@ -44,7 +43,7 @@ description = "Build OMP from the local oh-my-pi fork and install it to ~/.bun/b
 run = '''
 set -euo pipefail
 repo_root="${MISE_PROJECT_ROOT:-$(pwd)}"
-package_dir="${repo_root}/oh-my-pi/packages/coding-agent"
+package_dir="${repo_root}/vendor/oh-my-pi/packages/coding-agent"
 artifact="${package_dir}/dist/omp"
 target="${HOME}/.bun/bin/omp"
 target_dir="$(dirname "${target}")"
@@ -122,7 +121,7 @@ cat <<'EOF'
 OMP updates are fork-based now; this task intentionally does not download or replace binaries.
 
 Manual update flow:
-  cd ~/agents/oh-my-pi
+  cd ~/agents/vendor/oh-my-pi
   git fetch upstream
   git merge upstream/main    # or rebase/cherry-pick deliberately
   # run focused fork tests for the merge
@@ -148,10 +147,6 @@ checks = {
     "~/.local/bin/omp": (Path.home() / ".local/bin/omp", repo_root / ".omp/bin/omp"),
     "~/.local/bin/omp-post-update": (Path.home() / ".local/bin/omp-post-update", repo_root / ".omp/bin/omp-post-update"),
     "~/.omp/agent/bin/omp-self-heal": (Path.home() / ".omp/agent/bin/omp-self-heal", repo_root / ".omp/agent/bin/omp-self-heal"),
-    "~/.omp/agent/skills/spec-driven-overlays/SKILL.md": (
-        Path.home() / ".omp/agent/skills/spec-driven-overlays/SKILL.md",
-        repo_root / "skills/core/spec-driven-overlays/SKILL.md",
-    ),
 }
 
 for label, (path, expected) in checks.items():
@@ -221,7 +216,7 @@ set -euo pipefail
 cat <<'EOF'
 omp-agent-heal is retired.
 
-OMP-local behavior now lives as commits in ~/agents/oh-my-pi. Update or repair the fork directly, then run:
+OMP-local behavior now lives as commits in ~/agents/vendor/oh-my-pi. Update or repair the fork directly, then run:
   mise run omp-install
 
 Historical overlay specs remain under .omp/patches/ and .omp/agent/patches/.
