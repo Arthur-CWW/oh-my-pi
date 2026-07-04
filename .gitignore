@@ -22,6 +22,7 @@ omp-session-*.html
 telegram_upload_session.session
 packages/spatial-audio-renderer/test-output/
 .omp/bin/*.bak.*
+apps/scene-playground/.tmp-test/
 
 codex-decomp/
 tmp/
