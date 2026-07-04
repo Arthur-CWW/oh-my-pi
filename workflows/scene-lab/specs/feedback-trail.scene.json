@@ -1,0 +1,57 @@
+{
+  "schemaVersion": "scene.v1",
+  "width": 720,
+  "height": 1280,
+  "fps": 30,
+  "durationSeconds": 10,
+  "background": "#08030f",
+  "timeline": { "bpm": 96 },
+  "assets": [
+    {
+      "id": "persona",
+      "kind": "image",
+      "path": "data/video-recreation/samuelszuchan/bootstrap-20260620/jimeng-persona/artifacts/82fdd5d8-37b7-405e-bc81-ca0d748eb821-00.png"
+    }
+  ],
+  "camera": {
+    "fov": 42,
+    "position": [0, 0, 8],
+    "lookAt": [0, 0, 0],
+    "tracks": []
+  },
+  "objects": [
+    {
+      "id": "persona-center",
+      "kind": "sprite",
+      "asset": "persona",
+      "size": [2.65, 3.35],
+      "position": [0, 0, 0.25],
+      "rotation": [0, 0, 0],
+      "scale": 1,
+      "opacity": 1,
+      "tracks": [
+        {
+          "prop": "scale",
+          "mode": "beat",
+          "beat": { "every": 2, "from": 1, "to": 1.06, "attack": 0.08, "decay": 0.38 }
+        },
+        {
+          "prop": "rotation.z",
+          "mode": "osc",
+          "osc": { "amp": 0.12, "freqBeats": 0.25, "phasePerClone": 0, "center": 0 }
+        },
+        {
+          "prop": "position.x",
+          "mode": "osc",
+          "osc": { "amp": 0.35, "freqBeats": 0.5, "phasePerClone": 0, "center": 0 }
+        }
+      ]
+    }
+  ],
+  "post": [
+    {
+      "pass": "feedback",
+      "params": { "decay": 0.62, "zoom": 1.002, "rotate": 0.004 }
+    }
+  ]
+}

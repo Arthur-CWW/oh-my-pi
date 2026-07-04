@@ -16,7 +16,7 @@ export type TrackProp =
   | "opacity"
 export type TrackMode = "keyframes" | "osc" | "beat"
 export type Ease = "linear" | "inOut" | "outElastic"
-export type PostPass = "bloom" | "chromaticAberration" | "vhs" | "glitch"
+export type PostPass = "bloom" | "chromaticAberration" | "vhs" | "glitch" | "feedback" | "displacement" | "halftone"
 
 export type Vec2 = readonly [number, number]
 export type Vec3 = readonly [number, number, number]
@@ -246,6 +246,9 @@ export const PostSchema = Schema.Struct({
     Schema.Literal("chromaticAberration"),
     Schema.Literal("vhs"),
     Schema.Literal("glitch"),
+    Schema.Literal("feedback"),
+    Schema.Literal("displacement"),
+    Schema.Literal("halftone"),
   ]),
   params: Schema.optional(EmptyJsonRecordSchema),
   beatReactive: Schema.optional(BeatReactiveSchema),

@@ -4,7 +4,7 @@ import { buildObject, disposeBuiltObject, type BuiltObject } from "./builders";
 import { cloneTransforms } from "./layouts";
 import { defaultCameraPosition, defaultLookAt, type SceneObjectSpec, type SceneSpec, type TrackProp } from "./spec";
 import { durationInFrames as framesForDuration, evaluateTrack, playbackFrameForNow } from "./timeline";
-import { bloomPass, chromaticAberrationPass, glitchPass, PostChain, vhsPass, type ConfiguredPass, type ScenePass } from "./post";
+import { bloomPass, chromaticAberrationPass, displacementPass, feedbackPass, glitchPass, halftonePass, PostChain, vhsPass, type ConfiguredPass, type ScenePass } from "./post";
 
 export interface SceneRuntimeGlobal {
   init(spec: unknown, opts: { width: number; height: number; fps: number; assetBaseUrl: string }): Promise<void>;
@@ -61,7 +61,7 @@ function renderFrame(frame: number): void {
   for (const objectSpec of current.spec.objects ?? []) {
     buildObjectClones(objectSpec, current, frame, timeSeconds, fps, scene, builtObjects);
   }
-  current.postChain.render(scene, camera, timeSeconds, current.spec.timeline);
+  current.postChain.render(scene, camera, timeSeconds, current.spec.timeline, frame);
   for (const built of builtObjects) disposeBuiltObject(built);
 }
 
@@ -177,6 +177,9 @@ function configuredPasses(spec: SceneSpec): ConfiguredPass[] {
     chromaticAberration: chromaticAberrationPass,
     vhs: vhsPass,
     glitch: glitchPass,
+    feedback: feedbackPass,
+    displacement: displacementPass,
+    halftone: halftonePass,
   };
   const configured: ConfiguredPass[] = [];
   for (const post of spec.post ?? []) {

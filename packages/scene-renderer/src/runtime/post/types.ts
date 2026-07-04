@@ -4,6 +4,7 @@ export interface PassContext {
   renderer: THREE.WebGLRenderer;
   readTarget: THREE.WebGLRenderTarget;
   writeTarget: THREE.WebGLRenderTarget;
+  historyTarget: THREE.WebGLRenderTarget | null;
   scene: THREE.Scene;
   camera: THREE.Camera;
   timeSeconds: number;

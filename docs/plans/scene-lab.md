@@ -212,6 +212,9 @@ Supported passes:
 - `chromaticAberration`: RGB splitting, Y2K lens stress, cheap 3D-website energy.
 - `vhs`: scanlines, tape noise, home-video grime.
 - `glitch`: displacement and digital tear.
+- `feedback`: trail/echo via previous-frame accumulation. Params: `decay`, `zoom`, `rotate`.
+- `displacement`: UV warp by procedural seeded noise. Params: `amplitude`, `scale`, `speed`, `seed`.
+- `halftone`: dot-screen with optional RGB separation. Params: `dotSize`, `angle`, `rgbSplit`.
 
 `beatReactive` maps a beat envelope onto one numeric pass parameter:
 
@@ -703,6 +706,61 @@ bun run --cwd packages/scene-renderer check -- --scene workflows/scene-lab/specs
 bun run --cwd packages/scene-renderer still -- --scene workflows/scene-lab/specs/video-texture-wall.json --frame 90 --out workflows/scene-lab/renders/video-texture-wall/still-000090.png
 bun run --cwd packages/scene-renderer render -- --scene workflows/scene-lab/specs/video-texture-wall.json --frames 75:135 --out workflows/scene-lab/renders/video-texture-wall
 bun run --cwd packages/scene-renderer render -- --scene workflows/scene-lab/specs/video-texture-wall.json --out workflows/scene-lab/renders/video-texture-wall
+```
+
+### F. Feedback trail
+
+Accumulates previous frames for motion trails and echo. The chain maintains a history buffer that records the fully processed frame after all passes; on the next frame the feedback pass blends the current scene with this history. History resets deterministically at frame 0.
+
+Params: `decay` (0–1, how much history bleeds through; default 0.65), `zoom` (per-frame scale of trail center, e.g. 1.002 for slow zoom-in; default 1.0), `rotate` (per-frame rotation in radians, e.g. 0.004 for slow spiral; default 0.0).
+
+```json
+{ "pass": "feedback", "params": { "decay": 0.62, "zoom": 1.002, "rotate": 0.004 } }
+```
+
+Commands:
+
+```sh
+bun run --cwd packages/scene-renderer check -- --scene workflows/scene-lab/specs/feedback-trail.scene.json
+bun run --cwd packages/scene-renderer render -- --scene workflows/scene-lab/specs/feedback-trail.scene.json --out workflows/scene-lab/renders/feedback-trail --still 4
+```
+
+### G. Displacement warp
+
+UV distortion by procedural seeded noise. Deterministic: noise is driven by spec time and a fixed `seed`, never `Math.random`. Beat-reactive on `amplitude` works naturally through the existing `beatReactive` spec field.
+
+Params: `amplitude` (displacement strength; default 0.008), `scale` (noise frequency; default 4.0), `speed` (time-driven noise evolution; default 0.3), `seed` (deterministic offset; default 0.0).
+
+```json
+{
+  "pass": "displacement",
+  "params": { "amplitude": 0.018, "scale": 5.0, "speed": 0.4, "seed": 42 },
+  "beatReactive": { "param": "amplitude", "every": 1, "amount": 0.012, "decay": 0.25 }
+}
+```
+
+Commands:
+
+```sh
+bun run --cwd packages/scene-renderer check -- --scene workflows/scene-lab/specs/displacement-warp.scene.json
+bun run --cwd packages/scene-renderer render -- --scene workflows/scene-lab/specs/displacement-warp.scene.json --out workflows/scene-lab/renders/displacement-warp --still 2
+```
+
+### H. Halftone dot screen
+
+Classic print look: dot-screen thresholding with optional RGB channel separation. Produces a newspaper/risograph texture. In RGB mode, three dot grids at 0°/60°/30° offsets create a rosette moiré.
+
+Params: `dotSize` (dot frequency per UV unit; default 24.0), `angle` (screen rotation in radians; default 0.785), `rgbSplit` (0 = monochrome, 1 = RGB separated screens; default 1.0).
+
+```json
+{ "pass": "halftone", "params": { "dotSize": 22, "angle": 0.3, "rgbSplit": 1 } }
+```
+
+Commands:
+
+```sh
+bun run --cwd packages/scene-renderer check -- --scene workflows/scene-lab/specs/halftone-print.scene.json
+bun run --cwd packages/scene-renderer render -- --scene workflows/scene-lab/specs/halftone-print.scene.json --out workflows/scene-lab/renders/halftone-print --still 2
 ```
 
 ## Style vocabulary

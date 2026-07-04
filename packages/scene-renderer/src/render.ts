@@ -48,11 +48,12 @@ async function main(): Promise<void> {
     await rm(join(outDir, "frames"), { recursive: true, force: true })
     if (args.stillSeconds !== undefined) {
       const frame = Math.round(args.stillSeconds * staged.spec.fps)
+      const needsWarmup = staged.spec.post.some((p: { pass: string }) => p.pass === "feedback")
       const capture = await captureFrames(staged.spec, {
         publicDir: staged.publicDir,
         runtimePath: args.runtimePath,
         outDir,
-        frameRange: [frame, frame],
+        frameRange: needsWarmup ? [0, frame] : [frame, frame],
       })
       const stillPath = join(outDir, `still-${args.stillSeconds}s.png`)
       await copyFile(join(capture.framesDir, `${String(frame).padStart(6, "0")}.png`), stillPath)

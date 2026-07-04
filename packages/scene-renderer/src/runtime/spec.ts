@@ -15,7 +15,7 @@ export type TrackProp =
   | "opacity";
 export type TrackMode = "keyframes" | "osc" | "beat";
 export type EaseName = "linear" | "inOut" | "outElastic";
-export type PostPassName = "bloom" | "chromaticAberration" | "vhs" | "glitch";
+export type PostPassName = "bloom" | "chromaticAberration" | "vhs" | "glitch" | "feedback" | "displacement" | "halftone";
 
 export interface SceneSpec {
   schemaVersion: "scene.v1";

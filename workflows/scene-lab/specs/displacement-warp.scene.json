@@ -1,0 +1,53 @@
+{
+  "schemaVersion": "scene.v1",
+  "width": 720,
+  "height": 1280,
+  "fps": 30,
+  "durationSeconds": 8,
+  "background": "#02020a",
+  "timeline": { "bpm": 132 },
+  "assets": [],
+  "camera": {
+    "fov": 46,
+    "position": [0, 0, 7],
+    "lookAt": [0, 0, 0],
+    "tracks": []
+  },
+  "objects": [
+    {
+      "id": "chrome-title",
+      "kind": "text",
+      "text": "SCENE LAB",
+      "font": "900 132px Impact, Arial Black, sans-serif",
+      "color": "#d9f7ff",
+      "size": [5.8, 1.2],
+      "position": [0, 0, 0],
+      "rotation": [0, 0, 0],
+      "scale": 1,
+      "opacity": 1,
+      "tracks": [
+        {
+          "prop": "position.y",
+          "mode": "keyframes",
+          "keyframes": [
+            { "t": 0, "v": 3.2, "ease": "outElastic" },
+            { "t": 0.75, "v": 0.2, "ease": "outElastic" },
+            { "t": 7.5, "v": 0.2, "ease": "linear" }
+          ]
+        },
+        {
+          "prop": "scale",
+          "mode": "beat",
+          "beat": { "every": 1, "from": 1, "to": 1.06, "attack": 0.035, "decay": 0.2 }
+        }
+      ]
+    }
+  ],
+  "post": [
+    {
+      "pass": "displacement",
+      "params": { "amplitude": 0.018, "scale": 5.0, "speed": 0.4, "seed": 42 },
+      "beatReactive": { "param": "amplitude", "every": 1, "amount": 0.012, "decay": 0.25 }
+    }
+  ]
+}
