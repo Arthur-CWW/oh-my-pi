@@ -81,3 +81,14 @@ bun src/cli.ts model-calls --json --db test/.tmp/fixture.sqlite
 - Tests use repo-local `test/.tmp/` fixture dirs (subagent sandbox blocks os.tmpdir SQLite writes); coordinator runs the gate.
 - No root package.json edits; no formatters; no project-wide gates.
 - No `any`/`unknown` outside typed boundary modules; raw JSON enters through Effect Schema only.
+
+## Day-one DST rules (binding — spec v1 "Testing strategy: scaled-down DST", commit e86e3022)
+
+M1-specific application of the spec rules; full survey `docs/research/dst-scaled-down.md`:
+
+- No `Date.now`/raw timers in `src/`: timestamps come from Effect `Clock` (`Clock.currentTimeMillis`) or an explicit `now` parameter on store ops.
+- No `Math.random`/bare `randomUUID` in `src/` hot paths: ids are caller-supplied, content-derived (sha256), or produced by an injectable generator seam.
+- All SQLite access goes through ONE choke-point module (`ledger.ts`) so a later buggify wrapper (seeded `SQLITE_BUSY`, crash-between-write-and-commit) wraps it without refactor. No stray `bun:sqlite` imports elsewhere.
+- `openLedger` must accept `:memory:` and the store must be providable as an Effect Layer (`LedgerStore` as `Context.Tag` service) so simulated layers can substitute it.
+- Tests using randomness must accept and print their seed (`Random.withSeed`); failures replay by seed. Deterministic fixture tests are exempt.
+- `always`/`sometimes` invariant harness and `fc.scheduler()` interleaving exploration arrive with the daemon/bus (M2) — M1 only guarantees the seams above.
