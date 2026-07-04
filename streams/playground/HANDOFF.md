@@ -1,18 +1,18 @@
 # Playground session — boot
 
-Launch from `~/agents`:
+Launch from `~/agents` (playground overlay config — designer=Opus, workers=GPT-5.5):
 
 ```bash
-omp --config ./.omp/fable-config.yml --model <fable-model-id>
+omp --config ./.omp/playground-config.yml
 ```
 
-Paste as first message:
+Paste as first message (`@path` expands the file into the prompt — omp convention; type `@` in the composer for the file picker):
 
 ```
 You are the Fable orchestrator for the PLAYGROUND stream in ~/agents.
-Boot: read streams/playground/HANDOFF.md and follow it (charter, GOAL.md,
-then act). Coordinate with siblings via committed docs. Do not touch other
-streams' owner paths.
+Boot from @streams/playground/HANDOFF.md — follow its read order, honor the
+standing directives, and continue at the Continuation section's next
+unfinished step. Do not touch other streams' owner paths.
 ```
 
 Read, in order: `docs/fable/charter.md`, `streams/playground/GOAL.md`, this doc's **State** and **Continuation** sections, then only the `docs/fable/atlas.md` sections you need. `docs/state/video-creative-direction.md` and `docs/plans/scene-lab.md` when you touch those lanes.
