@@ -176,6 +176,17 @@ L3 owns policy and supervision:
 
 The control plane mutates L2 through typed commands. Every mutation writes an event row.
 
+#### Coordination protocol (settled 2026-07-04)
+
+Agents self-coordinate; synchronization is a cost, not a virtue (Amdahl / USL coherency term: interrupt cost serializes the recipient and grows with participants). Escalation ladder, cheapest first — use the lowest rung that suffices:
+
+1. **Partition**: ownership zones via packet `ownerPaths`/`excludedPaths`; zero coordination inside a zone.
+2. **Pull at boundaries**: shared state lives in the git log, the spec, and the ledger; agents read at their own natural boundaries (turn start, packet dispatch, review gate). Commit messages are global state — write them to be read.
+3. **Optimistic**: proceed without asking; collisions surface at merge/review; the rare loser redoes.
+4. **Interrupt** (DM/steer): ONLY to prevent imminent, expensive, irreversible waste that no upcoming boundary would catch in time. The interrupt budget is near zero; each one must justify itself.
+
+Contract boundaries (zone A owns what zone B consumes wholesale) still synchronize — but by pull-at-boundary, never push-interrupt.
+
 ### L4: views/operators
 
 L4 clients are replaceable:
