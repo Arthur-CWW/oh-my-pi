@@ -194,7 +194,7 @@ import type { Goal, GoalModeState } from "../goals/state";
 import type { HindsightSessionState } from "../hindsight/state";
 import { type LocalProtocolOptions, resolveLocalUrlToPath } from "../internal-urls";
 import { IrcBus, type IrcMessage } from "../irc/bus";
-import { IrcExternalBus, resolveIrcExternalPeerName, type IrcExternalPeerState } from "../irc/bus-external";
+import { IrcExternalBus, type IrcExternalPeerState, resolveIrcExternalPeerName } from "../irc/bus-external";
 import { resolveMemoryBackend } from "../memory-backend";
 import { getMnemopiSessionState, type MnemopiSessionState, setMnemopiSessionState } from "../mnemopi/state";
 import { containsOrchestrate, ORCHESTRATE_NOTICE } from "../modes/orchestrate";
@@ -1908,6 +1908,18 @@ export class AgentSession {
 
 	getAgentId(): string | undefined {
 		return this.#agentId;
+	}
+
+	beginExternalIrcWaitingInput(): () => void {
+		const restoreState = this.#ircExternalPeerState ?? "working";
+		this.#updateExternalIrcPeerState("waiting_input");
+		let restored = false;
+		return () => {
+			if (restored) return;
+			restored = true;
+			if (this.#isDisposed || this.#ircExternalPeerState !== "waiting_input") return;
+			this.#updateExternalIrcPeerState(restoreState);
+		};
 	}
 
 	/** Advance the tool-choice queue and return the next directive for the upcoming LLM call. */

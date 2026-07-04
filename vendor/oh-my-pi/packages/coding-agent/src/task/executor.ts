@@ -64,6 +64,7 @@ import {
 	TASK_SUBAGENT_LIFECYCLE_CHANNEL,
 	TASK_SUBAGENT_PROGRESS_CHANNEL,
 	type TaskToolDetails,
+	type TimeoutPartialProgress,
 } from "./types";
 
 const MCP_CALL_TIMEOUT_MS = 60_000;
@@ -90,6 +91,43 @@ export function buildBudgetNotice(requests: number): string {
 function formatSalvageSnippet(text: string, maxLength = 500): string {
 	const flattened = text.replace(/\s+/g, " ").trim();
 	return flattened.length > maxLength ? `${flattened.slice(0, maxLength - 1)}…` : flattened;
+}
+
+export interface TimeoutToolCallEvent {
+	toolName: string;
+	args?: Record<string, unknown>;
+}
+
+export function extractTimeoutFileOps(
+	events: readonly TimeoutToolCallEvent[],
+): Pick<TimeoutPartialProgress, "filesCreated" | "filesModified"> {
+	const filesCreated = new Set<string>();
+	const filesModified = new Set<string>();
+	for (const event of events) {
+		const pathValue = event.args?.path;
+		if (typeof pathValue !== "string" || pathValue.length === 0) continue;
+		if (event.toolName === "write") {
+			filesCreated.add(pathValue);
+		} else if (event.toolName === "edit") {
+			filesModified.add(pathValue);
+		}
+	}
+	return {
+		filesCreated: [...filesCreated].sort(),
+		filesModified: [...filesModified].sort(),
+	};
+}
+
+export function buildTimeoutPartialProgress(
+	events: readonly TimeoutToolCallEvent[],
+	lastAssistantText?: string,
+	ircNote?: string,
+): TimeoutPartialProgress {
+	const partial: TimeoutPartialProgress = extractTimeoutFileOps(events);
+	const trimmedAssistantText = lastAssistantText?.trim();
+	if (trimmedAssistantText) partial.lastAssistantText = trimmedAssistantText;
+	if (ircNote) partial.ircNote = ircNote;
+	return partial;
 }
 
 /** Agent event types to forward for progress tracking. */
@@ -706,6 +744,8 @@ interface SubagentRunMonitor {
 	/** Best-effort capture of the last assistant text for cancelled-run salvage. */
 	captureSalvage(session: AgentSession): void;
 	lastAssistantSalvageText(): string | undefined;
+	/** Tool-call log captured from session events for timeout partial-progress assembly. */
+	toolCalls(): readonly TimeoutToolCallEvent[];
 	/** Final raw output: end-of-run assistant text when available, else accumulated chunks. */
 	rawOutput(): string;
 	scheduleProgress(flush?: boolean): void;
@@ -765,6 +805,7 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
 	let budgetSteerSent = false;
 	let budgetLimitExceeded = false;
 	let lastAssistantSalvageText: string | undefined;
+	const toolCallEvents: TimeoutToolCallEvent[] = [];
 
 	const requestAbort = (reason: AbortReason) => {
 		if (reason === "timeout") {
@@ -960,9 +1001,12 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
 			case "tool_execution_start": {
 				progress.toolCount++;
 				progress.currentTool = event.toolName;
-				progress.currentToolArgs = extractToolArgsPreview(
-					(event as { toolArgs?: Record<string, unknown> }).toolArgs || event.args || {},
-				);
+				const eventArgs =
+					(event as { args?: Record<string, unknown>; toolArgs?: Record<string, unknown> }).args ??
+					(event as { args?: Record<string, unknown>; toolArgs?: Record<string, unknown> }).toolArgs ??
+					{};
+				progress.currentToolArgs = extractToolArgsPreview(eventArgs);
+				toolCallEvents.push({ toolName: event.toolName, args: eventArgs });
 				progress.currentToolStartMs = now;
 				const intent = event.intent?.trim();
 				if (intent) {
@@ -1268,6 +1312,7 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
 		attach,
 		captureSalvage,
 		lastAssistantSalvageText: () => lastAssistantSalvageText,
+		toolCalls: () => toolCallEvents,
 		rawOutput: () => (finalOutputChunks.length > 0 ? finalOutputChunks.join("") : outputChunks.join("")),
 		scheduleProgress,
 		finish: () => {
@@ -1493,6 +1538,19 @@ async function finalizeRunResult(args: FinalizeRunArgs): Promise<SingleResult> {
 	}
 	const lastYield = yieldItems?.[yieldItems.length - 1];
 	const yieldAbortReason = lastYield?.status === "aborted" ? lastYield.error || "Subagent aborted task" : undefined;
+	const runtimeLimitExceeded = monitor.runtimeLimitExceeded();
+	const timeoutIrcRef = runtimeLimitExceeded ? AgentRegistry.global().get(id) : undefined;
+	const timeoutIrcNote =
+		timeoutIrcRef?.status === "idle" && timeoutIrcRef.session
+			? `Agent ${id} is idle and addressable via irc. Transcript: history://${id}`
+			: `Agent ${id} was aborted by timeout and torn down. Transcript: history://${id}`;
+	const timeoutPartial = runtimeLimitExceeded
+		? buildTimeoutPartialProgress(
+				monitor.toolCalls(),
+				salvageText ?? progress.recentOutput.find(line => line.trim().length > 0),
+				timeoutIrcNote,
+			)
+		: undefined;
 	const { abortedViaYield, hasYield } = finalized;
 	const { content: truncatedOutput, truncated } = truncateTail(rawOutput, {
 		maxBytes: MAX_OUTPUT_BYTES,
@@ -1521,7 +1579,6 @@ async function finalizeRunResult(args: FinalizeRunArgs): Promise<SingleResult> {
 	// while we were tearing the session down. The yield data is still surfaced
 	// to the caller via `progress.extractedToolData`, but the exit status must
 	// reflect the timeout so on-call doesn't mistake a stuck run for success.
-	const runtimeLimitExceeded = monitor.runtimeLimitExceeded();
 	if (runtimeLimitExceeded && exitCode === 0) {
 		exitCode = 1;
 	}
@@ -1580,6 +1637,7 @@ async function finalizeRunResult(args: FinalizeRunArgs): Promise<SingleResult> {
 		outputPath,
 		extractedToolData: progress.extractedToolData,
 		retryFailure: progress.retryFailure,
+		timeoutPartial,
 		outputMeta,
 	};
 }
@@ -2115,8 +2173,11 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			if (session) {
 				monitor.captureSalvage(session);
 				const registry = AgentRegistry.global();
-				if (aborted) {
-					// Hard abort (caller signal / wall-clock / budget): terminal teardown.
+				const timeoutKeptAlive = aborted && monitor.runtimeLimitExceeded() && worktree === undefined;
+				if (aborted && !timeoutKeptAlive) {
+					// Caller/budget aborts and isolated runtime timeouts are terminal
+					// teardowns. Non-isolated wall-clock timeouts keep the session live
+					// below so the parent can follow up over IRC with the partial state.
 					registry.setStatus(id, "aborted");
 					try {
 						await untilAborted(AbortSignal.timeout(5000), () => session.dispose());

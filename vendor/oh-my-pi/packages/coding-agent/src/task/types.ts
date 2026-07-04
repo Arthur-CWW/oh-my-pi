@@ -85,6 +85,12 @@ export const ROLE_INPUT_MAX = 256;
  * When task isolation is enabled, `isolated` joins the item shape (per-item in
  * batch form, top-level in the flat form via the spread).
  */
+const modelShape = {
+	model: z
+		.union([z.string().min(1), z.array(z.string().min(1)).min(1)])
+		.optional()
+		.describe("model selector override for this spawn; accepts provider/model, fuzzy selector, or model role"),
+};
 const taskItemShape = {
 	id: z.string().max(48).optional().describe("stable agent id; default generated"),
 	description: z.string().optional().describe("ui label, not seen by subagent"),
@@ -95,7 +101,15 @@ const taskItemShape = {
 		.describe(
 			"specialist role/expertise this subagent embodies (e.g. 'Rust async-runtime specialist'); shapes its identity and display name",
 		),
+	...modelShape,
 	assignment: z.string().describe("the work; self-contained instructions"),
+	timeoutSec: z
+		.number()
+		.int()
+		.min(60)
+		.max(3600)
+		.optional()
+		.describe("per-spawn wall-clock timeout in seconds; overrides task.maxRuntimeMs for this spawn only"),
 };
 const isolatedShape = {
 	isolated: z.boolean().optional().describe("run in isolated env; returns patches"),
@@ -118,21 +132,27 @@ export interface TaskItem {
 	description?: string;
 	/** Specialist role/expertise this subagent embodies; shapes its system-prompt identity and display name. */
 	role?: string;
+	/** Model selector override for this spawn. */
+	model?: string | string[];
 	/** The work; required by the schema. */
 	assignment?: string;
 	/** Run this spawn in an isolated worktree (batch form; flat form carries it top-level). */
 	isolated?: boolean;
+	/** Per-spawn wall-clock timeout in seconds; overrides task.maxRuntimeMs for this spawn only. */
+	timeoutSec?: number;
 }
 
 export const taskSchema = z.object({ ...agentShape, ...taskItemShape, ...isolatedShape });
 const taskSchemaNoIsolation = z.object({ ...agentShape, ...taskItemShape });
 const taskSchemaBatch = z.object({
 	...agentShape,
+	...modelShape,
 	...contextShape,
 	tasks: z.array(taskItemSchemaIsolated).describe("tasks to spawn; one subagent per item"),
 });
 const taskSchemaBatchNoIsolation = z.object({
 	...agentShape,
+	...modelShape,
 	...contextShape,
 	tasks: z.array(taskItemSchema).describe("tasks to spawn; one subagent per item"),
 });
@@ -165,6 +185,8 @@ export interface TaskParams {
 	description?: string;
 	/** Specialist role/expertise this subagent embodies; shapes its system-prompt identity and display name. */
 	role?: string;
+	/** Model selector default for all spawns in this call; per-item model wins in batch form. */
+	model?: string | string[];
 	/** The work (flat form). */
 	assignment?: string;
 	/** Batch form (`task.batch`): one subagent per item. */
@@ -173,6 +195,8 @@ export interface TaskParams {
 	context?: string;
 	/** Run in an isolated worktree (flat form; per-item in batch form). */
 	isolated?: boolean;
+	/** Per-spawn wall-clock timeout in seconds (flat form). */
+	timeoutSec?: number;
 }
 
 /**
@@ -326,6 +350,13 @@ export interface AgentProgress {
 	inflightTaskDetails?: TaskToolDetails;
 }
 
+export interface TimeoutPartialProgress {
+	filesCreated: string[];
+	filesModified: string[];
+	lastAssistantText?: string;
+	ircNote?: string;
+}
+
 /** Result from a single agent execution */
 export interface SingleResult {
 	index: number;
@@ -377,6 +408,8 @@ export interface SingleResult {
 		attempt: number;
 		errorMessage: string;
 	};
+	/** Partial progress recovered when a wall-clock timeout aborts the subagent. */
+	timeoutPartial?: TimeoutPartialProgress;
 	/** Output metadata for agent:// URL integration */
 	outputMeta?: { lineCount: number; charCount: number };
 }

@@ -2,8 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- Per-spawn `model` override for `task` tool items: each spawn item accepts an optional `model` selector that takes priority over agent-level `task.agentModelOverrides`. Invalid overrides are rejected at schedule time with a formatted error listing available models, and spawn receipts now include a resolved model chain (e.g., `explore → "Rust specialist" → openai/gpt-5.2:high`).
+
 ### Fixed
 
+- Ask-tool waits now publish `waiting_input` IRC presence while they are blocking for user input, then restore the prior state on answer or abort.
+- Fixed one-shot `omp irc` CLI commands hanging after opening the external IRC SQLite bus by closing CLI-owned bus handles after each command.
 - Agent Hub now opens parked-agent history read-only on Enter instead of reviving the agent, with `R` as the explicit revive shortcut from the history view.
 - Fixed session resume/listing recovery for JSONL journals where a title metadata record was written before the session header, and changed synchronous first-write rewrites to use atomic replacement instead of in-place truncation.
 
@@ -20,6 +26,7 @@
 
 ### Added
 
+- Added optional `timeoutSec` (60–3600s) to `task` tool spawns, overriding `task.maxRuntimeMs` per spawn; timeout results now surface recovered files created/modified and last assistant text instead of a bare timeout error, with IRC reachability noted when applicable.
 - Added Kagi browser-session web search using a signed-in Kagi account, with the API-key search route retained as a fallback.
 - Added Agent Hub model badges that show compact model names and subscription/API lanes for subagents.
 - Added GitHub Copilot user-global discovery to the `github` provider: it now loads user-global instructions from `~/.copilot/copilot-instructions.md`, honors the `COPILOT_HOME` relocation override, reads each directory listed in `COPILOT_CUSTOM_INSTRUCTIONS_DIRS` for an `AGENTS.md` and `.github/instructions/**/*.instructions.md` (matching Copilot CLI), scans the project `.github/instructions/` tree recursively, and surfaces VS Code Copilot prompt files (`*.prompt.md`) from `.github/prompts/` as slash commands. Previously only the project `.github/` tree was scanned, so Copilot CLI users' cross-repo config was silently ignored. Closes #1913, #1915, #1916.

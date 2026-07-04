@@ -493,7 +493,16 @@ const BODY_LINES_COLLAPSED = 2;
 const BODY_LINES_EXPANDED = 12;
 const BODY_LINE_WIDTH = 100;
 
-const PEER_STATUS_ORDER: Record<string, number> = { running: 0, working: 0, waiting_input: 1, idle: 2, parked: 3, unknown: 4, disconnected: 5, external: 6 };
+const PEER_STATUS_ORDER: Record<string, number> = {
+	running: 0,
+	working: 0,
+	waiting_input: 1,
+	idle: 2,
+	parked: 3,
+	unknown: 4,
+	disconnected: 5,
+	external: 6,
+};
 
 function ircGlyph(theme: Theme): string {
 	return theme.styledSymbol("tool.irc", "accent");

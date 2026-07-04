@@ -73,6 +73,86 @@ beforeAll(async () => {
 });
 
 describe("AskTool cancellation", () => {
+	it("publishes waiting IRC presence only while ask is blocking", async () => {
+		const transitions: string[] = [];
+		const tool = new AskTool(
+			createSession({
+				beginIrcWaitingInput: () => {
+					transitions.push("waiting");
+					return () => {
+						transitions.push("restore");
+					};
+				},
+			}),
+		);
+		const context = createContext({
+			select: async () => {
+				expect(transitions).toEqual(["waiting"]);
+				return "yes";
+			},
+		});
+
+		await tool.execute(
+			"call-presence",
+			{
+				questions: [
+					{
+						id: "confirm",
+						question: "Proceed?",
+						options: [{ label: "yes" }, { label: "no" }],
+					},
+				],
+			},
+			undefined,
+			undefined,
+			context,
+		);
+
+		expect(transitions).toEqual(["waiting", "restore"]);
+	});
+
+	it("restores waiting IRC presence when ask input aborts", async () => {
+		const transitions: string[] = [];
+		const tool = new AskTool(
+			createSession({
+				beginIrcWaitingInput: () => {
+					transitions.push("waiting");
+					return () => {
+						transitions.push("restore");
+					};
+				},
+			}),
+		);
+		const abortError = new Error("aborted");
+		abortError.name = "AbortError";
+		const context = createContext({
+			select: async () => {
+				expect(transitions).toEqual(["waiting"]);
+				throw abortError;
+			},
+		});
+
+		await expect(
+			tool.execute(
+				"call-presence-abort",
+				{
+					questions: [
+						{
+							id: "confirm",
+							question: "Proceed?",
+							options: [{ label: "yes" }, { label: "no" }],
+						},
+					],
+				},
+				undefined,
+				undefined,
+				context,
+			),
+		).rejects.toBeInstanceOf(ToolAbortError);
+
+		expect(transitions).toEqual(["waiting", "restore"]);
+	});
+
 	it("aborts the turn when the user cancels selection", async () => {
 		const tool = new AskTool(createSession());
 		const abort = vi.fn();

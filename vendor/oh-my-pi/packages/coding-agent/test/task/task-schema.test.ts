@@ -16,6 +16,20 @@ describe("task schema (single-spawn)", () => {
 		expect(parsed.success).toBe(true);
 	});
 
+	it("accepts timeoutSec within the per-spawn bounds", () => {
+		const parsed = taskSchema.safeParse({ agent: "explore", assignment: "Map the auth module.", timeoutSec: 600 });
+		expect(parsed.success).toBe(true);
+	});
+
+	it("rejects timeoutSec outside the per-spawn bounds", () => {
+		expect(
+			taskSchema.safeParse({ agent: "explore", assignment: "Map the auth module.", timeoutSec: 59 }).success,
+		).toBe(false);
+		expect(
+			taskSchema.safeParse({ agent: "explore", assignment: "Map the auth module.", timeoutSec: 3601 }).success,
+		).toBe(false);
+	});
+
 	it("requires agent", () => {
 		const parsed = taskSchema.safeParse({ assignment: "Map the auth module." });
 		expect(parsed.success).toBe(false);

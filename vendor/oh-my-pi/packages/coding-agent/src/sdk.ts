@@ -1505,6 +1505,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			getHindsightSessionState: () => session?.getHindsightSessionState(),
 			getMnemopiSessionState: () => session?.getMnemopiSessionState(),
 			getAgentId: () => resolvedAgentId,
+			beginIrcWaitingInput: () => session.beginExternalIrcWaitingInput(),
 			getToolByName: name => session?.getToolByName(name),
 			agentRegistry,
 			getSessionSpawns: () => options.spawns ?? "*",

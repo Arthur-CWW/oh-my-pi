@@ -1,5 +1,5 @@
 import { Args, Command, Flags } from "@oh-my-pi/pi-utils/cli";
-import { runIrcCommand, type IrcCliAction } from "../cli/irc-cli";
+import { type IrcCliAction, runIrcCommand } from "../cli/irc-cli";
 
 const ACTIONS: IrcCliAction[] = ["list", "send", "inbox"];
 

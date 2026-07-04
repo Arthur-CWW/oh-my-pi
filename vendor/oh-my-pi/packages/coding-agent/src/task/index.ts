@@ -20,7 +20,7 @@ import type { AgentTool, AgentToolResult, AgentToolUpdateCallback } from "@oh-my
 import type { Usage } from "@oh-my-pi/pi-ai";
 import { $env, logger, prompt, Snowflake } from "@oh-my-pi/pi-utils";
 import type { ToolSession } from "..";
-import { resolveAgentModelPatterns } from "../config/model-resolver";
+import { resolveAgentModelPatterns, resolveModelOverride } from "../config/model-resolver";
 import { MCPManager } from "../mcp/manager";
 import type { Theme } from "../modes/theme/theme";
 import planModeSubagentPrompt from "../prompts/system/plan-mode-subagent.md" with { type: "text" };
@@ -114,6 +114,51 @@ function addUsageTotals(target: Usage, usage: Partial<Usage>): void {
 	target.cost.cacheRead += cost.cacheRead;
 	target.cost.cacheWrite += cost.cacheWrite;
 	target.cost.total += cost.total;
+}
+
+function formatResolvedModelSelector(
+	model: { provider: string; id: string },
+	thinkingLevel: string | undefined,
+	explicitThinkingLevel: boolean,
+): string {
+	return explicitThinkingLevel && thinkingLevel
+		? `${model.provider}/${model.id}:${thinkingLevel}`
+		: `${model.provider}/${model.id}`;
+}
+
+export function formatModelChain(
+	agentName: string,
+	role: string | undefined,
+	resolvedModel: string | undefined,
+): string | undefined {
+	if (!resolvedModel) return undefined;
+	const roleLabel = role?.trim();
+	return roleLabel ? `${agentName} → "${roleLabel}" → ${resolvedModel}` : `${agentName} → ${resolvedModel}`;
+}
+
+export function formatAvailableModels(models: ReadonlyArray<{ provider: string; id: string }>): string {
+	if (models.length === 0) return "none";
+	const limit = 20;
+	const listed = models.slice(0, limit).map(model => `${model.provider}/${model.id}`);
+	return models.length > limit ? `${listed.join(", ")}, … (${models.length - limit} more)` : listed.join(", ");
+}
+
+export function formatInvalidModelOverrideError(args: {
+	agentName: string;
+	requested: string | string[];
+	resolvedPatterns: string[];
+	availableModels: ReadonlyArray<{ provider: string; id: string }>;
+}): string {
+	const requested = Array.isArray(args.requested) ? args.requested.join(", ") : args.requested;
+	const resolved = args.resolvedPatterns.length > 0 ? args.resolvedPatterns.join(", ") : "none";
+	return `Invalid model override for task agent "${args.agentName}": ${requested}. Resolved selector${args.resolvedPatterns.length === 1 ? "" : "s"}: ${resolved}; no available model matched. Valid model selectors include: ${formatAvailableModels(args.availableModels)}.`;
+}
+
+interface SpawnModelResolution {
+	modelOverride: string[];
+	parentActiveModelPattern?: string;
+	resolvedModel?: string;
+	error?: string;
 }
 
 // Re-export types and utilities
@@ -311,7 +356,16 @@ function resolveSpawnItems(params: TaskParams): TaskItem[] {
 	if (Array.isArray(params.tasks) && params.tasks.length > 0) {
 		return params.tasks;
 	}
-	return [{ id: params.id, description: params.description, role: params.role, assignment: params.assignment }];
+	return [
+		{
+			id: params.id,
+			description: params.description,
+			role: params.role,
+			model: params.model,
+			assignment: params.assignment,
+			timeoutSec: params.timeoutSec,
+		},
+	];
 }
 
 /**
@@ -326,7 +380,13 @@ function spawnParamsFor(params: TaskParams, item: TaskItem): TaskParams {
 	if (item.id !== undefined) spawn.id = item.id;
 	if (item.description !== undefined) spawn.description = item.description;
 	if (item.role !== undefined) spawn.role = item.role;
+	if (item.model !== undefined) {
+		spawn.model = item.model;
+	} else if (params.model !== undefined) {
+		spawn.model = params.model;
+	}
 	if (item.assignment !== undefined) spawn.assignment = item.assignment;
+	if (item.timeoutSec !== undefined) spawn.timeoutSec = item.timeoutSec;
 	if (params.context !== undefined) spawn.context = params.context;
 	if (item.isolated !== undefined) {
 		spawn.isolated = item.isolated;
@@ -504,6 +564,8 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 	readonly mergeCallAndResult = true;
 	readonly #discoveredAgents: AgentDefinition[];
 	readonly #blockedAgent: string | undefined;
+	/** Schedule-time model resolutions keyed by agentId, consumed by #runSpawn to avoid duplicate work. */
+	#preResolvedModels = new Map<string, SpawnModelResolution>();
 	/**
 	 * One semaphore per TaskTool instance (i.e. per session): bounds concurrent
 	 * subagents across parallel `task` calls within the session. Sized from
@@ -551,6 +613,39 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 	#getSpawnSemaphore(): Semaphore {
 		this.#spawnSemaphore ??= new Semaphore(this.session.settings.get("task.maxConcurrency"));
 		return this.#spawnSemaphore;
+	}
+
+	#resolveSpawnModel(agentName: string, effectiveAgent: AgentDefinition, params: TaskParams): SpawnModelResolution {
+		const agentModelOverrides = this.session.settings.get("task.agentModelOverrides");
+		const parentActiveModelPattern = this.session.getActiveModelString?.();
+		const modelOverride = resolveAgentModelPatterns({
+			settingsOverride: params.model ?? agentModelOverrides[agentName],
+			agentModel: effectiveAgent.model,
+			settings: this.session.settings,
+			activeModelPattern: parentActiveModelPattern,
+			fallbackModelPattern: this.session.getModelString?.(),
+		});
+		const modelRegistry = this.session.modelRegistry;
+		if (!modelRegistry) {
+			return { modelOverride, parentActiveModelPattern };
+		}
+		const resolved = resolveModelOverride(modelOverride, modelRegistry, this.session.settings);
+		const resolvedModel = resolved.model
+			? formatResolvedModelSelector(resolved.model, resolved.thinkingLevel, resolved.explicitThinkingLevel)
+			: undefined;
+		if (params.model !== undefined && !resolved.model) {
+			return {
+				modelOverride,
+				parentActiveModelPattern,
+				error: formatInvalidModelOverrideError({
+					agentName,
+					requested: params.model,
+					resolvedPatterns: modelOverride,
+					availableModels: modelRegistry.getAvailable(),
+				}),
+			};
+		}
+		return { modelOverride, parentActiveModelPattern, resolvedModel };
 	}
 
 	/**
@@ -676,14 +771,31 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 			},
 		});
 
-		const started: Array<{ agentId: string; jobId: string; description?: string }> = [];
+		const started: Array<{ agentId: string; jobId: string; description?: string; modelChain?: string }> = [];
 		const failedSchedules: string[] = [];
 		for (const spawn of spawns) {
 			try {
+				const spawnParams = spawnParamsFor(params, spawn.item);
+				const modelResolution = selectedAgent
+					? this.#resolveSpawnModel(agentLabel, selectedAgent, spawnParams)
+					: undefined;
+				if (modelResolution) {
+					spawn.progress.modelOverride = modelResolution.modelOverride;
+					spawn.progress.resolvedModel = modelResolution.resolvedModel;
+				}
+				if (modelResolution?.error) {
+					failedSchedules.push(`${spawn.agentId}: ${modelResolution.error}`);
+					spawn.progress.status = "failed";
+					settledCount += 1;
+					failedCount += 1;
+					continue;
+				}
+				if (modelResolution) this.#preResolvedModels.set(spawn.agentId, modelResolution);
+				const modelChain = formatModelChain(agentLabel, spawnParams.role, modelResolution?.resolvedModel);
 				const jobId = this.#registerSpawnJob({
 					manager,
 					toolCallId,
-					spawnParams: spawnParamsFor(params, spawn.item),
+					spawnParams,
 					agentId: spawn.agentId,
 					progress: spawn.progress,
 					ircEnabled,
@@ -695,8 +807,9 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 					},
 				});
 				if (started.length === 0) primaryJobId = jobId;
-				started.push({ agentId: spawn.agentId, jobId, description: spawn.item.description });
+				started.push({ agentId: spawn.agentId, jobId, description: spawn.item.description, modelChain });
 			} catch (error) {
+				this.#preResolvedModels.delete(spawn.agentId);
 				const message = error instanceof Error ? error.message : String(error);
 				failedSchedules.push(`${spawn.agentId}: ${message}`);
 				spawn.progress.status = "failed";
@@ -718,11 +831,12 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 		}
 
 		if (single) {
-			const { agentId, jobId, description } = started[0];
+			const { agentId, jobId, description, modelChain } = started[0];
 			const coordinationHint = ircEnabled
 				? `DM \`${agentId}\` via \`irc\` to coordinate while it runs; use \`job\` only to inspect (\`list\`), wait (\`poll\`), or cancel a stuck task.`
 				: `Use \`job\` to inspect (\`list\`), wait (\`poll\`), or cancel a stuck task.`;
 			const descriptionSuffix = description ? ` — ${description}` : "";
+			const modelSuffix = modelChain ? ` using ${modelChain}` : "";
 			onUpdate?.({
 				content: [{ type: "text", text: `Spawned agent \`${agentId}\`...` }],
 				details: buildAsyncDetails("running", jobId),
@@ -731,7 +845,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 				content: [
 					{
 						type: "text",
-						text: `Spawned agent \`${agentId}\` (job \`${jobId}\`)${descriptionSuffix}. The result will be delivered when it yields. ${coordinationHint}`,
+						text: `Spawned agent \`${agentId}\` (job \`${jobId}\`)${descriptionSuffix}${modelSuffix}. The result will be delivered when it yields. ${coordinationHint}`,
 					},
 				],
 				details: buildAsyncDetails("running", jobId),
@@ -746,9 +860,10 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 				? ` Failed to schedule ${failedSchedules.length} spawn${failedSchedules.length === 1 ? "" : "s"}: ${failedSchedules.join("; ")}.`
 				: "";
 		const startedListing = started
-			.map(({ agentId, jobId, description }) => {
+			.map(({ agentId, jobId, description, modelChain }) => {
 				const prefix = `- \`${agentId}\` (job \`${jobId}\`)`;
-				return description ? `${prefix} — ${description}` : prefix;
+				const chainSuffix = modelChain ? ` — ${modelChain}` : "";
+				return description ? `${prefix} — ${description}${chainSuffix}` : `${prefix}${chainSuffix}`;
 			})
 			.join("\n");
 		onUpdate?.({
@@ -1035,6 +1150,8 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 		}
 		const { agents, projectAgentsDir } = await discoverAgents(this.session.cwd);
 		const agentName = params.agent ?? "";
+		const preResolved = preAllocatedId ? this.#preResolvedModels.get(preAllocatedId) : undefined;
+		if (preAllocatedId) this.#preResolvedModels.delete(preAllocatedId);
 		const sharedContext = this.#isBatchEnabled() ? params.context?.trim() || undefined : undefined;
 		const assignment = (params.assignment ?? "").trim();
 		const isolationMode = this.session.settings.get("task.isolation.mode");
@@ -1094,17 +1211,14 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 				}
 			: agent;
 
-		// Apply per-agent model override from settings (highest priority)
-		const agentModelOverrides = this.session.settings.get("task.agentModelOverrides");
-		const settingsModelOverride = agentModelOverrides[agentName];
-		const parentActiveModelPattern = this.session.getActiveModelString?.();
-		const modelOverride = resolveAgentModelPatterns({
-			settingsOverride: settingsModelOverride,
-			agentModel: effectiveAgent.model,
-			settings: this.session.settings,
-			activeModelPattern: parentActiveModelPattern,
-			fallbackModelPattern: this.session.getModelString?.(),
-		});
+		const modelResolution = preResolved ?? this.#resolveSpawnModel(agentName, effectiveAgent, params);
+		if (modelResolution.error) {
+			return {
+				content: [{ type: "text", text: modelResolution.error }],
+				details: { projectAgentsDir, results: [], totalDurationMs: Date.now() - startTime },
+			};
+		}
+		const { modelOverride, parentActiveModelPattern, resolvedModel } = modelResolution;
 		const thinkingLevelOverride = effectiveAgent.thinkingLevel;
 
 		// Output schema priority: agent frontmatter > inherited parent session.
@@ -1230,6 +1344,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 				cost: 0,
 				durationMs: 0,
 				modelOverride,
+				resolvedModel,
 				description: params.description,
 			};
 			const emitProgress = () => {
@@ -1256,6 +1371,9 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 							);
 						}
 					: undefined;
+
+			const maxRuntimeMsOverride =
+				params.timeoutSec !== undefined ? Math.trunc(params.timeoutSec * 1000) : undefined;
 
 			const sharedRunOptions = {
 				cwd: this.session.cwd,
@@ -1306,6 +1424,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 				parentMnemopiSessionState: this.session.getMnemopiSessionState?.(),
 				parentTelemetry: this.session.getTelemetry?.(),
 				parentEvalSessionId,
+				maxRuntimeMs: maxRuntimeMsOverride,
 			};
 
 			const runTask = async (): Promise<SingleResult> => {

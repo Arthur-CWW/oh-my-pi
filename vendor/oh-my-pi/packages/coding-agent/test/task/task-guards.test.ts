@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import type { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { LoadExtensionsResult } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/types";
@@ -9,6 +9,7 @@ import { formatResultOutputFallback } from "@oh-my-pi/pi-coding-agent/task";
 import { runSubprocess } from "@oh-my-pi/pi-coding-agent/task/executor";
 import type { AgentDefinition } from "@oh-my-pi/pi-coding-agent/task/types";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
+import { logger } from "@oh-my-pi/pi-utils";
 
 /**
  * Contract: runaway-subagent guards.
@@ -140,6 +141,12 @@ const baseOptions = {
 };
 
 describe("runSubprocess request guards", () => {
+	beforeEach(() => {
+		vi.spyOn(logger, "warn").mockImplementation(() => {});
+		vi.spyOn(logger, "debug").mockImplementation(() => {});
+		vi.spyOn(logger, "error").mockImplementation(() => {});
+	});
+
 	afterEach(() => {
 		vi.restoreAllMocks();
 	});

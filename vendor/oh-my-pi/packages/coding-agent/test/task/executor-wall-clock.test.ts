@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import type { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { LoadExtensionsResult } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/types";
@@ -8,6 +8,7 @@ import type { AgentSession, AgentSessionEvent, PromptOptions } from "@oh-my-pi/p
 import { runSubprocess } from "@oh-my-pi/pi-coding-agent/task/executor";
 import type { AgentDefinition } from "@oh-my-pi/pi-coding-agent/task/types";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
+import { logger } from "@oh-my-pi/pi-utils";
 
 /**
  * Contract: when `task.maxRuntimeMs` is set, a subagent whose inference call
@@ -69,6 +70,12 @@ function mockCreateAgentSession(session: AgentSession) {
 }
 
 describe("runSubprocess wall clock (task.maxRuntimeMs)", () => {
+	beforeEach(() => {
+		vi.spyOn(logger, "warn").mockImplementation(() => {});
+		vi.spyOn(logger, "debug").mockImplementation(() => {});
+		vi.spyOn(logger, "error").mockImplementation(() => {});
+	});
+
 	afterEach(() => {
 		vi.restoreAllMocks();
 	});
@@ -258,6 +265,69 @@ describe("runSubprocess wall clock (task.maxRuntimeMs)", () => {
 		// Yield data is preserved for inspection — the regression was only in
 		// the exit status / abort flag, not in the captured payload.
 		expect(result.extractedToolData?.yield).toBeDefined();
+	});
+
+	it("carries timeout partial progress from synthetic session events", async () => {
+		const settings = Settings.isolated({ "task.maxRuntimeMs": 30 });
+		const { promise: hang, resolve: releaseHang } = Promise.withResolvers<void>();
+		let listenerRef: ((event: AgentSessionEvent) => void) | undefined;
+		const session: Partial<AgentSession> = {
+			state: { messages: [] } as never,
+			agent: { state: { systemPrompt: ["test"] } } as never,
+			extensionRunner: undefined as never,
+			sessionManager: { appendSessionInit: () => {} } as never,
+			getActiveToolNames: () => ["write", "edit", "yield"],
+			setActiveToolsByName: async () => {},
+			subscribe: (listener: (event: AgentSessionEvent) => void) => {
+				listenerRef = listener;
+				return () => {};
+			},
+			prompt: async () => {
+				listenerRef?.({
+					type: "tool_execution_start",
+					toolCallId: "tool-write",
+					toolName: "write",
+					args: { path: "src/new.ts", content: "new" },
+				} as unknown as AgentSessionEvent);
+				listenerRef?.({
+					type: "tool_execution_start",
+					toolCallId: "tool-edit",
+					toolName: "edit",
+					args: { path: "src/existing.ts" },
+				} as unknown as AgentSessionEvent);
+				listenerRef?.({
+					type: "message_update",
+					message: { role: "assistant", content: [] },
+					assistantMessageEvent: { type: "text_delta", delta: "Wrote src/new.ts and edited src/existing.ts." },
+				} as unknown as AgentSessionEvent);
+				await hang;
+				return true;
+			},
+			waitForIdle: async () => {
+				await hang;
+			},
+			getLastAssistantMessage: () => undefined,
+			abort: async () => {
+				releaseHang();
+			},
+			dispose: async () => {},
+		};
+		mockCreateAgentSession(session as AgentSession);
+
+		const result = await runSubprocess({
+			...baseOptions,
+			id: "subagent-timeout-partial",
+			settings,
+		});
+
+		expect(result.aborted).toBe(true);
+		expect(result.timeoutPartial).toEqual({
+			filesCreated: ["src/new.ts"],
+			filesModified: ["src/existing.ts"],
+			lastAssistantText: "Wrote src/new.ts and edited src/existing.ts.",
+			ircNote:
+				"Agent subagent-timeout-partial was aborted by timeout and torn down. Transcript: history://subagent-timeout-partial",
+		});
 	});
 
 	it("propagates per-turn context tokens onto the SingleResult", async () => {

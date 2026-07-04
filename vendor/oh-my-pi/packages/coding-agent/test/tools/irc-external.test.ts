@@ -3,9 +3,13 @@ import { afterEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { runIrcCommand, type IrcCliIo } from "@oh-my-pi/pi-coding-agent/cli/irc-cli";
+import { type IrcCliIo, runIrcCommand } from "@oh-my-pi/pi-coding-agent/cli/irc-cli";
 import { isSubcommand, resolveCliArgv } from "@oh-my-pi/pi-coding-agent/cli-commands";
-import { getIrcExternalPeerDisplayState, IrcExternalBus, resolveIrcExternalPeerName } from "@oh-my-pi/pi-coding-agent/irc/bus-external";
+import {
+	getIrcExternalPeerDisplayState,
+	IrcExternalBus,
+	resolveIrcExternalPeerName,
+} from "@oh-my-pi/pi-coding-agent/irc/bus-external";
 import { IrcTool } from "@oh-my-pi/pi-coding-agent/tools/irc";
 
 const cleanupRoots: string[] = [];
@@ -78,7 +82,11 @@ describe("IrcExternalBus", () => {
 		const sessionA = "session-a";
 		const sessionB = "session-b";
 		const peerA = resolveIrcExternalPeerName({ configuredName: "", cwd: "/tmp/project-a", sessionId: sessionA });
-		const peerB = resolveIrcExternalPeerName({ configuredName: "custom-b", cwd: "/tmp/project-b", sessionId: sessionB });
+		const peerB = resolveIrcExternalPeerName({
+			configuredName: "custom-b",
+			cwd: "/tmp/project-b",
+			sessionId: sessionB,
+		});
 		const busA = new IrcExternalBus(dbPath);
 		const busB = new IrcExternalBus(dbPath);
 		try {
@@ -130,7 +138,9 @@ describe("IrcExternalBus", () => {
 			bus.registerPeer({ sessionId: "session-b", name: "peer-b", cwd: "/tmp/project-b", pid: 222 });
 
 			const listIo = createCapturedIrcIo();
-			expect(runIrcCommand({ action: "list", args: [], flags: {}, bus, io: listIo.io, nowMs: Date.now() }).exitCode).toBe(0);
+			expect(
+				runIrcCommand({ action: "list", args: [], flags: {}, bus, io: listIo.io, nowMs: Date.now() }).exitCode,
+			).toBe(0);
 			expect(listIo.stdout).toContain("peer-b");
 			expect(listIo.stdout).toContain("/tmp/project-b");
 
@@ -148,7 +158,9 @@ describe("IrcExternalBus", () => {
 			expect(bus.unreadCount("peer-b")).toBe(1);
 
 			const peekIo = createCapturedIrcIo();
-			expect(runIrcCommand({ action: "inbox", args: ["peer-b"], flags: { peek: true }, bus, io: peekIo.io }).exitCode).toBe(0);
+			expect(
+				runIrcCommand({ action: "inbox", args: ["peer-b"], flags: { peek: true }, bus, io: peekIo.io }).exitCode,
+			).toBe(0);
 			expect(peekIo.stdout).toContain("human -> peer-b: hello from CLI");
 			expect(bus.unreadCount("peer-b")).toBe(1);
 
@@ -158,6 +170,34 @@ describe("IrcExternalBus", () => {
 			expect(bus.unreadCount("peer-b")).toBe(0);
 		} finally {
 			bus.close();
+		}
+	});
+
+	it("creates and closes an owned CLI bus when none is injected", async () => {
+		const dbPath = await tempDbPath();
+		const io = createCapturedIrcIo();
+		let createdBus: IrcExternalBus | undefined;
+
+		const result = runIrcCommand({
+			action: "list",
+			args: [],
+			flags: {},
+			createBus: () => {
+				createdBus = new IrcExternalBus(dbPath);
+				return createdBus;
+			},
+			io: io.io,
+			nowMs: Date.now(),
+		});
+
+		expect(result.exitCode).toBe(0);
+		expect(io.stdout).toContain("No IRC peers registered.");
+		expect(createdBus).toBeDefined();
+		const verifyBus = new IrcExternalBus(dbPath);
+		try {
+			expect(() => verifyBus.listPeers()).not.toThrow();
+		} finally {
+			verifyBus.close();
 		}
 	});
 
@@ -236,7 +276,9 @@ describe("IrcExternalBus", () => {
 			expect(bus.listPeers().map(peer => peer.name)).toEqual(["fresh"]);
 			const allPeers = bus.listPeers({ includeStale: true });
 			expect(allPeers.map(peer => peer.name).sort()).toEqual(["fresh", "stale"]);
-			expect(getIrcExternalPeerDisplayState(allPeers.find(peer => peer.name === "stale")!, nowMs)).toBe("disconnected");
+			expect(getIrcExternalPeerDisplayState(allPeers.find(peer => peer.name === "stale")!, nowMs)).toBe(
+				"disconnected",
+			);
 			expect(getIrcExternalPeerDisplayState(allPeers.find(peer => peer.name === "fresh")!, nowMs)).toBe("working");
 		} finally {
 			bus.close();
@@ -267,7 +309,9 @@ describe("IrcExternalBus", () => {
 					delivered INTEGER DEFAULT 0
 				)
 			`);
-			db.query("INSERT INTO peers (session_id, name, cwd, pid, last_seen) VALUES ($sessionId, $name, $cwd, $pid, $lastSeen)").run({
+			db.query(
+				"INSERT INTO peers (session_id, name, cwd, pid, last_seen) VALUES ($sessionId, $name, $cwd, $pid, $lastSeen)",
+			).run({
 				$sessionId: "legacy-session",
 				$name: "legacy",
 				$cwd: "/tmp/legacy",

@@ -343,6 +343,10 @@
 			"types": "./src/internal-urls/*.ts",
 			"import": "./src/internal-urls/*.ts"
 		},
+		"./irc/*": {
+			"types": "./src/irc/*.ts",
+			"import": "./src/irc/*.ts"
+		},
 		"./eval": {
 			"types": "./src/eval/index.ts",
 			"import": "./src/eval/index.ts"

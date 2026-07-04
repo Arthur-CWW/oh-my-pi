@@ -1,6 +1,6 @@
 import {
-	IRC_EXTERNAL_STALE_MS,
 	getIrcExternalPeerDisplayState,
+	IRC_EXTERNAL_STALE_MS,
 	IrcExternalBus,
 	type IrcExternalMessage,
 	type IrcExternalPeer,
@@ -22,6 +22,7 @@ export interface IrcCliCommandArgs {
 		peek?: boolean;
 	};
 	bus?: IrcExternalBus;
+	createBus?: () => IrcExternalBus;
 	io?: IrcCliIo;
 	nowMs?: number;
 }
@@ -36,19 +37,28 @@ const DEFAULT_IO: IrcCliIo = {
 };
 
 export function runIrcCommand(cmd: IrcCliCommandArgs): IrcCliCommandResult {
-	const bus = cmd.bus ?? IrcExternalBus.global();
+	const bus = cmd.bus ?? cmd.createBus?.() ?? new IrcExternalBus();
+	const ownsBus = !cmd.bus;
 	const io = cmd.io ?? DEFAULT_IO;
 	const nowMs = cmd.nowMs ?? Date.now();
 
-	switch (cmd.action) {
-		case "list":
-			return handleList(bus, io, nowMs);
-		case "send":
-			return handleSend(cmd, bus, io);
-		case "inbox":
-			return handleInbox(cmd, bus, io);
-		default:
-			return fail(io, `Unknown action: ${cmd.action}`, "Usage: omp irc list | send <peer> <message> [--from <name>] | inbox <peer> [--peek]");
+	try {
+		switch (cmd.action) {
+			case "list":
+				return handleList(bus, io, nowMs);
+			case "send":
+				return handleSend(cmd, bus, io);
+			case "inbox":
+				return handleInbox(cmd, bus, io);
+			default:
+				return fail(
+					io,
+					`Unknown action: ${cmd.action}`,
+					"Usage: omp irc list | send <peer> <message> [--from <name>] | inbox <peer> [--peek]",
+				);
+		}
+	} finally {
+		if (ownsBus) bus.close();
 	}
 }
 

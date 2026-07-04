@@ -545,6 +545,7 @@ export class AskTool implements AgentTool<typeof askSchema, AskToolDetails> {
 				...(option.description?.trim() ? { description: option.description.trim() } : {}),
 			}));
 			const optionLabels = questionOptions.map(getAskOptionLabel);
+			const restoreIrcPeerState = this.session.beginIrcWaitingInput?.();
 			try {
 				const { selectedOptions, customInput, navigation, cancelled, timedOut } = await askSingleQuestion(
 					ui,
@@ -565,6 +566,8 @@ export class AskTool implements AgentTool<typeof askSchema, AskToolDetails> {
 					throw new ToolAbortError("Ask input was cancelled");
 				}
 				throw error;
+			} finally {
+				restoreIrcPeerState?.();
 			}
 		};
 

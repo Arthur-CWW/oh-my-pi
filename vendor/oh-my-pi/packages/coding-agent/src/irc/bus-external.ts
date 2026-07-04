@@ -3,7 +3,6 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-
 export type IrcExternalPeerState = "unknown" | "working" | "waiting_input" | "idle";
 export type IrcExternalPeerDisplayState = IrcExternalPeerState | "disconnected";
 
@@ -84,7 +83,10 @@ export function getIrcExternalPeerDisplayState(
 }
 
 function sanitizePeerComponent(value: string): string {
-	const normalized = value.trim().replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
+	const normalized = value
+		.trim()
+		.replace(/[^A-Za-z0-9._-]+/g, "-")
+		.replace(/^-+|-+$/g, "");
 	return normalized || "omp";
 }
 
@@ -148,7 +150,12 @@ export class IrcExternalBus {
 	readonly #db: Database;
 
 	#ensurePeerStateColumns(): void {
-		const columns = new Set(this.#db.query<TableInfoRow, []>("PRAGMA table_info(peers)").all().map(column => column.name));
+		const columns = new Set(
+			this.#db
+				.query<TableInfoRow, []>("PRAGMA table_info(peers)")
+				.all()
+				.map(column => column.name),
+		);
 		if (!columns.has("state")) {
 			this.#db.run("ALTER TABLE peers ADD COLUMN state TEXT NOT NULL DEFAULT 'unknown'");
 		}
@@ -221,7 +228,17 @@ export class IrcExternalBus {
 				$pid: pid,
 				$lastSeen: lastSeen,
 			});
-		return this.#getPeerBySessionId(peer.sessionId) ?? { sessionId: peer.sessionId, name: peer.name, cwd: peer.cwd, pid, lastSeen, state: "unknown", stateTs: null };
+		return (
+			this.#getPeerBySessionId(peer.sessionId) ?? {
+				sessionId: peer.sessionId,
+				name: peer.name,
+				cwd: peer.cwd,
+				pid,
+				lastSeen,
+				state: "unknown",
+				stateTs: null,
+			}
+		);
 	}
 
 	heartbeat(sessionId: string): void {
@@ -254,7 +271,9 @@ export class IrcExternalBus {
 		const nowMs = Date.now();
 		const staleMs = options.staleMs ?? IRC_EXTERNAL_STALE_MS;
 		return this.#db
-			.query<PeerRow, []>("SELECT session_id, name, cwd, pid, last_seen, state, state_ts FROM peers ORDER BY last_seen DESC")
+			.query<PeerRow, []>(
+				"SELECT session_id, name, cwd, pid, last_seen, state, state_ts FROM peers ORDER BY last_seen DESC",
+			)
 			.all()
 			.filter(
 				row =>
@@ -270,7 +289,9 @@ export class IrcExternalBus {
 				"SELECT session_id, name, cwd, pid, last_seen, state, state_ts FROM peers WHERE name = $name ORDER BY last_seen DESC",
 			)
 			.all({ $name: name });
-		const row = rows.find(candidate => candidate.session_id !== options.excludeSessionId && isIrcExternalPeerFresh(candidate.last_seen));
+		const row = rows.find(
+			candidate => candidate.session_id !== options.excludeSessionId && isIrcExternalPeerFresh(candidate.last_seen),
+		);
 		return row ? toPeer(row) : undefined;
 	}
 
