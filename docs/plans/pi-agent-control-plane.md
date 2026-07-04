@@ -151,6 +151,17 @@ L2 owns:
 - commit/session provenance index
 - archive and GC lifecycle hooks
 
+#### Durability and ingestion contract (settled 2026-07-04)
+
+No queue is ever the only copy of an event. The write path is durable-source-first (outbox pattern), not fire-and-forget streaming:
+
+1. **Publishers append to their own local append-only log first**, synchronously, before any hand-off (OMP's JSONL session journal already is this; other adapters mirror it). Each publisher owns its file — no cross-process contention.
+2. **The daemon tails publisher logs into SQLite** and is the ledger's only writer. Daemon death loses nothing: restart, resume tailing.
+3. **Ingestion is idempotent**: every event carries a stable id (`sessionId`, `seq`); ledger insert is `INSERT OR IGNORE` on that unique key. At-least-once tailing + idempotent writes = effectively exactly-once. Event ids are assigned at the publisher, never at ingest.
+4. **Group commit**: the daemon batches (N events or T ms) into one transaction — fsync cost amortizes; hot loops grow the batch, never drop data. WAL + `synchronous=NORMAL`: process crash loses nothing; power loss may trim the last instants but never corrupts (publisher logs cover replay).
+5. **No two-phase commit anywhere**: one store is authoritative per datum, everything else is a rebuildable view. Atomicity needs that span "state + event" (e.g. packet claim + its event) are one transaction in the one ledger DB.
+6. **DST invariant**: after any seeded crash/kill/restart schedule, no publisher-log event is missing from the ledger and none is duplicated.
+
 ### L3: control plane
 
 L3 owns policy and supervision:
