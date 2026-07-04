@@ -1,0 +1,12 @@
+{
+  "_provenance": {
+    "retrieved_at": "2026-07-04",
+    "source_api": "https://api.fxtwitter.com/_xjdr/status/<id>",
+    "discovery": "https://nitter.tiekoetter.com/_xjdr/search?f=tweets&q=agents",
+    "note": "Two adjacent-day tweets (2026-03-29/30) on agent-scaling bottlenecks. Embedded quote object of vitrupo's Jeff Dean video trimmed to id/text; full video variant list elided."
+  },
+  "tweets": [
+    {"code":200,"message":"OK","tweet":{"url":"https://x.com/_xjdr/status/2038355375486017634","id":"2038355375486017634","text":"this is probably the main thing i fight with when trying to scale agents beyond a maybe 10 unique simultaneous and parallel sessions. if you let them run, the complexity comes at review and merge time. if you review at each turn, you are the bottleneck","author":{"screen_name":"_xjdr","id":"1731404872871006208","name":"xjdr"},"replies":20,"retweets":13,"likes":296,"bookmarks":98,"quotes":2,"created_at":"Sun Mar 29 20:39:26 +0000 2026","created_timestamp":1774816766,"views":39945,"is_note_tweet":false,"lang":"en","quote_id":"2038230613912887757","quote_author":"vitrupo","quote_text":"Jeff Dean says we’re going to have to re-engineer our tools because they were designed for human speed.\n\nAn AI agent can run 50x faster, but the tools it relies on don’t.\n\nSo even if the model gets infinitely fast, you only get 2-3x improvement overall.\n\nAmdahl’s law still applies.","source":"Twitter Web App","provider":"twitter"}},
+    {"code":200,"message":"OK","tweet":{"url":"https://x.com/_xjdr/status/2038665211503374448","id":"2038665211503374448","text":"new ai agent scaling limit reached: random disk access and disk i/o which means at a certain point these agents need to run on multiple machines but also stay in sync like they are on a single machine. \n... neat ...","author":{"screen_name":"_xjdr","id":"1731404872871006208","name":"xjdr"},"replies":21,"retweets":3,"likes":197,"bookmarks":40,"quotes":3,"created_at":"Mon Mar 30 17:10:37 +0000 2026","created_timestamp":1774890637,"views":17827,"is_note_tweet":false,"lang":"en","source":"Twitter Web App","twitter_card":"tweet","provider":"twitter"}}
+  ]
+}

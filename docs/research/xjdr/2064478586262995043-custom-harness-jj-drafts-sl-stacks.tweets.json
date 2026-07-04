@@ -1,0 +1,12 @@
+{
+  "_provenance": {
+    "retrieved_at": "2026-07-04",
+    "source_api": "https://api.fxtwitter.com/_xjdr/status/<id>",
+    "discovery": "https://nitter.tiekoetter.com/_xjdr/search?f=tweets&q=jj",
+    "note": "Two replies to @harjassgambhir describing the custom SCM (jj drafts + sl stacks) and harness setup."
+  },
+  "tweets": [
+    {"code":200,"message":"OK","tweet":{"url":"https://x.com/_xjdr/status/2064478586262995043","id":"2064478586262995043","text":"i use it with a custom claude code harness with special tools, i also use a custom SCM (not git or github) that is a combination of jj for drafts and sl for stacked commits. i have custom build tools and operations tools for managing experiments and k8s clusters but mostly just on my codebase(s) and my style for research, torch and rust code","author":{"screen_name":"_xjdr","id":"1731404872871006208","name":"xjdr"},"replies":2,"retweets":0,"likes":15,"bookmarks":8,"quotes":0,"created_at":"Tue Jun 09 22:43:45 +0000 2026","created_timestamp":1781045025,"views":1589,"is_note_tweet":true,"community_note":null,"lang":"en","replying_to":"harjassgambhir","replying_to_status":"2064476905206903220","source":"Twitter Web App","twitter_card":"tweet","color":null,"provider":"twitter","reposted_by":null}},
+    {"code":200,"message":"OK","tweet":{"url":"https://x.com/_xjdr/status/2064481515380306388","id":"2064481515380306388","text":"i have mostly used codex in the past but k2.6 worked best in claude code (it seemed to be trained quite well on it)\nfor the scm world, i wanted jj for the drafts and sl for the stack commits (git has a hard time scaling with lots and lots of commits on the same repo at the same time)\n\ni do a lot of agent centric development but that is not the primary driver for this setup","author":{"screen_name":"_xjdr","id":"1731404872871006208","name":"xjdr"},"replies":1,"retweets":0,"likes":7,"bookmarks":2,"quotes":0,"created_at":"Tue Jun 09 22:55:24 +0000 2026","created_timestamp":1781045724,"views":343,"is_note_tweet":true,"community_note":null,"lang":"en","replying_to":"harjassgambhir","replying_to_status":"2064479834085191832","source":"Twitter Web App","twitter_card":"tweet","color":null,"provider":"twitter","reposted_by":null}}
+  ]
+}

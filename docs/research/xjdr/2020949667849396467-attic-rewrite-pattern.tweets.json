@@ -1,0 +1,11 @@
+{
+  "_provenance": {
+    "retrieved_at": "2026-07-04",
+    "source_api": "https://api.fxtwitter.com/_xjdr/status/2020949667849396467",
+    "discovery": "https://nitter.tiekoetter.com/_xjdr/search?f=tweets&q=agents",
+    "note": "Feb 9 2026 reply to @martin_casado: the attic/ rewrite pattern for fighting slop/complexity explosion in agent-built repos."
+  },
+  "tweets": [
+    {"code":200,"message":"OK","tweet":{"url":"https://x.com/_xjdr/status/2020949667849396467","id":"2020949667849396467","text":"the most effective way i've found to handle this sounds insane but its the only thing i've found to work consistently. i basically copy the existing repo to a dir called attic/ and i start from scratch. i then have the fleet of agents review the attic/ code and write tests and specs and contracts to define the core parts and features and functionality. then we make a clean and from scratch implementation but with clear and consistent instructions to optimize for 'elegant minimalism' . i .gitignore attic/ and keep it around for when the new repo is missing something or has inevitable regressions. for large repos (nmoe specifically) i have had to do this 3 or 4 times before i reach a new equilibrium where the models stop fucking things up and i have the tools and automation in place to prevent the complexity / slop explosion.","author":{"screen_name":"_xjdr","id":"1731404872871006208","name":"xjdr"},"replies":12,"retweets":6,"likes":199,"bookmarks":143,"quotes":3,"created_at":"Mon Feb 09 19:55:22 +0000 2026","created_timestamp":1770666922,"views":7941,"is_note_tweet":true,"lang":"en","replying_to":"martin_casado","replying_to_status":"2020389660858700268","source":"Twitter Web App","provider":"twitter"}}
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "_provenance": {
+    "retrieved_at": "2026-07-04",
+    "source_api": "https://api.fxtwitter.com/_xjdr/status/2067016286237045095",
+    "discovery": "https://nitter.tiekoetter.com/_xjdr/search?f=tweets&q=agents",
+    "note": "ncode TUI open-source release (Jun 16 2026) + follow-up architecture-highlights reply 2067018519049564160 (full text preserved in the .md; raw fetch of the reply skipped to limit volume; text captured verbatim from nitter). Quote object trimmed to id/text (tweet 2065855561552588895)."
+  },
+  "tweets": [
+    {"code":200,"message":"OK","tweet":{"url":"https://x.com/_xjdr/status/2067016286237045095","id":"2067016286237045095","text":"Ok i did it . this is Noumena's version of your favorite, ai code TUI . \n\nI rebuilt the REPL engine to be event based\nadded a new rust markdown rendering stack that considerably increased performance and stability\ni added a rust OpenAI compat websocket client\ni added a handful of tools and exposed a handfull of others that were hidden by default\n\nthis system is optimized for our internal inference system and models but i have recently tested it with a vanilla kimi k2.7 and it works quite well. over the next few days we will make the Noumena Inference Engine available and serve at least the k2.7 model . this project will support native noumena code (ncode) login and keys when its available.\n\neither way, i hope y'all enjoy and find this useful. this is the first of several things i hope to launch this week \n\nhttps://github.com/Noumena-Network/code","author":{"screen_name":"_xjdr","id":"1731404872871006208","name":"xjdr"},"replies":25,"retweets":31,"likes":392,"bookmarks":185,"quotes":5,"created_at":"Tue Jun 16 22:47:40 +0000 2026","created_timestamp":1781650060,"views":55652,"is_note_tweet":true,"lang":"en","quote_id":"2065855561552588895","quote_text":"based on everything that has happened over the last week (and year really) and how good k2.7 is in this harness, it is getting tempting to make this available to y'all","card":{"url":"https://github.com/Noumena-Network/code","title":"GitHub - Noumena-Network/code: Noumena's internal version of your favorite coding tui but improved...","domain":"github.com"},"source":"Twitter Web App","provider":"twitter"}}
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "_provenance": {
+    "retrieved_at": "2026-07-04",
+    "source_api": "https://api.fxtwitter.com/_xjdr/status/1958676179525017602",
+    "discovery": "https://nitter.tiekoetter.com/_xjdr/search?f=tweets&q=jj",
+    "note": "Context item from 2025-08-21 (outside the 2-month window; earliest public statement of the SCM design he later built). Quote object trimmed to id/author/text."
+  },
+  "tweets": [
+    {"code":200,"message":"OK","tweet":{"url":"https://x.com/_xjdr/status/1958676179525017602","id":"1958676179525017602","text":"the answer is a real full OSS sapling / mononoke / edenfs OR jj with a proper backend and a FUSE filesystem (like edenfs / CITC https://cacm.acm.org/research/why-google-stores-billions-of-lines-of-code-in-a-single-repository/ )","author":{"screen_name":"_xjdr","id":"1731404872871006208","name":"xjdr"},"replies":0,"retweets":0,"likes":8,"bookmarks":6,"quotes":0,"created_at":"Thu Aug 21 23:42:46 +0000 2025","created_timestamp":1755819766,"views":4157,"is_note_tweet":false,"lang":"en","quote_id":"1958675414941147211","quote_author":"khoomeik","quote_text":"there might be room for a new version control system (or at the very least, a few new git features) in the vibecoding era\n\nalmost every good engineer i know currently maintains multiple copies of their repo as worktrees for background agents like claude code","source":"Twitter Web App","provider":"twitter"}}
+  ]
+}

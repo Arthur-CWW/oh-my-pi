@@ -1,0 +1,12 @@
+{
+  "_provenance": {
+    "retrieved_at": "2026-07-04",
+    "source_api": "https://api.fxtwitter.com/_xjdr/status/<id>",
+    "discovery": "https://nitter.tiekoetter.com/_xjdr timeline",
+    "note": "Jun 29 2026 self-thread: codex drives ncode UI testing via tmux + why-codex reply."
+  },
+  "tweets": [
+    {"code":200,"message":"OK","tweet":{"url":"https://x.com/_xjdr/status/2071449740882133145","id":"2071449740882133145","text":"having codex drive ncode ui testing via tmux so i dont have to ? priceless (cloud sessions coming soon...)","author":{"screen_name":"_xjdr","id":"1731404872871006208","name":"xjdr"},"replies":2,"retweets":1,"likes":57,"bookmarks":6,"quotes":0,"created_at":"Mon Jun 29 04:24:38 +0000 2026","created_timestamp":1782707078,"views":5380,"is_note_tweet":false,"lang":"en","media":{"photos":[{"type":"photo","id":"2071449453308030976","url":"https://pbs.twimg.com/media/HL9ETYKaMAAgFDj.jpg?name=orig","width":1062,"height":432}]},"source":"Twitter Web App","provider":"twitter"}},
+    {"code":200,"message":"OK","tweet":{"url":"https://x.com/_xjdr/status/2071449742274609607","id":"2071449742274609607","text":"why codex and not ncode? well the harness mutates both at the same time so its simpler for me (currently) to have one test the other","author":{"screen_name":"_xjdr","id":"1731404872871006208","name":"xjdr"},"replies":0,"retweets":0,"likes":12,"bookmarks":1,"quotes":0,"created_at":"Mon Jun 29 04:24:38 +0000 2026","created_timestamp":1782707078,"views":1610,"is_note_tweet":false,"lang":"en","replying_to":"_xjdr","replying_to_status":"2071449740882133145","source":"Twitter Web App","provider":"twitter"}}
+  ]
+}

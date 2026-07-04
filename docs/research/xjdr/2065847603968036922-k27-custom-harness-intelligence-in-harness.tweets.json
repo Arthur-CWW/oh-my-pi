@@ -1,0 +1,11 @@
+{
+  "_provenance": {
+    "retrieved_at": "2026-07-04",
+    "source_api": "https://api.fxtwitter.com/_xjdr/status/2065847603968036922",
+    "discovery": "https://nitter.tiekoetter.com/_xjdr/search?f=tweets&q=harness",
+    "note": "Jun 13 2026: k2.7 assessment in his custom claude code harness; first public naming of the ncode SCM. Companion replies 2065849414724517930 ('intelligence is in the harness') and 2065855561552588895 captured verbatim from nitter in the .md; quote object of 2065667731119354051 trimmed to id/text."
+  },
+  "tweets": [
+    {"code":200,"message":"OK","tweet":{"url":"https://x.com/_xjdr/status/2065847603968036922","id":"2065847603968036922","text":"2.7-Code in claude code with my custom inference harness works surprisingly well. im comparing it to my k2.6 which was fine tuned for this harness as well as my recent runs of fable (at least the ones that succeeded) and it stacks up favorably. where k2.6 felt very much like opus, k2.7 is kind of its own thing (for better and for worse) . its more terse, more argumentative and overall 'smarter' (at least for the use cases i've tried it on already) . Moonshot did a very very good job with the post training on this, i am very impressed with their work. While k2.7 would certainly benefit from a FT run specifically on my claude code harness and my new scm system (called ncode), i am going to continue to use it as is for a while instead of falling back to the k2.6 ft (which is about the highest endorsement i can give) .","author":{"screen_name":"_xjdr","id":"1731404872871006208","name":"xjdr"},"replies":13,"retweets":11,"likes":252,"bookmarks":52,"quotes":4,"created_at":"Sat Jun 13 17:23:45 +0000 2026","created_timestamp":1781371425,"views":20260,"is_note_tweet":true,"lang":"en","quote_id":"2065667731119354051","quote_text":"Lets see how this stacks up  . high hopes","source":"Twitter Web App","provider":"twitter"}}
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "_provenance": {
+    "retrieved_at": "2026-07-04",
+    "source_api": "https://api.fxtwitter.com/_xjdr/status/2071835604095300079",
+    "discovery": "https://nitter.tiekoetter.com/_xjdr timeline",
+    "note": "Jun 30 2026: final GLM 5.2 serving stats, quoting the Jun 29 end-of-free announcement (quote object preserved inline as returned)."
+  },
+  "tweets": [
+    {"code":200,"message":"OK","tweet":{"url":"https://x.com/_xjdr/status/2071835604095300079","id":"2071835604095300079","text":"final GLM 5.2 served stats:\n~12000 unique api keys served\n~300B tokens total\n232 tok/s/gpu output average\n431 tok/s/gpu output max sustained\n2.1 sec TTFT overage (1M ctx)\n61 sec p95 TTFT  (1M ctx)\n81k tok average input size\n41% cache hit rate\n0 chat logs kept (dont be evil)\nthanks again everyone and hopefully you found the service and tokens useful","author":{"screen_name":"_xjdr","id":"1731404872871006208","name":"xjdr"},"replies":31,"retweets":7,"likes":415,"bookmarks":76,"quotes":0,"created_at":"Tue Jun 30 05:57:55 +0000 2026","created_timestamp":1782799075,"views":43713,"is_note_tweet":true,"lang":"en","quote_id":"2071677153285210283","quote_text":"Today marks the end of the free GLM 5.2 with ncode. i hope y'all enjoyed the tokens and found some of our tools useful.","quote_created_at":"Mon Jun 29 19:28:17 +0000 2026","source":"Twitter Web App","provider":"twitter"}}
+  ]
+}
