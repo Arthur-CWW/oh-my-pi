@@ -677,3 +677,4 @@ Influences (where the ideas came from):
 - Dan Luu, filesystem error handling — rationale for SQLite over ad-hoc durable JSON files.
 - Lopopolo — archive/GC lifecycle: active state, periodic archive, post-processing/distillation.
 - George / `@odysseus0z` — Linear/worker orchestration and overnight ticket throughput.
+- Isaac Yonemoto / `@DNAutics` on Rivet Actors — "links and monitors make all the difference; the BEAM is not an actor system": the OTP-lite claim for Effect fibers is honest only because structured concurrency gives links (child failure propagates to parent scope) and `Fiber.await`/`onExit` give monitors (observe death without propagating); the real unclosed gap vs OTP is distribution/location transparency. Found report: `docs/research/otp-vs-effect-tweet.md`.
