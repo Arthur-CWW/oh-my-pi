@@ -1,0 +1,67 @@
+{
+  "schemaVersion": "scene.v1",
+  "width": 720,
+  "height": 1280,
+  "fps": 30,
+  "durationSeconds": 12,
+  "background": "#08080a",
+  "timeline": { "bpm": 90 },
+  "camera": { "fov": 50, "position": [0, 0, 8], "lookAt": [0, 0, 0] },
+  "assets": [],
+  "objects": [
+    {
+      "id": "the-turns",
+      "kind": "text",
+      "text": "EVERY TURN",
+      "font": "700 90px Georgia, serif",
+      "color": "#e8e4da",
+      "size": [6, 1.4],
+      "position": [0, 1.1, 0],
+      "opacity": 0.92,
+      "clone": { "count": 9, "layout": "line", "spacing": 0.34, "seed": 5, "stagger": 0.22 },
+      "tracks": [
+        { "prop": "position.z", "mode": "osc", "osc": { "amp": 2.6, "freqBeats": 0.25, "phasePerClone": 0.55, "center": -3.2 } },
+        { "prop": "opacity", "mode": "osc", "osc": { "amp": 0.38, "freqBeats": 0.25, "phasePerClone": 0.55, "center": 0.5 } }
+      ]
+    },
+    {
+      "id": "the-fork",
+      "kind": "text",
+      "text": "A FORK",
+      "font": "800 130px Georgia, serif",
+      "color": "#ff4b3e",
+      "size": [5, 1.6],
+      "position": [0, -1.3, 0.5],
+      "opacity": 1,
+      "tracks": [
+        { "prop": "scale", "mode": "beat", "beat": { "every": 2, "from": 1.0, "to": 1.14, "attack": 0.04, "decay": 0.5 } },
+        { "prop": "position.y", "mode": "keyframes", "keyframes": [
+          { "t": 0, "v": -4.2, "ease": "outElastic" },
+          { "t": 1.4, "v": -1.3, "ease": "outElastic" },
+          { "t": 12, "v": -1.3, "ease": "linear" }
+        ] }
+      ]
+    },
+    {
+      "id": "witness",
+      "kind": "text",
+      "text": "the work is the continuity",
+      "font": "400 34px Georgia, serif",
+      "color": "#6e6a60",
+      "size": [6, 0.6],
+      "position": [0, -3.4, -1],
+      "opacity": 0,
+      "tracks": [
+        { "prop": "opacity", "mode": "keyframes", "keyframes": [
+          { "t": 8, "v": 0, "ease": "linear" },
+          { "t": 10, "v": 0.85, "ease": "inOut" },
+          { "t": 12, "v": 0.85, "ease": "linear" }
+        ] }
+      ]
+    }
+  ],
+  "post": [
+    { "pass": "chromaticAberration", "params": { "strength": 0.004 }, "beatReactive": { "param": "strength", "every": 2, "amount": 0.012, "decay": 0.35 } },
+    { "pass": "vhs", "params": { "scanlineIntensity": 0.10, "wobble": 0.15, "bleed": 0.2, "noise": 0.06, "vignette": 0.35 } }
+  ]
+}
