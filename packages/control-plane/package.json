@@ -1,0 +1,23 @@
+{
+  "name": "@wirebabel/control-plane",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "SQLite ledger foundation for the agent control plane",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "check": "bun run typecheck && bun run test"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.45.0",
+    "effect": "^4.0.0-beta.71"
+  },
+  "devDependencies": {
+    "bun-types": "^1.3.9",
+    "typescript": "^5.9.3"
+  }
+}
