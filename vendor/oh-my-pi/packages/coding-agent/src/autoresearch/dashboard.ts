@@ -1,6 +1,6 @@
 import { matchesKey, replaceTabs, ScrollView, Text, truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui";
-import { matchesAppInterrupt } from "../modes/utils/keybinding-matchers";
 import type { Theme } from "../modes/theme/theme";
+import { matchesAppInterrupt } from "../modes/utils/keybinding-matchers";
 import { formatElapsed, formatNum, isBetter } from "./helpers";
 import { currentResults, findBaselineMetric, findBaselineRunNumber, findBaselineSecondary } from "./state";
 import type { AutoresearchRuntime, DashboardController, ExperimentResult, ExperimentState } from "./types";

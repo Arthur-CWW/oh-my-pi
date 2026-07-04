@@ -180,7 +180,7 @@ export const KEYBINDINGS = {
 		description: "Toggle session path display",
 	},
 	"app.session.toggleSort": {
-		defaultKeys: "ctrl+s",
+		defaultKeys: "ctrl+shift+s",
 		description: "Toggle session sort order",
 	},
 	"app.session.rename": {
@@ -196,11 +196,11 @@ export const KEYBINDINGS = {
 		description: "Delete session (non-invasive)",
 	},
 	"app.tree.foldOrUp": {
-		defaultKeys: ["ctrl+left", "alt+left"],
+		defaultKeys: "ctrl+shift+left",
 		description: "Fold or move up",
 	},
 	"app.tree.unfoldOrDown": {
-		defaultKeys: ["ctrl+right", "alt+right"],
+		defaultKeys: "ctrl+shift+right",
 		description: "Unfold or move down",
 	},
 	"app.plan.toggle": {

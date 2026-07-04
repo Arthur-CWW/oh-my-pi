@@ -393,7 +393,8 @@ export const SETTINGS_SCHEMA = {
 			tab: "model",
 			group: "Advisor",
 			label: "Enable Advisor",
-			description: "Enable the advisor runtime. Advisor scope controls whether it attaches to main sessions, subagents, or both.",
+			description:
+				"Enable the advisor runtime. Advisor scope controls whether it attaches to main sessions, subagents, or both.",
 		},
 	},
 	"advisor.scope": {
@@ -406,7 +407,11 @@ export const SETTINGS_SCHEMA = {
 			label: "Advisor Scope",
 			description: "Choose which session kinds get an advisor when advisor.enabled is on.",
 			options: [
-				{ value: "all", label: "All sessions", description: "Attach advisor to main sessions and spawned subagents" },
+				{
+					value: "all",
+					label: "All sessions",
+					description: "Attach advisor to main sessions and spawned subagents",
+				},
 				{ value: "main", label: "Main only", description: "Attach advisor only to main sessions" },
 				{ value: "subagents", label: "Subagents only", description: "Attach advisor only to spawned subagents" },
 			],

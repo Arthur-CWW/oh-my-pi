@@ -5,6 +5,7 @@ import { getOAuthProviders } from "@oh-my-pi/pi-ai/oauth";
 import { setNextRequestDebugPath } from "@oh-my-pi/pi-ai/utils/request-debug";
 import type { AutocompleteItem } from "@oh-my-pi/pi-tui";
 import { APP_NAME, setProjectDir } from "@oh-my-pi/pi-utils";
+import { buildRestartSpawnSpec, spawnRestartProcess } from "../cli/restart-session";
 import { COLLAB_GUEST_ALLOWED_COMMANDS, CollabGuestLink } from "../collab/guest";
 import { CollabHost } from "../collab/host";
 import type { SettingPath, SettingValue } from "../config/settings";
@@ -27,7 +28,6 @@ import { resolveMemoryBackend } from "../memory-backend";
 import { theme } from "../modes/theme/theme";
 import type { InteractiveModeContext } from "../modes/types";
 import type { AgentSession, FreshSessionResult } from "../session/agent-session";
-import { buildRestartSpawnSpec, spawnRestartProcess } from "../cli/restart-session";
 import { formatShakeSummary, type ShakeMode } from "../session/shake-types";
 import { urlHyperlinkAlways } from "../tui";
 import { getChangelogPath, parseChangelog } from "../utils/changelog";
@@ -111,7 +111,10 @@ const shutdownHandlerTui = (_command: ParsedSlashCommand, runtime: TuiSlashComma
 	return commandConsumed();
 };
 
-async function restartHandlerTui(_command: ParsedSlashCommand, runtime: TuiSlashCommandRuntime): Promise<SlashCommandResult> {
+async function restartHandlerTui(
+	_command: ParsedSlashCommand,
+	runtime: TuiSlashCommandRuntime,
+): Promise<SlashCommandResult> {
 	const ctx = runtime.ctx;
 	ctx.editor.setText("");
 	if (ctx.session.isStreaming) {
@@ -121,7 +124,9 @@ async function restartHandlerTui(_command: ParsedSlashCommand, runtime: TuiSlash
 
 	const sessionId = ctx.sessionManager.getSessionId();
 	if (!sessionId || !ctx.sessionManager.getSessionFile()) {
-		ctx.showError("Cannot restart an in-memory session. Start without --no-session so /restart can resume from JSONL.");
+		ctx.showError(
+			"Cannot restart an in-memory session. Start without --no-session so /restart can resume from JSONL.",
+		);
 		return commandConsumed();
 	}
 

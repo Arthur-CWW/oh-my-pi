@@ -305,14 +305,6 @@ describe("captureRestartLaunchArgs / getRestartLaunchArgsForTest", () => {
 			processArgv: ["bun", "src/cli.ts", "--config", "/tmp/cfg.json", "--model", "pi/smol"],
 		});
 
-		expect(spec.args).toEqual([
-			"src/cli.ts",
-			"--config",
-			"/tmp/cfg.json",
-			"--model",
-			"pi/smol",
-			"--resume",
-			SESSION,
-		]);
+		expect(spec.args).toEqual(["src/cli.ts", "--config", "/tmp/cfg.json", "--model", "pi/smol", "--resume", SESSION]);
 	});
 });

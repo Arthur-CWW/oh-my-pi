@@ -4,7 +4,7 @@ import {
 	hasFreshCodexOAuthCredential,
 	isCodexRefreshManual,
 } from "@oh-my-pi/pi-coding-agent/config/codex-refresh-policy";
-import { Settings, resetSettingsForTest } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { AuthStorage, AuthStorageData } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 
 function authStorageWith(data: AuthStorageData): Pick<AuthStorage, "getAll"> {

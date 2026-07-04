@@ -25,6 +25,15 @@ describe("KeybindingsManager.getDisplayString", () => {
 
 		expect(keybindings.getDisplayString("app.clipboard.copyPrompt")).toBe("");
 	});
+
+	it("keeps session/tree defaults off editor word-navigation chords", () => {
+		const keybindings = KeybindingsManager.inMemory();
+
+		expect(keybindings.getKeys("app.session.observe")).toEqual(["ctrl+s"]);
+		expect(keybindings.getKeys("app.session.toggleSort")).toEqual(["ctrl+shift+s"]);
+		expect(keybindings.getKeys("app.tree.foldOrUp")).toEqual(["ctrl+shift+left"]);
+		expect(keybindings.getKeys("app.tree.unfoldOrDown")).toEqual(["ctrl+shift+right"]);
+	});
 });
 
 describe("getDefaultPasteImageKeys", () => {

@@ -4,8 +4,8 @@ import type { OAuthProvider } from "@oh-my-pi/pi-ai/oauth/types";
 import { Input, matchesKey, type SgrMouseEvent, wrapTextWithAnsi } from "@oh-my-pi/pi-tui";
 import { getAgentDbPath } from "@oh-my-pi/pi-utils";
 import { OAuthSelectorComponent } from "../../components/oauth-selector";
-import { matchesAppInterrupt } from "../../utils/keybinding-matchers";
 import { theme } from "../../theme/theme";
+import { matchesAppInterrupt } from "../../utils/keybinding-matchers";
 import type { SetupSceneHost, SetupTab } from "./types";
 
 function loginUrlLink(url: string): string {

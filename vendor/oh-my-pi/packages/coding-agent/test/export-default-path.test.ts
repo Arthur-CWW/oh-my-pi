@@ -72,9 +72,7 @@ describe("export default path", () => {
 
 		test("throws for in-memory sessions", async () => {
 			const sm = SessionManager.inMemory(tempDir);
-			await expect(exportSessionToHtml(sm)).rejects.toThrow(
-				"Cannot export in-memory session to HTML",
-			);
+			await expect(exportSessionToHtml(sm)).rejects.toThrow("Cannot export in-memory session to HTML");
 		});
 	});
 });

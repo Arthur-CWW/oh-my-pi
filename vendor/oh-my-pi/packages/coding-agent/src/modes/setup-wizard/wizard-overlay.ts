@@ -1,9 +1,9 @@
 import { type Component, matchesKey, padding, parseSgrMouse, truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui";
 import { APP_NAME } from "@oh-my-pi/pi-utils";
 import { gradientLogo, PI_LOGO } from "../components/welcome";
-import { matchesAppInterrupt } from "../utils/keybinding-matchers";
 import { theme } from "../theme/theme";
 import type { InteractiveModeContext } from "../types";
+import { matchesAppInterrupt } from "../utils/keybinding-matchers";
 import { renderSetupOutro, SETUP_OUTRO_MS } from "./scenes/outro";
 import { renderSetupSplash, SETUP_SPLASH_MS, SETUP_TICK_MS } from "./scenes/splash";
 import type { SetupScene, SetupSceneController, SetupSceneHost, SetupSceneResult } from "./scenes/types";

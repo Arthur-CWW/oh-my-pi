@@ -8,9 +8,9 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
 import { IrcBus } from "@oh-my-pi/pi-coding-agent/irc/bus";
 import {
-	AgentHubOverlayComponent,
 	type AgentHubExternalPeer,
 	type AgentHubExternalPeerDataSource,
+	AgentHubOverlayComponent,
 } from "@oh-my-pi/pi-coding-agent/modes/components/agent-hub";
 import { SessionObserverRegistry } from "@oh-my-pi/pi-coding-agent/modes/session-observer-registry";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
@@ -81,7 +81,12 @@ function renderedExternalPeerNames(hub: AgentHubOverlayComponent): string[] {
 		.map(parts => parts[1]!);
 }
 
-function externalPeer(sessionId: string, name: string, lastSeen: string, state: AgentHubExternalPeer["state"]): AgentHubExternalPeer {
+function externalPeer(
+	sessionId: string,
+	name: string,
+	lastSeen: string,
+	state: AgentHubExternalPeer["state"],
+): AgentHubExternalPeer {
 	return {
 		sessionId,
 		name,

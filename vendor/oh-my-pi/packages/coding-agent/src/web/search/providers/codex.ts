@@ -7,23 +7,28 @@
  * SQLite store, never POSTs the broker sentinel to an OpenAI token endpoint.
  */
 import * as os from "node:os";
-import { type AuthStorage, type FetchImpl, type OAuthAccess, isAuthRetryableError, withOAuthAccess } from "@oh-my-pi/pi-ai";
+import {
+	type AuthStorage,
+	type FetchImpl,
+	isAuthRetryableError,
+	type OAuthAccess,
+	withOAuthAccess,
+} from "@oh-my-pi/pi-ai";
 import { decodeJwt } from "@oh-my-pi/pi-ai/oauth/openai-codex";
 import { getBundledModels } from "@oh-my-pi/pi-catalog/models";
 import { $env, readSseJson } from "@oh-my-pi/pi-utils";
 import packageJson from "../../../../package.json" with { type: "json" };
-import type { SearchResponse, SearchSource } from "../../../web/search/types";
-import { SearchProviderError } from "../../../web/search/types";
-import type { SearchParams } from "./base";
-import { SearchProvider } from "./base";
-import { classifyProviderHttpError, withHardTimeout } from "./utils";
 import {
 	getCodexOAuthCredentials,
 	getFreshCodexOAuthCredential,
 	isCodexRefreshManual,
 	warnCodexRefreshGated,
 } from "../../../config/codex-refresh-policy";
-
+import type { SearchResponse, SearchSource } from "../../../web/search/types";
+import { SearchProviderError } from "../../../web/search/types";
+import type { SearchParams } from "./base";
+import { SearchProvider } from "./base";
+import { classifyProviderHttpError, withHardTimeout } from "./utils";
 
 const CODEX_BASE_URL = "https://chatgpt.com/backend-api";
 const CODEX_RESPONSES_PATH = "/codex/responses";
@@ -505,12 +510,12 @@ export async function searchCodex(params: SearchParams): Promise<SearchResponse>
 	const manualRefresh = isCodexRefreshManual();
 	const storedCodexCredentials = manualRefresh ? getCodexOAuthCredentials(params.authStorage) : [];
 	const freshCredential =
-		manualRefresh && storedCodexCredentials.length > 0
-			? getFreshCodexOAuthCredential(params.authStorage)
-			: undefined;
+		manualRefresh && storedCodexCredentials.length > 0 ? getFreshCodexOAuthCredential(params.authStorage) : undefined;
 	if (manualRefresh && storedCodexCredentials.length > 0 && !freshCredential) {
 		warnCodexRefreshGated();
-		throw new Error("Codex web search unavailable: manual refresh mode is active and no fresh Codex credential exists.");
+		throw new Error(
+			"Codex web search unavailable: manual refresh mode is active and no fresh Codex credential exists.",
+		);
 	}
 	const seed = freshCredential
 		? {

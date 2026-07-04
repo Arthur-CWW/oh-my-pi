@@ -43,7 +43,10 @@ export function buildGoalToolResponse(
 	};
 }
 
-function validateWriteParams(params: GoalToolInput, op: "create" | "update"): { objective: string; tokenBudget?: number } {
+function validateWriteParams(
+	params: GoalToolInput,
+	op: "create" | "update",
+): { objective: string; tokenBudget?: number } {
 	const objective = params.objective?.trim();
 	if (!objective) {
 		throw new ToolError(`objective is required when op=${op}`);

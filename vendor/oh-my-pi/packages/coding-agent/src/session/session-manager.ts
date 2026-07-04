@@ -1122,7 +1122,12 @@ export class SessionManager {
 			| FileMentionMessage,
 		attribution?: SessionMessageAttribution,
 	): string {
-		const entry: SessionMessageEntry = { type: "message", ...this.#freshEntryFields(), message, ...(attribution ?? {}) };
+		const entry: SessionMessageEntry = {
+			type: "message",
+			...this.#freshEntryFields(),
+			message,
+			...(attribution ?? {}),
+		};
 		this.#recordEntry(entry);
 		return entry.id;
 	}

@@ -16,7 +16,10 @@ function isSessionHeader(entry: FileEntry | undefined): entry is SessionHeader {
 	return entry?.type === "session" && typeof entry.id === "string";
 }
 
-function recoverLeadingTitle(entries: FileEntry[], sessionIndex: number): { title?: string; titleSource?: "auto" | "user" } {
+function recoverLeadingTitle(
+	entries: FileEntry[],
+	sessionIndex: number,
+): { title?: string; titleSource?: "auto" | "user" } {
 	for (let i = 0; i < sessionIndex; i++) {
 		const entry = entries[i] as { type?: unknown; title?: unknown; source?: unknown; titleSource?: unknown };
 		if (entry.type !== "title" || typeof entry.title !== "string") continue;

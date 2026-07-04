@@ -1,7 +1,6 @@
 import type { Api, ApiKeyResolver, AuthStorage, Model } from "@oh-my-pi/pi-ai";
 import { isCodexRefreshManual, warnCodexRefreshGated } from "./codex-refresh-policy";
 
-
 /** Model slice accepted by the model-form `resolver(model, sessionId)` overload. */
 export type ApiKeyResolverModel = Pick<Model<Api>, "provider" | "baseUrl" | "id">;
 

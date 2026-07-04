@@ -31,6 +31,7 @@ import {
 	IRC_EXTERNAL_STALE_MS,
 	IrcExternalBus,
 	type IrcExternalPeer,
+	type IrcExternalPeerState,
 	isIrcExternalPeerFresh,
 } from "../../irc/bus-external";
 import { AgentLifecycleManager } from "../../registry/agent-lifecycle";
@@ -106,20 +107,17 @@ function statusBadge(status: AgentStatus): string {
 	}
 }
 
-export type AgentHubExternalPeerState = "working" | "waiting_input" | "idle" | "unknown";
+export type AgentHubExternalPeerState = IrcExternalPeerState;
 type AgentHubExternalPeerDisplayState = AgentHubExternalPeerState | "disconnected";
 
-export type AgentHubExternalPeer = IrcExternalPeer & {
+/** Hub-side peer view: tolerates rows from older bus versions that lack state columns. */
+export type AgentHubExternalPeer = Omit<IrcExternalPeer, "state" | "stateTs"> & {
 	state?: AgentHubExternalPeerState | null;
 	stateTs?: string | null;
 };
 
 export interface AgentHubExternalPeerDataSource {
-	listPeers(options?: {
-		excludeSessionId?: string;
-		staleMs?: number;
-		includeStale?: boolean;
-	}): AgentHubExternalPeer[];
+	listPeers(options?: { excludeSessionId?: string; staleMs?: number; includeStale?: boolean }): AgentHubExternalPeer[];
 }
 
 interface ExternalPeerRow {
@@ -565,7 +563,9 @@ export class AgentHubOverlayComponent extends Container {
 					displayIndex = this.#nextExternalDisplayIndex++;
 					this.#externalOrder.set(peer.sessionId, displayIndex);
 				}
-				const state = isIrcExternalPeerFresh(peer.lastSeen) ? normalizeExternalPeerState(peer.state) : "disconnected";
+				const state: AgentHubExternalPeerDisplayState = isIrcExternalPeerFresh(peer.lastSeen)
+					? normalizeExternalPeerState(peer.state)
+					: "disconnected";
 				return { peer, displayIndex, state };
 			})
 			.sort((a, b) => a.displayIndex - b.displayIndex);
@@ -642,10 +642,7 @@ export class AgentHubOverlayComponent extends Container {
 			const maxVisible = Math.max(3, termHeight - 7 - (this.#notice ? 1 : 0));
 			let start = 0;
 			if (totalRows > maxVisible) {
-				start = Math.min(
-					Math.max(0, this.#selectedRow - Math.floor(maxVisible / 2)),
-					totalRows - maxVisible,
-				);
+				start = Math.min(Math.max(0, this.#selectedRow - Math.floor(maxVisible / 2)), totalRows - maxVisible);
 			}
 			const end = Math.min(start + maxVisible, totalRows);
 			let externalHeaderShown = false;
@@ -658,7 +655,9 @@ export class AgentHubOverlayComponent extends Container {
 					lines.push(` ${theme.fg("dim", "external peers")}`);
 					externalHeaderShown = true;
 				}
-				lines.push(this.#renderExternalRow(this.#externalRows[i - this.#rows.length], i === this.#selectedRow, width));
+				lines.push(
+					this.#renderExternalRow(this.#externalRows[i - this.#rows.length], i === this.#selectedRow, width),
+				);
 			}
 			if (end < totalRows) {
 				lines.push(` ${theme.fg("dim", `… ${totalRows - end} more`)}`);

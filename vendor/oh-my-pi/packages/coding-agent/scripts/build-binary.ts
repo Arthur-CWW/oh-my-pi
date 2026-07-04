@@ -63,7 +63,6 @@ async function readForkHash(): Promise<string> {
 	return "unknown";
 }
 
-
 async function main(): Promise<void> {
 	await runCommand(["bun", "--cwd=../stats", "scripts/generate-client-bundle.ts", "--generate"]);
 	try {

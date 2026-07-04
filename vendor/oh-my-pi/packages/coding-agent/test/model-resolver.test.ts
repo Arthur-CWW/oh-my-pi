@@ -11,8 +11,8 @@ import {
 	resolveCliModel,
 	resolveModelFromString,
 	resolveModelOverride,
-	resolveModelRoleValue,
 	resolveModelOverrideWithAuthFallback,
+	resolveModelRoleValue,
 	resolveModelScope,
 } from "@oh-my-pi/pi-coding-agent/config/model-resolver";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
@@ -645,7 +645,6 @@ describe("resolveModelOverride", () => {
 		expect(result.thinkingLevel).toBe(Effort.High);
 		expect(result.explicitThinkingLevel).toBe(true);
 	});
-
 });
 
 describe("resolveModelOverrideWithAuthFallback", () => {
