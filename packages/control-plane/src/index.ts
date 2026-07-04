@@ -22,6 +22,30 @@ export {
   type StatusSummary,
   type TurnInput,
 } from "./ledger"
+export { ingestOutbox, type IngestOutboxOptions, type IngestOutboxResult } from "./ingest"
+export {
+  JsonValueSchema,
+  KnownOutboxKindSchema,
+  OutboxEnvelopeSchema,
+  appendOutboxLine,
+  defaultOutboxDir,
+  outboxPathFor,
+  type JsonValue,
+  type KnownOutboxKind,
+  type OutboxEnvelope,
+} from "./outbox"
+export {
+  withModelCall,
+  withProviderCall,
+  type FailureTelemetryOutcome,
+  type ModelCallExtractorInput,
+  type ModelCallFacts,
+  type ModelCallTelemetryMeta,
+  type ProviderCallExtractorInput,
+  type ProviderCallFacts,
+  type ProviderCallTelemetryMeta,
+  type TelemetryOutcome,
+} from "./telemetry"
 export {
   artifacts,
   branches,

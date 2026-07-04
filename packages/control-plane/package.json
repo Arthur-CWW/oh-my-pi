@@ -7,10 +7,17 @@
   "exports": {
     ".": "./src/index.ts"
   },
+  "bin": {
+    "control-plane": "./src/cli.ts"
+  },
+  "omp": {
+    "extensions": ["./src/omp-publisher.ts"]
+  },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "bun test",
-    "check": "bun run typecheck && bun run test"
+    "check": "bun run typecheck && bun run test",
+    "cli": "bun run src/cli.ts"
   },
   "dependencies": {
     "drizzle-orm": "^0.45.0",
