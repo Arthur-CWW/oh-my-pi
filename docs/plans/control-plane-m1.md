@@ -1,6 +1,6 @@
 # Control plane M1 — implementation contract
 
-Status: active
+Status: COMPLETE 2026-07-04 (commits d6804889, 3ab250ef — proof: `cd packages/control-plane && bun run check && bun run proof`)
 Date: 2026-07-04
 Parent spec: `docs/plans/pi-agent-control-plane.md` (spec v1 — authoritative; this doc pins M1 implementation decisions and the inter-packet contract)
 

@@ -1,41 +1,42 @@
-# Harness stream — handoff (2026-07-04)
+# Harness stream — handoff (2026-07-04, evening)
 
-Boot doc for the next orchestrator session on this stream. Predecessor: Opus-orchestrated harness lane, 2026-07-04 (session notes in commits `8556386b`..`2069638d` + this doc's State section).
+Boot doc for the next orchestrator session on this stream. Predecessor: Fable-orchestrated harness lane, 2026-07-04 (fork reinstall + control-plane M1; commits `b401a47f`..this doc).
 
 ## Boot sequence
 
-1. Read `streams/harness/GOAL.md`, then `docs/plans/pi-agent-control-plane.md` (**spec v1 — the load-bearing artifact**), then `docs/state/harness-friction.md`, then `docs/state/side-quests.md`.
+1. Read `streams/harness/GOAL.md`, then `docs/plans/pi-agent-control-plane.md` (**spec v1 — the load-bearing artifact**; open questions 1–2 now settled, new binding sections: "Testing strategy: scaled-down DST" and "Durability and ingestion contract"), then `docs/plans/control-plane-m1.md` (COMPLETE — the M1 implementation contract, still the schema/wire reference), then `docs/state/harness-friction.md` and `docs/state/side-quests.md`.
 2. Check `irc list` and `cmux list-workspaces` — sibling sessions may be live; do not disturb their streams.
 3. You orchestrate at `:medium`. All implementation → GPT-5.5 lanes. Design/UI → designer. Research/retrieval → kimi lanes. You write code only for trivial inline fixes.
 
 ## State (what is done)
 
-- **Control-plane spec v1** at `docs/plans/pi-agent-control-plane.md`: L0-L4 layers, settled decisions (Bun+Effect v4, SQLite, harness-agnostic, no OTel), model_calls-first telemetry with session-mutation events + per-turn fatigue proxies + affect channels, hypotheses-as-acceptance, provenance (commit trailers), fork/hot-swap/steer contracts, M1-M4 with click/run proofs, influences section.
-- **Fork batch landed** (`vendor/oh-my-pi`, commits `8556386b`, `6d9d767a`): omp irc CLI hang fixed, mid-turn ask presence, task `timeoutSec` + timeout partial results, per-spawn `model` override with resolved-chain receipts. Package check green, 230/230 targeted tests.
-- **Research**: `docs/research/opencode-vs-omp.md` (verdict: keep OMP as L1, adopt OpenCode server/plugin/observability layers piecemeal), `docs/research/xjdr/` (jj/SCM/scaling archive + synthesis), DST research in flight → `docs/research/dst-scaled-down.md`.
-- **Fork reinstall PENDING**: installed omp binary (`fork.90c64256`) predates today's fixes and external-bus peer registration; reinstall per `docs/plans/omp-fork-install.md` so `omp irc list` sees live sessions. Do this early — it unblocks cross-session messaging.
+- **Fork reinstall DONE** (`b401a47f`): installed binary is `omp/16.0.1+fork.8a2fc866881f`; mise tasks repointed at `vendor/oh-my-pi` (fork moved under vendor/); retired stale spec-driven-overlays skill link/check; `mise run omp-doctor` green; one-shot `omp irc list` exits <1s. Live sessions register on the external bus as they restart onto the new binary.
+- **Control-plane M1 COMPLETE** (`d6804889`, `3ab250ef`; contract `docs/plans/control-plane-m1.md`): `packages/control-plane` — Drizzle+bun:sqlite ledger (9 row families, idempotent INSERT OR IGNORE writes, WAL+NORMAL), Effect `LedgerStore` service/Layer, telemetry lib (`withModelCall`/`withProviderCall`), OMP publisher extension (outbox JSONL, never touches SQLite), idempotent outbox ingest with rawRequest artifact materialization, `status/model-calls/events/ingest` CLI with `--json` parity. Gate: `bun run check` (10 tests / 165 assertions). Acceptance: `bun run proof` — publisher→outbox→ingest→CLI chain, 0 malformed, model-calls JSON carries tokens/cost/latency/outcome + rawRequestArtifact ids, re-ingest fully ignored.
+- **Scout map**: `docs/research/pi-agent-control-plane/omp-publisher-seams.md` — OMP extension API/hooks/telemetry facts with file:line evidence. Load-bearing for M2 live wiring.
+- **Research landed**: `docs/plans/harness-research.md`, `docs/research/dst-scaled-down.md` (day-one DST rules now in spec + M1 contract).
+- **Budget**: fable overlay `task.softRequestBudget` raised 40→80. CAVEAT: config is read at spawn — a raise never protects already-running workers (P1 died at 60 anyway; survived via files on disk + coordinator gate).
 
-## Next work: M1 (event ledger + model-call telemetry)
+## Next work: M2 (status/query API + first HTML viewer)
 
-Per spec v1 milestones. Recommendation already in spec open-questions: new `packages/control-plane` package, `packages/web-access/src/agent-cockpit*` as donor code only. First slice:
+Per spec v1 milestones: daemon/API over the same LedgerStore, HTML log/session viewer reading the same rows (high-level board → drill into one session → open a raw model request), SSE updates during a fixture run. Notes:
 
-1. Decide typed-DB (`@effect/sql` vs Drizzle+Effect wrapper) — criterion in spec; document the rejected option.
-2. Schema + migrations for `sessions/branches/turns/events/model_calls/artifacts` (open-union events).
-3. Effect instrumentation lib (custom exporter Layer → ledger rows, NOT OTLP).
-4. OMP publisher extension writing rows from a live session.
-5. CLI `status --json` / `model-calls --json`.
-Acceptance proof (from spec): fixture or live-session run producing queryable rows + CLI output showing model/provider/tokens/cost/latency/outcome + raw-request artifact linkage.
+- Daemon is the sole ledger writer tailing outboxes (ingestion contract in spec); M1 shipped the one-shot `ingest` — M2 makes it a supervised loop.
+- Wait-on-row/change sourcing decision queued in side-quests: daemon owns writes → in-process PubSub + SSE; no DB-level CDC.
+- Review surface must be portless (`bunx portless <name> …`), Chrome app-mode (cmux WKWebView breaks real apps — see friction log), one error log per app, dev server supervised.
+- **Live publisher wiring is opt-in and NOT yet done**: the extension ships at `packages/control-plane/src/omp-publisher.ts` (declared in the package's `omp.extensions`); wire a live session via project `.omp/settings.json#extensions` → `~/agents/packages/control-plane` or `omp -e`. Decide with a live smoke before making it default for all sessions. Outbox lands in `~/.agent-control-plane/outbox/` (env `AGENT_CONTROL_PLANE_OUTBOX_DIR`).
+- Known M1 residue: publisher fills `machine/effort/promptHash/systemPromptHash/skillProfile/contextManifest` with `"unknown"` placeholders (real capture needs deeper OMP seams — scout report Q3); `rawResponseArtifact` not yet captured; provider_calls path unexercised by the publisher (telemetry lib covers it).
 
 ## Operating contract (Arthur, 2026-07-04)
 
 - **Commit per block of work.** Focused messages; never commit red.
-- **Checkpoint Arthur ONLY at playable artifacts** — something he can click/run/put input into (e.g. the M2 HTML viewer). He polls asynchronously; do not ping for intermediate states. Everything below that bar: figure out how to test it yourself. Testing is very important.
-- **Subagent budget**: `task.softRequestBudget: 40` in `.omp/*-config.yml` → soft notice at 40 req, HARD CANCEL at 60 (evicts agent, no output). Slice packets to fit; every packet writes its report/output file FIRST and appends incrementally; raise the setting deliberately only for a packet class that needs it.
-- **Woken-agent results go stale**: after `irc` re-wake, `job poll` returns the pre-wake payload forever — read the report file / worktree / `history://<id>` instead.
+- **Checkpoint Arthur ONLY at playable artifacts** — something he can click/run/put input into (the M2 HTML viewer is the next such artifact). Everything below that bar: test it yourself.
+- **Subagent packets**: report/output file FIRST, append incrementally; workers do not run package commands — the coordinator gates in the parent shell (subagent sandbox blocks SQLite/tmp writes anyway).
+- **Woken-agent results go stale**: after `irc` re-wake, `job poll` returns the pre-wake payload forever — read the report file / worktree / `history://<id>`.
+- **Seam lesson (M1)**: two parallel packets sharing a wire format WILL drift — require an integration test that drives producer output through the consumer (`test/publisher-ingest.test.ts` is the pattern) and gate on it.
 - Self-contained packages (own package.json, no root edits), portless for any web surface, no WebKit/cmux fixes, no sudo, no secrets in commits.
 
-## Open questions for Arthur (raise only in decision mode, not creative mode)
+## Open questions for Arthur (raise only in decision mode)
 
-- Typed-DB choice if the criterion doesn't decide it cleanly.
-- Turso/libSQL trigger condition.
-- GOAL.md-level: none new; spec v1 open-questions section is the list.
+- Turso/libSQL trigger condition (spec open question 3).
+- Onboarding interview formalization depth (spec open question 4).
+- When (if ever) the OMP publisher becomes default-on for all sessions vs opt-in per project.

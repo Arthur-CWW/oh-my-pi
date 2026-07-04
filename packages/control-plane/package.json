@@ -17,7 +17,8 @@
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "check": "bun run typecheck && bun run test",
-    "cli": "bun run src/cli.ts"
+    "cli": "bun run src/cli.ts",
+    "proof": "bun scripts/m1-proof.ts && bun src/cli.ts ingest --from test/.tmp/m1-proof/outbox/session-m1-proof.jsonl --db test/.tmp/m1-proof/ledger.sqlite --json && bun src/cli.ts status --json --db test/.tmp/m1-proof/ledger.sqlite && bun src/cli.ts model-calls --json --db test/.tmp/m1-proof/ledger.sqlite"
   },
   "dependencies": {
     "drizzle-orm": "^0.45.0",
