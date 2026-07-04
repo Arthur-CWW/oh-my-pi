@@ -22,6 +22,10 @@ modelRoles:
   plan: openai-codex/gpt-5.5:high
   slow: openai-codex/gpt-5.5:high
   designer: anthropic/claude-opus-4-6
+  # Cheap vision for inspect_image (Arthur, 2026-07-03): image inspection was
+  # silently routed to the session model (Fable) — pi/vision wins the
+  # resolution order, so pin it to the Antigravity Gemini flash lane.
+  vision: google-antigravity/gemini-3.5-flash-low
 
 advisor:
   enabled: true
