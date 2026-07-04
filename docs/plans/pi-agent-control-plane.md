@@ -564,6 +564,23 @@ CLI parity rule: if a primitive exists in the library, a bounded `--json` comman
 
 This enables loops, forks, pipelines, custom tools, and eval harnesses written on the fly. Tool calls alone are not enough.
 
+## Testing strategy: scaled-down DST
+
+Full survey: `docs/research/dst-scaled-down.md` (2026-07-04). JS run-to-completion semantics plus Effect's injectable services make the cheap 80% of Antithesis-style DST nearly free — IF the day-one rules hold. Retrofit is where DST costs explode; design-in is a lint rule.
+
+Day-one rules (apply to all L2/L3 code from the first commit):
+
+- No `Date.now` or raw timers — `Clock` service only. Tests drive time with `TestClock.adjust`.
+- No `Math.random` — `Random` service only. `Random.withSeed(seed)` makes runs reproducible.
+- All I/O behind `Context.Tag` services with a prod layer and a simulated layer (in-memory bus with seeded delay/drop/duplicate; in-memory SQLite behind a buggify wrapper injecting `SQLITE_BUSY` and crash-between-write-and-commit).
+- Single-writer event-loop core (already the architecture).
+- Every simulated run keyed by a printed `(seed, config)` — failures replay by seed.
+- `always` invariants checked every step (e.g. ≤1 live claim per packet); `sometimes` coverage counters (e.g. contention actually occurred) asserted per batch.
+
+Stack: Effect v4 `TestClock` + `Random.withSeed` + fast-check `fc.scheduler()` for interleaving exploration + a ~200-500 LOC owned simulation harness. Zero new runtime frameworks. Skip: hypervisors, multi-process sim, disk-sector faults, exhaustive model checking.
+
+Decision rule: bug needs a timing diagram → DST; bug is an input value → plain property test; bug is a screenshot/config → e2e smoke.
+
 ## Existing donor code / current pilot
 
 Current donor seams, not the v1 architecture:
