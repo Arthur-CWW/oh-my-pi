@@ -96,4 +96,4 @@ Every dispatch specifies: **owner paths** (explicit files), **excluded paths**, 
 
 ## Session start
 
-1. This charter. 2. [`atlas.md`](atlas.md). 3. `TASKS.md` active rows. 4. Whatever Arthur points at. Nothing else by default.
+1. This charter + [`constitution.md`](constitution.md) (the reasons layer — apply at review gates). 2. [`atlas.md`](atlas.md). 3. `TASKS.md` active rows. 4. Whatever Arthur points at. Nothing else by default.
