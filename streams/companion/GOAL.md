@@ -27,6 +27,7 @@ Explore AI-companion **form factors**, not one app. Realtime voice-to-avatar (An
 - **Progress is visible live**: in-flight work may post `progress` entries; the page updates over SSE.
 - **Non-pessimization (Arthur, 2026-07-06, cf. Casey Muratori).** Quality first — small models miss the little things; get it *sufficiently good*, then hill-climb latency. Never optimize prematurely, and never write code that BLOCKS optimizing: every stage stays a hot-swappable seam with per-segment latency printed, so benchmarks/evals can sweep engine×model combos later. Planned: a bench harness (latency segments + register-quality samples per combo) feeding dashboard tables. Low latency remains the goal; optimizability is the method.
 - **PuruPuru body (backlog, Arthur inspo 2026-07-06):** rotejin's open-source PuruPuruPNGTuber decoded (`notes/rotejin-effect.md`, video in `data/inspiration/rotejin/`) — layered-PNG avatar, spring-chain hair, expression swaps. Becomes the THIRD hot-swap body type (audio-only / VRM / PNGTuber) over the same body events; M-effort Canvas2D recipe in the note.
+- **Body futures (Arthur, 2026-07-06):** fursona/furry models, non-humans, weird hybrids, hyperhuman forms — all later, but the EmotionVector projection is channel-manifest-based from day one (see `HANDOFF-BEHAVIOR.md`) so ears/tails/auras slot in as expression channels without redesign. Model crafting becomes its own lane eventually (we make our own).
 
 ## First goal
 
