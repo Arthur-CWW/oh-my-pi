@@ -6,6 +6,7 @@ import type {
   BeforeProviderRequestPayload,
   ExtensionContextLike,
   MessageEndPayload,
+  MessageStartPayload,
   OmpTimestamp,
   PiLike,
   SessionBranchPayload,
@@ -22,6 +23,7 @@ interface SessionState {
   nextSeq: number
   latestProviderRequest?: CapturedProviderRequest
   readonly turnStarts: Map<number, TurnStartSnapshot>
+  readonly pendingAttributions: Map<string, PendingAttribution>
 }
 
 interface CapturedProviderRequest {
@@ -42,6 +44,16 @@ interface TurnStartSnapshot {
   readonly yieldKind?: string
 }
 
+interface PendingAttribution {
+  readonly modelCallId: string
+  readonly messageTimestamp: number
+  readonly attribution: string
+  readonly probes: number
+}
+
+const ATTRIBUTION_ENTRY_TAIL = 20
+const MAX_PENDING_ATTRIBUTIONS = 20
+
 type JsonRecord = { [key: string]: JsonValue }
 type LooseJsonRecord = { [key: string]: JsonValue | undefined }
 
@@ -54,6 +66,7 @@ export default function createOmpPublisher(pi: PiLike): void {
   pi.on("turn_start", publisher.guard((event, ctx) => publisher.onTurn("start", event, ctx)))
   pi.on("before_provider_request", publisher.guard((event, ctx) => publisher.onBeforeProviderRequest(event, ctx)))
   pi.on("message_end", publisher.guard((event, ctx) => publisher.onMessageEnd(event, ctx)))
+  pi.on("message_start", publisher.guard((event, ctx) => publisher.onMessageStart(event, ctx)))
   pi.on("turn_end", publisher.guard((event, ctx) => publisher.onTurn("end", event, ctx)))
   pi.on("session_switch", publisher.guard((event, ctx) => publisher.onSessionSwitch(event, ctx)))
   pi.on("session_branch", publisher.guard((event, ctx) => publisher.onSessionBranch(event, ctx)))
@@ -151,6 +164,12 @@ class OmpOutboxPublisher {
       turnDurationMs: duration,
       yieldKind: event.yieldKind ?? start?.yieldKind ?? event.message?.stopReason ?? "unknown",
     }))
+    this.resolveAttributionBackfill(state, ctx, endedAt)
+  }
+
+  onMessageStart(event: MessageStartPayload, ctx: ExtensionContextLike): void {
+    const state = this.stateForContext(ctx)
+    this.resolveAttributionBackfill(state, ctx, timestampMillis(event.timestamp))
   }
 
   onBeforeProviderRequest(event: BeforeProviderRequestPayload, ctx: ExtensionContextLike): void {
@@ -176,12 +195,16 @@ class OmpOutboxPublisher {
     const captured = state.latestProviderRequest
     const branchId = event.branchId ?? captured?.branchId ?? "root"
     const ts = timestampMillis(message.timestamp ?? event.timestamp)
+    const provider = message.provider ?? captured?.provider ?? message.upstreamProvider ?? "unknown"
+    const model = message.model ?? captured?.model ?? "unknown"
+    const attribution = attributionString(provider, model, message.thinkingLevel)
+    const modelCallId = `${state.sessionId}:modelCall:${state.nextSeq}`
     const rawRequestSupport = captured?.rawRequestSupport ?? "unsupported"
     const rawRequest = captured?.payload ?? null
     state.latestProviderRequest = undefined
 
-    this.append(state, "modelCall", ts, (seq) => compactJson({
-      id: `${state.sessionId}:modelCall:${seq}`,
+    this.append(state, "modelCall", ts, () => compactJson({
+      id: modelCallId,
       ts,
       machine: "unknown",
       session: state.sessionId,
@@ -189,9 +212,10 @@ class OmpOutboxPublisher {
       branchId,
       agent: "omp",
       api: message.api ?? captured?.api ?? "unknown",
-      model: message.model ?? captured?.model ?? "unknown",
-      provider: message.provider ?? captured?.provider ?? message.upstreamProvider ?? "unknown",
+      model,
+      provider,
       upstreamProvider: message.upstreamProvider,
+      attribution,
       effort: "unknown",
       promptHash: "unknown",
       systemPromptHash: "unknown",
@@ -220,6 +244,12 @@ class OmpOutboxPublisher {
       rawRequestSupport,
       rawRequest,
     }))
+    this.cacheAttribution(state, ts, {
+      modelCallId,
+      messageTimestamp: ts,
+      attribution,
+      probes: 0,
+    })
   }
 
   onSessionSwitch(event: SessionSwitchPayload, ctx: ExtensionContextLike): void {
@@ -271,6 +301,7 @@ class OmpOutboxPublisher {
   onSessionShutdown(event: SessionShutdownPayload, ctx: ExtensionContextLike): void {
     const state = this.stateForContext(ctx)
     const ts = timestampMillis(event.timestamp)
+    this.resolveAttributionBackfill(state, ctx, ts)
     this.appendEvent(state, ts, undefined, "session_shutdown", {
       sessionId: state.sessionId,
       sessionFile: state.sessionFile,
@@ -295,6 +326,7 @@ class OmpOutboxPublisher {
       outboxPath,
       nextSeq: countExistingOutboxLines(outboxPath),
       turnStarts: new Map(),
+      pendingAttributions: new Map(),
     }
     this.sessions.set(sessionId, state)
     return state
@@ -338,12 +370,71 @@ class OmpOutboxPublisher {
     }))
   }
 
+  private cacheAttribution(state: SessionState, ts: number, pending: PendingAttribution): void {
+    state.pendingAttributions.set(pending.modelCallId, pending)
+    while (state.pendingAttributions.size > MAX_PENDING_ATTRIBUTIONS) {
+      for (const [modelCallId] of state.pendingAttributions) {
+        state.pendingAttributions.delete(modelCallId)
+        this.appendEvent(state, ts, undefined, "attributionMiss", {
+          modelCallId,
+          reason: "cacheLimitExceeded",
+        })
+        break
+      }
+    }
+  }
+
+  private resolveAttributionBackfill(state: SessionState, ctx: ExtensionContextLike, ts: number): void {
+    if (state.pendingAttributions.size === 0 || ctx.sessionManager.getEntries === undefined) {
+      return
+    }
+
+    const entries = ctx.sessionManager.getEntries()
+    const firstTailIndex = Math.max(0, entries.length - ATTRIBUTION_ENTRY_TAIL)
+
+    for (const [modelCallId, pending] of state.pendingAttributions) {
+      let entryId: string | undefined
+      for (let index = entries.length - 1; index >= firstTailIndex; index -= 1) {
+        const entry = entries[index]
+        if (entry !== undefined && entry.message?.role === "assistant" && entry.message.timestamp === pending.messageTimestamp) {
+          entryId = entry.id
+          break
+        }
+      }
+
+      if (entryId !== undefined) {
+        state.pendingAttributions.delete(modelCallId)
+        this.appendEvent(state, ts, undefined, "attribution", {
+          modelCallId,
+          entryId,
+          attribution: pending.attribution,
+        })
+        continue
+      }
+
+      const probes = pending.probes + 1
+      if (probes >= 2) {
+        state.pendingAttributions.delete(modelCallId)
+        this.appendEvent(state, ts, undefined, "attributionMiss", {
+          modelCallId,
+          reason: "entryNotFound",
+        })
+      } else {
+        state.pendingAttributions.set(modelCallId, { ...pending, probes })
+      }
+    }
+  }
+
   private appendPublisherError(ctx: ExtensionContextLike, cause: Error | object | string | number | boolean | symbol | bigint | null | undefined): void {
     const state = this.currentSessionId === undefined ? this.stateForContext(ctx) : this.sessions.get(this.currentSessionId) ?? this.stateForContext(ctx)
     this.appendEvent(state, 0, undefined, "publisherError", {
       message: cause instanceof Error ? cause.message : String(cause),
     })
   }
+}
+
+function attributionString(provider: string, model: string, thinkingLevel: string | undefined): string {
+  return thinkingLevel === undefined || thinkingLevel === "" ? `${provider}/${model}` : `${provider}/${model}:${thinkingLevel}`
 }
 
 function timestampMillis(timestamp: OmpTimestamp | undefined): number {

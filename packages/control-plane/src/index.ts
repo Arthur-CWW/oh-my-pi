@@ -4,6 +4,7 @@ export {
   LedgerStore,
   defaultLedgerPath,
   openLedger,
+  type AttributeResult,
   type ArtifactContent,
   type ArtifactMeta,
   type ArtifactRecord,

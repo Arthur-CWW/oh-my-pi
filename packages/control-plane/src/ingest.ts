@@ -94,6 +94,11 @@ const EventPayloadSchema = Schema.Struct({
 
 type EventPayload = Schema.Schema.Type<typeof EventPayloadSchema>
 
+const AttributionPayloadSchema = Schema.Struct({
+  modelCallId: Schema.String,
+  entryId: Schema.String,
+})
+
 const ModelCallPayloadSchema = Schema.Struct({
   id: OptionalString,
   ts: OptionalNumber,
@@ -123,6 +128,7 @@ const ModelCallPayloadSchema = Schema.Struct({
   rawRequestArtifact: Schema.String,
   rawResponseArtifact: Schema.String,
   entryId: OptionalString,
+  attribution: OptionalString,
   rawRequestSupport: OptionalString,
   rawRequest: Schema.optionalKey(JsonValueSchema),
 })
@@ -171,11 +177,17 @@ type RowMapping = {
   readonly row: BatchRow
   readonly malformed: boolean
   readonly rawRequestArtifact?: RawRequestArtifactInput
+  readonly attribution?: AttributionInput
 }
 
 interface RawRequestArtifactInput {
   readonly content: string
   readonly meta: ArtifactMeta
+}
+
+interface AttributionInput {
+  readonly modelCallId: string
+  readonly entryId: string
 }
 
 export function ingestOutbox(
@@ -192,6 +204,7 @@ export function ingestOutbox(
     let malformed = 0
     let materializedInserted = 0
     let materializedIgnored = 0
+    const attributions: AttributionInput[] = []
     const lines = content.split("\n")
 
     for (let index = 0; index < lines.length; index += 1) {
@@ -209,6 +222,9 @@ export function ingestOutbox(
       } else {
         rows.push(mapping.row)
       }
+      if (mapping.attribution !== undefined) {
+        attributions.push(mapping.attribution)
+      }
       if (mapping.malformed) malformed += 1
     }
 
@@ -219,6 +235,9 @@ export function ingestOutbox(
       const result = yield* store.ingestBatch(rows.slice(index, index + batchSize))
       inserted += result.inserted
       ignored += result.ignored
+    }
+    for (const attribution of attributions) {
+      yield* store.attributeModelCall(attribution.modelCallId, attribution.entryId)
     }
 
     return { inserted, ignored, malformed }
@@ -263,7 +282,14 @@ function mapKnownEnvelopeRow(envelope: OutboxEnvelope, kind: KnownOutboxKind, ra
     }
     case "event": {
       const payload = Schema.decodeUnknownOption(EventPayloadSchema)(envelope.payload, { onExcessProperty: "ignore" })
-      return payload._tag === "Some" ? { row: { kind, payload: eventInput(envelope, payload.value) }, malformed: false } : payloadErrorEvent(envelope, rawLine, "event payload schema mismatch")
+      if (payload._tag !== "Some") {
+        return payloadErrorEvent(envelope, rawLine, "event payload schema mismatch")
+      }
+      return {
+        row: { kind, payload: eventInput(envelope, payload.value) },
+        malformed: false,
+        attribution: attributionInput(payload.value),
+      }
     }
     case "modelCall": {
       const payload = Schema.decodeUnknownOption(ModelCallPayloadSchema)(envelope.payload, { onExcessProperty: "ignore" })
@@ -344,6 +370,17 @@ function eventInput(envelope: OutboxEnvelope, payload: EventPayload): EventInput
     payloadVersion: payload.payloadVersion,
     payload: typeof payload.payload === "string" ? payload.payload : jsonText(payload.payload),
   }
+}
+
+function attributionInput(payload: EventPayload): AttributionInput | undefined {
+  if (payload.kind !== "attribution") {
+    return undefined
+  }
+  const decoded = Schema.decodeUnknownOption(AttributionPayloadSchema)(payload.payload, { onExcessProperty: "ignore" })
+  if (decoded._tag !== "Some") {
+    return undefined
+  }
+  return decoded.value
 }
 
 function modelCallInput(envelope: OutboxEnvelope, payload: ModelCallPayload): ModelCallInput {

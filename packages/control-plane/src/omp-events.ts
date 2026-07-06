@@ -5,6 +5,7 @@ export interface PiLike {
   on(event: "turn_start", handler: ExtensionHandler<TurnPayload>): void
   on(event: "turn_end", handler: ExtensionHandler<TurnPayload>): void
   on(event: "message_end", handler: ExtensionHandler<MessageEndPayload>): void
+  on(event: "message_start", handler: ExtensionHandler<MessageStartPayload>): void
   on(event: "session_switch", handler: ExtensionHandler<SessionSwitchPayload>): void
   on(event: "session_branch", handler: ExtensionHandler<SessionBranchPayload>): void
   on(event: "session_shutdown", handler: ExtensionHandler<SessionShutdownPayload>): void
@@ -14,9 +15,22 @@ export interface PiLike {
 
 export type ExtensionHandler<E> = (event: E, ctx: ExtensionContextLike) => unknown
 
+export interface SessionEntryLike {
+  readonly id: string
+  readonly parentId?: string | null
+  readonly timestamp?: string | number
+  readonly type?: string
+  readonly message?: {
+    readonly role?: string
+    readonly timestamp?: number
+  }
+  readonly model?: string
+}
+
 export interface SessionManagerLike {
   getSessionId(): string
   getSessionFile(): string
+  getEntries?: () => ReadonlyArray<SessionEntryLike>
 }
 
 export interface ExtensionContextLike {
@@ -83,6 +97,7 @@ export interface AssistantMessage {
   readonly timestamp?: OmpTimestamp
   readonly duration?: number
   readonly ttft?: number
+  readonly thinkingLevel?: string
 }
 
 export interface MessageEndPayload {
@@ -91,6 +106,13 @@ export interface MessageEndPayload {
   readonly branchId?: string
   readonly timestamp?: OmpTimestamp
   readonly message: AssistantMessage
+}
+
+export interface MessageStartPayload {
+  readonly type?: "message_start"
+  readonly sessionId?: string
+  readonly branchId?: string
+  readonly timestamp?: OmpTimestamp
 }
 
 export interface BeforeProviderRequestPayload {

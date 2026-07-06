@@ -5,7 +5,7 @@ import { homedir } from "node:os"
 
 import { Database } from "bun:sqlite"
 import { Context, Effect, Layer } from "effect"
-import { and, desc, eq, gte } from "drizzle-orm"
+import { and, desc, eq, gte, isNull } from "drizzle-orm"
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite"
 
 import { ArtifactError, StorageError } from "./errors"
@@ -14,6 +14,10 @@ import { artifacts, branches, events, modelCalls, providerCalls, sessions, turns
 
 export interface InsertResult {
   readonly inserted: boolean
+}
+
+export interface AttributeResult {
+  readonly updated: boolean
 }
 
 export interface SessionInput {
@@ -202,6 +206,7 @@ export interface LedgerStoreShape {
   readonly recordTurn: (input: TurnInput) => Effect.Effect<InsertResult, StorageError>
   readonly publishEvent: (input: EventInput) => Effect.Effect<InsertResult, StorageError>
   readonly recordModelCall: (input: ModelCallInput) => Effect.Effect<InsertResult, StorageError>
+  readonly attributeModelCall: (modelCallId: string, entryId: string) => Effect.Effect<AttributeResult, StorageError>
   readonly recordProviderCall: (input: ProviderCallInput) => Effect.Effect<InsertResult, StorageError>
   readonly putArtifact: (content: ArtifactContent, meta: ArtifactMeta) => Effect.Effect<PutArtifactResult, ArtifactError>
   readonly ingestBatch: (rows: readonly BatchRow[]) => Effect.Effect<BatchResult, StorageError | ArtifactError>
@@ -259,6 +264,9 @@ function makeLedgerStore(dbPath: string): LedgerStoreShape {
     ),
     recordModelCall: Effect.fn("LedgerStore.recordModelCall")((input: ModelCallInput) =>
       storageEffect("recordModelCall", () => insertModelCall(db, input)),
+    ),
+    attributeModelCall: Effect.fn("LedgerStore.attributeModelCall")((modelCallId: string, entryId: string) =>
+      storageEffect("attributeModelCall", () => updateModelCallAttribution(db, modelCallId, entryId)),
     ),
     recordProviderCall: Effect.fn("LedgerStore.recordProviderCall")((input: ProviderCallInput) =>
       storageEffect("recordProviderCall", () => insertProviderCall(db, input)),
@@ -383,6 +391,15 @@ function insertModelCall(db: LedgerDb, input: ModelCallInput): InsertResult {
     fallbackFrom: input.fallbackFrom ?? null,
   }).onConflictDoNothing().returning({ id: modelCalls.id }).all()
   return { inserted: result.length > 0 }
+}
+
+function updateModelCallAttribution(db: LedgerDb, modelCallId: string, entryId: string): AttributeResult {
+  const result = db.update(modelCalls)
+    .set({ entryId })
+    .where(and(eq(modelCalls.id, modelCallId), isNull(modelCalls.entryId)))
+    .returning({ id: modelCalls.id })
+    .all()
+  return { updated: result.length > 0 }
 }
 
 function insertProviderCall(db: LedgerDb, input: ProviderCallInput): InsertResult {
