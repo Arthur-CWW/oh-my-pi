@@ -40,6 +40,8 @@ Explore AI-companion **form factors**, not one app. Realtime voice-to-avatar (An
 
 **Talk to it.** Full realtime loop Arthur can speak to: mic → VAD/STT (parakeet-mlx + Silero) → fast cheap LLM (Gemini Flash / Kimi lane; NEVER the Codex subscription) → Kokoro → presence layer, with barge-in and per-segment latency printed. Plus "the ghost room": a mesmerizing interactive binaural scene (orbits, behind-you passes, distance swells — reference vocabulary from `data/youtube-liked-asmr-refs`, e.g. 3D Sound Test, Vox Akuma binaural). Proof: a live conversation + a scene you can drag sources around in, both reachable from the dashboard.
 
+**Ghost Room validated by Arthur live 2026-07-03** ("fucking sick"). Consequence: the scene engine graduates toward **composable scenes** — authorable vignettes (LaDS-register intimate cinematics) mixing trajectories, foley, voice lines, and personas; converge `public/scene.ts` + `packages/spatial-audio-renderer` + persona/body events into one scene grammar. This is the cinematic lane of the scene-mode axis.
+
 ## Owns
 
 `apps/ai-companion-rtc/` (testbed; nested standalone git repo), `apps/xanadu/` (shared artifact dashboard), `packages/spatial-audio-renderer/`, `data/asmr-companion/`, `data/youtube-liked-asmr-refs/`, `data/avatar-models/`, `data/xanadu/`, this directory.
