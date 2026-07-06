@@ -44,6 +44,7 @@ harness-friction.md.
 
 ## First moves
 
+0. **Corpus pass before hardening VISION.md** (it is a living doc): Skycak/Math Academy downloads, vault clippings, Zotero, Books_Papers_Research triage — then iterate VISION. Explore and implement in parallel; don't serialize behind reading.
 1. **Recoveries** (VISION.md §Open recoveries): the better ASR model Arthur found (Cantonese lane), his saved comprehensible-input research — check `~/vault/Clippings`, then ask him last. Read `decks/hsk-deck/README.md` fully (constrained sentence generation = the 85%-rule machinery, already built).
 2. **Chinese loop skeleton** (VISION.md §Sequencing 1): paste a chapter into the reader → mark unknown spans → queue rows in the daemon ledger with sentence provenance → minimal review view. In-reader CEDICT popup (dictionary vendored in `decks/hsk-deck/`).
 3. Wire `learning-card-system.sqlite` as 4th daemon substrate; regenerate HSK cards against the didactic quality model (`wrapped-commentary-reader/references/`, `sideline-annotation-card` skill) with a multi-model rubric harness.

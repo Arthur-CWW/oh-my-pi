@@ -2,6 +2,8 @@
 
 Idea-exploration document, distilled from the 2026-07-03/06 working sessions with Arthur. This is the *vibe record*: what we're trying to elicit, decided constraints, and the design space still open. Companion to `GOAL.md` (contract) and `docs/plans/primer-intuitions.md` (earlier distillation). A fresh session should read HANDOFF → GOAL → this.
 
+**Status: LIVING DOCUMENT — not set in stone.** Arthur (2026-07-06): don't one-shot this; read all the saved research first and iterate — while still exploring and implementing in parallel. Each session should leave this doc better-grounded than it found it.
+
 ## The spine (everything is one loop)
 
 **read → friction → mark → agent enriches with context → queue → review near the source.**
@@ -27,6 +29,12 @@ Every idea below is a station on this loop. The failure mode of this stream is b
 5. **Tailscale for mobile v1.** Website served over tailnet; no auth code; no public UUID URLs (the surface carries reading/browsing life). iOS app later.
 6. **Paste-first reading environment.** V1 ingests text (paste a chapter / import a book) into our reader rather than annotating arbitrary sites in place. (Default pending Arthur's veto.)
 7. **Product LLM calls on subscription lanes** (gemini-flash default, kimi fallback), never the orchestrator model. Already enforced in primer-daemon.
+8. **Browser-rendered surface, Electron when it needs to be an app.** Anki-extension stopgap considered and rejected: Anki is not Electron, agents can't iterate/drive/test it well. Our surfaces render in the browser (agents test via CDP/headless; CuaDriver for app QA) — the dashboard/reader already comply; an Electron shell comes when a desktop app is warranted.
+9. **The reader carries known UX debt** — "small UX issues everywhere." A deliberate polish pass over the wrapped-commentary reader is scheduled work, not implied; its sweat-equity UX is the asset we build on, so it must feel good.
+
+## Vertical zero (standing): deep philosophy reading
+
+The reader's original purpose stays a first-class goal: read Nick Land and Nietzsche *deeper* — actually appreciate the reference genealogy (Marx, D&G, Kaufmann's Nietzsche, CCRU lineage) — with "creative graph understanding": the concept graph and margin annotations as instruments for seeing structure, not decoration. The 40-book philosophy library and meltdown annotation corpus are its substrate. Chinese is vertical *one* because its metric is honest; philosophy depth is the standing vertical the annotation-quality work ultimately serves.
 
 ## Vertical one: Chinese
 
@@ -59,6 +67,15 @@ Grounded corpus already exists — use it, don't re-derive:
 | `decks/hsk-deck` → `~/apps/hsk-deck` | Deck generator with **constrained sentence generation** (progressive difficulty = the 85%-rule machinery), cleaned HSK1–4 decks, Canto/Mando grammar drills, `hsk_meta.db`, vendored CC-CEDICT, Yomitan enrichment + Firefox setup scripts |
 | `decks/mochi` → `~/Documents/mochi` | Three .apkg exports (~790MB, 2025-06) |
 | `decks/yomitan` → `~/apps/yomitan` | Yomitan source (the fork attempt — superseded by in-reader dictionary decision) |
+
+## Research corpus (read before hardening this doc)
+
+The vision iterates against saved research, not from memory:
+- **Andy Matuschak** — prompts essay (vault clipping + `references/andy-matuschak-prompts.html`), mnemonic medium, Memory Machines eval.
+- **Justin Skycak / Math Academy** — Arthur downloaded a bunch: content-graph artifact (`browser:events:203934`), podcast (`browser:events:204495`), algorithms PDF (`browser:events:118880`); locate the full downloads and distill his pedagogy model (mastery learning, knowledge graphs, deliberate practice at scale).
+- **A third author Arthur remembers saving** — unidentified ("the other guy"); recover from downloads/vault/Zotero before asking.
+- Comprehensible-input / extensive-reading threshold literature (85%-rule adjacent).
+- `~/Downloads/_Organized/Books_Papers_Research` (3.3GB), `~/Zotero`, `~/vault/library` — triage what maps to the spine (was already a HANDOFF first-move; still undone).
 
 ## Open recoveries (fresh session, cheap)
 
