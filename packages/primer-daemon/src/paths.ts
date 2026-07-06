@@ -9,6 +9,7 @@ export interface DaemonPaths {
   browserDb: string
   twitterDb: string
   readerDb: string
+  readerSite: string
   ledgerDb: string
 }
 
@@ -19,6 +20,8 @@ export function resolveDaemonPaths(env: Record<string, string | undefined> = {})
     readerDb:
       env.PRIMER_READER_DB ??
       resolve(REPO_ROOT, "streams/primer/wrapped-commentary-reader/site/meltdown-annotations.sqlite"),
+    readerSite:
+      env.PRIMER_READER_SITE ?? resolve(REPO_ROOT, "streams/primer/wrapped-commentary-reader/site"),
     ledgerDb: env.PRIMER_LEDGER_DB ?? resolve(REPO_ROOT, "data/primer/daemon-ledger.sqlite"),
   }
 }

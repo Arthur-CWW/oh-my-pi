@@ -1,6 +1,8 @@
 import { X } from "lucide-react"
 import type * as React from "react"
 
+import { Kbd, KbdGroup } from "./ui/kbd"
+
 const KEYS: { keys: string[]; label: string }[] = [
   { keys: ["j", "k"], label: "focus item down / up" },
   { keys: ["[", "]"], label: "cycle panel" },
@@ -26,12 +28,12 @@ export function KeymapOverlay({ onClose }: { onClose: () => void }): React.JSX.E
           {KEYS.map((row) => (
             <div key={row.label} className="flex items-center justify-between gap-4 py-1.5">
               <dt className="text-sm text-muted-foreground">{row.label}</dt>
-              <dd className="flex shrink-0 gap-1">
-                {row.keys.map((key) => (
-                  <kbd key={key} className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
-                    {key}
-                  </kbd>
-                ))}
+              <dd className="shrink-0">
+                <KbdGroup>
+                  {row.keys.map((key) => (
+                    <Kbd key={key}>{key}</Kbd>
+                  ))}
+                </KbdGroup>
               </dd>
             </div>
           ))}

@@ -1,10 +1,10 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
-import { extname, resolve, sep } from "node:path"
+import { extname, normalize, resolve, sep } from "node:path"
 import { fileURLToPath } from "node:url"
 import type { Database } from "bun:sqlite"
 import { Schema } from "effect"
 
-import { resolveAskSynthesisConfig, synthesizeAnswer } from "./ask-synthesis"
+import { resolveAskSynthesisConfig, streamSynthesis, synthesizeAnswer } from "./ask-synthesis"
 import { extractTerms } from "./cli"
 import { askEvidence } from "./evidence"
 import {
@@ -102,11 +102,13 @@ export function startDashboard(options: DashboardOptions): DashboardServer {
 async function handleRequest(request: Request, paths: DaemonPaths, env: Record<string, string | undefined>): Promise<Response> {
   const url = new URL(request.url)
   const pathname = url.pathname
+  if (isReaderHost(request)) return handleReaderSite(request, pathname, paths)
 
   if (request.method === "GET" && pathname === "/") return handleWebIndex(env)
 
   if (request.method === "GET" && pathname === "/api/status") return handleStatus(paths)
   if (request.method === "GET" && pathname === "/api/ask/config") return handleAskConfig(env)
+  if (request.method === "POST" && pathname === "/api/ask/stream") return handleAskStream(request, paths, env)
   if (request.method === "POST" && pathname === "/api/ask") return handleAsk(request, paths, env)
   if (request.method === "GET" && pathname === "/api/notes") return handleNotes(url, paths)
   if (request.method === "GET" && pathname === "/api/cards") return handleCards(url, paths)
@@ -120,6 +122,39 @@ async function handleRequest(request: Request, paths: DaemonPaths, env: Record<s
   if (request.method === "GET" && pathname.startsWith("/assets/")) return handleWebAsset(pathname, env)
 
   return jsonError("unknown route", 404)
+}
+
+function isReaderHost(request: Request): boolean {
+  const host = request.headers.get("host")
+  if (host === null) return false
+
+  const hostname = host.trim().toLowerCase().split(":")[0] ?? ""
+  const firstLabel = hostname.split(".")[0]
+  return firstLabel === "meltdown" || firstLabel === "reader"
+}
+
+function handleReaderSite(request: Request, pathname: string, paths: DaemonPaths): Response {
+  if (request.method !== "GET" && request.method !== "HEAD") return jsonError("unknown route", 404)
+  if (pathname.startsWith("/api/")) return jsonError("unknown route", 404)
+
+  const readerRoot = resolve(paths.readerSite)
+  const filePath = pathname === "/" ? resolve(readerRoot, "index.html") : resolveReaderFile(readerRoot, pathname)
+  if (filePath === null) return jsonError("unknown route", 404)
+  if (filePath !== readerRoot && !filePath.startsWith(`${readerRoot}${sep}`)) return jsonError("unknown route", 404)
+  if (!existsSync(filePath) || !statSync(filePath).isFile()) return jsonError("unknown route", 404)
+
+  return new Response(Bun.file(filePath))
+}
+
+function resolveReaderFile(readerRoot: string, pathname: string): string | null {
+  let decodedPathname = ""
+  try {
+    decodedPathname = decodeURIComponent(pathname)
+  } catch {
+    return null
+  }
+
+  return resolve(readerRoot, normalize(`.${decodedPathname}`))
 }
 
 function handleWebIndex(env: Record<string, string | undefined>): Response {
@@ -213,6 +248,80 @@ async function handleAsk(request: Request, paths: DaemonPaths, env: Record<strin
     skipped: evidence.skipped,
     answer,
     answerError,
+  })
+}
+
+async function handleAskStream(request: Request, paths: DaemonPaths, env: Record<string, string | undefined>): Promise<Response> {
+  const body = await decodeJson(request, AskRequestSchema)
+  if (body instanceof Response) return body
+
+  const terms = extractTerms(body.question)
+  const evidence = askEvidence(paths, terms, body.limit ?? DEFAULT_ASK_LIMIT)
+  const config = resolveAskSynthesisConfig(env)
+  const meta = {
+    question: body.question,
+    terms,
+    hits: evidence.hits,
+    skipped: evidence.skipped,
+    model: config.model,
+    synthesisEnabled: config.enabled,
+  }
+  const encoder = new TextEncoder()
+  let closed = false
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const close = (): void => {
+        if (closed) return
+        closed = true
+        try {
+          controller.close()
+        } catch {
+          closed = true
+        }
+      }
+      const send = (event: string, data: object): boolean => {
+        if (closed || request.signal.aborted) return false
+        try {
+          controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`))
+          return true
+        } catch {
+          closed = true
+          return false
+        }
+      }
+      const abort = (): void => close()
+      request.signal.addEventListener("abort", abort, { once: true })
+
+      try {
+        if (!send("meta", meta)) return
+        if (!config.enabled || evidence.hits.length === 0) {
+          send("done", { elapsedMs: 0 })
+          return
+        }
+
+        try {
+          const { elapsedMs } = await streamSynthesis(body.question, evidence.hits, config, (text) => {
+            if (!send("delta", { text })) throw new Error("client aborted")
+          })
+          send("done", { elapsedMs })
+        } catch (error) {
+          if (!closed && !request.signal.aborted) send("error", { message: answerFailure(error) })
+        }
+      } finally {
+        request.signal.removeEventListener("abort", abort)
+        close()
+      }
+    },
+    cancel() {
+      closed = true
+    },
+  })
+
+  return new Response(stream, {
+    headers: {
+      "content-type": "text/event-stream",
+      "cache-control": "no-cache",
+    },
   })
 }
 
@@ -385,11 +494,38 @@ function jsonError(error: string, status: number): Response {
   return jsonResponse({ error }, status)
 }
 
+function registerPortlessAlias(port: number, env: Record<string, string | undefined>): void {
+  if (env.PORTLESS_URL === undefined) return
+
+  try {
+    const child = Bun.spawn(["bunx", "portless@latest", "alias", "meltdown", String(port)], {
+      stdout: "ignore",
+      stderr: "inherit",
+    })
+    child.exited.then(
+      (exitCode) => {
+        if (exitCode === 0) {
+          console.log(`Registered http://meltdown.localhost:1355 for port ${port}`)
+        } else {
+          console.error(`Failed to register meltdown portless alias: exit ${exitCode}`)
+        }
+      },
+      (error: unknown) => {
+        console.error(`Failed to register meltdown portless alias: ${error instanceof Error ? error.message : String(error)}`)
+      },
+    )
+  } catch (error) {
+    console.error(`Failed to start meltdown portless alias registration: ${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
 if (import.meta.main) {
   const server = startDashboard({
     port: Number(process.env.PORT ?? 4177),
     paths: resolveDaemonPaths(process.env),
     env: process.env,
   })
-  console.log(`Primer dashboard listening on http://localhost:${server.port}`)
+  const actualPort = server.port ?? Number(process.env.PORT ?? 4177)
+  console.log(`Primer dashboard listening on http://localhost:${actualPort}`)
+  registerPortlessAlias(actualPort, process.env)
 }

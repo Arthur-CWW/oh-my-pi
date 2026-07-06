@@ -3,6 +3,7 @@ import type * as React from "react"
 
 import type { EvidenceHit, EvidenceSource } from "@/api"
 import { cn } from "@/lib/utils"
+import { readerRefUrl } from "@/lib/reader-link"
 import { RefChip, SUBSTRATE_DOT, SUBSTRATE_LABEL, SourceBadge, TimeAgo, focusRing } from "./atoms"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./ui/collapsible"
 
@@ -52,9 +53,12 @@ function EvidenceRow({
   const panel = nav ? "ask" : undefined
   const vimIndex = nav ? index : undefined
   const hover = nav ? onFocus : undefined
+  // Reader refs deep-link into the Talmudic reader; every other source
+  // already carries its own url on the hit.
+  const href = hit.url ?? readerRefUrl(hit.ref)
 
-  return hit.url ? (
-    <a href={hit.url} target="_blank" rel="noreferrer" className={className} data-vim-panel={panel} data-vim-index={vimIndex} onMouseEnter={hover}>
+  return href ? (
+    <a href={href} target="_blank" rel="noreferrer" className={className} data-vim-panel={panel} data-vim-index={vimIndex} onMouseEnter={hover}>
       {inner}
     </a>
   ) : (

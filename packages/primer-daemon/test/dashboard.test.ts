@@ -32,6 +32,24 @@ interface AskResponse {
   answerError: string | null
 }
 
+interface AskStreamMeta {
+  question: string
+  terms: string[]
+  hits: EvidenceHit[]
+  skipped: string[]
+  model: string
+  synthesisEnabled: boolean
+}
+
+interface AskStreamDone {
+  elapsedMs: number
+}
+
+interface ParsedSseEvent {
+  event: string
+  data: unknown
+}
+
 interface CardResponse {
   id: number
   status: string
@@ -61,7 +79,7 @@ interface ErrorResponse {
   error: string
 }
 
-function makeDashboardPaths(name: string): DaemonPaths {
+function makeDashboardPaths(name: string, env: Record<string, string | undefined> = {}): DaemonPaths {
   mkdirSync(TEST_TMP_ROOT, { recursive: true })
   const browserDb = join(TEST_TMP_ROOT, `${name}.browser.sqlite`)
   const twitterDb = join(TEST_TMP_ROOT, `${name}.twitter.sqlite`)
@@ -81,6 +99,7 @@ function makeDashboardPaths(name: string): DaemonPaths {
     PRIMER_TWITTER_DB: twitterDb,
     PRIMER_READER_DB: readerDb,
     PRIMER_LEDGER_DB: ledgerDb,
+    PRIMER_READER_SITE: env.PRIMER_READER_SITE,
   })
 }
 
@@ -88,7 +107,7 @@ async function withDashboard(
   run: (fixture: DashboardFixture) => Promise<void>,
   env: Record<string, string | undefined> = {},
 ): Promise<void> {
-  const paths = makeDashboardPaths(`dashboard-${nextDashboardId}`)
+  const paths = makeDashboardPaths(`dashboard-${nextDashboardId}`, env)
   nextDashboardId += 1
   const server = startDashboard({ port: 0, paths, env: { PRIMER_ASK_SYNTHESIS: "0", ...env } })
   try {
@@ -102,6 +121,22 @@ async function requestJson<T>(baseUrl: string, path: string, init?: RequestInit)
   const response = await fetch(`${baseUrl}${path}`, init)
   const body = (await response.json()) as T
   return { response, body }
+}
+
+function parseSseEvents(text: string): ParsedSseEvent[] {
+  return text
+    .split("\n\n")
+    .filter((block) => block.length > 0)
+    .map((block) => {
+      let event = ""
+      const data: string[] = []
+      for (const line of block.split("\n")) {
+        if (line.startsWith("event: ")) event = line.slice("event: ".length)
+        if (line.startsWith("data: ")) data.push(line.slice("data: ".length))
+      }
+      if (event.length === 0 || data.length === 0) throw new Error(`invalid SSE block: ${block}`)
+      return { event, data: JSON.parse(data.join("\n")) as unknown }
+    })
 }
 
 function createBrowserDb(path: string): void {
@@ -273,6 +308,43 @@ describe("dashboard", () => {
     }
   })
 
+  test("serves the reader site only on meltdown and reader hosts", async () => {
+    const readerSite = join(TEST_TMP_ROOT, "fixture-reader-site")
+    const secret = join(TEST_TMP_ROOT, "secret")
+    rmSync(readerSite, { force: true, recursive: true })
+    rmSync(secret, { force: true })
+    mkdirSync(join(readerSite, "assets"), { recursive: true })
+    writeFileSync(join(readerSite, "index.html"), "<!doctype html><html><body><h1>Meltdown Reader</h1></body></html>")
+    writeFileSync(join(readerSite, "assets", "x.js"), "globalThis.readerAsset = true;\n")
+    writeFileSync(secret, "outside reader root\n")
+
+    try {
+      await withDashboard(async ({ baseUrl }) => {
+        const host = { host: "meltdown.localhost" }
+        const index = await fetch(`${baseUrl}/`, { headers: host })
+        const asset = await fetch(`${baseUrl}/assets/x.js`, { headers: host })
+        const readerAsset = await fetch(`${baseUrl}/assets/x.js`, { headers: { host: "reader.localhost" } })
+        const traversal = await fetch(`${baseUrl}/%2e%2e%2fsecret`, { headers: host })
+        const readerStatus = await requestJson<ErrorResponse>(baseUrl, "/api/status", { headers: host })
+        const dashboardStatus = await fetch(`${baseUrl}/api/status`)
+
+        expect(index.status).toBe(200)
+        expect(await index.text()).toContain("Meltdown Reader")
+        expect(asset.status).toBe(200)
+        expect(await asset.text()).toContain("readerAsset")
+        expect(readerAsset.status).toBe(200)
+        expect(await readerAsset.text()).toContain("readerAsset")
+        expect(traversal.status).toBeGreaterThanOrEqual(400)
+        expect(readerStatus.response.status).toBe(404)
+        expect(readerStatus.body).toEqual({ error: "unknown route" })
+        expect(dashboardStatus.status).toBe(200)
+      }, { PRIMER_READER_SITE: readerSite })
+    } finally {
+      rmSync(readerSite, { force: true, recursive: true })
+      rmSync(secret, { force: true })
+    }
+  })
+
   test("exposes ask synthesis config", async () => {
     await withDashboard(async ({ baseUrl }) => {
       const { response, body } = await requestJson<AskConfigResponse>(baseUrl, "/api/ask/config")
@@ -307,6 +379,51 @@ describe("dashboard", () => {
       expect(body.answer).toBeNull()
       expect(body.answerError).toBe("synthesis disabled")
     }, { PRIMER_ASK_SYNTHESIS: "0" })
+  })
+
+  test("streams meta and done while synthesis is disabled", async () => {
+    await withDashboard(async ({ baseUrl }) => {
+      const response = await fetch(`${baseUrl}/api/ask/stream`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ question: "Find cybernetics", limit: 5 }),
+      })
+      const raw = await response.text()
+      const events = parseSseEvents(raw)
+
+      expect(response.status).toBe(200)
+      expect(response.headers.get("content-type") ?? "").toContain("text/event-stream")
+      expect(events.map((event) => event.event)).toEqual(["meta", "done"])
+
+      const meta = events[0]?.data as AskStreamMeta
+      expect(Object.keys(meta)).toEqual(["question", "terms", "hits", "skipped", "model", "synthesisEnabled"])
+      expect(meta.question).toBe("Find cybernetics")
+      expect(meta.terms).toEqual(["find", "cybernetics"])
+      expect(meta.hits.map((hit) => hit.ref)).toContain("browser:tab_entries:1")
+      expect(meta.skipped).toEqual([])
+      expect(meta.model).toBe("google-antigravity/gemini-3.5-flash")
+      expect(meta.synthesisEnabled).toBe(false)
+
+      expect(events[1]?.data as AskStreamDone).toEqual({ elapsedMs: 0 })
+      expect(Object.keys(events[1]?.data as AskStreamDone)).toEqual(["elapsedMs"])
+      expect(raw).toBe(`event: meta\ndata: ${JSON.stringify(meta)}\n\nevent: done\ndata: {"elapsedMs":0}\n\n`)
+    }, { PRIMER_ASK_SYNTHESIS: "0" })
+  })
+
+  test("returns JSON 400 for malformed ask stream bodies", async () => {
+    await withDashboard(async ({ baseUrl }) => {
+      const response = await fetch(`${baseUrl}/api/ask/stream`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{",
+      })
+      const body = (await response.json()) as ErrorResponse
+
+      expect(response.status).toBe(400)
+      expect(response.headers.get("content-type") ?? "").toContain("application/json")
+      expect(response.headers.get("content-type") ?? "").not.toContain("text/event-stream")
+      expect(body).toEqual({ error: "malformed JSON body" })
+    })
   })
 
   test("updates card status and 404s unknown card ids", async () => {
