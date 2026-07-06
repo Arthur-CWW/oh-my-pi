@@ -1,0 +1,36 @@
+{
+  "schemaVersion": "pleometric-sync-report.v1",
+  "generatedAt": "2026-07-06T03:45:18.044Z",
+  "tools": {
+    "yt-dlp": "/opt/homebrew/bin/yt-dlp",
+    "gallery-dl": "absent",
+    "ffmpeg": "/opt/homebrew/bin/ffmpeg",
+    "ffprobe": "/opt/homebrew/bin/ffprobe"
+  },
+  "archiveSqlite": {
+    "path": "data/twitter-archive/twitter-archive.sqlite",
+    "pleometricMediaRows": 0,
+    "pleometricVideoGifRows": 0
+  },
+  "fetch": {
+    "baseUrl": "https://nitter.tiekoetter.com",
+    "pagesFetched": 10,
+    "stopReason": "max-pages",
+    "walls": []
+  },
+  "files": {
+    "manifest": "data/inspiration/abelian_soup/manifest.json",
+    "contactSheet": "workflows/scene-lab/reports/2026-07-06-abelian_soup-corpus/abelian_soup-contact-sheet.png",
+    "dataDir": "data/inspiration/abelian_soup"
+  },
+  "counts": {
+    "items": 57,
+    "existingAtStart": 0,
+    "newItems": 57,
+    "filesOnDisk": 58
+  },
+  "dateRange": {
+    "earliest": "Nov 16, 2025 · 2:07 PM UTC",
+    "latest": "Jun 24, 2026 · 4:06 AM UTC"
+  }
+}
