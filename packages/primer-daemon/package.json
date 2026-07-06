@@ -16,7 +16,8 @@
     "check": "bun run typecheck && bun run web:build && bun run test",
     "cli": "bun src/cli.ts",
     "dashboard": "bun src/dashboard.ts",
-    "dev": "bun run web:build && bunx portless@latest primer bun src/dashboard.ts"
+    "dev": "bun run web:build && bunx portless@latest primer bun src/dashboard.ts",
+    "cedict:build": "bun scripts/build-cedict.ts"
   },
   "dependencies": {
     "@radix-ui/react-collapsible": "^1.1.12",

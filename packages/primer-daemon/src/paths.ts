@@ -9,8 +9,10 @@ export interface DaemonPaths {
   browserDb: string
   twitterDb: string
   readerDb: string
+  learningCardsDb: string
   readerSite: string
   ledgerDb: string
+  cedictDb: string
 }
 
 export function resolveDaemonPaths(env: Record<string, string | undefined> = {}): DaemonPaths {
@@ -20,8 +22,12 @@ export function resolveDaemonPaths(env: Record<string, string | undefined> = {})
     readerDb:
       env.PRIMER_READER_DB ??
       resolve(REPO_ROOT, "streams/primer/wrapped-commentary-reader/site/meltdown-annotations.sqlite"),
+    learningCardsDb:
+      env.PRIMER_CARDS_DB ??
+      resolve(REPO_ROOT, "streams/primer/wrapped-commentary-reader/artifacts/learning-card-system/learning-card-system.sqlite"),
     readerSite:
       env.PRIMER_READER_SITE ?? resolve(REPO_ROOT, "streams/primer/wrapped-commentary-reader/site"),
     ledgerDb: env.PRIMER_LEDGER_DB ?? resolve(REPO_ROOT, "data/primer/daemon-ledger.sqlite"),
+    cedictDb: env.PRIMER_CEDICT_DB ?? resolve(REPO_ROOT, "data/primer/cedict.sqlite"),
   }
 }

@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "media": {
+    "file": "/Users/arthur/apps/hsk-deck/audio/sentences/hsk1_00003_sentence.mp3",
+    "durationMs": 2218,
+    "lang": "zh",
+    "asr": "faster-whisper-base"
+  },
+  "sentences": [
+    {
+      "idx": 0,
+      "text": "這件事我不了",
+      "pinyin": "zhè jiàn shì wǒ bù le",
+      "startMs": 0,
+      "endMs": 1120,
+      "charTiming": "interpolated",
+      "chars": [
+        { "ch": "這", "pinyin": "zhè", "startMs": 0, "endMs": 220 },
+        { "ch": "件", "pinyin": "jiàn", "startMs": 220, "endMs": 380 },
+        { "ch": "事", "pinyin": "shì", "startMs": 380, "endMs": 600 },
+        { "ch": "我", "pinyin": "wǒ", "startMs": 600, "endMs": 740 },
+        { "ch": "不", "pinyin": "bù", "startMs": 740, "endMs": 880 },
+        { "ch": "了", "pinyin": "le", "startMs": 880, "endMs": 1120 }
+      ]
+    },
+    {
+      "idx": 1,
+      "text": "不了",
+      "pinyin": "bù le",
+      "startMs": 1120,
+      "endMs": 1920,
+      "charTiming": "interpolated",
+      "chars": [
+        { "ch": "不", "pinyin": "bù", "startMs": 1120, "endMs": 1700 },
+        { "ch": "了", "pinyin": "le", "startMs": 1700, "endMs": 1920 }
+      ]
+    }
+  ]
+}

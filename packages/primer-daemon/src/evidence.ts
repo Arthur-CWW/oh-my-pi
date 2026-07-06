@@ -2,6 +2,7 @@ import type { DaemonPaths } from "./paths"
 import { rankEvidence } from "./rank"
 import type { EvidenceHit, EvidenceSource, SearchResult } from "./schema"
 import { recentBrowser, searchBrowser } from "./substrate/browser"
+import { searchCards } from "./substrate/cards"
 import { searchReader } from "./substrate/reader"
 import { recentTweets, searchTwitter } from "./substrate/twitter"
 
@@ -10,7 +11,7 @@ export interface EvidenceSet {
   skipped: string[]
 }
 
-export const SUBSTRATES = ["browser", "twitter", "reader"] as const satisfies readonly EvidenceSource[]
+export const SUBSTRATES = ["browser", "twitter", "reader", "cards"] as const satisfies readonly EvidenceSource[]
 
 export function searchEvidence(
   paths: DaemonPaths,
@@ -68,7 +69,8 @@ export function recentEvidence(paths: DaemonPaths, days: number, limit: number):
 function searchSubstrate(paths: DaemonPaths, substrate: EvidenceSource, terms: readonly string[], limit: number): SearchResult {
   if (substrate === "browser") return searchBrowser(paths.browserDb, terms, { limit })
   if (substrate === "twitter") return searchTwitter(paths.twitterDb, terms, limit)
-  return searchReader(paths.readerDb, terms, limit)
+  if (substrate === "reader") return searchReader(paths.readerDb, terms, limit)
+  return searchCards(paths.learningCardsDb, terms, limit)
 }
 
 function appendResult(result: SearchResult, hits: EvidenceHit[], skipped: string[]): void {

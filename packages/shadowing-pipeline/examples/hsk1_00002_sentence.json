@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "media": {
+    "file": "/Users/arthur/apps/hsk-deck/audio/sentences/hsk1_00002_sentence.mp3",
+    "durationMs": 1834,
+    "lang": "zh",
+    "asr": "faster-whisper-base"
+  },
+  "sentences": [
+    {
+      "idx": 0,
+      "text": "他今天買了七本書",
+      "pinyin": "tā jīntiān mǎi le qī běn shū",
+      "startMs": 0,
+      "endMs": 1560,
+      "charTiming": "interpolated",
+      "chars": [
+        { "ch": "他", "pinyin": "tā", "startMs": 0, "endMs": 260 },
+        { "ch": "今", "pinyin": "jīn", "startMs": 260, "endMs": 400 },
+        { "ch": "天", "pinyin": "tiān", "startMs": 400, "endMs": 540 },
+        { "ch": "買", "pinyin": "mǎi", "startMs": 540, "endMs": 740 },
+        { "ch": "了", "pinyin": "le", "startMs": 740, "endMs": 840 },
+        { "ch": "七", "pinyin": "qī", "startMs": 840, "endMs": 1060 },
+        { "ch": "本", "pinyin": "běn", "startMs": 1060, "endMs": 1240 },
+        { "ch": "書", "pinyin": "shū", "startMs": 1240, "endMs": 1560 }
+      ]
+    }
+  ]
+}

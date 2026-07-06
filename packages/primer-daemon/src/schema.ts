@@ -7,6 +7,7 @@ export const EvidenceSourceSchema = Schema.Union([
   Schema.Literal("browser"),
   Schema.Literal("twitter"),
   Schema.Literal("reader"),
+  Schema.Literal("cards"),
 ])
 export type EvidenceSource = Schema.Schema.Type<typeof EvidenceSourceSchema>
 
@@ -58,6 +59,20 @@ export const ReaderRowSchema = Schema.Struct({
 })
 export type ReaderRow = Schema.Schema.Type<typeof ReaderRowSchema>
 
+export const CardsRowSchema = Schema.Struct({
+  kind: Schema.Union([
+    Schema.Literal("concept_node"),
+    Schema.Literal("tacit_move"),
+    Schema.Literal("card_candidate"),
+  ]),
+  id: Schema.String,
+  title: NullableString,
+  primaryText: NullableString,
+  secondaryText: NullableString,
+  tertiaryText: NullableString,
+})
+export type CardsRow = Schema.Schema.Type<typeof CardsRowSchema>
+
 export interface SearchResult {
   hits: EvidenceHit[]
   skipped?: string
@@ -77,4 +92,8 @@ export function decodeTwitterRow(value: unknown): TwitterRow {
 
 export function decodeReaderRow(value: unknown): ReaderRow {
   return Schema.decodeUnknownSync(ReaderRowSchema)(value)
+}
+
+export function decodeCardsRow(value: unknown): CardsRow {
+  return Schema.decodeUnknownSync(CardsRowSchema)(value)
 }

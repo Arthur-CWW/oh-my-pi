@@ -16,6 +16,7 @@ import {
   setCardStatus,
   type CardStatus,
 } from "./ledger"
+import { handleReaderApi } from "./reader-api"
 import { resolveDaemonPaths, type DaemonPaths } from "./paths"
 
 export interface DashboardOptions {
@@ -41,7 +42,7 @@ interface ProofEntry extends ProofSummary {
 }
 
 interface SubstrateStatus {
-  name: "browser" | "twitter" | "reader"
+  name: "browser" | "twitter" | "reader" | "cards"
   path: string
   exists: boolean
   mtime: string | null
@@ -102,6 +103,8 @@ export function startDashboard(options: DashboardOptions): DashboardServer {
 async function handleRequest(request: Request, paths: DaemonPaths, env: Record<string, string | undefined>): Promise<Response> {
   const url = new URL(request.url)
   const pathname = url.pathname
+  const readerApiResponse = await handleReaderApi(request, paths)
+  if (readerApiResponse !== null) return readerApiResponse
   if (isReaderHost(request)) return handleReaderSite(request, pathname, paths)
 
   if (request.method === "GET" && pathname === "/") return handleWebIndex(env)
@@ -120,6 +123,7 @@ async function handleRequest(request: Request, paths: DaemonPaths, env: Record<s
   }
   if (request.method === "GET" && pathname.startsWith("/api/proofs/")) return handleProof(pathname, env)
   if (request.method === "GET" && pathname.startsWith("/assets/")) return handleWebAsset(pathname, env)
+
 
   return jsonError("unknown route", 404)
 }
@@ -423,6 +427,7 @@ function substrateStatuses(paths: DaemonPaths): SubstrateStatus[] {
     substrateStatus("browser", paths.browserDb),
     substrateStatus("twitter", paths.twitterDb),
     substrateStatus("reader", paths.readerDb),
+    substrateStatus("cards", paths.learningCardsDb),
   ]
 }
 

@@ -5,7 +5,6 @@ import { usePolled } from "@/hooks/usePolled"
 import { ageMs, relativeShort } from "@/lib/relative-time"
 import { cn } from "@/lib/utils"
 import { SUBSTRATE_LABEL } from "./atoms"
-import { Button } from "./ui/button"
 
 const DAY = 86_400_000
 
@@ -36,32 +35,56 @@ function Ledger({ label, value }: { label: string; value: number }): React.JSX.E
   )
 }
 
-export function Header({ onShowKeys }: { onShowKeys: () => void }): React.JSX.Element {
+// ---------------------------------------------------------------------------
+// Nav — driven by routeSegment prop from App (re-renders on every route change)
+// ---------------------------------------------------------------------------
+
+const NAV_LINKS: Array<{ href: string; label: string; segment: string }> = [
+  { href: "#/", label: "Dashboard", segment: "" },
+  { href: "#/read", label: "Read", segment: "read" },
+  { href: "#/review", label: "Review", segment: "review" },
+  { href: "#/shadow", label: "Shadow", segment: "shadow" },
+]
+
+function Nav({ segment }: { segment: string }): React.JSX.Element {
+  return (
+    <nav className="flex items-center gap-0.5">
+      {NAV_LINKS.map((link) => (
+        <a
+          key={link.href}
+          href={link.href}
+          className={cn(
+            "rounded-md px-2 py-1 text-xs font-medium transition-colors",
+            link.segment === segment
+              ? "bg-accent text-foreground"
+              : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+          )}
+        >
+          {link.label}
+        </a>
+      ))}
+    </nav>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Header
+// ---------------------------------------------------------------------------
+
+export function Header({ routeSegment = "" }: { routeSegment?: string }): React.JSX.Element {
   const { data, error } = usePolled(getStatus, 30_000)
 
   return (
     <header className="sticky top-0 z-40 border-b border-border/70 bg-background/85 backdrop-blur supports-[backdrop-filter]:bg-background/70">
       <div className="mx-auto w-full max-w-3xl px-4 py-3 min-[1200px]:max-w-6xl">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-4">
             <div className="flex items-baseline gap-2">
               <h1 className="text-base font-semibold tracking-tight">Primer</h1>
               <span className="text-xs text-muted-foreground">dæmon</span>
             </div>
-            <p className="mt-0.5 max-w-prose text-xs leading-relaxed text-muted-foreground/80">
-              Local reading dæmon — searches your browser history, tweets, and reading annotations; answers with sources. Agents post finished work here for
-              review.
-            </p>
+            <Nav segment={routeSegment} />
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={onShowKeys}
-            className="h-7 shrink-0 gap-1.5 px-2 text-xs text-muted-foreground"
-            aria-label="Show keyboard shortcuts"
-          >
-            <kbd className="font-mono">?</kbd> keys
-          </Button>
         </div>
 
         <div className="mt-2.5 flex flex-wrap items-center gap-x-2 gap-y-1.5">

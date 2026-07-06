@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "media": {
+    "file": "/Users/arthur/apps/hsk-deck/audio/sentences/hsk1_00001_sentence.mp3",
+    "durationMs": 2473,
+    "lang": "zh",
+    "asr": "faster-whisper-base"
+  },
+  "sentences": [
+    {
+      "idx": 0,
+      "text": "我今天想去超市买东西",
+      "pinyin": "wǒ jīntiān xiǎng qù chāoshì mǎi dōngxī",
+      "startMs": 0,
+      "endMs": 2120,
+      "charTiming": "interpolated",
+      "chars": [
+        { "ch": "我", "pinyin": "wǒ", "startMs": 0, "endMs": 240 },
+        { "ch": "今", "pinyin": "jīn", "startMs": 240, "endMs": 410 },
+        { "ch": "天", "pinyin": "tiān", "startMs": 410, "endMs": 580 },
+        { "ch": "想", "pinyin": "xiǎng", "startMs": 580, "endMs": 940 },
+        { "ch": "去", "pinyin": "qù", "startMs": 940, "endMs": 1080 },
+        { "ch": "超", "pinyin": "chāo", "startMs": 1080, "endMs": 1260 },
+        { "ch": "市", "pinyin": "shì", "startMs": 1260, "endMs": 1460 },
+        { "ch": "买", "pinyin": "mǎi", "startMs": 1460, "endMs": 1660 },
+        { "ch": "东", "pinyin": "dōng", "startMs": 1660, "endMs": 1820 },
+        { "ch": "西", "pinyin": "xī", "startMs": 1820, "endMs": 2120 }
+      ]
+    }
+  ]
+}

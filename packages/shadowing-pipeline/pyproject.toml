@@ -1,0 +1,21 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "shadowing-pipeline"
+version = "0.1.0"
+description = "Local Mandarin ASR-to-character alignment pipeline for the primer shadowing tool."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "faster-whisper>=1.2.1",
+    "pydantic>=2.0",
+    "pypinyin>=0.53.0",
+]
+
+[project.scripts]
+shadow-align = "shadowing_pipeline.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/shadowing_pipeline"]

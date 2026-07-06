@@ -84,6 +84,21 @@
   }
 }
 
+/* Reading surface typography — Chinese text at comfortable size + leading */
+.reading-surface {
+  font-size: 1.35rem;
+  line-height: 1.85;
+}
+
+/* Flash animation for mark provenance scroll-to */
+@keyframes mark-flash {
+  0%, 100% { box-shadow: 0 0 0 2px oklch(0.55 0.13 55 / 0.5); border-radius: 2px; }
+  50% { box-shadow: 0 0 0 0 transparent; }
+}
+.animate-flash {
+  animation: mark-flash 0.5s ease-in-out 3;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

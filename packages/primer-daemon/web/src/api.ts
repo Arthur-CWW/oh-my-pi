@@ -114,6 +114,76 @@ export interface AskConfig {
   synthesisEnabled: boolean
 }
 
+// ---------------------------------------------------------------------------
+// Reader / Queue types
+// ---------------------------------------------------------------------------
+
+export interface ReaderDocSummary {
+  id: number
+  title: string
+  lang: string
+  createdAt: string
+  paragraphCount: number
+  markCount: number
+}
+
+export interface Mark {
+  id: number
+  paragraphIdx: number
+  start: number
+  end: number
+  surface: string
+  kind: string
+}
+
+export interface ReaderDoc {
+  id: number
+  title: string
+  lang: string
+  createdAt: string
+  paragraphs: string[]
+  marks: Mark[]
+}
+
+export interface DictEntry {
+  simplified: string
+  traditional: string
+  pinyin: string
+  definitions: string[]
+}
+
+export interface DictResult {
+  word: string
+  entries: DictEntry[]
+}
+
+export interface QueueProvenance {
+  docId: number
+  docTitle: string
+  paragraphIdx: number
+  start: number
+  end: number
+  sentence: string
+}
+
+export type QueueStatus = "new" | "keep" | "discarded" | "known"
+
+export interface QueueItem {
+  id: number
+  word: string
+  pinyin: string | null
+  gloss: string | null
+  status: QueueStatus
+  lookupCount: number
+  createdAt: string
+  provenance: QueueProvenance | null
+}
+
+export interface CreateMarkResult {
+  markId: number
+  queueItem: QueueItem
+}
+
 export async function getStatus(): Promise<DashboardStatus> {
   return fetchJson<DashboardStatus>("/api/status")
 }
@@ -214,6 +284,72 @@ export async function getProof(name: string): Promise<Proof> {
 
 export async function getAskConfig(): Promise<AskConfig> {
   return fetchJson<AskConfig>("/api/ask/config")
+}
+
+// ---------------------------------------------------------------------------
+// Reader API
+// ---------------------------------------------------------------------------
+
+export async function getReaderDocs(): Promise<ReaderDocSummary[]> {
+  return fetchJson<ReaderDocSummary[]>("/api/reader/docs")
+}
+
+export async function getReaderDoc(id: number): Promise<ReaderDoc> {
+  return fetchJson<ReaderDoc>(`/api/reader/docs/${id}`)
+}
+
+export async function createReaderDoc(title: string, text: string, lang?: string): Promise<{ id: number; paragraphCount: number }> {
+  return fetchJson("/api/reader/docs", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(lang ? { title, text, lang } : { title, text }),
+  })
+}
+
+export async function createMark(params: {
+  docId: number
+  paragraphIdx: number
+  start: number
+  end: number
+  surface: string
+  sentence: string
+  kind?: string
+}): Promise<CreateMarkResult> {
+  return fetchJson("/api/reader/marks", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(params),
+  })
+}
+
+export async function deleteMark(id: number): Promise<void> {
+  await fetchJson<{ ok: true }>(`/api/reader/marks/${id}`, { method: "DELETE" })
+}
+
+export async function dictLookup(word: string): Promise<DictResult> {
+  return fetchJson<DictResult>(`/api/dict/${encodeURIComponent(word)}`)
+}
+
+export async function dictBest(text: string): Promise<DictResult> {
+  return fetchJson<DictResult>(`/api/dict/best?text=${encodeURIComponent(text)}`)
+}
+
+export async function getKnownWords(): Promise<string[]> {
+  const result = await fetchJson<{ words: string[] }>("/api/reader/known-words")
+  return result.words
+}
+
+export async function getQueue(status: QueueStatus | "all" = "new", limit = 100): Promise<QueueItem[]> {
+  const params = new URLSearchParams({ status, limit: String(limit) })
+  return fetchJson<QueueItem[]>(`/api/queue?${params}`)
+}
+
+export async function setQueueStatus(id: number, status: QueueStatus): Promise<QueueItem> {
+  return fetchJson<QueueItem>(`/api/queue/${id}/status`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ status }),
+  })
 }
 
 async function fetchJson<T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> {

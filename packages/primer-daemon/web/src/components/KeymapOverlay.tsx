@@ -3,7 +3,7 @@ import type * as React from "react"
 
 import { Kbd, KbdGroup } from "./ui/kbd"
 
-const KEYS: { keys: string[]; label: string }[] = [
+const DEFAULT_KEYS: { keys: string[]; label: string }[] = [
   { keys: ["j", "k"], label: "focus item down / up" },
   { keys: ["[", "]"], label: "cycle panel" },
   { keys: ["g", "G"], label: "first / last item" },
@@ -13,7 +13,7 @@ const KEYS: { keys: string[]; label: string }[] = [
   { keys: ["?"], label: "toggle this help" },
 ]
 
-export function KeymapOverlay({ onClose }: { onClose: () => void }): React.JSX.Element {
+export function KeymapOverlay({ onClose, keys = DEFAULT_KEYS }: { onClose: () => void; keys?: { keys: string[]; label: string }[] }): React.JSX.Element {
   return (
     <div className="fixed inset-0 z-50 flex" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
       <button type="button" aria-label="Close" onClick={onClose} className="absolute inset-0 bg-background/70 backdrop-blur-sm" />
@@ -25,7 +25,7 @@ export function KeymapOverlay({ onClose }: { onClose: () => void }): React.JSX.E
           </button>
         </div>
         <dl className="mt-3 divide-y divide-border/60">
-          {KEYS.map((row) => (
+          {keys.map((row) => (
             <div key={row.label} className="flex items-center justify-between gap-4 py-1.5">
               <dt className="text-sm text-muted-foreground">{row.label}</dt>
               <dd className="shrink-0">

@@ -4,7 +4,7 @@ import { resolveDaemonPaths, type DaemonPaths } from "./paths"
 import type { EvidenceHit, EvidenceSource } from "./schema"
 
 export const USAGE = `Usage:
-  primer search <terms...> [--limit N] [--source browser|twitter|reader] [--json]
+  primer search <terms...> [--limit N] [--source browser|twitter|reader|cards] [--json]
   primer ask "<question>" [--limit N] [--json]
   primer recent [--days N] [--limit N] [--json]
   primer note <add|list> [options]
@@ -316,7 +316,7 @@ function parsePositiveInteger(value: FlagValue | undefined, fallback: number): n
 function parseSource(value: FlagValue | undefined): EvidenceSource | undefined | null {
   if (value === undefined) return undefined
   if (value === true) return null
-  if (value === "browser" || value === "twitter" || value === "reader") return value
+  if (value === "browser" || value === "twitter" || value === "reader" || value === "cards") return value
   return null
 }
 
