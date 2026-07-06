@@ -55,3 +55,20 @@ Tension to watch: L1 reactivity vs L2 coherence — if L1 emotes too strongly du
 - **Backchannel audio** from L1 ("mm", soft laugh) — huge presence win, but risks talking over him. Ship gated behind a Rig toggle?
 - **Where L1 runs** — server-side rules now; later a flash-lite stream or a tiny local model (latency vs cost vs privacy — all fine local-first).
 - **L3 timing** — defer until scenes/memory arrive; premature directors are how systems get baroque.
+
+## Brain models — what theory to steal from (session 2, 2026-07-06)
+
+Arthur asked: best model of how the brain does this? Answer: **hierarchical predictive processing** (Rao & Ballard → Clark) with **active inference** (Friston) as the strong form; plus three unglamorous classics that are more load-bearing than FEP itself.
+
+- **Predictions down, errors up, timescales separate the levels.** Nobody commands; higher levels set expectations lower levels reconcile. Active inference's motor move: cortex sends *proprioceptive predictions* ("arm is already there"), reflex arcs fulfill them. → Our L2/L3 set setpoints; L0/L1 fulfill; decay-to-baseline = homeostasis.
+- **Precision weighting = attention = gain knobs.** → One reactivity gain per layer, L3-turnable, Rig-exposed (scene mode damps L1; banter cranks it).
+- **Efference copy** (Wolpert): never startle at yourself. → Bus events gain `source: self|user|world`; L1 ignores self-generated audio/motion. *Most practical single steal.*
+- **Global Workspace** (Baars/Dehaene): parallel processors, one serial broadcast. → Many L1 detectors, one L2 stream, the intent bus as mini-workspace.
+- **Society of Mind** (Minsky): Arthur's multi-agent intuition, 40y early; stalls exactly where arbitration is unspecified — arbitration is the whole game (hence L0 blender).
+- **FEP honesty**: a principle, not a mechanism; contested as unfalsifiable. Architecture generator, not gospel.
+- **Where to ignore brains**: we build a *performance*, not a mind — animation's 12 principles (anticipation, follow-through, secondary action) are the quality bar; eyes grade the output, not theory.
+- **Convergence argument**: our constraints (expensive slow deliberation + cheap fast loops + hard latency floors) are evolution's constraints; the brain-shaped answer re-derives itself in robotics/games because it's convergent, not copied.
+
+Readings: Clark *Surfing Uncertainty*; Wolpert internal models; Friston 2010 review (optional pain).
+
+Next-wave cheap wins from theory: `source` tag on bus events (efference copy), per-layer precision/gain knobs, L1 rules v0 with salient-observation injection into L2 context.
