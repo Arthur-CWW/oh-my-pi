@@ -13,14 +13,16 @@ The archive (Twitter/X, browser history, transcripts, SRS, library) is the **sub
 - Local-first, provenance-preserving (Nelson-style: everything linked to its source).
 - Respectful capture: low concurrency, dedupe, no private/locked content (existing twitter-archive rules).
 
-## Open questions
+## Settled (2026-07-06, Arthur)
 
-- SRS loop built into this ecosystem vs generating cards into mochi-lite/anki? (leaning: feed existing apps first; the substrate is the moat, not the review UI)
-- First interface: agent-queryable (tool/MCP) or Arthur-browsable (UI)?
+- **Own the SRS surface** — reverses the earlier "feed mochi/anki" leaning. Anki's ceiling (no popup dictionary, dead shortcuts, atomic-only, no context tie-back) was the real constraint on the HSK deck. Deck material linked under `decks/` (hsk-deck, mochi exports, yomitan); we design on our own reader/queue/review loop.
+- First interface: agent-queryable, then Arthur-browsable — both shipped (daemon CLI + dashboard).
+- **Vertical one: Chinese** (paste-first reading environment); math/PreTeXt second. Scheduler borrowed (hashcards/FSRS), never invented. No Yomitan fork — in-reader dictionary. Mobile via Tailscale, no public UUID URLs.
+- Full design space and vibe record: [`VISION.md`](VISION.md).
 
 ## First goal
 
-**The dæmon answers.** An agent that can be asked "what have I been reading about X?" and answers from the substrate (browser-context SQLite + wrapped-commentary-reader artifacts + twitter archive), with sources linked — then writes one useful thing back (an annotation or a card candidate). Query path before review UI. Proof: transcript of three real questions answered with provenance + rerun command.
+**The dæmon answers.** DONE 2026-07-03 — see `docs/qa/primer-daemon-first-answers.md`. Second surface (dashboard + streaming + reader re-mount) DONE 2026-07-06 — `docs/qa/primer-dashboard.md`. Next arc: the Chinese reading loop (VISION.md §Sequencing).
 
 ## Owns
 

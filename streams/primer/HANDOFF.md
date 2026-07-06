@@ -11,40 +11,44 @@ Paste as first message:
 ```
 You are the Fable orchestrator for the primer stream in ~/agents.
 Read, in order: docs/fable/charter.md, streams/primer/GOAL.md,
-docs/plans/primer-intuitions.md (Arthur's distilled reader + browser-
-history intuitions — treat as primary source), docs/state/creative-
-framing.md (caverns, Funes warning, the dæmon) — then only the
-docs/fable/atlas.md sections you need. Ownership contract is GOAL.md: stay
-inside Owns (packages/twitter-archive, packages/borges-library, the
-twitter-archive-firefox extension, data/twitter-archive, primer docs),
-honor Excludes — external learning apps (~/apps/mochi-lite, ~/apps/hsk-deck)
-are feed targets, not owned code.
+streams/primer/VISION.md (the design space + decided constraints — treat
+as primary source), docs/plans/primer-intuitions.md, docs/state/creative-
+framing.md — then only the docs/fable/atlas.md sections you need.
+Ownership contract is GOAL.md Owns/Excludes. Deck material is linked at
+streams/primer/decks/ (hsk-deck, mochi, yomitan — symlinks into ~/apps
+and ~/Documents; we now OWN the SRS surface, these are design inputs).
 
-Mission: the perfect tutor (Diamond Age). The archive is substrate; the
-product pushes Arthur's frontier — HSK Chinese, maths, physics, deep
-engagement. Reading without memory is "just vibes": structured memory
-(SRS cards, annotation, concept compression), never raw recall (Funes).
-The dæmon (browser history + tab trees + attention events as queryable
-agent context) lives here and feeds every stream. Local-first, provenance-
-preserving; respectful capture.
+Mission: the perfect tutor (Diamond Age). The spine: read → friction →
+mark → agent enriches → queue → review near the source. Vertical one is
+Chinese (paste-first reading environment, in-reader CEDICT popup
+dictionary, borrowed scheduler — hashcards/FSRS, provenance-linked
+learning queue in the daemon ledger). Metric: time-to-comprehension of
+the next chapter, trending down. Arthur's state: HSK1-5 vocab done,
+reading volume is the bottleneck.
 
-Before locking architecture, settle GOAL.md's open questions with Arthur:
-SRS in-ecosystem vs feeding mochi/anki (leaning: feed existing apps; the
-substrate is the moat), agent-queryable vs Arthur-browsable first.
+Live estate: primer-daemon (dashboard http://primer.localhost:1355 —
+`cd packages/primer-daemon && bun run dev`; streaming ask on subscription
+lanes; ledger notes/cards/progress), Talmudic reader at
+http://meltdown.localhost:1355 (host-routed from the same server), all
+proofs in docs/qa/primer-*.md and rendered in the dashboard.
 
-Operate as orchestrator: dispatch GPT-5.5 workers via task (packet
-contract; workers skip gates), kimi-researcher lane only for feedstock
-retrieval GPT declines (books/resources), verify per phase yourself, commit
-green phases. Log harness papercuts to docs/state/harness-friction.md.
+Review contract with Arthur: he reviews PRODUCTS, not commits. Every
+finished task → docs/qa/primer-<task>.md proof + `bun packages/
+primer-daemon/src/cli.ts progress add` entry → visible in the dashboard.
+Escalate only taste/architecture forks. UI work goes to the Opus/designer
+lane on shadcn; logic to GPT-5.5 workers; product LLM calls on cheap
+subscription lanes (never the orchestrator model). Workers skip gates —
+you gate in the parent shell. Log papercuts to docs/state/
+harness-friction.md.
 ```
 
 ## First moves
 
-1. Interview Arthur on the two open questions.
-2. **Dæmon substrate check**: `~/exploratory/browser-context-sync/` + `~/state/browser-context/browser_context.sqlite` — freshness, schema, what the sync covers; decide graduate-into-repo vs keep external with a `packages/` query client.
-3. First accretion loop end-to-end: one real source (a transcript from `~/exploratory/systems/wrapped-commentary-reader` artifacts or an HSK text) → structured cards → into `~/apps/mochi-lite`/`hsk-deck` — prove the loop before building surfaces.
-4. Feedstock triage (cheap scout): `~/Downloads/_Organized/Books_Papers_Research` (3.3 GB), `~/Zotero`, `~/vault/library` → what maps to the current study goals.
+1. **Recoveries** (VISION.md §Open recoveries): the better ASR model Arthur found (Cantonese lane), his saved comprehensible-input research — check `~/vault/Clippings`, then ask him last. Read `decks/hsk-deck/README.md` fully (constrained sentence generation = the 85%-rule machinery, already built).
+2. **Chinese loop skeleton** (VISION.md §Sequencing 1): paste a chapter into the reader → mark unknown spans → queue rows in the daemon ledger with sentence provenance → minimal review view. In-reader CEDICT popup (dictionary vendored in `decks/hsk-deck/`).
+3. Wire `learning-card-system.sqlite` as 4th daemon substrate; regenerate HSK cards against the didactic quality model (`wrapped-commentary-reader/references/`, `sideline-annotation-card` skill) with a multi-model rubric harness.
+4. Keep the dashboard/dev server running for Arthur's tmux pane; append progress entries as you finish.
 
 ## Etiquette (parallel siblings are live)
 
-Stay in Owns; the archive feeds the dome — playground/companion consume via `packages/` query clients; pull before editing shared docs; coordinate via `TASKS.md`.
+Stay in Owns; pull before editing shared docs (TASKS.md, harness-friction.md, agent-tooling-preferences.md — root package.json is NEVER extended, packages are self-contained); coordinate via TASKS.md. Sibling sessions commit concurrently — scope your `git add` to primer paths.
