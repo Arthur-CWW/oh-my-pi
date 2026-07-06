@@ -1,12 +1,21 @@
 # Primer session — boot
 
-Launch from `~/agents`:
+One command (uses OMP's `@<file>` syntax to inline boot context into the first message):
 
 ```bash
-omp --config ./.omp/fable-config.yml --model <fable-model-id>
+~/agents/streams/primer/boot.sh
 ```
 
-Paste as first message:
+Or by hand from `~/agents` — attach files with `@`, then the orchestrator instruction as the trailing message:
+
+```bash
+omp --config .omp/fable-config.yml --model anthropic/claude-fable-5 \
+  @docs/fable/charter.md @streams/primer/GOAL.md \
+  @streams/primer/VISION.md @streams/primer/HANDOFF.md \
+  "<orchestrator instruction — see boot.sh for the canonical text>"
+```
+
+Canonical first-message text (kept in `boot.sh`; the block below is the same content for reference):
 
 ```
 You are the Fable orchestrator for the primer stream in ~/agents.
