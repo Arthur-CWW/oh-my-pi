@@ -19,7 +19,9 @@ import {
   mapLabelKey,
   visualRange,
   nextUnlabeled,
+  buildAutoplayQueue,
 } from "./keymap";
+import { reportClientError } from "../error-report";
 import {
   type CellPatch,
   computeMovePatch,
@@ -117,6 +119,15 @@ const rowMap = new Map<number, HTMLElement>();
 // Video discipline: at most 2 <video> elements in the DOM at any time
 let focusedCellVideo: HTMLVideoElement | null = null;
 
+// Autoplay state
+let autoplayActive = false;
+let autoplayQueue: number[] = [];  // filtered indices
+let autoplayPosition = -1;
+let autoplayGifTimer: ReturnType<typeof setTimeout> | null = null;
+
+// Save status
+let saveStatusTimer: ReturnType<typeof setTimeout> | null = null;
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -142,6 +153,11 @@ export function mountLabelView(root: HTMLElement, statusLine: HTMLElement): void
 
 export function unmountLabelView(): void {
   teardownFocusedVideo();
+  if (autoplayGifTimer !== null) { clearTimeout(autoplayGifTimer); autoplayGifTimer = null; }
+  autoplayActive = false;
+  autoplayQueue = [];
+  autoplayPosition = -1;
+  if (saveStatusTimer !== null) { clearTimeout(saveStatusTimer); saveStatusTimer = null; }
   if (virtualizerCleanup) { virtualizerCleanup(); virtualizerCleanup = null; }
   virtualizer = null;
 }
@@ -168,6 +184,18 @@ export function handleLabelKeydown(e: KeyboardEvent): void {
     }
     return;
   }
+  if (target instanceof HTMLInputElement && target.classList.contains("command-input")) {
+    if (e.key === "Escape") { e.preventDefault(); target.remove(); return; }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      const raw = target.value.trim();
+      target.remove();
+      const match = raw.match(/^:?group\s+(.+)$/);
+      if (match?.[1]) void addGroup(match[1].trim());
+      return;
+    }
+    return;
+  }
 
   const navState: LabelNavState = {
     focus: state.focus,
@@ -179,9 +207,15 @@ export function handleLabelKeydown(e: KeyboardEvent): void {
     inspecting: state.inspecting,
   };
 
-  if (e.key === "a" && !state.inspecting && !state.filterFocused) {
+  if ((e.key === "a" || e.key === "g") && !state.inspecting && !state.filterFocused) {
     e.preventDefault();
     promptAddGroup();
+    return;
+  }
+
+  if (e.key === ":" && !state.inspecting && !state.filterFocused) {
+    e.preventDefault();
+    promptCommand();
     return;
   }
 
@@ -215,13 +249,20 @@ function buildShell(): string {
           <span class="hint-sep">·</span>
           <kbd>1-9</kbd> group
           <span class="hint-sep">·</span>
+          <kbd>a</kbd><kbd>g</kbd> add group
+          <span class="hint-sep">·</span>
+          <kbd>:</kbd> command
+          <span class="hint-sep">·</span>
           <kbd>i</kbd> inspect
+          <span class="hint-sep">·</span>
+          <kbd>p</kbd> autoplay
           <span class="hint-sep">·</span>
           <kbd>u</kbd> unlabel
           <span class="hint-sep">·</span>
           <kbd>/</kbd> filter
           <span class="hint-sep">·</span>
           <kbd>?</kbd> help
+          <span class="label-save-status"></span>
         </div>
       </section>
       <aside class="label-detail"></aside>
@@ -244,6 +285,19 @@ async function loadData(): Promise<void> {
     const groups: GroupInfo[] = await groupsRes.json();
     state.items = corpus;
     state.groups = groups;
+    // Seed "interesting" group (key 4) if absent — Arthur explicitly wants this bucket
+    if (!state.groups.some((g) => g.name === "interesting")) {
+      void (async () => {
+        try {
+          await fetch("/api/label-groups", {
+            method: "PUT",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ name: "interesting", key: "4" }),
+          });
+          await refreshGroups();
+        } catch { /* best effort on boot */ }
+      })();
+    }
     applyFilter();
     renderAll();
   } catch (err) {
@@ -312,6 +366,11 @@ function sortIndices(indices: number[]): number[] {
 // ---------------------------------------------------------------------------
 
 function applyAction(action: LabelAction): void {
+  // Manual navigation stops autoplay
+  if (autoplayActive && (action.type === "move" || action.type === "visual-clear")) {
+    stopAutoplay();
+  }
+
   switch (action.type) {
     case "move": {
       const oldFocus = state.focus;
@@ -454,8 +513,102 @@ function applyAction(action: LabelAction): void {
       renderAll();
       break;
 
+    case "autoplay-toggle":
+      if (autoplayActive) {
+        stopAutoplay();
+      } else {
+        startAutoplay();
+      }
+      break;
+
     case "none":
       break;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Autoplay — play through a queue of items, advancing on video end
+// ---------------------------------------------------------------------------
+
+function startAutoplay(): void {
+  // Build queue from filtered items
+  const filteredItems = state.filteredIndices.map((i) => ({
+    labels: state.items[i]!.labels,
+  }));
+  const groupNames = state.groups.map((g) => g.name);
+  autoplayQueue = buildAutoplayQueue(filteredItems, groupNames);
+  if (autoplayQueue.length === 0) return;
+
+  autoplayActive = true;
+  // Start at the current focus if it's in the queue, else first item
+  autoplayPosition = autoplayQueue.indexOf(state.focus);
+  if (autoplayPosition < 0) autoplayPosition = 0;
+
+  // Move to the first autoplay item
+  const oldFocus = state.focus;
+  state.focus = autoplayQueue[autoplayPosition]!;
+  applyCellPatches(computeMovePatch(oldFocus, state.focus));
+  updateFocusedVideo(oldFocus, state.focus);
+  renderDetail();
+  updateStatus();
+  scrollFocusIntoView();
+  wireAutoplayEnded();
+}
+
+function stopAutoplay(): void {
+  autoplayActive = false;
+  autoplayQueue = [];
+  autoplayPosition = -1;
+  if (autoplayGifTimer !== null) {
+    clearTimeout(autoplayGifTimer);
+    autoplayGifTimer = null;
+  }
+  // Re-render detail to restore loop on current video
+  renderDetail();
+  updateStatus();
+}
+
+function autoplayAdvance(): void {
+  if (!autoplayActive) return;
+  autoplayPosition++;
+  if (autoplayPosition >= autoplayQueue.length) {
+    stopAutoplay();
+    return;
+  }
+  const oldFocus = state.focus;
+  state.focus = autoplayQueue[autoplayPosition]!;
+  applyCellPatches(computeMovePatch(oldFocus, state.focus));
+  updateFocusedVideo(oldFocus, state.focus);
+  renderDetail();
+  updateStatus();
+  scrollFocusIntoView();
+  wireAutoplayEnded();
+}
+
+function wireAutoplayEnded(): void {
+  if (!autoplayActive) return;
+  if (autoplayGifTimer !== null) {
+    clearTimeout(autoplayGifTimer);
+    autoplayGifTimer = null;
+  }
+
+  const itemIdx = state.filteredIndices[state.focus];
+  if (itemIdx === undefined) return;
+  const item = state.items[itemIdx]!;
+  const ext = item.file.split(".").pop()?.toLowerCase();
+
+  if (ext === "gif") {
+    // GIFs have no ended event — auto-advance after duration or 3s
+    const ms = (item.durationSeconds ?? 3) * 1000;
+    autoplayGifTimer = setTimeout(autoplayAdvance, ms);
+    return;
+  }
+
+  // Wire the detail pane video's ended event
+  const video = detailPane?.querySelector<HTMLVideoElement>("video.detail-preview");
+  if (video) {
+    video.loop = false;
+    video.addEventListener("ended", autoplayAdvance, { once: true });
   }
 }
 
@@ -473,50 +626,110 @@ function applyCellPatches(patches: CellPatch[]): void {
 }
 
 // ---------------------------------------------------------------------------
-// API calls (optimistic — fire and don't await in the render path)
+// API calls — optimistic update, then verify response and show save status
 // ---------------------------------------------------------------------------
 
 async function assignBatch(itemIndices: number[], groupName: string): Promise<void> {
+  // Save old labels for revert on failure
+  const snapshots = new Map<number, string[]>();
   for (const idx of itemIndices) {
     const item = state.items[idx];
-    if (item !== undefined && !item.labels.includes(groupName)) {
-      item.labels.push(groupName);
+    if (item !== undefined) {
+      snapshots.set(idx, item.labels.slice());
+      if (!item.labels.includes(groupName)) item.labels.push(groupName);
     }
   }
-  for (const idx of itemIndices) {
-    const item = state.items[idx];
-    if (item === undefined) continue;
-    fetch("/api/labels", {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ mediaPath: item.file, group: groupName, op: "add" }),
-    }).catch(() => {});
+  const results = await Promise.allSettled(
+    itemIndices
+      .map((idx) => state.items[idx])
+      .filter((item): item is CorpusItem => item !== undefined)
+      .map((item) =>
+        fetch("/api/labels", {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ mediaPath: item.file, group: groupName, op: "add" }),
+        }).then(async (res) => {
+          if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            throw new Error((body as { error?: string }).error ?? `HTTP ${res.status}`);
+          }
+        }),
+      ),
+  );
+  const failures = results.filter((r): r is PromiseRejectedResult => r.status === "rejected");
+  if (failures.length > 0) {
+    // Revert optimistic mutations
+    for (const [idx, old] of snapshots) {
+      const item = state.items[idx];
+      if (item) item.labels = old;
+    }
+    const msg = `${failures.length} label save(s) failed: ${failures[0]!.reason}`;
+    showSaveStatus(false, msg);
+  } else {
+    showSaveStatus(true, "saved");
   }
   void refreshGroups();
 }
 
 async function unassignBatch(itemIndices: number[]): Promise<void> {
+  // Save old labels for revert on failure
+  const snapshots = new Map<number, string[]>();
+  const promises: Promise<Response>[] = [];
   for (const idx of itemIndices) {
     const item = state.items[idx];
     if (item === undefined) continue;
+    snapshots.set(idx, item.labels.slice());
     for (const g of item.labels) {
-      fetch("/api/labels", {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ mediaPath: item.file, group: g, op: "remove" }),
-      }).catch(() => {});
+      promises.push(
+        fetch("/api/labels", {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ mediaPath: item.file, group: g, op: "remove" }),
+        }),
+      );
     }
     item.labels = [];
+  }
+  const results = await Promise.allSettled(
+    promises.map((p) =>
+      p.then(async (res) => {
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error((body as { error?: string }).error ?? `HTTP ${res.status}`);
+        }
+      }),
+    ),
+  );
+  const failures = results.filter((r): r is PromiseRejectedResult => r.status === "rejected");
+  if (failures.length > 0) {
+    // Revert optimistic mutations
+    for (const [idx, old] of snapshots) {
+      const item = state.items[idx];
+      if (item) item.labels = old;
+    }
+    showSaveStatus(false, `${failures.length} remove(s) failed: ${failures[0]!.reason}`);
+  } else {
+    showSaveStatus(true, "removed");
   }
   void refreshGroups();
 }
 
 async function addGroup(name: string): Promise<void> {
-  await fetch("/api/label-groups", {
-    method: "PUT",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ name }),
-  });
+  try {
+    const res = await fetch("/api/label-groups", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      showSaveStatus(false, `group create failed: ${(body as { error?: string }).error ?? res.status}`);
+    } else {
+      showSaveStatus(true, `group "${name}" created`);
+    }
+  } catch (err) {
+    showSaveStatus(false, `group create failed: ${err instanceof Error ? err.message : "network error"}`);
+  }
   await refreshGroups();
   renderGroups();
 }
@@ -527,6 +740,27 @@ async function refreshGroups(): Promise<void> {
     state.groups = await res.json();
     renderGroups();
   } catch { /* ignore */ }
+}
+
+function showSaveStatus(ok: boolean, detail: string): void {
+  const el = container?.querySelector<HTMLElement>(".label-save-status");
+  if (!el) return;
+  if (saveStatusTimer !== null) {
+    clearTimeout(saveStatusTimer);
+    saveStatusTimer = null;
+  }
+  const ts = new Date().toLocaleTimeString();
+  el.textContent = ok ? `\u2713 ${detail} ${ts}` : `\u2717 ${detail}`;
+  el.className = `label-save-status ${ok ? "save-ok" : "save-fail"}`;
+  if (ok) {
+    saveStatusTimer = setTimeout(() => {
+      el.className = "label-save-status";
+      el.textContent = "";
+    }, 4000);
+  } else {
+    // Report failed saves to the server error log via the capped beacon helper
+    reportClientError(`Label persistence failure: ${detail}`);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -870,7 +1104,8 @@ function updateStatus(): void {
   const total = state.items.length;
   const sortLabel = state.sortMode === "unlabeled" ? "unlabeled-first" : state.sortMode;
   const modeLabel = state.visualAnchor !== null ? " VISUAL" : state.marks.size > 0 ? ` ${state.marks.size} marked` : "";
-  statusEl.textContent = `LABEL  ${labeled}/${total} labeled  sort:${sortLabel}${modeLabel}`;
+  const autoLabel = autoplayActive ? ` \u25b6 ${autoplayPosition + 1}/${autoplayQueue.length}` : "";
+  statusEl.textContent = `LABEL  ${labeled}/${total} labeled  sort:${sortLabel}${modeLabel}${autoLabel}`;
 }
 
 function renderGroups(): void {
@@ -903,9 +1138,10 @@ function renderDetail(): void {
   const ext = item.file.split(".").pop()?.toLowerCase();
   const isRealGif = ext === "gif";
 
+  const loopAttr = autoplayActive ? "" : " loop";
   const preview = isRealGif
     ? `<img src="${src}" class="detail-preview" />`
-    : `<video src="${src}" class="detail-preview" autoplay muted loop playsinline></video>`;
+    : `<video src="${src}" class="detail-preview" autoplay muted${loopAttr} playsinline></video>`;
 
   const chips = item.labels.length > 0
     ? item.labels.map((l) => `<span class="detail-chip">${esc(l)}</span>`).join("")
@@ -1004,6 +1240,20 @@ function promptAddGroup(): void {
   input.focus();
 }
 
+function promptCommand(): void {
+  const existing = container?.querySelector<HTMLInputElement>(".command-input");
+  if (existing) { existing.focus(); return; }
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "command-input";
+  input.placeholder = ":group name";
+  // Place at the bottom of the hint strip
+  const strip = container?.querySelector<HTMLElement>(".label-hint-strip");
+  if (strip) strip.appendChild(input);
+  else { groupsPane.appendChild(input); }
+  input.focus();
+}
+
 // ---------------------------------------------------------------------------
 // Escape helper
 // ---------------------------------------------------------------------------
@@ -1097,6 +1347,19 @@ export function labelCss(): string {
   width: calc(100% - var(--space-4));
   margin: var(--space-1) var(--space-2);
   padding: var(--space-1);
+  font-size: var(--text-sm);
+  font-family: var(--font-mono);
+  background: var(--control-bg);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  outline: none;
+}
+.command-input {
+  display: inline-block;
+  width: 160px;
+  margin-left: var(--space-2);
+  padding: 2px var(--space-1);
   font-size: var(--text-sm);
   font-family: var(--font-mono);
   background: var(--control-bg);
@@ -1374,6 +1637,23 @@ export function labelCss(): string {
   background: rgba(0,0,0,0.6);
   display: grid;
   place-items: center;
+}
+
+/* -- Save status indicator (inside hint strip) -- */
+.label-save-status {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  transition: opacity 0.3s var(--ease-out);
+  white-space: nowrap;
+}
+.label-save-status:empty { display: none; }
+.label-save-status.save-ok {
+  color: var(--success);
+}
+.label-save-status.save-fail {
+  color: var(--error);
+  font-weight: 600;
 }
 `;
 }

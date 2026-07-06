@@ -32,6 +32,7 @@ export type LabelAction =
   | { type: "filter-focus" }
   | { type: "help-toggle" }
   | { type: "cycle-sort" }
+  | { type: "autoplay-toggle" }
   | { type: "none" };
 
 /** Compute the visual-mode selected range (inclusive, ordered). */
@@ -100,9 +101,11 @@ export function mapLabelKey(
     return key === "Escape" ? { type: "filter-focus" } : { type: "none" };
   }
 
-  // When inspecting, Escape exits inspect
+  // When inspecting, Escape/i exits inspect; p toggles autoplay
   if (state.inspecting) {
-    return key === "Escape" || key === "i" ? { type: "inspect-toggle" } : { type: "none" };
+    if (key === "Escape" || key === "i") return { type: "inspect-toggle" };
+    if (key === "p") return { type: "autoplay-toggle" };
+    return { type: "none" };
   }
 
   const inVisual = state.visualAnchor !== null;
@@ -128,7 +131,6 @@ export function mapLabelKey(
       return { type: "move", index: gridMove(state.focus, state.cols, state.total, "right") };
 
     // First / last
-    case "g":
     case "Home":
       return { type: "move", index: 0 };
     case "G":
@@ -167,6 +169,10 @@ export function mapLabelKey(
     case "s":
       return { type: "cycle-sort" };
 
+    // Autoplay
+    case "p":
+      return { type: "autoplay-toggle" };
+
     default:
       return { type: "none" };
   }
@@ -175,14 +181,89 @@ export function mapLabelKey(
 export const LABEL_KEYMAP_HELP = [
   ["j/k", "Move down / up"],
   ["h/l", "Move left / right"],
-  ["g / G", "First / last item"],
+  ["Home / G", "First / last item"],
   ["v", "Visual mode (range select)"],
   ["Space", "Toggle mark on item"],
   ["1-9", "Assign marked to group N"],
   ["u", "Remove labels from item(s)"],
+  ["a / g", "Add group (bind next digit)"],
+  [":group name", "Create group by command"],
   ["i", "Inspect focused item"],
-  ["Esc", "Clear marks / exit mode"],
+  ["p", "Autoplay labeled items"],
+  ["Esc", "Clear marks / stop autoplay"],
   ["/", "Filter (text or group:<name>)"],
   ["s", "Cycle sort order"],
   ["?", "Toggle this help"],
 ] as const;
+// ---------------------------------------------------------------------------
+// Autoplay queue — pure, testable
+// ---------------------------------------------------------------------------
+
+export interface AutoplayItem {
+  labels: readonly string[];
+}
+
+/**
+ * Build a queue of item indices for autoplay, ordered by priority:
+ *  1. Items in the "interesting" group, if any exist.
+ *  2. Labeled items, round-robin across groups for diversity.
+ *  3. All items in manifest order (fallback).
+ */
+export function buildAutoplayQueue(
+  items: readonly AutoplayItem[],
+  groupNames: readonly string[],
+): number[] {
+  // Priority 1: "interesting" group
+  const interesting: number[] = [];
+  for (let i = 0; i < items.length; i++) {
+    if (items[i]!.labels.includes("interesting")) interesting.push(i);
+  }
+  if (interesting.length > 0) return interesting;
+
+  // Priority 2: labeled items, round-robin across groups
+  const byGroup = new Map<string, number[]>();
+  for (let i = 0; i < items.length; i++) {
+    const labels = items[i]!.labels;
+    if (labels.length === 0) continue;
+    for (const g of labels) {
+      let arr = byGroup.get(g);
+      if (arr === undefined) { arr = []; byGroup.set(g, arr); }
+      arr.push(i);
+    }
+  }
+
+  if (byGroup.size > 0) {
+    // Use provided group order; add unlisted groups at end
+    const ordered = groupNames.filter((n) => byGroup.has(n));
+    for (const [k] of byGroup) {
+      if (!ordered.includes(k)) ordered.push(k);
+    }
+
+    const queue: number[] = [];
+    const seen = new Set<number>();
+    const cursors = new Map<string, number>();
+    for (const g of ordered) cursors.set(g, 0);
+
+    let advanced = true;
+    while (advanced) {
+      advanced = false;
+      for (const gName of ordered) {
+        const arr = byGroup.get(gName)!;
+        let c = cursors.get(gName)!;
+        while (c < arr.length && seen.has(arr[c]!)) c++;
+        if (c < arr.length) {
+          queue.push(arr[c]!);
+          seen.add(arr[c]!);
+          cursors.set(gName, c + 1);
+          advanced = true;
+        }
+      }
+    }
+    if (queue.length > 0) return queue;
+  }
+
+  // Priority 3: all items in order
+  const all: number[] = [];
+  for (let i = 0; i < items.length; i++) all.push(i);
+  return all;
+}

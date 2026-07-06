@@ -22,6 +22,7 @@ Three new post-processing passes added to `packages/scene-renderer`: **feedback*
 ### halftone
 - Dot-screen thresholding. Monochrome or RGB separated screens at 0°/60°/30° offsets.
 - Aspect-corrected: UV coordinates are scaled by aspect ratio before rotation and dot distance, so dots remain circular on non-square canvases (e.g. 720x1280).
+- Tonality-correct: ink coverage uses `1.0 - brightness` threshold so dark stays dark and bright content shows dot patterns. Smoothstep lower bound clamped to 0.0 to avoid mid-gray artifacts at full brightness.
 - Params: `dotSize` (frequency), `angle` (rotation), `rgbSplit` (0 = mono, 1 = RGB).
 
 ## Files changed
@@ -49,8 +50,8 @@ Three new post-processing passes added to `packages/scene-renderer`: **feedback*
 | `workflows/scene-lab/specs/feedback-trail.scene.json` | `workflows/scene-lab/renders/feedback-trail/still-4s.png` | 4s | 6–10 stacked echo layers, clear progressive accumulation |
 | `workflows/scene-lab/specs/displacement-warp.scene.json` | `workflows/scene-lab/renders/displacement-warp/still-2s.png` | 2s | Text visible with smooth wave/warp distortion |
 | `workflows/scene-lab/specs/displacement-warp.scene.json` | `workflows/scene-lab/renders/displacement-warp/still-5s.png` | 5s | Text with different warp phase |
-| `workflows/scene-lab/specs/halftone-print.scene.json` | `workflows/scene-lab/renders/halftone-print/still-2s.png` | 2s | Circular CMY dots with RGB separation, aspect-correct |
-| `workflows/scene-lab/specs/halftone-print.scene.json` | `workflows/scene-lab/renders/halftone-print/still-5s.png` | 5s | Dot pattern with camera push closer, dots remain circular |
+| `workflows/scene-lab/specs/halftone-print.scene.json` | `workflows/scene-lab/renders/halftone-print/still-2s.png` | 2s | Circular CMY dots, aspect-correct, correct tonality (dark background stays dark) |
+| `workflows/scene-lab/specs/halftone-print.scene.json` | `workflows/scene-lab/renders/halftone-print/still-5s.png` | 5s | Dot pattern with camera push closer, dots circular, tonality preserved |
 
 ## Rerun commands
 

@@ -239,6 +239,37 @@ describe("label keymap", () => {
     expect(action.type).toBe("unassign");
     if (action.type === "unassign") expect(action.indices).toEqual([3]);
   });
+
+  test("mapLabelKey g no longer moves to first — falls through to none (handled by view)", () => {
+    const action = mapLabelKey("g", false, makeState({ focus: 5 }));
+    expect(action.type).toBe("none");
+  });
+
+  test("mapLabelKey Home still moves to first item", () => {
+    const action = mapLabelKey("Home", false, makeState({ focus: 5 }));
+    expect(action.type).toBe("move");
+    if (action.type === "move") expect(action.index).toBe(0);
+  });
+
+  test("mapLabelKey digit with visual range selects all items in range", () => {
+    const s = makeState({ focus: 5, visualAnchor: 3 });
+    const action = mapLabelKey("2", false, s);
+    expect(action.type).toBe("assign-group");
+    if (action.type === "assign-group") {
+      expect(action.key).toBe("2");
+      expect(action.indices).toEqual([3, 4, 5]);
+    }
+  });
+
+  test("mapLabelKey digit with single focus returns focused index", () => {
+    const s = makeState({ focus: 7 });
+    const action = mapLabelKey("1", false, s);
+    expect(action.type).toBe("assign-group");
+    if (action.type === "assign-group") {
+      expect(action.key).toBe("1");
+      expect(action.indices).toEqual([7]);
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -492,5 +523,136 @@ describe("label routes", () => {
     const res = await fetch(`${baseUrl}/api/corpus`);
     const corpus = (await res.json()) as Array<{ file: string; labels: string[] }>;
     expect(corpus[0]!.labels).toEqual(["motion"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Autoplay queue selection tests
+// ---------------------------------------------------------------------------
+
+import { buildAutoplayQueue, type AutoplayItem } from "../src/ui/label/keymap";
+
+describe("buildAutoplayQueue", () => {
+  test("prioritizes interesting group when items exist", () => {
+    const items: AutoplayItem[] = [
+      { labels: ["motion"] },
+      { labels: ["interesting"] },
+      { labels: [] },
+      { labels: ["interesting", "rhythm"] },
+    ];
+    const queue = buildAutoplayQueue(items, ["motion", "interesting", "rhythm"]);
+    expect(queue).toEqual([1, 3]);
+  });
+
+  test("falls back to round-robin across groups when no interesting", () => {
+    const items: AutoplayItem[] = [
+      { labels: ["motion"] },
+      { labels: ["motion"] },
+      { labels: ["texture"] },
+      { labels: ["rhythm"] },
+      { labels: [] },
+    ];
+    const queue = buildAutoplayQueue(items, ["motion", "texture", "rhythm"]);
+    // Round-robin: motion[0]=0, texture[0]=2, rhythm[0]=3, motion[1]=1
+    expect(queue).toEqual([0, 2, 3, 1]);
+  });
+
+  test("deduplicates items labeled in multiple groups", () => {
+    const items: AutoplayItem[] = [
+      { labels: ["motion", "texture"] },
+      { labels: ["texture"] },
+      { labels: ["rhythm"] },
+    ];
+    const queue = buildAutoplayQueue(items, ["motion", "texture", "rhythm"]);
+    // motion picks 0, texture skips 0 (seen) picks 1, rhythm picks 2
+    expect(queue).toEqual([0, 1, 2]);
+  });
+
+  test("falls back to all items when nothing is labeled", () => {
+    const items: AutoplayItem[] = [
+      { labels: [] },
+      { labels: [] },
+      { labels: [] },
+    ];
+    const queue = buildAutoplayQueue(items, ["motion"]);
+    expect(queue).toEqual([0, 1, 2]);
+  });
+
+  test("returns empty for empty input", () => {
+    expect(buildAutoplayQueue([], [])).toEqual([]);
+  });
+
+  test("handles groups not in groupNames list", () => {
+    const items: AutoplayItem[] = [
+      { labels: ["unknown-group"] },
+      { labels: [] },
+    ];
+    const queue = buildAutoplayQueue(items, []);
+    // Falls to labeled round-robin; unknown-group not in groupNames but still collected
+    expect(queue).toEqual([0]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Keymap tests for autoplay key
+// ---------------------------------------------------------------------------
+
+describe("label keymap autoplay", () => {
+  function makeState(overrides: Partial<LabelNavState> = {}): LabelNavState {
+    return {
+      focus: 0,
+      total: 12,
+      cols: 4,
+      marks: new Set(),
+      visualAnchor: null,
+      filterFocused: false,
+      inspecting: false,
+      ...overrides,
+    };
+  }
+
+  test("p toggles autoplay in normal mode", () => {
+    expect(mapLabelKey("p", false, makeState()).type).toBe("autoplay-toggle");
+  });
+
+  test("p toggles autoplay even when inspecting", () => {
+    const s = makeState({ inspecting: true });
+    expect(mapLabelKey("p", false, s).type).toBe("autoplay-toggle");
+  });
+
+  test("p does nothing when filter is focused", () => {
+    const s = makeState({ filterFocused: true });
+    expect(mapLabelKey("p", false, s).type).toBe("none");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Label route save failure visibility
+// ---------------------------------------------------------------------------
+
+describe("label save failure visibility", () => {
+  test("PUT /api/labels returns error body for invalid op", async () => {
+    const { baseUrl } = await startTestServer();
+    const res = await fetch(`${baseUrl}/api/labels`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ mediaPath: "x.mp4", group: "test", op: "invalid" }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBeDefined();
+    expect(body.error.length).toBeGreaterThan(0);
+  });
+
+  test("PUT /api/labels returns structured error for path traversal", async () => {
+    const { baseUrl } = await startTestServer();
+    const res = await fetch(`${baseUrl}/api/labels`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ mediaPath: "../../../etc/passwd", group: "evil", op: "add" }),
+    });
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain("data/inspiration");
   });
 });

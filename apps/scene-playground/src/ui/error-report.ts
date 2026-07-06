@@ -8,7 +8,7 @@ interface ClientErrorPayload {
   url?: string;
 }
 
-function reportClientError(message: string, stack?: string): void {
+export function reportClientError(message: string, stack?: string): void {
   if (sentClientErrors >= MAX_CLIENT_ERRORS_PER_SESSION) return;
   sentClientErrors += 1;
   const payload: ClientErrorPayload = { message };
@@ -32,6 +32,8 @@ function messageAndStackFromReason(reason: unknown): { message: string; stack?: 
 }
 
 window.addEventListener("error", (event) => {
+  // Filter benign ResizeObserver noise — floods the log with no actionable signal
+  if (typeof event.message === "string" && event.message.includes("ResizeObserver loop")) return;
   const message = typeof event.message === "string" && event.message.length > 0 ? event.message : "Unhandled client error";
   const stack = event.error instanceof Error && typeof event.error.stack === "string" ? event.error.stack : undefined;
   reportClientError(message, stack);
