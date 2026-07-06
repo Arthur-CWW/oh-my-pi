@@ -72,10 +72,12 @@ export interface ModelCallInput {
   readonly ts: number
   readonly machine: string
   readonly session: string
+  readonly entryId?: string
   readonly branchId: string
   readonly agent: string
   readonly model: string
   readonly provider: string
+  readonly upstreamProvider?: string
   readonly effort: string
   readonly promptHash: string
   readonly systemPromptHash: string
@@ -164,6 +166,7 @@ export interface ModelCallFilters {
   readonly session?: string
   readonly model?: string
   readonly provider?: string
+  readonly entryId?: string
   readonly outcome?: string
   readonly sinceTs?: number
   readonly limit?: number
@@ -373,6 +376,8 @@ function insertEvent(db: LedgerDb, input: EventInput): InsertResult {
 function insertModelCall(db: LedgerDb, input: ModelCallInput): InsertResult {
   const result = db.insert(modelCalls).values({
     ...input,
+    entryId: input.entryId ?? null,
+    upstreamProvider: input.upstreamProvider ?? null,
     errorClass: input.errorClass ?? null,
     retryOf: input.retryOf ?? null,
     fallbackFrom: input.fallbackFrom ?? null,
@@ -460,6 +465,7 @@ function listModelCallRows(db: LedgerDb, filters: ModelCallFilters): ModelCallRo
     filters.session === undefined ? undefined : eq(modelCalls.session, filters.session),
     filters.model === undefined ? undefined : eq(modelCalls.model, filters.model),
     filters.provider === undefined ? undefined : eq(modelCalls.provider, filters.provider),
+    filters.entryId === undefined ? undefined : eq(modelCalls.entryId, filters.entryId),
     filters.outcome === undefined ? undefined : eq(modelCalls.outcome, filters.outcome),
     filters.sinceTs === undefined ? undefined : gte(modelCalls.ts, filters.sinceTs),
   ].filter((clause) => clause !== undefined)

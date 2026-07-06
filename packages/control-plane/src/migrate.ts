@@ -11,7 +11,7 @@ interface UserVersionRow {
   user_version: number
 }
 
-export const LEDGER_SCHEMA_VERSION = 1
+export const LEDGER_SCHEMA_VERSION = 2
 
 export const migration0001Sql = `
 CREATE TABLE IF NOT EXISTS sessions (
@@ -165,6 +165,14 @@ CREATE INDEX IF NOT EXISTS model_calls_outcome_idx ON model_calls (outcome);
 PRAGMA user_version = 1;
 `
 
+export const migration0002Sql = `
+ALTER TABLE model_calls ADD COLUMN entryId TEXT;
+ALTER TABLE model_calls ADD COLUMN upstreamProvider TEXT;
+CREATE INDEX IF NOT EXISTS model_calls_session_entryId_idx ON model_calls (session, entryId);
+
+PRAGMA user_version = 2;
+`
+
 export function setDurabilityPragmas(sqlite: LedgerSqliteConnection): void {
   sqlite.exec("PRAGMA journal_mode = WAL")
   sqlite.exec("PRAGMA synchronous = NORMAL")
@@ -174,7 +182,10 @@ export function migrateLedger(sqlite: LedgerSqliteConnection): void {
   const row = sqlite.query<UserVersionRow>("PRAGMA user_version").get()
   const currentVersion = row?.user_version ?? 0
 
-  if (currentVersion < LEDGER_SCHEMA_VERSION) {
+  if (currentVersion < 1) {
     sqlite.exec(migration0001Sql)
+  }
+  if (currentVersion < LEDGER_SCHEMA_VERSION) {
+    sqlite.exec(migration0002Sql)
   }
 }

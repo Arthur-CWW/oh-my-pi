@@ -162,6 +162,7 @@ function parseModelCalls(argv: readonly string[], base: BaseCommand): ModelCalls
   let model: string | undefined
   let provider: string | undefined
   let outcome: string | undefined
+  let entryId: string | undefined
   let sinceTs: number | undefined
   let limit = 50
 
@@ -204,6 +205,13 @@ function parseModelCalls(argv: readonly string[], base: BaseCommand): ModelCalls
       index += 1
     } else if (arg?.startsWith("--outcome=")) {
       outcome = arg.slice("--outcome=".length)
+    } else if (arg === "--entry") {
+      const value = requiredValue(argv, index, "--entry")
+      if (value instanceof CliUsageError) return value
+      entryId = value
+      index += 1
+    } else if (arg?.startsWith("--entry=")) {
+      entryId = arg.slice("--entry=".length)
     } else if (arg === "--since") {
       const value = requiredValue(argv, index, "--since")
       if (value instanceof CliUsageError) return value
@@ -231,7 +239,7 @@ function parseModelCalls(argv: readonly string[], base: BaseCommand): ModelCalls
     }
   }
 
-  return { name: "model-calls", dbPath, json, filters: { session, model, provider, outcome, sinceTs, limit } }
+  return { name: "model-calls", dbPath, json, filters: { session, model, provider, entryId, outcome, sinceTs, limit } }
 }
 
 function parseEvents(argv: readonly string[], base: BaseCommand): EventsCommand | CliUsageError {
@@ -363,12 +371,14 @@ function renderStatusTable(summary: StatusSummary): string {
 
 function renderModelCallsTable(rows: readonly ModelCallRow[]): string {
   return renderTable(
-    ["ts", "session", "model", "provider", "tokensIn", "tokensOut", "cost", "latencyMs", "outcome", "rawRequestArtifact"],
+    ["ts", "session", "entryId", "model", "provider", "upstreamProvider", "tokensIn", "tokensOut", "cost", "latencyMs", "outcome", "rawRequestArtifact"],
     rows.map((row) => [
       row.ts,
       row.session,
+      row.entryId ?? "",
       row.model,
       row.provider,
+      row.upstreamProvider ?? "",
       row.tokensIn,
       row.tokensOut,
       row.cost,

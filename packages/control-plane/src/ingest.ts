@@ -103,6 +103,7 @@ const ModelCallPayloadSchema = Schema.Struct({
   agent: Schema.String,
   model: Schema.String,
   provider: Schema.String,
+  upstreamProvider: OptionalString,
   effort: Schema.String,
   promptHash: Schema.String,
   systemPromptHash: Schema.String,
@@ -121,6 +122,7 @@ const ModelCallPayloadSchema = Schema.Struct({
   fallbackFrom: OptionalString,
   rawRequestArtifact: Schema.String,
   rawResponseArtifact: Schema.String,
+  entryId: OptionalString,
   rawRequestSupport: OptionalString,
   rawRequest: Schema.optionalKey(JsonValueSchema),
 })
@@ -354,6 +356,7 @@ function modelCallInput(envelope: OutboxEnvelope, payload: ModelCallPayload): Mo
     agent: payload.agent,
     model: payload.model,
     provider: payload.provider,
+    upstreamProvider: payload.upstreamProvider ?? undefined,
     effort: payload.effort,
     promptHash: payload.promptHash,
     systemPromptHash: payload.systemPromptHash,
@@ -372,6 +375,7 @@ function modelCallInput(envelope: OutboxEnvelope, payload: ModelCallPayload): Mo
     fallbackFrom: payload.fallbackFrom ?? undefined,
     rawRequestArtifact: payload.rawRequestArtifact,
     rawResponseArtifact: payload.rawResponseArtifact,
+    entryId: payload.entryId ?? undefined,
   }
 }
 

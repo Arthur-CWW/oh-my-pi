@@ -1,5 +1,5 @@
 export { ArtifactError, StorageError } from "./errors"
-export { LEDGER_SCHEMA_VERSION, migrateLedger, migration0001Sql, setDurabilityPragmas } from "./migrate"
+export { LEDGER_SCHEMA_VERSION, migrateLedger, migration0001Sql, migration0002Sql, setDurabilityPragmas } from "./migrate"
 export {
   LedgerStore,
   defaultLedgerPath,

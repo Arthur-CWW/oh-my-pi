@@ -71,10 +71,12 @@ export const modelCalls = sqliteTable(
     ts: integer("ts").notNull(),
     machine: text("machine").notNull(),
     session: text("session").notNull(),
+    entryId: text("entryId"),
     branchId: text("branchId").notNull(),
     agent: text("agent").notNull(),
     model: text("model").notNull(),
     provider: text("provider").notNull(),
+    upstreamProvider: text("upstreamProvider"),
     effort: text("effort").notNull(),
     promptHash: text("promptHash").notNull(),
     systemPromptHash: text("systemPromptHash").notNull(),
@@ -97,6 +99,7 @@ export const modelCalls = sqliteTable(
   (table) => [
     index("model_calls_session_ts_idx").on(table.session, table.ts),
     index("model_calls_outcome_idx").on(table.outcome),
+    index("model_calls_session_entryId_idx").on(table.session, table.entryId),
   ],
 )
 
