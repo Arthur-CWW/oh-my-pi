@@ -49,6 +49,7 @@ Invariants. Most are also static lints — push every lesson down the guardrail 
 ## Hard rules
 
 - **No `sudo`** without Arthur's explicit approval via `ask` (exact command, cwd, why, reversibility).
+- **Fable 5 quota is finite and dying** (~24% left, gone after 2026-07-08): NEVER launch `claude-fable-5` at high thinking — **medium only**, creative work only. Constrained tasks go to gpt/kimi lanes. This mistake keeps recurring — check `--thinking` before every fable launch.
 - **No secrets in commits.** No `.env`, tokens, credentials, session files.
 - **Provider spend gates.** Jimeng/Dreamina: dry-run default, live spend only inside a named cap with approval; concurrency 1; stop on rate-limit errors.
 - **Respectful external access.** Low concurrency, jitter/backoff, disk cache, entity dedupe. No private/locked content.
