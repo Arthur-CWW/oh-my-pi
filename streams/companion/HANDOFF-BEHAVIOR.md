@@ -13,6 +13,8 @@ Make her *react while Arthur talks* and *feel emotions congruently in face + voi
 
 ## Settled decisions (Arthur, 2026-07-06 — do not relitigate)
 
+- Face fidelity: **build on Alicia now** — AND the perfect-sync hunt already LANDED: two verified 52/52 ARKit-blendshape VRM donors local at `data/avatar-models/hinzka-vroid-v110-female-perfectsync/` (canonical HANA_Tool donor, exact Perfect Sync clip names) and `data/avatar-models/blender-vrm-perfect-sync-female-donor/` (CC BY 4.0, cleanest license). Details/licenses: `notes/perfect-sync-models.md`. Wire one as the high-fidelity face for EmotionVector projection; the projection still degrades gracefully to Alicia's standard set.
+
 - Backchannel: **on by default**, conservative (≤1 per ~15s, strong cues only, low gain, Rig kill-switch).
 - Face fidelity: **build on Alicia now**; `PerfectSyncHunt` researcher is fetching an ARKit-52 "perfect sync" VRM in parallel → check `streams/companion/notes/perfect-sync-models.md` + `data/avatar-models/` before designing the projection; design projects onto *whatever the loaded model has*.
 - L1 = **rules + flash-lite hybrid**: rules for reflex-speed (VAD start → gaze+lean; silence >2.5s → glance-away; energy spike → flicker), model for judgment (mood reading, backchannel timing). Same intent bus, both.
