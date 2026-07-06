@@ -57,3 +57,14 @@ Feedback addressed: "I don't know what I'm looking at" / "what can I ask?" / "wh
 QA (headless, 720px): UI ask "Nick Land and Meltdown" → synthesized answer citing browser events AND reader annotations (11/13/15/35), model chip + 3.3s; ? overlay, panel cycling, j/k focus ring all exercised. Screenshot: [`primer-dashboard/dashboard-v2-ask.png`](primer-dashboard/dashboard-v2-ask.png). Gate: in-package `bun run check` — typecheck clean, 28 tests / 107 assertions.
 
 Queued preference (not yet built): migrate chat components to shadcn/chatcn when the page graduates to a build step; Opus lane owns UI.
+
+## v3 — React + shadcn rebuild (2026-07-06)
+
+Arthur's call: "UI is kinda shit, use Opus, shadcn as base." The zero-build constraint was retired.
+
+- **Stack**: Vite + React + TS + Tailwind v4 + shadcn (dark zinc, vendored primitives) in `packages/primer-daemon/web/`; UI designed and implemented by the Opus lane. Bun server unchanged except static serving of `web/dist` (`PRIMER_WEB_DIST` override; 503 JSON when unbuilt). Old inline `dashboard-page.ts` deleted — clean cutover.
+- **Design**: warm-amber accent doubling as the vim focus ring, bookish local serif for answer prose, staleness-colored substrate dots, 4px rhythm, single column narrow-first (≤1199px), workbench + reference-rail grid ≥1200px via display:contents so DOM/vim order is stable.
+- **Vim nav**: useVimNav hook + panel registry (j/k, [/], Enter, a/r, g/G, Esc/q, ?), inert while typing.
+- QA (760px headless): example chip → serif answer with 5 inline citation chips, model badge `google-antigravity/gemini-3.5-flash` + 5.5s, evidence (5) collapsed; ? keymap overlay, panel cycling + focus ring, proof overlay open/close via Enter/Esc — all exercised live. Screenshot: [`primer-dashboard/dashboard-v3-ask.png`](primer-dashboard/dashboard-v3-ask.png).
+- Gate: in-package `bun run check` = typecheck (src + web) + vite build + 29 tests — green.
+- Dev: `bun run dev` (build + portless) → http://primer.localhost:1355; UI iteration: `bun run web:dev` (HMR, /api proxied).

@@ -240,15 +240,37 @@ describe("ask synthesis helpers", () => {
 })
 
 describe("dashboard", () => {
-  test("serves the dashboard page", async () => {
-    await withDashboard(async ({ baseUrl }) => {
-      const response = await fetch(`${baseUrl}/`)
-      const html = await response.text()
+  test("returns 503 JSON when the web UI is not built", async () => {
+    const missingDist = join(TEST_TMP_ROOT, "missing-web-dist")
+    rmSync(missingDist, { force: true, recursive: true })
 
-      expect(response.status).toBe(200)
-      expect(response.headers.get("content-type") ?? "").toContain("text/html")
-      expect(html).toContain("<html")
-    })
+    await withDashboard(async ({ baseUrl }) => {
+      const { response, body } = await requestJson<ErrorResponse>(baseUrl, "/")
+
+      expect(response.status).toBe(503)
+      expect(response.headers.get("content-type") ?? "").toContain("application/json")
+      expect(body).toEqual({ error: "web ui not built — run bun run web:build" })
+    }, { PRIMER_WEB_DIST: missingDist })
+  })
+
+  test("serves the built web index from PRIMER_WEB_DIST", async () => {
+    const webDist = join(TEST_TMP_ROOT, "fixture-web-dist")
+    rmSync(webDist, { force: true, recursive: true })
+    mkdirSync(webDist, { recursive: true })
+    writeFileSync(join(webDist, "index.html"), "<!doctype html><html><body><h1>Primer Daemon</h1></body></html>")
+
+    try {
+      await withDashboard(async ({ baseUrl }) => {
+        const response = await fetch(`${baseUrl}/`)
+        const html = await response.text()
+
+        expect(response.status).toBe(200)
+        expect(response.headers.get("content-type") ?? "").toContain("text/html")
+        expect(html).toContain("Primer Daemon")
+      }, { PRIMER_WEB_DIST: webDist })
+    } finally {
+      rmSync(webDist, { force: true, recursive: true })
+    }
   })
 
   test("exposes ask synthesis config", async () => {

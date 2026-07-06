@@ -9,17 +9,36 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "web:typecheck": "tsc -p web/tsconfig.json --noEmit",
+    "web:dev": "vite --config web/vite.config.ts --host 127.0.0.1",
+    "web:build": "bun run web:typecheck && vite build --config web/vite.config.ts",
     "test": "bun test",
-    "check": "bun run typecheck && bun run test",
+    "check": "bun run typecheck && bun run web:build && bun run test",
     "cli": "bun src/cli.ts",
     "dashboard": "bun src/dashboard.ts",
-    "dev": "bunx portless@latest primer bun src/dashboard.ts"
+    "dev": "bun run web:build && bunx portless@latest primer bun src/dashboard.ts"
   },
   "dependencies": {
-    "effect": "^4.0.0-beta.71"
+    "@radix-ui/react-collapsible": "^1.1.12",
+    "@radix-ui/react-scroll-area": "^1.2.10",
+    "@radix-ui/react-separator": "^1.1.7",
+    "@radix-ui/react-slot": "^1.2.3",
+    "@tailwindcss/vite": "^4.1.17",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "effect": "^4.0.0-beta.71",
+    "lucide-react": "^0.555.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "tailwind-merge": "^3.4.0",
+    "tailwindcss": "^4.1.17",
+    "vite": "^7.2.4"
   },
   "devDependencies": {
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
     "bun-types": "^1.3.9",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "@vitejs/plugin-react": "^5.1.1"
   }
 }

@@ -1,12 +1,11 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
-import { resolve } from "node:path"
+import { extname, resolve, sep } from "node:path"
 import { fileURLToPath } from "node:url"
 import type { Database } from "bun:sqlite"
 import { Schema } from "effect"
 
 import { resolveAskSynthesisConfig, synthesizeAnswer } from "./ask-synthesis"
 import { extractTerms } from "./cli"
-import { renderDashboardPage } from "./dashboard-page"
 import { askEvidence } from "./evidence"
 import {
   addProgress,
@@ -54,6 +53,8 @@ const DEFAULT_CARD_LIMIT = 100
 const DEFAULT_PROGRESS_LIMIT = 100
 const PACKAGE_DIR = fileURLToPath(new URL("../", import.meta.url))
 const DEFAULT_PROOF_DIR = resolve(PACKAGE_DIR, "../../docs/qa")
+const DEFAULT_WEB_DIST = resolve(PACKAGE_DIR, "web/dist")
+const WEB_BUILD_ERROR = "web ui not built — run bun run web:build"
 const MAX_ANSWER_ERROR_LENGTH = 500
 const PositiveInteger = Schema.Number.check(Schema.isFinite(), Schema.isInt(), Schema.isGreaterThanOrEqualTo(1))
 
@@ -102,11 +103,7 @@ async function handleRequest(request: Request, paths: DaemonPaths, env: Record<s
   const url = new URL(request.url)
   const pathname = url.pathname
 
-  if (request.method === "GET" && pathname === "/") {
-    return new Response(renderDashboardPage(), {
-      headers: { "content-type": "text/html; charset=utf-8" },
-    })
-  }
+  if (request.method === "GET" && pathname === "/") return handleWebIndex(env)
 
   if (request.method === "GET" && pathname === "/api/status") return handleStatus(paths)
   if (request.method === "GET" && pathname === "/api/ask/config") return handleAskConfig(env)
@@ -120,8 +117,56 @@ async function handleRequest(request: Request, paths: DaemonPaths, env: Record<s
     return jsonResponse(scanProofs(env).map(({ name, title, mtime }) => ({ name, title, mtime })))
   }
   if (request.method === "GET" && pathname.startsWith("/api/proofs/")) return handleProof(pathname, env)
+  if (request.method === "GET" && pathname.startsWith("/assets/")) return handleWebAsset(pathname, env)
 
   return jsonError("unknown route", 404)
+}
+
+function handleWebIndex(env: Record<string, string | undefined>): Response {
+  const distDir = resolveWebDist(env)
+  const indexPath = resolve(distDir, "index.html")
+  if (!existsSync(indexPath)) return jsonError(WEB_BUILD_ERROR, 503)
+
+  return serveWebFile(indexPath, "text/html; charset=utf-8")
+}
+
+function handleWebAsset(pathname: string, env: Record<string, string | undefined>): Response {
+  const distDir = resolveWebDist(env)
+  const filePath = resolve(distDir, `.${pathname}`)
+  if (filePath !== distDir && !filePath.startsWith(`${distDir}${sep}`)) return jsonError("unknown route", 404)
+  if (!existsSync(filePath) || !statSync(filePath).isFile()) return jsonError("unknown route", 404)
+
+  return serveWebFile(filePath, webContentType(filePath))
+}
+
+function resolveWebDist(env: Record<string, string | undefined>): string {
+  return resolve(env.PRIMER_WEB_DIST ?? DEFAULT_WEB_DIST)
+}
+
+function serveWebFile(path: string, contentType: string): Response {
+  return new Response(Bun.file(path), {
+    headers: { "content-type": contentType },
+  })
+}
+
+function webContentType(path: string): string {
+  switch (extname(path)) {
+    case ".css":
+      return "text/css; charset=utf-8"
+    case ".js":
+      return "text/javascript; charset=utf-8"
+    case ".svg":
+      return "image/svg+xml"
+    case ".png":
+      return "image/png"
+    case ".jpg":
+    case ".jpeg":
+      return "image/jpeg"
+    case ".webp":
+      return "image/webp"
+    default:
+      return "application/octet-stream"
+  }
 }
 
 function handleStatus(paths: DaemonPaths): Response {
