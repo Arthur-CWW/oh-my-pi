@@ -1,0 +1,48 @@
+# HANDOFF — the Expressive Stack wave (fresh Fable session)
+
+Boot: `docs/fable/charter.md` → `streams/companion/GOAL.md` → `streams/companion/notes/behavior-stack.md` (BOTH sessions in that note) → this file. Then act. You are the companion-stream Fable orchestrator; dashboard-mediated review; autonomous chaining; question entries for taste forks.
+
+## Mission
+
+Make her *react while Arthur talks* and *feel emotions congruently in face + voice*. Three builds, one adoption decision:
+
+1. **EmotionVector system** — the low-dim emotion control space, congruent face+voice.
+2. **L1 reactor** — rules + tiny-model hybrid watching the live stream, emitting reactive intents.
+3. **Backchannel audio** — "mm", soft laugh, while Arthur speaks. ON by default, conservative.
+4. **Effect v4 adoption** — all NEW server modules Effect-native; turn-pipeline migration second.
+
+## Settled decisions (Arthur, 2026-07-06 — do not relitigate)
+
+- Backchannel: **on by default**, conservative (≤1 per ~15s, strong cues only, low gain, Rig kill-switch).
+- Face fidelity: **build on Alicia now**; `PerfectSyncHunt` researcher is fetching an ARKit-52 "perfect sync" VRM in parallel → check `streams/companion/notes/perfect-sync-models.md` + `data/avatar-models/` before designing the projection; design projects onto *whatever the loaded model has*.
+- L1 = **rules + flash-lite hybrid**: rules for reflex-speed (VAD start → gaze+lean; silence >2.5s → glance-away; energy spike → flicker), model for judgment (mood reading, backchannel timing). Same intent bus, both.
+- Face : voice : body investment ≈ **5 : 4 : 1**. Body pose presets are done and sufficient (cherry on top).
+- **Effect v4** for new server code (repo AGENTS.md rule): Stream for token/audio pipelines, fibers + structured interruption for turn supersede/barge-in, Hub/Queue for the intent bus, Semaphore(1) per single-threaded sidecar, TaggedErrorClass, Schema at every boundary (sidecar JSON, personas, config). Browser vrm-body 60Hz loop stays vanilla zero-alloc. No big-bang rewrite of working code.
+- Doctrine: non-pessimization (quality first, optimizable seams); Bret Victor artifacts; every stage hot-swappable + visible in Rig.
+
+## Design (from notes/behavior-stack.md — read it, it has the full reasoning)
+
+- **EmotionVector**: 9 palette names = anchors in valence×arousal×dominance; mixing in VAD space (`ache .6 + fond .5` = bittersweet); per-model projection → blendshape weights (FACS/ARKit-52 is the target basis, Alicia's standard VRM set the degraded case); SAME vector → voice params (Kokoro rate, pause length, gain, WebAudio pitch/EQ/breath layer — coarse now, clone-lane prosody later). New wire: extend `body` events or add `affect` event carrying the vector; L0 projects.
+- **Intent bus upgrades**: `lane:'react'` (schema already carries lane), `source: self|user|world` on every event (efference copy — she never reacts to her own voice), `ttlMs` decay, per-layer **precision/gain knobs** in Rig (L3-style modulation).
+- **L1 reactor**: server-side, subscribes to the same taps SessionLog uses (vad state, partials, energy, silence). Rules emit instantly; flash-lite (via existing `createLlmEngineFromEnv` gemini lane w/ flash-lite model, or gemini-cca) gets a 2-5s cadence digest and may emit: emotion pulse, backchannel cue, salient observation injected into L2's rolling history as a system note ("he sounds tired"). L1 role flips while L2 speaks (accompany, don't react).
+- **Backchannel**: pre-render a palette per persona voice at session start (Kokoro one-shots: "mm", "mhm", soft laugh, breath — write the list with taste, whisper register) → cached wavs → instant playback through the presence layer at low gain, ducked under Arthur's speech; triggered only by L1 cues.
+
+## System map (all working, commit `f61c731` nested / `2edc38ca` outer)
+
+- App: `apps/ai-companion-rtc` (NESTED git repo). `bun run stack` = self-healing launcher (portless proxy → sidecars → server; `AI_COMPANION_LLM=gemini-cca` for the real brain). Surfaces: `companion.localhost:1355` (talk + VRM stage + Rig), `/scene.html` Ghost Room, `xanadu.localhost:1355` (dashboard; post via `cd apps/xanadu && bun run post`).
+- Server: `src/server.ts` (WS, config apply-live, session-log taps), `src/server-assistant.ts` (turn pipeline, tag parser — cross-chunk incl. lone-`<`), `src/llm.ts` + `src/llm-cca.ts` (echo/gemini/kimi/gemini-cca; CCA = `omp token google-antigravity`, wire id `gemini-3.5-flash-low`, sandbox-first endpoints), `src/tts.ts` (kokoro per-request voice/speed), `src/stt.ts`, `src/personas.ts` (14 egregores), `src/session-log.ts` (JSONL per session).
+- Sidecars (Python/MLX, single-threaded on purpose): `scripts/tts-sidecar.py` (Kokoro, 8799, mlx-audio==0.4.3 pin), `scripts/stt-sidecar.py` (whisper-turbo default + parakeet, 8798, hot /config).
+- Browser: `public/vrm-body.ts` (bundled via `bun run build:vrm`; L0: 5-layer blender, gaze/saccades, speaking behavior, 9 emotion poses, idle life; contract: `createVrmBody(canvas,url)` → handle w/ `handleBody/setSpeechEnergy/setMood/setSpeaking/loadModel/dispose`), `public/app.ts` (Rig, talk toggle, pause), `public/presence.ts` (HRTF + analyser + suspend/resume).
+- Latency truth: `[latency]` stdout per turn; `bun run measure`; echo lane eos→firstAudio ~100ms; CCA TTFT ~2s.
+
+## Operational lessons (cost us hours — respect them)
+
+- **gpt-implementer lane gets wrap-up-killed** mid-slice (~5min); kimi-implementer with a FROZEN contract + small file-scoped packets ships. Orchestrator runs ALL installs/builds/tests/servers/commits — worker sandboxes can't bind ports, use Metal, write .git, or bun install.
+- **Dead agents ghost-message** stand-down claims after crashes; keep a kill-list, tell workers to ignore it.
+- Transpiled files are served `no-store` now (stale-cache bug class); portless proxy dies sometimes — stack script self-heals it (`bunx portless proxy start --no-tls --port 1355`).
+- `git pull --rebase --autostash` can leave the autostash UNPOPPED — check `git stash list` after every pull.
+- personas/core.json grows — never hardcode counts/palettes.
+
+## Acceptance for the wave
+
+Arthur talks → she visibly reacts *during* his speech (gaze, lean, ≤conservative backchannel); mixed emotions render congruently in face AND voice (demo: `ache+fond` vs `playful` A/B); efference: she never reacts to her own voice; every gain Rig-tunable live; session JSONL captures affect events; dashboard proof entry with a captured demo clip + rerun commands; nested repo green (tsc + tests) and committed; TASKS.md row updated.
