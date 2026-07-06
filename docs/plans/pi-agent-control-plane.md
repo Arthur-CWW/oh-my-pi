@@ -121,7 +121,7 @@ First-class adapters:
 | Pi publisher | existing interactive Pi session + extension | Good for observing normal terminal workflows. |
 | Codex app-server | Codex JSON-RPC/app-server runner | Reference-compatible runner, not a privileged architecture. |
 | tmux/zellij process | terminal attach/capture/send | Attachment and preview only; not semantic replay or durable truth. |
-| direct PTY | controlled local process | Later option if replacing multiplexers is worth the scope. |
+| direct PTY (agent-mux) | `Bun.spawn({terminal})` PTY host, per-session daemon, unix-socket attach | ADOPTED 2026-07-04 for session survival: agents keep running when the terminal client dies; thin reattach clients; explicit `--resume` (never terminal-ID `--continue`); mux daemon publishes lifecycle events via the outbox contract. Design: `docs/plans/agent-mux.md`. |
 
 Harness facts preserved from v0:
 
@@ -129,6 +129,7 @@ Harness facts preserved from v0:
 - Pi has UI hooks such as `ctx.ui.setTitle(...)`, `ctx.ui.setStatus(...)`, and `ctx.ui.setFooter(...)`.
 - tmux and zellij provide attach, capture, pane/tab metadata, and survivable terminal sessions.
 - Current terminal naming is too redundant and too tied to cwd/pane title.
+- Session survival findings (2026-07-04): closing the terminal SIGHUPs omp (postmortem cleanup, exit 129 — running turns die); `--continue` resume is keyed to a terminal-ID breadcrumb that force-closed terminal apps invalidate (the "random resume failures"); no pid/lock/heartbeat exists — status is derived from the JSONL tail only. Supervisor status model (starting/running-attached/running-detached/exited/failed) lives in agent-mux.
 
 L1 publishes normalized lifecycle events and artifacts. L1 does not decide packet state, review state, provenance, or fallback policy.
 
