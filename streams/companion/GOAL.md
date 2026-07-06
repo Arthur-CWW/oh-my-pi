@@ -25,6 +25,8 @@ Explore AI-companion **form factors**, not one app. Realtime voice-to-avatar (An
 - **Dashboard-mediated review.** Arthur reviews what the stream *produces*, not commits. Every finished slice posts an entry to the Xanadu dashboard feed (`apps/xanadu/`, `http://xanadu.localhost:1355`, run: `cd apps/xanadu && bun run dev`); artifacts must be interactable end-to-end (playable clips, runnable actions). Self-contained package — nothing in root `package.json`.
 - **Autonomous chaining.** Finish a task, post it, start the next — no per-task approval. Escalate to Arthur only for taste, UX preference, or architectural forks he'd genuinely weigh differently; post those as `kind: question` feed entries.
 - **Progress is visible live**: in-flight work may post `progress` entries; the page updates over SSE.
+- **Non-pessimization (Arthur, 2026-07-06, cf. Casey Muratori).** Quality first — small models miss the little things; get it *sufficiently good*, then hill-climb latency. Never optimize prematurely, and never write code that BLOCKS optimizing: every stage stays a hot-swappable seam with per-segment latency printed, so benchmarks/evals can sweep engine×model combos later. Planned: a bench harness (latency segments + register-quality samples per combo) feeding dashboard tables. Low latency remains the goal; optimizability is the method.
+- **PuruPuru body (backlog, Arthur inspo 2026-07-06):** rotejin's open-source PuruPuruPNGTuber decoded (`notes/rotejin-effect.md`, video in `data/inspiration/rotejin/`) — layered-PNG avatar, spring-chain hair, expression swaps. Becomes the THIRD hot-swap body type (audio-only / VRM / PNGTuber) over the same body events; M-effort Canvas2D recipe in the note.
 
 ## First goal
 

@@ -36,6 +36,13 @@ The official [Cubism SDK for Web](https://www.live2d.com/en/sdk/download/web/) i
 - **Legally clean?** Their claim: a reimplementation "without any Live2D code", so "you can use, modify, and distribute this library without needing a special license from Live2D Inc."; Live2D/Cubism referenced nominatively as trademarks. This is a reimplementation, not a leaked SDK — consistent with the clean-room framing — but it is *their* claim, untested in court; README acknowledges "We currently do not think" Live2D will pursue users. For local prototyping the risk is negligible; for shipping, revisit.
 - **Web fit caveat**: plain C99 targeting the native Core ABI; the platform table marks Emscripten/wasm as untested (`?`). Using it in the browser means compiling to wasm ourselves to stand in for `live2dcubismcore.js`. [INFERENCE] wrappers like pixi-live2d-display, which just take a `cubismCorePath`, should then run fully open — unverified, worth a spike.
 
+### Hoshino Lina's **Ayagami** — track, but not vendorable yet
+
+- **Identity**: Ayagami is the Rust clean-room Live2D renderer Lina is posting about publicly (posts on 2026-06-29 and 2026-07-06 mention open-source Live2D rendering, parameters, wasm/webgl/webgpu, Godot/C FFI plans).
+- **Public source status, 2026-07-06**: no public repo found under `hoshinolina/` or `TokyoHackerGirls/`; `https://github.com/hoshinolina/ayagami` returns 404. The crates.io package [`ayagami`](https://crates.io/crates/ayagami) exists only as `0.0.0-reserved` (published 2026-06-14, 705 B, no README/source beyond placeholder).
+- **Use decision**: do **not** vendor a placeholder or unrelated repo. For this stream, treat Ayagami as the preferred future Live2D body backend once real source lands. Watch `hoshinolina/ayagami`, `TokyoHackerGirls/ayagami`, and the crates.io crate for a non-reserved release.
+- **Stopgap if body work must start before release**: use Hiyori + `pixi-live2d-display` for browser proof, or spike Purism Core wasm if the open-core requirement matters more than speed.
+
 ### Orientation one-liners
 
 - [`pixi-live2d-display`](https://github.com/guansss/pixi-live2d-display) — MIT PixiJS plugin unifying Cubism 2.1/3/4 model handling behind one high-level API (motions, expressions, hit-testing, lip-sync-able mouth params); still requires the official proprietary Core blobs; upstream is slow-moving — last release [v0.5.0-beta, 2023-12-07](https://github.com/guansss/pixi-live2d-display/releases/tag/v0.5.0-beta) (Pixi v7), npm stable 0.4.0, ~13K weekly downloads.
@@ -73,4 +80,4 @@ Rationale, one line each:
 - *Seed-san* (also downloaded): our VRM 1.0 coverage — exercises the newer meta/springbone/constraint path so the presence layer isn't accidentally VRM-0-shaped.
 - *`@pixiv/three-vrm`*: MIT, actively released (v3.5.4, 2026-06), the only battle-tested web runtime; keeps the body a plain three.js scene node the WebAudio presence layer can position in the same space.
 - *Hiyori + `pixi-live2d-display`*: fastest legal 2D path (sample data exists precisely for SDK-integration testing); mouth-open scalar from our `audio.energyFrame` contract is enough to drive it.
-- *Purism Core*: track it (MIT, June 2026) as the escape hatch from the proprietary Core blob — spike a wasm build later; don't block the first prototype on it.
+- *Purism Core / Ayagami*: track both as escape hatches from the proprietary Core blob. Purism Core is usable C99 now; Ayagami is the preferred Rust/WebGPU backend if Lina publishes real source. Don't block the first prototype on either.
