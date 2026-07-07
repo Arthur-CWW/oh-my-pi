@@ -11,9 +11,16 @@ export interface CedictEntry {
   definitions: string[]
 }
 
+export interface DecompositionEntry {
+  char: string
+  ids: string
+  components: string[]
+}
+
 export interface DictLookup {
   word: string
   entries: CedictEntry[]
+  decomposition: DecompositionEntry[]
 }
 
 export interface KnownWordsResult {
@@ -27,8 +34,14 @@ const RawCedictRowSchema = Schema.Struct({
   pinyin: Schema.String,
   definitions: Schema.String,
 })
+const RawDecompositionRowSchema = Schema.Struct({
+  char: Schema.String,
+  ids: Schema.String,
+  components: Schema.String,
+})
 
 type RawCedictRow = Schema.Schema.Type<typeof RawCedictRowSchema>
+type RawDecompositionRow = Schema.Schema.Type<typeof RawDecompositionRowSchema>
 
 const RawKnownWordRowSchema = Schema.Struct({ word: Schema.String })
 type RawKnownWordRow = Schema.Schema.Type<typeof RawKnownWordRowSchema>
@@ -41,21 +54,21 @@ export class CedictNotBuiltError extends Error {
 
 export function lookupCedictExact(dbPath: string, word: string): DictLookup {
   const trimmedWord = word.trim()
-  if (trimmedWord.length === 0) return { word: trimmedWord, entries: [] }
-  return withCedict(dbPath, (db) => ({ word: trimmedWord, entries: queryExactEntries(db, trimmedWord) }))
+  if (trimmedWord.length === 0) return { word: trimmedWord, entries: [], decomposition: [] }
+  return withCedict(dbPath, (db) => ({ word: trimmedWord, entries: queryExactEntries(db, trimmedWord), decomposition: queryDecomposition(db, trimmedWord) }))
 }
 
 export function lookupCedictBest(dbPath: string, text: string): DictLookup {
   const trimmedText = text.trim()
-  if (trimmedText.length === 0) return { word: trimmedText, entries: [] }
+  if (trimmedText.length === 0) return { word: trimmedText, entries: [], decomposition: [] }
   return withCedict(dbPath, (db) => {
     const chars = Array.from(trimmedText)
     for (let length = chars.length; length > 0; length -= 1) {
       const prefix = chars.slice(0, length).join("")
       const entries = queryExactEntries(db, prefix)
-      if (entries.length > 0) return { word: prefix, entries }
+      if (entries.length > 0) return { word: prefix, entries, decomposition: queryDecomposition(db, prefix) }
     }
-    return { word: trimmedText, entries: [] }
+    return { word: trimmedText, entries: [], decomposition: queryDecomposition(db, trimmedText) }
   })
 }
 
@@ -76,7 +89,7 @@ function withCedict<T>(dbPath: string, use: (db: Database) => T): T {
     return use(db)
   } catch (error) {
     if (error instanceof CedictNotBuiltError) throw error
-    if (error instanceof Error && /no such table: (cedict|known_words)/u.test(error.message)) throw new CedictNotBuiltError()
+    if (error instanceof Error && /no such table: (cedict|known_words|decomposition)/u.test(error.message)) throw new CedictNotBuiltError()
     throw error
   } finally {
     db.close()
@@ -95,6 +108,29 @@ function queryExactEntries(db: Database, word: string): CedictEntry[] {
     .map((row) => decodeCedictRow(row))
 }
 
+function queryDecomposition(db: Database, word: string): DecompositionEntry[] {
+  const rowsByChar = new Map<string, DecompositionEntry>()
+  const query = db.query<RawDecompositionRow, [string]>(
+    `SELECT char, ids, components
+     FROM decomposition
+     WHERE char = ?`,
+  )
+  const entries: DecompositionEntry[] = []
+  for (const char of Array.from(word)) {
+    const cachedEntry = rowsByChar.get(char)
+    if (cachedEntry !== undefined) {
+      entries.push(cachedEntry)
+      continue
+    }
+    const row = query.get(char)
+    if (row === null) continue
+    const entry = decodeDecompositionRow(row)
+    rowsByChar.set(char, entry)
+    entries.push(entry)
+  }
+  return entries
+}
+
 function decodeCedictRow(row: RawCedictRow): CedictEntry {
   const decoded = Schema.decodeUnknownSync(RawCedictRowSchema)(row)
   const parsedDefinitions: unknown = JSON.parse(decoded.definitions)
@@ -103,5 +139,15 @@ function decodeCedictRow(row: RawCedictRow): CedictEntry {
     traditional: decoded.traditional,
     pinyin: decoded.pinyin,
     definitions: [...Schema.decodeUnknownSync(StringArraySchema)(parsedDefinitions)],
+  }
+}
+
+function decodeDecompositionRow(row: RawDecompositionRow): DecompositionEntry {
+  const decoded = Schema.decodeUnknownSync(RawDecompositionRowSchema)(row)
+  const parsedComponents: unknown = JSON.parse(decoded.components)
+  return {
+    char: decoded.char,
+    ids: decoded.ids,
+    components: [...Schema.decodeUnknownSync(StringArraySchema)(parsedComponents)],
   }
 }

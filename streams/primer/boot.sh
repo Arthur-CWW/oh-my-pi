@@ -4,7 +4,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
-exec omp --config .omp/fable-config.yml --model anthropic/claude-fable-5 \
+exec omp --config .omp/fable-config.yml --model anthropic/claude-fable-5:medium \
   @docs/fable/charter.md \
   @streams/primer/GOAL.md \
   @streams/primer/VISION.md \

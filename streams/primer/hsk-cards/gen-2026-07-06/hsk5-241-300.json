@@ -1,0 +1,1022 @@
+[
+  {
+    "word": "全都",
+    "pinyin": "quán dōu",
+    "gloss": "all; without exception",
+    "cards": [
+      {
+        "type": "production",
+        "front": "You want to say none are left out: “The students all came.” 学生___来了。",
+        "back": "学生全都来了。全都 stresses “all, without exception”; 都 alone can be lighter.",
+        "retrievalTarget": "Produce 全都 when every member is included without exception.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Stable production cue for the emphatic all-without-exception use; scaffolding uses only basic words plus the target.",
+        "notes": "Self-audit: not ambiguous, not multiple-valid because the cue asks for emphatic no-exception scope; not narrow, shallow, wordy, or redundant."
+      }
+    ]
+  },
+  {
+    "word": "环节",
+    "pinyin": "huán jié",
+    "gloss": "link; stage; part of a process",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "A plan has several connected stages; one stage has a problem. Which word names that process link/stage?",
+        "back": "环节。这个环节有问题 = this stage/link has a problem. It treats the part as one link in a whole process.",
+        "retrievalTarget": "Choose 环节 for a linked stage or component within a larger process.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Targets the figurative process-stage sense instead of generic part; Chinese support is basic plus target.",
+        "notes": "Self-audit: front does not contain the answer; single stable answer; useful process-collocation boundary."
+      }
+    ]
+  },
+  {
+    "word": "餐厅",
+    "pinyin": "cān tīng",
+    "gloss": "restaurant; dining room/hall",
+    "cards": [
+      {
+        "type": "collocation",
+        "front": "For a restaurant as a business/place, which classifiers fit: 一___餐厅 / 一___餐厅?",
+        "back": "一家餐厅 / 一间餐厅。家 fits a restaurant business; 间 fits a room/place.",
+        "retrievalTarget": "Use 餐厅 for restaurant/dining room and pair it with 家 or 间 by sense.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Classifier choice supports production and disambiguates business vs room; scaffolding is minimal and basic.",
+        "notes": "Self-audit: multiple classifiers are expected and named in the prompt; not ambiguous because retrieval target includes both."
+      }
+    ]
+  },
+  {
+    "word": "违反",
+    "pinyin": "wéi fǎn",
+    "gloss": "to violate; go against a rule/law",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "Someone acts against a rule or law, not just disagrees with a person. Which verb fits?",
+        "back": "违反。违反规定 = violate rules [规定 = rule/regulation]; 违反法律 = violate the law [法律 = law].",
+        "retrievalTarget": "Use 违反 for violating or going against rules, laws, or requirements.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Precise legal/rule-bound use; the only support terms beyond the target are glossed inline.",
+        "notes": "Self-audit: not multiple-valid with 反对 because the cue specifies rule/law violation; front does not imply pronunciation or characters."
+      }
+    ]
+  },
+  {
+    "word": "活力",
+    "pinyin": "huó lì",
+    "gloss": "energy; vitality",
+    "cards": [
+      {
+        "type": "production",
+        "front": "A city, person, or class feels energetic and alive: 很有___。",
+        "back": "很有活力 = full of energy/vitality. 活力 is lively force, not physical strength 力气.",
+        "retrievalTarget": "Produce 活力 for vitality or lively energy in people, groups, and places.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Contrasts vitality with mere physical strength; Chinese scaffold uses target plus basic pattern.",
+        "notes": "Self-audit: answer not visible in front; cue is broad enough for productive use but points to one noun."
+      }
+    ]
+  },
+  {
+    "word": "委托",
+    "pinyin": "wěi tuō",
+    "gloss": "to entrust; commission someone to do something",
+    "cards": [
+      {
+        "type": "collocation",
+        "front": "You formally ask another person/company to handle a task for you. Which verb fits “___他办这件事”?",
+        "back": "委托他办这件事 = entrust/commission him to handle this matter. It is more formal than 请他帮忙.",
+        "retrievalTarget": "Use 委托 + person/organization + task for formally entrusting or commissioning work.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Captures formality and argument pattern; Chinese support is basic plus the target.",
+        "notes": "Self-audit: not ambiguous with 请 because formal entrusting is specified; stable collocation frame."
+      }
+    ]
+  },
+  {
+    "word": "软",
+    "pinyin": "ruǎn",
+    "gloss": "soft; flexible",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "A bed is comfortable because it is not hard; a person’s attitude can also become less firm. Which adjective?",
+        "back": "软。床很软 = the bed is soft. 态度软下来 = the attitude softened [态度 = attitude].",
+        "retrievalTarget": "Use 软 for physical softness and extended lack of firmness/flexibility.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Links physical and figurative senses; one non-basic support word is glossed inline.",
+        "notes": "Self-audit: single adjective target; no answer leakage; not shallow because it includes figurative extension."
+      }
+    ]
+  },
+  {
+    "word": "签名",
+    "pinyin": "qiān míng",
+    "gloss": "to sign; signature",
+    "cards": [
+      {
+        "type": "production",
+        "front": "On a form, you write your name by hand. What word names the action/result? 请在这里___。",
+        "back": "请在这里签名 = please sign here. 签名 can be the action “sign” or the noun “signature.”",
+        "retrievalTarget": "Use 签名 for signing one’s name and for the resulting signature.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Production cue covers noun/verb ambiguity; Chinese is basic plus target.",
+        "notes": "Self-audit: not multiple-valid with 写名字 because the form/register cue asks for sign/signature."
+      }
+    ]
+  },
+  {
+    "word": "摄影",
+    "pinyin": "shè yǐng",
+    "gloss": "photography; filming; to shoot",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "Not just taking one casual photo: the art/work of taking photos or shooting film. Which word?",
+        "back": "摄影。摄影师 = photographer [师 = professional/person]; 摄影 can also mean filming a movie.",
+        "retrievalTarget": "Choose 摄影 for photography or filming as an activity/profession, beyond one casual photo.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Separates activity/profession from 拍照片; one support morpheme is glossed inline.",
+        "notes": "Self-audit: front asks for register/activity distinction; no trivial answer clue."
+      }
+    ]
+  },
+  {
+    "word": "用于",
+    "pinyin": "yòng yú",
+    "gloss": "to be used in/on/for",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "Formal written style: a tool is used for study, work, or medicine. Which two-character verb before the purpose?",
+        "back": "用于。这个方法用于学习 = this method is used for study. It is more written/formal than 用来.",
+        "retrievalTarget": "Recognize 用于 as formal “be used for/in/on” before a purpose or field.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Worth retaining despite function-like status because it distinguishes written register from 用来.",
+        "notes": "Self-audit: not redundant with 用来 card because this one targets formal 用于 register."
+      }
+    ]
+  },
+  {
+    "word": "今日",
+    "pinyin": "jīn rì",
+    "gloss": "today; this day",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "A headline or formal notice says “today,” not everyday 今天. Which written word?",
+        "back": "今日。今日天气 = today’s weather. It is written/formal compared with 今天.",
+        "retrievalTarget": "Recognize 今日 as a written or headline-style equivalent of 今天.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Register distinction supports reading; scaffold uses basic 今天/天气 contrast.",
+        "notes": "Self-audit: single register target; no answer in front; not too narrow because headlines/notices are common."
+      }
+    ]
+  },
+  {
+    "word": "偶像",
+    "pinyin": "ǒu xiàng",
+    "gloss": "idol",
+    "cards": [
+      {
+        "type": "production",
+        "front": "A fan says a singer or actor is the person they admire most: 他是我的___。",
+        "back": "他是我的偶像 = he is my idol. 偶像 is used for admired public figures and fan culture.",
+        "retrievalTarget": "Use 偶像 for an idol or admired public figure, especially in fan contexts.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Production cue anchors the fan/public-figure sense; Chinese support is basic plus target.",
+        "notes": "Self-audit: not multiple-valid with 喜欢的人 because “idol” and fan culture are specified."
+      }
+    ]
+  },
+  {
+    "word": "届",
+    "pinyin": "jiè",
+    "gloss": "session; edition; classifier for recurring events/classes",
+    "cards": [
+      {
+        "type": "collocation",
+        "front": "For the 10th meeting/competition as one edition in a series: 第十___。Which classifier?",
+        "back": "第十届 = the 10th session/edition. 届 counts recurring events, conferences, competitions, or graduating classes.",
+        "retrievalTarget": "Use 届 as the classifier for numbered sessions/editions of recurring events or classes.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Although measure-like, it is not trivial; the recurring-event constraint is production-critical.",
+        "notes": "Self-audit: front allows only the series-edition classifier; not redundant with general 个/次."
+      }
+    ]
+  },
+  {
+    "word": "挡",
+    "pinyin": "dǎng",
+    "gloss": "to block; obstruct; keep off",
+    "cards": [
+      {
+        "type": "production",
+        "front": "Something is in the way, blocking your view: 别___着我。",
+        "back": "别挡着我 = don’t block me / don’t get in my way. 挡 can block people, sight, wind, or light.",
+        "retrievalTarget": "Use 挡 for physically or functionally blocking/obstructing something.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Concrete production phrase extends to common objects; Chinese is target plus basic words.",
+        "notes": "Self-audit: not ambiguous with 停 because the clue says blocking/in the way; front does not give answer."
+      }
+    ]
+  },
+  {
+    "word": "认",
+    "pinyin": "rèn",
+    "gloss": "to recognize; admit; accept as",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "You see a face and know who it is; later you admit a mistake. What shared verb appears in both?",
+        "back": "认。认出他 = recognize him; 认错 = admit a mistake / recognize wrongly. It can mean recognize or acknowledge/admit.",
+        "retrievalTarget": "Connect 认’s recognize sense with admitting or acknowledging something as true.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Builds a stable semantic bridge across common compounds; support examples are basic plus target.",
+        "notes": "Self-audit: not shallow because it prevents treating 认 as only “recognize”; answer not cued by characters."
+      }
+    ]
+  },
+  {
+    "word": "尝",
+    "pinyin": "cháng",
+    "gloss": "to taste; try food; experience",
+    "cards": [
+      {
+        "type": "production",
+        "front": "Before deciding whether food is good, take a taste: 你___一下。",
+        "back": "你尝一下 = have a taste. 尝 is for tasting/trying food; it can extend to experiencing something.",
+        "retrievalTarget": "Use 尝 for tasting or trying food, with extension to experiencing.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Simple but production-useful food verb; Chinese scaffold is basic plus target.",
+        "notes": "Self-audit: not multiple-valid with 试 because “taste food” specifies 尝; not wordy."
+      }
+    ]
+  },
+  {
+    "word": "注射",
+    "pinyin": "zhù shè",
+    "gloss": "to inject; injection",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "Medicine enters the body through a needle, not by eating or drinking. Which medical verb/noun?",
+        "back": "注射。注射药 = inject medicine [药 = medicine]. 注射 can name the action or an injection.",
+        "retrievalTarget": "Use 注射 for injecting medicine/liquid with a needle and for an injection.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Concrete medical action with noun/verb ambiguity; one support noun is glossed inline.",
+        "notes": "Self-audit: single answer; front avoids the Chinese target; not narrow because injections recur in reading."
+      }
+    ]
+  },
+  {
+    "word": "冲突",
+    "pinyin": "chōng tū",
+    "gloss": "conflict; clash",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "Two plans, interests, or groups clash so both cannot smoothly coexist. Which noun/verb?",
+        "back": "冲突。时间冲突 = schedule conflict; 利益冲突 = conflict of interest [利益 = interest/benefit].",
+        "retrievalTarget": "Use 冲突 for clashes between times, interests, ideas, or groups.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Targets abstract clash/collision, not generic problem; one higher collocate is glossed.",
+        "notes": "Self-audit: stable target; not ambiguous with 问题 because clash/incompatibility is specified."
+      }
+    ]
+  },
+  {
+    "word": "在场",
+    "pinyin": "zài chǎng",
+    "gloss": "to be present; on the scene",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "At the meeting/accident scene, someone was there in person. Which word says “present on site”?",
+        "back": "在场。他当时在场 = he was present there at the time. 不在场 = not present / not on the scene.",
+        "retrievalTarget": "Use 在场 for being physically present at an event or scene.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Distinguishes on-site presence from generic 在; Chinese support is basic plus target.",
+        "notes": "Self-audit: not multiple-valid with 在 because “at event/scene in person” requires 在场."
+      }
+    ]
+  },
+  {
+    "word": "敏感",
+    "pinyin": "mǐn gǎn",
+    "gloss": "sensitive; susceptible",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "A topic causes strong reactions; skin reacts easily; a person is easily hurt. Which adjective covers this sensitivity?",
+        "back": "敏感。敏感问题 = sensitive issue; 皮肤敏感 = sensitive skin [皮肤 = skin].",
+        "retrievalTarget": "Use 敏感 for emotional, political/topic, or physical sensitivity.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Unifies common abstract and physical uses; one non-basic support word is glossed inline.",
+        "notes": "Self-audit: broad but not shallow because it gives domains; front does not include Chinese answer."
+      }
+    ]
+  },
+  {
+    "word": "鼠",
+    "pinyin": "shǔ",
+    "gloss": "rat; mouse (bound form)",
+    "cards": [
+      {
+        "type": "collocation",
+        "front": "Which bound animal character appears in 老鼠 and 鼠标?",
+        "back": "鼠。老鼠 = rat/mouse; 鼠标 = computer mouse [标 = marker]. 鼠 is usually bound, not a common standalone spoken noun.",
+        "retrievalTarget": "Recognize 鼠 as the rat/mouse morpheme in compounds such as 老鼠 and 鼠标.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Bound-form behavior and compound recognition matter for reading; one support morpheme is glossed.",
+        "notes": "Self-audit: not redundant with 老鼠 because target is the bound morpheme 鼠; front asks for character-level retrieval."
+      }
+    ]
+  },
+  {
+    "word": "提示",
+    "pinyin": "tí shì",
+    "gloss": "to remind; prompt; hint; notice",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "A screen gives a hint/reminder about what to do next. Which word names the prompt or hint?",
+        "back": "提示。系统提示 = system prompt/notice [系统 = system]. 提示 can be a hint, reminder, or the act of prompting.",
+        "retrievalTarget": "Use 提示 for a hint, reminder, notice, or prompt that points someone toward action.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Targets common UI/reading sense; one support word is glossed inline.",
+        "notes": "Self-audit: single functional cue; no answer leakage; not narrow because UI prompts and reminders are common."
+      }
+    ]
+  },
+  {
+    "word": "摔",
+    "pinyin": "shuāi",
+    "gloss": "to fall; throw down; drop and break",
+    "cards": [
+      {
+        "type": "production",
+        "front": "A person falls, or a phone drops hard and breaks. Which verb? 他___倒了。",
+        "back": "他摔倒了 = he fell down. 手机摔坏了 = the phone was damaged from a fall/drop.",
+        "retrievalTarget": "Use 摔 for falling, throwing down, or dropping something hard enough to damage it.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Covers the fall/drop-damage cluster; Chinese support uses common words plus target.",
+        "notes": "Self-audit: not ambiguous with 掉 because damage/hard fall is specified; front does not trivially imply answer."
+      }
+    ]
+  },
+  {
+    "word": "沟通",
+    "pinyin": "gōu tōng",
+    "gloss": "to communicate; connect",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "Two people exchange ideas to understand each other, not just say words. Which verb?",
+        "back": "沟通。我们需要沟通 = we need to communicate. It stresses two-way understanding/connection.",
+        "retrievalTarget": "Use 沟通 for two-way communication that connects people or ideas.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Separates interactive communication from generic 说; Chinese support is basic plus target.",
+        "notes": "Self-audit: stable near-synonym split; not multiple-valid because two-way understanding is the cue."
+      }
+    ]
+  },
+  {
+    "word": "收拾",
+    "pinyin": "shōu shi",
+    "gloss": "to tidy up; pack; sort out",
+    "cards": [
+      {
+        "type": "production",
+        "front": "Before leaving, put your things in order and pack them: ___东西。",
+        "back": "收拾东西 = tidy/pack things. 收拾房间 = clean up a room; colloquially it can also mean “deal with/fix” someone.",
+        "retrievalTarget": "Use 收拾 for tidying, putting in order, or packing things up.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "High-value household/travel collocation; colloquial extension is noted without requiring extra unknowns.",
+        "notes": "Self-audit: front cues the core sense; not too broad because back handles extension."
+      }
+    ]
+  },
+  {
+    "word": "除非",
+    "pinyin": "chú fēi",
+    "gloss": "unless; only if",
+    "cards": [
+      {
+        "type": "cloze",
+        "front": "Only one condition changes the result: “___你去，我才去。”",
+        "back": "除非你去，我才去 = I’ll go only if you go. 除非 sets the necessary exception/condition.",
+        "retrievalTarget": "Use 除非 to introduce the only condition or exception: unless/only if.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Production cue for a difficult connector; Chinese scaffold is basic plus target.",
+        "notes": "Self-audit: stable connector retrieval; not multiple-valid because the paired 才 structure cues only-if."
+      }
+    ]
+  },
+  {
+    "word": "乘客",
+    "pinyin": "chéng kè",
+    "gloss": "passenger",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "On a bus, train, or plane, the people riding are not drivers or staff. Which noun?",
+        "back": "乘客。车上的乘客 = passengers on the vehicle. 乘客 is the rider/passenger role.",
+        "retrievalTarget": "Use 乘客 for passengers riding in public or private transport.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Role contrast is production-relevant; scaffolding uses only basic transport/person words plus target.",
+        "notes": "Self-audit: single noun target; answer not present; not overly narrow because transport contexts are frequent."
+      }
+    ]
+  },
+  {
+    "word": "艰难",
+    "pinyin": "jiān nán",
+    "gloss": "difficult; hard; arduous",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "A road, choice, or period is not just hard; it feels arduous and full of difficulty. Which formal adjective?",
+        "back": "艰难。艰难的决定 = difficult/arduous decision [决定 = decision]. It is heavier and more written than 难.",
+        "retrievalTarget": "Choose 艰难 for arduous, serious difficulty, often in written or weighty contexts.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Register/intensity contrast with 难; one collocate is glossed inline.",
+        "notes": "Self-audit: not multiple-valid with 困难 because cue asks for heavier/written adjective; no answer leakage."
+      }
+    ]
+  },
+  {
+    "word": "用来",
+    "pinyin": "yòng lái",
+    "gloss": "to be used for",
+    "cards": [
+      {
+        "type": "collocation",
+        "front": "Everyday pattern for purpose: “This cup is used for drinking water.” 这个杯子是___喝水的。",
+        "back": "这个杯子是用来喝水的。用来 + verb says what something is used to do; 用于 is more written/formal.",
+        "retrievalTarget": "Use 用来 + verb for the everyday purpose/function of a thing.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Contrasts with 用于 while teaching productive purpose pattern; Chinese is basic plus target.",
+        "notes": "Self-audit: not redundant with 用于 because retrieval target is everyday 用来 + verb syntax."
+      }
+    ]
+  },
+  {
+    "word": "专辑",
+    "pinyin": "zhuān jí",
+    "gloss": "album; special collection",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "A singer releases a group of songs together, not just one song. Which noun?",
+        "back": "专辑。新专辑 = new album. It can also mean a special collected issue/program, but music album is common.",
+        "retrievalTarget": "Use 专辑 for an album or curated special collection, especially a music album.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Distinguishes album/collection from single song; Chinese support is target plus basic modifier.",
+        "notes": "Self-audit: stable target; no unsupported Chinese unknowns; not shallow because collection sense is noted."
+      }
+    ]
+  },
+  {
+    "word": "虎",
+    "pinyin": "hǔ",
+    "gloss": "tiger",
+    "cards": [
+      {
+        "type": "collocation",
+        "front": "Which animal word takes 只 and means tiger: 一___?",
+        "back": "一只虎 / 一只老虎 = one tiger. 虎 is often the shorter/written morpheme; 老虎 is the common spoken word.",
+        "retrievalTarget": "Recognize 虎 as the tiger morpheme, often shorter or more written than 老虎.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Not just animal naming: targets bound/short-form contrast with 老虎; scaffold is basic.",
+        "notes": "Self-audit: front asks for tiger word but not characters; productive classifier included."
+      }
+    ]
+  },
+  {
+    "word": "绕",
+    "pinyin": "rào",
+    "gloss": "to go around; wind around; bypass; confuse",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "The road is blocked, so you go around it instead of through it. Which verb?",
+        "back": "绕。绕过去 = go around/bypass it. 绕 can also mean wind around, as a rope around a hand.",
+        "retrievalTarget": "Use 绕 for going around, winding around, or bypassing an obstacle.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Concrete spatial image supports the extended bypass sense; Chinese support is basic plus target.",
+        "notes": "Self-audit: not ambiguous with 走 because “around instead of through” specifies 绕."
+      }
+    ]
+  },
+  {
+    "word": "喷",
+    "pinyin": "pēn",
+    "gloss": "to spray; spurt; spout",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "Water, smoke, or air suddenly shoots out from a small opening. Which pēn verb?",
+        "back": "喷 (pēn)。喷水 = spray water; 喷出来 = spurt/spray out. This is the action reading, not pèn for strong smell/season.",
+        "retrievalTarget": "Read 喷 as pēn for spraying, spurting, or spouting outward.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Pronunciation/use contrast with pèn; examples use basic words plus target.",
+        "notes": "Self-audit: front includes pinyin to disambiguate duplicate entry; retrieval target is pronunciation plus sense."
+      }
+    ]
+  },
+  {
+    "word": "喷",
+    "pinyin": "pèn",
+    "gloss": "fragrant/strong smell; peak season/flush",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "Same character as “spray,” but this pèn reading describes a strong smell, as in 香喷喷. Which reading/sense?",
+        "back": "喷 (pèn)。香喷喷 = strongly fragrant [香 = fragrant]. Do not read this as pēn “spray.”",
+        "retrievalTarget": "Read 喷 as pèn in smell-intensity words such as 香喷喷, distinct from pēn “spray.”",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Keeps the rare pronunciation from collapsing into pēn; the one support word is glossed.",
+        "notes": "Self-audit: duplicate character is intentionally disambiguated by pinyin; not multiple-valid."
+      }
+    ]
+  },
+  {
+    "word": "抱怨",
+    "pinyin": "bào yuàn",
+    "gloss": "to complain; grumble",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "Someone keeps saying they are unhappy about work or life, not just giving feedback. Which verb?",
+        "back": "抱怨。他总是抱怨工作 = he always complains about work. It carries dissatisfaction/grumbling.",
+        "retrievalTarget": "Use 抱怨 for complaining or grumbling from dissatisfaction.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Distinguishes complaint/grumbling from neutral comments; Chinese support is basic plus target.",
+        "notes": "Self-audit: stable affective cue; not ambiguous with 说 because dissatisfaction is explicit."
+      }
+    ]
+  },
+  {
+    "word": "卫星",
+    "pinyin": "wèi xīng",
+    "gloss": "satellite; moon",
+    "cards": [
+      {
+        "type": "collocation",
+        "front": "A man-made object goes around Earth in space. Which noun, and which classifier: 一___卫星?",
+        "back": "一颗卫星 = one satellite. 卫星 can be artificial satellite or a natural moon; 颗 often counts small round/sky objects.",
+        "retrievalTarget": "Use 卫星 for satellite/moon and pair it with classifier 颗.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Combines meaning and classifier; Chinese support is target plus basic classifier pattern.",
+        "notes": "Self-audit: not ambiguous because satellite/moon domain is specified; classifier retrieval is explicit."
+      }
+    ]
+  },
+  {
+    "word": "动手",
+    "pinyin": "dòng shǒu",
+    "gloss": "to start doing; to hit/use violence",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "“Start working on it” and “hit someone” can both be this word. What warning must you remember?",
+        "back": "动手 can mean start doing a task: 开始动手吧. It can also mean use hands violently: 他动手打人 = he hit someone.",
+        "retrievalTarget": "Distinguish 动手 as “start doing hands-on work” from “use violence/hit.”",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Prevents a high-risk sense error; Chinese examples use basic words plus target.",
+        "notes": "Self-audit: two senses are intentionally contrasted; front asks for the distinction, not a vague meaning."
+      }
+    ]
+  },
+  {
+    "word": "靠近",
+    "pinyin": "kào jìn",
+    "gloss": "to approach; be close to",
+    "cards": [
+      {
+        "type": "production",
+        "front": "You move closer to the door/person, or are located near them: 不要___门。",
+        "back": "不要靠近门 = don’t go near/approach the door. 靠近 can describe movement toward or being near.",
+        "retrievalTarget": "Use 靠近 for approaching or being close to a person/place/object.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Covers dynamic and static near senses; Chinese scaffold is basic plus target.",
+        "notes": "Self-audit: not multiple-valid with 近 because verb approach is cued; stable production frame."
+      }
+    ]
+  },
+  {
+    "word": "邻居",
+    "pinyin": "lín jū",
+    "gloss": "neighbor",
+    "cards": [
+      {
+        "type": "production",
+        "front": "The person living next door is your ___: 他是我的___。",
+        "back": "他是我的邻居 = he is my neighbor. 邻居 is the person/household nearby, not just “near.”",
+        "retrievalTarget": "Use 邻居 for a neighbor or next-door household/person.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Simple production noun with no extra unknown burden; distinguishes person from location adjective.",
+        "notes": "Self-audit: answer not in front; cue is direct but not trivial for production."
+      }
+    ]
+  },
+  {
+    "word": "污染",
+    "pinyin": "wū rǎn",
+    "gloss": "to pollute; pollution/contamination",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "Air or water becomes dirty/harmful because of human activity. Which verb/noun?",
+        "back": "污染。空气污染 = air pollution; 污染水 = pollute water. It can also extend to moral/media contamination in formal writing.",
+        "retrievalTarget": "Use 污染 for polluting or contamination of air, water, environments, or figurative domains.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Targets environmental core with figurative extension; Chinese examples are basic plus target.",
+        "notes": "Self-audit: single clear answer; not overly narrow because both verb and noun behavior are included."
+      }
+    ]
+  },
+  {
+    "word": "罚",
+    "pinyin": "fá",
+    "gloss": "to punish; penalize; fine",
+    "cards": [
+      {
+        "type": "collocation",
+        "front": "A rule was broken, so the teacher/police makes the person pay or suffer a penalty: ___钱 / ___他。",
+        "back": "罚钱 = fine someone money; 罚他 = punish him. 罚 is penalty/punishment after wrongdoing.",
+        "retrievalTarget": "Use 罚 for punishing or fining someone for breaking a rule.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Shows productive object patterns and rule-breaking context; Chinese support is basic plus target.",
+        "notes": "Self-audit: not ambiguous with 骂 because penalty after rule-breaking is specified."
+      }
+    ]
+  },
+  {
+    "word": "时机",
+    "pinyin": "shí jī",
+    "gloss": "right moment; opportunity; timing",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "You are waiting for the right moment to act, not just any time on the clock. Which noun?",
+        "back": "时机。好时机 = good opportunity/right moment. 时间 is time in general; 时机 is timing/opportune moment.",
+        "retrievalTarget": "Choose 时机 for the opportune moment or timing to act.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Useful distinction from 时间; Chinese support uses basic contrast words plus target.",
+        "notes": "Self-audit: stable near-synonym split; not multiple-valid because “right moment to act” cues 时机."
+      }
+    ]
+  },
+  {
+    "word": "治安",
+    "pinyin": "zhì ān",
+    "gloss": "public security; law and order",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "A neighborhood is safe because crime is low and public order is good. Which formal noun?",
+        "back": "治安。这里治安很好 = public security/law and order is good here. It is about social order and safety.",
+        "retrievalTarget": "Use 治安 for public security or law-and-order conditions in a place.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Formal civic-domain noun; Chinese scaffold is basic plus target.",
+        "notes": "Self-audit: not ambiguous with 安全 because cue says public order/crime conditions; no answer leakage."
+      }
+    ]
+  },
+  {
+    "word": "糟糕",
+    "pinyin": "zāo gāo",
+    "gloss": "terrible; awful; too bad",
+    "cards": [
+      {
+        "type": "production",
+        "front": "Bad news arrives and you react: “Oh no, this is terrible.” ___！",
+        "back": "糟糕！= Oh no!/Terrible! 事情很糟糕 = the situation is bad/awful.",
+        "retrievalTarget": "Use 糟糕 as an exclamation or adjective for an awful/bad situation.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Captures both interjection and adjective use; no extra Chinese unknowns beyond basic support.",
+        "notes": "Self-audit: exclamation cue makes target stable; front avoids Chinese answer."
+      }
+    ]
+  },
+  {
+    "word": "空中",
+    "pinyin": "kōng zhōng",
+    "gloss": "in the air; in the sky",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "A plane, bird, or object is not on the ground; it is in the air/sky. Which location word?",
+        "back": "空中。飞机在空中 = the plane is in the air. 空中 is a location/medium, more written than 天上 in some contexts.",
+        "retrievalTarget": "Use 空中 for being in the air or sky, especially in written descriptions.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Location/register cue for reading; Chinese support is target plus basic words.",
+        "notes": "Self-audit: not multiple-valid with 天上 because written/in-air medium is specified."
+      }
+    ]
+  },
+  {
+    "word": "渴望",
+    "pinyin": "kě wàng",
+    "gloss": "to long for; yearn for",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "Someone wants freedom or success very deeply, stronger and more written than 想要. Which verb/noun?",
+        "back": "渴望。渴望自由 = long for freedom [自由 = freedom]. It is a deep, often emotional desire.",
+        "retrievalTarget": "Choose 渴望 for deep longing or yearning, stronger than ordinary wanting.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Intensity/register contrast with 想要; one collocate is glossed inline.",
+        "notes": "Self-audit: stable target because “deep longing” rules out simple 想; front does not contain answer."
+      }
+    ]
+  },
+  {
+    "word": "连接",
+    "pinyin": "lián jiē",
+    "gloss": "to connect; link; join",
+    "cards": [
+      {
+        "type": "production",
+        "front": "Two computers, roads, or ideas are linked together. Which verb? A和B___起来。",
+        "back": "A和B连接起来 = connect/link A and B together. 连接 often joins two parts into a system.",
+        "retrievalTarget": "Use 连接 for linking or connecting two parts, devices, roads, or ideas.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Productive A-and-B connection pattern; Chinese scaffold is minimal and basic.",
+        "notes": "Self-audit: not multiple-valid with 联系 because physical/system link is cued; no answer leakage."
+      }
+    ]
+  },
+  {
+    "word": "拆",
+    "pinyin": "chāi",
+    "gloss": "to take apart; dismantle; tear open",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "You open a package by tearing it, or take a machine/house apart. Which verb?",
+        "back": "拆。拆包 = open/tear open a package [包 = package/bag]; 拆房子 = tear down a house.",
+        "retrievalTarget": "Use 拆 for opening by taking apart/tearing open or dismantling something.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Unifies package-opening and dismantling senses; support word 包 is basic/glossed.",
+        "notes": "Self-audit: stable action image; not ambiguous with 开 because taking apart/tearing is specified."
+      }
+    ]
+  },
+  {
+    "word": "此时",
+    "pinyin": "cǐ shí",
+    "gloss": "at this moment; now",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "In written narration, “at this moment” points to the current moment in the story. Which word?",
+        "back": "此时。此时，他走了进来 = at this moment, he walked in. It is more written than 这时候.",
+        "retrievalTarget": "Recognize 此时 as written “at this moment/now” in narration or formal text.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Register cue for reading; Chinese support is basic plus target.",
+        "notes": "Self-audit: not redundant with 现在 because written narrative moment is specified."
+      }
+    ]
+  },
+  {
+    "word": "蛇",
+    "pinyin": "shé",
+    "gloss": "snake",
+    "cards": [
+      {
+        "type": "collocation",
+        "front": "Which animal word takes 条 as classifier: 一___蛇?",
+        "back": "一条蛇 = one snake. 条 fits long, thin things and animals like fish/snakes.",
+        "retrievalTarget": "Use 蛇 for snake and pair it with classifier 条.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Classifier production card with no extra unknown burden.",
+        "notes": "Self-audit: direct but useful; not multiple-valid because classifier and animal are specified."
+      }
+    ]
+  },
+  {
+    "word": "耳朵",
+    "pinyin": "ěr duo",
+    "gloss": "ear; handle-like ear",
+    "cards": [
+      {
+        "type": "collocation",
+        "front": "For body parts on the side of the head: 一___耳朵 / 一___耳朵 / 一___耳朵. Which classifiers are possible?",
+        "back": "一只耳朵, 一个耳朵, 一对耳朵. 只 is common for one ear; 对 means a pair.",
+        "retrievalTarget": "Use 耳朵 for ear and recall common classifiers 只, 个, and 对.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Classifier variation is production-relevant; Chinese scaffold is basic.",
+        "notes": "Self-audit: multiple answers are intentionally requested; no ambiguity outside the listed classifier set."
+      }
+    ]
+  },
+  {
+    "word": "画面",
+    "pinyin": "huà miàn",
+    "gloss": "picture; scene; screen image; frame",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "In a film, photo, or memory, you refer to the visible scene/image, not the story itself. Which noun?",
+        "back": "画面。这个画面很美 = this image/scene is beautiful. It can be a screen image, film frame, or mental picture.",
+        "retrievalTarget": "Use 画面 for the visible image/scene/frame on screen, in film, or in memory.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Disambiguates visual scene/image from generic picture/story; Chinese support is basic plus target.",
+        "notes": "Self-audit: stable target; broad domains are unified by visible-image sense."
+      }
+    ]
+  },
+  {
+    "word": "饮料",
+    "pinyin": "yǐn liào",
+    "gloss": "drink; beverage",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "On a menu, water, juice, tea, or soda are grouped as what noun?",
+        "back": "饮料。买饮料 = buy drinks/beverages. It is a category noun, not the verb “to drink.”",
+        "retrievalTarget": "Use 饮料 for drinks/beverages as a category noun.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Simple category production distinction from 喝; scaffold uses basic words only.",
+        "notes": "Self-audit: not ambiguous with 水 because category grouping is specified; answer not in front."
+      }
+    ]
+  },
+  {
+    "word": "扮演",
+    "pinyin": "bàn yǎn",
+    "gloss": "to play the role of; act as",
+    "cards": [
+      {
+        "type": "collocation",
+        "front": "An actor plays a character; in society, a person plays a role. Which verb fits “___重要角色”?",
+        "back": "扮演重要角色 = play an important role [角色 = role/character]. 扮演 works for acting and abstract roles.",
+        "retrievalTarget": "Use 扮演 for playing a character or playing an abstract role.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "High-value collocation and literal-to-abstract extension; one support word is glossed.",
+        "notes": "Self-audit: stable role-playing cue; not multiple-valid with 演 because abstract role collocation is specified."
+      }
+    ]
+  },
+  {
+    "word": "大脑",
+    "pinyin": "dà nǎo",
+    "gloss": "brain",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "The organ used for thinking and memory, not just the head as an outside body part. Which noun?",
+        "back": "大脑。大脑在工作 = the brain is working. 脑子 is more everyday; 大脑 is more anatomical/formal.",
+        "retrievalTarget": "Use 大脑 for the brain as an organ/system, often more formal than 脑子.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Distinguishes organ/formal register from head or colloquial mind; Chinese scaffold is basic.",
+        "notes": "Self-audit: single noun target; not redundant with 头 because internal organ is specified."
+      }
+    ]
+  },
+  {
+    "word": "鼻子",
+    "pinyin": "bí zi",
+    "gloss": "nose",
+    "cards": [
+      {
+        "type": "collocation",
+        "front": "For the body part used to smell: 一___鼻子 / 一___鼻子. Which classifiers are common?",
+        "back": "一个鼻子 / 一只鼻子. 个 is common; 只 can count some body parts.",
+        "retrievalTarget": "Use 鼻子 for nose and recall common classifiers 个 and 只.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Classifier support for a concrete noun; no extra unknown vocabulary.",
+        "notes": "Self-audit: direct production target; multiple answers are explicitly requested."
+      }
+    ]
+  },
+  {
+    "word": "资产",
+    "pinyin": "zī chǎn",
+    "gloss": "assets; property",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "In finance, money, houses, and other valuable things owned by a person/company are called what?",
+        "back": "资产。公司资产 = company assets. 资产 is owned value/property, not monthly income.",
+        "retrievalTarget": "Use 资产 for assets or property owned by a person, company, or organization.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Finance-domain distinction from income/cash; Chinese support uses basic words plus target.",
+        "notes": "Self-audit: stable domain cue; not ambiguous with 钱 because owned valuable property is specified."
+      }
+    ]
+  },
+  {
+    "word": "祝贺",
+    "pinyin": "zhù hè",
+    "gloss": "to congratulate; congratulations",
+    "cards": [
+      {
+        "type": "production",
+        "front": "Someone passed an exam or got a new job; you formally say congratulations: ___你！",
+        "back": "祝贺你！= Congratulations! 祝贺 is more formal than 恭喜, and can be a verb or noun.",
+        "retrievalTarget": "Use 祝贺 to congratulate someone, especially in a formal or written tone.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Register contrast with 恭喜 supports production; Chinese scaffold is target plus basic pronoun.",
+        "notes": "Self-audit: not multiple-valid because formal tone is specified; front does not expose answer."
+      }
+    ]
+  },
+  {
+    "word": "大事",
+    "pinyin": "dà shì",
+    "gloss": "major event; important matter",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "A wedding, war, or life-changing decision is not a small matter. Which noun?",
+        "back": "大事。这是大事 = this is a major matter/event. 一件大事 = one major event/matter.",
+        "retrievalTarget": "Use 大事 for a major event or important matter, often with classifier 件.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Meaning is compositional but production/register and classifier are useful; Chinese support is basic.",
+        "notes": "Self-audit: not too shallow because it targets “major event/matter,” not simply big+thing."
+      }
+    ]
+  },
+  {
+    "word": "运行",
+    "pinyin": "yùn xíng",
+    "gloss": "to operate; run; function",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "A machine, train service, app, or system is functioning/running, not a person running on foot. Which verb?",
+        "back": "运行。系统正常运行 = the system runs/operates normally [系统 = system]. 火车运行 = trains operate/run.",
+        "retrievalTarget": "Use 运行 for systems, machines, software, routes, or services operating/running.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Prevents literal 跑/走 confusion and covers technical/service domains; one support term is glossed.",
+        "notes": "Self-audit: stable non-human running target; not multiple-valid because operation/functioning is specified."
+      }
+    ]
+  }
+]

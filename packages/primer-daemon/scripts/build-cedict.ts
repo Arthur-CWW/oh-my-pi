@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { inflateRawSync } from "node:zlib"
@@ -12,10 +12,18 @@ interface CedictBuildEntry {
   definitions: string[]
 }
 
+interface DecompositionEntry {
+  char: string
+  ids: string
+  components: string[]
+}
+
 interface BuildResult {
   source: string
+  decompositionSource: string
   entryCount: number
   knownWordCount: number
+  decompositionCount: number
   outputPath: string
 }
 
@@ -33,6 +41,11 @@ const VENDORED_YOMITAN_ZIP = resolve(REPO_ROOT, "streams/primer/decks/hsk-deck/a
 const OUTPUT_DB = resolve(REPO_ROOT, "data/primer/cedict.sqlite")
 const CLEANED_DIR = resolve(REPO_ROOT, "streams/primer/decks/hsk-deck/data/cleaned")
 const MDBG_ZIP_URL = "https://www.mdbg.net/chinese/export/cedict/cedict_1_0_ts_utf-8_mdbg.zip"
+// CJKV IDS `ids.txt` is derived from the CHISE project; per the upstream
+// README, `ids.txt` follows the CHISE project terms while other cjkvi-ids
+// datasets are distributed under GPLv2.
+const CJKVI_IDS_URL = "https://raw.githubusercontent.com/cjkvi/cjkvi-ids/master/ids.txt"
+const CJKVI_IDS_CACHE = resolve(REPO_ROOT, "data/primer/cjkvi-ids.txt")
 
 const TermBankEntrySchema = Schema.Tuple([
   Schema.String,
@@ -59,6 +72,7 @@ type NoRows = Record<string, never>
 
 export async function buildCedict(outputPath = OUTPUT_DB): Promise<BuildResult> {
   const parsed = await loadCedictEntries()
+  const decomposition = await loadDecompositionEntries()
   const knownWords = loadKnownWords()
   let actualOutputPath = outputPath
   let db: Database
@@ -87,8 +101,13 @@ CREATE TABLE known_words (
   word TEXT PRIMARY KEY,
   hsk_level INTEGER NOT NULL
 );
+CREATE TABLE decomposition (
+  char TEXT PRIMARY KEY,
+  ids TEXT NOT NULL,
+  components TEXT NOT NULL
+);
 `)
-    db.transaction((entries: CedictBuildEntry[], words: Map<string, number>) => {
+    db.transaction((entries: CedictBuildEntry[], words: Map<string, number>, decompositions: DecompositionEntry[]) => {
       const insertEntry = db.query<NoRows, [string, string, string, string]>(
         "INSERT INTO cedict (simplified, traditional, pinyin, definitions) VALUES (?, ?, ?, ?)",
       )
@@ -101,12 +120,19 @@ CREATE TABLE known_words (
          ON CONFLICT(word) DO UPDATE SET hsk_level = min(known_words.hsk_level, ?)`,
       )
       for (const [word, level] of words) insertKnown.run(word, level, level)
-    })(parsed.entries, knownWords)
+
+      const insertDecomposition = db.query<NoRows, [string, string, string]>(
+        "INSERT INTO decomposition (char, ids, components) VALUES (?, ?, ?)",
+      )
+      for (const entry of decompositions) insertDecomposition.run(entry.char, entry.ids, JSON.stringify(entry.components))
+    })(parsed.entries, knownWords, decomposition.entries)
 
     return {
       source: parsed.source,
+      decompositionSource: decomposition.source,
       entryCount: countRows(db, "cedict"),
       knownWordCount: countRows(db, "known_words"),
+      decompositionCount: countRows(db, "decomposition"),
       outputPath: actualOutputPath,
     }
   } finally {
@@ -287,7 +313,7 @@ function prepareOutputPath(outputPath: string): void {
   rmSync(outputPath, { force: true })
 }
 
-function countRows(db: Database, table: "cedict" | "known_words"): number {
+function countRows(db: Database, table: "cedict" | "known_words" | "decomposition"): number {
   const row = db.query<CountRow, []>(`SELECT COUNT(*) AS count FROM ${table}`).get()
   return row === null ? 0 : Schema.decodeUnknownSync(CountRowSchema)(row).count
 }
@@ -296,10 +322,86 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
+
+async function loadDecompositionEntries(): Promise<{ source: string; entries: DecompositionEntry[] }> {
+  if (existsSync(CJKVI_IDS_CACHE)) {
+    const entries = parseCjkviIds(readFileSync(CJKVI_IDS_CACHE, "utf8"))
+    if (entries.length > 0) return { source: CJKVI_IDS_CACHE, entries }
+  }
+
+  const response = await fetch(CJKVI_IDS_URL)
+  if (!response.ok) throw new Error(`failed to download CJKV IDS data: HTTP ${response.status}`)
+  const text = await response.text()
+  const entries = parseCjkviIds(text)
+  if (entries.length === 0) throw new Error("downloaded CJKV IDS data contained no entries")
+  mkdirSync(dirname(CJKVI_IDS_CACHE), { recursive: true })
+  writeFileSync(CJKVI_IDS_CACHE, text)
+  return { source: CJKVI_IDS_URL, entries }
+}
+
+export function parseCjkviIds(text: string): DecompositionEntry[] {
+  const entries: DecompositionEntry[] = []
+  for (const line of text.split(/\r?\n/u)) {
+    if (line.length === 0 || line.startsWith("#")) continue
+    const fields = line.split("\t")
+    if (fields.length < 3) continue
+    const char = fields[1]
+    const ids = stripIdsVariant(fields[2])
+    if (char.length === 0 || ids.length === 0) continue
+    entries.push({ char, ids, components: extractComponentChars(ids) })
+  }
+  return entries
+}
+
+function stripIdsVariant(ids: string): string {
+  return ids.replace(/\[[A-Z]+\]/gu, "")
+}
+
+function extractComponentChars(ids: string): string[] {
+  const tokens = Array.from(ids)
+  if (tokens.length === 0 || !isIdsOperator(tokens[0])) return []
+  const parsed = parseIdsNode(tokens, 0)
+  if (parsed === null || parsed.nextIndex !== tokens.length || parsed.node.kind !== "operator") return []
+  return parsed.node.children.flatMap((child) => collectComponentChars(child))
+}
+
+type IdsNode = { kind: "component"; value: string } | { kind: "operator"; value: string; children: IdsNode[] }
+
+function parseIdsNode(tokens: string[], index: number): { node: IdsNode; nextIndex: number } | null {
+  const token = tokens[index]
+  if (token === undefined) return null
+  if (!isIdsOperator(token)) return { node: { kind: "component", value: token }, nextIndex: index + 1 }
+
+  let nextIndex = index + 1
+  const children: IdsNode[] = []
+  for (let childIndex = 0; childIndex < idsOperatorArity(token); childIndex += 1) {
+    const parsed = parseIdsNode(tokens, nextIndex)
+    if (parsed === null) return null
+    children.push(parsed.node)
+    nextIndex = parsed.nextIndex
+  }
+  return { node: { kind: "operator", value: token, children }, nextIndex }
+}
+
+function collectComponentChars(node: IdsNode): string[] {
+  if (node.kind === "component") return [node.value]
+  return node.children.flatMap((child) => collectComponentChars(child))
+}
+
+
+function isIdsOperator(token: string): boolean {
+  return token >= "⿰" && token <= "⿻"
+}
+
+function idsOperatorArity(token: string): 2 | 3 {
+  return token === "⿲" || token === "⿳" ? 3 : 2
+}
 if (import.meta.main) {
   const result = await buildCedict(Bun.argv[2] ?? process.env.PRIMER_CEDICT_DB ?? OUTPUT_DB)
   console.log(`CEDICT source: ${result.source}`)
+  console.log(`CJKV IDS source: ${result.decompositionSource}`)
   console.log(`CEDICT entries: ${result.entryCount}`)
   console.log(`Known words: ${result.knownWordCount}`)
+  console.log(`Decomposition rows: ${result.decompositionCount}`)
   console.log(`Output: ${result.outputPath}`)
 }

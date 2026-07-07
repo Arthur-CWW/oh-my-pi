@@ -9,7 +9,7 @@ One command (uses OMP's `@<file>` syntax to inline boot context into the first m
 Or by hand from `~/agents` — attach files with `@`, then the orchestrator instruction as the trailing message:
 
 ```bash
-omp --config .omp/fable-config.yml --model anthropic/claude-fable-5 \
+omp --config .omp/fable-config.yml --model anthropic/claude-fable-5:medium \
   @docs/fable/charter.md @streams/primer/GOAL.md \
   @streams/primer/VISION.md @streams/primer/HANDOFF.md \
   "<orchestrator instruction — see boot.sh for the canonical text>"

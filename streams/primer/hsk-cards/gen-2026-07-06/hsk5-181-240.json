@@ -1,0 +1,962 @@
+[
+  {
+    "word": "回头",
+    "pinyin": "huí tóu",
+    "gloss": "to turn one's head; later",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "Someone says, “I’ll tell you later,” not “I will turn my head.” Which word fits that later/by-and-by sense?",
+        "back": "回头. 回头告诉你 = I’ll tell you later. It can literally mean turn one’s head, but in speech often means later.",
+        "retrievalTarget": "Interpret 回头 as either turning back/one's head or conversational “later.”",
+        "tier": "T3",
+        "verdict": "new",
+        "reason": "Contrasts literal and conversational uses without putting the answer on the front."
+      }
+    ]
+  },
+  {
+    "word": "库",
+    "pinyin": "kù",
+    "gloss": "warehouse; storehouse; library/database",
+    "cards": [
+      {
+        "type": "collocation",
+        "front": "A warehouse, database, or code library is a place things are stored. Which bound noun gives that storage-place idea?",
+        "back": "库. 仓库 = warehouse [仓 = storehouse]; 数据库 = database [数据 = data]; 书库 = book collection/library.",
+        "retrievalTarget": "Recognize 库 as a storage-place morpheme in warehouse, database, and library compounds.",
+        "tier": "T3",
+        "verdict": "new",
+        "reason": "Builds a stable semantic link across common compounds; extra compound parts are glossed."
+      }
+    ]
+  },
+  {
+    "word": "主管",
+    "pinyin": "zhǔ guǎn",
+    "gloss": "to be in charge; manager/person responsible",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "At work, one person is responsible for this area and can make decisions. Which word names that person or role?",
+        "back": "主管. 他是销售主管 = he is the sales manager/person in charge [销售 = sales]. 主管 can be noun or verb: 主管这件事 = be in charge of this matter.",
+        "retrievalTarget": "Use 主管 for the person or role in charge of an area.",
+        "tier": "T3",
+        "verdict": "new",
+        "reason": "Targets role meaning and noun/verb flexibility; one extra work noun is glossed inline."
+      }
+    ]
+  },
+  {
+    "word": "答",
+    "pinyin": "dá",
+    "gloss": "to answer; reply",
+    "cards": [
+      {
+        "type": "collocation",
+        "front": "Which answer/reply morpheme appears in 回答 and 答案?",
+        "back": "答. 回答 = answer/reply; 答案 = answer/key [案 = case/plan]. 单独说 答 is more written or bound than 回答.",
+        "retrievalTarget": "Recognize 答 as the answer/reply morpheme in 回答 and 答案.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Simple bound-morpheme card kept for reading compounds; extra 案 is glossed."
+      }
+    ]
+  },
+  {
+    "word": "奖励",
+    "pinyin": "jiǎng lì",
+    "gloss": "to reward; reward",
+    "cards": [
+      {
+        "type": "production",
+        "front": "A child studies hard, so the parents give a prize to encourage him: 父母___他。",
+        "back": "父母奖励他. 奖励 is a reward given for good behavior or achievement; 礼物 is just a gift.",
+        "retrievalTarget": "Use 奖励 for rewarding someone as encouragement for achievement or good behavior.",
+        "tier": "T3",
+        "verdict": "new",
+        "reason": "Production cue distinguishes reward from ordinary gift; support vocabulary is HSK1-4."
+      }
+    ]
+  },
+  {
+    "word": "之下",
+    "pinyin": "zhī xià",
+    "gloss": "under; beneath; less than",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "Formal writing says something happens “under this condition/pressure,” not physically below a table. Which phrase?",
+        "back": "之下. 在这种压力之下 = under this kind of pressure [压力 = pressure]. It is written/formal compared with 下面.",
+        "retrievalTarget": "Interpret 之下 as formal “under/beneath” for conditions, pressure, or limits.",
+        "tier": "T3",
+        "verdict": "new",
+        "reason": "Targets formal abstract use; one extra noun is glossed inline."
+      }
+    ]
+  },
+  {
+    "word": "熊",
+    "pinyin": "xióng",
+    "gloss": "bear; to scold; weak",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "The animal is a bear. In northern colloquial speech, the same character can mean scold someone. Which word is this?",
+        "back": "熊. 熊猫 has the animal sense; colloquial 熊孩子 can mean a badly behaved child [孩子 = child]. The “scold” sense is regional/colloquial.",
+        "retrievalTarget": "Recognize 熊 primarily as bear, with regional colloquial scold/weak extensions.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Keeps the main reading stable while warning about less central extensions; extra phrase is glossed."
+      }
+    ]
+  },
+  {
+    "word": "青",
+    "pinyin": "qīng",
+    "gloss": "blue-green; young; youth",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "An older text describes grass, sky, or youth with one color/age morpheme that is not simply modern 蓝 or 绿. Which character?",
+        "back": "青. 青 can cover blue-green/dark green and also youth/young, as in 青年 = youth/young person.",
+        "retrievalTarget": "Recognize 青 as blue-green/dark green and as the youth/young morpheme.",
+        "tier": "T3",
+        "verdict": "new",
+        "reason": "Prevents over-narrow color mapping and links the youth sense; support words are basic."
+      }
+    ]
+  },
+  {
+    "word": "不幸",
+    "pinyin": "bù xìng",
+    "gloss": "unfortunate; misfortune; unfortunately",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "A report says someone met with a sad bad outcome. Which word means unfortunate/misfortune, stronger than simply 不好?",
+        "back": "不幸. 不幸的是… = unfortunately…; 一个不幸的消息 = unfortunate sad news/report [消息 = news/report].",
+        "retrievalTarget": "Use 不幸 for unfortunate events, misfortune, or “unfortunately.”",
+        "tier": "T3",
+        "verdict": "new",
+        "reason": "Targets tone and adverbial pattern; one support noun is glossed inline."
+      }
+    ]
+  },
+  {
+    "word": "能量",
+    "pinyin": "néng liàng",
+    "gloss": "energy; capability",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "In physics, food, or motivational talk, which noun names energy rather than ability alone?",
+        "back": "能量. 食物给人能量 = food gives people energy. 能力 is ability/capability; 能量 is energy or force/resources.",
+        "retrievalTarget": "Distinguish 能量 “energy” from 能力 “ability.”",
+        "tier": "T3",
+        "verdict": "new",
+        "reason": "Near-form contrast removes ambiguity; Chinese support is HSK1-4 plus target."
+      }
+    ]
+  },
+  {
+    "word": "矛盾",
+    "pinyin": "máo dùn",
+    "gloss": "contradiction; conflict; contradictory",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "Two statements or two people cannot both fit together; there is a contradiction/conflict. Which noun/adjective?",
+        "back": "矛盾. 这两句话很矛盾 = these two sentences contradict each other. 他们之间有矛盾 = there is conflict between them.",
+        "retrievalTarget": "Use 矛盾 for contradiction between ideas or conflict between people/interests.",
+        "tier": "T3",
+        "verdict": "new",
+        "reason": "Covers idea-conflict and people-conflict without extra unknown scaffolding."
+      }
+    ]
+  },
+  {
+    "word": "到来",
+    "pinyin": "dào lái",
+    "gloss": "to arrive; arrival/advent",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "Spring, a new age, or a moment arrives in a written/formal style. Which word is more event-like than 来?",
+        "back": "到来. 春天的到来 = the arrival of spring; 新时代到来了 = a new era has arrived [时代 = era].",
+        "retrievalTarget": "Use 到来 for the arrival/advent of times, events, or seasons.",
+        "tier": "T3",
+        "verdict": "new",
+        "reason": "Targets formal event-arrival use; one extra noun is glossed inline."
+      }
+    ]
+  },
+  {
+    "word": "清理",
+    "pinyin": "qīng lǐ",
+    "gloss": "to clear up; tidy up; dispose of",
+    "cards": [
+      {
+        "type": "production",
+        "front": "You remove old files or trash so the place/system is clean: 我需要___一下。",
+        "back": "我需要清理一下. 清理 means clear up/tidy/dispose of, often by removing unwanted things; 打扫 is more sweep/clean a room.",
+        "retrievalTarget": "Use 清理 for clearing out unwanted things, files, trash, or a messy place.",
+        "tier": "T3",
+        "verdict": "new",
+        "reason": "Production cue distinguishes clearing-out from general cleaning; support is basic."
+      }
+    ]
+  },
+  {
+    "word": "成交",
+    "pinyin": "chéng jiāo",
+    "gloss": "to reach a deal; deal completed",
+    "cards": [
+      {
+        "type": "collocation",
+        "front": "After bargaining, both sides agree and the deal is done. What do you say?",
+        "back": "成交. 好，成交！ = OK, deal! It marks that a trade/contract has been completed.",
+        "retrievalTarget": "Use 成交 to mark that a deal or transaction has been reached/completed.",
+        "tier": "T3",
+        "verdict": "new",
+        "reason": "High-value transactional phrase; no extra Chinese unknowns needed."
+      }
+    ]
+  },
+  {
+    "word": "一句话",
+    "pinyin": "yī jù huà",
+    "gloss": "in a word; in short",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "Before summarizing a long explanation, which phrase means “in short / to put it in one sentence”?",
+        "back": "一句话. 一句话，他不想去 = in short, he doesn’t want to go. Literally “one sentence,” but often a summary marker.",
+        "retrievalTarget": "Interpret 一句话 as a discourse marker meaning “in short / to sum up.”",
+        "tier": "T3",
+        "verdict": "new",
+        "reason": "Focuses on discourse-marker use rather than literal components; support words are basic."
+      }
+    ]
+  },
+  {
+    "word": "自杀",
+    "pinyin": "zì shā",
+    "gloss": "to kill oneself; suicide",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "A report says someone killed themself. Which word names suicide, not killing another person?",
+        "back": "自杀. 自 means self; 杀 is kill. 他自杀了 = he died by suicide.",
+        "retrievalTarget": "Recognize 自杀 as suicide / killing oneself, distinct from 杀 someone else.",
+        "tier": "T3",
+        "verdict": "new",
+        "reason": "Sensitive meaning is explicit and unambiguous; support vocabulary is HSK1-4 plus target."
+      }
+    ]
+  },
+  {
+    "word": "负责人",
+    "pinyin": "fù zé rén",
+    "gloss": "person in charge",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "In a project, which noun names the person who carries responsibility and is in charge?",
+        "back": "负责人. 请找负责人 = please find the person in charge. It is the responsible person, not just any worker.",
+        "retrievalTarget": "Use 负责人 for the responsible person/person in charge of work or an organization.",
+        "tier": "T3",
+        "verdict": "new",
+        "reason": "Clear role distinction; Chinese example uses familiar words plus target."
+      }
+    ]
+  },
+  {
+    "word": "旁",
+    "pinyin": "páng",
+    "gloss": "side; beside; component side",
+    "cards": [
+      {
+        "type": "collocation",
+        "front": "Which side morpheme appears in 旁边 and in character-component names like 木字___?",
+        "back": "旁. 旁边 = beside/side. 木字旁 = the wood component on the side of a character.",
+        "retrievalTarget": "Recognize 旁 as “side/beside,” including character-component names like 木字旁.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Useful reading/character meta-vocabulary; support terms are basic or explained inline."
+      }
+    ]
+  },
+  {
+    "word": "详细",
+    "pinyin": "xiáng xì",
+    "gloss": "detailed; in detail",
+    "cards": [
+      {
+        "type": "production",
+        "front": "You want not a short answer, but a detailed explanation: 请说得___一点。",
+        "back": "请说得详细一点. 详细 means detailed/in detail; 仔细 is careful/attentive.",
+        "retrievalTarget": "Use 详细 for detailed information, explanation, or description.",
+        "tier": "T3",
+        "verdict": "new",
+        "reason": "Production cue contrasts detail with carefulness; support vocabulary is HSK1-4."
+      }
+    ]
+  },
+  {
+    "word": "插",
+    "pinyin": "chā",
+    "gloss": "to insert; stick in; take part in",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "You put a card into a machine or add a sentence in the middle of talk. Which verb means insert/stick in?",
+        "back": "插. 插卡 = insert a card; 插话 = cut in/add words while others speak. It is not general 放 “put.”",
+        "retrievalTarget": "Use 插 for inserting something into a slot, space, or conversation.",
+        "tier": "T3",
+        "verdict": "new",
+        "reason": "Connects physical insertion and conversational interruption with basic scaffolding."
+      }
+    ]
+  },
+  {
+    "word": "线索",
+    "pinyin": "xiàn suǒ",
+    "gloss": "clue; lead; thread",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "Police, a reader, or a researcher has a lead that helps follow the case/story. Which word means clue?",
+        "back": "线索. 找到线索 = find a clue/lead. It can also mean the thread running through a story.",
+        "retrievalTarget": "Use 线索 for clues/leads and the thread of a story or investigation.",
+        "tier": "T3",
+        "verdict": "new",
+        "reason": "Stable semantic image; no unglossed higher Chinese support is required."
+      }
+    ]
+  },
+  {
+    "word": "臭",
+    "pinyin": "chòu",
+    "gloss": "stinky; bad-smelling; repulsive",
+    "cards": [
+      {
+        "type": "production",
+        "front": "The food smells bad, not fragrant: 这个菜很___。",
+        "back": "这个菜很臭. 臭 is bad-smelling/stinky; 香 is fragrant or tasty-smelling.",
+        "retrievalTarget": "Use 臭 (chòu) for bad smells or stinky/repulsive things.",
+        "tier": "T3",
+        "verdict": "new",
+        "reason": "Concrete production target with a clear 香 contrast; support vocabulary is basic."
+      }
+    ]
+  },
+  {
+    "word": "臭",
+    "pinyin": "xiù",
+    "gloss": "sense of smell; smell",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "Same character, rare reading: in scientific/formal words about the sense of smell, which reading is used?",
+        "back": "xiù. 嗅觉 is smell/sense of smell [嗅 = smell; 觉 = sense/feeling]. The common “stinky” reading is chòu.",
+        "retrievalTarget": "Read 臭 as xiù only in rare/formal smell-sense contexts, not ordinary “stinky.”",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Pronunciation guard for a rare reading; the non-target support word is glossed inline."
+      }
+    ]
+  },
+  {
+    "word": "违法",
+    "pinyin": "wéi fǎ",
+    "gloss": "illegal; to break the law",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "An action breaks the law, not just a school rule or moral norm. Which adjective/verb?",
+        "back": "违法. 这是违法的 = this is illegal. 违法行为 = illegal act [行为 = behavior/action].",
+        "retrievalTarget": "Use 违法 for illegal actions that violate the law.",
+        "tier": "T3",
+        "verdict": "new",
+        "reason": "Separates legal violation from generic wrongness; one support noun is glossed."
+      }
+    ]
+  },
+  {
+    "word": "堆",
+    "pinyin": "duī",
+    "gloss": "pile; heap; to pile up; a lot of",
+    "cards": [
+      {
+        "type": "collocation",
+        "front": "A messy mass of books or work sits together in a heap: 一___书 / 一___事。",
+        "back": "一堆书 / 一堆事. 堆 is a pile/heap and can informally mean a lot of things.",
+        "retrievalTarget": "Use 堆 for piles/heaps and 一堆 for a lot/a pile of items or tasks.",
+        "tier": "T3",
+        "verdict": "new",
+        "reason": "Classifier-like collocation is production useful; Chinese support is HSK1-4."
+      }
+    ]
+  },
+  {
+    "word": "男性",
+    "pinyin": "nán xìng",
+    "gloss": "male; the male sex",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "A survey or medical text needs the formal category “male,” not simply 男人. Which word?",
+        "back": "男性. 男性用户 = male users [用户 = users]; 男性健康 = men’s/male health. It is formal/category-like.",
+        "retrievalTarget": "Use 男性 for formal/category “male,” distinct from everyday 男人.",
+        "tier": "T3",
+        "verdict": "new",
+        "reason": "Register/category contrast; one support noun is glossed inline."
+      }
+    ]
+  },
+  {
+    "word": "品",
+    "pinyin": "pǐn",
+    "gloss": "product; item; grade; character; to taste/judge",
+    "cards": [
+      {
+        "type": "collocation",
+        "front": "Which bound character gives 商品, 产品, and 作品 their “item/product/work” feel?",
+        "back": "品. 商品 = goods; 产品 = product; 作品 = created work. 品 often means an item/type/quality in compounds.",
+        "retrievalTarget": "Recognize 品 as the item/product/quality morpheme in common compounds.",
+        "tier": "T3",
+        "verdict": "new",
+        "reason": "Compound-family card for a duplicated source item; examples are common and semantically transparent."
+      }
+    ]
+  },
+  {
+    "word": "品",
+    "pinyin": "pǐn",
+    "gloss": "product; item; grade; character; to taste/judge",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "In 品茶 or 品一品, the action is not buying a product. What kind of careful action is it?",
+        "back": "品 can mean taste/sample and judge carefully. 品茶 = taste tea; 品一品 = taste/consider it carefully.",
+        "retrievalTarget": "Recognize 品 as “taste/sample/judge carefully” in verb uses like 品茶.",
+        "tier": "T3",
+        "verdict": "new",
+        "reason": "Uses the duplicate row to cover a distinct verb sense; front does not give the answer away."
+      }
+    ]
+  },
+  {
+    "word": "收集",
+    "pinyin": "shōu jí",
+    "gloss": "to collect; gather",
+    "cards": [
+      {
+        "type": "production",
+        "front": "You gather stamps, data, or examples from many places: 我在___资料。",
+        "back": "我在收集资料 = I am collecting materials/data. 收集 focuses on gathering items together over time.",
+        "retrievalTarget": "Use 收集 for collecting/gathering items, data, examples, or materials.",
+        "tier": "T3",
+        "verdict": "new",
+        "reason": "Production cue covers concrete and information objects; support terms are basic."
+      }
+    ]
+  },
+  {
+    "word": "频道",
+    "pinyin": "pín dào",
+    "gloss": "channel; frequency channel",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "On TV, radio, or a video site, which word means the channel you watch or follow?",
+        "back": "频道. 换频道 = change channels; 这个频道 = this channel. 道 here is not a road but a channel/path.",
+        "retrievalTarget": "Use 频道 for TV/radio/media channels or frequency channels.",
+        "tier": "T3",
+        "verdict": "new",
+        "reason": "Modern media sense is clear; Chinese support is basic plus target."
+      }
+    ]
+  },
+  {
+    "word": "使得",
+    "pinyin": "shǐ de",
+    "gloss": "to make; to cause; usable",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "Written style: one fact causes another result. Which verb links cause to result, as in “rain made the road hard to walk”?",
+        "back": "使得. 大雨使得路很难走 = heavy rain made the road hard to walk [大雨 = heavy rain]. It is more written than 让.",
+        "retrievalTarget": "Use 使得 as a written/formal cause-result linker meaning “make/cause.”",
+        "tier": "T3",
+        "verdict": "new",
+        "reason": "Targets the common written causative use; one support phrase is glossed inline."
+      }
+    ]
+  },
+  {
+    "word": "当年",
+    "pinyin": "dāng nián",
+    "gloss": "in those days; back then",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "Someone looks back to earlier years and says “back then / in those days.” Which time word?",
+        "back": "当年. 当年我还小 = back then I was still young. It points to a remembered past period, not this year.",
+        "retrievalTarget": "Interpret 当年 as “back then / in those days” for a past period.",
+        "tier": "T3",
+        "verdict": "new",
+        "reason": "Clear temporal contrast with 年 literal/current-year readings; support words are basic."
+      }
+    ]
+  },
+  {
+    "word": "盒",
+    "pinyin": "hé",
+    "gloss": "small box; case",
+    "cards": [
+      {
+        "type": "collocation",
+        "front": "A small box/case of medicine, tea, or food: 一___药 / 一___茶。",
+        "back": "一盒药 / 一盒茶. 盒 is a box/case and also works as the classifier for a boxful.",
+        "retrievalTarget": "Use 盒 for small boxes/cases and as a classifier for a box of something.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Simple classifier/container card; Chinese support is HSK1-4 plus target."
+      }
+    ]
+  },
+  {
+    "word": "不足",
+    "pinyin": "bù zú",
+    "gloss": "insufficient; deficiency; not enough",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "A plan has not enough money or experience; a formal report names the deficiency. Which word?",
+        "back": "不足. 经验不足 = insufficient experience; 资金不足 = funds are insufficient [资金 = funds]. It can be adjective or noun.",
+        "retrievalTarget": "Use 不足 for insufficiency or a deficiency, especially in formal evaluation.",
+        "tier": "T3",
+        "verdict": "new",
+        "reason": "Targets formal lack/deficiency; one support noun is glossed inline."
+      }
+    ]
+  },
+  {
+    "word": "警告",
+    "pinyin": "jǐng gào",
+    "gloss": "to warn; warning",
+    "cards": [
+      {
+        "type": "production",
+        "front": "You tell someone strongly before danger or punishment: 我___过你。",
+        "back": "我警告过你 = I warned you. 警告 is stronger/formal warning, often before danger, rules, or consequences.",
+        "retrievalTarget": "Use 警告 for a strong or formal warning.",
+        "tier": "T3",
+        "verdict": "new",
+        "reason": "Production phrase is common and not answer-revealing; support vocabulary is basic."
+      }
+    ]
+  },
+  {
+    "word": "报警",
+    "pinyin": "bào jǐng",
+    "gloss": "to call/report to police; sound an alarm",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "There is a theft or danger, so you call the police. Which verb?",
+        "back": "报警. 快报警！ = call the police quickly! It can also mean an alarm device sounds.",
+        "retrievalTarget": "Use 报警 for reporting to police/calling police, and recognize the alarm-sounding sense.",
+        "tier": "T3",
+        "verdict": "new",
+        "reason": "High-value emergency verb; no unglossed higher support is needed."
+      }
+    ]
+  },
+  {
+    "word": "业务",
+    "pinyin": "yè wù",
+    "gloss": "business; professional work; service",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "A company talks about the work/services it provides, not “business” as a shop. Which formal noun?",
+        "back": "业务. 银行业务 = banking services/business [银行 = bank]; 主要业务 = main business/service area.",
+        "retrievalTarget": "Use 业务 for a company’s professional work, service line, or business area.",
+        "tier": "T3",
+        "verdict": "new",
+        "reason": "Captures enterprise/service sense; one support noun is glossed inline."
+      }
+    ]
+  },
+  {
+    "word": "驾驶",
+    "pinyin": "jià shǐ",
+    "gloss": "to drive; pilot",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "A formal sign or license talks about operating a car, ship, or plane. Which verb is more formal than 开车?",
+        "back": "驾驶. 驾驶汽车 = drive a car; 驾驶飞机 = pilot a plane. 开车 is everyday for driving a car.",
+        "retrievalTarget": "Use 驾驶 for formal driving/piloting/operating vehicles.",
+        "tier": "T3",
+        "verdict": "new",
+        "reason": "Register contrast with 开车; support vocabulary is familiar."
+      }
+    ]
+  },
+  {
+    "word": "乘",
+    "pinyin": "chéng",
+    "gloss": "to ride/take; make use of; multiply",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "A sign says “take bus/train/plane” in a formal way. Which verb can also mean multiply in math?",
+        "back": "乘. 乘公共汽车 = take a bus; 乘火车 = take a train. In math, 三乘二 = three times two.",
+        "retrievalTarget": "Recognize 乘 as formal “ride/take transport” and as math “multiply.”",
+        "tier": "T3",
+        "verdict": "new",
+        "reason": "Links two high-frequency readings; transport words are HSK1-4."
+      }
+    ]
+  },
+  {
+    "word": "甲",
+    "pinyin": "jiǎ",
+    "gloss": "A; first; shell/armor; nail in compounds",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "In contracts or lists, one party is labeled “A” or “the first side.” Which formal character often marks that role?",
+        "back": "甲. 甲方 = Party A [方 = side/party]; 第一甲 = first grade/group. In 指甲, it means nail/shell-like covering.",
+        "retrievalTarget": "Recognize 甲 as formal “A/first party” and as shell/nail in compounds.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Bound formal morpheme is kept with compound-based recognition; one compound part is glossed."
+      }
+    ]
+  },
+  {
+    "word": "出版",
+    "pinyin": "chū bǎn",
+    "gloss": "to publish",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "A book is officially brought out by a press. Which verb means publish, not merely post online?",
+        "back": "出版. 这本书出版了 = this book was published. 出版社 = publishing house [社 = society/agency].",
+        "retrievalTarget": "Use 出版 for formal publication of books, magazines, or editions.",
+        "tier": "T3",
+        "verdict": "new",
+        "reason": "Separates publishing from generic release/posting; one compound part is glossed."
+      }
+    ]
+  },
+  {
+    "word": "神奇",
+    "pinyin": "shén qí",
+    "gloss": "magical; miraculous; amazing",
+    "cards": [
+      {
+        "type": "production",
+        "front": "Something feels almost magical or miraculous, not just good: 这个地方很___。",
+        "back": "这个地方很神奇. 神奇 means magical/miraculous/amazing, often because it feels beyond ordinary explanation.",
+        "retrievalTarget": "Use 神奇 for magical, miraculous, or strangely amazing things.",
+        "tier": "T3",
+        "verdict": "new",
+        "reason": "Production cue distinguishes wonder from generic quality; support vocabulary is basic."
+      }
+    ]
+  },
+  {
+    "word": "诊断",
+    "pinyin": "zhěn duàn",
+    "gloss": "to diagnose; diagnosis",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "A doctor identifies what illness someone has. Which medical verb means diagnose?",
+        "back": "诊断. 医生诊断出问题 = the doctor diagnosed/identified the problem. 诊断结果 = diagnosis result.",
+        "retrievalTarget": "Use 诊断 for medical or technical diagnosis/identification of a problem.",
+        "tier": "T3",
+        "verdict": "new",
+        "reason": "Concrete professional action with extension to technical problems; support words are basic."
+      }
+    ]
+  },
+  {
+    "word": "剪",
+    "pinyin": "jiǎn",
+    "gloss": "scissors; to cut with scissors; trim",
+    "cards": [
+      {
+        "type": "production",
+        "front": "You cut hair or paper with scissors: 我想___头发。",
+        "back": "我想剪头发. 剪 means cut with scissors/trim; 切 is cutting with a knife or slicing.",
+        "retrievalTarget": "Use 剪 for cutting or trimming with scissors, especially hair/paper.",
+        "tier": "T3",
+        "verdict": "new",
+        "reason": "Tool-based contrast with 切; Chinese support is HSK1-4."
+      }
+    ]
+  },
+  {
+    "word": "发射",
+    "pinyin": "fā shè",
+    "gloss": "to launch; fire; emit",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "A rocket is launched, a bullet is fired, or a signal is emitted. Which verb covers this sending-out action?",
+        "back": "发射. 发射火箭 = launch a rocket [火箭 = rocket]; 发射信号 = send/emit a signal [信号 = signal].",
+        "retrievalTarget": "Use 发射 for launching/firing/emitting projectiles, rockets, or signals.",
+        "tier": "T3",
+        "verdict": "new",
+        "reason": "Unifies projectile and signal senses; extra technical nouns are glossed inline."
+      }
+    ]
+  },
+  {
+    "word": "脑子",
+    "pinyin": "nǎo zi",
+    "gloss": "brains; mind",
+    "cards": [
+      {
+        "type": "production",
+        "front": "Colloquial: use your brain! 动动___！",
+        "back": "动动脑子！脑子 = brains/mind in everyday speech. 大脑 [anatomical/formal brain] is another, more medical term.",
+        "retrievalTarget": "Use 脑子 for colloquial brains/mind in everyday speech.",
+        "tier": "T3",
+        "verdict": "new",
+        "reason": "High-value colloquial body/mind word; support phrase is basic."
+      }
+    ]
+  },
+  {
+    "word": "代价",
+    "pinyin": "dài jià",
+    "gloss": "price; cost; sacrifice",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "Success came at a high cost — not just money, but time, health, or loss. Which word captures that broader cost?",
+        "back": "代价. 付出很大的代价 = pay a big price/cost. 价格 is market price; 代价 is cost/sacrifice/consequence.",
+        "retrievalTarget": "Use 代价 for cost as sacrifice or consequence, not ordinary market price.",
+        "tier": "T3",
+        "verdict": "new",
+        "reason": "Separates sacrifice-cost from price; Chinese support is HSK1-4."
+      }
+    ]
+  },
+  {
+    "word": "局长",
+    "pinyin": "jú zhǎng",
+    "gloss": "bureau chief; head of a bureau",
+    "cards": [
+      {
+        "type": "production",
+        "front": "The head of a government bureau/office: 他是这个局的___。",
+        "back": "他是这个局的局长. 局 = bureau/office; 局长 = bureau chief. Pattern: department/office + 长.",
+        "retrievalTarget": "Use 局长 for the head/chief of a bureau or government office.",
+        "tier": "T3",
+        "verdict": "new",
+        "reason": "Common official-title pattern; support vocabulary is basic."
+      }
+    ]
+  },
+  {
+    "word": "挤",
+    "pinyin": "jǐ",
+    "gloss": "crowded; to squeeze; press",
+    "cards": [
+      {
+        "type": "production",
+        "front": "The subway is very crowded, people are squeezed together: 地铁里太___了。",
+        "back": "地铁里太挤了. 挤 can describe crowded conditions or the action of squeezing/pressing: 挤进去 = squeeze in.",
+        "retrievalTarget": "Use 挤 for crowded conditions and squeezing/pressing actions.",
+        "tier": "T3",
+        "verdict": "new",
+        "reason": "Concrete urban-life adjective/verb; support vocabulary is HSK1-4."
+      }
+    ]
+  },
+  {
+    "word": "瞧",
+    "pinyin": "qiáo",
+    "gloss": "to look at; see; visit",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "Northern colloquial speech uses a casual verb for “look/see,” including “see a doctor.” Which word?",
+        "back": "瞧. 你瞧！ = look!/see! 瞧病 = see a doctor. It is more northern/colloquial than 看.",
+        "retrievalTarget": "Recognize 瞧 as colloquial “look/see,” especially in northern speech.",
+        "tier": "T3",
+        "verdict": "new",
+        "reason": "Register/regional contrast with neutral 看; Chinese support is basic plus target."
+      }
+    ]
+  },
+  {
+    "word": "搜索",
+    "pinyin": "sōu suǒ",
+    "gloss": "to search; search for",
+    "cards": [
+      {
+        "type": "production",
+        "front": "You type keywords to find information online: 在网上___。",
+        "back": "在网上搜索. 搜索 = search the web, a database, or a place. 搜 is the shorter everyday form.",
+        "retrievalTarget": "Use 搜索 for systematic searching of places, databases, or the web.",
+        "tier": "T3",
+        "verdict": "new",
+        "reason": "Common digital-age verb; support vocabulary is HSK1-4."
+      }
+    ]
+  },
+  {
+    "word": "胃",
+    "pinyin": "wèi",
+    "gloss": "stomach",
+    "cards": [
+      {
+        "type": "production",
+        "front": "After eating too much, your stomach hurts: ___疼。",
+        "back": "胃疼. 胃 = stomach. 胃口 = appetite [口 = mouth/taste]; 胃病 = stomach illness.",
+        "retrievalTarget": "Use 胃 for stomach and common stomach-related compounds.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Simple body-part noun with useful compounds; one extension is glossed inline."
+      }
+    ]
+  },
+  {
+    "word": "厨房",
+    "pinyin": "chú fáng",
+    "gloss": "kitchen",
+    "cards": [
+      {
+        "type": "production",
+        "front": "The room where you cook food: 妈妈在___做饭。",
+        "back": "妈妈在厨房做饭. 厨房 = kitchen; 房 is room. Classifier: 间.",
+        "retrievalTarget": "Use 厨房 for kitchen.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Concrete room noun; support vocabulary is HSK1-4."
+      }
+    ]
+  },
+  {
+    "word": "之内",
+    "pinyin": "zhī nèi",
+    "gloss": "within; inside",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "Formal writing says “within this time/range,” not physical inside a box. Which phrase?",
+        "back": "之内. 在三天之内 = within three days. 在这个范围之内 = within this scope [范围 = scope]. More written than 里面.",
+        "retrievalTarget": "Interpret 之内 as formal “within/inside” for time, ranges, or abstract scope.",
+        "tier": "T3",
+        "verdict": "new",
+        "reason": "Matches the formal postposition pattern; one support noun is glossed inline."
+      }
+    ]
+  },
+  {
+    "word": "注册",
+    "pinyin": "zhù cè",
+    "gloss": "to register; enroll",
+    "cards": [
+      {
+        "type": "production",
+        "front": "You create an account on a website: 请先___一个账号。",
+        "back": "请先注册一个账号. 注册 = register/enroll [账号 = account]. Also: 注册公司 = register a company.",
+        "retrievalTarget": "Use 注册 for registering accounts, companies, or enrollment.",
+        "tier": "T3",
+        "verdict": "new",
+        "reason": "Common digital/bureaucratic verb; one support noun is glossed inline."
+      }
+    ]
+  },
+  {
+    "word": "厅",
+    "pinyin": "tīng",
+    "gloss": "hall; living room; office/department",
+    "cards": [
+      {
+        "type": "collocation",
+        "front": "Which one-syllable room/hall word appears in 餐厅, 客厅, and 办公厅?",
+        "back": "厅. 餐厅 = dining hall/restaurant; 客厅 = living room [客 = guest]; 办公厅 = office hall/department [办公 = office work].",
+        "retrievalTarget": "Recognize 厅 as a hall/room/department morpheme in compounds.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Bound-morpheme recognition card; compound parts are familiar or glossed."
+      }
+    ]
+  },
+  {
+    "word": "随着",
+    "pinyin": "suí zhe",
+    "gloss": "along with; as; following",
+    "cards": [
+      {
+        "type": "cloze",
+        "front": "A written sentence says one thing changes together with another: ___时间过去，事情变了。",
+        "back": "随着时间过去，事情变了 = as time passed, things changed. 随着 marks one change accompanying another.",
+        "retrievalTarget": "Use 随着 as “along with / as X happens” to mark accompanying change.",
+        "tier": "T3",
+        "verdict": "new",
+        "reason": "Discourse connector is production-relevant; support words are basic."
+      }
+    ]
+  },
+  {
+    "word": "回报",
+    "pinyin": "huí bào",
+    "gloss": "return; reciprocation; report back",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "Someone helped you; you want to give something back. In another context, you report results back. Which word covers both?",
+        "back": "回报. 回报社会 = give back to society; 回报结果 = report back results. 回 = return; 报 = repay/report.",
+        "retrievalTarget": "Distinguish 回报 as reciprocate/give back from 回报 as report back.",
+        "tier": "T3",
+        "verdict": "new",
+        "reason": "Links two senses through the return/report components; support vocabulary is basic."
+      }
+    ]
+  },
+  {
+    "word": "展现",
+    "pinyin": "zhǎn xiàn",
+    "gloss": "to display; reveal; unfold",
+    "cards": [
+      {
+        "type": "production",
+        "front": "A painting reveals the artist’s feelings: 这幅画___了作者的感情。",
+        "back": "这幅画展现了作者的感情. 展现 = reveal/display/unfold [感情 = feelings/emotion]. More unfolding than simple 显示.",
+        "retrievalTarget": "Use 展现 for revealing, displaying, or unfolding before one's eyes.",
+        "tier": "T3",
+        "verdict": "new",
+        "reason": "Distinctive reveal/display image; one support noun is glossed inline."
+      }
+    ]
+  },
+  {
+    "word": "评估",
+    "pinyin": "píng gū",
+    "gloss": "to evaluate; assess; assessment",
+    "cards": [
+      {
+        "type": "production",
+        "front": "Before a big decision, experts evaluate the situation: 专家___了情况。",
+        "back": "专家评估了情况. 评估 = evaluate/assess [情况 = situation]. It is more formal than 看看 or 判断 [judge/decide].",
+        "retrievalTarget": "Use 评估 for formal evaluation or assessment.",
+        "tier": "T3",
+        "verdict": "new",
+        "reason": "Formal evaluation verb with clear production cue; support noun is glossed inline."
+      }
+    ]
+  }
+]

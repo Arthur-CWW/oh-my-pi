@@ -51,6 +51,7 @@ interface QueueProvenanceResponse {
 interface DictResponse {
   word: string
   entries: Array<{ simplified: string; traditional: string; pinyin: string; definitions: string[] }>
+  decomposition: Array<{ char: string; ids: string; components: string[] }>
 }
 
 interface KnownWordsResponse {
@@ -79,6 +80,7 @@ const REAL_CEDICT_FIXTURE = [
   { simplified: "AA制", traditional: "AA制", pinyin: "aazhì", definitions: ["to split the bill; to go Dutch"] },
   { simplified: "AB制", traditional: "AB制", pinyin: "abzhì", definitions: ["to split the bill (where the male counterpart foots the larger portion of the sum)", "(theater) a system where two actors take turns in acting the main role, with one actor replacing the other if either is unavailable"] },
   { simplified: "学生", traditional: "學生", pinyin: "xuésheng", definitions: ["student; schoolchild"] },
+  { simplified: "学习", traditional: "學習", pinyin: "xuéxí", definitions: ["to learn; to study"] },
 ]
 
 describe("reader API", () => {
@@ -95,6 +97,13 @@ describe("reader API", () => {
       const best = lookupCedictBest(paths.cedictDb, "3D打印机坏了")
       expect(best.word).toBe("3D打印机")
       expect(best.entries[0].definitions).toEqual(["3D printer"])
+
+      const decomposed = lookupCedictExact(paths.cedictDb, "好词")
+      expect(decomposed.decomposition).toEqual([
+        { char: "好", ids: "⿰女子", components: ["女", "子"] },
+        { char: "词", ids: "⿰讠司", components: ["讠", "司"] },
+      ])
+      expect(lookupCedictExact(paths.cedictDb, "☃").decomposition).toEqual([])
     } finally {
       cedict.close()
     }
@@ -141,6 +150,14 @@ describe("reader API", () => {
       const best = await requestJson<DictResponse>(baseUrl, "/api/dict/best?text=3D%E6%89%93%E5%8D%B0%E6%9C%BA%E5%9D%8F%E4%BA%86")
       expect(best.body.word).toBe("3D打印机")
 
+
+      const learning = await requestJson<DictResponse>(baseUrl, `/api/dict/${encodeURIComponent("学习")}`)
+      expect(learning.response.status).toBe(200)
+      expect(learning.body.word).toBe("学习")
+      expect(learning.body.decomposition).toEqual([
+        { char: "学", ids: "⿳𭕄冖子", components: ["𭕄", "冖", "子"] },
+        { char: "习", ids: "⿹𠃌冫", components: ["𠃌", "冫"] },
+      ])
       const known = await requestJson<KnownWordsResponse>(baseUrl, "/api/reader/known-words")
       expect(known.body.words).toContain("学生")
 
@@ -227,12 +244,22 @@ CREATE TABLE known_words (
   word TEXT PRIMARY KEY,
   hsk_level INTEGER NOT NULL
 );
+CREATE TABLE decomposition (
+  char TEXT PRIMARY KEY,
+  ids TEXT NOT NULL,
+  components TEXT NOT NULL
+);
 `)
     const insertEntry = db.query<NoRows, [string, string, string, string]>("INSERT INTO cedict (simplified, traditional, pinyin, definitions) VALUES (?, ?, ?, ?)")
     for (const entry of REAL_CEDICT_FIXTURE) insertEntry.run(entry.simplified, entry.traditional, entry.pinyin, JSON.stringify(entry.definitions))
     const insertKnown = db.query<NoRows, [string, number]>("INSERT INTO known_words (word, hsk_level) VALUES (?, ?)")
     insertKnown.run("学生", 1)
     insertKnown.run("AA制", 5)
+    const insertDecomposition = db.query<NoRows, [string, string, string]>("INSERT INTO decomposition (char, ids, components) VALUES (?, ?, ?)")
+    insertDecomposition.run("好", "⿰女子", JSON.stringify(["女", "子"]))
+    insertDecomposition.run("词", "⿰讠司", JSON.stringify(["讠", "司"]))
+    insertDecomposition.run("学", "⿳𭕄冖子", JSON.stringify(["𭕄", "冖", "子"]))
+    insertDecomposition.run("习", "⿹𠃌冫", JSON.stringify(["𠃌", "冫"]))
     return db
   } catch (error) {
     db.close()

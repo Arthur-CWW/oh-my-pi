@@ -16,7 +16,9 @@ import {
   setCardStatus,
   type CardStatus,
 } from "./ledger"
+import { handleGenerationApi } from "./generation-api"
 import { handleReaderApi } from "./reader-api"
+import { handleShadowingApi } from "./shadowing-api"
 import { resolveDaemonPaths, type DaemonPaths } from "./paths"
 
 export interface DashboardOptions {
@@ -105,6 +107,12 @@ async function handleRequest(request: Request, paths: DaemonPaths, env: Record<s
   const pathname = url.pathname
   const readerApiResponse = await handleReaderApi(request, paths)
   if (readerApiResponse !== null) return readerApiResponse
+
+  const shadowingApiResponse = await handleShadowingApi(request, paths)
+  if (shadowingApiResponse !== null) return shadowingApiResponse
+
+  const generationApiResponse = await handleGenerationApi(request, paths)
+  if (generationApiResponse !== null) return generationApiResponse
   if (isReaderHost(request)) return handleReaderSite(request, pathname, paths)
 
   if (request.method === "GET" && pathname === "/") return handleWebIndex(env)

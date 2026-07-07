@@ -15,9 +15,10 @@ CLI:
 ```bash
 uv run shadow-align <media.(wav|mp3|mp4|m4a)> -o <out.json> [--engine whisper] [--publish]
 uv run shadow-align validate <alignment.json>
+uv run shadow-align batch <dir> [--limit N] [--publish-root <dir>] [--engine whisper]
 ```
 
-`--publish` copies the source media and `alignment.json` to `data/primer/shadowing/<media-stem>/`.
+`--publish` copies the source media and `alignment.json` to `data/primer/shadowing/<media-stem>/`. `batch` aligns each `.mp3`/`.wav` in the input directory, writes `<publish-root>/<media-stem>/alignment.json`, copies the source media beside it, skips already-published stems, logs per-file errors, and finishes with `batch summary: aligned=<n> skipped=<n> failed=<n>`.
 
 ## Output contract
 

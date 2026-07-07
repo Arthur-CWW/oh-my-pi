@@ -1,0 +1,962 @@
+[
+  {
+    "word": "局面",
+    "pinyin": "jú miàn",
+    "gloss": "situation; state of affairs",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "A commentator describes the whole picture of how things stand, not one detail or one person's view. Which word captures the large-scale state of affairs?",
+        "back": "局面. Use it for the state of affairs: 局面不错 = the situation is pretty good; 局面不好 = the situation is bad. It is broader and more formal than 情况.",
+        "retrievalTarget": "Choose 局面 for an overall state of affairs, especially when it can improve, worsen, or be controlled.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Separates 局面 from generic 情况/place senses; front does not contain the answer and support Chinese is basic plus target. Self-audit: not ambiguous, not multiple-answer, not wordy."
+      }
+    ]
+  },
+  {
+    "word": "期望",
+    "pinyin": "qī wàng",
+    "gloss": "expectation; to hope/expect",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "Parents or a company have hopes for future performance; the word is more expectation than a casual wish. Which word?",
+        "back": "期望. 父母对孩子有很高的期望 = parents have high expectations for the child. 希望 is broader and more everyday.",
+        "retrievalTarget": "Use 期望 for expectations or hoped-for standards someone holds for the future.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Targets hope-vs-expectation boundary; Chinese support uses basic family words plus target. Self-audit: stable cue, no trivial answer leak."
+      }
+    ]
+  },
+  {
+    "word": "询问",
+    "pinyin": "xún wèn",
+    "gloss": "to inquire; ask about",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "At a desk or in a formal email, you ask about time, price, or rules. Which formal verb replaces simple 问?",
+        "back": "询问. 可以询问价格 = you may inquire about the price. It sounds more formal/polite than just 问.",
+        "retrievalTarget": "Choose 询问 for formal or polite inquiry about information.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Register contrast is the main production need; support vocabulary is HSK1-4 plus target. Self-audit: precise and non-redundant."
+      }
+    ]
+  },
+  {
+    "word": "补偿",
+    "pinyin": "bǔ cháng",
+    "gloss": "to compensate; make up for",
+    "cards": [
+      {
+        "type": "production",
+        "front": "After a company's mistake caused a customer loss, the company gives money to fix the loss, not a gift. Which formal verb?",
+        "back": "补偿. 公司给了补偿 = the company gave compensation. 赔 is more everyday “pay for damage”; 补偿 is formal making-up for loss.",
+        "retrievalTarget": "Produce 补偿 for making up for someone’s loss or damage.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Concrete compensation frame avoids generic 给/还; Chinese support is basic plus target. Self-audit: single answer, not shallow."
+      }
+    ]
+  },
+  {
+    "word": "软件",
+    "pinyin": "ruǎn jiàn",
+    "gloss": "software",
+    "cards": [
+      {
+        "type": "collocation",
+        "front": "A phone has two parts: the machine body and the programs inside. Which word names the program side, not the physical machine?",
+        "back": "软件. 手机软件 = phone software/app; 电脑软件 = computer software. 硬件 is hardware [硬 = hard].",
+        "retrievalTarget": "Use 软件 for computer/phone software, contrasted with hardware.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Basic tech distinction with one glossed contrast term; front does not reveal the Chinese word. Self-audit: focused and production-relevant."
+      }
+    ]
+  },
+  {
+    "word": "显",
+    "pinyin": "xiǎn",
+    "gloss": "visible; to show; prominent",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "In words for “show,” “obvious,” or “prominent,” which bound character carries the visible/showing idea?",
+        "back": "显. 显示 = show/display; 明显 = obvious; 显得 = appear/seem. 显 often means made visible or standing out.",
+        "retrievalTarget": "Recognize 显 as the visible/show/prominent morpheme in common compounds.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Bound-morpheme card avoids pretending 显 is common standalone speech; examples are target compounds with plain English glosses. Self-audit: not multiple-valid because retrieval is the morpheme."
+      }
+    ]
+  },
+  {
+    "word": "看出",
+    "pinyin": "kàn chū",
+    "gloss": "to make out; see from evidence",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "You study someone's face and figure out they are lying — you detect the truth from visible signs. Which verb means perceive/detect from observation?",
+        "back": "看出. 我能看出他不高兴 = I can tell he's unhappy. 看 alone is just look; 看出 adds result: look → detect.",
+        "retrievalTarget": "Use 看出 for detecting or perceiving something from observation, not just looking.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Result-complement sense is retrieved without exposing the target in the front; support Chinese is basic plus target. Self-audit: stable and not answer-implying."
+      }
+    ]
+  },
+  {
+    "word": "严肃",
+    "pinyin": "yán sù",
+    "gloss": "serious; solemn; strict",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "A teacher’s face and tone show this is not a joke. Which adjective fits the serious register?",
+        "back": "严肃. 老师很严肃 = the teacher is serious/strict. It can describe a person, face, meeting, or problem.",
+        "retrievalTarget": "Use 严肃 for serious, solemn, or strict attitude and situations.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Targets register and collocation range; support Chinese is basic plus target. Self-audit: not ambiguous, not shallow."
+      }
+    ]
+  },
+  {
+    "word": "肌肉",
+    "pinyin": "jī ròu",
+    "gloss": "muscle",
+    "cards": [
+      {
+        "type": "production",
+        "front": "After exercise, the body part that gets stronger is not fat or water. Which word means muscle?",
+        "back": "肌肉. 练肌肉 = train/build muscle [练 = practice/train]. 肌肉疼 = muscles hurt.",
+        "retrievalTarget": "Produce 肌肉 for body muscle in exercise or pain contexts.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Concrete body-word production card; one training verb is glossed inline. Self-audit: single retrieval, concise."
+      }
+    ]
+  },
+  {
+    "word": "随后",
+    "pinyin": "suí hòu",
+    "gloss": "soon after; subsequently",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "News style: first one event happened; soon after, another happened. Which written connector marks the later event?",
+        "back": "随后. 他先说话，随后离开 = he spoke first, then left soon after. It is more written than 然后.",
+        "retrievalTarget": "Use 随后 as a written connector for a following event soon after the first.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Captures temporal sequence and register; example uses basic words plus target. Self-audit: clear contrast, no answer leak."
+      }
+    ]
+  },
+  {
+    "word": "安慰",
+    "pinyin": "ān wèi",
+    "gloss": "to comfort; console",
+    "cards": [
+      {
+        "type": "production",
+        "front": "A friend is sad; you speak kindly so they feel better. Which verb?",
+        "back": "安慰. 我安慰她 = I comforted her. 安慰 is emotional support, not solving the whole problem.",
+        "retrievalTarget": "Produce 安慰 for comforting or consoling someone emotionally.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Emotion-support cue is concrete and production-oriented; Chinese support is basic. Self-audit: not multiple-answer."
+      }
+    ]
+  },
+  {
+    "word": "年度",
+    "pinyin": "nián dù",
+    "gloss": "year; annual period",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "A company or school report covers one formal year, not just any calendar date. Which word gives that annual-period sense?",
+        "back": "年度. 年度计划 = annual plan; 年度报告 = annual report [报告 = report]. It is formal and institutional.",
+        "retrievalTarget": "Choose 年度 for a formal annual period or yearly item.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Distinguishes formal annual-period usage from plain 年; one collocate is glossed inline. Self-audit: focused and useful."
+      }
+    ]
+  },
+  {
+    "word": "抬",
+    "pinyin": "tái",
+    "gloss": "to lift; raise; carry together",
+    "cards": [
+      {
+        "type": "production",
+        "front": "Raise your head/hand upward: ___头 / ___手. Which verb?",
+        "back": "抬. 抬头 = raise the head; 抬手 = raise the hand. 抬 can also mean two people carry something heavy together.",
+        "retrievalTarget": "Use 抬 for lifting or raising something upward, especially head/hand, and for carrying together.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "High-frequency body collocations with basic scaffolding; front blanks avoid showing target. Self-audit: precise, not wordy."
+      }
+    ]
+  },
+  {
+    "word": "检验",
+    "pinyin": "jiǎn yàn",
+    "gloss": "to inspect; examine; test",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "You test whether a product, result, or idea is correct/qualified. Which formal verb fits?",
+        "back": "检验. 检验结果 = test/examine the result. It is more formal than 看一看 and often checks quality or truth.",
+        "retrievalTarget": "Use 检验 for formal testing or examination of quality, result, or truth.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Formal testing sense is distinct from casual looking; support words are basic plus target. Self-audit: single stable target."
+      }
+    ]
+  },
+  {
+    "word": "排除",
+    "pinyin": "pái chú",
+    "gloss": "to eliminate; remove; exclude; rule out",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "A doctor or plan removes one possible cause from consideration. Which verb means eliminate/rule out?",
+        "back": "排除. 排除这个原因 = rule out this reason/cause. It can remove obstacles or exclude possibilities.",
+        "retrievalTarget": "Use 排除 for eliminating, removing, excluding, or ruling out a possibility.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Highlights diagnostic/logical use, not just physical removal; Chinese support is basic. Self-audit: not ambiguous."
+      }
+    ]
+  },
+  {
+    "word": "加速",
+    "pinyin": "jiā sù",
+    "gloss": "to speed up; accelerate",
+    "cards": [
+      {
+        "type": "production",
+        "front": "A car, process, or plan needs to go faster. Which verb means speed up?",
+        "back": "加速. 加速发展 = speed up development [发展 = develop/development]. 加 means add; 速 is speed.",
+        "retrievalTarget": "Produce 加速 for making movement or a process faster.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Concrete and abstract speed-up frames; one collocate is glossed inline. Self-audit: clear cue and no front leak."
+      }
+    ]
+  },
+  {
+    "word": "发行",
+    "pinyin": "fā xíng",
+    "gloss": "to publish; issue; release/distribute",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "A book, movie, money, or stock is officially put out for the public. Which formal verb?",
+        "back": "发行. 发行新书 = publish/release a new book. It focuses on official release/distribution, not just saying something publicly.",
+        "retrievalTarget": "Choose 发行 for official publishing, issuing, releasing, or distributing media/currency/stocks.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Domain/register card separates from generic 发布/发表 in English; support Chinese is basic plus target. Self-audit: stable."
+      }
+    ]
+  },
+  {
+    "word": "社",
+    "pinyin": "shè",
+    "gloss": "society; organization; agency (bound form)",
+    "cards": [
+      {
+        "type": "collocation",
+        "front": "Which bound character appears in words for a publishing house, news agency, or student club/society?",
+        "back": "社. 出版社 = publishing house [出版 = publish]; 通讯社 = news agency [通讯 = communication]; 社团 = club/society [团 = group].",
+        "retrievalTarget": "Recognize 社 as the organization/society/agency morpheme in compounds.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Bound-form card with glossed higher compounds; teaches recognition without unsafe standalone use. Self-audit: not shallow, no answer in front."
+      }
+    ]
+  },
+  {
+    "word": "搜",
+    "pinyin": "sōu",
+    "gloss": "to search",
+    "cards": [
+      {
+        "type": "production",
+        "front": "Online or in a room, you look carefully for information or a thing. Which short verb means search?",
+        "back": "搜. 搜一下 = search it; 搜手机 = search on the phone / search a phone. It is common in web and police/search contexts.",
+        "retrievalTarget": "Produce 搜 for searching for information, people, or things.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Practical search verb with basic collocations; no extra unglossed unknowns. Self-audit: single answer."
+      }
+    ]
+  },
+  {
+    "word": "解放",
+    "pinyin": "jiě fàng",
+    "gloss": "to liberate; liberation",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "People are freed from control or old limits; in history this can mean liberation. Which verb/noun?",
+        "back": "解放. 解放自己 = free/liberate oneself. 历史上的解放 = liberation in history [历史 = history].",
+        "retrievalTarget": "Use 解放 for freeing or liberating people from control, oppression, or limits.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Meaning is anchored without political overreach; one support noun is glossed inline. Self-audit: clear and not too broad."
+      }
+    ]
+  },
+  {
+    "word": "拥抱",
+    "pinyin": "yōng bào",
+    "gloss": "to hug; embrace",
+    "cards": [
+      {
+        "type": "production",
+        "front": "Two friends meet after a long time and hold each other in their arms. Which verb?",
+        "back": "拥抱. 他们拥抱了一下 = they hugged briefly. It can also be figurative: embrace a new idea.",
+        "retrievalTarget": "Produce 拥抱 for physical hugging and recognize its figurative “embrace” extension.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Concrete physical cue plus common extension; Chinese support uses basic words plus target. Self-audit: not ambiguous."
+      }
+    ]
+  },
+  {
+    "word": "悲剧",
+    "pinyin": "bēi jù",
+    "gloss": "tragedy",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "An event or story ends in serious sadness or disaster, not just a small problem. Which noun?",
+        "back": "悲剧. 这是一场悲剧 = this is a tragedy. It is stronger than 难过 or 不好.",
+        "retrievalTarget": "Choose 悲剧 for a tragedy: a seriously sad or disastrous event/story.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Prevents overusing it for minor bad news; Chinese support is target plus basic words. Self-audit: narrow enough and stable."
+      }
+    ]
+  },
+  {
+    "word": "消防",
+    "pinyin": "xiāo fáng",
+    "gloss": "firefighting; fire control",
+    "cards": [
+      {
+        "type": "collocation",
+        "front": "For firefighters, fire safety, or fire-control work, which two-character word comes before 员/车/安全?",
+        "back": "消防. 消防员 = firefighter; 消防车 = fire truck; 消防安全 = fire safety. It is the fire-control domain.",
+        "retrievalTarget": "Recognize 消防 as the fire-control/firefighting domain in common compounds.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Collocation card teaches domain use with transparent English glosses; no unglossed support unknowns. Self-audit: concise."
+      }
+    ]
+  },
+  {
+    "word": "太空",
+    "pinyin": "tài kōng",
+    "gloss": "outer space",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "Astronauts and satellites are not just in the sky; they are beyond Earth. Which word means outer space?",
+        "back": "太空. 太空中 = in outer space; 太空人 = astronaut [人 = person]. 天空 is the sky seen from Earth.",
+        "retrievalTarget": "Choose 太空 for outer space, distinct from 天空 “sky.”",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Space-vs-sky boundary is clear; support Chinese is basic plus target. Self-audit: no multiple-valid issue."
+      }
+    ]
+  },
+  {
+    "word": "夹",
+    "pinyin": "jiā",
+    "gloss": "to press/hold between; clip/folder",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "Something is held between two sides: a book under the arm, paper in a clip, meat inside bread. Which verb/root?",
+        "back": "夹. 夹在中间 = be caught in the middle; 夹菜 = pick/hold food with chopsticks. The core is holding between sides.",
+        "retrievalTarget": "Use 夹 for holding, pressing, or putting something between two sides.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Unifies several senses with one physical image; Chinese support is basic plus target. Self-audit: precise and not wordy."
+      }
+    ]
+  },
+  {
+    "word": "指示",
+    "pinyin": "zhǐ shì",
+    "gloss": "to instruct; indicate; instruction/directive",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "A sign shows the direction, or a boss gives instructions. Which word covers indicate/instruct?",
+        "back": "指示. 指示方向 = indicate direction; 按指示做 = do according to the instructions. It is more formal than 说.",
+        "retrievalTarget": "Use 指示 for indicating directions/signs or giving formal instructions/directives.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Covers noun/verb ambiguity and formal register; support is basic plus target. Self-audit: stable, not redundant."
+      }
+    ]
+  },
+  {
+    "word": "出于",
+    "pinyin": "chū yú",
+    "gloss": "due to; out of; stemming from",
+    "cards": [
+      {
+        "type": "production",
+        "front": "Formal pattern: “out of concern/love/need, he did it” = ___ + reason. Which phrase?",
+        "back": "出于. 出于爱，他帮她 = out of love, he helped her. 出于 introduces the motive or reason behind an action.",
+        "retrievalTarget": "Use 出于 before a motive/reason meaning “out of/due to.”",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Pattern card for formal motive marking; Chinese example uses basic words plus target. Self-audit: answer not implied by front."
+      }
+    ]
+  },
+  {
+    "word": "双手",
+    "pinyin": "shuāng shǒu",
+    "gloss": "both hands",
+    "cards": [
+      {
+        "type": "production",
+        "front": "You receive something politely using both hands, not one hand. Which word?",
+        "back": "双手. 双手拿 = hold with both hands; 双手给老师 = give to the teacher with both hands. 双 marks the pair.",
+        "retrievalTarget": "Produce 双手 for both hands as a pair, especially in polite actions.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Simple but production-relevant collocation; support vocabulary is HSK1-4 plus target. Self-audit: not too narrow."
+      }
+    ]
+  },
+  {
+    "word": "得了",
+    "pinyin": "dé le",
+    "gloss": "that’s enough; all right",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "Someone keeps talking or arguing; you cut it off with “enough, stop.” Which phrase, read dé le?",
+        "back": "得了 (dé le). 得了，别说了 = enough, stop talking. This is not 得了 (dé liǎo) meaning “able to bear/possible.”",
+        "retrievalTarget": "Recognize 得了 dé le as a colloquial “enough / that will do.”",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Polyphone/register card prevents confusing the two entries; Chinese support is basic. Self-audit: pronunciation specified, no ambiguity."
+      }
+    ]
+  },
+  {
+    "word": "得了",
+    "pinyin": "dé liǎo",
+    "gloss": "possible/bearable, often in rhetorical negative",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "In the rhetorical phrase meaning “how can this be allowed?”, the two characters are read dé liǎo, not dé le. Which entry?",
+        "back": "得了 (dé liǎo). 这还得了? = how can this be allowed / this is serious. It keeps the “can bear/can be okay” sense.",
+        "retrievalTarget": "Read 得了 as dé liǎo when it means possible or bearable, especially 这还得了?.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Targets the non-obvious polyphone and fixed rhetorical use; no unglossed extra unknowns. Self-audit: distinct from dé le."
+      }
+    ]
+  },
+  {
+    "word": "买卖",
+    "pinyin": "mǎi mài",
+    "gloss": "business; buying and selling",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "Two characters “buy-sell” together name a business or trade, not one purchase. Which word?",
+        "back": "买卖. 做买卖 = do business/trade. 买卖 can mean the business itself or a business deal.",
+        "retrievalTarget": "Use 买卖 for business/trade or a buying-selling deal, not a single act of buying.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Distinguishes compound meaning from component verbs; support Chinese is basic plus target. Self-audit: stable cue."
+      }
+    ]
+  },
+  {
+    "word": "偶尔",
+    "pinyin": "ǒu ěr",
+    "gloss": "occasionally; once in a while",
+    "cards": [
+      {
+        "type": "production",
+        "front": "You do something sometimes, but not often: 我___喝咖啡。",
+        "back": "我偶尔喝咖啡 = I occasionally drink coffee. 偶尔 is lower frequency than 有时候 and often feels “once in a while.”",
+        "retrievalTarget": "Produce 偶尔 for occasional, once-in-a-while frequency.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Frequency contrast with basic 有时候; Chinese support is basic plus target. Self-audit: no multiple answer because nuance is specified."
+      }
+    ]
+  },
+  {
+    "word": "悲伤",
+    "pinyin": "bēi shāng",
+    "gloss": "sad; sorrowful",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "The feeling is deeper and more sorrowful than ordinary 不高兴. Which adjective/noun fits?",
+        "back": "悲伤. 她很悲伤 = she is sorrowful. It is heavier and more written than 难过 in many contexts.",
+        "retrievalTarget": "Choose 悲伤 for deep sadness or sorrow, often more written than 难过.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Register/intensity boundary is production-relevant; support Chinese is basic. Self-audit: narrow and clear."
+      }
+    ]
+  },
+  {
+    "word": "劝",
+    "pinyin": "quàn",
+    "gloss": "to advise; persuade; urge",
+    "cards": [
+      {
+        "type": "production",
+        "front": "A friend wants to quit school; you try to persuade him not to. Which verb?",
+        "back": "劝. 我劝他别去 = I advise/persuade him not to go. 劝 is more active than just 给意见 “give an opinion.”",
+        "retrievalTarget": "Produce 劝 for advising or persuading someone toward/away from an action.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Persuasion frame avoids generic advice words; support Chinese is basic plus target. Self-audit: single stable target."
+      }
+    ]
+  },
+  {
+    "word": "顾问",
+    "pinyin": "gù wèn",
+    "gloss": "adviser; consultant",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "A company pays an expert to give advice, but that person is not a regular assistant. Which job noun?",
+        "back": "顾问. 法律顾问 = legal adviser [法律 = law]; 公司顾问 = company consultant. 顾问 advises; 助理 helps with work.",
+        "retrievalTarget": "Use 顾问 for an adviser/consultant who gives expert advice.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Contrasts with 助理 and anchors expert-advice role; one domain word is glossed inline. Self-audit: no answer leak."
+      }
+    ]
+  },
+  {
+    "word": "助理",
+    "pinyin": "zhù lǐ",
+    "gloss": "assistant",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "This person helps a boss or professional handle work, but is not necessarily the expert adviser. Which job noun?",
+        "back": "助理. 老师助理 = teaching assistant; 经理助理 = manager’s assistant [经理 = manager]. 顾问 gives expert advice.",
+        "retrievalTarget": "Use 助理 for an assistant role that helps someone do work.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Near-role contrast with 顾问; one job title is glossed inline. Self-audit: clear and production-relevant."
+      }
+    ]
+  },
+  {
+    "word": "分离",
+    "pinyin": "fēn lí",
+    "gloss": "to separate; be separated",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "Two things or people that were together become apart. Which formal verb means separate?",
+        "back": "分离. 母子分离 = mother and child are separated [母子 = mother and child]. It is more written/formal than 分开.",
+        "retrievalTarget": "Choose 分离 for formal separation of people, things, or parts.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Formal-vs-everyday split is explicit; one example noun is glossed inline. Self-audit: not ambiguous."
+      }
+    ]
+  },
+  {
+    "word": "扇",
+    "pinyin": "shān",
+    "gloss": "to fan; to slap",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "Same character as “fan,” but read shān when it is an action: move air or slap a face. Which reading/use?",
+        "back": "扇 (shān). 扇风 = fan air / create a breeze [风 = wind]; 扇他一下 = slap him once. The noun/classifier reading is shàn.",
+        "retrievalTarget": "Read 扇 as shān for the verb “fan” or “slap.”",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Polyphone card separates action reading; one collocate is glossed inline. Self-audit: pronunciation removes ambiguity."
+      }
+    ]
+  },
+  {
+    "word": "扇",
+    "pinyin": "shàn",
+    "gloss": "fan; classifier for doors/windows",
+    "cards": [
+      {
+        "type": "collocation",
+        "front": "Same character, read shàn: a hand fan, or the measure word in 一___门. Which word/reading?",
+        "back": "扇 (shàn). 一把扇子 = a fan; 一扇门 = one door. The verb “to fan/slap” is shān.",
+        "retrievalTarget": "Read 扇 as shàn for the noun fan and the classifier for doors/windows.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Classifier use is production-relevant, not skipped; Chinese support is basic. Self-audit: distinct from shān and no front answer leak."
+      }
+    ]
+  },
+  {
+    "word": "利润",
+    "pinyin": "lì rùn",
+    "gloss": "profit",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "A business’s income minus cost leaves what money? Which noun means profit?",
+        "back": "利润. 利润高 = profit is high; 没有利润 = no profit. It is not just 收入 “income.”",
+        "retrievalTarget": "Use 利润 for profit after costs, distinct from gross income.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Finance distinction is concise; support Chinese is basic plus target. Self-audit: single retrieval target."
+      }
+    ]
+  },
+  {
+    "word": "珍惜",
+    "pinyin": "zhēn xī",
+    "gloss": "to treasure; cherish; value",
+    "cards": [
+      {
+        "type": "production",
+        "front": "Time with family is precious, so you should value it and not waste it. Which verb?",
+        "back": "珍惜. 珍惜时间 = cherish/value time; 珍惜朋友 = value friends. It implies something is precious and should not be wasted.",
+        "retrievalTarget": "Produce 珍惜 for cherishing or valuing something precious.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Emotional value/waste contrast is production-relevant; Chinese support is basic plus target. Self-audit: stable."
+      }
+    ]
+  },
+  {
+    "word": "消除",
+    "pinyin": "xiāo chú",
+    "gloss": "to eliminate; remove",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "You remove a worry, misunderstanding, danger, or bad effect so it is gone. Which formal verb?",
+        "back": "消除. 消除误会 = clear up a misunderstanding [误会 = misunderstanding]; 消除影响 = remove an effect [影响 = influence/effect].",
+        "retrievalTarget": "Use 消除 for eliminating abstract bad states, effects, worries, or misunderstandings.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Contrasts abstract elimination from physical removal; two higher collocates are glossed inline. Self-audit: focused despite examples."
+      }
+    ]
+  },
+  {
+    "word": "随意",
+    "pinyin": "suí yì",
+    "gloss": "as one wishes; casual; arbitrary",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "Someone acts however they like, without fixed plan or care. Which word means freely/casually/at will?",
+        "back": "随意. 请随意 = please feel free; 不要随意改 = don’t change it casually/arbitrarily. It can be friendly or negative by context.",
+        "retrievalTarget": "Use 随意 for doing as one wishes, from “feel free” to “casually/arbitrarily.”",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Captures positive/negative context shift; Chinese support is basic plus target. Self-audit: not shallow."
+      }
+    ]
+  },
+  {
+    "word": "匹",
+    "pinyin": "pǐ",
+    "gloss": "classifier for horses and cloth",
+    "cards": [
+      {
+        "type": "collocation",
+        "front": "For horses, which measure word completes 一___马?",
+        "back": "一匹马. 匹 is the normal classifier for horses; it can also measure lengths/rolls of cloth in formal contexts.",
+        "retrievalTarget": "Use 匹 as the classifier for horses, especially 一匹马.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Not skipped because horse classifier is a distinct production item; scaffolding is entirely basic. Self-audit: narrow but useful, no ambiguity."
+      }
+    ]
+  },
+  {
+    "word": "友谊",
+    "pinyin": "yǒu yì",
+    "gloss": "friendship",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "You mean the relationship/feeling of friendship, especially in a formal or warm phrase, not just a friend. Which noun?",
+        "back": "友谊. 中美友谊 = China-US friendship; 友谊第一 = friendship first. 朋友 is the person; 友谊 is the relationship.",
+        "retrievalTarget": "Choose 友谊 for the abstract relationship of friendship, not the person 朋友.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Abstract noun vs person contrast; examples are common and transparent. Self-audit: not multiple-answer because relationship is specified."
+      }
+    ]
+  },
+  {
+    "word": "拔",
+    "pinyin": "bá",
+    "gloss": "to pull out/up; select; stand out",
+    "cards": [
+      {
+        "type": "production",
+        "front": "A tooth or a plant is removed by pulling it out. Which verb?",
+        "back": "拔. 拔牙 = pull a tooth [牙 = tooth]; 拔草 = pull weeds/grass [草 = grass]. The core is pulling out/up.",
+        "retrievalTarget": "Produce 拔 for pulling something out or up, such as a tooth or plant.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Physical core sense anchors extensions; two concrete nouns are glossed inline. Self-audit: stable and not wordy."
+      }
+    ]
+  },
+  {
+    "word": "寻求",
+    "pinyin": "xún qiú",
+    "gloss": "to seek; look for",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "Formal writing: a person seeks help, truth, or a solution, not just searches a room. Which verb?",
+        "back": "寻求. 寻求帮助 = seek help; 寻求答案 = seek an answer. It is more formal and goal-directed than 找.",
+        "retrievalTarget": "Use 寻求 for formally seeking help, answers, truth, solutions, or opportunities.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Formal goal-directed seeking contrasts with 找; Chinese support is basic plus target. Self-audit: precise."
+      }
+    ]
+  },
+  {
+    "word": "装饰",
+    "pinyin": "zhuāng shì",
+    "gloss": "to decorate; decoration",
+    "cards": [
+      {
+        "type": "production",
+        "front": "Before a party, you make a room look nicer with flowers, lights, or pictures. Which verb/noun?",
+        "back": "装饰. 装饰房间 = decorate a room. It can be the action or the decorative things.",
+        "retrievalTarget": "Produce 装饰 for decorating a place/object or for decoration.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Concrete scene cues the target without naming it; support Chinese is basic plus target. Self-audit: not ambiguous."
+      }
+    ]
+  },
+  {
+    "word": "锅",
+    "pinyin": "guō",
+    "gloss": "pot; pan; wok",
+    "cards": [
+      {
+        "type": "collocation",
+        "front": "For cooking soup or rice, which vessel word fits: 一口___?",
+        "back": "一口锅. 锅 = pot/pan/wok for cooking; 口 is a common classifier for pots/woks.",
+        "retrievalTarget": "Use 锅 for cooking pots/pans/woks and remember classifier 口.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Classifier collocation is production-relevant; Chinese scaffolding is basic plus target. Self-audit: concise."
+      }
+    ]
+  },
+  {
+    "word": "大厅",
+    "pinyin": "dà tīng",
+    "gloss": "hall; lobby; large room",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "In a hotel, station, or office building, the large public room/lobby is called what?",
+        "back": "大厅. 酒店大厅 = hotel lobby [酒店 = hotel]; 大厅里有很多人 = there are many people in the hall/lobby.",
+        "retrievalTarget": "Choose 大厅 for a large public hall or lobby inside a building.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Places word anchored by common context; one support noun is glossed inline. Self-audit: no multiple-answer issue."
+      }
+    ]
+  },
+  {
+    "word": "丑",
+    "pinyin": "chǒu",
+    "gloss": "ugly; unsightly",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "A thing looks bad or unattractive; it is the opposite of 美. Which adjective?",
+        "back": "丑. 这件衣服很丑 = this clothing is ugly. It can describe appearance; be careful because it is blunt for people.",
+        "retrievalTarget": "Use 丑 for ugly/unattractive appearance, with blunt register for people.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Corrects the common HSK sense absent from source gloss; support Chinese is basic plus target. Self-audit: not ambiguous."
+      }
+    ]
+  },
+  {
+    "word": "耐心",
+    "pinyin": "nài xīn",
+    "gloss": "patience; patient",
+    "cards": [
+      {
+        "type": "production",
+        "front": "A teacher explains many times without getting angry. Say the teacher has what quality?",
+        "back": "耐心. 老师很有耐心 = the teacher is very patient / has patience. 有耐心 is the common pattern.",
+        "retrievalTarget": "Produce 耐心 in 有耐心 for being patient or having patience.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Pattern-focused production card; Chinese support is basic plus target. Self-audit: stable cue."
+      }
+    ]
+  },
+  {
+    "word": "冲动",
+    "pinyin": "chōng dòng",
+    "gloss": "impulse; impulsive",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "Someone acts immediately from a strong feeling, without thinking carefully. Which noun/adjective?",
+        "back": "冲动. 别冲动 = don’t be impulsive; 一时冲动 = a momentary impulse. It warns against action before thought.",
+        "retrievalTarget": "Use 冲动 for impulse or impulsive action driven by immediate emotion.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Behavioral cue is clear; Chinese support is basic plus target. Self-audit: not multiple-valid because impulsivity is specified."
+      }
+    ]
+  },
+  {
+    "word": "如同",
+    "pinyin": "rú tóng",
+    "gloss": "like; as if; just as",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "Written style: compare A to B, meaning “like/as though,” more formal than 像. Which word?",
+        "back": "如同. 时间如同水 = time is like water. It is a written/literary comparison marker close to 像.",
+        "retrievalTarget": "Use 如同 as a written comparison marker meaning like/as though.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Register contrast with 像; Chinese example uses basic words plus target. Self-audit: concise and stable."
+      }
+    ]
+  },
+  {
+    "word": "提起",
+    "pinyin": "tí qǐ",
+    "gloss": "to mention; lift; bring up",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "In conversation, someone brings up an old thing or person; no physical lifting is involved. Which verb?",
+        "back": "提起. 一提起这件事，他就不高兴 = whenever this matter is mentioned, he is unhappy. It can also literally lift up.",
+        "retrievalTarget": "Use 提起 for mentioning/bringing up a topic, while remembering its literal lift-up sense.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Disambiguates mention vs physical lift; support Chinese is basic plus target. Self-audit: not answer-implying."
+      }
+    ]
+  },
+  {
+    "word": "公正",
+    "pinyin": "gōng zhèng",
+    "gloss": "fair; just; impartial",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "A judge or rule treats everyone fairly, without favoring one side. Which formal adjective?",
+        "back": "公正. 公正的老师 = a fair teacher; 公正处理 = handle fairly [处理 = handle]. It stresses impartial justice.",
+        "retrievalTarget": "Choose 公正 for fair, just, impartial treatment or judgment.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Fairness/impartiality cue is precise; one collocate is glossed inline. Self-audit: stable."
+      }
+    ]
+  },
+  {
+    "word": "冻",
+    "pinyin": "dòng",
+    "gloss": "to freeze; feel very cold",
+    "cards": [
+      {
+        "type": "production",
+        "front": "Water becomes ice, or a person feels extremely cold. Which verb/adjective?",
+        "back": "冻. 水冻了 = the water froze; 我快冻死了 = I’m freezing. 冷 is just cold; 冻 is stronger/result-like.",
+        "retrievalTarget": "Use 冻 for freezing or feeling extremely cold, stronger than plain 冷.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Physical result and felt-cold pattern; support Chinese is basic plus target. Self-audit: clear contrast."
+      }
+    ]
+  },
+  {
+    "word": "辞职",
+    "pinyin": "cí zhí",
+    "gloss": "to resign; quit a job",
+    "cards": [
+      {
+        "type": "production",
+        "front": "Someone formally leaves a job, not just leaves the office for the day. Which verb?",
+        "back": "辞职. 他辞职了 = he resigned / quit his job. It is for leaving a position or job.",
+        "retrievalTarget": "Produce 辞职 for resigning or quitting a job/position.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Work-domain cue prevents confusion with 离开; support Chinese is basic plus target. Self-audit: single answer."
+      }
+    ]
+  },
+  {
+    "word": "遵守",
+    "pinyin": "zūn shǒu",
+    "gloss": "to obey; comply with; abide by",
+    "cards": [
+      {
+        "type": "collocation",
+        "front": "Rules and promises are not just \"done\"; they are followed. Which verb pairs with 规则 (rules) to mean obey/follow?",
+        "back": "遵守. 遵守规则 = follow rules [规则 = rules]; 遵守法律 = obey the law [法律 = law]. It takes rules/agreements as objects.",
+        "retrievalTarget": "Use 遵守 with rules, laws, agreements, or promises meaning obey/abide by.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Collocation frame is high-value for production; two non-basic objects are glossed inline. Self-audit: no ambiguity."
+      }
+    ]
+  },
+  {
+    "word": "暖",
+    "pinyin": "nuǎn",
+    "gloss": "warm; to warm",
+    "cards": [
+      {
+        "type": "disambiguation",
+        "front": "The weather, room, or someone’s words feel pleasantly warm, not hot. Which adjective/verb?",
+        "back": "暖. 天气很暖 = the weather is warm; 暖心 = heartwarming [心 = heart]. 热 is hot; 暖 is gentle warmth.",
+        "retrievalTarget": "Use 暖 for gentle warmth or warming, distinct from hot 热.",
+        "tier": "T2",
+        "verdict": "new",
+        "reason": "Warm-vs-hot boundary plus emotional extension; one compound is glossed inline. Self-audit: clear and concise."
+      }
+    ]
+  }
+]
