@@ -102,4 +102,56 @@ describe("fast mode scope", () => {
 
 		expect(session.serviceTier).toBe("claude-only");
 	});
+
+	it("enables fast mode for only OpenAI when scoped from off", async () => {
+		const session = await createSession();
+
+		session.setFastMode(true, "openai");
+
+		expect(session.serviceTier).toBe("openai-only");
+	});
+
+	it("adds Claude to an OpenAI-only fast mode scope", async () => {
+		const session = await createSession();
+		session.setServiceTier("openai-only");
+
+		session.setFastMode(true, "claude");
+
+		expect(session.serviceTier).toBe("priority");
+	});
+
+	it("removes Claude from a both-provider fast mode scope", async () => {
+		const session = await createSession();
+		session.setServiceTier("priority");
+
+		session.setFastMode(false, "claude");
+
+		expect(session.serviceTier).toBe("openai-only");
+	});
+
+	it("turns fast mode off when removing the only Claude scope", async () => {
+		const session = await createSession();
+		session.setServiceTier("claude-only");
+
+		session.setFastMode(false, "claude");
+
+		expect(session.serviceTier).toBeUndefined();
+	});
+
+	it("enables fast mode for both providers when scoped to both from off", async () => {
+		const session = await createSession();
+
+		session.setFastMode(true, "both");
+
+		expect(session.serviceTier).toBe("priority");
+	});
+
+	it("adds OpenAI while scoped fast mode is already enabled for Claude", async () => {
+		const session = await createSession();
+		session.setServiceTier("claude-only");
+
+		session.setFastMode(true, "openai");
+
+		expect(session.serviceTier).toBe("priority");
+	});
 });

@@ -12,6 +12,9 @@ import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-sessi
 import type { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { executeAcpBuiltinSlashCommand } from "@oh-my-pi/pi-coding-agent/slash-commands/acp-builtins";
 
+type FakeServiceTier = "priority" | "openai-only" | "claude-only";
+type FakeFastModeScope = "openai" | "claude" | "both";
+
 interface FakeAcpBuiltinSession {
 	fastMode: boolean;
 	forcedToolChoice: string | undefined;
@@ -21,8 +24,9 @@ interface FakeAcpBuiltinSession {
 	sessionName: string;
 	_todoPhases: Array<{ name: string; tasks: Array<{ content: string; status: string }> }>;
 	toggleFastMode(): boolean;
-	setFastMode(enabled: boolean): void;
+	setFastMode(enabled: boolean, scope?: FakeFastModeScope): void;
 	isFastModeEnabled(): boolean;
+	serviceTier: FakeServiceTier | undefined;
 	setForcedToolChoice(toolName: string): void;
 	fetchUsageReports?: () => Promise<unknown>;
 	getAsyncJobSnapshot: (opts?: { recentLimit?: number }) => { running: unknown[]; recent: unknown[] } | null;
@@ -53,6 +57,7 @@ function createRuntime() {
 	const output: string[] = [];
 	const session: FakeAcpBuiltinSession = {
 		fastMode: false,
+		serviceTier: undefined,
 		forcedToolChoice: undefined as string | undefined,
 		isStreaming: false,
 		sessionFile: undefined,
@@ -60,14 +65,43 @@ function createRuntime() {
 		sessionName: "Fake Session",
 		_todoPhases: [],
 		toggleFastMode() {
-			this.fastMode = !this.fastMode;
-			return this.fastMode;
+			const enabled = !this.isFastModeEnabled();
+			this.setFastMode(enabled);
+			return enabled;
 		},
-		setFastMode(enabled: boolean) {
-			this.fastMode = enabled;
+		setFastMode(enabled: boolean, scope?: FakeFastModeScope) {
+			if (scope === undefined) {
+				this.fastMode = enabled;
+				this.serviceTier = enabled ? "priority" : undefined;
+				return;
+			}
+
+			let openaiEnabled = this.serviceTier === "priority" || this.serviceTier === "openai-only";
+			let claudeEnabled = this.serviceTier === "priority" || this.serviceTier === "claude-only";
+			const scopeIncludesOpenai = scope === "openai" || scope === "both";
+			const scopeIncludesClaude = scope === "claude" || scope === "both";
+			if (enabled) {
+				openaiEnabled = openaiEnabled || scopeIncludesOpenai;
+				claudeEnabled = claudeEnabled || scopeIncludesClaude;
+			} else {
+				if (scopeIncludesOpenai) openaiEnabled = false;
+				if (scopeIncludesClaude) claudeEnabled = false;
+			}
+			if (openaiEnabled && claudeEnabled) {
+				this.serviceTier = "priority";
+			} else if (openaiEnabled) {
+				this.serviceTier = "openai-only";
+			} else if (claudeEnabled) {
+				this.serviceTier = "claude-only";
+			} else {
+				this.serviceTier = undefined;
+			}
+			this.fastMode = this.serviceTier !== undefined;
 		},
 		isFastModeEnabled() {
-			return this.fastMode;
+			return (
+				this.serviceTier === "priority" || this.serviceTier === "openai-only" || this.serviceTier === "claude-only"
+			);
 		},
 		setForcedToolChoice(toolName: string) {
 			this.forcedToolChoice = toolName;
@@ -178,6 +212,46 @@ describe("ACP builtin slash commands", () => {
 
 		expect(result).toEqual({ consumed: true });
 		expect(output).toEqual(["Fast mode is off."]);
+	});
+
+	it("enables OpenAI-scoped fast mode from /fast on gpt", async () => {
+		const { output, runtime } = createRuntime();
+
+		const result = await executeAcpBuiltinSlashCommand("/fast on gpt", runtime);
+
+		expect(result).toEqual({ consumed: true });
+		expect(runtime.session.serviceTier).toBe("openai-only");
+		expect(output).toEqual(["Fast mode on (OpenAI only)."]);
+	});
+
+	it("removes Claude from scoped fast mode with /fast off claude", async () => {
+		const { output, runtime } = createRuntime();
+		runtime.session.setFastMode(true);
+
+		const result = await executeAcpBuiltinSlashCommand("/fast off claude", runtime);
+
+		expect(result).toEqual({ consumed: true });
+		expect(runtime.session.serviceTier).toBe("openai-only");
+		expect(output).toEqual(["Fast mode on (OpenAI only)."]);
+	});
+
+	it("treats bare /fast gpt as OpenAI-scoped enable", async () => {
+		const { output, runtime } = createRuntime();
+
+		const result = await executeAcpBuiltinSlashCommand("/fast gpt", runtime);
+
+		expect(result).toEqual({ consumed: true });
+		expect(runtime.session.serviceTier).toBe("openai-only");
+		expect(output).toEqual(["Fast mode on (OpenAI only)."]);
+	});
+
+	it("prints scoped fast mode usage for unknown tokens", async () => {
+		const { output, runtime } = createRuntime();
+
+		const result = await executeAcpBuiltinSlashCommand("/fast turbo", runtime);
+
+		expect(result).toEqual({ consumed: true });
+		expect(output).toEqual(["Usage: /fast [on|off|status] [gpt|claude|both]"]);
 	});
 
 	it("forces a tool and returns remaining prompt text", async () => {

@@ -6710,17 +6710,46 @@ export class AgentSession {
 		this.sessionManager.appendServiceTierChange(serviceTier ?? null);
 	}
 
-	setFastMode(enabled: boolean): void {
-		if (enabled && this.isFastModeEnabled()) {
-			// Already on under any scope — keep the user's scoped value.
+	setFastMode(enabled: boolean, scope?: "openai" | "claude" | "both"): void {
+		if (scope === undefined) {
+			if (enabled && this.isFastModeEnabled()) {
+				// Already on under any scope — keep the user's scoped value.
+				return;
+			}
+			if (!enabled) {
+				this.setServiceTier(undefined);
+				return;
+			}
+			const configuredScope = this.settings.get("fastModeScope");
+			this.setServiceTier(
+				configuredScope === "openai" ? "openai-only" : configuredScope === "claude" ? "claude-only" : "priority",
+			);
 			return;
 		}
-		if (!enabled) {
-			this.setServiceTier(undefined);
-			return;
+
+		const serviceTier = this.serviceTier;
+		let openaiEnabled = serviceTier === "priority" || serviceTier === "openai-only";
+		let claudeEnabled = serviceTier === "priority" || serviceTier === "claude-only";
+		const scopeIncludesOpenai = scope === "openai" || scope === "both";
+		const scopeIncludesClaude = scope === "claude" || scope === "both";
+
+		if (enabled) {
+			openaiEnabled = openaiEnabled || scopeIncludesOpenai;
+			claudeEnabled = claudeEnabled || scopeIncludesClaude;
+		} else {
+			if (scopeIncludesOpenai) openaiEnabled = false;
+			if (scopeIncludesClaude) claudeEnabled = false;
 		}
-		const scope = this.settings.get("fastModeScope");
-		this.setServiceTier(scope === "openai" ? "openai-only" : scope === "claude" ? "claude-only" : "priority");
+
+		let nextServiceTier: ServiceTier | undefined;
+		if (openaiEnabled && claudeEnabled) {
+			nextServiceTier = "priority";
+		} else if (openaiEnabled) {
+			nextServiceTier = "openai-only";
+		} else if (claudeEnabled) {
+			nextServiceTier = "claude-only";
+		}
+		this.setServiceTier(nextServiceTier);
 	}
 
 	toggleFastMode(): boolean {

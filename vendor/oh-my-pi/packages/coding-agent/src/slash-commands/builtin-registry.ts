@@ -63,6 +63,62 @@ function refreshStatusLine(ctx: InteractiveModeContext): void {
 	ctx.ui.requestRender();
 }
 
+type FastModeScope = "openai" | "claude" | "both";
+
+type ParsedFastModeCommand =
+	| { kind: "toggle" }
+	| { kind: "status" }
+	| { kind: "set"; enabled: boolean; scope?: FastModeScope }
+	| { kind: "usage" };
+
+const FAST_MODE_USAGE = "Usage: /fast [on|off|status] [gpt|claude|both]";
+
+function parseFastModeScope(token: string): FastModeScope | undefined {
+	switch (token) {
+		case "gpt":
+		case "openai":
+		case "oai":
+		case "codex":
+			return "openai";
+		case "claude":
+		case "anthropic":
+		case "opus":
+			return "claude";
+		case "both":
+		case "all":
+			return "both";
+		default:
+			return undefined;
+	}
+}
+
+function parseFastModeCommand(args: string): ParsedFastModeCommand {
+	const trimmed = args.trim().toLowerCase();
+	if (!trimmed) return { kind: "toggle" };
+
+	const tokens = trimmed.split(/\s+/);
+	if (tokens.length === 1) {
+		const token = tokens[0]!;
+		if (token === "toggle") return { kind: "toggle" };
+		if (token === "status") return { kind: "status" };
+		if (token === "on") return { kind: "set", enabled: true };
+		if (token === "off") return { kind: "set", enabled: false };
+		const scope = parseFastModeScope(token);
+		return scope ? { kind: "set", enabled: true, scope } : { kind: "usage" };
+	}
+
+	if (tokens.length === 2) {
+		const verb = tokens[0]!;
+		const scopeToken = tokens[1]!;
+		const scope = parseFastModeScope(scopeToken);
+		if (scope && (verb === "on" || verb === "off")) {
+			return { kind: "set", enabled: verb === "on", scope };
+		}
+	}
+
+	return { kind: "usage" };
+}
+
 /** `/fast status` label: "off", "on", or scope-qualified "on (… only)". */
 function formatFastModeStatus(session: AgentSession): string {
 	if (!session.isFastModeEnabled()) return "off";
@@ -394,68 +450,67 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 	},
 	{
 		name: "fast",
-		description: "Toggle priority service tier (OpenAI service_tier=priority, Anthropic speed=fast)",
+		description: "Toggle fast mode for both providers or a specific provider scope",
 		acpDescription: "Toggle fast mode",
-		acpInputHint: "[on|off|status]",
+		acpInputHint: "[on|off|status|toggle] [gpt|claude|both]",
 		subcommands: [
-			{ name: "on", description: "Enable fast mode" },
-			{ name: "off", description: "Disable fast mode" },
+			{ name: "on", description: "Enable fast mode", usage: "[gpt|claude|both]" },
+			{ name: "off", description: "Disable fast mode", usage: "[gpt|claude|both]" },
 			{ name: "status", description: "Show fast mode status" },
 		],
 		allowArgs: true,
 		handle: async (command, runtime) => {
-			const arg = command.args.toLowerCase();
-			if (!arg || arg === "toggle") {
-				const enabled = runtime.session.toggleFastMode();
-				await runtime.output(`Fast mode ${enabled ? "enabled" : "disabled"}.`);
-				return commandConsumed();
+			const parsed = parseFastModeCommand(command.args);
+			switch (parsed.kind) {
+				case "toggle": {
+					const enabled = runtime.session.toggleFastMode();
+					await runtime.output(`Fast mode ${enabled ? "enabled" : "disabled"}.`);
+					return commandConsumed();
+				}
+				case "set":
+					runtime.session.setFastMode(parsed.enabled, parsed.scope);
+					await runtime.output(
+						parsed.scope
+							? `Fast mode ${formatFastModeStatus(runtime.session)}.`
+							: `Fast mode ${parsed.enabled ? "enabled" : "disabled"}.`,
+					);
+					return commandConsumed();
+				case "status":
+					await runtime.output(`Fast mode is ${formatFastModeStatus(runtime.session)}.`);
+					return commandConsumed();
+				case "usage":
+					return usage(FAST_MODE_USAGE, runtime);
 			}
-			if (arg === "on") {
-				runtime.session.setFastMode(true);
-				await runtime.output("Fast mode enabled.");
-				return commandConsumed();
-			}
-			if (arg === "off") {
-				runtime.session.setFastMode(false);
-				await runtime.output("Fast mode disabled.");
-				return commandConsumed();
-			}
-			if (arg === "status") {
-				await runtime.output(`Fast mode is ${formatFastModeStatus(runtime.session)}.`);
-				return commandConsumed();
-			}
-			return usage("Usage: /fast [on|off|status]", runtime);
 		},
 		handleTui: (command, runtime) => {
-			const arg = command.args.trim().toLowerCase();
-			if (!arg || arg === "toggle") {
-				const enabled = runtime.ctx.session.toggleFastMode();
-				refreshStatusLine(runtime.ctx);
-				runtime.ctx.showStatus(`Fast mode ${enabled ? "enabled" : "disabled"}.`);
-				runtime.ctx.editor.setText("");
-				return;
+			const parsed = parseFastModeCommand(command.args);
+			switch (parsed.kind) {
+				case "toggle": {
+					const enabled = runtime.ctx.session.toggleFastMode();
+					refreshStatusLine(runtime.ctx);
+					runtime.ctx.showStatus(`Fast mode ${enabled ? "enabled" : "disabled"}.`);
+					runtime.ctx.editor.setText("");
+					return;
+				}
+				case "set":
+					runtime.ctx.session.setFastMode(parsed.enabled, parsed.scope);
+					refreshStatusLine(runtime.ctx);
+					runtime.ctx.showStatus(
+						parsed.scope
+							? `Fast mode ${formatFastModeStatus(runtime.ctx.session)}.`
+							: `Fast mode ${parsed.enabled ? "enabled" : "disabled"}.`,
+					);
+					runtime.ctx.editor.setText("");
+					return;
+				case "status":
+					runtime.ctx.showStatus(`Fast mode is ${formatFastModeStatus(runtime.ctx.session)}.`);
+					runtime.ctx.editor.setText("");
+					return;
+				case "usage":
+					runtime.ctx.showStatus(FAST_MODE_USAGE);
+					runtime.ctx.editor.setText("");
+					return;
 			}
-			if (arg === "on") {
-				runtime.ctx.session.setFastMode(true);
-				refreshStatusLine(runtime.ctx);
-				runtime.ctx.showStatus("Fast mode enabled.");
-				runtime.ctx.editor.setText("");
-				return;
-			}
-			if (arg === "off") {
-				runtime.ctx.session.setFastMode(false);
-				refreshStatusLine(runtime.ctx);
-				runtime.ctx.showStatus("Fast mode disabled.");
-				runtime.ctx.editor.setText("");
-				return;
-			}
-			if (arg === "status") {
-				runtime.ctx.showStatus(`Fast mode is ${formatFastModeStatus(runtime.ctx.session)}.`);
-				runtime.ctx.editor.setText("");
-				return;
-			}
-			runtime.ctx.showStatus("Usage: /fast [on|off|status]");
-			runtime.ctx.editor.setText("");
 		},
 	},
 	{
