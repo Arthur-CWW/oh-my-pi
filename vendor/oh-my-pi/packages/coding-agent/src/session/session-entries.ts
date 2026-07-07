@@ -85,6 +85,13 @@ export interface BranchSummaryEntry<T = unknown> extends SessionEntryBase {
 	fromExtension?: boolean;
 }
 
+/** Persisted active leaf selection. Not a conversation tree node. */
+export interface LeafChangeEntry extends SessionEntryBase {
+	type: "leaf_change";
+	/** Null means root/no active leaf; unknown non-null targets are ignored on replay. */
+	target: string | null;
+}
+
 /**
  * Custom entry for extensions to store extension-specific data in the session.
  * Use customType to identify your extension's entries.
@@ -166,7 +173,7 @@ export interface CustomMessageEntry<T = unknown> extends SessionEntryBase {
 	attribution?: MessageAttribution;
 }
 
-/** Session entry - has id/parentId for tree structure (returned by "read" methods in SessionManager) */
+/** Session entry - has id/parentId for persisted journal entries (tree entries plus metadata entries). */
 export type SessionEntry =
 	| SessionMessageEntry
 	| ThinkingLevelChangeEntry
@@ -174,6 +181,7 @@ export type SessionEntry =
 	| ServiceTierChangeEntry
 	| CompactionEntry
 	| BranchSummaryEntry
+	| LeafChangeEntry
 	| CustomEntry
 	| CustomMessageEntry
 	| LabelEntry

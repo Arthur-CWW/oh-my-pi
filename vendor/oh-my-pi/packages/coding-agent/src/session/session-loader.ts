@@ -1,7 +1,7 @@
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import { getBlobsDir, isEnoent, parseJsonlLenient } from "@oh-my-pi/pi-utils";
 import { BlobStore, isBlobRef, resolveImageData, resolveImageDataUrl } from "./blob-store";
-import { buildSessionContext } from "./session-context";
+import { buildSessionContext, resolveSessionLeaf } from "./session-context";
 import type { FileEntry, SessionEntry, SessionHeader } from "./session-entries";
 import { migrateToCurrentVersion } from "./session-migrations";
 import { isImageBlock } from "./session-persistence";
@@ -120,8 +120,8 @@ export async function resolveBlobRefsInEntries(entries: FileEntry[], blobStore: 
 /**
  * Read-only message view of a session file: load entries, migrate to the
  * current version, resolve blob refs, and build the context along the
- * persisted leaf path (last entry). Does NOT create a writer or take the
- * session lock — safe to call against a file another session is writing.
+ * replayed persisted leaf path. Does NOT create a writer or take the session
+ * lock — safe to call against a file another session is writing.
  */
 export async function loadSessionMessagesReadOnly(filePath: string): Promise<AgentMessage[]> {
 	const entries = await loadEntriesFromFile(filePath);
@@ -129,5 +129,6 @@ export async function loadSessionMessagesReadOnly(filePath: string): Promise<Age
 	migrateToCurrentVersion(entries);
 	await resolveBlobRefsInEntries(entries, new BlobStore(getBlobsDir()));
 	const sessionEntries = entries.filter((e): e is SessionEntry => e.type !== "session");
-	return buildSessionContext(sessionEntries).messages;
+	const leaf = resolveSessionLeaf(sessionEntries);
+	return buildSessionContext(sessionEntries, leaf.leafId, leaf.entriesById).messages;
 }

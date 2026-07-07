@@ -109,6 +109,13 @@ export interface ModeChangeEntry extends SessionEntryBase {
 	data?: Record<string, unknown>;
 }
 
+/** Persisted active leaf selection. Not a conversation tree node. */
+export interface LeafChangeEntry extends SessionEntryBase {
+	type: "leaf_change";
+	/** Null means root/no active leaf; unknown non-null targets are ignored on replay. */
+	target: string | null;
+}
+
 export interface CustomCompactionSessionEntries {}
 
 export type SessionEntry =
@@ -125,6 +132,7 @@ export type SessionEntry =
 	| MCPToolSelectionEntry
 	| SessionInitEntry
 	| ModeChangeEntry
+	| LeafChangeEntry
 	| CustomCompactionSessionEntries[keyof CustomCompactionSessionEntries];
 
 export interface ReadonlySessionManager {

@@ -48,6 +48,24 @@ export interface ResolvedSessionMatch {
 	scope: "local" | "global";
 }
 
+export type SessionScanSkipReason = "missing_header" | "unreadable" | "scan_error";
+
+export interface SessionScanSkippedFile {
+	path: string;
+	reason: SessionScanSkipReason;
+	message?: string;
+}
+
+export interface SessionListResult {
+	sessions: SessionInfo[];
+	skippedFiles: SessionScanSkippedFile[];
+}
+
+export interface ResolvedSessionLookup {
+	match: ResolvedSessionMatch | undefined;
+	skippedFiles: SessionScanSkippedFile[];
+}
+
 /** Lightweight metadata for a recent session, used in welcome/picker UI. */
 export interface RecentSessionInfo {
 	path: string;
@@ -346,7 +364,7 @@ async function scanSessionFile(
 	file: string,
 	storage: SessionStorage,
 	withStatus: boolean,
-): Promise<SessionInfo | undefined> {
+): Promise<{ session?: SessionInfo; skipped?: SessionScanSkippedFile }> {
 	try {
 		const stat = storage.statSync(file);
 		const [content, suffix] = await storage.readTextSlices(
@@ -357,7 +375,7 @@ async function scanSessionFile(
 		const { size, mtime } = stat;
 		const entries = parseJsonlLenient<Record<string, unknown>>(content);
 		const header = parseSessionListHeader(content, entries);
-		if (!header) return undefined;
+		if (!header) return { skipped: { path: file, reason: "missing_header" } };
 
 		let parsedMessageCount = 0;
 		let firstMessage = "";
@@ -391,21 +409,23 @@ async function scanSessionFile(
 		firstMessage ||= extractFirstUserMessageFromPrefix(content) ?? "";
 		const messageCount = Math.max(parsedMessageCount, countMessageMarkers(content));
 		return {
-			path: file,
-			id: header.id,
-			cwd: header.cwd ?? "",
-			title: header.title ?? shortSummary,
-			parentSessionPath: header.parentSession,
-			created: new Date(header.timestamp ?? ""),
-			modified: mtime,
-			messageCount,
-			size,
-			firstMessage: firstMessage || "(no messages)",
-			allMessagesText: allMessages.length > 0 ? allMessages.join(" ") : firstMessage,
-			status: withStatus ? deriveSessionStatus(suffix) : undefined,
+			session: {
+				path: file,
+				id: header.id,
+				cwd: header.cwd ?? "",
+				title: header.title ?? shortSummary,
+				parentSessionPath: header.parentSession,
+				created: new Date(header.timestamp ?? ""),
+				modified: mtime,
+				messageCount,
+				size,
+				firstMessage: firstMessage || "(no messages)",
+				allMessagesText: allMessages.length > 0 ? allMessages.join(" ") : firstMessage,
+				status: withStatus ? deriveSessionStatus(suffix) : undefined,
+			},
 		};
-	} catch {
-		return undefined;
+	} catch (err) {
+		return { skipped: { path: file, reason: "unreadable", message: toError(err).message } };
 	}
 }
 
@@ -415,24 +435,26 @@ async function collectSessionsFromFileStride(
 	startIndex: number,
 	stride: number,
 	withStatus: boolean,
-): Promise<SessionInfo[]> {
+): Promise<SessionListResult> {
 	const sessions: SessionInfo[] = [];
+	const skippedFiles: SessionScanSkippedFile[] = [];
 
 	for (let i = startIndex; i < files.length; i += stride) {
-		const session = await scanSessionFile(files[i], storage, withStatus);
-		if (session) sessions.push(session);
+		const result = await scanSessionFile(files[i], storage, withStatus);
+		if (result.session) sessions.push(result.session);
+		if (result.skipped) skippedFiles.push(result.skipped);
 	}
 
-	return sessions;
+	return { sessions, skippedFiles };
 }
 
 async function collectSessionsFromFiles(
 	files: string[],
 	storage: SessionStorage,
 	withStatus: boolean,
-): Promise<SessionInfo[]> {
+): Promise<SessionListResult> {
 	const workerCount = getSessionListWorkerCount(files.length);
-	const sessions =
+	const result =
 		workerCount === 1
 			? await collectSessionsFromFileStride(files, storage, 0, 1, withStatus)
 			: (
@@ -441,10 +463,17 @@ async function collectSessionsFromFiles(
 							collectSessionsFromFileStride(files, storage, workerIndex, workerCount, withStatus),
 						),
 					)
-				).flat();
+				).reduce<SessionListResult>(
+					(acc, part) => {
+						acc.sessions.push(...part.sessions);
+						acc.skippedFiles.push(...part.skippedFiles);
+						return acc;
+					},
+					{ sessions: [], skippedFiles: [] },
+				);
 
-	sessions.sort((a, b) => b.modified.getTime() - a.modified.getTime());
-	return sessions;
+	result.sessions.sort((a, b) => b.modified.getTime() - a.modified.getTime());
+	return result;
 }
 
 /**
@@ -505,17 +534,39 @@ export async function recoverOrphanedBackups(sessionDir: string, storage: Sessio
 	}
 }
 
+function logSkippedSessionFiles(skippedFiles: readonly SessionScanSkippedFile[]): void {
+	if (skippedFiles.length === 0) return;
+	logger.warn("Skipped unreadable session files during scan", {
+		count: skippedFiles.length,
+		paths: skippedFiles.map(file => file.path),
+	});
+}
+
+function dedupeSkippedSessionFiles(skippedFiles: readonly SessionScanSkippedFile[]): SessionScanSkippedFile[] {
+	const seen = new Set<string>();
+	const deduped: SessionScanSkippedFile[] = [];
+	for (const file of skippedFiles) {
+		if (seen.has(file.path)) continue;
+		seen.add(file.path);
+		deduped.push(file);
+	}
+	return deduped;
+}
+
 async function scanSessionDir(
 	sessionDir: string,
 	storage: SessionStorage,
 	withStatus: boolean,
-): Promise<SessionInfo[]> {
+): Promise<SessionListResult> {
 	try {
 		await recoverOrphanedBackups(sessionDir, storage);
 		const files = storage.listFilesSync(sessionDir, "*.jsonl");
 		return await collectSessionsFromFiles(files, storage, withStatus);
-	} catch {
-		return [];
+	} catch (err) {
+		return {
+			sessions: [],
+			skippedFiles: [{ path: sessionDir, reason: "scan_error", message: toError(err).message }],
+		};
 	}
 }
 
@@ -523,20 +574,45 @@ async function scanSessionDir(
  * List sessions in a resolved session directory (newest first), reading each
  * file's lifecycle {@link SessionStatus}.
  */
-export function listSessions(sessionDir: string, storage: SessionStorage): Promise<SessionInfo[]> {
-	return scanSessionDir(sessionDir, storage, true);
+export async function listSessions(sessionDir: string, storage: SessionStorage): Promise<SessionInfo[]> {
+	const result = await scanSessionDir(sessionDir, storage, true);
+	logSkippedSessionFiles(result.skippedFiles);
+	return result.sessions;
+}
+
+export async function listSessionsWithDiagnostics(
+	sessionDir: string,
+	storage: SessionStorage,
+): Promise<SessionListResult> {
+	const result = await scanSessionDir(sessionDir, storage, true);
+	logSkippedSessionFiles(result.skippedFiles);
+	return result;
 }
 
 /** List all sessions across all project directories (newest first). */
 export async function listAllSessions(storage: SessionStorage = new FileSessionStorage()): Promise<SessionInfo[]> {
+	const result = await listAllSessionsWithDiagnostics(storage);
+	return result.sessions;
+}
+
+export async function listAllSessionsWithDiagnostics(
+	storage: SessionStorage = new FileSessionStorage(),
+): Promise<SessionListResult> {
 	const sessionsRoot = path.join(getDefaultAgentDir(), "sessions");
 	try {
 		const files = await Array.fromAsync(new Bun.Glob("*/*.jsonl").scan(sessionsRoot), name =>
 			path.join(sessionsRoot, name),
 		);
-		return await collectSessionsFromFiles(files, storage, true);
-	} catch {
-		return [];
+		const result = await collectSessionsFromFiles(files, storage, true);
+		logSkippedSessionFiles(result.skippedFiles);
+		return result;
+	} catch (err) {
+		const result = {
+			sessions: [],
+			skippedFiles: [{ path: sessionsRoot, reason: "scan_error" as const, message: toError(err).message }],
+		};
+		logSkippedSessionFiles(result.skippedFiles);
+		return result;
 	}
 }
 
@@ -545,8 +621,9 @@ export async function findMostRecentSession(
 	sessionDir: string,
 	storage: SessionStorage = new FileSessionStorage(),
 ): Promise<string | null> {
-	const sessions = await scanSessionDir(sessionDir, storage, false);
-	return sessions[0]?.path ?? null;
+	const result = await scanSessionDir(sessionDir, storage, false);
+	logSkippedSessionFiles(result.skippedFiles);
+	return result.sessions[0]?.path ?? null;
 }
 
 /** Get recent sessions for display in the welcome screen. */
@@ -555,10 +632,11 @@ export async function getRecentSessions(
 	limit = 4,
 	storage: SessionStorage = new FileSessionStorage(),
 ): Promise<RecentSessionInfo[]> {
-	const sessions = await scanSessionDir(sessionDir, storage, false);
+	const result = await scanSessionDir(sessionDir, storage, false);
+	logSkippedSessionFiles(result.skippedFiles);
 	const recent: RecentSessionInfo[] = [];
-	for (let i = 0; i < sessions.length && i < limit; i++) {
-		const info = sessions[i];
+	for (let i = 0; i < result.sessions.length && i < limit; i++) {
+		const info = result.sessions[i];
 		recent.push({ path: info.path, name: sessionDisplayName(info), timeAgo: formatTimeAgo(info.modified) });
 	}
 	return recent;
@@ -591,22 +669,32 @@ export async function resolveResumableSession(
 	sessionDir?: string,
 	storage: SessionStorage = new FileSessionStorage(),
 ): Promise<ResolvedSessionMatch | undefined> {
+	return (await resolveResumableSessionWithDiagnostics(sessionArg, cwd, sessionDir, storage)).match;
+}
+
+export async function resolveResumableSessionWithDiagnostics(
+	sessionArg: string,
+	cwd: string,
+	sessionDir?: string,
+	storage: SessionStorage = new FileSessionStorage(),
+): Promise<ResolvedSessionLookup> {
 	const localSessionDir = sessionDir ?? computeDefaultSessionDir(cwd, storage);
-	const localSessions = await listSessions(localSessionDir, storage);
-	const localMatch = localSessions.find(session => sessionMatchesResumeArg(session, sessionArg));
+	const localResult = await listSessionsWithDiagnostics(localSessionDir, storage);
+	const localMatch = localResult.sessions.find(session => sessionMatchesResumeArg(session, sessionArg));
 	if (localMatch) {
-		return { session: localMatch, scope: "local" };
+		return { match: { session: localMatch, scope: "local" }, skippedFiles: localResult.skippedFiles };
 	}
 
 	if (sessionDir) {
-		return undefined;
+		return { match: undefined, skippedFiles: localResult.skippedFiles };
 	}
 
-	const globalSessions = await listAllSessions(storage);
-	const globalMatch = globalSessions.find(session => sessionMatchesResumeArg(session, sessionArg));
+	const globalResult = await listAllSessionsWithDiagnostics(storage);
+	const globalMatch = globalResult.sessions.find(session => sessionMatchesResumeArg(session, sessionArg));
+	const skippedFiles = dedupeSkippedSessionFiles([...localResult.skippedFiles, ...globalResult.skippedFiles]);
 	if (!globalMatch) {
-		return undefined;
+		return { match: undefined, skippedFiles };
 	}
 
-	return { session: globalMatch, scope: "global" };
+	return { match: { session: globalMatch, scope: "global" }, skippedFiles };
 }

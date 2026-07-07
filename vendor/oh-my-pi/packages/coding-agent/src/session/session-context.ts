@@ -62,6 +62,35 @@ export interface BuildSessionContextOptions {
 	transcript?: boolean;
 }
 
+export function resolveLeafIdAfterSessionEntry(
+	currentLeafId: string | null,
+	entriesById: ReadonlyMap<string, SessionEntry>,
+	entry: SessionEntry,
+): string | null {
+	if (entry.type === "leaf_change") {
+		return entry.target === null || entriesById.has(entry.target) ? entry.target : currentLeafId;
+	}
+	return entry.id;
+}
+
+export interface ResolvedSessionLeaf {
+	leafId: string | null;
+	entriesById: Map<string, SessionEntry>;
+}
+
+export function resolveSessionLeaf(entries: readonly SessionEntry[]): ResolvedSessionLeaf {
+	const entriesById = new Map<string, SessionEntry>();
+	let leafId: string | null = null;
+
+	for (const entry of entries) {
+		const nextLeafId = resolveLeafIdAfterSessionEntry(leafId, entriesById, entry);
+		if (entry.type !== "leaf_change") entriesById.set(entry.id, entry);
+		leafId = nextLeafId;
+	}
+
+	return { leafId, entriesById };
+}
+
 /**
  * Build the session context from entries using tree traversal.
  * If leafId is provided, walks from that entry to root.

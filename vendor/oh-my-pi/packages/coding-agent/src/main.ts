@@ -64,7 +64,11 @@ import {
 } from "./sdk";
 import type { AgentSession } from "./session/agent-session";
 import type { AuthStorage } from "./session/auth-storage";
-import { resolveResumableSession, type SessionInfo } from "./session/session-listing";
+import {
+	resolveResumableSessionWithDiagnostics,
+	type SessionInfo,
+	type SessionScanSkippedFile,
+} from "./session/session-listing";
 import { SessionManager } from "./session/session-manager";
 import { executeBuiltinSlashCommand } from "./slash-commands/builtin-registry";
 import { discoverTitleSystemPromptFile, resolvePromptInput } from "./system-prompt";
@@ -545,6 +549,19 @@ export class SessionResolutionError extends Error {
 	}
 }
 
+function skippedSessionFilesSuffix(skippedFiles: readonly SessionScanSkippedFile[]): string {
+	if (skippedFiles.length === 0) return "";
+	return ` (${skippedFiles.length} unreadable files skipped — see debug log)`;
+}
+
+function continueStartupMessage(manager: SessionManager): string | undefined {
+	const sessionFile = manager.getSessionFile();
+	const provenance = manager.getContinueProvenance();
+	if (!sessionFile || !provenance) return undefined;
+	const verb = provenance.startsWith("new session") ? "Starting" : "Continuing";
+	return `${verb} ${sessionFile} (${provenance})`;
+}
+
 type MissingCwdMoveResult =
 	| { status: "not-needed" }
 	| { status: "declined" }
@@ -623,10 +640,11 @@ export async function createSessionManager(
 		if (forkSource.includes("/") || forkSource.includes("\\") || forkSource.endsWith(".jsonl")) {
 			return await SessionManager.forkFrom(forkSource, cwd, parsed.sessionDir);
 		}
-		const match = await resolveResumableSession(forkSource, cwd, parsed.sessionDir);
+		const lookup = await resolveResumableSessionWithDiagnostics(forkSource, cwd, parsed.sessionDir);
+		const match = lookup.match;
 		if (!match) {
 			throw new SessionResolutionError(
-				`Session "${forkSource}" not found.`,
+				`Session "${forkSource}" not found.${skippedSessionFilesSuffix(lookup.skippedFiles)}`,
 				"Run `omp --resume` without an argument to pick from recent sessions, or `omp` to start a new one.",
 			);
 		}
@@ -641,10 +659,11 @@ export async function createSessionManager(
 		if (sessionArg.includes("/") || sessionArg.includes("\\") || sessionArg.endsWith(".jsonl")) {
 			return await SessionManager.open(sessionArg, parsed.sessionDir);
 		}
-		const match = await resolveResumableSession(sessionArg, cwd, parsed.sessionDir);
+		const lookup = await resolveResumableSessionWithDiagnostics(sessionArg, cwd, parsed.sessionDir);
+		const match = lookup.match;
 		if (!match) {
 			throw new SessionResolutionError(
-				`Session "${sessionArg}" not found.`,
+				`Session "${sessionArg}" not found.${skippedSessionFilesSuffix(lookup.skippedFiles)}`,
 				"Run `omp --resume` without an argument to pick from recent sessions, or `omp` to start a new one.",
 			);
 		}
@@ -1088,6 +1107,11 @@ export async function runRootCommand(
 		throw error;
 	}
 
+	const continueMessage = sessionManager ? continueStartupMessage(sessionManager) : undefined;
+	if (continueMessage) {
+		notifs.push({ kind: "info", message: continueMessage });
+	}
+
 	// User declined the cross-project fork prompt — exit cleanly with a friendly
 	// message rather than letting the decline bubble up as an uncaught exception
 	// (see issue #1668).
@@ -1098,15 +1122,24 @@ export async function runRootCommand(
 
 	// Handle --resume (no value): show session picker
 	if (parsedArgs.resume === true && !parsedArgs.fork) {
-		const folderSessions = await logger.time("SessionManager.list", SessionManager.list, cwd, parsedArgs.sessionDir);
+		const folderResult = await logger.time(
+			"SessionManager.list",
+			SessionManager.listWithDiagnostics,
+			cwd,
+			parsedArgs.sessionDir,
+		);
+		const folderSessions = folderResult.sessions;
 		let preloadedAllSessions: SessionInfo[] | undefined;
 		let startInAllScope = false;
 		if (folderSessions.length === 0) {
 			// Nothing in the current folder — fall back to a global scan so the
 			// picker can still open in all-projects scope instead of dead-ending.
-			preloadedAllSessions = await logger.time("SessionManager.listAll", SessionManager.listAll);
+			const allResult = await logger.time("SessionManager.listAll", SessionManager.listAllWithDiagnostics);
+			preloadedAllSessions = allResult.sessions;
 			if (preloadedAllSessions.length === 0) {
-				process.stdout.write(`${chalk.dim("No sessions found")}\n`);
+				process.stdout.write(
+					`${chalk.dim(`No sessions found${skippedSessionFilesSuffix([...folderResult.skippedFiles, ...allResult.skippedFiles])}`)}\n`,
+				);
 				return;
 			}
 			startInAllScope = true;

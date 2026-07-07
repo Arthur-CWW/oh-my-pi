@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import * as path from "node:path";
+import { isWireSessionEntry } from "@oh-my-pi/pi-coding-agent/collab/host";
 import { isBlobRef } from "@oh-my-pi/pi-coding-agent/session/blob-store";
 import type { SessionEntry } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
@@ -89,6 +90,36 @@ describe("SessionManager collab replication", () => {
 		await loaded.setSessionFile(file);
 		expect(loaded.getEntry("feed0001")?.parentId).toBe(rootId);
 		expect(loaded.getEntry(nextId)?.parentId).toBe("feed0001");
+	});
+
+	it("replicates leaf_change entries in live frames and welcome snapshots", () => {
+		const { manager: host } = makeManager();
+		const { manager: liveGuest } = makeManager();
+		const rootId = host.appendMessage({ role: "user", content: "root", timestamp: Date.now() });
+		const mainLeaf = host.appendMessage({ role: "user", content: "main", timestamp: Date.now() });
+		host.branch(rootId);
+		const branchLeaf = host.appendMessage({ role: "user", content: "branch", timestamp: Date.now() });
+
+		for (const entry of host.snapshotForReplication().entries.filter(isWireSessionEntry)) {
+			liveGuest.ingestReplicatedEntry(entry);
+		}
+		expect(liveGuest.getLeafId()).toBe(branchLeaf);
+
+		const liveFrames: SessionEntry[] = [];
+		host.onEntryAppended = entry => {
+			if (isWireSessionEntry(entry)) liveFrames.push(entry);
+		};
+		host.branch(mainLeaf);
+
+		expect(liveFrames.map(entry => entry.type)).toEqual(["leaf_change"]);
+		for (const entry of liveFrames) liveGuest.ingestReplicatedEntry(entry);
+		expect(liveGuest.getLeafId()).toBe(mainLeaf);
+
+		const { manager: welcomeGuest } = makeManager();
+		for (const entry of host.snapshotForReplication().entries.filter(isWireSessionEntry)) {
+			welcomeGuest.ingestReplicatedEntry(entry);
+		}
+		expect(welcomeGuest.getLeafId()).toBe(mainLeaf);
 	});
 
 	it("snapshotForReplication deep-copies entries and preserves the header identity", () => {

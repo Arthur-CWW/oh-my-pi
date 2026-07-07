@@ -13,7 +13,12 @@ import {
 	sanitizeRehydratedOpenAIResponsesAssistantMessage,
 	stripInternalDetailsFields,
 } from "./messages";
-import { type BuildSessionContextOptions, buildSessionContext, type SessionContext } from "./session-context";
+import {
+	type BuildSessionContextOptions,
+	buildSessionContext,
+	resolveLeafIdAfterSessionEntry,
+	type SessionContext,
+} from "./session-context";
 import {
 	type BranchSummaryEntry,
 	type CompactionEntry,
@@ -21,6 +26,7 @@ import {
 	type CustomEntry,
 	type CustomMessageEntry,
 	type FileEntry,
+	type LeafChangeEntry,
 	type LabelEntry,
 	type MCPToolSelectionEntry,
 	type ModeChangeEntry,
@@ -37,11 +43,20 @@ import {
 	type TtsrInjectionEntry,
 	type UsageStatistics,
 } from "./session-entries";
-import { findMostRecentSession, listAllSessions, listSessions, type SessionInfo } from "./session-listing";
+import {
+	findMostRecentSession,
+	listAllSessions,
+	listAllSessionsWithDiagnostics,
+	listSessions,
+	listSessionsWithDiagnostics,
+	type SessionInfo,
+	type SessionListResult,
+} from "./session-listing";
 import { loadEntriesFromFile, resolveBlobRefsInEntries } from "./session-loader";
 import { generateId, migrateToCurrentVersion } from "./session-migrations";
 import {
 	computeDefaultSessionDir,
+	readBreadcrumbsForCwd,
 	readTerminalBreadcrumbEntry,
 	resolveManagedSessionRoot,
 	writeTerminalBreadcrumb,
@@ -118,6 +133,7 @@ class SessionEntryIndex {
 	#entriesById = new Map<string, SessionEntry>();
 	#children = new Map<string | null, SessionEntry[]>();
 	#labels = new Map<string, string>();
+	#entryIds = new Set<string>();
 	#leaf: string | null = null;
 	#usage = emptyUsageStatistics();
 
@@ -125,6 +141,7 @@ class SessionEntryIndex {
 		this.#entriesById.clear();
 		this.#children.clear();
 		this.#labels.clear();
+		this.#entryIds.clear();
 		this.#leaf = null;
 		this.#usage = emptyUsageStatistics();
 	}
@@ -135,9 +152,15 @@ class SessionEntryIndex {
 	}
 
 	insert(entry: SessionEntry): void {
-		this.#entriesById.set(entry.id, entry);
-		this.#leaf = entry.id;
+		this.#entryIds.add(entry.id);
+		const nextLeafId = resolveLeafIdAfterSessionEntry(this.#leaf, this.#entriesById, entry);
+		if (entry.type === "leaf_change") {
+			this.#leaf = nextLeafId;
+			return;
+		}
 
+		this.#entriesById.set(entry.id, entry);
+		this.#leaf = nextLeafId;
 		const bucket = this.#children.get(entry.parentId);
 		if (bucket) bucket.push(entry);
 		else this.#children.set(entry.parentId, [entry]);
@@ -152,6 +175,10 @@ class SessionEntryIndex {
 
 	has(id: string): boolean {
 		return this.#entriesById.has(id);
+	}
+
+	hasAnyId(id: string): boolean {
+		return this.#entryIds.has(id);
 	}
 
 	get(id: string): SessionEntry | undefined {
@@ -213,10 +240,12 @@ class SessionEntryIndex {
 		const roots: SessionTreeNode[] = [];
 
 		for (const entry of entries) {
+			if (entry.type === "leaf_change") continue;
 			nodes.set(entry.id, { entry, children: [], label: this.#labels.get(entry.id) });
 		}
 
 		for (const entry of entries) {
+			if (entry.type === "leaf_change") continue;
 			const node = nodes.get(entry.id)!;
 			const parentId = entry.parentId;
 			if (parentId === null || parentId === entry.id) {
@@ -311,6 +340,8 @@ export class SessionManager {
 	#header!: SessionHeader;
 	#entries: SessionEntry[] = [];
 	#index = new SessionEntryIndex();
+
+	#continueProvenance: string | undefined;
 
 	/** File reflects all current entries; appends can go incrementally. */
 	#fileIsCurrent = false;
@@ -589,7 +620,7 @@ export class SessionManager {
 
 	#freshEntryFields(): { id: string; parentId: string | null; timestamp: string } {
 		return {
-			id: generateId(this.#index),
+			id: generateId({ has: id => this.#index.hasAnyId(id) }),
 			parentId: this.#index.leafId(),
 			timestamp: nowIso(),
 		};
@@ -608,6 +639,27 @@ export class SessionManager {
 				logger.warn("collab entry hook failed", { error: String(err) });
 			}
 		}
+	}
+
+	#recordLeafChange(target: string | null): void {
+		const priorLeaf = this.#index.leafId();
+		if (!this.#persist || priorLeaf === target) {
+			this.#index.setLeaf(target);
+			return;
+		}
+
+		const lastEntry = this.#entries[this.#entries.length - 1];
+		if (lastEntry?.type === "leaf_change" && lastEntry.target === target) {
+			this.#index.setLeaf(target);
+			return;
+		}
+
+		const entry: LeafChangeEntry = {
+			type: "leaf_change",
+			...this.#freshEntryFields(),
+			target,
+		};
+		this.#recordEntry(entry);
 	}
 
 	#draftPath(): string | null {
@@ -977,6 +1029,10 @@ export class SessionManager {
 
 	getSessionFile(): string | undefined {
 		return this.#sessionFile;
+	}
+
+	getContinueProvenance(): string | undefined {
+		return this.#continueProvenance;
 	}
 
 	getArtifactsDir(): string | null {
@@ -1373,12 +1429,12 @@ export class SessionManager {
 	 */
 	branch(branchFromId: string): void {
 		if (!this.#index.has(branchFromId)) throw new Error(`Entry ${branchFromId} not found`);
-		this.#index.setLeaf(branchFromId);
+		this.#recordLeafChange(branchFromId);
 	}
 
 	/** Reset the leaf to null so the next append creates a new root entry. */
 	resetLeaf(): void {
-		this.#index.setLeaf(null);
+		this.#recordLeafChange(null);
 	}
 
 	/** Like branch(), but also records a branch_summary of the abandoned path. */
@@ -1557,11 +1613,14 @@ export class SessionManager {
 		const resolvedCwd = path.resolve(cwd);
 		const breadcrumb = await readTerminalBreadcrumbEntry();
 		let chosenSession: string | null | undefined;
+		let cwdMismatchFallback: string | null | undefined;
+		let provenance = "last session in this folder — breadcrumb missed";
 
 		if (breadcrumb) {
 			const breadcrumbCwd = path.resolve(breadcrumb.cwd);
 			if (breadcrumbCwd === resolvedCwd) {
 				chosenSession = breadcrumb.sessionFile;
+				provenance = "this terminal's last session";
 			} else {
 				// The terminal's last session started in a different cwd. If that cwd is
 				// gone (worktree move/rename) and this location has no sessions of its
@@ -1594,18 +1653,30 @@ export class SessionManager {
 					logger.info("Re-rooting moved session", { from: breadcrumbCwd, to: resolvedCwd });
 					const manager = await SessionManager.open(breadcrumb.sessionFile, undefined, storage);
 					await manager.moveTo(cwd, sessionDir);
+					manager.#continueProvenance = "this terminal's moved session";
 					return manager;
 				}
-
-				chosenSession = newestInTargetDir;
+				cwdMismatchFallback = newestInTargetDir;
 			}
 		}
 
-		if (chosenSession === undefined) chosenSession = await findMostRecentSession(dir, storage);
+		if (chosenSession === undefined) {
+			const sameCwdBreadcrumb = (await readBreadcrumbsForCwd(cwd))[0];
+			if (sameCwdBreadcrumb) {
+				chosenSession = sameCwdBreadcrumb.sessionFile;
+				provenance = "last session in this folder — breadcrumb recovered";
+			}
+		}
+
+		if (chosenSession === undefined) chosenSession = cwdMismatchFallback ?? (await findMostRecentSession(dir, storage));
 
 		const manager = new SessionManager(cwd, dir, true, storage);
 		if (chosenSession) await manager.setSessionFile(chosenSession);
-		else manager.#resetToNewSession();
+		else {
+			manager.#resetToNewSession();
+			provenance = "new session — no prior session found";
+		}
+		manager.#continueProvenance = provenance;
 		return manager;
 	}
 
@@ -1632,8 +1703,21 @@ export class SessionManager {
 		return listSessions(dir, storage);
 	}
 
+	static async listWithDiagnostics(
+		cwd: string,
+		sessionDir?: string,
+		storage: SessionStorage = new FileSessionStorage(),
+	): Promise<SessionListResult> {
+		const dir = sessionDir ?? SessionManager.getDefaultSessionDir(cwd, undefined, storage);
+		return listSessionsWithDiagnostics(dir, storage);
+	}
+
 	/** List all sessions across all project directories. */
 	static listAll(storage: SessionStorage = new FileSessionStorage()): Promise<SessionInfo[]> {
 		return listAllSessions(storage);
+	}
+
+	static listAllWithDiagnostics(storage: SessionStorage = new FileSessionStorage()): Promise<SessionListResult> {
+		return listAllSessionsWithDiagnostics(storage);
 	}
 }
