@@ -791,6 +791,8 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 					continue;
 				}
 				if (modelResolution) this.#preResolvedModels.set(spawn.agentId, modelResolution);
+				const spawnIsolated =
+					this.session.settings.get("task.isolation.mode") !== "none" && spawnParams.isolated === true;
 				const modelChain = formatModelChain(agentLabel, spawnParams.role, modelResolution?.resolvedModel);
 				const jobId = this.#registerSpawnJob({
 					manager,
@@ -798,6 +800,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 					spawnParams,
 					agentId: spawn.agentId,
 					progress: spawn.progress,
+					isolated: spawnIsolated,
 					ircEnabled,
 					buildDetails: buildAsyncDetails,
 					onUpdate,
@@ -893,13 +896,24 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 		spawnParams: TaskParams;
 		agentId: string;
 		progress: AgentProgress;
+		isolated: boolean;
 		ircEnabled: boolean;
 		buildDetails: (state: "running" | "completed" | "failed", jobId: string) => TaskToolDetails;
 		onUpdate?: AgentToolUpdateCallback<TaskToolDetails>;
 		onSettled?: (failed: boolean) => void;
 	}): string {
-		const { manager, toolCallId, spawnParams, agentId, progress, ircEnabled, buildDetails, onUpdate, onSettled } =
-			options;
+		const {
+			manager,
+			toolCallId,
+			spawnParams,
+			agentId,
+			progress,
+			ircEnabled,
+			isolated,
+			buildDetails,
+			onUpdate,
+			onSettled,
+		} = options;
 		const buildFollowUpHint = (aborted: boolean): string => {
 			if (aborted) {
 				return `\n\n${agentId} was aborted — transcript at history://${agentId}`;
@@ -993,6 +1007,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 				id: agentId,
 				queued: true,
 				ownerId: this.session.getAgentId?.() ?? undefined,
+				isolated,
 				onProgress: (text, details) => {
 					const progressDetails = (details as TaskToolDetails | undefined) ?? buildDetails("running", agentId);
 					onUpdate?.({ content: [{ type: "text", text }], details: progressDetails });
@@ -1425,6 +1440,8 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 				parentTelemetry: this.session.getTelemetry?.(),
 				parentEvalSessionId,
 				maxRuntimeMs: maxRuntimeMsOverride,
+				asyncJobManager: preAllocatedId ? this.session.asyncJobManager : undefined,
+				asyncJobId: preAllocatedId,
 			};
 
 			const runTask = async (): Promise<SingleResult> => {

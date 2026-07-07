@@ -20,6 +20,27 @@ const POLL_WAIT_LADDER_MS = [5_000, 10_000, 30_000, 60_000, 300_000] as const;
  */
 const POLL_ESCALATION_RESET_MS = 60_000;
 
+const ASYNC_JOB_INTERRUPT_REASON_TYPE = "omp:async-job-interrupt";
+
+export interface AsyncJobInterruptReason {
+	type: typeof ASYNC_JOB_INTERRUPT_REASON_TYPE;
+	requestedBy?: string;
+	reason?: string;
+}
+
+export function isAsyncJobInterruptReason(value: unknown): value is AsyncJobInterruptReason {
+	if (!value || typeof value !== "object") return false;
+	return (value as { type?: unknown }).type === ASYNC_JOB_INTERRUPT_REASON_TYPE;
+}
+
+function createInterruptReason(requestedBy: string | undefined, reason: string | undefined): AsyncJobInterruptReason {
+	return {
+		type: ASYNC_JOB_INTERRUPT_REASON_TYPE,
+		...(requestedBy ? { requestedBy } : {}),
+		...(reason ? { reason } : {}),
+	};
+}
+
 interface PollEscalationState {
 	/** Index into POLL_WAIT_LADDER_MS used for the most recent poll wait. */
 	level: number;
@@ -37,6 +58,12 @@ export interface AsyncJob {
 	promise: Promise<void>;
 	resultText?: string;
 	errorText?: string;
+	interruptRequested?: boolean;
+	interruptReason?: string;
+	interruptRequestedBy?: string;
+	interrupted?: boolean;
+	hardCancelled?: boolean;
+	isolated?: boolean;
 	/**
 	 * Registry id of the agent that registered the job (e.g. "Main",
 	 * "AuthLoader"). Used by scoped cancel/list APIs so a subagent's teardown
@@ -82,6 +109,8 @@ export interface AsyncJobRegisterOptions {
 	onProgress?: (text: string, details?: Record<string, unknown>) => void | Promise<void>;
 	/** Register the job in queued state; see {@link AsyncJob.queued}. */
 	queued?: boolean;
+	/** Isolated task jobs cannot be kept alive after an interrupt. */
+	isolated?: boolean;
 }
 
 /**
@@ -193,6 +222,7 @@ export class AsyncJobManager {
 			promise: Promise.resolve(),
 			ownerId: options?.ownerId,
 			queued: options?.queued === true,
+			isolated: options?.isolated === true,
 		};
 
 		const reportProgress = async (text: string, details?: Record<string, unknown>): Promise<void> => {
@@ -222,6 +252,7 @@ export class AsyncJobManager {
 					return;
 				}
 				job.status = "completed";
+				if (job.interruptRequested) job.interrupted = true;
 				job.resultText = text;
 				this.#enqueueDelivery(id, text);
 				this.#scheduleEviction(id);
@@ -254,8 +285,35 @@ export class AsyncJobManager {
 		if (filter?.ownerId && job.ownerId !== filter.ownerId) return false;
 		if (job.status !== "running") return false;
 		job.status = "cancelled";
+		if (job.interruptRequested) job.hardCancelled = true;
 		job.abortController.abort();
 		this.#scheduleEviction(id);
+		return true;
+	}
+
+	/**
+	 * Soft-interrupt a running job: abort the current turn with a typed reason
+	 * while leaving completion status to the job body. Unlike cancel(), this does
+	 * not mark the job terminal or schedule eviction.
+	 */
+	interrupt(id: string, filter?: AsyncJobFilter, reason?: string): boolean {
+		const job = this.#jobs.get(id);
+		if (!job) return false;
+		if (filter?.ownerId && job.ownerId !== filter.ownerId) return false;
+		if (job.status !== "running" || job.queued || job.interruptRequested || job.isolated) return false;
+		const interruptReason = reason?.trim();
+		job.interruptRequested = true;
+		job.interruptRequestedBy = filter?.ownerId;
+		if (interruptReason) job.interruptReason = interruptReason;
+		job.abortController.abort(createInterruptReason(filter?.ownerId, interruptReason));
+		return true;
+	}
+
+	refreshResultText(id: string, text: string): boolean {
+		const job = this.#jobs.get(id);
+		if (!job || (job.status !== "completed" && job.status !== "failed")) return false;
+		job.resultText = text;
+		if (job.errorText !== undefined) job.errorText = undefined;
 		return true;
 	}
 

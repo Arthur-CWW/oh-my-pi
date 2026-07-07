@@ -27,6 +27,8 @@ import { ToolError } from "./tool-errors";
 const jobSchema = z.object({
 	poll: z.array(z.string()).optional().describe("job ids to wait for; omit to wait on all running jobs"),
 	cancel: z.array(z.string()).optional().describe("job ids to cancel"),
+	interrupt: z.array(z.string()).optional().describe("job ids to interrupt without killing the agent"),
+	interruptReason: z.string().optional().describe("why the job is being interrupted"),
 	list: z.boolean().optional().describe("snapshot all jobs"),
 	setModel: z
 		.object({
@@ -60,9 +62,11 @@ interface JobSnapshot {
 	durationMs: number;
 	resultText?: string;
 	errorText?: string;
+	interrupted?: boolean;
 }
 
 type CancelStatus = "cancelled" | "not_found" | "already_completed";
+type InterruptStatus = "interrupted" | "not_found" | "not_running" | "isolated";
 
 interface CancelOutcome {
 	id: string;
@@ -70,9 +74,16 @@ interface CancelOutcome {
 	message: string;
 }
 
+interface InterruptOutcome {
+	id: string;
+	status: InterruptStatus;
+	message: string;
+}
+
 export interface JobToolDetails {
 	jobs: JobSnapshot[];
 	cancelled?: { id: string; status: CancelStatus }[];
+	interrupted?: { id: string; status: InterruptStatus }[];
 }
 
 /**
@@ -84,7 +95,7 @@ export interface JobToolDetails {
 export function isWaitingPollDetails(details: unknown): boolean {
 	const d = details as JobToolDetails | undefined;
 	if (!d || !Array.isArray(d.jobs) || d.jobs.length === 0) return false;
-	if (d.cancelled?.length) return false;
+	if (d.cancelled?.length || d.interrupted?.length) return false;
 	return d.jobs.every(job => job?.status === "running");
 }
 
@@ -123,8 +134,8 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 		const ownerFilter = ownerId ? { ownerId } : undefined;
 
 		if (params.setModel) {
-			if (params.list || params.cancel?.length || params.poll?.length) {
-				throw new ToolError("`setModel` cannot be combined with `list`, `poll`, or `cancel`.");
+			if (params.list || params.cancel?.length || params.interrupt?.length || params.poll?.length) {
+				throw new ToolError("`setModel` cannot be combined with `list`, `poll`, `cancel`, or `interrupt`.");
 			}
 			const job = manager.getJob(params.setModel.id);
 			if (!job || (ownerId && job.ownerId !== ownerId)) {
@@ -144,8 +155,8 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 
 		// `list` is a read-only snapshot mode. Replaces the legacy `jobs://` URL.
 		if (params.list) {
-			if (params.cancel?.length || params.poll?.length) {
-				throw new ToolError("`list` cannot be combined with `poll` or `cancel`.");
+			if (params.cancel?.length || params.interrupt?.length || params.poll?.length) {
+				throw new ToolError("`list` cannot be combined with `poll`, `cancel`, or `interrupt`.");
 			}
 			return this.#buildResult(manager, manager.getAllJobs(ownerFilter), []);
 		}
@@ -174,13 +185,56 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 			);
 		}
 
+		const interruptIds = params.interrupt ?? [];
+		const interruptOutcomes: InterruptOutcome[] = [];
+		if (params.interruptReason !== undefined && interruptIds.length === 0) {
+			throw new ToolError("`interruptReason` requires `interrupt`.");
+		}
+		for (const id of interruptIds) {
+			const existing = manager.getJob(id);
+			if (!existing || (ownerId && existing.ownerId !== ownerId)) {
+				interruptOutcomes.push({ id, status: "not_found", message: `Background job not found: ${id}` });
+				continue;
+			}
+			if (existing.status !== "running") {
+				interruptOutcomes.push({
+					id,
+					status: "not_running",
+					message: `Background job ${id} is already ${existing.status}.`,
+				});
+				continue;
+			}
+			if (existing.isolated) {
+				interruptOutcomes.push({
+					id,
+					status: "isolated",
+					message: `Background job ${id} is isolated — interrupt cannot keep it alive; use cancel.`,
+				});
+				continue;
+			}
+			const interrupted = manager.interrupt(id, ownerFilter, params.interruptReason);
+			interruptOutcomes.push(
+				interrupted
+					? {
+							id,
+							status: "interrupted",
+							message: `Interrupted ${id} — agent kept alive (irc-addressable)`,
+						}
+					: {
+							id,
+							status: "not_running",
+							message: `Background job ${id} is not running.`,
+						},
+			);
+		}
+
 		const requestedPollIds = params.poll;
-		// If only `cancel` was provided (no `poll`), don't wait \u2014 return immediately.
-		const shouldPoll = requestedPollIds !== undefined || cancelIds.length === 0;
+		// If only `cancel`/`interrupt` was provided (no `poll`), don't wait — return immediately.
+		const shouldPoll = requestedPollIds !== undefined || (cancelIds.length === 0 && interruptIds.length === 0);
 
 		if (!shouldPoll) {
-			const cancelledJobs = this.#visibleJobs(manager, cancelIds, ownerId);
-			return this.#buildResult(manager, cancelledJobs, cancelOutcomes);
+			const changedJobs = this.#visibleJobs(manager, [...cancelIds, ...interruptIds], ownerId);
+			return this.#buildResult(manager, changedJobs, cancelOutcomes, interruptOutcomes);
 		}
 
 		// Resolve which jobs to watch.
@@ -191,9 +245,9 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 			: manager.getRunningJobs(ownerFilter);
 
 		if (jobsToWatch.length === 0) {
-			if (cancelOutcomes.length > 0) {
-				const cancelledJobs = this.#visibleJobs(manager, cancelIds, ownerId);
-				return this.#buildResult(manager, cancelledJobs, cancelOutcomes);
+			if (cancelOutcomes.length > 0 || interruptOutcomes.length > 0) {
+				const changedJobs = this.#visibleJobs(manager, [...cancelIds, ...interruptIds], ownerId);
+				return this.#buildResult(manager, changedJobs, cancelOutcomes, interruptOutcomes);
 			}
 			const message = requestedPollIds?.length
 				? `No matching jobs found for IDs: ${requestedPollIds.join(", ")}`
@@ -210,8 +264,8 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 		// If all watched jobs are already done, build immediate result.
 		const runningJobs = jobsToWatch.filter(j => j.status === "running");
 		if (runningJobs.length === 0) {
-			const cancelledJobs = cancelIds.map(id => manager.getJob(id)).filter(j => j != null);
-			return this.#buildResult(manager, [...cancelledJobs, ...jobsToWatch], cancelOutcomes);
+			const changedJobs = this.#visibleJobs(manager, [...cancelIds, ...interruptIds], ownerId);
+			return this.#buildResult(manager, [...changedJobs, ...jobsToWatch], cancelOutcomes, interruptOutcomes);
 		}
 
 		// Wait until at least one running job finishes, the wait window elapses,
@@ -231,8 +285,8 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 		const watchedJobIds = runningJobs.map(job => job.id);
 		manager.watchJobs(watchedJobIds);
 
-		const cancelledJobs = this.#visibleJobs(manager, cancelIds, ownerId);
-		const allTrackedJobs = [...cancelledJobs, ...jobsToWatch];
+		const changedJobs = this.#visibleJobs(manager, [...cancelIds, ...interruptIds], ownerId);
+		const allTrackedJobs = [...changedJobs, ...jobsToWatch];
 
 		const PROGRESS_INTERVAL_MS = 500;
 		const emitProgress = () => {
@@ -244,6 +298,9 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 					jobs: snapshot,
 					...(cancelOutcomes.length
 						? { cancelled: cancelOutcomes.map(({ id, status }) => ({ id, status })) }
+						: {}),
+					...(interruptOutcomes.length
+						? { interrupted: interruptOutcomes.map(({ id, status }) => ({ id, status })) }
 						: {}),
 				},
 			});
@@ -276,7 +333,7 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 			}
 		}
 
-		return this.#buildResult(manager, allTrackedJobs, cancelOutcomes);
+		return this.#buildResult(manager, allTrackedJobs, cancelOutcomes, interruptOutcomes);
 	}
 
 	/**
@@ -304,6 +361,8 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 			startTime: number;
 			resultText?: string;
 			errorText?: string;
+			interruptRequested?: boolean;
+			interrupted?: boolean;
 		}[],
 	): JobSnapshot[] {
 		const now = Date.now();
@@ -318,6 +377,7 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 				durationMs: Math.max(0, now - latest.startTime),
 				...(latest.resultText ? { resultText: latest.resultText } : {}),
 				...(latest.errorText ? { errorText: latest.errorText } : {}),
+				...(latest.interrupted || latest.interruptRequested ? { interrupted: true } : {}),
 			};
 		});
 	}
@@ -342,8 +402,11 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 			startTime: number;
 			resultText?: string;
 			errorText?: string;
+			interruptRequested?: boolean;
+			interrupted?: boolean;
 		}[],
 		cancelOutcomes: CancelOutcome[],
+		interruptOutcomes: InterruptOutcome[] = [],
 	): AgentToolResult<JobToolDetails> {
 		// Deduplicate by id (cancelled jobs may also appear in the watched set).
 		const seen = new Set<string>();
@@ -364,6 +427,12 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 		if (cancelOutcomes.length > 0) {
 			lines.push(`## Cancelled (${cancelOutcomes.length})\n`);
 			for (const o of cancelOutcomes) lines.push(`- ${o.message}`);
+			lines.push("");
+		}
+
+		if (interruptOutcomes.length > 0) {
+			lines.push(`## Interrupted (${interruptOutcomes.length})\n`);
+			for (const o of interruptOutcomes) lines.push(`- ${o.message}`);
 			lines.push("");
 		}
 
@@ -392,6 +461,9 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 		const details: JobToolDetails = {
 			jobs: jobResults,
 			...(cancelOutcomes.length ? { cancelled: cancelOutcomes.map(({ id, status }) => ({ id, status })) } : {}),
+			...(interruptOutcomes.length
+				? { interrupted: interruptOutcomes.map(({ id, status }) => ({ id, status })) }
+				: {}),
 		};
 		return {
 			content: [{ type: "text", text: lines.join("\n").trimEnd() }],
@@ -411,6 +483,8 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 interface JobRenderArgs {
 	poll?: string[];
 	cancel?: string[];
+	interrupt?: string[];
+	interruptReason?: string;
 	list?: boolean;
 	setModel?: { id: string; model: string; reason?: string };
 }
@@ -478,9 +552,13 @@ function describeTarget(args: JobRenderArgs | undefined): string {
 	if (args?.setModel) return `swap model of ${args.setModel.id}`;
 	const poll = args?.poll ?? [];
 	const cancel = args?.cancel ?? [];
+	const interrupt = args?.interrupt ?? [];
 	const parts: string[] = [];
 	if (cancel.length > 0) {
 		parts.push(cancel.length === 1 ? `cancel ${cancel[0]}` : `cancel ${cancel.length} jobs`);
+	}
+	if (interrupt.length > 0) {
+		parts.push(interrupt.length === 1 ? `interrupt ${interrupt[0]}` : `interrupt ${interrupt.length} jobs`);
 	}
 	if (poll.length > 0) {
 		parts.push(poll.length === 1 ? `poll ${poll[0]}` : `poll ${poll.length} jobs`);
@@ -513,7 +591,9 @@ export const jobToolRenderer = {
 		}
 
 		const isPollCall = args
-			? !args.list && (!args.cancel || args.cancel.length === 0 || args.poll !== undefined)
+			? !args.list &&
+				(!args.cancel || args.cancel.length === 0 || args.poll !== undefined) &&
+				(!args.interrupt || args.interrupt.length === 0 || args.poll !== undefined)
 			: true;
 
 		if (!options.isPartial && isPollCall) {

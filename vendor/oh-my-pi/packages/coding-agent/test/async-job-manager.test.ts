@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { AsyncJobManager } from "@oh-my-pi/pi-coding-agent/async/job-manager";
+import { AsyncJobManager, isAsyncJobInterruptReason } from "@oh-my-pi/pi-coding-agent/async/job-manager";
 
 describe("AsyncJobManager", () => {
 	test("forwards progress updates and delivers completion", async () => {
@@ -111,6 +111,135 @@ describe("AsyncJobManager", () => {
 
 		expect(manager.getJob(jobId)?.status).toBe("cancelled");
 		expect(completions).toHaveLength(0);
+	});
+
+	test("refreshResultText updates terminal jobs without re-enqueueing delivery", async () => {
+		const completions: Array<{ jobId: string; text: string }> = [];
+		const manager = new AsyncJobManager({
+			onJobComplete: async (jobId, text) => {
+				completions.push({ jobId, text });
+			},
+		});
+
+		const completedJobId = manager.register("task", "done", async () => "original");
+		const failedJobId = manager.register("task", "failed", async () => {
+			throw new Error("first failure");
+		});
+		await manager.waitForAll();
+		await manager.drainDeliveries({ timeoutMs: 2_000 });
+		expect(completions).toEqual([
+			{ jobId: completedJobId, text: "original" },
+			{ jobId: failedJobId, text: "first failure" },
+		]);
+
+		expect(manager.refreshResultText(completedJobId, "fresh result")).toBe(true);
+		expect(manager.refreshResultText(failedJobId, "recovered result")).toBe(true);
+		expect(manager.getJob(completedJobId)?.resultText).toBe("fresh result");
+		expect(manager.getJob(failedJobId)?.status).toBe("failed");
+		expect(manager.getJob(failedJobId)?.resultText).toBe("recovered result");
+		expect(manager.getJob(failedJobId)?.errorText).toBeUndefined();
+		expect(manager.hasPendingDeliveries()).toBe(false);
+		await manager.drainDeliveries({ timeoutMs: 50 });
+		expect(completions).toHaveLength(2);
+	});
+
+	test("refreshResultText rejects running jobs", async () => {
+		const manager = new AsyncJobManager({ onJobComplete: async () => {} });
+		const release = Promise.withResolvers<void>();
+		const jobId = manager.register("task", "running", async () => {
+			await release.promise;
+			return "done";
+		});
+
+		expect(manager.refreshResultText(jobId, "too early")).toBe(false);
+		expect(manager.getJob(jobId)?.resultText).toBeUndefined();
+		release.resolve();
+		await manager.waitForAll();
+	});
+
+	test("interrupt aborts with a typed reason and leaves completion delivery to the job", async () => {
+		const completions: Array<{ jobId: string; text: string }> = [];
+		let abortReason: { type: string; requestedBy?: string; reason?: string } | undefined;
+		const manager = new AsyncJobManager({
+			onJobComplete: async (jobId, text) => {
+				completions.push({ jobId, text });
+			},
+		});
+
+		const jobId = manager.register(
+			"task",
+			"interruptible",
+			async ({ signal }) => {
+				await new Promise<void>(resolve => {
+					signal.addEventListener(
+						"abort",
+						() => {
+							abortReason = isAsyncJobInterruptReason(signal.reason) ? signal.reason : undefined;
+							resolve();
+						},
+						{ once: true },
+					);
+				});
+				return "[interrupted: operator]\n\npartial";
+			},
+			{ ownerId: "Main" },
+		);
+
+		expect(manager.interrupt(jobId, { ownerId: "Other" }, "operator")).toBe(false);
+		expect(manager.interrupt(jobId, { ownerId: "Main" }, "operator")).toBe(true);
+		expect(manager.interrupt(jobId, { ownerId: "Main" }, "again")).toBe(false);
+		await manager.waitForAll();
+		await manager.drainDeliveries({ timeoutMs: 2_000 });
+
+		expect(abortReason).toEqual({ type: "omp:async-job-interrupt", requestedBy: "Main", reason: "operator" });
+		expect(manager.getJob(jobId)?.status).toBe("completed");
+		expect(manager.getJob(jobId)?.interrupted).toBe(true);
+		expect(manager.getJob(jobId)?.interruptRequested).toBe(true);
+		expect(completions).toEqual([{ jobId, text: "[interrupted: operator]\n\npartial" }]);
+	});
+
+	test("cancel after interrupt marks the job hard-cancelled and suppresses delivery", async () => {
+		const completions: Array<{ jobId: string; text: string }> = [];
+		const release = Promise.withResolvers<void>();
+		let abortReason: { type: string; requestedBy?: string; reason?: string } | undefined;
+		const manager = new AsyncJobManager({
+			onJobComplete: async (jobId, text) => {
+				completions.push({ jobId, text });
+			},
+		});
+
+		const jobId = manager.register(
+			"task",
+			"interrupt-then-cancel",
+			async ({ signal }) => {
+				await new Promise<void>(resolve => {
+					signal.addEventListener(
+						"abort",
+						() => {
+							abortReason = isAsyncJobInterruptReason(signal.reason) ? signal.reason : undefined;
+							resolve();
+						},
+						{ once: true },
+					);
+				});
+				await release.promise;
+				return "late completion";
+			},
+			{ ownerId: "Main" },
+		);
+
+		expect(manager.interrupt(jobId, { ownerId: "Main" }, "checkpoint")).toBe(true);
+		expect(manager.cancel(jobId, { ownerId: "Main" })).toBe(true);
+		release.resolve();
+		await manager.waitForAll();
+		await manager.drainDeliveries({ timeoutMs: 50 });
+
+		const job = manager.getJob(jobId);
+		expect(abortReason).toEqual({ type: "omp:async-job-interrupt", requestedBy: "Main", reason: "checkpoint" });
+		expect(job?.status).toBe("cancelled");
+		expect(job?.hardCancelled).toBe(true);
+		expect(job?.interrupted).toBeUndefined();
+		expect(completions).toEqual([]);
 	});
 
 	test("enforces maxRunningJobs cap", () => {

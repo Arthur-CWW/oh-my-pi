@@ -9,6 +9,7 @@ import type { AgentEvent, AgentIdentity, AgentTelemetryConfig, ThinkingLevel } f
 import { recordHandoff, resolveTelemetry } from "@oh-my-pi/pi-agent-core";
 import type { Usage } from "@oh-my-pi/pi-ai";
 import { logger, popLoopPhase, prompt, pushLoopPhase, untilAborted } from "@oh-my-pi/pi-utils";
+import { type AsyncJobManager, isAsyncJobInterruptReason } from "../async/job-manager";
 import type { Rule } from "../capability/rule";
 import { ModelRegistry } from "../config/model-registry";
 import { resolveModelOverrideWithAuthFallback } from "../config/model-resolver";
@@ -119,16 +120,39 @@ export function extractTimeoutFileOps(
 	};
 }
 
+function extractAssistantTextFromContent(content: unknown): string | undefined {
+	if (!Array.isArray(content)) return undefined;
+	const text = content
+		.map(block => {
+			if (!block || typeof block !== "object") return "";
+			const record = block as { type?: unknown; text?: unknown };
+			return record.type === "text" && typeof record.text === "string" ? record.text : "";
+		})
+		.filter(Boolean)
+		.join("\n");
+	return text.trim() ? text : undefined;
+}
+
+export function extractLastAssistantText(session: Pick<AgentSession, "getLastAssistantMessage">): string | undefined {
+	try {
+		return extractAssistantTextFromContent(session.getLastAssistantMessage()?.content);
+	} catch {
+		return undefined;
+	}
+}
+
 export function buildTimeoutPartialProgress(
 	events: readonly TimeoutToolCallEvent[],
 	lastAssistantText?: string,
 	ircNote?: string,
 ): TimeoutPartialProgress {
-	const partial: TimeoutPartialProgress = extractTimeoutFileOps(events);
+	const partial = extractTimeoutFileOps(events);
 	const trimmedAssistantText = lastAssistantText?.trim();
-	if (trimmedAssistantText) partial.lastAssistantText = trimmedAssistantText;
-	if (ircNote) partial.ircNote = ircNote;
-	return partial;
+	return {
+		...partial,
+		...(trimmedAssistantText ? { lastAssistantText: trimmedAssistantText } : {}),
+		...(ircNote ? { ircNote } : {}),
+	};
 }
 
 /** Agent event types to forward for progress tracking. */
@@ -306,6 +330,8 @@ export interface ExecutorOptions {
 	parentMnemopiSessionState?: MnemopiSessionState;
 	/** Parent agent's eval executor session id. Subagents reuse it so eval state is shared. */
 	parentEvalSessionId?: string;
+	asyncJobManager?: AsyncJobManager;
+	asyncJobId?: string;
 	/**
 	 * Parent agent's OpenTelemetry configuration. When defined, the subagent's
 	 * loop is started with the same tracer/hooks but its own agent identity
@@ -694,7 +720,7 @@ export function createSubagentSettings(
 	});
 }
 
-type AbortReason = "signal" | "terminate" | "timeout" | "budget";
+type AbortReason = "signal" | "terminate" | "timeout" | "budget" | "interrupt";
 
 /** Inputs for the run monitor driving one subagent assignment. */
 interface RunMonitorArgs {
@@ -706,6 +732,7 @@ interface RunMonitorArgs {
 	description?: string;
 	modelOverride?: string | string[];
 	signal?: AbortSignal;
+	isHardCancelled?: () => boolean;
 	onProgress?: (progress: AgentProgress) => void;
 	eventBus?: EventBus;
 	parentToolCallId?: string;
@@ -730,7 +757,10 @@ interface SubagentRunMonitor {
 	hasUsage(): boolean;
 	yieldCalled(): boolean;
 	runtimeLimitExceeded(): boolean;
-	/** True when the abort carries a precise external reason (signal / wall-clock / budget). */
+	interrupted(): boolean;
+	interruptReason(): string | undefined;
+	interruptRequestedBy(): string | undefined;
+	/** True when the abort carries a precise external reason (hard cancel / signal / wall-clock / budget). */
 	hasExplicitAbortReason(): boolean;
 	/** Whether the (attempted) abort counts as a cancelled run rather than an internal failure. */
 	isAbortedRun(): boolean;
@@ -755,7 +785,18 @@ interface SubagentRunMonitor {
 }
 
 function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
-	const { index, id, agent, task, assignment, signal, onProgress, softRequestBudget, maxRuntimeMs } = args;
+	const {
+		index,
+		id,
+		agent,
+		task,
+		assignment,
+		signal,
+		onProgress,
+		softRequestBudget,
+		maxRuntimeMs,
+		isHardCancelled,
+	} = args;
 	const startTime = Date.now();
 
 	const progress: AgentProgress = {
@@ -808,6 +849,7 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
 	let lastAssistantSalvageText: string | undefined;
 	const toolCallEvents: TimeoutToolCallEvent[] = [];
 
+	const hardCancelled = (): boolean => isHardCancelled?.() === true;
 	const requestAbort = (reason: AbortReason) => {
 		if (reason === "timeout") {
 			runtimeLimitExceeded = true;
@@ -835,7 +877,7 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
 		signal.addEventListener(
 			"abort",
 			() => {
-				if (!resolved) requestAbort("signal");
+				if (!resolved) requestAbort(isAsyncJobInterruptReason(signal.reason) ? "interrupt" : "signal");
 			},
 			{ once: true, signal: listenerSignal },
 		);
@@ -858,6 +900,11 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
 			}
 		}, maxRuntimeMs);
 	}
+
+	const interruptDetails = () =>
+		!hardCancelled() && isAsyncJobInterruptReason(signal?.reason) ? signal.reason : undefined;
+	const interruptReason = (): string | undefined => interruptDetails()?.reason;
+	const interruptRequestedBy = (): string | undefined => interruptDetails()?.requestedBy;
 
 	const resolveSignalAbortReason = (): string => {
 		const reason = signal?.reason;
@@ -1271,22 +1318,10 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
 
 	const captureSalvage = (session: AgentSession): void => {
 		// Best-effort salvage: capture the last assistant text so
-		// cancelled/aborted children can surface "last activity" instead of
-		// "(no output)".
-		try {
-			const lastContent = session.getLastAssistantMessage()?.content;
-			if (Array.isArray(lastContent)) {
-				const text = lastContent
-					.map(block => (block.type === "text" && typeof block.text === "string" ? block.text : ""))
-					.filter(Boolean)
-					.join("\n");
-				if (text.trim()) {
-					lastAssistantSalvageText = text;
-				}
-			}
-		} catch {
-			// Salvage is best-effort; partial sessions may not implement it
-		}
+		// cancelled/aborted/interrupted children can surface "last activity"
+		// instead of "(no output)".
+		const text = extractLastAssistantText(session);
+		if (text) lastAssistantSalvageText = text;
 	};
 
 	return {
@@ -1296,9 +1331,12 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
 		hasUsage: () => hasUsage,
 		yieldCalled: () => yieldCalled,
 		runtimeLimitExceeded: () => runtimeLimitExceeded,
-		hasExplicitAbortReason: () => abortReason === "signal" || runtimeLimitExceeded || budgetLimitExceeded,
+		interrupted: () => abortReason === "interrupt" && !hardCancelled(),
+		interruptReason,
+		interruptRequestedBy,
+		hasExplicitAbortReason: () => hardCancelled() || abortReason === "signal" || runtimeLimitExceeded || budgetLimitExceeded,
 		isAbortedRun: () =>
-			abortReason === "signal" || runtimeLimitExceeded || budgetLimitExceeded || abortReason === undefined,
+			hardCancelled() || abortReason === "signal" || runtimeLimitExceeded || budgetLimitExceeded || abortReason === undefined,
 		requestAbort,
 		resolveSignalAbortReason,
 		resolveAbortReasonText,
@@ -1336,6 +1374,7 @@ interface DriveOutcome {
 	error?: string;
 	aborted: boolean;
 	abortReasonText?: string;
+	interrupted?: boolean;
 }
 
 const MAX_YIELD_RETRIES = 3;
@@ -1360,8 +1399,8 @@ async function driveSessionToYield(
 			aborted = monitor.isAbortedRun();
 			if (aborted) {
 				abortReasonText ??= monitor.resolveAbortReasonText();
+				exitCode = 1;
 			}
-			exitCode = 1;
 			throw new ToolAbortError();
 		}
 	};
@@ -1451,26 +1490,32 @@ async function driveSessionToYield(
 			}
 		}
 	} catch (err) {
-		exitCode = 1;
-		if (!abortSignal.aborted) {
-			error = err instanceof Error ? err.stack || err.message : String(err);
+		if (abortSignal.aborted && monitor.interrupted()) {
+			exitCode = 0;
+		} else {
+			exitCode = 1;
+			if (!abortSignal.aborted) {
+				error = err instanceof Error ? err.stack || err.message : String(err);
+			}
 		}
 	} finally {
 		if (abortSignal.aborted) {
 			aborted = monitor.isAbortedRun();
 			if (aborted) {
 				abortReasonText ??= monitor.resolveAbortReasonText();
+				if (exitCode === 0) exitCode = 1;
+			} else if (monitor.interrupted()) {
+				exitCode = 0;
 			}
-			if (exitCode === 0) exitCode = 1;
 		}
 	}
 
-	return { exitCode, error, aborted, abortReasonText };
+	return { exitCode, error, aborted, abortReasonText, interrupted: monitor.interrupted() };
 }
 
 interface FinalizeRunArgs {
 	monitor: SubagentRunMonitor;
-	done: { exitCode: number; error?: string; aborted?: boolean; abortReason?: string; durationMs: number };
+	done: { exitCode: number; error?: string; aborted?: boolean; abortReason?: string; interrupted?: boolean; durationMs: number };
 	index: number;
 	id: string;
 	agent: AgentDefinition;
@@ -1502,6 +1547,11 @@ async function finalizeRunResult(args: FinalizeRunArgs): Promise<SingleResult> {
 
 	// Use final output if available, otherwise accumulated output
 	let rawOutput = monitor.rawOutput();
+	const interrupted = done.interrupted === true || monitor.interrupted();
+	const interruptReason = monitor.interruptReason()?.trim();
+	const interruptPrefix = interrupted ? `[interrupted${interruptReason ? `: ${interruptReason}` : ""}]` : undefined;
+	const preFinalizeRawOutput = rawOutput;
+	const salvageText = monitor.lastAssistantSalvageText();
 	const yieldItems = progress.extractedToolData?.yield as YieldItem[] | undefined;
 	const reportFindingDetails = progress.extractedToolData?.report_finding as ReportFindingDetails[] | undefined;
 	const reportFindings: ReviewFinding[] | undefined = reportFindingDetails?.map(toReviewFinding);
@@ -1515,7 +1565,7 @@ async function finalizeRunResult(args: FinalizeRunArgs): Promise<SingleResult> {
 			exitCode,
 			stderr,
 			doneAborted: Boolean(done.aborted),
-			signalAborted: Boolean(signal?.aborted),
+			signalAborted: Boolean(signal?.aborted && !interrupted),
 			yieldItems,
 			reportFindings,
 			outputSchema: args.outputSchema,
@@ -1526,10 +1576,18 @@ async function finalizeRunResult(args: FinalizeRunArgs): Promise<SingleResult> {
 	rawOutput = finalized.rawOutput;
 	exitCode = finalized.exitCode;
 	stderr = finalized.stderr;
+	if (interruptPrefix) {
+		const partial =
+			preFinalizeRawOutput.trim() ||
+			salvageText?.trim() ||
+			progress.recentOutput.find(line => line.trim().length > 0)?.trim();
+		rawOutput = partial ? `${interruptPrefix}\n\n${partial}` : interruptPrefix;
+		exitCode = 0;
+		stderr = "";
+	}
 	// Salvage for cancelled/aborted children that produced no completed output:
 	// surface the last assistant text + stats instead of "(no output)" so the
 	// parent doesn't redo work the child already finished.
-	const salvageText = monitor.lastAssistantSalvageText();
 	if (
 		(done.aborted || signal?.aborted || monitor.runtimeLimitExceeded()) &&
 		!rawOutput.trim() &&
@@ -1584,7 +1642,7 @@ async function finalizeRunResult(args: FinalizeRunArgs): Promise<SingleResult> {
 		exitCode = 1;
 	}
 	const wasAborted =
-		runtimeLimitExceeded || abortedViaYield || (!hasYield && (done.aborted || signal?.aborted || false));
+		!interrupted && (runtimeLimitExceeded || abortedViaYield || (!hasYield && (done.aborted || signal?.aborted || false)));
 	const finalAbortReason = wasAborted
 		? runtimeLimitExceeded
 			? monitor.resolveAbortReasonText()
@@ -1764,6 +1822,12 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 	const ircEnabled = isIrcEnabled(subagentSettings, childDepth);
 	const skipPythonPreflight = Array.isArray(toolNames) && !toolNames.includes("eval");
 
+	const isAsyncJobHardCancelled = (): boolean => {
+		const manager = options.asyncJobManager;
+		const jobId = options.asyncJobId;
+		return manager !== undefined && jobId !== undefined && manager.getJob(jobId)?.hardCancelled === true;
+	};
+
 	const monitor = createSubagentRunMonitor({
 		index,
 		id,
@@ -1780,10 +1844,12 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 		sessionFile: subtaskSessionFile,
 		softRequestBudget,
 		maxRuntimeMs,
+		isHardCancelled: isAsyncJobHardCancelled,
 	});
 	const progress = monitor.progress;
 	let unsubscribe: (() => void) | null = null;
 	let reviveSession: (() => Promise<AgentSession>) | null = null;
+	let originalRunSettled = false;
 	// Adopted (kept-alive) subagents flip registry status from session events on
 	// later turns: revive/wake → running, turn drained → idle. The subscription
 	// intentionally survives this run; a disposed session emits nothing, so it
@@ -1794,6 +1860,15 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 				AgentRegistry.global().setStatus(id, "running");
 			} else if (event.type === "agent_end") {
 				AgentRegistry.global().setStatus(id, "idle");
+				if (!originalRunSettled || worktree !== undefined) return;
+				const manager = options.asyncJobManager;
+				const jobId = options.asyncJobId;
+				if (!manager || !jobId) return;
+				const job = manager.getJob(jobId);
+				if (!job || (job.status !== "completed" && job.status !== "failed")) return;
+				const latestText = extractLastAssistantText(target);
+				if (!latestText) return;
+				manager.refreshResultText(jobId, `${latestText}\n\n[refreshed after follow-up turn]`);
 			}
 		});
 	};
@@ -1803,6 +1878,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 		error?: string;
 		aborted?: boolean;
 		abortReason?: string;
+		interrupted?: boolean;
 		durationMs: number;
 	}> => {
 		const sessionAbortController = new AbortController();
@@ -2159,11 +2235,16 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			}
 		} finally {
 			if (abortSignal.aborted) {
-				aborted = monitor.isAbortedRun();
-				if (aborted) {
-					abortReasonText ??= monitor.resolveAbortReasonText();
+				if (monitor.interrupted()) {
+					aborted = false;
+					exitCode = 0;
+				} else {
+					aborted = monitor.isAbortedRun();
+					if (aborted) {
+						abortReasonText ??= monitor.resolveAbortReasonText();
+					}
+					if (exitCode === 0) exitCode = 1;
 				}
-				if (exitCode === 0) exitCode = 1;
 			}
 			sessionAbortController.abort();
 			if (unsubscribe) {
@@ -2177,6 +2258,21 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			const session = monitor.takeActiveSession();
 			if (session) {
 				monitor.captureSalvage(session);
+				const softInterruptKeptAlive = monitor.interrupted() && worktree === undefined;
+				if (softInterruptKeptAlive) {
+					const requestedBy = monitor.interruptRequestedBy() ?? "the orchestrator";
+					const reason = monitor.interruptReason();
+					const reasonSuffix = reason ? ` (reason: ${reason})` : "";
+					await session.sendCustomMessage(
+						{
+							customType: "job:interrupt",
+							content: `<system-warning>Your turn was interrupted by ${requestedBy}${reasonSuffix}. Your session is alive; you may be woken via irc to continue.</system-warning>`,
+							display: false,
+							attribution: "agent",
+						},
+						{ deliverAs: "nextTurn" },
+					);
+				}
 				const registry = AgentRegistry.global();
 				const timeoutKeptAlive = aborted && monitor.runtimeLimitExceeded() && worktree === undefined;
 				if (aborted && !timeoutKeptAlive) {
@@ -2219,11 +2315,13 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			error,
 			aborted,
 			abortReason: aborted ? abortReasonText : undefined,
+			interrupted: monitor.interrupted(),
 			durationMs: Date.now() - startTime,
 		};
 	};
 
 	const done = await runSubagent();
+	originalRunSettled = true;
 	monitor.finish();
 
 	return finalizeRunResult({

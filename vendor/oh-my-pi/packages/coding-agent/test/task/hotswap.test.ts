@@ -466,4 +466,38 @@ describe("job setModel operation", () => {
 		const failed = await tool.execute("job-failed", { setModel: { id: "QueuedSub", model: "openai/model-b" } });
 		expect(firstText(failed)).toBe("Hot-swap failed: Missing credentials for openai/model-b");
 	});
+
+	it("interrupts owned jobs and reports that the agent stays alive", async () => {
+		const manager = createManager();
+		registerRunningTask(manager, "InterruptSub", "Main");
+
+		const result = await new JobTool(createToolSession(manager, "Main")).execute("job-interrupt", {
+			interrupt: ["InterruptSub"],
+			interruptReason: "need a checkpoint",
+		});
+
+		expect(firstText(result)).toContain("Interrupted InterruptSub — agent kept alive (irc-addressable)");
+		expect(result.details?.interrupted).toEqual([{ id: "InterruptSub", status: "interrupted" }]);
+		expect(manager.getJob("InterruptSub")?.interruptRequested).toBe(true);
+		expect(manager.getJob("InterruptSub")?.interruptReason).toBe("need a checkpoint");
+	});
+
+	it("enforces interrupt ownership and rejects non-running jobs cleanly", async () => {
+		const manager = createManager();
+		registerRunningTask(manager, "OtherInterruptSub", "OtherParent");
+		const completedId = manager.register("task", "DoneSub", async () => "done", { id: "DoneSub", ownerId: "Main" });
+		await manager.getJob(completedId)?.promise;
+
+		const result = await new JobTool(createToolSession(manager, "Main")).execute("job-interrupt-denied", {
+			interrupt: ["OtherInterruptSub", "DoneSub"],
+		});
+
+		expect(firstText(result)).toContain("Background job not found: OtherInterruptSub");
+		expect(firstText(result)).toContain("Background job DoneSub is already completed.");
+		expect(result.details?.interrupted).toEqual([
+			{ id: "OtherInterruptSub", status: "not_found" },
+			{ id: "DoneSub", status: "not_running" },
+		]);
+		expect(manager.getJob("OtherInterruptSub")?.interruptRequested).toBeUndefined();
+	});
 });
