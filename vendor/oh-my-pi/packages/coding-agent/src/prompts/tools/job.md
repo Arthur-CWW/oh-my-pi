@@ -1,6 +1,6 @@
-Inspects, waits, or cancels async jobs.
+Inspects, waits, cancels async jobs, or hot-swaps a live subagent's model.
 
-Background job results are delivered automatically when complete. Reach for this tool only when you need to intervene.
+Background job results are delivered automatically when complete. Reach for this tool only when you need to intervene. Model swaps apply immediately when the subagent is idle, otherwise at the next safe turn boundary; the target subagent is told that it was swapped.
 
 # Operations
 
@@ -18,3 +18,10 @@ Block until the specified jobs finish or the wait window elapses. Omit `poll` (w
 Stop running jobs.
 - Use when a job is stalled, hung, or no longer needed.
 - Returns immediately after cancelling.
+
+## `setModel: { id, model, reason? }`
+Swap a live subagent's model mid-flight.
+- `id` is the task job id (the spawned agent id).
+- `model` is a provider/model selector, fuzzy selector, role, or selector with `:<thinking>` suffix.
+- `reason` is optional and is included in the notice delivered to the target.
+- The swap is restricted to subagents you own, preserves conversation context, and never triggers an extra turn.

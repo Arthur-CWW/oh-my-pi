@@ -50,6 +50,7 @@ import { ToolAbortError } from "../tools/tool-errors";
 import type { EventBus } from "../utils/event-bus";
 import { buildNamedToolChoice } from "../utils/tool-choice";
 import type { WorkspaceTree } from "../workspace-tree";
+import { resolveRestorableSessionModel, type RestorableSessionModel } from "./hotswap";
 import { subprocessToolRegistry } from "./subprocess-tool-registry";
 import {
 	type AgentDefinition,
@@ -1935,16 +1936,19 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			const { normalized: normalizedOutputSchema } = normalizeSchema(outputSchema);
 
 			// Captured by the lifecycle reviver: rebuilding an equivalent session from
-			// the same JSONL file re-invokes createAgentSession with the exact options
-			// of the original run (same agent id, tools, model, system prompt,
-			// artifacts dir) — only the SessionManager differs.
-			const buildSubagentSessionOptions = (sessionManagerForRun: SessionManager): CreateAgentSessionOptions => ({
+			// the same JSONL file re-invokes createAgentSession with the original run
+			// options. A revived parked agent may have been hot-swapped after spawn,
+			// so the reviver can explicitly override only the restored model fields.
+			const buildSubagentSessionOptions = (
+				sessionManagerForRun: SessionManager,
+				modelOverride?: RestorableSessionModel,
+			): CreateAgentSessionOptions => ({
 				cwd: worktree ?? cwd,
 				authStorage,
 				modelRegistry,
 				settings: subagentSettings,
-				model,
-				thinkingLevel: effectiveThinkingLevel,
+				model: modelOverride?.model ?? model,
+				thinkingLevel: modelOverride?.thinkingLevel ?? effectiveThinkingLevel,
 				toolNames,
 				outputSchema,
 				requireYieldTool: true,
@@ -2014,7 +2018,8 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 					if (options.parentArtifactManager) {
 						reopened.adoptArtifactManager(options.parentArtifactManager);
 					}
-					const { session: revived } = await createAgentSession(buildSubagentSessionOptions(reopened));
+					const restoredModel = resolveRestorableSessionModel(reopened, modelRegistry, subagentSettings, model);
+					const { session: revived } = await createAgentSession(buildSubagentSessionOptions(reopened, restoredModel));
 					installRegistryStatusSync(revived);
 					return revived;
 				};

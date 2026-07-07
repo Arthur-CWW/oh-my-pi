@@ -9,6 +9,7 @@ import { shimmerEnabled, shimmerText } from "../modes/theme/shimmer";
 import type { Theme } from "../modes/theme/theme";
 import jobDescription from "../prompts/tools/job.md" with { type: "text" };
 import { Ellipsis, Hasher, type RenderCache, renderStatusLine, renderTreeList, truncateToWidth } from "../tui";
+import { hotswapAgentModel, type HotswapResult } from "../task/hotswap";
 import type { ToolSession } from "./index";
 import {
 	formatBadge,
@@ -27,6 +28,14 @@ const jobSchema = z.object({
 	poll: z.array(z.string()).optional().describe("job ids to wait for; omit to wait on all running jobs"),
 	cancel: z.array(z.string()).optional().describe("job ids to cancel"),
 	list: z.boolean().optional().describe("snapshot all jobs"),
+	setModel: z
+		.object({
+			id: z.string().describe("task job id of the subagent to hot-swap"),
+			model: z.string().describe("model selector to apply, including optional :thinking suffix"),
+			reason: z.string().optional().describe("why the subagent is being swapped"),
+		})
+		.optional()
+		.describe("swap a live subagent's model at a safe boundary; the target is told"),
 });
 
 type JobParams = z.infer<typeof jobSchema>;
@@ -83,7 +92,7 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 	readonly name = "job";
 	readonly approval = "read" as const;
 	readonly label = "Job";
-	readonly summary = "Manage long-running background jobs (async bash/python)";
+	readonly summary = "Manage background jobs and hot-swap live subagent models";
 	readonly description: string;
 	readonly parameters = jobSchema;
 	readonly strict = true;
@@ -112,6 +121,26 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 		// consumers without an agent id see everything (legacy behavior).
 		const ownerId = this.session.getAgentId?.() ?? undefined;
 		const ownerFilter = ownerId ? { ownerId } : undefined;
+
+		if (params.setModel) {
+			if (params.list || params.cancel?.length || params.poll?.length) {
+				throw new ToolError("`setModel` cannot be combined with `list`, `poll`, or `cancel`.");
+			}
+			const job = manager.getJob(params.setModel.id);
+			if (!job || (ownerId && job.ownerId !== ownerId)) {
+				return {
+					content: [{ type: "text", text: `Hot-swap failed: background job not found: ${params.setModel.id}` }],
+					details: { jobs: [] },
+				};
+			}
+			const result = await hotswapAgentModel({
+				agentId: params.setModel.id,
+				model: params.setModel.model,
+				reason: params.setModel.reason,
+				requestedBy: ownerId,
+			});
+			return this.#buildHotswapResult(result);
+		}
 
 		// `list` is a read-only snapshot mode. Replaces the legacy `jobs://` URL.
 		if (params.list) {
@@ -293,6 +322,16 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 		});
 	}
 
+	#buildHotswapResult(result: HotswapResult): AgentToolResult<JobToolDetails> {
+		const text =
+			result.status === "applied"
+				? `Hot-swap applied: ${result.agentId} now ${result.to} (was ${result.from})`
+				: result.status === "queued"
+					? `Hot-swap queued: ${result.agentId} will switch ${result.from} → ${result.to} at its next turn boundary`
+					: `Hot-swap failed: ${result.error}`;
+		return { content: [{ type: "text", text }], details: { jobs: [] } };
+	}
+
 	#buildResult(
 		manager: AsyncJobManager,
 		jobs: {
@@ -373,6 +412,7 @@ interface JobRenderArgs {
 	poll?: string[];
 	cancel?: string[];
 	list?: boolean;
+	setModel?: { id: string; model: string; reason?: string };
 }
 
 const COLLAPSED_LIST_LIMIT = PREVIEW_LIMITS.COLLAPSED_ITEMS;
@@ -435,6 +475,7 @@ function flattenStructuredPreview(text: string): string {
 
 function describeTarget(args: JobRenderArgs | undefined): string {
 	if (args?.list) return "background jobs";
+	if (args?.setModel) return `swap model of ${args.setModel.id}`;
 	const poll = args?.poll ?? [];
 	const cancel = args?.cancel ?? [];
 	const parts: string[] = [];
@@ -466,7 +507,8 @@ export const jobToolRenderer = {
 
 		if (jobs.length === 0) {
 			const fallback = result.content?.find(c => c.type === "text")?.text || "No jobs to process";
-			const header = renderStatusLine({ icon: "warning", title: describeTarget(args) || "Job" }, uiTheme);
+			const icon: ToolUIStatus = args?.setModel && !fallback.startsWith("Hot-swap failed:") ? "success" : "warning";
+			const header = renderStatusLine({ icon, title: describeTarget(args) || "Job" }, uiTheme);
 			return new Text([header, formatEmptyMessage(fallback, uiTheme)].join("\n"), 0, 0);
 		}
 
