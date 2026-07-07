@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { Effect, Result } from "effect"
+import { Effect, Result, Schema } from "effect"
 import * as S from "effect/Schedule"
 import { FetchHttpClient } from "effect/unstable/http"
 import { readdir, readFile, writeFile, mkdir, stat, open } from "node:fs/promises"
@@ -18,6 +18,43 @@ import type { BookResult, DownloadResult } from "./src/schemas.ts"
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
+type JsonPrimitive = string | number | boolean | null
+type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue }
+type JsonObject = { [key: string]: JsonValue }
+
+const MirrorCacheSchema = Schema.Struct({
+  sources: Schema.Array(Schema.Struct({
+    id: Schema.String,
+    kind: Schema.Literal("anna", "libgen", "internet_archive", "arxiv", "auto"),
+    baseUrl: Schema.optional(Schema.String),
+    origin: Schema.Literal("discovered", "manual", "default"),
+    monitorUrl: Schema.optional(Schema.String),
+    validCert: Schema.optional(Schema.Boolean),
+    status: Schema.optional(Schema.String),
+  })),
+  summary: Schema.Struct({
+    enabled: Schema.Boolean,
+    sourceUrl: Schema.String,
+    groups: Schema.Array(Schema.String),
+    manualCount: Schema.Number,
+    discoveredCount: Schema.Number,
+    candidateCount: Schema.Number,
+    status: Schema.String,
+    error: Schema.optional(Schema.String),
+    candidates: Schema.Array(Schema.Struct({
+      id: Schema.String,
+      kind: Schema.String,
+      baseUrl: Schema.optional(Schema.String),
+      origin: Schema.String,
+      monitorUrl: Schema.optional(Schema.String),
+      validCert: Schema.optional(Schema.Boolean),
+      status: Schema.optional(Schema.String),
+    })),
+    cached: Schema.optional(Schema.Boolean),
+  }),
+  cachedAt: Schema.Number,
+})
+
 
 interface ScoredCandidate {
   result: BookResult
@@ -155,7 +192,7 @@ interface TargetResult {
 interface BatchReport {
   startedAt: string
   finishedAt: string | null
-  options: Record<string, unknown>
+  options: JsonObject
   mirrorDiscovery: MirrorPlan["summary"]
   summary: Record<string, number>
   results: TargetResult[]
@@ -214,27 +251,27 @@ const QUERY_STOPWORDS: Record<string, true> = {
 // Pure helpers (no I/O)
 // ---------------------------------------------------------------------------
 
-function normalizeKeyword(value: unknown): string {
+function normalizeKeyword(value: JsonValue | undefined): string {
   return String(value ?? "").toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
 }
 
-function normalizeText(value: unknown): string {
+function normalizeText(value: JsonValue | undefined): string {
   return normalizeKeyword(value).replace(/[^a-z0-9]+/g, " ").trim()
 }
 
-function normalizeFormat(value: unknown): string {
+function normalizeFormat(value: JsonValue | undefined): string {
   return String(value ?? "").trim().toLowerCase().replace(/^\./, "")
 }
 
-function splitList(value: unknown): string[] {
+function splitList(value: JsonValue | undefined): string[] {
   return String(value ?? "").split(",").map(v => v.trim()).filter(Boolean)
 }
 
-function mergePreference(...groups: unknown[]): string[] {
+function mergePreference(...groups: Array<JsonValue | undefined>): string[] {
   const values: string[] = []
   for (const group of groups) {
     if (!group) continue
-    if (Array.isArray(group)) values.push(...group)
+    if (Array.isArray(group)) values.push(...group.map(String))
     else values.push(...splitList(group))
   }
   return [...new Set(values.map(String).map(v => v.trim()).filter(Boolean))]
@@ -369,11 +406,15 @@ function isBlockedMessage(message: string): boolean {
   return BLOCKED_MARKERS.some(m => normalizeKeyword(message).includes(m))
 }
 
-function isBlockedError(err: unknown): boolean {
+function errorMessage(err: object | string | number | boolean | null | undefined): string {
+  if (err && typeof err === "object" && "message" in err) return String(err.message)
+  return String(err)
+}
+
+function isBlockedError(err: object | string | number | boolean | null | undefined): boolean {
   if (err instanceof BlockedSourceError) return true
-  const e = err as Record<string, unknown> | null
-  if (e?.blocked === true) return true
-  return isBlockedMessage((e?.message as string) ?? String(err))
+  if (err && typeof err === "object" && "blocked" in err && err.blocked === true) return true
+  return isBlockedMessage(errorMessage(err))
 }
 
 class BlockedSourceError extends Error {
@@ -381,13 +422,13 @@ class BlockedSourceError extends Error {
   constructor(message: string) { super(message); this.name = "BlockedSourceError" }
 }
 
-function asBlockedError(err: unknown, prefix = "Source blocked"): BlockedSourceError {
+function asBlockedError(err: object | string | number | boolean | null | undefined, prefix = "Source blocked"): BlockedSourceError {
   if (err instanceof BlockedSourceError) return err
-  return new BlockedSourceError(`${prefix}: ${(err as Error)?.message ?? String(err)}`)
+  return new BlockedSourceError(`${prefix}: ${errorMessage(err)}`)
 }
 
-function sourceFailure(source: MirrorSource, stage: "search" | "download", err: unknown): SourceFailure {
-  return { source: summarizeSource(source), stage, blocked: isBlockedError(err), error: (err as Error)?.message ?? String(err) }
+function sourceFailure(source: MirrorSource, stage: "search" | "download", err: object | string | number | boolean | null | undefined): SourceFailure {
+  return { source: summarizeSource(source), stage, blocked: isBlockedError(err), error: errorMessage(err) }
 }
 
 function defaultSourceCandidate(): MirrorSource {
@@ -401,20 +442,31 @@ function publicSourceCandidates(): MirrorSource[] {
   ]
 }
 
-function normalizeDiscoveredCandidate(raw: Record<string, unknown>, origin: "discovered" | "manual" = "discovered", index = 0): MirrorSource | null {
+function isJsonObject(value: JsonValue | undefined): value is JsonObject {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value))
+}
+
+function isMirrorSource(value: MirrorSource | null): value is MirrorSource {
+  return Boolean(value)
+}
+
+function normalizeDiscoveredCandidate(raw: JsonObject, origin: "discovered" | "manual" = "discovered", index = 0): MirrorSource | null {
   try {
     const url = raw.url ?? raw.baseUrl ?? raw.base_url ?? raw.address
     if (!url || typeof url !== "string") return null
     const baseUrl = normalizeBaseUrl(url)
-    const kind = (raw.kind ?? raw.type ?? raw.source) as string | undefined
+    const kindValue = raw.kind ?? raw.type ?? raw.source
+    const kind = typeof kindValue === "string" ? kindValue : undefined
+    const monitorUrlValue = raw.monitorUrl ?? raw.monitor_url ?? raw.monitor
+    const validCertValue = raw.validCert ?? raw.valid_cert ?? raw.certValid
     return {
       id: raw.id ? String(raw.id) : `${origin}-${kind ?? "unknown"}-${index + 1}`,
       kind: kind ? inferMirrorKind(baseUrl, kind) : inferMirrorKind(baseUrl),
       baseUrl,
       origin,
-      monitorUrl: raw.monitorUrl ?? raw.monitor_url ?? raw.monitor,
-      validCert: raw.validCert ?? raw.valid_cert ?? raw.certValid,
-    } as MirrorSource
+      monitorUrl: typeof monitorUrlValue === "string" ? monitorUrlValue : undefined,
+      validCert: typeof validCertValue === "boolean" ? validCertValue : undefined,
+    }
   } catch { return null }
 }
 
@@ -462,36 +514,34 @@ function fallbackRankSources(sources: MirrorSource[]): MirrorSource[] {
   })
 }
 
-function targetsFromJson(json: unknown): { targets: unknown[]; preferences: Record<string, unknown> } {
+function targetsFromJson(json: JsonValue): { targets: JsonValue[]; preferences: JsonObject } {
   if (Array.isArray(json)) return { targets: json, preferences: {} }
-  if (json && typeof json === "object") {
-    const o = json as Record<string, unknown>
-    const t = Array.isArray(o.targets) ? o.targets : Array.isArray(o.queries) ? o.queries : []
-    const p = o.preferences && typeof o.preferences === "object" ? o.preferences as Record<string, unknown> : {}
+  if (isJsonObject(json)) {
+    const t = Array.isArray(json.targets) ? json.targets : Array.isArray(json.queries) ? json.queries : []
+    const p = isJsonObject(json.preferences) ? json.preferences : {}
     return { targets: t, preferences: p }
   }
   exit("Input JSON must be an array or an object with a targets array")
 }
 
-function preferencesFrom(target: Record<string, unknown>, inherited: TargetPreferences, global: BatchOptions): TargetPreferences {
+function preferencesFrom(target: JsonObject, inherited: TargetPreferences, global: BatchOptions): TargetPreferences {
   return {
-    formats: mergePreference(target.formats ?? target.format, inherited.formats, global.formats).map(normalizeFormat),
-    translators: mergePreference(target.translators ?? target.translator, inherited.translators, global.translators),
-    authors: mergePreference(target.authors ?? target.author, inherited.authors, global.authors),
-    languages: mergePreference(target.languages ?? target.language ?? target.lang, inherited.languages, global.languages),
-    keywords: mergePreference(target.keywords ?? target.keyword, inherited.keywords, global.keywords),
+    formats: mergePreference(target.formats, target.format, inherited.formats, global.formats).map(normalizeFormat),
+    translators: mergePreference(target.translators, target.translator, inherited.translators, global.translators),
+    authors: mergePreference(target.authors, target.author, inherited.authors, global.authors),
+    languages: mergePreference(target.languages, target.language, target.lang, inherited.languages, global.languages),
+    keywords: mergePreference(target.keywords, target.keyword, inherited.keywords, global.keywords),
   }
 }
 
-function normalizeTarget(raw: unknown, index: number, inherited: TargetPreferences, global: BatchOptions): BatchTarget {
+function normalizeTarget(raw: JsonValue, index: number, inherited: TargetPreferences, global: BatchOptions): BatchTarget {
   if (typeof raw === "string") return { id: `target-${index + 1}`, query: raw, preferences: preferencesFrom({}, inherited, global) }
-  if (!raw || typeof raw !== "object") exit(`Target ${index + 1} must be a string or object`)
-  const r = raw as Record<string, unknown>
-  const query = r.query ?? r.title ?? r.q
+  if (!isJsonObject(raw)) exit(`Target ${index + 1} must be a string or object`)
+  const query = raw.query ?? raw.title ?? raw.q
   if (!query || typeof query !== "string") exit(`Target ${index + 1} is missing a query string`)
-  const directUrl = r.url ?? r.sourceUrl ?? r.downloadUrl
+  const directUrl = raw.url ?? raw.sourceUrl ?? raw.downloadUrl
   if (directUrl !== undefined && typeof directUrl !== "string") exit(`Target ${index + 1} direct URL must be a string`)
-  return { id: String(r.id ?? `target-${index + 1}`), query, directUrl, preferences: preferencesFrom(r, inherited, global) }
+  return { id: String(raw.id ?? `target-${index + 1}`), query, directUrl, preferences: preferencesFrom(raw, inherited, global) }
 }
 
 // ---------------------------------------------------------------------------
@@ -601,13 +651,13 @@ function parseArgs(argv: string[]): { options: BatchOptions; inputFiles: string[
 // I/O helpers (Effect-based)
 // ---------------------------------------------------------------------------
 
-async function readJsonFile(file: string): Promise<unknown> {
+async function readJsonFile(file: string): Promise<JsonValue> {
   try { return JSON.parse(await readFile(file, "utf8")) }
-  catch (err) { exit(`Failed to read JSON input ${file}: ${(err as Error).message}`) }
+  catch (err) { exit(`Failed to read JSON input ${file}: ${String(err)}`) }
 }
 
 async function loadTargets(inputFiles: string[], cliTargets: string[], options: BatchOptions): Promise<BatchTarget[]> {
-  const rawTargets: unknown[] = []
+  const rawTargets: JsonValue[] = []
   const inherited: TargetPreferences = { formats: [], translators: [], authors: [], languages: [], keywords: [] }
 
   for (const file of inputFiles) {
@@ -724,7 +774,7 @@ function atomicDownloadEffect(scored: ScoredCandidate, outDir: string, options: 
 function discoverMirrorSourcesEffect(options: BatchOptions) {
   return Effect.gen(function* () {
     const manualSources = dedupeSources(
-      options.baseUrls.map((url, i) => normalizeDiscoveredCandidate({ url: normalizeBaseUrl(url) }, "manual", i)).filter(Boolean) as MirrorSource[],
+      options.baseUrls.map((url, i) => normalizeDiscoveredCandidate({ url: normalizeBaseUrl(url) }, "manual", i)).filter(isMirrorSource),
     )
 
     const summary: MirrorPlan["summary"] = {
@@ -744,15 +794,15 @@ function discoverMirrorSourcesEffect(options: BatchOptions) {
       try {
         const mirrorModule = yield* Effect.tryPromise(() => import("./src/mirrors.ts"))
         const discovered = yield* mirrorModule.discoverOpenSlumMirrors({ groups: options.mirrorGroups as MirrorGroup[], statusPageUrl: options.mirrorSource })
-        const discoveredUnknown = discovered as unknown
-        const discoveredRecord = discoveredUnknown && typeof discoveredUnknown === "object" && !Array.isArray(discoveredUnknown) ? discoveredUnknown as Record<string, unknown> : {}
-        const raw = Array.isArray(discoveredUnknown)
-          ? discoveredUnknown
-          : discoveredRecord.candidates ?? discoveredRecord.mirrors ?? discoveredRecord.urls ?? []
-        const rawCandidates: unknown[] = Array.isArray(raw) ? raw : []
-        const normalized = rawCandidates
-          .map((c, i) => normalizeDiscoveredCandidate(c as Record<string, unknown>, "discovered", i))
-          .filter(Boolean) as MirrorSource[]
+        const normalized = discovered.map((candidate, i): MirrorSource => ({
+          id: `open-slum-${candidate.group}-${i + 1}`,
+          kind: candidate.group,
+          baseUrl: normalizeBaseUrl(candidate.url),
+          origin: "discovered",
+          monitorUrl: candidate.url,
+          validCert: candidate.validCert,
+          status: "ok",
+        }))
         discoveredSources = dedupeSources(interleaveSources(fallbackRankSources(normalized)))
         summary.discoveredCount = discoveredSources.length
         summary.status = "ok"
@@ -892,7 +942,7 @@ function processTargetEffect(target: BatchTarget, options: BatchOptions) {
       Effect.retry(S.exponential("250 millis", 2.0).pipe(S.both(S.recurs(options.retries)))),
       Effect.mapError((err) => {
         if (isBlockedError(err)) return asBlockedError(err, `download ${pick.source.baseUrl ?? pick.source.id}`)
-        return new Error(`download failed: ${(err as Error)?.message ?? String(err)}`)
+        return new Error(`download failed: ${errorMessage(err)}`)
       })
     )
     const dlResult = yield* Effect.result(dlEff)
@@ -913,9 +963,10 @@ function loadMirrorCacheEffect(cacheFile: string) {
       () => null,
     )
     if (!raw) return undefined
-    const cached = JSON.parse(raw) as { sources: MirrorSource[]; summary: MirrorPlan["summary"]; cachedAt: number }
-    if (!cached || !Array.isArray(cached.sources) || !cached.cachedAt) return undefined
-    if (cached.summary?.status === "error") return undefined
+    const parsed = Schema.decodeUnknownOption(MirrorCacheSchema)(JSON.parse(raw))
+    if (parsed._tag === "None") return undefined
+    const cached = parsed.value
+    if (cached.summary.status === "error") return undefined
     if (Date.now() - cached.cachedAt > MIRROR_CACHE_TTL_MS) return undefined
     return cached
   })
@@ -946,7 +997,7 @@ function summaryFromResults(results: TargetResult[], totalTargets: number): Reco
   return summary
 }
 
-function reportOptions(options: BatchOptions): Record<string, unknown> {
+function reportOptions(options: BatchOptions): JsonObject {
   return {
     outDir: options.outDir, dryRun: options.dryRun, concurrency: options.concurrency,
     maxResults: options.maxResults, retries: options.retries, targetTimeoutMs: options.targetTimeoutMs,
@@ -1024,7 +1075,7 @@ const main = Effect.gen(function* () {
   if (options.discoverMirrors && !options.noCache) {
     const cached = yield* loadMirrorCacheEffect(options.cacheFile)
     if (cached) {
-      mirrorPlan = { sources: cached.sources, summary: { ...cached.summary, cached: true } }
+      mirrorPlan = { sources: [...cached.sources], summary: { ...cached.summary, candidates: [...cached.summary.candidates], cached: true } }
     } else {
       mirrorPlan = yield* discoverMirrorSourcesEffect(options)
       yield* saveMirrorCacheEffect(options.cacheFile, mirrorPlan.sources, mirrorPlan.summary)

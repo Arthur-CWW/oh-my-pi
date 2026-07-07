@@ -1,4 +1,4 @@
-import { Effect, Result } from "effect"
+import { Effect, Result, Schema } from "effect"
 import { DownloadError, FetchError, ParseError } from "./errors"
 import { downloadDirectFile, type DirectDownloadOptions } from "./direct-download"
 import type { BookFormat, BookResult, DownloadResult } from "./schemas"
@@ -13,50 +13,60 @@ const QUERY_STOPWORDS = new Set([
   "and", "the", "for", "with", "vol", "volume", "collected", "works", "jung", "c", "g", "of", "in", "on",
 ])
 
+const StringishSchema = Schema.Union([Schema.String, Schema.Number])
+type Stringish = Schema.Schema.Type<typeof StringishSchema>
+
+const StringishArraySchema = Schema.Array(StringishSchema)
+type StringishArray = Schema.Schema.Type<typeof StringishArraySchema>
+
+const ArchiveSearchDocSchema = Schema.Struct({
+  identifier: Schema.optional(StringishSchema),
+  title: Schema.optional(StringishSchema),
+  creator: Schema.optional(Schema.Union([StringishSchema, StringishArraySchema])),
+  date: Schema.optional(StringishSchema),
+  year: Schema.optional(StringishSchema),
+  language: Schema.optional(Schema.Union([StringishSchema, StringishArraySchema])),
+})
+type ArchiveSearchDoc = Schema.Schema.Type<typeof ArchiveSearchDocSchema>
+
+const ArchiveSearchPayloadSchema = Schema.Struct({
+  response: Schema.Struct({
+    docs: Schema.Array(ArchiveSearchDocSchema),
+  }),
+})
+
+const ArchiveFileSchema = Schema.Struct({
+  name: Schema.optional(StringishSchema),
+  format: Schema.optional(StringishSchema),
+  size: Schema.optional(StringishSchema),
+  source: Schema.optional(StringishSchema),
+})
+type ArchiveFile = Schema.Schema.Type<typeof ArchiveFileSchema>
+
+const ArchiveMetadataSchema = Schema.Struct({
+  files: Schema.Array(ArchiveFileSchema),
+})
+
 export interface InternetArchiveSearchOptions {
   query: string
   limit?: number
   timeoutMs?: number
 }
 
-interface ArchiveSearchDoc {
-  identifier?: unknown
-  title?: unknown
-  creator?: unknown
-  date?: unknown
-  year?: unknown
-  language?: unknown
-}
-
-interface ArchiveFile {
-  name?: unknown
-  format?: unknown
-  size?: unknown
-  source?: unknown
-}
-
-interface ArchiveMetadata {
-  files?: unknown
-}
-
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === "object" ? value as Record<string, unknown> : undefined
-}
-
-function asString(value: unknown): string | undefined {
+function asString(value: Stringish | undefined): string | undefined {
   if (typeof value === "string") return value.trim() || undefined
   if (typeof value === "number") return String(value)
   return undefined
 }
 
-function asStringArray(value: unknown): string[] {
-  if (Array.isArray(value)) return value.map(asString).filter(Boolean) as string[]
+function asStringArray(value: Stringish | StringishArray | undefined): string[] {
+  if (Array.isArray(value)) return value.map(asString).filter((item): item is string => Boolean(item))
   const single = asString(value)
   if (!single) return []
   return single.split(/[,;]|\band\b/iu).map((part) => part.trim()).filter(Boolean)
 }
 
-function parseYear(...values: unknown[]): number | undefined {
+function parseYear(...values: Array<Stringish | undefined>): number | undefined {
   for (const value of values) {
     const text = asString(value)
     const year = text?.match(/\b(1[5-9]\d{2}|20\d{2})\b/u)?.[1]
@@ -65,7 +75,7 @@ function parseYear(...values: unknown[]): number | undefined {
   return undefined
 }
 
-function normalizeFormatFromName(name: string, format: unknown): BookFormat {
+function normalizeFormatFromName(name: string, format: Stringish | undefined): BookFormat {
   const normalizedFormat = asString(format)?.toLowerCase() ?? ""
   const lowerName = name.toLowerCase()
   if (lowerName.endsWith(".pdf") || normalizedFormat.includes("pdf")) return "pdf"
@@ -86,20 +96,17 @@ function queryTokens(query: string): string[] {
     .filter((token) => token.length >= 3 && !QUERY_STOPWORDS.has(token))
 }
 
-function chooseDownloadableFile(files: unknown, query: string): { name: string; format: BookFormat; size?: string } | undefined {
-  if (!Array.isArray(files)) return undefined
+function chooseDownloadableFile(files: readonly ArchiveFile[], query: string): { name: string; format: BookFormat; size?: string } | undefined {
   const tokens = queryTokens(query)
   const candidates = files
-    .map((file) => asRecord(file) as ArchiveFile | undefined)
-    .filter(Boolean)
     .map((file) => {
-      const name = asString(file?.name)
+      const name = asString(file.name)
       if (!name || isLikelyDerivativeNoise(name)) return undefined
       const lowerName = name.toLowerCase()
-      const format = normalizeFormatFromName(name, file?.format)
+      const format = normalizeFormatFromName(name, file.format)
       if (!DOWNLOADABLE_FORMATS.has(format)) return undefined
-      const size = asString(file?.size)
-      const source = asString(file?.source)?.toLowerCase()
+      const size = asString(file.size)
+      const source = asString(file.source)?.toLowerCase()
       const tokenHits = tokens.filter((token) => lowerName.includes(token)).length
       const score =
         (format === "pdf" ? 30 : 20) +
@@ -109,7 +116,7 @@ function chooseDownloadableFile(files: unknown, query: string): { name: string; 
         (lowerName.includes("two") && lowerName.includes("essays") ? 80 : 0)
       return { name, format, size, score }
     })
-    .filter(Boolean) as Array<{ name: string; format: BookFormat; size?: string; score: number }>
+    .filter((candidate): candidate is { name: string; format: BookFormat; size?: string; score: number } => Boolean(candidate))
 
   candidates.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
   return candidates[0]
@@ -121,7 +128,7 @@ function archiveDownloadUrl(identifier: string, fileName: string): string {
   return `${DOWNLOAD_BASE_URL}/${encodedIdentifier}/${encodedFileName}`
 }
 
-async function fetchJson(url: string, timeoutMs: number): Promise<unknown> {
+async function fetchJson(url: string, timeoutMs: number) {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), Math.max(1, timeoutMs))
   try {
@@ -151,15 +158,14 @@ function searchUrl(query: string, rows: number): string {
   return `${ADVANCED_SEARCH_URL}?${params.toString()}`
 }
 
-function docsFromSearchPayload(payload: unknown): ArchiveSearchDoc[] {
-  const response = asRecord(asRecord(payload)?.response)
-  const docs = response?.docs
-  if (!Array.isArray(docs)) return []
-  return docs.map((doc) => asRecord(doc) as ArchiveSearchDoc | undefined).filter(Boolean) as ArchiveSearchDoc[]
+function docsFromSearchPayload(payload: Awaited<ReturnType<typeof fetchJson>>): ArchiveSearchDoc[] {
+  const parsed = Schema.decodeUnknownOption(ArchiveSearchPayloadSchema)(payload)
+  return parsed._tag === "Some" ? [...parsed.value.response.docs] : []
 }
 
-function metadataFiles(payload: unknown): unknown {
-  return (asRecord(payload) as ArchiveMetadata | undefined)?.files
+function metadataFiles(payload: Awaited<ReturnType<typeof fetchJson>>): readonly ArchiveFile[] {
+  const parsed = Schema.decodeUnknownOption(ArchiveMetadataSchema)(payload)
+  return parsed._tag === "Some" ? parsed.value.files : []
 }
 
 export function searchInternetArchive(options: InternetArchiveSearchOptions): Effect.Effect<BookResult[], FetchError | ParseError> {
@@ -189,10 +195,11 @@ export function searchInternetArchive(options: InternetArchiveSearchOptions): Ef
       const file = chooseDownloadableFile(metadataFiles(metadataResult.success), query)
       if (!file) continue
 
+      const authors = asStringArray(doc.creator)
       results.push({
         id: `internet_archive:${identifier}:${file.name}`,
         title: asString(doc.title) ?? identifier,
-        authors: asStringArray(doc.creator).length > 0 ? asStringArray(doc.creator) : ["Unknown"],
+        authors: authors.length > 0 ? authors : ["Unknown"],
         year: parseYear(doc.year, doc.date),
         language: asStringArray(doc.language)[0],
         format: file.format,

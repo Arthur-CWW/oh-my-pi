@@ -9,10 +9,11 @@ const PACKAGE_DIR = resolve(SCRIPT_DIR, "..")
 const REPO_ROOT = resolve(PACKAGE_DIR, "..", "..")
 const DEFAULT_STORE_PATH = resolve(REPO_ROOT, "data/primer/generation-store.sqlite")
 
-const ANNOTATION_DIR = "streams/primer/wrapped-commentary-reader/artifacts/generation/quality-pass-2026-07-06"
-const ACCELERANDO_DIR = "streams/primer/wrapped-commentary-reader/artifacts/generation/accelerando-2026-07-06"
-const ACCELERANDO_V2_DIR = "streams/primer/wrapped-commentary-reader/artifacts/generation/accelerando-v2-2026-07-06"
-const RUBRIC_DIR = "streams/primer/wrapped-commentary-reader/artifacts/generation/rubric-2026-07-06"
+const GENERATION_DIR = "streams/primer/wrapped-commentary-reader/artifacts/generation"
+const ANNOTATION_DIR = `${GENERATION_DIR}/quality-pass-2026-07-06`
+const PROMPT_AB_DIR_PATTERN = /^prompt-ab-20\d{2}-\d{2}-\d{2}$/u
+const DATED_GENERATION_DIR_PATTERN = /^.+-20\d{2}-\d{2}-\d{2}$/u
+const RUBRIC_DIR = `${GENERATION_DIR}/rubric-2026-07-06`
 const HSK_DIR = "streams/primer/hsk-cards/gen-2026-07-06"
 
 const BATCH_KINDS = ["annotation-rewrite", "rubric-verdict", "hsk-cards"] as const
@@ -293,8 +294,7 @@ PRAGMA user_version = 1;
 function ingestAnnotationFiles(db: Database, rootDir: string, now: () => Date): FileIngestResult[] {
   const files = [
     ...listStageFiles(rootDir, ANNOTATION_DIR, /^slice-[a-d]\.json$/u),
-    ...listStageFiles(rootDir, ACCELERANDO_DIR, /^.+\.batch\.json$/u),
-    ...listStageFiles(rootDir, ACCELERANDO_V2_DIR, /^.+\.batch\.json$/u),
+    ...listAnnotationBatchFiles(rootDir),
   ]
   return files.map((filePath) => ingestAnnotationFile(db, rootDir, filePath, now))
 }
@@ -326,7 +326,7 @@ function ingestAnnotationFile(db: Database, rootDir: string, filePath: string, n
     sourceFile,
     worker: firstText(envelope.worker, envelope.slice, firstBatch?.worker, workerFromSource(sourceFile)),
     model: firstText(envelope.model, firstBatch?.model),
-    promptVersion: firstText(envelope.prompt_version, firstBatch?.prompt_version, promptVersionFromSource(sourceFile)),
+    promptVersion: firstText(promptVersionFromSource(sourceFile), envelope.prompt_version, firstBatch?.prompt_version),
     ingestedAt: now().toISOString(),
   })
 
@@ -709,6 +709,19 @@ function listStageFiles(rootDir: string, relativeDir: string, filePattern: RegEx
     .filter((entry) => entry.isFile() && filePattern.test(entry.name))
     .map((entry) => resolve(dir, entry.name))
     .sort((left, right) => left.localeCompare(right))
+}
+
+function listAnnotationBatchFiles(rootDir: string): string[] {
+  const generationDir = resolve(rootDir, GENERATION_DIR)
+  if (!existsSync(generationDir)) return []
+  const files: string[] = []
+  for (const entry of readdirSync(generationDir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue
+    if (!DATED_GENERATION_DIR_PATTERN.test(entry.name)) continue
+    if (PROMPT_AB_DIR_PATTERN.test(entry.name)) continue
+    files.push(...listStageFiles(rootDir, `${GENERATION_DIR}/${entry.name}`, /^.+\.batch\.json$/u))
+  }
+  return files.sort((left, right) => left.localeCompare(right))
 }
 
 function sourceFileFor(rootDir: string, filePath: string): string {

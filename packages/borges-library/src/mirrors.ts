@@ -1,4 +1,4 @@
-import { Effect, Result } from "effect"
+import { Effect, Result, Schema } from "effect"
 import type { HttpClient } from "effect/unstable/http"
 import { HttpClient as HttpClientService } from "effect/unstable/http"
 import { FetchError, ParseError } from "./errors"
@@ -21,21 +21,23 @@ export interface OpenSlumDiscoveryOptions {
   groups?: readonly MirrorGroup[]
 }
 
-interface OpenSlumMonitor {
-  name?: unknown
-  url?: unknown
-  validCert?: unknown
-  certExpiryDaysRemaining?: unknown
-}
+const OpenSlumMonitorSchema = Schema.Struct({
+  name: Schema.optional(Schema.String),
+  url: Schema.optional(Schema.String),
+  validCert: Schema.optional(Schema.Boolean),
+  certExpiryDaysRemaining: Schema.optional(Schema.Number),
+})
+type OpenSlumMonitor = Schema.Schema.Type<typeof OpenSlumMonitorSchema>
 
-interface OpenSlumGroup {
-  name?: unknown
-  monitorList?: unknown
-}
+const OpenSlumGroupSchema = Schema.Struct({
+  name: Schema.optional(Schema.String),
+  monitorList: Schema.optional(Schema.Array(OpenSlumMonitorSchema)),
+})
 
-export interface OpenSlumPreloadData {
-  publicGroupList?: OpenSlumGroup[]
-}
+export const OpenSlumPreloadDataSchema = Schema.Struct({
+  publicGroupList: Schema.optional(Schema.Array(OpenSlumGroupSchema)),
+})
+export type OpenSlumPreloadData = Schema.Schema.Type<typeof OpenSlumPreloadDataSchema>
 
 const CHALLENGE_OR_ERROR_MARKERS = [
   "captcha",
@@ -241,9 +243,7 @@ function jsObjectLiteralToJson(input: string): string {
 
 export function parseOpenSlumPreloadData(html: string): OpenSlumPreloadData {
   const literal = extractPreloadLiteral(html)
-  const parsed = JSON.parse(jsObjectLiteralToJson(literal)) as unknown
-  if (!parsed || typeof parsed !== "object") throw new Error("OpenSLUM preload data is not an object")
-  return parsed as OpenSlumPreloadData
+  return Schema.decodeUnknownSync(OpenSlumPreloadDataSchema)(JSON.parse(jsObjectLiteralToJson(literal)))
 }
 
 function groupForName(name: string): MirrorGroup | undefined {
@@ -264,15 +264,15 @@ function normalizeMirrorUrl(value: string): string | undefined {
   }
 }
 
-function asString(value: unknown): string | undefined {
+function asString(value: string | undefined): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined
 }
 
-function asNumber(value: unknown): number | undefined {
+function asNumber(value: number | undefined): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined
 }
 
-function asBoolean(value: unknown): boolean | undefined {
+function asBoolean(value: boolean | undefined): boolean | undefined {
   return typeof value === "boolean" ? value : undefined
 }
 
@@ -306,9 +306,7 @@ export function extractOpenSlumMirrors(
     if (!groupName) continue
     const group = groupForName(groupName)
     if (!group || !allowedGroups.has(group)) continue
-    if (!Array.isArray(publicGroup.monitorList)) continue
-
-    for (const monitor of publicGroup.monitorList as OpenSlumMonitor[]) {
+    for (const monitor of publicGroup.monitorList ?? []) {
       const url = asString(monitor.url)
       const normalizedUrl = url ? normalizeMirrorUrl(url) : undefined
       if (!normalizedUrl) continue

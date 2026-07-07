@@ -51,6 +51,13 @@ describe("generation ingest", () => {
       )
       const hskRaw = db.query<{ raw_json: string }, []>("SELECT raw_json FROM hsk_cards LIMIT 1").get()?.raw_json
       expect(hskRaw === undefined ? undefined : JSON.parse(hskRaw).card.reason).toBe("Targets the polyphonic contrast directly.")
+      expect(
+        db
+          .query<{ prompt_version: string | null }, [string]>(
+            "SELECT prompt_version FROM generation_batches WHERE source_file LIKE ?",
+          )
+          .get("%accelerando-v2-2026-07-06/%")?.prompt_version,
+      ).toBe("accelerando-v2-2026-07-06")
     } finally {
       db.close()
     }

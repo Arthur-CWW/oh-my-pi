@@ -240,13 +240,17 @@ async function readFilePrefix(filePath: string, length = 8192): Promise<{ bytes:
   }
 }
 
+function isMissingFileError(cause: object): boolean {
+  return "code" in cause && cause.code === "ENOENT"
+}
+
 async function validExistingFile(filePath: string, format: BookFormat): Promise<{ bytes: number } | undefined> {
   try {
     const { bytes, size } = await readFilePrefix(filePath)
     const invalidReason = validateBookBytes(bytes, format)
     return invalidReason ? undefined : { bytes: size }
   } catch (cause) {
-    if ((cause as NodeJS.ErrnoException).code === "ENOENT") return undefined
+    if (cause && typeof cause === "object" && isMissingFileError(cause)) return undefined
     throw cause
   }
 }
@@ -278,7 +282,7 @@ function getWithRetry(
   options: { timeout: "15 seconds" | "60 seconds"; retries: number; label: string; errorKind: "fetch" | "download" },
 ): Effect.Effect<HttpClientResponse.HttpClientResponse, FetchError | DownloadError, HttpClient.HttpClient> {
   return Effect.gen(function* () {
-    let lastFailure: unknown
+    let lastFailureMessage = "request failed"
     const attempts = Math.max(0, options.retries) + 1
     for (let attempt = 1; attempt <= attempts; attempt++) {
       const requestResult = yield* Effect.result(
@@ -289,10 +293,10 @@ function getWithRetry(
         if (TRANSIENT_STATUSES.has(response.status) && attempt < attempts) continue
         return response
       }
-      lastFailure = requestResult.failure
+      lastFailureMessage = String(requestResult.failure)
     }
 
-    const message = `${options.label} request failed after ${attempts} attempt(s): ${String(lastFailure)}`
+    const message = `${options.label} request failed after ${attempts} attempt(s): ${lastFailureMessage}`
     if (options.errorKind === "download") {
       return yield* new DownloadError({ message })
     }

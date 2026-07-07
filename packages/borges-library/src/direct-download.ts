@@ -170,13 +170,17 @@ async function readFilePrefix(filePath: string, length = 8192): Promise<{ bytes:
   }
 }
 
+function isMissingFileError(cause: object): boolean {
+  return "code" in cause && cause.code === "ENOENT"
+}
+
 async function validExistingFile(filePath: string, format: BookFormat): Promise<{ bytes: number } | undefined> {
   try {
     const { bytes, size } = await readFilePrefix(filePath)
     const invalidReason = validateDirectBookBytes(bytes, format)
     return invalidReason ? undefined : { bytes: size }
   } catch (cause) {
-    if ((cause as NodeJS.ErrnoException).code === "ENOENT") return undefined
+    if (cause && typeof cause === "object" && isMissingFileError(cause)) return undefined
     throw cause
   }
 }
@@ -210,17 +214,17 @@ async function fetchWithTimeout(url: string, timeoutMs: number): Promise<Respons
 }
 
 async function fetchWithRetry(url: string, retries: number, timeoutMs: number): Promise<Response> {
-  let lastError: unknown
+  let lastErrorMessage = "request failed"
   const attempts = Math.max(0, retries) + 1
   for (let attempt = 1; attempt <= attempts; attempt++) {
     try {
       const response = await fetchWithTimeout(url, timeoutMs)
       if (![408, 425, 429, 500, 502, 503, 504].includes(response.status) || attempt === attempts) return response
     } catch (cause) {
-      lastError = cause
+      lastErrorMessage = String(cause)
     }
   }
-  throw lastError ?? new Error("request failed")
+  throw new Error(lastErrorMessage)
 }
 
 export function downloadDirectFile(options: DirectDownloadOptions): Effect.Effect<DownloadResult, DownloadError> {

@@ -47,3 +47,15 @@ export const SearchResponseSchema = Schema.Struct({
 export type SearchResponse = Schema.Schema.Type<typeof SearchResponseSchema>
 
 export const BookResultFromJsonStringSchema = Schema.fromJsonString(BookResultSchema)
+
+export const BorgesSearchToolParamsSchema = Schema.Struct({
+  query: NonEmptyString,
+  limit: Schema.optional(Schema.Number),
+})
+export type BorgesSearchToolParams = Schema.Schema.Type<typeof BorgesSearchToolParamsSchema>
+
+export const BorgesDownloadToolParamsSchema = Schema.Struct({
+  result_json: NonEmptyString,
+  outDir: OptionalNonEmptyString,
+})
+export type BorgesDownloadToolParams = Schema.Schema.Type<typeof BorgesDownloadToolParamsSchema>

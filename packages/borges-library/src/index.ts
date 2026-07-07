@@ -3,8 +3,8 @@ import { Effect, Schema } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent"
 import { downloadBorgesLibrary, searchBorgesLibrary } from "./client"
-import { BookResultFromJsonStringSchema } from "./schemas"
-import type { BookResult, DownloadResult } from "./schemas"
+import { BookResultFromJsonStringSchema, BorgesDownloadToolParamsSchema, BorgesSearchToolParamsSchema } from "./schemas"
+import type { BookResult } from "./schemas"
 
 const httpLayer = FetchHttpClient.layer
 
@@ -36,7 +36,7 @@ export default function (pi: ExtensionAPI): void {
       limit: Type.Optional(Type.Number({ description: "Maximum number of results to return", default: 10 })),
     }),
     async execute(_callId, rawParams) {
-      const params = rawParams as { query: string; limit?: number }
+      const params = Schema.decodeUnknownSync(BorgesSearchToolParamsSchema)(rawParams)
       try {
         const results = await Effect.runPromise(
           searchBorgesLibrary(params.query, params.limit ?? 10).pipe(
@@ -45,12 +45,12 @@ export default function (pi: ExtensionAPI): void {
         )
         return {
           content: [{ type: "text", text: formatResults(results) }],
-          details: { results, error: undefined as string | undefined },
+          details: { results, error: undefined },
         }
       } catch (err) {
         return {
           content: [{ type: "text", text: `Search failed: ${String(err)}` }],
-          details: { results: [] as BookResult[], error: String(err) },
+          details: { results: [], error: String(err) },
         }
       }
     },
@@ -65,7 +65,7 @@ export default function (pi: ExtensionAPI): void {
       outDir: Type.Optional(Type.String({ description: "Output directory for the downloaded file (default: ~/.borges-library/downloads)" })),
     }),
     async execute(_callId, rawParams) {
-      const params = rawParams as { result_json: string; outDir?: string }
+      const params = Schema.decodeUnknownSync(BorgesDownloadToolParamsSchema)(rawParams)
       try {
         const result = Schema.decodeUnknownSync(BookResultFromJsonStringSchema)(params.result_json)
         const downloadResult = await Effect.runPromise(
@@ -80,12 +80,12 @@ export default function (pi: ExtensionAPI): void {
               text: `Downloaded: **${downloadResult.title}**\nSaved to: \`${downloadResult.downloadedPath}\` (${(downloadResult.bytes / 1024 / 1024).toFixed(2)} MB)`,
             },
           ],
-          details: { result: downloadResult as DownloadResult | undefined, error: undefined as string | undefined },
+          details: { result: downloadResult, error: undefined },
         }
       } catch (err) {
         return {
           content: [{ type: "text", text: `Download failed: ${String(err)}` }],
-          details: { result: undefined as DownloadResult | undefined, error: String(err) },
+          details: { result: undefined, error: String(err) },
         }
       }
     },
