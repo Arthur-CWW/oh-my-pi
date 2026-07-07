@@ -15,6 +15,8 @@ Boot doc for the next orchestrator session on this stream. Predecessor: Fable-or
 - **Scout map**: `docs/research/pi-agent-control-plane/omp-publisher-seams.md` — OMP extension API/hooks/telemetry facts with file:line evidence. Load-bearing for M2 live wiring.
 - **Research landed**: `docs/plans/harness-research.md`, `docs/research/dst-scaled-down.md` (day-one DST rules now in spec + M1 contract).
 - **Budget**: fable overlay `task.softRequestBudget` raised 40→80. CAVEAT: config is read at spawn — a raise never protects already-running workers (P1 died at 60 anyway; survived via files on disk + coordinator gate).
+- **Subagent model hot-swap SHIPPED** (2026-07-07, `b5d9db5a`): `hotswapAgentModel` primitive (`vendor/oh-my-pi/packages/coding-agent/src/task/hotswap.ts`) + `job setModel {id, model, reason?}` op. Boundary semantics (idle immediate / streaming agent_end, last-wins), JSONL role `hotswap`, child gets a hidden next-turn notice, park→revive restores swapped model + persisted thinking (auth-gated). Spec v1 hot-swap contract's "durable swap metadata + agent must know" satisfied for subagents; pause-at-boundary for the MAIN agent and control-plane `hotswap` event rows remain M4. NOT in the installed binary yet — needs a fork rebuild/reinstall to take effect in live sessions.
+- **Per-provider fast mode SHIPPED** (2026-07-07, `781cf956`): `/fast on gpt`, `/fast off claude`, bare `/fast gpt`; `setFastMode(enabled, scope?)` set arithmetic over service tiers, session-scoped, never writes `fastModeScope`. Same rebuild caveat.
 
 ## Next work: M2 (status/query API + first HTML viewer)
 
