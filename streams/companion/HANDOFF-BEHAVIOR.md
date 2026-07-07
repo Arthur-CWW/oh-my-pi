@@ -41,6 +41,8 @@ Make her *react while Arthur talks* and *feel emotions congruently in face + voi
 ## Operational lessons (cost us hours — respect them)
 
 - **gpt-implementer lane gets wrap-up-killed** mid-slice (~5min); kimi-implementer with a FROZEN contract + small file-scoped packets ships. Orchestrator runs ALL installs/builds/tests/servers/commits — worker sandboxes can't bind ports, use Metal, write .git, or bun install.
+- **kimi-implementer is DEAD and fails SILENT** (2026-07-07): the subscription lapsed and the agent resolves to the SESSION model (fable-high!) without warning. After ANY spawn, verify the actual lane: `grep -h '"model"' ~/.omp/agent/sessions/<session>/<Worker>.jsonl | head -1`. Working lanes this wave: gpt-implementer (`openai-codex/gpt-5.5:high`) shipped 5/6 slices clean (one wrap-up-kill on the reactor — but its 410-line remnant was 95% complete and compiled after a 2-line v4 `Effect.forkChild` fix); designer/opus for UI; `task` + explicit `model: anthropic/claude-opus-4-8` for browser QA. Cancelled workers leave their edits on disk (shared tree) — resume-packets beat restarts.
+- **Effect v4 beta.92 API drift**: `Effect.fork` doesn't exist — use `Effect.forkChild`/`forkScoped`; check `node_modules/effect/dist/Effect.d.ts` before assuming v3 names.
 - **Dead agents ghost-message** stand-down claims after crashes; keep a kill-list, tell workers to ignore it.
 - Transpiled files are served `no-store` now (stale-cache bug class); portless proxy dies sometimes — stack script self-heals it (`bunx portless proxy start --no-tls --port 1355`).
 - `git pull --rebase --autostash` can leave the autostash UNPOPPED — check `git stash list` after every pull.
