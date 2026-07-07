@@ -22,8 +22,20 @@ Agents are manageable processes: any live agent — subagent or session — can 
 | Resume/revive subagent | WORKS | park→revive (`AgentLifecycleManager`), keep-alive after timeout (`timeoutSec` fix 2026-07-04), hotswap survives revive | — |
 | Session fork / tree view | DEGRADED (friction 2026-07-04: "concept loved, behavior kind of broken") | candidates: stale tree state, wrong branch selection on resume | Same scout; fix if root cause surfaces, else capture exact repro next occurrence |
 | Fresh results from woken agents | **BROKEN** (friction 2026-07-04, observed 3× + again 2026-07-07) | `job poll` returns pre-wake payload forever; truth only in report files/`history://` | Fix this batch: re-bind job result on later yields (`ControlSeamScout` maps the seam) |
-| Transcript provenance (which agent wrote what) | PARTIAL | in-session: JSONL `model_change` roles, custom-message `attribution`, irc sender ids, task spawn records. Cross-session/commit: control-plane M1 ledger shipped (sessions/branches/turns/events rows); commit trailers + `commits` table = M3 | Don't build ad-hoc: M2 viewer exposes rows; M3 adds commit provenance. Scout inventories what's already answerable from a session file |
+| Transcript provenance (which agent wrote what) | PARTIAL — inventoried 2026-07-07 (`ControlSeamScout`) | EXISTS in JSONL: per-entry `id/parentId/timestamp` tree, `parentSession` header (fork lineage), message `attribution` (user/agent), assistant turn-level model/thinking/advisor provenance, `custom_message.attribution` + irc from-ids, `model_change` roles (incl. `hotswap`), `session_init` task records. MISSING: stable `agentId` on ordinary messages, authenticated external `fromPeer` (SQLite body metadata only), parent-side pointer from job → later yields (being fixed this batch), commit provenance (M3) | Don't build ad-hoc: M2 viewer exposes ledger rows; M3 adds commit trailers + `commits` table. Candidate M2 input: add writer `agentId` to ordinary message entries |
 | Attach/steer live subagent | WORKS | irc injection (step-boundary fold-in), `history://` transcripts | Absorbed by control-plane L2 bus contract later |
+
+## Cross-session command channel — design note (2026-07-07, not yet built)
+
+Facts (`ControlSeamScout`): external bus is SQLite at `~/.omp/agent/irc-bus.sqlite`, `messages.body` is plain text, no structured commands, no sender auth (any process that can write the DB can spoof `fromPeer`). Receiving main sessions poll at step boundaries (`#pollExternalIrcMessages`) and idle flush, converting to `irc:incoming` custom messages.
+
+Smallest honest surface:
+- **Envelope**: versioned JSON inside `body` (e.g. `{"omp":"cmd/1","cmd":"setModel","args":{…}}`), parsed only by the receiving MAIN session before `irc:incoming` conversion; malformed/unknown envelopes fall through as plain text (safe degradation, old binaries unaffected).
+- **Commands v1**: `setModel` (session's existing setModel path), `interrupt` (session.abort, keep-alive), `status` (reply message).
+- **Approval**: `fromPeer` is unauthenticated ⇒ commands are *requests*: receiving-side setting `irc.commands: off|ask|allow` (default `ask`, routed through the existing ask/approval machinery). Never silent mutation (spec rule). Every executed command appends a `custom_message` audit entry with the envelope + sender.
+- **Human surface**: `omp irc send <peer> '<json>'` already works — no new CLI needed for v1.
+
+Build only after Arthur approves the surface; implementation is worker-sized once decided (bus parse hook + command dispatch + setting + tests).
 
 ## Friction triage (open items → disposition)
 
