@@ -16,12 +16,12 @@ Agents are manageable processes: any live agent — subagent or session — can 
 | Hot-swap subagent model | **SHIPPED** 2026-07-07 (`b5d9db5a`) | `job setModel {id, model, reason?}`; `src/task/hotswap.ts`; boundary apply, JSONL role `hotswap`, child notified, revive-safe | Rebuild/reinstall fork binary to activate in live sessions |
 | Per-provider fast mode | **SHIPPED** 2026-07-07 (`781cf956`) | `/fast on gpt`, `/fast off claude`; `setFastMode(enabled, scope?)` | Same rebuild caveat |
 | Hot-swap MAIN agent of another session | QUEUED — scouting | irc external bus (SQLite, `agents-xxxxxx` peers) carries text only today | Scout: structured command envelope over the bus + receiving-side handler/allowlist; decide surface before building (`ControlSeamScout`) |
-| Interrupt subagent (abort turn, keep alive + addressable) | IN PROGRESS — scouting | today only `job cancel` (hard) and irc steer (message injection) | Add `job interrupt` (or equivalent): abort in-flight turn, session stays idle/registered, optional steer note; scout maps `session.abort` semantics first |
+| Interrupt subagent (abort turn, keep alive + addressable) | **SHIPPED** 2026-07-07 (`f5c07cdb`) | `job interrupt {ids, interruptReason?}`: turn aborted, agent stays idle/adopted/irc-addressable, next-turn note, `[interrupted]` partial result; hard cancel overrides prior interrupt; isolated jobs reject | Rebuild caveat |
 | Interrupt another session | QUEUED | irc steer messages only | Same command-envelope design as cross-session swap; one mechanism for both |
-| Resume session (`--resume`/`--continue`) | **BROKEN** (friction 2026-07-04, no repro) — root-causing now | known: `--continue` keyed to terminal-ID breadcrumb invalidated by force-closed terminals; single-writer JSONL lock suspects | `ResumeRootCause` scout → fix top causes this batch |
+| Resume session (`--resume`/`--continue`) | **SHIPPED** 2026-07-07 (`ca51962d`) | root causes fixed: persisted `leaf_change` metadata (wrong-branch-on-resume), `--continue` same-cwd breadcrumb fallback + provenance notice, discovery skip diagnostics; forensics `docs/qa/resume-robustness-20260707.md` | Rebuild caveat; capture repro if anything still misbehaves on the new binary |
 | Resume/revive subagent | WORKS | park→revive (`AgentLifecycleManager`), keep-alive after timeout (`timeoutSec` fix 2026-07-04), hotswap survives revive | — |
-| Session fork / tree view | DEGRADED (friction 2026-07-04: "concept loved, behavior kind of broken") | candidates: stale tree state, wrong branch selection on resume | Same scout; fix if root cause surfaces, else capture exact repro next occurrence |
-| Fresh results from woken agents | **BROKEN** (friction 2026-07-04, observed 3× + again 2026-07-07) | `job poll` returns pre-wake payload forever; truth only in report files/`history://` | Fix this batch: re-bind job result on later yields (`ControlSeamScout` maps the seam) |
+| Session fork / tree view | FIXED with resume (`ca51962d`) — wrong branch selection was the memory-only leaf; tree view follows the restored leaf now | stale-overlay candidate remains (tree captured before user interaction, no refresh hook) | Capture concrete repro next occurrence if overlay staleness persists |
+| Fresh results from woken agents | **SHIPPED** 2026-07-07 (`f5c07cdb`) | `refreshResultText` on post-completion `agent_end`; poll reflects latest yield with `[refreshed after follow-up turn]` marker | Rebuild caveat |
 | Transcript provenance (which agent wrote what) | PARTIAL — inventoried 2026-07-07 (`ControlSeamScout`) | EXISTS in JSONL: per-entry `id/parentId/timestamp` tree, `parentSession` header (fork lineage), message `attribution` (user/agent), assistant turn-level model/thinking/advisor provenance, `custom_message.attribution` + irc from-ids, `model_change` roles (incl. `hotswap`), `session_init` task records. MISSING: stable `agentId` on ordinary messages, authenticated external `fromPeer` (SQLite body metadata only), parent-side pointer from job → later yields (being fixed this batch), commit provenance (M3) | Don't build ad-hoc: M2 viewer exposes ledger rows; M3 adds commit trailers + `commits` table. Candidate M2 input: add writer `agentId` to ordinary message entries |
 | Attach/steer live subagent | WORKS | irc injection (step-boundary fold-in), `history://` transcripts | Absorbed by control-plane L2 bus contract later |
 
@@ -75,8 +75,8 @@ From `docs/state/harness-friction.md` Open, 2026-07-07 pass:
 
 1. ~~`omp fork: hot-swap subagent models via job setModel`~~ — `b5d9db5a`
 2. ~~`omp fork: /fast accepts a provider scope`~~ — `781cf956`
-3. This tracker doc.
-4. `omp fork: resume robustness` — per `ResumeRootCause` findings (breadcrumb fallback + top failure modes). Separate commit per independent cause if they don't share code.
-5. `omp fork: job results refresh on woken-agent yields`.
-6. `omp fork: job interrupt — abort turn, keep subagent alive`.
-7. Cross-session command channel: design note first (append here), implementation only after surface is settled.
+3. ~~This tracker doc~~ — `0c12b8b1`, design note `e88b686a`.
+4. ~~`omp fork: resume robustness`~~ — `ca51962d` (all three causes shared the session module; one commit).
+5. ~~`omp fork: job interrupt + fresh results from woken agents`~~ — `f5c07cdb` (shared job-manager/executor seams; one commit).
+6. Cross-session command channel: design note above; implementation only after Arthur approves the surface.
+7. Fork rebuild/reinstall (`mise` install task) to activate the batch in live sessions — pending Arthur's restart window.
