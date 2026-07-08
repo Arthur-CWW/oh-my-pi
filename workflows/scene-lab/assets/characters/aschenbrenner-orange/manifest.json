@@ -1,0 +1,16 @@
+{
+  "slug": "aschenbrenner-orange",
+  "ts": "2026-07-08T07:52:26.831Z",
+  "prompt": "A hyper-realistic collectible 3D , glossy PVC vinyl toy, wet high-gloss specular highlights, soft subsurface scattering plastic skin, studio HDRI softbox lighting, three-quarter turnaround pose, centered, clean seamless pale neutral gray studio backdrop, octane render, ultra detailed, 8k, no text, no watermark — a chubby stylized caricature figurine of a young blond male tech-nerd whose whole round body IS a giant ripe orange with dimpled citrus peel, small human arms and short legs, thin wire-frame glasses, tidy side-parted blond hair on top, big smug over-confident grin, glossy orange skin. Playful meme mascot, NOT a real person, exaggerated cartoon caricature. hyper-realistic collectible 3D character figurine, glossy PVC vinyl toy, wet high-gloss specular highlights, soft subsurface scattering plastic skin, studio HDRI softbox lighting, three-quarter turnaround pose, centered, clean seamless pale neutral gray studio backdrop, octane render, ultra detailed, 8k, no text, no watermark",
+  "negative_prompt": "text, watermark, logo, signature, letters, caption, blurry, low quality, jpeg artifacts, extra limbs, deformed hands, mutated, photorealistic real human photograph, real celebrity face, nsfw, ugly, oversaturated",
+  "model": "high_aes_general_v50",
+  "resolution": "2k",
+  "ratio": "2:3",
+  "width": 1664,
+  "height": 2496,
+  "seed": 2890575256,
+  "submit_id": "a3d8abfe-d0d1-4a8e-9977-bdcca6887238",
+  "http_status": 200,
+  "outcome": "error",
+  "error": "Workbench submit did not return submit/history id (ret=3018, errmsg=permission denied)"
+}

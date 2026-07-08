@@ -1,0 +1,31 @@
+{
+  "slug": "cat-mouse-duo",
+  "ts": "2026-07-08T08:04:13.521Z",
+  "prompt": "A hyper-realistic collectible 3D character figurine, glossy PVC vinyl toy with wet high-gloss specular highlights and soft subsurface-scattering plastic skin, studio HDRI softbox lighting, three-quarter turnaround pose, centered, clean seamless pale neutral gray studio backdrop, octane render, ultra detailed, no text, no watermark: a Tom-and-Jerry-style comedy duo — one sleek grey cartoon cat and one small brown cartoon mouse standing side by side as a mischievous pair, expressive faces, glossy toy finish, shared round display base.",
+  "model": "workbench default (jimeng-5.0 high_aes_general_v50)",
+  "resolution": "smart-ratio 2K",
+  "transport": "cdp-ui",
+  "http_status": 200,
+  "submit_id": "575db2a3-82f9-48e7-818a-19790c647928",
+  "history_id": "37304895513356",
+  "final_status": 50,
+  "outcome": "success",
+  "images": [
+    {
+      "file": "workflows/scene-lab/assets/characters/cat-mouse-duo/cat-mouse-duo-00.png",
+      "bytes": 1122937
+    },
+    {
+      "file": "workflows/scene-lab/assets/characters/cat-mouse-duo/cat-mouse-duo-01.png",
+      "bytes": 953725
+    },
+    {
+      "file": "workflows/scene-lab/assets/characters/cat-mouse-duo/cat-mouse-duo-02.png",
+      "bytes": 1277095
+    },
+    {
+      "file": "workflows/scene-lab/assets/characters/cat-mouse-duo/cat-mouse-duo-03.png",
+      "bytes": 1004533
+    }
+  ]
+}

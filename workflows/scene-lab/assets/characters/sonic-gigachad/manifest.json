@@ -1,0 +1,31 @@
+{
+  "slug": "sonic-gigachad",
+  "ts": "2026-07-08T08:00:08.123Z",
+  "prompt": "A hyper-realistic collectible 3D character figurine, glossy PVC vinyl toy with wet high-gloss specular highlights and soft subsurface-scattering plastic skin, studio HDRI softbox lighting, three-quarter turnaround pose, centered, clean seamless pale neutral gray studio backdrop, octane render, ultra detailed, no text, no watermark: Sonic the Hedgehog reimagined as a muscular 'gigachad' — blue spiky quills, exaggerated chiseled square jawline, sharp cheekbones, smug half-smile, cocky confident stare, oversized masculine bodybuilder physique, classic red-and-white sneakers, dramatic rim lighting.",
+  "model": "workbench default (jimeng-5.0 high_aes_general_v50)",
+  "resolution": "smart-ratio 2K",
+  "transport": "cdp-ui",
+  "http_status": 200,
+  "submit_id": "9003ce76-bbb6-4782-9b93-d02740ed03b7",
+  "history_id": "37319041020684",
+  "final_status": 50,
+  "outcome": "success",
+  "images": [
+    {
+      "file": "workflows/scene-lab/assets/characters/sonic-gigachad/sonic-gigachad-00.png",
+      "bytes": 1579011
+    },
+    {
+      "file": "workflows/scene-lab/assets/characters/sonic-gigachad/sonic-gigachad-01.png",
+      "bytes": 1977879
+    },
+    {
+      "file": "workflows/scene-lab/assets/characters/sonic-gigachad/sonic-gigachad-02.png",
+      "bytes": 1851473
+    },
+    {
+      "file": "workflows/scene-lab/assets/characters/sonic-gigachad/sonic-gigachad-03.png",
+      "bytes": 1893250
+    }
+  ]
+}

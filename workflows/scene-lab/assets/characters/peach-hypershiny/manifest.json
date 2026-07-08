@@ -1,0 +1,31 @@
+{
+  "slug": "peach-hypershiny",
+  "ts": "2026-07-08T08:00:59.956Z",
+  "prompt": "A hyper-realistic collectible 3D character figurine, glossy PVC vinyl toy with wet high-gloss specular highlights and soft subsurface-scattering plastic skin, studio HDRI softbox lighting, three-quarter turnaround pose, centered, clean seamless pale neutral gray studio backdrop, octane render, ultra detailed, no text, no watermark: a Princess-Peach-style royal princess, hyper-shiny mirror-glaze bubblegum-pink ball gown, golden jeweled crown, flowing blonde hair, elegant confident pose, ultra-glossy candy-coat lacquer finish, sparkling reflections.",
+  "model": "workbench default (jimeng-5.0 high_aes_general_v50)",
+  "resolution": "smart-ratio 2K",
+  "transport": "cdp-ui",
+  "http_status": 200,
+  "submit_id": "3a8c18cf-d750-4801-a6ef-d85ee05dc58a",
+  "history_id": "37337227606796",
+  "final_status": 50,
+  "outcome": "success",
+  "images": [
+    {
+      "file": "workflows/scene-lab/assets/characters/peach-hypershiny/peach-hypershiny-00.png",
+      "bytes": 1258812
+    },
+    {
+      "file": "workflows/scene-lab/assets/characters/peach-hypershiny/peach-hypershiny-01.png",
+      "bytes": 1660235
+    },
+    {
+      "file": "workflows/scene-lab/assets/characters/peach-hypershiny/peach-hypershiny-02.png",
+      "bytes": 1237593
+    },
+    {
+      "file": "workflows/scene-lab/assets/characters/peach-hypershiny/peach-hypershiny-03.png",
+      "bytes": 1209697
+    }
+  ]
+}

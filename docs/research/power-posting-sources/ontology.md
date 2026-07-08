@@ -26,9 +26,13 @@
 | @lumpenspace | trickster/leftfield |
 | @tenobrus | dry absurdist insight |
 | @voooooogel | artist-engineer bridge (also `artist` list) |
+| @apralky ("yung macro") | macro-economics absurdist — redistribution math meets "farming infinity wealth and status" |
+| @doomslide | gnostic doom-prophet — Land's cybergothic horror wing ("no dataset large enough to save you"; "retarded eschatology… Total mind virus") |
 | Nick Land / Meltdown | ur-text |
 
-**Visual/persona lane** (separate list, feeds the video style): @pleometric, @abelian_soup, @SkyeSharkie, @poetengineer__.
+**Visual/persona lane** (separate list, feeds the video style): @pleometric, @abelian_soup, @SkyeSharkie, @poetengineer__. Note: @pleometric also theoryposts — practitioner threads + concept posts (text harvest: `pleometric-longposts.md`).
+
+**Adjacent influence stack** (literary + anime): see `influences.md` — Borges (calm infinite-structure vertigo), Nietzsche (public-domain oral-prophecy feedstock), Lain/GitS/Eva + conceptual-anime recs.
 
 ## Why it's an oral medium (Arthur's instinct, confirmed)
 

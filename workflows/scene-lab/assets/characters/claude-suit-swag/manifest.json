@@ -1,0 +1,31 @@
+{
+  "slug": "claude-suit-swag",
+  "ts": "2026-07-08T08:03:16.231Z",
+  "prompt": "A hyper-realistic collectible 3D character figurine, glossy PVC vinyl toy with wet high-gloss specular highlights and soft subsurface-scattering plastic skin, studio HDRI softbox lighting, three-quarter turnaround pose, centered, clean seamless pale neutral gray studio backdrop, octane render, ultra detailed, no text, no watermark: an anthropomorphized starburst sunburst-flower mascot with warm coral-orange radial petals and a cute expressive face, wearing a sharp tailored charcoal business suit and tie, arms crossed, cool confident swag pose, glossy enamel finish.",
+  "model": "workbench default (jimeng-5.0 high_aes_general_v50)",
+  "resolution": "smart-ratio 2K",
+  "transport": "cdp-ui",
+  "http_status": 200,
+  "submit_id": "5dc75734-38fb-42d4-b19b-97c7652bdca4",
+  "history_id": "37337227939084",
+  "final_status": 50,
+  "outcome": "success",
+  "images": [
+    {
+      "file": "workflows/scene-lab/assets/characters/claude-suit-swag/claude-suit-swag-00.png",
+      "bytes": 1077305
+    },
+    {
+      "file": "workflows/scene-lab/assets/characters/claude-suit-swag/claude-suit-swag-01.png",
+      "bytes": 1322612
+    },
+    {
+      "file": "workflows/scene-lab/assets/characters/claude-suit-swag/claude-suit-swag-02.png",
+      "bytes": 1122965
+    },
+    {
+      "file": "workflows/scene-lab/assets/characters/claude-suit-swag/claude-suit-swag-03.png",
+      "bytes": 1081060
+    }
+  ]
+}

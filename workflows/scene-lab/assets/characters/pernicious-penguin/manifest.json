@@ -1,0 +1,10 @@
+{
+  "slug": "pernicious-penguin",
+  "ts": "2026-07-08T08:05:18.931Z",
+  "prompt": "A hyper-realistic collectible 3D character figurine, glossy PVC vinyl toy with wet high-gloss specular highlights and soft subsurface-scattering plastic skin, studio HDRI softbox lighting, three-quarter turnaround pose, centered, clean seamless pale neutral gray studio backdrop, octane render, ultra detailed, no text, no watermark: a sinister, pernicious-looking cartoon penguin, glossy black-and-white plumage, narrowed scheming eyes, sly menacing smirk, slightly hunched conspiratorial posture, tiny orange feet and beak, moody dramatic lighting.",
+  "model": "workbench default (jimeng-5.0 high_aes_general_v50)",
+  "resolution": "smart-ratio 2K",
+  "transport": "cdp-ui",
+  "outcome": "error",
+  "error": "Jimeng image workbench prompt editor is missing."
+}
