@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "beat-grid.v1",
+  "source": "workflows/scene-lab/assets/audio/pleo-update-13s.wav",
+  "durationSeconds": 13.312,
+  "mode": "detect",
+  "beats": [
+    0.15
+  ]
+}

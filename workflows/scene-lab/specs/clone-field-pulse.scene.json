@@ -1,0 +1,174 @@
+{
+  "schemaVersion": "scene.v1",
+  "width": 720,
+  "height": 720,
+  "fps": 30,
+  "durationSeconds": 20,
+  "background": "#0a0705",
+  "timeline": {
+    "bpm": 100,
+    "beats": [
+      0.2, 0.8, 1.4, 2.0, 2.6, 3.2, 3.8, 4.4, 5.0, 5.6,
+      6.2, 6.8, 7.4, 8.0, 8.6, 9.2, 9.8, 10.4, 11.0, 11.6,
+      12.2, 12.8, 13.4, 14.0, 14.6, 15.2, 15.8, 16.4, 17.0, 17.6,
+      18.2, 18.8, 19.4, 20.0, 20.6
+    ]
+  },
+  "assets": [
+    {
+      "id": "track",
+      "kind": "audio",
+      "path": "workflows/scene-lab/assets/audio/pleo-track-20s.wav"
+    }
+  ],
+  "camera": {
+    "fov": 46,
+    "position": [0, 0, 8.6],
+    "lookAt": [0, 0, 0],
+    "tracks": [
+      {
+        "prop": "position.z",
+        "mode": "keyframes",
+        "keyframes": [
+          { "t": 0, "v": 8.6, "ease": "linear" },
+          { "t": 20, "v": 6.9, "ease": "inOut" }
+        ]
+      },
+      {
+        "prop": "rotation.z",
+        "mode": "keyframes",
+        "keyframes": [
+          { "t": 0, "v": 0, "ease": "linear" },
+          { "t": 20, "v": 0.26, "ease": "linear" }
+        ]
+      }
+    ]
+  },
+  "objects": [
+    {
+      "id": "back-grid",
+      "kind": "plane",
+      "color": "#39291b",
+      "size": [0.95, 0.95],
+      "position": [0, 0, -2.4],
+      "rotation": [0, 0, 0.18],
+      "scale": 1,
+      "opacity": 0.5,
+      "clone": {
+        "count": 100,
+        "layout": "grid",
+        "spacing": 0.86,
+        "radius": 0,
+        "seed": 3,
+        "stagger": 0
+      },
+      "tracks": [
+        {
+          "prop": "scale",
+          "mode": "beat",
+          "beat": { "every": 2, "from": 0.92, "to": 1.08, "attack": 0.05, "decay": 0.42 }
+        },
+        {
+          "prop": "rotation.z",
+          "mode": "osc",
+          "osc": { "amp": 0.08, "freqBeats": 0.5, "phasePerClone": 0.3, "center": 0 }
+        },
+        {
+          "prop": "opacity",
+          "mode": "osc",
+          "osc": { "amp": 0.14, "freqBeats": 0.25, "phasePerClone": 0.4, "center": 0.46 }
+        }
+      ]
+    },
+    {
+      "id": "front-grid",
+      "kind": "plane",
+      "color": "#d5c9ac",
+      "size": [0.46, 0.46],
+      "position": [0, 0, 0],
+      "rotation": [0, 0, 0],
+      "scale": 1,
+      "opacity": 0.8,
+      "clone": {
+        "count": 225,
+        "layout": "grid",
+        "spacing": 0.62,
+        "radius": 0,
+        "seed": 7,
+        "stagger": 0
+      },
+      "tracks": [
+        {
+          "prop": "scale",
+          "mode": "beat",
+          "beat": { "every": 1, "from": 0.6, "to": 0.95, "attack": 0.035, "decay": 0.3 }
+        },
+        {
+          "prop": "rotation.z",
+          "mode": "osc",
+          "osc": { "amp": 0.14, "freqBeats": 0.5, "phasePerClone": 0.2, "center": 0 }
+        },
+        {
+          "prop": "opacity",
+          "mode": "osc",
+          "osc": { "amp": 0.12, "freqBeats": 0.25, "phasePerClone": 0.28, "center": 0.72 }
+        }
+      ]
+    },
+    {
+      "id": "orbit-halo",
+      "kind": "plane",
+      "color": "#e2542a",
+      "size": [0.6, 0.6],
+      "position": [0, 0, 1.1],
+      "rotation": [0, 0, 0],
+      "scale": 1,
+      "opacity": 0.85,
+      "clone": {
+        "count": 24,
+        "layout": "orbit",
+        "spacing": 1,
+        "radius": 2.5,
+        "seed": 11,
+        "stagger": 0.012
+      },
+      "tracks": [
+        {
+          "prop": "scale",
+          "mode": "beat",
+          "beat": { "every": 4, "from": 0.55, "to": 1.45, "attack": 0.05, "decay": 0.5 }
+        },
+        {
+          "prop": "rotation.z",
+          "mode": "osc",
+          "osc": { "amp": 0.6, "freqBeats": 0.25, "phasePerClone": 0.5, "center": 0 }
+        },
+        {
+          "prop": "opacity",
+          "mode": "osc",
+          "osc": { "amp": 0.14, "freqBeats": 0.5, "phasePerClone": 0.6, "center": 0.8 }
+        }
+      ]
+    }
+  ],
+  "post": [
+    {
+      "pass": "bloom",
+      "params": { "strength": 0.1, "threshold": 0.86, "radius": 1.0 },
+      "beatReactive": { "param": "strength", "every": 4, "amount": 0.16, "decay": 0.4 }
+    },
+    {
+      "pass": "halftone",
+      "params": { "dotSize": 30, "angle": 0.35, "rgbSplit": 1 }
+    },
+    {
+      "pass": "chromaticAberration",
+      "params": { "strength": 0.004, "barrel": 0 }
+    }
+  ],
+  "audio": {
+    "asset": "track",
+    "offsetSeconds": 0,
+    "gainDb": 0
+  }
+}

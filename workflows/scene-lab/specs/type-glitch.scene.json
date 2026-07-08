@@ -1,0 +1,196 @@
+{
+  "schemaVersion": "scene.v1",
+  "width": 720,
+  "height": 720,
+  "fps": 30,
+  "durationSeconds": 20,
+  "background": "#0a0810",
+  "timeline": { "bpm": 100 },
+  "assets": [
+    { "id": "track", "kind": "audio", "path": "workflows/scene-lab/assets/audio/pleo-track-20s.wav" }
+  ],
+  "camera": {
+    "fov": 44,
+    "position": [0, 0, 8.2],
+    "lookAt": [0, 0, 0],
+    "tracks": [
+      {
+        "prop": "position.z",
+        "mode": "keyframes",
+        "keyframes": [
+          { "t": 0, "v": 8.2, "ease": "linear" },
+          { "t": 20, "v": 6.9, "ease": "inOut" }
+        ]
+      },
+      {
+        "prop": "rotation.z",
+        "mode": "beat",
+        "beat": { "every": 4, "from": 0, "to": 0.07, "attack": 0.04, "decay": 0.4 }
+      }
+    ]
+  },
+  "objects": [
+    {
+      "id": "pleo-line",
+      "kind": "text",
+      "text": "PLEO",
+      "font": "900 130px \"Arial Black\", Impact, sans-serif",
+      "color": "#f2ead9",
+      "size": [1.6, 0.8],
+      "position": [0, 0, 0],
+      "rotation": [0, 0, 0],
+      "scale": 1,
+      "opacity": 1,
+      "clone": { "count": 4, "layout": "line", "spacing": 1.75, "radius": 0, "seed": 3, "stagger": 0.05 },
+      "tracks": [
+        {
+          "prop": "opacity",
+          "mode": "keyframes",
+          "keyframes": [
+            { "t": 0, "v": 1, "ease": "linear" },
+            { "t": 4.75, "v": 1, "ease": "linear" },
+            { "t": 4.8, "v": 0, "ease": "linear" },
+            { "t": 20, "v": 0, "ease": "linear" }
+          ]
+        },
+        { "prop": "scale", "mode": "beat", "beat": { "every": 1, "from": 1.0, "to": 1.18, "attack": 0.03, "decay": 0.2 } },
+        { "prop": "position.y", "mode": "osc", "osc": { "amp": 0.12, "freqBeats": 0.5, "phasePerClone": 0.7, "center": 0 } }
+      ]
+    },
+    {
+      "id": "kaleido-grid",
+      "kind": "text",
+      "text": "万花筒",
+      "font": "700 130px \"PingFang SC\", \"Heiti SC\", \"Hiragino Sans GB\", sans-serif",
+      "color": "#ff3b1d",
+      "size": [1.35, 0.8],
+      "position": [0, 0, 0],
+      "rotation": [0, 0, 0],
+      "scale": 1,
+      "opacity": 1,
+      "clone": { "count": 16, "layout": "grid", "spacing": 1.5, "radius": 0, "seed": 7, "stagger": 0.03 },
+      "tracks": [
+        {
+          "prop": "opacity",
+          "mode": "keyframes",
+          "keyframes": [
+            { "t": 0, "v": 0, "ease": "linear" },
+            { "t": 4.75, "v": 0, "ease": "linear" },
+            { "t": 4.8, "v": 1, "ease": "linear" },
+            { "t": 9.55, "v": 1, "ease": "linear" },
+            { "t": 9.6, "v": 0, "ease": "linear" },
+            { "t": 20, "v": 0, "ease": "linear" }
+          ]
+        },
+        { "prop": "scale", "mode": "beat", "beat": { "every": 1, "from": 1.0, "to": 1.2, "attack": 0.04, "decay": 0.26 } },
+        { "prop": "position.y", "mode": "osc", "osc": { "amp": 0.14, "freqBeats": 1, "phasePerClone": 0.5, "center": 0 } }
+      ]
+    },
+    {
+      "id": "scenelab-scatter",
+      "kind": "text",
+      "text": "SCENE LAB",
+      "font": "900 78px \"Arial Black\", Impact, sans-serif",
+      "color": "#f2ead9",
+      "size": [2.0, 0.5],
+      "position": [0, 0, 0],
+      "rotation": [0, 0, 0],
+      "scale": 1,
+      "opacity": 1,
+      "clone": { "count": 9, "layout": "scatter", "spacing": 0.8, "radius": 3.2, "seed": 33, "stagger": 0.02 },
+      "tracks": [
+        {
+          "prop": "opacity",
+          "mode": "keyframes",
+          "keyframes": [
+            { "t": 0, "v": 0, "ease": "linear" },
+            { "t": 9.55, "v": 0, "ease": "linear" },
+            { "t": 9.6, "v": 1, "ease": "linear" },
+            { "t": 14.35, "v": 1, "ease": "linear" },
+            { "t": 14.4, "v": 0, "ease": "linear" },
+            { "t": 20, "v": 0, "ease": "linear" }
+          ]
+        },
+        { "prop": "scale", "mode": "beat", "beat": { "every": 1, "from": 1.0, "to": 1.28, "attack": 0.02, "decay": 0.15 } },
+        { "prop": "position.y", "mode": "osc", "osc": { "amp": 0.1, "freqBeats": 2, "phasePerClone": 1.1, "center": 0 } }
+      ]
+    },
+    {
+      "id": "kaleido-core",
+      "kind": "text",
+      "text": "万花筒",
+      "font": "800 220px \"PingFang SC\", \"Heiti SC\", \"Hiragino Sans GB\", sans-serif",
+      "color": "#f2ead9",
+      "size": [3.0, 1.4],
+      "position": [0, 0, -0.25],
+      "rotation": [0, 0, 0],
+      "scale": 1,
+      "opacity": 1,
+      "clone": { "count": 1, "layout": "line", "spacing": 1, "radius": 0, "seed": 1, "stagger": 0 },
+      "tracks": [
+        {
+          "prop": "opacity",
+          "mode": "keyframes",
+          "keyframes": [
+            { "t": 0, "v": 0, "ease": "linear" },
+            { "t": 14.35, "v": 0, "ease": "linear" },
+            { "t": 14.4, "v": 1, "ease": "linear" },
+            { "t": 20, "v": 1, "ease": "linear" }
+          ]
+        },
+        { "prop": "scale", "mode": "beat", "beat": { "every": 2, "from": 1.0, "to": 1.06, "attack": 0.06, "decay": 0.4 } },
+        { "prop": "position.y", "mode": "osc", "osc": { "amp": 0.04, "freqBeats": 0.5, "phasePerClone": 0, "center": 0 } }
+      ]
+    },
+    {
+      "id": "kaleido-orbit",
+      "kind": "text",
+      "text": "万花筒",
+      "font": "700 82px \"PingFang SC\", \"Heiti SC\", \"Hiragino Sans GB\", sans-serif",
+      "color": "#ff3b1d",
+      "size": [1.0, 0.62],
+      "position": [0, 0, 0.15],
+      "rotation": [0, 0, 0],
+      "scale": 1,
+      "opacity": 1,
+      "clone": { "count": 12, "layout": "orbit", "spacing": 1, "radius": 2.4, "seed": 12, "stagger": 0.04 },
+      "tracks": [
+        {
+          "prop": "opacity",
+          "mode": "keyframes",
+          "keyframes": [
+            { "t": 0, "v": 0, "ease": "linear" },
+            { "t": 14.35, "v": 0, "ease": "linear" },
+            { "t": 14.4, "v": 0.9, "ease": "linear" },
+            { "t": 20, "v": 0.9, "ease": "linear" }
+          ]
+        },
+        { "prop": "position.z", "mode": "osc", "osc": { "amp": 0.25, "freqBeats": 0.5, "phasePerClone": 0.6, "center": 0.15 } },
+        { "prop": "scale", "mode": "osc", "osc": { "amp": 0.16, "freqBeats": 1, "phasePerClone": 0.52, "center": 0.9 } }
+      ]
+    }
+  ],
+  "post": [
+    {
+      "pass": "displacement",
+      "params": { "amplitude": 0.006, "scale": 5.5, "speed": 0.35, "seed": 42 },
+      "beatReactive": { "param": "amplitude", "every": 2, "amount": 0.02, "decay": 0.22 }
+    },
+    {
+      "pass": "glitch",
+      "params": { "intensity": 0.02, "blockiness": 0.5 },
+      "beatReactive": { "param": "intensity", "every": 1, "amount": 0.4, "decay": 0.13 }
+    },
+    {
+      "pass": "chromaticAberration",
+      "params": { "strength": 0.012, "barrel": 0.05 },
+      "beatReactive": { "param": "strength", "every": 1, "amount": 0.06, "decay": 0.16 }
+    },
+    {
+      "pass": "bloom",
+      "params": { "strength": 0.28 },
+      "beatReactive": { "param": "strength", "every": 4, "amount": 0.2, "decay": 0.5 }
+    }
+  ],
+  "audio": { "asset": "track", "offsetSeconds": 0, "gainDb": 0 }
+}

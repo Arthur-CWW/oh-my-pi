@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>TYPE GLITCH · toy</title>
+<style>
+  :root { --ink:#0a0810; --bone:#f2ead9; --verm:#ff3b1d; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; background:var(--ink); color:var(--bone);
+    font-family:"Courier New",ui-monospace,monospace; overflow:hidden; }
+  #stage { position:fixed; inset:0; }
+  #panel { position:fixed; left:16px; top:16px; width:224px; padding:14px 15px 12px;
+    background:rgba(12,10,18,.72); border:1px solid rgba(242,234,217,.16);
+    border-radius:2px; backdrop-filter:blur(3px); user-select:none; }
+  #panel h1 { margin:0 0 2px; font-size:15px; letter-spacing:3px; font-weight:900; }
+  #panel .sub { margin:0 0 12px; font-size:10px; letter-spacing:1.5px; color:#8a8397; }
+  .row { margin:9px 0; }
+  .row label { display:flex; justify-content:space-between; font-size:10px;
+    letter-spacing:1px; margin-bottom:4px; color:#c9c1d2; }
+  .row label b { color:var(--verm); font-weight:700; }
+  input[type=range] { -webkit-appearance:none; appearance:none; width:100%; height:2px;
+    background:#3a3346; outline:none; margin:0; }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:13px; height:13px;
+    border-radius:50%; background:var(--bone); cursor:pointer; border:2px solid var(--verm); }
+  input[type=range]::-moz-range-thumb { width:13px; height:13px; border-radius:50%;
+    background:var(--bone); cursor:pointer; border:2px solid var(--verm); }
+  #word { width:100%; margin-top:10px; padding:7px; cursor:pointer; letter-spacing:2px;
+    background:var(--verm); color:var(--ink); border:none; font-weight:900; font-size:12px;
+    font-family:inherit; border-radius:2px; }
+  #word:active { transform:translateY(1px); }
+  #hint { margin-top:11px; font-size:9.5px; letter-spacing:.5px; color:#7c7589; line-height:1.5; }
+  #hint kbd { background:#2a2536; border:1px solid #4a4358; border-radius:2px;
+    padding:0 4px; color:var(--bone); }
+  .flash { color:var(--verm); }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<div id="panel">
+  <h1>TYPE&nbsp;GLITCH</h1>
+  <p class="sub">100 BPM · CLONE FIELD</p>
+  <div class="row"><label>CLONES <b id="vClones">25</b></label>
+    <input id="clones" type="range" min="1" max="64" step="1" value="25"></div>
+  <div class="row"><label>PULSE <b id="vPulse">0.55</b></label>
+    <input id="pulse" type="range" min="0" max="1.5" step="0.01" value="0.55"></div>
+  <div class="row"><label>GLITCH <b id="vGlitch">0.45</b></label>
+    <input id="glitch" type="range" min="0" max="1" step="0.01" value="0.45"></div>
+  <div class="row"><label>HALFTONE <b id="vHalf">0.0</b></label>
+    <input id="half" type="range" min="0" max="1" step="0.01" value="0"></div>
+  <button id="word">万花筒 ↺</button>
+  <p id="hint"><kbd>drag</kbd> orbit · <kbd>space</kbd> pulse · <kbd>▲</kbd> beat-locked</p>
+</div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://unpkg.com/three@0.166.1/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.166.1/examples/jsm/"
+}}
+</script>
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+
+const WORDS = ["万花筒", "PLEO", "SCENE LAB"];
+const COLORS = ["#ff3b1d", "#f2ead9", "#f2ead9"];
+let wordIdx = 0;
+
+const stage = document.getElementById("stage");
+const renderer = new THREE.WebGLRenderer({ antialias:true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+stage.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(46, 1, 0.1, 100);
+camera.position.set(0, 0, 12);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.enablePan = false;
+controls.minDistance = 3;
+controls.maxDistance = 22;
+
+// --- offscreen target + fullscreen post quad (glitch + halftone), mirrors scene-lab passes ---
+let rt = new THREE.WebGLRenderTarget(1, 1);
+const postScene = new THREE.Scene();
+const postCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+const post = new THREE.ShaderMaterial({
+  uniforms: {
+    tDiffuse:{value:null}, uTime:{value:0}, uGlitch:{value:0.45},
+    uHalf:{value:0}, uPulse:{value:0}, uRes:{value:new THREE.Vector2(1,1)}
+  },
+  vertexShader:`varying vec2 v; void main(){ v=uv; gl_Position=vec4(position.xy,0.,1.);}`,
+  fragmentShader:`
+    precision highp float; varying vec2 v;
+    uniform sampler2D tDiffuse; uniform float uTime,uGlitch,uHalf,uPulse; uniform vec2 uRes;
+    float h(vec2 p){ p=fract(p*vec2(234.34,435.345)); p+=dot(p,p+34.23); return fract(p.x*p.y);}
+    float dots(vec2 c,float a,float freq,float br){ float s=sin(a),co=cos(a);
+      vec2 r=vec2(c.x*co-c.y*s,c.x*s+c.y*co); vec2 cell=fract(r*freq)-0.5;
+      float d=length(cell)*2.0; float cov=1.0-br; return smoothstep(cov-0.05,cov+0.05,d);}
+    void main(){ vec2 uv=v; float amt=uGlitch*(0.35+uPulse);
+      float band=floor(uv.y*mix(8.,80.,0.5));
+      float pulse=step(0.72,h(vec2(floor(uTime*7.0),band)));
+      float win=smoothstep(0.,0.08,fract(uTime*7.0))*(1.-smoothstep(0.35,1.,fract(uTime*7.0)));
+      uv.x+=(h(vec2(band,11.0))-0.5)*0.16*amt*pulse*win;
+      float sp=amt*(0.4+pulse*win); vec2 sh=vec2(0.02*sp,0.0);
+      vec3 col=vec3(texture2D(tDiffuse,uv+sh).r,texture2D(tDiffuse,uv).g,texture2D(tDiffuse,uv-sh).b);
+      col+=step(0.5,h(floor(v*44.0)))*sp*0.06;
+      if(uHalf>0.001){ float asp=uRes.x/max(uRes.y,1.0); vec2 c=vec2(v.x*asp,v.y);
+        float lum=dot(col,vec3(0.2126,0.7152,0.0722));
+        vec3 ink=vec3(0.04,0.03,0.06); vec3 paper=vec3(0.95,0.92,0.85);
+        vec3 ht=mix(ink,paper,dots(c,0.3,26.0,lum));
+        col=mix(col,ht,uHalf);}
+      gl_FragColor=vec4(col,1.0);}`
+});
+postScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2,2), post));
+
+// --- clone field ---
+const field = new THREE.Group();
+scene.add(field);
+const tiles = [];
+
+function makeTexture(word, color){
+  const cv = document.createElement("canvas");
+  cv.width = 512; cv.height = 256;
+  const g = cv.getContext("2d");
+  g.clearRect(0,0,512,256);
+  g.fillStyle = color; g.textAlign = "center"; g.textBaseline = "middle";
+  const heavy = /[A-Z]/.test(word);
+  g.font = heavy ? '900 150px "Arial Black",Impact,sans-serif'
+                 : '700 170px "PingFang SC","Heiti SC",sans-serif';
+  g.fillText(word, 256, 138, 486);
+  const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+
+function rebuild(count){
+  for (const t of tiles){ field.remove(t.sprite); t.sprite.material.map.dispose();
+    t.sprite.material.dispose(); }
+  tiles.length = 0;
+  const tex = makeTexture(WORDS[wordIdx], COLORS[wordIdx]);
+  const cols = Math.max(1, Math.ceil(Math.sqrt(count)));
+  const rows = Math.max(1, Math.ceil(count / cols));
+  const sx = 2.05, sy = 1.02, gap = 2.15;
+  for (let i=0;i<count;i++){
+    const mat = new THREE.SpriteMaterial({ map:tex, transparent:true });
+    const s = new THREE.Sprite(mat);
+    const col = i % cols, row = Math.floor(i / cols);
+    s.position.set((col-(cols-1)/2)*gap, ((rows-1)/2-row)*gap, 0);
+    s.userData = { base:new THREE.Vector3(sx,sy,1), phase:i*0.5 };
+    s.scale.copy(s.userData.base);
+    field.add(s); tiles.push({ sprite:s });
+  }
+}
+
+// --- beat + pulse state ---
+const BPM = 100, BEAT = 60/BPM;
+let pulseEnv = 0, lastBeat = -1, params = { pulse:0.55 };
+function trigger(){ pulseEnv = 1; }
+
+function resize(){
+  const w = innerWidth, hgt = innerHeight;
+  renderer.setSize(w, hgt); camera.aspect = w/hgt; camera.updateProjectionMatrix();
+  const px = renderer.getPixelRatio();
+  rt.setSize(w*px, hgt*px); post.uniforms.uRes.value.set(w*px, hgt*px);
+}
+addEventListener("resize", resize);
+
+const clock = new THREE.Clock();
+function loop(){
+  requestAnimationFrame(loop);
+  const t = clock.getElapsedTime();
+  const beat = Math.floor(t / BEAT);
+  if (beat !== lastBeat){ lastBeat = beat; trigger(); }   // auto beat-lock
+  pulseEnv *= 0.90;                                        // exponential decay
+
+  for (const {sprite:s} of tiles){
+    const wave = 0.65 + 0.35*Math.sin(s.userData.phase + t*2.0);
+    const k = 1 + params.pulse * pulseEnv * wave;
+    s.scale.set(s.userData.base.x*k, s.userData.base.y*k, 1);
+  }
+  field.rotation.z = 0.05 * pulseEnv * Math.sin(t*0.7);    // whole-field roll snap
+  controls.update();
+
+  post.uniforms.uTime.value = t;
+  post.uniforms.uPulse.value = pulseEnv;
+  renderer.setRenderTarget(rt); renderer.render(scene, camera);
+  renderer.setRenderTarget(null);
+  post.uniforms.tDiffuse.value = rt.texture;
+  renderer.render(postScene, postCam);
+}
+
+// --- controls wiring: immediate feedback ---
+const $ = id => document.getElementById(id);
+function bind(id, vid, fn, fmt){ const el=$(id), out=$(vid);
+  el.addEventListener("input", ()=>{ const val=parseFloat(el.value);
+    out.textContent = fmt ? fmt(val) : val; fn(val); }); }
+bind("clones","vClones", v=>rebuild(v));
+bind("pulse","vPulse", v=>params.pulse=v, v=>v.toFixed(2));
+bind("glitch","vGlitch", v=>post.uniforms.uGlitch.value=v, v=>v.toFixed(2));
+bind("half","vHalf", v=>post.uniforms.uHalf.value=v, v=>v.toFixed(2));
+$("word").addEventListener("click", ()=>{ wordIdx=(wordIdx+1)%WORDS.length;
+  $("word").textContent = WORDS[wordIdx] + " ↺";
+  rebuild(parseInt($("clones").value)); trigger(); });
+addEventListener("keydown", e=>{ if (e.code==="Space"){ e.preventDefault(); trigger(); } });
+
+renderer.setClearColor(0x0a0810, 1);
+resize(); rebuild(25); loop();
+</script>
+</body>
+</html>

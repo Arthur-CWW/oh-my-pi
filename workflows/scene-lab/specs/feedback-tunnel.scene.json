@@ -1,0 +1,207 @@
+{
+  "schemaVersion": "scene.v1",
+  "width": 720,
+  "height": 720,
+  "fps": 30,
+  "durationSeconds": 13.3,
+  "background": "#0b0710",
+  "timeline": { "bpm": 90 },
+  "assets": [
+    {
+      "id": "pad",
+      "kind": "audio",
+      "path": "workflows/scene-lab/assets/audio/pleo-update-13s.wav"
+    }
+  ],
+  "camera": {
+    "fov": 52,
+    "position": [0, 0, 5.7],
+    "lookAt": [0, 0, 0],
+    "tracks": [
+      {
+        "prop": "position.z",
+        "mode": "keyframes",
+        "keyframes": [
+          { "t": 0, "v": 5.7, "ease": "linear" },
+          { "t": 13.3, "v": 5.1, "ease": "inOut" }
+        ]
+      },
+      {
+        "prop": "position.x",
+        "mode": "osc",
+        "osc": { "amp": 0.1, "freqBeats": 0.07, "phasePerClone": 0, "center": 0 }
+      },
+      {
+        "prop": "position.y",
+        "mode": "osc",
+        "osc": { "amp": 0.08, "freqBeats": 0.05, "phasePerClone": 0, "center": 0 }
+      }
+    ]
+  },
+  "objects": [
+    {
+      "id": "ring-edge",
+      "kind": "plane",
+      "color": "#ffb060",
+      "size": [0.36, 0.78],
+      "position": [0, 0, -0.05],
+      "rotation": [0, 0, 0],
+      "scale": 1,
+      "opacity": 1,
+      "clone": {
+        "count": 30,
+        "layout": "orbit",
+        "spacing": 1,
+        "radius": 2.55,
+        "seed": 2,
+        "stagger": 0.05
+      },
+      "tracks": [
+        {
+          "prop": "scale",
+          "mode": "osc",
+          "osc": { "amp": 0.2, "freqBeats": 0.22, "phasePerClone": 0.32, "center": 1 }
+        },
+        {
+          "prop": "opacity",
+          "mode": "osc",
+          "osc": { "amp": 0.08, "freqBeats": 0.28, "phasePerClone": 0.36, "center": 0.94 }
+        },
+        {
+          "prop": "rotation.z",
+          "mode": "keyframes",
+          "keyframes": [
+            { "t": 0, "v": 0, "ease": "linear" },
+            { "t": 13.3, "v": 1.6, "ease": "linear" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ring-outer",
+      "kind": "plane",
+      "color": "#ffc27a",
+      "size": [0.32, 0.66],
+      "position": [0, 0, 0],
+      "rotation": [0, 0, 0],
+      "scale": 1,
+      "opacity": 1,
+      "clone": {
+        "count": 24,
+        "layout": "orbit",
+        "spacing": 1,
+        "radius": 1.9,
+        "seed": 3,
+        "stagger": 0.05
+      },
+      "tracks": [
+        {
+          "prop": "scale",
+          "mode": "osc",
+          "osc": { "amp": 0.24, "freqBeats": 0.2, "phasePerClone": -0.4, "center": 1 }
+        },
+        {
+          "prop": "opacity",
+          "mode": "osc",
+          "osc": { "amp": 0.1, "freqBeats": 0.26, "phasePerClone": -0.42, "center": 0.92 }
+        },
+        {
+          "prop": "rotation.z",
+          "mode": "keyframes",
+          "keyframes": [
+            { "t": 0, "v": 0, "ease": "linear" },
+            { "t": 13.3, "v": -1.5, "ease": "linear" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ring-mid",
+      "kind": "plane",
+      "color": "#ffe0b0",
+      "size": [0.28, 0.54],
+      "position": [0, 0, 0.05],
+      "rotation": [0, 0, 0],
+      "scale": 1,
+      "opacity": 1,
+      "clone": {
+        "count": 16,
+        "layout": "orbit",
+        "spacing": 1,
+        "radius": 1.15,
+        "seed": 8,
+        "stagger": 0.05
+      },
+      "tracks": [
+        {
+          "prop": "scale",
+          "mode": "osc",
+          "osc": { "amp": 0.24, "freqBeats": 0.18, "phasePerClone": 0.5, "center": 1 }
+        },
+        {
+          "prop": "opacity",
+          "mode": "osc",
+          "osc": { "amp": 0.12, "freqBeats": 0.24, "phasePerClone": 0.5, "center": 0.9 }
+        },
+        {
+          "prop": "rotation.z",
+          "mode": "keyframes",
+          "keyframes": [
+            { "t": 0, "v": 0, "ease": "linear" },
+            { "t": 13.3, "v": 1.3, "ease": "linear" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ring-inner",
+      "kind": "plane",
+      "color": "#fff4e2",
+      "size": [0.22, 0.38],
+      "position": [0, 0, 0.1],
+      "rotation": [0, 0, 0],
+      "scale": 1,
+      "opacity": 1,
+      "clone": {
+        "count": 10,
+        "layout": "orbit",
+        "spacing": 1,
+        "radius": 0.55,
+        "seed": 5,
+        "stagger": 0.04
+      },
+      "tracks": [
+        {
+          "prop": "scale",
+          "mode": "osc",
+          "osc": { "amp": 0.18, "freqBeats": 0.16, "phasePerClone": 0.66, "center": 1 }
+        },
+        {
+          "prop": "opacity",
+          "mode": "osc",
+          "osc": { "amp": 0.14, "freqBeats": 0.22, "phasePerClone": 0.66, "center": 0.86 }
+        },
+        {
+          "prop": "rotation.z",
+          "mode": "keyframes",
+          "keyframes": [
+            { "t": 0, "v": 0, "ease": "linear" },
+            { "t": 13.3, "v": -1.1, "ease": "linear" }
+          ]
+        }
+      ]
+    }
+  ],
+  "post": [
+    { "pass": "bloom", "params": { "threshold": 0.42, "strength": 0.55, "radius": 1.0 } },
+    { "pass": "feedback", "params": { "decay": 0.85, "zoom": 0.987, "rotate": 0.017 } },
+    {
+      "pass": "displacement",
+      "params": { "amplitude": 0.011, "scale": 3.0, "speed": 0.14, "seed": 7 },
+      "beatReactive": { "param": "amplitude", "every": 4, "amount": 0.006, "decay": 0.7 }
+    },
+    { "pass": "chromaticAberration", "params": { "strength": 0.005, "barrel": 0.3 } },
+    { "pass": "vhs", "params": { "scanlineIntensity": 0.16, "wobble": 0.24, "bleed": 0.4, "noise": 0.08, "vignette": 0.18 } }
+  ],
+  "audio": { "asset": "pad", "offsetSeconds": 0, "gainDb": 0 }
+}
