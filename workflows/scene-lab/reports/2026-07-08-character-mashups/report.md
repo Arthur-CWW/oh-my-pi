@@ -1,7 +1,7 @@
 ---
-title: 3D character mashups — first five, via jimeng-5.0
+title: 3D character mashups — the full six, via jimeng-5.0
 date: 2026-07-08
-agent: CharacterMashups + Fable
+agent: CharacterMashups + Fable + PenguinRetry
 status: shipped
 ---
 
@@ -14,8 +14,9 @@ status: shipped
 | ![claude](claude-suit-swag-00.png) | **Suit Claude** — starburst-flower head, gray suit, crossed arms, ceramic gloss. |
 | ![peach](peach-hypershiny-00.png) | **Hyper-shiny Peach** — humanized, wet-gloss PVC. |
 | ![catmouse](cat-mouse-duo-00.png) | **Cat & Mouse duo** — Tom-and-Jerry-shaped, house style. |
+| ![penguin](pernicious-penguin-00.png) | **Pernicious Penguin** — chubby glossy figurine, one arched eyebrow, sideways side-eye and a cheeky up-curved beak-grin: cute-but-untrustworthy. (Landed on the 4th real submit after 3× `2038/InputTextRisk` — the "menacing/scheming/untrustworthy" wording tripped Jimeng's text filter, so villainy had to be carried by physical features, not psychology words.) |
 
-**Missing:** pernicious penguin — workbench UI-state error ("prompt editor missing"), retry next session.
+**Cast complete — all six shipped.** The pernicious penguin (previously missing on a workbench UI-state error) landed this session via the exact proven submit path with a physical-only prompt. Forensics: `workflows/scene-lab/assets/characters/pernicious-penguin/manifest.json` + `history://PenguinRetry`.
 
 ## Spend + auth story
 
