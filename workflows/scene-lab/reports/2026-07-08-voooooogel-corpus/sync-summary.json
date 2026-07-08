@@ -1,0 +1,36 @@
+{
+  "schemaVersion": "pleometric-sync-report.v1",
+  "generatedAt": "2026-07-08T07:50:18.932Z",
+  "tools": {
+    "yt-dlp": "/opt/homebrew/bin/yt-dlp",
+    "gallery-dl": "absent",
+    "ffmpeg": "/opt/homebrew/bin/ffmpeg",
+    "ffprobe": "/opt/homebrew/bin/ffprobe"
+  },
+  "archiveSqlite": {
+    "path": "data/twitter-archive/twitter-archive.sqlite",
+    "pleometricMediaRows": 335,
+    "pleometricVideoGifRows": 0
+  },
+  "fetch": {
+    "baseUrl": "https://nitter.tiekoetter.com",
+    "pagesFetched": 10,
+    "stopReason": "max-pages",
+    "walls": []
+  },
+  "files": {
+    "manifest": "data/inspiration/voooooogel/manifest.json",
+    "contactSheet": "workflows/scene-lab/reports/2026-07-08-voooooogel-corpus/voooooogel-contact-sheet.png",
+    "dataDir": "data/inspiration/voooooogel"
+  },
+  "counts": {
+    "items": 3,
+    "existingAtStart": 0,
+    "newItems": 3,
+    "filesOnDisk": 4
+  },
+  "dateRange": {
+    "earliest": "Apr 25, 2026 · 2:22 AM UTC",
+    "latest": "Jul 3, 2026 · 8:27 PM UTC"
+  }
+}

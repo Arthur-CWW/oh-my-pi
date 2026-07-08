@@ -1,0 +1,32 @@
+{
+  "schemaVersion": "pleometric-sync-report.v1",
+  "generatedAt": "2026-07-08T07:42:41.268Z",
+  "tools": {
+    "yt-dlp": "/opt/homebrew/bin/yt-dlp",
+    "gallery-dl": "absent",
+    "ffmpeg": "/opt/homebrew/bin/ffmpeg",
+    "ffprobe": "/opt/homebrew/bin/ffprobe"
+  },
+  "archiveSqlite": {
+    "path": "data/twitter-archive/twitter-archive.sqlite",
+    "pleometricMediaRows": 2,
+    "pleometricVideoGifRows": 0
+  },
+  "fetch": {
+    "baseUrl": "https://nitter.tiekoetter.com",
+    "pagesFetched": 10,
+    "stopReason": "max-pages",
+    "walls": []
+  },
+  "files": {
+    "manifest": "data/inspiration/SkyeSharkie/manifest.json",
+    "contactSheet": "workflows/scene-lab/reports/2026-07-08-SkyeSharkie-corpus/SkyeSharkie-contact-sheet.png",
+    "dataDir": "data/inspiration/SkyeSharkie"
+  },
+  "counts": {
+    "items": 0,
+    "existingAtStart": 0,
+    "newItems": 0,
+    "filesOnDisk": 1
+  }
+}

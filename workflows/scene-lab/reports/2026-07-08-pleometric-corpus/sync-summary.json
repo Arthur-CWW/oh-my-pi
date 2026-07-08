@@ -1,0 +1,38 @@
+{
+  "schemaVersion": "pleometric-sync-report.v1",
+  "generatedAt": "2026-07-08T07:40:40.975Z",
+  "tools": {
+    "yt-dlp": "/opt/homebrew/bin/yt-dlp",
+    "gallery-dl": "absent",
+    "ffmpeg": "/opt/homebrew/bin/ffmpeg",
+    "ffprobe": "/opt/homebrew/bin/ffprobe"
+  },
+  "archiveSqlite": {
+    "path": "data/twitter-archive/twitter-archive.sqlite",
+    "pleometricMediaRows": 19,
+    "pleometricVideoGifRows": 0
+  },
+  "fetch": {
+    "baseUrl": "https://nitter.tiekoetter.com",
+    "pagesFetched": 17,
+    "stopReason": "wall-429",
+    "walls": [
+      "429 at https://nitter.tiekoetter.com/pleometric/media?view=timeline&cursor=DAABCgABHMsGtoy__qAKAAIcT83uBBZhKggAAwAAAAIAAA"
+    ]
+  },
+  "files": {
+    "manifest": "data/inspiration/pleometric/manifest.json",
+    "contactSheet": "workflows/scene-lab/reports/2026-07-08-pleometric-corpus/pleometric-contact-sheet.png",
+    "dataDir": "data/inspiration/pleometric"
+  },
+  "counts": {
+    "items": 133,
+    "existingAtStart": 82,
+    "newItems": 51,
+    "filesOnDisk": 134
+  },
+  "dateRange": {
+    "earliest": "Apr 4, 2026 · 2:16 AM UTC",
+    "latest": "Jul 6, 2026 · 1:14 AM UTC"
+  }
+}
