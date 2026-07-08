@@ -433,7 +433,7 @@ function extractPrimaryVideoItems(html: string, handle: string): RawVideoItem[] 
   const items: RawVideoItem[] = []
   const escapedHandle = escapeRegExp(handle)
   const escapedLowerHandle = escapeRegExp(handle.toLowerCase())
-  const chunks = html.split(new RegExp(`<div class="timeline-item[^"]*" data-username="${escapedLowerHandle}">`))
+  const chunks = html.split(new RegExp(`<div class="timeline-item[^"]*" data-username="${escapedLowerHandle}">`, "i"))
   const statusPattern = new RegExp(`href="/${escapedHandle}/status/(\\d+)#m"`, "i")
   for (let i = 1; i < chunks.length; i += 1) {
     const chunk = chunks[i]

@@ -1,6 +1,6 @@
 {
   "schemaVersion": "pleometric-sync-report.v1",
-  "generatedAt": "2026-07-08T07:42:41.268Z",
+  "generatedAt": "2026-07-08T08:55:21.105Z",
   "tools": {
     "yt-dlp": "/opt/homebrew/bin/yt-dlp",
     "gallery-dl": "absent",
@@ -14,8 +14,8 @@
   },
   "fetch": {
     "baseUrl": "https://nitter.tiekoetter.com",
-    "pagesFetched": 10,
-    "stopReason": "max-pages",
+    "pagesFetched": 8,
+    "stopReason": "max-items",
     "walls": []
   },
   "files": {
@@ -24,9 +24,13 @@
     "dataDir": "data/inspiration/SkyeSharkie"
   },
   "counts": {
-    "items": 0,
-    "existingAtStart": 0,
-    "newItems": 0,
-    "filesOnDisk": 1
+    "items": 60,
+    "existingAtStart": 38,
+    "newItems": 22,
+    "filesOnDisk": 61
+  },
+  "dateRange": {
+    "earliest": "Jun 23, 2026 · 6:07 AM UTC",
+    "latest": "Jul 7, 2026 · 4:37 PM UTC"
   }
 }
