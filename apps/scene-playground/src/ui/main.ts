@@ -33,6 +33,7 @@ import { renderTimeline, type TimelineCallbacks } from "./studio/timeline";
 import { createSourceEditor, getDoc, setDoc, setDirtyDot, setSpecLabel, type SourceState } from "./studio/source";
 import { applyDelete, KEYMAP_HELP, mapKey } from "./studio/keymap";
 import { mountLabelView, unmountLabelView, handleLabelKeydown, labelCss } from "./label/view";
+import { mountGalleryView, unmountGalleryView, handleGalleryKeydown, galleryCss } from "./gallery/view";
 
 // ---------------------------------------------------------------------------
 // State
@@ -43,7 +44,7 @@ let selection: Selection = { type: "none" };
 let selectedSpecPath = "";
 let playing = true;
 let currentFrame = 0;
-let currentView: "reports" | "studio" | "label" = "reports";
+let currentView: "reports" | "studio" | "label" | "gallery" = "reports";
 let studioInitialized = false;
 let specsList: SpecEntry[] = [];
 let filesystemAssets: AssetEntry[] = [];
@@ -65,6 +66,7 @@ app.innerHTML = `
   <nav class="topnav">
     <span class="brand">scene playground</span>
     <button class="nav-btn active" data-view="reports">reports</button>
+    <button class="nav-btn" data-view="gallery">gallery</button>
     <button class="nav-btn" data-view="studio">studio</button>
     <button class="nav-btn" data-view="label">label</button>
   </nav>
@@ -93,6 +95,7 @@ app.innerHTML = `
     </aside>
   </div>
   <div id="label-view" class="label-view-root hidden"></div>
+  <div id="gallery-view" class="gallery-view-root hidden"></div>
   <div id="help-overlay" class="help-overlay hidden"></div>
   <footer id="status">SSE: connecting\u2026</footer>
 `;
@@ -225,7 +228,7 @@ async function boot(): Promise<void> {
 function wireEvents(): void {
   for (const btn of document.querySelectorAll<HTMLButtonElement>(".nav-btn")) {
     btn.addEventListener("click", () => {
-      const target = btn.dataset.view as "reports" | "studio" | "label" | undefined;
+      const target = btn.dataset.view as "reports" | "studio" | "label" | "gallery" | undefined;
       if (target !== undefined && target !== currentView) switchView(target);
     });
   }
@@ -233,6 +236,7 @@ function wireEvents(): void {
   // Global keymap
   window.addEventListener("keydown", (e) => {
     if (currentView === "label") { handleLabelKeydown(e); return; }
+    if (currentView === "gallery") { handleGalleryKeydown(e); return; }
     if (currentView !== "studio") return;
     const target = e.target;
     if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) {
@@ -315,8 +319,9 @@ function toggleHelp(): void {
   }
 }
 
-function switchView(target: "reports" | "studio" | "label"): void {
+function switchView(target: "reports" | "studio" | "label" | "gallery"): void {
   if (currentView === "label") unmountLabelView();
+  if (currentView === "gallery") unmountGalleryView();
   currentView = target;
   for (const btn of document.querySelectorAll<HTMLButtonElement>(".nav-btn")) {
     btn.classList.toggle("active", btn.dataset.view === target);
@@ -325,6 +330,8 @@ function switchView(target: "reports" | "studio" | "label"): void {
   studioView.classList.toggle("hidden", target !== "studio");
   const labelView = document.getElementById("label-view");
   if (labelView !== null) labelView.classList.toggle("hidden", target !== "label");
+  const galleryView = document.getElementById("gallery-view");
+  if (galleryView !== null) galleryView.classList.toggle("hidden", target !== "gallery");
   if (target === "reports") {
     // Pause runtime and viewport RAF when leaving studio
     if (window.SceneRuntime !== undefined) window.SceneRuntime.stop();
@@ -336,7 +343,26 @@ function switchView(target: "reports" | "studio" | "label"): void {
     const lv = document.getElementById("label-view");
     const st = document.getElementById("status");
     if (lv !== null && st !== null) mountLabelView(lv, st);
+  } else if (target === "gallery") {
+    const gv = document.getElementById("gallery-view");
+    const st = document.getElementById("status");
+    if (gv !== null && st !== null) mountGalleryView(gv, st, { openReport: openReportFromGallery });
   }
+}
+
+function openReportFromGallery(reportPath: string): void {
+  switchView("reports");
+  requestAnimationFrame(() => {
+    const toggle = reportFeed.querySelector<HTMLButtonElement>(`.report-toggle[data-report-path="${CSS.escape(reportPath)}"]`);
+    if (toggle === null) return;
+    const card = toggle.closest<HTMLElement>(".report-card");
+    if (card === null) return;
+    card.scrollIntoView({ behavior: "smooth", block: "start" });
+    const body = card.querySelector<HTMLDivElement>(".report-body");
+    if (body !== null && !body.classList.contains("open")) toggle.click();
+    card.classList.add("flash");
+    setTimeout(() => card.classList.remove("flash"), 2000);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -848,5 +874,6 @@ footer { height: 24px; display: flex; align-items: center; padding: 0 var(--spac
 /* === Shared === */
 .muted { color: var(--text-muted); font-size: var(--text-sm); }
 ${labelCss()}
+${galleryCss()}
 `;
 }

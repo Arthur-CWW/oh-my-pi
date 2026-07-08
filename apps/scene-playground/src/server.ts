@@ -160,7 +160,7 @@ function resolveAssetPath(paths: AppPaths, requestPath: string): string | null {
   return target;
 }
 
-const REPORT_MEDIA_RE = /\.(png|mp4|json)$/i;
+const REPORT_MEDIA_RE = /\.(png|mp4|json|html)$/i;
 
 function resolveReportPath(paths: AppPaths, requestPath: string): string | null {
   const trimmed = requestPath.trim();
@@ -169,7 +169,7 @@ function resolveReportPath(paths: AppPaths, requestPath: string): string | null 
   const target = resolve(paths.repoRoot, rel);
   if (!isInside(paths.reportsDir, target)) return null;
   const ext = extname(target).toLowerCase();
-  if (ext !== ".md" && ext !== ".png" && ext !== ".mp4" && ext !== ".json") return null;
+  if (ext !== ".md" && ext !== ".png" && ext !== ".mp4" && ext !== ".json" && ext !== ".html") return null;
   return target;
 }
 
@@ -257,9 +257,34 @@ async function listRenders(paths: AppPaths): Promise<RenderEntry[]> {
   return entries;
 }
 
+function stripQuotes(value: string): string {
+  if (value.length >= 2) {
+    const first = value[0];
+    const last = value[value.length - 1];
+    if ((first === '"' && last === '"') || (first === "'" && last === "'")) return value.slice(1, -1);
+  }
+  return value;
+}
+
 function parseFrontMatter(content: string): { meta: Record<string, string>; body: string } {
   const lines = content.split("\n");
   const meta: Record<string, string> = {};
+
+  // YAML-style fenced front matter: --- ... --- (used by newer reports)
+  if (lines[0]?.trim() === "---") {
+    let i = 1;
+    for (; i < lines.length; i += 1) {
+      const line = lines[i]!;
+      if (line.trim() === "---") { i += 1; break; }
+      const colon = line.indexOf(":");
+      if (colon < 0) continue;
+      meta[line.slice(0, colon).trim()] = stripQuotes(line.slice(colon + 1).trim());
+    }
+    if (lines[i]?.trim() === "") i += 1;
+    return { meta, body: lines.slice(i).join("\n").trim() };
+  }
+
+  // Bare key: value front matter (legacy)
   let bodyStart = 0;
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i]!;
@@ -272,7 +297,7 @@ function parseFrontMatter(content: string): { meta: Record<string, string>; body
       bodyStart = i;
       break;
     }
-    meta[line.slice(0, colon).trim()] = line.slice(colon + 1).trim();
+    meta[line.slice(0, colon).trim()] = stripQuotes(line.slice(colon + 1).trim());
   }
   return { meta, body: lines.slice(bodyStart).join("\n").trim() };
 }

@@ -193,6 +193,37 @@ describe("report routes", () => {
     expect(report.media).not.toContain("workflows/scene-lab/reports/2026-07-03-test-report/report.md");
   });
 
+  test("parses YAML-fenced front matter and surfaces .html toy artifacts", async () => {
+    const testServer = await startTestServer();
+    const reportDir = join(testServer.root, "workflows/scene-lab/reports/2026-07-06-fenced-report");
+    await mkdir(reportDir, { recursive: true });
+    // Regression: reports opening with a `---` fence must NOT fall back to the
+    // dir-name title. Before the fence branch, the parser saw a colon-less
+    // first line and bailed with empty meta → title defaulted to the dir name.
+    await writeFile(
+      join(reportDir, "report.md"),
+      '---\ntitle: "Fenced Report — quoted"\ndate: 2026-07-06\nagent: FenceBot\nstatus: shipped\n---\n\nFenced prose paragraph.\n\n## Details\n',
+      "utf8",
+    );
+    await writeFile(join(reportDir, "artifact.html"), "<!doctype html><title>toy</title>");
+    await writeFile(join(reportDir, "still.png"), new Uint8Array([137, 80, 78, 71]));
+
+    const response = await fetch(`${testServer.baseUrl}/api/reports`);
+    const reports = (await response.json()) as ReportJson[];
+    const report = reports.find((r) => r.path.endsWith("2026-07-06-fenced-report"));
+    expect(report).toBeDefined();
+    // Title comes from the fenced meta (quotes stripped), not the dir name.
+    expect(report!.title).toBe("Fenced Report — quoted");
+    expect(report!.title).not.toBe("2026-07-06-fenced-report");
+    expect(report!.agent).toBe("FenceBot");
+    expect(report!.status).toBe("shipped");
+    expect(report!.date).toBe("2026-07-06");
+    // Body starts after the closing fence → excerpt is the first prose block.
+    expect(report!.excerpt).toBe("Fenced prose paragraph.");
+    // .html toys are now scanned into media (drives the gallery TOY card).
+    expect(report!.media).toContain("workflows/scene-lab/reports/2026-07-06-fenced-report/artifact.html");
+  });
+
   test("excerpt skips heading lines and takes first prose paragraph", async () => {
     const testServer = await startTestServer();
     const reportDir = join(testServer.root, "workflows/scene-lab/reports/2026-07-03-heading-test");
