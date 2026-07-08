@@ -4,7 +4,7 @@ import { existsSync, watch } from "node:fs";
 import type { FSWatcher } from "node:fs";
 import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
 import { openLedger, type EditRecord, type EditStats, type Ledger } from "./ledger";
-import { openLabels, type LabelsStore, type GroupWithCount, type LabelRow } from "./labels";
+import { openLabels, type LabelsStore, type GroupWithCount, type LabelRow, type NoteRow } from "./labels";
 import { appendError, caughtErrorInput, listRecentErrors, type ErrorLogEntry } from "./errors";
 
 const APP_DIR = resolve(import.meta.dir, "..");
@@ -19,6 +19,7 @@ const MAX_ASSET_DEPTH = 4;
 const SSE_HEARTBEAT_MS = 20_000;
 const RECENT_PUT_HASH_TTL_MS = 30_000;
 const WATCH_DUPLICATE_WINDOW_MS = 500;
+const MAX_NOTE_LENGTH = 20_000;
 
 export interface ServerOptions {
   repoRoot?: string;
@@ -64,7 +65,7 @@ interface ReportEntry {
 
 type JsonPrimitive = string | number | boolean | null;
 type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
-type JsonPayload = JsonValue | SpecEntry[] | AssetEntry[] | RenderEntry[] | ReportEntry[] | EditRecord[] | EditStats | ErrorLogEntry[] | { error: string } | { ok: true; path: string };
+type JsonPayload = JsonValue | SpecEntry[] | AssetEntry[] | RenderEntry[] | ReportEntry[] | EditRecord[] | EditStats | ErrorLogEntry[] | NoteRow | NoteRow[] | { error: string } | { ok: true; path: string };
 
 interface AppPaths {
   repoRoot: string;
@@ -836,6 +837,27 @@ export async function createScenePlaygroundApp(options: ServerOptions = {}): Pro
         }
         const row = labels.ensureGroup(body.name.trim(), body.key ?? undefined);
         return jsonResponse(row as unknown as JsonPayload);
+      }
+      if (url.pathname === "/api/notes" && request.method === "GET") {
+        const item = url.searchParams.get("item");
+        if (item !== null) return jsonResponse(labels.getNote(item));
+        return jsonResponse(labels.allNotes());
+      }
+      if (url.pathname === "/api/notes" && request.method === "PUT") {
+        const body = (await request.json()) as { itemKey?: string; body?: string };
+        const itemKey = body.itemKey;
+        const noteBody = body.body;
+        if (typeof itemKey !== "string" || itemKey.trim().length === 0 || typeof noteBody !== "string") {
+          return jsonResponse({ error: "Body requires itemKey (non-empty string) and body (string)" }, { status: 400 });
+        }
+        if (noteBody.length > MAX_NOTE_LENGTH) {
+          return jsonResponse({ error: `Note body exceeds ${MAX_NOTE_LENGTH} characters` }, { status: 400 });
+        }
+        const note = labels.setNote(itemKey, noteBody);
+        // Provenance: record every note write in the ledger as a human edit,
+        // namespaced by item so note history never collides with artifact edits.
+        ledger.recordEdit({ path: `note:${itemKey}`, actor: "human", content: noteBody });
+        return jsonResponse(note);
       }
       if (url.pathname === "/api/reports" && request.method === "GET") {
         return jsonResponse(await listReports(paths));

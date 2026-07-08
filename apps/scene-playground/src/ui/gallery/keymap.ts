@@ -22,6 +22,7 @@ export type GalleryAction =
   | { type: "toggle-play" }
   | { type: "open-report" }
   | { type: "cycle-filter" }
+  | { type: "open-note" }
   | { type: "help-toggle" }
   | { type: "none" };
 
@@ -89,6 +90,8 @@ export function mapGalleryKey(key: string, state: GalleryNavState): GalleryActio
       return { type: "open" };
     case "o":
       return { type: "open-report" };
+    case "n":
+      return { type: "open-note" };
     case "f":
       return { type: "cycle-filter" };
     case "?":
@@ -108,4 +111,5 @@ export const GALLERY_KEYMAP_HELP = [
   ["o", "Open parent report"],
   ["f", "Filter: all → videos → toys"],
   ["?", "Toggle this help"],
+  ["n", "Add / edit reference note"],
 ] as const;

@@ -22,6 +22,7 @@ import {
   buildAutoplayQueue,
 } from "./keymap";
 import { reportClientError } from "../error-report";
+import { isNotePanelOpen, openNotePanel } from "../notes";
 import {
   type CellPatch,
   computeMovePatch,
@@ -128,6 +129,9 @@ let autoplayGifTimer: ReturnType<typeof setTimeout> | null = null;
 // Save status
 let saveStatusTimer: ReturnType<typeof setTimeout> | null = null;
 
+/** corpus media_path → note body, for cell markers + the detail-pane note. */
+const noteMap = new Map<string, string>();
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -163,6 +167,7 @@ export function unmountLabelView(): void {
 }
 
 export function handleLabelKeydown(e: KeyboardEvent): void {
+  if (isNotePanelOpen()) return;
   const target = e.target;
   if (target instanceof HTMLInputElement && target.classList.contains("label-filter-input")) {
     if (e.key === "Escape") {
@@ -261,6 +266,8 @@ function buildShell(): string {
           <span class="hint-sep">·</span>
           <kbd>/</kbd> filter
           <span class="hint-sep">·</span>
+          <kbd>n</kbd> note
+          <span class="hint-sep">·</span>
           <kbd>?</kbd> help
           <span class="label-save-status"></span>
         </div>
@@ -277,12 +284,16 @@ function buildShell(): string {
 
 async function loadData(): Promise<void> {
   try {
-    const [corpusRes, groupsRes] = await Promise.all([
+    const [corpusRes, groupsRes, notesRes] = await Promise.all([
       fetch("/api/corpus"),
       fetch("/api/label-groups"),
+      fetch("/api/notes"),
     ]);
     const corpus: CorpusItem[] = await corpusRes.json();
     const groups: GroupInfo[] = await groupsRes.json();
+    const notes = (await notesRes.json()) as Array<{ item_key: string; body: string }>;
+    noteMap.clear();
+    for (const n of notes) noteMap.set(n.item_key, n.body);
     state.items = corpus;
     state.groups = groups;
     // Seed "interesting" group (key 4) if absent — Arthur explicitly wants this bucket
@@ -519,6 +530,10 @@ function applyAction(action: LabelAction): void {
       } else {
         startAutoplay();
       }
+      break;
+
+    case "note":
+      openNoteForFocused();
       break;
 
     case "none":
@@ -761,6 +776,35 @@ function showSaveStatus(ok: boolean, detail: string): void {
     // Report failed saves to the server error log via the capped beacon helper
     reportClientError(`Label persistence failure: ${detail}`);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Reference notes
+// ---------------------------------------------------------------------------
+
+function openNoteForFocused(): void {
+  const fi = state.focus;
+  const itemIdx = state.filteredIndices[fi];
+  if (itemIdx === undefined) return;
+  const item = state.items[itemIdx];
+  if (item === undefined) return;
+  const key = item.file;
+  openNotePanel({
+    itemKey: key,
+    title: item.text ? item.text.slice(0, 80) : item.file,
+    initialBody: noteMap.get(key) ?? "",
+    onSaved: (savedKey, body) => {
+      const has = body.trim().length > 0;
+      if (has) noteMap.set(savedKey, body);
+      else noteMap.delete(savedKey);
+      // Cell may have been recycled by the virtualizer since the panel opened,
+      // so re-resolve it at save time rather than capturing a stale reference.
+      const cell = cellMap.get(fi) ?? null;
+      if (cell !== null) cell.classList.toggle("has-note", has);
+      if (state.focus === fi) renderDetail();
+      showSaveStatus(true, has ? "note saved" : "note cleared");
+    },
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -1010,6 +1054,7 @@ function createCell(fi: number): HTMLElement {
     if (fi >= vLo && fi <= vHi) cell.classList.add("visual");
   }
   if (item.labels.length > 0) cell.classList.add("labeled");
+  if (noteMap.has(item.file)) cell.classList.add("has-note");
 
   // Placeholder with thumbnail + badges — NO media element
   const placeholder = document.createElement("div");
@@ -1135,6 +1180,7 @@ function renderDetail(): void {
   }
   const item = state.items[itemIdx]!;
   const src = assetPath(item.file);
+  const note = noteMap.get(item.file) ?? "";
   const ext = item.file.split(".").pop()?.toLowerCase();
   const isRealGif = ext === "gif";
 
@@ -1161,6 +1207,7 @@ function renderDetail(): void {
         ${item.date ? `<div class="detail-row"><span class="detail-label">date</span><span class="detail-val">${esc(item.date)}</span></div>` : ""}
         ${item.text ? `<div class="detail-text">${esc(item.text)}</div>` : ""}
         ${item.sourceUrl ? `<div class="detail-row"><span class="detail-label">source</span><a class="detail-link" href="https://x.com/i/status/${esc(item.tweetId)}" target="_blank">tweet</a></div>` : ""}
+        ${note ? `<div class="detail-note"><span class="detail-note-label">note</span><div class="detail-note-body">${esc(note)}</div></div>` : ""}
       </div>
     </div>
   `;
@@ -1451,6 +1498,18 @@ export function labelCss(): string {
   border-radius: 50%;
   background: var(--success);
 }
+.grid-cell.has-note::before {
+  content: "";
+  position: absolute;
+  top: var(--space-1);
+  left: var(--space-1);
+  z-index: 3;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-2);
+  box-shadow: 0 0 6px color-mix(in oklab, var(--accent-2), transparent 40%);
+}
 
 /* -- Placeholder (thumbnail + badges) -- */
 .grid-placeholder {
@@ -1628,6 +1687,30 @@ export function labelCss(): string {
   font-size: var(--text-sm);
 }
 .detail-link:hover { text-decoration: underline; }
+.detail-note {
+  border-top: 1px solid var(--panel-border-subtle);
+  padding-top: var(--space-2);
+  margin-top: var(--space-1);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.detail-note-label {
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-upper);
+  color: var(--accent-2);
+  font-weight: 600;
+}
+.detail-note-body {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-body);
+  white-space: pre-wrap;
+  word-break: break-word;
+  border-left: 2px solid color-mix(in oklab, var(--accent-2), transparent 45%);
+  padding-left: var(--space-2);
+}
 
 /* -- Help overlay (reuse studio pattern) -- */
 .label-help-overlay {

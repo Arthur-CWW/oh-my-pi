@@ -110,6 +110,80 @@ describe("labels store", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Notes store unit tests
+// ---------------------------------------------------------------------------
+
+describe("notes store", () => {
+  test("setNote creates a row that getNote returns", () => {
+    const store = openLabels(":memory:");
+    const saved = store.setNote("t1-1.mp4", "gigachad Sonic energy");
+    expect(saved).not.toBeNull();
+    expect(saved!.item_key).toBe("t1-1.mp4");
+    expect(saved!.body).toBe("gigachad Sonic energy");
+    expect(typeof saved!.id).toBe("number");
+    expect(typeof saved!.ts).toBe("string");
+
+    const got = store.getNote("t1-1.mp4");
+    expect(got).not.toBeNull();
+    expect(got!.body).toBe("gigachad Sonic energy");
+    store.close();
+  });
+
+  test("getNote returns null when no note exists", () => {
+    const store = openLabels(":memory:");
+    expect(store.getNote("missing.mp4")).toBeNull();
+    store.close();
+  });
+
+  test("setNote upserts by item_key (one row per item, id reused)", () => {
+    const store = openLabels(":memory:");
+    const first = store.setNote("clip.mp4", "first draft");
+    const second = store.setNote("clip.mp4", "revised body");
+    expect(second!.body).toBe("revised body");
+    expect(second!.id).toBe(first!.id);
+    expect(store.allNotes()).toHaveLength(1);
+    expect(store.getNote("clip.mp4")!.body).toBe("revised body");
+    store.close();
+  });
+
+  test("setNote with whitespace-only body clears the note", () => {
+    const store = openLabels(":memory:");
+    store.setNote("clip.mp4", "something worth keeping");
+    const cleared = store.setNote("clip.mp4", "   \n  ");
+    expect(cleared).toBeNull();
+    expect(store.getNote("clip.mp4")).toBeNull();
+    expect(store.allNotes()).toHaveLength(0);
+    store.close();
+  });
+
+  test("setNote empty body on a non-existent item is a no-op", () => {
+    const store = openLabels(":memory:");
+    expect(store.setNote("never.mp4", "")).toBeNull();
+    expect(store.allNotes()).toHaveLength(0);
+    store.close();
+  });
+
+  test("setNote preserves body verbatim including newlines", () => {
+    const store = openLabels(":memory:");
+    const body = "line one\nline two — Aschenbrenner orange";
+    store.setNote("multi.mp4", body);
+    expect(store.getNote("multi.mp4")!.body).toBe(body);
+    store.close();
+  });
+
+  test("allNotes returns every stored note", () => {
+    const store = openLabels(":memory:");
+    store.setNote("a.mp4", "note a");
+    store.setNote("b.mp4", "note b");
+    store.setNote("c.mp4", "note c");
+    const all = store.allNotes();
+    expect(all).toHaveLength(3);
+    expect(all.map((n) => n.item_key).sort()).toEqual(["a.mp4", "b.mp4", "c.mp4"]);
+    store.close();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Label keymap pure logic tests
 // ---------------------------------------------------------------------------
 
@@ -627,6 +701,43 @@ describe("label keymap autoplay", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Keymap tests for the reference-note key
+// ---------------------------------------------------------------------------
+
+describe("label keymap notes", () => {
+  function makeState(overrides: Partial<LabelNavState> = {}): LabelNavState {
+    return {
+      focus: 0,
+      total: 12,
+      cols: 4,
+      marks: new Set(),
+      visualAnchor: null,
+      filterFocused: false,
+      inspecting: false,
+      ...overrides,
+    };
+  }
+
+  test("n opens the note panel in normal mode", () => {
+    expect(mapLabelKey("n", false, makeState()).type).toBe("note");
+  });
+
+  test("n is inert while the filter is focused (typing into filter)", () => {
+    expect(mapLabelKey("n", false, makeState({ filterFocused: true })).type).toBe("none");
+  });
+
+  test("n is inert while inspecting (only Escape/i/p are live)", () => {
+    expect(mapLabelKey("n", false, makeState({ inspecting: true })).type).toBe("none");
+  });
+
+  test("n and p route to distinct actions (no duplicate-case regression)", () => {
+    const s = makeState();
+    expect(mapLabelKey("p", false, s).type).toBe("autoplay-toggle");
+    expect(mapLabelKey("n", false, s).type).toBe("note");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Label route save failure visibility
 // ---------------------------------------------------------------------------
 
@@ -654,5 +765,104 @@ describe("label save failure visibility", () => {
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error: string };
     expect(body.error).toContain("data/inspiration");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Notes API routes — contract mirrors /api/labels
+// ---------------------------------------------------------------------------
+
+describe("notes routes", () => {
+  test("GET /api/notes returns an empty array before any note is set", async () => {
+    const { baseUrl } = await startTestServer();
+    const res = await fetch(`${baseUrl}/api/notes`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual([]);
+  });
+
+  test("PUT /api/notes creates a note, GET ?item returns it", async () => {
+    const { baseUrl } = await startTestServer();
+    const putRes = await fetch(`${baseUrl}/api/notes`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ itemKey: "t1-1.mp4", body: "pernicious penguin" }),
+    });
+    expect(putRes.status).toBe(200);
+    const saved = (await putRes.json()) as { item_key: string; body: string };
+    expect(saved.item_key).toBe("t1-1.mp4");
+    expect(saved.body).toBe("pernicious penguin");
+
+    const getRes = await fetch(`${baseUrl}/api/notes?item=${encodeURIComponent("t1-1.mp4")}`);
+    const got = (await getRes.json()) as { body: string } | null;
+    expect(got).not.toBeNull();
+    expect(got!.body).toBe("pernicious penguin");
+  });
+
+  test("GET /api/notes?item returns null for an unnoted item", async () => {
+    const { baseUrl } = await startTestServer();
+    const res = await fetch(`${baseUrl}/api/notes?item=nope.mp4`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toBeNull();
+  });
+
+  test("PUT /api/notes upserts and an empty body clears the note", async () => {
+    const { baseUrl } = await startTestServer();
+    await fetch(`${baseUrl}/api/notes`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ itemKey: "clip.mp4", body: "first" }),
+    });
+    await fetch(`${baseUrl}/api/notes`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ itemKey: "clip.mp4", body: "second" }),
+    });
+    const all1 = (await (await fetch(`${baseUrl}/api/notes`)).json()) as unknown[];
+    expect(all1).toHaveLength(1);
+
+    const clearRes = await fetch(`${baseUrl}/api/notes`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ itemKey: "clip.mp4", body: "" }),
+    });
+    expect(clearRes.status).toBe(200);
+    expect(await clearRes.json()).toBeNull();
+    const all2 = (await (await fetch(`${baseUrl}/api/notes`)).json()) as unknown[];
+    expect(all2).toHaveLength(0);
+  });
+
+  test("PUT /api/notes rejects a missing itemKey with 400 + error body", async () => {
+    const { baseUrl } = await startTestServer();
+    const res = await fetch(`${baseUrl}/api/notes`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ body: "orphan note" }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error.length).toBeGreaterThan(0);
+  });
+
+  test("PUT /api/notes rejects an over-length body with 400", async () => {
+    const { baseUrl } = await startTestServer();
+    const res = await fetch(`${baseUrl}/api/notes`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ itemKey: "big.mp4", body: "x".repeat(20_001) }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  test("note writes record human provenance in the ledger", async () => {
+    const { baseUrl } = await startTestServer();
+    await fetch(`${baseUrl}/api/notes`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ itemKey: "t1-1.mp4", body: "ledgered reference" }),
+    });
+    const records = (await (await fetch(`${baseUrl}/api/ledger?limit=5`)).json()) as Array<{ path: string; actor: string }>;
+    const noteRecord = records.find((r) => r.path === "note:t1-1.mp4");
+    expect(noteRecord).toBeDefined();
+    expect(noteRecord!.actor).toBe("human");
   });
 });

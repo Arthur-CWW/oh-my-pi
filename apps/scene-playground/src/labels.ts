@@ -23,6 +23,13 @@ export interface GroupWithCount extends GroupRow {
   count: number;
 }
 
+export interface NoteRow {
+  id: number;
+  item_key: string;
+  body: string;
+  ts: string;
+}
+
 export interface LabelsStore {
   assign(mediaPath: string, group: string): LabelRow;
   unassign(mediaPath: string, group: string): boolean;
@@ -32,6 +39,9 @@ export interface LabelsStore {
   groupsWithCounts(): GroupWithCount[];
   ensureGroup(name: string, key?: string | null): GroupRow;
   listGroups(): GroupRow[];
+  getNote(itemKey: string): NoteRow | null;
+  setNote(itemKey: string, body: string): NoteRow | null;
+  allNotes(): NoteRow[];
   close(): void;
 }
 
@@ -70,6 +80,13 @@ class SqliteLabels implements LabelsStore {
       );
       CREATE INDEX IF NOT EXISTS labels_media_idx ON labels(media_path);
       CREATE INDEX IF NOT EXISTS labels_grp_idx ON labels(grp);
+      CREATE TABLE IF NOT EXISTS notes (
+        id INTEGER PRIMARY KEY,
+        item_key TEXT NOT NULL UNIQUE,
+        body TEXT NOT NULL,
+        ts TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS notes_item_idx ON notes(item_key);
     `);
   }
 
@@ -151,6 +168,36 @@ class SqliteLabels implements LabelsStore {
   listGroups(): GroupRow[] {
     return this.db
       .query<GroupRow, []>("SELECT name, key, ord FROM groups ORDER BY ord, name")
+      .all();
+  }
+
+  getNote(itemKey: string): NoteRow | null {
+    const row = this.db
+      .query<NoteRow, [string]>("SELECT id, item_key, body, ts FROM notes WHERE item_key = ?")
+      .get(itemKey);
+    return row ?? null;
+  }
+
+  setNote(itemKey: string, body: string): NoteRow | null {
+    // Empty/whitespace-only body clears the note — keeps the table free of blanks.
+    if (body.trim().length === 0) {
+      this.db.run("DELETE FROM notes WHERE item_key = ?", [itemKey]);
+      return null;
+    }
+    const row = this.db
+      .query<NoteRow, [string, string, string]>(
+        `INSERT INTO notes (item_key, body, ts) VALUES (?, ?, ?)
+         ON CONFLICT(item_key) DO UPDATE SET body = excluded.body, ts = excluded.ts
+         RETURNING id, item_key, body, ts`,
+      )
+      .get(itemKey, body, new Date().toISOString());
+    if (row === null || row === undefined) throw new Error("Note insert failed");
+    return row;
+  }
+
+  allNotes(): NoteRow[] {
+    return this.db
+      .query<NoteRow, []>("SELECT id, item_key, body, ts FROM notes ORDER BY ts DESC")
       .all();
   }
 

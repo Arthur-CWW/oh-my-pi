@@ -33,6 +33,7 @@ export type LabelAction =
   | { type: "help-toggle" }
   | { type: "cycle-sort" }
   | { type: "autoplay-toggle" }
+  | { type: "note" }
   | { type: "none" };
 
 /** Compute the visual-mode selected range (inclusive, ordered). */
@@ -172,6 +173,8 @@ export function mapLabelKey(
     // Autoplay
     case "p":
       return { type: "autoplay-toggle" };
+    case "n":
+      return { type: "note" };
 
     default:
       return { type: "none" };
@@ -194,6 +197,7 @@ export const LABEL_KEYMAP_HELP = [
   ["/", "Filter (text or group:<name>)"],
   ["s", "Cycle sort order"],
   ["?", "Toggle this help"],
+  ["n", "Add / edit reference note"],
 ] as const;
 // ---------------------------------------------------------------------------
 // Autoplay queue — pure, testable

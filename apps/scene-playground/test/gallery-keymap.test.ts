@@ -121,6 +121,10 @@ describe("mapGalleryKey (grid mode)", () => {
     expect(mapGalleryKey("?", state)).toEqual({ type: "help-toggle" });
   });
 
+  test("n opens the reference-note panel", () => {
+    expect(mapGalleryKey("n", nav())).toEqual({ type: "open-note" });
+  });
+
   test("unmapped keys are inert", () => {
     expect(mapGalleryKey("x", nav())).toEqual({ type: "none" });
     expect(mapGalleryKey("Tab", nav())).toEqual({ type: "none" });
@@ -140,7 +144,7 @@ describe("mapGalleryKey (overlay open)", () => {
   });
 
   test("grid navigation and actions are swallowed so focus never drifts under the modal", () => {
-    for (const key of ["j", "k", "h", "l", "Enter", "o", "f", "?", "G"]) {
+    for (const key of ["j", "k", "h", "l", "Enter", "o", "f", "n", "?", "G"]) {
       expect(mapGalleryKey(key, state)).toEqual({ type: "none" });
     }
   });
@@ -159,7 +163,7 @@ describe("mapGalleryKey (help visible)", () => {
   });
 
   test("everything else is inert while help is up", () => {
-    for (const key of ["j", "k", "Enter", "o", "f", " "]) {
+    for (const key of ["j", "k", "Enter", "o", "f", "n", " "]) {
       expect(mapGalleryKey(key, state)).toEqual({ type: "none" });
     }
   });

@@ -24,6 +24,7 @@ import {
   filterArtifacts,
 } from "./data";
 import { GALLERY_KEYMAP_HELP, cycleFilter, mapGalleryKey, type GalleryNavState } from "./keymap";
+import { isNotePanelOpen, openNotePanel } from "../notes";
 
 export interface GalleryCallbacks {
   /** Switch to the REPORTS view and reveal the given report dir. */
@@ -58,6 +59,10 @@ const cellMap = new Map<number, HTMLElement>();
 let focusedVideo: HTMLVideoElement | null = null;
 let overlayVideo: HTMLVideoElement | null = null;
 
+/** artifact src → note body, for note markers + excerpts. */
+const noteMap = new Map<string, string>();
+let saveStatusTimer: ReturnType<typeof setTimeout> | null = null;
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -90,9 +95,11 @@ export function unmountGalleryView(): void {
     overlayEl.innerHTML = "";
     helpEl.classList.add("hidden");
   }
+  if (saveStatusTimer !== null) { clearTimeout(saveStatusTimer); saveStatusTimer = null; }
 }
 
 export function handleGalleryKeydown(e: KeyboardEvent): void {
+  if (isNotePanelOpen()) return;
   const navState: GalleryNavState = {
     focus,
     total: filtered.length,
@@ -142,6 +149,9 @@ export function handleGalleryKeydown(e: KeyboardEvent): void {
       callbacks.openReport(a.reportPath);
       break;
     }
+    case "open-note":
+      openNoteForFocused();
+      break;
     case "cycle-filter":
       filter = cycleFilter(filter);
       focus = 0;
@@ -176,7 +186,10 @@ function buildShell(): string {
         <span class="hint-sep">·</span>
         <kbd>f</kbd> filter
         <span class="hint-sep">·</span>
+        <kbd>n</kbd> note
+        <span class="hint-sep">·</span>
         <kbd>?</kbd> help
+        <span class="gallery-save-status"></span>
       </div>
     </div>
     <div class="gallery-overlay hidden"></div>
@@ -190,9 +203,16 @@ function buildShell(): string {
 
 async function loadData(): Promise<void> {
   try {
-    const [reportsRes, rendersRes] = await Promise.all([fetch("/api/reports"), fetch("/api/renders")]);
+    const [reportsRes, rendersRes, notesRes] = await Promise.all([
+      fetch("/api/reports"),
+      fetch("/api/renders"),
+      fetch("/api/notes"),
+    ]);
     const reports = (await reportsRes.json()) as ReportEntry[];
     const renders = (await rendersRes.json()) as GalleryRender[];
+    const notes = (await notesRes.json()) as Array<{ item_key: string; body: string }>;
+    noteMap.clear();
+    for (const n of notes) noteMap.set(n.item_key, n.body);
     artifacts = buildArtifacts(reports, renders);
     filter = "all";
     focus = 0;
@@ -267,6 +287,12 @@ function createCard(a: GalleryArtifact, fi: number): HTMLElement {
   broken.textContent = "media error";
   thumb.appendChild(broken);
 
+  const noteMark = document.createElement("span");
+  noteMark.className = "gallery-note-mark";
+  noteMark.title = "has reference note";
+  noteMark.textContent = "note";
+  thumb.appendChild(noteMark);
+
   card.appendChild(thumb);
 
   const info = document.createElement("div");
@@ -293,6 +319,13 @@ function createCard(a: GalleryArtifact, fi: number): HTMLElement {
     meta.appendChild(agent);
   }
   info.appendChild(meta);
+
+  const noteExcerpt = document.createElement("div");
+  noteExcerpt.className = "gallery-note-excerpt";
+  const noteBody = noteMap.get(a.src) ?? "";
+  noteExcerpt.textContent = noteBody;
+  info.appendChild(noteExcerpt);
+  if (noteBody.length > 0) card.classList.add("has-note");
   card.appendChild(info);
 
   card.addEventListener("click", () => {
@@ -315,6 +348,48 @@ function createCard(a: GalleryArtifact, fi: number): HTMLElement {
 function markBroken(card: HTMLElement, a: GalleryArtifact, what: string): void {
   card.classList.add("has-broken");
   reportClientError(`Gallery ${what} failed to load: ${a.src}`);
+}
+
+// ---------------------------------------------------------------------------
+// Reference notes
+// ---------------------------------------------------------------------------
+
+function openNoteForFocused(): void {
+  const a = filtered[focus];
+  if (a === undefined) return;
+  const card = cellMap.get(focus) ?? null;
+  openNotePanel({
+    itemKey: a.src,
+    title: a.title || a.fileName,
+    initialBody: noteMap.get(a.src) ?? "",
+    onSaved: (key, body) => {
+      if (body.trim().length > 0) noteMap.set(key, body);
+      else noteMap.delete(key);
+      if (card !== null) {
+        card.classList.toggle("has-note", body.trim().length > 0);
+        const excerpt = card.querySelector<HTMLElement>(".gallery-note-excerpt");
+        if (excerpt !== null) excerpt.textContent = body;
+      }
+      showGalleryStatus(true, body.trim().length > 0 ? "note saved" : "note cleared");
+    },
+  });
+}
+
+function showGalleryStatus(ok: boolean, detail: string): void {
+  const el = container?.querySelector<HTMLElement>(".gallery-save-status");
+  if (el === null || el === undefined) return;
+  if (saveStatusTimer !== null) { clearTimeout(saveStatusTimer); saveStatusTimer = null; }
+  const ts = new Date().toLocaleTimeString();
+  el.textContent = ok ? `\u2713 ${detail} ${ts}` : `\u2717 ${detail}`;
+  el.className = `gallery-save-status ${ok ? "save-ok" : "save-fail"}`;
+  if (ok) {
+    saveStatusTimer = setTimeout(() => {
+      el.className = "gallery-save-status";
+      el.textContent = "";
+    }, 4000);
+  } else {
+    reportClientError(`Gallery note status failure: ${detail}`);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -591,6 +666,51 @@ export function galleryCss(): string {
 .gallery-card.has-broken .gallery-broken { display: inline-block; }
 .gallery-card.has-broken .gallery-noposter,
 .gallery-card.has-broken .gallery-thumb { background: var(--error-bg); }
+
+/* -- Note marker + excerpt -- */
+.gallery-note-mark {
+  position: absolute;
+  bottom: var(--space-1);
+  right: var(--space-1);
+  z-index: 3;
+  display: none;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: var(--tracking-upper);
+  text-transform: uppercase;
+  padding: 2px 5px;
+  border-radius: var(--radius-xs);
+  background: color-mix(in oklab, var(--accent-2), transparent 78%);
+  color: var(--accent-2);
+  border: 1px solid color-mix(in oklab, var(--accent-2), transparent 55%);
+}
+.gallery-card.has-note .gallery-note-mark { display: inline-block; }
+.gallery-note-excerpt {
+  display: none;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  line-height: var(--leading-body);
+  border-left: 2px solid color-mix(in oklab, var(--accent-2), transparent 40%);
+  padding: 2px var(--space-2);
+  margin-top: 2px;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+.gallery-card.has-note.focused .gallery-note-excerpt,
+.gallery-card.has-note:hover .gallery-note-excerpt { display: -webkit-box; }
+.gallery-card:not(.has-note) .gallery-note-excerpt { display: none; }
+.gallery-save-status {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+.gallery-save-status:empty { display: none; }
+.gallery-save-status.save-ok { color: var(--success); }
+.gallery-save-status.save-fail { color: var(--error); font-weight: 600; }
 
 /* -- Info -- */
 .gallery-info { padding: var(--space-2) var(--space-3) var(--space-3); display: flex; flex-direction: column; gap: 3px; }
