@@ -13,7 +13,13 @@
       28.8, 29.4, 30.0, 30.6, 31.2, 31.8, 32.4, 33.0, 33.5
     ]
   },
-  "assets": [],
+  "assets": [
+    {
+      "id": "narration",
+      "kind": "audio",
+      "path": "workflows/scene-lab/assets/narration/the-number-with-no-name.mp3"
+    }
+  ],
   "camera": {
     "fov": 40,
     "position": [0, 0, 0],
@@ -333,5 +339,6 @@
       "params": { "strength": 0.0, "barrel": 0.04 },
       "beatReactive": { "param": "strength", "every": 1, "amount": 0.05, "decay": 0.16 }
     }
-  ]
+  ],
+  "audio": { "asset": "narration", "offsetSeconds": 0, "gainDb": 0 }
 }

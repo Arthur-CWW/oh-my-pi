@@ -88,3 +88,70 @@ ffmpeg -y -framerate 30 -start_number 0 -i /tmp/nnn-combined/%06d.png \
 # (when the narration WAV lands) mux it in a later pass, then re-sync per the timing table:
 # ffmpeg -y -i number-no-name.mp4 -i narration.wav -c:v copy -c:a aac -shortest number-no-name-voiced.mp4
 ```
+
+---
+
+## v1.1 — with narration
+
+The George-voice narration is now muxed into the video. This is the first **complete** power-post video (voice + visuals). The v1 silent cut above is unchanged and still on disk (`number-no-name.mp4`); v1.1 is the shipped deliverable.
+
+- **Narrated MP4:** `number-no-name-with-narration.mp4` (5.2 MB) — also mirrored at `workflows/scene-lab/renders/number-no-name/number-no-name-with-narration.mp4`.
+- **Narration:** `workflows/scene-lab/assets/narration/the-number-with-no-name.mp3` — George voice, **37.48 s**, mono 44.1 kHz mp3 → re-encoded to AAC in the mux.
+
+### Audio wired into the spec
+
+The spec now carries the audio in-band, matching the sibling specs (`clone-field-pulse`, `feedback-tunnel`, `type-glitch`):
+
+```jsonc
+"assets": [
+  { "id": "narration", "kind": "audio",
+    "path": "workflows/scene-lab/assets/narration/the-number-with-no-name.mp3" }
+],
+// …
+"audio": { "asset": "narration", "offsetSeconds": 0, "gainDb": 0 }
+```
+
+Asset paths are **repo-root-relative** (the renderer's `resolveAssetPath` tries repo-root first). A `../../workflows/…` form does **not** resolve from this spec's location — it climbs two levels *above* the repo root — so the repo-root-relative path is the correct and conventional one. `check` now reports `OK: 9 objects, 1 assets, 1380 frames`.
+
+### Duration alignment (option b: silent coda)
+
+Video is **46.0 s** (1380 frames), narration is **37.48 s**. Chosen: let the voice stop and leave an **8.52 s visual-only coda** over movement 4 (the lone unlit `BB` reducing to a residual dot). The silence after "It was always there" *is* the point — the coda reads as dread, not dead air. No spec retiming was needed; every keyframe `t` in the timing table already lands the last spoken line (#12, "It was always there.") at ~45.2 s of *nominal* read, and the actual read finishes at 37.48 s, so the dot is already resolving as the voice fades. The narration and the visual movements stay aligned by the timing table — no drift, because the read paces slightly ahead of nominal.
+
+### Chunking: 460-frame chunks now crash — use ≤230
+
+The v1 recipe used three 460-frame chunks. On this pass the **dense movement-2 breeding-towers** section (frames ~549–1005: 45 clones + value grid + three vermilion exponent towers, all pulsing) exhausts the browser GPU/texture budget faster, and a 460-frame chunk dies ~halfway through (`Target closed` around the chunk's 230th frame). Fix: cap chunks at **230 frames**. The sparse opening (0–459) still survives a 460-frame chunk, but the uniform ≤230 recipe below is the robust one. No `feedback` pass ⇒ every frame is a pure function of its index, so chunk boundaries are frame-accurate.
+
+### Verification
+
+- **check passes:** `OK: 9 objects, 1 assets, 1380 frames`.
+- **`ffprobe`:** 2 streams, container `duration=46.000000`. Video `h264, 720×1280 portrait, 30 fps, 1380 frames`. Audio `aac, 44100 Hz, mono, start_time=0.000000, duration=37.477007`.
+- **Audio is audible, not a dead track:** `volumedetect` over the full file → `n_samples: 1652736` (≈37.47 s), `mean_volume: -24.3 dB`, `max_volume: -4.2 dB` (real speech dynamics).
+- **Coda is truly silent:** `volumedetect` on the 38.0–46.0 s window → `n_samples: 0` (no audio past 37.48 s).
+
+### Rerun commands (from repo root)
+
+```sh
+# validate (now reports 1 asset)
+bun run --cwd packages/scene-renderer check -- --scene ../../workflows/scene-lab/specs/number-no-name.scene.json
+
+# full 46 s render — chunked at <=230 frames to survive the dense movement-2 browser crash
+cd packages/scene-renderer
+rm -rf /tmp/nnn-chunks
+for r in 0-459 460-689 690-919 920-1149 1150-1379; do \
+  bun src/render.ts --scene ../../workflows/scene-lab/specs/number-no-name.scene.json \
+    --out /tmp/nnn-chunks/$r --runtime dist/runtime.js --frame-range $r --keep-frames; done
+rm -rf /tmp/nnn-combined && mkdir -p /tmp/nnn-combined
+for r in 0-459 460-689 690-919 920-1149 1150-1379; do cp /tmp/nnn-chunks/$r/frames/*.png /tmp/nnn-combined/; done
+
+# mux narration in the final concat pass. NO -shortest: the 46 s video length must win so the
+# 8.5 s silent coda survives (-shortest would truncate the file to the 37.5 s audio).
+cd ../..
+ffmpeg -y -framerate 30 -start_number 0 -i /tmp/nnn-combined/%06d.png \
+  -i workflows/scene-lab/assets/narration/the-number-with-no-name.mp3 \
+  -c:v libx264 -pix_fmt yuv420p -movflags +faststart -c:a aac \
+  workflows/scene-lab/renders/number-no-name/number-no-name-with-narration.mp4
+cp workflows/scene-lab/renders/number-no-name/number-no-name-with-narration.mp4 \
+   workflows/scene-lab/reports/2026-07-08-number-no-name-v1/number-no-name-with-narration.mp4
+```
+
+> Note: the renderer's built-in single-pass mux (`buildFfmpegArgs`) always appends `-shortest`, which would clip the output to 37.5 s. That is fine for specs whose audio ≥ video, but for this scene the audio is *shorter*, so the final MP4 is assembled by the manual concat above (no `-shortest`) to preserve the coda.
