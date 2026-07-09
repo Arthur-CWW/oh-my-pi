@@ -17,34 +17,61 @@ unfinished step. Do not touch other streams' owner paths.
 
 Read, in order: `docs/fable/charter.md`, `streams/playground/GOAL.md`, this doc's **State** and **Continuation** sections, then only the `docs/fable/atlas.md` sections you need. `docs/state/video-creative-direction.md` and `docs/plans/scene-lab.md` when you touch those lanes.
 
-## State (as of 2026-07-03, session 2)
+## State (as of 2026-07-08, session 3)
 
-Two waves shipped and committed (`07b6af4d`, `6429bb20`, `0cffd6b8`, `c6bc3eed`, `a726fc9a`):
+Session 3 shipped seven waves across three substreams:
 
-1. **Recreation lane works end-to-end** (first goal, DONE): birthrate TikTok decomposed → plates/persona/TTS/VTT captions → Remotion render → side-by-side proof. Four renderer bugs root-caused; QA doc `docs/qa/tiktok-recreate-bootstrap-20260620.md` § 2026-07-03 has rerun commands.
-2. **Scene lane** (the strategic direction, MIT-clean Three.js): `scene.v1` JSON specs → live playground preview AND deterministic offline MP4 via one runtime. `packages/scene-renderer` (schema/check/render CLIs, `--still`/`--frame-range`, clone fields, beat-synced tracks, bloom/chromAb/VHS/glitch passes), manual + cookbook at `docs/plans/scene-lab.md`.
-3. **The playground app** = Arthur's standing review surface: `apps/scene-playground`, live at `http://scene.localhost:1355` (portless). Views: REPORTS feed (default; agents drop proof dirs in `workflows/scene-lab/reports/<date>-<slug>/report.md` + media, SSE-live), STUDIO (scene tree / inspector / timeline / source editor), LABEL (yazi-style vim labeler over the pleometric corpus, ffmpeg thumbnails, SQLite labels).
-4. **Provenance + ops**: every spec/label edit lands in `data/scene-lab/ledger.sqlite` marked human|agent (entropy tracking; future: cursor-style edit prediction). Unified `data/scene-lab/errors.log` (backend + browser). Supervised dev server: `cd apps/scene-playground && bun run dev:up` (restart loop + `bun --watch` + `/healthz`).
-5. **Pleometric corpus**: 35/150 media items + manifest at `data/inspiration/pleometric/` (429-walled, resume later), shader-account leads in `leads.json`. Arthur labels via LABEL view; labels DB `data/scene-lab/labels.sqlite`.
+### Scene-renderer extensions
+- **Three new post passes** (feedback/displacement/halftone): Opus-built, GPT-reviewed, Fable-caught tonality inversion. Demo specs + stills + cookbook §F/G/H.
+- **First original pieces**: three Opus-authored scene.v1 pieces on real pleo audio (clone-field-pulse, feedback-tunnel, type-glitch + playable artifact.html toy). All live in STUDIO.
+- **First concept video**: "The Number With No Name" — 46s portrait power-post, narration timing table ready for MiniMax mux.
+- Findings: sprite `rotation.z` silently ignored (gap); halftone needs mix/opacity uniform; 1380-frame renders need `--frame-range` chunking.
 
-## Standing directives (Arthur, this session — most promoted to AGENTS.md/charter, honor them)
+### Corpus + cataloging
+- **Pleometric**: 35→133 items (429-wall pushed back twice). Sync script: resumable, `--handle`, incremental writes, no-shrink guard, **case-insensitive username fix** (was silently dropping mixed-case handles).
+- **New handles**: abelian_soup (57), SkyeSharkie (60), poetengineer__ (60), voooooogel (3).
+- **Theoryposters text**: @repligate (65), @lumpenspace (95), @teortaxesTex (122), @tenobrus (60), @tszzl (60), @xenocosmography (127), @doomslide (79) — all in twitter-archive sqlite.
+- **Reference catalog**: 30 videos via Antigravity subscription (gemini-3.5-flash, $0), `docs/research/pleometric-reference-catalog.md`.
+- **Transcripts**: 39 videos whispered (faster-whisper large-v3-turbo on 3090), 16 with substantial dialogue at `data/inspiration/pleometric/transcripts.json`.
 
-- **Conserve Fable**: orchestrate only; delegate implementation AND checking. GPT-5.5 = pedantic code review + logic; **Opus/designer = anything design/web-facing** (GPT UI = "functional-but-fucked"); Kimi/GPT = computer-use QA. Opus creates, GPT reviews.
-- **Portless everywhere** (`bunx portless <name> <cmd>`), self-contained package.json (never root), one HTML + one Bun server per app.
-- **Vim-native UIs**, visible shortcut hints, Bret Victor alive-software (immediate feedback, no staring at code), SQLite everywhere.
+### Power-posting lane (NEW — theoryposting video format)
+- **Ontology + vibe brief**: `docs/research/power-posting-sources/` — Meltdown (full verbatim), teortaxes/apralky/repligate/xenocosmography longposts, pleometric practitioner threads, Borges/Nietzsche/anime influence stack, `ontology.md` (invariants + wings table), `vibe-brief.md` (294 lines: format dissection, six registers, do/never, four TTS-ready scripts, six taste questions for Arthur).
+- **Character mashups**: 6/6 glossy 3D figurines via jimeng-5.0 (aschenbrenner×orange, gigachad sonic, suit claude, shiny peach, cat-mouse duo, pernicious penguin). Prompting playbook at `docs/research/jimeng-prompting-playbook.md`.
+- **latwalk first-light**: both renders shipped on desktop 3090 (DINO localnn + middlepath beat-sync pulse). Pleo latent remix: 1077 corpus frames walked to pleometric's own audio (glitch + pulse-negative variants).
+
+### Playground app
+- **GALLERY view** (NEW): all artifacts navigable — 10 videos + 1 toy, vim-native j/k/h/l, autoplay, Enter overlay with sound, filter cycle, ? help. Front-matter `---` fence parsing bug fixed.
+- **LABEL**: P0 silent-label-loss fixed (fire-and-forget → allSettled + revert + red status + errors.log beacon); `interesting` group (key 4) auto-seeded; `g`/`:group` creation; `p` autoplay. **Arthur must re-label** (old marks unrecoverable). Corpus now 193 items (pleometric 133 + others).
+- **Reference notes** (`n` key): inline annotations in GALLERY + LABEL, server-confirmed save, dictation-first (VoiceInk → cmd+Enter).
+- **Desktop**: SSH hardened (MagicDNS + multiplexing + fallbacks), sudo paste block for Arthur in feed report; uv installed.
+
+### Routing
+**GPT-5.5 lanes DOWN** (OpenAI Pro degraded to free tier). `oracle` + `llm-frontend-browser` archived in `skills-attic/disabled-20260708/`. Charter routing override: Opus creates+reviews, Kimi mechanical, Antigravity via `omp token`/`omp -p` — never KIE/API keys.
+
+## Standing directives (session 3 — all promoted to charter/AGENTS.md)
+
+- **Conserve Fable**: orchestrate only; delegate implementation AND checking. **Opus creates AND reviews** (two Opus instances with different roles). Kimi = mechanical/pipeline/retrieval. Gemini Flash (Antigravity subscription) = bounded vision one-shots.
+- **Subscription over API, always** — use `omp token`/`omp -p` for Antigravity; never KIE credits or API keys when a subscription exists (Arthur, 2026-07-08, hard rule).
+- **uv for venvs** on the desktop — never pip directly; uv resolves conflicts faster.
+- **tmux for SSH desktop work** — not bare nohup.
+- **Portless everywhere**, self-contained package.json, one HTML + one Bun server per app.
+- **Vim-native UIs**, visible shortcut hints, Bret Victor alive-software, SQLite everywhere.
 - **Check `data/<app>/errors.log` before claiming done.** Keep the dev server running always.
-- **WebKit/cmux panes are broken** — do NOT fix apps for WebKit; interim is Chrome app-mode windows; cmux→Chromium queued in `docs/state/harness-friction.md` (high). Evidence: `workflows/scene-lab/reports/2026-07-03-webkit-pane-issue/`.
-- Subagent facts: ~400s wall cap (slice packets; report-file-first so timeouts lose nothing); kimi/QA lanes are write-sandboxed (they stage `/tmp` driver scripts, YOU audit then fire); workers can't run gates (parent gates); wake parked agents via IRC instead of respawning (context reuse) — but an OMP restart wipes the roster, so treat parked context as disposable.
+- **WebKit/cmux panes broken** — Chrome app-mode windows; cmux→Chromium queued.
+- Subagent facts: ~400s wall cap (report-file-first); kimi sandboxed (stage scripts, coordinator fires); workers skip gates (coordinator gates); OMP restart wipes roster.
 
-## Continuation (the exploration, in order)
+## Continuation (in order)
 
-1. **Arthur labels the corpus** (LABEL view; groups = style buckets + "interesting"). Nudge him; his labels are the golden seed.
-2. **Style extraction** from labeled-interesting items → named style recipes (spec fragments) appended to the `docs/plans/scene-lab.md` vocabulary. Post-process with video-understanding lanes; the labeler's groups + tweet text are the input.
-3. **Recreate pleometric pieces** as scene specs — the proof the creative framework works. Gaps to expect: more pass types (feedback/displacement/halftone), asset pipelines (3D via Gemini/Antigravity lane = `jimeng-gemini-worker`), audio-reactive beyond beat grid (use `scripts/audio-beat-grid.boundary.ts --detect`).
-4. **Corpus expansion**: resume `PleometricCorpus`-style bounded backfill past the 429 wall (later window, same caps); mine `leads.json` accounts the same way.
-5. **Two-layer framework** (person / hook): pose-transfer persona pipeline for TikToker recreation — swap person, swap hook. Ties to jimeng pose-transfer snapshot (TASKS T-2026-06-09-101) and the persona work in recreation lane. End goal: agent-crafted TikTok personas/accounts promoting our UGC.
-6. **Studio v3** when friction demands: undo stack, in-canvas gizmos, provenance badges UI (ledger data has no UI surface yet — known gap), videoFrames in live preview.
-7. **Open GOAL.md questions** still unsettled with Arthur: remix unit (comps vs assets), realtime vs offline emphasis, private vs shareable v1.
+1. **Arthur labels the corpus** — 193 items in LABEL, `interesting` key 4 seeded, autoplay + notes ready. Labels are the golden seed for everything below. Nudge him.
+2. **MiniMax narration** — blocked on API key (`omp token minimax` empty; Arthur needs to paste `MINIMAX_API_KEY` into `.env` or `omp auth`). Four scripts ready; concept video timed for mux.
+3. **Taste questions** — six in `2026-07-08-power-posting-brief` feed report. Load-bearing: profanity policy, found-audio lane mode, voice identity (consistent egregore vs per-piece).
+4. **Style extraction** from labeled-interesting items → named style recipes → `docs/plans/scene-lab.md` vocabulary. Video-understanding (Antigravity via `omp -p @frames`) + transcripts + tweet text as input.
+5. **Full reference catalog** — extend the 30-video pass to the full 193-item corpus (same Antigravity pipeline).
+6. **Concept video v2**: mux narration audio into "The Number With No Name" spec once MiniMax lands; iterate timing.
+7. **Character scale-up**: Jimeng Helium re-login → more figurines from catalog backlog; explore trellis2 for 3D mesh route (per Abel's Jun 3 thread).
+8. **FILM interpolation**: isolated `~/latwalk-lab/venv-film` via uv (TF ↔ torch CUDA conflict documented; recipe in `2026-07-08-film-stretch` report).
+9. **Persona/lip-sync**: pose-transfer pipeline (TASKS T-2026-06-09-101) + MiniMax TTS character voice → lip-synced narrator.
+10. **Studio v3** when friction demands: undo stack, in-canvas gizmos, provenance badges UI, halftone mix uniform.
 
 ## Review etiquette
 
