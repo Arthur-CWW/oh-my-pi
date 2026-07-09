@@ -62,16 +62,29 @@ Session 3 shipped seven waves across three substreams:
 
 ## Continuation (in order)
 
-1. **Arthur labels the corpus** — 193 items in LABEL, `interesting` key 4 seeded, autoplay + notes ready. Labels are the golden seed for everything below. Nudge him.
-2. **MiniMax narration** — blocked on API key (`omp token minimax` empty; Arthur needs to paste `MINIMAX_API_KEY` into `.env` or `omp auth`). Four scripts ready; concept video timed for mux.
-3. **Taste questions** — six in `2026-07-08-power-posting-brief` feed report. Load-bearing: profanity policy, found-audio lane mode, voice identity (consistent egregore vs per-piece).
-4. **Style extraction** from labeled-interesting items → named style recipes → `docs/plans/scene-lab.md` vocabulary. Video-understanding (Antigravity via `omp -p @frames`) + transcripts + tweet text as input.
-5. **Full reference catalog** — extend the 30-video pass to the full 193-item corpus (same Antigravity pipeline).
-6. **Concept video v2**: mux narration audio into "The Number With No Name" spec once MiniMax lands; iterate timing.
-7. **Character scale-up**: Jimeng Helium re-login → more figurines from catalog backlog; explore trellis2 for 3D mesh route (per Abel's Jun 3 thread).
-8. **FILM interpolation**: isolated `~/latwalk-lab/venv-film` via uv (TF ↔ torch CUDA conflict documented; recipe in `2026-07-08-film-stretch` report).
-9. **Persona/lip-sync**: pose-transfer pipeline (TASKS T-2026-06-09-101) + MiniMax TTS character voice → lip-synced narrator.
-10. **Studio v3** when friction demands: undo stack, in-canvas gizmos, provenance badges UI, halftone mix uniform.
+### In-flight from session 3 (check on boot — may have finished)
+- **NarrationMux** (Opus designer): muxing `the-number-with-no-name.mp3` into the concept video spec → `workflows/scene-lab/reports/2026-07-08-number-no-name-v1/number-no-name-with-narration.mp4`. Check if the file exists; if yes, commit it.
+- **DesktopUpdate** (Kimi task): mise/uv/tools update on desktop. Check `workflows/scene-lab/reports/2026-07-08-desktop-update/report.md` — if present, commit and run the sudo paste block if Arthur approves. Note: `~/desktop-update-sudo.sh` on the desktop has the apt upgrade commands.
+
+### New session priorities (Arthur, end of session 3)
+1. **Desktop server setup** — run `~/dotfiles` bootstrap (`cd ~/dotfiles && uv run scripts/dotfiles.py bootstrap`), set up local TTS model on the 3090 (Kokoro for preset English voices OR Fish Speech/Qwen3-TTS for voice cloning — all <4GB VRAM; 24GB free confirmed). Use uv + tmux.
+2. **Local TTS pipeline** replaces all paid TTS: generate narration on the 3090, zero cost, no API keys, unlimited volume. Compare quality against Jimeng TTS samples already at `workflows/scene-lab/assets/narration/`.
+3. **MiniMax narration** — SUPERSEDED by Jimeng TTS (proven working, $0, 4 scripts generated this session) + upcoming local TTS. MiniMax key still missing but no longer blocking.
+4. **Narration mux** — if NarrationMux didn't finish: wire audio asset into `number-no-name.scene.json`, render chunked (browser crashes ~frame 679), verify ffprobe shows audio stream.
+5. **Taste questions** — six in `2026-07-08-power-posting-brief` feed report. Load-bearing: profanity policy, found-audio lane mode, voice identity.
+6. **Arthur labels the corpus** — 193 items in LABEL, `interesting` key 4 seeded, autoplay + notes ready.
+7. **Style extraction** from labeled items → named style recipes → `docs/plans/scene-lab.md` vocabulary. Video-understanding (Antigravity via `omp -p @frames`) + transcripts + tweet text.
+8. **Full reference catalog** — extend the 30-video Antigravity pass to all 193 items.
+9. **Character scale-up**: more figurines from catalog backlog; explore trellis2/Sonic (open-source talking portrait on 3090) for 3D mesh + lip-sync route.
+10. **Persona/lip-sync via local models**: Sonic (`github.com/jixiaozhong/Sonic`) on 3090 with character figurine + local TTS audio → talking-head video. Bypasses Jimeng lip-sync blocker entirely.
+11. **FILM interpolation**: isolated `~/latwalk-lab/venv-film` via uv.
+12. **Studio v3** when friction demands.
+
+### Session 3 routing lessons
+- **Jimeng TTS works and is free** — `/mweb/v1/tts_generate`, 142 voices, session bundle auth. Use before any paid TTS.
+- **Antigravity = Gemini vision via `omp -p --model google-antigravity/gemini-3.5-flash @frame.jpg "prompt"`**. NOT for Cloud TTS. Never use KIE credits when subscription exists.
+- **Kimi workers flail on adaptive debugging** (KIE 422 loops, sandbox write blocks). Route GPU/pipeline/debugging work to Opus.
+- **Advisor claims about file contents are often fabricated** — always verify with actual reads before acting on them.
 
 ## Review etiquette
 
