@@ -1,0 +1,19 @@
+{
+  "command": "tts",
+  "endpoint": "/mweb/v1/tts_generate",
+  "text": "The story goes like this.",
+  "voice_id": "7592674770097803814",
+  "voice_title": "Nothing-Human-Makes-It-Out",
+  "item_platform": 1,
+  "transport": {
+    "mode": "live",
+    "cassette_path": null
+  },
+  "browser_session": {
+    "cookie": "[REDACTED 3172 chars]",
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
+    "origin": "https://jimeng.jianying.com",
+    "referer": "https://jimeng.jianying.com/ai-tool/home/",
+    "capturedAtIso": "2026-06-30T01:25:49.133Z"
+  }
+}

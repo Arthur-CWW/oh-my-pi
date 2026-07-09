@@ -1,0 +1,25 @@
+{
+  "command": "tts",
+  "endpoint": "/mweb/v1/tts_generate",
+  "text": "The story goes like this. Earth is captured by a technocapital singularity. Markets learn to manufacture intelligence; politics upgrades its paranoia and tries to get a grip. The thresholds come faster now. Fifteen hundred. Nineteen forty-eight. Nineteen ninety-six. Two thousand eight. Two thousand eleven. Nothing human makes it out of the near-future. Neo-China arrives from the future. Hypersynthetic drugs click into digital voodoo. Retro-disease. Nanospasm. Garbage time is running out. Can what is playing you make it to level two? It's war.",
+  "voice_id": "7592674770097803814",
+  "voice_title": "Nothing-Human-Makes-It-Out",
+  "item_platform": 1,
+  "transport": {
+    "mode": "live",
+    "cassette_path": null
+  },
+  "browser_session": {
+    "cookie": "[REDACTED 21 chars]",
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
+    "origin": "https://jimeng.jianying.com",
+    "referer": "https://jimeng.jianying.com/ai-tool/home/",
+    "capturedAtIso": "2026-06-30T01:25:49.133Z"
+  },
+  "http_status": 200,
+  "ret": "0",
+  "errmsg": "success",
+  "response_text_sha256": "c76c66660f2a0dbc295cbc736aeeeed1b1b27bde3ca8b55e7e6b2b4852c7d346",
+  "artifact": "/Users/arthur/agents/workflows/scene-lab/assets/narration/artifacts/Nothing-Human-Makes-It-Out-7592674770097803814.mp3",
+  "bytes": 586440
+}

@@ -1,0 +1,25 @@
+{
+  "command": "tts",
+  "endpoint": "/mweb/v1/tts_generate",
+  "text": "Honestly, labs is such bullshit. What lab? Why are we calling it a lab? It is a trillion-dollar corporation with five thousand people building a superweapon in secrecy, dropping hints from time to time. DeepSeek is a lab. This is a ticking time bomb. Imagine if Los Alamos were a private actor, guarding its cute know-hows, never publishing anything. But that is exactly what they say it is. And I don't see how a nation-state lets that be anything more than a facade, in the long run.",
+  "voice_id": "7592674770097803814",
+  "voice_title": "What-Lab",
+  "item_platform": 1,
+  "transport": {
+    "mode": "live",
+    "cassette_path": null
+  },
+  "browser_session": {
+    "cookie": "[REDACTED 21 chars]",
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
+    "origin": "https://jimeng.jianying.com",
+    "referer": "https://jimeng.jianying.com/ai-tool/home/",
+    "capturedAtIso": "2026-06-30T01:25:49.133Z"
+  },
+  "http_status": 200,
+  "ret": "0",
+  "errmsg": "success",
+  "response_text_sha256": "80c91a0174be0ca749ec547279ffc1546772977cac81c2704172f5b4c86b9649",
+  "artifact": "/Users/arthur/agents/workflows/scene-lab/assets/narration/artifacts/What-Lab-7592674770097803814.mp3",
+  "bytes": 500341
+}
