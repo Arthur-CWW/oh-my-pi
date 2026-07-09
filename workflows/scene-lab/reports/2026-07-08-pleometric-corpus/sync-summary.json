@@ -1,6 +1,6 @@
 {
   "schemaVersion": "pleometric-sync-report.v1",
-  "generatedAt": "2026-07-08T07:40:40.975Z",
+  "generatedAt": "2026-07-08T08:55:50.766Z",
   "tools": {
     "yt-dlp": "/opt/homebrew/bin/yt-dlp",
     "gallery-dl": "absent",
@@ -14,11 +14,9 @@
   },
   "fetch": {
     "baseUrl": "https://nitter.tiekoetter.com",
-    "pagesFetched": 17,
-    "stopReason": "wall-429",
-    "walls": [
-      "429 at https://nitter.tiekoetter.com/pleometric/media?view=timeline&cursor=DAABCgABHMsGtoy__qAKAAIcT83uBBZhKggAAwAAAAIAAA"
-    ]
+    "pagesFetched": 1,
+    "stopReason": "max-pages",
+    "walls": []
   },
   "files": {
     "manifest": "data/inspiration/pleometric/manifest.json",
@@ -27,8 +25,8 @@
   },
   "counts": {
     "items": 133,
-    "existingAtStart": 82,
-    "newItems": 51,
+    "existingAtStart": 133,
+    "newItems": 0,
     "filesOnDisk": 134
   },
   "dateRange": {
