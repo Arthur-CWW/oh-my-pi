@@ -1,4 +1,6 @@
-import type { JsonValue } from "./outbox"
+import { Schema } from "effect"
+
+import { JsonValueSchema, type JsonValue } from "./outbox"
 
 export interface PiLike {
   on(event: "session_start", handler: ExtensionHandler<SessionStartPayload>): void
@@ -163,3 +165,171 @@ export interface SessionShutdownPayload {
   readonly reason?: string
   readonly sessionManager?: SessionManagerLike
 }
+
+export type JsonObject = { readonly [key: string]: JsonValue }
+
+export const AgentStateSchema = Schema.Literals([
+  "scheduled", "resolved", "running", "interrupted", "cancelled", "idle", "parked", "completed", "failed",
+])
+export type AgentState = Schema.Schema.Type<typeof AgentStateSchema>
+
+export const PolicyLayerSchema = Schema.Literals([
+  "hard_constraint", "spawn_explicit", "session_strategy", "workspace_policy", "global_policy",
+])
+export type PolicyLayer = Schema.Schema.Type<typeof PolicyLayerSchema>
+
+export const AccountKindSchema = Schema.Literals(["configured", "ambient", "none"])
+export type AccountKind = Schema.Schema.Type<typeof AccountKindSchema>
+
+export const EffortSchema = Schema.Union([
+  Schema.Literals(["none", "low", "medium", "high", "high_plus"]),
+  Schema.TemplateLiteral(["provider_defined:", Schema.String]),
+])
+export type Effort = Schema.Schema.Type<typeof EffortSchema>
+
+export const LifecycleKindSchema = Schema.Literals([
+  "spawn_scheduled", "spawn_started", "interrupt", "cancel", "idle", "park", "adopt", "revive",
+  "interrupted_by_restart", "completed", "failed",
+])
+export type LifecycleKind = Schema.Schema.Type<typeof LifecycleKindSchema>
+
+export const RouteChangeKindSchema = Schema.Literals([
+  "spawn_resolved", "model_change", "thinking_change", "account_change", "hotswap", "fallback", "revert", "advisor_change",
+])
+export type RouteChangeKind = Schema.Schema.Type<typeof RouteChangeKindSchema>
+
+export const TimelineKindSchema = Schema.Union([LifecycleKindSchema, RouteChangeKindSchema])
+export type TimelineKind = Schema.Schema.Type<typeof TimelineKindSchema>
+
+const NullableStringSchema = Schema.Union([Schema.String, Schema.Null])
+const NullableAgentStateSchema = Schema.Union([AgentStateSchema, Schema.Null])
+
+const EventLinkageFields = {
+  agentId: Schema.String,
+  agentSeq: Schema.Int,
+  agentSessionId: NullableStringSchema,
+  parentSessionId: NullableStringSchema,
+  parentAgentId: NullableStringSchema,
+  taskId: NullableStringSchema,
+  packetId: NullableStringSchema,
+  branchId: NullableStringSchema,
+  turnId: NullableStringSchema,
+}
+
+export const EventLinkageSchema = Schema.Struct(EventLinkageFields)
+export type EventLinkage = Schema.Schema.Type<typeof EventLinkageSchema>
+
+export const ArtifactHandleSchema = Schema.Struct({
+  role: Schema.Literals(["sessionJournal", "taskInput", "taskOutput", "rawRequest", "rawResponse", "contextManifest", "resolverTrace", "error", "review", "other"]),
+  artifactId: Schema.String,
+})
+export type ArtifactHandle = Schema.Schema.Type<typeof ArtifactHandleSchema>
+
+export const AgentTimelinePayloadV1Schema = Schema.Struct({ ...EventLinkageFields,
+  payloadVersion: Schema.Literal(1),
+  eventId: Schema.String,
+  occurredAt: Schema.Int,
+  kind: LifecycleKindSchema,
+  fromState: NullableAgentStateSchema,
+  toState: NullableAgentStateSchema,
+  reason: NullableStringSchema,
+  errorClass: NullableStringSchema,
+  detail: Schema.Record(Schema.String, JsonValueSchema),
+  artifacts: Schema.Array(ArtifactHandleSchema),
+})
+export type AgentTimelinePayloadV1 = Schema.Schema.Type<typeof AgentTimelinePayloadV1Schema>
+
+export const RouteConstraintSchema = Schema.Struct({
+  id: Schema.String,
+  kind: Schema.Literals(["quality", "latency", "budget", "context", "tool", "privacy", "auth", "availability", "review_independence", "other"]),
+  requirement: Schema.String,
+  hard: Schema.Boolean,
+  sourceLayer: PolicyLayerSchema,
+  sourceRef: Schema.String,
+})
+export type RouteConstraint = Schema.Schema.Type<typeof RouteConstraintSchema>
+
+export const ConsultedSourceSchema = Schema.Struct({
+  layer: PolicyLayerSchema,
+  sourceRef: Schema.String,
+  values: Schema.Record(Schema.String, JsonValueSchema),
+})
+export type ConsultedSource = Schema.Schema.Type<typeof ConsultedSourceSchema>
+
+export const OverriddenValueSchema = Schema.Struct({
+  field: Schema.Literals(["lane", "provider", "model", "account", "effort", "advisor", "fallback"]),
+  losingLayer: PolicyLayerSchema,
+  losingSourceRef: Schema.String,
+  losingValue: JsonValueSchema,
+  winningLayer: PolicyLayerSchema,
+  winningSourceRef: Schema.String,
+  winningValue: JsonValueSchema,
+  reason: Schema.String,
+})
+export type OverriddenValue = Schema.Schema.Type<typeof OverriddenValueSchema>
+
+export const AccountResolutionSchema = Schema.Struct({
+  kind: AccountKindSchema,
+  ref: NullableStringSchema,
+  provenance: Schema.Record(Schema.String, JsonValueSchema),
+})
+export type AccountResolution = Schema.Schema.Type<typeof AccountResolutionSchema>
+
+export const RouteCandidateV1Schema = Schema.Struct({
+  ordinal: Schema.Int,
+  lane: Schema.String,
+  provider: Schema.String,
+  model: Schema.String,
+  account: AccountResolutionSchema,
+  effort: EffortSchema,
+  disposition: Schema.Literals(["selected", "rejected", "fallback"]),
+  fallbackOrdinal: Schema.Union([Schema.Int, Schema.Null]),
+  rejectionCode: NullableStringSchema,
+  rejectionReason: NullableStringSchema,
+  failedConstraintIds: Schema.Array(Schema.String),
+})
+export type RouteCandidateV1 = Schema.Schema.Type<typeof RouteCandidateV1Schema>
+
+export const AdvisorRouteV1Schema = Schema.Struct({
+  ordinal: Schema.Int,
+  advisorAgentId: NullableStringSchema,
+  purpose: Schema.String,
+  lane: Schema.String,
+  provider: Schema.String,
+  model: Schema.String,
+  account: AccountResolutionSchema,
+  effort: EffortSchema,
+  winningLayer: PolicyLayerSchema,
+  independenceRequired: Schema.Boolean,
+  rawAdviceArtifactId: NullableStringSchema,
+})
+export type AdvisorRouteV1 = Schema.Schema.Type<typeof AdvisorRouteV1Schema>
+
+export const RouteResolutionPayloadV1Schema = Schema.Struct({ ...EventLinkageFields,
+  payloadVersion: Schema.Literal(1),
+  resolutionId: Schema.String,
+  occurredAt: Schema.Int,
+  changeKind: RouteChangeKindSchema,
+  reason: NullableStringSchema,
+  route: Schema.Struct({
+    lane: Schema.String,
+    provider: Schema.String,
+    upstreamProvider: NullableStringSchema,
+    model: Schema.String,
+    account: AccountResolutionSchema,
+    effort: EffortSchema,
+  }),
+  provenance: Schema.Struct({
+    winningLayer: PolicyLayerSchema,
+    constraints: Schema.Array(RouteConstraintSchema),
+    consultedSources: Schema.Array(ConsultedSourceSchema),
+    overriddenValues: Schema.Array(OverriddenValueSchema),
+  }),
+  candidates: Schema.Array(RouteCandidateV1Schema),
+  fallbackFromResolutionId: NullableStringSchema,
+  revertedFromResolutionId: NullableStringSchema,
+  advisors: Schema.Array(AdvisorRouteV1Schema),
+  rawDecisionArtifactId: NullableStringSchema,
+  artifacts: Schema.Array(ArtifactHandleSchema),
+})
+export type RouteResolutionPayloadV1 = Schema.Schema.Type<typeof RouteResolutionPayloadV1Schema>

@@ -1,7 +1,9 @@
 import { existsSync, readFileSync } from "node:fs"
+import { Schema } from "effect"
 
-import { appendOutboxLine, outboxPathFor, type JsonValue, type KnownOutboxKind } from "./outbox"
+import { appendOutboxLine, OutboxEnvelopeSchema, outboxPathFor, type JsonValue, type KnownOutboxKind } from "./outbox"
 import type {
+  AgentTimelinePayloadV1,
   AssistantMessage,
   BeforeProviderRequestPayload,
   ExtensionContextLike,
@@ -9,12 +11,14 @@ import type {
   MessageStartPayload,
   OmpTimestamp,
   PiLike,
+  RouteResolutionPayloadV1,
   SessionBranchPayload,
   SessionShutdownPayload,
   SessionStartPayload,
   SessionSwitchPayload,
   TurnPayload,
 } from "./omp-events"
+import { AgentTimelinePayloadV1Schema, RouteResolutionPayloadV1Schema } from "./omp-events"
 
 interface SessionState {
   readonly sessionId: string
@@ -23,6 +27,7 @@ interface SessionState {
   nextSeq: number
   latestProviderRequest?: CapturedProviderRequest
   readonly turnStarts: Map<number, TurnStartSnapshot>
+  activeRouteResolutionId?: string
   readonly pendingAttributions: Map<string, PendingAttribution>
 }
 
@@ -59,9 +64,17 @@ type LooseJsonRecord = { [key: string]: JsonValue | undefined }
 
 type PayloadBuilder = (seq: number) => JsonValue
 
-export default function createOmpPublisher(pi: PiLike): void {
-  const publisher = new OmpOutboxPublisher()
+export interface OmpPublisherHooks {
+  publishAgentTimeline(payload: AgentTimelinePayloadV1, ctx: ExtensionContextLike): void
+  publishRouteResolution(payload: RouteResolutionPayloadV1, ctx: ExtensionContextLike): void
+}
 
+export function createOmpPublisherHooks(): OmpPublisherHooks {
+  return new OmpOutboxPublisher()
+}
+
+export default function createOmpPublisher(pi: PiLike): OmpPublisherHooks {
+  const publisher = new OmpOutboxPublisher()
   pi.on("session_start", publisher.guard((event, ctx) => publisher.onSessionStart(event, ctx)))
   pi.on("turn_start", publisher.guard((event, ctx) => publisher.onTurn("start", event, ctx)))
   pi.on("before_provider_request", publisher.guard((event, ctx) => publisher.onBeforeProviderRequest(event, ctx)))
@@ -71,9 +84,22 @@ export default function createOmpPublisher(pi: PiLike): void {
   pi.on("session_switch", publisher.guard((event, ctx) => publisher.onSessionSwitch(event, ctx)))
   pi.on("session_branch", publisher.guard((event, ctx) => publisher.onSessionBranch(event, ctx)))
   pi.on("session_shutdown", publisher.guard((event, ctx) => publisher.onSessionShutdown(event, ctx)))
+  return publisher
 }
+class OmpOutboxPublisher implements OmpPublisherHooks {
+  publishAgentTimeline(payload: AgentTimelinePayloadV1, ctx: ExtensionContextLike): void {
+    const event = Schema.decodeUnknownSync(AgentTimelinePayloadV1Schema)(payload)
+    const state = this.stateForContext(ctx)
+    this.append(state, "agentTimeline", event.occurredAt, () => event)
+  }
 
-class OmpOutboxPublisher {
+  publishRouteResolution(payload: RouteResolutionPayloadV1, ctx: ExtensionContextLike): void {
+    const resolution = Schema.decodeUnknownSync(RouteResolutionPayloadV1Schema)(payload)
+    const state = this.stateForContext(ctx)
+    this.append(state, "routeResolution", resolution.occurredAt, () => resolution)
+    state.activeRouteResolutionId = resolution.resolutionId
+  }
+
   private readonly sessions = new Map<string, SessionState>()
   private currentSessionId: string | undefined
 
@@ -243,6 +269,7 @@ class OmpOutboxPublisher {
       rawResponseArtifact: "",
       rawRequestSupport,
       rawRequest,
+      routeResolutionId: state.activeRouteResolutionId,
     }))
     this.cacheAttribution(state, ts, {
       modelCallId,
@@ -325,6 +352,7 @@ class OmpOutboxPublisher {
       sessionFile,
       outboxPath,
       nextSeq: countExistingOutboxLines(outboxPath),
+      activeRouteResolutionId: activeRouteResolutionIdFor(outboxPath),
       turnStarts: new Map(),
       pendingAttributions: new Map(),
     }
@@ -477,6 +505,33 @@ function errorClassFor(message: AssistantMessage): string | null {
     case "error":
       return message.errorStatus !== undefined ? `ProviderError:${message.errorStatus}` : "ProviderError"
   }
+}
+
+function activeRouteResolutionIdFor(path: string): string | undefined {
+  if (!existsSync(path)) {
+    return undefined
+  }
+
+  let activeRouteResolutionId: string | undefined
+  for (const line of readFileSync(path, "utf8").split("\n")) {
+    if (line === "") {
+      continue
+    }
+
+    try {
+      const envelope = Schema.decodeUnknownOption(OutboxEnvelopeSchema)(JSON.parse(line) as unknown)
+      if (envelope._tag !== "Some" || envelope.value.v !== 1 || envelope.value.kind !== "routeResolution") {
+        continue
+      }
+      const payload = Schema.decodeUnknownOption(RouteResolutionPayloadV1Schema)(envelope.value.payload, { onExcessProperty: "ignore" })
+      if (payload._tag === "Some") {
+        activeRouteResolutionId = payload.value.resolutionId
+      }
+    } catch {
+      // Existing outbox bytes, including malformed or future envelopes, remain untouched.
+    }
+  }
+  return activeRouteResolutionId
 }
 
 function countExistingOutboxLines(path: string): number {

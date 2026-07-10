@@ -24,6 +24,8 @@ export const KnownOutboxKindSchema = Schema.Union([
   Schema.Literal("modelCall"),
   Schema.Literal("providerCall"),
   Schema.Literal("artifact"),
+  Schema.Literal("agentTimeline"),
+  Schema.Literal("routeResolution"),
 ])
 export type KnownOutboxKind = Schema.Schema.Type<typeof KnownOutboxKindSchema>
 

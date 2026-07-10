@@ -15,3 +15,29 @@ bun src/cli.ts routing brief --db test/.tmp/routing.sqlite --lane openai-codex/g
 ```
 
 `routing observe` accepts caller-supplied `--id` for idempotent `INSERT OR IGNORE`; without it the CLI generates a UUID-backed id. `routing seed` is idempotent and installs the 2026-07-03 temperament hypotheses plus the 2026-07-07 current account state.
+
+## GPT-5.6 release evidence
+
+The package-local curator converts `../../local/gpt56-release-evidence.json` into the reproducible typed fixture. It retains only exact numeric observations, preserves extraction provenance, and records known gaps in notes rather than inventing values.
+
+The fixture also records the official token-based Codex credit rate card. Sol's listed rates equal GPT-5.5's; Terra is one half of Sol for the same input, cached-input, and output token mix. These metered rates do not prove fixed message limits, account-specific pool/reset allowances, API price equivalence, or subscription-cost frontier equivalence.
+
+```sh
+# From packages/control-plane
+bun run evidence:curate:gpt56
+
+OUT=test/.tmp
+mkdir -p "$OUT"
+DB=$OUT/gpt56-release.sqlite
+FIXTURE=fixtures/gpt56-release-2026-07-10.json
+SCORE='["definition-deepswe-v1-1","benchmark.deepswe.pass-at-1","%","maximize","latest","point"]'
+COST='[null,"cost.usd","USD","minimize","latest","point"]'
+
+bun run src/evidence-cli.ts ingest --db "$DB" --from "$FIXTURE" --json
+bun run src/evidence-cli.ts frontier --db "$DB" --work-class software-engineering --task-modality repository --axis=definition-deepswe-v1-1:benchmark.deepswe.pass-at-1:%:maximize:latest:point --axis=-:cost.usd:USD:minimize:latest:point --json
+bun run src/evidence-cli.ts export --db "$DB" --work-class software-engineering --task-modality repository --axis=definition-deepswe-v1-1:benchmark.deepswe.pass-at-1:%:maximize:latest:point --axis=-:cost.usd:USD:minimize:latest:point --format json --out "$OUT/gpt56-frontier.json"
+bun run src/evidence-cli.ts export --db "$DB" --work-class software-engineering --task-modality repository --axis=definition-deepswe-v1-1:benchmark.deepswe.pass-at-1:%:maximize:latest:point --axis=-:cost.usd:USD:minimize:latest:point --format csv --out "$OUT/gpt56-frontier.csv"
+bun run src/evidence-cli.ts export --db "$DB" --work-class software-engineering --task-modality repository --axis=definition-deepswe-v1-1:benchmark.deepswe.pass-at-1:%:maximize:latest:point --axis=-:cost.usd:USD:minimize:latest:point --format svg --x "$COST" --y "$SCORE" --out "$OUT/gpt56-frontier.svg"
+```
+
+For later releases, append only a named benchmark catalog row when an official source identifies it. An unreleased row carries no metric definition, run, or measurement until exact release-window evidence exists.

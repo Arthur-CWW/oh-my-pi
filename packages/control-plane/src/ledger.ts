@@ -10,7 +10,7 @@ import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite"
 
 import { ArtifactError, StorageError } from "./errors"
 import { migrateLedger, setDurabilityPragmas } from "./migrate"
-import { artifacts, branches, events, modelCalls, providerCalls, sessions, turns, type ArtifactRow, type EventRow, type ModelCallRow } from "./schema"
+import { agentTimelineEvents, artifacts, branches, events, modelCalls, providerCalls, routeAdvisors, routeCandidates, routeEventArtifacts, routeResolutions, sessions, turns, type AgentTimelineEventRow, type ArtifactRow, type EventRow, type ModelCallRow, type RouteAdvisorRow, type RouteCandidateRow, type RouteEventArtifactRow, type RouteResolutionRow } from "./schema"
 
 export interface InsertResult {
   readonly inserted: boolean
@@ -102,6 +102,17 @@ export interface ModelCallInput {
   readonly fallbackFrom?: string
   readonly rawRequestArtifact: string
   readonly rawResponseArtifact: string
+  readonly routeResolutionId?: string
+}
+
+export interface TimelineInput {
+  readonly id: string; readonly ts: number; readonly sourceSessionId: string; readonly sourceSeq: number; readonly agentId: string; readonly agentSeq: number; readonly agentSessionId?: string; readonly parentSessionId?: string; readonly parentAgentId?: string; readonly taskId?: string; readonly packetId?: string; readonly branchId?: string; readonly turnId?: string; readonly kind: string; readonly fromState?: string; readonly toState?: string; readonly routeResolutionId?: string; readonly reason?: string; readonly errorClass?: string; readonly detail: string; readonly artifacts: readonly RouteArtifactInput[]; readonly payloadVersion: 1
+}
+export interface RouteCandidateInput { readonly ordinal: number; readonly lane: string; readonly provider: string; readonly model: string; readonly accountKind: string; readonly accountRef?: string; readonly effort: string; readonly disposition: string; readonly fallbackOrdinal?: number; readonly rejectionCode?: string; readonly rejectionReason?: string; readonly failedConstraintIds: string }
+export interface RouteAdvisorInput { readonly ordinal: number; readonly advisorAgentId?: string; readonly purpose: string; readonly lane: string; readonly provider: string; readonly model: string; readonly accountKind: string; readonly accountRef?: string; readonly accountProvenance: string; readonly effort: string; readonly winningLayer: string; readonly independenceRequired: boolean; readonly rawAdviceArtifactId?: string }
+export interface RouteArtifactInput { readonly ordinal: number; readonly role: string; readonly artifactId: string }
+export interface RouteResolutionInput extends Omit<TimelineInput, "id" | "kind" | "fromState" | "toState" | "routeResolutionId" | "errorClass" | "detail"> {
+  readonly id: string; readonly changeKind: string; readonly lane: string; readonly provider: string; readonly upstreamProvider?: string; readonly model: string; readonly accountKind: string; readonly accountRef?: string; readonly accountProvenance: string; readonly effort: string; readonly winningLayer: string; readonly constraints: string; readonly consultedSources: string; readonly overriddenValues: string; readonly fallbackFromResolutionId?: string; readonly revertedFromResolutionId?: string; readonly advisorMode: string; readonly rawDecisionArtifactId?: string; readonly candidates: readonly RouteCandidateInput[]; readonly advisors: readonly RouteAdvisorInput[]; readonly artifacts: readonly RouteArtifactInput[]; readonly timeline: TimelineInput
 }
 
 export interface ProviderCallInput {
@@ -187,6 +198,11 @@ export interface EventFilters {
   readonly limit?: number
 }
 
+export interface TimelineSourceCursor {
+  readonly sourceSessionId: string
+  readonly sourceSeq: number
+}
+
 export type BatchRow =
   | { readonly kind: "session"; readonly payload: SessionInput }
   | { readonly kind: "branch"; readonly payload: BranchInput }
@@ -195,6 +211,8 @@ export type BatchRow =
   | { readonly kind: "modelCall"; readonly payload: ModelCallInput }
   | { readonly kind: "providerCall"; readonly payload: ProviderCallInput }
   | { readonly kind: "artifact"; readonly payload: ArtifactContent & ArtifactMeta }
+  | { readonly kind: "agentTimeline"; readonly payload: TimelineInput }
+  | { readonly kind: "routeResolution"; readonly payload: RouteResolutionInput }
 
 export interface BatchResult {
   readonly inserted: number
@@ -217,6 +235,17 @@ export interface LedgerStoreShape {
   readonly listEvents: (filters: EventFilters) => Effect.Effect<EventRow[], StorageError>
   readonly getArtifact: (id: string) => Effect.Effect<ArtifactRecord & { readonly content: string }, StorageError | ArtifactError>
   readonly close: () => void
+  readonly listAgentTimelineRows: (agentId: string, afterAgentSeq?: number, limit?: number) => Effect.Effect<AgentTimelineEventRow[], StorageError>
+  readonly listTimelineRowsAfterSource: (cursor: TimelineSourceCursor | undefined, limit: number) => Effect.Effect<AgentTimelineEventRow[], StorageError>
+  readonly listCurrentAgentStateRows: (parentAgentId?: string) => Effect.Effect<AgentTimelineEventRow[], StorageError>
+  readonly getRouteResolutionRow: (id: string) => Effect.Effect<RouteResolutionRow | undefined, StorageError>
+  readonly listRouteCandidateRows: (resolutionId: string) => Effect.Effect<RouteCandidateRow[], StorageError>
+  readonly listRouteAdvisorRows: (resolutionId: string) => Effect.Effect<RouteAdvisorRow[], StorageError>
+  readonly listRouteArtifactRows: (ownerKind: "agentEvent" | "routeResolution", ownerId: string) => Effect.Effect<RouteEventArtifactRow[], StorageError>
+  readonly listAgentRouteRows: (agentId: string) => Effect.Effect<RouteResolutionRow[], StorageError>
+  readonly listPacketRouteRows: (packetId: string) => Effect.Effect<RouteResolutionRow[], StorageError>
+  readonly listRestartRecoveryRows: (agentId: string) => Effect.Effect<AgentTimelineEventRow[], StorageError>
+  readonly listModelCallResolutionRows: (resolutionId: string) => Effect.Effect<ModelCallRow[], StorageError>
 }
 
 export class LedgerStore extends Context.Service<LedgerStore, LedgerStoreShape>()("ControlPlane/LedgerStore") {}
@@ -301,6 +330,17 @@ function makeLedgerStore(dbPath: string): LedgerStoreShape {
     listEvents: Effect.fn("LedgerStore.listEvents")((filters: EventFilters) =>
       storageEffect("listEvents", () => listEventRows(db, filters)),
     ),
+    listAgentTimelineRows: Effect.fn("LedgerStore.listAgentTimelineRows")((agentId: string, afterAgentSeq?: number, limit?: number) => storageEffect("listAgentTimelineRows", () => listAgentTimelineRows(db, agentId, afterAgentSeq, limit))),
+    listTimelineRowsAfterSource: Effect.fn("LedgerStore.listTimelineRowsAfterSource")((cursor: TimelineSourceCursor | undefined, limit: number) => storageEffect("listTimelineRowsAfterSource", () => listTimelineRowsAfterSource(sqlite, cursor, limit))),
+    listCurrentAgentStateRows: Effect.fn("LedgerStore.listCurrentAgentStateRows")((parentAgentId?: string) => storageEffect("listCurrentAgentStateRows", () => listCurrentAgentStateRows(sqlite, parentAgentId))),
+    getRouteResolutionRow: Effect.fn("LedgerStore.getRouteResolutionRow")((id: string) => storageEffect("getRouteResolutionRow", () => db.select().from(routeResolutions).where(eq(routeResolutions.id, id)).get())),
+    listRouteCandidateRows: Effect.fn("LedgerStore.listRouteCandidateRows")((id: string) => storageEffect("listRouteCandidateRows", () => db.select().from(routeCandidates).where(eq(routeCandidates.routeResolutionId, id)).orderBy(routeCandidates.ordinal).all())),
+    listRouteAdvisorRows: Effect.fn("LedgerStore.listRouteAdvisorRows")((id: string) => storageEffect("listRouteAdvisorRows", () => db.select().from(routeAdvisors).where(eq(routeAdvisors.routeResolutionId, id)).orderBy(routeAdvisors.ordinal).all())),
+    listRouteArtifactRows: Effect.fn("LedgerStore.listRouteArtifactRows")((ownerKind: "agentEvent" | "routeResolution", ownerId: string) => storageEffect("listRouteArtifactRows", () => db.select().from(routeEventArtifacts).where(and(eq(routeEventArtifacts.ownerKind, ownerKind), eq(routeEventArtifacts.ownerId, ownerId))).orderBy(routeEventArtifacts.ordinal).all())),
+    listAgentRouteRows: Effect.fn("LedgerStore.listAgentRouteRows")((agentId: string) => storageEffect("listAgentRouteRows", () => db.select().from(routeResolutions).where(eq(routeResolutions.agentId, agentId)).orderBy(routeResolutions.agentSeq).all())),
+    listPacketRouteRows: Effect.fn("LedgerStore.listPacketRouteRows")((packetId: string) => storageEffect("listPacketRouteRows", () => db.select().from(routeResolutions).where(eq(routeResolutions.packetId, packetId)).orderBy(routeResolutions.ts, routeResolutions.sourceSessionId, routeResolutions.sourceSeq).all())),
+    listRestartRecoveryRows: Effect.fn("LedgerStore.listRestartRecoveryRows")((agentId: string) => storageEffect("listRestartRecoveryRows", () => listRestartRecoveryRows(sqlite, agentId))),
+    listModelCallResolutionRows: Effect.fn("LedgerStore.listModelCallResolutionRows")((id: string) => storageEffect("listModelCallResolutionRows", () => db.select().from(modelCalls).where(eq(modelCalls.routeResolutionId, id)).orderBy(modelCalls.ts, modelCalls.id).all())),
     getArtifact: Effect.fn("LedgerStore.getArtifact")((id: string) =>
       Effect.try({
         try: () => readArtifact(db, id),
@@ -327,6 +367,10 @@ function insertBatchRow(db: LedgerDb, row: BatchRow): InsertResult {
       return insertProviderCall(db, row.payload)
     case "artifact":
       return insertArtifact(db, row.payload, row.payload)
+    case "agentTimeline":
+      return insertAgentTimeline(db, row.payload)
+    case "routeResolution":
+      return insertRouteResolution(db, row.payload)
   }
 }
 
@@ -383,7 +427,11 @@ function insertEvent(db: LedgerDb, input: EventInput): InsertResult {
   return { inserted: result.length > 0 }
 }
 
+
 function insertModelCall(db: LedgerDb, input: ModelCallInput): InsertResult {
+  if (input.routeResolutionId !== undefined && db.select().from(routeResolutions).where(eq(routeResolutions.id, input.routeResolutionId)).get() === undefined) {
+    throw new Error("Model call route resolution does not exist")
+  }
   const result = db.insert(modelCalls).values({
     ...input,
     entryId: input.entryId ?? null,
@@ -393,17 +441,73 @@ function insertModelCall(db: LedgerDb, input: ModelCallInput): InsertResult {
     fallbackFrom: input.fallbackFrom ?? null,
     ttftMs: input.ttftMs ?? null,
     reasoningTokens: input.reasoningTokens ?? null,
+    routeResolutionId: input.routeResolutionId ?? null,
   }).onConflictDoNothing().returning({ id: modelCalls.id }).all()
   return { inserted: result.length > 0 }
 }
 
 function updateModelCallAttribution(db: LedgerDb, modelCallId: string, entryId: string): AttributeResult {
-  const result = db.update(modelCalls)
-    .set({ entryId })
-    .where(and(eq(modelCalls.id, modelCallId), isNull(modelCalls.entryId)))
-    .returning({ id: modelCalls.id })
-    .all()
+  const result = db.update(modelCalls).set({ entryId }).where(and(eq(modelCalls.id, modelCallId), isNull(modelCalls.entryId))).returning({ id: modelCalls.id }).all()
   return { updated: result.length > 0 }
+}
+
+function insertAgentTimeline(db: LedgerDb, input: TimelineInput): InsertResult {
+  const conflict = db.select().from(agentTimelineEvents).where(and(eq(agentTimelineEvents.sourceSessionId, input.sourceSessionId), eq(agentTimelineEvents.sourceSeq, input.sourceSeq))).get()
+    ?? db.select().from(agentTimelineEvents).where(and(eq(agentTimelineEvents.agentId, input.agentId), eq(agentTimelineEvents.agentSeq, input.agentSeq))).get()
+  if (conflict !== undefined) {
+    if (timelineMatches(db, conflict, input)) return { inserted: false }
+    throw new Error("Agent timeline idempotency conflict")
+  }
+  db.insert(agentTimelineEvents).values(timelineValues(input)).run()
+  if (input.artifacts.length > 0) {
+    db.insert(routeEventArtifacts).values(input.artifacts.map((artifact) => ({ ...artifact, ownerKind: "agentEvent", ownerId: input.id }))).run()
+  }
+  return { inserted: true }
+}
+
+function insertRouteResolution(db: LedgerDb, input: RouteResolutionInput): InsertResult {
+  const conflict = db.select().from(routeResolutions).where(and(eq(routeResolutions.sourceSessionId, input.sourceSessionId), eq(routeResolutions.sourceSeq, input.sourceSeq))).get()
+    ?? db.select().from(routeResolutions).where(and(eq(routeResolutions.agentId, input.agentId), eq(routeResolutions.agentSeq, input.agentSeq))).get()
+  if (conflict !== undefined) {
+    if (routeMatches(db, conflict, input)) return { inserted: false }
+    throw new Error("Route resolution idempotency conflict")
+  }
+  if (input.fallbackFromResolutionId !== undefined && db.select().from(routeResolutions).where(eq(routeResolutions.id, input.fallbackFromResolutionId)).get() === undefined) {
+    throw new Error("Fallback route resolution does not exist")
+  }
+  if (input.revertedFromResolutionId !== undefined && db.select().from(routeResolutions).where(eq(routeResolutions.id, input.revertedFromResolutionId)).get() === undefined) {
+    throw new Error("Reverted route resolution does not exist")
+  }
+  db.insert(routeResolutions).values(routeValues(input)).run()
+  db.insert(agentTimelineEvents).values(timelineValues(input.timeline)).run()
+  if (input.candidates.length > 0) db.insert(routeCandidates).values(input.candidates.map((candidate) => ({ ...candidate, routeResolutionId: input.id, accountRef: candidate.accountRef ?? null, fallbackOrdinal: candidate.fallbackOrdinal ?? null, rejectionCode: candidate.rejectionCode ?? null, rejectionReason: candidate.rejectionReason ?? null }))).run()
+  if (input.advisors.length > 0) db.insert(routeAdvisors).values(input.advisors.map((advisor) => ({ ...advisor, routeResolutionId: input.id, advisorAgentId: advisor.advisorAgentId ?? null, accountRef: advisor.accountRef ?? null, rawAdviceArtifactId: advisor.rawAdviceArtifactId ?? null }))).run()
+  if (input.artifacts.length > 0) db.insert(routeEventArtifacts).values(input.artifacts.map((artifact) => ({ ...artifact, ownerKind: "routeResolution", ownerId: input.id }))).run()
+  return { inserted: true }
+}
+
+function timelineValues(input: TimelineInput) {
+  const { artifacts: timelineArtifacts, ...row } = input
+  return { ...row, agentSessionId: input.agentSessionId ?? null, parentSessionId: input.parentSessionId ?? null, parentAgentId: input.parentAgentId ?? null, taskId: input.taskId ?? null, packetId: input.packetId ?? null, branchId: input.branchId ?? null, turnId: input.turnId ?? null, fromState: input.fromState ?? null, toState: input.toState ?? null, routeResolutionId: input.routeResolutionId ?? null, reason: input.reason ?? null, errorClass: input.errorClass ?? null }
+}
+
+function routeValues(input: RouteResolutionInput) {
+  const { candidates, advisors, artifacts: routeArtifacts, timeline, ...row } = input
+  return { ...row, agentSessionId: input.agentSessionId ?? null, parentSessionId: input.parentSessionId ?? null, parentAgentId: input.parentAgentId ?? null, taskId: input.taskId ?? null, packetId: input.packetId ?? null, branchId: input.branchId ?? null, turnId: input.turnId ?? null, reason: input.reason ?? null, upstreamProvider: input.upstreamProvider ?? null, accountRef: input.accountRef ?? null, fallbackFromResolutionId: input.fallbackFromResolutionId ?? null, revertedFromResolutionId: input.revertedFromResolutionId ?? null, rawDecisionArtifactId: input.rawDecisionArtifactId ?? null }
+}
+
+function timelineMatches(db: LedgerDb, row: AgentTimelineEventRow, input: TimelineInput): boolean {
+  const expected = timelineValues(input)
+  const artifacts = db.select().from(routeEventArtifacts).where(and(eq(routeEventArtifacts.ownerKind, "agentEvent"), eq(routeEventArtifacts.ownerId, input.id))).orderBy(routeEventArtifacts.ordinal).all()
+  return row.id === expected.id && row.ts === expected.ts && row.sourceSessionId === expected.sourceSessionId && row.sourceSeq === expected.sourceSeq && row.agentId === expected.agentId && row.agentSeq === expected.agentSeq && row.agentSessionId === expected.agentSessionId && row.parentSessionId === expected.parentSessionId && row.parentAgentId === expected.parentAgentId && row.taskId === expected.taskId && row.packetId === expected.packetId && row.branchId === expected.branchId && row.turnId === expected.turnId && row.kind === expected.kind && row.fromState === expected.fromState && row.toState === expected.toState && row.routeResolutionId === expected.routeResolutionId && row.reason === expected.reason && row.errorClass === expected.errorClass && row.detail === expected.detail && row.payloadVersion === expected.payloadVersion && JSON.stringify(artifacts.map((artifact) => [artifact.ordinal, artifact.role, artifact.artifactId])) === JSON.stringify(input.artifacts.map((artifact) => [artifact.ordinal, artifact.role, artifact.artifactId]))
+}
+
+function routeMatches(db: LedgerDb, row: RouteResolutionRow, input: RouteResolutionInput): boolean {
+  const expected = routeValues(input)
+  const candidates = db.select().from(routeCandidates).where(eq(routeCandidates.routeResolutionId, input.id)).orderBy(routeCandidates.ordinal).all()
+  const advisors = db.select().from(routeAdvisors).where(eq(routeAdvisors.routeResolutionId, input.id)).orderBy(routeAdvisors.ordinal).all()
+  const artifacts = db.select().from(routeEventArtifacts).where(and(eq(routeEventArtifacts.ownerKind, "routeResolution"), eq(routeEventArtifacts.ownerId, input.id))).orderBy(routeEventArtifacts.ordinal).all()
+  return row.id === expected.id && row.ts === expected.ts && row.sourceSessionId === expected.sourceSessionId && row.sourceSeq === expected.sourceSeq && row.agentId === expected.agentId && row.agentSeq === expected.agentSeq && row.agentSessionId === expected.agentSessionId && row.parentSessionId === expected.parentSessionId && row.parentAgentId === expected.parentAgentId && row.taskId === expected.taskId && row.packetId === expected.packetId && row.branchId === expected.branchId && row.turnId === expected.turnId && row.changeKind === expected.changeKind && row.reason === expected.reason && row.lane === expected.lane && row.provider === expected.provider && row.upstreamProvider === expected.upstreamProvider && row.model === expected.model && row.accountKind === expected.accountKind && row.accountRef === expected.accountRef && row.accountProvenance === expected.accountProvenance && row.effort === expected.effort && row.winningLayer === expected.winningLayer && row.constraints === expected.constraints && row.consultedSources === expected.consultedSources && row.overriddenValues === expected.overriddenValues && row.fallbackFromResolutionId === expected.fallbackFromResolutionId && row.revertedFromResolutionId === expected.revertedFromResolutionId && row.advisorMode === expected.advisorMode && row.rawDecisionArtifactId === expected.rawDecisionArtifactId && row.payloadVersion === expected.payloadVersion && JSON.stringify(candidates.map((candidate) => [candidate.ordinal, candidate.lane, candidate.provider, candidate.model, candidate.accountKind, candidate.accountRef, candidate.effort, candidate.disposition, candidate.fallbackOrdinal, candidate.rejectionCode, candidate.rejectionReason, candidate.failedConstraintIds])) === JSON.stringify(input.candidates.map((candidate) => [candidate.ordinal, candidate.lane, candidate.provider, candidate.model, candidate.accountKind, candidate.accountRef ?? null, candidate.effort, candidate.disposition, candidate.fallbackOrdinal ?? null, candidate.rejectionCode ?? null, candidate.rejectionReason ?? null, candidate.failedConstraintIds])) && JSON.stringify(advisors.map((advisor) => [advisor.ordinal, advisor.advisorAgentId, advisor.purpose, advisor.lane, advisor.provider, advisor.model, advisor.accountKind, advisor.accountRef, advisor.accountProvenance, advisor.effort, advisor.winningLayer, advisor.independenceRequired, advisor.rawAdviceArtifactId])) === JSON.stringify(input.advisors.map((advisor) => [advisor.ordinal, advisor.advisorAgentId ?? null, advisor.purpose, advisor.lane, advisor.provider, advisor.model, advisor.accountKind, advisor.accountRef ?? null, advisor.accountProvenance, advisor.effort, advisor.winningLayer, advisor.independenceRequired, advisor.rawAdviceArtifactId ?? null])) && JSON.stringify(artifacts.map((artifact) => [artifact.ordinal, artifact.role, artifact.artifactId])) === JSON.stringify(input.artifacts.map((artifact) => [artifact.ordinal, artifact.role, artifact.artifactId]))
 }
 
 function insertProviderCall(db: LedgerDb, input: ProviderCallInput): InsertResult {
@@ -524,19 +628,28 @@ function artifactContent(row: ArtifactRow): string {
 }
 
 function artifactRecord(row: ArtifactRow, content: string): ArtifactRecord & { readonly content: string } {
-  return {
-    id: row.id,
-    ts: row.ts,
-    sessionId: row.sessionId ?? undefined,
-    kind: row.kind,
-    contentPath: row.contentPath ?? undefined,
-    contentInline: row.contentInline ?? undefined,
-    sha256: row.sha256,
-    bytes: row.bytes,
-    retention: row.retention,
-    meta: row.meta,
-    content,
+  return { id: row.id, ts: row.ts, sessionId: row.sessionId ?? undefined, kind: row.kind, contentPath: row.contentPath ?? undefined, contentInline: row.contentInline ?? undefined, sha256: row.sha256, bytes: row.bytes, retention: row.retention, meta: row.meta, content }
+}
+
+function listAgentTimelineRows(db: LedgerDb, agentId: string, afterAgentSeq?: number, limit?: number): AgentTimelineEventRow[] {
+  const clauses = [eq(agentTimelineEvents.agentId, agentId), afterAgentSeq === undefined ? undefined : gte(agentTimelineEvents.agentSeq, afterAgentSeq + 1)].filter((clause) => clause !== undefined)
+  return db.select().from(agentTimelineEvents).where(and(...clauses)).orderBy(agentTimelineEvents.agentSeq).limit(limit ?? 200).all()
+}
+
+function listTimelineRowsAfterSource(sqlite: Database, cursor: TimelineSourceCursor | undefined, limit: number): AgentTimelineEventRow[] {
+  const boundedLimit = Math.max(1, Math.min(limit, 1_000))
+  if (cursor === undefined) {
+    return sqlite.query<AgentTimelineEventRow, [number]>("SELECT * FROM agent_timeline_events ORDER BY sourceSessionId ASC, sourceSeq ASC LIMIT ?").all(boundedLimit)
   }
+  return sqlite.query<AgentTimelineEventRow, [string, string, number, number]>("SELECT * FROM agent_timeline_events WHERE sourceSessionId > ? OR (sourceSessionId = ? AND sourceSeq > ?) ORDER BY sourceSessionId ASC, sourceSeq ASC LIMIT ?").all(cursor.sourceSessionId, cursor.sourceSessionId, cursor.sourceSeq, boundedLimit)
+}
+
+function listCurrentAgentStateRows(sqlite: Database, parentAgentId?: string): AgentTimelineEventRow[] {
+  return sqlite.query<AgentTimelineEventRow, [string | null, string | null]>("WITH ranked AS (SELECT e.*, ROW_NUMBER() OVER (PARTITION BY agentId ORDER BY agentSeq DESC) AS rn FROM agent_timeline_events e WHERE (? IS NULL OR parentAgentId = ?)) SELECT * FROM ranked WHERE rn = 1 ORDER BY ts DESC, agentId ASC").all(parentAgentId ?? null, parentAgentId ?? null)
+}
+
+function listRestartRecoveryRows(sqlite: Database, agentId: string): AgentTimelineEventRow[] {
+  return sqlite.query<AgentTimelineEventRow, [string]>("SELECT * FROM agent_timeline_events WHERE agentId = ? AND kind IN ('interrupted_by_restart', 'adopt', 'revive') ORDER BY agentSeq ASC").all(agentId)
 }
 
 function limitOrDefault(limit: number | undefined): number {

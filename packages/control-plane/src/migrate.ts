@@ -11,7 +11,7 @@ interface UserVersionRow {
   user_version: number
 }
 
-export const LEDGER_SCHEMA_VERSION = 5
+export const LEDGER_SCHEMA_VERSION = 7
 
 export const migration0001Sql = `
 CREATE TABLE IF NOT EXISTS sessions (
@@ -336,6 +336,233 @@ ORDER BY MAX(ts) DESC;
 PRAGMA user_version = 5;
 `
 
+export const migration0006Sql = `
+CREATE TABLE IF NOT EXISTS evidence_sources (
+  id TEXT PRIMARY KEY,
+  sourceKind TEXT NOT NULL,
+  captureKind TEXT NOT NULL,
+  sourceSystem TEXT,
+  sourceRef TEXT,
+  trustLabel TEXT NOT NULL,
+  publisher TEXT NOT NULL,
+  author TEXT,
+  title TEXT NOT NULL,
+  url TEXT,
+  publishedAt INTEGER,
+  retrievedAt INTEGER NOT NULL,
+  effectiveFrom INTEGER,
+  effectiveTo INTEGER,
+  artifactId TEXT,
+  contentSha256 TEXT,
+  scope TEXT NOT NULL,
+  methodologyUrl TEXT,
+  notes TEXT
+);
+
+CREATE INDEX IF NOT EXISTS evidence_sources_publisher_publishedAt_idx ON evidence_sources (publisher, publishedAt);
+CREATE INDEX IF NOT EXISTS evidence_sources_trustLabel_publishedAt_idx ON evidence_sources (trustLabel, publishedAt);
+CREATE INDEX IF NOT EXISTS evidence_sources_contentSha256_idx ON evidence_sources (contentSha256);
+CREATE INDEX IF NOT EXISTS evidence_sources_sourceSystem_sourceRef_idx ON evidence_sources (sourceSystem, sourceRef);
+
+CREATE TABLE IF NOT EXISTS benchmark_catalog (
+  id TEXT PRIMARY KEY,
+  benchmarkKey TEXT NOT NULL,
+  version TEXT NOT NULL,
+  readiness TEXT NOT NULL,
+  expectedAt INTEGER,
+  releasedAt INTEGER,
+  lastCheckedAt INTEGER,
+  nextCheckAt INTEGER,
+  sourceUrl TEXT,
+  dataUrl TEXT,
+  ingestMethod TEXT NOT NULL,
+  blocker TEXT,
+  notes TEXT
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS benchmark_catalog_key_version_unique_idx ON benchmark_catalog (benchmarkKey, version);
+CREATE INDEX IF NOT EXISTS benchmark_catalog_readiness_nextCheckAt_idx ON benchmark_catalog (readiness, nextCheckAt);
+
+CREATE TABLE IF NOT EXISTS metric_definitions (
+  id TEXT PRIMARY KEY,
+  definitionKind TEXT NOT NULL,
+  definitionKey TEXT NOT NULL,
+  version TEXT NOT NULL,
+  metricKey TEXT NOT NULL,
+  displayName TEXT NOT NULL,
+  workClass TEXT NOT NULL,
+  taskModality TEXT NOT NULL,
+  unit TEXT NOT NULL,
+  scoreDirection TEXT NOT NULL,
+  scoringRule TEXT NOT NULL,
+  datasetSize INTEGER,
+  hiddenEval INTEGER,
+  contaminationStatus TEXT NOT NULL,
+  benchmarkCatalogId TEXT,
+  lowerBound REAL,
+  upperBound REAL,
+  methodologySourceId TEXT NOT NULL,
+  qualityNotes TEXT
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS metric_definitions_key_version_metric_unique_idx ON metric_definitions (definitionKey, version, metricKey);
+CREATE INDEX IF NOT EXISTS metric_definitions_kind_workClass_modality_idx ON metric_definitions (definitionKind, workClass, taskModality);
+CREATE INDEX IF NOT EXISTS metric_definitions_catalog_idx ON metric_definitions (benchmarkCatalogId);
+CREATE INDEX IF NOT EXISTS metric_definitions_source_idx ON metric_definitions (methodologySourceId);
+
+
+CREATE TABLE IF NOT EXISTS benchmark_saturation_assessments (
+  benchmarkCatalogId TEXT NOT NULL,
+  sourceId TEXT NOT NULL,
+  assessedAt INTEGER NOT NULL,
+  cohortKey TEXT NOT NULL,
+  status TEXT NOT NULL,
+  topScore REAL,
+  scoreSpread REAL,
+  topK INTEGER,
+  ceiling REAL,
+  threshold REAL,
+  expectedSaturationAt INTEGER,
+  notes TEXT,
+  PRIMARY KEY (benchmarkCatalogId, sourceId, assessedAt, cohortKey)
+);
+
+CREATE INDEX IF NOT EXISTS benchmark_saturation_assessments_catalog_cohort_assessedAt_idx ON benchmark_saturation_assessments (benchmarkCatalogId, cohortKey, assessedAt);
+CREATE INDEX IF NOT EXISTS benchmark_saturation_assessments_status_assessedAt_idx ON benchmark_saturation_assessments (status, assessedAt);
+CREATE TABLE IF NOT EXISTS commercial_facts (
+  id TEXT PRIMARY KEY,
+  sourceId TEXT NOT NULL,
+  effectiveFrom INTEGER NOT NULL,
+  effectiveTo INTEGER,
+  provider TEXT NOT NULL,
+  model TEXT,
+  account TEXT,
+  product TEXT NOT NULL,
+  pricingContext TEXT NOT NULL,
+  serviceTier TEXT,
+  component TEXT NOT NULL,
+  poolKey TEXT,
+  factKind TEXT NOT NULL,
+  subjectKind TEXT NOT NULL,
+  subjectKey TEXT NOT NULL,
+  windowKind TEXT NOT NULL,
+  value REAL,
+  unit TEXT NOT NULL,
+  perValue REAL,
+  perUnit TEXT,
+  limitKind TEXT NOT NULL,
+  periodSeconds INTEGER,
+  scope TEXT NOT NULL,
+  notes TEXT
+);
+
+CREATE INDEX IF NOT EXISTS commercial_facts_provider_model_context_effective_idx ON commercial_facts (provider, model, pricingContext, effectiveFrom);
+CREATE INDEX IF NOT EXISTS commercial_facts_product_account_effective_idx ON commercial_facts (product, account, effectiveFrom);
+CREATE INDEX IF NOT EXISTS commercial_facts_source_idx ON commercial_facts (sourceId);
+CREATE INDEX IF NOT EXISTS commercial_facts_poolKey_idx ON commercial_facts (poolKey);
+CREATE INDEX IF NOT EXISTS commercial_facts_subject_idx ON commercial_facts (subjectKind, subjectKey);
+
+CREATE TABLE IF NOT EXISTS evaluation_runs (
+  id TEXT PRIMARY KEY,
+  sourceId TEXT NOT NULL,
+  evidenceKind TEXT NOT NULL,
+  observedAt INTEGER NOT NULL,
+  workClass TEXT NOT NULL,
+  harnessProfile TEXT,
+  toolProfile TEXT,
+  contextProfile TEXT,
+  taskModality TEXT NOT NULL,
+  taskCount INTEGER,
+  modelCallId TEXT,
+  sessionId TEXT,
+  packetId TEXT,
+  artifactId TEXT,
+  outcomeClass TEXT,
+  retryCount INTEGER,
+  humanInterventionCount INTEGER,
+  notes TEXT
+);
+
+CREATE INDEX IF NOT EXISTS evaluation_runs_workClass_observedAt_idx ON evaluation_runs (workClass, observedAt);
+CREATE INDEX IF NOT EXISTS evaluation_runs_source_idx ON evaluation_runs (sourceId);
+CREATE INDEX IF NOT EXISTS evaluation_runs_modelCall_idx ON evaluation_runs (modelCallId);
+CREATE INDEX IF NOT EXISTS evaluation_runs_packet_idx ON evaluation_runs (packetId);
+CREATE INDEX IF NOT EXISTS evaluation_runs_profiles_idx ON evaluation_runs (harnessProfile, toolProfile, contextProfile);
+
+CREATE TABLE IF NOT EXISTS evaluation_run_participants (
+  runId TEXT NOT NULL,
+  ordinal INTEGER NOT NULL,
+  role TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  model TEXT NOT NULL,
+  modelVersion TEXT,
+  account TEXT,
+  effort TEXT,
+  PRIMARY KEY (runId, ordinal)
+);
+
+CREATE INDEX IF NOT EXISTS evaluation_run_participants_candidate_idx ON evaluation_run_participants (provider, model, modelVersion, account, effort);
+CREATE INDEX IF NOT EXISTS evaluation_run_participants_run_role_idx ON evaluation_run_participants (runId, role);
+
+CREATE TABLE IF NOT EXISTS evaluation_measurements (
+  id TEXT PRIMARY KEY,
+  runId TEXT NOT NULL,
+  metricDefinitionId TEXT,
+  metricKey TEXT NOT NULL,
+  value REAL NOT NULL,
+  unit TEXT NOT NULL,
+  direction TEXT NOT NULL,
+  statistic TEXT NOT NULL,
+  axisRole TEXT NOT NULL,
+  lowerConfidenceBound REAL,
+  upperConfidenceBound REAL,
+  confidenceLevel REAL,
+  sampleSize INTEGER,
+  costBasis TEXT,
+  derived INTEGER NOT NULL,
+  derivation TEXT,
+  notes TEXT
+);
+
+CREATE INDEX IF NOT EXISTS evaluation_measurements_run_metric_idx ON evaluation_measurements (runId, metricKey);
+CREATE INDEX IF NOT EXISTS evaluation_measurements_metricDefinition_run_idx ON evaluation_measurements (metricDefinitionId, runId);
+CREATE INDEX IF NOT EXISTS evaluation_measurements_metric_unit_direction_idx ON evaluation_measurements (metricKey, unit, direction);
+
+PRAGMA user_version = 6;
+`
+
+export const migration0007Sql = `
+CREATE TABLE agent_timeline_events (id TEXT PRIMARY KEY, ts INTEGER NOT NULL, sourceSessionId TEXT NOT NULL, sourceSeq INTEGER NOT NULL, agentId TEXT NOT NULL, agentSeq INTEGER NOT NULL, agentSessionId TEXT, parentSessionId TEXT, parentAgentId TEXT, taskId TEXT, packetId TEXT, branchId TEXT, turnId TEXT, kind TEXT NOT NULL, fromState TEXT, toState TEXT, routeResolutionId TEXT, reason TEXT, errorClass TEXT, detail TEXT NOT NULL, payloadVersion INTEGER NOT NULL);
+CREATE UNIQUE INDEX agent_timeline_source_unique_idx ON agent_timeline_events (sourceSessionId, sourceSeq);
+CREATE UNIQUE INDEX agent_timeline_agent_seq_unique_idx ON agent_timeline_events (agentId, agentSeq);
+CREATE INDEX agent_timeline_agent_ts_idx ON agent_timeline_events (agentId, ts);
+CREATE INDEX agent_timeline_parent_agent_seq_idx ON agent_timeline_events (parentAgentId, agentSeq);
+CREATE INDEX agent_timeline_task_idx ON agent_timeline_events (taskId);
+CREATE INDEX agent_timeline_packet_idx ON agent_timeline_events (packetId);
+CREATE INDEX agent_timeline_kind_ts_idx ON agent_timeline_events (kind, ts);
+CREATE INDEX agent_timeline_route_idx ON agent_timeline_events (routeResolutionId);
+CREATE TABLE route_resolutions (id TEXT PRIMARY KEY, ts INTEGER NOT NULL, sourceSessionId TEXT NOT NULL, sourceSeq INTEGER NOT NULL, agentId TEXT NOT NULL, agentSeq INTEGER NOT NULL, agentSessionId TEXT, parentSessionId TEXT, parentAgentId TEXT, taskId TEXT, packetId TEXT, branchId TEXT, turnId TEXT, changeKind TEXT NOT NULL, reason TEXT, lane TEXT NOT NULL, provider TEXT NOT NULL, upstreamProvider TEXT, model TEXT NOT NULL, accountKind TEXT NOT NULL, accountRef TEXT, accountProvenance TEXT NOT NULL, effort TEXT NOT NULL, winningLayer TEXT NOT NULL, constraints TEXT NOT NULL, consultedSources TEXT NOT NULL, overriddenValues TEXT NOT NULL, fallbackFromResolutionId TEXT, revertedFromResolutionId TEXT, advisorMode TEXT NOT NULL, rawDecisionArtifactId TEXT, payloadVersion INTEGER NOT NULL);
+CREATE UNIQUE INDEX route_resolutions_source_unique_idx ON route_resolutions (sourceSessionId, sourceSeq);
+CREATE UNIQUE INDEX route_resolutions_agent_seq_unique_idx ON route_resolutions (agentId, agentSeq);
+CREATE INDEX route_resolutions_agent_ts_idx ON route_resolutions (agentId, ts);
+CREATE INDEX route_resolutions_packet_ts_idx ON route_resolutions (packetId, ts);
+CREATE INDEX route_resolutions_lane_ts_idx ON route_resolutions (provider, model, accountRef, effort, ts);
+CREATE INDEX route_resolutions_change_kind_ts_idx ON route_resolutions (changeKind, ts);
+CREATE INDEX route_resolutions_fallback_from_idx ON route_resolutions (fallbackFromResolutionId);
+CREATE TABLE route_candidates (routeResolutionId TEXT NOT NULL, ordinal INTEGER NOT NULL, lane TEXT NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL, accountKind TEXT NOT NULL, accountRef TEXT, effort TEXT NOT NULL, disposition TEXT NOT NULL, fallbackOrdinal INTEGER, rejectionCode TEXT, rejectionReason TEXT, failedConstraintIds TEXT NOT NULL, PRIMARY KEY (routeResolutionId, ordinal));
+CREATE INDEX route_candidates_disposition_idx ON route_candidates (routeResolutionId, disposition, fallbackOrdinal);
+CREATE INDEX route_candidates_lane_idx ON route_candidates (provider, model, accountRef, effort);
+CREATE TABLE route_advisors (routeResolutionId TEXT NOT NULL, ordinal INTEGER NOT NULL, advisorAgentId TEXT, purpose TEXT NOT NULL, lane TEXT NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL, accountKind TEXT NOT NULL, accountRef TEXT, accountProvenance TEXT NOT NULL, effort TEXT NOT NULL, winningLayer TEXT NOT NULL, independenceRequired INTEGER NOT NULL, rawAdviceArtifactId TEXT, PRIMARY KEY (routeResolutionId, ordinal));
+CREATE INDEX route_advisors_agent_idx ON route_advisors (advisorAgentId);
+CREATE INDEX route_advisors_lane_idx ON route_advisors (provider, model, accountRef, effort);
+CREATE TABLE route_event_artifacts (ownerKind TEXT NOT NULL, ownerId TEXT NOT NULL, ordinal INTEGER NOT NULL, role TEXT NOT NULL, artifactId TEXT NOT NULL, PRIMARY KEY (ownerKind, ownerId, ordinal));
+CREATE INDEX route_event_artifacts_artifact_idx ON route_event_artifacts (artifactId);
+CREATE INDEX route_event_artifacts_owner_role_idx ON route_event_artifacts (ownerKind, ownerId, role);
+ALTER TABLE model_calls ADD COLUMN routeResolutionId TEXT;
+CREATE INDEX model_calls_route_resolution_idx ON model_calls (routeResolutionId);
+PRAGMA user_version = 7;
+`
+
 
 export function setDurabilityPragmas(sqlite: LedgerSqliteConnection): void {
   sqlite.exec("PRAGMA journal_mode = WAL")
@@ -360,5 +587,11 @@ export function migrateLedger(sqlite: LedgerSqliteConnection): void {
   }
   if (currentVersion < 5) {
     sqlite.exec(migration0005Sql)
+  }
+  if (currentVersion < 6) {
+    sqlite.exec(migration0006Sql)
+  }
+  if (currentVersion < 7) {
+    sqlite.exec(migration0007Sql)
   }
 }
