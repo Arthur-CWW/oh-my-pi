@@ -9,6 +9,7 @@ import { LedgerStore, openLedger } from "../src/ledger"
 const packageDir = join(import.meta.dir, "..")
 const tmpDir = join(import.meta.dir, ".tmp")
 const dbPath = join(tmpDir, "cli-fixture.sqlite")
+const statsDbPath = join(tmpDir, "cli-stats-fixture.sqlite")
 
 interface StatusJson {
   readonly sessionsByStatus: readonly { readonly status: string; readonly count: number }[]
@@ -36,9 +37,20 @@ interface ModelCallJson {
   readonly cost: number
   readonly latencyMs: number
   readonly outcome: string
+  readonly ttftMs: number | null
+  readonly reasoningTokens: number | null
   readonly contextManifest: string
   readonly rawRequestArtifact: string
   readonly rawResponseArtifact: string
+}
+
+interface StatsLaneJson {
+  readonly lane: string
+  readonly calls: number
+  readonly tokensOut: number
+  readonly tokensPerSecond: number | null
+  readonly avgTtftMs: number | null
+  readonly reasoningTokens: number
 }
 
 beforeAll(() => {
@@ -105,10 +117,47 @@ test("cli emits ledger JSON parity for status and model calls", async () => {
     cost: 0.023,
     latencyMs: 345,
     outcome: "ok",
+    ttftMs: 111,
+    reasoningTokens: 77,
   })
   expect(modelCalls[0]?.contextManifest).toBe(modelCalls[0]?.rawRequestArtifact)
   expect(modelCalls[0]?.rawRequestArtifact).toMatch(/^artifact_/)
   expect(modelCalls[0]?.rawResponseArtifact).toMatch(/^artifact_/)
+})
+
+test("cli stats output includes throughput columns", async () => {
+  await writeFixture(statsDbPath)
+
+  const jsonResult = Bun.spawnSync(["bun", "src/cli.ts", "stats", "lanes", "--json", "--db", statsDbPath], {
+    cwd: packageDir,
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  const jsonStdout = new TextDecoder().decode(jsonResult.stdout).trim()
+  expect(jsonResult.exitCode).toBe(0)
+
+  const lanes = JSON.parse(jsonStdout) as readonly StatsLaneJson[]
+  expect(lanes).toHaveLength(1)
+  expect(lanes[0]).toMatchObject({
+    lane: "openai/gpt-cli",
+    calls: 1,
+    tokensOut: 456,
+    tokensPerSecond: 1321.74,
+    avgTtftMs: 111,
+    reasoningTokens: 77,
+  })
+
+  const tableResult = Bun.spawnSync(["bun", "src/cli.ts", "stats", "lanes", "--db", statsDbPath], {
+    cwd: packageDir,
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  const tableStdout = new TextDecoder().decode(tableResult.stdout).trim()
+  expect(tableResult.exitCode).toBe(0)
+  expect(tableStdout).toContain("tokensPerSecond")
+  expect(tableStdout).toContain("avgTtftMs")
+  expect(tableStdout).toContain("reasoningTokens")
+  expect(tableStdout).toContain("1321.74")
 })
 
 async function writeFixture(path: string): Promise<void> {
@@ -171,6 +220,8 @@ async function writeFixture(path: string): Promise<void> {
       cacheWrite: 8,
       cost: 0.023,
       latencyMs: 345,
+      ttftMs: 111,
+      reasoningTokens: 77,
       outcome: "ok",
       rawRequestArtifact: rawRequest.id,
       rawResponseArtifact: rawResponse.id,

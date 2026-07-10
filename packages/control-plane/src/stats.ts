@@ -17,6 +17,9 @@ export interface UsageByLaneHourRow {
   readonly cost: number
   readonly avgLatencyMs: number
   readonly tokensPerMinute: number
+  readonly tokensPerSecond: number | null
+  readonly avgTtftMs: number | null
+  readonly reasoningTokens: number
 }
 
 export interface UsageByAgentRow {
@@ -31,6 +34,9 @@ export interface UsageByAgentRow {
   readonly firstTs: number
   readonly lastTs: number
   readonly tokensPerMinute: number
+  readonly tokensPerSecond: number | null
+  readonly avgTtftMs: number | null
+  readonly reasoningTokens: number
 }
 
 export interface UsageBySessionRow {
@@ -45,6 +51,9 @@ export interface UsageBySessionRow {
   readonly firstTs: number
   readonly lastTs: number
   readonly tokensPerMinute: number
+  readonly tokensPerSecond: number | null
+  readonly avgTtftMs: number | null
+  readonly reasoningTokens: number
 }
 
 export interface StatsFilters {
@@ -65,7 +74,10 @@ export function queryUsageByLaneHour(dbPath: string, filters: StatsFilters = {})
             SUM(cacheRead) AS cacheRead,
             SUM(cost) AS cost,
             CAST(ROUND(AVG(latencyMs)) AS INTEGER) AS avgLatencyMs,
-            ROUND((SUM(tokensIn) + SUM(tokensOut)) / 60.0, 2) AS tokensPerMinute
+            ROUND((SUM(tokensIn) + SUM(tokensOut)) / 60.0, 2) AS tokensPerMinute,
+            ROUND(SUM(tokensOut) / NULLIF(SUM(latencyMs) / 1000.0, 0), 2) AS tokensPerSecond,
+            CAST(ROUND(AVG(ttftMs)) AS INTEGER) AS avgTtftMs,
+            SUM(COALESCE(reasoningTokens, 0)) AS reasoningTokens
           FROM model_calls
           WHERE ts >= ?
           GROUP BY lane, hourBucket
@@ -98,7 +110,10 @@ export function queryUsageByAgent(dbPath: string, filters: StatsFilters = {}): E
             CASE
               WHEN MAX(ts) = MIN(ts) THEN 0.0
               ELSE ROUND((SUM(tokensIn) + SUM(tokensOut)) * 60000.0 / (MAX(ts) - MIN(ts)), 2)
-            END AS tokensPerMinute
+            END AS tokensPerMinute,
+            ROUND(SUM(tokensOut) / NULLIF(SUM(latencyMs) / 1000.0, 0), 2) AS tokensPerSecond,
+            CAST(ROUND(AVG(ttftMs)) AS INTEGER) AS avgTtftMs,
+            SUM(COALESCE(reasoningTokens, 0)) AS reasoningTokens
           FROM model_calls
           WHERE ts >= ?
           GROUP BY agent, lane
@@ -131,7 +146,10 @@ export function queryUsageBySession(dbPath: string, filters: StatsFilters = {}):
             CASE
               WHEN MAX(ts) = MIN(ts) THEN 0.0
               ELSE ROUND((SUM(tokensIn) + SUM(tokensOut)) * 60000.0 / (MAX(ts) - MIN(ts)), 2)
-            END AS tokensPerMinute
+            END AS tokensPerMinute,
+            ROUND(SUM(tokensOut) / NULLIF(SUM(latencyMs) / 1000.0, 0), 2) AS tokensPerSecond,
+            CAST(ROUND(AVG(ttftMs)) AS INTEGER) AS avgTtftMs,
+            SUM(COALESCE(reasoningTokens, 0)) AS reasoningTokens
           FROM model_calls
           WHERE ts >= ?
           GROUP BY session, lane

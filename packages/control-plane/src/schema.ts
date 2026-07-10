@@ -89,6 +89,8 @@ export const modelCalls = sqliteTable(
     cacheWrite: integer("cacheWrite").notNull(),
     cost: real("cost").notNull(),
     latencyMs: integer("latencyMs").notNull(),
+    ttftMs: integer("ttftMs"),
+    reasoningTokens: integer("reasoningTokens"),
     outcome: text("outcome").notNull(),
     errorClass: text("errorClass"),
     retryOf: text("retryOf"),

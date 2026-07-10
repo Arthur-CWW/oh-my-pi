@@ -939,7 +939,7 @@ function renderRoutingSeedTable(result: RoutingSeedResult): string {
 
 function renderStatsLanesTable(rows: readonly UsageByLaneHourRow[]): string {
   return renderTable(
-    ["lane", "hourBucket", "calls", "tokensIn", "tokensOut", "cacheRead", "cost", "avgLatencyMs", "tokensPerMinute"],
+    ["lane", "hourBucket", "calls", "tokensIn", "tokensOut", "cacheRead", "cost", "avgLatencyMs", "tokensPerMinute", "tokensPerSecond", "avgTtftMs", "reasoningTokens"],
     rows.map((row) => [
       row.lane,
       row.hourBucket,
@@ -950,13 +950,16 @@ function renderStatsLanesTable(rows: readonly UsageByLaneHourRow[]): string {
       row.cost,
       row.avgLatencyMs,
       row.tokensPerMinute,
+      row.tokensPerSecond,
+      row.avgTtftMs,
+      row.reasoningTokens,
     ]),
   )
 }
 
 function renderStatsAgentsTable(rows: readonly UsageByAgentRow[]): string {
   return renderTable(
-    ["agent", "lane", "calls", "tokensIn", "tokensOut", "cacheRead", "cost", "avgLatencyMs", "firstTs", "lastTs", "tokensPerMinute"],
+    ["agent", "lane", "calls", "tokensIn", "tokensOut", "cacheRead", "cost", "avgLatencyMs", "firstTs", "lastTs", "tokensPerMinute", "tokensPerSecond", "avgTtftMs", "reasoningTokens"],
     rows.map((row) => [
       row.agent,
       row.lane,
@@ -969,13 +972,16 @@ function renderStatsAgentsTable(rows: readonly UsageByAgentRow[]): string {
       row.firstTs,
       row.lastTs,
       row.tokensPerMinute,
+      row.tokensPerSecond,
+      row.avgTtftMs,
+      row.reasoningTokens,
     ]),
   )
 }
 
 function renderStatsSessionsTable(rows: readonly UsageBySessionRow[]): string {
   return renderTable(
-    ["session", "lane", "calls", "tokensIn", "tokensOut", "cacheRead", "cost", "avgLatencyMs", "firstTs", "lastTs", "tokensPerMinute"],
+    ["session", "lane", "calls", "tokensIn", "tokensOut", "cacheRead", "cost", "avgLatencyMs", "firstTs", "lastTs", "tokensPerMinute", "tokensPerSecond", "avgTtftMs", "reasoningTokens"],
     rows.map((row) => [
       row.session,
       row.lane,
@@ -988,11 +994,14 @@ function renderStatsSessionsTable(rows: readonly UsageBySessionRow[]): string {
       row.firstTs,
       row.lastTs,
       row.tokensPerMinute,
+      row.tokensPerSecond,
+      row.avgTtftMs,
+      row.reasoningTokens,
     ]),
   )
 }
 
-type TableCell = string | number
+type TableCell = string | number | null
 
 function renderTable(headers: readonly string[], rows: readonly (readonly TableCell[])[]): string {
   const renderedRows = rows.map((row) => row.map((cell) => String(cell)))

@@ -94,6 +94,8 @@ export interface ModelCallInput {
   readonly cacheWrite: number
   readonly cost: number
   readonly latencyMs: number
+  readonly ttftMs?: number
+  readonly reasoningTokens?: number
   readonly outcome: string
   readonly errorClass?: string
   readonly retryOf?: string
@@ -389,6 +391,8 @@ function insertModelCall(db: LedgerDb, input: ModelCallInput): InsertResult {
     errorClass: input.errorClass ?? null,
     retryOf: input.retryOf ?? null,
     fallbackFrom: input.fallbackFrom ?? null,
+    ttftMs: input.ttftMs ?? null,
+    reasoningTokens: input.reasoningTokens ?? null,
   }).onConflictDoNothing().returning({ id: modelCalls.id }).all()
   return { inserted: result.length > 0 }
 }

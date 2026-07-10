@@ -122,6 +122,8 @@ const ModelCallPayloadSchema = Schema.Struct({
   // Live publisher emits a cost breakdown object; fixtures/spec use a number. Normalize to total.
   cost: Schema.Union([Schema.Number, Schema.Struct({ total: Schema.Number })]),
   latencyMs: Schema.Number,
+  ttftMs: OptionalNumber,
+  reasoningTokens: OptionalNumber,
   outcome: Schema.String,
   errorClass: OptionalString,
   retryOf: OptionalString,
@@ -407,6 +409,8 @@ function modelCallInput(envelope: OutboxEnvelope, payload: ModelCallPayload): Mo
     cacheWrite: payload.cacheWrite,
     cost: typeof payload.cost === "number" ? payload.cost : payload.cost.total,
     latencyMs: payload.latencyMs,
+    ttftMs: payload.ttftMs ?? undefined,
+    reasoningTokens: payload.reasoningTokens ?? undefined,
     outcome: payload.outcome,
     errorClass: payload.errorClass ?? undefined,
     retryOf: payload.retryOf ?? undefined,

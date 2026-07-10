@@ -45,7 +45,7 @@ test("fresh migration stores and filters assistant attribution fields", async ()
     expect(rows[0]?.upstreamProvider).toBe("anthropic")
   }).pipe(Effect.provide(openLedger(dbPath))))
 
-  expect(readUserVersion(dbPath)).toBe(4)
+  expect(readUserVersion(dbPath)).toBe(5)
 })
 
 test("v1 ledger upgrades model call attribution columns in place", async () => {
@@ -80,7 +80,7 @@ test("v1 ledger upgrades model call attribution columns in place", async () => {
     expect(rows[0]?.upstreamProvider).toBeNull()
   }).pipe(Effect.provide(openLedger(dbPath))))
 
-  expect(readUserVersion(dbPath)).toBe(4)
+  expect(readUserVersion(dbPath)).toBe(5)
 })
 
 test("ingest preserves nullable model call attribution payload fields", async () => {

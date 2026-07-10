@@ -5,7 +5,7 @@ import { Database } from "bun:sqlite"
 import { afterAll, beforeAll, expect, test } from "bun:test"
 import { Effect } from "effect"
 
-import { LEDGER_SCHEMA_VERSION, migrateLedger, setDurabilityPragmas } from "../src/migrate"
+import { LEDGER_SCHEMA_VERSION, migrateLedger, migration0001Sql, migration0002Sql, migration0003Sql, migration0004Sql, setDurabilityPragmas } from "../src/migrate"
 import { queryUsageByAgent, queryUsageByLaneHour, queryUsageBySession } from "../src/stats"
 
 const tmpDir = join(import.meta.dir, ".tmp", "stats")
@@ -24,21 +24,21 @@ beforeAll(() => {
       INSERT INTO model_calls (
         id, ts, machine, session, branchId, agent, model, provider, effort,
         promptHash, systemPromptHash, skillProfile, contextManifest, packetId,
-        tokensIn, tokensOut, cacheRead, cacheWrite, cost, latencyMs, outcome,
+        tokensIn, tokensOut, cacheRead, cacheWrite, cost, latencyMs, ttftMs, reasoningTokens, outcome,
         rawRequestArtifact, rawResponseArtifact
       ) VALUES (
         ?, ?, 'm1', ?, 'branch-1', ?, ?, ?, 'medium',
         'ph', 'sph', 'sk', 'ctx', 'pkt',
-        ?, ?, ?, 0, ?, ?, 'ok',
+        ?, ?, ?, 0, ?, ?, ?, ?, 'ok',
         'rr', 'rr'
       )
     `)
 
-    //                 id               ts        session  agent    model          provider    tokensIn tokensOut cacheRead cost  latencyMs
-    insert.run("mc-1", 60_000,   "s1", "Main", "claude-opus-4", "anthropic", 600, 300, 400, 0.10, 500)
-    insert.run("mc-2", 120_000,  "s1", "Main", "claude-opus-4", "anthropic", 400, 200, 300, 0.08, 400)
-    insert.run("mc-3", 180_000,  "s1", "Sub1", "gpt-4o",        "openai",    300, 150, 0,   0.05, 300)
-    insert.run("mc-4", 3_660_000,"s2", "Main", "claude-opus-4", "anthropic", 500, 250, 200, 0.12, 600)
+    //                 id               ts        session  agent    model          provider    tokensIn tokensOut cacheRead cost  latencyMs ttftMs reasoningTokens
+    insert.run("mc-1", 60_000,   "s1", "Main", "claude-opus-4", "anthropic", 600, 300, 400, 0.10, 500, 100, 30)
+    insert.run("mc-2", 120_000,  "s1", "Main", "claude-opus-4", "anthropic", 400, 200, 300, 0.08, 400, null, null)
+    insert.run("mc-3", 180_000,  "s1", "Sub1", "gpt-4o",        "openai",    300, 150, 0,   0.05, 300, 75, 5)
+    insert.run("mc-4", 3_660_000,"s2", "Main", "claude-opus-4", "anthropic", 500, 250, 200, 0.12, 600, 120, 15)
   } finally {
     sqlite.close()
   }
@@ -48,12 +48,12 @@ afterAll(() => {
   rmSync(tmpDir, { recursive: true, force: true })
 })
 
-test("migration version is 4", () => {
-  expect(LEDGER_SCHEMA_VERSION).toBe(4)
+test("migration version is 5", () => {
+  expect(LEDGER_SCHEMA_VERSION).toBe(5)
   const sqlite = new Database(dbPath)
   try {
     const version = sqlite.query<{ user_version: number }, []>("PRAGMA user_version").get()?.user_version ?? -1
-    expect(version).toBe(4)
+    expect(version).toBe(5)
   } finally {
     sqlite.close()
   }
@@ -88,6 +88,9 @@ test("usage_by_lane_hour aggregates correctly", async () => {
   expect(anthHour1.avgLatencyMs).toBe(600)
   // tokensPerMinute = (500 + 250) / 60.0 = 12.5
   expect(anthHour1.tokensPerMinute).toBeCloseTo(12.5, 5)
+  expect(anthHour1.tokensPerSecond).toBeCloseTo(416.67, 2)
+  expect(anthHour1.avgTtftMs).toBe(120)
+  expect(anthHour1.reasoningTokens).toBe(15)
 
   const anthHour0 = rows.find((r) => r.lane === "anthropic/claude-opus-4" && r.hourBucket === 0)!
   expect(anthHour0).toBeDefined()
@@ -99,6 +102,9 @@ test("usage_by_lane_hour aggregates correctly", async () => {
   expect(anthHour0.avgLatencyMs).toBe(450)
   // tokensPerMinute = (1000 + 500) / 60.0 = 25
   expect(anthHour0.tokensPerMinute).toBeCloseTo(25, 5)
+  expect(anthHour0.tokensPerSecond).toBeCloseTo(555.56, 2)
+  expect(anthHour0.avgTtftMs).toBe(100)
+  expect(anthHour0.reasoningTokens).toBe(30)
 
   const oaiHour0 = rows.find((r) => r.lane === "openai/gpt-4o" && r.hourBucket === 0)!
   expect(oaiHour0).toBeDefined()
@@ -107,6 +113,9 @@ test("usage_by_lane_hour aggregates correctly", async () => {
   expect(oaiHour0.tokensOut).toBe(150)
   // tokensPerMinute = (300 + 150) / 60.0 = 7.5
   expect(oaiHour0.tokensPerMinute).toBeCloseTo(7.5, 5)
+  expect(oaiHour0.tokensPerSecond).toBe(500)
+  expect(oaiHour0.avgTtftMs).toBe(75)
+  expect(oaiHour0.reasoningTokens).toBe(5)
 })
 
 test("usage_by_agent aggregates with tokensPerMinute over active span", async () => {
@@ -125,6 +134,9 @@ test("usage_by_agent aggregates with tokensPerMinute over active span", async ()
   // span = 3660000 - 60000 = 3600000 ms = 60 minutes
   // tokensPerMinute = (1500 + 750) * 60000 / 3600000 = 2250 * 60000 / 3600000 = 37.5
   expect(mainAnth.tokensPerMinute).toBeCloseTo(37.5, 5)
+  expect(mainAnth.tokensPerSecond).toBe(500)
+  expect(mainAnth.avgTtftMs).toBe(110)
+  expect(mainAnth.reasoningTokens).toBe(45)
 
   // Sub1 + openai/gpt-4o: single call => span=0 => tokensPerMinute=0
   const sub1Oai = rows.find((r) => r.agent === "Sub1" && r.lane === "openai/gpt-4o")!
@@ -152,6 +164,9 @@ test("usage_by_session newest first with correct aggregates", async () => {
   // span = 60000 ms = 1 minute
   // tokensPerMinute = (1000 + 500) * 60000 / 60000 = 1500
   expect(s1Anth.tokensPerMinute).toBeCloseTo(1500, 5)
+  expect(s1Anth.tokensPerSecond).toBeCloseTo(555.56, 2)
+  expect(s1Anth.avgTtftMs).toBe(100)
+  expect(s1Anth.reasoningTokens).toBe(30)
 
   // s1 + openai/gpt-4o: single call
   const s1Oai = rows.find((r) => r.session === "s1" && r.lane === "openai/gpt-4o")!
@@ -175,4 +190,41 @@ test("--since filter excludes earlier data", async () => {
   const sessionRows = await Effect.runPromise(queryUsageBySession(dbPath, { sinceTs: 3_600_000 }))
   expect(sessionRows.length).toBe(1)
   expect(sessionRows[0]!.session).toBe("s2")
+})
+
+test("v4 ledger upgrades throughput columns in place", () => {
+  const upgradePath = join(tmpDir, "upgrade-v4.sqlite")
+  const sqlite = new Database(upgradePath)
+  try {
+    sqlite.exec(migration0001Sql)
+    sqlite.exec(migration0002Sql)
+    sqlite.exec(migration0003Sql)
+    sqlite.exec(migration0004Sql)
+    sqlite.exec(`
+      INSERT INTO model_calls (
+        id, ts, machine, session, branchId, agent, model, provider, effort,
+        promptHash, systemPromptHash, skillProfile, contextManifest, packetId,
+        tokensIn, tokensOut, cacheRead, cacheWrite, cost, latencyMs, outcome,
+        rawRequestArtifact, rawResponseArtifact
+      ) VALUES (
+        'old-call', 1000, 'm1', 'old-session', 'branch-old', 'OldAgent', 'old-model', 'old-provider', 'medium',
+        'ph', 'sph', 'sk', 'ctx', 'pkt',
+        10, 20, 0, 0, 0.01, 250, 'ok',
+        'rr', 'rr'
+      )
+    `)
+    expect(sqlite.query<{ user_version: number }, []>("PRAGMA user_version").get()?.user_version).toBe(4)
+
+    migrateLedger(sqlite)
+
+    expect(sqlite.query<{ user_version: number }, []>("PRAGMA user_version").get()?.user_version).toBe(5)
+    const row = sqlite.query<{ ttftMs: number | null; reasoningTokens: number | null }, []>("SELECT ttftMs, reasoningTokens FROM model_calls WHERE id = 'old-call'").get()
+    expect(row).toEqual({ ttftMs: null, reasoningTokens: null })
+
+    const statsRow = sqlite.query<{ tokensPerSecond: number; avgTtftMs: number | null; reasoningTokens: number }, []>("SELECT tokensPerSecond, avgTtftMs, reasoningTokens FROM usage_by_session WHERE session = 'old-session'").get()
+    expect(statsRow).toEqual({ tokensPerSecond: 80, avgTtftMs: null, reasoningTokens: 0 })
+  } finally {
+    sqlite.close()
+  }
+
 })

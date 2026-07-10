@@ -102,6 +102,67 @@ test("outbox ingest is idempotent and resumes from a truncated tail", async () =
   }
 })
 
+test("ingest stores live model call throughput fields", async () => {
+  const liveDbPath = join(tmpDir, "ingest-live-shape.sqlite")
+  const liveOutboxPath = join(tmpDir, "live-shape-outbox.jsonl")
+
+  appendOutboxLine(liveOutboxPath, envelope(21, "modelCall", {
+    id: "live-shape-model-call",
+    machine: "m1",
+    session: sessionId,
+    sessionId,
+    branchId: rootBranchId,
+    agent: "omp",
+    api: "openai-codex-responses",
+    model: "gpt-5.5",
+    provider: "openai-codex",
+    attribution: "openai-codex/gpt-5.5",
+    effort: "unknown",
+    promptHash: "unknown",
+    systemPromptHash: "unknown",
+    skillProfile: "unknown",
+    contextManifest: "unknown",
+    packetId: "",
+    tokensIn: 20_070,
+    tokensOut: 189,
+    cacheRead: 0,
+    cacheWrite: 0,
+    totalTokens: 20_259,
+    reasoningTokens: 157,
+    premiumRequests: 0,
+    cost: {
+      input: 0.10035000000000001,
+      output: 0.0056700000000000006,
+      cacheRead: 0,
+      cacheWrite: 0,
+      total: 0.10602,
+    },
+    latencyMs: 5_876,
+    ttftMs: 1_968,
+    outcome: "ok",
+    errorClass: null,
+    stopReason: "toolUse",
+    rawRequestArtifact: "",
+    rawResponseArtifact: "",
+    rawRequestSupport: "captured",
+    rawRequest: { type: "response.create", model: "gpt-5.5" },
+  }))
+
+  await Effect.runPromise(Effect.gen(function* () {
+    const result = yield* ingestOutbox(liveOutboxPath)
+    // 2 = the model_call row + the materialized rawRequest artifact row.
+    expect(result).toEqual({ inserted: 2, ignored: 0, malformed: 0 })
+
+    const store = yield* LedgerStore
+    const rows = yield* store.listModelCalls({ session: sessionId })
+    expect(rows).toHaveLength(1)
+    expect(rows[0]?.id).toBe("live-shape-model-call")
+    expect(rows[0]?.cost).toBeCloseTo(0.10602, 5)
+    expect(rows[0]?.ttftMs).toBe(1_968)
+    expect(rows[0]?.reasoningTokens).toBe(157)
+  }).pipe(Effect.provide(openLedger(liveDbPath))))
+})
+
 function writeFixtureOutbox(): void {
   appendOutboxLine(outboxPath, envelope(1, "session", {
     machine: "m1",
