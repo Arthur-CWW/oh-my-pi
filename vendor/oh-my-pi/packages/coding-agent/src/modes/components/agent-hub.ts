@@ -184,6 +184,23 @@ const MODEL_ABBREVIATIONS: Record<string, string> = {
 	"google-antigravity/gemini-3.5-flash": "Gem3.5F",
 };
 
+/** Compact provider codes so the model id survives narrow lanes ("anthropic/claude-…" → "ant/claude-…"). */
+const PROVIDER_SHORT_NAMES: Record<string, string> = {
+	anthropic: "ant",
+	openai: "oai",
+	"openai-codex": "codex",
+	google: "goog",
+	"google-antigravity": "agrav",
+	deepseek: "ds",
+	"kimi-code": "kimi",
+	openrouter: "or",
+	mistral: "mis",
+};
+
+function shortProviderName(provider: string): string {
+	return PROVIDER_SHORT_NAMES[provider] ?? provider.slice(0, 3);
+}
+
 const HEADER_FULL_MODEL_WIDTH = 36;
 const MODEL_LANE_WIDTH = 18;
 
@@ -216,7 +233,9 @@ function abbreviateResolvedModel(parts: ResolvedModelParts): string {
 	const modelKey = parts.provider ? `${parts.provider}/${parts.id}` : parts.id;
 	const abbreviation = MODEL_ABBREVIATIONS[modelKey];
 	if (abbreviation) return abbreviation;
-	return parts.provider && !SUBSCRIPTION_MODEL_PROVIDERS.has(parts.provider) ? modelKey : parts.id;
+	return parts.provider && !SUBSCRIPTION_MODEL_PROVIDERS.has(parts.provider)
+		? `${shortProviderName(parts.provider)}/${parts.id}`
+		: parts.id;
 }
 
 function modelLane(resolvedModel: string, maxLabelWidth = MODEL_LANE_WIDTH): string {

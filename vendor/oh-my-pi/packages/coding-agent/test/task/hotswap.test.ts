@@ -57,6 +57,19 @@ const modelC = buildModel({
 	maxTokens: 100,
 });
 
+const fableModel = buildModel({
+	id: "claude-fable-5",
+	name: "Fable",
+	api: "openai-responses",
+	provider: "anthropic",
+	baseUrl: "https://api.anthropic.com/v1",
+	reasoning: true,
+	input: ["text"],
+	cost: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
+	contextWindow: 2000,
+	maxTokens: 100,
+});
+
 interface ModelRegistryStub {
 	getAvailable(): Model[];
 	getApiKey(model: Model): Promise<string | undefined>;
@@ -198,6 +211,18 @@ describe("hotswapAgentModel", () => {
 		expect(stub.notices[0]?.deliverAs).toBe("nextTurn");
 		expect(stub.notices[0]?.content).toContain("hot-swapped by Main: anthropic/model-a → openai/model-b");
 		expect(stub.notices[0]?.content).toContain("reason: testing");
+	});
+
+	it("refuses to hot-swap a subagent onto a blocked (fable) model", async () => {
+		const stub = makeSessionStub({ registry: makeRegistry([modelA, modelB, fableModel]) });
+		registerSub("GuardedSub", stub.session);
+
+		const result = await hotswapAgentModel({ agentId: "GuardedSub", model: "anthropic/claude-fable-5" });
+
+		expect(result.status).toBe("failed");
+		if (result.status === "failed") expect(result.error).toContain("not allowed for subagents");
+		expect(stub.setModelCalls).toHaveLength(0);
+		expect(stub.notices).toHaveLength(0);
 	});
 
 	it("queues while streaming, applies once on agent_end, and unsubscribes", async () => {

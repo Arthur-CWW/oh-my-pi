@@ -47,7 +47,7 @@ function pickDefaultAvailableModel(availableModels: Model<Api>[]): Model<Api> | 
 	return availableModels[0];
 }
 
-function isBlockedSubagentModel(model: Model<Api>): boolean {
+export function isBlockedSubagentModel(model: Model<Api>): boolean {
 	const selector = `${model.provider}/${model.id}`.toLowerCase();
 	return selector.includes("fable");
 }

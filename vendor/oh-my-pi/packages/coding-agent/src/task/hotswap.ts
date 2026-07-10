@@ -2,7 +2,7 @@ import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { Model } from "@oh-my-pi/pi-ai";
 import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
 import { logger, toError } from "@oh-my-pi/pi-utils";
-import { resolveModelOverride } from "../config/model-resolver";
+import { isBlockedSubagentModel, resolveModelOverride } from "../config/model-resolver";
 import type { Settings } from "../config/settings";
 import { AgentLifecycleManager } from "../registry/agent-lifecycle";
 import { AgentRegistry } from "../registry/agent-registry";
@@ -135,6 +135,12 @@ export function resolveRestorableSessionModel(
 	for (const candidate of candidates) {
 		const resolved = resolveModelOverride([candidate], modelRegistry, settings);
 		if (!resolved.model) continue;
+		if (isBlockedSubagentModel(resolved.model)) {
+			logger.warn("Skipping blocked restorable hotswap model", {
+				model: `${resolved.model.provider}/${resolved.model.id}`,
+			});
+			continue;
+		}
 		if (!modelRegistry.hasConfiguredAuth(resolved.model)) {
 			logger.warn("Skipping unauthenticated restorable hotswap model", {
 				model: `${resolved.model.provider}/${resolved.model.id}`,
@@ -175,6 +181,9 @@ export async function hotswapAgentModel(args: HotswapArgs): Promise<HotswapResul
 	try {
 		const resolved = resolveModelOverride([args.model], session.modelRegistry, session.settings);
 		if (!resolved.model) return failed(args.agentId, `Could not resolve model selector: ${args.model}`);
+		if (isBlockedSubagentModel(resolved.model)) {
+			return failed(args.agentId, `Model ${formatModel(resolved.model)} is not allowed for subagents.`);
+		}
 		const to = formatModel(resolved.model);
 		const key = await session.modelRegistry.getApiKey(resolved.model);
 		if (!key) return failed(args.agentId, `Missing credentials for ${to}`);
