@@ -12,15 +12,15 @@ modelRoles:
   # Kimi is NOT a default worker (subscription likely cancelled): keep it only
   # for refusal-basin feedstock retrieval (books/resources GPT declines) via
   # research/authenticated_web, with GPT fallback chains covering outages.
-  smol: openai-codex/gpt-5.5:medium
-  task: openai-codex/gpt-5.5:medium
-  implementer: openai-codex/gpt-5.5:high
-  maintenance: openai-codex/gpt-5.5:medium
+  # smol: openai-codex/gpt-5.6-terra:medium
+  # task: openai-codex/gpt-5.6-terra:medium
+  implementer: openai-codex/gpt-5.6-terra:medium
+  maintenance: openai-codex/gpt-5.6-terra:medium
   research: kimi-code/kimi-for-coding
   authenticated_web: kimi-code/kimi-for-coding
-  complex: openai-codex/gpt-5.5:high
-  plan: openai-codex/gpt-5.5:high
-  slow: openai-codex/gpt-5.5:high
+  complex: openai-codex/gpt-5.6-terra:medium
+  # plan: openai-codex/gpt-5.6-terra:medium
+  # slow: openai-codex/gpt-5.6-terra:medium
   designer: anthropic/claude-opus-4-6
   # Cheap vision for inspect_image (Arthur, 2026-07-03): image inspection was
   # silently routed to the session model (Fable) — pi/vision wins the
@@ -51,11 +51,12 @@ retry:
     slow:
       - kimi-code/kimi-for-coding
     research:
-      - openai-codex/gpt-5.5:medium
+      - openai-codex/gpt-5.6-terra:medium
     authenticated_web:
-      - openai-codex/gpt-5.5:medium
+      - openai-codex/gpt-5.6-terra:medium
     designer:
-      - openai-codex/gpt-5.5:high
+      - kimi-code/kimi-for-coding
+      - openai-codex/gpt-5.6-terra:medium
     vision:
       - kimi-code/kimi-for-coding
 
