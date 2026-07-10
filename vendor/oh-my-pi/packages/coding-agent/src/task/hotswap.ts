@@ -135,7 +135,7 @@ export function resolveRestorableSessionModel(
 	for (const candidate of candidates) {
 		const resolved = resolveModelOverride([candidate], modelRegistry, settings);
 		if (!resolved.model) continue;
-		if (isBlockedSubagentModel(resolved.model)) {
+		if (isBlockedSubagentModel(resolved.model, settings)) {
 			logger.warn("Skipping blocked restorable hotswap model", {
 				model: `${resolved.model.provider}/${resolved.model.id}`,
 			});
@@ -181,7 +181,7 @@ export async function hotswapAgentModel(args: HotswapArgs): Promise<HotswapResul
 	try {
 		const resolved = resolveModelOverride([args.model], session.modelRegistry, session.settings);
 		if (!resolved.model) return failed(args.agentId, `Could not resolve model selector: ${args.model}`);
-		if (isBlockedSubagentModel(resolved.model)) {
+		if (isBlockedSubagentModel(resolved.model, session.settings)) {
 			return failed(args.agentId, `Model ${formatModel(resolved.model)} is not allowed for subagents.`);
 		}
 		const to = formatModel(resolved.model);

@@ -1936,6 +1936,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 				thinkingLevel: resolvedThinkingLevel,
 				explicitThinkingLevel,
 				authFallbackUsed,
+				blocked,
 			} = await awaitAbortable(
 				resolveModelOverrideWithAuthFallback(
 					modelPatterns,
@@ -1944,6 +1945,11 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 					settings,
 				),
 			);
+			if (blocked) {
+				throw new Error(
+					"Subagent model resolution blocked: requested/inherited model is not allowed for subagents and no fallback role is configured — set modelRoles.task",
+				);
+			}
 			if (authFallbackUsed && model) {
 				logger.warn("Subagent model has no working credentials; falling back to parent session model", {
 					requested: modelPatterns,

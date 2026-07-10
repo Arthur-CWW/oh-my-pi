@@ -1139,11 +1139,13 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 		}
 
 		const outputLines = textContent.split("\n");
-		const maxOutputLines = this.#expanded ? 12 : 4;
+		const maxOutputLines = this.#expanded ? outputLines.length : 4;
 		const displayLines = outputLines.slice(0, maxOutputLines);
 
 		for (const line of displayLines) {
-			lines.push(theme.fg("toolOutput", truncateToWidth(replaceTabs(line), 80)));
+			// Expanded is an explicit user request for the full output: no width clamp
+			// (wide diagrams/tables would be silently maimed at 80 cols).
+			lines.push(theme.fg("toolOutput", this.#expanded ? replaceTabs(line) : truncateToWidth(replaceTabs(line), 80)));
 		}
 
 		if (outputLines.length > maxOutputLines) {

@@ -47,9 +47,36 @@ function pickDefaultAvailableModel(availableModels: Model<Api>[]): Model<Api> | 
 	return availableModels[0];
 }
 
-export function isBlockedSubagentModel(model: Model<Api>): boolean {
+/** Match a glob pattern (only `*` wildcards) against a string, case-insensitive. */
+function matchesGlobPattern(text: string, pattern: string): boolean {
+	const lower = text.toLowerCase();
+	const parts = pattern.toLowerCase().split("*");
+	if (parts.length === 1) return lower === parts[0];
+	let pos = 0;
+	for (let i = 0; i < parts.length; i++) {
+		const part = parts[i];
+		if (part.length === 0) continue;
+		const idx = lower.indexOf(part, pos);
+		if (idx === -1) return false;
+		if (i === 0 && idx !== 0) return false;
+		pos = idx + part.length;
+	}
+	if (parts[parts.length - 1] !== "" && pos !== lower.length) return false;
+	return true;
+}
+
+export function isBlockedSubagentModel(model: Model<Api>, settings?: Settings): boolean {
 	const selector = `${model.provider}/${model.id}`.toLowerCase();
-	return selector.includes("fable");
+	// Hard built-in floor: fable is always blocked regardless of settings
+	if (selector.includes("fable")) return true;
+	// Config-driven patterns from task.orchestratorOnlyModels
+	if (settings) {
+		const patterns = settings.get("task.orchestratorOnlyModels");
+		for (const pattern of patterns) {
+			if (matchesGlobPattern(selector, pattern)) return true;
+		}
+	}
+	return false;
 }
 
 export interface ScopedModel {
@@ -965,9 +992,45 @@ export async function resolveModelOverrideWithAuthFallback(
 	thinkingLevel?: ThinkingLevel;
 	explicitThinkingLevel: boolean;
 	authFallbackUsed: boolean;
+	blocked: boolean;
 }> {
 	const primary = resolveModelOverride(modelPatterns, modelRegistry, settings);
-	if (primary.model && isBlockedSubagentModel(primary.model)) {
+
+	// Leak A fix: when modelPatterns is empty (or resolves to no model) and
+	// parentActiveModelPattern is set, resolve the parent pattern and run it
+	// through the blocked-model guard. Without this, the undefined primary
+	// would skip the guard and downstream session creation would silently
+	// inherit the parent model — which can be an orchestrator-only model.
+	if (!primary.model && parentActiveModelPattern) {
+		const parentResolved = resolveModelOverride([parentActiveModelPattern], modelRegistry, settings);
+		if (parentResolved.model && !isBlockedSubagentModel(parentResolved.model, settings)) {
+			return { ...parentResolved, authFallbackUsed: false, blocked: false };
+		}
+		if (parentResolved.model && isBlockedSubagentModel(parentResolved.model, settings)) {
+			const fallbackPatterns = ["pi/task", "pi/smol", "pi/slow"];
+			for (const fallbackPattern of fallbackPatterns) {
+				const fallback = resolveModelOverride([fallbackPattern], modelRegistry, settings);
+				if (!fallback.model || isBlockedSubagentModel(fallback.model, settings)) continue;
+				const fallbackKey = await modelRegistry.getApiKey(fallback.model);
+				if (fallbackKey === kNoAuth || isAuthenticated(fallbackKey)) {
+					logger.warn("Blocked orchestrator-only parent model for subagent; falling back", {
+						parentPattern: parentActiveModelPattern,
+						fallbackPattern,
+						resolvedProvider: fallback.model.provider,
+						resolvedModel: fallback.model.id,
+					});
+					return { ...fallback, authFallbackUsed: true, blocked: false };
+				}
+			}
+			logger.warn("Blocked orchestrator-only parent model for subagent; no fallback available", {
+				parentPattern: parentActiveModelPattern,
+			});
+			return { model: undefined, thinkingLevel: undefined, explicitThinkingLevel: false, authFallbackUsed: false, blocked: true };
+		}
+		return { ...primary, authFallbackUsed: false, blocked: false };
+	}
+
+	if (primary.model && isBlockedSubagentModel(primary.model, settings)) {
 		const fallbackPatterns = [
 			...(parentActiveModelPattern ? [parentActiveModelPattern] : []),
 			"pi/task",
@@ -977,45 +1040,46 @@ export async function resolveModelOverrideWithAuthFallback(
 
 		for (const fallbackPattern of fallbackPatterns) {
 			const fallback = resolveModelOverride([fallbackPattern], modelRegistry, settings);
-			if (!fallback.model || isBlockedSubagentModel(fallback.model)) continue;
+			if (!fallback.model || isBlockedSubagentModel(fallback.model, settings)) continue;
 			const fallbackKey = await modelRegistry.getApiKey(fallback.model);
 			if (fallbackKey === kNoAuth || isAuthenticated(fallbackKey)) {
-				logger.warn("Blocked Fable subagent model; falling back to a non-Fable model", {
+				logger.warn("Blocked orchestrator-only subagent model; falling back to a non-blocked model", {
 					requested: modelPatterns,
 					fallbackPattern,
 					resolvedProvider: fallback.model.provider,
 					resolvedModel: fallback.model.id,
 				});
-				return { ...fallback, authFallbackUsed: true };
+				return { ...fallback, authFallbackUsed: true, blocked: false };
 			}
 		}
 
-		logger.warn("Blocked Fable subagent model; no non-Fable fallback was available", { requested: modelPatterns });
-		return { model: undefined, thinkingLevel: undefined, explicitThinkingLevel: false, authFallbackUsed: false };
+		// Leak B fix: signal blocked explicitly instead of returning ambiguous undefined
+		logger.warn("Blocked orchestrator-only subagent model; no fallback was available", { requested: modelPatterns });
+		return { model: undefined, thinkingLevel: undefined, explicitThinkingLevel: false, authFallbackUsed: false, blocked: true };
 	}
 
 	if (!primary.model || !parentActiveModelPattern) {
-		return { ...primary, authFallbackUsed: false };
+		return { ...primary, authFallbackUsed: false, blocked: false };
 	}
 
 	const primaryKey = await modelRegistry.getApiKey(primary.model);
 	if (primaryKey === kNoAuth || isAuthenticated(primaryKey)) {
-		return { ...primary, authFallbackUsed: false };
+		return { ...primary, authFallbackUsed: false, blocked: false };
 	}
 
 	const fallback = resolveModelOverride([parentActiveModelPattern], modelRegistry, settings);
 	if (!fallback.model) {
-		return { ...primary, authFallbackUsed: false };
+		return { ...primary, authFallbackUsed: false, blocked: false };
 	}
-	if (modelsAreEqual(fallback.model, primary.model) || isBlockedSubagentModel(fallback.model)) {
-		return { ...primary, authFallbackUsed: false };
+	if (modelsAreEqual(fallback.model, primary.model) || isBlockedSubagentModel(fallback.model, settings)) {
+		return { ...primary, authFallbackUsed: false, blocked: false };
 	}
 	const fallbackKey = await modelRegistry.getApiKey(fallback.model);
 	if (fallbackKey !== kNoAuth && !isAuthenticated(fallbackKey)) {
-		return { ...primary, authFallbackUsed: false };
+		return { ...primary, authFallbackUsed: false, blocked: false };
 	}
 
-	return { ...fallback, authFallbackUsed: true };
+	return { ...fallback, authFallbackUsed: true, blocked: false };
 }
 
 /**

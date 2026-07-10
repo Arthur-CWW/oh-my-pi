@@ -691,6 +691,200 @@ describe("resolveModelOverrideWithAuthFallback", () => {
 		expect(result.model?.id).toBe("moonshotai/kimi-k2");
 		expect(result.authFallbackUsed).toBe(true);
 	});
+
+	test("empty patterns + fable parent + configured pi/task role resolves the task role", async () => {
+		const fable = buildModel({
+			id: "claude-fable-1",
+			name: "Claude Fable",
+			api: "anthropic-messages",
+			provider: "anthropic",
+			baseUrl: "https://api.anthropic.com",
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 15, output: 75, cacheRead: 1.5, cacheWrite: 18.75 },
+			contextWindow: 200000,
+			maxTokens: 8192,
+		});
+		const worker = buildModel({
+			id: "moonshotai/kimi-k2",
+			name: "Kimi K2",
+			api: "anthropic-messages",
+			provider: "openrouter",
+			baseUrl: "https://openrouter.ai/api/v1",
+			reasoning: false,
+			input: ["text"],
+			cost: { input: 0.15, output: 0.6, cacheRead: 0.015, cacheWrite: 0.15 },
+			contextWindow: 128000,
+			maxTokens: 4096,
+		});
+		const settings = Settings.isolated();
+		settings.setModelRole("task", "openrouter/moonshotai/kimi-k2");
+		const registry = {
+			getAvailable: () => [fable, worker],
+			getApiKey: async () => "test-key",
+		} as Parameters<typeof resolveModelOverrideWithAuthFallback>[2];
+
+		const result = await resolveModelOverrideWithAuthFallback(
+			[],
+			"anthropic/claude-fable-1",
+			registry,
+			settings,
+		);
+
+		expect(result.model?.id).toBe("moonshotai/kimi-k2");
+		expect(result.blocked).toBe(false);
+		expect(result.model?.id).not.toContain("fable");
+	});
+
+	test("empty patterns + fable parent + no roles returns blocked marker", async () => {
+		const fable = buildModel({
+			id: "claude-fable-1",
+			name: "Claude Fable",
+			api: "anthropic-messages",
+			provider: "anthropic",
+			baseUrl: "https://api.anthropic.com",
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 15, output: 75, cacheRead: 1.5, cacheWrite: 18.75 },
+			contextWindow: 200000,
+			maxTokens: 8192,
+		});
+		const settings = Settings.isolated();
+		// No roles configured — all fallback patterns resolve to fable or nothing
+		const registry = {
+			getAvailable: () => [fable],
+			getApiKey: async () => "test-key",
+		} as Parameters<typeof resolveModelOverrideWithAuthFallback>[2];
+
+		const result = await resolveModelOverrideWithAuthFallback(
+			[],
+			"anthropic/claude-fable-1",
+			registry,
+			settings,
+		);
+
+		expect(result.model).toBeUndefined();
+		expect(result.blocked).toBe(true);
+	});
+
+	test("empty patterns + non-fable parent returns parent model unchanged", async () => {
+		const sonnet = buildModel({
+			id: "claude-sonnet-4-5",
+			name: "Claude Sonnet 4.5",
+			api: "anthropic-messages",
+			provider: "anthropic",
+			baseUrl: "https://api.anthropic.com",
+			reasoning: false,
+			input: ["text"],
+			cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
+			contextWindow: 200000,
+			maxTokens: 8192,
+		});
+		const registry = {
+			getAvailable: () => [sonnet],
+			getApiKey: async () => "test-key",
+		} as Parameters<typeof resolveModelOverrideWithAuthFallback>[2];
+
+		const result = await resolveModelOverrideWithAuthFallback(
+			[],
+			"anthropic/claude-sonnet-4-5",
+			registry,
+		);
+
+		expect(result.model?.id).toBe("claude-sonnet-4-5");
+		expect(result.blocked).toBe(false);
+		expect(result.authFallbackUsed).toBe(false);
+	});
+
+	test("non-fable model blocked via orchestratorOnlyModels setting triggers fallback", async () => {
+		const ultra = buildModel({
+			id: "gpt-5.6-ultra",
+			name: "GPT 5.6 Ultra",
+			api: "openai-completions",
+			provider: "openai",
+			baseUrl: "https://api.openai.com",
+			reasoning: false,
+			input: ["text"],
+			cost: { input: 10, output: 50, cacheRead: 1, cacheWrite: 10 },
+			contextWindow: 200000,
+			maxTokens: 8192,
+		});
+		const worker = buildModel({
+			id: "moonshotai/kimi-k2",
+			name: "Kimi K2",
+			api: "anthropic-messages",
+			provider: "openrouter",
+			baseUrl: "https://openrouter.ai/api/v1",
+			reasoning: false,
+			input: ["text"],
+			cost: { input: 0.15, output: 0.6, cacheRead: 0.015, cacheWrite: 0.15 },
+			contextWindow: 128000,
+			maxTokens: 4096,
+		});
+		const settings = Settings.isolated();
+		settings.set("task.orchestratorOnlyModels", ["*fable*", "openai/gpt-5.6-ultra"]);
+		settings.setModelRole("task", "openrouter/moonshotai/kimi-k2");
+		const registry = {
+			getAvailable: () => [ultra, worker],
+			getApiKey: async () => "test-key",
+		} as Parameters<typeof resolveModelOverrideWithAuthFallback>[2];
+
+		const result = await resolveModelOverrideWithAuthFallback(
+			["openai/gpt-5.6-ultra"],
+			undefined,
+			registry,
+			settings,
+		);
+
+		expect(result.model?.id).toBe("moonshotai/kimi-k2");
+		expect(result.authFallbackUsed).toBe(true);
+		expect(result.blocked).toBe(false);
+	});
+
+	test("non-fable model blocked via setting with empty patterns inherits fallback", async () => {
+		const ultra = buildModel({
+			id: "gpt-5.6-ultra",
+			name: "GPT 5.6 Ultra",
+			api: "openai-completions",
+			provider: "openai",
+			baseUrl: "https://api.openai.com",
+			reasoning: false,
+			input: ["text"],
+			cost: { input: 10, output: 50, cacheRead: 1, cacheWrite: 10 },
+			contextWindow: 200000,
+			maxTokens: 8192,
+		});
+		const worker = buildModel({
+			id: "moonshotai/kimi-k2",
+			name: "Kimi K2",
+			api: "anthropic-messages",
+			provider: "openrouter",
+			baseUrl: "https://openrouter.ai/api/v1",
+			reasoning: false,
+			input: ["text"],
+			cost: { input: 0.15, output: 0.6, cacheRead: 0.015, cacheWrite: 0.15 },
+			contextWindow: 128000,
+			maxTokens: 4096,
+		});
+		const settings = Settings.isolated();
+		settings.set("task.orchestratorOnlyModels", ["*fable*", "openai/gpt-5.6-ultra"]);
+		settings.setModelRole("task", "openrouter/moonshotai/kimi-k2");
+		const registry = {
+			getAvailable: () => [ultra, worker],
+			getApiKey: async () => "test-key",
+		} as Parameters<typeof resolveModelOverrideWithAuthFallback>[2];
+
+		const result = await resolveModelOverrideWithAuthFallback(
+			[],
+			"openai/gpt-5.6-ultra",
+			registry,
+			settings,
+		);
+
+		expect(result.model?.id).toBe("moonshotai/kimi-k2");
+		expect(result.blocked).toBe(false);
+		expect(result.authFallbackUsed).toBe(true);
+	});
 });
 describe("resolveCliModel", () => {
 	test("resolves exact canonical ids to the preferred concrete provider", () => {

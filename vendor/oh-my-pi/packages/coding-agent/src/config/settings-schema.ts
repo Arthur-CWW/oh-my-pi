@@ -274,6 +274,7 @@ const EMPTY_STRING_RECORD: Record<string, string> = {};
 const DEFAULT_CYCLE_ORDER: string[] = ["smol", "default", "slow"];
 const EMPTY_MODEL_TAGS_RECORD: ModelTagsSettings = {};
 const HINDSIGHT_RECALL_TYPES_DEFAULT: string[] = ["world", "experience"];
+const DEFAULT_ORCHESTRATOR_ONLY_MODELS: string[] = ["*fable*"];
 export const DEFAULT_BASH_INTERCEPTOR_RULES: BashInterceptorRule[] = [
 	{
 		pattern: "^\\s*(cat|head|tail|less|more)\\s+",
@@ -3754,6 +3755,18 @@ export const SETTINGS_SCHEMA = {
 	"task.agentModelOverrides": {
 		type: "record",
 		default: {} as Record<string, string>,
+	},
+
+	"task.orchestratorOnlyModels": {
+		type: "array",
+		default: DEFAULT_ORCHESTRATOR_ONLY_MODELS,
+		ui: {
+			tab: "tasks",
+			group: "Subagents",
+			label: "Orchestrator-Only Models",
+			description:
+				"Model selector patterns that are restricted to orchestrator sessions and blocked from subagent inheritance. Patterns are matched case-insensitively against provider/id; use * as a wildcard (e.g. *fable*). The built-in *fable* floor is always enforced regardless of this setting.",
+		},
 	},
 
 	"tasks.todoClearDelay": {

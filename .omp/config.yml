@@ -2,5 +2,18 @@ task:
   isolation:
     mode: apfs
   softRequestBudget: 80
+# Base worker roles (2026-07-07): guarantees the Fable-subagent guard always has
+# a non-Fable fallback — without these, sessions running Fable as main silently
+# spawned Fable subagents (guard exhaustion -> undefined -> pi/default = Fable).
+modelRoles:
+  task: openai-codex/gpt-5.5:medium
+  smol: google-antigravity/gemini-3.5-flash
+  slow: openai-codex/gpt-5.5:high
 providers:
   webSearch: kagi
+# Control-plane telemetry publisher (2026-07-07): every ~/agents session appends
+# model-call/turn/event rows to ~/.agent-control-plane/outbox/ (JSONL, durable-
+# source-first); ingest via `cd packages/control-plane && bun run cli ingest`.
+# Bundled dist entry — rebuild with `bun run build:extension` after src changes.
+extensions:
+  - ./packages/control-plane
