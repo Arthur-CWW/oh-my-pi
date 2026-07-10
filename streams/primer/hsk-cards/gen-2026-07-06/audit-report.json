@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-07-07T01:28:39.292Z",
+  "generatedAt": "2026-07-10T00:20:42.022Z",
   "inputDir": "/Users/arthur/agents/streams/primer/hsk-cards/gen-2026-07-06",
   "cedictDb": "/Users/arthur/agents/data/primer/cedict.sqlite",
   "knownWordCount": 4240,
@@ -7,130 +7,18 @@
     "files": 6,
     "entries": 360,
     "cards": 369,
-    "passed": 339,
-    "failed": 30,
-    "passRate": 0.9186991869918699
+    "passed": 369,
+    "failed": 0,
+    "passRate": 1
   },
   "histograms": {
     "unknownsPerCard": {
       "0": 338,
-      "1": 10,
-      "2": 15,
-      "3": 3,
-      "4": 2,
-      "5": 1
+      "1": 31
     },
-    "issues": {
-      "unknowns>1": 21,
-      "front-answer-leak": 13
-    }
+    "issues": {}
   },
-  "worstOffenders": [
-    {
-      "file": "hsk5-121-180.json",
-      "word": "锁",
-      "cardIndex": 0,
-      "unknownCount": 5,
-      "issues": [
-        "unknowns>1: 屏, 解, 屏, 屏, 解"
-      ],
-      "why": "unknowns>1: 屏, 解, 屏, 屏, 解"
-    },
-    {
-      "file": "hsk5-181-240.json",
-      "word": "厅",
-      "cardIndex": 0,
-      "unknownCount": 4,
-      "issues": [
-        "unknowns>1: 公, 客, 公, 公",
-        "front contains leading back answer: 厅"
-      ],
-      "why": "unknowns>1: 公, 客, 公, 公; front contains leading back answer: 厅"
-    },
-    {
-      "file": "hsk5-121-180.json",
-      "word": "拼",
-      "cardIndex": 0,
-      "unknownCount": 4,
-      "issues": [
-        "unknowns>1: 音, 命, 命, 命"
-      ],
-      "why": "unknowns>1: 音, 命, 命, 命"
-    },
-    {
-      "file": "hsk5-241-300.json",
-      "word": "鼠",
-      "cardIndex": 0,
-      "unknownCount": 3,
-      "issues": [
-        "unknowns>1: 标, 标, 标",
-        "front contains leading back answer: 鼠"
-      ],
-      "why": "unknowns>1: 标, 标, 标; front contains leading back answer: 鼠"
-    },
-    {
-      "file": "hsk5-181-240.json",
-      "word": "注册",
-      "cardIndex": 0,
-      "unknownCount": 3,
-      "issues": [
-        "unknowns>1: 账, 账, 账"
-      ],
-      "why": "unknowns>1: 账, 账, 账"
-    },
-    {
-      "file": "hsk5-181-240.json",
-      "word": "臭",
-      "cardIndex": 0,
-      "unknownCount": 3,
-      "issues": [
-        "unknowns>1: 嗅觉, 嗅, 觉"
-      ],
-      "why": "unknowns>1: 嗅觉, 嗅, 觉"
-    },
-    {
-      "file": "hsk5-121-180.json",
-      "word": "必",
-      "cardIndex": 0,
-      "unknownCount": 2,
-      "issues": [
-        "unknowns>1: 何, 何",
-        "front contains leading back answer: 必"
-      ],
-      "why": "unknowns>1: 何, 何; front contains leading back answer: 必"
-    },
-    {
-      "file": "hsk5-181-240.json",
-      "word": "旁",
-      "cardIndex": 0,
-      "unknownCount": 2,
-      "issues": [
-        "unknowns>1: 木, 木",
-        "front contains leading back answer: 旁"
-      ],
-      "why": "unknowns>1: 木, 木; front contains leading back answer: 旁"
-    },
-    {
-      "file": "hsk5-061-120.json",
-      "word": "人士",
-      "cardIndex": 0,
-      "unknownCount": 2,
-      "issues": [
-        "unknowns>1: 界, 界"
-      ],
-      "why": "unknowns>1: 界, 界"
-    },
-    {
-      "file": "hsk5-301-360.json",
-      "word": "分离",
-      "cardIndex": 0,
-      "unknownCount": 2,
-      "issues": [
-        "unknowns>1: 母, 母"
-      ],
-      "why": "unknowns>1: 母, 母"
-    }
-  ],
+  "worstOffenders": [],
   "cards": [
     {
       "file": "hsk5-001-060.json",
@@ -251,36 +139,25 @@
       "gloss": "to control",
       "cardIndex": 0,
       "type": "collocation",
-      "front": "Keep feelings from getting out of hand: ___ 情绪。",
-      "back": "控制情绪。Also common: 控制时间, 控制成本.",
+      "front": "Keep feelings in check — the verb for reining in 情绪 (qíngxù, emotions), 时间, or 成本: ___。",
+      "back": "控制。控制时间 and 控制成本 are also common。",
       "retrievalTarget": "Use 控制 with things kept within limits, especially 情绪/时间/成本.",
       "tier": "T2",
-      "passed": false,
-      "unknownCount": 2,
+      "passed": true,
+      "unknownCount": 1,
       "unknowns": [
         {
           "text": "情绪",
           "source": "front",
           "hanRun": "情绪",
-          "start": 44,
-          "end": 46,
-          "glossed": false,
-          "context": "f hand: ___ 情绪。"
-        },
-        {
-          "text": "情绪",
-          "source": "back",
-          "hanRun": "控制情绪",
-          "start": 2,
-          "end": 4,
+          "start": 49,
+          "end": 51,
           "glossed": true,
-          "context": "控制情绪。Also common"
+          "context": " reining in 情绪 (qíngxù, em"
         }
       ],
       "frontAnswerLeak": null,
-      "issues": [
-        "unknowns>1: 情绪, 情绪"
-      ]
+      "issues": []
     },
     {
       "file": "hsk5-001-060.json",
@@ -323,12 +200,12 @@
       "gloss": "to have; to possess",
       "cardIndex": 0,
       "type": "disambiguation",
-      "front": "Formal possession, stronger than 有: 他 ___ 三套房。",
-      "back": "拥有：他拥有三套房。Use it for assets, rights, resources, or qualities.",
+      "front": "Formal possession, stronger than 有: 他 ___ 三套房 (fáng, houses)。",
+      "back": "拥有 — formal possession of assets, rights, resources, or qualities。",
       "retrievalTarget": "Use 拥有 for formal possession of assets/resources/rights, not casual 有.",
       "tier": "T2",
-      "passed": false,
-      "unknownCount": 2,
+      "passed": true,
+      "unknownCount": 1,
       "unknowns": [
         {
           "text": "房",
@@ -336,23 +213,12 @@
           "hanRun": "三套房",
           "start": 44,
           "end": 45,
-          "glossed": false,
-          "context": " 有: 他 ___ 三套房。"
-        },
-        {
-          "text": "房",
-          "source": "back",
-          "hanRun": "他拥有三套房",
-          "start": 8,
-          "end": 9,
           "glossed": true,
-          "context": "拥有：他拥有三套房。Use it for "
+          "context": " 有: 他 ___ 三套房 (fáng, hous"
         }
       ],
       "frontAnswerLeak": null,
-      "issues": [
-        "unknowns>1: 房, 房"
-      ]
+      "issues": []
     },
     {
       "file": "hsk5-001-060.json",
@@ -1170,12 +1036,12 @@
       "gloss": "to shoot; launch; emit",
       "cardIndex": 0,
       "type": "collocation",
-      "front": "One character fits “shoot an arrow” and “launch”: ___箭 / 发___.",
-      "back": "射 — 射箭, 发射. Core image: something goes out from a point.",
+      "front": "One character fits “shoot an arrow” and “launch”: ___箭 (jiàn, arrow) / 发___。",
+      "back": "射。发射 = launch; core image: something goes out from a point。",
       "retrievalTarget": "Link 射 with shooting/launching outward.",
       "tier": "T2",
-      "passed": false,
-      "unknownCount": 2,
+      "passed": true,
+      "unknownCount": 1,
       "unknowns": [
         {
           "text": "箭",
@@ -1183,23 +1049,12 @@
           "hanRun": "箭",
           "start": 53,
           "end": 54,
-          "glossed": false,
-          "context": "launch”: ___箭 / 发___."
-        },
-        {
-          "text": "箭",
-          "source": "back",
-          "hanRun": "射箭",
-          "start": 5,
-          "end": 6,
-          "glossed": false,
-          "context": "射 — 射箭, 发射. Core i"
+          "glossed": true,
+          "context": "launch”: ___箭 (jiàn, arro"
         }
       ],
       "frontAnswerLeak": null,
-      "issues": [
-        "unknowns>1: 箭, 箭"
-      ]
+      "issues": []
     },
     {
       "file": "hsk5-061-120.json",
@@ -1327,20 +1182,15 @@
       "gloss": "to master; grasp; control/know well",
       "cardIndex": 0,
       "type": "disambiguation",
-      "front": "You can use a skill well, not just understand it. Which verb: 理解 or 掌握?",
-      "back": "掌握. 掌握中文/技术 means have command of it; 理解 can be only mental understanding.",
+      "front": "A skill you can actually use, not just 理解 (understand) — which verb?",
+      "back": "掌握。掌握中文/技术 = have command of it; 理解 can be only mental understanding。",
       "retrievalTarget": "Distinguish 掌握 as usable command/mastery from 理解.",
-      "tier": "T3",
-      "passed": false,
+      "tier": "T2",
+      "passed": true,
       "unknownCount": 0,
       "unknowns": [],
-      "frontAnswerLeak": {
-        "answer": "掌握",
-        "mode": "leadingAnswer"
-      },
-      "issues": [
-        "front contains leading back answer: 掌握"
-      ]
+      "frontAnswerLeak": null,
+      "issues": []
     },
     {
       "file": "hsk5-061-120.json",
@@ -1420,7 +1270,7 @@
       "front": "Set phrase “I got startled”: 我___了一跳。",
       "back": "我吓了一跳. To say something scared me: 吓了我一跳.",
       "retrievalTarget": "Produce 吓了一跳 / 吓了我一跳.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -1468,20 +1318,15 @@
       "gloss": "means; method; tactic",
       "cardIndex": 0,
       "type": "disambiguation",
-      "front": "A way used to reach a goal, sometimes not clean/fair: 方法 or 手段?",
-      "back": "手段. 方法 is a method; 手段 is means/tactic toward a goal and can sound negative.",
+      "front": "A way used to reach a goal, sometimes not clean or fair — 方法 (method) or which stronger word?",
+      "back": "手段。方法 is a neutral method; 手段 is means/tactic toward a goal and can sound negative。",
       "retrievalTarget": "Use 手段 for goal-directed means/tactics, often with a negative edge.",
-      "tier": "T3",
-      "passed": false,
+      "tier": "T2",
+      "passed": true,
       "unknownCount": 0,
       "unknowns": [],
-      "frontAnswerLeak": {
-        "answer": "手段",
-        "mode": "leadingAnswer"
-      },
-      "issues": [
-        "front contains leading back answer: 手段"
-      ]
+      "frontAnswerLeak": null,
+      "issues": []
     },
     {
       "file": "hsk5-061-120.json",
@@ -1490,22 +1335,13 @@
       "gloss": "means; method; tactic",
       "cardIndex": 1,
       "type": "collocation",
-      "front": "Idiom “use any means”: 不择___.",
-      "back": "不择手段. It usually criticizes someone for doing anything to get a result.",
+      "front": "Four-char idiom meaning “will use any means, unscrupulously,” built on the headword. Produce it:",
+      "back": "不择手段 (bù zé = not choosy about) — do anything to get a result。",
       "retrievalTarget": "Produce 不择手段.",
-      "tier": "T3",
-      "passed": false,
-      "unknownCount": 2,
+      "tier": "T2",
+      "passed": true,
+      "unknownCount": 1,
       "unknowns": [
-        {
-          "text": "择",
-          "source": "front",
-          "hanRun": "不择",
-          "start": 24,
-          "end": 25,
-          "glossed": true,
-          "context": "ny means”: 不择___."
-        },
         {
           "text": "择",
           "source": "back",
@@ -1513,13 +1349,11 @@
           "start": 1,
           "end": 2,
           "glossed": true,
-          "context": "不择手段. It usual"
+          "context": "不择手段 (bù zé = "
         }
       ],
       "frontAnswerLeak": null,
-      "issues": [
-        "unknowns>1: 择, 择"
-      ]
+      "issues": []
     },
     {
       "file": "hsk5-061-120.json",
@@ -1592,7 +1426,7 @@
       "front": "“他中文很厉害” and “我疼得厉害” share what idea: good only, or strong/intense?",
       "back": "Strong/intense. 厉害 can praise skill, or mean pain/rain is severe: 疼得厉害.",
       "retrievalTarget": "Recognize 厉害 as high intensity/formidability, positive or negative.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -1623,20 +1457,15 @@
       "gloss": "to respect; honor; value",
       "cardIndex": 0,
       "type": "disambiguation",
-      "front": "Respect someone’s choice/opinion, not just admire a teacher. Which verb: 尊敬 or 尊重?",
-      "back": "尊重. 尊重他的选择/意见; 尊敬老师. 尊重 means treat something as valid and not violate it.",
+      "front": "Treat someone’s choice or opinion as valid, not just admire a teacher — which verb (contrast 尊敬)?",
+      "back": "尊重。尊重他的选择/意见; 尊敬老师。尊重 = treat something as valid and not violate it。",
       "retrievalTarget": "Distinguish 尊重 for respecting choices/opinions from 尊敬 for esteem.",
-      "tier": "T3",
-      "passed": false,
+      "tier": "T2",
+      "passed": true,
       "unknownCount": 0,
       "unknowns": [],
-      "frontAnswerLeak": {
-        "answer": "尊重",
-        "mode": "leadingAnswer"
-      },
-      "issues": [
-        "front contains leading back answer: 尊重"
-      ]
+      "frontAnswerLeak": null,
+      "issues": []
     },
     {
       "file": "hsk5-061-120.json",
@@ -1682,7 +1511,7 @@
       "front": "Say “don’t fool yourself”: 别___自己。",
       "back": "别骗自己. A compact pattern for self-deception.",
       "retrievalTarget": "Produce 骗自己 for fool/deceive oneself.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -1733,7 +1562,7 @@
       "front": "吐 has two readings. Which reading for 吐字清楚, “say words clearly”: tǔ or tù?",
       "back": "tǔ — 吐字清楚. tǔ is spit/emit/articulate; tù is vomit.",
       "retrievalTarget": "Use tǔ for spit/emit/articulate, especially 吐字.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -1750,7 +1579,7 @@
       "front": "吐 has two readings. Which reading for “I feel like throwing up”: 我想吐?",
       "back": "tù — 我想吐. Vomiting/nausea uses tù; spit/emit/articulate uses tǔ.",
       "retrievalTarget": "Use tù for vomiting or feeling nauseated.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -1798,20 +1627,25 @@
       "gloss": "house; room (bound form)",
       "cardIndex": 0,
       "type": "collocation",
-      "front": "The bound word in 屋子, 屋里, 屋顶 is?",
-      "back": "屋. It often appears in compounds/locative phrases: 进屋, 屋里, 屋顶.",
+      "front": "Bound morpheme for “house/room” seen in “___子”, “___里”, “___顶” — what is it?",
+      "back": "屋。常见于 compounds/locatives: 进屋, 屋里, 屋顶。",
       "retrievalTarget": "Use 屋 mainly in compounds/locatives for house/room.",
       "tier": "T2",
-      "passed": false,
-      "unknownCount": 0,
-      "unknowns": [],
-      "frontAnswerLeak": {
-        "answer": "屋",
-        "mode": "leadingAnswer"
-      },
-      "issues": [
-        "front contains leading back answer: 屋"
-      ]
+      "passed": true,
+      "unknownCount": 1,
+      "unknowns": [
+        {
+          "text": "于",
+          "source": "back",
+          "hanRun": "常见于",
+          "start": 4,
+          "end": 5,
+          "glossed": true,
+          "context": "屋。常见于 compounds/l"
+        }
+      ],
+      "frontAnswerLeak": null,
+      "issues": []
     },
     {
       "file": "hsk5-061-120.json",
@@ -1871,20 +1705,15 @@
       "gloss": "what a pity; unfortunately",
       "cardIndex": 1,
       "type": "disambiguation",
-      "front": "可怜 vs 可惜: which one means “what a pity/unfortunately,” not “pitiful”?",
-      "back": "可惜. 可怜 describes someone/something pitiful; 可惜 comments on an unfortunate result.",
+      "front": "“What a pity / unfortunately” (a comment on a result), contrasted with 可怜 (pitiful) — which word?",
+      "back": "可惜。可怜 describes someone/something pitiful; 可惜 comments on an unfortunate result。",
       "retrievalTarget": "Distinguish 可惜 from 可怜.",
-      "tier": "T3",
-      "passed": false,
+      "tier": "T2",
+      "passed": true,
       "unknownCount": 0,
       "unknowns": [],
-      "frontAnswerLeak": {
-        "answer": "可惜",
-        "mode": "leadingAnswer"
-      },
-      "issues": [
-        "front contains leading back answer: 可惜"
-      ]
+      "frontAnswerLeak": null,
+      "issues": []
     },
     {
       "file": "hsk5-061-120.json",
@@ -1896,7 +1725,7 @@
       "front": "滚 can mean water boils/rolls, but said to a person “滚!” has what register?",
       "back": "Very rude: “Get lost!” Use 走开 or 请走开 if you do not want to be harsh.",
       "retrievalTarget": "Remember 滚 as a rude imperative toward people.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -1964,7 +1793,7 @@
       "front": "A bad result hurts someone emotionally: 他受到很大___. Which word also means “strike/attack”?",
       "back": "打击 — 他受到很大打击. It can mean physical/institutional strike or psychological blow.",
       "retrievalTarget": "Recognize 打击 as attack/crackdown and emotional blow.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -1998,7 +1827,7 @@
       "front": "You know this place well from being there often, but you have not “mastered” it. 熟悉 or 掌握?",
       "back": "熟悉 — 我对这里很熟悉. 掌握 is command/mastery; 熟悉 is familiarity.",
       "retrievalTarget": "Distinguish 熟悉 as familiarity from 掌握 as mastery.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -2117,7 +1946,7 @@
       "front": "欠钱 and 欠考虑: what two meanings of 欠 must you keep apart?",
       "back": "Owe and lack. 欠钱 = owe money; 欠考虑 = lacking thought/consideration.",
       "retrievalTarget": "Separate 欠 as owing from 欠 as lacking/insufficient.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -2148,36 +1977,25 @@
       "gloss": "personage; people from a field/circle",
       "cardIndex": 0,
       "type": "disambiguation",
-      "front": "Formal/news “people from all circles”: 各界___. Which word, not everyday 人?",
-      "back": "各界人士. 人士 is formal for people from a field/group/public role.",
+      "front": "Formal/news word for “people from all circles”: 各界 (gè jiè, all fields) ___。Not everyday 人。",
+      "back": "人士。人士 is formal for people from a field, group, or public role。",
       "retrievalTarget": "Use 人士 for formal public/professional people from a group.",
       "tier": "T2",
-      "passed": false,
-      "unknownCount": 2,
+      "passed": true,
+      "unknownCount": 1,
       "unknowns": [
         {
           "text": "界",
           "source": "front",
           "hanRun": "各界",
-          "start": 40,
-          "end": 41,
+          "start": 49,
+          "end": 50,
           "glossed": true,
-          "context": " circles”: 各界___. Which w"
-        },
-        {
-          "text": "界",
-          "source": "back",
-          "hanRun": "各界人士",
-          "start": 1,
-          "end": 2,
-          "glossed": false,
-          "context": "各界人士. 人士 is fo"
+          "context": " circles”: 各界 (gè jiè, al"
         }
       ],
       "frontAnswerLeak": null,
-      "issues": [
-        "unknowns>1: 界, 界"
-      ]
+      "issues": []
     },
     {
       "file": "hsk5-061-120.json",
@@ -2206,7 +2024,7 @@
       "front": "Formal endpoint: “up to today” = 到今天___.",
       "back": "到今天为止. 到…为止 marks the endpoint of a time/process.",
       "retrievalTarget": "Produce 到…为止 to mark an endpoint “up to/until.”",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -2274,7 +2092,7 @@
       "front": "After asking “what really happened?”, the thing you want to know is the ___, not just 真. ",
       "back": "真相 — 我想知道真相. 真相 means the actual facts behind an event.",
       "retrievalTarget": "Use 真相 for the actual facts behind an event.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -2342,7 +2160,7 @@
       "front": "Formal description: “This city has a long history.” 这座城市___很长的历史. Why not plain 有?",
       "back": "有着 — 这座城市有着很长的历史. 有着 emphasizes an enduring quality in written/descriptive style.",
       "retrievalTarget": "Use 有着 for formal enduring attributes, not simple ownership.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -2356,36 +2174,25 @@
       "gloss": "virus",
       "cardIndex": 0,
       "type": "production",
-      "front": "You get sick because of a virus: 我感染了___.",
-      "back": "病毒 — 我感染了病毒。病毒 can be biological or computer virus.",
+      "front": "You get sick from a virus: 我感染了 (gǎnrǎn = got infected) ___。",
+      "back": "病毒 — can be a biological or computer virus。",
       "retrievalTarget": "Produce 病毒 for biological/computer viruses.",
       "tier": "T2",
-      "passed": false,
-      "unknownCount": 2,
+      "passed": true,
+      "unknownCount": 1,
       "unknowns": [
         {
           "text": "感",
           "source": "front",
           "hanRun": "我感染了",
-          "start": 34,
-          "end": 35,
+          "start": 28,
+          "end": 29,
           "glossed": true,
-          "context": "f a virus: 我感染了___."
-        },
-        {
-          "text": "感",
-          "source": "back",
-          "hanRun": "我感染了病毒",
-          "start": 6,
-          "end": 7,
-          "glossed": false,
-          "context": "病毒 — 我感染了病毒。病毒 can "
+          "context": "m a virus: 我感染了 (gǎnrǎn ="
         }
       ],
       "frontAnswerLeak": null,
-      "issues": [
-        "unknowns>1: 感, 感"
-      ]
+      "issues": []
     },
     {
       "file": "hsk5-061-120.json",
@@ -2394,36 +2201,25 @@
       "gloss": "to sign; visa; tag/label",
       "cardIndex": 0,
       "type": "disambiguation",
-      "front": "Same character in sign a name, visa, and label: ___名 / ___证 / 标___.",
-      "back": "签 — 签名, 签证, 标签. Core idea: a written/attached mark.",
+      "front": "One character = sign a name / visa / and the tag in “label”: ___名 / ___证 / 标___。(biāo = mark)",
+      "back": "签 — signature (___名), visa (___证), tag. Core idea: a written or attached mark。",
       "retrievalTarget": "Connect 签 across signature, visa, and label/tag compounds.",
       "tier": "T2",
-      "passed": false,
-      "unknownCount": 2,
+      "passed": true,
+      "unknownCount": 1,
       "unknowns": [
         {
           "text": "标",
           "source": "front",
           "hanRun": "标",
-          "start": 62,
-          "end": 63,
-          "glossed": false,
-          "context": "_名 / ___证 / 标___."
-        },
-        {
-          "text": "标",
-          "source": "back",
-          "hanRun": "标签",
-          "start": 12,
-          "end": 13,
+          "start": 75,
+          "end": 76,
           "glossed": true,
-          "context": "签 — 签名, 签证, 标签. Core idea"
+          "context": "_名 / ___证 / 标___。(biāo = "
         }
       ],
       "frontAnswerLeak": null,
-      "issues": [
-        "unknowns>1: 标, 标"
-      ]
+      "issues": []
     },
     {
       "file": "hsk5-061-120.json",
@@ -2449,20 +2245,25 @@
       "gloss": "price; value",
       "cardIndex": 0,
       "type": "collocation",
-      "front": "The price/value character in 价格 and 价值 is?",
-      "back": "价. 价格 = price; 价值 = value/worth. 价 usually appears inside compounds.",
+      "front": "The price/value morpheme in “___格” (price) and “___值” (value) — which character?",
+      "back": "价。价格 = price; 价值 = value/worth; 价 usually appears inside compounds。",
       "retrievalTarget": "Recognize 价 as the price/value morpheme.",
       "tier": "T2",
-      "passed": false,
-      "unknownCount": 0,
-      "unknowns": [],
-      "frontAnswerLeak": {
-        "answer": "价",
-        "mode": "leadingAnswer"
-      },
-      "issues": [
-        "front contains leading back answer: 价"
-      ]
+      "passed": true,
+      "unknownCount": 1,
+      "unknowns": [
+        {
+          "text": "格",
+          "source": "front",
+          "hanRun": "格",
+          "start": 32,
+          "end": 33,
+          "glossed": true,
+          "context": "heme in “___格” (price) an"
+        }
+      ],
+      "frontAnswerLeak": null,
+      "issues": []
     },
     {
       "file": "hsk5-061-120.json",
@@ -2474,7 +2275,7 @@
       "front": "价格 vs 价值: which is market price, which is worth/value?",
       "back": "价格 = price; 价值 = value/worth.",
       "retrievalTarget": "Distinguish 价格 from 价值.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -2488,20 +2289,15 @@
       "gloss": "to try; attempt",
       "cardIndex": 0,
       "type": "disambiguation",
-      "front": "Try a new way to see if it works: 试 or 尝试? Which is more formal/intentional?",
-      "back": "尝试. 尝试新的方法 = make an intentional attempt with a new method; 试 is broader and simpler.",
+      "front": "Make an intentional attempt with a new method — the more formal word (vs plain 试)?",
+      "back": "尝试。尝试新的方法 = intentionally try a new method; 试 is broader and simpler。",
       "retrievalTarget": "Use 尝试 for intentional attempts, especially new methods.",
       "tier": "T2",
-      "passed": false,
+      "passed": true,
       "unknownCount": 0,
       "unknowns": [],
-      "frontAnswerLeak": {
-        "answer": "尝试",
-        "mode": "leadingAnswer"
-      },
-      "issues": [
-        "front contains leading back answer: 尝试"
-      ]
+      "frontAnswerLeak": null,
+      "issues": []
     },
     {
       "file": "hsk5-061-120.json",
@@ -2530,7 +2326,7 @@
       "front": "小心 vs 仔细: which is “be careful about danger,” and which is “pay attention to details”?",
       "back": "小心 = watch out/be cautious; 仔细 = careful/meticulous about details.",
       "retrievalTarget": "Distinguish 仔细 from 小心.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -2547,7 +2343,7 @@
       "front": "You are challenging the basis for a claim: “___什么这么说？”",
       "back": "凭什么这么说？ = On what grounds do you say that? Use 凭 for the basis, proof, or credential something rests on.",
       "retrievalTarget": "Produce 凭 for the basis/evidence/credential behind a claim or action.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -2564,7 +2360,7 @@
       "front": "A boss says something must be done; it is not a suggestion. Which word names that top-down order?",
       "back": "命令. Use it for an authoritative command: 老师命令学生回家 is harsh; 老师让学生回家 is neutral.",
       "retrievalTarget": "Choose 命令 for authoritative commands, not ordinary requests.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -2581,7 +2377,7 @@
       "front": "You value someone’s ability or taste, not just enjoy a good time. Which verb fits?",
       "back": "欣赏. 我很欣赏她 = I admire/appreciate her. It can target a person, work, or way of doing something.",
       "retrievalTarget": "Use 欣赏 for appreciative judgment or admiration.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -2598,7 +2394,7 @@
       "front": "In “你神经啊?”, the word is not medical. What register shift should you hear?",
       "back": "神经 can be medical “nerve,” but 你神经啊? is colloquial and rude: “are you crazy?” Avoid it in polite speech.",
       "retrievalTarget": "Recognize 神经 as both medical nerve and blunt colloquial “crazy.”",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -2615,7 +2411,7 @@
       "front": "In formal writing, “高度 + verb” often does not mean physical height. What does it mean in 高度看重?",
       "back": "高度 = to a high degree / highly. 高度看重 means value highly; physical height is only one sense.",
       "retrievalTarget": "Interpret 高度 as formal “highly/to a high degree” before attitudes or actions.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -2632,7 +2428,7 @@
       "front": "The cup did not merely break; it broke into pieces: 杯子___了。",
       "back": "杯子碎了. 碎 focuses on pieces/fragments; 破 is broader “broken/damaged.”",
       "retrievalTarget": "Use 碎 for shattering into pieces, distinct from broader 破.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -2649,7 +2445,7 @@
       "front": "You mean one whole human life, emotionally heavier than abstract “forever”: 我___都不忘。",
       "back": "我一辈子都不忘. 一辈子 is anchored to a person’s lifetime; 永远 is abstract forever.",
       "retrievalTarget": "Produce 一辈子 for the duration of a human life.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -2666,7 +2462,7 @@
       "front": "You want to stress scope: not just “in the world,” but “the whole world.” Which word?",
       "back": "全世界. 全世界都知道 = the whole world knows. It marks total global scope.",
       "retrievalTarget": "Choose 全世界 when the scope is the entire world.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -2683,7 +2479,7 @@
       "front": "“This account/wording is not quite right” targets the way a claim is stated, not speech in general. Which word?",
       "back": "说法. 这种说法不对 = this way of saying/account is not right. It packages a claim as one formulation.",
       "retrievalTarget": "Interpret 说法 as formulation/version/account rather than generic words.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -2700,7 +2496,7 @@
       "front": "Under a video, users leave short reactions. Which noun is this, not 评价 “evaluation”?",
       "back": "评论. 看评论 = read comments; 写评论 = write a comment/commentary. 评价 is more judgment/evaluation.",
       "retrievalTarget": "Choose 评论 for comments/commentary, distinct from evaluative 评价.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -2717,7 +2513,7 @@
       "front": "When describing life conditions or values around money/things, which word gives “material” rather than emotional/spiritual?",
       "back": "物质. 很物质 can mean materialistic; 物质生活 means material life/conditions, not physics only.",
       "retrievalTarget": "Distinguish social “material/materialistic” 物质 from scientific matter/substance.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -2734,7 +2530,7 @@
       "front": "Rain starts and you move under cover. You are avoiding rain, not hiding an object. Which verb?",
       "back": "躲. 躲雨 = take shelter from rain; 躲人 = avoid someone. 藏 is more “hide/conceal.”",
       "retrievalTarget": "Use 躲 for avoiding or dodging an unwanted person, thing, or situation.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 1,
       "unknowns": [
@@ -2761,7 +2557,7 @@
       "front": "Smoke comes out: 冒烟. Someone goes despite danger: 冒着危险. What two uses must you keep apart?",
       "back": "冒 can mean come out/emit, or brave/risk. 冒烟 = smoke comes out; 冒着危险 = braving danger [危险 = danger].",
       "retrievalTarget": "Recognize 冒 as emit/come out and as brave/risk in 冒着 + danger.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -2778,7 +2574,7 @@
       "front": "Food has gone bad and soft; a movie is really lousy. Which stronger word than 坏 fits both?",
       "back": "烂. 菜烂了 = the food/vegetables have rotted; 烂电影 = terrible movie [电影 = movie].",
       "retrievalTarget": "Use 烂 for rotten/mushy or strongly bad, not merely broken.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -2795,7 +2591,7 @@
       "front": "You make a general statement, then single out one case: 我喜欢看书，___是历史书。",
       "back": "尤其是历史书 = especially history books. 尤其 often follows a broad claim and highlights one case.",
       "retrievalTarget": "Produce 尤其/尤其是 to single out a special case after a general claim.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -2812,7 +2608,7 @@
       "front": "After too much alcohol, say: 他喝___了。",
       "back": "他喝醉了. 醉 is the resulting state; 很醉 / 醉了 are common.",
       "retrievalTarget": "Use 醉 for the state of being drunk/intoxicated.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -2829,7 +2625,7 @@
       "front": "You physically throw something into the trash. Which verb is more physical than 丢?",
       "back": "扔. 别扔 = don’t throw it away. 丢 can also mean lose; 扔 emphasizes the throwing/discarding action.",
       "retrievalTarget": "Choose 扔 for physical throwing or throwing away.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -2846,7 +2642,7 @@
       "front": "You remember a beautiful period of life, not clock time. Which more literary word than 时间 fits?",
       "back": "时光. 美好的时光 = beautiful days/period. 时间 is neutral measurable time.",
       "retrievalTarget": "Use 时光 for lived, often nostalgic periods of time.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -2863,7 +2659,7 @@
       "front": "What links 礼物 “gift” and 礼貌 “politeness”?",
       "back": "礼 points to socially proper giving/behavior/ritual. 礼物 is a gift; 礼貌 is politeness [貌 = manner/appearance].",
       "retrievalTarget": "Connect 礼’s gift and etiquette senses through social propriety.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 1,
       "unknowns": [
@@ -2890,7 +2686,7 @@
       "front": "Modern 博士 usually names an academic degree/person. Which English “doctor” should you NOT assume?",
       "back": "Do not assume medical doctor. 博士 usually means Ph.D./doctoral degree; medical doctor is 医生.",
       "retrievalTarget": "Interpret 博士 as doctorate/Ph.D. unless context says medical doctor.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -2924,7 +2720,7 @@
       "front": "A dinner, story, or person has a romantic feeling. Which adjective?",
       "back": "浪漫. 很浪漫 = very romantic; 不浪漫 = not romantic. Do not confuse with 浪费 “waste.”",
       "retrievalTarget": "Use 浪漫 for romantic mood, gesture, story, or person.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -2941,7 +2737,7 @@
       "front": "Something is legal but still wrong. Which domain are you judging: law or morality?",
       "back": "道德. 道德问题 = moral/ethical issue; 法律问题 = legal issue [法律 = law].",
       "retrievalTarget": "Choose 道德 for moral/ethical evaluation distinct from law.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -2958,7 +2754,7 @@
       "front": "In one sentence it is a job; in another it is an action. What word covers both “editor” and “edit”?",
       "back": "编辑. 她是编辑 = she is an editor. 编辑文字 = edit text [文字 = written text].",
       "retrievalTarget": "Recognize 编辑 as both noun “editor” and verb “edit/compile.”",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -2975,7 +2771,7 @@
       "front": "A doctor/space/account is for one person and not public. Which word is stronger than 个人?",
       "back": "私人. 私人空间 = private space; 私人医生 = private doctor. 个人 is more “individual/personal.”",
       "retrievalTarget": "Choose 私人 for private, exclusive, non-public ownership or service.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -2992,7 +2788,7 @@
       "front": "After someone helped you and worked hard, say politely: “___你了.”",
       "back": "辛苦你了. It thanks/recognizes effort: you went to trouble / worked hard.",
       "retrievalTarget": "Use 辛苦你了 to acknowledge effort or trouble taken by someone.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -3009,7 +2805,7 @@
       "front": "A report was checked and confirmed true. Which formal verb emphasizes verification?",
       "back": "证实. 这个消息证实了 = this news/report was confirmed [消息 = news/report]. 证明 is broader “prove.”",
       "retrievalTarget": "Use 证实 for confirming/verifying that information is true.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -3026,7 +2822,7 @@
       "front": "Which word completes the travel blessing “___平安” = safe journey?",
       "back": "一路平安. 一路 means all along the road/journey, not literally “one road.”",
       "retrievalTarget": "Use 一路 for the whole route/journey, especially 一路平安.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -3043,7 +2839,7 @@
       "front": "Only three minutes are left: 只___三分钟了。",
       "back": "只剩三分钟了. 剩 states what remains after time, money, food, or options are gone.",
       "retrievalTarget": "Use 剩 to state what remains/is left.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -3057,54 +2853,25 @@
       "gloss": "piece together; spell; go all out",
       "cardIndex": 0,
       "type": "disambiguation",
-      "front": "拼音 and 拼命 share a “put/throw together” feel. What broad action does 拼 carry?",
-      "back": "拼 can join pieces/spell parts together, or throw all effort in: 拼命 = go all out/risk life [命 = life].",
+      "front": "拼命 (pīn mìng, mìng = life) uses 拼 for “throw everything in.” What broad sense does 拼 carry across its uses?",
+      "back": "拼 = piece/put together (spelling, assembling) or go all out with full effort。",
       "retrievalTarget": "Connect 拼’s piece-together/spell sense with all-out effort in 拼命.",
-      "tier": "T3",
-      "passed": false,
-      "unknownCount": 4,
+      "tier": "T2",
+      "passed": true,
+      "unknownCount": 1,
       "unknowns": [
         {
-          "text": "音",
+          "text": "命",
           "source": "front",
-          "hanRun": "拼音",
+          "hanRun": "拼命",
           "start": 1,
           "end": 2,
           "glossed": true,
-          "context": "拼音 and 拼命 shar"
-        },
-        {
-          "text": "命",
-          "source": "front",
-          "hanRun": "拼命",
-          "start": 8,
-          "end": 9,
-          "glossed": true,
-          "context": "拼音 and 拼命 share a “pu"
-        },
-        {
-          "text": "命",
-          "source": "back",
-          "hanRun": "拼命",
-          "start": 65,
-          "end": 66,
-          "glossed": true,
-          "context": "effort in: 拼命 = go all ou"
-        },
-        {
-          "text": "命",
-          "source": "back",
-          "hanRun": "命",
-          "start": 91,
-          "end": 92,
-          "glossed": true,
-          "context": "/risk life [命 = life]."
+          "context": "拼命 (pīn mìng, "
         }
       ],
       "frontAnswerLeak": null,
-      "issues": [
-        "unknowns>1: 音, 命, 命, 命"
-      ]
+      "issues": []
     },
     {
       "file": "hsk5-121-180.json",
@@ -3116,7 +2883,7 @@
       "front": "In “他硬要去,” it is not texture. What does 硬 add?",
       "back": "硬 adds stubborn/forced insistence: 他硬要去 = he insists on going. It can also mean physically hard.",
       "retrievalTarget": "Interpret 硬 as stubbornly/forcibly in adverbial uses like 硬要.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -3133,7 +2900,7 @@
       "front": "You give the final reason that settles the explanation: “别怪他，___他还是个孩子。”",
       "back": "别怪他，毕竟他还是个孩子 = don’t blame him; after all, he is still a child.",
       "retrievalTarget": "Use 毕竟 to introduce the decisive “after all” reason.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -3150,7 +2917,7 @@
       "front": "Which word is the dating/relationship activity, not the broad feeling 爱?",
       "back": "恋爱. 谈恋爱 = date / be in a romantic relationship. 爱 is broader love.",
       "retrievalTarget": "Distinguish romantic relationship/activity 恋爱 from broad love 爱.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -3167,7 +2934,7 @@
       "front": "A music app or contest uses a more formal word for “song” than 歌. Which word?",
       "back": "歌曲. 这首歌曲 = this song; 歌 is more casual. Use 首 as the classifier for songs.",
       "retrievalTarget": "Choose 歌曲 for formal/media references to songs and recall classifier 首.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -3184,7 +2951,7 @@
       "front": "You soften a contrast: “I’m not against it; it’s just that I’m worried.” Which connector?",
       "back": "只不过. 我不是不同意，只不过有点担心 = I don’t disagree; it’s just that I’m a bit worried.",
       "retrievalTarget": "Use 只不过 to introduce a limiting/softening “it’s just that” clause.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -3201,7 +2968,7 @@
       "front": "A phone has sleep mode; a company has a business model. Which word covers configured state/pattern?",
       "back": "模式. 工作模式 = work mode; 学习模式 = study mode. 方法 is a method, not necessarily a repeatable model/state.",
       "retrievalTarget": "Use 模式 for modes, repeatable patterns, and operating models.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -3215,36 +2982,25 @@
       "gloss": "bullet; shell; projectile",
       "cardIndex": 0,
       "type": "disambiguation",
-      "front": "Same character, different reading: which reading of 弹 means bullet/shell, as in 子弹?",
-      "back": "dàn. 子弹 = bullet [子 here is part of the word]; 导弹 = missile [导 = guide/lead]. The music reading is tán.",
+      "front": "弹 has two readings. Which reading means bullet/shell, as in 子弹?",
+      "back": "dàn。子弹 = bullet; 导弹 (dǎodàn) = missile; the music reading is tán。",
       "retrievalTarget": "Read 弹 as dàn for bullet/shell/projectile compounds.",
-      "tier": "T3",
-      "passed": false,
-      "unknownCount": 2,
+      "tier": "T2",
+      "passed": true,
+      "unknownCount": 1,
       "unknowns": [
         {
           "text": "导",
           "source": "back",
           "hanRun": "导弹",
-          "start": 47,
-          "end": 48,
+          "start": 17,
+          "end": 18,
           "glossed": true,
-          "context": " the word]; 导弹 = missile "
-        },
-        {
-          "text": "导",
-          "source": "back",
-          "hanRun": "导",
-          "start": 61,
-          "end": 62,
-          "glossed": true,
-          "context": " = missile [导 = guide/lea"
+          "context": "弹 = bullet; 导弹 (dǎodàn) ="
         }
       ],
       "frontAnswerLeak": null,
-      "issues": [
-        "unknowns>1: 导, 导"
-      ]
+      "issues": []
     },
     {
       "file": "hsk5-121-180.json",
@@ -3256,7 +3012,7 @@
       "front": "Same character, different reading: 弹钢琴 means play piano. Which reading?",
       "back": "tán. 弹钢琴 = play piano [钢琴 = piano]. dàn is the bullet/projectile reading.",
       "retrievalTarget": "Read 弹 as tán for playing instruments or bouncing/rebounding.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -3270,40 +3026,15 @@
       "gloss": "must; necessarily; certainly",
       "cardIndex": 0,
       "type": "collocation",
-      "front": "Which bound character gives 必须, 必要, 未必, 何必 their necessity/certainty flavor?",
-      "back": "必. 必须 = must; 必要 = necessary; 未必 = not necessarily; 何必 = why must/bother.",
+      "front": "Which single bound character is the shared “necessity/certainty” morpheme in bìxū (must), bìyào (necessary), and wèibì (not necessarily)?",
+      "back": "必。必须 = must; 必要 = necessary; 未必 = not necessarily。",
       "retrievalTarget": "Recognize 必 as the necessity/certainty morpheme in common function compounds.",
-      "tier": "T3",
-      "passed": false,
-      "unknownCount": 2,
-      "unknowns": [
-        {
-          "text": "何",
-          "source": "front",
-          "hanRun": "何必",
-          "start": 40,
-          "end": 41,
-          "glossed": true,
-          "context": "必须, 必要, 未必, 何必 their nece"
-        },
-        {
-          "text": "何",
-          "source": "back",
-          "hanRun": "何必",
-          "start": 52,
-          "end": 53,
-          "glossed": true,
-          "context": "ecessarily; 何必 = why must"
-        }
-      ],
-      "frontAnswerLeak": {
-        "answer": "必",
-        "mode": "leadingAnswer"
-      },
-      "issues": [
-        "unknowns>1: 何, 何",
-        "front contains leading back answer: 必"
-      ]
+      "tier": "T2",
+      "passed": true,
+      "unknownCount": 0,
+      "unknowns": [],
+      "frontAnswerLeak": null,
+      "issues": []
     },
     {
       "file": "hsk5-121-180.json",
@@ -3315,7 +3046,7 @@
       "front": "Formal news style: someone attempted to leave but did not succeed. Which verb before the action?",
       "back": "试图. 他试图走 = he attempted to leave/go. It is more formal than 试一试 and often precedes a verb phrase.",
       "retrievalTarget": "Use 试图 + verb phrase for formal attempted action/intention.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -3332,7 +3063,7 @@
       "front": "To say a cup made of glass, put the material before 杯: ___杯。",
       "back": "玻璃杯 = glass cup. 玻璃 marks the material; 杯子 is just “cup.”",
       "retrievalTarget": "Use 玻璃 as a material modifier for glass objects.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -3349,7 +3080,7 @@
       "front": "A dog bites a person: 狗___人。",
       "back": "狗咬人. 咬一口 = take one bite; 咬住 = bite and hold.",
       "retrievalTarget": "Use 咬 for biting, including one-bite and bite-and-hold patterns.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -3366,7 +3097,7 @@
       "front": "公司所在地 means the place where a company is located. What role does 所在 add?",
       "back": "所在 turns “be at/in” into “where it is located.” 所在地 = location [地 = place]. 问题所在 = where the problem lies.",
       "retrievalTarget": "Interpret 所在 as “where X is located” and in “where the problem lies.”",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -3383,7 +3114,7 @@
       "front": "Buying a house with bank money is not casual 借钱. Which formal finance word?",
       "back": "贷款. 买房贷款 = take a loan to buy a house. 借钱 is everyday borrowing money.",
       "retrievalTarget": "Use 贷款 for formal bank/credit loans, not casual borrowing.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 1,
       "unknowns": [
@@ -3410,7 +3141,7 @@
       "front": "A formal sentence says a plan lacks money, time, or evidence. Which verb is more formal than 缺少?",
       "back": "缺乏. 缺乏钱/时间/证据 = lack money/time/evidence [证据 = evidence]. It is common with abstract nouns.",
       "retrievalTarget": "Choose 缺乏 for formal or abstract lack.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -3427,7 +3158,7 @@
       "front": "A person loses weight; meat has little fat. Which word, not 薄 “thin/flat”?",
       "back": "瘦. 他瘦了 = he lost weight / got thinner. 瘦肉 = lean meat [肉 = meat].",
       "retrievalTarget": "Use 瘦 for body thinness, weight loss, and lean meat; not flat thickness.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -3441,63 +3172,25 @@
       "gloss": "lock; to lock",
       "cardIndex": 0,
       "type": "collocation",
-      "front": "Door or phone security: ___门, ___屏, 解___。",
-      "back": "锁门 = lock the door; 锁屏 = lock screen [屏 = screen]; 解锁 = unlock.",
+      "front": "Which character is both the noun “lock” and the verb “to lock,” e.g. lock the door or lock the screen?",
+      "back": "锁。锁门 = lock the door; 解锁 (jiě) = unlock。",
       "retrievalTarget": "Use 锁 as noun/verb in lock, screen-lock, and unlock patterns.",
-      "tier": "T3",
-      "passed": false,
-      "unknownCount": 5,
+      "tier": "T2",
+      "passed": true,
+      "unknownCount": 1,
       "unknowns": [
-        {
-          "text": "屏",
-          "source": "front",
-          "hanRun": "屏",
-          "start": 33,
-          "end": 34,
-          "glossed": false,
-          "context": "y: ___门, ___屏, 解___。"
-        },
-        {
-          "text": "解",
-          "source": "front",
-          "hanRun": "解",
-          "start": 36,
-          "end": 37,
-          "glossed": false,
-          "context": "___门, ___屏, 解___。"
-        },
-        {
-          "text": "屏",
-          "source": "back",
-          "hanRun": "锁屏",
-          "start": 21,
-          "end": 22,
-          "glossed": true,
-          "context": " the door; 锁屏 = lock scre"
-        },
-        {
-          "text": "屏",
-          "source": "back",
-          "hanRun": "屏",
-          "start": 38,
-          "end": 39,
-          "glossed": true,
-          "context": "ock screen [屏 = screen]; "
-        },
         {
           "text": "解",
           "source": "back",
           "hanRun": "解锁",
-          "start": 51,
-          "end": 52,
+          "start": 22,
+          "end": 23,
           "glossed": true,
-          "context": " = screen]; 解锁 = unlock."
+          "context": "k the door; 解锁 (jiě) = un"
         }
       ],
       "frontAnswerLeak": null,
-      "issues": [
-        "unknowns>1: 屏, 解, 屏, 屏, 解"
-      ]
+      "issues": []
     },
     {
       "file": "hsk5-121-180.json",
@@ -3509,7 +3202,7 @@
       "front": "Smoking is harmful to health: 吸烟有___健康。",
       "back": "吸烟有害健康. 有害 = harmful; 害 is the harm/trouble root also seen in 害怕 and 害羞.",
       "retrievalTarget": "Use 有害/对…有害 for harmful-to patterns and recognize 害 as harm root.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 1,
       "unknowns": [
@@ -3536,7 +3229,7 @@
       "front": "From “stand,” 立 extends into setting something up. What does it contribute in 建立?",
       "back": "立 gives the establish/set-up idea. 建立 = establish/build up [建 = build]. 立刻 is a separate fixed word: immediately.",
       "retrievalTarget": "Connect 立’s stand meaning to establish/set-up compounds and recognize fixed 立刻.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -3553,7 +3246,7 @@
       "front": "Someone is not merely criticizing politely; they are scolding or using angry words. Which verb?",
       "back": "骂. 他骂我 = he scolded/cursed me. 批评 can be neutral criticism; 骂 is harsher.",
       "retrievalTarget": "Distinguish harsh scolding/abuse 骂 from neutral criticism 批评.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -3570,7 +3263,7 @@
       "front": "Polite service phrase: “please wait a moment” = 请___等。",
       "back": "请稍等. 稍 is a formal/slight “a little,” common in 稍等 and 稍后 [后 = later/after].",
       "retrievalTarget": "Recognize 稍 as formal/slight in fixed phrases like 稍等 and 稍后.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -3587,7 +3280,7 @@
       "front": "After rain, the ground is dangerous because it is slippery. Which word?",
       "back": "滑. 地很滑 = the ground is slippery; 滑倒 = slip and fall [倒 = fall]. 光滑 is smooth in texture.",
       "retrievalTarget": "Use 滑 for slippery/slide and distinguish it from smooth-only texture.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -3604,7 +3297,7 @@
       "front": "Two sides reach an agreement; nobody physically arrives anywhere. Which formal verb?",
       "back": "达成. 达成协议 = reach an agreement [协议 = agreement]. 到达 is physical arrival.",
       "retrievalTarget": "Use 达成 for reaching abstract results such as agreements, not physical arrival.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -3621,7 +3314,7 @@
       "front": "A teacher gives students confidence to ask more questions: 老师___学生多问。",
       "back": "老师鼓励学生多问. 鼓励 + person + action = encourage someone to do something.",
       "retrievalTarget": "Produce 鼓励 in the pattern 鼓励 + person + action.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -3655,7 +3348,7 @@
       "front": "On a form, the person themself must sign or handle it. Which formal self/person word?",
       "back": "本人. 请本人来 = please come in person; 本人签名 = the person themself signs [签名 = sign name].",
       "retrievalTarget": "Use 本人 for formal self-reference or “the person concerned/themselves.”",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -3672,7 +3365,7 @@
       "front": "You regret not listening earlier: 我很___没听你的。",
       "back": "我很后悔没听你的. 后悔 implies you feel you chose/did wrong; 遗憾 can be broader “unfortunate/pity.”",
       "retrievalTarget": "Use 后悔 for remorse/regret over one’s choice or action.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 1,
       "unknowns": [
@@ -3699,7 +3392,7 @@
       "front": "A team moves past a limit or bottleneck, not merely breaks an object. Which word?",
       "back": "突破. 突破问题 = break through a problem; 取得突破 = achieve a breakthrough [取得 = obtain/achieve].",
       "retrievalTarget": "Use 突破 for overcoming barriers, limits, defenses, or bottlenecks.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -3716,7 +3409,7 @@
       "front": "A company officially releases news or a new version. Which verb, not 发表 for an article/opinion?",
       "back": "发布. 发布消息 = release/announce news; 发布新版本 = release a new version [版本 = version].",
       "retrievalTarget": "Choose 发布 for official release/issue of news, notices, products, or versions.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -3733,7 +3426,7 @@
       "front": "You reach your limit and cannot tolerate it anymore: 我___不了了。",
       "back": "我忍不了了 = I can’t stand it anymore. 忍 can mean endure/tolerate or hold oneself back.",
       "retrievalTarget": "Use 忍 for enduring/tolerating/restraining oneself, especially 忍不了.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -3750,7 +3443,7 @@
       "front": "Someone says, “I’ll tell you later,” not “I will turn my head.” Which word fits that later/by-and-by sense?",
       "back": "回头. 回头告诉你 = I’ll tell you later. It can literally mean turn one’s head, but in speech often means later.",
       "retrievalTarget": "Interpret 回头 as either turning back/one's head or conversational “later.”",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -3764,36 +3457,25 @@
       "gloss": "warehouse; storehouse; library/database",
       "cardIndex": 0,
       "type": "collocation",
-      "front": "A warehouse, database, or code library is a place things are stored. Which bound noun gives that storage-place idea?",
-      "back": "库. 仓库 = warehouse [仓 = storehouse]; 数据库 = database [数据 = data]; 书库 = book collection/library.",
+      "front": "A warehouse, database, or code library — which bound noun gives the “storage place” idea?",
+      "back": "库。仓库 (cāngkù) = warehouse; 数据库 = database; 书库 = book collection。",
       "retrievalTarget": "Recognize 库 as a storage-place morpheme in warehouse, database, and library compounds.",
-      "tier": "T3",
-      "passed": false,
-      "unknownCount": 2,
+      "tier": "T2",
+      "passed": true,
+      "unknownCount": 1,
       "unknowns": [
         {
           "text": "仓",
           "source": "back",
           "hanRun": "仓库",
-          "start": 3,
-          "end": 4,
+          "start": 2,
+          "end": 3,
           "glossed": true,
-          "context": "库. 仓库 = warehous"
-        },
-        {
-          "text": "仓",
-          "source": "back",
-          "hanRun": "仓",
-          "start": 19,
-          "end": 20,
-          "glossed": true,
-          "context": " warehouse [仓 = storehous"
+          "context": "库。仓库 (cāngkù) ="
         }
       ],
       "frontAnswerLeak": null,
-      "issues": [
-        "unknowns>1: 仓, 仓"
-      ]
+      "issues": []
     },
     {
       "file": "hsk5-181-240.json",
@@ -3805,7 +3487,7 @@
       "front": "At work, one person is responsible for this area and can make decisions. Which word names that person or role?",
       "back": "主管. 他是销售主管 = he is the sales manager/person in charge [销售 = sales]. 主管 can be noun or verb: 主管这件事 = be in charge of this matter.",
       "retrievalTarget": "Use 主管 for the person or role in charge of an area.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -3819,30 +3501,25 @@
       "gloss": "to answer; reply",
       "cardIndex": 0,
       "type": "collocation",
-      "front": "Which answer/reply morpheme appears in 回答 and 答案?",
-      "back": "答. 回答 = answer/reply; 答案 = answer/key [案 = case/plan]. 单独说 答 is more written or bound than 回答.",
+      "front": "Which answer/reply morpheme appears in “回___” and “___案”?",
+      "back": "答。回答 = answer/reply; 答案 = answer/key; standalone 答 is more written than 回答。",
       "retrievalTarget": "Recognize 答 as the answer/reply morpheme in 回答 and 答案.",
       "tier": "T2",
-      "passed": false,
+      "passed": true,
       "unknownCount": 1,
       "unknowns": [
         {
           "text": "案",
-          "source": "back",
+          "source": "front",
           "hanRun": "案",
-          "start": 39,
-          "end": 40,
+          "start": 54,
+          "end": 55,
           "glossed": true,
-          "context": "answer/key [案 = case/plan"
+          "context": "__” and “___案”?"
         }
       ],
-      "frontAnswerLeak": {
-        "answer": "答",
-        "mode": "leadingAnswer"
-      },
-      "issues": [
-        "front contains leading back answer: 答"
-      ]
+      "frontAnswerLeak": null,
+      "issues": []
     },
     {
       "file": "hsk5-181-240.json",
@@ -3854,7 +3531,7 @@
       "front": "A child studies hard, so the parents give a prize to encourage him: 父母___他。",
       "back": "父母奖励他. 奖励 is a reward given for good behavior or achievement; 礼物 is just a gift.",
       "retrievalTarget": "Use 奖励 for rewarding someone as encouragement for achievement or good behavior.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -3871,7 +3548,7 @@
       "front": "Formal writing says something happens “under this condition/pressure,” not physically below a table. Which phrase?",
       "back": "之下. 在这种压力之下 = under this kind of pressure [压力 = pressure]. It is written/formal compared with 下面.",
       "retrievalTarget": "Interpret 之下 as formal “under/beneath” for conditions, pressure, or limits.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -3905,7 +3582,7 @@
       "front": "An older text describes grass, sky, or youth with one color/age morpheme that is not simply modern 蓝 or 绿. Which character?",
       "back": "青. 青 can cover blue-green/dark green and also youth/young, as in 青年 = youth/young person.",
       "retrievalTarget": "Recognize 青 as blue-green/dark green and as the youth/young morpheme.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -3922,7 +3599,7 @@
       "front": "A report says someone met with a sad bad outcome. Which word means unfortunate/misfortune, stronger than simply 不好?",
       "back": "不幸. 不幸的是… = unfortunately…; 一个不幸的消息 = unfortunate sad news/report [消息 = news/report].",
       "retrievalTarget": "Use 不幸 for unfortunate events, misfortune, or “unfortunately.”",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -3939,7 +3616,7 @@
       "front": "In physics, food, or motivational talk, which noun names energy rather than ability alone?",
       "back": "能量. 食物给人能量 = food gives people energy. 能力 is ability/capability; 能量 is energy or force/resources.",
       "retrievalTarget": "Distinguish 能量 “energy” from 能力 “ability.”",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -3956,7 +3633,7 @@
       "front": "Two statements or two people cannot both fit together; there is a contradiction/conflict. Which noun/adjective?",
       "back": "矛盾. 这两句话很矛盾 = these two sentences contradict each other. 他们之间有矛盾 = there is conflict between them.",
       "retrievalTarget": "Use 矛盾 for contradiction between ideas or conflict between people/interests.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -3973,7 +3650,7 @@
       "front": "Spring, a new age, or a moment arrives in a written/formal style. Which word is more event-like than 来?",
       "back": "到来. 春天的到来 = the arrival of spring; 新时代到来了 = a new era has arrived [时代 = era].",
       "retrievalTarget": "Use 到来 for the arrival/advent of times, events, or seasons.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -3990,7 +3667,7 @@
       "front": "You remove old files or trash so the place/system is clean: 我需要___一下。",
       "back": "我需要清理一下. 清理 means clear up/tidy/dispose of, often by removing unwanted things; 打扫 is more sweep/clean a room.",
       "retrievalTarget": "Use 清理 for clearing out unwanted things, files, trash, or a messy place.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -4007,7 +3684,7 @@
       "front": "After bargaining, both sides agree and the deal is done. What do you say?",
       "back": "成交. 好，成交！ = OK, deal! It marks that a trade/contract has been completed.",
       "retrievalTarget": "Use 成交 to mark that a deal or transaction has been reached/completed.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -4024,7 +3701,7 @@
       "front": "Before summarizing a long explanation, which phrase means “in short / to put it in one sentence”?",
       "back": "一句话. 一句话，他不想去 = in short, he doesn’t want to go. Literally “one sentence,” but often a summary marker.",
       "retrievalTarget": "Interpret 一句话 as a discourse marker meaning “in short / to sum up.”",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -4041,7 +3718,7 @@
       "front": "A report says someone killed themself. Which word names suicide, not killing another person?",
       "back": "自杀. 自 means self; 杀 is kill. 他自杀了 = he died by suicide.",
       "retrievalTarget": "Recognize 自杀 as suicide / killing oneself, distinct from 杀 someone else.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -4058,7 +3735,7 @@
       "front": "In a project, which noun names the person who carries responsibility and is in charge?",
       "back": "负责人. 请找负责人 = please find the person in charge. It is the responsible person, not just any worker.",
       "retrievalTarget": "Use 负责人 for the responsible person/person in charge of work or an organization.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -4072,40 +3749,25 @@
       "gloss": "side; beside; component side",
       "cardIndex": 0,
       "type": "collocation",
-      "front": "Which side morpheme appears in 旁边 and in character-component names like 木字___?",
-      "back": "旁. 旁边 = beside/side. 木字旁 = the wood component on the side of a character.",
+      "front": "Which “side/beside” morpheme appears in “___边” and in radical names like “木 (mù, wood) 字___”?",
+      "back": "旁。旁边 = beside/side; used in radical names for the component on a character’s side。",
       "retrievalTarget": "Recognize 旁 as “side/beside,” including character-component names like 木字旁.",
       "tier": "T2",
-      "passed": false,
-      "unknownCount": 2,
+      "passed": true,
+      "unknownCount": 1,
       "unknowns": [
         {
           "text": "木",
           "source": "front",
-          "hanRun": "木字",
-          "start": 72,
-          "end": 73,
+          "hanRun": "木",
+          "start": 74,
+          "end": 75,
           "glossed": true,
-          "context": " names like 木字___?"
-        },
-        {
-          "text": "木",
-          "source": "back",
-          "hanRun": "木字旁",
-          "start": 21,
-          "end": 22,
-          "glossed": true,
-          "context": "eside/side. 木字旁 = the woo"
+          "context": "names like “木 (mù, wood) "
         }
       ],
-      "frontAnswerLeak": {
-        "answer": "旁",
-        "mode": "leadingAnswer"
-      },
-      "issues": [
-        "unknowns>1: 木, 木",
-        "front contains leading back answer: 旁"
-      ]
+      "frontAnswerLeak": null,
+      "issues": []
     },
     {
       "file": "hsk5-181-240.json",
@@ -4117,7 +3779,7 @@
       "front": "You want not a short answer, but a detailed explanation: 请说得___一点。",
       "back": "请说得详细一点. 详细 means detailed/in detail; 仔细 is careful/attentive.",
       "retrievalTarget": "Use 详细 for detailed information, explanation, or description.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -4134,7 +3796,7 @@
       "front": "You put a card into a machine or add a sentence in the middle of talk. Which verb means insert/stick in?",
       "back": "插. 插卡 = insert a card; 插话 = cut in/add words while others speak. It is not general 放 “put.”",
       "retrievalTarget": "Use 插 for inserting something into a slot, space, or conversation.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -4151,7 +3813,7 @@
       "front": "Police, a reader, or a researcher has a lead that helps follow the case/story. Which word means clue?",
       "back": "线索. 找到线索 = find a clue/lead. It can also mean the thread running through a story.",
       "retrievalTarget": "Use 线索 for clues/leads and the thread of a story or investigation.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -4168,7 +3830,7 @@
       "front": "The food smells bad, not fragrant: 这个菜很___。",
       "back": "这个菜很臭. 臭 is bad-smelling/stinky; 香 is fragrant or tasty-smelling.",
       "retrievalTarget": "Use 臭 (chòu) for bad smells or stinky/repulsive things.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -4182,45 +3844,15 @@
       "gloss": "sense of smell; smell",
       "cardIndex": 0,
       "type": "disambiguation",
-      "front": "Same character, rare reading: in scientific/formal words about the sense of smell, which reading is used?",
-      "back": "xiù. 嗅觉 is smell/sense of smell [嗅 = smell; 觉 = sense/feeling]. The common “stinky” reading is chòu.",
+      "front": "臭 has a common reading chòu (“stinky”) and a rare formal reading for the sense of smell. What is the rare reading?",
+      "back": "xiù。In formal or scientific words about olfaction, 臭 is read xiù; the everyday “stinky” reading is chòu。",
       "retrievalTarget": "Read 臭 as xiù only in rare/formal smell-sense contexts, not ordinary “stinky.”",
       "tier": "T2",
-      "passed": false,
-      "unknownCount": 3,
-      "unknowns": [
-        {
-          "text": "嗅觉",
-          "source": "back",
-          "hanRun": "嗅觉",
-          "start": 5,
-          "end": 7,
-          "glossed": true,
-          "context": "xiù. 嗅觉 is smell/se"
-        },
-        {
-          "text": "嗅",
-          "source": "back",
-          "hanRun": "嗅",
-          "start": 33,
-          "end": 34,
-          "glossed": true,
-          "context": "e of smell [嗅 = smell; 觉 "
-        },
-        {
-          "text": "觉",
-          "source": "back",
-          "hanRun": "觉",
-          "start": 44,
-          "end": 45,
-          "glossed": true,
-          "context": "[嗅 = smell; 觉 = sense/fee"
-        }
-      ],
+      "passed": true,
+      "unknownCount": 0,
+      "unknowns": [],
       "frontAnswerLeak": null,
-      "issues": [
-        "unknowns>1: 嗅觉, 嗅, 觉"
-      ]
+      "issues": []
     },
     {
       "file": "hsk5-181-240.json",
@@ -4232,7 +3864,7 @@
       "front": "An action breaks the law, not just a school rule or moral norm. Which adjective/verb?",
       "back": "违法. 这是违法的 = this is illegal. 违法行为 = illegal act [行为 = behavior/action].",
       "retrievalTarget": "Use 违法 for illegal actions that violate the law.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -4249,7 +3881,7 @@
       "front": "A messy mass of books or work sits together in a heap: 一___书 / 一___事。",
       "back": "一堆书 / 一堆事. 堆 is a pile/heap and can informally mean a lot of things.",
       "retrievalTarget": "Use 堆 for piles/heaps and 一堆 for a lot/a pile of items or tasks.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -4266,7 +3898,7 @@
       "front": "A survey or medical text needs the formal category “male,” not simply 男人. Which word?",
       "back": "男性. 男性用户 = male users [用户 = users]; 男性健康 = men’s/male health. It is formal/category-like.",
       "retrievalTarget": "Use 男性 for formal/category “male,” distinct from everyday 男人.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -4280,20 +3912,15 @@
       "gloss": "product; item; grade; character; to taste/judge",
       "cardIndex": 0,
       "type": "collocation",
-      "front": "Which bound character gives 商品, 产品, and 作品 their “item/product/work” feel?",
-      "back": "品. 商品 = goods; 产品 = product; 作品 = created work. 品 often means an item/type/quality in compounds.",
+      "front": "Which bound character is the shared morpheme in shāngpǐn (goods), chǎnpǐn (product), and zuòpǐn (a created work), giving an “item/product/work” feel?",
+      "back": "品。商品 = goods; 产品 = product; 作品 = created work; 品 often means an item/type/quality。",
       "retrievalTarget": "Recognize 品 as the item/product/quality morpheme in common compounds.",
-      "tier": "T3",
-      "passed": false,
+      "tier": "T2",
+      "passed": true,
       "unknownCount": 0,
       "unknowns": [],
-      "frontAnswerLeak": {
-        "answer": "品",
-        "mode": "leadingAnswer"
-      },
-      "issues": [
-        "front contains leading back answer: 品"
-      ]
+      "frontAnswerLeak": null,
+      "issues": []
     },
     {
       "file": "hsk5-181-240.json",
@@ -4305,7 +3932,7 @@
       "front": "In 品茶 or 品一品, the action is not buying a product. What kind of careful action is it?",
       "back": "品 can mean taste/sample and judge carefully. 品茶 = taste tea; 品一品 = taste/consider it carefully.",
       "retrievalTarget": "Recognize 品 as “taste/sample/judge carefully” in verb uses like 品茶.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -4322,7 +3949,7 @@
       "front": "You gather stamps, data, or examples from many places: 我在___资料。",
       "back": "我在收集资料 = I am collecting materials/data. 收集 focuses on gathering items together over time.",
       "retrievalTarget": "Use 收集 for collecting/gathering items, data, examples, or materials.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -4339,7 +3966,7 @@
       "front": "On TV, radio, or a video site, which word means the channel you watch or follow?",
       "back": "频道. 换频道 = change channels; 这个频道 = this channel. 道 here is not a road but a channel/path.",
       "retrievalTarget": "Use 频道 for TV/radio/media channels or frequency channels.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -4356,7 +3983,7 @@
       "front": "Written style: one fact causes another result. Which verb links cause to result, as in “rain made the road hard to walk”?",
       "back": "使得. 大雨使得路很难走 = heavy rain made the road hard to walk [大雨 = heavy rain]. It is more written than 让.",
       "retrievalTarget": "Use 使得 as a written/formal cause-result linker meaning “make/cause.”",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -4373,7 +4000,7 @@
       "front": "Someone looks back to earlier years and says “back then / in those days.” Which time word?",
       "back": "当年. 当年我还小 = back then I was still young. It points to a remembered past period, not this year.",
       "retrievalTarget": "Interpret 当年 as “back then / in those days” for a past period.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -4407,7 +4034,7 @@
       "front": "A plan has not enough money or experience; a formal report names the deficiency. Which word?",
       "back": "不足. 经验不足 = insufficient experience; 资金不足 = funds are insufficient [资金 = funds]. It can be adjective or noun.",
       "retrievalTarget": "Use 不足 for insufficiency or a deficiency, especially in formal evaluation.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -4424,7 +4051,7 @@
       "front": "You tell someone strongly before danger or punishment: 我___过你。",
       "back": "我警告过你 = I warned you. 警告 is stronger/formal warning, often before danger, rules, or consequences.",
       "retrievalTarget": "Use 警告 for a strong or formal warning.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -4441,7 +4068,7 @@
       "front": "There is a theft or danger, so you call the police. Which verb?",
       "back": "报警. 快报警！ = call the police quickly! It can also mean an alarm device sounds.",
       "retrievalTarget": "Use 报警 for reporting to police/calling police, and recognize the alarm-sounding sense.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -4458,7 +4085,7 @@
       "front": "A company talks about the work/services it provides, not “business” as a shop. Which formal noun?",
       "back": "业务. 银行业务 = banking services/business [银行 = bank]; 主要业务 = main business/service area.",
       "retrievalTarget": "Use 业务 for a company’s professional work, service line, or business area.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -4475,7 +4102,7 @@
       "front": "A formal sign or license talks about operating a car, ship, or plane. Which verb is more formal than 开车?",
       "back": "驾驶. 驾驶汽车 = drive a car; 驾驶飞机 = pilot a plane. 开车 is everyday for driving a car.",
       "retrievalTarget": "Use 驾驶 for formal driving/piloting/operating vehicles.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -4492,7 +4119,7 @@
       "front": "A sign says “take bus/train/plane” in a formal way. Which verb can also mean multiply in math?",
       "back": "乘. 乘公共汽车 = take a bus; 乘火车 = take a train. In math, 三乘二 = three times two.",
       "retrievalTarget": "Recognize 乘 as formal “ride/take transport” and as math “multiply.”",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -4526,7 +4153,7 @@
       "front": "A book is officially brought out by a press. Which verb means publish, not merely post online?",
       "back": "出版. 这本书出版了 = this book was published. 出版社 = publishing house [社 = society/agency].",
       "retrievalTarget": "Use 出版 for formal publication of books, magazines, or editions.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -4543,7 +4170,7 @@
       "front": "Something feels almost magical or miraculous, not just good: 这个地方很___。",
       "back": "这个地方很神奇. 神奇 means magical/miraculous/amazing, often because it feels beyond ordinary explanation.",
       "retrievalTarget": "Use 神奇 for magical, miraculous, or strangely amazing things.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -4560,7 +4187,7 @@
       "front": "A doctor identifies what illness someone has. Which medical verb means diagnose?",
       "back": "诊断. 医生诊断出问题 = the doctor diagnosed/identified the problem. 诊断结果 = diagnosis result.",
       "retrievalTarget": "Use 诊断 for medical or technical diagnosis/identification of a problem.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -4577,7 +4204,7 @@
       "front": "You cut hair or paper with scissors: 我想___头发。",
       "back": "我想剪头发. 剪 means cut with scissors/trim; 切 is cutting with a knife or slicing.",
       "retrievalTarget": "Use 剪 for cutting or trimming with scissors, especially hair/paper.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -4591,36 +4218,25 @@
       "gloss": "to launch; fire; emit",
       "cardIndex": 0,
       "type": "disambiguation",
-      "front": "A rocket is launched, a bullet is fired, or a signal is emitted. Which verb covers this sending-out action?",
-      "back": "发射. 发射火箭 = launch a rocket [火箭 = rocket]; 发射信号 = send/emit a signal [信号 = signal].",
+      "front": "A rocket is launched, a bullet fired, or a signal emitted — which verb covers this “sending out” action?",
+      "back": "发射。发射火箭 (huǒjiàn = rocket) = launch a rocket; 发射信号 = emit a signal。",
       "retrievalTarget": "Use 发射 for launching/firing/emitting projectiles, rockets, or signals.",
-      "tier": "T3",
-      "passed": false,
-      "unknownCount": 2,
+      "tier": "T2",
+      "passed": true,
+      "unknownCount": 1,
       "unknowns": [
         {
           "text": "箭",
           "source": "back",
           "hanRun": "发射火箭",
-          "start": 7,
-          "end": 8,
+          "start": 6,
+          "end": 7,
           "glossed": true,
-          "context": "发射. 发射火箭 = launch a "
-        },
-        {
-          "text": "箭",
-          "source": "back",
-          "hanRun": "火箭",
-          "start": 29,
-          "end": 30,
-          "glossed": true,
-          "context": " a rocket [火箭 = rocket]; "
+          "context": "发射。发射火箭 (huǒjiàn = "
         }
       ],
       "frontAnswerLeak": null,
-      "issues": [
-        "unknowns>1: 箭, 箭"
-      ]
+      "issues": []
     },
     {
       "file": "hsk5-181-240.json",
@@ -4632,7 +4248,7 @@
       "front": "Colloquial: use your brain! 动动___！",
       "back": "动动脑子！脑子 = brains/mind in everyday speech. 大脑 [anatomical/formal brain] is another, more medical term.",
       "retrievalTarget": "Use 脑子 for colloquial brains/mind in everyday speech.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -4649,7 +4265,7 @@
       "front": "Success came at a high cost — not just money, but time, health, or loss. Which word captures that broader cost?",
       "back": "代价. 付出很大的代价 = pay a big price/cost. 价格 is market price; 代价 is cost/sacrifice/consequence.",
       "retrievalTarget": "Use 代价 for cost as sacrifice or consequence, not ordinary market price.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -4666,7 +4282,7 @@
       "front": "The head of a government bureau/office: 他是这个局的___。",
       "back": "他是这个局的局长. 局 = bureau/office; 局长 = bureau chief. Pattern: department/office + 长.",
       "retrievalTarget": "Use 局长 for the head/chief of a bureau or government office.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -4683,7 +4299,7 @@
       "front": "The subway is very crowded, people are squeezed together: 地铁里太___了。",
       "back": "地铁里太挤了. 挤 can describe crowded conditions or the action of squeezing/pressing: 挤进去 = squeeze in.",
       "retrievalTarget": "Use 挤 for crowded conditions and squeezing/pressing actions.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -4700,7 +4316,7 @@
       "front": "Northern colloquial speech uses a casual verb for “look/see,” including “see a doctor.” Which word?",
       "back": "瞧. 你瞧！ = look!/see! 瞧病 = see a doctor. It is more northern/colloquial than 看.",
       "retrievalTarget": "Recognize 瞧 as colloquial “look/see,” especially in northern speech.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -4717,7 +4333,7 @@
       "front": "You type keywords to find information online: 在网上___。",
       "back": "在网上搜索. 搜索 = search the web, a database, or a place. 搜 is the shorter everyday form.",
       "retrievalTarget": "Use 搜索 for systematic searching of places, databases, or the web.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -4768,7 +4384,7 @@
       "front": "Formal writing says “within this time/range,” not physical inside a box. Which phrase?",
       "back": "之内. 在三天之内 = within three days. 在这个范围之内 = within this scope [范围 = scope]. More written than 里面.",
       "retrievalTarget": "Interpret 之内 as formal “within/inside” for time, ranges, or abstract scope.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -4782,45 +4398,25 @@
       "gloss": "to register; enroll",
       "cardIndex": 0,
       "type": "production",
-      "front": "You create an account on a website: 请先___一个账号。",
-      "back": "请先注册一个账号. 注册 = register/enroll [账号 = account]. Also: 注册公司 = register a company.",
+      "front": "Create an account on a website: 请先 ___ 一个账号 (zhànghào = account)。",
+      "back": "注册 — register/enroll. Also 注册公司 = register a company。",
       "retrievalTarget": "Use 注册 for registering accounts, companies, or enrollment.",
-      "tier": "T3",
-      "passed": false,
-      "unknownCount": 3,
+      "tier": "T2",
+      "passed": true,
+      "unknownCount": 1,
       "unknowns": [
         {
           "text": "账",
           "source": "front",
           "hanRun": "一个账号",
-          "start": 43,
-          "end": 44,
-          "glossed": false,
-          "context": "ite: 请先___一个账号。"
-        },
-        {
-          "text": "账",
-          "source": "back",
-          "hanRun": "请先注册一个账号",
-          "start": 6,
-          "end": 7,
-          "glossed": false,
-          "context": "请先注册一个账号. 注册 = regi"
-        },
-        {
-          "text": "账",
-          "source": "back",
-          "hanRun": "账号",
-          "start": 32,
-          "end": 33,
+          "start": 41,
+          "end": 42,
           "glossed": true,
-          "context": "ter/enroll [账号 = account]"
+          "context": "e: 请先 ___ 一个账号 (zhànghào "
         }
       ],
       "frontAnswerLeak": null,
-      "issues": [
-        "unknowns>1: 账, 账, 账"
-      ]
+      "issues": []
     },
     {
       "file": "hsk5-181-240.json",
@@ -4829,58 +4425,25 @@
       "gloss": "hall; living room; office/department",
       "cardIndex": 0,
       "type": "collocation",
-      "front": "Which one-syllable room/hall word appears in 餐厅, 客厅, and 办公厅?",
-      "back": "厅. 餐厅 = dining hall/restaurant; 客厅 = living room [客 = guest]; 办公厅 = office hall/department [办公 = office work].",
+      "front": "Which one-syllable “hall/room” morpheme appears in “餐___” (dining hall), a living room, and office rooms?",
+      "back": "厅。餐厅 = dining hall/restaurant; 客厅 (kè) = living room; also used for offices and departments。",
       "retrievalTarget": "Recognize 厅 as a hall/room/department morpheme in compounds.",
       "tier": "T2",
-      "passed": false,
-      "unknownCount": 4,
+      "passed": true,
+      "unknownCount": 1,
       "unknowns": [
         {
-          "text": "公",
+          "text": "餐",
           "source": "front",
-          "hanRun": "办公厅",
-          "start": 58,
-          "end": 59,
+          "hanRun": "餐",
+          "start": 52,
+          "end": 53,
           "glossed": true,
-          "context": "厅, 客厅, and 办公厅?"
-        },
-        {
-          "text": "客",
-          "source": "back",
-          "hanRun": "客",
-          "start": 50,
-          "end": 51,
-          "glossed": true,
-          "context": "iving room [客 = guest]; 办"
-        },
-        {
-          "text": "公",
-          "source": "back",
-          "hanRun": "办公厅",
-          "start": 63,
-          "end": 64,
-          "glossed": true,
-          "context": " = guest]; 办公厅 = office h"
-        },
-        {
-          "text": "公",
-          "source": "back",
-          "hanRun": "办公",
-          "start": 93,
-          "end": 94,
-          "glossed": true,
-          "context": "epartment [办公 = office wo"
+          "context": "appears in “餐___” (dining"
         }
       ],
-      "frontAnswerLeak": {
-        "answer": "厅",
-        "mode": "leadingAnswer"
-      },
-      "issues": [
-        "unknowns>1: 公, 客, 公, 公",
-        "front contains leading back answer: 厅"
-      ]
+      "frontAnswerLeak": null,
+      "issues": []
     },
     {
       "file": "hsk5-181-240.json",
@@ -4892,7 +4455,7 @@
       "front": "A written sentence says one thing changes together with another: ___时间过去，事情变了。",
       "back": "随着时间过去，事情变了 = as time passed, things changed. 随着 marks one change accompanying another.",
       "retrievalTarget": "Use 随着 as “along with / as X happens” to mark accompanying change.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -4909,7 +4472,7 @@
       "front": "Someone helped you; you want to give something back. In another context, you report results back. Which word covers both?",
       "back": "回报. 回报社会 = give back to society; 回报结果 = report back results. 回 = return; 报 = repay/report.",
       "retrievalTarget": "Distinguish 回报 as reciprocate/give back from 回报 as report back.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -4926,7 +4489,7 @@
       "front": "A painting reveals the artist’s feelings: 这幅画___了作者的感情。",
       "back": "这幅画展现了作者的感情. 展现 = reveal/display/unfold [感情 = feelings/emotion]. More unfolding than simple 显示.",
       "retrievalTarget": "Use 展现 for revealing, displaying, or unfolding before one's eyes.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -4943,7 +4506,7 @@
       "front": "Before a big decision, experts evaluate the situation: 专家___了情况。",
       "back": "专家评估了情况. 评估 = evaluate/assess [情况 = situation]. It is more formal than 看看 or 判断 [judge/decide].",
       "retrievalTarget": "Use 评估 for formal evaluation or assessment.",
-      "tier": "T3",
+      "tier": "T2",
       "passed": true,
       "unknownCount": 0,
       "unknowns": [],
@@ -5093,12 +4656,12 @@
       "gloss": "photography; filming; to shoot",
       "cardIndex": 0,
       "type": "disambiguation",
-      "front": "Not just taking one casual photo: the art/work of taking photos or shooting film. Which word?",
-      "back": "摄影。摄影师 = photographer [师 = professional/person]; 摄影 can also mean filming a movie.",
+      "front": "Not one casual photo, but the art or work of taking photos or shooting film — which word?",
+      "back": "摄影。摄影师 (shī = professional) = photographer; 摄影 can also mean filming a movie。",
       "retrievalTarget": "Choose 摄影 for photography or filming as an activity/profession, beyond one casual photo.",
       "tier": "T2",
-      "passed": false,
-      "unknownCount": 2,
+      "passed": true,
+      "unknownCount": 1,
       "unknowns": [
         {
           "text": "师",
@@ -5107,22 +4670,11 @@
           "start": 5,
           "end": 6,
           "glossed": true,
-          "context": "摄影。摄影师 = photograp"
-        },
-        {
-          "text": "师",
-          "source": "back",
-          "hanRun": "师",
-          "start": 23,
-          "end": 24,
-          "glossed": true,
-          "context": "otographer [师 = professio"
+          "context": "摄影。摄影师 (shī = prof"
         }
       ],
       "frontAnswerLeak": null,
-      "issues": [
-        "unknowns>1: 师, 师"
-      ]
+      "issues": []
     },
     {
       "file": "hsk5-241-300.json",
@@ -5318,49 +4870,25 @@
       "gloss": "rat; mouse (bound form)",
       "cardIndex": 0,
       "type": "collocation",
-      "front": "Which bound animal character appears in 老鼠 and 鼠标?",
-      "back": "鼠。老鼠 = rat/mouse; 鼠标 = computer mouse [标 = marker]. 鼠 is usually bound, not a common standalone spoken noun.",
+      "front": "Which bound animal character appears in “老___” (rat) and “___标” (computer mouse)?",
+      "back": "鼠。老鼠 = rat/mouse; also the word for a computer mouse; 鼠 is usually bound, not a standalone spoken noun。",
       "retrievalTarget": "Recognize 鼠 as the rat/mouse morpheme in compounds such as 老鼠 and 鼠标.",
       "tier": "T2",
-      "passed": false,
-      "unknownCount": 3,
+      "passed": true,
+      "unknownCount": 1,
       "unknowns": [
         {
           "text": "标",
           "source": "front",
-          "hanRun": "鼠标",
-          "start": 48,
-          "end": 49,
-          "glossed": true,
-          "context": " in 老鼠 and 鼠标?"
-        },
-        {
-          "text": "标",
-          "source": "back",
-          "hanRun": "鼠标",
-          "start": 19,
-          "end": 20,
-          "glossed": true,
-          "context": "rat/mouse; 鼠标 = computer "
-        },
-        {
-          "text": "标",
-          "source": "back",
           "hanRun": "标",
-          "start": 39,
-          "end": 40,
+          "start": 61,
+          "end": 62,
           "glossed": true,
-          "context": "uter mouse [标 = marker]. "
+          "context": "at) and “___标” (computer "
         }
       ],
-      "frontAnswerLeak": {
-        "answer": "鼠",
-        "mode": "leadingAnswer"
-      },
-      "issues": [
-        "unknowns>1: 标, 标, 标",
-        "front contains leading back answer: 鼠"
-      ]
+      "frontAnswerLeak": null,
+      "issues": []
     },
     {
       "file": "hsk5-241-300.json",
@@ -6331,36 +5859,25 @@
       "gloss": "society; organization; agency (bound form)",
       "cardIndex": 0,
       "type": "collocation",
-      "front": "Which bound character appears in words for a publishing house, news agency, or student club/society?",
-      "back": "社. 出版社 = publishing house [出版 = publish]; 通讯社 = news agency [通讯 = communication]; 社团 = club/society [团 = group].",
+      "front": "Which bound character appears in words for a publishing house, a news agency, and a student club/society?",
+      "back": "社。出版社 = publishing house; 通讯社 (tōngxùn = communication) = news agency; 社团 = club/society。",
       "retrievalTarget": "Recognize 社 as the organization/society/agency morpheme in compounds.",
       "tier": "T2",
-      "passed": false,
-      "unknownCount": 2,
+      "passed": true,
+      "unknownCount": 1,
       "unknowns": [
         {
           "text": "讯",
           "source": "back",
           "hanRun": "通讯社",
-          "start": 43,
-          "end": 44,
+          "start": 27,
+          "end": 28,
           "glossed": true,
-          "context": " publish]; 通讯社 = news age"
-        },
-        {
-          "text": "讯",
-          "source": "back",
-          "hanRun": "通讯",
-          "start": 62,
-          "end": 63,
-          "glossed": true,
-          "context": "ws agency [通讯 = communica"
+          "context": "ing house; 通讯社 (tōngxùn ="
         }
       ],
       "frontAnswerLeak": null,
-      "issues": [
-        "unknowns>1: 讯, 讯"
-      ]
+      "issues": []
     },
     {
       "file": "hsk5-301-360.json",
@@ -6675,36 +6192,25 @@
       "gloss": "to separate; be separated",
       "cardIndex": 0,
       "type": "disambiguation",
-      "front": "Two things or people that were together become apart. Which formal verb means separate?",
-      "back": "分离. 母子分离 = mother and child are separated [母子 = mother and child]. It is more written/formal than 分开.",
+      "front": "Two things or people once together become apart — which formal verb (more written than 分开) means “separate”?",
+      "back": "分离。母子分离 (mǔzǐ = mother and child) = they are separated; more formal than 分开。",
       "retrievalTarget": "Choose 分离 for formal separation of people, things, or parts.",
       "tier": "T2",
-      "passed": false,
-      "unknownCount": 2,
+      "passed": true,
+      "unknownCount": 1,
       "unknowns": [
         {
           "text": "母",
           "source": "back",
           "hanRun": "母子分离",
-          "start": 4,
-          "end": 5,
-          "glossed": false,
-          "context": "分离. 母子分离 = mother"
-        },
-        {
-          "text": "母",
-          "source": "back",
-          "hanRun": "母子",
-          "start": 43,
-          "end": 44,
+          "start": 3,
+          "end": 4,
           "glossed": true,
-          "context": " separated [母子 = mother a"
+          "context": "分离。母子分离 (mǔzǐ = "
         }
       ],
       "frontAnswerLeak": null,
-      "issues": [
-        "unknowns>1: 母, 母"
-      ]
+      "issues": []
     },
     {
       "file": "hsk5-301-360.json",

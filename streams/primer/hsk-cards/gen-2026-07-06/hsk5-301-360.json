@@ -278,8 +278,8 @@
     "cards": [
       {
         "type": "collocation",
-        "front": "Which bound character appears in words for a publishing house, news agency, or student club/society?",
-        "back": "社. 出版社 = publishing house [出版 = publish]; 通讯社 = news agency [通讯 = communication]; 社团 = club/society [团 = group].",
+        "front": "Which bound character appears in words for a publishing house, a news agency, and a student club/society?",
+        "back": "社。出版社 = publishing house; 通讯社 (tōngxùn = communication) = news agency; 社团 = club/society。",
         "retrievalTarget": "Recognize 社 as the organization/society/agency morpheme in compounds.",
         "tier": "T2",
         "verdict": "new",
@@ -582,8 +582,8 @@
     "cards": [
       {
         "type": "disambiguation",
-        "front": "Two things or people that were together become apart. Which formal verb means separate?",
-        "back": "分离. 母子分离 = mother and child are separated [母子 = mother and child]. It is more written/formal than 分开.",
+        "front": "Two things or people once together become apart — which formal verb (more written than 分开) means “separate”?",
+        "back": "分离。母子分离 (mǔzǐ = mother and child) = they are separated; more formal than 分开。",
         "retrievalTarget": "Choose 分离 for formal separation of people, things, or parts.",
         "tier": "T2",
         "verdict": "new",

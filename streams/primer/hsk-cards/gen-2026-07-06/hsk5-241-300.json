@@ -142,8 +142,8 @@
     "cards": [
       {
         "type": "disambiguation",
-        "front": "Not just taking one casual photo: the art/work of taking photos or shooting film. Which word?",
-        "back": "摄影。摄影师 = photographer [师 = professional/person]; 摄影 can also mean filming a movie.",
+        "front": "Not one casual photo, but the art or work of taking photos or shooting film — which word?",
+        "back": "摄影。摄影师 (shī = professional) = photographer; 摄影 can also mean filming a movie。",
         "retrievalTarget": "Choose 摄影 for photography or filming as an activity/profession, beyond one casual photo.",
         "tier": "T2",
         "verdict": "new",
@@ -346,8 +346,8 @@
     "cards": [
       {
         "type": "collocation",
-        "front": "Which bound animal character appears in 老鼠 and 鼠标?",
-        "back": "鼠。老鼠 = rat/mouse; 鼠标 = computer mouse [标 = marker]. 鼠 is usually bound, not a common standalone spoken noun.",
+        "front": "Which bound animal character appears in “老___” (rat) and “___标” (computer mouse)?",
+        "back": "鼠。老鼠 = rat/mouse; also the word for a computer mouse; 鼠 is usually bound, not a standalone spoken noun。",
         "retrievalTarget": "Recognize 鼠 as the rat/mouse morpheme in compounds such as 老鼠 and 鼠标.",
         "tier": "T2",
         "verdict": "new",

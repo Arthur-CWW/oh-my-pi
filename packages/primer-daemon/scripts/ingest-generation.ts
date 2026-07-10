@@ -28,6 +28,7 @@ interface FileIngestResult {
   updated: number
   skippedDup: number
   malformed: number
+  deleted: number
 }
 
 export interface IngestGenerationOptions {
@@ -331,6 +332,7 @@ function ingestAnnotationFile(db: Database, rootDir: string, filePath: string, n
   })
 
   const applyRows = db.transaction((batches: AnnotationBatch[]) => {
+    const seen = new Set<string>()
     for (const batch of batches) {
       const unitKey = firstText(batch.unit_key, batch.reading_unit_key)
       if (unitKey === null) {
@@ -341,6 +343,7 @@ function ingestAnnotationFile(db: Database, rootDir: string, filePath: string, n
         const annotation = batch.annotations[index]
         const rawJson = stableRawJson({ unit_key: unitKey, annotation })
         const annId = annotationIdFor(unitKey, annotation, index)
+        seen.add(annId)
         const existing = db
           .query<ExistingRow, [string, string]>("SELECT raw_json FROM annotations WHERE batch_id = ? AND ann_id = ?")
           .get(batchId, annId)
@@ -355,6 +358,7 @@ function ingestAnnotationFile(db: Database, rootDir: string, filePath: string, n
         }
       }
     }
+    result.deleted += reconcileAnnotationBatch(db, batchId, seen)
   })
   applyRows(envelope.unit_batches)
   return result
@@ -462,6 +466,7 @@ function ingestHskFile(db: Database, rootDir: string, filePath: string, now: () 
   })
 
   const applyRows = db.transaction((wordEntries: HskCardFile[]) => {
+    const seen = new Set<string>()
     for (const entry of wordEntries) {
       for (const card of entry.cards) {
         const normalizedCard = hskCardRow(card)
@@ -469,6 +474,7 @@ function ingestHskFile(db: Database, rootDir: string, filePath: string, now: () 
           result.malformed += 1
           continue
         }
+        seen.add(hskRowKey(entry.word, normalizedCard.type, normalizedCard.front))
         const rawJson = stableRawJson({ word: entry.word, pinyin: entry.pinyin, gloss: entry.gloss, card })
         const existing = db
           .query<ExistingRow, [string, string, string, string]>(
@@ -486,9 +492,44 @@ function ingestHskFile(db: Database, rootDir: string, filePath: string, now: () 
         }
       }
     }
+    result.deleted += reconcileHskBatch(db, batchId, seen)
   })
   applyRows(entries)
   return result
+}
+
+function reconcileAnnotationBatch(db: Database, batchId: string, seen: ReadonlySet<string>): number {
+  const rows = db.query<{ ann_id: string }, [string]>("SELECT ann_id FROM annotations WHERE batch_id = ?").all(batchId)
+  const del = db.query<NoRows, [string, string]>("DELETE FROM annotations WHERE batch_id = ? AND ann_id = ?")
+  let deleted = 0
+  for (const row of rows) {
+    if (seen.has(row.ann_id)) continue
+    del.run(batchId, row.ann_id)
+    deleted += 1
+  }
+  return deleted
+}
+
+function reconcileHskBatch(db: Database, batchId: string, seen: ReadonlySet<string>): number {
+  const rows = db
+    .query<{ word: string; card_type: string; front: string }, [string]>(
+      "SELECT word, card_type, front FROM hsk_cards WHERE batch_id = ?",
+    )
+    .all(batchId)
+  const del = db.query<NoRows, [string, string, string, string]>(
+    "DELETE FROM hsk_cards WHERE batch_id = ? AND word = ? AND card_type = ? AND front = ?",
+  )
+  let deleted = 0
+  for (const row of rows) {
+    if (seen.has(hskRowKey(row.word, row.card_type, row.front))) continue
+    del.run(batchId, row.word, row.card_type, row.front)
+    deleted += 1
+  }
+  return deleted
+}
+
+function hskRowKey(word: string, cardType: string, front: string): string {
+  return JSON.stringify([word, cardType, front])
 }
 
 function upsertGenerationBatch(
@@ -778,7 +819,7 @@ function stableRawJson(value: unknown): string {
 }
 
 function emptyFileResult(kind: BatchKind, sourceFile: string): FileIngestResult {
-  return { kind, sourceFile, inserted: 0, updated: 0, skippedDup: 0, malformed: 0 }
+  return { kind, sourceFile, inserted: 0, updated: 0, skippedDup: 0, malformed: 0, deleted: 0 }
 }
 
 function prepareStorePath(storePath: string): void {
@@ -793,7 +834,7 @@ function formatIngestReport(result: IngestGenerationResult): string {
   }
   for (const file of result.files) {
     lines.push(
-      `${file.kind} ${file.sourceFile}: inserted=${file.inserted} updated=${file.updated} skipped-dup=${file.skippedDup} malformed=${file.malformed}`,
+      `${file.kind} ${file.sourceFile}: inserted=${file.inserted} updated=${file.updated} skipped-dup=${file.skippedDup} deleted=${file.deleted} malformed=${file.malformed}`,
     )
   }
   return lines.join("\n")
