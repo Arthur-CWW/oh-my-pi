@@ -42,10 +42,10 @@ Notable repairs during the run:
 ## Reader (browse surface)
 
 - Multi-book: `#/` library home, `#/book/<slug>` reader; 11 library entries (meltdown, meltdown-deep staged, 9 books). IR pipeline: `bun run export:books` → `site/books/<slug>/reader-ir.json` + `index.json` (anchor re-verified at merge; 0 dropped on final build).
-- Theme system: token-driven, auto-follows system dark/light (matchMedia live), manual cycle auto→light→dark→terminal; terminal = TUI treatment (mono, phosphor).
+- QA screenshots: `READER/artifacts/tmp/reader-multibook-qa/` (v1), `reader-theme-qa/` (6 theme shots), `reader-phaseb-qa/` (per-view), `reader-final-qa/` (release sweep 01–09).
+- **Release QA (kimi lane, 2026-07-10): 8/8 PASS** — 11 covers + totals, genealogy reader (185 margin cards), meltdown-deep staged (45/45 rendered), review session graded live, scan triage verdicts persisted, theme cycle readable, zero window errors, write-back rows verified (review_grade + annotation_triage, work_slug-tagged).
+- Published via `bun run portless` → http://meltdown.localhost:1355/ (library home now multi-book).
 - Write-back: all interaction tables carry `work_slug`; reviewed rows proven in sqlite (e.g. `stage_card_for_agent`, work_slug `the-prince`).
-- QA screenshots: `READER/artifacts/tmp/reader-multibook-qa/` (v1), `reader-theme-qa/` (6 theme shots), `reader-phaseb-qa/` (library shelf / review / scan — Phase B).
-- Phase B views (library cover-wall, Anki-style review, keyboard triage scan): results appended below when gated.
 
 ## References captured
 
