@@ -164,6 +164,40 @@ export const commits = sqliteTable("commits", {
   ts: integer("ts").notNull(),
 })
 
+export const routingObservations = sqliteTable(
+  "routing_observations",
+  {
+    id: text("id").primaryKey(),
+    ts: integer("ts").notNull(),
+    machine: text("machine").notNull(),
+    session: text("session"),
+    agent: text("agent"),
+    lane: text("lane").notNull(),
+    workType: text("workType").notNull(),
+    verdict: text("verdict").notNull(),
+    note: text("note").notNull(),
+    evidence: text("evidence"),
+    confidence: real("confidence"),
+  },
+  (table) => [
+    index("routing_observations_lane_ts_idx").on(table.lane, table.ts),
+    index("routing_observations_workType_ts_idx").on(table.workType, table.ts),
+    index("routing_observations_verdict_ts_idx").on(table.verdict, table.ts),
+  ],
+)
+
+export const laneState = sqliteTable("lane_state", {
+  lane: text("lane").primaryKey(),
+  updatedTs: integer("updatedTs").notNull(),
+  updatedBy: text("updatedBy").notNull(),
+  status: text("status").notNull(),
+  exhaustedUntilTs: integer("exhaustedUntilTs"),
+  costTier: text("costTier"),
+  defaultFor: text("defaultFor"),
+  notes: text("notes"),
+})
+
+
 export const ledgerTables = {
   sessions,
   branches,
@@ -174,6 +208,8 @@ export const ledgerTables = {
   artifacts,
   packets,
   commits,
+  routingObservations,
+  laneState,
 } as const
 
 export type SessionRow = typeof sessions.$inferSelect
@@ -185,3 +221,5 @@ export type ProviderCallRow = typeof providerCalls.$inferSelect
 export type ArtifactRow = typeof artifacts.$inferSelect
 export type PacketRow = typeof packets.$inferSelect
 export type CommitRow = typeof commits.$inferSelect
+export type RoutingObservationRow = typeof routingObservations.$inferSelect
+export type LaneStateRow = typeof laneState.$inferSelect

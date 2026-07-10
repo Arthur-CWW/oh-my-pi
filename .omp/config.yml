@@ -1,6 +1,6 @@
 task:
   isolation:
     mode: apfs
-  softRequestBudget: 40
+  softRequestBudget: 80
 providers:
   webSearch: kagi

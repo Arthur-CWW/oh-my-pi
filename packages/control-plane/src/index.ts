@@ -1,5 +1,5 @@
 export { ArtifactError, StorageError } from "./errors"
-export { LEDGER_SCHEMA_VERSION, migrateLedger, migration0001Sql, migration0002Sql, setDurabilityPragmas } from "./migrate"
+export { LEDGER_SCHEMA_VERSION, migrateLedger, migration0001Sql, migration0002Sql, migration0003Sql, setDurabilityPragmas } from "./migrate"
 export {
   LedgerStore,
   defaultLedgerPath,
@@ -23,6 +23,27 @@ export {
   type StatusSummary,
   type TurnInput,
 } from "./ledger"
+export {
+  LaneCostTierSchema,
+  LaneStatusSchema,
+  RoutingStore,
+  RoutingVerdictSchema,
+  openRoutingStore,
+  parseLaneCostTier,
+  parseLaneStatus,
+  parseRoutingVerdict,
+  type LaneBrief,
+  type LaneBriefEntry,
+  type LaneBriefOptions,
+  type LaneCostTier,
+  type LaneStateInput,
+  type LaneStateWriteResult,
+  type LaneStatus,
+  type RoutingObservationFilters,
+  type RoutingObservationInput,
+  type RoutingStoreShape,
+  type RoutingVerdict,
+} from "./routing"
 export { ingestOutbox, type IngestOutboxOptions, type IngestOutboxResult } from "./ingest"
 export {
   JsonValueSchema,
@@ -57,14 +78,18 @@ export {
   packets,
   providerCalls,
   sessions,
+  laneState,
   turns,
+  routingObservations,
   type ArtifactRow,
   type BranchRow,
   type CommitRow,
+  type LaneStateRow,
   type EventRow,
   type ModelCallRow,
   type PacketRow,
   type ProviderCallRow,
+  type RoutingObservationRow,
   type SessionRow,
   type TurnRow,
 } from "./schema"

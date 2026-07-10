@@ -11,7 +11,7 @@ interface UserVersionRow {
   user_version: number
 }
 
-export const LEDGER_SCHEMA_VERSION = 2
+export const LEDGER_SCHEMA_VERSION = 3
 
 export const migration0001Sql = `
 CREATE TABLE IF NOT EXISTS sessions (
@@ -173,6 +173,40 @@ CREATE INDEX IF NOT EXISTS model_calls_session_entryId_idx ON model_calls (sessi
 PRAGMA user_version = 2;
 `
 
+export const migration0003Sql = `
+CREATE TABLE IF NOT EXISTS routing_observations (
+  id TEXT PRIMARY KEY,
+  ts INTEGER NOT NULL,
+  machine TEXT NOT NULL,
+  session TEXT,
+  agent TEXT,
+  lane TEXT NOT NULL,
+  workType TEXT NOT NULL,
+  verdict TEXT NOT NULL,
+  note TEXT NOT NULL,
+  evidence TEXT,
+  confidence REAL
+);
+
+CREATE TABLE IF NOT EXISTS lane_state (
+  lane TEXT PRIMARY KEY,
+  updatedTs INTEGER NOT NULL,
+  updatedBy TEXT NOT NULL,
+  status TEXT NOT NULL,
+  exhaustedUntilTs INTEGER,
+  costTier TEXT,
+  defaultFor TEXT,
+  notes TEXT
+);
+
+CREATE INDEX IF NOT EXISTS routing_observations_lane_ts_idx ON routing_observations (lane, ts);
+CREATE INDEX IF NOT EXISTS routing_observations_workType_ts_idx ON routing_observations (workType, ts);
+CREATE INDEX IF NOT EXISTS routing_observations_verdict_ts_idx ON routing_observations (verdict, ts);
+
+PRAGMA user_version = 3;
+`
+
+
 export function setDurabilityPragmas(sqlite: LedgerSqliteConnection): void {
   sqlite.exec("PRAGMA journal_mode = WAL")
   sqlite.exec("PRAGMA synchronous = NORMAL")
@@ -185,7 +219,10 @@ export function migrateLedger(sqlite: LedgerSqliteConnection): void {
   if (currentVersion < 1) {
     sqlite.exec(migration0001Sql)
   }
-  if (currentVersion < LEDGER_SCHEMA_VERSION) {
+  if (currentVersion < 2) {
     sqlite.exec(migration0002Sql)
+  }
+  if (currentVersion < 3) {
+    sqlite.exec(migration0003Sql)
   }
 }

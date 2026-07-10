@@ -196,7 +196,7 @@ test("ledger migration and fixture rows cover every row family", async () => {
     sqlite.exec("INSERT OR IGNORE INTO packets (id, title, lane, status, ownerPaths, excludedPaths, createdAt, updatedAt) VALUES ('packet-1', 'Packet', 'impl', 'done', '[]', '[]', 1000, 2000)")
     sqlite.exec("INSERT OR IGNORE INTO commits (sha, sessionId, agentId, packetId, ts) VALUES ('abc123', 'session-1', 'agent-1', 'packet-1', 2100)")
     const tableNames = sqlite.query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row) => row.name).sort()
-    expect(tableNames).toEqual(["artifacts", "branches", "commits", "events", "model_calls", "packets", "provider_calls", "sessions", "turns"])
+    expect(tableNames).toEqual(["artifacts", "branches", "commits", "events", "lane_state", "model_calls", "packets", "provider_calls", "routing_observations", "sessions", "turns"])
     expect(sqlite.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM packets").get()?.count).toBe(1)
     expect(sqlite.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM commits").get()?.count).toBe(1)
   } finally {

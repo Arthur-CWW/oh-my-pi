@@ -1,13 +1,27 @@
 #!/usr/bin/env bun
 
+import { randomUUID } from "node:crypto"
+import { hostname } from "node:os"
+
 import { Effect } from "effect"
 
 import { ArtifactError, StorageError } from "./errors"
 import { ingestOutbox } from "./ingest"
 import { LedgerStore, defaultLedgerPath, openLedger, type EventFilters, type ModelCallFilters, type StatusSummary } from "./ledger"
-import type { EventRow, ModelCallRow } from "./schema"
+import {
+  RoutingStore,
+  openRoutingStore,
+  parseRoutingVerdict,
+  type LaneBrief,
+  type RoutingObservationInput,
+  type RoutingVerdict,
+} from "./routing"
+import { seedRoutingStore, type RoutingSeedResult } from "./routing-seed"
+import type { EventRow, LaneStateRow, ModelCallRow, RoutingObservationRow } from "./schema"
 
-type Command = StatusCommand | ModelCallsCommand | EventsCommand | IngestCommand
+type Command = StatusCommand | ModelCallsCommand | EventsCommand | IngestCommand | RoutingCommand
+
+type RoutingCommand = RoutingObserveCommand | RoutingLanesCommand | RoutingBriefCommand | RoutingLogCommand | RoutingSeedCommand
 
 interface BaseCommand {
   readonly dbPath: string
@@ -31,6 +45,37 @@ interface EventsCommand extends BaseCommand {
 interface IngestCommand extends BaseCommand {
   readonly name: "ingest"
   readonly from: string
+}
+
+interface RoutingObserveCommand extends BaseCommand {
+  readonly name: "routing-observe"
+  readonly observation: RoutingObservationInput
+}
+
+interface RoutingLanesCommand extends BaseCommand {
+  readonly name: "routing-lanes"
+}
+
+interface RoutingBriefCommand extends BaseCommand {
+  readonly name: "routing-brief"
+  readonly lane?: string
+}
+
+interface RoutingLogCommand extends BaseCommand {
+  readonly name: "routing-log"
+  readonly filters: {
+    readonly lane?: string
+    readonly limit: number
+  }
+}
+
+interface RoutingSeedCommand extends BaseCommand {
+  readonly name: "routing-seed"
+}
+
+interface RoutingObserveResult {
+  readonly id: string
+  readonly inserted: boolean
 }
 
 interface CliFailure {
@@ -59,6 +104,16 @@ export async function runCli(argv: readonly string[] = Bun.argv.slice(2)): Promi
       return runEvents(parsed)
     case "ingest":
       return runIngest(parsed)
+    case "routing-observe":
+      return runRoutingObserve(parsed)
+    case "routing-lanes":
+      return runRoutingLanes(parsed)
+    case "routing-brief":
+      return runRoutingBrief(parsed)
+    case "routing-log":
+      return runRoutingLog(parsed)
+    case "routing-seed":
+      return runRoutingSeed(parsed)
   }
 }
 
@@ -68,7 +123,7 @@ function runStatus(command: StatusCommand): Promise<number> {
     return yield* store.statusSummary()
   }).pipe(Effect.provide(openLedger(command.dbPath)))
 
-  return runLedgerProgram(program, command.json, renderStatusTable)
+  return runStorageProgram(program, command.json, renderStatusTable)
 }
 
 function runModelCalls(command: ModelCallsCommand): Promise<number> {
@@ -77,7 +132,7 @@ function runModelCalls(command: ModelCallsCommand): Promise<number> {
     return yield* store.listModelCalls(command.filters)
   }).pipe(Effect.provide(openLedger(command.dbPath)))
 
-  return runLedgerProgram(program, command.json, renderModelCallsTable)
+  return runStorageProgram(program, command.json, renderModelCallsTable)
 }
 
 function runEvents(command: EventsCommand): Promise<number> {
@@ -86,15 +141,57 @@ function runEvents(command: EventsCommand): Promise<number> {
     return yield* store.listEvents(command.filters)
   }).pipe(Effect.provide(openLedger(command.dbPath)))
 
-  return runLedgerProgram(program, command.json, renderEventsTable)
+  return runStorageProgram(program, command.json, renderEventsTable)
 }
 
 function runIngest(command: IngestCommand): Promise<number> {
   const program = ingestOutbox(command.from).pipe(Effect.provide(openLedger(command.dbPath)))
-  return runLedgerProgram(program, command.json, renderIngestTable)
+  return runStorageProgram(program, command.json, renderIngestTable)
 }
 
-async function runLedgerProgram<A>(
+function runRoutingObserve(command: RoutingObserveCommand): Promise<number> {
+  const program = Effect.gen(function* () {
+    const store = yield* RoutingStore
+    const result = yield* store.recordObservation(command.observation)
+    return { id: command.observation.id, inserted: result.inserted }
+  }).pipe(Effect.provide(openRoutingStore(command.dbPath)))
+
+  return runStorageProgram(program, command.json, renderRoutingObserveTable)
+}
+
+function runRoutingLanes(command: RoutingLanesCommand): Promise<number> {
+  const program = Effect.gen(function* () {
+    const store = yield* RoutingStore
+    return yield* store.getLaneState()
+  }).pipe(Effect.provide(openRoutingStore(command.dbPath)))
+
+  return runStorageProgram(program, command.json, (value) => renderLaneStateTable(value as readonly LaneStateRow[]))
+}
+
+function runRoutingBrief(command: RoutingBriefCommand): Promise<number> {
+  const program = Effect.gen(function* () {
+    const store = yield* RoutingStore
+    return yield* store.laneBrief({ lane: command.lane })
+  }).pipe(Effect.provide(openRoutingStore(command.dbPath)))
+
+  return runStorageProgram(program, command.json, renderLaneBriefTable)
+}
+
+function runRoutingLog(command: RoutingLogCommand): Promise<number> {
+  const program = Effect.gen(function* () {
+    const store = yield* RoutingStore
+    return yield* store.listObservations(command.filters)
+  }).pipe(Effect.provide(openRoutingStore(command.dbPath)))
+
+  return runStorageProgram(program, command.json, renderRoutingLogTable)
+}
+
+function runRoutingSeed(command: RoutingSeedCommand): Promise<number> {
+  const program = seedRoutingStore().pipe(Effect.provide(openRoutingStore(command.dbPath)))
+  return runStorageProgram(program, command.json, renderRoutingSeedTable)
+}
+
+async function runStorageProgram<A>(
   program: Effect.Effect<A, StorageError | ArtifactError>,
   json: boolean,
   renderTable: (value: A) => string,
@@ -127,6 +224,8 @@ function parseCommand(argv: readonly string[]): Command | CliUsageError {
       return parseEvents(argv.slice(1), base)
     case "ingest":
       return parseIngest(argv.slice(1), base)
+    case "routing":
+      return parseRouting(argv.slice(1), base)
     default:
       return usage(`unknown command: ${commandName}`)
   }
@@ -325,6 +424,292 @@ function parseIngest(argv: readonly string[], base: BaseCommand): IngestCommand 
   return { name: "ingest", dbPath, json, from }
 }
 
+function parseRouting(argv: readonly string[], base: BaseCommand): RoutingCommand | CliUsageError {
+  const subcommand = argv[0]
+  if (subcommand === undefined) return usage("routing requires a subcommand")
+
+  switch (subcommand) {
+    case "observe":
+      return parseRoutingObserve(argv.slice(1), base)
+    case "lanes":
+      return parseRoutingLanes(argv.slice(1), base)
+    case "brief":
+      return parseRoutingBrief(argv.slice(1), base)
+    case "log":
+      return parseRoutingLog(argv.slice(1), base)
+    case "seed":
+      return parseRoutingSeed(argv.slice(1), base)
+    default:
+      return usage(`unknown routing subcommand: ${subcommand}`)
+  }
+}
+
+function parseRoutingObserve(argv: readonly string[], base: BaseCommand): RoutingObserveCommand | CliUsageError {
+  let dbPath = base.dbPath
+  let json = base.json
+  let id: string | undefined
+  let ts = Date.now()
+  let machine = hostname()
+  let session: string | undefined
+  let agent: string | undefined
+  let lane: string | undefined
+  let workType: string | undefined
+  let verdict: RoutingVerdict | undefined
+  let note: string | undefined
+  let evidence: string | undefined
+  let confidence: number | undefined
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index]
+    if (arg === "--json") {
+      json = true
+    } else if (arg === "--db") {
+      const value = requiredValue(argv, index, "--db")
+      if (value instanceof CliUsageError) return value
+      dbPath = value
+      index += 1
+    } else if (arg?.startsWith("--db=")) {
+      dbPath = arg.slice("--db=".length)
+    } else if (arg === "--id") {
+      const value = requiredValue(argv, index, "--id")
+      if (value instanceof CliUsageError) return value
+      id = value
+      index += 1
+    } else if (arg?.startsWith("--id=")) {
+      id = arg.slice("--id=".length)
+    } else if (arg === "--ts") {
+      const value = requiredValue(argv, index, "--ts")
+      if (value instanceof CliUsageError) return value
+      const parsed = parseSince(value)
+      if (parsed instanceof CliUsageError) return parsed
+      ts = parsed
+      index += 1
+    } else if (arg?.startsWith("--ts=")) {
+      const parsed = parseSince(arg.slice("--ts=".length))
+      if (parsed instanceof CliUsageError) return parsed
+      ts = parsed
+    } else if (arg === "--machine") {
+      const value = requiredValue(argv, index, "--machine")
+      if (value instanceof CliUsageError) return value
+      machine = value
+      index += 1
+    } else if (arg?.startsWith("--machine=")) {
+      machine = arg.slice("--machine=".length)
+    } else if (arg === "--session") {
+      const value = requiredValue(argv, index, "--session")
+      if (value instanceof CliUsageError) return value
+      session = value
+      index += 1
+    } else if (arg?.startsWith("--session=")) {
+      session = arg.slice("--session=".length)
+    } else if (arg === "--agent") {
+      const value = requiredValue(argv, index, "--agent")
+      if (value instanceof CliUsageError) return value
+      agent = value
+      index += 1
+    } else if (arg?.startsWith("--agent=")) {
+      agent = arg.slice("--agent=".length)
+    } else if (arg === "--lane") {
+      const value = requiredValue(argv, index, "--lane")
+      if (value instanceof CliUsageError) return value
+      lane = value
+      index += 1
+    } else if (arg?.startsWith("--lane=")) {
+      lane = arg.slice("--lane=".length)
+    } else if (arg === "--work-type") {
+      const value = requiredValue(argv, index, "--work-type")
+      if (value instanceof CliUsageError) return value
+      workType = value
+      index += 1
+    } else if (arg?.startsWith("--work-type=")) {
+      workType = arg.slice("--work-type=".length)
+    } else if (arg === "--verdict") {
+      const value = requiredValue(argv, index, "--verdict")
+      if (value instanceof CliUsageError) return value
+      const parsed = parseRoutingVerdict(value)
+      if (parsed === null) return usage(`invalid --verdict: ${value}`)
+      verdict = parsed
+      index += 1
+    } else if (arg?.startsWith("--verdict=")) {
+      const value = arg.slice("--verdict=".length)
+      const parsed = parseRoutingVerdict(value)
+      if (parsed === null) return usage(`invalid --verdict: ${value}`)
+      verdict = parsed
+    } else if (arg === "--note") {
+      const value = requiredValue(argv, index, "--note")
+      if (value instanceof CliUsageError) return value
+      note = value
+      index += 1
+    } else if (arg?.startsWith("--note=")) {
+      note = arg.slice("--note=".length)
+    } else if (arg === "--evidence") {
+      const value = requiredValue(argv, index, "--evidence")
+      if (value instanceof CliUsageError) return value
+      evidence = value
+      index += 1
+    } else if (arg?.startsWith("--evidence=")) {
+      evidence = arg.slice("--evidence=".length)
+    } else if (arg === "--confidence") {
+      const value = requiredValue(argv, index, "--confidence")
+      if (value instanceof CliUsageError) return value
+      const parsed = parseConfidence(value)
+      if (parsed instanceof CliUsageError) return parsed
+      confidence = parsed
+      index += 1
+    } else if (arg?.startsWith("--confidence=")) {
+      const parsed = parseConfidence(arg.slice("--confidence=".length))
+      if (parsed instanceof CliUsageError) return parsed
+      confidence = parsed
+    } else {
+      return usage(`unknown routing observe option: ${arg}`)
+    }
+  }
+
+  if (lane === undefined || lane.length === 0) return usage("routing observe requires --lane <lane>")
+  if (workType === undefined || workType.length === 0) return usage("routing observe requires --work-type <workType>")
+  if (verdict === undefined) return usage("routing observe requires --verdict <verdict>")
+  if (note === undefined || note.length === 0) return usage("routing observe requires --note <note>")
+
+  return {
+    name: "routing-observe",
+    dbPath,
+    json,
+    observation: {
+      id: id ?? `cli:${ts}:${randomUUID()}`,
+      ts,
+      machine,
+      session,
+      agent,
+      lane,
+      workType,
+      verdict,
+      note,
+      evidence,
+      confidence,
+    },
+  }
+}
+
+function parseRoutingLanes(argv: readonly string[], base: BaseCommand): RoutingLanesCommand | CliUsageError {
+  let dbPath = base.dbPath
+  let json = base.json
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index]
+    if (arg === "--json") {
+      json = true
+    } else if (arg === "--db") {
+      const value = requiredValue(argv, index, "--db")
+      if (value instanceof CliUsageError) return value
+      dbPath = value
+      index += 1
+    } else if (arg?.startsWith("--db=")) {
+      dbPath = arg.slice("--db=".length)
+    } else {
+      return usage(`unknown routing lanes option: ${arg}`)
+    }
+  }
+
+  return { name: "routing-lanes", dbPath, json }
+}
+
+function parseRoutingBrief(argv: readonly string[], base: BaseCommand): RoutingBriefCommand | CliUsageError {
+  let dbPath = base.dbPath
+  let json = base.json
+  let lane: string | undefined
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index]
+    if (arg === "--json") {
+      json = true
+    } else if (arg === "--db") {
+      const value = requiredValue(argv, index, "--db")
+      if (value instanceof CliUsageError) return value
+      dbPath = value
+      index += 1
+    } else if (arg?.startsWith("--db=")) {
+      dbPath = arg.slice("--db=".length)
+    } else if (arg === "--lane") {
+      const value = requiredValue(argv, index, "--lane")
+      if (value instanceof CliUsageError) return value
+      lane = value
+      index += 1
+    } else if (arg?.startsWith("--lane=")) {
+      lane = arg.slice("--lane=".length)
+    } else {
+      return usage(`unknown routing brief option: ${arg}`)
+    }
+  }
+
+  return { name: "routing-brief", dbPath, json, lane }
+}
+
+function parseRoutingLog(argv: readonly string[], base: BaseCommand): RoutingLogCommand | CliUsageError {
+  let dbPath = base.dbPath
+  let json = base.json
+  let lane: string | undefined
+  let limit = 50
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index]
+    if (arg === "--json") {
+      json = true
+    } else if (arg === "--db") {
+      const value = requiredValue(argv, index, "--db")
+      if (value instanceof CliUsageError) return value
+      dbPath = value
+      index += 1
+    } else if (arg?.startsWith("--db=")) {
+      dbPath = arg.slice("--db=".length)
+    } else if (arg === "--lane") {
+      const value = requiredValue(argv, index, "--lane")
+      if (value instanceof CliUsageError) return value
+      lane = value
+      index += 1
+    } else if (arg?.startsWith("--lane=")) {
+      lane = arg.slice("--lane=".length)
+    } else if (arg === "--limit") {
+      const value = requiredValue(argv, index, "--limit")
+      if (value instanceof CliUsageError) return value
+      const parsed = parseLimit(value)
+      if (parsed instanceof CliUsageError) return parsed
+      limit = parsed
+      index += 1
+    } else if (arg?.startsWith("--limit=")) {
+      const parsed = parseLimit(arg.slice("--limit=".length))
+      if (parsed instanceof CliUsageError) return parsed
+      limit = parsed
+    } else {
+      return usage(`unknown routing log option: ${arg}`)
+    }
+  }
+
+  return { name: "routing-log", dbPath, json, filters: { lane, limit } }
+}
+
+function parseRoutingSeed(argv: readonly string[], base: BaseCommand): RoutingSeedCommand | CliUsageError {
+  let dbPath = base.dbPath
+  let json = base.json
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index]
+    if (arg === "--json") {
+      json = true
+    } else if (arg === "--db") {
+      const value = requiredValue(argv, index, "--db")
+      if (value instanceof CliUsageError) return value
+      dbPath = value
+      index += 1
+    } else if (arg?.startsWith("--db=")) {
+      dbPath = arg.slice("--db=".length)
+    } else {
+      return usage(`unknown routing seed option: ${arg}`)
+    }
+  }
+
+  return { name: "routing-seed", dbPath, json }
+}
+
 function requiredValue(argv: readonly string[], index: number, flag: string): string | CliUsageError {
   const value = argv[index + 1]
   if (value === undefined || value.startsWith("--")) return usage(`${flag} requires a value`)
@@ -342,6 +727,12 @@ function parseSince(value: string): number | CliUsageError {
   const parsed = Date.parse(value)
   if (Number.isNaN(parsed)) return usage(`invalid --since: ${value}`)
   return parsed
+}
+
+function parseConfidence(value: string): number | CliUsageError {
+  const confidence = Number(value)
+  if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) return usage(`invalid --confidence: ${value}`)
+  return confidence
 }
 
 function cliFailure(error: StorageError | ArtifactError): CliFailure {
@@ -400,6 +791,60 @@ function renderIngestTable(result: { readonly inserted: number; readonly ignored
   return renderTable(["inserted", "ignored", "malformed"], [[result.inserted, result.ignored, result.malformed]])
 }
 
+function renderRoutingObserveTable(result: RoutingObserveResult): string {
+  return renderTable(["id", "inserted"], [[result.id, result.inserted ? "true" : "false"]])
+}
+
+function renderLaneStateTable(rows: readonly LaneStateRow[]): string {
+  return renderTable(
+    ["lane", "status", "costTier", "exhaustedUntilTs", "defaultFor", "notes", "updatedTs", "updatedBy"],
+    rows.map((row) => [
+      row.lane,
+      row.status,
+      row.costTier ?? "",
+      row.exhaustedUntilTs ?? "",
+      row.defaultFor ?? "",
+      row.notes ?? "",
+      row.updatedTs,
+      row.updatedBy,
+    ]),
+  )
+}
+
+function renderLaneBriefTable(brief: LaneBrief): string {
+  return renderTable(
+    ["lane", "status", "costTier", "recentObservations"],
+    brief.entries.map((entry) => [
+      entry.lane,
+      entry.state?.status ?? "",
+      entry.state?.costTier ?? "",
+      entry.observations.map((row) => `${row.verdict}:${row.workType}:${row.note}`).join(" | "),
+    ]),
+  )
+}
+
+function renderRoutingLogTable(rows: readonly RoutingObservationRow[]): string {
+  return renderTable(
+    ["ts", "lane", "workType", "verdict", "confidence", "evidence", "note"],
+    rows.map((row) => [
+      row.ts,
+      row.lane,
+      row.workType,
+      row.verdict,
+      row.confidence ?? "",
+      row.evidence ?? "",
+      row.note,
+    ]),
+  )
+}
+
+function renderRoutingSeedTable(result: RoutingSeedResult): string {
+  return renderTable(
+    ["observationsInserted", "observationsIgnored", "laneStatesWritten"],
+    [[result.observationsInserted, result.observationsIgnored, result.laneStatesWritten]],
+  )
+}
+
 type TableCell = string | number
 
 function renderTable(headers: readonly string[], rows: readonly (readonly TableCell[])[]): string {
@@ -420,7 +865,7 @@ function writeJsonError(error: CliFailure): void {
 }
 
 function usage(message: string): CliUsageError {
-  return new CliUsageError(`${message}. usage: control-plane <status|model-calls|events|ingest> [--db <path>] [--json]`)
+  return new CliUsageError(`${message}. usage: control-plane <status|model-calls|events|ingest|routing> [--db <path>] [--json]`)
 }
 
 if (import.meta.main) {
