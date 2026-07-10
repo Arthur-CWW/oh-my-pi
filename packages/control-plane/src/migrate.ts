@@ -11,7 +11,7 @@ interface UserVersionRow {
   user_version: number
 }
 
-export const LEDGER_SCHEMA_VERSION = 3
+export const LEDGER_SCHEMA_VERSION = 4
 
 export const migration0001Sql = `
 CREATE TABLE IF NOT EXISTS sessions (
@@ -206,6 +206,63 @@ CREATE INDEX IF NOT EXISTS routing_observations_verdict_ts_idx ON routing_observ
 PRAGMA user_version = 3;
 `
 
+export const migration0004Sql = `
+CREATE VIEW IF NOT EXISTS usage_by_lane_hour AS
+SELECT
+  provider || '/' || model AS lane,
+  (ts / 3600000) * 3600000 AS hourBucket,
+  COUNT(*) AS calls,
+  SUM(tokensIn) AS tokensIn,
+  SUM(tokensOut) AS tokensOut,
+  SUM(cacheRead) AS cacheRead,
+  SUM(cost) AS cost,
+  CAST(ROUND(AVG(latencyMs)) AS INTEGER) AS avgLatencyMs,
+  ROUND((SUM(tokensIn) + SUM(tokensOut)) / 60.0, 2) AS tokensPerMinute
+FROM model_calls
+GROUP BY lane, hourBucket;
+
+CREATE VIEW IF NOT EXISTS usage_by_agent AS
+SELECT
+  agent,
+  provider || '/' || model AS lane,
+  COUNT(*) AS calls,
+  SUM(tokensIn) AS tokensIn,
+  SUM(tokensOut) AS tokensOut,
+  SUM(cacheRead) AS cacheRead,
+  SUM(cost) AS cost,
+  CAST(ROUND(AVG(latencyMs)) AS INTEGER) AS avgLatencyMs,
+  MIN(ts) AS firstTs,
+  MAX(ts) AS lastTs,
+  CASE
+    WHEN MAX(ts) = MIN(ts) THEN 0.0
+    ELSE ROUND((SUM(tokensIn) + SUM(tokensOut)) * 60000.0 / (MAX(ts) - MIN(ts)), 2)
+  END AS tokensPerMinute
+FROM model_calls
+GROUP BY agent, lane;
+
+CREATE VIEW IF NOT EXISTS usage_by_session AS
+SELECT
+  session,
+  provider || '/' || model AS lane,
+  COUNT(*) AS calls,
+  SUM(tokensIn) AS tokensIn,
+  SUM(tokensOut) AS tokensOut,
+  SUM(cacheRead) AS cacheRead,
+  SUM(cost) AS cost,
+  CAST(ROUND(AVG(latencyMs)) AS INTEGER) AS avgLatencyMs,
+  MIN(ts) AS firstTs,
+  MAX(ts) AS lastTs,
+  CASE
+    WHEN MAX(ts) = MIN(ts) THEN 0.0
+    ELSE ROUND((SUM(tokensIn) + SUM(tokensOut)) * 60000.0 / (MAX(ts) - MIN(ts)), 2)
+  END AS tokensPerMinute
+FROM model_calls
+GROUP BY session, lane
+ORDER BY MAX(ts) DESC;
+
+PRAGMA user_version = 4;
+`
+
 
 export function setDurabilityPragmas(sqlite: LedgerSqliteConnection): void {
   sqlite.exec("PRAGMA journal_mode = WAL")
@@ -224,5 +281,8 @@ export function migrateLedger(sqlite: LedgerSqliteConnection): void {
   }
   if (currentVersion < 3) {
     sqlite.exec(migration0003Sql)
+  }
+  if (currentVersion < 4) {
+    sqlite.exec(migration0004Sql)
   }
 }

@@ -18,10 +18,13 @@ import {
 } from "./routing"
 import { seedRoutingStore, type RoutingSeedResult } from "./routing-seed"
 import type { EventRow, LaneStateRow, ModelCallRow, RoutingObservationRow } from "./schema"
+import { queryUsageByAgent, queryUsageByLaneHour, queryUsageBySession, type UsageByAgentRow, type UsageByLaneHourRow, type UsageBySessionRow } from "./stats"
 
-type Command = StatusCommand | ModelCallsCommand | EventsCommand | IngestCommand | RoutingCommand
+type Command = StatusCommand | ModelCallsCommand | EventsCommand | IngestCommand | RoutingCommand | StatsCommand
 
 type RoutingCommand = RoutingObserveCommand | RoutingLanesCommand | RoutingBriefCommand | RoutingLogCommand | RoutingSeedCommand
+
+type StatsCommand = StatsLanesCommand | StatsAgentsCommand | StatsSessionsCommand
 
 interface BaseCommand {
   readonly dbPath: string
@@ -73,6 +76,21 @@ interface RoutingSeedCommand extends BaseCommand {
   readonly name: "routing-seed"
 }
 
+interface StatsLanesCommand extends BaseCommand {
+  readonly name: "stats-lanes"
+  readonly sinceTs?: number
+}
+
+interface StatsAgentsCommand extends BaseCommand {
+  readonly name: "stats-agents"
+  readonly sinceTs?: number
+}
+
+interface StatsSessionsCommand extends BaseCommand {
+  readonly name: "stats-sessions"
+  readonly sinceTs?: number
+}
+
 interface RoutingObserveResult {
   readonly id: string
   readonly inserted: boolean
@@ -114,6 +132,12 @@ export async function runCli(argv: readonly string[] = Bun.argv.slice(2)): Promi
       return runRoutingLog(parsed)
     case "routing-seed":
       return runRoutingSeed(parsed)
+    case "stats-lanes":
+      return runStatsLanes(parsed)
+    case "stats-agents":
+      return runStatsAgents(parsed)
+    case "stats-sessions":
+      return runStatsSessions(parsed)
   }
 }
 
@@ -186,6 +210,21 @@ function runRoutingLog(command: RoutingLogCommand): Promise<number> {
   return runStorageProgram(program, command.json, renderRoutingLogTable)
 }
 
+function runStatsLanes(command: StatsLanesCommand): Promise<number> {
+  const program = queryUsageByLaneHour(command.dbPath, { sinceTs: command.sinceTs })
+  return runStorageProgram(program, command.json, renderStatsLanesTable)
+}
+
+function runStatsAgents(command: StatsAgentsCommand): Promise<number> {
+  const program = queryUsageByAgent(command.dbPath, { sinceTs: command.sinceTs })
+  return runStorageProgram(program, command.json, renderStatsAgentsTable)
+}
+
+function runStatsSessions(command: StatsSessionsCommand): Promise<number> {
+  const program = queryUsageBySession(command.dbPath, { sinceTs: command.sinceTs })
+  return runStorageProgram(program, command.json, renderStatsSessionsTable)
+}
+
 function runRoutingSeed(command: RoutingSeedCommand): Promise<number> {
   const program = seedRoutingStore().pipe(Effect.provide(openRoutingStore(command.dbPath)))
   return runStorageProgram(program, command.json, renderRoutingSeedTable)
@@ -226,6 +265,8 @@ function parseCommand(argv: readonly string[]): Command | CliUsageError {
       return parseIngest(argv.slice(1), base)
     case "routing":
       return parseRouting(argv.slice(1), base)
+    case "stats":
+      return parseStats(argv.slice(1), base)
     default:
       return usage(`unknown command: ${commandName}`)
   }
@@ -710,6 +751,57 @@ function parseRoutingSeed(argv: readonly string[], base: BaseCommand): RoutingSe
   return { name: "routing-seed", dbPath, json }
 }
 
+function parseStats(argv: readonly string[], base: BaseCommand): StatsCommand | CliUsageError {
+  const subcommand = argv[0]
+  if (subcommand === undefined) return usage("stats requires a subcommand: lanes|agents|sessions")
+
+  switch (subcommand) {
+    case "lanes":
+      return parseStatsSubcommand(argv.slice(1), base, "stats-lanes")
+    case "agents":
+      return parseStatsSubcommand(argv.slice(1), base, "stats-agents")
+    case "sessions":
+      return parseStatsSubcommand(argv.slice(1), base, "stats-sessions")
+    default:
+      return usage(`unknown stats subcommand: ${subcommand}`)
+  }
+}
+
+function parseStatsSubcommand(argv: readonly string[], base: BaseCommand, name: StatsCommand["name"]): StatsCommand | CliUsageError {
+  let dbPath = base.dbPath
+  let json = base.json
+  let sinceTs: number | undefined
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index]
+    if (arg === "--json") {
+      json = true
+    } else if (arg === "--db") {
+      const value = requiredValue(argv, index, "--db")
+      if (value instanceof CliUsageError) return value
+      dbPath = value
+      index += 1
+    } else if (arg?.startsWith("--db=")) {
+      dbPath = arg.slice("--db=".length)
+    } else if (arg === "--since") {
+      const value = requiredValue(argv, index, "--since")
+      if (value instanceof CliUsageError) return value
+      const parsed = parseSince(value)
+      if (parsed instanceof CliUsageError) return parsed
+      sinceTs = parsed
+      index += 1
+    } else if (arg?.startsWith("--since=")) {
+      const parsed = parseSince(arg.slice("--since=".length))
+      if (parsed instanceof CliUsageError) return parsed
+      sinceTs = parsed
+    } else {
+      return usage(`unknown stats ${name.slice("stats-".length)} option: ${arg}`)
+    }
+  }
+
+  return { name, dbPath, json, sinceTs } as StatsCommand
+}
+
 function requiredValue(argv: readonly string[], index: number, flag: string): string | CliUsageError {
   const value = argv[index + 1]
   if (value === undefined || value.startsWith("--")) return usage(`${flag} requires a value`)
@@ -845,6 +937,61 @@ function renderRoutingSeedTable(result: RoutingSeedResult): string {
   )
 }
 
+function renderStatsLanesTable(rows: readonly UsageByLaneHourRow[]): string {
+  return renderTable(
+    ["lane", "hourBucket", "calls", "tokensIn", "tokensOut", "cacheRead", "cost", "avgLatencyMs", "tokensPerMinute"],
+    rows.map((row) => [
+      row.lane,
+      row.hourBucket,
+      row.calls,
+      row.tokensIn,
+      row.tokensOut,
+      row.cacheRead,
+      row.cost,
+      row.avgLatencyMs,
+      row.tokensPerMinute,
+    ]),
+  )
+}
+
+function renderStatsAgentsTable(rows: readonly UsageByAgentRow[]): string {
+  return renderTable(
+    ["agent", "lane", "calls", "tokensIn", "tokensOut", "cacheRead", "cost", "avgLatencyMs", "firstTs", "lastTs", "tokensPerMinute"],
+    rows.map((row) => [
+      row.agent,
+      row.lane,
+      row.calls,
+      row.tokensIn,
+      row.tokensOut,
+      row.cacheRead,
+      row.cost,
+      row.avgLatencyMs,
+      row.firstTs,
+      row.lastTs,
+      row.tokensPerMinute,
+    ]),
+  )
+}
+
+function renderStatsSessionsTable(rows: readonly UsageBySessionRow[]): string {
+  return renderTable(
+    ["session", "lane", "calls", "tokensIn", "tokensOut", "cacheRead", "cost", "avgLatencyMs", "firstTs", "lastTs", "tokensPerMinute"],
+    rows.map((row) => [
+      row.session,
+      row.lane,
+      row.calls,
+      row.tokensIn,
+      row.tokensOut,
+      row.cacheRead,
+      row.cost,
+      row.avgLatencyMs,
+      row.firstTs,
+      row.lastTs,
+      row.tokensPerMinute,
+    ]),
+  )
+}
+
 type TableCell = string | number
 
 function renderTable(headers: readonly string[], rows: readonly (readonly TableCell[])[]): string {
@@ -865,7 +1012,7 @@ function writeJsonError(error: CliFailure): void {
 }
 
 function usage(message: string): CliUsageError {
-  return new CliUsageError(`${message}. usage: control-plane <status|model-calls|events|ingest|routing> [--db <path>] [--json]`)
+  return new CliUsageError(`${message}. usage: control-plane <status|model-calls|events|ingest|routing|stats> [--db <path>] [--json]`)
 }
 
 if (import.meta.main) {

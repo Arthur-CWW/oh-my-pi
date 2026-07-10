@@ -1,5 +1,5 @@
 export { ArtifactError, StorageError } from "./errors"
-export { LEDGER_SCHEMA_VERSION, migrateLedger, migration0001Sql, migration0002Sql, migration0003Sql, setDurabilityPragmas } from "./migrate"
+export { LEDGER_SCHEMA_VERSION, migrateLedger, migration0001Sql, migration0002Sql, migration0003Sql, migration0004Sql, setDurabilityPragmas } from "./migrate"
 export {
   LedgerStore,
   defaultLedgerPath,
@@ -93,3 +93,12 @@ export {
   type SessionRow,
   type TurnRow,
 } from "./schema"
+export {
+  queryUsageByAgent,
+  queryUsageByLaneHour,
+  queryUsageBySession,
+  type StatsFilters,
+  type UsageByAgentRow,
+  type UsageByLaneHourRow,
+  type UsageBySessionRow,
+} from "./stats"
