@@ -4509,6 +4509,8 @@ export interface RetrySettings {
 	baseDelayMs: number;
 	maxDelayMs: number;
 	modelFallback: boolean;
+	fallbackChains: Record<string, string[]>;
+	fallbackRevertPolicy: "cooldown-expiry" | "never";
 }
 
 export interface MemoriesSettings {

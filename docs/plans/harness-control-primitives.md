@@ -9,6 +9,24 @@ Reads with: `docs/plans/pi-agent-control-plane.md` (spec v1 — the L2/L3 contra
 
 Agents are manageable processes: any live agent — subagent or session — can be **inspected, interrupted, resumed, hot-swapped, and attributed** without losing its context. Each primitive lands OMP-native first (usable today), with contracts shaped so control-plane M2–M4 can absorb them as ledger rows/commands instead of rewrites.
 
+## Orchestrator experiment kit (Arthur, 2026-07-07 — the frame above the primitives)
+
+Thesis: routing/fallback/config decisions **cannot be made a priori** — lane knowledge decays ("cargo-culting past experience which is not true anymore"). The harness's job is to make empirical testing cheap and capture the metadata, so the orchestrator (which only gets stronger) decides from data. Design filter (thebes, `docs/research/thebes-future-harnesses.md`): build only what survives stronger models — filesystem-as-substrate, spawn+onboarding-interview, **forking as the primary multi-agent mode**, telemetry; never bake in hierarchies/workflows/memory schemes the model layer will eat. MVP single-machine now; multi-machine (Turso/libSQL) later (Arthur, 2026-07-07).
+
+What the orchestrator needs → status:
+| Need | Status |
+|---|---|
+| Vary model/thinking/persona/context per spawn | EXISTS (`task` model selector+arrays, role, context, `local://`) |
+| Vary skills/tools/config per spawn ("test different harnesses") | MISSING — per-spawn config/tool-exposure overlay; absorbs the config-hot-swap and tool-flexibility asks |
+| Same packet across N lanes, results comparable | EXISTS blind (eval-bridge `parallel`+`agent()`); no cost/latency/outcome per run until publisher wired |
+| Query cost×outcome telemetry (Pareto frontier) | LEDGER SHIPPED (M1), publisher NOT live-wired — wire + smoke = next slice; then `model_calls` answers model×work-type×cost empirically |
+| Global routing-knowledge store (lane strengths/failure modes/quota, evidence-linked, dated) | IN FLIGHT 2026-07-07 (`RoutingStore` packet): `routing_observations` + `lane_state` in the control-plane SQLite, CLI `routing observe/lanes/brief/log`, seeded from charter temperaments as `[hypothesis, pre-empirical]` rows |
+| Subscription-quota failover (usage exhausted → next lane; chains) | IN FLIGHT — `FailoverScout` mapping retry-fallback/error-class seams; composes with `hotswapAgentModel` for live workers |
+| Fork a subagent across model variants (compare failure modes) | QUEUED — cold fork v1: spawn N variants from one transcript/`leaf_change` tree point (spec M4 contract `{fromTranscript, atTurn}`); post-MVP |
+| Onboarding interview (spawned agent asks back before starting) | EXISTS mechanically (irc `await`); make it standard spawn practice, not a fixed template |
+
+Contract for lane knowledge: observations are dated, evidence-linked, confidence-scored rows — the charter's lane-temperament prose becomes seed hypotheses to be confirmed/retired by data, never doctrine.
+
 ## Primitives
 
 | Primitive | Status | Where | Next |

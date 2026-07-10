@@ -27,6 +27,38 @@ modelRoles:
   # resolution order, so pin it to the Antigravity Gemini flash lane.
   vision: google-antigravity/gemini-3.5-flash-low
 
+# Subscription-quota failover (Arthur, 2026-07-07): when a lane's usage limit
+# is exhausted mid-turn, the session falls back down the chain for that role
+# (retry.fallbackChains keys are modelRoles names; runtime path:
+# #handleRetryableError → isUsageLimitError → credential rotation → chain).
+# Reverts to the primary when the suppression cooldown expires.
+retry:
+  modelFallback: true
+  fallbackRevertPolicy: cooldown-expiry
+  fallbackChains:
+    task:
+      - kimi-code/kimi-for-coding
+      - google-antigravity/gemini-3.5-flash
+    smol:
+      - google-antigravity/gemini-3.5-flash
+      - kimi-code/kimi-for-coding
+    implementer:
+      - kimi-code/kimi-for-coding
+    complex:
+      - kimi-code/kimi-for-coding
+    plan:
+      - kimi-code/kimi-for-coding
+    slow:
+      - kimi-code/kimi-for-coding
+    research:
+      - openai-codex/gpt-5.5:medium
+    authenticated_web:
+      - openai-codex/gpt-5.5:medium
+    designer:
+      - openai-codex/gpt-5.5:high
+    vision:
+      - kimi-code/kimi-for-coding
+
 advisor:
   enabled: true
   scope: subagents
