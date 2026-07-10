@@ -5,7 +5,10 @@ import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import type { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { ModelSelectorComponent } from "@oh-my-pi/pi-coding-agent/modes/components/model-selector";
+import {
+	classifyModelSelectorItem,
+	ModelSelectorComponent,
+} from "@oh-my-pi/pi-coding-agent/modes/components/model-selector";
 import { getThemeByName, setThemeInstance } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import type { TUI } from "@oh-my-pi/pi-tui";
 
@@ -105,6 +108,30 @@ describe("ModelSelector role badge thinking display", () => {
 		}
 	});
 
+	test("classifies context overflow as selectable warning without masking real disable reasons", () => {
+		expect(classifyModelSelectorItem({ currentContextTokens: 312_000, contextWindow: 256_000 })).toEqual({
+			disabled: false,
+			contextOverflow: true,
+			contextWarning: "context 312k > 256k — will compact on switch",
+		});
+		expect(
+			classifyModelSelectorItem({
+				currentContextTokens: 1000,
+				contextWindow: 128_000,
+				disabledReason: "unauthenticated",
+			}),
+		).toEqual({
+			disabled: true,
+			contextOverflow: false,
+			contextWarning: null,
+		});
+		expect(classifyModelSelectorItem({ currentContextTokens: 1000, contextWindow: 128_000 })).toEqual({
+			disabled: false,
+			contextOverflow: false,
+			contextWarning: null,
+		});
+	});
+
 	test("shows custom roles from cycleOrder/modelRoles and honors built-in metadata overrides", async () => {
 		installTestTheme();
 		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
@@ -154,7 +181,7 @@ describe("ModelSelector role badge thinking display", () => {
 		expect(rendered).toContain("[SLOW auto]");
 	});
 
-	test("dims and disables models below the current context size", async () => {
+	test("warns and allows selecting models below the current context size", async () => {
 		installTestTheme();
 		const settings = Settings.isolated({});
 		const small = createContextTestModel("a-small", 4096);
@@ -169,13 +196,13 @@ describe("ModelSelector role badge thinking display", () => {
 
 		const rendered = normalizeRenderedText(selector.render(220).join("\n"));
 		expect(rendered).toContain("a-small");
-		expect(rendered).toContain("context>4.1k");
+		expect(rendered).toContain("⚠ context 6k > 4.1k — will compact on switch");
 
 		selector.handleInput("\n");
-		expect(selected).toEqual(["b-large"]);
+		expect(selected).toEqual(["a-small"]);
 	});
 
-	test("does not open the model menu when every candidate is disabled", async () => {
+	test("opens the model menu when the only candidate overflows context", async () => {
 		installTestTheme();
 		const settings = Settings.isolated({});
 		const small = createContextTestModel("only-small", 4096);
@@ -188,11 +215,11 @@ describe("ModelSelector role badge thinking display", () => {
 
 		const rendered = normalizeRenderedText(selector.render(220).join("\n"));
 		expect(rendered).toContain("only-small");
-		expect(rendered).toContain("current context 6k > 4.1k limit");
+		expect(rendered).toContain("context 6k > 4.1k — will compact on switch");
 
 		selector.handleInput("\n");
 		const afterEnter = normalizeRenderedText(selector.render(220).join("\n"));
-		expect(afterEnter).not.toContain("Action for");
+		expect(afterEnter).toContain("Action for");
 		expect(onSelect).not.toHaveBeenCalled();
 	});
 

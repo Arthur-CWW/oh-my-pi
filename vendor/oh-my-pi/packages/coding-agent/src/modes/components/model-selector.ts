@@ -67,6 +67,30 @@ function getAlphaSearchTokens(query: string): string[] {
 	return [...normalizeSearchText(query).matchAll(/[a-z]+/g)].map(match => match[0]).filter(token => token.length > 0);
 }
 
+export interface ModelSelectorItemClassification {
+	disabled: boolean;
+	contextOverflow: boolean;
+	contextWarning: string | null;
+}
+
+export function classifyModelSelectorItem(options: {
+	currentContextTokens: number;
+	contextWindow?: number | null;
+	disabledReason?: string | null;
+}): ModelSelectorItemClassification {
+	const contextWindow = options.contextWindow ?? 0;
+	const contextOverflow =
+		options.currentContextTokens > 0 && contextWindow > 0 && options.currentContextTokens > contextWindow;
+	const disabledReason = options.disabledReason;
+	return {
+		disabled: disabledReason !== undefined && disabledReason !== null && disabledReason.length > 0,
+		contextOverflow,
+		contextWarning: contextOverflow
+			? `context ${formatNumber(options.currentContextTokens).toLowerCase()} > ${formatNumber(contextWindow).toLowerCase()} — will compact on switch`
+			: null,
+	};
+}
+
 function computeModelRank(model: Model, roles: Record<string, RoleAssignment | undefined>): number {
 	let i = 0;
 	while (i < MODEL_ROLE_IDS.length) {
@@ -698,20 +722,27 @@ export class ModelSelectorComponent extends Container {
 		return this.#getActiveTabId() === CANONICAL_TAB;
 	}
 
+	#classifyModel(model: Model): ModelSelectorItemClassification {
+		return classifyModelSelectorItem({
+			currentContextTokens: this.#currentContextTokens,
+			contextWindow: model.contextWindow,
+		});
+	}
+
 	#isModelOverContextLimit(model: Model): boolean {
-		const contextWindow = model.contextWindow ?? 0;
-		return this.#currentContextTokens > 0 && contextWindow > 0 && this.#currentContextTokens > contextWindow;
+		return this.#classifyModel(model).contextOverflow;
 	}
 
-	#isItemDisabled(item: ModelItem | CanonicalModelItem): boolean {
-		return this.#isModelOverContextLimit(item.model);
+	#isItemDisabled(_item: ModelItem | CanonicalModelItem): boolean {
+		return false;
 	}
 
-	#formatContextLimitSuffix(model: Model): string {
-		if (!this.#isModelOverContextLimit(model)) {
+	#formatContextWarningSuffix(model: Model): string {
+		const warning = this.#classifyModel(model).contextWarning;
+		if (!warning) {
 			return "";
 		}
-		return ` ${theme.status.disabled} context>${formatNumber(model.contextWindow ?? 0).toLowerCase()}`;
+		return ` ${theme.fg("dim", `⚠ ${warning}`)}`;
 	}
 
 	#getVisibleItems(): ReadonlyArray<ModelItem | CanonicalModelItem> {
@@ -931,7 +962,7 @@ export class ModelSelectorComponent extends Container {
 
 			const isSelected = i === this.#selectedIndex;
 			const isDisabled = this.#isItemDisabled(item);
-			const disabledSuffix = this.#formatContextLimitSuffix(item.model);
+			const contextWarningSuffix = this.#formatContextWarningSuffix(item.model);
 
 			// Build role badges. Solid badges are configured; outlined badges are auto-selected defaults.
 			const roleBadgeTokens: string[] = [];
@@ -958,24 +989,24 @@ export class ModelSelectorComponent extends Container {
 				if (isCanonicalTab) {
 					const variants = theme.fg("dim", ` [${canonicalItem?.variantCount ?? 0}]`);
 					const backing = theme.fg("dim", ` -> ${item.model.provider}/${item.model.id}`);
-					line = `${prefix}${theme.fg("accent", item.id)}${variants}${backing}${badgeText}${disabledSuffix}`;
+					line = `${prefix}${theme.fg("accent", item.id)}${variants}${backing}${badgeText}${contextWarningSuffix}`;
 				} else if (showProvider) {
 					const providerPrefix = theme.fg("dim", `${providerItem?.provider ?? ""}/`);
-					line = `${prefix}${providerPrefix}${theme.fg("accent", providerItem?.id ?? item.id)}${badgeText}${disabledSuffix}`;
+					line = `${prefix}${providerPrefix}${theme.fg("accent", providerItem?.id ?? item.id)}${badgeText}${contextWarningSuffix}`;
 				} else {
-					line = `${prefix}${theme.fg("accent", item.id)}${badgeText}${disabledSuffix}`;
+					line = `${prefix}${theme.fg("accent", item.id)}${badgeText}${contextWarningSuffix}`;
 				}
 			} else {
 				const prefix = "  ";
 				if (isCanonicalTab) {
 					const variants = theme.fg("dim", ` [${canonicalItem?.variantCount ?? 0}]`);
 					const backing = theme.fg("dim", ` -> ${item.model.provider}/${item.model.id}`);
-					line = `${prefix}${item.id}${variants}${backing}${badgeText}${disabledSuffix}`;
+					line = `${prefix}${item.id}${variants}${backing}${badgeText}${contextWarningSuffix}`;
 				} else if (showProvider) {
 					const providerPrefix = theme.fg("dim", `${providerItem?.provider ?? ""}/`);
-					line = `${prefix}${providerPrefix}${providerItem?.id ?? item.id}${badgeText}${disabledSuffix}`;
+					line = `${prefix}${providerPrefix}${providerItem?.id ?? item.id}${badgeText}${contextWarningSuffix}`;
 				} else {
-					line = `${prefix}${item.id}${badgeText}${disabledSuffix}`;
+					line = `${prefix}${item.id}${badgeText}${contextWarningSuffix}`;
 				}
 			}
 
@@ -1014,14 +1045,11 @@ export class ModelSelectorComponent extends Container {
 			const suffix = isCanonicalTab
 				? ` (${selected.model.provider}/${selected.model.id}, ${(selected as CanonicalModelItem).variantCount} variants)`
 				: "";
-			const limitWarning = this.#isItemDisabled(selected)
-				? theme.fg(
-						"dim",
-						` — current context ${formatNumber(this.#currentContextTokens).toLowerCase()} > ${formatNumber(selected.model.contextWindow ?? 0).toLowerCase()} limit`,
-					)
+			const selectedContextWarning = this.#isModelOverContextLimit(selected.model)
+				? theme.fg("dim", ` — ${this.#classifyModel(selected.model).contextWarning ?? ""}`)
 				: "";
 			this.#listContainer.addChild(
-				new Text(theme.fg("muted", `  Model Name: ${selected.model.name}${suffix}`) + limitWarning, 0, 0),
+				new Text(theme.fg("muted", `  Model Name: ${selected.model.name}${suffix}`) + selectedContextWarning, 0, 0),
 			);
 		}
 	}
