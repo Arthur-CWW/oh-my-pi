@@ -1,3 +1,4 @@
+import type { DurableQueuedInput } from "../session/durable-input-queue";
 import { Schema } from "effect";
 import { InvalidRunnerCommandError, RunnerRevisionConflictError } from "./errors";
 
@@ -66,48 +67,14 @@ export interface DetachRunnerViewCommand extends RunnerControlMetadata {
 	readonly controllerEpoch?: number;
 }
 
-export interface PreparedDurableInput {
+export interface RunnerCommandReceipt {
 	readonly commandId: string;
 	readonly correlationId: string;
-	readonly causationId: string | undefined;
-	readonly controllerEpoch: number;
+	readonly causationId?: string;
 	readonly inputId: string;
-	readonly sequence: number;
+	readonly durableSequence: number;
 	readonly revision: number;
 	readonly replayed: boolean;
-}
-
-export interface RunnerCommandReceipt extends PreparedDurableInput {}
-
-/** A dispatched record is uncertain after reopen and is never automatically retried. */
-export type DurableDispatchState = "prepared" | "dispatched" | "completed" | "uncertain";
-
-export interface DurableInputRecord {
-	readonly command: SubmitInputCommand;
-	readonly receipt: Omit<RunnerCommandReceipt, "replayed">;
-	readonly dispatchState: DurableDispatchState;
-}
-
-export interface DurableRunnerSnapshot {
-	readonly revision: number;
-	readonly records: ReadonlyArray<DurableInputRecord>;
-}
-
-/**
- * `prepare` atomically performs the revision CAS, allocates durable input sequence,
- * and records the dispatch obligation. `beginDispatch` is a prepared-to-dispatched
- * CAS; only its winner may invoke the provider.
- */
-export interface DurableRunnerStore {
-	load(): Promise<DurableRunnerSnapshot>;
-	prepare(command: SubmitInputCommand, expectedRevision: number): Promise<PreparedDurableInput>;
-	beginDispatch(commandId: string): Promise<DurableInputRecord | undefined>;
-	finishDispatch(commandId: string, state: "completed" | "uncertain"): Promise<void>;
-}
-
-export interface RunnerState {
-	readonly revision: number;
-	readonly processedCommandIds: ReadonlyMap<string, RunnerCommandReceipt>;
 }
 
 export interface RunnerViewSnapshot {
@@ -117,11 +84,18 @@ export interface RunnerViewSnapshot {
 	readonly attachedSequence: number;
 }
 
+export interface RunnerTranscriptSnapshot {
+	readonly entryCount: number;
+	readonly leafId: string | null;
+	readonly lastEntryId: string | undefined;
+}
+
 export interface SessionRunnerSnapshot {
 	readonly revision: number;
 	readonly sequence: number;
 	readonly durableSequence: number;
-	readonly records: ReadonlyArray<DurableInputRecord>;
+	readonly items: ReadonlyArray<DurableQueuedInput>;
+	readonly transcript: RunnerTranscriptSnapshot;
 	readonly views: ReadonlyArray<RunnerViewSnapshot>;
 	readonly controller: { readonly viewId: string; readonly epoch: number } | undefined;
 	readonly status: RunnerStatus;
@@ -134,8 +108,7 @@ export type RunnerEventKind =
 	| "controllerReleased"
 	| "viewDetached"
 	| "inputPrepared"
-	| "inputCompleted"
-	| "inputUncertain";
+	| "transcriptEntryAppended";
 
 /** Every event is a closed causal envelope in the runner's single total order. */
 export interface RunnerEvent {
@@ -151,6 +124,9 @@ export interface RunnerEvent {
 	readonly viewId: string | undefined;
 	readonly inputId: string | undefined;
 	readonly durableSequence: number | undefined;
+	readonly transcriptEntryId: string | undefined;
+	readonly transcriptLeafId: string | null | undefined;
+	readonly transcriptPosition: number | undefined;
 }
 
 export type RunnerEventDelivery =
@@ -163,67 +139,15 @@ export type RunnerEventDelivery =
 			readonly snapshot: SessionRunnerSnapshot;
 	  };
 
-export interface Transition {
-	readonly state: RunnerState;
-	readonly receipt: RunnerCommandReceipt;
-	readonly event: RunnerEvent | undefined;
-}
-
-export const stateFromSnapshot = (snapshot: DurableRunnerSnapshot): RunnerState => ({
-	revision: snapshot.revision,
-	processedCommandIds: new Map(
-		snapshot.records.map((record) => [record.receipt.commandId, { ...record.receipt, replayed: false }]),
-	),
-});
-
-export const transitionPreparedInput = (
-	state: RunnerState,
-	command: SubmitInputCommand,
-	prepared: PreparedDurableInput,
-	eventSequence: number,
-): Transition => {
-	const prior = state.processedCommandIds.get(command.commandId);
-	if (prior) return { state, receipt: { ...prior, replayed: true }, event: undefined };
-
-	const receipt: RunnerCommandReceipt = { ...prepared };
-	const processedCommandIds = new Map(state.processedCommandIds);
-	processedCommandIds.set(command.commandId, receipt);
-	return {
-		state: { revision: Math.max(state.revision, prepared.revision), processedCommandIds },
-		receipt,
-		event: prepared.replayed
-			? undefined
-			: {
-					schemaVersion: RUNNER_SCHEMA_VERSION,
-					kind: "inputPrepared",
-					eventId: `inputPrepared:${eventSequence}`,
-					commandId: command.commandId,
-					correlationId: command.correlationId,
-					causationId: command.causationId,
-					revision: prepared.revision,
-					sequence: eventSequence,
-					controllerEpoch: command.controllerEpoch,
-					viewId: command.viewId,
-					inputId: prepared.inputId,
-					durableSequence: prepared.sequence,
-				},
-	};
-};
-
 export const decodeSubmitInputCommand = (input: unknown): SubmitInputCommand => {
 	try {
 		return Schema.decodeUnknownSync(SubmitInputCommandSchema)(input);
 	} catch (error) {
-		throw new InvalidRunnerCommandError({
-			issue: error instanceof Error ? error.message : "Schema decoding failed",
-		});
+		throw new InvalidRunnerCommandError({ issue: error instanceof Error ? error.message : "Invalid submit command" });
 	}
 };
 
 export const assertRunnerRevision = (expectedRevision: number, actualRevision: number): void => {
-	if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
-		throw new InvalidRunnerCommandError({ issue: "expectedRevision must be a non-negative safe integer" });
-	}
 	if (expectedRevision !== actualRevision) {
 		throw new RunnerRevisionConflictError({ expectedRevision, actualRevision });
 	}

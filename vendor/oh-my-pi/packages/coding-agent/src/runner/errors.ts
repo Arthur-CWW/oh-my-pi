@@ -12,14 +12,10 @@ export class RunnerRevisionConflictError extends Schema.TaggedErrorClass<RunnerR
 	{ expectedRevision: NonNegativeInt, actualRevision: NonNegativeInt },
 ) {}
 
-export class DurableRunnerStoreError extends Schema.TaggedErrorClass<DurableRunnerStoreError>()(
-	"DurableRunnerStoreError",
+export class SessionRunnerRuntimeError extends Schema.TaggedErrorClass<SessionRunnerRuntimeError>()(
+	"SessionRunnerRuntimeError",
 	{ issue: Schema.String },
 ) {}
-
-export class RunnerProviderError extends Schema.TaggedErrorClass<RunnerProviderError>()("RunnerProviderError", {
-	issue: Schema.String,
-}) {}
 
 export class RunnerControllerConflictError extends Schema.TaggedErrorClass<RunnerControllerConflictError>()(
 	"RunnerControllerConflictError",
