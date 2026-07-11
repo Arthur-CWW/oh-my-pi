@@ -123,6 +123,7 @@ export async function acquireSessionLease(input: {
   readonly controllerProcess: ProcessIdentity
   readonly daemonProcess: ProcessIdentity | null
   readonly cmux?: CmuxOwnerEnvironment
+  readonly dependencies?: OwnershipDependencies
 }): Promise<OwnershipHandle | OwnerRefusal> {
   const dependencies = input.dependencies ?? {}
   const paths = leasePathsFor(input.identity, dependencies.root ?? muxRootDir())

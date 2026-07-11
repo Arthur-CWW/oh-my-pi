@@ -84,9 +84,12 @@ test("does not write cmux metadata outside cmux", async () => {
 test("omits partial or invalid cmux metadata", async () => {
   await rm(root, { recursive: true, force: true }); await mkdir(root, { recursive: true })
   const cases = [
-    ["partial", { workspaceId }],
+    ["missing-workspace", { surfaceId, socketPath: "/tmp/cmux.sock" }],
+    ["missing-surface", { workspaceId, socketPath: "/tmp/cmux.sock" }],
+    ["missing-socket", { workspaceId, surfaceId }],
     ["invalid-workspace", { workspaceId: "workspace-a", surfaceId, socketPath: "/tmp/cmux.sock" }],
     ["invalid-surface", { workspaceId, surfaceId: "surface-a", socketPath: "/tmp/cmux.sock" }],
+    ["empty-socket", { workspaceId, surfaceId, socketPath: "" }],
     ["relative-socket", { workspaceId, surfaceId, socketPath: "tmp/cmux.sock" }],
   ] as const
   for (const [name, cmux] of cases) {
