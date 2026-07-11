@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- Effect v4 beta.92 alignment probe covering service layers, typed failures, scoped cleanup/interruption, bounded queues, and deterministic test-clock scheduling.
 
 - Per-spawn `model` override for `task` tool items: each spawn item accepts an optional `model` selector that takes priority over agent-level `task.agentModelOverrides`. Invalid overrides are rejected at schedule time with a formatted error listing available models, and spawn receipts now include a resolved model chain (e.g., `explore → "Rust specialist" → openai/gpt-5.2:high`).
 
