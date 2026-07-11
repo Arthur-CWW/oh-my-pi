@@ -33,6 +33,21 @@ interface ResumeChildResult {
 	queuedAfter: number;
 	admittedAgain: boolean;
 }
+interface SingleSubmissionChildResult {
+	action: "single";
+	inputId: string;
+	providerCalls: readonly string[];
+	userTranscript: readonly string[];
+	queuedAfter: number;
+	admittedAgain: boolean;
+	attempts: readonly {
+		inputId: string;
+		attemptId: string;
+		revision: number;
+		state: string;
+	}[];
+}
+
 
 interface OwnershipLossChildResult {
 	action: "loss";
@@ -81,6 +96,7 @@ interface CompactionChildResult {
 type ChildResult =
 	| FirstChildResult
 	| ResumeChildResult
+	| SingleSubmissionChildResult
 	| OwnershipLossChildResult
 	| MixedChildResult
 	| CompactionChildResult;
@@ -105,8 +121,18 @@ const cwd = process.env.CWD;
 const sessionFile = process.env.SESSION_FILE;
 const sessionsDir = process.env.SESSIONS_DIR;
 const home = process.env.HOME;
-if ((action !== "first" && action !== "resume" && action !== "loss" && action !== "mixed" && action !== "compaction") || !cwd || !sessionFile || !sessionsDir || !home) {
-	throw new Error("missing durable queue child environment");
+if (
+	(action !== "first" &&
+		action !== "resume" &&
+		action !== "single" &&
+		action !== "loss" &&
+		action !== "mixed" &&
+		action !== "compaction") ||
+	!cwd ||
+	!sessionFile ||
+	!sessionsDir ||
+	!home
+) {
 }
 
 
@@ -450,6 +476,55 @@ if (action === "first") {
 	} finally {
 		await closeHarness(harness);
 	}
+} else if (action === "single") {
+	const providerCalls = [];
+	const commandSink = { bash: [], python: [], statuses: [] };
+	const harness = await createSession("success", providerCalls);
+	try {
+		const { ctx, editor } = createControllerContext(harness.session, harness.sessionManager, harness.settings, commandSink);
+		let submittedTurn;
+		ctx.onInputCallback = submission => {
+			submittedTurn = harness.session.prompt(submission.text, {
+				images: submission.images,
+				streamingBehavior: submission.streamingBehavior,
+			});
+		};
+		const controller = new InputController(ctx);
+		controller.setupEditorSubmitHandler();
+		await editor.onSubmit("go on");
+		if (!submittedTurn) throw new Error("idle submission did not start a session prompt");
+		await submittedTurn;
+		await harness.session.waitForIdle();
+		const completed = latestAttempt(harness.sessionManager, "completed");
+		const queue = await DurableInputQueue.open(harness.ownership, path.join(home, ".agent-mux"));
+		const userTranscript = harness.sessionManager
+			.getEntries()
+			.flatMap(entry => {
+				if (entry.type !== "message" || entry.message.role !== "user") return [];
+				const content = entry.message.content;
+				return Array.isArray(content)
+					? content.filter(part => part.type === "text").map(part => part.text)
+					: typeof content === "string"
+						? [content]
+						: [];
+			});
+		console.log(JSON.stringify({
+			action: "single",
+			inputId: completed.inputId,
+			providerCalls,
+			userTranscript,
+			queuedAfter: (await queue.replayQueued()).length,
+			admittedAgain: (await queue.admitNext()) !== undefined,
+			attempts: durableAttemptEntries(harness.sessionManager).map(entry => ({
+				inputId: entry.inputId,
+				attemptId: entry.attemptId,
+				revision: entry.revision,
+				state: entry.state,
+			})),
+		}));
+	} finally {
+		await closeHarness(harness);
+	}
 } else if (action === "mixed") {
 	const providerCalls = [];
 	const toolGate = Promise.withResolvers();
@@ -708,6 +783,26 @@ function decodeChildResult(value: unknown): ChildResult {
 		}
 	}
 	if (
+		record.action === "single" &&
+		typeof record.inputId === "string" &&
+		isStringArray(record.providerCalls) &&
+		isStringArray(record.userTranscript) &&
+		typeof record.queuedAfter === "number" &&
+		typeof record.admittedAgain === "boolean" &&
+		Array.isArray(record.attempts) &&
+		record.attempts.every(isAttemptLedger)
+	) {
+		return {
+			action: "single",
+			inputId: record.inputId,
+			providerCalls: record.providerCalls,
+			userTranscript: record.userTranscript,
+			queuedAfter: record.queuedAfter,
+			admittedAgain: record.admittedAgain,
+			attempts: record.attempts,
+		};
+	}
+	if (
 		record.action === "mixed" &&
 		isStringArray(record.providerCalls) &&
 		isStringArray(record.toolExecutions) &&
@@ -817,6 +912,27 @@ afterEach(async () => {
 });
 
 describe("AgentSession durable input queue process replacement", () => {
+	it("delivers one idle typed submission through one durable attempt without residue", async () => {
+		const root = await fs.mkdtemp(path.join(os.tmpdir(), "omp-agent-session-queue-single-"));
+		roots.push(root);
+		const fixture = await createPersistedSession(root);
+		const single = await runChild({
+			ACTION: "single",
+			CWD: fixture.cwd,
+			HOME: fixture.home,
+			SESSIONS_DIR: fixture.sessionsDir,
+			SESSION_FILE: fixture.sessionFile,
+		});
+		if (single.action !== "single") throw new Error("single child returned an unexpected result");
+
+		expect(single.providerCalls).toEqual(["go on"]);
+		expect(single.userTranscript.filter(text => text === "go on")).toHaveLength(1);
+		expect(single.queuedAfter).toBe(0);
+		expect(single.admittedAgain).toBe(false);
+		expect(single.attempts).toHaveLength(3);
+		expect(single.attempts.map(attempt => attempt.state)).toEqual(["admitted", "request-started", "completed"]);
+		expect(new Set(single.attempts.map(attempt => attempt.inputId))).toEqual(new Set([single.inputId]));
+	}, 10_000);
 	it("resumes one idle InputController submission after usage-limit owner replacement", async () => {
 		const root = await fs.mkdtemp(path.join(os.tmpdir(), "omp-agent-session-queue-process-"));
 		roots.push(root);

@@ -665,8 +665,12 @@ export class UiHelpers {
 
 	updatePendingMessagesDisplay(): void {
 		this.ctx.pendingMessagesContainer.clear();
+		// An admitted or running durable item already owns the live turn and is
+		// rendered as the user transcript message. Only work not yet delivered
+		// belongs in the pending queue, otherwise one physical submit appears twice.
 		const durableInputs = this.ctx.viewSession
 			.getQueuedInputProjection()
+			.filter(input => input.state !== "admitted" && input.state !== "running")
 			.toSorted((left, right) => left.sequence - right.sequence);
 		const durablePayloadCounts = new Map<string, number>();
 		for (const input of durableInputs) {
