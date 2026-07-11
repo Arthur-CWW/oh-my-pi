@@ -175,34 +175,51 @@ process.exit(0);
 `;
 
 function decodeReceipt(value: unknown): Receipt {
-	if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error("receipt was not an object");
+	if (typeof value !== "object" || value === null || Array.isArray(value))
+		throw new Error("receipt was not an object");
 	const receipt = value as Record<string, unknown>;
-	if (typeof receipt.provider !== "string" || typeof receipt.model !== "string" || typeof receipt.lastUserText !== "string") {
+	if (
+		typeof receipt.provider !== "string" ||
+		typeof receipt.model !== "string" ||
+		typeof receipt.lastUserText !== "string"
+	) {
 		throw new Error("receipt had an invalid shape");
 	}
 	return { provider: receipt.provider, model: receipt.model, lastUserText: receipt.lastUserText };
 }
 
 function decodeChildResult(value: unknown): ChildResult {
-	if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error("child emitted a non-object result");
+	if (typeof value !== "object" || value === null || Array.isArray(value))
+		throw new Error("child emitted a non-object result");
 	const result = value as Record<string, unknown>;
 	const resolution = result.resolution;
-	const validModelChanges = Array.isArray(result.modelChanges) && result.modelChanges.every(change =>
-		typeof change === "object" && change !== null && !Array.isArray(change) &&
-		typeof (change as Record<string, unknown>).model === "string" &&
-		((change as Record<string, unknown>).role === undefined || typeof (change as Record<string, unknown>).role === "string"),
-	);
+	const validModelChanges =
+		Array.isArray(result.modelChanges) &&
+		result.modelChanges.every(
+			change =>
+				typeof change === "object" &&
+				change !== null &&
+				!Array.isArray(change) &&
+				typeof (change as Record<string, unknown>).model === "string" &&
+				((change as Record<string, unknown>).role === undefined ||
+					typeof (change as Record<string, unknown>).role === "string"),
+		);
 	if (
 		typeof result.liveModel !== "string" ||
 		typeof result.sessionId !== "string" ||
 		typeof result.unhandledRejections !== "number" ||
 		!validModelChanges ||
-		!Array.isArray(result.thinkingLevels) || !result.thinkingLevels.every(level => typeof level === "string") ||
-		!Array.isArray(result.diagnostics) || !result.diagnostics.every(value => typeof value === "string") ||
-		typeof resolution !== "object" || resolution === null || Array.isArray(resolution) ||
+		!Array.isArray(result.thinkingLevels) ||
+		!result.thinkingLevels.every(level => typeof level === "string") ||
+		!Array.isArray(result.diagnostics) ||
+		!result.diagnostics.every(value => typeof value === "string") ||
+		typeof resolution !== "object" ||
+		resolution === null ||
+		Array.isArray(resolution) ||
 		typeof (resolution as Record<string, unknown>).selector !== "string" ||
 		typeof (resolution as Record<string, unknown>).winningLayer !== "string"
-	) throw new Error(`child emitted an invalid result: ${JSON.stringify(result)}`);
+	)
+		throw new Error(`child emitted an invalid result: ${JSON.stringify(result)}`);
 	const resolutionRecord = resolution as Record<string, unknown>;
 	return {
 		liveModel: result.liveModel,
@@ -225,7 +242,7 @@ function parseJsonLine(line: string, label: string): unknown {
 	try {
 		return JSON.parse(line);
 	} catch {
-		throw new Error(label + " was not valid JSON");
+		throw new Error(`${label} was not valid JSON`);
 	}
 }
 
@@ -242,7 +259,7 @@ async function runChild(environment: Record<string, string>): Promise<{ result: 
 		new Response(child.stdout).text(),
 		new Response(child.stderr).text(),
 	]);
-	if (exitCode !== 0) throw new Error("routing precedence child failed (" + exitCode + "): " + stderr);
+	if (exitCode !== 0) throw new Error(`routing precedence child failed (${exitCode}): ${stderr}`);
 	const line = stdout.trim().split("\n").at(-1);
 	if (!line) throw new Error("routing precedence child emitted no result");
 	return { result: decodeChildResult(parseJsonLine(line, "child result")), stderr };
@@ -250,7 +267,9 @@ async function runChild(environment: Record<string, string>): Promise<{ result: 
 
 async function readReceipts(receiptsFile: string, diagnostics: readonly string[]): Promise<Receipt[]> {
 	const text = await fs.readFile(receiptsFile, "utf8").catch(error => {
-		throw new Error(`provider receipt file missing; diagnostics=${JSON.stringify(diagnostics)}; error=${String(error)}`);
+		throw new Error(
+			`provider receipt file missing; diagnostics=${JSON.stringify(diagnostics)}; error=${String(error)}`,
+		);
 	});
 	return text
 		.split("\n")
@@ -281,9 +300,19 @@ describe("routing precedence process proof", () => {
 
 		expect(result.stderr).not.toContain("unhandledRejection");
 		expect(result.result.unhandledRejections).toBe(0);
-		expect(result.result.resolution).toEqual({ selector: "routing-precedence-b/model-b:high", winningLayer: "runtime_override" });
+		expect(result.result.resolution).toEqual({
+			selector: "routing-precedence-b/model-b:high",
+			winningLayer: "runtime_override",
+		});
 		expect(result.result.liveModel).toBe("routing-precedence-b/model-b");
 		expect(result.result.modelChanges).toContainEqual({ model: "routing-precedence-b/model-b", role: "default" });
 		expect(result.result.thinkingLevels).toContain("high");
+		expect(receipts).toEqual([
+			{
+				provider: "routing-precedence-b",
+				model: "model-b",
+				lastUserText: "provider receipt proof",
+			},
+		]);
 	}, 20_000);
 });

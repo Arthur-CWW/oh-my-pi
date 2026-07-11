@@ -274,8 +274,8 @@ import {
 	shouldPromptCodexAutoRedeem,
 } from "./codex-auto-reset";
 import {
-	DurableInputQueue,
 	type DurableInputPayload,
+	DurableInputQueue,
 	type DurableInputState,
 	type DurableQueuedInput,
 	SessionOwnershipLostError,
@@ -5945,7 +5945,7 @@ export class AgentSession {
 		}
 		this.#scheduleIdleQueueDrain();
 	}
-	
+
 	#freezeDurableQueuedInput(item: DurableQueuedInput): DurableQueuedInput {
 		const images = item.payload.images?.map(image => Object.freeze({ ...image }));
 		const payload = Object.freeze({
@@ -9521,44 +9521,44 @@ export class AgentSession {
 		const generation = this.#promptGeneration;
 		const shouldAutoContinue = options.autoContinue !== false && compactionSettings.autoContinue !== false;
 		try {
-		// Shake runs inline (cheap, no remote LLM). On overflow recovery, if shake
-		// reclaims nothing we fall through to the summary-compaction body below so
-		// the oversized input still gets resolved.
-		if (compactionSettings.strategy === "shake") {
-			const outcome = await this.#runAutoShake(
-				reason,
-				willRetry,
-				generation,
-				shouldAutoContinue,
-				options.triggerContextTokens,
-			);
-			if (outcome !== "fallback") {
-				releaseAdmissionMaintenance?.();
-				return false;
+			// Shake runs inline (cheap, no remote LLM). On overflow recovery, if shake
+			// reclaims nothing we fall through to the summary-compaction body below so
+			// the oversized input still gets resolved.
+			if (compactionSettings.strategy === "shake") {
+				const outcome = await this.#runAutoShake(
+					reason,
+					willRetry,
+					generation,
+					shouldAutoContinue,
+					options.triggerContextTokens,
+				);
+				if (outcome !== "fallback") {
+					releaseAdmissionMaintenance?.();
+					return false;
+				}
 			}
-		}
-		// "overflow" and "incomplete" force inline execution because they are recovery
-		// paths the caller wants resolved before scheduling the next turn. "idle" is
-		// triggered by the idle loop and does its own scheduling.
-		if (
-			!deferred &&
-			allowDefer &&
-			reason !== "overflow" &&
-			reason !== "incomplete" &&
-			reason !== "idle" &&
-			compactionSettings.strategy === "handoff"
-		) {
-			this.#schedulePostPromptTask(
-				async signal => {
-					await Promise.resolve();
-					if (signal.aborted) return;
-					await this.#runAutoCompaction(reason, willRetry, true);
-				},
-				{ generation },
-			);
-			releaseAdmissionMaintenance?.();
-			return true;
-		}
+			// "overflow" and "incomplete" force inline execution because they are recovery
+			// paths the caller wants resolved before scheduling the next turn. "idle" is
+			// triggered by the idle loop and does its own scheduling.
+			if (
+				!deferred &&
+				allowDefer &&
+				reason !== "overflow" &&
+				reason !== "incomplete" &&
+				reason !== "idle" &&
+				compactionSettings.strategy === "handoff"
+			) {
+				this.#schedulePostPromptTask(
+					async signal => {
+						await Promise.resolve();
+						if (signal.aborted) return;
+						await this.#runAutoCompaction(reason, willRetry, true);
+					},
+					{ generation },
+				);
+				releaseAdmissionMaintenance?.();
+				return true;
+			}
 		} catch (error) {
 			releaseAdmissionMaintenance?.();
 			throw error;

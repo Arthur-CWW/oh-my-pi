@@ -3,10 +3,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import {
-	DurableInputQueue,
-	SessionOwnershipLostError,
-} from "@oh-my-pi/pi-coding-agent/session/durable-input-queue";
+import { DurableInputQueue, SessionOwnershipLostError } from "@oh-my-pi/pi-coding-agent/session/durable-input-queue";
 import type { SessionOwnershipHandle } from "@oh-my-pi/pi-coding-agent/session/session-ownership";
 
 const roots: string[] = [];
@@ -325,7 +322,9 @@ describe("durable input queue", () => {
 		const currentQueue = await DurableInputQueue.open(nextOwner.handle, root);
 		const adopted = await currentQueue.adopt();
 
-		expect(adopted.map(item => ({ id: item.inputId, text: item.payload.text }))).toEqual([{ id: first.inputId, text: "first" }]);
+		expect(adopted.map(item => ({ id: item.inputId, text: item.payload.text }))).toEqual([
+			{ id: first.inputId, text: "first" },
+		]);
 	});
 	it("synthesizes immutable defaults for legacy v2 enqueue records", async () => {
 		const { root, owner } = await fixture("epoch-a");
@@ -453,7 +452,10 @@ describe("durable input queue", () => {
 		const firstInput = await first.enqueue({ text: "first", deliveryClass: "followUp" });
 		const secondInput = await second.enqueue({ text: "second", deliveryClass: "followUp" });
 		expect((await first.replayQueued()).map(item => item.inputId)).toEqual([firstInput.inputId, secondInput.inputId]);
-		expect((await second.replayQueued()).map(item => item.inputId)).toEqual([firstInput.inputId, secondInput.inputId]);
+		expect((await second.replayQueued()).map(item => item.inputId)).toEqual([
+			firstInput.inputId,
+			secondInput.inputId,
+		]);
 	});
 
 	it("publishes one successor when concurrent same-owner adopters migrate a legacy head", async () => {
@@ -583,7 +585,10 @@ describe("durable input queue", () => {
 
 		const admitted = await queue.enqueue({ text: "cancel before start", deliveryClass: "followUp" });
 		await queue.admitNext("terminal");
-		await expect(queue.cancel(admitted.inputId)).resolves.toMatchObject({ inputId: admitted.inputId, state: "cancelled" });
+		await expect(queue.cancel(admitted.inputId)).resolves.toMatchObject({
+			inputId: admitted.inputId,
+			state: "cancelled",
+		});
 
 		const running = await queue.enqueue({ text: "cannot cancel after start", deliveryClass: "followUp" });
 		const attempt = await queue.admitNext("terminal");
@@ -602,13 +607,15 @@ describe("durable input queue", () => {
 
 		const nextOwner = replacement(session, "epoch-b");
 		const replacementQueue = await DurableInputQueue.open(nextOwner.handle, root);
-		expect((await replacementQueue.adopt()).map(item => ({
-			inputId: item.inputId,
-			sequence: item.sequence,
-			deliveryClass: item.deliveryClass,
-			revision: item.revision,
-			payload: item.payload,
-		}))).toEqual([
+		expect(
+			(await replacementQueue.adopt()).map(item => ({
+				inputId: item.inputId,
+				sequence: item.sequence,
+				deliveryClass: item.deliveryClass,
+				revision: item.revision,
+				payload: item.payload,
+			})),
+		).toEqual([
 			{
 				inputId: input.inputId,
 				sequence: input.sequence,

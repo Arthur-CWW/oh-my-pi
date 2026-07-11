@@ -12,8 +12,8 @@ import { expandEmoticons } from "../../modes/emoji-autocomplete";
 import { materializeImageReferenceLinks, shiftImageMarkers } from "../../modes/image-references";
 import { createPromptActionAutocompleteProvider } from "../../modes/prompt-action-autocomplete";
 import type { InteractiveModeContext } from "../../modes/types";
-import { AgentRegistry, MAIN_AGENT_ID } from "../../registry/agent-registry";
 import manualContinuePrompt from "../../prompts/system/manual-continue.md" with { type: "text" };
+import { AgentRegistry, MAIN_AGENT_ID } from "../../registry/agent-registry";
 import { SKILL_PROMPT_MESSAGE_TYPE, type SkillPromptDetails, USER_INTERRUPT_LABEL } from "../../session/messages";
 import { executeBuiltinSlashCommand } from "../../slash-commands/builtin-registry";
 import { isTinyTitleLocalModelKey } from "../../tiny/models";
@@ -512,7 +512,6 @@ export class InputController {
 
 			if (!text) return;
 
-
 			// Continue shortcuts: "." or "c" resume the agent with a hidden agent-authored
 			// developer directive (no visible user message) instead of an empty turn, so the
 			// model continues the prior intent rather than second-guessing the interrupt.
@@ -536,7 +535,6 @@ export class InputController {
 			const runner = this.ctx.session.extensionRunner;
 			let inputImages = this.ctx.pendingImages.length > 0 ? [...this.ctx.pendingImages] : undefined;
 			let inputImageLinks = this.ctx.pendingImageLinks.length > 0 ? [...this.ctx.pendingImageLinks] : undefined;
-
 
 			if (runner?.hasHandlers("input")) {
 				const result = await runner.emitInput(text, inputImages, "interactive");
@@ -898,9 +896,7 @@ export class InputController {
 				if (ref.parentId && ownedIds.has(ref.parentId)) ownedIds.add(ref.id);
 			}
 		}
-		const children = refs.filter(
-			ref => ref.id !== MAIN_AGENT_ID && ownedIds.has(ref.id) && ref.status !== "aborted",
-		);
+		const children = refs.filter(ref => ref.id !== MAIN_AGENT_ID && ownedIds.has(ref.id) && ref.status !== "aborted");
 
 		const running = children.filter(ref => ref.status === "running");
 		if (running.length === 0) {
@@ -1070,7 +1066,6 @@ export class InputController {
 			return;
 		}
 
-
 		if (QUIT_COMMAND_RE.test(text)) {
 			await this.#requestInteractiveShutdown({ clearEditor: true });
 			return;
@@ -1130,8 +1125,7 @@ export class InputController {
 				this.ctx.editor.setText(selected.payload.text);
 				this.ctx.pendingImages = selected.payload.images ? [...selected.payload.images] : [];
 				this.ctx.pendingImageLinks = this.ctx.pendingImages.map(() => undefined);
-				this.ctx.editor.imageLinks =
-					this.ctx.pendingImageLinks.length > 0 ? this.ctx.pendingImageLinks : undefined;
+				this.ctx.editor.imageLinks = this.ctx.pendingImageLinks.length > 0 ? this.ctx.pendingImageLinks : undefined;
 				this.#queuedInputEdit = { inputId: selected.inputId, revision: selected.revision };
 			}
 			this.ctx.updatePendingMessagesDisplay();

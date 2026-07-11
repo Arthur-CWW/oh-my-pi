@@ -9,11 +9,11 @@ import {
 	type Context,
 	type CursorExecHandlers,
 	type CursorToolResultHandler,
-	type ReasoningEffort,
 	type ImageContent,
 	type Message,
 	type Model,
 	type ProviderSessionState,
+	type ReasoningEffort,
 	type ServiceTier,
 	type SimpleStreamOptions,
 	streamSimple,
@@ -1058,9 +1058,7 @@ export class Agent {
 			appendOnlyContext: this.#appendOnlyContext,
 			beforeToolCall: this.beforeToolCall ? (ctx, signal) => this.beforeToolCall?.(ctx, signal) : undefined,
 			afterToolCall: this.afterToolCall ? (ctx, signal) => this.afterToolCall?.(ctx, signal) : undefined,
-			admitQueuedInput: this.admitQueuedInput
-				? async boundary => this.admitQueuedInput?.(boundary)
-				: undefined,
+			admitQueuedInput: this.admitQueuedInput ? async boundary => this.admitQueuedInput?.(boundary) : undefined,
 			onAssistantMessageEvent: this.#onAssistantMessageEvent,
 			onHarmonyLeak: this.#onHarmonyLeak,
 			onTurnEnd: (messages, signal) => this.#onTurnEnd?.(messages, signal),

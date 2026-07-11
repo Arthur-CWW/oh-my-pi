@@ -53,10 +53,10 @@ import { type ReportFindingDetails, toReviewFinding } from "../tools/review";
 import { ToolAbortError } from "../tools/tool-errors";
 import type { EventBus } from "../utils/event-bus";
 import { buildNamedToolChoice } from "../utils/tool-choice";
-import type { SpawnRouteReceipt } from "./route-resolution";
 import type { WorkspaceTree } from "../workspace-tree";
-import { resolveRestorableSessionModel, type RestorableSessionModel } from "./hotswap";
 import { appendChildLifecycleRecord, type ChildLifecycleState } from "./child-lifecycle";
+import { type RestorableSessionModel, resolveRestorableSessionModel } from "./hotswap";
+import type { SpawnRouteReceipt } from "./route-resolution";
 import { subprocessToolRegistry } from "./subprocess-tool-registry";
 import {
 	type AgentDefinition,
@@ -2082,7 +2082,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 	let reviveSession: ((registerSubscription: (unsubscribe: () => void) => void) => Promise<AgentSession>) | null =
 		null;
 	let appendLifecycleState: ((state: ChildLifecycleState) => void) | undefined;
-	let originalRunSettled = false;
+	const originalRunSettled = false;
 	const installRegistryStatusSync = (target: AgentSession): (() => void) =>
 		target.subscribe(event => {
 			if (event.type === "agent_start") {

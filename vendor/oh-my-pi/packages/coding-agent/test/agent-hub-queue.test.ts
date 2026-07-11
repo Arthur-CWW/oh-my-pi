@@ -6,14 +6,14 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { IrcBus } from "@oh-my-pi/pi-coding-agent/irc/bus";
 import { IrcExternalBus } from "@oh-my-pi/pi-coding-agent/irc/bus-external";
-import { getAgentHubTurnStatus } from "@oh-my-pi/pi-coding-agent/modes/controllers/selector-controller";
 import { AgentHubOverlayComponent } from "@oh-my-pi/pi-coding-agent/modes/components/agent-hub";
+import { getAgentHubTurnStatus } from "@oh-my-pi/pi-coding-agent/modes/controllers/selector-controller";
 import { SessionObserverRegistry } from "@oh-my-pi/pi-coding-agent/modes/session-observer-registry";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
-import { AgentLifecycleManager } from "@oh-my-pi/pi-coding-agent/registry/agent-lifecycle";
-import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
 import { UiHelpers } from "@oh-my-pi/pi-coding-agent/modes/utils/ui-helpers";
+import { AgentLifecycleManager } from "@oh-my-pi/pi-coding-agent/registry/agent-lifecycle";
+import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { Container } from "@oh-my-pi/pi-tui";
 

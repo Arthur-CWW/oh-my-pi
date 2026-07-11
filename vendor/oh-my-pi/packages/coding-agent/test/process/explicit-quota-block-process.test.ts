@@ -339,27 +339,38 @@ process.exit(0);
 `;
 
 function decodeChildResult(value: unknown): ChildResult {
-	if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error("child emitted a non-object result");
+	if (typeof value !== "object" || value === null || Array.isArray(value))
+		throw new Error("child emitted a non-object result");
 	const result = value as Record<string, unknown>;
 	if (
 		typeof result.text !== "string" ||
-		!Array.isArray(result.resultIds) || !result.resultIds.every(value => typeof value === "string") ||
+		!Array.isArray(result.resultIds) ||
+		!result.resultIds.every(value => typeof value === "string") ||
 		typeof result.jobs !== "number" ||
 		typeof result.registryChild !== "boolean" ||
-		!Array.isArray(result.customTypes) || !result.customTypes.every(value => typeof value === "string") ||
+		!Array.isArray(result.customTypes) ||
+		!result.customTypes.every(value => typeof value === "string") ||
 		typeof result.artifactExists !== "boolean" ||
 		typeof result.childSessionExists !== "boolean" ||
 		typeof result.routeResolutionEntries !== "number" ||
 		typeof result.quotaDecisionBlocks !== "number" ||
 		typeof result.unhandledRejections !== "number"
-	) throw new Error("child emitted an invalid result: " + JSON.stringify(result));
+	)
+		throw new Error(`child emitted an invalid result: ${JSON.stringify(result)}`);
 	const receipts = result.receipts;
-	if (receipts !== undefined && (!Array.isArray(receipts) || !receipts.every(receipt =>
-		typeof receipt === "object" && receipt !== null &&
-		typeof receipt.provider === "string" &&
-		typeof receipt.model === "string" &&
-		typeof receipt.lastUserText === "string"
-	))) throw new Error("child emitted invalid receipts: " + JSON.stringify(result));
+	if (
+		receipts !== undefined &&
+		(!Array.isArray(receipts) ||
+			!receipts.every(
+				receipt =>
+					typeof receipt === "object" &&
+					receipt !== null &&
+					typeof receipt.provider === "string" &&
+					typeof receipt.model === "string" &&
+					typeof receipt.lastUserText === "string",
+			))
+	)
+		throw new Error(`child emitted invalid receipts: ${JSON.stringify(result)}`);
 	if (
 		(result.routeWinningLayer !== undefined && typeof result.routeWinningLayer !== "string") ||
 		(result.originalProvider !== undefined && typeof result.originalProvider !== "string") ||
@@ -369,8 +380,10 @@ function decodeChildResult(value: unknown): ChildResult {
 		(result.routeReason !== undefined && result.routeReason !== null && typeof result.routeReason !== "string") ||
 		(result.quotaSampleCount !== undefined && typeof result.quotaSampleCount !== "number") ||
 		(result.childSessionCount !== undefined && typeof result.childSessionCount !== "number") ||
-		(result.jobStatuses !== undefined && (!Array.isArray(result.jobStatuses) || !result.jobStatuses.every(status => typeof status === "string")))
-	) throw new Error("child emitted invalid automatic route result: " + JSON.stringify(result));
+		(result.jobStatuses !== undefined &&
+			(!Array.isArray(result.jobStatuses) || !result.jobStatuses.every(status => typeof status === "string")))
+	)
+		throw new Error(`child emitted invalid automatic route result: ${JSON.stringify(result)}`);
 	return {
 		text: result.text,
 		resultIds: result.resultIds as string[],
@@ -403,8 +416,12 @@ async function runChild(environment: Record<string, string>): Promise<{ result: 
 		stdout: "pipe",
 		stderr: "pipe",
 	});
-	const [exitCode, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
-	if (exitCode !== 0) throw new Error("explicit quota block child failed (" + exitCode + "): " + stderr);
+	const [exitCode, stdout, stderr] = await Promise.all([
+		child.exited,
+		new Response(child.stdout).text(),
+		new Response(child.stderr).text(),
+	]);
+	if (exitCode !== 0) throw new Error(`explicit quota block child failed (${exitCode}): ${stderr}`);
 	const line = stdout.trim().split("\n").at(-1);
 	if (!line) throw new Error("explicit quota block child emitted no result");
 	return { result: decodeChildResult(JSON.parse(line)), stderr };

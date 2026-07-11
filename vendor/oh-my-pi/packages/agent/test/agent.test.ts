@@ -51,7 +51,8 @@ describe("Agent", () => {
 		expect(boundaries).toEqual(["tool"]);
 		expect(
 			mock.calls[1]?.context.messages.some(
-				message => message.role === "user" && typeof message.content === "string" && message.content === "host-admitted",
+				message =>
+					message.role === "user" && typeof message.content === "string" && message.content === "host-admitted",
 			),
 		).toBe(true);
 	});

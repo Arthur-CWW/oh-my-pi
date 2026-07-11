@@ -1,5 +1,5 @@
-import { OPTIONAL_VALUE_FLAGS, STRING_VALUE_FLAGS } from "./flag-tables";
 import type { SessionOwnershipHandle } from "../session/session-ownership";
+import { OPTIONAL_VALUE_FLAGS, STRING_VALUE_FLAGS } from "./flag-tables";
 
 let launchArgsForRestart: readonly string[] = [];
 

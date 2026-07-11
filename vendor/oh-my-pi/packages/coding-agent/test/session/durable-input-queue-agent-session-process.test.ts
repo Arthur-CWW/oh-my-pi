@@ -78,7 +78,12 @@ interface CompactionChildResult {
 	uncaughtErrors: number;
 }
 
-type ChildResult = FirstChildResult | ResumeChildResult | OwnershipLossChildResult | MixedChildResult | CompactionChildResult;
+type ChildResult =
+	| FirstChildResult
+	| ResumeChildResult
+	| OwnershipLossChildResult
+	| MixedChildResult
+	| CompactionChildResult;
 
 const CHILD_SOURCE = String.raw`
 import * as path from "node:path";
@@ -632,7 +637,7 @@ function isAttemptLedger(value: unknown): value is MixedChildResult["attempts"][
 		typeof (value as Record<string, unknown>).revision === "number" &&
 		typeof (value as Record<string, unknown>).state === "string"
 	);
-	}
+}
 
 function isCompactionProjection(value: unknown): value is CompactionChildResult["queuedDuringCompaction"][number] {
 	return (
@@ -913,7 +918,9 @@ describe("AgentSession durable input queue process replacement", () => {
 		expect(queued.inputId).not.toBe("");
 		expect(queued.sequence).toBeGreaterThan(compaction.compactionBoundarySequence);
 		expect(compaction.providerCalls.at(-1)).toContain("input captured during compaction");
-		expect(compaction.providerCalls.slice(0, -1).every(call => !call.includes("input captured during compaction"))).toBe(true);
+		expect(
+			compaction.providerCalls.slice(0, -1).every(call => !call.includes("input captured during compaction")),
+		).toBe(true);
 		expect(compaction.compactionIndex).toBeGreaterThanOrEqual(0);
 		expect(compaction.durableAttemptIndexes.length).toBeGreaterThan(0);
 		expect(compaction.durableAttemptIndexes.every(index => index > compaction.compactionIndex)).toBe(true);

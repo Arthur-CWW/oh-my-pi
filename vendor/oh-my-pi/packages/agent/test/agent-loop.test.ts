@@ -1190,7 +1190,8 @@ describe("agentLoop with AgentMessage", () => {
 		const secondRequestMessages = mock.calls[1]?.context.messages ?? [];
 		const toolResultIndex = secondRequestMessages.findIndex(message => message.role === "toolResult");
 		const admittedIndex = secondRequestMessages.findIndex(
-			message => message.role === "user" && typeof message.content === "string" && message.content === "host-admitted",
+			message =>
+				message.role === "user" && typeof message.content === "string" && message.content === "host-admitted",
 		);
 		expect(admittedIndex).toBeGreaterThan(toolResultIndex);
 		expect(
@@ -1202,7 +1203,6 @@ describe("agentLoop with AgentMessage", () => {
 			),
 		).toBe(true);
 	});
-
 
 	it("injects aside messages at the step boundary without interrupting tools", async () => {
 		const toolSchema = z.object({ value: z.string() });

@@ -16,11 +16,13 @@ beforeAll(() => {
 function buildCtx(compact: InteractiveModeContext["session"]["compact"]) {
 	const statusContainer = new Container();
 	const dispatched: string[] = [];
-	const capturedInputs = [{
-		text: "address review feedback",
-		delivery: "steer",
-		images: ["review.png"],
-	}];
+	const capturedInputs = [
+		{
+			text: "address review feedback",
+			delivery: "steer",
+			images: ["review.png"],
+		},
+	];
 	const capturedInput = capturedInputs[0];
 	const ctx = {
 		loadingAnimation: undefined,
@@ -54,9 +56,7 @@ describe("issue #825: compaction input ownership", () => {
 
 		expect(outcome).toBe("ok");
 		expect(dispatched).toEqual([]);
-		expect(capturedInputs).toEqual([
-			{ text: "address review feedback", delivery: "steer", images: ["review.png"] },
-		]);
+		expect(capturedInputs).toEqual([{ text: "address review feedback", delivery: "steer", images: ["review.png"] }]);
 		expect(capturedInputs).toHaveLength(1);
 		expect(capturedInputs[0]).toBe(capturedInput);
 	});

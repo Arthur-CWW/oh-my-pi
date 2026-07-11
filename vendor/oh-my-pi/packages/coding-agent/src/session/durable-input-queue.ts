@@ -74,7 +74,9 @@ export class SessionOwnershipLostError extends Error {
 	readonly ownerEpoch: string;
 
 	constructor(sessionId: string, ownerEpoch: string) {
-		super(`Session ${sessionId} is active in another process; this view is read-only. Resume or return to the active session.`);
+		super(
+			`Session ${sessionId} is active in another process; this view is read-only. Resume or return to the active session.`,
+		);
 		this.name = "SessionOwnershipLostError";
 		this.sessionId = sessionId;
 		this.ownerEpoch = ownerEpoch;
@@ -283,11 +285,7 @@ function decodeRecord(value: unknown): QueueRecord | undefined {
 		}
 		case "revision": {
 			const payload = decodePayload(value.payload);
-			if (
-				typeof value.inputId !== "string" ||
-				!isPositiveSafeInteger(value.revision) ||
-				!payload
-			) {
+			if (typeof value.inputId !== "string" || !isPositiveSafeInteger(value.revision) || !payload) {
 				return undefined;
 			}
 			return {
@@ -451,7 +449,8 @@ export class DurableInputQueue {
 				if (typeof input.text !== "string" || !isDeliveryClass(input.deliveryClass)) {
 					throw new DurableInputQueueConflictError("Invalid durable input queue enqueue payload");
 				}
-				const sequence = (await this.#items()).reduce((lastSequence, item) => Math.max(lastSequence, item.sequence), 0) + 1;
+				const sequence =
+					(await this.#items()).reduce((lastSequence, item) => Math.max(lastSequence, item.sequence), 0) + 1;
 				const item: DurableQueuedInput = {
 					inputId: randomUUID(),
 					sequence,
@@ -691,12 +690,20 @@ export class DurableInputQueue {
 			}),
 		);
 	}
-	async admitNext(boundary: "tool" | "terminal" = "terminal", now: number = Date.now()): Promise<DurableQueuedInput | undefined> {
+	async admitNext(
+		boundary: "tool" | "terminal" = "terminal",
+		now: number = Date.now(),
+	): Promise<DurableQueuedInput | undefined> {
 		return this.#exclusive(() =>
 			this.#withWriterLock(async () => {
 				await this.#assertOwner();
 				const items = await this.#items();
-				if (items.some(candidate => candidate.state === "admitted" || candidate.state === "running" || candidate.state === "uncertain")) {
+				if (
+					items.some(
+						candidate =>
+							candidate.state === "admitted" || candidate.state === "running" || candidate.state === "uncertain",
+					)
+				) {
 					return undefined;
 				}
 				let item: DurableQueuedInput | undefined;
@@ -724,7 +731,10 @@ export class DurableInputQueue {
 				return {
 					...item,
 					state: "admitted",
-					attempts: [...item.attempts, { id: attemptId, inputId: item.inputId, revision: item.revision, state: "admitted" }],
+					attempts: [
+						...item.attempts,
+						{ id: attemptId, inputId: item.inputId, revision: item.revision, state: "admitted" },
+					],
 				};
 			}),
 		);
@@ -899,7 +909,6 @@ export class DurableInputQueue {
 			return (await this.#items()).filter(item => item.state === "uncertain");
 		});
 	}
-
 
 	async reconcile(
 		attemptId: string,

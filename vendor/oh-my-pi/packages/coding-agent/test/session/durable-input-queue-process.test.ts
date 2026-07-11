@@ -15,7 +15,7 @@ const CHILD_SOURCE = [
 	'const owner = { sessionFile, sessionId: "parent", ownerEpoch: epoch, ownerKind: "omp", isCurrent: async () => true, release: async () => {} };',
 	"const queue = await DurableInputQueue.open(owner, root);",
 	"const adopted = await queue.adopt();",
-	'async function complete(item) {',
+	"async function complete(item) {",
 	"  const attempt = item.attempts.at(-1);",
 	'  if (!attempt) throw new Error("attempt missing");',
 	"  await queue.markRequestStarted(item.inputId, attempt.id);",
@@ -183,9 +183,21 @@ describe("durable input queue process replacement", () => {
 			.map(line => JSON.parse(line) as Record<string, unknown>);
 		expect(frozenRecords).toEqual(
 			expect.arrayContaining([
-				expect.objectContaining({ type: "enqueue", id: seeded.followUp.inputId, sequence: 1, deliveryClass: "followUp", revision: 1 }),
+				expect.objectContaining({
+					type: "enqueue",
+					id: seeded.followUp.inputId,
+					sequence: 1,
+					deliveryClass: "followUp",
+					revision: 1,
+				}),
 				expect.objectContaining({ type: "revision", inputId: seeded.followUp.inputId, revision: 2 }),
-				expect.objectContaining({ type: "enqueue", id: seeded.steer.inputId, sequence: 2, deliveryClass: "steer", revision: 1 }),
+				expect.objectContaining({
+					type: "enqueue",
+					id: seeded.steer.inputId,
+					sequence: 2,
+					deliveryClass: "steer",
+					revision: 1,
+				}),
 				expect.objectContaining({ type: "state", id: seeded.cancelled.inputId, state: "cancelled" }),
 			]),
 		);
@@ -226,8 +238,18 @@ describe("durable input queue process replacement", () => {
 			expect.arrayContaining([
 				expect.objectContaining({ inputId: seeded.followUp.inputId, sequence: 1, revision: 2, state: "completed" }),
 				expect.objectContaining({ inputId: seeded.steer.inputId, sequence: 2, revision: 1, state: "completed" }),
-				expect.objectContaining({ inputId: seeded.cancelled.inputId, sequence: 3, state: "cancelled", attempts: [] }),
-				expect.objectContaining({ inputId: delivered.captured.inputId, sequence: 4, revision: 1, state: "completed" }),
+				expect.objectContaining({
+					inputId: seeded.cancelled.inputId,
+					sequence: 3,
+					state: "cancelled",
+					attempts: [],
+				}),
+				expect.objectContaining({
+					inputId: delivered.captured.inputId,
+					sequence: 4,
+					revision: 1,
+					state: "completed",
+				}),
 			]),
 		);
 		const admittedIds = [delivered.tool.inputId, ...delivered.terminal.map(item => item.inputId)];
@@ -243,11 +265,36 @@ describe("durable input queue process replacement", () => {
 		expect(replacementRecords).toEqual(
 			expect.arrayContaining([
 				expect.objectContaining({ type: "adopt", previousEpoch: firstHead.epoch }),
-				expect.objectContaining({ type: "enqueue", id: delivered.captured.inputId, sequence: 4, deliveryClass: "followUp" }),
-				expect.objectContaining({ type: "attempt", id: delivered.tool.attemptId, inputId: seeded.steer.inputId, revision: 1 }),
-				expect.objectContaining({ type: "terminal", inputId: seeded.steer.inputId, attemptId: delivered.tool.attemptId, state: "completed" }),
-				expect.objectContaining({ type: "terminal", inputId: seeded.followUp.inputId, attemptId: delivered.terminal[0]?.attemptId, state: "completed" }),
-				expect.objectContaining({ type: "terminal", inputId: delivered.captured.inputId, attemptId: delivered.terminal[1]?.attemptId, state: "completed" }),
+				expect.objectContaining({
+					type: "enqueue",
+					id: delivered.captured.inputId,
+					sequence: 4,
+					deliveryClass: "followUp",
+				}),
+				expect.objectContaining({
+					type: "attempt",
+					id: delivered.tool.attemptId,
+					inputId: seeded.steer.inputId,
+					revision: 1,
+				}),
+				expect.objectContaining({
+					type: "terminal",
+					inputId: seeded.steer.inputId,
+					attemptId: delivered.tool.attemptId,
+					state: "completed",
+				}),
+				expect.objectContaining({
+					type: "terminal",
+					inputId: seeded.followUp.inputId,
+					attemptId: delivered.terminal[0]?.attemptId,
+					state: "completed",
+				}),
+				expect.objectContaining({
+					type: "terminal",
+					inputId: delivered.captured.inputId,
+					attemptId: delivered.terminal[1]?.attemptId,
+					state: "completed",
+				}),
 			]),
 		);
 	});
@@ -266,7 +313,10 @@ describe("durable input queue process replacement", () => {
 		const [queueKey] = await fs.readdir(path.join(root, "owners-v1"));
 		if (!queueKey) throw new Error("queue root missing");
 		const queueRoot = path.join(root, "owners-v1", queueKey, "queue-v2");
-		const head = JSON.parse(await fs.readFile(path.join(queueRoot, "head.json"), "utf8")) as { epoch: string; ownershipEpoch: string };
+		const head = JSON.parse(await fs.readFile(path.join(queueRoot, "head.json"), "utf8")) as {
+			epoch: string;
+			ownershipEpoch: string;
+		};
 		const records = (await fs.readFile(path.join(queueRoot, "segments", `${head.epoch}.jsonl`), "utf8"))
 			.trim()
 			.split("\n")

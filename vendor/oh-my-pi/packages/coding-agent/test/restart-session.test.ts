@@ -423,7 +423,7 @@ async function receiveHandoffReceipt(socketPath: string): Promise<{
 		receipt: received.promise,
 		close: async () => {
 			const closed = Promise.withResolvers<void>();
-			server.close(error => error ? closed.reject(error) : closed.resolve());
+			server.close(error => (error ? closed.reject(error) : closed.resolve()));
 			await closed.promise;
 		},
 	};

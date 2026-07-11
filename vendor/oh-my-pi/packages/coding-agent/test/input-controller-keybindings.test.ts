@@ -44,21 +44,18 @@ function installDurableInputSeam(
 	let clearQueueCalls = 0;
 	let cancelCalls = 0;
 	const session = ctx.session as AgentSession;
-	Object.assign(
-		session,
-		{
-			getQueuedInputProjection: () => projection,
-			editQueuedInput: edit,
-			clearQueue: () => {
-				clearQueueCalls += 1;
-				return { steering: [], followUp: [] };
-			},
-			cancelQueuedInput: async () => {
-				cancelCalls += 1;
-				return projection[0]!;
-			},
-		} satisfies Pick<AgentSession, "getQueuedInputProjection" | "editQueuedInput" | "clearQueue" | "cancelQueuedInput">,
-	);
+	Object.assign(session, {
+		getQueuedInputProjection: () => projection,
+		editQueuedInput: edit,
+		clearQueue: () => {
+			clearQueueCalls += 1;
+			return { steering: [], followUp: [] };
+		},
+		cancelQueuedInput: async () => {
+			cancelCalls += 1;
+			return projection[0]!;
+		},
+	} satisfies Pick<AgentSession, "getQueuedInputProjection" | "editQueuedInput" | "clearQueue" | "cancelQueuedInput">);
 	return { clearQueueCalls: () => clearQueueCalls, cancelCalls: () => cancelCalls };
 }
 async function createContext() {

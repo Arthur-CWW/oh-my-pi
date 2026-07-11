@@ -116,6 +116,7 @@ import { ChatBlock, type ChatBlockHost } from "./components/chat-block";
 import { CustomEditor } from "./components/custom-editor";
 import { DynamicBorder } from "./components/dynamic-border";
 import { ErrorBannerComponent } from "./components/error-banner";
+import { ErrorSelectorComponent } from "./components/error-selector";
 import type { EvalExecutionComponent } from "./components/eval-execution";
 import type { HookEditorComponent } from "./components/hook-editor";
 import type { HookInputComponent } from "./components/hook-input";
@@ -169,10 +170,8 @@ import type {
 	TodoItem,
 	TodoPhase,
 } from "./types";
+import { type DiagnosticEventInput, ErrorInbox } from "./utils/error-inbox";
 import { UiHelpers } from "./utils/ui-helpers";
-import { ErrorInbox, type DiagnosticEventInput } from "./utils/error-inbox";
-import { ErrorSelectorComponent } from "./components/error-selector";
-
 
 const HINT_SHIMMER_PALETTE: ShimmerPalette = {
 	low: "dim",
@@ -3432,7 +3431,6 @@ export class InteractiveMode implements InteractiveModeContext {
 	updatePendingMessagesDisplay(): void {
 		this.#uiHelpers.updatePendingMessagesDisplay();
 	}
-
 
 	flushPendingBashComponents(): void {
 		this.#uiHelpers.flushPendingBashComponents();
