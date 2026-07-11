@@ -1,7 +1,12 @@
 import { describe, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { CURRENT_SESSION_VERSION, type SessionHeader } from "@oh-my-pi/pi-coding-agent/session/session-entries";
+import {
+	CURRENT_SESSION_VERSION,
+	type PlanWorkflowModeSnapshot,
+	type PlanWorkflowRestoreState,
+	type SessionHeader,
+} from "@oh-my-pi/pi-coding-agent/session/session-entries";
 import {
 	IndexedSessionStorage,
 	type SessionStorageBackend,
@@ -24,6 +29,36 @@ const modelCommand = (commandId: string, expectedSessionRevision: number, model 
 	model,
 	role: "default",
 });
+
+const workflowCommand = (
+	commandId: string,
+	expectedSessionRevision: number,
+	transition:
+		| { kind: "enter"; planFilePath: string; workflow: "parallel" | "iterative" }
+		| { kind: "exit"; disposition: "paused" | "disabled" },
+) => ({
+	schemaVersion: 1 as const,
+	commandId,
+	correlationId: `correlation-${commandId}`,
+	expectedSessionRevision,
+	kind: "transitionPlanMode" as const,
+	transition,
+});
+
+const restoreState: PlanWorkflowRestoreState = {
+	mode: { kind: "none" },
+	activeToolNames: ["read", "edit"],
+	model: "openai/gpt-5",
+	thinkingLevel: "high",
+};
+
+const activePlan: PlanWorkflowModeSnapshot = {
+	kind: "plan",
+	phase: "active",
+	planFilePath: "local://journal-plan.md",
+	workflow: "parallel",
+	reentry: false,
+};
 
 class ControlledSessionBackend implements SessionStorageBackend {
 	readonly files = new Map<string, { content: string; mtimeMs: number }>();
@@ -259,6 +294,137 @@ describe("SessionManager state command journal", () => {
 		await reopened.commitStateCommand(modelCommand("next", 2));
 		expect(reopened.getSessionRevision()).toBe(3);
 		await reopened.close();
+	});
+
+	it("commits one workflow line and replays before CAS without recomputing restore state", async () => {
+		const manager = SessionManager.inMemory("/workflow-command-journal");
+		manager.appendModeChange("plan", { planFilePath: "local://legacy.md" });
+		const command = workflowCommand("workflow-enter", 1, {
+			kind: "enter",
+			planFilePath: activePlan.kind === "plan" ? activePlan.planFilePath : "",
+			workflow: "parallel",
+		});
+		const committed = await manager.commitWorkflowCommand(command, restoreState, activePlan);
+		expect(committed.sessionRevision).toBe(2);
+		expect(manager.getEntries().map(entry => entry.type)).toEqual(["mode_change", "workflow_change"]);
+		expect(committed.entry).toMatchObject({
+			type: "workflow_change",
+			previous: restoreState,
+			next: activePlan,
+			command: {
+				commandId: "workflow-enter",
+				correlationId: "correlation-workflow-enter",
+				expectedSessionRevision: 1,
+				committedSessionRevision: 2,
+				request: { kind: command.kind, transition: command.transition },
+			},
+		});
+		expect(manager.buildSessionContext()).toMatchObject({
+			mode: "plan",
+			modeData: {
+				planFilePath: "local://journal-plan.md",
+				workflow: "parallel",
+				reentry: false,
+			},
+			workflow: activePlan,
+		});
+
+		const replayed = await manager.commitWorkflowCommand(
+			command,
+			{ mode: activePlan, activeToolNames: ["different"] },
+			{ kind: "none" },
+		);
+		expect(replayed.replayed).toBe(true);
+		expect(replayed.entry.id).toBe(committed.entry.id);
+		expect(manager.getSessionRevision()).toBe(2);
+		await expect(
+			manager.commitWorkflowCommand(
+				workflowCommand("workflow-enter", 1, {
+					kind: "enter",
+					planFilePath: "local://other.md",
+					workflow: "parallel",
+				}),
+				restoreState,
+				activePlan,
+			),
+		).rejects.toBeInstanceOf(SessionCommandConflictError);
+	});
+
+	it("serializes concurrent workflow CAS contenders through the shared command fence", async () => {
+		const manager = SessionManager.inMemory("/workflow-command-cas");
+		const contenders = await Promise.allSettled([
+			manager.commitWorkflowCommand(
+				workflowCommand("workflow-a", 0, {
+					kind: "enter",
+					planFilePath: "local://a.md",
+					workflow: "parallel",
+				}),
+				restoreState,
+				{ ...activePlan, planFilePath: "local://a.md" },
+			),
+			manager.commitWorkflowCommand(
+				workflowCommand("workflow-b", 0, {
+					kind: "enter",
+					planFilePath: "local://b.md",
+					workflow: "iterative",
+				}),
+				restoreState,
+				{ ...activePlan, planFilePath: "local://b.md", workflow: "iterative" },
+			),
+		]);
+		expect(contenders.filter(result => result.status === "fulfilled")).toHaveLength(1);
+		const rejection = contenders.find(result => result.status === "rejected");
+		expect(rejection?.status === "rejected" && rejection.reason).toBeInstanceOf(SessionRevisionConflictError);
+		expect(manager.getSessionRevision()).toBe(1);
+		expect(manager.getEntries()).toHaveLength(1);
+		expect(manager.getEntries()[0]?.type).toBe("workflow_change");
+	});
+
+	it("reopens workflow receipts and typed mode projection with legacy mode parity", async () => {
+		using tempDir = TempDir.createSync("@omp-session-workflow-command-");
+		const sessionDir = path.join(tempDir.path(), "sessions");
+		await fs.mkdir(sessionDir, { recursive: true });
+		const manager = SessionManager.create(tempDir.path(), sessionDir);
+		await manager.ensureOnDisk();
+		const command = workflowCommand("workflow-pause", 0, {
+			kind: "exit",
+			disposition: "paused",
+		});
+		const pausedPlan: PlanWorkflowModeSnapshot = {
+			...activePlan,
+			phase: "paused",
+			reentry: true,
+		};
+		await manager.commitWorkflowCommand(command, { ...restoreState, mode: activePlan }, pausedPlan);
+		const sessionFile = manager.getSessionFile();
+		if (!sessionFile) throw new Error("expected workflow session file");
+		const lines = (await Bun.file(sessionFile).text()).trim().split("\n");
+		expect(lines).toHaveLength(2);
+		expect(JSON.parse(lines[1] ?? "{}")).toMatchObject({ type: "workflow_change" });
+		await manager.close();
+
+		const reopened = await SessionManager.open(sessionFile, sessionDir);
+		expect(reopened.getSessionCommandReceipt("workflow-pause")?.entry.type).toBe("workflow_change");
+		expect(reopened.buildSessionContext()).toMatchObject({
+			mode: "plan_paused",
+			workflow: pausedPlan,
+		});
+		expect((await reopened.commitWorkflowCommand(command, restoreState, { kind: "none" })).replayed).toBe(true);
+		await reopened.close();
+
+		const legacy = SessionManager.inMemory("/legacy-workflow-context");
+		legacy.appendModeChange("plan", { planFilePath: "local://legacy.md" });
+		expect(legacy.buildSessionContext()).toMatchObject({
+			mode: "plan",
+			modeData: { planFilePath: "local://legacy.md" },
+			workflow: {
+				kind: "plan",
+				phase: "active",
+				planFilePath: "local://legacy.md",
+				workflow: "parallel",
+				reentry: false,
+			},
+		});
 	});
 
 	it("keeps legacy model and thinking entries readable without receipts", async () => {

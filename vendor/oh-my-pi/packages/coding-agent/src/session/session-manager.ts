@@ -32,6 +32,8 @@ import {
 	type LeafChangeEntry,
 	type MCPToolSelectionEntry,
 	type ModeChangeEntry,
+	type PlanWorkflowModeSnapshot,
+	type PlanWorkflowRestoreState,
 	type ModelChangeEntry,
 	type NewSessionOptions,
 	type ServiceTierChangeEntry,
@@ -43,6 +45,8 @@ import {
 	type SessionMessageAttribution,
 	type SessionMessageEntry,
 	type SessionStateCommand,
+	type SessionCommand,
+	type TransitionPlanModeSessionCommand,
 	type SessionWorkstream,
 	type WorkstreamSource,
 	type SessionTreeNode,
@@ -1451,9 +1455,19 @@ export class SessionManager {
 	}
 
 	commitStateCommand(command: SessionStateCommand): Promise<SessionCommandReceipt> {
-		const commit = this.#stateCommandPending
-			? this.#stateCommandTail.then(() => this.#commitStateCommandNow(command))
-			: this.#commitStateCommandNow(command);
+		return this.#enqueueSessionCommand(() => this.#commitSessionCommandNow(command));
+	}
+
+	commitWorkflowCommand(
+		command: TransitionPlanModeSessionCommand,
+		previous: PlanWorkflowRestoreState,
+		next: PlanWorkflowModeSnapshot,
+	): Promise<SessionCommandReceipt> {
+		return this.#enqueueSessionCommand(() => this.#commitSessionCommandNow(command, { previous, next }));
+	}
+
+	#enqueueSessionCommand(commitNow: () => Promise<SessionCommandReceipt>): Promise<SessionCommandReceipt> {
+		const commit = this.#stateCommandPending ? this.#stateCommandTail.then(commitNow) : commitNow();
 		this.#stateCommandPending = true;
 		const tail = commit.then(
 			() => undefined,
@@ -1466,15 +1480,30 @@ export class SessionManager {
 		return commit;
 	}
 
-	async #commitStateCommandNow(command: SessionStateCommand): Promise<SessionCommandReceipt> {
+	async #commitSessionCommandNow(
+		command: SessionCommand,
+		workflowState?: { previous: PlanWorkflowRestoreState; next: PlanWorkflowModeSnapshot },
+	): Promise<SessionCommandReceipt> {
 		const existing = this.#sessionCommandEntries.get(command.commandId);
 		const normalizedRequest =
 			command.kind === "setModel"
 				? { kind: "setModel" as const, model: command.model, role: command.role ?? "default" }
-				: {
-						kind: "setThinkingLevel" as const,
-						thinkingLevel: command.thinkingLevel ?? null,
-					};
+				: command.kind === "setThinkingLevel"
+					? { kind: "setThinkingLevel" as const, thinkingLevel: command.thinkingLevel ?? null }
+					: {
+							kind: "transitionPlanMode" as const,
+							transition:
+								command.transition.kind === "enter"
+									? {
+											kind: "enter" as const,
+											planFilePath: command.transition.planFilePath,
+											workflow: command.transition.workflow,
+										}
+									: {
+											kind: "exit" as const,
+											disposition: command.transition.disposition,
+										},
+						};
 		if (existing?.command) {
 			const prior = existing.command;
 			const sameMetadata =
@@ -1483,19 +1512,34 @@ export class SessionManager {
 				prior.correlationId === command.correlationId &&
 				prior.causationId === command.causationId &&
 				prior.expectedSessionRevision === command.expectedSessionRevision;
-			const sameRequest =
-				prior.request.kind === normalizedRequest.kind &&
-				(prior.request.kind === "setModel" && normalizedRequest.kind === "setModel"
-					? prior.request.model === normalizedRequest.model && prior.request.role === normalizedRequest.role
-					: prior.request.kind === "setThinkingLevel" &&
-						normalizedRequest.kind === "setThinkingLevel" &&
-						prior.request.thinkingLevel === normalizedRequest.thinkingLevel);
+			let sameRequest = false;
+			if (prior.request.kind === normalizedRequest.kind) {
+				if (prior.request.kind === "setModel" && normalizedRequest.kind === "setModel") {
+					sameRequest =
+						prior.request.model === normalizedRequest.model && prior.request.role === normalizedRequest.role;
+				} else if (
+					prior.request.kind === "setThinkingLevel" &&
+					normalizedRequest.kind === "setThinkingLevel"
+				) {
+					sameRequest = prior.request.thinkingLevel === normalizedRequest.thinkingLevel;
+				} else if (
+					prior.request.kind === "transitionPlanMode" &&
+					normalizedRequest.kind === "transitionPlanMode"
+				) {
+					const priorTransition = prior.request.transition;
+					const nextTransition = normalizedRequest.transition;
+					sameRequest =
+						priorTransition.kind === nextTransition.kind &&
+						(priorTransition.kind === "enter" && nextTransition.kind === "enter"
+							? priorTransition.planFilePath === nextTransition.planFilePath &&
+								priorTransition.workflow === nextTransition.workflow
+							: priorTransition.kind === "exit" &&
+								nextTransition.kind === "exit" &&
+								priorTransition.disposition === nextTransition.disposition);
+				}
+			}
 			if (!sameMetadata || !sameRequest) throw new SessionCommandConflictError(command.commandId);
-			return {
-				entry: existing,
-				sessionRevision: prior.committedSessionRevision,
-				replayed: true,
-			};
+			return { entry: existing, sessionRevision: prior.committedSessionRevision, replayed: true };
 		}
 		const currentRevision = this.getSessionRevision();
 		if (command.expectedSessionRevision !== currentRevision) {
@@ -1510,21 +1554,36 @@ export class SessionManager {
 			expectedSessionRevision: command.expectedSessionRevision,
 			committedSessionRevision,
 		};
-		const entry: SessionCommandEntry =
-			normalizedRequest.kind === "setModel"
-				? {
-						type: "model_change",
-						...this.#freshEntryFields(),
-						model: normalizedRequest.model,
-						role: normalizedRequest.role,
-						command: { ...common, request: normalizedRequest },
-					}
-				: {
-						type: "thinking_level_change",
-						...this.#freshEntryFields(),
-						thinkingLevel: normalizedRequest.thinkingLevel,
-						command: { ...common, request: normalizedRequest },
-					};
+		let entry: SessionCommandEntry;
+		if (normalizedRequest.kind === "setModel") {
+			entry = {
+				type: "model_change",
+				...this.#freshEntryFields(),
+				model: normalizedRequest.model,
+				role: normalizedRequest.role,
+				command: { ...common, request: normalizedRequest },
+			};
+		} else if (normalizedRequest.kind === "setThinkingLevel") {
+			entry = {
+				type: "thinking_level_change",
+				...this.#freshEntryFields(),
+				thinkingLevel: normalizedRequest.thinkingLevel,
+				command: { ...common, request: normalizedRequest },
+			};
+		} else {
+			if (!workflowState) throw new Error("Workflow state is required for transitionPlanMode");
+			entry = {
+				type: "workflow_change",
+				...this.#freshEntryFields(),
+				command: { ...common, request: normalizedRequest },
+				previous: {
+					...workflowState.previous,
+					mode: { ...workflowState.previous.mode },
+					activeToolNames: [...workflowState.previous.activeToolNames],
+				},
+				next: { ...workflowState.next },
+			};
+		}
 		this.#stateCommandPersistenceInFlight = true;
 		this.#reserveStateCommandEntry(entry);
 		try {

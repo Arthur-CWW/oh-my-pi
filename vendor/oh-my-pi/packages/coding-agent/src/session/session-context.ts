@@ -6,6 +6,7 @@ import {
 	type CompactionEntry,
 	decodeSessionCommandEntry,
 	EPHEMERAL_MODEL_CHANGE_ROLE,
+	type PlanWorkflowModeSnapshot,
 	type SessionEntry,
 } from "./session-entries";
 import { AUTO_THINKING, type ConfiguredThinkingLevel, parseThinkingLevel } from "../thinking";
@@ -26,6 +27,8 @@ export interface SessionContext {
 	mode: string;
 	/** Mode-specific data from the last mode_change entry */
 	modeData?: Record<string, unknown>;
+	/** Closed workflow state restored from workflow_change entries (or legacy mode_change entries). */
+	workflow?: PlanWorkflowModeSnapshot;
 }
 
 /** Lists session model strings to try when restoring, in fallback order. */
@@ -146,6 +149,7 @@ export function buildSessionContext(
 			selectedMCPToolNames: [],
 			hasPersistedMCPToolSelection: false,
 			mode: "none",
+			workflow: { kind: "none" },
 		};
 	}
 	if (leafId) {
@@ -166,6 +170,7 @@ export function buildSessionContext(
 			selectedMCPToolNames: [],
 			hasPersistedMCPToolSelection: false,
 			mode: "none",
+			workflow: { kind: "none" },
 		};
 	}
 
@@ -187,6 +192,7 @@ export function buildSessionContext(
 	let hasPersistedMCPToolSelection = false;
 	let mode = "none";
 	let modeData: Record<string, unknown> | undefined;
+	let workflow: PlanWorkflowModeSnapshot = { kind: "none" };
 	// Track whether an explicit `model_change` with role="default" has been
 	// seen on this path. Once a user (or the agent itself) records an
 	// explicit default, later assistant-message inference must NOT overwrite
@@ -232,6 +238,22 @@ export function buildSessionContext(
 		} else if (entry.type === "mode_change") {
 			mode = entry.mode;
 			modeData = entry.data;
+			workflow = workflowFromLegacyMode(entry.mode, entry.data);
+		} else if (entry.type === "workflow_change") {
+			const decoded = decodeSessionCommandEntry(entry);
+			if (decoded?.type !== "workflow_change") continue;
+			workflow = decoded.next;
+			if (workflow.kind === "none") {
+				mode = "none";
+				modeData = undefined;
+			} else {
+				mode = workflow.phase === "active" ? "plan" : "plan_paused";
+				modeData = {
+					planFilePath: workflow.planFilePath,
+					workflow: workflow.workflow,
+					reentry: workflow.reentry,
+				};
+			}
 		}
 	}
 
@@ -400,5 +422,22 @@ export function buildSessionContext(
 		hasPersistedMCPToolSelection,
 		mode,
 		modeData,
+		workflow,
+	};
+}
+
+function workflowFromLegacyMode(
+	mode: string,
+	data: Record<string, unknown> | undefined,
+): PlanWorkflowModeSnapshot {
+	if (mode !== "plan" && mode !== "plan_paused") return { kind: "none" };
+	const planFilePath = data?.planFilePath;
+	if (typeof planFilePath !== "string") return { kind: "none" };
+	return {
+		kind: "plan",
+		phase: mode === "plan" ? "active" : "paused",
+		planFilePath,
+		workflow: data?.workflow === "iterative" ? "iterative" : "parallel",
+		reentry: data?.reentry === true,
 	};
 }

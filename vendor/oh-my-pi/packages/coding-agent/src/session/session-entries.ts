@@ -97,11 +97,41 @@ export interface SetThinkingLevelRequest {
 	readonly thinkingLevel: string | null;
 }
 
+export type PlanWorkflowModeSnapshot =
+	| { readonly kind: "none" }
+	| {
+			readonly kind: "plan";
+			readonly phase: "active" | "paused";
+			readonly planFilePath: string;
+			readonly workflow: "parallel" | "iterative";
+			readonly reentry: boolean;
+		};
+
+export interface TransitionPlanModeRequest {
+	readonly kind: "transitionPlanMode";
+	readonly transition:
+		| {
+				readonly kind: "enter";
+				readonly planFilePath: string;
+				readonly workflow: "parallel" | "iterative";
+		  }
+		| { readonly kind: "exit"; readonly disposition: "paused" | "disabled" };
+}
+
+export interface PlanWorkflowRestoreState {
+	readonly mode: PlanWorkflowModeSnapshot;
+	readonly activeToolNames: string[];
+	readonly model?: string;
+	readonly thinkingLevel?: string;
+}
+
 export type SetModelSessionCommand = SessionCommandMetadataV1 & SetModelRequest;
 export type SetThinkingSessionCommand = SessionCommandMetadataV1 & SetThinkingLevelRequest;
+export type TransitionPlanModeSessionCommand = SessionCommandMetadataV1 & TransitionPlanModeRequest;
 export type SessionStateCommand = SetModelSessionCommand | SetThinkingSessionCommand;
+export type SessionCommand = SessionStateCommand | TransitionPlanModeSessionCommand;
 
-export interface SessionCommandRecord<Request extends SetModelRequest | SetThinkingLevelRequest>
+export interface SessionCommandRecord<Request extends SetModelRequest | SetThinkingLevelRequest | TransitionPlanModeRequest>
 	extends SessionCommandMetadataV1 {
 	readonly request: Request;
 	readonly committedSessionRevision: number;
@@ -122,7 +152,20 @@ export interface ModelChangeEntry extends SessionEntryBase {
 	command?: SessionCommandRecord<SetModelRequest>;
 }
 
-export type SessionCommandEntry = ModelChangeEntry | ThinkingLevelChangeEntry;
+export interface WorkflowChangeEntry extends SessionEntryBase {
+	type: "workflow_change";
+	command: SessionCommandRecord<TransitionPlanModeRequest>;
+	previous: PlanWorkflowRestoreState;
+	next: PlanWorkflowModeSnapshot;
+}
+
+declare module "@oh-my-pi/pi-agent-core/compaction/entries" {
+	interface CustomCompactionSessionEntries {
+		workflowChange: WorkflowChangeEntry;
+	}
+}
+
+export type SessionCommandEntry = ModelChangeEntry | ThinkingLevelChangeEntry | WorkflowChangeEntry;
 
 export interface SessionCommandReceipt {
 	readonly entry: SessionCommandEntry;
@@ -170,7 +213,51 @@ export function decodeSessionCommandEntry(value: unknown): SessionCommandEntry |
 	) {
 		return value as ThinkingLevelChangeEntry;
 	}
+	if (
+		entry.type === "workflow_change" &&
+		request.kind === "transitionPlanMode" &&
+		isTransitionPlanModeRequest(request) &&
+		isPlanWorkflowRestoreState(entry.previous) &&
+		isPlanWorkflowModeSnapshot(entry.next)
+	) {
+		return value as WorkflowChangeEntry;
+	}
 	return undefined;
+}
+
+function isTransitionPlanModeRequest(value: Record<string, unknown>): boolean {
+	const transition = value.transition;
+	if (typeof transition !== "object" || transition === null) return false;
+	const candidate = transition as Record<string, unknown>;
+	return candidate.kind === "enter"
+		? typeof candidate.planFilePath === "string" &&
+				(candidate.workflow === "parallel" || candidate.workflow === "iterative")
+		: candidate.kind === "exit" && (candidate.disposition === "paused" || candidate.disposition === "disabled");
+}
+
+export function isPlanWorkflowModeSnapshot(value: unknown): value is PlanWorkflowModeSnapshot {
+	if (typeof value !== "object" || value === null) return false;
+	const candidate = value as Record<string, unknown>;
+	if (candidate.kind === "none") return true;
+	return (
+		candidate.kind === "plan" &&
+		(candidate.phase === "active" || candidate.phase === "paused") &&
+		typeof candidate.planFilePath === "string" &&
+		(candidate.workflow === "parallel" || candidate.workflow === "iterative") &&
+		typeof candidate.reentry === "boolean"
+	);
+}
+
+function isPlanWorkflowRestoreState(value: unknown): value is PlanWorkflowRestoreState {
+	if (typeof value !== "object" || value === null) return false;
+	const candidate = value as Record<string, unknown>;
+	return (
+		isPlanWorkflowModeSnapshot(candidate.mode) &&
+		Array.isArray(candidate.activeToolNames) &&
+		candidate.activeToolNames.every(name => typeof name === "string") &&
+		(candidate.model === undefined || typeof candidate.model === "string") &&
+		(candidate.thinkingLevel === undefined || typeof candidate.thinkingLevel === "string")
+	);
 }
 
 export interface ServiceTierChangeEntry extends SessionEntryBase {
@@ -326,7 +413,8 @@ export type SessionEntry =
 	| TtsrInjectionEntry
 	| MCPToolSelectionEntry
 	| SessionInitEntry
-	| ModeChangeEntry;
+	| ModeChangeEntry
+	| WorkflowChangeEntry;
 
 /** Raw file entry (includes header) */
 export type FileEntry = SessionHeader | SessionEntry;
