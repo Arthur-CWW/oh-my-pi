@@ -97,7 +97,7 @@ export interface SetThinkingLevelRequest {
 	readonly thinkingLevel: string | null;
 }
 
-export type PlanWorkflowModeSnapshot =
+export type WorkflowModeSnapshot =
 	| { readonly kind: "none" }
 	| {
 			readonly kind: "plan";
@@ -105,7 +105,8 @@ export type PlanWorkflowModeSnapshot =
 			readonly planFilePath: string;
 			readonly workflow: "parallel" | "iterative";
 			readonly reentry: boolean;
-		};
+		}
+	| { readonly kind: "goal"; readonly phase: "active" | "paused"; readonly goalId: string };
 
 export interface TransitionPlanModeRequest {
 	readonly kind: "transitionPlanMode";
@@ -118,8 +119,26 @@ export interface TransitionPlanModeRequest {
 		| { readonly kind: "exit"; readonly disposition: "paused" | "disabled" };
 }
 
-export interface PlanWorkflowRestoreState {
-	readonly mode: PlanWorkflowModeSnapshot;
+export interface TransitionGoalModeRequest {
+	readonly kind: "transitionGoalMode";
+	readonly transition:
+		| {
+				readonly kind: "enter";
+				readonly action: "create";
+				readonly objective: string;
+				readonly tokenBudget?: number;
+				readonly workstream?: string;
+		  }
+		| { readonly kind: "enter"; readonly action: "resume"; readonly goalId: string }
+		| {
+				readonly kind: "exit";
+				readonly goalId: string;
+				readonly disposition: "paused" | "dropped" | "completed";
+		  };
+}
+
+export interface WorkflowRestoreState {
+	readonly mode: WorkflowModeSnapshot;
 	readonly activeToolNames: string[];
 	readonly model?: string;
 	readonly thinkingLevel?: string;
@@ -128,10 +147,16 @@ export interface PlanWorkflowRestoreState {
 export type SetModelSessionCommand = SessionCommandMetadataV1 & SetModelRequest;
 export type SetThinkingSessionCommand = SessionCommandMetadataV1 & SetThinkingLevelRequest;
 export type TransitionPlanModeSessionCommand = SessionCommandMetadataV1 & TransitionPlanModeRequest;
+export type TransitionGoalModeSessionCommand = SessionCommandMetadataV1 & TransitionGoalModeRequest;
+export type TransitionWorkflowModeSessionCommand =
+	| TransitionPlanModeSessionCommand
+	| TransitionGoalModeSessionCommand;
 export type SessionStateCommand = SetModelSessionCommand | SetThinkingSessionCommand;
-export type SessionCommand = SessionStateCommand | TransitionPlanModeSessionCommand;
+export type SessionCommand = SessionStateCommand | TransitionWorkflowModeSessionCommand;
 
-export interface SessionCommandRecord<Request extends SetModelRequest | SetThinkingLevelRequest | TransitionPlanModeRequest>
+export interface SessionCommandRecord<
+	Request extends SetModelRequest | SetThinkingLevelRequest | TransitionPlanModeRequest | TransitionGoalModeRequest,
+>
 	extends SessionCommandMetadataV1 {
 	readonly request: Request;
 	readonly committedSessionRevision: number;
@@ -154,9 +179,9 @@ export interface ModelChangeEntry extends SessionEntryBase {
 
 export interface WorkflowChangeEntry extends SessionEntryBase {
 	type: "workflow_change";
-	command: SessionCommandRecord<TransitionPlanModeRequest>;
-	previous: PlanWorkflowRestoreState;
-	next: PlanWorkflowModeSnapshot;
+	command: SessionCommandRecord<TransitionPlanModeRequest | TransitionGoalModeRequest>;
+	previous: WorkflowRestoreState;
+	next: WorkflowModeSnapshot;
 }
 
 declare module "@oh-my-pi/pi-agent-core/compaction/entries" {
@@ -215,10 +240,11 @@ export function decodeSessionCommandEntry(value: unknown): SessionCommandEntry |
 	}
 	if (
 		entry.type === "workflow_change" &&
-		request.kind === "transitionPlanMode" &&
-		isTransitionPlanModeRequest(request) &&
-		isPlanWorkflowRestoreState(entry.previous) &&
-		isPlanWorkflowModeSnapshot(entry.next)
+		((request.kind === "transitionPlanMode" && isTransitionPlanModeRequest(request)) ||
+			(request.kind === "transitionGoalMode" && isTransitionGoalModeRequest(request))) &&
+		isWorkflowRestoreState(entry.previous) &&
+		isWorkflowModeSnapshot(entry.next) &&
+		isWorkflowTransitionResult(request, entry.previous.mode, entry.next)
 	) {
 		return value as WorkflowChangeEntry;
 	}
@@ -235,10 +261,46 @@ function isTransitionPlanModeRequest(value: Record<string, unknown>): boolean {
 		: candidate.kind === "exit" && (candidate.disposition === "paused" || candidate.disposition === "disabled");
 }
 
-export function isPlanWorkflowModeSnapshot(value: unknown): value is PlanWorkflowModeSnapshot {
+function isTransitionGoalModeRequest(value: Record<string, unknown>): boolean {
+	const transition = value.transition;
+	if (typeof transition !== "object" || transition === null) return false;
+	const candidate = transition as Record<string, unknown>;
+	if (candidate.kind === "enter" && candidate.action === "create") {
+		return (
+			candidate.goalId === undefined &&
+			typeof candidate.objective === "string" &&
+			candidate.objective.trim().length > 0 &&
+			(candidate.tokenBudget === undefined ||
+				(Number.isSafeInteger(candidate.tokenBudget) && (candidate.tokenBudget as number) > 0)) &&
+			(candidate.workstream === undefined ||
+				(typeof candidate.workstream === "string" &&
+					decodeSessionWorkstream({ kind: "workstream", id: candidate.workstream }) !== undefined))
+		);
+	}
+	if (candidate.kind === "enter" && candidate.action === "resume") {
+		return typeof candidate.goalId === "string" && candidate.goalId.trim().length > 0;
+	}
+	return (
+		candidate.kind === "exit" &&
+		typeof candidate.goalId === "string" &&
+		candidate.goalId.trim().length > 0 &&
+		(candidate.disposition === "paused" ||
+			candidate.disposition === "dropped" ||
+			candidate.disposition === "completed")
+	);
+}
+
+export function isWorkflowModeSnapshot(value: unknown): value is WorkflowModeSnapshot {
 	if (typeof value !== "object" || value === null) return false;
 	const candidate = value as Record<string, unknown>;
 	if (candidate.kind === "none") return true;
+	if (candidate.kind === "goal") {
+		return (
+			(candidate.phase === "active" || candidate.phase === "paused") &&
+			typeof candidate.goalId === "string" &&
+			candidate.goalId.trim().length > 0
+		);
+	}
 	return (
 		candidate.kind === "plan" &&
 		(candidate.phase === "active" || candidate.phase === "paused") &&
@@ -248,16 +310,42 @@ export function isPlanWorkflowModeSnapshot(value: unknown): value is PlanWorkflo
 	);
 }
 
-function isPlanWorkflowRestoreState(value: unknown): value is PlanWorkflowRestoreState {
+function isWorkflowRestoreState(value: unknown): value is WorkflowRestoreState {
 	if (typeof value !== "object" || value === null) return false;
 	const candidate = value as Record<string, unknown>;
 	return (
-		isPlanWorkflowModeSnapshot(candidate.mode) &&
+		isWorkflowModeSnapshot(candidate.mode) &&
 		Array.isArray(candidate.activeToolNames) &&
 		candidate.activeToolNames.every(name => typeof name === "string") &&
 		(candidate.model === undefined || typeof candidate.model === "string") &&
 		(candidate.thinkingLevel === undefined || typeof candidate.thinkingLevel === "string")
 	);
+}
+
+function isWorkflowTransitionResult(
+	request: Record<string, unknown>,
+	previous: WorkflowModeSnapshot,
+	next: WorkflowModeSnapshot,
+): boolean {
+	if (request.kind === "transitionPlanMode") return true;
+	const transition = request.transition as Record<string, unknown>;
+	if (transition.kind === "enter") {
+		return (
+			next.kind === "goal" &&
+			next.phase === "active" &&
+			(transition.action === "create" || next.goalId === transition.goalId)
+		);
+	}
+	if (
+		previous.kind !== "goal" ||
+		previous.phase !== "active" ||
+		previous.goalId !== transition.goalId
+	) {
+		return false;
+	}
+	return transition.disposition === "paused"
+		? next.kind === "goal" && next.phase === "paused" && next.goalId === transition.goalId
+		: next.kind === "none";
 }
 
 export interface ServiceTierChangeEntry extends SessionEntryBase {

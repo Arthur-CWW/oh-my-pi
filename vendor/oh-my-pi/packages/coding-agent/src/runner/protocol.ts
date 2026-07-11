@@ -1,5 +1,5 @@
 import type { DurableQueuedInput } from "../session/durable-input-queue";
-import type { PlanWorkflowModeSnapshot } from "../session/session-entries";
+import type { WorkflowModeSnapshot } from "../session/session-entries";
 import { Schema } from "effect";
 import { InvalidRunnerCommandError, RunnerRevisionConflictError } from "./errors";
 
@@ -286,7 +286,7 @@ export interface SessionRunnerSnapshot {
 				readonly startedSessionRevision: number;
 		  }
 		| undefined;
-	readonly workflow: PlanWorkflowModeSnapshot;
+	readonly workflow: WorkflowModeSnapshot;
 	readonly activeToolNames: ReadonlyArray<string>;
 	readonly status: RunnerStatus;
 	readonly pendingOperations: number;

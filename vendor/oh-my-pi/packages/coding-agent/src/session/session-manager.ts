@@ -32,8 +32,8 @@ import {
 	type LeafChangeEntry,
 	type MCPToolSelectionEntry,
 	type ModeChangeEntry,
-	type PlanWorkflowModeSnapshot,
-	type PlanWorkflowRestoreState,
+	type WorkflowModeSnapshot,
+	type WorkflowRestoreState,
 	type ModelChangeEntry,
 	type NewSessionOptions,
 	type ServiceTierChangeEntry,
@@ -46,7 +46,7 @@ import {
 	type SessionMessageEntry,
 	type SessionStateCommand,
 	type SessionCommand,
-	type TransitionPlanModeSessionCommand,
+	type TransitionWorkflowModeSessionCommand,
 	type SessionWorkstream,
 	type WorkstreamSource,
 	type SessionTreeNode,
@@ -1459,9 +1459,9 @@ export class SessionManager {
 	}
 
 	commitWorkflowCommand(
-		command: TransitionPlanModeSessionCommand,
-		previous: PlanWorkflowRestoreState,
-		next: PlanWorkflowModeSnapshot,
+		command: TransitionWorkflowModeSessionCommand,
+		previous: WorkflowRestoreState,
+		next: WorkflowModeSnapshot,
 	): Promise<SessionCommandReceipt> {
 		return this.#enqueueSessionCommand(() => this.#commitSessionCommandNow(command, { previous, next }));
 	}
@@ -1482,7 +1482,7 @@ export class SessionManager {
 
 	async #commitSessionCommandNow(
 		command: SessionCommand,
-		workflowState?: { previous: PlanWorkflowRestoreState; next: PlanWorkflowModeSnapshot },
+		workflowState?: { previous: WorkflowRestoreState; next: WorkflowModeSnapshot },
 	): Promise<SessionCommandReceipt> {
 		const existing = this.#sessionCommandEntries.get(command.commandId);
 		const normalizedRequest =
@@ -1490,20 +1490,48 @@ export class SessionManager {
 				? { kind: "setModel" as const, model: command.model, role: command.role ?? "default" }
 				: command.kind === "setThinkingLevel"
 					? { kind: "setThinkingLevel" as const, thinkingLevel: command.thinkingLevel ?? null }
-					: {
-							kind: "transitionPlanMode" as const,
-							transition:
-								command.transition.kind === "enter"
-									? {
-											kind: "enter" as const,
-											planFilePath: command.transition.planFilePath,
-											workflow: command.transition.workflow,
-										}
-									: {
-											kind: "exit" as const,
-											disposition: command.transition.disposition,
-										},
-						};
+					: command.kind === "transitionPlanMode"
+						? {
+								kind: "transitionPlanMode" as const,
+								transition:
+									command.transition.kind === "enter"
+										? {
+												kind: "enter" as const,
+												planFilePath: command.transition.planFilePath,
+												workflow: command.transition.workflow,
+											}
+										: {
+												kind: "exit" as const,
+												disposition: command.transition.disposition,
+											},
+							}
+						: {
+								kind: "transitionGoalMode" as const,
+								transition:
+									command.transition.kind === "enter"
+										? command.transition.action === "create"
+											? {
+													kind: "enter" as const,
+													action: "create" as const,
+													objective: command.transition.objective,
+													...(command.transition.tokenBudget === undefined
+														? {}
+														: { tokenBudget: command.transition.tokenBudget }),
+													...(command.transition.workstream === undefined
+														? {}
+														: { workstream: command.transition.workstream }),
+												}
+											: {
+													kind: "enter" as const,
+													action: "resume" as const,
+													goalId: command.transition.goalId,
+												}
+										: {
+												kind: "exit" as const,
+												goalId: command.transition.goalId,
+												disposition: command.transition.disposition,
+											},
+							};
 		if (existing?.command) {
 			const prior = existing.command;
 			const sameMetadata =
@@ -1523,19 +1551,43 @@ export class SessionManager {
 				) {
 					sameRequest = prior.request.thinkingLevel === normalizedRequest.thinkingLevel;
 				} else if (
-					prior.request.kind === "transitionPlanMode" &&
-					normalizedRequest.kind === "transitionPlanMode"
+					(prior.request.kind === "transitionPlanMode" ||
+						prior.request.kind === "transitionGoalMode") &&
+					prior.request.kind === normalizedRequest.kind
 				) {
-					const priorTransition = prior.request.transition;
-					const nextTransition = normalizedRequest.transition;
-					sameRequest =
-						priorTransition.kind === nextTransition.kind &&
-						(priorTransition.kind === "enter" && nextTransition.kind === "enter"
-							? priorTransition.planFilePath === nextTransition.planFilePath &&
-								priorTransition.workflow === nextTransition.workflow
-							: priorTransition.kind === "exit" &&
-								nextTransition.kind === "exit" &&
-								priorTransition.disposition === nextTransition.disposition);
+					if (prior.request.kind === "transitionPlanMode" && normalizedRequest.kind === "transitionPlanMode") {
+						const priorTransition = prior.request.transition;
+						const nextTransition = normalizedRequest.transition;
+						sameRequest =
+							priorTransition.kind === nextTransition.kind &&
+							(priorTransition.kind === "enter" && nextTransition.kind === "enter"
+								? priorTransition.planFilePath === nextTransition.planFilePath &&
+									priorTransition.workflow === nextTransition.workflow
+								: priorTransition.kind === "exit" &&
+									nextTransition.kind === "exit" &&
+									priorTransition.disposition === nextTransition.disposition);
+					} else if (
+						prior.request.kind === "transitionGoalMode" &&
+						normalizedRequest.kind === "transitionGoalMode"
+					) {
+						const priorTransition = prior.request.transition;
+						const nextTransition = normalizedRequest.transition;
+						sameRequest =
+							priorTransition.kind === nextTransition.kind &&
+							(priorTransition.kind === "enter" && nextTransition.kind === "enter"
+								? priorTransition.action === nextTransition.action &&
+									(priorTransition.action === "create" && nextTransition.action === "create"
+										? priorTransition.objective === nextTransition.objective &&
+											priorTransition.tokenBudget === nextTransition.tokenBudget &&
+											priorTransition.workstream === nextTransition.workstream
+										: priorTransition.action === "resume" &&
+											nextTransition.action === "resume" &&
+											priorTransition.goalId === nextTransition.goalId)
+								: priorTransition.kind === "exit" &&
+									nextTransition.kind === "exit" &&
+									priorTransition.goalId === nextTransition.goalId &&
+									priorTransition.disposition === nextTransition.disposition);
+					}
 				}
 			}
 			if (!sameMetadata || !sameRequest) throw new SessionCommandConflictError(command.commandId);
@@ -1571,7 +1623,7 @@ export class SessionManager {
 				command: { ...common, request: normalizedRequest },
 			};
 		} else {
-			if (!workflowState) throw new Error("Workflow state is required for transitionPlanMode");
+			if (!workflowState) throw new Error("Workflow state is required for workflow transitions");
 			entry = {
 				type: "workflow_change",
 				...this.#freshEntryFields(),
@@ -1583,6 +1635,7 @@ export class SessionManager {
 				},
 				next: { ...workflowState.next },
 			};
+			if (!decodeSessionCommandEntry(entry)) throw new Error("Invalid workflow transition state");
 		}
 		this.#stateCommandPersistenceInFlight = true;
 		this.#reserveStateCommandEntry(entry);

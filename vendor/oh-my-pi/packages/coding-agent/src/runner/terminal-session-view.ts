@@ -3,7 +3,7 @@ import type { Model } from "@oh-my-pi/pi-ai";
 import type { Effect, Scope } from "effect";
 import type { ConfiguredThinkingLevel } from "../thinking";
 import type { AgentSessionEvent } from "../session/agent-session";
-import type { PlanWorkflowModeSnapshot } from "../session/session-entries";
+import type { WorkflowModeSnapshot } from "../session/session-entries";
 import type {
 	CancelQueuedInputCommand,
 	CancelCompactionCommand,
@@ -32,7 +32,7 @@ export interface TerminalSessionStateSnapshot {
 	readonly sessionId: string;
 	readonly modelSummary: TerminalModelSnapshot | undefined;
 	readonly configuredThinkingLevel: ConfiguredThinkingLevel | undefined;
-	readonly workflow: PlanWorkflowModeSnapshot;
+	readonly workflow: WorkflowModeSnapshot;
 	readonly activeToolNames: ReadonlyArray<string>;
 	readonly autoCompactionEnabled: boolean;
 	readonly isStreaming: boolean;

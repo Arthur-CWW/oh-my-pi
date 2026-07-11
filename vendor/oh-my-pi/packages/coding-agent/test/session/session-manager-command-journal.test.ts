@@ -3,8 +3,9 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import {
 	CURRENT_SESSION_VERSION,
-	type PlanWorkflowModeSnapshot,
-	type PlanWorkflowRestoreState,
+	decodeSessionCommandEntry,
+	type WorkflowModeSnapshot,
+	type WorkflowRestoreState,
 	type SessionHeader,
 } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 import {
@@ -45,14 +46,30 @@ const workflowCommand = (
 	transition,
 });
 
-const restoreState: PlanWorkflowRestoreState = {
+const goalWorkflowCommand = (
+	commandId: string,
+	expectedSessionRevision: number,
+	transition:
+		| { kind: "enter"; action: "create"; objective: string; tokenBudget?: number; workstream?: string }
+		| { kind: "enter"; action: "resume"; goalId: string }
+		| { kind: "exit"; goalId: string; disposition: "paused" | "dropped" | "completed" },
+) => ({
+	schemaVersion: 1 as const,
+	commandId,
+	correlationId: `correlation-${commandId}`,
+	expectedSessionRevision,
+	kind: "transitionGoalMode" as const,
+	transition,
+});
+
+const restoreState: WorkflowRestoreState = {
 	mode: { kind: "none" },
 	activeToolNames: ["read", "edit"],
 	model: "openai/gpt-5",
 	thinkingLevel: "high",
 };
 
-const activePlan: PlanWorkflowModeSnapshot = {
+const activePlan: WorkflowModeSnapshot = {
 	kind: "plan",
 	phase: "active",
 	planFilePath: "local://journal-plan.md",
@@ -390,7 +407,7 @@ describe("SessionManager state command journal", () => {
 			kind: "exit",
 			disposition: "paused",
 		});
-		const pausedPlan: PlanWorkflowModeSnapshot = {
+		const pausedPlan: WorkflowModeSnapshot = {
 			...activePlan,
 			phase: "paused",
 			reentry: true,
@@ -425,6 +442,241 @@ describe("SessionManager state command journal", () => {
 				reentry: false,
 			},
 		});
+	});
+
+	it("commits, decodes, replays, and projects every goal workflow request", async () => {
+		const manager = SessionManager.inMemory("/goal-workflow-command-journal");
+		const activeGoal: WorkflowModeSnapshot = {
+			kind: "goal",
+			phase: "active",
+			goalId: "goal-1",
+		};
+		const pausedGoal: WorkflowModeSnapshot = { ...activeGoal, phase: "paused" };
+		const create = goalWorkflowCommand("goal-create", 0, {
+			kind: "enter",
+			action: "create",
+			objective: "Ship the closed workflow journal",
+			tokenBudget: 1200,
+			workstream: "workflow-journal",
+		});
+		const created = await manager.commitWorkflowCommand(create, restoreState, activeGoal);
+		expect(created.replayed).toBe(false);
+		expect(decodeSessionCommandEntry(created.entry)).toEqual(created.entry);
+		expect(created.entry).toMatchObject({
+			type: "workflow_change",
+			command: { request: { kind: create.kind, transition: create.transition } },
+			next: activeGoal,
+		});
+		expect(manager.buildSessionContext()).toMatchObject({
+			mode: "goal",
+			modeData: { goalId: "goal-1" },
+			workflow: activeGoal,
+		});
+		expect((await manager.commitWorkflowCommand(create, { ...restoreState, mode: activeGoal }, pausedGoal)).replayed).toBe(
+			true,
+		);
+
+		const pause = goalWorkflowCommand("goal-pause", 1, {
+			kind: "exit",
+			goalId: "goal-1",
+			disposition: "paused",
+		});
+		const paused = await manager.commitWorkflowCommand(pause, { ...restoreState, mode: activeGoal }, pausedGoal);
+		expect(decodeSessionCommandEntry(paused.entry)).toEqual(paused.entry);
+		expect(manager.buildSessionContext()).toMatchObject({
+			mode: "goal_paused",
+			modeData: { goalId: "goal-1" },
+			workflow: pausedGoal,
+		});
+
+		const resume = goalWorkflowCommand("goal-resume", 2, {
+			kind: "enter",
+			action: "resume",
+			goalId: "goal-1",
+		});
+		expect(
+			decodeSessionCommandEntry(
+				(await manager.commitWorkflowCommand(resume, { ...restoreState, mode: pausedGoal }, activeGoal)).entry,
+			),
+		).toBeDefined();
+		const complete = goalWorkflowCommand("goal-complete", 3, {
+			kind: "exit",
+			goalId: "goal-1",
+			disposition: "completed",
+		});
+		await manager.commitWorkflowCommand(complete, { ...restoreState, mode: activeGoal }, { kind: "none" });
+		const drop = goalWorkflowCommand("goal-drop", 4, {
+			kind: "exit",
+			goalId: "goal-1",
+			disposition: "dropped",
+		});
+		expect(
+			decodeSessionCommandEntry(
+				(await manager.commitWorkflowCommand(drop, { ...restoreState, mode: activeGoal }, { kind: "none" })).entry,
+			),
+		).toBeDefined();
+		expect(manager.buildSessionContext()).toMatchObject({ mode: "none", workflow: { kind: "none" } });
+		await expect(
+			manager.commitWorkflowCommand(
+				goalWorkflowCommand("goal-create", 0, {
+					kind: "enter",
+					action: "create",
+					objective: "Changed objective",
+				}),
+				restoreState,
+				activeGoal,
+			),
+		).rejects.toBeInstanceOf(SessionCommandConflictError);
+	});
+
+	it("serializes concurrent goal CAS contenders through the workflow fence", async () => {
+		const manager = SessionManager.inMemory("/goal-workflow-cas");
+		const contenders = await Promise.allSettled([
+			manager.commitWorkflowCommand(
+				goalWorkflowCommand("goal-cas-a", 0, {
+					kind: "enter",
+					action: "create",
+					objective: "First contender",
+				}),
+				restoreState,
+				{ kind: "goal", phase: "active", goalId: "goal-cas-a" },
+			),
+			manager.commitWorkflowCommand(
+				goalWorkflowCommand("goal-cas-b", 0, {
+					kind: "enter",
+					action: "create",
+					objective: "Second contender",
+				}),
+				restoreState,
+				{ kind: "goal", phase: "active", goalId: "goal-cas-b" },
+			),
+		]);
+		expect(contenders.filter(result => result.status === "fulfilled")).toHaveLength(1);
+		const rejection = contenders.find(result => result.status === "rejected");
+		expect(rejection?.status === "rejected" && rejection.reason).toBeInstanceOf(SessionRevisionConflictError);
+		expect(manager.getEntries()).toHaveLength(1);
+	});
+
+	it("rejects malformed goal requests and request/result mismatches before appending", async () => {
+		const cases = [
+			{
+				command: goalWorkflowCommand("invalid-objective", 0, {
+					kind: "enter",
+					action: "create",
+					objective: "   ",
+				}),
+				next: { kind: "goal", phase: "active", goalId: "goal-1" } as const,
+			},
+			{
+				command: goalWorkflowCommand("invalid-budget", 0, {
+					kind: "enter",
+					action: "create",
+					objective: "Objective",
+					tokenBudget: 0,
+				}),
+				next: { kind: "goal", phase: "active", goalId: "goal-1" } as const,
+			},
+			{
+				command: goalWorkflowCommand("invalid-workstream", 0, {
+					kind: "enter",
+					action: "create",
+					objective: "Objective",
+					workstream: "Not Valid",
+				}),
+				next: { kind: "goal", phase: "active", goalId: "goal-1" } as const,
+			},
+			{
+				command: goalWorkflowCommand("invalid-goal", 0, {
+					kind: "enter",
+					action: "resume",
+					goalId: "",
+				}),
+				next: { kind: "goal", phase: "active", goalId: "goal-1" } as const,
+			},
+			{
+				command: goalWorkflowCommand("mismatched-goal", 0, {
+					kind: "enter",
+					action: "resume",
+					goalId: "goal-1",
+				}),
+				next: { kind: "goal", phase: "active", goalId: "goal-2" } as const,
+			},
+		];
+		for (const testCase of cases) {
+			const manager = SessionManager.inMemory(`/goal-invalid-${testCase.command.commandId}`);
+			await expect(manager.commitWorkflowCommand(testCase.command, restoreState, testCase.next)).rejects.toThrow(
+				"Invalid workflow transition state",
+			);
+			expect(manager.getEntries()).toEqual([]);
+		}
+		for (const [disposition, next] of [
+			["paused", { kind: "goal", phase: "paused", goalId: "goal-b" }],
+			["completed", { kind: "none" }],
+		] as const) {
+			const manager = SessionManager.inMemory(`/goal-exit-mismatch-${disposition}`);
+			await expect(
+				manager.commitWorkflowCommand(
+					goalWorkflowCommand(`goal-exit-mismatch-${disposition}`, 0, {
+						kind: "exit",
+						goalId: "goal-b",
+						disposition,
+					}),
+					{
+						...restoreState,
+						mode: { kind: "goal", phase: "active", goalId: "goal-a" },
+					},
+					next,
+				),
+			).rejects.toThrow("Invalid workflow transition state");
+			expect(manager.getEntries()).toEqual([]);
+		}
+	});
+
+	it("reopens goal receipts and applies newest legacy or closed workflow projection", async () => {
+		using tempDir = TempDir.createSync("@omp-session-goal-workflow-");
+		const sessionDir = path.join(tempDir.path(), "sessions");
+		await fs.mkdir(sessionDir, { recursive: true });
+		const manager = SessionManager.create(tempDir.path(), sessionDir);
+		const activeGoal: WorkflowModeSnapshot = { kind: "goal", phase: "active", goalId: "goal-reopen" };
+		const command = goalWorkflowCommand("goal-reopen-command", 0, {
+			kind: "enter",
+			action: "create",
+			objective: "Persist and reopen",
+		});
+		await manager.commitWorkflowCommand(command, restoreState, activeGoal);
+		const sessionFile = manager.getSessionFile();
+		if (!sessionFile) throw new Error("expected goal workflow session file");
+		await manager.close();
+
+		const reopened = await SessionManager.open(sessionFile, sessionDir);
+		expect(reopened.getSessionCommandReceipt(command.commandId)?.entry.type).toBe("workflow_change");
+		expect((await reopened.commitWorkflowCommand(command, restoreState, { kind: "none" })).replayed).toBe(true);
+		expect(reopened.buildSessionContext()).toMatchObject({
+			mode: "goal",
+			modeData: { goalId: "goal-reopen" },
+			workflow: activeGoal,
+		});
+		reopened.appendModeChange("plan", { planFilePath: "local://newest-legacy.md" });
+		expect(reopened.buildSessionContext()).toMatchObject({
+			mode: "plan",
+			workflow: { kind: "plan", planFilePath: "local://newest-legacy.md" },
+		});
+		const resumedGoal: WorkflowModeSnapshot = { kind: "goal", phase: "active", goalId: "goal-reopen" };
+		await reopened.commitWorkflowCommand(
+			goalWorkflowCommand("goal-newest", 2, {
+				kind: "enter",
+				action: "resume",
+				goalId: "goal-reopen",
+			}),
+			restoreState,
+			resumedGoal,
+		);
+		expect(reopened.buildSessionContext()).toMatchObject({
+			mode: "goal",
+			modeData: { goalId: "goal-reopen" },
+			workflow: resumedGoal,
+		});
+		await reopened.close();
 	});
 
 	it("keeps legacy model and thinking entries readable without receipts", async () => {

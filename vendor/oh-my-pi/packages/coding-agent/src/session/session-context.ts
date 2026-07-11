@@ -6,7 +6,7 @@ import {
 	type CompactionEntry,
 	decodeSessionCommandEntry,
 	EPHEMERAL_MODEL_CHANGE_ROLE,
-	type PlanWorkflowModeSnapshot,
+	type WorkflowModeSnapshot,
 	type SessionEntry,
 } from "./session-entries";
 import { AUTO_THINKING, type ConfiguredThinkingLevel, parseThinkingLevel } from "../thinking";
@@ -28,7 +28,7 @@ export interface SessionContext {
 	/** Mode-specific data from the last mode_change entry */
 	modeData?: Record<string, unknown>;
 	/** Closed workflow state restored from workflow_change entries (or legacy mode_change entries). */
-	workflow?: PlanWorkflowModeSnapshot;
+	workflow?: WorkflowModeSnapshot;
 }
 
 /** Lists session model strings to try when restoring, in fallback order. */
@@ -192,7 +192,7 @@ export function buildSessionContext(
 	let hasPersistedMCPToolSelection = false;
 	let mode = "none";
 	let modeData: Record<string, unknown> | undefined;
-	let workflow: PlanWorkflowModeSnapshot = { kind: "none" };
+	let workflow: WorkflowModeSnapshot = { kind: "none" };
 	// Track whether an explicit `model_change` with role="default" has been
 	// seen on this path. Once a user (or the agent itself) records an
 	// explicit default, later assistant-message inference must NOT overwrite
@@ -246,13 +246,16 @@ export function buildSessionContext(
 			if (workflow.kind === "none") {
 				mode = "none";
 				modeData = undefined;
-			} else {
+			} else if (workflow.kind === "plan") {
 				mode = workflow.phase === "active" ? "plan" : "plan_paused";
 				modeData = {
 					planFilePath: workflow.planFilePath,
 					workflow: workflow.workflow,
 					reentry: workflow.reentry,
 				};
+			} else {
+				mode = workflow.phase === "active" ? "goal" : "goal_paused";
+				modeData = { goalId: workflow.goalId };
 			}
 		}
 	}
@@ -429,7 +432,7 @@ export function buildSessionContext(
 function workflowFromLegacyMode(
 	mode: string,
 	data: Record<string, unknown> | undefined,
-): PlanWorkflowModeSnapshot {
+): WorkflowModeSnapshot {
 	if (mode !== "plan" && mode !== "plan_paused") return { kind: "none" };
 	const planFilePath = data?.planFilePath;
 	if (typeof planFilePath !== "string") return { kind: "none" };

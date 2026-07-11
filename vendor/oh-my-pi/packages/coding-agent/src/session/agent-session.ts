@@ -307,8 +307,8 @@ import type {
 	BranchSummaryEntry,
 	CompactionEntry,
 	NewSessionOptions,
-	PlanWorkflowModeSnapshot,
-	PlanWorkflowRestoreState,
+	WorkflowModeSnapshot,
+	WorkflowRestoreState,
 	SessionCommandReceipt,
 	SetModelSessionCommand,
 	SetThinkingSessionCommand,
@@ -6222,7 +6222,7 @@ export class AgentSession {
 			const latest = this.#latestWorkflowChange();
 			const currentMode = latest?.next ?? this.sessionManager.buildSessionContext().workflow ?? { kind: "none" };
 			const configuredThinkingLevel = this.configuredThinkingLevel();
-			const previous: PlanWorkflowRestoreState =
+			const previous: WorkflowRestoreState =
 				currentMode.kind === "plan" && latest
 					? latest.previous
 					: {
@@ -6233,7 +6233,7 @@ export class AgentSession {
 								? {}
 								: { thinkingLevel: configuredThinkingLevel }),
 						};
-			let next: PlanWorkflowModeSnapshot;
+			let next: WorkflowModeSnapshot;
 			if (command.transition.kind === "enter") {
 				next = {
 					kind: "plan",
