@@ -310,7 +310,7 @@ describe("goal runtime", () => {
 		});
 
 		await expect(harness.runtime.createGoal({ objective: "Second" })).rejects.toThrow(
-			"cannot create a new goal because this session already has a goal",
+			"cannot create goal because existing goal is active; use op=update to replace it",
 		);
 	});
 
@@ -337,6 +337,45 @@ describe("goal runtime", () => {
 		expect(next.goal.timeUsedSeconds).toBe(0);
 		expect(next.goal.id).not.toBe("goal-1");
 		expect(harness.persists.at(-1)?.state?.goal.objective).toBe("Second");
+	});
+
+	it("updates a paused goal without accounting paused usage or double-counting the replacement", async () => {
+		const harness = createHarness({
+			now: 1_000,
+			usage: createUsage({ input: 10 }),
+			state: {
+				enabled: false,
+				mode: "active",
+				goal: createGoal({
+					status: "paused",
+					tokenBudget: 100,
+					tokensUsed: 30,
+					timeUsedSeconds: 5,
+				}),
+			},
+		});
+
+		harness.runtime.onTurnStart("turn-1", createUsage({ input: 10 }));
+		harness.advance(5_000);
+		harness.setUsage({ input: 40 });
+
+		const replacement = await harness.runtime.replaceGoal({ objective: "Restarted", tokenBudget: 20 });
+
+		expect(replacement.enabled).toBe(true);
+		expect(replacement.goal.status).toBe("active");
+		expect(replacement.goal.id).not.toBe("goal-1");
+		expect(replacement.goal.tokensUsed).toBe(0);
+		expect(replacement.goal.timeUsedSeconds).toBe(0);
+		expect(harness.persists).toHaveLength(1);
+
+		harness.advance(1_500);
+		harness.setUsage({ input: 43 });
+		await harness.runtime.flushUsage("suppressed");
+		await harness.runtime.flushUsage("suppressed");
+
+		expect(harness.getState()?.goal.tokensUsed).toBe(3);
+		expect(harness.getState()?.goal.timeUsedSeconds).toBe(1);
+		expect(harness.persists).toHaveLength(2);
 	});
 
 	it("allows creating a new goal after the previous one is complete", async () => {

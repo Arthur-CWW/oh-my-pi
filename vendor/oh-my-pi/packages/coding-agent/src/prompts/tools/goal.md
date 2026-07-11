@@ -1,10 +1,10 @@
 Manage the active goal-mode objective.
 
 Use a single `op` field:
-- `create` starts a goal. Requires `objective`; optional `token_budget` must be positive. Use only when no goal exists and no goal is paused.
-- `update` replaces the active goal with a new objective and optional budget. Requires an active (or budget-limited) goal; fails if no goal is active.
+- `create` starts a goal. Requires `objective`; optional `token_budget` must be positive. Use when no goal exists or the previous goal is complete or dropped.
+- `update` replaces any nonterminal goal (active, paused, or budget-limited) with a fresh active goal, objective, and optional budget.
 - `get` returns the current goal (active or paused) and remaining token budget.
-- `resume` re-activates a paused goal so work can continue.
+- `resume` re-activates a paused goal without replacing it.
 - `complete` marks the goal complete after you have verified every deliverable against current evidence.
 - `drop` discards the current goal without completing it.
 
@@ -17,4 +17,4 @@ Examples:
 - `goal({"op":"drop"})`
 
 NEVER call `complete` because a budget is low or a turn is ending. Call it only when the goal is actually done and verified.
-If `get` shows a paused goal, call `resume` before continuing work on it.
+If `get` shows a paused goal, use `resume` to continue it unchanged or `update` to replace it.

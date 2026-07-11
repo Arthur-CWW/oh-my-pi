@@ -398,7 +398,9 @@ export class GoalRuntime {
 		return await this.#withAccounting(async () => {
 			const existing = this.#host.getState();
 			if (existing?.goal && existing.goal.status !== "dropped" && existing.goal.status !== "complete") {
-				throw new Error("cannot create a new goal because this session already has a goal");
+				throw new Error(
+					`cannot create goal because existing goal is ${existing.goal.status}; use op=update to replace it`,
+				);
 			}
 			const state = this.#createGoalState(objective, input.tokenBudget);
 			this.#budgetReportedFor = undefined;
@@ -410,12 +412,17 @@ export class GoalRuntime {
 
 	async replaceGoal(input: { objective: string; tokenBudget?: number }): Promise<GoalModeState> {
 		const objective = input.objective.trim();
-		if (!objective) throw new Error("objective is required when op=replace");
+		if (!objective) throw new Error("objective is required when op=update");
 		validateTokenBudget(input.tokenBudget);
 		return await this.#withAccounting(async () => {
 			const existing = this.#host.getState();
-			if (!existing?.enabled || !isAccountingStatus(existing.goal)) {
-				throw new Error("cannot replace goal because no goal is active");
+			if (!existing?.goal) {
+				throw new Error("cannot update goal because this session has no goal; use op=create");
+			}
+			if (existing.goal.status === "complete" || existing.goal.status === "dropped") {
+				throw new Error(
+					`cannot update goal because existing goal is ${existing.goal.status}; use op=create`,
+				);
 			}
 			await this.#flushUsageLocked("suppressed");
 			const state = this.#createGoalState(objective, input.tokenBudget);
@@ -429,8 +436,18 @@ export class GoalRuntime {
 	async resumeGoal(): Promise<GoalModeState> {
 		return await this.#withAccounting(async () => {
 			const state = this.#getStateClone();
-			if (!state?.goal) throw new Error("No paused goal.");
-			if (state.goal.status === "complete") throw new Error("Goal is already complete.");
+			if (!state?.goal) {
+				throw new Error("cannot resume goal because this session has no goal; use op=create");
+			}
+			if (state.goal.status !== "paused") {
+				const action =
+					state.goal.status === "complete" || state.goal.status === "dropped"
+						? "use op=create"
+						: state.goal.status === "active"
+							? "no action is needed"
+							: "use op=update to replace it";
+				throw new Error(`cannot resume goal because existing goal is ${state.goal.status}; ${action}`);
+			}
 			state.enabled = true;
 			state.mode = "active";
 			state.reason = undefined;

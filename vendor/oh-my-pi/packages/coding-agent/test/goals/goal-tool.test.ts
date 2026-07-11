@@ -123,65 +123,130 @@ describe("GoalTool", () => {
 		});
 	});
 
-	it("rejects create when a goal already exists", async () => {
-		const harness = createRuntimeHarness({
-			enabled: true,
-			mode: "active",
-			goal: createGoal({ objective: "Existing" }),
-		});
-		const tool = new GoalTool(
-			createToolSession({
-				getGoalRuntime: () => harness.runtime,
-				getGoalModeState: () => harness.getState(),
-			}),
-		);
+	it("enforces the create, update, and resume lifecycle truth table", async () => {
+		const cases: Array<{
+			status: Goal["status"] | "absent";
+			create: "success" | string;
+			update: "success" | string;
+			resume: "success" | string;
+		}> = [
+			{
+				status: "absent",
+				create: "success",
+				update: "cannot update goal because this session has no goal; use op=create",
+				resume: "cannot resume goal because this session has no goal; use op=create",
+			},
+			{
+				status: "active",
+				create: "cannot create goal because existing goal is active; use op=update to replace it",
+				update: "success",
+				resume: "cannot resume goal because existing goal is active; no action is needed",
+			},
+			{
+				status: "paused",
+				create: "cannot create goal because existing goal is paused; use op=update to replace it",
+				update: "success",
+				resume: "success",
+			},
+			{
+				status: "budget-limited",
+				create: "cannot create goal because existing goal is budget-limited; use op=update to replace it",
+				update: "success",
+				resume: "cannot resume goal because existing goal is budget-limited; use op=update to replace it",
+			},
+			{
+				status: "complete",
+				create: "success",
+				update: "cannot update goal because existing goal is complete; use op=create",
+				resume: "cannot resume goal because existing goal is complete; use op=create",
+			},
+			{
+				status: "dropped",
+				create: "success",
+				update: "cannot update goal because existing goal is dropped; use op=create",
+				resume: "cannot resume goal because existing goal is dropped; use op=create",
+			},
+		];
 
-		await expect(
-			tool.execute("call-create", { op: "create", objective: "New goal", token_budget: 10 }),
-		).rejects.toThrow("cannot create a new goal because this session already has a goal");
+		const initialState = (status: Goal["status"] | "absent"): GoalModeState | undefined => {
+			if (status === "absent") return undefined;
+			return {
+				enabled: status === "active" || status === "budget-limited",
+				mode: status === "complete" ? "exiting" : "active",
+				reason: status === "complete" ? "completed" : undefined,
+				goal: createGoal({ status, tokensUsed: 7, timeUsedSeconds: 3 }),
+			};
+		};
+		const setup = (status: Goal["status"] | "absent") => {
+			const harness = createRuntimeHarness(initialState(status));
+			const tool = new GoalTool(
+				createToolSession({
+					getGoalRuntime: () => harness.runtime,
+					getGoalModeState: () => harness.getState(),
+				}),
+			);
+			return { harness, tool };
+		};
+
+		for (const testCase of cases) {
+			const create = setup(testCase.status);
+			const createCall = create.tool.execute(`create-${testCase.status}`, {
+				op: "create",
+				objective: "Created",
+				token_budget: 20,
+			});
+			if (testCase.create === "success") {
+				const result = await createCall;
+				expect(result.details?.goal).toMatchObject({
+					objective: "Created",
+					status: "active",
+					tokenBudget: 20,
+					tokensUsed: 0,
+					timeUsedSeconds: 0,
+				});
+			} else {
+				await expect(createCall).rejects.toThrow(testCase.create);
+			}
+
+			const update = setup(testCase.status);
+			const updateCall = update.tool.execute(`update-${testCase.status}`, {
+				op: "update",
+				objective: "Updated",
+				token_budget: 25,
+			});
+			if (testCase.update === "success") {
+				const result = await updateCall;
+				expect(result.details?.goal).toMatchObject({
+					objective: "Updated",
+					status: "active",
+					tokenBudget: 25,
+					tokensUsed: 0,
+					timeUsedSeconds: 0,
+				});
+				expect(result.details?.goal?.id).not.toBe("goal-1");
+				expect(update.harness.getState()?.enabled).toBe(true);
+			} else {
+				await expect(updateCall).rejects.toThrow(testCase.update);
+			}
+
+			const resume = setup(testCase.status);
+			const resumeCall = resume.tool.execute(`resume-${testCase.status}`, { op: "resume" });
+			if (testCase.resume === "success") {
+				const result = await resumeCall;
+				expect(result.details?.goal).toMatchObject({
+					id: "goal-1",
+					status: "active",
+					tokensUsed: 7,
+					timeUsedSeconds: 3,
+				});
+				expect(resume.harness.getState()?.enabled).toBe(true);
+			} else {
+				await expect(resumeCall).rejects.toThrow(testCase.resume);
+			}
+		}
 	});
 
-	it("updates an active goal without using the slash command path", async () => {
-		const harness = createRuntimeHarness();
-		await harness.runtime.createGoal({ objective: "Existing", tokenBudget: 100 });
-		const tool = new GoalTool(
-			createToolSession({
-				getGoalRuntime: () => harness.runtime,
-				getGoalModeState: () => harness.getState(),
-			}),
-		);
 
-		const result = await tool.execute("call-update", {
-			op: "update",
-			objective: "  Refined goal  ",
-			token_budget: 25,
-		});
-
-		expect(result.details).toMatchObject({
-			op: "update",
-			remainingTokens: 25,
-			completionBudgetReport: null,
-		});
-		expect(result.details?.goal?.objective).toBe("Refined goal");
-		expect(result.details?.goal?.tokenBudget).toBe(25);
-		expect(result.details?.goal?.status).toBe("active");
-		expect(harness.getState()?.enabled).toBe(true);
-		expect(harness.getState()?.goal.objective).toBe("Refined goal");
-	});
-
-	it("rejects op=update when no goal is active", async () => {
-		const harness = createRuntimeHarness();
-		const tool = new GoalTool(
-			createToolSession({
-				getGoalRuntime: () => harness.runtime,
-				getGoalModeState: () => harness.getState(),
-			}),
-		);
-
-		await expect(tool.execute("call-update", { op: "update", objective: "New goal" })).rejects.toThrow(
-			"cannot replace goal because no goal is active",
-		);
-	});
 
 	it("rejects op=update when the objective is missing or only whitespace", async () => {
 		const harness = createRuntimeHarness();
@@ -284,27 +349,6 @@ describe("GoalTool", () => {
 		expect(harness.getState()?.goal.status).toBe("complete");
 	});
 
-	it("allows create after previous goal is complete", async () => {
-		const harness = createRuntimeHarness({
-			enabled: false,
-			mode: "exiting",
-			reason: "completed",
-			goal: createGoal({ status: "complete" }),
-		});
-		const tool = new GoalTool(
-			createToolSession({
-				getGoalRuntime: () => harness.runtime,
-				getGoalModeState: () => harness.getState(),
-			}),
-		);
-
-		const result = await tool.execute("call-create", {
-			op: "create",
-			objective: "Next goal",
-		});
-		expect(result.details?.goal?.objective).toBe("Next goal");
-		expect(result.details?.goal?.status).toBe("active");
-	});
 
 	it("op=get returns a paused goal even when enabled=false", async () => {
 		const harness = createRuntimeHarness({
@@ -324,24 +368,6 @@ describe("GoalTool", () => {
 		expect(result.details?.goal?.objective).toBe("Ship it");
 	});
 
-	it("op=resume re-activates a paused goal", async () => {
-		const harness = createRuntimeHarness({
-			enabled: false,
-			mode: "active",
-			goal: createGoal({ status: "paused" }),
-		});
-		const tool = new GoalTool(
-			createToolSession({
-				getGoalRuntime: () => harness.runtime,
-				getGoalModeState: () => harness.getState(),
-			}),
-		);
-
-		const result = await tool.execute("call-resume", { op: "resume" });
-		expect(result.details?.op).toBe("resume");
-		expect(result.details?.goal?.status).toBe("active");
-		expect(harness.getState()?.enabled).toBe(true);
-	});
 
 	it("op=drop clears goal state", async () => {
 		const harness = createRuntimeHarness({
