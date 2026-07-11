@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "bun:test";
-import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
+import { Agent, type AgentMessage } from "@oh-my-pi/pi-agent-core";
 import { createAdvisorMessageCard } from "../../src/modes/components/advisor-message";
 import { getThemeByName } from "../../src/modes/theme/theme";
 import { formatSessionHistoryMarkdown } from "../../src/session/session-history-format";
@@ -158,6 +158,51 @@ describe("advisor", () => {
 			const advisorMessage = messages[0] as { content: string };
 			expect(advisorMessage.content).toContain("current response");
 			expect(advisorMessage.content).not.toContain("stale response");
+		});
+
+		it("fences queued old-lifecycle advice before the next steering boundary", async () => {
+			const agent = new Agent();
+			const oldLease = new AdvisorDeliveryLease();
+			const replacementLease = new AdvisorDeliveryLease();
+			const oldAdvice = {
+				role: "custom",
+				customType: "advisor",
+				content: "same advice",
+				display: true,
+				timestamp: 1,
+			} satisfies AgentMessage;
+			const replacementAdvice = {
+				...oldAdvice,
+				timestamp: 2,
+			} satisfies AgentMessage;
+			const userSteer = {
+				role: "user",
+				content: "keep my steer",
+				timestamp: 3,
+			} satisfies AgentMessage;
+			const streaming = Promise.withResolvers<void>();
+			const steeringBoundary = Promise.withResolvers<void>();
+			let consumed: readonly AgentMessage[] = [];
+			const primaryRun = (async () => {
+				streaming.resolve();
+				await steeringBoundary.promise;
+				consumed = agent.peekSteeringQueue().slice();
+			})();
+
+			await streaming.promise;
+			expect(oldLease.claim(oldAdvice)).toBe(true);
+			agent.steer(oldAdvice);
+			agent.steer(userSteer);
+
+			oldLease.revokeQueued(agent);
+			expect(replacementLease.claim(replacementAdvice)).toBe(true);
+			agent.steer(replacementAdvice);
+			steeringBoundary.resolve();
+			await primaryRun;
+
+			expect(consumed).toEqual([userSteer, replacementAdvice]);
+			expect(consumed.filter(message => message === oldAdvice)).toHaveLength(0);
+			expect(consumed.filter(message => message === replacementAdvice)).toHaveLength(1);
 		});
 	});
 

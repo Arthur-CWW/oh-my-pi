@@ -1,4 +1,10 @@
-import type { AgentTool, AgentToolContext, AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
+import type {
+	AgentMessage,
+	AgentTool,
+	AgentToolContext,
+	AgentToolResult,
+	AgentToolUpdateCallback,
+} from "@oh-my-pi/pi-agent-core";
 import { z } from "zod/v4";
 import adviseDescription from "../prompts/advisor/advise-tool.md" with { type: "text" };
 
@@ -29,13 +35,49 @@ export interface AdvisorNote {
 /** Lease held by the single advisor runtime currently allowed to surface advice. */
 export class AdvisorDeliveryLease {
 	#active = true;
+	readonly #claimedMessages = new WeakSet<AgentMessage>();
 
 	get active(): boolean {
 		return this.#active;
 	}
 
+	/**
+	 * Atomically accepts a normalized message into this lifecycle. The object
+	 * identity follows the message into agent-core without leaking lifecycle
+	 * metadata into the serialized transcript.
+	 */
+	claim(message: AgentMessage): boolean {
+		if (!this.#active) return false;
+		this.#claimedMessages.add(message);
+		return true;
+	}
+
 	revoke(): void {
 		this.#active = false;
+	}
+
+	/**
+	 * Revoke this lifecycle and remove only messages it already accepted into
+	 * agent-core. Ordinary steering and replacement-lifecycle advice survive.
+	 */
+	revokeQueued(queue: {
+		peekSteeringQueue(): readonly AgentMessage[];
+		peekFollowUpQueue(): readonly AgentMessage[];
+		replaceQueues(steering: AgentMessage[], followUp: AgentMessage[]): void;
+	}): void {
+		this.#active = false;
+		const steering = queue.peekSteeringQueue();
+		const followUp = queue.peekFollowUpQueue();
+		if (
+			!steering.some(message => this.#claimedMessages.has(message)) &&
+			!followUp.some(message => this.#claimedMessages.has(message))
+		) {
+			return;
+		}
+		queue.replaceQueues(
+			steering.filter(message => !this.#claimedMessages.has(message)),
+			followUp.filter(message => !this.#claimedMessages.has(message)),
+		);
 	}
 }
 

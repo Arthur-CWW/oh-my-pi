@@ -1794,7 +1794,7 @@ export class AgentSession {
 				}
 				void this.sendCustomMessage(
 					{ customType: "advisor", content, display: true, attribution: "agent", details },
-					{ deliverAs: "steer", triggerTurn: true, isDeliverable: () => deliveryLease.active },
+					{ deliverAs: "steer", triggerTurn: true, deliveryLease },
 				).catch(err => logger.debug("advisor delivery failed", { err: String(err) }));
 				return;
 			}
@@ -1878,8 +1878,9 @@ export class AgentSession {
 	}
 
 	#stopAdvisorRuntime(): void {
-		this.#advisorDeliveryLease?.revoke();
+		const deliveryLease = this.#advisorDeliveryLease;
 		this.#advisorDeliveryLease = undefined;
+		deliveryLease?.revokeQueued(this.agent);
 		if (this.#advisorRuntime) {
 			this.#advisorRuntime.dispose();
 			this.#advisorRuntime = undefined;
@@ -6566,8 +6567,8 @@ export class AgentSession {
 			triggerTurn?: boolean;
 			deliverAs?: "steer" | "followUp" | "nextTurn";
 			queueChipText?: string;
-			/** Cancels a message whose producer was superseded while async normalization ran. */
-			isDeliverable?: () => boolean;
+			/** Advisor lifecycle accepting this message into the core queue. */
+			deliveryLease?: AdvisorDeliveryLease;
 		},
 	): Promise<boolean> {
 		const details =
@@ -6590,7 +6591,7 @@ export class AgentSession {
 			timestamp: Date.now(),
 		};
 		const normalizedAppMessage = await this.#normalizeAgentMessageImages(appMessage);
-		if (options?.isDeliverable && !options.isDeliverable()) return false;
+		if (options?.deliveryLease && !options.deliveryLease.claim(normalizedAppMessage)) return false;
 		if (this.isStreaming) {
 			if (options?.deliverAs === "nextTurn") {
 				this.#queueHiddenNextTurnMessage(normalizedAppMessage, options?.triggerTurn ?? false);
