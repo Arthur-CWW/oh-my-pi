@@ -1,0 +1,41 @@
+{
+  "canonical_accounts": {
+    "x": "https://x.com/NousResearch",
+    "profile_confirmed_at": "2026-07-11",
+    "profile_media_total_reported": 438,
+    "canonical_links": [
+      "https://hermes-agent.nousresearch.com/",
+      "https://discord.gg/nousresearch",
+      "https://portal.nousresearch.com/cloud"
+    ]
+  },
+  "window": {
+    "visible_status_cards": 34,
+    "start": "2026-05-04T14:00:43Z",
+    "end": "2026-07-10T20:14:47Z"
+  },
+  "media": {
+    "video_files": 21,
+    "image_originals": 16,
+    "total_files": 37,
+    "total_bytes": 952508759,
+    "contact_sheets": [
+      "cleaned/video-contact-sheet.jpg"
+    ]
+  },
+  "analysis": {
+    "transcripts": 0,
+    "scene_note_records": 21,
+    "scene_note_completeness": "poster-frame only; frame-by-frame annotation pending"
+  },
+  "gaps": [
+    "X media timeline not exhausted: reported 438 assets; capture has first 34 cards because browser scrolling stopped producing observable state.",
+    "Image post exact copy/timestamps/status associations unavailable from grid/extractor.",
+    "No configured transcription credential."
+  ],
+  "stop_condition": "Stopped after browser automation became non-observable during media-grid pagination; no rate-limit response was received.",
+  "access_failures": [
+    "yt-dlp returned \u201cNo video could be found\u201d for standalone image posts (expected extractor limitation).",
+    "Some linked product URLs were unsupported by generic extraction; embedded public media was captured where available."
+  ]
+}

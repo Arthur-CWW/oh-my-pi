@@ -1,0 +1,33 @@
+{
+  "source": "https://x.com/poetengineer__",
+  "retrievedAt": "2026-07-11T09:31:43.561Z",
+  "method": "authenticated cmux WKWebView DOM capture; one browser surface; 2–5 second pauses between scroll attempts",
+  "identity": {
+    "displayName": "Kat ⊷ the Poet Engineer",
+    "handle": "@poetengineer__",
+    "visiblePostCounter": 5479
+  },
+  "timeline": {
+    "uniqueAuthoredOrQuotedStatusesMounted": 32,
+    "firstMountedAt": "2024-08-08T21:06:07.000Z",
+    "newestMountedAt": "2026-07-10T14:14:00.000Z",
+    "paginationBoundary": {
+      "scrollY": 15898,
+      "bodyHeight": 16891,
+      "attemptsWithoutNewStatuses": 12,
+      "lastNewStatusCount": 32,
+      "note": "The WKWebView timeline stopped appending material after the currently mounted Jun 16–Jul 10 2026 slice. No rate-limit UI or explicit error was rendered."
+    }
+  },
+  "videoPlayers": 10,
+  "publicMediaReferences": {
+    "photosOrPosterUrls": 21,
+    "downloadedFiles": 0,
+    "downloadFailure": "Node fetch could not resolve pbs.twimg.com (getaddrinfo ENOTFOUND); X exposed video streams only as page-bound blob URLs. No alternate downloader, stream reconstruction, or bypass was attempted."
+  },
+  "captureNotes": [
+    "Text and URLs are normalized in ../cleaned/posts.md; DOM raw was not written with authenticated session data or cookies.",
+    "Some timeline text ended at X's Show more control and is marked UI-truncated in the cleaned corpus.",
+    "Replies were not separately paginated; one visible reply is included among mounted statuses."
+  ]
+}

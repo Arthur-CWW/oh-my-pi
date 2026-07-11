@@ -1,0 +1,396 @@
+{
+  "retrievedAt": "2026-07-11T09:58:31Z",
+  "method": "yt-dlp against each canonical public X status URL; no browser-cookie extraction, cookies, auth headers, or account interaction",
+  "statuses": [
+    {
+      "statusId": "1821654144958202077",
+      "canonicalUrl": "https://x.com/poetengineer__/status/1821654144958202077",
+      "method": "yt-dlp canonical status",
+      "exitCode": 0,
+      "files": [
+        {
+          "file": "1796780683567722497.mp4",
+          "bytes": 2180490,
+          "sha256": "25fe0558e0bca9e581c7aab2daa86c80751192f6a74c789694a3990e2e6a8290"
+        },
+        {
+          "file": "1801536291424641024.mp4",
+          "bytes": 792010,
+          "sha256": "6a184e41c1876bc38957c9e29e2a8c7ab2ea3dfec059a69ed629928ce12c5226"
+        }
+      ]
+    },
+    {
+      "statusId": "1873264289626374353",
+      "canonicalUrl": "https://x.com/poetengineer__/status/1873264289626374353",
+      "method": "yt-dlp canonical status",
+      "exitCode": 0,
+      "files": [
+        {
+          "file": "1873264173787844608.mp4",
+          "bytes": 2907555,
+          "sha256": "736a4a36d8bae6bcfe99eec3019e8495956bb77244a86c914f9af6d11fa8e1a6"
+        },
+        {
+          "file": "1873197336601530368.mp4",
+          "bytes": 2528171,
+          "sha256": "af8738a350757426257fe5302bfcbb54771bc514ccc2ce2ab70d47ea1c1221c1"
+        }
+      ]
+    },
+    {
+      "statusId": "2066924260317147488",
+      "canonicalUrl": "https://x.com/poetengineer__/status/2066924260317147488",
+      "method": "yt-dlp canonical status",
+      "exitCode": 0,
+      "files": [
+        {
+          "file": "2066924196337160193.mp4",
+          "bytes": 6155297,
+          "sha256": "c1b790fd8d378f3a158b9f3b3b89fac92ec10b576d00e2a214ec65b33b200b34"
+        }
+      ]
+    },
+    {
+      "statusId": "2066924263190184355",
+      "canonicalUrl": "https://x.com/poetengineer__/status/2066924263190184355",
+      "method": "yt-dlp canonical status",
+      "exitCode": 1,
+      "files": [],
+      "failure": "ERROR: [twitter] 2066924263190184355: No video formats found!; please report this issue on  https://github.com/yt-dlp/yt-dlp/issues?q= , filling out the appropriate issue template. Confirm you are on the latest version using  yt-dlp -U"
+    },
+    {
+      "statusId": "2066924266000384244",
+      "canonicalUrl": "https://x.com/poetengineer__/status/2066924266000384244",
+      "method": "yt-dlp canonical status",
+      "exitCode": 1,
+      "files": [],
+      "failure": "ERROR: [twitter] 2066924266000384244: No video could be found in this tweet"
+    },
+    {
+      "statusId": "2067341526229733876",
+      "canonicalUrl": "https://x.com/poetengineer__/status/2067341526229733876",
+      "method": "yt-dlp canonical status",
+      "exitCode": 0,
+      "files": [],
+      "gap": "No downloadable media exposed by the public canonical status."
+    },
+    {
+      "statusId": "2067413840359251985",
+      "canonicalUrl": "https://x.com/poetengineer__/status/2067413840359251985",
+      "method": "yt-dlp canonical status",
+      "exitCode": 1,
+      "files": [],
+      "failure": "ERROR: [twitter] 2067413840359251985: No video could be found in this tweet"
+    },
+    {
+      "statusId": "2067415820112667045",
+      "canonicalUrl": "https://x.com/poetengineer__/status/2067415820112667045",
+      "method": "yt-dlp canonical status",
+      "exitCode": 1,
+      "files": [],
+      "failure": "ERROR: [twitter] 2067415820112667045: No video could be found in this tweet"
+    },
+    {
+      "statusId": "2067420147602620830",
+      "canonicalUrl": "https://x.com/poetengineer__/status/2067420147602620830",
+      "method": "yt-dlp canonical status",
+      "exitCode": 1,
+      "files": [],
+      "failure": "ERROR: [twitter] 2067420147602620830: No video could be found in this tweet"
+    },
+    {
+      "statusId": "2067422633059029414",
+      "canonicalUrl": "https://x.com/poetengineer__/status/2067422633059029414",
+      "method": "yt-dlp canonical status",
+      "exitCode": 1,
+      "files": [],
+      "failure": "ERROR: [twitter] 2067422633059029414: No video could be found in this tweet"
+    },
+    {
+      "statusId": "2067427745538167237",
+      "canonicalUrl": "https://x.com/poetengineer__/status/2067427745538167237",
+      "method": "yt-dlp canonical status",
+      "exitCode": 1,
+      "files": [],
+      "failure": "ERROR: [twitter] 2067427745538167237: No video could be found in this tweet"
+    },
+    {
+      "statusId": "2067513358660616634",
+      "canonicalUrl": "https://x.com/poetengineer__/status/2067513358660616634",
+      "method": "yt-dlp canonical status",
+      "exitCode": 1,
+      "files": [],
+      "failure": "ERROR: [twitter] 2067513358660616634: No video could be found in this tweet"
+    },
+    {
+      "statusId": "2068419118655529130",
+      "canonicalUrl": "https://x.com/poetengineer__/status/2068419118655529130",
+      "method": "yt-dlp canonical status",
+      "exitCode": 0,
+      "files": [
+        {
+          "file": "2068418902443372544.mp4",
+          "bytes": 10185875,
+          "sha256": "04f9e70e468a2d61cc3dc34f3b0e2f1af2205a3534c7dac982c26a41ef2beb2a"
+        }
+      ]
+    },
+    {
+      "statusId": "2068790638699528490",
+      "canonicalUrl": "https://x.com/poetengineer__/status/2068790638699528490",
+      "method": "yt-dlp canonical status",
+      "exitCode": 1,
+      "files": [],
+      "failure": "ERROR: [twitter] 2068790638699528490: No video could be found in this tweet"
+    },
+    {
+      "statusId": "2068790640041726347",
+      "canonicalUrl": "https://x.com/poetengineer__/status/2068790640041726347",
+      "method": "yt-dlp canonical status",
+      "exitCode": 1,
+      "files": [],
+      "failure": "ERROR: [twitter] 2068790640041726347: No video could be found in this tweet"
+    },
+    {
+      "statusId": "2068790642852122808",
+      "canonicalUrl": "https://x.com/poetengineer__/status/2068790642852122808",
+      "method": "yt-dlp canonical status",
+      "exitCode": 1,
+      "files": [],
+      "failure": "ERROR: [twitter] 2068790642852122808: No video could be found in this tweet"
+    },
+    {
+      "statusId": "2068790698610983051",
+      "canonicalUrl": "https://x.com/poetengineer__/status/2068790698610983051",
+      "method": "yt-dlp canonical status",
+      "exitCode": 1,
+      "files": [],
+      "failure": "ERROR: [twitter:shortener] PJHqJNlCOZ: Unable to download webpage: HTTP Error 403: Forbidden (caused by <HTTPError 403: Forbidden>)"
+    },
+    {
+      "statusId": "2068817177902244345",
+      "canonicalUrl": "https://x.com/poetengineer__/status/2068817177902244345",
+      "method": "yt-dlp canonical status",
+      "exitCode": 1,
+      "files": [],
+      "failure": "ERROR: [twitter] 2068817177902244345: No video could be found in this tweet"
+    },
+    {
+      "statusId": "2070184648265597188",
+      "canonicalUrl": "https://x.com/poetengineer__/status/2070184648265597188",
+      "method": "yt-dlp canonical status",
+      "exitCode": 0,
+      "files": [
+        {
+          "file": "2070184538282573824.mp4",
+          "bytes": 15300669,
+          "sha256": "c073bde0aaef8072691d0569cd679ae54704da04c5b397e0096f122267373de0"
+        }
+      ]
+    },
+    {
+      "statusId": "2070249914127323286",
+      "canonicalUrl": "https://x.com/poetengineer__/status/2070249914127323286",
+      "method": "yt-dlp canonical status",
+      "exitCode": 1,
+      "files": [],
+      "failure": "ERROR: [twitter] 2070249914127323286: No video could be found in this tweet"
+    },
+    {
+      "statusId": "2071356280355148161",
+      "canonicalUrl": "https://x.com/poetengineer__/status/2071356280355148161",
+      "method": "yt-dlp canonical status",
+      "exitCode": 1,
+      "files": [],
+      "failure": "ERROR: [twitter] 2071356280355148161: No video could be found in this tweet"
+    },
+    {
+      "statusId": "2072826940407316628",
+      "canonicalUrl": "https://x.com/poetengineer__/status/2072826940407316628",
+      "method": "yt-dlp canonical status",
+      "exitCode": 1,
+      "files": [],
+      "failure": "ERROR: [twitter] 2072826940407316628: No video could be found in this tweet"
+    },
+    {
+      "statusId": "2073103304612012202",
+      "canonicalUrl": "https://x.com/poetengineer__/status/2073103304612012202",
+      "method": "yt-dlp canonical status",
+      "exitCode": 0,
+      "files": [
+        {
+          "file": "2073102931105132544.mp4",
+          "bytes": 14284042,
+          "sha256": "9870e99097f32f104fde52b798fa983c2b066ce30daa49bcde015c7f6d14ce0e"
+        }
+      ]
+    },
+    {
+      "statusId": "2073104284212687138",
+      "canonicalUrl": "https://x.com/poetengineer__/status/2073104284212687138",
+      "method": "yt-dlp canonical status",
+      "exitCode": 1,
+      "files": [],
+      "failure": "ERROR: [twitter] 2073104284212687138: No video could be found in this tweet"
+    },
+    {
+      "statusId": "2073107415277441487",
+      "canonicalUrl": "https://x.com/poetengineer__/status/2073107415277441487",
+      "method": "yt-dlp canonical status",
+      "exitCode": 1,
+      "files": [],
+      "failure": "ERROR: [twitter] 2073107415277441487: No video could be found in this tweet"
+    },
+    {
+      "statusId": "2074189012378464436",
+      "canonicalUrl": "https://x.com/poetengineer__/status/2074189012378464436",
+      "method": "yt-dlp canonical status",
+      "exitCode": 0,
+      "files": [
+        {
+          "file": "2074188790822793216.mp4",
+          "bytes": 13777344,
+          "sha256": "2eb78baac4f84479beca0a21f14e5405824fc49aa9f754d185cc79bbc123165b"
+        }
+      ]
+    },
+    {
+      "statusId": "2074189077214052396",
+      "canonicalUrl": "https://x.com/poetengineer__/status/2074189077214052396",
+      "method": "yt-dlp canonical status",
+      "exitCode": 1,
+      "files": [],
+      "failure": "WARNING: [generic] Falling back on generic information extractor\nERROR: Unsupported URL: https://hypomnemata.xyz/"
+    },
+    {
+      "statusId": "2074432243829780985",
+      "canonicalUrl": "https://x.com/poetengineer__/status/2074432243829780985",
+      "method": "yt-dlp canonical status",
+      "exitCode": 0,
+      "files": [
+        {
+          "file": "2074432151135617025.mp4",
+          "bytes": 8101098,
+          "sha256": "70dc5370c173ad6c770a98833f055a3fc8f9854d58a75383108a2d9dcd623ba1"
+        }
+      ]
+    },
+    {
+      "statusId": "2074594976218993114",
+      "canonicalUrl": "https://x.com/poetengineer__/status/2074594976218993114",
+      "method": "yt-dlp canonical status",
+      "exitCode": 1,
+      "files": [],
+      "failure": "ERROR: [twitter] 2074594976218993114: No video could be found in this tweet"
+    },
+    {
+      "statusId": "2074886581953990888",
+      "canonicalUrl": "https://x.com/poetengineer__/status/2074886581953990888",
+      "method": "yt-dlp canonical status",
+      "exitCode": 0,
+      "files": [
+        {
+          "file": "2074886524844281857.mp4",
+          "bytes": 6077311,
+          "sha256": "34fd77baa37ffc386eb5907f2a57a732e1d7a84b54e128c0837cd0901fc994d2"
+        }
+      ]
+    },
+    {
+      "statusId": "2075264760136749101",
+      "canonicalUrl": "https://x.com/poetengineer__/status/2075264760136749101",
+      "method": "yt-dlp canonical status",
+      "exitCode": 0,
+      "files": [
+        {
+          "file": "2075264689886359552.mp4",
+          "bytes": 3462999,
+          "sha256": "11e971dea697cacc36fad4e56a3b552282b4b3ef81c7b9f21f55182b44a1f293"
+        }
+      ]
+    },
+    {
+      "statusId": "2075584325043503144",
+      "canonicalUrl": "https://x.com/poetengineer__/status/2075584325043503144",
+      "method": "yt-dlp canonical status",
+      "exitCode": 1,
+      "files": [],
+      "failure": "ERROR: [twitter] 2075584325043503144: No video could be found in this tweet"
+    }
+  ],
+  "files": [
+    {
+      "statusId": "1821654144958202077",
+      "file": "1796780683567722497.mp4",
+      "bytes": 2180490,
+      "sha256": "25fe0558e0bca9e581c7aab2daa86c80751192f6a74c789694a3990e2e6a8290"
+    },
+    {
+      "statusId": "1821654144958202077",
+      "file": "1801536291424641024.mp4",
+      "bytes": 792010,
+      "sha256": "6a184e41c1876bc38957c9e29e2a8c7ab2ea3dfec059a69ed629928ce12c5226"
+    },
+    {
+      "statusId": "1873264289626374353",
+      "file": "1873264173787844608.mp4",
+      "bytes": 2907555,
+      "sha256": "736a4a36d8bae6bcfe99eec3019e8495956bb77244a86c914f9af6d11fa8e1a6"
+    },
+    {
+      "statusId": "1873264289626374353",
+      "file": "1873197336601530368.mp4",
+      "bytes": 2528171,
+      "sha256": "af8738a350757426257fe5302bfcbb54771bc514ccc2ce2ab70d47ea1c1221c1"
+    },
+    {
+      "statusId": "2066924260317147488",
+      "file": "2066924196337160193.mp4",
+      "bytes": 6155297,
+      "sha256": "c1b790fd8d378f3a158b9f3b3b89fac92ec10b576d00e2a214ec65b33b200b34"
+    },
+    {
+      "statusId": "2068419118655529130",
+      "file": "2068418902443372544.mp4",
+      "bytes": 10185875,
+      "sha256": "04f9e70e468a2d61cc3dc34f3b0e2f1af2205a3534c7dac982c26a41ef2beb2a"
+    },
+    {
+      "statusId": "2070184648265597188",
+      "file": "2070184538282573824.mp4",
+      "bytes": 15300669,
+      "sha256": "c073bde0aaef8072691d0569cd679ae54704da04c5b397e0096f122267373de0"
+    },
+    {
+      "statusId": "2073103304612012202",
+      "file": "2073102931105132544.mp4",
+      "bytes": 14284042,
+      "sha256": "9870e99097f32f104fde52b798fa983c2b066ce30daa49bcde015c7f6d14ce0e"
+    },
+    {
+      "statusId": "2074189012378464436",
+      "file": "2074188790822793216.mp4",
+      "bytes": 13777344,
+      "sha256": "2eb78baac4f84479beca0a21f14e5405824fc49aa9f754d185cc79bbc123165b"
+    },
+    {
+      "statusId": "2074432243829780985",
+      "file": "2074432151135617025.mp4",
+      "bytes": 8101098,
+      "sha256": "70dc5370c173ad6c770a98833f055a3fc8f9854d58a75383108a2d9dcd623ba1"
+    },
+    {
+      "statusId": "2074886581953990888",
+      "file": "2074886524844281857.mp4",
+      "bytes": 6077311,
+      "sha256": "34fd77baa37ffc386eb5907f2a57a732e1d7a84b54e128c0837cd0901fc994d2"
+    },
+    {
+      "statusId": "2075264760136749101",
+      "file": "2075264689886359552.mp4",
+      "bytes": 3462999,
+      "sha256": "11e971dea697cacc36fad4e56a3b552282b4b3ef81c7b9f21f55182b44a1f293"
+    }
+  ]
+}
