@@ -29,7 +29,7 @@ import { fuzzyMatch } from "@oh-my-pi/pi-tui";
 import { logger } from "@oh-my-pi/pi-utils";
 import chalk from "chalk";
 import MODEL_PRIO from "../priority.json" with { type: "json" };
-import { parseThinkingLevel, resolveThinkingLevelForModel } from "../thinking";
+import { clampAutoThinkingEffort, parseThinkingLevel, resolveThinkingLevelForModel } from "../thinking";
 import { isAuthenticated, kNoAuth, type ModelRegistry } from "./model-registry";
 import { MODEL_ROLE_IDS, type ModelRole } from "./model-roles";
 import type { Settings } from "./settings";
@@ -675,16 +675,6 @@ export function parseModelPattern(
 const PREFIX_MODEL_ROLE = "pi/";
 const DEFAULT_MODEL_ROLE = "default";
 
-function getModelRoleAlias(value: string): ModelRole | undefined {
-	const normalized = value.trim();
-	if (!normalized.startsWith(PREFIX_MODEL_ROLE)) return undefined;
-
-	const candidate = normalized.slice(PREFIX_MODEL_ROLE.length);
-	for (const role of MODEL_ROLE_IDS) {
-		if (candidate === role) return role;
-	}
-	return undefined;
-}
 
 function normalizeModelPatternList(value: string | string[] | undefined): string[] {
 	if (!value) return [];
@@ -700,120 +690,109 @@ function shouldInheritDefaultBeforePriority(role: ModelRole): boolean {
 	return role === "smol" || role === "slow" || role === "designer";
 }
 
-function resolveDefaultInheritedPatterns(
-	role: ModelRole,
-	configuredDefault: string | undefined,
-	roleDefaults: string[],
-	settings: Settings | undefined,
-	visited: Set<ModelRole>,
-): string[] {
-	if (!shouldInheritDefaultBeforePriority(role) || !configuredDefault) return [];
-
-	const resolved: string[] = [];
-	for (const pattern of normalizeModelPatternList(configuredDefault)) {
-		const { base: aliasCandidate, level: thinkingLevel } = splitThinkingSuffix(pattern, PREFIX_MODEL_ROLE.length);
-		const aliasRole = getModelRoleAlias(aliasCandidate);
-		if (aliasRole === role) {
-			// Self-alias (e.g. modelRoles.default = "pi/smol") would loop back to the
-			// same unset role; collapse straight to the built-in priority chain.
-			resolved.push(
-				...(thinkingLevel
-					? roleDefaults.map(defaultPattern => `${defaultPattern}:${thinkingLevel}`)
-					: roleDefaults),
-			);
-			continue;
-		}
-		if (aliasRole && !visited.has(aliasRole)) {
-			// Cross-role alias (e.g. modelRoles.default = "pi/slow"): resolve the
-			// target role's patterns now so downstream one-layer expanders see
-			// concrete model patterns instead of another role alias.
-			const recursed = resolveConfiguredRolePattern(pattern, settings, new Set(visited));
-			if (recursed && recursed.length > 0) {
-				resolved.push(...recursed);
-				continue;
-			}
-		}
-		resolved.push(pattern);
-	}
-	return resolved;
+function appendThinkingLevel(patterns: string[], thinkingLevel?: ThinkingLevel): string[] {
+	return thinkingLevel ? patterns.map(pattern => `${pattern}:${thinkingLevel}`) : patterns;
 }
 
-function resolveConfiguredRolePattern(
-	value: string,
-	settings?: Settings,
-	visited: Set<ModelRole> = new Set(),
-): string[] | undefined {
-	const normalized = value.trim();
-	if (!normalized) return undefined;
+function getExplicitRoleAlias(value: string): { role: ModelRole; thinkingLevel?: ThinkingLevel } | undefined {
+	if (!value.startsWith(PREFIX_MODEL_ROLE)) return undefined;
+	const { base, level } = splitThinkingSuffix(value, PREFIX_MODEL_ROLE.length);
+	const role = MODEL_ROLE_IDS.find(candidate => candidate === base.slice(PREFIX_MODEL_ROLE.length));
+	return role ? { role, thinkingLevel: level } : undefined;
+}
 
-	const { base: aliasCandidate, level: thinkingLevel } = splitThinkingSuffix(normalized, PREFIX_MODEL_ROLE.length);
-	const role = getModelRoleAlias(aliasCandidate);
-	if (!role) return [normalized];
-	if (visited.has(role)) return undefined;
-	visited.add(role);
+function getRolePriorityPatterns(role: ModelRole): string[] {
+	return normalizeModelPatternList(MODEL_PRIO[role as keyof typeof MODEL_PRIO]);
+}
 
-	const configured = settings?.getModelRole(role)?.trim();
-	const configuredDefault = settings?.getModelRole(DEFAULT_MODEL_ROLE)?.trim();
-	const roleDefaults = normalizeModelPatternList(MODEL_PRIO[role as keyof typeof MODEL_PRIO]);
-	const resolved = configured
-		? normalizeModelPatternList(configured)
-		: resolveDefaultInheritedPatterns(role, configuredDefault, roleDefaults, settings, visited);
-	if (resolved.length === 0) {
-		resolved.push(...roleDefaults);
+function resolveRolePatterns(role: ModelRole, settings: Settings | undefined, visited: ReadonlySet<ModelRole>): string[] {
+	if (visited.has(role)) return getRolePriorityPatterns(role);
+
+	const nextVisited = new Set(visited);
+	nextVisited.add(role);
+	const configured = normalizeModelPatternList(settings?.getModelRole(role));
+	if (configured.length > 0) return resolveConfiguredModelPatterns(configured, settings, nextVisited);
+
+	if (role === "task") return [];
+	if (shouldInheritDefaultBeforePriority(role)) {
+		const inherited = normalizeModelPatternList(settings?.getModelRole(DEFAULT_MODEL_ROLE));
+		if (inherited.length > 0) {
+			const resolved = resolveConfiguredModelPatterns(inherited, settings, nextVisited);
+			if (resolved.length > 0) return resolved;
+		}
 	}
-	if (resolved.length === 0) {
-		return undefined;
-	}
-
-	return thinkingLevel ? resolved.map(pattern => `${pattern}:${thinkingLevel}`) : resolved;
+	return getRolePriorityPatterns(role);
 }
 
 /**
- * Expand a role alias like "pi/smol" to the configured model string.
+ * Expand a role alias like "pi/smol" to configured or deterministic fallback
+ * model patterns. Only an explicit `pi/<role>` is a role alias here; bare
+ * model strings remain concrete selectors for the task-input boundary.
  */
 export function expandRoleAlias(value: string, settings?: Settings): string {
-	const normalized = value.trim();
-	if (normalized === DEFAULT_MODEL_ROLE) {
-		return settings?.getModelRole("default") ?? value;
-	}
-
-	const resolved = resolveConfiguredRolePattern(value, settings)?.[0];
-	return resolved ?? value;
+	const resolved = resolveConfiguredModelPatterns(value, settings);
+	return resolved[0] ?? value;
 }
 
-export function resolveConfiguredModelPatterns(value: string | string[] | undefined, settings?: Settings): string[] {
-	const patterns = normalizeModelPatternList(value);
-	return patterns.flatMap(pattern => {
-		const resolved = resolveConfiguredRolePattern(pattern, settings);
-		return resolved ?? [];
+export function resolveConfiguredModelPatterns(
+	value: string | string[] | undefined,
+	settings?: Settings,
+	visited: ReadonlySet<ModelRole> = new Set(),
+): string[] {
+	return normalizeModelPatternList(value).flatMap(pattern => {
+		const alias = getExplicitRoleAlias(pattern);
+		if (!alias) return [pattern];
+		return appendThinkingLevel(resolveRolePatterns(alias.role, settings, visited), alias.thinkingLevel);
 	});
 }
+
+function resolveExplicitThinkingLevelForModel(
+	model: Model<Api>,
+	thinkingLevel: ThinkingLevel | undefined,
+): ThinkingLevel | undefined {
+	const resolved = resolveThinkingLevelForModel(model, thinkingLevel);
+	if (resolved !== undefined) return resolved;
+	if (!model.reasoning || thinkingLevel === undefined || thinkingLevel === ThinkingLevel.Inherit) return undefined;
+	return clampAutoThinkingEffort(model, thinkingLevel);
+}
+/**
+ * Distinct model-routing inputs in descending precedence. Each tier expands
+ * independently, so an empty higher tier cannot mask a usable lower tier.
+ */
 export interface AgentModelPatternResolutionOptions {
-	settingsOverride?: string | string[];
-	agentModel?: string | string[];
+	explicitModel?: string | string[];
+	temporaryModel?: string | string[];
+	taskOrRoleModel?: string | string[];
+	streamModel?: string | string[];
+	globalFallbackModel?: string | string[];
 	settings?: Settings;
-	activeModelPattern?: string;
-	fallbackModelPattern?: string;
 }
 
 export function resolveAgentModelPatterns(options: AgentModelPatternResolutionOptions): string[] {
-	const { settingsOverride, agentModel, settings, activeModelPattern, fallbackModelPattern } = options;
+	const { explicitModel, temporaryModel, taskOrRoleModel, streamModel, globalFallbackModel, settings } = options;
 
-	const overridePatterns = resolveConfiguredModelPatterns(settingsOverride, settings);
-	if (overridePatterns.length > 0) return overridePatterns;
-
-	const normalizedAgentPatterns = normalizeModelPatternList(agentModel);
-	const configuredAgentPatterns = resolveConfiguredModelPatterns(agentModel, settings);
-	const singleAgentPattern = normalizedAgentPatterns.length === 1 ? normalizedAgentPatterns[0] : undefined;
-	const agentInheritsSessionModel = singleAgentPattern ? isSessionInheritedAgentPattern(singleAgentPattern) : false;
-	if (configuredAgentPatterns.length > 0) {
-		if (!agentInheritsSessionModel) return configuredAgentPatterns;
-		if (singleAgentPattern === "pi/task") return configuredAgentPatterns;
+	for (const value of [explicitModel, temporaryModel]) {
+		const patterns = resolveConfiguredModelPatterns(value, settings);
+		if (patterns.length > 0) return patterns;
 	}
 
-	const fallback =
-		activeModelPattern?.trim() || fallbackModelPattern?.trim() || settings?.getModelRole("default")?.trim() || "";
-	return resolveConfiguredModelPatterns(fallback, settings);
+	const normalizedTaskOrRolePatterns = normalizeModelPatternList(taskOrRoleModel);
+	const taskOrRolePatterns = resolveConfiguredModelPatterns(taskOrRoleModel, settings);
+	const singleTaskOrRolePattern =
+		normalizedTaskOrRolePatterns.length === 1 ? normalizedTaskOrRolePatterns[0] : undefined;
+	const taskOrRoleInheritsSessionModel = singleTaskOrRolePattern
+		? isSessionInheritedAgentPattern(singleTaskOrRolePattern)
+		: false;
+	if (taskOrRolePatterns.length > 0) {
+		if (!taskOrRoleInheritsSessionModel || singleTaskOrRolePattern === "pi/task") return taskOrRolePatterns;
+	}
+
+	for (const value of [streamModel, globalFallbackModel]) {
+		const patterns = resolveConfiguredModelPatterns(value, settings);
+		if (patterns.length > 0) return patterns;
+	}
+
+	return [];
 }
 
 /**
@@ -855,7 +834,7 @@ export function resolveModelRoleValue(
 			return {
 				model: resolved.model,
 				thinkingLevel: resolved.explicitThinkingLevel
-					? (resolveThinkingLevelForModel(resolved.model, resolved.thinkingLevel) ?? resolved.thinkingLevel)
+					? resolveExplicitThinkingLevelForModel(resolved.model, resolved.thinkingLevel)
 					: resolved.thinkingLevel,
 				explicitThinkingLevel: resolved.explicitThinkingLevel,
 				warning: resolved.warning,
@@ -1146,9 +1125,7 @@ export async function resolveModelScope(
 		if (scopedModels.some(sm => modelsAreEqual(sm.model, model))) return;
 		scopedModels.push({
 			model,
-			thinkingLevel: explicit
-				? (resolveThinkingLevelForModel(model, thinkingLevel) ?? thinkingLevel)
-				: thinkingLevel,
+			thinkingLevel: explicit ? resolveExplicitThinkingLevelForModel(model, thinkingLevel) : thinkingLevel,
 			explicitThinkingLevel: explicit,
 		});
 	};
@@ -1496,7 +1473,7 @@ export async function findInitialModel(options: {
 	} = options;
 
 	let model: Model<Api> | undefined;
-	let thinkingLevel: Effort | undefined;
+	let thinkingLevel: ThinkingLevel | undefined;
 
 	// 1. CLI args take priority
 	if (cliProvider && cliModel) {

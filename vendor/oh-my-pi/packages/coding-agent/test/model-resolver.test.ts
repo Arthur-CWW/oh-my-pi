@@ -457,6 +457,19 @@ describe("resolveModelRoleValue", () => {
 		expect(result.explicitThinkingLevel).toBe(true);
 	});
 
+	test("preserves explicit effort through configured cross-role aliases", () => {
+		const settings = Settings.isolated({
+			modelRoles: { smol: "pi/slow", slow: "openrouter/qwen/qwen3-coder:exacto" },
+		});
+
+		const result = resolveModelRoleValue("pi/smol:high", allModels, { settings });
+
+		expect(result.model?.provider).toBe("openrouter");
+		expect(result.model?.id).toBe("qwen/qwen3-coder:exacto");
+		expect(result.thinkingLevel).toBe(Effort.High);
+		expect(result.explicitThinkingLevel).toBe(true);
+	});
+
 	test("resolves pi/default through configured default role alias", () => {
 		const settings = {
 			getModelRole: (role: string) => (role === "default" ? "openrouter/qwen/qwen3-coder:exacto" : undefined),
@@ -515,15 +528,69 @@ describe("resolveModelRoleValue", () => {
 	});
 });
 describe("resolveAgentModelPatterns", () => {
+	test("uses explicit selection over a temporary override", () => {
+		const result = resolveAgentModelPatterns({
+			explicitModel: "anthropic/claude-sonnet-4-5",
+			temporaryModel: "openai/gpt-4o",
+			taskOrRoleModel: "pi/smol",
+			streamModel: "stream/model",
+			globalFallbackModel: "global/model",
+		});
+
+		expect(result).toEqual(["anthropic/claude-sonnet-4-5"]);
+	});
+
+	test("uses a temporary override over a task or role route", () => {
+		const result = resolveAgentModelPatterns({
+			temporaryModel: "openai/gpt-4o",
+			taskOrRoleModel: "anthropic/claude-sonnet-4-5",
+			streamModel: "stream/model",
+			globalFallbackModel: "global/model",
+		});
+
+		expect(result).toEqual(["openai/gpt-4o"]);
+	});
+
+	test("uses a task or role route over stream configuration", () => {
+		const result = resolveAgentModelPatterns({
+			taskOrRoleModel: "anthropic/claude-sonnet-4-5",
+			streamModel: "openai/gpt-4o",
+			globalFallbackModel: "global/model",
+		});
+
+		expect(result).toEqual(["anthropic/claude-sonnet-4-5"]);
+	});
+
+	test("uses stream configuration over the global fallback", () => {
+		const result = resolveAgentModelPatterns({
+			streamModel: "openai/gpt-4o",
+			globalFallbackModel: "anthropic/claude-sonnet-4-5",
+		});
+
+		expect(result).toEqual(["openai/gpt-4o"]);
+	});
+
+	test("falls through cleared or unset higher-priority inputs", () => {
+		const result = resolveAgentModelPatterns({
+			explicitModel: " ",
+			temporaryModel: "",
+			taskOrRoleModel: undefined,
+			streamModel: "openai/gpt-4o",
+			globalFallbackModel: "anthropic/claude-sonnet-4-5",
+		});
+
+		expect(result).toEqual(["openai/gpt-4o"]);
+	});
+
 	test("falls back to the active session model when pi/task is unset", () => {
 		const settings = Settings.isolated({
 			modelRoles: { default: "anthropic/claude-sonnet-4-5" },
 		});
 
 		const result = resolveAgentModelPatterns({
-			agentModel: "pi/task",
+			taskOrRoleModel: "pi/task",
 			settings,
-			activeModelPattern: "openai/gpt-4o",
+			streamModel: "openai/gpt-4o",
 		});
 
 		expect(result).toEqual(["openai/gpt-4o"]);
@@ -538,9 +605,9 @@ describe("resolveAgentModelPatterns", () => {
 		});
 
 		const result = resolveAgentModelPatterns({
-			agentModel: "pi/task",
+			taskOrRoleModel: "pi/task",
 			settings,
-			activeModelPattern: "openai/gpt-4o",
+			streamModel: "openai/gpt-4o",
 		});
 
 		expect(result).toEqual(["anthropic/claude-sonnet-4-5:high"]);
@@ -551,9 +618,9 @@ describe("resolveAgentModelPatterns", () => {
 			modelRoles: { default: "local/llama" },
 		});
 
-		expect(resolveAgentModelPatterns({ agentModel: "pi/smol", settings })).toEqual(["local/llama"]);
-		expect(resolveAgentModelPatterns({ agentModel: "pi/slow", settings })).toEqual(["local/llama"]);
-		expect(resolveAgentModelPatterns({ agentModel: "pi/designer", settings })).toEqual(["local/llama"]);
+		expect(resolveAgentModelPatterns({ taskOrRoleModel: "pi/smol", settings })).toEqual(["local/llama"]);
+		expect(resolveAgentModelPatterns({ taskOrRoleModel: "pi/slow", settings })).toEqual(["local/llama"]);
+		expect(resolveAgentModelPatterns({ taskOrRoleModel: "pi/designer", settings })).toEqual(["local/llama"]);
 	});
 
 	test("expands cross-role default aliases when inheriting for an unset role", () => {
@@ -561,7 +628,9 @@ describe("resolveAgentModelPatterns", () => {
 			modelRoles: { default: "pi/slow", slow: "anthropic/claude-sonnet-4-5" },
 		});
 
-		expect(resolveAgentModelPatterns({ agentModel: "pi/smol", settings })).toEqual(["anthropic/claude-sonnet-4-5"]);
+		expect(resolveAgentModelPatterns({ taskOrRoleModel: "pi/smol", settings })).toEqual([
+			"anthropic/claude-sonnet-4-5",
+		]);
 	});
 
 	test("prefers configured designer role override over priority defaults", () => {
@@ -573,7 +642,7 @@ describe("resolveAgentModelPatterns", () => {
 		});
 
 		const result = resolveAgentModelPatterns({
-			agentModel: "pi/designer",
+			taskOrRoleModel: "pi/designer",
 			settings,
 		});
 
@@ -582,7 +651,7 @@ describe("resolveAgentModelPatterns", () => {
 
 	test("slow priority falls forward to Opus 4.8 before older Opus aliases", () => {
 		const settings = Settings.isolated();
-		const patterns = resolveAgentModelPatterns({ agentModel: "pi/slow", settings });
+		const patterns = resolveAgentModelPatterns({ taskOrRoleModel: "pi/slow", settings });
 
 		const dottedRegistry = {
 			getAvailable: () => [
@@ -1173,6 +1242,24 @@ describe("expandRoleAlias", () => {
 
 		expect(expandRoleAlias("pi/vision", settings)).toBe("pi/vision");
 	});
+
+	test("falls back to the role priority list for a direct alias cycle", () => {
+		const settings = Settings.isolated({ modelRoles: { smol: "pi/smol" } });
+
+		expect(expandRoleAlias("pi/smol", settings)).toBe("cerebras/zai-glm-4.7");
+	});
+
+	test("falls back to the originating role priority list for a cross-role alias cycle", () => {
+		const settings = Settings.isolated({ modelRoles: { smol: "pi/slow", slow: "pi/smol" } });
+
+		expect(expandRoleAlias("pi/smol", settings)).toBe("cerebras/zai-glm-4.7");
+	});
+
+	test("keeps literal model selectors containing role-like names unchanged", () => {
+		const settings = Settings.isolated({ modelRoles: { smol: "anthropic/claude-sonnet-4-5" } });
+
+		expect(expandRoleAlias("openai/pi/smol", settings)).toBe("openai/pi/smol");
+	});
 });
 
 describe("provider routing selector (@upstream)", () => {
@@ -1439,3 +1526,4 @@ describe("effort-tier variant aliases", () => {
 		expect(parseModelPattern("kimi-k2-thinking", variantModels).model?.id).toBe("kimi-k2");
 	});
 });
+
