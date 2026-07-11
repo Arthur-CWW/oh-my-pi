@@ -710,15 +710,19 @@ export class DurableInputQueue {
 				for (const candidate of items) {
 					if (
 						candidate.state !== "queued" ||
-						(boundary === "tool" && candidate.deliveryClass !== "steer") ||
-						(candidate.retryAt !== undefined && now < candidate.retryAt) ||
 						(item !== undefined && item.sequence < candidate.sequence)
 					) {
 						continue;
 					}
 					item = candidate;
 				}
-				if (!item) return undefined;
+				if (
+					!item ||
+					(boundary === "tool" && item.deliveryClass !== "steer") ||
+					(item.retryAt !== undefined && now < item.retryAt)
+				) {
+					return undefined;
+				}
 				const attemptId = randomUUID();
 				await this.#appendLocked({
 					version: QUEUE_VERSION,

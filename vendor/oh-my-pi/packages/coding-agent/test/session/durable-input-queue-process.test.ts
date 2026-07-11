@@ -67,8 +67,6 @@ const CHILD_SOURCE = [
 	'} else if (action === "adopt-order-and-deliver") {',
 	'  const captured = await queue.enqueue({ text: "captured after adoption", deliveryClass: "followUp" });',
 	'  const tool = await queue.admitNext("tool");',
-	'  if (!tool) throw new Error("tool boundary admitted nothing");',
-	"  const toolAttemptId = await complete(tool);",
 	"  const terminal = [];",
 	"  for (;;) {",
 	'    const item = await queue.admitNext("terminal");',
@@ -76,7 +74,7 @@ const CHILD_SOURCE = [
 	"    terminal.push({ inputId: item.inputId, sequence: item.sequence, attemptId: await complete(item) });",
 	"  }",
 	"  const items = await queue.list();",
-	"  console.log(JSON.stringify({ adopted: adopted.map(item => ({ inputId: item.inputId, sequence: item.sequence, revision: item.revision })), captured: { inputId: captured.inputId, sequence: captured.sequence }, tool: { inputId: tool.inputId, sequence: tool.sequence, attemptId: toolAttemptId }, terminal, items: items.map(item => ({ inputId: item.inputId, sequence: item.sequence, revision: item.revision, state: item.state, attempts: item.attempts.map(attempt => attempt.id) })) }));",
+	"  console.log(JSON.stringify({ adopted: adopted.map(item => ({ inputId: item.inputId, sequence: item.sequence, revision: item.revision })), captured: { inputId: captured.inputId, sequence: captured.sequence }, tool: tool ? { inputId: tool.inputId, sequence: tool.sequence } : null, terminal, items: items.map(item => ({ inputId: item.inputId, sequence: item.sequence, revision: item.revision, state: item.state, attempts: item.attempts.map(attempt => attempt.id) })) }));",
 	'} else if (action === "enqueue-once") {',
 	'  const item = await queue.enqueue({ text: process.env.TEXT ?? "concurrent", deliveryClass: "followUp" });',
 	"  console.log(JSON.stringify({ inputId: item.inputId, sequence: item.sequence }));",
@@ -209,7 +207,7 @@ describe("durable input queue process replacement", () => {
 		})) as {
 			adopted: { inputId: string; sequence: number; revision: number }[];
 			captured: { inputId: string; sequence: number };
-			tool: { inputId: string; sequence: number; attemptId: string };
+			tool: { inputId: string; sequence: number } | null;
 			terminal: { inputId: string; sequence: number; attemptId: string }[];
 			items: { inputId: string; sequence: number; revision: number; state: string; attempts: string[] }[];
 		};
@@ -229,9 +227,10 @@ describe("durable input queue process replacement", () => {
 			{ inputId: seeded.followUp.inputId, sequence: 1, revision: 2 },
 			{ inputId: seeded.steer.inputId, sequence: 2, revision: 1 },
 		]);
-		expect(delivered.tool).toMatchObject({ inputId: seeded.steer.inputId, sequence: 2 });
+		expect(delivered.tool).toBeNull();
 		expect(delivered.terminal.map(item => [item.inputId, item.sequence])).toEqual([
 			[seeded.followUp.inputId, 1],
+			[seeded.steer.inputId, 2],
 			[delivered.captured.inputId, 4],
 		]);
 		expect(delivered.items).toEqual(
@@ -252,8 +251,8 @@ describe("durable input queue process replacement", () => {
 				}),
 			]),
 		);
-		const admittedIds = [delivered.tool.inputId, ...delivered.terminal.map(item => item.inputId)];
-		const attemptIds = [delivered.tool.attemptId, ...delivered.terminal.map(item => item.attemptId)];
+		const admittedIds = delivered.terminal.map(item => item.inputId);
+		const attemptIds = delivered.terminal.map(item => item.attemptId);
 		expect(new Set(admittedIds).size).toBe(admittedIds.length);
 		expect(new Set(attemptIds).size).toBe(attemptIds.length);
 		expect(admittedIds).not.toContain(seeded.cancelled.inputId);
@@ -272,18 +271,6 @@ describe("durable input queue process replacement", () => {
 					deliveryClass: "followUp",
 				}),
 				expect.objectContaining({
-					type: "attempt",
-					id: delivered.tool.attemptId,
-					inputId: seeded.steer.inputId,
-					revision: 1,
-				}),
-				expect.objectContaining({
-					type: "terminal",
-					inputId: seeded.steer.inputId,
-					attemptId: delivered.tool.attemptId,
-					state: "completed",
-				}),
-				expect.objectContaining({
 					type: "terminal",
 					inputId: seeded.followUp.inputId,
 					attemptId: delivered.terminal[0]?.attemptId,
@@ -291,8 +278,14 @@ describe("durable input queue process replacement", () => {
 				}),
 				expect.objectContaining({
 					type: "terminal",
-					inputId: delivered.captured.inputId,
+					inputId: seeded.steer.inputId,
 					attemptId: delivered.terminal[1]?.attemptId,
+					state: "completed",
+				}),
+				expect.objectContaining({
+					type: "terminal",
+					inputId: delivered.captured.inputId,
+					attemptId: delivered.terminal[2]?.attemptId,
 					state: "completed",
 				}),
 			]),

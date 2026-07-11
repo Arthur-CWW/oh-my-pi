@@ -870,7 +870,7 @@ describe("AgentSession durable input queue process replacement", () => {
 		expect(replacementHead.ownershipEpoch).toBe(resumed.ownerEpoch);
 		expect((await fs.stat(initialSegment)).size).toBe(initialSegmentBytes);
 	}, 15_000);
-	it("delivers lower follow-up and higher steer at their eligible AgentSession boundaries", async () => {
+	it("preserves capture order when an earlier follow-up blocks a later steer at the tool boundary", async () => {
 		const root = await fs.mkdtemp(path.join(os.tmpdir(), "omp-agent-session-queue-mixed-"));
 		roots.push(root);
 		const fixture = await createPersistedSession(root);
@@ -883,15 +883,17 @@ describe("AgentSession durable input queue process replacement", () => {
 		});
 		if (mixed.action !== "mixed") throw new Error("mixed child returned an unexpected result");
 
-		expect(mixed.providerCalls).toHaveLength(3);
+		expect(mixed.providerCalls).toHaveLength(4);
 		expect(mixed.providerCalls[0]).toBe("initial tool request");
-		expect(mixed.providerCalls[1]).toContain("higher steer");
-		expect(mixed.providerCalls[2]).toContain("lower follow-up");
+		expect(mixed.providerCalls.filter(call => call.includes("lower follow-up") || call.includes("higher steer"))).toEqual([
+			"lower follow-up",
+			"higher steer",
+		]);
 		expect(mixed.toolExecutions).toBe(1);
 		expect(mixed.coreQueuedInputs).toEqual([]);
 		expect(mixed.unhandledRejections).toBe(0);
 		expect(mixed.uncaughtErrors).toBe(0);
-		const inputs = ["initial tool request", "higher steer", "lower follow-up"];
+		const inputs = ["initial tool request", "lower follow-up", "higher steer"];
 		const byAttempt = Map.groupBy(mixed.attempts, entry => `${entry.inputId}:${entry.attemptId}:${entry.revision}`);
 		expect(byAttempt.size).toBe(inputs.length);
 		expect([...byAttempt.values()].map(entries => entries.map(entry => entry.state))).toEqual(

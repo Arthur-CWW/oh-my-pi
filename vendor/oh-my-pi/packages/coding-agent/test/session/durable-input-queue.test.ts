@@ -536,14 +536,31 @@ describe("durable input queue", () => {
 		expect((await queue.admitNext("terminal"))?.inputId).toBe(steer.inputId);
 	});
 
-	it("keeps follow-up input out of the tool boundary", async () => {
+	it("does not let a later steer overtake the queued follow-up at a tool boundary", async () => {
 		const { root, owner } = await fixture("epoch-a");
 		const queue = await DurableInputQueue.open(owner.handle, root);
 		await queue.adopt();
 
 		const followUp = await queue.enqueue({ text: "follow-up", deliveryClass: "followUp" });
+		const steer = await queue.enqueue({ text: "steer", deliveryClass: "steer" });
 		expect(await queue.admitNext("tool")).toBeUndefined();
-		expect((await queue.admitNext("terminal"))?.inputId).toBe(followUp.inputId);
+
+		const first = await queue.admitNext("terminal");
+		expect(first?.inputId).toBe(followUp.inputId);
+		const followUpAttempt = await queue.markRunning(followUp.inputId);
+		await queue.completeAttempt(followUp.inputId, followUpAttempt.id);
+		expect((await queue.admitNext("terminal"))?.inputId).toBe(steer.inputId);
+	});
+
+	it("allows a tool-boundary steer after the earlier queued input is cancelled", async () => {
+		const { root, owner } = await fixture("epoch-a");
+		const queue = await DurableInputQueue.open(owner.handle, root);
+		await queue.adopt();
+
+		const followUp = await queue.enqueue({ text: "cancelled follow-up", deliveryClass: "followUp" });
+		const steer = await queue.enqueue({ text: "steer", deliveryClass: "steer" });
+		await queue.cancel(followUp.inputId);
+		expect((await queue.admitNext("tool"))?.inputId).toBe(steer.inputId);
 	});
 
 	it("admits mixed input in global sequence order at the terminal boundary", async () => {
