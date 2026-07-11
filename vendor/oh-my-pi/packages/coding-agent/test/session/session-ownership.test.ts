@@ -7,6 +7,7 @@ import {
 	acquireSessionOwnership,
 	decodeCmuxOwnerView,
 	decodeSessionLeaseV1,
+	ExternalSessionOwner,
 	ExternalSessionOwnerUnverifiable,
 	inspectLiveSessionOwnerView,
 	inspectSessionOwnership,
@@ -58,6 +59,27 @@ async function closeServer(server: net.Server): Promise<void> {
 	const result = Promise.withResolvers<void>();
 	server.close(error => (error ? result.reject(error) : result.resolve()));
 	await result.promise;
+}
+
+async function requestOwner(socketPath: string, request: string): Promise<string> {
+	const result = Promise.withResolvers<string>();
+	const socket = net.createConnection(socketPath);
+	let response = "";
+	let settled = false;
+	const finish = (): void => {
+		if (settled) return;
+		settled = true;
+		socket.destroy();
+		result.resolve(response);
+	};
+	socket.setTimeout(500, finish);
+	socket.once("error", finish);
+	socket.once("close", finish);
+	socket.on("data", chunk => {
+		response += chunk.toString();
+	});
+	socket.once("connect", () => socket.write(request));
+	return result.promise;
 }
 
 function setCmuxEnvironment(name: "CMUX_WORKSPACE_ID" | "CMUX_SURFACE_ID" | "CMUX_SOCKET_PATH", value: string | undefined): void {
@@ -148,8 +170,6 @@ describe("owners-v1 OMP guard", () => {
 			process.env.AGENT_MUX_DIR = root;
 			await withCmuxEnvironment(async () => {
 				const ownership = await acquireSessionOwnership(session, "parent");
-				const claim = await claimPath(root);
-				const server = await startOwnerServer(path.join(claim, "owner.sock"), ownership.ownerEpoch);
 				try {
 					expect(await inspectLiveSessionOwnerView(session, "parent")).toEqual({
 						version: 1,
@@ -157,7 +177,6 @@ describe("owners-v1 OMP guard", () => {
 						cmux: { workspaceId, surfaceId, socketPath: cmuxSocket },
 					});
 				} finally {
-					await closeServer(server);
 					await ownership.release();
 				}
 			}, { workspaceId, surfaceId, socketPath: cmuxSocket });
@@ -172,7 +191,6 @@ describe("owners-v1 OMP guard", () => {
 		await withCmuxEnvironment(async () => {
 			const ownership = await acquireSessionOwnership(session, "parent", { root });
 			const claim = await claimPath(root);
-			const server = await startOwnerServer(path.join(claim, "owner.sock"), ownership.ownerEpoch);
 			try {
 				expect(await inspectLiveSessionOwnerView(session, "parent", { root })).toBeUndefined();
 				await fs.writeFile(path.join(claim, "view.json"), JSON.stringify({ version: 1, ownerEpoch: ownership.ownerEpoch }));
@@ -180,7 +198,6 @@ describe("owners-v1 OMP guard", () => {
 				await fs.writeFile(path.join(claim, "view.json"), "{");
 				expect(await inspectLiveSessionOwnerView(session, "parent", { root })).toBeUndefined();
 			} finally {
-				await closeServer(server);
 				await ownership.release();
 			}
 		}, {});
@@ -202,11 +219,9 @@ describe("owners-v1 OMP guard", () => {
 				cmux: { workspaceId, surfaceId, socketPath: path.join(root, "cmux.sock") },
 			}),
 		);
-		const server = await startOwnerServer(path.join(claim, "owner.sock"), takeoverEpoch);
 		try {
 			expect(await inspectLiveSessionOwnerView(session, "parent", { root })).toBeUndefined();
 		} finally {
-			await closeServer(server);
 			await ownership.release();
 		}
 	});
@@ -217,12 +232,10 @@ describe("owners-v1 OMP guard", () => {
 			const ownership = await acquireSessionOwnership(session, "parent", { root });
 			const claim = await claimPath(root);
 			await fs.mkdir(path.join(claim, "view.json"));
-			const server = await startOwnerServer(path.join(claim, "owner.sock"), ownership.ownerEpoch);
 			try {
 				expect(await ownership.isCurrent()).toBe(true);
 				expect(await inspectLiveSessionOwnerView(session, "parent", { root })).toBeUndefined();
 			} finally {
-				await closeServer(server);
 				await ownership.release();
 			}
 		}, { workspaceId: "invalid", surfaceId, socketPath: path.join(root, "cmux.sock") });
@@ -236,15 +249,87 @@ describe("owners-v1 OMP guard", () => {
 		expect(await inspectSessionOwnership(session, "parent", { root })).toEqual({ status: "none" });
 	});
 
+	it("serves strict direct owner probes and unlinks the socket on release", async () => {
+		const { root, session } = await fixture();
+		const ownership = await acquireSessionOwnership(session, "parent", { root });
+		const claim = await claimPath(root);
+		const lease = decodeSessionLeaseV1(JSON.parse(await fs.readFile(path.join(claim, "lease.json"), "utf8")));
+		if (!lease) throw new Error("missing direct lease");
+		const probe = {
+			t: "ownerProbe",
+			nonce: "proof-nonce",
+			expectedEpoch: ownership.ownerEpoch,
+			sessionFile: lease.sessionFile,
+			sessionId: "parent",
+		};
+		expect(JSON.parse(await requestOwner(lease.socketPath, `${JSON.stringify(probe)}\n`))).toEqual({
+			t: "ownerProof",
+			nonce: "proof-nonce",
+			ownerEpoch: ownership.ownerEpoch,
+			sessionMatch: true,
+			phase: "running",
+		});
+		expect(await requestOwner(lease.socketPath, "{\n")).toBe("");
+		expect(await requestOwner(lease.socketPath, `${JSON.stringify({ ...probe, expectedEpoch: "wrong" })}\n`)).toBe("");
+		expect(await requestOwner(lease.socketPath, `${JSON.stringify({ ...probe, extra: true })}\n`)).toBe("");
+		expect(await requestOwner(lease.socketPath, `${JSON.stringify(probe)}\n{}\n`)).toBe("");
+		await ownership.release();
+		expect(await requestOwner(lease.socketPath, `${JSON.stringify(probe)}\n`)).toBe("");
+		await expect(fs.stat(lease.socketPath)).rejects.toMatchObject({ code: "ENOENT" });
+		expect(await inspectSessionOwnership(session, "parent", { root })).toEqual({ status: "none" });
+	});
+
+	it("lets another process verify a live direct owner", async () => {
+		const { root, session } = await fixture();
+		const ownership = await acquireSessionOwnership(session, "parent", { root });
+		try {
+			const child = Bun.spawn({
+				cmd: [
+					process.execPath,
+					"-e",
+					'import { inspectSessionOwnership } from "@oh-my-pi/pi-coding-agent/session/session-ownership"; const result = await inspectSessionOwnership(process.env.SESSION_FILE!, "parent", { root: process.env.OWNER_ROOT! }); console.log(JSON.stringify(result));',
+				],
+				cwd: path.resolve(import.meta.dir, "../.."),
+				env: { ...process.env, SESSION_FILE: session, OWNER_ROOT: root },
+				stdout: "pipe",
+				stderr: "pipe",
+			});
+			const [exitCode, stdout, stderr] = await Promise.all([
+				child.exited,
+				new Response(child.stdout).text(),
+				new Response(child.stderr).text(),
+			]);
+			if (exitCode !== 0) throw new Error(`direct ownership child failed (${exitCode}): ${stderr}`);
+			const result = JSON.parse(stdout.trim()) as { status: string; lease?: { ownerEpoch: string } };
+			expect(result.status).toBe("live");
+			expect(result.lease?.ownerEpoch).toBe(ownership.ownerEpoch);
+		} finally {
+			await ownership.release();
+		}
+	});
+
+	it("self-fences and closes its probe socket after heartbeat ownership loss", async () => {
+		const { root, session } = await fixture();
+		const ownership = await acquireSessionOwnership(session, "parent", { root });
+		const claim = await claimPath(root);
+		const leaseFile = path.join(claim, "lease.json");
+		const lease = decodeSessionLeaseV1(JSON.parse(await fs.readFile(leaseFile, "utf8")));
+		if (!lease) throw new Error("missing direct lease");
+		await fs.writeFile(leaseFile, JSON.stringify({ ...lease, ownerEpoch: "replacement-epoch" }));
+		const deadline = Date.now() + 4_000;
+		while (!ownership.isFenced?.() && Date.now() < deadline) await Bun.sleep(25);
+		expect(ownership.isFenced?.()).toBe(true);
+		await expect(fs.stat(lease.socketPath)).rejects.toMatchObject({ code: "ENOENT" });
+		await ownership.release();
+	});
+
 	it("treats a final-component symlink as the same owned journal", async () => {
 		const { root, session } = await fixture();
 		const symlink = path.join(root, "parent-link.jsonl");
 		await fs.symlink(session, symlink);
 		const ownership = await acquireSessionOwnership(symlink, "parent", { root });
-		expect((await inspectSessionOwnership(session, "parent", { root })).status).toBe("suspect");
-		await expect(acquireSessionOwnership(session, "parent", { root })).rejects.toBeInstanceOf(
-			ExternalSessionOwnerUnverifiable,
-		);
+		expect((await inspectSessionOwnership(session, "parent", { root })).status).toBe("live");
+		await expect(acquireSessionOwnership(session, "parent", { root })).rejects.toBeInstanceOf(ExternalSessionOwner);
 		await ownership.release();
 	});
 
@@ -273,7 +358,7 @@ describe("owners-v1 OMP guard", () => {
 			const leaseFile = path.join(claim, "lease.json");
 			const lease = JSON.parse(await fs.readFile(leaseFile, "utf8")) as Record<string, unknown>;
 			const suppliedEpoch = "mux-epoch";
-			const suppliedSocket = path.join(claim, "owner.sock");
+			const suppliedSocket = path.join(root, "mux-owner.sock");
 			await fs.writeFile(
 				leaseFile,
 				JSON.stringify({ ...lease, ownerKind: "agent-mux", ownerEpoch: suppliedEpoch, socketPath: suppliedSocket }),

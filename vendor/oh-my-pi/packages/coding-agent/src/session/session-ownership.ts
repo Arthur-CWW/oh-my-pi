@@ -345,21 +345,187 @@ function processIdentity(): ProcessIdentity {
 	);
 }
 
+interface OwnerProbe {
+	readonly t: "ownerProbe";
+	readonly nonce: string;
+	readonly expectedEpoch: string;
+	readonly sessionFile: string;
+	readonly sessionId: string;
+}
+
+function decodeOwnerProbe(value: unknown): OwnerProbe | undefined {
+	if (!isRecord(value)) return undefined;
+	const keys = Object.keys(value);
+	if (
+		keys.length !== 5 ||
+		!keys.every(key => ["t", "nonce", "expectedEpoch", "sessionFile", "sessionId"].includes(key)) ||
+		value.t !== "ownerProbe" ||
+		typeof value.nonce !== "string" ||
+		value.nonce.length === 0 ||
+		typeof value.expectedEpoch !== "string" ||
+		typeof value.sessionFile !== "string" ||
+		typeof value.sessionId !== "string"
+	)
+		return undefined;
+	return {
+		t: "ownerProbe",
+		nonce: value.nonce,
+		expectedEpoch: value.expectedEpoch,
+		sessionFile: value.sessionFile,
+		sessionId: value.sessionId,
+	};
+}
+
+class DirectOwnerProbeServer {
+	readonly #location: LeaseLocation;
+	readonly #lease: SessionLeaseV1;
+	readonly #server: net.Server;
+	readonly #sockets = new Set<net.Socket>();
+	#live = false;
+	#closing: Promise<void> | undefined;
+
+	constructor(location: LeaseLocation, lease: SessionLeaseV1) {
+		this.#location = location;
+		this.#lease = lease;
+		this.#server = net.createServer(socket => this.#serve(socket));
+		this.#server.on("error", () => void this.close().catch(() => {}));
+	}
+
+	async listen(): Promise<void> {
+		const listening = Promise.withResolvers<void>();
+		const onError = (error: Error): void => listening.reject(error);
+		this.#server.once("error", onError);
+		this.#server.listen(this.#lease.socketPath, () => {
+			this.#server.off("error", onError);
+			this.#server.unref();
+			listening.resolve();
+		});
+		await listening.promise;
+	}
+
+	activate(): void {
+		this.#live = true;
+	}
+
+	async close(): Promise<void> {
+		if (this.#closing) return this.#closing;
+		this.#live = false;
+		this.#closing = (async () => {
+			for (const socket of this.#sockets) socket.destroy();
+			if (this.#server.listening) {
+				await new Promise<void>((resolve, reject) =>
+					this.#server.close(error => (error ? reject(error) : resolve())),
+				);
+			}
+			await fs.rm(this.#lease.socketPath, { force: true });
+		})();
+		return this.#closing;
+	}
+
+	#serve(socket: net.Socket): void {
+		this.#sockets.add(socket);
+		socket.once("close", () => this.#sockets.delete(socket));
+		let body = "";
+		let handled = false;
+		const reject = (): void => {
+			handled = true;
+			socket.destroy();
+		};
+		socket.on("data", chunk => {
+			if (handled) return;
+			body += chunk.toString();
+			if (body.length > 16_384) {
+				reject();
+				return;
+			}
+			const newline = body.indexOf("\n");
+			if (newline < 0) return;
+			if (newline !== body.length - 1) {
+				reject();
+				return;
+			}
+			handled = true;
+			let probe: OwnerProbe | undefined;
+			try {
+				probe = decodeOwnerProbe(JSON.parse(body.slice(0, newline)));
+			} catch {
+				socket.destroy();
+				return;
+			}
+			if (
+				!probe ||
+				!this.#live ||
+				probe.expectedEpoch !== this.#lease.ownerEpoch ||
+				probe.sessionFile !== this.#lease.sessionFile ||
+				probe.sessionId !== this.#lease.sessionId
+			) {
+				socket.destroy();
+				return;
+			}
+			void this.#reply(socket, probe);
+		});
+		socket.once("end", () => {
+			if (!handled) socket.destroy();
+		});
+		socket.once("error", () => {});
+	}
+
+	async #reply(socket: net.Socket, probe: OwnerProbe): Promise<void> {
+		const lease = await readLease(this.#location).catch(() => null);
+		if (
+			!this.#live ||
+			lease === null ||
+			lease === "corrupt" ||
+			lease.ownerEpoch !== this.#lease.ownerEpoch ||
+			lease.sessionFile !== this.#lease.sessionFile ||
+			lease.sessionId !== this.#lease.sessionId ||
+			lease.phase !== "running"
+		) {
+			socket.destroy();
+			return;
+		}
+		socket.end(
+			`${JSON.stringify({
+				t: "ownerProof",
+				nonce: probe.nonce,
+				ownerEpoch: lease.ownerEpoch,
+				sessionMatch: true,
+				phase: lease.phase,
+			})}\n`,
+		);
+	}
+}
+
 class DirectOwnershipHandle implements SessionOwnershipHandle {
 	readonly #location: LeaseLocation;
+	readonly #probeServer: DirectOwnerProbeServer;
 	readonly sessionFile: string;
 	readonly sessionId: string;
 	readonly ownerEpoch: string;
 	readonly ownerKind = "omp" as const;
 	#released = false;
 	#heartbeat: ReturnType<typeof setInterval> | undefined;
+	#heartbeatTask: Promise<void> | undefined;
 
-	constructor(location: LeaseLocation, lease: SessionLeaseV1) {
+	constructor(location: LeaseLocation, lease: SessionLeaseV1, probeServer: DirectOwnerProbeServer) {
 		this.#location = location;
+		this.#probeServer = probeServer;
 		this.sessionFile = lease.sessionFile;
 		this.sessionId = lease.sessionId;
 		this.ownerEpoch = lease.ownerEpoch;
-		this.#heartbeat = setInterval(() => void this.#beat(), 2_000);
+		this.#heartbeat = setInterval(() => {
+			if (this.#heartbeatTask) return;
+			const task = this.#beat();
+			this.#heartbeatTask = task;
+			void task.then(
+				() => {
+					if (this.#heartbeatTask === task) this.#heartbeatTask = undefined;
+				},
+				() => {
+					if (this.#heartbeatTask === task) this.#heartbeatTask = undefined;
+				},
+			);
+		}, 2_000);
 		this.#heartbeat.unref?.();
 	}
 
@@ -369,20 +535,35 @@ class DirectOwnershipHandle implements SessionOwnershipHandle {
 		return lease !== null && lease !== "corrupt" && lease.ownerEpoch === this.ownerEpoch && lease.phase === "running";
 	}
 
+	async #fence(): Promise<void> {
+		if (this.#released) return;
+		this.#released = true;
+		clearInterval(this.#heartbeat);
+		await this.#probeServer.close();
+	}
+
 	async #beat(): Promise<void> {
-		const lease = await readLease(this.#location);
-		if (lease === null || lease === "corrupt" || lease.ownerEpoch !== this.ownerEpoch || lease.phase !== "running") {
-			this.#released = true;
-			clearInterval(this.#heartbeat);
+		const lease = await readLease(this.#location).catch(() => null);
+		if (
+			this.#released ||
+			lease === null ||
+			lease === "corrupt" ||
+			lease.ownerEpoch !== this.ownerEpoch ||
+			lease.phase !== "running"
+		) {
+			await this.#fence();
 			return;
 		}
-		await writeLease(this.#location, {
-			...lease,
-			heartbeatSeq: lease.heartbeatSeq + 1,
-			heartbeatAtUnixMs: Date.now(),
-		}).catch(() => {
-			this.#released = true;
-		});
+		if (this.#released) return;
+		try {
+			await writeLease(this.#location, {
+				...lease,
+				heartbeatSeq: lease.heartbeatSeq + 1,
+				heartbeatAtUnixMs: Date.now(),
+			});
+		} catch {
+			await this.#fence();
+		}
 	}
 
 	isFenced(): boolean {
@@ -390,12 +571,23 @@ class DirectOwnershipHandle implements SessionOwnershipHandle {
 	}
 
 	async release(): Promise<void> {
-		if (this.#released) return;
+		if (this.#released) {
+			await this.#probeServer.close();
+			return;
+		}
 		this.#released = true;
 		clearInterval(this.#heartbeat);
+		await this.#heartbeatTask;
 		const lease = await readLease(this.#location);
-		if (lease === null || lease === "corrupt" || lease.ownerEpoch !== this.ownerEpoch) return;
-		await writeLease(this.#location, { ...lease, phase: "releasing" });
+		if (lease === null || lease === "corrupt" || lease.ownerEpoch !== this.ownerEpoch) {
+			await this.#probeServer.close();
+			return;
+		}
+		try {
+			await writeLease(this.#location, { ...lease, phase: "releasing" });
+		} finally {
+			await this.#probeServer.close();
+		}
 		const retired = path.join(this.#location.parent, `retired-${this.ownerEpoch}`);
 		try {
 			await fs.rename(this.#location.claim, retired);
@@ -521,14 +713,19 @@ export async function acquireSessionOwnership(
 		heartbeatSeq: 0,
 		heartbeatAtUnixMs: Date.now(),
 	};
+	let probeServer: DirectOwnerProbeServer | undefined;
 	try {
 		await writeLease(location, lease);
+		probeServer = new DirectOwnerProbeServer(location, lease);
+		await probeServer.listen();
 		const runningLease = { ...lease, phase: "running" as const, heartbeatSeq: 1, heartbeatAtUnixMs: Date.now() };
 		await writeLease(location, runningLease);
+		probeServer.activate();
 		const view = cmuxOwnerViewFromEnvironment(epoch);
 		if (view) await writeCmuxOwnerView(location, view).catch(() => {});
-		return new DirectOwnershipHandle(location, lease);
+		return new DirectOwnershipHandle(location, runningLease, probeServer);
 	} catch (error) {
+		await probeServer?.close().catch(() => {});
 		await fs.rm(location.claim, { recursive: true, force: true });
 		throw error;
 	}

@@ -27,6 +27,7 @@ import { getEditorCommand, openInEditor } from "../../utils/external-editor";
 import { ensureSupportedImageInput, ImageInputTooLargeError, loadImageInput } from "../../utils/image-loading";
 import { resizeImage } from "../../utils/image-resize";
 import { generateSessionTitle, setSessionTerminalTitle } from "../../utils/title-generator";
+import { diagnosticInputFromError } from "../utils/error-inbox";
 
 interface Expandable {
 	setExpanded(expanded: boolean): void;
@@ -675,7 +676,7 @@ export class InputController {
 					this.ctx.pendingImages = [];
 					this.ctx.pendingImageLinks = [];
 				} catch (error) {
-					this.ctx.showError(error instanceof Error ? error.message : String(error));
+					this.ctx.showError(diagnosticInputFromError(error, this.ctx.sessionManager.getSessionFile()));
 				}
 				this.ctx.updatePendingMessagesDisplay();
 				this.ctx.ui.requestRender();
@@ -796,7 +797,7 @@ export class InputController {
 						this.ctx.pendingImageLinks = inputImageLinks ? [...inputImageLinks] : images.map(() => undefined);
 						this.ctx.editor.imageLinks = this.ctx.pendingImageLinks;
 					}
-					this.ctx.showError(error instanceof Error ? error.message : String(error));
+					this.ctx.showError(diagnosticInputFromError(error, this.ctx.sessionManager.getSessionFile()));
 				}
 				this.ctx.updatePendingMessagesDisplay();
 				this.ctx.ui.requestRender();
@@ -842,7 +843,7 @@ export class InputController {
 			await this.ctx.withLocalSubmission(text, submit, { imageCount: images?.length ?? 0 });
 		} catch (error) {
 			this.ctx.editor.setText(text); // hand the message back, mirroring the main submit error path
-			this.ctx.showError(error instanceof Error ? error.message : String(error));
+			this.ctx.showError(diagnosticInputFromError(error, target.sessionManager.getSessionFile()));
 		}
 		this.ctx.updatePendingMessagesDisplay();
 		this.ctx.ui.requestRender();
@@ -1182,7 +1183,7 @@ export class InputController {
 			});
 		} catch (error) {
 			this.#queuedInputEdit = undefined;
-			this.ctx.showError(error instanceof Error ? error.message : String(error));
+			this.ctx.showError(diagnosticInputFromError(error, this.ctx.sessionManager.getSessionFile()));
 			return true;
 		}
 		this.ctx.editor.addToHistory(text);

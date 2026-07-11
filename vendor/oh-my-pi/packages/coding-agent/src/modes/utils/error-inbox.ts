@@ -1,5 +1,63 @@
 import { randomUUID } from "node:crypto";
+import { SessionOwnershipLostError } from "../../session/durable-input-queue";
 import type { SessionEntry } from "../../session/session-entries";
+
+export interface FocusCmuxOwnerAction {
+	readonly kind: "focus_cmux_owner";
+	readonly sessionFile: string;
+	readonly sessionId: string;
+	readonly lostOwnerEpoch: string;
+}
+
+export type DiagnosticAction = FocusCmuxOwnerAction;
+
+export function diagnosticInputFromError(error: unknown, sessionFile: string | null | undefined): string | DiagnosticEventInput {
+	const message = error instanceof Error ? error.message : String(error);
+	if (!(error instanceof SessionOwnershipLostError) || !sessionFile) return message;
+	return {
+		message,
+		action: {
+			kind: "focus_cmux_owner",
+			sessionFile,
+			sessionId: error.sessionId,
+			lostOwnerEpoch: error.ownerEpoch,
+		},
+	};
+}
+
+function decodeDiagnosticAction(value: unknown): DiagnosticAction | undefined {
+	if (!isObject(value)) return undefined;
+	const keys = Object.keys(value);
+	if (
+		keys.length !== 4 ||
+		value.kind !== "focus_cmux_owner" ||
+		typeof value.sessionFile !== "string" ||
+		typeof value.sessionId !== "string" ||
+		typeof value.lostOwnerEpoch !== "string" ||
+		value.sessionFile.length === 0 ||
+		value.sessionId.length === 0 ||
+		value.lostOwnerEpoch.length === 0
+	) {
+		return undefined;
+	}
+	return {
+		kind: value.kind,
+		sessionFile: value.sessionFile,
+		sessionId: value.sessionId,
+		lostOwnerEpoch: value.lostOwnerEpoch,
+	};
+}
+
+function isSameAction(a: DiagnosticAction | undefined, b: DiagnosticAction | undefined): boolean {
+	if (a === b) return true;
+	if (!a || !b) return false;
+	return (
+		a.kind === b.kind &&
+		a.sessionFile === b.sessionFile &&
+		a.sessionId === b.sessionId &&
+		a.lostOwnerEpoch === b.lostOwnerEpoch
+	);
+}
 
 export interface DiagnosticEvent {
 	id: string;
@@ -25,6 +83,7 @@ export interface DiagnosticEvent {
 	logPointer?: string;
 	causeChain?: string[];
 
+	action?: DiagnosticAction;
 	unread: boolean;
 	resolved: boolean;
 }
@@ -136,6 +195,7 @@ function decodeUiErrorV2(data: Record<string, unknown>): DiagnosticEvent {
 		requestFingerprint: optionalString(data, "requestFingerprint"),
 		logPointer: optionalString(data, "logPointer"),
 		causeChain: optionalStringArray(data, "causeChain"),
+		action: decodeDiagnosticAction(data.action),
 		unread,
 		resolved,
 	};
@@ -172,6 +232,7 @@ function decodeUiErrorV1(data: Record<string, unknown>): DiagnosticEvent {
 		requestFingerprint: optionalString(data, "requestFingerprint"),
 		logPointer: optionalString(data, "logPointer"),
 		causeChain: optionalStringArray(data, "causeChain"),
+		action: decodeDiagnosticAction(data.action),
 		unread: optionalBoolean(data, "unread") ?? true,
 		resolved: optionalBoolean(data, "resolved") ?? false,
 	};
@@ -281,6 +342,7 @@ export class ErrorInbox {
 			existing.requestFingerprint === details.requestFingerprint &&
 			existing.logPointer === details.logPointer &&
 			isSameCauseChain(existing.causeChain, details.causeChain) &&
+			isSameAction(existing.action, details.action) &&
 			now >= existing.lastTimestamp &&
 			now - existing.lastTimestamp <= DEDUPE_WINDOW_MS,
 		);
@@ -319,6 +381,7 @@ export class ErrorInbox {
 				requestFingerprint: details.requestFingerprint,
 				logPointer: details.logPointer,
 				causeChain: details.causeChain,
+				action: details.action,
 			};
 			this.#errors.unshift(record);
 			if (this.#errors.length > this.#maxErrors) {

@@ -1,9 +1,17 @@
 import { Container, type SelectItem, SelectList, Spacer, Text } from "@oh-my-pi/pi-tui";
 import { getSelectListTheme, theme } from "../theme/theme";
-import type { DiagnosticEvent } from "../utils/error-inbox";
+import type { DiagnosticAction, DiagnosticEvent } from "../utils/error-inbox";
+import { CMUX_OWNER_UNAVAILABLE_MESSAGE, type FocusCmuxOwnerResult } from "../utils/cmux-owner-navigation";
 import { DynamicBorder } from "./dynamic-border";
+export type DiagnosticActionHandler = (action: DiagnosticAction) => Promise<FocusCmuxOwnerResult>;
 
-export function formatDiagnosticDetail(err: DiagnosticEvent | null): string {
+export interface ErrorSelectorOptions {
+	readonly onAction?: DiagnosticActionHandler;
+	readonly onUpdate?: () => void;
+}
+
+
+export function formatDiagnosticDetail(err: DiagnosticEvent | null, actionMessage?: string): string {
 	if (!err) return "";
 	let out = "";
 	if (err.count > 1) {
@@ -47,8 +55,14 @@ export function formatDiagnosticDetail(err: DiagnosticEvent | null): string {
 			out += `${i + 1}. ${err.causeChain[i]}\n`;
 		}
 	}
+	if (actionMessage) {
+		out += `\n\n${actionMessage}`;
+	}
 
-	if (!err.resolved) {
+
+	if (err.action) {
+		out += "\n" + theme.fg("dim", "Focus active cmux session: Enter   Close: Esc");
+	} else if (!err.resolved) {
 		out += "\n" + theme.fg("dim", `Resolve: /errors resolve ${err.id}   Close: Esc/Enter`);
 	}
 
@@ -58,7 +72,7 @@ export function formatDiagnosticDetail(err: DiagnosticEvent | null): string {
 export class ErrorSelectorComponent extends Container {
 	#selectList: SelectList;
 
-	constructor(errors: ReadonlyArray<DiagnosticEvent>, onDismiss: () => void) {
+	constructor(errors: ReadonlyArray<DiagnosticEvent>, onDismiss: () => void, options: ErrorSelectorOptions = {}) {
 		super();
 
 		const byId = new Map<string, DiagnosticEvent>(errors.map(e => [e.id, e]));
@@ -81,15 +95,60 @@ export class ErrorSelectorComponent extends Container {
 			items.push({ value: "none", label: "No recent errors" });
 		}
 
-		const detailText = new Text(formatDiagnosticDetail(errors.length > 0 ? errors[0] : null), 1, 0);
+		const selectedError = errors[0];
+		let selectedId = errors[0]?.id;
+		let nextActionGeneration = 0;
+		const actionMessages = new Map<string, string>();
+		const pendingActions = new Map<string, number>();
+		const detailText = new Text(formatDiagnosticDetail(selectedError ?? null), 1, 0);
 
 		this.#selectList = new SelectList(items, Math.min(items.length, 10), getSelectListTheme());
-		this.#selectList.onSelect = () => onDismiss();
+		this.#selectList.onSelect = item => {
+			const selected = byId.get(item.value);
+			if (!selected?.action || !options.onAction) {
+				onDismiss();
+				return;
+			}
+			if (pendingActions.has(selected.id)) return;
+			const generation = ++nextActionGeneration;
+			pendingActions.set(selected.id, generation);
+			void options.onAction(selected.action).then(
+				result => {
+					if (pendingActions.get(selected.id) !== generation) return;
+					pendingActions.delete(selected.id);
+					if (result.kind === "focused") {
+						if (selectedId === selected.id) onDismiss();
+						return;
+					}
+					const actionMessage =
+						result.kind === "unavailable"
+							? CMUX_OWNER_UNAVAILABLE_MESSAGE
+							: `Could not focus the active cmux session: ${result.reason}. This view remains read-only.`;
+					actionMessages.set(selected.id, actionMessage);
+					if (selectedId !== selected.id) return;
+					detailText.setText(formatDiagnosticDetail(selected, actionMessage));
+					options.onUpdate?.();
+				},
+				error => {
+					if (pendingActions.get(selected.id) !== generation) return;
+					pendingActions.delete(selected.id);
+					const reason = error instanceof Error ? error.message : String(error);
+					const actionMessage = `Could not focus the active cmux session: ${reason}. This view remains read-only.`;
+					actionMessages.set(selected.id, actionMessage);
+					if (selectedId !== selected.id) return;
+					detailText.setText(formatDiagnosticDetail(selected, actionMessage));
+					options.onUpdate?.();
+				},
+			);
+		};
 		this.#selectList.onCancel = () => onDismiss();
-		this.#selectList.onSelectionChange = (item) => {
+		this.#selectList.onSelectionChange = item => {
 			if (item.value === "none") return;
+			selectedId = item.value;
 			const found = byId.get(item.value);
-			if (found) detailText.setText(formatDiagnosticDetail(found));
+			if (found) {
+				detailText.setText(formatDiagnosticDetail(found, actionMessages.get(found.id)));
+			}
 		};
 
 		this.addChild(new Spacer(1));

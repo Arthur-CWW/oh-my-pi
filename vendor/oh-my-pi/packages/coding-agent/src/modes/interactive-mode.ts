@@ -170,6 +170,7 @@ import type {
 	TodoItem,
 	TodoPhase,
 } from "./types";
+import { focusCmuxOwner } from "./utils/cmux-owner-navigation";
 import { type DiagnosticEventInput, ErrorInbox } from "./utils/error-inbox";
 import { UiHelpers } from "./utils/ui-helpers";
 
@@ -2855,10 +2856,17 @@ export class InteractiveMode implements InteractiveModeContext {
 			return;
 		}
 		this.#selectorController.showSelector(done => {
-			const selector = new ErrorSelectorComponent(errors, () => {
-				done();
-				this.ui.requestRender();
-			});
+			const selector = new ErrorSelectorComponent(
+				errors,
+				() => {
+					done();
+					this.ui.requestRender();
+				},
+				{
+					onAction: focusCmuxOwner,
+					onUpdate: () => this.ui.requestRender(),
+				},
+			);
 			return { component: selector, focus: selector.getSelectList() };
 		});
 	}

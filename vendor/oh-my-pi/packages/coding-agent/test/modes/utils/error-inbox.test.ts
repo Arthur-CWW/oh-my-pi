@@ -1,6 +1,11 @@
 import { describe, expect, mock, test } from "bun:test";
-import { ErrorInbox, type DiagnosticEventInput } from "../../../src/modes/utils/error-inbox";
+import {
+	diagnosticInputFromError,
+	ErrorInbox,
+	type DiagnosticEventInput,
+} from "../../../src/modes/utils/error-inbox";
 import type { SessionEntry } from "../../../src/session/session-entries";
+import { SessionOwnershipLostError } from "../../../src/session/durable-input-queue";
 
 describe("ErrorInbox", () => {
 	test("recordError appends payload with default unread/resolved state", () => {
@@ -281,4 +286,61 @@ describe("ErrorInbox", () => {
 			causeChain: ["a", "b"],
 		});
 	});
+	test("ownership action round-trips, participates in dedupe, and malformed actions fall back safely", () => {
+		const entries: SessionEntry[] = [];
+		const inbox = new ErrorInbox({
+			appendCustomEntry(type, data) {
+				entries.push({ type: "custom", id: `entry-${entries.length}`, parentId: null, timestamp: new Date().toISOString(), customType: type, data });
+				return "";
+			},
+		});
+		const action = {
+			kind: "focus_cmux_owner" as const,
+			sessionFile: "/tmp/session.jsonl",
+			sessionId: "session-1",
+			lostOwnerEpoch: "epoch-old",
+		};
+
+		inbox.recordError({ message: "ownership lost", action }, undefined, { nowMs: 1000, id: "ownership" });
+		inbox.recordError({ message: "ownership lost", action: { ...action } }, undefined, { nowMs: 2000 });
+		expect(inbox.getErrors()).toHaveLength(1);
+		expect(inbox.getErrors()[0].count).toBe(2);
+
+		const recovered = new ErrorInbox({ appendCustomEntry: () => "" });
+		recovered.reconcile(entries);
+		expect(recovered.getErrors()[0].action).toEqual(action);
+
+		const persisted = entries.at(-1);
+		expect(persisted?.type).toBe("custom");
+		const malformed = {
+			...(persisted as Extract<SessionEntry, { type: "custom" }>),
+			id: "malformed-entry",
+			data: {
+				...((persisted as Extract<SessionEntry, { type: "custom" }>).data as Record<string, unknown>),
+				id: "malformed",
+				action: { ...action, unexpected: true },
+			},
+		} as SessionEntry;
+		recovered.reconcile([malformed]);
+		expect(recovered.getErrors()).toHaveLength(1);
+		expect(recovered.getErrors()[0].id).toBe("malformed");
+		expect(recovered.getErrors()[0].action).toBeUndefined();
+	});
+
+	test("converts only ownership loss errors into focus actions", () => {
+		const converted = diagnosticInputFromError(
+			new SessionOwnershipLostError("session-1", "epoch-old"),
+			"/tmp/session.jsonl",
+		);
+		expect(converted).toMatchObject({
+			action: {
+				kind: "focus_cmux_owner",
+				sessionFile: "/tmp/session.jsonl",
+				sessionId: "session-1",
+				lostOwnerEpoch: "epoch-old",
+			},
+		});
+		expect(diagnosticInputFromError(new Error("ordinary"), "/tmp/session.jsonl")).toBe("ordinary");
+	});
+
 });
