@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import { extractPrintableText } from "@oh-my-pi/pi-tui/keys";
+import { Editor } from "@oh-my-pi/pi-tui/components/editor";
+import { defaultEditorTheme } from "./test-themes";
 import { ProcessTerminal } from "@oh-my-pi/pi-tui/terminal";
 import {
 	type CellDimensions,
@@ -51,7 +53,7 @@ describe("ProcessTerminal OSC 11 appearance detection", () => {
 		restoreEnv("WSL_DISTRO_NAME", originalWslDistroName);
 	});
 
-	function setupTerminal() {
+	function setupTerminal(onInput?: (data: string) => void) {
 		const writes: string[] = [];
 		const received: string[] = [];
 		vi.spyOn(process, "kill").mockReturnValue(true);
@@ -65,7 +67,10 @@ describe("ProcessTerminal OSC 11 appearance detection", () => {
 
 		const terminal = new ProcessTerminal();
 		terminal.start(
-			data => received.push(data),
+			data => {
+				received.push(data);
+				onInput?.(data);
+			},
 			() => {},
 		);
 
@@ -283,6 +288,24 @@ describe("ProcessTerminal OSC 11 appearance detection", () => {
 		expect(received).toContain("\x1b[A");
 
 		terminal.stop();
+	});
+
+	it("keeps the prompt editable after a busy loop flushes a partial OSC reply", () => {
+		vi.useFakeTimers();
+		const editor = new Editor(defaultEditorTheme);
+		const { terminal, writes } = setupTerminal(data => editor.handleInput(data));
+		try {
+			// Streaming/render work can keep Bun busy long enough for StdinBuffer to
+			// flush a terminal capability reply before its tail reaches the TUI.
+			process.stdin.emit("data", "\x1b]11;rgb:ff");
+			vi.advanceTimersByTime(51);
+			process.stdin.emit("data", "queue");
+
+			expect(editor.getText()).toBe("queue");
+			expect(writes).toContain("\x1b]11;?\x07");
+		} finally {
+			terminal.stop();
+		}
 	});
 
 	it("DA1 from old query does not cancel new queued query", () => {

@@ -840,28 +840,33 @@ export class ProcessTerminal implements Terminal {
 			}
 
 			// OSC 11 replies can be split if the stdin buffer flushes a partial sequence.
-			// Accumulate fragments until the BEL/ST terminator arrives, then parse once.
-			// If a new escape sequence arrives (not the ST terminator), abort buffering
-			// and forward it as normal input so user keystrokes are never swallowed.
+			// A following printable sequence is ambiguous: it could be the tail of the
+			// reply, or a user keystroke delivered after a busy event loop delayed the
+			// reply. Input must win that ambiguity. Dropping an incomplete capability
+			// reply only leaves appearance unknown; treating a keystroke as its tail
+			// leaves the prompt permanently unresponsive until another escape arrives.
 			if (this.#osc11Pending && (this.#osc11ResponseBuffer || sequence.startsWith("\x1b]11;"))) {
 				if (this.#osc11ResponseBuffer && sequence.startsWith("\x1b") && sequence !== "\x1b\\") {
-					// New escape sequence arrived mid-buffer — not an OSC 11 continuation.
 					this.#osc11ResponseBuffer = "";
 					// Fall through to normal input handling below.
+				} else if (this.#osc11ResponseBuffer && !sequence.startsWith("\x1b")) {
+					this.#osc11ResponseBuffer = "";
+					// Fall through: never let a partial terminal reply capture typing.
 				} else {
 					this.#osc11ResponseBuffer += sequence;
 					const osc11Match = this.#osc11ResponseBuffer.match(osc11ResponsePattern);
 					if (!osc11Match) return;
-					const [, rHex, gHex, bHex] = osc11Match;
 					this.#osc11Pending = false;
 					this.#osc11ResponseBuffer = "";
-					this.#handleOsc11Response(rHex!, gHex!, bHex!);
+					this.#handleOsc11Response(osc11Match[1]!, osc11Match[2]!, osc11Match[3]!);
 					return;
 				}
 			}
 
 			if (this.#osc99PendingId && (this.#osc99ResponseBuffer || sequence.startsWith("\x1b]99;"))) {
 				if (this.#osc99ResponseBuffer && sequence.startsWith("\x1b") && sequence !== "\x1b\\") {
+					this.#osc99ResponseBuffer = "";
+				} else if (this.#osc99ResponseBuffer && !sequence.startsWith("\x1b")) {
 					this.#osc99ResponseBuffer = "";
 				} else {
 					this.#osc99ResponseBuffer += sequence;
