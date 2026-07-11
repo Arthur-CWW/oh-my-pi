@@ -11,6 +11,7 @@ import {
 	inspectLiveSessionOwnerView,
 	inspectSessionOwnership,
 	resolveAgentMuxRoot,
+	type CmuxOwnerView,
 } from "@oh-my-pi/pi-coding-agent/session/session-ownership";
 
 const roots: string[] = [];
@@ -99,7 +100,7 @@ describe("owners-v1 OMP guard", () => {
 			version: 1,
 			ownerEpoch: "owner-epoch",
 			cmux: { workspaceId, surfaceId, socketPath: "/tmp/cmux.sock" },
-		};
+		} satisfies CmuxOwnerView;
 		expect(decodeCmuxOwnerView(view)).toEqual(view);
 		expect(decodeCmuxOwnerView({ ...view, extra: true })).toBeUndefined();
 		expect(decodeCmuxOwnerView({ ...view, cmux: { workspaceId, surfaceId } })).toBeUndefined();
@@ -116,6 +117,24 @@ describe("owners-v1 OMP guard", () => {
 			process.env.AGENT_MUX_DIR = "";
 			expect(resolveAgentMuxRoot()).toBe(path.join(os.homedir(), ".agent-mux"));
 		} finally {
+			if (original === undefined) delete process.env.AGENT_MUX_DIR;
+			else process.env.AGENT_MUX_DIR = original;
+		}
+	});
+
+	it("uses an explicit ownership root instead of AGENT_MUX_DIR", async () => {
+		const { root, session } = await fixture();
+		const environmentRoot = path.join(root, "environment");
+		const explicitRoot = path.join(root, "explicit");
+		const original = process.env.AGENT_MUX_DIR;
+		let ownership: Awaited<ReturnType<typeof acquireSessionOwnership>> | undefined;
+		try {
+			process.env.AGENT_MUX_DIR = environmentRoot;
+			ownership = await acquireSessionOwnership(session, "parent", { root: explicitRoot });
+			expect((await fs.stat(await claimPath(explicitRoot))).isDirectory()).toBe(true);
+			await expect(fs.stat(environmentRoot)).rejects.toMatchObject({ code: "ENOENT" });
+		} finally {
+			await ownership?.release();
 			if (original === undefined) delete process.env.AGENT_MUX_DIR;
 			else process.env.AGENT_MUX_DIR = original;
 		}
@@ -241,10 +260,12 @@ describe("owners-v1 OMP guard", () => {
 		expect(await inspectSessionOwnership(session, "parent", { root })).toEqual({ status: "none" });
 	});
 
-	it("finds a mux-supplied lease through inherited AGENT_MUX_DIR", async () => {
+	it("lets a child find its mux lease, view, and queue through inherited AGENT_MUX_DIR", async () => {
 		const { root, session } = await fixture();
+		const isolatedHome = path.join(root, "home");
 		const original = process.env.AGENT_MUX_DIR;
 		let direct: Awaited<ReturnType<typeof acquireSessionOwnership>> | undefined;
+		let server: net.Server | undefined;
 		try {
 			process.env.AGENT_MUX_DIR = root;
 			direct = await acquireSessionOwnership(session, "parent");
@@ -257,10 +278,53 @@ describe("owners-v1 OMP guard", () => {
 				leaseFile,
 				JSON.stringify({ ...lease, ownerKind: "agent-mux", ownerEpoch: suppliedEpoch, socketPath: suppliedSocket }),
 			);
-			const inherited = await acquireSessionOwnership(session, "parent", { suppliedEpoch, suppliedSocket });
-			expect(inherited.ownerKind).toBe("agent-mux");
-			expect(await inherited.isCurrent()).toBe(true);
+			await fs.writeFile(
+				path.join(claim, "view.json"),
+				JSON.stringify({
+					version: 1,
+					ownerEpoch: suppliedEpoch,
+					cmux: { workspaceId, surfaceId, socketPath: path.join(root, "cmux.sock") },
+				}),
+			);
+			server = await startOwnerServer(suppliedSocket, suppliedEpoch);
+			const childSource = [
+				'import { acquireSessionOwnership, inspectLiveSessionOwnerView } from "@oh-my-pi/pi-coding-agent/session/session-ownership";',
+				'import { DurableInputQueue } from "@oh-my-pi/pi-coding-agent/session/durable-input-queue";',
+				"const sessionFile = process.env.SESSION_FILE;",
+				"const suppliedEpoch = process.env.OWNER_EPOCH;",
+				"const suppliedSocket = process.env.OWNER_SOCKET;",
+				'if (!sessionFile || !suppliedEpoch || !suppliedSocket) throw new Error("missing child environment");',
+				'const ownership = await acquireSessionOwnership(sessionFile, "parent", { suppliedEpoch, suppliedSocket });',
+				"await DurableInputQueue.open(ownership);",
+				'console.log(JSON.stringify({ ownerKind: ownership.ownerKind, current: await ownership.isCurrent(), view: await inspectLiveSessionOwnerView(sessionFile, "parent") }));',
+			].join("\n");
+			const child = Bun.spawn({
+				cmd: [process.execPath, "-e", childSource],
+				cwd: path.resolve(import.meta.dir, "../.."),
+				env: {
+					...process.env,
+					HOME: isolatedHome,
+					SESSION_FILE: session,
+					OWNER_EPOCH: suppliedEpoch,
+					OWNER_SOCKET: suppliedSocket,
+				},
+				stdout: "pipe",
+				stderr: "pipe",
+			});
+			const [exitCode, stdout, stderr] = await Promise.all([
+				child.exited,
+				new Response(child.stdout).text(),
+				new Response(child.stderr).text(),
+			]);
+			if (exitCode !== 0) throw new Error(`ownership child failed (${exitCode}): ${stderr}`);
+			const result = JSON.parse(stdout.trim()) as { ownerKind: string; current: boolean; view?: CmuxOwnerView };
+			expect(result.ownerKind).toBe("agent-mux");
+			expect(result.current).toBe(true);
+			expect(result.view?.ownerEpoch).toBe(suppliedEpoch);
+			expect((await fs.stat(path.join(path.dirname(claim), "queue-v2"))).isDirectory()).toBe(true);
+			await expect(fs.stat(path.join(isolatedHome, ".agent-mux"))).rejects.toMatchObject({ code: "ENOENT" });
 		} finally {
+			if (server) await closeServer(server);
 			await direct?.release();
 			if (original === undefined) delete process.env.AGENT_MUX_DIR;
 			else process.env.AGENT_MUX_DIR = original;
