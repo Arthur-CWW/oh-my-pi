@@ -2,11 +2,26 @@ import { prompt, Snowflake } from "@oh-my-pi/pi-utils";
 import goalBudgetLimitPrompt from "../prompts/goals/goal-budget-limit.md" with { type: "text" };
 import goalContinuationPrompt from "../prompts/goals/goal-continuation.md" with { type: "text" };
 import goalModeActivePrompt from "../prompts/goals/goal-mode-active.md" with { type: "text" };
-import type { Goal, GoalBudgetSteering, GoalModeState, GoalRuntimeEvent, GoalTokenUsage } from "./state";
+import {
+	decodeSessionWorkstream,
+	type SessionWorkstream,
+	type WorkstreamSource,
+	workstreamCharterPath,
+} from "../session/session-entries";
+import type {
+	Goal,
+	GoalBudgetSteering,
+	GoalModeState,
+	GoalRuntimeEvent,
+	GoalTokenUsage,
+	GoalWorkstreamReference,
+} from "./state";
 
 export interface GoalRuntimeHost {
 	getState(): GoalModeState | undefined;
 	setState(state: GoalModeState | undefined): void;
+	getWorkstream(): SessionWorkstream | undefined;
+	setWorkstream(workstream: SessionWorkstream, source: WorkstreamSource): Promise<boolean>;
 	getCurrentUsage(): GoalTokenUsage;
 	emit(event: GoalRuntimeEvent): void | Promise<void>;
 	persist(mode: "goal" | "goal_paused" | "none", state?: GoalModeState): void;
@@ -36,6 +51,7 @@ export interface GoalRuntimeSnapshot {
 }
 
 export type GoalPromptKind = "active" | "continuation" | "budget-limit";
+
 
 function cloneGoal(goal: Goal): Goal {
 	return { ...goal };
@@ -98,7 +114,25 @@ export function goalTokenDelta(current: GoalTokenUsage, baseline: GoalTokenUsage
 	);
 }
 
-export function renderGoalPrompt(kind: GoalPromptKind, goal: Goal): string {
+export function projectGoalWorkstream(workstream: SessionWorkstream | undefined): GoalWorkstreamReference | undefined {
+	if (!workstream) return undefined;
+	return workstream.kind === "adhoc"
+		? { kind: "adhoc" }
+		: { kind: "workstream", id: workstream.id, charterPath: workstreamCharterPath(workstream.id) };
+}
+
+function renderWorkstreamContext(workstream: GoalWorkstreamReference | undefined): string {
+	if (!workstream) return "";
+	return workstream.kind === "adhoc"
+		? '<workstream kind="adhoc" />'
+		: `<workstream id="${workstream.id}" charter="${workstream.charterPath}" />`;
+}
+
+export function renderGoalPrompt(
+	kind: GoalPromptKind,
+	goal: Goal,
+	workstream?: GoalWorkstreamReference,
+): string {
 	const template =
 		kind === "active"
 			? goalModeActivePrompt
@@ -111,6 +145,7 @@ export function renderGoalPrompt(kind: GoalPromptKind, goal: Goal): string {
 		tokenBudget: budgetValue(goal),
 		remainingTokens: remainingValue(goal),
 		timeUsedSeconds: String(goal.timeUsedSeconds),
+		workstreamContext: renderWorkstreamContext(workstream),
 	});
 }
 
@@ -130,6 +165,28 @@ function validateTokenBudget(tokenBudget: number | undefined): void {
 	if (tokenBudget !== undefined && (!Number.isInteger(tokenBudget) || tokenBudget <= 0)) {
 		throw new Error("goal token_budget must be a positive integer when provided");
 	}
+}
+const CHARTER_REFERENCE_PATTERN =
+	/(?<![A-Za-z0-9_./-])streams\/([a-z0-9]+(?:-[a-z0-9]+)*)\/GOAL\.md(?![A-Za-z0-9_./-])/g;
+
+export function inferGoalWorkstream(objective: string): SessionWorkstream | undefined {
+	const matches = [...objective.matchAll(CHARTER_REFERENCE_PATTERN)];
+	if (matches.length !== 1) return undefined;
+	const id = matches[0]?.[1];
+	if (!id) return undefined;
+	return { kind: "workstream", id };
+}
+
+function explicitGoalWorkstream(value: string): SessionWorkstream {
+	const id = value.trim();
+	const candidate: SessionWorkstream = id === "adhoc" ? { kind: "adhoc" } : { kind: "workstream", id };
+	const validated = decodeSessionWorkstream(candidate);
+	if (!validated) throw new Error('workstream must be "adhoc" or a lowercase kebab-case stream slug');
+	return validated;
+}
+
+function sameWorkstream(left: SessionWorkstream | undefined, right: SessionWorkstream): boolean {
+	return left?.kind === right.kind && (left.kind === "adhoc" || (right.kind === "workstream" && left.id === right.id));
 }
 
 function isAccountingStatus(goal: Goal): boolean {
@@ -160,6 +217,22 @@ export class GoalRuntime {
 
 	#now(): number {
 		return this.#host.now?.() ?? Date.now();
+	}
+	async #classifyWorkstream(objective: string, explicit: string | undefined): Promise<void> {
+		if (explicit !== undefined) {
+			const requested = explicitGoalWorkstream(explicit);
+			const current = this.#host.getWorkstream();
+			const changed = await this.#host.setWorkstream(requested, "explicit");
+			if (!changed && !sameWorkstream(current, requested)) {
+				throw new Error(`failed to classify session as workstream "${explicit.trim()}"`);
+			}
+		} else if (!this.#host.getWorkstream()) {
+			const inferred = inferGoalWorkstream(objective);
+			if (inferred) await this.#host.setWorkstream(inferred, "goal");
+		}
+	}
+	getWorkstreamReference(): GoalWorkstreamReference | undefined {
+		return projectGoalWorkstream(this.#host.getWorkstream());
 	}
 
 	#hasAccountingState(): boolean {
@@ -391,7 +464,7 @@ export class GoalRuntime {
 		return { enabled: true, mode: "active", goal };
 	}
 
-	async createGoal(input: { objective: string; tokenBudget?: number }): Promise<GoalModeState> {
+	async createGoal(input: { objective: string; tokenBudget?: number; workstream?: string }): Promise<GoalModeState> {
 		const objective = input.objective.trim();
 		if (!objective) throw new Error("objective is required when op=create");
 		validateTokenBudget(input.tokenBudget);
@@ -402,6 +475,7 @@ export class GoalRuntime {
 					`cannot create goal because existing goal is ${existing.goal.status}; use op=update to replace it`,
 				);
 			}
+			await this.#classifyWorkstream(objective, input.workstream);
 			const state = this.#createGoalState(objective, input.tokenBudget);
 			this.#budgetReportedFor = undefined;
 			this.#markActiveAccounting(state.goal);
@@ -410,7 +484,7 @@ export class GoalRuntime {
 		});
 	}
 
-	async replaceGoal(input: { objective: string; tokenBudget?: number }): Promise<GoalModeState> {
+	async replaceGoal(input: { objective: string; tokenBudget?: number; workstream?: string }): Promise<GoalModeState> {
 		const objective = input.objective.trim();
 		if (!objective) throw new Error("objective is required when op=update");
 		validateTokenBudget(input.tokenBudget);
@@ -425,6 +499,7 @@ export class GoalRuntime {
 				);
 			}
 			await this.#flushUsageLocked("suppressed");
+			await this.#classifyWorkstream(objective, input.workstream);
 			const state = this.#createGoalState(objective, input.tokenBudget);
 			this.#budgetReportedFor = undefined;
 			this.#markActiveAccounting(state.goal);
@@ -525,14 +600,14 @@ export class GoalRuntime {
 	buildActivePrompt(): string | undefined {
 		const state = this.#host.getState();
 		return state?.enabled && state.goal && state.goal.status === "active"
-			? renderGoalPrompt("active", state.goal)
+			? renderGoalPrompt("active", state.goal, this.getWorkstreamReference())
 			: undefined;
 	}
 
 	buildContinuationPrompt(): string | undefined {
 		const state = this.#host.getState();
 		return state?.enabled && state.goal.status === "active"
-			? renderGoalPrompt("continuation", state.goal)
+			? renderGoalPrompt("continuation", state.goal, this.getWorkstreamReference())
 			: undefined;
 	}
 
@@ -541,7 +616,7 @@ export class GoalRuntime {
 		this.#budgetReportedFor = goal.id;
 		await this.#host.sendHiddenMessage({
 			customType: "goal-budget-limit",
-			content: renderGoalPrompt("budget-limit", goal),
+			content: renderGoalPrompt("budget-limit", goal, this.getWorkstreamReference()),
 			deliverAs: "steer",
 		});
 	}

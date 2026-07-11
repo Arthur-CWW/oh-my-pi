@@ -7,34 +7,38 @@ import type { RenderResultOptions } from "../../extensibility/custom-tools/types
 import type { Theme, ThemeColor } from "../../modes/theme/theme";
 import goalDescription from "../../prompts/tools/goal.md" with { type: "text" };
 import { formatDuration } from "../../slash-commands/helpers/format";
+import { decodeSessionWorkstream } from "../../session/session-entries";
 import type { ToolSession } from "../../tools";
 import { formatErrorDetail, TRUNCATE_LENGTHS } from "../../tools/render-utils";
 import { ToolError } from "../../tools/tool-errors";
 import { framedBlock, renderStatusLine, truncateToWidth } from "../../tui";
 import { completionBudgetReport, remainingTokens } from "../runtime";
-import type { Goal, GoalStatus, GoalToolDetails } from "../state";
+import type { Goal, GoalStatus, GoalToolDetails, GoalWorkstreamReference } from "../state";
 
 const goalSchema = z.object({
 	op: z.enum(["create", "update", "get", "complete", "resume", "drop"]).describe("goal operation"),
 	objective: z.string().describe("goal objective").optional(),
 	token_budget: z.number().int().describe("token budget").optional(),
+	workstream: z.string().describe('workstream slug, or "adhoc"').optional(),
 });
 
 export type GoalToolInput = z.infer<typeof goalSchema>;
 
 export interface GoalToolResponse {
 	goal: Goal | null;
+	workstream: GoalWorkstreamReference | undefined;
 	remainingTokens: number | null;
 	completionBudgetReport: string | null;
 }
 
 export function buildGoalToolResponse(
 	goal: Goal | null | undefined,
-	options?: { includeCompletionReport?: boolean },
+	options?: { includeCompletionReport?: boolean; workstream?: GoalWorkstreamReference },
 ): GoalToolResponse {
 	const resolvedGoal = goal ?? null;
 	return {
 		goal: resolvedGoal,
+		workstream: options?.workstream,
 		remainingTokens: remainingTokens(resolvedGoal),
 		completionBudgetReport:
 			options?.includeCompletionReport && resolvedGoal?.status === "complete"
@@ -46,7 +50,7 @@ export function buildGoalToolResponse(
 function validateWriteParams(
 	params: GoalToolInput,
 	op: "create" | "update",
-): { objective: string; tokenBudget?: number } {
+): { objective: string; tokenBudget?: number; workstream?: string } {
 	const objective = params.objective?.trim();
 	if (!objective) {
 		throw new ToolError(`objective is required when op=${op}`);
@@ -55,7 +59,17 @@ function validateWriteParams(
 	if (tokenBudget !== undefined && (!Number.isInteger(tokenBudget) || tokenBudget <= 0)) {
 		throw new ToolError("token_budget must be a positive integer when provided");
 	}
-	return { objective, tokenBudget };
+	const workstream = params.workstream?.trim();
+	if (params.workstream !== undefined && !workstream) {
+		throw new ToolError('workstream must be a stream slug or "adhoc"');
+	}
+	if (
+		workstream !== undefined &&
+		!decodeSessionWorkstream(workstream === "adhoc" ? { kind: "adhoc" } : { kind: "workstream", id: workstream })
+	) {
+		throw new ToolError('workstream must be "adhoc" or a lowercase kebab-case stream slug');
+	}
+	return workstream === undefined ? { objective, tokenBudget } : { objective, tokenBudget, workstream };
 }
 
 export class GoalTool implements AgentTool<typeof goalSchema, GoalToolDetails> {
@@ -86,22 +100,25 @@ export class GoalTool implements AgentTool<typeof goalSchema, GoalToolDetails> {
 		let response: GoalToolResponse;
 		if (params.op === "create") {
 			const created = await runtime.createGoal(validateWriteParams(params, "create"));
-			response = buildGoalToolResponse(created.goal);
+			response = buildGoalToolResponse(created.goal, { workstream: runtime.getWorkstreamReference() });
 		} else if (params.op === "update") {
 			const updated = await runtime.replaceGoal(validateWriteParams(params, "update"));
-			response = buildGoalToolResponse(updated.goal);
+			response = buildGoalToolResponse(updated.goal, { workstream: runtime.getWorkstreamReference() });
 		} else if (params.op === "get") {
 			const state = this.#session.getGoalModeState?.();
-			response = buildGoalToolResponse(state?.goal ?? null);
+			response = buildGoalToolResponse(state?.goal ?? null, { workstream: runtime.getWorkstreamReference() });
 		} else if (params.op === "resume") {
 			const resumed = await runtime.resumeGoal();
-			response = buildGoalToolResponse(resumed.goal);
+			response = buildGoalToolResponse(resumed.goal, { workstream: runtime.getWorkstreamReference() });
 		} else if (params.op === "drop") {
 			const dropped = await runtime.dropGoal();
-			response = buildGoalToolResponse(dropped ?? null);
+			response = buildGoalToolResponse(dropped ?? null, { workstream: runtime.getWorkstreamReference() });
 		} else {
 			const completed = await runtime.completeGoalFromTool();
-			response = buildGoalToolResponse(completed, { includeCompletionReport: true });
+			response = buildGoalToolResponse(completed, {
+				includeCompletionReport: true,
+				workstream: runtime.getWorkstreamReference(),
+			});
 		}
 		let text: string;
 		if (response.goal) {
@@ -111,6 +128,12 @@ export class GoalTool implements AgentTool<typeof goalSchema, GoalToolDetails> {
 			}
 			if (response.remainingTokens !== null) {
 				text += `\nRemaining tokens: ${response.remainingTokens}`;
+			}
+			if (response.workstream) {
+				text +=
+					response.workstream.kind === "adhoc"
+						? "\nWorkstream: adhoc"
+						: `\nWorkstream: ${response.workstream.id} · ${response.workstream.charterPath}`;
 			}
 			if (response.completionBudgetReport) {
 				text += `\n\n${response.completionBudgetReport}`;
@@ -123,6 +146,7 @@ export class GoalTool implements AgentTool<typeof goalSchema, GoalToolDetails> {
 			details: {
 				op: params.op,
 				goal: response.goal,
+				workstream: response.workstream,
 				remainingTokens: response.remainingTokens,
 				completionBudgetReport: response.completionBudgetReport,
 			},

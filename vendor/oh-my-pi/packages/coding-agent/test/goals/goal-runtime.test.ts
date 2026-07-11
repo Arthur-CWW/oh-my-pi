@@ -8,6 +8,7 @@ import {
 	renderTrustedObjective,
 } from "@oh-my-pi/pi-coding-agent/goals/runtime";
 import type { Goal, GoalModeState, GoalRuntimeEvent, GoalTokenUsage } from "@oh-my-pi/pi-coding-agent/goals/state";
+import type { SessionWorkstream } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 
 function createUsage(overrides: Partial<GoalTokenUsage> = {}): GoalTokenUsage {
 	return {
@@ -52,10 +53,13 @@ function cloneEvent(event: GoalRuntimeEvent): GoalRuntimeEvent {
 	return { ...event };
 }
 
-function createHarness(initial: { state?: GoalModeState; usage?: GoalTokenUsage; now?: number } = {}) {
+function createHarness(
+	initial: { state?: GoalModeState; usage?: GoalTokenUsage; now?: number; workstream?: SessionWorkstream } = {},
+) {
 	let state = cloneState(initial.state);
 	let usage = createUsage(initial.usage);
 	let now = initial.now ?? 0;
+	let workstream = initial.workstream ? { ...initial.workstream } : undefined;
 	const events: GoalRuntimeEvent[] = [];
 	const persists: Array<{ mode: "goal" | "goal_paused" | "none"; state?: GoalModeState }> = [];
 	const hiddenMessages: Array<{ customType: string; content: string; deliverAs?: "steer" | "followUp" | "nextTurn" }> =
@@ -64,6 +68,12 @@ function createHarness(initial: { state?: GoalModeState; usage?: GoalTokenUsage;
 		getState: () => cloneState(state),
 		setState: next => {
 			state = cloneState(next);
+		},
+		getWorkstream: () => (workstream ? { ...workstream } : undefined),
+		setWorkstream: async next => {
+			const changed = JSON.stringify(workstream) !== JSON.stringify(next);
+			workstream = { ...next };
+			return changed;
 		},
 		getCurrentUsage: () => createUsage(usage),
 		emit: async event => {
@@ -80,6 +90,10 @@ function createHarness(initial: { state?: GoalModeState; usage?: GoalTokenUsage;
 	return {
 		runtime: new GoalRuntime(host),
 		getState: () => cloneState(state),
+		getWorkstream: () => (workstream ? { ...workstream } : undefined),
+		setWorkstream: (next: SessionWorkstream) => {
+			workstream = { ...next };
+		},
 		setUsage: (next: Partial<GoalTokenUsage>) => {
 			usage = createUsage(next);
 		},
@@ -409,5 +423,107 @@ describe("goal runtime", () => {
 		expect(state?.enabled).toBe(false);
 		expect(state?.mode).toBe("exiting");
 		expect(state?.goal.status).toBe("complete");
+	});
+	it("keeps per-session goals distinct while linking them to the same workstream", async () => {
+		const first = createHarness();
+		const second = createHarness();
+
+		const firstState = await first.runtime.createGoal({
+			objective: "First session objective",
+			tokenBudget: 100,
+			workstream: "shared-stream",
+		});
+		const secondState = await second.runtime.createGoal({
+			objective: "Second session objective",
+			tokenBudget: 250,
+			workstream: "shared-stream",
+		});
+
+		expect(firstState.goal.id).not.toBe(secondState.goal.id);
+		expect(firstState.goal.tokenBudget).toBe(100);
+		expect(secondState.goal.tokenBudget).toBe(250);
+		expect(first.runtime.getWorkstreamReference()).toEqual({
+			kind: "workstream",
+			id: "shared-stream",
+			charterPath: "streams/shared-stream/GOAL.md",
+		});
+		expect(second.runtime.getWorkstreamReference()).toEqual(first.runtime.getWorkstreamReference());
+		expect(firstState.goal).not.toHaveProperty("workstream");
+		expect(secondState.goal).not.toHaveProperty("workstream");
+		first.setWorkstream({ kind: "adhoc" });
+		expect(first.runtime.getWorkstreamReference()).toEqual({ kind: "adhoc" });
+		expect(first.runtime.buildActivePrompt()).toContain('<workstream kind="adhoc" />');
+		expect(firstState.goal).not.toHaveProperty("workstream");
+	});
+
+	it("supports explicit adhoc and lets explicit classification beat objective inference", async () => {
+		const adhoc = await createHarness().runtime.createGoal({
+			objective: "One-off investigation",
+			workstream: "adhoc",
+		});
+		expect(adhoc.goal).not.toHaveProperty("workstream");
+
+		const explicit = await createHarness().runtime.createGoal({
+			objective: "Use streams/inferred-stream/GOAL.md as background",
+			workstream: "chosen-stream",
+		});
+		expect(explicit.goal).not.toHaveProperty("workstream");
+	});
+
+	it("infers only one exact charter reference and leaves legacy or ambiguous sessions unclassified", async () => {
+		const inferredHarness = createHarness();
+		await inferredHarness.runtime.createGoal({
+			objective: "Implement the charter at streams/single-stream/GOAL.md",
+		});
+		expect(inferredHarness.runtime.getWorkstreamReference()).toEqual({
+			kind: "workstream",
+			id: "single-stream",
+			charterPath: "streams/single-stream/GOAL.md",
+		});
+
+		const legacyHarness = createHarness();
+		await legacyHarness.runtime.createGoal({ objective: "No charter reference" });
+		expect(legacyHarness.runtime.getWorkstreamReference()).toBeUndefined();
+
+		const ambiguousHarness = createHarness();
+		await ambiguousHarness.runtime.createGoal({
+			objective: "Compare streams/first/GOAL.md with streams/second/GOAL.md",
+		});
+		expect(ambiguousHarness.runtime.getWorkstreamReference()).toBeUndefined();
+	});
+
+	it("restores the goal workstream reference from the session header on resume", async () => {
+		const harness = createHarness({
+			workstream: {
+				kind: "workstream",
+				id: "resume-stream",
+			},
+			state: {
+				enabled: false,
+				mode: "active",
+				goal: createGoal({ status: "paused", tokenBudget: 90, tokensUsed: 12 }),
+			},
+		});
+
+		const restored = await harness.runtime.onThreadResumed();
+		expect(harness.runtime.getWorkstreamReference()).toEqual({
+			kind: "workstream",
+			id: "resume-stream",
+			charterPath: "streams/resume-stream/GOAL.md",
+		});
+		expect(restored?.goal.id).toBe("goal-1");
+		expect(restored?.goal.tokenBudget).toBe(90);
+		expect(restored?.goal.tokensUsed).toBe(12);
+		const resumed = await harness.runtime.resumeGoal();
+		expect(resumed.goal).not.toHaveProperty("workstream");
+		expect(harness.persists.at(-1)?.state?.goal).not.toHaveProperty("workstream");
+	});
+	it("rejects an invalid explicit workstream without creating a goal", async () => {
+		const harness = createHarness();
+		await expect(
+			harness.runtime.createGoal({ objective: "Invalid classification", workstream: "Not A Slug" }),
+		).rejects.toThrow('workstream must be "adhoc" or a lowercase kebab-case stream slug');
+		expect(harness.getState()).toBeUndefined();
+		expect(harness.getWorkstream()).toBeUndefined();
 	});
 });

@@ -3,7 +3,7 @@ import type { UsageStatistics } from "../session/session-entries";
 export type GoalStatus = "active" | "paused" | "budget-limited" | "complete" | "dropped";
 
 export interface Goal {
-	id: string;
+	readonly id: string;
 	objective: string;
 	status: GoalStatus;
 	tokenBudget?: number;
@@ -19,10 +19,15 @@ export interface GoalModeState {
 	reason?: "completed";
 	goal: Goal;
 }
+export type GoalWorkstreamReference =
+	| { kind: "workstream"; id: string; charterPath: string }
+	| { kind: "adhoc" };
+
 
 export interface GoalToolDetails {
 	op: "create" | "update" | "get" | "complete" | "resume" | "drop";
 	goal?: Goal | null;
+	workstream?: GoalWorkstreamReference;
 	remainingTokens?: number | null;
 	completionBudgetReport?: string | null;
 }

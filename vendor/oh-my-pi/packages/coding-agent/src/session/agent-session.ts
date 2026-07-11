@@ -1691,6 +1691,8 @@ export class AgentSession {
 			setState: state => {
 				this.#goalModeState = state;
 			},
+			getWorkstream: () => this.sessionManager.getWorkstream(),
+			setWorkstream: (workstream, source) => this.sessionManager.setWorkstream(workstream, source),
 			getCurrentUsage: () => {
 				const usage = this.getSessionStats().tokens;
 				return {

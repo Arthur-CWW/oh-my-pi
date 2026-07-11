@@ -22,6 +22,7 @@ import {
 import {
 	type BranchSummaryEntry,
 	type CompactionEntry,
+	decodeSessionWorkstream,
 	CURRENT_SESSION_VERSION,
 	type CustomEntry,
 	type CustomMessageEntry,
@@ -38,6 +39,8 @@ import {
 	type SessionInitEntry,
 	type SessionMessageAttribution,
 	type SessionMessageEntry,
+	type SessionWorkstream,
+	type WorkstreamSource,
 	type SessionTreeNode,
 	type SubagentSessionMetadata,
 	type ThinkingLevelChangeEntry,
@@ -290,6 +293,7 @@ export type ReadonlySessionManager = Pick<
 	| "getSessionId"
 	| "getSessionFile"
 	| "getSessionName"
+	| "getWorkstream"
 	| "getArtifactsDir"
 	| "getArtifactManager"
 	| "allocateArtifactPath"
@@ -404,6 +408,7 @@ export class SessionManager {
 
 	#suppressBreadcrumb = false;
 	#sessionNameChangedCallbacks = new Set<() => void>();
+	#workstreamChangedCallbacks = new Set<() => void>();
 
 	private constructor(cwd: string, sessionDir: string, persist: boolean, storage: SessionStorage) {
 		this.#cwd = cwd;
@@ -650,7 +655,9 @@ export class SessionManager {
 	}
 
 	#applyEntries(header: SessionHeader, entries: SessionEntry[]): void {
-		this.#header = header;
+		const workstream = decodeSessionWorkstream(header.workstream);
+		const { workstream: _unsafeWorkstream, ...safeHeader } = header;
+		this.#header = workstream ? { ...safeHeader, workstream } : safeHeader;
 		this.#entries = entries;
 		this.#sessionId = header.id;
 		this.#sessionName = header.title;
@@ -730,6 +737,16 @@ export class SessionManager {
 				callback();
 			} catch (err) {
 				logger.warn("SessionManager: session name change hook failed", { error: String(err) });
+			}
+		}
+	}
+
+	#notifyWorkstreamListeners(): void {
+		for (const callback of [...this.#workstreamChangedCallbacks]) {
+			try {
+				callback();
+			} catch (err) {
+				logger.warn("SessionManager: workstream change hook failed", { error: String(err) });
 			}
 		}
 	}
@@ -886,6 +903,7 @@ export class SessionManager {
 			id: this.#sessionId,
 			title: this.#header.title ?? this.#sessionName,
 			titleSource: this.#header.titleSource ?? this.#titleSource,
+			workstream: decodeSessionWorkstream(this.#header.workstream),
 			timestamp,
 			cwd: this.#cwd,
 			parentSession: parentSessionId,
@@ -1175,6 +1193,38 @@ export class SessionManager {
 		return () => {
 			this.#sessionNameChangedCallbacks.delete(cb);
 		};
+	}
+
+	getWorkstream(): SessionWorkstream | undefined {
+		return decodeSessionWorkstream(this.#header.workstream);
+	}
+
+	onWorkstreamChanged(cb: () => void): () => void {
+		this.#workstreamChangedCallbacks.add(cb);
+		return () => {
+			this.#workstreamChangedCallbacks.delete(cb);
+		};
+	}
+
+	async setWorkstream(workstream: SessionWorkstream, source: WorkstreamSource = "explicit"): Promise<boolean> {
+		const normalized = decodeSessionWorkstream(workstream);
+		if (!normalized) return false;
+
+		const current = decodeSessionWorkstream(this.#header.workstream);
+		if (current && source !== "explicit") return false;
+		if (
+			current?.kind === normalized.kind &&
+			(current.kind === "adhoc" || (normalized.kind === "workstream" && current.id === normalized.id))
+		)
+			return false;
+
+		this.#header.workstream = normalized;
+		if (this.#persist && this.#sessionFile && this.#storage.existsSync(this.#sessionFile)) {
+			await this.#rewriteAtomically();
+		}
+
+		this.#notifyWorkstreamListeners();
+		return true;
 	}
 
 	/**
@@ -1580,6 +1630,7 @@ export class SessionManager {
 			timestamp,
 			cwd: this.#cwd,
 			parentSession: this.#persist ? sourceSessionFile : undefined,
+			workstream: decodeSessionWorkstream(this.#header.workstream),
 		};
 
 		const labels: LabelEntry[] = [];
@@ -1670,6 +1721,7 @@ export class SessionManager {
 		manager.#resetToNewSession({ parentSession: sourceHeader?.id }, options?.sessionFile);
 		manager.#header.title = sourceHeader?.title;
 		manager.#header.titleSource = sourceHeader?.titleSource;
+		manager.#header.workstream = decodeSessionWorkstream(sourceHeader?.workstream);
 		manager.#sessionName = manager.#header.title;
 		manager.#titleSource = manager.#header.titleSource;
 		manager.#entries = history;

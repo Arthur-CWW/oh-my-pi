@@ -5,6 +5,7 @@ Continue work on the active goal.
 <objective>
 {{objective}}
 </objective>
+{{workstreamContext}}
 
 Budget:
 - Tokens used: {{tokensUsed}}

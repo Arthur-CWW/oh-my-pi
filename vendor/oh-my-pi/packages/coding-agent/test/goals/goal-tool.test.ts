@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "bun:test";
 import { completionBudgetReport, GoalRuntime } from "@oh-my-pi/pi-coding-agent/goals/runtime";
 import type { Goal, GoalModeState, GoalTokenUsage } from "@oh-my-pi/pi-coding-agent/goals/state";
 import { GoalTool } from "@oh-my-pi/pi-coding-agent/goals/tools/goal-tool";
+import type { SessionWorkstream } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 
 function createUsage(overrides: Partial<GoalTokenUsage> = {}): GoalTokenUsage {
@@ -38,10 +39,16 @@ function createToolSession(overrides: Partial<ToolSession>): ToolSession {
 
 function createRuntimeHarness(initialState?: GoalModeState) {
 	let state = cloneState(initialState);
+	let workstream: SessionWorkstream | undefined;
 	const runtime = new GoalRuntime({
 		getState: () => cloneState(state),
 		setState: next => {
 			state = cloneState(next);
+		},
+		getWorkstream: () => workstream,
+		setWorkstream: async next => {
+			workstream = { ...next };
+			return true;
 		},
 		getCurrentUsage: () => createUsage(),
 		emit: async () => {},
@@ -77,6 +84,11 @@ describe("GoalTool", () => {
 		const runtime = {
 			createGoal: vi.fn(async () => createGoalState),
 			completeGoalFromTool: vi.fn(async () => completedGoal),
+			getWorkstreamReference: () => ({
+				kind: "workstream" as const,
+				id: "create-route",
+				charterPath: "streams/create-route/GOAL.md",
+			}),
 		};
 		const getGoalModeState = vi.fn(() => getGoalState);
 		const tool = new GoalTool(
@@ -90,13 +102,27 @@ describe("GoalTool", () => {
 			op: "create",
 			objective: "  Create route  ",
 			token_budget: 10,
+			workstream: "create-route",
 		});
-		expect(runtime.createGoal).toHaveBeenCalledWith({ objective: "Create route", tokenBudget: 10 });
+		expect(runtime.createGoal).toHaveBeenCalledWith({
+			objective: "Create route",
+			tokenBudget: 10,
+			workstream: "create-route",
+		});
 		expect(created.details).toMatchObject({
 			op: "create",
 			goal: createGoalState.goal,
+			workstream: {
+				kind: "workstream",
+				id: "create-route",
+				charterPath: "streams/create-route/GOAL.md",
+			},
 			remainingTokens: 10,
 			completionBudgetReport: null,
+		});
+		expect(created.content[0]).toMatchObject({
+			type: "text",
+			text: expect.stringContaining("Workstream: create-route · streams/create-route/GOAL.md"),
 		});
 
 		const fetched = await tool.execute("call-get", { op: "get" });
@@ -119,7 +145,7 @@ describe("GoalTool", () => {
 		});
 		expect(completed.content[0]).toEqual({
 			type: "text",
-			text: "Goal: Complete route\nStatus: complete\nTokens: 7 used / 10 budget\nRemaining tokens: 3\n\nGoal achieved. Report final budget usage to the user: tokens used: 7 of 10; time used: 3 seconds.",
+			text: "Goal: Complete route\nStatus: complete\nTokens: 7 used / 10 budget\nRemaining tokens: 3\nWorkstream: create-route · streams/create-route/GOAL.md\n\nGoal achieved. Report final budget usage to the user: tokens used: 7 of 10; time used: 3 seconds.",
 		});
 	});
 
@@ -308,6 +334,25 @@ describe("GoalTool", () => {
 		await expect(tool.execute("call-neg", { op: "create", objective: "Ship it", token_budget: -5 })).rejects.toThrow(
 			"token_budget must be a positive integer when provided",
 		);
+		expect(harness.getState()).toBeUndefined();
+	});
+
+	it("rejects an invalid explicit workstream as a tool error before goal creation", async () => {
+		const harness = createRuntimeHarness();
+		const tool = new GoalTool(
+			createToolSession({
+				getGoalRuntime: () => harness.runtime,
+				getGoalModeState: () => harness.getState(),
+			}),
+		);
+
+		await expect(
+			tool.execute("call-invalid-workstream", {
+				op: "create",
+				objective: "Ship it",
+				workstream: "Feature X",
+			}),
+		).rejects.toBeInstanceOf(ToolError);
 		expect(harness.getState()).toBeUndefined();
 	});
 

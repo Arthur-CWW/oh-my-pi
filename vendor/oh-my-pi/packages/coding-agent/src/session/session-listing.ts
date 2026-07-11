@@ -2,6 +2,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { Message, TextContent } from "@oh-my-pi/pi-ai";
 import { getAgentDir as getDefaultAgentDir, logger, parseJsonlLenient, toError } from "@oh-my-pi/pi-utils";
+import { decodeSessionWorkstream, type SessionWorkstream } from "./session-entries";
 import { computeDefaultSessionDir } from "./session-paths";
 import { FileSessionStorage, type SessionStorage } from "./session-storage";
 
@@ -27,6 +28,7 @@ export interface SessionInfo {
 	/** Working directory where the session was started. Empty string for old sessions. */
 	cwd: string;
 	title?: string;
+	workstream?: SessionWorkstream;
 	/** Path to the parent session (if this session was forked). */
 	parentSessionPath?: string;
 	created: Date;
@@ -285,6 +287,7 @@ interface SessionListHeader {
 	cwd?: string;
 	title?: string;
 	parentSession?: string;
+	workstream?: SessionWorkstream;
 	timestamp?: string;
 }
 
@@ -311,6 +314,7 @@ function sessionListHeaderFromRecord(
 		id: parsedHeader.id,
 		cwd: typeof parsedHeader.cwd === "string" ? parsedHeader.cwd : undefined,
 		title: typeof parsedHeader.title === "string" ? parsedHeader.title : leadingTitle?.title,
+		workstream: decodeSessionWorkstream(parsedHeader.workstream),
 		parentSession: typeof parsedHeader.parentSession === "string" ? parsedHeader.parentSession : undefined,
 		timestamp: typeof parsedHeader.timestamp === "string" ? parsedHeader.timestamp : undefined,
 	};
@@ -414,6 +418,7 @@ async function scanSessionFile(
 				id: header.id,
 				cwd: header.cwd ?? "",
 				title: header.title ?? shortSummary,
+				workstream: header.workstream,
 				parentSessionPath: header.parentSession,
 				created: new Date(header.timestamp ?? ""),
 				modified: mtime,

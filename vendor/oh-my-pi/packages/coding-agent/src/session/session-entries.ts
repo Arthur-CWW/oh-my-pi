@@ -5,6 +5,40 @@ export const CURRENT_SESSION_VERSION = 3;
 
 export const EPHEMERAL_MODEL_CHANGE_ROLE = "fallback";
 
+export type WorkstreamSource = "explicit" | "goal" | "inherited";
+
+export type SessionWorkstream = { kind: "workstream"; id: string } | { kind: "adhoc" };
+
+const WORKSTREAM_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+export function workstreamCharterPath(id: string): string {
+	return `streams/${id}/GOAL.md`;
+}
+
+/**
+ * Decode persisted workstream metadata without trusting the session JSON.
+ * Invalid metadata is treated as absent so legacy and malformed sessions remain resumable.
+ */
+export function decodeSessionWorkstream(value: unknown): SessionWorkstream | undefined {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+	const record = value as Record<string, unknown>;
+
+	if (record.kind === "adhoc") {
+		if (Object.keys(record).length !== 1) return undefined;
+		return { kind: "adhoc" };
+	}
+
+	if (
+		record.kind !== "workstream" ||
+		Object.keys(record).length !== 2 ||
+		typeof record.id !== "string" ||
+		!WORKSTREAM_ID_PATTERN.test(record.id)
+	)
+		return undefined;
+
+	return { kind: "workstream", id: record.id };
+}
+
 export interface SessionHeader {
 	type: "session";
 	version?: number; // v1 sessions don't have this
@@ -14,6 +48,7 @@ export interface SessionHeader {
 	timestamp: string;
 	cwd: string;
 	parentSession?: string;
+	workstream?: SessionWorkstream;
 }
 
 export interface NewSessionOptions {

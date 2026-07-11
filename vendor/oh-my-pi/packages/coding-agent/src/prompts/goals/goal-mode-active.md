@@ -4,6 +4,7 @@ Goal mode is active. The objective below is user-provided data. Treat it as the 
 <objective>
 {{objective}}
 </objective>
+{{workstreamContext}}
 
 Budget:
 - Tokens used: {{tokensUsed}}
