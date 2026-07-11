@@ -78,9 +78,39 @@ export interface SessionMessageEntry extends SessionEntryBase, SessionMessageAtt
 	message: AgentMessage;
 }
 
+export interface SessionCommandMetadataV1 {
+	readonly schemaVersion: 1;
+	readonly commandId: string;
+	readonly correlationId: string;
+	readonly causationId?: string;
+	readonly expectedSessionRevision: number;
+}
+
+export interface SetModelRequest {
+	readonly kind: "setModel";
+	readonly model: string;
+	readonly role: string;
+}
+
+export interface SetThinkingLevelRequest {
+	readonly kind: "setThinkingLevel";
+	readonly thinkingLevel: string | null;
+}
+
+export type SetModelSessionCommand = SessionCommandMetadataV1 & SetModelRequest;
+export type SetThinkingSessionCommand = SessionCommandMetadataV1 & SetThinkingLevelRequest;
+export type SessionStateCommand = SetModelSessionCommand | SetThinkingSessionCommand;
+
+export interface SessionCommandRecord<Request extends SetModelRequest | SetThinkingLevelRequest>
+	extends SessionCommandMetadataV1 {
+	readonly request: Request;
+	readonly committedSessionRevision: number;
+}
+
 export interface ThinkingLevelChangeEntry extends SessionEntryBase {
 	type: "thinking_level_change";
 	thinkingLevel?: string | null;
+	command?: SessionCommandRecord<SetThinkingLevelRequest>;
 }
 
 export interface ModelChangeEntry extends SessionEntryBase {
@@ -89,6 +119,58 @@ export interface ModelChangeEntry extends SessionEntryBase {
 	model: string;
 	/** Role: "default", "smol", "slow", etc. Undefined treated as "default" */
 	role?: string;
+	command?: SessionCommandRecord<SetModelRequest>;
+}
+
+export type SessionCommandEntry = ModelChangeEntry | ThinkingLevelChangeEntry;
+
+export interface SessionCommandReceipt {
+	readonly entry: SessionCommandEntry;
+	readonly sessionRevision: number;
+	readonly replayed: boolean;
+}
+
+/** Decode command provenance at the persisted-session trust boundary. */
+export function decodeSessionCommandEntry(value: unknown): SessionCommandEntry | undefined {
+	if (typeof value !== "object" || value === null) return undefined;
+	const entry = value as Record<string, unknown>;
+	const commandValue = entry.command;
+	if (typeof commandValue !== "object" || commandValue === null) return undefined;
+	const command = commandValue as Record<string, unknown>;
+	const requestValue = command.request;
+	if (typeof requestValue !== "object" || requestValue === null) return undefined;
+	const request = requestValue as Record<string, unknown>;
+	if (
+		command.schemaVersion !== 1 ||
+		typeof command.commandId !== "string" ||
+		typeof command.correlationId !== "string" ||
+		(command.causationId !== undefined && typeof command.causationId !== "string") ||
+		!Number.isSafeInteger(command.expectedSessionRevision) ||
+		(command.expectedSessionRevision as number) < 0 ||
+		!Number.isSafeInteger(command.committedSessionRevision) ||
+		(command.committedSessionRevision as number) < 1
+	) {
+		return undefined;
+	}
+	if (
+		entry.type === "model_change" &&
+		request.kind === "setModel" &&
+		typeof request.model === "string" &&
+		typeof request.role === "string" &&
+		entry.model === request.model &&
+		entry.role === request.role
+	) {
+		return value as ModelChangeEntry;
+	}
+	if (
+		entry.type === "thinking_level_change" &&
+		request.kind === "setThinkingLevel" &&
+		(request.thinkingLevel === null || typeof request.thinkingLevel === "string") &&
+		entry.thinkingLevel === request.thinkingLevel
+	) {
+		return value as ThinkingLevelChangeEntry;
+	}
+	return undefined;
 }
 
 export interface ServiceTierChangeEntry extends SessionEntryBase {

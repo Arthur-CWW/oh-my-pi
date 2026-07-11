@@ -22,6 +22,7 @@ import {
 import {
 	type BranchSummaryEntry,
 	type CompactionEntry,
+	decodeSessionCommandEntry,
 	decodeSessionWorkstream,
 	CURRENT_SESSION_VERSION,
 	type CustomEntry,
@@ -34,11 +35,14 @@ import {
 	type ModelChangeEntry,
 	type NewSessionOptions,
 	type ServiceTierChangeEntry,
+	type SessionCommandEntry,
+	type SessionCommandReceipt,
 	type SessionEntry,
 	type SessionHeader,
 	type SessionInitEntry,
 	type SessionMessageAttribution,
 	type SessionMessageEntry,
+	type SessionStateCommand,
 	type SessionWorkstream,
 	type WorkstreamSource,
 	type SessionTreeNode,
@@ -293,6 +297,8 @@ export type ReadonlySessionManager = Pick<
 	| "getSessionId"
 	| "getSessionFile"
 	| "getSessionName"
+	| "getSessionRevision"
+	| "getSessionCommandReceipt"
 	| "getWorkstream"
 	| "getArtifactsDir"
 	| "getArtifactManager"
@@ -354,6 +360,35 @@ export interface HistoricalHotswapAudit {
  * through the storage layer's atomic temp-write+rename so a crash mid-rewrite
  * cannot truncate the prior good file.
  */
+export class SessionCommandConflictError extends Error {
+	readonly commandId: string;
+
+	constructor(commandId: string) {
+		super(`Session command ID was reused with different content: ${commandId}`);
+		this.name = "SessionCommandConflictError";
+		this.commandId = commandId;
+	}
+}
+
+export class SessionRevisionConflictError extends Error {
+	readonly expectedSessionRevision: number;
+	readonly actualSessionRevision: number;
+
+	constructor(expectedSessionRevision: number, actualSessionRevision: number) {
+		super(`Session revision conflict: expected ${expectedSessionRevision}, actual ${actualSessionRevision}`);
+		this.name = "SessionRevisionConflictError";
+		this.expectedSessionRevision = expectedSessionRevision;
+		this.actualSessionRevision = actualSessionRevision;
+	}
+}
+
+export class SessionStateCommandInFlightError extends Error {
+	constructor() {
+		super("A session state command is awaiting durable persistence");
+		this.name = "SessionStateCommandInFlightError";
+	}
+}
+
 export class SessionManager {
 	#cwd: string;
 	#sessionDir: string;
@@ -368,6 +403,10 @@ export class SessionManager {
 	#header!: SessionHeader;
 	#entries: SessionEntry[] = [];
 	#index = new SessionEntryIndex();
+	#sessionCommandEntries = new Map<string, SessionCommandEntry>();
+	#stateCommandTail: Promise<void> = Promise.resolve();
+	#stateCommandPending = false;
+	#stateCommandPersistenceInFlight = false;
 
 	#continueProvenance: string | undefined;
 
@@ -607,6 +646,47 @@ export class SessionManager {
 		}
 	}
 
+	async #persistReservedStateCommandEntry(entry: SessionCommandEntry): Promise<void> {
+		this.#assertOwnership();
+		if (!this.#persist || !this.#sessionFile) return;
+		if (this.#diskFailure) throw this.#diskFailure;
+
+		if (!this.#fileIsCurrent || this.#rewriteRequired) {
+			const sessionFile = this.#sessionFile;
+			this.#forceFileCreation = true;
+			this.#rewriteSynchronously();
+			if (this.#diskFailure) throw this.#diskFailure;
+			try {
+				await this.#storage.readText(sessionFile);
+			} catch (err) {
+				throw this.#noteDiskFailure(err);
+			}
+			return;
+		}
+
+		try {
+			await this.#appendWriter().append(this.#lineFor(entry));
+		} catch (err) {
+			throw this.#noteDiskFailure(err);
+		}
+	}
+
+	#reserveStateCommandEntry(entry: SessionCommandEntry): void {
+		this.#entries.push(entry);
+		this.#index.insert(entry);
+	}
+
+	#finishReservedStateCommandEntry(entry: SessionCommandEntry): void {
+		if (entry.command) this.#sessionCommandEntries.set(entry.command.commandId, entry);
+		this.#notifyEntryListeners(entry);
+	}
+
+	#rollbackReservedStateCommandEntry(entry: SessionCommandEntry): void {
+		if (this.#entries[this.#entries.length - 1] !== entry) return;
+		this.#entries.pop();
+		this.#index.rebuild(this.#entries);
+	}
+
 	#resetToNewSession(options?: NewSessionOptions, forcedSessionFile?: string): string | undefined {
 		this.#diskTail = Promise.resolve();
 		this.#clearDiskError();
@@ -626,6 +706,10 @@ export class SessionManager {
 
 		this.#entries = [];
 		this.#index.clear();
+		this.#sessionCommandEntries.clear();
+		this.#stateCommandTail = Promise.resolve();
+		this.#stateCommandPending = false;
+		this.#stateCommandPersistenceInFlight = false;
 		this.#fileIsCurrent = false;
 		this.#rewriteRequired = false;
 		this.#forceFileCreation = false;
@@ -651,6 +735,16 @@ export class SessionManager {
 		return this.#sessionFile;
 	}
 
+	#rebuildSessionCommandIndex(): void {
+		this.#sessionCommandEntries.clear();
+		for (const rawEntry of this.#entries) {
+			const entry = decodeSessionCommandEntry(rawEntry);
+			if (entry?.command && !this.#sessionCommandEntries.has(entry.command.commandId)) {
+				this.#sessionCommandEntries.set(entry.command.commandId, entry);
+			}
+		}
+	}
+
 	#applyEntries(header: SessionHeader, entries: SessionEntry[]): void {
 		const workstream = decodeSessionWorkstream(header.workstream);
 		const { workstream: _unsafeWorkstream, ...safeHeader } = header;
@@ -660,6 +754,7 @@ export class SessionManager {
 		this.#sessionName = header.title;
 		this.#titleSource = header.titleSource;
 		this.#index.rebuild(entries);
+		this.#rebuildSessionCommandIndex();
 	}
 
 	#freshEntryFields(): { id: string; parentId: string | null; timestamp: string } {
@@ -681,9 +776,12 @@ export class SessionManager {
 	}
 
 	#recordEntry(entry: SessionEntry): void {
+		if (this.#stateCommandPersistenceInFlight) throw new SessionStateCommandInFlightError();
 		this.#entries.push(entry);
 		this.#index.insert(entry);
 		this.#appendToSessionFile(entry);
+		const commandEntry = decodeSessionCommandEntry(entry);
+		if (commandEntry?.command) this.#sessionCommandEntries.set(commandEntry.command.commandId, commandEntry);
 		this.#notifyEntryListeners(entry);
 	}
 
@@ -1187,6 +1285,20 @@ export class SessionManager {
 		return this.#sessionName;
 	}
 
+	getSessionRevision(): number {
+		return this.#entries.length;
+	}
+
+	getSessionCommandReceipt(commandId: string): SessionCommandReceipt | undefined {
+		const entry = this.#sessionCommandEntries.get(commandId);
+		if (!entry?.command) return undefined;
+		return {
+			entry,
+			sessionRevision: entry.command.committedSessionRevision,
+			replayed: false,
+		};
+	}
+
 	subscribeEntries(listener: (entry: SessionEntry) => void): () => void {
 		this.#entryListeners.add(listener);
 		return () => {
@@ -1336,6 +1448,95 @@ export class SessionManager {
 		const entry: ModelChangeEntry = { type: "model_change", ...this.#freshEntryFields(), model, role };
 		this.#recordEntry(entry);
 		return entry.id;
+	}
+
+	commitStateCommand(command: SessionStateCommand): Promise<SessionCommandReceipt> {
+		const commit = this.#stateCommandPending
+			? this.#stateCommandTail.then(() => this.#commitStateCommandNow(command))
+			: this.#commitStateCommandNow(command);
+		this.#stateCommandPending = true;
+		const tail = commit.then(
+			() => undefined,
+			() => undefined,
+		);
+		this.#stateCommandTail = tail;
+		void tail.then(() => {
+			if (this.#stateCommandTail === tail) this.#stateCommandPending = false;
+		});
+		return commit;
+	}
+
+	async #commitStateCommandNow(command: SessionStateCommand): Promise<SessionCommandReceipt> {
+		const existing = this.#sessionCommandEntries.get(command.commandId);
+		const normalizedRequest =
+			command.kind === "setModel"
+				? { kind: "setModel" as const, model: command.model, role: command.role ?? "default" }
+				: {
+						kind: "setThinkingLevel" as const,
+						thinkingLevel: command.thinkingLevel ?? null,
+					};
+		if (existing?.command) {
+			const prior = existing.command;
+			const sameMetadata =
+				prior.schemaVersion === command.schemaVersion &&
+				prior.commandId === command.commandId &&
+				prior.correlationId === command.correlationId &&
+				prior.causationId === command.causationId &&
+				prior.expectedSessionRevision === command.expectedSessionRevision;
+			const sameRequest =
+				prior.request.kind === normalizedRequest.kind &&
+				(prior.request.kind === "setModel" && normalizedRequest.kind === "setModel"
+					? prior.request.model === normalizedRequest.model && prior.request.role === normalizedRequest.role
+					: prior.request.kind === "setThinkingLevel" &&
+						normalizedRequest.kind === "setThinkingLevel" &&
+						prior.request.thinkingLevel === normalizedRequest.thinkingLevel);
+			if (!sameMetadata || !sameRequest) throw new SessionCommandConflictError(command.commandId);
+			return {
+				entry: existing,
+				sessionRevision: prior.committedSessionRevision,
+				replayed: true,
+			};
+		}
+		const currentRevision = this.getSessionRevision();
+		if (command.expectedSessionRevision !== currentRevision) {
+			throw new SessionRevisionConflictError(command.expectedSessionRevision, currentRevision);
+		}
+		const committedSessionRevision = currentRevision + 1;
+		const common = {
+			schemaVersion: 1 as const,
+			commandId: command.commandId,
+			correlationId: command.correlationId,
+			...(command.causationId === undefined ? {} : { causationId: command.causationId }),
+			expectedSessionRevision: command.expectedSessionRevision,
+			committedSessionRevision,
+		};
+		const entry: SessionCommandEntry =
+			normalizedRequest.kind === "setModel"
+				? {
+						type: "model_change",
+						...this.#freshEntryFields(),
+						model: normalizedRequest.model,
+						role: normalizedRequest.role,
+						command: { ...common, request: normalizedRequest },
+					}
+				: {
+						type: "thinking_level_change",
+						...this.#freshEntryFields(),
+						thinkingLevel: normalizedRequest.thinkingLevel,
+						command: { ...common, request: normalizedRequest },
+					};
+		this.#stateCommandPersistenceInFlight = true;
+		this.#reserveStateCommandEntry(entry);
+		try {
+			await this.#persistReservedStateCommandEntry(entry);
+		} catch (err) {
+			this.#rollbackReservedStateCommandEntry(entry);
+			throw err;
+		} finally {
+			this.#stateCommandPersistenceInFlight = false;
+		}
+		this.#finishReservedStateCommandEntry(entry);
+		return { entry, sessionRevision: committedSessionRevision, replayed: false };
 	}
 
 	appendSessionInit(init: {
@@ -1666,6 +1867,7 @@ export class SessionManager {
 		this.#sessionName = header.title;
 		this.#titleSource = header.titleSource;
 		this.#index.rebuild(this.#entries);
+		this.#rebuildSessionCommandIndex();
 		this.#artifactManager = null;
 		this.#artifactManagerSessionFile = null;
 		this.#forceFileCreation = this.#persist;
@@ -1738,6 +1940,7 @@ export class SessionManager {
 		manager.#titleSource = manager.#header.titleSource;
 		manager.#entries = history;
 		manager.#index.rebuild(history);
+		manager.#rebuildSessionCommandIndex();
 		manager.sanitizeLoadedOpenAIResponsesReplayMetadata();
 		manager.#forceFileCreation = true;
 		await manager.#rewriteAtomically();
