@@ -37,7 +37,8 @@
     {
       "id": "primer-graph-creation-engine-v0",
       "brief": "../../../streams/primer/wrapped-commentary-reader/experiments/graph-creation-engine/prototype-brief.md",
-      "status": "planned"
+      "live_url": "http://meltdown.localhost:1355/#/graph",
+      "status": "complete"
     }
   ]
 }

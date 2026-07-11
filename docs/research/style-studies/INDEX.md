@@ -29,6 +29,7 @@ A source is inspiration, not a template. Do not copy motifs without understandin
 | Primer graph audit | [`experiments/graph-creation-engine/current-graph-audit.md`](../../../streams/primer/wrapped-commentary-reader/experiments/graph-creation-engine/current-graph-audit.md) | Why the current global force graph is semantically and perceptually misleading. |
 | Graph data contract | [`experiments/graph-creation-engine/graph-data-contract.md`](../../../streams/primer/wrapped-commentary-reader/experiments/graph-creation-engine/graph-data-contract.md) | Typed records, assertions, provenance, and missing relation semantics. |
 | Creation-engine prototype brief | [`experiments/graph-creation-engine/prototype-brief.md`](../../../streams/primer/wrapped-commentary-reader/experiments/graph-creation-engine/prototype-brief.md) | Passage Lens, Recurrence Trail, Argument Spine, Source Genealogy Desk, Evidence Neighborhood. |
+| Primer creation engine v0 | [`#/graph`](http://meltdown.localhost:1355/#/graph) | Five bounded projections over real reader IR: Passage Lens, Recurrence Trail, Authored Spine, Source Genealogy, and Evidence Neighborhood, with deterministic manifests and explicit provenance gaps. |
 
 ## Provisional vocabulary to test
 
