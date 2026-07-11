@@ -125,6 +125,18 @@ export const RunCompactionCommandSchema = Schema.Struct({
 	customInstructions: Schema.optional(Schema.String),
 });
 
+export const CancelCompactionCommandSchema = Schema.Struct({
+	schemaVersion: Schema.Literal(RUNNER_SCHEMA_VERSION),
+	kind: Schema.Literal("cancelCompaction"),
+	commandId: Schema.String,
+	correlationId: Schema.String,
+	causationId: Schema.optional(Schema.String),
+	viewId: Schema.String,
+	controllerEpoch: ControllerEpochSchema,
+	targetCommandId: Schema.String,
+	targetOperationGeneration: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(1))),
+});
+
 export type SubmitInputCommand = typeof SubmitInputCommandSchema.Type;
 export type EditQueuedInputCommand = typeof EditQueuedInputCommandSchema.Type;
 export type CancelQueuedInputCommand = typeof CancelQueuedInputCommandSchema.Type;
@@ -132,6 +144,7 @@ export type SetThinkingLevelCommand = typeof SetThinkingLevelCommandSchema.Type;
 export type SetModelCommand = typeof SetModelCommandSchema.Type;
 export type InterruptPromptCommand = typeof InterruptPromptCommandSchema.Type;
 export type RunCompactionCommand = typeof RunCompactionCommandSchema.Type;
+export type CancelCompactionCommand = typeof CancelCompactionCommandSchema.Type;
 export type RunnerCapability = "observer" | "controller";
 export type RunnerStatus = "running" | "stopping" | "stopped";
 
@@ -199,6 +212,7 @@ export interface RunCompactionReceipt {
 	readonly correlationId: string;
 	readonly causationId?: string;
 	readonly startedSessionRevision: number;
+	readonly operationGeneration: number;
 	readonly completedSessionRevision: number;
 	readonly replayed: boolean;
 	readonly result: {
@@ -207,6 +221,15 @@ export interface RunCompactionReceipt {
 		readonly firstKeptEntryId: string;
 		readonly tokensBefore: number;
 	};
+}
+
+export interface CancelCompactionReceipt {
+	readonly commandId: string;
+	readonly correlationId: string;
+	readonly causationId?: string;
+	readonly targetCommandId: string;
+	readonly targetOperationGeneration: number;
+	readonly cancellationRequested: true;
 }
 
 export interface RunnerViewSnapshot {
@@ -231,6 +254,13 @@ export interface SessionRunnerSnapshot {
 	readonly transcript: RunnerTranscriptSnapshot;
 	readonly views: ReadonlyArray<RunnerViewSnapshot>;
 	readonly controller: { readonly viewId: string; readonly epoch: number } | undefined;
+	readonly activeCompaction:
+		| {
+				readonly commandId: string;
+				readonly operationGeneration: number;
+				readonly startedSessionRevision: number;
+		  }
+		| undefined;
 	readonly status: RunnerStatus;
 	readonly pendingOperations: number;
 }
@@ -246,6 +276,7 @@ export type RunnerEventKind =
 	| "thinkingLevelChanged"
 	| "modelChanged"
 	| "promptInterrupted"
+	| "compactionCancelRequested"
 	| "compactionCompleted"
 	| "transcriptEntryAppended";
 
@@ -268,6 +299,8 @@ export interface RunnerEvent {
 	readonly transcriptLeafId: string | null | undefined;
 	readonly transcriptPosition: number | undefined;
 	readonly targetGeneration: number | undefined;
+	readonly targetCommandId: string | undefined;
+	readonly targetOperationGeneration: number | undefined;
 }
 
 export type RunnerEventDelivery =
@@ -330,6 +363,16 @@ export const decodeInterruptPromptCommand = (input: unknown): InterruptPromptCom
 	} catch (error) {
 		throw new InvalidRunnerCommandError({
 			issue: error instanceof Error ? error.message : "Invalid interrupt-prompt command",
+		});
+	}
+};
+
+export const decodeCancelCompactionCommand = (input: unknown): CancelCompactionCommand => {
+	try {
+		return Schema.decodeUnknownSync(CancelCompactionCommandSchema)(input);
+	} catch (error) {
+		throw new InvalidRunnerCommandError({
+			issue: error instanceof Error ? error.message : "Invalid cancel-compaction command",
 		});
 	}
 };

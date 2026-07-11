@@ -5,6 +5,8 @@ import type { ConfiguredThinkingLevel } from "../thinking";
 import type { AgentSessionEvent } from "../session/agent-session";
 import type {
 	CancelQueuedInputCommand,
+	CancelCompactionCommand,
+	CancelCompactionReceipt,
 	EditQueuedInputCommand,
 	InterruptPromptCommand,
 	InterruptPromptReceipt,
@@ -73,6 +75,9 @@ export interface TerminalSessionView {
 	readonly compact: (
 		command: RunCompactionCommand,
 	) => Effect.Effect<RunCompactionReceipt, RunnerFailure, Scope.Scope>;
+	readonly cancelCompaction: (
+		command: CancelCompactionCommand,
+	) => Effect.Effect<CancelCompactionReceipt, RunnerFailure, Scope.Scope>;
 	readonly interruptPrompt: (
 		command: InterruptPromptCommand,
 	) => Effect.Effect<InterruptPromptReceipt, RunnerFailure, Scope.Scope>;

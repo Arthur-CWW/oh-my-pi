@@ -70,6 +70,16 @@ export class RunnerCompactionUnavailableError extends Schema.TaggedErrorClass<Ru
 	{ reason: Schema.Literals(["streaming", "compacting", "retrying", "handoff", "capacity"]) },
 ) {}
 
+export class RunnerCompactionTargetError extends Schema.TaggedErrorClass<RunnerCompactionTargetError>()(
+	"RunnerCompactionTargetError",
+	{
+		targetCommandId: Schema.String,
+		targetOperationGeneration: NonNegativeInt,
+		activeCommandId: Schema.optional(Schema.String),
+		activeOperationGeneration: Schema.optional(NonNegativeInt),
+	},
+) {}
+
 export class SessionRunnerStoppedError extends Schema.TaggedErrorClass<SessionRunnerStoppedError>()(
 	"SessionRunnerStoppedError",
 	{},

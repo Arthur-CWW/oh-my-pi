@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Effect, Exit, Scope } from "effect";
 import type {
 	RunnerCommandReceipt,
+	CancelCompactionReceipt,
 	InterruptPromptReceipt,
 	RunCompactionReceipt,
 	RunnerImageContent,
@@ -10,12 +11,14 @@ import type {
 } from "../runner/protocol";
 import {
 	decodeCancelQueuedInputCommand,
+	decodeCancelCompactionCommand,
 	decodeEditQueuedInputCommand,
 	decodeInterruptPromptCommand,
 	decodeRunCompactionCommand,
 	decodeSubmitInputCommand,
 	decodeSetModelCommand,
 	decodeSetThinkingLevelCommand,
+	RunnerCompactionTargetError,
 	RUNNER_SCHEMA_VERSION,
 } from "../runner/protocol";
 import type { AgentSessionEvent } from "../session/agent-session";
@@ -79,6 +82,12 @@ export interface TerminalCompactionIntent {
 	readonly causationId?: string;
 }
 
+export interface TerminalCancelCompactionIntent {
+	readonly commandId?: string;
+	readonly correlationId?: string;
+	readonly causationId?: string;
+}
+
 export interface TerminalSessionControllerOptions {
 	readonly viewId?: string;
 	readonly commandId?: string;
@@ -97,6 +106,9 @@ export interface TerminalSessionController {
 	readonly setModel: (intent: TerminalSetModelIntent) => Promise<SetModelReceipt>;
 	readonly setThinkingLevel: (intent: TerminalSetThinkingLevelIntent) => Promise<SetThinkingLevelReceipt>;
 	readonly compact: (intent?: TerminalCompactionIntent) => Promise<RunCompactionReceipt>;
+	readonly cancelCompaction: (
+		intent?: TerminalCancelCompactionIntent,
+	) => Promise<CancelCompactionReceipt>;
 	readonly interruptPrompt: (intent?: TerminalInterruptPromptIntent) => Promise<InterruptPromptReceipt>;
 	readonly close: () => Promise<void>;
 }
@@ -330,6 +342,33 @@ export async function createTerminalSessionController(
 					await refresh();
 					throw error;
 				}
+			},
+			cancelCompaction: async (intent = {}) => {
+				const current = await refresh();
+				const activeCompaction = current.runner.activeCompaction;
+				if (activeCompaction === undefined) {
+					throw new RunnerCompactionTargetError({
+						targetCommandId: "",
+						targetOperationGeneration: 0,
+					});
+				}
+				const ids = metadata(intent);
+				const receipt = await run(
+					view!.cancelCompaction(
+						decodeCancelCompactionCommand({
+							schemaVersion: RUNNER_SCHEMA_VERSION,
+							kind: "cancelCompaction",
+							...ids,
+							...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
+							viewId,
+							controllerEpoch: view!.epoch,
+							targetCommandId: activeCompaction.commandId,
+							targetOperationGeneration: activeCompaction.operationGeneration,
+						}),
+					),
+				);
+				await refresh();
+				return receipt;
 			},
 			interruptPrompt: async (intent = {}) => {
 				try {

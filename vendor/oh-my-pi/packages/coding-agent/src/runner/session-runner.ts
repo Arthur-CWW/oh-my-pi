@@ -24,6 +24,7 @@ import {
 	RunnerRevisionConflictError,
 	RunnerCompactionCommandConflictError,
 	RunnerCompactionUnavailableError,
+	RunnerCompactionTargetError,
 	RunnerItemRevisionConflictError,
 	RunnerPromptOperationConflictError,
 	RunnerViewAlreadyAttachedError,
@@ -36,6 +37,7 @@ import {
 import {
 	assertRunnerRevision,
 	decodeCancelQueuedInputCommand,
+	decodeCancelCompactionCommand,
 	decodeEditQueuedInputCommand,
 	decodeSubmitInputCommand,
 	decodeRunCompactionCommand,
@@ -44,6 +46,8 @@ import {
 	decodeSetThinkingLevelCommand,
 	RUNNER_SCHEMA_VERSION,
 	type AcquireRunnerControllerCommand,
+	type CancelCompactionCommand,
+	type CancelCompactionReceipt,
 	type AttachRunnerViewCommand,
 	type DetachRunnerViewCommand,
 	type ReleaseRunnerControllerCommand,
@@ -78,6 +82,7 @@ export type RunnerFailure =
 	| RunnerControllerConflictError
 	| RunnerCompactionCommandConflictError
 	| RunnerCompactionUnavailableError
+	| RunnerCompactionTargetError
 	| StaleRunnerControllerLeaseError
 	| RunnerViewAlreadyAttachedError
 	| RunnerViewNotAttachedError
@@ -129,6 +134,9 @@ export interface ControllerSessionRunnerView extends RunnerViewBase {
 	readonly setModel: (input: unknown) => Effect.Effect<SetModelReceipt, RunnerFailure, Scope.Scope>;
 	readonly setThinkingLevel: (input: unknown) => Effect.Effect<SetThinkingLevelReceipt, RunnerFailure, Scope.Scope>;
 	readonly compact: (command: RunCompactionCommand) => Effect.Effect<RunCompactionReceipt, RunnerFailure, Scope.Scope>;
+	readonly cancelCompaction: (
+		command: CancelCompactionCommand,
+	) => Effect.Effect<CancelCompactionReceipt, RunnerFailure, Scope.Scope>;
 	readonly interruptPrompt: (
 		command: InterruptPromptCommand,
 	) => Effect.Effect<InterruptPromptReceipt, RunnerFailure, Scope.Scope>;
@@ -161,11 +169,13 @@ interface ActiveController {
 
 interface EventDetails {
 	readonly kind: RunnerEventKind;
-	readonly metadata: RunnerControlMetadata | InterruptPromptCommand;
+	readonly metadata: RunnerControlMetadata | InterruptPromptCommand | CancelCompactionCommand;
 	readonly controllerEpoch: number;
 	readonly viewId?: string;
 	readonly inputId?: string;
 	readonly targetGeneration?: number;
+	readonly targetCommandId?: string;
+	readonly targetOperationGeneration?: number;
 	readonly durableSequence?: number;
 	readonly transcriptEntryId?: string;
 	readonly transcriptLeafId?: string | null;
@@ -182,9 +192,11 @@ interface TerminalViewState {
 
 interface LiveCompactionRecord {
 	readonly command: RunCompactionCommand;
+	readonly operationGeneration: number;
 	readonly startedSessionRevision: number;
 	readonly deferred: Deferred.Deferred<RunCompactionReceipt, RunnerFailure>;
 	completed: boolean;
+	cancellationRequested: boolean;
 }
 
 
@@ -197,6 +209,7 @@ const asRunnerFailure = (error: unknown): RunnerFailure => {
 		error instanceof RunnerPromptOperationConflictError ||
 		error instanceof RunnerCompactionCommandConflictError ||
 		error instanceof RunnerCompactionUnavailableError ||
+		error instanceof RunnerCompactionTargetError ||
 		error instanceof StaleRunnerControllerLeaseError ||
 		error instanceof RunnerViewAlreadyAttachedError ||
 		error instanceof RunnerViewNotAttachedError ||
@@ -289,7 +302,8 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 	let runnerSequence = 0;
 	const mailboxWaiters = new Set<() => Effect.Effect<void>>();
 	const compactionCommands = new Map<string, LiveCompactionRecord>();
-	let activeCompactionCommandId: string | undefined;
+	let activeCompaction: { readonly commandId: string; readonly operationGeneration: number } | undefined;
+	let nextCompactionOperationGeneration = 1;
 
 	const materializeSnapshot = Effect.fn("Runner.materializeSnapshot")(function* (refreshQueue: boolean) {
 		if (refreshQueue) {
@@ -322,6 +336,13 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 			},
 			views: viewSnapshots,
 			controller: activeController,
+			activeCompaction:
+				activeCompaction === undefined
+					? undefined
+					: {
+							...activeCompaction,
+							startedSessionRevision: compactionCommands.get(activeCompaction.commandId)!.startedSessionRevision,
+						},
 			status,
 			pendingOperations: pending,
 		} satisfies SessionRunnerSnapshot;
@@ -391,6 +412,8 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 			transcriptLeafId: details.transcriptLeafId,
 			transcriptPosition: details.transcriptPosition,
 			targetGeneration: details.targetGeneration,
+			targetCommandId: details.targetCommandId,
+			targetOperationGeneration: details.targetOperationGeneration,
 		};
 		yield* PubSub.publish(events, event);
 		yield* publishTerminal({ kind: "runnerEvent", event });
@@ -585,6 +608,11 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 		controllerEpoch: number,
 		command: RunCompactionCommand,
 	) => Effect.Effect<RunCompactionReceipt, RunnerFailure, Scope.Scope>;
+	let cancelCompaction!: (
+		viewId: string,
+		controllerEpoch: number,
+		command: CancelCompactionCommand,
+	) => Effect.Effect<CancelCompactionReceipt, RunnerFailure, Scope.Scope>;
 	let interruptPrompt!: (
 		viewId: string,
 		controllerEpoch: number,
@@ -625,6 +653,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 			setThinkingLevel: (input) => setThinkingLevel(viewId, controllerEpoch, input),
 			setModel: (input) => setModel(viewId, controllerEpoch, input),
 			compact: (input) => runCompaction(viewId, controllerEpoch, input),
+			cancelCompaction: (command) => cancelCompaction(viewId, controllerEpoch, command),
 			interruptPrompt: (command) => interruptPrompt(viewId, controllerEpoch, command),
 			releaseController: (command) =>
 				command.viewId === viewId ? releaseController(command) : mismatchedView(viewId),
@@ -919,7 +948,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 				}
 				const unavailableReason = resources.session.isStreaming
 					? "streaming"
-					: activeCompactionCommandId !== undefined || resources.session.isCompacting
+					: activeCompaction !== undefined || resources.session.isCompacting
 						? "compacting"
 						: resources.session.isRetrying
 							? "retrying"
@@ -942,14 +971,17 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 					}
 				}
 				const deferred = yield* Deferred.make<RunCompactionReceipt, RunnerFailure>();
+				const operationGeneration = nextCompactionOperationGeneration++;
 				const record: LiveCompactionRecord = {
 					command,
+					operationGeneration,
 					startedSessionRevision: sessionRevision,
 					deferred,
 					completed: false,
+					cancellationRequested: false,
 				};
 				compactionCommands.set(command.commandId, record);
-				activeCompactionCommandId = command.commandId;
+				activeCompaction = { commandId: command.commandId, operationGeneration };
 				runCallback(
 					Effect.tryPromise({
 						try: () => resources.session.compact(command.customInstructions),
@@ -960,7 +992,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 								enqueue(
 									Effect.sync(() => {
 										record.completed = true;
-										if (activeCompactionCommandId === command.commandId) activeCompactionCommandId = undefined;
+										if (activeCompaction?.operationGeneration === record.operationGeneration) activeCompaction = undefined;
 										return failure;
 									}),
 								).pipe(
@@ -972,12 +1004,13 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 									Effect.gen(function* () {
 										sessionRevision = resources.sessionManager.getSessionRevision();
 										record.completed = true;
-										if (activeCompactionCommandId === command.commandId) activeCompactionCommandId = undefined;
+										if (activeCompaction?.operationGeneration === record.operationGeneration) activeCompaction = undefined;
 										const receipt: RunCompactionReceipt = {
 											commandId: command.commandId,
 											correlationId: command.correlationId,
 											...(command.causationId === undefined ? {} : { causationId: command.causationId }),
 											startedSessionRevision: record.startedSessionRevision,
+											operationGeneration: record.operationGeneration,
 											completedSessionRevision: sessionRevision,
 											replayed: false,
 											result: {
@@ -1017,6 +1050,75 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 		);
 		const receipt = yield* Deferred.await(admitted.record.deferred);
 		return admitted.replayed ? { ...receipt, replayed: true } : receipt;
+	});
+
+	cancelCompaction = Effect.fn("Runner.cancelCompaction")(function* (
+		viewId: string,
+		controllerEpoch: number,
+		command: CancelCompactionCommand,
+	) {
+		const decoded = yield* Effect.try({
+			try: () => decodeCancelCompactionCommand(command),
+			catch: asRunnerFailure,
+		});
+		if (decoded.viewId !== viewId) return yield* mismatchedView(viewId);
+		if (decoded.controllerEpoch !== controllerEpoch) {
+			return yield* Effect.fail(
+				new StaleRunnerControllerLeaseError({
+					viewId,
+					expectedControllerEpoch: decoded.controllerEpoch,
+					actualControllerEpoch: controllerEpoch,
+				}),
+			);
+		}
+		return yield* enqueue(
+			Effect.gen(function* () {
+				yield* requireController(viewId, controllerEpoch);
+				const active = activeCompaction;
+				const record = active === undefined ? undefined : compactionCommands.get(active.commandId);
+				if (
+					active === undefined ||
+					record === undefined ||
+					record.completed ||
+					active.commandId !== decoded.targetCommandId ||
+					active.operationGeneration !== decoded.targetOperationGeneration
+				) {
+					return yield* Effect.fail(
+						new RunnerCompactionTargetError({
+							targetCommandId: decoded.targetCommandId,
+							targetOperationGeneration: decoded.targetOperationGeneration,
+							...(active === undefined
+								? {}
+								: {
+										activeCommandId: active.commandId,
+										activeOperationGeneration: active.operationGeneration,
+									}),
+						}),
+					);
+				}
+				if (!record.cancellationRequested) {
+					record.cancellationRequested = true;
+					resources.session.abortCompaction();
+					yield* publishEvent({
+						kind: "compactionCancelRequested",
+						metadata: decoded,
+						controllerEpoch,
+						viewId,
+						targetCommandId: decoded.targetCommandId,
+						targetOperationGeneration: decoded.targetOperationGeneration,
+						sessionRevision,
+					});
+				}
+				return {
+					commandId: decoded.commandId,
+					correlationId: decoded.correlationId,
+					...(decoded.causationId === undefined ? {} : { causationId: decoded.causationId }),
+					targetCommandId: decoded.targetCommandId,
+					targetOperationGeneration: decoded.targetOperationGeneration,
+					cancellationRequested: true,
+				} satisfies CancelCompactionReceipt;
+			}),
+		);
 	});
 
 	interruptPrompt = Effect.fn("Runner.interruptPrompt")(function* (
@@ -1429,6 +1531,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 			setThinkingLevel: attached.setThinkingLevel,
 			setModel: attached.setModel,
 			compact: attached.compact,
+			cancelCompaction: attached.cancelCompaction,
 			interruptPrompt: attached.interruptPrompt,
 			detach,
 		} satisfies TerminalSessionView;
@@ -1443,7 +1546,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 				if (!leader) return yield* restore(Deferred.await(stopDone));
 
 				resources.session.beginDispose();
-				activeCompactionCommandId = undefined;
+				activeCompaction = undefined;
 				yield* Effect.forEach(
 					compactionCommands.values(),
 					(record) => Deferred.fail(record.deferred, new SessionRunnerStoppedError()).pipe(Effect.asVoid),

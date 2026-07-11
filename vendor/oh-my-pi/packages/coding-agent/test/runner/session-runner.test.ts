@@ -15,6 +15,7 @@ import { Settings } from "../../src/config/settings";
 import { createTerminalSessionController } from "../../src/modes/terminal-session-controller";
 import {
 	decodeInterruptPromptCommand,
+	decodeCancelCompactionCommand,
 	decodeRunCompactionCommand,
 	decodeSubmitInputCommand,
 	decodeSetModelCommand,
@@ -24,6 +25,7 @@ import {
 	RunnerPromptOperationConflictError,
 	RunnerCompactionCommandConflictError,
 	RunnerCompactionUnavailableError,
+	RunnerCompactionTargetError,
 	SessionRunnerStoppedError,
 	StaleRunnerControllerLeaseError,
 	SessionRunnerRuntimeError,
@@ -1056,10 +1058,13 @@ describe("live SessionRunner", () => {
 				tokensBefore: preparation.tokensBefore,
 			};
 		});
+		const abortCompactionSpy = vi.spyOn(fixture.session, "abortCompaction").mockImplementation(() => {});
+		let releaseSecondCompaction = () => {};
+		let releaseReusedCompaction = () => {};
 		await Effect.runPromise(
 			Effect.scoped(
 				Effect.gen(function* () {
-					const runner = yield* makeSessionRunnerLive(fixture, { mailboxCapacity: 1, eventCapacity: 8 });
+					const runner = yield* makeSessionRunnerLive(fixture, { mailboxCapacity: 1, eventCapacity: 2 });
 					const observer = yield* runner.attachView(attach("compaction-observer", "observer", 0));
 					const controller = yield* runner.attachView(attach("compaction-controller", "controller", 0));
 					if (controller.capability !== "controller") throw new Error("expected controller");
@@ -1081,6 +1086,52 @@ describe("live SessionRunner", () => {
 					});
 					const heldSnapshot = yield* runner.snapshot();
 					expect(heldSnapshot.status).toBe("running");
+					expect(heldSnapshot.activeCompaction).toEqual({
+						commandId: command.commandId,
+						operationGeneration: 1,
+						startedSessionRevision: initial.sessionRevision,
+					});
+					const cancelCommand = decodeCancelCompactionCommand({
+						schemaVersion: 1,
+						kind: "cancelCompaction",
+						commandId: "cancel-manual-compaction",
+						correlationId: "cancel-manual-compaction",
+						viewId: controller.viewId,
+						controllerEpoch: controller.controllerEpoch,
+						targetCommandId: command.commandId,
+						targetOperationGeneration: heldSnapshot.activeCompaction!.operationGeneration,
+					});
+					const abortCallsBeforeCancel = abortCompactionSpy.mock.calls.length;
+					const cancelReceipt = yield* controller.cancelCompaction(cancelCommand);
+					expect(cancelReceipt.targetCommandId).toBe(command.commandId);
+					expect(cancelReceipt.targetOperationGeneration).toBe(heldSnapshot.activeCompaction!.operationGeneration);
+					expect(abortCompactionSpy).toHaveBeenCalledTimes(abortCallsBeforeCancel + 1);
+					yield* controller.cancelCompaction({
+						...cancelCommand,
+						commandId: "duplicate-cancel",
+						correlationId: "duplicate-cancel",
+					});
+					expect(abortCompactionSpy).toHaveBeenCalledTimes(abortCallsBeforeCancel + 1);
+					const staleCancel = yield* Effect.flip(
+						controller.cancelCompaction({
+							...cancelCommand,
+							commandId: "stale-cancel",
+							correlationId: "stale-cancel",
+							targetCommandId: "older-compaction",
+						}),
+					);
+					expect(staleCancel).toBeInstanceOf(RunnerCompactionTargetError);
+					expect(abortCompactionSpy).toHaveBeenCalledTimes(abortCallsBeforeCancel + 1);
+					const cancelDelivery = yield* subscription.take;
+					expect(cancelDelivery.kind).toBe("event");
+					if (cancelDelivery.kind === "event") {
+						expect(cancelDelivery.event.kind).toBe("compactionCancelRequested");
+						expect(cancelDelivery.event.targetCommandId).toBe(command.commandId);
+						expect(cancelDelivery.event.targetOperationGeneration).toBe(
+							heldSnapshot.activeCompaction!.operationGeneration,
+						);
+					}
+					expect((yield* runner.snapshot()).revision).toBe(initial.revision);
 					yield* observer.detach(detach(observer.viewId, heldSnapshot.revision));
 
 					const staleEpoch = yield* Effect.flip(
@@ -1145,12 +1196,108 @@ describe("live SessionRunner", () => {
 					expect(completionEvents).toBe(1);
 					expect(compactSpy).toHaveBeenCalledTimes(1);
 					const completed = yield* runner.snapshot();
+					expect(completed.activeCompaction).toBeUndefined();
 					expect(completed.revision).toBe(initial.revision);
 					expect(completed.sessionRevision).toBeGreaterThan(initial.sessionRevision);
 					expect(first.startedSessionRevision).toBe(initial.sessionRevision);
 					expect(first.completedSessionRevision).toBe(completed.sessionRevision);
+					yield* Effect.promise(() => fixture.session.prompt("third compactable turn", { synthetic: true }));
+					yield* Effect.promise(() => fixture.session.prompt("fourth compactable turn", { synthetic: true }));
+					const beforeSecond = yield* runner.snapshot();
+					const secondGate = new Promise<void>(resolve => {
+						releaseSecondCompaction = resolve;
+					});
+					compactSpy.mockImplementationOnce(async preparation => {
+						await secondGate;
+						return {
+							summary: "second held runner compaction",
+							firstKeptEntryId: preparation.firstKeptEntryId,
+							tokensBefore: preparation.tokensBefore,
+						};
+					});
+					const secondCommand = decodeRunCompactionCommand({
+						...command,
+						commandId: "newer-manual-compaction",
+						correlationId: "newer-manual-compaction",
+						expectedSessionRevision: beforeSecond.sessionRevision,
+					});
+					const secondFiber = yield* Effect.forkChild(controller.compact(secondCommand));
+					yield* Effect.promise(async () => {
+						while (compactSpy.mock.calls.length < 2) await new Promise(resolve => setTimeout(resolve, 1));
+					});
+					const abortCallsBeforeDelayedCancel = abortCompactionSpy.mock.calls.length;
+					const delayedOldCancel = yield* Effect.flip(
+						controller.cancelCompaction({
+							...cancelCommand,
+							commandId: "delayed-old-cancel",
+							correlationId: "delayed-old-cancel",
+						}),
+					);
+					expect(delayedOldCancel).toBeInstanceOf(RunnerCompactionTargetError);
+					expect(abortCompactionSpy).toHaveBeenCalledTimes(abortCallsBeforeDelayedCancel);
+					expect((yield* runner.snapshot()).activeCompaction?.commandId).toBe(secondCommand.commandId);
+					releaseSecondCompaction();
+					yield* Fiber.join(secondFiber);
+					yield* Effect.promise(() => fixture.session.prompt("fifth compactable turn", { synthetic: true }));
+					yield* Effect.promise(() => fixture.session.prompt("sixth compactable turn", { synthetic: true }));
+					const beforeEvictor = yield* runner.snapshot();
+					yield* controller.compact(
+						decodeRunCompactionCommand({
+							...command,
+							commandId: "compaction-record-evictor",
+							correlationId: "compaction-record-evictor",
+							expectedSessionRevision: beforeEvictor.sessionRevision,
+						}),
+					);
+					yield* Effect.promise(() => fixture.session.prompt("seventh compactable turn", { synthetic: true }));
+					yield* Effect.promise(() => fixture.session.prompt("eighth compactable turn", { synthetic: true }));
+					const beforeReused = yield* runner.snapshot();
+					const reusedGate = new Promise<void>(resolve => {
+						releaseReusedCompaction = resolve;
+					});
+					compactSpy.mockImplementationOnce(async preparation => {
+						await reusedGate;
+						return {
+							summary: "reused-id held runner compaction",
+							firstKeptEntryId: preparation.firstKeptEntryId,
+							tokensBefore: preparation.tokensBefore,
+						};
+					});
+					const reusedCommand = decodeRunCompactionCommand({
+						...command,
+						correlationId: "reused-manual-compaction",
+						expectedSessionRevision: beforeReused.sessionRevision,
+					});
+					const reusedFiber = yield* Effect.forkChild(controller.compact(reusedCommand));
+					yield* Effect.promise(async () => {
+						while (compactSpy.mock.calls.length < 4) await new Promise(resolve => setTimeout(resolve, 1));
+					});
+					const reusedActive = (yield* runner.snapshot()).activeCompaction;
+					expect(reusedActive?.commandId).toBe(command.commandId);
+					expect(reusedActive?.operationGeneration).not.toBe(cancelCommand.targetOperationGeneration);
+					const abortCallsBeforeSameIdCancel = abortCompactionSpy.mock.calls.length;
+					const staleSameIdCancel = yield* Effect.flip(
+						controller.cancelCompaction({
+							...cancelCommand,
+							commandId: "delayed-old-generation-cancel",
+							correlationId: "delayed-old-generation-cancel",
+						}),
+					);
+					expect(staleSameIdCancel).toBeInstanceOf(RunnerCompactionTargetError);
+					expect(abortCompactionSpy).toHaveBeenCalledTimes(abortCallsBeforeSameIdCancel);
+					expect((yield* runner.snapshot()).activeCompaction).toEqual(reusedActive);
+					releaseReusedCompaction();
+					yield* Fiber.join(reusedFiber);
 					yield* runner.stop();
-				}).pipe(Effect.ensuring(Effect.sync(releaseCompaction))),
+				}).pipe(
+					Effect.ensuring(
+						Effect.sync(() => {
+							releaseCompaction();
+							releaseSecondCompaction();
+							releaseReusedCompaction();
+						}),
+					),
+				),
 			),
 		);
 	});
