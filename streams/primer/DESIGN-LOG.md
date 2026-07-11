@@ -210,3 +210,16 @@ Current live comparison:
 - Sol: `http://reader-sol.localhost:1355`
 
 The first reader portfolio suggests Terra and Sol can perform real design work and should not be treated only as logic lanes. Terra is the preferred next experiment when a single non-portfolio design worker is needed; this is a dated preference, not a permanent capability claim. Actual billing telemetry was unavailable, so the comparison reports public API-equivalent estimates separately from actual spend.
+
+## 2026-07-11 — Graph views are bounded evidence instruments, not spatial decoration
+
+**Status:** implemented / active default  
+**Scope:** reader knowledge views and cross-stream visual research  
+**Relationships:** `corrects` → global force-layout graph as the default knowledge model; `evidence_for` → question-specific projections with deterministic provenance  
+**Evidence:** typed graph substrate and five live projections at `http://meltdown.localhost:1355/#/graph`; source studies and reusable primitives under `docs/research/style-studies/`
+
+The creation engine answers bounded reader questions through distinct projections: Passage Lens, Recurrence Trail, Authored Spine, Source Genealogy, and Evidence Neighborhood. A visible edge must be backed by a typed assertion with method, evidence, provenance transform, and confidence. Missing reader-specific blockers, prerequisites, or citation identity remain explicit unsupported claims. Semantic zoom changes the query and representation rather than merely scaling a force layout.
+
+Style Studies are evidence, not templates. Poet Engineer and Nous Research sources are archived with coverage gaps, then distilled into motion, typography, diagram, and interaction principles. Projects may consume the machine-readable registry and studies, but must not copy motifs without a product-specific reason.
+
+The first model portfolio selected GPT-5.6 Sol as the default UI/UX implementation lane for Primer: its restraint and editorial hierarchy survived blind review best. This supersedes the earlier provisional Terra preference while remaining a dated, evidence-specific routing decision.
