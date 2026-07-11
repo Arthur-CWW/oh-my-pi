@@ -2172,7 +2172,9 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			} = await awaitAbortable(
 				resolveModelOverrideWithAuthFallback(
 					modelPatterns,
-					options.parentActiveModelPattern,
+					routeReceipt?.source === "spawn_explicit" || routeReceipt?.source === "session_explicit"
+						? undefined
+						: options.parentActiveModelPattern,
 					modelRegistry,
 					settings,
 				),

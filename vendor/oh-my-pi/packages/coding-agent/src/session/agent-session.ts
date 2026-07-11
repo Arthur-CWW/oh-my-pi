@@ -6760,6 +6760,12 @@ export class AgentSession {
 			options?.thinkingLevel,
 		);
 		const previousRole = this.settings.resolveModelRole(role);
+		const previousRuntimeRole =
+			previousRole.winningLayer === "runtime_override" ? previousRole.effectiveSelector : undefined;
+		const previousGlobalRole =
+			previousRole.winningLayer === "global"
+				? previousRole.effectiveSelector
+				: previousRole.shadowedCandidates.find(candidate => candidate.layer === "global")?.selector;
 		const persistGlobally =
 			previousRole.winningLayer !== "config_overlay" &&
 			previousRole.winningLayer !== "project" &&
@@ -6771,40 +6777,44 @@ export class AgentSession {
 			this.settings.assertModelRoleWritable(role);
 		}
 
+		const previousEditMode = this.#resolveActiveEditMode();
+		const previousModel = this.model;
+		const previousThinkingLevel = this.#thinkingLevel;
+		const previousAutoThinking = this.#autoThinking;
+		const previousAutoResolvedLevel = this.#autoResolvedLevel;
 		this.settings.setRuntimeModelRole(role, selector);
 		try {
-			if (persistGlobally) {
+			this.#setModelWithProviderSessionReset(model);
+			if (options?.thinkingLevel !== undefined) {
+				this.setThinkingLevel(options.thinkingLevel);
+			} else {
+				this.#reapplyThinkingLevel(model.thinking?.defaultLevel);
+			}
+			await this.#syncAfterModelChange(previousEditMode);
+
+			// Commit the global role last: activation or prompt synchronization
+			// failures must not survive a settings reload.
+			if (persistGlobally && previousGlobalRole !== selector) {
 				this.settings.setModelRole(role, selector);
 			}
 		} catch (error) {
-			if (previousRole.winningLayer === "runtime_override" && previousRole.effectiveSelector !== undefined) {
-				this.settings.setRuntimeModelRole(role, previousRole.effectiveSelector);
+			if (previousRuntimeRole !== undefined) {
+				this.settings.setRuntimeModelRole(role, previousRuntimeRole);
 			} else {
 				this.settings.clearRuntimeModelRole(role);
 			}
-			throw error;
-		}
-
-		const previousEditMode = this.#resolveActiveEditMode();
-		try {
-			this.#setModelWithProviderSessionReset(model);
-		} catch (error) {
-			if (previousRole.winningLayer === "runtime_override" && previousRole.effectiveSelector !== undefined) {
-				this.settings.setRuntimeModelRole(role, previousRole.effectiveSelector);
-			} else {
-				this.settings.clearRuntimeModelRole(role);
+			if (previousModel) {
+				this.agent.setModel(previousModel);
 			}
+			this.#thinkingLevel = previousThinkingLevel;
+			this.#autoThinking = previousAutoThinking;
+			this.#autoResolvedLevel = previousAutoResolvedLevel;
+			this.#applyThinkingLevelToAgent(previousThinkingLevel);
 			throw error;
 		}
 		this.#clearActiveRetryFallback();
 		this.sessionManager.appendModelChange(`${model.provider}/${model.id}`, role);
 		this.settings.getStorage()?.recordModelUsage(`${model.provider}/${model.id}`);
-		if (options?.thinkingLevel !== undefined) {
-			this.setThinkingLevel(options.thinkingLevel);
-		} else {
-			this.#reapplyThinkingLevel(model.thinking?.defaultLevel);
-		}
-		await this.#syncAfterModelChange(previousEditMode);
 	}
 
 	/**
