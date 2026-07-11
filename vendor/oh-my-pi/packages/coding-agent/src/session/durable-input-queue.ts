@@ -34,17 +34,27 @@ export type DurableInputState =
 	| "failed-rate-limit"
 	| "cancelled";
 
+export type DurableInputDeliveryClass = "steer" | "followUp";
+
+export interface DurableInputPayload {
+	readonly text: string;
+	readonly images: readonly ImageContent[] | undefined;
+}
+
 export interface DurableInputAttempt {
 	readonly id: string;
 	readonly inputId: string;
+	readonly revision: number;
 	readonly state: "admitted" | "started" | "completed" | "failed-rate-limit";
 	readonly retryAt?: number;
 }
 
 export interface DurableQueuedInput {
-	readonly id: string;
-	readonly text: string;
-	readonly images: readonly ImageContent[] | undefined;
+	readonly inputId: string;
+	readonly sequence: number;
+	readonly deliveryClass: DurableInputDeliveryClass;
+	readonly revision: number;
+	readonly payload: DurableInputPayload;
 	readonly state: DurableInputState;
 	readonly retryAt?: number;
 	readonly attempts: readonly DurableInputAttempt[];
@@ -71,6 +81,13 @@ export class SessionOwnershipLostError extends Error {
 	}
 }
 
+export class DurableInputQueueConflictError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = "DurableInputQueueConflictError";
+	}
+}
+
 type WriterLockIdentity = { readonly kind: "fingerprint"; readonly value: string } | { readonly kind: "pid" };
 
 interface WriterLock {
@@ -89,6 +106,17 @@ type QueueRecord =
 			readonly id: string;
 			readonly text: string;
 			readonly images: readonly ImageContent[] | undefined;
+			readonly sequence?: number;
+			readonly deliveryClass?: DurableInputDeliveryClass;
+			readonly revision?: number;
+			readonly ownerEpoch: string;
+	  }
+	| {
+			readonly version: typeof QUEUE_VERSION;
+			readonly type: "revision";
+			readonly inputId: string;
+			readonly revision: number;
+			readonly payload: DurableInputPayload;
 			readonly ownerEpoch: string;
 	  }
 	| {
@@ -103,6 +131,7 @@ type QueueRecord =
 			readonly type: "attempt";
 			readonly id: string;
 			readonly inputId: string;
+			readonly revision?: number;
 			readonly ownerEpoch: string;
 	  }
 	| {
@@ -202,6 +231,22 @@ function decodeWriterLock(value: unknown): WriterLock | undefined {
 	};
 }
 
+function isPositiveSafeInteger(value: unknown): value is number {
+	return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
+function isDeliveryClass(value: unknown): value is DurableInputDeliveryClass {
+	return value === "steer" || value === "followUp";
+}
+
+function decodePayload(value: unknown): DurableInputPayload | undefined {
+	if (!isRecord(value) || typeof value.text !== "string") return undefined;
+	return {
+		text: value.text,
+		images: Array.isArray(value.images) ? (value.images as ImageContent[]) : undefined,
+	};
+}
+
 function decodeRecord(value: unknown): QueueRecord | undefined {
 	if (
 		!isRecord(value) ||
@@ -212,16 +257,48 @@ function decodeRecord(value: unknown): QueueRecord | undefined {
 		return undefined;
 	}
 	switch (value.type) {
-		case "enqueue":
-			if (typeof value.id !== "string" || typeof value.text !== "string") return undefined;
+		case "enqueue": {
+			if (
+				typeof value.id !== "string" ||
+				typeof value.text !== "string" ||
+				(value.sequence !== undefined && !isPositiveSafeInteger(value.sequence)) ||
+				(value.deliveryClass !== undefined && !isDeliveryClass(value.deliveryClass)) ||
+				(value.revision !== undefined && !isPositiveSafeInteger(value.revision))
+			) {
+				return undefined;
+			}
 			return {
 				version: QUEUE_VERSION,
 				type: "enqueue",
 				id: value.id,
 				text: value.text,
 				images: Array.isArray(value.images) ? (value.images as ImageContent[]) : undefined,
+				...(value.sequence === undefined ? {} : { sequence: value.sequence as number }),
+				...(value.deliveryClass === undefined
+					? {}
+					: { deliveryClass: value.deliveryClass as DurableInputDeliveryClass }),
+				...(value.revision === undefined ? {} : { revision: value.revision as number }),
 				ownerEpoch: value.ownerEpoch,
 			};
+		}
+		case "revision": {
+			const payload = decodePayload(value.payload);
+			if (
+				typeof value.inputId !== "string" ||
+				!isPositiveSafeInteger(value.revision) ||
+				!payload
+			) {
+				return undefined;
+			}
+			return {
+				version: QUEUE_VERSION,
+				type: "revision",
+				inputId: value.inputId,
+				revision: value.revision,
+				payload,
+				ownerEpoch: value.ownerEpoch,
+			};
+		}
 		case "state":
 			if (typeof value.id !== "string" || !isValidState(value.state)) return undefined;
 			return {
@@ -232,12 +309,19 @@ function decodeRecord(value: unknown): QueueRecord | undefined {
 				ownerEpoch: value.ownerEpoch,
 			};
 		case "attempt":
-			if (typeof value.id !== "string" || typeof value.inputId !== "string") return undefined;
+			if (
+				typeof value.id !== "string" ||
+				typeof value.inputId !== "string" ||
+				(value.revision !== undefined && !isPositiveSafeInteger(value.revision))
+			) {
+				return undefined;
+			}
 			return {
 				version: QUEUE_VERSION,
 				type: "attempt",
 				id: value.id,
 				inputId: value.inputId,
+				...(value.revision === undefined ? {} : { revision: value.revision as number }),
 				ownerEpoch: value.ownerEpoch,
 			};
 		case "request-start":
@@ -356,20 +440,41 @@ export class DurableInputQueue {
 		return queue;
 	}
 
-	async enqueue(text: string, images?: readonly ImageContent[]): Promise<DurableQueuedInput> {
-		return this.#exclusive(async () => {
-			await this.#assertOwner();
-			const item: DurableQueuedInput = { id: randomUUID(), text, images, state: "queued", attempts: [] };
-			await this.#append({
-				version: QUEUE_VERSION,
-				type: "enqueue",
-				id: item.id,
-				text: item.text,
-				images: item.images,
-				ownerEpoch: this.#activeEpoch,
-			});
-			return item;
-		});
+	async enqueue(input: {
+		readonly text: string;
+		readonly images?: readonly ImageContent[];
+		readonly deliveryClass: DurableInputDeliveryClass;
+	}): Promise<DurableQueuedInput> {
+		return this.#exclusive(() =>
+			this.#withWriterLock(async () => {
+				await this.#assertOwner();
+				if (typeof input.text !== "string" || !isDeliveryClass(input.deliveryClass)) {
+					throw new DurableInputQueueConflictError("Invalid durable input queue enqueue payload");
+				}
+				const sequence = (await this.#items()).reduce((lastSequence, item) => Math.max(lastSequence, item.sequence), 0) + 1;
+				const item: DurableQueuedInput = {
+					inputId: randomUUID(),
+					sequence,
+					deliveryClass: input.deliveryClass,
+					revision: 1,
+					payload: { text: input.text, images: input.images },
+					state: "queued",
+					attempts: [],
+				};
+				await this.#appendLocked({
+					version: QUEUE_VERSION,
+					type: "enqueue",
+					id: item.inputId,
+					text: item.payload.text,
+					images: item.payload.images,
+					sequence: item.sequence,
+					deliveryClass: item.deliveryClass,
+					revision: item.revision,
+					ownerEpoch: this.#activeEpoch,
+				});
+				return item;
+			}),
+		);
 	}
 
 	async #acquireWriterLock(): Promise<WriterLock> {
@@ -514,41 +619,120 @@ export class DurableInputQueue {
 			return (await this.#items()).filter(item => item.state === "queued");
 		});
 	}
-	async admitNext(now: number = Date.now()): Promise<DurableQueuedInput | undefined> {
+
+	async get(inputId: string): Promise<DurableQueuedInput | undefined> {
+		return this.#exclusive(async () => {
+			await this.#assertOwner();
+			return (await this.#items()).find(item => item.inputId === inputId);
+		});
+	}
+
+	async list(options?: { readonly states?: readonly DurableInputState[] }): Promise<readonly DurableQueuedInput[]> {
 		return this.#exclusive(async () => {
 			await this.#assertOwner();
 			const items = await this.#items();
-			if (
-				items.some(
-					candidate =>
-						candidate.state === "admitted" || candidate.state === "running" || candidate.state === "uncertain",
-				)
-			) {
-				return undefined;
-			}
-			const item = items.find(
-				candidate => candidate.state === "queued" && (candidate.retryAt === undefined || now >= candidate.retryAt),
-			);
-			if (!item) return undefined;
-			const attemptId = randomUUID();
-			await this.#append({
-				version: QUEUE_VERSION,
-				type: "attempt",
-				id: attemptId,
-				inputId: item.id,
-				ownerEpoch: this.#activeEpoch,
-			});
-			return {
-				...item,
-				state: "admitted",
-				attempts: [...item.attempts, { id: attemptId, inputId: item.id, state: "admitted" }],
-			};
+			return options?.states === undefined ? items : items.filter(item => options.states?.includes(item.state));
 		});
+	}
+
+	async sequenceBoundary(): Promise<number> {
+		return this.#exclusive(async () => {
+			await this.#assertOwner();
+			return (await this.#items()).reduce((lastSequence, item) => Math.max(lastSequence, item.sequence), 0);
+		});
+	}
+
+	async edit(inputId: string, expectedRevision: number, payload: DurableInputPayload): Promise<DurableQueuedInput> {
+		return this.#exclusive(() =>
+			this.#withWriterLock(async () => {
+				await this.#assertOwner();
+				if (typeof payload.text !== "string") {
+					throw new DurableInputQueueConflictError(`Invalid durable input queue revision payload: ${inputId}`);
+				}
+				const item = (await this.#items()).find(candidate => candidate.inputId === inputId);
+				if (!item) throw new DurableInputQueueConflictError(`Durable input queue item not found: ${inputId}`);
+				if (item.state !== "queued" || item.revision !== expectedRevision) {
+					throw new DurableInputQueueConflictError(`Durable input queue edit conflict: ${inputId}`);
+				}
+				const revision = item.revision + 1;
+				await this.#appendLocked({
+					version: QUEUE_VERSION,
+					type: "revision",
+					inputId,
+					revision,
+					payload,
+					ownerEpoch: this.#activeEpoch,
+				});
+				return { ...item, revision, payload };
+			}),
+		);
+	}
+
+	async cancel(inputId: string): Promise<DurableQueuedInput> {
+		return this.#exclusive(() =>
+			this.#withWriterLock(async () => {
+				await this.#assertOwner();
+				const item = (await this.#items()).find(candidate => candidate.inputId === inputId);
+				if (!item) throw new DurableInputQueueConflictError(`Durable input queue item not found: ${inputId}`);
+				if (item.state !== "queued" && item.state !== "admitted") {
+					throw new DurableInputQueueConflictError(`Durable input queue cancellation conflict: ${inputId}`);
+				}
+				if (item.attempts.some(attempt => attempt.state === "started")) {
+					throw new DurableInputQueueConflictError(`Durable input queue request already started: ${inputId}`);
+				}
+				await this.#appendLocked({
+					version: QUEUE_VERSION,
+					type: "state",
+					id: inputId,
+					state: "cancelled",
+					ownerEpoch: this.#activeEpoch,
+				});
+				return { ...item, state: "cancelled" };
+			}),
+		);
+	}
+	async admitNext(boundary: "tool" | "terminal" = "terminal", now: number = Date.now()): Promise<DurableQueuedInput | undefined> {
+		return this.#exclusive(() =>
+			this.#withWriterLock(async () => {
+				await this.#assertOwner();
+				const items = await this.#items();
+				if (items.some(candidate => candidate.state === "admitted" || candidate.state === "running" || candidate.state === "uncertain")) {
+					return undefined;
+				}
+				let item: DurableQueuedInput | undefined;
+				for (const candidate of items) {
+					if (
+						candidate.state !== "queued" ||
+						(boundary === "tool" && candidate.deliveryClass !== "steer") ||
+						(candidate.retryAt !== undefined && now < candidate.retryAt) ||
+						(item !== undefined && item.sequence < candidate.sequence)
+					) {
+						continue;
+					}
+					item = candidate;
+				}
+				if (!item) return undefined;
+				const attemptId = randomUUID();
+				await this.#appendLocked({
+					version: QUEUE_VERSION,
+					type: "attempt",
+					id: attemptId,
+					inputId: item.inputId,
+					revision: item.revision,
+					ownerEpoch: this.#activeEpoch,
+				});
+				return {
+					...item,
+					state: "admitted",
+					attempts: [...item.attempts, { id: attemptId, inputId: item.inputId, revision: item.revision, state: "admitted" }],
+				};
+			}),
+		);
 	}
 
 	/** Fsyncs the request-start boundary for the attempt created by admitNext(). */
 	async markRunning(inputId: string): Promise<DurableInputAttempt> {
-		const item = (await this.#items()).find(candidate => candidate.id === inputId);
+		const item = (await this.#items()).find(candidate => candidate.inputId === inputId);
 		if (!item) throw new Error(`Durable input queue item not found: ${inputId}`);
 		const attempt = [...item.attempts].reverse().find(candidate => candidate.state === "admitted");
 		if (!attempt) throw new Error(`No admitted attempt to start for input: ${inputId}`);
@@ -558,27 +742,37 @@ export class DurableInputQueue {
 
 	/** Fsynced boundary written before the provider call. */
 	async markRequestStarted(inputId: string, attemptId: string): Promise<void> {
-		await this.#exclusive(async () => {
-			await this.#assertOwner();
-			const item = (await this.#items()).find(candidate => candidate.id === inputId);
-			if (!item) throw new Error(`Durable input queue item not found: ${inputId}`);
-			const attempt = item.attempts.find(a => a.id === attemptId);
-			if (!attempt) throw new Error(`Durable input queue attempt not found: ${attemptId}`);
-			await this.#transitionItem(item, "running");
-			await this.#append({
-				version: QUEUE_VERSION,
-				type: "request-start",
-				attemptId,
-				inputId,
-				ownerEpoch: this.#activeEpoch,
-			});
-		});
+		await this.#exclusive(() =>
+			this.#withWriterLock(async () => {
+				await this.#assertOwner();
+				const item = (await this.#items()).find(candidate => candidate.inputId === inputId);
+				if (!item) throw new DurableInputQueueConflictError(`Durable input queue item not found: ${inputId}`);
+				const attempt = item.attempts.find(a => a.id === attemptId);
+				if (!attempt || item.state !== "admitted") {
+					throw new DurableInputQueueConflictError(`Durable input queue attempt not admitted: ${attemptId}`);
+				}
+				await this.#appendLocked({
+					version: QUEUE_VERSION,
+					type: "state",
+					id: inputId,
+					state: "running",
+					ownerEpoch: this.#activeEpoch,
+				});
+				await this.#appendLocked({
+					version: QUEUE_VERSION,
+					type: "request-start",
+					attemptId,
+					inputId,
+					ownerEpoch: this.#activeEpoch,
+				});
+			}),
+		);
 	}
 
 	async completeAttempt(inputId: string, attemptId: string): Promise<void> {
 		await this.#exclusive(async () => {
 			await this.#assertOwner();
-			const item = (await this.#items()).find(candidate => candidate.id === inputId);
+			const item = (await this.#items()).find(candidate => candidate.inputId === inputId);
 			if (!item) throw new Error(`Durable input queue item not found: ${inputId}`);
 			const attempt = item.attempts.find(a => a.id === attemptId);
 			if (!attempt) throw new Error(`Durable input queue attempt not found: ${attemptId}`);
@@ -598,7 +792,7 @@ export class DurableInputQueue {
 	async complete(inputId: string): Promise<void> {
 		await this.#exclusive(async () => {
 			await this.#assertOwner();
-			const item = (await this.#items()).find(candidate => candidate.id === inputId);
+			const item = (await this.#items()).find(candidate => candidate.inputId === inputId);
 			if (!item) throw new Error(`Durable input queue item not found: ${inputId}`);
 			const attempt = [...item.attempts].reverse().find(a => a.state === "started" || a.state === "admitted");
 			if (!attempt) throw new Error(`No running attempt to complete for input: ${inputId}`);
@@ -617,7 +811,7 @@ export class DurableInputQueue {
 	async failRateLimit(inputId: string, attemptId: string, retryAt: number): Promise<void> {
 		await this.#exclusive(async () => {
 			await this.#assertOwner();
-			const item = (await this.#items()).find(candidate => candidate.id === inputId);
+			const item = (await this.#items()).find(candidate => candidate.inputId === inputId);
 			if (!item) throw new Error(`Durable input queue item not found: ${inputId}`);
 			const attempt = item.attempts.find(a => a.id === attemptId);
 			if (!attempt) throw new Error(`Durable input queue attempt not found: ${attemptId}`);
@@ -637,7 +831,7 @@ export class DurableInputQueue {
 	async retryRateLimit(inputId: string): Promise<void> {
 		await this.#exclusive(async () => {
 			await this.#assertOwner();
-			const item = (await this.#items()).find(candidate => candidate.id === inputId);
+			const item = (await this.#items()).find(candidate => candidate.inputId === inputId);
 			if (!item) throw new Error(`Durable input queue item not found: ${inputId}`);
 			await this.#append({
 				version: QUEUE_VERSION,
@@ -659,7 +853,7 @@ export class DurableInputQueue {
 				await this.#append({
 					version: QUEUE_VERSION,
 					type: "requeue",
-					inputId: item.id,
+					inputId: item.inputId,
 					ownerEpoch: this.#activeEpoch,
 				});
 			}
@@ -670,7 +864,7 @@ export class DurableInputQueue {
 	async requeueUnstarted(inputId: string, attemptId: string): Promise<void> {
 		await this.#exclusive(async () => {
 			await this.#assertOwner();
-			const item = (await this.#items()).find(candidate => candidate.id === inputId);
+			const item = (await this.#items()).find(candidate => candidate.inputId === inputId);
 			if (!item) throw new Error(`Durable input queue item not found: ${inputId}`);
 			const attempt = item.attempts.find(candidate => candidate.id === attemptId);
 			if (attempt?.state !== "admitted" || item.state !== "admitted") {
@@ -689,7 +883,7 @@ export class DurableInputQueue {
 	async markUncertain(inputId: string, attemptId: string): Promise<void> {
 		await this.#exclusive(async () => {
 			await this.#assertOwner();
-			const item = (await this.#items()).find(candidate => candidate.id === inputId);
+			const item = (await this.#items()).find(candidate => candidate.inputId === inputId);
 			if (!item) throw new Error(`Durable input queue item not found: ${inputId}`);
 			const attempt = item.attempts.find(candidate => candidate.id === attemptId);
 			if (attempt?.state !== "started" || item.state !== "running") {
@@ -706,14 +900,6 @@ export class DurableInputQueue {
 		});
 	}
 
-	async cancel(inputId: string): Promise<void> {
-		await this.#exclusive(async () => {
-			await this.#assertOwner();
-			const item = (await this.#items()).find(candidate => candidate.id === inputId);
-			if (!item) throw new Error(`Durable input queue item not found: ${inputId}`);
-			await this.#transitionItem(item, "cancelled");
-		});
-	}
 
 	async reconcile(
 		attemptId: string,
@@ -735,7 +921,7 @@ export class DurableInputQueue {
 					version: QUEUE_VERSION,
 					type: "terminal",
 					attemptId,
-					inputId: item.id,
+					inputId: item.inputId,
 					state: "completed",
 					ownerEpoch: this.#activeEpoch,
 				});
@@ -748,7 +934,7 @@ export class DurableInputQueue {
 					version: QUEUE_VERSION,
 					type: "terminal",
 					attemptId,
-					inputId: item.id,
+					inputId: item.inputId,
 					state: "failed-rate-limit",
 					retryAt,
 					ownerEpoch: this.#activeEpoch,
@@ -758,7 +944,7 @@ export class DurableInputQueue {
 				await this.#append({
 					version: QUEUE_VERSION,
 					type: "requeue",
-					inputId: item.id,
+					inputId: item.inputId,
 					ownerEpoch: this.#activeEpoch,
 				});
 				await this.#transitionItem(item, "queued");
@@ -792,7 +978,7 @@ export class DurableInputQueue {
 		await this.#append({
 			version: QUEUE_VERSION,
 			type: "state",
-			id: item.id,
+			id: item.inputId,
 			state,
 			ownerEpoch: this.#activeEpoch,
 		});
@@ -970,18 +1156,43 @@ export class DurableInputQueue {
 		const attempts = new Map<string, DurableInputAttempt>();
 		const currentEpoch = this.#activeEpoch;
 		const records = await this.#readAllRecords();
+		let lastSequence = 0;
 		for (const record of records) {
 			if (record.type === "adopt") continue;
 			if (record.type === "enqueue") {
+				const hasSchemaFields =
+					record.sequence !== undefined || record.deliveryClass !== undefined || record.revision !== undefined;
+				if (
+					hasSchemaFields &&
+					(record.sequence === undefined || record.deliveryClass === undefined || record.revision === undefined)
+				) {
+					throw new Error(`Corrupt durable input queue enqueue schema: ${record.id}`);
+				}
+				const sequence = record.sequence ?? lastSequence + 1;
+				if (!isPositiveSafeInteger(sequence) || sequence <= lastSequence) {
+					throw new Error(`Corrupt durable input queue sequence: ${record.id}`);
+				}
+				lastSequence = sequence;
 				if (!items.has(record.id)) {
 					items.set(record.id, {
-						id: record.id,
-						text: record.text,
-						images: record.images,
+						inputId: record.id,
+						sequence,
+						deliveryClass: record.deliveryClass ?? "followUp",
+						revision: record.revision ?? 1,
+						payload: { text: record.text, images: record.images },
 						state: "queued",
 						attempts: [],
 					});
 				}
+				continue;
+			}
+			if (record.type === "revision") {
+				const item = items.get(record.inputId);
+				if (!item) throw new Error(`Durable input queue revision references unknown input: ${record.inputId}`);
+				if (item.state !== "queued" || record.revision !== item.revision + 1) {
+					throw new Error(`Invalid durable input queue revision: ${record.inputId}`);
+				}
+				items.set(record.inputId, { ...item, revision: record.revision, payload: record.payload });
 				continue;
 			}
 			if (record.type === "state") {
@@ -992,7 +1203,12 @@ export class DurableInputQueue {
 				continue;
 			}
 			if (record.type === "attempt") {
-				const attempt: DurableInputAttempt = { id: record.id, inputId: record.inputId, state: "admitted" };
+				const attempt: DurableInputAttempt = {
+					id: record.id,
+					inputId: record.inputId,
+					revision: record.revision ?? 1,
+					state: "admitted",
+				};
 				attempts.set(record.id, attempt);
 				const item = items.get(record.inputId);
 				if (item && !item.attempts.some(a => a.id === record.id)) {
@@ -1049,16 +1265,12 @@ export class DurableInputQueue {
 			}
 		}
 
-		const result: DurableQueuedInput[] = [];
-		for (const item of items.values()) {
-			const lastRecordEpoch = this.#lastRecordEpochForItem(item.id, records);
-			if (lastRecordEpoch && lastRecordEpoch !== currentEpoch) {
-				result.push(this.#applyAdoptionTransition(item));
-			} else {
-				result.push(item);
-			}
-		}
-		return result;
+		return [...items.values()]
+			.map(item => {
+				const lastRecordEpoch = this.#lastRecordEpochForItem(item.inputId, records);
+				return lastRecordEpoch && lastRecordEpoch !== currentEpoch ? this.#applyAdoptionTransition(item) : item;
+			})
+			.sort((left, right) => left.sequence - right.sequence);
 	}
 
 	#lastRecordEpochForItem(inputId: string, records: readonly QueueRecord[]): string | undefined {
@@ -1066,6 +1278,7 @@ export class DurableInputQueue {
 			const record = records[i];
 			if (
 				(record.type === "enqueue" && record.id === inputId) ||
+				(record.type === "revision" && record.inputId === inputId) ||
 				(record.type === "state" && record.id === inputId) ||
 				(record.type === "attempt" && record.inputId === inputId) ||
 				(record.type === "request-start" && record.inputId === inputId) ||

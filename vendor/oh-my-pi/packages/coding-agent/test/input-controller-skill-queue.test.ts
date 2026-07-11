@@ -86,7 +86,6 @@ function createStubInputControllerContext(opts: { skillCommands: Map<string, str
 		pendingImages: [],
 		pendingImageLinks: [],
 		loopModeEnabled: false,
-		compactionQueuedMessages: [],
 		locallySubmittedUserSignatures: new Set<string>(),
 		withLocalSubmission: async (_text: string, fn: () => unknown) => fn(),
 	} as unknown as InteractiveModeContext;
@@ -306,7 +305,6 @@ function createStubInteractiveModeContextForUiHelpers(session: AgentSession) {
 		pendingMessagesContainer,
 		session,
 		viewSession: session,
-		compactionQueuedMessages: [],
 		keybindings: {
 			getDisplayString: (_action: string) => "Alt+Up",
 		},
@@ -346,7 +344,7 @@ describe("UiHelpers / InputController against derived queued custom display", ()
 		uiHelpers.updatePendingMessagesDisplay();
 
 		const rendered = pendingMessagesContainer.render(120).join("\n");
-		expect(rendered).toMatch(/Steer: \/skill:test-skill arg1 arg2/);
+		expect(rendered).toMatch(/legacy steer · queued · core: \/skill:test-skill arg1 arg2/);
 	});
 
 	it("restores the compact slash form into the editor and clears the queue", async () => {

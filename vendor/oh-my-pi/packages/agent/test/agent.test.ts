@@ -16,6 +16,46 @@ describe("Agent", () => {
 		expect(agent.state.messages).not.toContainEqual(message);
 	});
 
+	it("forwards a post-construction queued-input admission hook", async () => {
+		const toolSchema = z.object({});
+		const executed: string[] = [];
+		const tool: AgentTool<typeof toolSchema, Record<string, never>> = {
+			name: "echo",
+			label: "Echo",
+			description: "Echo tool",
+			parameters: toolSchema,
+			async execute(toolCallId) {
+				executed.push(toolCallId);
+				return { content: [{ type: "text", text: "ok" }], details: {} };
+			},
+		};
+		const mock = createMockModel({
+			responses: [
+				{ content: [{ type: "toolCall", id: "tool-1", name: "echo", arguments: {} }] },
+				{ content: ["done"] },
+			],
+		});
+		const agent = new Agent({
+			initialState: { model: mock.model, systemPrompt: [""], tools: [tool], messages: [] },
+			streamFn: mock.stream,
+		});
+		const boundaries: string[] = [];
+		agent.admitQueuedInput = async boundary => {
+			boundaries.push(boundary);
+			return { role: "user", content: "host-admitted", timestamp: Date.now() };
+		};
+
+		await agent.prompt("start");
+
+		expect(executed).toEqual(["tool-1"]);
+		expect(boundaries).toEqual(["tool"]);
+		expect(
+			mock.calls[1]?.context.messages.some(
+				message => message.role === "user" && typeof message.content === "string" && message.content === "host-admitted",
+			),
+		).toBe(true);
+	});
+
 	it("continue() should process queued follow-up messages after an assistant turn", async () => {
 		const mock = createMockModel({ responses: [{ content: ["Processed"] }] });
 		const agent = new Agent({ streamFn: mock.stream });

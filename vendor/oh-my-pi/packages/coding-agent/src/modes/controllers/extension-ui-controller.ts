@@ -177,7 +177,6 @@ export class ExtensionUiController {
 				// Clear UI state
 				this.ctx.chatContainer.clear();
 				this.ctx.pendingMessagesContainer.clear();
-				this.ctx.compactionQueuedMessages = [];
 				this.ctx.streamingComponent = undefined;
 				this.ctx.streamingMessage = undefined;
 				this.ctx.pendingTools.clear();
@@ -406,7 +405,6 @@ export class ExtensionUiController {
 				// Clear UI state
 				this.ctx.chatContainer.clear();
 				this.ctx.pendingMessagesContainer.clear();
-				this.ctx.compactionQueuedMessages = [];
 				this.ctx.streamingComponent = undefined;
 				this.ctx.streamingMessage = undefined;
 				this.ctx.pendingTools.clear();

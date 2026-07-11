@@ -34,7 +34,7 @@ import { createUsageRowBlock } from "../../modes/components/usage-row";
 import { UserMessageComponent } from "../../modes/components/user-message";
 import { materializeImageReferenceLinksSync } from "../../modes/image-references";
 import { theme } from "../../modes/theme/theme";
-import type { CompactionQueuedMessage, InteractiveModeContext } from "../../modes/types";
+import type { InteractiveModeContext } from "../../modes/types";
 import {
 	BACKGROUND_TAN_DISPATCH_MESSAGE_TYPE,
 	type CustomMessage,
@@ -56,8 +56,8 @@ interface RenderInitialMessagesOptions {
 }
 
 type QueuedMessages = {
-	steering: string[];
-	followUp: string[];
+	readonly steering: readonly string[];
+	readonly followUp: readonly string[];
 };
 
 function imageLinksForMessage(
@@ -665,68 +665,54 @@ export class UiHelpers {
 
 	updatePendingMessagesDisplay(): void {
 		this.ctx.pendingMessagesContainer.clear();
+		const durableInputs = this.ctx.viewSession
+			.getQueuedInputProjection()
+			.toSorted((left, right) => left.sequence - right.sequence);
+		const durablePayloadCounts = new Map<string, number>();
+		for (const input of durableInputs) {
+			const key = `${input.deliveryClass}\0${input.payload.text}`;
+			durablePayloadCounts.set(key, (durablePayloadCounts.get(key) ?? 0) + 1);
+		}
+
+		const legacyEntries: Array<{ deliveryClass: "steer" | "followUp"; text: string }> = [];
 		const queuedMessages = this.ctx.viewSession.getQueuedMessages() as QueuedMessages;
-
-		const steeringMessages: Array<{ message: string; label: string }> = [];
-		for (const message of queuedMessages.steering) {
-			steeringMessages.push({ message, label: "Steer" });
-		}
-		for (const entry of this.ctx.compactionQueuedMessages as CompactionQueuedMessage[]) {
-			if (entry.mode === "steer") {
-				steeringMessages.push({ message: entry.text, label: "Steer" });
+		for (const [deliveryClass, messages] of [
+			["steer", queuedMessages.steering],
+			["followUp", queuedMessages.followUp],
+		] as const) {
+			for (const text of messages) {
+				const key = `${deliveryClass}\0${text}`;
+				const durablePayloadCount = durablePayloadCounts.get(key) ?? 0;
+				if (durablePayloadCount > 0) {
+					durablePayloadCounts.set(key, durablePayloadCount - 1);
+					continue;
+				}
+				legacyEntries.push({ deliveryClass, text });
 			}
 		}
 
-		const followUpMessages: Array<{ message: string; label: string }> = [];
-		for (const message of queuedMessages.followUp) {
-			followUpMessages.push({ message, label: "Follow-up" });
-		}
-		for (const entry of this.ctx.compactionQueuedMessages as CompactionQueuedMessage[]) {
-			if (entry.mode === "followUp") {
-				followUpMessages.push({ message: entry.text, label: "Follow-up" });
-			}
-		}
+		const pendingCount = durableInputs.length + legacyEntries.length;
+		if (pendingCount === 0) return;
 
-		const allMessages = [...steeringMessages, ...followUpMessages];
-		if (allMessages.length > 0) {
-			this.ctx.pendingMessagesContainer.addChild(new Spacer(1));
-			for (const entry of allMessages) {
-				const queuedText = theme.fg("dim", `${entry.label}: ${entry.message}`);
-				this.ctx.pendingMessagesContainer.addChild(new TruncatedText(queuedText, 1, 0));
-			}
-			const dequeueKey = this.ctx.keybindings.getDisplayString("app.message.dequeue") || "Alt+Up";
-			const hintText = theme.fg("dim", `${theme.tree.hook} ${dequeueKey} to edit`);
-			this.ctx.pendingMessagesContainer.addChild(new TruncatedText(hintText, 1, 0));
-		}
-	}
-
-	queueCompactionMessage(text: string, mode: "steer" | "followUp", images?: ImageContent[]): void {
-		const queuedImages = images && images.length > 0 ? images : undefined;
-		this.ctx.compactionQueuedMessages.push({ text, mode, images: queuedImages } as CompactionQueuedMessage);
-		this.ctx.editor.addToHistory(text);
-		this.ctx.editor.setText("");
-		this.ctx.editor.imageLinks = undefined;
-		this.ctx.pendingImages = [];
-		this.ctx.pendingImageLinks = [];
-		this.ctx.updatePendingMessagesDisplay();
-		this.ctx.showStatus(
-			queuedImages ? "Queued message with image for after compaction" : "Queued message for after compaction",
+		this.ctx.pendingMessagesContainer.addChild(new Spacer(1));
+		this.ctx.pendingMessagesContainer.addChild(
+			new TruncatedText(theme.fg("dim", `Pending inputs (${pendingCount}):`), 1, 0),
 		);
-	}
-
-	async #deliverQueuedMessage(message: CompactionQueuedMessage): Promise<void> {
-		if (this.ctx.isKnownSlashCommand(message.text)) {
-			await this.ctx.session.prompt(message.text);
-			return;
+		for (const input of durableInputs) {
+			const imageMarker = input.payload.images?.length ? " [image]" : "";
+			const queuedText = theme.fg(
+				"dim",
+				`#${input.sequence} ${input.deliveryClass} · ${input.state} · ${input.inputId.slice(0, 8)}: ${input.payload.text}${imageMarker}`,
+			);
+			this.ctx.pendingMessagesContainer.addChild(new TruncatedText(queuedText, 1, 0));
 		}
-		await this.ctx.withLocalSubmission(
-			message.text,
-			() =>
-				message.mode === "followUp"
-					? this.ctx.session.followUp(message.text, message.images)
-					: this.ctx.session.steer(message.text, message.images),
-			{ imageCount: message.images?.length ?? 0 },
-		);
+		for (const entry of legacyEntries) {
+			const queuedText = theme.fg("dim", `legacy ${entry.deliveryClass} · queued · core: ${entry.text}`);
+			this.ctx.pendingMessagesContainer.addChild(new TruncatedText(queuedText, 1, 0));
+		}
+		const dequeueKey = this.ctx.keybindings.getDisplayString("app.message.dequeue") || "Alt+Up";
+		const hintText = theme.fg("dim", `${theme.tree.hook} ${dequeueKey} to edit one item`);
+		this.ctx.pendingMessagesContainer.addChild(new TruncatedText(hintText, 1, 0));
 	}
 
 	isKnownSlashCommand(text: string): boolean {
@@ -734,106 +720,11 @@ export class UiHelpers {
 		const spaceIndex = text.indexOf(" ");
 		const commandName = spaceIndex === -1 ? text.slice(1) : text.slice(1, spaceIndex);
 		if (!commandName) return false;
-
-		if (this.ctx.session.extensionRunner?.getCommand(commandName)) {
-			return true;
-		}
-
+		if (this.ctx.session.extensionRunner?.getCommand(commandName)) return true;
 		for (const command of this.ctx.session.customCommands) {
-			if (command.command.name === commandName) {
-				return true;
-			}
+			if (command.command.name === commandName) return true;
 		}
-
 		return this.ctx.fileSlashCommands.has(commandName);
-	}
-
-	async flushCompactionQueue(options?: { willRetry?: boolean }): Promise<void> {
-		if (this.ctx.compactionQueuedMessages.length === 0) {
-			return;
-		}
-
-		const queuedMessages = [...(this.ctx.compactionQueuedMessages as CompactionQueuedMessage[])];
-		this.ctx.compactionQueuedMessages = [] as CompactionQueuedMessage[];
-		this.ctx.updatePendingMessagesDisplay();
-
-		const restoreQueue = (error: unknown) => {
-			this.ctx.session.clearQueue();
-			this.ctx.compactionQueuedMessages = queuedMessages;
-			this.ctx.updatePendingMessagesDisplay();
-			this.ctx.showError(
-				`Failed to send queued message${queuedMessages.length > 1 ? "s" : ""}: ${
-					error instanceof Error ? error.message : String(error)
-				}`,
-			);
-		};
-
-		try {
-			if (options?.willRetry) {
-				for (const message of queuedMessages) {
-					await this.#deliverQueuedMessage(message);
-				}
-				this.ctx.updatePendingMessagesDisplay();
-				return;
-			}
-
-			let firstPromptIndex = -1;
-			for (let i = 0; i < queuedMessages.length; i++) {
-				if (!this.ctx.isKnownSlashCommand(queuedMessages[i].text)) {
-					firstPromptIndex = i;
-					break;
-				}
-			}
-			if (firstPromptIndex === -1) {
-				for (const message of queuedMessages) {
-					await this.ctx.session.prompt(message.text);
-				}
-				return;
-			}
-
-			const preCommands = queuedMessages.slice(0, firstPromptIndex);
-			const firstPrompt = queuedMessages[firstPromptIndex];
-			const rest = queuedMessages.slice(firstPromptIndex + 1);
-
-			for (const message of preCommands) {
-				// preCommands are all slash commands; #deliverQueuedMessage handles
-				// that branch (no local-submission marking needed since slash
-				// commands don't generate a matching user message_start).
-				await this.#deliverQueuedMessage(message);
-			}
-
-			// Pass streamingBehavior so that if the session is still streaming when
-			// compaction-end fires (race window between isStreaming flipping false and
-			// the event landing here), prompt() routes the message into the steer/
-			// follow-up queue instead of throwing AgentBusyError. When the session is
-			// genuinely idle, streamingBehavior is ignored and a fresh prompt runs as
-			// before. This keeps the steer preview honest: if delivery has to be
-			// deferred, the message lands in the same queue every other consumer
-			// (Alt+Up dequeue, post-stream drain) already drains, instead of being
-			// stranded in compactionQueuedMessages with no drainer.
-			//
-			// firstPrompt is fire-and-forget — its rejection is funneled through
-			// `restoreQueue` rather than rethrown, so we use the primitive
-			// recordLocalSubmission and dispose manually in the catch.
-			const disposeFirstPrompt = this.ctx.recordLocalSubmission(firstPrompt.text, firstPrompt.images?.length ?? 0);
-			const promptPromise = this.ctx.session
-				.prompt(firstPrompt.text, {
-					streamingBehavior: firstPrompt.mode === "followUp" ? "followUp" : "steer",
-					images: firstPrompt.images,
-				})
-				.catch((error: unknown) => {
-					disposeFirstPrompt();
-					restoreQueue(error);
-				});
-
-			for (const message of rest) {
-				await this.#deliverQueuedMessage(message);
-			}
-			this.ctx.updatePendingMessagesDisplay();
-			void promptPromise;
-		} catch (error) {
-			restoreQueue(error);
-		}
 	}
 
 	/** Move pending bash components from pending area to chat */

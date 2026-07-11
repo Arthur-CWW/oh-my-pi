@@ -802,7 +802,9 @@ async function runLoopBody(
 			hasMoreToolCalls = runnableStop && toolCalls.length > 0;
 
 			const toolResults: ToolResultMessage[] = [];
+			let settledToolBatch = false;
 			if (hasMoreToolCalls) {
+				settledToolBatch = true;
 				const executionResult = await executeToolCalls(
 					currentContext,
 					message,
@@ -869,7 +871,11 @@ async function runLoopBody(
 			// instantly aborts — message lands in history, agent never responds. The
 			// mid-batch interrupt poll only peeks (hasSteeringMessages), so the queue
 			// still owns every message until this dequeue.
-			const steering = signal?.aborted ? [] : (await config.getSteeringMessages?.()) || [];
+			let steering = signal?.aborted ? [] : (await config.getSteeringMessages?.()) || [];
+			if (steering.length === 0 && settledToolBatch && !signal?.aborted) {
+				const admitted = await config.admitQueuedInput?.("tool");
+				if (admitted) steering = [admitted];
+			}
 			if (hasMoreToolCalls) {
 				// Mid-work: fold any non-interrupting asides into the next turn alongside steering.
 				const asides = resolveAsides(await config.getAsideMessages?.());

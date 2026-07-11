@@ -1003,7 +1003,6 @@ export class EventController {
 		} else {
 			this.ctx.showWarning("Auto context-full maintenance failed; continuing without maintenance");
 		}
-		await this.ctx.flushCompactionQueue({ willRetry: event.willRetry });
 		this.ctx.ui.requestRender();
 	}
 

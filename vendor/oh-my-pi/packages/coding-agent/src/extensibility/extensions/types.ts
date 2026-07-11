@@ -284,6 +284,12 @@ export interface ContextUsage {
 export interface CompactOptions {
 	onComplete?: (result: CompactionResult) => void;
 	onError?: (error: Error) => void;
+	/** Runs after compaction state is installed, before queued input may resume. */
+	beforeAdmission?: (
+		result:
+			| { outcome: "ok"; result: CompactionResult }
+			| { outcome: "cancelled" | "failed"; error: Error },
+	) => void | Promise<void>;
 }
 
 /**

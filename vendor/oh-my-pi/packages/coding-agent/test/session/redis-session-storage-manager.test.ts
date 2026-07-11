@@ -169,6 +169,48 @@ describe("SessionManager + RedisSessionStorage", () => {
 		await reopened.close();
 	});
 
+	it("round-trips optional compaction queue boundary metadata without rewriting old compactions", async () => {
+		const redis = createFakeRedis();
+		const storage = await RedisSessionStorage.create({ client: redis });
+		const sessionDir = "/sessions/compaction-boundary";
+		const manager = SessionManager.create("/cwd", sessionDir, storage);
+		manager.appendMessage({
+			role: "assistant",
+			provider: "anthropic",
+			model: "claude-3-7-sonnet",
+			content: [{ type: "text", text: "before compaction" }],
+			usage: fakeUsage(10, 5),
+			api: "anthropic-messages",
+			stopReason: "stop",
+			timestamp: Date.now(),
+		});
+
+		manager.appendCompaction("legacy summary", undefined, "first-kept", 10);
+		manager.appendCompaction("boundary summary", undefined, "first-kept", 20, undefined, undefined, undefined, 42);
+
+		const sessionFilePath = manager.getSessionFile() as string;
+		await manager.flush();
+		await storage.drain();
+		await manager.close();
+
+		const stored = redis.strings.get(`omp:sessions:file:${sessionFilePath}`) as string;
+		const compactions = stored
+			.trim()
+			.split("\n")
+			.map(line => JSON.parse(line))
+			.filter((entry: { type: string }) => entry.type === "compaction");
+		expect(compactions).toHaveLength(2);
+		expect("queueBoundarySequence" in compactions[0]).toBe(false);
+		expect(compactions[0].queueBoundarySequence).toBeUndefined();
+		expect(compactions[1].queueBoundarySequence).toBe(42);
+
+		const reopened = await SessionManager.open(sessionFilePath, sessionDir, storage);
+		const replayedCompactions = reopened.getEntries().filter(entry => entry.type === "compaction");
+		expect(replayedCompactions[0]?.queueBoundarySequence).toBeUndefined();
+		expect(replayedCompactions[1]?.queueBoundarySequence).toBe(42);
+		await reopened.close();
+	});
+
 	it("SessionManager.list returns Redis-backed sessions for the cwd", async () => {
 		const redis = createFakeRedis();
 		const storage = await RedisSessionStorage.create({ client: redis });

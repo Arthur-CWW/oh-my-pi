@@ -256,6 +256,12 @@ export interface AgentOptions {
 	afterToolCall?: AgentLoopConfig["afterToolCall"];
 
 	/**
+	 * Admits one host-owned queued input at a settled tool boundary.
+	 * Reassign after construction to change the host admission source.
+	 */
+	admitQueuedInput?: AgentLoopConfig["admitQueuedInput"];
+
+	/**
 	 * Opt-in OpenTelemetry instrumentation. Passing `{}` enables the loop's
 	 * GenAI-semantic-convention spans using the global tracer provider. See
 	 * {@link AgentLoopConfig.telemetry} for the full surface.
@@ -355,6 +361,11 @@ export class Agent {
 	 * message emission. Reassign at any time to swap the implementation.
 	 */
 	afterToolCall?: AgentLoopConfig["afterToolCall"];
+	/**
+	 * Hook invoked at a settled tool boundary when in-memory steering is empty.
+	 * Reassign at any time to swap the host admission source.
+	 */
+	admitQueuedInput?: AgentLoopConfig["admitQueuedInput"];
 
 	constructor(opts: AgentOptions = {}) {
 		this.#state = { ...this.#state, ...opts.initialState };
@@ -398,6 +409,7 @@ export class Agent {
 		this.#onHarmonyLeak = opts.onHarmonyLeak;
 		this.beforeToolCall = opts.beforeToolCall;
 		this.afterToolCall = opts.afterToolCall;
+		this.admitQueuedInput = opts.admitQueuedInput;
 		this.#telemetry = opts.telemetry;
 		this.#appendOnlyContext = opts.appendOnlyContext;
 		this.#transformProviderContext = opts.transformProviderContext;
@@ -1046,6 +1058,9 @@ export class Agent {
 			appendOnlyContext: this.#appendOnlyContext,
 			beforeToolCall: this.beforeToolCall ? (ctx, signal) => this.beforeToolCall?.(ctx, signal) : undefined,
 			afterToolCall: this.afterToolCall ? (ctx, signal) => this.afterToolCall?.(ctx, signal) : undefined,
+			admitQueuedInput: this.admitQueuedInput
+				? async boundary => this.admitQueuedInput?.(boundary)
+				: undefined,
 			onAssistantMessageEvent: this.#onAssistantMessageEvent,
 			onHarmonyLeak: this.#onHarmonyLeak,
 			onTurnEnd: (messages, signal) => this.#onTurnEnd?.(messages, signal),

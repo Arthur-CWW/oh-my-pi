@@ -162,7 +162,6 @@ import {
 	theme,
 } from "./theme/theme";
 import type {
-	CompactionQueuedMessage,
 	InteractiveModeContext,
 	InteractiveModeInitOptions,
 	InteractiveSelectorDialogOptions,
@@ -403,7 +402,6 @@ export class InteractiveMode implements InteractiveModeContext {
 	hideThinkingBlock = false;
 	pendingImages: ImageContent[] = [];
 	pendingImageLinks: (string | undefined)[] = [];
-	compactionQueuedMessages: CompactionQueuedMessage[] = [];
 	pendingTools = new Map<string, ToolExecutionHandle>();
 	pendingBashComponents: BashExecutionComponent[] = [];
 	bashComponent: BashExecutionComponent | undefined = undefined;
@@ -509,7 +507,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.pendingMessagesContainer.clear();
 		this.#cancelModelCycleClearTimer();
 		this.modelCycleContainer.clear();
-		this.compactionQueuedMessages = [];
 		this.streamingComponent = undefined;
 		this.streamingMessage = undefined;
 		this.pendingTools.clear();
@@ -1946,11 +1943,10 @@ export class InteractiveMode implements InteractiveModeContext {
 	}
 
 	/**
-	 * Idempotent post-compaction model transition for the plan-approval compact
-	 * path. The deferred pre-plan state is consumed on first application, so a
-	 * second call (the before-flush hook vs. the short-circuit fallback) is a
-	 * no-op. "failed" intentionally stays on the plan model — the context is
-	 * intact and we dispatch best-effort.
+	 * Idempotent model transition for the plan-approval compact path. The
+	 * deferred pre-plan state is consumed on first application, so repeat calls
+	 * are no-ops. "failed" intentionally stays on the plan model — the context
+	 * is intact and we dispatch best-effort.
 	 */
 	async #applyDeferredPlanModelTransition(
 		outcome: CompactionOutcome | undefined,
@@ -2368,12 +2364,10 @@ export class InteractiveMode implements InteractiveModeContext {
 				const compactionPrompt = prompt.render(planModeCompactInstructionsPrompt, {
 					planFilePath: options.planFilePath,
 				});
-				// Pin the plan reference path BEFORE compaction so any user messages
-				// queued during the compaction await (which `handleCompactCommand`
-				// flushes via `flushCompactionQueue` before returning) see the
-				// approved plan in `#buildPlanReferenceMessage`. Reassignment after
-				// the try/finally is idempotent and kept for the !compactBeforeExecute
-				// branch.
+				// Pin the plan reference path before compaction so user input captured
+				// while it runs retains the approved plan in
+				// `#buildPlanReferenceMessage`. Reassignment after the try/finally is
+				// idempotent and kept for the !compactBeforeExecute branch.
 				this.session.setPlanReferencePath(options.planFilePath);
 				compactOutcome = await this.handleCompactCommand(compactionPrompt, outcome =>
 					this.#applyDeferredPlanModelTransition(outcome, options.executionModel),
@@ -2394,14 +2388,12 @@ export class InteractiveMode implements InteractiveModeContext {
 		}
 		this.session.setPlanReferencePath(options.planFilePath);
 
-		// Resolve the deferred plan-approval model transition. On the compact path
-		// the before-flush hook passed to handleCompactCommand already ran this (so
-		// any input queued during compaction executed on the post-compaction
-		// model); the re-run here is idempotent and covers the short-circuit where
-		// compaction never executed. It runs for "cancelled" too — the operator
-		// aborted only the compaction, not the approval — so the next turn no longer
-		// lands on the plan model. "failed" stays on the plan model (context
-		// intact) and dispatches best-effort.
+		// Resolve the deferred plan-approval model transition. The compaction
+		// callback may already have applied this; the re-run is idempotent and
+		// covers the short-circuit where compaction never executed. It runs for
+		// "cancelled" too — the operator aborted only the compaction, not the
+		// approval — so the next turn no longer lands on the plan model. "failed"
+		// stays on the plan model (context intact) and dispatches best-effort.
 		if (options.compactBeforeExecute) {
 			await this.#applyDeferredPlanModelTransition(compactOutcome, options.executionModel);
 		} else {
@@ -3439,13 +3431,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.#uiHelpers.updatePendingMessagesDisplay();
 	}
 
-	queueCompactionMessage(text: string, mode: "steer" | "followUp", images?: ImageContent[]): void {
-		this.#uiHelpers.queueCompactionMessage(text, mode, images);
-	}
-
-	flushCompactionQueue(options?: { willRetry?: boolean }): Promise<void> {
-		return this.#uiHelpers.flushCompactionQueue(options);
-	}
 
 	flushPendingBashComponents(): void {
 		this.#uiHelpers.flushPendingBashComponents();

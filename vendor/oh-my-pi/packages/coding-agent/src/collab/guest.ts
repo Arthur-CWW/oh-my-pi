@@ -403,7 +403,6 @@ export class CollabGuestLink {
 	#clearTransientUi(): void {
 		this.#ctx.statusContainer.clear();
 		this.#ctx.pendingMessagesContainer.clear();
-		this.#ctx.compactionQueuedMessages = [];
 		this.#ctx.streamingComponent = undefined;
 		this.#ctx.streamingMessage = undefined;
 		this.#ctx.pendingTools.clear();

@@ -12,7 +12,10 @@ import { SessionObserverRegistry } from "@oh-my-pi/pi-coding-agent/modes/session
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { AgentLifecycleManager } from "@oh-my-pi/pi-coding-agent/registry/agent-lifecycle";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
+import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
+import { UiHelpers } from "@oh-my-pi/pi-coding-agent/modes/utils/ui-helpers";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
+import { Container } from "@oh-my-pi/pi-tui";
 
 const AGENT_ID = "Worker";
 
@@ -109,5 +112,56 @@ describe("Agent hub queued follow-up", () => {
 
 		hub.dispose();
 		await lifecycle.dispose();
+	});
+
+	it("renders durable obligations by global sequence with class, state, identity, and count", () => {
+		const pendingMessagesContainer = new Container();
+		const projection = [
+			{
+				sequence: 20,
+				deliveryClass: "followUp",
+				state: "running",
+				inputId: "follow20-identity",
+				payload: { text: "finish second", images: [{ type: "image" }] },
+			},
+			{
+				sequence: 3,
+				deliveryClass: "steer",
+				state: "queued",
+				inputId: "steer003-identity",
+				payload: { text: "interrupt first", images: undefined },
+			},
+			{
+				sequence: 14,
+				deliveryClass: "steer",
+				state: "failed-rate-limit",
+				inputId: "steer014-identity",
+				payload: { text: "retry between", images: undefined },
+			},
+		];
+		const ctx = {
+			pendingMessagesContainer,
+			viewSession: {
+				getQueuedInputProjection: () => projection,
+				getQueuedMessages: () => ({
+					steering: ["interrupt first", "core-only"],
+					followUp: ["finish second"],
+				}),
+			},
+			keybindings: { getDisplayString: () => "Alt+Up" },
+		} as unknown as InteractiveModeContext;
+
+		new UiHelpers(ctx).updatePendingMessagesDisplay();
+
+		const rendered = Bun.stripANSI(pendingMessagesContainer.render(120).join("\n"));
+		expect(rendered).toContain("Pending inputs (4):");
+		expect(rendered).toContain("#3 steer · queued · steer003: interrupt first");
+		expect(rendered).toContain("#14 steer · failed-rate-limit · steer014: retry between");
+		expect(rendered).toContain("#20 followUp · running · follow20: finish second [image]");
+		expect(rendered).toContain("legacy steer · queued · core: core-only");
+		expect(rendered).not.toContain("legacy steer · queued · core: interrupt first");
+		expect(rendered).not.toContain("legacy followUp · queued · core: finish second");
+		expect(rendered.indexOf("#3 steer")).toBeLessThan(rendered.indexOf("#14 steer"));
+		expect(rendered.indexOf("#14 steer")).toBeLessThan(rendered.indexOf("#20 followUp"));
 	});
 });

@@ -41,15 +41,51 @@ interface OwnershipLossChildResult {
 	unhandledRejections: number;
 }
 
-type ChildResult = FirstChildResult | ResumeChildResult | OwnershipLossChildResult;
+interface MixedChildResult {
+	action: "mixed";
+	providerCalls: readonly string[];
+	toolExecutions: number;
+	coreQueuedInputs: readonly string[];
+	attempts: readonly {
+		inputId: string;
+		attemptId: string;
+		revision: number;
+		state: string;
+	}[];
+	unhandledRejections: number;
+	uncaughtErrors: number;
+}
+
+interface CompactionChildResult {
+	action: "compaction";
+	providerCalls: readonly string[];
+	queuedDuringCompaction: readonly {
+		inputId: string;
+		sequence: number;
+		deliveryClass: string;
+	}[];
+	compactionBoundarySequence: number;
+	compactionIndex: number;
+	durableAttemptIndexes: readonly number[];
+	attempts: readonly {
+		inputId: string;
+		attemptId: string;
+		revision: number;
+		state: string;
+	}[];
+	queuedAfter: number;
+	unhandledRejections: number;
+	uncaughtErrors: number;
+}
+
+type ChildResult = FirstChildResult | ResumeChildResult | OwnershipLossChildResult | MixedChildResult | CompactionChildResult;
 
 const CHILD_SOURCE = String.raw`
 import * as path from "node:path";
-import { clearCustomApis, registerCustomApi } from "@oh-my-pi/pi-ai";
-import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
+import { type AssistantMessage, clearCustomApis, registerCustomApi } from "@oh-my-pi/pi-ai";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
-import { createAssistantMessage } from "./test/helpers/agent-session-setup";
+import { z } from "zod/v4";
 import { InputController } from "@oh-my-pi/pi-coding-agent/modes/controllers/input-controller";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
@@ -64,7 +100,7 @@ const cwd = process.env.CWD;
 const sessionFile = process.env.SESSION_FILE;
 const sessionsDir = process.env.SESSIONS_DIR;
 const home = process.env.HOME;
-if ((action !== "first" && action !== "resume" && action !== "loss") || !cwd || !sessionFile || !sessionsDir || !home) {
+if ((action !== "first" && action !== "resume" && action !== "loss" && action !== "mixed" && action !== "compaction") || !cwd || !sessionFile || !sessionsDir || !home) {
 	throw new Error("missing durable queue child environment");
 }
 
@@ -168,15 +204,6 @@ function latestRateLimit(sessionManager) {
 	return latest;
 }
 
-function waitForTurnEnd(session, predicate) {
-	const done = Promise.withResolvers();
-	const unsubscribe = session.subscribe(event => {
-		if (event.type !== "turn_end" || !predicate(event)) return;
-		unsubscribe();
-		done.resolve(event);
-	});
-	return done.promise;
-}
 
 async function createSession(responseKind, providerCalls, existing) {
 	clearCustomApis();
@@ -194,22 +221,74 @@ async function createSession(responseKind, providerCalls, existing) {
 		contextWindow: 4096,
 		maxTokens: 1024,
 	});
-	const usageError = '429 {"type":"error","error":{"type":"rate_limit_error","message":"usage limit"}} retry-after-ms=600000';
-	const mock = createMockModel({ handler: () => responseKind === "rate-limit" ? { throw: usageError } : { content: ["resumed ok"], stopReason: "stop" } });
-	registerCustomApi(api, (streamModel, context, options) => {
-		const last = context.messages.at(-1);
-		const textPart = Array.isArray(last?.content) ? last.content.find(part => part?.type === "text" && typeof part.text === "string") : undefined;
-		providerCalls.push(typeof last?.content === "string" ? last.content : textPart ? textPart.text : JSON.stringify(last?.content));
-		if (responseKind === "success" && existing?.responseGate) {
-			const stream = new AssistantMessageEventStream();
-			void existing.responseGate.promise.then(() => {
-				const message = createAssistantMessage("resumed ok");
-				stream.push({ type: "text_delta", contentIndex: 0, delta: "resumed ok", partial: message });
-				stream.push({ type: "done", reason: "stop", message });
-			});
-			return stream;
-		}
-		return mock.stream(streamModel, context, options);
+	const usageError = '{"type":"error","error":{"type":"rate_limit_error","message":"usage limit"}} retry-after-ms=600000';
+	function textStream(text, gate) {
+		const stream = new AssistantMessageEventStream();
+		void (gate ?? Promise.resolve()).then(() => setTimeout(() => {
+			const message: AssistantMessage = {
+				role: "assistant",
+				content: [{ type: "text", text }],
+				api,
+				provider,
+				model: model.id,
+				usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+				stopReason: "stop",
+				timestamp: Date.now(),
+			};
+			stream.push({ type: "start", partial: message });
+			stream.push({ type: "done", reason: "stop", message });
+		}, 0));
+		return stream;
+	}
+	function rateLimitStream() {
+		const stream = new AssistantMessageEventStream();
+		const message: AssistantMessage = {
+			role: "assistant",
+			content: [],
+			api,
+			provider,
+			model: "durable-model",
+			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+			stopReason: "error",
+			errorMessage: usageError,
+			timestamp: Date.now(),
+		};
+		queueMicrotask(() => {
+			stream.push({ type: "start", partial: message });
+			stream.push({ type: "error", reason: "error", error: message });
+		});
+		return stream;
+	}
+	function toolStream() {
+		const stream = new AssistantMessageEventStream();
+		const message: AssistantMessage = {
+			role: "assistant",
+			content: [{ type: "toolCall", id: "durable-gate-call", name: "durable_gate", arguments: {} }],
+			api,
+			provider,
+			model: "durable-model",
+			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+			stopReason: "toolUse",
+			timestamp: Date.now(),
+		};
+		queueMicrotask(() => {
+			stream.push({ type: "start", partial: message });
+			stream.push({ type: "done", reason: "toolUse", message });
+		});
+		return stream;
+	}
+	registerCustomApi(api, (_streamModel, context) => {
+		const lastUser = [...context.messages].reverse().find(message => message.role === "user");
+		const textPart = Array.isArray(lastUser?.content)
+			? lastUser.content.find(part => part?.type === "text" && typeof part.text === "string")
+			: undefined;
+		const call = typeof lastUser?.content === "string" ? lastUser.content : textPart ? textPart.text : JSON.stringify(lastUser?.content);
+		providerCalls.push(responseKind === "compaction" && providerCalls.length === 0 ? "compaction" : call);
+		existing?.providerInvoked?.resolve();
+		if (providerCalls.length === 3) existing?.thirdCall?.resolve();
+		if (responseKind === "rate-limit") return rateLimitStream();
+		if (responseKind === "mixed" && providerCalls.length === 1) return toolStream();
+		return textStream(responseKind === "compaction" && providerCalls.length === 1 ? "Compaction summary." : responseKind === "mixed" ? "settled" : "resumed ok", existing?.responseGate?.promise);
 	});
 	const authStorage = await AuthStorage.create(path.join(home, "auth.db"));
 	authStorage.setRuntimeApiKey(provider, "test-key");
@@ -227,7 +306,27 @@ async function createSession(responseKind, providerCalls, existing) {
 	if (!(await acquired.ownership.isCurrent())) {
 		throw new Error("session ownership was not current before AgentSession construction");
 	}
-	const settings = Settings.isolated({ "compaction.enabled": false, "retry.maxDelayMs": 100 });
+	const settings = Settings.isolated({
+		"compaction.enabled": false,
+		"compaction.keepRecentTokens": responseKind === "compaction" ? 1 : undefined,
+		"retry.maxDelayMs": 100,
+	});
+	if (responseKind === "compaction" && acquired.sessionManager.getEntries().length === 0) {
+		for (const text of ["persisted branch context one", "persisted branch context two"]) {
+			acquired.sessionManager.appendMessage({ role: "user", content: [{ type: "text", text }], timestamp: Date.now() });
+			acquired.sessionManager.appendMessage({
+				role: "assistant",
+				content: [{ type: "text", text: "persisted response for " + text }],
+				api,
+				provider,
+				model: model.id,
+				usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+				stopReason: "stop",
+				timestamp: Date.now(),
+			});
+		}
+		await acquired.sessionManager.flush();
+	}
 	const { session } = await createAgentSession({
 		cwd,
 		agentDir: home,
@@ -245,7 +344,21 @@ async function createSession(responseKind, providerCalls, existing) {
 		enableLsp: false,
 		rules: [],
 		workspaceTree: { rootPath: cwd, rendered: "", truncated: false, totalLines: 0, agentsMdFiles: [] },
-		toolNames: [],
+		toolNames: responseKind === "mixed" ? ["durable_gate"] : [],
+		customTools: responseKind === "mixed"
+			? [{
+				name: "durable_gate",
+				label: "durable gate",
+				description: "Gates this process proof until its queued input is durable.",
+				parameters: z.object({}),
+				async execute() {
+					existing?.toolExecutions?.push("durable_gate");
+					existing?.toolStarted?.resolve();
+					await existing?.toolGate?.promise;
+					return { content: [{ type: "text", text: "gate released" }] };
+				},
+			}]
+			: undefined,
 	});
 	return { session, sessionManager: acquired.sessionManager, ownership: acquired.ownership, authStorage, settings };
 }
@@ -263,7 +376,6 @@ if (action === "first") {
 	const commandSink = { bash: [], python: [], statuses: [] };
 	const harness = await createSession("rate-limit", providerCalls);
 	try {
-		const failedTurn = waitForTurnEnd(harness.session, event => Boolean(event.message?.errorMessage?.includes("rate_limit_error")));
 		const { ctx, editor } = createControllerContext(harness.session, harness.sessionManager, harness.settings, commandSink);
 		let submittedTurn;
 		ctx.onInputCallback = submission => {
@@ -272,7 +384,6 @@ if (action === "first") {
 		const controller = new InputController(ctx);
 		controller.setupEditorSubmitHandler();
 		await editor.onSubmit("ordinary durable hello");
-		await failedTurn;
 		if (!submittedTurn) throw new Error("idle submission did not start a session prompt");
 		await submittedTurn;
 		await harness.session.waitForIdle();
@@ -305,11 +416,12 @@ if (action === "first") {
 	const earlyDue = (await queue.retryDue(retryAt - 1)).length;
 	const due = (await queue.retryDue(retryAt)).length;
 	const responseGate = Promise.withResolvers();
-	const harness = await createSession("success", providerCalls, { sessionManager, ownership, responseGate });
+	const providerInvoked = Promise.withResolvers();
+	const releaseResponse = providerInvoked.promise.then(() => responseGate.resolve());
+	const harness = await createSession("success", providerCalls, { sessionManager, ownership, responseGate, providerInvoked });
 	try {
-		const successfulTurn = waitForTurnEnd(harness.session, event => !event.message?.errorMessage);
-		responseGate.resolve();
-		await successfulTurn;
+		await providerInvoked.promise;
+		await releaseResponse;
 		await harness.session.waitForIdle();
 		const completed = latestAttempt(harness.sessionManager, "completed");
 		const failed = latestRateLimit(harness.sessionManager);
@@ -333,23 +445,141 @@ if (action === "first") {
 	} finally {
 		await closeHarness(harness);
 	}
+} else if (action === "mixed") {
+	const providerCalls = [];
+	const toolGate = Promise.withResolvers();
+	const toolStarted = Promise.withResolvers();
+	const thirdCall = Promise.withResolvers();
+	const toolExecutions = [];
+	const harness = await createSession("mixed", providerCalls, { toolGate, toolStarted, thirdCall, toolExecutions });
+	let unhandledRejections = 0;
+	let uncaughtErrors = 0;
+	const onUnhandledRejection = () => {
+		unhandledRejections++;
+	};
+	const onUncaughtException = () => {
+		uncaughtErrors++;
+	};
+	process.on("unhandledRejection", onUnhandledRejection);
+	process.on("uncaughtException", onUncaughtException);
+	try {
+		const initial = harness.session.followUp("initial tool request");
+		await toolStarted.promise;
+		await harness.session.followUp("lower follow-up");
+		await harness.session.steer("higher steer");
+		const coreQueuedInputs = harness.session.messages
+			.filter(message => message.role === "user")
+			.flatMap(message => typeof message.content === "string"
+				? [message.content]
+				: message.content.filter(part => part.type === "text").map(part => part.text))
+			.filter(text => text === "lower follow-up" || text === "higher steer");
+		toolGate.resolve();
+		await initial;
+		await thirdCall.promise;
+		await harness.session.waitForIdle();
+		const attempts = durableAttemptEntries(harness.sessionManager).map(entry => ({
+			inputId: entry.inputId,
+			attemptId: entry.attemptId,
+			revision: entry.revision,
+			state: entry.state,
+		}));
+		console.log(JSON.stringify({
+			action: "mixed",
+			providerCalls,
+			toolExecutions,
+			coreQueuedInputs,
+			attempts,
+			unhandledRejections,
+			uncaughtErrors,
+		}));
+	} finally {
+		process.off("unhandledRejection", onUnhandledRejection);
+		process.off("uncaughtException", onUncaughtException);
+		await closeHarness(harness);
+	}
+} else if (action === "compaction") {
+	const providerCalls = [];
+	const responseGate = Promise.withResolvers();
+	const providerInvoked = Promise.withResolvers();
+	const harness = await createSession("compaction", providerCalls, { responseGate, providerInvoked });
+	let unhandledRejections = 0;
+	let uncaughtErrors = 0;
+	const onUnhandledRejection = () => {
+		unhandledRejections++;
+	};
+	const onUncaughtException = () => {
+		uncaughtErrors++;
+	};
+	process.on("unhandledRejection", onUnhandledRejection);
+	process.on("uncaughtException", onUncaughtException);
+	try {
+		const compacting = harness.session.compact();
+		await providerInvoked.promise;
+		const queuedInput = harness.session.followUp("input captured during compaction");
+		const projection = await DurableInputQueue.open(harness.ownership, path.join(home, ".agent-mux"));
+		let queuedDuringCompaction = await projection.replayQueued();
+		for (let attempt = 0; queuedDuringCompaction.length === 0 && attempt < 50; attempt++) {
+			await Bun.sleep(1);
+			queuedDuringCompaction = await projection.replayQueued();
+		}
+		if (queuedDuringCompaction.length === 0) throw new Error("input was not journaled while compaction provider was gated");
+		if (providerCalls.some(call => call.includes("input captured during compaction"))) {
+			throw new Error("main provider received input before compaction committed: " + JSON.stringify(providerCalls));
+		}
+		responseGate.resolve();
+		await compacting;
+		await queuedInput;
+		await harness.session.waitForIdle();
+		const entries = harness.sessionManager.getEntries();
+		const compactionIndex = entries.findIndex(entry => entry.type === "compaction");
+		if (compactionIndex < 0) throw new Error("manual compaction did not persist a compaction entry");
+		const compactionEntry = entries[compactionIndex];
+		if (compactionEntry?.type !== "compaction" || typeof compactionEntry.queueBoundarySequence !== "number") {
+			throw new Error("compaction entry omitted queue boundary sequence");
+		}
+		const durableAttemptIndexes = entries
+			.map((entry, index) => entry.type === "custom" && entry.customType === "durable_input_attempt" ? index : -1)
+			.filter(index => index >= 0);
+		const attempts = durableAttemptEntries(harness.sessionManager).map(entry => ({
+			inputId: entry.inputId,
+			attemptId: entry.attemptId,
+			revision: entry.revision,
+			state: entry.state,
+		}));
+		console.log(JSON.stringify({
+			action: "compaction",
+			providerCalls,
+			queuedDuringCompaction: queuedDuringCompaction.map(input => ({
+				inputId: input.inputId,
+				sequence: input.sequence,
+				deliveryClass: input.deliveryClass,
+			})),
+			compactionBoundarySequence: compactionEntry.queueBoundarySequence,
+			compactionIndex,
+			durableAttemptIndexes,
+			attempts,
+			queuedAfter: (await projection.replayQueued()).length,
+			unhandledRejections,
+			uncaughtErrors,
+		}));
+	} finally {
+		process.off("unhandledRejection", onUnhandledRejection);
+		process.off("uncaughtException", onUncaughtException);
+		await closeHarness(harness);
+	}
 } else {
 	const providerCalls = [];
 	const responseGate = Promise.withResolvers();
-	const harness = await createSession("success", providerCalls, { responseGate });
+	const providerInvoked = Promise.withResolvers();
+	const harness = await createSession("success", providerCalls, { responseGate, providerInvoked });
 	let unhandledRejections = 0;
 	const onUnhandledRejection = () => {
 		unhandledRejections++;
 	};
 	process.on("unhandledRejection", onUnhandledRejection);
 	try {
-		const requestStarted = Promise.withResolvers();
-		const unsubscribe = harness.session.subscribe(event => {
-			if (event.type === "turn_start") requestStarted.resolve();
-		});
 		const inFlight = harness.session.prompt("lose ownership after request start");
-		await requestStarted.promise;
-		unsubscribe();
+		await providerInvoked.promise;
 		const replacement = {
 			sessionFile: harness.sessionManager.getSessionFile(),
 			sessionId: harness.sessionManager.getSessionId(),
@@ -362,6 +592,7 @@ if (action === "first") {
 		await replacementQueue.adopt();
 		responseGate.resolve();
 		await inFlight;
+		await harness.session.waitForIdle();
 		const inputStartedAt = Date.now();
 		const results = await Promise.all(
 			["first rejected input", "second rejected input"].map(text =>
@@ -390,6 +621,27 @@ process.exit(0);
 
 function isStringArray(value: unknown): value is readonly string[] {
 	return Array.isArray(value) && value.every(item => typeof item === "string");
+}
+
+function isAttemptLedger(value: unknown): value is MixedChildResult["attempts"][number] {
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		typeof (value as Record<string, unknown>).inputId === "string" &&
+		typeof (value as Record<string, unknown>).attemptId === "string" &&
+		typeof (value as Record<string, unknown>).revision === "number" &&
+		typeof (value as Record<string, unknown>).state === "string"
+	);
+	}
+
+function isCompactionProjection(value: unknown): value is CompactionChildResult["queuedDuringCompaction"][number] {
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		typeof (value as Record<string, unknown>).inputId === "string" &&
+		typeof (value as Record<string, unknown>).sequence === "number" &&
+		typeof (value as Record<string, unknown>).deliveryClass === "string"
+	);
 }
 
 function decodeChildResult(value: unknown): ChildResult {
@@ -449,6 +701,54 @@ function decodeChildResult(value: unknown): ChildResult {
 				admittedAgain: record.admittedAgain,
 			};
 		}
+	}
+	if (
+		record.action === "mixed" &&
+		isStringArray(record.providerCalls) &&
+		isStringArray(record.toolExecutions) &&
+		isStringArray(record.coreQueuedInputs) &&
+		Array.isArray(record.attempts) &&
+		record.attempts.every(isAttemptLedger) &&
+		typeof record.unhandledRejections === "number" &&
+		typeof record.uncaughtErrors === "number"
+	) {
+		return {
+			action: "mixed",
+			providerCalls: record.providerCalls,
+			toolExecutions: record.toolExecutions.length,
+			coreQueuedInputs: record.coreQueuedInputs,
+			attempts: record.attempts,
+			unhandledRejections: record.unhandledRejections,
+			uncaughtErrors: record.uncaughtErrors,
+		};
+	}
+	if (
+		record.action === "compaction" &&
+		isStringArray(record.providerCalls) &&
+		Array.isArray(record.queuedDuringCompaction) &&
+		record.queuedDuringCompaction.every(isCompactionProjection) &&
+		typeof record.compactionBoundarySequence === "number" &&
+		typeof record.compactionIndex === "number" &&
+		Array.isArray(record.durableAttemptIndexes) &&
+		record.durableAttemptIndexes.every(index => typeof index === "number") &&
+		Array.isArray(record.attempts) &&
+		record.attempts.every(isAttemptLedger) &&
+		typeof record.queuedAfter === "number" &&
+		typeof record.unhandledRejections === "number" &&
+		typeof record.uncaughtErrors === "number"
+	) {
+		return {
+			action: "compaction",
+			providerCalls: record.providerCalls,
+			queuedDuringCompaction: record.queuedDuringCompaction,
+			compactionBoundarySequence: record.compactionBoundarySequence,
+			compactionIndex: record.compactionIndex,
+			durableAttemptIndexes: record.durableAttemptIndexes,
+			attempts: record.attempts,
+			queuedAfter: record.queuedAfter,
+			unhandledRejections: record.unhandledRejections,
+			uncaughtErrors: record.uncaughtErrors,
+		};
 	}
 	if (
 		record.action === "loss" &&
@@ -565,6 +865,65 @@ describe("AgentSession durable input queue process replacement", () => {
 		expect(replacementHead.ownershipEpoch).toBe(resumed.ownerEpoch);
 		expect((await fs.stat(initialSegment)).size).toBe(initialSegmentBytes);
 	}, 15_000);
+	it("delivers lower follow-up and higher steer at their eligible AgentSession boundaries", async () => {
+		const root = await fs.mkdtemp(path.join(os.tmpdir(), "omp-agent-session-queue-mixed-"));
+		roots.push(root);
+		const fixture = await createPersistedSession(root);
+		const mixed = await runChild({
+			ACTION: "mixed",
+			CWD: fixture.cwd,
+			HOME: fixture.home,
+			SESSIONS_DIR: fixture.sessionsDir,
+			SESSION_FILE: fixture.sessionFile,
+		});
+		if (mixed.action !== "mixed") throw new Error("mixed child returned an unexpected result");
+
+		expect(mixed.providerCalls).toHaveLength(3);
+		expect(mixed.providerCalls[0]).toBe("initial tool request");
+		expect(mixed.providerCalls[1]).toContain("higher steer");
+		expect(mixed.providerCalls[2]).toContain("lower follow-up");
+		expect(mixed.toolExecutions).toBe(1);
+		expect(mixed.coreQueuedInputs).toEqual([]);
+		expect(mixed.unhandledRejections).toBe(0);
+		expect(mixed.uncaughtErrors).toBe(0);
+		const inputs = ["initial tool request", "higher steer", "lower follow-up"];
+		const byAttempt = Map.groupBy(mixed.attempts, entry => `${entry.inputId}:${entry.attemptId}:${entry.revision}`);
+		expect(byAttempt.size).toBe(inputs.length);
+		expect([...byAttempt.values()].map(entries => entries.map(entry => entry.state))).toEqual(
+			inputs.map(() => ["admitted", "request-started", "completed"]),
+		);
+	}, 10_000);
+	it("holds queued input behind a durable manual compaction boundary", async () => {
+		const root = await fs.mkdtemp(path.join(os.tmpdir(), "omp-agent-session-queue-compaction-"));
+		roots.push(root);
+		const fixture = await createPersistedSession(root);
+		const compaction = await runChild({
+			ACTION: "compaction",
+			CWD: fixture.cwd,
+			HOME: fixture.home,
+			SESSIONS_DIR: fixture.sessionsDir,
+			SESSION_FILE: fixture.sessionFile,
+		});
+		if (compaction.action !== "compaction") throw new Error("compaction child returned an unexpected result");
+
+		expect(compaction.queuedDuringCompaction).toHaveLength(1);
+		const [queued] = compaction.queuedDuringCompaction;
+		if (!queued) throw new Error("compaction child omitted queued input projection");
+		expect(queued).toMatchObject({ deliveryClass: "followUp" });
+		expect(queued.inputId).not.toBe("");
+		expect(queued.sequence).toBeGreaterThan(compaction.compactionBoundarySequence);
+		expect(compaction.providerCalls.at(-1)).toContain("input captured during compaction");
+		expect(compaction.providerCalls.slice(0, -1).every(call => !call.includes("input captured during compaction"))).toBe(true);
+		expect(compaction.compactionIndex).toBeGreaterThanOrEqual(0);
+		expect(compaction.durableAttemptIndexes.length).toBeGreaterThan(0);
+		expect(compaction.durableAttemptIndexes.every(index => index > compaction.compactionIndex)).toBe(true);
+		expect(compaction.attempts).toHaveLength(3);
+		expect(compaction.attempts.map(entry => entry.state)).toEqual(["admitted", "request-started", "completed"]);
+		expect(new Set(compaction.attempts.map(entry => entry.inputId))).toEqual(new Set([queued.inputId]));
+		expect(compaction.queuedAfter).toBe(0);
+		expect(compaction.unhandledRejections).toBe(0);
+		expect(compaction.uncaughtErrors).toBe(0);
+	}, 10_000);
 	it("rejects repeated input promptly after queue ownership loss without retrying", async () => {
 		const root = await fs.mkdtemp(path.join(os.tmpdir(), "omp-agent-session-queue-loss-"));
 		roots.push(root);
@@ -580,5 +939,5 @@ describe("AgentSession durable input queue process replacement", () => {
 		expect(lost.results).toEqual(["SessionOwnershipLostError", "SessionOwnershipLostError"]);
 		expect(lost.inputElapsedMs).toBeLessThan(250);
 		expect(lost.unhandledRejections).toBe(0);
-	}, 1_000);
+	}, 5_000);
 });

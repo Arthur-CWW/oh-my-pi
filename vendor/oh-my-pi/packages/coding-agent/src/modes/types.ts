@@ -39,11 +39,6 @@ import type { LoopLimitRuntime } from "./loop-limit";
 import type { OAuthManualInputManager } from "./oauth-manual-input";
 import type { Theme } from "./theme/theme";
 
-export type CompactionQueuedMessage = {
-	text: string;
-	mode: "steer" | "followUp";
-	images?: ImageContent[];
-};
 
 export type SubmittedUserInput = {
 	text: string;
@@ -154,7 +149,6 @@ export interface InteractiveModeContext {
 	hideThinkingBlock: boolean;
 	pendingImages: ImageContent[];
 	pendingImageLinks: (string | undefined)[];
-	compactionQueuedMessages: CompactionQueuedMessage[];
 	pendingTools: Map<string, ToolExecutionHandle>;
 	pendingBashComponents: BashExecutionComponent[];
 	bashComponent: BashExecutionComponent | undefined;
@@ -224,8 +218,6 @@ export interface InteractiveModeContext {
 	showNewVersionNotification(newVersion: string): void;
 	clearEditor(): void;
 	updatePendingMessagesDisplay(): void;
-	queueCompactionMessage(text: string, mode: "steer" | "followUp", images?: ImageContent[]): void;
-	flushCompactionQueue(options?: { willRetry?: boolean }): Promise<void>;
 	flushPendingBashComponents(): void;
 	flushPendingModelSwitch(): Promise<void>;
 	setWorkingMessage(message?: string): void;

@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "bun:test";
 import { InputController } from "@oh-my-pi/pi-coding-agent/modes/controllers/input-controller";
 import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
+import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
+import type { DurableInputPayload, DurableQueuedInput } from "@oh-my-pi/pi-coding-agent/session/durable-input-queue";
 import manualContinuePrompt from "../src/prompts/system/manual-continue.md" with { type: "text" };
 
 type FakeEditor = {
@@ -32,6 +34,33 @@ type FakeEditor = {
 	pasteText(text: string): void;
 };
 
+type DurableProjectionItem = DurableQueuedInput;
+
+function installDurableInputSeam(
+	ctx: InteractiveModeContext,
+	projection: DurableProjectionItem[],
+	edit: (inputId: string, revision: number, payload: DurableInputPayload) => Promise<DurableQueuedInput>,
+): { clearQueueCalls: () => number; cancelCalls: () => number } {
+	let clearQueueCalls = 0;
+	let cancelCalls = 0;
+	const session = ctx.session as AgentSession;
+	Object.assign(
+		session,
+		{
+			getQueuedInputProjection: () => projection,
+			editQueuedInput: edit,
+			clearQueue: () => {
+				clearQueueCalls += 1;
+				return { steering: [], followUp: [] };
+			},
+			cancelQueuedInput: async () => {
+				cancelCalls += 1;
+				return projection[0]!;
+			},
+		} satisfies Pick<AgentSession, "getQueuedInputProjection" | "editQueuedInput" | "clearQueue" | "cancelQueuedInput">,
+	);
+	return { clearQueueCalls: () => clearQueueCalls, cancelCalls: () => cancelCalls };
+}
 async function createContext() {
 	let editorText = "";
 	const keyMap: Record<string, string[]> = {
@@ -57,10 +86,12 @@ async function createContext() {
 	const terminalWrite = vi.fn();
 	const prompt = vi.fn(async () => {});
 	const abort = vi.fn(async () => {});
+	const sendUserMessage = vi.fn(async () => {});
 	const hardCancel = vi.fn();
 	const focusParentSession = vi.fn(async () => {});
 	const showStatus = vi.fn();
 	const updatePendingMessagesDisplay = vi.fn();
+	const showError = vi.fn();
 	const editor: FakeEditor = {
 		setText(text: string) {
 			editorText = text;
@@ -99,6 +130,7 @@ async function createContext() {
 			extensionRunner: undefined,
 			prompt,
 			queuedMessageCount: 0,
+			sendUserMessage,
 			abort,
 			cancel: hardCancel,
 		} as unknown as InteractiveModeContext["session"],
@@ -155,7 +187,7 @@ async function createContext() {
 		viewSession: undefined,
 		updateEditorBorderColor: vi.fn(),
 		hasActiveBtw: vi.fn(() => false),
-		showError: vi.fn(),
+		showError,
 	} as unknown as InteractiveModeContext;
 	Object.defineProperty(ctx, "viewSession", { get: () => ctx.session });
 
@@ -169,12 +201,14 @@ async function createContext() {
 			showModelSelector,
 			prompt,
 			updatePendingMessagesDisplay,
+			sendUserMessage,
 			requestRender,
 			abort,
 			hardCancel,
 			focusParentSession,
 			showStatus,
 			resetDisplay,
+			showError,
 		},
 	};
 }
@@ -220,6 +254,107 @@ describe("InputController keybinding setup", () => {
 		expect(spies.prompt).not.toHaveBeenCalled();
 	});
 
+	it("restores exactly one highest-sequence durable input without class grouping or queue mutation", async () => {
+		const { InputController, ctx, editor } = await createContext();
+		const projection: DurableProjectionItem[] = [
+			{
+				inputId: "steer-2",
+				sequence: 2,
+				deliveryClass: "steer",
+				revision: 1,
+				payload: { text: "first steer", images: undefined },
+				state: "queued",
+				attempts: [],
+			},
+			{
+				inputId: "follow-9",
+				sequence: 9,
+				deliveryClass: "followUp",
+				revision: 4,
+				payload: { text: "latest follow-up", images: undefined },
+				state: "queued",
+				attempts: [],
+			},
+		];
+		const seam = installDurableInputSeam(ctx, projection, async () => projection[1]!);
+		const controller = new InputController(ctx);
+
+		expect(controller.restoreQueuedMessagesToEditor()).toBe(1);
+		expect(editor.getText()).toBe("latest follow-up");
+		expect(seam.clearQueueCalls()).toBe(0);
+		expect(seam.cancelCalls()).toBe(0);
+	});
+
+	it("edits the restored durable input by stable identity and revision", async () => {
+		const { InputController, ctx, editor, spies } = await createContext();
+		const projection: DurableProjectionItem[] = [
+			{
+				inputId: "input-7",
+				sequence: 7,
+				deliveryClass: "steer",
+				revision: 3,
+				payload: { text: "original", images: undefined },
+				state: "queued",
+				attempts: [],
+			},
+		];
+		const edits: { inputId: string; revision: number; payload: DurableInputPayload }[] = [];
+		installDurableInputSeam(ctx, projection, async (inputId, revision, payload) => {
+			edits.push({ inputId, revision, payload });
+			return projection[0]!;
+		});
+		const controller = new InputController(ctx);
+		controller.restoreQueuedMessagesToEditor();
+		editor.setText("replacement");
+		controller.setupEditorSubmitHandler();
+
+		await editor.onSubmit?.("replacement");
+
+		expect(edits).toEqual([{ inputId: "input-7", revision: 3, payload: { text: "replacement", images: undefined } }]);
+		expect(editor.getText()).toBe("");
+		expect(spies.prompt).not.toHaveBeenCalled();
+	});
+
+	it("releases a stale queued edit token so the retained draft submits as new input", async () => {
+		const { InputController, ctx, editor, spies } = await createContext();
+		const session = ctx.session as unknown as { isStreaming: boolean };
+		session.isStreaming = true;
+		const projection: DurableProjectionItem[] = [
+			{
+				inputId: "input-8",
+				sequence: 8,
+				deliveryClass: "steer",
+				revision: 5,
+				payload: { text: "original", images: undefined },
+				state: "queued",
+				attempts: [],
+			},
+		];
+		const attemptedRevisions: number[] = [];
+		installDurableInputSeam(ctx, projection, async (_inputId, revision) => {
+			attemptedRevisions.push(revision);
+			throw new Error("queued input input-8 was admitted");
+		});
+		const controller = new InputController(ctx);
+		controller.restoreQueuedMessagesToEditor();
+		editor.setText("keep this draft");
+		controller.setupEditorSubmitHandler();
+
+		await editor.onSubmit?.("keep this draft");
+
+		expect(editor.getText()).toBe("keep this draft");
+		expect(spies.showError).toHaveBeenCalledWith("queued input input-8 was admitted");
+
+		await editor.onSubmit?.("keep this draft");
+
+		expect(attemptedRevisions).toEqual([5]);
+		expect(spies.prompt).toHaveBeenCalledTimes(1);
+		expect(spies.prompt).toHaveBeenCalledWith("keep this draft", {
+			streamingBehavior: "steer",
+			images: undefined,
+		});
+	});
+
 	it("marks streaming follow-up submissions as local", async () => {
 		const { InputController, ctx, editor, spies } = await createContext();
 		const session = ctx.session as unknown as { isStreaming: boolean };
@@ -230,8 +365,8 @@ describe("InputController keybinding setup", () => {
 		await controller.handleFollowUp();
 
 		expect(ctx.locallySubmittedUserSignatures.has("follow up after current response\u00000")).toBe(true);
-		expect(spies.prompt).toHaveBeenCalledWith("follow up after current response", {
-			streamingBehavior: "followUp",
+		expect(spies.sendUserMessage).toHaveBeenCalledWith("follow up after current response", {
+			deliverAs: "followUp",
 		});
 		expect(spies.updatePendingMessagesDisplay).toHaveBeenCalledTimes(1);
 	});
@@ -245,13 +380,12 @@ describe("InputController keybinding setup", () => {
 		await controller.handleFollowUp();
 
 		expect(ctx.locallySubmittedUserSignatures.has("plain idle submit\u00000")).toBe(true);
-		// Idle submit calls prompt() with no streamingBehavior (images forwarded, undefined here).
-		expect(spies.prompt).toHaveBeenCalledWith("plain idle submit", { images: undefined });
+		expect(spies.sendUserMessage).toHaveBeenCalledWith("plain idle submit", { deliverAs: "followUp" });
 	});
 
 	it("removes the signature when an idle follow-up submission rejects", async () => {
 		const { InputController, ctx, editor, spies } = await createContext();
-		spies.prompt.mockImplementationOnce(async () => {
+		spies.sendUserMessage.mockImplementationOnce(async () => {
 			throw new Error("boom");
 		});
 		editor.setText("doomed submit");
@@ -269,7 +403,7 @@ describe("InputController keybinding setup", () => {
 		const { InputController, ctx, editor, spies } = await createContext();
 		const session = ctx.session as unknown as { isStreaming: boolean };
 		session.isStreaming = true;
-		spies.prompt.mockImplementationOnce(async () => {
+		spies.sendUserMessage.mockImplementationOnce(async () => {
 			throw new Error("queue full");
 		});
 		editor.setText("queued during stream");
@@ -344,7 +478,7 @@ describe("InputController keybinding setup", () => {
 		customHandlers.get("ctrl+q")?.();
 		await new Promise(resolve => setTimeout(resolve, 0));
 
-		expect(spies.prompt).toHaveBeenCalledWith("main follow-up", { images: undefined });
+		expect(spies.sendUserMessage).toHaveBeenCalledWith("main follow-up", { deliverAs: "followUp" });
 		expect(spies.focusParentSession).not.toHaveBeenCalled();
 	});
 

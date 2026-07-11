@@ -88,6 +88,7 @@ export class InputController {
 	// action. Seeded from 0 and bumped past any existing attachment files in #attachPasteAsFile.
 	#attachmentCounter = 0;
 	#quitConfirmationPending = false;
+	#queuedInputEdit?: { inputId: string; revision: number };
 
 	#showTinyTitleDownloadProgress(modelKey: string): void {
 		if (!isTinyTitleLocalModelKey(modelKey)) return;
@@ -485,6 +486,10 @@ export class InputController {
 			text = text.trim();
 			if ((!isSettingsInitialized() || settings.get("emojiAutocomplete")) && text) text = expandEmoticons(text);
 
+			if (text && (await this.#submitQueuedInputEdit(text, this.ctx.pendingImages))) {
+				return;
+			}
+
 			// Focused subagent session: the editor is a plain chat box for it.
 			// Everything below (continue shortcuts, slash/bash/python, loop,
 			// compaction queueing) is main-session-only.
@@ -506,6 +511,7 @@ export class InputController {
 			}
 
 			if (!text) return;
+
 
 			// Continue shortcuts: "." or "c" resume the agent with a hidden agent-authored
 			// developer directive (no visible user message) instead of an empty turn, so the
@@ -530,6 +536,7 @@ export class InputController {
 			const runner = this.ctx.session.extensionRunner;
 			let inputImages = this.ctx.pendingImages.length > 0 ? [...this.ctx.pendingImages] : undefined;
 			let inputImageLinks = this.ctx.pendingImageLinks.length > 0 ? [...this.ctx.pendingImageLinks] : undefined;
+
 
 			if (runner?.hasHandlers("input")) {
 				const result = await runner.emitInput(text, inputImages, "interactive");
@@ -652,10 +659,28 @@ export class InputController {
 				this.ctx.loopPrompt = text;
 			}
 
-			// Queue input during compaction
+			// Compaction admission is serialized by AgentSession's maintenance mutex.
+			// Capture through its durable queue immediately rather than keeping a
+			// controller-side buffer that could be lost before compaction resumes.
 			if (this.ctx.session.isCompacting) {
 				const images = inputImages && inputImages.length > 0 ? [...inputImages] : undefined;
-				this.ctx.queueCompactionMessage(text, "steer", images);
+				const content = images ? [{ type: "text" as const, text }, ...images] : text;
+				try {
+					await this.ctx.withLocalSubmission(
+						text,
+						() => this.ctx.session.sendUserMessage(content, { deliverAs: "steer" }),
+						{ imageCount: images?.length ?? 0 },
+					);
+					this.ctx.editor.addToHistory(text);
+					this.ctx.editor.setText("");
+					this.ctx.editor.imageLinks = undefined;
+					this.ctx.pendingImages = [];
+					this.ctx.pendingImageLinks = [];
+				} catch (error) {
+					this.ctx.showError(error instanceof Error ? error.message : String(error));
+				}
+				this.ctx.updatePendingMessagesDisplay();
+				this.ctx.ui.requestRender();
 				return;
 			}
 
@@ -1035,23 +1060,16 @@ export class InputController {
 		let text = this.ctx.editor.getText().trim();
 		if (!text) return;
 
+		if (await this.#submitQueuedInputEdit(text, this.ctx.pendingImages)) {
+			return;
+		}
+
 		// Focused subagent session: follow-ups go to it; non-chat input is gated.
 		if (this.ctx.focusedAgentId) {
 			await this.#submitToFocusedSession(text, "followUp");
 			return;
 		}
 
-		// Compaction first: while compacting, free text gets queued via
-		// `queueCompactionMessage`, and `/skill:*` rides the same queue so a
-		// skill typed during compaction is not lost or short-circuited through
-		// `promptCustomMessage`. The skill text is queued verbatim; whether
-		// the queued entry is later re-parsed into a skill invocation is a
-		// separate concern owned by the compaction-resume path.
-		if (this.ctx.session.isCompacting) {
-			const images = this.ctx.pendingImages.length > 0 ? [...this.ctx.pendingImages] : undefined;
-			this.ctx.queueCompactionMessage(text, "followUp", images);
-			return;
-		}
 
 		if (QUIT_COMMAND_RE.test(text)) {
 			await this.#requestInteractiveShutdown({ clearEditor: true });
@@ -1080,37 +1098,51 @@ export class InputController {
 		// durable follow-up delivery before a new turn may be admitted.
 		const images = this.ctx.pendingImages.length > 0 ? [...this.ctx.pendingImages] : undefined;
 		const content = images ? [{ type: "text" as const, text }, ...images] : text;
-		this.ctx.editor.addToHistory(text);
-		this.ctx.editor.setText("");
-		this.ctx.editor.imageLinks = undefined;
-		this.ctx.pendingImages = [];
-		this.ctx.pendingImageLinks = [];
 		await this.ctx.withLocalSubmission(
 			text,
 			() => this.ctx.session.sendUserMessage(content, { deliverAs: "followUp" }),
 			{ imageCount: images?.length ?? 0 },
 		);
+		this.ctx.editor.addToHistory(text);
+		this.ctx.editor.setText("");
+		this.ctx.editor.imageLinks = undefined;
+		this.ctx.pendingImages = [];
+		this.ctx.pendingImageLinks = [];
 		this.ctx.updatePendingMessagesDisplay();
 		this.ctx.ui.requestRender();
 	}
 
+	/**
+	 * Restore one durable queued input for identity-aware editing. Legacy agent-core
+	 * queues remain restorable only while the durable projection is empty.
+	 */
 	restoreQueuedMessagesToEditor(options?: { abort?: boolean; currentText?: string }): number {
 		this.ctx.locallySubmittedUserSignatures.clear();
+		const durableProjection = this.ctx.session.getQueuedInputProjection();
+		if (durableProjection.length > 0) {
+			let selected: (typeof durableProjection)[number] | undefined;
+			for (const item of durableProjection) {
+				if (item.state === "queued" && (!selected || item.sequence > selected.sequence)) {
+					selected = item;
+				}
+			}
+			if (selected) {
+				this.ctx.editor.setText(selected.payload.text);
+				this.ctx.pendingImages = selected.payload.images ? [...selected.payload.images] : [];
+				this.ctx.pendingImageLinks = this.ctx.pendingImages.map(() => undefined);
+				this.ctx.editor.imageLinks =
+					this.ctx.pendingImageLinks.length > 0 ? this.ctx.pendingImageLinks : undefined;
+				this.#queuedInputEdit = { inputId: selected.inputId, revision: selected.revision };
+			}
+			this.ctx.updatePendingMessagesDisplay();
+			if (options?.abort) {
+				void this.ctx.session.abort({ reason: USER_INTERRUPT_LABEL });
+			}
+			return selected ? 1 : 0;
+		}
+
 		const { steering, followUp } = this.ctx.session.clearQueue();
-		// Messages typed while compacting live in `compactionQueuedMessages`, not the
-		// agent queue `clearQueue()` drains — but the pending bar shows the same
-		// "Alt+Up to edit" hint for them (ui-helpers `updatePendingMessagesDisplay`).
-		// Drain them here too so the dequeue restores every message the hint
-		// advertises; otherwise a skill/text queued during compaction is stranded and
-		// Alt+Up reports "No queued messages to restore".
-		const compactionQueued = this.ctx.compactionQueuedMessages;
-		this.ctx.compactionQueuedMessages = [];
-		const allQueued = [
-			...steering,
-			...compactionQueued.filter(e => e.mode === "steer").map(e => ({ text: e.text, images: e.images })),
-			...followUp,
-			...compactionQueued.filter(e => e.mode === "followUp").map(e => ({ text: e.text, images: e.images })),
-		];
+		const allQueued = [...steering, ...followUp];
 		if (allQueued.length === 0) {
 			this.ctx.updatePendingMessagesDisplay();
 			if (options?.abort) {
@@ -1118,16 +1150,7 @@ export class InputController {
 			}
 			return 0;
 		}
-		// Image markers are positional: `[Image #N]` ↔ `pendingImages[N-1]`. Each
-		// queued message numbered its markers against its own local image list
-		// (1..K). Because we prepend the queued text but append the queued images
-		// to `pendingImages`, any existing draft images (M of them) — plus images
-		// already pulled in by earlier queued messages — shift the slot index that
-		// every marker must point to. Bumping each message's markers by the
-		// running offset keeps the merged text aligned with the merged
-		// `pendingImages` order; draft markers stay valid because draft images
-		// keep their original positions.
-		const queuedImages = allQueued.flatMap(e => e.images ?? []);
+		const queuedImages = allQueued.flatMap(entry => entry.images ?? []);
 		let queuedText: string;
 		if (queuedImages.length > 0) {
 			const parts: string[] = [];
@@ -1138,14 +1161,10 @@ export class InputController {
 			}
 			queuedText = parts.join("\n\n");
 		} else {
-			queuedText = allQueued.map(e => e.text).join("\n\n");
+			queuedText = allQueued.map(entry => entry.text).join("\n\n");
 		}
 		const currentText = options?.currentText ?? this.ctx.editor.getText();
-		const combinedText = [queuedText, currentText].filter(t => t.trim()).join("\n\n");
-		this.ctx.editor.setText(combinedText);
-		// Hand queued images back to the pending-image buffer (links are
-		// re-materialized lazily; the restored text already carries the
-		// renumbered `[Image #N, WxH]` markers).
+		this.ctx.editor.setText([queuedText, currentText].filter(text => text.trim()).join("\n\n"));
 		if (queuedImages.length > 0) {
 			this.ctx.pendingImages.push(...queuedImages);
 			this.ctx.pendingImageLinks.push(...queuedImages.map(() => undefined));
@@ -1156,6 +1175,31 @@ export class InputController {
 			void this.ctx.session.abort({ reason: USER_INTERRUPT_LABEL });
 		}
 		return allQueued.length;
+	}
+
+	async #submitQueuedInputEdit(text: string, images: readonly ImageContent[]): Promise<boolean> {
+		const token = this.#queuedInputEdit;
+		if (!token) return false;
+		const payloadImages = images.length > 0 ? [...images] : undefined;
+		try {
+			await this.ctx.session.editQueuedInput(token.inputId, token.revision, {
+				text,
+				images: payloadImages,
+			});
+		} catch (error) {
+			this.#queuedInputEdit = undefined;
+			this.ctx.showError(error instanceof Error ? error.message : String(error));
+			return true;
+		}
+		this.ctx.editor.addToHistory(text);
+		this.ctx.editor.setText("");
+		this.ctx.editor.imageLinks = undefined;
+		this.ctx.pendingImages = [];
+		this.ctx.pendingImageLinks = [];
+		this.#queuedInputEdit = undefined;
+		this.ctx.updatePendingMessagesDisplay();
+		this.ctx.ui.requestRender();
+		return true;
 	}
 
 	async #insertPendingImage(imageData: ImageContent): Promise<void> {

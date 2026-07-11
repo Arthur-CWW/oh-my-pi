@@ -67,6 +67,11 @@ export interface CompactionEntry<T = unknown> extends SessionEntryBase {
 	shortSummary?: string;
 	firstKeptEntryId: string;
 	tokensBefore: number;
+	/**
+	 * Highest durable input queue sequence observed when compaction began.
+	 * Audit metadata only; it neither owns the queue nor asserts payload inclusion.
+	 */
+	queueBoundarySequence?: number;
 	/** Extension-specific data (e.g., ArtifactIndex, version markers for structured compaction) */
 	details?: T;
 	/** Hook-provided data to persist across compaction */

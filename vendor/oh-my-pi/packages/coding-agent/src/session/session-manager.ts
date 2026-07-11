@@ -1296,6 +1296,7 @@ export class SessionManager {
 		details?: T,
 		fromExtension?: boolean,
 		preserveData?: Record<string, unknown>,
+		queueBoundarySequence?: number,
 	): string {
 		const entry: CompactionEntry<T> = {
 			type: "compaction",
@@ -1307,6 +1308,7 @@ export class SessionManager {
 			details,
 			fromExtension,
 			preserveData,
+			queueBoundarySequence,
 		};
 		this.#recordEntry(entry);
 		return entry.id;

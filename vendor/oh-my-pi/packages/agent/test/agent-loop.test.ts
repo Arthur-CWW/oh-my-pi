@@ -1144,6 +1144,65 @@ describe("agentLoop with AgentMessage", () => {
 		if (finalAssistant?.message.role !== "assistant") return;
 		expect(finalAssistant.message.stopReason).toBe("stop");
 	});
+	it("admits one host message after a tool batch into the next model request", async () => {
+		const toolSchema = z.object({ value: z.string() });
+		const executed: string[] = [];
+		const tool: AgentTool<typeof toolSchema, { value: string }> = {
+			name: "echo",
+			label: "Echo",
+			description: "Echo tool",
+			parameters: toolSchema,
+			async execute(_toolCallId, params) {
+				executed.push(params.value);
+				return {
+					content: [{ type: "text", text: `echoed: ${params.value}` }],
+					details: { value: params.value },
+				};
+			},
+		};
+		const context: AgentContext = { systemPrompt: [""], messages: [], tools: [tool] };
+		const mock = createMockModel({
+			responses: [
+				{ content: [{ type: "toolCall", id: "tool-1", name: "echo", arguments: { value: "first" } }] },
+				{ content: ["done"] },
+			],
+		});
+
+		const admitted = createUserMessage("host-admitted");
+		const boundaries: string[] = [];
+		const config: AgentLoopConfig = {
+			model: mock.model,
+			convertToLlm: identityConverter,
+			admitQueuedInput: async boundary => {
+				boundaries.push(boundary);
+				return admitted;
+			},
+		};
+
+		const events: AgentEvent[] = [];
+		const stream = agentLoop([createUserMessage("start")], context, config, undefined, mock.stream);
+		for await (const event of stream) {
+			events.push(event);
+		}
+
+		expect(executed).toEqual(["first"]);
+		expect(boundaries).toEqual(["tool"]);
+		const secondRequestMessages = mock.calls[1]?.context.messages ?? [];
+		const toolResultIndex = secondRequestMessages.findIndex(message => message.role === "toolResult");
+		const admittedIndex = secondRequestMessages.findIndex(
+			message => message.role === "user" && typeof message.content === "string" && message.content === "host-admitted",
+		);
+		expect(admittedIndex).toBeGreaterThan(toolResultIndex);
+		expect(
+			events.some(
+				event =>
+					event.type === "message_start" &&
+					event.message.role === "user" &&
+					event.message.content === "host-admitted",
+			),
+		).toBe(true);
+	});
+
 
 	it("injects aside messages at the step boundary without interrupting tools", async () => {
 		const toolSchema = z.object({ value: z.string() });

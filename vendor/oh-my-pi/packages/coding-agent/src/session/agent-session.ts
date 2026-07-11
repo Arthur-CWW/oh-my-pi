@@ -273,7 +273,13 @@ import {
 	shouldEvaluateCodexAutoRedeem,
 	shouldPromptCodexAutoRedeem,
 } from "./codex-auto-reset";
-import { DurableInputQueue, SessionOwnershipLostError } from "./durable-input-queue";
+import {
+	DurableInputQueue,
+	type DurableInputPayload,
+	type DurableInputState,
+	type DurableQueuedInput,
+	SessionOwnershipLostError,
+} from "./durable-input-queue";
 import {
 	type BashExecutionMessage,
 	type CustomMessage,
@@ -492,6 +498,7 @@ export interface AgentSessionConfig {
 }
 
 const kDurableAdmittedPrompt = Symbol("durable-admitted-prompt");
+const kNormalizedPromptImages = Symbol("normalized-prompt-images");
 
 /** Options for AgentSession.prompt() */
 export interface PromptOptions {
@@ -517,7 +524,10 @@ export interface PromptOptions {
 	skipCompactionCheck?: boolean;
 }
 
-type InternalPromptOptions = PromptOptions & { [kDurableAdmittedPrompt]?: true };
+type InternalPromptOptions = PromptOptions & {
+	[kDurableAdmittedPrompt]?: true;
+	[kNormalizedPromptImages]?: ImageContent[];
+};
 
 type DurableAttemptJournalState =
 	| "admitted"
@@ -531,6 +541,7 @@ interface DurableAttemptJournalMarker {
 	readonly inputId: string;
 	readonly attemptId: string;
 	readonly state: DurableAttemptJournalState;
+	readonly revision?: number;
 	readonly retryAt?: number;
 }
 
@@ -553,12 +564,17 @@ function decodeDurableAttemptJournalMarker(entry: SessionEntry): DurableAttemptJ
 	) {
 		return undefined;
 	}
+	const revision = record.revision;
+	if (revision !== undefined && (typeof revision !== "number" || !Number.isInteger(revision) || revision < 1)) {
+		return undefined;
+	}
 	const retryAt = record.retryAt;
 	if (retryAt !== undefined && (typeof retryAt !== "number" || !Number.isFinite(retryAt))) return undefined;
 	return {
 		inputId: record.inputId,
 		attemptId: record.attemptId,
 		state,
+		...(revision === undefined ? {} : { revision }),
 		...(retryAt === undefined ? {} : { retryAt }),
 	};
 }
@@ -982,6 +998,14 @@ function extractPermissionLocations(
 /** Entry returned by {@link AgentSession.clearQueue} / {@link AgentSession.popLastQueuedMessage}. */
 export type RestoredQueuedMessage = { text: string; images?: ImageContent[] };
 
+const DURABLE_PENDING_INPUT_STATES: readonly DurableInputState[] = Object.freeze([
+	"queued",
+	"admitted",
+	"running",
+	"uncertain",
+	"failed-rate-limit",
+]);
+
 function queuedTextContent(message: AgentMessage): string | undefined {
 	if (!("content" in message)) return undefined;
 	const content = message.content;
@@ -1073,18 +1097,26 @@ export class AgentSession {
 	readonly agent: Agent;
 	readonly sessionManager: SessionManager;
 	readonly settings: Settings;
+	readonly yieldQueue: YieldQueue;
 	#durableInputQueue: Promise<DurableInputQueue | undefined> = Promise.resolve(undefined);
 	#durableInputQueueRequired = false;
 	#durableInputQueueError: Error | undefined;
+	/** Read-only display projection; durable-input-queue remains the sole queue authority. */
+	#durableQueuedInputProjection: readonly DurableQueuedInput[] = Object.freeze([]);
 	#activeDurableInputId: string | undefined;
 	#activeDurableAttemptId: string | undefined;
+	#activeDurableInputRevision: number | undefined;
 	#activeDurableRequestStarted = false;
+	#durableAdmissionMaintenanceTail: Promise<void> = Promise.resolve();
+	#durableAdmissionMaintenanceRelease: (() => void) | undefined;
 	#durableRateLimitHandledForAgentEnd = false;
 	#durableRateLimitRetryTimer: ReturnType<typeof setTimeout> | undefined;
 	#durableRateLimitRetryAt: number | undefined;
 	#durableQueueDrainScheduled = false;
+	#durableQueueDrainPromise: Promise<void> | undefined;
+	/** A terminal drain remains due after a turn_end raced outer prompt recovery. */
+	#durableQueueDrainPending = false;
 	#durableOwnershipLostError: SessionOwnershipLostError | undefined;
-	readonly yieldQueue: YieldQueue;
 	fileSnapshotStore?: InMemorySnapshotStore;
 	#autoApprove: boolean;
 
@@ -1367,6 +1399,7 @@ export class AgentSession {
 			this.#releasePowerAssertion();
 			const emittedAgentEnd = this.#flushPendingAgentEnd();
 			this.#drainStrandedQueuedMessages();
+			this.#scheduleDurableQueueDrainAfterIdle();
 			if (!emittedAgentEnd && this.#ircExternalPeerState === "working" && !this.agent.state.isStreaming) {
 				this.#updateExternalIrcPeerState("idle");
 			}
@@ -1448,6 +1481,7 @@ export class AgentSession {
 		this.#releasePowerAssertion();
 		const emittedAgentEnd = this.#flushPendingAgentEnd();
 		this.#drainStrandedQueuedMessages();
+		this.#scheduleDurableQueueDrainAfterIdle();
 		if (!emittedAgentEnd && this.#ircExternalPeerState === "working" && !this.agent.state.isStreaming) {
 			this.#updateExternalIrcPeerState("idle");
 		}
@@ -1470,6 +1504,7 @@ export class AgentSession {
 			this.#durableInputQueue = DurableInputQueue.open(ownership)
 				.then(async queue => {
 					await queue.adopt();
+					await this.#refreshDurableQueuedInputProjection(queue);
 					await this.#reconcileDurableInputAttempts(queue);
 					await this.#scheduleDurableRetry(queue);
 					return queue;
@@ -1484,8 +1519,17 @@ export class AgentSession {
 		}
 		const providerStream = this.agent.streamFn;
 		this.agent.streamFn = async (...args) => {
-			await this.#markActiveDurableRequestStarted();
-			return providerStream(...args);
+			try {
+				await this.#markActiveDurableRequestStarted();
+				return providerStream(...args);
+			} finally {
+				this.#releaseDurableAdmissionMaintenance();
+			}
+		};
+		const existingAdmitQueuedInput = this.agent.admitQueuedInput;
+		this.agent.admitQueuedInput = async boundary => {
+			if (!this.#durableInputQueueRequired) return existingAdmitQueuedInput?.(boundary);
+			return this.#admitDurableQueuedInputAtToolBoundary();
 		};
 		void this.#durableInputQueue
 			.then(() => this.#scheduleDurableQueueDrainAfterIdle())
@@ -2357,28 +2401,36 @@ export class AgentSession {
 			const queue = await this.#durableInputQueue;
 			if (queue) {
 				try {
+					const revision = this.#activeDurableInputRevision;
+					if (revision === undefined) throw new Error(`Durable input ${inputId} has no active revision`);
 					const message = event.message as AssistantMessage;
 					if (!requestStarted) {
 						await queue.requeueUnstarted(inputId, attemptId);
-						await this.#appendDurableAttemptEntry(inputId, attemptId, "not-executed");
+						await this.#refreshDurableQueuedInputProjection(queue);
+						await this.#appendDurableAttemptEntry(inputId, attemptId, revision, "not-executed");
 					} else if (message.errorMessage && isUsageLimitError(message.errorMessage)) {
 						const delay =
 							this.#parseRetryAfterMsFromError(message.errorMessage) ??
 							calculateRateLimitBackoffMs(parseRateLimitReason(message.errorMessage));
 						const retryAt = Date.now() + delay;
 						await queue.failRateLimit(inputId, attemptId, retryAt);
-						await this.#appendDurableAttemptEntry(inputId, attemptId, "failed-rate-limit", retryAt);
+						await this.#refreshDurableQueuedInputProjection(queue);
+						await this.#appendDurableAttemptEntry(inputId, attemptId, revision, "failed-rate-limit", retryAt);
 						this.#durableRateLimitHandledForAgentEnd = true;
 						await this.#scheduleDurableRetry(queue);
 					} else {
 						await queue.completeAttempt(inputId, attemptId);
-						await this.#appendDurableAttemptEntry(inputId, attemptId, "completed");
+						await this.#refreshDurableQueuedInputProjection(queue);
+						await this.#appendDurableAttemptEntry(inputId, attemptId, revision, "completed");
 					}
 					this.#clearActiveDurableAttempt();
 				} catch (error) {
 					if (!this.#handleDurableOwnershipLoss(error as Error)) throw error;
 				}
 			}
+		}
+		if (event.type === "agent_end") {
+			await this.#settleAbandonedDurableAdmission();
 		}
 		if (event.type === "turn_end" || event.type === "agent_end") {
 			this.#scheduleDurableQueueDrainAfterIdle();
@@ -3894,6 +3946,9 @@ export class AgentSession {
 		this.agent.setAsideMessageProvider(undefined);
 		this.#stopAdvisorRuntime();
 		this.#evalExecutionDisposing = true;
+		this.#durableQueueDrainPending = false;
+		this.#durableQueueDrainScheduled = false;
+		this.#durableQueueDrainPromise = undefined;
 	}
 
 	/**
@@ -4055,7 +4110,13 @@ export class AgentSession {
 	/** Wait until streaming and deferred recovery work are fully settled. */
 	async waitForIdle(): Promise<void> {
 		await this.agent.waitForIdle();
+		while (this.#durableQueueDrainPromise) {
+			await this.#durableQueueDrainPromise;
+		}
 		await this.#waitForPostPromptRecovery();
+		while (this.#durableQueueDrainPromise) {
+			await this.#durableQueueDrainPromise;
+		}
 	}
 
 	async drainAsyncJobDeliveriesForAcp(options?: { timeoutMs?: number }): Promise<boolean> {
@@ -5362,8 +5423,9 @@ export class AgentSession {
 			if (!queue) throw this.#durableInputQueueError ?? new Error("Durable input queue is unavailable");
 			const normalizedImages = await this.#normalizeImagesForModel(options?.images);
 			try {
-				await queue.enqueue(expandedText, normalizedImages);
-				await this.#drainDurableInputQueue();
+				await queue.enqueue({ text: expandedText, images: normalizedImages, deliveryClass: "followUp" });
+				await this.#refreshDurableQueuedInputProjection(queue);
+				await this.#drainDurableTerminalInputQueue();
 			} catch (error) {
 				if (this.#handleDurableOwnershipLoss(error as Error)) throw this.#durableOwnershipLostError ?? error;
 				throw error;
@@ -5406,7 +5468,8 @@ export class AgentSession {
 			!options?.synthetic && !hasPendingUserDirective ? this.#createEagerTodoPrelude(expandedText) : undefined;
 		const eagerTaskPrelude =
 			!options?.synthetic && !hasPendingUserDirective ? this.#createEagerTaskPrelude(expandedText) : undefined;
-		const normalizedImages = await this.#normalizeImagesForModel(options?.images);
+		const normalizedImages =
+			internalOptions?.[kNormalizedPromptImages] ?? (await this.#normalizeImagesForModel(options?.images));
 
 		const userContent: (TextContent | ImageContent)[] = [{ type: "text", text: expandedText }];
 		if (normalizedImages) {
@@ -5843,16 +5906,16 @@ export class AgentSession {
 		images: ImageContent[] | undefined,
 		mode: "steer" | "followUp",
 	): Promise<void> {
-		// A queued user message (RPC/SDK/collab steer or follow-up, or a typed message
-		// while streaming) is a deliberate resume; re-enable advisor auto-resume that
-		// a user interrupt suppressed.
+		// A queued user message is a deliberate resume; re-enable advisor auto-resume
+		// that a user interrupt suppressed.
 		this.#advisorAutoResumeSuppressed = false;
 		const normalizedImages = await this.#normalizeImagesForModel(images);
 		const durableQueue = await this.#durableInputQueue;
 		if (durableQueue) {
 			try {
-				await durableQueue.enqueue(text, normalizedImages);
-				await this.#drainDurableInputQueue();
+				await durableQueue.enqueue({ text, images: normalizedImages, deliveryClass: mode });
+				await this.#refreshDurableQueuedInputProjection(durableQueue);
+				await this.#drainDurableTerminalInputQueue();
 			} catch (error) {
 				if (this.#handleDurableOwnershipLoss(error as Error)) throw this.#durableOwnershipLostError ?? error;
 				throw error;
@@ -5882,53 +5945,211 @@ export class AgentSession {
 		}
 		this.#scheduleIdleQueueDrain();
 	}
+	
+	#freezeDurableQueuedInput(item: DurableQueuedInput): DurableQueuedInput {
+		const images = item.payload.images?.map(image => Object.freeze({ ...image }));
+		const payload = Object.freeze({
+			text: item.payload.text,
+			images: images === undefined ? undefined : Object.freeze(images),
+		});
+		const attempts = Object.freeze(item.attempts.map(attempt => Object.freeze({ ...attempt })));
+		return Object.freeze({ ...item, payload, attempts });
+	}
 
-	async #drainDurableInputQueue(): Promise<void> {
-		if (this.#durableOwnershipLostError || this.isStreaming || this.#activeDurableInputId) return;
+	async #refreshDurableQueuedInputProjection(queue: DurableInputQueue): Promise<void> {
+		const items = await queue.list({ states: DURABLE_PENDING_INPUT_STATES });
+		this.#durableQueuedInputProjection = Object.freeze(
+			items
+				.toSorted((left, right) => left.sequence - right.sequence)
+				.map(item => this.#freezeDurableQueuedInput(item)),
+		);
+	}
+
+	async #getDurableInputQueueForMutation(): Promise<DurableInputQueue> {
+		if (this.#durableOwnershipLostError) throw this.#durableOwnershipLostError;
 		const queue = await this.#durableInputQueue;
-		if (!queue) return;
+		if (queue) return queue;
+		throw this.#durableInputQueueError ?? new Error("Durable input queue is unavailable");
+	}
+	async #acquireDurableAdmissionMaintenance(): Promise<() => void> {
+		const previous = this.#durableAdmissionMaintenanceTail;
+		const release = Promise.withResolvers<void>();
+		this.#durableAdmissionMaintenanceTail = previous.then(() => release.promise);
+		await previous;
+		let released = false;
+		return () => {
+			if (released) return;
+			released = true;
+			release.resolve();
+		};
+	}
+
+	#releaseDurableAdmissionMaintenance(): void {
+		const release = this.#durableAdmissionMaintenanceRelease;
+		this.#durableAdmissionMaintenanceRelease = undefined;
+		release?.();
+	}
+
+	async #admitDurableQueuedInputAtToolBoundary(): Promise<AgentMessage | undefined> {
+		await this.#pendingTurnEndProcessing;
+		if (this.#durableOwnershipLostError) throw this.#durableOwnershipLostError;
+		if (
+			this.#activeDurableInputId !== undefined ||
+			this.#activeDurableAttemptId !== undefined ||
+			this.#activeDurableInputRevision !== undefined
+		) {
+			return undefined;
+		}
+		const release = await this.#acquireDurableAdmissionMaintenance();
+		const queue = await this.#durableInputQueue;
+		if (!queue) {
+			release();
+			throw this.#durableInputQueueError ?? new Error("Durable input queue is unavailable");
+		}
 		try {
 			await queue.retryDue();
-			const item = await queue.admitNext();
+			await this.#refreshDurableQueuedInputProjection(queue);
+			const item = await queue.admitNext("tool");
+			await this.#refreshDurableQueuedInputProjection(queue);
 			if (!item) {
 				await this.#scheduleDurableRetry(queue);
+				release();
+				return undefined;
+			}
+			const attempt = item.attempts.at(-1);
+			if (attempt?.state !== "admitted" || attempt.revision !== item.revision) {
+				throw new Error(`Durable input ${item.inputId} has no admitted attempt at revision ${item.revision}`);
+			}
+			this.#activeDurableInputId = item.inputId;
+			this.#activeDurableAttemptId = attempt.id;
+			this.#activeDurableInputRevision = item.revision;
+			this.#activeDurableRequestStarted = false;
+			await this.#appendDurableAttemptEntry(item.inputId, attempt.id, item.revision, "admitted");
+			this.#durableAdmissionMaintenanceRelease = release;
+			const content: (TextContent | ImageContent)[] = [{ type: "text", text: item.payload.text }];
+			if (item.payload.images) content.push(...item.payload.images);
+			return {
+				role: "user",
+				content,
+				steering: true,
+				attribution: "user",
+				timestamp: Date.now(),
+			};
+		} catch (error) {
+			release();
+			if (this.#handleDurableOwnershipLoss(error as Error)) throw this.#durableOwnershipLostError ?? error;
+			throw error;
+		}
+	}
+
+	async #settleAbandonedDurableAdmission(): Promise<void> {
+		if (this.#activeDurableInputId === undefined || this.#activeDurableAttemptId === undefined) return;
+		const inputId = this.#activeDurableInputId;
+		const attemptId = this.#activeDurableAttemptId;
+		const revision = this.#activeDurableInputRevision;
+		if (revision === undefined) throw new Error(`Durable input ${inputId} has no active revision`);
+		const requestStarted = this.#activeDurableRequestStarted;
+		if (this.#durableOwnershipLostError) throw this.#durableOwnershipLostError;
+		const queue = await this.#durableInputQueue;
+		if (!queue) throw this.#durableInputQueueError ?? new Error("Durable input queue is unavailable");
+		try {
+			if (requestStarted) {
+				await queue.markUncertain(inputId, attemptId);
+				await this.#refreshDurableQueuedInputProjection(queue);
+				await this.#appendDurableAttemptEntry(inputId, attemptId, revision, "uncertain");
+			} else {
+				await queue.requeueUnstarted(inputId, attemptId);
+				await this.#refreshDurableQueuedInputProjection(queue);
+				await this.#appendDurableAttemptEntry(inputId, attemptId, revision, "not-executed");
+			}
+			this.#clearActiveDurableAttempt();
+		} catch (error) {
+			if (this.#handleDurableOwnershipLoss(error as Error)) return;
+			throw error;
+		}
+	}
+
+	async #drainDurableTerminalInputQueue(suppressOwnershipLoss = false): Promise<void> {
+		if (this.#durableOwnershipLostError) {
+			if (suppressOwnershipLoss) return;
+			throw this.#durableOwnershipLostError;
+		}
+		if (this.isStreaming || this.#activeDurableInputId) return;
+		const queue = await this.#durableInputQueue;
+		if (!queue) return;
+		const release = await this.#acquireDurableAdmissionMaintenance();
+		this.#durableAdmissionMaintenanceRelease = release;
+		if (this.#durableOwnershipLostError) {
+			this.#releaseDurableAdmissionMaintenance();
+			if (suppressOwnershipLoss) return;
+			throw this.#durableOwnershipLostError;
+		}
+		if (this.isStreaming || this.#activeDurableInputId) {
+			this.#releaseDurableAdmissionMaintenance();
+			return;
+		}
+		try {
+			const lastAssistant = this.#findLastAssistantMessage();
+			if (lastAssistant) await this.#checkCompaction(lastAssistant, false, false, false);
+			await queue.retryDue();
+			await this.#refreshDurableQueuedInputProjection(queue);
+			const item = await queue.admitNext("terminal");
+			await this.#refreshDurableQueuedInputProjection(queue);
+			if (!item) {
+				await this.#scheduleDurableRetry(queue);
+				this.#releaseDurableAdmissionMaintenance();
 				return;
 			}
 			const attempt = item.attempts.at(-1);
-			if (attempt?.state !== "admitted") {
-				throw new Error(`Durable input ${item.id} has no admitted attempt`);
+			if (attempt?.state !== "admitted" || attempt.revision !== item.revision) {
+				throw new Error(`Durable input ${item.inputId} has no admitted attempt at revision ${item.revision}`);
 			}
-			this.#activeDurableInputId = item.id;
+			this.#activeDurableInputId = item.inputId;
 			this.#activeDurableAttemptId = attempt.id;
+			this.#activeDurableInputRevision = item.revision;
 			this.#activeDurableRequestStarted = false;
-			await this.#appendDurableAttemptEntry(item.id, attempt.id, "admitted");
+			await this.#appendDurableAttemptEntry(item.inputId, attempt.id, item.revision, "admitted");
+			this.#durableAdmissionMaintenanceRelease = release;
 			try {
-				await this.prompt(item.text, {
+				const images = item.payload.images ? [...item.payload.images] : undefined;
+				await this.prompt(item.payload.text, {
 					expandPromptTemplates: false,
-					images: item.images ? [...item.images] : undefined,
+					images,
 					[kDurableAdmittedPrompt]: true,
+					[kNormalizedPromptImages]: images,
+					skipCompactionCheck: true,
 				} as InternalPromptOptions);
-				if (this.#activeDurableInputId === item.id && !this.#activeDurableRequestStarted) {
-					await queue.requeueUnstarted(item.id, attempt.id);
-					await this.#appendDurableAttemptEntry(item.id, attempt.id, "not-executed");
+				if (this.#activeDurableInputId === item.inputId && !this.#activeDurableRequestStarted) {
+					await queue.requeueUnstarted(item.inputId, attempt.id);
+					await this.#refreshDurableQueuedInputProjection(queue);
+					await this.#appendDurableAttemptEntry(item.inputId, attempt.id, item.revision, "not-executed");
 					this.#clearActiveDurableAttempt();
 				}
 			} catch (error) {
-				if (this.#handleDurableOwnershipLoss(error as Error)) throw this.#durableOwnershipLostError ?? error;
-				if (this.#activeDurableInputId === item.id) {
+				if (this.#handleDurableOwnershipLoss(error as Error)) {
+					if (suppressOwnershipLoss) return;
+					throw this.#durableOwnershipLostError ?? error;
+				}
+				if (this.#activeDurableInputId === item.inputId) {
 					if (!this.#activeDurableRequestStarted) {
-						await queue.requeueUnstarted(item.id, attempt.id);
-						await this.#appendDurableAttemptEntry(item.id, attempt.id, "not-executed");
+						await queue.requeueUnstarted(item.inputId, attempt.id);
+						await this.#refreshDurableQueuedInputProjection(queue);
+						await this.#appendDurableAttemptEntry(item.inputId, attempt.id, item.revision, "not-executed");
 					} else {
-						await queue.markUncertain(item.id, attempt.id);
-						await this.#appendDurableAttemptEntry(item.id, attempt.id, "uncertain");
+						await queue.markUncertain(item.inputId, attempt.id);
+						await this.#refreshDurableQueuedInputProjection(queue);
+						await this.#appendDurableAttemptEntry(item.inputId, attempt.id, item.revision, "uncertain");
 					}
 					this.#clearActiveDurableAttempt();
 				}
 				throw error;
 			}
 		} catch (error) {
-			if (this.#handleDurableOwnershipLoss(error as Error)) throw this.#durableOwnershipLostError ?? error;
+			this.#releaseDurableAdmissionMaintenance();
+			if (this.#handleDurableOwnershipLoss(error as Error)) {
+				if (suppressOwnershipLoss) return;
+				throw this.#durableOwnershipLostError ?? error;
+			}
 			throw error;
 		}
 	}
@@ -5946,14 +6167,18 @@ export class AgentSession {
 		if (!queue) throw this.#durableInputQueueError ?? new Error("Durable input queue is unavailable");
 		try {
 			await queue.markRequestStarted(this.#activeDurableInputId, this.#activeDurableAttemptId);
+			await this.#refreshDurableQueuedInputProjection(queue);
 		} catch (error) {
 			if (this.#handleDurableOwnershipLoss(error as Error)) throw this.#durableOwnershipLostError ?? error;
 			throw error;
 		}
 		this.#activeDurableRequestStarted = true;
+		const revision = this.#activeDurableInputRevision;
+		if (revision === undefined) throw new Error(`Durable input ${this.#activeDurableInputId} has no active revision`);
 		await this.#appendDurableAttemptEntry(
 			this.#activeDurableInputId,
 			this.#activeDurableAttemptId,
+			revision,
 			"request-started",
 		);
 	}
@@ -5968,7 +6193,10 @@ export class AgentSession {
 			const attempt = item.attempts.findLast(candidate => candidate.state === "started");
 			if (!attempt) continue;
 			const matching = markers.filter(
-				candidate => candidate.marker.inputId === item.id && candidate.marker.attemptId === attempt.id,
+				candidate =>
+					candidate.marker.inputId === item.inputId &&
+					candidate.marker.attemptId === attempt.id &&
+					(candidate.marker.revision === undefined || candidate.marker.revision === attempt.revision),
 			);
 			const terminal = matching.findLast(
 				candidate =>
@@ -6020,11 +6248,13 @@ export class AgentSession {
 				}
 			}
 		}
+		await this.#refreshDurableQueuedInputProjection(queue);
 	}
 
 	async #appendDurableAttemptEntry(
 		inputId: string,
 		attemptId: string,
+		revision: number,
 		state: DurableAttemptJournalState,
 		retryAt?: number,
 	): Promise<void> {
@@ -6034,6 +6264,7 @@ export class AgentSession {
 				version: 1,
 				inputId,
 				attemptId,
+				revision,
 				state,
 				...(retryAt === undefined ? {} : { retryAt }),
 			});
@@ -6050,7 +6281,9 @@ export class AgentSession {
 	#clearActiveDurableAttempt(): void {
 		this.#activeDurableInputId = undefined;
 		this.#activeDurableAttemptId = undefined;
+		this.#activeDurableInputRevision = undefined;
 		this.#activeDurableRequestStarted = false;
+		this.#releaseDurableAdmissionMaintenance();
 	}
 
 	#handleDurableOwnershipLoss(error: Error): boolean {
@@ -6062,6 +6295,7 @@ export class AgentSession {
 			this.#durableRateLimitRetryTimer = undefined;
 			this.#durableRateLimitRetryAt = undefined;
 			this.#durableQueueDrainScheduled = false;
+			this.#durableQueueDrainPending = false;
 			this.#clearActiveDurableAttempt();
 			logger.warn("Durable input queue ownership lost; view is read-only", {
 				sessionId: error.sessionId,
@@ -6101,7 +6335,10 @@ export class AgentSession {
 			this.#durableRateLimitRetryAt = undefined;
 			void queue
 				.retryDue()
-				.then(() => this.#scheduleDurableQueueDrainAfterIdle())
+				.then(async () => {
+					await this.#refreshDurableQueuedInputProjection(queue);
+					await this.#scheduleDurableQueueDrainAfterIdle();
+				})
 				.catch(error => {
 					if (!this.#handleDurableOwnershipLoss(error as Error)) {
 						logger.warn("Durable rate-limit queue retry failed", { error: String(error) });
@@ -6112,21 +6349,54 @@ export class AgentSession {
 	}
 
 	#scheduleDurableQueueDrainAfterIdle(): void {
-		if (this.#durableOwnershipLostError || this.#durableQueueDrainScheduled) return;
+		if (this.#isDisposed || this.#durableOwnershipLostError) return;
+		this.#durableQueueDrainPending = true;
+		if (this.#durableQueueDrainScheduled) return;
+		this.#startDurableQueueDrainAfterIdle();
+	}
+
+	#startDurableQueueDrainAfterIdle(): void {
+		if (
+			this.#isDisposed ||
+			this.#durableOwnershipLostError ||
+			this.#durableQueueDrainScheduled ||
+			!this.#durableQueueDrainPending
+		) {
+			return;
+		}
 		this.#durableQueueDrainScheduled = true;
-		void this.agent
+		let drainTask: Promise<void>;
+		drainTask = this.agent
 			.waitForIdle()
 			.then(async () => {
-				this.#durableQueueDrainScheduled = false;
-				if (this.#durableOwnershipLostError) return;
-				await this.#drainDurableInputQueue();
+				if (this.#isDisposed || this.#durableOwnershipLostError) return;
+				// AgentCore may be idle before the outer prompt's recovery/finally
+				// releases its in-flight count. Leave the intent for #endInFlight
+				// instead of recursively prompting during that recovery.
+				if (this.isStreaming || this.#activeDurableInputId) return;
+				this.#durableQueueDrainPending = false;
+				await this.#drainDurableTerminalInputQueue(true);
 			})
 			.catch(error => {
-				this.#durableQueueDrainScheduled = false;
 				if (!this.#handleDurableOwnershipLoss(error as Error)) {
 					logger.warn("Durable input queue drain failed", { error: String(error) });
 				}
+			})
+			.finally(() => {
+				if (this.#durableQueueDrainPromise !== drainTask) return;
+				this.#durableQueueDrainPromise = undefined;
+				this.#durableQueueDrainScheduled = false;
+				if (
+					this.#durableQueueDrainPending &&
+					!this.#isDisposed &&
+					!this.#durableOwnershipLostError &&
+					!this.isStreaming &&
+					!this.#activeDurableInputId
+				) {
+					this.#startDurableQueueDrainAfterIdle();
+				}
 			});
+		this.#durableQueueDrainPromise = drainTask;
 	}
 
 	#scheduleIdleQueueDrain(): void {
@@ -6360,52 +6630,99 @@ export class AgentSession {
 		content: string | (TextContent | ImageContent)[],
 		options?: { deliverAs?: "steer" | "followUp" },
 	): Promise<void> {
-		// Normalize content to text string + optional images
 		let text: string;
 		let images: ImageContent[] | undefined;
-
 		if (typeof content === "string") {
 			text = content;
 		} else {
 			const textParts: string[] = [];
 			images = [];
 			for (const part of content) {
-				if (part.type === "text") {
-					textParts.push(part.text);
-				} else {
-					images.push(part);
-				}
+				if (part.type === "text") textParts.push(part.text);
+				else images.push(part);
 			}
-			text = textParts.join("\n");
+			text = textParts.join("");
 			if (images.length === 0) images = undefined;
-		}
-
-		if (options?.deliverAs === "followUp") {
-			await this.#queueUserMessage(text, images, "followUp");
-			return;
 		}
 		if (options?.deliverAs === "steer") {
 			await this.#queueUserMessage(text, images, "steer");
 			return;
 		}
-
-		// Use prompt() with expandPromptTemplates: false to skip command handling and template expansion
+		if (options?.deliverAs === "followUp") {
+			await this.#queueUserMessage(text, images, "followUp");
+			return;
+		}
 		await this.prompt(text, {
 			expandPromptTemplates: false,
 			images,
 		});
 	}
 
-	/** Clear queued messages and return them (text plus any attached images). */
+	/** Read-only pending durable-input projection, sorted by durable sequence. */
+	getQueuedInputProjection(): readonly DurableQueuedInput[] {
+		return this.#durableQueuedInputProjection;
+	}
+
+	async getQueuedInput(inputId: string): Promise<DurableQueuedInput | undefined> {
+		if (this.#durableOwnershipLostError) {
+			return this.#durableQueuedInputProjection.find(item => item.inputId === inputId);
+		}
+		const queue = await this.#durableInputQueue;
+		if (!queue) return undefined;
+		try {
+			const item = await queue.get(inputId);
+			await this.#refreshDurableQueuedInputProjection(queue);
+			return item === undefined ? undefined : this.#freezeDurableQueuedInput(item);
+		} catch (error) {
+			if (this.#handleDurableOwnershipLoss(error as Error)) {
+				return this.#durableQueuedInputProjection.find(item => item.inputId === inputId);
+			}
+			throw error;
+		}
+	}
+
+	async editQueuedInput(
+		inputId: string,
+		expectedRevision: number,
+		payload: DurableInputPayload,
+	): Promise<DurableQueuedInput> {
+		const queue = await this.#getDurableInputQueueForMutation();
+		try {
+			const item = await queue.edit(inputId, expectedRevision, payload);
+			await this.#refreshDurableQueuedInputProjection(queue);
+			return this.#freezeDurableQueuedInput(item);
+		} catch (error) {
+			if (this.#handleDurableOwnershipLoss(error as Error)) throw this.#durableOwnershipLostError ?? error;
+			throw error;
+		}
+	}
+
+	async cancelQueuedInput(inputId: string): Promise<DurableQueuedInput> {
+		const queue = await this.#getDurableInputQueueForMutation();
+		try {
+			const item = await queue.cancel(inputId);
+			await this.#refreshDurableQueuedInputProjection(queue);
+			return this.#freezeDurableQueuedInput(item);
+		} catch (error) {
+			if (this.#handleDurableOwnershipLoss(error as Error)) throw this.#durableOwnershipLostError ?? error;
+			throw error;
+		}
+	}
+
+	/** Legacy in-memory queue operation; durable inputs cannot be bulk-cleared. */
 	clearQueue(): { steering: RestoredQueuedMessage[]; followUp: RestoredQueuedMessage[] } {
+		if (this.#durableInputQueueRequired) return { steering: [], followUp: [] };
 		const steering = this.agent.peekSteeringQueue().map(toRestoredQueuedMessage);
 		const followUp = this.agent.peekFollowUpQueue().map(toRestoredQueuedMessage);
 		this.agent.clearAllQueues();
 		return { steering, followUp };
 	}
 
-	/** Number of pending displayable messages (includes steering, follow-up, and next-turn messages) */
+	/** Number of pending displayable messages (includes next-turn messages). */
 	get queuedMessageCount(): number {
+		if (this.#durableInputQueueRequired) {
+			return this.#durableQueuedInputProjection.length + this.#pendingNextTurnMessages.length;
+		}
 		return (
 			this.agent.peekSteeringQueue().filter(isDisplayableQueuedMessage).length +
 			this.agent.peekFollowUpQueue().filter(isDisplayableQueuedMessage).length +
@@ -6414,17 +6731,25 @@ export class AgentSession {
 	}
 
 	getQueuedMessages(): { steering: readonly string[]; followUp: readonly string[] } {
+		if (this.#durableInputQueueRequired) {
+			return {
+				steering: this.#durableQueuedInputProjection
+					.filter(item => item.deliveryClass === "steer")
+					.map(item => item.payload.text),
+				followUp: this.#durableQueuedInputProjection
+					.filter(item => item.deliveryClass === "followUp")
+					.map(item => item.payload.text),
+			};
+		}
 		return {
 			steering: this.agent.peekSteeringQueue().filter(isDisplayableQueuedMessage).map(queueChipText),
 			followUp: this.agent.peekFollowUpQueue().filter(isDisplayableQueuedMessage).map(queueChipText),
 		};
 	}
 
-	/**
-	 * Pop the last queued message (steering first, then follow-up).
-	 * Used by dequeue keybinding to restore messages to editor one at a time.
-	 */
+	/** Legacy in-memory dequeue; durable inputs remain queue-v2 owned. */
 	popLastQueuedMessage(): RestoredQueuedMessage | undefined {
+		if (this.#durableInputQueueRequired) return undefined;
 		const message = this.agent.popLastSteer() ?? this.agent.popLastFollowUp();
 		return message ? toRestoredQueuedMessage(message) : undefined;
 	}
@@ -7522,8 +7847,13 @@ export class AgentSession {
 		await this.abort();
 		const compactionAbortController = new AbortController();
 		this.#compactionAbortController = compactionAbortController;
+		const releaseAdmissionMaintenance = await this.#acquireDurableAdmissionMaintenance();
+		let queueBoundarySequence: number | undefined;
+		let beforeAdmissionInvoked = false;
 
 		try {
+			const durableQueue = await this.#durableInputQueue;
+			queueBoundarySequence = durableQueue ? await durableQueue.sequenceBoundary() : undefined;
 			if (!this.model) {
 				throw new Error("No model selected");
 			}
@@ -7683,7 +8013,9 @@ export class AgentSession {
 				details,
 				fromExtension,
 				preserveData,
+				queueBoundarySequence,
 			);
+			await this.sessionManager.flush();
 			const newEntries = this.sessionManager.getEntries();
 			const sessionContext = this.buildDisplaySessionContext();
 			this.agent.replaceMessages(sessionContext.messages);
@@ -7713,9 +8045,30 @@ export class AgentSession {
 				preserveData,
 			};
 			options?.onComplete?.(compactionResult);
+			try {
+				beforeAdmissionInvoked = true;
+				await options?.beforeAdmission?.({ outcome: "ok", result: compactionResult });
+			} catch (hookError) {
+				logger.warn("Compaction before-admission hook failed", {
+					error: hookError instanceof Error ? hookError.message : String(hookError),
+				});
+			}
 			return compactionResult;
 		} catch (error) {
 			const err = error instanceof Error ? error : new Error(String(error));
+			if (!beforeAdmissionInvoked) {
+				try {
+					beforeAdmissionInvoked = true;
+					await options?.beforeAdmission?.({
+						outcome: error instanceof CompactionCancelledError ? "cancelled" : "failed",
+						error: err,
+					});
+				} catch (hookError) {
+					logger.warn("Compaction before-admission hook failed", {
+						error: hookError instanceof Error ? hookError.message : String(hookError),
+					});
+				}
+			}
 			options?.onError?.(err);
 			throw error;
 		} finally {
@@ -7723,6 +8076,7 @@ export class AgentSession {
 				this.#compactionAbortController = undefined;
 			}
 			this.#reconnectToAgent();
+			releaseAdmissionMaintenance();
 		}
 	}
 
@@ -9159,8 +9513,14 @@ export class AgentSession {
 		const compactionSettings = this.settings.getGroup("compaction");
 		if (compactionSettings.strategy === "off") return false;
 		if (reason !== "idle" && !compactionSettings.enabled) return false;
+		const releaseAdmissionMaintenance =
+			this.#durableAdmissionMaintenanceRelease === undefined
+				? await this.#acquireDurableAdmissionMaintenance()
+				: undefined;
+		let queueBoundarySequence: number | undefined;
 		const generation = this.#promptGeneration;
 		const shouldAutoContinue = options.autoContinue !== false && compactionSettings.autoContinue !== false;
+		try {
 		// Shake runs inline (cheap, no remote LLM). On overflow recovery, if shake
 		// reclaims nothing we fall through to the summary-compaction body below so
 		// the oversized input still gets resolved.
@@ -9172,7 +9532,10 @@ export class AgentSession {
 				shouldAutoContinue,
 				options.triggerContextTokens,
 			);
-			if (outcome !== "fallback") return false;
+			if (outcome !== "fallback") {
+				releaseAdmissionMaintenance?.();
+				return false;
+			}
 		}
 		// "overflow" and "incomplete" force inline execution because they are recovery
 		// paths the caller wants resolved before scheduling the next turn. "idle" is
@@ -9193,7 +9556,12 @@ export class AgentSession {
 				},
 				{ generation },
 			);
+			releaseAdmissionMaintenance?.();
 			return true;
+		}
+		} catch (error) {
+			releaseAdmissionMaintenance?.();
+			throw error;
 		}
 
 		// "overflow" forces context-full because the input itself is broken — a handoff
@@ -9225,6 +9593,8 @@ export class AgentSession {
 		const autoCompactionSignal = autoCompactionAbortController.signal;
 
 		try {
+			const durableQueue = await this.#durableInputQueue;
+			queueBoundarySequence = durableQueue ? await durableQueue.sequenceBoundary() : undefined;
 			if (compactionSettings.strategy === "handoff" && reason !== "overflow") {
 				const handoffFocus = AUTO_HANDOFF_THRESHOLD_FOCUS;
 				const handoffResult = await this.handoff(handoffFocus, {
@@ -9525,7 +9895,9 @@ export class AgentSession {
 				details,
 				fromExtension,
 				preserveData,
+				queueBoundarySequence,
 			);
+			await this.sessionManager.flush();
 			const newEntries = this.sessionManager.getEntries();
 			const sessionContext = this.buildDisplaySessionContext();
 			this.agent.replaceMessages(sessionContext.messages);
@@ -9616,6 +9988,7 @@ export class AgentSession {
 			if (this.#autoCompactionAbortController === autoCompactionAbortController) {
 				this.#autoCompactionAbortController = undefined;
 			}
+			releaseAdmissionMaintenance?.();
 		}
 		return false;
 	}

@@ -832,7 +832,6 @@ export class CommandController {
 		this.ctx.updateEditorBorderColor();
 		this.ctx.chatContainer.clear();
 		this.ctx.pendingMessagesContainer.clear();
-		this.ctx.compactionQueuedMessages = [];
 		this.ctx.streamingComponent = undefined;
 		this.ctx.streamingMessage = undefined;
 		this.ctx.pendingTools.clear();
@@ -1035,7 +1034,7 @@ export class CommandController {
 
 	async handleCompactCommand(
 		customInstructions?: string,
-		beforeFlush?: (outcome: CompactionOutcome) => void | Promise<void>,
+		afterCompaction?: (outcome: CompactionOutcome) => void | Promise<void>,
 	): Promise<CompactionOutcome> {
 		const entries = this.ctx.sessionManager.getEntries();
 		const messageCount = entries.filter(e => e.type === "message").length;
@@ -1045,7 +1044,7 @@ export class CommandController {
 			return "ok";
 		}
 
-		return this.executeCompaction(customInstructions, false, beforeFlush);
+		return this.executeCompaction(customInstructions, false, afterCompaction);
 	}
 
 	/**
@@ -1090,7 +1089,7 @@ export class CommandController {
 	async executeCompaction(
 		customInstructionsOrOptions?: string | CompactOptions,
 		isAuto = false,
-		beforeFlush?: (outcome: CompactionOutcome) => void | Promise<void>,
+		afterCompaction?: (outcome: CompactionOutcome) => void | Promise<void>,
 	): Promise<CompactionOutcome> {
 		if (this.ctx.loadingAnimation) {
 			this.ctx.loadingAnimation.stop();
@@ -1112,10 +1111,19 @@ export class CommandController {
 		let outcome: CompactionOutcome = "ok";
 		try {
 			const instructions = typeof customInstructionsOrOptions === "string" ? customInstructionsOrOptions : undefined;
-			const options =
+			const providedOptions =
 				customInstructionsOrOptions && typeof customInstructionsOrOptions === "object"
 					? customInstructionsOrOptions
 					: undefined;
+			const options: CompactOptions | undefined = afterCompaction
+				? {
+						...providedOptions,
+						beforeAdmission: async result => {
+							await providedOptions?.beforeAdmission?.(result);
+							await afterCompaction(result.outcome);
+						},
+					}
+				: providedOptions;
 			await this.ctx.session.compact(instructions, options);
 
 			compactingLoader.stop();
@@ -1137,12 +1145,6 @@ export class CommandController {
 			compactingLoader.stop();
 			this.ctx.statusContainer.clear();
 		}
-		// Run the caller's pre-flush hook (e.g. the plan-approval model transition)
-		// before queued user input is dispatched, so any turn queued during
-		// compaction executes on the post-compaction model rather than the model
-		// compaction itself ran on.
-		if (beforeFlush) await beforeFlush(outcome);
-		await this.ctx.flushCompactionQueue({ willRetry: false });
 		return outcome;
 	}
 
