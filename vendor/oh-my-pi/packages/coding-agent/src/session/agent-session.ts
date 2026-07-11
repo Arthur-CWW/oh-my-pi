@@ -122,6 +122,7 @@ import * as snapcompact from "@oh-my-pi/snapcompact";
 import {
 	AdviseTool,
 	type AdvisorAgent,
+	AdvisorDeliveryLease,
 	type AdvisorMessageDetails,
 	type AdvisorNote,
 	AdvisorRuntime,
@@ -1160,6 +1161,8 @@ export class AgentSession {
 	#advisorReadOnlyTools?: AgentTool[];
 	#advisorWatchdogPrompt?: string;
 	#advisorYieldQueueUnsubscribe?: () => void;
+	/** Revoked before replacing or stopping an advisor so late tool callbacks cannot surface advice. */
+	#advisorDeliveryLease?: AdvisorDeliveryLease;
 	#goalTurnCounter = 0;
 	#planReferenceSent = false;
 	#planReferencePath = "local://PLAN.md";
@@ -1769,7 +1772,10 @@ export class AgentSession {
 		// user interrupt that auto-resume is suppressed: the concern is recorded as
 		// visible advice and re-enters context only when the user resumes. A plain nit
 		// rides the non-interrupting YieldQueue aside.
+		const deliveryLease = new AdvisorDeliveryLease();
+		this.#advisorDeliveryLease = deliveryLease;
 		const enqueueAdvice = (note: string, severity?: AdvisorSeverity) => {
+			if (!deliveryLease.active) return;
 			if (isInterruptingSeverity(severity)) {
 				const notes: AdvisorNote[] = [{ note, severity }];
 				const content = formatAdvisorBatchContent(notes);
@@ -1788,11 +1794,11 @@ export class AgentSession {
 				}
 				void this.sendCustomMessage(
 					{ customType: "advisor", content, display: true, attribution: "agent", details },
-					{ deliverAs: "steer", triggerTurn: true },
+					{ deliverAs: "steer", triggerTurn: true, isDeliverable: () => deliveryLease.active },
 				).catch(err => logger.debug("advisor delivery failed", { err: String(err) }));
 				return;
 			}
-			this.yieldQueue.enqueue("advisor", { note, severity });
+			this.yieldQueue.enqueue("advisor", { note, severity, deliveryLease });
 		};
 
 		const adviseTool = new AdviseTool(enqueueAdvice);
@@ -1846,26 +1852,34 @@ export class AgentSession {
 		}
 
 		// Batch non-blocking advisor notes into one injected custom message.
-		this.#advisorYieldQueueUnsubscribe = this.yieldQueue.register<AdvisorNote>("advisor", {
-			build: entries =>
-				entries.length === 0
-					? null
-					: ({
-							role: "custom",
-							customType: "advisor",
-							display: true,
-							attribution: "agent",
-							timestamp: Date.now(),
-							content: formatAdvisorBatchContent(entries),
-							details: { notes: entries } satisfies AdvisorMessageDetails,
-						} satisfies CustomMessage),
-			skipIdleFlush: true,
-		});
+		this.#advisorYieldQueueUnsubscribe = this.yieldQueue.register<AdvisorNote & { deliveryLease: AdvisorDeliveryLease }>(
+			"advisor",
+			{
+				isStale: entry => !entry.deliveryLease.active,
+				build: entries =>
+					entries.length === 0
+						? null
+						: ({
+								role: "custom",
+								customType: "advisor",
+								display: true,
+								attribution: "agent",
+								timestamp: Date.now(),
+								content: formatAdvisorBatchContent(entries),
+								details: {
+									notes: entries.map(({ note, severity }) => ({ note, severity })),
+								} satisfies AdvisorMessageDetails,
+							} satisfies CustomMessage),
+				skipIdleFlush: true,
+			},
+		);
 
 		return true;
 	}
 
 	#stopAdvisorRuntime(): void {
+		this.#advisorDeliveryLease?.revoke();
+		this.#advisorDeliveryLease = undefined;
 		if (this.#advisorRuntime) {
 			this.#advisorRuntime.dispose();
 			this.#advisorRuntime = undefined;
@@ -1875,6 +1889,12 @@ export class AgentSession {
 		}
 		this.#advisorYieldQueueUnsubscribe?.();
 		this.#advisorYieldQueueUnsubscribe = undefined;
+	}
+
+	/** Replace, rather than reset, an advisor after a primary-history boundary. */
+	#restartAdvisorRuntime(): void {
+		this.#stopAdvisorRuntime();
+		this.#buildAdvisorRuntime();
 	}
 
 	async #promoteAdvisorContextModel(currentModel: Model): Promise<boolean> {
@@ -6542,7 +6562,13 @@ export class AgentSession {
 	 */
 	async sendCustomMessage<T = unknown>(
 		message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details" | "attribution">,
-		options?: { triggerTurn?: boolean; deliverAs?: "steer" | "followUp" | "nextTurn"; queueChipText?: string },
+		options?: {
+			triggerTurn?: boolean;
+			deliverAs?: "steer" | "followUp" | "nextTurn";
+			queueChipText?: string;
+			/** Cancels a message whose producer was superseded while async normalization ran. */
+			isDeliverable?: () => boolean;
+		},
 	): Promise<boolean> {
 		const details =
 			options?.queueChipText && options.deliverAs !== "nextTurn"
@@ -6564,6 +6590,7 @@ export class AgentSession {
 			timestamp: Date.now(),
 		};
 		const normalizedAppMessage = await this.#normalizeAgentMessageImages(appMessage);
+		if (options?.isDeliverable && !options.isDeliverable()) return false;
 		if (this.isStreaming) {
 			if (options?.deliverAs === "nextTurn") {
 				this.#queueHiddenNextTurnMessage(normalizedAppMessage, options?.triggerTurn ?? false);
@@ -6931,7 +6958,7 @@ export class AgentSession {
 		this.#todoReminderAwaitingProgress = false;
 		this.#planReferenceSent = false;
 		this.#planReferencePath = "local://PLAN.md";
-		this.#advisorRuntime?.reset();
+		this.#restartAdvisorRuntime();
 		this.#reconnectToAgent();
 
 		// Emit session_switch event with reason "new" to hooks
@@ -7661,7 +7688,7 @@ export class AgentSession {
 		await this.sessionManager.rewriteEntries();
 		const sessionContext = this.buildDisplaySessionContext();
 		this.agent.replaceMessages(sessionContext.messages);
-		this.#advisorRuntime?.reset();
+		this.#restartAdvisorRuntime();
 		this.#syncTodoPhasesFromBranch();
 		this.#closeCodexProviderSessionsForHistoryRewrite();
 		return result;
@@ -7693,7 +7720,7 @@ export class AgentSession {
 
 		const sessionContext = this.buildDisplaySessionContext();
 		this.agent.replaceMessages(sessionContext.messages);
-		this.#advisorRuntime?.reset();
+		this.#restartAdvisorRuntime();
 		this.#syncTodoPhasesFromBranch();
 		this.#closeCodexProviderSessionsForHistoryRewrite();
 		return result;
@@ -7744,7 +7771,7 @@ export class AgentSession {
 		await this.sessionManager.rewriteEntries();
 		const sessionContext = this.buildDisplaySessionContext();
 		this.agent.replaceMessages(sessionContext.messages);
-		this.#advisorRuntime?.reset();
+		this.#restartAdvisorRuntime();
 		this.#closeCodexProviderSessionsForHistoryRewrite();
 		return { removed };
 	}
@@ -7795,7 +7822,7 @@ export class AgentSession {
 		await this.sessionManager.rewriteEntries();
 		const sessionContext = this.buildDisplaySessionContext();
 		this.agent.replaceMessages(sessionContext.messages);
-		this.#advisorRuntime?.reset();
+		this.#restartAdvisorRuntime();
 		this.#closeCodexProviderSessionsForHistoryRewrite();
 
 		return {
@@ -8019,7 +8046,7 @@ export class AgentSession {
 			const newEntries = this.sessionManager.getEntries();
 			const sessionContext = this.buildDisplaySessionContext();
 			this.agent.replaceMessages(sessionContext.messages);
-			this.#advisorRuntime?.reset();
+			this.#restartAdvisorRuntime();
 			this.#syncTodoPhasesFromBranch();
 			this.#closeCodexProviderSessionsForHistoryRewrite();
 
@@ -8261,7 +8288,7 @@ export class AgentSession {
 			// Rebuild agent messages from session
 			const sessionContext = this.buildDisplaySessionContext();
 			this.agent.replaceMessages(sessionContext.messages);
-			this.#advisorRuntime?.reset();
+			this.#restartAdvisorRuntime();
 			this.#syncTodoPhasesFromBranch();
 
 			return { document: handoffText, savedPath };
@@ -8699,7 +8726,7 @@ export class AgentSession {
 		}
 		const safeCount = Math.max(0, Math.min(checkpointState.checkpointMessageCount, this.agent.state.messages.length));
 		this.agent.replaceMessages(this.agent.state.messages.slice(0, safeCount));
-		this.#advisorRuntime?.reset();
+		this.#restartAdvisorRuntime();
 		try {
 			this.sessionManager.branchWithSummary(checkpointState.checkpointEntryId, report, {
 				startedAt: checkpointState.startedAt,
@@ -9901,7 +9928,7 @@ export class AgentSession {
 			const newEntries = this.sessionManager.getEntries();
 			const sessionContext = this.buildDisplaySessionContext();
 			this.agent.replaceMessages(sessionContext.messages);
-			this.#advisorRuntime?.reset();
+			this.#restartAdvisorRuntime();
 			this.#syncTodoPhasesFromBranch();
 			this.#closeCodexProviderSessionsForHistoryRewrite();
 
@@ -11595,6 +11622,7 @@ export class AgentSession {
 				this.#resetHindsightConversationTrackingIfHindsight();
 				this.#resetMnemopiConversationTrackingIfMnemopi();
 			}
+			this.#restartAdvisorRuntime();
 			this.#reconnectToAgent();
 			try {
 				await this.#sessionSwitchReconciler?.();
@@ -11643,7 +11671,7 @@ export class AgentSession {
 			this.#applyThinkingLevelToAgent(previousThinkingLevel);
 			this.agent.serviceTier = previousServiceTier;
 			this.#syncTodoPhasesFromBranch();
-			this.#advisorRuntime?.reset();
+			this.#restartAdvisorRuntime();
 			this.#reconnectToAgent();
 			if (restoreMcpError) {
 				throw restoreMcpError;
@@ -11725,7 +11753,7 @@ export class AgentSession {
 
 		if (!skipConversationRestore) {
 			this.agent.replaceMessages(sessionContext.messages);
-			this.#advisorRuntime?.reset();
+			this.#restartAdvisorRuntime();
 			this.#closeCodexProviderSessionsForHistoryRewrite();
 		}
 
@@ -11892,7 +11920,7 @@ export class AgentSession {
 		const displayContext = deobfuscateSessionContext(stateContext, this.#obfuscator);
 		await this.#restoreMCPSelectionsForSessionContext(displayContext);
 		this.agent.replaceMessages(displayContext.messages);
-		this.#advisorRuntime?.reset();
+		this.#restartAdvisorRuntime();
 		this.#syncTodoPhasesFromBranch();
 		this.#closeCodexProviderSessionsForHistoryRewrite();
 

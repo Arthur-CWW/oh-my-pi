@@ -8,6 +8,7 @@ import {
 	ADVISOR_READONLY_TOOL_NAMES,
 	AdviseTool,
 	type AdvisorAgent,
+	AdvisorDeliveryLease,
 	AdvisorRuntime,
 	type AdvisorRuntimeHost,
 	formatAdvisorBatchContent,
@@ -112,6 +113,51 @@ describe("advisor", () => {
 			expect(onAdvice).toHaveBeenCalledWith("x", "concern");
 			expect(result.details).toEqual({ note: "x", severity: "concern" });
 			expect(result.useless).toBe(true);
+		});
+
+		it("delivers only the replacement lifecycle's advice after an advisor reconnect", async () => {
+			const queue = new YieldQueue({
+				isStreaming: () => true,
+				injectIdle: async () => {},
+				scheduleIdleFlush: () => {},
+			});
+			queue.register<{ note: string; deliveryLease: AdvisorDeliveryLease }>("advisor", {
+				isStale: entry => !entry.deliveryLease.active,
+				build: entries =>
+					entries.length === 0
+						? null
+						: ({
+								role: "custom",
+								customType: "advisor",
+								content: formatAdvisorBatchContent(entries),
+								display: true,
+								timestamp: Date.now(),
+							} as AgentMessage),
+				skipIdleFlush: true,
+			});
+
+			const firstLease = new AdvisorDeliveryLease();
+			const firstAdvisor = new AdviseTool(note => {
+				if (firstLease.active) queue.enqueue("advisor", { note, deliveryLease: firstLease });
+			});
+			await firstAdvisor.execute("first", { note: "stale response" });
+			firstLease.revoke();
+			await firstAdvisor.execute("late-first", { note: "late stale response" });
+
+			const replacementLease = new AdvisorDeliveryLease();
+			const replacementAdvisor = new AdviseTool(note => {
+				if (replacementLease.active) queue.enqueue("advisor", { note, deliveryLease: replacementLease });
+			});
+			await replacementAdvisor.execute("replacement", { note: "current response" });
+			const messages = queue.drainLazy().flatMap(build => {
+				const message = build();
+				return message ? [message] : [];
+			});
+
+			expect(messages).toHaveLength(1);
+			const advisorMessage = messages[0] as { content: string };
+			expect(advisorMessage.content).toContain("current response");
+			expect(advisorMessage.content).not.toContain("stale response");
 		});
 	});
 

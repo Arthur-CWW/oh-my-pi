@@ -26,6 +26,18 @@ export interface AdvisorNote {
 	note: string;
 	severity?: AdvisorSeverity;
 }
+/** Lease held by the single advisor runtime currently allowed to surface advice. */
+export class AdvisorDeliveryLease {
+	#active = true;
+
+	get active(): boolean {
+		return this.#active;
+	}
+
+	revoke(): void {
+		this.#active = false;
+	}
+}
 
 /** Details payload on the batched `advisor` custom message rendered in the transcript. */
 export interface AdvisorMessageDetails {
