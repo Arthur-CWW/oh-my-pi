@@ -8,7 +8,7 @@ export const USAGE = `Usage:
   primer ask "<question>" [--limit N] [--json]
   primer recent [--days N] [--limit N] [--json]
   primer note <add|list> [options]
-  primer card <add|list> [options]
+  primer card <add|list|status> [options]
   primer progress <add|list> [options]
 `
 

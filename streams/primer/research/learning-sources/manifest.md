@@ -1,16 +1,18 @@
 # Primer learning-system source manifest
 
-Canonical sources gathered for the one-chapter Meltdown annotation workbench. Read the cleaned local copies before summaries.
+Canonical sources gathered for the one-chapter Meltdown annotation workbench. **Read [`system-synthesis.md`](system-synthesis.md) first** — it synthesizes all four source families with phase constraints, agreements/tensions, and explicit now-vs-defer guidance. Then read the cleaned local copies before any source-specific summaries.
+
+**→ Recommended entry point: [`system-synthesis.md`](system-synthesis.md)** — compact, source-linked synthesis covering what each source constrains, agreements/tensions/unknowns, what to use now vs. defer, and a prior-session recovery appendix.
 
 ## Learning-system architecture
 
 - Justin Skycak, knowledge-graph / learning-system thread, part 1  
   Source: https://x.com/justinskycak/status/2074331548342538696  
-  Local verbatim capture: `../../skycak-knowledge-graph-thread-2074331548342538696.md`
+  Local verbatim capture: `../skycak-knowledge-graph-thread-2074331548342538696.md`
 - Justin Skycak, chained continuation, part 2  
   Source: https://x.com/justinskycak/status/2074376893067911436  
-  Local verbatim capture: `../../skycak-knowledge-graph-thread-2074376893067911436.md`
-- Quote-anchored local distillation: `../../skycak-scheduling-primitives-distilled.md`
+  Local verbatim capture: `../skycak-knowledge-graph-thread-2074376893067911436.md`
+- Quote-anchored local distillation: `../skycak-scheduling-primitives-distilled.md`
 
 The focal posts are saved. Their X reply timelines were not captured: the authenticated offscreen WKWebView never mounted replies (33 shown on part 1, 1 on part 2). This limitation is documented in each local capture.
 
@@ -32,5 +34,5 @@ The focal posts are saved. Their X reply timelines were not captured: the authen
 
 - Grant Sanderson interview, “AI and the future of math”  
   Source: https://www.dwarkesh.com/p/grant-sanderson-2  
-  Local: `../../dwarkesh-grant-sanderson-ai-future-math-transcript.md`  
+  Local: `../dwarkesh-grant-sanderson-ai-future-math-transcript.md`  
   Relevant sections: 01:07:07 and 01:16:02.

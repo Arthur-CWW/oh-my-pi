@@ -16,6 +16,14 @@ Supersedes HANDOFF-LIVE-2026-07-09.md. Read GOAL.md + VISION.md after this.
 6. **Skycak scheduling/knowledge-graph threads** extracted (authenticated cmux; replies unrenderable — occluded WKWebView, documented) + distilled: streams/primer/research/skycak-scheduling-primitives-distilled.md (11 primitive groups, quote-anchored, 2 [AMBIGUOUS] flags).
 7. Proof doc: docs/qa/primer-annotation-factory.md. Progress ledger entries 14-16. Both repos committed (reader repo + outer primer paths).
 
+## 2026-07-11 minimal-workbench continuation
+
+- **Prior-session/source recovery complete**: consolidated entry point at `streams/primer/research/learning-sources/system-synthesis.md`; canonical manifest links saved Skycak threads, Matuschak prompt essay/research trail, Kirkby+Matuschak Memory Machines, and Grant Sanderson/Dwarkesh transcript. Historical OMP evidence recovered from handoffs plus ReaderMultiBook/BookIrBuilder/MeltdownDeep/ReviewView/ScanView histories. Per-card model provenance remains incomplete in old batches.
+- **One-chapter annotation workbench shipped in nested READER**: `scripts/annotation-workbench.ts` + `experiments/meltdown-machinic/`. Commands prepare/record/label/compare create atomic, content-hashed Markdown/JSON runs; no model/API execution or DB. Opus 4.6 produced `intent-brief.md` + editable `prompt-v0.md` once. First isolated GPT-5.6 run recorded as `2026-07-11T04-34-08-344Z-03383117`; Arthur feedback still pending.
+- **Reader side-chat clean cutover**: fake Agent sidebar and `/api/chat` frontend flow removed. Exact block-local DOM Range selection now creates a removable Zed-style `ReaderContextReference` chip and deterministic `OmpRequestPacket` for clipboard/manual copy; UTF-16 offsets, work/unit/block/page, exact quote, surrounding source, IR identity, capture provenance. Cross-block/source-false selections rejected. Existing mark/candidate actions retained. Functional prototype only: expanded composer still visually heavy/overlays reading; polish deferred.
+- **Global card CLI completed**: existing `primer card add --front --back --source-ref --url` remains canonical SQLite inbox creation path; added `primer card status <id> candidate|approved|rejected`, including idempotent migration for legacy ledgers lacking `status`. Do not create a competing Markdown/global store; Hashcards Markdown remains downstream approved content and Hashcards SQLite remains FSRS state.
+- **Gates**: READER focused tests 10/10 + Vite production build; primer-daemon focused CLI tests 4/4 + full typecheck/web build/123 tests. Kimi browser QA after rebuild: 9/9 context-chip flow pass, zero window/network errors, screenshots under `READER/artifacts/tmp/context-chip-qa/`.
+
 ## Arthur's product directives (2026-07-10, binding for next sessions)
 
 - **Scheduler** ("scheduling within scheduling"): ONE review stream with correct FSRS timing; priority queue = user-pushed items jump NEW-card introduction order, never corrupt due timing; interleaving = same-lemma/sibling variations forced apart (false-familiarity guard); dependency gating from a knowledge graph (Skycak primitives are the spine — read the distillation).
@@ -25,14 +33,14 @@ Supersedes HANDOFF-LIVE-2026-07-09.md. Read GOAL.md + VISION.md after this.
 - **Mobile + sync**: end product must be reviewable on mobile (sync engine, syncs everywhere); local data-viewer surfaces exempt. Direction only — nothing built.
 - Taste: bespoke/typographic/reader-first; NEVER generic AI-app React look. Terminal theme exists so Arthur can feel the TUI direction.
 
-## In flight / next (priority order)
+## Next (priority order)
 
-1. **FinalReaderQa2** (kimi) — release QA sweep on :4797 with screenshots → then `bun run portless` publish (NOT yet run) + update proof doc with QA results.
-2. **Scheduler design doc** (kimi or GPT when back; NOT Opus): FSRS + priority + interleave + dependency gating against skycak-scheduling-primitives-distilled.md; then smallest slice = priority column + word-select push in primer-daemon Chinese reader.
-3. Meltdown import go/no-go (Arthur): 54 rewritten units + 45 deep staged; importer REPLACES whole units; back up site/meltdown-annotations.sqlite; then export:ir.
-4. Annotation waves (Bloom/Shakespeare — epub landed; Gay Science; Banks) — PARKED until GPT sub returns.
-5. Knowledge-graph lane: start from HSK vocab variations + annotation refs fields; multi-model edge validation; surfaces exist (scan view) for disagreement review.
-6. legacy accelerando (32 section cards) kept in index, retitled "Accelerando (legacy sections)" — Arthur may drop it.
+1. **Arthur calibration**: review first GPT-5.6 Machinic Synthesis run at `READER/experiments/meltdown-machinic/runs/2026-07-11T04-34-08-344Z-03383117/response.md`; label chapter model, four proposed interventions, and exclusions through the workbench. Briefly reread only this unit and its existing annotations—not all books.
+2. Fork prompt v0 only after Arthur labels attention/explanation failures. Keep one chapter, static prompt, OMP interaction; no batch regeneration/import.
+3. Define explicit promotion contract from useful explanation → reader-local candidate → global daemon ledger. Do not promise rubric-tier auto-promotion: annotation and rubric batches lack a proven collision-safe join key. Manual `primer card add` works now.
+4. UI debt after calibration: dock/collapse context composer, hide raw packet behind details, clarify UTF-16 range label, move Note/Vocab/Concept/Quote/Card into overflow. Do not spend a design wave before the prompt loop proves useful.
+5. Vim-style reader shortcuts are a deferred side quest; preserve native selection/composer keys first.
+6. Meltdown import go/no-go, scheduler/knowledge graph, mobile sync, and further annotation waves remain deferred as described below.
 
 ## Operational notes
 

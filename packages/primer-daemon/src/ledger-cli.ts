@@ -1,5 +1,6 @@
+import { Schema } from "effect"
 import type { DaemonPaths } from "./paths"
-import { addCard, addNote, addProgress, listCards, listNotes, listProgress, openLedger, type CardInput, type NoteInput, type ProgressInput } from "./ledger"
+import { addCard, addNote, addProgress, CardStatusSchema, listCards, listNotes, listProgress, openLedger, PositiveInteger, setCardStatus, type CardInput, type CardStatus, type NoteInput, type ProgressInput } from "./ledger"
 
 type FlagValue = string | boolean | string[]
 
@@ -11,9 +12,10 @@ interface ParsedArgs {
 const NOTE_COMMAND_USAGE = "Usage: primer note <add|list> [options]"
 const NOTE_ADD_USAGE = "Usage: primer note add --question Q --body B [--source ref|url|title]..."
 const NOTE_LIST_USAGE = "Usage: primer note list [--limit N] [--json]"
-const CARD_COMMAND_USAGE = "Usage: primer card <add|list> [options]"
+const CARD_COMMAND_USAGE = "Usage: primer card <add|list|status> [options]"
 const CARD_ADD_USAGE = "Usage: primer card add --front F --back B [--source-ref R] [--url U]"
 const CARD_LIST_USAGE = "Usage: primer card list [--limit N] [--json]"
+const CARD_STATUS_USAGE = "Usage: primer card status <id> candidate|approved|rejected"
 const PROGRESS_COMMAND_USAGE = "Usage: primer progress <add|list> [options]"
 const PROGRESS_ADD_USAGE = "Usage: primer progress add --kind K --title T [--body B] [--ref R]..."
 const PROGRESS_LIST_USAGE = "Usage: primer progress list [--limit N] [--json]"
@@ -158,6 +160,42 @@ export async function runCardCommand(argv: string[], paths: DaemonPaths): Promis
       for (const row of rows) {
         process.stdout.write(`#${row.id} [${row.status}] ${row.front} — ${row.back}\n`)
       }
+      return 0
+    } finally {
+      db.close()
+    }
+  }
+
+  if (subcommand === "status") {
+    if (parsed.positionals.length !== 3 || Object.keys(parsed.flags).length !== 0) {
+      process.stderr.write(`${CARD_STATUS_USAGE}\n`)
+      return 2
+    }
+
+    const idValue = parsed.positionals[1]
+    if (!/^[1-9]\d*$/.test(idValue)) {
+      process.stderr.write(`${CARD_STATUS_USAGE}\n`)
+      return 2
+    }
+    const statusValue = parsed.positionals[2]
+    let id: number
+    let status: CardStatus
+    try {
+      id = Schema.decodeUnknownSync(PositiveInteger)(Number(idValue))
+      status = Schema.decodeUnknownSync(CardStatusSchema)(statusValue)
+    } catch {
+      process.stderr.write(`${CARD_STATUS_USAGE}\n`)
+      return 2
+    }
+
+    const db = openLedger(paths.ledgerDb)
+    try {
+      const updated = setCardStatus(db, id, status)
+      if (updated === null) {
+        process.stderr.write(`card ${id} not found\n`)
+        return 1
+      }
+      process.stdout.write(`card ${id} ${updated.status}\n`)
       return 0
     } finally {
       db.close()

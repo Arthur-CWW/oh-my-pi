@@ -59,9 +59,9 @@ export interface ProgressRow {
   createdAt: string
 }
 
-const PositiveInteger = Schema.Number.check(Schema.isFinite(), Schema.isInt(), Schema.isGreaterThanOrEqualTo(1))
+export const PositiveInteger = Schema.Number.check(Schema.isFinite(), Schema.isInt(), Schema.isGreaterThanOrEqualTo(1))
 const NullableString = Schema.NullOr(Schema.String)
-const CardStatusSchema = Schema.Union([Schema.Literal("candidate"), Schema.Literal("approved"), Schema.Literal("rejected")])
+export const CardStatusSchema = Schema.Union([Schema.Literal("candidate"), Schema.Literal("approved"), Schema.Literal("rejected")])
 const StringArraySchema = Schema.Array(Schema.String)
 
 const RawNoteRowSchema = Schema.Struct({
@@ -146,6 +146,12 @@ CREATE TABLE IF NOT EXISTS progress (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 `)
+  const cardColumns = db
+    .query<{ name: string }, []>("PRAGMA table_info(card_candidates)")
+    .all()
+  if (!cardColumns.some((column) => column.name === "status")) {
+    db.exec("ALTER TABLE card_candidates ADD COLUMN status TEXT NOT NULL DEFAULT 'candidate'")
+  }
   return db
 }
 

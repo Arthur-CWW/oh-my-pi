@@ -62,4 +62,7 @@ bun packages/primer-daemon/src/cli.ts note add --question "What matters?" --body
 bun packages/primer-daemon/src/cli.ts note list --limit 5
 bun packages/primer-daemon/src/cli.ts card add --front "What is the source?" --back "A provenance-linked evidence hit." --source-ref browser:events:206004
 bun packages/primer-daemon/src/cli.ts card list --json
+bun packages/primer-daemon/src/cli.ts card status 1 approved
 ```
+
+Card candidates belong to the global inbox in `data/primer/daemon-ledger.sqlite` (or `PRIMER_LEDGER_DB`). Create provenance-rich candidates with the existing `card add` command, then explicitly mark them `candidate`, `approved`, or `rejected` with `card status`. Approved-card export or sync to Hashcards Markdown is a later downstream step; this CLI does not write Hashcards content.
