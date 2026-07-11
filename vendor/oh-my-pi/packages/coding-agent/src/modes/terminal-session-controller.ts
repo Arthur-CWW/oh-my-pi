@@ -3,6 +3,7 @@ import { Effect, Exit, Scope } from "effect";
 import type {
 	RunnerCommandReceipt,
 	InterruptPromptReceipt,
+	RunCompactionReceipt,
 	RunnerImageContent,
 	SetModelReceipt,
 	SetThinkingLevelReceipt,
@@ -11,6 +12,7 @@ import {
 	decodeCancelQueuedInputCommand,
 	decodeEditQueuedInputCommand,
 	decodeInterruptPromptCommand,
+	decodeRunCompactionCommand,
 	decodeSubmitInputCommand,
 	decodeSetModelCommand,
 	decodeSetThinkingLevelCommand,
@@ -70,6 +72,13 @@ export interface TerminalInterruptPromptIntent {
 	readonly causationId?: string;
 }
 
+export interface TerminalCompactionIntent {
+	readonly customInstructions?: string;
+	readonly commandId?: string;
+	readonly correlationId?: string;
+	readonly causationId?: string;
+}
+
 export interface TerminalSessionControllerOptions {
 	readonly viewId?: string;
 	readonly commandId?: string;
@@ -87,6 +96,7 @@ export interface TerminalSessionController {
 	readonly cancel: (intent: TerminalCancelIntent) => Promise<RunnerCommandReceipt>;
 	readonly setModel: (intent: TerminalSetModelIntent) => Promise<SetModelReceipt>;
 	readonly setThinkingLevel: (intent: TerminalSetThinkingLevelIntent) => Promise<SetThinkingLevelReceipt>;
+	readonly compact: (intent?: TerminalCompactionIntent) => Promise<RunCompactionReceipt>;
 	readonly interruptPrompt: (intent?: TerminalInterruptPromptIntent) => Promise<InterruptPromptReceipt>;
 	readonly close: () => Promise<void>;
 }
@@ -288,6 +298,33 @@ export async function createTerminalSessionController(
 							sessionRevision: Math.max(latest.runner.sessionRevision, receipt.sessionRevision),
 						},
 					};
+					return receipt;
+				} catch (error) {
+					await refresh();
+					throw error;
+				}
+			},
+			compact: async (intent = {}) => {
+				const current = await refresh();
+				try {
+					const ids = metadata(intent);
+					const receipt = await run(
+						view!.compact(
+							decodeRunCompactionCommand({
+								schemaVersion: RUNNER_SCHEMA_VERSION,
+								kind: "runCompaction",
+								...ids,
+								...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
+								expectedSessionRevision: current.runner.sessionRevision,
+								viewId,
+								controllerEpoch: view!.epoch,
+								...(intent.customInstructions === undefined
+									? {}
+									: { customInstructions: intent.customInstructions }),
+							}),
+						),
+					);
+					await refresh();
 					return receipt;
 				} catch (error) {
 					await refresh();

@@ -10,6 +10,8 @@ import type {
 	InterruptPromptReceipt,
 	RunnerCommandReceipt,
 	RunnerEvent,
+	RunCompactionCommand,
+	RunCompactionReceipt,
 	SessionRunnerSnapshot,
 	SetModelCommand,
 	SetModelReceipt,
@@ -68,6 +70,9 @@ export interface TerminalSessionView {
 	readonly setThinkingLevel: (
 		command: SetThinkingLevelCommand,
 	) => Effect.Effect<SetThinkingLevelReceipt, RunnerFailure, Scope.Scope>;
+	readonly compact: (
+		command: RunCompactionCommand,
+	) => Effect.Effect<RunCompactionReceipt, RunnerFailure, Scope.Scope>;
 	readonly interruptPrompt: (
 		command: InterruptPromptCommand,
 	) => Effect.Effect<InterruptPromptReceipt, RunnerFailure, Scope.Scope>;

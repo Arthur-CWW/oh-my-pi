@@ -3,6 +3,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { Agent, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
+import * as compactionModule from "@oh-my-pi/pi-agent-core/compaction";
 import { type AssistantMessage, Effort } from "@oh-my-pi/pi-ai";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
@@ -14,12 +15,16 @@ import { Settings } from "../../src/config/settings";
 import { createTerminalSessionController } from "../../src/modes/terminal-session-controller";
 import {
 	decodeInterruptPromptCommand,
+	decodeRunCompactionCommand,
 	decodeSubmitInputCommand,
 	decodeSetModelCommand,
 	decodeSetThinkingLevelCommand,
 	RunnerRevisionConflictError,
 	RunnerItemRevisionConflictError,
 	RunnerPromptOperationConflictError,
+	RunnerCompactionCommandConflictError,
+	RunnerCompactionUnavailableError,
+	SessionRunnerStoppedError,
 	StaleRunnerControllerLeaseError,
 	SessionRunnerRuntimeError,
 	type AttachRunnerViewCommand,
@@ -79,6 +84,7 @@ const submit = (viewId: string, controllerEpoch: number, commandId: string, expe
 });
 
 async function createLiveFixture(holdProviderResponses = false) {
+	let shouldHoldProviderResponses = holdProviderResponses;
 	const root = await fs.mkdtemp(path.join(os.tmpdir(), "omp-session-runner-"));
 	roots.push(root);
 	const project = path.join(root, "project");
@@ -125,7 +131,7 @@ async function createLiveFixture(holdProviderResponses = false) {
 			queueMicrotask(() => {
 				stream.push({ type: "start", partial: message });
 				const complete = () => stream.push({ type: "done", reason: "stop", message });
-				if (holdProviderResponses) pendingProviderCompletions.push(complete);
+				if (shouldHoldProviderResponses) pendingProviderCompletions.push(complete);
 				else complete();
 			});
 			return stream;
@@ -172,6 +178,9 @@ async function createLiveFixture(holdProviderResponses = false) {
 		alternateModel,
 		failNextPromptRebuild: () => {
 			failNextPromptRebuild = true;
+		},
+		holdProviderResponses: () => {
+			shouldHoldProviderResponses = true;
 		},
 		releaseProviderResponses: () => {
 			for (const complete of pendingProviderCompletions.splice(0)) complete();
@@ -1029,5 +1038,208 @@ describe("live SessionRunner", () => {
 		);
 	});
 
+
+	it("supervises live compaction without occupying the mailbox and replays one retained result", async () => {
+		const fixture = await createLiveFixture();
+		fixture.settings.set("compaction.keepRecentTokens", 1);
+		await fixture.session.prompt("first compactable turn", { synthetic: true });
+		await fixture.session.prompt("second compactable turn", { synthetic: true });
+		let releaseCompaction!: () => void;
+		const compactionGate = new Promise<void>(resolve => {
+			releaseCompaction = resolve;
+		});
+		const compactSpy = vi.spyOn(compactionModule, "compact").mockImplementation(async preparation => {
+			await compactionGate;
+			return {
+				summary: "held runner compaction",
+				firstKeptEntryId: preparation.firstKeptEntryId,
+				tokensBefore: preparation.tokensBefore,
+			};
+		});
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const runner = yield* makeSessionRunnerLive(fixture, { mailboxCapacity: 1, eventCapacity: 8 });
+					const observer = yield* runner.attachView(attach("compaction-observer", "observer", 0));
+					const controller = yield* runner.attachView(attach("compaction-controller", "controller", 0));
+					if (controller.capability !== "controller") throw new Error("expected controller");
+					const subscription = yield* controller.subscribe();
+					const initial = yield* controller.snapshot();
+					const command = decodeRunCompactionCommand({
+						schemaVersion: 1,
+						kind: "runCompaction",
+						commandId: "manual-compaction",
+						correlationId: "manual-compaction-correlation",
+						expectedSessionRevision: initial.sessionRevision,
+						viewId: controller.viewId,
+						controllerEpoch: controller.controllerEpoch,
+					});
+
+					const firstFiber = yield* Effect.forkChild(controller.compact(command));
+					yield* Effect.promise(async () => {
+						while (compactSpy.mock.calls.length === 0) await new Promise(resolve => setTimeout(resolve, 1));
+					});
+					const heldSnapshot = yield* runner.snapshot();
+					expect(heldSnapshot.status).toBe("running");
+					yield* observer.detach(detach(observer.viewId, heldSnapshot.revision));
+
+					const staleEpoch = yield* Effect.flip(
+						controller.compact(
+							decodeRunCompactionCommand({
+								...command,
+								commandId: "stale-compaction-epoch",
+								correlationId: "stale-compaction-epoch",
+								controllerEpoch: controller.controllerEpoch + 1,
+							}),
+						),
+					);
+					expect(staleEpoch).toBeInstanceOf(StaleRunnerControllerLeaseError);
+					const staleRevision = yield* Effect.flip(
+						controller.compact(
+							decodeRunCompactionCommand({
+								...command,
+								commandId: "stale-compaction-revision",
+								correlationId: "stale-compaction-revision",
+								expectedSessionRevision: initial.sessionRevision + 1,
+							}),
+						),
+					);
+					const secondWhileActive = yield* Effect.flip(
+						controller.compact(
+							decodeRunCompactionCommand({
+								...command,
+								commandId: "second-active-compaction",
+								correlationId: "second-active-compaction",
+							}),
+						),
+					);
+					expect(secondWhileActive).toBeInstanceOf(RunnerCompactionUnavailableError);
+					expect(staleRevision).toBeInstanceOf(SessionRevisionConflictError);
+					const conflicting = yield* Effect.flip(
+						controller.compact(
+							decodeRunCompactionCommand({
+								...command,
+								customInstructions: "different command content",
+							}),
+						),
+					);
+					expect(conflicting).toBeInstanceOf(RunnerCompactionCommandConflictError);
+
+					const duplicateFiber = yield* Effect.forkChild(controller.compact(command));
+					expect(compactSpy).toHaveBeenCalledTimes(1);
+					releaseCompaction();
+					const first = yield* Fiber.join(firstFiber);
+					const duplicate = yield* Fiber.join(duplicateFiber);
+					expect(first.replayed).toBe(false);
+					expect(duplicate).toEqual({ ...first, replayed: true });
+					const retained = yield* controller.compact(command);
+					expect(retained).toEqual({ ...first, replayed: true });
+
+					let completionEvents = 0;
+					while (completionEvents === 0) {
+						const delivery = yield* subscription.take;
+						if (delivery.kind !== "resyncRequired" && delivery.event.kind === "compactionCompleted") {
+							completionEvents += 1;
+						}
+					}
+					expect(completionEvents).toBe(1);
+					expect(compactSpy).toHaveBeenCalledTimes(1);
+					const completed = yield* runner.snapshot();
+					expect(completed.revision).toBe(initial.revision);
+					expect(completed.sessionRevision).toBeGreaterThan(initial.sessionRevision);
+					expect(first.startedSessionRevision).toBe(initial.sessionRevision);
+					expect(first.completedSessionRevision).toBe(completed.sessionRevision);
+					yield* runner.stop();
+				}).pipe(Effect.ensuring(Effect.sync(releaseCompaction))),
+			),
+		);
+	});
+
+	it("resolves held compaction waiters with a typed stop failure", async () => {
+		const fixture = await createLiveFixture();
+		fixture.settings.set("compaction.keepRecentTokens", 1);
+		await fixture.session.prompt("first stop-compaction turn", { synthetic: true });
+		await fixture.session.prompt("second stop-compaction turn", { synthetic: true });
+		let releaseCompaction!: () => void;
+		const compactionGate = new Promise<void>(resolve => {
+			releaseCompaction = resolve;
+		});
+		const compactSpy = vi.spyOn(compactionModule, "compact").mockImplementation(async preparation => {
+			await compactionGate;
+			return {
+				summary: "should be interrupted by stop",
+				firstKeptEntryId: preparation.firstKeptEntryId,
+				tokensBefore: preparation.tokensBefore,
+			};
+		});
+
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const runner = yield* makeSessionRunnerLive(fixture, { mailboxCapacity: 1, eventCapacity: 2 });
+					const controller = yield* runner.attachView(attach("stop-compaction-controller", "controller", 0));
+					if (controller.capability !== "controller") throw new Error("expected controller");
+					const initial = yield* controller.snapshot();
+					const compacting = yield* Effect.forkChild(
+						controller.compact(
+							decodeRunCompactionCommand({
+								schemaVersion: 1,
+								kind: "runCompaction",
+								commandId: "stop-compaction",
+								correlationId: "stop-compaction",
+								expectedSessionRevision: initial.sessionRevision,
+								viewId: controller.viewId,
+								controllerEpoch: controller.controllerEpoch,
+							}),
+						),
+					);
+					yield* Effect.promise(async () => {
+						while (compactSpy.mock.calls.length === 0) await new Promise(resolve => setTimeout(resolve, 1));
+					});
+					const stopping = yield* Effect.forkChild(runner.stop());
+					const failure = yield* Effect.flip(Fiber.join(compacting));
+					expect(failure).toBeInstanceOf(SessionRunnerStoppedError);
+					releaseCompaction();
+					yield* Fiber.join(stopping);
+					expect(fixture.sessionManager.getEntries().filter(entry => entry.type === "compaction")).toHaveLength(0);
+				}).pipe(Effect.ensuring(Effect.sync(releaseCompaction))),
+			),
+		);
+	});
+
+	it("retains a typed compaction failure and does not rerun it", async () => {
+		const fixture = await createLiveFixture();
+		fixture.settings.set("compaction.keepRecentTokens", 1);
+		await fixture.session.prompt("first failing-compaction turn", { synthetic: true });
+		await fixture.session.prompt("second failing-compaction turn", { synthetic: true });
+		const compactSpy = vi.spyOn(compactionModule, "compact").mockRejectedValue(new Error("held provider failed"));
+
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const runner = yield* makeSessionRunnerLive(fixture, { mailboxCapacity: 1, eventCapacity: 2 });
+					const controller = yield* runner.attachView(attach("failed-compaction-controller", "controller", 0));
+					if (controller.capability !== "controller") throw new Error("expected controller");
+					const initial = yield* controller.snapshot();
+					const command = decodeRunCompactionCommand({
+						schemaVersion: 1,
+						kind: "runCompaction",
+						commandId: "failed-compaction",
+						correlationId: "failed-compaction",
+						expectedSessionRevision: initial.sessionRevision,
+						viewId: controller.viewId,
+						controllerEpoch: controller.controllerEpoch,
+					});
+					const first = yield* Effect.flip(controller.compact(command));
+					const replayed = yield* Effect.flip(controller.compact(command));
+					expect(first).toBeInstanceOf(SessionRunnerRuntimeError);
+					expect(replayed).toBe(first);
+					expect(compactSpy).toHaveBeenCalledTimes(1);
+					expect(fixture.sessionManager.getEntries().filter(entry => entry.type === "compaction")).toHaveLength(0);
+					yield* runner.stop();
+				}),
+			),
+		);
+	});
 
 });

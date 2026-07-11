@@ -113,12 +113,25 @@ export const InterruptPromptCommandSchema = Schema.Struct({
 	targetGeneration: RunnerRevisionSchema,
 });
 
+export const RunCompactionCommandSchema = Schema.Struct({
+	schemaVersion: Schema.Literal(RUNNER_SCHEMA_VERSION),
+	kind: Schema.Literal("runCompaction"),
+	commandId: Schema.String,
+	correlationId: Schema.String,
+	causationId: Schema.optional(Schema.String),
+	expectedSessionRevision: RunnerRevisionSchema,
+	viewId: Schema.String,
+	controllerEpoch: ControllerEpochSchema,
+	customInstructions: Schema.optional(Schema.String),
+});
+
 export type SubmitInputCommand = typeof SubmitInputCommandSchema.Type;
 export type EditQueuedInputCommand = typeof EditQueuedInputCommandSchema.Type;
 export type CancelQueuedInputCommand = typeof CancelQueuedInputCommandSchema.Type;
 export type SetThinkingLevelCommand = typeof SetThinkingLevelCommandSchema.Type;
 export type SetModelCommand = typeof SetModelCommandSchema.Type;
 export type InterruptPromptCommand = typeof InterruptPromptCommandSchema.Type;
+export type RunCompactionCommand = typeof RunCompactionCommandSchema.Type;
 export type RunnerCapability = "observer" | "controller";
 export type RunnerStatus = "running" | "stopping" | "stopped";
 
@@ -181,6 +194,21 @@ export interface InterruptPromptReceipt {
 	readonly interrupted: true;
 }
 
+export interface RunCompactionReceipt {
+	readonly commandId: string;
+	readonly correlationId: string;
+	readonly causationId?: string;
+	readonly startedSessionRevision: number;
+	readonly completedSessionRevision: number;
+	readonly replayed: boolean;
+	readonly result: {
+		readonly summary: string;
+		readonly shortSummary?: string;
+		readonly firstKeptEntryId: string;
+		readonly tokensBefore: number;
+	};
+}
+
 export interface RunnerViewSnapshot {
 	readonly viewId: string;
 	readonly capability: RunnerCapability;
@@ -218,6 +246,7 @@ export type RunnerEventKind =
 	| "thinkingLevelChanged"
 	| "modelChanged"
 	| "promptInterrupted"
+	| "compactionCompleted"
 	| "transcriptEntryAppended";
 
 /** Every event is a closed causal envelope in the runner's single total order. */
@@ -301,6 +330,16 @@ export const decodeInterruptPromptCommand = (input: unknown): InterruptPromptCom
 	} catch (error) {
 		throw new InvalidRunnerCommandError({
 			issue: error instanceof Error ? error.message : "Invalid interrupt-prompt command",
+		});
+	}
+};
+
+export const decodeRunCompactionCommand = (input: unknown): RunCompactionCommand => {
+	try {
+		return Schema.decodeUnknownSync(RunCompactionCommandSchema)(input);
+	} catch (error) {
+		throw new InvalidRunnerCommandError({
+			issue: error instanceof Error ? error.message : "Invalid compaction command",
 		});
 	}
 };

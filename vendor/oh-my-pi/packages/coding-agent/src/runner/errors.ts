@@ -60,6 +60,16 @@ export class RunnerPromptOperationConflictError extends Schema.TaggedErrorClass<
 	},
 ) {}
 
+export class RunnerCompactionCommandConflictError extends Schema.TaggedErrorClass<RunnerCompactionCommandConflictError>()(
+	"RunnerCompactionCommandConflictError",
+	{ commandId: Schema.String },
+) {}
+
+export class RunnerCompactionUnavailableError extends Schema.TaggedErrorClass<RunnerCompactionUnavailableError>()(
+	"RunnerCompactionUnavailableError",
+	{ reason: Schema.Literals(["streaming", "compacting", "retrying", "handoff", "capacity"]) },
+) {}
+
 export class SessionRunnerStoppedError extends Schema.TaggedErrorClass<SessionRunnerStoppedError>()(
 	"SessionRunnerStoppedError",
 	{},
