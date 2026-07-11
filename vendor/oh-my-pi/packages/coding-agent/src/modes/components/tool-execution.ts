@@ -146,9 +146,8 @@ export interface ToolExecutionHandle {
 	setExpanded(expanded: boolean): void;
 }
 
-/** Drive pending-tool redraws at 30fps for live tool headers and displaceable
- * poll blocks. The TUI throttles at the same cadence, and static frames diff to
- * a no-op redraw at ~zero cost. */
+/** Drive component-scoped pending-tool redraws at 30fps. Concurrent tool
+ * animations coalesce into one paint without recomposing transcript history. */
 export const SPINNER_RENDER_INTERVAL_MS = 1000 / 30;
 /** Advance the spinner glyph at its classic ~12.5fps step, decoupled from the
  * render cadence (mirrors `Loader`). */
@@ -228,6 +227,9 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 	// sealed the block stays in the transcript's repaintable live region so a
 	// late result still repaints instead of stranding the streaming preview.
 	#sealed = false;
+	// Permanently detached components must never re-arm local animation or
+	// publish late async image-conversion paints.
+	#disposed = false;
 	// A `job` poll result whose watched jobs are all still running. Such a
 	// block never finalizes (stays in the transcript live region) so a
 	// follow-up `job` call can displace it instead of stacking another
@@ -470,10 +472,11 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 				.png()
 				.toBase64()
 				.then(data => {
+					if (this.#disposed) return;
 					this.#convertedImages.set(index, { data, mimeType: "image/png" });
 					this.#displayInputVersion++;
 					this.#updateDisplay();
-					this.#ui.requestRender();
+					this.#ui.requestComponentRender(this);
 				})
 				.catch(() => {
 					// Ignore conversion failures - display will use original image format
@@ -494,7 +497,8 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 		// Detached async task progress rows are static now; progress snapshots
 		// still call #maybeFreezeBackgroundTask before applying so rows settle
 		// once the block leaves the live region.
-		const needsSpinner = isStreamingArgs || isPartialTask || this.isDisplaceableBlock();
+		const needsSpinner =
+			!this.#sealed && !this.#disposed && (isStreamingArgs || isPartialTask || this.isDisplaceableBlock());
 		if (needsSpinner && !this.#spinnerInterval) {
 			const frameCount = theme.spinnerFrames.length;
 			const frame = sharedSpinnerFrame(frameCount);
@@ -508,7 +512,7 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 				const frameCount = theme.spinnerFrames.length;
 				this.#spinnerFrame = sharedSpinnerFrame(frameCount, now);
 				this.#renderState.spinnerFrame = this.#spinnerFrame;
-				this.#ui.requestRender();
+				this.#ui.requestComponentRender(this);
 			}, SPINNER_RENDER_INTERVAL_MS);
 		} else if (!needsSpinner && this.#spinnerInterval) {
 			clearInterval(this.#spinnerInterval);
@@ -544,7 +548,7 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 	}
 
 	#updateTodoStrikeAnimation(): void {
-		if (this.#toolName !== "todo" || this.#isPartial || this.#result?.isError) {
+		if (this.#sealed || this.#disposed || this.#toolName !== "todo" || this.#isPartial || this.#result?.isError) {
 			this.#stopTodoStrikeAnimation();
 			return;
 		}
@@ -565,7 +569,7 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 				this.#spinnerFrame = nextFrame;
 				this.#renderState.spinnerFrame = nextFrame;
 			}
-			this.#ui.requestRender();
+			this.#ui.requestComponentRender(this);
 		}, 65);
 	}
 
@@ -683,6 +687,13 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 		this.#stopTodoStrikeAnimation();
 		this.#editDiffAbort?.abort();
 		this.#editDiffAbort = undefined;
+	}
+
+	/** Lifecycle teardown for permanently detached transcript blocks. */
+	override dispose(): void {
+		this.#disposed = true;
+		this.stopAnimation();
+		super.dispose();
 	}
 
 	setExpanded(expanded: boolean): void {

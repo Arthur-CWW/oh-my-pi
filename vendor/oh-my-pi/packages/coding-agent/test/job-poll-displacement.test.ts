@@ -18,7 +18,7 @@ import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
 import type { Component, TUI } from "@oh-my-pi/pi-tui";
 
-const uiStub = { requestRender() {} } as unknown as TUI;
+const uiStub = { requestRender() {}, requestComponentRender() {} } as unknown as TUI;
 
 type JobStatus = "running" | "completed" | "failed" | "cancelled";
 
