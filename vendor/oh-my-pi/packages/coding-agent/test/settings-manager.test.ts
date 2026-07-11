@@ -311,6 +311,7 @@ describe("Settings", () => {
 	});
 
 	describe("model role overrides", () => {
+
 		it("does not persist temporary default model overrides when another role is saved", async () => {
 			await writeSettings({
 				modelRoles: { default: "anthropic/claude-sonnet-4-5" },
@@ -387,9 +388,172 @@ describe("Settings", () => {
 
 			expect(settings.getModelRole("default")).toBe("kimi-code/kimi-for-coding");
 			expect(settings.getModelRole("task")).toBe("openai-codex/gpt-5.5:medium");
-			expect(resolveAgentModelPatterns({ agentModel: "pi/task", settings })).toEqual([
+			expect(resolveAgentModelPatterns({ taskOrRoleModel: "pi/task", settings })).toEqual([
 				"openai-codex/gpt-5.5:medium",
 			]);
+		});
+
+		it("refuses shadowed project role writes atomically while persisting unshadowed roles", async () => {
+			await writeSettings({
+				modelRoles: { default: "anthropic/claude-sonnet-4-5" },
+			});
+			await Bun.write(
+				path.join(getProjectAgentDir(projectDir), "settings.json"),
+				JSON.stringify({ modelRoles: { default: "openai/gpt-5.2-codex" } }),
+			);
+
+			const settings = await Settings.init({ cwd: projectDir, agentDir });
+
+			expect(() =>
+				settings.set("modelRoles", {
+					default: "anthropic/claude-opus-4-5",
+					smol: "anthropic/claude-haiku-4-5",
+				}),
+			).toThrow("modelRoles.default is overridden by project settings");
+			expect(settings.getModelRole("default")).toBe("openai/gpt-5.2-codex");
+			expect(settings.getModelRole("smol")).toBeUndefined();
+			expect(await readSettings()).toEqual({
+				modelRoles: { default: "anthropic/claude-sonnet-4-5" },
+			});
+
+			settings.setModelRole("smol", "anthropic/claude-haiku-4-5");
+			await settings.flush();
+
+			expect(await readSettings()).toEqual({
+				modelRoles: {
+					default: "anthropic/claude-sonnet-4-5",
+					smol: "anthropic/claude-haiku-4-5",
+				},
+			});
+		});
+
+		it("allows runtime role writes through a null config overlay", async () => {
+			const overlayPath = path.join(testDir, "roles-overlay.yml");
+			await Bun.write(overlayPath, "modelRoles:\n");
+			const settings = await Settings.init({ cwd: projectDir, agentDir, configFiles: [overlayPath] });
+
+			settings.setModelRole("smol", "moonshot/kimi-k2.5");
+			settings.setModelRole("default", "google-antigravity/gemini-3.1-pro");
+			await settings.flush();
+
+			expect(settings.getModelRole("smol")).toBe("moonshot/kimi-k2.5");
+			expect(settings.getModelRole("default")).toBe("google-antigravity/gemini-3.1-pro");
+		});
+
+		it("refuses a model role shadowed by a config overlay", async () => {
+			const overlayPath = path.join(testDir, "roles-overlay.yml");
+			await writeSettings({
+				modelRoles: { default: "anthropic/claude-sonnet-4-5" },
+			});
+			await Bun.write(overlayPath, "modelRoles:\n  default: openai/gpt-5.2-codex\n");
+
+			const settings = await Settings.init({ cwd: projectDir, agentDir, configFiles: [overlayPath] });
+
+			expect(() => settings.setModelRole("default", "anthropic/claude-opus-4-5")).toThrow(
+				"modelRoles.default is overridden by config overlay settings",
+			);
+			expect(settings.getModelRole("default")).toBe("openai/gpt-5.2-codex");
+			expect(await readSettings()).toEqual({
+				modelRoles: { default: "anthropic/claude-sonnet-4-5" },
+			});
+		});
+
+		it("reports global model-role provenance", async () => {
+			await writeSettings({ modelRoles: { default: "global/default" } });
+			const settings = await Settings.init({ cwd: projectDir, agentDir });
+			expect(settings.resolveModelRole("default")).toEqual({
+				role: "default",
+				effectiveSelector: "global/default",
+				winningLayer: "global",
+				shadowedCandidates: [],
+			});
+		});
+
+		it("reports project model-role provenance over global", async () => {
+			await writeSettings({ modelRoles: { default: "global/default" } });
+			await Bun.write(
+				path.join(getProjectAgentDir(projectDir), "settings.json"),
+				JSON.stringify({ modelRoles: { default: "project/default" } }),
+			);
+			const settings = await Settings.init({ cwd: projectDir, agentDir });
+			expect(settings.resolveModelRole("default")).toMatchObject({
+				effectiveSelector: "project/default",
+				winningLayer: "project",
+				shadowedCandidates: [{ layer: "global", selector: "global/default" }],
+			});
+		});
+
+		it("reports config model-role provenance over project and global", async () => {
+			await writeSettings({ modelRoles: { default: "global/default" } });
+			await Bun.write(
+				path.join(getProjectAgentDir(projectDir), "settings.json"),
+				JSON.stringify({ modelRoles: { default: "project/default" } }),
+			);
+			const overlayPath = path.join(testDir, "roles-provenance.yml");
+			await Bun.write(overlayPath, "modelRoles:\n  default: config/default\n");
+			const settings = await Settings.init({ cwd: projectDir, agentDir, configFiles: [overlayPath] });
+			expect(settings.resolveModelRole("default")).toMatchObject({
+				effectiveSelector: "config/default",
+				winningLayer: "config_overlay",
+				shadowedCandidates: [
+					{ layer: "project", selector: "project/default" },
+					{ layer: "global", selector: "global/default" },
+				],
+			});
+		});
+
+		it("keeps runtime role selectors isolated while exposing ordered provenance", async () => {
+			await writeSettings({ modelRoles: { default: "global/default", smol: "global/smol" } });
+			await Bun.write(
+				path.join(getProjectAgentDir(projectDir), "settings.json"),
+				JSON.stringify({ modelRoles: { default: "project/default" } }),
+			);
+			const overlayPath = path.join(testDir, "roles-runtime.yml");
+			await Bun.write(overlayPath, "modelRoles:\n  default: config/default\n");
+			const settings = await Settings.init({ cwd: projectDir, agentDir, configFiles: [overlayPath] });
+
+			expect(() => settings.setRuntimeModelRole("default", "")).toThrow(
+				"Runtime model role selector must not be empty",
+			);
+			settings.setRuntimeModelRole("default", "runtime/default");
+			settings.setRuntimeModelRole("smol", "runtime/smol");
+			expect(settings.resolveModelRole("default")).toEqual({
+				role: "default",
+				effectiveSelector: "runtime/default",
+				winningLayer: "runtime_override",
+				shadowedCandidates: [
+					{ layer: "config_overlay", selector: "config/default" },
+					{ layer: "project", selector: "project/default" },
+					{ layer: "global", selector: "global/default" },
+				],
+			});
+			expect(settings.getModelRole("default")).toBe("runtime/default");
+			expect(settings.getModelRole("smol")).toBe("runtime/smol");
+
+			settings.clearRuntimeModelRole("default");
+			expect(settings.resolveModelRole("default")).toMatchObject({
+				effectiveSelector: "config/default",
+				winningLayer: "config_overlay",
+			});
+			expect(settings.getModelRole("smol")).toBe("runtime/smol");
+		});
+
+		it("retains runtime selectors across disk reload and isolates them in clones", async () => {
+			await writeSettings({ modelRoles: { default: "global/original" } });
+			const settings = await Settings.init({ cwd: projectDir, agentDir });
+			settings.setRuntimeModelRole("default", "runtime/original");
+
+			await writeSettings({ modelRoles: { default: "global/reloaded" } });
+			await settings.reloadFromDisk();
+			expect(settings.resolveModelRole("default")).toMatchObject({
+				effectiveSelector: "runtime/original",
+				winningLayer: "runtime_override",
+			});
+
+			const clone = await settings.cloneForCwd(projectDir);
+			clone.setRuntimeModelRole("default", "runtime/clone");
+			expect(clone.getModelRole("default")).toBe("runtime/clone");
+			expect(settings.getModelRole("default")).toBe("runtime/original");
 		});
 	});
 
@@ -518,4 +682,7 @@ describe("Settings", () => {
 			expect(fs.readFileSync(path.join(agentDir, "last-changelog-version"), "utf8")).toBe("0.41.0");
 		});
 	});
+
+
 });
+

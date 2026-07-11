@@ -470,6 +470,12 @@ describe("resolveModelRoleValue", () => {
 		expect(result.explicitThinkingLevel).toBe(true);
 	});
 
+	test("returns no model when pi/task role is unset", () => {
+		const result = resolveModelRoleValue("pi/task", allModels, { settings: Settings.isolated() });
+
+		expect(result.model).toBeUndefined();
+	});
+
 	test("resolves pi/default through configured default role alias", () => {
 		const settings = {
 			getModelRole: (role: string) => (role === "default" ? "openrouter/qwen/qwen3-coder:exacto" : undefined),
@@ -630,6 +636,16 @@ describe("resolveAgentModelPatterns", () => {
 
 		expect(resolveAgentModelPatterns({ taskOrRoleModel: "pi/smol", settings })).toEqual([
 			"anthropic/claude-sonnet-4-5",
+		]);
+	});
+
+	test("preserves effort suffix through inherited cross-role alias expansion", () => {
+		const settings = Settings.isolated({
+			modelRoles: { default: "pi/slow:high", slow: "anthropic/claude-sonnet-4-5" },
+		});
+
+		expect(resolveAgentModelPatterns({ taskOrRoleModel: "pi/smol", settings })).toEqual([
+			"anthropic/claude-sonnet-4-5:high",
 		]);
 	});
 
@@ -1258,7 +1274,9 @@ describe("expandRoleAlias", () => {
 	test("keeps literal model selectors containing role-like names unchanged", () => {
 		const settings = Settings.isolated({ modelRoles: { smol: "anthropic/claude-sonnet-4-5" } });
 
+		expect(expandRoleAlias("smol", settings)).toBe("smol");
 		expect(expandRoleAlias("openai/pi/smol", settings)).toBe("openai/pi/smol");
+		expect(expandRoleAlias("openrouter/smol-model", settings)).toBe("openrouter/smol-model");
 	});
 });
 

@@ -68,6 +68,20 @@ export interface SettingsOptions {
 	configFiles?: string[];
 }
 
+export type ModelRoleWinningLayer =
+	| "runtime_override"
+	| "config_overlay"
+	| "project"
+	| "global"
+	| "default";
+
+export interface ModelRoleResolution {
+	role: string;
+	effectiveSelector: string | undefined;
+	winningLayer: ModelRoleWinningLayer | undefined;
+	shadowedCandidates: readonly { layer: ModelRoleWinningLayer; selector: string }[];
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Path Utilities
 // ═══════════════════════════════════════════════════════════════════════════
@@ -147,6 +161,12 @@ function shallowStringRecord(value: unknown): Record<string, string> {
 		}
 	}
 	return result;
+}
+
+function modelRoleSelector(value: unknown, role: string): string | undefined {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+	const selector = (value as Record<string, unknown>)[role];
+	return typeof selector === "string" && selector.length > 0 ? selector : undefined;
 }
 
 function resolvePathScopedStringArray(settingPath: SettingPath, value: unknown, cwd: string): string[] | undefined {
@@ -326,6 +346,9 @@ export class Settings {
 	 * Triggers hooks for settings that have side effects.
 	 */
 	set<P extends SettingPath>(path: P, value: SettingValue<P>): void {
+		if (path === "modelRoles") {
+			this.#assertModelRolesWritable(value as Record<string, string>);
+		}
 		const prev = this.get(path);
 		const segments = path.split(".");
 		setByPath(this.#global, segments, value);
@@ -529,33 +552,171 @@ export class Settings {
 		return this.get("bashInterceptor.patterns");
 	}
 
+
 	/**
 	 * Set a model role (helper for modelRoles record).
 	 */
 	setModelRole(role: ModelRole | string, modelId: string): void {
+		this.#assertModelRolesWritable({ [role]: modelId });
 		const current = shallowStringRecord(getByPath(this.#global, ["modelRoles"]));
-		this.set("modelRoles", { ...current, [role]: modelId });
+		current[role] = modelId;
+		this.#setModelRolesGlobal(current);
 	}
 
 	/**
-	 * Get a model role (helper for modelRoles record).
+	 * Determine whether a model role is shadowed by a read-only winning layer
+	 * (project settings or --config overlay). Returns the winning source name, or
+	 * undefined when the role is writable at the global layer.
+	 */
+	#modelRoleWinningReadOnlySource(role: string): "project" | "config overlay" | undefined {
+		const overlayRoles = getByPath(this.#configOverlay, ["modelRoles"]);
+		if (
+			overlayRoles !== null &&
+			typeof overlayRoles === "object" &&
+			!Array.isArray(overlayRoles) &&
+			role in overlayRoles
+		) {
+			return "config overlay";
+		}
+
+		const projectRoles = getByPath(this.#project, ["modelRoles"]);
+		if (
+			projectRoles !== null &&
+			typeof projectRoles === "object" &&
+			!Array.isArray(projectRoles) &&
+			role in projectRoles
+		) {
+			return "project";
+		}
+
+		return undefined;
+	}
+
+	/**
+	 * Validate that all roles in an incoming modelRoles record are writable at
+	 * the global layer. Throws a descriptive Error listing any shadowed roles.
+	 */
+	#assertModelRolesWritable(incoming: Record<string, string>): void {
+		const conflicts: { role: string; source: "project" | "config overlay" }[] = [];
+		for (const role of Object.keys(incoming)) {
+			const source = this.#modelRoleWinningReadOnlySource(role);
+			if (source) {
+				conflicts.push({ role, source });
+			}
+		}
+
+		if (conflicts.length > 0) {
+			const messages = conflicts.map(
+				({ role, source }) =>
+					`modelRoles.${role} is overridden by ${source} settings and cannot be changed here`,
+			);
+			throw new Error(messages.join("; "));
+		}
+	}
+
+	/**
+	 * Validate that a single model role can be written to the global layer.
+	 * Public so AgentSession can preflight before mutating live state.
+	 */
+	assertModelRoleWritable(role: ModelRole | string): void {
+		this.#assertModelRolesWritable({ [role]: "" });
+	}
+
+	/**
+	 * Write a modelRoles record to the global layer without re-running the
+	 * preflight. Used by setModelRole after it has already validated the role
+	 * being changed; keeps the generic `set("modelRoles", ...)` path validating
+	 * every incoming key.
+	 */
+	#setModelRolesGlobal(value: Record<string, string>): void {
+		const path: SettingPath = "modelRoles";
+		const prev = this.get(path);
+		setByPath(this.#global, path.split("."), value);
+
+		this.#modified.add(path);
+		this.#rebuildMerged();
+		const next = this.get(path);
+		this.#queueSave();
+		this.#fireEffectiveSettingChanged(path, next, prev);
+	}
+
+	/**
+	 * Set a non-persistent selector for one model role.
+	 */
+	setRuntimeModelRole(role: ModelRole | string, selector: string): void {
+		if (selector.length === 0) {
+			throw new Error("Runtime model role selector must not be empty");
+		}
+
+		const path: SettingPath = "modelRoles";
+		const prev = this.get(path);
+		const roles = shallowStringRecord(getByPath(this.#overrides, ["modelRoles"]));
+		roles[role] = selector;
+		setByPath(this.#overrides, ["modelRoles"], roles);
+		this.#rebuildMerged();
+		this.#fireEffectiveSettingChanged(path, this.get(path), prev);
+	}
+
+	/**
+	 * Clear a non-persistent selector for one model role.
+	 */
+	clearRuntimeModelRole(role: ModelRole | string): void {
+		const roles = shallowStringRecord(getByPath(this.#overrides, ["modelRoles"]));
+		if (!(role in roles)) return;
+
+		const path: SettingPath = "modelRoles";
+		const prev = this.get(path);
+		delete roles[role];
+		setByPath(this.#overrides, ["modelRoles"], roles);
+		this.#rebuildMerged();
+		this.#fireEffectiveSettingChanged(path, this.get(path), prev);
+	}
+
+	/**
+	 * Resolve a role selector directly from each settings layer.
+	 */
+	resolveModelRole(role: ModelRole | string): ModelRoleResolution {
+		const candidates: { layer: ModelRoleWinningLayer; selector: string }[] = [];
+		const layers: readonly { layer: Exclude<ModelRoleWinningLayer, "default">; settings: RawSettings }[] = [
+			{ layer: "runtime_override", settings: this.#overrides },
+			{ layer: "config_overlay", settings: this.#configOverlay },
+			{ layer: "project", settings: this.#project },
+			{ layer: "global", settings: this.#global },
+		];
+
+		for (const { layer, settings } of layers) {
+			const selector = modelRoleSelector(getByPath(settings, ["modelRoles"]), role);
+			if (selector !== undefined) candidates.push({ layer, selector });
+		}
+
+		const defaultSelector = modelRoleSelector(getDefault("modelRoles"), role);
+		if (defaultSelector !== undefined) {
+			candidates.push({ layer: "default", selector: defaultSelector });
+		}
+
+		const [winner, ...shadowedCandidates] = candidates;
+		return {
+			role,
+			effectiveSelector: winner?.selector,
+			winningLayer: winner?.layer,
+			shadowedCandidates,
+		};
+	}
+
+	getModelRoles(): Readonly<Record<string, string>> {
+		return shallowStringRecord(this.get("modelRoles"));
+	}
+	/**
+	 * Get the configured model selector for a single role.
 	 */
 	getModelRole(role: ModelRole | string): string | undefined {
-		const roles = this.get("modelRoles");
-		return roles[role];
-	}
-
-	/**
-	 * Get all model roles (helper for modelRoles record).
-	 */
-	getModelRoles(): ReadOnlyDict<string> {
-		return { ...this.get("modelRoles") };
+		return this.resolveModelRole(role).effectiveSelector;
 	}
 
 	/*
 	 * Override model roles (helper for modelRoles record).
 	 */
-	overrideModelRoles(roles: ReadOnlyDict<string>): void {
+	overrideModelRoles(roles: Readonly<Record<string, string>>): void {
 		const next = shallowStringRecord(getByPath(this.#overrides, ["modelRoles"]));
 		for (const [role, modelId] of Object.entries(roles)) {
 			if (modelId) {
@@ -564,6 +725,7 @@ export class Settings {
 		}
 		this.override("modelRoles", next);
 	}
+
 
 	/**
 	 * Set disabled providers (for compatibility with discovery system).
