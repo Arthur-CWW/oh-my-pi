@@ -11,6 +11,7 @@ import { ModelRegistry } from "../../src/config/model-registry";
 import { Settings } from "../../src/config/settings";
 import {
 	RunnerRevisionConflictError,
+	RunnerItemRevisionConflictError,
 	StaleRunnerControllerLeaseError,
 	type AttachRunnerViewCommand,
 	type DetachRunnerViewCommand,
@@ -59,10 +60,10 @@ const submit = (viewId: string, controllerEpoch: number, commandId: string, expe
 	kind: "submitInput" as const,
 	viewId,
 	controllerEpoch,
-	payload: { text: `input-${commandId}` },
+	payload: { text: `input-${commandId}`, deliveryClass: "followUp" as const },
 });
 
-async function createLiveFixture() {
+async function createLiveFixture(holdProviderResponses = false) {
 	const root = await fs.mkdtemp(path.join(os.tmpdir(), "omp-session-runner-"));
 	roots.push(root);
 	const project = path.join(root, "project");
@@ -77,6 +78,7 @@ async function createLiveFixture() {
 	authStorage.setRuntimeApiKey(model.provider, "test-key");
 	const modelRegistry = new ModelRegistry(authStorage, path.join(root, "models.yml"));
 	const providerInputs: string[] = [];
+	const pendingProviderCompletions: Array<() => void> = [];
 	const agent = new Agent({
 		initialState: { model, systemPrompt: ["test"], tools: [], messages: [] },
 		streamFn: (_model, context) => {
@@ -106,7 +108,9 @@ async function createLiveFixture() {
 			};
 			queueMicrotask(() => {
 				stream.push({ type: "start", partial: message });
-				stream.push({ type: "done", reason: "stop", message });
+				const complete = () => stream.push({ type: "done", reason: "stop", message });
+				if (holdProviderResponses) pendingProviderCompletions.push(complete);
+				else complete();
 			});
 			return stream;
 		},
@@ -128,7 +132,19 @@ async function createLiveFixture() {
 		settings: Settings.isolated({ "compaction.enabled": false }),
 		modelRegistry,
 	});
-	return { root, muxRoot, sessionFile, ownership, queue, session, sessionManager, providerInputs };
+	return {
+		root,
+		muxRoot,
+		sessionFile,
+		ownership,
+		queue,
+		session,
+		sessionManager,
+		providerInputs,
+		releaseProviderResponses: () => {
+			for (const complete of pendingProviderCompletions.splice(0)) complete();
+		},
+	};
 }
 
 describe("live SessionRunner", () => {
@@ -205,5 +221,142 @@ describe("live SessionRunner", () => {
 		);
 		expect(await replacementOwnership.isCurrent()).toBe(true);
 		await replacementOwnership.release();
+	});
+
+	it("decodes and persists steer and follow-up image payloads", async () => {
+		const fixture = await createLiveFixture();
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const runner = yield* makeSessionRunnerLive(fixture, { mailboxCapacity: 1, eventCapacity: 4 });
+					const attached = yield* runner.attachView(attach("image-controller", "controller", 0));
+					if (attached.capability !== "controller") throw new Error("expected controller");
+					const image = { type: "image" as const, data: "aW1hZ2U=", mimeType: "image/png" };
+					const steer = yield* attached.submitInput({
+						...metadata("steer-image", 0),
+						kind: "submitInput",
+						viewId: attached.viewId,
+						controllerEpoch: attached.controllerEpoch,
+						payload: { text: "steer image", images: [image], deliveryClass: "steer" },
+					});
+					yield* Effect.promise(() => fixture.session.waitForIdle());
+					const followUp = yield* attached.submitInput({
+						...metadata("follow-up-image", 1),
+						kind: "submitInput",
+						viewId: attached.viewId,
+						controllerEpoch: attached.controllerEpoch,
+						payload: { text: "follow-up image", images: [image], deliveryClass: "followUp" },
+					});
+					yield* Effect.promise(() => fixture.session.waitForIdle());
+					const snapshot = yield* runner.snapshot();
+					expect(snapshot.items.find(item => item.inputId === steer.inputId)?.deliveryClass).toBe("steer");
+					expect(snapshot.items.find(item => item.inputId === steer.inputId)?.payload.images).toEqual([image]);
+					expect(snapshot.items.find(item => item.inputId === followUp.inputId)?.deliveryClass).toBe("followUp");
+					expect(snapshot.items.find(item => item.inputId === followUp.inputId)?.payload.images).toEqual([image]);
+					yield* runner.stop();
+				}),
+			),
+		);
+	});
+
+	it("serializes edit and cancel with typed fences, replay deduplication, and kind-specific events", async () => {
+		const fixture = await createLiveFixture(true);
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const runner = yield* makeSessionRunnerLive(fixture, { mailboxCapacity: 1, eventCapacity: 8 });
+					const attached = yield* runner.attachView(attach("mutation-controller", "controller", 0));
+					if (attached.capability !== "controller") throw new Error("expected controller");
+					yield* attached.submitInput(submit(attached.viewId, attached.controllerEpoch, "blocking-input", 0));
+					while (!fixture.session.isStreaming) yield* Effect.promise(() => Bun.sleep(1));
+					const target = yield* attached.submitInput(
+						submit(attached.viewId, attached.controllerEpoch, "mutation-target", 1),
+					);
+					const subscription = yield* attached.subscribe();
+
+					const staleRunner = yield* Effect.flip(
+						attached.editQueuedInput({
+							...metadata("stale-runner-edit", 1),
+							kind: "editQueuedInput",
+							viewId: attached.viewId,
+							controllerEpoch: attached.controllerEpoch,
+							inputId: target.inputId,
+							itemRevision: 1,
+							payload: { text: "must not apply" },
+						}),
+					);
+					expect(staleRunner).toBeInstanceOf(RunnerRevisionConflictError);
+					const staleItem = yield* Effect.flip(
+						attached.editQueuedInput({
+							...metadata("stale-item-edit", 2),
+							kind: "editQueuedInput",
+							viewId: attached.viewId,
+							controllerEpoch: attached.controllerEpoch,
+							inputId: target.inputId,
+							itemRevision: 2,
+							payload: { text: "must not apply" },
+						}),
+					);
+					expect(staleItem).toBeInstanceOf(RunnerItemRevisionConflictError);
+					const staleController = yield* Effect.flip(
+						attached.cancelQueuedInput({
+							...metadata("stale-controller-cancel", 2),
+							kind: "cancelQueuedInput",
+							viewId: attached.viewId,
+							controllerEpoch: attached.controllerEpoch + 1,
+							inputId: target.inputId,
+							itemRevision: 1,
+						}),
+					);
+					expect(staleController).toBeInstanceOf(StaleRunnerControllerLeaseError);
+
+					const editCommand = {
+						...metadata("edit-command", 2),
+						kind: "editQueuedInput" as const,
+						viewId: attached.viewId,
+						controllerEpoch: attached.controllerEpoch,
+						inputId: target.inputId,
+						itemRevision: 1,
+						payload: {
+							text: "after edit",
+							images: [{ type: "image" as const, data: "ZWRpdA==", mimeType: "image/jpeg" }],
+						},
+					};
+					const edited = yield* attached.editQueuedInput(editCommand);
+					const editReplay = yield* attached.editQueuedInput(editCommand);
+					expect(editReplay).toEqual({ ...edited, replayed: true });
+
+					const cancelCommand = {
+						...metadata("cancel-command", 3),
+						kind: "cancelQueuedInput" as const,
+						viewId: attached.viewId,
+						controllerEpoch: attached.controllerEpoch,
+						inputId: target.inputId,
+						itemRevision: 2,
+					};
+					const cancelled = yield* attached.cancelQueuedInput(cancelCommand);
+					const cancelReplay = yield* attached.cancelQueuedInput(cancelCommand);
+					expect(cancelReplay).toEqual({ ...cancelled, replayed: true });
+					const mutationEvents: string[] = [];
+					while (!mutationEvents.some(event => event.startsWith("cancel-command:"))) {
+						const delivery = yield* subscription.take;
+						if (delivery.event.commandId === "edit-command" || delivery.event.commandId === "cancel-command") {
+							mutationEvents.push(`${delivery.event.commandId}:${delivery.event.kind}`);
+						}
+					}
+					expect(mutationEvents).toEqual(["edit-command:inputEdited", "cancel-command:inputCancelled"]);
+					const snapshot = yield* runner.snapshot();
+					expect(snapshot.revision).toBe(4);
+					expect(snapshot.items.find(item => item.inputId === target.inputId)).toMatchObject({
+						revision: 2,
+						state: "cancelled",
+						payload: editCommand.payload,
+					});
+					fixture.releaseProviderResponses();
+					yield* Effect.promise(() => fixture.session.waitForIdle());
+					yield* runner.stop();
+				}).pipe(Effect.ensuring(Effect.sync(fixture.releaseProviderResponses))),
+			),
+		);
 	});
 });

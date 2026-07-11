@@ -80,19 +80,58 @@ async function childMain(mode: string, root: string): Promise<void> {
 						capability: "controller",
 					});
 					if (controller.capability !== "controller") throw new Error("controller attachment failed");
+					const blockerCommand = {
+						schemaVersion: 1 as const,
+						kind: "submitInput" as const,
+						commandId: "process-blocker",
+						correlationId: "process-blocker-correlation",
+						expectedRevision: 0,
+						viewId: controller.viewId,
+						controllerEpoch: controller.controllerEpoch,
+						payload: { text: "hold the provider boundary open", deliveryClass: "followUp" as const },
+					};
+					yield* controller.submitInput(blockerCommand);
+					yield* Effect.yieldNow;
 					const command = {
 						schemaVersion: 1 as const,
 						kind: "submitInput" as const,
 						commandId: "process-command",
 						correlationId: "process-correlation",
-						expectedRevision: 0,
+						expectedRevision: 1,
 						viewId: controller.viewId,
 						controllerEpoch: controller.controllerEpoch,
-						payload: { text: "accepted without claiming provider completion" },
+						payload: { text: "accepted without claiming provider completion", deliveryClass: "followUp" as const },
 					};
 					const accepted = yield* controller.submitInput(command);
 					const replayed = yield* controller.submitInput(command);
-					return { accepted, replayed };
+					const editCommand = {
+						schemaVersion: 1 as const,
+						kind: "editQueuedInput" as const,
+						commandId: "process-edit",
+						correlationId: "process-edit-correlation",
+						expectedRevision: 2,
+						viewId: controller.viewId,
+						controllerEpoch: controller.controllerEpoch,
+						inputId: accepted.inputId,
+						itemRevision: 1,
+						payload: { text: "edited without provider completion" },
+					};
+					const edited = yield* controller.editQueuedInput(editCommand);
+					const editReplayed = yield* controller.editQueuedInput(editCommand);
+					const cancelCommand = {
+						schemaVersion: 1 as const,
+						kind: "cancelQueuedInput" as const,
+						commandId: "process-cancel",
+						correlationId: "process-cancel-correlation",
+						expectedRevision: 3,
+						viewId: controller.viewId,
+						controllerEpoch: controller.controllerEpoch,
+						inputId: accepted.inputId,
+						itemRevision: 2,
+					};
+					const cancelled = yield* controller.cancelQueuedInput(cancelCommand);
+					const cancelReplayed = yield* controller.cancelQueuedInput(cancelCommand);
+					return { accepted, replayed, edited, editReplayed, cancelled, cancelReplayed };
 				}),
 			),
 		);
@@ -171,23 +210,47 @@ async function readQueueHead(root: string): Promise<Record<string, unknown>> {
 }
 
 describe("createSessionRunner process composition", () => {
-	it("durably accepts and replays one command without claiming provider completion", async () => {
+	it("journals one record for each replayed input command without claiming provider completion", async () => {
 		const root = await fs.mkdtemp(path.join(os.tmpdir(), "omp-sdk-runner-process-"));
 		roots.push(root);
 		const result = await spawnChild("accept", root);
 		const accepted = result.accepted as Record<string, unknown>;
 		const replayed = result.replayed as Record<string, unknown>;
+		const edited = result.edited as Record<string, unknown>;
+		const editReplayed = result.editReplayed as Record<string, unknown>;
+		const cancelled = result.cancelled as Record<string, unknown>;
+		const cancelReplayed = result.cancelReplayed as Record<string, unknown>;
 		expect(accepted.replayed).toBe(false);
 		expect(replayed).toEqual({ ...accepted, replayed: true });
+		expect(editReplayed).toEqual({ ...edited, replayed: true });
+		expect(cancelReplayed).toEqual({ ...cancelled, replayed: true });
 
 		const queueRecords = await jsonlRecords(path.join(root, "mux"));
 		expect(queueRecords.filter(record => record.type === "adopt")).toHaveLength(0);
 		const head = await readQueueHead(path.join(root, "mux"));
 		expect(head.ownershipEpoch).toBe(result.ownershipEpoch);
 		const enqueues = queueRecords.filter(record => record.type === "enqueue");
-		expect(enqueues).toHaveLength(1);
-		expect(enqueues[0]?.runnerRevision).toBe(1);
-		expect((enqueues[0]?.command as Record<string, unknown>)?.commandId).toBe("process-command");
+		expect(enqueues).toHaveLength(2);
+		expect(enqueues.map(record => (record.command as Record<string, unknown>)?.commandId)).toEqual([
+			"process-blocker",
+			"process-command",
+		]);
+		const edits = queueRecords.filter(
+			record =>
+				record.type === "revision" &&
+				(record.command as Record<string, unknown> | undefined)?.commandId === "process-edit",
+		);
+		expect(edits).toHaveLength(1);
+		expect(edits[0]?.runnerRevision).toBe(3);
+		const cancellations = queueRecords.filter(
+			record =>
+				record.type === "state" &&
+				record.state === "cancelled" &&
+				(record.command as Record<string, unknown> | undefined)?.commandId === "process-cancel",
+		);
+		expect(cancellations).toHaveLength(1);
+		expect(cancellations[0]?.runnerRevision).toBe(4);
+		expect(queueRecords.filter(record => record.type === "terminal")).toHaveLength(0);
 
 		const sessionLines = (await fs.readFile(String(result.sessionFile), "utf8"))
 			.split("\n")

@@ -12,6 +12,11 @@ export class RunnerRevisionConflictError extends Schema.TaggedErrorClass<RunnerR
 	{ expectedRevision: NonNegativeInt, actualRevision: NonNegativeInt },
 ) {}
 
+export class RunnerItemRevisionConflictError extends Schema.TaggedErrorClass<RunnerItemRevisionConflictError>()(
+	"RunnerItemRevisionConflictError",
+	{ inputId: Schema.String, expectedRevision: NonNegativeInt, actualRevision: NonNegativeInt },
+) {}
+
 export class SessionRunnerRuntimeError extends Schema.TaggedErrorClass<SessionRunnerRuntimeError>()(
 	"SessionRunnerRuntimeError",
 	{ issue: Schema.String },

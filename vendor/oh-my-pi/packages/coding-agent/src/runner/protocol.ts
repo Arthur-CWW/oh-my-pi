@@ -16,6 +16,22 @@ export const ControllerEpochSchema = Schema.Int.pipe(
 	Schema.brand("ControllerEpoch"),
 );
 
+export const ItemRevisionSchema = Schema.Int.pipe(
+	Schema.check(Schema.isGreaterThanOrEqualTo(1)),
+	Schema.brand("ItemRevision"),
+);
+
+export const ImageContentSchema = Schema.Struct({
+	type: Schema.Literal("image"),
+	data: Schema.String,
+	mimeType: Schema.String,
+});
+
+const InputPayloadSchema = Schema.Struct({
+	text: Schema.String,
+	images: Schema.optional(Schema.Array(ImageContentSchema)),
+});
+
 const CommandMetadataSchema = {
 	schemaVersion: Schema.Literal(RUNNER_SCHEMA_VERSION),
 	commandId: Schema.String,
@@ -29,10 +45,35 @@ export const SubmitInputCommandSchema = Schema.Struct({
 	kind: Schema.Literal("submitInput"),
 	viewId: Schema.String,
 	controllerEpoch: ControllerEpochSchema,
-	payload: Schema.Struct({ text: Schema.String }),
+	payload: Schema.Struct({
+		text: Schema.String,
+		images: Schema.optional(Schema.Array(ImageContentSchema)),
+		deliveryClass: Schema.Literals(["steer", "followUp"]),
+	}),
+});
+
+export const EditQueuedInputCommandSchema = Schema.Struct({
+	...CommandMetadataSchema,
+	kind: Schema.Literal("editQueuedInput"),
+	viewId: Schema.String,
+	controllerEpoch: ControllerEpochSchema,
+	inputId: Schema.String,
+	itemRevision: ItemRevisionSchema,
+	payload: InputPayloadSchema,
+});
+
+export const CancelQueuedInputCommandSchema = Schema.Struct({
+	...CommandMetadataSchema,
+	kind: Schema.Literal("cancelQueuedInput"),
+	viewId: Schema.String,
+	controllerEpoch: ControllerEpochSchema,
+	inputId: Schema.String,
+	itemRevision: ItemRevisionSchema,
 });
 
 export type SubmitInputCommand = typeof SubmitInputCommandSchema.Type;
+export type EditQueuedInputCommand = typeof EditQueuedInputCommandSchema.Type;
+export type CancelQueuedInputCommand = typeof CancelQueuedInputCommandSchema.Type;
 export type RunnerCapability = "observer" | "controller";
 export type RunnerStatus = "running" | "stopping" | "stopped";
 
@@ -108,6 +149,8 @@ export type RunnerEventKind =
 	| "controllerReleased"
 	| "viewDetached"
 	| "inputPrepared"
+	| "inputEdited"
+	| "inputCancelled"
 	| "transcriptEntryAppended";
 
 /** Every event is a closed causal envelope in the runner's single total order. */
@@ -144,6 +187,22 @@ export const decodeSubmitInputCommand = (input: unknown): SubmitInputCommand => 
 		return Schema.decodeUnknownSync(SubmitInputCommandSchema)(input);
 	} catch (error) {
 		throw new InvalidRunnerCommandError({ issue: error instanceof Error ? error.message : "Invalid submit command" });
+	}
+};
+
+export const decodeEditQueuedInputCommand = (input: unknown): EditQueuedInputCommand => {
+	try {
+		return Schema.decodeUnknownSync(EditQueuedInputCommandSchema)(input);
+	} catch (error) {
+		throw new InvalidRunnerCommandError({ issue: error instanceof Error ? error.message : "Invalid edit command" });
+	}
+};
+
+export const decodeCancelQueuedInputCommand = (input: unknown): CancelQueuedInputCommand => {
+	try {
+		return Schema.decodeUnknownSync(CancelQueuedInputCommandSchema)(input);
+	} catch (error) {
+		throw new InvalidRunnerCommandError({ issue: error instanceof Error ? error.message : "Invalid cancel command" });
 	}
 };
 

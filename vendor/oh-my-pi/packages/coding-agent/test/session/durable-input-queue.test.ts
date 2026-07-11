@@ -5,6 +5,7 @@ import * as path from "node:path";
 
 import {
 	DurableInputCommandConflictError,
+	DurableInputItemRevisionConflictError,
 	DurableInputQueue,
 	DurableInputRunnerRevisionConflictError,
 	type DurableInputCommandMetadata,
@@ -856,5 +857,129 @@ describe("durable input queue", () => {
 		expect(seen).toEqual(["outer", "inner"]);
 		expect(await queue.getLatestRunnerRevision()).toBe(2);
 		expect((await queue.list()).map(item => item.payload.text)).toEqual(["outer", "inner"]);
+	});
+
+	it("atomically edits and cancels through the command ledger with durable replay and CAS", async () => {
+		const { root, session, owner } = await fixture("epoch-a");
+		const queue = await DurableInputQueue.open(owner.handle, root);
+		await queue.adopt();
+		const first = await queue.enqueueCommand(
+			{ text: "original", deliveryClass: "followUp" },
+			command("enqueue-target", 0),
+		);
+		const editMetadata = command("edit-target", 1);
+		const edited = await queue.editCommand(
+			first.item.inputId,
+			first.item.revision,
+			{ text: "edited", images: undefined },
+			editMetadata,
+		);
+		const replay = await queue.editCommand(
+			first.item.inputId,
+			first.item.revision,
+			{ images: undefined, text: "edited" },
+			editMetadata,
+		);
+		expect(replay).toEqual({ ...edited, replayed: true });
+		await expect(
+			queue.editCommand(
+				first.item.inputId,
+				first.item.revision,
+				{ text: "changed", images: undefined },
+				editMetadata,
+			),
+		).rejects.toBeInstanceOf(DurableInputCommandConflictError);
+		await expect(
+			queue.editCommand(
+				first.item.inputId,
+				edited.item.revision,
+				{ text: "stale runner", images: undefined },
+				command("stale-runner-edit", 1),
+			),
+		).rejects.toBeInstanceOf(DurableInputRunnerRevisionConflictError);
+		await expect(
+			queue.editCommand(
+				first.item.inputId,
+				first.item.revision,
+				{ text: "stale item", images: undefined },
+				command("stale-item-edit", 2),
+			),
+		).rejects.toBeInstanceOf(DurableInputItemRevisionConflictError);
+
+		const cancelMetadata = command("cancel-target", 2);
+		const cancelled = await queue.cancelCommand(first.item.inputId, edited.item.revision, cancelMetadata);
+		expect(cancelled).toMatchObject({
+			runnerRevision: 3,
+			replayed: false,
+			item: { revision: 2, state: "cancelled", payload: { text: "edited" } },
+		});
+		expect(await queue.cancelCommand(first.item.inputId, edited.item.revision, cancelMetadata)).toEqual({
+			...cancelled,
+			replayed: true,
+		});
+
+		const rootPath = await queueRoot(root);
+		const { activeEpoch } = await queue.getStatus();
+		const records = (await fs.readFile(path.join(rootPath, "segments", `${activeEpoch}.jsonl`), "utf8"))
+			.trim()
+			.split("\n")
+			.map(line => JSON.parse(line) as Record<string, unknown>);
+		expect(records.filter(record => record.command && record.type === "revision")).toHaveLength(1);
+		expect(records.filter(record => record.command && record.type === "state")).toHaveLength(1);
+
+		owner.current = false;
+		const nextOwner = replacement(session, "epoch-b");
+		const reopened = await DurableInputQueue.open(nextOwner.handle, root);
+		await reopened.adopt();
+		expect(await reopened.getLatestRunnerRevision()).toBe(3);
+		expect(await reopened.getCommandReceipt("edit-target")).toEqual(edited);
+		expect(await reopened.getCommandReceipt("cancel-target")).toEqual(cancelled);
+	});
+
+	it("lets only one same-runner-revision mutation win and keeps legacy mutations outside the ledger", async () => {
+		const { root, owner } = await fixture("epoch-a");
+		const queue = await DurableInputQueue.open(owner.handle, root);
+		await queue.adopt();
+		const left = await queue.enqueue({ text: "left", deliveryClass: "followUp" });
+		const right = await queue.enqueue({ text: "right", deliveryClass: "followUp" });
+		const outcomes = await Promise.allSettled([
+			queue.editCommand(left.inputId, left.revision, { text: "winner", images: undefined }, command("edit", 0)),
+			queue.cancelCommand(right.inputId, right.revision, command("cancel", 0)),
+		]);
+		expect(outcomes.filter(outcome => outcome.status === "fulfilled")).toHaveLength(1);
+		expect(outcomes.find(outcome => outcome.status === "rejected")).toMatchObject({
+			reason: { name: "DurableInputRunnerRevisionConflictError", expectedRevision: 0, actualRevision: 1 },
+		});
+
+		const revisionBeforeLegacy = await queue.getLatestRunnerRevision();
+		const legacy = await queue.enqueue({ text: "legacy", deliveryClass: "followUp" });
+		const legacyEdited = await queue.edit(legacy.inputId, legacy.revision, { text: "legacy edit", images: undefined });
+		await queue.cancel(legacyEdited.inputId);
+		expect(await queue.getLatestRunnerRevision()).toBe(revisionBeforeLegacy);
+	});
+
+	it("publishes edit and cancel events only after durable commit and tolerates reentrant failing listeners", async () => {
+		const { root, owner } = await fixture("epoch-a");
+		const queue = await DurableInputQueue.open(owner.handle, root);
+		await queue.adopt();
+		const input = await queue.enqueue({ text: "original", deliveryClass: "followUp" });
+		const seen: string[] = [];
+		let reentrant: Promise<unknown> | undefined;
+		queue.subscribe(event => {
+			seen.push(event.kind);
+			if (event.kind === "inputEdited") {
+				reentrant = queue.cancelCommand(event.item.inputId, event.item.revision, command("cancel-event", 1));
+			}
+			throw new Error("listener failure");
+		});
+		await queue.editCommand(
+			input.inputId,
+			input.revision,
+			{ text: "edited", images: undefined },
+			command("edit-event", 0),
+		);
+		await reentrant;
+		expect(seen).toEqual(["inputEdited", "inputCancelled"]);
+		expect(await queue.getLatestRunnerRevision()).toBe(2);
 	});
 });

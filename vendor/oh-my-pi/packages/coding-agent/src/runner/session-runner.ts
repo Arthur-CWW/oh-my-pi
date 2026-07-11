@@ -3,6 +3,7 @@ import type { AgentSession } from "../session/agent-session";
 import {
 	DurableInputCommandConflictError,
 	DurableInputQueueConflictError,
+	DurableInputItemRevisionConflictError,
 	DurableInputRunnerRevisionConflictError,
 	SessionOwnershipLostError,
 	type DurableInputQueue,
@@ -16,6 +17,7 @@ import {
 	InvalidRunnerCommandError,
 	RunnerControllerConflictError,
 	RunnerRevisionConflictError,
+	RunnerItemRevisionConflictError,
 	RunnerViewAlreadyAttachedError,
 	RunnerViewCapabilityError,
 	RunnerViewNotAttachedError,
@@ -25,6 +27,8 @@ import {
 } from "./errors";
 import {
 	assertRunnerRevision,
+	decodeCancelQueuedInputCommand,
+	decodeEditQueuedInputCommand,
 	decodeSubmitInputCommand,
 	RUNNER_SCHEMA_VERSION,
 	type AcquireRunnerControllerCommand,
@@ -45,6 +49,7 @@ import {
 export type RunnerFailure =
 	| InvalidRunnerCommandError
 	| RunnerRevisionConflictError
+	| RunnerItemRevisionConflictError
 	| RunnerControllerConflictError
 	| StaleRunnerControllerLeaseError
 	| RunnerViewAlreadyAttachedError
@@ -89,6 +94,8 @@ export interface ControllerSessionRunnerView extends RunnerViewBase {
 	readonly capability: "controller";
 	readonly controllerEpoch: number;
 	readonly submitInput: (input: unknown) => Effect.Effect<RunnerCommandReceipt, RunnerFailure, Scope.Scope>;
+	readonly editQueuedInput: (input: unknown) => Effect.Effect<RunnerCommandReceipt, RunnerFailure, Scope.Scope>;
+	readonly cancelQueuedInput: (input: unknown) => Effect.Effect<RunnerCommandReceipt, RunnerFailure, Scope.Scope>;
 	readonly releaseController: (
 		command: ReleaseRunnerControllerCommand,
 	) => Effect.Effect<ObserverSessionRunnerView, RunnerFailure, Scope.Scope>;
@@ -130,6 +137,7 @@ const asRunnerFailure = (error: unknown): RunnerFailure => {
 		error instanceof InvalidRunnerCommandError ||
 		error instanceof RunnerRevisionConflictError ||
 		error instanceof RunnerControllerConflictError ||
+		error instanceof RunnerItemRevisionConflictError ||
 		error instanceof StaleRunnerControllerLeaseError ||
 		error instanceof RunnerViewAlreadyAttachedError ||
 		error instanceof RunnerViewNotAttachedError ||
@@ -141,6 +149,13 @@ const asRunnerFailure = (error: unknown): RunnerFailure => {
 	}
 	if (error instanceof DurableInputRunnerRevisionConflictError) {
 		return new RunnerRevisionConflictError({
+			expectedRevision: error.expectedRevision,
+			actualRevision: error.actualRevision,
+		});
+	}
+	if (error instanceof DurableInputItemRevisionConflictError) {
+		return new RunnerItemRevisionConflictError({
+			inputId: error.inputId,
 			expectedRevision: error.expectedRevision,
 			actualRevision: error.actualRevision,
 		});
@@ -349,13 +364,19 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 		return Effect.succeed(view);
 	};
 
-	const applyAcceptedInput = Effect.fn("Runner.applyAcceptedInput")(function* (event: DurableInputQueueEvent) {
+	const applyQueueEvent = Effect.fn("Runner.applyQueueEvent")(function* (event: DurableInputQueueEvent) {
 		if (acceptedCommands.has(event.command.commandId)) return;
 		acceptedCommands.add(event.command.commandId);
 		durableItems.set(event.item.inputId, event.item);
 		revision = event.runnerRevision;
+		const kind: RunnerEventKind =
+			event.kind === "inputAccepted"
+				? "inputPrepared"
+				: event.kind === "inputEdited"
+					? "inputEdited"
+					: "inputCancelled";
 		yield* publishEvent({
-			kind: "inputPrepared",
+			kind,
 			metadata: event.command,
 			controllerEpoch: event.command.controllerEpoch,
 			viewId: event.command.viewId,
@@ -367,7 +388,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 	let transcriptPosition = transcriptEntryCount;
 	const unsubscribeQueue = resources.queue.subscribe((event) => {
 		runCallback(
-			enqueue(applyAcceptedInput(event)).pipe(
+			enqueue(applyQueueEvent(event)).pipe(
 				Effect.matchCauseEffect({ onFailure: () => Effect.void, onSuccess: () => Effect.void }),
 			),
 		);
@@ -415,6 +436,16 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 		controllerEpoch: number,
 		input: unknown,
 	) => Effect.Effect<RunnerCommandReceipt, RunnerFailure, Scope.Scope>;
+	let editQueuedInput!: (
+		viewId: string,
+		controllerEpoch: number,
+		input: unknown,
+	) => Effect.Effect<RunnerCommandReceipt, RunnerFailure, Scope.Scope>;
+	let cancelQueuedInput!: (
+		viewId: string,
+		controllerEpoch: number,
+		input: unknown,
+	) => Effect.Effect<RunnerCommandReceipt, RunnerFailure, Scope.Scope>;
 
 	const mismatchedView = (viewId: string): Effect.Effect<never, RunnerFailure> =>
 		Effect.fail(new InvalidRunnerCommandError({ issue: `Command does not belong to view ${viewId}` }));
@@ -445,6 +476,8 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 			detach,
 			close: detach,
 			submitInput: (input) => submitInput(viewId, controllerEpoch, input),
+			editQueuedInput: (input) => editQueuedInput(viewId, controllerEpoch, input),
+			cancelQueuedInput: (input) => cancelQueuedInput(viewId, controllerEpoch, input),
 			releaseController: (command) =>
 				command.viewId === viewId ? releaseController(command) : mismatchedView(viewId),
 		};
@@ -526,7 +559,11 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 				const durable = yield* Effect.tryPromise({
 					try: () =>
 						resources.session.acceptDurableInput(
-							{ text: command.payload.text, deliveryClass: "followUp" },
+							{
+								text: command.payload.text,
+								images: command.payload.images,
+								deliveryClass: command.payload.deliveryClass,
+							},
 							{
 								schemaVersion: 1,
 								commandId: command.commandId,
@@ -542,8 +579,133 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 				revision = Math.max(revision, durable.runnerRevision);
 				durableItems.set(durable.item.inputId, durable.item);
 				if (!durable.replayed) {
-					yield* applyAcceptedInput({
+					yield* applyQueueEvent({
 						kind: "inputAccepted",
+						runnerRevision: durable.runnerRevision,
+						command: durable.command,
+						item: durable.item,
+					});
+				}
+				return {
+					commandId: durable.command.commandId,
+					correlationId: durable.command.correlationId,
+					...(durable.command.causationId === undefined ? {} : { causationId: durable.command.causationId }),
+					inputId: durable.item.inputId,
+					durableSequence: durable.item.sequence,
+					revision: durable.runnerRevision,
+					replayed: durable.replayed,
+				} satisfies RunnerCommandReceipt;
+			}),
+		);
+	});
+
+	editQueuedInput = Effect.fn("Runner.editQueuedInput")(function* (
+		viewId: string,
+		controllerEpoch: number,
+		input: unknown,
+	) {
+		const command = yield* Effect.try({ try: () => decodeEditQueuedInputCommand(input), catch: asRunnerFailure });
+		if (command.viewId !== viewId) return yield* mismatchedView(viewId);
+		if (command.controllerEpoch !== controllerEpoch) {
+			return yield* Effect.fail(
+				new StaleRunnerControllerLeaseError({
+					viewId,
+					expectedControllerEpoch: command.controllerEpoch,
+					actualControllerEpoch: controllerEpoch,
+				}),
+			);
+		}
+		return yield* enqueue(
+			Effect.gen(function* () {
+				yield* requireController(viewId, controllerEpoch);
+				const prior = yield* Effect.tryPromise({
+					try: () => resources.queue.getCommandReceipt(command.commandId),
+					catch: asRunnerFailure,
+				});
+				if (!prior) yield* requireRevision(command.expectedRevision);
+				const durable = yield* Effect.tryPromise({
+					try: () =>
+						resources.session.editDurableInputCommand(
+							command.inputId,
+							command.itemRevision,
+							{ text: command.payload.text, images: command.payload.images },
+							{
+								schemaVersion: 1,
+								commandId: command.commandId,
+								correlationId: command.correlationId,
+								...(command.causationId === undefined ? {} : { causationId: command.causationId }),
+								viewId,
+								controllerEpoch,
+								expectedRevision: command.expectedRevision,
+							},
+						),
+					catch: asRunnerFailure,
+				});
+				revision = Math.max(revision, durable.runnerRevision);
+				durableItems.set(durable.item.inputId, durable.item);
+				if (!durable.replayed) {
+					yield* applyQueueEvent({
+						kind: "inputEdited",
+						runnerRevision: durable.runnerRevision,
+						command: durable.command,
+						item: durable.item,
+					});
+				}
+				return {
+					commandId: durable.command.commandId,
+					correlationId: durable.command.correlationId,
+					...(durable.command.causationId === undefined ? {} : { causationId: durable.command.causationId }),
+					inputId: durable.item.inputId,
+					durableSequence: durable.item.sequence,
+					revision: durable.runnerRevision,
+					replayed: durable.replayed,
+				} satisfies RunnerCommandReceipt;
+			}),
+		);
+	});
+
+	cancelQueuedInput = Effect.fn("Runner.cancelQueuedInput")(function* (
+		viewId: string,
+		controllerEpoch: number,
+		input: unknown,
+	) {
+		const command = yield* Effect.try({ try: () => decodeCancelQueuedInputCommand(input), catch: asRunnerFailure });
+		if (command.viewId !== viewId) return yield* mismatchedView(viewId);
+		if (command.controllerEpoch !== controllerEpoch) {
+			return yield* Effect.fail(
+				new StaleRunnerControllerLeaseError({
+					viewId,
+					expectedControllerEpoch: command.controllerEpoch,
+					actualControllerEpoch: controllerEpoch,
+				}),
+			);
+		}
+		return yield* enqueue(
+			Effect.gen(function* () {
+				yield* requireController(viewId, controllerEpoch);
+				const prior = yield* Effect.tryPromise({
+					try: () => resources.queue.getCommandReceipt(command.commandId),
+					catch: asRunnerFailure,
+				});
+				if (!prior) yield* requireRevision(command.expectedRevision);
+				const durable = yield* Effect.tryPromise({
+					try: () =>
+						resources.session.cancelDurableInputCommand(command.inputId, command.itemRevision, {
+							schemaVersion: 1,
+							commandId: command.commandId,
+							correlationId: command.correlationId,
+							...(command.causationId === undefined ? {} : { causationId: command.causationId }),
+							viewId,
+							controllerEpoch,
+							expectedRevision: command.expectedRevision,
+						}),
+					catch: asRunnerFailure,
+				});
+				revision = Math.max(revision, durable.runnerRevision);
+				durableItems.set(durable.item.inputId, durable.item);
+				if (!durable.replayed) {
+					yield* applyQueueEvent({
+						kind: "inputCancelled",
 						runnerRevision: durable.runnerRevision,
 						command: durable.command,
 						item: durable.item,

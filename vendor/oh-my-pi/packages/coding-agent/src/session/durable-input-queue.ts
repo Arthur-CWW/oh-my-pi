@@ -56,13 +56,22 @@ export interface DurableInputAdmissionReceipt {
 	readonly runnerRevision: number;
 	readonly replayed: boolean;
 }
+export type DurableInputMutationReceipt = DurableInputAdmissionReceipt;
 
-export type DurableInputQueueEvent = {
-	readonly kind: "inputAccepted";
-	readonly runnerRevision: number;
-	readonly command: DurableInputCommandMetadata;
-	readonly item: DurableQueuedInput;
-};
+
+export type DurableInputQueueEvent =
+	| {
+			readonly kind: "inputAccepted";
+			readonly runnerRevision: number;
+			readonly command: DurableInputCommandMetadata;
+			readonly item: DurableQueuedInput;
+	  }
+	| {
+			readonly kind: "inputEdited" | "inputCancelled";
+			readonly runnerRevision: number;
+			readonly command: DurableInputCommandMetadata;
+			readonly item: DurableQueuedInput;
+	  };
 
 export interface DurableInputAttempt {
 	readonly id: string;
@@ -134,6 +143,20 @@ export class DurableInputRunnerRevisionConflictError extends Error {
 		this.actualRevision = actualRevision;
 	}
 }
+export class DurableInputItemRevisionConflictError extends Error {
+	readonly inputId: string;
+	readonly expectedRevision: number;
+	readonly actualRevision: number;
+
+	constructor(inputId: string, expectedRevision: number, actualRevision: number) {
+		super(`Durable input item revision conflict for ${inputId}: expected ${expectedRevision}, actual ${actualRevision}`);
+		this.name = "DurableInputItemRevisionConflictError";
+		this.inputId = inputId;
+		this.expectedRevision = expectedRevision;
+		this.actualRevision = actualRevision;
+	}
+}
+
 
 type WriterLockIdentity = { readonly kind: "fingerprint"; readonly value: string } | { readonly kind: "pid" };
 
@@ -166,6 +189,8 @@ type QueueRecord =
 			readonly inputId: string;
 			readonly revision: number;
 			readonly payload: DurableInputPayload;
+			readonly command?: DurableInputCommandMetadata;
+			readonly runnerRevision?: number;
 			readonly ownerEpoch: string;
 	  }
 	| {
@@ -173,6 +198,9 @@ type QueueRecord =
 			readonly type: "state";
 			readonly id: string;
 			readonly state: DurableInputState;
+			readonly revision?: number;
+			readonly command?: DurableInputCommandMetadata;
+			readonly runnerRevision?: number;
 			readonly ownerEpoch: string;
 	  }
 	| {
@@ -387,7 +415,15 @@ function decodeRecord(value: unknown): QueueRecord | undefined {
 		}
 		case "revision": {
 			const payload = decodePayload(value.payload);
-			if (typeof value.inputId !== "string" || !isPositiveSafeInteger(value.revision) || !payload) {
+			const command = value.command === undefined ? undefined : decodeCommandMetadata(value.command);
+			if (
+				typeof value.inputId !== "string" ||
+				!isPositiveSafeInteger(value.revision) ||
+				!payload ||
+				(value.command !== undefined && command === undefined) ||
+				(value.runnerRevision !== undefined && !isPositiveSafeInteger(value.runnerRevision)) ||
+				(command === undefined) !== (value.runnerRevision === undefined)
+			) {
 				return undefined;
 			}
 			return {
@@ -396,18 +432,35 @@ function decodeRecord(value: unknown): QueueRecord | undefined {
 				inputId: value.inputId,
 				revision: value.revision,
 				payload,
+				...(command === undefined ? {} : { command }),
+				...(value.runnerRevision === undefined ? {} : { runnerRevision: value.runnerRevision as number }),
 				ownerEpoch: value.ownerEpoch,
 			};
 		}
-		case "state":
-			if (typeof value.id !== "string" || !isValidState(value.state)) return undefined;
+		case "state": {
+			const command = value.command === undefined ? undefined : decodeCommandMetadata(value.command);
+			if (
+				typeof value.id !== "string" ||
+				!isValidState(value.state) ||
+				(value.revision !== undefined && !isPositiveSafeInteger(value.revision)) ||
+				(value.command !== undefined && command === undefined) ||
+				(value.runnerRevision !== undefined && !isPositiveSafeInteger(value.runnerRevision)) ||
+				(command === undefined) !== (value.runnerRevision === undefined) ||
+				(command !== undefined && value.revision === undefined)
+			) {
+				return undefined;
+			}
 			return {
 				version: QUEUE_VERSION,
 				type: "state",
 				id: value.id,
 				state: value.state,
+				...(value.revision === undefined ? {} : { revision: value.revision as number }),
+				...(command === undefined ? {} : { command }),
+				...(value.runnerRevision === undefined ? {} : { runnerRevision: value.runnerRevision as number }),
 				ownerEpoch: value.ownerEpoch,
 			};
+		}
 		case "attempt":
 			if (
 				typeof value.id !== "string" ||
@@ -918,6 +971,141 @@ export class DurableInputQueue {
 			}),
 		);
 	}
+
+	async editCommand(
+		inputId: string,
+		expectedItemRevision: number,
+		payload: DurableInputPayload,
+		command: DurableInputCommandMetadata,
+	): Promise<DurableInputMutationReceipt> {
+		const result = await this.#exclusive(() =>
+			this.#withWriterLock(async () => {
+				await this.#assertOwner();
+				const decodedCommand = decodeCommandMetadata(command);
+				if (!decodedCommand || !isPositiveSafeInteger(expectedItemRevision) || typeof payload.text !== "string") {
+					throw new DurableInputQueueConflictError(`Invalid durable input command edit: ${inputId}`);
+				}
+				await this.#rebuildCommandIndexLocked();
+				const existing = this.#commandReceipts.get(command.commandId);
+				if (existing) {
+					if (
+						!structurallyEqual(existing.command, decodedCommand) ||
+						existing.item.inputId !== inputId ||
+						existing.item.revision !== expectedItemRevision + 1 ||
+						existing.item.state !== "queued" ||
+						!structurallyEqual(existing.item.payload, payload)
+					) {
+						throw new DurableInputCommandConflictError(command.commandId);
+					}
+					return { receipt: { ...existing, replayed: true }, changed: false as const };
+				}
+				if (command.expectedRevision !== this.#latestRunnerRevision) {
+					throw new DurableInputRunnerRevisionConflictError(command.expectedRevision, this.#latestRunnerRevision);
+				}
+				const item = (await this.#items()).find(candidate => candidate.inputId === inputId);
+				if (!item) throw new DurableInputQueueConflictError(`Durable input queue item not found: ${inputId}`);
+				if (item.revision !== expectedItemRevision) {
+					throw new DurableInputItemRevisionConflictError(inputId, expectedItemRevision, item.revision);
+				}
+				if (item.state !== "queued") {
+					throw new DurableInputQueueConflictError(`Durable input queue edit conflict: ${inputId}`);
+				}
+				const nextItem = { ...item, revision: item.revision + 1, payload };
+				const runnerRevision = this.#latestRunnerRevision + 1;
+				await this.#appendLocked({
+					version: QUEUE_VERSION,
+					type: "revision",
+					inputId,
+					revision: nextItem.revision,
+					payload,
+					command: decodedCommand,
+					runnerRevision,
+					ownerEpoch: this.#activeEpoch,
+				});
+				const receipt = { item: nextItem, command: decodedCommand, runnerRevision, replayed: false };
+				this.#commandReceipts.set(command.commandId, receipt);
+				this.#latestRunnerRevision = runnerRevision;
+				return { receipt, changed: true as const };
+			}),
+		);
+		if (result.changed) {
+			this.#emit({
+				kind: "inputEdited",
+				runnerRevision: result.receipt.runnerRevision,
+				command: result.receipt.command,
+				item: result.receipt.item,
+			});
+		}
+		return result.receipt;
+	}
+
+	async cancelCommand(
+		inputId: string,
+		expectedItemRevision: number,
+		command: DurableInputCommandMetadata,
+	): Promise<DurableInputMutationReceipt> {
+		const result = await this.#exclusive(() =>
+			this.#withWriterLock(async () => {
+				await this.#assertOwner();
+				const decodedCommand = decodeCommandMetadata(command);
+				if (!decodedCommand || !isPositiveSafeInteger(expectedItemRevision)) {
+					throw new DurableInputQueueConflictError(`Invalid durable input command cancellation: ${inputId}`);
+				}
+				await this.#rebuildCommandIndexLocked();
+				const existing = this.#commandReceipts.get(command.commandId);
+				if (existing) {
+					if (
+						!structurallyEqual(existing.command, decodedCommand) ||
+						existing.item.inputId !== inputId ||
+						existing.item.revision !== expectedItemRevision ||
+						existing.item.state !== "cancelled"
+					) {
+						throw new DurableInputCommandConflictError(command.commandId);
+					}
+					return { receipt: { ...existing, replayed: true }, changed: false as const };
+				}
+				if (command.expectedRevision !== this.#latestRunnerRevision) {
+					throw new DurableInputRunnerRevisionConflictError(command.expectedRevision, this.#latestRunnerRevision);
+				}
+				const item = (await this.#items()).find(candidate => candidate.inputId === inputId);
+				if (!item) throw new DurableInputQueueConflictError(`Durable input queue item not found: ${inputId}`);
+				if (item.revision !== expectedItemRevision) {
+					throw new DurableInputItemRevisionConflictError(inputId, expectedItemRevision, item.revision);
+				}
+				if (
+					(item.state !== "queued" && item.state !== "admitted" && item.state !== "failed-rate-limit") ||
+					item.attempts.some(attempt => attempt.state === "started")
+				) {
+					throw new DurableInputQueueConflictError(`Durable input queue cancellation conflict: ${inputId}`);
+				}
+				const nextItem = { ...item, state: "cancelled" as const };
+				const runnerRevision = this.#latestRunnerRevision + 1;
+				await this.#appendLocked({
+					version: QUEUE_VERSION,
+					type: "state",
+					id: inputId,
+					state: "cancelled",
+					revision: item.revision,
+					command: decodedCommand,
+					runnerRevision,
+					ownerEpoch: this.#activeEpoch,
+				});
+				const receipt = { item: nextItem, command: decodedCommand, runnerRevision, replayed: false };
+				this.#commandReceipts.set(command.commandId, receipt);
+				this.#latestRunnerRevision = runnerRevision;
+				return { receipt, changed: true as const };
+			}),
+		);
+		if (result.changed) {
+			this.#emit({
+				kind: "inputCancelled",
+				runnerRevision: result.receipt.runnerRevision,
+				command: result.receipt.command,
+				item: result.receipt.item,
+			});
+		}
+		return result.receipt;
+	}
 	async admitNext(
 		boundary: "tool" | "terminal" = "terminal",
 		now: number = Date.now(),
@@ -1378,43 +1566,129 @@ export class DurableInputQueue {
 
 	async #rebuildCommandIndexLocked(): Promise<void> {
 		const receipts = new Map<string, DurableInputAdmissionReceipt>();
+		const items = new Map<string, DurableQueuedInput>();
 		const records = await this.#readAllRecords();
 		let latestRunnerRevision = 0;
 		let lastSequence = 0;
+		const indexCommand = (
+			command: DurableInputCommandMetadata,
+			runnerRevision: number | undefined,
+			item: DurableQueuedInput,
+		): void => {
+			if (runnerRevision !== latestRunnerRevision + 1) {
+				throw new Error(`Corrupt durable input command revision: ${command.commandId}`);
+			}
+			if (receipts.has(command.commandId)) {
+				throw new Error(`Duplicate durable input command: ${command.commandId}`);
+			}
+			latestRunnerRevision = runnerRevision;
+			receipts.set(command.commandId, { item, command, runnerRevision, replayed: false });
+		};
 		for (const record of records) {
-			if (record.type !== "enqueue") continue;
-			const sequence = record.sequence ?? lastSequence + 1;
-			if (!isPositiveSafeInteger(sequence) || sequence <= lastSequence) {
-				throw new Error(`Corrupt durable input queue sequence: ${record.id}`);
-			}
-			lastSequence = sequence;
-			if (!record.command) continue;
-			if (
-				record.runnerRevision !== latestRunnerRevision + 1 ||
-				record.sequence === undefined ||
-				record.deliveryClass === undefined ||
-				record.revision === undefined
-			) {
-				throw new Error(`Corrupt durable input command admission: ${record.id}`);
-			}
-			if (receipts.has(record.command.commandId)) {
-				throw new Error(`Duplicate durable input command admission: ${record.command.commandId}`);
-			}
-			latestRunnerRevision = record.runnerRevision;
-			receipts.set(record.command.commandId, {
-				item: {
+			if (record.type === "adopt") continue;
+			if (record.type === "enqueue") {
+				const sequence = record.sequence ?? lastSequence + 1;
+				if (!isPositiveSafeInteger(sequence) || sequence <= lastSequence) {
+					throw new Error(`Corrupt durable input queue sequence: ${record.id}`);
+				}
+				lastSequence = sequence;
+				const item: DurableQueuedInput = {
 					inputId: record.id,
-					sequence: record.sequence,
-					deliveryClass: record.deliveryClass,
-					revision: record.revision,
+					sequence,
+					deliveryClass: record.deliveryClass ?? "followUp",
+					revision: record.revision ?? 1,
 					payload: { text: record.text, images: record.images },
 					state: "queued",
 					attempts: [],
-				},
-				command: record.command,
-				runnerRevision: record.runnerRevision,
-				replayed: false,
-			});
+				};
+				if (!items.has(record.id)) items.set(record.id, item);
+				if (record.command) {
+					if (
+						record.sequence === undefined ||
+						record.deliveryClass === undefined ||
+						record.revision === undefined
+					) {
+						throw new Error(`Corrupt durable input command admission: ${record.id}`);
+					}
+					indexCommand(record.command, record.runnerRevision, item);
+				}
+				continue;
+			}
+			if (record.type === "revision") {
+				const item = items.get(record.inputId);
+				if (!item || item.state !== "queued" || record.revision !== item.revision + 1) {
+					throw new Error(`Invalid durable input queue revision: ${record.inputId}`);
+				}
+				const revised = { ...item, revision: record.revision, payload: record.payload };
+				items.set(record.inputId, revised);
+				if (record.command) indexCommand(record.command, record.runnerRevision, revised);
+				continue;
+			}
+			if (record.type === "state") {
+				const item = items.get(record.id);
+				if (record.command && !item) {
+					throw new Error(`Durable input command cancellation references unknown input: ${record.id}`);
+				}
+				if (item) {
+					if (record.command && (record.state !== "cancelled" || record.revision !== item.revision)) {
+						throw new Error(`Corrupt durable input command cancellation: ${record.id}`);
+					}
+					const changed = { ...item, state: record.state };
+					items.set(record.id, changed);
+					if (record.command) indexCommand(record.command, record.runnerRevision, changed);
+				}
+				continue;
+			}
+			if (record.type === "attempt") {
+				const attempt: DurableInputAttempt = {
+					id: record.id,
+					inputId: record.inputId,
+					revision: record.revision ?? 1,
+					state: "admitted",
+				};
+				const item = items.get(record.inputId);
+				if (item && !item.attempts.some(candidate => candidate.id === record.id)) {
+					items.set(record.inputId, {
+						...item,
+						state: item.state === "queued" ? "admitted" : item.state,
+						attempts: [...item.attempts, attempt],
+					});
+				}
+				continue;
+			}
+			if (record.type === "request-start") {
+				const item = items.get(record.inputId);
+				if (item) {
+					items.set(record.inputId, {
+						...item,
+						state: item.state === "admitted" ? "running" : item.state,
+						attempts: item.attempts.map(attempt =>
+							attempt.id === record.attemptId ? { ...attempt, state: "started" } : attempt,
+						),
+					});
+				}
+				continue;
+			}
+			if (record.type === "terminal") {
+				const item = items.get(record.inputId);
+				if (item) {
+					items.set(record.inputId, {
+						...item,
+						state: record.state,
+						retryAt: record.retryAt,
+						attempts: item.attempts.map(attempt =>
+							attempt.id === record.attemptId
+								? { ...attempt, state: record.state, retryAt: record.retryAt }
+								: attempt,
+						),
+					});
+				}
+				continue;
+			}
+			if (record.type === "requeue") {
+				const item = items.get(record.inputId);
+				if (item) items.set(record.inputId, { ...item, state: "queued", retryAt: undefined });
+			}
 		}
 		this.#commandReceipts.clear();
 		for (const [commandId, receipt] of receipts) this.#commandReceipts.set(commandId, receipt);

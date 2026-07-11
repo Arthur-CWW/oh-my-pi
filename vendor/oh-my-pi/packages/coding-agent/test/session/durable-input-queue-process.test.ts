@@ -87,6 +87,9 @@ const CHILD_SOURCE = [
 	'} else if (action === "enqueue-once") {',
 	'  const item = await queue.enqueue({ text: process.env.TEXT ?? "concurrent", deliveryClass: "followUp" });',
 	"  console.log(JSON.stringify({ inputId: item.inputId, sequence: item.sequence }));",
+'} else if (action === "seed-mutation-target") {',
+'  const item = await queue.enqueue({ text: process.env.TEXT ?? "target", deliveryClass: "followUp" });',
+'  console.log(JSON.stringify({ inputId: item.inputId, itemRevision: item.revision }));',
 	'} else if (action === "admit-command") {',
 	"  const commandId = process.env.COMMAND_ID;",
 	"  const expectedRevision = Number(process.env.EXPECTED_REVISION);",
@@ -97,6 +100,22 @@ const CHILD_SOURCE = [
 	"  } catch (error) {",
 	'    console.log(JSON.stringify({ status: "rejected", name: error?.name, expectedRevision: error?.expectedRevision, actualRevision: error?.actualRevision }));',
 	"  }",
+'} else if (action === "mutate-command") {',
+'  const commandId = process.env.COMMAND_ID;',
+'  const inputId = process.env.INPUT_ID;',
+'  const operation = process.env.OPERATION;',
+'  const expectedRevision = Number(process.env.EXPECTED_REVISION);',
+'  const expectedItemRevision = Number(process.env.EXPECTED_ITEM_REVISION);',
+'  if (!commandId || !inputId || !operation) throw new Error("mutation command environment missing");',
+'  const metadata = { schemaVersion: 1, commandId, correlationId: "correlation-" + commandId, viewId: "view-a", controllerEpoch: 1, expectedRevision };',
+'  try {',
+'    const receipt = operation === "edit"',
+'      ? await queue.editCommand(inputId, expectedItemRevision, { text: process.env.TEXT ?? "edited", images: undefined }, metadata)',
+'      : await queue.cancelCommand(inputId, expectedItemRevision, metadata);',
+'    console.log(JSON.stringify({ status: "accepted", inputId: receipt.item.inputId, itemRevision: receipt.item.revision, state: receipt.item.state, text: receipt.item.payload.text, runnerRevision: receipt.runnerRevision, replayed: receipt.replayed, latestRunnerRevision: await queue.getLatestRunnerRevision() }));',
+'  } catch (error) {',
+'    console.log(JSON.stringify({ status: "rejected", name: error?.name, expectedRevision: error?.expectedRevision, actualRevision: error?.actualRevision }));',
+'  }',
 	"} else {",
 	'  throw new Error("unknown action: " + action);',
 	"}",
@@ -408,6 +427,66 @@ describe("durable input queue process replacement", () => {
 		expect(records.map(record => record.runnerRevision).sort()).toEqual([1, 2]);
 	});
 
+
+	it("serializes edit and cancel command CAS across processes and reopens mutation receipts", async () => {
+		const root = await fs.mkdtemp(path.join(os.tmpdir(), "omp-queue-mutation-process-"));
+		roots.push(root);
+		const sessionFile = path.join(root, "parent.jsonl");
+		await fs.writeFile(sessionFile, "");
+		const base = { ROOT: root, SESSION_FILE: sessionFile, EPOCH: "epoch-a" };
+		const [left, right] = await Promise.all([
+			runChild({ ...base, ACTION: "seed-mutation-target", TEXT: "left" }),
+			runChild({ ...base, ACTION: "seed-mutation-target", TEXT: "right" }),
+		]);
+		const editEnvironment = {
+			...base,
+			ACTION: "mutate-command",
+			OPERATION: "edit",
+			COMMAND_ID: "edit-left",
+			INPUT_ID: String(left.inputId),
+			EXPECTED_REVISION: "0",
+			EXPECTED_ITEM_REVISION: "1",
+			TEXT: "left edited",
+		};
+		const cancelEnvironment = {
+			...base,
+			ACTION: "mutate-command",
+			OPERATION: "cancel",
+			COMMAND_ID: "cancel-right",
+			INPUT_ID: String(right.inputId),
+			EXPECTED_REVISION: "0",
+			EXPECTED_ITEM_REVISION: "1",
+		};
+		const contenders = await Promise.all([runChild(editEnvironment), runChild(cancelEnvironment)]);
+		expect(contenders.filter(result => result.status === "accepted")).toHaveLength(1);
+		expect(contenders.filter(result => result.status === "rejected")).toEqual([
+			expect.objectContaining({
+				name: "DurableInputRunnerRevisionConflictError",
+				expectedRevision: 0,
+				actualRevision: 1,
+			}),
+		]);
+		const winningEnvironment = contenders[0]?.status === "accepted" ? editEnvironment : cancelEnvironment;
+		const replay = await runChild({ ...winningEnvironment, EPOCH: "epoch-a" });
+		expect(replay).toMatchObject({
+			status: "accepted",
+			runnerRevision: 1,
+			replayed: true,
+			latestRunnerRevision: 1,
+		});
+
+		const [queueKey] = await fs.readdir(path.join(root, "owners-v1"));
+		if (!queueKey) throw new Error("queue root missing");
+		const queueRoot = path.join(root, "owners-v1", queueKey, "queue-v2");
+		const head = JSON.parse(await fs.readFile(path.join(queueRoot, "head.json"), "utf8")) as { epoch: string };
+		const records = (await fs.readFile(path.join(queueRoot, "segments", `${head.epoch}.jsonl`), "utf8"))
+			.trim()
+			.split("\n")
+			.map(line => JSON.parse(line) as Record<string, unknown>)
+			.filter(record => record.command);
+		expect(records).toHaveLength(1);
+		expect(records[0]).toMatchObject({ runnerRevision: 1 });
+	});
 	it("withholds a crashed running attempt until durable reconciliation proves non-execution", async () => {
 		const root = await fs.mkdtemp(path.join(os.tmpdir(), "omp-queue-process-"));
 		roots.push(root);

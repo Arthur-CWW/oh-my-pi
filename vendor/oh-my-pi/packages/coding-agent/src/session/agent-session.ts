@@ -277,6 +277,7 @@ import {
 import {
 	type DurableInputAdmissionReceipt,
 	type DurableInputCommandMetadata,
+	type DurableInputMutationReceipt,
 	type DurableInputPayload,
 	DurableInputQueue,
 	type DurableInputState,
@@ -6712,6 +6713,39 @@ export class AgentSession {
 			const receipt = await queue.enqueueCommand(input, command);
 			await this.#refreshDurableQueuedInputProjection(queue);
 			if (!receipt.replayed) this.#scheduleDurableQueueDrainAfterIdle();
+			return receipt;
+		} catch (error) {
+			if (this.#handleDurableOwnershipLoss(error as Error)) throw this.#durableOwnershipLostError ?? error;
+			throw error;
+		}
+	}
+
+	async editDurableInputCommand(
+		inputId: string,
+		expectedItemRevision: number,
+		payload: DurableInputPayload,
+		command: DurableInputCommandMetadata,
+	): Promise<DurableInputMutationReceipt> {
+		const queue = await this.#getDurableInputQueueForMutation();
+		try {
+			const receipt = await queue.editCommand(inputId, expectedItemRevision, payload, command);
+			await this.#refreshDurableQueuedInputProjection(queue);
+			return receipt;
+		} catch (error) {
+			if (this.#handleDurableOwnershipLoss(error as Error)) throw this.#durableOwnershipLostError ?? error;
+			throw error;
+		}
+	}
+
+	async cancelDurableInputCommand(
+		inputId: string,
+		expectedItemRevision: number,
+		command: DurableInputCommandMetadata,
+	): Promise<DurableInputMutationReceipt> {
+		const queue = await this.#getDurableInputQueueForMutation();
+		try {
+			const receipt = await queue.cancelCommand(inputId, expectedItemRevision, command);
+			await this.#refreshDurableQueuedInputProjection(queue);
 			return receipt;
 		} catch (error) {
 			if (this.#handleDurableOwnershipLoss(error as Error)) throw this.#durableOwnershipLostError ?? error;
