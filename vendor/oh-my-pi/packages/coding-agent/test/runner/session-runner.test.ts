@@ -6,10 +6,12 @@ import { Agent } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
-import { Effect } from "effect";
+import { Effect, Exit, Fiber, Scope } from "effect";
 import { ModelRegistry } from "../../src/config/model-registry";
 import { Settings } from "../../src/config/settings";
+import { createTerminalSessionController } from "../../src/modes/terminal-session-controller";
 import {
+	decodeSubmitInputCommand,
 	RunnerRevisionConflictError,
 	RunnerItemRevisionConflictError,
 	StaleRunnerControllerLeaseError,
@@ -352,6 +354,103 @@ describe("live SessionRunner", () => {
 						state: "cancelled",
 						payload: editCommand.payload,
 					});
+					fixture.releaseProviderResponses();
+					yield* Effect.promise(() => fixture.session.waitForIdle());
+					yield* runner.stop();
+				}).pipe(Effect.ensuring(Effect.sync(fixture.releaseProviderResponses))),
+			),
+		);
+	});
+	it("projects terminal state without exposing the session and detaches without stopping the runner", async () => {
+		const fixture = await createLiveFixture();
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const runner = yield* makeSessionRunnerLive(fixture, { mailboxCapacity: 4, eventCapacity: 4 });
+					const terminal = yield* runner.attachTerminalView(attach("terminal", "controller", 0));
+					const subscription = yield* terminal.subscribe();
+					const initial = yield* terminal.snapshot();
+					expect(initial.session.sessionId).toBe(fixture.session.sessionId);
+					expect(initial.session.modelSummary?.provider).toBe(fixture.session.model?.provider);
+					expect(initial.session.modelSummary?.id).toBe(fixture.session.model?.id);
+					expect(initial.session.modelSummary?.name).toBe(fixture.session.model?.name);
+					expect(initial.session.modelSummary?.contextWindow).toBe(fixture.session.model?.contextWindow);
+					expect(initial.session.messages).not.toBe(fixture.session.messages);
+
+					const command = submit(terminal.viewId, terminal.epoch, "terminal-submit", 0);
+					yield* terminal.submit(decodeSubmitInputCommand(command));
+					const delivery = yield* subscription.take;
+					expect(["agentEvent", "runnerEvent", "resyncRequired"]).toContain(delivery.kind);
+					expect(initial.session.messages).toHaveLength(0);
+
+					yield* terminal.detach();
+					const alive = yield* runner.snapshot();
+					expect(alive.status).toBe("running");
+					expect(alive.views).toHaveLength(0);
+					fixture.releaseProviderResponses();
+					yield* Effect.promise(() => fixture.session.waitForIdle());
+					yield* runner.stop();
+				}).pipe(Effect.ensuring(Effect.sync(fixture.releaseProviderResponses))),
+			),
+		);
+	});
+	it("advances Promise controller fences across sequential mutations and closes without stopping", async () => {
+		const fixture = await createLiveFixture();
+		const scope = Scope.makeUnsafe("sequential");
+		const run = <A, E>(effect: Effect.Effect<A, E, Scope.Scope>) =>
+			Effect.runPromise(Scope.provide(scope)(effect));
+		try {
+			const runner = await run(makeSessionRunnerLive(fixture, { mailboxCapacity: 4, eventCapacity: 4 }));
+			const controller = await createTerminalSessionController(runner, { viewId: "promise-terminal" });
+			const first = await controller.submit({ text: "one", deliveryClass: "followUp" });
+			const second = await controller.submit({ text: "two", deliveryClass: "followUp" });
+			expect(first.revision).toBe(1);
+			expect(second.revision).toBe(2);
+			expect(controller.snapshot().runner.revision).toBe(2);
+			await controller.close();
+			expect((await run(runner.snapshot())).status).toBe("running");
+			fixture.releaseProviderResponses();
+			await fixture.session.waitForIdle();
+			await run(runner.stop());
+		} finally {
+			fixture.releaseProviderResponses();
+			await Effect.runPromise(Scope.close(scope, Exit.void));
+		}
+	});
+
+	it("resyncs from the snapshot baseline and atomically detaches beside an admitted mutation", async () => {
+		const fixture = await createLiveFixture();
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const runner = yield* makeSessionRunnerLive(fixture, { mailboxCapacity: 4, eventCapacity: 1 });
+					const terminal = yield* runner.attachTerminalView(attach("gap-terminal", "controller", 0));
+					const subscription = yield* terminal.subscribe();
+					yield* runner.attachView(attach("gap-observer-1", "observer", 0));
+					yield* runner.attachView(attach("gap-observer-2", "observer", 0));
+					yield* runner.attachView(attach("gap-observer-3", "observer", 0));
+					const gap = yield* subscription.take;
+					expect(gap.kind).toBe("resyncRequired");
+					if (gap.kind !== "resyncRequired") throw new Error("expected terminal resync");
+					const baseline = gap.snapshot.terminalSequence;
+					yield* runner.attachView(attach("gap-observer-4", "observer", 0));
+					const afterBaseline = yield* subscription.take;
+					expect(afterBaseline.kind).toBe("runnerEvent");
+					if (afterBaseline.kind === "resyncRequired") throw new Error("unexpected second resync");
+					expect(afterBaseline.sequence).toBe(baseline + 1);
+
+					const mutation = yield* Effect.forkChild(
+						terminal.submit(
+							decodeSubmitInputCommand(
+								submit(terminal.viewId, terminal.epoch, "concurrent-terminal-submit", 0),
+							),
+						),
+						{ startImmediately: true },
+					);
+					yield* Effect.yieldNow;
+					yield* terminal.detach();
+					expect((yield* Fiber.join(mutation)).revision).toBe(1);
+					expect((yield* runner.snapshot()).views.some(view => view.viewId === terminal.viewId)).toBe(false);
 					fixture.releaseProviderResponses();
 					yield* Effect.promise(() => fixture.session.waitForIdle());
 					yield* runner.stop();

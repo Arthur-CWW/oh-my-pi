@@ -1,5 +1,5 @@
+import type { AgentSession, AgentSessionEvent } from "../session/agent-session";
 import { Cause, Deferred, Effect, FiberSet, PubSub, Queue, Ref, Scope } from "effect";
-import type { AgentSession } from "../session/agent-session";
 import {
 	DurableInputCommandConflictError,
 	DurableInputQueueConflictError,
@@ -45,6 +45,12 @@ import {
 	type RunnerViewSnapshot,
 	type SessionRunnerSnapshot,
 } from "./protocol";
+import type {
+	TerminalSessionDelivery,
+	TerminalSessionSnapshot,
+	TerminalSessionSubscription,
+	TerminalSessionView,
+} from "./terminal-session-view";
 
 export type RunnerFailure =
 	| InvalidRunnerCommandError
@@ -105,6 +111,9 @@ export type SessionRunnerView = ObserverSessionRunnerView | ControllerSessionRun
 
 export interface SessionRunner {
 	readonly attachView: (command: AttachRunnerViewCommand) => Effect.Effect<SessionRunnerView, RunnerFailure, Scope.Scope>;
+	readonly attachTerminalView: (
+		command: AttachRunnerViewCommand,
+	) => Effect.Effect<TerminalSessionView, RunnerFailure, Scope.Scope>;
 	readonly snapshot: () => Effect.Effect<SessionRunnerSnapshot, RunnerFailure, Scope.Scope>;
 	readonly stop: () => Effect.Effect<void, RunnerFailure, Scope.Scope>;
 }
@@ -131,6 +140,14 @@ interface EventDetails {
 	readonly transcriptLeafId?: string | null;
 	readonly transcriptPosition?: number;
 }
+type TerminalRawDelivery =
+	| { readonly kind: "agentEvent"; readonly sequence: number; readonly event: AgentSessionEvent }
+	| { readonly kind: "runnerEvent"; readonly sequence: number; readonly event: RunnerEvent };
+
+interface TerminalViewState {
+	readonly events: PubSub.PubSub<TerminalRawDelivery>;
+}
+
 
 const asRunnerFailure = (error: unknown): RunnerFailure => {
 	if (
@@ -211,6 +228,9 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 	const callbackFibers = yield* FiberSet.make<void, never>();
 	const runCallback = yield* FiberSet.runtime(callbackFibers)<never>();
 	const views = new Map<string, MutableViewState>();
+	const terminalViews = new Map<string, TerminalViewState>();
+	let unsubscribeTerminalAgent: (() => void) | undefined;
+	let terminalSequence = 0;
 	let activeController: ActiveController | undefined;
 	let nextControllerEpoch = 1;
 	let runnerSequence = 0;
@@ -250,6 +270,49 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 			pendingOperations: pending,
 		} satisfies SessionRunnerSnapshot;
 	});
+	const materializeTerminalSnapshot = Effect.fn("Runner.materializeTerminalSnapshot")(function* (
+		refreshQueue: boolean,
+	) {
+		const runner = yield* materializeSnapshot(refreshQueue);
+		const model = resources.session.model;
+		return {
+			terminalSequence,
+			runner,
+			session: {
+				sessionId: resources.session.sessionId,
+				modelSummary:
+					model === undefined
+						? undefined
+						: {
+								provider: model.provider,
+								id: model.id,
+								name: model.name,
+								contextWindow: model.contextWindow,
+							},
+				configuredThinkingLevel: resources.session.configuredThinkingLevel(),
+				autoCompactionEnabled: resources.session.autoCompactionEnabled,
+				isStreaming: resources.session.isStreaming,
+				isCompacting: resources.session.isCompacting,
+				hasPostPromptWork: resources.session.hasPostPromptWork,
+				isBashRunning: resources.session.isBashRunning,
+				isEvalRunning: resources.session.isEvalRunning,
+				messages: [...resources.session.messages],
+			},
+		} satisfies TerminalSessionSnapshot;
+	});
+
+
+	const publishTerminal = Effect.fn("Runner.publishTerminal")(function* (
+		delivery:
+			| { readonly kind: "agentEvent"; readonly event: AgentSessionEvent }
+			| { readonly kind: "runnerEvent"; readonly event: RunnerEvent },
+	) {
+		terminalSequence += 1;
+		const sequenced = { ...delivery, sequence: terminalSequence } as TerminalRawDelivery;
+		yield* Effect.forEach(terminalViews.values(), (view) => PubSub.publish(view.events, sequenced), {
+			discard: true,
+		});
+	});
 
 	const publishEvent = Effect.fn("Runner.publishEvent")(function* (details: EventDetails) {
 		runnerSequence += 1;
@@ -271,6 +334,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 			transcriptPosition: details.transcriptPosition,
 		};
 		yield* PubSub.publish(events, event);
+		yield* publishTerminal({ kind: "runnerEvent", event });
 	});
 
 	const enqueue = <A>(operation: Effect.Effect<A, RunnerFailure>): Effect.Effect<A, RunnerFailure> =>
@@ -849,6 +913,129 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 		return observerView(command.viewId);
 	});
 
+	const attachTerminalView = Effect.fn("Runner.attachTerminalView")(function* (
+		command: AttachRunnerViewCommand,
+	) {
+		if (command.capability !== "controller") {
+			return yield* Effect.fail(
+				new RunnerViewCapabilityError({ viewId: command.viewId, requiredCapability: "controller" }),
+			);
+		}
+		const terminalEvents = yield* PubSub.sliding<TerminalRawDelivery>(options.eventCapacity);
+		terminalViews.set(command.viewId, { events: terminalEvents });
+		if (unsubscribeTerminalAgent === undefined) {
+			unsubscribeTerminalAgent = resources.session.subscribe((event) => {
+				runCallback(
+					enqueue(publishTerminal({ kind: "agentEvent", event })).pipe(
+						Effect.matchCauseEffect({ onFailure: () => Effect.void, onSuccess: () => Effect.void }),
+					),
+				);
+			});
+		}
+		const attached = yield* attachView(command).pipe(
+			Effect.matchEffect({
+				onFailure: (failure) =>
+					Effect.sync(() => {
+						terminalViews.delete(command.viewId);
+						if (terminalViews.size === 0) {
+							unsubscribeTerminalAgent?.();
+							unsubscribeTerminalAgent = undefined;
+						}
+					}).pipe(Effect.andThen(PubSub.shutdown(terminalEvents)), Effect.andThen(Effect.fail(failure))),
+				onSuccess: Effect.succeed,
+			}),
+		);
+		if (attached.capability !== "controller") {
+			return yield* Effect.fail(
+				new RunnerViewCapabilityError({ viewId: command.viewId, requiredCapability: "controller" }),
+			);
+		}
+		const epoch = attached.controllerEpoch;
+
+		const terminalSnapshot = () =>
+			enqueue(
+				Effect.gen(function* () {
+					yield* requireController(command.viewId, epoch);
+					return yield* materializeTerminalSnapshot(true);
+				}),
+			);
+		const subscribe = Effect.fn("Runner.subscribeTerminalView")(function* () {
+			const subscription = yield* PubSub.subscribe(terminalEvents);
+			const starting = yield* enqueue(
+				Effect.gen(function* () {
+					yield* requireController(command.viewId, epoch);
+					return terminalSequence;
+				}),
+			);
+			let expectedSequence = starting + 1;
+			let take!: Effect.Effect<TerminalSessionDelivery, RunnerFailure, Scope.Scope>;
+			take = Effect.suspend(() =>
+				PubSub.take(subscription).pipe(
+					Effect.flatMap((delivery): Effect.Effect<TerminalSessionDelivery, RunnerFailure, Scope.Scope> => {
+						if (delivery.sequence < expectedSequence) return take;
+						if (delivery.sequence !== expectedSequence) {
+							const expected = expectedSequence;
+							return terminalSnapshot().pipe(
+								Effect.map((current) => {
+									expectedSequence = current.terminalSequence + 1;
+									return {
+										kind: "resyncRequired" as const,
+										expectedSequence: expected,
+										observedSequence: delivery.sequence,
+										snapshot: current,
+									};
+								}),
+							);
+						}
+						expectedSequence += 1;
+						return Effect.succeed(delivery);
+					}),
+				),
+			);
+			return { take } satisfies TerminalSessionSubscription;
+		});
+		const detach = Effect.fn("Runner.detachTerminalView")(function* () {
+			yield* enqueue(
+				Effect.gen(function* () {
+					yield* requireController(command.viewId, epoch);
+					const detachCommand: DetachRunnerViewCommand = {
+						schemaVersion: RUNNER_SCHEMA_VERSION,
+						kind: "detachView",
+						commandId: `terminal-detach:${command.viewId}:${terminalSequence}`,
+						correlationId: command.correlationId,
+						expectedRevision: revision,
+						viewId: command.viewId,
+						controllerEpoch: epoch,
+					};
+					views.delete(command.viewId);
+					activeController = undefined;
+					yield* publishEvent({
+						kind: "viewDetached",
+						metadata: detachCommand,
+						controllerEpoch: epoch,
+						viewId: command.viewId,
+					});
+				}),
+			);
+			terminalViews.delete(command.viewId);
+			if (terminalViews.size === 0) {
+				unsubscribeTerminalAgent?.();
+				unsubscribeTerminalAgent = undefined;
+			}
+			yield* PubSub.shutdown(terminalEvents);
+		});
+		return {
+			viewId: command.viewId,
+			epoch,
+			snapshot: terminalSnapshot,
+			subscribe,
+			submit: attached.submitInput,
+			edit: attached.editQueuedInput,
+			cancel: attached.cancelQueuedInput,
+			detach,
+		} satisfies TerminalSessionView;
+	});
+
 	const stop = Effect.fn("Runner.stop")(function* () {
 		return yield* Effect.uninterruptibleMask((restore) =>
 			Effect.gen(function* () {
@@ -886,7 +1073,17 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 				);
 				yield* finish(Effect.sync(unsubscribeQueue));
 				yield* finish(Effect.sync(unsubscribeTranscript));
+				yield* finish(
+					Effect.sync(() => {
+						unsubscribeTerminalAgent?.();
+						unsubscribeTerminalAgent = undefined;
+					}),
+				);
 				yield* finish(FiberSet.clear(callbackFibers));
+				yield* Effect.forEach(terminalViews.values(), (view) => finish(PubSub.shutdown(view.events)), {
+					discard: true,
+				});
+				terminalViews.clear();
 				yield* finish(PubSub.shutdown(events));
 				yield* finish(Queue.shutdown(mailbox).pipe(Effect.asVoid));
 				yield* Ref.set(pendingOperations, 0);
@@ -904,5 +1101,5 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 	yield* Effect.addFinalizer(() =>
 		stop().pipe(Effect.matchCauseEffect({ onFailure: () => Effect.void, onSuccess: () => Effect.void })),
 	);
-	return { attachView, snapshot, stop } satisfies SessionRunner;
+	return { attachView, attachTerminalView, snapshot, stop } satisfies SessionRunner;
 });

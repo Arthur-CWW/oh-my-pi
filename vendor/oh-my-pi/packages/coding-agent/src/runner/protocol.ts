@@ -26,6 +26,7 @@ export const ImageContentSchema = Schema.Struct({
 	data: Schema.String,
 	mimeType: Schema.String,
 });
+export type RunnerImageContent = typeof ImageContentSchema.Type;
 
 const InputPayloadSchema = Schema.Struct({
 	text: Schema.String,
@@ -211,3 +212,12 @@ export const assertRunnerRevision = (expectedRevision: number, actualRevision: n
 		throw new RunnerRevisionConflictError({ expectedRevision, actualRevision });
 	}
 };
+
+export type {
+	TerminalModelSnapshot,
+	TerminalSessionDelivery,
+	TerminalSessionSnapshot,
+	TerminalSessionStateSnapshot,
+	TerminalSessionSubscription,
+	TerminalSessionView,
+} from "./terminal-session-view";
