@@ -184,7 +184,7 @@ export interface InteractiveModeContext {
 	// Lifecycle
 	init(options?: InteractiveModeInitOptions): Promise<void>;
 	playWelcomeIntro(): void;
-	shutdown(options?: { childPolicy?: ChildShutdownPolicy }): Promise<void>;
+	shutdown(options?: { childPolicy?: ChildShutdownPolicy; persistSession?: boolean }): Promise<void>;
 	checkShutdownRequested(): Promise<void>;
 
 	// Extension UI integration

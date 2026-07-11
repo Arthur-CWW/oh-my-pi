@@ -1,4 +1,5 @@
 import { OPTIONAL_VALUE_FLAGS, STRING_VALUE_FLAGS } from "./flag-tables";
+import type { SessionOwnershipHandle } from "../session/session-ownership";
 
 let launchArgsForRestart: readonly string[] = [];
 
@@ -132,4 +133,17 @@ export function spawnRestartProcess(spec: RestartSpawnSpec): void {
 		stderr: "inherit",
 	});
 	child.unref();
+}
+
+/**
+ * Retire this process's direct session lease before launching its replacement.
+ * Mux-backed ownership releases as a no-op, so its inherited attach semantics
+ * remain intact.
+ */
+export async function handoffRestartProcess(
+	spec: RestartSpawnSpec,
+	ownership: SessionOwnershipHandle | undefined,
+): Promise<void> {
+	await ownership?.release();
+	spawnRestartProcess(spec);
 }

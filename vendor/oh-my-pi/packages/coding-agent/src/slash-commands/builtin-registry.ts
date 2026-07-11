@@ -5,7 +5,7 @@ import { getOAuthProviders } from "@oh-my-pi/pi-ai/oauth";
 import { setNextRequestDebugPath } from "@oh-my-pi/pi-ai/utils/request-debug";
 import type { AutocompleteItem } from "@oh-my-pi/pi-tui";
 import { APP_NAME, setProjectDir } from "@oh-my-pi/pi-utils";
-import { buildRestartSpawnSpec, spawnRestartProcess } from "../cli/restart-session";
+import { buildRestartSpawnSpec, handoffRestartProcess } from "../cli/restart-session";
 import { COLLAB_GUEST_ALLOWED_COMMANDS, CollabGuestLink } from "../collab/guest";
 import { CollabHost } from "../collab/host";
 import type { SettingPath, SettingValue } from "../config/settings";
@@ -194,14 +194,19 @@ async function restartHandlerTui(
 		ctx.showError(`Restart failed while saving the session: ${errorMessage(err)}`);
 		return commandConsumed();
 	}
+	const ownership = ctx.sessionManager.getSessionOwnership();
 
 	const spec = buildRestartSpawnSpec({
 		sessionId,
 		cwd: ctx.sessionManager.getCwd(),
 	});
 	ctx.showStatus(`Restarting ${APP_NAME} --resume ${sessionId}…`);
-	spawnRestartProcess(spec);
-	await ctx.shutdown({ childPolicy: "detach" });
+	try {
+		await handoffRestartProcess(spec, ownership);
+	} catch (err) {
+		ctx.showError(`Restart failed during session handoff: ${errorMessage(err)}`);
+	}
+	await ctx.shutdown({ childPolicy: "detach", persistSession: false });
 	return commandConsumed();
 }
 

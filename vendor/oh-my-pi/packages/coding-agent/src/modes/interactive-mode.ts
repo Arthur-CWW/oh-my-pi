@@ -3084,21 +3084,23 @@ export class InteractiveMode implements InteractiveModeContext {
 		}
 	}
 
-	async shutdown(options: { childPolicy?: "detach" | "stop" } = {}): Promise<void> {
+	async shutdown(options: { childPolicy?: "detach" | "stop"; persistSession?: boolean } = {}): Promise<void> {
 		if (this.#isShuttingDown) return;
 		this.#isShuttingDown = true;
 
-		// Snapshot the editor before any teardown empties it. Persisting the draft
-		// here covers Ctrl+D shutdown with non-empty text; for /exit the editor is
-		// already cleared so saveDraft("") just removes any stale sidecar.
-		const draftText = this.editor.getText();
+		if (options.persistSession !== false) {
+			// Snapshot the editor before any teardown empties it. Persisting the draft
+			// here covers Ctrl+D shutdown with non-empty text; for /exit the editor is
+			// already cleared so saveDraft("") just removes any stale sidecar.
+			const draftText = this.editor.getText();
 
-		// Flush pending session writes before shutdown
-		await this.sessionManager.flush();
-		try {
-			await this.sessionManager.saveDraft(draftText);
-		} catch (err) {
-			logger.warn("Failed to save session draft", { error: String(err) });
+			// Flush pending session writes before shutdown.
+			await this.sessionManager.flush();
+			try {
+				await this.sessionManager.saveDraft(draftText);
+			} catch (err) {
+				logger.warn("Failed to save session draft", { error: String(err) });
+			}
 		}
 		this.#btwController.dispose();
 		this.#omfgController.dispose();
