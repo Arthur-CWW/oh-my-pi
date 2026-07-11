@@ -44,12 +44,12 @@ Invariants. Most are also static lints — push every lesson down the guardrail 
 - **Artifact-viewer/dashboard pattern.** Finished work → entry in a feed ledger (JSONL + schema) → live dashboard card with inline media, runnable actions, and **error logs of every run**. Taste forks → `question` entries answered in-place. Arthur reviews products, not commits. Reference implementations: `apps/xanadu` (companion), `packages/primer-daemon` dashboard (primer) — converge these into a shared package when a third consumer appears.
 - **One error log per app.** Backend errors AND browser errors (`window.onerror`/`unhandledrejection` POSTed to the app server) append to a single `data/<app>/errors.log`. Before claiming any UI/server work done, READ that file — "done" with fresh errors in the log is not done.
 - **Dev server always running.** The active stream keeps its dashboard/dev server up in the background so Arthur can glance anytime — supervised: a `dev:up` restart-loop script + `bun --watch` hot reload + a `/healthz` route (see `apps/scene-playground/scripts/dev-up.sh`). Never QA against Arthur's live instance — boot your own.
-- **Delegate the checking.** Browser QA, code review, and verification runs happen in subagents (GPT-5.5 for pedantic code review; GPT/Kimi lanes for computer-use QA), never in the orchestrator's main thread.
+- **Delegate the checking.** Browser QA, code review, and verification runs happen in subagents using the appropriate configured role, never in the orchestrator's main thread.
 
 ## Hard rules
 
 - **No `sudo`** without Arthur's explicit approval via `ask` (exact command, cwd, why, reversibility).
-- **Scarce-model discipline.** Some model lanes (e.g. `claude-fable-5`) run on finite, non-renewing quota: NEVER launch them at high thinking — medium only, creative work only. Constrained tasks go to gpt/kimi lanes. Check `--thinking` before every launch; current quota status lives in session context, not here.
+- **Model routing.** Never launch GPT-5.5 or Fable. Sol medium is the default for implementation, UI, and design; use Terra for bounded logic and retrieval. Every spawn that overrides a role default must explicitly choose a GPT-5.6 lane.
 - **No secrets in commits.** No `.env`, tokens, credentials, session files.
 - **Provider spend gates.** Jimeng/Dreamina: dry-run default, live spend only inside a named cap with approval; concurrency 1; stop on rate-limit errors.
 - **Respectful external access.** Low concurrency, jitter/backoff, disk cache, entity dedupe. No private/locked content.
