@@ -756,7 +756,8 @@ export async function createSessionManager(
 	// overriding them with CLI defaults.
 	if (activeSettings.get("autoResume")) {
 		const manager = await SessionManager.continueRecent(cwd, parsed.sessionDir);
-		if (manager.getEntries().length > 0) {
+		const resumedFile = manager.getSessionFile();
+		if (resumedFile && fsSync.existsSync(resumedFile)) {
 			parsed.continue = true;
 		}
 		return manager;

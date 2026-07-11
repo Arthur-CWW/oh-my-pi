@@ -316,6 +316,16 @@ function formatSessionWorkstream(workstream: SessionWorkstream | undefined): str
 		: `Session workstream: ${workstream.id}`;
 }
 
+export type SessionCommandAction = "info" | "delete" | "classification" | "invalid";
+
+export function resolveSessionCommandAction(args: string): SessionCommandAction {
+	const { verb, rest } = parseSubcommand(args);
+	if ((!verb || verb === "info") && !rest) return "info";
+	if (verb === "delete" && !rest) return "delete";
+	if (verb === "workstream" || ((verb === "adhoc" || verb === "unclassify") && !rest)) return "classification";
+	return "invalid";
+}
+
 export async function executeSessionClassificationCommand(
 	args: string,
 	manager: Pick<SessionManager, "getWorkstream" | "setWorkstream">,
@@ -1013,14 +1023,13 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 			return usage("Usage: /session [info|workstream [<slug>]|adhoc|unclassify|delete]", runtime);
 		},
 		handleTui: async (command, runtime) => {
-			const { verb } = parseSubcommand(command.args);
-			const sub = verb || "info";
-			if (sub === "delete") {
+			const action = resolveSessionCommandAction(command.args);
+			if (action === "delete") {
 				runtime.ctx.editor.setText("");
 				await runtime.ctx.handleSessionDeleteCommand();
 				return;
 			}
-			if (
+			if (action === "classification" &&
 				await executeSessionClassificationCommand(command.args, runtime.ctx.sessionManager, text =>
 					runtime.ctx.showStatus(text),
 				)
@@ -1028,7 +1037,7 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 				runtime.ctx.editor.setText("");
 				return;
 			}
-			if (sub === "info") {
+			if (action === "info") {
 				await runtime.ctx.handleSessionCommand();
 				runtime.ctx.editor.setText("");
 				return;

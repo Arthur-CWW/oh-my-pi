@@ -94,6 +94,7 @@ describe("/session slash command", () => {
 		expect(settled).toBe(true);
 	});
 
+
 	it("propagates session deletion failures through executeBuiltinSlashCommand", async () => {
 		const deleteError = new Error("delete failed");
 		const handleSessionDeleteCommand = vi.fn(async () => {
