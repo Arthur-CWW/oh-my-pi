@@ -72,9 +72,24 @@ export const CancelQueuedInputCommandSchema = Schema.Struct({
 	itemRevision: ItemRevisionSchema,
 });
 
+export const SetThinkingLevelCommandSchema = Schema.Struct({
+	schemaVersion: Schema.Literal(RUNNER_SCHEMA_VERSION),
+	kind: Schema.Literal("setThinkingLevel"),
+	commandId: Schema.String,
+	correlationId: Schema.String,
+	causationId: Schema.optional(Schema.String),
+	expectedSessionRevision: RunnerRevisionSchema,
+	viewId: Schema.String,
+	controllerEpoch: ControllerEpochSchema,
+	thinkingLevel: Schema.optional(
+		Schema.Literals(["inherit", "off", "none", "minimal", "low", "medium", "high", "xhigh", "max", "auto"]),
+	),
+});
+
 export type SubmitInputCommand = typeof SubmitInputCommandSchema.Type;
 export type EditQueuedInputCommand = typeof EditQueuedInputCommandSchema.Type;
 export type CancelQueuedInputCommand = typeof CancelQueuedInputCommandSchema.Type;
+export type SetThinkingLevelCommand = typeof SetThinkingLevelCommandSchema.Type;
 export type RunnerCapability = "observer" | "controller";
 export type RunnerStatus = "running" | "stopping" | "stopped";
 
@@ -119,6 +134,14 @@ export interface RunnerCommandReceipt {
 	readonly replayed: boolean;
 }
 
+export interface SetThinkingLevelReceipt {
+	readonly commandId: string;
+	readonly correlationId: string;
+	readonly causationId?: string;
+	readonly sessionRevision: number;
+	readonly replayed: boolean;
+}
+
 export interface RunnerViewSnapshot {
 	readonly viewId: string;
 	readonly capability: RunnerCapability;
@@ -134,6 +157,7 @@ export interface RunnerTranscriptSnapshot {
 
 export interface SessionRunnerSnapshot {
 	readonly revision: number;
+	readonly sessionRevision: number;
 	readonly sequence: number;
 	readonly durableSequence: number;
 	readonly items: ReadonlyArray<DurableQueuedInput>;
@@ -152,6 +176,7 @@ export type RunnerEventKind =
 	| "inputPrepared"
 	| "inputEdited"
 	| "inputCancelled"
+	| "thinkingLevelChanged"
 	| "transcriptEntryAppended";
 
 /** Every event is a closed causal envelope in the runner's single total order. */
@@ -164,6 +189,7 @@ export interface RunnerEvent {
 	readonly causationId: string | undefined;
 	readonly revision: number;
 	readonly sequence: number;
+	readonly sessionRevision: number | undefined;
 	readonly controllerEpoch: number;
 	readonly viewId: string | undefined;
 	readonly inputId: string | undefined;
@@ -204,6 +230,16 @@ export const decodeCancelQueuedInputCommand = (input: unknown): CancelQueuedInpu
 		return Schema.decodeUnknownSync(CancelQueuedInputCommandSchema)(input);
 	} catch (error) {
 		throw new InvalidRunnerCommandError({ issue: error instanceof Error ? error.message : "Invalid cancel command" });
+	}
+};
+
+export const decodeSetThinkingLevelCommand = (input: unknown): SetThinkingLevelCommand => {
+	try {
+		return Schema.decodeUnknownSync(SetThinkingLevelCommandSchema)(input);
+	} catch (error) {
+		throw new InvalidRunnerCommandError({
+			issue: error instanceof Error ? error.message : "Invalid set-thinking command",
+		});
 	}
 };
 

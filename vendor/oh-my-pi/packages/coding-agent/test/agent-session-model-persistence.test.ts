@@ -13,6 +13,7 @@ import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { getRestorableSessionModels } from "@oh-my-pi/pi-coding-agent/session/session-context";
 import { EPHEMERAL_MODEL_CHANGE_ROLE } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import { AUTO_THINKING } from "@oh-my-pi/pi-coding-agent/thinking";
 import { TempDir } from "@oh-my-pi/pi-utils";
 
 describe("AgentSession model persistence", () => {
@@ -564,4 +565,24 @@ describe("AgentSession model persistence", () => {
 		expect(created.sessionManager.getEntries()).toHaveLength(entryCount);
 		expect(created.settings.resolveModelRole("default")).toEqual(before);
 	});
+	it("restores journaled auto thinking during fresh SDK startup", async () => {
+		const persisted = SessionManager.create(tempDir.path(), path.join(tempDir.path(), "persisted-auto"));
+		await persisted.commitStateCommand({
+			schemaVersion: 1,
+			kind: "setThinkingLevel",
+			commandId: "startup-auto",
+			correlationId: "startup-auto-correlation",
+			expectedSessionRevision: persisted.getSessionRevision(),
+			thinkingLevel: AUTO_THINKING,
+		});
+		await persisted.flush();
+		const sessionFile = persisted.getSessionFile();
+		expect(sessionFile).toBeDefined();
+		await persisted.close();
+
+		const resumed = await createStartupResumeSession(sessionFile!);
+		expect(resumed.session.configuredThinkingLevel()).toBe(AUTO_THINKING);
+		expect(resumed.session.isAutoThinking).toBe(true);
+	});
+
 });

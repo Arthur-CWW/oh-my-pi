@@ -1,17 +1,19 @@
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { Agent } from "@oh-my-pi/pi-agent-core";
-import type { AssistantMessage } from "@oh-my-pi/pi-ai";
+import { Agent, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
+import { type AssistantMessage, Effort } from "@oh-my-pi/pi-ai";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
+import * as autoThinkingClassifier from "../../src/auto-thinking/classifier";
 import { Effect, Exit, Fiber, Scope } from "effect";
 import { ModelRegistry } from "../../src/config/model-registry";
 import { Settings } from "../../src/config/settings";
 import { createTerminalSessionController } from "../../src/modes/terminal-session-controller";
 import {
 	decodeSubmitInputCommand,
+	decodeSetThinkingLevelCommand,
 	RunnerRevisionConflictError,
 	RunnerItemRevisionConflictError,
 	StaleRunnerControllerLeaseError,
@@ -23,12 +25,14 @@ import { makeSessionRunnerLive } from "../../src/runner/session-runner";
 import { AgentSession } from "../../src/session/agent-session";
 import { AuthStorage } from "../../src/session/auth-storage";
 import { DurableInputQueue } from "../../src/session/durable-input-queue";
-import { SessionManager } from "../../src/session/session-manager";
+import { SessionManager, SessionStateCommandInFlightError } from "../../src/session/session-manager";
+import { AUTO_THINKING } from "../../src/thinking";
 import { acquireSessionOwnership } from "../../src/session/session-ownership";
 
 const roots: string[] = [];
 
 afterEach(async () => {
+	vi.restoreAllMocks();
 	await Promise.all(roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true })));
 });
 
@@ -361,6 +365,170 @@ describe("live SessionRunner", () => {
 			),
 		);
 	});
+	it("commits thinking changes on the session revision without advancing the input revision", async () => {
+		const fixture = await createLiveFixture();
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const runner = yield* makeSessionRunnerLive(fixture, { mailboxCapacity: 4, eventCapacity: 8 });
+					const terminal = yield* runner.attachTerminalView(attach("thinking-terminal", "controller", 0));
+					const initial = yield* terminal.snapshot();
+					let thinkingEvents = 0;
+					const unsubscribe = fixture.session.subscribe((event) => {
+						if (event.type === "thinking_level_changed") thinkingEvents += 1;
+					});
+					const command = decodeSetThinkingLevelCommand({
+						schemaVersion: 1,
+						kind: "setThinkingLevel",
+						commandId: "thinking-high",
+						correlationId: "thinking-high-correlation",
+						expectedSessionRevision: initial.runner.sessionRevision,
+						viewId: terminal.viewId,
+						controllerEpoch: terminal.epoch,
+						thinkingLevel: ThinkingLevel.High,
+					});
+					const receipt = yield* terminal.setThinkingLevel(command);
+					expect(receipt).toMatchObject({
+						commandId: "thinking-high",
+						sessionRevision: initial.runner.sessionRevision + 1,
+						replayed: false,
+					});
+					expect(fixture.session.configuredThinkingLevel()).toBe(ThinkingLevel.High);
+					expect((yield* runner.snapshot()).revision).toBe(initial.runner.revision);
+					expect(
+						fixture.sessionManager
+							.getEntries()
+							.filter((entry) => entry.type === "thinking_level_change" && entry.command?.commandId === "thinking-high"),
+					).toHaveLength(1);
+
+					const secondCommand = decodeSetThinkingLevelCommand({
+						...command,
+						commandId: "thinking-low",
+						correlationId: "thinking-low-correlation",
+						expectedSessionRevision: receipt.sessionRevision,
+						thinkingLevel: ThinkingLevel.Low,
+					});
+					const secondReceipt = yield* terminal.setThinkingLevel(secondCommand);
+					expect(fixture.session.configuredThinkingLevel()).toBe(ThinkingLevel.Low);
+
+					const replay = yield* terminal.setThinkingLevel(command);
+					expect(replay).toEqual({ ...receipt, replayed: true });
+					expect(fixture.session.configuredThinkingLevel()).toBe(ThinkingLevel.Low);
+					expect((yield* runner.snapshot()).sessionRevision).toBe(secondReceipt.sessionRevision);
+					expect(thinkingEvents).toBe(2);
+					expect(
+
+						fixture.sessionManager
+							.getEntries()
+							.filter((entry) => entry.type === "thinking_level_change" && entry.command?.commandId === "thinking-high"),
+					).toHaveLength(1);
+					expect(
+						fixture.sessionManager.getEntries().filter((entry) => entry.type === "thinking_level_change"),
+					).toHaveLength(2);
+					unsubscribe();
+					yield* terminal.detach();
+					yield* runner.stop();
+				}),
+			),
+		);
+	});
+
+	it("keeps busy thinking rejection, snapshots, detach, and replay responsive during a held prompt", async () => {
+		const fixture = await createLiveFixture(true);
+		const scope = Scope.makeUnsafe("sequential");
+		const run = <A, E>(effect: Effect.Effect<A, E, Scope.Scope>) =>
+			Effect.runPromise(Scope.provide(scope)(effect));
+		let releaseTimer: ReturnType<typeof setInterval> | undefined;
+		try {
+			const runner = await run(makeSessionRunnerLive(fixture, { mailboxCapacity: 4, eventCapacity: 8 }));
+			const terminal = await run(runner.attachTerminalView(attach("thinking-race", "controller", 0)));
+			const initial = await run(terminal.snapshot());
+			const committedCommand = decodeSetThinkingLevelCommand({
+				schemaVersion: 1,
+				kind: "setThinkingLevel",
+				commandId: "thinking-before-drain",
+				correlationId: "thinking-before-drain-correlation",
+				expectedSessionRevision: initial.runner.sessionRevision,
+				viewId: terminal.viewId,
+				controllerEpoch: terminal.epoch,
+				thinkingLevel: ThinkingLevel.High,
+			});
+			const committed = await run(terminal.setThinkingLevel(committedCommand));
+			await run(terminal.submit(decodeSubmitInputCommand(submit(terminal.viewId, terminal.epoch, "race-input", 0))));
+			while (!fixture.session.isStreaming) await Bun.sleep(1);
+
+			const startedAt = Date.now();
+			await expect(
+				run(
+					terminal.setThinkingLevel(
+						decodeSetThinkingLevelCommand({
+							...committedCommand,
+							commandId: "thinking-during-drain",
+							correlationId: "thinking-during-drain-correlation",
+							expectedSessionRevision: committed.sessionRevision,
+							thinkingLevel: ThinkingLevel.Low,
+						}),
+					),
+				),
+			).rejects.toBeInstanceOf(SessionStateCommandInFlightError);
+			expect(Date.now() - startedAt).toBeLessThan(250);
+			expect((await run(runner.snapshot())).status).toBe("running");
+
+			const replay = await run(terminal.setThinkingLevel(committedCommand));
+			expect(replay).toEqual({ ...committed, replayed: true });
+			const observer = await run(runner.attachView(attach("race-observer", "observer", 1)));
+			await run(observer.detach(detach(observer.viewId, 1)));
+			expect(
+				fixture.sessionManager
+					.getEntries()
+					.some(
+						(entry) =>
+							entry.type === "thinking_level_change" &&
+							entry.command?.commandId === "thinking-during-drain",
+					),
+			).toBe(false);
+			expect(fixture.session.configuredThinkingLevel()).toBe(ThinkingLevel.High);
+
+			releaseTimer = setInterval(fixture.releaseProviderResponses, 1);
+			await fixture.session.waitForIdle();
+			clearInterval(releaseTimer);
+			releaseTimer = undefined;
+			await run(terminal.detach());
+			await run(runner.stop());
+		} finally {
+			if (releaseTimer) clearInterval(releaseTimer);
+			fixture.releaseProviderResponses();
+			await Effect.runPromise(Scope.close(scope, Exit.void));
+		}
+	});
+
+	it("restores a journaled auto selector and classifies after reopening", async () => {
+		const fixture = await createLiveFixture();
+		await fixture.sessionManager.commitStateCommand({
+			schemaVersion: 1,
+			kind: "setThinkingLevel",
+			commandId: "journal-auto",
+			correlationId: "journal-auto-correlation",
+			expectedSessionRevision: fixture.sessionManager.getSessionRevision(),
+			thinkingLevel: AUTO_THINKING,
+		});
+		fixture.session.applyJournaledThinkingLevel(AUTO_THINKING);
+		await fixture.sessionManager.flush();
+		fixture.session.applyJournaledThinkingLevel(ThinkingLevel.Low);
+
+		expect(await fixture.session.switchSession(fixture.sessionFile)).toBe(true);
+		expect(fixture.session.configuredThinkingLevel()).toBe(AUTO_THINKING);
+		expect(fixture.session.isAutoThinking).toBe(true);
+
+		const classifierSpy = vi.spyOn(autoThinkingClassifier, "classifyDifficulty").mockResolvedValue(Effort.Medium);
+		await fixture.session.prompt("Classify this reopened journaled auto session");
+		await fixture.session.waitForIdle();
+		expect(classifierSpy).toHaveBeenCalledTimes(1);
+		expect(fixture.session.configuredThinkingLevel()).toBe(AUTO_THINKING);
+		expect(fixture.session.thinkingLevel).toBe(Effort.Medium);
+		await fixture.session.dispose();
+	});
+
 	it("projects terminal state without exposing the session and detaches without stopping the runner", async () => {
 		const fixture = await createLiveFixture();
 		await Effect.runPromise(

@@ -1,15 +1,21 @@
 import { randomUUID } from "node:crypto";
 import { Effect, Exit, Scope } from "effect";
-import type { RunnerCommandReceipt, RunnerImageContent } from "../runner/protocol";
+import type {
+	RunnerCommandReceipt,
+	RunnerImageContent,
+	SetThinkingLevelReceipt,
+} from "../runner/protocol";
 import {
 	decodeCancelQueuedInputCommand,
 	decodeEditQueuedInputCommand,
 	decodeSubmitInputCommand,
+	decodeSetThinkingLevelCommand,
 	RUNNER_SCHEMA_VERSION,
 } from "../runner/protocol";
 import type { AgentSessionEvent } from "../session/agent-session";
 import type { RunnerFailure, SessionRunner } from "../runner/session-runner";
 import type { TerminalSessionSnapshot, TerminalSessionView } from "../runner/terminal-session-view";
+import type { ConfiguredThinkingLevel } from "../thinking";
 
 export interface TerminalSubmitIntent {
 	readonly text: string;
@@ -38,6 +44,13 @@ export interface TerminalCancelIntent {
 	readonly causationId?: string;
 }
 
+export interface TerminalSetThinkingLevelIntent {
+	readonly thinkingLevel: ConfiguredThinkingLevel | undefined;
+	readonly commandId?: string;
+	readonly correlationId?: string;
+	readonly causationId?: string;
+}
+
 export interface TerminalSessionControllerOptions {
 	readonly viewId?: string;
 	readonly commandId?: string;
@@ -53,6 +66,7 @@ export interface TerminalSessionController {
 	readonly submit: (intent: TerminalSubmitIntent) => Promise<RunnerCommandReceipt>;
 	readonly edit: (intent: TerminalEditIntent) => Promise<RunnerCommandReceipt>;
 	readonly cancel: (intent: TerminalCancelIntent) => Promise<RunnerCommandReceipt>;
+	readonly setThinkingLevel: (intent: TerminalSetThinkingLevelIntent) => Promise<SetThinkingLevelReceipt>;
 	readonly close: () => Promise<void>;
 }
 
@@ -199,6 +213,38 @@ export async function createTerminalSessionController(
 						),
 					);
 				}),
+			setThinkingLevel: async (intent) => {
+				try {
+					const ids = metadata(intent);
+					const receipt = await run(
+						view!.setThinkingLevel(
+							decodeSetThinkingLevelCommand({
+								schemaVersion: RUNNER_SCHEMA_VERSION,
+								kind: "setThinkingLevel",
+								...ids,
+								...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
+								expectedSessionRevision: latest.runner.sessionRevision,
+								viewId,
+								controllerEpoch: view!.epoch,
+								...(intent.thinkingLevel === undefined
+									? {}
+									: { thinkingLevel: intent.thinkingLevel }),
+							}),
+						),
+					);
+					latest = {
+						...latest,
+						runner: {
+							...latest.runner,
+							sessionRevision: Math.max(latest.runner.sessionRevision, receipt.sessionRevision),
+						},
+					};
+					return receipt;
+				} catch (error) {
+					await refresh();
+					throw error;
+				}
+			},
 			close: async () => {
 				if (closed) return;
 				closed = true;

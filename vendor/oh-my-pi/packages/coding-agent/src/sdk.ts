@@ -13,10 +13,10 @@ import {
 	type CredentialDisabledEvent,
 	type Message,
 	type Model,
-	type SimpleStreamOptions,
 	type ReasoningEffort,
-	type ThinkingBudgets,
+	type SimpleStreamOptions,
 	streamSimple,
+	type ThinkingBudgets,
 } from "@oh-my-pi/pi-ai";
 import type { Dialect } from "@oh-my-pi/pi-ai/dialect";
 import {
@@ -58,6 +58,7 @@ import { loadPromptTemplates as loadPromptTemplatesInternal, type PromptTemplate
 import { Settings, type SkillsSettings } from "./config/settings";
 import { CursorExecHandlers } from "./cursor";
 import "./discovery";
+import { Effect, Exit, Scope } from "effect";
 import { resolveConfigValue } from "./config/resolve-config-value";
 import { initializeWithSettings } from "./discovery";
 import { disposeAllKernelSessions, disposeKernelSessionsByOwner } from "./eval/py/executor";
@@ -107,7 +108,9 @@ import type { MnemopiSessionState } from "./mnemopi/state";
 import asyncResultTemplate from "./prompts/tools/async-result.md" with { type: "text" };
 import lateDiagnosticTemplate from "./prompts/tools/lsp-late-diagnostic.md" with { type: "text" };
 import { AgentLifecycleManager } from "./registry/agent-lifecycle";
-import { AgentRegistry, MAIN_AGENT_ID, type AgentQuotaAdmission } from "./registry/agent-registry";
+import { type AgentQuotaAdmission, AgentRegistry, MAIN_AGENT_ID } from "./registry/agent-registry";
+import type { SessionRunner } from "./runner/session-runner";
+import { makeSessionRunnerLive } from "./runner/session-runner";
 import {
 	collectEnvSecrets,
 	deobfuscateSessionContext,
@@ -117,7 +120,6 @@ import {
 	SecretObfuscator,
 } from "./secrets";
 import { AgentSession, type SessionDisposeOptions } from "./session/agent-session";
-import { DurableInputQueue } from "./session/durable-input-queue";
 import { resolveAuthBrokerConfig } from "./session/auth-broker-config";
 import {
 	AuthBrokerClient,
@@ -128,6 +130,7 @@ import {
 	type SnapshotResponse,
 	writeAuthBrokerSnapshotCache,
 } from "./session/auth-storage";
+import { DurableInputQueue } from "./session/durable-input-queue";
 import {
 	type CustomMessage,
 	convertToLlm,
@@ -135,12 +138,9 @@ import {
 	USER_INTERRUPT_LABEL,
 	wrapSteeringForModel,
 } from "./session/messages";
-import { getRestorableSessionModels } from "./session/session-context";
+import { getRestorableSessionModels, getRestorableSessionThinkingLevel } from "./session/session-context";
 import { SessionManager } from "./session/session-manager";
 import type { SessionOwnershipHandle } from "./session/session-ownership";
-import { makeSessionRunnerLive } from "./runner/session-runner";
-import type { SessionRunner } from "./runner/session-runner";
-import { Effect, Exit, Scope } from "effect";
 import { SnapcompactInlineTransformer } from "./session/snapcompact-inline";
 import { createSnapcompactSavingsRecorder } from "./session/snapcompact-savings-journal";
 import { closeAllConnections } from "./ssh/connection-manager";
@@ -155,7 +155,6 @@ import { AgentOutputManager } from "./task/output-manager";
 import {
 	AUTO_THINKING,
 	type ConfiguredThinkingLevel,
-	parseThinkingLevel,
 	resolveProvisionalAutoLevel,
 	resolveThinkingLevelForModel,
 	shouldDisableReasoning,
@@ -567,10 +566,8 @@ export interface CreateAgentSessionResult {
 	eventBus: EventBus;
 }
 
-export interface CreateSessionRunnerOptions extends Omit<
-	CreateAgentSessionOptions,
-	"durableInputQueue" | "sessionManager"
-> {
+export interface CreateSessionRunnerOptions
+	extends Omit<CreateAgentSessionOptions, "durableInputQueue" | "sessionManager"> {
 	/** Already-acquired ownership; release authority transfers to the returned runner. */
 	ownership: SessionOwnershipHandle;
 	sessionManager: SessionManager;
@@ -1321,7 +1318,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	const pickInitialThinkingLevel = (selectedModel: Model | undefined): ConfiguredThinkingLevel | undefined => {
 		let level = options.thinkingLevel;
 		if (level === undefined && hasExistingSession && hasThinkingEntry) {
-			level = parseThinkingLevel(existingSession.thinkingLevel);
+			level = getRestorableSessionThinkingLevel(existingBranch, existingSession.thinkingLevel);
 		}
 		if (level === undefined && !hasExplicitModel && !hasThinkingEntry && defaultRoleSpec.explicitThinkingLevel) {
 			level = defaultRoleSpec.thinkingLevel;

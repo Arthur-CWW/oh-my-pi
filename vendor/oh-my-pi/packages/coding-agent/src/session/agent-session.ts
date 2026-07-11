@@ -235,6 +235,7 @@ import {
 	type ConfiguredThinkingLevel,
 	clampAutoThinkingEffort,
 	parseEffort,
+	parseConfiguredThinkingLevel,
 	resolveProvisionalAutoLevel,
 	resolveThinkingLevelForModel,
 	shouldDisableReasoning,
@@ -296,12 +297,22 @@ import {
 	USER_INTERRUPT_LABEL,
 } from "./messages";
 import type { SessionContext } from "./session-context";
-import { getLatestCompactionEntry, getRestorableSessionModels } from "./session-context";
+import {
+	getLatestCompactionEntry,
+	getRestorableSessionModels,
+	getRestorableSessionThinkingLevel,
+} from "./session-context";
 import { formatSessionDumpText } from "./session-dump-format";
-import type { BranchSummaryEntry, CompactionEntry, NewSessionOptions } from "./session-entries";
+import type {
+	BranchSummaryEntry,
+	CompactionEntry,
+	NewSessionOptions,
+	SessionCommandReceipt,
+	SetThinkingSessionCommand,
+} from "./session-entries";
 import { EPHEMERAL_MODEL_CHANGE_ROLE } from "./session-entries";
 import { formatSessionHistoryMarkdown } from "./session-history-format";
-import type { SessionManager } from "./session-manager";
+import { type SessionManager, SessionStateCommandInFlightError } from "./session-manager";
 import type { ShakeMode, ShakeResult } from "./shake-types";
 import { ToolChoiceQueue } from "./tool-choice-queue";
 import { classifyUnexpectedStop, isUnexpectedStopCandidate } from "./unexpected-stop-classifier";
@@ -6010,6 +6021,39 @@ export class AgentSession {
 		if (queue) return queue;
 		throw this.#durableInputQueueError ?? new Error("Durable input queue is unavailable");
 	}
+	/**
+	 * Durably commit and apply a thinking command under the same admission fence
+	 * used by queue drain. Replays return their original receipt without applying.
+	 */
+	async commitJournaledThinkingLevel(command: SetThinkingSessionCommand): Promise<SessionCommandReceipt> {
+		const promptGeneration = this.#promptGeneration;
+		if (this.sessionManager.getSessionCommandReceipt(command.commandId) !== undefined) {
+			return await this.sessionManager.commitStateCommand(command);
+		}
+		const wasBusy =
+			this.isStreaming || this.isCompacting || this.isRetrying || this.isGeneratingHandoff;
+		if (wasBusy) throw new SessionStateCommandInFlightError();
+		const release = await this.#acquireDurableAdmissionMaintenance();
+		try {
+			if (
+				promptGeneration !== this.#promptGeneration ||
+				this.isStreaming ||
+				this.isCompacting ||
+				this.isRetrying ||
+				this.isGeneratingHandoff
+			) {
+				throw new SessionStateCommandInFlightError();
+			}
+			const receipt = await this.sessionManager.commitStateCommand(command);
+			if (!receipt.replayed) {
+				this.applyJournaledThinkingLevel(parseConfiguredThinkingLevel(command.thinkingLevel));
+			}
+			return receipt;
+		} finally {
+			release();
+		}
+	}
+
 	async #acquireDurableAdmissionMaintenance(): Promise<() => void> {
 		const previous = this.#durableAdmissionMaintenanceTail;
 		const release = Promise.withResolvers<void>();
@@ -7474,6 +7518,22 @@ export class AgentSession {
 	 * last resolved effort instead of reverting to pending auto.
 	 */
 	setThinkingLevel(level: ConfiguredThinkingLevel | undefined, persist: boolean = false): void {
+		this.#applyThinkingLevel(level, persist, true);
+	}
+
+	/**
+	 * Apply a thinking selector whose durable session entry was already committed.
+	 * This intentionally bypasses both SessionManager and Settings persistence.
+	 */
+	applyJournaledThinkingLevel(level: ConfiguredThinkingLevel | undefined): void {
+		this.#applyThinkingLevel(level, false, false);
+	}
+
+	#applyThinkingLevel(
+		level: ConfiguredThinkingLevel | undefined,
+		persist: boolean,
+		appendSessionEntry: boolean,
+	): void {
 		if (level === AUTO_THINKING) {
 			const provisional = resolveProvisionalAutoLevel(this.model);
 			const wasAuto = this.#autoThinking;
@@ -7499,7 +7559,7 @@ export class AgentSession {
 		this.#applyThinkingLevelToAgent(effectiveLevel);
 
 		if (isChanging) {
-			this.sessionManager.appendThinkingLevelChange(effectiveLevel);
+			if (appendSessionEntry) this.sessionManager.appendThinkingLevelChange(effectiveLevel);
 			const persistedLevel = parseEffort(effectiveLevel);
 			if (persist && persistedLevel !== undefined) {
 				this.settings.set("defaultThinkingLevel", persistedLevel);
@@ -11654,21 +11714,20 @@ export class AgentSession {
 				}
 			}
 
-			const hasThinkingEntry = this.sessionManager.getBranch().some(entry => entry.type === "thinking_level_change");
+			const branch = this.sessionManager.getBranch();
+			const hasThinkingEntry = branch.some(entry => entry.type === "thinking_level_change");
+			const restoredLoggedThinkingLevel = getRestorableSessionThinkingLevel(
+				branch,
+				sessionContext.thinkingLevel,
+			);
 			const hasServiceTierEntry = this.sessionManager
 				.getBranch()
 				.some(entry => entry.type === "service_tier_change");
 			const defaultThinkingLevel = this.settings.get("defaultThinkingLevel");
 			const configuredServiceTier = this.settings.get("serviceTier");
-			// Session log entries store only concrete levels. When `auto` has resolved
-			// for a turn, the persisted context may already carry that concrete level
-			// even if the branch scan races a just-flushed thinking entry under isolated
-			// parallel test workers. Prefer the concrete context value in that case;
-			// otherwise keep the configured `auto` selector so fresh sessions still
-			// classify their first turn.
 			const restoredThinkingLevel: ConfiguredThinkingLevel | undefined =
 				hasThinkingEntry || (defaultThinkingLevel === AUTO_THINKING && sessionContext.thinkingLevel !== "off")
-					? (sessionContext.thinkingLevel as ThinkingLevel | undefined)
+					? restoredLoggedThinkingLevel
 					: defaultThinkingLevel;
 			if (restoredThinkingLevel === AUTO_THINKING) {
 				this.#autoThinking = true;

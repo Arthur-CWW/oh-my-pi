@@ -2,7 +2,13 @@ import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { ProviderPayload, ServiceTier } from "@oh-my-pi/pi-ai";
 import * as snapcompact from "@oh-my-pi/snapcompact";
 import { createBranchSummaryMessage, createCompactionSummaryMessage, createCustomMessage } from "./messages";
-import { type CompactionEntry, EPHEMERAL_MODEL_CHANGE_ROLE, type SessionEntry } from "./session-entries";
+import {
+	type CompactionEntry,
+	decodeSessionCommandEntry,
+	EPHEMERAL_MODEL_CHANGE_ROLE,
+	type SessionEntry,
+} from "./session-entries";
+import { AUTO_THINKING, type ConfiguredThinkingLevel, parseThinkingLevel } from "../thinking";
 
 export interface SessionContext {
 	messages: AgentMessage[];
@@ -40,6 +46,23 @@ export function getRestorableSessionModels(
 	if (!roleModel) return defaultModel ? [defaultModel] : [];
 	if (!defaultModel || roleModel === defaultModel) return [roleModel];
 	return [roleModel, defaultModel];
+}
+
+/** Restore command-aware selectors while retaining legacy concrete context semantics. */
+export function getRestorableSessionThinkingLevel(
+	entries: readonly SessionEntry[],
+	contextThinkingLevel: string | undefined,
+): ConfiguredThinkingLevel | undefined {
+	for (let index = entries.length - 1; index >= 0; index -= 1) {
+		const entry = entries[index];
+		if (entry?.type !== "thinking_level_change") continue;
+		const decoded = decodeSessionCommandEntry(entry);
+		if (decoded?.type === "thinking_level_change" && decoded.command?.request.thinkingLevel === AUTO_THINKING) {
+			return AUTO_THINKING;
+		}
+		break;
+	}
+	return parseThinkingLevel(contextThinkingLevel);
 }
 
 export function getLatestCompactionEntry(entries: SessionEntry[]): CompactionEntry | null {

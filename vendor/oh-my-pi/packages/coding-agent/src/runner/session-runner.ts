@@ -10,8 +10,13 @@ import {
 	type DurableInputQueueEvent,
 	type DurableQueuedInput,
 } from "../session/durable-input-queue";
-import type { SessionEntry } from "../session/session-entries";
-import type { SessionManager } from "../session/session-manager";
+import type { SessionEntry, SetThinkingSessionCommand } from "../session/session-entries";
+import {
+	SessionCommandConflictError,
+	type SessionManager,
+	SessionRevisionConflictError,
+	SessionStateCommandInFlightError,
+} from "../session/session-manager";
 import type { SessionOwnershipHandle } from "../session/session-ownership";
 import {
 	InvalidRunnerCommandError,
@@ -30,6 +35,7 @@ import {
 	decodeCancelQueuedInputCommand,
 	decodeEditQueuedInputCommand,
 	decodeSubmitInputCommand,
+	decodeSetThinkingLevelCommand,
 	RUNNER_SCHEMA_VERSION,
 	type AcquireRunnerControllerCommand,
 	type AttachRunnerViewCommand,
@@ -37,6 +43,7 @@ import {
 	type ReleaseRunnerControllerCommand,
 	type RunnerCapability,
 	type RunnerCommandReceipt,
+	type SetThinkingLevelReceipt,
 	type RunnerControlMetadata,
 	type RunnerEvent,
 	type RunnerEventDelivery,
@@ -62,7 +69,10 @@ export type RunnerFailure =
 	| RunnerViewNotAttachedError
 	| RunnerViewCapabilityError
 	| SessionRunnerRuntimeError
-	| SessionRunnerStoppedError;
+	| SessionRunnerStoppedError
+	| SessionRevisionConflictError
+	| SessionCommandConflictError
+	| SessionStateCommandInFlightError;
 
 export interface SessionRunnerOptions {
 	readonly mailboxCapacity: number;
@@ -102,6 +112,7 @@ export interface ControllerSessionRunnerView extends RunnerViewBase {
 	readonly submitInput: (input: unknown) => Effect.Effect<RunnerCommandReceipt, RunnerFailure, Scope.Scope>;
 	readonly editQueuedInput: (input: unknown) => Effect.Effect<RunnerCommandReceipt, RunnerFailure, Scope.Scope>;
 	readonly cancelQueuedInput: (input: unknown) => Effect.Effect<RunnerCommandReceipt, RunnerFailure, Scope.Scope>;
+	readonly setThinkingLevel: (input: unknown) => Effect.Effect<SetThinkingLevelReceipt, RunnerFailure, Scope.Scope>;
 	readonly releaseController: (
 		command: ReleaseRunnerControllerCommand,
 	) => Effect.Effect<ObserverSessionRunnerView, RunnerFailure, Scope.Scope>;
@@ -139,6 +150,7 @@ interface EventDetails {
 	readonly transcriptEntryId?: string;
 	readonly transcriptLeafId?: string | null;
 	readonly transcriptPosition?: number;
+	readonly sessionRevision?: number;
 }
 type TerminalRawDelivery =
 	| { readonly kind: "agentEvent"; readonly sequence: number; readonly event: AgentSessionEvent }
@@ -160,7 +172,10 @@ const asRunnerFailure = (error: unknown): RunnerFailure => {
 		error instanceof RunnerViewNotAttachedError ||
 		error instanceof RunnerViewCapabilityError ||
 		error instanceof SessionRunnerRuntimeError ||
-		error instanceof SessionRunnerStoppedError
+		error instanceof SessionRunnerStoppedError ||
+		error instanceof SessionRevisionConflictError ||
+		error instanceof SessionCommandConflictError ||
+		error instanceof SessionStateCommandInFlightError
 	) {
 		return error;
 	}
@@ -213,6 +228,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 		try: () => resources.queue.getLatestRunnerRevision(),
 		catch: asRunnerFailure,
 	});
+	let sessionRevision = resources.sessionManager.getSessionRevision();
 	const durableItems = new Map(openedItems.map((item) => [item.inputId, item]));
 	const acceptedCommands = new Set<string>();
 	const transcriptEntries = resources.sessionManager.getEntries();
@@ -256,6 +272,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 		}
 		return {
 			revision,
+			sessionRevision,
 			sequence: runnerSequence,
 			durableSequence: items.at(-1)?.sequence ?? 0,
 			items,
@@ -324,6 +341,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 			correlationId: details.metadata.correlationId,
 			causationId: details.metadata.causationId,
 			revision,
+			sessionRevision: details.sessionRevision,
 			sequence: runnerSequence,
 			controllerEpoch: details.controllerEpoch,
 			viewId: details.viewId,
@@ -467,6 +485,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 					transcriptEntryCount = position;
 					transcriptLeafId = leafId;
 					transcriptLastEntryId = entry.id;
+					sessionRevision = resources.sessionManager.getSessionRevision();
 					yield* publishEvent({
 						kind: "transcriptEntryAppended",
 						metadata: {
@@ -510,6 +529,11 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 		controllerEpoch: number,
 		input: unknown,
 	) => Effect.Effect<RunnerCommandReceipt, RunnerFailure, Scope.Scope>;
+	let setThinkingLevel!: (
+		viewId: string,
+		controllerEpoch: number,
+		input: unknown,
+	) => Effect.Effect<SetThinkingLevelReceipt, RunnerFailure, Scope.Scope>;
 
 	const mismatchedView = (viewId: string): Effect.Effect<never, RunnerFailure> =>
 		Effect.fail(new InvalidRunnerCommandError({ issue: `Command does not belong to view ${viewId}` }));
@@ -542,6 +566,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 			submitInput: (input) => submitInput(viewId, controllerEpoch, input),
 			editQueuedInput: (input) => editQueuedInput(viewId, controllerEpoch, input),
 			cancelQueuedInput: (input) => cancelQueuedInput(viewId, controllerEpoch, input),
+			setThinkingLevel: (input) => setThinkingLevel(viewId, controllerEpoch, input),
 			releaseController: (command) =>
 				command.viewId === viewId ? releaseController(command) : mismatchedView(viewId),
 		};
@@ -784,6 +809,68 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 					revision: durable.runnerRevision,
 					replayed: durable.replayed,
 				} satisfies RunnerCommandReceipt;
+			}),
+		);
+	});
+
+	setThinkingLevel = Effect.fn("Runner.setThinkingLevel")(function* (
+		viewId: string,
+		controllerEpoch: number,
+		input: unknown,
+	) {
+		const command = yield* Effect.try({
+			try: () => decodeSetThinkingLevelCommand(input),
+			catch: asRunnerFailure,
+		});
+		if (command.viewId !== viewId) return yield* mismatchedView(viewId);
+		if (command.controllerEpoch !== controllerEpoch) {
+			return yield* Effect.fail(
+				new StaleRunnerControllerLeaseError({
+					viewId,
+					expectedControllerEpoch: command.controllerEpoch,
+					actualControllerEpoch: controllerEpoch,
+				}),
+			);
+		}
+		return yield* enqueue(
+			Effect.gen(function* () {
+				yield* requireController(viewId, controllerEpoch);
+				const journalCommand: SetThinkingSessionCommand = {
+					schemaVersion: 1,
+					kind: "setThinkingLevel",
+					commandId: command.commandId,
+					correlationId: command.correlationId,
+					...(command.causationId === undefined ? {} : { causationId: command.causationId }),
+					expectedSessionRevision: command.expectedSessionRevision,
+					thinkingLevel: command.thinkingLevel ?? null,
+				};
+				const durable = yield* Effect.tryPromise({
+					try: () => resources.session.commitJournaledThinkingLevel(journalCommand),
+					catch: asRunnerFailure,
+				});
+				sessionRevision = Math.max(sessionRevision, durable.sessionRevision);
+				if (!durable.replayed) {
+					yield* publishEvent({
+						kind: "thinkingLevelChanged",
+						metadata: {
+							schemaVersion: RUNNER_SCHEMA_VERSION,
+							commandId: command.commandId,
+							correlationId: command.correlationId,
+							...(command.causationId === undefined ? {} : { causationId: command.causationId }),
+							expectedRevision: revision,
+						},
+						controllerEpoch,
+						viewId,
+						sessionRevision,
+					});
+				}
+				return {
+					commandId: command.commandId,
+					correlationId: command.correlationId,
+					...(command.causationId === undefined ? {} : { causationId: command.causationId }),
+					sessionRevision: durable.sessionRevision,
+					replayed: durable.replayed,
+				} satisfies SetThinkingLevelReceipt;
 			}),
 		);
 	});
@@ -1032,6 +1119,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 			submit: attached.submitInput,
 			edit: attached.editQueuedInput,
 			cancel: attached.cancelQueuedInput,
+			setThinkingLevel: attached.setThinkingLevel,
 			detach,
 		} satisfies TerminalSessionView;
 	});
