@@ -1,4 +1,4 @@
-import type { AgentSession, AgentSessionEvent } from "../session/agent-session";
+import { type AgentSession, type AgentSessionEvent, PromptOperationConflictError } from "../session/agent-session";
 import { Cause, Deferred, Effect, FiberSet, PubSub, Queue, Ref, Scope } from "effect";
 import {
 	DurableInputCommandConflictError,
@@ -23,6 +23,7 @@ import {
 	RunnerControllerConflictError,
 	RunnerRevisionConflictError,
 	RunnerItemRevisionConflictError,
+	RunnerPromptOperationConflictError,
 	RunnerViewAlreadyAttachedError,
 	RunnerViewCapabilityError,
 	RunnerViewNotAttachedError,
@@ -36,6 +37,7 @@ import {
 	decodeEditQueuedInputCommand,
 	decodeSubmitInputCommand,
 	decodeSetModelCommand,
+	decodeInterruptPromptCommand,
 	decodeSetThinkingLevelCommand,
 	RUNNER_SCHEMA_VERSION,
 	type AcquireRunnerControllerCommand,
@@ -44,7 +46,9 @@ import {
 	type ReleaseRunnerControllerCommand,
 	type RunnerCapability,
 	type RunnerCommandReceipt,
+	type InterruptPromptReceipt,
 	type SetModelReceipt,
+	type InterruptPromptCommand,
 	type SetThinkingLevelReceipt,
 	type RunnerControlMetadata,
 	type RunnerEvent,
@@ -65,6 +69,7 @@ export type RunnerFailure =
 	| InvalidRunnerCommandError
 	| RunnerRevisionConflictError
 	| RunnerItemRevisionConflictError
+	| RunnerPromptOperationConflictError
 	| RunnerControllerConflictError
 	| StaleRunnerControllerLeaseError
 	| RunnerViewAlreadyAttachedError
@@ -116,6 +121,9 @@ export interface ControllerSessionRunnerView extends RunnerViewBase {
 	readonly cancelQueuedInput: (input: unknown) => Effect.Effect<RunnerCommandReceipt, RunnerFailure, Scope.Scope>;
 	readonly setModel: (input: unknown) => Effect.Effect<SetModelReceipt, RunnerFailure, Scope.Scope>;
 	readonly setThinkingLevel: (input: unknown) => Effect.Effect<SetThinkingLevelReceipt, RunnerFailure, Scope.Scope>;
+	readonly interruptPrompt: (
+		command: InterruptPromptCommand,
+	) => Effect.Effect<InterruptPromptReceipt, RunnerFailure, Scope.Scope>;
 	readonly releaseController: (
 		command: ReleaseRunnerControllerCommand,
 	) => Effect.Effect<ObserverSessionRunnerView, RunnerFailure, Scope.Scope>;
@@ -145,10 +153,11 @@ interface ActiveController {
 
 interface EventDetails {
 	readonly kind: RunnerEventKind;
-	readonly metadata: RunnerControlMetadata;
+	readonly metadata: RunnerControlMetadata | InterruptPromptCommand;
 	readonly controllerEpoch: number;
 	readonly viewId?: string;
 	readonly inputId?: string;
+	readonly targetGeneration?: number;
 	readonly durableSequence?: number;
 	readonly transcriptEntryId?: string;
 	readonly transcriptLeafId?: string | null;
@@ -170,6 +179,7 @@ const asRunnerFailure = (error: unknown): RunnerFailure => {
 		error instanceof RunnerRevisionConflictError ||
 		error instanceof RunnerControllerConflictError ||
 		error instanceof RunnerItemRevisionConflictError ||
+		error instanceof RunnerPromptOperationConflictError ||
 		error instanceof StaleRunnerControllerLeaseError ||
 		error instanceof RunnerViewAlreadyAttachedError ||
 		error instanceof RunnerViewNotAttachedError ||
@@ -181,6 +191,13 @@ const asRunnerFailure = (error: unknown): RunnerFailure => {
 		error instanceof SessionStateCommandInFlightError
 	) {
 		return error;
+	}
+	if (error instanceof PromptOperationConflictError) {
+		return new RunnerPromptOperationConflictError({
+			targetGeneration: error.targetGeneration,
+			actualGeneration: error.actualGeneration,
+			active: error.active,
+		});
 	}
 	if (error instanceof DurableInputRunnerRevisionConflictError) {
 		return new RunnerRevisionConflictError({
@@ -315,6 +332,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 				isCompacting: resources.session.isCompacting,
 				hasPostPromptWork: resources.session.hasPostPromptWork,
 				isBashRunning: resources.session.isBashRunning,
+				promptOperation: resources.session.promptOperation,
 				isEvalRunning: resources.session.isEvalRunning,
 				messages: [...resources.session.messages],
 			},
@@ -353,6 +371,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 			transcriptEntryId: details.transcriptEntryId,
 			transcriptLeafId: details.transcriptLeafId,
 			transcriptPosition: details.transcriptPosition,
+			targetGeneration: details.targetGeneration,
 		};
 		yield* PubSub.publish(events, event);
 		yield* publishTerminal({ kind: "runnerEvent", event });
@@ -542,6 +561,11 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 		controllerEpoch: number,
 		input: unknown,
 	) => Effect.Effect<SetThinkingLevelReceipt, RunnerFailure, Scope.Scope>;
+	let interruptPrompt!: (
+		viewId: string,
+		controllerEpoch: number,
+		command: InterruptPromptCommand,
+	) => Effect.Effect<InterruptPromptReceipt, RunnerFailure, Scope.Scope>;
 
 	const mismatchedView = (viewId: string): Effect.Effect<never, RunnerFailure> =>
 		Effect.fail(new InvalidRunnerCommandError({ issue: `Command does not belong to view ${viewId}` }));
@@ -576,6 +600,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 			cancelQueuedInput: (input) => cancelQueuedInput(viewId, controllerEpoch, input),
 			setThinkingLevel: (input) => setThinkingLevel(viewId, controllerEpoch, input),
 			setModel: (input) => setModel(viewId, controllerEpoch, input),
+			interruptPrompt: (command) => interruptPrompt(viewId, controllerEpoch, command),
 			releaseController: (command) =>
 				command.viewId === viewId ? releaseController(command) : mismatchedView(viewId),
 		};
@@ -818,6 +843,47 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 					revision: durable.runnerRevision,
 					replayed: durable.replayed,
 				} satisfies RunnerCommandReceipt;
+			}),
+		);
+	});
+
+	interruptPrompt = Effect.fn("Runner.interruptPrompt")(function* (
+		viewId: string,
+		controllerEpoch: number,
+		command: InterruptPromptCommand,
+	) {
+		const decoded = yield* Effect.try({ try: () => decodeInterruptPromptCommand(command), catch: asRunnerFailure });
+		if (decoded.viewId !== viewId) return yield* mismatchedView(viewId);
+		if (decoded.controllerEpoch !== controllerEpoch) {
+			return yield* Effect.fail(
+				new StaleRunnerControllerLeaseError({
+					viewId,
+					expectedControllerEpoch: decoded.controllerEpoch,
+					actualControllerEpoch: controllerEpoch,
+				}),
+			);
+		}
+		return yield* enqueue(
+			Effect.gen(function* () {
+				yield* requireController(viewId, controllerEpoch);
+				yield* Effect.tryPromise({
+					try: () => resources.session.interruptPrompt(decoded.targetGeneration),
+					catch: asRunnerFailure,
+				});
+				yield* publishEvent({
+					kind: "promptInterrupted",
+					metadata: decoded,
+					controllerEpoch,
+					viewId,
+					targetGeneration: decoded.targetGeneration,
+				});
+				return {
+					commandId: decoded.commandId,
+					correlationId: decoded.correlationId,
+					...(decoded.causationId === undefined ? {} : { causationId: decoded.causationId }),
+					targetGeneration: decoded.targetGeneration,
+					interrupted: true,
+				} satisfies InterruptPromptReceipt;
 			}),
 		);
 	});
@@ -1190,6 +1256,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 			cancel: attached.cancelQueuedInput,
 			setThinkingLevel: attached.setThinkingLevel,
 			setModel: attached.setModel,
+			interruptPrompt: attached.interruptPrompt,
 			detach,
 		} satisfies TerminalSessionView;
 	});

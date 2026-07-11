@@ -7,16 +7,19 @@ import { type AssistantMessage, Effort } from "@oh-my-pi/pi-ai";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import * as autoThinkingClassifier from "../../src/auto-thinking/classifier";
+import * as imageLoading from "../../src/utils/image-loading";
 import { Effect, Exit, Fiber, Scope } from "effect";
 import { ModelRegistry } from "../../src/config/model-registry";
 import { Settings } from "../../src/config/settings";
 import { createTerminalSessionController } from "../../src/modes/terminal-session-controller";
 import {
+	decodeInterruptPromptCommand,
 	decodeSubmitInputCommand,
 	decodeSetModelCommand,
 	decodeSetThinkingLevelCommand,
 	RunnerRevisionConflictError,
 	RunnerItemRevisionConflictError,
+	RunnerPromptOperationConflictError,
 	StaleRunnerControllerLeaseError,
 	SessionRunnerRuntimeError,
 	type AttachRunnerViewCommand,
@@ -859,4 +862,130 @@ describe("live SessionRunner", () => {
 			),
 		);
 	});
+	it("interrupts only the exact live prompt generation without changing durable revisions", async () => {
+		const fixture = await createLiveFixture(true);
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const runner = yield* makeSessionRunnerLive(fixture, { mailboxCapacity: 4, eventCapacity: 8 });
+					const observer = yield* runner.attachView(attach("interrupt-observer", "observer", 0));
+					const controller = yield* runner.attachView(attach("interrupt-controller", "controller", 0));
+					if (controller.capability !== "controller") throw new Error("expected controller");
+					const subscription = yield* observer.subscribe();
+					const before = yield* runner.snapshot();
+
+					const firstPrompt = fixture.session.prompt("interrupt target");
+					yield* Effect.promise(async () => {
+						while (!fixture.session.promptOperation.active) await new Promise(resolve => setTimeout(resolve, 1));
+					});
+					const targetGeneration = fixture.session.promptOperation.generation;
+					const command = decodeInterruptPromptCommand({
+						schemaVersion: 1,
+						kind: "interruptPrompt",
+						commandId: "interrupt-once",
+						correlationId: "interrupt-correlation",
+						viewId: controller.viewId,
+						controllerEpoch: controller.controllerEpoch,
+						targetGeneration,
+					});
+					const receipt = yield* controller.interruptPrompt(command);
+					expect(receipt).toEqual({
+						commandId: "interrupt-once",
+						correlationId: "interrupt-correlation",
+						targetGeneration,
+						interrupted: true,
+					});
+					yield* Effect.promise(() => firstPrompt);
+					let interruptEventCount = 0;
+					let observedTargetGeneration: number | undefined;
+					for (let index = 0; index < 8; index += 1) {
+						const delivery = yield* Effect.race(
+							subscription.take,
+							Effect.sleep("2 seconds").pipe(
+								Effect.andThen(
+									Effect.fail(new SessionRunnerRuntimeError({ issue: "Timed out awaiting prompt interrupt event" })),
+								),
+							),
+						);
+						if (delivery.kind !== "event" || delivery.event.kind !== "promptInterrupted") continue;
+						interruptEventCount += 1;
+						observedTargetGeneration = delivery.event.targetGeneration;
+						break;
+					}
+					expect(interruptEventCount).toBe(1);
+					expect(observedTargetGeneration).toBe(targetGeneration);
+
+					const secondPrompt = fixture.session.prompt("new prompt");
+					yield* Effect.promise(async () => {
+						while (
+							!fixture.session.promptOperation.active ||
+							fixture.session.promptOperation.generation === targetGeneration ||
+							!fixture.providerInputs.includes("new prompt")
+						) {
+							await new Promise(resolve => setTimeout(resolve, 1));
+						}
+					});
+					yield* Effect.promise(() => new Promise(resolve => setTimeout(resolve, 10)));
+					const beforeStale = yield* runner.snapshot();
+					const stale = yield* Effect.flip(controller.interruptPrompt(command));
+					expect(stale).toBeInstanceOf(RunnerPromptOperationConflictError);
+					expect(fixture.session.promptOperation.active).toBe(true);
+					const after = yield* runner.snapshot();
+					expect(after.revision).toBe(before.revision);
+					expect(after.sessionRevision).toBe(beforeStale.sessionRevision);
+
+					yield* observer.detach(detach(observer.viewId, after.revision));
+					fixture.releaseProviderResponses();
+					yield* Effect.promise(() => secondPrompt);
+					yield* runner.stop();
+				}).pipe(Effect.ensuring(Effect.sync(fixture.releaseProviderResponses))),
+			),
+		);
+	});
+	it("does not launch the provider when interrupted during image normalization", async () => {
+		const fixture = await createLiveFixture();
+		let releaseNormalization!: () => void;
+		const normalizationGate = new Promise<void>(resolve => {
+			releaseNormalization = resolve;
+		});
+		vi.spyOn(imageLoading, "normalizeModelContextImages").mockImplementation(async images => {
+			await normalizationGate;
+			return images;
+		});
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const runner = yield* makeSessionRunnerLive(fixture, { mailboxCapacity: 4, eventCapacity: 8 });
+					const controller = yield* runner.attachView(attach("normalization-controller", "controller", 0));
+					if (controller.capability !== "controller") throw new Error("expected controller");
+					const prompt = fixture.session.prompt("normalize then interrupt", {
+						synthetic: true,
+						images: [{ type: "image", data: "AA==", mimeType: "image/png" }],
+					});
+					yield* Effect.promise(async () => {
+						while (!fixture.session.promptOperation.active) await new Promise(resolve => setTimeout(resolve, 1));
+					});
+					const targetGeneration = fixture.session.promptOperation.generation;
+					yield* controller.interruptPrompt(
+						decodeInterruptPromptCommand({
+							schemaVersion: 1,
+							kind: "interruptPrompt",
+							commandId: "interrupt-normalization",
+							correlationId: "interrupt-normalization",
+							viewId: controller.viewId,
+							controllerEpoch: controller.controllerEpoch,
+							targetGeneration,
+						}),
+					);
+					releaseNormalization();
+					yield* Effect.promise(() => prompt);
+					expect(fixture.providerInputs).toHaveLength(0);
+					expect(fixture.session.promptOperation).toEqual({ generation: targetGeneration, active: false });
+					yield* runner.stop();
+				}).pipe(Effect.ensuring(Effect.sync(releaseNormalization))),
+			),
+		);
+	});
+
+
 });

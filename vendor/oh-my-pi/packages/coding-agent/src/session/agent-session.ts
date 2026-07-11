@@ -519,6 +519,27 @@ export interface AgentSessionConfig {
 const kDurableAdmittedPrompt = Symbol("durable-admitted-prompt");
 const kNormalizedPromptImages = Symbol("normalized-prompt-images");
 
+export interface PromptOperationSnapshot {
+	readonly generation: number;
+	readonly active: boolean;
+}
+
+export class PromptOperationConflictError extends Error {
+	readonly targetGeneration: number;
+	readonly actualGeneration: number;
+	readonly active: boolean;
+
+	constructor(snapshot: PromptOperationSnapshot, targetGeneration: number) {
+		super(
+			`Prompt operation ${targetGeneration} is ${snapshot.active ? "stale" : "inactive"}; current generation is ${snapshot.generation}`,
+		);
+		this.name = "PromptOperationConflictError";
+		this.targetGeneration = targetGeneration;
+		this.actualGeneration = snapshot.generation;
+		this.active = snapshot.active;
+	}
+}
+
 /** Options for AgentSession.prompt() */
 export interface PromptOptions {
 	/** Whether to expand file-based prompt templates (default: true) */
@@ -1354,6 +1375,8 @@ export class AgentSession {
 	#emptyStopRetryCount = 0;
 	#unexpectedStopRetryCount = 0;
 	#promptGeneration = 0;
+	#promptOperationGeneration = 0;
+	#promptOperationActive = false;
 	#lastAppliedModelCommandEntryId: string | undefined;
 	#pendingAgentEndEmit: AgentSessionEvent | undefined;
 	#pendingTurnEndProcessing: Promise<void> = Promise.resolve();
@@ -4159,6 +4182,22 @@ export class AgentSession {
 		return this.agent.isAborting;
 	}
 
+	get promptOperation(): PromptOperationSnapshot {
+		return {
+			generation: this.#promptOperationGeneration,
+			active: this.#promptOperationActive,
+		};
+	}
+
+	async interruptPrompt(targetGeneration: number): Promise<void> {
+		const snapshot = this.promptOperation;
+		if (!snapshot.active || snapshot.generation !== targetGeneration) {
+			throw new PromptOperationConflictError(snapshot, targetGeneration);
+		}
+		this.#promptOperationActive = false;
+		await this.abort({ reason: USER_INTERRUPT_LABEL });
+	}
+
 	/** Wait until streaming and deferred recovery work are fully settled. */
 	async waitForIdle(): Promise<void> {
 		await this.agent.waitForIdle();
@@ -5520,8 +5559,17 @@ export class AgentSession {
 			!options?.synthetic && !hasPendingUserDirective ? this.#createEagerTodoPrelude(expandedText) : undefined;
 		const eagerTaskPrelude =
 			!options?.synthetic && !hasPendingUserDirective ? this.#createEagerTaskPrelude(expandedText) : undefined;
-		const normalizedImages =
-			internalOptions?.[kNormalizedPromptImages] ?? (await this.#normalizeImagesForModel(options?.images));
+		const operationGeneration = ++this.#promptOperationGeneration;
+		const operationPromptGeneration = this.#promptGeneration;
+		this.#promptOperationActive = true;
+		let normalizedImages: ImageContent[] | undefined;
+		try {
+			normalizedImages =
+				internalOptions?.[kNormalizedPromptImages] ?? (await this.#normalizeImagesForModel(options?.images));
+		} catch (error) {
+			if (this.#promptOperationGeneration === operationGeneration) this.#promptOperationActive = false;
+			throw error;
+		}
 
 		const userContent: (TextContent | ImageContent)[] = [{ type: "text", text: expandedText }];
 		if (normalizedImages) {
@@ -5551,6 +5599,8 @@ export class AgentSession {
 				...options,
 				images: normalizedImages,
 				prependMessages: preludeMessages.length > 0 ? preludeMessages : undefined,
+				promptOperationGeneration: operationGeneration,
+				promptGeneration: operationPromptGeneration,
 				appendMessages: keywordNotices.length > 0 ? keywordNotices : undefined,
 			});
 		} finally {
@@ -5622,11 +5672,24 @@ export class AgentSession {
 		options?: Pick<PromptOptions, "toolChoice" | "images" | "skipCompactionCheck"> & {
 			prependMessages?: AgentMessage[];
 			appendMessages?: AgentMessage[];
+			promptOperationGeneration?: number;
+			promptGeneration?: number;
 			skipPostPromptRecoveryWait?: boolean;
 		},
 	): Promise<void> {
+		const acceptedOperationGeneration = options?.promptOperationGeneration;
+		const operationGeneration = acceptedOperationGeneration ?? ++this.#promptOperationGeneration;
+		const generation = options?.promptGeneration ?? this.#promptGeneration;
+		if (
+			acceptedOperationGeneration !== undefined &&
+			(this.#promptOperationGeneration !== acceptedOperationGeneration ||
+				!this.#promptOperationActive ||
+				this.#promptGeneration !== generation)
+		) {
+			return;
+		}
+		if (acceptedOperationGeneration === undefined) this.#promptOperationActive = true;
 		this.#beginInFlight();
-		const generation = this.#promptGeneration;
 		try {
 			// Flush any pending bash messages before the new prompt
 			this.#flushPendingBashMessages();
@@ -5788,6 +5851,9 @@ export class AgentSession {
 				await this.#waitForPostPromptRecovery(generation);
 			}
 		} finally {
+			if (this.#promptOperationGeneration === operationGeneration) {
+				this.#promptOperationActive = false;
+			}
 			this.#endInFlight();
 		}
 	}

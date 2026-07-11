@@ -51,6 +51,15 @@ export class RunnerViewCapabilityError extends Schema.TaggedErrorClass<RunnerVie
 	{ viewId: Schema.String, requiredCapability: Schema.Literal("controller") },
 ) {}
 
+export class RunnerPromptOperationConflictError extends Schema.TaggedErrorClass<RunnerPromptOperationConflictError>()(
+	"RunnerPromptOperationConflictError",
+	{
+		targetGeneration: NonNegativeInt,
+		actualGeneration: NonNegativeInt,
+		active: Schema.Boolean,
+	},
+) {}
+
 export class SessionRunnerStoppedError extends Schema.TaggedErrorClass<SessionRunnerStoppedError>()(
 	"SessionRunnerStoppedError",
 	{},

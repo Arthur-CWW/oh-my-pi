@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Effect, Exit, Scope } from "effect";
 import type {
 	RunnerCommandReceipt,
+	InterruptPromptReceipt,
 	RunnerImageContent,
 	SetModelReceipt,
 	SetThinkingLevelReceipt,
@@ -9,6 +10,7 @@ import type {
 import {
 	decodeCancelQueuedInputCommand,
 	decodeEditQueuedInputCommand,
+	decodeInterruptPromptCommand,
 	decodeSubmitInputCommand,
 	decodeSetModelCommand,
 	decodeSetThinkingLevelCommand,
@@ -62,6 +64,12 @@ export interface TerminalSetThinkingLevelIntent {
 	readonly causationId?: string;
 }
 
+export interface TerminalInterruptPromptIntent {
+	readonly commandId?: string;
+	readonly correlationId?: string;
+	readonly causationId?: string;
+}
+
 export interface TerminalSessionControllerOptions {
 	readonly viewId?: string;
 	readonly commandId?: string;
@@ -79,6 +87,7 @@ export interface TerminalSessionController {
 	readonly cancel: (intent: TerminalCancelIntent) => Promise<RunnerCommandReceipt>;
 	readonly setModel: (intent: TerminalSetModelIntent) => Promise<SetModelReceipt>;
 	readonly setThinkingLevel: (intent: TerminalSetThinkingLevelIntent) => Promise<SetThinkingLevelReceipt>;
+	readonly interruptPrompt: (intent?: TerminalInterruptPromptIntent) => Promise<InterruptPromptReceipt>;
 	readonly close: () => Promise<void>;
 }
 
@@ -279,6 +288,30 @@ export async function createTerminalSessionController(
 							sessionRevision: Math.max(latest.runner.sessionRevision, receipt.sessionRevision),
 						},
 					};
+					return receipt;
+				} catch (error) {
+					await refresh();
+					throw error;
+				}
+			},
+			interruptPrompt: async (intent = {}) => {
+				try {
+					const ids = metadata(intent);
+					const targetGeneration = latest.session.promptOperation.generation;
+					const receipt = await run(
+						view!.interruptPrompt(
+							decodeInterruptPromptCommand({
+								schemaVersion: RUNNER_SCHEMA_VERSION,
+								kind: "interruptPrompt",
+								...ids,
+								...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
+								viewId,
+								controllerEpoch: view!.epoch,
+								targetGeneration,
+							}),
+						),
+					);
+					await refresh();
 					return receipt;
 				} catch (error) {
 					await refresh();

@@ -6,6 +6,8 @@ import type { AgentSessionEvent } from "../session/agent-session";
 import type {
 	CancelQueuedInputCommand,
 	EditQueuedInputCommand,
+	InterruptPromptCommand,
+	InterruptPromptReceipt,
 	RunnerCommandReceipt,
 	RunnerEvent,
 	SessionRunnerSnapshot,
@@ -29,6 +31,7 @@ export interface TerminalSessionStateSnapshot {
 	readonly hasPostPromptWork: boolean;
 	readonly isBashRunning: boolean;
 	readonly isEvalRunning: boolean;
+	readonly promptOperation: { readonly generation: number; readonly active: boolean };
 	readonly messages: ReadonlyArray<AgentMessage>;
 }
 
@@ -65,5 +68,8 @@ export interface TerminalSessionView {
 	readonly setThinkingLevel: (
 		command: SetThinkingLevelCommand,
 	) => Effect.Effect<SetThinkingLevelReceipt, RunnerFailure, Scope.Scope>;
+	readonly interruptPrompt: (
+		command: InterruptPromptCommand,
+	) => Effect.Effect<InterruptPromptReceipt, RunnerFailure, Scope.Scope>;
 	readonly detach: () => Effect.Effect<void, RunnerFailure, Scope.Scope>;
 }
