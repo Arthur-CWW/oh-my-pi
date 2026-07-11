@@ -12,6 +12,7 @@ import { expandEmoticons } from "../../modes/emoji-autocomplete";
 import { materializeImageReferenceLinks, shiftImageMarkers } from "../../modes/image-references";
 import { createPromptActionAutocompleteProvider } from "../../modes/prompt-action-autocomplete";
 import type { InteractiveModeContext } from "../../modes/types";
+import { AgentRegistry, MAIN_AGENT_ID } from "../../registry/agent-registry";
 import manualContinuePrompt from "../../prompts/system/manual-continue.md" with { type: "text" };
 import { SKILL_PROMPT_MESSAGE_TYPE, type SkillPromptDetails, USER_INTERRUPT_LABEL } from "../../session/messages";
 import { executeBuiltinSlashCommand } from "../../slash-commands/builtin-registry";
@@ -65,6 +66,7 @@ const TINY_TITLE_PROGRESS_REVEAL_DELAY_MS = 1_000;
 // deliberate human double-tap is always tens of milliseconds apart.
 const LEFT_DOUBLE_TAP_MIN_GAP_MS = 40;
 const LEFT_DOUBLE_TAP_MAX_GAP_MS = 500;
+const QUIT_COMMAND_RE = /^\/(?:exit|quit)(?:\s|$)/;
 
 export class InputController {
 	constructor(
@@ -85,6 +87,7 @@ export class InputController {
 	// Sequential index for `local://attachment-N` references created by the large-paste local-file
 	// action. Seeded from 0 and bumped past any existing attachment files in #attachPasteAsFile.
 	#attachmentCounter = 0;
+	#quitConfirmationPending = false;
 
 	#showTinyTitleDownloadProgress(modelKey: string): void {
 		if (!isTinyTitleLocalModelKey(modelKey)) return;
@@ -196,7 +199,7 @@ export class InputController {
 					this.ctx.editor.setText("");
 					this.ctx.ui.requestRender();
 				} else {
-					void this.ctx.unfocusSession();
+					this.#handleFocusPromise(this.ctx.unfocusSession(), "Failed to return to the main session");
 				}
 				return; // double-escape backtrack (/tree, /branch) stays main-only
 			}
@@ -325,7 +328,18 @@ export class InputController {
 			this.ctx.editor.setCustomKeyHandler(key, () => this.ctx.showSessionSelector());
 		}
 		for (const key of this.ctx.keybindings.getKeys("app.message.followUp")) {
-			this.ctx.editor.setCustomKeyHandler(key, () => void this.handleFollowUp());
+			this.ctx.editor.setCustomKeyHandler(key, () => {
+				if (this.ctx.focusedAgentId && key.toLowerCase() === "ctrl+q") {
+					this.#handleFocusPromise(this.#pauseFocusedAgent(), "Failed to pause the focused agent");
+					return;
+				}
+				void this.handleFollowUp();
+			});
+		}
+		for (const key of this.ctx.keybindings.getKeys("app.agents.returnToParent")) {
+			this.ctx.editor.setCustomKeyHandler(key, () =>
+				this.#handleFocusPromise(this.#returnToFocusedParent(), "Failed to return to the parent session"),
+			);
 		}
 		for (const key of this.ctx.keybindings.getKeys("app.stt.toggle")) {
 			this.ctx.editor.setCustomKeyHandler(key, () => void this.ctx.handleSTTToggle());
@@ -378,8 +392,32 @@ export class InputController {
 
 	#handleFocusedLeftTap(): void {
 		if (this.#detectLeftDoubleTap()) {
-			void this.ctx.unfocusSession();
+			this.#handleFocusPromise(this.ctx.unfocusSession(), "Failed to return to the main session");
 		}
+	}
+
+	#handleFocusPromise(promise: Promise<void>, message: string): void {
+		void promise.catch(error => {
+			this.ctx.showError(`${message}: ${error instanceof Error ? error.message : String(error)}`);
+		});
+	}
+
+	async #pauseFocusedAgent(): Promise<void> {
+		const id = this.ctx.focusedAgentId;
+		if (!id) return;
+		const target = this.ctx.viewSession;
+		if (target.isStreaming) {
+			await target.abort({ reason: USER_INTERRUPT_LABEL });
+			await this.#returnToFocusedParent(`Interrupted ${id}; returned to parent with draft preserved`);
+			return;
+		}
+		await this.#returnToFocusedParent(`Returned to parent from ${id} with draft preserved`);
+	}
+
+	async #returnToFocusedParent(status = "Returned to parent with draft preserved"): Promise<void> {
+		if (!this.ctx.focusedAgentId) return;
+		await this.ctx.focusParentSession();
+		this.ctx.showStatus(status);
 	}
 
 	/**
@@ -515,6 +553,11 @@ export class InputController {
 			}
 
 			if (!text) return;
+
+			if (QUIT_COMMAND_RE.test(text)) {
+				await this.#requestInteractiveShutdown({ clearEditor: true });
+				return;
+			}
 
 			// Handle built-in slash commands
 			const slashResult = await executeBuiltinSlashCommand(text, {
@@ -756,16 +799,24 @@ export class InputController {
 			return; // editor text not cleared: Editor does not auto-clear on submit
 		}
 		const images = this.ctx.pendingImages.length > 0 ? [...this.ctx.pendingImages] : undefined;
+		const content = images ? [{ type: "text" as const, text }, ...images] : text;
 		this.ctx.editor.addToHistory(text);
 		this.ctx.editor.setText("");
 		this.ctx.editor.imageLinks = undefined;
 		this.ctx.pendingImages = [];
 		this.ctx.pendingImageLinks = [];
 		try {
-			// prompt() handles idle (new turn) and streaming (queues per streamingBehavior).
-			await this.ctx.withLocalSubmission(text, () => target.prompt(text, { streamingBehavior, images }), {
-				imageCount: images?.length ?? 0,
-			});
+			// A follow-up is an explicit queue request even if the agent happens
+			// to be idle. Ordinary Enter preserves prompt's admission behavior.
+			const submit: () => Promise<void> =
+				streamingBehavior === "followUp"
+					? async () => {
+							await target.sendUserMessage(content, { deliverAs: "followUp" });
+						}
+					: async () => {
+							await target.prompt(text, { streamingBehavior, images });
+						};
+			await this.ctx.withLocalSubmission(text, submit, { imageCount: images?.length ?? 0 });
 		} catch (error) {
 			this.ctx.editor.setText(text); // hand the message back, mirroring the main submit error path
 			this.ctx.showError(error instanceof Error ? error.message : String(error));
@@ -797,10 +848,9 @@ export class InputController {
 		if (this.ctx.isShuttingDown) {
 			process.exit(130); // 128 + SIGINT
 		}
-
 		const now = Date.now();
 		if (now - this.ctx.lastSigintTime < 500) {
-			void this.ctx.shutdown();
+			void this.#requestInteractiveShutdown();
 		} else {
 			this.ctx.clearEditor();
 			this.ctx.lastSigintTime = now;
@@ -808,10 +858,69 @@ export class InputController {
 	}
 
 	handleCtrlD(): void {
-		// Editor text (if any) is snapshotted at the start of shutdown() and
-		// persisted as a draft for the next resume. Empty text is also fine —
-		// shutdown clears any stale sidecar in that case.
-		void this.ctx.shutdown();
+		void this.#requestInteractiveShutdown();
+	}
+
+	async #requestInteractiveShutdown(options: { clearEditor?: boolean } = {}): Promise<void> {
+		if (this.#quitConfirmationPending || this.ctx.isShuttingDown) return;
+
+		const refs = AgentRegistry.global().list();
+		const ownedIds = new Set([MAIN_AGENT_ID]);
+		let previousOwnedCount = 0;
+		while (ownedIds.size !== previousOwnedCount) {
+			previousOwnedCount = ownedIds.size;
+			for (const ref of refs) {
+				if (ref.parentId && ownedIds.has(ref.parentId)) ownedIds.add(ref.id);
+			}
+		}
+		const children = refs.filter(
+			ref => ref.id !== MAIN_AGENT_ID && ownedIds.has(ref.id) && ref.status !== "aborted",
+		);
+
+		const running = children.filter(ref => ref.status === "running");
+		if (running.length === 0) {
+			if (options.clearEditor) this.ctx.editor.setText("");
+			await this.ctx.shutdown({ childPolicy: "detach" });
+			return;
+		}
+
+		const parkedCount = children.filter(ref => ref.status === "parked").length;
+		const idleCount = children.filter(ref => ref.status === "idle").length;
+		const names = running
+			.slice(0, 3)
+			.map(ref => ref.displayName)
+			.join(", ");
+		const remainingCount = running.length - 3;
+		const listedNames = remainingCount > 0 ? `${names}, +${remainingCount} more` : names;
+		const preserved = [
+			parkedCount > 0 ? `${parkedCount} parked` : undefined,
+			idleCount > 0 ? `${idleCount} idle` : undefined,
+		].filter((part): part is string => part !== undefined);
+		const preservedText =
+			preserved.length > 0 ? ` ${preserved.join(" and ")} child agents have recoverable sessions.` : "";
+		this.#quitConfirmationPending = true;
+		try {
+			const choice = await this.ctx.showHookSelector(
+				`Exit OMP?\n${running.length} running child ${running.length === 1 ? "agent" : "agents"}: ${listedNames}.${preservedText}`,
+				[
+					{
+						label: "Detach & exit",
+						description: "Leave recoverable children available for the next OMP session",
+					},
+					{
+						label: "Stop children & exit",
+						description: `Interrupt and stop ${running.length} running ${running.length === 1 ? "child" : "children"}`,
+					},
+					"Cancel",
+				],
+			);
+			if (choice === "Detach & exit" || choice === "Stop children & exit") {
+				if (options.clearEditor) this.ctx.editor.setText("");
+				await this.ctx.shutdown({ childPolicy: choice === "Detach & exit" ? "detach" : "stop" });
+			}
+		} finally {
+			this.#quitConfirmationPending = false;
+		}
 	}
 
 	handleCtrlZ(): void {
@@ -944,6 +1053,11 @@ export class InputController {
 			return;
 		}
 
+		if (QUIT_COMMAND_RE.test(text)) {
+			await this.#requestInteractiveShutdown({ clearEditor: true });
+			return;
+		}
+
 		const slashResult = await executeBuiltinSlashCommand(text, {
 			ctx: this.ctx,
 		});
@@ -961,35 +1075,23 @@ export class InputController {
 			return;
 		}
 
-		// Forward any pending clipboard-pasted images alongside the queued text;
-		// otherwise the follow-up would drop the image (mirrors the Enter/steer path).
+		// Use the explicit enqueue API even while idle: `prompt()` treats
+		// `streamingBehavior` as a busy-only fallback, while Ctrl+Enter promises
+		// durable follow-up delivery before a new turn may be admitted.
 		const images = this.ctx.pendingImages.length > 0 ? [...this.ctx.pendingImages] : undefined;
-
-		if (this.ctx.session.isStreaming) {
-			this.ctx.editor.addToHistory(text);
-			this.ctx.editor.setText("");
-			this.ctx.editor.imageLinks = undefined;
-			this.ctx.pendingImages = [];
-			this.ctx.pendingImageLinks = [];
-			await this.ctx.withLocalSubmission(
-				text,
-				() => this.ctx.session.prompt(text, { streamingBehavior: "followUp", images }),
-				{ imageCount: images?.length ?? 0 },
-			);
-			this.ctx.updatePendingMessagesDisplay();
-			this.ctx.ui.requestRender();
-			return;
-		}
-
-		// Not streaming — just submit normally
+		const content = images ? [{ type: "text" as const, text }, ...images] : text;
 		this.ctx.editor.addToHistory(text);
 		this.ctx.editor.setText("");
 		this.ctx.editor.imageLinks = undefined;
 		this.ctx.pendingImages = [];
 		this.ctx.pendingImageLinks = [];
-		await this.ctx.withLocalSubmission(text, () => this.ctx.session.prompt(text, { images }), {
-			imageCount: images?.length ?? 0,
-		});
+		await this.ctx.withLocalSubmission(
+			text,
+			() => this.ctx.session.sendUserMessage(content, { deliverAs: "followUp" }),
+			{ imageCount: images?.length ?? 0 },
+		);
+		this.ctx.updatePendingMessagesDisplay();
+		this.ctx.ui.requestRender();
 	}
 
 	restoreQueuedMessagesToEditor(options?: { abort?: boolean; currentText?: string }): number {

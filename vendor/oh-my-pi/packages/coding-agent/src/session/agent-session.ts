@@ -79,6 +79,7 @@ import type {
 	Model,
 	ProviderResponseMetadata,
 	ProviderSessionState,
+	ReasoningEffort,
 	ResetCreditAccountStatus,
 	ResetCreditRedeemOutcome,
 	ResetCreditTarget,
@@ -153,6 +154,7 @@ import { RawSseDebugBuffer } from "../debug/raw-sse-buffer";
 import { loadCapability } from "../discovery";
 import { expandApplyPatchToEntries, normalizeDiff, normalizeToLF, ParseError, previewPatch, stripBom } from "../edit";
 import { getFileSnapshotStore } from "../edit/file-snapshot-store";
+import { disposeVmContextsByOwner } from "../eval/js/context-manager";
 import { namespaceSessionId as namespacePythonSessionId } from "../eval/py";
 import {
 	disposeKernelSessionsByOwner,
@@ -231,6 +233,7 @@ import {
 	AUTO_THINKING,
 	type ConfiguredThinkingLevel,
 	clampAutoThinkingEffort,
+	parseEffort,
 	resolveProvisionalAutoLevel,
 	resolveThinkingLevelForModel,
 	shouldDisableReasoning,
@@ -270,6 +273,7 @@ import {
 	shouldEvaluateCodexAutoRedeem,
 	shouldPromptCodexAutoRedeem,
 } from "./codex-auto-reset";
+import { DurableInputQueue, SessionOwnershipLostError } from "./durable-input-queue";
 import {
 	type BashExecutionMessage,
 	type CustomMessage,
@@ -325,8 +329,8 @@ export type AgentSessionEvent =
 			thinkingLevel: ThinkingLevel | undefined;
 			/** The user-configured selector when it differs from the effective level (e.g. `auto`). */
 			configured?: ConfiguredThinkingLevel;
-			/** The level `auto` resolved to this turn, once classified. */
-			resolved?: Effort;
+			/** The exact effort `auto` resolved to this turn, once classified. */
+			resolved?: ReasoningEffort;
 	  }
 	| { type: "goal_updated"; goal: Goal | null; state?: GoalModeState };
 /** Listener function for agent session events */
@@ -487,6 +491,8 @@ export interface AgentSessionConfig {
 	advisorWatchdogPrompt?: string;
 }
 
+const kDurableAdmittedPrompt = Symbol("durable-admitted-prompt");
+
 /** Options for AgentSession.prompt() */
 export interface PromptOptions {
 	/** Whether to expand file-based prompt templates (default: true) */
@@ -509,6 +515,52 @@ export interface PromptOptions {
 	attribution?: MessageAttribution;
 	/** Skip pre-send compaction checks for this prompt (internal use for maintenance flows). */
 	skipCompactionCheck?: boolean;
+}
+
+type InternalPromptOptions = PromptOptions & { [kDurableAdmittedPrompt]?: true };
+
+type DurableAttemptJournalState =
+	| "admitted"
+	| "request-started"
+	| "not-executed"
+	| "uncertain"
+	| "completed"
+	| "failed-rate-limit";
+
+interface DurableAttemptJournalMarker {
+	readonly inputId: string;
+	readonly attemptId: string;
+	readonly state: DurableAttemptJournalState;
+	readonly retryAt?: number;
+}
+
+function decodeDurableAttemptJournalMarker(entry: SessionEntry): DurableAttemptJournalMarker | undefined {
+	if (entry.type !== "custom" || entry.customType !== "durable_input_attempt" || entry.data === undefined) {
+		return undefined;
+	}
+	const data = entry.data;
+	if (typeof data !== "object" || data === null || Array.isArray(data)) return undefined;
+	const record = data as Readonly<Record<string, unknown>>;
+	if (typeof record.inputId !== "string" || typeof record.attemptId !== "string") return undefined;
+	const state = record.state;
+	if (
+		state !== "admitted" &&
+		state !== "request-started" &&
+		state !== "not-executed" &&
+		state !== "uncertain" &&
+		state !== "completed" &&
+		state !== "failed-rate-limit"
+	) {
+		return undefined;
+	}
+	const retryAt = record.retryAt;
+	if (retryAt !== undefined && (typeof retryAt !== "number" || !Number.isFinite(retryAt))) return undefined;
+	return {
+		inputId: record.inputId,
+		attemptId: record.attemptId,
+		state,
+		...(retryAt === undefined ? {} : { retryAt }),
+	};
 }
 
 /** Result from a handoff operation. */
@@ -1008,10 +1060,30 @@ function toRestoredQueuedMessage(message: AgentMessage): RestoredQueuedMessage {
 	return { text: queueChipText(message), images: queuedImageContent(message) };
 }
 
+export type SessionDisposeScope = "root" | "child";
+
+export interface SessionDisposeOptions {
+	/** Root disposal releases process-wide helpers; child disposal retains host-owned services. */
+	scope?: SessionDisposeScope;
+	/** Main-session child handling. Detach leaves recoverable journals and external processes intact. */
+	childPolicy?: "detach" | "stop";
+}
+
 export class AgentSession {
 	readonly agent: Agent;
 	readonly sessionManager: SessionManager;
 	readonly settings: Settings;
+	#durableInputQueue: Promise<DurableInputQueue | undefined> = Promise.resolve(undefined);
+	#durableInputQueueRequired = false;
+	#durableInputQueueError: Error | undefined;
+	#activeDurableInputId: string | undefined;
+	#activeDurableAttemptId: string | undefined;
+	#activeDurableRequestStarted = false;
+	#durableRateLimitHandledForAgentEnd = false;
+	#durableRateLimitRetryTimer: ReturnType<typeof setTimeout> | undefined;
+	#durableRateLimitRetryAt: number | undefined;
+	#durableQueueDrainScheduled = false;
+	#durableOwnershipLostError: SessionOwnershipLostError | undefined;
 	readonly yieldQueue: YieldQueue;
 	fileSnapshotStore?: InMemorySnapshotStore;
 	#autoApprove: boolean;
@@ -1026,7 +1098,7 @@ export class AgentSession {
 	/** True when the user configured `auto`; the effective level is resolved per turn. */
 	#autoThinking: boolean = false;
 	/** The level `auto` last resolved to (for UI); undefined until a turn is classified. */
-	#autoResolvedLevel: Effort | undefined;
+	#autoResolvedLevel: ReasoningEffort | undefined;
 	#promptTemplates: PromptTemplate[];
 	#slashCommands: FileSlashCommand[];
 
@@ -1230,6 +1302,7 @@ export class AgentSession {
 	#unexpectedStopRetryCount = 0;
 	#promptGeneration = 0;
 	#pendingAgentEndEmit: AgentSessionEvent | undefined;
+	#pendingTurnEndProcessing: Promise<void> = Promise.resolve();
 	#pendingProviderRequestNonMessageTokens: number | undefined = undefined;
 	#lastProviderUsageNonMessage:
 		| {
@@ -1391,6 +1464,34 @@ export class AgentSession {
 	constructor(config: AgentSessionConfig) {
 		this.agent = config.agent;
 		this.sessionManager = config.sessionManager;
+		const ownership = this.sessionManager.getSessionOwnership();
+		if (ownership) {
+			this.#durableInputQueueRequired = true;
+			this.#durableInputQueue = DurableInputQueue.open(ownership)
+				.then(async queue => {
+					await queue.adopt();
+					await this.#reconcileDurableInputAttempts(queue);
+					await this.#scheduleDurableRetry(queue);
+					return queue;
+				})
+				.catch(error => {
+					if (this.#handleDurableOwnershipLoss(error as Error)) return undefined;
+					const failure = error instanceof Error ? error : new Error(String(error));
+					this.#durableInputQueueError = failure;
+					logger.error("Durable input queue initialization failed", { error: failure.message });
+					return undefined;
+				});
+		}
+		const providerStream = this.agent.streamFn;
+		this.agent.streamFn = async (...args) => {
+			await this.#markActiveDurableRequestStarted();
+			return providerStream(...args);
+		};
+		void this.#durableInputQueue
+			.then(() => this.#scheduleDurableQueueDrainAfterIdle())
+			.catch(error => {
+				logger.warn("Durable input queue startup drain failed", { error: String(error) });
+			});
 		this.settings = config.settings;
 		this.#autoApprove = config.autoApprove === true;
 		// Power assertions are taken per turn (see #beginInFlight); nothing acquired here.
@@ -2163,29 +2264,29 @@ export class AgentSession {
 
 	/** Internal handler for agent events - shared by subscribe and reconnect.
 	 *
-	 * `agent_end` handling schedules deferred post-prompt recovery work
-	 * (compaction/handoff, context-promotion continuations). It is invoked
-	 * fire-and-forget by the agent's synchronous `#emit`, and only reaches
-	 * `#checkCompaction` after several internal awaits. `prompt()` runs
-	 * `#waitForPostPromptRecovery()` the instant `agent.prompt()` resolves — which
-	 * can land BEFORE the handler registers its tasks, so the wait would observe an
-	 * empty task set and return early, letting a deferred handoff/promotion race
-	 * prompt completion. Tracking the `agent_end` handler as a post-prompt task
-	 * that is registered SYNCHRONOUSLY (before the first await) closes that window:
-	 * `#postPromptTasksPromise` is set the moment `#emit` invokes this handler, so
-	 * the recovery wait always sees the in-flight handler and blocks until it — and
-	 * everything it schedules — settles. */
-	#handleAgentEvent = async (event: AgentEvent): Promise<void> => {
-		if (event.type !== "agent_end") {
-			return this.#processAgentEvent(event);
+	 * `turn_end` commits durable queue outcomes asynchronously, while `agent_end`
+	 * schedules deferred recovery. The agent emits both synchronously without
+	 * awaiting listeners, so track both before the first await and serialize
+	 * `agent_end` behind its turn commit. Prompt completion then observes the
+	 * post-prompt task gate only after durable settlement and recovery finish. */
+	#handleAgentEvent = (event: AgentEvent): Promise<void> => {
+		const suppressOwnershipLoss = (task: Promise<void>): Promise<void> =>
+			task.catch(error => {
+				if (this.#handleDurableOwnershipLoss(error as Error)) return;
+				throw error;
+			});
+		if (event.type === "turn_end") {
+			const task = suppressOwnershipLoss(this.#pendingTurnEndProcessing.then(() => this.#processAgentEvent(event)));
+			this.#pendingTurnEndProcessing = task.catch(() => {});
+			this.#trackPostPromptTask(task);
+			return task;
 		}
-		const { promise, resolve } = Promise.withResolvers<void>();
-		this.#trackPostPromptTask(promise);
-		try {
-			await this.#processAgentEvent(event);
-		} finally {
-			resolve();
+		if (event.type === "agent_end") {
+			const task = suppressOwnershipLoss(this.#pendingTurnEndProcessing.then(() => this.#processAgentEvent(event)));
+			this.#trackPostPromptTask(task);
+			return task;
 		}
+		return suppressOwnershipLoss(this.#processAgentEvent(event));
 	};
 
 	#processAgentEvent = async (event: AgentEvent): Promise<void> => {
@@ -2247,6 +2348,40 @@ export class AgentSession {
 		// TTSR: Increment message count on turn end (for repeat-after-gap tracking)
 		if (event.type === "turn_end" && this.#ttsrManager) {
 			this.#ttsrManager.incrementMessageCount();
+		}
+
+		if (event.type === "turn_end" && this.#activeDurableInputId && this.#activeDurableAttemptId) {
+			const inputId = this.#activeDurableInputId;
+			const attemptId = this.#activeDurableAttemptId;
+			const requestStarted = this.#activeDurableRequestStarted;
+			const queue = await this.#durableInputQueue;
+			if (queue) {
+				try {
+					const message = event.message as AssistantMessage;
+					if (!requestStarted) {
+						await queue.requeueUnstarted(inputId, attemptId);
+						await this.#appendDurableAttemptEntry(inputId, attemptId, "not-executed");
+					} else if (message.errorMessage && isUsageLimitError(message.errorMessage)) {
+						const delay =
+							this.#parseRetryAfterMsFromError(message.errorMessage) ??
+							calculateRateLimitBackoffMs(parseRateLimitReason(message.errorMessage));
+						const retryAt = Date.now() + delay;
+						await queue.failRateLimit(inputId, attemptId, retryAt);
+						await this.#appendDurableAttemptEntry(inputId, attemptId, "failed-rate-limit", retryAt);
+						this.#durableRateLimitHandledForAgentEnd = true;
+						await this.#scheduleDurableRetry(queue);
+					} else {
+						await queue.completeAttempt(inputId, attemptId);
+						await this.#appendDurableAttemptEntry(inputId, attemptId, "completed");
+					}
+					this.#clearActiveDurableAttempt();
+				} catch (error) {
+					if (!this.#handleDurableOwnershipLoss(error as Error)) throw error;
+				}
+			}
+		}
+		if (event.type === "turn_end" || event.type === "agent_end") {
+			this.#scheduleDurableQueueDrainAfterIdle();
 		}
 		// Finalize the tool-choice queue's in-flight yield after tools have executed.
 		// This must happen at turn_end (not message_end) because onInvoked handlers
@@ -2468,6 +2603,8 @@ export class AgentSession {
 
 		// Check auto-retry and auto-compaction after agent completes
 		if (event.type === "agent_end") {
+			const durableRateLimitHandled = this.#durableRateLimitHandledForAgentEnd;
+			this.#durableRateLimitHandledForAgentEnd = false;
 			const usage = this.getSessionStats().tokens;
 			await this.#goalRuntime.onAgentEnd({
 				currentUsage: {
@@ -2484,6 +2621,11 @@ export class AgentSession {
 			this.#lastAssistantMessage = undefined;
 			if (!msg) {
 				this.#lastSuccessfulYieldToolCallId = undefined;
+				return;
+			}
+			if (durableRateLimitHandled) {
+				this.#lastSuccessfulYieldToolCallId = undefined;
+				this.#resolveRetry();
 				return;
 			}
 
@@ -3743,6 +3885,10 @@ export class AgentSession {
 	 */
 	beginDispose(): void {
 		this.#isDisposed = true;
+		if (this.#durableRateLimitRetryTimer) {
+			clearTimeout(this.#durableRateLimitRetryTimer);
+			this.#durableRateLimitRetryTimer = undefined;
+		}
 		this.#pendingIrcAsides = [];
 		this.yieldQueue.clear();
 		this.agent.setAsideMessageProvider(undefined);
@@ -3752,9 +3898,9 @@ export class AgentSession {
 
 	/**
 	 * Remove all listeners, flush pending writes, and disconnect from agent.
-	 * Call this when completely done with the session.
+	 * Root scope is the default; child scope retains process-wide host services.
 	 */
-	async dispose(): Promise<void> {
+	async dispose({ scope = "root" }: SessionDisposeOptions = {}): Promise<void> {
 		this.beginDispose();
 		try {
 			if (this.#extensionRunner?.hasHandlers("session_shutdown")) {
@@ -3803,7 +3949,8 @@ export class AgentSession {
 			);
 		}
 		await disposeKernelSessionsByOwner(this.#evalKernelOwnerId);
-		await shutdownTinyTitleClient();
+		await disposeVmContextsByOwner(this.#evalKernelOwnerId);
+		if (scope === "root") await shutdownTinyTitleClient();
 		this.#releasePowerAssertion();
 		await this.sessionManager.close();
 		this.#closeAllProviderSessions("dispose");
@@ -3888,7 +4035,7 @@ export class AgentSession {
 	}
 
 	/** The level `auto` resolved to for the current turn (undefined until classified). */
-	autoResolvedThinkingLevel(): Effort | undefined {
+	autoResolvedThinkingLevel(): ReasoningEffort | undefined {
 		return this.#autoResolvedLevel;
 	}
 
@@ -5204,6 +5351,26 @@ export class AgentSession {
 		// Expand file-based prompt templates if requested
 		const expandedText = expandPromptTemplates ? expandPromptTemplate(text, [...this.#promptTemplates]) : text;
 
+		const internalOptions = options as InternalPromptOptions | undefined;
+		if (
+			!internalOptions?.[kDurableAdmittedPrompt] &&
+			!options?.synthetic &&
+			!this.isStreaming &&
+			this.#durableInputQueueRequired
+		) {
+			const queue = await this.#durableInputQueue;
+			if (!queue) throw this.#durableInputQueueError ?? new Error("Durable input queue is unavailable");
+			const normalizedImages = await this.#normalizeImagesForModel(options?.images);
+			try {
+				await queue.enqueue(expandedText, normalizedImages);
+				await this.#drainDurableInputQueue();
+			} catch (error) {
+				if (this.#handleDurableOwnershipLoss(error as Error)) throw this.#durableOwnershipLostError ?? error;
+				throw error;
+			}
+			return true;
+		}
+
 		// Magic keywords ("ultrathink", "orchestrate"): append hidden system notices after the
 		// user's message that steer this turn. User-authored prompts only — synthetic /
 		// agent-initiated turns never trigger them.
@@ -5681,10 +5848,22 @@ export class AgentSession {
 		// a user interrupt suppressed.
 		this.#advisorAutoResumeSuppressed = false;
 		const normalizedImages = await this.#normalizeImagesForModel(images);
-		const content: (TextContent | ImageContent)[] = [{ type: "text", text }];
-		if (normalizedImages?.length) {
-			content.push(...normalizedImages);
+		const durableQueue = await this.#durableInputQueue;
+		if (durableQueue) {
+			try {
+				await durableQueue.enqueue(text, normalizedImages);
+				await this.#drainDurableInputQueue();
+			} catch (error) {
+				if (this.#handleDurableOwnershipLoss(error as Error)) throw this.#durableOwnershipLostError ?? error;
+				throw error;
+			}
+			return;
 		}
+		if (this.#durableInputQueueRequired) {
+			throw this.#durableInputQueueError ?? new Error("Durable input queue is unavailable");
+		}
+		const content: (TextContent | ImageContent)[] = [{ type: "text", text }];
+		if (normalizedImages?.length) content.push(...normalizedImages);
 		if (mode === "followUp") {
 			this.agent.followUp({
 				role: "user",
@@ -5702,6 +5881,252 @@ export class AgentSession {
 			});
 		}
 		this.#scheduleIdleQueueDrain();
+	}
+
+	async #drainDurableInputQueue(): Promise<void> {
+		if (this.#durableOwnershipLostError || this.isStreaming || this.#activeDurableInputId) return;
+		const queue = await this.#durableInputQueue;
+		if (!queue) return;
+		try {
+			await queue.retryDue();
+			const item = await queue.admitNext();
+			if (!item) {
+				await this.#scheduleDurableRetry(queue);
+				return;
+			}
+			const attempt = item.attempts.at(-1);
+			if (attempt?.state !== "admitted") {
+				throw new Error(`Durable input ${item.id} has no admitted attempt`);
+			}
+			this.#activeDurableInputId = item.id;
+			this.#activeDurableAttemptId = attempt.id;
+			this.#activeDurableRequestStarted = false;
+			await this.#appendDurableAttemptEntry(item.id, attempt.id, "admitted");
+			try {
+				await this.prompt(item.text, {
+					expandPromptTemplates: false,
+					images: item.images ? [...item.images] : undefined,
+					[kDurableAdmittedPrompt]: true,
+				} as InternalPromptOptions);
+				if (this.#activeDurableInputId === item.id && !this.#activeDurableRequestStarted) {
+					await queue.requeueUnstarted(item.id, attempt.id);
+					await this.#appendDurableAttemptEntry(item.id, attempt.id, "not-executed");
+					this.#clearActiveDurableAttempt();
+				}
+			} catch (error) {
+				if (this.#handleDurableOwnershipLoss(error as Error)) throw this.#durableOwnershipLostError ?? error;
+				if (this.#activeDurableInputId === item.id) {
+					if (!this.#activeDurableRequestStarted) {
+						await queue.requeueUnstarted(item.id, attempt.id);
+						await this.#appendDurableAttemptEntry(item.id, attempt.id, "not-executed");
+					} else {
+						await queue.markUncertain(item.id, attempt.id);
+						await this.#appendDurableAttemptEntry(item.id, attempt.id, "uncertain");
+					}
+					this.#clearActiveDurableAttempt();
+				}
+				throw error;
+			}
+		} catch (error) {
+			if (this.#handleDurableOwnershipLoss(error as Error)) throw this.#durableOwnershipLostError ?? error;
+			throw error;
+		}
+	}
+
+	async #markActiveDurableRequestStarted(): Promise<void> {
+		if (
+			this.#activeDurableRequestStarted ||
+			this.#activeDurableInputId === undefined ||
+			this.#activeDurableAttemptId === undefined
+		) {
+			return;
+		}
+		if (this.#durableOwnershipLostError) throw this.#durableOwnershipLostError;
+		const queue = await this.#durableInputQueue;
+		if (!queue) throw this.#durableInputQueueError ?? new Error("Durable input queue is unavailable");
+		try {
+			await queue.markRequestStarted(this.#activeDurableInputId, this.#activeDurableAttemptId);
+		} catch (error) {
+			if (this.#handleDurableOwnershipLoss(error as Error)) throw this.#durableOwnershipLostError ?? error;
+			throw error;
+		}
+		this.#activeDurableRequestStarted = true;
+		await this.#appendDurableAttemptEntry(
+			this.#activeDurableInputId,
+			this.#activeDurableAttemptId,
+			"request-started",
+		);
+	}
+
+	async #reconcileDurableInputAttempts(queue: DurableInputQueue): Promise<void> {
+		const entries = this.sessionManager.getEntries();
+		const markers = entries.flatMap((entry, index) => {
+			const marker = decodeDurableAttemptJournalMarker(entry);
+			return marker ? [{ marker, index }] : [];
+		});
+		for (const item of await queue.listUncertain()) {
+			const attempt = item.attempts.findLast(candidate => candidate.state === "started");
+			if (!attempt) continue;
+			const matching = markers.filter(
+				candidate => candidate.marker.inputId === item.id && candidate.marker.attemptId === attempt.id,
+			);
+			const terminal = matching.findLast(
+				candidate =>
+					candidate.marker.state === "completed" ||
+					candidate.marker.state === "failed-rate-limit" ||
+					candidate.marker.state === "not-executed",
+			);
+			if (terminal?.marker.state === "completed") {
+				await queue.reconcile(attempt.id, "completed");
+				continue;
+			}
+			if (terminal?.marker.state === "not-executed") {
+				await queue.reconcile(attempt.id, "not-executed");
+				continue;
+			}
+			if (terminal?.marker.state === "failed-rate-limit" && terminal.marker.retryAt !== undefined) {
+				await queue.reconcile(attempt.id, "failed-rate-limit", terminal.marker.retryAt);
+				continue;
+			}
+			const requestStarted = matching.findLast(candidate => candidate.marker.state === "request-started");
+			if (!requestStarted) continue;
+			for (let index = requestStarted.index + 1; index < entries.length; index++) {
+				const entry = entries[index];
+				const laterMarker = decodeDurableAttemptJournalMarker(entry);
+				if (
+					laterMarker &&
+					laterMarker.attemptId !== attempt.id &&
+					(laterMarker.state === "admitted" || laterMarker.state === "request-started")
+				) {
+					break;
+				}
+				if (entry?.type !== "message" || entry.message.role !== "assistant") continue;
+				const message = entry.message;
+				if (message.errorMessage && isUsageLimitError(message.errorMessage)) {
+					const delay =
+						this.#parseRetryAfterMsFromError(message.errorMessage) ??
+						calculateRateLimitBackoffMs(parseRateLimitReason(message.errorMessage));
+					await queue.reconcile(attempt.id, "failed-rate-limit", Date.now() + delay);
+					break;
+				}
+				const hasToolCall = message.content.some(content => content.type === "toolCall");
+				const isTerminal =
+					message.stopReason === "aborted" ||
+					message.stopReason === "error" ||
+					(message.stopReason === "stop" && message.stopDetails?.type !== "pause_turn" && !hasToolCall);
+				if (isTerminal) {
+					await queue.reconcile(attempt.id, "completed");
+					break;
+				}
+			}
+		}
+	}
+
+	async #appendDurableAttemptEntry(
+		inputId: string,
+		attemptId: string,
+		state: DurableAttemptJournalState,
+		retryAt?: number,
+	): Promise<void> {
+		if (this.#durableOwnershipLostError) return;
+		try {
+			this.sessionManager.appendCustomEntry("durable_input_attempt", {
+				version: 1,
+				inputId,
+				attemptId,
+				state,
+				...(retryAt === undefined ? {} : { retryAt }),
+			});
+			await this.sessionManager.flush();
+		} catch (error) {
+			logger.warn("Durable input session evidence write failed", {
+				attemptId,
+				state,
+				error: error instanceof Error ? error.message : String(error),
+			});
+		}
+	}
+
+	#clearActiveDurableAttempt(): void {
+		this.#activeDurableInputId = undefined;
+		this.#activeDurableAttemptId = undefined;
+		this.#activeDurableRequestStarted = false;
+	}
+
+	#handleDurableOwnershipLoss(error: Error): boolean {
+		if (!(error instanceof SessionOwnershipLostError)) return false;
+		if (!this.#durableOwnershipLostError) {
+			this.#durableOwnershipLostError = error;
+			this.#durableInputQueueError = error;
+			if (this.#durableRateLimitRetryTimer) clearTimeout(this.#durableRateLimitRetryTimer);
+			this.#durableRateLimitRetryTimer = undefined;
+			this.#durableRateLimitRetryAt = undefined;
+			this.#durableQueueDrainScheduled = false;
+			this.#clearActiveDurableAttempt();
+			logger.warn("Durable input queue ownership lost; view is read-only", {
+				sessionId: error.sessionId,
+				ownerEpoch: error.ownerEpoch,
+			});
+		}
+		return true;
+	}
+
+	async #scheduleDurableRetry(queue: DurableInputQueue): Promise<void> {
+		if (this.#durableOwnershipLostError) return;
+		let retryAt: number | undefined;
+		try {
+			retryAt = await queue.nextRetryAt();
+		} catch (error) {
+			if (this.#handleDurableOwnershipLoss(error as Error)) return;
+			throw error;
+		}
+		if (retryAt === undefined) {
+			if (this.#durableRateLimitRetryTimer) clearTimeout(this.#durableRateLimitRetryTimer);
+			this.#durableRateLimitRetryTimer = undefined;
+			this.#durableRateLimitRetryAt = undefined;
+			return;
+		}
+		if (
+			this.#durableRateLimitRetryTimer &&
+			this.#durableRateLimitRetryAt !== undefined &&
+			this.#durableRateLimitRetryAt <= retryAt
+		) {
+			return;
+		}
+		if (this.#durableRateLimitRetryTimer) clearTimeout(this.#durableRateLimitRetryTimer);
+		this.#durableRateLimitRetryAt = retryAt;
+		const delay = Math.max(0, retryAt - Date.now());
+		this.#durableRateLimitRetryTimer = setTimeout(() => {
+			this.#durableRateLimitRetryTimer = undefined;
+			this.#durableRateLimitRetryAt = undefined;
+			void queue
+				.retryDue()
+				.then(() => this.#scheduleDurableQueueDrainAfterIdle())
+				.catch(error => {
+					if (!this.#handleDurableOwnershipLoss(error as Error)) {
+						logger.warn("Durable rate-limit queue retry failed", { error: String(error) });
+					}
+				});
+		}, delay);
+		this.#durableRateLimitRetryTimer.unref?.();
+	}
+
+	#scheduleDurableQueueDrainAfterIdle(): void {
+		if (this.#durableOwnershipLostError || this.#durableQueueDrainScheduled) return;
+		this.#durableQueueDrainScheduled = true;
+		void this.agent
+			.waitForIdle()
+			.then(async () => {
+				this.#durableQueueDrainScheduled = false;
+				if (this.#durableOwnershipLostError) return;
+				await this.#drainDurableInputQueue();
+			})
+			.catch(error => {
+				this.#durableQueueDrainScheduled = false;
+				if (!this.#handleDurableOwnershipLoss(error as Error)) {
+					logger.warn("Durable input queue drain failed", { error: String(error) });
+				}
+			});
 	}
 
 	#scheduleIdleQueueDrain(): void {
@@ -6293,6 +6718,10 @@ export class AgentSession {
 			throw new Error(`No API key for ${model.provider}/${model.id}`);
 		}
 
+		if (options?.persist) {
+			this.settings.assertModelRoleWritable(role);
+		}
+
 		this.#clearActiveRetryFallback();
 		this.#setModelWithProviderSessionReset(model);
 		this.sessionManager.appendModelChange(`${model.provider}/${model.id}`, role);
@@ -6307,6 +6736,74 @@ export class AgentSession {
 		// Re-apply thinking for the newly selected model. Prefer the model's
 		// configured defaultLevel; otherwise preserve the current level (or auto).
 		this.#reapplyThinkingLevel(model.thinking?.defaultLevel);
+		await this.#syncAfterModelChange(previousEditMode);
+	}
+
+	/**
+	 * Make a TUI role assignment authoritative for this process.
+	 *
+	 * The runtime override is installed even when a project or config overlay
+	 * shadows the global role. Global persistence is attempted only when that
+	 * role was previously resolved from the writable global/default layers.
+	 */
+	async setModelExplicitRuntime(
+		model: Model,
+		role: string = "default",
+		options?: { selector?: string; thinkingLevel?: ThinkingLevel },
+	): Promise<void> {
+		if (!this.#modelRegistry.hasConfiguredAuth(model)) {
+			throw new Error(`No API key for ${model.provider}/${model.id}`);
+		}
+
+		const selector = formatModelSelectorValue(
+			options?.selector ?? `${model.provider}/${model.id}`,
+			options?.thinkingLevel,
+		);
+		const previousRole = this.settings.resolveModelRole(role);
+		const persistGlobally =
+			previousRole.winningLayer !== "config_overlay" &&
+			previousRole.winningLayer !== "project" &&
+			!previousRole.shadowedCandidates.some(
+				candidate => candidate.layer === "config_overlay" || candidate.layer === "project",
+			);
+
+		if (persistGlobally) {
+			this.settings.assertModelRoleWritable(role);
+		}
+
+		this.settings.setRuntimeModelRole(role, selector);
+		try {
+			if (persistGlobally) {
+				this.settings.setModelRole(role, selector);
+			}
+		} catch (error) {
+			if (previousRole.winningLayer === "runtime_override" && previousRole.effectiveSelector !== undefined) {
+				this.settings.setRuntimeModelRole(role, previousRole.effectiveSelector);
+			} else {
+				this.settings.clearRuntimeModelRole(role);
+			}
+			throw error;
+		}
+
+		const previousEditMode = this.#resolveActiveEditMode();
+		try {
+			this.#setModelWithProviderSessionReset(model);
+		} catch (error) {
+			if (previousRole.winningLayer === "runtime_override" && previousRole.effectiveSelector !== undefined) {
+				this.settings.setRuntimeModelRole(role, previousRole.effectiveSelector);
+			} else {
+				this.settings.clearRuntimeModelRole(role);
+			}
+			throw error;
+		}
+		this.#clearActiveRetryFallback();
+		this.sessionManager.appendModelChange(`${model.provider}/${model.id}`, role);
+		this.settings.getStorage()?.recordModelUsage(`${model.provider}/${model.id}`);
+		if (options?.thinkingLevel !== undefined) {
+			this.setThinkingLevel(options.thinkingLevel);
+		} else {
+			this.#reapplyThinkingLevel(model.thinking?.defaultLevel);
+		}
 		await this.#syncAfterModelChange(previousEditMode);
 	}
 
@@ -6573,8 +7070,9 @@ export class AgentSession {
 
 		if (isChanging) {
 			this.sessionManager.appendThinkingLevelChange(effectiveLevel);
-			if (persist && effectiveLevel !== undefined && effectiveLevel !== ThinkingLevel.Off) {
-				this.settings.set("defaultThinkingLevel", effectiveLevel);
+			const persistedLevel = parseEffort(effectiveLevel);
+			if (persist && persistedLevel !== undefined) {
+				this.settings.set("defaultThinkingLevel", persistedLevel);
 			}
 			this.#emit({ type: "thinking_level_changed", thinkingLevel: effectiveLevel });
 		}
@@ -6625,7 +7123,7 @@ export class AgentSession {
 		const model = this.model;
 		if (!model?.reasoning) return;
 
-		let resolved: Effort | undefined;
+		let resolved: ReasoningEffort | undefined;
 		if (this.#magicKeywordEnabled("ultrathink") && containsUltrathink(promptText)) {
 			// The user explicitly asked for maximum thinking; bypass the classifier
 			// and jump straight to the highest auto-supported level for this model.
@@ -6761,7 +7259,7 @@ export class AgentSession {
 	/**
 	 * Get available thinking levels for current model.
 	 */
-	getAvailableThinkingLevels(): ReadonlyArray<Effort> {
+	getAvailableThinkingLevels(): ReadonlyArray<ReasoningEffort> {
 		if (!this.model) return [];
 		return getSupportedEfforts(this.model);
 	}

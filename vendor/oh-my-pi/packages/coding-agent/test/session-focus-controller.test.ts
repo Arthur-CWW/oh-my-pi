@@ -89,6 +89,7 @@ function makeHarness(): Harness {
 		},
 		updateEditorBorderColor() {},
 		ui: { requestRender() {} },
+		showError() {},
 		showStatus() {},
 		collabGuest: undefined,
 	} as unknown as InteractiveModeContext;
@@ -205,5 +206,42 @@ describe("SessionFocusController", () => {
 			[worker.session, "Worker"],
 			[h.main.session, undefined],
 		]);
+	});
+
+	it("returns to main when the direct parent is missing and serializes repeated returns", async () => {
+		const h = makeHarness();
+		const worker = makeSessionStub();
+		registerSub(h.registry, "Worker", worker.session, "Missing");
+
+		await h.controller.focusAgent("Worker");
+		const firstReturn = h.controller.focusParent();
+		const secondReturn = h.controller.unfocus();
+		await Promise.all([firstReturn, secondReturn]);
+
+		expect(h.controller.focusedAgentId).toBeUndefined();
+		expect(h.controller.target).toBeUndefined();
+		expect(worker.unsubscribeCalls()).toBe(1);
+		expect(h.setSessionCalls).toEqual([
+			[worker.session, "Worker"],
+			[h.main.session, undefined],
+		]);
+	});
+
+	it("keeps the main subscription attached when child subscription setup fails", async () => {
+		const h = makeHarness();
+		const broken = {
+			isStreaming: false,
+			subscribe() {
+				throw new Error("child ownership lost");
+			},
+		} as never as AgentSession;
+		registerSub(h.registry, "Broken", broken, MAIN_AGENT_ID);
+
+		await expect(h.controller.focusAgent("Broken")).rejects.toThrow("child ownership lost");
+
+		expect(h.controller.focusedAgentId).toBeUndefined();
+		expect(h.controller.target).toBeUndefined();
+		expect(h.counts.mainUnsubscribe()).toBe(0);
+		expect(h.setSessionCalls).toEqual([[h.main.session, undefined]]);
 	});
 });
