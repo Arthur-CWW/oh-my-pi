@@ -45,6 +45,15 @@ describe("session workstream metadata", () => {
 		expect(workstreamCharterPath(STREAM.id)).toBe("streams/session-metadata/GOAL.md");
 		expect(reloaded.getLeafId()).toBe(leafId);
 		expect(reloaded.getEntries().map(entry => entry.id)).toEqual([firstId, leafId]);
+		expect(await reloaded.setWorkstream(undefined, "goal")).toBe(false);
+		expect(await reloaded.setWorkstream(undefined, "explicit")).toBe(true);
+		expect(reloaded.getWorkstream()).toBeUndefined();
+		expect(reloaded.getLeafId()).toBe(leafId);
+		expect(parseLines(await storage.readText(sessionFile!))[0]?.workstream).toBeUndefined();
+
+		const unclassifiedReload = await SessionManager.open(sessionFile!, "/sessions", storage);
+		expect(unclassifiedReload.getWorkstream()).toBeUndefined();
+		expect(unclassifiedReload.getEntries().map(entry => entry.id)).toEqual([firstId, leafId]);
 	});
 
 	test("protects explicit metadata from goal inference and distinguishes adhoc from unclassified", async () => {
@@ -56,6 +65,7 @@ describe("session workstream metadata", () => {
 		expect(manager.getWorkstream()).toEqual(STREAM);
 		expect(await manager.setWorkstream({ kind: "workstream", id: "other-stream" }, "explicit")).toBe(true);
 		expect(manager.getWorkstream()).toEqual({ kind: "workstream", id: "other-stream" });
+		expect(await manager.setWorkstream(undefined, "goal")).toBe(false);
 
 		const adhoc: SessionWorkstream = { kind: "adhoc" };
 		const separate = SessionManager.create("/other", "/sessions", storage);

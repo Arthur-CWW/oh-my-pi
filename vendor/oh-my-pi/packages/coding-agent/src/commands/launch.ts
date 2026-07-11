@@ -58,6 +58,9 @@ export default class Index extends Command {
 		cwd: Flags.string({
 			description: "Directory to start in (overrides the launch cwd)",
 		}),
+		workstream: Flags.string({
+			description: 'Classify the session with a workstream slug or "adhoc"',
+		}),
 		mode: Flags.string({
 			description: "Output mode: text (default), json, rpc, or rpc-ui",
 			options: ["text", "json", "rpc", "acp", "rpc-ui"],

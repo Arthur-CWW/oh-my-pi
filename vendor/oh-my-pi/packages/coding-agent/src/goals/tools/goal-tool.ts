@@ -26,7 +26,7 @@ export type GoalToolInput = z.infer<typeof goalSchema>;
 
 export interface GoalToolResponse {
 	goal: Goal | null;
-	workstream: GoalWorkstreamReference | undefined;
+	workstream?: GoalWorkstreamReference;
 	remainingTokens: number | null;
 	completionBudgetReport: string | null;
 }
@@ -38,7 +38,7 @@ export function buildGoalToolResponse(
 	const resolvedGoal = goal ?? null;
 	return {
 		goal: resolvedGoal,
-		workstream: options?.workstream,
+		...(options?.workstream ? { workstream: options.workstream } : {}),
 		remainingTokens: remainingTokens(resolvedGoal),
 		completionBudgetReport:
 			options?.includeCompletionReport && resolvedGoal?.status === "complete"

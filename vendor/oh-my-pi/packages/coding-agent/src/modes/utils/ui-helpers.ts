@@ -325,10 +325,11 @@ export class UiHelpers {
 				break;
 			}
 			case "assistant": {
-				const assistantComponent = new AssistantMessageComponent(
+				let assistantComponent!: AssistantMessageComponent;
+				assistantComponent = new AssistantMessageComponent(
 					message,
 					this.ctx.hideThinkingBlock,
-					() => this.ctx.ui.requestRender(),
+					() => this.ctx.ui.requestComponentRender(assistantComponent),
 					this.ctx.viewSession.extensionRunner?.getAssistantThinkingRenderers(),
 					this.ctx.ui.imageBudget,
 				);

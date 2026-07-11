@@ -27,6 +27,11 @@ import { processFileArguments } from "./cli/file-processor";
 import { buildInitialMessage } from "./cli/initial-message";
 import { selectSession } from "./cli/session-picker";
 import { applyStartupCwd } from "./cli/startup-cwd";
+import {
+	resolveStartupWorkstream,
+	type StartupWorkstream,
+	WorkstreamResolutionError,
+} from "./cli/workstream";
 import { findConfigFile } from "./config";
 import { ModelRegistry } from "./config/model-registry";
 import {
@@ -349,9 +354,18 @@ export interface AcpSessionFactoryOptions {
 	sessionDir?: string;
 	authStorage: AuthStorage;
 	modelRegistry: ModelRegistry;
-	parsedArgs: Pick<Args, "apiKey">;
+	parsedArgs: Pick<Args, "apiKey" | "workstream">;
 	rawArgs: string[];
 	createSession: (options: CreateAgentSessionOptions) => Promise<CreateAgentSessionResult>;
+}
+
+export async function applyStartupWorkstream(
+	manager: SessionManager,
+	startup: StartupWorkstream,
+	allowInference: boolean,
+): Promise<void> {
+	if (!startup.workstream || (!startup.explicit && !allowInference)) return;
+	await manager.setWorkstream(startup.workstream, startup.explicit ? "explicit" : "inherited");
 }
 
 /**
@@ -368,6 +382,13 @@ export function createAcpSessionFactory(args: AcpSessionFactoryOptions): AcpSess
 	return async cwd => {
 		const nextSettings = await args.settings.cloneForCwd(cwd);
 		const nextSessionManager = SessionManager.create(cwd, args.sessionDir);
+		const startupWorkstream = resolveStartupWorkstream(args.parsedArgs.workstream, cwd);
+		if (startupWorkstream.workstream) {
+			await nextSessionManager.setWorkstream(
+				startupWorkstream.workstream,
+				startupWorkstream.explicit ? "explicit" : "inherited",
+			);
+		}
 		const agentId = `acp:${nextSessionManager.getSessionId()}`;
 		const { session: nextSession } = await args.createSession({
 			...args.baseOptions,
@@ -1177,6 +1198,28 @@ export async function runRootCommand(
 		sessionManager = await SessionManager.open(selected.path);
 	}
 
+	const isResumingLaunch = Boolean(parsedArgs.continue || parsedArgs.resume || parsedArgs.fork);
+	let startupWorkstream: StartupWorkstream;
+	try {
+		// Resume metadata is authoritative. The resolver ignores environment and
+		// cwd inference on resume while still validating an explicit CLI value.
+		startupWorkstream = resolveStartupWorkstream(parsedArgs.workstream, cwd, process.env, isResumingLaunch);
+	} catch (error) {
+		if (error instanceof WorkstreamResolutionError) {
+			process.stderr.write(`${chalk.red(`Error: ${error.message}`)}\n`);
+			process.exit(2);
+		}
+		throw error;
+	}
+
+	// Classified new roots need their manager before session construction so
+	// prompt/tool initialization observes the header authority immediately.
+	// SessionManager.create is allocation-only here; persistence still begins
+	// after ownership and normal session creation.
+	if (!sessionManager && startupWorkstream.workstream && !isResumingLaunch) {
+		sessionManager = SessionManager.create(cwd, parsedArgs.sessionDir);
+	}
+
 	// The session file and persisted id are now final. Acquire before extension
 	// startup, session creation, writer open, or durable child re-adoption.
 	let ownership: SessionOwnershipHandle | undefined;
@@ -1194,6 +1237,10 @@ export async function runRootCommand(
 			}
 			throw error;
 		}
+	}
+
+	if (sessionManager) {
+		await applyStartupWorkstream(sessionManager, startupWorkstream, !isResumingLaunch);
 	}
 
 	await pluginPreloadPromise;
@@ -1320,6 +1367,7 @@ export async function runRootCommand(
 			eventBus,
 			preloadedExtensions: extensionsResult,
 		});
+		await applyStartupWorkstream(session.sessionManager, startupWorkstream, !isResumingLaunch);
 
 		if (parsedArgs.apiKey && !sessionOptions.model && session.model) {
 			authStorage.setRuntimeApiKey(session.model.provider, parsedArgs.apiKey);

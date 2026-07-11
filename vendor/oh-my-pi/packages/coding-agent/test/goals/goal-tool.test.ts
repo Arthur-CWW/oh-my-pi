@@ -4,6 +4,7 @@ import type { Goal, GoalModeState, GoalTokenUsage } from "@oh-my-pi/pi-coding-ag
 import { GoalTool } from "@oh-my-pi/pi-coding-agent/goals/tools/goal-tool";
 import type { SessionWorkstream } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
+import { ToolError } from "@oh-my-pi/pi-coding-agent/tools/tool-errors";
 
 function createUsage(overrides: Partial<GoalTokenUsage> = {}): GoalTokenUsage {
 	return {

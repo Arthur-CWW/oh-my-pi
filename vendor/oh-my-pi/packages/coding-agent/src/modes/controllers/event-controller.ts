@@ -326,13 +326,15 @@ export class EventController {
 			this.ctx.ui.requestRender();
 		} else if (event.message.role === "assistant") {
 			this.#lastVisibleBlockCount = 0;
-			this.ctx.streamingComponent = new AssistantMessageComponent(
+			let streamingComponent!: AssistantMessageComponent;
+			streamingComponent = new AssistantMessageComponent(
 				undefined,
 				this.ctx.hideThinkingBlock,
-				() => this.ctx.ui.requestRender(),
+				() => this.ctx.ui.requestComponentRender(streamingComponent),
 				this.ctx.viewSession.extensionRunner?.getAssistantThinkingRenderers(),
 				this.ctx.ui.imageBudget,
 			);
+			this.ctx.streamingComponent = streamingComponent;
 			this.ctx.streamingMessage = event.message;
 			this.ctx.chatContainer.addChild(this.ctx.streamingComponent);
 			this.#streamingReveal.begin(this.ctx.streamingComponent, this.ctx.streamingMessage);

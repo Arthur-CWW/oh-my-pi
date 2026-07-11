@@ -20,6 +20,7 @@ export type Mode = "text" | "json" | "rpc" | "acp" | "rpc-ui";
 export interface Args {
 	cwd?: string;
 	profile?: string;
+	workstream?: string;
 	alias?: string;
 	allowHome?: boolean;
 	provider?: string;
@@ -303,6 +304,7 @@ export function getExtraHelpText(): string {
 
   ${chalk.dim("# Configuration")}
   OMP_PROFILE                 - Named profile for isolated agent state (same as --profile)
+  OMP_WORKSTREAM              - Classify new sessions (slug or "adhoc"; overridden by --workstream)
   Use \`omp --profile <name> --alias <command>\` to create a shell shortcut for a profile
   PI_CODING_AGENT_DIR        - Session storage directory (default: ~/${CONFIG_DIR_NAME}/agent)
   PI_PACKAGE_DIR             - Override package directory (for Nix/Guix store paths)

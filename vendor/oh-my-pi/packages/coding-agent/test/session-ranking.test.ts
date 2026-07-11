@@ -71,6 +71,25 @@ describe("rankSessionSearchMatches", () => {
 		expect(ids(rankSessionSearchMatches([exact, lowQuality], "mn"))).toEqual(["exact"]);
 	});
 
+	it("matches workstream ids and kinds while leaving legacy sessions unclassified", () => {
+		const harness = makeSession("harness-session", {
+			workstream: { kind: "workstream", id: "harness" },
+		});
+		const primer = makeSession("primer-session", {
+			workstream: { kind: "workstream", id: "primer" },
+		});
+		const adhoc = makeSession("adhoc-session", {
+			workstream: { kind: "adhoc" },
+		});
+		const legacy = makeSession("legacy-session");
+		const sessions = [harness, primer, adhoc, legacy];
+
+		expect(ids(rankSessionSearchMatches(sessions, "harness"))).toEqual(["harness-session"]);
+		expect(ids(rankSessionSearchMatches(sessions, "primer"))).toEqual(["primer-session"]);
+		expect(ids(rankSessionSearchMatches(sessions, "workstream"))).toEqual(["harness-session", "primer-session"]);
+		expect(ids(rankSessionSearchMatches(sessions, "adhoc"))).toEqual(["adhoc-session"]);
+	});
+
 	it("returns all sessions unchanged for an empty query", () => {
 		const sessions = [makeSession("a"), makeSession("b")];
 

@@ -1206,19 +1206,25 @@ export class SessionManager {
 		};
 	}
 
-	async setWorkstream(workstream: SessionWorkstream, source: WorkstreamSource = "explicit"): Promise<boolean> {
-		const normalized = decodeSessionWorkstream(workstream);
-		if (!normalized) return false;
-
+	async setWorkstream(
+		workstream: SessionWorkstream | undefined,
+		source: WorkstreamSource = "explicit",
+	): Promise<boolean> {
 		const current = decodeSessionWorkstream(this.#header.workstream);
-		if (current && source !== "explicit") return false;
-		if (
-			current?.kind === normalized.kind &&
-			(current.kind === "adhoc" || (normalized.kind === "workstream" && current.id === normalized.id))
-		)
-			return false;
-
-		this.#header.workstream = normalized;
+		if (workstream === undefined) {
+			if (!current || source !== "explicit") return false;
+			delete this.#header.workstream;
+		} else {
+			const normalized = decodeSessionWorkstream(workstream);
+			if (!normalized) return false;
+			if (current && source !== "explicit") return false;
+			if (
+				current?.kind === normalized.kind &&
+				(current.kind === "adhoc" || (normalized.kind === "workstream" && current.id === normalized.id))
+			)
+				return false;
+			this.#header.workstream = normalized;
+		}
 		if (this.#persist && this.#sessionFile && this.#storage.existsSync(this.#sessionFile)) {
 			await this.#rewriteAtomically();
 		}

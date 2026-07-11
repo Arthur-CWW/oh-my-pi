@@ -12,7 +12,11 @@ afterAll(async () => {
 	await initTheme();
 });
 
-function createSession(id: string, status: SessionStatus | undefined): SessionInfo {
+function createSession(
+	id: string,
+	status: SessionStatus | undefined,
+	workstream?: SessionInfo["workstream"],
+): SessionInfo {
 	return {
 		path: `/work/${id}.jsonl`,
 		id,
@@ -25,6 +29,7 @@ function createSession(id: string, status: SessionStatus | undefined): SessionIn
 		firstMessage: `first message ${id}`,
 		allMessagesText: `first message ${id}`,
 		status,
+		workstream,
 	};
 }
 
@@ -44,6 +49,22 @@ function renderPlain(sessions: SessionInfo[]): string {
 		.join("\n")
 		.replace(/\x1b\[[0-9;]*m/g, "");
 }
+
+describe("SessionSelectorComponent workstream badges", () => {
+	it("renders the workstream slug and adhoc badges without classifying legacy sessions", () => {
+		const rendered = renderPlain([
+			createSession("harness", undefined, { kind: "workstream", id: "harness" }),
+			createSession("adhoc", undefined, { kind: "adhoc" }),
+		]);
+
+		expect(rendered).toContain("[harness]");
+		expect(rendered).toContain("[adhoc]");
+
+		const legacy = renderPlain([createSession("legacy", undefined)]);
+		expect(legacy).not.toContain("[harness]");
+		expect(legacy).not.toContain("[adhoc]");
+	});
+});
 
 describe("SessionSelectorComponent status labels", () => {
 	it("renders each derived status as a themed glyph + label on the metadata line", () => {

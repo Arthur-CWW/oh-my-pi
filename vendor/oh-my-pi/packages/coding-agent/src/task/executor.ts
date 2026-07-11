@@ -38,6 +38,7 @@ import type { ArtifactManager } from "../session/artifacts";
 import type { AuthStorage } from "../session/auth-storage";
 import { SKILL_PROMPT_MESSAGE_TYPE, USER_INTERRUPT_LABEL } from "../session/messages";
 import { SessionManager } from "../session/session-manager";
+import type { SessionWorkstream } from "../session/session-entries";
 import { truncateTail } from "../session/streaming-output";
 import { parseThinkingLevel } from "../thinking";
 import type { ContextFileEntry } from "../tools";
@@ -301,6 +302,8 @@ export interface ExecutorOptions {
 	signal?: AbortSignal;
 	onProgress?: (progress: AgentProgress) => void;
 	sessionFile?: string | null;
+	/** Snapshot of the parent's classification at direct-child spawn time. */
+	parentWorkstream?: SessionWorkstream;
 	/** Durable parent session file for replacement-process child re-adoption. */
 	parentSessionFile?: string | null;
 	/** Durable parent session id for replacement-process child re-adoption. */
@@ -1929,6 +1932,18 @@ async function finalizeRunResult(args: FinalizeRunArgs): Promise<SingleResult> {
 }
 
 /**
+ * Copy a parent's spawn-time classification into a new direct-child header.
+ * Undefined is intentionally a no-op so legacy/unclassified parents stay unclassified.
+ */
+export async function inheritParentWorkstream(
+	sessionManager: SessionManager,
+	parentWorkstream: SessionWorkstream | undefined,
+): Promise<boolean> {
+	if (!parentWorkstream) return false;
+	return sessionManager.setWorkstream(parentWorkstream, "inherited");
+}
+
+/**
  * Run a single agent in-process.
  */
 export async function runSubprocess(options: ExecutorOptions): Promise<SingleResult> {
@@ -2204,10 +2219,14 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 				? resolvedThinkingLevel
 				: (thinkingLevel ?? resolvedThinkingLevel);
 
+			const parentWorkstream = options.parentWorkstream;
 			const effectiveCwd = worktree ?? cwd;
+			// Classification is copied once into the child's own header. Reopened
+			// children keep their persisted value; inherited writes never override it.
 			const sessionManager = sessionFile
 				? await awaitAbortable(SessionManager.open(sessionFile, undefined, undefined, { initialCwd: effectiveCwd }))
 				: SessionManager.inMemory(effectiveCwd);
+			await awaitAbortable(inheritParentWorkstream(sessionManager, parentWorkstream));
 			if (options.parentArtifactManager) {
 				sessionManager.adoptArtifactManager(options.parentArtifactManager);
 			}

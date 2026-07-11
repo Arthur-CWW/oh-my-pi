@@ -47,6 +47,12 @@ function formatSessionStatus(status: SessionStatus | undefined): string | undefi
 export type SessionHistoryMatcher = (query: string) => string[];
 
 function sessionSearchText(session: SessionInfo): string {
+	const workstream = session.workstream;
+	const workstreamSearch = workstream
+		? workstream.kind === "workstream"
+			? `${workstream.id} ${workstream.kind}`
+			: workstream.kind
+		: undefined;
 	const parts = [
 		session.id,
 		session.title ?? "",
@@ -54,8 +60,20 @@ function sessionSearchText(session: SessionInfo): string {
 		session.firstMessage ?? "",
 		session.allMessagesText,
 		session.path,
+		workstreamSearch ?? "",
 	];
 	return parts.filter(Boolean).join(" ");
+}
+
+function formatSessionWorkstream(workstream: SessionInfo["workstream"]): string | undefined {
+	switch (workstream?.kind) {
+		case "workstream":
+			return theme.fg("accent", `[${workstream.id}]`);
+		case "adhoc":
+			return theme.fg("warning", "[adhoc]");
+		default:
+			return undefined;
+	}
 }
 
 function tokenizeSessionQuery(query: string): string[] {
@@ -319,8 +337,10 @@ class SessionList implements Component {
 
 			// Normalize first message to single line
 			const normalizedMessage = session.firstMessage.replace(/\n/g, " ").trim();
+			const badge = formatSessionWorkstream(session.workstream);
 
-			// First line: cursor + title (or first message if no title)
+			// First line: cursor + title (or first message if no title). The
+			// workstream badge stays on this line so classification adds no row.
 			const cursorSymbol = `${theme.nav.cursor} `;
 			const cursorWidth = visibleWidth(cursorSymbol);
 			const cursor = isSelected ? theme.fg("accent", cursorSymbol) : padding(cursorWidth);
@@ -328,7 +348,8 @@ class SessionList implements Component {
 
 			if (session.title) {
 				// Has title: show title on first line, dimmed first message on second line
-				const truncatedTitle = truncateToWidth(session.title, maxWidth);
+				const title = badge ? `${badge} ${session.title}` : session.title;
+				const truncatedTitle = truncateToWidth(title, maxWidth);
 				const titleLine = cursor + (isSelected ? theme.bold(truncatedTitle) : truncatedTitle);
 				sessionLines.push(titleLine);
 
@@ -337,7 +358,8 @@ class SessionList implements Component {
 				sessionLines.push(`  ${theme.fg("dim", truncatedPreview)}`);
 			} else {
 				// No title: show first message as main line
-				const truncatedMsg = truncateToWidth(normalizedMessage, maxWidth);
+				const message = badge ? `${badge} ${normalizedMessage}` : normalizedMessage;
+				const truncatedMsg = truncateToWidth(message, maxWidth);
 				const messageLine = cursor + (isSelected ? theme.bold(truncatedMsg) : truncatedMsg);
 				sessionLines.push(messageLine);
 			}

@@ -28,6 +28,8 @@ import { resolveMemoryBackend } from "../memory-backend";
 import { theme } from "../modes/theme/theme";
 import type { InteractiveModeContext } from "../modes/types";
 import type { AgentSession, FreshSessionResult } from "../session/agent-session";
+import { decodeSessionWorkstream, type SessionWorkstream } from "../session/session-entries";
+import type { SessionManager } from "../session/session-manager";
 import { formatShakeSummary, type ShakeMode } from "../session/shake-types";
 import { urlHyperlinkAlways } from "../tui";
 import { getChangelogPath, parseChangelog } from "../utils/changelog";
@@ -305,6 +307,48 @@ function parseShakeMode(args: string): ShakeMode | { error: string } {
 	if (verb === "" || verb === "elide") return "elide";
 	if (verb === "images") return "images";
 	return { error: `Unknown /shake mode "${verb}". Use elide or images.` };
+}
+
+function formatSessionWorkstream(workstream: SessionWorkstream | undefined): string {
+	if (!workstream) return "Session classification: unclassified";
+	return workstream.kind === "adhoc"
+		? "Session classification: adhoc"
+		: `Session workstream: ${workstream.id}`;
+}
+
+export async function executeSessionClassificationCommand(
+	args: string,
+	manager: Pick<SessionManager, "getWorkstream" | "setWorkstream">,
+	output: (text: string) => Promise<void> | void,
+): Promise<boolean> {
+	const { verb, rest } = parseSubcommand(args);
+	if (verb === "workstream") {
+		if (!rest) {
+			await output(formatSessionWorkstream(manager.getWorkstream()));
+			return true;
+		}
+		const decoded = decodeSessionWorkstream({ kind: "workstream", id: rest });
+		if (!decoded) {
+			await output(
+				`Invalid workstream slug ${JSON.stringify(rest)}. Use lowercase letters, numbers, and single hyphens (for example, harness-runtime).`,
+			);
+			return true;
+		}
+		await manager.setWorkstream(decoded);
+		await output(formatSessionWorkstream(manager.getWorkstream()));
+		return true;
+	}
+	if (verb === "adhoc" && !rest) {
+		await manager.setWorkstream({ kind: "adhoc" });
+		await output(formatSessionWorkstream(manager.getWorkstream()));
+		return true;
+	}
+	if (verb === "unclassify" && !rest) {
+		await manager.setWorkstream(undefined);
+		await output(formatSessionWorkstream(manager.getWorkstream()));
+		return true;
+	}
+	return false;
 }
 
 const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
@@ -922,13 +966,21 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 		name: "session",
 		description: "Session management commands",
 		acpDescription: "Show session information",
-		acpInputHint: "info|delete",
+		acpInputHint: "info|workstream <slug>|adhoc|unclassify|delete",
 		subcommands: [
 			{ name: "info", description: "Show session info and stats" },
+			{ name: "workstream", description: "Show or set the workstream", usage: "[<slug>]" },
+			{ name: "adhoc", description: "Classify this session as ad hoc" },
+			{ name: "unclassify", description: "Remove this session's classification" },
 			{ name: "delete", description: "Delete current session and return to selector" },
 		],
 		allowArgs: true,
 		handle: async (command, runtime) => {
+			if (
+				await executeSessionClassificationCommand(command.args, runtime.sessionManager, runtime.output)
+			) {
+				return commandConsumed();
+			}
 			if (!command.args || command.args === "info") {
 				await runtime.output(
 					[
@@ -958,18 +1010,30 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 				);
 				return commandConsumed();
 			}
-			return usage("Usage: /session [info|delete]", runtime);
+			return usage("Usage: /session [info|workstream [<slug>]|adhoc|unclassify|delete]", runtime);
 		},
 		handleTui: async (command, runtime) => {
-			const sub = command.args.trim().toLowerCase() || "info";
+			const { verb } = parseSubcommand(command.args);
+			const sub = verb || "info";
 			if (sub === "delete") {
 				runtime.ctx.editor.setText("");
 				await runtime.ctx.handleSessionDeleteCommand();
 				return;
 			}
-			// Default: show session info
-			await runtime.ctx.handleSessionCommand();
-			runtime.ctx.editor.setText("");
+			if (
+				await executeSessionClassificationCommand(command.args, runtime.ctx.sessionManager, text =>
+					runtime.ctx.showStatus(text),
+				)
+			) {
+				runtime.ctx.editor.setText("");
+				return;
+			}
+			if (sub === "info") {
+				await runtime.ctx.handleSessionCommand();
+				runtime.ctx.editor.setText("");
+				return;
+			}
+			runtime.ctx.showStatus("Usage: /session [info|workstream [<slug>]|adhoc|unclassify|delete]");
 		},
 	},
 	{
