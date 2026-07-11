@@ -16,6 +16,7 @@ import { EventController } from "@oh-my-pi/pi-coding-agent/modes/controllers/eve
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
 import type { AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/session/agent-session";
+import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 
 function makeAssistantMessage(overrides: Partial<AssistantMessage> = {}): AssistantMessage {
 	return {
@@ -62,6 +63,7 @@ function createFixture(streamingMessage?: AssistantMessage) {
 	const clearPinnedError = vi.fn();
 
 	const session = { isTtsrAbortPending: false, retryAttempt: 0 };
+	const sessionManager = SessionManager.inMemory();
 	const ctx = {
 		isInitialized: true,
 		init: vi.fn(async () => {}),
@@ -76,6 +78,7 @@ function createFixture(streamingMessage?: AssistantMessage) {
 		showPinnedError,
 		clearPinnedError,
 		session,
+		sessionManager,
 		get viewSession() {
 			return session;
 		},
@@ -83,14 +86,14 @@ function createFixture(streamingMessage?: AssistantMessage) {
 	} as unknown as InteractiveModeContext;
 
 	const controller = new EventController(ctx);
-	return { controller, ctx, showPinnedError, clearPinnedError, streamingComponent };
+	return { controller, ctx, sessionManager, showPinnedError, clearPinnedError, streamingComponent };
 }
 
 describe("EventController error banner", () => {
 	it("pins the provider error above the editor when an assistant turn ends on stopReason error", async () => {
 		const errorMessage = "Output blocked by content filtering policy";
 		const message = makeAssistantMessage({ stopReason: "error", errorMessage });
-		const { controller, showPinnedError, streamingComponent } = createFixture(message);
+		const { controller, sessionManager, showPinnedError, streamingComponent } = createFixture(message);
 
 		await controller.handleEvent({ type: "message_end", message } as Extract<
 			AgentSessionEvent,
@@ -98,7 +101,16 @@ describe("EventController error banner", () => {
 		>);
 
 		expect(showPinnedError).toHaveBeenCalledTimes(1);
-		expect(showPinnedError).toHaveBeenCalledWith(errorMessage);
+		expect(showPinnedError).toHaveBeenCalledWith({
+			message: errorMessage,
+			source: "provider",
+			provider: message.provider,
+			model: message.model,
+			status: message.errorStatus,
+			session: sessionManager.getSessionId(),
+			category: "provider",
+			operation: "turn",
+		});
 		// The same error is mirrored in the banner, so the transcript's inline
 		// `Error: …` line is suppressed to avoid a duplicate render.
 		expect(streamingComponent.setErrorPinned).toHaveBeenCalledWith(true);
