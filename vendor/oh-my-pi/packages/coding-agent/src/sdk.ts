@@ -117,6 +117,7 @@ import {
 	SecretObfuscator,
 } from "./secrets";
 import { AgentSession, type SessionDisposeOptions } from "./session/agent-session";
+import { DurableInputQueue } from "./session/durable-input-queue";
 import { resolveAuthBrokerConfig } from "./session/auth-broker-config";
 import {
 	AuthBrokerClient,
@@ -136,6 +137,10 @@ import {
 } from "./session/messages";
 import { getRestorableSessionModels } from "./session/session-context";
 import { SessionManager } from "./session/session-manager";
+import type { SessionOwnershipHandle } from "./session/session-ownership";
+import { makeSessionRunnerLive } from "./runner/session-runner";
+import type { SessionRunner } from "./runner/session-runner";
+import { Effect, Exit, Scope } from "effect";
 import { SnapcompactInlineTransformer } from "./session/snapcompact-inline";
 import { createSnapcompactSavingsRecorder } from "./session/snapcompact-savings-journal";
 import { closeAllConnections } from "./ssh/connection-manager";
@@ -517,6 +522,8 @@ export interface CreateAgentSessionOptions {
 
 	/** Session manager. Default: session stored under the configured agentDir sessions root */
 	sessionManager?: SessionManager;
+	/** Already-adopted durable queue supplied by the live runner composition. @internal */
+	durableInputQueue?: DurableInputQueue;
 
 	/** Override local:// protocol options for subagent local:// sharing. Default: uses the session's own artifacts dir and session ID. */
 	localProtocolOptions?: LocalProtocolOptions;
@@ -558,6 +565,25 @@ export interface CreateAgentSessionResult {
 	lspServers?: LspStartupServerInfo[];
 	/** Shared event bus for tool/extension communication */
 	eventBus: EventBus;
+}
+
+export interface CreateSessionRunnerOptions extends Omit<
+	CreateAgentSessionOptions,
+	"durableInputQueue" | "sessionManager"
+> {
+	/** Already-acquired ownership; release authority transfers to the returned runner. */
+	ownership: SessionOwnershipHandle;
+	sessionManager: SessionManager;
+	mailboxCapacity: number;
+	eventCapacity: number;
+	childStopPolicy?: "detach" | "stop";
+}
+
+export interface CreateSessionRunnerResult {
+	runner: SessionRunner;
+	extensionsResult: LoadExtensionsResult;
+	setToolUIContext: (uiContext: ExtensionUIContext, hasUI: boolean) => void;
+	modelFallbackMessage?: string;
 }
 
 export type DialectFormat = "auto" | "native" | Dialect;
@@ -2610,6 +2636,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			sessionManager,
 			settings,
 			autoApprove: options.autoApprove,
+			durableInputQueue: options.durableInputQueue,
 			evalKernelOwnerId,
 			// Defined only for top-level sessions (creation is gated above).
 			// AgentSession uses this to decide whether it may dispose the global
@@ -2912,6 +2939,73 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			logger.warn("Failed to clean up createAgentSession resources after startup error", {
 				error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
 			});
+		}
+		throw error;
+	}
+}
+
+/**
+ * Construct the live runner composition over one ownership handle, queue, and
+ * AgentSession. The returned runner is the sole release authority.
+ */
+export async function createSessionRunner(options: CreateSessionRunnerOptions): Promise<CreateSessionRunnerResult> {
+	const { ownership, sessionManager, mailboxCapacity, eventCapacity, childStopPolicy, ...sessionOptions } = options;
+	let sessionResult: CreateAgentSessionResult | undefined;
+	let scope: Scope.Closeable | undefined;
+	let transferred = false;
+	try {
+		if (!(await ownership.isCurrent())) throw new Error("Session ownership is no longer current");
+		sessionManager.bindSessionOwnership(ownership);
+		const queue = await DurableInputQueue.open(ownership);
+		await queue.adopt();
+		sessionResult = await createAgentSession({
+			...sessionOptions,
+			sessionManager,
+			durableInputQueue: queue,
+		});
+		scope = Scope.makeUnsafe("sequential");
+		const liveRunner = await Effect.runPromise(
+			Scope.provide(scope)(
+				makeSessionRunnerLive(
+					{ ownership, queue, session: sessionResult.session, sessionManager },
+					{ mailboxCapacity, eventCapacity, childStopPolicy },
+				),
+			),
+		);
+		transferred = true;
+		let scopeClosed = false;
+		const runner: SessionRunner = {
+			...liveRunner,
+			stop: () =>
+				liveRunner.stop().pipe(
+					Effect.ensuring(
+						Effect.suspend(() => {
+							if (scopeClosed) return Effect.void;
+							scopeClosed = true;
+							return Scope.close(scope!, Exit.void);
+						}),
+					),
+				),
+		};
+		return {
+			runner,
+			extensionsResult: sessionResult.extensionsResult,
+			setToolUIContext: sessionResult.setToolUIContext,
+			modelFallbackMessage: sessionResult.modelFallbackMessage,
+		};
+	} catch (error) {
+		if (!transferred) {
+			try {
+				if (scope) await Effect.runPromise(Scope.close(scope, Exit.void));
+			} finally {
+				try {
+					if (sessionResult) {
+						await sessionResult.session.dispose({ scope: "root", childPolicy: childStopPolicy });
+					}
+				} finally {
+					await ownership.release();
+				}
+			}
 		}
 		throw error;
 	}
