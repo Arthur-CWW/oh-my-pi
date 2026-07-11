@@ -1,4 +1,5 @@
 import { afterAll, describe, expect, it } from "bun:test";
+import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -10,6 +11,18 @@ const temporaryRoots: string[] = [];
 
 function canonicalPath(file: string): string {
 	return fs.realpathSync(file);
+}
+
+function checksum(file: string): string {
+	return createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+}
+
+function releasePath(bin: string, file: string): string {
+	return path.join(bin, ".omp-releases", `omp-${checksum(file)}`);
+}
+
+function linkTarget(link: string): string {
+	return fs.realpathSync(fs.readlinkSync(link));
 }
 
 function temporaryRoot(): string {
@@ -64,11 +77,14 @@ describe("installed binary isolation", () => {
   *) exit 31 ;;
 esac`,
 		);
-
 		const result = run(root, ["stable", candidate]);
 		expect(result.exitCode).toBe(0);
+
 		const bin = path.join(root, "global bin");
-		expect(canonicalPath(path.join(bin, "omp"))).toBe(canonicalPath(candidate));
+		const promoted = path.join(bin, "omp");
+		const release = releasePath(bin, candidate);
+		expect(linkTarget(promoted)).toBe(canonicalPath(release));
+		expect(canonicalPath(promoted)).toBe(canonicalPath(release));
 		expect(fs.existsSync(path.join(root, "home", ".omp"))).toBeFalse();
 	});
 
@@ -102,12 +118,18 @@ describe.skipIf(!fs.existsSync(distCandidate))("compiled dist candidate", () => 
 		fs.copyFileSync(distCandidate, copiedCandidate);
 		fs.chmodSync(copiedCandidate, 0o755);
 		fs.writeFileSync(copiedEntry, "original source");
-
 		const promotion = run(root, ["stable", copiedCandidate]);
 		expect(promotion.exitCode).toBe(0);
-		const promoted = path.join(root, "global bin", "omp");
-		expect(canonicalPath(promoted)).toBe(canonicalPath(copiedCandidate));
-		fs.writeFileSync(copiedEntry, "corrupted source");
+
+		const bin = path.join(root, "global bin");
+		const promoted = path.join(bin, "omp");
+		const release = releasePath(bin, copiedCandidate);
+		expect(linkTarget(promoted)).toBe(canonicalPath(release));
+		expect(canonicalPath(promoted)).toBe(canonicalPath(release));
+		const releaseDigest = checksum(release);
+		fs.writeFileSync(copiedCandidate, "corrupted build output");
+		expect(checksum(release)).toBe(releaseDigest);
+		fs.rmSync(copiedCandidate);
 
 		fs.rmSync(path.join(copiedSource, "packages", "coding-agent", "src"), {
 			recursive: true,

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Link the development launcher separately from the promoted standalone binary.
+# Link the development launcher separately from immutable promoted binaries.
 set -euo pipefail
 
 usage() {
@@ -54,30 +54,8 @@ atomic_symlink() {
 	mv -f "$temporary" "$destination"
 }
 
-copy_backup() {
-	local source="$1"
-	local backup="$2"
-	local temporary
-	temporary="$(mktemp "${backup}.tmp.XXXXXX")"
-	rm -f "$temporary"
-	cp -P "$source" "$temporary"
-	mv -f "$temporary" "$backup"
-}
-
-repo_root="${OMP_LINK_REPO_ROOT:-$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)}"
-global_bin="$(resolve_global_bin)"
-stable="$global_bin/omp"
-previous="$global_bin/omp.previous"
-failed="$global_bin/omp.failed"
-
-cmd_dev() {
-	local target="$repo_root/packages/coding-agent/scripts/omp"
-	if [ ! -f "$target" ] || [ ! -x "$target" ]; then
-		printf 'link-omp: development launcher not found or not executable: %s\n' "$target" >&2
-		exit 1
-	fi
-	atomic_symlink "$target" "$global_bin/omp-dev"
-	printf 'link-omp: linked %s -> %s\n' "$global_bin/omp-dev" "$target"
+sha256() {
+	shasum -a 256 "$1" | awk '{print $1}'
 }
 
 validate_candidate() {
@@ -124,30 +102,134 @@ smoke_candidate() {
 	rm -rf "$isolated_root"
 }
 
+validate_release() {
+	local release="$1"
+	local expected_sha="$2"
+	local actual_sha
+
+	if [ -L "$release" ] || [ ! -f "$release" ] || [ ! -x "$release" ]; then
+		return 1
+	fi
+	actual_sha="$(sha256 "$release")"
+	[ "$actual_sha" = "$expected_sha" ]
+}
+
+immutable_target_from_link() {
+	local link="$1"
+	local target
+	local filename
+	local expected_sha
+
+	[ -L "$link" ] || return 1
+	target="$(readlink "$link")" || return 1
+	case "$target" in
+		"$releases"/omp-*) ;;
+		*) return 1 ;;
+	esac
+	filename="$(basename -- "$target")"
+	expected_sha="${filename#omp-}"
+	case "$expected_sha" in
+		"" | *[!0123456789abcdef]*) return 1 ;;
+	esac
+	validate_release "$target" "$expected_sha" || return 1
+	printf '%s\n' "$target"
+}
+
+repo_root="${OMP_LINK_REPO_ROOT:-$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)}"
+global_bin="$(resolve_global_bin)"
+releases="$global_bin/.omp-releases"
+stable="$global_bin/omp"
+previous="$global_bin/omp.previous"
+failed="$global_bin/omp.failed"
+stage=""
+
+cleanup_stage() {
+	if [ -n "$stage" ]; then
+		rm -f "$stage"
+	fi
+}
+
+trap cleanup_stage EXIT
+
+cmd_dev() {
+	local target="$repo_root/packages/coding-agent/scripts/omp"
+	if [ ! -f "$target" ] || [ ! -x "$target" ]; then
+		printf 'link-omp: development launcher not found or not executable: %s\n' "$target" >&2
+		exit 1
+	fi
+	atomic_symlink "$target" "$global_bin/omp-dev"
+	printf 'link-omp: linked %s -> %s\n' "$global_bin/omp-dev" "$target"
+}
+
 cmd_stable() {
 	if [ "$#" -ne 1 ]; then
 		printf 'link-omp: stable promotion requires an executable candidate path\n' >&2
 		usage
 	fi
 	local candidate
+	local digest
+	local release
+	local staged_digest
+	local prior=""
 	candidate="$(validate_candidate "$1")"
-	smoke_candidate "$candidate"
-	if has_path "$stable"; then
-		copy_backup "$stable" "$previous"
+	digest="$(sha256 "$candidate")"
+	release="$releases/omp-$digest"
+	mkdir -p "$releases"
+
+	if has_path "$release"; then
+		if ! validate_release "$release" "$digest"; then
+			printf 'link-omp: existing release is invalid or collides with candidate digest: %s\n' "$release" >&2
+			exit 1
+		fi
+	else
+		stage="$(mktemp "$releases/.omp-$digest.tmp.XXXXXX")"
+		cp "$candidate" "$stage"
+		chmod 755 "$stage"
+		validate_candidate "$stage" >/dev/null
+		staged_digest="$(sha256 "$stage")"
+		if [ "$staged_digest" != "$digest" ]; then
+			printf 'link-omp: candidate changed while being promoted: %s\n' "$candidate" >&2
+			exit 1
+		fi
+		if ! smoke_candidate "$stage"; then
+			printf 'link-omp: staged candidate failed validation: %s\n' "$candidate" >&2
+			exit 1
+		fi
+		mv "$stage" "$release"
+		stage=""
 	fi
-	atomic_symlink "$candidate" "$stable"
-	printf 'link-omp: promoted %s -> %s\n' "$stable" "$candidate"
+
+	if has_path "$stable"; then
+		if ! prior="$(immutable_target_from_link "$stable")"; then
+			printf 'link-omp: active stable command is not a valid immutable release: %s\n' "$stable" >&2
+			exit 1
+		fi
+		if [ "$prior" = "$release" ]; then
+			printf 'link-omp: stable release already active: %s\n' "$release"
+			return
+		fi
+		atomic_symlink "$prior" "$previous"
+	else
+		rm -f "$previous"
+	fi
+	atomic_symlink "$release" "$stable"
+	printf 'link-omp: promoted %s -> %s\n' "$stable" "$release"
 }
 
 cmd_rollback() {
-	if ! has_path "$previous"; then
-		printf 'link-omp: no previous stable command to restore: %s\n' "$previous" >&2
+	local prior
+	local current
+	if ! prior="$(immutable_target_from_link "$previous")"; then
+		printf 'link-omp: no valid immutable previous command to restore: %s\n' "$previous" >&2
 		exit 1
 	fi
-	if has_path "$stable"; then
-		mv -f "$stable" "$failed"
+	if ! current="$(immutable_target_from_link "$stable")"; then
+		printf 'link-omp: active stable command is not a valid immutable release: %s\n' "$stable" >&2
+		exit 1
 	fi
-	mv -f "$previous" "$stable"
+	atomic_symlink "$current" "$failed"
+	atomic_symlink "$prior" "$stable"
+	rm -f "$previous"
 	printf 'link-omp: restored %s from %s\n' "$stable" "$previous"
 }
 
