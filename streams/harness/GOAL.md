@@ -6,6 +6,14 @@ The background lane, never a blocking project. Owned by whichever session is doi
 
 Agents waste fewer tokens, get only the context they can use, and hand off cleanly. Polling, not blocking: friction logged as it appears, fixed in worker-sized batches. OMP is the current harness, not the optimal one.
 
+## Persistent context anchors
+
+- [`docs/fable/harness-runtime-contract.md`](../../docs/fable/harness-runtime-contract.md) — authoritative runtime behavior and phase gates.
+- [`docs/fable/harness-request-register.md`](../../docs/fable/harness-request-register.md) — request status and proof links.
+- [`docs/state/harness-friction.md`](../../docs/state/harness-friction.md) — reproduced papercuts, recurrence evidence, and triage.
+
+Reference these paths in the active `/goal`. At every verified Git checkpoint, update the register and friction row together; compaction summaries should preserve the paths rather than duplicating their contents.
+
 ## Non-functional requirements
 
 - Every default earns its prompt tax; per-agent context routing over one-prompt-fits-all.
