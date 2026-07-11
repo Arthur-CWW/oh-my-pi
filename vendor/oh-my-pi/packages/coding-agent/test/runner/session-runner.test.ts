@@ -942,6 +942,48 @@ describe("live SessionRunner", () => {
 			),
 		);
 	});
+	it("refreshes the Promise controller generation before interrupting a newly started prompt", async () => {
+		const fixture = await createLiveFixture(true);
+		let releaseNormalization!: () => void;
+		const normalizationGate = new Promise<void>(resolve => {
+			releaseNormalization = resolve;
+		});
+		vi.spyOn(imageLoading, "normalizeModelContextImages").mockImplementation(async images => {
+			await normalizationGate;
+			return images;
+		});
+		const scope = Scope.makeUnsafe("sequential");
+		const run = <A, E>(effect: Effect.Effect<A, E, Scope.Scope>) =>
+			Effect.runPromise(Scope.provide(scope)(effect));
+		try {
+			const runner = await run(makeSessionRunnerLive(fixture, { mailboxCapacity: 4, eventCapacity: 8 }));
+			const controller = await createTerminalSessionController(runner, { viewId: "fresh-interrupt-controller" });
+			const cachedGeneration = controller.snapshot().session.promptOperation.generation;
+			const prompt = fixture.session.prompt("new live operation", {
+				synthetic: true,
+				images: [{ type: "image", data: "AA==", mimeType: "image/png" }],
+			});
+			while (!fixture.session.promptOperation.active) {
+				await new Promise(resolve => setTimeout(resolve, 1));
+			}
+			expect(controller.snapshot().session.promptOperation.generation).toBe(cachedGeneration);
+			const receipt = await controller.interruptPrompt({
+				commandId: "fresh-generation-interrupt",
+				correlationId: "fresh-generation-interrupt",
+			});
+			expect(receipt.targetGeneration).toBe(fixture.session.promptOperation.generation);
+			expect(receipt.interrupted).toBe(true);
+			releaseNormalization();
+			await prompt;
+			await controller.close();
+			await run(runner.stop());
+		} finally {
+			releaseNormalization();
+			fixture.releaseProviderResponses();
+			await Effect.runPromise(Scope.close(scope, Exit.void));
+		}
+	});
+
 	it("does not launch the provider when interrupted during image normalization", async () => {
 		const fixture = await createLiveFixture();
 		let releaseNormalization!: () => void;

@@ -297,7 +297,7 @@ export async function createTerminalSessionController(
 			interruptPrompt: async (intent = {}) => {
 				try {
 					const ids = metadata(intent);
-					const targetGeneration = latest.session.promptOperation.generation;
+					const targetGeneration = (await refresh()).session.promptOperation.generation;
 					const receipt = await run(
 						view!.interruptPrompt(
 							decodeInterruptPromptCommand({
