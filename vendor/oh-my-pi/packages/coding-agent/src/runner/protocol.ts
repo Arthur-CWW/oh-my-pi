@@ -73,6 +73,18 @@ export const CancelQueuedInputCommandSchema = Schema.Struct({
 	itemRevision: ItemRevisionSchema,
 });
 
+export const SetActiveToolsCommandSchema = Schema.Struct({
+	schemaVersion: Schema.Literal(RUNNER_SCHEMA_VERSION),
+	kind: Schema.Literal("setActiveTools"),
+	commandId: Schema.String,
+	correlationId: Schema.String,
+	causationId: Schema.optional(Schema.String),
+	viewId: Schema.String,
+	controllerEpoch: ControllerEpochSchema,
+	expectedToolConfigurationGeneration: RunnerRevisionSchema,
+	toolNames: Schema.Array(Schema.String),
+});
+
 export const SetThinkingLevelCommandSchema = Schema.Struct({
 	schemaVersion: Schema.Literal(RUNNER_SCHEMA_VERSION),
 	kind: Schema.Literal("setThinkingLevel"),
@@ -195,6 +207,7 @@ export const CancelCompactionCommandSchema = Schema.Struct({
 export type SubmitInputCommand = typeof SubmitInputCommandSchema.Type;
 export type EditQueuedInputCommand = typeof EditQueuedInputCommandSchema.Type;
 export type CancelQueuedInputCommand = typeof CancelQueuedInputCommandSchema.Type;
+export type SetActiveToolsCommand = typeof SetActiveToolsCommandSchema.Type;
 export type SetThinkingLevelCommand = typeof SetThinkingLevelCommandSchema.Type;
 export type SetModelCommand = typeof SetModelCommandSchema.Type;
 export type InterruptPromptCommand = typeof InterruptPromptCommandSchema.Type;
@@ -244,6 +257,14 @@ export interface RunnerCommandReceipt {
 	readonly durableSequence: number;
 	readonly revision: number;
 	readonly replayed: boolean;
+}
+
+export interface SetActiveToolsReceipt {
+	readonly commandId: string;
+	readonly correlationId: string;
+	readonly causationId?: string;
+	readonly toolConfigurationGeneration: number;
+	readonly activeToolNames: ReadonlyArray<string>;
 }
 
 export interface SetThinkingLevelReceipt {
@@ -324,6 +345,7 @@ export interface SessionRunnerSnapshot {
 		  }
 		| undefined;
 	readonly workflow: WorkflowModeSnapshot;
+	readonly toolConfigurationGeneration: number;
 	readonly activeToolNames: ReadonlyArray<string>;
 	readonly status: RunnerStatus;
 	readonly pendingOperations: number;
@@ -338,6 +360,7 @@ export type RunnerEventKind =
 	| "inputEdited"
 	| "inputCancelled"
 	| "thinkingLevelChanged"
+	| "toolsChanged"
 	| "modelChanged"
 	| "planModeChanged"
 	| "goalModeChanged"
@@ -400,6 +423,25 @@ export const decodeCancelQueuedInputCommand = (input: unknown): CancelQueuedInpu
 		return Schema.decodeUnknownSync(CancelQueuedInputCommandSchema)(input);
 	} catch (error) {
 		throw new InvalidRunnerCommandError({ issue: error instanceof Error ? error.message : "Invalid cancel command" });
+	}
+};
+
+export const decodeSetActiveToolsCommand = (input: unknown): SetActiveToolsCommand => {
+	try {
+		const command = Schema.decodeUnknownSync(SetActiveToolsCommandSchema)(input);
+		const seen = new Set<string>();
+		for (const name of command.toolNames) {
+			if (name.length === 0 || name !== name.trim() || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(name)) {
+				throw new Error(`Invalid tool identifier: ${JSON.stringify(name)}`);
+			}
+			if (seen.has(name)) throw new Error(`Duplicate tool identifier: ${name}`);
+			seen.add(name);
+		}
+		return command;
+	} catch (error) {
+		throw new InvalidRunnerCommandError({
+			issue: error instanceof Error ? error.message : "Invalid set-active-tools command",
+		});
 	}
 };
 

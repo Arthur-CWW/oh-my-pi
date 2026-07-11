@@ -16,6 +16,8 @@ import type {
 	RunnerCommandReceipt,
 	RunnerEvent,
 	SessionRunnerSnapshot,
+	SetActiveToolsCommand,
+	SetActiveToolsReceipt,
 	SetModelCommand,
 	SetModelReceipt,
 	SetThinkingLevelCommand,
@@ -35,6 +37,7 @@ export interface TerminalSessionStateSnapshot {
 	readonly modelSummary: TerminalModelSnapshot | undefined;
 	readonly configuredThinkingLevel: ConfiguredThinkingLevel | undefined;
 	readonly workflow: WorkflowModeSnapshot;
+	readonly toolConfigurationGeneration: number;
 	readonly activeToolNames: ReadonlyArray<string>;
 	readonly autoCompactionEnabled: boolean;
 	readonly isStreaming: boolean;
@@ -77,6 +80,9 @@ export interface TerminalSessionView {
 	readonly cancel: (
 		command: CancelQueuedInputCommand,
 	) => Effect.Effect<RunnerCommandReceipt, RunnerFailure, Scope.Scope>;
+	readonly setActiveTools: (
+		command: SetActiveToolsCommand,
+	) => Effect.Effect<SetActiveToolsReceipt, RunnerFailure, Scope.Scope>;
 	readonly setModel: (command: SetModelCommand) => Effect.Effect<SetModelReceipt, RunnerFailure, Scope.Scope>;
 	readonly setThinkingLevel: (
 		command: SetThinkingLevelCommand,

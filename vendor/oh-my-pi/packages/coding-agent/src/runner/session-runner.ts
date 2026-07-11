@@ -1,5 +1,5 @@
 import { type AgentSession, type AgentSessionEvent, PromptOperationConflictError } from "../session/agent-session";
-import { Cause, Deferred, Effect, FiberSet, PubSub, Queue, Ref, Scope } from "effect";
+import { Cause, Deferred, Effect, FiberSet, PubSub, Queue, Ref, type Scope } from "effect";
 import {
 	DurableInputCommandConflictError,
 	DurableInputQueueConflictError,
@@ -8,7 +8,6 @@ import {
 	SessionOwnershipLostError,
 	type DurableInputQueue,
 	type DurableInputQueueEvent,
-	type DurableQueuedInput,
 } from "../session/durable-input-queue";
 import type {
 	SessionEntry,
@@ -28,6 +27,7 @@ import {
 	InvalidRunnerCommandError,
 	RunnerControllerConflictError,
 	RunnerRevisionConflictError,
+	RunnerToolConfigurationConflictError,
 	RunnerCompactionCommandConflictError,
 	RunnerCompactionUnavailableError,
 	RunnerCompactionTargetError,
@@ -45,6 +45,7 @@ import {
 	decodeCancelQueuedInputCommand,
 	decodeCancelCompactionCommand,
 	decodeEditQueuedInputCommand,
+	decodeSetActiveToolsCommand,
 	decodeSubmitInputCommand,
 	decodeRunCompactionCommand,
 	decodeSetModelCommand,
@@ -65,6 +66,8 @@ import {
 	type RunCompactionReceipt,
 	type InterruptPromptReceipt,
 	type SetModelReceipt,
+	type SetActiveToolsReceipt,
+	type SetActiveToolsCommand,
 	type InterruptPromptCommand,
 	type SetThinkingLevelReceipt,
 	type TransitionPlanModeReceipt,
@@ -86,6 +89,7 @@ import type {
 
 export type RunnerFailure =
 	| InvalidRunnerCommandError
+	| RunnerToolConfigurationConflictError
 	| RunnerRevisionConflictError
 	| RunnerItemRevisionConflictError
 	| RunnerPromptOperationConflictError
@@ -141,6 +145,7 @@ export interface ControllerSessionRunnerView extends RunnerViewBase {
 	readonly submitInput: (input: unknown) => Effect.Effect<RunnerCommandReceipt, RunnerFailure, Scope.Scope>;
 	readonly editQueuedInput: (input: unknown) => Effect.Effect<RunnerCommandReceipt, RunnerFailure, Scope.Scope>;
 	readonly cancelQueuedInput: (input: unknown) => Effect.Effect<RunnerCommandReceipt, RunnerFailure, Scope.Scope>;
+	readonly setActiveTools: (input: unknown) => Effect.Effect<SetActiveToolsReceipt, RunnerFailure, Scope.Scope>;
 	readonly setModel: (input: unknown) => Effect.Effect<SetModelReceipt, RunnerFailure, Scope.Scope>;
 	readonly setThinkingLevel: (input: unknown) => Effect.Effect<SetThinkingLevelReceipt, RunnerFailure, Scope.Scope>;
 	readonly transitionPlanMode: (input: unknown) => Effect.Effect<TransitionPlanModeReceipt, RunnerFailure, Scope.Scope>;
@@ -181,7 +186,7 @@ interface ActiveController {
 
 interface EventDetails {
 	readonly kind: RunnerEventKind;
-	readonly metadata: RunnerControlMetadata | InterruptPromptCommand | CancelCompactionCommand;
+	readonly metadata: RunnerControlMetadata | SetActiveToolsCommand | InterruptPromptCommand | CancelCompactionCommand;
 	readonly controllerEpoch: number;
 	readonly viewId?: string;
 	readonly inputId?: string;
@@ -230,6 +235,7 @@ const asRunnerFailure = (error: unknown): RunnerFailure => {
 		error instanceof SessionRunnerStoppedError ||
 		error instanceof SessionRevisionConflictError ||
 		error instanceof SessionCommandConflictError ||
+		error instanceof RunnerToolConfigurationConflictError ||
 		error instanceof SessionStateCommandInFlightError
 	) {
 		return error;
@@ -321,6 +327,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 	let activeCompaction: { readonly commandId: string; readonly operationGeneration: number } | undefined;
 	let nextCompactionOperationGeneration = 1;
 
+
 	const materializeSnapshot = Effect.fn("Runner.materializeSnapshot")(function* (refreshQueue: boolean) {
 		if (refreshQueue) {
 			const items = yield* Effect.tryPromise({ try: () => resources.queue.list(), catch: asRunnerFailure });
@@ -360,6 +367,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 							startedSessionRevision: compactionCommands.get(activeCompaction.commandId)!.startedSessionRevision,
 						},
 			workflow: resources.sessionManager.buildSessionContext().workflow ?? { kind: "none" },
+			toolConfigurationGeneration: resources.session.toolConfigurationGeneration,
 			activeToolNames: resources.session.getActiveToolNames(),
 			status,
 			pendingOperations: pending,
@@ -386,6 +394,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 							},
 				configuredThinkingLevel: resources.session.configuredThinkingLevel(),
 				workflow: resources.sessionManager.buildSessionContext().workflow ?? { kind: "none" },
+				toolConfigurationGeneration: resources.session.toolConfigurationGeneration,
 				activeToolNames: resources.session.getActiveToolNames(),
 				autoCompactionEnabled: resources.session.autoCompactionEnabled,
 				isStreaming: resources.session.isStreaming,
@@ -613,6 +622,11 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 		controllerEpoch: number,
 		input: unknown,
 	) => Effect.Effect<RunnerCommandReceipt, RunnerFailure, Scope.Scope>;
+	let setActiveTools!: (
+		viewId: string,
+		controllerEpoch: number,
+		input: unknown,
+	) => Effect.Effect<SetActiveToolsReceipt, RunnerFailure, Scope.Scope>;
 	let setModel!: (
 		viewId: string,
 		controllerEpoch: number,
@@ -680,6 +694,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 			submitInput: (input) => submitInput(viewId, controllerEpoch, input),
 			editQueuedInput: (input) => editQueuedInput(viewId, controllerEpoch, input),
 			cancelQueuedInput: (input) => cancelQueuedInput(viewId, controllerEpoch, input),
+			setActiveTools: (input) => setActiveTools(viewId, controllerEpoch, input),
 			setThinkingLevel: (input) => setThinkingLevel(viewId, controllerEpoch, input),
 			setModel: (input) => setModel(viewId, controllerEpoch, input),
 			transitionPlanMode: (input) => transitionPlanMode(viewId, controllerEpoch, input),
@@ -1194,6 +1209,66 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 		);
 	});
 
+	setActiveTools = Effect.fn("Runner.setActiveTools")(function* (
+		viewId: string,
+		controllerEpoch: number,
+		input: unknown,
+	) {
+		const command = yield* Effect.try({ try: () => decodeSetActiveToolsCommand(input), catch: asRunnerFailure });
+		if (command.viewId !== viewId) return yield* mismatchedView(viewId);
+		if (command.controllerEpoch !== controllerEpoch) {
+			return yield* Effect.fail(
+				new StaleRunnerControllerLeaseError({
+					viewId,
+					expectedControllerEpoch: command.controllerEpoch,
+					actualControllerEpoch: controllerEpoch,
+				}),
+			);
+		}
+		return yield* enqueue(
+			Effect.gen(function* () {
+				yield* requireController(viewId, controllerEpoch);
+				const available = new Set(resources.session.getAllToolNames());
+				for (const name of command.toolNames) {
+					if (!available.has(name)) {
+						return yield* Effect.fail(
+							new InvalidRunnerCommandError({ issue: `Tool "${name}" is unavailable` }),
+						);
+					}
+				}
+				const result = yield* Effect.tryPromise({
+					try: () =>
+						resources.session.configureActiveTools(
+							command.expectedToolConfigurationGeneration,
+							command.toolNames,
+						),
+					catch: asRunnerFailure,
+				});
+				if (result.kind === "conflict") {
+					return yield* Effect.fail(
+						new RunnerToolConfigurationConflictError({
+							expectedGeneration: command.expectedToolConfigurationGeneration,
+							actualGeneration: result.actualGeneration,
+						}),
+					);
+				}
+				yield* publishEvent({
+					kind: "toolsChanged",
+					metadata: command,
+					controllerEpoch,
+					viewId,
+				});
+				return {
+					commandId: command.commandId,
+					correlationId: command.correlationId,
+					...(command.causationId === undefined ? {} : { causationId: command.causationId }),
+					toolConfigurationGeneration: result.toolConfigurationGeneration,
+					activeToolNames: result.activeToolNames,
+				} satisfies SetActiveToolsReceipt;
+			}),
+		);
+	});
+
 	setModel = Effect.fn("Runner.setModel")(function* (
 		viewId: string,
 		controllerEpoch: number,
@@ -1691,6 +1766,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 			submit: attached.submitInput,
 			edit: attached.editQueuedInput,
 			cancel: attached.cancelQueuedInput,
+			setActiveTools: attached.setActiveTools,
 			setThinkingLevel: attached.setThinkingLevel,
 			setModel: attached.setModel,
 			transitionPlanMode: attached.transitionPlanMode,

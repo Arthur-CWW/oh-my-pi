@@ -1031,7 +1031,9 @@ export class AcpAgent implements Agent {
 
 	async #registerPreparedSession(session: AgentSession, mcpServers: McpServer[]): Promise<ManagedSessionRecord> {
 		const record = this.#createManagedSessionRecord(session);
-		session.setClientBridge(createAcpClientBridge(this.#connection, session.sessionId, this.#clientCapabilities));
+		await session.setClientBridge(
+			createAcpClientBridge(this.#connection, session.sessionId, this.#clientCapabilities),
+		);
 		// `record.lifetimeUnsubscribe` is installed in `#scheduleBootstrapUpdates`
 		// so it shares the bootstrap race guard — see that comment for why.
 		try {

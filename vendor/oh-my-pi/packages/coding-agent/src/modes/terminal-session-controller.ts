@@ -6,6 +6,7 @@ import type {
 	InterruptPromptReceipt,
 	RunCompactionReceipt,
 	RunnerImageContent,
+	SetActiveToolsReceipt,
 	SetModelReceipt,
 	SetThinkingLevelReceipt,
 	TransitionPlanModeReceipt,
@@ -18,6 +19,7 @@ import {
 	decodeInterruptPromptCommand,
 	decodeRunCompactionCommand,
 	decodeSubmitInputCommand,
+	decodeSetActiveToolsCommand,
 	decodeSetModelCommand,
 	decodeSetThinkingLevelCommand,
 	decodeTransitionPlanModeCommand,
@@ -52,6 +54,13 @@ export interface TerminalEditIntent {
 export interface TerminalCancelIntent {
 	readonly inputId: string;
 	readonly itemRevision: number;
+	readonly commandId?: string;
+	readonly correlationId?: string;
+	readonly causationId?: string;
+}
+
+export interface TerminalSetActiveToolsIntent {
+	readonly toolNames: ReadonlyArray<string>;
 	readonly commandId?: string;
 	readonly correlationId?: string;
 	readonly causationId?: string;
@@ -140,6 +149,7 @@ export interface TerminalSessionController {
 	readonly submit: (intent: TerminalSubmitIntent) => Promise<RunnerCommandReceipt>;
 	readonly edit: (intent: TerminalEditIntent) => Promise<RunnerCommandReceipt>;
 	readonly cancel: (intent: TerminalCancelIntent) => Promise<RunnerCommandReceipt>;
+	readonly setActiveTools: (intent: TerminalSetActiveToolsIntent) => Promise<SetActiveToolsReceipt>;
 	readonly setModel: (intent: TerminalSetModelIntent) => Promise<SetModelReceipt>;
 	readonly setThinkingLevel: (intent: TerminalSetThinkingLevelIntent) => Promise<SetThinkingLevelReceipt>;
 	readonly transitionPlanMode: (intent: TerminalTransitionPlanModeIntent) => Promise<TransitionPlanModeReceipt>;
@@ -295,6 +305,31 @@ export async function createTerminalSessionController(
 						),
 					);
 				}),
+			setActiveTools: async (intent) => {
+				const current = await refresh();
+				try {
+					const ids = metadata(intent);
+					const receipt = await run(
+						view!.setActiveTools(
+							decodeSetActiveToolsCommand({
+								schemaVersion: RUNNER_SCHEMA_VERSION,
+								kind: "setActiveTools",
+								...ids,
+								...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
+								viewId,
+								controllerEpoch: view!.epoch,
+								expectedToolConfigurationGeneration: current.runner.toolConfigurationGeneration,
+								toolNames: [...intent.toolNames],
+							}),
+						),
+					);
+					await refresh();
+					return receipt;
+				} catch (error) {
+					await refresh();
+					throw error;
+				}
+			},
 			setModel: async (intent) => {
 				try {
 					const ids = metadata(intent);

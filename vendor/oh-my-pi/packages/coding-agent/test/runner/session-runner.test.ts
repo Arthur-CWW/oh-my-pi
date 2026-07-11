@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { Agent, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
+import { Agent, type AgentTool, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import * as compactionModule from "@oh-my-pi/pi-agent-core/compaction";
 import { type AssistantMessage, Effort } from "@oh-my-pi/pi-ai";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
@@ -10,6 +10,7 @@ import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import * as autoThinkingClassifier from "../../src/auto-thinking/classifier";
 import * as imageLoading from "../../src/utils/image-loading";
 import { Effect, Exit, Fiber, Scope } from "effect";
+import { z } from "zod";
 import { ModelRegistry } from "../../src/config/model-registry";
 import { Settings } from "../../src/config/settings";
 import { createTerminalSessionController } from "../../src/modes/terminal-session-controller";
@@ -18,10 +19,13 @@ import {
 	decodeCancelCompactionCommand,
 	decodeRunCompactionCommand,
 	decodeSubmitInputCommand,
+	decodeSetActiveToolsCommand,
 	decodeSetModelCommand,
 	decodeSetThinkingLevelCommand,
 	decodeTransitionGoalModeCommand,
 	decodeTransitionPlanModeCommand,
+	InvalidRunnerCommandError,
+	RunnerToolConfigurationConflictError,
 	RunnerRevisionConflictError,
 	RunnerItemRevisionConflictError,
 	RunnerPromptOperationConflictError,
@@ -107,9 +111,32 @@ async function createLiveFixture(holdProviderResponses = false) {
 	const providerInputs: string[] = [];
 	const providerPlanModeContextCounts: number[] = [];
 	const pendingProviderCompletions: Array<() => void> = [];
+	const alphaTool: AgentTool = {
+		name: "alpha",
+		label: "Alpha",
+		description: "Test tool alpha",
+		parameters: z.object({}),
+		execute: async () => ({ content: [{ type: "text" as const, text: "alpha" }] }),
+	};
+	const betaTool: AgentTool = {
+		name: "beta",
+		label: "Beta",
+		description: "Test tool beta",
+		parameters: z.object({}),
+		execute: async () => ({ content: [{ type: "text" as const, text: "beta" }] }),
+	};
+	const mcpTool = {
+		name: "mcp__test_lookup",
+		label: "test/lookup",
+		description: "Test MCP lookup",
+		parameters: z.object({}),
+		mcpServerName: "test",
+		mcpToolName: "lookup",
+		execute: async () => ({ content: [{ type: "text" as const, text: "mcp" }] }),
+	} as AgentTool;
 	const agent = new Agent({
 		convertToLlm,
-		initialState: { model, systemPrompt: ["test"], tools: [], messages: [] },
+		initialState: { model, systemPrompt: ["test"], tools: [alphaTool], messages: [] },
 		streamFn: (_model, context) => {
 			const lastUser = [...context.messages].reverse().find((message) => message.role === "user");
 			const text =
@@ -161,6 +188,9 @@ async function createLiveFixture(holdProviderResponses = false) {
 	let failNextPromptRebuild = false;
 	let session!: AgentSession;
 	const settings = Settings.isolated({ "compaction.enabled": false });
+	let heldPromptRebuild:
+		| { readonly started: PromiseWithResolvers<void>; readonly release: PromiseWithResolvers<void> }
+		| undefined;
 	session = new AgentSession({
 		agent,
 		sessionManager,
@@ -168,7 +198,19 @@ async function createLiveFixture(holdProviderResponses = false) {
 		settings,
 		convertToLlm,
 		modelRegistry,
+		toolRegistry: new Map([
+			[alphaTool.name, alphaTool],
+			[betaTool.name, betaTool],
+			[mcpTool.name, mcpTool],
+		]),
+		mcpDiscoveryEnabled: true,
 		rebuildSystemPrompt: async () => {
+			if (heldPromptRebuild) {
+				const held = heldPromptRebuild;
+				held.started.resolve();
+				await held.release.promise;
+				heldPromptRebuild = undefined;
+			}
 			if (failNextPromptRebuild) {
 				failNextPromptRebuild = false;
 				throw new Error("prompt rebuild failed once");
@@ -188,6 +230,14 @@ async function createLiveFixture(holdProviderResponses = false) {
 		providerPlanModeContextCounts,
 		settings,
 		modelRegistry,
+		holdNextPromptRebuild: () => {
+			const held = {
+				started: Promise.withResolvers<void>(),
+				release: Promise.withResolvers<void>(),
+			};
+			heldPromptRebuild = held;
+			return held;
+		},
 		alternateModel,
 		failNextPromptRebuild: () => {
 			failNextPromptRebuild = true;
@@ -643,6 +693,9 @@ describe("live SessionRunner", () => {
 						planFilePath: "local://PLAN.md",
 					});
 					expect(entered.session.activeToolNames).not.toContain("resolve");
+					expect(entered.runner.toolConfigurationGeneration).toBe(
+						initial.runner.toolConfigurationGeneration + 1,
+					);
 					expect(
 						fixture.sessionManager
 							.getEntries()
@@ -676,6 +729,9 @@ describe("live SessionRunner", () => {
 					const exited = yield* terminal.snapshot();
 					expect(exited.session.workflow).toMatchObject({ kind: "plan", phase: "paused" });
 					expect(exited.session.activeToolNames).toEqual(initialTools);
+					expect(exited.runner.toolConfigurationGeneration).toBe(
+						entered.runner.toolConfigurationGeneration + 1,
+					);
 					yield* terminal.detach();
 					yield* runner.stop();
 				}),
@@ -714,6 +770,9 @@ describe("live SessionRunner", () => {
 					expect(entered.runner.revision).toBe(initial.runner.revision);
 					expect(entered.session.workflow).toMatchObject({ kind: "goal", phase: "active" });
 					expect(entered.session.activeToolNames).toEqual(initialTools);
+					expect(entered.runner.toolConfigurationGeneration).toBe(
+						initial.runner.toolConfigurationGeneration + 1,
+					);
 					expect(fixture.session.getGoalModeState()).toMatchObject({
 						enabled: true,
 						goal: {
@@ -755,6 +814,9 @@ describe("live SessionRunner", () => {
 						goalId: workflow.goalId,
 					});
 					expect(paused.session.activeToolNames).toEqual(initialTools);
+					expect(paused.runner.toolConfigurationGeneration).toBe(
+						entered.runner.toolConfigurationGeneration + 1,
+					);
 					expect(fixture.session.getGoalModeState()).toMatchObject({
 						enabled: false,
 						goal: { id: workflow.goalId, status: "paused" },
@@ -1139,10 +1201,58 @@ describe("live SessionRunner", () => {
 			expect(modelReceipt.sessionRevision).toBe(beforeModelRevision + 1);
 			expect(controller.snapshot().runner.sessionRevision).toBe(modelReceipt.sessionRevision);
 			expect(controller.snapshot().session.modelSummary?.id).toBe(fixture.alternateModel.id);
+			const betaTools = await controller.setActiveTools({ toolNames: ["beta"] });
+			const alphaTools = await controller.setActiveTools({ toolNames: ["alpha"] });
+			expect(betaTools.toolConfigurationGeneration).toBe(1);
+			expect(betaTools.activeToolNames).toEqual(["beta"]);
+			expect(alphaTools.toolConfigurationGeneration).toBe(2);
+			expect(alphaTools.activeToolNames).toEqual(["alpha"]);
+			expect(controller.snapshot().runner.toolConfigurationGeneration).toBe(2);
 			await controller.close();
 			expect((await run(runner.snapshot())).status).toBe("running");
 			fixture.releaseProviderResponses();
 			await fixture.session.waitForIdle();
+			await run(runner.stop());
+		} finally {
+			fixture.releaseProviderResponses();
+			await Effect.runPromise(Scope.close(scope, Exit.void));
+		}
+	});
+	it("rejects live tool changes while a prompt is active without blocking snapshots", async () => {
+		const fixture = await createLiveFixture(true);
+		const scope = Scope.makeUnsafe("sequential");
+		const run = <A, E>(effect: Effect.Effect<A, E, Scope.Scope>) =>
+			Effect.runPromise(Scope.provide(scope)(effect));
+		const bounded = async <A>(promise: Promise<A>): Promise<A> => {
+			let timer: ReturnType<typeof setTimeout> | undefined;
+			try {
+				return await Promise.race([
+					promise,
+					new Promise<never>((_, reject) => {
+						timer = setTimeout(() => reject(new Error("operation blocked behind active prompt")), 500);
+					}),
+				]);
+			} finally {
+				if (timer) clearTimeout(timer);
+			}
+		};
+		try {
+			const runner = await run(makeSessionRunnerLive(fixture, { mailboxCapacity: 4, eventCapacity: 4 }));
+			const controller = await createTerminalSessionController(runner, { viewId: "busy-tools-terminal" });
+			const prompt = fixture.session.prompt("held tool configuration prompt");
+			for (let attempt = 0; attempt < 100 && !fixture.session.isStreaming; attempt++) {
+				await Bun.sleep(1);
+			}
+			expect(fixture.session.isStreaming).toBe(true);
+			await expect(bounded(controller.setActiveTools({ toolNames: ["beta"] }))).rejects.toBeInstanceOf(
+				SessionStateCommandInFlightError,
+			);
+			const snapshot = await bounded(controller.refresh());
+			expect(snapshot.session.isStreaming).toBe(true);
+			expect(snapshot.runner.toolConfigurationGeneration).toBe(0);
+			fixture.releaseProviderResponses();
+			await prompt;
+			await controller.close();
 			await run(runner.stop());
 		} finally {
 			fixture.releaseProviderResponses();
@@ -1700,6 +1810,88 @@ describe("live SessionRunner", () => {
 					expect(replayed).toBe(first);
 					expect(compactSpy).toHaveBeenCalledTimes(1);
 					expect(fixture.sessionManager.getEntries().filter(entry => entry.type === "compaction")).toHaveLength(0);
+					yield* runner.stop();
+				}),
+			),
+		);
+	});
+
+	it("fences live tool configuration and rolls back failed prompt rebuilds", async () => {
+		const fixture = await createLiveFixture();
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const runner = yield* makeSessionRunnerLive(fixture, { mailboxCapacity: 4, eventCapacity: 8 });
+					const terminal = yield* runner.attachTerminalView(attach("tools-terminal", "controller", 0));
+					const initial = yield* terminal.snapshot();
+					expect(initial.runner.toolConfigurationGeneration).toBe(0);
+					expect(initial.session.activeToolNames).toEqual(["alpha"]);
+
+					const command = (commandId: string, generation: number, toolNames: string[]) =>
+						decodeSetActiveToolsCommand({
+							schemaVersion: 1,
+							kind: "setActiveTools",
+							commandId,
+							correlationId: commandId,
+							viewId: terminal.viewId,
+							controllerEpoch: terminal.epoch,
+							expectedToolConfigurationGeneration: generation,
+							toolNames,
+						});
+					const changed = yield* terminal.setActiveTools(command("tools-beta", 0, ["beta"]));
+					expect(changed.toolConfigurationGeneration).toBe(1);
+					expect(changed.activeToolNames).toEqual(["beta"]);
+					yield* Effect.promise(() => fixture.session.setActiveToolsByName(["alpha"]));
+					yield* Effect.promise(() => fixture.session.setActiveToolsByName(["beta"]));
+					expect(fixture.session.toolConfigurationGeneration).toBe(3);
+
+					const stale = yield* Effect.flip(terminal.setActiveTools(command("tools-stale", 1, ["alpha"])));
+					expect(stale).toBeInstanceOf(RunnerToolConfigurationConflictError);
+					expect(fixture.session.getActiveToolNames()).toEqual(["beta"]);
+
+					const unknown = yield* Effect.flip(terminal.setActiveTools(command("tools-unknown", 3, ["missing"])));
+					expect(unknown).toBeInstanceOf(InvalidRunnerCommandError);
+					expect(fixture.session.getActiveToolNames()).toEqual(["beta"]);
+
+					const previousPrompt = fixture.session.agent.state.systemPrompt;
+					fixture.failNextPromptRebuild();
+					yield* Effect.flip(terminal.setActiveTools(command("tools-fail", 3, ["alpha"])));
+					expect(fixture.session.getActiveToolNames()).toEqual(["beta"]);
+					expect(fixture.session.agent.state.systemPrompt).toEqual(previousPrompt);
+					expect((yield* terminal.snapshot()).runner.toolConfigurationGeneration).toBe(5);
+
+					const recovered = yield* terminal.setActiveTools(command("tools-recover", 5, ["alpha"]));
+					expect(recovered.toolConfigurationGeneration).toBe(6);
+					expect(recovered.activeToolNames).toEqual(["alpha"]);
+					const mcpEntryCount = fixture.sessionManager
+						.getEntries()
+						.filter(entry => entry.type === "mcp_tool_selection").length;
+					const mcpChanged = yield* terminal.setActiveTools(
+						command("tools-mcp", 6, ["mcp__test_lookup"]),
+					);
+					expect(mcpChanged.toolConfigurationGeneration).toBe(7);
+					expect(
+						fixture.sessionManager.getEntries().filter(entry => entry.type === "mcp_tool_selection"),
+					).toHaveLength(mcpEntryCount);
+
+					const held = fixture.holdNextPromptRebuild();
+					const external = yield* Effect.forkScoped(
+						Effect.promise(() => fixture.session.setActiveToolsByName(["beta"])),
+					);
+					yield* Effect.promise(() => held.started.promise);
+					const concurrentCommand = yield* Effect.forkScoped(
+						terminal.setActiveTools(command("tools-concurrent", 7, ["alpha"])),
+					);
+					held.release.resolve();
+					yield* Fiber.join(external);
+					const concurrentConflict = yield* Effect.flip(Fiber.join(concurrentCommand));
+					expect(concurrentConflict).toBeInstanceOf(RunnerToolConfigurationConflictError);
+					expect(fixture.session.toolConfigurationGeneration).toBe(8);
+					expect(fixture.session.getActiveToolNames()).toEqual(["beta"]);
+					expect(() => command("tools-duplicate", 8, ["alpha", "alpha"])).toThrow(
+						InvalidRunnerCommandError,
+					);
+					yield* terminal.detach();
 					yield* runner.stop();
 				}),
 			),

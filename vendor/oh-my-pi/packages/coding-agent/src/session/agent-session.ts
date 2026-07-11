@@ -1303,6 +1303,8 @@ export class AgentSession {
 
 	// Tool registry and prompt builder for extensions
 	#toolRegistry: Map<string, AgentTool>;
+	#toolConfigurationGeneration = 0;
+	#activeToolMutationTail: Promise<void> = Promise.resolve();
 	#transformContext: (messages: AgentMessage[], signal?: AbortSignal) => AgentMessage[] | Promise<AgentMessage[]>;
 	#onPayload: SimpleStreamOptions["onPayload"] | undefined;
 	#onResponse: SimpleStreamOptions["onResponse"] | undefined;
@@ -4632,11 +4634,44 @@ export class AgentSession {
 		);
 	}
 
+	get toolConfigurationGeneration(): number {
+		return this.#toolConfigurationGeneration;
+	}
+
+	async #withActiveToolMutation<A>(operation: () => Promise<A>): Promise<A> {
+		const previous = this.#activeToolMutationTail;
+		const release = Promise.withResolvers<void>();
+		this.#activeToolMutationTail = previous.then(() => release.promise);
+		await previous;
+		try {
+			return await operation();
+		} finally {
+			release.resolve();
+		}
+	}
+
 	async #applyActiveToolsByName(
 		toolNames: string[],
-		options?: { persistMCPSelection?: boolean; previousSelectedMCPToolNames?: string[] },
+		options?: {
+			persistMCPSelection?: boolean;
+			previousSelectedMCPToolNames?: string[];
+			normalizeNames?: boolean;
+		},
 	): Promise<void> {
-		toolNames = [...new Set(toolNames.map(name => name.toLowerCase()))];
+		await this.#withActiveToolMutation(() => this.#applyActiveToolsByNameUnlocked(toolNames, options));
+	}
+
+	async #applyActiveToolsByNameUnlocked(
+		toolNames: string[],
+		options?: {
+			persistMCPSelection?: boolean;
+			previousSelectedMCPToolNames?: string[];
+			normalizeNames?: boolean;
+		},
+	): Promise<void> {
+		toolNames = [
+			...new Set(options?.normalizeNames === false ? toolNames : toolNames.map(name => name.toLowerCase())),
+		];
 		const previousSelectedMCPToolNames = options?.previousSelectedMCPToolNames ?? this.getSelectedMCPToolNames();
 		const tools: AgentTool[] = [];
 		const validToolNames: string[] = [];
@@ -4669,6 +4704,7 @@ export class AgentSession {
 			}
 		}
 		this.agent.setTools(tools);
+		this.#toolConfigurationGeneration += 1;
 
 		// Active tool set changed → discoverable tool list (which excludes already-active tools)
 		// is now stale. Invalidate before any prompt-template hook reads the discovery list.
@@ -4741,6 +4777,78 @@ export class AgentSession {
 	 */
 	async setActiveToolsByName(toolNames: string[]): Promise<void> {
 		await this.#applyActiveToolsByName(toolNames);
+	}
+
+	/**
+	 * Apply a controller-owned live tool configuration without crossing the prompt
+	 * admission boundary. This operation is intentionally non-durable.
+	 */
+	async configureActiveTools(
+		expectedGeneration: number,
+		toolNames: readonly string[],
+	): Promise<
+		| { readonly kind: "conflict"; readonly actualGeneration: number }
+		| {
+				readonly kind: "applied";
+				readonly toolConfigurationGeneration: number;
+				readonly activeToolNames: ReadonlyArray<string>;
+		  }
+	> {
+		const promptGeneration = this.#promptGeneration;
+		if (this.isStreaming || this.isCompacting || this.isRetrying || this.isGeneratingHandoff) {
+			throw new SessionStateCommandInFlightError();
+		}
+		const release = await this.#acquireDurableAdmissionMaintenance();
+		try {
+			if (
+				promptGeneration !== this.#promptGeneration ||
+				this.isStreaming ||
+				this.isCompacting ||
+				this.isRetrying ||
+				this.isGeneratingHandoff
+			) {
+				throw new SessionStateCommandInFlightError();
+			}
+			return await this.#withActiveToolMutation(async () => {
+				if (expectedGeneration !== this.#toolConfigurationGeneration) {
+					return { kind: "conflict" as const, actualGeneration: this.#toolConfigurationGeneration };
+				}
+				for (const name of toolNames) {
+					if (!this.#toolRegistry.has(name)) throw new Error(`Tool "${name}" is unavailable`);
+				}
+				const previousTools = [...this.agent.state.tools];
+				const previousSystemPrompt = this.agent.state.systemPrompt;
+				const previousBaseSystemPrompt = this.#baseSystemPrompt;
+				const previousSignature = this.#lastAppliedToolSignature;
+				const previousPromptModelKey = this.#promptModelKey;
+				const previousSelectedMCPToolNames = new Set(this.#selectedMCPToolNames);
+				const previousSelectedDiscoveredToolNames = new Set(this.#selectedDiscoveredToolNames);
+				try {
+					await this.#applyActiveToolsByNameUnlocked([...toolNames], {
+						normalizeNames: false,
+						persistMCPSelection: false,
+					});
+				} catch (error) {
+					this.agent.setTools(previousTools);
+					this.#toolConfigurationGeneration += 1;
+					this.agent.setSystemPrompt(previousSystemPrompt);
+					this.#baseSystemPrompt = previousBaseSystemPrompt;
+					this.#lastAppliedToolSignature = previousSignature;
+					this.#promptModelKey = previousPromptModelKey;
+					this.#selectedMCPToolNames = previousSelectedMCPToolNames;
+					this.#selectedDiscoveredToolNames = previousSelectedDiscoveredToolNames;
+					this.#invalidateDiscoveryCaches();
+					throw error;
+				}
+				return {
+					kind: "applied" as const,
+					toolConfigurationGeneration: this.#toolConfigurationGeneration,
+					activeToolNames: this.getActiveToolNames(),
+				};
+			});
+		} finally {
+			release();
+		}
 	}
 
 	async #restoreMCPSelectionsForSessionContext(
@@ -5215,15 +5323,13 @@ export class AgentSession {
 		return this.#clientBridge;
 	}
 
-	setClientBridge(bridge: ClientBridge | undefined): void {
+	async setClientBridge(bridge: ClientBridge | undefined): Promise<void> {
 		this.#clientBridge = bridge;
 		this.#acpPermissionDecisions.clear();
-		const activeToolNames = this.getActiveToolNames();
-		const activeTools = activeToolNames
-			.map(name => this.#toolRegistry.get(name))
-			.filter((tool): tool is AgentTool => tool !== undefined)
-			.map(tool => this.#wrapToolForAcpPermission(tool));
-		this.agent.setTools(activeTools);
+		await this.#applyActiveToolsByName(this.getActiveToolNames(), {
+			normalizeNames: false,
+			persistMCPSelection: false,
+		});
 	}
 
 	getCheckpointState(): CheckpointState | undefined {
@@ -12196,10 +12302,13 @@ export class AgentSession {
 					targetSessionFile: sessionPath,
 					error: String(mcpError),
 				});
-				this.#selectedMCPToolNames = new Set(previousSelectedMCPToolNames);
-				this.agent.setTools(previousTools);
-				this.#baseSystemPrompt = previousBaseSystemPrompt;
-				this.agent.setSystemPrompt(previousSystemPrompt);
+				await this.#withActiveToolMutation(async () => {
+					this.#selectedMCPToolNames = new Set(previousSelectedMCPToolNames);
+					this.agent.setTools(previousTools);
+					this.#toolConfigurationGeneration += 1;
+					this.#baseSystemPrompt = previousBaseSystemPrompt;
+					this.agent.setSystemPrompt(previousSystemPrompt);
+				});
 			}
 			this.#baseSystemPrompt = previousBaseSystemPrompt;
 			this.agent.setSystemPrompt(previousSystemPrompt);
