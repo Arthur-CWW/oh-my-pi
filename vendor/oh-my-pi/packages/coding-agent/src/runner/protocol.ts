@@ -1,4 +1,5 @@
 import type { DurableQueuedInput } from "../session/durable-input-queue";
+import type { PlanWorkflowModeSnapshot } from "../session/session-entries";
 import { Schema } from "effect";
 import { InvalidRunnerCommandError, RunnerRevisionConflictError } from "./errors";
 
@@ -102,6 +103,28 @@ export const SetModelCommandSchema = Schema.Struct({
 	}),
 });
 
+export const TransitionPlanModeCommandSchema = Schema.Struct({
+	schemaVersion: Schema.Literal(RUNNER_SCHEMA_VERSION),
+	kind: Schema.Literal("transitionPlanMode"),
+	commandId: Schema.String,
+	correlationId: Schema.String,
+	causationId: Schema.optional(Schema.String),
+	expectedSessionRevision: RunnerRevisionSchema,
+	viewId: Schema.String,
+	controllerEpoch: ControllerEpochSchema,
+	transition: Schema.Union([
+		Schema.Struct({
+			kind: Schema.Literal("enter"),
+			planFilePath: Schema.String,
+			workflow: Schema.Literals(["parallel", "iterative"]),
+		}),
+		Schema.Struct({
+			kind: Schema.Literal("exit"),
+			disposition: Schema.Literals(["paused", "disabled"]),
+		}),
+	]),
+});
+
 export const InterruptPromptCommandSchema = Schema.Struct({
 	schemaVersion: Schema.Literal(RUNNER_SCHEMA_VERSION),
 	kind: Schema.Literal("interruptPrompt"),
@@ -145,6 +168,7 @@ export type SetModelCommand = typeof SetModelCommandSchema.Type;
 export type InterruptPromptCommand = typeof InterruptPromptCommandSchema.Type;
 export type RunCompactionCommand = typeof RunCompactionCommandSchema.Type;
 export type CancelCompactionCommand = typeof CancelCompactionCommandSchema.Type;
+export type TransitionPlanModeCommand = typeof TransitionPlanModeCommandSchema.Type;
 export type RunnerCapability = "observer" | "controller";
 export type RunnerStatus = "running" | "stopping" | "stopped";
 
@@ -198,6 +222,7 @@ export interface SetThinkingLevelReceipt {
 }
 
 export type SetModelReceipt = SetThinkingLevelReceipt;
+export type TransitionPlanModeReceipt = SetThinkingLevelReceipt;
 
 export interface InterruptPromptReceipt {
 	readonly commandId: string;
@@ -261,6 +286,8 @@ export interface SessionRunnerSnapshot {
 				readonly startedSessionRevision: number;
 		  }
 		| undefined;
+	readonly workflow: PlanWorkflowModeSnapshot;
+	readonly activeToolNames: ReadonlyArray<string>;
 	readonly status: RunnerStatus;
 	readonly pendingOperations: number;
 }
@@ -275,6 +302,7 @@ export type RunnerEventKind =
 	| "inputCancelled"
 	| "thinkingLevelChanged"
 	| "modelChanged"
+	| "planModeChanged"
 	| "promptInterrupted"
 	| "compactionCancelRequested"
 	| "compactionCompleted"
@@ -353,6 +381,16 @@ export const decodeSetModelCommand = (input: unknown): SetModelCommand => {
 	} catch (error) {
 		throw new InvalidRunnerCommandError({
 			issue: error instanceof Error ? error.message : "Invalid set-model command",
+		});
+	}
+};
+
+export const decodeTransitionPlanModeCommand = (input: unknown): TransitionPlanModeCommand => {
+	try {
+		return Schema.decodeUnknownSync(TransitionPlanModeCommandSchema)(input);
+	} catch (error) {
+		throw new InvalidRunnerCommandError({
+			issue: error instanceof Error ? error.message : "Invalid plan-mode transition command",
 		});
 	}
 };

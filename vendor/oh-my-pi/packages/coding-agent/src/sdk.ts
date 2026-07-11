@@ -2685,6 +2685,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			parentEvalSessionId: options.parentEvalSessionId,
 			advisorReadOnlyTools,
 		});
+		await session.reconcilePlanWorkflowFromJournal();
 		hasSession = true;
 		if (scopedAsyncJobManager) {
 			session.yieldQueue.register<AsyncResultEntry>("async-result", {

@@ -11,7 +11,7 @@ import { type CreateAgentSessionResult, createAgentSession } from "@oh-my-pi/pi-
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { getRestorableSessionModels } from "@oh-my-pi/pi-coding-agent/session/session-context";
-import { EPHEMERAL_MODEL_CHANGE_ROLE } from "@oh-my-pi/pi-coding-agent/session/session-entries";
+import { EPHEMERAL_MODEL_CHANGE_ROLE, type TransitionPlanModeSessionCommand } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { AUTO_THINKING } from "@oh-my-pi/pi-coding-agent/thinking";
 import { TempDir } from "@oh-my-pi/pi-utils";
@@ -583,6 +583,121 @@ describe("AgentSession model persistence", () => {
 		const resumed = await createStartupResumeSession(sessionFile!);
 		expect(resumed.session.configuredThinkingLevel()).toBe(AUTO_THINKING);
 		expect(resumed.session.isAutoThinking).toBe(true);
+	});
+
+	it("persists and restores plan workflow transitions across SDK reopen", async () => {
+		const initialModel = getAnthropicModelOrThrow("claude-sonnet-4-5");
+		const planModel = getAnthropicModelOrThrow("claude-opus-4-5");
+		const settings = Settings.isolated({
+			modelRoles: {
+				default: `${initialModel.provider}/${initialModel.id}:high`,
+				plan: `${planModel.provider}/${planModel.id}:off`,
+			},
+		});
+		const manager = SessionManager.create(tempDir.path(), path.join(tempDir.path(), "sessions"));
+		const created = await createAgentSession({
+			cwd: tempDir.path(),
+			agentDir: tempDir.path(),
+			authStorage: sharedAuthStorage,
+			modelRegistry: sharedModelRegistry,
+			sessionManager: manager,
+			model: initialModel,
+			thinkingLevel: Effort.High,
+			settings,
+			toolNames: ["read", "edit", "bash"],
+			disableExtensionDiscovery: true,
+			skills: [],
+			contextFiles: [],
+			promptTemplates: [],
+			slashCommands: [],
+			enableMCP: false,
+			enableLsp: false,
+			skipPythonPreflight: true,
+		});
+		session = created.session;
+		const originalTools = [...session.getActiveToolNames()];
+		const baselineSideEntryTypes = session.sessionManager
+			.getEntries()
+			.filter(entry => entry.type !== "workflow_change")
+			.map(entry => entry.type);
+		const sessionFile = session.sessionFile;
+		if (!sessionFile) throw new Error("Expected persisted session file");
+		const enter: TransitionPlanModeSessionCommand = {
+			schemaVersion: 1,
+			kind: "transitionPlanMode",
+			commandId: "sdk-plan-enter",
+			correlationId: "sdk-plan-enter-correlation",
+			expectedSessionRevision: session.sessionManager.getSessionRevision(),
+			transition: {
+				kind: "enter",
+				planFilePath: "local://PLAN.md",
+				workflow: "parallel",
+			},
+		};
+		await session.commitPlanWorkflowTransition(enter);
+		expect(session.getPlanModeState()).toMatchObject({
+			enabled: true,
+			planFilePath: "local://PLAN.md",
+			workflow: "parallel",
+		});
+		expect(session.getActiveToolNames()).not.toContain("resolve");
+		expect(session.model?.id).toBe(planModel.id);
+		expect(session.configuredThinkingLevel()).toBe("off");
+		expect(session.sessionManager.getEntries().filter(entry => entry.type === "workflow_change")).toHaveLength(1);
+		expect(
+			session.sessionManager
+				.getEntries()
+				.filter(entry => entry.type !== "workflow_change")
+				.map(entry => entry.type),
+		).toEqual(baselineSideEntryTypes);
+
+		await session.dispose();
+		session = undefined;
+		const reopened = await createStartupResumeSession(sessionFile, settings);
+		expect(reopened.session.getPlanModeState()).toMatchObject({
+			enabled: true,
+			planFilePath: "local://PLAN.md",
+			workflow: "parallel",
+		});
+		expect(reopened.session.getActiveToolNames()).not.toContain("resolve");
+		expect(reopened.session.model?.id).toBe(planModel.id);
+		expect(reopened.session.configuredThinkingLevel()).toBe("off");
+
+		const pause: TransitionPlanModeSessionCommand = {
+			schemaVersion: 1,
+			kind: "transitionPlanMode",
+			commandId: "sdk-plan-pause",
+			correlationId: "sdk-plan-pause-correlation",
+			expectedSessionRevision: reopened.session.sessionManager.getSessionRevision(),
+			transition: { kind: "exit", disposition: "paused" },
+		};
+		await reopened.session.commitPlanWorkflowTransition(pause);
+		expect(reopened.session.getPlanModeState()).toBeUndefined();
+		expect(reopened.session.getActiveToolNames()).toEqual(originalTools);
+		expect(reopened.session.model?.id).toBe(initialModel.id);
+		expect(reopened.session.configuredThinkingLevel()).toBe(Effort.High);
+		expect(reopened.session.sessionManager.getEntries().filter(entry => entry.type === "workflow_change")).toHaveLength(2);
+		expect(
+			reopened.session.sessionManager
+				.getEntries()
+				.filter(entry => entry.type !== "workflow_change")
+				.map(entry => entry.type),
+		).toEqual(baselineSideEntryTypes);
+
+		await reopened.session.dispose();
+		session = undefined;
+		const resumed = await createStartupResumeSession(sessionFile, settings);
+		expect(resumed.session.getPlanModeState()).toBeUndefined();
+		expect(resumed.session.getActiveToolNames()).toEqual(originalTools);
+		expect(resumed.session.model?.id).toBe(initialModel.id);
+		expect(resumed.session.configuredThinkingLevel()).toBe(Effort.High);
+		expect(resumed.session.sessionManager.getEntries().filter(entry => entry.type === "workflow_change")).toHaveLength(2);
+		expect(
+			resumed.session.sessionManager
+				.getEntries()
+				.filter(entry => entry.type !== "workflow_change")
+				.map(entry => entry.type),
+		).toEqual(baselineSideEntryTypes);
 	});
 
 });

@@ -8,6 +8,7 @@ import type {
 	RunnerImageContent,
 	SetModelReceipt,
 	SetThinkingLevelReceipt,
+	TransitionPlanModeReceipt,
 } from "../runner/protocol";
 import {
 	decodeCancelQueuedInputCommand,
@@ -18,6 +19,7 @@ import {
 	decodeSubmitInputCommand,
 	decodeSetModelCommand,
 	decodeSetThinkingLevelCommand,
+	decodeTransitionPlanModeCommand,
 	RunnerCompactionTargetError,
 	RUNNER_SCHEMA_VERSION,
 } from "../runner/protocol";
@@ -69,6 +71,19 @@ export interface TerminalSetThinkingLevelIntent {
 	readonly causationId?: string;
 }
 
+export interface TerminalTransitionPlanModeIntent {
+	readonly transition:
+		| {
+				readonly kind: "enter";
+				readonly planFilePath: string;
+				readonly workflow: "parallel" | "iterative";
+		  }
+		| { readonly kind: "exit"; readonly disposition: "paused" | "disabled" };
+	readonly commandId?: string;
+	readonly correlationId?: string;
+	readonly causationId?: string;
+}
+
 export interface TerminalInterruptPromptIntent {
 	readonly commandId?: string;
 	readonly correlationId?: string;
@@ -105,6 +120,7 @@ export interface TerminalSessionController {
 	readonly cancel: (intent: TerminalCancelIntent) => Promise<RunnerCommandReceipt>;
 	readonly setModel: (intent: TerminalSetModelIntent) => Promise<SetModelReceipt>;
 	readonly setThinkingLevel: (intent: TerminalSetThinkingLevelIntent) => Promise<SetThinkingLevelReceipt>;
+	readonly transitionPlanMode: (intent: TerminalTransitionPlanModeIntent) => Promise<TransitionPlanModeReceipt>;
 	readonly compact: (intent?: TerminalCompactionIntent) => Promise<RunCompactionReceipt>;
 	readonly cancelCompaction: (
 		intent?: TerminalCancelCompactionIntent,
@@ -310,6 +326,31 @@ export async function createTerminalSessionController(
 							sessionRevision: Math.max(latest.runner.sessionRevision, receipt.sessionRevision),
 						},
 					};
+					return receipt;
+				} catch (error) {
+					await refresh();
+					throw error;
+				}
+			},
+			transitionPlanMode: async (intent) => {
+				const current = await refresh();
+				try {
+					const ids = metadata(intent);
+					const receipt = await run(
+						view!.transitionPlanMode(
+							decodeTransitionPlanModeCommand({
+								schemaVersion: RUNNER_SCHEMA_VERSION,
+								kind: "transitionPlanMode",
+								...ids,
+								...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
+								expectedSessionRevision: current.runner.sessionRevision,
+								viewId,
+								controllerEpoch: view!.epoch,
+								transition: intent.transition,
+							}),
+						),
+					);
+					await refresh();
 					return receipt;
 				} catch (error) {
 					await refresh();

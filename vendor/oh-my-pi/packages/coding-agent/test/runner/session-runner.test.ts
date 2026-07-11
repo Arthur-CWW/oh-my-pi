@@ -20,6 +20,7 @@ import {
 	decodeSubmitInputCommand,
 	decodeSetModelCommand,
 	decodeSetThinkingLevelCommand,
+	decodeTransitionPlanModeCommand,
 	RunnerRevisionConflictError,
 	RunnerItemRevisionConflictError,
 	RunnerPromptOperationConflictError,
@@ -36,6 +37,7 @@ import {
 import { makeSessionRunnerLive } from "../../src/runner/session-runner";
 import { AgentSession } from "../../src/session/agent-session";
 import { AuthStorage } from "../../src/session/auth-storage";
+import { convertToLlm } from "../../src/session/messages";
 import { DurableInputQueue } from "../../src/session/durable-input-queue";
 import {
 	SessionManager,
@@ -102,8 +104,10 @@ async function createLiveFixture(holdProviderResponses = false) {
 	authStorage.setRuntimeApiKey(model.provider, "test-key");
 	const modelRegistry = new ModelRegistry(authStorage, path.join(root, "models.yml"));
 	const providerInputs: string[] = [];
+	const providerPlanModeContextCounts: number[] = [];
 	const pendingProviderCompletions: Array<() => void> = [];
 	const agent = new Agent({
+		convertToLlm,
 		initialState: { model, systemPrompt: ["test"], tools: [], messages: [] },
 		streamFn: (_model, context) => {
 			const lastUser = [...context.messages].reverse().find((message) => message.role === "user");
@@ -112,6 +116,10 @@ async function createLiveFixture(holdProviderResponses = false) {
 					? lastUser.content
 					: lastUser?.content?.find((part) => part.type === "text")?.text;
 			providerInputs.push(text ?? "");
+			const serializedContext = JSON.stringify(context);
+			providerPlanModeContextCounts.push(
+				serializedContext.split("Plan mode is active.").length - 1,
+			);
 			const stream = new AssistantMessageEventStream();
 			const message: AssistantMessage = {
 				role: "assistant",
@@ -157,6 +165,7 @@ async function createLiveFixture(holdProviderResponses = false) {
 		sessionManager,
 		durableInputQueue: queue,
 		settings,
+		convertToLlm,
 		modelRegistry,
 		rebuildSystemPrompt: async () => {
 			if (failNextPromptRebuild) {
@@ -175,6 +184,7 @@ async function createLiveFixture(holdProviderResponses = false) {
 		session,
 		sessionManager,
 		providerInputs,
+		providerPlanModeContextCounts,
 		settings,
 		modelRegistry,
 		alternateModel,
@@ -569,6 +579,183 @@ describe("live SessionRunner", () => {
 		);
 	});
 
+	it("commits and restores plan workflow without side journal entries", async () => {
+		const fixture = await createLiveFixture();
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const runner = yield* makeSessionRunnerLive(fixture, { mailboxCapacity: 4, eventCapacity: 8 });
+					const terminal = yield* runner.attachTerminalView(attach("plan-terminal", "controller", 0));
+					const initial = yield* terminal.snapshot();
+					const initialTools = [...initial.session.activeToolNames];
+					const sideEntryCount = fixture.sessionManager
+						.getEntries()
+						.filter(entry =>
+							entry.type === "mode_change" ||
+							entry.type === "model_change" ||
+							entry.type === "thinking_level_change"
+						).length;
+					const initialQueueEntryCount = (yield* Effect.promise(() => fixture.queue.list())).length;
+					const enter = decodeTransitionPlanModeCommand({
+						schemaVersion: 1,
+						kind: "transitionPlanMode",
+						commandId: "plan-enter",
+						correlationId: "plan-enter-correlation",
+						expectedSessionRevision: initial.runner.sessionRevision,
+						viewId: terminal.viewId,
+						controllerEpoch: terminal.epoch,
+						transition: {
+							kind: "enter",
+							planFilePath: "local://PLAN.md",
+							workflow: "parallel",
+						},
+					});
+					yield* Effect.flip(
+						terminal.transitionPlanMode(
+							decodeTransitionPlanModeCommand({ ...enter, controllerEpoch: terminal.epoch + 1 }),
+						),
+					).pipe(
+						Effect.tap(error =>
+							Effect.sync(() => expect(error).toBeInstanceOf(StaleRunnerControllerLeaseError)),
+						),
+					);
+					yield* Effect.flip(
+						terminal.transitionPlanMode(
+							decodeTransitionPlanModeCommand({
+								...enter,
+								commandId: "plan-stale",
+								correlationId: "plan-stale-correlation",
+								expectedSessionRevision: initial.runner.sessionRevision + 1,
+							}),
+						),
+					).pipe(
+						Effect.tap(error =>
+							Effect.sync(() => expect(error).toBeInstanceOf(SessionRevisionConflictError)),
+						),
+					);
+					const enterReceipt = yield* terminal.transitionPlanMode(enter);
+					const entered = yield* terminal.snapshot();
+					expect(entered.runner.revision).toBe(initial.runner.revision);
+					expect(entered.session.workflow).toMatchObject({
+						kind: "plan",
+						phase: "active",
+						planFilePath: "local://PLAN.md",
+					});
+					expect(entered.session.activeToolNames).not.toContain("resolve");
+					expect(
+						fixture.sessionManager
+							.getEntries()
+							.filter(entry => entry.type === "workflow_change" && entry.command.commandId === enter.commandId),
+					).toHaveLength(1);
+					expect(
+						fixture.sessionManager
+							.getEntries()
+							.filter(entry =>
+								entry.type === "mode_change" ||
+								entry.type === "model_change" ||
+								entry.type === "thinking_level_change"
+							),
+					).toHaveLength(sideEntryCount);
+					expect((yield* Effect.promise(() => fixture.queue.list())).length).toBe(initialQueueEntryCount);
+					const providerRequestCount = fixture.providerPlanModeContextCounts.length;
+					yield* Effect.promise(() => fixture.session.prompt("plan context probe"));
+					yield* Effect.promise(() => fixture.session.waitForIdle());
+					expect(fixture.providerPlanModeContextCounts).toHaveLength(providerRequestCount + 1);
+					expect(fixture.providerPlanModeContextCounts.at(-1)).toBe(1);
+					expect(yield* terminal.transitionPlanMode(enter)).toEqual({ ...enterReceipt, replayed: true });
+
+					const exit = decodeTransitionPlanModeCommand({
+						...enter,
+						commandId: "plan-exit",
+						correlationId: "plan-exit-correlation",
+						expectedSessionRevision: (yield* terminal.snapshot()).runner.sessionRevision,
+						transition: { kind: "exit", disposition: "paused" },
+					});
+					yield* terminal.transitionPlanMode(exit);
+					const exited = yield* terminal.snapshot();
+					expect(exited.session.workflow).toMatchObject({ kind: "plan", phase: "paused" });
+					expect(exited.session.activeToolNames).toEqual(initialTools);
+					yield* terminal.detach();
+					yield* runner.stop();
+				}),
+			),
+		);
+	});
+
+	it("replays a committed plan workflow after prompt rebuild failure without duplicate events", async () => {
+		const fixture = await createLiveFixture();
+		fixture.settings.setRuntimeModelRole(
+			"plan",
+			`${fixture.alternateModel.provider}/${fixture.alternateModel.id}`,
+		);
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const runner = yield* makeSessionRunnerLive(fixture, { mailboxCapacity: 4, eventCapacity: 8 });
+					const terminal = yield* runner.attachTerminalView(attach("plan-reconcile", "controller", 0));
+					const initial = yield* terminal.snapshot();
+					const command = decodeTransitionPlanModeCommand({
+						schemaVersion: 1,
+						kind: "transitionPlanMode",
+						commandId: "plan-reconcile-command",
+						correlationId: "plan-reconcile-correlation",
+						expectedSessionRevision: initial.runner.sessionRevision,
+						viewId: terminal.viewId,
+						controllerEpoch: terminal.epoch,
+						transition: {
+							kind: "enter",
+							planFilePath: "local://PLAN.md",
+							workflow: "parallel",
+						},
+					});
+					fixture.failNextPromptRebuild();
+					yield* Effect.flip(terminal.transitionPlanMode(command)).pipe(
+						Effect.tap(error =>
+							Effect.sync(() => expect(error).toBeInstanceOf(SessionRunnerRuntimeError)),
+						),
+					);
+					expect(
+						fixture.sessionManager
+							.getEntries()
+							.filter(entry => entry.type === "workflow_change" && entry.command.commandId === command.commandId),
+					).toHaveLength(1);
+					const failed = yield* runner.snapshot();
+					expect(failed.sequence).toBe(initial.runner.sequence + 1);
+					expect(failed.sessionRevision).toBe(initial.runner.sessionRevision + 1);
+
+					const replay = yield* terminal.transitionPlanMode(command);
+					expect(replay.replayed).toBe(true);
+					expect((yield* terminal.snapshot()).session.workflow).toMatchObject({
+						kind: "plan",
+						phase: "active",
+					});
+					expect(fixture.session.agent.state.systemPrompt).toEqual([
+						`model:${fixture.alternateModel.provider}/${fixture.alternateModel.id}`,
+					]);
+					expect(
+						fixture.sessionManager
+							.getEntries()
+							.filter(entry => entry.type === "workflow_change" && entry.command.commandId === command.commandId),
+					).toHaveLength(1);
+					expect((yield* runner.snapshot()).sequence).toBe(failed.sequence);
+					const correctiveExit = decodeTransitionPlanModeCommand({
+						...command,
+						commandId: "plan-reconcile-exit",
+						correlationId: "plan-reconcile-exit-correlation",
+						expectedSessionRevision: failed.sessionRevision,
+						transition: { kind: "exit", disposition: "disabled" },
+					});
+					const corrected = yield* terminal.transitionPlanMode(correctiveExit);
+					expect(corrected.sessionRevision).toBe(failed.sessionRevision + 1);
+					expect((yield* terminal.snapshot()).session.workflow).toEqual({ kind: "none" });
+					expect(fixture.session.getPlanModeState()).toBeUndefined();
+					yield* terminal.detach();
+					yield* runner.stop();
+				}),
+			),
+		);
+	});
+
 	it("replays the latest durable model command to finish a failed post-commit prompt rebuild", async () => {
 		const fixture = await createLiveFixture();
 		await Effect.runPromise(
@@ -663,6 +850,30 @@ describe("live SessionRunner", () => {
 				),
 			).rejects.toBeInstanceOf(SessionStateCommandInFlightError);
 			expect(Date.now() - startedAt).toBeLessThan(250);
+			const busyPlan = decodeTransitionPlanModeCommand({
+				schemaVersion: 1,
+				kind: "transitionPlanMode",
+				commandId: "plan-during-drain",
+				correlationId: "plan-during-drain-correlation",
+				expectedSessionRevision: committed.sessionRevision,
+				viewId: terminal.viewId,
+				controllerEpoch: terminal.epoch,
+				transition: {
+					kind: "enter",
+					planFilePath: "local://PLAN.md",
+					workflow: "parallel",
+				},
+			});
+			const planStartedAt = Date.now();
+			await expect(run(terminal.transitionPlanMode(busyPlan))).rejects.toBeInstanceOf(
+				SessionStateCommandInFlightError,
+			);
+			expect(Date.now() - planStartedAt).toBeLessThan(250);
+			expect(
+				fixture.sessionManager
+					.getEntries()
+					.some(entry => entry.type === "workflow_change" && entry.command.commandId === busyPlan.commandId),
+			).toBe(false);
 			expect((await run(runner.snapshot())).status).toBe("running");
 
 			const replay = await run(terminal.setThinkingLevel(committedCommand));

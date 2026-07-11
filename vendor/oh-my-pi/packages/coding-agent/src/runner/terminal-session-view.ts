@@ -3,6 +3,7 @@ import type { Model } from "@oh-my-pi/pi-ai";
 import type { Effect, Scope } from "effect";
 import type { ConfiguredThinkingLevel } from "../thinking";
 import type { AgentSessionEvent } from "../session/agent-session";
+import type { PlanWorkflowModeSnapshot } from "../session/session-entries";
 import type {
 	CancelQueuedInputCommand,
 	CancelCompactionCommand,
@@ -20,6 +21,8 @@ import type {
 	SetThinkingLevelCommand,
 	SetThinkingLevelReceipt,
 	SubmitInputCommand,
+	TransitionPlanModeCommand,
+	TransitionPlanModeReceipt,
 } from "./protocol";
 import type { RunnerFailure } from "./session-runner";
 
@@ -29,6 +32,8 @@ export interface TerminalSessionStateSnapshot {
 	readonly sessionId: string;
 	readonly modelSummary: TerminalModelSnapshot | undefined;
 	readonly configuredThinkingLevel: ConfiguredThinkingLevel | undefined;
+	readonly workflow: PlanWorkflowModeSnapshot;
+	readonly activeToolNames: ReadonlyArray<string>;
 	readonly autoCompactionEnabled: boolean;
 	readonly isStreaming: boolean;
 	readonly isCompacting: boolean;
@@ -72,6 +77,9 @@ export interface TerminalSessionView {
 	readonly setThinkingLevel: (
 		command: SetThinkingLevelCommand,
 	) => Effect.Effect<SetThinkingLevelReceipt, RunnerFailure, Scope.Scope>;
+	readonly transitionPlanMode: (
+		command: TransitionPlanModeCommand,
+	) => Effect.Effect<TransitionPlanModeReceipt, RunnerFailure, Scope.Scope>;
 	readonly compact: (
 		command: RunCompactionCommand,
 	) => Effect.Effect<RunCompactionReceipt, RunnerFailure, Scope.Scope>;

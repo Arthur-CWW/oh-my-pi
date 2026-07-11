@@ -10,7 +10,12 @@ import {
 	type DurableInputQueueEvent,
 	type DurableQueuedInput,
 } from "../session/durable-input-queue";
-import type { SessionEntry, SetModelSessionCommand, SetThinkingSessionCommand } from "../session/session-entries";
+import type {
+	SessionEntry,
+	SetModelSessionCommand,
+	SetThinkingSessionCommand,
+	TransitionPlanModeSessionCommand,
+} from "../session/session-entries";
 import {
 	SessionCommandConflictError,
 	type SessionManager,
@@ -42,6 +47,7 @@ import {
 	decodeSubmitInputCommand,
 	decodeRunCompactionCommand,
 	decodeSetModelCommand,
+	decodeTransitionPlanModeCommand,
 	decodeInterruptPromptCommand,
 	decodeSetThinkingLevelCommand,
 	RUNNER_SCHEMA_VERSION,
@@ -59,6 +65,7 @@ import {
 	type SetModelReceipt,
 	type InterruptPromptCommand,
 	type SetThinkingLevelReceipt,
+	type TransitionPlanModeReceipt,
 	type RunnerControlMetadata,
 	type RunnerEvent,
 	type RunnerEventDelivery,
@@ -133,6 +140,7 @@ export interface ControllerSessionRunnerView extends RunnerViewBase {
 	readonly cancelQueuedInput: (input: unknown) => Effect.Effect<RunnerCommandReceipt, RunnerFailure, Scope.Scope>;
 	readonly setModel: (input: unknown) => Effect.Effect<SetModelReceipt, RunnerFailure, Scope.Scope>;
 	readonly setThinkingLevel: (input: unknown) => Effect.Effect<SetThinkingLevelReceipt, RunnerFailure, Scope.Scope>;
+	readonly transitionPlanMode: (input: unknown) => Effect.Effect<TransitionPlanModeReceipt, RunnerFailure, Scope.Scope>;
 	readonly compact: (command: RunCompactionCommand) => Effect.Effect<RunCompactionReceipt, RunnerFailure, Scope.Scope>;
 	readonly cancelCompaction: (
 		command: CancelCompactionCommand,
@@ -279,6 +287,10 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 		catch: asRunnerFailure,
 	});
 	let sessionRevision = resources.sessionManager.getSessionRevision();
+	const stateCommandFailure = (error: unknown): RunnerFailure => {
+		sessionRevision = Math.max(sessionRevision, resources.sessionManager.getSessionRevision());
+		return asRunnerFailure(error);
+	};
 	const durableItems = new Map(openedItems.map((item) => [item.inputId, item]));
 	const acceptedCommands = new Set<string>();
 	const transcriptEntries = resources.sessionManager.getEntries();
@@ -343,6 +355,8 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 							...activeCompaction,
 							startedSessionRevision: compactionCommands.get(activeCompaction.commandId)!.startedSessionRevision,
 						},
+			workflow: resources.sessionManager.buildSessionContext().workflow ?? { kind: "none" },
+			activeToolNames: resources.session.getActiveToolNames(),
 			status,
 			pendingOperations: pending,
 		} satisfies SessionRunnerSnapshot;
@@ -367,6 +381,8 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 								contextWindow: model.contextWindow,
 							},
 				configuredThinkingLevel: resources.session.configuredThinkingLevel(),
+				workflow: resources.sessionManager.buildSessionContext().workflow ?? { kind: "none" },
+				activeToolNames: resources.session.getActiveToolNames(),
 				autoCompactionEnabled: resources.session.autoCompactionEnabled,
 				isStreaming: resources.session.isStreaming,
 				isCompacting: resources.session.isCompacting,
@@ -603,6 +619,11 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 		controllerEpoch: number,
 		input: unknown,
 	) => Effect.Effect<SetThinkingLevelReceipt, RunnerFailure, Scope.Scope>;
+	let transitionPlanMode!: (
+		viewId: string,
+		controllerEpoch: number,
+		input: unknown,
+	) => Effect.Effect<TransitionPlanModeReceipt, RunnerFailure, Scope.Scope>;
 	let runCompaction!: (
 		viewId: string,
 		controllerEpoch: number,
@@ -652,6 +673,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 			cancelQueuedInput: (input) => cancelQueuedInput(viewId, controllerEpoch, input),
 			setThinkingLevel: (input) => setThinkingLevel(viewId, controllerEpoch, input),
 			setModel: (input) => setModel(viewId, controllerEpoch, input),
+			transitionPlanMode: (input) => transitionPlanMode(viewId, controllerEpoch, input),
 			compact: (input) => runCompaction(viewId, controllerEpoch, input),
 			cancelCompaction: (command) => cancelCompaction(viewId, controllerEpoch, command),
 			interruptPrompt: (command) => interruptPrompt(viewId, controllerEpoch, command),
@@ -1193,7 +1215,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 				};
 				const durable = yield* Effect.tryPromise({
 					try: () => resources.session.commitJournaledModel(journalCommand),
-					catch: asRunnerFailure,
+					catch: stateCommandFailure,
 				});
 				sessionRevision = Math.max(sessionRevision, durable.sessionRevision);
 				if (!durable.replayed) {
@@ -1255,7 +1277,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 				};
 				const durable = yield* Effect.tryPromise({
 					try: () => resources.session.commitJournaledThinkingLevel(journalCommand),
-					catch: asRunnerFailure,
+					catch: stateCommandFailure,
 				});
 				sessionRevision = Math.max(sessionRevision, durable.sessionRevision);
 				if (!durable.replayed) {
@@ -1280,6 +1302,68 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 					sessionRevision: durable.sessionRevision,
 					replayed: durable.replayed,
 				} satisfies SetThinkingLevelReceipt;
+			}),
+		);
+	});
+
+	transitionPlanMode = Effect.fn("Runner.transitionPlanMode")(function* (
+		viewId: string,
+		controllerEpoch: number,
+		input: unknown,
+	) {
+		const command = yield* Effect.try({
+			try: () => decodeTransitionPlanModeCommand(input),
+			catch: asRunnerFailure,
+		});
+		if (command.viewId !== viewId) return yield* mismatchedView(viewId);
+		if (command.controllerEpoch !== controllerEpoch) {
+			return yield* Effect.fail(
+				new StaleRunnerControllerLeaseError({
+					viewId,
+					expectedControllerEpoch: command.controllerEpoch,
+					actualControllerEpoch: controllerEpoch,
+				}),
+			);
+		}
+		return yield* enqueue(
+			Effect.gen(function* () {
+				yield* requireController(viewId, controllerEpoch);
+				const journalCommand: TransitionPlanModeSessionCommand = {
+					schemaVersion: 1,
+					kind: "transitionPlanMode",
+					commandId: command.commandId,
+					correlationId: command.correlationId,
+					...(command.causationId === undefined ? {} : { causationId: command.causationId }),
+					expectedSessionRevision: command.expectedSessionRevision,
+					transition: command.transition,
+				};
+				const durable = yield* Effect.tryPromise({
+					try: () => resources.session.commitPlanWorkflowTransition(journalCommand),
+					catch: stateCommandFailure,
+				});
+				sessionRevision = Math.max(sessionRevision, durable.sessionRevision);
+				if (!durable.replayed) {
+					yield* publishEvent({
+						kind: "planModeChanged",
+						metadata: {
+							schemaVersion: RUNNER_SCHEMA_VERSION,
+							commandId: command.commandId,
+							correlationId: command.correlationId,
+							...(command.causationId === undefined ? {} : { causationId: command.causationId }),
+							expectedRevision: revision,
+						},
+						controllerEpoch,
+						viewId,
+						sessionRevision,
+					});
+				}
+				return {
+					commandId: command.commandId,
+					correlationId: command.correlationId,
+					...(command.causationId === undefined ? {} : { causationId: command.causationId }),
+					sessionRevision: durable.sessionRevision,
+					replayed: durable.replayed,
+				} satisfies TransitionPlanModeReceipt;
 			}),
 		);
 	});
@@ -1530,6 +1614,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 			cancel: attached.cancelQueuedInput,
 			setThinkingLevel: attached.setThinkingLevel,
 			setModel: attached.setModel,
+			transitionPlanMode: attached.transitionPlanMode,
 			compact: attached.compact,
 			cancelCompaction: attached.cancelCompaction,
 			interruptPrompt: attached.interruptPrompt,

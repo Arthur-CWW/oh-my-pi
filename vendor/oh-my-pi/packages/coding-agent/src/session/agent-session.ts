@@ -307,9 +307,13 @@ import type {
 	BranchSummaryEntry,
 	CompactionEntry,
 	NewSessionOptions,
+	PlanWorkflowModeSnapshot,
+	PlanWorkflowRestoreState,
 	SessionCommandReceipt,
 	SetModelSessionCommand,
 	SetThinkingSessionCommand,
+	TransitionPlanModeSessionCommand,
+	WorkflowChangeEntry,
 } from "./session-entries";
 import { EPHEMERAL_MODEL_CHANGE_ROLE } from "./session-entries";
 import { formatSessionHistoryMarkdown } from "./session-history-format";
@@ -1191,6 +1195,7 @@ export class AgentSession {
 	 *  Advisor advice is still recorded into the transcript, just not auto-run. */
 	#advisorAutoResumeSuppressed = false;
 	#planModeState: PlanModeState | undefined;
+	#lastAppliedWorkflowCommandEntryId: string | undefined;
 	#goalModeState: GoalModeState | undefined;
 	#goalRuntime: GoalRuntime;
 	#advisorRuntime?: AdvisorRuntime;
@@ -6180,6 +6185,154 @@ export class AgentSession {
 		} finally {
 			release();
 		}
+	}
+
+	/** Durably transition plan workflow state under the prompt-admission fence. */
+	async commitPlanWorkflowTransition(command: TransitionPlanModeSessionCommand): Promise<SessionCommandReceipt> {
+		const existing = this.sessionManager.getSessionCommandReceipt(command.commandId);
+		if (existing) {
+			const receipt = await this.sessionManager.commitWorkflowCommand(
+				command,
+				{ mode: { kind: "none" }, activeToolNames: [] },
+				{ kind: "none" },
+			);
+			const latest = this.#latestWorkflowChange();
+			if (latest?.id === receipt.entry.id && this.#lastAppliedWorkflowCommandEntryId !== latest.id) {
+				await this.#applyWorkflowEntry(latest);
+			}
+			return receipt;
+		}
+
+		const promptGeneration = this.#promptGeneration;
+		if (this.isStreaming || this.isCompacting || this.isRetrying || this.isGeneratingHandoff) {
+			throw new SessionStateCommandInFlightError();
+		}
+		const release = await this.#acquireDurableAdmissionMaintenance();
+		try {
+			if (
+				promptGeneration !== this.#promptGeneration ||
+				this.isStreaming ||
+				this.isCompacting ||
+				this.isRetrying ||
+				this.isGeneratingHandoff
+			) {
+				throw new SessionStateCommandInFlightError();
+			}
+
+			const latest = this.#latestWorkflowChange();
+			const currentMode = latest?.next ?? this.sessionManager.buildSessionContext().workflow ?? { kind: "none" };
+			const configuredThinkingLevel = this.configuredThinkingLevel();
+			const previous: PlanWorkflowRestoreState =
+				currentMode.kind === "plan" && latest
+					? latest.previous
+					: {
+							mode: currentMode,
+							activeToolNames: this.getActiveToolNames(),
+							...(this.model === undefined ? {} : { model: `${this.model.provider}/${this.model.id}` }),
+							...(configuredThinkingLevel === undefined
+								? {}
+								: { thinkingLevel: configuredThinkingLevel }),
+						};
+			let next: PlanWorkflowModeSnapshot;
+			if (command.transition.kind === "enter") {
+				next = {
+					kind: "plan",
+					phase: "active",
+					planFilePath: command.transition.planFilePath,
+					workflow: command.transition.workflow,
+					reentry: currentMode.kind === "plan",
+				};
+			} else if (command.transition.disposition === "paused" && currentMode.kind === "plan") {
+				next = { ...currentMode, phase: "paused" };
+			} else {
+				next = { kind: "none" };
+			}
+			const receipt = await this.sessionManager.commitWorkflowCommand(command, previous, next);
+			if (!receipt.replayed) {
+				const entry = receipt.entry;
+				if (entry.type !== "workflow_change") throw new Error("Workflow command committed an invalid entry");
+				await this.#applyWorkflowEntry(entry);
+			}
+			return receipt;
+		} finally {
+			release();
+		}
+	}
+
+	/** Restore the latest durable workflow state without appending journal entries. */
+	async reconcilePlanWorkflowFromJournal(): Promise<void> {
+		const latest = this.#latestWorkflowChange();
+		if (!latest) {
+			this.setPlanModeState(undefined);
+			this.#lastAppliedWorkflowCommandEntryId = undefined;
+			return;
+		}
+		if (this.#lastAppliedWorkflowCommandEntryId === latest.id) return;
+		await this.#applyWorkflowEntry(latest);
+	}
+
+	#latestWorkflowChange(): WorkflowChangeEntry | undefined {
+		return this.sessionManager.getBranch().findLast(
+			(entry): entry is WorkflowChangeEntry => entry.type === "workflow_change",
+		);
+	}
+
+	async #applyWorkflowEntry(entry: WorkflowChangeEntry): Promise<void> {
+		if (entry.next.kind === "plan" && entry.next.phase === "active") {
+			const resolved = this.resolveRoleModelWithThinking("plan");
+			const model = resolved.model === undefined ? undefined : `${resolved.model.provider}/${resolved.model.id}`;
+			const thinkingLevel = resolved.explicitThinkingLevel ? resolved.thinkingLevel : undefined;
+			await this.#applyWorkflowRuntime(
+				this.getActiveToolNames().filter(name => name !== "resolve"),
+				model,
+				thinkingLevel,
+				thinkingLevel !== undefined,
+			);
+			this.setPlanModeState({
+				enabled: true,
+				planFilePath: entry.next.planFilePath,
+				workflow: entry.next.workflow,
+				reentry: entry.next.reentry,
+			});
+		} else {
+			await this.#applyWorkflowRuntime(
+				entry.previous.activeToolNames,
+				entry.previous.model,
+				entry.previous.thinkingLevel,
+				true,
+			);
+			this.setPlanModeState(undefined);
+		}
+		this.#lastAppliedWorkflowCommandEntryId = entry.id;
+	}
+
+	async #applyWorkflowRuntime(
+		activeToolNames: string[],
+		modelSelector: string | undefined,
+		thinkingLevel: string | undefined,
+		applyThinkingLevel: boolean,
+	): Promise<void> {
+		const previousEditMode = this.#resolveActiveEditMode();
+		if (modelSelector !== undefined) {
+			const slash = modelSelector.indexOf("/");
+			const model =
+				slash > 0 ? this.#modelRegistry.find(modelSelector.slice(0, slash), modelSelector.slice(slash + 1)) : undefined;
+			if (!model) throw new Error(`Model not found: ${modelSelector}`);
+			if (!this.#modelRegistry.hasConfiguredAuth(model)) {
+				throw new Error(`No API key for ${model.provider}/${model.id}`);
+			}
+			if (!modelsAreEqual(this.model, model)) {
+				this.#clearActiveRetryFallback();
+				this.#setModelWithProviderSessionReset(model);
+			}
+		}
+		if (applyThinkingLevel) {
+			this.applyJournaledThinkingLevel(
+				thinkingLevel === undefined ? undefined : parseConfiguredThinkingLevel(thinkingLevel),
+			);
+		}
+		await this.#syncAfterModelChange(previousEditMode);
+		await this.setActiveToolsByName(activeToolNames);
 	}
 
 	async #acquireDurableAdmissionMaintenance(): Promise<() => void> {
@@ -11769,6 +11922,8 @@ export class AgentSession {
 		const previousBaseSystemPrompt = this.#baseSystemPrompt;
 		const previousSystemPrompt = this.agent.state.systemPrompt;
 		const previousFreshProviderSessionId = this.#freshProviderSessionId;
+		const previousPlanModeState = this.#planModeState;
+		const previousAppliedWorkflowEntryId = this.#lastAppliedWorkflowCommandEntryId;
 		const previousFallbackSelectedMCPToolNames = previousSessionFile
 			? this.#getSessionDefaultSelectedMCPToolNames(previousSessionFile)
 			: undefined;
@@ -11877,6 +12032,8 @@ export class AgentSession {
 				this.#resetHindsightConversationTrackingIfHindsight();
 				this.#resetMnemopiConversationTrackingIfMnemopi();
 			}
+			this.#lastAppliedWorkflowCommandEntryId = undefined;
+			await this.reconcilePlanWorkflowFromJournal();
 			this.#restartAdvisorRuntime();
 			this.#reconnectToAgent();
 			try {
@@ -11924,6 +12081,8 @@ export class AgentSession {
 			this.#autoThinking = previousAutoThinking;
 			this.#autoResolvedLevel = previousAutoResolvedLevel;
 			this.#applyThinkingLevelToAgent(previousThinkingLevel);
+			this.#planModeState = previousPlanModeState;
+			this.#lastAppliedWorkflowCommandEntryId = previousAppliedWorkflowEntryId;
 			this.agent.serviceTier = previousServiceTier;
 			this.#syncTodoPhasesFromBranch();
 			this.#restartAdvisorRuntime();
