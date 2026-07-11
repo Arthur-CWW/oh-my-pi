@@ -184,3 +184,29 @@ The local annotation contract uses a unit identity, exact block and verbatim anc
 **Evidence:** Arthur reading the live annotations on 2026-07-11: “the annotations are pretty nice,” with concern that selection may over-rely on the recovered Claude/Fable-adjacent conversation
 
 Keep the existing live and staged annotations available for review. The next question is whether their chosen targets represent the chapter as a whole or disproportionately mirror one conversation’s examples. Compare them against the chapter-level model, selective pre-read glossary, and Arthur’s actual selections. Revise or add only where a concrete omission, duplication, or wrong-level explanation appears.
+
+## 2026-07-11 — Design work uses model portfolios, not a single-model assumption
+
+**Status:** Arthur preference / active experiment  
+**Scope:** UI/UX design and implementation  
+**Relationships:** `corrects` → routing all taste work to Opus by default; `evidence_for` → inspectable proof before model preference hardens  
+**Evidence:** Arthur requested parallel Opus 4.6, GPT-5.6 Terra, and GPT-5.6 Sol implementations of the same reader brief, each available under a distinct portless surface with cost and QA evidence
+
+For consequential design work, a useful evaluation pattern is:
+
+1. freeze one baseline screenshot and source snapshot;
+2. give multiple models the same high-level brief, constraints, and acceptance rubric;
+3. keep proposals private rather than allowing shared-tree collisions;
+4. build proposals sequentially, then serve all bundles concurrently;
+5. compare visual intuition, functional preservation, correction burden, latency, and cost;
+6. preserve the first attempts rather than silently repairing them before comparison;
+7. record Arthur’s choice and the specific ideas worth merging.
+
+Current live comparison:
+
+- `http://reader-compare.localhost:1355`
+- Opus: `http://reader-opus.localhost:1355`
+- Terra: `http://reader-terra.localhost:1355`
+- Sol: `http://reader-sol.localhost:1355`
+
+The first reader portfolio suggests Terra and Sol can perform real design work and should not be treated only as logic lanes. Terra is the preferred next experiment when a single non-portfolio design worker is needed; this is a dated preference, not a permanent capability claim. Actual billing telemetry was unavailable, so the comparison reports public API-equivalent estimates separately from actual spend.
