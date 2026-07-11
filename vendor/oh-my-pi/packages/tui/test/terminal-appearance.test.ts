@@ -271,6 +271,27 @@ describe("ProcessTerminal OSC 11 appearance detection", () => {
 		terminal.stop();
 	});
 
+	for (const [name, terminator] of [
+		["BEL", "\x07"],
+		["ST", "\x1b\\"],
+	] as const) {
+		it(`reassembles a legitimate split OSC 11 reply terminated by ${name}`, () => {
+			vi.useFakeTimers();
+			const { terminal, received } = setupTerminal();
+			const appearances: string[] = [];
+			terminal.onAppearanceChange(appearance => appearances.push(appearance));
+
+			process.stdin.emit("data", "\x1b]11;rgb:ff");
+			vi.advanceTimersByTime(51);
+			process.stdin.emit("data", `/ff/ff${terminator}`);
+
+			expect(terminal.appearance).toBe("light");
+			expect(appearances).toEqual(["light"]);
+			expect(received).toEqual([]);
+			terminal.stop();
+		});
+	}
+
 	it("partial OSC 11 buffer does not swallow unrelated input", () => {
 		vi.useFakeTimers();
 		const { terminal, received } = setupTerminal();
@@ -290,22 +311,28 @@ describe("ProcessTerminal OSC 11 appearance detection", () => {
 		terminal.stop();
 	});
 
-	it("keeps the prompt editable after a busy loop flushes a partial OSC reply", () => {
+	it("keeps the prompt editable after a busy loop flushes a partial OSC reply without leaking resources", () => {
 		vi.useFakeTimers();
+		const stdinDataListeners = process.stdin.listenerCount("data");
+		const stdoutResizeListeners = process.stdout.listenerCount("resize");
 		const editor = new Editor(defaultEditorTheme);
 		const { terminal, writes } = setupTerminal(data => editor.handleInput(data));
-		try {
-			// Streaming/render work can keep Bun busy long enough for StdinBuffer to
-			// flush a terminal capability reply before its tail reaches the TUI.
-			process.stdin.emit("data", "\x1b]11;rgb:ff");
-			vi.advanceTimersByTime(51);
-			process.stdin.emit("data", "queue");
 
-			expect(editor.getText()).toBe("queue");
-			expect(writes).toContain("\x1b]11;?\x07");
-		} finally {
-			terminal.stop();
-		}
+		// Streaming/render work can keep Bun busy long enough for StdinBuffer to
+		// flush a terminal capability reply before its tail reaches the TUI.
+		process.stdin.emit("data", "\x1b]11;rgb:ff");
+		vi.advanceTimersByTime(51);
+		process.stdin.emit("data", "queue");
+
+		expect(editor.getText()).toBe("queue");
+		expect(writes).toContain("\x1b]11;?\x07");
+
+		terminal.stop();
+		expect(process.stdin.listenerCount("data")).toBe(stdinDataListeners);
+		expect(process.stdout.listenerCount("resize")).toBe(stdoutResizeListeners);
+		const writesAfterStop = writes.length;
+		vi.advanceTimersByTime(60_000);
+		expect(writes).toHaveLength(writesAfterStop);
 	});
 
 	it("DA1 from old query does not cancel new queued query", () => {

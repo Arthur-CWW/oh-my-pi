@@ -380,6 +380,59 @@ function parseOsc99KeyValues(section: string): Map<string, string> {
 	}
 	return values;
 }
+
+type Osc11ReplyParse =
+	| { state: "complete"; red: string; green: string; blue: string }
+	| { state: "incomplete" }
+	| { state: "invalid" };
+
+/**
+ * Parse a complete or incrementally delivered OSC 11 response. Prefix
+ * recognition is deliberately grammar-bound: once a scalar cannot still form
+ * `rgb[a]:H/H/H` plus BEL/ST, it belongs to application input.
+ */
+function parseOsc11Reply(value: string): Osc11ReplyParse {
+	const complete = value.match(
+		/^\x1b\]11;rgba?:([0-9a-fA-F]{1,4})\/([0-9a-fA-F]{1,4})\/([0-9a-fA-F]{1,4})(?:\x07|\x1b\\)$/,
+	);
+	if (complete) {
+		return { state: "complete", red: complete[1]!, green: complete[2]!, blue: complete[3]! };
+	}
+
+	const headers = ["\x1b]11;rgb:", "\x1b]11;rgba:"];
+	if (headers.some(header => header.startsWith(value))) return { state: "incomplete" };
+	const header = headers.find(candidate => value.startsWith(candidate));
+	if (!header) return { state: "invalid" };
+
+	let body = value.slice(header.length);
+	if (body.endsWith("\x1b")) body = body.slice(0, -1);
+	if (/[\x00-\x1f\x7f]/.test(body)) return { state: "invalid" };
+	const components = body.split("/");
+	if (components.length > 3) return { state: "invalid" };
+	for (let index = 0; index < components.length; index++) {
+		const component = components[index]!;
+		const mayBeEmpty = index === components.length - 1;
+		if ((!mayBeEmpty && component.length === 0) || component.length > 4 || !/^[0-9a-fA-F]*$/.test(component)) {
+			return { state: "invalid" };
+		}
+	}
+	return { state: "incomplete" };
+}
+
+/**
+ * Kitty's OSC 99 capability reply mirrors the queried metadata and returns a
+ * `p=` capability list. Keep only prefixes that can still satisfy that reply
+ * grammar, so a stalled optional probe cannot capture normal typing.
+ */
+function isOsc99ReplyPrefix(value: string, pendingId: string): boolean {
+	const header = `\x1b]99;i=${pendingId}:p=?;p=`;
+	if (header.startsWith(value)) return true;
+	if (!value.startsWith(header)) return false;
+	let payload = value.slice(header.length);
+	if (payload.endsWith("\x1b")) payload = payload.slice(0, -1);
+	if (/[\x00-\x1f\x7f;]/.test(payload)) return false;
+	return /^[a-zA-Z0-9_-]*(?:,[a-zA-Z0-9_-]*)*$/.test(payload);
+}
 /**
  * Real terminal using process.stdin/stdout
  */
@@ -637,9 +690,6 @@ export class ProcessTerminal implements Terminal {
 		// Mode 2031 DSR response: \x1b[?997;{1=dark,2=light}n
 		const appearanceDsrPattern = /^\x1b\[\?997;([12])n$/;
 
-		// OSC 11 response: \x1b]11;rgb:RR/GG/BB or rgba:RR/GG/BB, terminated by BEL or ST.
-		const osc11ResponsePattern =
-			/^\x1b\]11;rgba?:([0-9a-fA-F]{1,4})\/([0-9a-fA-F]{1,4})\/([0-9a-fA-F]{1,4})(?:\x07|\x1b\\)$/;
 
 		// DA1 (Primary Device Attributes) response: \x1b[?...c
 		const da1ResponsePattern = /^\x1b\[\?[\d;]*c$/;
@@ -839,44 +889,43 @@ export class ProcessTerminal implements Terminal {
 				return;
 			}
 
-			// OSC 11 replies can be split if the stdin buffer flushes a partial sequence.
-			// A following printable sequence is ambiguous: it could be the tail of the
-			// reply, or a user keystroke delivered after a busy event loop delayed the
-			// reply. Input must win that ambiguity. Dropping an incomplete capability
-			// reply only leaves appearance unknown; treating a keystroke as its tail
-			// leaves the prompt permanently unresponsive until another escape arrives.
+			// Reassemble only while the accumulated bytes remain a valid OSC 11
+			// prefix. A grammar mismatch abandons the optional probe and lets the
+			// current event flow to the editor immediately; previously received
+			// probe bytes remain terminal noise.
 			if (this.#osc11Pending && (this.#osc11ResponseBuffer || sequence.startsWith("\x1b]11;"))) {
-				if (this.#osc11ResponseBuffer && sequence.startsWith("\x1b") && sequence !== "\x1b\\") {
-					this.#osc11ResponseBuffer = "";
-					// Fall through to normal input handling below.
-				} else if (this.#osc11ResponseBuffer && !sequence.startsWith("\x1b")) {
-					this.#osc11ResponseBuffer = "";
-					// Fall through: never let a partial terminal reply capture typing.
-				} else {
-					this.#osc11ResponseBuffer += sequence;
-					const osc11Match = this.#osc11ResponseBuffer.match(osc11ResponsePattern);
-					if (!osc11Match) return;
+				const candidate = this.#osc11ResponseBuffer + sequence;
+				const parsed = parseOsc11Reply(candidate);
+				if (parsed.state === "complete") {
 					this.#osc11Pending = false;
 					this.#osc11ResponseBuffer = "";
-					this.#handleOsc11Response(osc11Match[1]!, osc11Match[2]!, osc11Match[3]!);
+					this.#handleOsc11Response(parsed.red, parsed.green, parsed.blue);
 					return;
 				}
+				if (parsed.state === "incomplete" && candidate.length <= 256) {
+					this.#osc11ResponseBuffer = candidate;
+					return;
+				}
+				this.#osc11ResponseBuffer = "";
+				// Fall through with the event that disproved the reply grammar.
 			}
 
 			if (this.#osc99PendingId && (this.#osc99ResponseBuffer || sequence.startsWith("\x1b]99;"))) {
-				if (this.#osc99ResponseBuffer && sequence.startsWith("\x1b") && sequence !== "\x1b\\") {
-					this.#osc99ResponseBuffer = "";
-				} else if (this.#osc99ResponseBuffer && !sequence.startsWith("\x1b")) {
-					this.#osc99ResponseBuffer = "";
-				} else {
-					this.#osc99ResponseBuffer += sequence;
-					const osc99Match = this.#osc99ResponseBuffer.match(/^\x1b\]99;([^;]*);([\s\S]*?)(?:\x07|\x1b\\)$/u);
-					if (!osc99Match) return;
+				const candidate = this.#osc99ResponseBuffer + sequence;
+				const osc99Match = candidate.match(/^\x1b\]99;([^;]*);([\s\S]*?)(?:\x07|\x1b\\)$/u);
+				if (osc99Match) {
 					const [, meta, payload] = osc99Match;
 					this.#osc99ResponseBuffer = "";
 					this.#handleOsc99CapabilityResponse(meta!, payload!);
 					return;
 				}
+				if (candidate.length <= 256 && isOsc99ReplyPrefix(candidate, this.#osc99PendingId)) {
+					this.#osc99ResponseBuffer = candidate;
+					return;
+				}
+				this.#osc99ResponseBuffer = "";
+				// Fall through with unrelated input; the optional probe stays
+				// pending until its DA1 sentinel resolves it.
 			}
 
 			// Mode 2031 change notification: re-query OSC 11 with 100ms debounce
