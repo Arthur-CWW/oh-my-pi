@@ -1,11 +1,14 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
+import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 import {
 	acquireSessionOwnership,
+	decodeCmuxOwnerView,
 	decodeSessionLeaseV1,
 	ExternalSessionOwnerUnverifiable,
+	inspectLiveSessionOwnerView,
 	inspectSessionOwnership,
 } from "@oh-my-pi/pi-coding-agent/session/session-ownership";
 
@@ -19,6 +22,68 @@ async function fixture(): Promise<{ root: string; session: string }> {
 	return { root, session };
 }
 
+const workspaceId = "11111111-1111-1111-1111-111111111111";
+const surfaceId = "22222222-2222-2222-2222-222222222222";
+
+async function claimPath(root: string): Promise<string> {
+	const [key] = await fs.readdir(path.join(root, "owners-v1"));
+	return path.join(root, "owners-v1", key, "claim");
+}
+
+async function startOwnerServer(socketPath: string, ownerEpoch: string): Promise<net.Server> {
+	const server = net.createServer(socket => {
+		socket.on("data", data => {
+			const request = JSON.parse(data.toString()) as { nonce: string };
+			socket.end(
+				`${JSON.stringify({
+					t: "ownerProof",
+					nonce: request.nonce,
+					ownerEpoch,
+					sessionMatch: true,
+					phase: "running",
+				})}\n`,
+			);
+		});
+	});
+	const result = Promise.withResolvers<void>();
+	server.once("error", result.reject);
+	server.listen(socketPath, () => result.resolve());
+	await result.promise;
+	return server;
+}
+
+async function closeServer(server: net.Server): Promise<void> {
+	const result = Promise.withResolvers<void>();
+	server.close(error => (error ? result.reject(error) : result.resolve()));
+	await result.promise;
+}
+
+function setCmuxEnvironment(name: "CMUX_WORKSPACE_ID" | "CMUX_SURFACE_ID" | "CMUX_SOCKET_PATH", value: string | undefined): void {
+	if (value === undefined) delete process.env[name];
+	else process.env[name] = value;
+}
+
+async function withCmuxEnvironment(
+	callback: () => Promise<void>,
+	values: { workspaceId?: string; surfaceId?: string; socketPath?: string },
+): Promise<void> {
+	const original = {
+		workspaceId: process.env.CMUX_WORKSPACE_ID,
+		surfaceId: process.env.CMUX_SURFACE_ID,
+		socketPath: process.env.CMUX_SOCKET_PATH,
+	};
+	try {
+		setCmuxEnvironment("CMUX_WORKSPACE_ID", values.workspaceId);
+		setCmuxEnvironment("CMUX_SURFACE_ID", values.surfaceId);
+		setCmuxEnvironment("CMUX_SOCKET_PATH", values.socketPath);
+		await callback();
+	} finally {
+		setCmuxEnvironment("CMUX_WORKSPACE_ID", original.workspaceId);
+		setCmuxEnvironment("CMUX_SURFACE_ID", original.surfaceId);
+		setCmuxEnvironment("CMUX_SOCKET_PATH", original.socketPath);
+	}
+}
+
 afterEach(async () => {
 	await Promise.all(roots.splice(0).map(root => fs.rm(root, { recursive: true, force: true })));
 });
@@ -26,6 +91,100 @@ afterEach(async () => {
 describe("owners-v1 OMP guard", () => {
 	it("uses the closed v1 decoder", () => {
 		expect(decodeSessionLeaseV1({ version: 1 })).toBeNull();
+	});
+
+	it("strictly decodes valid cmux owner views", () => {
+		const view = {
+			version: 1,
+			ownerEpoch: "owner-epoch",
+			cmux: { workspaceId, surfaceId, socketPath: "/tmp/cmux.sock" },
+		};
+		expect(decodeCmuxOwnerView(view)).toEqual(view);
+		expect(decodeCmuxOwnerView({ ...view, extra: true })).toBeUndefined();
+		expect(decodeCmuxOwnerView({ ...view, cmux: { workspaceId, surfaceId } })).toBeUndefined();
+		expect(decodeCmuxOwnerView({ ...view, cmux: { workspaceId: "invalid", surfaceId, socketPath: "/tmp/cmux.sock" } })).toBeUndefined();
+		expect(decodeCmuxOwnerView({ ...view, cmux: { workspaceId, surfaceId, socketPath: "relative.sock" } })).toBeUndefined();
+	});
+
+	it("round-trips a live direct owner cmux view", async () => {
+		const { root, session } = await fixture();
+		const cmuxSocket = path.join(root, "cmux.sock");
+		await withCmuxEnvironment(async () => {
+			const ownership = await acquireSessionOwnership(session, "parent", { root });
+			const claim = await claimPath(root);
+			const server = await startOwnerServer(path.join(claim, "owner.sock"), ownership.ownerEpoch);
+			try {
+				expect(await inspectLiveSessionOwnerView(session, "parent", { root })).toEqual({
+					version: 1,
+					ownerEpoch: ownership.ownerEpoch,
+					cmux: { workspaceId, surfaceId, socketPath: cmuxSocket },
+				});
+			} finally {
+				await closeServer(server);
+				await ownership.release();
+			}
+		}, { workspaceId, surfaceId, socketPath: cmuxSocket });
+	});
+
+	it("falls back for absent, malformed, or partial legacy sidecars", async () => {
+		const { root, session } = await fixture();
+		await withCmuxEnvironment(async () => {
+			const ownership = await acquireSessionOwnership(session, "parent", { root });
+			const claim = await claimPath(root);
+			const server = await startOwnerServer(path.join(claim, "owner.sock"), ownership.ownerEpoch);
+			try {
+				expect(await inspectLiveSessionOwnerView(session, "parent", { root })).toBeUndefined();
+				await fs.writeFile(path.join(claim, "view.json"), JSON.stringify({ version: 1, ownerEpoch: ownership.ownerEpoch }));
+				expect(await inspectLiveSessionOwnerView(session, "parent", { root })).toBeUndefined();
+				await fs.writeFile(path.join(claim, "view.json"), "{");
+				expect(await inspectLiveSessionOwnerView(session, "parent", { root })).toBeUndefined();
+			} finally {
+				await closeServer(server);
+				await ownership.release();
+			}
+		}, {});
+	});
+
+	it("rejects an epoch-mismatched view after takeover", async () => {
+		const { root, session } = await fixture();
+		const ownership = await acquireSessionOwnership(session, "parent", { root });
+		const claim = await claimPath(root);
+		const leaseFile = path.join(claim, "lease.json");
+		const lease = JSON.parse(await fs.readFile(leaseFile, "utf8")) as { ownerEpoch: string };
+		const takeoverEpoch = "takeover-epoch";
+		await fs.writeFile(leaseFile, JSON.stringify({ ...lease, ownerEpoch: takeoverEpoch }));
+		await fs.writeFile(
+			path.join(claim, "view.json"),
+			JSON.stringify({
+				version: 1,
+				ownerEpoch: ownership.ownerEpoch,
+				cmux: { workspaceId, surfaceId, socketPath: path.join(root, "cmux.sock") },
+			}),
+		);
+		const server = await startOwnerServer(path.join(claim, "owner.sock"), takeoverEpoch);
+		try {
+			expect(await inspectLiveSessionOwnerView(session, "parent", { root })).toBeUndefined();
+		} finally {
+			await closeServer(server);
+			await ownership.release();
+		}
+	});
+
+	it("ignores unavailable sidecar metadata without fencing ownership", async () => {
+		const { root, session } = await fixture();
+		await withCmuxEnvironment(async () => {
+			const ownership = await acquireSessionOwnership(session, "parent", { root });
+			const claim = await claimPath(root);
+			await fs.mkdir(path.join(claim, "view.json"));
+			const server = await startOwnerServer(path.join(claim, "owner.sock"), ownership.ownerEpoch);
+			try {
+				expect(await ownership.isCurrent()).toBe(true);
+				expect(await inspectLiveSessionOwnerView(session, "parent", { root })).toBeUndefined();
+			} finally {
+				await closeServer(server);
+				await ownership.release();
+			}
+		}, { workspaceId: "invalid", surfaceId, socketPath: path.join(root, "cmux.sock") });
 	});
 
 	it("acquires and releases only its own epoch", async () => {

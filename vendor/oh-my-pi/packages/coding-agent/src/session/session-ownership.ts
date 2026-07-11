@@ -26,6 +26,16 @@ export interface SessionLeaseV1 {
 	readonly heartbeatAtUnixMs: number;
 }
 
+export interface CmuxOwnerView {
+	readonly version: 1;
+	readonly ownerEpoch: string;
+	readonly cmux: {
+		readonly workspaceId: string;
+		readonly surfaceId: string;
+		readonly socketPath: string;
+	};
+}
+
 export type SessionOwnershipLookup =
 	| { readonly status: "none" }
 	| { readonly status: "live"; readonly lease: SessionLeaseV1 }
@@ -72,6 +82,7 @@ interface LeaseLocation {
 	readonly parent: string;
 	readonly claim: string;
 	readonly leaseFile: string;
+	readonly viewFile: string;
 	readonly canonicalSessionFile: string;
 }
 
@@ -144,6 +155,41 @@ export function decodeSessionLeaseV1(value: unknown): SessionLeaseV1 | null {
 	};
 }
 
+function isCmuxId(value: unknown): value is string {
+	return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
+
+/** Decodes the closed non-authoritative cmux owner-view filesystem boundary. */
+export function decodeCmuxOwnerView(value: unknown): CmuxOwnerView | undefined {
+	if (!isRecord(value)) return undefined;
+	const keys = Object.keys(value);
+	if (
+		keys.length !== 3 ||
+		!keys.every(key => ["version", "ownerEpoch", "cmux"].includes(key)) ||
+		value.version !== 1 ||
+		typeof value.ownerEpoch !== "string" ||
+		value.ownerEpoch.length === 0 ||
+		!isRecord(value.cmux) ||
+		Object.keys(value.cmux).length !== 3 ||
+		!Object.keys(value.cmux).every(key => ["workspaceId", "surfaceId", "socketPath"].includes(key)) ||
+		!isCmuxId(value.cmux.workspaceId) ||
+		!isCmuxId(value.cmux.surfaceId) ||
+		typeof value.cmux.socketPath !== "string" ||
+		value.cmux.socketPath.length === 0 ||
+		!path.isAbsolute(value.cmux.socketPath)
+	)
+		return undefined;
+	return {
+		version: 1,
+		ownerEpoch: value.ownerEpoch,
+		cmux: {
+			workspaceId: value.cmux.workspaceId,
+			surfaceId: value.cmux.surfaceId,
+			socketPath: value.cmux.socketPath,
+		},
+	};
+}
+
 async function canonicalSessionFile(sessionFile: string): Promise<string> {
 	const resolved = path.resolve(sessionFile);
 	try {
@@ -166,7 +212,14 @@ async function leaseLocation(
 	const key = createHash("sha256").update(`${canonical}\0${sessionId}`).digest("hex");
 	const parent = path.join(root, "owners-v1", key);
 	const claim = path.join(parent, "claim");
-	return { root, parent, claim, leaseFile: path.join(claim, "lease.json"), canonicalSessionFile: canonical };
+	return {
+		root,
+		parent,
+		claim,
+		leaseFile: path.join(claim, "lease.json"),
+		viewFile: path.join(claim, "view.json"),
+		canonicalSessionFile: canonical,
+	};
 }
 
 async function readLease(location: LeaseLocation): Promise<SessionLeaseV1 | null | "corrupt"> {
@@ -193,6 +246,28 @@ async function writeLease(location: LeaseLocation, lease: SessionLeaseV1): Promi
 	const temp = path.join(location.claim, `.lease-${lease.ownerEpoch}.tmp`);
 	await fs.writeFile(temp, JSON.stringify(lease));
 	await fs.rename(temp, location.leaseFile);
+}
+
+function cmuxOwnerViewFromEnvironment(ownerEpoch: string): CmuxOwnerView | undefined {
+	const workspaceId = process.env.CMUX_WORKSPACE_ID;
+	const surfaceId = process.env.CMUX_SURFACE_ID;
+	const socketPath = process.env.CMUX_SOCKET_PATH;
+	if (!workspaceId || !surfaceId || !socketPath) return undefined;
+	return decodeCmuxOwnerView({ version: 1, ownerEpoch, cmux: { workspaceId, surfaceId, socketPath } });
+}
+
+async function writeCmuxOwnerView(location: LeaseLocation, view: CmuxOwnerView): Promise<void> {
+	const temp = path.join(location.claim, `.view-${view.ownerEpoch}.tmp`);
+	await fs.writeFile(temp, JSON.stringify(view));
+	await fs.rename(temp, location.viewFile);
+}
+
+async function readCmuxOwnerView(location: LeaseLocation): Promise<CmuxOwnerView | undefined> {
+	try {
+		return decodeCmuxOwnerView(JSON.parse(await fs.readFile(location.viewFile, "utf8")));
+	} catch {
+		return undefined;
+	}
 }
 function commandOutput(command: string[]): string {
 	const result = Bun.spawnSync({ cmd: command, stdout: "pipe", stderr: "ignore" });
@@ -363,6 +438,21 @@ export async function inspectSessionOwnership(
 	return { status: "stale", lease };
 }
 
+/**
+ * Returns cmux navigation metadata for a currently live owner, when its sidecar
+ * still belongs to that owner epoch. This never influences lease ownership.
+ */
+export async function inspectLiveSessionOwnerView(
+	sessionFile: string,
+	sessionId: string,
+	options: SessionOwnershipOptions = {},
+): Promise<CmuxOwnerView | undefined> {
+	const ownership = await inspectSessionOwnership(sessionFile, sessionId, options);
+	if (ownership.status !== "live") return undefined;
+	const view = await readCmuxOwnerView(await leaseLocation(sessionFile, sessionId, options.root));
+	return view?.ownerEpoch === ownership.lease.ownerEpoch ? view : undefined;
+}
+
 export async function acquireSessionOwnership(
 	sessionFile: string,
 	sessionId: string,
@@ -425,7 +515,10 @@ export async function acquireSessionOwnership(
 	};
 	try {
 		await writeLease(location, lease);
-		await writeLease(location, { ...lease, phase: "running", heartbeatSeq: 1, heartbeatAtUnixMs: Date.now() });
+		const runningLease = { ...lease, phase: "running" as const, heartbeatSeq: 1, heartbeatAtUnixMs: Date.now() };
+		await writeLease(location, runningLease);
+		const view = cmuxOwnerViewFromEnvironment(epoch);
+		if (view) await writeCmuxOwnerView(location, view).catch(() => {});
 		return new DirectOwnershipHandle(location, lease);
 	} catch (error) {
 		await fs.rm(location.claim, { recursive: true, force: true });
