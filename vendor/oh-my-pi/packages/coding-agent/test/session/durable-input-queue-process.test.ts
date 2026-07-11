@@ -31,16 +31,25 @@ const CHILD_SOURCE = [
 	'  if (!attempt) throw new Error("attempt missing");',
 	"  await queue.markRequestStarted(item.inputId, attempt.id);",
 	"  await queue.failRateLimit(item.inputId, attempt.id, retryAt);",
-	"  console.log(JSON.stringify({ inputId: item.inputId, attemptId: attempt.id, retryAt }));",
+	"  const later = await queue.enqueue({ text: \"wait behind reset retry\", deliveryClass: \"followUp\" });",
+	"  console.log(JSON.stringify({ inputId: item.inputId, laterInputId: later.inputId, attemptId: attempt.id, retryAt }));",
 	'} else if (action === "resume-rate-limit") {',
 	"  const retryAt = Number(process.env.RETRY_AT);",
 	"  const before = await queue.replayQueued();",
 	"  const early = await queue.retryDue(retryAt - 1);",
+	'  const blocked = await queue.admitNext("terminal", retryAt - 1);',
 	"  const due = await queue.retryDue(retryAt);",
 	"  const admitted = await queue.admitNext();",
 	'  if (!admitted) throw new Error("due input was not admitted");',
-	"  await complete(admitted);",
-	"  console.log(JSON.stringify({ adopted: adopted.length, before: before.length, early: early.length, due: due.length, inputId: admitted.inputId, admittedAgain: (await queue.admitNext()) !== undefined, replay: (await queue.replayQueued()).length }));",
+	"  const attempt = admitted.attempts.at(-1);",
+	'  if (!attempt) throw new Error("attempt missing");',
+	"  await queue.markRequestStarted(admitted.inputId, attempt.id);",
+	"  const admittedWhileRunning = await queue.admitNext();",
+	"  await queue.completeAttempt(admitted.inputId, attempt.id);",
+	"  const next = await queue.admitNext();",
+	'  if (!next) throw new Error("later input was not admitted");',
+	"  await complete(next);",
+	"  console.log(JSON.stringify({ adopted: adopted.length, before: before.length, early: early.length, blocked: blocked !== undefined, due: due.length, inputId: admitted.inputId, admittedWhileRunning: admittedWhileRunning !== undefined, nextInputId: next.inputId, admittedAgain: (await queue.admitNext()) !== undefined, replay: (await queue.replayQueued()).length }));",
 	'} else if (action === "running") {',
 	'  const item = await queue.enqueue({ text: "uncertain after crash", deliveryClass: "followUp" });',
 	"  const admitted = await queue.admitNext();",
@@ -110,7 +119,7 @@ afterEach(async () => {
 });
 
 describe("durable input queue process replacement", () => {
-	it("resumes one rate-limited input exactly once after its reset", async () => {
+	it("keeps a later input behind a rate-limited head across process replacement", async () => {
 		const root = await fs.mkdtemp(path.join(os.tmpdir(), "omp-queue-process-"));
 		roots.push(root);
 		const sessionFile = path.join(root, "parent.jsonl");
@@ -142,11 +151,14 @@ describe("durable input queue process replacement", () => {
 		expect(replacementHead.ownershipEpoch).toBe("epoch-b");
 		expect((await fs.stat(firstSegment)).size).toBe(firstSegmentBytes);
 		expect(resumed).toMatchObject({
-			adopted: 0,
-			before: 0,
+			adopted: 1,
+			before: 1,
 			early: 0,
+			blocked: false,
 			due: 1,
 			inputId: first.inputId,
+			admittedWhileRunning: false,
+			nextInputId: first.laterInputId,
 			admittedAgain: false,
 			replay: 0,
 		});

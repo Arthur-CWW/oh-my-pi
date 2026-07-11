@@ -180,6 +180,50 @@ describe("durable input queue", () => {
 		expect((await replacementQueue.replayQueued()).map(entry => entry.inputId)).toEqual([item.inputId]);
 	});
 
+	it("blocks later input behind a rate-limited head until retryDue requeues it", async () => {
+		const { root, owner } = await fixture("epoch-a");
+		const queue = await DurableInputQueue.open(owner.handle, root);
+		await queue.adopt();
+		const head = await queue.enqueue({ text: "retry first", deliveryClass: "followUp" });
+		const later = await queue.enqueue({ text: "wait behind retry", deliveryClass: "followUp" });
+		const admitted = await queue.admitNext();
+		const attempt = await queue.markRunning(head.inputId);
+		const retryAt = Date.now() + 1000;
+		await queue.failRateLimit(head.inputId, attempt.id, retryAt);
+
+		expect(admitted?.inputId).toBe(head.inputId);
+		expect(await queue.admitNext("terminal", retryAt - 1)).toBeUndefined();
+		expect(await queue.retryDue(retryAt - 1)).toEqual([]);
+		expect(await queue.admitNext("terminal", retryAt)).toBeUndefined();
+		expect((await queue.retryDue(retryAt)).map(item => item.inputId)).toEqual([head.inputId]);
+
+		const peer = await DurableInputQueue.open(owner.handle, root);
+		await peer.adopt();
+		const concurrentAdmissions = await Promise.all([queue.admitNext(), peer.admitNext()]);
+		const [retried] = concurrentAdmissions.filter(item => item !== undefined);
+		expect(concurrentAdmissions.filter(item => item !== undefined)).toHaveLength(1);
+		expect(retried?.inputId).toBe(head.inputId);
+		const retriedAttempt = await queue.markRunning(head.inputId);
+		expect(await peer.admitNext()).toBeUndefined();
+		await queue.completeAttempt(head.inputId, retriedAttempt.id);
+		expect((await queue.admitNext())?.inputId).toBe(later.inputId);
+	});
+
+	it("exposes the next input when a rate-limited head is explicitly cancelled", async () => {
+		const { root, owner } = await fixture("epoch-a");
+		const queue = await DurableInputQueue.open(owner.handle, root);
+		await queue.adopt();
+		const head = await queue.enqueue({ text: "cancel retry", deliveryClass: "followUp" });
+		const later = await queue.enqueue({ text: "run next", deliveryClass: "followUp" });
+		await queue.admitNext();
+		const attempt = await queue.markRunning(head.inputId);
+		await queue.failRateLimit(head.inputId, attempt.id, Date.now() + 1000);
+
+		expect(await queue.admitNext()).toBeUndefined();
+		expect((await queue.cancel(head.inputId)).state).toBe("cancelled");
+		expect((await queue.admitNext())?.inputId).toBe(later.inputId);
+	});
+
 	it("reads correct segment sizes across multiple generations", async () => {
 		const { root, session, owner: ownerA } = await fixture("epoch-a");
 		const queueA = await DurableInputQueue.open(ownerA.handle, root);

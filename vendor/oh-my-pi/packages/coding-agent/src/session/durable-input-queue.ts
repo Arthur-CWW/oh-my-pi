@@ -673,7 +673,11 @@ export class DurableInputQueue {
 				await this.#assertOwner();
 				const item = (await this.#items()).find(candidate => candidate.inputId === inputId);
 				if (!item) throw new DurableInputQueueConflictError(`Durable input queue item not found: ${inputId}`);
-				if (item.state !== "queued" && item.state !== "admitted") {
+				if (
+					item.state !== "queued" &&
+					item.state !== "admitted" &&
+					item.state !== "failed-rate-limit"
+				) {
 					throw new DurableInputQueueConflictError(`Durable input queue cancellation conflict: ${inputId}`);
 				}
 				if (item.attempts.some(attempt => attempt.state === "started")) {
@@ -706,18 +710,12 @@ export class DurableInputQueue {
 				) {
 					return undefined;
 				}
-				let item: DurableQueuedInput | undefined;
-				for (const candidate of items) {
-					if (
-						candidate.state !== "queued" ||
-						(item !== undefined && item.sequence < candidate.sequence)
-					) {
-						continue;
-					}
-					item = candidate;
-				}
+				const item = items.find(
+					candidate => candidate.state === "queued" || candidate.state === "failed-rate-limit",
+				);
 				if (
 					!item ||
+					item.state === "failed-rate-limit" ||
 					(boundary === "tool" && item.deliveryClass !== "steer") ||
 					(item.retryAt !== undefined && now < item.retryAt)
 				) {
