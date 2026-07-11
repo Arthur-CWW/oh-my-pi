@@ -17,7 +17,7 @@ export type SpawnRouteSource =
 	| "global_default";
 
 /** Sources which can appear after the initial spawn decision has been made. */
-export type SubsequentSpawnRouteSource = SpawnRouteSource | "automatic_reroute";
+export type SubsequentSpawnRouteSource = SpawnRouteSource | "automatic_reroute" | "auth_fallback";
 
 export interface SpawnRouteInput {
 	readonly spawnExplicit?: string | readonly string[];
@@ -274,6 +274,38 @@ export function rerouteSpawnRoute(
 		quotaAdmission,
 		block: undefined,
 		invalid: undefined,
+	};
+}
+
+export function reconcileSpawnRouteAuthFallback(
+	decision: SpawnRouteDecision,
+	model: Model<Api>,
+	thinking: ThinkingLevel | undefined,
+	explicitThinking: boolean,
+): SpawnRouteDecision {
+	if (!decision.source || !decision.route || decision.invalid || decision.block || decision.explicit) {
+		throw new Error("Cannot apply auth fallback to an explicit, blocked, or unresolved spawn route");
+	}
+	const route = toRoute(model, thinking, explicitThinking, decision.parentActiveSelector);
+	const authReason = `auth fallback from ${decision.route.selector} to ${route.selector}`;
+	const reason = decision.reason ? `${decision.reason}; ${authReason}` : authReason;
+	return {
+		...decision,
+		source: "auth_fallback",
+		selectedSelectors: immutable([route.selector]),
+		resolvedPatterns: immutable([route.selector]),
+		route,
+		originalSource: decision.source,
+		originalRoute: decision.route,
+		reason,
+		quotaAdmission: decision.quotaAdmission
+			? {
+					...decision.quotaAdmission,
+					reroutedProvider: route.provider,
+					reroutedModel: route.selector,
+					decisionReason: reason,
+				}
+			: undefined,
 	};
 }
 

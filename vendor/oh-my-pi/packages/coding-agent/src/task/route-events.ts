@@ -62,6 +62,7 @@ export type RouteResolutionSource = Linkage & {
 			| "session_inherited"
 			| "global_default"
 			| "automatic_reroute"
+			| "auth_fallback"
 			| "hard_constraint"
 			| "session_strategy"
 			| "workspace_policy"

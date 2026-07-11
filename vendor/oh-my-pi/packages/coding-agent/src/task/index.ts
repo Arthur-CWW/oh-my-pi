@@ -20,7 +20,7 @@ import type { AgentTool, AgentToolResult, AgentToolUpdateCallback } from "@oh-my
 import type { Usage } from "@oh-my-pi/pi-ai";
 import { $env, logger, prompt, Snowflake } from "@oh-my-pi/pi-utils";
 import type { ToolSession } from "..";
-import { resolveModelRoleValue } from "../config/model-resolver";
+import { resolveModelOverrideWithAuthFallback, resolveModelRoleValue } from "../config/model-resolver";
 import { MCPManager } from "../mcp/manager";
 import type { Theme } from "../modes/theme/theme";
 import planModeSubagentPrompt from "../prompts/system/plan-mode-subagent.md" with { type: "text" };
@@ -65,6 +65,7 @@ import {
 import {
 	admitSpawnRoute,
 	blockSpawnRoute,
+	reconcileSpawnRouteAuthFallback,
 	rerouteSpawnRoute,
 	resolveSpawnRoute,
 	toSpawnRouteReceipt,
@@ -746,6 +747,30 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 		return rerouteSpawnRoute(decision, quotaDecision.routedModel, quotaAdmission, quotaDecision.reason);
 	}
 
+	async #applyAuthFallback(decision: SpawnRouteDecision): Promise<SpawnRouteDecision> {
+		const modelRegistry = this.session.modelRegistry;
+		if (decision.explicit || decision.invalid || decision.block || !decision.route || !modelRegistry) return decision;
+		const resolution = await resolveModelOverrideWithAuthFallback(
+			[...decision.resolvedPatterns],
+			decision.parentActiveSelector,
+			modelRegistry,
+			this.session.settings,
+		);
+		if (!resolution.authFallbackUsed || !resolution.model) return decision;
+		logger.warn("Task route lacks working credentials; reconciling route to parent session model", {
+			requested: decision.route.selector,
+			parentModel: decision.parentActiveSelector,
+			resolvedProvider: resolution.model.provider,
+			resolvedModel: resolution.model.id,
+		});
+		return reconcileSpawnRouteAuthFallback(
+			decision,
+			resolution.model,
+			resolution.thinkingLevel,
+			resolution.explicitThinkingLevel,
+		);
+	}
+
 	#routeError(agentName: string, decision: SpawnRouteDecision): string | undefined {
 		if (decision.invalid) {
 			return formatInvalidModelOverrideError({
@@ -1365,6 +1390,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 		if (!preResolved && !routeDecision.invalid) {
 			routeDecision = await this.#applyQuotaAdmission(routeDecision, signal);
 		}
+		routeDecision = await this.#applyAuthFallback(routeDecision);
 		const routeError = this.#routeError(agentName, routeDecision);
 		if (routeError) {
 			const blockedEntry: SingleResult = {

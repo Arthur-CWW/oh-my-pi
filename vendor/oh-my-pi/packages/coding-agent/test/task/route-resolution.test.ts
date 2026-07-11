@@ -3,7 +3,14 @@ import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import type { ModelLookupRegistry } from "@oh-my-pi/pi-coding-agent/config/model-resolver";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { resolveSpawnRoute, type SpawnRouteInput, type SpawnRouteSource } from "@oh-my-pi/pi-coding-agent/task/route-resolution";
+import {
+	admitSpawnRoute,
+	reconcileSpawnRouteAuthFallback,
+	resolveSpawnRoute,
+	toSpawnRouteReceipt,
+	type SpawnRouteInput,
+	type SpawnRouteSource,
+} from "@oh-my-pi/pi-coding-agent/task/route-resolution";
 
 const primary = buildModel({
 	id: "gpt-5.6-terra",
@@ -148,5 +155,45 @@ describe("resolveSpawnRoute", () => {
 
 		const thinking = resolveSpawnRoute(input({ spawnExplicit: "openai-codex/gpt-5.6-terra:xhigh" }));
 		expect(thinking.route?.thinking).toBe(ThinkingLevel.Medium);
+	});
+
+	it("reconciles auth fallback into the sole receipt while preserving quota history", () => {
+		const selected = admitSpawnRoute(
+			resolveSpawnRoute(
+				input({
+					agentFrontmatter: "openai/smol-literal",
+					parentActiveSelector: "openai-codex/gpt-5.6-terra",
+				}),
+			),
+			{
+				originalProvider: "openai",
+				originalModel: "openai/smol-literal",
+				decisionReason: "quota admitted selected route",
+			},
+		);
+		const reconciled = reconcileSpawnRouteAuthFallback(selected, primary, ThinkingLevel.Low, true);
+		const receipt = toSpawnRouteReceipt(reconciled);
+
+		expect(receipt.source).toBe("auth_fallback");
+		expect(receipt.originalSource).toBe("agent_frontmatter");
+		expect(receipt.originalRoute?.selector).toBe("openai/smol-literal");
+		expect(receipt.route.selector).toBe("openai-codex/gpt-5.6-terra:low");
+		expect(receipt.reason).toBe(
+			"auth fallback from openai/smol-literal to openai-codex/gpt-5.6-terra:low",
+		);
+		expect(reconciled.quotaAdmission).toMatchObject({
+			originalProvider: "openai",
+			originalModel: "openai/smol-literal",
+			reroutedProvider: "openai-codex",
+			reroutedModel: "openai-codex/gpt-5.6-terra:low",
+			decisionReason: "auth fallback from openai/smol-literal to openai-codex/gpt-5.6-terra:low",
+		});
+	});
+
+	it("rejects auth fallback reconciliation for explicit routes", () => {
+		const explicit = resolveSpawnRoute(input({ spawnExplicit: "openai/smol-literal" }));
+		expect(() => reconcileSpawnRouteAuthFallback(explicit, primary, undefined, false)).toThrow(
+			"Cannot apply auth fallback",
+		);
 	});
 });
