@@ -1,4 +1,8 @@
-import type { RunnerState } from "./protocol.js";
+import { Exit } from "effect";
+import type { DurableDispatchState } from "./protocol.js";
 
-/** Provider completion is serialized even though this representative slice has no completion state yet. */
-export const transitionProviderCompletion = (state: RunnerState): RunnerState => state;
+/** Only a successful provider return proves completion; every other exit is side-effect-uncertain. */
+export const providerExitDispatchState = <A, E>(
+	exit: Exit.Exit<A, E>,
+): Extract<DurableDispatchState, "completed" | "uncertain"> =>
+	Exit.isSuccess(exit) ? "completed" : "uncertain";

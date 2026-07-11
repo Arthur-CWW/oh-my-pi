@@ -2,18 +2,23 @@ import { Deferred, Effect, PubSub, Queue, Ref, Scope } from "effect";
 import { DurableRunnerStoreError, InvalidRunnerCommandError, RunnerRevisionConflictError } from "./errors.js";
 import {
 	decodeSubmitInputCommand,
+	stateFromSnapshot,
 	transitionPreparedInput,
+	type DurableRunnerSnapshot,
+	type PreparedDurableInput,
 	type RunnerCommandReceipt,
 	type RunnerEvent,
 	type RunnerState,
 } from "./protocol.js";
 import {
+	beginDurableDispatch,
 	DurableRunnerStoreService,
+	finishDurableDispatch,
 	loadDurableRunnerSnapshot,
 	prepareDurableInput,
 	RunnerProviderService,
 } from "./services.js";
-import { transitionProviderCompletion } from "./transition.js";
+import { providerExitDispatchState } from "./transition.js";
 
 export type RunnerFailure =
 	| DurableRunnerStoreError
@@ -22,6 +27,8 @@ export type RunnerFailure =
 
 export interface RunnerInspection {
 	readonly revision: number;
+	readonly records: DurableRunnerSnapshot["records"];
+	readonly pendingOperations: number;
 }
 
 export type RunnerEventDelivery =
@@ -30,6 +37,7 @@ export type RunnerEventDelivery =
 			readonly kind: "resyncRequired";
 			readonly expectedRevision: number;
 			readonly observedRevision: number;
+			readonly event: RunnerEvent;
 		};
 
 export interface RepresentativeRunnerOptions {
@@ -50,10 +58,7 @@ const asRunnerFailure = (error: unknown): RunnerFailure => {
 	});
 };
 
-/**
- * A deliberately small vertical slice. The queue transports mailbox wakeup IDs;
- * commands and their replies stay in the private pending table until serialized.
- */
+/** A small serialized authority around a durable input outbox and supervised provider fibers. */
 export const makeRepresentativeRunner = Effect.fn("Runner.makeRepresentativeRunner")(function* (
 	options: RepresentativeRunnerOptions,
 ) {
@@ -62,10 +67,7 @@ export const makeRepresentativeRunner = Effect.fn("Runner.makeRepresentativeRunn
 	const mailbox = yield* Queue.bounded<number>(options.mailboxCapacity);
 	const events = yield* PubSub.sliding<RunnerEvent>(options.eventCapacity);
 	const durableSnapshot = yield* loadDurableRunnerSnapshot();
-	const state = yield* Ref.make<RunnerState>({
-		revision: durableSnapshot.revision,
-		processedCommandIds: new Map(durableSnapshot.receipts.map((receipt) => [receipt.commandId, receipt])),
-	});
+	const state = yield* Ref.make<RunnerState>(stateFromSnapshot(durableSnapshot));
 	const pending = new Map<number, Effect.Effect<void, never, Scope.Scope>>();
 	let nextMailboxId = 0;
 
@@ -83,99 +85,115 @@ export const makeRepresentativeRunner = Effect.fn("Runner.makeRepresentativeRunn
 	yield* Effect.forkScoped(drainMailbox, { startImmediately: true });
 
 	const enqueue = Effect.fn("Runner.enqueue")(function* (operation: Effect.Effect<void, never, Scope.Scope>) {
-		const mailboxId = nextMailboxId;
-		nextMailboxId += 1;
+		const mailboxId = nextMailboxId++;
 		yield* Effect.sync(() => pending.set(mailboxId, operation));
-		yield* Queue.offer(mailbox, mailboxId);
-	});
-
-	const reenterProviderCompletion = Effect.fn("Runner.reenterProviderCompletion")(function* () {
-		yield* enqueue(
-			Effect.gen(function* () {
-				const current = yield* Ref.get(state);
-				yield* Ref.set(state, transitionProviderCompletion(current));
-			}).pipe(Effect.asVoid),
+		yield* Queue.offer(mailbox, mailboxId).pipe(
+			Effect.onInterrupt(() =>
+				Effect.sync(() => {
+					if (pending.get(mailboxId) === operation) pending.delete(mailboxId);
+				}),
+			),
 		);
 	});
 
+	const dispatchPrepared = Effect.fn("Runner.dispatchPrepared")(function* (commandId: string) {
+		const record = yield* beginDurableDispatch(commandId);
+		if (!record) return;
+		const input: PreparedDurableInput = {
+			commandId: record.receipt.commandId,
+			inputId: record.receipt.inputId,
+			sequence: record.receipt.sequence,
+			revision: record.receipt.revision,
+			replayed: false,
+		};
+		const invocation = Effect.scoped(provider.run(input)).pipe(
+			Effect.onExit((exit) => finishDurableDispatch(commandId, providerExitDispatchState(exit))),
+			Effect.catchCause(() => Effect.void),
+		);
+		yield* Effect.forkScoped(invocation, { startImmediately: true });
+	});
+
+	// Reconcile before returning the authority. The durable prepared-to-dispatched
+	// CAS prevents two concurrently opened runners from invoking the same record.
+	for (const record of durableSnapshot.records) {
+		if (record.dispatchState === "prepared") yield* dispatchPrepared(record.receipt.commandId);
+	}
+
 	const submitInput = Effect.fn("Runner.submitInput")(function* (input: unknown) {
-		const command = yield* Effect.try({
-			try: () => decodeSubmitInputCommand(input),
-			catch: asRunnerFailure,
-		});
+		const command = yield* Effect.try({ try: () => decodeSubmitInputCommand(input), catch: asRunnerFailure });
 		const reply = yield* Deferred.make<RunnerCommandReceipt, RunnerFailure>();
 		const operation = Effect.gen(function* () {
-			const result = yield* Effect.gen(function* () {
-				const current = yield* Ref.get(state);
-				if (
-					!current.processedCommandIds.has(command.commandId) &&
-					command.expectedRevision !== undefined &&
-					command.expectedRevision !== current.revision
-				) {
-					return yield* new RunnerRevisionConflictError({
-						expectedRevision: command.expectedRevision,
-						actualRevision: current.revision,
-					});
-				}
-				const prepared = yield* prepareDurableInput(command, current.revision + 1);
-				const transition = yield* Effect.try({
-					try: () => transitionPreparedInput(current, command, prepared),
-					catch: asRunnerFailure,
-				});
-				yield* Ref.set(state, transition.state);
-				if (transition.event) {
-					yield* PubSub.publish(events, transition.event);
-					yield* Effect.forkScoped(
-						provider.run(prepared).pipe(
-							Effect.matchEffect({
-								onFailure: () => reenterProviderCompletion(),
-								onSuccess: () => reenterProviderCompletion(),
-							}),
-						),
-						{ startImmediately: true },
-					);
-				}
-				return transition.receipt;
-			}).pipe(Effect.catch((error) => Deferred.fail(reply, error).pipe(Effect.asVoid)));
-			if (result !== undefined) {
-				yield* Deferred.succeed(reply, result);
-			}
-		}).pipe(Effect.provideService(DurableRunnerStoreService, durableStore), Effect.asVoid);
+			const current = yield* Ref.get(state);
+			const prior = current.processedCommandIds.get(command.commandId);
+			if (prior) return { ...prior, replayed: true };
+			const prepared = yield* prepareDurableInput(command, command.expectedRevision ?? current.revision);
+			const transition = transitionPreparedInput(current, command, prepared);
+			yield* Ref.set(state, transition.state);
+			if (transition.event) yield* PubSub.publish(events, transition.event);
+			yield* dispatchPrepared(command.commandId);
+			return transition.receipt;
+		}).pipe(
+			Effect.matchEffect({
+				onFailure: (error) => Deferred.fail(reply, asRunnerFailure(error)),
+				onSuccess: (receipt) => Deferred.succeed(reply, receipt),
+			}),
+			Effect.asVoid,
+			Effect.provideService(DurableRunnerStoreService, durableStore),
+		);
 		yield* enqueue(operation);
 		return yield* Deferred.await(reply);
 	});
 
 	const inspect = Effect.fn("Runner.inspect")(function* () {
-		const reply = yield* Deferred.make<RunnerInspection>();
+		const reply = yield* Deferred.make<RunnerInspection, RunnerFailure>();
 		yield* enqueue(
-			Effect.gen(function* () {
-				const current = yield* Ref.get(state);
-				yield* Deferred.succeed(reply, { revision: current.revision });
-			}).pipe(Effect.asVoid),
+			loadDurableRunnerSnapshot().pipe(
+				Effect.flatMap((snapshot) =>
+					Ref.set(state, stateFromSnapshot(snapshot)).pipe(
+						Effect.andThen(
+							Deferred.succeed(reply, {
+								revision: snapshot.revision,
+								records: snapshot.records,
+								pendingOperations: pending.size,
+							}),
+						),
+					),
+				),
+				Effect.catch((error) => Deferred.fail(reply, error)),
+				Effect.asVoid,
+				Effect.provideService(DurableRunnerStoreService, durableStore),
+			),
 		);
 		return yield* Deferred.await(reply);
 	});
 
 	const subscribe = Effect.fn("Runner.subscribe")(function* () {
 		const subscription = yield* PubSub.subscribe(events);
-		let nextRevision = 1;
-		return {
-			take: PubSub.take(subscription).pipe(
-				Effect.map((event): RunnerEventDelivery => {
+		const snapshot = yield* loadDurableRunnerSnapshot().pipe(
+			Effect.provideService(DurableRunnerStoreService, durableStore),
+		);
+		let nextRevision = snapshot.revision + 1;
+		let takeNext!: Effect.Effect<RunnerEventDelivery>;
+		takeNext = Effect.suspend(() =>
+			PubSub.take(subscription).pipe(
+				Effect.flatMap((event): Effect.Effect<RunnerEventDelivery> => {
+					if (event.revision < nextRevision) return takeNext;
 					if (event.revision !== nextRevision) {
-						const delivery: RunnerEventDelivery = {
-							kind: "resyncRequired",
-							expectedRevision: nextRevision,
-							observedRevision: event.revision,
-						};
+						const expectedRevision = nextRevision;
 						nextRevision = event.revision + 1;
-						return delivery;
+						return Effect.succeed({
+							kind: "resyncRequired",
+							expectedRevision,
+							observedRevision: event.revision,
+							event,
+						});
 					}
-					nextRevision += 1;
-					return { kind: "event", event };
+					nextRevision++;
+					return Effect.succeed({ kind: "event", event });
 				}),
 			),
-		};
+		);
+		return { take: takeNext };
 	});
 
 	return { submitInput, inspect, subscribe };
