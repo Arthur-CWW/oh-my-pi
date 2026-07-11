@@ -40,6 +40,30 @@ export interface DurableInputPayload {
 	readonly images: readonly ImageContent[] | undefined;
 }
 
+export interface DurableInputCommandMetadata {
+	readonly schemaVersion: 1;
+	readonly commandId: string;
+	readonly correlationId: string;
+	readonly causationId?: string;
+	readonly viewId: string;
+	readonly controllerEpoch: number;
+	readonly expectedRevision: number;
+}
+
+export interface DurableInputAdmissionReceipt {
+	readonly item: DurableQueuedInput;
+	readonly command: DurableInputCommandMetadata;
+	readonly runnerRevision: number;
+	readonly replayed: boolean;
+}
+
+export type DurableInputQueueEvent = {
+	readonly kind: "inputAccepted";
+	readonly runnerRevision: number;
+	readonly command: DurableInputCommandMetadata;
+	readonly item: DurableQueuedInput;
+};
+
 export interface DurableInputAttempt {
 	readonly id: string;
 	readonly inputId: string;
@@ -89,6 +113,28 @@ export class DurableInputQueueConflictError extends Error {
 	}
 }
 
+export class DurableInputCommandConflictError extends Error {
+	readonly commandId: string;
+
+	constructor(commandId: string) {
+		super(`Durable input command ID was reused with different content: ${commandId}`);
+		this.name = "DurableInputCommandConflictError";
+		this.commandId = commandId;
+	}
+}
+
+export class DurableInputRunnerRevisionConflictError extends Error {
+	readonly expectedRevision: number;
+	readonly actualRevision: number;
+
+	constructor(expectedRevision: number, actualRevision: number) {
+		super(`Durable input runner revision conflict: expected ${expectedRevision}, actual ${actualRevision}`);
+		this.name = "DurableInputRunnerRevisionConflictError";
+		this.expectedRevision = expectedRevision;
+		this.actualRevision = actualRevision;
+	}
+}
+
 type WriterLockIdentity = { readonly kind: "fingerprint"; readonly value: string } | { readonly kind: "pid" };
 
 interface WriterLock {
@@ -110,6 +156,8 @@ type QueueRecord =
 			readonly sequence?: number;
 			readonly deliveryClass?: DurableInputDeliveryClass;
 			readonly revision?: number;
+			readonly command?: DurableInputCommandMetadata;
+			readonly runnerRevision?: number;
 			readonly ownerEpoch: string;
 	  }
 	| {
@@ -248,6 +296,55 @@ function decodePayload(value: unknown): DurableInputPayload | undefined {
 	};
 }
 
+function decodeCommandMetadata(value: unknown): DurableInputCommandMetadata | undefined {
+	if (!isRecord(value)) return undefined;
+	const hasCausationId = Object.hasOwn(value, "causationId");
+	if (
+		Object.keys(value).length !== (hasCausationId ? 7 : 6) ||
+		!Object.hasOwn(value, "schemaVersion") ||
+		!Object.hasOwn(value, "commandId") ||
+		!Object.hasOwn(value, "correlationId") ||
+		!Object.hasOwn(value, "viewId") ||
+		!Object.hasOwn(value, "controllerEpoch") ||
+		!Object.hasOwn(value, "expectedRevision") ||
+		value.schemaVersion !== 1 ||
+		typeof value.commandId !== "string" ||
+		typeof value.correlationId !== "string" ||
+		(value.causationId !== undefined && typeof value.causationId !== "string") ||
+		typeof value.viewId !== "string" ||
+		!Number.isSafeInteger(value.controllerEpoch) ||
+		(value.controllerEpoch as number) < 0 ||
+		!Number.isSafeInteger(value.expectedRevision) ||
+		(value.expectedRevision as number) < 0
+	) {
+		return undefined;
+	}
+	return {
+		schemaVersion: 1,
+		commandId: value.commandId,
+		correlationId: value.correlationId,
+		...(value.causationId === undefined ? {} : { causationId: value.causationId as string }),
+		viewId: value.viewId,
+		controllerEpoch: value.controllerEpoch as number,
+		expectedRevision: value.expectedRevision as number,
+	};
+}
+
+function structurallyEqual(left: unknown, right: unknown): boolean {
+	if (Object.is(left, right)) return true;
+	if (Array.isArray(left) || Array.isArray(right)) {
+		if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) return false;
+		return left.every((value, index) => structurallyEqual(value, right[index]));
+	}
+	if (!isRecord(left) || !isRecord(right)) return false;
+	const leftKeys = Object.keys(left).filter(key => left[key] !== undefined);
+	const rightKeys = Object.keys(right).filter(key => right[key] !== undefined);
+	if (leftKeys.length !== rightKeys.length) return false;
+	return leftKeys.every(
+		key => Object.hasOwn(right, key) && right[key] !== undefined && structurallyEqual(left[key], right[key]),
+	);
+}
+
 function decodeRecord(value: unknown): QueueRecord | undefined {
 	if (
 		!isRecord(value) ||
@@ -259,12 +356,16 @@ function decodeRecord(value: unknown): QueueRecord | undefined {
 	}
 	switch (value.type) {
 		case "enqueue": {
+			const command = value.command === undefined ? undefined : decodeCommandMetadata(value.command);
 			if (
 				typeof value.id !== "string" ||
 				typeof value.text !== "string" ||
 				(value.sequence !== undefined && !isPositiveSafeInteger(value.sequence)) ||
 				(value.deliveryClass !== undefined && !isDeliveryClass(value.deliveryClass)) ||
-				(value.revision !== undefined && !isPositiveSafeInteger(value.revision))
+				(value.revision !== undefined && !isPositiveSafeInteger(value.revision)) ||
+				(value.command !== undefined && command === undefined) ||
+				(value.runnerRevision !== undefined && !isPositiveSafeInteger(value.runnerRevision)) ||
+				(command === undefined) !== (value.runnerRevision === undefined)
 			) {
 				return undefined;
 			}
@@ -279,6 +380,8 @@ function decodeRecord(value: unknown): QueueRecord | undefined {
 					? {}
 					: { deliveryClass: value.deliveryClass as DurableInputDeliveryClass }),
 				...(value.revision === undefined ? {} : { revision: value.revision as number }),
+				...(command === undefined ? {} : { command }),
+				...(value.runnerRevision === undefined ? {} : { runnerRevision: value.runnerRevision as number }),
 				ownerEpoch: value.ownerEpoch,
 			};
 		}
@@ -403,6 +506,9 @@ export class DurableInputQueue {
 	#activeEpoch: string;
 	#tail: Promise<void> = Promise.resolve();
 	#adopted = false;
+	readonly #commandReceipts = new Map<string, DurableInputAdmissionReceipt>();
+	readonly #listeners = new Set<(event: DurableInputQueueEvent) => void>();
+	#latestRunnerRevision = 0;
 
 	private constructor(root: string, ownership: SessionOwnershipHandle, activeEpoch: string) {
 		this.#root = root;
@@ -423,14 +529,15 @@ export class DurableInputQueue {
 			const head = await DurableInputQueue.#readHead(queueRoot);
 			if (head) {
 				queue.#activeEpoch = head.epoch;
-				return;
+			} else {
+				await DurableInputQueue.#writeHead(queueRoot, {
+					version: QUEUE_VERSION,
+					epoch: initialEpoch,
+					ownershipEpoch: ownership.ownerEpoch,
+					adoptedAt: Date.now(),
+				});
 			}
-			await DurableInputQueue.#writeHead(queueRoot, {
-				version: QUEUE_VERSION,
-				epoch: initialEpoch,
-				ownershipEpoch: ownership.ownerEpoch,
-				adoptedAt: Date.now(),
-			});
+			await queue.#rebuildCommandIndexLocked();
 		});
 		return queue;
 	}
@@ -471,6 +578,121 @@ export class DurableInputQueue {
 				return item;
 			}),
 		);
+	}
+
+	async enqueueCommand(
+		input: {
+			readonly text: string;
+			readonly images?: readonly ImageContent[];
+			readonly deliveryClass: DurableInputDeliveryClass;
+		},
+		command: DurableInputCommandMetadata,
+	): Promise<DurableInputAdmissionReceipt> {
+		const result = await this.#exclusive(() =>
+			this.#withWriterLock(async () => {
+				await this.#assertOwner();
+				const decodedCommand = decodeCommandMetadata(command);
+				if (!decodedCommand || typeof input.text !== "string" || !isDeliveryClass(input.deliveryClass)) {
+					throw new DurableInputQueueConflictError("Invalid durable input command admission");
+				}
+				await this.#rebuildCommandIndexLocked();
+				const existing = this.#commandReceipts.get(command.commandId);
+				if (existing) {
+					if (
+						!structurallyEqual(existing.command, decodedCommand) ||
+						!structurallyEqual(existing.item.payload, { text: input.text, images: input.images }) ||
+						existing.item.deliveryClass !== input.deliveryClass
+					) {
+						throw new DurableInputCommandConflictError(command.commandId);
+					}
+					return { receipt: { ...existing, replayed: true }, accepted: false as const };
+				}
+				if (command.expectedRevision !== this.#latestRunnerRevision) {
+					throw new DurableInputRunnerRevisionConflictError(
+						command.expectedRevision,
+						this.#latestRunnerRevision,
+					);
+				}
+				const sequence =
+					(await this.#items()).reduce((lastSequence, item) => Math.max(lastSequence, item.sequence), 0) + 1;
+				const item: DurableQueuedInput = {
+					inputId: randomUUID(),
+					sequence,
+					deliveryClass: input.deliveryClass,
+					revision: 1,
+					payload: { text: input.text, images: input.images },
+					state: "queued",
+					attempts: [],
+				};
+				const runnerRevision = this.#latestRunnerRevision + 1;
+				await this.#appendLocked({
+					version: QUEUE_VERSION,
+					type: "enqueue",
+					id: item.inputId,
+					text: item.payload.text,
+					images: item.payload.images,
+					sequence: item.sequence,
+					deliveryClass: item.deliveryClass,
+					revision: item.revision,
+					command: decodedCommand,
+					runnerRevision,
+					ownerEpoch: this.#activeEpoch,
+				});
+				const receipt: DurableInputAdmissionReceipt = {
+					item,
+					command: decodedCommand,
+					runnerRevision,
+					replayed: false,
+				};
+				this.#commandReceipts.set(command.commandId, receipt);
+				this.#latestRunnerRevision = runnerRevision;
+				return { receipt, accepted: true as const };
+			}),
+		);
+		if (result.accepted) {
+			this.#emit({
+				kind: "inputAccepted",
+				runnerRevision: result.receipt.runnerRevision,
+				command: result.receipt.command,
+				item: result.receipt.item,
+			});
+		}
+		return result.receipt;
+	}
+
+	subscribe(listener: (event: DurableInputQueueEvent) => void): () => void {
+		this.#listeners.add(listener);
+		return () => {
+			this.#listeners.delete(listener);
+		};
+	}
+
+	async getCommandReceipt(commandId: string): Promise<DurableInputAdmissionReceipt | undefined> {
+		return this.#exclusive(() =>
+			this.#withWriterLock(async () => {
+				await this.#assertOwner();
+				await this.#rebuildCommandIndexLocked();
+				return this.#commandReceipts.get(commandId);
+			}),
+		);
+	}
+
+	async getLatestRunnerRevision(): Promise<number> {
+		return this.#exclusive(() =>
+			this.#withWriterLock(async () => {
+				await this.#assertOwner();
+				await this.#rebuildCommandIndexLocked();
+				return this.#latestRunnerRevision;
+			}),
+		);
+	}
+
+	#emit(event: DurableInputQueueEvent): void {
+		for (const listener of [...this.#listeners]) {
+			try {
+				listener(event);
+			} catch {}
+		}
 	}
 
 	async #acquireWriterLock(): Promise<WriterLock> {
@@ -577,6 +799,7 @@ export class DurableInputQueue {
 				const head = await DurableInputQueue.#readHead(this.#root);
 				if (head?.ownershipEpoch === this.#ownership.ownerEpoch) {
 					this.#activeEpoch = head.epoch;
+					await this.#rebuildCommandIndexLocked();
 					if (this.#adopted) return [];
 					this.#adopted = true;
 					return (await this.#items()).filter(item => item.state === "queued");
@@ -602,6 +825,7 @@ export class DurableInputQueue {
 					ownerEpoch: newEpoch,
 					previousEpoch,
 				});
+				await this.#rebuildCommandIndexLocked();
 
 				return (await this.#items()).filter(item => item.state === "queued");
 			}),
@@ -610,10 +834,13 @@ export class DurableInputQueue {
 
 	/** Returns queued items in durable arrival order without changing their state. */
 	async replayQueued(): Promise<readonly DurableQueuedInput[]> {
-		return this.#exclusive(async () => {
-			await this.#assertOwner();
-			return (await this.#items()).filter(item => item.state === "queued");
-		});
+		return this.#exclusive(() =>
+			this.#withWriterLock(async () => {
+				await this.#assertOwner();
+				await this.#rebuildCommandIndexLocked();
+				return (await this.#items()).filter(item => item.state === "queued");
+			}),
+		);
 	}
 
 	async get(inputId: string): Promise<DurableQueuedInput | undefined> {
@@ -1147,6 +1374,51 @@ export class DurableInputQueue {
 			records.push(...(await this.#readSegment(epoch, boundary)));
 		}
 		return records;
+	}
+
+	async #rebuildCommandIndexLocked(): Promise<void> {
+		const receipts = new Map<string, DurableInputAdmissionReceipt>();
+		const records = await this.#readAllRecords();
+		let latestRunnerRevision = 0;
+		let lastSequence = 0;
+		for (const record of records) {
+			if (record.type !== "enqueue") continue;
+			const sequence = record.sequence ?? lastSequence + 1;
+			if (!isPositiveSafeInteger(sequence) || sequence <= lastSequence) {
+				throw new Error(`Corrupt durable input queue sequence: ${record.id}`);
+			}
+			lastSequence = sequence;
+			if (!record.command) continue;
+			if (
+				record.runnerRevision !== latestRunnerRevision + 1 ||
+				record.sequence === undefined ||
+				record.deliveryClass === undefined ||
+				record.revision === undefined
+			) {
+				throw new Error(`Corrupt durable input command admission: ${record.id}`);
+			}
+			if (receipts.has(record.command.commandId)) {
+				throw new Error(`Duplicate durable input command admission: ${record.command.commandId}`);
+			}
+			latestRunnerRevision = record.runnerRevision;
+			receipts.set(record.command.commandId, {
+				item: {
+					inputId: record.id,
+					sequence: record.sequence,
+					deliveryClass: record.deliveryClass,
+					revision: record.revision,
+					payload: { text: record.text, images: record.images },
+					state: "queued",
+					attempts: [],
+				},
+				command: record.command,
+				runnerRevision: record.runnerRevision,
+				replayed: false,
+			});
+		}
+		this.#commandReceipts.clear();
+		for (const [commandId, receipt] of receipts) this.#commandReceipts.set(commandId, receipt);
+		this.#latestRunnerRevision = latestRunnerRevision;
 	}
 
 	async #readEpochHead(epoch: string): Promise<QueueHead | undefined> {

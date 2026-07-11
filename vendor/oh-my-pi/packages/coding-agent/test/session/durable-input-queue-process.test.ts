@@ -87,6 +87,16 @@ const CHILD_SOURCE = [
 	'} else if (action === "enqueue-once") {',
 	'  const item = await queue.enqueue({ text: process.env.TEXT ?? "concurrent", deliveryClass: "followUp" });',
 	"  console.log(JSON.stringify({ inputId: item.inputId, sequence: item.sequence }));",
+	'} else if (action === "admit-command") {',
+	"  const commandId = process.env.COMMAND_ID;",
+	"  const expectedRevision = Number(process.env.EXPECTED_REVISION);",
+	'  if (!commandId || !Number.isSafeInteger(expectedRevision)) throw new Error("command environment missing");',
+	"  try {",
+	'    const receipt = await queue.enqueueCommand({ text: process.env.TEXT ?? "command", deliveryClass: "followUp" }, { schemaVersion: 1, commandId, correlationId: "correlation-" + commandId, viewId: "view-a", controllerEpoch: 1, expectedRevision });',
+	'    console.log(JSON.stringify({ status: "accepted", inputId: receipt.item.inputId, sequence: receipt.item.sequence, runnerRevision: receipt.runnerRevision, replayed: receipt.replayed }));',
+	"  } catch (error) {",
+	'    console.log(JSON.stringify({ status: "rejected", name: error?.name, expectedRevision: error?.expectedRevision, actualRevision: error?.actualRevision }));',
+	"  }",
 	"} else {",
 	'  throw new Error("unknown action: " + action);',
 	"}",
@@ -335,6 +345,67 @@ describe("durable input queue process replacement", () => {
 			]),
 		);
 		expect(records.map(record => record.sequence).sort((a, b) => Number(a) - Number(b))).toEqual([1, 2]);
+	});
+
+	it("serializes command idempotency and revision CAS across processes", async () => {
+		const root = await fs.mkdtemp(path.join(os.tmpdir(), "omp-queue-command-process-"));
+		roots.push(root);
+		const sessionFile = path.join(root, "parent.jsonl");
+		await fs.writeFile(sessionFile, "");
+		const common = {
+			ROOT: root,
+			SESSION_FILE: sessionFile,
+			EPOCH: "epoch-a",
+			ACTION: "admit-command",
+			COMMAND_ID: "duplicate",
+			EXPECTED_REVISION: "0",
+			TEXT: "identical",
+		};
+		const duplicates = (await Promise.all([runChild(common), runChild(common)])) as Array<{
+			status: string;
+			inputId: string;
+			runnerRevision: number;
+			replayed: boolean;
+		}>;
+		expect(duplicates.map(result => result.status)).toEqual(["accepted", "accepted"]);
+		expect(new Set(duplicates.map(result => result.inputId)).size).toBe(1);
+		expect(duplicates.map(result => result.runnerRevision)).toEqual([1, 1]);
+		expect(duplicates.map(result => result.replayed).sort()).toEqual([false, true]);
+
+		const contenders = await Promise.all([
+			runChild({
+				...common,
+				COMMAND_ID: "contender-a",
+				EXPECTED_REVISION: "1",
+				TEXT: "a",
+			}),
+			runChild({
+				...common,
+				COMMAND_ID: "contender-b",
+				EXPECTED_REVISION: "1",
+				TEXT: "b",
+			}),
+		]);
+		expect(contenders.filter(result => result.status === "accepted")).toHaveLength(1);
+		expect(contenders.filter(result => result.status === "rejected")).toEqual([
+			expect.objectContaining({
+				name: "DurableInputRunnerRevisionConflictError",
+				expectedRevision: 1,
+				actualRevision: 2,
+			}),
+		]);
+
+		const [queueKey] = await fs.readdir(path.join(root, "owners-v1"));
+		if (!queueKey) throw new Error("queue root missing");
+		const queueRoot = path.join(root, "owners-v1", queueKey, "queue-v2");
+		const head = JSON.parse(await fs.readFile(path.join(queueRoot, "head.json"), "utf8")) as { epoch: string };
+		const records = (await fs.readFile(path.join(queueRoot, "segments", `${head.epoch}.jsonl`), "utf8"))
+			.trim()
+			.split("\n")
+			.map(line => JSON.parse(line) as Record<string, unknown>)
+			.filter(record => record.type === "enqueue");
+		expect(records).toHaveLength(2);
+		expect(records.map(record => record.runnerRevision).sort()).toEqual([1, 2]);
 	});
 
 	it("withholds a crashed running attempt until durable reconciliation proves non-execution", async () => {

@@ -3,7 +3,13 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { DurableInputQueue, SessionOwnershipLostError } from "@oh-my-pi/pi-coding-agent/session/durable-input-queue";
+import {
+	DurableInputCommandConflictError,
+	DurableInputQueue,
+	DurableInputRunnerRevisionConflictError,
+	type DurableInputCommandMetadata,
+	SessionOwnershipLostError,
+} from "@oh-my-pi/pi-coding-agent/session/durable-input-queue";
 import { acquireSessionOwnership, type SessionOwnershipHandle } from "@oh-my-pi/pi-coding-agent/session/session-ownership";
 
 const roots: string[] = [];
@@ -49,6 +55,22 @@ function replacement(session: string, epoch: string): Owner {
 		},
 	};
 	return owner;
+}
+
+function command(
+	commandId: string,
+	expectedRevision: number,
+	overrides: Partial<DurableInputCommandMetadata> = {},
+): DurableInputCommandMetadata {
+	return {
+		schemaVersion: 1,
+		commandId,
+		correlationId: `correlation-${commandId}`,
+		viewId: "view-a",
+		controllerEpoch: 1,
+		expectedRevision,
+		...overrides,
+	};
 }
 
 async function queueRoot(root: string): Promise<string> {
@@ -359,8 +381,9 @@ describe("durable input queue", () => {
 		await fs.writeFile(segmentPath, lines.join("\n"));
 
 		const nextOwner = replacement(session, "epoch-b");
-		const currentQueue = await DurableInputQueue.open(nextOwner.handle, root);
-		await expect(currentQueue.adopt()).rejects.toThrow("Corrupt durable input queue segment");
+		await expect(DurableInputQueue.open(nextOwner.handle, root)).rejects.toThrow(
+			"Corrupt durable input queue segment",
+		);
 	});
 
 	it("tolerates partial final-line records from crashes", async () => {
@@ -705,5 +728,133 @@ describe("durable input queue", () => {
 				payload: { text: "revised", images: undefined },
 			},
 		]);
+	});
+	it("keeps ordinary enqueue outside the runner command ledger", async () => {
+		const { root, owner } = await fixture("epoch-a");
+		const queue = await DurableInputQueue.open(owner.handle, root);
+		await queue.adopt();
+		const item = await queue.enqueue({ text: "legacy path", deliveryClass: "followUp" });
+
+		expect(await queue.getLatestRunnerRevision()).toBe(0);
+		expect(await queue.getCommandReceipt(item.inputId)).toBeUndefined();
+		const rootPath = await queueRoot(root);
+		const { activeEpoch } = await queue.getStatus();
+		const enqueueRecord = (await fs.readFile(path.join(rootPath, "segments", `${activeEpoch}.jsonl`), "utf8"))
+			.trim()
+			.split("\n")
+			.map(line => JSON.parse(line) as Record<string, unknown>)
+			.find(record => record.type === "enqueue");
+		expect(enqueueRecord).not.toHaveProperty("command");
+		expect(enqueueRecord).not.toHaveProperty("runnerRevision");
+	});
+
+	it("atomically replays concurrent duplicate commands from one journal admission", async () => {
+		const { root, owner } = await fixture("epoch-a");
+		const queue = await DurableInputQueue.open(owner.handle, root);
+		await queue.adopt();
+		const metadata = command("duplicate", 0, { causationId: "cause-a" });
+		const input = { text: "same", deliveryClass: "followUp" as const };
+
+		const receipts = await Promise.all([queue.enqueueCommand(input, metadata), queue.enqueueCommand(input, metadata)]);
+
+		expect(receipts.map(receipt => receipt.replayed).sort()).toEqual([false, true]);
+		expect(receipts[0]?.item.inputId).toBe(receipts[1]?.item.inputId);
+		expect(receipts[0]?.runnerRevision).toBe(1);
+		expect(receipts[1]?.runnerRevision).toBe(1);
+		expect(await queue.getLatestRunnerRevision()).toBe(1);
+		const rootPath = await queueRoot(root);
+		const { activeEpoch } = await queue.getStatus();
+		const records = (await fs.readFile(path.join(rootPath, "segments", `${activeEpoch}.jsonl`), "utf8"))
+			.trim()
+			.split("\n")
+			.map(line => JSON.parse(line) as { type: string });
+		expect(records.filter(record => record.type === "enqueue")).toHaveLength(1);
+	});
+
+	it("rejects changed command reuse and stale or concurrently lost runner revisions with typed errors", async () => {
+		const { root, owner } = await fixture("epoch-a");
+		const queue = await DurableInputQueue.open(owner.handle, root);
+		await queue.adopt();
+		await queue.enqueueCommand({ text: "first", deliveryClass: "followUp" }, command("first", 0));
+
+		const changedPayload = queue.enqueueCommand(
+			{ text: "changed", deliveryClass: "followUp" },
+			command("first", 0),
+		);
+		await expect(changedPayload).rejects.toBeInstanceOf(DurableInputCommandConflictError);
+		const changedMetadata = queue.enqueueCommand(
+			{ text: "first", deliveryClass: "followUp" },
+			command("first", 0, { correlationId: "changed-correlation" }),
+		);
+		await expect(changedMetadata).rejects.toBeInstanceOf(DurableInputCommandConflictError);
+
+		const stale = queue.enqueueCommand({ text: "stale", deliveryClass: "followUp" }, command("stale", 0));
+		await expect(stale).rejects.toMatchObject({
+			name: "DurableInputRunnerRevisionConflictError",
+			expectedRevision: 0,
+			actualRevision: 1,
+		});
+
+		const outcomes = await Promise.allSettled([
+			queue.enqueueCommand({ text: "winner-a", deliveryClass: "steer" }, command("winner-a", 1)),
+			queue.enqueueCommand({ text: "winner-b", deliveryClass: "steer" }, command("winner-b", 1)),
+		]);
+		expect(outcomes.filter(outcome => outcome.status === "fulfilled")).toHaveLength(1);
+		const rejection = outcomes.find(outcome => outcome.status === "rejected") as PromiseRejectedResult;
+		expect(rejection.reason).toBeInstanceOf(DurableInputRunnerRevisionConflictError);
+		expect(rejection.reason).toMatchObject({ expectedRevision: 1, actualRevision: 2 });
+		expect(await queue.getLatestRunnerRevision()).toBe(2);
+	});
+
+	it("rebuilds command receipts and latest runner revision after replacement adoption", async () => {
+		const { root, session, owner } = await fixture("epoch-a");
+		const queue = await DurableInputQueue.open(owner.handle, root);
+		await queue.adopt();
+		const original = await queue.enqueueCommand(
+			{ text: "persisted", deliveryClass: "steer" },
+			command("persisted", 0),
+		);
+		owner.current = false;
+
+		const nextOwner = replacement(session, "epoch-b");
+		const reopened = await DurableInputQueue.open(nextOwner.handle, root);
+		await reopened.adopt();
+		expect(await reopened.getLatestRunnerRevision()).toBe(1);
+		expect(await reopened.getCommandReceipt("persisted")).toEqual(original);
+		const replay = await reopened.enqueueCommand(
+			{ text: "persisted", deliveryClass: "steer" },
+			command("persisted", 0),
+		);
+		expect(replay).toEqual({ ...original, replayed: true });
+	});
+
+	it("publishes post-commit events despite listener failure and permits listener reentrancy", async () => {
+		const { root, owner } = await fixture("epoch-a");
+		const queue = await DurableInputQueue.open(owner.handle, root);
+		await queue.adopt();
+		const seen: string[] = [];
+		let reentrant: Promise<unknown> | undefined;
+		queue.subscribe(event => {
+			if (event.command.commandId === "outer") {
+				reentrant = queue.enqueueCommand(
+					{ text: "inner", deliveryClass: "followUp" },
+					command("inner", 1),
+				);
+			}
+			throw new Error("listener failure");
+		});
+		queue.subscribe(event => {
+			seen.push(event.command.commandId);
+		});
+
+		const outer = await queue.enqueueCommand(
+			{ text: "outer", deliveryClass: "followUp" },
+			command("outer", 0),
+		);
+		expect(outer.replayed).toBe(false);
+		await reentrant;
+		expect(seen).toEqual(["outer", "inner"]);
+		expect(await queue.getLatestRunnerRevision()).toBe(2);
+		expect((await queue.list()).map(item => item.payload.text)).toEqual(["outer", "inner"]);
 	});
 });
