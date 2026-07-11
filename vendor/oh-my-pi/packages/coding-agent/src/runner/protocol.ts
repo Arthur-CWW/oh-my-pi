@@ -1,7 +1,7 @@
 import { Schema } from "effect";
-import { InvalidRunnerCommandError, RunnerRevisionConflictError } from "./errors.js";
+import { InvalidRunnerCommandError, RunnerRevisionConflictError } from "./errors";
 
-export { InvalidRunnerCommandError, RunnerRevisionConflictError } from "./errors.js";
+export * from "./errors";
 
 export const RUNNER_SCHEMA_VERSION = 1 as const;
 
@@ -10,39 +10,76 @@ export const RunnerRevisionSchema = Schema.Int.pipe(
 	Schema.brand("RunnerRevision"),
 );
 
-export const SubmitInputCommandSchema = Schema.Struct({
+export const ControllerEpochSchema = Schema.Int.pipe(
+	Schema.check(Schema.isGreaterThanOrEqualTo(1)),
+	Schema.brand("ControllerEpoch"),
+);
+
+const CommandMetadataSchema = {
 	schemaVersion: Schema.Literal(RUNNER_SCHEMA_VERSION),
 	commandId: Schema.String,
 	correlationId: Schema.String,
 	causationId: Schema.optional(Schema.String),
-	expectedRevision: Schema.optional(RunnerRevisionSchema),
+	expectedRevision: RunnerRevisionSchema,
+};
+
+export const SubmitInputCommandSchema = Schema.Struct({
+	...CommandMetadataSchema,
 	kind: Schema.Literal("submitInput"),
+	viewId: Schema.String,
+	controllerEpoch: ControllerEpochSchema,
 	payload: Schema.Struct({ text: Schema.String }),
 });
 
 export type SubmitInputCommand = typeof SubmitInputCommandSchema.Type;
+export type RunnerCapability = "observer" | "controller";
+export type RunnerStatus = "running" | "stopping" | "stopped";
+
+export interface RunnerControlMetadata {
+	readonly schemaVersion: typeof RUNNER_SCHEMA_VERSION;
+	readonly commandId: string;
+	readonly correlationId: string;
+	readonly causationId?: string;
+	readonly expectedRevision: number;
+}
+
+export interface AttachRunnerViewCommand extends RunnerControlMetadata {
+	readonly kind: "attachView";
+	readonly viewId: string;
+	readonly capability: RunnerCapability;
+}
+
+export interface AcquireRunnerControllerCommand extends RunnerControlMetadata {
+	readonly kind: "acquireController";
+	readonly viewId: string;
+}
+
+export interface ReleaseRunnerControllerCommand extends RunnerControlMetadata {
+	readonly kind: "releaseController";
+	readonly viewId: string;
+	readonly controllerEpoch: number;
+}
+
+export interface DetachRunnerViewCommand extends RunnerControlMetadata {
+	readonly kind: "detachView";
+	readonly viewId: string;
+	readonly controllerEpoch?: number;
+}
 
 export interface PreparedDurableInput {
 	readonly commandId: string;
+	readonly correlationId: string;
+	readonly causationId: string | undefined;
+	readonly controllerEpoch: number;
 	readonly inputId: string;
 	readonly sequence: number;
 	readonly revision: number;
 	readonly replayed: boolean;
 }
 
-export interface RunnerCommandReceipt {
-	readonly commandId: string;
-	readonly revision: number;
-	readonly inputId: string;
-	readonly sequence: number;
-	readonly replayed: boolean;
-}
+export interface RunnerCommandReceipt extends PreparedDurableInput {}
 
-/**
- * `prepared` has not crossed the provider boundary and is safe to dispatch.
- * `dispatched` crossed that boundary but has no durable outcome yet, so a
- * reopened runner must expose it without retrying an uncertain side effect.
- */
+/** A dispatched record is uncertain after reopen and is never automatically retried. */
 export type DurableDispatchState = "prepared" | "dispatched" | "completed" | "uncertain";
 
 export interface DurableInputRecord {
@@ -57,10 +94,9 @@ export interface DurableRunnerSnapshot {
 }
 
 /**
- * Every mutating method is a durable transaction. `prepare` must atomically
- * compare `expectedRevision`, allocate the next revision and sequence, and
- * persist both the receipt and a prepared dispatch obligation. `beginDispatch`
- * is a prepared-to-dispatched CAS; only its winner may call the provider.
+ * `prepare` atomically performs the revision CAS, allocates durable input sequence,
+ * and records the dispatch obligation. `beginDispatch` is a prepared-to-dispatched
+ * CAS; only its winner may invoke the provider.
  */
 export interface DurableRunnerStore {
 	load(): Promise<DurableRunnerSnapshot>;
@@ -74,17 +110,58 @@ export interface RunnerState {
 	readonly processedCommandIds: ReadonlyMap<string, RunnerCommandReceipt>;
 }
 
+export interface RunnerViewSnapshot {
+	readonly viewId: string;
+	readonly capability: RunnerCapability;
+	readonly controllerEpoch: number | undefined;
+	readonly attachedSequence: number;
+}
+
+export interface SessionRunnerSnapshot {
+	readonly revision: number;
+	readonly sequence: number;
+	readonly durableSequence: number;
+	readonly records: ReadonlyArray<DurableInputRecord>;
+	readonly views: ReadonlyArray<RunnerViewSnapshot>;
+	readonly controller: { readonly viewId: string; readonly epoch: number } | undefined;
+	readonly status: RunnerStatus;
+	readonly pendingOperations: number;
+}
+
+export type RunnerEventKind =
+	| "observerAttached"
+	| "controllerAcquired"
+	| "controllerReleased"
+	| "viewDetached"
+	| "inputPrepared"
+	| "inputCompleted"
+	| "inputUncertain";
+
+/** Every event is a closed causal envelope in the runner's single total order. */
 export interface RunnerEvent {
 	readonly schemaVersion: typeof RUNNER_SCHEMA_VERSION;
-	readonly revision: number;
-	readonly kind: "inputPrepared";
+	readonly kind: RunnerEventKind;
 	readonly eventId: string;
 	readonly commandId: string;
 	readonly correlationId: string;
 	readonly causationId: string | undefined;
-	readonly inputId: string;
+	readonly revision: number;
 	readonly sequence: number;
+	readonly controllerEpoch: number;
+	readonly viewId: string | undefined;
+	readonly inputId: string | undefined;
+	readonly durableSequence: number | undefined;
 }
+
+export type RunnerEventDelivery =
+	| { readonly kind: "event"; readonly event: RunnerEvent }
+	| {
+			readonly kind: "resyncRequired";
+			readonly expectedSequence: number;
+			readonly observedSequence: number;
+			readonly event: RunnerEvent;
+			readonly snapshot: SessionRunnerSnapshot;
+	  };
 
 export interface Transition {
 	readonly state: RunnerState;
@@ -103,19 +180,12 @@ export const transitionPreparedInput = (
 	state: RunnerState,
 	command: SubmitInputCommand,
 	prepared: PreparedDurableInput,
+	eventSequence: number,
 ): Transition => {
 	const prior = state.processedCommandIds.get(command.commandId);
-	if (prior) {
-		return { state, receipt: { ...prior, replayed: true }, event: undefined };
-	}
+	if (prior) return { state, receipt: { ...prior, replayed: true }, event: undefined };
 
-	const receipt: RunnerCommandReceipt = {
-		commandId: command.commandId,
-		revision: prepared.revision,
-		inputId: prepared.inputId,
-		sequence: prepared.sequence,
-		replayed: prepared.replayed,
-	};
+	const receipt: RunnerCommandReceipt = { ...prepared };
 	const processedCommandIds = new Map(state.processedCommandIds);
 	processedCommandIds.set(command.commandId, receipt);
 	return {
@@ -125,14 +195,17 @@ export const transitionPreparedInput = (
 			? undefined
 			: {
 					schemaVersion: RUNNER_SCHEMA_VERSION,
-					revision: prepared.revision,
-					eventId: `inputPrepared:${prepared.revision}`,
 					kind: "inputPrepared",
+					eventId: `inputPrepared:${eventSequence}`,
 					commandId: command.commandId,
 					correlationId: command.correlationId,
 					causationId: command.causationId,
+					revision: prepared.revision,
+					sequence: eventSequence,
+					controllerEpoch: command.controllerEpoch,
+					viewId: command.viewId,
 					inputId: prepared.inputId,
-					sequence: prepared.sequence,
+					durableSequence: prepared.sequence,
 				},
 	};
 };
@@ -144,5 +217,14 @@ export const decodeSubmitInputCommand = (input: unknown): SubmitInputCommand => 
 		throw new InvalidRunnerCommandError({
 			issue: error instanceof Error ? error.message : "Schema decoding failed",
 		});
+	}
+};
+
+export const assertRunnerRevision = (expectedRevision: number, actualRevision: number): void => {
+	if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
+		throw new InvalidRunnerCommandError({ issue: "expectedRevision must be a non-negative safe integer" });
+	}
+	if (expectedRevision !== actualRevision) {
+		throw new RunnerRevisionConflictError({ expectedRevision, actualRevision });
 	}
 };

@@ -3,13 +3,13 @@ import {
 	DurableRunnerStoreError,
 	RunnerProviderError,
 	RunnerRevisionConflictError,
-} from "./errors.js";
+} from "./errors";
 import type {
 	DurableDispatchState,
 	DurableRunnerStore,
 	PreparedDurableInput,
 	SubmitInputCommand,
-} from "./protocol.js";
+} from "./protocol";
 
 export class DurableRunnerStoreService extends Context.Service<
 	DurableRunnerStoreService,

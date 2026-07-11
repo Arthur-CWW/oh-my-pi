@@ -1,5 +1,7 @@
 import { Schema } from "effect";
 
+const NonNegativeInt = Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0)));
+
 export class InvalidRunnerCommandError extends Schema.TaggedErrorClass<InvalidRunnerCommandError>()(
 	"InvalidRunnerCommandError",
 	{ issue: Schema.String },
@@ -7,10 +9,7 @@ export class InvalidRunnerCommandError extends Schema.TaggedErrorClass<InvalidRu
 
 export class RunnerRevisionConflictError extends Schema.TaggedErrorClass<RunnerRevisionConflictError>()(
 	"RunnerRevisionConflictError",
-	{
-		expectedRevision: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
-		actualRevision: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
-	},
+	{ expectedRevision: NonNegativeInt, actualRevision: NonNegativeInt },
 ) {}
 
 export class DurableRunnerStoreError extends Schema.TaggedErrorClass<DurableRunnerStoreError>()(
@@ -21,3 +20,37 @@ export class DurableRunnerStoreError extends Schema.TaggedErrorClass<DurableRunn
 export class RunnerProviderError extends Schema.TaggedErrorClass<RunnerProviderError>()("RunnerProviderError", {
 	issue: Schema.String,
 }) {}
+
+export class RunnerControllerConflictError extends Schema.TaggedErrorClass<RunnerControllerConflictError>()(
+	"RunnerControllerConflictError",
+	{ requestedViewId: Schema.String, activeViewId: Schema.String, controllerEpoch: NonNegativeInt },
+) {}
+
+export class StaleRunnerControllerLeaseError extends Schema.TaggedErrorClass<StaleRunnerControllerLeaseError>()(
+	"StaleRunnerControllerLeaseError",
+	{
+		viewId: Schema.String,
+		expectedControllerEpoch: NonNegativeInt,
+		actualControllerEpoch: Schema.optional(NonNegativeInt),
+	},
+) {}
+
+export class RunnerViewAlreadyAttachedError extends Schema.TaggedErrorClass<RunnerViewAlreadyAttachedError>()(
+	"RunnerViewAlreadyAttachedError",
+	{ viewId: Schema.String },
+) {}
+
+export class RunnerViewNotAttachedError extends Schema.TaggedErrorClass<RunnerViewNotAttachedError>()(
+	"RunnerViewNotAttachedError",
+	{ viewId: Schema.String },
+) {}
+
+export class RunnerViewCapabilityError extends Schema.TaggedErrorClass<RunnerViewCapabilityError>()(
+	"RunnerViewCapabilityError",
+	{ viewId: Schema.String, requiredCapability: Schema.Literal("controller") },
+) {}
+
+export class SessionRunnerStoppedError extends Schema.TaggedErrorClass<SessionRunnerStoppedError>()(
+	"SessionRunnerStoppedError",
+	{},
+) {}
