@@ -93,7 +93,7 @@ describe("TUI render scheduler", () => {
 		}
 	});
 
-	it("lets a synchronous reset preempt an ordinary queued paint", async () => {
+	it("lets a scheduled reset preempt an ordinary queued paint", async () => {
 		const terminal = new VirtualTerminal(40, 4);
 		const scheduler = new DeterministicScheduler();
 		const tui = new TUI(terminal, undefined, { renderScheduler: scheduler });
@@ -108,7 +108,8 @@ describe("TUI render scheduler", () => {
 			const paintBaseline = tui.renderMetrics.renderPasses;
 
 			tui.resetDisplay();
-			expect(tui.renderMetrics.renderPasses - paintBaseline).toBe(1);
+			expect(tui.renderMetrics.renderPasses - paintBaseline).toBe(0);
+			expect(scheduler.pending).toBe(1);
 			await scheduler.drain(terminal);
 
 			expect(tui.renderMetrics.renderPasses - paintBaseline).toBe(1);

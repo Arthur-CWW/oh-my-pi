@@ -129,7 +129,12 @@ export interface TUIStartOptions {
 const DEFAULT_RENDER_SCHEDULER: RenderScheduler = {
 	now: () => performance.now(),
 	scheduleImmediate: callback => {
-		process.nextTick(callback);
+		// `nextTick` callbacks drain before Bun returns to the poll phase. A
+		// reentrant forced invalidation can therefore keep raw terminal input
+		// waiting behind an unbounded chain of full paints. `setImmediate`
+		// preserves next-turn latency while giving ready stdin/resize events a
+		// poll opportunity before the paint.
+		setImmediate(callback);
 	},
 	scheduleRender: (callback, delayMs) => {
 		const timer = setTimeout(callback, delayMs);
@@ -701,9 +706,9 @@ export class TUI extends Container {
 	onDebug?: () => void;
 	#renderRequested = false;
 	#renderTimer: RenderTimer | undefined;
-	// A forced request needs next-tick latency, but a burst must still enqueue
+	// A forced request needs next-turn latency, but a burst must still enqueue
 	// only one callback. Incrementing the generation makes a queued callback
-	// harmless after a synchronous reset or disposal.
+	// harmless after a superseding reset or disposal.
 	#forcedRenderQueued = false;
 	#forcedRenderGeneration = 0;
 	#renderMetrics: TUIRenderMetrics = { invalidations: 0, renderRequests: 0, scheduledPaints: 0, renderPasses: 0 };
@@ -1307,15 +1312,15 @@ export class TUI extends Container {
 			data => this.#handleInput(data),
 			() => {
 				// Real terminals deliver SIGWINCH (and the equivalent ConPTY
-				// notification) atomically with the new `process.stdout` geometry, so
-				// a forced render must fire immediately: it clears and replays at the
-				// fresh size before the terminal's reflow settles into a state a
-				// throttled frame would race. Multiplexer panes (tmux/screen/zellij)
-				// do not give that guarantee. The host receives SIGWINCH while the
-				// multiplexer is still mid-reflow — it has not finished repainting
-				// the pane buffer at the new size — and a drag-resize or pane-close
-				// animation fires several events in flight. Forcing a render on each
-				// event races those mid-reflow paints: the multiplexer's catch-up
+				// notification) atomically with the new `process.stdout` geometry,
+				// so they can take the bounded viewport paint immediately and defer
+				// the authoritative replay until resize settles. Multiplexer panes
+				// (tmux/screen/zellij) do not give that guarantee. The host
+				// receives SIGWINCH while the multiplexer is still mid-reflow: it
+				// has not finished repainting the pane buffer at the new size. A
+				// drag-resize or pane-close animation fires several events in flight.
+				// Forcing a render on each event races those mid-reflow paints: the
+				// multiplexer's catch-up
 				// paint then partially overwrites the TUI output, which the user sees
 				// as a viewport flash or blank screen before the next throttled
 				// frame arrives (issue #2088). `#armMultiplexerResizeTimer` coalesces
@@ -1583,7 +1588,7 @@ export class TUI extends Container {
 	}
 
 	/**
-	 * Force an immediate full replay of the current frame, including native
+	 * Force a next-turn full replay of the current frame, including native
 	 * scrollback. This is the keyboard-accessible equivalent of the resize reset:
 	 * no queued diff frame or terminal scrollback probe can downgrade it to a
 	 * viewport-only repaint.
@@ -1599,21 +1604,12 @@ export class TUI extends Container {
 	resetDisplay(): void {
 		if (this.#stopped) return;
 		this.invalidate();
-		// A reset that lands inside a tmux/screen/zellij resize burst would
-		// paint mid-reflow and re-introduce the flash race (issue #2088).
-		// Fold it into the in-flight debounce instead; the settled paint runs
-		// the same `#prepareForcedRender(!isMultiplexerSession())` path via
-		// `requestRender(true)`, so the clear-scrollback intent is preserved.
-		if (this.#multiplexerResizeTimer) {
-			this.#armMultiplexerResizeTimer(!isMultiplexerSession());
-			return;
-		}
-		this.#prepareForcedRender(!isMultiplexerSession());
-		this.#cancelQueuedForcedRender();
+		// Treat a reset as resize-class authoritative replay, but schedule it
+		// through the same one-frame gate as every other forced request. Doing
+		// the full compose/write inline from an input callback can otherwise
+		// hold raw stdin behind an arbitrarily long transcript replay.
 		this.#resizeEventPending = true;
-		this.#renderRequested = false;
-		this.#lastRenderAt = this.#renderScheduler.now();
-		this.#doRender();
+		this.requestRender(true, { clearScrollback: !isMultiplexerSession() });
 	}
 
 	requestRender(force = false, options?: RenderRequestOptions): void {
@@ -1884,11 +1880,24 @@ export class TUI extends Container {
 		this.#renderMetrics.scheduledPaints++;
 		this.#renderScheduler.scheduleImmediate(() => {
 			if (generation !== this.#forcedRenderGeneration) return;
-			this.#forcedRenderQueued = false;
-			if (this.#stopped || !this.#renderRequested) return;
+			if (this.#stopped || !this.#renderRequested) {
+				this.#forcedRenderQueued = false;
+				return;
+			}
 			this.#renderRequested = false;
 			this.#lastRenderAt = this.#renderScheduler.now();
-			this.#doRender();
+			try {
+				// Keep #forcedRenderQueued set during composition. A component
+				// that invalidates from render() then merges into this pass
+				// instead of recursively queueing another immediate full paint.
+				this.#doRender();
+			} finally {
+				this.#forcedRenderQueued = false;
+				// A reentrant invalidation owns one trailing throttled frame.
+				// scheduleRender uses a timer, so stdin/resize gets a poll turn
+				// before another potentially large compose/write.
+				if (this.#renderRequested) this.#scheduleRender();
+			}
 		});
 	}
 
@@ -2972,10 +2981,12 @@ export class TUI extends Container {
 			// The drag is quiet: replay the rewrapped transcript authoritatively.
 			// #resizeEventPending was preserved across every viewport-only frame
 			// (the fast path never consumes it), so this classifies as a geometry
-			// rebuild. The full replay rewraps the history without erasing native
-			// scrollback, preserving prior shell history.
+			// rebuild. Direct-terminal resize has always cleared native scrollback
+			// before replaying the rewrapped transcript; preserve that contract for
+			// the settled asynchronous paint. Multiplexer resizes use their separate
+			// debounce path and explicitly keep clearScrollback false.
 			this.#resizeEventPending = true;
-			this.requestRender(true, { clearScrollback: false });
+			this.requestRender(true, { clearScrollback: true });
 		}, TUI.#RESIZE_VIEWPORT_SETTLE_MS);
 	}
 

@@ -71,16 +71,16 @@ async function settle(term: VirtualTerminal): Promise<void> {
 	await term.flush();
 }
 
-// Pad the non-multiplexer resize viewport settle window (120 ms) so the test
-// reliably observes the deferred authoritative full paint. These are
-// integration tests against the real render scheduler (process.nextTick
-// immediates interleaved with setTimeout debounces), so the settle window is
-// driven with a real delay rather than fake timers.
-const RESIZE_VIEWPORT_SETTLE_WAIT_MS = 160;
-
-async function settleResize(term: VirtualTerminal): Promise<void> {
-	await Bun.sleep(RESIZE_VIEWPORT_SETTLE_WAIT_MS);
-	await settle(term);
+// Wait for the resize scheduler's authoritative full replay rather than
+// sleeping for a guessed amount of wall-clock time. The deadline is only a
+// failure bound; success follows the observable scheduler transition.
+async function settleResize(term: VirtualTerminal, tui: TUI, baselineRedraws: number): Promise<void> {
+	const deadline = Date.now() + 1000;
+	while (tui.fullRedraws === baselineRedraws) {
+		if (Date.now() >= deadline) throw new Error("resize did not settle");
+		await settle(term);
+	}
+	await term.flush();
 }
 
 function captureWrites(term: VirtualTerminal): string[] {
@@ -185,7 +185,7 @@ describe("issue #2088: tmux pane-resize race produces viewport flash", () => {
 				expect(visible(term)).toEqual(expectedViewport);
 
 				// Once the drag goes quiet the full replay fires exactly once.
-				await settleResize(term);
+				await settleResize(term, tui, baselineRedraws);
 				expect(tui.fullRedraws).toBeGreaterThan(baselineRedraws);
 				expect(visible(term)).toEqual(expectedViewport);
 			} finally {
@@ -317,9 +317,9 @@ describe("issue #2088: tmux pane-resize race produces viewport flash", () => {
 				await Bun.sleep(10);
 				tui.resetDisplay();
 
-				// resetDisplay normally repaints synchronously; here it must
-				// route through the multiplexer debounce so no paint lands
-				// while tmux is still reflowing.
+				// resetDisplay normally schedules the next fair-loop paint; here it
+				// must additionally route through the multiplexer debounce so no
+				// paint lands while tmux is still reflowing.
 				await Bun.sleep(20);
 				expect(tui.fullRedraws).toBe(baselineRedraws);
 				expect(writes.length).toBe(0);
@@ -417,11 +417,11 @@ describe("multiplexer detection: TERM prefix gates ED3 when TMUX is stripped", (
 
 				// Capture only the resize-driven paint; the initial paint never
 				// clears scrollback, so any ED3 in `out` belongs to the resize.
-				// Wait past the 120 ms viewport-settle window — that deferred
-				// `requestRender(true, { clearScrollback: true })` is what emits ED3.
+				// The settled authoritative request is what emits ED3.
 				const writes = captureWrites(term);
+				const baselineRedraws = tui.fullRedraws;
 				term.resize(80, 10);
-				await settleResize(term);
+				await settleResize(term, tui, baselineRedraws);
 				const out = writes.join("");
 				expect(out).toContain(ED3);
 				expect(visible(term)).toEqual(Array.from({ length: 10 }, (_v, i) => `line-${i + 10}`));
