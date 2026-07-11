@@ -5,16 +5,18 @@ import goalModeActivePrompt from "../prompts/goals/goal-mode-active.md" with { t
 import {
 	decodeSessionWorkstream,
 	type SessionWorkstream,
+	type TransitionGoalModeRequest,
 	type WorkstreamSource,
 	workstreamCharterPath,
 } from "../session/session-entries";
-import type {
-	Goal,
-	GoalBudgetSteering,
-	GoalModeState,
-	GoalRuntimeEvent,
-	GoalTokenUsage,
-	GoalWorkstreamReference,
+import {
+	decodeGoalModeState,
+	type Goal,
+	type GoalBudgetSteering,
+	type GoalModeState,
+	type GoalRuntimeEvent,
+	type GoalTokenUsage,
+	type GoalWorkstreamReference,
 } from "./state";
 
 export interface GoalRuntimeHost {
@@ -214,6 +216,13 @@ export class GoalRuntime {
 			budgetReportedFor: this.#budgetReportedFor,
 		};
 	}
+	restoreSnapshot(snapshot: GoalRuntimeSnapshot): void {
+		this.#turnSnapshot = snapshot.turnSnapshot
+			? { ...snapshot.turnSnapshot, baselineUsage: { ...snapshot.turnSnapshot.baselineUsage } }
+			: undefined;
+		this.#wallClock = { ...snapshot.wallClock };
+		this.#budgetReportedFor = snapshot.budgetReportedFor;
+	}
 
 	#now(): number {
 		return this.#host.now?.() ?? Date.now();
@@ -288,6 +297,28 @@ export class GoalRuntime {
 		if (this.#turnSnapshot) {
 			this.#turnSnapshot.activeGoalId = undefined;
 		}
+	}
+
+	/**
+	 * Replace runtime state from the canonical session projection without
+	 * appending journal entries or emitting lifecycle events.
+	 */
+	hydratePersistedState(value: unknown): void {
+		if (value === undefined) {
+			this.#host.setState(undefined);
+			this.#clearActiveAccounting();
+			this.#budgetReportedFor = undefined;
+			return;
+		}
+		const state = decodeGoalModeState(value);
+		if (!state) throw new Error("Invalid persisted goal mode state");
+		this.#host.setState(cloneState(state));
+		if (state.enabled && isAccountingStatus(state.goal)) {
+			this.#markActiveAccounting(state.goal);
+		} else {
+			this.#clearActiveAccounting();
+		}
+		this.#budgetReportedFor = undefined;
 	}
 
 	onTurnStart(turnId: string, baselineUsage: GoalTokenUsage): void {
@@ -449,10 +480,10 @@ export class GoalRuntime {
 		await this.#withAccounting(() => this.#flushUsageLocked(steering, currentUsage));
 	}
 
-	#createGoalState(objective: string, tokenBudget: number | undefined): GoalModeState {
+	#createGoalState(objective: string, tokenBudget: number | undefined, goalId = String(Snowflake.next())): GoalModeState {
 		const now = this.#now();
 		const goal: Goal = {
-			id: String(Snowflake.next()),
+			id: goalId,
 			objective,
 			status: "active",
 			tokenBudget,
@@ -462,6 +493,147 @@ export class GoalRuntime {
 			updatedAt: now,
 		};
 		return { enabled: true, mode: "active", goal };
+	}
+
+	reserveGoalId(): string {
+		return String(Snowflake.next());
+	}
+
+	preflightWorkflowTransition(request: TransitionGoalModeRequest, goalId?: string): void {
+		const transition = request.transition;
+		const state = this.#host.getState();
+		if (transition.kind === "enter" && transition.action === "create") {
+			if (goalId !== undefined && !goalId) throw new Error("goalId must be non-empty when creating a goal workflow");
+			const objective = transition.objective.trim();
+			if (!objective) throw new Error("objective is required when op=create");
+			validateTokenBudget(transition.tokenBudget);
+			if (transition.workstream !== undefined) explicitGoalWorkstream(transition.workstream);
+			if (goalId !== undefined && state?.goal.id === goalId) return;
+			if (state?.goal && state.goal.status !== "dropped" && state.goal.status !== "complete") {
+				throw new Error(
+					`cannot create goal because existing goal is ${state.goal.status}; use op=update to replace it`,
+				);
+			}
+			return;
+		}
+
+		const requestedGoalId = transition.goalId;
+		if (!goalId || goalId !== requestedGoalId) {
+			throw new Error(`goal workflow transition requires exact goalId "${requestedGoalId}"`);
+		}
+		if (!state?.goal) {
+			if (transition.kind === "exit" && transition.disposition !== "paused") return;
+			throw new Error(`cannot transition goal "${requestedGoalId}" because this session has no goal`);
+		}
+		if (state.goal.id !== requestedGoalId) {
+			throw new Error(
+				`cannot transition goal "${requestedGoalId}" because active goal is "${state.goal.id}"`,
+			);
+		}
+
+		if (transition.kind === "enter") {
+			if (state.enabled && state.mode === "active" && state.goal.status === "active") return;
+			if (state.goal.status !== "paused") {
+				throw new Error(`cannot resume goal because existing goal is ${state.goal.status}`);
+			}
+			return;
+		}
+		if (transition.disposition === "paused") {
+			if (!state.enabled && state.goal.status === "paused") return;
+			if (state.goal.status !== "active" && state.goal.status !== "budget-limited") {
+				throw new Error(`cannot pause goal because existing goal is ${state.goal.status}`);
+			}
+			return;
+		}
+		if (transition.disposition === "dropped") {
+			if (state.goal.status === "dropped") return;
+			if (state.goal.status === "complete") throw new Error("cannot drop a completed goal");
+			return;
+		}
+		if (state.goal.status !== "complete" || state.mode !== "exiting") {
+			throw new Error("cannot finalize goal before the goal tool has completed it");
+		}
+	}
+
+	async applyWorkflowTransition(request: TransitionGoalModeRequest, goalId: string): Promise<void> {
+		await this.#withAccounting(async () => {
+			this.preflightWorkflowTransition(request, goalId);
+			const transition = request.transition;
+			const current = this.#host.getState();
+
+			if (transition.kind === "enter" && transition.action === "create") {
+				if (current?.goal.id === goalId) return;
+				const objective = transition.objective.trim();
+				await this.#classifyWorkstream(objective, transition.workstream);
+				const state = this.#createGoalState(objective, transition.tokenBudget, goalId);
+				this.#budgetReportedFor = undefined;
+				this.#markActiveAccounting(state.goal);
+				await this.#commitState(state, { persist: "goal" });
+				return;
+			}
+
+			if (!current) {
+				if (transition.kind === "exit" && transition.disposition !== "paused") return;
+				throw new Error(`cannot apply goal workflow transition for inactive goal "${goalId}"`);
+			}
+			if (current.goal.id !== goalId) {
+				throw new Error(`cannot apply goal workflow transition for inactive goal "${goalId}"`);
+			}
+			if (transition.kind === "enter") {
+				if (current.enabled && current.mode === "active" && current.goal.status === "active") return;
+				const state = cloneState(current);
+				state.enabled = true;
+				state.mode = "active";
+				state.reason = undefined;
+				state.goal.status = "active";
+				state.goal.updatedAt = this.#now();
+				this.#budgetReportedFor = undefined;
+				this.#markActiveAccounting(state.goal);
+				await this.#commitState(state, { persist: "goal" });
+				return;
+			}
+
+			if (transition.disposition === "paused") {
+				if (!current.enabled && current.goal.status === "paused") return;
+				await this.#flushUsageLocked("suppressed");
+				const state = this.#getStateClone();
+				if (!state || state.goal.id !== goalId) {
+					throw new Error(`goal "${goalId}" changed while pausing`);
+				}
+				state.enabled = false;
+				state.mode = "active";
+				state.reason = undefined;
+				state.goal.status = "paused";
+				state.goal.updatedAt = this.#now();
+				this.#clearActiveAccounting();
+				this.#budgetReportedFor = undefined;
+				await this.#commitState(state, { persist: "goal_paused" });
+				return;
+			}
+
+			if (transition.disposition === "completed") {
+				this.#clearActiveAccounting();
+				this.#budgetReportedFor = undefined;
+				await this.#commitState(undefined, { persist: "none" });
+				return;
+			}
+
+			if (current.goal.status === "dropped") return;
+			await this.#flushUsageLocked("suppressed");
+			const state = this.#getStateClone();
+			if (!state || state.goal.id !== goalId) {
+				throw new Error(`goal "${goalId}" changed while dropping`);
+			}
+			const dropped = { ...state.goal, status: "dropped" as const, updatedAt: this.#now() };
+			this.#clearActiveAccounting();
+			this.#budgetReportedFor = undefined;
+			await this.#host.emit({
+				type: "goal_updated",
+				goal: dropped,
+				state: { ...state, enabled: false, goal: dropped },
+			});
+			await this.#commitState(undefined, { persist: "none", emit: false });
+		});
 	}
 
 	async createGoal(input: { objective: string; tokenBudget?: number; workstream?: string }): Promise<GoalModeState> {

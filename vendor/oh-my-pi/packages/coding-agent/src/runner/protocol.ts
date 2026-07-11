@@ -1,6 +1,6 @@
+import { Schema } from "effect";
 import type { DurableQueuedInput } from "../session/durable-input-queue";
 import type { WorkflowModeSnapshot } from "../session/session-entries";
-import { Schema } from "effect";
 import { InvalidRunnerCommandError, RunnerRevisionConflictError } from "./errors";
 
 export * from "./errors";
@@ -125,6 +125,38 @@ export const TransitionPlanModeCommandSchema = Schema.Struct({
 	]),
 });
 
+const NonEmptyTrimmedStringSchema = Schema.Trim.pipe(Schema.check(Schema.isMinLength(1)));
+
+export const TransitionGoalModeCommandSchema = Schema.Struct({
+	schemaVersion: Schema.Literal(RUNNER_SCHEMA_VERSION),
+	kind: Schema.Literal("transitionGoalMode"),
+	commandId: Schema.String,
+	correlationId: Schema.String,
+	causationId: Schema.optional(Schema.String),
+	expectedSessionRevision: RunnerRevisionSchema,
+	viewId: Schema.String,
+	controllerEpoch: ControllerEpochSchema,
+	transition: Schema.Union([
+		Schema.Struct({
+			kind: Schema.Literal("enter"),
+			action: Schema.Literal("create"),
+			objective: NonEmptyTrimmedStringSchema,
+			tokenBudget: Schema.optional(Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0)))),
+			workstream: Schema.optional(NonEmptyTrimmedStringSchema),
+		}),
+		Schema.Struct({
+			kind: Schema.Literal("enter"),
+			action: Schema.Literal("resume"),
+			goalId: NonEmptyTrimmedStringSchema,
+		}),
+		Schema.Struct({
+			kind: Schema.Literal("exit"),
+			goalId: NonEmptyTrimmedStringSchema,
+			disposition: Schema.Literals(["paused", "dropped", "completed"]),
+		}),
+	]),
+});
+
 export const InterruptPromptCommandSchema = Schema.Struct({
 	schemaVersion: Schema.Literal(RUNNER_SCHEMA_VERSION),
 	kind: Schema.Literal("interruptPrompt"),
@@ -169,6 +201,7 @@ export type InterruptPromptCommand = typeof InterruptPromptCommandSchema.Type;
 export type RunCompactionCommand = typeof RunCompactionCommandSchema.Type;
 export type CancelCompactionCommand = typeof CancelCompactionCommandSchema.Type;
 export type TransitionPlanModeCommand = typeof TransitionPlanModeCommandSchema.Type;
+export type TransitionGoalModeCommand = typeof TransitionGoalModeCommandSchema.Type;
 export type RunnerCapability = "observer" | "controller";
 export type RunnerStatus = "running" | "stopping" | "stopped";
 
@@ -223,6 +256,10 @@ export interface SetThinkingLevelReceipt {
 
 export type SetModelReceipt = SetThinkingLevelReceipt;
 export type TransitionPlanModeReceipt = SetThinkingLevelReceipt;
+
+export interface TransitionGoalModeReceipt extends SetThinkingLevelReceipt {
+	readonly workflow: WorkflowModeSnapshot;
+}
 
 export interface InterruptPromptReceipt {
 	readonly commandId: string;
@@ -303,6 +340,7 @@ export type RunnerEventKind =
 	| "thinkingLevelChanged"
 	| "modelChanged"
 	| "planModeChanged"
+	| "goalModeChanged"
 	| "promptInterrupted"
 	| "compactionCancelRequested"
 	| "compactionCompleted"
@@ -391,6 +429,16 @@ export const decodeTransitionPlanModeCommand = (input: unknown): TransitionPlanM
 	} catch (error) {
 		throw new InvalidRunnerCommandError({
 			issue: error instanceof Error ? error.message : "Invalid plan-mode transition command",
+		});
+	}
+};
+
+export const decodeTransitionGoalModeCommand = (input: unknown): TransitionGoalModeCommand => {
+	try {
+		return Schema.decodeUnknownSync(TransitionGoalModeCommandSchema)(input);
+	} catch (error) {
+		throw new InvalidRunnerCommandError({
+			issue: error instanceof Error ? error.message : "Invalid goal-mode transition command",
 		});
 	}
 };

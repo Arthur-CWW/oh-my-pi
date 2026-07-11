@@ -105,7 +105,7 @@ export type WorkflowModeSnapshot =
 			readonly planFilePath: string;
 			readonly workflow: "parallel" | "iterative";
 			readonly reentry: boolean;
-		}
+	  }
 	| { readonly kind: "goal"; readonly phase: "active" | "paused"; readonly goalId: string };
 
 export interface TransitionPlanModeRequest {
@@ -148,16 +148,13 @@ export type SetModelSessionCommand = SessionCommandMetadataV1 & SetModelRequest;
 export type SetThinkingSessionCommand = SessionCommandMetadataV1 & SetThinkingLevelRequest;
 export type TransitionPlanModeSessionCommand = SessionCommandMetadataV1 & TransitionPlanModeRequest;
 export type TransitionGoalModeSessionCommand = SessionCommandMetadataV1 & TransitionGoalModeRequest;
-export type TransitionWorkflowModeSessionCommand =
-	| TransitionPlanModeSessionCommand
-	| TransitionGoalModeSessionCommand;
+export type TransitionWorkflowModeSessionCommand = TransitionPlanModeSessionCommand | TransitionGoalModeSessionCommand;
 export type SessionStateCommand = SetModelSessionCommand | SetThinkingSessionCommand;
 export type SessionCommand = SessionStateCommand | TransitionWorkflowModeSessionCommand;
 
 export interface SessionCommandRecord<
 	Request extends SetModelRequest | SetThinkingLevelRequest | TransitionPlanModeRequest | TransitionGoalModeRequest,
->
-	extends SessionCommandMetadataV1 {
+> extends SessionCommandMetadataV1 {
 	readonly request: Request;
 	readonly committedSessionRevision: number;
 }
@@ -180,6 +177,7 @@ export interface ModelChangeEntry extends SessionEntryBase {
 export interface WorkflowChangeEntry extends SessionEntryBase {
 	type: "workflow_change";
 	command: SessionCommandRecord<TransitionPlanModeRequest | TransitionGoalModeRequest>;
+	from: WorkflowModeSnapshot;
 	previous: WorkflowRestoreState;
 	next: WorkflowModeSnapshot;
 }
@@ -242,9 +240,10 @@ export function decodeSessionCommandEntry(value: unknown): SessionCommandEntry |
 		entry.type === "workflow_change" &&
 		((request.kind === "transitionPlanMode" && isTransitionPlanModeRequest(request)) ||
 			(request.kind === "transitionGoalMode" && isTransitionGoalModeRequest(request))) &&
+		isWorkflowModeSnapshot(entry.from) &&
 		isWorkflowRestoreState(entry.previous) &&
 		isWorkflowModeSnapshot(entry.next) &&
-		isWorkflowTransitionResult(request, entry.previous.mode, entry.next)
+		isWorkflowTransitionResult(request, entry.from, entry.next)
 	) {
 		return value as WorkflowChangeEntry;
 	}
@@ -324,22 +323,46 @@ function isWorkflowRestoreState(value: unknown): value is WorkflowRestoreState {
 
 function isWorkflowTransitionResult(
 	request: Record<string, unknown>,
-	previous: WorkflowModeSnapshot,
+	from: WorkflowModeSnapshot,
 	next: WorkflowModeSnapshot,
 ): boolean {
-	if (request.kind === "transitionPlanMode") return true;
 	const transition = request.transition as Record<string, unknown>;
+	if (request.kind === "transitionPlanMode") {
+		if (transition.kind === "enter") {
+			return (
+				next.kind === "plan" &&
+				next.phase === "active" &&
+				next.planFilePath === transition.planFilePath &&
+				next.workflow === transition.workflow &&
+				next.reentry === (from.kind === "plan")
+			);
+		}
+		if (from.kind !== "plan" || from.phase !== "active") return false;
+		return transition.disposition === "paused"
+			? next.kind === "plan" &&
+					next.phase === "paused" &&
+					next.planFilePath === from.planFilePath &&
+					next.workflow === from.workflow &&
+					next.reentry === from.reentry
+			: next.kind === "none";
+	}
+	if (transition.kind === "enter" && transition.action === "create") {
+		return next.kind === "goal" && next.phase === "active";
+	}
 	if (transition.kind === "enter") {
 		return (
+			from.kind === "goal" &&
+			from.phase === "paused" &&
+			from.goalId === transition.goalId &&
 			next.kind === "goal" &&
 			next.phase === "active" &&
-			(transition.action === "create" || next.goalId === transition.goalId)
+			next.goalId === transition.goalId
 		);
 	}
 	if (
-		previous.kind !== "goal" ||
-		previous.phase !== "active" ||
-		previous.goalId !== transition.goalId
+		from.kind !== "goal" ||
+		from.phase !== "active" ||
+		from.goalId !== transition.goalId
 	) {
 		return false;
 	}

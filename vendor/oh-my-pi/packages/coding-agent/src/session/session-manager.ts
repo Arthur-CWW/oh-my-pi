@@ -22,21 +22,20 @@ import {
 import {
 	type BranchSummaryEntry,
 	type CompactionEntry,
-	decodeSessionCommandEntry,
-	decodeSessionWorkstream,
 	CURRENT_SESSION_VERSION,
 	type CustomEntry,
 	type CustomMessageEntry,
+	decodeSessionCommandEntry,
+	decodeSessionWorkstream,
 	type FileEntry,
 	type LabelEntry,
 	type LeafChangeEntry,
 	type MCPToolSelectionEntry,
 	type ModeChangeEntry,
-	type WorkflowModeSnapshot,
-	type WorkflowRestoreState,
 	type ModelChangeEntry,
 	type NewSessionOptions,
 	type ServiceTierChangeEntry,
+	type SessionCommand,
 	type SessionCommandEntry,
 	type SessionCommandReceipt,
 	type SessionEntry,
@@ -45,15 +44,16 @@ import {
 	type SessionMessageAttribution,
 	type SessionMessageEntry,
 	type SessionStateCommand,
-	type SessionCommand,
-	type TransitionWorkflowModeSessionCommand,
-	type SessionWorkstream,
-	type WorkstreamSource,
 	type SessionTreeNode,
+	type SessionWorkstream,
 	type SubagentSessionMetadata,
 	type ThinkingLevelChangeEntry,
+	type TransitionWorkflowModeSessionCommand,
 	type TtsrInjectionEntry,
 	type UsageStatistics,
+	type WorkflowModeSnapshot,
+	type WorkflowRestoreState,
+	type WorkstreamSource,
 } from "./session-entries";
 import {
 	findMostRecentSession,
@@ -1460,10 +1460,11 @@ export class SessionManager {
 
 	commitWorkflowCommand(
 		command: TransitionWorkflowModeSessionCommand,
+		from: WorkflowModeSnapshot,
 		previous: WorkflowRestoreState,
 		next: WorkflowModeSnapshot,
 	): Promise<SessionCommandReceipt> {
-		return this.#enqueueSessionCommand(() => this.#commitSessionCommandNow(command, { previous, next }));
+		return this.#enqueueSessionCommand(() => this.#commitSessionCommandNow(command, { from, previous, next }));
 	}
 
 	#enqueueSessionCommand(commitNow: () => Promise<SessionCommandReceipt>): Promise<SessionCommandReceipt> {
@@ -1482,7 +1483,7 @@ export class SessionManager {
 
 	async #commitSessionCommandNow(
 		command: SessionCommand,
-		workflowState?: { previous: WorkflowRestoreState; next: WorkflowModeSnapshot },
+		workflowState?: { from: WorkflowModeSnapshot; previous: WorkflowRestoreState; next: WorkflowModeSnapshot },
 	): Promise<SessionCommandReceipt> {
 		const existing = this.#sessionCommandEntries.get(command.commandId);
 		const normalizedRequest =
@@ -1545,14 +1546,10 @@ export class SessionManager {
 				if (prior.request.kind === "setModel" && normalizedRequest.kind === "setModel") {
 					sameRequest =
 						prior.request.model === normalizedRequest.model && prior.request.role === normalizedRequest.role;
-				} else if (
-					prior.request.kind === "setThinkingLevel" &&
-					normalizedRequest.kind === "setThinkingLevel"
-				) {
+				} else if (prior.request.kind === "setThinkingLevel" && normalizedRequest.kind === "setThinkingLevel") {
 					sameRequest = prior.request.thinkingLevel === normalizedRequest.thinkingLevel;
 				} else if (
-					(prior.request.kind === "transitionPlanMode" ||
-						prior.request.kind === "transitionGoalMode") &&
+					(prior.request.kind === "transitionPlanMode" || prior.request.kind === "transitionGoalMode") &&
 					prior.request.kind === normalizedRequest.kind
 				) {
 					if (prior.request.kind === "transitionPlanMode" && normalizedRequest.kind === "transitionPlanMode") {
@@ -1628,6 +1625,7 @@ export class SessionManager {
 				type: "workflow_change",
 				...this.#freshEntryFields(),
 				command: { ...common, request: normalizedRequest },
+				from: { ...workflowState.from },
 				previous: {
 					...workflowState.previous,
 					mode: { ...workflowState.previous.mode },

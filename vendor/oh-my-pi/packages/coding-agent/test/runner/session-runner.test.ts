@@ -20,6 +20,7 @@ import {
 	decodeSubmitInputCommand,
 	decodeSetModelCommand,
 	decodeSetThinkingLevelCommand,
+	decodeTransitionGoalModeCommand,
 	decodeTransitionPlanModeCommand,
 	RunnerRevisionConflictError,
 	RunnerItemRevisionConflictError,
@@ -682,6 +683,89 @@ describe("live SessionRunner", () => {
 		);
 	});
 
+	it("commits, replays, and fences goal workflow transitions without changing input revision", async () => {
+		const fixture = await createLiveFixture();
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const runner = yield* makeSessionRunnerLive(fixture, { mailboxCapacity: 4, eventCapacity: 8 });
+					const terminal = yield* runner.attachTerminalView(attach("goal-terminal", "controller", 0));
+					const initial = yield* terminal.snapshot();
+					const initialTools = [...initial.session.activeToolNames];
+					const enter = decodeTransitionGoalModeCommand({
+						schemaVersion: 1,
+						kind: "transitionGoalMode",
+						commandId: "goal-enter",
+						correlationId: "goal-enter-correlation",
+						expectedSessionRevision: initial.runner.sessionRevision,
+						viewId: terminal.viewId,
+						controllerEpoch: terminal.epoch,
+						transition: {
+							kind: "enter",
+							action: "create",
+							objective: "Prove durable goal transitions",
+							tokenBudget: 500,
+						},
+					});
+
+					const receipt = yield* terminal.transitionGoalMode(enter);
+					const entered = yield* terminal.snapshot();
+					expect(receipt.replayed).toBe(false);
+					expect(entered.runner.revision).toBe(initial.runner.revision);
+					expect(entered.session.workflow).toMatchObject({ kind: "goal", phase: "active" });
+					expect(entered.session.activeToolNames).toEqual(initialTools);
+					expect(fixture.session.getGoalModeState()).toMatchObject({
+						enabled: true,
+						goal: {
+							objective: "Prove durable goal transitions",
+							status: "active",
+							tokenBudget: 500,
+						},
+					});
+					expect(yield* terminal.transitionGoalMode(enter)).toEqual({ ...receipt, replayed: true });
+					expect((yield* terminal.snapshot()).runner.revision).toBe(initial.runner.revision);
+
+					const workflow = entered.session.workflow;
+					if (workflow.kind !== "goal") throw new Error("expected active goal workflow");
+					const mismatch = decodeTransitionGoalModeCommand({
+						...enter,
+						commandId: "goal-mismatch",
+						correlationId: "goal-mismatch-correlation",
+						expectedSessionRevision: receipt.sessionRevision,
+						transition: { kind: "exit", goalId: "different-goal", disposition: "paused" },
+					});
+					yield* Effect.flip(terminal.transitionGoalMode(mismatch)).pipe(
+						Effect.tap(error =>
+							Effect.sync(() => expect(error).toBeInstanceOf(SessionRunnerRuntimeError)),
+						),
+					);
+
+					const pause = decodeTransitionGoalModeCommand({
+						...enter,
+						commandId: "goal-pause",
+						correlationId: "goal-pause-correlation",
+						expectedSessionRevision: receipt.sessionRevision,
+						transition: { kind: "exit", goalId: workflow.goalId, disposition: "paused" },
+					});
+					yield* terminal.transitionGoalMode(pause);
+					const paused = yield* terminal.snapshot();
+					expect(paused.session.workflow).toEqual({
+						kind: "goal",
+						phase: "paused",
+						goalId: workflow.goalId,
+					});
+					expect(paused.session.activeToolNames).toEqual(initialTools);
+					expect(fixture.session.getGoalModeState()).toMatchObject({
+						enabled: false,
+						goal: { id: workflow.goalId, status: "paused" },
+					});
+					yield* terminal.detach();
+					yield* runner.stop();
+				}),
+			),
+		);
+	});
+
 	it("replays a committed plan workflow after prompt rebuild failure without duplicate events", async () => {
 		const fixture = await createLiveFixture();
 		fixture.settings.setRuntimeModelRole(
@@ -873,6 +957,28 @@ describe("live SessionRunner", () => {
 				fixture.sessionManager
 					.getEntries()
 					.some(entry => entry.type === "workflow_change" && entry.command.commandId === busyPlan.commandId),
+			).toBe(false);
+			const busyGoal = decodeTransitionGoalModeCommand({
+				schemaVersion: 1,
+				kind: "transitionGoalMode",
+				commandId: "goal-during-drain",
+				correlationId: "goal-during-drain-correlation",
+				expectedSessionRevision: committed.sessionRevision,
+				viewId: terminal.viewId,
+				controllerEpoch: terminal.epoch,
+				transition: {
+					kind: "enter",
+					action: "create",
+					objective: "Must wait for the held prompt",
+				},
+			});
+			await expect(run(terminal.transitionGoalMode(busyGoal))).rejects.toBeInstanceOf(
+				SessionStateCommandInFlightError,
+			);
+			expect(
+				fixture.sessionManager
+					.getEntries()
+					.some(entry => entry.type === "workflow_change" && entry.command.commandId === busyGoal.commandId),
 			).toBe(false);
 			expect((await run(runner.snapshot())).status).toBe("running");
 

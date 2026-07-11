@@ -7,7 +7,13 @@ import {
 	renderGoalPrompt,
 	renderTrustedObjective,
 } from "@oh-my-pi/pi-coding-agent/goals/runtime";
-import type { Goal, GoalModeState, GoalRuntimeEvent, GoalTokenUsage } from "@oh-my-pi/pi-coding-agent/goals/state";
+import {
+	decodeGoalModeState,
+	type Goal,
+	type GoalModeState,
+	type GoalRuntimeEvent,
+	type GoalTokenUsage,
+} from "@oh-my-pi/pi-coding-agent/goals/state";
 import type { SessionWorkstream } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 
 function createUsage(overrides: Partial<GoalTokenUsage> = {}): GoalTokenUsage {
@@ -107,6 +113,36 @@ function createHarness(
 }
 
 describe("goal runtime", () => {
+	it("decodes only complete persisted goal states", () => {
+		const active: GoalModeState = { enabled: true, mode: "active", goal: createGoal() };
+		expect(decodeGoalModeState(active)).toEqual(active);
+		expect(decodeGoalModeState({ ...active, goal: { ...active.goal, id: "" } })).toBeUndefined();
+		expect(decodeGoalModeState({ ...active, enabled: "true" })).toBeUndefined();
+		expect(decodeGoalModeState({ ...active, goal: { ...active.goal, tokensUsed: -1 } })).toBeUndefined();
+	});
+
+	it("hydrates accounting state without persistence and clones the journal projection", async () => {
+		const harness = createHarness({ now: 1_000, usage: createUsage({ input: 10 }) });
+		const persisted: GoalModeState = {
+			enabled: true,
+			mode: "active",
+			goal: createGoal({ id: "hydrated-goal", tokensUsed: 7, timeUsedSeconds: 3 }),
+		};
+		harness.runtime.hydratePersistedState(persisted);
+		persisted.goal.objective = "mutated after hydration";
+		expect(harness.getState()?.goal.objective).toBe("Ship <fast> & safely");
+		expect(harness.persists).toHaveLength(0);
+
+		harness.runtime.onTurnStart("hydrated-turn", createUsage({ input: 10 }));
+		harness.advance(1_000);
+		harness.setUsage(createUsage({ input: 12 }));
+		await harness.runtime.flushUsage("suppressed");
+		expect(harness.getState()?.goal).toMatchObject({ tokensUsed: 9, timeUsedSeconds: 4 });
+
+		harness.runtime.hydratePersistedState(undefined);
+		expect(harness.getState()).toBeUndefined();
+		expect(harness.persists).toHaveLength(1);
+	});
 	it("counts cache writes but ignores cache reads in token deltas", () => {
 		expect(
 			goalTokenDelta(

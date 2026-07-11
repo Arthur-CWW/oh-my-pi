@@ -1,20 +1,20 @@
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { Model } from "@oh-my-pi/pi-ai";
 import type { Effect, Scope } from "effect";
-import type { ConfiguredThinkingLevel } from "../thinking";
 import type { AgentSessionEvent } from "../session/agent-session";
 import type { WorkflowModeSnapshot } from "../session/session-entries";
+import type { ConfiguredThinkingLevel } from "../thinking";
 import type {
-	CancelQueuedInputCommand,
 	CancelCompactionCommand,
 	CancelCompactionReceipt,
+	CancelQueuedInputCommand,
 	EditQueuedInputCommand,
 	InterruptPromptCommand,
 	InterruptPromptReceipt,
-	RunnerCommandReceipt,
-	RunnerEvent,
 	RunCompactionCommand,
 	RunCompactionReceipt,
+	RunnerCommandReceipt,
+	RunnerEvent,
 	SessionRunnerSnapshot,
 	SetModelCommand,
 	SetModelReceipt,
@@ -23,6 +23,8 @@ import type {
 	SubmitInputCommand,
 	TransitionPlanModeCommand,
 	TransitionPlanModeReceipt,
+	TransitionGoalModeCommand,
+	TransitionGoalModeReceipt,
 } from "./protocol";
 import type { RunnerFailure } from "./session-runner";
 
@@ -72,7 +74,9 @@ export interface TerminalSessionView {
 	readonly subscribe: () => Effect.Effect<TerminalSessionSubscription, RunnerFailure, Scope.Scope>;
 	readonly submit: (command: SubmitInputCommand) => Effect.Effect<RunnerCommandReceipt, RunnerFailure, Scope.Scope>;
 	readonly edit: (command: EditQueuedInputCommand) => Effect.Effect<RunnerCommandReceipt, RunnerFailure, Scope.Scope>;
-	readonly cancel: (command: CancelQueuedInputCommand) => Effect.Effect<RunnerCommandReceipt, RunnerFailure, Scope.Scope>;
+	readonly cancel: (
+		command: CancelQueuedInputCommand,
+	) => Effect.Effect<RunnerCommandReceipt, RunnerFailure, Scope.Scope>;
 	readonly setModel: (command: SetModelCommand) => Effect.Effect<SetModelReceipt, RunnerFailure, Scope.Scope>;
 	readonly setThinkingLevel: (
 		command: SetThinkingLevelCommand,
@@ -80,9 +84,10 @@ export interface TerminalSessionView {
 	readonly transitionPlanMode: (
 		command: TransitionPlanModeCommand,
 	) => Effect.Effect<TransitionPlanModeReceipt, RunnerFailure, Scope.Scope>;
-	readonly compact: (
-		command: RunCompactionCommand,
-	) => Effect.Effect<RunCompactionReceipt, RunnerFailure, Scope.Scope>;
+	readonly transitionGoalMode: (
+		command: TransitionGoalModeCommand,
+	) => Effect.Effect<TransitionGoalModeReceipt, RunnerFailure, Scope.Scope>;
+	readonly compact: (command: RunCompactionCommand) => Effect.Effect<RunCompactionReceipt, RunnerFailure, Scope.Scope>;
 	readonly cancelCompaction: (
 		command: CancelCompactionCommand,
 	) => Effect.Effect<CancelCompactionReceipt, RunnerFailure, Scope.Scope>;

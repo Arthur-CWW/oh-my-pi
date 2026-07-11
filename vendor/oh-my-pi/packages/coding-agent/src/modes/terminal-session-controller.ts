@@ -9,6 +9,7 @@ import type {
 	SetModelReceipt,
 	SetThinkingLevelReceipt,
 	TransitionPlanModeReceipt,
+	TransitionGoalModeReceipt,
 } from "../runner/protocol";
 import {
 	decodeCancelQueuedInputCommand,
@@ -20,6 +21,7 @@ import {
 	decodeSetModelCommand,
 	decodeSetThinkingLevelCommand,
 	decodeTransitionPlanModeCommand,
+	decodeTransitionGoalModeCommand,
 	RunnerCompactionTargetError,
 	RUNNER_SCHEMA_VERSION,
 } from "../runner/protocol";
@@ -84,6 +86,26 @@ export interface TerminalTransitionPlanModeIntent {
 	readonly causationId?: string;
 }
 
+export interface TerminalTransitionGoalModeIntent {
+	readonly transition:
+		| {
+				readonly kind: "enter";
+				readonly action: "create";
+				readonly objective: string;
+				readonly tokenBudget?: number;
+				readonly workstream?: string;
+		  }
+		| { readonly kind: "enter"; readonly action: "resume"; readonly goalId: string }
+		| {
+				readonly kind: "exit";
+				readonly goalId: string;
+				readonly disposition: "paused" | "dropped" | "completed";
+		  };
+	readonly commandId?: string;
+	readonly correlationId?: string;
+	readonly causationId?: string;
+}
+
 export interface TerminalInterruptPromptIntent {
 	readonly commandId?: string;
 	readonly correlationId?: string;
@@ -121,6 +143,7 @@ export interface TerminalSessionController {
 	readonly setModel: (intent: TerminalSetModelIntent) => Promise<SetModelReceipt>;
 	readonly setThinkingLevel: (intent: TerminalSetThinkingLevelIntent) => Promise<SetThinkingLevelReceipt>;
 	readonly transitionPlanMode: (intent: TerminalTransitionPlanModeIntent) => Promise<TransitionPlanModeReceipt>;
+	readonly transitionGoalMode: (intent: TerminalTransitionGoalModeIntent) => Promise<TransitionGoalModeReceipt>;
 	readonly compact: (intent?: TerminalCompactionIntent) => Promise<RunCompactionReceipt>;
 	readonly cancelCompaction: (
 		intent?: TerminalCancelCompactionIntent,
@@ -341,6 +364,31 @@ export async function createTerminalSessionController(
 							decodeTransitionPlanModeCommand({
 								schemaVersion: RUNNER_SCHEMA_VERSION,
 								kind: "transitionPlanMode",
+								...ids,
+								...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
+								expectedSessionRevision: current.runner.sessionRevision,
+								viewId,
+								controllerEpoch: view!.epoch,
+								transition: intent.transition,
+							}),
+						),
+					);
+					await refresh();
+					return receipt;
+				} catch (error) {
+					await refresh();
+					throw error;
+				}
+			},
+			transitionGoalMode: async (intent) => {
+				const current = await refresh();
+				try {
+					const ids = metadata(intent);
+					const receipt = await run(
+						view!.transitionGoalMode(
+							decodeTransitionGoalModeCommand({
+								schemaVersion: RUNNER_SCHEMA_VERSION,
+								kind: "transitionGoalMode",
 								...ids,
 								...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
 								expectedSessionRevision: current.runner.sessionRevision,

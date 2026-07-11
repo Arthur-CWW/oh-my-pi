@@ -1,23 +1,24 @@
 import { describe, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import {
-	CURRENT_SESSION_VERSION,
-	decodeSessionCommandEntry,
-	type WorkflowModeSnapshot,
-	type WorkflowRestoreState,
-	type SessionHeader,
-} from "@oh-my-pi/pi-coding-agent/session/session-entries";
+import type { SessionEntry as CompactionSessionEntry } from "@oh-my-pi/pi-agent-core/compaction/entries";
 import {
 	IndexedSessionStorage,
 	type SessionStorageBackend,
 	type SessionStorageIndexEntry,
 } from "@oh-my-pi/pi-coding-agent/session/indexed-session-storage";
 import {
+	CURRENT_SESSION_VERSION,
+	decodeSessionCommandEntry,
+	type SessionHeader,
+	type WorkflowModeSnapshot,
+	type WorkflowRestoreState,
+} from "@oh-my-pi/pi-coding-agent/session/session-entries";
+import {
 	SessionCommandConflictError,
 	SessionManager,
-	SessionStateCommandInFlightError,
 	SessionRevisionConflictError,
+	SessionStateCommandInFlightError,
 } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { TempDir } from "@oh-my-pi/pi-utils";
 
@@ -189,7 +190,6 @@ describe("SessionManager state command journal", () => {
 		await manager.close();
 	});
 
-
 	it("reserves a cold command before a concurrent ordinary append", async () => {
 		const backend = new ControlledSessionBackend();
 		const storage = new IndexedSessionStorage(backend);
@@ -321,13 +321,32 @@ describe("SessionManager state command journal", () => {
 			planFilePath: activePlan.kind === "plan" ? activePlan.planFilePath : "",
 			workflow: "parallel",
 		});
-		const committed = await manager.commitWorkflowCommand(command, restoreState, activePlan);
+		const reenteredPlan: WorkflowModeSnapshot = { ...activePlan, reentry: true };
+		const committed = await manager.commitWorkflowCommand(
+			command,
+			{
+				kind: "plan",
+				phase: "active",
+				planFilePath: "local://legacy.md",
+				workflow: "parallel",
+				reentry: false,
+			},
+			restoreState,
+			reenteredPlan,
+		);
 		expect(committed.sessionRevision).toBe(2);
 		expect(manager.getEntries().map(entry => entry.type)).toEqual(["mode_change", "workflow_change"]);
 		expect(committed.entry).toMatchObject({
 			type: "workflow_change",
+			from: {
+				kind: "plan",
+				phase: "active",
+				planFilePath: "local://legacy.md",
+				workflow: "parallel",
+				reentry: false,
+			},
 			previous: restoreState,
-			next: activePlan,
+			next: reenteredPlan,
 			command: {
 				commandId: "workflow-enter",
 				correlationId: "correlation-workflow-enter",
@@ -341,13 +360,14 @@ describe("SessionManager state command journal", () => {
 			modeData: {
 				planFilePath: "local://journal-plan.md",
 				workflow: "parallel",
-				reentry: false,
+				reentry: true,
 			},
-			workflow: activePlan,
+			workflow: reenteredPlan,
 		});
 
 		const replayed = await manager.commitWorkflowCommand(
 			command,
+			activePlan,
 			{ mode: activePlan, activeToolNames: ["different"] },
 			{ kind: "none" },
 		);
@@ -361,6 +381,7 @@ describe("SessionManager state command journal", () => {
 					planFilePath: "local://other.md",
 					workflow: "parallel",
 				}),
+				activePlan,
 				restoreState,
 				activePlan,
 			),
@@ -376,6 +397,7 @@ describe("SessionManager state command journal", () => {
 					planFilePath: "local://a.md",
 					workflow: "parallel",
 				}),
+				{ kind: "none" },
 				restoreState,
 				{ ...activePlan, planFilePath: "local://a.md" },
 			),
@@ -385,6 +407,7 @@ describe("SessionManager state command journal", () => {
 					planFilePath: "local://b.md",
 					workflow: "iterative",
 				}),
+				{ kind: "none" },
 				restoreState,
 				{ ...activePlan, planFilePath: "local://b.md", workflow: "iterative" },
 			),
@@ -410,9 +433,9 @@ describe("SessionManager state command journal", () => {
 		const pausedPlan: WorkflowModeSnapshot = {
 			...activePlan,
 			phase: "paused",
-			reentry: true,
+			reentry: false,
 		};
-		await manager.commitWorkflowCommand(command, { ...restoreState, mode: activePlan }, pausedPlan);
+		await manager.commitWorkflowCommand(command, activePlan, { ...restoreState, mode: activePlan }, pausedPlan);
 		const sessionFile = manager.getSessionFile();
 		if (!sessionFile) throw new Error("expected workflow session file");
 		const lines = (await Bun.file(sessionFile).text()).trim().split("\n");
@@ -426,7 +449,9 @@ describe("SessionManager state command journal", () => {
 			mode: "plan_paused",
 			workflow: pausedPlan,
 		});
-		expect((await reopened.commitWorkflowCommand(command, restoreState, { kind: "none" })).replayed).toBe(true);
+		expect(
+			(await reopened.commitWorkflowCommand(command, pausedPlan, restoreState, { kind: "none" })).replayed,
+		).toBe(true);
 		await reopened.close();
 
 		const legacy = SessionManager.inMemory("/legacy-workflow-context");
@@ -459,11 +484,14 @@ describe("SessionManager state command journal", () => {
 			tokenBudget: 1200,
 			workstream: "workflow-journal",
 		});
-		const created = await manager.commitWorkflowCommand(create, restoreState, activeGoal);
+		const created = await manager.commitWorkflowCommand(create, { kind: "none" }, restoreState, activeGoal);
 		expect(created.replayed).toBe(false);
 		expect(decodeSessionCommandEntry(created.entry)).toEqual(created.entry);
+		const compactableEntry: CompactionSessionEntry = created.entry;
+		expect(compactableEntry.type).toBe("workflow_change");
 		expect(created.entry).toMatchObject({
 			type: "workflow_change",
+			from: { kind: "none" },
 			command: { request: { kind: create.kind, transition: create.transition } },
 			next: activeGoal,
 		});
@@ -472,16 +500,28 @@ describe("SessionManager state command journal", () => {
 			modeData: { goalId: "goal-1" },
 			workflow: activeGoal,
 		});
-		expect((await manager.commitWorkflowCommand(create, { ...restoreState, mode: activeGoal }, pausedGoal)).replayed).toBe(
-			true,
-		);
+		expect(
+			(
+				await manager.commitWorkflowCommand(
+					create,
+					activeGoal,
+					{ ...restoreState, mode: activeGoal },
+					pausedGoal,
+				)
+			).replayed,
+		).toBe(true);
 
 		const pause = goalWorkflowCommand("goal-pause", 1, {
 			kind: "exit",
 			goalId: "goal-1",
 			disposition: "paused",
 		});
-		const paused = await manager.commitWorkflowCommand(pause, { ...restoreState, mode: activeGoal }, pausedGoal);
+		const paused = await manager.commitWorkflowCommand(
+			pause,
+			activeGoal,
+			{ ...restoreState, mode: activeGoal },
+			pausedGoal,
+		);
 		expect(decodeSessionCommandEntry(paused.entry)).toEqual(paused.entry);
 		expect(manager.buildSessionContext()).toMatchObject({
 			mode: "goal_paused",
@@ -496,7 +536,14 @@ describe("SessionManager state command journal", () => {
 		});
 		expect(
 			decodeSessionCommandEntry(
-				(await manager.commitWorkflowCommand(resume, { ...restoreState, mode: pausedGoal }, activeGoal)).entry,
+				(
+					await manager.commitWorkflowCommand(
+						resume,
+						pausedGoal,
+						{ ...restoreState, mode: pausedGoal },
+						activeGoal,
+					)
+				).entry,
 			),
 		).toBeDefined();
 		const complete = goalWorkflowCommand("goal-complete", 3, {
@@ -504,17 +551,25 @@ describe("SessionManager state command journal", () => {
 			goalId: "goal-1",
 			disposition: "completed",
 		});
-		await manager.commitWorkflowCommand(complete, { ...restoreState, mode: activeGoal }, { kind: "none" });
+		await manager.commitWorkflowCommand(
+			complete,
+			activeGoal,
+			{ ...restoreState, mode: activeGoal },
+			{ kind: "none" },
+		);
 		const drop = goalWorkflowCommand("goal-drop", 4, {
 			kind: "exit",
 			goalId: "goal-1",
 			disposition: "dropped",
 		});
-		expect(
-			decodeSessionCommandEntry(
-				(await manager.commitWorkflowCommand(drop, { ...restoreState, mode: activeGoal }, { kind: "none" })).entry,
+		await expect(
+			manager.commitWorkflowCommand(
+				drop,
+				{ kind: "none" },
+				{ ...restoreState, mode: activeGoal },
+				{ kind: "none" },
 			),
-		).toBeDefined();
+		).rejects.toThrow("Invalid workflow transition state");
 		expect(manager.buildSessionContext()).toMatchObject({ mode: "none", workflow: { kind: "none" } });
 		await expect(
 			manager.commitWorkflowCommand(
@@ -523,6 +578,7 @@ describe("SessionManager state command journal", () => {
 					action: "create",
 					objective: "Changed objective",
 				}),
+				{ kind: "none" },
 				restoreState,
 				activeGoal,
 			),
@@ -538,6 +594,7 @@ describe("SessionManager state command journal", () => {
 					action: "create",
 					objective: "First contender",
 				}),
+				{ kind: "none" },
 				restoreState,
 				{ kind: "goal", phase: "active", goalId: "goal-cas-a" },
 			),
@@ -547,6 +604,7 @@ describe("SessionManager state command journal", () => {
 					action: "create",
 					objective: "Second contender",
 				}),
+				{ kind: "none" },
 				restoreState,
 				{ kind: "goal", phase: "active", goalId: "goal-cas-b" },
 			),
@@ -604,11 +662,28 @@ describe("SessionManager state command journal", () => {
 		];
 		for (const testCase of cases) {
 			const manager = SessionManager.inMemory(`/goal-invalid-${testCase.command.commandId}`);
-			await expect(manager.commitWorkflowCommand(testCase.command, restoreState, testCase.next)).rejects.toThrow(
-				"Invalid workflow transition state",
-			);
+			await expect(
+				manager.commitWorkflowCommand(testCase.command, { kind: "none" }, restoreState, testCase.next),
+			).rejects.toThrow("Invalid workflow transition state");
 			expect(manager.getEntries()).toEqual([]);
 		}
+		const resumeAba = SessionManager.inMemory("/goal-resume-aba");
+		await expect(
+			resumeAba.commitWorkflowCommand(
+				goalWorkflowCommand("goal-resume-aba", 0, {
+					kind: "enter",
+					action: "resume",
+					goalId: "goal-1",
+				}),
+				{ kind: "goal", phase: "paused", goalId: "goal-2" },
+				{
+					...restoreState,
+					mode: { kind: "goal", phase: "paused", goalId: "goal-1" },
+				},
+				{ kind: "goal", phase: "active", goalId: "goal-1" },
+			),
+		).rejects.toThrow("Invalid workflow transition state");
+		expect(resumeAba.getEntries()).toEqual([]);
 		for (const [disposition, next] of [
 			["paused", { kind: "goal", phase: "paused", goalId: "goal-b" }],
 			["completed", { kind: "none" }],
@@ -621,6 +696,7 @@ describe("SessionManager state command journal", () => {
 						goalId: "goal-b",
 						disposition,
 					}),
+					{ kind: "goal", phase: "active", goalId: "goal-a" },
 					{
 						...restoreState,
 						mode: { kind: "goal", phase: "active", goalId: "goal-a" },
@@ -643,17 +719,44 @@ describe("SessionManager state command journal", () => {
 			action: "create",
 			objective: "Persist and reopen",
 		});
-		await manager.commitWorkflowCommand(command, restoreState, activeGoal);
+		await manager.commitWorkflowCommand(command, { kind: "none" }, restoreState, activeGoal);
 		const sessionFile = manager.getSessionFile();
 		if (!sessionFile) throw new Error("expected goal workflow session file");
 		await manager.close();
 
 		const reopened = await SessionManager.open(sessionFile, sessionDir);
 		expect(reopened.getSessionCommandReceipt(command.commandId)?.entry.type).toBe("workflow_change");
-		expect((await reopened.commitWorkflowCommand(command, restoreState, { kind: "none" })).replayed).toBe(true);
+		expect(
+			(await reopened.commitWorkflowCommand(command, activeGoal, restoreState, { kind: "none" })).replayed,
+		).toBe(true);
 		expect(reopened.buildSessionContext()).toMatchObject({
 			mode: "goal",
 			modeData: { goalId: "goal-reopen" },
+			workflow: activeGoal,
+		});
+		reopened.appendModeChange("goal", {
+			goal: {
+				enabled: true,
+				mode: "active",
+				goal: {
+					id: "goal-reopen",
+					objective: "Persist and reopen",
+					status: "active",
+					tokensUsed: 100,
+					timeUsedSeconds: 10,
+					createdAt: 1,
+					updatedAt: 2,
+				},
+			},
+		});
+		expect(reopened.buildSessionContext()).toMatchObject({
+			mode: "goal",
+			modeData: { goal: { goal: { id: "goal-reopen" } } },
+			goalState: {
+				mode: "active",
+				enabled: true,
+				goal: { id: "goal-reopen", status: "active", tokensUsed: 100 },
+			},
 			workflow: activeGoal,
 		});
 		reopened.appendModeChange("plan", { planFilePath: "local://newest-legacy.md" });
@@ -663,11 +766,18 @@ describe("SessionManager state command journal", () => {
 		});
 		const resumedGoal: WorkflowModeSnapshot = { kind: "goal", phase: "active", goalId: "goal-reopen" };
 		await reopened.commitWorkflowCommand(
-			goalWorkflowCommand("goal-newest", 2, {
+			goalWorkflowCommand("goal-newest", 3, {
 				kind: "enter",
-				action: "resume",
-				goalId: "goal-reopen",
+				action: "create",
+				objective: "Replace the legacy plan",
 			}),
+			{
+				kind: "plan",
+				phase: "active",
+				planFilePath: "local://newest-legacy.md",
+				workflow: "parallel",
+				reentry: false,
+			},
 			restoreState,
 			resumedGoal,
 		);

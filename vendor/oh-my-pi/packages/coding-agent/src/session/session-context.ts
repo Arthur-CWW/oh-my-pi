@@ -1,15 +1,16 @@
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { ProviderPayload, ServiceTier } from "@oh-my-pi/pi-ai";
 import * as snapcompact from "@oh-my-pi/snapcompact";
+import { AUTO_THINKING, type ConfiguredThinkingLevel, parseThinkingLevel } from "../thinking";
+import { decodeGoalModeState, type GoalModeState } from "../goals/state";
 import { createBranchSummaryMessage, createCompactionSummaryMessage, createCustomMessage } from "./messages";
 import {
 	type CompactionEntry,
 	decodeSessionCommandEntry,
 	EPHEMERAL_MODEL_CHANGE_ROLE,
-	type WorkflowModeSnapshot,
 	type SessionEntry,
+	type WorkflowModeSnapshot,
 } from "./session-entries";
-import { AUTO_THINKING, type ConfiguredThinkingLevel, parseThinkingLevel } from "../thinking";
 
 export interface SessionContext {
 	messages: AgentMessage[];
@@ -29,6 +30,8 @@ export interface SessionContext {
 	modeData?: Record<string, unknown>;
 	/** Closed workflow state restored from workflow_change entries (or legacy mode_change entries). */
 	workflow?: WorkflowModeSnapshot;
+	/** Canonical persisted goal lifecycle state, independent of workflow intent. */
+	goalState?: GoalModeState;
 }
 
 /** Lists session model strings to try when restoring, in fallback order. */
@@ -193,6 +196,10 @@ export function buildSessionContext(
 	let mode = "none";
 	let modeData: Record<string, unknown> | undefined;
 	let workflow: WorkflowModeSnapshot = { kind: "none" };
+	let goalState: GoalModeState | undefined;
+	let precedingWorkflowChange:
+		| { from: WorkflowModeSnapshot; next: WorkflowModeSnapshot }
+		| undefined;
 	// Track whether an explicit `model_change` with role="default" has been
 	// seen on this path. Once a user (or the agent itself) records an
 	// explicit default, later assistant-message inference must NOT overwrite
@@ -203,6 +210,8 @@ export function buildSessionContext(
 	let hasExplicitDefaultModel = false;
 
 	for (const entry of path) {
+		const workflowChangeImmediatelyBefore = precedingWorkflowChange;
+		precedingWorkflowChange = undefined;
 		if (entry.type === "thinking_level_change") {
 			thinkingLevel = entry.thinkingLevel ?? "off";
 		} else if (entry.type === "model_change") {
@@ -236,13 +245,35 @@ export function buildSessionContext(
 			selectedMCPToolNames = [...entry.selectedToolNames];
 			hasPersistedMCPToolSelection = true;
 		} else if (entry.type === "mode_change") {
+			const decodedGoalState =
+				entry.mode === "goal" || entry.mode === "goal_paused"
+					? decodeGoalModeState(entry.data?.goal)
+					: undefined;
+			const isCanonicalGoalSideEntry =
+				(entry.mode === "goal" || entry.mode === "goal_paused") &&
+				workflowChangeImmediatelyBefore?.next.kind === "goal" &&
+				workflowChangeImmediatelyBefore.next.phase === (entry.mode === "goal" ? "active" : "paused") &&
+				decodedGoalState?.goal.id === workflowChangeImmediatelyBefore.next.goalId;
+			const isCanonicalGoalExitSideEntry =
+				entry.mode === "none" &&
+				workflowChangeImmediatelyBefore?.from.kind === "goal" &&
+				workflowChangeImmediatelyBefore.next.kind === "none";
+
 			mode = entry.mode;
 			modeData = entry.data;
-			workflow = workflowFromLegacyMode(entry.mode, entry.data);
+			if (!isCanonicalGoalSideEntry && !isCanonicalGoalExitSideEntry) {
+				workflow = workflowFromLegacyMode(entry.mode, entry.data);
+			}
+			if (entry.mode === "goal" || entry.mode === "goal_paused") {
+				goalState = decodedGoalState;
+			} else if (entry.mode === "none") {
+				goalState = undefined;
+			}
 		} else if (entry.type === "workflow_change") {
 			const decoded = decodeSessionCommandEntry(entry);
 			if (decoded?.type !== "workflow_change") continue;
 			workflow = decoded.next;
+			precedingWorkflowChange = { from: decoded.from, next: decoded.next };
 			if (workflow.kind === "none") {
 				mode = "none";
 				modeData = undefined;
@@ -426,13 +457,21 @@ export function buildSessionContext(
 		mode,
 		modeData,
 		workflow,
+		goalState,
 	};
 }
 
-function workflowFromLegacyMode(
-	mode: string,
-	data: Record<string, unknown> | undefined,
-): WorkflowModeSnapshot {
+function workflowFromLegacyMode(mode: string, data: Record<string, unknown> | undefined): WorkflowModeSnapshot {
+	if (mode === "goal" || mode === "goal_paused") {
+		const goalState = decodeGoalModeState(data?.goal);
+		const goalId = goalState?.goal.id ?? (typeof data?.goalId === "string" ? data.goalId : undefined);
+		if (!goalId) return { kind: "none" };
+		return {
+			kind: "goal",
+			phase: mode === "goal" ? "active" : "paused",
+			goalId,
+		};
+	}
 	if (mode !== "plan" && mode !== "plan_paused") return { kind: "none" };
 	const planFilePath = data?.planFilePath;
 	if (typeof planFilePath !== "string") return { kind: "none" };

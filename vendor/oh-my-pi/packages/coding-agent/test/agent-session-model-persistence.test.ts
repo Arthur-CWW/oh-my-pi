@@ -11,7 +11,11 @@ import { type CreateAgentSessionResult, createAgentSession } from "@oh-my-pi/pi-
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { getRestorableSessionModels } from "@oh-my-pi/pi-coding-agent/session/session-context";
-import { EPHEMERAL_MODEL_CHANGE_ROLE, type TransitionPlanModeSessionCommand } from "@oh-my-pi/pi-coding-agent/session/session-entries";
+import {
+	EPHEMERAL_MODEL_CHANGE_ROLE,
+	type TransitionGoalModeSessionCommand,
+	type TransitionPlanModeSessionCommand,
+} from "@oh-my-pi/pi-coding-agent/session/session-entries";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { AUTO_THINKING } from "@oh-my-pi/pi-coding-agent/thinking";
 import { TempDir } from "@oh-my-pi/pi-utils";
@@ -698,6 +702,192 @@ describe("AgentSession model persistence", () => {
 				.filter(entry => entry.type !== "workflow_change")
 				.map(entry => entry.type),
 		).toEqual(baselineSideEntryTypes);
+	});
+
+	it("rolls back goal state and accounting when switch target goal reconciliation fails", async () => {
+		const created = await createSession({ persist: true });
+		const previousManager = created.session.sessionManager;
+		const previousSessionFile = previousManager.getSessionFile();
+		const previousSessionId = created.session.sessionId;
+		const previousGoalState = {
+			enabled: true,
+			mode: "active" as const,
+			goal: {
+				id: "goal-before-failed-switch",
+				objective: "Keep the original accounting state",
+				status: "active" as const,
+				tokenBudget: 1_000,
+				tokensUsed: 37,
+				timeUsedSeconds: 11,
+				createdAt: 100,
+				updatedAt: 200,
+			},
+		};
+		created.session.goalRuntime.hydratePersistedState(previousGoalState);
+		created.session.goalRuntime.onTurnStart("turn-before-failed-switch", {
+			input: 0,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+		});
+
+		const targetManager = SessionManager.create(tempDir.path(), path.join(tempDir.path(), "invalid-goal-target"));
+		const targetSessionFile = targetManager.getSessionFile();
+		if (!targetSessionFile) throw new Error("Expected persisted target session file");
+		const targetGoalState = {
+			enabled: true,
+			mode: "active" as const,
+			goal: {
+				id: "goal-present-only-in-target",
+				objective: "Must disappear when reconciliation fails",
+				status: "active" as const,
+				tokenBudget: 500,
+				tokensUsed: 91,
+				timeUsedSeconds: 23,
+				createdAt: 300,
+				updatedAt: 400,
+			},
+		};
+		targetManager.appendModeChange("goal", { goal: targetGoalState });
+		const conflictingEnter: TransitionGoalModeSessionCommand = {
+			schemaVersion: 1,
+			kind: "transitionGoalMode",
+			commandId: "conflicting-target-goal-enter",
+			correlationId: "conflicting-target-goal-enter-correlation",
+			expectedSessionRevision: targetManager.getSessionRevision(),
+			transition: {
+				kind: "enter",
+				action: "create",
+				objective: "Conflicting committed target goal",
+			},
+		};
+		await targetManager.commitWorkflowCommand(
+			conflictingEnter,
+			{ kind: "goal", phase: "active", goalId: targetGoalState.goal.id },
+			{ mode: { kind: "none" }, activeToolNames: ["read"] },
+			{ kind: "goal", phase: "active", goalId: "conflicting-target-goal" },
+		);
+		await targetManager.close();
+
+		await expect(created.session.switchSession(targetSessionFile)).rejects.toThrow(
+			"cannot create goal because existing goal is active",
+		);
+		expect(created.session.sessionManager).toBe(previousManager);
+		expect(created.session.sessionFile).toBe(previousSessionFile);
+		expect(created.session.sessionId).toBe(previousSessionId);
+		expect(created.session.getGoalModeState()).toEqual(previousGoalState);
+		expect(created.session.goalRuntime.snapshot.turnSnapshot?.activeGoalId).toBe(previousGoalState.goal.id);
+		expect(JSON.stringify(created.session.getGoalModeState())).not.toContain(targetGoalState.goal.id);
+
+		await created.session.goalRuntime.flushUsage("suppressed", {
+			input: 9,
+			output: 8,
+			cacheRead: 0,
+			cacheWrite: 0,
+		});
+		expect(created.session.getGoalModeState()?.goal.tokensUsed).toBe(54);
+	});
+
+	it("reconciles a committed goal workflow without a runtime entry across active and paused reopens", async () => {
+		const manager = SessionManager.create(tempDir.path(), path.join(tempDir.path(), "goal-sessions"));
+		const sessionFile = manager.getSessionFile();
+		if (!sessionFile) throw new Error("Expected persisted goal session file");
+		const enter: TransitionGoalModeSessionCommand = {
+			schemaVersion: 1,
+			kind: "transitionGoalMode",
+			commandId: "sdk-goal-enter",
+			correlationId: "sdk-goal-enter-correlation",
+			expectedSessionRevision: manager.getSessionRevision(),
+			transition: {
+				kind: "enter",
+				action: "create",
+				objective: "Recover a committed goal",
+				tokenBudget: 900,
+			},
+		};
+		await manager.commitWorkflowCommand(
+			enter,
+			{ kind: "none" },
+			{ mode: { kind: "none" }, activeToolNames: ["read", "edit", "bash"] },
+			{ kind: "goal", phase: "active", goalId: "goal-recovery-proof" },
+		);
+		expect(manager.getEntries().filter(entry => entry.type === "mode_change")).toHaveLength(0);
+		await manager.close();
+
+		const active = await createStartupResumeSession(sessionFile);
+		expect(active.session.getGoalModeState()).toMatchObject({
+			enabled: true,
+			goal: {
+				id: "goal-recovery-proof",
+				objective: "Recover a committed goal",
+				status: "active",
+				tokenBudget: 900,
+			},
+		});
+		expect(active.session.getActiveToolNames()).toEqual(["read", "edit", "bash", "goal"]);
+		const pause: TransitionGoalModeSessionCommand = {
+			schemaVersion: 1,
+			kind: "transitionGoalMode",
+			commandId: "sdk-goal-pause",
+			correlationId: "sdk-goal-pause-correlation",
+			expectedSessionRevision: active.session.sessionManager.getSessionRevision(),
+			transition: {
+				kind: "exit",
+				goalId: "goal-recovery-proof",
+				disposition: "paused",
+			},
+		};
+		await active.session.commitGoalWorkflowTransition(pause);
+		await active.session.dispose();
+		session = undefined;
+
+		const paused = await createStartupResumeSession(sessionFile);
+		expect(paused.session.getGoalModeState()).toMatchObject({
+			enabled: false,
+			goal: {
+				id: "goal-recovery-proof",
+				objective: "Recover a committed goal",
+				status: "paused",
+				tokenBudget: 900,
+			},
+		});
+		expect(paused.session.getActiveToolNames()).toEqual(["read", "edit", "bash"]);
+		expect(paused.session.sessionManager.getEntries().filter(entry => entry.type === "workflow_change")).toHaveLength(2);
+		const differentManager = SessionManager.create(
+			tempDir.path(),
+			path.join(tempDir.path(), "different-goal-sessions"),
+		);
+		const differentSessionFile = differentManager.getSessionFile();
+		if (!differentSessionFile) throw new Error("Expected different persisted goal session file");
+		const differentEnter: TransitionGoalModeSessionCommand = {
+			...enter,
+			commandId: "sdk-different-goal-enter",
+			correlationId: "sdk-different-goal-enter-correlation",
+			expectedSessionRevision: differentManager.getSessionRevision(),
+			transition: {
+				kind: "enter",
+				action: "create",
+				objective: "Replace stale hydrated state",
+			},
+		};
+		await differentManager.commitWorkflowCommand(
+			differentEnter,
+			{ kind: "none" },
+			{ mode: { kind: "none" }, activeToolNames: ["read"] },
+			{ kind: "goal", phase: "active", goalId: "goal-after-switch" },
+		);
+		await differentManager.close();
+
+		await expect(paused.session.switchSession(differentSessionFile)).resolves.toBe(true);
+		expect(paused.session.getGoalModeState()).toMatchObject({
+			enabled: true,
+			goal: {
+				id: "goal-after-switch",
+				objective: "Replace stale hydrated state",
+				status: "active",
+			},
+		});
+		expect(paused.session.getActiveToolNames()).toEqual(["read", "goal"]);
 	});
 
 });

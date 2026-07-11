@@ -234,8 +234,8 @@ import {
 	AUTO_THINKING,
 	type ConfiguredThinkingLevel,
 	clampAutoThinkingEffort,
-	parseEffort,
 	parseConfiguredThinkingLevel,
+	parseEffort,
 	resolveProvisionalAutoLevel,
 	resolveThinkingLevelForModel,
 	shouldDisableReasoning,
@@ -307,13 +307,15 @@ import type {
 	BranchSummaryEntry,
 	CompactionEntry,
 	NewSessionOptions,
-	WorkflowModeSnapshot,
-	WorkflowRestoreState,
 	SessionCommandReceipt,
 	SetModelSessionCommand,
 	SetThinkingSessionCommand,
+	TransitionGoalModeSessionCommand,
+	TransitionGoalModeRequest,
 	TransitionPlanModeSessionCommand,
 	WorkflowChangeEntry,
+	WorkflowModeSnapshot,
+	WorkflowRestoreState,
 } from "./session-entries";
 import { EPHEMERAL_MODEL_CHANGE_ROLE } from "./session-entries";
 import { formatSessionHistoryMarkdown } from "./session-history-format";
@@ -1768,7 +1770,7 @@ export class AgentSession {
 				if (mode === "none") {
 					this.sessionManager.appendModeChange("none");
 				} else if (state) {
-					this.sessionManager.appendModeChange(mode, { goal: state.goal });
+					this.sessionManager.appendModeChange(mode, { goal: state });
 				}
 			},
 			sendHiddenMessage: async message => {
@@ -1911,27 +1913,26 @@ export class AgentSession {
 		}
 
 		// Batch non-blocking advisor notes into one injected custom message.
-		this.#advisorYieldQueueUnsubscribe = this.yieldQueue.register<AdvisorNote & { deliveryLease: AdvisorDeliveryLease }>(
-			"advisor",
-			{
-				isStale: entry => !entry.deliveryLease.active,
-				build: entries =>
-					entries.length === 0
-						? null
-						: ({
-								role: "custom",
-								customType: "advisor",
-								display: true,
-								attribution: "agent",
-								timestamp: Date.now(),
-								content: formatAdvisorBatchContent(entries),
-								details: {
-									notes: entries.map(({ note, severity }) => ({ note, severity })),
-								} satisfies AdvisorMessageDetails,
-							} satisfies CustomMessage),
-				skipIdleFlush: true,
-			},
-		);
+		this.#advisorYieldQueueUnsubscribe = this.yieldQueue.register<
+			AdvisorNote & { deliveryLease: AdvisorDeliveryLease }
+		>("advisor", {
+			isStale: entry => !entry.deliveryLease.active,
+			build: entries =>
+				entries.length === 0
+					? null
+					: ({
+							role: "custom",
+							customType: "advisor",
+							display: true,
+							attribution: "agent",
+							timestamp: Date.now(),
+							content: formatAdvisorBatchContent(entries),
+							details: {
+								notes: entries.map(({ note, severity }) => ({ note, severity })),
+							} satisfies AdvisorMessageDetails,
+						} satisfies CustomMessage),
+			skipIdleFlush: true,
+		});
 
 		return true;
 	}
@@ -6124,9 +6125,7 @@ export class AgentSession {
 
 		if (this.sessionManager.getSessionCommandReceipt(command.commandId) !== undefined) {
 			const receipt = await this.sessionManager.commitStateCommand(command);
-			const latestModel = this.sessionManager
-				.getBranch()
-				.findLast(entry => entry.type === "model_change");
+			const latestModel = this.sessionManager.getBranch().findLast(entry => entry.type === "model_change");
 			if (latestModel?.id === receipt.entry.id) await apply(receipt.entry.id);
 			return receipt;
 		}
@@ -6163,8 +6162,7 @@ export class AgentSession {
 		if (this.sessionManager.getSessionCommandReceipt(command.commandId) !== undefined) {
 			return await this.sessionManager.commitStateCommand(command);
 		}
-		const wasBusy =
-			this.isStreaming || this.isCompacting || this.isRetrying || this.isGeneratingHandoff;
+		const wasBusy = this.isStreaming || this.isCompacting || this.isRetrying || this.isGeneratingHandoff;
 		if (wasBusy) throw new SessionStateCommandInFlightError();
 		const release = await this.#acquireDurableAdmissionMaintenance();
 		try {
@@ -6190,9 +6188,11 @@ export class AgentSession {
 	/** Durably transition plan workflow state under the prompt-admission fence. */
 	async commitPlanWorkflowTransition(command: TransitionPlanModeSessionCommand): Promise<SessionCommandReceipt> {
 		const existing = this.sessionManager.getSessionCommandReceipt(command.commandId);
+		const currentMode = this.sessionManager.buildSessionContext().workflow ?? { kind: "none" };
 		if (existing) {
 			const receipt = await this.sessionManager.commitWorkflowCommand(
 				command,
+				currentMode,
 				{ mode: { kind: "none" }, activeToolNames: [] },
 				{ kind: "none" },
 			);
@@ -6220,7 +6220,7 @@ export class AgentSession {
 			}
 
 			const latest = this.#latestWorkflowChange();
-			const currentMode = latest?.next ?? this.sessionManager.buildSessionContext().workflow ?? { kind: "none" };
+			const currentMode = this.sessionManager.buildSessionContext().workflow ?? { kind: "none" };
 			const configuredThinkingLevel = this.configuredThinkingLevel();
 			const previous: WorkflowRestoreState =
 				currentMode.kind === "plan" && latest
@@ -6229,9 +6229,7 @@ export class AgentSession {
 							mode: currentMode,
 							activeToolNames: this.getActiveToolNames(),
 							...(this.model === undefined ? {} : { model: `${this.model.provider}/${this.model.id}` }),
-							...(configuredThinkingLevel === undefined
-								? {}
-								: { thinkingLevel: configuredThinkingLevel }),
+							...(configuredThinkingLevel === undefined ? {} : { thinkingLevel: configuredThinkingLevel }),
 						};
 			let next: WorkflowModeSnapshot;
 			if (command.transition.kind === "enter") {
@@ -6247,7 +6245,7 @@ export class AgentSession {
 			} else {
 				next = { kind: "none" };
 			}
-			const receipt = await this.sessionManager.commitWorkflowCommand(command, previous, next);
+			const receipt = await this.sessionManager.commitWorkflowCommand(command, currentMode, previous, next);
 			if (!receipt.replayed) {
 				const entry = receipt.entry;
 				if (entry.type !== "workflow_change") throw new Error("Workflow command committed an invalid entry");
@@ -6259,26 +6257,155 @@ export class AgentSession {
 		}
 	}
 
-	/** Restore the latest durable workflow state without appending journal entries. */
+	/** Durably transition goal workflow state under the prompt-admission fence. */
+	async commitGoalWorkflowTransition(command: TransitionGoalModeSessionCommand): Promise<SessionCommandReceipt> {
+		const existing = this.sessionManager.getSessionCommandReceipt(command.commandId);
+		const currentMode = this.sessionManager.buildSessionContext().workflow ?? { kind: "none" };
+		if (existing) {
+			const receipt = await this.sessionManager.commitWorkflowCommand(
+				command,
+				currentMode,
+				{ mode: { kind: "none" }, activeToolNames: [] },
+				{ kind: "none" },
+			);
+			const latest = this.#latestWorkflowChange();
+			if (latest?.id === receipt.entry.id && this.#lastAppliedWorkflowCommandEntryId !== latest.id) {
+				await this.#applyWorkflowEntry(latest);
+			}
+			return { ...receipt, sessionRevision: this.sessionManager.getSessionRevision() };
+		}
+
+		const request: TransitionGoalModeRequest = { kind: command.kind, transition: command.transition };
+		if (command.transition.kind === "enter" && command.transition.action === "create") {
+			this.#goalRuntime.preflightWorkflowTransition(request);
+		}
+		const promptGeneration = this.#promptGeneration;
+		if (this.isStreaming || this.isCompacting || this.isRetrying || this.isGeneratingHandoff) {
+			throw new SessionStateCommandInFlightError();
+		}
+		const release = await this.#acquireDurableAdmissionMaintenance();
+		try {
+			if (
+				promptGeneration !== this.#promptGeneration ||
+				this.isStreaming ||
+				this.isCompacting ||
+				this.isRetrying ||
+				this.isGeneratingHandoff
+			) {
+				throw new SessionStateCommandInFlightError();
+			}
+
+			const latest = this.#latestWorkflowChange();
+			const currentMode = this.sessionManager.buildSessionContext().workflow ?? { kind: "none" };
+			const goalId =
+				command.transition.kind === "enter" && command.transition.action === "create"
+					? this.#goalRuntime.reserveGoalId()
+					: command.transition.goalId;
+			this.#goalRuntime.preflightWorkflowTransition(request, goalId);
+
+			let previous: WorkflowRestoreState;
+			let next: WorkflowModeSnapshot;
+			if (command.transition.kind === "enter") {
+				const configuredThinkingLevel = this.configuredThinkingLevel();
+				previous =
+					currentMode.kind === "goal" && latest
+						? latest.previous
+						: {
+								mode: currentMode,
+								activeToolNames: this.getActiveToolNames(),
+								...(this.model === undefined ? {} : { model: `${this.model.provider}/${this.model.id}` }),
+								...(configuredThinkingLevel === undefined ? {} : { thinkingLevel: configuredThinkingLevel }),
+							};
+				next = { kind: "goal", phase: "active", goalId };
+			} else {
+				const activeGoalEntry = this.sessionManager
+					.getBranch()
+					.findLast(
+						(entry): entry is WorkflowChangeEntry =>
+							entry.type === "workflow_change" &&
+							entry.next.kind === "goal" &&
+							entry.next.phase === "active" &&
+							entry.next.goalId === goalId,
+					);
+				if (!activeGoalEntry || currentMode.kind !== "goal" || currentMode.phase !== "active" || currentMode.goalId !== goalId) {
+					throw new Error(`Goal workflow ${goalId} is not the active workflow`);
+				}
+				previous = activeGoalEntry.previous;
+				next =
+					command.transition.disposition === "paused"
+						? { kind: "goal", phase: "paused", goalId }
+						: { kind: "none" };
+			}
+
+			const receipt = await this.sessionManager.commitWorkflowCommand(command, currentMode, previous, next);
+			if (!receipt.replayed) {
+				const entry = receipt.entry;
+				if (entry.type !== "workflow_change") throw new Error("Workflow command committed an invalid entry");
+				await this.#applyWorkflowEntry(entry);
+			}
+			return { ...receipt, sessionRevision: this.sessionManager.getSessionRevision() };
+		} finally {
+			release();
+		}
+	}
+
+	/** Restore the latest durable plan workflow state without appending journal entries. */
 	async reconcilePlanWorkflowFromJournal(): Promise<void> {
 		const latest = this.#latestWorkflowChange();
-		if (!latest) {
+		if (!latest || latest.command.request.kind !== "transitionPlanMode") {
 			this.setPlanModeState(undefined);
-			this.#lastAppliedWorkflowCommandEntryId = undefined;
+			if (!latest) this.#lastAppliedWorkflowCommandEntryId = undefined;
 			return;
 		}
 		if (this.#lastAppliedWorkflowCommandEntryId === latest.id) return;
 		await this.#applyWorkflowEntry(latest);
 	}
 
+	/** Restore the latest durable goal workflow state without appending journal entries. */
+	async reconcileGoalWorkflowFromJournal(): Promise<void> {
+		const latest = this.#latestWorkflowChange();
+		if (!latest) {
+			this.#lastAppliedWorkflowCommandEntryId = undefined;
+			return;
+		}
+		if (latest.next.kind !== "goal" && latest.command.request.kind !== "transitionGoalMode") return;
+		if (this.#lastAppliedWorkflowCommandEntryId === latest.id) return;
+		await this.#applyWorkflowEntry(latest);
+	}
+
 	#latestWorkflowChange(): WorkflowChangeEntry | undefined {
-		return this.sessionManager.getBranch().findLast(
-			(entry): entry is WorkflowChangeEntry => entry.type === "workflow_change",
-		);
+		return this.sessionManager
+			.getBranch()
+			.findLast((entry): entry is WorkflowChangeEntry => entry.type === "workflow_change");
 	}
 
 	async #applyWorkflowEntry(entry: WorkflowChangeEntry): Promise<void> {
-		if (entry.next.kind === "plan" && entry.next.phase === "active") {
+		if (entry.command.request.kind === "transitionGoalMode") {
+			const goalId =
+				entry.next.kind === "goal"
+					? entry.next.goalId
+					: entry.command.request.transition.kind === "exit"
+						? entry.command.request.transition.goalId
+						: undefined;
+			if (goalId === undefined) throw new Error("Committed goal workflow is missing its goal ID");
+			await this.#goalRuntime.applyWorkflowTransition(entry.command.request, goalId);
+			if (entry.next.kind === "goal" && entry.next.phase === "active") {
+				await this.#applyWorkflowRuntime(
+					[...new Set([...entry.previous.activeToolNames, "goal"])],
+					undefined,
+					undefined,
+					false,
+				);
+			} else {
+				await this.#applyWorkflowRuntime(
+					entry.previous.activeToolNames,
+					entry.previous.model,
+					entry.previous.thinkingLevel,
+					true,
+				);
+			}
+			this.setPlanModeState(undefined);
+		} else if (entry.next.kind === "plan" && entry.next.phase === "active") {
 			const resolved = this.resolveRoleModelWithThinking("plan");
 			const model = resolved.model === undefined ? undefined : `${resolved.model.provider}/${resolved.model.id}`;
 			const thinkingLevel = resolved.explicitThinkingLevel ? resolved.thinkingLevel : undefined;
@@ -6316,7 +6443,9 @@ export class AgentSession {
 		if (modelSelector !== undefined) {
 			const slash = modelSelector.indexOf("/");
 			const model =
-				slash > 0 ? this.#modelRegistry.find(modelSelector.slice(0, slash), modelSelector.slice(slash + 1)) : undefined;
+				slash > 0
+					? this.#modelRegistry.find(modelSelector.slice(0, slash), modelSelector.slice(slash + 1))
+					: undefined;
 			if (!model) throw new Error(`Model not found: ${modelSelector}`);
 			if (!this.#modelRegistry.hasConfiguredAuth(model)) {
 				throw new Error(`No API key for ${model.provider}/${model.id}`);
@@ -11897,6 +12026,9 @@ export class AgentSession {
 			}
 		}
 
+		const previousGoalState =
+			this.buildDisplaySessionContext().goalState ?? this.getGoalModeState();
+		const previousGoalRuntimeSnapshot = this.#goalRuntime.snapshot;
 		this.#disconnectFromAgent();
 		await this.abort();
 
@@ -11999,10 +12131,7 @@ export class AgentSession {
 
 			const branch = this.sessionManager.getBranch();
 			const hasThinkingEntry = branch.some(entry => entry.type === "thinking_level_change");
-			const restoredLoggedThinkingLevel = getRestorableSessionThinkingLevel(
-				branch,
-				sessionContext.thinkingLevel,
-			);
+			const restoredLoggedThinkingLevel = getRestorableSessionThinkingLevel(branch, sessionContext.thinkingLevel);
 			const hasServiceTierEntry = this.sessionManager
 				.getBranch()
 				.some(entry => entry.type === "service_tier_change");
@@ -12032,8 +12161,10 @@ export class AgentSession {
 				this.#resetHindsightConversationTrackingIfHindsight();
 				this.#resetMnemopiConversationTrackingIfMnemopi();
 			}
+			this.#goalRuntime.hydratePersistedState(sessionContext.goalState);
 			this.#lastAppliedWorkflowCommandEntryId = undefined;
 			await this.reconcilePlanWorkflowFromJournal();
+			await this.reconcileGoalWorkflowFromJournal();
 			this.#restartAdvisorRuntime();
 			this.#reconnectToAgent();
 			try {
@@ -12047,6 +12178,8 @@ export class AgentSession {
 			return true;
 		} catch (error) {
 			this.sessionManager.restoreState(previousSessionState);
+			this.#goalRuntime.hydratePersistedState(previousGoalState);
+			this.#goalRuntime.restoreSnapshot(previousGoalRuntimeSnapshot);
 			this.#freshProviderSessionId = previousFreshProviderSessionId;
 			this.#syncAgentSessionId(previousSessionState.sessionId);
 			this.#rekeyHindsightMemoryForCurrentSessionId();

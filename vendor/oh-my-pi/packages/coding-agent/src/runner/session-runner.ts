@@ -15,6 +15,7 @@ import type {
 	SetModelSessionCommand,
 	SetThinkingSessionCommand,
 	TransitionPlanModeSessionCommand,
+	TransitionGoalModeSessionCommand,
 } from "../session/session-entries";
 import {
 	SessionCommandConflictError,
@@ -48,6 +49,7 @@ import {
 	decodeRunCompactionCommand,
 	decodeSetModelCommand,
 	decodeTransitionPlanModeCommand,
+	decodeTransitionGoalModeCommand,
 	decodeInterruptPromptCommand,
 	decodeSetThinkingLevelCommand,
 	RUNNER_SCHEMA_VERSION,
@@ -66,6 +68,7 @@ import {
 	type InterruptPromptCommand,
 	type SetThinkingLevelReceipt,
 	type TransitionPlanModeReceipt,
+	type TransitionGoalModeReceipt,
 	type RunnerControlMetadata,
 	type RunnerEvent,
 	type RunnerEventDelivery,
@@ -141,6 +144,7 @@ export interface ControllerSessionRunnerView extends RunnerViewBase {
 	readonly setModel: (input: unknown) => Effect.Effect<SetModelReceipt, RunnerFailure, Scope.Scope>;
 	readonly setThinkingLevel: (input: unknown) => Effect.Effect<SetThinkingLevelReceipt, RunnerFailure, Scope.Scope>;
 	readonly transitionPlanMode: (input: unknown) => Effect.Effect<TransitionPlanModeReceipt, RunnerFailure, Scope.Scope>;
+	readonly transitionGoalMode: (input: unknown) => Effect.Effect<TransitionGoalModeReceipt, RunnerFailure, Scope.Scope>;
 	readonly compact: (command: RunCompactionCommand) => Effect.Effect<RunCompactionReceipt, RunnerFailure, Scope.Scope>;
 	readonly cancelCompaction: (
 		command: CancelCompactionCommand,
@@ -624,6 +628,11 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 		controllerEpoch: number,
 		input: unknown,
 	) => Effect.Effect<TransitionPlanModeReceipt, RunnerFailure, Scope.Scope>;
+	let transitionGoalMode!: (
+		viewId: string,
+		controllerEpoch: number,
+		input: unknown,
+	) => Effect.Effect<TransitionGoalModeReceipt, RunnerFailure, Scope.Scope>;
 	let runCompaction!: (
 		viewId: string,
 		controllerEpoch: number,
@@ -674,6 +683,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 			setThinkingLevel: (input) => setThinkingLevel(viewId, controllerEpoch, input),
 			setModel: (input) => setModel(viewId, controllerEpoch, input),
 			transitionPlanMode: (input) => transitionPlanMode(viewId, controllerEpoch, input),
+			transitionGoalMode: (input) => transitionGoalMode(viewId, controllerEpoch, input),
 			compact: (input) => runCompaction(viewId, controllerEpoch, input),
 			cancelCompaction: (command) => cancelCompaction(viewId, controllerEpoch, command),
 			interruptPrompt: (command) => interruptPrompt(viewId, controllerEpoch, command),
@@ -1368,6 +1378,75 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 		);
 	});
 
+	transitionGoalMode = Effect.fn("Runner.transitionGoalMode")(function* (
+		viewId: string,
+		controllerEpoch: number,
+		input: unknown,
+	) {
+		const command = yield* Effect.try({
+			try: () => decodeTransitionGoalModeCommand(input),
+			catch: asRunnerFailure,
+		});
+		if (command.viewId !== viewId) return yield* mismatchedView(viewId);
+		if (command.controllerEpoch !== controllerEpoch) {
+			return yield* Effect.fail(
+				new StaleRunnerControllerLeaseError({
+					viewId,
+					expectedControllerEpoch: command.controllerEpoch,
+					actualControllerEpoch: controllerEpoch,
+				}),
+			);
+		}
+		return yield* enqueue(
+			Effect.gen(function* () {
+				yield* requireController(viewId, controllerEpoch);
+				const journalCommand: TransitionGoalModeSessionCommand = {
+					schemaVersion: 1,
+					kind: "transitionGoalMode",
+					commandId: command.commandId,
+					correlationId: command.correlationId,
+					...(command.causationId === undefined ? {} : { causationId: command.causationId }),
+					expectedSessionRevision: command.expectedSessionRevision,
+					transition: command.transition,
+				};
+				const durable = yield* Effect.tryPromise({
+					try: () => resources.session.commitGoalWorkflowTransition(journalCommand),
+					catch: stateCommandFailure,
+				});
+				sessionRevision = resources.sessionManager.getSessionRevision();
+				const workflowEntry = durable.entry;
+				if (workflowEntry.type !== "workflow_change") {
+					return yield* Effect.fail(
+						new SessionRunnerRuntimeError({ issue: "Goal workflow command committed an invalid entry" }),
+					);
+				}
+				if (!durable.replayed) {
+					yield* publishEvent({
+						kind: "goalModeChanged",
+						metadata: {
+							schemaVersion: RUNNER_SCHEMA_VERSION,
+							commandId: command.commandId,
+							correlationId: command.correlationId,
+							...(command.causationId === undefined ? {} : { causationId: command.causationId }),
+							expectedRevision: revision,
+						},
+						controllerEpoch,
+						viewId,
+						sessionRevision,
+					});
+				}
+				return {
+					commandId: command.commandId,
+					correlationId: command.correlationId,
+					...(command.causationId === undefined ? {} : { causationId: command.causationId }),
+					workflow: workflowEntry.next,
+					sessionRevision,
+					replayed: durable.replayed,
+				} satisfies TransitionGoalModeReceipt;
+			}),
+		);
+	});
+
 	acquireController = Effect.fn("Runner.acquireController")(function* (command: AcquireRunnerControllerCommand) {
 		yield* Effect.try({ try: () => validateMetadata(command), catch: asRunnerFailure });
 		const epoch = yield* enqueue(
@@ -1615,6 +1694,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 			setThinkingLevel: attached.setThinkingLevel,
 			setModel: attached.setModel,
 			transitionPlanMode: attached.transitionPlanMode,
+			transitionGoalMode: attached.transitionGoalMode,
 			compact: attached.compact,
 			cancelCompaction: attached.cancelCompaction,
 			interruptPrompt: attached.interruptPrompt,
