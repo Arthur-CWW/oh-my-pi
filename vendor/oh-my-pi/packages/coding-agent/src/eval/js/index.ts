@@ -28,6 +28,7 @@ export default {
 			idleTimeoutMs: opts.idleTimeoutMs,
 			signal: opts.signal,
 			sessionId: namespaceSessionId(opts.sessionId),
+			ownerId: opts.kernelOwnerId,
 			sessionFile: opts.sessionFile,
 			reset: opts.reset,
 			onChunk: opts.onChunk,

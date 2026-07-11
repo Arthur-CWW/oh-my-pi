@@ -12,6 +12,7 @@
  * they are kept because compatible providers still emit them on the wire.
  */
 
+import type { ReasoningEffort as CatalogReasoningEffort } from "@oh-my-pi/pi-catalog/effort";
 // ─── Shared types (openai/resources/shared) ─────────────────────────────────
 
 export type ChatModel =
@@ -115,9 +116,8 @@ export type Metadata = {
 	[key: string]: string;
 };
 
-/** Constrains effort on reasoning for reasoning models. */
-export type ReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | null;
-
+/** Exact effort string validated against the selected model's advertised capabilities. */
+export type ReasoningEffort = CatalogReasoningEffort | null;
 /** JSON object response format (older JSON mode). */
 export interface ResponseFormatJSONObject {
 	/** Always `json_object`. */

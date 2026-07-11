@@ -37,6 +37,7 @@ interface AppKeybindings {
 	"app.clipboard.copyLine": true;
 	"app.clipboard.copyPrompt": true;
 	"app.agents.hub": true;
+	"app.agents.returnToParent": true;
 	"app.session.new": true;
 	"app.session.tree": true;
 	"app.session.fork": true;
@@ -170,6 +171,10 @@ export const KEYBINDINGS = {
 	"app.agents.hub": {
 		defaultKeys: "alt+a",
 		description: "Open the agent hub",
+	},
+	"app.agents.returnToParent": {
+		defaultKeys: "alt+shift+left",
+		description: "Return to the parent agent",
 	},
 	"app.session.observe": {
 		defaultKeys: "ctrl+s",

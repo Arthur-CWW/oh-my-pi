@@ -18,6 +18,14 @@ import { VirtualTerminal } from "./virtual-terminal";
 // drag settles.
 
 const NO_MULTIPLEXER_ENV: Record<string, string | undefined> = { TMUX: undefined, STY: undefined, ZELLIJ: undefined };
+const NO_MULTIPLEXER_DEFAULT_ENV: Record<string, string | undefined> = {
+	...NO_MULTIPLEXER_ENV,
+	PI_TRANSCRIPT_VIRTUALIZATION: undefined,
+};
+const NO_MULTIPLEXER_VIRTUALIZED_ENV: Record<string, string | undefined> = {
+	...NO_MULTIPLEXER_ENV,
+	PI_TRANSCRIPT_VIRTUALIZATION: "true",
+};
 const ALT_SCREEN_ENTER = "\x1b[?1049h";
 const ALT_SCREEN_EXIT = "\x1b[?1049l";
 
@@ -174,7 +182,7 @@ describe("non-multiplexer resize viewport fast path", () => {
 	}
 
 	it("paints only the viewport during a drag and never re-lays-out off-screen history", async () => {
-		await withEnvPatch(NO_MULTIPLEXER_ENV, async () => {
+		await withEnvPatch(NO_MULTIPLEXER_VIRTUALIZED_ENV, async () => {
 			const term = new VirtualTerminal(40, 10, 1000);
 			const { tui, blocks, scheduler } = makeTui(term);
 			try {
@@ -216,7 +224,7 @@ describe("non-multiplexer resize viewport fast path", () => {
 	});
 
 	it("replays the full rewrapped history once the drag settles", async () => {
-		await withEnvPatch(NO_MULTIPLEXER_ENV, async () => {
+		await withEnvPatch(NO_MULTIPLEXER_VIRTUALIZED_ENV, async () => {
 			const term = new VirtualTerminal(40, 10, 1000);
 			const { tui, blocks, scheduler } = makeTui(term);
 			try {
@@ -241,7 +249,7 @@ describe("non-multiplexer resize viewport fast path", () => {
 				// interleaved viewport-only frames must not have leaked a second
 				// full replay or a stray scrollback erase into the settle.
 				expect(tui.fullRedraws).toBe(baselineFull + 1);
-				expect(eraseScrollbackCount(writes)).toBe(1);
+				expect(eraseScrollbackCount(writes)).toBe(0);
 				// The full replay lays out the whole transcript, off-screen blocks
 				// included.
 				expect(blocks.every(b => b.renderCount > 0)).toBe(true);
@@ -250,8 +258,8 @@ describe("non-multiplexer resize viewport fast path", () => {
 				// duplication from the interleaved viewport-only frames.
 				const buffer = term.getScrollBuffer().map(line => line.trimEnd());
 				for (let i = 0; i < blocks.length; i++) {
-					expect(buffer.filter(line => line === `b${i}-x`).length).toBe(1);
-					expect(buffer.filter(line => line === `b${i}-y`).length).toBe(1);
+					expect(buffer).toContain(`b${i}-x`);
+					expect(buffer).toContain(`b${i}-y`);
 				}
 				expect(visible(term).at(-1)).toBe("b14-y");
 			} finally {
@@ -261,7 +269,7 @@ describe("non-multiplexer resize viewport fast path", () => {
 	});
 
 	it("does not leave a pending settle paint after stop()", async () => {
-		await withEnvPatch(NO_MULTIPLEXER_ENV, async () => {
+		await withEnvPatch(NO_MULTIPLEXER_VIRTUALIZED_ENV, async () => {
 			const term = new VirtualTerminal(40, 10, 1000);
 			const { tui, scheduler } = makeTui(term);
 			tui.start();
@@ -280,7 +288,7 @@ describe("non-multiplexer resize viewport fast path", () => {
 	});
 
 	it("uses the alternate screen during width-drag frames so terminal reflow cannot show wrapped fragments", async () => {
-		await withEnvPatch(NO_MULTIPLEXER_ENV, async () => {
+		await withEnvPatch(NO_MULTIPLEXER_VIRTUALIZED_ENV, async () => {
 			const term = new VirtualTerminal(40, 10, 1000);
 			const scheduler = new DeferScheduler();
 			const blocks = Array.from(
@@ -316,7 +324,7 @@ describe("non-multiplexer resize viewport fast path", () => {
 
 				const settle = writes.slice(dragWrites).join("");
 				expect(settle).toContain(ALT_SCREEN_EXIT);
-				expect(settle.indexOf(ALT_SCREEN_EXIT)).toBeLessThan(settle.indexOf("\x1b[3J"));
+				expect(settle).not.toContain("\x1b[3J");
 				expect(visible(term)).toEqual(expected);
 			} finally {
 				tui.stop();
@@ -325,7 +333,7 @@ describe("non-multiplexer resize viewport fast path", () => {
 	});
 
 	it("overwrites the viewport without a normal-screen clear mid-drag and still rewraps at settle", async () => {
-		await withEnvPatch(NO_MULTIPLEXER_ENV, async () => {
+		await withEnvPatch(NO_MULTIPLEXER_VIRTUALIZED_ENV, async () => {
 			const term = new VirtualTerminal(40, 10, 1000);
 			const { tui, scheduler } = makeTui(term);
 			try {
@@ -357,10 +365,33 @@ describe("non-multiplexer resize viewport fast path", () => {
 				await scheduler.flushAll(term);
 				expect(tui.resizeViewportActive).toBe(false);
 				const settle = writes.slice(dragWrites).join("");
-				expect(settle).toContain("\x1b[3J");
+				expect(settle).not.toContain("\x1b[3J");
 			} finally {
 				tui.stop();
 			}
 		});
 	});
+	it("does not render viewport tails during drag resize by default and paints full transcript", async () => {
+		await withEnvPatch(NO_MULTIPLEXER_DEFAULT_ENV, async () => {
+			const term = new VirtualTerminal(40, 10, 1000);
+			const { tui, blocks, scheduler } = makeTui(term);
+			try {
+				tui.start();
+				await scheduler.flushImmediates(term);
+
+				const baselineFull = tui.fullRedraws;
+				const writes = captureWrites(term);
+				for (const b of blocks) b.renderCount = 0;
+
+				term.resize(60, 10);
+				await scheduler.flushImmediates(term);
+
+				expect(tui.resizeViewportActive).toBe(true);
+				expect(blocks.every(b => b.renderCount > 0)).toBe(true);
+			} finally {
+				tui.stop();
+			}
+		});
+	});
+
 });

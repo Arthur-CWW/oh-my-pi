@@ -1,8 +1,8 @@
 import { describe, expect, it } from "bun:test";
-import type { GoalModeState } from "../../goals/state";
-import type { UsageStatistics } from "../../session/session-entries";
-import type { ToolSession } from "../../tools";
-import { runEvalBudget } from "../budget-bridge";
+import type { GoalModeState } from "../../src/goals/state";
+import type { UsageStatistics } from "../../src/session/session-entries";
+import type { ToolSession } from "../../src/tools";
+import { runEvalBudget } from "../../src/eval/budget-bridge";
 
 type TurnBudget = { total: number | null; spent: number; hard: boolean };
 

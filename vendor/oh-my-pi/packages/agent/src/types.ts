@@ -4,7 +4,7 @@ import type {
 	AssistantMessageEvent,
 	AssistantMessageEventStream,
 	Context,
-	Effort,
+	ReasoningEffort,
 	ImageContent,
 	Message,
 	Model,
@@ -254,7 +254,7 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	 * at run-loop start. Use this so mid-run thinking-level changes apply on
 	 * the next model call instead of waiting for the next prompt.
 	 */
-	getReasoning?: () => Effort | undefined;
+	getReasoning?: () => ReasoningEffort | undefined;
 
 	/**
 	 * Dynamic reasoning-disable override, resolved per LLM call. When set,
@@ -421,7 +421,7 @@ export type AgentMessage = Message | CustomAgentMessages[keyof CustomAgentMessag
 export interface AgentState {
 	systemPrompt: string[];
 	model: Model;
-	thinkingLevel?: Effort;
+	thinkingLevel?: ReasoningEffort;
 	disableReasoning?: boolean;
 	tools: AgentTool<any>[];
 	messages: AgentMessage[]; // Can include attachments + custom message types

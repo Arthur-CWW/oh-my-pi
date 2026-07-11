@@ -4,6 +4,8 @@ import { AsyncJobManager } from "@oh-my-pi/pi-coding-agent/async/job-manager";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AgentLifecycleManager } from "@oh-my-pi/pi-coding-agent/registry/agent-lifecycle";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
+import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import { QUOTA_ADMISSION_CUSTOM_TYPE, createQuotaAdmissionStateRecord } from "@oh-my-pi/pi-coding-agent/task/quota-admission";
 import { formatModelChain, TaskTool } from "@oh-my-pi/pi-coding-agent/task";
 import * as discoveryModule from "@oh-my-pi/pi-coding-agent/task/discovery";
 import * as executorModule from "@oh-my-pi/pi-coding-agent/task/executor";
@@ -14,6 +16,7 @@ const taskAgent: AgentDefinition = {
 	name: "task",
 	description: "General-purpose task agent",
 	systemPrompt: "You are a task agent.",
+	model: ["openai/gpt-5-mini"],
 	source: "bundled",
 };
 
@@ -30,11 +33,30 @@ const availableModel = buildModel({
 	maxTokens: 8192,
 });
 
+const fallbackModel = buildModel({
+	id: "gpt-5-mini",
+	name: "GPT-5 mini",
+	api: "openai-responses",
+	provider: "openai",
+	baseUrl: "https://api.openai.com/v1",
+	reasoning: false,
+	input: ["text"],
+	cost: { input: 0.25, output: 2, cacheRead: 0.025, cacheWrite: 0.25 },
+	contextWindow: 128000,
+	maxTokens: 8192,
+});
+
 const modelRegistry = {
-	getAvailable: () => [availableModel],
+	getAvailable: () => [availableModel, fallbackModel],
 };
 
-function createSession(manager: AsyncJobManager): ToolSession {
+function createSession(
+	manager: AsyncJobManager,
+	options: {
+		authStorage?: { fetchUsageReports: () => Promise<unknown> };
+		sessionManager?: SessionManager;
+	} = {},
+): ToolSession {
 	return {
 		cwd: "/tmp/task-model-override-test",
 		hasUI: false,
@@ -43,7 +65,9 @@ function createSession(manager: AsyncJobManager): ToolSession {
 		getSessionSpawns: () => "*",
 		getModelString: () => "anthropic/claude-sonnet-4-5",
 		asyncJobManager: manager,
+		authStorage: options.authStorage,
 		modelRegistry,
+		sessionManager: options.sessionManager,
 	} as unknown as ToolSession;
 }
 
@@ -119,6 +143,62 @@ describe("task model override receipts", () => {
 		if (jobId) await manager.getJob(jobId)?.promise;
 	});
 
+	it.each(["rejects", "returns no reports"] as const)(
+		"blocks an explicit model override from fresh persisted one-percent quota when usage fetching %s",
+		async fetchOutcome => {
+			vi.spyOn(discoveryModule, "discoverAgents").mockResolvedValue({ agents: [taskAgent], projectAgentsDir: null });
+			const runSpy = vi
+				.spyOn(executorModule, "runSubprocess")
+				.mockImplementation(async options => makeResult(options.id ?? "?"));
+			const fetchUsageReports = vi.fn(async () => {
+				if (fetchOutcome === "rejects") throw new Error("usage service unavailable");
+				return [];
+			});
+			const sessionManager = SessionManager.inMemory("/tmp/task-model-override-quota");
+			const now = Date.now();
+			sessionManager.appendCustomEntry(
+				QUOTA_ADMISSION_CUSTOM_TYPE,
+				createQuotaAdmissionStateRecord({
+					samples: [
+						{
+							poolId: "anthropic:test",
+							windowId: "five-hour",
+							modelId: "claude-sonnet-4-5",
+							observedAtMs: now,
+							remainingPercent: 1,
+							resetAtMs: now + 3_600_000,
+							emaBurnPerHour: 0,
+						},
+						{
+							poolId: "openai:healthy",
+							windowId: "five-hour",
+							modelId: "gpt-5-mini",
+							observedAtMs: now,
+							remainingPercent: 80,
+							resetAtMs: now + 3_600_000,
+							emaBurnPerHour: 0,
+						},
+					],
+					decisions: [],
+				}, now),
+			);
+
+			const manager = createManager();
+			const tool = await TaskTool.create(createSession(manager, { authStorage: { fetchUsageReports }, sessionManager }));
+			const result = await tool.execute("tc-quota-fetch-outage", {
+				agent: "task",
+				id: "QuotaOutage",
+				model: "anthropic/claude-sonnet-4-5",
+				assignment: "Do the thing.",
+			} as TaskParams);
+
+			expect(fetchUsageReports).toHaveBeenCalledTimes(1);
+			expect(getFirstText(result)).toContain("Quota admission blocked anthropic/claude-sonnet-4-5 (reserve).");
+			expect(manager.getAllJobs()).toHaveLength(0);
+			expect(runSpy).not.toHaveBeenCalled();
+		},
+	);
+
 	it("fails an invalid per-spawn model override before scheduling a job", async () => {
 		vi.spyOn(discoveryModule, "discoverAgents").mockResolvedValue({ agents: [taskAgent], projectAgentsDir: null });
 		const runSpy = vi
@@ -141,4 +221,6 @@ describe("task model override receipts", () => {
 		expect(manager.getAllJobs()).toHaveLength(0);
 		expect(runSpy).not.toHaveBeenCalled();
 	});
+
 });
+

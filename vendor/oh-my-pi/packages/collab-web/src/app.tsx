@@ -164,32 +164,35 @@ function Session({ client, onLeave, onRejoin }: SessionProps): ReactNode {
 				onLeave={onLeave}
 			/>
 			<main className="sh-main">
-				<section className="sh-content" data-rail={railOpen ? "true" : "false"}>
-					<div className="sh-transcript">
-						<Transcript
-							entries={snap.entries}
-							stream={snap.stream}
-							streamDone={snap.streamDone}
-							activeTools={snap.activeTools}
-							working={snap.working}
-							host={toolHost}
+				<section className="sh-content" data-rail="false">
+					{railOpen ? (
+						<AgentsPanel
+							agents={snap.agents}
+							progress={snap.progress}
+							lifecycle={snap.lifecycle}
+							selectedId={selectedId}
+							onSelect={setSelectedId}
+							onAction={(action, agent, inputId) => {
+								const operationClient = client as GuestClient & {
+									sendOperationCmd?: (action: string, agentId: string, inputId?: string) => void;
+								};
+								operationClient.sendOperationCmd?.(action, agent.id, inputId);
+								if (action === "inspect") setSelectedId(agent.id);
+							}}
 						/>
-					</div>
-				</section>
-				{railOpen && (
-					<>
-						<div className="sh-rail-backdrop" onClick={() => setRailOpen(false)} />
-						<aside className="sh-rail">
-							<AgentsPanel
-								agents={snap.agents}
-								progress={snap.progress}
-								lifecycle={snap.lifecycle}
-								selectedId={selectedId}
-								onSelect={setSelectedId}
+					) : (
+						<div className="sh-transcript">
+							<Transcript
+								entries={snap.entries}
+								stream={snap.stream}
+								streamDone={snap.streamDone}
+								activeTools={snap.activeTools}
+								working={snap.working}
+								host={toolHost}
 							/>
-						</aside>
-					</>
-				)}
+						</div>
+					)}
+				</section>
 			</main>
 			<Composer client={client} snapshot={snap} />
 			{drawerAgent && (

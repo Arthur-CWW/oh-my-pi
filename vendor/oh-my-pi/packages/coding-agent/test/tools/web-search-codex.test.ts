@@ -225,22 +225,24 @@ describe("searchCodex model selection", () => {
 
 	it("uses the built-in default model when PI_CODEX_WEB_SEARCH_MODEL is unset", async () => {
 		delete process.env.PI_CODEX_WEB_SEARCH_MODEL;
-		const result = await searchCodex(makeSearchParams("default codex model", mockCodexFetch("gpt-5.5")));
+		const result = await searchCodex(makeSearchParams("default codex model", mockCodexFetch("gpt-5.6-terra")));
 
 		expect(capturedRequest).not.toBeNull();
 		expect(capturedRequest?.url).toBe("https://chatgpt.com/backend-api/codex/responses");
-		expect(capturedRequest?.body?.model).toBe("gpt-5.5");
-		expect(result.model).toBe("gpt-5.5");
+		expect(capturedRequest?.body?.model).toBe("gpt-5.6-terra");
+		expect(capturedRequest?.body?.reasoning_effort).toBe("medium");
+		expect(capturedRequest?.body?.service_tier).toBe("default");
+		expect(result.model).toBe("gpt-5.6-terra");
 		expect(result.sources).toEqual([{ title: "Example Article", url: "https://example.com/article" }]);
 	});
 
 	it("falls back to the default model when PI_CODEX_WEB_SEARCH_MODEL is blank", async () => {
 		process.env.PI_CODEX_WEB_SEARCH_MODEL = "   ";
-		const result = await searchCodex(makeSearchParams("blank codex model", mockCodexFetch("gpt-5.5")));
+		const result = await searchCodex(makeSearchParams("blank codex model", mockCodexFetch("gpt-5.6-terra")));
 
 		expect(capturedRequest).not.toBeNull();
-		expect(capturedRequest?.body?.model).toBe("gpt-5.5");
-		expect(result.model).toBe("gpt-5.5");
+		expect(capturedRequest?.body?.model).toBe("gpt-5.6-terra");
+		expect(result.model).toBe("gpt-5.6-terra");
 	});
 
 	it("retries the next bundled default when Codex rejects a model for ChatGPT accounts", async () => {
@@ -257,11 +259,11 @@ describe("searchCodex model selection", () => {
 
 			const requestedModel = capturedRequest.body?.model;
 			if (calls === 1) {
-				expect(requestedModel).toBe("gpt-5.5");
+				expect(requestedModel).toBe("gpt-5.6-terra");
 				return Promise.resolve(
 					new Response(
 						JSON.stringify({
-							detail: "The 'gpt-5.5' model is not supported when using Codex with a ChatGPT account.",
+							detail: "The 'gpt-5.6-terra' model is not supported when using Codex with a ChatGPT account.",
 						}),
 						{ status: 400, headers: { "Content-Type": "application/json" } },
 					),
@@ -413,7 +415,7 @@ describe("searchCodex model selection", () => {
 			"",
 			`data: ${JSON.stringify({
 				type: "response.completed",
-				response: { id: "resp_codex_placeholder_only", model: "gpt-5.5" },
+				response: { id: "resp_codex_placeholder_only", model: "gpt-5.6-terra" },
 			})}`,
 			"",
 		].join("\n");
@@ -447,7 +449,7 @@ describe("searchCodex model selection", () => {
 			"",
 			`data: ${JSON.stringify({
 				type: "response.completed",
-				response: { id: "resp_codex_placeholder_with_sources", model: "gpt-5.5" },
+				response: { id: "resp_codex_placeholder_with_sources", model: "gpt-5.6-terra" },
 			})}`,
 			"",
 		].join("\n");

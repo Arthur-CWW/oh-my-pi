@@ -235,16 +235,69 @@ export interface SessionState {
 	isAborting?: boolean;
 }
 
+export type AgentOperationAction = "reconcile" | "retry" | "cancel" | "inspect";
+
+export interface AgentActivity {
+	kind: string;
+	fromId?: string;
+	toId?: string;
+	at?: number;
+}
+
+export interface AgentRecovery {
+	state: string;
+	reason?: string;
+	attempt?: number;
+	task?: string;
+	model?: string;
+	thinkingLevel?: string | null;
+	hotswapModel?: string;
+}
+
+export interface AgentQuota {
+	originalProvider?: string;
+	routedProvider?: string;
+	originalModel?: string;
+	routedModel?: string;
+	ratePerHour?: number;
+	projectedEmptyAt?: number;
+	resetAt?: number;
+	deficitPerHour?: number;
+	decisionReason?: string;
+	quotaPoolId?: string;
+	limitWindowId?: string;
+}
+
+export interface AgentOperation {
+	inputId?: string;
+	state: "blocked" | "uncertain" | "retrying";
+	resetAt?: number;
+	reason?: string;
+	supportedActions: readonly AgentOperationAction[];
+}
+
 export interface AgentSnapshot {
 	id: string;
 	displayName: string;
 	kind: "main" | "sub";
 	parentId?: string;
+	/** Stable owning tree root, derived from parentId; omitted by older hosts. */
+	group?: string;
 	status: "running" | "idle" | "parked" | "aborted";
 	/** Whether the host has a transcript file for this agent (gates remote transcript fetch). */
 	hasSessionFile: boolean;
 	createdAt: number;
 	lastActivity: number;
+	/** Stable registration order; lower values appeared first. */
+	spawnIndex?: number;
+	/** Work-aware display metadata; omitted by older hosts. */
+	activity?: AgentActivity;
+	/** Durable restart recovery metadata; omitted when not recovering. */
+	recovery?: AgentRecovery;
+	/** Admission/quota decision metadata; omitted when no quota decision exists. */
+	quota?: AgentQuota;
+	/** Only present when the host can safely operate on a real durable condition. */
+	operation?: AgentOperation;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -313,6 +366,7 @@ export type GuestFrame =
 	| { t: "prompt"; text: string; images?: ImageContent[] }
 	| { t: "abort" }
 	| { t: "agent-cmd"; cmd: "chat" | "kill" | "revive"; agentId: string; text?: string }
+	| { t: "agent-op-cmd"; reqId: number; action: AgentOperationAction; agentId: string; inputId?: string }
 	| { t: "fetch-transcript"; reqId: number; agentId: string; fromByte: number };
 
 /** EventBus channels mirrored to guests (task subagent traffic only). */
@@ -337,6 +391,8 @@ export type HostFrame =
 	| { t: "agents"; agents: AgentSnapshot[] }
 	/** Targeted reply to fetch-transcript; `text` is decoded JSONL from `fromByte`, `newSize` the next offset base. */
 	| { t: "transcript"; reqId: number; text: string; newSize: number; error?: string }
+	/** Correlated outcome of a durable agent operation command. */
+	| { t: "agent-op-result"; reqId: number; action: AgentOperationAction; agentId: string; ok: boolean; error?: string }
 	| { t: "bye"; reason: string }
 	| { t: "error"; message: string };
 

@@ -26,8 +26,8 @@ import {
 	type CustomEntry,
 	type CustomMessageEntry,
 	type FileEntry,
-	type LeafChangeEntry,
 	type LabelEntry,
+	type LeafChangeEntry,
 	type MCPToolSelectionEntry,
 	type ModeChangeEntry,
 	type ModelChangeEntry,
@@ -39,6 +39,7 @@ import {
 	type SessionMessageAttribution,
 	type SessionMessageEntry,
 	type SessionTreeNode,
+	type SubagentSessionMetadata,
 	type ThinkingLevelChangeEntry,
 	type TtsrInjectionEntry,
 	type UsageStatistics,
@@ -54,6 +55,7 @@ import {
 } from "./session-listing";
 import { loadEntriesFromFile, resolveBlobRefsInEntries } from "./session-loader";
 import { generateId, migrateToCurrentVersion } from "./session-migrations";
+import type { SessionOwnershipHandle } from "./session-ownership";
 import {
 	computeDefaultSessionDir,
 	readBreadcrumbsForCwd,
@@ -73,6 +75,18 @@ const JSONL_SUFFIX_LENGTH = ".jsonl".length;
 
 function mintSessionId(): string {
 	return Bun.randomUUIDv7();
+}
+
+function canonicalFilePathSync(filePath: string): string {
+	const resolved = path.resolve(filePath);
+	try {
+		const stat = fs.statSync(resolved);
+		if (!stat.isFile()) throw new Error(`Session resume target is not a regular file: ${filePath}`);
+		return fs.realpathSync.native(resolved);
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+		return path.join(fs.realpathSync.native(path.dirname(resolved)), path.basename(resolved));
+	}
 }
 
 function nowIso(): string {
@@ -313,6 +327,16 @@ interface DiskQueueOptions {
 	epoch?: number;
 }
 
+export type HistoricalDirectChildLookup =
+	| { status: "found"; sessionFile: string; sessionManager: SessionManager }
+	| { status: "not_found" }
+	| { status: "ambiguous"; sessionFiles: string[] };
+
+export interface HistoricalHotswapAudit {
+	customType: string;
+	data: unknown;
+}
+
 /**
  * Stores and navigates an append-only conversation journal.
  *
@@ -363,6 +387,8 @@ export class SessionManager {
 
 	/** The single open append writer; the manager only ever writes one file at a time. */
 	#writer: SessionStorageWriter | undefined;
+	/** The lease that authorizes every persistent mutation of this parent journal. */
+	#ownership: SessionOwnershipHandle | undefined;
 	/** Serializes async disk work (flush/close/atomic rewrite). Appends are synchronous and bypass it. */
 	#diskTail: Promise<void> = Promise.resolve();
 	#diskFailure: Error | undefined;
@@ -392,10 +418,21 @@ export class SessionManager {
 	#rememberBreadcrumb(cwd: string, sessionFile: string): void {
 		if (!this.#suppressBreadcrumb) writeTerminalBreadcrumb(cwd, sessionFile);
 	}
-
 	#clearDiskError(): void {
 		this.#diskFailure = undefined;
 		this.#diskFailureLogged = false;
+	}
+
+	#assertOwnership(): void {
+		if (!this.#ownership) return;
+		if (
+			this.#ownership.isFenced?.() ||
+			!this.#sessionFile ||
+			canonicalFilePathSync(this.#ownership.sessionFile) !== canonicalFilePathSync(this.#sessionFile) ||
+			this.#ownership.sessionId !== this.#sessionId
+		) {
+			throw new Error("Session ownership lost; refusing to write stale epoch");
+		}
 	}
 
 	#noteDiskFailure(errorLike: unknown): Error {
@@ -495,6 +532,7 @@ export class SessionManager {
 	 * replacement, but does not claim power-loss fsync durability.
 	 */
 	#rewriteSynchronously(): void {
+		this.#assertOwnership();
 		if (!this.#persist || !this.#sessionFile) return;
 
 		try {
@@ -516,6 +554,7 @@ export class SessionManager {
 	 * closed — so entries appended before the task runs are included.
 	 */
 	async #rewriteAtomically(): Promise<void> {
+		this.#assertOwnership();
 		if (!this.#persist || !this.#sessionFile) return;
 
 		const epoch = this.#diskEpoch;
@@ -533,6 +572,7 @@ export class SessionManager {
 	}
 
 	#appendToSessionFile(entry: SessionEntry): void {
+		this.#assertOwnership();
 		if (!this.#persist || !this.#sessionFile) return;
 		if (this.#diskFailure) throw this.#diskFailure;
 
@@ -701,7 +741,22 @@ export class SessionManager {
 			.trim();
 	}
 
-	/** Puts a binary blob into the blob store and returns the blob reference. */
+	/** Bind this manager's persistent writer to the already-acquired parent lease. */
+	bindSessionOwnership(ownership: SessionOwnershipHandle): void {
+		if (!this.#sessionFile) throw new Error("Cannot bind ownership before choosing a session file");
+		if (
+			canonicalFilePathSync(ownership.sessionFile) !== canonicalFilePathSync(this.#sessionFile) ||
+			ownership.sessionId !== this.#sessionId
+		) {
+			throw new Error("Session ownership identity does not match session manager");
+		}
+		this.#ownership = ownership;
+	}
+
+	/** Current parent lease, when this manager has a durable writer. */
+	getSessionOwnership(): SessionOwnershipHandle | undefined {
+		return this.#ownership;
+	}
 	async putBlob(data: Buffer, options?: BlobPutOptions): Promise<BlobPutResult> {
 		return this.#blobs.put(data, options);
 	}
@@ -1221,7 +1276,13 @@ export class SessionManager {
 		return entry.id;
 	}
 
-	appendSessionInit(init: { systemPrompt: string; task: string; tools: string[]; outputSchema?: unknown }): string {
+	appendSessionInit(init: {
+		systemPrompt: string;
+		task: string;
+		tools: string[];
+		outputSchema?: unknown;
+		subagent?: SubagentSessionMetadata;
+	}): string {
 		const entry: SessionInitEntry = { type: "session_init", ...this.#freshEntryFields(), ...init };
 		this.#recordEntry(entry);
 		return entry.id;
@@ -1255,6 +1316,40 @@ export class SessionManager {
 		const entry: CustomEntry = { type: "custom", customType, data, ...this.#freshEntryFields() };
 		this.#recordEntry(entry);
 		return entry.id;
+	}
+
+	/**
+	 * Record a model hotswap for a closed child journal in one atomic rewrite.
+	 * Historical journals have no owner or writer, so this deliberately avoids
+	 * the normal append path, which could expose only part of the hotswap.
+	 */
+	async appendHistoricalHotswap(
+		model: string,
+		thinkingLevel: string | undefined,
+		audit: HistoricalHotswapAudit,
+	): Promise<void> {
+		const originalEntries = this.#entries.length;
+		const appended: SessionEntry[] = [];
+		const append = (entry: SessionEntry): void => {
+			this.#entries.push(entry);
+			this.#index.insert(entry);
+			appended.push(entry);
+		};
+
+		append({ type: "model_change", ...this.#freshEntryFields(), model, role: "hotswap" });
+		if (thinkingLevel !== undefined) {
+			append({ type: "thinking_level_change", ...this.#freshEntryFields(), thinkingLevel });
+		}
+		append({ type: "custom", customType: audit.customType, data: audit.data, ...this.#freshEntryFields() });
+
+		try {
+			await this.#rewriteAtomically();
+		} catch (error) {
+			this.#entries.length = originalEntries;
+			this.#index.rebuild(this.#entries);
+			throw error;
+		}
+		for (const entry of appended) this.onEntryAppended?.(entry);
 	}
 
 	/**
@@ -1592,17 +1687,90 @@ export class SessionManager {
 		filePath: string,
 		sessionDir?: string,
 		storage: SessionStorage = new FileSessionStorage(),
-		options?: { initialCwd?: string },
+		options?: { initialCwd?: string; suppressBreadcrumb?: boolean },
 	): Promise<SessionManager> {
 		const loaded = await loadEntriesFromFile(filePath, storage);
 		const header = loaded.find(entry => entry.type === "session") as SessionHeader | undefined;
 		const cwd = header?.cwd ?? options?.initialCwd ?? getProjectDir();
 		const dir = sessionDir ?? path.dirname(path.resolve(filePath));
 		const manager = new SessionManager(cwd, dir, true, storage);
+		manager.#suppressBreadcrumb = options?.suppressBreadcrumb === true;
 		await manager.setSessionFile(filePath);
 		return manager;
 	}
 
+	/**
+	 * Resolve a uniquely identifiable, non-isolated direct child journal by its
+	 * durable agent id. The parent-session path and id are both required so an
+	 * unrelated sibling or stale journal cannot be addressed.
+	 */
+	async openHistoricalDirectChild(agentId: string): Promise<HistoricalDirectChildLookup> {
+		const parentFile = this.#sessionFile;
+		if (!parentFile) return { status: "not_found" };
+		const childrenDir = parentFile.endsWith(".jsonl") ? parentFile.slice(0, -JSONL_SUFFIX_LENGTH) : "";
+		if (!childrenDir) return { status: "not_found" };
+
+		const matches: Array<{ sessionFile: string; sessionManager: SessionManager }> = [];
+		for (const sessionFile of this.#storage.listFilesSync(childrenDir, "*.jsonl")) {
+			let raw: string;
+			try {
+				raw = await this.#storage.readText(sessionFile);
+			} catch {
+				continue;
+			}
+			const lines = raw.split("\n").filter(line => line.trim());
+			if (lines.length === 0) continue;
+			let parsedEntries: unknown[];
+			try {
+				parsedEntries = lines.map(line => JSON.parse(line));
+			} catch {
+				continue;
+			}
+			const header = parsedEntries[0] as { type?: unknown; id?: unknown; cwd?: unknown } | undefined;
+			if (
+				header?.type !== "session" ||
+				typeof header.id !== "string" ||
+				typeof header.cwd !== "string" ||
+				!parsedEntries.every(
+					entry =>
+						typeof entry === "object" && entry !== null && typeof (entry as { type?: unknown }).type === "string",
+				)
+			)
+				continue;
+
+			const child = await SessionManager.open(sessionFile, undefined, this.#storage, { suppressBreadcrumb: true });
+			const initEntries = child
+				.getEntries()
+				.filter((entry): entry is SessionInitEntry => entry.type === "session_init");
+			if (initEntries.length !== 1) continue;
+			const metadata = initEntries[0].subagent;
+			if (!this.#isDirectChildMetadata(metadata, agentId, parentFile)) continue;
+			matches.push({ sessionFile, sessionManager: child });
+		}
+
+		if (matches.length === 0) return { status: "not_found" };
+		if (matches.length > 1) return { status: "ambiguous", sessionFiles: matches.map(match => match.sessionFile) };
+		return { status: "found", ...matches[0] };
+	}
+
+	#isDirectChildMetadata(
+		metadata: SubagentSessionMetadata | undefined,
+		agentId: string,
+		parentFile: string,
+	): metadata is SubagentSessionMetadata {
+		return (
+			metadata !== undefined &&
+			metadata.agentId === agentId &&
+			metadata.parentSessionId === this.#sessionId &&
+			path.resolve(metadata.parentSessionFile) === path.resolve(parentFile) &&
+			metadata.isolated === false &&
+			typeof metadata.displayName === "string" &&
+			typeof metadata.taskDepth === "number" &&
+			Number.isInteger(metadata.taskDepth) &&
+			metadata.taskDepth >= 0 &&
+			typeof metadata.parentTaskPrefix === "string"
+		);
+	}
 	/** Continue the most recent session, or create a new one if none exists. */
 	static async continueRecent(
 		cwd: string,
@@ -1668,7 +1836,8 @@ export class SessionManager {
 			}
 		}
 
-		if (chosenSession === undefined) chosenSession = cwdMismatchFallback ?? (await findMostRecentSession(dir, storage));
+		if (chosenSession === undefined)
+			chosenSession = cwdMismatchFallback ?? (await findMostRecentSession(dir, storage));
 
 		const manager = new SessionManager(cwd, dir, true, storage);
 		if (chosenSession) await manager.setSessionFile(chosenSession);

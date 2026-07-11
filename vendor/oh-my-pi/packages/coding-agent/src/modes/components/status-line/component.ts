@@ -664,9 +664,11 @@ export class StatusLineComponent implements Component {
 		// set `statusLineBg: ""`. Powerline end caps need a contrasting fill to
 		// bridge the bar into the surrounding terminal; without one they read as
 		// stray glyphs, so the cap renderer drops them when the fill is empty.
+		// Compact (borderless) presets always use transparent bg.
 		const TRANSPARENT_BG_ANSI = "\x1b[49m";
 		const themeBgAnsi = theme.getBgAnsi("statusLineBg");
-		const bgAnsi = effectiveSettings.transparent ? TRANSPARENT_BG_ANSI : themeBgAnsi;
+		const forceTransparent = this.#isBorderless();
+		const bgAnsi = effectiveSettings.transparent || forceTransparent ? TRANSPARENT_BG_ANSI : themeBgAnsi;
 		const transparentBg = bgAnsi === TRANSPARENT_BG_ANSI;
 		const fgAnsi = theme.getFgAnsi("text");
 		const sepAnsi = theme.getFgAnsi("statusLineSep");
@@ -802,7 +804,21 @@ export class StatusLineComponent implements Component {
 		return leftGroup + gapFill + rightGroup;
 	}
 
+	/** Whether the preset renders as a standalone row above a borderless editor. */
+	#isBorderless(): boolean {
+		return (this.#settings.preset ?? "default") === "compact";
+	}
+
+	/** Whether the active preset uses a standalone (borderless) layout. */
+	isBorderless(): boolean {
+		return this.#isBorderless();
+	}
+
 	getTopBorder(width: number): { content: string; width: number } {
+		// In borderless mode, the status row is rendered by render(), not the editor border
+		if (this.#isBorderless()) {
+			return { content: "", width: 0 };
+		}
 		let content = this.#buildStatusLine(width);
 		if (this.#focusedAgentId && content) {
 			// Dim the whole bar while focus-proxied. Group/cap terminators emit full
@@ -816,16 +832,29 @@ export class StatusLineComponent implements Component {
 	}
 
 	render(width: number): readonly string[] {
-		// Only render hook statuses - main status is in editor's top border
-		const showHooks = this.#settings.showHookStatus ?? true;
-		if (!showHooks || this.#hookStatuses.size === 0) {
-			return [];
+		const lines: string[] = [];
+
+		// In borderless mode, render the full status line as a standalone row
+		if (this.#isBorderless()) {
+			let statusRow = this.#buildStatusLine(width);
+			if (statusRow) {
+				if (this.#focusedAgentId) {
+					statusRow = `\x1b[2m${statusRow.replaceAll("\x1b[0m", "\x1b[0m\x1b[2m")}\x1b[22m`;
+				}
+				lines.push(truncateToWidth(statusRow, width));
+			}
 		}
 
-		const sortedStatuses = Array.from(this.#hookStatuses.entries())
-			.sort(([a], [b]) => a.localeCompare(b))
-			.map(([, text]) => sanitizeStatusText(text));
-		const hookLine = sortedStatuses.join(" ");
-		return [truncateToWidth(hookLine, width)];
+		// Hook statuses (rendered in all modes)
+		const showHooks = this.#settings.showHookStatus ?? true;
+		if (showHooks && this.#hookStatuses.size > 0) {
+			const sortedStatuses = Array.from(this.#hookStatuses.entries())
+				.sort(([a], [b]) => a.localeCompare(b))
+				.map(([, text]) => sanitizeStatusText(text));
+			const hookLine = sortedStatuses.join(" ");
+			lines.push(truncateToWidth(hookLine, width));
+		}
+
+		return lines;
 	}
 }

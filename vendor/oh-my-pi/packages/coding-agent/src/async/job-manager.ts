@@ -48,6 +48,26 @@ interface PollEscalationState {
 	lastPollEndAt: number;
 }
 
+export type AsyncJobGroupTopology = "flat" | "supervised";
+export type AsyncJobGroupReporting = "main" | "hub";
+
+export interface AsyncJobGroupConfiguration {
+	topology: AsyncJobGroupTopology;
+	reporting: AsyncJobGroupReporting;
+}
+
+export interface AsyncJobGroupMetadata extends AsyncJobGroupConfiguration {
+	/** Stable root agent id derived from AgentRegistry parentage. */
+	groupId: string;
+	/** Immediate supervisor for a supervised leaf; absent for group coordinators. */
+	coordinatorId?: string;
+}
+
+const DEFAULT_GROUP_CONFIGURATION: AsyncJobGroupConfiguration = {
+	topology: "flat",
+	reporting: "main",
+};
+
 export interface AsyncJob {
 	id: string;
 	type: "bash" | "task";
@@ -71,6 +91,8 @@ export interface AsyncJob {
 	 * supply an id (e.g. legacy tests, SDK consumers without an agent context).
 	 */
 	ownerId?: string;
+	/** Snapshot group routing metadata. Group configuration changes affect only later registrations. */
+	group?: AsyncJobGroupMetadata;
 	/**
 	 * Job is registered but parked behind a caller-managed gate (e.g. a task
 	 * batch semaphore). Queued jobs do not count toward the running-job limit
@@ -106,6 +128,8 @@ export interface AsyncJobRegisterOptions {
 	id?: string;
 	/** Registry id of the agent that owns this job; used to scope cancelAll. */
 	ownerId?: string;
+	/** Stable group root and immediate supervisor, both derived from AgentRegistry parentage. */
+	group?: Pick<AsyncJobGroupMetadata, "groupId" | "coordinatorId">;
 	onProgress?: (text: string, details?: Record<string, unknown>) => void | Promise<void>;
 	/** Register the job in queued state; see {@link AsyncJob.queued}. */
 	queued?: boolean;
@@ -147,6 +171,7 @@ export class AsyncJobManager {
 	readonly #watchedJobs = new Set<string>();
 	readonly #evictionTimers = new Map<string, NodeJS.Timeout>();
 	readonly #pollEscalation = new Map<string | undefined, PollEscalationState>();
+	readonly #groupConfigurations = new Map<string, AsyncJobGroupConfiguration>();
 	readonly #onJobComplete: AsyncJobManagerOptions["onJobComplete"];
 	readonly #maxRunningJobs: number;
 	readonly #retentionMs: number;
@@ -167,6 +192,34 @@ export class AsyncJobManager {
 		this.#onJobComplete = options.onJobComplete;
 		this.#maxRunningJobs = Math.max(1, Math.floor(options.maxRunningJobs ?? DEFAULT_MAX_RUNNING_JOBS));
 		this.#retentionMs = Math.max(0, Math.floor(options.retentionMs ?? DEFAULT_RETENTION_MS));
+	}
+
+	/**
+	 * Set routing defaults for a group. Existing jobs retain their registration
+	 * snapshot; the update applies only to jobs registered after this call.
+	 */
+	configureGroup(groupId: string, configuration: AsyncJobGroupConfiguration): void {
+		this.#groupConfigurations.set(groupId, { ...configuration });
+	}
+
+	/** Return the current defaults used by a future registration in this group. */
+	getGroupConfiguration(groupId: string): AsyncJobGroupConfiguration {
+		return this.#groupConfigurations.get(groupId) ?? DEFAULT_GROUP_CONFIGURATION;
+	}
+
+	/**
+	 * Explicitly promote a hub-only terminal completion to the Main delivery
+	 * route. This is intentionally per-job; it does not alter future jobs.
+	 */
+	escalateCompletion(jobId: string): boolean {
+		const job = this.#jobs.get(jobId);
+		if (!job?.group || job.group.reporting !== "hub") return false;
+		if (job.status !== "completed" && job.status !== "failed") return false;
+		job.group.reporting = "main";
+		const text = job.resultText ?? job.errorText;
+		if (!text || this.#hasDelivery(jobId)) return true;
+		this.#enqueueDelivery(jobId, text);
+		return true;
 	}
 
 	/** True when the running-job count has reached the configured cap. */
@@ -221,6 +274,13 @@ export class AsyncJobManager {
 			abortController,
 			promise: Promise.resolve(),
 			ownerId: options?.ownerId,
+			group: options?.group
+				? {
+						groupId: options.group.groupId,
+						coordinatorId: options.group.coordinatorId,
+						...this.getGroupConfiguration(options.group.groupId),
+					}
+				: undefined,
 			queued: options?.queued === true,
 			isolated: options?.isolated === true,
 		};
@@ -619,6 +679,10 @@ export class AsyncJobManager {
 
 	isDeliverySuppressed(jobId: string): boolean {
 		return this.#suppressedDeliveries.has(jobId) || this.#watchedJobs.has(jobId);
+	}
+
+	#hasDelivery(jobId: string): boolean {
+		return this.#deliveries.some(delivery => delivery.jobId === jobId) || this.#inFlightDeliveries.some(delivery => delivery.jobId === jobId);
 	}
 
 	#enqueueDelivery(jobId: string, text: string): void {

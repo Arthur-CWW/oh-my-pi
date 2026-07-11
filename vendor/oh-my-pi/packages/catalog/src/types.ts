@@ -1,4 +1,4 @@
-import type { Effort } from "./effort";
+import type { ReasoningEffort } from "./effort";
 
 export type { KnownProvider } from "./provider-models/descriptors";
 
@@ -24,59 +24,92 @@ export type ThinkingControlMode =
 	| "anthropic-adaptive"
 	| "anthropic-budget-effort";
 
-/** Per-model thinking capabilities used to clamp and map user-facing effort levels. */
+/** A model-advertised reasoning choice, retained in the endpoint's order. */
+export interface ReasoningEffortPreset {
+	effort: ReasoningEffort;
+	description: string;
+}
+
+/** Per-model thinking capabilities used to validate and encode exact effort values. */
 export interface ThinkingConfig {
 	/** Provider-specific transport used to encode the selected effort. */
 	mode: ThinkingControlMode;
-	/**
-	 * Supported user-facing efforts, ordered least → most intensive. Never
-	 * empty: a reasoning model without a controllable effort surface carries
-	 * `thinking: undefined` instead of an empty list.
-	 */
-	efforts: readonly Effort[];
-	/** Optional default effort applied when this model is selected. Falls back to global default if absent. */
-	defaultLevel?: Effort;
-	/**
-	 * Effort → provider wire-value remap, baked at build time. Identity for
-	 * efforts the map omits. Used by Anthropic adaptive thinking, OpenAI-
-	 * compatible `reasoning_effort`, and Responses-style reasoning params.
-	 */
-	effortMap?: Partial<Record<Effort, string>>;
-	/**
-	 * Adaptive thinking accepts the `display` field (Opus 4.7+, Fable/Mythos
-	 * 5). Also implies native interleaved thinking — no beta header needed.
-	 */
+	/** Ordered supported exact wire values. Never empty when present. */
+	efforts: readonly ReasoningEffort[];
+	/** Ordered endpoint presentation metadata, when the provider advertises it. */
+	presets?: readonly ReasoningEffortPreset[];
+	/** Optional model-scoped default effort. */
+	defaultLevel?: ReasoningEffort;
+	/** Provider wire remaps for non-identity transports. */
+	effortMap?: Partial<Record<ReasoningEffort, string>>;
+	/** Adaptive thinking accepts the `display` field. */
 	supportsDisplay?: boolean;
-	/**
-	 * Per-effort upstream wire-id routing for collapsed effort-tier variants
-	 * (`variant-collapse.ts`). Keyed by pi effort; `"off"` applies when
-	 * thinking is disabled. Missing keys fall back to `requestModelId ?? id`.
-	 */
-	effortRouting?: Readonly<Partial<Record<Effort | "off", string>>>;
-	/**
-	 * When true, a thinking-off request MUST explicitly suppress thinking on
-	 * the wire (google-level: `thinkingLevel: "MINIMAL"` + `includeThoughts:
-	 * false`; budget: `thinkingBudget: 0`) instead of omitting thinkingConfig —
-	 * Cloud Code Assist re-applies the per-id baked server default when the
-	 * config is absent.
-	 */
+	/** Per-effort upstream wire-id routing for collapsed effort-tier variants. */
+	effortRouting?: Readonly<Partial<Record<ReasoningEffort | "off", string>>>;
+	/** An off request requires an explicit wire suppression. */
 	suppressWhenOff?: boolean;
-	/**
-	 * Reasoning is mandatory upstream: the endpoint rejects disabled or
-	 * omitted thinking (e.g. OpenRouter Gemini 3.x — "Reasoning is mandatory
-	 * for this endpoint and cannot be disabled"). Request mapping clamps
-	 * thinking-off to the lowest supported effort unless `suppressWhenOff`
-	 * provides an explicit wire off-path.
-	 */
+	/** The upstream requires an effort and rejects disabled reasoning. */
 	requiresEffort?: boolean;
+}
+
+/** A service tier advertised by the authenticated Codex model catalog. */
+export interface CodexServiceTier {
+	id: string;
+	name: string;
+	description: string;
+}
+
+/** Live Codex `/models` capability metadata, retained without inferred aliases. */
+export interface CodexModelCapabilities {
+	description?: string;
+	defaultReasoningLevel?: ReasoningEffort;
+	visibility?: "list" | "hide" | "none" | (string & {});
+	supportedInApi?: boolean;
+	shellType?: string;
+	additionalSpeedTiers?: readonly string[];
+	serviceTiers?: readonly CodexServiceTier[];
+	defaultServiceTier?: string;
+	availabilityNuxMessage?: string;
+	upgrade?: { model: string; migrationMarkdown: string };
+	baseInstructions?: string;
+	includeSkillsUsageInstructions?: boolean;
+	supportsReasoningSummaries?: boolean;
+	modelMessages?: {
+		instructionsTemplate?: string;
+		instructionsVariables?: { personalityDefault?: string; personalityFriendly?: string; personalityPragmatic?: string };
+		approvals?: { onRequest?: string; onRequestAutoReview?: string };
+	};
+	defaultReasoningSummary?: string;
+	supportsVerbosity?: boolean;
+	defaultVerbosity?: string;
+	applyPatchToolType?: "freeform" | "function" | (string & {});
+	webSearchToolType?: string;
+	truncationPolicy?: { mode: string; limit: number };
+	supportsParallelToolCalls?: boolean;
+	supportsImageDetailOriginal?: boolean;
+	maxContextWindow?: number;
+	autoCompactTokenLimit?: number;
+	compactionHash?: string;
+	effectiveContextWindowPercent?: number;
+	experimentalSupportedTools?: readonly string[];
+	supportsSearchTool?: boolean;
+	useResponsesLite?: boolean;
+	autoReviewModelOverride?: string;
+	toolMode?: string;
+	multiAgentVersion?: string;
+	/** Codex client-side Ultra orchestration capability, never inferred from efforts. */
+	supportsUltraOrchestration?: boolean;
+	/** Provenance for values that may be absent from the current endpoint. */
+	contextWindowSource?: "endpoint" | "fallback";
+	maxTokensSource?: "endpoint" | "fallback";
+	costSource?: "endpoint" | "fallback";
 }
 
 // `Provider` is any provider-id string; `KnownProvider` (re-exported above) enumerates
 // the built-in model providers from the catalog descriptor table.
 export type Provider = string;
 
-/** Token budgets for each thinking level (token-based providers only) */
-export type ThinkingBudgets = { [key in Effort]?: number };
+export type ThinkingBudgets = { [key in ReasoningEffort]?: number };
 
 /**
  * `fetch`-compatible function. Accepts any callable matching the standard
@@ -158,8 +191,8 @@ export interface OpenAICompat {
 	supportsMultipleSystemMessages?: boolean;
 	/** Whether the provider supports `reasoning_effort`. Default: auto-detected from URL. */
 	supportsReasoningEffort?: boolean;
-	/** Optional mapping from pi-ai reasoning levels to provider/model-specific `reasoning_effort` values. */
-	reasoningEffortMap?: Partial<Record<Effort, string>>;
+	/** Optional exact effort → provider wire-value remap. */
+	reasoningEffortMap?: Partial<Record<ReasoningEffort, string>>;
 	/** Whether the provider supports `stream_options: { include_usage: true }` for token usage in streaming responses. Default: true. */
 	supportsUsageInStreaming?: boolean;
 	/** Which field to use for max tokens. Default: auto-detected from URL. */
@@ -384,7 +417,7 @@ export interface ResolvedOpenAIResponsesCompat {
 	supportsLongPromptCacheRetention: boolean;
 	strictResponsesPairing: boolean;
 	requiresJuiceZeroHack: boolean;
-	reasoningEffortMap: Partial<Record<Effort, string>>;
+	reasoningEffortMap: Partial<Record<ReasoningEffort, string>>;
 }
 
 /** Fully-resolved anthropic-messages compat view (same contract as `ResolvedOpenAICompat`). */
@@ -489,6 +522,10 @@ export interface Model<TApi extends Api = Api> {
 	priority?: number;
 	/** Canonical thinking capability metadata for this model. */
 	thinking?: ThinkingConfig;
+	/** Live authenticated Codex model capability metadata. */
+	codex?: CodexModelCapabilities;
+	/** Whether the model is intentionally excluded from picker UIs but remains resolvable. */
+	hidden?: boolean;
 	/**
 	 * Fully-resolved compatibility record, materialized once by `buildModel`.
 	 * Protocol handlers read fields; they never detect, resolve, or allocate.

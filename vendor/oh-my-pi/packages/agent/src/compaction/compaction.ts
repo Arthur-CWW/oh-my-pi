@@ -8,7 +8,6 @@
 import {
 	type ApiKey,
 	type AssistantMessage,
-	Effort,
 	type FetchImpl,
 	type Message,
 	type MessageAttribution,
@@ -19,12 +18,12 @@ import {
 	withAuth,
 } from "@oh-my-pi/pi-ai";
 import { preferredDialect } from "@oh-my-pi/pi-catalog/identity";
-import { clampThinkingLevelForModel } from "@oh-my-pi/pi-catalog/model-thinking";
+import type { ReasoningEffort } from "@oh-my-pi/pi-catalog/effort";
 import { countTokens } from "@oh-my-pi/pi-natives";
 import { logger, prompt } from "@oh-my-pi/pi-utils";
 import * as snapcompact from "@oh-my-pi/snapcompact";
 import { type AgentTelemetry, instrumentedCompleteSimple } from "../telemetry";
-import { ThinkingLevel } from "../thinking";
+import { isProviderThinkingEffort, ThinkingLevel } from "../thinking";
 import type { AgentMessage } from "../types";
 import type { CompactionEntry, SessionEntry } from "./entries";
 import { type ConvertToLlm, createBranchSummaryMessage, createCustomMessage, defaultConvertToLlm } from "./messages";
@@ -527,50 +526,17 @@ function formatAdditionalContext(context: string[] | undefined): string {
 }
 
 /**
- * Maps the non-special `ThinkingLevel` values to their `Effort` counterparts.
- * Exhaustive over the union; throws for `Off`/`Inherit` to surface logic
- * errors in callers that forgot to filter those out. Never use a TS cast for
- * this — `ThinkingLevel` is a string-union over distinct concepts (Off /
- * Inherit are not Efforts), and a cast hides the contract.
- */
-function effortFromThinkingLevel(level: ThinkingLevel): Effort {
-	switch (level) {
-		case ThinkingLevel.Minimal:
-			return Effort.Minimal;
-		case ThinkingLevel.Low:
-			return Effort.Low;
-		case ThinkingLevel.Medium:
-			return Effort.Medium;
-		case ThinkingLevel.High:
-			return Effort.High;
-		case ThinkingLevel.XHigh:
-			return Effort.XHigh;
-		case ThinkingLevel.Off:
-		case ThinkingLevel.Inherit:
-			throw new Error(`effortFromThinkingLevel: ${level} must be handled by caller`);
-	}
-}
-
-/**
- * Resolves the reasoning effort to send on a compaction LLM call.
+ * Resolves a compaction reasoning effort without translating provider values.
  *
- * - Explicit `Off` → `undefined` (omit reasoning entirely; the user said no thinking).
- * - `undefined` / `Inherit` → historical `Effort.High` default → clamped per model
- *   (preserves current behavior for users who never touched the dial).
- * - Explicit effort → respect user choice → clamped per model.
- *
- * The clamp routes through `clampThinkingLevelForModel`, which returns
- * `undefined` for reasoning models without a thinking config — the build-time
- * encoding of `compat.supportsReasoningEffort: false` (e.g.
- * `xai-oauth/grok-build`). That `undefined` then flows through to the
- * openai-responses mapper, which omits the wire param — no
- * `requireSupportedEffort` throw.
+ * - Explicit `off` omits reasoning entirely.
+ * - `undefined` / `inherit` use only the selected model's advertised default.
+ * - Any provider effort has already been validated against the selected model
+ *   and is forwarded unchanged, including future endpoint-advertised values.
  */
-function resolveCompactionEffort(model: Model, level: ThinkingLevel | undefined): Effort | undefined {
+function resolveCompactionEffort(model: Model, level: ThinkingLevel | undefined): ReasoningEffort | undefined {
 	if (level === ThinkingLevel.Off) return undefined;
-	const requested: Effort =
-		level === undefined || level === ThinkingLevel.Inherit ? Effort.High : effortFromThinkingLevel(level);
-	return clampThinkingLevelForModel(model, requested);
+	if (level === undefined || level === ThinkingLevel.Inherit) return model.thinking?.defaultLevel;
+	return isProviderThinkingEffort(level) ? level : undefined;
 }
 
 /**
@@ -607,12 +573,10 @@ export interface SummaryOptions {
 	 */
 	telemetry?: AgentTelemetry;
 	/**
-	 * Active session thinking level. Threaded from `agent-session.ts` so
-	 * compaction honors the user's `/model` thinking selection instead of
-	 * silently overriding it with `Effort.High` (the historical default).
-	 * `undefined` / `ThinkingLevel.Inherit` falls back to that historical
-	 * default; `ThinkingLevel.Off` omits reasoning entirely. See
-	 * `resolveCompactionEffort` for the conversion contract.
+	 * Active session thinking selector. Provider efforts are model-scoped values
+	 * already validated at selection time and are passed to every compaction
+	 * request unchanged. `undefined` / `inherit` use the model's advertised
+	 * default; `off` omits reasoning entirely.
 	 */
 	thinkingLevel?: ThinkingLevel;
 	/** Optional fetch implementation threaded into remote compaction calls. */
@@ -719,10 +683,10 @@ export interface HandoffOptions {
 	 */
 	telemetry?: AgentTelemetry;
 	/**
-	 * Active session thinking level. Threaded from `agent-session.ts` so
-	 * handoff generation honors the user's `/model` thinking selection
-	 * instead of silently overriding it with `Effort.High`. See
-	 * `resolveCompactionEffort` for the conversion contract.
+	 * Active session thinking selector. Provider efforts are model-scoped values
+	 * already validated at selection time and are passed through unchanged.
+	 * `undefined` / `inherit` use the model's advertised default; `off` omits
+	 * reasoning entirely. See `resolveCompactionEffort`.
 	 */
 	thinkingLevel?: ThinkingLevel;
 }
@@ -1010,11 +974,9 @@ export async function compact(
 		metadata: options?.metadata,
 		convertToLlm: options?.convertToLlm,
 		telemetry: options?.telemetry,
-		// Honor /model thinking selection on every fan-out summarizer.
-		// Without this propagation, generateSummary / generateTurnPrefixSummary
-		// see options?.thinkingLevel === undefined and resolveCompactionEffort
-		// silently falls back to Effort.High — the same defect e07b47ee4 fixed
-		// at the call sites, leaked back in here. See resolveCompactionEffort.
+		// Preserve the exact selected effort through every fan-out summarizer.
+		// Each request resolves its own inherited value from model metadata, so
+		// dropping this field would silently change the session's wire effort.
 		thinkingLevel: options?.thinkingLevel,
 		fetch: options?.fetch,
 	};

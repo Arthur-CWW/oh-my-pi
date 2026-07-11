@@ -1,5 +1,5 @@
 import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import type { Effort } from "@oh-my-pi/pi-ai";
+import type { ReasoningEffort } from "@oh-my-pi/pi-ai";
 import {
 	type Component,
 	Container,
@@ -252,8 +252,8 @@ function getSettingsTabs(): Tab[] {
  * Some settings (like thinking level) are managed by the session, not Settings.
  */
 export interface SettingsRuntimeContext {
-	/** Available thinking levels (from session) */
-	availableThinkingLevels: Effort[];
+	/** Exact model-supported thinking efforts (from session). */
+	availableThinkingLevels: ReasoningEffort[];
 	/** Current thinking level (from session) */
 	thinkingLevel: ThinkingLevel | undefined;
 	/** Available themes */

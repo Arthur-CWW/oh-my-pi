@@ -38,6 +38,8 @@ async function createContext() {
 		"app.display.reset": ["ctrl+l"],
 		"app.model.selectTemporary": ["ctrl+y"],
 		"app.model.select": ["alt+m"],
+		"app.message.followUp": ["ctrl+q", "ctrl+enter"],
+		"app.agents.returnToParent": ["alt+shift+left"],
 	};
 	const customHandlers = new Map<string, () => void>();
 	const setActionKeys = vi.fn();
@@ -55,6 +57,9 @@ async function createContext() {
 	const terminalWrite = vi.fn();
 	const prompt = vi.fn(async () => {});
 	const abort = vi.fn(async () => {});
+	const hardCancel = vi.fn();
+	const focusParentSession = vi.fn(async () => {});
+	const showStatus = vi.fn();
 	const updatePendingMessagesDisplay = vi.fn();
 	const editor: FakeEditor = {
 		setText(text: string) {
@@ -95,6 +100,7 @@ async function createContext() {
 			prompt,
 			queuedMessageCount: 0,
 			abort,
+			cancel: hardCancel,
 		} as unknown as InteractiveModeContext["session"],
 		keybindings: {
 			getKeys(action: string) {
@@ -143,10 +149,15 @@ async function createContext() {
 		showHistorySearch: vi.fn(),
 		toggleThinkingBlockVisibility: vi.fn(),
 		showModelSelector,
+		focusParentSession,
+		showStatus,
+		focusedAgentId: undefined,
+		viewSession: undefined,
 		updateEditorBorderColor: vi.fn(),
 		hasActiveBtw: vi.fn(() => false),
 		showError: vi.fn(),
 	} as unknown as InteractiveModeContext;
+	Object.defineProperty(ctx, "viewSession", { get: () => ctx.session });
 
 	return {
 		InputController,
@@ -160,6 +171,9 @@ async function createContext() {
 			updatePendingMessagesDisplay,
 			requestRender,
 			abort,
+			hardCancel,
+			focusParentSession,
+			showStatus,
 			resetDisplay,
 		},
 	};
@@ -178,6 +192,7 @@ describe("InputController keybinding setup", () => {
 		expect(editor.onDisplayReset).toBeDefined();
 		expect(editor.onSelectModelTemporary).toBeDefined();
 		expect(editor.onSelectModel).toBeDefined();
+		expect(editor.onExit).toBeDefined();
 		expect(editor.onSelectModelTemporary).not.toBe(editor.onSelectModel);
 
 		editor.onDisplayReset?.();
@@ -283,5 +298,68 @@ describe("InputController keybinding setup", () => {
 				userInitiated: true,
 			});
 		}
+	});
+
+	it("Ctrl+Q softly interrupts a running focused child, preserves its draft, and returns to its parent", async () => {
+		const { InputController, ctx, editor, customHandlers, spies } = await createContext();
+		const session = ctx.session as unknown as { isStreaming: boolean };
+		session.isStreaming = true;
+		(ctx as unknown as { focusedAgentId?: string }).focusedAgentId = "Worker";
+		editor.setText("keep this draft");
+		const controller = new InputController(ctx);
+		controller.setupKeyHandlers();
+
+		customHandlers.get("ctrl+q")?.();
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(spies.abort).toHaveBeenCalledWith({ reason: "Interrupted by user" });
+		expect(spies.hardCancel).not.toHaveBeenCalled();
+		expect(spies.focusParentSession).toHaveBeenCalledTimes(1);
+		expect(editor.getText()).toBe("keep this draft");
+		expect(spies.showStatus).toHaveBeenCalledWith("Interrupted Worker; returned to parent with draft preserved");
+	});
+
+	it("Ctrl+Q returns from an idle focused child without interrupting or clearing its draft", async () => {
+		const { InputController, ctx, editor, customHandlers, spies } = await createContext();
+		(ctx as unknown as { focusedAgentId?: string }).focusedAgentId = "Worker";
+		editor.setText("resume me later");
+		const controller = new InputController(ctx);
+		controller.setupKeyHandlers();
+
+		customHandlers.get("ctrl+q")?.();
+		await Promise.resolve();
+
+		expect(spies.abort).not.toHaveBeenCalled();
+		expect(spies.focusParentSession).toHaveBeenCalledTimes(1);
+		expect(editor.getText()).toBe("resume me later");
+	});
+
+	it("Ctrl+Q retains its main-session follow-up behavior", async () => {
+		const { InputController, ctx, editor, customHandlers, spies } = await createContext();
+		editor.setText("main follow-up");
+		const controller = new InputController(ctx);
+		controller.setupKeyHandlers();
+
+		customHandlers.get("ctrl+q")?.();
+		await new Promise(resolve => setTimeout(resolve, 0));
+
+		expect(spies.prompt).toHaveBeenCalledWith("main follow-up", { images: undefined });
+		expect(spies.focusParentSession).not.toHaveBeenCalled();
+	});
+
+	it("the dedicated parent shortcut leaves a nonempty focused draft intact", async () => {
+		const { InputController, ctx, editor, customHandlers, spies } = await createContext();
+		(ctx as unknown as { focusedAgentId?: string }).focusedAgentId = "Worker";
+		editor.setText("draft at cursor");
+		const controller = new InputController(ctx);
+		controller.setupKeyHandlers();
+
+		customHandlers.get("alt+shift+left")?.();
+		await Promise.resolve();
+
+		expect(spies.abort).not.toHaveBeenCalled();
+		expect(spies.focusParentSession).toHaveBeenCalledTimes(1);
+		expect(editor.getText()).toBe("draft at cursor");
 	});
 });

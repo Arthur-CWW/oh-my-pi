@@ -5,16 +5,16 @@ import * as ai from "@oh-my-pi/pi-ai";
 import { Effort } from "@oh-my-pi/pi-ai";
 import { TempDir } from "@oh-my-pi/pi-utils";
 import { $ } from "bun";
-import type { ModelRegistry } from "../../config/model-registry";
-import { Settings } from "../../config/settings";
-import type { ToolSession } from "../../tools";
-import { ToolError } from "../../tools/tool-errors";
-import { EVAL_TIMEOUT_PAUSE_OP, EVAL_TIMEOUT_RESUME_OP } from "../bridge-timeout";
-import { runEvalCompletion } from "../completion-bridge";
-import { IdleTimeout } from "../idle-timeout";
-import { disposeAllVmContexts } from "../js/context-manager";
-import { executeJs } from "../js/executor";
-import { disposeAllKernelSessions, type PythonResult } from "../py/executor";
+import type { ModelRegistry } from "../../src/config/model-registry";
+import { Settings } from "../../src/config/settings";
+import type { ToolSession } from "../../src/tools";
+import { ToolError } from "../../src/tools/tool-errors";
+import { EVAL_TIMEOUT_PAUSE_OP, EVAL_TIMEOUT_RESUME_OP } from "../../src/eval/bridge-timeout";
+import { runEvalCompletion } from "../../src/eval/completion-bridge";
+import { IdleTimeout } from "../../src/eval/idle-timeout";
+import { disposeAllVmContexts } from "../../src/eval/js/context-manager";
+import { executeJs } from "../../src/eval/js/executor";
+import { disposeAllKernelSessions, type PythonResult } from "../../src/eval/py/executor";
 
 function makeModel(provider: string, id: string, extra: Partial<Model<Api>> = {}): Model<Api> {
 	return {
@@ -102,12 +102,12 @@ async function runPythonCompletionInSubprocess(options: {
 	structured: boolean;
 	tempDir: TempDir;
 }): Promise<PythonResult> {
-	const repoRoot = path.resolve(import.meta.dir, "../../../..");
+	const repoRoot = path.resolve(import.meta.dir, "../../..");
 	const scriptPath = path.join(options.tempDir.path(), "run-python-completion.ts");
 	const resultPath = path.join(options.tempDir.path(), "python-completion-result.json");
-	const aiPath = path.resolve(import.meta.dir, "../../../../ai/src/index.ts");
-	const executorPath = path.resolve(import.meta.dir, "../py/executor.ts");
-	const settingsPath = path.resolve(import.meta.dir, "../../config/settings.ts");
+	const aiPath = path.resolve(import.meta.dir, "../../../ai/src/index.ts");
+	const executorPath = path.resolve(import.meta.dir, "../../src/eval/py/executor.ts");
+	const settingsPath = path.resolve(import.meta.dir, "../../src/config/settings.ts");
 	const code = options.structured
 		? 'import json\nprint(json.dumps(completion("hi", schema={"type": "object"})))'
 		: 'print(completion("hi", model="smol"))';

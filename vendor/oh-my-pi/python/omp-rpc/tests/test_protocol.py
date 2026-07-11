@@ -182,23 +182,12 @@ class ProtocolParsingTests(unittest.TestCase):
         self.assertEqual(assistant_text(message), "visible")
         self.assertEqual(assistant_text_with_thinking(message), "internalvisible")
 
-    def test_parse_session_state_rejects_invalid_thinking_level(self) -> None:
+    def test_parse_session_state_rejects_unadvertised_thinking_level(self) -> None:
         with self.assertRaises(ValueError):
             parse_session_state(
                 {
                     "sessionId": "session-123",
                     "thinkingLevel": "extreme",
-                    "steeringMode": "one-at-a-time",
-                    "followUpMode": "one-at-a-time",
-                    "interruptMode": "immediate",
-                }
-            )
-
-    def test_parse_model_info_rejects_unknown_effort(self) -> None:
-        with self.assertRaises(ValueError):
-            parse_session_state(
-                {
-                    "sessionId": "session-123",
                     "steeringMode": "one-at-a-time",
                     "followUpMode": "one-at-a-time",
                     "interruptMode": "immediate",
@@ -209,7 +198,55 @@ class ProtocolParsingTests(unittest.TestCase):
                         "provider": "anthropic",
                         "baseUrl": "https://api.anthropic.com",
                         "reasoning": True,
-                        "thinking": {"mode": "effort", "efforts": ["extreme"]},
+                        "thinking": {"mode": "effort", "efforts": ["high"]},
+                    },
+                }
+            )
+
+    def test_parse_model_info_preserves_advertised_efforts(self) -> None:
+        state = parse_session_state(
+            {
+                "sessionId": "session-123",
+                "thinkingLevel": "custom-effort",
+                "steeringMode": "one-at-a-time",
+                "followUpMode": "one-at-a-time",
+                "interruptMode": "immediate",
+                "model": {
+                    "id": "m",
+                    "name": "M",
+                    "api": "openai-responses",
+                    "provider": "openai-codex",
+                    "baseUrl": "https://api.openai.com",
+                    "reasoning": True,
+                    "thinking": {
+                        "mode": "effort",
+                        "efforts": ["max", "ultra", "custom-effort"],
+                        "defaultLevel": "ultra",
+                    },
+                },
+            }
+        )
+        assert state.model is not None and state.model.thinking is not None
+        self.assertEqual(state.model.thinking.efforts, ("max", "ultra", "custom-effort"))
+        self.assertEqual(state.model.thinking.default_level, "ultra")
+        self.assertEqual(state.thinking_level, "custom-effort")
+
+    def test_parse_model_info_rejects_empty_advertised_effort(self) -> None:
+        with self.assertRaises(ValueError):
+            parse_session_state(
+                {
+                    "sessionId": "session-123",
+                    "steeringMode": "one-at-a-time",
+                    "followUpMode": "one-at-a-time",
+                    "interruptMode": "immediate",
+                    "model": {
+                        "id": "m",
+                        "name": "M",
+                        "api": "openai-responses",
+                        "provider": "openai-codex",
+                        "baseUrl": "https://api.openai.com",
+                        "reasoning": True,
+                        "thinking": {"mode": "effort", "efforts": [""]},
                     },
                 }
             )

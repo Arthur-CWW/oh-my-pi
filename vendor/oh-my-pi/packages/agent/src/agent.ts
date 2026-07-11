@@ -9,7 +9,7 @@ import {
 	type Context,
 	type CursorExecHandlers,
 	type CursorToolResultHandler,
-	type Effort,
+	type ReasoningEffort,
 	type ImageContent,
 	type Message,
 	type Model,
@@ -683,7 +683,7 @@ export class Agent {
 		this.#state.model = m;
 	}
 
-	setThinkingLevel(l: Effort | undefined) {
+	setThinkingLevel(l: ReasoningEffort | undefined) {
 		this.#state.thinkingLevel = l;
 	}
 

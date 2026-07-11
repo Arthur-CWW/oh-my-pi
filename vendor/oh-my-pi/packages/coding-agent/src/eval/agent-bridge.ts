@@ -220,11 +220,12 @@ export async function runEvalAgent(args: unknown, options: EvalAgentBridgeOption
 	const parentActiveModelPattern = options.session.getActiveModelString?.();
 	const agentModelOverrides = options.session.settings.get("task.agentModelOverrides");
 	const modelOverride = resolveAgentModelPatterns({
-		settingsOverride: parsed.model ?? agentModelOverrides[agentName],
-		agentModel: effectiveAgent.model,
+		explicitModel: parsed.model,
+		temporaryModel: agentModelOverrides[agentName],
+		taskOrRoleModel: effectiveAgent.model,
+		streamModel: parentActiveModelPattern,
+		globalFallbackModel: [options.session.getModelString?.() ?? "", options.session.settings.getModelRole("default") ?? ""],
 		settings: options.session.settings,
-		activeModelPattern: parentActiveModelPattern,
-		fallbackModelPattern: options.session.getModelString?.(),
 	});
 	const availableSkills = [...(options.session.skills ?? [])];
 	const resolvedAutoloadSkills =

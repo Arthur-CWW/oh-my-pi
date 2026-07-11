@@ -1,3 +1,4 @@
+import type { ReasoningEffort } from "@oh-my-pi/pi-catalog/effort";
 import * as os from "node:os";
 import { scheduler } from "node:timers/promises";
 import { calculateCost } from "@oh-my-pi/pi-catalog/models";
@@ -87,7 +88,9 @@ import type {
 import { transformMessages } from "./transform-messages";
 
 export interface OpenAICodexResponsesOptions extends StreamOptions {
-	reasoning?: "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
+	reasoning?: ReasoningEffort;
+	/** Independent reasoning policy; `pro` does not alter the selected effort. */
+	reasoningMode?: "standard" | "pro";
 	reasoningSummary?: "auto" | "concise" | "detailed" | null;
 	/** `reasoning.context` replay scope. Defaults to `all_turns` under {@link OpenAICodexResponsesOptions.responsesLite}, otherwise omitted (server default is `current_turn`). */
 	reasoningContext?: CodexReasoningContext;
@@ -859,6 +862,7 @@ async function buildTransformedCodexRequestBody(
 	const codexOptions: CodexRequestOptions = {
 		reasoningEffort: options?.reasoning,
 		reasoningSummary: options?.reasoningSummary === undefined ? "auto" : options.reasoningSummary,
+		reasoningMode: options?.reasoningMode,
 		reasoningContext: options?.reasoningContext,
 		textVerbosity: options?.textVerbosity,
 		include: options?.include,

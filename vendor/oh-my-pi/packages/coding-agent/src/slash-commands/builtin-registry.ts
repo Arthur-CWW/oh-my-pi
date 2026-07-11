@@ -201,7 +201,7 @@ async function restartHandlerTui(
 	});
 	ctx.showStatus(`Restarting ${APP_NAME} --resume ${sessionId}…`);
 	spawnRestartProcess(spec);
-	await ctx.shutdown();
+	await ctx.shutdown({ childPolicy: "detach" });
 	return commandConsumed();
 }
 
@@ -303,6 +303,14 @@ function parseShakeMode(args: string): ShakeMode | { error: string } {
 }
 
 const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
+	{
+		name: "errors",
+		description: "View recent errors or clear history",
+		allowArgs: true,
+		handleTui: (command, runtime) => {
+			runtime.ctx.handleErrorsCommand(command.args);
+		},
+	},
 	{
 		name: "settings",
 		description: "Open settings menu",

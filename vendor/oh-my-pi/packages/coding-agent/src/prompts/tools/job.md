@@ -1,6 +1,6 @@
-Inspects, waits, interrupts, cancels async jobs, or hot-swaps a live subagent's model.
+Inspects, waits, interrupts, cancels async jobs, or hot-swaps the current Main session or a direct child's model.
 
-Background job results are delivered automatically when complete. Reach for this tool only when you need to intervene. Interrupt stops a subagent's current turn but keeps it alive for follow-up; cancel kills abandoned/stalled work. Model swaps apply immediately when the subagent is idle, otherwise at the next safe turn boundary; the target subagent is told that it was swapped.
+Background job results are delivered automatically when complete. Reach for this tool only when you need to intervene. Interrupt stops a subagent's current turn but keeps it alive for follow-up; cancel kills abandoned/stalled work. Model swaps apply immediately when the target is idle, otherwise at the next safe turn boundary; the target is told that it was swapped.
 
 # Operations
 
@@ -27,8 +27,8 @@ Stop the current turn but keep the subagent alive.
 - Returns immediately after requesting the interrupt.
 
 ## `setModel: { id, model, reason? }`
-Swap a live subagent's model mid-flight.
-- `id` is the task job id (the spawned agent id).
+Swap the current Main session or a live, parked, or historical direct child's model.
+- `id` is `Main` for the current Main session, or a stable spawned-agent id. Historical ids are resolved only within this session's durable direct-child journals.
 - `model` is a provider/model selector, fuzzy selector, role, or selector with `:<thinking>` suffix.
-- `reason` is optional and is included in the notice delivered to the target.
-- The swap is restricted to subagents you own, preserves conversation context, and never triggers an extra turn.
+- `reason` is optional; live targets receive it in their next-turn notice and historical targets retain it in route metadata.
+- The swap is restricted to the current Main session or direct children you own, preserves conversation context, and never triggers an extra turn.

@@ -166,4 +166,73 @@ describe("legacy-pi in-place module loading (issue #1674)", () => {
 		const siblingUrl = `${url.pathToFileURL(await fs.realpath(path.join(dir, "unrelated.ts"))).href}?nonce=${Date.now()}`;
 		await expect(import(siblingUrl)).rejects.toThrow(/@earendil-works\/pi-ai/);
 	});
+
+	it("resolves bare deps from an isolated-store-style symlinked package", async () => {
+		const dir = await writePackage({
+			".store/pkg@1.0.0/node_modules/effect/package.json": JSON.stringify({
+				name: "effect",
+				version: "1.0.0",
+				main: "index.js",
+			}),
+			".store/pkg@1.0.0/node_modules/effect/index.js": 'module.exports = { value: "effect-ok" };',
+			".store/pkg@1.0.0/node_modules/pkg/package.json": JSON.stringify({
+				name: "pkg",
+				version: "1.0.0",
+				main: "index.ts",
+			}),
+			".store/pkg@1.0.0/node_modules/pkg/index.ts": [
+				'import effect from "effect";',
+				"export const effectValue = effect.value;",
+				"export const metaUrl = import.meta.url;",
+				"export default function (pi) { void pi; }",
+			].join("\n"),
+		});
+
+		// Symlink top-level node_modules/pkg to the store package (isolated-store layout).
+		const storePkg = path.join(dir, ".store", "pkg@1.0.0", "node_modules", "pkg");
+		const topPkg = path.join(dir, "node_modules", "pkg");
+		await fs.mkdir(path.dirname(topPkg), { recursive: true });
+		await fs.symlink(storePkg, topPkg, "dir");
+
+		const mod = (await loadLegacyPiModule(path.join(topPkg, "index.ts"))) as {
+			effectValue: string;
+			metaUrl: string;
+		};
+
+		expect(mod.effectValue).toBe("effect-ok");
+		// The module ran from its real store location, proving package identity and
+		// asset paths are anchored to the manifest, not the top-level symlink.
+		expect(mod.metaUrl).toContain(".store/pkg@1.0.0");
+	});
+
+	it("identifies the importer and package in bare dependency resolution errors", async () => {
+		// Use an empty node_modules directory so Bun stops searching ancestors;
+		// otherwise a coincidental global/workspace package could satisfy the
+		// bare specifier and the test would not exercise the error path.
+		const missingSpecifier = "__omp_test_missing_dep_019f4a14";
+		const dir = await writePackage({
+			"package.json": JSON.stringify({ name: "missing-dep-ext", version: "1.0.0" }),
+			"node_modules/.gitkeep": "",
+			"index.ts": [
+				`import { value } from "${missingSpecifier}";`,
+				"export const used = value;",
+				"export default function (pi) { void pi; }",
+			].join("\n"),
+		});
+
+		const entryPath = path.join(dir, "index.ts");
+		const entryRealPath = await fs.realpath(entryPath);
+		const packageRealPath = await fs.realpath(dir);
+		let caught: unknown;
+		try {
+			await loadLegacyPiModule(entryPath);
+		} catch (error) {
+			caught = error;
+		}
+		expect(caught).toBeInstanceOf(Error);
+		const message = caught instanceof Error ? caught.message : String(caught);
+		expect(message).toContain(missingSpecifier);
+		expect(message).toContain(entryRealPath);
+		expect(message).toContain(packageRealPath);
+	});
 });

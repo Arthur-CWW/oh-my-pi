@@ -22,7 +22,7 @@ import type { AgentSessionEvent } from "../../session/agent-session";
 import { isSilentAbort, readQueueChipText, resolveAbortLabel } from "../../session/messages";
 import type { ResolveToolDetails } from "../../tools/resolve";
 import { vocalizer } from "../../tts/vocalizer";
-import { canonicalizeMessage } from "../../utils/thinking-display";
+import { canonicalizeMessage, normalizeThinkingDisplay } from "../../utils/thinking-display";
 import { interruptHint } from "../shared";
 import { StreamingRevealController } from "./streaming-reveal";
 import { ToolArgsRevealController } from "./tool-args-reveal";
@@ -425,7 +425,7 @@ export class EventController {
 	async #handleNotice(event: Extract<AgentSessionEvent, { type: "notice" }>): Promise<void> {
 		const message = event.source ? `${event.source}: ${event.message}` : event.message;
 		if (event.level === "error") {
-			this.ctx.showError(message);
+			this.ctx.showError(message, event.source);
 		} else if (event.level === "warning") {
 			this.ctx.showWarning(message);
 		} else {
@@ -481,7 +481,7 @@ export class EventController {
 			const visibleBlockCount = this.ctx.streamingMessage.content.filter(
 				content =>
 					(content.type === "text" && canonicalizeMessage(content.text)) ||
-					(content.type === "thinking" && canonicalizeMessage(content.thinking)),
+					(content.type === "thinking" && normalizeThinkingDisplay(content.thinking)),
 			).length;
 			if (visibleBlockCount > this.#lastVisibleBlockCount) {
 				this.#resetReadGroup();
@@ -678,7 +678,16 @@ export class EventController {
 			) {
 				this.#lastAssistantComponent?.setErrorPinned(true);
 				this.#pinnedErrorComponent = this.#lastAssistantComponent;
-				this.ctx.showPinnedError(event.message.errorMessage);
+				this.ctx.showPinnedError({
+					message: event.message.errorMessage,
+					source: "provider",
+					provider: event.message.provider,
+					model: event.message.model,
+					status: event.message.errorStatus,
+					session: this.ctx.sessionManager.getSessionId(),
+					category: "provider",
+					operation: "turn",
+				});
 			}
 			this.ctx.statusLine.invalidate();
 			this.ctx.updateEditorTopBorder();

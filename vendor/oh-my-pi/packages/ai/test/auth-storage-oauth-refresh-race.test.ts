@@ -209,7 +209,7 @@ describe("AuthStorage OAuth refresh race", () => {
 
 		// Drive the refresh failure deterministically so the test does not depend
 		// on the Anthropic token endpoint being reachable from the sanitized runner.
-		authStorage = new AuthStorage(store, {
+		authStorage = new AuthStorage(store!, {
 			onCredentialDisabled: event => {
 				events.push(event);
 			},

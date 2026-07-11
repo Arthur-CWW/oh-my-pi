@@ -1,15 +1,27 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { TempDir } from "@oh-my-pi/pi-utils";
-import { Settings } from "../../config/settings";
-import type { ToolSession } from "../../tools";
-import { disposeAllVmContexts, setWorkerCloseTimeoutMsForTests } from "../js/context-manager";
-import { executeJs } from "../js/executor";
+import { Settings } from "../../src/config/settings";
+import type { ToolSession } from "../../src/tools";
+import {
+	disposeAllVmContexts,
+	disposeVmContextsByOwner,
+	executeInVmContext,
+	setWorkerCloseTimeoutMsForTests,
+} from "../../src/eval/js/context-manager";
+import { executeJs } from "../../src/eval/js/executor";
 
 const originalWorker = globalThis.Worker;
+
+interface FakeWorkerInstanceStats {
+	closeRequests: number;
+	terminateCalls: number;
+}
 
 interface FakeWorkerStats {
 	closeRequests: number;
 	terminateCalls: number;
+	onRunStarted?: () => void;
+	workers?: FakeWorkerInstanceStats[];
 }
 
 interface FakeWorkerBehavior {
@@ -54,7 +66,7 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): P
 }
 
 async function waitForRealWorkerExitAfterClose(cwd: string): Promise<void> {
-	const worker = new originalWorker(new URL("../js/worker-entry.ts", import.meta.url).href, { type: "module" });
+	const worker = new originalWorker(new URL("../../src/eval/js/worker-entry.ts", import.meta.url).href, { type: "module" });
 	const ready = Promise.withResolvers<void>();
 	const runComplete = Promise.withResolvers<void>();
 	const closedAck = Promise.withResolvers<void>();
@@ -96,15 +108,25 @@ function installFakeWorker(stats: FakeWorkerStats, behavior: FakeWorkerBehavior)
 		#errorListeners = new Set<(event: Event) => void>();
 		#readyQueued = false;
 		#exited = false;
+		#stats: FakeWorkerInstanceStats = { closeRequests: 0, terminateCalls: 0 };
+
+		constructor() {
+			stats.workers?.push(this.#stats);
+		}
+
 
 		postMessage(message: unknown): void {
 			if (!message || typeof message !== "object") return;
 			const typed = message as { type?: string; runId?: string };
-			if (typed.type === "run" && typed.runId && behavior.settleRuns) {
-				queueMicrotask(() => this.#emitMessage({ type: "result", runId: typed.runId, ok: true }));
+			if (typed.type === "run" && typed.runId) {
+				stats.onRunStarted?.();
+				if (behavior.settleRuns) {
+					queueMicrotask(() => this.#emitMessage({ type: "result", runId: typed.runId, ok: true }));
+				}
 				return;
 			}
 			if (typed.type === "close") {
+				this.#stats.closeRequests++;
 				stats.closeRequests++;
 				queueMicrotask(() => {
 					this.#emitMessage({ type: "closed" });
@@ -147,6 +169,7 @@ function installFakeWorker(stats: FakeWorkerStats, behavior: FakeWorkerBehavior)
 		}
 
 		terminate(): void {
+			this.#stats.terminateCalls++;
 			stats.terminateCalls++;
 			this.#emitClose();
 		}
@@ -269,6 +292,106 @@ describe("JavaScript eval worker lifecycle", () => {
 		expect(result.cancelled).toBe(true);
 		expect(stats.closeRequests).toBe(0);
 		expect(stats.terminateCalls).toBe(1);
+	});
+
+	it("disposes only the requested owner's context", async () => {
+		using tempDir = TempDir.createSync("@omp-js-worker-owner-dispose-");
+		const stats: FakeWorkerStats = { closeRequests: 0, terminateCalls: 0, workers: [] };
+		installFakeWorker(stats, { exitOnClose: true, settleRuns: true });
+
+		const session = makeSession(tempDir.path());
+		const ownerA = `owner-a:${crypto.randomUUID()}`;
+		const ownerB = `owner-b:${crypto.randomUUID()}`;
+		const run = (ownerId: string, sessionKey: string) =>
+			executeInVmContext({
+				sessionKey,
+				sessionId: sessionKey,
+				ownerId,
+				cwd: tempDir.path(),
+				session,
+				code: "undefined;",
+				filename: "owner-dispose.js",
+				runState: {},
+			});
+
+		await run(ownerA, "shared-context");
+		await run(ownerB, "shared-context");
+		const ownerBWorker = stats.workers?.at(1);
+		expect(ownerBWorker).toBeDefined();
+		await disposeVmContextsByOwner(ownerA);
+
+		expect(stats.closeRequests).toBe(0);
+		expect(stats.terminateCalls).toBe(1);
+		expect(ownerBWorker?.closeRequests).toBe(0);
+		expect(ownerBWorker?.terminateCalls).toBe(0);
+		await run(ownerB, "shared-context");
+		expect(stats.terminateCalls).toBe(1);
+		expect(stats.workers).toHaveLength(2);
+		expect(ownerBWorker?.closeRequests).toBe(0);
+		expect(ownerBWorker?.terminateCalls).toBe(0);
+	});
+
+	it("aborts and terminates an owner's pending execution", async () => {
+		using tempDir = TempDir.createSync("@omp-js-worker-owner-abort-");
+		const runStarted = Promise.withResolvers<void>();
+		const stats: FakeWorkerStats = {
+			closeRequests: 0,
+			terminateCalls: 0,
+			onRunStarted: runStarted.resolve,
+		};
+		installFakeWorker(stats, { exitOnClose: true, settleRuns: false });
+
+		const session = makeSession(tempDir.path());
+		const ownerId = `owner-pending:${crypto.randomUUID()}`;
+		const pending = executeInVmContext({
+			sessionKey: "owner-pending-context",
+			sessionId: "owner-pending-context",
+			ownerId,
+			cwd: tempDir.path(),
+			session,
+			code: "globalThis.neverFinishes = true;",
+			filename: "owner-pending.js",
+			runState: {},
+		});
+
+		await runStarted.promise;
+		await disposeVmContextsByOwner(ownerId);
+
+		await expect(pending).rejects.toThrow("JS context disposed");
+		expect(stats.closeRequests).toBe(0);
+		expect(stats.terminateCalls).toBe(1);
+	});
+
+	it("removes every owned context and makes repeated disposal a no-op", async () => {
+		using tempDir = TempDir.createSync("@omp-js-worker-owner-idempotent-");
+		const stats: FakeWorkerStats = { closeRequests: 0, terminateCalls: 0, workers: [] };
+		installFakeWorker(stats, { exitOnClose: true, settleRuns: true });
+
+		const session = makeSession(tempDir.path());
+		const ownerId = `owner-idempotent:${crypto.randomUUID()}`;
+		const run = (sessionKey: string) =>
+			executeInVmContext({
+				sessionKey,
+				sessionId: sessionKey,
+				ownerId,
+				cwd: tempDir.path(),
+				session,
+				code: "undefined;",
+				filename: "owner-idempotent.js",
+				runState: {},
+			});
+		await run("owner-idempotent-a");
+		await run("owner-idempotent-b");
+		expect(stats.workers).toHaveLength(2);
+
+		await disposeVmContextsByOwner(ownerId);
+		expect(stats.closeRequests).toBe(0);
+		expect(stats.terminateCalls).toBe(2);
+		await disposeVmContextsByOwner(ownerId);
+		expect(stats.terminateCalls).toBe(2);
+		await run("owner-idempotent-a");
+		expect(stats.workers).toHaveLength(3);
+		expect(stats.terminateCalls).toBe(2);
 	});
 
 	it("falls back to the inline worker when the spawned worker errors during startup", async () => {

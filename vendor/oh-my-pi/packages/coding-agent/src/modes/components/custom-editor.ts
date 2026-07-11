@@ -152,14 +152,13 @@ export class CustomEditor extends Editor {
 	/** Time for the gradient to sweep one full cycle across each keyword. */
 	static readonly SHIMMER_PERIOD_MS = 1800;
 
-	/** Per-render scratch flag: did any layout line in this render contain a magic
-	 *  keyword that should shimmer? Reset by {@link #scheduleShimmerIfNeeded} each
-	 *  time a frame is queued. */
+	/** Pending magic-keyword shimmer repaint timer. */
 	#shimmerTimer: ReturnType<typeof setTimeout> | undefined;
 	/** Repaint hook the host wires once at construction. Called from the shimmer
 	 *  timer to request the next animation frame. Undefined when nobody is
 	 *  listening (tests, headless callers); the timer chain still self-cleans. */
 	#requestShimmerRepaint: (() => void) | undefined;
+	#disposed = false;
 
 	/** Gradient-highlight the "ultrathink" / "orchestrate" / "workflowz" keywords as the user types
 	 *  them, skipping any occurrence inside code spans, fenced blocks, or XML sections. Also make
@@ -170,7 +169,7 @@ export class CustomEditor extends Editor {
 	 *  stops the animation on its own. The static glow itself runs even when shimmering is gated
 	 *  off, matching existing behavior for the editor and sent bubbles. */
 	decorateText = (text: string): string => {
-		const animated = this.focused && this.#shimmerEnabled() && hasMagicKeyword(this.getText());
+		const animated = this.#shouldShimmer();
 		const phase = animated ? (Date.now() % CustomEditor.SHIMMER_PERIOD_MS) / CustomEditor.SHIMMER_PERIOD_MS : 0;
 		if (animated) this.#scheduleShimmerFrame();
 		return renderPlaceholders(text, {
@@ -206,6 +205,7 @@ export class CustomEditor extends Editor {
 	 *  once after construction (and again after `setEditorComponent` swaps the
 	 *  editor). Passing `undefined` clears any pending frame. */
 	setShimmerRepaintHandler(handler: (() => void) | undefined): void {
+		if (this.#disposed) return;
 		this.#requestShimmerRepaint = handler;
 		if (!handler && this.#shimmerTimer) {
 			clearTimeout(this.#shimmerTimer);
@@ -213,13 +213,18 @@ export class CustomEditor extends Editor {
 		}
 	}
 
+	#shouldShimmer(): boolean {
+		return !this.#disposed && this.focused && this.#shimmerEnabled() && hasMagicKeyword(this.getText());
+	}
+
 	/** Schedule one shimmer frame if none is already pending. The next render
 	 *  decides whether to schedule another, so the chain stops by itself when
 	 *  `focused` flips off or the keyword leaves the buffer. */
 	#scheduleShimmerFrame(): void {
-		if (this.#shimmerTimer || !this.#requestShimmerRepaint) return;
+		if (this.#shimmerTimer || !this.#requestShimmerRepaint || this.#disposed) return;
 		this.#shimmerTimer = setTimeout(() => {
 			this.#shimmerTimer = undefined;
+			if (!this.#shouldShimmer()) return;
 			this.#requestShimmerRepaint?.();
 		}, CustomEditor.SHIMMER_FRAME_MS);
 		this.#shimmerTimer.unref?.();
@@ -389,6 +394,17 @@ export class CustomEditor extends Editor {
 			this.#spaceHoldTimer = undefined;
 		}
 		this.onSpaceHoldEnd?.();
+	}
+
+	dispose(): void {
+		if (this.#disposed) return;
+		this.#disposed = true;
+		if (this.#shimmerTimer) clearTimeout(this.#shimmerTimer);
+		this.#shimmerTimer = undefined;
+		this.#requestShimmerRepaint = undefined;
+		if (this.#spaceHoldTimer) clearTimeout(this.#spaceHoldTimer);
+		this.#spaceHoldTimer = undefined;
+		this.#endSpaceHold();
 	}
 
 	handleInput(data: string): void {

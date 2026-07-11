@@ -199,37 +199,109 @@ try {
 
 // ── E3: long-transcript frame cost ──────────────────────────────────────────
 //
-// E3 root cause: Container.render walks EVERY child and concatenates their line
-// arrays on every frame. Finalized messages hit their Markdown L1 cache (no
-// re-lex) but still pay the tree walk + line-array rebuild/concat per frame.
-// Build N finalized assistant messages (prose + closed code fences) + 1 growing
-// tail, then time one render(WIDTH) of the whole tree per streaming frame.
-// Rising ms/frame in N => the stable history is re-walked/re-concatenated each
-// frame (the cost E3 culls); flat => the walk is already cheap.
-console.log("\nlongTranscriptFrame (E3: whole-tree render cost vs transcript length N):");
+// Each series has finalized history plus one unfinalized growing tail. Alongside
+// frame time, report how many history blocks and rows were rendered per frame:
+// a prefix cache should drive both to zero. `prefixValidationBlocksPerFrame`
+// remains explicit because versioned finalized blocks are checked for late
+// post-finalize mutations before their immutable rows are reused.
+class MeasuredAssistantMessageComponent extends AssistantMessageComponent {
+	renderCalls = 0;
+	renderedRows = 0;
+	versionReads = 0;
+
+	override getTranscriptBlockVersion(): number {
+		this.versionReads++;
+		return super.getTranscriptBlockVersion();
+	}
+
+	override render(width: number): readonly string[] {
+		const rows = super.render(width);
+		this.renderCalls++;
+		this.renderedRows += rows.length;
+		return rows;
+	}
+
+	resetMeasurements(): void {
+		this.renderCalls = 0;
+		this.renderedRows = 0;
+		this.versionReads = 0;
+	}
+}
+
+console.log("\nlongTranscriptFrame (E3: finalized prefix + growing tail):");
 try {
-	const histText = makeMarkdownCorpus(800);
+	const historyText = "Finalized history with `inline` code.\n```ts\nconst settled = true;\n```";
 	const tailCorpus = makeMarkdownCorpus(1200);
-	for (const n of [50, 100, 200]) {
+	const results: Array<{
+		finalizedMessages: number;
+		frameMs: number;
+		historyRenderCallsPerFrame: number;
+		historyRenderedRowsPerFrame: number;
+		mutableRenderedRowsPerFrame: number;
+		prefixValidationBlocksPerFrame: number;
+		retained: {
+			assembledRows: number;
+			segments: number;
+			segmentRawRowRefs: number;
+			segmentContributionRowRefs: number;
+			liveSnapshots: number;
+			liveSnapshotRowRefs: number;
+			historyPrefixCacheEntries: 0 | 1;
+			historyPrefixSegmentRefs: 0;
+		};
+		beforeEditStructuralModel: {
+			/** Derived from the replaced cache shape, not a noisy heap measurement. */
+			evidence: "structural-model";
+			historyPrefixSegmentRefs: number;
+			historyPrefixVersionEntries: number;
+			finalizedSnapshotEntries: number;
+		};
+	}> = [];
+	const frames = 60;
+	for (const finalizedMessages of [100, 1000, 10_000]) {
 		const container = new TranscriptContainer();
-		for (let i = 0; i < n; i++) {
-			const c = new AssistantMessageComponent();
-			c.updateContent(makeTextMessage(histText));
-			container.addChild(c);
+		const history: MeasuredAssistantMessageComponent[] = [];
+		for (let i = 0; i < finalizedMessages; i++) {
+			const block = new MeasuredAssistantMessageComponent();
+			block.updateContent(makeTextMessage(historyText));
+			block.markTranscriptBlockFinalized();
+			container.addChild(block);
+			history.push(block);
 		}
-		const tail = new AssistantMessageComponent();
+		const tail = new MeasuredAssistantMessageComponent();
 		container.addChild(tail);
 		let revealed = Math.floor(tailCorpus.length * 0.5);
 		tail.updateContent(makeTextMessage(tailCorpus.slice(0, revealed)));
-		container.render(WIDTH); // warm finalized history (L1 caches hot)
-		const ms = benchStep(60, () => {
+		container.render(WIDTH); // Build immutable history once before measurement.
+		for (const block of history) block.resetMeasurements();
+		tail.resetMeasurements();
+
+		const frameMs = benchStep(frames, () => {
 			revealed += 20;
 			if (revealed > tailCorpus.length) revealed = Math.floor(tailCorpus.length * 0.5);
 			tail.updateContent(makeTextMessage(tailCorpus.slice(0, revealed)));
 			container.render(WIDTH);
 		});
-		console.log(`  N=${n}: ${ms.toFixed(4)}ms/frame`);
+		const historyRenderCalls = history.reduce((total, block) => total + block.renderCalls, 0);
+		const historyRenderedRows = history.reduce((total, block) => total + block.renderedRows, 0);
+		const prefixVersionReads = history.reduce((total, block) => total + block.versionReads, 0);
+		results.push({
+			finalizedMessages,
+			frameMs,
+			historyRenderCallsPerFrame: historyRenderCalls / frames,
+			historyRenderedRowsPerFrame: historyRenderedRows / frames,
+			mutableRenderedRowsPerFrame: tail.renderedRows / frames,
+			prefixValidationBlocksPerFrame: prefixVersionReads / frames,
+			retained: container.getRetentionMetrics(),
+			beforeEditStructuralModel: {
+				evidence: "structural-model",
+				historyPrefixSegmentRefs: finalizedMessages,
+				historyPrefixVersionEntries: finalizedMessages,
+				finalizedSnapshotEntries: finalizedMessages,
+			},
+		});
 	}
+	console.log(JSON.stringify({ benchmark: "longTranscriptFrame", width: WIDTH, frames, results }));
 } catch (err) {
 	console.log(`  (skipped: ${(err as Error).message})`);
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { PYTHON_PRELUDE } from "../prelude";
+import { PYTHON_PRELUDE } from "../../../src/eval/py/prelude";
 
 describe("python prelude", () => {
 	it("exposes read(path, offset?, limit?) with positional optional args", () => {

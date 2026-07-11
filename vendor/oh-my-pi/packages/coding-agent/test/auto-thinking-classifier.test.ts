@@ -1,13 +1,15 @@
 import { describe, expect, it } from "bun:test";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import { Effort } from "@oh-my-pi/pi-ai";
+import { Effort, type ReasoningEffort } from "@oh-my-pi/pi-ai";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { parseDifficultyBucket, parseDifficultyLevel } from "@oh-my-pi/pi-coding-agent/auto-thinking/classifier";
 import {
 	AUTO_THINKING,
 	clampAutoThinkingEffort,
 	parseConfiguredThinkingLevel,
+	parseEffort,
 	parseThinkingLevel,
+	toReasoningEffort,
 } from "@oh-my-pi/pi-coding-agent/thinking";
 
 describe("auto thinking classifier helpers", () => {
@@ -17,6 +19,16 @@ describe("auto thinking classifier helpers", () => {
 		expect(parseConfiguredThinkingLevel("bogus")).toBeUndefined();
 		expect(parseThinkingLevel(AUTO_THINKING)).toBeUndefined();
 		expect(parseThinkingLevel(ThinkingLevel.Off)).toBe(ThinkingLevel.Off);
+	});
+
+	it("forwards exact endpoint efforts without widening legacy selectors", () => {
+		const advertised = "endpoint-advertised" as ReasoningEffort;
+
+		expect(toReasoningEffort(advertised)).toBe(advertised);
+		expect(parseEffort(advertised)).toBeUndefined();
+		expect(toReasoningEffort("" as ReasoningEffort)).toBeUndefined();
+		expect(parseThinkingLevel(advertised)).toBeUndefined();
+		expect(parseThinkingLevel("ultra")).toBeUndefined();
 	});
 
 	it("maps online 4-way classifier labels to effort levels", () => {

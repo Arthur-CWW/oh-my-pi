@@ -24,6 +24,20 @@ export const MAIN_AGENT_ID = "Main";
 export type AgentStatus = "running" | "idle" | "parked" | "aborted";
 export type AgentKind = "main" | "sub";
 
+export interface AgentQuotaAdmission {
+	originalProvider?: string;
+	reroutedProvider?: string;
+	originalModel?: string;
+	reroutedModel?: string;
+	ratePerHour?: number;
+	projectedEmptyAt?: number;
+	resetAt?: number;
+	deficitPerHour?: number;
+	decisionReason?: string;
+	quotaPoolId?: string;
+	limitWindowId?: string;
+}
+
 export interface AgentRef {
 	id: string;
 	displayName: string;
@@ -39,6 +53,15 @@ export interface AgentRef {
 	readonly spawnIndex: number;
 	/** Short gist of what the agent is currently doing (latest intent or tool), for the work-aware roster. Display-only. */
 	activity?: string;
+	/** Durable recovery state for a child re-adopted after controller replacement. */
+	recovery?: {
+		task: string;
+		model?: string;
+		thinkingLevel?: string | null;
+		hotswapModel?: string;
+		turnState: "interrupted_by_restart";
+	};
+	quota?: AgentQuotaAdmission;
 }
 
 export type RegistryEvent =
@@ -56,6 +79,8 @@ export interface RegisterInput {
 	session: AgentSession | null;
 	sessionFile?: string | null;
 	status?: AgentStatus;
+	recovery?: AgentRef["recovery"];
+	quota?: AgentQuotaAdmission;
 }
 
 export class AgentRegistry {
@@ -88,9 +113,11 @@ export class AgentRegistry {
 			status: input.status ?? "running",
 			session: input.session,
 			sessionFile: input.sessionFile ?? null,
+			recovery: input.recovery,
 			createdAt: now,
 			lastActivity: now,
 			spawnIndex: existing?.spawnIndex ?? this.#nextSpawnIndex++,
+			quota: input.quota ?? existing?.quota,
 		};
 		this.#refs.set(ref.id, ref);
 		this.#emit({ type: "registered", ref });

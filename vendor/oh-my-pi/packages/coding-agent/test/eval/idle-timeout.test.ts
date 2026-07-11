@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { IdleTimeout } from "../idle-timeout";
+import { IdleTimeout } from "../../src/eval/idle-timeout";
 
 /** Resolve true if `signal` aborts within `ms`, false if the window elapses first. */
 function abortedWithin(signal: AbortSignal, ms: number): Promise<boolean> {

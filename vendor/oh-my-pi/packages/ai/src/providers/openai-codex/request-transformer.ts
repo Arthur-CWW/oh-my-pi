@@ -1,18 +1,21 @@
-import type { Effort } from "@oh-my-pi/pi-catalog/effort";
+import type { ReasoningEffort } from "@oh-my-pi/pi-catalog/effort";
 import { requireSupportedEffort } from "@oh-my-pi/pi-catalog/model-thinking";
 import type { Api, Model } from "../../types";
 
 /** Reasoning replay scope for the Codex Responses API (`reasoning.context`). */
 export type CodexReasoningContext = "auto" | "current_turn" | "all_turns";
 
+/** Independent Codex Responses API reasoning controls. */
 export interface ReasoningConfig {
-	effort: "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
+	effort?: ReasoningEffort;
+	mode?: "standard" | "pro";
 	summary?: "auto" | "concise" | "detailed";
 	context?: CodexReasoningContext;
 }
 
 export interface CodexRequestOptions {
-	reasoningEffort?: ReasoningConfig["effort"];
+	reasoningEffort?: ReasoningEffort;
+	reasoningMode?: ReasoningConfig["mode"];
 	reasoningSummary?: ReasoningConfig["summary"] | null;
 	/** Explicit `reasoning.context` override. Defaults to `all_turns` under {@link CodexRequestOptions.responsesLite}, otherwise omitted (server default is `current_turn`). */
 	reasoningContext?: CodexReasoningContext;
@@ -61,10 +64,13 @@ export interface RequestBody {
 }
 
 function getReasoningConfig(model: Model<Api>, options: CodexRequestOptions): ReasoningConfig {
-	const config: ReasoningConfig = {
-		effort:
-			options.reasoningEffort === "none" ? "none" : requireSupportedEffort(model, options.reasoningEffort as Effort),
-	};
+	const config: ReasoningConfig = {};
+	if (options.reasoningEffort !== undefined) {
+		config.effort = requireSupportedEffort(model, options.reasoningEffort);
+	}
+	if (options.reasoningMode !== undefined) {
+		config.mode = options.reasoningMode;
+	}
 	if (options.reasoningSummary !== null) {
 		config.summary = options.reasoningSummary ?? "detailed";
 	}
@@ -223,7 +229,7 @@ export async function transformRequestBody(
 		}
 	}
 
-	if (options.reasoningEffort !== undefined) {
+	if (options.reasoningEffort !== undefined || options.reasoningMode !== undefined) {
 		const reasoningConfig = getReasoningConfig(model, options);
 		body.reasoning = {
 			...body.reasoning,

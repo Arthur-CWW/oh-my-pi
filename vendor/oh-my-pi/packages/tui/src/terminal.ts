@@ -120,8 +120,11 @@ export function chunkForConPTY(data: string, maxChunkBytes: number = MAX_CONPTY_
 
 // Track active terminal for emergency cleanup on crash
 let activeTerminal: ProcessTerminal | null = null;
-// Track if a terminal was ever started (for emergency restore logic)
+// Track if a terminal was ever acquired (for emergency restore logic)
 let terminalEverStarted = false;
+// Snapshot of the terminal state before the ProcessTerminal acquired it; used by
+// emergencyTerminalRestore when the active terminal instance is no longer reachable.
+let terminalRestoreState: { raw: boolean } | undefined = undefined;
 // Whether the alternate screen buffer is currently active (mirrors the TUI's
 // overlay enter/leave writes). Consulted by emergencyTerminalRestore: DECRST
 // 1049 must never be written blindly, because Windows' shared VT dispatcher
@@ -250,28 +253,30 @@ export function emergencyTerminalRestore(): void {
 			}
 			terminal.showCursor();
 		} else if (terminalEverStarted) {
-			// Blind restore only if we know a terminal was started but lost track of it
-			// This avoids writing escape sequences for non-TUI commands (grep, commit, etc.)
-			process.stdout.write(
-				"\x1b[?2026l" + // End synchronized output
-					"\x1b[?7h" + // Restore autowrap
-					"\x1b[?2004l" + // Disable bracketed paste
-					"\x1b[?2031l" + // Disable Mode 2031 appearance notifications
-					"\x1b[?2048l" + // Disable in-band resize notifications
-					"\x1b[?5522l" + // Disable enhanced paste notifications
-					"\x1b[<u" + // Pop kitty keyboard protocol
-					"\x1b[>4;0m" + // Disable modifyOtherKeys fallback
-					"\x1b[?1006l\x1b[?1003l\x1b[?1000l" + // Disable mouse tracking (fullscreen overlays)
-					// Leave the alternate screen only when a fullscreen overlay
-					// actually holds it — on Windows, DECRST 1049 on the main
-					// buffer homes the cursor (unconditional CursorRestoreState
-					// with no prior save), corrupting the shell handoff on exit.
-					(altScreenActive ? "\x1b[?1049l" : "") +
-					"\x1b[?25h", // Show cursor
-			);
+			// Blind restore only if we know a terminal was acquired but lost track of it.
+			// This avoids writing escape sequences for non-TUI commands (grep, commit, etc.).
+			if (process.stdout.isTTY) {
+				process.stdout.write(
+					"\x1b[?2026l" + // End synchronized output
+						"\x1b[?7h" + // Restore autowrap
+						"\x1b[?2004l" + // Disable bracketed paste
+						"\x1b[?2031l" + // Disable Mode 2031 appearance notifications
+						"\x1b[?2048l" + // Disable in-band resize notifications
+						"\x1b[?5522l" + // Disable enhanced paste notifications
+						"\x1b[<u" + // Pop kitty keyboard protocol
+						"\x1b[>4;0m" + // Disable modifyOtherKeys fallback
+						"\x1b[?1006l\x1b[?1003l\x1b[?1000l" + // Disable mouse tracking (fullscreen overlays)
+						// Leave the alternate screen only when a fullscreen overlay
+						// actually holds it — on Windows, DECRST 1049 on the main
+						// buffer homes the cursor (unconditional CursorRestoreState
+						// with no prior save), corrupting the shell handoff on exit.
+						(altScreenActive ? "\x1b[?1049l" : "") +
+						"\x1b[?25h", // Show cursor
+				);
+			}
 			altScreenActive = false;
-			if (process.stdin.setRawMode) {
-				process.stdin.setRawMode(false);
+			if (process.stdin.isTTY && typeof process.stdin.setRawMode === "function") {
+				process.stdin.setRawMode(terminalRestoreState?.raw ?? false);
 			}
 		}
 	} catch {
@@ -380,6 +385,7 @@ function parseOsc99KeyValues(section: string): Map<string, string> {
  */
 export class ProcessTerminal implements Terminal {
 	#wasRaw = false;
+	#terminalAcquired = false;
 	#inputHandler?: (data: string) => void;
 	#resizeHandler?: () => void;
 	#stdoutResizeListener?: () => void;
@@ -419,6 +425,42 @@ export class ProcessTerminal implements Terminal {
 	#osc11PollTimer?: Timer;
 	#mode2031DebounceTimer?: Timer;
 	#progressTimer?: ReturnType<typeof setInterval>;
+	constructor() {
+		this.#acquireTerminal();
+	}
+
+	/**
+	 * Acquire the terminal as early as possible: capture the prior raw/flow-control
+	 * state and disable IXON by entering raw mode. The kernel buffers any input
+	 * until `start()` attaches the handler and calls `resume()`, so no application
+	 * pre-start buffer is required.
+	 */
+	#acquireTerminal(): void {
+		if (this.#terminalAcquired) return;
+		if (typeof process.stdin.setRawMode !== "function" || !process.stdin.isTTY) return;
+
+		this.#wasRaw = process.stdin.isRaw || false;
+		process.stdin.setRawMode(true);
+		this.#terminalAcquired = true;
+		activeTerminal = this;
+		terminalEverStarted = true;
+		terminalRestoreState = { raw: this.#wasRaw };
+	}
+
+	/**
+	 * Release the terminal: restore the raw/flow-control state captured at
+	 * acquisition and clear our ownership marker.
+	 */
+	#releaseTerminal(): void {
+		if (!this.#terminalAcquired) return;
+		if (process.stdin.isTTY && typeof process.stdin.setRawMode === "function") {
+			process.stdin.setRawMode(this.#wasRaw);
+		}
+		this.#terminalAcquired = false;
+		if (activeTerminal === this) {
+			activeTerminal = null;
+		}
+	}
 
 	get kittyProtocolActive(): boolean {
 		return this.#kittyProtocolActive;
@@ -444,15 +486,11 @@ export class ProcessTerminal implements Terminal {
 		this.#inputHandler = onInput;
 		this.#resizeHandler = onResize;
 
-		// Register for emergency cleanup
-		activeTerminal = this;
-		terminalEverStarted = true;
+		// The terminal is acquired as early as the constructor so that IXON/DC3
+		// cannot swallow Ctrl-S during interactive initialization. Re-acquire here in
+		// case stop() was called and start() is invoked again.
+		this.#acquireTerminal();
 
-		// Save previous state and enable raw mode
-		this.#wasRaw = process.stdin.isRaw || false;
-		if (process.stdin.setRawMode) {
-			process.stdin.setRawMode(true);
-		}
 		process.stdin.setEncoding("utf8");
 		process.stdin.resume();
 
@@ -1236,10 +1274,8 @@ export class ProcessTerminal implements Terminal {
 		// where Ctrl+D could close the parent shell over SSH.
 		process.stdin.pause();
 
-		// Restore raw mode state
-		if (process.stdin.setRawMode) {
-			process.stdin.setRawMode(this.#wasRaw);
-		}
+		// Restore raw mode state captured at acquisition.
+		this.#releaseTerminal();
 		this.#stdoutErrorCleanup?.();
 		this.#stdoutErrorCleanup = undefined;
 	}

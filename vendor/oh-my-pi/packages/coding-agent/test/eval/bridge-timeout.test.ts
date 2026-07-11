@@ -4,8 +4,8 @@ import {
 	EVAL_TIMEOUT_RESUME_OP,
 	isEvalTimeoutControlEvent,
 	withBridgeTimeoutPause,
-} from "../bridge-timeout";
-import type { JsStatusEvent } from "../js/shared/types";
+} from "../../src/eval/bridge-timeout";
+import type { JsStatusEvent } from "../../src/eval/js/shared/types";
 
 describe("withBridgeTimeoutPause", () => {
 	it("emits one pause before the operation and one resume after it settles", async () => {

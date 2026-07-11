@@ -2721,7 +2721,7 @@ function resolveAnthropicAdaptiveEffort(
 	if (options.effort) return options.effort;
 	const requestedEffort = options.reasoning;
 	if (!requestedEffort) return undefined;
-	return mapEffortToAnthropicAdaptiveEffort(model, requestedEffort);
+	return mapEffortToAnthropicAdaptiveEffort(model, requestedEffort) as AnthropicEffort;
 }
 
 function extractClaudeCodeFirstUserMessageText(messages: readonly Message[]): string {

@@ -265,6 +265,7 @@ function promptLine(rl: readline.Interface, question: string): Promise<string> {
 
 	const onSigint = () => {
 		cancel();
+		rl.close();
 	};
 
 	const onKeypress = (_str: string, key: readline.Key) => {
@@ -890,6 +891,7 @@ export async function runAuthBrokerCommand(cmd: AuthBrokerCommandArgs): Promise<
 }
 
 export { ACTIONS as AUTH_BROKER_ACTIONS };
+export const __test = { promptLine };
 
 // Touch `$` so Bun's tree-shaker keeps the shell helper imported (used by future verbs).
 void $;

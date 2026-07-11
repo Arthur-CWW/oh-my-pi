@@ -5,12 +5,12 @@ from __future__ import annotations
 import random
 from functools import cache
 from pathlib import Path
-from typing import Literal
+from typing import TypeAlias
 
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-ThinkingLevel = Literal["off", "low", "medium", "high", "xhigh"]
+ThinkingLevel: TypeAlias = str
 
 
 class Settings(BaseSettings):
@@ -154,6 +154,14 @@ class Settings(BaseSettings):
         cleaned = value.strip()
         if not cleaned:
             raise ValueError("ROBOMP_BOT_LOGIN must be a non-empty GitHub login")
+        return cleaned
+
+    @field_validator("thinking_level", mode="after")
+    @classmethod
+    def _require_thinking_level(cls, value: str) -> ThinkingLevel:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("ROBOMP_THINKING must be a non-empty effort string")
         return cleaned
 
     @field_validator("replay_token", mode="before")

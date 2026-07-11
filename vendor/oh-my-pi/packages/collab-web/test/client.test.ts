@@ -50,8 +50,8 @@ function messageEntry(id: string, message: WireMessage): SessionEntry {
 	return { type: "message", id, parentId: null, timestamp: "2026-06-12T00:00:01Z", message };
 }
 
-function welcomeFrame(entries: SessionEntry[] = [], readOnly?: boolean): HostFrame {
-	return { t: "welcome", proto: 1, header: HEADER, entries, state: STATE, agents: AGENTS, readOnly };
+function welcomeFrame(entries: SessionEntry[] = [], readOnly?: boolean, agents: AgentSnapshot[] = AGENTS): HostFrame {
+	return { t: "welcome", proto: 1, header: HEADER, entries, state: STATE, agents, readOnly };
 }
 
 function liveClient(entries: SessionEntry[] = []): GuestClient {
@@ -194,6 +194,46 @@ describe("GuestClient frame apply", () => {
 		const notices = client.getSnapshot().notices;
 		expect(notices).toHaveLength(1);
 		expect(notices[0]).toMatchObject({ level: "error", message: "boom" });
+	});
+
+	it("accepts older agent snapshots with omitted dashboard metadata", () => {
+		const client = liveClient();
+		expect(client.getSnapshot().agents[0]).toEqual(AGENTS[0]);
+	});
+
+	it("copies dashboard metadata into an immutable snapshot", () => {
+		const actions: "reconcile"[] = ["reconcile"];
+		const agent: AgentSnapshot = {
+			...AGENTS[0],
+			spawnIndex: 3,
+			group: "main",
+			activity: { kind: "tool", at: 2 },
+			recovery: { state: "interrupted_by_restart", task: "resume" },
+			quota: { originalModel: "a", routedModel: "b", resetAt: 10 },
+			operation: { state: "uncertain", supportedActions: actions },
+		};
+		const client = new GuestClient(LINK, "tester");
+		client.applyFrameForTest(welcomeFrame([], undefined, [agent]));
+		actions.length = 0;
+		expect(client.getSnapshot().agents[0].operation?.supportedActions).toEqual(["reconcile"]);
+	});
+
+	it("resolves correlated operation success and error results", async () => {
+		const client = liveClient();
+		const success = client.sendOperationCmd("reconcile", "main");
+		client.applyFrameForTest({ t: "agent-op-result", reqId: 1, action: "reconcile", agentId: "main", ok: true });
+		await expect(success).resolves.toEqual({ ok: true });
+
+		const failure = client.sendOperationCmd("reconcile", "main");
+		client.applyFrameForTest({
+			t: "agent-op-result",
+			reqId: 2,
+			action: "reconcile",
+			agentId: "main",
+			ok: false,
+			error: "not authorized",
+		});
+		await expect(failure).resolves.toEqual({ ok: false, error: "not authorized" });
 	});
 
 	it("snapshot reference is stable between frames and replaced per frame", () => {

@@ -33,6 +33,40 @@ describe("AsyncJobManager", () => {
 		expect(manager.getJob(jobId)?.status).toBe("completed");
 	});
 
+	test("snapshots future group reporting and explicitly escalates a hub completion", async () => {
+		const reports: string[] = [];
+		const manager = new AsyncJobManager({
+			onJobComplete: async (_jobId, _text, job) => {
+				reports.push(job?.group?.reporting ?? "ungrouped");
+			},
+		});
+
+		manager.configureGroup("Main", { topology: "flat", reporting: "hub" });
+		const hubJobId = manager.register("task", "hub task", async () => "hub result", {
+			group: { groupId: "Main" },
+		});
+		manager.configureGroup("Main", { topology: "supervised", reporting: "main" });
+		const mainJobId = manager.register("task", "main task", async () => "main result", {
+			group: { groupId: "Main", coordinatorId: "Coordinator" },
+		});
+
+		await manager.waitForAll();
+		await manager.drainDeliveries({ timeoutMs: 2_000 });
+		expect(manager.getJob(hubJobId)?.group).toEqual({ groupId: "Main", topology: "flat", reporting: "hub" });
+		expect(manager.getJob(mainJobId)?.group).toEqual({
+			groupId: "Main",
+			coordinatorId: "Coordinator",
+			topology: "supervised",
+			reporting: "main",
+		});
+		expect(reports).toEqual(["hub", "main"]);
+
+		expect(manager.escalateCompletion(hubJobId)).toBe(true);
+		await manager.drainDeliveries({ timeoutMs: 2_000 });
+		expect(reports).toEqual(["hub", "main", "main"]);
+		expect(manager.escalateCompletion(mainJobId)).toBe(false);
+	});
+
 	test("swallows progress callback errors without failing the job", async () => {
 		const completions: Array<{ jobId: string; text: string }> = [];
 		const manager = new AsyncJobManager({

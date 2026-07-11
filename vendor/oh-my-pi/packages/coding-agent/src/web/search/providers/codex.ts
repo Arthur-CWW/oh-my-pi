@@ -19,8 +19,10 @@ import { getBundledModels } from "@oh-my-pi/pi-catalog/models";
 import { $env, readSseJson } from "@oh-my-pi/pi-utils";
 import packageJson from "../../../../package.json" with { type: "json" };
 import {
+	advanceCodexOAuthCredentialSlot,
 	getCodexOAuthCredentials,
-	getFreshCodexOAuthCredential,
+	getFreshCodexOAuthCredentialSlots,
+	getFreshCodexOAuthCredentialSlot,
 	isCodexRefreshManual,
 	warnCodexRefreshGated,
 } from "../../../config/codex-refresh-policy";
@@ -32,9 +34,9 @@ import { classifyProviderHttpError, withHardTimeout } from "./utils";
 
 const CODEX_BASE_URL = "https://chatgpt.com/backend-api";
 const CODEX_RESPONSES_PATH = "/codex/responses";
-const FALLBACK_MODEL = "gpt-5.5";
+const FALLBACK_MODEL = "gpt-5.6-terra";
 const DEFAULT_MODEL_PREFERENCES = [
-	"gpt-5.5",
+	"gpt-5.6-terra",
 	"gpt-5.4",
 	"gpt-5-codex",
 	"gpt-5",
@@ -55,18 +57,8 @@ function getConfiguredModel(): string | undefined {
 function getDefaultModelCandidates(): string[] {
 	const bundledModels = getBundledModels("openai-codex");
 	const bundledIds = new Set(bundledModels.map(model => model.id));
-	const candidates = DEFAULT_MODEL_PREFERENCES.filter(modelId => bundledIds.has(modelId));
-
-	if (candidates.length > 0) {
-		return candidates;
-	}
-
-	const nonMini = bundledModels.find(model => !model.id.includes("mini") && !model.id.includes("spark"));
-	if (nonMini) {
-		return [nonMini.id];
-	}
-
-	return bundledModels[0]?.id ? [bundledModels[0].id] : [FALLBACK_MODEL];
+	const bundledCandidates = DEFAULT_MODEL_PREFERENCES.filter(modelId => bundledIds.has(modelId));
+	return [FALLBACK_MODEL, ...bundledCandidates.filter(modelId => modelId !== FALLBACK_MODEL)];
 }
 
 function shouldRetryWithNextDefaultModel(error: unknown): boolean {
@@ -354,6 +346,8 @@ async function callCodexSearch(
 		model: requestedModel,
 		stream: true,
 		store: false,
+		reasoning_effort: "medium",
+		service_tier: "default",
 		input: [
 			{
 				type: "message",
@@ -509,24 +503,26 @@ async function callCodexSearch(
 export async function searchCodex(params: SearchParams): Promise<SearchResponse> {
 	const manualRefresh = isCodexRefreshManual();
 	const storedCodexCredentials = manualRefresh ? getCodexOAuthCredentials(params.authStorage) : [];
-	const freshCredential =
-		manualRefresh && storedCodexCredentials.length > 0 ? getFreshCodexOAuthCredential(params.authStorage) : undefined;
-	if (manualRefresh && storedCodexCredentials.length > 0 && !freshCredential) {
+	const freshSlot =
+		manualRefresh && storedCodexCredentials.length > 0
+			? getFreshCodexOAuthCredentialSlot(params.authStorage, params.sessionId)
+			: undefined;
+	if (manualRefresh && storedCodexCredentials.length > 0 && !freshSlot) {
 		warnCodexRefreshGated();
 		throw new Error(
 			"Codex web search unavailable: manual refresh mode is active and no fresh Codex credential exists.",
 		);
 	}
-	const seed = freshCredential
+	const seed = freshSlot
 		? {
 				access: {
-					accessToken: freshCredential.access,
-					accountId: freshCredential.accountId,
-					email: freshCredential.email,
-					projectId: freshCredential.projectId,
-					enterpriseUrl: freshCredential.enterpriseUrl,
+					accessToken: freshSlot.credential.access,
+					accountId: freshSlot.accountId,
+					email: freshSlot.credential.email,
+					projectId: freshSlot.credential.projectId,
+					enterpriseUrl: freshSlot.credential.enterpriseUrl,
 				},
-				accountId: freshCredential.accountId ?? getAccountIdFromJwt(freshCredential.access),
+				accountId: freshSlot.accountId ?? getAccountIdFromJwt(freshSlot.credential.access),
 			}
 		: await findCodexAuth(params.authStorage, params.sessionId, params.signal);
 	if (!seed) {
@@ -571,11 +567,45 @@ export async function searchCodex(params: SearchParams): Promise<SearchResponse>
 		throw lastError ?? new Error("Codex search failed without returning a result");
 	};
 
-	const result = manualRefresh
-		? await runWithAccess(seed.access).catch(error => {
+	const runWithManualAccess = async () => {
+		let lastError: Error | undefined;
+		const maxAttempts = getFreshCodexOAuthCredentialSlots(params.authStorage).length;
+		if (maxAttempts === 0) {
+			try {
+				return await runWithAccess(seed.access);
+			} catch (error) {
 				if (isAuthRetryableError(error)) warnCodexRefreshGated();
 				throw error;
-			})
+			}
+		}
+		for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+			const slot =
+				attempt === 0
+					? freshSlot
+					: getFreshCodexOAuthCredentialSlot(params.authStorage, params.sessionId);
+			if (!slot) break;
+			try {
+				return await runWithAccess({
+					accessToken: slot.credential.access,
+					accountId: slot.accountId,
+					email: slot.credential.email,
+					projectId: slot.credential.projectId,
+					enterpriseUrl: slot.credential.enterpriseUrl,
+				});
+			} catch (error) {
+				if (!isAuthRetryableError(error)) throw error;
+				lastError = error instanceof Error ? error : new Error(String(error));
+				advanceCodexOAuthCredentialSlot(params.sessionId);
+			}
+		}
+		warnCodexRefreshGated();
+		throw lastError ?? new Error(
+			"Codex web search unavailable: manual refresh mode is active and no fresh Codex credential exists.",
+		);
+	};
+
+	const result = manualRefresh
+		? await runWithManualAccess()
 		: await withOAuthAccess(params.authStorage, "openai-codex", runWithAccess, {
 				sessionId: params.sessionId,
 				signal: params.signal,

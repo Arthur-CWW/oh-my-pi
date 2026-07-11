@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import * as vm from "node:vm";
-import { JAVASCRIPT_PRELUDE_SOURCE } from "../js/shared/prelude";
+import { JAVASCRIPT_PRELUDE_SOURCE } from "../../src/eval/js/shared/prelude";
 
 /**
  * The eval `agent()` helper grows a `returnHandle` option that turns its bare

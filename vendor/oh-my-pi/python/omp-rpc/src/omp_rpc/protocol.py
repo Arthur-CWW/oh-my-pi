@@ -11,8 +11,8 @@ JsonValue: TypeAlias = JsonPrimitive | list["JsonValue"] | dict[str, "JsonValue"
 JsonObject: TypeAlias = dict[str, JsonValue]
 
 Attribution: TypeAlias = Literal["user", "agent"]
-Effort: TypeAlias = Literal["minimal", "low", "medium", "high", "xhigh"]
-ThinkingLevel: TypeAlias = Literal["off", "minimal", "low", "medium", "high", "xhigh"]
+Effort: TypeAlias = str
+ThinkingLevel: TypeAlias = str
 StreamingBehavior: TypeAlias = Literal["steer", "followUp"]
 SteeringMode: TypeAlias = Literal["all", "one-at-a-time"]
 InterruptMode: TypeAlias = Literal["immediate", "wait"]
@@ -49,10 +49,6 @@ INTERACTIVE_EXTENSION_UI_METHODS: Final[frozenset[InteractiveExtensionUiMethod]]
 VALUE_EXTENSION_UI_METHODS: Final[frozenset[ValueExtensionUiMethod]] = frozenset(
     {"select", "input", "editor"}
 )
-_EFFORT_VALUES: Final[frozenset[str]] = frozenset(
-    {"minimal", "low", "medium", "high", "xhigh"}
-)
-_THINKING_LEVEL_VALUES: Final[frozenset[str]] = _EFFORT_VALUES | frozenset({"off"})
 _STEERING_MODE_VALUES: Final[frozenset[str]] = frozenset({"all", "one-at-a-time"})
 _INTERRUPT_MODE_VALUES: Final[frozenset[str]] = frozenset({"immediate", "wait"})
 _STOP_REASON_VALUES: Final[frozenset[str]] = frozenset(
@@ -176,6 +172,12 @@ def _require_str(payload: JsonObject, field: str) -> str:
     value = payload.get(field)
     if not isinstance(value, str):
         raise ValueError(f"{field} must be a string")
+    return value
+
+
+def _require_nonempty_str(value: object, *, field: str) -> str:
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"{field} must be a non-empty string")
     return value
 
 
@@ -1139,23 +1141,21 @@ def _parse_thinking_config(payload: object) -> ThinkingConfig | None:
     if not isinstance(payload, dict):
         return None
     raw_efforts = payload.get("efforts")
-    if not isinstance(raw_efforts, list):
-        raise ValueError("model.thinking.efforts must be a list")
-    efforts: tuple[Effort, ...] = tuple(
-        cast(Effort, _require_literal(item, _EFFORT_VALUES, field="model.thinking.efforts[]"))
+    if not isinstance(raw_efforts, list) or not raw_efforts:
+        raise ValueError("model.thinking.efforts must be a non-empty list")
+    efforts = tuple(
+        _require_nonempty_str(item, field="model.thinking.efforts[]")
         for item in raw_efforts
     )
+    default_level = _optional_str(
+        cast(JsonObject, payload), "defaultLevel"
+    )
+    if default_level is not None and default_level not in efforts:
+        raise ValueError("model.thinking.defaultLevel must be one of model.thinking.efforts")
     return ThinkingConfig(
         mode=_require_str(cast(JsonObject, payload), "mode"),
         efforts=efforts,
-        default_level=cast(
-            Effort | None,
-            _optional_literal(
-                payload.get("defaultLevel"),
-                _EFFORT_VALUES,
-                field="model.thinking.defaultLevel",
-            ),
-        ),
+        default_level=default_level,
         effort_map=cast(
             dict[str, str] | None,
             _optional_json_object(
@@ -1270,20 +1270,32 @@ def parse_todo_phases(payload: JsonValue | None) -> tuple[TodoPhase, ...]:
     return tuple(parse_todo_phase(cast(JsonObject, item)) for item in payload)
 
 
+def _parse_selected_thinking_level(
+    value: object,
+    *,
+    model: ModelInfo | None,
+    field: str,
+) -> ThinkingLevel | None:
+    if value is None:
+        return None
+    level = _require_nonempty_str(value, field=field)
+    if level == "off" or model is None or model.thinking is None:
+        return level
+    if level not in model.thinking.efforts:
+        raise ValueError(f"{field} is not advertised by the selected model")
+    return level
+
+
 def parse_session_state(payload: JsonObject) -> SessionState:
     dump_tools = tuple(
         parse_tool_descriptor(_clone_json_object(item, field="dumpTools[]"))
         for item in cast(list[Any], payload.get("dumpTools") or [])
     )
+    model = parse_model_info(cast(JsonObject | None, payload.get("model")))
     return SessionState(
-        model=parse_model_info(cast(JsonObject | None, payload.get("model"))),
-        thinking_level=cast(
-            ThinkingLevel | None,
-            _optional_literal(
-                payload.get("thinkingLevel"),
-                _THINKING_LEVEL_VALUES,
-                field="thinkingLevel",
-            ),
+        model=model,
+        thinking_level=_parse_selected_thinking_level(
+            payload.get("thinkingLevel"), model=model, field="thinkingLevel"
         ),
         is_streaming=bool(payload.get("isStreaming", False)),
         is_compacting=bool(payload.get("isCompacting", False)),
@@ -1362,7 +1374,9 @@ def parse_model_cycle_result(payload: JsonObject | None) -> ModelCycleResult | N
         raise ValueError("cycle_model response did not include a model")
     return ModelCycleResult(
         model=model,
-        thinking_level=cast(ThinkingLevel | None, payload.get("thinkingLevel")),
+        thinking_level=_parse_selected_thinking_level(
+            payload.get("thinkingLevel"), model=model, field="thinkingLevel"
+        ),
         is_scoped=bool(payload.get("isScoped", False)),
     )
 
@@ -1372,7 +1386,12 @@ def parse_thinking_level_cycle_result(
 ) -> ThinkingLevelCycleResult | None:
     if payload is None or payload.get("level") is None:
         return None
-    return ThinkingLevelCycleResult(level=cast(ThinkingLevel, payload["level"]))
+    level = _parse_selected_thinking_level(
+        payload["level"], model=None, field="level"
+    )
+    if level is None:
+        return None
+    return ThinkingLevelCycleResult(level=level)
 
 
 def parse_cancellation_result(payload: JsonObject | None) -> CancellationResult:

@@ -47,7 +47,7 @@ import {
 import type { SessionContext } from "../../session/session-context";
 import { createIrcMessageCard } from "../../tools/irc";
 import { formatBytes, formatDuration } from "../../tools/render-utils";
-import { canonicalizeMessage } from "../../utils/thinking-display";
+import { canonicalizeMessage, normalizeThinkingDisplay } from "../../utils/thinking-display";
 
 type TextBlock = { type: "text"; text: string };
 interface RenderInitialMessagesOptions {
@@ -409,7 +409,7 @@ export class UiHelpers {
 				const hasVisibleAssistantContent = message.content.some(
 					content =>
 						(content.type === "text" && canonicalizeMessage(content.text)) ||
-						(content.type === "thinking" && canonicalizeMessage(content.thinking)),
+						(content.type === "thinking" && normalizeThinkingDisplay(content.thinking)),
 				);
 				if (hasVisibleAssistantContent) {
 					// Rebuild reconstructs immutable history; seal (not finalize) so the
@@ -635,7 +635,11 @@ export class UiHelpers {
 	}
 
 	showError(errorMessage: string): void {
-		this.ctx.present([new Spacer(1), new Text(theme.fg("error", `Error: ${errorMessage}`), 1, 0)]);
+		this.ctx.present([
+			new Spacer(1),
+			new Text(theme.fg("error", `Error: ${errorMessage}`), 1, 0),
+			new Text(theme.fg("dim", `(/errors for history)`), 1, 0),
+		]);
 	}
 
 	showWarning(warningMessage: string): void {

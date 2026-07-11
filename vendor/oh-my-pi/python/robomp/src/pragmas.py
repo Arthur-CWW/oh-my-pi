@@ -32,9 +32,9 @@ Supported keys (today):
 - `/model <alias>` — pick the first id in `ROBOMP_MODEL` whose model id
   contains `<alias>` (case-insensitive). Falls back to the normal random
   pool selection if no member matches.
-- `/thinking <level>` — override `ROBOMP_THINKING` for this run. Accepts
-  `off|none|no`, `lo|low`, `med|medium`, `hi|high`, `xhi|xhigh`
-  (case-insensitive); anything else is ignored.
+- `/thinking <level>` — override `ROBOMP_THINKING` for this run. The exact
+  non-empty effort is forwarded without aliases and, when a selected model's
+  advertised efforts are available, must be one of those values.
 
 Parser semantics:
 
@@ -47,9 +47,9 @@ Parser semantics:
 from __future__ import annotations
 
 import re
-from typing import Literal
+from collections.abc import Collection
 
-ThinkingLevel = Literal["off", "low", "medium", "high", "xhigh"]
+ThinkingLevel = str
 
 # Key = ascii lowercase / digit / dash / underscore, must start with a letter.
 # The value (when using `/key=value` form) runs to end-of-token.
@@ -150,26 +150,32 @@ def resolve_model_alias(alias: str, pool: tuple[str, ...]) -> str | None:
     return exact or partial
 
 
-# Spelling aliases for the `/thinking` pragma. Lowercased; whitespace-stripped
-# input is looked up directly.
-_THINKING_ALIASES: dict[str, ThinkingLevel] = {
-    "off": "off",
-    "none": "off",
-    "no": "off",
-    "lo": "low",
-    "low": "low",
-    "med": "medium",
-    "medium": "medium",
-    "hi": "high",
-    "high": "high",
-    "xhi": "xhigh",
-    "xhigh": "xhigh",
-}
+_STANDARD_EFFORTS = frozenset(
+    {"none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"}
+)
 
 
-def resolve_thinking_level(value: str) -> ThinkingLevel | None:
-    """Normalize a thinking pragma to a canonical level, or None if unknown."""
-    return _THINKING_ALIASES.get(value.strip().lower())
+def resolve_thinking_level(
+    value: str,
+    supported_efforts: Collection[str] | None = None,
+) -> ThinkingLevel | None:
+    """Validate a pragma effort against selected-model capabilities.
+
+    Standard effort wire values are normalized case-insensitively. Custom
+    values retain their exact spelling and must exactly match advertised
+    capability data when it is available. ``off`` is a local OMP selector.
+    """
+    if not value or not value.strip():
+        return None
+    normalized = value.strip().lower()
+    effort = (
+        normalized
+        if normalized in _STANDARD_EFFORTS or normalized == "off"
+        else value
+    )
+    if effort == "off" or supported_efforts is None or effort in supported_efforts:
+        return effort
+    return None
 
 
 __all__ = [

@@ -1,15 +1,17 @@
 import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import type { Model } from "@oh-my-pi/pi-ai";
+import type { Model, ReasoningEffort } from "@oh-my-pi/pi-ai";
+import { getSupportedEfforts } from "@oh-my-pi/pi-catalog/model-thinking";
 import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
 import { logger, toError } from "@oh-my-pi/pi-utils";
 import { isBlockedSubagentModel, resolveModelOverride } from "../config/model-resolver";
 import type { Settings } from "../config/settings";
 import { AgentLifecycleManager } from "../registry/agent-lifecycle";
-import { AgentRegistry } from "../registry/agent-registry";
+import { AgentRegistry, MAIN_AGENT_ID, type AgentRef } from "../registry/agent-registry";
 import type { AgentSession, AgentSessionEvent } from "../session/agent-session";
 import { getRestorableSessionModels } from "../session/session-context";
+import { SessionManager } from "../session/session-manager";
 import { parseThinkingLevel } from "../thinking";
-import type { SessionManager } from "../session/session-manager";
+import { ROUTE_RESOLUTION_ENTRY, createEffectiveHotswapRoute } from "./route-events";
 
 export interface HotswapArgs {
 	agentId: string;
@@ -17,11 +19,17 @@ export interface HotswapArgs {
 	model: string;
 	requestedBy?: string;
 	reason?: string;
+	/** Current parent journal, required to address a historical direct child. */
+	parentSessionManager?: SessionManager;
+	/** Resolver/auth source when no live AgentSession exists. */
+	modelRegistry?: HotswapModelRegistry;
+	settings?: Settings;
 }
 
 export type HotswapResult =
 	| { status: "applied"; agentId: string; from: string; to: string }
 	| { status: "queued"; agentId: string; from: string; to: string }
+	| { status: "recorded"; agentId: string; from: string; to: string }
 	| { status: "failed"; agentId: string; error: string };
 
 export interface RestorableSessionModel {
@@ -37,6 +45,10 @@ interface RestorableSessionModelSource {
 type RestorableModelRegistry = {
 	getAvailable(): Model[];
 	hasConfiguredAuth(model: Model): boolean;
+};
+
+type HotswapModelRegistry = RestorableModelRegistry & {
+	getApiKey(model: Model): Promise<string | undefined>;
 };
 
 type PendingCancel = () => void;
@@ -56,6 +68,39 @@ function cancelPending(agentId: string): void {
 	if (!cancel) return;
 	cancel();
 	pendingSwaps.delete(agentId);
+}
+
+function validateThinkingLevel(model: Model, thinkingLevel: ThinkingLevel | undefined, explicit: boolean): string | undefined {
+	if (!explicit || thinkingLevel === undefined || thinkingLevel === "off" || thinkingLevel === "inherit") return undefined;
+	if (getSupportedEfforts(model).includes(thinkingLevel as ReasoningEffort)) return undefined;
+	const supported = getSupportedEfforts(model);
+	return `Thinking effort ${thinkingLevel} is not supported by ${formatModel(model)}${supported.length ? `. Supported efforts: ${supported.join(", ")}` : ""}`;
+}
+
+function isOwnedDirectChild(ref: AgentRef, requestedBy: string | undefined): boolean {
+	return requestedBy === undefined || ref.parentId === requestedBy;
+}
+
+function hotswapAudit(
+	sessionManager: SessionManager,
+	agentId: string,
+	model: Model,
+	reason: string | undefined,
+	requestedBy: string | undefined,
+	previousModel: string,
+	previousThinkingLevel: ThinkingLevel | string | undefined,
+	thinkingLevel: ThinkingLevel | undefined,
+) {
+	const route = createEffectiveHotswapRoute(sessionManager, agentId, model, reason, thinkingLevel);
+	return {
+		...route,
+		hotswapAudit: {
+			requestedBy: requestedBy ?? null,
+			previousRoute: { model: previousModel, effort: previousThinkingLevel ?? null },
+			newRoute: { model: formatModel(model), effort: thinkingLevel ?? previousThinkingLevel ?? null },
+			timestamp: new Date().toISOString(),
+		},
+	};
 }
 
 async function injectHotswapNotice(
@@ -87,12 +132,26 @@ async function applyHotswap(
 	reason: string | undefined,
 	from: string,
 	to: string,
+	previousThinkingLevel: ThinkingLevel | undefined,
 ): Promise<HotswapResult> {
 	try {
 		await session.setModel(model, "hotswap");
 		if (explicitThinkingLevel) {
 			session.setThinkingLevel(thinkingLevel);
 		}
+		session.sessionManager.appendCustomEntry(
+			ROUTE_RESOLUTION_ENTRY,
+			hotswapAudit(
+				session.sessionManager,
+				agentId,
+				model,
+				reason,
+				requestedBy,
+				from,
+				previousThinkingLevel,
+				explicitThinkingLevel ? thinkingLevel : session.thinkingLevel,
+			),
+		);
 		await injectHotswapNotice(session, from, to, requestedBy, reason);
 		return { status: "applied", agentId, from, to };
 	} catch (error) {
@@ -109,16 +168,87 @@ async function applyThinkingOnlyHotswap(
 	requestedBy: string | undefined,
 	reason: string | undefined,
 	modelString: string,
+	previousThinkingLevel: ThinkingLevel | undefined,
 ): Promise<HotswapResult> {
 	try {
+		const model = session.model;
+		if (!model) return failed(agentId, `Agent ${agentId} has no current model.`);
 		session.setThinkingLevel(thinkingLevel);
 		session.sessionManager.appendModelChange(modelString, "hotswap");
+		session.sessionManager.appendCustomEntry(
+			ROUTE_RESOLUTION_ENTRY,
+			hotswapAudit(
+				session.sessionManager,
+				agentId,
+				model,
+				reason,
+				requestedBy,
+				modelString,
+				previousThinkingLevel,
+				thinkingLevel,
+			),
+		);
 		await injectHotswapNotice(session, modelString, modelString, requestedBy, reason);
 		return { status: "applied", agentId, from: modelString, to: modelString };
 	} catch (error) {
 		const err = toError(error);
 		logger.warn("Failed to hot-swap agent thinking level", { agentId, error: err.message, model: modelString });
 		return { status: "failed", agentId, error: err.message };
+	}
+}
+
+async function hotswapHistoricalAgentModel(args: HotswapArgs): Promise<HotswapResult> {
+	const parentSessionManager = args.parentSessionManager;
+	const modelRegistry = args.modelRegistry;
+	if (!parentSessionManager || !modelRegistry) {
+		return failed(args.agentId, `Unknown agent: ${args.agentId}`);
+	}
+
+	const lookup = await parentSessionManager.openHistoricalDirectChild(args.agentId);
+	if (lookup.status === "not_found") return failed(args.agentId, `Unknown agent: ${args.agentId}`);
+	if (lookup.status === "ambiguous") {
+		return failed(args.agentId, `Ambiguous historical agent id: ${args.agentId}`);
+	}
+
+	const sessionManager = lookup.sessionManager;
+	const context = sessionManager.buildSessionContext();
+	const lastRole = sessionManager.getLastModelChangeRole();
+	const from = context.models[lastRole ?? "default"] ?? context.models.default;
+	if (!from) return failed(args.agentId, `Historical agent ${args.agentId} has no current model.`);
+
+	try {
+		const resolved = resolveModelOverride([args.model], modelRegistry, args.settings);
+		if (!resolved.model) return failed(args.agentId, `Could not resolve model selector: ${args.model}`);
+		if (isBlockedSubagentModel(resolved.model, args.settings)) {
+			return failed(args.agentId, `Model ${formatModel(resolved.model)} is not allowed for subagents.`);
+		}
+		const thinkingError = validateThinkingLevel(resolved.model, resolved.thinkingLevel, resolved.explicitThinkingLevel);
+		if (thinkingError) return failed(args.agentId, thinkingError);
+		const to = formatModel(resolved.model);
+		const key = await modelRegistry.getApiKey(resolved.model);
+		if (!key || !modelRegistry.hasConfiguredAuth(resolved.model)) return failed(args.agentId, `Missing credentials for ${to}`);
+		if (to === from && !resolved.explicitThinkingLevel) {
+			return { status: "recorded", agentId: args.agentId, from, to };
+		}
+
+		const route = hotswapAudit(
+			sessionManager,
+			args.agentId,
+			resolved.model,
+			args.reason,
+			args.requestedBy,
+			from,
+			context.thinkingLevel,
+			resolved.explicitThinkingLevel ? resolved.thinkingLevel : undefined,
+		);
+		await sessionManager.appendHistoricalHotswap(
+			to,
+			resolved.explicitThinkingLevel ? resolved.thinkingLevel : undefined,
+			{ customType: ROUTE_RESOLUTION_ENTRY, data: route },
+		);
+		return { status: "recorded", agentId: args.agentId, from, to };
+	} catch (error) {
+		return failed(args.agentId, toError(error).message);
 	}
 }
 
@@ -159,14 +289,32 @@ export function resolveRestorableSessionModel(
 export async function hotswapAgentModel(args: HotswapArgs): Promise<HotswapResult> {
 	const registry = AgentRegistry.global();
 	const initialRef = registry.get(args.agentId);
-	if (!initialRef) return failed(args.agentId, `Unknown agent: ${args.agentId}`);
-	if (initialRef.kind !== "sub") return failed(args.agentId, `Agent ${args.agentId} is not a subagent.`);
+	if (!initialRef) {
+		return args.agentId === MAIN_AGENT_ID
+			? failed(args.agentId, `Unknown agent: ${args.agentId}`)
+			: await hotswapHistoricalAgentModel(args);
+	}
 	if (initialRef.status === "aborted") return failed(args.agentId, `Agent ${args.agentId} is aborted.`);
+
+	const isMain = initialRef.kind === "main";
+	if (isMain) {
+		if (args.agentId !== MAIN_AGENT_ID || args.requestedBy !== MAIN_AGENT_ID) {
+			return failed(args.agentId, `Agent ${args.agentId} is not the current Main session.`);
+		}
+		if (!initialRef.session || (args.parentSessionManager && initialRef.session.sessionManager !== args.parentSessionManager)) {
+			return failed(args.agentId, `Agent ${args.agentId} is not the current Main session.`);
+		}
+	} else if (initialRef.kind !== "sub") {
+		return failed(args.agentId, `Agent ${args.agentId} is not a subagent.`);
+	} else if (!isOwnedDirectChild(initialRef, args.requestedBy)) {
+		return failed(args.agentId, `Agent ${args.agentId} is not a direct child of ${args.requestedBy}.`);
+	}
 
 	let session: AgentSession;
 	try {
-		session =
-			initialRef.status === "parked"
+		session = isMain
+			? initialRef.session!
+			: initialRef.status === "parked"
 				? await AgentLifecycleManager.global().ensureLive(args.agentId)
 				: (initialRef.session ?? (await AgentLifecycleManager.global().ensureLive(args.agentId)));
 	} catch (error) {
@@ -177,16 +325,21 @@ export async function hotswapAgentModel(args: HotswapArgs): Promise<HotswapResul
 	const currentModel = session.model;
 	if (!currentModel) return failed(args.agentId, `Agent ${args.agentId} has no current model.`);
 	const from = formatModel(currentModel);
+	const previousThinkingLevel = session.thinkingLevel;
 
 	try {
 		const resolved = resolveModelOverride([args.model], session.modelRegistry, session.settings);
 		if (!resolved.model) return failed(args.agentId, `Could not resolve model selector: ${args.model}`);
-		if (isBlockedSubagentModel(resolved.model, session.settings)) {
+		if (!isMain && isBlockedSubagentModel(resolved.model, session.settings)) {
 			return failed(args.agentId, `Model ${formatModel(resolved.model)} is not allowed for subagents.`);
 		}
-		const to = formatModel(resolved.model);
 		const key = await session.modelRegistry.getApiKey(resolved.model);
-		if (!key) return failed(args.agentId, `Missing credentials for ${to}`);
+		if (!key || !session.modelRegistry.hasConfiguredAuth(resolved.model)) {
+			return failed(args.agentId, `Missing credentials for ${formatModel(resolved.model)}`);
+		}
+		const to = formatModel(resolved.model);
+		const thinkingError = validateThinkingLevel(resolved.model, resolved.thinkingLevel, resolved.explicitThinkingLevel);
+		if (thinkingError) return failed(args.agentId, thinkingError);
 
 		cancelPending(args.agentId);
 
@@ -205,6 +358,7 @@ export async function hotswapAgentModel(args: HotswapArgs): Promise<HotswapResul
 						args.requestedBy,
 						args.reason,
 						from,
+						previousThinkingLevel,
 					)
 				: applyHotswap(
 						args.agentId,
@@ -216,6 +370,7 @@ export async function hotswapAgentModel(args: HotswapArgs): Promise<HotswapResul
 						args.reason,
 						from,
 						to,
+						previousThinkingLevel,
 					);
 
 		if (!session.isStreaming) {

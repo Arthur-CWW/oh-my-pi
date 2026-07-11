@@ -18,7 +18,7 @@ import type {
 	WriteArgs,
 	WriteResult,
 } from "@oh-my-pi/pi-catalog/discovery/cursor-gen/agent_pb";
-import type { Effort } from "@oh-my-pi/pi-catalog/effort";
+import type { ReasoningEffort } from "@oh-my-pi/pi-catalog/effort";
 import type { Api, FetchImpl, KnownApi, Model, Provider, ThinkingBudgets, Usage } from "@oh-my-pi/pi-catalog/types";
 import type { ZodType, z } from "zod/v4";
 import type { ApiKey } from "./auth-retry";
@@ -330,7 +330,9 @@ export interface SimpleStreamOptions extends Omit<StreamOptions, "apiKey"> {
 	 * ever see the resolved {@link StreamOptions.apiKey} string.
 	 */
 	apiKey?: ApiKey;
-	reasoning?: Effort;
+	reasoning?: ReasoningEffort;
+	/** OpenAI Responses reasoning policy, independent of the effort level. */
+	reasoningMode?: "standard" | "pro";
 	/**
 	 * Force-disable reasoning for the request even when the model supports it.
 	 * Takes precedence over `reasoning`. Useful for fast utility calls

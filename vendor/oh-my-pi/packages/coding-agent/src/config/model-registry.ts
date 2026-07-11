@@ -41,6 +41,12 @@ const STARTUP_MODEL_CACHE_PROVIDER_IDS: readonly string[] = [
 	...SPECIAL_MODEL_MANAGER_PROVIDER_IDS,
 ];
 
+const GPT_5_6_CODEX_LIMITS: Readonly<Record<string, { contextWindow: number; maxTokens: number }>> = {
+	"gpt-5.6-sol": { contextWindow: 1_050_000, maxTokens: 128_000 },
+	"gpt-5.6-terra": { contextWindow: 1_050_000, maxTokens: 128_000 },
+	"gpt-5.6-luna": { contextWindow: 1_050_000, maxTokens: 128_000 },
+};
+
 import type { ApiKeyResolver, FetchImpl } from "@oh-my-pi/pi-ai";
 import { registerOAuthProvider, unregisterOAuthProviders } from "@oh-my-pi/pi-ai/oauth";
 import type { OAuthCredentials, OAuthLoginCallbacks } from "@oh-my-pi/pi-ai/oauth/types";
@@ -64,8 +70,9 @@ import { parseModelString, resolveProviderModelReference } from "../config/model
 import type { AuthStorage, OAuthCredential } from "../session/auth-storage";
 import { type ApiKeyResolverModel, type ApiKeyResolverOptions, createApiKeyResolver } from "./api-key-resolver";
 import {
+	advanceCodexOAuthCredentialSlot,
 	getCodexOAuthCredentials,
-	getFreshCodexOAuthCredential,
+	getFreshCodexOAuthCredentialSlot,
 	isCodexRefreshManual,
 	warnCodexRefreshGated,
 } from "./codex-refresh-policy";
@@ -626,6 +633,7 @@ function getConfiguredProviderOrderFromSettings(): string[] {
 /**
  * Model registry - loads and manages models, resolves API keys via AuthStorage.
  */
+
 export class ModelRegistry {
 	#models: Model<Api>[] = [];
 	#canonicalIndex: CanonicalModelIndex = { records: [], byId: new Map(), bySelector: new Map() };
@@ -868,7 +876,8 @@ export class ModelRegistry {
 		const combined = this.#mergeCustomModels(withConfigModels, this.#runtimeModelOverlays);
 		// Custom/config providers bypass the model-manager merge point —
 		// collapse effort-tier variants here so X/X-thinking twins fold.
-		const withModelOverrides = this.#applyModelOverrides(collapseBuiltModelVariants(combined), this.#modelOverrides);
+		const withGpt56CodexLimits = this.#applyGpt56CodexLimits(collapseBuiltModelVariants(combined));
+		const withModelOverrides = this.#applyModelOverrides(withGpt56CodexLimits, this.#modelOverrides);
 		this.#models = this.#applyRuntimeProviderOverrides(withModelOverrides);
 		this.#rebuildCanonicalIndex();
 		this.#lastStaticLoadMtime = this.#modelsConfigFile.getMtimeMs();
@@ -1568,7 +1577,7 @@ export class ModelRegistry {
 		});
 	}
 	#applyHardcodedModelPolicies(models: Model<Api>[]): Model<Api>[] {
-		return models.map(model => {
+		return this.#applyGpt56CodexLimits(models).map(model => {
 			if (model.id !== "gpt-5.4" || model.provider === "github-copilot") {
 				return model;
 			}
@@ -1580,6 +1589,15 @@ export class ModelRegistry {
 				contextWindow: overrides.contextWindow ?? 1_000_000,
 				...overrides,
 			});
+		});
+	}
+	#applyGpt56CodexLimits(models: Model<Api>[]): Model<Api>[] {
+		return models.map(model => {
+			const publishedLimits =
+				model.provider === "openai-codex" && model.api === "openai-codex-responses"
+					? GPT_5_6_CODEX_LIMITS[model.id]
+					: undefined;
+			return publishedLimits ? applyModelOverride(model, publishedLimits) : model;
 		});
 	}
 
@@ -1861,12 +1879,12 @@ export class ModelRegistry {
 		if (model.provider === "openai-codex" && isCodexRefreshManual()) {
 			const credentials = getCodexOAuthCredentials(this.authStorage);
 			if (credentials.length > 0) {
-				const credential = getFreshCodexOAuthCredential(this.authStorage);
-				if (!credential) {
+				const slot = getFreshCodexOAuthCredentialSlot(this.authStorage, sessionId);
+				if (!slot) {
 					warnCodexRefreshGated();
 					return undefined;
 				}
-				return credential.access;
+				return slot.credential.access;
 			}
 		}
 		return this.authStorage.getApiKey(model.provider, sessionId, { baseUrl: model.baseUrl, modelId: model.id });
@@ -1889,15 +1907,15 @@ export class ModelRegistry {
 		if (this.#keylessProviders.has(provider) && !this.authStorage.hasAuth(provider)) {
 			return kNoAuth;
 		}
-		if (provider === "openai-codex" && isCodexRefreshManual() && !options?.forceRefresh) {
+		if (provider === "openai-codex" && isCodexRefreshManual()) {
 			const credentials = getCodexOAuthCredentials(this.authStorage);
 			if (credentials.length > 0) {
-				const credential = getFreshCodexOAuthCredential(this.authStorage);
-				if (!credential) {
+				const slot = getFreshCodexOAuthCredentialSlot(this.authStorage, sessionId);
+				if (!slot) {
 					warnCodexRefreshGated();
 					return undefined;
 				}
-				return credential.access;
+				return slot.credential.access;
 			}
 		}
 		return this.authStorage.getApiKey(provider, sessionId, {
@@ -1920,13 +1938,35 @@ export class ModelRegistry {
 	resolver(target: string | ApiKeyResolverModel, optionsOrSessionId?: ApiKeyResolverOptions | string): ApiKeyResolver {
 		const options = typeof optionsOrSessionId === "string" ? { sessionId: optionsOrSessionId } : optionsOrSessionId;
 		if (typeof target === "string") {
+			if (target === "openai-codex" && isCodexRefreshManual()) {
+				return this.#manualCodexApiKeyResolver(options);
+			}
 			return createApiKeyResolver(this, target, options);
 		}
-		return createApiKeyResolver(this, target.provider, {
+		const modelOptions = {
 			...options,
 			baseUrl: target.baseUrl,
 			modelId: target.id,
-		});
+		};
+		if (target.provider === "openai-codex" && isCodexRefreshManual()) {
+			return this.#manualCodexApiKeyResolver(modelOptions);
+		}
+		return createApiKeyResolver(this, target.provider, modelOptions);
+	}
+
+	#manualCodexApiKeyResolver(options: ApiKeyResolverOptions = {}): ApiKeyResolver {
+		const { sessionId, baseUrl, modelId } = options;
+		return async ({ lastChance, error, signal }) => {
+			if (error === undefined) {
+				return this.getApiKeyForProvider("openai-codex", sessionId, { baseUrl, modelId, signal });
+			}
+			if (lastChance) {
+				advanceCodexOAuthCredentialSlot(sessionId);
+				return this.getApiKeyForProvider("openai-codex", sessionId, { baseUrl, modelId, signal });
+			}
+			warnCodexRefreshGated();
+			return undefined;
+		};
 	}
 
 	async #peekApiKeyForProvider(provider: string): Promise<string | undefined> {
@@ -2207,6 +2247,7 @@ export class ModelRegistry {
 	clearSuppressedSelectors(): void {
 		this.#suppressedSelectors.clear();
 	}
+
 }
 
 /**

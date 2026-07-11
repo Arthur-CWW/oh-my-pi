@@ -6,10 +6,9 @@
  * compacted LLM context to the chat is exactly the old "session starts over
  * after compaction" bug.
  *
- * Also guards the cold-launch terminal cleanup: `omp` / `omp -c` leave the
- * previous run's transcript in native scrollback because the TUI's initial
- * paint preserves it, so the cold-launch render must request a
- * scrollback-clearing repaint (`clearTerminalHistory`).
+ * Cold launch and resume preserve native terminal scrollback while replaying
+ * the persisted transcript. `clearTerminalHistory` remains reserved for
+ * explicit in-process resets.
  */
 
 import { beforeAll, describe, expect, it, type Mock, vi } from "bun:test";
@@ -98,7 +97,7 @@ describe("UiHelpers.renderInitialMessages — clearTerminalHistory", () => {
 		expect(ctx.ui.requestRender).toHaveBeenCalledWith(true, { clearScrollback: true });
 	});
 
-	it("never clears scrollback when clearTerminalHistory is unset", () => {
+	it("preserves scrollback by default", () => {
 		const { ctx } = makeCtx();
 		new UiHelpers(ctx).renderInitialMessages();
 		const clearedCall = (ctx.ui.requestRender as Mock<(...a: unknown[]) => void>).mock.calls.find(

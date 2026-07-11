@@ -37,6 +37,17 @@ import {
 	visibleWidth,
 } from "./utils";
 
+/**
+ * Single default-off opt-in A/B switch for transcript virtualization.
+ * Controls:
+ * - ViewportTailProvider partial-tail rendering during non-multiplexer resize drags.
+ * - HistoryPrefixCache render bypass in TranscriptContainer.
+ * Default keeps the authoritative full-render path and append-only native scrollback.
+ */
+export function isTranscriptVirtualizationEnabled(): boolean {
+	return $flag("PI_TRANSCRIPT_VIRTUALIZATION");
+}
+
 const SEGMENT_RESET = "\x1b[0m";
 /**
  * Per-line terminator written after every non-image content row. It closes both
@@ -96,6 +107,14 @@ export interface RenderScheduler {
 	now(): number;
 	scheduleImmediate(callback: () => void): void;
 	scheduleRender(callback: () => void, delayMs: number): RenderTimer;
+}
+
+/** Counters for diagnosing invalidation bursts without sampling terminal output. */
+export interface TUIRenderMetrics {
+	invalidations: number;
+	renderRequests: number;
+	scheduledPaints: number;
+	renderPasses: number;
 }
 
 export interface TUIOptions {
@@ -682,6 +701,12 @@ export class TUI extends Container {
 	onDebug?: () => void;
 	#renderRequested = false;
 	#renderTimer: RenderTimer | undefined;
+	// A forced request needs next-tick latency, but a burst must still enqueue
+	// only one callback. Incrementing the generation makes a queued callback
+	// harmless after a synchronous reset or disposal.
+	#forcedRenderQueued = false;
+	#forcedRenderGeneration = 0;
+	#renderMetrics: TUIRenderMetrics = { invalidations: 0, renderRequests: 0, scheduledPaints: 0, renderPasses: 0 };
 	#renderScheduler: RenderScheduler;
 	#lastRenderAt = 0;
 	static readonly #MIN_RENDER_INTERVAL_MS = 1000 / 30;
@@ -896,6 +921,11 @@ export class TUI extends Container {
 		this.#renderScheduler = options?.renderScheduler ?? DEFAULT_RENDER_SCHEDULER;
 		this.#showHardwareCursor = showHardwareCursor === undefined ? this.#showHardwareCursor : showHardwareCursor;
 		this.#watchdog = new LoopWatchdog();
+	}
+
+	/** Live scheduling counters; read-only to callers and allocation-free to sample. */
+	get renderMetrics(): Readonly<TUIRenderMetrics> {
+		return this.#renderMetrics;
 	}
 
 	override render(width: number): readonly string[] {
@@ -1255,6 +1285,7 @@ export class TUI extends Container {
 	override invalidate(): void {
 		super.invalidate();
 		for (const overlay of this.overlayStack) overlay.component.invalidate?.();
+		this.#renderMetrics.invalidations++;
 	}
 
 	start(options?: TUIStartOptions): void {
@@ -1506,6 +1537,8 @@ export class TUI extends Container {
 		this.#clearSixelProbeState();
 		this.#stopped = true;
 		this.#watchdog.stop();
+		this.#renderRequested = false;
+		this.#cancelQueuedForcedRender();
 		if (this.#renderTimer) {
 			this.#renderTimer.cancel();
 			this.#renderTimer = undefined;
@@ -1576,6 +1609,7 @@ export class TUI extends Container {
 			return;
 		}
 		this.#prepareForcedRender(!isMultiplexerSession());
+		this.#cancelQueuedForcedRender();
 		this.#resizeEventPending = true;
 		this.#renderRequested = false;
 		this.#lastRenderAt = this.#renderScheduler.now();
@@ -1583,6 +1617,7 @@ export class TUI extends Container {
 	}
 
 	requestRender(force = false, options?: RenderRequestOptions): void {
+		this.#renderMetrics.renderRequests++;
 		// Any non-component-scoped request makes the pending frame a full one.
 		this.#pendingRenderComponentsOnly = false;
 		if (force) {
@@ -1606,14 +1641,7 @@ export class TUI extends Container {
 			this.#clearPostFullPaintSettle();
 			this.#prepareForcedRender(options?.clearScrollback === true);
 			this.#renderRequested = true;
-			this.#renderScheduler.scheduleImmediate(() => {
-				if (this.#stopped || !this.#renderRequested) {
-					return;
-				}
-				this.#renderRequested = false;
-				this.#lastRenderAt = this.#renderScheduler.now();
-				this.#doRender();
-			});
+			this.#queueForcedRender();
 			return;
 		}
 		this.#requestOrdinaryRender();
@@ -1671,7 +1699,7 @@ export class TUI extends Container {
 		}
 		if (this.#renderRequested) return;
 		this.#renderRequested = true;
-		this.#renderScheduler.scheduleImmediate(() => this.#scheduleRender());
+		this.#scheduleRender();
 	}
 
 	/**
@@ -1741,6 +1769,7 @@ export class TUI extends Container {
 			this.#renderTimer = undefined;
 		}
 		this.#renderRequested = false;
+		this.#cancelQueuedForcedRender();
 		if (this.#multiplexerResizeTimer) {
 			this.#multiplexerResizeTimer.cancel();
 		}
@@ -1848,6 +1877,26 @@ export class TUI extends Container {
 		}
 	}
 
+	#queueForcedRender(): void {
+		if (this.#forcedRenderQueued) return;
+		this.#forcedRenderQueued = true;
+		const generation = ++this.#forcedRenderGeneration;
+		this.#renderMetrics.scheduledPaints++;
+		this.#renderScheduler.scheduleImmediate(() => {
+			if (generation !== this.#forcedRenderGeneration) return;
+			this.#forcedRenderQueued = false;
+			if (this.#stopped || !this.#renderRequested) return;
+			this.#renderRequested = false;
+			this.#lastRenderAt = this.#renderScheduler.now();
+			this.#doRender();
+		});
+	}
+
+	#cancelQueuedForcedRender(): void {
+		this.#forcedRenderQueued = false;
+		this.#forcedRenderGeneration++;
+	}
+
 	#scheduleRender(): void {
 		if (this.#stopped || this.#renderTimer || !this.#renderRequested) {
 			return;
@@ -1861,6 +1910,7 @@ export class TUI extends Container {
 		}
 		const elapsed = this.#renderScheduler.now() - this.#lastRenderAt;
 		const delay = Math.max(0, TUI.#MIN_RENDER_INTERVAL_MS - elapsed);
+		this.#renderMetrics.scheduledPaints++;
 		this.#renderTimer = this.#renderScheduler.scheduleRender(() => {
 			this.#renderTimer = undefined;
 			if (this.#stopped || !this.#renderRequested) {
@@ -2209,6 +2259,7 @@ export class TUI extends Container {
 	 */
 	#doRender(): void {
 		if (this.#stopped) return;
+		this.#renderMetrics.renderPasses++;
 		const width = this.terminal.columns;
 		const height = this.terminal.rows;
 
@@ -2460,7 +2511,7 @@ export class TUI extends Container {
 		}
 
 		const intent: RenderIntent = fullPaint
-			? { kind: "fullPaint", clearScrollback: replaceRequested || geometryRebuild ? !isMultiplexerSession() : false }
+			? { kind: "fullPaint", clearScrollback: replaceRequested ? !isMultiplexerSession() : false }
 			: { kind: "update", chunkTo, windowTop };
 		this.#logRedraw(intent, frameLength, height);
 
@@ -2921,10 +2972,10 @@ export class TUI extends Container {
 			// The drag is quiet: replay the rewrapped transcript authoritatively.
 			// #resizeEventPending was preserved across every viewport-only frame
 			// (the fast path never consumes it), so this classifies as a geometry
-			// rebuild — ED3 + full history — and the clearScrollback intent below
-			// matches the gesture-driven reset path.
+			// rebuild. The full replay rewraps the history without erasing native
+			// scrollback, preserving prior shell history.
 			this.#resizeEventPending = true;
-			this.requestRender(true, { clearScrollback: !isMultiplexerSession() });
+			this.requestRender(true, { clearScrollback: false });
 		}, TUI.#RESIZE_VIEWPORT_SETTLE_MS);
 	}
 
@@ -2976,7 +3027,7 @@ export class TUI extends Container {
 		const children = this.children;
 		for (let i = children.length - 1; i >= 0 && tail.length < height; i--) {
 			const child = children[i]!;
-			const provider = asViewportTailProvider(child);
+			const provider = isTranscriptVirtualizationEnabled() ? asViewportTailProvider(child) : undefined;
 			const rows = provider ? provider.renderViewportTail(width, height - tail.length) : child.render(width);
 			for (let r = rows.length - 1; r >= 0 && tail.length < height; r--) {
 				tail.push(rows[r]!);

@@ -7,7 +7,7 @@
  * Bun's native `HTTPS_PROXY` support.
  */
 
-import type { Effort } from "@oh-my-pi/pi-catalog/effort";
+import { Effort, THINKING_EFFORTS } from "@oh-my-pi/pi-catalog/effort";
 import { mapEffortToAnthropicAdaptiveEffort, requireSupportedEffort } from "@oh-my-pi/pi-catalog/model-thinking";
 import { calculateCost } from "@oh-my-pi/pi-catalog/models";
 import { $env, $flag, extractHttpStatusFromError, fetchWithRetry } from "@oh-my-pi/pi-utils";
@@ -851,8 +851,12 @@ function buildAdditionalModelRequestFields(
 		};
 	}
 
-	const level = requireSupportedEffort(model, reasoning);
-	const defaultBudgets: Record<Effort, number> = {
+	const validatedLevel = requireSupportedEffort(model, reasoning);
+	if (!THINKING_EFFORTS.includes(validatedLevel as Effort)) {
+		throw new Error(`Model ${model.provider}/${model.id} advertises an effort unsupported by Bedrock: ${validatedLevel}`);
+	}
+	const level = validatedLevel as Effort;
+	const defaultBudgets: Partial<Record<Effort, number>> = {
 		minimal: 1024,
 		low: 2048,
 		medium: 8192,

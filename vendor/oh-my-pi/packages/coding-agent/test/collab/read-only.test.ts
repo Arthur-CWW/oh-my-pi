@@ -292,6 +292,11 @@ describe("collab read-only links", () => {
 		const cmdReply = await guest.nextFrame();
 		expect(cmdReply.t).toBe("error");
 
+		guest.socket.send({ t: "agent-op-cmd", reqId: 7, action: "reconcile", agentId: "nope" });
+		const operationReply = await guest.nextFrame();
+		if (operationReply.t !== "agent-op-result") throw new Error(`expected agent-op-result, got ${operationReply.t}`);
+		expect(operationReply).toMatchObject({ reqId: 7, action: "reconcile", agentId: "nope", ok: false });
+
 		expect(host.participants.find(p => p.name === "viewer")?.readOnly).toBe(true);
 	});
 

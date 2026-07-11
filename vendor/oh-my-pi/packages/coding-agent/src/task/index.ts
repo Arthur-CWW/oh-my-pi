@@ -20,7 +20,7 @@ import type { AgentTool, AgentToolResult, AgentToolUpdateCallback } from "@oh-my
 import type { Usage } from "@oh-my-pi/pi-ai";
 import { $env, logger, prompt, Snowflake } from "@oh-my-pi/pi-utils";
 import type { ToolSession } from "..";
-import { resolveAgentModelPatterns, resolveModelOverride } from "../config/model-resolver";
+import { resolveModelRoleValue } from "../config/model-resolver";
 import { MCPManager } from "../mcp/manager";
 import type { Theme } from "../modes/theme/theme";
 import planModeSubagentPrompt from "../prompts/system/plan-mode-subagent.md" with { type: "text" };
@@ -46,7 +46,8 @@ import "../tools/review";
 import type { AsyncJobManager } from "../async";
 import type { LocalProtocolOptions } from "../internal-urls";
 import { loadOverallPlanReference } from "../plan-mode/plan-handoff";
-import { AgentRegistry } from "../registry/agent-registry";
+import { AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
+import type { AgentQuotaAdmission } from "../registry/agent-registry";
 import { generateCommitMessage } from "../utils/commit-message-generator";
 import * as git from "../utils/git";
 import { type DiscoveryResult, discoverAgents, getAgent } from "./discovery";
@@ -54,6 +55,22 @@ import { runSubprocess } from "./executor";
 import { generateTaskName } from "./name-generator";
 import { AgentOutputManager } from "./output-manager";
 import { mapWithConcurrencyLimit, Semaphore } from "./parallel";
+import {
+	QUOTA_ADMISSION_CUSTOM_TYPE,
+	QuotaAdmissionController,
+	createQuotaAdmissionStateRecord,
+	latestQuotaAdmissionState,
+	type QuotaModel,
+} from "./quota-admission";
+import {
+	admitSpawnRoute,
+	blockSpawnRoute,
+	rerouteSpawnRoute,
+	resolveSpawnRoute,
+	toSpawnRouteReceipt,
+	type SpawnRouteDecision,
+} from "./route-resolution";
+import { appendSpawnRouteResolution } from "./route-events";
 import { renderResult, renderCall as renderTaskCall } from "./render";
 import { repairTaskParams } from "./repair-args";
 import {
@@ -70,6 +87,21 @@ import {
 	parseIsolationMode,
 	type WorktreeBaseline,
 } from "./worktree";
+
+function deriveSpawnGroup(ownerId: string | undefined): { groupId: string; coordinatorId?: string } {
+	const registry = AgentRegistry.global();
+	const coordinatorId = ownerId ?? MAIN_AGENT_ID;
+	if (coordinatorId === MAIN_AGENT_ID) return { groupId: MAIN_AGENT_ID };
+	let groupId = coordinatorId;
+	const visited = new Set<string>();
+	while (!visited.has(groupId)) {
+		visited.add(groupId);
+		const parentId = registry.get(groupId)?.parentId;
+		if (!parentId || parentId === MAIN_AGENT_ID) break;
+		groupId = parentId;
+	}
+	return { groupId, coordinatorId };
+}
 
 function renderSubagentUserPrompt(assignment: string): string {
 	return prompt.render(subagentUserPromptTemplate, {
@@ -116,6 +148,7 @@ function addUsageTotals(target: Usage, usage: Partial<Usage>): void {
 	target.cost.total += cost.total;
 }
 
+
 function formatResolvedModelSelector(
 	model: { provider: string; id: string },
 	thinkingLevel: string | undefined,
@@ -130,10 +163,12 @@ export function formatModelChain(
 	agentName: string,
 	role: string | undefined,
 	resolvedModel: string | undefined,
+	source?: string,
 ): string | undefined {
 	if (!resolvedModel) return undefined;
+	const route = source ? ` [${source}]` : "";
 	const roleLabel = role?.trim();
-	return roleLabel ? `${agentName} → "${roleLabel}" → ${resolvedModel}` : `${agentName} → ${resolvedModel}`;
+	return roleLabel ? `${agentName} → "${roleLabel}" → ${resolvedModel}${route}` : `${agentName} → ${resolvedModel}${route}`;
 }
 
 export function formatAvailableModels(models: ReadonlyArray<{ provider: string; id: string }>): string {
@@ -154,12 +189,6 @@ export function formatInvalidModelOverrideError(args: {
 	return `Invalid model override for task agent "${args.agentName}": ${requested}. Resolved selector${args.resolvedPatterns.length === 1 ? "" : "s"}: ${resolved}; no available model matched. Valid model selectors include: ${formatAvailableModels(args.availableModels)}.`;
 }
 
-interface SpawnModelResolution {
-	modelOverride: string[];
-	parentActiveModelPattern?: string;
-	resolvedModel?: string;
-	error?: string;
-}
 
 // Re-export types and utilities
 export { loadBundledAgents as BUNDLED_AGENTS } from "./agents";
@@ -564,8 +593,8 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 	readonly mergeCallAndResult = true;
 	readonly #discoveredAgents: AgentDefinition[];
 	readonly #blockedAgent: string | undefined;
-	/** Schedule-time model resolutions keyed by agentId, consumed by #runSpawn to avoid duplicate work. */
-	#preResolvedModels = new Map<string, SpawnModelResolution>();
+	/** Schedule-time route decisions keyed by agentId, consumed by #runSpawn to avoid duplicate work. */
+	#preResolvedModels = new Map<string, SpawnRouteDecision>();
 	/**
 	 * One semaphore per TaskTool instance (i.e. per session): bounds concurrent
 	 * subagents across parallel `task` calls within the session. Sized from
@@ -609,43 +638,131 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 	#isBatchEnabled(): boolean {
 		return this.session.settings.get("task.batch");
 	}
-
 	#getSpawnSemaphore(): Semaphore {
 		this.#spawnSemaphore ??= new Semaphore(this.session.settings.get("task.maxConcurrency"));
 		return this.#spawnSemaphore;
 	}
 
-	#resolveSpawnModel(agentName: string, effectiveAgent: AgentDefinition, params: TaskParams): SpawnModelResolution {
+	#resolveSpawnRoute(agentName: string, effectiveAgent: AgentDefinition, params: TaskParams): SpawnRouteDecision {
 		const agentModelOverrides = this.session.settings.get("task.agentModelOverrides");
-		const parentActiveModelPattern = this.session.getActiveModelString?.();
-		const modelOverride = resolveAgentModelPatterns({
-			settingsOverride: params.model ?? agentModelOverrides[agentName],
-			agentModel: effectiveAgent.model,
+		const parentActiveSelector = this.session.getActiveModelString?.();
+		return resolveSpawnRoute({
+			spawnExplicit: params.model,
+			sessionExplicit: this.session.getExplicitModelString?.(),
+			sessionTemporary: this.session.getTemporaryModelString?.(),
+			agentModelOverride: agentModelOverrides[agentName],
+			agentFrontmatter: effectiveAgent.model,
+			sessionInherited: parentActiveSelector,
+			globalDefault: this.session.settings.getModelRole("default"),
 			settings: this.session.settings,
-			activeModelPattern: parentActiveModelPattern,
-			fallbackModelPattern: this.session.getModelString?.(),
+			modelRegistry: this.session.modelRegistry,
+			parentActiveSelector,
 		});
-		const modelRegistry = this.session.modelRegistry;
-		if (!modelRegistry) {
-			return { modelOverride, parentActiveModelPattern };
-		}
-		const resolved = resolveModelOverride(modelOverride, modelRegistry, this.session.settings);
-		const resolvedModel = resolved.model
-			? formatResolvedModelSelector(resolved.model, resolved.thinkingLevel, resolved.explicitThinkingLevel)
+	}
+
+	#quotaModel(decision: SpawnRouteDecision): QuotaModel | undefined {
+		const route = decision.route;
+		return route
+			? { providerId: route.provider, modelId: route.model, selector: route.selector }
 			: undefined;
-		if (params.model !== undefined && !resolved.model) {
-			return {
-				modelOverride,
-				parentActiveModelPattern,
-				error: formatInvalidModelOverrideError({
-					agentName,
-					requested: params.model,
-					resolvedPatterns: modelOverride,
-					availableModels: modelRegistry.getAvailable(),
-				}),
-			};
+	}
+	
+
+	#quotaCandidates(decision: SpawnRouteDecision, primary: QuotaModel | undefined): QuotaModel[] {
+		const modelRegistry = this.session.modelRegistry;
+		if (!modelRegistry || !primary || decision.explicit) return [];
+		const available = modelRegistry.getAvailable();
+		const candidates: QuotaModel[] = [];
+		for (const pattern of decision.resolvedPatterns) {
+			const resolved = resolveModelRoleValue(pattern, available, {
+				settings: this.session.settings,
+				modelRegistry,
+			});
+			if (!resolved.model) continue;
+			if (resolved.model.provider === primary.providerId && resolved.model.id === primary.modelId) continue;
+			const selector = formatResolvedModelSelector(
+				resolved.model,
+				resolved.thinkingLevel,
+				resolved.explicitThinkingLevel,
+			);
+			candidates.push({ providerId: resolved.model.provider, modelId: resolved.model.id, selector });
 		}
-		return { modelOverride, parentActiveModelPattern, resolvedModel };
+		return candidates;
+	}
+
+	#quotaAdmissionSettings() {
+		return {
+			enabled: this.session.settings.get("quotaAdmission.enabled"),
+			reservePercent: this.session.settings.get("quotaAdmission.reservePercent"),
+			emaAlpha: this.session.settings.get("quotaAdmission.emaAlpha"),
+			hysteresisPercent: this.session.settings.get("quotaAdmission.hysteresisPercent"),
+		};
+	}
+
+	async #applyQuotaAdmission(decision: SpawnRouteDecision, signal?: AbortSignal): Promise<SpawnRouteDecision> {
+		const quotaModel = this.#quotaModel(decision);
+		if (!quotaModel || !this.session.authStorage) return decision;
+		const state = this.session.sessionManager
+			? latestQuotaAdmissionState(this.session.sessionManager.getEntries())
+			: undefined;
+		const controller = new QuotaAdmissionController(this.#quotaAdmissionSettings(), state);
+		const reports = await this.session.authStorage
+			.fetchUsageReports({
+				baseUrlResolver: provider => this.session.modelRegistry?.getProviderBaseUrl?.(provider),
+				signal,
+			})
+			.catch(error => {
+				logger.debug("task: quota admission usage fetch failed", { error: String(error) });
+				return null;
+			});
+		if (reports?.length) controller.observeReports(reports);
+		const quotaDecision = controller.admit(quotaModel, this.#quotaCandidates(decision, quotaModel));
+		this.session.sessionManager?.appendCustomEntry(
+			QUOTA_ADMISSION_CUSTOM_TYPE,
+			createQuotaAdmissionStateRecord(controller.state, quotaDecision.atMs),
+		);
+		const quotaAdmission: AgentQuotaAdmission = {
+			originalProvider: quotaDecision.model.providerId,
+			reroutedProvider: quotaDecision.outcome === "reroute" ? quotaDecision.routedModel?.providerId : undefined,
+			originalModel: quotaDecision.model.selector,
+			reroutedModel: quotaDecision.outcome === "reroute" ? quotaDecision.routedModel?.selector : undefined,
+			ratePerHour: quotaDecision.ratePerHour,
+			projectedEmptyAt: quotaDecision.projectedEmptyAt,
+			resetAt: quotaDecision.resetAt,
+			deficitPerHour: quotaDecision.deficitPerHour,
+			decisionReason: quotaDecision.reason,
+			quotaPoolId: quotaDecision.poolId,
+			limitWindowId: quotaDecision.windowId,
+		};
+		if (quotaDecision.outcome === "admit") return admitSpawnRoute(decision, quotaAdmission);
+		if (quotaDecision.outcome === "block" || !quotaDecision.routedModel) {
+			return blockSpawnRoute(decision, {
+				kind: "quota_admission_blocked",
+				selector: quotaModel.selector,
+				reason: quotaDecision.reason,
+				resetAt: quotaDecision.resetAt,
+			});
+		}
+		return rerouteSpawnRoute(decision, quotaDecision.routedModel, quotaAdmission, quotaDecision.reason);
+	}
+
+	#routeError(agentName: string, decision: SpawnRouteDecision): string | undefined {
+		if (decision.invalid) {
+			return formatInvalidModelOverrideError({
+				agentName,
+				requested: [...decision.invalid.requested],
+				resolvedPatterns: [...decision.invalid.patterns],
+				availableModels: this.session.modelRegistry?.getAvailable() ?? [],
+			});
+		}
+		if (decision.block) {
+			const reason = decision.block.reason ? ` (${decision.block.reason})` : "";
+			const reset = decision.block.resetAt
+				? ` Reset at ${new Date(decision.block.resetAt).toISOString()}.`
+				: "";
+			return `Quota admission blocked ${decision.block.selector}${reason}.${reset}`;
+		}
+		return undefined;
 	}
 
 	/**
@@ -718,19 +835,45 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 			return withAdvisory(await this.#executeSyncFanout(toolCallId, params, spawnItems, signal, onUpdate));
 		}
 
-		// Resolve agent ids up front so the immediate result can name them.
-		const outputManager =
-			this.session.agentOutputManager ?? new AgentOutputManager(this.session.getArtifactsDir ?? (() => null));
 		const agentLabel = params.agent ?? "task";
 		const agentSource = selectedAgent?.source ?? "bundled";
-		const spawns: Array<{ agentId: string; item: TaskItem; progress: AgentProgress }> = [];
+		const routeDecisions: Array<SpawnRouteDecision | undefined> = [];
+		for (const item of spawnItems) {
+			const spawnParams = spawnParamsFor(params, item);
+			let routeDecision = selectedAgent
+				? this.#resolveSpawnRoute(agentLabel, selectedAgent, spawnParams)
+				: undefined;
+			if (routeDecision && !routeDecision.invalid) {
+				routeDecision = await this.#applyQuotaAdmission(routeDecision, signal);
+			}
+			const routeError = routeDecision ? this.#routeError(agentLabel, routeDecision) : undefined;
+			if (routeError) {
+				return withAdvisory({
+					content: [{ type: "text", text: `Failed to start background task job${spawnItems.length === 1 ? "" : "s"}: ${routeError}` }],
+					details: { projectAgentsDir: null, results: [], totalDurationMs: 0 },
+				});
+			}
+			routeDecisions.push(routeDecision);
+		}
+
+		// Resolve agent IDs only after every route has passed invalid-model and quota admission.
+		const outputManager =
+			this.session.agentOutputManager ?? new AgentOutputManager(this.session.getArtifactsDir ?? (() => null));
+		const spawns: Array<{
+			agentId: string;
+			item: TaskItem;
+			routeDecision: SpawnRouteDecision | undefined;
+			progress: AgentProgress;
+		}> = [];
 		for (let index = 0; index < spawnItems.length; index++) {
 			const item = spawnItems[index];
+			const routeDecision = routeDecisions[index];
 			const agentId = await outputManager.allocate(item.id?.trim() || generateTaskName());
 			const assignment = (item.assignment ?? "").trim();
 			spawns.push({
 				agentId,
 				item,
+				routeDecision,
 				progress: {
 					index,
 					id: agentId,
@@ -747,6 +890,9 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 					tokens: 0,
 					cost: 0,
 					durationMs: 0,
+					...(routeDecision
+						? { modelOverride: [...routeDecision.resolvedPatterns], resolvedModel: routeDecision.route?.selector }
+						: {}),
 				},
 			});
 		}
@@ -776,24 +922,11 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 		for (const spawn of spawns) {
 			try {
 				const spawnParams = spawnParamsFor(params, spawn.item);
-				const modelResolution = selectedAgent
-					? this.#resolveSpawnModel(agentLabel, selectedAgent, spawnParams)
-					: undefined;
-				if (modelResolution) {
-					spawn.progress.modelOverride = modelResolution.modelOverride;
-					spawn.progress.resolvedModel = modelResolution.resolvedModel;
-				}
-				if (modelResolution?.error) {
-					failedSchedules.push(`${spawn.agentId}: ${modelResolution.error}`);
-					spawn.progress.status = "failed";
-					settledCount += 1;
-					failedCount += 1;
-					continue;
-				}
-				if (modelResolution) this.#preResolvedModels.set(spawn.agentId, modelResolution);
+				const routeDecision = spawn.routeDecision;
+				if (routeDecision) this.#preResolvedModels.set(spawn.agentId, routeDecision);
 				const spawnIsolated =
 					this.session.settings.get("task.isolation.mode") !== "none" && spawnParams.isolated === true;
-				const modelChain = formatModelChain(agentLabel, spawnParams.role, modelResolution?.resolvedModel);
+				const modelChain = formatModelChain(agentLabel, spawnParams.role, routeDecision?.route?.selector, routeDecision?.source);
 				const jobId = this.#registerSpawnJob({
 					manager,
 					toolCallId,
@@ -1007,6 +1140,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 				id: agentId,
 				queued: true,
 				ownerId: this.session.getAgentId?.() ?? undefined,
+				group: deriveSpawnGroup(this.session.getAgentId?.() ?? undefined),
 				isolated,
 				onProgress: (text, details) => {
 					const progressDetails = (details as TaskToolDetails | undefined) ?? buildDetails("running", agentId);
@@ -1202,6 +1336,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 				content: [
 					{
 						type: "text",
+		
 						text: `Agent "${agentName}" is disabled in settings. Enable it via /agents, or use a different agent type.${enabled.length > 0 ? ` Available: ${enabled.join(", ")}` : ""}`,
 					},
 				],
@@ -1226,14 +1361,41 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 				}
 			: agent;
 
-		const modelResolution = preResolved ?? this.#resolveSpawnModel(agentName, effectiveAgent, params);
-		if (modelResolution.error) {
+		let routeDecision = preResolved ?? this.#resolveSpawnRoute(agentName, effectiveAgent, params);
+		if (!preResolved && !routeDecision.invalid) {
+			routeDecision = await this.#applyQuotaAdmission(routeDecision, signal);
+		}
+		const routeError = this.#routeError(agentName, routeDecision);
+		if (routeError) {
+			const blockedEntry: SingleResult = {
+				index: spawnIndex,
+				id: "",
+				agent: agentName,
+				agentSource: agent.source,
+				task: params.assignment ?? "",
+				exitCode: 1,
+				output: routeError,
+				stderr: "",
+				truncated: false,
+				durationMs: Date.now() - startTime,
+				tokens: 0,
+				requests: 0,
+				error: routeError,
+				aborted: false,
+			};
 			return {
-				content: [{ type: "text", text: modelResolution.error }],
-				details: { projectAgentsDir, results: [], totalDurationMs: Date.now() - startTime },
+				content: [{ type: "text", text: routeError }],
+				details: { projectAgentsDir, results: [blockedEntry], totalDurationMs: Date.now() - startTime },
 			};
 		}
-		const { modelOverride, parentActiveModelPattern, resolvedModel } = modelResolution;
+		const routeReceipt =
+			routeDecision.source && routeDecision.route && !routeDecision.invalid && !routeDecision.block
+				? toSpawnRouteReceipt(routeDecision)
+				: undefined;
+		const modelOverride = [...routeDecision.resolvedPatterns];
+		const parentActiveModelPattern = routeDecision.parentActiveSelector;
+		const resolvedModel = routeDecision.route?.selector;
+		const quotaAdmission = routeDecision.quotaAdmission;
 		const thinkingLevelOverride = effectiveAgent.thinkingLevel;
 
 		// Output schema priority: agent frontmatter > inherited parent session.
@@ -1326,6 +1488,19 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 					this.session.agentOutputManager ?? new AgentOutputManager(this.session.getArtifactsDir ?? (() => null));
 				agentId = await outputManager.allocate(params.id?.trim() || generateTaskName());
 			}
+			if (this.session.sessionManager && routeReceipt) {
+				appendSpawnRouteResolution(this.session.sessionManager, {
+					agentId,
+					agentSessionId: null,
+					parentSessionId: this.session.getSessionId?.() ?? null,
+					parentAgentId: this.session.getAgentId?.() ?? null,
+					taskId: params.id?.trim() || null,
+					packetId: null,
+					branchId: null,
+					turnId: toolCallId ?? null,
+				}, routeReceipt);
+			}
+
 
 			const availableSkills = [...(this.session.skills ?? [])];
 			// Resolve autoload skills from agent definition against available skills
@@ -1347,6 +1522,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 				index: spawnIndex,
 				id: agentId,
 				agent: agentName,
+				routeReceipt,
 				agentSource: agent.source,
 				status: "pending",
 				task: renderSubagentUserPrompt(assignment),
@@ -1392,6 +1568,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 
 			const sharedRunOptions = {
 				cwd: this.session.cwd,
+				routeReceipt,
 				agent: effectiveAgent,
 				task: renderSubagentUserPrompt(assignment),
 				assignment,
@@ -1408,7 +1585,10 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 				parentActiveModelPattern,
 				thinkingLevel: thinkingLevelOverride,
 				outputSchema: effectiveOutputSchema,
+				quotaAdmission,
 				sessionFile,
+				parentSessionFile: sessionFile,
+				parentSessionId: this.session.getSessionId?.() ?? undefined,
 				persistArtifacts: !!artifactsDir,
 				artifactsDir: effectiveArtifactsDir,
 				enableLsp: subagentLspEnabled,

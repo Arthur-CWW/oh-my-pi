@@ -202,6 +202,26 @@ describe("ModelSelector role badge thinking display", () => {
 		expect(selected).toEqual(["a-small"]);
 	});
 
+	test("warns but selects every GPT-5.6 Codex model over its context window", async () => {
+		installTestTheme();
+		for (const id of ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]) {
+			const selected: string[] = [];
+			const selector = createScopedSelector(
+				[createContextTestModel(id, 1_050_000)],
+				Settings.isolated({}),
+				model => selected.push(model.id),
+				{ temporaryOnly: true, currentContextTokens: 1_050_001 },
+			);
+			await Bun.sleep(0);
+			installTestTheme();
+
+			const rendered = normalizeRenderedText(selector.render(220).join("\n"));
+			expect(rendered).toContain(`${id} ⚠ context 1.1m > 1.1m — will compact on switch`);
+			selector.handleInput("\n");
+			expect(selected).toEqual([id]);
+		}
+	});
+
 	test("opens the model menu when the only candidate overflows context", async () => {
 		installTestTheme();
 		const settings = Settings.isolated({});

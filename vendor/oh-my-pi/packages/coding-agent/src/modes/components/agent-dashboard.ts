@@ -826,20 +826,20 @@ export class AgentDashboard extends Container {
 
 	#defaultPatternsFor(agent: DashboardAgent): string[] {
 		return resolveAgentModelPatterns({
-			agentModel: agent.model,
+			taskOrRoleModel: agent.model,
+			streamModel: this.modelContext.activeModelPattern,
+			globalFallbackModel: this.modelContext.defaultModelPattern,
 			settings: this.#settingsManager ?? undefined,
-			activeModelPattern: this.modelContext.activeModelPattern,
-			fallbackModelPattern: this.modelContext.defaultModelPattern,
 		});
 	}
 
 	#effectivePatternsFor(agent: DashboardAgent, draftOverride: string | undefined): string[] {
 		return resolveAgentModelPatterns({
-			settingsOverride: draftOverride,
-			agentModel: agent.model,
+			temporaryModel: draftOverride,
+			taskOrRoleModel: agent.model,
+			streamModel: this.modelContext.activeModelPattern,
+			globalFallbackModel: this.modelContext.defaultModelPattern,
 			settings: this.#settingsManager ?? undefined,
-			activeModelPattern: this.modelContext.activeModelPattern,
-			fallbackModelPattern: this.modelContext.defaultModelPattern,
 		});
 	}
 

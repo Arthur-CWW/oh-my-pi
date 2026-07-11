@@ -431,9 +431,16 @@ describe("model thinking runtime helpers", () => {
 		// `-reasoner` ids are thinking-only SKUs — the wire fact is backfilled
 		// onto explicit metadata like effortMap.
 		expect(model.thinking).toEqual({ mode: "effort", efforts: [Effort.Medium, Effort.High], requiresEffort: true });
-		expect(clampThinkingLevelForModel(model, Effort.Minimal)).toBe(Effort.Medium);
-		expect(clampThinkingLevelForModel(model, Effort.XHigh)).toBe(Effort.High);
+		expect(clampThinkingLevelForModel(model, Effort.Minimal)).toBeUndefined();
+		expect(clampThinkingLevelForModel(model, Effort.XHigh)).toBeUndefined();
 		expect(clampThinkingLevelForModel(model, Effort.High)).toBe(Effort.High);
+	});
+
+	it("preserves custom model efforts without global clamping", () => {
+		const model = createModel({ id: "custom", api: "openai-codex-responses", provider: "custom", thinking: { mode: "effort", efforts: ["max", "ultra", "custom"] } });
+		expect(requireSupportedEffort(model, "ultra")).toBe("ultra");
+		expect(requireSupportedEffort(model, "custom")).toBe("custom");
+		expect(clampThinkingLevelForModel(model, "unadvertised")).toBeUndefined();
 	});
 
 	it('forces "off" for non-reasoning models', () => {

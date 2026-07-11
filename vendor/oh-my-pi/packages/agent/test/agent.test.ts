@@ -418,6 +418,23 @@ describe("Agent", () => {
 		expect(reasoningPerCall).toEqual([ThinkingLevel.Low, ThinkingLevel.High]);
 	});
 
+	it("forwards a custom validated reasoning effort from agent state", async () => {
+		const mock = createMockModel({ responses: [{ content: ["done"] }] });
+		const agent = new Agent({
+			initialState: {
+				model: mock.model,
+				thinkingLevel: "codex-preview",
+				tools: [],
+				messages: [],
+			},
+			streamFn: mock.stream,
+		});
+
+		await agent.prompt("run");
+
+		expect(mock.calls[0]?.options?.reasoning).toBe("codex-preview");
+	});
+
 	it("forwards explicit reasoning disablement to the stream", async () => {
 		const mock = createMockModel({ responses: [{ content: ["ok"] }] });
 		const agent = new Agent({

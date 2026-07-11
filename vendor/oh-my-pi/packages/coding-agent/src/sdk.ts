@@ -14,6 +14,8 @@ import {
 	type Message,
 	type Model,
 	type SimpleStreamOptions,
+	type ReasoningEffort,
+	type ThinkingBudgets,
 	streamSimple,
 } from "@oh-my-pi/pi-ai";
 import type { Dialect } from "@oh-my-pi/pi-ai/dialect";
@@ -105,7 +107,7 @@ import type { MnemopiSessionState } from "./mnemopi/state";
 import asyncResultTemplate from "./prompts/tools/async-result.md" with { type: "text" };
 import lateDiagnosticTemplate from "./prompts/tools/lsp-late-diagnostic.md" with { type: "text" };
 import { AgentLifecycleManager } from "./registry/agent-lifecycle";
-import { AgentRegistry, MAIN_AGENT_ID } from "./registry/agent-registry";
+import { AgentRegistry, MAIN_AGENT_ID, type AgentQuotaAdmission } from "./registry/agent-registry";
 import {
 	collectEnvSecrets,
 	deobfuscateSessionContext,
@@ -114,7 +116,7 @@ import {
 	obfuscateProviderContext,
 	SecretObfuscator,
 } from "./secrets";
-import { AgentSession } from "./session/agent-session";
+import { AgentSession, type SessionDisposeOptions } from "./session/agent-session";
 import { resolveAuthBrokerConfig } from "./session/auth-broker-config";
 import {
 	AuthBrokerClient,
@@ -385,6 +387,7 @@ function applyMCPEnvironment(result: { exaApiKeys: string[] }): void {
 }
 
 // Types
+
 export interface CreateAgentSessionOptions {
 	/** Working directory for project-local discovery. Default: getProjectDir() */
 	cwd?: string;
@@ -505,6 +508,8 @@ export interface CreateAgentSessionOptions {
 	agentDisplayName?: string;
 	/** Optional shared agent registry for IRC routing. Default: AgentRegistry.global(). */
 	agentRegistry?: AgentRegistry;
+	/** Quota admission metadata for this agent run. */
+	quotaAdmission?: AgentQuotaAdmission;
 	/** Parent task ID prefix for nested artifact naming (e.g., "Extensions") */
 	parentTaskPrefix?: string;
 	/** Inherited eval executor session id for subagents sharing parent eval state. */
@@ -1415,6 +1420,8 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 
 		return preview;
 	};
+	const agentRegistry = options.agentRegistry ?? AgentRegistry.global();
+
 	// Only the first top-level session in a process owns an AsyncJobManager.
 	// Subagents inherit the parent's manager via `AsyncJobManager.instance()`
 	// (set below), and any additional top-level session spun up in-process
@@ -1429,11 +1436,21 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 					maxRunningJobs: asyncMaxJobs,
 					onJobComplete: async (jobId, result, job) => {
 						if (!session || asyncJobManager!.isDeliverySuppressed(jobId)) return;
+						const group = job?.group;
+						if (group?.reporting === "hub" && group.topology === "flat") return;
 						const formattedResult = await formatAsyncResultForFollowUp(result);
 						if (asyncJobManager!.isDeliverySuppressed(jobId)) return;
 
+						const targetSession =
+							group?.reporting === "hub" && group.topology === "supervised" && group.coordinatorId
+								? agentRegistry.get(group.coordinatorId)?.session
+								: session;
+						if (!targetSession) {
+							throw new Error(`Completion recipient is unavailable for ${jobId}`);
+						}
+
 						const durationMs = job ? Math.max(0, Date.now() - job.startTime) : undefined;
-						session.yieldQueue.enqueue<AsyncResultEntry>("async-result", {
+						targetSession.yieldQueue.enqueue<AsyncResultEntry>("async-result", {
 							jobId,
 							result: formattedResult,
 							job,
@@ -1445,7 +1462,6 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 
 	const scopedAsyncJobManager = asyncJobManager ?? (options.parentTaskPrefix ? AsyncJobManager.instance() : undefined);
 
-	const agentRegistry = options.agentRegistry ?? AgentRegistry.global();
 	const resolvedAgentId = options.agentId ?? options.parentTaskPrefix ?? MAIN_AGENT_ID;
 	const resolvedAgentDisplayName =
 		options.agentDisplayName ?? ((options.taskDepth ?? 0) > 0 || options.parentTaskPrefix ? "sub" : "main");
@@ -1495,6 +1511,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			requireYieldTool: options.requireYieldTool,
 			taskDepth: options.taskDepth ?? 0,
 			getSessionFile: () => sessionManager.getSessionFile() ?? null,
+			sessionManager,
 			getEvalKernelOwnerId: () => evalKernelOwnerId,
 			getEvalSessionId: () =>
 				session?.getEvalSessionId() ?? options.parentEvalSessionId ?? defaultEvalSessionId(toolSession),
@@ -1510,6 +1527,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			agentRegistry,
 			getSessionSpawns: () => options.spawns ?? "*",
 			getModelString: () => (hasExplicitModel && model ? formatModelString(model) : undefined),
+			getExplicitModelString: () => (hasExplicitModel && model ? formatModelString(model) : undefined),
 			getActiveModelString,
 			getActiveModel: () => agent?.state.model ?? model,
 			getPlanModeState: () => session?.getPlanModeState(),
@@ -2343,6 +2361,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			session: null,
 			sessionFile: sessionManager.getSessionFile() ?? null,
 			status: "running",
+			quota: options.quotaAdmission,
 		});
 		hasRegistered = true;
 
@@ -2451,12 +2470,13 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			: serviceTierSetting === "none"
 				? undefined
 				: serviceTierSetting;
+		const initialReasoningEffort: ReasoningEffort | undefined = toReasoningEffort(effectiveThinkingLevel);
 
 		agent = new Agent({
 			initialState: {
 				systemPrompt,
 				model,
-				thinkingLevel: toReasoningEffort(effectiveThinkingLevel),
+				thinkingLevel: initialReasoningEffort,
 				disableReasoning: shouldDisableReasoning(effectiveThinkingLevel),
 				tools: initialTools,
 			},
@@ -2470,7 +2490,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			steeringMode: settings.get("steeringMode") ?? "one-at-a-time",
 			followUpMode: settings.get("followUpMode") ?? "one-at-a-time",
 			interruptMode: settings.get("interruptMode") ?? "immediate",
-			thinkingBudgets: settings.getGroup("thinkingBudgets"),
+			thinkingBudgets: settings.getGroup("thinkingBudgets") as ThinkingBudgets,
 			temperature: settings.get("temperature") >= 0 ? settings.get("temperature") : undefined,
 			topP: settings.get("topP") >= 0 ? settings.get("topP") : undefined,
 			topK: settings.get("topK") >= 0 ? settings.get("topK") : undefined,
@@ -2642,9 +2662,9 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			advisorReadOnlyTools,
 		});
 		hasSession = true;
-		if (asyncJobManager) {
+		if (scopedAsyncJobManager) {
 			session.yieldQueue.register<AsyncResultEntry>("async-result", {
-				isStale: entry => asyncJobManager.isDeliverySuppressed(entry.jobId),
+				isStale: entry => scopedAsyncJobManager.isDeliverySuppressed(entry.jobId),
 				build: buildAsyncResultBatchMessage,
 			});
 		}
@@ -2662,20 +2682,23 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		agentRegistry.attachSession(resolvedAgentId, session, sessionManager.getSessionFile() ?? null);
 		{
 			const originalDispose = session.dispose.bind(session);
-			session.dispose = async () => {
+			session.dispose = async (disposeOptions: SessionDisposeOptions = {}) => {
 				try {
 					// Reject new session work (Python/eval starts) the moment disposal
 					// begins — the lifecycle await below opens an async gap before
 					// AgentSession.dispose() would otherwise set its guards.
 					session.beginDispose();
 					if (agentKind === "main") {
-						// Top-level teardown owns the global agent lifecycle: park timers,
-						// adopted subagent sessions, revivers. Tear it down while shared
-						// resources (kernels, MCP, LSP) are still live. Subagent disposal
-						// must NOT touch the global lifecycle.
-						await AgentLifecycleManager.global().dispose();
+						// Detach preserves durable child descriptors and any
+						// out-of-process execution for a replacement controller.
+						// Destructive shutdown retains the historical release path.
+						if (disposeOptions.childPolicy === "detach") {
+							await AgentLifecycleManager.global().detach();
+						} else {
+							await AgentLifecycleManager.global().dispose();
+						}
 					}
-					await originalDispose();
+					await originalDispose(disposeOptions);
 				} finally {
 					unregisterUnlessParked();
 					unsubscribeCredentialDisabled?.();

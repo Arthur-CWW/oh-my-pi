@@ -6,7 +6,8 @@
  * entries. Everything below the "runtime helpers" divider reads baked fields
  * only: no id parsing, no host matching, no compat detection per request.
  */
-import { Effort, THINKING_EFFORTS } from "./effort";
+import { Effort } from "./effort";
+import type { ReasoningEffort } from "./effort";
 import { modelMatchesHost } from "./hosts";
 import {
 	type AnthropicModel,
@@ -57,7 +58,7 @@ const GPT_5_2_PLUS_EFFORTS: readonly Effort[] = [Effort.Low, Effort.Medium, Effo
 const GPT_5_1_CODEX_MINI_EFFORTS: readonly Effort[] = [Effort.Medium, Effort.High];
 const LOW_MEDIUM_HIGH_REASONING_EFFORTS: readonly Effort[] = [Effort.Low, Effort.Medium, Effort.High];
 
-type EffortMap = Partial<Record<Effort, string>>;
+type EffortMap = Partial<Record<ReasoningEffort, string>>;
 
 const GROQ_QWEN3_32B_REASONING_EFFORT_MAP: Readonly<EffortMap> = {
 	[Effort.Minimal]: "default",
@@ -230,7 +231,7 @@ function inferEffortMap<TApi extends Api>(
 	compat: CompatOf<TApi>,
 	parsedModel: ParsedModel,
 	mode: ThinkingConfig["mode"],
-	efforts: readonly Effort[],
+	efforts: readonly ReasoningEffort[],
 ): EffortMap | undefined {
 	const detected = inferDetectedEffortMap(spec, parsedModel, mode);
 	const configured = readCompatEffortMap(compat);
@@ -239,7 +240,7 @@ function inferEffortMap<TApi extends Api>(
 	return merged === undefined ? undefined : filterEffortMapToSupportedEfforts(merged, efforts);
 }
 
-function filterEffortMapToSupportedEfforts(map: EffortMap, efforts: readonly Effort[]): EffortMap | undefined {
+function filterEffortMapToSupportedEfforts(map: EffortMap, efforts: readonly ReasoningEffort[]): EffortMap | undefined {
 	let filtered: EffortMap | undefined;
 	for (const effort of efforts) {
 		const mapped = map[effort];
@@ -250,7 +251,7 @@ function filterEffortMapToSupportedEfforts(map: EffortMap, efforts: readonly Eff
 	return filtered;
 }
 
-function sameEffortList(left: readonly Effort[], right: readonly Effort[]): boolean {
+function sameEffortList(left: readonly ReasoningEffort[], right: readonly ReasoningEffort[]): boolean {
 	if (left.length !== right.length) return false;
 	for (let index = 0; index < left.length; index++) {
 		if (left[index] !== right[index]) return false;
@@ -258,7 +259,7 @@ function sameEffortList(left: readonly Effort[], right: readonly Effort[]): bool
 	return true;
 }
 
-function getModelDefinedEfforts<TApi extends Api>(spec: ModelSpec<TApi>): readonly Effort[] | undefined {
+function getModelDefinedEfforts<TApi extends Api>(spec: ModelSpec<TApi>): readonly ReasoningEffort[] | undefined {
 	return spec.api === "openai-completions" && (isMinimaxM2FamilyModelId(spec.id) || isOpenAIGptOssModelId(spec.id))
 		? LOW_MEDIUM_HIGH_REASONING_EFFORTS
 		: undefined;
@@ -331,7 +332,7 @@ function inferSupportedEfforts<TApi extends Api>(
 	parsedModel: ParsedModel,
 	spec: ModelSpec<TApi>,
 	compat: CompatOf<TApi>,
-): readonly Effort[] {
+): readonly ReasoningEffort[] {
 	const modelDefinedEfforts = getModelDefinedEfforts(spec);
 	if (modelDefinedEfforts !== undefined) {
 		return modelDefinedEfforts;
@@ -510,7 +511,7 @@ function anthropicModelHasRealXHighEffort<TApi extends Api>(spec: ModelSpec<TApi
  * Empty for non-reasoning models and for reasoning models without a
  * controllable effort surface (`thinking: undefined`).
  */
-export function getSupportedEfforts<TApi extends Api>(model: ApiModel<TApi>): readonly Effort[] {
+export function getSupportedEfforts<TApi extends Api>(model: ApiModel<TApi>): readonly ReasoningEffort[] {
 	if (!model.reasoning) {
 		return [];
 	}
@@ -524,8 +525,8 @@ export function getSupportedEfforts<TApi extends Api>(model: ApiModel<TApi>): re
  */
 export function clampThinkingLevelForModel<TApi extends Api>(
 	model: ApiModel<TApi> | undefined,
-	requested: Effort | undefined,
-): Effort | undefined {
+	requested: ReasoningEffort | undefined,
+): ReasoningEffort | undefined {
 	if (!model) {
 		return requested;
 	}
@@ -538,23 +539,12 @@ export function clampThinkingLevelForModel<TApi extends Api>(
 		return requested;
 	}
 
-	const requestedIndex = THINKING_EFFORTS.indexOf(requested);
-	if (requestedIndex === -1) {
-		return undefined;
-	}
-
-	let clamped: Effort | undefined;
-	for (const effort of levels) {
-		if (THINKING_EFFORTS.indexOf(effort) > requestedIndex) {
-			break;
-		}
-		clamped = effort;
-	}
-
-	return clamped ?? levels[0];
+	// Model metadata is authoritative. Do not infer a nearest effort from a
+	// process-wide order: unknown endpoint values have only model-local meaning.
+	return undefined;
 }
 
-export function requireSupportedEffort<TApi extends Api>(model: ApiModel<TApi>, effort: Effort): Effort {
+export function requireSupportedEffort<TApi extends Api>(model: ApiModel<TApi>, effort: ReasoningEffort): ReasoningEffort {
 	if (!model.reasoning) {
 		throw new Error(`Model ${model.provider}/${model.id} does not support thinking`);
 	}
@@ -570,6 +560,7 @@ export function requireSupportedEffort<TApi extends Api>(model: ApiModel<TApi>, 
 /** Maps a normalized thinking effort to Google's `thinkingLevel` enum values. */
 export function mapEffortToGoogleThinkingLevel(effort: Effort): "MINIMAL" | "LOW" | "MEDIUM" | "HIGH" {
 	switch (effort) {
+		case Effort.None:
 		case Effort.Minimal:
 			return "MINIMAL";
 		case Effort.Low:
@@ -578,6 +569,7 @@ export function mapEffortToGoogleThinkingLevel(effort: Effort): "MINIMAL" | "LOW
 			return "MEDIUM";
 		case Effort.High:
 		case Effort.XHigh:
+		case Effort.Max:
 			return "HIGH";
 	}
 }
@@ -588,10 +580,10 @@ export function mapEffortToGoogleThinkingLevel(effort: Effort): "MINIMAL" | "LOW
  */
 export function mapEffortToAnthropicAdaptiveEffort<TApi extends Api>(
 	model: ApiModel<TApi>,
-	effort: Effort,
-): "low" | "medium" | "high" | "xhigh" | "max" {
+	effort: ReasoningEffort,
+): string {
 	const supported = requireSupportedEffort(model, effort);
-	return (model.thinking?.effortMap?.[supported] ?? supported) as "low" | "medium" | "high" | "xhigh" | "max";
+	return model.thinking?.effortMap?.[supported] ?? supported;
 }
 
 /**
@@ -600,7 +592,7 @@ export function mapEffortToAnthropicAdaptiveEffort<TApi extends Api>(
  * `thinking.effortRouting`; everything else falls back to
  * `requestModelId ?? id`.
  */
-export function resolveWireModelId<TApi extends Api>(model: ApiModel<TApi>, effort: Effort | undefined): string {
+export function resolveWireModelId<TApi extends Api>(model: ApiModel<TApi>, effort: ReasoningEffort | undefined): string {
 	return model.thinking?.effortRouting?.[effort ?? "off"] ?? model.requestModelId ?? model.id;
 }
 
@@ -608,11 +600,8 @@ export function resolveWireModelId<TApi extends Api>(model: ApiModel<TApi>, effo
  * Lowest supported effort in canonical order — the clamp target for
  * thinking-off requests on `thinking.requiresEffort` models.
  */
-export function minimumSupportedEffort<TApi extends Api>(model: ApiModel<TApi>): Effort | undefined {
+export function minimumSupportedEffort<TApi extends Api>(model: ApiModel<TApi>): ReasoningEffort | undefined {
 	const efforts = model.thinking?.efforts;
 	if (!efforts || efforts.length === 0) return undefined;
-	for (const effort of THINKING_EFFORTS) {
-		if (efforts.includes(effort)) return effort;
-	}
 	return efforts[0];
 }

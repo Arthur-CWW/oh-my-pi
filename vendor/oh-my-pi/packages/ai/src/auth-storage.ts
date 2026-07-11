@@ -725,14 +725,70 @@ function getUsagePlanType(report: UsageReport | null): string | undefined {
 	return typeof planType === "string" ? planType.toLowerCase() : undefined;
 }
 
-function getOpenAICodexPlanPriority(report: UsageReport | null): number {
-	const planType = getUsagePlanType(report);
-	if (!planType) return 1;
-	return planType.includes("pro") ? 0 : 2;
+function isUsageReportFresh(report: UsageReport | null, nowMs: number): boolean {
+	return Boolean(
+		report &&
+			Number.isFinite(report.fetchedAt) &&
+			report.fetchedAt > 0 &&
+			report.fetchedAt <= nowMs &&
+			nowMs - report.fetchedAt <= USAGE_REPORT_TTL_MS,
+	);
 }
 
-function hasOpenAICodexProPlan(report: UsageReport | null): boolean {
-	return getUsagePlanType(report)?.includes("pro") === true;
+function getUsageMetadataBoolean(report: UsageReport | null, key: "allowed" | "limitReached"): boolean | undefined {
+	const metadata = report?.metadata;
+	if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return undefined;
+	const value = metadata[key];
+	return typeof value === "boolean" ? value : undefined;
+}
+
+function isUsageCapacityLimitUsable(limit: UsageLimit | undefined): boolean {
+	if (!limit) return false;
+	if (limit.status === "exhausted") return false;
+	const usedFraction = resolveUsedFraction(limit);
+	return typeof usedFraction !== "number" || !Number.isFinite(usedFraction) || usedFraction < 1;
+}
+
+function isOpenAICodexCapacityUsable(
+	report: UsageReport | null,
+	nowMs: number,
+	primary: UsageLimit | undefined,
+	secondary: UsageLimit | undefined,
+): boolean {
+	return (
+		isUsageReportFresh(report, nowMs) &&
+		getUsageMetadataBoolean(report, "allowed") !== false &&
+		getUsageMetadataBoolean(report, "limitReached") !== true &&
+		isUsageCapacityLimitUsable(primary) &&
+		isUsageCapacityLimitUsable(secondary)
+	);
+}
+
+function getOpenAICodexCapacityWeight(report: UsageReport | null): number {
+	const planType = getUsagePlanType(report);
+	if (!planType) return 1;
+	return planType.includes("pro") || planType.includes("large") ? 20 : 1;
+}
+
+function hasOpenAICodexProPlan(report: UsageReport | null, nowMs = Date.now()): boolean {
+	return (
+		isUsageReportFresh(report, nowMs) &&
+		getUsageMetadataBoolean(report, "allowed") !== false &&
+		getUsageMetadataBoolean(report, "limitReached") !== true &&
+		getUsagePlanType(report)?.includes("pro") === true
+	);
+}
+
+function resolveUsageRemainingFraction(limit: UsageLimit | undefined): number {
+	const usedFraction = limit ? resolveUsedFraction(limit) : undefined;
+	if (typeof usedFraction === "number" && Number.isFinite(usedFraction)) {
+		return Math.max(0, 1 - usedFraction);
+	}
+	const remainingFraction = limit?.amount.remainingFraction;
+	if (typeof remainingFraction === "number" && Number.isFinite(remainingFraction)) {
+		return Math.max(0, remainingFraction);
+	}
+	return 0;
 }
 
 function compareUsageRankingMetric(left: number, right: number): number {
@@ -887,11 +943,15 @@ type RankedOAuthCandidate = OAuthCandidate & {
 	blocked: boolean;
 	blockedUntil?: number;
 	hasPriorityBoost: boolean;
-	planPriority: number;
+	capacityWeight: number;
+	capacityUsable: boolean;
+	weightedRemaining: number;
 	secondaryUsed: number;
 	secondaryDrainRate: number;
+	secondaryObservedBurnRate?: number;
 	primaryUsed: number;
 	primaryDrainRate: number;
+	primaryObservedBurnRate?: number;
 	orderPos: number;
 };
 
@@ -2801,11 +2861,54 @@ export class AuthStorage {
 		return usedFraction / elapsedHours;
 	}
 
+	#computeObservedWindowBurnRate(
+		history: ReadonlyArray<UsageHistoryEntry>,
+		accountKey: string,
+		limit: UsageLimit | undefined,
+	): number | undefined {
+		if (!limit) return undefined;
+		const limitWindowLabel = limit.window?.label ?? limit.scope.windowId;
+		let previous: UsageHistoryEntry | undefined;
+		let latestRate: number | undefined;
+		for (const entry of history) {
+			if (entry.accountKey !== accountKey || entry.limitId !== limit.id) continue;
+			if (limitWindowLabel !== undefined && entry.windowLabel !== limitWindowLabel) continue;
+			if (typeof entry.usedFraction !== "number" || !Number.isFinite(entry.usedFraction)) continue;
+			if (previous) {
+				const previousUsed = previous.usedFraction;
+				const currentUsed = entry.usedFraction;
+				const elapsedMs = entry.recordedAt - previous.recordedAt;
+				const sameReset =
+					(previous.resetsAt === undefined && entry.resetsAt === undefined) ||
+					(previous.resetsAt !== undefined &&
+						entry.resetsAt !== undefined &&
+						previous.resetsAt === entry.resetsAt);
+				const crossedReset =
+					(previous.resetsAt !== undefined &&
+						(previous.recordedAt >= previous.resetsAt || entry.recordedAt >= previous.resetsAt)) ||
+					(entry.resetsAt !== undefined && entry.recordedAt >= entry.resetsAt);
+				if (
+					sameReset &&
+					!crossedReset &&
+					elapsedMs > 0 &&
+					typeof previousUsed === "number" &&
+					Number.isFinite(previousUsed) &&
+					currentUsed >= previousUsed
+				) {
+					const elapsedHours = elapsedMs / (60 * 60_000);
+					const rate = (currentUsed - previousUsed) / elapsedHours;
+					if (Number.isFinite(rate)) latestRate = rate;
+				}
+			}
+			previous = entry;
+		}
+		return latestRate;
+	}
+
 	#compareRankedOAuthCandidatePriority(
 		left: RankedOAuthCandidate,
 		right: RankedOAuthCandidate,
 		provider: string,
-		modelId: string | undefined,
 	): number {
 		if (left.blocked !== right.blocked) return left.blocked ? 1 : -1;
 		if (left.blocked && right.blocked) {
@@ -2814,8 +2917,27 @@ export class AuthStorage {
 			if (leftBlockedUntil !== rightBlockedUntil) return leftBlockedUntil - rightBlockedUntil;
 			return 0;
 		}
-		if (requiresOpenAICodexProModel(provider, modelId) && left.planPriority !== right.planPriority) {
-			return left.planPriority - right.planPriority;
+		if (provider === "openai-codex") {
+			let metric = compareUsageRankingMetric(right.weightedRemaining, left.weightedRemaining);
+			if (metric !== 0) return metric;
+			if (left.hasPriorityBoost !== right.hasPriorityBoost) return left.hasPriorityBoost ? -1 : 1;
+			if (left.secondaryObservedBurnRate !== undefined && right.secondaryObservedBurnRate !== undefined) {
+				metric = compareUsageRankingMetric(left.secondaryObservedBurnRate, right.secondaryObservedBurnRate);
+				if (metric !== 0) return metric;
+			}
+			if (left.primaryObservedBurnRate !== undefined && right.primaryObservedBurnRate !== undefined) {
+				metric = compareUsageRankingMetric(left.primaryObservedBurnRate, right.primaryObservedBurnRate);
+				if (metric !== 0) return metric;
+			}
+			metric = compareUsageRankingMetric(left.secondaryDrainRate, right.secondaryDrainRate);
+			if (metric !== 0) return metric;
+			metric = compareUsageRankingMetric(left.primaryDrainRate, right.primaryDrainRate);
+			if (metric !== 0) return metric;
+			metric = compareUsageRankingMetric(left.secondaryUsed, right.secondaryUsed);
+			if (metric !== 0) return metric;
+			metric = compareUsageRankingMetric(left.primaryUsed, right.primaryUsed);
+			if (metric !== 0) return metric;
+			return 0;
 		}
 		if (left.hasPriorityBoost !== right.hasPriorityBoost) return left.hasPriorityBoost ? -1 : 1;
 		let metric = compareUsageRankingMetric(left.secondaryDrainRate, right.secondaryDrainRate);
@@ -2829,13 +2951,8 @@ export class AuthStorage {
 		return 0;
 	}
 
-	#compareRankedOAuthCandidates(
-		left: RankedOAuthCandidate,
-		right: RankedOAuthCandidate,
-		provider: string,
-		modelId: string | undefined,
-	): number {
-		const priority = this.#compareRankedOAuthCandidatePriority(left, right, provider, modelId);
+	#compareRankedOAuthCandidates(left: RankedOAuthCandidate, right: RankedOAuthCandidate, provider: string): number {
+		const priority = this.#compareRankedOAuthCandidatePriority(left, right, provider);
 		return priority !== 0 ? priority : left.orderPos - right.orderPos;
 	}
 
@@ -2843,9 +2960,8 @@ export class AuthStorage {
 		candidates: RankedOAuthCandidate[],
 		sessionId: string | undefined,
 		provider: string,
-		modelId: string | undefined,
 	): OAuthCandidate[] {
-		candidates.sort((left, right) => this.#compareRankedOAuthCandidates(left, right, provider, modelId));
+		candidates.sort((left, right) => this.#compareRankedOAuthCandidates(left, right, provider));
 		if (!sessionId) {
 			return candidates.map(candidate => ({
 				selection: candidate.selection,
@@ -2868,10 +2984,7 @@ export class AuthStorage {
 		let previous = unblocked[0];
 		const bucketByCandidate = new Map<RankedOAuthCandidate, number>();
 		for (const candidate of unblocked) {
-			if (
-				candidate !== previous &&
-				this.#compareRankedOAuthCandidatePriority(previous, candidate, provider, modelId) !== 0
-			) {
+			if (candidate !== previous && this.#compareRankedOAuthCandidatePriority(previous, candidate, provider) !== 0) {
 				bucketIndex += 1;
 			}
 			bucketByCandidate.set(candidate, bucketIndex);
@@ -2883,16 +2996,20 @@ export class AuthStorage {
 			priorityByCandidate.set(candidate, maxBucket === 0 ? 0 : 1 - bucket / maxBucket);
 		}
 
+		const useCodexCapacityWeights =
+			provider === "openai-codex" && unblocked.some(candidate => candidate.capacityUsable && candidate.weightedRemaining > 0);
+		const weightFor = (candidate: RankedOAuthCandidate): number => {
+			if (useCodexCapacityWeights) return candidate.capacityUsable ? candidate.weightedRemaining : 0;
+			return 1 + (priorityByCandidate.get(candidate) ?? 0);
+		};
 		let totalWeight = 0;
-		for (const candidate of unblocked) {
-			totalWeight += 1 + (priorityByCandidate.get(candidate) ?? 0);
-		}
+		for (const candidate of unblocked) totalWeight += weightFor(candidate);
 
 		const hit = ((Bun.hash.xxHash32(sessionId) >>> 0) / 2 ** 32) * totalWeight;
 		let cursor = 0;
 		let selected = unblocked[unblocked.length - 1];
 		for (const candidate of unblocked) {
-			cursor += 1 + (priorityByCandidate.get(candidate) ?? 0);
+			cursor += weightFor(candidate);
 			if (hit < cursor) {
 				selected = candidate;
 				break;
@@ -2960,6 +3077,20 @@ export class AuthStorage {
 				})
 			);
 		});
+		const usageHistory =
+			args.provider === "openai-codex"
+				? this.listUsageHistory({
+						provider: args.provider,
+						sinceMs:
+							nowMs -
+							Math.max(
+								strategy.windowDefaults.primaryMs,
+								strategy.windowDefaults.secondaryMs,
+								USAGE_HISTORY_BUCKET_MS,
+							) *
+								2,
+					})
+				: [];
 
 		for (let orderPos = 0; orderPos < usageResults.length; orderPos += 1) {
 			const result = usageResults[orderPos];
@@ -2967,17 +3098,30 @@ export class AuthStorage {
 			const { selection, usage, usageChecked } = result;
 			let { blockedUntil } = result;
 			let blocked = blockedUntil !== undefined;
-			const scopedLimits = usage ? this.#getScopedUsageLimits(strategy, usage, args.rankingContext) : undefined;
+			// Expired reports remain available to callers as diagnostic fallback, but
+			// must not block or reorder credentials behind fresh capacity.
+			const rankingUsage = usage && isUsageReportFresh(usage, nowMs) ? usage : null;
+			const scopedLimits = rankingUsage
+				? this.#getScopedUsageLimits(strategy, rankingUsage, args.rankingContext)
+				: undefined;
 			if (!blocked && scopedLimits && this.#isUsageLimitReached(scopedLimits)) {
 				const resetAtMs = this.#getUsageResetAtMs(scopedLimits, nowMs);
 				blockedUntil = resetAtMs ?? Date.now() + AuthStorage.#defaultBackoffMs;
 				this.#markCredentialBlocked(args.providerKey, selection.index, blockedUntil, args.blockScope);
 				blocked = true;
 			}
-			const windows = usage ? strategy.findWindowLimits(usage, args.rankingContext) : undefined;
+			const windows = rankingUsage ? strategy.findWindowLimits(rankingUsage, args.rankingContext) : undefined;
 			const primary = windows?.primary;
 			const secondary = windows?.secondary;
 			const secondaryTarget = secondary ?? primary;
+			const accountKey = this.#buildUsageCacheIdentity(this.#buildUsageCredential(selection.credential));
+			const capacityUsable = isOpenAICodexCapacityUsable(rankingUsage, nowMs, primary, secondaryTarget);
+			const capacityWeight = getOpenAICodexCapacityWeight(rankingUsage);
+			const primaryRemaining = primary
+				? resolveUsageRemainingFraction(primary)
+				: resolveUsageRemainingFraction(secondaryTarget);
+			const secondaryRemaining = secondaryTarget ? resolveUsageRemainingFraction(secondaryTarget) : primaryRemaining;
+			const bottleneckRemaining = Math.min(primaryRemaining, secondaryRemaining);
 			ranked.push({
 				selection,
 				usage,
@@ -2985,19 +3129,27 @@ export class AuthStorage {
 				blocked,
 				blockedUntil,
 				hasPriorityBoost: strategy.hasPriorityBoost?.(primary) ?? false,
-				planPriority: getOpenAICodexPlanPriority(usage),
+				capacityWeight,
+				capacityUsable,
+				weightedRemaining: capacityUsable ? capacityWeight * bottleneckRemaining : 0,
 				secondaryUsed: this.#normalizeUsageFraction(secondaryTarget),
 				secondaryDrainRate: this.#computeWindowDrainRate(
 					secondaryTarget,
 					nowMs,
 					strategy.windowDefaults.secondaryMs,
 				),
+				secondaryObservedBurnRate: rankingUsage
+					? this.#computeObservedWindowBurnRate(usageHistory, accountKey, secondaryTarget)
+					: undefined,
 				primaryUsed: this.#normalizeUsageFraction(primary),
 				primaryDrainRate: this.#computeWindowDrainRate(primary, nowMs, strategy.windowDefaults.primaryMs),
+				primaryObservedBurnRate: rankingUsage
+					? this.#computeObservedWindowBurnRate(usageHistory, accountKey, primary)
+					: undefined,
 				orderPos,
 			});
 		}
-		return this.#orderRankedOAuthCandidates(ranked, args.sessionId, args.provider, args.options?.modelId);
+		return this.#orderRankedOAuthCandidates(ranked, args.sessionId, args.provider);
 	}
 
 	/**

@@ -191,4 +191,56 @@ describe("subagent warning injection", () => {
 		expect(JSON.parse(result.rawOutput)).toEqual({ verdict: "looks good" });
 		expect(result.stderr.startsWith("invalid output schema:")).toBe(true);
 	});
+
+	it("allows schema fallback after a post-terminal abort when clean text completed", () => {
+		const result = finalizeSubprocessOutput({
+			rawOutput: '{"ok": true}',
+			exitCode: 0,
+			stderr: "",
+			doneAborted: false,
+			signalAborted: true,
+			completed: true,
+			yieldItems: undefined,
+			outputSchema: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] },
+		});
+
+		expect(result.rawOutput).toBe('{\n  "ok": true\n}');
+		expect(result.exitCode).toBe(0);
+		expect(result.stderr).toBe("");
+		expect(result.rawOutput.includes("SYSTEM WARNING")).toBe(false);
+	});
+
+	it("does not allow schema fallback when signal aborted before terminal completion", () => {
+		const result = finalizeSubprocessOutput({
+			rawOutput: '{"ok": true}',
+			exitCode: 0,
+			stderr: "",
+			doneAborted: false,
+			signalAborted: true,
+			completed: false,
+			yieldItems: undefined,
+			outputSchema: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] },
+		});
+
+		expect(result.rawOutput).toContain(SUBAGENT_WARNING_MISSING_YIELD);
+		expect(result.exitCode).toBe(1);
+		expect(result.stderr).toBe(SUBAGENT_WARNING_MISSING_YIELD);
+	});
+
+	it("keeps plain text as completed after a post-terminal abort", () => {
+		const result = finalizeSubprocessOutput({
+			rawOutput: "plain text notes",
+			exitCode: 0,
+			stderr: "",
+			doneAborted: false,
+			signalAborted: true,
+			completed: true,
+			yieldItems: undefined,
+			outputSchema: undefined,
+		});
+
+		expect(result.rawOutput).toBe("plain text notes");
+		expect(result.exitCode).toBe(0);
+		expect(result.rawOutput.includes("SYSTEM WARNING")).toBe(false);
+	});
 });

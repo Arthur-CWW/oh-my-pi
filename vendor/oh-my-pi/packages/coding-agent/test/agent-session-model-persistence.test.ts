@@ -1,10 +1,12 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import * as fs from "node:fs";
 import * as path from "node:path";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import { type Api, Effort, type Model } from "@oh-my-pi/pi-ai";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
-import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { resolveAgentModelPatterns } from "@oh-my-pi/pi-coding-agent/config/model-resolver";
+import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { type CreateAgentSessionResult, createAgentSession } from "@oh-my-pi/pi-coding-agent/sdk";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
@@ -96,7 +98,8 @@ describe("AgentSession model persistence", () => {
 		selectInitialModel?: (availableModels: Model<Api>[]) => Model<Api>;
 		modelRoles?: Record<string, string>;
 		persist?: boolean;
-	}): Promise<{ modelRegistry: ModelRegistry; settings: Settings; session: AgentSession }> {
+		settings?: Settings;
+	}): Promise<{ modelRegistry: ModelRegistry; settings: Settings; session: AgentSession; sessionManager: SessionManager }> {
 		const modelRegistry = sharedModelRegistry;
 		const model =
 			options?.initialModel ??
@@ -112,7 +115,7 @@ describe("AgentSession model persistence", () => {
 			},
 		});
 
-		sessionSettings = Settings.isolated();
+		sessionSettings = options?.settings ?? Settings.isolated();
 		const modelRoles = options?.modelRoles;
 		if (modelRoles) {
 			for (const role in modelRoles) {
@@ -122,16 +125,17 @@ describe("AgentSession model persistence", () => {
 				}
 			}
 		}
+		const sessionManager = options?.persist
+			? SessionManager.create(tempDir.path(), path.join(tempDir.path(), "active"))
+			: SessionManager.inMemory();
 		session = new AgentSession({
 			agent,
-			sessionManager: options?.persist
-				? SessionManager.create(tempDir.path(), path.join(tempDir.path(), "active"))
-				: SessionManager.inMemory(),
+			sessionManager,
 			settings: sessionSettings,
 			modelRegistry,
 		});
 
-		return { modelRegistry, settings: sessionSettings, session };
+		return { modelRegistry, settings: sessionSettings, session, sessionManager };
 	}
 
 	async function createStartupResumeSession(
@@ -187,6 +191,35 @@ describe("AgentSession model persistence", () => {
 
 		expect(created.session.model?.id).toBe(nextModel.id);
 		expect(created.settings.getModelRole("default")).toBe(modelValue(nextModel));
+	});
+
+	it("refuses persisted role changes before changing the live session model", async () => {
+		const initialModel = getAnthropicModelOrThrow("claude-sonnet-4-5");
+		const nextModel = getAnthropicModelOrThrow("claude-sonnet-4-6");
+		const projectSettingsPath = path.join(tempDir.path(), ".claude", "settings.json");
+		const agentDir = path.join(tempDir.path(), "agent");
+		fs.mkdirSync(path.dirname(projectSettingsPath), { recursive: true });
+		fs.mkdirSync(agentDir, { recursive: true });
+		fs.writeFileSync(
+			projectSettingsPath,
+			JSON.stringify({ modelRoles: { default: modelValue(initialModel) } }),
+		);
+
+		resetSettingsForTest();
+		try {
+			const settings = await Settings.init({ cwd: tempDir.path(), agentDir });
+			const created = await createSession({ initialModel, settings });
+			const entryCount = created.sessionManager.getEntries().length;
+
+			await expect(created.session.setModel(nextModel, "default", { persist: true })).rejects.toThrow(
+				"modelRoles.default is overridden by project settings",
+			);
+			expect(created.session.model?.id).toBe(initialModel.id);
+			expect(created.sessionManager.getEntries()).toHaveLength(entryCount);
+			expect(created.settings.getModelRole("default")).toBe(modelValue(initialModel));
+		} finally {
+			resetSettingsForTest();
+		}
 	});
 
 	it("cycles role models without rewriting configured roles", async () => {
@@ -419,5 +452,116 @@ describe("AgentSession model persistence", () => {
 				"smol",
 			),
 		).toEqual(["anthropic/claude-sonnet-4-6", "anthropic/claude-sonnet-4-5"]);
+	});
+
+	it("makes an explicit config-shadowed default runtime-authoritative across reload", async () => {
+		const initialModel = getAnthropicModelOrThrow("claude-sonnet-4-5");
+		const nextModel = getAnthropicModelOrThrow("claude-sonnet-4-6");
+		const agentDir = path.join(tempDir.path(), "agent");
+		const configOverlay = path.join(tempDir.path(), "overlay.yml");
+		fs.mkdirSync(agentDir, { recursive: true });
+		await Bun.write(configOverlay, `modelRoles:\n  default: ${modelValue(initialModel)}\n`);
+
+		resetSettingsForTest();
+		try {
+			const settings = await Settings.init({
+				cwd: tempDir.path(),
+				agentDir,
+				configFiles: [configOverlay],
+			});
+			const created = await createSession({ initialModel, settings });
+
+			await created.session.setModelExplicitRuntime(nextModel, "default", {
+				thinkingLevel: Effort.High,
+			});
+
+			expect(created.session.model?.id).toBe(nextModel.id);
+			const modelChange = created.sessionManager.getEntries().findLast(entry => entry.type === "model_change");
+			if (modelChange?.type !== "model_change") throw new Error("Expected a model change entry");
+			expect(modelChange.role).toBe("default");
+			expect(created.settings.resolveModelRole("default")).toMatchObject({
+				effectiveSelector: `${modelValue(nextModel)}:high`,
+				winningLayer: "runtime_override",
+				shadowedCandidates: [{ layer: "config_overlay", selector: modelValue(initialModel) }],
+			});
+
+			await created.settings.reloadFromDisk();
+			expect(created.settings.resolveModelRole("default").effectiveSelector).toBe(`${modelValue(nextModel)}:high`);
+		} finally {
+			resetSettingsForTest();
+		}
+	});
+
+	it("persists writable explicit defaults while retaining the runtime override", async () => {
+		const initialModel = getAnthropicModelOrThrow("claude-sonnet-4-5");
+		const nextModel = getAnthropicModelOrThrow("claude-sonnet-4-6");
+		const agentDir = path.join(tempDir.path(), "agent");
+		fs.mkdirSync(agentDir, { recursive: true });
+
+		resetSettingsForTest();
+		try {
+			const settings = await Settings.init({ cwd: tempDir.path(), agentDir });
+			const created = await createSession({ initialModel, settings });
+
+			await created.session.setModelExplicitRuntime(nextModel);
+
+			const resolution = created.settings.resolveModelRole("default");
+			expect(resolution).toMatchObject({
+				effectiveSelector: modelValue(nextModel),
+				winningLayer: "runtime_override",
+				shadowedCandidates: [{ layer: "global", selector: modelValue(nextModel) }],
+			});
+		} finally {
+			resetSettingsForTest();
+		}
+	});
+
+	it("uses explicit non-default runtime roles for subsequent child resolution", async () => {
+		const initialModel = getAnthropicModelOrThrow("claude-sonnet-4-5");
+		const nextModel = getAnthropicModelOrThrow("claude-sonnet-4-6");
+		const created = await createSession({ initialModel });
+
+		await created.session.setModelExplicitRuntime(nextModel, "smol", { thinkingLevel: Effort.High });
+
+		expect(
+			resolveAgentModelPatterns({
+				taskOrRoleModel: "pi/smol",
+				settings: created.settings,
+			}),
+		).toEqual([`${modelValue(nextModel)}:high`]);
+		expect(created.settings.resolveModelRole("smol").winningLayer).toBe("runtime_override");
+	});
+
+	it("keeps temporary model selection out of runtime roles", async () => {
+		const initialModel = getAnthropicModelOrThrow("claude-sonnet-4-5");
+		const temporaryModel = getAnthropicModelOrThrow("claude-sonnet-4-6");
+		const created = await createSession({
+			initialModel,
+			modelRoles: { default: modelValue(initialModel) },
+		});
+		const before = created.settings.resolveModelRole("default");
+
+		await created.session.setModelTemporary(temporaryModel, Effort.High);
+
+		expect(created.session.model?.id).toBe(temporaryModel.id);
+		expect(created.settings.resolveModelRole("default")).toEqual(before);
+	});
+
+	it("rejects unauthenticated explicit assignments without mutating runtime or session state", async () => {
+		const initialModel = getAnthropicModelOrThrow("claude-sonnet-4-5");
+		const unauthenticatedModel = getBundledModel("openai", "gpt-4o-mini");
+		if (!unauthenticatedModel) throw new Error("Expected bundled unauthenticated OpenAI model");
+		const created = await createSession({
+			initialModel,
+			modelRoles: { default: modelValue(initialModel) },
+		});
+		const entryCount = created.sessionManager.getEntries().length;
+		const before = created.settings.resolveModelRole("default");
+
+		await expect(created.session.setModelExplicitRuntime(unauthenticatedModel)).rejects.toThrow("No API key");
+
+		expect(created.session.model?.id).toBe(initialModel.id);
+		expect(created.sessionManager.getEntries()).toHaveLength(entryCount);
+		expect(created.settings.resolveModelRole("default")).toEqual(before);
 	});
 });

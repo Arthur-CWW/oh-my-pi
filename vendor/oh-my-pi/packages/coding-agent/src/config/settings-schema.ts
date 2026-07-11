@@ -3647,6 +3647,22 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
+	"quotaAdmission.enabled": {
+		type: "boolean",
+		default: true,
+	},
+	"quotaAdmission.reservePercent": {
+		type: "number",
+		default: 2,
+	},
+	"quotaAdmission.emaAlpha": {
+		type: "number",
+		default: 0.25,
+	},
+	"quotaAdmission.hysteresisPercent": {
+		type: "number",
+		default: 1,
+	},
 	"task.maxConcurrency": {
 		type: "number",
 		default: 32,

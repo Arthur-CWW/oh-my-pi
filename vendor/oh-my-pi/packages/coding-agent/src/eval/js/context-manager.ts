@@ -44,14 +44,26 @@ interface PendingRun {
 
 interface JsSession {
 	sessionKey: string;
+	ownerId: string;
 	worker: WorkerHandle;
-	state: "alive" | "dead";
+	state: "alive" | "closing" | "dead";
 	pending: Map<string, PendingRun>;
+	unsubscribeWorkerListeners?: () => void;
+	cancelInitialization?: () => void;
+}
+
+interface ResettingSession {
+	ownerId: string;
+	promise: Promise<void>;
+	session: JsSession | undefined;
 }
 
 const sessions = new Map<string, JsSession>();
 const startingSessions = new Map<string, Promise<JsSession>>();
-const resettingSessions = new Map<string, Promise<void>>();
+const startingSessionHandles = new Map<string, JsSession>();
+const resettingSessions = new Map<string, ResettingSession>();
+const ownerGenerations = new Map<string, number>();
+const disposingOwners = new Set<string>();
 // Worker startup (module-graph import + WorkerCore construction) is infrastructure
 // cost, not user compute. Floor it independently of Bun's 5s default per-test timeout
 // so a slow cold-start under load isn't aborted mid-init — terminating a still-
@@ -77,9 +89,14 @@ export function setWorkerCloseTimeoutMsForTests(ms: number): number {
 	return previous;
 }
 
+function ownerScopedSessionKey(sessionKey: string, ownerId: string | undefined): string {
+	return ownerId === undefined ? sessionKey : `${sessionKey}\0owner:${ownerId}`;
+}
+
 export async function executeInVmContext(options: {
 	sessionKey: string;
 	sessionId: string;
+	ownerId?: string;
 	cwd: string;
 	session: ToolSession;
 	localRoots?: Record<string, string>;
@@ -89,56 +106,88 @@ export async function executeInVmContext(options: {
 	timeoutMs?: number;
 	runState: VmRunState;
 }): Promise<{ value: unknown }> {
+	const ownerId = options.ownerId ?? options.sessionKey;
+	const ownerGeneration = ownerGenerations.get(ownerId) ?? 0;
+	const sessionKey = ownerScopedSessionKey(options.sessionKey, options.ownerId);
+	if (disposingOwners.has(ownerId)) throw new ToolAbortError("JS context disposed");
 	if (options.reset) {
-		// Coalesce concurrent resets: an existing in-flight reset already
-		// produces a fresh context, so a follow-up `reset: true` cell should
-		// just wait for it rather than failing the user-visible call.
-		const inFlight = resettingSessions.get(options.sessionKey);
-		if (inFlight) await inFlight.catch(() => undefined);
+		const inFlight = resettingSessions.get(sessionKey);
+		if (inFlight) await inFlight.promise.catch(() => undefined);
 		else {
-			const resetPromise = resetVmContext(options.sessionKey);
-			resettingSessions.set(
-				options.sessionKey,
-				resetPromise.then(() => undefined),
-			);
+			const resetSession = sessions.get(sessionKey) ?? startingSessionHandles.get(sessionKey);
+			const resetPromise = resetVmContext(sessionKey);
+			const reset = { ownerId, promise: resetPromise.then(() => undefined), session: resetSession };
+			resettingSessions.set(sessionKey, reset);
 			try {
 				await resetPromise;
 			} finally {
-				resettingSessions.delete(options.sessionKey);
+				if (resettingSessions.get(sessionKey) === reset) resettingSessions.delete(sessionKey);
 			}
 		}
 	} else {
-		// Internal coordination: wait for any in-flight reset to settle and
-		// then run on the freshly-rebuilt context.
-		const inFlight = resettingSessions.get(options.sessionKey);
-		if (inFlight) await inFlight.catch(() => undefined);
+		const inFlight = resettingSessions.get(sessionKey);
+		if (inFlight) await inFlight.promise.catch(() => undefined);
+	}
+	if (disposingOwners.has(ownerId) || (ownerGenerations.get(ownerId) ?? 0) !== ownerGeneration) {
+		throw new ToolAbortError("JS context disposed");
 	}
 	const session = await acquireSession(
-		options.sessionKey,
+		sessionKey,
+		ownerId,
 		{ cwd: options.cwd, sessionId: options.sessionId, localRoots: options.localRoots },
 		options.timeoutMs,
 	);
+	if (session.state !== "alive") throw new ToolAbortError("JS context disposed");
 	return await runOnce(session, options);
 }
 
 export async function resetVmContext(sessionKey: string): Promise<void> {
-	const session = sessions.get(sessionKey) ?? (await startingSessions.get(sessionKey)?.catch(() => undefined));
+	const session = sessions.get(sessionKey) ?? startingSessionHandles.get(sessionKey);
 	if (!session) return;
 	sessions.delete(sessionKey);
+	startingSessionHandles.delete(sessionKey);
 	await killSession(session, new ToolError("JS context reset"), { force: false });
 }
 
-export async function disposeAllVmContexts(): Promise<void> {
-	const pending = [...startingSessions.values()];
-	startingSessions.clear();
-	const started = await Promise.allSettled(pending);
-	const all = [...sessions.values()];
-	for (const result of started) {
-		if (result.status !== "fulfilled") continue;
-		if (!all.includes(result.value)) all.push(result.value);
+export async function disposeVmContextsByOwner(ownerId: string): Promise<void> {
+	disposingOwners.add(ownerId);
+	ownerGenerations.set(ownerId, (ownerGenerations.get(ownerId) ?? 0) + 1);
+	try {
+		const owned = new Set<JsSession>();
+		const resetPromises: Promise<void>[] = [];
+		for (const [sessionKey, session] of sessions) {
+			if (session.ownerId !== ownerId) continue;
+			sessions.delete(sessionKey);
+			owned.add(session);
+		}
+		for (const [sessionKey, session] of startingSessionHandles) {
+			if (session.ownerId !== ownerId) continue;
+			startingSessions.delete(sessionKey);
+			startingSessionHandles.delete(sessionKey);
+			owned.add(session);
+		}
+		for (const [sessionKey, reset] of resettingSessions) {
+			if (reset.ownerId !== ownerId) continue;
+			resettingSessions.delete(sessionKey);
+			if (reset.session) owned.add(reset.session);
+			resetPromises.push(reset.promise);
+		}
+		await Promise.all([...owned].map(session => killSession(session, new ToolAbortError("JS context disposed"), { force: true })));
+		await Promise.all(resetPromises);
+	} finally {
+		disposingOwners.delete(ownerId);
 	}
+}
+
+export async function disposeAllVmContexts(): Promise<void> {
+	const all = new Set<JsSession>(sessions.values());
+	for (const session of startingSessionHandles.values()) all.add(session);
+	for (const reset of resettingSessions.values()) if (reset.session) all.add(reset.session);
 	sessions.clear();
-	await Promise.all(all.map(session => killSession(session, new ToolError("JS context disposed"), { force: false })));
+	startingSessions.clear();
+	startingSessionHandles.clear();
+	resettingSessions.clear();
+	await Promise.all([...all].map(session => killSession(session, new ToolError("JS context disposed"), { force: false })));
 }
 
 /**
@@ -151,14 +200,14 @@ export async function disposeAllVmContexts(): Promise<void> {
  */
 export async function smokeTestJsEvalWorker(): Promise<void> {
 	const worker = spawnJsWorker();
-	const session: JsSession = { sessionKey: "smoke", worker, state: "alive", pending: new Map() };
+	const session: JsSession = { sessionKey: "smoke", ownerId: "smoke", worker, state: "alive", pending: new Map() };
 	try {
 		await initWorker(session, { cwd: process.cwd(), sessionId: "smoke" }, WORKER_INIT_TIMEOUT_MS);
 		if (worker.mode !== "worker") {
 			throw new Error("JS eval worker smoke fell back to the inline worker (real worker failed to start)");
 		}
 	} finally {
-		await worker.terminate().catch(() => undefined);
+		await killSession(session, new ToolError("JS eval smoke complete"), { force: true });
 	}
 }
 
@@ -217,24 +266,31 @@ async function runOnce(
 	}
 }
 
-async function acquireSession(sessionKey: string, snapshot: SessionSnapshot, timeoutMs?: number): Promise<JsSession> {
+async function acquireSession(
+	sessionKey: string,
+	ownerId: string,
+	snapshot: SessionSnapshot,
+	timeoutMs?: number,
+): Promise<JsSession> {
 	const existing = sessions.get(sessionKey);
 	if (existing && existing.state === "alive") return existing;
 	const starting = startingSessions.get(sessionKey);
 	if (starting) return await starting;
 
+	// The message listener must be attached synchronously after `new Worker`:
+	// Bun drops messages posted before a listener exists, and WorkerCore emits
+	// `ready` from its constructor on load. `spawnJsWorker` + `initWorker` run with
+	// no intervening await, so `ready` can never race the attach.
+	const worker = spawnJsWorker();
+	const session: JsSession = {
+		sessionKey,
+		ownerId,
+		worker,
+		state: "alive",
+		pending: new Map(),
+	};
+	startingSessionHandles.set(sessionKey, session);
 	const startup = (async (): Promise<JsSession> => {
-		// The message listener must be attached synchronously after `new Worker`:
-		// Bun drops messages posted before a listener exists, and WorkerCore emits
-		// `ready` from its constructor on load. `spawnJsWorker` + `initWorker` run with
-		// no intervening await, so `ready` can never race the attach.
-		const worker = spawnJsWorker();
-		const session: JsSession = {
-			sessionKey,
-			worker,
-			state: "alive",
-			pending: new Map(),
-		};
 		// Init headroom is the fixed infrastructure floor; the caller's per-cell timeout
 		// dominates when larger so users can grant more by raising `timeout` on a cell.
 		const readyTimeoutMs = Math.max(WORKER_INIT_TIMEOUT_MS, timeoutMs ?? 0);
@@ -247,13 +303,12 @@ async function acquireSession(sessionKey: string, snapshot: SessionSnapshot, tim
 			// inline worker so a broken module graph fails fast instead of stalling
 			// every cell on the init timeout and then dying with exitCode 1.
 			await worker.terminate().catch(() => undefined);
-			if (worker.mode === "inline") throw error;
+			if (worker.mode === "inline" || session.state === "dead") throw error;
 			logger.warn("JS eval worker init failed; retrying with inline worker (no sync-loop guard)", {
 				error: error instanceof Error ? error.message : String(error),
 			});
 			const inline = spawnInlineWorker();
 			session.worker = inline;
-			session.state = "alive";
 			try {
 				await initWorker(session, snapshot, readyTimeoutMs);
 			} catch (inlineError) {
@@ -261,7 +316,10 @@ async function acquireSession(sessionKey: string, snapshot: SessionSnapshot, tim
 				throw inlineError;
 			}
 		}
-		sessions.set(sessionKey, session);
+		if (session.state === "alive" && startingSessionHandles.get(sessionKey) === session) {
+			startingSessionHandles.delete(sessionKey);
+			sessions.set(sessionKey, session);
+		}
 		return session;
 	})();
 	startingSessions.set(sessionKey, startup);
@@ -269,6 +327,7 @@ async function acquireSession(sessionKey: string, snapshot: SessionSnapshot, tim
 		return await startup;
 	} finally {
 		if (startingSessions.get(sessionKey) === startup) startingSessions.delete(sessionKey);
+		if (startingSessionHandles.get(sessionKey) === session) startingSessionHandles.delete(sessionKey);
 	}
 }
 
@@ -300,17 +359,28 @@ async function initWorker(session: JsSession, snapshot: SessionSnapshot, timeout
 		// worker that will never reply.
 		void killSessionFor(session, error, { force: true });
 	});
+	const unsubscribe = (): void => {
+		unsubscribeMessage();
+		unsubscribeError();
+	};
+	session.cancelInitialization = () => {
+		if (resolved) return;
+		resolved = true;
+		rejectReady(new ToolAbortError("JS context disposed"));
+	};
 	try {
 		// Attach listeners and send init before awaiting ready. The worker now
 		// emits ready only in response to init, so this ordering is race-free.
 		worker.send({ type: "init", snapshot });
 		await raceWithTimeout(readyPromise, timeoutMs, "Timed out initializing JS eval worker");
+		if (session.state !== "alive") throw new ToolAbortError("JS context disposed");
+		session.cancelInitialization = undefined;
+		session.unsubscribeWorkerListeners = unsubscribe;
 	} catch (error) {
-		// Handshake failed (timeout, init-failed, or worker error): drop both listeners
-		// so the abandoned worker can't keep routing messages into a session the caller
-		// is about to discard or retry on the inline fallback.
-		unsubscribeMessage();
-		unsubscribeError();
+		// Handshake failed (timeout, init-failed, worker error, or disposal): drop
+		// both listeners so an abandoned worker cannot retain the dead session.
+		session.cancelInitialization = undefined;
+		unsubscribe();
 		throw error;
 	}
 }
@@ -384,12 +454,27 @@ async function killSessionFor(session: JsSession, error: Error, options: { force
 	if (sessions.get(session.sessionKey) === session) {
 		sessions.delete(session.sessionKey);
 	}
+	if (startingSessionHandles.get(session.sessionKey) === session) {
+		startingSessionHandles.delete(session.sessionKey);
+		startingSessions.delete(session.sessionKey);
+	}
 	await killSession(session, error, options);
 }
 
 async function killSession(session: JsSession, error: Error, options: { force: boolean }): Promise<void> {
 	if (session.state === "dead") return;
-	session.state = "dead";
+	if (session.state === "closing") {
+		if (options.force) {
+			session.state = "dead";
+			await session.worker.terminate().catch(() => undefined);
+		}
+		return;
+	}
+	session.state = options.force ? "dead" : "closing";
+	session.cancelInitialization?.();
+	session.cancelInitialization = undefined;
+	session.unsubscribeWorkerListeners?.();
+	session.unsubscribeWorkerListeners = undefined;
 	for (const pending of session.pending.values()) {
 		if (pending.settled) continue;
 		pending.settled = true;
@@ -401,8 +486,12 @@ async function killSession(session: JsSession, error: Error, options: { force: b
 		await session.worker.terminate().catch(() => undefined);
 		return;
 	}
-	if (await session.worker.close().catch(() => false)) return;
+	if (await session.worker.close().catch(() => false)) {
+		session.state = "dead";
+		return;
+	}
 	await session.worker.terminate().catch(() => undefined);
+	session.state = "dead";
 }
 
 function safeSend(session: JsSession, msg: WorkerInbound): void {

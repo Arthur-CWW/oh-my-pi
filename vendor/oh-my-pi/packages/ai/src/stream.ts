@@ -1,4 +1,4 @@
-import type { Effort } from "@oh-my-pi/pi-catalog/effort";
+import { Effort, THINKING_EFFORTS, type ReasoningEffort } from "@oh-my-pi/pi-catalog/effort";
 import { isVertexExpressOpenAIUrl, isVertexRawPredictUrl } from "@oh-my-pi/pi-catalog/hosts";
 import {
 	mapEffortToAnthropicAdaptiveEffort,
@@ -570,7 +570,7 @@ function maxTokensWithThinkingBudget(
 export const OUTPUT_FALLBACK_BUFFER = 4000;
 const ANTHROPIC_USE_INTERLEAVED_THINKING = Bun.env.PI_NO_INTERLEAVED_THINKING !== "1";
 
-export const ANTHROPIC_THINKING: Record<Effort, number> = {
+export const ANTHROPIC_THINKING: Partial<Record<Effort, number>> = {
 	minimal: 1024,
 	low: 4096,
 	medium: 8192,
@@ -578,7 +578,7 @@ export const ANTHROPIC_THINKING: Record<Effort, number> = {
 	xhigh: 32768,
 };
 
-const GOOGLE_THINKING: Record<Effort, number> = {
+const GOOGLE_THINKING: Partial<Record<Effort, number>> = {
 	minimal: 1024,
 	low: 4096,
 	medium: 8192,
@@ -586,7 +586,7 @@ const GOOGLE_THINKING: Record<Effort, number> = {
 	xhigh: 24575,
 };
 
-const BEDROCK_CLAUDE_THINKING: Record<Effort, number> = {
+const BEDROCK_CLAUDE_THINKING: Partial<Record<Effort, number>> = {
 	minimal: 1024,
 	low: 2048,
 	medium: 8192,
@@ -599,8 +599,8 @@ function resolveBedrockThinkingBudget(
 	options?: SimpleStreamOptions,
 ): { budget: number; level: Effort } | null {
 	if (!options?.reasoning || !model.reasoning) return null;
-	const level = requireSupportedEffort(model, options.reasoning);
-	const budget = options.thinkingBudgets?.[level] ?? BEDROCK_CLAUDE_THINKING[level];
+	const level = requireKnownEffort(model, options.reasoning);
+	const budget = options.thinkingBudgets?.[level] ?? BEDROCK_CLAUDE_THINKING[level] ?? 0;
 	return { budget, level };
 }
 
@@ -662,7 +662,7 @@ function mapOpenAiToolChoice(choice?: ToolChoice): OpenAICompletionsOptions["too
 function resolveOpenAiReasoningEffort<TApi extends Api>(
 	model: Model<TApi>,
 	options?: SimpleStreamOptions,
-): Effort | undefined {
+): ReasoningEffort | undefined {
 	const reasoning = options?.reasoning;
 	if (!reasoning || !model.reasoning) return undefined;
 	// Models that reason natively but expose no effort dial carry
@@ -675,6 +675,20 @@ function resolveOpenAiReasoningEffort<TApi extends Api>(
 	// by..." to the user.
 	if (!model.thinking) return undefined;
 	return requireSupportedEffort(model, reasoning);
+}
+
+function resolveCompatibleOpenAiReasoningEffort<TApi extends Api>(
+	model: Model<TApi>,
+	options?: SimpleStreamOptions,
+): OpenAICompletionsOptions["reasoning"] {
+	const effort = resolveOpenAiReasoningEffort(model, options);
+	return effort as OpenAICompletionsOptions["reasoning"];
+}
+
+function requireKnownEffort<TApi extends Api>(model: Model<TApi>, effort: ReasoningEffort): Effort {
+	const validated = requireSupportedEffort(model, effort);
+	if (THINKING_EFFORTS.includes(validated as Effort)) return validated as Effort;
+	throw new Error(`Model ${model.provider}/${model.id} advertises an effort unsupported by its ${model.api} transport: ${validated}`);
 }
 
 const castApi = <TApi extends Api>(api: OptionsForApi<TApi>): OptionsForApi<Api> => api as OptionsForApi<Api>;
@@ -748,14 +762,14 @@ function mapOptionsForApi<TApi extends Api>(
 				return castApi<"anthropic-messages">({
 					...base,
 					requestModelId: resolveWireModelId(model, undefined),
-					thinkingEnabled: false,
 					toolChoice: mapAnthropicToolChoice(options?.toolChoice),
 					thinkingDisplay: options?.hideThinkingSummary ? "omitted" : undefined,
 					serviceTier: options?.serviceTier,
 				});
 			}
 
-			let thinkingBudget = options.thinkingBudgets?.[reasoning] ?? ANTHROPIC_THINKING[reasoning];
+			const effort = requireKnownEffort(model, reasoning);
+			let thinkingBudget = options.thinkingBudgets?.[effort] ?? ANTHROPIC_THINKING[effort] ?? 0;
 			if (thinkingBudget <= 0) {
 				return castApi<"anthropic-messages">({
 					...base,
@@ -770,12 +784,12 @@ function mapOptionsForApi<TApi extends Api>(
 			// For Opus 4.6+ and Sonnet 4.6+: use adaptive thinking with effort level
 			// For older models: use budget-based thinking
 			if (model.thinking?.mode === "anthropic-adaptive") {
-				const effort = mapEffortToAnthropicAdaptiveEffort(model, reasoning);
+				const adaptiveEffort = mapEffortToAnthropicAdaptiveEffort(model, effort) as AnthropicOptions["effort"];
 				return castApi<"anthropic-messages">({
 					...base,
-					requestModelId: resolveWireModelId(model, reasoning),
+					requestModelId: resolveWireModelId(model, effort),
 					thinkingEnabled: true,
-					effort,
+					effort: adaptiveEffort,
 					toolChoice: mapAnthropicToolChoice(options?.toolChoice),
 					thinkingDisplay: options?.hideThinkingSummary ? "omitted" : undefined,
 					serviceTier: options?.serviceTier,
@@ -785,7 +799,7 @@ function mapOptionsForApi<TApi extends Api>(
 			if (ANTHROPIC_USE_INTERLEAVED_THINKING) {
 				return castApi<"anthropic-messages">({
 					...base,
-					requestModelId: resolveWireModelId(model, reasoning),
+					requestModelId: resolveWireModelId(model, effort),
 					thinkingEnabled: true,
 					thinkingBudgetTokens: thinkingBudget,
 					toolChoice: mapAnthropicToolChoice(options?.toolChoice),
@@ -816,7 +830,7 @@ function mapOptionsForApi<TApi extends Api>(
 				return castApi<"anthropic-messages">({
 					...base,
 					maxTokens,
-					requestModelId: resolveWireModelId(model, reasoning),
+					requestModelId: resolveWireModelId(model, effort),
 					thinkingEnabled: true,
 					thinkingBudgetTokens: thinkingBudget,
 					toolChoice: mapAnthropicToolChoice(options?.toolChoice),
@@ -829,7 +843,7 @@ function mapOptionsForApi<TApi extends Api>(
 		case "bedrock-converse-stream": {
 			const bedrockBase: BedrockOptions = {
 				...base,
-				reasoning: options?.reasoning,
+				reasoning: options?.reasoning === undefined ? undefined : requireKnownEffort(model, options.reasoning),
 				thinkingBudgets: options?.thinkingBudgets,
 				toolChoice: mapAnthropicToolChoice(options?.toolChoice),
 				thinkingDisplay: options?.hideThinkingSummary ? "omitted" : undefined,
@@ -861,7 +875,7 @@ function mapOptionsForApi<TApi extends Api>(
 		case "openai-completions":
 			return castApi<"openai-completions">({
 				...base,
-				reasoning: resolveOpenAiReasoningEffort(model, options),
+				reasoning: resolveCompatibleOpenAiReasoningEffort(model, options),
 				disableReasoning: options?.disableReasoning,
 				toolChoice: mapOpenAiToolChoice(options?.toolChoice),
 				serviceTier: options?.serviceTier,
@@ -871,7 +885,7 @@ function mapOptionsForApi<TApi extends Api>(
 		case "openai-responses":
 			return castApi<"openai-responses">({
 				...base,
-				reasoning: resolveOpenAiReasoningEffort(model, options),
+				reasoning: resolveCompatibleOpenAiReasoningEffort(model, options),
 				toolChoice: mapOpenAiToolChoice(options?.toolChoice),
 				serviceTier: options?.serviceTier,
 				reasoningSummary: options?.hideThinkingSummary ? null : undefined,
@@ -880,7 +894,7 @@ function mapOptionsForApi<TApi extends Api>(
 		case "azure-openai-responses":
 			return castApi<"azure-openai-responses">({
 				...base,
-				reasoning: resolveOpenAiReasoningEffort(model, options),
+				reasoning: resolveCompatibleOpenAiReasoningEffort(model, options),
 				toolChoice: mapOpenAiToolChoice(options?.toolChoice),
 				serviceTier: options?.serviceTier,
 				reasoningSummary: options?.hideThinkingSummary ? null : undefined,
@@ -893,6 +907,7 @@ function mapOptionsForApi<TApi extends Api>(
 				toolChoice: mapOpenAiToolChoice(options?.toolChoice),
 				serviceTier: options?.serviceTier,
 				preferWebsockets: options?.preferWebsockets,
+				reasoningMode: options?.reasoningMode,
 				reasoningSummary: options?.hideThinkingSummary ? null : undefined,
 			});
 
@@ -909,7 +924,7 @@ function mapOptionsForApi<TApi extends Api>(
 			}
 
 			const googleModel = model as Model<"google-generative-ai">;
-			const effort = requireSupportedEffort(googleModel, reasoning);
+			const effort = requireKnownEffort(googleModel, reasoning);
 
 			// Gemini 3+ models use thinkingLevel exclusively instead of thinkingBudget.
 			// https://ai.google.dev/gemini-api/docs/thinking#set-budget
@@ -938,7 +953,8 @@ function mapOptionsForApi<TApi extends Api>(
 			const reasoning = options?.reasoning;
 			const toolChoice = mapGoogleToolChoice(options?.toolChoice);
 			if (reasoning && model.reasoning) {
-				const effort = requireSupportedEffort(model, reasoning);
+				const effort = requireKnownEffort(model, reasoning);
+				let thinkingBudget = options.thinkingBudgets?.[effort] ?? GOOGLE_THINKING[effort] ?? 0;
 
 				// Gemini 3+ models use thinkingLevel instead of thinkingBudget
 				if (model.thinking?.mode === "google-level") {
@@ -952,8 +968,6 @@ function mapOptionsForApi<TApi extends Api>(
 						toolChoice,
 					});
 				}
-
-				let thinkingBudget = options.thinkingBudgets?.[effort] ?? GOOGLE_THINKING[effort];
 
 				// Caller's maxTokens is desired output, so add thinking budget on top. With no caller/model cap, use a finite total fallback.
 				const maxTokens = maxTokensWithThinkingBudget(base.maxTokens, model.maxTokens, thinkingBudget);
@@ -1001,7 +1015,7 @@ function mapOptionsForApi<TApi extends Api>(
 			}
 
 			const vertexModel = model as Model<"google-vertex">;
-			const effort = requireSupportedEffort(vertexModel, reasoning);
+			const effort = requireKnownEffort(vertexModel, reasoning);
 			const geminiModel = vertexModel as unknown as Model<"google-generative-ai">;
 
 			if (geminiModel.thinking?.mode === "google-level") {
@@ -1028,7 +1042,7 @@ function mapOptionsForApi<TApi extends Api>(
 		case "ollama-chat":
 			return castApi<"ollama-chat">({
 				...base,
-				reasoning: resolveOpenAiReasoningEffort(model, options),
+				reasoning: resolveCompatibleOpenAiReasoningEffort(model, options),
 				disableReasoning: options?.disableReasoning,
 				toolChoice: options?.toolChoice,
 			});

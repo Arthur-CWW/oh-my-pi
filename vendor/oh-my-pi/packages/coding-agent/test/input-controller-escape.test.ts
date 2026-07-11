@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "bun:
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { InputController } from "@oh-my-pi/pi-coding-agent/modes/controllers/input-controller";
 import type { InteractiveModeContext, SubmittedUserInput } from "@oh-my-pi/pi-coding-agent/modes/types";
+import { AgentRegistry, MAIN_AGENT_ID } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import { USER_INTERRUPT_LABEL } from "@oh-my-pi/pi-coding-agent/session/messages";
 
 type Spy = Mock<(...args: unknown[]) => unknown>;
@@ -72,6 +73,7 @@ function createContext(): {
 		prompt: Spy;
 		requestRender: Spy;
 		resetDisplay: Spy;
+		showHookSelector: Spy;
 		shutdown: Spy;
 		startPendingSubmission: StartPendingSubmissionSpy;
 		updatePendingMessagesDisplay: Spy;
@@ -97,6 +99,7 @@ function createContext(): {
 	const handleOmfgEscape = vi.fn(() => true);
 	const hasActiveOmfg = vi.fn(() => false);
 	const updatePendingMessagesDisplay = vi.fn();
+	const showHookSelector = vi.fn();
 	const prompt = vi.fn();
 	const startPendingSubmission = vi.fn(
 		(input: {
@@ -204,6 +207,7 @@ function createContext(): {
 		showTreeSelector: vi.fn(),
 		showUserMessageSelector: vi.fn(),
 		showSessionSelector: vi.fn(),
+		showHookSelector,
 		shutdown: vi.fn(async () => {}),
 		clearEditor: vi.fn(),
 	} as unknown as InteractiveModeContext;
@@ -232,6 +236,7 @@ function createContext(): {
 			prompt,
 			requestRender,
 			resetDisplay,
+			showHookSelector,
 			shutdown: ctx.shutdown as Spy,
 			startPendingSubmission,
 			updatePendingMessagesDisplay,
@@ -240,10 +245,12 @@ function createContext(): {
 	};
 }
 beforeEach(async () => {
+	AgentRegistry.resetGlobalForTests();
 	await Settings.init({ inMemory: true });
 });
 
 afterEach(() => {
+	AgentRegistry.resetGlobalForTests();
 	vi.restoreAllMocks();
 	resetSettingsForTest();
 });
@@ -508,6 +515,121 @@ describe("InputController escape behavior", () => {
 	});
 });
 
+describe("InputController interactive quit behavior", () => {
+	it("exits immediately when no revivable child is registered", async () => {
+		const { ctx, editor, spies } = createContext();
+		const controller = new InputController(ctx);
+
+		controller.setupKeyHandlers();
+		editor.onExit?.();
+		await Promise.resolve();
+
+		expect(spies.showHookSelector).not.toHaveBeenCalled();
+		expect(spies.shutdown).toHaveBeenCalledWith({ childPolicy: "detach" });
+	});
+	it("exits without a warning and preserves parked child descriptors", async () => {
+		const { ctx, editor, spies } = createContext();
+		for (let index = 0; index < 43; index++) {
+			AgentRegistry.global().register({
+				id: `Parked${index}`,
+				displayName: `Parked ${index}`,
+				kind: "sub",
+				parentId: MAIN_AGENT_ID,
+				session: null,
+				status: "parked",
+			});
+		}
+		const controller = new InputController(ctx);
+
+		controller.setupKeyHandlers();
+		editor.onExit?.();
+		await Promise.resolve();
+
+		expect(spies.showHookSelector).not.toHaveBeenCalled();
+		expect(spies.shutdown).toHaveBeenCalledWith({ childPolicy: "detach" });
+	});
+
+
+	it("offers detach, destructive stop, and cancel for running child work", async () => {
+		const { ctx, editor, spies } = createContext();
+		const registry = AgentRegistry.global();
+		registry.register({
+			id: "Worker",
+			displayName: "Worker",
+			kind: "sub",
+			parentId: MAIN_AGENT_ID,
+			session: null,
+		});
+		registry.register({
+			id: "Reviewer",
+			displayName: "Reviewer",
+			kind: "sub",
+			parentId: MAIN_AGENT_ID,
+			session: null,
+			status: "idle",
+		});
+		registry.register({
+			id: "Sleeper",
+			displayName: "Sleeper",
+			kind: "sub",
+			parentId: MAIN_AGENT_ID,
+			session: null,
+			status: "parked",
+		});
+		const firstAnswer = Promise.withResolvers<string | undefined>();
+		spies.showHookSelector.mockReturnValueOnce(firstAnswer.promise);
+		const controller = new InputController(ctx);
+
+		controller.setupKeyHandlers();
+		editor.onExit?.();
+		editor.onExit?.();
+		await Promise.resolve();
+
+		expect(spies.showHookSelector).toHaveBeenCalledTimes(1);
+		expect(spies.showHookSelector.mock.calls[0]?.[0]).toBe(
+			"Exit OMP?\n1 running child agent: Worker. 1 parked and 1 idle child agents have recoverable sessions.",
+		);
+		expect(spies.shutdown).not.toHaveBeenCalled();
+
+		firstAnswer.resolve("Cancel");
+		await Promise.resolve();
+		expect(spies.shutdown).not.toHaveBeenCalled();
+
+		ctx.showHookSelector = async () => "Detach & exit";
+		editor.onExit?.();
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(spies.shutdown).toHaveBeenLastCalledWith({ childPolicy: "detach" });
+
+		spies.shutdown.mockClear();
+		ctx.showHookSelector = async () => "Stop children & exit";
+		editor.onExit?.();
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(spies.shutdown).toHaveBeenCalledWith({ childPolicy: "stop" });
+	});
+
+	it("keeps a quit command draft when confirmation is canceled", async () => {
+		const { ctx, editor, spies } = createContext();
+		AgentRegistry.global().register({
+			id: "Worker",
+			displayName: "Worker",
+			kind: "sub",
+			parentId: MAIN_AGENT_ID,
+			session: null,
+		});
+		ctx.showHookSelector = async () => "Cancel";
+		const controller = new InputController(ctx);
+
+		editor.setText("/quit");
+		controller.setupEditorSubmitHandler();
+		await editor.onSubmit?.("/quit");
+
+		expect(spies.shutdown).not.toHaveBeenCalled();
+		expect(editor.getText()).toBe("/quit");
+	});
+});
+
 describe("InputController Ctrl+C behavior", () => {
 	it("sync-flushes the session JSONL on first Ctrl+C (editor clear)", () => {
 		const { ctx, editor, spies } = createContext();
@@ -521,13 +643,14 @@ describe("InputController Ctrl+C behavior", () => {
 		expect(spies.shutdown).not.toHaveBeenCalled();
 	});
 
-	it("sync-flushes the session JSONL on second Ctrl+C (shutdown)", () => {
+	it("sync-flushes the session JSONL on second Ctrl+C (shutdown)", async () => {
 		const { ctx, editor, spies } = createContext();
 		const controller = new InputController(ctx);
 
 		controller.setupKeyHandlers();
 		editor.onClear?.(); // first Ctrl+C
 		editor.onClear?.(); // second Ctrl+C within 500ms → shutdown
+		await Promise.resolve();
 
 		expect(spies.shutdown).toHaveBeenCalledTimes(1);
 		// flushSync fires on both presses; the first-press flush is the

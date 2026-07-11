@@ -53,10 +53,12 @@ def test_thinking_pragma_normalized(settings_with_pool: Settings) -> None:
     assert thinking_override == "low"
 
 
-def test_unknown_thinking_level_dropped(settings_with_pool: Settings) -> None:
-    directive = DirectiveInfo(body="run", author="can1357", pragmas=(("thinking", "ultra"),))
+def test_ultra_thinking_level_preserved(settings_with_pool: Settings) -> None:
+    directive = DirectiveInfo(
+        body="run", author="can1357", pragmas=(("thinking", "ultra"),)
+    )
     _, thinking_override = _resolve_pragma_overrides(directive, settings_with_pool)
-    assert thinking_override is None
+    assert thinking_override == "ultra"
 
 
 def test_both_pragmas_resolved_together(settings_with_pool: Settings) -> None:

@@ -5,6 +5,7 @@ import {
 	type NativeScrollbackLiveRegion,
 	type RenderStablePrefix,
 	type ViewportTailProvider,
+	isTranscriptVirtualizationEnabled,
 } from "@oh-my-pi/pi-tui";
 
 const kSnapshot = Symbol("transcript.liveDiffSnapshot");
@@ -139,9 +140,41 @@ interface BlockSegment {
 	version: number | undefined;
 }
 
+/**
+ * Finalized history immediately above the live tail. Versioned blocks are
+ * checked for late post-finalize mutations; versionless blocks enter only once
+ * their rows are already native-scrollback committed, matching the existing
+ * committed-reuse safety rule.
+ */
+interface HistoryPrefixCache {
+	childCount: number;
+	width: number;
+	generation: number;
+	rows: number;
+}
+
 const EMPTY_SEGMENTS: BlockSegment[] = [];
 /** Shared empty result for an empty viewport-tail render (no allocation). */
 const EMPTY_TAIL: readonly string[] = [];
+
+/** Retained render state, exposing reference/row counts without copying content. */
+export interface TranscriptRetentionMetrics {
+	/** Canonical full-frame rows required by the TUI render contract. */
+	assembledRows: number;
+	/** One canonical segment per transcript child; no prefix-cache copies. */
+	segments: number;
+	/** References into child render arrays; strings are shared, never copied here. */
+	segmentRawRowRefs: number;
+	/** Canonical stripped-row references used for transcript assembly. */
+	segmentContributionRowRefs: number;
+	/** Live blocks retaining a diff snapshot; finalized history retains none. */
+	liveSnapshots: number;
+	/** Rows referenced by the live diff snapshots. */
+	liveSnapshotRowRefs: number;
+	/** The prefix cache has a scalar seam and zero segment references. */
+	historyPrefixCacheEntries: 0 | 1;
+	historyPrefixSegmentRefs: 0;
+}
 
 interface LiveCommitState {
 	appendOnly: boolean;
@@ -409,12 +442,14 @@ function deriveLiveCommitState(
  * head so a long reply's scrolled-off rows still reach scrollback mid-stream.
  *
  * Assembly is incremental: the returned array is persistent and mutated in
- * place. Each block's render is still called every frame, but a block whose
- * render returned the same array reference at an unchanged offset reuses its
- * previously assembled rows; the array is truncated and re-pushed only from
- * the first divergent block. The leading byte-identical row count is reported
- * through {@link RenderStablePrefix} so the engine can skip marker scanning,
- * line preparation, and the committed-prefix audit for those rows.
+ * place. A finalized prefix with monotonic versions, or rows already committed
+ * to native scrollback, is retained above the live tail. It avoids render and
+ * row-array work until width, theme/global invalidation, structure, a version,
+ * or the committed boundary changes. Other blocks render every frame; an
+ * unchanged render reference then reuses its assembled
+ * rows. The leading byte-identical row count is reported through
+ * {@link RenderStablePrefix} so the engine can skip marker scanning, line
+ * preparation, and the committed-prefix audit for those rows.
  */
 export class TranscriptContainer
 	extends Container
@@ -448,6 +483,9 @@ export class TranscriptContainer
 	#lines: string[] = [];
 	#segments: BlockSegment[] = EMPTY_SEGMENTS;
 	#renderWidth = -1;
+	// Cached finalized, versioned history before the last (live) transcript
+	// block. The rows stay in #lines; cached frames start composing at this seam.
+	#historyPrefix: HistoryPrefixCache | undefined;
 	// Local rows already committed to native scrollback by the previous frame.
 	// Finalized blocks wholly before this boundary are immutable on-screen history;
 	// their previous contribution can be replayed without calling render().
@@ -457,16 +495,102 @@ export class TranscriptContainer
 	// consumes the report and re-bases the baseline). Out-of-band renders
 	// between engine frames lower it; they can never inflate it.
 	#stableRowsFloor = 0;
+	override addChild(component: Component): void {
+		// Structural history changes can alter every following separator/offset.
+		this.#historyPrefix = undefined;
+		super.addChild(component);
+	}
+
+	override removeChild(component: Component): void {
+		this.#historyPrefix = undefined;
+		super.removeChild(component);
+	}
+
 	override invalidate(): void {
 		// Theme/global invalidation: retire every diff snapshot so stale styling
 		// is not diffed against the recolored render.
 		this.#generation++;
+		this.#historyPrefix = undefined;
 		super.invalidate();
 	}
 
 	override clear(): void {
 		this.#generation++;
+		this.#historyPrefix = undefined;
 		super.clear();
+	}
+	#usableHistoryPrefix(width: number, childCount: number): HistoryPrefixCache | undefined {
+		if (!isTranscriptVirtualizationEnabled()) {
+			this.#historyPrefix = undefined;
+			return undefined;
+		}
+		const cache = this.#historyPrefix;
+		if (
+			cache === undefined ||
+			cache.width !== width ||
+			cache.generation !== this.#generation ||
+			cache.childCount >= childCount ||
+			this.#segments.length < cache.childCount ||
+			this.#lines.length < cache.rows
+		) {
+			this.#historyPrefix = undefined;
+			return undefined;
+		}
+
+		// Finalized components may deliberately update after completion. The
+		// canonical segment records hold the version and identity; retaining a
+		// second prefix slice would duplicate O(history) references every frame.
+		for (let i = 0; i < cache.childCount; i++) {
+			const segment = this.#segments[i];
+			const child = this.children[i];
+			if (
+				segment === undefined ||
+				child === undefined ||
+				segment.component !== child ||
+				!isBlockFinalized(child) ||
+				(segment.version === undefined
+					? segment.startRow + segment.rowCount > this.#committedRows
+					: getBlockVersion(child) !== segment.version)
+			) {
+				this.#historyPrefix = undefined;
+				return undefined;
+			}
+		}
+		return cache;
+	}
+
+	#rememberHistoryPrefix(segments: readonly BlockSegment[], width: number): void {
+		if (!isTranscriptVirtualizationEnabled()) {
+			this.#historyPrefix = undefined;
+			return;
+		}
+		// The final block remains the repaintable seam even once it has finalized.
+		// Versionless blocks can join only after native scrollback has committed
+		// them; before then their render() remains their only mutation signal.
+		const childCount = segments.length - 1;
+		if (childCount <= 0) {
+			this.#historyPrefix = undefined;
+			return;
+		}
+		for (let i = 0; i < childCount; i++) {
+			const segment = segments[i]!;
+			const version = getBlockVersion(segment.component);
+			if (
+				!segment.finalized ||
+				(version === undefined
+					? segment.startRow + segment.rowCount > this.#committedRows
+					: version !== segment.version)
+			) {
+				this.#historyPrefix = undefined;
+				return;
+			}
+		}
+		this.#historyPrefix = {
+			childCount,
+			width,
+			generation: this.#generation,
+			rows: segments[childCount - 1]!.startRow + segments[childCount - 1]!.rowCount,
+		};
 	}
 
 	setNativeScrollbackCommittedRows(rows: number): void {
@@ -477,6 +601,34 @@ export class TranscriptContainer
 		const value = Math.min(this.#stableRowsFloor, this.#lines.length);
 		this.#stableRowsFloor = this.#lines.length;
 		return value;
+	}
+
+	getRetentionMetrics(): TranscriptRetentionMetrics {
+		let liveSnapshots = 0;
+		let liveSnapshotRowRefs = 0;
+		for (const child of this.children) {
+			const snapshot = (child as Component & SnapshotCarrier)[kSnapshot];
+			if (snapshot !== undefined) {
+				liveSnapshots++;
+				liveSnapshotRowRefs += snapshot.lines.length;
+			}
+		}
+		let segmentRawRowRefs = 0;
+		let segmentContributionRowRefs = 0;
+		for (const segment of this.#segments) {
+			segmentRawRowRefs += segment.rawRef.length;
+			segmentContributionRowRefs += segment.contribution.length;
+		}
+		return {
+			assembledRows: this.#lines.length,
+			segments: this.#segments.length,
+			segmentRawRowRefs,
+			segmentContributionRowRefs,
+			liveSnapshots,
+			liveSnapshotRowRefs,
+			historyPrefixCacheEntries: this.#historyPrefix === undefined ? 0 : 1,
+			historyPrefixSegmentRefs: 0,
+		};
 	}
 
 	getNativeScrollbackLiveRegionStart(): number | undefined {
@@ -585,15 +737,14 @@ export class TranscriptContainer
 		this.#nativeScrollbackSnapshotSafeEnd = undefined;
 
 		const count = this.children.length;
+		const historyPrefix = this.#usableHistoryPrefix(width, count);
+		const historyChildCount = historyPrefix?.childCount ?? 0;
 
-		// The live region spans from the earliest still-mutating block through the
-		// bottom. A block that has not finalized must stay below the seam: out-of-
-		// band inserts (TTSR/todo cards) can append a finalized block *below* a
-		// tool that is still awaiting its result, and committing the tool there
-		// would strand its history rows on the mid-stream preview the late result
-		// never reaches.
+		// The cached prefix is known-finalized. Only the remaining mutable seam can
+		// move the live-region boundary, so a streaming frame does not revisit the
+		// finalized history just to rediscover the same answer.
 		let liveStartIndex = count - 1;
-		for (let i = 0; i < count; i++) {
+		for (let i = historyChildCount; i < count; i++) {
 			if (!isBlockFinalized(this.children[i]!)) {
 				liveStartIndex = i;
 				break;
@@ -602,7 +753,10 @@ export class TranscriptContainer
 
 		const lines = this.#lines;
 		const previousSegments = this.#segments;
-		const segments: BlockSegment[] = new Array(count);
+		// A cache hit retains the previous segment array intact above the mutable
+		// seam; only tail entries are overwritten below. This avoids allocating or
+		// copying one segment per finalized history block on every streaming frame.
+		const segments: BlockSegment[] = historyPrefix === undefined ? new Array(count) : previousSegments;
 		// Poisoned until the walk completes: a block render throwing mid-walk
 		// leaves the persistent array half-rebuilt, and the next render must
 		// not trust stale segments against it. Restored at the end.
@@ -632,7 +786,11 @@ export class TranscriptContainer
 		// Frame row cursor: rows emitted (reused or pushed) so far.
 		let row = 0;
 		let stableRows = 0;
-		for (let i = 0; i < count; i++) {
+		if (historyPrefix !== undefined) {
+			row = historyPrefix.rows;
+			stableRows = row;
+		}
+		for (let i = historyChildCount; i < count; i++) {
 			const child = this.children[i]! as Component & SnapshotCarrier;
 
 			// This child's contribution: its current render with plain-blank
@@ -682,18 +840,24 @@ export class TranscriptContainer
 			if (i >= liveStartIndex && !finalized && isBlockCommitStable(child)) {
 				liveCommitState = deriveLiveCommitState(previousSnapshot, contribution, width, this.#generation);
 			}
-			// Cache the latest contribution as the next frame's diff input.
-			child[kSnapshot] = {
-				width,
-				lines: contribution,
-				generation: this.#generation,
-				appendOnly: liveCommitState?.appendOnly ?? false,
-				volatileCooldown: liveCommitState?.volatileCooldown ?? 0,
-				stablePrefixLength: liveCommitState?.stablePrefixLength ?? 0,
-				candidatePrefixLength: liveCommitState?.candidatePrefixLength ?? 0,
-				candidatePrefixAge: liveCommitState?.candidatePrefixAge ?? 0,
-				rewriteFloor: liveCommitState?.rewriteFloor ?? Number.POSITIVE_INFINITY,
-			};
+			// Only still-live blocks need a previous-frame diff. Finalized blocks
+			// are validated by their segment version and must not retain a second
+			// contribution array on the component.
+			if (finalized) {
+				delete child[kSnapshot];
+			} else {
+				child[kSnapshot] = {
+					width,
+					lines: contribution,
+					generation: this.#generation,
+					appendOnly: liveCommitState?.appendOnly ?? false,
+					volatileCooldown: liveCommitState?.volatileCooldown ?? 0,
+					stablePrefixLength: liveCommitState?.stablePrefixLength ?? 0,
+					candidatePrefixLength: liveCommitState?.candidatePrefixLength ?? 0,
+					candidatePrefixAge: liveCommitState?.candidatePrefixAge ?? 0,
+					rewriteFloor: liveCommitState?.rewriteFloor ?? Number.POSITIVE_INFINITY,
+				};
+			}
 
 			// Empty (or stripped-to-nothing) children contribute nothing and never
 			// affect spacing or the live-region offsets. An empty still-live child
@@ -789,6 +953,7 @@ export class TranscriptContainer
 		// when every surviving segment was reused.
 		if (lines.length !== row) lines.length = row;
 		this.#segments = segments;
+		if (historyPrefix === undefined) this.#rememberHistoryPrefix(segments, width);
 		this.#stableRowsFloor = Math.min(stableFloorBefore, stableRows, row);
 		return lines;
 	}

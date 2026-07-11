@@ -62,6 +62,7 @@ const SOURCE_MODULE_EXTENSIONS = [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", 
 const SUPPORTED_PACKAGE_IMPORT_CONDITIONS = new Set(["bun", "node", "import", "default"]);
 const packageRootCache = new Map<string, string | null>();
 const packageImportsCache = new Map<string, Record<string, unknown> | null>();
+const extensionPackageRoots = new Set<string>();
 const PACKAGE_IMPORT_EXCLUDED = Symbol("packageImportExcluded");
 
 // Extensions that imported `@sinclair/typebox` directly used to resolve against a
@@ -322,6 +323,34 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function unknownErrorMessage(error: unknown): string {
+	if (error instanceof Error) {
+		return error.message;
+	}
+	if (typeof error === "string") {
+		return error;
+	}
+	if (isRecord(error)) {
+		const message = error.message;
+		if (typeof message === "string") {
+			return message;
+		}
+		const code = error.code;
+		if (typeof code === "string") {
+			return code;
+		}
+	}
+	try {
+		const json = JSON.stringify(error);
+		if (json) {
+			return json;
+		}
+	} catch {
+		// Fall through to String(error).
+	}
+	return String(error);
+}
+
 async function pathExists(p: string): Promise<boolean> {
 	try {
 		await fs.promises.stat(p);
@@ -375,17 +404,53 @@ async function findPackageRoot(importerPath: string): Promise<string | null> {
 		}
 
 		if (await pathExists(path.join(dir, "package.json"))) {
-			packageRootCache.set(path.dirname(importerPath), dir);
+			packageRootCache.set(dir, dir);
 			return dir;
 		}
 
 		const parent = path.dirname(dir);
 		if (parent === dir) {
-			packageRootCache.set(path.dirname(importerPath), null);
+			packageRootCache.set(dir, null);
 			return null;
 		}
 		dir = parent;
 	}
+}
+
+function findPackageRootSync(importerPath: string): string | null {
+	let dir = path.dirname(importerPath);
+	while (true) {
+		const cached = packageRootCache.get(dir);
+		if (cached !== undefined) {
+			return cached;
+		}
+
+		if (fs.existsSync(path.join(dir, "package.json"))) {
+			packageRootCache.set(dir, dir);
+			return dir;
+		}
+
+		const parent = path.dirname(dir);
+		if (parent === dir) {
+			packageRootCache.set(dir, null);
+			return null;
+		}
+		dir = parent;
+	}
+}
+
+// Package root of the host coding-agent runtime. The bare-specifier fallback
+// must only resolve for external extension packages; host-internal imports
+// (e.g. `@oh-my-pi/hashline/grammar.lark`) are left to Bun's native resolver
+// and the existing legacy Pi/TypeBox hooks.
+const HOST_PACKAGE_ROOT = BUNFS_PACKAGE_ROOT
+	? BUNFS_PACKAGE_ROOT
+	: findPackageRootSync((import.meta as { filename?: string }).filename ?? url.fileURLToPath(import.meta.url));
+
+function isJsLikeSpecifier(specifier: string): boolean {
+	const ext = path.extname(specifier).toLowerCase();
+	if (!ext) return true;
+	return (SOURCE_MODULE_EXTENSIONS as readonly string[]).includes(ext);
 }
 
 async function readPackageImports(packageRoot: string): Promise<Record<string, unknown> | null> {
@@ -552,6 +617,27 @@ async function realpathOrSelf(p: string): Promise<string> {
 	}
 }
 
+/** Resolve symlinks in a path, falling back to the input if realpath fails. */
+function realpathSyncOrSelf(p: string): string {
+	try {
+		return fs.realpathSync.native(p);
+	} catch {
+		return p;
+	}
+}
+
+function stripImportSuffix(p: string): string {
+	const query = p.indexOf("?");
+	const hash = p.indexOf("#");
+	if (query === -1) {
+		return hash === -1 ? p : p.slice(0, hash);
+	}
+	if (hash === -1) {
+		return p.slice(0, query);
+	}
+	return p.slice(0, Math.min(query, hash));
+}
+
 /**
  * Walk the extension's relative-import graph starting at `entryRealPath`,
  * returning the realpath of every reachable source module. Only relative
@@ -639,9 +725,30 @@ export async function loadLegacyPiModule(resolvedPath: string): Promise<unknown>
 	// `bun link`/pnpm installs) so the rewrite filter matches the path Bun
 	// actually hands the hook.
 	const entryRealPath = await realpathOrSelf(path.resolve(resolvedPath));
+	// Register the extension's package root so the bare-specifier fallback only
+	// resolves imports declared by packages we are actively loading as legacy
+	// extensions, not host internals or unrelated workspace packages.
+	const packageRoot = findPackageRootSync(entryRealPath);
+	if (packageRoot) {
+		extensionPackageRoots.add(packageRoot);
+	}
 	await ensureExtensionGraphHook(entryRealPath);
 	// `?mtime` busts Bun's module cache so repeat loads pick up edited source.
-	return import(`${toImportSpecifier(entryRealPath)}?mtime=${Date.now()}`);
+	try {
+		return await import(`${toImportSpecifier(entryRealPath)}?mtime=${Date.now()}`);
+	} catch (error) {
+		// If the bare-specifier fallback already threw an explicit
+		// importer/package error, rethrow it as-is. Otherwise wrap native
+		// resolution failures with the extension entry/package context.
+		if (error instanceof Error && error.message.startsWith("Cannot resolve bare dependency")) {
+			throw error;
+		}
+		const detail = unknownErrorMessage(error);
+		throw new Error(
+			`Cannot load legacy Pi extension from ${entryRealPath} (package: ${packageRoot ?? "unknown"}): ${detail}`,
+			{ cause: error },
+		);
+	}
 }
 
 function getLoader(path: string): "js" | "jsx" | "ts" | "tsx" {
@@ -691,6 +798,70 @@ function resolveTypeBoxSpecifier(): { path: string } {
 	return { path: TYPEBOX_SHIM_PATH };
 }
 
+// Bare specifier fallback: resolve non-relative, non-absolute imports from the
+// importer's package root (following symlinks). This lets unbundled extensions
+// load their declared dependencies under isolated-store layouts such as pnpm,
+// where the extension package is a symlink into a nested store directory.
+const BARE_SPECIFIER_FILTER = /^[@a-zA-Z]/;
+
+function resolveBareSpecifier(args: { path: string; importer: string }): { path: string } | undefined {
+	// Already handled by the legacy Pi or TypeBox hooks; let those take priority.
+	if (LEGACY_PI_SPECIFIER_FILTER.test(args.path) || TYPEBOX_SPECIFIER_FILTER.test(args.path)) {
+		return undefined;
+	}
+	// Leave non-JS asset imports to Bun's native resolver (e.g. `.lark`, `.css`,
+	// `.wasm`, `.json` files referenced from host or extension packages).
+	if (!isJsLikeSpecifier(args.path)) {
+		return undefined;
+	}
+	// Leave URL schemes (node:, data:, https:, file:, etc.) to Bun's native resolver.
+	if (/^[a-z][a-z0-9+.-]*:/i.test(args.path)) {
+		return undefined;
+	}
+	// Only resolve for importers whose package root we have registered as a
+	// legacy extension being loaded. This scopes the fallback to external
+	// extension packages and avoids intercepting host internals or unrelated
+	// workspace packages (e.g. web-access test imports of `@oh-my-pi/pi-tui`).
+	const importerPath = stripImportSuffix(args.importer.startsWith("file://") ? url.fileURLToPath(args.importer) : args.importer);
+	const importerRealPath = realpathSyncOrSelf(importerPath);
+	const importerPackageRoot = findPackageRootSync(importerRealPath);
+	if (!importerPackageRoot || !extensionPackageRoots.has(importerPackageRoot)) {
+		return undefined;
+	}
+	// Defensive: never resolve from the host package root itself.
+	if (importerPackageRoot === HOST_PACKAGE_ROOT) {
+		return undefined;
+	}
+	// Resolve from the importer's package root (following symlinks) so that
+	// isolated-store layouts and symlinked extension packages can still load
+	// their declared dependencies. If Bun finds a match outside the package
+	// boundary (e.g. a hoisted dep in a parent node_modules), fall through to
+	// Bun's native resolver. Only throw the explicit importer/package error when
+	// Bun itself cannot resolve the specifier.
+	const resolveFrom = importerPackageRoot;
+	let resolveBoundary: string;
+	if (path.basename(path.dirname(importerPackageRoot)) === "node_modules") {
+		resolveBoundary = path.dirname(importerPackageRoot);
+	} else {
+		resolveBoundary = importerPackageRoot;
+	}
+	try {
+		const resolved = Bun.resolveSync(args.path, resolveFrom);
+		// If Bun resolved outside the package boundary (e.g. a hoisted dep in a
+		// parent node_modules), fall through to Bun's native resolver rather than
+		// asserting a package-local resolution that might not be correct.
+		if (!resolved.startsWith(resolveBoundary + path.sep)) {
+			return undefined;
+		}
+		return { path: resolved };
+	} catch (cause) {
+		throw new Error(
+			`Cannot resolve bare dependency "${args.path}" from ${importerRealPath} (package: ${importerPackageRoot ?? "unknown"})`,
+			{ cause },
+		);
+	}
+}
+
 export function installLegacyPiSpecifierShim(): void {
 	if (isLegacyPiSpecifierShimInstalled) {
 		return;
@@ -702,6 +873,7 @@ export function installLegacyPiSpecifierShim(): void {
 		setup(build) {
 			build.onResolve({ filter: LEGACY_PI_SPECIFIER_FILTER, namespace: "file" }, resolveLegacyPiSpecifier);
 			build.onResolve({ filter: TYPEBOX_SPECIFIER_FILTER, namespace: "file" }, resolveTypeBoxSpecifier);
+			build.onResolve({ filter: BARE_SPECIFIER_FILTER, namespace: "file" }, resolveBareSpecifier);
 		},
 	});
 }

@@ -9,6 +9,12 @@ import type { TranscriptProps } from "../transcript/Transcript";
 import { Transcript } from "../transcript/Transcript";
 
 const EMPTY_TOOLS: TranscriptProps["activeTools"] = new Map();
+
+type OperationAction = "retry" | "reconcile" | "cancel" | "inspect";
+type OperationalAgent = AgentSnapshot & {
+	quota?: { originalModel?: string; routedModel?: string; quotaPoolId?: string; resetAt?: number; decisionReason?: string };
+	operation?: { inputId?: string; state?: string; reason?: string; supportedActions?: OperationAction[] };
+};
 const POLL_MS = 1200;
 
 export function AgentDrawer(props: {
@@ -21,7 +27,8 @@ export function AgentDrawer(props: {
 	host?: TranscriptProps["host"];
 	onClose(): void;
 }): ReactNode {
-	const { agent, progress, client, readOnly, host, onClose } = props;
+	const { progress, client, readOnly, host, onClose } = props;
+	const agent = props.agent as OperationalAgent;
 	const [entries, setEntries] = useState<readonly SessionEntry[]>([]);
 	const [draft, setDraft] = useState("");
 
@@ -91,6 +98,12 @@ export function AgentDrawer(props: {
 		p?.contextTokens !== undefined && p.contextWindow
 			? Math.min(100, (p.contextTokens / p.contextWindow) * 100)
 			: null;
+	const runOperation = (action: OperationAction): void => {
+		const operationalClient = client as GuestClient & {
+			sendOperationCmd?: (action: OperationAction, agentId: string, inputId?: string) => void;
+		};
+		operationalClient.sendOperationCmd?.(action, agent.id, agent.operation?.inputId);
+	};
 
 	return (
 		<aside className="ag-drawer" role="dialog" aria-label={agent.displayName}>
@@ -101,6 +114,16 @@ export function AgentDrawer(props: {
 					{model ? <span className="ag-chip ag-chip--model">{model}</span> : null}
 				</div>
 				<div className="ag-drawer-actions">
+					{!readOnly
+						? agent.operation?.supportedActions
+								?.filter(action => action !== "inspect")
+								.map(action => (
+									<button type="button" className="ag-btn" key={action} onClick={() => runOperation(action)}>
+										<RotateCcw size={13} aria-hidden />
+										{action}
+									</button>
+								))
+						: null}
 					{agent.status === "running" && !readOnly ? (
 						<button
 							type="button"
@@ -122,6 +145,12 @@ export function AgentDrawer(props: {
 					</button>
 				</div>
 			</header>
+			{agent.operation?.reason || agent.quota?.decisionReason ? (
+				<div className="ag-operation-note">
+					<strong>{agent.operation?.state ?? "routing"}</strong>
+					<span>{agent.operation?.reason ?? agent.quota?.decisionReason}</span>
+				</div>
+			) : null}
 			{p ? (
 				<div className="ag-stats">
 					<span className="ag-stat">
@@ -150,6 +179,13 @@ export function AgentDrawer(props: {
 					<span className="ag-stat">
 						<span className="ag-stat-value">{fmtDuration(p.durationMs)}</span>
 					</span>
+				</div>
+			) : null}
+			{agent.quota ? (
+				<div className="ag-stats">
+					{agent.quota.quotaPoolId ? <span className="ag-stat"><span className="ag-stat-label">pool</span><span className="ag-stat-value">{agent.quota.quotaPoolId}</span></span> : null}
+					{agent.quota.routedModel ? <span className="ag-stat"><span className="ag-stat-label">route</span><span className="ag-stat-value">{agent.quota.originalModel && agent.quota.originalModel !== agent.quota.routedModel ? `${agent.quota.originalModel} → ` : ""}{agent.quota.routedModel}</span></span> : null}
+					{agent.quota.resetAt ? <span className="ag-stat"><span className="ag-stat-label">reset</span><span className="ag-stat-value">{new Date(agent.quota.resetAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span></span> : null}
 				</div>
 			) : null}
 			<div className="ag-drawer-body">

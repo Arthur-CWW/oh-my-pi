@@ -797,6 +797,7 @@ describe("ModelRegistry", () => {
 		let openaiGpt54Explicit: ModelRegistry;
 		let openaiGpt54Override: ModelRegistry;
 		let minimaxReplace: ModelRegistry;
+		let codexGpt56Stale: ModelRegistry;
 		beforeAll(() => {
 			anthropicCustom = readonlyRegistry({
 				providers: { anthropic: providerConfig("https://my-proxy.example.com/v1", [{ id: "claude-custom" }]) },
@@ -945,6 +946,19 @@ describe("ModelRegistry", () => {
 					},
 				},
 			});
+			codexGpt56Stale = readonlyRegistry({
+				providers: {
+					"openai-codex": providerConfig(
+						"https://chatgpt.com/backend-api",
+						[
+							{ id: "gpt-5.6-sol", contextWindow: 272_000 },
+							{ id: "gpt-5.6-terra", contextWindow: 272_000 },
+							{ id: "gpt-5.6-luna", contextWindow: 272_000 },
+						],
+						"openai-codex-responses",
+					),
+				},
+			});
 		});
 
 		test("custom provider with same name as built-in merges with built-in models", () => {
@@ -1038,6 +1052,14 @@ describe("ModelRegistry", () => {
 
 		test("modelOverrides can still patch a custom gpt-5.4 replacement", () => {
 			expect(openaiGpt54Override.find("openai", "gpt-5.4")?.contextWindow).toBe(512000);
+		});
+
+		test("Codex GPT-5.6 models correct stale cached limits", () => {
+			for (const id of ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]) {
+				const model = codexGpt56Stale.find("openai-codex", id);
+				expect(model?.contextWindow).toBe(1_050_000);
+				expect(model?.maxTokens).toBe(128_000);
+			}
 		});
 
 		test("discoverable bundled replacement survives refresh", async () => {
@@ -2142,5 +2164,6 @@ describe("ModelRegistry", () => {
 			expect(suppressible.isSelectorSuppressed("google-antigravity/gemini-3-pro-low")).toBe(true);
 			expect(suppressible.isSelectorSuppressed("google-antigravity/gemini-2.5-pro")).toBe(false);
 		});
+
 	});
 });

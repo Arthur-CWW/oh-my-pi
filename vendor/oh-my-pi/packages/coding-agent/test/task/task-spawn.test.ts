@@ -29,13 +29,14 @@ const taskAgent: AgentDefinition = {
 	source: "bundled",
 };
 
-function createSession(options: { manager?: AsyncJobManager; settings?: Record<string, unknown> }): ToolSession {
+function createSession(options: { manager?: AsyncJobManager; settings?: Record<string, unknown>; agentId?: string }): ToolSession {
 	return {
 		cwd: "/tmp",
 		hasUI: false,
 		settings: Settings.isolated(options.settings ?? {}),
 		getSessionFile: () => null,
 		getSessionSpawns: () => "*",
+		getAgentId: () => options.agentId,
 		asyncJobManager: options.manager,
 	} as unknown as ToolSession;
 }
@@ -135,6 +136,7 @@ describe("task spawn routing", () => {
 		const job = manager.getJob(jobId!);
 		expect(job?.status).toBe("running");
 		expect(job?.resultText).toBeUndefined();
+		expect(job?.group).toEqual({ groupId: "Main", topology: "flat", reporting: "main" });
 
 		gate.resolve();
 		await job!.promise;
@@ -146,6 +148,33 @@ describe("task spawn routing", () => {
 		expect(runSpy).toHaveBeenCalledTimes(1);
 	});
 
+
+	it("derives a supervised group snapshot from nested registry parentage", async () => {
+		vi.spyOn(discoveryModule, "discoverAgents").mockResolvedValue({
+			agents: [taskAgent],
+			projectAgentsDir: null,
+		});
+		const registry = AgentRegistry.global();
+		registry.register({ id: "Hub", displayName: "Hub", kind: "sub", parentId: "Main", session: null });
+		registry.register({ id: "Leaf", displayName: "Leaf", kind: "sub", parentId: "Hub", session: null });
+		vi.spyOn(executorModule, "runSubprocess").mockImplementation(async options => makeResult(options.id ?? "?"));
+
+		const manager = createManager();
+		manager.configureGroup("Hub", { topology: "supervised", reporting: "hub" });
+		const tool = await TaskTool.create(createSession({ manager, agentId: "Leaf" }));
+		const result = await tool.execute("tc-nested", {
+			agent: "task",
+			id: "Nested",
+			assignment: "Do the nested thing.",
+		} as TaskParams);
+
+		expect(manager.getJob(result.details!.async!.jobId)?.group).toEqual({
+			groupId: "Hub",
+			coordinatorId: "Leaf",
+			topology: "supervised",
+			reporting: "hub",
+		});
+	});
 	it("bounds concurrent job bodies with the session spawn semaphore", async () => {
 		vi.spyOn(discoveryModule, "discoverAgents").mockResolvedValue({
 			agents: [taskAgent],
@@ -187,4 +216,6 @@ describe("task spawn routing", () => {
 		expect(firstJob.status).toBe("completed");
 		expect(secondJob.status).toBe("completed");
 	});
+
 });
+

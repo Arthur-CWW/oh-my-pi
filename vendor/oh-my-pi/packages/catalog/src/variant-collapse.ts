@@ -32,7 +32,7 @@
  * generator, and the model-manager merge point.
  */
 import { buildCompat, buildModel } from "./build";
-import { Effort } from "./effort";
+import { Effort, type ReasoningEffort } from "./effort";
 import { stripThinkingVariantToken } from "./identity/family";
 import { resolveModelThinking } from "./model-thinking";
 import type { Api, Model, ModelSpec, Provider, ThinkingConfig } from "./types";
@@ -71,7 +71,7 @@ export interface EffortVariantFamily {
 	 * Entries whose target member is absent from the input are dropped — those
 	 * efforts fall back to `requestModelId ?? id`.
 	 */
-	routing: Readonly<Partial<Record<Effort | "off", string>>>;
+	routing: Readonly<Partial<Record<ReasoningEffort | "off", string>>>;
 	/** Explicit capability surface for the collapsed spec — no inference. */
 	thinking: Readonly<Omit<ThinkingConfig, "effortRouting" | "suppressWhenOff">>;
 	/** Thinking-off requests must explicitly suppress thinking on the wire. */
@@ -237,7 +237,7 @@ export function deriveThinkingPairFamilies<TSpec extends VariantSpecLike>(
 			continue;
 		}
 		const surface = derivePairThinkingSurface(spec, base);
-		const routing: Partial<Record<Effort | "off", string>> = { off: base.id };
+		const routing: Partial<Record<ReasoningEffort | "off", string>> = { off: base.id };
 		for (const effort of surface.efforts) {
 			routing[effort] = spec.id;
 		}

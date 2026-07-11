@@ -2665,12 +2665,12 @@ export async function getThemeExportColors(themeName?: string): Promise<{
 // TUI Helpers
 // ============================================================================
 
-let cachedHighlightColorsFor: Theme | undefined;
+let cachedHighlightColorsEpoch = -1;
 let cachedHighlightColors: NativeHighlightColors | undefined;
 
 function getHighlightColors(t: Theme): NativeHighlightColors {
-	if (cachedHighlightColorsFor !== t || !cachedHighlightColors) {
-		cachedHighlightColorsFor = t;
+	if (cachedHighlightColorsEpoch !== themeEpoch || !cachedHighlightColors) {
+		cachedHighlightColorsEpoch = themeEpoch;
 		cachedHighlightColors = {
 			comment: t.getFgAnsi("syntaxComment"),
 			keyword: t.getFgAnsi("syntaxKeyword"),
@@ -2704,12 +2704,12 @@ function getHighlightColors(t: Theme): NativeHighlightColors {
  */
 const HIGHLIGHT_CACHE_MAX = 256;
 const highlightCache = new LRUCache<string, string>({ max: HIGHLIGHT_CACHE_MAX });
-let highlightCacheTheme: Theme | undefined;
+let highlightCacheEpoch = -1;
 
 function highlightCached(code: string, validLang: string | undefined, highlightTheme: Theme): string | null {
-	if (highlightCacheTheme !== highlightTheme) {
+	if (highlightCacheEpoch !== themeEpoch) {
 		highlightCache.clear();
-		highlightCacheTheme = highlightTheme;
+		highlightCacheEpoch = themeEpoch;
 	}
 	const key = `${validLang ?? ""}\x00${code}`;
 	const hit = highlightCache.get(key);
@@ -2755,10 +2755,10 @@ export function getSymbolTheme(): SymbolTheme {
 }
 
 let cachedMarkdownTheme: MarkdownTheme | undefined;
-let cachedMarkdownThemeRef: Theme | undefined;
+let cachedMarkdownThemeEpoch = -1;
 
 export function getMarkdownTheme(): MarkdownTheme {
-	if (cachedMarkdownTheme !== undefined && cachedMarkdownThemeRef === theme) {
+	if (cachedMarkdownTheme !== undefined && cachedMarkdownThemeEpoch === themeEpoch) {
 		return cachedMarkdownTheme;
 	}
 	const markdownTheme: MarkdownTheme = {
@@ -2786,7 +2786,7 @@ export function getMarkdownTheme(): MarkdownTheme {
 		},
 	};
 	cachedMarkdownTheme = markdownTheme;
-	cachedMarkdownThemeRef = theme;
+	cachedMarkdownThemeEpoch = themeEpoch;
 	return markdownTheme;
 }
 

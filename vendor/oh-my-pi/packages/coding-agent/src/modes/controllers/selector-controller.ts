@@ -1,3 +1,5 @@
+import { AgentRegistry } from "../../registry/agent-registry";
+import type { AgentHubTurnStatus } from "../components/agent-hub";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import { PASTE_CODE_LOGIN_PROVIDERS } from "@oh-my-pi/pi-ai";
 import { getOAuthProviders } from "@oh-my-pi/pi-ai/oauth";
@@ -71,6 +73,30 @@ import { computeContextBreakdown } from "../utils/context-usage";
 import { buildCopyTargets } from "../utils/copy-targets";
 
 const MANUAL_LOGIN_TIP = "Tip: You can complete pairing with /login <redirect URL>.";
+
+export function getAgentHubTurnStatus(registry: AgentRegistry, agentId: string): AgentHubTurnStatus | undefined {
+	const ref = registry.get(agentId);
+	if (!ref?.quota) return undefined;
+	let state: "running" | "completed" | "cancelled" = "completed";
+	if (ref.status === "running") state = "running";
+	else if (ref.status === "aborted") state = "cancelled";
+	return {
+		inputId: ref.id,
+		state,
+		canCancel: false,
+		provider: ref.quota.originalProvider,
+		reroutedProvider: ref.quota.reroutedProvider,
+		originalModel: ref.quota.originalModel,
+		reroutedModel: ref.quota.reroutedModel,
+		ratePerHour: ref.quota.ratePerHour,
+		projectedEmptyAt: ref.quota.projectedEmptyAt,
+		resetAt: ref.quota.resetAt,
+		deficitPerHour: ref.quota.deficitPerHour,
+		decisionReason: ref.quota.decisionReason,
+		quotaPoolId: ref.quota.quotaPoolId,
+		limitWindowId: ref.quota.limitWindowId,
+	};
+}
 
 export class SelectorController {
 	constructor(private ctx: InteractiveModeContext) {}
@@ -460,7 +486,7 @@ export class SelectorController {
 					try {
 						if (role === null) {
 							// Temporary: update agent state but don't persist the model to settings
-							await this.ctx.session.setModelTemporary(model);
+							await this.ctx.session.setModelTemporary(model, concreteThinking);
 							if (isAuto) {
 								this.ctx.session.setThinkingLevel(AUTO_THINKING, true);
 							}
@@ -470,27 +496,52 @@ export class SelectorController {
 							done();
 							this.ctx.ui.requestRender();
 						} else if (role === "default") {
-							// Default: update agent state and persist
-							await this.ctx.session.setModel(model, role, {
+							// Default: update the live session and make the role authoritative at runtime.
+							await this.ctx.session.setModelExplicitRuntime(model, role, {
 								selector,
 								thinkingLevel: concreteThinking,
-								persist: true,
 							});
 							if (isAuto) {
 								this.ctx.session.setThinkingLevel(AUTO_THINKING, true);
-							} else if (concreteThinking && concreteThinking !== ThinkingLevel.Inherit) {
-								this.ctx.session.setThinkingLevel(concreteThinking);
 							}
 							this.ctx.statusLine.invalidate();
 							this.ctx.updateEditorBorderColor();
 							this.ctx.showStatus(`Default model: ${selector ?? model.id}`);
 							// Don't call done() - selector stays open for role assignment
 						} else {
-							// Other roles (smol, slow): just update settings, not current model
-							this.ctx.settings.setModelRole(
-								role,
-								formatModelSelectorValue(selector ?? `${model.provider}/${model.id}`, concreteThinking),
+							const runtimeSelector = formatModelSelectorValue(
+								selector ?? `${model.provider}/${model.id}`,
+								concreteThinking,
 							);
+							const previousRole = this.ctx.settings.resolveModelRole(role);
+							const persistGlobally =
+								previousRole.winningLayer !== "config_overlay" &&
+								previousRole.winningLayer !== "project" &&
+								!previousRole.shadowedCandidates.some(
+									candidate => candidate.layer === "config_overlay" || candidate.layer === "project",
+								);
+
+							if (persistGlobally) {
+								this.ctx.settings.assertModelRoleWritable(role);
+							}
+
+							this.ctx.settings.setRuntimeModelRole(role, runtimeSelector);
+							try {
+								if (persistGlobally) {
+									this.ctx.settings.setModelRole(role, runtimeSelector);
+								}
+							} catch (error) {
+								if (
+									previousRole.winningLayer === "runtime_override" &&
+									previousRole.effectiveSelector !== undefined
+								) {
+									this.ctx.settings.setRuntimeModelRole(role, previousRole.effectiveSelector);
+								} else {
+									this.ctx.settings.clearRuntimeModelRole(role);
+								}
+								throw error;
+							}
+
 							if (isAuto) {
 								this.ctx.session.setThinkingLevel(AUTO_THINKING, true);
 							}
@@ -1225,27 +1276,26 @@ export class SelectorController {
 			this.ctx.ui.requestRender();
 		};
 
+		const registry = this.ctx.collabGuest?.agentRegistry ?? AgentRegistry.global();
 		hub = new AgentHubOverlayComponent({
 			observers,
 			hubKeys,
 			expandKeys: this.ctx.keybindings.getKeys("app.tools.expand"),
 			onDone: done,
 			requestRender: () => this.ctx.ui.requestRender(),
-			registry: this.ctx.collabGuest?.agentRegistry,
+			registry,
 			remote: this.ctx.collabGuest?.hubRemote,
+			turnStatus: (agentId: string) => getAgentHubTurnStatus(registry, agentId),
 			ui: this.ctx.ui,
 			getTool: name => this.ctx.session.getToolByName(name),
 			getMessageRenderer: type => this.ctx.session.extensionRunner?.getMessageRenderer(type),
 			cwd: this.ctx.sessionManager.getCwd(),
 			hideThinkingBlock: () => this.ctx.hideThinkingBlock,
 			focusAgent: id => this.ctx.focusAgentSession(id),
-			sessionFile: this.ctx.sessionManager.getSessionFile() ?? null,
+			parentSessionFile: this.ctx.sessionManager.getSessionFile(),
 		});
-
-		// The double-← gesture passes requireContent so it stays inert when there
-		// are no subagents to show; the explicit hub/observe keys still open the
-		// empty roster. The freshly built hub already ran the persisted-subagent
-		// scan, so its row count is the authoritative "is there anything to show".
+		// requireContent stays inert without live or revivable children; explicit
+		// hub/observe keys may still open the empty roster.
 		if (options?.requireContent && hub.isEmpty) {
 			hub.dispose();
 			return;

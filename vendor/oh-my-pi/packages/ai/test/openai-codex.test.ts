@@ -163,6 +163,27 @@ describe("openai-codex reasoning effort validation", () => {
 		await expect(
 			transformRequestBody({ ...body }, createCodexModel(body.model), { reasoningEffort: "xhigh" }),
 		).rejects.toThrow(/Supported efforts: medium, high/);
+
+		await expect(
+			transformRequestBody({ ...body }, createCodexModel(body.model), { reasoningEffort: "custom-unadvertised" }),
+		).rejects.toThrow(/Supported efforts: medium, high/);
+	});
+
+	it("passes every model-advertised effort through unchanged and keeps pro orthogonal", async () => {
+		const model = {
+			...createCodexModel("gpt-5.6-terra"),
+			thinking: { mode: "effort" as const, efforts: ["max", "ultra", "custom-advertised"] },
+		};
+
+		for (const effort of model.thinking.efforts) {
+			const transformed = await transformRequestBody(
+				{ model: model.id, input: [] },
+				model,
+				{ reasoningEffort: effort, reasoningMode: "pro" },
+			);
+			expect(transformed.reasoning).toEqual({ effort, mode: "pro", summary: "detailed" });
+			expect(transformed.multi_agent).toBeUndefined();
+		}
 	});
 });
 

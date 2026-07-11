@@ -4,7 +4,7 @@ import type { AssistantThinkingRenderer } from "../../extensibility/extensions/t
 import { getMarkdownTheme, theme } from "../../modes/theme/theme";
 import { resolveAbortLabel, shouldRenderAbortReason } from "../../session/messages";
 import { getPreviewLines, resolveImageOptions, TRUNCATE_LENGTHS } from "../../tools/render-utils";
-import { canonicalizeMessage } from "../../utils/thinking-display";
+import { canonicalizeMessage, normalizeThinkingDisplay } from "../../utils/thinking-display";
 
 /**
  * Max lines of a turn-ending provider error rendered inline in the transcript.
@@ -120,7 +120,7 @@ export class AssistantMessageComponent extends Container {
 		for (const content of message.content) {
 			if (content.type === "toolCall") return false;
 			if (content.type === "text" && canonicalizeMessage(content.text)) tail = "text";
-			else if (content.type === "thinking" && canonicalizeMessage(content.thinking)) tail = "thinking";
+			else if (content.type === "thinking" && normalizeThinkingDisplay(content.thinking)) tail = "thinking";
 		}
 		return tail === "thinking";
 	}
@@ -310,7 +310,7 @@ export class AssistantMessageComponent extends Container {
 			if (content.type === "text") {
 				parts.push(canonicalizeMessage(content.text) ? "T1" : "T0");
 			} else if (content.type === "thinking") {
-				const canon = canonicalizeMessage(content.thinking);
+				const canon = normalizeThinkingDisplay(content.thinking);
 				if (!canon) parts.push("K0");
 				else if (this.hideThinkingBlock) parts.push("KH");
 				else parts.push("KV");
@@ -344,7 +344,7 @@ export class AssistantMessageComponent extends Container {
 			for (const item of this.#fastPathItems) {
 				if (item.blockType === "thinking") {
 					const content = message.content[item.contentIndex];
-					if (content?.type === "thinking" && canonicalizeMessage(content.thinking) !== item.lastText)
+					if (content?.type === "thinking" && normalizeThinkingDisplay(content.thinking) !== item.lastText)
 						return false;
 				}
 			}
@@ -378,7 +378,7 @@ export class AssistantMessageComponent extends Container {
 			if (item.blockType === "text" && content.type === "text") {
 				newText = content.text.trim();
 			} else if (item.blockType === "thinking" && content.type === "thinking") {
-				newText = canonicalizeMessage(content.thinking);
+				newText = normalizeThinkingDisplay(content.thinking);
 			} else {
 				this.#fastPathKey = undefined;
 				this.#fastPathItems = undefined;
@@ -413,7 +413,7 @@ export class AssistantMessageComponent extends Container {
 		const hasVisibleContent = message.content.some(
 			c =>
 				(c.type === "text" && canonicalizeMessage(c.text)) ||
-				(!this.hideThinkingBlock && c.type === "thinking" && canonicalizeMessage(c.thinking)),
+				(!this.hideThinkingBlock && c.type === "thinking" && normalizeThinkingDisplay(c.thinking)),
 		);
 
 		// Render content in order
@@ -427,8 +427,9 @@ export class AssistantMessageComponent extends Container {
 				md.transientRenderCache = this.#lastUpdateTransient;
 				this.#contentContainer.addChild(md);
 				captureItems?.push({ md, contentIndex: i, blockType: "text", lastText: trimmed });
-			} else if (content.type === "thinking" && canonicalizeMessage(content.thinking)) {
-				const thinkingText = canonicalizeMessage(content.thinking);
+			} else if (content.type === "thinking") {
+				const thinkingText = normalizeThinkingDisplay(content.thinking);
+				if (!thinkingText) continue;
 				if (this.hideThinkingBlock) {
 					thinkingIndex += 1;
 					continue;
@@ -440,7 +441,7 @@ export class AssistantMessageComponent extends Container {
 					.some(
 						c =>
 							(c.type === "text" && canonicalizeMessage(c.text)) ||
-							(c.type === "thinking" && canonicalizeMessage(c.thinking)),
+							(c.type === "thinking" && normalizeThinkingDisplay(c.thinking)),
 					);
 
 				// Thinking traces in thinkingText color, italic

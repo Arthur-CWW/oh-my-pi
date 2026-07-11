@@ -132,3 +132,20 @@ def test_task_timeout_hard_grace_env_parses(monkeypatch: pytest.MonkeyPatch, env
     reset_settings_cache()
     cfg = Settings()  # type: ignore[call-arg]
     assert cfg.task_timeout_hard_grace_seconds == 12.5
+
+
+def test_thinking_effort_preserves_exact_value(
+    monkeypatch: pytest.MonkeyPatch, env: dict[str, str]
+) -> None:
+    monkeypatch.setenv("ROBOMP_THINKING", "custom-effort")
+    reset_settings_cache()
+    assert Settings().thinking_level == "custom-effort"  # type: ignore[call-arg]
+
+
+def test_blank_thinking_effort_rejected(
+    monkeypatch: pytest.MonkeyPatch, env: dict[str, str]
+) -> None:
+    monkeypatch.setenv("ROBOMP_THINKING", "   ")
+    reset_settings_cache()
+    with pytest.raises(ValueError, match="ROBOMP_THINKING"):
+        Settings()  # type: ignore[call-arg]

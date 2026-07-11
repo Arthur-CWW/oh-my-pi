@@ -4298,3 +4298,37 @@ describe("openai-codex SSE statelessness", () => {
 		expect(stats).toMatchObject({ fullContextRequests: 2, deltaRequests: 0 });
 	});
 });
+
+
+describe("openai-codex exact reasoning wire", () => {
+	it("sends ultra effort and pro mode without enabling multi-agent", async () => {
+		const capturedRequests: Array<{ body: Record<string, unknown>; headers: Headers }> = [];
+		const fetchMock: FetchImpl = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+			capturedRequests.push({
+				body: JSON.parse(String(init?.body)) as Record<string, unknown>,
+				headers: init?.headers instanceof Headers ? init.headers : new Headers(init?.headers),
+			});
+			return new Response(createCompletedCodexSse("Hello"), {
+				status: 200,
+				headers: { "content-type": "text/event-stream" },
+			});
+		}) as FetchImpl;
+		const model = {
+			...createCodexTestModel("https://chatgpt.com/backend-api"),
+			preferWebsockets: false,
+			thinking: { mode: "effort" as const, efforts: ["ultra"] },
+		};
+
+		await streamOpenAICodexResponses(model, createCodexTestContext(), {
+			apiKey: createCodexTestToken(),
+			fetch: fetchMock,
+			reasoning: "ultra",
+			reasoningMode: "pro",
+		}).result();
+
+		expect(capturedRequests).toHaveLength(1);
+		expect(capturedRequests[0]?.body.reasoning).toEqual({ effort: "ultra", mode: "pro", summary: "auto" });
+		expect(capturedRequests[0]?.body.multi_agent).toBeUndefined();
+		expect(capturedRequests[0]?.headers.get("openai-beta")).not.toContain("responses_multi_agent");
+	});
+});

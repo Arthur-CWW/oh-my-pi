@@ -2396,6 +2396,22 @@ describe("Editor component", () => {
 		});
 	});
 
+	describe("chrome modes", () => {
+		it("renders horizontal status rules without side rails", () => {
+			const editor = new Editor(defaultEditorTheme);
+			editor.setChromeMode("horizontal");
+			editor.setTopBorder({ content: "status", width: 6 });
+			editor.setText("draft");
+
+			const lines = editor.render(20).map(line => stripVTControlCharacters(line));
+			expect(lines).toHaveLength(3);
+			expect(lines[0]?.startsWith("status")).toBe(true);
+			expect(lines[0]).not.toMatch(/[╭╮╰╯│]/);
+			expect(lines[1]).toContain("draft");
+			expect(lines[2]).toBe(defaultEditorTheme.symbols.boxRound.horizontal.repeat(20));
+		});
+	});
+
 	describe("volatile speech-to-text preview", () => {
 		it("replaces the volatile preview in place rather than appending", () => {
 			const editor = new Editor(defaultEditorTheme);

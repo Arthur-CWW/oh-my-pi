@@ -7,6 +7,25 @@ import {
 } from "@oh-my-pi/pi-tui";
 import { VirtualTerminal } from "./virtual-terminal";
 
+async function withEnvPatch<T>(patch: Record<string, string | undefined>, run: () => Promise<T>): Promise<T> {
+	const saved: Record<string, string | undefined> = {};
+	for (const key in patch) {
+		saved[key] = Bun.env[key];
+		const value = patch[key];
+		if (value === undefined) delete Bun.env[key];
+		else Bun.env[key] = value;
+	}
+	try {
+		return await run();
+	} finally {
+		for (const key in saved) {
+			const value = saved[key];
+			if (value === undefined) delete Bun.env[key];
+			else Bun.env[key] = value;
+		}
+	}
+}
+
 class LineList implements Component {
 	#lines: string[];
 
@@ -462,47 +481,60 @@ describe("streaming scrollback defer", () => {
 		}
 	});
 
-	it("erases mis-wrapped native scrollback on resize even mid-stream", async () => {
-		if (process.platform === "win32") return;
-		const term = new VirtualTerminal(40, 10);
-		overrideProbe(term, undefined);
-		const tui = new TUI(term);
-		const component = new LineList([...rows("init-", 5), "prompt"]);
+	it("keeps newest content on screen after resize mid-stream with no scrollback erase", async () => {
+		await withEnvPatch({ PI_TRANSCRIPT_VIRTUALIZATION: undefined }, async () => {
+			if (process.platform === "win32") return;
+			const term = new VirtualTerminal(40, 10);
+			overrideProbe(term, undefined);
+			const tui = new TUI(term);
+			const component = new LineList([...rows("init-", 5), "prompt"]);
 
-		try {
-			tui.addChild(component);
-			tui.start();
-			await settle(term);
+			try {
+				tui.addChild(component);
+				tui.start();
+				await settle(term);
 
-			const writes = capture(term);
+				const writes = capture(term);
 
-			// Stream past the viewport: scrolled rows commit to history in
-			// order (shell semantics) and no ED3 fires.
-			component.setLines([...rows("stream-", 30), "prompt"]);
-			tui.requestRender();
-			await settle(term);
-			expect(eraseScrollbackCount(writes)).toBe(0);
-			const streamed = term.getScrollBuffer().map(line => line.trimEnd());
-			expect(streamed).toEqual([...rows("stream-", 30), "prompt"].slice(0, streamed.length));
+				// Stream past the viewport: scrolled rows commit to history in
+				// order (shell semantics) and no ED3 fires.
+				component.setLines([...rows("stream-", 30), "prompt"]);
+				tui.requestRender();
+				await settle(term);
+				expect(eraseScrollbackCount(writes)).toBe(0);
+				const streamed = term.getScrollBuffer().map(line => line.trimEnd());
+				expect(streamed).toEqual([...rows("stream-", 30), "prompt"].slice(0, streamed.length));
 
-			// Resize mid-stream. The terminal re-wrapped its saved lines at the old
-			// width, so the authoritative rebuild must erase them (ED 3) rather than
-			// leaving the corrupt history on screen. That rebuild is deferred until
-			// the drag settles; while in flight only the viewport is repainted.
-			term.resize(30, 10);
-			await settleResize(term);
+				// Resize mid-stream. The terminal re-wrapped its saved lines at the old
+				// width. In append-only mode, the settle rebuild repaints without erasing
+				// native scrollback (0 ED3).
+				term.resize(30, 10);
+				await settleResize(term);
 
-			expect(eraseScrollbackCount(writes)).toBeGreaterThan(0);
-			expect(term.getScrollBuffer().map(line => line.trimEnd())).toEqual([...rows("stream-", 30), "prompt"]);
-			expect(
-				term
-					.getViewport()
-					.map(line => line.trim())
-					.at(-1),
-			).toBe("prompt");
-		} finally {
-			tui.stop();
-		}
+				expect(eraseScrollbackCount(writes)).toBe(0);
+				expect(term.getScrollBuffer().map(line => line.trimEnd())).toContain("prompt");
+				expect(
+					term
+						.getViewport()
+						.map(line => line.trim())
+						.at(-1),
+				).toBe("prompt");
+
+				// Append another streaming chunk and assert the newest prompt remains visible
+				component.setLines([...rows("stream-", 35), "new-prompt"]);
+				tui.requestRender();
+				await settle(term);
+
+				expect(
+					term
+						.getViewport()
+						.map(line => line.trim())
+						.at(-1),
+				).toBe("new-prompt");
+			} finally {
+				tui.stop();
+			}
+		});
 	});
 
 	it("feeds committed native scrollback rows to interested children before render", async () => {

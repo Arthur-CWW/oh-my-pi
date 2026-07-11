@@ -4,7 +4,7 @@ import {
 	consoleAttachedViaTTY,
 	hostHasInheritableConsole,
 	shouldHideKernelWindow,
-} from "../py/spawn-options";
+} from "../../src/eval/py/spawn-options";
 
 /**
  * `shouldHideKernelWindow` decides whether the long-lived Python kernel

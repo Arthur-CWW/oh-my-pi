@@ -293,6 +293,9 @@ export class CollabHost {
 			case "agent-cmd":
 				this.#handleAgentCmd(frame.cmd, frame.agentId, frame.text, fromPeer);
 				break;
+			case "agent-op-cmd":
+				void this.#handleAgentOperation(frame.reqId, frame.action, frame.agentId, fromPeer);
+				break;
 			case "fetch-transcript":
 				void this.#handleFetchTranscript(frame.reqId, frame.agentId, frame.fromByte, fromPeer);
 				break;
@@ -448,17 +451,63 @@ export class CollabHost {
 	}
 
 	#snapshotAgents(): AgentSnapshot[] {
-		return AgentRegistry.global()
-			.list()
+		const refs = AgentRegistry.global().list();
+		const byId = new Map(refs.map(ref => [ref.id, ref]));
+		const groupFor = (id: string): string => {
+			let ref = byId.get(id);
+			while (ref?.parentId) {
+				const parent = byId.get(ref.parentId);
+				if (!parent) return ref.parentId;
+				ref = parent;
+			}
+			return ref?.id ?? id;
+		};
+		return refs
+			.toSorted((left, right) => left.spawnIndex - right.spawnIndex)
 			.map(ref => ({
 				id: ref.id,
 				displayName: ref.displayName,
 				kind: ref.kind,
 				parentId: ref.parentId,
+				group: groupFor(ref.id),
 				status: ref.status,
 				hasSessionFile: !!ref.sessionFile,
 				createdAt: ref.createdAt,
 				lastActivity: ref.lastActivity,
+				spawnIndex: ref.spawnIndex,
+				activity: ref.activity ? { kind: ref.activity, at: ref.lastActivity } : undefined,
+				recovery: ref.recovery
+					? {
+							state: ref.recovery.turnState,
+							task: ref.recovery.task,
+							model: ref.recovery.model,
+							thinkingLevel: ref.recovery.thinkingLevel,
+							hotswapModel: ref.recovery.hotswapModel,
+						}
+					: undefined,
+				quota: ref.quota
+					? {
+							originalProvider: ref.quota.originalProvider,
+							routedProvider: ref.quota.reroutedProvider,
+							originalModel: ref.quota.originalModel,
+							routedModel: ref.quota.reroutedModel,
+							ratePerHour: ref.quota.ratePerHour,
+							projectedEmptyAt: ref.quota.projectedEmptyAt,
+							resetAt: ref.quota.resetAt,
+							deficitPerHour: ref.quota.deficitPerHour,
+							decisionReason: ref.quota.decisionReason,
+							quotaPoolId: ref.quota.quotaPoolId,
+							limitWindowId: ref.quota.limitWindowId,
+						}
+					: undefined,
+				operation:
+					ref.recovery && ref.kind === "sub" && ref.status === "running" && ref.session
+						? {
+								state: "uncertain",
+								reason: ref.recovery.turnState,
+								supportedActions: ["reconcile"],
+							}
+						: undefined,
 			}));
 	}
 
@@ -508,6 +557,37 @@ export class CollabHost {
 				AgentLifecycleManager.global().ensureLive(agentId).catch(fail);
 				break;
 		}
+	}
+	async #handleAgentOperation(
+		reqId: number,
+		action: "reconcile" | "retry" | "cancel" | "inspect",
+		agentId: string,
+		fromPeer: number,
+	): Promise<void> {
+		const reply = (ok: boolean, error?: string) =>
+			this.#socket?.send({ t: "agent-op-result", reqId, action, agentId, ok, error }, fromPeer);
+		if (!this.#peers.get(fromPeer)?.canWrite) {
+			reply(false, "agent control is disabled on a read-only link");
+			return;
+		}
+		const ref = AgentRegistry.global().get(agentId);
+		if (
+			action !== "reconcile" ||
+			!ref?.recovery ||
+			ref.kind !== "sub" ||
+			ref.status !== "running" ||
+			!ref.session
+		) {
+			reply(false, "operation is not supported for this agent");
+			return;
+		}
+		const result = await AgentLifecycleManager.global().reconcileStaleOrphan(agentId);
+		if (result.reconciled) {
+			reply(true);
+			this.#scheduleAgentsBroadcast();
+			return;
+		}
+		reply(false, result.reason.replaceAll("_", " "));
 	}
 
 	/** Incremental transcript read mirroring the hub's readFileIncremental contract. */

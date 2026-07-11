@@ -1,4 +1,4 @@
-import type { Effort } from "@oh-my-pi/pi-ai";
+import type { ReasoningEffort } from "@oh-my-pi/pi-ai";
 import { Container, type SelectItem, SelectList } from "@oh-my-pi/pi-tui";
 import { getSelectListTheme } from "../../modes/theme/theme";
 import { getThinkingLevelMetadata } from "../../thinking";
@@ -11,9 +11,9 @@ export class ThinkingSelectorComponent extends Container {
 	#selectList: SelectList;
 
 	constructor(
-		currentLevel: Effort,
-		availableLevels: Effort[],
-		onSelect: (level: Effort) => void,
+		currentLevel: ReasoningEffort,
+		availableLevels: ReasoningEffort[],
+		onSelect: (level: ReasoningEffort) => void,
 		onCancel: () => void,
 	) {
 		super();
@@ -33,7 +33,7 @@ export class ThinkingSelectorComponent extends Container {
 		}
 
 		this.#selectList.onSelect = item => {
-			onSelect(item.value as Effort);
+			onSelect(item.value as ReasoningEffort);
 		};
 
 		this.#selectList.onCancel = () => {

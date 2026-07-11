@@ -129,6 +129,20 @@ export interface MCPToolSelectionEntry extends SessionEntryBase {
 	selectedToolNames: string[];
 }
 
+/** Durable task metadata needed to re-adopt a direct child after controller replacement. */
+export interface SubagentSessionMetadata {
+	agentId: string;
+	parentSessionFile: string;
+	parentSessionId?: string;
+	displayName: string;
+	model?: string;
+	thinkingLevel?: string | null;
+	isolated: boolean;
+	/** Child depth and task prefix preserve subagent-scoped advisor policy on revival. */
+	taskDepth: number;
+	parentTaskPrefix: string;
+}
+
 /** Session init entry - captures initial context for subagent sessions (debugging/replay). */
 export interface SessionInitEntry extends SessionEntryBase {
 	type: "session_init";
@@ -140,6 +154,8 @@ export interface SessionInitEntry extends SessionEntryBase {
 	tools: string[];
 	/** Output schema if structured output was requested */
 	outputSchema?: unknown;
+	/** Present only for durable direct task children. */
+	subagent?: SubagentSessionMetadata;
 }
 
 /** Mode change entry - tracks agent mode transitions (e.g. plan mode). */

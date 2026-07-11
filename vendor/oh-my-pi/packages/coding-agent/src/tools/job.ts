@@ -5,6 +5,7 @@ import { prompt } from "@oh-my-pi/pi-utils";
 import { z } from "zod/v4";
 import type { AsyncJob, AsyncJobManager } from "../async";
 import type { RenderResultOptions } from "../extensibility/custom-tools/types";
+import { MAIN_AGENT_ID } from "../registry/agent-registry";
 import { shimmerEnabled, shimmerText } from "../modes/theme/shimmer";
 import type { Theme } from "../modes/theme/theme";
 import jobDescription from "../prompts/tools/job.md" with { type: "text" };
@@ -32,12 +33,12 @@ const jobSchema = z.object({
 	list: z.boolean().optional().describe("snapshot all jobs"),
 	setModel: z
 		.object({
-			id: z.string().describe("task job id of the subagent to hot-swap"),
+			id: z.string().describe("current Main session or stable direct-child id to hot-swap"),
 			model: z.string().describe("model selector to apply, including optional :thinking suffix"),
-			reason: z.string().optional().describe("why the subagent is being swapped"),
+			reason: z.string().optional().describe("why the target agent is being swapped"),
 		})
 		.optional()
-		.describe("swap a live subagent's model at a safe boundary; the target is told"),
+		.describe("swap the current Main session or a live, parked, or historical direct-child model; live targets switch at a safe boundary"),
 });
 
 type JobParams = z.infer<typeof jobSchema>;
@@ -103,7 +104,7 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 	readonly name = "job";
 	readonly approval = "read" as const;
 	readonly label = "Job";
-	readonly summary = "Manage background jobs and hot-swap live subagent models";
+	readonly summary = "Manage background jobs and hot-swap the current session or direct child models";
 	readonly description: string;
 	readonly parameters = jobSchema;
 	readonly strict = true;
@@ -121,12 +122,6 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 		_context?: AgentToolContext,
 	): Promise<AgentToolResult<JobToolDetails>> {
 		const manager = this.session.asyncJobManager;
-		if (!manager) {
-			return {
-				content: [{ type: "text", text: "Async execution is disabled; no background jobs are available." }],
-				details: { jobs: [] },
-			};
-		}
 
 		// Scope every visible operation to the calling agent. Tests / SDK
 		// consumers without an agent id see everything (legacy behavior).
@@ -137,8 +132,8 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 			if (params.list || params.cancel?.length || params.interrupt?.length || params.poll?.length) {
 				throw new ToolError("`setModel` cannot be combined with `list`, `poll`, `cancel`, or `interrupt`.");
 			}
-			const job = manager.getJob(params.setModel.id);
-			if (!job || (ownerId && job.ownerId !== ownerId)) {
+			const job = params.setModel.id === MAIN_AGENT_ID ? undefined : manager?.getJob(params.setModel.id);
+			if (job && ownerId && job.ownerId !== ownerId) {
 				return {
 					content: [{ type: "text", text: `Hot-swap failed: background job not found: ${params.setModel.id}` }],
 					details: { jobs: [] },
@@ -149,8 +144,22 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 				model: params.setModel.model,
 				reason: params.setModel.reason,
 				requestedBy: ownerId,
+				...(this.session.sessionManager && this.session.modelRegistry
+					? {
+						parentSessionManager: this.session.sessionManager,
+						modelRegistry: this.session.modelRegistry,
+						settings: this.session.settings,
+					}
+					: {}),
 			});
 			return this.#buildHotswapResult(result);
+		}
+
+		if (!manager) {
+			return {
+				content: [{ type: "text", text: "Async execution is disabled; no background jobs are available." }],
+				details: { jobs: [] },
+			};
 		}
 
 		// `list` is a read-only snapshot mode. Replaces the legacy `jobs://` URL.
@@ -388,7 +397,9 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 				? `Hot-swap applied: ${result.agentId} now ${result.to} (was ${result.from})`
 				: result.status === "queued"
 					? `Hot-swap queued: ${result.agentId} will switch ${result.from} → ${result.to} at its next turn boundary`
-					: `Hot-swap failed: ${result.error}`;
+					: result.status === "recorded"
+						? `Hot-swap recorded: ${result.agentId} will use ${result.to} when revived (was ${result.from})`
+						: `Hot-swap failed: ${result.error}`;
 		return { content: [{ type: "text", text }], details: { jobs: [] } };
 	}
 

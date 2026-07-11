@@ -23,12 +23,13 @@ export const STATUS_LINE_PRESETS: Record<StatusLinePreset, PresetDef> = {
 	},
 
 	compact: {
-		leftSegments: ["model", "mode", "git", "pr"],
-		rightSegments: ["session_name", "cost", "context_pct"],
-		separator: "powerline-thin",
+		leftSegments: ["model", "mode", "path", "git"],
+		rightSegments: ["session_name"],
+		separator: "pipe",
 		segmentOptions: {
-			model: { showThinkingLevel: false },
-			git: { showBranch: true, showStaged: true, showUnstaged: true, showUntracked: false },
+			model: { showThinkingLevel: true },
+			path: { abbreviate: true, maxLength: 20, stripWorkPrefix: true },
+			git: { showBranch: true, showStaged: true, showUnstaged: true, showUntracked: true },
 		},
 	},
 

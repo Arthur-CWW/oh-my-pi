@@ -21,6 +21,7 @@ import type { HistoryStorage } from "../session/history-storage";
 import type { SessionContext } from "../session/session-context";
 import type { SessionManager } from "../session/session-manager";
 import type { ShakeMode } from "../session/shake-types";
+import type { ErrorInbox, DiagnosticEventInput } from "./utils/error-inbox";
 import type { LspStartupServerInfo } from "../tools";
 import type { EventBus } from "../utils/event-bus";
 import type { AssistantMessageComponent } from "./components/assistant-message";
@@ -89,6 +90,8 @@ export interface InteractiveModeInitOptions {
 
 export type InteractiveSelectorDialogOptions = ExtensionUIDialogOptions & Pick<HookSelectorOptions, "disabledIndices">;
 
+export type ChildShutdownPolicy = "detach" | "stop";
+
 export interface InteractiveModeContext {
 	// UI access
 	ui: TUI;
@@ -108,6 +111,7 @@ export interface InteractiveModeContext {
 	statusLine: StatusLineComponent;
 
 	// Session access
+	errorInbox: ErrorInbox;
 	session: AgentSession;
 	sessionManager: SessionManager;
 	/** Session the transcript/editor/status are attached to: the focused agent's, else `session`. */
@@ -118,6 +122,7 @@ export interface InteractiveModeContext {
 	focusAgentSession(id: string): Promise<void>;
 	/** Focus the focused agent's parent session, falling back to main (delegates to focusParent). */
 	focusParentSession(): Promise<void>;
+	handleErrorsCommand(args?: string): void;
 	/** Return the view to the main session (delegates to SessionFocusController.unfocus). */
 	unfocusSession(): Promise<void>;
 	/** Clear loader, status/pending containers, streaming state, and pending tools. */
@@ -185,7 +190,7 @@ export interface InteractiveModeContext {
 	// Lifecycle
 	init(options?: InteractiveModeInitOptions): Promise<void>;
 	playWelcomeIntro(): void;
-	shutdown(): Promise<void>;
+	shutdown(options?: { childPolicy?: ChildShutdownPolicy }): Promise<void>;
 	checkShutdownRequested(): Promise<void>;
 
 	// Extension UI integration
@@ -212,8 +217,8 @@ export interface InteractiveModeContext {
 	resetTranscript(): void;
 	showStatus(message: string, options?: { dim?: boolean }): void;
 	showModelCycleTrack(track: string): void;
-	showError(message: string): void;
-	showPinnedError(message: string): void;
+	showError(message: string | DiagnosticEventInput, source?: string): void;
+	showPinnedError(message: string | DiagnosticEventInput, source?: string): void;
 	clearPinnedError(): void;
 	showWarning(message: string): void;
 	showNewVersionNotification(newVersion: string): void;

@@ -29,6 +29,8 @@ import type { MnemopiSessionState } from "../mnemopi/state";
 import subagentSystemPromptTemplate from "../prompts/system/subagent-system-prompt.md" with { type: "text" };
 import submitReminderTemplate from "../prompts/system/subagent-yield-reminder.md" with { type: "text" };
 import { AgentLifecycleManager } from "../registry/agent-lifecycle";
+import type { AgentQuotaAdmission } from "../registry/agent-registry";
+
 import { AgentRegistry } from "../registry/agent-registry";
 import { type CreateAgentSessionOptions, createAgentSession, discoverAuthStorage } from "../sdk";
 import type { AgentSession, AgentSessionEvent } from "../session/agent-session";
@@ -37,6 +39,7 @@ import type { AuthStorage } from "../session/auth-storage";
 import { SKILL_PROMPT_MESSAGE_TYPE, USER_INTERRUPT_LABEL } from "../session/messages";
 import { SessionManager } from "../session/session-manager";
 import { truncateTail } from "../session/streaming-output";
+import { parseThinkingLevel } from "../thinking";
 import type { ContextFileEntry } from "../tools";
 import { isIrcEnabled } from "../tools/irc";
 import { normalizeSchema } from "../tools/jtd-to-json-schema";
@@ -50,8 +53,10 @@ import { type ReportFindingDetails, toReviewFinding } from "../tools/review";
 import { ToolAbortError } from "../tools/tool-errors";
 import type { EventBus } from "../utils/event-bus";
 import { buildNamedToolChoice } from "../utils/tool-choice";
+import type { SpawnRouteReceipt } from "./route-resolution";
 import type { WorkspaceTree } from "../workspace-tree";
 import { resolveRestorableSessionModel, type RestorableSessionModel } from "./hotswap";
+import { appendChildLifecycleRecord, type ChildLifecycleState } from "./child-lifecycle";
 import { subprocessToolRegistry } from "./subprocess-tool-registry";
 import {
 	type AgentDefinition,
@@ -273,6 +278,7 @@ export interface ExecutorOptions {
 	 */
 	detached?: boolean;
 	modelOverride?: string | string[];
+	routeReceipt?: SpawnRouteReceipt;
 	/**
 	 * Active model selector of the parent session, used as an auth-aware fallback
 	 * if the resolved subagent model has no working credentials. See #985.
@@ -289,10 +295,16 @@ export interface ExecutorOptions {
 	 * watchdog is already suspended for the call's duration.
 	 */
 	maxRuntimeMs?: number;
+	/** Quota admission metadata for this run. */
+	quotaAdmission?: AgentQuotaAdmission;
 	enableLsp?: boolean;
 	signal?: AbortSignal;
 	onProgress?: (progress: AgentProgress) => void;
 	sessionFile?: string | null;
+	/** Durable parent session file for replacement-process child re-adoption. */
+	parentSessionFile?: string | null;
+	/** Durable parent session id for replacement-process child re-adoption. */
+	parentSessionId?: string;
 	persistArtifacts?: boolean;
 	artifactsDir?: string;
 	eventBus?: EventBus;
@@ -454,6 +466,7 @@ interface FinalizeSubprocessOutputArgs {
 	stderr: string;
 	doneAborted: boolean;
 	signalAborted: boolean;
+	completed?: boolean;
 	yieldItems?: YieldItem[];
 	reportFindings?: ReviewFinding[];
 	outputSchema: unknown;
@@ -499,7 +512,7 @@ function buildSchemaViolationOutcome(
 
 export function finalizeSubprocessOutput(args: FinalizeSubprocessOutputArgs): FinalizeSubprocessOutputResult {
 	let { rawOutput, exitCode, stderr } = args;
-	const { yieldItems, reportFindings, doneAborted, signalAborted, outputSchema } = args;
+	const { yieldItems, reportFindings, doneAborted, signalAborted, completed, outputSchema } = args;
 	let abortedViaYield = false;
 	const hasYield = Array.isArray(yieldItems) && yieldItems.length > 0;
 
@@ -549,7 +562,7 @@ export function finalizeSubprocessOutput(args: FinalizeSubprocessOutputArgs): Fi
 			}
 		}
 	} else {
-		const allowFallback = exitCode === 0 && !doneAborted && !signalAborted;
+		const allowFallback = exitCode === 0 && !doneAborted && (!signalAborted || completed === true);
 		const { normalized: normalizedSchema, error: schemaError } = normalizeSchema(outputSchema);
 		const hasOutputSchema = normalizedSchema !== undefined && !schemaError;
 		const fallback = allowFallback ? resolveFallbackCompletion(rawOutput, outputSchema) : null;
@@ -715,9 +728,200 @@ export function createSubagentSettings(
 		// Subagents run headless — there is no UI to confirm prompts against, so
 		// the parent task approval is the authorization boundary. Use yolo mode
 		// to preserve unattended subagent execution. User `tools.approval` policies still apply.
+
 		"tools.approvalMode": "yolo",
 		...overrides,
 	});
+}
+
+/** Inputs persisted by a child journal that are sufficient to rebuild it under current policy. */
+export interface ReAdoptedSessionReviverOptions {
+	id: string;
+	displayName: string;
+	sessionFile: string;
+	systemPrompt: string;
+	tools: string[];
+	outputSchema?: unknown;
+	model?: string;
+	hotswapModel?: string;
+	thinkingLevel?: string | null;
+	taskDepth: number;
+	parentTaskPrefix: string;
+	settings: Settings;
+	modelRegistry: ModelRegistry;
+}
+
+/** Shared parked-session construction path for replacement-process re-adoption. */
+export async function createReAdoptedSessionReviver(
+	options: ReAdoptedSessionReviverOptions,
+): Promise<(registerSubscription: (unsubscribe: () => void) => void) => Promise<AgentSession>> {
+	const descriptor = Object.freeze({
+		id: options.id,
+		displayName: options.displayName,
+		sessionFile: options.sessionFile,
+		systemPrompt: options.systemPrompt,
+		tools: Object.freeze([...options.tools]),
+		outputSchema: options.outputSchema,
+		model: options.model,
+		hotswapModel: options.hotswapModel,
+		thinkingLevel: options.thinkingLevel,
+		taskDepth: options.taskDepth,
+		parentTaskPrefix: options.parentTaskPrefix,
+		settings: options.settings,
+		modelRegistry: options.modelRegistry,
+	});
+	const selector = descriptor.hotswapModel ?? descriptor.model ?? "task";
+	return async registerSubscription => {
+		const resolved = await resolveModelOverrideWithAuthFallback(
+			[selector],
+			undefined,
+			descriptor.modelRegistry,
+			descriptor.settings,
+		);
+		if (resolved.blocked || !resolved.model || !descriptor.modelRegistry.hasConfiguredAuth(resolved.model)) {
+			throw new Error(`Current policy cannot revive ${descriptor.id} with ${selector}`);
+		}
+		const reopened = await SessionManager.open(descriptor.sessionFile);
+		try {
+			const { session } = await createAgentSession({
+				cwd: reopened.getCwd(),
+				authStorage: descriptor.modelRegistry.authStorage,
+				modelRegistry: descriptor.modelRegistry,
+				settings: createSubagentSettings(descriptor.settings),
+				model: resolved.model,
+				thinkingLevel: parseThinkingLevel(descriptor.thinkingLevel ?? undefined),
+				toolNames: [...descriptor.tools],
+				outputSchema: descriptor.outputSchema,
+				requireYieldTool: true,
+				systemPrompt: () => [descriptor.systemPrompt],
+				sessionManager: reopened,
+				taskDepth: descriptor.taskDepth,
+				parentTaskPrefix: descriptor.parentTaskPrefix,
+				hasUI: false,
+				agentId: descriptor.id,
+				agentDisplayName: descriptor.displayName,
+			});
+			registerSubscription(
+				session.subscribe(event => {
+					if (event.type === "agent_start") AgentRegistry.global().setStatus(descriptor.id, "running");
+					if (event.type === "agent_end") AgentRegistry.global().setStatus(descriptor.id, "idle");
+				}),
+			);
+			return session;
+		} catch (error) {
+			await reopened.close();
+			throw error;
+		}
+	};
+}
+
+interface ParkedChildSessionDescriptor {
+	id: string;
+	sessionFile: string;
+	parentSessionFile: string;
+	modelPatterns: readonly string[];
+	parentActiveModelPattern?: string;
+	modelRegistry: ModelRegistry;
+	policySettings: Settings;
+	disableReadSummarize: boolean;
+	initialModel: CreateAgentSessionOptions["model"];
+	initialThinkingLevel: ThinkingLevel | undefined;
+	sessionOptions: Omit<
+		CreateAgentSessionOptions,
+		| "sessionManager"
+		| "model"
+		| "thinkingLevel"
+		| "systemPrompt"
+		| "authStorage"
+		| "modelRegistry"
+		| "settings"
+		| "toolNames"
+	>;
+	toolNames: readonly string[];
+	subagentPrompt: string;
+	artifactManager?: ArtifactManager;
+}
+
+function appendParkedChildLifecycleState(
+	session: AgentSession,
+	descriptor: ParkedChildSessionDescriptor,
+	state: ChildLifecycleState,
+): void {
+	appendChildLifecycleRecord(session.sessionManager, {
+		version: 1,
+		agentId: descriptor.id,
+		childSessionFile: descriptor.sessionFile,
+		parentSessionFile: descriptor.parentSessionFile,
+		state,
+		updatedAt: new Date().toISOString(),
+		...(session.model ? { modelId: `${session.model.provider}/${session.model.id}` } : {}),
+		...(session.thinkingLevel === undefined ? {} : { thinkingLevel: session.thinkingLevel }),
+	});
+}
+
+/** Rebuild a parked child from frozen run inputs without retaining its original executor closure. */
+function createParkedChildSessionReviver(
+	descriptor: Readonly<ParkedChildSessionDescriptor>,
+): (registerSubscription: (unsubscribe: () => void) => void) => Promise<AgentSession> {
+	return async registerSubscription => {
+		const resolution = await resolveModelOverrideWithAuthFallback(
+			[...descriptor.modelPatterns],
+			descriptor.parentActiveModelPattern,
+			descriptor.modelRegistry,
+			descriptor.policySettings,
+		);
+		if (resolution.blocked || !resolution.model || !descriptor.modelRegistry.hasConfiguredAuth(resolution.model)) {
+			throw new Error(`Current policy cannot revive ${descriptor.id}`);
+		}
+		const sessionSettings = createSubagentSettings(
+			descriptor.policySettings,
+			descriptor.disableReadSummarize ? { "read.summarize.enabled": false } : undefined,
+		);
+		const reopened = await SessionManager.open(descriptor.sessionFile);
+		try {
+			descriptor.artifactManager && reopened.adoptArtifactManager(descriptor.artifactManager);
+			const restoredModel = resolveRestorableSessionModel(
+				reopened,
+				descriptor.modelRegistry,
+				sessionSettings,
+				descriptor.initialModel,
+			);
+			const model: RestorableSessionModel =
+				restoredModel ??
+				(resolution.explicitThinkingLevel
+					? { model: resolution.model, thinkingLevel: resolution.thinkingLevel }
+					: { model: resolution.model });
+			const { session } = await createAgentSession({
+				...descriptor.sessionOptions,
+				authStorage: descriptor.modelRegistry.authStorage,
+				modelRegistry: descriptor.modelRegistry,
+				toolNames: [...descriptor.toolNames],
+				settings: sessionSettings,
+				model: model.model,
+				thinkingLevel: model.thinkingLevel ?? descriptor.initialThinkingLevel,
+				systemPrompt: defaultPrompt =>
+					defaultPrompt.length === 0
+						? [descriptor.subagentPrompt]
+						: [...defaultPrompt.slice(0, -1), descriptor.subagentPrompt, defaultPrompt[defaultPrompt.length - 1]],
+				sessionManager: reopened,
+			});
+			registerSubscription(
+				session.subscribe(event => {
+					if (event.type === "agent_start") {
+						AgentRegistry.global().setStatus(descriptor.id, "running");
+						appendParkedChildLifecycleState(session, descriptor, "running");
+					} else if (event.type === "agent_end") {
+						AgentRegistry.global().setStatus(descriptor.id, "idle");
+						appendParkedChildLifecycleState(session, descriptor, "idle");
+					}
+				}),
+			);
+			return session;
+		} catch (error) {
+			await reopened.close();
+			throw error;
+		}
+	};
 }
 
 type AbortReason = "signal" | "terminate" | "timeout" | "budget" | "interrupt";
@@ -731,6 +935,7 @@ interface RunMonitorArgs {
 	assignment?: string;
 	description?: string;
 	modelOverride?: string | string[];
+	routeReceipt?: SpawnRouteReceipt;
 	signal?: AbortSignal;
 	isHardCancelled?: () => boolean;
 	onProgress?: (progress: AgentProgress) => void;
@@ -785,18 +990,8 @@ interface SubagentRunMonitor {
 }
 
 function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
-	const {
-		index,
-		id,
-		agent,
-		task,
-		assignment,
-		signal,
-		onProgress,
-		softRequestBudget,
-		maxRuntimeMs,
-		isHardCancelled,
-	} = args;
+	const { index, id, agent, task, assignment, signal, onProgress, softRequestBudget, maxRuntimeMs, isHardCancelled } =
+		args;
 	const startTime = Date.now();
 
 	const progress: AgentProgress = {
@@ -817,6 +1012,7 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
 		cost: 0,
 		durationMs: 0,
 		modelOverride: args.modelOverride,
+		routeReceipt: args.routeReceipt,
 	};
 
 	const outputChunks: string[] = [];
@@ -1334,9 +1530,14 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
 		interrupted: () => abortReason === "interrupt" && !hardCancelled(),
 		interruptReason,
 		interruptRequestedBy,
-		hasExplicitAbortReason: () => hardCancelled() || abortReason === "signal" || runtimeLimitExceeded || budgetLimitExceeded,
+		hasExplicitAbortReason: () =>
+			hardCancelled() || abortReason === "signal" || runtimeLimitExceeded || budgetLimitExceeded,
 		isAbortedRun: () =>
-			hardCancelled() || abortReason === "signal" || runtimeLimitExceeded || budgetLimitExceeded || abortReason === undefined,
+			hardCancelled() ||
+			abortReason === "signal" ||
+			runtimeLimitExceeded ||
+			budgetLimitExceeded ||
+			abortReason === undefined,
 		requestAbort,
 		resolveSignalAbortReason,
 		resolveAbortReasonText,
@@ -1369,12 +1570,22 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
 	};
 }
 
+/** Determine whether the session reached a terminal completion before any later abort. */
+function isTerminalCompletion(monitor: SubagentRunMonitor, session: AgentSession): boolean {
+	if (monitor.yieldCalled()) return true;
+	const lastAssistant = session.getLastAssistantMessage();
+	if (!lastAssistant) return false;
+	if (lastAssistant.stopReason === "aborted" || lastAssistant.stopReason === "error") return false;
+	return monitor.rawOutput().trim().length > 0;
+}
+
 interface DriveOutcome {
 	exitCode: number;
 	error?: string;
 	aborted: boolean;
 	abortReasonText?: string;
 	interrupted?: boolean;
+	completed: boolean;
 }
 
 const MAX_YIELD_RETRIES = 3;
@@ -1394,6 +1605,7 @@ async function driveSessionToYield(
 	let error: string | undefined;
 	let aborted = false;
 	let abortReasonText: string | undefined;
+	let completed = false;
 	const checkAbort = () => {
 		if (abortSignal.aborted) {
 			aborted = monitor.isAbortedRun();
@@ -1489,6 +1701,7 @@ async function driveSessionToYield(
 				error ??= lastAssistant.errorMessage || "Subagent failed";
 			}
 		}
+		completed = isTerminalCompletion(monitor, session);
 	} catch (err) {
 		if (abortSignal.aborted && monitor.interrupted()) {
 			exitCode = 0;
@@ -1499,7 +1712,8 @@ async function driveSessionToYield(
 			}
 		}
 	} finally {
-		if (abortSignal.aborted) {
+		completed ||= isTerminalCompletion(monitor, session);
+		if (abortSignal.aborted && !completed) {
 			aborted = monitor.isAbortedRun();
 			if (aborted) {
 				abortReasonText ??= monitor.resolveAbortReasonText();
@@ -1510,12 +1724,19 @@ async function driveSessionToYield(
 		}
 	}
 
-	return { exitCode, error, aborted, abortReasonText, interrupted: monitor.interrupted() };
+	return { exitCode, error, aborted, abortReasonText, interrupted: monitor.interrupted(), completed };
 }
-
 interface FinalizeRunArgs {
 	monitor: SubagentRunMonitor;
-	done: { exitCode: number; error?: string; aborted?: boolean; abortReason?: string; interrupted?: boolean; durationMs: number };
+	done: {
+		exitCode: number;
+		error?: string;
+		aborted?: boolean;
+		abortReason?: string;
+		interrupted?: boolean;
+		completed: boolean;
+		durationMs: number;
+	};
 	index: number;
 	id: string;
 	agent: AgentDefinition;
@@ -1523,6 +1744,7 @@ interface FinalizeRunArgs {
 	assignment?: string;
 	description?: string;
 	modelOverride?: string | string[];
+	routeReceipt?: SpawnRouteReceipt;
 	outputSchema?: unknown;
 	signal?: AbortSignal;
 	artifactsDir?: string;
@@ -1540,7 +1762,7 @@ interface FinalizeRunArgs {
  * event.
  */
 async function finalizeRunResult(args: FinalizeRunArgs): Promise<SingleResult> {
-	const { monitor, done, index, id, agent, task, assignment, signal, modelOverride } = args;
+	const { monitor, done, index, id, agent, task, assignment, signal, modelOverride, routeReceipt } = args;
 	const progress = monitor.progress;
 	let exitCode = done.exitCode;
 	let stderr = done.error ?? "";
@@ -1566,6 +1788,7 @@ async function finalizeRunResult(args: FinalizeRunArgs): Promise<SingleResult> {
 			stderr,
 			doneAborted: Boolean(done.aborted),
 			signalAborted: Boolean(signal?.aborted && !interrupted),
+			completed: done.completed,
 			yieldItems,
 			reportFindings,
 			outputSchema: args.outputSchema,
@@ -1642,7 +1865,10 @@ async function finalizeRunResult(args: FinalizeRunArgs): Promise<SingleResult> {
 		exitCode = 1;
 	}
 	const wasAborted =
-		!interrupted && (runtimeLimitExceeded || abortedViaYield || (!hasYield && (done.aborted || signal?.aborted || false)));
+		!interrupted &&
+		(runtimeLimitExceeded ||
+			abortedViaYield ||
+			(!hasYield && !done.completed && (done.aborted || signal?.aborted || false)));
 	const finalAbortReason = wasAborted
 		? runtimeLimitExceeded
 			? monitor.resolveAbortReasonText()
@@ -1689,6 +1915,7 @@ async function finalizeRunResult(args: FinalizeRunArgs): Promise<SingleResult> {
 		contextWindow: progress.contextWindow,
 		modelOverride,
 		resolvedModel: progress.resolvedModel,
+		routeReceipt,
 		error: exitCode !== 0 && stderr ? stderr : undefined,
 		aborted: wasAborted,
 		abortReason: finalAbortReason,
@@ -1716,6 +1943,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 		modelOverride,
 		thinkingLevel,
 		outputSchema,
+		routeReceipt,
 		enableLsp,
 		signal,
 		onProgress,
@@ -1740,6 +1968,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			tokens: 0,
 			requests: 0,
 			modelOverride,
+			routeReceipt,
 			error: "Cancelled before start",
 			aborted: true,
 			abortReason: "Cancelled before start",
@@ -1836,6 +2065,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 		assignment,
 		description: options.description,
 		modelOverride,
+		routeReceipt,
 		signal,
 		onProgress,
 		eventBus: options.eventBus,
@@ -1848,18 +2078,19 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 	});
 	const progress = monitor.progress;
 	let unsubscribe: (() => void) | null = null;
-	let reviveSession: (() => Promise<AgentSession>) | null = null;
+	let sessionStatusSubscription: (() => void) | undefined;
+	let reviveSession: ((registerSubscription: (unsubscribe: () => void) => void) => Promise<AgentSession>) | null =
+		null;
+	let appendLifecycleState: ((state: ChildLifecycleState) => void) | undefined;
 	let originalRunSettled = false;
-	// Adopted (kept-alive) subagents flip registry status from session events on
-	// later turns: revive/wake → running, turn drained → idle. The subscription
-	// intentionally survives this run; a disposed session emits nothing, so it
-	// needs no teardown.
-	const installRegistryStatusSync = (target: AgentSession): void => {
+	const installRegistryStatusSync = (target: AgentSession): (() => void) =>
 		target.subscribe(event => {
 			if (event.type === "agent_start") {
 				AgentRegistry.global().setStatus(id, "running");
+				appendLifecycleState?.("running");
 			} else if (event.type === "agent_end") {
 				AgentRegistry.global().setStatus(id, "idle");
+				appendLifecycleState?.("idle");
 				if (!originalRunSettled || worktree !== undefined) return;
 				const manager = options.asyncJobManager;
 				const jobId = options.asyncJobId;
@@ -1871,7 +2102,6 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 				manager.refreshResultText(jobId, `${latestText}\n\n[refreshed after follow-up turn]`);
 			}
 		});
-	};
 
 	const runSubagent = async (): Promise<{
 		exitCode: number;
@@ -1879,8 +2109,10 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 		aborted?: boolean;
 		abortReason?: string;
 		interrupted?: boolean;
+		completed: boolean;
 		durationMs: number;
 	}> => {
+		let completed = false;
 		const sessionAbortController = new AbortController();
 		const abortSignal = monitor.abortSignal;
 		let exitCode = 0;
@@ -2016,21 +2248,28 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			}
 
 			const { normalized: normalizedOutputSchema } = normalizeSchema(outputSchema);
+			const subagentPrompt = prompt.render(subagentSystemPromptTemplate, {
+				agent: agent.systemPrompt,
+				role: subagentRole ? oneLineLabel(subagentRole) : "",
+				context: options.context?.trim() ?? "",
+				planReference: options.planReference?.content ?? "",
+				planReferencePath: options.planReference?.path ?? "",
+				worktree: worktree ?? "",
+				outputSchema: normalizedOutputSchema,
+				ircPeers: ircEnabled ? renderIrcPeerRoster(id) : "",
+				ircSelfId: ircEnabled ? id : "",
+			});
 
-			// Captured by the lifecycle reviver: rebuilding an equivalent session from
-			// the same JSONL file re-invokes createAgentSession with the original run
-			// options. A revived parked agent may have been hot-swapped after spawn,
-			// so the reviver can explicitly override only the restored model fields.
-			const buildSubagentSessionOptions = (
-				sessionManagerForRun: SessionManager,
-				modelOverride?: RestorableSessionModel,
-			): CreateAgentSessionOptions => ({
+			// Materialize initial child options once. The parked-session descriptor below
+			// retains only data, so revival cannot retain this executor closure.
+			const buildSubagentSessionOptions = (sessionManagerForRun: SessionManager): CreateAgentSessionOptions => ({
 				cwd: worktree ?? cwd,
 				authStorage,
 				modelRegistry,
+				quotaAdmission: options.quotaAdmission,
 				settings: subagentSettings,
-				model: modelOverride?.model ?? model,
-				thinkingLevel: modelOverride?.thinkingLevel ?? effectiveThinkingLevel,
+				model,
+				thinkingLevel: effectiveThinkingLevel,
 				toolNames,
 				outputSchema,
 				requireYieldTool: true,
@@ -2041,22 +2280,10 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 				rules: options.rules,
 				preloadedExtensionPaths: options.preloadedExtensionPaths,
 				preloadedCustomToolPaths: options.preloadedCustomToolPaths,
-				systemPrompt: defaultPrompt => {
-					const subagentPrompt = prompt.render(subagentSystemPromptTemplate, {
-						agent: agent.systemPrompt,
-						role: subagentRole ? oneLineLabel(subagentRole) : "",
-						context: options.context?.trim() ?? "",
-						planReference: options.planReference?.content ?? "",
-						planReferencePath: options.planReference?.path ?? "",
-						worktree: worktree ?? "",
-						outputSchema: normalizedOutputSchema,
-						ircPeers: ircEnabled ? renderIrcPeerRoster(id) : "",
-						ircSelfId: ircEnabled ? id : "",
-					});
-					return defaultPrompt.length === 0
+				systemPrompt: defaultPrompt =>
+					defaultPrompt.length === 0
 						? [subagentPrompt]
-						: [...defaultPrompt.slice(0, -1), subagentPrompt, defaultPrompt[defaultPrompt.length - 1]];
-				},
+						: [...defaultPrompt.slice(0, -1), subagentPrompt, defaultPrompt[defaultPrompt.length - 1]],
 				sessionManager: sessionManagerForRun,
 				hasUI: false,
 				spawns: spawnsEnv,
@@ -2076,7 +2303,8 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 				parentEvalSessionId: options.parentEvalSessionId,
 			});
 
-			const sessionPromise = createAgentSession(buildSubagentSessionOptions(sessionManager));
+			const initialSessionOptions = buildSubagentSessionOptions(sessionManager);
+			const sessionPromise = createAgentSession(initialSessionOptions);
 			let session: AgentSession;
 			try {
 				({ session } = await awaitAbortable(sessionPromise));
@@ -2084,29 +2312,47 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 				// Abort raced session startup. The session may still resolve later
 				// holding live LSP/MCP child processes — dispose it when it does so
 				// a cancelled subagent cannot leak them.
-				void sessionPromise.then(created => created.session.dispose()).catch(() => {});
+				void sessionPromise.then(created => created.session.dispose({ scope: "child" })).catch(() => {});
 				throw err;
 			}
 
 			monitor.setActiveSession(session);
-			installRegistryStatusSync(session);
-			if (sessionFile !== null && worktree === undefined) {
-				// Lifecycle reviver: park closed the JSONL writer, so reopening takes
-				// the single-writer lock cleanly and restores the full message history
-				// (createAgentSession → agent.replaceMessages). Isolated runs are not
-				// resumable (worktree is merged + cleaned) and never get a reviver.
-				reviveSession = async () => {
-					const reopened = await SessionManager.open(sessionFile);
-					if (options.parentArtifactManager) {
-						reopened.adoptArtifactManager(options.parentArtifactManager);
-					}
-					const restoredModel = resolveRestorableSessionModel(reopened, modelRegistry, subagentSettings, model);
-					const { session: revived } = await createAgentSession(buildSubagentSessionOptions(reopened, restoredModel));
-					installRegistryStatusSync(revived);
-					return revived;
-				};
+			sessionStatusSubscription = installRegistryStatusSync(session);
+			const persistedParentSessionFile =
+				options.parentSessionFile ?? (sessionFile ? `${path.dirname(sessionFile)}.jsonl` : undefined);
+			if (sessionFile && (!persistedParentSessionFile || !options.parentSessionId)) {
+				throw new Error("Durable subagent sessions require the live parent session file and id");
 			}
-
+			if (sessionFile !== null && worktree === undefined && persistedParentSessionFile) {
+				const {
+					sessionManager: _sessionManager,
+					model: _model,
+					thinkingLevel: _thinkingLevel,
+					systemPrompt: _systemPrompt,
+					authStorage: _authStorage,
+					modelRegistry: _modelRegistry,
+					settings: _sessionSettings,
+					toolNames: initialToolNames,
+					...sessionOptions
+				} = initialSessionOptions;
+				const descriptor = Object.freeze({
+					id,
+					sessionFile,
+					parentSessionFile: persistedParentSessionFile,
+					modelPatterns: Object.freeze([...modelPatterns]),
+					parentActiveModelPattern: options.parentActiveModelPattern,
+					modelRegistry,
+					policySettings: settings,
+					disableReadSummarize: agent.readSummarize === false,
+					initialModel: model,
+					initialThinkingLevel: effectiveThinkingLevel,
+					sessionOptions: Object.freeze(sessionOptions),
+					toolNames: Object.freeze([...(initialToolNames ?? [])]),
+					subagentPrompt,
+					artifactManager: options.parentArtifactManager,
+				});
+				reviveSession = createParkedChildSessionReviver(descriptor);
+			}
 			// Emit lifecycle start event
 			if (options.eventBus) {
 				options.eventBus.emit(TASK_SUBAGENT_LIFECYCLE_CHANNEL, {
@@ -2122,19 +2368,46 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 				});
 			}
 
-			const subagentToolNames = session.getActiveToolNames();
 			const parentOwnedToolNames = new Set(["todo"]);
-			const filteredSubagentTools = subagentToolNames.filter(name => !parentOwnedToolNames.has(name));
-			if (filteredSubagentTools.length !== subagentToolNames.length) {
-				await awaitAbortable(session.setActiveToolsByName(filteredSubagentTools));
+			function createLifecycleAppender(target: AgentSession): ((state: ChildLifecycleState) => void) | undefined {
+				if (!sessionFile || !persistedParentSessionFile) return undefined;
+				return (state: ChildLifecycleState): void => {
+					appendChildLifecycleRecord(target.sessionManager, {
+						version: 1,
+						agentId: id,
+						childSessionFile: sessionFile,
+						parentSessionFile: persistedParentSessionFile,
+						state,
+						updatedAt: new Date().toISOString(),
+						...(target.model ? { modelId: `${target.model.provider}/${target.model.id}` } : {}),
+						...(target.thinkingLevel === undefined ? {} : { thinkingLevel: target.thinkingLevel }),
+					});
+				};
 			}
-
+			const filteredSubagentTools = session.getActiveToolNames().filter(name => !parentOwnedToolNames.has(name));
+			appendLifecycleState = createLifecycleAppender(session);
 			session.sessionManager.appendSessionInit({
 				systemPrompt: session.agent.state.systemPrompt.join("\n\n"),
 				task,
-				tools: session.getActiveToolNames(),
+				tools: filteredSubagentTools,
 				outputSchema,
+				...(sessionFile && persistedParentSessionFile && options.parentSessionId
+					? {
+							subagent: {
+								agentId: id,
+								parentSessionFile: persistedParentSessionFile,
+								parentSessionId: options.parentSessionId,
+								displayName: subagentDisplayName,
+								model: model ? `${model.provider}/${model.id}` : undefined,
+								taskDepth: childDepth,
+								parentTaskPrefix: id,
+								thinkingLevel: effectiveThinkingLevel ?? null,
+								isolated: worktree !== undefined,
+							},
+						}
+					: {}),
 			});
+			appendLifecycleState?.("running");
 
 			abortSignal.addEventListener(
 				"abort",
@@ -2234,13 +2507,14 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			error = outcome.error;
 			aborted = outcome.aborted;
 			abortReasonText = outcome.abortReasonText;
+			completed = outcome.completed;
 		} catch (err) {
 			exitCode = 1;
 			if (!abortSignal.aborted) {
 				error = err instanceof Error ? err.stack || err.message : String(err);
 			}
 		} finally {
-			if (abortSignal.aborted) {
+			if (abortSignal.aborted && !completed) {
 				if (monitor.interrupted()) {
 					aborted = false;
 					exitCode = 0;
@@ -2265,6 +2539,15 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			if (session) {
 				monitor.captureSalvage(session);
 				const softInterruptKeptAlive = monitor.interrupted() && worktree === undefined;
+				appendLifecycleState?.(
+					softInterruptKeptAlive
+						? "idle"
+						: monitor.interrupted()
+							? "interrupted"
+							: completed && exitCode === 0
+								? "completed"
+								: "failed",
+				);
 				if (softInterruptKeptAlive) {
 					const requestedBy = monitor.interruptRequestedBy() ?? "the orchestrator";
 					const reason = monitor.interruptReason();
@@ -2285,9 +2568,11 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 					// Caller/budget aborts and isolated runtime timeouts are terminal
 					// teardowns. Non-isolated wall-clock timeouts keep the session live
 					// below so the parent can follow up over IRC with the partial state.
+					sessionStatusSubscription?.();
+					sessionStatusSubscription = undefined;
 					registry.setStatus(id, "aborted");
 					try {
-						await untilAborted(AbortSignal.timeout(5000), () => session.dispose());
+						await untilAborted(AbortSignal.timeout(5000), () => session.dispose({ scope: "child" }));
 					} catch {
 						// Ignore cleanup errors
 					}
@@ -2297,9 +2582,11 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 					// transcript stays reachable (history://), but ensureLive will throw.
 					// Status must flip to "parked" before dispose so the sdk dispose
 					// wrapper skips unregister.
+					sessionStatusSubscription?.();
+					sessionStatusSubscription = undefined;
 					registry.setStatus(id, "parked");
 					try {
-						await untilAborted(AbortSignal.timeout(5000), () => session.dispose());
+						await untilAborted(AbortSignal.timeout(5000), () => session.dispose({ scope: "child" }));
 					} catch {
 						// Ignore cleanup errors
 					}
@@ -2308,10 +2595,13 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 					// Keep-alive: finished and failed subagents both stay interrogable.
 					// The lifecycle manager owns idle-TTL parking + revival from here on.
 					registry.setStatus(id, "idle");
+					// Soft interrupts retain a live, immediately revivable session.
 					AgentLifecycleManager.global().adopt(id, {
 						idleTtlMs: agentIdleTtlMs,
 						revive: reviveSession ?? undefined,
+						sessionSubscription: sessionStatusSubscription,
 					});
+					sessionStatusSubscription = undefined;
 				}
 			}
 		}
@@ -2322,14 +2612,12 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			aborted,
 			abortReason: aborted ? abortReasonText : undefined,
 			interrupted: monitor.interrupted(),
+			completed,
 			durationMs: Date.now() - startTime,
 		};
 	};
 
 	const done = await runSubagent();
-	originalRunSettled = true;
-	monitor.finish();
-
 	return finalizeRunResult({
 		monitor,
 		done,
@@ -2340,6 +2628,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 		assignment,
 		description: options.description,
 		modelOverride,
+		routeReceipt,
 		outputSchema,
 		signal,
 		artifactsDir: options.artifactsDir,

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import * as path from "node:path";
 import { TempDir } from "@oh-my-pi/pi-utils/temp";
-import { createHelpers, type HelperContext } from "../js/shared/helpers";
+import { createHelpers, type HelperContext } from "../../src/eval/js/shared/helpers";
 
 /**
  * The eval helpers (`read`/`write`/`append`) must substitute injected on-disk

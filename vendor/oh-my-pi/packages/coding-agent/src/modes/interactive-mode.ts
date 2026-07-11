@@ -171,6 +171,9 @@ import type {
 	TodoPhase,
 } from "./types";
 import { UiHelpers } from "./utils/ui-helpers";
+import { ErrorInbox, type DiagnosticEventInput } from "./utils/error-inbox";
+import { ErrorSelectorComponent } from "./components/error-selector";
+
 
 const HINT_SHIMMER_PALETTE: ShimmerPalette = {
 	low: "dim",
@@ -524,6 +527,7 @@ export class InteractiveMode implements InteractiveModeContext {
 	#welcomeComponent?: WelcomeComponent;
 	readonly #chatHost: ChatBlockHost = { requestRender: () => this.ui.requestRender() };
 
+	readonly errorInbox: ErrorInbox;
 	constructor(
 		session: AgentSession,
 		version: string,
@@ -536,6 +540,12 @@ export class InteractiveMode implements InteractiveModeContext {
 	) {
 		this.session = session;
 		this.sessionManager = session.sessionManager;
+		this.errorInbox = new ErrorInbox(this.sessionManager);
+		try {
+			this.errorInbox.reconcile(this.sessionManager.getEntries());
+		} catch {
+			// silent
+		}
 		this.settings = session.settings;
 		this.keybindings = KeybindingsManager.inMemory();
 		this.agent = session.agent;
@@ -750,7 +760,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.ui.addChild(this.omfgContainer);
 		this.ui.addChild(this.errorBannerContainer);
 		this.ui.addChild(this.modelCycleContainer);
-		this.ui.addChild(this.statusLine); // Only renders hook statuses (main status in editor border)
+		this.ui.addChild(this.statusLine); // Renders hook statuses; also renders the full status row in compact/borderless mode
 		this.ui.addChild(this.hookWidgetContainerAbove);
 		this.ui.addChild(this.editorContainer);
 		this.ui.addChild(this.hookWidgetContainerBelow);
@@ -785,6 +795,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.ui.start({ clearScrollback: options.clearInitialTerminalHistory === true });
 		pushTerminalTitle();
 		setSessionTerminalTitle(this.sessionManager.getSessionName(), this.sessionManager.getCwd());
+		this.#syncEditorBorderMode();
 		this.updateEditorBorderColor();
 		this.#syncEditorMaxHeight();
 		this.isInitialized = true;
@@ -855,6 +866,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			this.#clearWorkingMessageAccentCache();
 			clearRenderCache();
 			this.ui.invalidate();
+			this.#syncEditorBorderMode();
 			this.updateEditorBorderColor();
 			this.ui.requestRender();
 		});
@@ -1288,6 +1300,21 @@ export class InteractiveMode implements InteractiveModeContext {
 			transparent: settings.get("statusLine.transparent"),
 			segmentOptions: settings.get("statusLine.segmentOptions"),
 		});
+		this.#syncEditorBorderMode();
+	}
+
+	/** Toggle editor border chrome based on the active preset.
+	 *  Compact preset: borderless editor with a subtle prompt gutter.
+	 *  Other presets: bordered editor with status in top border. */
+	#syncEditorBorderMode(): void {
+		const borderless = this.statusLine.isBorderless();
+		this.editor.setBorderVisible(!borderless);
+		if (borderless) {
+			this.editor.setPromptGutter(theme.fg("dim", "❯ "));
+			this.editor.setTopBorder(undefined);
+		} else {
+			this.editor.setPromptGutter(undefined);
+		}
 	}
 
 	#handleSessionAccentInputsChanged(): void {
@@ -1297,6 +1324,12 @@ export class InteractiveMode implements InteractiveModeContext {
 	}
 
 	updateEditorBorderColor(): void {
+		// Borderless mode: no border chrome to color, just refresh prompt gutter style
+		if (this.statusLine.isBorderless()) {
+			this.editor.setPromptGutter(theme.fg("dim", "❯ "));
+			this.ui.requestRender();
+			return;
+		}
 		if (this.isBashMode) {
 			this.editor.borderColor = theme.getBashModeBorderColor();
 		} else if (this.isPythonMode) {
@@ -1326,6 +1359,8 @@ export class InteractiveMode implements InteractiveModeContext {
 	}
 
 	updateEditorTopBorder(): void {
+		// In borderless mode, status renders as standalone row — skip top border
+		if (this.statusLine.isBorderless()) return;
 		const availableWidth = this.editor.getTopBorderAvailableWidth(this.ui.terminal.columns);
 		const topBorder = this.statusLine.getTopBorder(availableWidth);
 		this.editor.setTopBorder(topBorder);
@@ -2790,6 +2825,52 @@ export class InteractiveMode implements InteractiveModeContext {
 		const { title } = resolvePlanTitle({ planContent, planFilePath });
 		await this.handlePlanApproval({ planFilePath, title, planExists: true });
 	}
+	handleErrorsCommand(args?: string): void {
+		const tokens = args?.trim().split(/\s+/) ?? [];
+		const verb = tokens[0]?.toLowerCase() ?? "";
+		const rest = tokens.slice(1);
+		if (verb === "clear") {
+			if (rest.length > 0) {
+				this.showStatus("Usage: /errors clear");
+				return;
+			}
+			this.errorInbox.clear();
+			this.showStatus("Error history cleared.");
+			return;
+		}
+		if (verb === "resolve") {
+			if (rest.length !== 1) {
+				this.showStatus("Usage: /errors resolve \u003cid\u003e");
+				return;
+			}
+			const id = rest[0];
+			const ok = this.errorInbox.resolve(id);
+			if (!ok) {
+				this.showStatus(`No error with id "${id}".`);
+				return;
+			}
+			this.showStatus(`Error ${id} resolved.`);
+			return;
+		}
+
+		if (verb !== "") {
+			this.showStatus("Usage: /errors [clear | resolve \u003cid\u003e]");
+			return;
+		}
+
+		const errors = this.errorInbox.getErrors();
+		if (errors.length === 0) {
+			this.showStatus("No recent errors.");
+			return;
+		}
+		this.#selectorController.showSelector(done => {
+			const selector = new ErrorSelectorComponent(errors, () => {
+				done();
+				this.ui.requestRender();
+			});
+			return { component: selector, focus: selector.getSelectList() };
+		});
+	}
 
 	async handlePlanApproval(details: PlanApprovalDetails): Promise<void> {
 		if (!this.planModeEnabled) {
@@ -3011,7 +3092,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		}
 	}
 
-	async shutdown(): Promise<void> {
+	async shutdown(options: { childPolicy?: "detach" | "stop" } = {}): Promise<void> {
 		if (this.#isShuttingDown) return;
 		this.#isShuttingDown = true;
 
@@ -3032,7 +3113,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.#focusController.dispose();
 
 		// Emit shutdown event to hooks
-		await this.session.dispose();
+		await this.session.dispose({ childPolicy: options.childPolicy });
 
 		// Do not force a final render during teardown: disposed session/UI state can
 		// collapse to an empty frame, clearing the viewport and leaving the parent
@@ -3133,7 +3214,29 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.#uiHelpers.showStatus(message, options);
 	}
 
-	showError(message: string): void {
+	#resolveDiagnosticInput(
+		messageOrInput: string | DiagnosticEventInput,
+		source?: string,
+		defaults?: { category?: string; operation?: string },
+	): DiagnosticEventInput {
+		let input: DiagnosticEventInput;
+		if (typeof messageOrInput === "string") {
+			input = { message: messageOrInput };
+			if (source) input.source = source;
+		} else {
+			input = { ...messageOrInput };
+		}
+		if (!input.provider) input.provider = this.session.model?.provider;
+		if (!input.model) input.model = this.session.model?.id;
+		if (!input.session) input.session = this.sessionManager.getSessionId();
+		if (defaults) {
+			if (!input.category) input.category = defaults.category;
+			if (!input.operation) input.operation = defaults.operation;
+		}
+		return input;
+	}
+
+	showError(messageOrInput: string | DiagnosticEventInput, source?: string): void {
 		this.#pendingSubmittedInput = undefined;
 		this.optimisticUserMessageSignature = undefined;
 		this.#pendingSubmissionDispose?.();
@@ -3142,12 +3245,17 @@ export class InteractiveMode implements InteractiveModeContext {
 		if (this.loadingAnimation) {
 			this.#stopLoadingAnimation(true);
 		}
-		this.#uiHelpers.showError(message);
+		const input = this.#resolveDiagnosticInput(messageOrInput, source, { category: "ui", operation: "display" });
+		this.errorInbox.recordError(input);
+		this.#uiHelpers.showError(typeof messageOrInput === "string" ? messageOrInput : messageOrInput.message);
 	}
 
-	showPinnedError(message: string): void {
+	showPinnedError(messageOrInput: string | DiagnosticEventInput, source?: string): void {
+		const message = typeof messageOrInput === "string" ? messageOrInput : messageOrInput.message;
 		this.errorBannerContainer.clear();
 		this.errorBannerContainer.addChild(new ErrorBannerComponent(message));
+		const input = this.#resolveDiagnosticInput(messageOrInput, source, { category: "provider", operation: "turn" });
+		this.errorInbox.recordError(input);
 		this.ui.requestRender();
 	}
 

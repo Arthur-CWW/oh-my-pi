@@ -1,7 +1,7 @@
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import { getSegmenter } from "@oh-my-pi/pi-tui";
 import { LRUCache } from "lru-cache/raw";
-import { canonicalizeMessage } from "../../utils/thinking-display";
+import { normalizeThinkingDisplay } from "../../utils/thinking-display";
 import type { AssistantMessageComponent } from "../components/assistant-message";
 
 export const STREAMING_REVEAL_FRAME_MS = 1000 / 30;
@@ -88,8 +88,9 @@ export function visibleUnits(message: AssistantMessage, hideThinking: boolean): 
 	for (const block of message.content) {
 		if (block.type === "text") {
 			total += countGraphemes(block.text);
-		} else if (block.type === "thinking" && !hideThinking && canonicalizeMessage(block.thinking)) {
-			total += countGraphemes(block.thinking);
+		} else if (block.type === "thinking" && !hideThinking) {
+			const thinking = normalizeThinkingDisplay(block.thinking);
+			if (thinking) total += countGraphemes(thinking);
 		}
 	}
 	return total;
@@ -129,9 +130,14 @@ export function buildDisplayMessage(
 			const units = countOf(i, block.text);
 			content.push(revealTextBlock(block, remaining, units));
 			remaining = Math.max(0, remaining - units);
-		} else if (block.type === "thinking" && !hideThinking && canonicalizeMessage(block.thinking)) {
-			const units = countOf(i, block.thinking);
-			content.push(revealThinkingBlock(block, remaining, units));
+		} else if (block.type === "thinking" && !hideThinking) {
+			const thinking = normalizeThinkingDisplay(block.thinking);
+			if (!thinking) {
+				content.push({ ...block, thinking: "" });
+				continue;
+			}
+			const units = countOf(i, thinking);
+			content.push(revealThinkingBlock({ ...block, thinking }, remaining, units));
 			remaining = Math.max(0, remaining - units);
 		} else {
 			content.push(block);
@@ -231,8 +237,9 @@ export class StreamingRevealController {
 			const block = message.content[i]!;
 			if (block.type === "text") {
 				total += this.#unitCounter.count(i, block.text);
-			} else if (block.type === "thinking" && !this.#hideThinkingBlock && canonicalizeMessage(block.thinking)) {
-				total += this.#unitCounter.count(i, block.thinking);
+			} else if (block.type === "thinking" && !this.#hideThinkingBlock) {
+				const thinking = normalizeThinkingDisplay(block.thinking);
+				if (thinking) total += this.#unitCounter.count(i, thinking);
 			}
 		}
 		return total;

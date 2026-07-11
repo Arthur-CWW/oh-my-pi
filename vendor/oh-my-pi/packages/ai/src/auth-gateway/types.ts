@@ -1,4 +1,4 @@
-import type { Effort } from "@oh-my-pi/pi-catalog/effort";
+import type { Effort, ReasoningEffort } from "@oh-my-pi/pi-catalog/effort";
 import type {
 	AssistantMessage,
 	AssistantMessageEventStream,
@@ -53,8 +53,8 @@ export interface AuthGatewayParsedRequestOptions {
 	parallelToolCalls?: boolean;
 
 	// ── Reasoning ─────────────────────────────────────────────────────────
-	/** Effort-level reasoning request (OpenAI Responses / Chat `reasoning_effort`). */
-	reasoning?: Effort;
+	/** Exact effort string validated against the resolved model's advertised capabilities. */
+	reasoning?: ReasoningEffort;
 	/** Force-disable reasoning (Anthropic `thinking: { type: "disabled" }`). */
 	disableReasoning?: boolean;
 	/**

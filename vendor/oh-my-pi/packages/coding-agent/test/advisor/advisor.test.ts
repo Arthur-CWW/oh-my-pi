@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "bun:test";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
-import { createAdvisorMessageCard } from "../../modes/components/advisor-message";
-import { getThemeByName } from "../../modes/theme/theme";
-import { formatSessionHistoryMarkdown } from "../../session/session-history-format";
-import { YieldQueue } from "../../session/yield-queue";
+import { createAdvisorMessageCard } from "../../src/modes/components/advisor-message";
+import { getThemeByName } from "../../src/modes/theme/theme";
+import { formatSessionHistoryMarkdown } from "../../src/session/session-history-format";
+import { YieldQueue } from "../../src/session/yield-queue";
 import {
 	ADVISOR_READONLY_TOOL_NAMES,
 	AdviseTool,
@@ -12,7 +12,7 @@ import {
 	type AdvisorRuntimeHost,
 	formatAdvisorBatchContent,
 	isInterruptingSeverity,
-} from "..";
+} from "../../src/advisor";
 
 describe("advisor", () => {
 	describe("formatSessionHistoryMarkdown includeThinking", () => {

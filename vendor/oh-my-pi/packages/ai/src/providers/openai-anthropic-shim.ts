@@ -9,10 +9,13 @@
  */
 
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
+import type { Effort } from "@oh-my-pi/pi-catalog/effort";
+import { requireSupportedEffort } from "@oh-my-pi/pi-catalog/model-thinking";
 import { ANTHROPIC_THINKING } from "../stream";
 import type { Context, Model, ModelSpec, SimpleStreamOptions } from "../types";
 import { AssistantMessageEventStream } from "../utils/event-stream";
 import { createProviderErrorMessage } from "./error-message";
+import type { OpenAICompletionsOptions } from "./openai-completions";
 import { streamAnthropic, streamOpenAICompletions } from "./register-builtins";
 
 export type OpenAIAnthropicApiFormat = "openai" | "anthropic";
@@ -71,10 +74,11 @@ export function streamOpenAIAnthropicShim(
 					cost: model.cost,
 				} as ModelSpec<"anthropic-messages">);
 
-				const reasoningEffort = options?.reasoning;
+				const reasoningEffort =
+					options?.reasoning === undefined ? undefined : (requireSupportedEffort(model, options.reasoning) as Effort);
 				const thinkingEnabled = !!reasoningEffort && model.reasoning;
 				const thinkingBudget = reasoningEffort
-					? (options?.thinkingBudgets?.[reasoningEffort] ?? ANTHROPIC_THINKING[reasoningEffort])
+					? (options?.thinkingBudgets?.[reasoningEffort] ?? ANTHROPIC_THINKING[reasoningEffort] ?? 0)
 					: undefined;
 
 				const innerStream = streamAnthropic(anthropicModel, context, {
@@ -110,7 +114,8 @@ export function streamOpenAIAnthropicShim(
 						} as ModelSpec<"openai-completions">)
 					: model;
 
-				const reasoningEffort = options?.reasoning;
+				const reasoningEffort =
+					options?.reasoning === undefined ? undefined : (requireSupportedEffort(model, options.reasoning) as Effort);
 				const innerStream = streamOpenAICompletions(openaiModel, context, {
 					apiKey,
 					temperature: options?.temperature,
@@ -127,7 +132,7 @@ export function streamOpenAIAnthropicShim(
 					onResponse: options?.onResponse,
 					onSseEvent: options?.onSseEvent,
 					fetch: options?.fetch,
-					reasoning: reasoningEffort,
+					reasoning: reasoningEffort as OpenAICompletionsOptions["reasoning"],
 				});
 
 				for await (const event of innerStream) {

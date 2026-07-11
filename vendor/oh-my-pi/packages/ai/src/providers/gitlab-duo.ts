@@ -1,3 +1,5 @@
+import type { Effort } from "@oh-my-pi/pi-catalog/effort";
+import { requireSupportedEffort } from "@oh-my-pi/pi-catalog/model-thinking";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { ANTHROPIC_THINKING, mapAnthropicToolChoice } from "../stream";
 import type { Api, Context, FetchImpl, Model, ModelSpec, SimpleStreamOptions } from "../types";
@@ -253,7 +255,8 @@ export function streamGitLabDuo(
 				...options.headers,
 			};
 
-			const reasoningEffort = options.reasoning;
+			const reasoningEffort =
+				options.reasoning === undefined ? undefined : (requireSupportedEffort(model, options.reasoning) as Effort);
 
 			const inner =
 				mapping.provider === "anthropic"
@@ -289,7 +292,7 @@ export function streamGitLabDuo(
 								fetch: options.fetch,
 								thinkingEnabled: Boolean(reasoningEffort) && model.reasoning,
 								thinkingBudgetTokens: reasoningEffort
-									? (options.thinkingBudgets?.[reasoningEffort] ?? ANTHROPIC_THINKING[reasoningEffort])
+									? (options.thinkingBudgets?.[reasoningEffort] ?? ANTHROPIC_THINKING[reasoningEffort] ?? 0)
 									: undefined,
 								reasoning: reasoningEffort,
 								toolChoice: mapAnthropicToolChoice(options.toolChoice),
@@ -325,7 +328,7 @@ export function streamGitLabDuo(
 									onResponse: options.onResponse,
 									onSseEvent: options.onSseEvent,
 									fetch: options.fetch,
-									reasoning: reasoningEffort,
+									reasoning: reasoningEffort as OpenAIResponsesOptions["reasoning"],
 									toolChoice: options.toolChoice,
 								} satisfies OpenAIResponsesOptions,
 							)
@@ -358,7 +361,7 @@ export function streamGitLabDuo(
 									onResponse: options.onResponse,
 									onSseEvent: options.onSseEvent,
 									fetch: options.fetch,
-									reasoning: reasoningEffort,
+									reasoning: reasoningEffort as OpenAICompletionsOptions["reasoning"],
 									toolChoice: options.toolChoice,
 								} satisfies OpenAICompletionsOptions,
 							);

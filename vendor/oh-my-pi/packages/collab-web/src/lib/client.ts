@@ -9,6 +9,7 @@
  */
 
 import type {
+	AgentOperationAction,
 	AgentSnapshot,
 	AssistantMessage,
 	HostFrame,
@@ -73,6 +74,35 @@ interface PendingTranscript {
 	timer: Timer;
 }
 
+export interface AgentOperationResult {
+	ok: boolean;
+	error?: string;
+}
+
+interface PendingAgentOperation {
+	resolve: (result: AgentOperationResult | null) => void;
+	timer: Timer;
+}
+
+function copyState(state: SessionState): SessionState {
+	return {
+		...state,
+		model: state.model ? { ...state.model } : undefined,
+		contextUsage: state.contextUsage ? { ...state.contextUsage } : undefined,
+		participants: state.participants.map(participant => ({ ...participant })),
+	};
+}
+
+function copyAgent(agent: AgentSnapshot): AgentSnapshot {
+	return {
+		...agent,
+		activity: agent.activity ? { ...agent.activity } : undefined,
+		recovery: agent.recovery ? { ...agent.recovery } : undefined,
+		quota: agent.quota ? { ...agent.quota } : undefined,
+		operation: agent.operation ? { ...agent.operation, supportedActions: [...agent.operation.supportedActions] } : undefined,
+	};
+}
+
 export class GuestClient {
 	readonly #socket: CollabSocket;
 	readonly #name: string;
@@ -80,6 +110,7 @@ export class GuestClient {
 	readonly #writeToken: string | undefined;
 	readonly #listeners = new Set<() => void>();
 	readonly #pendingTranscripts = new Map<number, PendingTranscript>();
+	readonly #pendingAgentOperations = new Map<number, PendingAgentOperation>();
 	#reqSeq = 0;
 	#noticeSeq = 0;
 	#everConnected = false;
@@ -161,6 +192,22 @@ export class GuestClient {
 	sendAgentCmd(cmd: "chat" | "kill" | "revive", agentId: string, text?: string): void {
 		this.#socket.send({ t: "agent-cmd", cmd, agentId, text });
 	}
+	/** Sends a real host-advertised durable operation and resolves its correlated outcome. */
+	sendOperationCmd(
+		action: AgentOperationAction,
+		agentId: string,
+		inputId?: string,
+	): Promise<AgentOperationResult | null> {
+		const reqId = ++this.#reqSeq;
+		const { promise, resolve } = Promise.withResolvers<AgentOperationResult | null>();
+		const timer = setTimeout(() => {
+			this.#pendingAgentOperations.delete(reqId);
+			resolve(null);
+		}, TRANSCRIPT_TIMEOUT_MS);
+		this.#pendingAgentOperations.set(reqId, { resolve, timer });
+		this.#socket.send({ t: "agent-op-cmd", reqId, action, agentId, inputId });
+		return promise;
+	}
 
 	/** Incremental subagent-transcript read. Resolves null on error reply or 10s timeout. */
 	fetchTranscript(agentId: string, fromByte: number): Promise<{ text: string; newSize: number } | null> {
@@ -207,6 +254,11 @@ export class GuestClient {
 			pending.resolve(null);
 		}
 		this.#pendingTranscripts.clear();
+		for (const [, pending] of this.#pendingAgentOperations) {
+			clearTimeout(pending.timer);
+			pending.resolve(null);
+		}
+		this.#pendingAgentOperations.clear();
 		this.#commit();
 		this.#socket.close();
 	}
@@ -236,10 +288,10 @@ export class GuestClient {
 	#applyFrame(frame: HostFrame): void {
 		switch (frame.t) {
 			case "welcome":
-				this.#header = frame.header;
+				this.#header = { ...frame.header };
 				this.#entries = [...frame.entries];
-				this.#state = frame.state;
-				this.#agents = [...frame.agents];
+				this.#state = copyState(frame.state);
+				this.#agents = frame.agents.map(copyAgent);
 				this.#stream = null;
 				this.#streamDone = false;
 				this.#activeTools = new Map();
@@ -263,7 +315,7 @@ export class GuestClient {
 				this.#applyEvent(frame.event);
 				break;
 			case "state":
-				this.#state = frame.state;
+				this.#state = copyState(frame.state);
 				if (!frame.state.isStreaming) {
 					this.#working = false;
 					if (this.#streamDone) {
@@ -273,7 +325,7 @@ export class GuestClient {
 				}
 				break;
 			case "agents":
-				this.#agents = [...frame.agents];
+				this.#agents = frame.agents.map(copyAgent);
 				break;
 			case "bus":
 				if (frame.channel === "task:subagent:progress") {
@@ -290,6 +342,15 @@ export class GuestClient {
 					this.#pendingTranscripts.delete(frame.reqId);
 					clearTimeout(pending.timer);
 					pending.resolve(frame.error !== undefined ? null : { text: frame.text, newSize: frame.newSize });
+				}
+				break;
+			}
+			case "agent-op-result": {
+				const pending = this.#pendingAgentOperations.get(frame.reqId);
+				if (pending) {
+					this.#pendingAgentOperations.delete(frame.reqId);
+					clearTimeout(pending.timer);
+					pending.resolve(frame.ok ? { ok: true } : { ok: false, error: frame.error });
 				}
 				break;
 			}

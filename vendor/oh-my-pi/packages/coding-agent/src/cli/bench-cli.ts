@@ -8,6 +8,7 @@ import type {
 	Context,
 	Effort,
 	Model,
+	ReasoningEffort,
 	SimpleStreamOptions,
 } from "@oh-my-pi/pi-ai";
 import { streamSimple } from "@oh-my-pi/pi-ai";
@@ -155,8 +156,8 @@ interface BenchRequestOptions {
 	sessionId: string;
 	prompt: string;
 	maxTokens: number;
-	/** Explicit effort from a `:level` selector suffix; absent = provider default. */
-	reasoning?: Effort;
+	/** Exact validated effort from a `:level` selector suffix; absent = provider default. */
+	reasoning?: ReasoningEffort;
 	/** Only set for an explicit `:off` suffix — some endpoints reject disablement. */
 	disableReasoning?: boolean;
 }

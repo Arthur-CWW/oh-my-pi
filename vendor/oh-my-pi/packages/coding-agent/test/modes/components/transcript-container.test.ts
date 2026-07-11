@@ -8,6 +8,25 @@ import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { USER_INTERRUPT_LABEL } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { type Component, Text } from "@oh-my-pi/pi-tui";
 
+function withEnvPatch<T>(patch: Record<string, string | undefined>, run: () => T): T {
+	const saved: Record<string, string | undefined> = {};
+	for (const key in patch) {
+		saved[key] = Bun.env[key];
+		const value = patch[key];
+		if (value === undefined) delete Bun.env[key];
+		else Bun.env[key] = value;
+	}
+	try {
+		return run();
+	} finally {
+		for (const key in saved) {
+			const value = saved[key];
+			if (value === undefined) delete Bun.env[key];
+			else Bun.env[key] = value;
+		}
+	}
+}
+
 // Models a transcript block that re-lays-out (tool preview collapsing, assistant
 // message finalizing, late async result) after newer blocks were appended below
 // it — the window must always reflect its current content.
@@ -396,6 +415,140 @@ describe("TranscriptContainer", () => {
 		const rendersAfterTransition = block.renderCount;
 		expect(container.render(40)).toEqual(["streaming", "done", "", "tail"]);
 		expect(block.renderCount).toBe(rendersAfterTransition);
+	});
+	it("reuses versioned finalized history behind a live tail and invalidates it on mutation", () => {
+		withEnvPatch({ PI_TRANSCRIPT_VIRTUALIZATION: "true" }, () => {
+			const container = new TranscriptContainer();
+			const first = new VersionedFinalizedBlock(["first"]);
+			const second = new VersionedFinalizedBlock(["second"]);
+			const tail = new StreamingBlock(["tail-0"]);
+			container.addChild(first);
+			container.addChild(second);
+			container.addChild(tail);
+
+			expect(container.render(40)).toEqual(["first", "", "second", "", "tail-0"]);
+			expect([first.renderCount, second.renderCount]).toEqual([1, 1]);
+
+			// The finalized prefix is neither re-rendered nor re-concatenated while
+			// the streaming tail changes; the visible bytes remain exact.
+			tail.set(["tail-1"]);
+			expect(container.render(40)).toEqual(["first", "", "second", "", "tail-1"]);
+			expect([first.renderCount, second.renderCount]).toEqual([1, 1]);
+			expect(container.getNativeScrollbackLiveRegionStart()).toBe(4);
+			expect(container.getNativeScrollbackCommitSafeEnd()).toBeUndefined();
+
+			// A post-finalize version bump must abandon the cached prefix immediately,
+			// rather than leaving the old history bytes above the live seam.
+			first.mutate(["first-updated"]);
+			expect(container.render(40)).toEqual(["first-updated", "", "second", "", "tail-1"]);
+			expect([first.renderCount, second.renderCount]).toEqual([2, 2]);
+		});
+	});
+
+	it("retains no duplicate finalized prefix cache or finalized diff snapshots at 10k", () => {
+		withEnvPatch({ PI_TRANSCRIPT_VIRTUALIZATION: "true" }, () => {
+			const container = new TranscriptContainer();
+			for (let i = 0; i < 10_000; i++) container.addChild(new VersionedFinalizedBlock([`history-${i}`]));
+			container.addChild(new StreamingBlock(["tail"]));
+
+			container.render(80);
+			const retention = container.getRetentionMetrics();
+			// The full-frame rows and per-child segments are the sole canonical render
+			// representation required by the TUI compose contract. The prefix cache is
+			// scalar and finalized children retain no per-component diff array.
+			expect(retention.segments).toBe(10_001);
+			expect(retention.assembledRows).toBeGreaterThan(10_000);
+			expect(retention.historyPrefixSegmentRefs).toBe(0);
+			expect(retention.liveSnapshotRowRefs).toBe(1);
+			expect(retention.liveSnapshots).toBe(1);
+			expect(retention.historyPrefixCacheEntries).toBe(1);
+		});
+	});
+
+	it("invalidates finalized-prefix reuse on width and explicit history invalidation", () => {
+		withEnvPatch({ PI_TRANSCRIPT_VIRTUALIZATION: "true" }, () => {
+			const container = new TranscriptContainer();
+			const history = new VersionedFinalizedBlock(["history"]);
+			const tail = new StreamingBlock(["tail"]);
+			container.addChild(history);
+			container.addChild(tail);
+
+			container.render(40);
+			container.render(40);
+			expect(history.renderCount).toBe(1);
+
+			container.render(80);
+			expect(history.renderCount).toBe(2);
+			container.invalidate();
+			expect(container.render(80)).toEqual(["history", "", "tail"]);
+
+			expect(history.renderCount).toBe(3);
+		});
+	});
+
+	it("reuses committed versionless history behind a live tail", () => {
+		const container = new TranscriptContainer();
+		const history = new CountingFinalizedBlock(["committed history"]);
+		const tail = new StreamingBlock(["tail-0"]);
+		container.addChild(history);
+		container.addChild(tail);
+
+		container.render(40);
+		container.setNativeScrollbackCommittedRows(1);
+		container.render(40); // establish cache after native commitment
+		expect(history.renderCount).toBe(1);
+
+		tail.set(["tail-1"]);
+		expect(container.render(40)).toEqual(["committed history", "", "tail-1"]);
+		expect(history.renderCount).toBe(1);
+	});
+
+	it("retains no prefix cache entries by default (virtualization disabled)", () => {
+		withEnvPatch({ PI_TRANSCRIPT_VIRTUALIZATION: undefined }, () => {
+			const container = new TranscriptContainer();
+			for (let i = 0; i < 10; i++) container.addChild(new VersionedFinalizedBlock([`history-${i}`]));
+			container.addChild(new StreamingBlock(["tail"]));
+
+			container.render(80);
+			const retention = container.getRetentionMetrics();
+			expect(retention.historyPrefixCacheEntries).toBe(0);
+		});
+	});
+
+	it("keeps ANSI-rendered assistant history byte-identical behind a changing tail", () => {
+		withEnvPatch({ PI_TRANSCRIPT_VIRTUALIZATION: "true" }, () => {
+			const width = 48;
+			const historyMessage = makeAssistantMessage({
+				content: [{ type: "text", text: "## Finalized\n\n**bold** and `code`" }],
+			});
+			const tailMessage = makeAssistantMessage({ content: [{ type: "text", text: "streaming tail" }] });
+			const changedTailMessage = makeAssistantMessage({
+				content: [{ type: "text", text: "streaming tail changed" }],
+			});
+			const container = new TranscriptContainer();
+			const history = new AssistantMessageComponent();
+			const tail = new AssistantMessageComponent();
+			history.updateContent(historyMessage);
+			history.markTranscriptBlockFinalized();
+			tail.updateContent(tailMessage);
+			container.addChild(history);
+			container.addChild(tail);
+			container.render(width); // establish the finalized-prefix cache
+
+			tail.updateContent(changedTailMessage);
+			const cached = [...container.render(width)];
+
+			// A fresh composition is the exact byte-level oracle, including SGR bytes.
+			const control = new TranscriptContainer();
+			const controlHistory = new AssistantMessageComponent();
+			const controlTail = new AssistantMessageComponent();
+			controlHistory.updateContent(historyMessage);
+			controlHistory.markTranscriptBlockFinalized();
+			controlTail.updateContent(changedTailMessage);
+			control.addChild(controlHistory);
+			control.addChild(controlTail);
+			expect(cached).toEqual([...control.render(width)]);
+		});
 	});
 	it("reports a new assistant block version after post-finalize error unpinning", () => {
 		const message: AssistantMessage = {

@@ -1,5 +1,5 @@
 import { type ResolvedThinkingLevel, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import { Effort, type Model, THINKING_EFFORTS } from "@oh-my-pi/pi-ai";
+import { Effort, type Model, type ReasoningEffort, THINKING_EFFORTS } from "@oh-my-pi/pi-ai";
 import { clampThinkingLevelForModel, getSupportedEfforts } from "@oh-my-pi/pi-catalog/model-thinking";
 
 /**
@@ -11,13 +11,16 @@ export interface ThinkingLevelMetadata {
 	description: string;
 }
 
-const THINKING_LEVEL_METADATA: Record<ThinkingLevel, ThinkingLevelMetadata> = {
+type KnownThinkingLevel = (typeof ThinkingLevel)[keyof typeof ThinkingLevel];
+
+const THINKING_LEVEL_METADATA: Record<KnownThinkingLevel, ThinkingLevelMetadata> = {
 	[ThinkingLevel.Inherit]: {
 		value: ThinkingLevel.Inherit,
 		label: "inherit",
 		description: "Inherit session default",
 	},
 	[ThinkingLevel.Off]: { value: ThinkingLevel.Off, label: "off", description: "No reasoning" },
+	[ThinkingLevel.None]: { value: ThinkingLevel.None, label: "none", description: "No provider reasoning" },
 	[ThinkingLevel.Minimal]: {
 		value: ThinkingLevel.Minimal,
 		label: "min",
@@ -35,13 +38,21 @@ const THINKING_LEVEL_METADATA: Record<ThinkingLevel, ThinkingLevelMetadata> = {
 		label: "xhigh",
 		description: "Maximum reasoning (~32k tokens)",
 	},
+	[ThinkingLevel.Max]: {
+		value: ThinkingLevel.Max,
+		label: "max",
+		description: "Maximum provider reasoning",
+	},
 };
 
 const THINKING_LEVELS = new Set<string>([ThinkingLevel.Inherit, ThinkingLevel.Off, ...THINKING_EFFORTS]);
 const EFFORT_LEVELS = new Set<string>(THINKING_EFFORTS);
 
 /**
- * Parses a provider-facing effort value.
+ * Parses a legacy canonical effort selector.
+ *
+ * Endpoint-advertised values deliberately bypass this selector and are carried
+ * as {@link ReasoningEffort} only after model-capability validation.
  */
 export function parseEffort(value: string | null | undefined): Effort | undefined {
 	return value !== undefined && value !== null && EFFORT_LEVELS.has(value) ? (value as Effort) : undefined;
@@ -55,20 +66,26 @@ export function parseThinkingLevel(value: string | null | undefined): ThinkingLe
 }
 
 /**
- * Returns display metadata for a thinking selector.
+ * Returns display metadata for a thinking selector or endpoint-defined effort.
  */
 export function getThinkingLevelMetadata(level: ThinkingLevel): ThinkingLevelMetadata {
-	return THINKING_LEVEL_METADATA[level];
+	return (
+		THINKING_LEVEL_METADATA[level as KnownThinkingLevel] ?? {
+			value: level,
+			label: level,
+			description: "Provider-defined reasoning effort",
+		}
+	);
 }
 
 /**
- * Converts an agent-local selector into the effort sent to providers.
+ * Converts an agent-local selector into an exact provider reasoning effort.
  */
-export function toReasoningEffort(level: ThinkingLevel | undefined): Effort | undefined {
-	if (level === undefined || level === ThinkingLevel.Off || level === ThinkingLevel.Inherit) {
+export function toReasoningEffort(level: ThinkingLevel | undefined): ReasoningEffort | undefined {
+	if (level === undefined || level.length === 0 || level === ThinkingLevel.Off || level === ThinkingLevel.Inherit) {
 		return undefined;
 	}
-	return level;
+	return level as ReasoningEffort;
 }
 
 /**
@@ -136,21 +153,33 @@ export function getConfiguredThinkingLevelMetadata(level: ConfiguredThinkingLeve
 /**
  * Resolves an auto-classified effort against the active model's supported
  * range. Unlike {@link clampThinkingLevelForModel}, `auto` never resolves below
- * {@link Effort.Low}: the eligible pool is the model's supported efforts at or
- * above Low (falling back to the full supported set only when the model maxes
- * out below Low). Within that pool the request snaps to the highest level not
- * exceeding it, or the pool minimum when the request is below the pool.
+ * {@link Effort.Low}: the eligible pool is the model's supported canonical
+ * efforts at or above Low (falling back to the full supported set only when the
+ * model exposes no canonical auto range). Unknown endpoint values have no global
+ * ordering, so an advertised unknown default round-trips unchanged.
  */
-export function clampAutoThinkingEffort(model: Model | undefined, effort: Effort): Effort {
+export function clampAutoThinkingEffort(model: Model | undefined, effort: Effort): Effort;
+export function clampAutoThinkingEffort(
+	model: Model | undefined,
+	effort: ReasoningEffort,
+): ReasoningEffort;
+export function clampAutoThinkingEffort(
+	model: Model | undefined,
+	effort: ReasoningEffort,
+): ReasoningEffort {
 	const supported = model ? getSupportedEfforts(model) : THINKING_EFFORTS;
 	if (supported.length === 0) return effort;
-	const lowIndex = THINKING_EFFORTS.indexOf(Effort.Low);
-	const eligible = supported.filter(level => THINKING_EFFORTS.indexOf(level) >= lowIndex);
+	const knownEffortIndex = (candidate: ReasoningEffort): number =>
+		THINKING_EFFORTS.findIndex(known => known === candidate);
+	if (knownEffortIndex(effort) < 0 && supported.includes(effort)) return effort;
+	const lowIndex = knownEffortIndex(Effort.Low);
+	const eligible = supported.filter(level => knownEffortIndex(level) >= lowIndex);
 	const pool = eligible.length > 0 ? eligible : supported;
-	const requestedIndex = THINKING_EFFORTS.indexOf(effort);
-	let chosen = pool[0];
+	const requestedIndex = knownEffortIndex(effort);
+	if (requestedIndex < 0) return pool[0]!;
+	let chosen = pool[0]!;
 	for (const candidate of pool) {
-		if (THINKING_EFFORTS.indexOf(candidate) > requestedIndex) break;
+		if (knownEffortIndex(candidate) > requestedIndex) break;
 		chosen = candidate;
 	}
 	return chosen;
@@ -161,7 +190,7 @@ export function clampAutoThinkingEffort(model: Model | undefined, effort: Effort
  * turn has been classified. Prefers the model's `defaultLevel`, otherwise High,
  * clamped into the auto range. Returns `undefined` for non-reasoning models.
  */
-export function resolveProvisionalAutoLevel(model: Model | undefined): Effort | undefined {
+export function resolveProvisionalAutoLevel(model: Model | undefined): ReasoningEffort | undefined {
 	if (!model?.reasoning) return undefined;
 	return clampAutoThinkingEffort(model, model.thinking?.defaultLevel ?? Effort.High);
 }

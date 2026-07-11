@@ -80,6 +80,15 @@ export type CollabFrame =
 	| { t: "agents"; agents: AgentSnapshot[] }
 	/** Targeted reply to fetch-transcript; `text` is decoded JSONL from `fromByte`, `newSize` the next offset base. */
 	| { t: "transcript"; reqId: number; text: string; newSize: number; error?: string }
+	/** Correlated reply to a durable-operation command. */
+	| {
+			t: "agent-op-result";
+			reqId: number;
+			action: "reconcile" | "retry" | "cancel" | "inspect";
+			agentId: string;
+			ok: boolean;
+			error?: string;
+	  }
 	| { t: "bye"; reason: string }
 	| { t: "error"; message: string };
 

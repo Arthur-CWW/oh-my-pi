@@ -953,4 +953,94 @@ describe("ACP event mapper", () => {
 		});
 		expectAcpStructureRejects(zSessionNotification, { ...notification, sessionId: 42 });
 	});
+
+	it("buffers split empty thinking separators until they can be omitted", () => {
+		const assistantMessage = {
+			...makeAssistantMessage(""),
+			content: [{ type: "thinking" as const, thinking: "## Plan\n<!-- " }],
+		};
+		const progress = { textEmitted: false, thoughtEmitted: false };
+		const options = {
+			getMessageProgress: (message: unknown) => (message === assistantMessage ? progress : undefined),
+		};
+
+		const opening = mapAgentSessionEventToAcpSessionUpdates(
+			{
+				type: "message_update",
+				message: assistantMessage,
+				assistantMessageEvent: {
+					type: "thinking_delta",
+					delta: "## Plan\n<!-- ",
+					partial: assistantMessage,
+					contentIndex: 0,
+				},
+			} as AgentSessionEvent,
+			"session-1",
+			options,
+		);
+		assistantMessage.content[0]!.thinking = "## Plan\n<!-- -->\n## Next";
+		const closing = mapAgentSessionEventToAcpSessionUpdates(
+			{
+				type: "message_update",
+				message: assistantMessage,
+				assistantMessageEvent: {
+					type: "thinking_delta",
+					delta: "-->\n## Next",
+					partial: assistantMessage,
+					contentIndex: 0,
+				},
+			} as AgentSessionEvent,
+			"session-1",
+			options,
+		);
+
+		const chunks = [...opening, ...closing].map(
+			update => (update.update as { content: { text: string } }).content.text,
+		);
+		expect(chunks).toEqual(["## Plan", "\n\n## Next"]);
+		expect(chunks.join("")).toBe("## Plan\n\n## Next");
+	});
+
+	it("flushes an incomplete separator at thinking end", () => {
+		const assistantMessage = {
+			...makeAssistantMessage(""),
+			content: [{ type: "thinking" as const, thinking: "Plan<!--" }],
+		};
+		const progress = { textEmitted: false, thoughtEmitted: false };
+		const options = {
+			getMessageProgress: (message: unknown) => (message === assistantMessage ? progress : undefined),
+		};
+		const delta = mapAgentSessionEventToAcpSessionUpdates(
+			{
+				type: "message_update",
+				message: assistantMessage,
+				assistantMessageEvent: {
+					type: "thinking_delta",
+					delta: "Plan<!--",
+					partial: assistantMessage,
+					contentIndex: 0,
+				},
+			} as AgentSessionEvent,
+			"session-1",
+			options,
+		);
+		const end = mapAgentSessionEventToAcpSessionUpdates(
+			{
+				type: "message_update",
+				message: assistantMessage,
+				assistantMessageEvent: {
+					type: "thinking_end",
+					content: "Plan<!--",
+					partial: assistantMessage,
+					contentIndex: 0,
+				},
+			} as AgentSessionEvent,
+			"session-1",
+			options,
+		);
+
+		const chunks = [...delta, ...end].map(update => (update.update as { content: { text: string } }).content.text);
+		expect(chunks).toEqual(["Plan", "<!--"]);
+		expect(chunks.join("")).toBe("Plan<!--");
+	});
 });

@@ -70,6 +70,12 @@ import {
 	type SessionScanSkippedFile,
 } from "./session/session-listing";
 import { SessionManager } from "./session/session-manager";
+import {
+	acquireSessionOwnership,
+	ExternalSessionOwner,
+	ExternalSessionOwnerUnverifiable,
+	type SessionOwnershipHandle,
+} from "./session/session-ownership";
 import { executeBuiltinSlashCommand } from "./slash-commands/builtin-registry";
 import { discoverTitleSystemPromptFile, resolvePromptInput } from "./system-prompt";
 import { initTelemetryExport, isTelemetryExportEnabled } from "./telemetry-export";
@@ -83,6 +89,8 @@ import {
 	writeLastChangelogVersion,
 } from "./utils/changelog";
 import { EventBus } from "./utils/event-bus";
+import { createReAdoptedSessionReviver } from "./task/executor";
+import { reAdoptDirectChildren } from "./task/re-adopt";
 
 type RunAcpMode = (createSession: AcpSessionFactory) => Promise<never>;
 type RunPrintMode = (session: AgentSession, options: PrintModeOptions) => Promise<void>;
@@ -427,7 +435,7 @@ async function runInteractiveMode(
 
 	await mode.init({
 		suppressWelcomeIntro: resuming || setupScenes.length > 0,
-		clearInitialTerminalHistory: true,
+		clearInitialTerminalHistory: false,
 	});
 
 	if (setupWizard && setupScenes.length > 0) {
@@ -445,12 +453,9 @@ async function runInteractiveMode(
 		})
 		.catch(() => {});
 
-	// Cold-launch cleanup: the first paint already clears native history, and this
-	// replay replaces the welcome/startup frame with the resumed/new transcript.
-	// Every in-process session load also uses `clearTerminalHistory`; cold launch
-	// follows the same clean-cutover path instead of preserving a previous run's
-	// transcript above the fresh one.
-	mode.renderInitialMessages({ preserveExistingChat: true, clearTerminalHistory: true });
+	// Replay the persisted transcript after the startup frame without erasing
+	// native terminal scrollback from a previous launch.
+	mode.renderInitialMessages({ preserveExistingChat: true });
 
 	for (const notify of notifs) {
 		if (!notify) {
@@ -1172,6 +1177,25 @@ export async function runRootCommand(
 		sessionManager = await SessionManager.open(selected.path);
 	}
 
+	// The session file and persisted id are now final. Acquire before extension
+	// startup, session creation, writer open, or durable child re-adoption.
+	let ownership: SessionOwnershipHandle | undefined;
+	if (sessionManager?.getSessionFile()) {
+		try {
+			ownership = await acquireSessionOwnership(sessionManager.getSessionFile() as string, sessionManager.getSessionId(), {
+				suppliedEpoch: process.env.OMP_SESSION_OWNER_EPOCH,
+				suppliedSocket: process.env.OMP_SESSION_OWNER_SOCKET,
+			});
+			sessionManager.bindSessionOwnership(ownership);
+		} catch (error) {
+			if (error instanceof ExternalSessionOwner || error instanceof ExternalSessionOwnerUnverifiable) {
+				process.stderr.write(`${chalk.red(`Error: ${error.message}`)}\n`);
+				return;
+			}
+			throw error;
+		}
+	}
+
 	await pluginPreloadPromise;
 
 	scheduleMarketplaceAutoUpdate({
@@ -1296,8 +1320,36 @@ export async function runRootCommand(
 			eventBus,
 			preloadedExtensions: extensionsResult,
 		});
+
 		if (parsedArgs.apiKey && !sessionOptions.model && session.model) {
 			authStorage.setRuntimeApiKey(session.model.provider, parsedArgs.apiKey);
+		}
+		// A replacement process owns no former AsyncJobManager work. Rebuild only
+		// durable direct-child control handles as parked revivable sessions.
+		const resumedParentFile = session.sessionManager.getSessionFile();
+		if ((parsedArgs.continue || parsedArgs.resume) && resumedParentFile && ownership) {
+			await reAdoptDirectChildren({
+				parentSessionFile: resumedParentFile,
+				parentSessionId: session.sessionManager.getSessionId(),
+				idleTtlMs: Math.trunc(Number(settingsInstance.get("task.agentIdleTtlMs") ?? 420_000) || 0),
+				ownership,
+				createReviver: (child, init) =>
+					createReAdoptedSessionReviver({
+						id: child.id,
+						displayName: child.displayName,
+						sessionFile: child.sessionFile,
+						systemPrompt: init.systemPrompt,
+						tools: init.tools,
+						outputSchema: init.outputSchema,
+						model: child.model,
+						thinkingLevel: child.thinkingLevel,
+						hotswapModel: child.hotswapModel,
+						taskDepth: child.taskDepth,
+						parentTaskPrefix: child.parentTaskPrefix,
+						settings: settingsInstance,
+						modelRegistry,
+					}),
+			});
 		}
 
 		if (modelFallbackMessage) {
@@ -1326,6 +1378,7 @@ export async function runRootCommand(
 			const runRpcMode: RunRpcMode = (await import("./modes/rpc/rpc-mode")).runRpcMode;
 			stopStartupWatchdog();
 			await runRpcMode(session, mode === "rpc-ui" ? setToolUIContext : undefined, eventBus);
+			await ownership?.release();
 		} else if (isInteractive) {
 			const versionCheckPromise = checkForNewVersion(VERSION).catch(() => undefined);
 			const changelogMarkdown = await logger.time("main:getChangelogForDisplay", getChangelogForDisplay, parsedArgs);
@@ -1368,6 +1421,7 @@ export async function runRootCommand(
 				titleSystemPrompt,
 				parsedArgs.join,
 			);
+			await ownership?.release();
 		} else {
 			// Branch-only single-shot runner: keep print-mode code out of normal interactive startup.
 			stopStartupWatchdog();
@@ -1382,6 +1436,7 @@ export async function runRootCommand(
 				logger.printTimings();
 			}
 			await session.dispose();
+			await ownership?.release();
 			stopThemeWatcher();
 			await postmortem.quit(0);
 		}

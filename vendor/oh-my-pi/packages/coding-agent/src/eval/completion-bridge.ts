@@ -12,7 +12,7 @@
  * in, text (or, with `schema`, a structured object) out.
  */
 import { instrumentedCompleteSimple, resolveTelemetry } from "@oh-my-pi/pi-agent-core";
-import { type Api, Effort, type Model, type Tool } from "@oh-my-pi/pi-ai";
+import { type Api, Effort, type Model, type ReasoningEffort, type Tool } from "@oh-my-pi/pi-ai";
 import { getSupportedEfforts } from "@oh-my-pi/pi-catalog/model-thinking";
 import { z } from "zod/v4";
 import { extractTextContent, extractToolCall, parseJsonPayload } from "../commit/utils";
@@ -91,7 +91,7 @@ function resolveTierModel(tier: CompletionTier, session: ToolSession): Model<Api
  * throwing downstream on models that cannot reason. Clamps to the highest
  * supported effort so a reasoning model without `high` does not 400.
  */
-function reasoningForTier(tier: CompletionTier, model: Model<Api>): Effort | undefined {
+function reasoningForTier(tier: CompletionTier, model: Model<Api>): ReasoningEffort | undefined {
 	if (tier !== "slow" || !model.reasoning) return undefined;
 	const efforts = getSupportedEfforts(model);
 	if (efforts.length === 0) return undefined;

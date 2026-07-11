@@ -4,6 +4,7 @@ import { $env } from "@oh-my-pi/pi-utils";
 import { z } from "zod/v4";
 import type { AgentSessionEvent } from "../session/agent-session";
 import type { NestedRepoPatch } from "./worktree";
+import type { SpawnRouteReceipt } from "./route-resolution";
 
 /** Source of an agent definition */
 export type AgentSource = "bundled" | "user" | "project";
@@ -314,6 +315,7 @@ export interface AgentProgress {
 	modelOverride?: string | string[];
 	/** Resolved model display string in the form `<provider>/<id>`, optionally suffixed with `:<thinkingLevel>` when the level was set explicitly. Undefined when the model could not be resolved. */
 	resolvedModel?: string;
+	routeReceipt?: SpawnRouteReceipt;
 	/** Data extracted by registered subprocess tool handlers (keyed by tool name) */
 	extractedToolData?: Record<string, unknown[]>;
 	/**
@@ -383,6 +385,7 @@ export interface SingleResult {
 	modelOverride?: string | string[];
 	/** Resolved model display string in the form `<provider>/<id>`, optionally suffixed with `:<thinkingLevel>` when the level was set explicitly. Omitted from tool-result JSON when undefined to keep wire payloads small. */
 	resolvedModel?: string;
+	routeReceipt?: SpawnRouteReceipt;
 	error?: string;
 	aborted?: boolean;
 	abortReason?: string;
