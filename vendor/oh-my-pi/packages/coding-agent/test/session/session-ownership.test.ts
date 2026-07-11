@@ -10,6 +10,7 @@ import {
 	ExternalSessionOwnerUnverifiable,
 	inspectLiveSessionOwnerView,
 	inspectSessionOwnership,
+	resolveAgentMuxRoot,
 } from "@oh-my-pi/pi-coding-agent/session/session-ownership";
 
 const roots: string[] = [];
@@ -106,24 +107,45 @@ describe("owners-v1 OMP guard", () => {
 		expect(decodeCmuxOwnerView({ ...view, cmux: { workspaceId, surfaceId, socketPath: "relative.sock" } })).toBeUndefined();
 	});
 
-	it("round-trips a live direct owner cmux view", async () => {
+	it("resolves explicit, environment, and default agent-mux roots", () => {
+		const original = process.env.AGENT_MUX_DIR;
+		try {
+			process.env.AGENT_MUX_DIR = path.join(".", "environment-root");
+			expect(resolveAgentMuxRoot(path.join(".", "explicit-root"))).toBe(path.resolve("explicit-root"));
+			expect(resolveAgentMuxRoot()).toBe(path.resolve("environment-root"));
+			process.env.AGENT_MUX_DIR = "";
+			expect(resolveAgentMuxRoot()).toBe(path.join(os.homedir(), ".agent-mux"));
+		} finally {
+			if (original === undefined) delete process.env.AGENT_MUX_DIR;
+			else process.env.AGENT_MUX_DIR = original;
+		}
+	});
+
+	it("round-trips a live owner and cmux view through AGENT_MUX_DIR", async () => {
 		const { root, session } = await fixture();
 		const cmuxSocket = path.join(root, "cmux.sock");
-		await withCmuxEnvironment(async () => {
-			const ownership = await acquireSessionOwnership(session, "parent", { root });
-			const claim = await claimPath(root);
-			const server = await startOwnerServer(path.join(claim, "owner.sock"), ownership.ownerEpoch);
-			try {
-				expect(await inspectLiveSessionOwnerView(session, "parent", { root })).toEqual({
-					version: 1,
-					ownerEpoch: ownership.ownerEpoch,
-					cmux: { workspaceId, surfaceId, socketPath: cmuxSocket },
-				});
-			} finally {
-				await closeServer(server);
-				await ownership.release();
-			}
-		}, { workspaceId, surfaceId, socketPath: cmuxSocket });
+		const original = process.env.AGENT_MUX_DIR;
+		try {
+			process.env.AGENT_MUX_DIR = root;
+			await withCmuxEnvironment(async () => {
+				const ownership = await acquireSessionOwnership(session, "parent");
+				const claim = await claimPath(root);
+				const server = await startOwnerServer(path.join(claim, "owner.sock"), ownership.ownerEpoch);
+				try {
+					expect(await inspectLiveSessionOwnerView(session, "parent")).toEqual({
+						version: 1,
+						ownerEpoch: ownership.ownerEpoch,
+						cmux: { workspaceId, surfaceId, socketPath: cmuxSocket },
+					});
+				} finally {
+					await closeServer(server);
+					await ownership.release();
+				}
+			}, { workspaceId, surfaceId, socketPath: cmuxSocket });
+		} finally {
+			if (original === undefined) delete process.env.AGENT_MUX_DIR;
+			else process.env.AGENT_MUX_DIR = original;
+		}
 	});
 
 	it("falls back for absent, malformed, or partial legacy sidecars", async () => {
@@ -217,5 +239,31 @@ describe("owners-v1 OMP guard", () => {
 			}),
 		).rejects.toBeInstanceOf(ExternalSessionOwnerUnverifiable);
 		expect(await inspectSessionOwnership(session, "parent", { root })).toEqual({ status: "none" });
+	});
+
+	it("finds a mux-supplied lease through inherited AGENT_MUX_DIR", async () => {
+		const { root, session } = await fixture();
+		const original = process.env.AGENT_MUX_DIR;
+		let direct: Awaited<ReturnType<typeof acquireSessionOwnership>> | undefined;
+		try {
+			process.env.AGENT_MUX_DIR = root;
+			direct = await acquireSessionOwnership(session, "parent");
+			const claim = await claimPath(root);
+			const leaseFile = path.join(claim, "lease.json");
+			const lease = JSON.parse(await fs.readFile(leaseFile, "utf8")) as Record<string, unknown>;
+			const suppliedEpoch = "mux-epoch";
+			const suppliedSocket = path.join(claim, "owner.sock");
+			await fs.writeFile(
+				leaseFile,
+				JSON.stringify({ ...lease, ownerKind: "agent-mux", ownerEpoch: suppliedEpoch, socketPath: suppliedSocket }),
+			);
+			const inherited = await acquireSessionOwnership(session, "parent", { suppliedEpoch, suppliedSocket });
+			expect(inherited.ownerKind).toBe("agent-mux");
+			expect(await inherited.isCurrent()).toBe(true);
+		} finally {
+			await direct?.release();
+			if (original === undefined) delete process.env.AGENT_MUX_DIR;
+			else process.env.AGENT_MUX_DIR = original;
+		}
 	});
 });

@@ -190,6 +190,17 @@ export function decodeCmuxOwnerView(value: unknown): CmuxOwnerView | undefined {
 	};
 }
 
+/**
+ * Resolves the shared agent-mux namespace used by ownership metadata and
+ * durable session state.
+ */
+export function resolveAgentMuxRoot(explicitRoot?: string): string {
+	if (explicitRoot !== undefined) return path.resolve(explicitRoot);
+	const environmentRoot = process.env.AGENT_MUX_DIR;
+	if (environmentRoot) return path.resolve(environmentRoot);
+	return path.join(os.homedir(), ".agent-mux");
+}
+
 async function canonicalSessionFile(sessionFile: string): Promise<string> {
 	const resolved = path.resolve(sessionFile);
 	try {
@@ -203,11 +214,8 @@ async function canonicalSessionFile(sessionFile: string): Promise<string> {
 	}
 }
 
-async function leaseLocation(
-	sessionFile: string,
-	sessionId: string,
-	root = path.join(os.homedir(), ".agent-mux"),
-): Promise<LeaseLocation> {
+async function leaseLocation(sessionFile: string, sessionId: string, root?: string): Promise<LeaseLocation> {
+	root = resolveAgentMuxRoot(root);
 	const canonical = await canonicalSessionFile(sessionFile);
 	const key = createHash("sha256").update(`${canonical}\0${sessionId}`).digest("hex");
 	const parent = path.join(root, "owners-v1", key);

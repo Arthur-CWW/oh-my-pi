@@ -4,7 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 import { DurableInputQueue, SessionOwnershipLostError } from "@oh-my-pi/pi-coding-agent/session/durable-input-queue";
-import type { SessionOwnershipHandle } from "@oh-my-pi/pi-coding-agent/session/session-ownership";
+import { acquireSessionOwnership, type SessionOwnershipHandle } from "@oh-my-pi/pi-coding-agent/session/session-ownership";
 
 const roots: string[] = [];
 
@@ -69,6 +69,26 @@ describe("durable input queue", () => {
 			DurableInputQueue.open(owner.handle, root),
 		]);
 		expect((await first.getStatus()).activeEpoch).toBe((await second.getStatus()).activeEpoch);
+	});
+
+	it("shares AGENT_MUX_DIR with the default ownership lease root", async () => {
+		const { root, session } = await fixture("fixture");
+		const muxRoot = path.join(root, "custom-mux");
+		const original = process.env.AGENT_MUX_DIR;
+		try {
+			process.env.AGENT_MUX_DIR = muxRoot;
+			const ownership = await acquireSessionOwnership(session, "parent");
+			try {
+				await DurableInputQueue.open(ownership);
+				expect(await ownership.isCurrent()).toBe(true);
+				expect((await fs.stat(await queueRoot(muxRoot))).isDirectory()).toBe(true);
+			} finally {
+				await ownership.release();
+			}
+		} finally {
+			if (original === undefined) delete process.env.AGENT_MUX_DIR;
+			else process.env.AGENT_MUX_DIR = original;
+		}
 	});
 
 	it("adopts queued editor input after restart with stable IDs and order", async () => {

@@ -1,11 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
 import * as fs from "node:fs/promises";
-import * as os from "node:os";
 import * as path from "node:path";
 
 import type { ImageContent } from "@oh-my-pi/pi-ai";
 
-import type { SessionOwnershipHandle } from "./session-ownership";
+import { resolveAgentMuxRoot, type SessionOwnershipHandle } from "./session-ownership";
 
 const QUEUE_VERSION = 2 as const;
 const HEAD_FILE = "head.json";
@@ -411,10 +410,8 @@ export class DurableInputQueue {
 		this.#activeEpoch = activeEpoch;
 	}
 
-	static async open(
-		ownership: SessionOwnershipHandle,
-		root = path.join(os.homedir(), ".agent-mux"),
-	): Promise<DurableInputQueue> {
+	static async open(ownership: SessionOwnershipHandle, root?: string): Promise<DurableInputQueue> {
+		root = resolveAgentMuxRoot(root);
 		const sessionFile = await canonicalSessionFile(ownership.sessionFile);
 		const queueRoot = path.join(root, "owners-v1", queueKey(sessionFile, ownership.sessionId), "queue-v2");
 		await fs.mkdir(path.join(queueRoot, SEGMENTS_DIR), { recursive: true });
