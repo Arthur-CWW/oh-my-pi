@@ -86,10 +86,27 @@ export const SetThinkingLevelCommandSchema = Schema.Struct({
 	),
 });
 
+export const SetModelCommandSchema = Schema.Struct({
+	schemaVersion: Schema.Literal(RUNNER_SCHEMA_VERSION),
+	kind: Schema.Literal("setModel"),
+	commandId: Schema.String,
+	correlationId: Schema.String,
+	causationId: Schema.optional(Schema.String),
+	expectedSessionRevision: RunnerRevisionSchema,
+	viewId: Schema.String,
+	controllerEpoch: ControllerEpochSchema,
+	payload: Schema.Struct({
+		provider: Schema.String,
+		id: Schema.String,
+		role: Schema.optional(Schema.String),
+	}),
+});
+
 export type SubmitInputCommand = typeof SubmitInputCommandSchema.Type;
 export type EditQueuedInputCommand = typeof EditQueuedInputCommandSchema.Type;
 export type CancelQueuedInputCommand = typeof CancelQueuedInputCommandSchema.Type;
 export type SetThinkingLevelCommand = typeof SetThinkingLevelCommandSchema.Type;
+export type SetModelCommand = typeof SetModelCommandSchema.Type;
 export type RunnerCapability = "observer" | "controller";
 export type RunnerStatus = "running" | "stopping" | "stopped";
 
@@ -142,6 +159,8 @@ export interface SetThinkingLevelReceipt {
 	readonly replayed: boolean;
 }
 
+export type SetModelReceipt = SetThinkingLevelReceipt;
+
 export interface RunnerViewSnapshot {
 	readonly viewId: string;
 	readonly capability: RunnerCapability;
@@ -177,6 +196,7 @@ export type RunnerEventKind =
 	| "inputEdited"
 	| "inputCancelled"
 	| "thinkingLevelChanged"
+	| "modelChanged"
 	| "transcriptEntryAppended";
 
 /** Every event is a closed causal envelope in the runner's single total order. */
@@ -239,6 +259,16 @@ export const decodeSetThinkingLevelCommand = (input: unknown): SetThinkingLevelC
 	} catch (error) {
 		throw new InvalidRunnerCommandError({
 			issue: error instanceof Error ? error.message : "Invalid set-thinking command",
+		});
+	}
+};
+
+export const decodeSetModelCommand = (input: unknown): SetModelCommand => {
+	try {
+		return Schema.decodeUnknownSync(SetModelCommandSchema)(input);
+	} catch (error) {
+		throw new InvalidRunnerCommandError({
+			issue: error instanceof Error ? error.message : "Invalid set-model command",
 		});
 	}
 };

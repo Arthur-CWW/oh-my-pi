@@ -3,12 +3,14 @@ import { Effect, Exit, Scope } from "effect";
 import type {
 	RunnerCommandReceipt,
 	RunnerImageContent,
+	SetModelReceipt,
 	SetThinkingLevelReceipt,
 } from "../runner/protocol";
 import {
 	decodeCancelQueuedInputCommand,
 	decodeEditQueuedInputCommand,
 	decodeSubmitInputCommand,
+	decodeSetModelCommand,
 	decodeSetThinkingLevelCommand,
 	RUNNER_SCHEMA_VERSION,
 } from "../runner/protocol";
@@ -44,6 +46,15 @@ export interface TerminalCancelIntent {
 	readonly causationId?: string;
 }
 
+export interface TerminalSetModelIntent {
+	readonly provider: string;
+	readonly id: string;
+	readonly role?: string;
+	readonly commandId?: string;
+	readonly correlationId?: string;
+	readonly causationId?: string;
+}
+
 export interface TerminalSetThinkingLevelIntent {
 	readonly thinkingLevel: ConfiguredThinkingLevel | undefined;
 	readonly commandId?: string;
@@ -66,6 +77,7 @@ export interface TerminalSessionController {
 	readonly submit: (intent: TerminalSubmitIntent) => Promise<RunnerCommandReceipt>;
 	readonly edit: (intent: TerminalEditIntent) => Promise<RunnerCommandReceipt>;
 	readonly cancel: (intent: TerminalCancelIntent) => Promise<RunnerCommandReceipt>;
+	readonly setModel: (intent: TerminalSetModelIntent) => Promise<SetModelReceipt>;
 	readonly setThinkingLevel: (intent: TerminalSetThinkingLevelIntent) => Promise<SetThinkingLevelReceipt>;
 	readonly close: () => Promise<void>;
 }
@@ -213,6 +225,34 @@ export async function createTerminalSessionController(
 						),
 					);
 				}),
+			setModel: async (intent) => {
+				try {
+					const ids = metadata(intent);
+					const receipt = await run(
+						view!.setModel(
+							decodeSetModelCommand({
+								schemaVersion: RUNNER_SCHEMA_VERSION,
+								kind: "setModel",
+								...ids,
+								...(intent.causationId === undefined ? {} : { causationId: intent.causationId }),
+								expectedSessionRevision: latest.runner.sessionRevision,
+								viewId,
+								controllerEpoch: view!.epoch,
+								payload: {
+									provider: intent.provider,
+									id: intent.id,
+									...(intent.role === undefined ? {} : { role: intent.role }),
+								},
+							}),
+						),
+					);
+					latest = await run(view!.snapshot());
+					return receipt;
+				} catch (error) {
+					await refresh();
+					throw error;
+				}
+			},
 			setThinkingLevel: async (intent) => {
 				try {
 					const ids = metadata(intent);

@@ -10,7 +10,7 @@ import {
 	type DurableInputQueueEvent,
 	type DurableQueuedInput,
 } from "../session/durable-input-queue";
-import type { SessionEntry, SetThinkingSessionCommand } from "../session/session-entries";
+import type { SessionEntry, SetModelSessionCommand, SetThinkingSessionCommand } from "../session/session-entries";
 import {
 	SessionCommandConflictError,
 	type SessionManager,
@@ -35,6 +35,7 @@ import {
 	decodeCancelQueuedInputCommand,
 	decodeEditQueuedInputCommand,
 	decodeSubmitInputCommand,
+	decodeSetModelCommand,
 	decodeSetThinkingLevelCommand,
 	RUNNER_SCHEMA_VERSION,
 	type AcquireRunnerControllerCommand,
@@ -43,6 +44,7 @@ import {
 	type ReleaseRunnerControllerCommand,
 	type RunnerCapability,
 	type RunnerCommandReceipt,
+	type SetModelReceipt,
 	type SetThinkingLevelReceipt,
 	type RunnerControlMetadata,
 	type RunnerEvent,
@@ -112,6 +114,7 @@ export interface ControllerSessionRunnerView extends RunnerViewBase {
 	readonly submitInput: (input: unknown) => Effect.Effect<RunnerCommandReceipt, RunnerFailure, Scope.Scope>;
 	readonly editQueuedInput: (input: unknown) => Effect.Effect<RunnerCommandReceipt, RunnerFailure, Scope.Scope>;
 	readonly cancelQueuedInput: (input: unknown) => Effect.Effect<RunnerCommandReceipt, RunnerFailure, Scope.Scope>;
+	readonly setModel: (input: unknown) => Effect.Effect<SetModelReceipt, RunnerFailure, Scope.Scope>;
 	readonly setThinkingLevel: (input: unknown) => Effect.Effect<SetThinkingLevelReceipt, RunnerFailure, Scope.Scope>;
 	readonly releaseController: (
 		command: ReleaseRunnerControllerCommand,
@@ -529,6 +532,11 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 		controllerEpoch: number,
 		input: unknown,
 	) => Effect.Effect<RunnerCommandReceipt, RunnerFailure, Scope.Scope>;
+	let setModel!: (
+		viewId: string,
+		controllerEpoch: number,
+		input: unknown,
+	) => Effect.Effect<SetModelReceipt, RunnerFailure, Scope.Scope>;
 	let setThinkingLevel!: (
 		viewId: string,
 		controllerEpoch: number,
@@ -567,6 +575,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 			editQueuedInput: (input) => editQueuedInput(viewId, controllerEpoch, input),
 			cancelQueuedInput: (input) => cancelQueuedInput(viewId, controllerEpoch, input),
 			setThinkingLevel: (input) => setThinkingLevel(viewId, controllerEpoch, input),
+			setModel: (input) => setModel(viewId, controllerEpoch, input),
 			releaseController: (command) =>
 				command.viewId === viewId ? releaseController(command) : mismatchedView(viewId),
 		};
@@ -809,6 +818,66 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 					revision: durable.runnerRevision,
 					replayed: durable.replayed,
 				} satisfies RunnerCommandReceipt;
+			}),
+		);
+	});
+
+	setModel = Effect.fn("Runner.setModel")(function* (
+		viewId: string,
+		controllerEpoch: number,
+		input: unknown,
+	) {
+		const command = yield* Effect.try({ try: () => decodeSetModelCommand(input), catch: asRunnerFailure });
+		if (command.viewId !== viewId) return yield* mismatchedView(viewId);
+		if (command.controllerEpoch !== controllerEpoch) {
+			return yield* Effect.fail(
+				new StaleRunnerControllerLeaseError({
+					viewId,
+					expectedControllerEpoch: command.controllerEpoch,
+					actualControllerEpoch: controllerEpoch,
+				}),
+			);
+		}
+		return yield* enqueue(
+			Effect.gen(function* () {
+				yield* requireController(viewId, controllerEpoch);
+				const journalCommand: SetModelSessionCommand = {
+					schemaVersion: 1,
+					kind: "setModel",
+					commandId: command.commandId,
+					correlationId: command.correlationId,
+					...(command.causationId === undefined ? {} : { causationId: command.causationId }),
+					expectedSessionRevision: command.expectedSessionRevision,
+					model: `${command.payload.provider}/${command.payload.id}`,
+					role: command.payload.role ?? "default",
+				};
+				const durable = yield* Effect.tryPromise({
+					try: () => resources.session.commitJournaledModel(journalCommand),
+					catch: asRunnerFailure,
+				});
+				sessionRevision = Math.max(sessionRevision, durable.sessionRevision);
+				if (!durable.replayed) {
+					yield* publishEvent({
+						kind: "modelChanged",
+						metadata: {
+							schemaVersion: RUNNER_SCHEMA_VERSION,
+							commandId: command.commandId,
+							correlationId: command.correlationId,
+							...(command.causationId === undefined ? {} : { causationId: command.causationId }),
+							expectedRevision: revision,
+						},
+						controllerEpoch,
+						viewId,
+						sessionRevision,
+					});
+				}
+				return {
+					commandId: command.commandId,
+					correlationId: command.correlationId,
+					...(command.causationId === undefined ? {} : { causationId: command.causationId }),
+					sessionRevision: durable.sessionRevision,
+					replayed: durable.replayed,
+				} satisfies SetModelReceipt;
 			}),
 		);
 	});
@@ -1120,6 +1189,7 @@ export const makeSessionRunnerLive = Effect.fn("Runner.makeSessionRunnerLive")(f
 			edit: attached.editQueuedInput,
 			cancel: attached.cancelQueuedInput,
 			setThinkingLevel: attached.setThinkingLevel,
+			setModel: attached.setModel,
 			detach,
 		} satisfies TerminalSessionView;
 	});

@@ -13,10 +13,12 @@ import { Settings } from "../../src/config/settings";
 import { createTerminalSessionController } from "../../src/modes/terminal-session-controller";
 import {
 	decodeSubmitInputCommand,
+	decodeSetModelCommand,
 	decodeSetThinkingLevelCommand,
 	RunnerRevisionConflictError,
 	RunnerItemRevisionConflictError,
 	StaleRunnerControllerLeaseError,
+	SessionRunnerRuntimeError,
 	type AttachRunnerViewCommand,
 	type DetachRunnerViewCommand,
 	type RunnerControlMetadata,
@@ -25,7 +27,11 @@ import { makeSessionRunnerLive } from "../../src/runner/session-runner";
 import { AgentSession } from "../../src/session/agent-session";
 import { AuthStorage } from "../../src/session/auth-storage";
 import { DurableInputQueue } from "../../src/session/durable-input-queue";
-import { SessionManager, SessionStateCommandInFlightError } from "../../src/session/session-manager";
+import {
+	SessionManager,
+	SessionRevisionConflictError,
+	SessionStateCommandInFlightError,
+} from "../../src/session/session-manager";
 import { AUTO_THINKING } from "../../src/thinking";
 import { acquireSessionOwnership } from "../../src/session/session-ownership";
 
@@ -79,7 +85,8 @@ async function createLiveFixture(holdProviderResponses = false) {
 	await fs.mkdir(sessions, { recursive: true });
 
 	const model = getBundledModel("anthropic", "claude-sonnet-4-5");
-	if (!model) throw new Error("test model unavailable");
+	const alternateModel = getBundledModel("anthropic", "claude-haiku-4-5");
+	if (!model || !alternateModel) throw new Error("test models unavailable");
 	const authStorage = await AuthStorage.create(path.join(root, "auth.db"));
 	authStorage.setRuntimeApiKey(model.provider, "test-key");
 	const modelRegistry = new ModelRegistry(authStorage, path.join(root, "models.yml"));
@@ -131,12 +138,22 @@ async function createLiveFixture(holdProviderResponses = false) {
 	sessionManager.bindSessionOwnership(ownership);
 	const queue = await DurableInputQueue.open(ownership, muxRoot);
 	await queue.adopt();
-	const session = new AgentSession({
+	let failNextPromptRebuild = false;
+	let session!: AgentSession;
+	const settings = Settings.isolated({ "compaction.enabled": false });
+	session = new AgentSession({
 		agent,
 		sessionManager,
 		durableInputQueue: queue,
-		settings: Settings.isolated({ "compaction.enabled": false }),
+		settings,
 		modelRegistry,
+		rebuildSystemPrompt: async () => {
+			if (failNextPromptRebuild) {
+				failNextPromptRebuild = false;
+				throw new Error("prompt rebuild failed once");
+			}
+			return { systemPrompt: [`model:${session.model?.provider}/${session.model?.id}`] };
+		},
 	});
 	return {
 		root,
@@ -147,6 +164,12 @@ async function createLiveFixture(holdProviderResponses = false) {
 		session,
 		sessionManager,
 		providerInputs,
+		settings,
+		modelRegistry,
+		alternateModel,
+		failNextPromptRebuild: () => {
+			failNextPromptRebuild = true;
+		},
 		releaseProviderResponses: () => {
 			for (const complete of pendingProviderCompletions.splice(0)) complete();
 		},
@@ -433,6 +456,160 @@ describe("live SessionRunner", () => {
 		);
 	});
 
+	it("durably switches models once, fences revisions, and keeps replay older than the latest model inert", async () => {
+		const fixture = await createLiveFixture();
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const runner = yield* makeSessionRunnerLive(fixture, { mailboxCapacity: 4, eventCapacity: 8 });
+					const terminal = yield* runner.attachTerminalView(attach("model-terminal", "controller", 0));
+					const subscription = yield* terminal.subscribe();
+					const initial = yield* terminal.snapshot();
+					const setRole = vi.spyOn(fixture.settings, "setModelRole");
+					const commandA = decodeSetModelCommand({
+						schemaVersion: 1,
+						kind: "setModel",
+						commandId: "model-a",
+						correlationId: "model-a-correlation",
+						expectedSessionRevision: initial.runner.sessionRevision,
+						viewId: terminal.viewId,
+						controllerEpoch: terminal.epoch,
+						payload: {
+							provider: fixture.alternateModel.provider,
+							id: fixture.alternateModel.id,
+						},
+					});
+
+					yield* Effect.flip(
+						terminal.setModel(
+							decodeSetModelCommand({ ...commandA, controllerEpoch: terminal.epoch + 1 }),
+						),
+					).pipe(Effect.tap(error => Effect.sync(() => expect(error).toBeInstanceOf(StaleRunnerControllerLeaseError))));
+
+					const receiptA = yield* terminal.setModel(commandA);
+					expect(fixture.session.model?.id).toBe(fixture.alternateModel.id);
+					expect((yield* terminal.snapshot()).session.modelSummary?.id).toBe(fixture.alternateModel.id);
+					expect((yield* runner.snapshot()).revision).toBe(initial.runner.revision);
+					expect(setRole).not.toHaveBeenCalled();
+					expect(
+						fixture.sessionManager
+							.getEntries()
+							.filter(entry => entry.type === "model_change" && entry.command?.commandId === "model-a"),
+					).toHaveLength(1);
+					const initialModel = fixture.modelRegistry.find(
+						initial.session.modelSummary!.provider,
+						initial.session.modelSummary!.id,
+					);
+					if (!initialModel) throw new Error("initial model unavailable");
+					fixture.session.agent.setModel(initialModel);
+					expect(fixture.session.model?.id).toBe(initialModel.id);
+					expect(yield* terminal.setModel(commandA)).toEqual({ ...receiptA, replayed: true });
+					expect(fixture.session.model?.id).toBe(fixture.alternateModel.id);
+
+					yield* Effect.flip(
+						terminal.setModel(
+							decodeSetModelCommand({
+								...commandA,
+								commandId: "model-stale",
+								correlationId: "model-stale-correlation",
+								payload: {
+									provider: initial.session.modelSummary!.provider,
+									id: initial.session.modelSummary!.id,
+								},
+							}),
+						),
+					).pipe(Effect.tap(error => Effect.sync(() => expect(error).toBeInstanceOf(SessionRevisionConflictError))));
+
+					const commandB = decodeSetModelCommand({
+						...commandA,
+						commandId: "model-b",
+						correlationId: "model-b-correlation",
+						expectedSessionRevision: receiptA.sessionRevision,
+						payload: {
+							provider: initial.session.modelSummary!.provider,
+							id: initial.session.modelSummary!.id,
+						},
+					});
+					const receiptB = yield* terminal.setModel(commandB);
+					expect(fixture.session.model?.id).toBe(initial.session.modelSummary?.id);
+					const replay = yield* terminal.setModel(commandA);
+					expect(replay).toEqual({ ...receiptA, replayed: true });
+					expect(fixture.session.model?.id).toBe(initial.session.modelSummary?.id);
+					expect((yield* runner.snapshot()).sessionRevision).toBe(receiptB.sessionRevision);
+					expect(
+						fixture.sessionManager.getEntries().filter(entry => entry.type === "model_change" && entry.command),
+					).toHaveLength(2);
+
+					const modelEvents: string[] = [];
+					while (modelEvents.length < 2) {
+						const delivery = yield* subscription.take;
+						if (delivery.kind === "runnerEvent" && delivery.event.kind === "modelChanged") {
+							modelEvents.push(delivery.event.commandId);
+						}
+					}
+					expect(modelEvents).toEqual(["model-a", "model-b"]);
+					yield* terminal.detach();
+					yield* runner.stop();
+				}),
+			),
+		);
+	});
+
+	it("replays the latest durable model command to finish a failed post-commit prompt rebuild", async () => {
+		const fixture = await createLiveFixture();
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const runner = yield* makeSessionRunnerLive(fixture, { mailboxCapacity: 4, eventCapacity: 8 });
+					const terminal = yield* runner.attachTerminalView(attach("model-reconcile", "controller", 0));
+					const initial = yield* terminal.snapshot();
+					const command = decodeSetModelCommand({
+						schemaVersion: 1,
+						kind: "setModel",
+						commandId: "model-reconcile-command",
+						correlationId: "model-reconcile-correlation",
+						expectedSessionRevision: initial.runner.sessionRevision,
+						viewId: terminal.viewId,
+						controllerEpoch: terminal.epoch,
+						payload: {
+							provider: fixture.alternateModel.provider,
+							id: fixture.alternateModel.id,
+						},
+					});
+					fixture.failNextPromptRebuild();
+					yield* Effect.flip(terminal.setModel(command)).pipe(
+						Effect.tap(error =>
+							Effect.sync(() => expect(error).toBeInstanceOf(SessionRunnerRuntimeError)),
+						),
+					);
+					expect(fixture.session.model?.id).toBe(fixture.alternateModel.id);
+					expect(fixture.session.agent.state.systemPrompt).toEqual(["test"]);
+					expect(
+						fixture.sessionManager
+							.getEntries()
+							.filter(entry => entry.type === "model_change" && entry.command?.commandId === command.commandId),
+					).toHaveLength(1);
+					const sequenceAfterFailedApply = (yield* runner.snapshot()).sequence;
+					expect(sequenceAfterFailedApply).toBe(initial.runner.sequence + 1);
+
+					const replay = yield* terminal.setModel(command);
+					expect(replay.replayed).toBe(true);
+					expect(fixture.session.agent.state.systemPrompt).toEqual([
+						`model:${fixture.alternateModel.provider}/${fixture.alternateModel.id}`,
+					]);
+					expect(
+						fixture.sessionManager
+							.getEntries()
+							.filter(entry => entry.type === "model_change" && entry.command?.commandId === command.commandId),
+					).toHaveLength(1);
+					expect((yield* runner.snapshot()).sequence).toBe(sequenceAfterFailedApply);
+					yield* terminal.detach();
+					yield* runner.stop();
+				}),
+			),
+		);
+	});
+
 	it("keeps busy thinking rejection, snapshots, detach, and replay responsive during a held prompt", async () => {
 		const fixture = await createLiveFixture(true);
 		const scope = Scope.makeUnsafe("sequential");
@@ -489,6 +666,53 @@ describe("live SessionRunner", () => {
 			).toBe(false);
 			expect(fixture.session.configuredThinkingLevel()).toBe(ThinkingLevel.High);
 
+			releaseTimer = setInterval(fixture.releaseProviderResponses, 1);
+			await fixture.session.waitForIdle();
+			clearInterval(releaseTimer);
+			releaseTimer = undefined;
+			await run(terminal.detach());
+			await run(runner.stop());
+		} finally {
+			if (releaseTimer) clearInterval(releaseTimer);
+			fixture.releaseProviderResponses();
+			await Effect.runPromise(Scope.close(scope, Exit.void));
+		}
+	});
+
+	it("rejects a model switch promptly during a held prompt without blocking snapshots or journaling", async () => {
+		const fixture = await createLiveFixture(true);
+		const scope = Scope.makeUnsafe("sequential");
+		const run = <A, E>(effect: Effect.Effect<A, E, Scope.Scope>) =>
+			Effect.runPromise(Scope.provide(scope)(effect));
+		let releaseTimer: ReturnType<typeof setInterval> | undefined;
+		try {
+			const runner = await run(makeSessionRunnerLive(fixture, { mailboxCapacity: 4, eventCapacity: 8 }));
+			const terminal = await run(runner.attachTerminalView(attach("model-race", "controller", 0)));
+			const initial = await run(terminal.snapshot());
+			await run(terminal.submit(decodeSubmitInputCommand(submit(terminal.viewId, terminal.epoch, "model-race-input", 0))));
+			while (!fixture.session.isStreaming) await Bun.sleep(1);
+			const command = decodeSetModelCommand({
+				schemaVersion: 1,
+				kind: "setModel",
+				commandId: "model-during-prompt",
+				correlationId: "model-during-prompt-correlation",
+				expectedSessionRevision: initial.runner.sessionRevision,
+				viewId: terminal.viewId,
+				controllerEpoch: terminal.epoch,
+				payload: {
+					provider: fixture.alternateModel.provider,
+					id: fixture.alternateModel.id,
+				},
+			});
+			const startedAt = Date.now();
+			await expect(run(terminal.setModel(command))).rejects.toBeInstanceOf(SessionStateCommandInFlightError);
+			expect(Date.now() - startedAt).toBeLessThan(250);
+			expect((await run(runner.snapshot())).status).toBe("running");
+			expect(
+				fixture.sessionManager
+					.getEntries()
+					.some(entry => entry.type === "model_change" && entry.command?.commandId === command.commandId),
+			).toBe(false);
 			releaseTimer = setInterval(fixture.releaseProviderResponses, 1);
 			await fixture.session.waitForIdle();
 			clearInterval(releaseTimer);
@@ -575,6 +799,15 @@ describe("live SessionRunner", () => {
 			expect(first.revision).toBe(1);
 			expect(second.revision).toBe(2);
 			expect(controller.snapshot().runner.revision).toBe(2);
+			await fixture.session.waitForIdle();
+			const beforeModelRevision = controller.snapshot().runner.sessionRevision;
+			const modelReceipt = await controller.setModel({
+				provider: fixture.alternateModel.provider,
+				id: fixture.alternateModel.id,
+			});
+			expect(modelReceipt.sessionRevision).toBe(beforeModelRevision + 1);
+			expect(controller.snapshot().runner.sessionRevision).toBe(modelReceipt.sessionRevision);
+			expect(controller.snapshot().session.modelSummary?.id).toBe(fixture.alternateModel.id);
 			await controller.close();
 			expect((await run(runner.snapshot())).status).toBe("running");
 			fixture.releaseProviderResponses();

@@ -308,6 +308,7 @@ import type {
 	CompactionEntry,
 	NewSessionOptions,
 	SessionCommandReceipt,
+	SetModelSessionCommand,
 	SetThinkingSessionCommand,
 } from "./session-entries";
 import { EPHEMERAL_MODEL_CHANGE_ROLE } from "./session-entries";
@@ -1353,6 +1354,7 @@ export class AgentSession {
 	#emptyStopRetryCount = 0;
 	#unexpectedStopRetryCount = 0;
 	#promptGeneration = 0;
+	#lastAppliedModelCommandEntryId: string | undefined;
 	#pendingAgentEndEmit: AgentSessionEvent | undefined;
 	#pendingTurnEndProcessing: Promise<void> = Promise.resolve();
 	#pendingProviderRequestNonMessageTokens: number | undefined = undefined;
@@ -6021,6 +6023,66 @@ export class AgentSession {
 		if (queue) return queue;
 		throw this.#durableInputQueueError ?? new Error("Durable input queue is unavailable");
 	}
+	/**
+	 * Durably commit and apply a model command under the prompt-admission fence.
+	 * A replay only reconciles memory when its entry remains the latest model state.
+	 */
+	async commitJournaledModel(command: SetModelSessionCommand): Promise<SessionCommandReceipt> {
+		const slash = command.model.indexOf("/");
+		const provider = slash < 0 ? "" : command.model.slice(0, slash);
+		const id = slash < 0 ? "" : command.model.slice(slash + 1);
+		const target = provider && id ? this.#modelRegistry.find(provider, id) : undefined;
+		if (!target) throw new Error(`Model not found: ${command.model}`);
+		if (!this.#modelRegistry.hasConfiguredAuth(target)) {
+			throw new Error(`No API key for ${target.provider}/${target.id}`);
+		}
+
+		const apply = async (entryId: string): Promise<void> => {
+			if (modelsAreEqual(this.model, target) && this.#lastAppliedModelCommandEntryId === entryId) return;
+			const previousEditMode = this.#resolveActiveEditMode();
+			const configuredThinking = this.configuredThinkingLevel();
+			if (!modelsAreEqual(this.model, target)) {
+				this.#clearActiveRetryFallback();
+				this.#setModelWithProviderSessionReset(target);
+			}
+			this.applyJournaledThinkingLevel(configuredThinking);
+			await this.#syncAfterModelChange(previousEditMode);
+			this.settings.getStorage()?.recordModelUsage(`${target.provider}/${target.id}`);
+			this.#lastAppliedModelCommandEntryId = entryId;
+		};
+
+		if (this.sessionManager.getSessionCommandReceipt(command.commandId) !== undefined) {
+			const receipt = await this.sessionManager.commitStateCommand(command);
+			const latestModel = this.sessionManager
+				.getBranch()
+				.findLast(entry => entry.type === "model_change");
+			if (latestModel?.id === receipt.entry.id) await apply(receipt.entry.id);
+			return receipt;
+		}
+
+		const promptGeneration = this.#promptGeneration;
+		if (this.isStreaming || this.isCompacting || this.isRetrying || this.isGeneratingHandoff) {
+			throw new SessionStateCommandInFlightError();
+		}
+		const release = await this.#acquireDurableAdmissionMaintenance();
+		try {
+			if (
+				promptGeneration !== this.#promptGeneration ||
+				this.isStreaming ||
+				this.isCompacting ||
+				this.isRetrying ||
+				this.isGeneratingHandoff
+			) {
+				throw new SessionStateCommandInFlightError();
+			}
+			const receipt = await this.sessionManager.commitStateCommand(command);
+			if (!receipt.replayed) await apply(receipt.entry.id);
+			return receipt;
+		} finally {
+			release();
+		}
+	}
+
 	/**
 	 * Durably commit and apply a thinking command under the same admission fence
 	 * used by queue drain. Replays return their original receipt without applying.

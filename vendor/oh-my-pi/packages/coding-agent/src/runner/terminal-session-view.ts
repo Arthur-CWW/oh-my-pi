@@ -9,6 +9,8 @@ import type {
 	RunnerCommandReceipt,
 	RunnerEvent,
 	SessionRunnerSnapshot,
+	SetModelCommand,
+	SetModelReceipt,
 	SetThinkingLevelCommand,
 	SetThinkingLevelReceipt,
 	SubmitInputCommand,
@@ -59,6 +61,7 @@ export interface TerminalSessionView {
 	readonly submit: (command: SubmitInputCommand) => Effect.Effect<RunnerCommandReceipt, RunnerFailure, Scope.Scope>;
 	readonly edit: (command: EditQueuedInputCommand) => Effect.Effect<RunnerCommandReceipt, RunnerFailure, Scope.Scope>;
 	readonly cancel: (command: CancelQueuedInputCommand) => Effect.Effect<RunnerCommandReceipt, RunnerFailure, Scope.Scope>;
+	readonly setModel: (command: SetModelCommand) => Effect.Effect<SetModelReceipt, RunnerFailure, Scope.Scope>;
 	readonly setThinkingLevel: (
 		command: SetThinkingLevelCommand,
 	) => Effect.Effect<SetThinkingLevelReceipt, RunnerFailure, Scope.Scope>;
