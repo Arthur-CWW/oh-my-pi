@@ -1,70 +1,37 @@
-# Fable session overlay.
+# Sol high owns load-bearing orchestration and implementation. Luna xhigh is
+# reserved for smol, simple, peripheral work. Designer and vision stay explicit.
 # Use with: omp --config ./.omp/fable-config.yml
-# Orchestration defaults to Fable MEDIUM (Arthur, 2026-07-03): the orchestrator
-# routes and gates, it doesn't think hard — never default above :medium.
-# Pass --model anthropic/claude-fable-5:high explicitly only when a session
-# genuinely needs it.
-
-model: anthropic/claude-fable-5:medium
+model: openai-codex/gpt-5.6-sol:high
 
 modelRoles:
-  # GPT-5.5 medium = small/bounded tasks; :high = harder work.
-  # Kimi is NOT a default worker (subscription likely cancelled): keep it only
-  # for refusal-basin feedstock retrieval (books/resources GPT declines) via
-  # research/authenticated_web, with GPT fallback chains covering outages.
-  # smol: openai-codex/gpt-5.6-terra:medium
-  # task: openai-codex/gpt-5.6-terra:medium
-  implementer: openai-codex/gpt-5.6-terra:medium
-  maintenance: openai-codex/gpt-5.6-terra:medium
-  research: kimi-code/kimi-for-coding
-  authenticated_web: kimi-code/kimi-for-coding
-  complex: openai-codex/gpt-5.6-terra:medium
-  # plan: openai-codex/gpt-5.6-terra:medium
-  # slow: openai-codex/gpt-5.6-terra:medium
+  default: openai-codex/gpt-5.6-sol:high
+  smol: openai-codex/gpt-5.6-luna:xhigh
+  task: openai-codex/gpt-5.6-sol:high
+  slow: openai-codex/gpt-5.6-sol:high
+  plan: openai-codex/gpt-5.6-sol:high
+  advisor: openai-codex/gpt-5.6-sol:high
   designer: anthropic/claude-opus-4-6
-  # Cheap vision for inspect_image (Arthur, 2026-07-03): image inspection was
-  # silently routed to the session model (Fable) — pi/vision wins the
-  # resolution order, so pin it to the Antigravity Gemini flash lane.
   vision: google-antigravity/gemini-3.5-flash-low
 
-# Subscription-quota failover (Arthur, 2026-07-07): when a lane's usage limit
-# is exhausted mid-turn, the session falls back down the chain for that role
-# (retry.fallbackChains keys are modelRoles names; runtime path:
-# #handleRetryableError → isUsageLimitError → credential rotation → chain).
-# Reverts to the primary when the suppression cooldown expires.
+# Retry chains are restricted to built-in model roles.
 retry:
   modelFallback: true
   fallbackRevertPolicy: cooldown-expiry
   fallbackChains:
-    task:
-      - kimi-code/kimi-for-coding
-      - google-antigravity/gemini-3.5-flash
     smol:
-      - google-antigravity/gemini-3.5-flash
+      - openai-codex/gpt-5.6-sol:high
       - kimi-code/kimi-for-coding
-    implementer:
-      - kimi-code/kimi-for-coding
-    complex:
-      - kimi-code/kimi-for-coding
-    plan:
-      - kimi-code/kimi-for-coding
-    slow:
-      - kimi-code/kimi-for-coding
-    research:
-      - openai-codex/gpt-5.6-terra:medium
-    authenticated_web:
-      - openai-codex/gpt-5.6-terra:medium
     designer:
-      - kimi-code/kimi-for-coding
-      - openai-codex/gpt-5.6-terra:medium
+      - openai-codex/gpt-5.6-sol:high
     vision:
       - kimi-code/kimi-for-coding
 
 advisor:
-  enabled: true
+  enabled: false
   scope: subagents
-  model: deepseek/deepseek-reasoner-v4
+  model: openai-codex/gpt-5.6-sol:high
 
+serviceTier: none
 auth:
   codexRefresh: manual
 
@@ -73,6 +40,8 @@ task:
   eager: always
   maxRecursionDepth: -1
   softRequestBudget: 80
+  orchestratorOnlyModels:
+    - "*fable*"
   isolation:
     mode: apfs
 
